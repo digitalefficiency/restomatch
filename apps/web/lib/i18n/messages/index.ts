@@ -28,6 +28,7 @@ import { overview } from './overview';
 import { payRun } from './payRun';
 import { products } from './products';
 import { receiving } from './receiving';
+import { receivingDelivery } from './receiving/delivery';
 import { leakProof } from './leakProof';
 import { recovery } from './recovery';
 import { receiverLangs } from './receiverLangs';
@@ -70,6 +71,7 @@ export const ALL_NAMESPACES = [
   payRun,
   products,
   receiving,
+  receivingDelivery,
   leakProof,
   recovery,
   receiverLangs,
@@ -87,4 +89,4 @@ export const ALL_NAMESPACES = [
   vat,
 ] as const;
 
-export { common, admin, approvals, auth, catalog, chain, components, contracts, supplierConfirm, dockPrice, emails, accounting, ingest, integrations, invoices, landing, leakProof, leaks, marketing, nav, onboarding, orders, overview, products, receiving, recovery, receiverLangs, ask, recipes, inventory, scans, settings, showcase, suppliers, team, views, leakCheck, growth, vat };
+export { common, admin, approvals, auth, catalog, chain, components, contracts, supplierConfirm, dockPrice, emails, accounting, ingest, integrations, invoices, landing, leakProof, leaks, marketing, nav, onboarding, orders, overview, products, receiving, receivingDelivery, recovery, receiverLangs, ask, recipes, inventory, scans, settings, showcase, suppliers, team, views, leakCheck, growth, vat };

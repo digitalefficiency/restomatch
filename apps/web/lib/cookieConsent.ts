@@ -44,3 +44,17 @@ export function setConsentChoice(choice: ConsentChoice): void {
 export function isAnalyticsConsented(): boolean {
   return getConsentChoice() === 'all';
 }
+
+/**
+ * Where the banner sits (a11y-12, mobile-field-19, auth-31). Inside the
+ * signed-in app and on the auth and supplier-portal routes only strictly-
+ * necessary cookies are set, so it is an inline strip at the top of the page —
+ * never a card over the form, the bottom nav or a field CTA. Marketing pages
+ * keep the floating card.
+ */
+const INLINE_PREFIXES = ['/dashboard', '/admin', '/login', '/reset', '/set-password', '/invite', '/onboarding', '/s'];
+
+export function consentPlacement(pathname: string | null | undefined): 'inline' | 'floating' {
+  const p = pathname ?? '/';
+  return INLINE_PREFIXES.some((prefix) => p === prefix || p.startsWith(`${prefix}/`)) ? 'inline' : 'floating';
+}

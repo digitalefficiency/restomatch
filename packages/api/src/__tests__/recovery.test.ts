@@ -20,7 +20,7 @@ import { computeLeakHero } from '@restomatch/charts';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { enqueueRecoveryReminders } from '../recovery/reminders';
-import { AUTO_WRITE_OFF_NOTE, listClaims, syncClaims } from '../recovery/service';
+import { AUTO_WRITE_OFF_NOTE, listClaims, MAX_CLAIMS, syncClaims } from '../recovery/service';
 import { computeMonthlyReport, ensureMonthlyReport, monthlyReportEmail, monthlyReportWhatsApp, WHATSAPP_MAX } from '../reports/monthly';
 import { renderMonthlyReportPdf } from '../reports/pdf';
 import { sendMonthlyReports } from '../reports/send';
@@ -130,6 +130,16 @@ describe('claims', () => {
     expect(await syncClaims(db, T.restaurantId)).toBe(0);
     await db.update(discrepancies).set({ resolutionStatus: 'rejected' }).where(eq(discrepancies.id, T.discrepancyId));
     expect(await syncClaims(db, T.restaurantId)).toBe(0);
+  });
+
+  it('each claim names its discrepancy, and list takes a limit up to MAX_CLAIMS (W1-08 letters pair on the id)', async () => {
+    const c = caller();
+    const claims = await c.recovery.list();
+    expect(claims.length).toBeGreaterThan(0);
+    expect(claims[0]!.discrepancyId).toBe(T.discrepancyId);
+    expect(await c.recovery.list({ limit: 1 })).toHaveLength(1);
+    expect((await c.recovery.list({ limit: MAX_CLAIMS })).length).toBe(claims.length);
+    await expect(c.recovery.list({ limit: MAX_CLAIMS + 1 })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 
   it('walks claimed → letter sent → acknowledged → credited (credit note) → recovered', async () => {

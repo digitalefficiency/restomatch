@@ -75,6 +75,18 @@ describe('POST /api/supplier-confirm/[token]', () => {
     expect(line).toMatchObject({ qtyOrdered: '10.000', unitPriceExpected: '8.5000' });
   });
 
+  it('a partial or quantity-less line answer → 400 and nothing stored; the note rides on "as ordered"', async () => {
+    const { token } = (await createSupplierLink(db, rid, poId))!;
+    const partial = await post(token, { lines: [{ poLineId: lineId, proposedUnitPrice: 9 }] });
+    expect(partial.status).toBe(400);
+    expect(await partial.json()).toEqual({ ok: false, error: 'incomplete_lines' });
+    expect(await db.select().from(supplierResponses).where(eq(supplierResponses.restaurantId, rid))).toEqual([]);
+    const asIs = await post(token, { lines: [], note: 'יגיע מחר בבוקר' });
+    expect(asIs.status).toBe(200);
+    const [stored] = await db.select().from(supplierResponses).where(eq(supplierResponses.restaurantId, rid));
+    expect(stored).toMatchObject({ note: 'יגיע מחר בבוקר', lines: [] });
+  });
+
   it('replay → 409; a line from another order → 400; unknown token → 404', async () => {
     const { token } = (await createSupplierLink(db, rid, poId))!;
     expect((await post(token, { lines: [{ poLineId: otherLineId, qtyAvailable: 0 }] })).status).toBe(400);

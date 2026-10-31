@@ -23,6 +23,12 @@ const BOUNDARY_TITLES = [
   commonEn.errorPage.title,
   commonHe.notFound.title,
   commonEn.notFound.title,
+  // W1-04 (7ecd0b38): under /dashboard a notFound()/throw now renders INSIDE the shell
+  // (app/dashboard/{not-found,error}.tsx) with its own titles — keep catching both.
+  commonHe.shell.notFound.title,
+  commonEn.shell.notFound.title,
+  commonHe.shell.error.title,
+  commonEn.shell.error.title,
 ];
 
 /** `:po` / `:invoice` / … are resolved from the seeded e2e DB in beforeAll. */
@@ -172,20 +178,32 @@ for (const locale of LOCALES) {
 }
 
 // QA D2: a malformed id must render the translated not-found page, never the
-// error boundary ("Something went wrong").
+// error boundary ("Something went wrong"). Since W1-04 (7ecd0b38, perf-states-09 /
+// ia-nav-07) that page is the IN-SHELL 404 (app/dashboard/not-found.tsx): header
+// stays, its own title, and a way up to the parent list.
+const MALFORMED: Array<[path: string, up: string]> = [
+  ['/dashboard/receiving/not-a-uuid', '/dashboard/receiving'],
+  ['/dashboard/orders/not-a-uuid', '/dashboard/orders'],
+  ['/dashboard/invoices/not-a-uuid', '/dashboard/approvals'],
+];
 for (const locale of LOCALES) {
   test.describe(`malformed ids [${locale}]`, () => {
     test.use({ storageState: OWNER_STATE });
-    for (const path of ['/dashboard/receiving/not-a-uuid', '/dashboard/orders/not-a-uuid', '/dashboard/invoices/not-a-uuid']) {
+    for (const [path, up] of MALFORMED) {
       test(`${locale} ${path} → not found`, async ({ page }) => {
         await page.context().addCookies([
           { name: 'rm_locale', value: locale, url: test.info().project.use.baseURL ?? 'http://localhost:3100' },
         ]);
         await page.goto(path);
-        const notFoundTitle = locale === 'he' ? commonHe.notFound.title : commonEn.notFound.title;
-        const errorTitle = locale === 'he' ? commonHe.errorPage.title : commonEn.errorPage.title;
-        await expect(page.getByRole('heading', { name: notFoundTitle, exact: true })).toBeVisible();
-        await expect(page.getByRole('heading', { name: errorTitle, exact: true })).toHaveCount(0);
+        const c = locale === 'he' ? commonHe : commonEn;
+        const notFound = page.getByTestId('dashboard-not-found');
+        await expect(notFound).toBeVisible();
+        await expect(notFound.getByRole('heading', { level: 1 })).toHaveText(c.shell.notFound.title);
+        await expect(page.getByTestId('not-found-up')).toHaveAttribute('href', up);
+        await expect(page.locator('header').first()).toContainText(DEMO_RESTAURANT_NAME);
+        for (const errorTitle of [c.errorPage.title, c.shell.error.title]) {
+          await expect(page.getByRole('heading', { name: errorTitle, exact: true })).toHaveCount(0);
+        }
       });
     }
   });

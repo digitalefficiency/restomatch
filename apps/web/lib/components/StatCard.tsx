@@ -12,9 +12,10 @@ const valueTone: Record<StatTone, string> = {
 };
 
 /**
- * Compact metric tile — lighter than KpiCard, for dense stat grids. Mono
- * tabular value, optional leading icon and hint. Money-positive figures read
- * best with tone="gold", losses with tone="danger". Server-safe (no hooks).
+ * @deprecated v1 compact metric tile — new code uses `MetricTile`
+ * (lib/components/money). Kept as a compatibility wrapper so existing call
+ * sites render unchanged until their area migrates. Heebo tabular value (the
+ * mono subset has no ₪ glyph); Hebrew labels are never letter-spaced.
  */
 export function StatCard({
   label,
@@ -45,11 +46,11 @@ export function StatCard({
       {emphasis ? <div className="absolute inset-y-0 start-0 w-1.5 bg-danger" aria-hidden="true" /> : null}
       <div className="flex items-center gap-2">
         {icon ? <span className="text-muted">{icon}</span> : null}
-        <p className="text-xs font-semibold uppercase tracking-wider text-subtle">{label}</p>
+        <p className="text-xs font-semibold text-subtle ltr:uppercase ltr:tracking-wider">{label}</p>
       </div>
       <p
         className={cn(
-          'mt-1.5 font-mono font-bold tabular-nums tracking-tight',
+          'num mt-1.5 font-bold tracking-tight',
           emphasis ? 'text-3xl font-extrabold text-ink' : `text-2xl ${valueTone[tone]}`,
         )}
       >

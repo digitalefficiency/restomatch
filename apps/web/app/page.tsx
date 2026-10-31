@@ -17,6 +17,8 @@ import { HeroMatch } from './(marketing)/_components/HeroMatch';
 import { HeroVideo } from './(marketing)/_components/HeroVideo';
 import { LazyLeadForm } from './(marketing)/_components/LazyLeadForm';
 import { PromoVideoButton } from './(marketing)/_components/PromoVideoButton';
+import { ReceiverMorph } from './(marketing)/_components/ReceiverMorph';
+import { primaryCtaHref } from './(marketing)/_components/cta';
 import { Eyebrow, FaqSection, Forward, faqItems } from './(marketing)/_components/detail-sections';
 import { OrdersStory } from './(marketing)/_components/OrdersStory';
 import { LandingCompare } from '@/lib/growth/LandingCompare';
@@ -50,7 +52,8 @@ const MORPH_LINES = [
 
 /** Worked example used by the proof block (same figures as the calculator default). */
 const EXAMPLE_PURCHASING_ILS = 150_000;
-const PILOT_TARGET = 0.015;
+/** An illustrative leak rate for the worked example — never presented as a target. */
+const EXAMPLE_LEAK_RATE = 0.015;
 
 /**
  * Landing v2 — short and visual (owner: "efficient, not overloaded, invest in
@@ -79,6 +82,7 @@ export default async function Home() {
     });
   }
   const promoSrc = promoVideoFor(locale);
+  const ctaHref = primaryCtaHref();
   const ils = (n: number) => formatIls(n, { locale });
   const basicIls = PLAN_SEED.basic.priceAgorotMonthly / 100;
   const proIls = PLAN_SEED.pro.priceAgorotMonthly / 100;
@@ -91,7 +95,7 @@ export default async function Home() {
   ];
   const proof = [
     {
-      value: t('v2.proof.leakValue', { amount: ils(EXAMPLE_PURCHASING_ILS * PILOT_TARGET) }),
+      value: t('v2.proof.leakValue', { amount: ils(EXAMPLE_PURCHASING_ILS * EXAMPLE_LEAK_RATE) }),
       label: t('v2.proof.leakLabel', { purchasing: ils(EXAMPLE_PURCHASING_ILS) }),
       tone: 'text-danger',
     },
@@ -165,11 +169,8 @@ export default async function Home() {
         <div aria-hidden="true" className="rm-grid pointer-events-none absolute inset-0" />
         <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-4 pb-16 pt-12 sm:px-6 sm:pt-20 lg:grid-cols-[1.05fr_1fr] lg:gap-10 lg:pb-24 lg:pt-24">
           <div className="text-center lg:text-start">
-            <p className="mb-5 inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase text-primary ltr:text-[11px] ltr:tracking-[0.18em]">
-              <span
-                className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary motion-reduce:animate-none"
-                aria-hidden="true"
-              />
+            <p className="mb-5 inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary ltr:uppercase ltr:tracking-[0.18em]">
+              <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
               {t('hero.eyebrow')}
             </p>
             <h1
@@ -185,8 +186,9 @@ export default async function Home() {
               {t('hero.lead')}
             </p>
             <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center lg:justify-start">
-              {/* data-keep-clear: the cookie banner never covers this CTA */}
-              <Link href="#lead" className={btnPrimary} data-keep-clear>
+              {/* data-keep-clear: the cookie banner never covers this CTA.
+                  data-sticky-cta-anchor: once it scrolls away, the phone sticky CTA takes over. */}
+              <Link href={ctaHref} className={btnPrimary} data-keep-clear data-sticky-cta-anchor>
                 {t('hero.ctaPrimary')}
                 <Forward />
               </Link>
@@ -301,39 +303,12 @@ export default async function Home() {
                 <Forward />
               </Link>
             </div>
-            <div className="mx-auto w-full max-w-sm rounded-[2rem] border border-line bg-bg p-3 shadow-card">
-              <div className="mx-auto mb-3 h-1 w-16 rounded-full bg-line" aria-hidden="true" />
-              <div className="mb-2 flex justify-between px-2 text-[11px] font-semibold text-muted">
-                <span>{t('v2.receiver.original')}</span>
-                <span className="text-primary">{t('v2.receiver.english')}</span>
-              </div>
-              <ul className="space-y-2">
-                {MORPH_LINES.map((l, i) => (
-                  <li
-                    key={l.en}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface px-3 py-3"
-                    style={{ '--i': i } as React.CSSProperties}
-                  >
-                    {/* Read once as a pair; the animated copies are visual only. */}
-                    <span className="sr-only">
-                      <span lang="he" dir="rtl">
-                        {l.he}
-                      </span>{' '}
-                      → <span lang="en">{l.en}</span>
-                    </span>
-                    <span aria-hidden="true" className="rm-morph min-w-0 text-sm font-semibold">
-                      <span className="rm-morph-he text-muted" lang="he" dir="rtl">
-                        {l.he}
-                      </span>
-                      <span className="rm-morph-en text-ink" lang="en" dir="ltr">
-                        {l.en}
-                      </span>
-                    </span>
-                    <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <ReceiverMorph
+              lines={MORPH_LINES}
+              originalLabel={t('v2.receiver.original')}
+              englishLabel={t('v2.receiver.english')}
+              labels={{ pause: t('visual.pause'), play: t('visual.play'), replay: t('visual.replay') }}
+            />
           </div>
         </div>
       </section>

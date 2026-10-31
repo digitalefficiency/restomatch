@@ -35,10 +35,10 @@ async function signIn(page: Page, role: 'owner' | 'receiver') {
 
 async function signOut(page: Page) {
   await page.goto('/dashboard');
+  // Shell v2 (W1-03): sign-out lives in the account menu, on phone and desktop.
   // The click lands immediately — in-flight prefetches are exactly the race.
-  const out = page.locator('header form button[type=submit]').first();
-  if (!(await out.isVisible())) await page.getByRole('button', { name: /menu|תפריט/i }).first().click();
-  await page.getByRole('button', { name: /^(sign out|התנתקות)$/i }).first().click();
+  await page.getByTestId('avatar-menu').click();
+  await page.locator('#rm-account-panel form[data-rm-logout] button[type=submit]').click();
   await page.waitForURL((u) => !u.pathname.startsWith('/dashboard'), { timeout: 30_000 });
 }
 
@@ -64,9 +64,10 @@ test.describe('role switch in one browser (owner → sign out → receiver)', ()
       // No owner navigation for the receiver…
       await expect(page.locator('a[href="/dashboard/leaks"]')).toHaveCount(0);
       await expect(page.locator('a[href="/dashboard/team"]')).toHaveCount(0);
-      // …and the owner's pages bounce (middleware role gate).
-      await page.goto('/dashboard/leaks');
-      await expect(page).toHaveURL(/\/dashboard$/);
+      // …and the owner's pages are refused (middleware role gate): a bounce to the
+      // home, or the in-shell 403 page once W1-04 lands — never the owner's page.
+      const res = await page.goto('/dashboard/leaks');
+      expect(/\/dashboard$/.test(page.url()) || res?.status() === 403).toBe(true);
 
       await signOut(page);
     }

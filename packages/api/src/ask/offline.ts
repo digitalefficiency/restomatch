@@ -5,7 +5,13 @@
  * names, links); the web turns them into a sentence in he/en with formatIls()
  * (the ₪ display boundary), so no money string is ever built here.
  */
-import { computeLeakBreakdown, computeLeakHero, computeLeakReport } from '@restomatch/charts';
+import {
+  computeLeakBreakdown,
+  computeLeakGrouped,
+  computeLeakHero,
+  computeLeakReport,
+  computeLeakSummary,
+} from '@restomatch/charts';
 import type { Database } from '@restomatch/db';
 import { claimableData, clip, monthKey, reportData, type ScreenLink } from './tools';
 
@@ -19,7 +25,9 @@ const RULES: Array<[CannedIntent, RegExp]> = [
   ['leakChange', /(why|למה|מדוע)|((leak|דליפ|דלף).*(went up|go up|increas|chang|rise|rose|עלת|עלה|השתנ|גדל))/i],
   ['priceRaise', /(rais|price|increas|expensive|העלה|העלו|התייקר|מחיר|יקר)/i],
   ['topSupplier', /(which supplier|worst|most|biggest|top|איזה ספק|הכי|הגדול)/i],
-  ['leakTotal', /(how much|leak|total|כמה|דליפ|דלף|הפסד)/i],
+  // Only a question about the LEAK (or a loss) is the leak total: "כמה" / "how much" alone
+  // ("כמה הזמנות?", "how much is the salmon?") is not — it falls through to null.
+  ['leakTotal', /(leak|\blos(?:e|s|t|ing)\b|דליפ|דלף|דולף|הפסד)/i],
 ];
 
 export function classifyQuestion(question: string): CannedIntent | null {
@@ -65,26 +73,32 @@ export async function offlineAnswer(
       };
     }
     case 'leakChange': {
-      const [curRaw, prevRaw] = await Promise.all([
-        computeLeakReport(db, restaurantId, month),
-        computeLeakReport(db, restaurantId, prevMonth),
+      // Like for like: this month to date vs the SAME day-span of last month (the
+      // explorer's aligned compare) — never a partial month against a full one.
+      const spec = { period: 'this_month' as const, now };
+      const [curH, prevH, curSup, prevSup, curType, prevType] = await Promise.all([
+        computeLeakSummary(db, restaurantId, spec, 'off'),
+        computeLeakSummary(db, restaurantId, spec, 'prev'),
+        computeLeakGrouped(db, restaurantId, spec, 'supplier', 'off', 200),
+        computeLeakGrouped(db, restaurantId, spec, 'supplier', 'prev', 200),
+        computeLeakGrouped(db, restaurantId, spec, 'type', 'off', 200),
+        computeLeakGrouped(db, restaurantId, spec, 'type', 'prev', 200),
       ]);
-      const cur = { hero: { leakIls: r2(curRaw.hero.leakIls) }, byType: curRaw.byType, bySupplier: curRaw.bySupplier };
-      const prev = { hero: { leakIls: r2(prevRaw.hero.leakIls) }, byType: prevRaw.byType, bySupplier: prevRaw.bySupplier };
-      // Biggest supplier and discrepancy-type movers between the two months —
+      const span = alignedSpan(curH.monthStart, prevH.monthStart, prevH.monthEnd, now);
+      // Biggest supplier and discrepancy-type movers between the two spans —
       // over the FULL lists (a supplier outside last month's top 8 is not "new").
-      const supName = (s: { supplierName: string | null; supplierNameEn: string | null }) => clip(locale === 'en' ? (s.supplierNameEn ?? s.supplierName) : (s.supplierName ?? s.supplierNameEn));
       const supDelta = new Map<string, { name: string | null; id: string | null; delta: number }>();
-      for (const s of cur.bySupplier) supDelta.set(s.supplierId ?? supName(s) ?? '?', { name: supName(s), id: s.supplierId, delta: s.leakIls });
-      for (const s of prev.bySupplier) {
-        const k = s.supplierId ?? supName(s) ?? '?';
-        const e = supDelta.get(k) ?? { name: supName(s), id: s.supplierId, delta: 0 };
-        e.delta -= s.leakIls;
-        supDelta.set(k, e);
+      const supName = (r: { label: string | null; labelEn: string | null }) =>
+        clip(locale === 'en' ? (r.labelEn ?? r.label) : (r.label ?? r.labelEn));
+      for (const r of curSup) supDelta.set(r.key || '?', { name: supName(r), id: r.key || null, delta: r.leakIls });
+      for (const r of prevSup) {
+        const e = supDelta.get(r.key || '?') ?? { name: supName(r), id: r.key || null, delta: 0 };
+        e.delta -= r.leakIls;
+        supDelta.set(r.key || '?', e);
       }
       const typeDelta = new Map<string, number>();
-      for (const t of cur.byType) typeDelta.set(t.type, (typeDelta.get(t.type) ?? 0) + t.amountIls);
-      for (const t of prev.byType) typeDelta.set(t.type, (typeDelta.get(t.type) ?? 0) - t.amountIls);
+      for (const r of curType) typeDelta.set(r.key, (typeDelta.get(r.key) ?? 0) + r.leakIls);
+      for (const r of prevType) typeDelta.set(r.key, (typeDelta.get(r.key) ?? 0) - r.leakIls);
       const topSup = [...supDelta.values()].sort((a, b) => b.delta - a.delta)[0] ?? null;
       const topType = [...typeDelta.entries()].sort((a, b) => b[1] - a[1])[0] ?? null;
       const links: ScreenLink[] = [
@@ -92,14 +106,21 @@ export async function offlineAnswer(
         { screen: 'report', href: `/dashboard/leaks/report?month=${prevMonth}` },
       ];
       if (topSup?.id) links.push({ screen: 'supplier', href: `/dashboard/suppliers/${topSup.id}` });
+      const leakIls = r2(curH.leakIls);
+      const prevLeakIls = r2(prevH.leakIls);
       return {
         intent,
         facts: {
           month,
           prevMonth,
-          leakIls: cur.hero.leakIls,
-          prevLeakIls: prev.hero.leakIls,
-          deltaIls: r2(cur.hero.leakIls - prev.hero.leakIls),
+          // The two spans compared, as local days (inclusive) — the sentence names them.
+          from: span.from,
+          to: span.to,
+          prevFrom: span.prevFrom,
+          prevTo: span.prevTo,
+          leakIls,
+          prevLeakIls,
+          deltaIls: r2(leakIls - prevLeakIls),
           topSupplier: topSup && topSup.delta > 0 ? topSup.name : null,
           topSupplierDeltaIls: topSup && topSup.delta > 0 ? r2(topSup.delta) : null,
           topType: topType && topType[1] > 0 ? topType[0] : null,
@@ -174,4 +195,32 @@ export async function offlineAnswer(
     default:
       return { intent: null, facts: {}, links: [{ screen: 'leaks', href: '/dashboard/leaks' }] };
   }
+}
+
+/** 'YYYY-MM-DD' of an instant in Israel time. */
+function israelDay(d: Date | string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jerusalem',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(d));
+}
+
+/**
+ * The inclusive local days an aligned compare covers: this month from its 1st to
+ * today, and the comparison period from its start to its (exclusive) end − 1 ms.
+ */
+export function alignedSpan(
+  curStartIso: string,
+  prevStartIso: string,
+  prevEndIso: string,
+  now: Date,
+): { from: string; to: string; prevFrom: string; prevTo: string } {
+  return {
+    from: israelDay(curStartIso),
+    to: israelDay(now),
+    prevFrom: israelDay(prevStartIso),
+    prevTo: israelDay(new Date(new Date(prevEndIso).getTime() - 1)),
+  };
 }

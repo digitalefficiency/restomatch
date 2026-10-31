@@ -45,7 +45,7 @@ export const receiving: Shape<typeof he> = {
       uploading: 'ይለኣኽ ኣሎ…',
       process: 'ፋቱራ ስደዱ',
       retake: 'ስእሊ ድገሙ',
-      capture: 'ስእሊ ኣልዕሉ / ፋይል ስደዱ',
+      capture: 'ፋክቱራ ስኣሉ',
       useDemo: 'ናይ ፈተነ ፋቱራ ተጠቐሙ (ብዘይ ምልኣኽ)',
       backToSupplier: 'ናብ ኣቕራቢ ተመለሱ',
       back: 'ንድሕሪት',
@@ -83,7 +83,7 @@ export const receiving: Shape<typeof he> = {
     recon: {
       title: 'ውጽኢት ምርመራ',
       subtitle: 'ፋቱራ {number} · ርግጽነት ንባብ {confidence}',
-      matched: 'ይሰማማዕ',
+      matched: 'ፋክቱራ = ትእዛዝ',
       different: 'ይፈላለ',
       unordered: 'ዘይተኣዘዘ',
       missing: 'ኣብ ፋቱራ ዘየለ',
@@ -114,7 +114,7 @@ export const receiving: Shape<typeof he> = {
       duplicateInvoice: 'ቁጽሪ ፋቱራ {number} ኣብዚ ኣቕራቢ ቀደም ኣሎ — ክድገም ዝኽእል ፋቱራ ስለ ዝኾነ ንምርመራ ተመልኪቱ ኣሎ። ከም ልሙድ ምቕባል ክትቕጽሉ ትኽእሉ።',
     },
     status: {
-      matched: 'ይሰማማዕ',
+      matched: 'ፋክቱራ = ትእዛዝ',
       qty_diff: 'ብዝሒ ይፈላለ',
       price_diff: 'ዋጋ ይፈላለ',
       unordered: 'ዘይተኣዘዘ',
@@ -122,7 +122,7 @@ export const receiving: Shape<typeof he> = {
       pending_review: 'ብኢድ ፈትሹ',
     },
     adjust: {
-      title: 'ብሓቂ ክንደይ መጺኡ?',
+      title: 'ምርመራ ጽዕነት',
       subtitle: '{pending} መስመራት ገና ክፍተሹ ኣለዎም · {done} ተወዲኦም · {matched} ብኣውቶማቲክ ተሰማሚዖም',
       matchedSummary: '{count} ዝሰማምዑ መስመራት — ብኣውቶማቲክ ጸዲቖም',
       tapToExpand: 'ንምዝርጋሕ ጠውቑ',
