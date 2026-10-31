@@ -75,12 +75,14 @@ export const invoicesRouter = router({
     const noLines = sql<boolean>`NOT EXISTS (SELECT 1 FROM invoice_lines il WHERE il.invoice_id = ${invoices.id})`;
     const consolidated = sql<boolean>`COALESCE((${invoices.ocrPayload} -> 'raw' ->> 'kind') = 'consolidated', false)`;
     const scannedNoLines = sql<boolean>`(NOT ${consolidated} AND ${invoices.status} <> 'ocr_pending' AND ${invoices.source} IN ('photo', 'email', 'whatsapp') AND ${noLines})`;
-    // ≥1 actionable review code (strings or {code}); link codes and the 'consolidated' marker don't count.
+    // ≥1 actionable review code (strings or {code: string}, non-empty — as holdReasonsOf); link codes and the 'consolidated' marker don't count.
     const reasonsJson = sql`${invoices.ocrPayload} -> 'raw' -> 'reviewReasons'`;
     const actionableHold = sql<boolean>`(CASE WHEN jsonb_typeof(${reasonsJson}) = 'array' THEN EXISTS (
       SELECT 1 FROM jsonb_array_elements(${reasonsJson}) e
-      WHERE (CASE jsonb_typeof(e) WHEN 'string' THEN e #>> '{}' WHEN 'object' THEN e ->> 'code' END)
-        NOT IN (${sql.join(NON_ACTION_HOLD_CODES.map((c) => sql`${c}`), sql`, `)})
+      WHERE (CASE
+          WHEN jsonb_typeof(e) = 'string' THEN e #>> '{}'
+          WHEN jsonb_typeof(e) = 'object' AND jsonb_typeof(e -> 'code') = 'string' THEN e ->> 'code'
+        END) NOT IN (${sql.join(NON_ACTION_HOLD_CODES.map((c) => sql`${c}`), sql`, `)})
     ) ELSE false END)`;
     const rows = await ctx.db
       .select({

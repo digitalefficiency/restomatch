@@ -100,6 +100,12 @@ test('a held invoice says why (T4 chips) in the list and on its page; a link-onl
     await expect(page.getByTestId('invoice-held-reasons')).toContainText('ח.פ. במסמך שונה מהרשום לספק');
     await expect(page.getByTestId('invoice-held-supplier-link')).toHaveAttribute('href', /\/dashboard\/suppliers\/[0-9a-f-]{36}$/);
     await page.context().close();
+    // The bookkeeper sees the reasons read-only, with no dead-end link to the supplier pages.
+    const bk = await signedIn(browser, 'bookkeeper');
+    await bk.goto(`/dashboard/invoices/${ids[0]}`);
+    await expect(bk.getByTestId('invoice-held-reasons')).toContainText('החשבונית ממתינה לבדיקה של הבעלים או המנהל');
+    await expect(bk.getByTestId('invoice-held-supplier-link')).toHaveCount(0);
+    await bk.context().close();
   } finally {
     const clean = e2eSql();
     try {

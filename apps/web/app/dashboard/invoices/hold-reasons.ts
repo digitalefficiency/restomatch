@@ -43,8 +43,8 @@ const DIRECT: Record<string, HoldReasonKey> = {
 };
 
 export function holdReasonKey(code: string): HoldReasonKey {
-  const direct = DIRECT[code];
-  if (direct) return direct;
+  // Own keys only: 'toString' / '__proto__' never resolve through the prototype.
+  if (Object.hasOwn(DIRECT, code)) return DIRECT[code]!;
   if (code.startsWith('missing_')) return 'missing';
   if (code.startsWith('doc_kind_')) return 'doc_kind';
   return 'unknown';

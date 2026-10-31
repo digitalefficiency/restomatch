@@ -92,7 +92,8 @@ export default async function InvoiceCorrectionPage({
               </li>
             ))}
           </ul>
-          {held.supplierId && held.reviewReasons.includes('supplier_id_mismatch') ? (
+          {/* Owner/manager only: the bookkeeper can't open the supplier pages. */}
+          {canEdit && held.supplierId && held.reviewReasons.includes('supplier_id_mismatch') ? (
             <Link
               href={`/dashboard/suppliers/${held.supplierId}`}
               data-testid="invoice-held-supplier-link"

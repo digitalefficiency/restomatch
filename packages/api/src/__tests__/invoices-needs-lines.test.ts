@@ -127,6 +127,21 @@ describe('invoices.needsLines', () => {
     expect(r.rows.map((x) => [x.id, x.reviewReasons])).toEqual([[mixed, ['consolidated_evidence']]]);
   });
 
+  it('object-form reasons ({code}) are read by the SQL filter too: listed as held', async () => {
+    const id = await heldWithLine(A, 'O-1', [{ code: 'supplier_id_mismatch' }]);
+    const r = await callerOf(A).invoices.needsLines();
+    expect(r.rows).toEqual([expect.objectContaining({ id, reason: 'held', reviewReasons: ['supplier_id_mismatch'] })]);
+  });
+
+  it('non-array reviewReasons (string / object / null) and empty or non-string codes: not listed, no SQL error', async () => {
+    await heldWithLine(A, 'J-1', 'supplier_id_mismatch');
+    await heldWithLine(A, 'J-2', { code: 'supplier_id_mismatch' });
+    await heldWithLine(A, 'J-3', null);
+    await heldWithLine(A, 'J-4', ['', { code: 5 }, { code: '' }, 7, null]);
+    const r = await callerOf(A).invoices.needsLines();
+    expect(r).toEqual({ count: 0, rows: [] });
+  });
+
   it("review #3: 'consolidated' is a marker, not an action — alone it is not listed; with an actionable code it is, without the marker", async () => {
     const marker = await heldWithLine(A, 'C-M', ['consolidated']);
     const unknown = await heldWithLine(A, 'C-U', ['consolidated', 'consolidated_unknown_supplier']);

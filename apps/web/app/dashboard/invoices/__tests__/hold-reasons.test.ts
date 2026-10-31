@@ -44,4 +44,7 @@ describe('held-invoice reasons (pilot #222)', () => {
     expect(tEn('needsLines.count', { count: 1 })).toBe('1 invoice');
     expect(tEn('needsLines.count', { count: 3 })).toBe('3 invoices');
   });
+  it('prototype keys never resolve to a reason', () => {
+    expect(holdReasonKeys(['toString', '__proto__', 'constructor'])).toEqual(['unknown']);
+  });
 });
