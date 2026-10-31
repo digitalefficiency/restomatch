@@ -4,7 +4,7 @@ import { e2eSql } from './helpers';
 
 /**
  * Fresh phone, cookie banner not answered yet: the dashboard's bottom nav and
- * the receiving wizard's sticky "close receipt" CTA must stay clickable. Inside
+ * the Delivery Check's sticky primary CTA must stay clickable. Inside
  * the app the banner is an inline strip at the top of the page (W1-01,
  * a11y-12 / mobile-field-19) — it never overlaps fixed chrome, so the nav keeps
  * the bottom edge and nothing has to make room for it.
@@ -65,7 +65,7 @@ test('bottom nav stays clickable with the unanswered cookie banner, which sits i
     .toBe(844);
 });
 
-test('receiving wizard: the sticky "close receipt" CTA stays clickable with the banner visible', async ({ page }) => {
+test('Delivery Check: the sticky primary CTA stays clickable with the banner visible', async ({ page }) => {
   test.setTimeout(120_000);
   const sql = e2eSql();
   let poId = '';
@@ -89,18 +89,18 @@ test('receiving wizard: the sticky "close receipt" CTA stays clickable with the 
 
   await page.goto(`/dashboard/receiving/${poId}`);
   await expect(page.locator(BANNER)).toBeVisible();
-  // The banner never covers the wizard's own buttons either.
-  const demo = page.getByRole('button', { name: 'השתמש בחשבונית-דמה (ללא העלאה)' });
-  expect(await onTop(page, demo), '"use a demo invoice" is not covered').toBe(true);
-  await demo.click();
-  await page.getByRole('button', { name: /^עבד את החשבונית/ }).click();
-  await expect(page.getByRole('heading', { name: 'תוצאת ההצלבה' })).toBeVisible({ timeout: 60_000 });
-  await page.getByTestId('continue-adjust').click();
+  // The banner never covers the Delivery Check's own buttons either (W1-06: the
+  // live flow has no demo invoice; it offers "no invoice right now").
+  const noInvoice = page.getByTestId('scan-no-invoice');
+  expect(await onTop(page, noInvoice), '"no invoice right now" is not covered').toBe(true);
+  await noInvoice.click();
+  await expect(page.getByTestId('delivery-check')).toBeVisible({ timeout: 30_000 });
 
-  const cta = page.getByTestId('close-receipt');
+  // The sticky primary at the bottom ("everything arrived as ordered") is the close path.
+  const cta = page.getByTestId('all-arrived');
   await expect(cta).toBeVisible();
   await expect(page.locator(BANNER)).toBeVisible();
-  expect(await onTop(page, cta), 'close-receipt CTA is not covered by the banner or the nav').toBe(true);
+  expect(await onTop(page, cta), 'the Delivery Check primary is not covered by the banner or the nav').toBe(true);
   // Field route (W1-03 focus mode): no bottom bar competes with the CTA.
   await expect(page.getByTestId('bottom-bar')).toBeHidden();
 });
