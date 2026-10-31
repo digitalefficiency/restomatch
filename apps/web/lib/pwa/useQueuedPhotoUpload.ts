@@ -2,17 +2,10 @@
 
 import { useCallback } from 'react';
 import { trpc } from '@/lib/trpc/client';
+import { uploadScanFile } from '../scanPrep';
 import { ScopeChangedError, SessionGoneError, announceSynced, type QueuedPhoto } from './offlineQueue';
 
-/** Encode a Blob to base64 (chunked — large photos overflow String.fromCharCode). */
-export async function blobToBase64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(binary);
-}
+export { blobToBase64 } from '../scanPrep';
 
 /** The signed-in user and active restaurant, read fresh (another tab may have switched branch). */
 export async function sessionScope(): Promise<{ userId: string; restaurantId: string } | null> {
@@ -42,12 +35,17 @@ export function useQueuedPhotoUpload(): (item: QueuedPhoto) => Promise<{ invoice
       // No session at all is an EXPIRED session (sign in to upload), not a branch switch.
       if (!scope) throw new SessionGoneError();
       if (scope.restaurantId !== item.restaurantId) throw new ScopeChangedError();
-      const scan = await utils.client.scans.upload.mutate({
-        contentBase64: await blobToBase64(item.blob),
-        mimeType: item.mimeType,
-        supplierName: item.supplierName,
-        clientUploadId: item.clientUploadId,
-      });
+      // A photo queued by an older version (or a gallery pick) may be too big /
+      // undecodable: shrink it now, or fail before any request (parked, kept).
+      const picked = new File([item.blob], 'invoice', { type: item.mimeType });
+      const scan = await uploadScanFile(picked, (ready, contentBase64) =>
+        utils.client.scans.upload.mutate({
+          contentBase64,
+          mimeType: ready.type,
+          supplierName: item.supplierName,
+          clientUploadId: item.clientUploadId,
+        }),
+      );
       const imageUrl = scan.signedUrl;
       if (!imageUrl) throw new Error('upload returned no URL');
       const receipt = await utils.client.receiving.startReceipt.mutate({ poId: item.poId });

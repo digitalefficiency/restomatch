@@ -14,6 +14,7 @@ import {
   type QueueStore,
   type QueuedPhoto,
 } from '../pwa/offlineQueue';
+import { ScanPrepError } from '../scanPrep';
 
 function memStore(items: QueuedPhoto[] = []): QueueStore & { map: Map<string, QueuedPhoto> } {
   const map = new Map(items.map((i) => [i.clientUploadId, i]));
@@ -162,6 +163,17 @@ describe('receiver PWA offline queue', () => {
       expect(store.map.get('a')!.attempts, String(err)).toBe(0);
     }
     expect(classifyFailure(new SessionGoneError(), true)).toBe('auth');
+  });
+
+  it('a photo the browser cannot make uploadable (too big / undecodable) is parked at once, not retried', async () => {
+    const store = memStore([photo('a', 1), photo('b', 2)]);
+    const r = await processQueue(store, async (i) => {
+      if (i.clientUploadId === 'a') throw new ScanPrepError('unsupported_type');
+      return { invoiceId: 'ok' };
+    });
+    expect(store.map.get('a')!.attempts).toBe(MAX_AUTO_ATTEMPTS);
+    expect(r.uploaded).toEqual(['b']);
+    expect(classifyFailure(new ScanPrepError('too_large'), true)).toBe('permanent');
   });
 
   it('classifies by HTTP status / tRPC code, never by the message text', () => {
