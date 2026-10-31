@@ -48,7 +48,7 @@ describe('approvals.escalate', () => {
       expect(r.body).toContain(approvalsGoLink(T.restaurantId, T.invoiceId));
       expect(r.body).toContain('צריך את הבעלים');
     }
-    const [{ c }] = (await db.execute(
+    const [{ c } = { c: -1 }] = (await db.execute(
       sql`SELECT count(*)::int AS c FROM notifications_outbox WHERE target LIKE 'role:%'`,
     )) as unknown as Array<{ c: number }>;
     expect(c).toBe(0);

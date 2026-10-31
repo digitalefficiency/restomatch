@@ -259,6 +259,11 @@ export const approvalsRouter = router({
           supplierNameEn: suppliers.nameEn,
           invoiceNumber: invoices.invoiceNumber,
           invoiceDueDate: invoices.dueDate,
+          // Decision 19: the effect line names the channel by invoice state
+          // (unpaid → offset at payment, paid → credit claim).
+          invoiceStatus: invoices.status,
+          // The evidence pane shows /scans/<invoiceId>/file when a scan exists.
+          hasScan: sql<boolean>`EXISTS (SELECT 1 FROM invoice_scans s WHERE s.invoice_id = ${invoices.id} AND s.restaurant_id = ${rid})`.mapWith(Boolean),
           message: discrepancies.resolutionNote, // reuse field for now
           createdAt: discrepancies.createdAt,
           matchRunId: discrepancies.matchRunId,
@@ -315,9 +320,13 @@ export const approvalsRouter = router({
             .offset(input?.afterId ? 0 : (input?.offset ?? 0));
       // A PO line from another tenant can never be joined in (its PO join is
       // tenant-scoped); drop its orphan facts rather than show them.
+      // The claimable ₪ per row (lib/claims rule, per-invoice cap): the group
+      // header, the BatchBar Σ and `seenClaimAgorot` on approve all read it.
+      const claims = await claimsByRow(ctx.db, rid, rows.filter(isClaimableRow));
       return rows.map((r) => ({
         ...(r.poId ? r : { ...r, qtyOrdered: null, orderedUnit: null, poRef: null, poDate: null }),
         claimable: isClaimableRow(r),
+        claimAgorot: isClaimableRow(r) ? Math.round((claims.get(r.id)?.amount ?? 0) * 100) : 0,
         canAct: canActOn(ctx.session.role, r.requiredRole),
         /** Who decides it: its routed role, or 'unrouted' (owner / manager). */
         waitingOn: (r.requiredRole ?? 'unrouted') as AwaitingRouting,
@@ -878,7 +887,12 @@ async function notifyOwnersOfEscalation(
   auditId: string,
 ): Promise<void> {
   await inSavepoint(tx, 'escalation notification', async (sp) => {
-    const owners = await recipientsForRestaurant(sp, ctx.session.restaurantId, ['owner']);
+    // The owners' addresses live in `users`, which the tenant (RLS) connection
+    // reads self-only — a manager would find no owner at all. Read them on the
+    // owner connection (as dsr.ts does), filtered to THIS session's restaurant
+    // only; the outbox insert itself stays on the tenant transaction.
+    // INTERIM(G-06): notify() resolves the audience.
+    const owners = await recipientsForRestaurant(ctx.adminDb ?? sp, ctx.session.restaurantId, ['owner']);
     const link = approvalsGoLink(ctx.session.restaurantId, row.invoiceId);
     const supplier = row.supplierName ?? 'ספק';
     const amount = row.claimAgorot > 0 ? formatIlsAgorot(row.claimAgorot, { maximumFractionDigits: 2 }) : null;
@@ -1027,7 +1041,7 @@ function checkedRow(
   );
 }
 
-type Ctx = { db: Database; session: { restaurantId: string; userId: string; role: UserRole } };
+type Ctx = { db: Database; adminDb?: Database; session: { restaurantId: string; userId: string; role: UserRole } };
 
 /**
  * The CONFLICT for a decision that lost the race (or came from a stale card):

@@ -198,7 +198,7 @@ describe('approvals.decideMany', () => {
     const again = await callerAs(db, T, 'manager').approvals.decideMany({ items: items(ids), decision: 'accepted', clientMutationId: id });
     expect(again).toMatchObject({ replayed: true, totalAgorot: first.totalAgorot, decided: first.decided });
     expect(await auditCount(ids)).toBe(1);
-    const [{ c }] = (await db.execute(
+    const [{ c } = { c: -1 }] = (await db.execute(
       sql`SELECT count(*)::int AS c FROM recovery_claims WHERE discrepancy_id = ${ids[0]!}::uuid`,
     )) as unknown as Array<{ c: number }>;
     expect(c).toBe(1);

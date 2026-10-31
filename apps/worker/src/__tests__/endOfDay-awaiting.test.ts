@@ -65,7 +65,7 @@ describe('match-invoice notification copy', () => {
   it('₪ = Σ claimableLines(computeInvoiceLeak(id)) for an invoice with open gaps', async () => {
     const awaiting = await awaitingDecision(db, { session: { restaurantId, role: 'owner' } }, { scope: 'all' });
     expect(awaiting.count).toBeGreaterThan(0);
-    const [{ invoice_id: invoiceId }] = (await db.execute(sql`
+    const [{ invoice_id: invoiceId } = { invoice_id: '' }] = (await db.execute(sql`
       SELECT mr.invoice_id FROM discrepancies d JOIN match_runs mr ON mr.id = d.match_run_id
       WHERE d.restaurant_id = ${restaurantId} AND d.resolution_status IN ('open','escalated') AND mr.invoice_id IS NOT NULL
       ORDER BY abs(d.delta_amount) DESC LIMIT 1`)) as unknown as Array<{ invoice_id: string }>;
