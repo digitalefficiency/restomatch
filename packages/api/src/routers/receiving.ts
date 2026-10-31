@@ -15,6 +15,8 @@ import {
   isNull,
   invoiceLines,
   creditNotes,
+  discrepancies,
+  recoveryClaims,
   lt,
   or,
   sql,
@@ -597,26 +599,40 @@ export const receivingRouter = router({
         ...invoiceFields,
         ocrFailed: failure?.ocrFailed === true,
         ocrFailureReason: failure?.ocrFailed === true ? (failure.reason ?? 'extraction_failed') : null,
-        // B8: lines may be added / deleted by hand (addInvoiceLine's own rule).
-        linesEditable: linesEditable(invoice.status, ocrPayload),
-        // Which lines "מחיקת שורה" may remove (deleteInvoiceLine's own rule): all of
-        // them when the header is computed from the lines, else only hand-added ones.
-        deletableLineIds: linesEditable(invoice.status, ocrPayload) ? deletableLineIds(ocrPayload, lines.map((l) => l.id)) : [],
-        // What a hand line can be called so it pairs with its order line (the
-        // order's descriptions — no ₪). Only while lines can be added.
-        // The order's lines for the add-line picker (ordered qty + price): only
-        // for the roles that may add lines — a receiver never gets ₪ here.
-        orderLines:
-          linesEditable(invoice.status, ocrPayload) && (ctx.session.role === 'owner' || ctx.session.role === 'manager')
-            ? (await invoiceOrderLines(ctx.db, ctx.session.restaurantId, invoice.id, ocrPayload)).map((l) => ({
-                id: l.id,
-                name: l.productName ?? l.rawDescription ?? '',
-                rawDescription: l.rawDescription,
-                qtyOrdered: l.qtyOrdered,
-                unit: l.unit,
-                unitPriceExpected: l.unitPriceExpected,
-              }))
-            : [],
+        ...(await (async () => {
+          // B8: may lines be added / deleted by hand (addInvoiceLine's own rule),
+          // and why not when the status alone would allow it.
+          const lockReason = linesEditable(invoice.status, ocrPayload)
+            ? await linesLockReason(ctx.db, ctx.session.restaurantId, invoice.id, ocrPayload)
+            : readConsolidatedRaw(ocrPayload) !== null
+              ? ('consolidated' as const)
+              : null;
+          const editable = linesEditable(invoice.status, ocrPayload) && lockReason === null;
+          const billed = new Set(Object.values(readMarkers(ocrPayload).manualLinePoLines));
+          return {
+            linesEditable: editable,
+            linesLockReason: lockReason,
+            // Which lines "מחיקת שורה" may remove (deleteInvoiceLine's own rule).
+            deletableLineIds: editable ? deletableLineIds(ocrPayload, lines.map((l) => l.id)) : [],
+            // The add-line picker: the order's lines that CAN pair (a product or a
+            // supplier SKU), with ordered qty + price — owner / manager only (no ₪
+            // for a receiver). `billed`: already billed by a hand line here.
+            orderLines:
+              editable && (ctx.session.role === 'owner' || ctx.session.role === 'manager')
+                ? (await invoiceOrderLines(ctx.db, ctx.session.restaurantId, invoice.id, ocrPayload))
+                    .filter((l) => l.productId || l.supplierSku)
+                    .map((l) => ({
+                      id: l.id,
+                      name: l.productName ?? l.rawDescription ?? '',
+                      rawDescription: l.rawDescription,
+                      qtyOrdered: l.qtyOrdered,
+                      unit: l.unit,
+                      unitPriceExpected: l.unitPriceExpected,
+                      billed: billed.has(l.id),
+                    }))
+                : [],
+          };
+        })()),
         // A חשבונית ריכוז: cross-matched against its delivery notes, never re-matched to a PO.
         consolidated: readConsolidatedRaw(ocrPayload) !== null,
         // The scanned number already belongs to another invoice of this
@@ -686,6 +702,18 @@ export const receivingRouter = router({
       if (p.vatAmount !== undefined) set.vatAmount = p.vatAmount == null ? null : String(p.vatAmount);
       if (p.totalInclVat !== undefined)
         set.totalInclVat = p.totalInclVat == null ? null : String(p.totalInclVat);
+      // A person typed header totals (a value that changed): from now on they
+      // are the billed figures — a hand line never recomputes them (B8).
+      const sameMoney = (a: string | null | undefined, b: string | null) =>
+        a === undefined || (a == null ? b == null : b != null && Number(a) === Number(b));
+      const totalsTyped = !(
+        sameMoney(set.totalExclVat, current.totalExclVat) &&
+        sameMoney(set.vatAmount, current.vatAmount) &&
+        sameMoney(set.totalInclVat, current.totalInclVat)
+      );
+      if (totalsTyped) {
+        set.ocrPayload = withMarkers(set.ocrPayload ?? current.ocrPayload, { headerEntered: true, manualHeader: false });
+      }
       try {
         // Savepoint: procedures may already run inside a transaction (RLS), and
         // a unique violation aborts it — the holder lookup below would then
@@ -807,7 +835,26 @@ export const receivingRouter = router({
         before: { invoiceId: owned.invoiceId, ...Object.fromEntries(keys.map((k) => [k, owned[k]])) },
         after: { invoiceId: owned.invoiceId, ...Object.fromEntries(keys.map((k) => [k, set[k]])) },
       });
-      return { ok: true };
+      // A line of a header WE compute (typed by hand): its total is qty × price
+      // to the agora, the header follows and the invoice is re-matched — or the
+      // stale header would read as a TOTAL_MISMATCH against its own lines.
+      const [parent] = await ctx.db
+        .select({ ocrPayload: invoices.ocrPayload, supplierId: invoices.supplierId })
+        .from(invoices)
+        .where(and(eq(invoices.id, owned.invoiceId), eq(invoices.restaurantId, restaurantId)))
+        .limit(1);
+      if (!parent || !headerOwned(readMarkers(parent.ocrPayload))) return { ok: true, totals: null, headerRecomputed: false };
+      const [row] = await ctx.db
+        .select({ qtyBilled: invoiceLines.qtyBilled, unitPriceBilled: invoiceLines.unitPriceBilled })
+        .from(invoiceLines)
+        .where(eq(invoiceLines.id, input.lineId))
+        .limit(1);
+      const agorot = row ? lineTotalAgorot(row.qtyBilled, row.unitPriceBilled) : null;
+      if (agorot === null || agorot > MAX_NUMERIC_12_2_AGOROT) throw new TRPCError({ code: 'BAD_REQUEST', message: 'סכום השורה גדול מדי' });
+      await ctx.db.update(invoiceLines).set({ lineTotal: agorotToPlain(agorot) }).where(eq(invoiceLines.id, input.lineId));
+      const totals = await recomputeInvoiceTotals(ctx.db, restaurantId, { id: owned.invoiceId, supplierId: parent.supplierId, ocrPayload: parent.ocrPayload });
+      const rematch = await rematchAfterEdit(ctx, owned.invoiceId);
+      return { ok: true, totals, headerRecomputed: true, ...rematch };
     }),
 
   /**
@@ -852,6 +899,16 @@ export const receivingRouter = router({
         // Only a line of THIS invoice's order (tenant-scoped through it).
         picked = orderLines.find((l) => l.id === input.line.poLineId);
         if (!picked) throw new TRPCError({ code: 'NOT_FOUND', message: 'order line not found' });
+        // An order line with no product and no SKU can't pair: the hand line
+        // would read "not ordered" + the line "not billed" — refuse, say why.
+        if (!picked.productId && !picked.supplierSku) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'קשרו קודם את שורת ההזמנה למוצר' });
+        }
+        // One hand line per order line (the engine pairs one invoice line with
+        // one order line): a second would read "not ordered".
+        if (Object.values(inv.markers.manualLinePoLines).includes(picked.id)) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: 'שורת ההזמנה הזו כבר חויבה בשורה ידנית — עדכנו את הכמות בשורה הקיימת' });
+        }
         if (input.line.productId && picked.productId && input.line.productId !== picked.productId) {
           throw new TRPCError({ code: 'BAD_REQUEST', message: 'המוצר אינו המוצר של שורת ההזמנה שנבחרה' });
         }
@@ -894,9 +951,17 @@ export const receivingRouter = router({
       // (manualLines); which lines are hand-added (manualLineIds — on a read
       // invoice only those may be deleted); and whether the header is OURS to
       // compute (manualHeader: the OCR read none) or the PRINTED one, kept.
-      const manualHeader = inv.manualHeader || (inv.totals.totalExclVat == null && inv.totals.vatAmount == null && inv.totals.totalInclVat == null);
-      await writeManualMarkers(ctx.db, restaurantId, inv, { manualHeader, lineIds: [...inv.manualLineIds, line.id] });
-      const totals = manualHeader ? await recomputeInvoiceTotals(ctx.db, restaurantId, inv) : inv.totals;
+      const m = inv.markers;
+      const manualHeader =
+        m.manualHeader || (!m.headerEntered && inv.totals.totalExclVat == null && inv.totals.vatAmount == null && inv.totals.totalInclVat == null);
+      const payload = await writeManualMarkers(ctx.db, restaurantId, inv, {
+        manualLines: true,
+        manualHeader,
+        manualLineIds: [...m.manualLineIds, line.id],
+        manualLinePoLines: picked ? { ...m.manualLinePoLines, [line.id]: picked.id } : m.manualLinePoLines,
+      });
+      const owned = headerOwned(readMarkers(payload));
+      const totals = owned ? await recomputeInvoiceTotals(ctx.db, restaurantId, { ...inv, ocrPayload: payload }) : inv.totals;
       await recordAudit(ctx.db, {
         restaurantId,
         userId: ctx.session.userId,
@@ -911,7 +976,7 @@ export const receivingRouter = router({
         },
       });
       const rematch = await rematchAfterEdit(ctx, inv.id);
-      return { lineId: line.id, totals, ...rematch };
+      return { lineId: line.id, totals, headerRecomputed: owned, ...rematch };
     }),
 
   /** B8 — remove a hand-entered (or misread) line; same rules as addInvoiceLine. */
@@ -938,15 +1003,18 @@ export const receivingRouter = router({
       const inv = await editableInvoice(ctx.db, restaurantId, line.invoiceId);
       // M-1: on an invoice the OCR read, only a hand-added line may go — a
       // printed line is evidence (correct it with updateInvoiceLine).
-      if (!inv.manualHeader && !inv.manualLineIds.includes(line.id)) {
+      const m = inv.markers;
+      if (!m.ocrFailed && !m.manualLineIds.includes(line.id)) {
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'אפשר למחוק רק שורה שנוספה ידנית — שורה שנקראה מהחשבונית מתקנים' });
       }
       await ctx.db.delete(invoiceLines).where(eq(invoiceLines.id, line.id));
-      await writeManualMarkers(ctx.db, restaurantId, inv, {
-        manualHeader: inv.manualHeader,
-        lineIds: inv.manualLineIds.filter((id) => id !== line.id),
+      const { [line.id]: _picked, ...restPicked } = m.manualLinePoLines;
+      const payload = await writeManualMarkers(ctx.db, restaurantId, inv, {
+        manualLineIds: m.manualLineIds.filter((id) => id !== line.id),
+        manualLinePoLines: restPicked,
       });
-      const totals = inv.manualHeader ? await recomputeInvoiceTotals(ctx.db, restaurantId, inv) : inv.totals;
+      const owned = headerOwned(readMarkers(payload));
+      const totals = owned ? await recomputeInvoiceTotals(ctx.db, restaurantId, { ...inv, ocrPayload: payload }) : inv.totals;
       const { id: _id, ...gone } = line;
       await recordAudit(ctx.db, {
         restaurantId,
@@ -958,7 +1026,7 @@ export const receivingRouter = router({
         after: { invoiceId: inv.id, totals },
       });
       const rematch = await rematchAfterEdit(ctx, inv.id);
-      return { ok: true, totals, ...rematch };
+      return { ok: true, totals, headerRecomputed: owned, ...rematch };
     }),
 
   /**
@@ -1332,9 +1400,11 @@ export const receivingRouter = router({
             .limit(1)
             .for('update');
           if (own) {
-            // A retake only of a scan the OCR could not read and nothing was built
-            // on (no lines, no run) — the predicate sits in the UPDATE itself, so
-            // a read / disputed / hand-entered invoice is never reset: it resumes.
+            // A re-scan of this delivery's invoice is a RETAKE (the wizard's
+            // "צלם שוב": same invoice, the new photo, read again) — but only of
+            // what the OCR built: no hand lines, no typed header, no decision,
+            // claim or credit note, never approved / paid; still being read →
+            // resume too. The predicate sits in the UPDATE itself (row locked).
             const [retaken] = await tx
               .update(invoices)
               .set({
@@ -1348,14 +1418,26 @@ export const receivingRouter = router({
                 and(
                   eq(invoices.id, own.id),
                   eq(invoices.restaurantId, restaurantId),
-                  eq(invoices.status, 'parsed'),
-                  sql`(${invoices.ocrPayload} -> 'raw' ->> 'ocrFailed') = 'true'`,
-                  sql`not exists (select 1 from ${invoiceLines} where ${invoiceLines.invoiceId} = ${invoices.id})`,
-                  sql`not exists (select 1 from ${matchRuns} where ${matchRuns.invoiceId} = ${invoices.id})`,
+                  // Only what OCR built (or nothing): never a person's work — no
+                  // hand lines / typed header (markers, audit), no decision on a
+                  // finding, no claim, no credit note, never approved / paid.
+                  inArray(invoices.status, ['parsed', 'matched', 'disputed']),
+                  sql`coalesce(${invoices.ocrPayload} -> 'raw' ->> 'manualLines', 'false') <> 'true'`,
+                  sql`coalesce(${invoices.ocrPayload} -> 'raw' ->> 'headerEntered', 'false') <> 'true'`,
+                  sql`not exists (select 1 from ${auditLog} where ${auditLog.restaurantId} = ${restaurantId} and ${auditLog.entityId} = ${invoices.id} and ${auditLog.action} = 'receiving.invoice_header_updated')`,
+                  sql`not exists (select 1 from ${discrepancies} d join ${matchRuns} r on r.id = d.match_run_id where r.invoice_id = ${invoices.id} and d.resolution_status <> 'open')`,
+                  sql`not exists (select 1 from ${recoveryClaims} c where c.invoice_id = ${invoices.id} and c.restaurant_id = ${restaurantId})`,
+                  sql`not exists (select 1 from ${creditNotes} n where n.invoice_id = ${invoices.id} and n.restaurant_id = ${restaurantId})`,
                 ),
               )
               .returning({ id: invoices.id });
             if (!retaken) return { invoiceId: own.id, created: false as const, resumed: true as const };
+            // The old read's runs go with it (no decision / claim on them — the
+            // predicate): the new read is matched afresh.
+            await tx.delete(matchRuns).where(and(eq(matchRuns.invoiceId, own.id), eq(matchRuns.restaurantId, restaurantId)));
+            // …and so do its lines: they were read from the OLD photo. Until the
+            // new read lands (or fails → hand entry) the invoice shows none.
+            await tx.delete(invoiceLines).where(eq(invoiceLines.invoiceId, own.id));
             await recordAudit(tx as unknown as Database, {
               restaurantId,
               userId: ctx.session.userId,
@@ -1612,25 +1694,111 @@ function receiptInvoiceSql(restaurantId: string, grId: string) {
   );
 }
 
-/** The OCR could not read it (raw.ocrFailed), or lines were entered by hand (raw.manualLines). */
-function isHandEntered(ocrPayload: OcrPayload | null): boolean {
-  const raw = (ocrPayload?.raw ?? null) as { ocrFailed?: unknown; manualLines?: unknown } | null;
-  return raw?.ocrFailed === true || raw?.manualLines === true;
+/**
+ * B8 markers in ocr_payload.raw:
+ *  • ocrFailed — the OCR read nothing (worker);
+ *  • manualLines — lines were entered by hand (stays editable after its re-match);
+ *  • manualLineIds — which lines are hand-added; manualLinePoLines — the order
+ *    line each hand line was picked from (one hand line per order line);
+ *  • manualHeader — the header was computed from the lines (none was read);
+ *  • headerEntered — a person typed the header totals (updateInvoiceHeader):
+ *    from then on they are the billed figures and are never recomputed.
+ */
+type Markers = {
+  ocrFailed: boolean;
+  manualLines: boolean;
+  manualHeader: boolean;
+  headerEntered: boolean;
+  manualLineIds: string[];
+  manualLinePoLines: Record<string, string>;
+};
+function readMarkers(ocrPayload: OcrPayload | null): Markers {
+  const raw = (ocrPayload?.raw ?? null) as Record<string, unknown> | null;
+  const ids = Array.isArray(raw?.manualLineIds) ? (raw!.manualLineIds as unknown[]).filter((x): x is string => typeof x === 'string') : [];
+  const map = raw?.manualLinePoLines && typeof raw.manualLinePoLines === 'object' ? (raw.manualLinePoLines as Record<string, string>) : {};
+  return {
+    ocrFailed: raw?.ocrFailed === true,
+    manualLines: raw?.manualLines === true,
+    manualHeader: raw?.manualHeader === true,
+    headerEntered: raw?.headerEntered === true,
+    manualLineIds: ids,
+    manualLinePoLines: map,
+  };
+}
+/** The header is OURS to compute from the lines: none was read and nobody typed one. */
+function headerOwned(m: Markers): boolean {
+  return (m.ocrFailed || m.manualHeader) && !m.headerEntered;
 }
 
-/** The lines deleteInvoiceLine accepts (M-1): every line of a header we compute, else the hand-added ones. */
+/** The OCR could not read it (raw.ocrFailed), or lines were entered by hand (raw.manualLines). */
+function isHandEntered(ocrPayload: OcrPayload | null): boolean {
+  const m = readMarkers(ocrPayload);
+  return m.ocrFailed || m.manualLines;
+}
+
+/**
+ * The lines deleteInvoiceLine accepts: every line of an invoice the OCR could
+ * not read (all of them were typed), else only the hand-added ones — a printed
+ * line is evidence (corrected with updateInvoiceLine, never deleted).
+ */
 function deletableLineIds(ocrPayload: OcrPayload | null, lineIds: string[]): string[] {
-  const raw = (ocrPayload?.raw ?? null) as { ocrFailed?: unknown; manualHeader?: unknown; manualLineIds?: unknown } | null;
-  if (raw?.ocrFailed === true || raw?.manualHeader === true) return lineIds;
-  const manual = new Set(Array.isArray(raw?.manualLineIds) ? (raw!.manualLineIds as unknown[]) : []);
+  const m = readMarkers(ocrPayload);
+  if (m.ocrFailed) return lineIds;
+  const manual = new Set(m.manualLineIds);
   return lineIds.filter((id) => manual.has(id));
 }
 
 /** May lines be added / deleted by hand (see editableInvoice)? One rule for the API and the page. */
 function linesEditable(status: string, ocrPayload: OcrPayload | null): boolean {
+  if (readConsolidatedRaw(ocrPayload) !== null) return false; // cross-matched against its delivery notes
   if (status === 'parsed') return true;
   return isHandEntered(ocrPayload) && (status === 'matched' || status === 'disputed');
 }
+
+/**
+ * Why lines are locked even where the status would allow an edit (the page
+ * hides add / delete and says why): a consolidated invoice, a credit note on a
+ * line, or a credit claim with history (letter / acknowledgement / credit).
+ * editableInvoice applies the exact rule (releaseClaimsForRematch's predicate).
+ */
+async function linesLockReason(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+  ocrPayload: OcrPayload | null,
+): Promise<'consolidated' | 'credit_note' | 'claim' | null> {
+  if (readConsolidatedRaw(ocrPayload) !== null) return 'consolidated';
+  const [credit] = await db
+    .select({ id: creditNotes.id })
+    .from(creditNotes)
+    .where(and(eq(creditNotes.invoiceId, invoiceId), eq(creditNotes.restaurantId, restaurantId)))
+    .limit(1);
+  if (credit) return 'credit_note';
+  const [claim] = await db
+    .select({ id: recoveryClaims.id })
+    .from(recoveryClaims)
+    .where(
+      and(
+        eq(recoveryClaims.restaurantId, restaurantId),
+        eq(recoveryClaims.invoiceId, invoiceId),
+        or(
+          isNotNull(recoveryClaims.letterSentAt),
+          isNotNull(recoveryClaims.acknowledgedAt),
+          isNotNull(recoveryClaims.creditedAt),
+          sql`${recoveryClaims.creditedAgorot} > 0`,
+          sql`${recoveryClaims.status} not in ('claimed', 'written_off')`,
+        ),
+      ),
+    )
+    .limit(1);
+  return claim ? 'claim' : null;
+}
+
+const LINES_LOCKED_MSG: Record<'consolidated' | 'credit_note' | 'claim', string> = {
+  consolidated: 'חשבונית ריכוז מוצלבת מול תעודות המשלוח — אין בה עריכת שורות ידנית',
+  credit_note: 'לחשבונית יש הודעת זיכוי רשומה — אי אפשר לשנות את שורותיה',
+  claim: 'יש לחשבונית דרישת זיכוי בתהליך — סגרו או מחקו אותה לפני שינוי השורות',
+};
 
 type OrderLine = {
   id: string;
@@ -1804,6 +1972,9 @@ async function editableInvoice(db: Database, restaurantId: string, invoiceId: st
     .for('update');
   if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
   const handEntered = isHandEntered(inv.ocrPayload);
+  if (readConsolidatedRaw(inv.ocrPayload) !== null) {
+    throw appError('PRECONDITION_FAILED', 'invoice.linesLocked', LINES_LOCKED_MSG.consolidated);
+  }
   if (!linesEditable(inv.status, inv.ocrPayload)) {
     throw new TRPCError({
       code: 'PRECONDITION_FAILED',
@@ -1820,51 +1991,46 @@ async function editableInvoice(db: Database, restaurantId: string, invoiceId: st
     .from(creditNotes)
     .where(and(eq(creditNotes.invoiceId, inv.id), eq(creditNotes.restaurantId, restaurantId)))
     .limit(1);
-  if (credit) {
-    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'לחשבונית יש הודעת זיכוי רשומה — אי אפשר לשנות את שורותיה' });
+  if (credit) throw appError('PRECONDITION_FAILED', 'invoice.linesLocked', LINES_LOCKED_MSG.credit_note);
+  try {
+    await releaseClaimsForRematch(db, restaurantId, inv.id);
+  } catch (err) {
+    if (err instanceof TRPCError && err.code === 'CONFLICT') throw appError('CONFLICT', 'invoice.linesLocked', LINES_LOCKED_MSG.claim);
+    throw err;
   }
-  await releaseClaimsForRematch(db, restaurantId, inv.id);
-  const raw = (inv.ocrPayload?.raw ?? null) as { ocrFailed?: unknown; manualHeader?: unknown; manualLineIds?: unknown } | null;
   const totals: InvoiceTotals = { totalExclVat: inv.totalExclVat, vatAmount: inv.vatAmount, totalInclVat: inv.totalInclVat };
-  return {
-    id: inv.id,
-    supplierId: inv.supplierId,
-    totals,
-    ocrPayload: inv.ocrPayload,
-    handEntered,
-    /** The header is computed from the lines (the OCR read none) — never a printed one. */
-    manualHeader: raw?.ocrFailed === true || raw?.manualHeader === true,
-    manualLineIds: Array.isArray(raw?.manualLineIds) ? (raw!.manualLineIds as unknown[]).filter((x): x is string => typeof x === 'string') : [],
-  };
+  return { id: inv.id, supplierId: inv.supplierId, totals, ocrPayload: inv.ocrPayload, handEntered, markers: readMarkers(inv.ocrPayload) };
 }
 
-/** The B8 markers in ocr_payload.raw (the rest of the read kept). */
+/** ocr_payload with B8 markers merged into raw (the rest of the read kept). */
+function withMarkers(payload: OcrPayload | null, patch: Partial<Markers>): OcrPayload {
+  return {
+    provider: payload?.provider ?? 'claude_vision',
+    ...(payload?.reconciledAt ? { reconciledAt: payload.reconciledAt } : {}),
+    raw: { ...((payload?.raw as object | null) ?? {}), ...patch },
+  };
+}
 async function writeManualMarkers(
   db: Database,
   restaurantId: string,
   inv: { id: string; ocrPayload: OcrPayload | null },
-  m: { manualHeader: boolean; lineIds: string[] },
-): Promise<void> {
-  const payload = inv.ocrPayload;
+  patch: Partial<Markers>,
+): Promise<OcrPayload> {
+  const next = withMarkers(inv.ocrPayload, patch);
   await db
     .update(invoices)
-    .set({
-      ocrPayload: {
-        provider: payload?.provider ?? 'claude_vision',
-        ...(payload?.reconciledAt ? { reconciledAt: payload.reconciledAt } : {}),
-        raw: { ...((payload?.raw as object | null) ?? {}), manualLines: true, manualHeader: m.manualHeader, manualLineIds: m.lineIds },
-      },
-    })
+    .set({ ocrPayload: next })
     .where(and(eq(invoices.id, inv.id), eq(invoices.restaurantId, restaurantId)));
+  return next;
 }
 
 /**
  * Header totals from the lines, exact — only for a header WE own (manualHeader:
  * the OCR read none; a printed header is never overwritten, or TOTAL / VAT
- * mismatches would disappear). Σ line totals (NUMERIC → integer agorot); VAT
- * per rate group (a line's own vat_rate, else the invoice rate by the engine's
- * precedence: PO → supplier → restaurant → 18%), half-up to the agora; incl =
- * excl + VAT. Written as NUMERIC strings; refused past NUMERIC(12,2).
+ * mismatches would disappear). Σ line totals (NUMERIC → integer agorot); VAT =
+ * excl × the invoice rate by the engine's precedence (PO → supplier →
+ * restaurant → 18%), half-up to the agora; incl = excl + VAT. Written as
+ * NUMERIC strings; refused past NUMERIC(12,2).
  */
 async function recomputeInvoiceTotals(
   db: Database,
@@ -1872,7 +2038,7 @@ async function recomputeInvoiceTotals(
   inv: { id: string; supplierId: string | null; ocrPayload: OcrPayload | null },
 ): Promise<InvoiceTotals> {
   const lines = await db
-    .select({ lineTotal: invoiceLines.lineTotal, vatRate: invoiceLines.vatRate })
+    .select({ lineTotal: invoiceLines.lineTotal })
     .from(invoiceLines)
     .where(eq(invoiceLines.invoiceId, inv.id));
   const { poId } = await invoiceOrderRef(db, restaurantId, inv.id, inv.ocrPayload);
@@ -1891,17 +2057,12 @@ async function recomputeInvoiceTotals(
         .where(and(eq(suppliers.id, inv.supplierId), eq(suppliers.restaurantId, restaurantId)))
         .limit(1)
     : [];
-  const invoiceRate = String(firstVatRate(po?.vatRate ?? null, sup?.vatRate ?? null, rest?.vatRate ?? null));
-  const byRate = new Map<number, number>(); // basis points → Σ agorot
-  let exclAgorot = 0;
-  for (const l of lines) {
-    const a = numericToAgorot(l.lineTotal) ?? 0;
-    exclAgorot += a;
-    const bp = rateToBasisPoints(l.vatRate ?? invoiceRate);
-    byRate.set(bp, (byRate.get(bp) ?? 0) + a);
-  }
-  let vatAgorot = 0;
-  for (const [bp, sum] of byRate) vatAgorot += Number((BigInt(sum) * BigInt(bp) + 5_000n) / 10_000n); // half-up (sum ≥ 0)
+  // The engine checks VAT at ONE invoice rate (engine.ts, immutable): our own
+  // header uses that rule, or it would trip VAT_MISMATCH against itself. Mixed
+  // per-line rates are a human-PR proposal (PR body).
+  const rateBp = rateToBasisPoints(String(firstVatRate(po?.vatRate ?? null, sup?.vatRate ?? null, rest?.vatRate ?? null)));
+  const exclAgorot = lines.reduce((t, l) => t + (numericToAgorot(l.lineTotal) ?? 0), 0);
+  const vatAgorot = Number((BigInt(exclAgorot) * BigInt(rateBp) + 5_000n) / 10_000n); // half-up (excl ≥ 0)
   if (exclAgorot + vatAgorot > MAX_NUMERIC_12_2_AGOROT) {
     throw new TRPCError({ code: 'BAD_REQUEST', message: 'סכום החשבונית גדול מדי' });
   }
@@ -1966,22 +2127,8 @@ async function rematchAfterEdit(ctx: { db: Database; session: MemberSession }, i
     .from(invoices)
     .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
     .limit(1);
-  const { grId } = await invoiceOrderRef(ctx.db, restaurantId, invoiceId, inv?.ocrPayload ?? null);
-  if (grId) {
-    const [gr] = await ctx.db
-      .select({ status: goodsReceipts.status })
-      .from(goodsReceipts)
-      .where(and(eq(goodsReceipts.id, grId), eq(goodsReceipts.restaurantId, restaurantId)))
-      .limit(1);
-    if (gr?.status === 'pending') {
-      await ctx.db.execute(sql`
-        UPDATE invoices
-           SET ocr_payload = jsonb_set(ocr_payload, ${`{raw,${HELD_FOR_RECEIPTS_KEY}}`}::text[], ${JSON.stringify([grId])}::jsonb, true)
-         WHERE id = ${invoiceId} AND restaurant_id = ${restaurantId}
-           AND jsonb_typeof(ocr_payload -> 'raw') = 'object'`);
-      return { rematched: false, rematchSkipped: 'receipt_open' };
-    }
-  }
+  // H-2 first: with no lines left there is nothing to hold or match — the old
+  // run (and its findings) goes, and the invoice is back to 'parsed'.
   const [anyLine] = await ctx.db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, invoiceId)).limit(1);
   if (!anyLine) {
     await releaseClaimsForRematch(ctx.db, restaurantId, invoiceId);
@@ -1991,6 +2138,27 @@ async function rematchAfterEdit(ctx: { db: Database; session: MemberSession }, i
       .set({ status: 'parsed', updatedAt: new Date() })
       .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)));
     return { rematched: false, rematchSkipped: 'no_lines' };
+  }
+  const { grId } = await invoiceOrderRef(ctx.db, restaurantId, invoiceId, inv?.ocrPayload ?? null);
+  if (grId) {
+    const [gr] = await ctx.db
+      .select({ status: goodsReceipts.status })
+      .from(goodsReceipts)
+      .where(and(eq(goodsReceipts.id, grId), eq(goodsReceipts.restaurantId, restaurantId)))
+      .limit(1);
+    if (gr?.status === 'pending') {
+      // Held for the count. A person entered these lines, so the receipt's
+      // submit must match them (rematchHoldReason holds a never-matched
+      // 'parsed' invoice for review): it is 'matched' (reviewed), waiting.
+      await ctx.db.execute(sql`
+        UPDATE invoices
+           SET ocr_payload = jsonb_set(ocr_payload, ${`{raw,${HELD_FOR_RECEIPTS_KEY}}`}::text[], ${JSON.stringify([grId])}::jsonb, true),
+               status = CASE WHEN status = 'parsed' THEN 'matched'::invoice_status ELSE status END,
+               updated_at = now()
+         WHERE id = ${invoiceId} AND restaurant_id = ${restaurantId}
+           AND jsonb_typeof(ocr_payload -> 'raw') = 'object'`);
+      return { rematched: false, rematchSkipped: 'receipt_open' };
+    }
   }
   try {
     await ctx.db.transaction(async (sp) => {

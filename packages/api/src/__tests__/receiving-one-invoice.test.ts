@@ -53,10 +53,19 @@ describe('registerInvoice — one receipt, one invoice', () => {
     expect(enqueueOcrInvoice).toHaveBeenCalledTimes(1); // no second OCR job (no second spend)
   });
 
-  it("a receipt whose invoice was already matched against it: a re-scan returns that invoice's id", async () => {
+  it("item 4: a re-scan of the receipt's OCR-read (matched) invoice is a RETAKE — same id, new photo, old read's runs + lines gone, read again", async () => {
+    const before = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, A.invoiceId));
+    expect(before.length).toBeGreaterThan(0);
+    const count = (await invoicesOf(A)).length;
     const r = await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('3'), supplierId: A.supplierId });
-    expect(r).toEqual({ invoiceId: A.invoiceId, alreadyExisted: true, resumed: true });
-    expect(enqueueOcrInvoice).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ invoiceId: A.invoiceId, alreadyExisted: false });
+    const [row] = await db.select().from(invoices).where(eq(invoices.id, A.invoiceId));
+    expect(row!.status).toBe('ocr_pending');
+    expect(row!.rawImageUrl).toBe(scan('3'));
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, A.invoiceId))).toHaveLength(0);
+    expect(await db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, A.invoiceId))).toHaveLength(0);
+    expect(enqueueOcrInvoice).toHaveBeenCalledWith(expect.objectContaining({ invoiceId: A.invoiceId, grId: A.grId }));
+    expect((await invoicesOf(A)).length).toBe(count); // never a second invoice
   });
 
   it('the same object re-signed (a retry) is still idempotent', async () => {
@@ -133,21 +142,39 @@ describe('registerInvoice — one receipt, one invoice', () => {
     expect(again.invoiceId).toBe(d2.invoiceId);
   });
 
-  it('a retake never resets an invoice that was built on (lines) — it resumes; a retake is audited', async () => {
+  it('a retake never resets an invoice a person built on (hand lines / typed header) — it resumes; a retake is audited', async () => {
     await db.delete(matchRuns).where(eq(matchRuns.restaurantId, A.restaurantId));
     const first = await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('r1'), supplierId: A.supplierId });
     const failedRaw = { provider: 'claude_vision' as const, raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: A.grId } };
     await db.update(invoices).set({ status: 'parsed', ocrPayload: failedRaw }).where(eq(invoices.id, first.invoiceId));
-    await db.insert(invoiceLines).values({ invoiceId: first.invoiceId, rawDescription: 'ידני', qtyBilled: '1', unit: 'kg', unitPriceBilled: '5', lineTotal: '5.00' });
+    // A hand line (the manualLines marker) → a re-scan resumes, never wipes it.
+    const added = await as(A, 'owner').receiving.addInvoiceLine({
+      invoiceId: first.invoiceId,
+      line: { rawDescription: 'ידני', qtyBilled: 1, unit: 'kg', unitPriceBilled: 5 },
+    });
     const r = await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('r2'), supplierId: A.supplierId });
     expect(r).toEqual({ invoiceId: first.invoiceId, alreadyExisted: true, resumed: true });
-    const [row] = await db.select({ status: invoices.status, url: invoices.rawImageUrl }).from(invoices).where(eq(invoices.id, first.invoiceId));
-    expect(row).toEqual({ status: 'parsed', url: scan('r1') });
+    const [row] = await db.select({ url: invoices.rawImageUrl }).from(invoices).where(eq(invoices.id, first.invoiceId));
+    expect(row!.url).toBe(scan('r1'));
+    expect(await db.select().from(invoiceLines).where(eq(invoiceLines.id, added.lineId))).toHaveLength(1);
 
+    // No person's work left (fresh failed read, no markers, no header audit) → a retake, audited.
     await db.delete(invoiceLines).where(eq(invoiceLines.invoiceId, first.invoiceId));
+    await db.update(invoices).set({ status: 'parsed', ocrPayload: failedRaw }).where(eq(invoices.id, first.invoiceId));
     await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('r3'), supplierId: A.supplierId });
     const audits = await db.select().from(auditLog).where(and(eq(auditLog.entityId, first.invoiceId), eq(auditLog.action, 'receiving.invoice_retaken')));
     expect(audits).toHaveLength(1);
     expect(audits[0]!.after).toMatchObject({ status: 'ocr_pending', rawImageUrl: scan('r3') });
+  });
+
+  it('item 11: a typed header (updateInvoiceHeader) makes a re-scan resume, never a reset', async () => {
+    const before = await db.select({ status: invoices.status, url: invoices.rawImageUrl }).from(invoices).where(eq(invoices.id, A.invoiceId));
+    await as(A, 'owner').receiving.updateInvoiceHeader({ invoiceId: A.invoiceId, patch: { invoiceNumber: 'INV-TYPED-1' } });
+    const r = await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('h1'), supplierId: A.supplierId });
+    expect(r).toEqual({ invoiceId: A.invoiceId, alreadyExisted: true, resumed: true });
+    const after = await db.select({ status: invoices.status, url: invoices.rawImageUrl }).from(invoices).where(eq(invoices.id, A.invoiceId));
+    expect(after).toEqual(before);
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, A.invoiceId))).not.toHaveLength(0);
+    expect(enqueueOcrInvoice).not.toHaveBeenCalled();
   });
 });

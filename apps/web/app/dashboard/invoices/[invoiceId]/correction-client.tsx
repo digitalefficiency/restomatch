@@ -86,8 +86,10 @@ export function InvoiceCorrection({
     setError(null);
     router.refresh();
   };
-  const onErr = (e: { message: string }) => {
-    setError(locale === 'en' ? t('correction.failed') : e.message || t('correction.failed'));
+  const onErr = (e: Parameters<typeof localizeServerError>[0] & { message: string }) => {
+    // A known domain code (e.g. invoice.linesLocked) reads in the UI language.
+    const known = localizeServerError(e, locale, '');
+    setError(known || (locale === 'en' ? t('correction.failed') : e.message || t('correction.failed')));
     setSaved(null);
   };
 
@@ -110,9 +112,10 @@ export function InvoiceCorrection({
     },
   });
   const updateLine = trpc.receiving.updateInvoiceLine.useMutation({
-    onSuccess: () => {
+    onSuccess: (res) => {
       setEditingLine(null);
-      onOk(t('correction.savedLine'));
+      if (res.headerRecomputed) afterManual(t('correction.savedLine'), { rematched: false, ...res });
+      else onOk(t('correction.savedLine'));
     },
     onError: onErr,
   });
@@ -124,12 +127,17 @@ export function InvoiceCorrection({
     res: {
       rematched: boolean;
       rematchSkipped?: 'receipt_open' | 'no_lines' | 'refused';
-      totals: { totalExclVat: string | null; vatAmount: string | null; totalInclVat: string | null };
+      headerRecomputed: boolean;
+      totals: { totalExclVat: string | null; vatAmount: string | null; totalInclVat: string | null } | null;
     },
   ) => {
-    setExcl(res.totals.totalExclVat ?? '');
-    setVat(res.totals.vatAmount ?? '');
-    setIncl(res.totals.totalInclVat ?? '');
+    // Only a header the server computes follows the lines; a printed or typed
+    // header is the billed figure and stays as it is on screen.
+    if (res.headerRecomputed && res.totals) {
+      setExcl(res.totals.totalExclVat ?? '');
+      setVat(res.totals.vatAmount ?? '');
+      setIncl(res.totals.totalInclVat ?? '');
+    }
     // Held for the receipt's count / nothing left to match / refused (re-run by hand).
     const note =
       res.rematched
@@ -278,6 +286,16 @@ export function InvoiceCorrection({
               ? t('correction.ocrQuota')
               : t('correction.ocrFailed')
             : t('correction.ocrPending')}
+        </div>
+      ) : null}
+
+      {canEdit && invoice.linesLockReason ? (
+        <div
+          role="status"
+          data-testid="invoice-lines-locked"
+          className="rounded-md border-s-4 border-line bg-surface-2 px-3 py-2 text-sm text-ink"
+        >
+          {t(`correction.linesLocked.${invoice.linesLockReason}`)}
         </div>
       ) : null}
 
@@ -485,13 +503,16 @@ export function InvoiceCorrection({
                     >
                       <option value="">{t('correction.notOrderedLine')}</option>
                       {orderLines.map((ol) => (
-                        <option key={ol.id} value={ol.id}>
+                        // One hand line per order line: an order line already billed by
+                        // hand is shown, not offered (update that line's quantity).
+                        <option key={ol.id} value={ol.id} disabled={ol.billed}>
                           {t('correction.orderLineOption', {
                             name: ol.name,
                             qty: formatNumber(Number(ol.qtyOrdered), locale, { maximumFractionDigits: 3 }),
                             unit: unit(ol.unit),
                             price: ol.unitPriceExpected != null ? money(Number(ol.unitPriceExpected)) : '—',
                           })}
+                          {ol.billed ? ` · ${t('correction.orderLineBilled')}` : ''}
                         </option>
                       ))}
                     </select>

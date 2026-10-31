@@ -33,6 +33,12 @@ export const en: Shape<typeof he> = {
     pickOrderLine: 'Order line',
     notOrderedLine: 'A line that was not ordered',
     orderLineOption: '{name} · ordered {qty} {unit} · {price}',
+    orderLineBilled: 'billed by a hand line',
+    linesLocked: {
+      consolidated: 'A consolidated invoice is cross-matched against its delivery notes — no lines are added or deleted here.',
+      credit_note: 'This invoice has a recorded credit note — its lines are locked.',
+      claim: 'This invoice has a credit claim in progress — its lines are locked until the claim is closed in the credits tracker.',
+    },
     addLine: 'Add line',
     deleteLine: 'Delete line',
     deleteLineConfirm: 'Delete this line? The header totals are recalculated and the match runs again.',

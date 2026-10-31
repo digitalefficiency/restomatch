@@ -1,7 +1,8 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { releaseClaimsForRematch } from '../recovery/service';
-import { and, desc, eq, invoices, matchRuns, restaurants } from '@restomatch/db';
+import { and, desc, eq, goodsReceipts, invoices, matchRuns, restaurants } from '@restomatch/db';
+import { readScanGrId } from '../receiving/matchTriggers';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
 import { managerProcedure, router } from '../trpc';
 import { assertInvoiceOwned } from '../tenant';
@@ -48,6 +49,22 @@ export const matchRouter = router({
           message: 'A consolidated invoice is cross-matched against its delivery notes, not re-matched to a PO.',
         });
       }
+
+      // S2 receipt hold — not while the invoice's receipt is still being counted:
+      // every line would read "received 0" (the leak hero jumping by the whole
+      // invoice). The receipt's submit matches it.
+      const scanGrId = readScanGrId(kind?.ocrPayload);
+      if (scanGrId) {
+        const [gr] = await ctx.db
+          .select({ status: goodsReceipts.status })
+          .from(goodsReceipts)
+          .where(and(eq(goodsReceipts.id, scanGrId), eq(goodsReceipts.restaurantId, restaurantId)))
+          .limit(1);
+        if (gr?.status === 'pending') {
+          throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'הספירה עדיין פתוחה — ההתאמה תרוץ כשהקבלה תיסגר' });
+        }
+      }
+      // end S2 receipt hold
 
       // A re-match checks against the PO the invoice was already matched to, even
       // once that PO is received/closed (discovery only looks at open POs).

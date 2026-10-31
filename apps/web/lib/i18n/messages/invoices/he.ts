@@ -34,6 +34,12 @@ export const he = {
     pickOrderLine: 'שורת הזמנה',
     notOrderedLine: 'שורה שלא הוזמנה',
     orderLineOption: '{name} · הוזמנו {qty} {unit} · {price}',
+    orderLineBilled: 'חויבה בשורה ידנית',
+    linesLocked: {
+      consolidated: 'חשבונית ריכוז מוצלבת מול תעודות המשלוח — אין בה הוספה או מחיקה של שורות.',
+      credit_note: 'לחשבונית יש הודעת זיכוי רשומה — השורות נעולות.',
+      claim: 'יש לחשבונית דרישת זיכוי בתהליך — השורות נעולות עד שהדרישה תיסגר במעקב הזיכויים.',
+    },
     addLine: 'הוספת שורה',
     deleteLine: 'מחיקת שורה',
     deleteLineConfirm: 'למחוק את השורה? הסכומים בכותרת יחושבו מחדש וההתאמה תרוץ שוב.',
