@@ -11,6 +11,7 @@ import { Card, SectionHeader } from '@/lib/components';
 import { buildProof } from '@/lib/leakProof';
 import { discrepancyLabel, displayName } from '../../approvals/vocab';
 import { PrintButton } from './print-button';
+import { approvedNotClaimed, sumAgora } from '../claims/letters';
 
 /**
  * "How did we get to ₪X?" (flag `leakProof`): a print-friendly sheet that
@@ -18,7 +19,10 @@ import { PrintButton } from './print-button';
  * owner.leakBreakdown, so every ₪ here equals the hero to the agora.
  * Finance roles (the breakdown is finance detail, like /dashboard/leaks).
  */
-export default async function LeakProofPage() {
+export default async function LeakProofPage({ searchParams }: { searchParams: Promise<{ m?: string }> }) {
+  const sp = await searchParams;
+  const parsed = Number.parseInt(sp.m ?? '0', 10);
+  const monthOffset = Number.isFinite(parsed) ? Math.min(0, Math.max(-24, parsed)) : 0;
   const caller = await createServerCaller();
   const flags = await caller.recovery.flags();
   if (!flags.leakProof) notFound();
@@ -27,13 +31,25 @@ export default async function LeakProofPage() {
     getT(leakProofNs),
     getT(approvalsNs),
     getLocale(),
-    caller.owner.leakHero(),
+    caller.owner.leakHero({ monthOffset }),
     // The whole month (pending rows sort last, and a pending invoice can still
     // carry leak) so the top 5 can never miss a catch.
-    caller.owner.leakBreakdown({ limit: 200 }),
+    caller.owner.leakBreakdown({ monthOffset, limit: 200 }),
   ]);
   const proof = buildProof(hero, breakdown);
-  const round = (ils: number) => formatIls(ils, { locale });
+  // On screen, the catches + "and N more" add up to the number, to the agora.
+  const topIls = sumAgora(proof.top.map((c) => c.leakIls));
+  const restIls = Math.round((hero.leakIls - topIls) * 100) / 100;
+  const restCount = Math.max(0, hero.invoicesWithLeak - proof.top.length);
+  // "טופל" lines are in "approved to claim" but no letter claims them: name them.
+  const tracked = flags.recovery ? await caller.recovery.list().catch(() => null) : null;
+  const resolved = (tracked ? approvedNotClaimed(breakdown, tracked) : []).map(({ invoice, line }) => ({
+    amount: Math.abs(line.deltaAmount),
+    type: line.type,
+    supplier: displayName(locale, invoice.supplierName, invoice.supplierNameEn),
+  }));
+  const resolvedIls = sumAgora(resolved.map((r) => r.amount));
+  const resolvedItems = [...new Set(resolved.map((r) => `${discrepancyLabel(ta, r.type)}, ${r.supplier}`))].slice(0, 3).join(' · ');
   const exact = (ils: number) => formatIls(ils, { locale, maximumFractionDigits: 2 });
   const num = (n: number) => formatNumber(n, locale);
   const month = formatDate(hero.monthStart, locale, { month: 'long', year: 'numeric' });
@@ -54,7 +70,7 @@ export default async function LeakProofPage() {
         <PrintButton label={t('print')} />
       </div>
 
-      <SectionHeader level={1} title={t('title', { amount: round(hero.leakIls) })} subtitle={t('subtitle', { month })} />
+      <SectionHeader level={1} title={t('title', { amount: exact(hero.leakIls) })} subtitle={t('subtitle', { month })} />
 
       {/* T1 — the number and how it is made. */}
       <Card padding="lg" elevated data-testid="proof-number" className={hero.leakIls > 0 ? 'relative overflow-hidden border-danger/35' : 'relative overflow-hidden'}>
@@ -63,7 +79,7 @@ export default async function LeakProofPage() {
           <Sigma className="mt-1 h-5 w-5 shrink-0 text-danger" aria-hidden="true" />
           <div className="min-w-0">
             <h2 className="text-sm font-bold text-ink">{t('numberTitle')}</h2>
-            <p className="mt-1 font-mono text-4xl font-extrabold tabular-nums text-ink" data-testid="proof-leak">
+            <p className="mt-1 text-4xl font-extrabold tabular-nums text-ink" data-testid="proof-leak">
               {exact(hero.leakIls)}
             </p>
             <p className="mt-2 text-sm text-ink">
@@ -132,10 +148,10 @@ export default async function LeakProofPage() {
                       </div>
                     </div>
                     <div className="text-end">
-                      <p className="font-mono text-lg font-bold tabular-nums text-danger" data-testid="proof-catch-amount">
+                      <p className="text-lg font-bold tabular-nums text-ink" data-testid="proof-catch-amount">
                         {exact(c.leakIls)}
                       </p>
-                      {c.capped ? <p className="text-[11px] text-muted">{t('capped')}</p> : null}
+                      {c.capped ? <p className="text-xs text-muted">{t('capped')}</p> : null}
                     </div>
                   </div>
                   <ul className="divide-y divide-line">
@@ -151,7 +167,7 @@ export default async function LeakProofPage() {
                             {f.level === 'invoice' ? <span className="text-muted"> · {t('invoiceLevel')}</span> : null}
                           </span>
                           <span className="flex shrink-0 items-center gap-3">
-                            <span className="font-mono tabular-nums text-ink">{exact(f.amountIls)}</span>
+                            <span className="tabular-nums text-ink">{exact(f.amountIls)}</span>
                             <Link
                               href={f.href}
                               data-print-hide
@@ -168,21 +184,45 @@ export default async function LeakProofPage() {
                 </Card>
               </li>
             ))}
+            {restIls > 0.005 ? (
+              <li data-testid="proof-rest" data-amount={restIls}>
+                <Card padding="md" className="flex flex-wrap items-center justify-between gap-3 bg-surface-2">
+                  <span className="text-sm text-ink">{t('rest', { count: num(restCount), amount: exact(restIls) })}</span>
+                  <Link
+                    href={`/dashboard/leaks/breakdown${monthOffset ? `?m=${monthOffset}` : ''}`}
+                    data-print-hide
+                    className="inline-flex min-h-11 items-center text-sm font-semibold text-primary hover:underline"
+                  >
+                    {t('restLink')}
+                  </Link>
+                </Card>
+              </li>
+            ) : null}
           </ol>
         )}
+        {proof.top.length > 0 ? (
+          <p className="mt-2 text-sm font-semibold text-ink" data-testid="proof-sum" data-amount={sumAgora([topIls, Math.max(0, restIls)])}>
+            {t('topSum', { count: num(hero.invoicesWithLeak), amount: exact(sumAgora([topIls, Math.max(0, restIls)])) })}
+          </p>
+        ) : null}
       </section>
 
       {/* T3 — the good news, with the hero's own definitions. */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 [&>*]:min-w-0">
         <Card padding="lg" data-testid="proof-caught">
           <h2 className="text-sm font-bold text-ink">{t('caughtTitle')}</h2>
-          <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-gold">{exact(hero.caughtBeforePaymentIls)}</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-gold">{exact(hero.caughtBeforePaymentIls)}</p>
           <p className="mt-1 text-xs text-muted">{t('caught', { amount: exact(hero.caughtBeforePaymentIls) })}</p>
         </Card>
         <Card padding="lg" data-testid="proof-recovered">
           <h2 className="text-sm font-bold text-ink">{t('recoveredTitle')}</h2>
-          <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-primary">{exact(hero.recoveredIls)}</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-primary">{exact(hero.recoveredIls)}</p>
           <p className="mt-1 text-xs text-muted">{t('recovered', { amount: exact(hero.recoveredIls) })}</p>
+          {resolvedIls > 0 ? (
+            <p className="mt-1 text-xs text-muted" data-testid="proof-resolved-note">
+              {t('resolvedNote', { amount: exact(resolvedIls), items: resolvedItems })}
+            </p>
+          ) : null}
         </Card>
       </div>
 

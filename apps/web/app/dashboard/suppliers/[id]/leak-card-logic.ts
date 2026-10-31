@@ -32,6 +32,9 @@ export interface LeakLineLike {
   productNameEn: string | null;
   lineDescription: string | null;
   lineDescriptionEn: string | null;
+  /** The engine's expected / charged values (the line's ₪ basis), when known. */
+  expected?: number | null;
+  actual?: number | null;
 }
 
 export interface LeakInvoiceLike {
