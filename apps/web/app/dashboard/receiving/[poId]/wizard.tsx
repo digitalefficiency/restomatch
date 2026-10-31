@@ -641,7 +641,7 @@ export function ReceivingWizard({
             onSubmit={() => void submit()}
             onBack={() => setStep('RECONCILIATION_REVIEW')}
             // Clear the fixed mobile bottom nav (dashboard/nav.tsx, lg:hidden).
-            footerBottomClass="bottom-[calc(4.5rem+env(safe-area-inset-bottom)+var(--consent-h,0px))] lg:bottom-[var(--consent-h,0px)]"
+            footerBottomClass="bottom-[calc(max(var(--rm-bottomnav-h,0px),env(safe-area-inset-bottom))+var(--consent-h,0px))] lg:bottom-[var(--consent-h,0px)]"
           />
           {submitting ? (
             <div className="mt-3 flex items-center justify-center gap-2 text-sm text-muted" dir={dir}>

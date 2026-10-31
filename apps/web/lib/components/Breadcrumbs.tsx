@@ -2,15 +2,16 @@
 
 import Link from 'next/link';
 import { ChevronRight } from 'lucide-react';
-import { canOpenPath } from '@/lib/nav/visibility';
+import { canFollowPath } from '@/lib/nav/visibility';
 import { useNavViewer } from '@/lib/nav/NavProvider';
 
 /**
  * Detail-page breadcrumb trail. Pass the localized `label` for the nav
  * landmark. The chevron is drawn for LTR and mirrored under RTL so it always
  * points "deeper" in reading direction. Inside the dashboard a crumb whose
- * page the viewer's role can't open renders as plain text instead of a link
- * that would bounce (e.g. the ledger → ספקים crumb for a bookkeeper).
+ * page the viewer can't open — role gate, or a feature flag that is off —
+ * renders as plain text instead of a link that would bounce or 404 (e.g. the
+ * ledger → ספקים crumb for a bookkeeper).
  */
 export function Breadcrumbs({
   items,
@@ -20,7 +21,7 @@ export function Breadcrumbs({
   label: string;
 }) {
   const viewer = useNavViewer();
-  const canOpen = (href: string) => !viewer || canOpenPath(viewer.role, href);
+  const canOpen = (href: string) => !viewer || canFollowPath(viewer, href);
   return (
     <nav aria-label={label} className="mb-3 text-sm text-muted">
       <ol className="flex min-w-0 flex-wrap items-center gap-1">

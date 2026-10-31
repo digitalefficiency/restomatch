@@ -25,13 +25,14 @@ export const routes: RouteDef[] = [
     aliases: ['הוכחה', 'proof'],
   },
   {
-    // Now explicit (leaks-22): the printable report calls owner.leakReport, a
-    // managerProcedure — the bookkeeper used to land on a warn "owner only" card.
+    // Inherits the /leaks gate. The bookkeeper reaches it from the leaks page and
+    // gets the page's own role card until owner.leakReport admits them (owner
+    // decision: the bookkeeper reads everything); a gate here would turn that
+    // button into a silent bounce home.
     key: 'leaksReport',
     path: '/dashboard/leaks/report',
     group: 'leaks',
     parent: 'leaks',
-    roles: ['owner', 'manager'],
     nav: 'linked',
     aliases: ['דוח דליפות', 'pdf', 'report'],
   },
