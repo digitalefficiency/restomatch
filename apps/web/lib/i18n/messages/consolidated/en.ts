@@ -17,7 +17,6 @@ export const en: Shape<typeof he> = {
     none: 'No open delivery notes from this supplier in the period',
     noneBody: "Deliveries from the supplier in the invoice's month will be cross-matched here.",
   },
-  toClaim: 'To the credit claim',
   print: 'Print the cross-match for the supplier',
   letter: {
     to: 'To {supplier}',

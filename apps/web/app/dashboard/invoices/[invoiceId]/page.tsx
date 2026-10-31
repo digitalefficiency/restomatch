@@ -208,7 +208,6 @@ export default async function InvoiceCockpitPage({
                 locale={locale}
                 supplierName={invoice.supplierName}
                 invoiceNumber={invoice.invoiceNumber}
-                supplierId={detail.supplierId}
               />
             ) : null}
           </>
