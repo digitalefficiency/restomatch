@@ -11,6 +11,7 @@ import {
   type RecoveryStatus,
 } from '@restomatch/db';
 import { assertSupplierOwned } from '../tenant';
+import { CLAIM_ANSWER_DAYS, NEVER_CLAIMABLE_TYPES } from '../lib/claims';
 import {
   AWAITING_SUPPLIER,
   CREDITABLE,
@@ -41,9 +42,38 @@ const isoOrNull = (v: unknown): string | null =>
 
 const notFound = (what: string) => new TRPCError({ code: 'NOT_FOUND', message: `${what} not found` });
 
-const CLAIMABLE_FILTER = sql`d.severity IN ('warn','block')
+type SQL = ReturnType<typeof sql>;
+
+const NEVER_CLAIMABLE_SQL = sql.join(
+  NEVER_CLAIMABLE_TYPES.map((t) => sql`${t}`),
+  sql`, `,
+);
+/**
+ * Still an accepted leak line — the "no longer accepted" write-off / re-open rule.
+ * Unchanged by the owner's 31.10 decision, so a never-claimable claim is never
+ * swept by it (that one has its own, narrower rule: NEVER_CLAIMABLE_WRITE_OFF).
+ */
+const ACCEPTED_FILTER = sql`d.severity IN ('warn','block')
   AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL')
   AND d.resolution_status IN ('accepted','resolved')`;
+/** A NEW claim is made only for this: accepted AND not a never-claimable type (lib/claims, owner 31.10). */
+const CLAIMABLE_FILTER = sql`${ACCEPTED_FILTER} AND d.type NOT IN (${NEVER_CLAIMABLE_SQL})`;
+/** The discrepancy (alias d) is a type never asked back from a supplier. */
+export const NEVER_CLAIMABLE_TYPE_SQL = sql`d.type IN (${NEVER_CLAIMABLE_SQL})`;
+
+/**
+ * Overdue, in the restaurant's CALENDAR days (alias c = claim, tz = its time zone):
+ * waiting more than OVERDUE_DAYS whole days since the letter (or the claim). The
+ * tracker badge, the reminder job and the web countdown (recovery/logic: Israel
+ * days) all use this one rule, so they can never be a day apart.
+ */
+export function overdueSql(now: Date, tz: SQL): SQL {
+  return sql`((${now.toISOString()}::timestamptz AT TIME ZONE ${tz})::date
+    - (COALESCE(c.letter_sent_at, c.claimed_at) AT TIME ZONE ${tz})::date) > ${OVERDUE_DAYS}`;
+}
+
+/** Event note of the narrow never-claimable write-off (owner 31.10). */
+export const NEVER_CLAIMABLE_NOTE = 'auto: type never claimable (owner 31.10)';
 
 /** Event note marking a claim the system wrote off because its discrepancy is no longer accepted. */
 export const AUTO_WRITE_OFF_NOTE = 'auto: discrepancy no longer accepted';
@@ -114,7 +144,34 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
         JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
         WHERE c.restaurant_id = ${restaurantId}
           AND c.status IN ('claimed', 'letter_sent')
-          AND NOT (${CLAIMABLE_FILTER})
+          AND NOT (${ACCEPTED_FILTER})
+        ORDER BY c.id
+        FOR UPDATE OF c
+      )
+      UPDATE recovery_claims c
+      SET status = 'written_off', closed_at = now()
+      FROM gone
+      WHERE c.id = gone.id AND c.restaurant_id = ${restaurantId}
+      RETURNING c.id, c.amount_agorot, gone.from_status
+    `),
+  );
+  // Owner 31.10: a never-claimable type (MISSING_ON_INVOICE…) is closed ONLY while nothing
+  // happened to its claim yet — still 'claimed', no letter, no money, and no person ever
+  // moved it (a person's re-open included). Any later state is the owner's to decide.
+  const neverClaimable = rowsOf(
+    await db.execute(sql`
+      WITH gone AS (
+        SELECT c.id, c.status AS from_status
+        FROM recovery_claims c
+        JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
+        WHERE c.restaurant_id = ${restaurantId}
+          AND c.status = 'claimed' AND c.letter_sent_at IS NULL AND c.credited_agorot = 0
+          AND ${NEVER_CLAIMABLE_TYPE_SQL}
+          AND NOT EXISTS (
+            SELECT 1 FROM recovery_events e
+            WHERE e.claim_id = c.id AND e.restaurant_id = ${restaurantId}
+              AND e.from_status IS NOT NULL AND e.actor_id IS NOT NULL
+          )
         ORDER BY c.id
         FOR UPDATE OF c
       )
@@ -161,6 +218,7 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
   // System events carry no actor (that is what marks them as system).
   const events = [
     ...autoClosed.map((r) => ({ id: r.id, from: r.from_status, to: 'written_off', amount: r.amount_agorot, note: AUTO_WRITE_OFF_NOTE })),
+    ...neverClaimable.map((r) => ({ id: r.id, from: r.from_status, to: 'written_off', amount: r.amount_agorot, note: NEVER_CLAIMABLE_NOTE })),
     ...reopened.map((r) => ({ id: r.id, from: 'written_off', to: r.to_status, amount: r.amount_agorot, note: 'auto: discrepancy accepted again' })),
   ];
   if (events.length > 0) {
@@ -260,8 +318,8 @@ export interface RecoveryClaimRow {
   note: string | null;
 }
 
-/** Waiting on the supplier this many days after the letter (or the claim) ⇒ overdue. */
-export const OVERDUE_DAYS = 14;
+/** Waiting on the supplier this many days after the letter (or the claim) ⇒ overdue (owner 31.10: a week). */
+export const OVERDUE_DAYS = CLAIM_ANSWER_DAYS;
 /** Do not chase the same claim more often than this. */
 export const REMIND_EVERY_DAYS = 7;
 /** Upper bound for one page of the claims LIST (totals never truncate — see computeRecoverySummary). */
@@ -288,8 +346,9 @@ export async function listClaims(
       cn.number AS credit_note_number,
       -- Ageing in the restaurant's calendar days (Asia/Jerusalem by default).
       ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date - (c.claimed_at AT TIME ZONE tz.tz)::date) AS age_days,
-      -- Overdue: exactly the reminder job's rule (findOverdue), so the badge and the email agree.
-      (COALESCE(c.letter_sent_at, c.claimed_at) < ${now.toISOString()}::timestamptz - make_interval(days => ${OVERDUE_DAYS})) AS waiting_overdue
+      -- Overdue: exactly the reminder job's rule (findOverdue), so the badge and the email agree;
+      -- never a type the owner decided is not claimed (it is not "owed").
+      (${overdueSql(now, sql`tz.tz`)} AND NOT ${NEVER_CLAIMABLE_TYPE_SQL}) AS waiting_overdue
     FROM recovery_claims c
     CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) tz
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}

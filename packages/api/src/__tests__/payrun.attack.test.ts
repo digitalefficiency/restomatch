@@ -256,6 +256,48 @@ describe('payRun.month', () => {
     }
   });
 
+  it('past the window: an accepted MISSING_ON_INVOICE is never a credit to ask for (owner 31.10 — NEVER_CLAIMABLE_TYPES)', async () => {
+    await ownerDb.execute(sql`
+      WITH inv AS (
+        INSERT INTO invoices (restaurant_id, supplier_id, invoice_number, invoice_date, total_excl_vat, vat_amount, total_incl_vat, status, source)
+        SELECT ${A.restaurantId}, ${A.supplierId}, 'PAID-WIN3-' || g, now(), 5000, 850, 5850, 'paid', 'photo'
+        FROM generate_series(1, 205) g
+        RETURNING id
+      ), mr AS (
+        INSERT INTO match_runs (restaurant_id, po_id, gr_id, invoice_id, overall_status, total_discrepancy_amount)
+        SELECT ${A.restaurantId}, ${A.poId}, ${A.grId}, inv.id, 'major', 1000 FROM inv
+        RETURNING id
+      )
+      INSERT INTO discrepancies (match_run_id, restaurant_id, type, severity, delta_amount, requires_role, resolution_status)
+      SELECT mr.id, ${A.restaurantId}, 'PRICE_HIGHER', 'warn', 1000, 'manager', 'resolved' FROM mr
+    `);
+    await ownerDb.execute(sql`
+      WITH inv AS (
+        INSERT INTO invoices (restaurant_id, supplier_id, invoice_number, invoice_date, total_excl_vat, vat_amount, total_incl_vat, status, source)
+        VALUES (${A.restaurantId}, ${A.supplierId}, 'EDGE-MOI', now(), 256.41, 43.59, 300, 'matched', 'photo')
+        RETURNING id
+      ), mr AS (
+        INSERT INTO match_runs (restaurant_id, po_id, gr_id, invoice_id, overall_status, total_discrepancy_amount)
+        SELECT ${A.restaurantId}, ${A.poId}, ${A.grId}, inv.id, 'major', 200 FROM inv
+        RETURNING id
+      )
+      INSERT INTO discrepancies (match_run_id, restaurant_id, type, severity, delta_amount, requires_role, resolution_status)
+      SELECT mr.id, ${A.restaurantId}, 'MISSING_ON_INVOICE', 'warn', -200, 'manager', 'accepted' FROM mr
+    `);
+    try {
+      const r = await asA().payRun.month();
+      const moi = r.suppliers.flatMap((x) => x.invoices).find((i) => i.invoiceNumber === 'EDGE-MOI')!;
+      expect(moi).toMatchObject({ status: 'pay', creditIls: 0 });
+    } finally {
+      await ownerDb.execute(sql`
+        DELETE FROM discrepancies WHERE match_run_id IN (
+          SELECT mr.id FROM match_runs mr JOIN invoices i ON i.id = mr.invoice_id
+          WHERE i.invoice_number LIKE 'PAID-WIN3-%' OR i.invoice_number = 'EDGE-MOI')`);
+      await ownerDb.execute(sql`DELETE FROM match_runs WHERE invoice_id IN (SELECT id FROM invoices WHERE invoice_number LIKE 'PAID-WIN3-%' OR invoice_number = 'EDGE-MOI')`);
+      await ownerDb.execute(sql`DELETE FROM invoices WHERE invoice_number LIKE 'PAID-WIN3-%' OR invoice_number = 'EDGE-MOI'`);
+    }
+  });
+
   it('past the window: an accepted duplicate copy holds, an open unordered arrival waits for its link — never "can pay"', async () => {
     await ownerDb.execute(sql`
       WITH inv AS (

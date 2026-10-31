@@ -14,7 +14,7 @@ import { recipientsForRestaurant } from '../notifications/recipients';
 import { renderEmail, ilsSpan, type RenderedEmail } from '../notifications/templates';
 import { formatIlsAgorot, type ReportLocale } from '../reports/money';
 import { AWAITING_SUPPLIER } from './lifecycle';
-import { OVERDUE_DAYS, REMIND_EVERY_DAYS, syncClaims } from './service';
+import { NEVER_CLAIMABLE_TYPE_SQL, OVERDUE_DAYS, REMIND_EVERY_DAYS, overdueSql, syncClaims } from './service';
 
 /**
  * Overdue-claim reminders: a claim still waiting on the supplier more than
@@ -42,10 +42,15 @@ export async function findOverdue(
            GREATEST(0, c.amount_agorot - c.credited_agorot) AS outstanding,
            floor(extract(epoch FROM (${now.toISOString()}::timestamptz - COALESCE(c.letter_sent_at, c.claimed_at))) / 86400)::int AS waiting
     FROM recovery_claims c
+    CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) tz
+    JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
     LEFT JOIN suppliers s ON s.id = c.supplier_id AND s.restaurant_id = ${restaurantId}
     WHERE c.restaurant_id = ${restaurantId}
       AND c.status IN (${sql.join(AWAITING_SUPPLIER.map((s) => sql`${s}`), sql`, `)})
-      AND COALESCE(c.letter_sent_at, c.claimed_at) < ${now.toISOString()}::timestamptz - make_interval(days => ${OVERDUE_DAYS})
+      -- The same calendar-day rule as the tracker badge and the web countdown (overdueSql).
+      AND ${overdueSql(now, sql`tz.tz`)}
+      -- Owner 31.10: a never-claimable type is not owed — never chased.
+      AND NOT ${NEVER_CLAIMABLE_TYPE_SQL}
       AND (c.last_reminder_at IS NULL
            OR c.last_reminder_at < ${now.toISOString()}::timestamptz - make_interval(days => ${REMIND_EVERY_DAYS}))
     ORDER BY waiting DESC

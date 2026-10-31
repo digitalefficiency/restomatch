@@ -16,7 +16,7 @@ import { LetterActions } from './letter-actions';
 import { DeferredProvider } from '../../recovery/deferred';
 import { addDays, buildLetters, daysLeft, sumAgora, type LetterLine, type SupplierLetter } from './letters';
 import { lineMathText } from './why';
-import { ALL_CLAIMS, ANSWER_DAYS } from '../../recovery/logic';
+import { ALL_CLAIMS, ANSWER_DAYS, ANSWER_WARN_DAYS } from '../../recovery/logic';
 
 const REASON_TYPES = [
   'PRICE_HIGHER',
@@ -354,7 +354,7 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                           <span className="text-muted">· {formatNumber(s.count, locale)}</span>
                         </span>
                         <span className="flex items-center gap-3">
-                          <Badge tone={left < 0 ? 'danger' : left <= 7 ? 'warning' : 'info'}>
+                          <Badge tone={left < 0 ? 'danger' : left <= ANSWER_WARN_DAYS ? 'warning' : 'info'}>
                             {left < 0
                               ? t('claims.sentLate', { date: formatDate(s.sentAt, locale, { day: '2-digit', month: '2-digit' }), days: formatNumber(-left, locale) })
                               : t('claims.sentBadge', { date: formatDate(s.sentAt, locale, { day: '2-digit', month: '2-digit' }), days: formatNumber(left, locale) })}
