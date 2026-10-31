@@ -24,6 +24,9 @@ const h = vi.hoisted(() => ({
   claudeResult: null as unknown,
   meter: vi.fn(async () => ({ metered: true, used: 1, limit: null })),
   demoIds: null as string[] | null,
+  stubThrows: false,
+  signed: [] as string[],
+  signTo: null as null | ((path: string) => string | null),
 }));
 
 vi.mock('@restomatch/ocr', async (importOriginal) => {
@@ -43,7 +46,18 @@ vi.mock('@restomatch/ocr', async (importOriginal) => {
 
 vi.mock('@restomatch/api', async (importOriginal) => {
   const real = await importOriginal<typeof import('@restomatch/api')>();
-  return { ...real, meterOcrScan: h.meter };
+  return {
+    ...real,
+    meterOcrScan: h.meter,
+    signedUrlForStoragePath: async (_rid: string, path: string) => {
+      h.signed.push(path);
+      return h.signTo ? h.signTo(path) : null;
+    },
+    buildDevOcrStub: (async (...args: Parameters<typeof real.buildDevOcrStub>) => {
+      if (h.stubThrows) throw new Error('stub build failed (db blip)');
+      return real.buildDevOcrStub(...args);
+    }) as typeof real.buildDevOcrStub,
+  };
 });
 
 vi.mock('@restomatch/db', async (importOriginal) => {
@@ -167,6 +181,9 @@ describe('processOcrInvoice gate (DB)', () => {
     h.claudeUrls.length = 0;
     h.claudeResult = extraction;
     h.demoIds = null;
+    h.stubThrows = false;
+    h.signed.length = 0;
+    h.signTo = (path) => `${SCAN_PREFIX}${path}?token=fresh`;
     const [r] = await db.insert(restaurants).values({ name: 'OCR allowlist QA' }).returning();
     rid = r!.id;
     const [s] = await db.insert(suppliers).values({ restaurantId: rid, name: 'ספק' }).returning();
@@ -250,6 +267,110 @@ describe('processOcrInvoice gate (DB)', () => {
     expect((await read(inv.id)).ocrPayload?.raw).toEqual({ ocrFailed: true, reason: 'scan_url_refused' });
   });
 
+  describe('the row is the trust boundary for the scan (review #3, G-09 bare object paths)', () => {
+    const allowlist = () => {
+      process.env.ANTHROPIC_API_KEY = 'test-key-not-real';
+      process.env.OCR_REAL_RESTAURANT_IDS = rid;
+    };
+
+    it('a signed-URL row is read as before (no signing)', async () => {
+      allowlist();
+      const inv = await newInvoice();
+      await run({ invoiceId: inv.id });
+      expect(h.claudeUrls).toEqual([inv.rawImageUrl]);
+      expect(h.signed).toEqual([]);
+    });
+
+    it("a bare path under the row's own tenant is signed at read time; the payload URL is ignored", async () => {
+      allowlist();
+      const path = `${rid}/scan-abc123-def456.pdf`;
+      const inv = await newInvoice({ url: path });
+      expect(await run({ invoiceId: inv.id, imageUrl: 'https://payload.example/evil.jpg' })).toMatchObject({ lines: 1 });
+      expect(h.signed).toEqual([path]);
+      expect(h.claudeUrls).toEqual([`${SCAN_PREFIX}${path}?token=fresh`]);
+    });
+
+    it("another tenant's path is refused — never signed, never read, never metered", async () => {
+      allowlist();
+      const inv = await newInvoice({ url: `${A}/scan-abc123-def456.pdf` });
+      expect(await run({ invoiceId: inv.id })).toMatchObject({ skipped: 'scan_url_refused' });
+      expect(h.signed).toEqual([]);
+      expect(h.claudeCtor).not.toHaveBeenCalled();
+      expect(h.meter).not.toHaveBeenCalled();
+    });
+
+    it('a traversal, a leading slash or a backslash in the path is refused', async () => {
+      allowlist();
+      for (const url of [`${rid}/../${A}/scan-x.pdf`, `/${rid}/scan-x.pdf`, `${rid}\\..\\scan-x.pdf`]) {
+        const inv = await newInvoice({ url });
+        expect(await run({ invoiceId: inv.id }), url).toMatchObject({ skipped: 'scan_url_refused' });
+      }
+      expect(h.signed).toEqual([]);
+      expect(h.claudeCtor).not.toHaveBeenCalled();
+    });
+
+    it('an exact allowlist, not a blacklist: encoded / split dots, sub-folders, a query or a fragment are refused unsigned', async () => {
+      allowlist();
+      const obj = 'scan-abc123-def456.jpg';
+      for (const url of [
+        `${rid}/%2e%2e/${A}/${obj}`,
+        `${rid}/.%2E/${A}/${obj}`,
+        `${rid}/%2E./${A}/${obj}`,
+        `${rid}/.\t./${A}/${obj}`,
+        `${rid}/.\r\n./${A}/${obj}`,
+        `${rid}/sub/${obj}`,
+        `${rid}/${obj}?x=1`,
+        `${rid}/${obj}#x`,
+        `${rid}/scan-abc123-def456%2Ejpg`,
+      ]) {
+        const inv = await newInvoice({ url });
+        expect(await run({ invoiceId: inv.id }), JSON.stringify(url)).toMatchObject({ skipped: 'scan_url_refused' });
+      }
+      expect(h.signed).toEqual([]);
+      expect(h.claudeCtor).not.toHaveBeenCalled();
+      expect(h.meter).not.toHaveBeenCalled();
+    });
+
+    it('a transient storage error while signing is RETRIED (not refused); a 4xx refuses the scan', async () => {
+      allowlist();
+      const path = `${rid}/scan-abc123-def456.pdf`;
+      const withRetry = (data: Record<string, unknown>) =>
+        processOcrInvoice({
+          data: { restaurantId: rid, supplierId: null, imageUrl: 'https://payload.example/evil.jpg', ...data },
+          attemptsMade: 0,
+          opts: { attempts: 2 },
+        } as never);
+      for (const err of [Object.assign(new Error('storage unavailable'), { status: 503 }), new TypeError('fetch failed')]) {
+        h.signTo = () => {
+          throw err;
+        };
+        const inv = await newInvoice({ url: path });
+        const thrown = await withRetry({ invoiceId: inv.id }).catch((e: unknown) => e as Error);
+        expect(thrown, err.message).toBeInstanceOf(Error);
+        expect((thrown as Error).message.startsWith('[terminal] ')).toBe(false);
+        expect((await read(inv.id)).status).toBe('ocr_pending'); // left for the retry
+      }
+      h.signTo = () => {
+        throw Object.assign(new Error('Object not found'), { status: 400, statusCode: '404' });
+      };
+      const gone = await newInvoice({ url: path });
+      expect(await withRetry({ invoiceId: gone.id })).toMatchObject({ skipped: 'scan_url_refused' });
+      expect(h.claudeCtor).not.toHaveBeenCalled();
+      expect(h.meter).not.toHaveBeenCalled();
+    });
+
+    it('a signature outside our scans bucket (or none at all) is refused by the same check', async () => {
+      allowlist();
+      h.signTo = () => 'https://elsewhere.example/x.pdf';
+      const a = await newInvoice({ url: `${rid}/scan-abc123-def456.pdf` });
+      expect(await run({ invoiceId: a.id })).toMatchObject({ skipped: 'scan_url_refused' });
+      h.signTo = () => null; // no storage configured
+      const b = await newInvoice({ url: `${rid}/scan-abc123-def456.pdf` });
+      expect(await run({ invoiceId: b.id })).toMatchObject({ skipped: 'scan_url_refused' });
+      expect(h.claudeCtor).not.toHaveBeenCalled();
+    });
+  });
+
   it('status guard: an invoice that already left ocr_pending is left alone', async () => {
     process.env.ANTHROPIC_API_KEY = 'test-key-not-real';
     process.env.OCR_REAL_RESTAURANT_IDS = rid;
@@ -268,6 +389,18 @@ describe('processOcrInvoice gate (DB)', () => {
     const res = await run({ invoiceId: inv.id, mockProviders: { docAi: extraction, claude: extraction } });
     expect(res).toMatchObject({ skipped: 'ocr_disabled' });
     expect(await lines(inv.id)).toHaveLength(0);
+  });
+
+  it('a failure BEFORE the read (the demo stub build) marks the invoice failed — never left ocr_pending (review #5)', async () => {
+    h.demoIds = [rid];
+    h.stubThrows = true;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const inv = await newInvoice();
+    await expect(run({ invoiceId: inv.id, grId })).rejects.toThrow('stub build failed');
+    const row = await read(inv.id);
+    expect(row.status).toBe('parsed');
+    expect(row.ocrPayload?.raw).toEqual({ ocrFailed: true, reason: 'extraction_failed' });
+    expect(h.meter).not.toHaveBeenCalled();
   });
 
   it('isDemoTenant uses the real identity finder: an ordinary tenant is not demo', async () => {
