@@ -55,6 +55,7 @@ export function OrdersList({
   const [status, setStatus] = useState<StatusFilter>('all');
   /** W2-06 §5.6: the queue view ('all' = no view); a view and a status filter never stack. */
   const [view, setView] = useState<OrderView | 'all'>('all');
+  const [answer, setAnswer] = useState<'all' | 'confirmed' | 'changes' | 'pending'>('all');
   const counts = trpc.orders.viewCounts.useQuery(undefined, { retry: false });
   // Pages past the first, fetched by offset (orders.list caps `limit` at 100, so
   // growing one query's limit broke "load more" at the third page).
@@ -66,9 +67,9 @@ export function OrdersList({
   const utils = trpc.useUtils();
 
   const q = trpc.orders.list.useQuery(
-    { ...queryOf(status), ...(view !== 'all' ? { view } : {}), limit: PAGE },
+    { ...queryOf(status), ...(view !== 'all' ? { view } : {}), ...(answer !== 'all' ? { answer } : {}), limit: PAGE },
     {
-      initialData: status === 'all' && view === 'all' ? initial : undefined,
+      initialData: status === 'all' && view === 'all' && answer === 'all' ? initial : undefined,
       placeholderData: (prev) => prev,
     },
   );
@@ -89,6 +90,7 @@ export function OrdersList({
       const page = await utils.orders.list.fetch({
         ...queryOf(status),
         ...(view !== 'all' ? { view } : {}),
+        ...(answer !== 'all' ? { answer } : {}),
         limit: PAGE,
         offset: first.length + more.length,
       });
@@ -157,6 +159,35 @@ export function OrdersList({
             )}
           >
             {t(`filters.${f}`)}
+          </button>
+        ))}
+      </div>
+
+      <div role="group" aria-label={t('w2.answer.column')} className="flex gap-1 overflow-x-auto pb-1" data-testid="answer-filter">
+        {(['all', 'confirmed', 'changes', 'pending'] as const).map((a) => (
+          <button
+            key={a}
+            type="button"
+            aria-pressed={answer === a}
+            onClick={() => {
+              setAnswer(a);
+              setMore([]);
+              setLastPage(null);
+              setMoreError(false);
+            }}
+            className={cn(
+              'min-h-11 whitespace-nowrap rounded-full px-3 py-1 text-sm transition-colors',
+              'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+              answer === a
+                ? 'bg-primary/12 font-semibold text-primary ring-1 ring-primary/25'
+                : 'text-muted hover:bg-surface-2 hover:text-ink',
+            )}
+          >
+            {a === 'all'
+              ? t('w2.answer.column')
+              : a === 'changes'
+                ? t('w2.answer.changesShort')
+                : t(`w2.answer.${a}`)}
           </button>
         ))}
       </div>

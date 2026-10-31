@@ -1,6 +1,7 @@
 import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, goodsReceipts, purchaseOrders } from '@restomatch/db';
+import { createDb, eq, goodsReceipts, purchaseOrders, supplierConfirmLinks, supplierResponses } from '@restomatch/db';
+import { createSupplierLink } from '../supplierConfirm/service';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { ORDER_VIEWS } from '../orders/views';
@@ -66,5 +67,33 @@ describe('orders.viewCounts / orders.list({ view })', () => {
     expect(b.drafts).toBe(4);
     const a = await callerFor(A).orders.viewCounts();
     expect(a.drafts).toBe(2);
+  });
+
+  it("the supplier's answer: column values and the answer filter", async () => {
+    const confirmed = await po(A, 'sent', 1);
+    const changed = await po(A, 'sent', 1);
+    for (const [poId, status, lines] of [
+      [confirmed, 'confirmed', []],
+      [changed, 'changes', [{ poLineId: A.poLineId }, { poLineId: A.poLineId }]],
+    ] as const) {
+      await createSupplierLink(db, A.restaurantId, poId);
+      const [link] = await db.select({ id: supplierConfirmLinks.id }).from(supplierConfirmLinks).where(eq(supplierConfirmLinks.poId, poId));
+      await db.insert(supplierResponses).values({
+        restaurantId: A.restaurantId,
+        poId,
+        linkId: link!.id,
+        status,
+        lines: lines as never,
+      });
+    }
+    const c = callerFor(A);
+    const all = await c.orders.list({ limit: 100 });
+    expect(all.find((o) => o.id === confirmed)).toMatchObject({ supplierAnswer: 'confirmed' });
+    expect(all.find((o) => o.id === changed)).toMatchObject({ supplierAnswer: 'changes', supplierAnswerChanges: 2 });
+    expect((await c.orders.list({ answer: 'confirmed', limit: 100 })).map((o) => o.id)).toEqual([confirmed]);
+    expect((await c.orders.list({ answer: 'changes', limit: 100 })).map((o) => o.id)).toEqual([changed]);
+    const pending = await c.orders.list({ answer: 'pending', limit: 100 });
+    expect(pending.map((o) => o.id)).not.toContain(confirmed);
+    expect(pending.every((o) => o.status === 'sent' || o.status === 'confirmed')).toBe(true);
   });
 });

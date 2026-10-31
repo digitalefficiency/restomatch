@@ -32,7 +32,7 @@ export function ThreeWayCard({ poId }: { poId: string }) {
   const num = (n: number | null | undefined) => (n == null ? t('w2.threeWay.unknown') : formatNumber(n, locale, { maximumFractionDigits: 3 }));
   const ils = (n: number | null | undefined) => (n == null ? t('w2.threeWay.unknown') : formatIls(n, { locale, maximumFractionDigits: 2 }));
   return (
-    <Card className="mt-6 overflow-x-auto" data-testid="three-way">
+    <Card className="mt-6 overflow-x-auto scroll-mt-24" data-testid="three-way" id="three-way">
       <div className="mb-2 flex flex-wrap items-baseline gap-2">
         <h2 className="text-base font-bold text-ink">{t('w2.threeWay.title')}</h2>
         <button

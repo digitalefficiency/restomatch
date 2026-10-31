@@ -345,6 +345,8 @@ export const he = {
     why: 'למה?',
     paste: 'הדביקו מהלוח',
     pasteFailed: 'לא הצלחנו לקרוא מהלוח. הדביקו בתיבה.',
+    answer: { column: 'תשובת הספק', confirmed: 'אושר', changes: 'אושר עם {count} שינויים', changesShort: 'אושר עם שינויים', pending: 'ממתין לספק' },
+    seeGaps: 'ראו פערים · {amount}',
     timeline: { sent: 'נשלח {time}', recorded: 'נרשם {time}', answered: 'הספק ענה {time}', received: 'התקבל {time}' },
     threeWay: {
       title: 'הוזמן · התקבל · חויב',

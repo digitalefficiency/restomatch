@@ -504,6 +504,8 @@ export const ordersRouter = router({
           delivery: z.enum(['awaiting', 'partial', 'received']).optional(),
           /** W2-06 §5.6 queue views (same definition as orders.viewCounts). */
           view: z.enum(ORDER_VIEWS).optional(),
+          /** The supplier's answer (§5.6): confirmed / confirmed with changes / no answer yet (sent POs). */
+          answer: z.enum(['confirmed', 'changes', 'pending']).optional(),
           limit: z.number().int().min(1).max(100).default(50),
           offset: z.number().int().min(0).default(0),
         })
@@ -515,6 +517,12 @@ export const ordersRouter = router({
       if (input?.status) conds.push(eq(purchaseOrders.status, input.status));
       if (input?.supplierId) conds.push(eq(purchaseOrders.supplierId, input.supplierId));
       const receipt = latestReceiptStatus(restaurantId);
+      if (input?.answer) {
+        const latest = sql`(select r.status from supplier_responses r where r.po_id = ${purchaseOrders.id}
+          and r.restaurant_id = ${restaurantId} order by r.submitted_at desc limit 1)`;
+        conds.push(inArray(purchaseOrders.status, ['sent', 'confirmed']));
+        conds.push(input.answer === 'pending' ? sql`${latest} is null` : sql`${latest} = ${input.answer}`);
+      }
       if (input?.view) {
         conds.push(orderViewConditions(restaurantId, await restaurantTz(ctx.db, restaurantId))[input.view]);
       }
@@ -538,6 +546,13 @@ export const ordersRouter = router({
           lineCount: count(poLines.id),
           receiptStatus: receipt,
           sentChannel: purchaseOrders.sentChannel,
+          /** The supplier's latest answer (§5.6): 'confirmed' | 'changes' | null (no answer yet). */
+          supplierAnswer: sql<string | null>`(select r.status from supplier_responses r
+            where r.po_id = ${purchaseOrders.id} and r.restaurant_id = ${restaurantId}
+            order by r.submitted_at desc limit 1)`,
+          supplierAnswerChanges: sql<number | null>`(select jsonb_array_length(r.lines) from supplier_responses r
+            where r.po_id = ${purchaseOrders.id} and r.restaurant_id = ${restaurantId}
+            order by r.submitted_at desc limit 1)`,
           createdBy: purchaseOrders.createdBy,
           createdByName: sql<string | null>`(select coalesce(u.name, u.email) from users u where u.id = ${purchaseOrders.createdBy})`,
           /** Sent from the manager's/chef's own WhatsApp: whatsapp, and nothing was queued by us. */

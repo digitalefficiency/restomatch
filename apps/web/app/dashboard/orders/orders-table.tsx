@@ -30,6 +30,9 @@ export interface OrderRow {
   sentManually?: boolean;
   /** The draft's author (the manager's "טיוטות" view). */
   createdByName?: string | null;
+  /** The supplier's latest answer (W2-06 §5.6). */
+  supplierAnswer?: string | null;
+  supplierAnswerChanges?: number | null;
 }
 
 /** Icon + word + tone: never colour alone; cancelled is history, not an alarm (orders-34). */
@@ -103,6 +106,13 @@ export function OrdersTable({
   const router = useRouter();
   const date = (d: Date | string | null) => (d ? formatDate(d, locale, SHORT_DATE) : '—');
   const total = (v: string | null | undefined) => (v != null ? formatIls(Number(v), { locale, maximumFractionDigits: 2 }) : '—');
+  const answer = (o: OrderRow): string | null => {
+    if (o.status !== 'sent' && o.status !== 'confirmed') return null;
+    if (o.supplierAnswer === 'confirmed') return t('w2.answer.confirmed');
+    if (o.supplierAnswer === 'changes')
+      return t('w2.answer.changes', { count: formatNumber(o.supplierAnswerChanges ?? 0, locale) });
+    return t('w2.answer.pending');
+  };
   const author = (o: OrderRow) => (o.status === 'draft' && o.createdByName ? t('w2.by', { name: o.createdByName }) : null);
   const supplier = (o: OrderRow) => displayName(o.supplierName, o.supplierNameEn, locale).primary;
   const rowLabel = (o: OrderRow) =>
@@ -125,6 +135,7 @@ export function OrdersTable({
               <th scope="col" className="px-4 py-3 text-start font-medium">{t('columns.ref')}</th>
               <th scope="col" className="px-4 py-3 text-start font-medium">{t('columns.created')}</th>
               <th scope="col" className="px-4 py-3 text-start font-medium">{t('columns.status')}</th>
+              <th scope="col" className="px-4 py-3 text-start font-medium">{t('w2.answer.column')}</th>
               <th scope="col" className="px-4 py-3 text-start font-medium">{t('columns.expectedDelivery')}</th>
               <th scope="col" className="px-4 py-3 text-right font-medium">{t('columns.lines')}</th>
               {showMoney ? <th scope="col" className="px-4 py-3 text-right font-medium">{t('columns.total')}</th> : null}
@@ -176,6 +187,7 @@ export function OrdersTable({
                   <OrderStatusBadge status={o.status} receiptStatus={o.receiptStatus} sentManually={o.sentManually} />
                   {author(o) ? <span className="ms-2 text-xs text-muted">{author(o)}</span> : null}
                 </td>
+                <td className="px-4 py-3 text-muted" data-testid="order-answer">{answer(o) ?? '—'}</td>
                 <td className="px-4 py-3 tabular-nums text-muted">{date(o.expectedDeliveryAt)}</td>
                 <td className="px-4 py-3 text-right tabular-nums text-muted">{formatNumber(o.lineCount, locale)}</td>
                 {showMoney ? <td className="px-4 py-3 text-right tabular-nums text-ink">{total(o.totalEstimated)}</td> : null}
@@ -229,6 +241,7 @@ export function OrdersTable({
                   <span className="tabular-nums">{t('list.linesCount', { count: formatNumber(o.lineCount, locale) })}</span>
                   {showMoney ? <span className="tabular-nums font-medium text-ink">{total(o.totalEstimated)}</span> : null}
                   {author(o) ? <span>{author(o)}</span> : null}
+                  {answer(o) ? <span data-testid="order-answer">{answer(o)}</span> : null}
                 </div>
               </div>
               {!reorderable(o) ? (

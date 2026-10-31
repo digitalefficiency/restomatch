@@ -344,6 +344,8 @@ export const en: Shape<typeof he> = {
     why: 'Why?',
     paste: 'Paste from clipboard',
     pasteFailed: "Couldn't read the clipboard. Paste into the box.",
+    answer: { column: 'Supplier answer', confirmed: 'Confirmed', changes: 'Confirmed with {count} changes', changesShort: 'Confirmed with changes', pending: 'Waiting for supplier' },
+    seeGaps: 'See gaps · {amount}',
     timeline: { sent: 'Sent {time}', recorded: 'Recorded {time}', answered: 'Supplier answered {time}', received: 'Received {time}' },
     threeWay: {
       title: 'Ordered · Received · Billed',
