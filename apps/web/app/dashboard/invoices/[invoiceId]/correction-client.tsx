@@ -444,13 +444,23 @@ export function InvoiceCorrection({
             {linesEditable && (
               <tr data-testid="add-invoice-line-row" className="bg-surface-2/40">
                 <td className="px-4 py-3">
+                  {/* The order's line names: picking one pairs the hand line with
+                      its order line (the server links the product by it). */}
                   <Input
                     aria-label={t('correction.colDescription')}
                     placeholder={t('correction.newLineDescription')}
                     value={nl.rawDescription}
                     maxLength={400}
+                    list={invoice.orderLineNames.length > 0 ? 'order-line-names' : undefined}
                     onChange={(e) => setNl({ ...nl, rawDescription: e.target.value })}
                   />
+                  {invoice.orderLineNames.length > 0 && (
+                    <datalist id="order-line-names" data-testid="order-line-names">
+                      {invoice.orderLineNames.map((n) => (
+                        <option key={n} value={n} />
+                      ))}
+                    </datalist>
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   <Input aria-label={t('correction.colQty')} type="number" inputMode="decimal" step="any" min="0" value={nl.qtyBilled} onChange={(e) => setNl({ ...nl, qtyBilled: e.target.value })} />

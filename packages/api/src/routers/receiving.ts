@@ -38,6 +38,7 @@ import { fillEnglishNames } from '../receiving/english';
 import {
   invoicesWaitingOnReceipt,
   lockReceipt,
+  readScanGrId,
   rematchHoldReason,
   scannedInvoicesForReceipt,
 } from '../receiving/matchTriggers';
@@ -594,6 +595,11 @@ export const receivingRouter = router({
         ocrFailureReason: failure?.ocrFailed === true ? (failure.reason ?? 'extraction_failed') : null,
         // B8: lines may be added / deleted by hand (addInvoiceLine's own rule).
         linesEditable: linesEditable(invoice.status, ocrPayload),
+        // What a hand line can be called so it pairs with its order line (the
+        // order's descriptions — no ₪). Only while lines can be added.
+        orderLineNames: linesEditable(invoice.status, ocrPayload)
+          ? [...new Set((await invoiceOrderLines(ctx.db, ctx.session.restaurantId, invoice.id, ocrPayload)).flatMap((l) => [l.rawDescription, l.productName]).filter((n): n is string => !!n?.trim()))]
+          : [],
         // A חשבונית ריכוז: cross-matched against its delivery notes, never re-matched to a PO.
         consolidated: readConsolidatedRaw(ocrPayload) !== null,
         // The scanned number already belongs to another invoice of this
@@ -821,6 +827,13 @@ export const receivingRouter = router({
           .limit(1);
         if (!prod) throw new TRPCError({ code: 'NOT_FOUND', message: 'product not found' });
       }
+      // S16: a hand line must pair with its order line like a read one, or an
+      // ordered item reads as "not ordered" + "order line not billed" (a false,
+      // inflated claim). Without an explicit product, take it from the
+      // invoice's own order when exactly one line has this description.
+      const link = input.line.productId
+        ? { productId: input.line.productId, supplierSku: null }
+        : orderLineByDescription(await invoiceOrderLines(ctx.db, restaurantId, inv.id, inv.ocrPayload), input.line.rawDescription);
       const qty = decimalString(input.line.qtyBilled, 3);
       const price = decimalString(input.line.unitPriceBilled, 4);
       const totalAgorot = lineTotalAgorot(qty, price);
@@ -829,7 +842,8 @@ export const receivingRouter = router({
         .insert(invoiceLines)
         .values({
           invoiceId: inv.id,
-          productId: input.line.productId ?? null,
+          productId: link?.productId ?? null,
+          supplierSku: link?.supplierSku ?? null,
           rawDescription: input.line.rawDescription,
           qtyBilled: qty,
           unit: input.line.unit,
@@ -863,7 +877,7 @@ export const receivingRouter = router({
         before: { invoiceId: inv.id, totals: inv.totals },
         after: {
           invoiceId: inv.id,
-          line: { rawDescription: input.line.rawDescription, qtyBilled: qty, unit: input.line.unit, unitPriceBilled: price, lineTotal: agorotToPlain(totalAgorot), productId: input.line.productId ?? null },
+          line: { rawDescription: input.line.rawDescription, qtyBilled: qty, unit: input.line.unit, unitPriceBilled: price, lineTotal: agorotToPlain(totalAgorot), productId: link?.productId ?? null },
           totals,
         },
       });
@@ -1531,6 +1545,76 @@ function isHandEntered(ocrPayload: OcrPayload | null): boolean {
 function linesEditable(status: string, ocrPayload: OcrPayload | null): boolean {
   if (status === 'parsed') return true;
   return isHandEntered(ocrPayload) && (status === 'matched' || status === 'disputed');
+}
+
+type OrderLine = { rawDescription: string | null; productName: string | null; productId: string | null; supplierSku: string | null };
+
+/**
+ * The lines of the order this invoice belongs to: the order of its latest match
+ * run, else the order of the receipt it was scanned on (raw.scanGrId).
+ * Tenant-scoped; [] when the invoice has no order yet.
+ */
+async function invoiceOrderLines(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+  ocrPayload: OcrPayload | null,
+): Promise<OrderLine[]> {
+  const [run] = await db
+    .select({ poId: matchRuns.poId })
+    .from(matchRuns)
+    .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId), isNotNull(matchRuns.poId)))
+    .orderBy(desc(matchRuns.runAt))
+    .limit(1);
+  let poId = run?.poId ?? null;
+  const grId = poId ? null : readScanGrId(ocrPayload);
+  if (grId) {
+    const [gr] = await db
+      .select({ poId: goodsReceipts.poId })
+      .from(goodsReceipts)
+      .where(and(eq(goodsReceipts.id, grId), eq(goodsReceipts.restaurantId, restaurantId)))
+      .limit(1);
+    poId = gr?.poId ?? null;
+  }
+  if (!poId) return [];
+  return db
+    .select({
+      rawDescription: poLines.rawDescription,
+      productName: products.canonicalName,
+      productId: poLines.productId,
+      supplierSku: poLines.supplierSku,
+    })
+    .from(poLines)
+    .innerJoin(purchaseOrders, and(eq(purchaseOrders.id, poLines.poId), eq(purchaseOrders.restaurantId, restaurantId)))
+    .leftJoin(products, and(eq(products.id, poLines.productId), eq(products.restaurantId, restaurantId)))
+    .where(eq(poLines.poId, poId));
+}
+
+/** Description key: no niqqud / quote marks (״ ' "), collapsed spaces, lower case. */
+function normDescription(v: string | null | undefined): string {
+  return (v ?? '')
+    .replace(/[\u0591-\u05C7]/g, '')
+    .replace(/["'\u05F3\u05F4\u2018\u2019\u201C\u201D]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * The product (or, for an unlinked order line, its supplier SKU — the engine's
+ * other pairing key) of the ONE order line whose description or product name
+ * matches; null when none or more than one does (never a guess).
+ */
+function orderLineByDescription(lines: OrderLine[], description: string): { productId: string | null; supplierSku: string | null } | null {
+  const key = normDescription(description);
+  if (!key) return null;
+  const hits = lines.filter(
+    (l) => (l.productId || l.supplierSku) && (normDescription(l.rawDescription) === key || normDescription(l.productName) === key),
+  );
+  const distinct = new Set(hits.map((h) => h.productId ?? `sku:${h.supplierSku}`));
+  if (distinct.size !== 1) return null;
+  const hit = hits[0]!;
+  return hit.productId ? { productId: hit.productId, supplierSku: null } : { productId: null, supplierSku: hit.supplierSku };
 }
 
 type InvoiceTotals = { totalExclVat: string | null; vatAmount: string | null; totalInclVat: string | null };
