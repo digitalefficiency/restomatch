@@ -33,7 +33,7 @@
     "@restomatch/queue": "workspace:*",
     "@restomatch/translate": "workspace:*",
     "@restomatch/types": "workspace:*",
-    "cron-parser": "4.9.0"
+    "cron-parser": "5.10.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
