@@ -85,6 +85,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkTag: 'ሓደ ብሓደ ኣይተቖጽረን',
     },
     confirmed: {
+      queued: 'ኣብ ተሌፎን ተዓጽዩ · ርክብ ምስ ተመልሰ ባዕሉ ይለኣኽ',
       summary: '{lines} መስመራት · {exceptions} ፍልልያት',
       noExceptions: '{lines} መስመራት · ኩሉ ከም ትእዛዝ',
       amountPending: 'ናይ ክሬዲት ሕቶ መጠን ድሕሪ ምርመራ ይውሰን',

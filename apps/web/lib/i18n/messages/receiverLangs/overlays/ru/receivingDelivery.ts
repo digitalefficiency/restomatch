@@ -85,6 +85,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkTag: 'Не посчитано поштучно',
     },
     confirmed: {
+      queued: 'Закрыто в телефоне · отправится само, когда появится связь',
       summary: 'Строк: {lines} · расхождений: {exceptions}',
       noExceptions: 'Строк: {lines} · всё как в заказе',
       amountPending: 'Сумма запроса на кредит-ноту будет определена после проверки',

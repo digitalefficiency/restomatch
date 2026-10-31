@@ -85,6 +85,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkTag: 'ไม่ได้นับทีละชิ้น',
     },
     confirmed: {
+      queued: 'ปิดในโทรศัพท์แล้ว · จะส่งเองเมื่อมีสัญญาณ',
       summary: '{lines} รายการ · ส่วนต่าง {exceptions}',
       noExceptions: '{lines} รายการ · ทุกอย่างตรงตามใบสั่งซื้อ',
       amountPending: 'ยอดสำหรับขอใบลดหนี้จะกำหนดหลังการตรวจ',

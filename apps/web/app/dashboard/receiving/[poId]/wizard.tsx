@@ -48,6 +48,8 @@ import {
   type LeaveTarget,
 } from './_fieldHooks';
 import { clearCloseKey, closeKeyFor, uncountedLinesOf } from './_closeKey';
+import { SUBMIT_RECEIPT_KIND, receiptGroup, type SubmitReceiptPayload } from '@/lib/pwa/fieldOutbox';
+import { enqueue, idbOutboxStore, outboxKey } from '@/lib/pwa/outbox';
 import { ReceiptSummary } from './receipt-summary';
 
 // The slip is only needed once there is something to dispute: keep it out of the first load.
@@ -231,7 +233,9 @@ export function ReceivingWizard({
     },
     restaurantId && userId ? { restaurantId, userId } : null,
   );
-  useClaimReceiptGroup(grId);
+  // A queued close hands the receipt to the background drainer: release the group.
+  const [closeQueued, setCloseQueued] = useState(false);
+  useClaimReceiptGroup(closeQueued ? null : grId);
   // Once the receipt's version is known, sort the stored rows: current ones go, stale ones are held.
   useEffect(() => {
     if (grId && receiptVersion && !closedAtOpen) void outbox.retry();
@@ -655,6 +659,16 @@ export function ReceivingWizard({
       (l) => Number(l.qtyReceived ?? 0) > 0 || Number(l.qtyRejected ?? 0) > 0 || Boolean(l.rejectReason),
     );
     void (async () => {
+      // Closed on this phone with no signal, still waiting to send: show that, never the count again.
+      if (restaurantId && userId) {
+        const queued = await idbOutboxStore.get(outboxKey('submitReceipt', existingReceipt.id)).catch(() => undefined);
+        if (queued && queued.restaurantId === restaurantId) {
+          outbox.dispose();
+          setCloseQueued(true);
+          setStep('CONFIRMED');
+          return;
+        }
+      }
       // Only an invoice read in THIS open/close cycle of the receipt (not before a close / reopen).
       // This phone's draft first; else the server's record (a reload after the draft was lost,
       // or another phone): resume at review — never a re-shoot, never a second OCR job (W2-05).
@@ -742,6 +756,26 @@ export function ReceivingWizard({
     outbox.set({ ...row, stamp: stampRef.current });
   }
 
+  /** Put the close in the field outbox (offline) and show it as closed on the phone, waiting to send. */
+  async function queueClose(activeGrId: string) {
+    await enqueue(
+      idbOutboxStore,
+      'submitReceipt',
+      {
+        grId: activeGrId,
+        clientMutationId: closeKeyFor(activeGrId, receiptVersion),
+        invoiceIds: invoiceId ? [invoiceId] : undefined,
+      } satisfies SubmitReceiptPayload,
+      { restaurantId: restaurantId!, userId: userId!, capturedByName: receiverName ?? null, group: receiptGroup(activeGrId) },
+      { idempotencyKey: SUBMIT_RECEIPT_KIND.idempotencyKey({ grId: activeGrId, clientMutationId: '' }) },
+    );
+    // From here the shell's drainer owns this receipt: its rows, then the close, in order.
+    outbox.dispose();
+    setCloseQueued(true);
+    setConfirmedAt(new Date().toISOString());
+    setStep('CONFIRMED');
+  }
+
   /** Close the receipt: every line is already saved (or flushed now); then submitReceipt re-matches. */
   async function submit() {
     if (!grId || !result) return;
@@ -758,6 +792,10 @@ export function ReceivingWizard({
         if (authGate.blocked) {
           requestReauth();
           setFooterError(td('delivery.count.sessionExpired'));
+        } else if (restaurantId && userId && flushed.failed.length === 0) {
+          // No signal (W2-05): the close waits in the field outbox behind this receipt's counts and
+          // goes by itself — the same close key, so it is ONE close however often it is retried.
+          await queueClose(grId);
         } else setFooterError(td('delivery.count.offline'));
         return;
       }
@@ -1045,7 +1083,12 @@ export function ReceivingWizard({
         >
           {/* After the close the engine may add findings the count didn't show (VAT,
               total, duplicate): the slip decides itself whether there is anything to say. */}
-          {result && dockSlipOn && grId ? (
+          {closeQueued ? (
+            <p role="status" data-testid="close-queued" className="mx-auto mt-3 max-w-md rounded-2xl border border-line bg-surface-2 px-4 py-3 text-base text-ink">
+              {td('delivery.confirmed.queued')}
+            </p>
+          ) : null}
+          {result && dockSlipOn && grId && !closeQueued ? (
             <DockSlip
               grId={grId}
               invoiceId={invoiceId}

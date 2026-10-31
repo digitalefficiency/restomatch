@@ -340,3 +340,50 @@ test('resume on ANOTHER phone: the same receipt lands on review — no re-shoot,
   }
   await other.close();
 });
+
+test('airplane mode: the receipt CLOSES with no signal, waits on the phone, and syncs from the board as ONE close after its counts', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(240_000);
+  const po = await freshPo('offline-close', 3);
+  const path = `/dashboard/receiving/${po.poId}`;
+  await page.goto('/dashboard/receiving');
+  await page.waitForLoadState('networkidle');
+  await expect.poll(() => snapshotHas(page, path), { timeout: 30_000 }).toBe(true);
+  await page.goto(path);
+  await page.waitForLoadState('networkidle');
+  await page.getByTestId('scan-no-invoice').tap();
+  await expect(page.getByTestId('delivery-check')).toBeVisible();
+
+  await context.setOffline(true);
+  for (const l of po.lines) {
+    await page.getByTestId('count-line').filter({ hasText: l.name }).getByTestId('count-arrived').tap();
+  }
+  await page.getByTestId('close-receipt').tap();
+  await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('close-queued')).toBeVisible();
+  await expect.poll(async () => (await outboxKinds(page)).sort()).toEqual(['grLine', 'grLine', 'grLine', 'submitReceipt']);
+
+  // Back online, on the board: the counts go, then the close — once.
+  await context.setOffline(false);
+  await page.goto('/dashboard/receiving');
+  await page.waitForLoadState('networkidle');
+  const sql = e2eSql();
+  try {
+    await expect
+      .poll(
+        async () => (await sql<{ status: string }[]>`select status from goods_receipts where po_id = ${po.poId}`)[0]?.status,
+        { timeout: 60_000 },
+      )
+      .toBe('completed');
+    await expect.poll(async () => (await outboxKinds(page)).length, { timeout: 30_000 }).toBe(0);
+    const closes = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log a join goods_receipts g on g.id = a.entity_id
+      where g.po_id = ${po.poId} and a.action = 'goods_receipt.closed'`;
+    expect(closes[0]!.n).toBe(1);
+    expect(await countedRows(po.poId)).toBe(3);
+  } finally {
+    await sql.end();
+  }
+});

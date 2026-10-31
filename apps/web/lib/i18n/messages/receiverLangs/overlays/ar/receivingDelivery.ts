@@ -85,6 +85,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkTag: 'لم يُعدّ صنفًا صنفًا',
     },
     confirmed: {
+      queued: 'أُغلق في الهاتف · يُرسل تلقائيًا عند عودة الاتصال',
       summary: '{lines} أسطر · {exceptions} فروق',
       noExceptions: '{lines} أسطر · كل شيء كما في الطلبية',
       amountPending: 'مبلغ طلب الإشعار الدائن يُحدَّد بعد الفحص',

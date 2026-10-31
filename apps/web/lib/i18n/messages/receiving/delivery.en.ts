@@ -83,6 +83,7 @@ export const en: Shape<typeof he> = {
       bulkTag: 'Not counted item by item',
     },
     confirmed: {
+      queued: 'Closed on the phone · it sends by itself when the connection is back',
       summary: '{lines} lines · {exceptions} gaps',
       noExceptions: '{lines} lines · everything as ordered',
       amountPending: 'The amount to claim is set after the check',

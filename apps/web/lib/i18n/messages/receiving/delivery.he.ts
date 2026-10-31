@@ -90,6 +90,7 @@ export const he = {
       bulkTag: 'לא נספר פריט-פריט',
     },
     confirmed: {
+      queued: 'נסגר בטלפון · יישלח לבד כשיחזור החיבור',
       summary: '{lines} שורות · {exceptions} פערים',
       noExceptions: '{lines} שורות · הכל כמו בהזמנה',
       amountPending: 'הסכום לדרישת זיכוי ייקבע אחרי הבדיקה',
