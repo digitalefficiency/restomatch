@@ -43,6 +43,33 @@ import {
 } from '@restomatch/db';
 
 /** A fully-populated tenant graph for isolation/attack tests. */
+
+/**
+ * `hour`:00 on TODAY'S ISRAEL calendar day (Asia/Jerusalem — the zone the app
+ * computes "today" / "this month" in). `new Date().setHours(h)` used the
+ * process's zone (UTC in CI): between 22:00 and 24:00 UTC that is yesterday in
+ * Israel, and on the last day of a month last month — seeded rows fell out of
+ * "today" / "this month" and ~47 api tests went red every night.
+ */
+/** 'YYYY-MM' of the ISRAEL calendar month of `now` (what "this month" means to the app). */
+export function israelMonth(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' }).format(now).slice(0, 7);
+}
+
+export function israelToday(hour: number, now: Date = new Date()): Date {
+  const tz = 'Asia/Jerusalem';
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+  const guess = Date.UTC(y, m - 1, d, hour);
+  // The zone's offset at that instant (+2 / +3), from its own wall clock.
+  const wall = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(guess));
+  const part = (t: string) => Number(wall.find((x) => x.type === t)!.value);
+  const asUtc = Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'));
+  return new Date(guess - (asUtc - guess));
+}
+
 export interface Tenant {
   restaurantId: string;
   ownerUserId: string;
@@ -209,8 +236,7 @@ export async function seedTenant(db: Database, tag: string): Promise<Tenant> {
     .returning();
   if (!productAlias) throw new Error('seed: productAlias');
 
-  const today = new Date();
-  today.setHours(11, 0, 0, 0);
+  const today = israelToday(11);
   const [po] = await db
     .insert(purchaseOrders)
     .values({

@@ -24,7 +24,7 @@ import { AUTO_WRITE_OFF_NOTE, listClaims, MAX_CLAIMS, syncClaims } from '../reco
 import { computeMonthlyReport, ensureMonthlyReport, monthlyReportEmail, monthlyReportWhatsApp, WHATSAPP_MAX } from '../reports/monthly';
 import { renderMonthlyReportPdf } from '../reports/pdf';
 import { sendMonthlyReports } from '../reports/send';
-import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { israelMonth, resetDb, seedTenant, type Tenant } from './fixtures';
 
 const db = createDb(testDbUrl());
 let T: Tenant;
@@ -239,10 +239,7 @@ describe('overdue reminders (outbox)', () => {
 });
 
 describe('monthly report', () => {
-  const month = () => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  };
+  const month = () => israelMonth();
 
   it('agrees with the hero and renders email (he/en), WhatsApp and a PDF', async () => {
     const data = await computeMonthlyReport(db, T.restaurantId, month());
@@ -421,7 +418,7 @@ describe('refuter regressions', () => {
 
   it('preview and PDF show the frozen snapshot once the month was generated', async () => {
     const d = new Date();
-    const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const month = israelMonth(d);
     const frozen = await ensureMonthlyReport(db, T.restaurantId, month);
     await db
       .update(monthlyReports)
@@ -434,7 +431,7 @@ describe('refuter regressions', () => {
 
   it('WhatsApp truncation keeps the report link', async () => {
     const d = new Date();
-    const data = await computeMonthlyReport(db, T.restaurantId, `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    const data = await computeMonthlyReport(db, T.restaurantId, israelMonth(d));
     data.topSuppliers = [{ name: 'א'.repeat(900), nameEn: null, leakAgorot: 100, leakPct: 0.02 }];
     const url = 'https://app.test/dashboard/reports/monthly?month=2026-09';
     const text = monthlyReportWhatsApp(data, { reportUrl: url });
@@ -478,7 +475,7 @@ describe('money cross-QA (S3) regressions', () => {
       .returning();
     try {
       const d = new Date();
-      const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const month = israelMonth(d);
       const data = await computeMonthlyReport(db, T.restaurantId, month);
       const hero = await computeLeakHero(db, T.restaurantId);
       expect(data.claimedAgorot).toBe(Math.round(hero.recoveredIls * 100));

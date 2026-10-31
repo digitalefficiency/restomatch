@@ -12,6 +12,7 @@ import {
   suppliers,
   users,
 } from '@restomatch/db';
+import { israelToday } from './fixtures';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 
@@ -42,8 +43,7 @@ async function seed() {
   await db.insert(memberships).values({ userId: receiver!.id, restaurantId: restaurant!.id, role: 'receiver' });
   const [supplier] = await db.insert(suppliers).values({ restaurantId: restaurant!.id, name: 'ירקות השרון' }).returning();
   const rid = restaurant!.id;
-  const today = new Date();
-  today.setHours(10, 0, 0, 0);
+  const today = israelToday(10);
   async function po(at: Date | null, status: 'sent' | 'confirmed' | 'partial' | 'closed' | 'cancelled' = 'sent', createdAt?: Date) {
     const [row] = await db
       .insert(purchaseOrders)
