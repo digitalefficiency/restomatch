@@ -171,7 +171,12 @@ export default async function RecoveryPage({
             <div className="grid gap-3 md:grid-cols-2" data-testid="recovery-followups">
               {queues.unsent.count > 0 ? (
                 <Card padding="md" className="flex flex-wrap items-center justify-between gap-3 border-warn/40">
-                  <p className="flex min-w-0 items-start gap-2 text-sm text-ink">
+                  <p
+                    className="flex min-w-0 items-start gap-2 text-sm text-ink"
+                    data-testid="recovery-followup-unsent"
+                    data-agorot={queues.unsent.agorot}
+                    data-count={queues.unsent.count}
+                  >
                     <Send className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden="true" />
                     <span>
                       <strong>{t('followUp.unsent', { count: formatNumber(queues.unsent.count, locale), amount: exact(queues.unsent.agorot) })}</strong>
@@ -188,7 +193,12 @@ export default async function RecoveryPage({
               {queues.waiting.count > 0 ? (
                 <Card padding="md" className="flex flex-wrap items-center justify-between gap-3 border-warn/40">
                   <div className="min-w-0 text-sm text-ink">
-                    <p className="flex items-start gap-2">
+                    <p
+                      className="flex items-start gap-2"
+                      data-testid="recovery-followup-waiting"
+                      data-agorot={queues.waiting.agorot}
+                      data-count={queues.waiting.count}
+                    >
                       <Mail className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden="true" />
                       <strong>
                         {t('followUp.waiting', { count: formatNumber(queues.waiting.count, locale), amount: exact(queues.waiting.agorot) })}

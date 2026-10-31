@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { Activity, ArrowLeft, Hourglass } from 'lucide-react';
 import type { UserRole } from '@restomatch/db';
 import { canSeeRoute } from '@/lib/roles';
+import { followUps } from '../recovery/logic';
+import { claimNeedRows } from './claims';
 import { formatIls } from '@/lib/money';
 import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
 import type { Locale } from '@/lib/i18n/config';
@@ -41,7 +43,7 @@ import {
   loadHeroPair,
   loadPayRun,
   loadRecoveryFlags,
-  loadRecoverySummary,
+  loadRecoveryClaims,
   loadSuppliers,
   loadToday,
   loadTrend,
@@ -218,8 +220,8 @@ async function Needs(ctx: Ctx) {
     ops: role === 'manager',
   };
   const [queue, recovery, vat, payRun, today, count, suppliers] = await Promise.all([
-    settle(loadDecide(restaurantId, role)),
-    wants.claims ? settle(loadRecoverySummary()) : null,
+    settle(loadDecide()),
+    wants.claims ? settle(loadRecoveryClaims()) : null,
     wants.vat ? settle(loadVatAtRisk(restaurantId, role)) : null,
     wants.payRun ? settle(loadPayRun()) : null,
     wants.ops ? settle(loadToday()) : null,
@@ -238,8 +240,21 @@ async function Needs(ctx: Ctx) {
       key: 'decide',
       tone: q.blocking > 0 ? 'danger' : 'warn',
       label: t('needs.decide.label'),
-      value: ils(q.atRiskIls),
-      sub: q.blocking > 0 ? t('needs.decide.subBlocking', { count: n(q.count), blocking: n(q.blocking) }) : t('needs.decide.sub', { count: n(q.count) }),
+      // The approvals "ניתן לדרוש מהספקים" tile, same server rule (before VAT).
+      value: ils(q.amountIls),
+      sub: [
+        q.blocking > 0 ? t('needs.decide.subBlocking', { count: n(q.count), blocking: n(q.blocking) }) : t('needs.decide.sub', { count: n(q.count) }),
+        q.toReview > 0 ? t('needs.decide.review', { count: n(q.toReview) }) : null,
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      notes:
+        [
+          q.duplicateIls > 0 ? t('needs.decide.duplicates', { amount: ils(q.duplicateIls) }) : null,
+          q.vatIls > 0 ? t('needs.decide.vat', { amount: ils(q.vatIls) }) : null,
+        ]
+          .filter(Boolean)
+          .join(' · ') || undefined,
       verb: t('needs.decide.verb'),
       href: '/dashboard/approvals',
     });
@@ -259,17 +274,10 @@ async function Needs(ctx: Ctx) {
       });
     }
   }
-  if (recovery?.ok && recovery.value && recovery.value.summary.overdueCount > 0) {
-    const s = recovery.value.summary;
-    rows.push({
-      key: 'claims',
-      tone: 'warn',
-      label: t('needs.claimsOverdue.label'),
-      value: ils(s.overdueAgorot / 100),
-      sub: t('needs.claimsOverdue.sub', { count: n(s.overdueCount) }),
-      verb: t('needs.claimsOverdue.verb'),
-      href: '/dashboard/recovery',
-    });
+  if (recovery?.ok && recovery.value) {
+    // The recovery page's own follow-up queues, to the agora (same rule, same words).
+    const exact = (agorot: number) => formatIls(agorot / 100, { locale, maximumFractionDigits: 2 });
+    rows.push(...claimNeedRows(followUps(recovery.value, new Date().toISOString()), { t, money: exact, n }));
   }
   if (vat?.ok && vat.value && vat.value.rows.length > 0) {
     const v = vat.value;

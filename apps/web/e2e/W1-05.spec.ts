@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { he as ovHe } from '../lib/i18n/messages/overview/he';
 import { en as ovEn } from '../lib/i18n/messages/overview/en';
+import { he as apHe } from '../lib/i18n/messages/approvals/he';
 import { DEMO_RESTAURANT_NAME, OWNER_STATE } from './env';
 import { e2eSql, loginViaMagicLink } from './helpers';
 
@@ -52,7 +53,41 @@ test.afterAll(async () => {
   } finally {
     await sql.end();
   }
+  await removeParityRows();
 });
+
+/** Open queue rows the demo seed lacks: a no-PO arrival (owner) and a duplicate (bookkeeper). */
+const PARITY_TAG = 'e2e-w1-05-parity';
+async function addParityRows() {
+  const sql = e2eSql();
+  try {
+    const [sup] = await sql<{ id: string }[]>`select id from suppliers where restaurant_id = ${restaurantId} order by name limit 1`;
+    for (const [n, type, role, total] of [
+      ['1', 'UNORDERED_ARRIVAL', 'owner', '4130.00'],
+      ['2', 'DUPLICATE_INVOICE', 'bookkeeper', '590.00'],
+    ] as const) {
+      const [inv] = await sql<{ id: string }[]>`insert into invoices (restaurant_id, supplier_id, source, invoice_number, total_excl_vat, total_incl_vat, status)
+        values (${restaurantId}, ${sup!.id}, 'manual', ${`${PARITY_TAG}-${n}`}, ${total}, ${total}, 'matched') returning id`;
+      const [mr] = await sql<{ id: string }[]>`insert into match_runs (restaurant_id, invoice_id, overall_status)
+        values (${restaurantId}, ${inv!.id}, 'major') returning id`;
+      await sql`insert into discrepancies (restaurant_id, match_run_id, type, severity, delta_amount, requires_role, resolution_status)
+        values (${restaurantId}, ${mr!.id}, ${type}, 'block', ${total}, ${role}, 'open')`;
+    }
+  } finally {
+    await sql.end();
+  }
+}
+async function removeParityRows() {
+  const sql = e2eSql();
+  try {
+    const ids = sql`select id from invoices where restaurant_id = ${restaurantId} and invoice_number like ${PARITY_TAG + '%'}`;
+    await sql`delete from discrepancies where match_run_id in (select id from match_runs where invoice_id in (${ids}))`;
+    await sql`delete from match_runs where invoice_id in (${ids})`;
+    await sql`delete from invoices where restaurant_id = ${restaurantId} and invoice_number like ${PARITY_TAG + '%'}`;
+  } finally {
+    await sql.end();
+  }
+}
 
 async function consent(page: Page, base: string) {
   await page.context().addCookies([{ name: 'rm_cookie_consent', value: 'necessary', url: base }]);
@@ -218,6 +253,7 @@ test.describe('owner home', () => {
   });
 
   test('undecided money is a T2 Needs-you row (not a gold "נתפס" tile), and 3 rows land on the same ₪', async ({ page }) => {
+    await addParityRows();
     await page.setViewportSize(DESKTOP.viewport);
     await page.goto('/dashboard');
     const hero = page.getByTestId('leak-hero');
@@ -237,25 +273,36 @@ test.describe('owner home', () => {
     }
 
     const checked: string[] = [];
-    // decide → approvals "סכום בסיכון"
-    if (await page.getByTestId('needs-decide').count()) {
+    // decide → approvals "ניתן לדרוש מהספקים" (the same server rule, before VAT). The fixture
+    // adds an open no-PO arrival and an open duplicate, which must NOT move that ₪.
+    {
+      await expect(page.getByTestId('needs-decide')).toBeVisible();
       const v = amount(await page.getByTestId('needs-decide-value').innerText());
+      await expect(page.getByTestId('needs-decide-sub')).toContainText(ovHe.needs.decide.review.split('{count}')[1]!.trim());
+      await expect(page.getByTestId('needs-decide-notes')).toBeVisible();
       await page.getByTestId('needs-decide').click();
       await page.waitForURL(/\/dashboard\/approvals/);
-      await expect(page.locator('main')).toContainText('סכום בסיכון');
-      const tile = page.locator('main').getByText('סכום בסיכון', { exact: true }).locator('xpath=..');
-      expect(amount(await tile.innerText()), 'approvals ₪ at risk vs the Needs-you row').toBe(v);
+      await expect(page.locator('main')).toContainText(apHe.summary.atRisk);
+      const tile = page.getByTestId('summary-claimable');
+      await expect(tile).toBeVisible();
+      // Home renders whole ₪, the tile agorot: compare at whole-shekel precision.
+      expect(Math.abs(amount(await tile.innerText()) - v), 'approvals claimable ₪ vs the Needs-you row').toBeLessThanOrEqual(0.5);
       checked.push('decide');
       await page.goto('/dashboard');
     }
-    // claims → recovery overdue banner
-    if (await page.getByTestId('needs-claims').count()) {
-      const v = amount(await page.getByTestId('needs-claims-value').innerText());
-      await page.getByTestId('needs-claims').click();
+    // claims → the recovery page's follow-up queue with the same figure (to the agora).
+    for (const [key, testId] of [
+      ['claimsWaiting', 'recovery-followup-waiting'],
+      ['claimsUnsent', 'recovery-followup-unsent'],
+    ] as const) {
+      if (!(await page.getByTestId(`needs-${key}`).count())) continue;
+      const v = amount(await page.getByTestId(`needs-${key}-value`).innerText());
+      await page.getByTestId(`needs-${key}`).click();
       await page.waitForURL(/\/dashboard\/recovery/);
-      const text = (await page.locator('main').innerText()).replace(BIDI, ' ');
-      expect(text.replace(/[\s,]/g, ''), 'recovery page repeats the overdue ₪').toContain(String(v));
-      checked.push('claims');
+      const q = page.getByTestId(testId);
+      await expect(q).toBeVisible();
+      expect(Number(await q.getAttribute('data-agorot')) / 100, `recovery ${testId} ₪ vs the Needs-you row`).toBe(v);
+      checked.push(key);
       await page.goto('/dashboard');
     }
     // VAT → the invoice (or the card) with the same ₪
@@ -278,6 +325,7 @@ test.describe('owner home', () => {
       checked.push('payRun');
     }
     expect(checked.length, `rows checked against their landing: ${checked.join(', ')}`).toBeGreaterThanOrEqual(3);
+    await removeParityRows();
   });
 
   test('a card that fails shows "לא נטען · נסו שוב" — never ₪0 — and the hero still renders', async ({ page }) => {
