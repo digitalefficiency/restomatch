@@ -499,7 +499,7 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
     expect(inQueue, 'approvals "in queue" vs dashboard "waiting for your decision"').toBe(n.pendingApprovals);
     expect(n.atRisk, 'approvals "amount at risk" vs dashboard "waiting for your decision" ₪').toBe(n.decide);
     // Owner sees Approve / Reject, never "escalate to owner" (pack 5:30).
-    // W1-02: the approve label carries the claim ₪ ("דרוש {amount} מהספק"), so match around it.
+    // W1-07: the approve label carries the claim ₪ ("דרוש {amount} מהספק"), so match around it.
     const approveName = new RegExp(
       '^' + m.approvals.decision.approve.split('{amount}').map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.+') + '$',
     );
