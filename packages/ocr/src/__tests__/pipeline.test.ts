@@ -51,14 +51,16 @@ describe('runOcrPipeline — catalog integration', () => {
   const tomatoMatch: ProductCandidate = {
     productId: 'tomato-uuid',
     canonicalName: 'עגבניה שרי',
-    confidence: 0.97,
+    // G-08: a person's alias (1.000) — an exact key the default decider links.
+    confidence: 1,
     matchedBy: 'alias',
   };
   const cucumberMatch: ProductCandidate = {
     productId: 'cucumber-uuid',
     canonicalName: 'מלפפון חממה',
-    confidence: 0.95,
-    matchedBy: 'embedding',
+    // G-08: an exact supplier SKU (catalog-item branch, 0.999).
+    confidence: 0.999,
+    matchedBy: 'sku',
   };
 
   it('attaches product candidates from catalog matcher', async () => {
@@ -93,6 +95,54 @@ describe('runOcrPipeline — catalog integration', () => {
 
     expect(result.reconciled.lines[0]?.productId).toBeNull();
     expect(result.reconciled.lines[0]?.productCandidates).toHaveLength(1);
+  });
+
+  describe('G-08 link policy', () => {
+    const run = (cands: ProductCandidate[], decideLink?: Parameters<typeof runOcrPipeline>[1]['decideLink']) =>
+      runOcrPipeline('test-image', {
+        ...makeProviders(AGREEMENT_PERFECT),
+        catalogMatcher: async () => cands,
+        ...(decideLink ? { decideLink } : {}),
+      });
+    const c = (confidence: number, matchedBy: ProductCandidate['matchedBy']): ProductCandidate => ({
+      productId: 'p1',
+      canonicalName: 'מוצר',
+      confidence,
+      matchedBy,
+    });
+
+    it('a 0.97 fuzzy candidate with no decider → productId null (review), candidate kept', async () => {
+      const r = await run([c(0.97, 'fuzzy')]);
+      expect(r.reconciled.lines[0]?.productId).toBeNull();
+      expect(r.reconciled.lines[0]?.productCandidates).toHaveLength(1);
+    });
+
+    it('a ≥0.95 embedding or a 0.97 (legacy/guessed) alias is not an exact key → null', async () => {
+      expect((await run([c(0.99, 'embedding')])).reconciled.lines[0]?.productId).toBeNull();
+      expect((await run([c(0.97, 'alias')])).reconciled.lines[0]?.productId).toBeNull();
+      expect((await run([c(0.9, 'sku')])).reconciled.lines[0]?.productId).toBeNull();
+    });
+
+    it('a guess provenance is never linked, even at 1.0', async () => {
+      const r = await run([{ ...c(1, 'sku'), provenance: 'guess' } as ProductCandidate]);
+      expect(r.reconciled.lines[0]?.productId).toBeNull();
+    });
+
+    it('sku / barcode / a 1.000 alias → linked', async () => {
+      expect((await run([c(0.999, 'sku')])).reconciled.lines[0]?.productId).toBe('p1');
+      expect((await run([c(1, 'barcode')])).reconciled.lines[0]?.productId).toBe('p1');
+      expect((await run([c(1, 'alias')])).reconciled.lines[0]?.productId).toBe('p1');
+    });
+
+    it('with an injected decider, its decision is used (called with unitPack unknown)', async () => {
+      const decider = vi.fn(() => ({ decision: 'auto' as const, productId: 'decided' }));
+      const r = await run([c(0.61, 'fuzzy')], decider);
+      expect(r.reconciled.lines[0]?.productId).toBe('decided');
+      expect(decider).toHaveBeenCalledWith([c(0.61, 'fuzzy')], { unitPack: 'unknown' });
+
+      const reviewer = vi.fn(() => ({ decision: 'review' as const, productId: null }));
+      expect((await run([c(1, 'sku')], reviewer)).reconciled.lines[0]?.productId).toBeNull();
+    });
   });
 
   it('no catalog matcher → lines have null productId and empty candidates', async () => {

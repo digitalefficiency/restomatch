@@ -15,6 +15,13 @@ import {
   type MatchCandidate,
   type MatcherThresholds,
 } from './types';
+import { aliasProvenance, MACHINE_MAX_CONFIDENCE } from './linkPolicy';
+
+/** A stored alias's confidence (numeric(4,3) string) as a number; a missing one reads as the column default. */
+function storedConfidence(c: string | null | undefined): number {
+  const n = c == null ? 1 : Number(c);
+  return Number.isFinite(n) ? n : 1;
+}
 
 /**
  * pgvector literals are built by string interpolation; reject anything that is
@@ -146,6 +153,7 @@ export async function matchBySku(
       productId: products.id,
       canonicalName: products.canonicalName,
       aliasId: productAliases.id,
+      aliasConfidence: productAliases.confidence,
     })
     .from(productAliases)
     .innerJoin(
@@ -162,9 +170,12 @@ export async function matchBySku(
     return {
       productId: aliasRow.productId,
       canonicalName: aliasRow.canonicalName,
-      confidence: 1.0,
+      // G-08: the STORED confidence + its provenance — a guessed alias that
+      // learned a SKU is still a guess, never certainty.
+      confidence: storedConfidence(aliasRow.aliasConfidence),
       matchedBy: 'sku',
       aliasId: aliasRow.aliasId,
+      provenance: aliasProvenance({ confidence: aliasRow.aliasConfidence }),
     };
   }
 
@@ -192,7 +203,8 @@ export async function matchBySku(
   return {
     productId: catalogRow.productId,
     canonicalName: catalogRow.canonicalName,
-    confidence: 1.0,
+    // An exact supplier key, machine-proven: never the 1.000 reserved for a person.
+    confidence: MACHINE_MAX_CONFIDENCE,
     matchedBy: 'sku',
   };
 }
@@ -201,7 +213,8 @@ export async function matchBySku(
  * Strategy 1: alias exact lookup
  *
  * Restaurant-scoped (through products), then (supplier_id, supplier_name_raw)
- * — case insensitive. Confidence = 1.0 for exact matches.
+ * — case insensitive. Confidence = the alias's STORED confidence (G-08), with
+ * its provenance; only a person's link reads 1.000.
  * ────────────────────────────────────────────────────────────────────────── */
 
 export async function matchByAlias(
@@ -225,6 +238,7 @@ export async function matchByAlias(
       canonicalName: products.canonicalName,
       aliasId: productAliases.id,
       supplierNameRaw: productAliases.supplierNameRaw,
+      aliasConfidence: productAliases.confidence,
     })
     .from(productAliases)
     .innerJoin(
@@ -239,9 +253,11 @@ export async function matchByAlias(
   return {
     productId: row.productId,
     canonicalName: row.canonicalName,
-    confidence: 1.0,
+    // G-08: the stored confidence + provenance, not a hard-coded 1.0.
+    confidence: storedConfidence(row.aliasConfidence),
     matchedBy: 'alias',
     aliasId: row.aliasId,
+    provenance: aliasProvenance({ confidence: row.aliasConfidence }),
   };
 }
 

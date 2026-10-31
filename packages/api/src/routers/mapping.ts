@@ -123,7 +123,7 @@ export interface UnmappedSku {
   supplierName: string;
   supplierSku: string;
   sampleDescription: string;
-  /** How many po_lines + invoice_lines carry this SKU unmapped. */
+  /** How many po_lines + invoice_lines + unlinked price-list rows (G-08) carry this SKU unmapped. */
   occurrences: number;
 }
 
@@ -185,8 +185,33 @@ export const mappingRouter = router({
           ),
         );
 
+      // G-08: price-list rows the link policy sent to review (saved unlinked,
+      // never guessed) join the SKU-keyed queue; mapping.confirm already links
+      // them by (supplier, SKU). Name-keyed review rows (no SKU) are W3-10's
+      // "לקשר" queue on decideLink.
+      const catalogRows = await ctx.db
+        .select({
+          supplierId: supplierCatalogItems.supplierId,
+          supplierName: suppliers.name,
+          supplierSku: supplierCatalogItems.supplierSku,
+          rawDescription: supplierCatalogItems.supplierNameRaw,
+        })
+        .from(supplierCatalogItems)
+        .innerJoin(
+          suppliers,
+          and(eq(suppliers.id, supplierCatalogItems.supplierId), eq(suppliers.restaurantId, rid)),
+        )
+        .where(
+          and(
+            eq(supplierCatalogItems.restaurantId, rid),
+            isNull(supplierCatalogItems.productId),
+            sql`${supplierCatalogItems.supplierSku} is not null`,
+            supplierFilter ? eq(supplierCatalogItems.supplierId, supplierFilter) : undefined,
+          ),
+        );
+
       const byKey = new Map<string, UnmappedSku>();
-      for (const r of [...poRows, ...invRows]) {
+      for (const r of [...poRows, ...invRows, ...catalogRows]) {
         if (!r.supplierId || !r.supplierSku) continue;
         const key = `${r.supplierId}::${r.supplierSku}`;
         const existing = byKey.get(key);
@@ -388,7 +413,7 @@ export const mappingRouter = router({
         rawName: input.rawName,
         supplierId: input.supplierId,
         supplierSku: input.supplierSku,
-        confidence: 1,
+        provenance: 'human', // G-08: a person linked it → 1.000
       });
 
       // Backfill already-imported lines, scoped to this restaurant + supplier.
