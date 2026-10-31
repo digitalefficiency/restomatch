@@ -220,7 +220,7 @@ async function posSince(supplierId: string, since: Date): Promise<Array<{ id: st
   }
 }
 
-type StoredCarts = { carts: Record<string, { lines: unknown[]; draftId: string | null }> };
+type StoredCarts = { carts: Record<string, { lines: unknown[]; draftId: string | null; server?: unknown }> };
 async function deviceCarts(page: Page): Promise<StoredCarts['carts']> {
   const raw = await page.evaluate(() => {
     const k = Object.keys(localStorage).find((x) => x.startsWith('rm:orders:cart:v1:'));
@@ -443,7 +443,14 @@ test.describe('phone 390 · manager · review fixes', () => {
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
     await addItem(page, items.nth(0));
     await page.getByTestId('cart-primary').tap(); // review → the server draft
-    await expect.poll(async () => (await deviceCarts(page))[supplierB.id]?.draftId ?? null, { timeout: 30_000 }).not.toBeNull();
+    // W2-06: the wizard may resume a server draft on open, so the id can exist before the
+    // review save. Wait for the save's read-back (`server`), not just the id.
+    await expect
+      .poll(async () => {
+        const c = (await deviceCarts(page))[supplierB.id];
+        return c?.draftId && c.server ? c.draftId : null;
+      }, { timeout: 30_000 })
+      .not.toBeNull();
     const draftId = (await deviceCarts(page))[supplierB.id]!.draftId!;
 
     // Someone sends it from the order page on another device.
