@@ -11,7 +11,6 @@ import {
   recordCreditNote,
   returnedInMonth,
   summarize,
-  syncClaims,
   transitionClaim,
 } from '../recovery/service';
 import { financeProcedure, memberProcedure } from '../trpc';
@@ -45,9 +44,12 @@ export const recoveryRouter = router({
     return { recovery, monthlyReport, monthlyDigestPreview, leakProof };
   }),
 
-  /** Totals, ageing, per-supplier recovery rate + this month's returned ₪. Materialises new claims first. */
+  /**
+   * Totals, ageing, per-supplier recovery rate + this month's returned ₪.
+   * A read writes nothing: claims are created at decision time
+   * (`materializeClaims`, W2-10a), never by whoever opens the screen.
+   */
   summary: recoveryProcedure.query(async ({ ctx }) => {
-    await syncClaims(ctx.db, ctx.session.restaurantId, ctx.session.userId);
     const now = new Date();
     const [claims, returned] = await Promise.all([
       listClaims(ctx.db, ctx.session.restaurantId, { now, limit: null }),
@@ -67,8 +69,8 @@ export const recoveryRouter = router({
         })
         .optional(),
     )
-    .query(async ({ ctx, input }) => {
-      await syncClaims(ctx.db, ctx.session.restaurantId, ctx.session.userId);
+    .query(({ ctx, input }) => {
+      // Read-only (W2-10a): no claim is materialised here.
       return listClaims(ctx.db, ctx.session.restaurantId, {
         status: input?.status,
         supplierId: input?.supplierId,
