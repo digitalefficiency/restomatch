@@ -75,6 +75,10 @@ async function open(page: Page, locale: Locale, path: string) {
     waitUntil: 'load',
   });
   await page.waitForLoadState('networkidle').catch(() => {});
+  // `next dev`'s badge floats over the bottom-start corner — in RTL that is the W1-03
+  // bottom bar's "עוד" button. It is not part of the product (axe and the touch-target
+  // scan already skip it); hide it so a tap reaches the control under it.
+  await page.addStyleTag({ content: 'nextjs-portal{display:none!important}' });
 }
 
 /**

@@ -4,6 +4,7 @@ import { SectionHeader } from '@/lib/components';
 import { getT } from '@/lib/i18n/server';
 import { ingest } from '@/lib/i18n/messages/ingest';
 import { enabledFeatures } from '@/lib/ingest/features';
+import { FieldMode } from '../field-mode';
 import { CaptureClient } from './capture-client';
 
 export const dynamic = 'force-dynamic';
@@ -29,9 +30,9 @@ export default async function OrderCapturePage({
   const initialText = [title, text].filter((s): s is string => typeof s === 'string' && s.trim() !== '').join('\n').slice(0, 8000);
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <FieldMode className="mx-auto max-w-3xl">
       <SectionHeader level={1} title={t('orderCapture.title')} subtitle={t('orderCapture.subtitle')} />
       <CaptureClient initialText={initialText} />
-    </div>
+    </FieldMode>
   );
 }

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { redirect } from 'next/navigation';
 import { CheckCircle2, SearchCheck } from 'lucide-react';
 import { leakCheck as lc } from '@restomatch/api';
 import { getT } from '@/lib/i18n/server';
@@ -23,10 +23,12 @@ export async function generateMetadata(): Promise<Metadata> {
 
 /**
  * Free leak check — public lead magnet (S15 wave 1). Exists only with
- * LEAK_CHECK_PUBLIC=1 and the `leakCheck` kill-switch off; 404 otherwise.
+ * LEAK_CHECK_PUBLIC=1 and the `leakCheck` kill-switch off. Otherwise the
+ * visitor still wants a leak check: send them to the lead form, where we run it
+ * with them by hand (W1-12 · mkt-12), instead of a 404.
  */
 export default async function LeakCheckPage() {
-  if (!lc.leakCheckPublicEnabled()) notFound();
+  if (!lc.leakCheckPublicEnabled()) redirect('/#lead');
   const t = await getT(leakCheck);
   const available = lc.leakCheckOcrMode() !== null;
   const checks = ['duplicate', 'vat', 'arithmetic', 'creep', 'priceList'] as const;

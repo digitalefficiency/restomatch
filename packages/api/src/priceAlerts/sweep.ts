@@ -15,8 +15,8 @@ import {
   suppliers,
   type Database,
 } from '@restomatch/db';
-import { unitConversionFactor } from '@restomatch/matching';
 import { featureEnabled } from '../lib/features';
+import { catalogUnitPrice } from '../lib/unitPrice';
 import { enqueueNotification } from '../notifications/outbox';
 import { recipientsForRestaurant } from '../notifications/recipients';
 import { localDateKey } from '../contracts/core';
@@ -32,27 +32,6 @@ import { priceAlertEmail } from './email';
 
 const DAY_MS = 86_400_000;
 
-/**
- * A catalog list price expressed per the product's default unit (the unit
- * price_history is normalized to), or null when it can't be compared safely:
- * a pack price (pack_size > 1), or a unit that doesn't convert.
- */
-function catalogUnitPrice(c: {
-  listPrice: string | null;
-  unit: string | null;
-  packSize: string | null;
-  productUnit: string | null;
-}): number | null {
-  const price = Number(c.listPrice);
-  if (!Number.isFinite(price) || price <= 0) return null;
-  if (c.packSize != null && Number(c.packSize) !== 1) return null;
-  // No unit on either side = quoted in the product's own unit.
-  if (!c.unit || !c.productUnit) return price;
-  const n = (u: string) => u.trim().toLowerCase().replace(/["'.\s\u05F3\u05F4]/g, '');
-  if (n(c.unit) === n(c.productUnit)) return price;
-  const f = unitConversionFactor(c.unit, c.productUnit);
-  return f ? Math.round((price / f) * 10_000) / 10_000 : null;
-}
 /** How far back a competing supplier's latest price still counts as an offer. */
 const OFFER_MAX_AGE_DAYS = 90;
 const DEFAULT_TZ = 'Asia/Jerusalem';

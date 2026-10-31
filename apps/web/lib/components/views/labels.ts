@@ -32,3 +32,31 @@ export function bucketLabel(bucket: 'day' | 'month', iso: string, locale: Locale
     ? formatDate(iso, locale, { day: 'numeric', month: 'short' })
     : formatDate(iso, locale, { month: 'short', year: 'numeric' });
 }
+
+/**
+ * A compact day span for a comparison sentence: "1–25 באוק׳" / "1–25 Oct", or
+ * "28 בספט׳ – 3 באוק׳" across months. `endIso` is exclusive; a span still
+ * running is cut at `nowIso` (the to-date stretch an aligned compare covers).
+ */
+export function spanLabel(startIso: string, endIso: string, locale: Locale, nowIso?: string): string {
+  const end = new Date(endIso).getTime() - 1;
+  const last = new Date(nowIso ? Math.min(end, new Date(nowIso).getTime()) : end);
+  const sameMonth = localDay(startIso).slice(0, 7) === localDay(last).slice(0, 7);
+  const dm: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' };
+  return sameMonth
+    ? `${formatDate(startIso, locale, { day: 'numeric' })}–${formatDate(last, locale, dm)}`
+    : `${formatDate(startIso, locale, dm)} – ${formatDate(last, locale, dm)}`;
+}
+
+/** "1–25 באוק׳ מול 1–25 בספט׳": what an aligned comparison compares, in words. */
+export function compareSpanLabel(
+  current: { monthStart: string; monthEnd: string },
+  previous: { monthStart: string; monthEnd: string },
+  locale: Locale,
+  nowIso: string,
+): { current: string; previous: string } {
+  return {
+    current: spanLabel(current.monthStart, current.monthEnd, locale, nowIso),
+    previous: spanLabel(previous.monthStart, previous.monthEnd, locale),
+  };
+}

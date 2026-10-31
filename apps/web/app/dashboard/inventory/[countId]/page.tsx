@@ -10,7 +10,11 @@ import { AREAS, dayText, qtyText } from '../inventory-ui';
 import { PriceSourceText } from '../count/count-screen';
 import { AmendButton, CsvButton } from './count-actions';
 
-/** A finished count, read-only: the snapshot (unit cost + value per line) as of its date. */
+/**
+ * A finished count, read-only: the snapshot (unit cost + value per line) as of
+ * its date. The chef sees quantities only (owner decision: no ₪; the server
+ * sends none, `showMoney: false`).
+ */
 export default async function InventoryCountDetailPage({ params }: { params: Promise<{ countId: string }> }) {
   const { countId } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(countId)) notFound();
@@ -38,12 +42,16 @@ export default async function InventoryCountDetailPage({ params }: { params: Pro
         subtitle={count.status === 'completed' ? t('detail.lockedNote', { date: dayText(count.countDate, locale) }) : undefined}
       />
       <Card padding="md" className="mb-4 flex flex-wrap items-baseline gap-3">
-        <span className="text-sm text-muted">{t('home.value')}</span>
-        <bdi dir="ltr" className="text-2xl font-bold tabular-nums text-ink">
-          {ils(count.totalValueAgorot, locale, 0)}
-        </bdi>
+        {count.showMoney ? (
+          <>
+            <span className="text-sm text-muted">{t('home.value')}</span>
+            <bdi dir="ltr" className="text-2xl font-bold tabular-nums text-ink">
+              {ils(count.totalValueAgorot, locale, 0)}
+            </bdi>
+          </>
+        ) : null}
         <span className="text-xs text-muted">{t('home.items', { counted: count.progress.counted })}</span>
-        {count.status === 'completed' ? (
+        {count.showMoney && count.status === 'completed' ? (
           <span className="ms-auto">
             <CsvButton countId={count.id} />
           </span>
@@ -70,7 +78,7 @@ export default async function InventoryCountDetailPage({ params }: { params: Pro
                     <span>
                       <bdi dir="ltr">{qtyText(l.qty)}</bdi> {l.unit}
                     </span>
-                    {l.status === 'ok' ? (
+                    {!count.showMoney ? null : l.status === 'ok' ? (
                       <>
                         <span className="hidden sm:inline">
                           × <bdi dir="ltr">{priceText(l.unitCost, locale)}</bdi>

@@ -1,7 +1,9 @@
-import { Skeleton } from '@/lib/components';
 import { getT } from '@/lib/i18n/server';
 import { receiving } from '@/lib/i18n/messages/receiving';
+import { Skeleton } from '@/lib/components';
+import { BoardSkeleton } from '../home/skeletons';
 
+/** Layout-true: header, then the board's summary line, next-truck card and rows. */
 export default async function Loading() {
   const t = await getT(receiving);
   return (
@@ -10,11 +12,7 @@ export default async function Loading() {
         <div className="h-0.5 w-10 rounded-full flow-stream" />
         <Skeleton className="h-8 w-44" />
       </div>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-32" />
-        ))}
-      </div>
+      <BoardSkeleton />
     </div>
   );
 }

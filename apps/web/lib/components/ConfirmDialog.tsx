@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef } from 'react';
 import { Button } from './Button';
+import { Money } from './money/Money';
 
 /**
  * The app's confirm step for destructive actions — a native modal <dialog>
@@ -11,6 +12,10 @@ import { Button } from './Button';
  * all call onClose; only the confirm button calls onConfirm. The keep button
  * takes initial focus so a stray Enter never destroys anything. `!m-auto`:
  * a parent's space-y-* margins would otherwise pin the modal to the top.
+ *
+ * Money or data deletions name what is at stake (C10, R-8): pass `amount`
+ * (shekels) and `party` and the dialog shows "‏1,240.00 ₪ · תנובה" above the
+ * buttons; the confirm label should name them too ("מחיקת ₪1,240 מדרישת הזיכוי לתנובה").
  */
 export function ConfirmDialog({
   open,
@@ -20,6 +25,8 @@ export function ConfirmDialog({
   cancelLabel,
   danger = true,
   loading = false,
+  amount,
+  party,
   onConfirm,
   onClose,
 }: {
@@ -30,6 +37,10 @@ export function ConfirmDialog({
   cancelLabel: React.ReactNode;
   danger?: boolean;
   loading?: boolean;
+  /** The ₪ at stake (shekels), shown with 2 dp. */
+  amount?: number;
+  /** Who it concerns (supplier, branch, person). */
+  party?: React.ReactNode;
   onConfirm: () => void;
   onClose: () => void;
 }) {
@@ -49,28 +60,34 @@ export function ConfirmDialog({
       ref={ref}
       role="alertdialog"
       aria-labelledby={titleId}
-      aria-describedby={body ? bodyId : undefined}
+      aria-describedby={body || amount !== undefined || party ? bodyId : undefined}
       onClose={onClose}
       onClick={(e) => e.target === ref.current && onClose()}
-      className="!m-auto w-[min(92vw,28rem)] rounded-2xl border border-line bg-surface p-0 text-ink shadow-card backdrop:bg-black/50"
+      className="rm-dialog !m-auto w-[min(92vw,28rem)] rounded-overlay border border-line bg-surface p-0 text-ink shadow-e3"
     >
       {open && (
         <div className="space-y-3 p-5">
           <h2 id={titleId} className="text-base font-bold text-ink">
             {title}
           </h2>
-          {body ? (
+          {body || amount !== undefined || party ? (
             <div id={bodyId} className="space-y-2 text-sm text-muted">
+              {amount !== undefined || party ? (
+                <p data-confirm-stake className="flex flex-wrap items-baseline gap-x-2 text-body font-semibold text-ink">
+                  {amount !== undefined ? <Money value={amount} context="line" /> : null}
+                  {amount !== undefined && party ? <span aria-hidden="true">·</span> : null}
+                  {party ? <span>{party}</span> : null}
+                </p>
+              ) : null}
               {body}
             </div>
           ) : null}
           <div className="flex flex-wrap justify-end gap-2 pt-2">
-            <Button variant="ghost" size="sm" autoFocus onClick={onClose} disabled={loading}>
+            <Button variant="secondary" autoFocus onClick={onClose} disabled={loading}>
               {cancelLabel}
             </Button>
             <Button
               variant={danger ? 'danger' : 'primary'}
-              size="sm"
               loading={loading}
               onClick={onConfirm}
             >

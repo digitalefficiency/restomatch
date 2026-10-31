@@ -2,7 +2,7 @@ import type { Shape } from '../../../../translate';
 import type { he } from '../../../auth/he';
 
 /** auth — ti overlay (Tigrinya). */
-export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor'>> = {
+export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 'signin'>> = {
   login: {
     title: 'ናብ RestoMatch እተዉ',
     subtitle: 'ብመሕለፊ ቃልኩም እተዉ፡ ወይ ብኢመይል ናይ ምእታው ሊንክ ተቐበሉ።',
@@ -40,5 +40,21 @@ export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor'>> 
     codeLabel: 'ኮድ ምርግጋጽ',
     submit: 'ኣረጋግጹ',
     switchAccount: 'ብካልእ ኣካውንት እተዉ',
+  },
+  signin: {
+    forgotShort: 'ረሲዕኩም?',
+    showPassword: 'ፓስዋርድ ኣርኢ',
+    hidePassword: 'ፓስዋርድ ሕባእ',
+    pending: 'ቁሩብ…',
+    lockoutHint: 'ድሕሪ ብዙሕ ጌጋ ፈተነታት ምእታው ንሓጺር እዋን ይዕጾ። ብዘይ ፓስዋርድ እውን ክትኣትዉ ትኽእሉ:',
+    magicFallback: 'ናይ ምእታው ሊንክ ብኢመይል ተቐበሉ',
+    emailMissing: 'ናይ ምእታው ሊንክ ንምቕባል ኢመይልኩም ኣእትዉ።',
+    queuedOne: 'ሓደ ስእሊ ፋክቱራ ኣብ መሳርሒ ይጽበ ኣሎ · ዘሳኣሎ ምስ ኣተወ ክስደድ እዩ',
+    queuedMany: '{count} ስእልታት ፋክቱራ ኣብ መሳርሒ ይጽበዩ ኣለዉ · ዘሳኣሎም ምስ ኣተወ ክስደዱ እዮም',
+    signedInAs: 'ድሮ ከም {email} ኣቲኹም ኣለኹም',
+    continue: 'ናብ ሕሳብ ቀጽሉ',
+    switchUser: 'ብካልእ ተጠቃሚ እተዉ',
+    newHere: 'ኣብ RestoMatch ሓድሽ ዲኹም? ብሊንክ ኢመይል ዝግበር ቀዳማይ ምእታው ሕሳብ ይኸፍት።',
+    demo: 'ዲሞ ርኣዩ',
   },
 };

@@ -14,9 +14,11 @@ const tones: Record<KpiTone, { icon: string; glow: string; value: string }> = {
 };
 
 /**
- * KPI card ("Command Center" language): money-flow top stream, colored icon
- * chip, big MONO tabular value (money-positive in gold, loss in danger),
- * optional trend delta + optional sparkline. Static — renders server-side.
+ * @deprecated v1 KPI card — new code uses `MetricTile` (lib/components/money).
+ * Kept as a compatibility wrapper so existing call sites render unchanged until
+ * their area migrates (wave 2). The value is Heebo tabular (`.num`), not mono:
+ * the mono subset has no ₪ glyph (design-system-02). Hebrew labels are never
+ * letter-spaced (design-system-14).
  */
 export function KpiCard({
   label,
@@ -79,7 +81,7 @@ export function KpiCard({
         {typeof delta === 'number' ? (
           <div className={cn('flex items-center gap-1 text-xs font-semibold', deltaColor)}>
             {deltaUp ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-            <span className="font-mono tabular-nums">
+            <span className="num">
               {delta > 0 ? '+' : ''}
               {delta}%
             </span>
@@ -87,10 +89,10 @@ export function KpiCard({
         ) : null}
       </div>
 
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-subtle">{label}</p>
+      <p className="mb-2 text-xs font-semibold text-subtle ltr:uppercase ltr:tracking-wider">{label}</p>
       <p
         className={cn(
-          'font-mono font-extrabold tabular-nums tracking-tight',
+          'num font-extrabold tracking-tight',
           emphasis ? 'text-4xl text-ink' : `text-3xl ${t.value}`,
         )}
       >

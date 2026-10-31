@@ -1,7 +1,5 @@
 'use client';
 
-import { useGSAP } from '@gsap/react';
-import { gsap } from 'gsap';
 import { Check, FileScan, Loader2, Package, Scale } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -96,24 +94,10 @@ const STEPS = [
 ] as const;
 
 export function Processing({ supplierId, imageUrl, onComplete }: Props) {
-  const ref = useRef<HTMLDivElement>(null);
   const t = useT(receiving);
   const dir = useDir();
   const [currentStep, setCurrentStep] = useState(0);
   const [ocrError, setOcrError] = useState<string | null>(null);
-
-  useGSAP(
-    () => {
-      gsap.from('.proc-step', {
-        x: -20,
-        opacity: 0,
-        stagger: 0.1,
-        duration: 0.5,
-        ease: 'power3.out',
-      });
-    },
-    { scope: ref },
-  );
 
   // The parent re-renders with a fresh onComplete each time; keep the latest in
   // a ref so the effect below runs once per (supplier, image) — and survives
@@ -185,7 +169,7 @@ export function Processing({ supplierId, imageUrl, onComplete }: Props) {
   void ocrError;
 
   return (
-    <div ref={ref} dir={dir} className="max-w-md mx-auto py-6">
+    <div dir={dir} className="max-w-md mx-auto py-6">
       <StepHeader
         eyebrow={t('steps.stepOf', { current: 3, total: 5 })}
         title={t('steps.processing.title')}
@@ -233,7 +217,7 @@ export function Processing({ supplierId, imageUrl, onComplete }: Props) {
                   >
                     {t(step.label)}
                   </div>
-                  <div className="text-xs text-muted mt-0.5">
+                  <div className="text-sm text-muted mt-0.5">
                     {isDone
                       ? t('steps.processing.done')
                       : isActive
@@ -247,18 +231,24 @@ export function Processing({ supplierId, imageUrl, onComplete }: Props) {
         </div>
 
         <div className="mt-6 pt-4 border-t border-line">
-          <div className="flex items-center justify-between text-xs text-muted">
+          <div className="flex items-center justify-between text-sm text-muted">
             <span>
               {t('steps.processing.progress', {
                 current: Math.min(currentStep + 1, STEPS.length),
                 total: STEPS.length,
               })}
             </span>
-            <span className="tabular-nums font-mono">
+            <span className="tabular-nums">
               {Math.round((currentStep / STEPS.length) * 100)}%
             </span>
           </div>
-          <div className="mt-2 h-1.5 bg-surface-2 rounded-full overflow-hidden">
+          <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={STEPS.length}
+            aria-valuenow={currentStep}
+            className="mt-2 h-1.5 bg-surface-2 rounded-full overflow-hidden"
+          >
             <div
               className="h-full flow-stream transition-all duration-500 ease-out"
               style={{ width: `${(currentStep / STEPS.length) * 100}%` }}

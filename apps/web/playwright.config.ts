@@ -81,6 +81,15 @@ export default defineConfig({
       PLATFORM_ADMIN_EMAILS: 'owner@kfar-hazeitim.test',
       NODE_ENV: 'development',
       NEXT_TELEMETRY_DISABLED: '1',
+      // The receiving specs play the OCR worker and the matcher themselves (they
+      // write invoice_lines / match_runs at a moment they choose): the in-process
+      // after() kick must not run the dev OCR stub / engine underneath them.
+      JOB_KICK: 'off',
+      // CI exports a placeholder NEXT_PUBLIC_SUPABASE_URL (inherited here) but no
+      // service-role key, so scans land in dev local storage
+      // (http://localhost:PORT/scans/<id>/file); without this the SSRF pin derives
+      // the placeholder's /storage/v1/object/sign/ prefix and registerInvoice 400s.
+      INVOICE_SCAN_URL_PREFIX: `http://localhost:${PORT}/scans/`,
     },
     url: `http://localhost:${PORT}/api/healthz`,
     reuseExistingServer: !process.env.CI,
