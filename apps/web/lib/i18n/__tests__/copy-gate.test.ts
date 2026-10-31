@@ -26,28 +26,54 @@ const SERVER_SCAN = [
 ];
 
 /** W2-13's own surface: must be clean (hard assertion). */
-// `components` joins with the feed slice (claude/ux-w2-13-copy-system): its `activity` values
-// are asserted by the legacy reverse parser in ops-components.test.ts until that block moves.
-const OWN_NAMESPACES = new Set(['emails', 'common']);
-const OWN_FILES = ['packages/api/src/notifications/templates.ts', 'packages/api/src/notifications/copy/'];
+const OWN_NAMESPACES = new Set(['emails', 'common', 'components']);
+const OWN_FILES = [
+  'packages/api/src/notifications/templates.ts',
+  'packages/api/src/notifications/copy/',
+  'packages/api/src/match/persist.ts',
+  'apps/web/lib/messageTemplates.ts',
+];
 
 /**
  * Reasoned exceptions on the hard-failing surface. Each one names its owner.
  * `where` is `ns:key` for namespace leaves or `file:<path>` for server literals.
  */
-const ALLOW: Array<{ where: string; rule: RuleId; reason: string }> = [
+const ALLOW: Array<{ where: string; rule: RuleId; reason: string; text?: string }> = [
   // DECISION_COPY.he.{approve,reject,escalate}: masculine singular, pinned by W2-04's
   // approvals-router.test.ts. W2-04's work item; the values are not changed here.
   { where: 'emails:decision.approve', rule: 'masculine-imperative', reason: 'W2-04 (pinned by approvals-router.test.ts)' },
   { where: 'emails:decision.reject', rule: 'masculine-imperative', reason: 'W2-04 (pinned by approvals-router.test.ts)' },
   { where: 'emails:decision.escalate', rule: 'masculine-imperative', reason: 'W2-04 (pinned by approvals-router.test.ts)' },
+  // Unused since W2-13 (the feed renders feed.discrepancies / feed.toReview, ICU plurals). Kept with a
+  // plain {count} because W2-05's receiver overlays (CompleteOverlays<typeof he>) carry `{count}` and
+  // receiver-langs.test pins placeholder parity. W2-05 can drop both keys from the overlays, then here.
+  { where: 'components:activity.discrepancies', rule: 'count-without-plural', reason: 'W2-05 receiver overlays' },
+  { where: 'components:activity.toReview', rule: 'count-without-plural', reason: 'W2-05 receiver overlays' },
+  // matchActivitySummary().detail (persist.ts): pinned byte-identical by match-money.test.ts and no
+  // longer persisted since W2-13 (the feed row is v2 metadata). Its text dies with the function.
+  ...(
+    [
+      ['retired-term', 'חריגה אחת'],
+      ['retired-term', '{x} חריגות'],
+      ['retired-term', 'חריגה אחת לבדיקה'],
+      ['retired-term', '{x} חריגות לבדיקה'],
+      ['retired-term', 'הפסד פוטנציאלי ₪{x}'],
+      ['sign-next-to-placeholder', 'הפסד פוטנציאלי ₪{x}'],
+    ] as const
+  ).map(([rule, text]) => ({
+    where: 'file:packages/api/src/match/persist.ts',
+    rule,
+    text,
+    reason: 'matchActivitySummary().detail is pinned by match-money.test.ts and not persisted',
+  })),
   // Quotes around a placeholder: pinned verbatim by e2e/W1-04.spec.ts:172 (W1-04's spec).
   { where: 'common:shell.forbidden.title', rule: 'sign-next-to-placeholder', reason: 'pinned by e2e/W1-04.spec.ts:172' },
   { where: 'file:packages/api/src/notifications/copy/he.ts', rule: 'masculine-imperative', reason: 'the same three DECISION_COPY values (W2-04)' },
 ];
 
-const allowed = (where: string, f: Finding) =>
-  ALLOW.some((a) => a.rule === f.rule && (where === a.where || where.startsWith(`${a.where}:`)));
+const covers = (a: (typeof ALLOW)[number], where: string, text: string) =>
+  (where === a.where || where.startsWith(`${a.where}:`)) && (a.text === undefined || a.text === text);
+const allowed = (where: string, text: string, f: Finding) => ALLOW.some((a) => a.rule === f.rule && covers(a, where, text));
 
 function namespaceRows(): Row[] {
   return ALL_NAMESPACES.flatMap((ns) =>
@@ -129,24 +155,24 @@ describe('copy gate: the report', () => {
     expect(fileRows.length).toBeGreaterThan(0);
   });
 
-  it('W2-13 namespaces (emails, common) are clean', () => {
+  it('W2-13 namespaces (emails, common, components) are clean', () => {
     const dirty = nsRows
       .filter((r) => OWN_NAMESPACES.has(r.where.split(':')[0]!))
-      .flatMap((r) => r.findings.filter((f) => !allowed(r.where, f)).map((f) => `${r.where} [${r.lang}] ${f.rule}: ${f.match} ← ${r.text}`));
+      .flatMap((r) => r.findings.filter((f) => !allowed(r.where, r.text, f)).map((f) => `${r.where} [${r.lang}] ${f.rule}: ${f.match} ← ${r.text}`));
     expect(dirty).toEqual([]);
   });
 
   it('W2-13 server files are clean', () => {
     const dirty = fileRows
       .filter((r) => OWN_FILES.some((p) => r.where.startsWith(`file:${p}`)))
-      .flatMap((r) => r.findings.filter((f) => !allowed(r.where, f)).map((f) => `${r.where} ${f.rule}: ${f.match} ← ${r.text}`));
+      .flatMap((r) => r.findings.filter((f) => !allowed(r.where, r.text, f)).map((f) => `${r.where} ${f.rule}: ${f.match} ← ${r.text}`));
     expect(dirty).toEqual([]);
   });
 
   it('every ALLOW entry is still needed (no stale exceptions)', () => {
     for (const a of ALLOW) {
       const rows = a.where.startsWith('file:') ? fileRows : nsRows;
-      const hit = rows.some((r) => (r.where === a.where || r.where.startsWith(`${a.where}:`)) && r.findings.some((f) => f.rule === a.rule));
+      const hit = rows.some((r) => covers(a, r.where, r.text) && r.findings.some((f) => f.rule === a.rule));
       expect(hit, `${a.where} ${a.rule}`).toBe(true);
     }
   });
