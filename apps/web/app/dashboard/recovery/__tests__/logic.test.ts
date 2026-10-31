@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CLAIM_ANSWER_DAYS } from '@restomatch/api';
+import { CLAIM_ANSWER_DAYS, OVERDUE_BOUNDARY_CASES, OVERDUE_BOUNDARY_NOW } from '@restomatch/api';
 import {
   ANSWER_DAYS,
   CONFIRMED_MOVES,
@@ -82,6 +82,12 @@ describe('answer countdown from COALESCE(letterSentAt, claimedAt) + a week (owne
   it('one constant with the server: ANSWER_DAYS = @restomatch/api CLAIM_ANSWER_DAYS = 7', () => {
     expect(ANSWER_DAYS).toBe(7);
     expect(ANSWER_DAYS).toBe(CLAIM_ANSWER_DAYS);
+  });
+  it.each(OVERDUE_BOUNDARY_CASES)('the SAME boundary cases as the server overdue rule: $letterSentAt → $overdue ($why)', (c) => {
+    const cd = countdownOf({ status: 'letter_sent', letterSentAt: c.letterSentAt, claimedAt: '2026-09-01T00:00:00Z' }, OVERDUE_BOUNDARY_NOW);
+    expect(cd?.tone === 'danger').toBe(c.overdue);
+    const f = followUps([{ status: 'letter_sent', letterSentAt: c.letterSentAt, claimedAt: '2026-09-01T00:00:00Z', outstandingAgorot: 100 }], OVERDUE_BOUNDARY_NOW);
+    expect(f.waiting.count === 1).toBe(c.overdue);
   });
   it('neutral above 3 days, warn at 3 or fewer, danger when late (after 7 days)', () => {
     expect(countdownOf({ status: 'letter_sent', letterSentAt: '2026-10-24T10:00:00.000Z', claimedAt: '2026-09-01T00:00:00Z' }, now)).toMatchObject({

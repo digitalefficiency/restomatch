@@ -22,6 +22,7 @@ import {
 } from '@restomatch/charts';
 import type { Database } from '@restomatch/db';
 import { z } from 'zod';
+import { claimableLines } from '../lib/claims';
 
 export type ToolName = 'leak_hero' | 'leak_report' | 'leak_breakdown' | 'claimable_lines';
 
@@ -127,24 +128,24 @@ export function reportData(r: LeakReport, locale: AskLocale = 'en') {
   };
 }
 
-/** Open, leak-counting discrepancy lines (what can still be claimed), biggest first. */
+/**
+ * What can still be claimed, biggest first: the claims letters' rule (claimableLines —
+ * never-claimable types out, paid/pending-link invoices out, capped at the invoice's
+ * leak), narrowed to lines still open or escalated.
+ */
 export function claimableData(invoices: LeakBreakdownInvoice[], locale: AskLocale = 'en') {
   const lines = invoices.flatMap((inv) =>
-    inv.lines
-      .filter(
-        (l) =>
-          l.countsAsLeak &&
-          (l.resolutionStatus === 'open' || l.resolutionStatus === 'escalated') &&
-          Math.abs(l.deltaAmount) >= 0.01,
-      )
-      .map((l) => ({
+    claimableLines(inv)
+      .filter(({ line: l }) => l.resolutionStatus === 'open' || l.resolutionStatus === 'escalated')
+      .map(({ line: l, amount }) => ({
         invoiceId: inv.invoiceId,
         invoiceNumber: clip(inv.invoiceNumber, 30),
         supplier: nm(locale, inv.supplierNameEn, inv.supplierName),
         type: l.type,
         item: nm(locale, l.productNameEn ?? l.lineDescriptionEn, l.productName, l.lineDescription),
-        amountIls: r2(Math.abs(l.deltaAmount)),
-      })),
+        amountIls: r2(amount),
+      }))
+      .filter((l) => l.amountIls >= 0.01),
   );
   lines.sort((a, b) => b.amountIls - a.amountIls);
   return { totalIls: r2(lines.reduce((s, l) => s + l.amountIls, 0)), count: lines.length, lines: lines.slice(0, 15) };

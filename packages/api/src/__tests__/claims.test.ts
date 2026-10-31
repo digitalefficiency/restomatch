@@ -4,6 +4,7 @@ import { CLAIM_ANSWER_DAYS, NEVER_CLAIMABLE_TYPES, claimableLines, isNeverClaima
 import { isClaimableRow } from '../routers/approvals';
 import { OVERDUE_DAYS } from '../recovery/service';
 import { payRunStatusOf } from '../routers/payRun';
+import { claimableData } from '../ask/tools';
 
 /**
  * The claimable-line rule moved out of apps/web/app/dashboard/leaks/claims/page.tsx
@@ -216,5 +217,25 @@ describe('owner decisions 31.10 — the claim rules', () => {
   it('a claim is overdue after a week ("שבוע"): one constant, the reminder job uses it', () => {
     expect(CLAIM_ANSWER_DAYS).toBe(7);
     expect(OVERDUE_DAYS).toBe(CLAIM_ANSWER_DAYS);
+  });
+});
+
+describe('ask "what to claim" (claimableData / offline claimWeek) = the claims rule (money review B)', () => {
+  it('never lists an open MISSING_ON_INVOICE, keeps open/escalated only, and caps at the invoice leak', () => {
+    const inv = invoice({
+      leakIls: 50,
+      lines: [
+        line({ discrepancyId: 'moi', type: 'MISSING_ON_INVOICE', deltaAmount: -500 }),
+        line({ discrepancyId: 'a', deltaAmount: 40 }),
+        line({ discrepancyId: 'b', resolutionStatus: 'escalated', deltaAmount: 30 }),
+        line({ discrepancyId: 'c', resolutionStatus: 'accepted', deltaAmount: 5 }),
+      ],
+    });
+    const c = claimableData([inv]);
+    expect(c.lines.map((l) => l.type)).not.toContain('MISSING_ON_INVOICE');
+    expect(c.lines.map((l) => l.amountIls)).toEqual([40, 10]);
+    expect(c.totalIls).toBe(50);
+    // A paid invoice has nothing left to claim (same as the letters).
+    expect(claimableData([{ ...inv, status: 'paid' }]).count).toBe(0);
   });
 });

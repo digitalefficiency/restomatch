@@ -394,6 +394,8 @@ export * from './ledger';
 export {
   CLAIMABLE_STATUSES,
   CLAIM_ANSWER_DAYS,
+  OVERDUE_BOUNDARY_CASES,
+  OVERDUE_BOUNDARY_NOW,
   NEVER_CLAIMABLE_TYPES,
   claimableLines,
   isNeverClaimable,

@@ -34,6 +34,20 @@ export function isNeverClaimable(type: string): boolean {
 export const CLAIM_ANSWER_DAYS = 7;
 
 /**
+ * The overdue boundary, as cases both sides test against (server overdueSql and the
+ * web countdown): a claim is overdue when MORE than CLAIM_ANSWER_DAYS whole calendar
+ * days (Asia/Jerusalem) passed since the letter — the hour of day never matters.
+ * `now` is 2026-10-25 13:00 in Israel.
+ */
+export const OVERDUE_BOUNDARY_NOW = '2026-10-25T10:00:00.000Z';
+export const OVERDUE_BOUNDARY_CASES: ReadonlyArray<{ letterSentAt: string; overdue: boolean; why: string }> = [
+  { letterSentAt: '2026-10-18T12:00:00.000Z', overdue: false, why: '18.10 15:00 IL — 7 calendar days: not yet' },
+  { letterSentAt: '2026-10-17T22:30:00.000Z', overdue: false, why: '18.10 01:30 IL — 7 calendar days (an instant rule said overdue)' },
+  { letterSentAt: '2026-10-17T20:59:00.000Z', overdue: true, why: '17.10 23:59 IL — 8 calendar days' },
+  { letterSentAt: '2026-10-17T05:00:00.000Z', overdue: true, why: '17.10 08:00 IL — 8 calendar days' },
+];
+
+/**
  * What an amount is measured on. A duplicate invoice is claimed at the invoice's total
  * INCLUDING VAT; a VAT mismatch IS a VAT amount; every other discrepancy is priced on line
  * amounts BEFORE VAT. Shown next to each amount so ₪ figures of different bases are never

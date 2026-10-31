@@ -1,9 +1,15 @@
 import { z } from 'zod';
 import { computeLeakBreakdown, computeLeakHero, scanAwaitingCountSql, type LeakBreakdownInvoice } from '@restomatch/charts';
 import { eq, restaurants, sql, type Database } from '@restomatch/db';
-import { claimableLines, sumClaims, type VatBasis } from '../lib/claims';
+import { NEVER_CLAIMABLE_TYPES, claimableLines, sumClaims, type VatBasis } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
 import { financeProcedure, router } from '../trpc';
+
+/** Never a credit to ask for: the never-claimable types (owner 31.10) + a duplicate copy (held, not claimed). */
+const NOT_A_CREDIT_SQL = sql.join(
+  [...NEVER_CLAIMABLE_TYPES, 'DUPLICATE_INVOICE'].map((t) => sql`${t}`),
+  sql`, `,
+);
 
 /**
  * Pay run (flag `payRun`): the month's checked invoices that are not marked
@@ -192,7 +198,7 @@ export const payRunRouter = router({
                  JOIN discrepancies d ON d.match_run_id = mr3.id AND d.restaurant_id = ${rid}
                  WHERE mr3.invoice_id = i.id AND mr3.restaurant_id = ${rid}
                    AND d.severity IN ('warn','block') AND d.resolution_status = 'accepted'
-                   AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL','DUPLICATE_INVOICE') AND ABS(d.delta_amount) > 0
+                   AND d.type NOT IN (${NOT_A_CREDIT_SQL}) AND ABS(d.delta_amount) > 0
                ) AS accepted_ils,
                -- …a non-waived duplicate copy is held ("don't pay this copy"); its ₪ is the copy's total.
                (
