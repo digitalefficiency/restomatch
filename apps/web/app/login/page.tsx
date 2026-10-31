@@ -5,6 +5,7 @@ import { auth, signIn, signOut } from '@/auth';
 import { Field, Input, LinkButton } from '@/lib/components';
 import { auth as authMessages } from '@/lib/i18n/messages/auth';
 import { getT } from '@/lib/i18n/server';
+import { loginErrorCode } from '@/lib/loginRateLimited';
 import { twoFactorEnabledForEmail } from '@/lib/passwords';
 import { safeRelativePath } from '@/lib/safeRedirect';
 import { AuthShell, authTitle } from '../(auth)/_components/AuthShell';
@@ -25,6 +26,8 @@ interface PageProps {
   searchParams: Promise<{
     callbackUrl?: string;
     error?: string;
+    /** Auth.js v5 CredentialsSignin.code on a direct callback POST (`rate`). */
+    code?: string;
     email?: string;
     sent?: string;
     reset?: string;
@@ -63,7 +66,10 @@ function back(code: string, redirectTo: string, lockedEmail: string | undefined)
 }
 
 export default async function LoginPage({ searchParams }: PageProps) {
-  const { callbackUrl, error, email: invitedEmail, sent, reset, signedOut } = await searchParams;
+  const { callbackUrl, error: rawError, code, email: invitedEmail, sent, reset, signedOut } = await searchParams;
+  // A script/form POSTing straight to /api/auth/callback/credentials lands here as
+  // ?error=CredentialsSignin&code=rate when throttled: show the same rate copy.
+  const error = rawError === 'CredentialsSignin' && code === 'rate' ? 'rate' : rawError;
   // Open-redirect guard (D1.7) — the shared, unit-tested same-origin path check.
   const redirectTo = safeRelativePath(callbackUrl);
   // When arriving from an invite link, the address is fixed (acceptInvite is
@@ -83,7 +89,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
   // never the URL) and puts the cursor back in the password field. Only right
   // after a failed attempt: on a shared device the next person (or a page after
   // sign-out) never sees the previous person's address.
-  const prefill = lockedEmail ?? (error === 'CredentialsSignin' ? hint?.email : undefined);
+  const prefill = lockedEmail ?? (error === 'CredentialsSignin' || error === 'rate' ? hint?.email : undefined);
   const wrongPassword = error === 'CredentialsSignin';
   const offerFallback = wrongPassword && (hint?.fails ?? 0) >= FALLBACK_AFTER_FAILS;
 
@@ -100,7 +106,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
     // callback (auth.ts) so it is enforced on EVERY entry point — including a
     // script POSTing straight to /api/auth/callback/credentials. Enforcing it
     // here too would double-count the limiter, so it is intentionally not
-    // repeated. A throttled/wrong attempt surfaces the same CredentialsSignin.
+    // repeated. A wrong password surfaces CredentialsSignin; a throttled one 'rate'.
     try {
       // redirect:false — we pick the destination ourselves (below).
       await signIn('credentials', { email, password, rememberMe, redirect: false });
@@ -111,7 +117,9 @@ export default async function LoginPage({ searchParams }: PageProps) {
         const prev = await readHint();
         const fails = prev && prev.email === email ? prev.fails + 1 : 1;
         await writeHint({ email, fails, sentAt: prev?.sentAt ?? null, next: prev?.next ?? null });
-        redirect(back('CredentialsSignin', redirectTo, lockedEmail));
+        // A throttled attempt (LoginRateLimited, code 'rate') says "too many
+        // attempts", not "wrong password"; everything else stays uniform.
+        redirect(back(loginErrorCode(err), redirectTo, lockedEmail));
       }
       throw err;
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkRateLimit, MemoryRateLimitStore, resetRateLimit } from '../rateLimit';
+import { checkRateLimit, MemoryRateLimitStore, peekRateLimit, resetRateLimit, type RateLimitStore } from '../rateLimit';
 
 describe('checkRateLimit (fixed window)', () => {
   it('allows up to the limit then blocks', async () => {
@@ -86,5 +86,42 @@ describe('resetRateLimit', () => {
 
   it('is a no-op for a store without del', async () => {
     await expect(resetRateLimit({ incr: async () => 1 }, 'a@x', { limit: 1, windowSec: 60 })).resolves.toBeUndefined();
+  });
+});
+
+describe('peekRateLimit (gate every attempt, record only failures)', () => {
+  const t0 = 1_000_000_000_000;
+  const opts = { limit: 30, windowSec: 900, prefix: 'login:ip', now: () => t0 };
+
+  it('reads without counting: 40 peeks (successful logins) leave the count at 0, all allowed', async () => {
+    const store = new MemoryRateLimitStore(() => t0);
+    for (let i = 0; i < 40; i++) expect((await peekRateLimit(store, '10.0.0.1', opts)).allowed, `peek ${i + 1}`).toBe(true);
+    expect(await peekRateLimit(store, '10.0.0.1', opts)).toMatchObject({ allowed: true, count: 0, remaining: 30 });
+  });
+
+  it('30 recorded failures refuse the 31st attempt; other IPs are unaffected', async () => {
+    const store = new MemoryRateLimitStore(() => t0);
+    for (let i = 0; i < 29; i++) await checkRateLimit(store, '10.0.0.2', opts);
+    expect(await peekRateLimit(store, '10.0.0.2', opts)).toMatchObject({ allowed: true, count: 29 });
+    await checkRateLimit(store, '10.0.0.2', opts); // 30th failure
+    expect(await peekRateLimit(store, '10.0.0.2', opts)).toMatchObject({ allowed: false, count: 30, remaining: 0 });
+    expect((await peekRateLimit(store, '10.0.0.3', opts)).allowed).toBe(true);
+  });
+
+  it('a new window starts fresh, and resetSec counts down to it', async () => {
+    let t = t0;
+    const store = new MemoryRateLimitStore(() => t);
+    const o = { ...opts, now: () => t };
+    for (let i = 0; i < 30; i++) await checkRateLimit(store, '10.0.0.4', o);
+    const blocked = await peekRateLimit(store, '10.0.0.4', o);
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.resetSec).toBeGreaterThan(0);
+    t += blocked.resetSec * 1000;
+    expect(await peekRateLimit(store, '10.0.0.4', o)).toMatchObject({ allowed: true, count: 0 });
+  });
+
+  it('a store without get reads 0 (fails open, like a store outage)', async () => {
+    const bare: RateLimitStore = { incr: async () => 999 };
+    expect(await peekRateLimit(bare, '10.0.0.5', opts)).toMatchObject({ allowed: true, count: 0 });
   });
 });

@@ -16,6 +16,8 @@ export interface RateLimitStore {
   incr(key: string, windowSec: number): Promise<number>;
   /** Optional: drop the counter for `key` (resetRateLimit; e.g. a successful login). */
   del?(key: string): Promise<void>;
+  /** Optional: read the counter for `key` WITHOUT changing it (0 when absent/expired). peekRateLimit. */
+  get?(key: string): Promise<number>;
 }
 
 export interface RateLimitOptions {
@@ -79,6 +81,33 @@ export async function resetRateLimit(store: RateLimitStore, identifier: string, 
 }
 
 /**
+ * Read `identifier`'s current-window count WITHOUT counting this event: for a
+ * limiter that only RECORDS failures (checkRateLimit on a failure) but must GATE
+ * every attempt. `allowed` is false once `limit` events are already recorded, so
+ * with limit 30 the attempt after the 30th recorded failure is refused. A store
+ * without `get` reads 0 (allowed): same fail-open stance as a store outage.
+ * Not atomic with the later record — a parallel burst can pass the cap by its
+ * concurrency; callers keep an atomic limiter (e.g. per account) as the floor.
+ */
+export async function peekRateLimit(
+  store: RateLimitStore,
+  identifier: string,
+  opts: RateLimitOptions,
+): Promise<RateLimitResult> {
+  const now = opts.now ? opts.now() : Date.now();
+  const { key, windowIndex } = windowKey(identifier, opts, now);
+  const count = store.get ? await store.get(key) : 0;
+  const nextWindowStartMs = (windowIndex + 1) * opts.windowSec * 1000;
+  return {
+    allowed: count < opts.limit,
+    count,
+    limit: opts.limit,
+    remaining: Math.max(0, opts.limit - count),
+    resetSec: Math.max(0, Math.ceil((nextWindowStartMs - now) / 1000)),
+  };
+}
+
+/**
  * In-memory store. Process-local (no good across serverless instances) — for
  * tests and single-process dev only.
  */
@@ -99,6 +128,11 @@ export class MemoryRateLimitStore implements RateLimitStore {
 
   async del(key: string): Promise<void> {
     this.counters.delete(key);
+  }
+
+  async get(key: string): Promise<number> {
+    const existing = this.counters.get(key);
+    return existing && existing.expiresAt > this.now() ? existing.count : 0;
   }
 
   /** Test helper: drop all counters. */

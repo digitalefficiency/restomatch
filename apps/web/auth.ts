@@ -23,6 +23,7 @@ import { authDb } from './lib/authDb';
 import { isEmailConfigured, sendEmail } from './lib/email';
 import { magicLinkEmail } from './lib/emailTemplates';
 import { LOCALE_COOKIE, resolveLocale, type Locale } from './lib/i18n/config';
+import { LoginRateLimited } from './lib/loginRateLimited';
 import { authorizeCredentials, getSessionSecurityState } from './lib/passwords';
 import { SIGNOUT_COOKIE, issuedBeforeSignOut, signOutCookieOptions } from './lib/signOutTombstone';
 import { consumeTwoFactorTicket } from './lib/totp';
@@ -167,12 +168,14 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         // the email+IP login limit must run INSIDE authorize() to be
         // un-bypassable. Reads the client IP from the request headers. Fails OPEN
         // on a rate-limit store outage — the durable floor is the per-account DB lockout in
-        // authorizeCredentials. A rate-limited attempt returns the same uniform
-        // null as a wrong password (surfaced as CredentialsSignin), revealing no
-        // account/lock state.
+        // authorizeCredentials. A rate-limited attempt throws LoginRateLimited
+        // (CredentialsSignin, code 'rate') so the page says "too many attempts"
+        // rather than "wrong password"; it reveals no account/lock state (the
+        // limiters key on any email string + IP). A wrong password and the DB
+        // lockout stay the uniform null → CredentialsSignin.
         const ip = clientIpFromHeaders(await headers(), { trustedProxyHops: trustedProxyHops() });
         const rl = await enforceLoginLimit(email, ip);
-        if (!rl.allowed) return null;
+        if (!rl.allowed) throw new LoginRateLimited();
         const result = await authorizeCredentials({ email, password });
         if (!result) return null;
         // Correct password: only FAILED attempts count toward the per-account limit.
