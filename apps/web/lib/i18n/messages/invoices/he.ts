@@ -168,6 +168,7 @@ export const he = {
     paid: 'שולמה',
   },
   cockpit: {
+    backToInvoice: 'חזרה לחשבונית',
     back: 'חזרה',
     from: {
       approvals: 'אישורים',

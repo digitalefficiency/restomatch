@@ -10,7 +10,10 @@ import {
   ingestDocuments,
   ingestMessages,
   ingestSenders,
+  invoiceLines,
+  invoices,
   restaurants,
+  sql,
   suppliers,
   type Database,
 } from '@restomatch/db';
@@ -350,6 +353,35 @@ export const ingestRouter = router({
             .from(purchaseOrders)
             .where(and(eq(purchaseOrders.restaurantId, rid), inArray(purchaseOrders.sourceRef, [...refOf.values()])))
         : [];
+      // W2-02 (approvals-38): the OCR outcome inline — supplier, ₪, lines, or the failure reason.
+      const invoiceIds = [...new Set(docs.map((d) => d.invoiceId).filter((x): x is string => !!x))];
+      const ocrRows = invoiceIds.length
+        ? await ctx.db
+            .select({
+              id: invoices.id,
+              status: invoices.status,
+              totalInclVat: invoices.totalInclVat,
+              supplierName: suppliers.name,
+              failure: sql<string | null>`CASE WHEN (${invoices.ocrPayload} -> 'raw' ->> 'ocrFailed') = 'true'
+                THEN COALESCE(${invoices.ocrPayload} -> 'raw' ->> 'reason', 'extraction_failed') END`,
+              lineCount: sql<number>`(SELECT count(*)::int FROM ${invoiceLines} il WHERE il.invoice_id = ${invoices.id})`,
+            })
+            .from(invoices)
+            .leftJoin(suppliers, and(eq(suppliers.id, invoices.supplierId), eq(suppliers.restaurantId, rid)))
+            .where(and(eq(invoices.restaurantId, rid), inArray(invoices.id, invoiceIds)))
+        : [];
+      const ocrOf = new Map(
+        ocrRows.map((r) => [
+          r.id,
+          {
+            state: r.failure ? ('failed' as const) : r.status === 'ocr_pending' ? ('reading' as const) : ('read' as const),
+            supplierName: r.supplierName,
+            totalInclVatAgorot: r.totalInclVat != null ? Math.round(Number(r.totalInclVat) * 100) : null,
+            lineCount: Number(r.lineCount ?? 0),
+            failureReason: r.failure,
+          },
+        ]),
+      );
       // Never expose storage paths — only whether a file is stored.
       return messages.map((m) => ({
         ...m,
@@ -361,7 +393,7 @@ export const ingestRouter = router({
           : null,
         documents: docs
           .filter((d) => d.messageId === m.id)
-          .map(({ storagePath, ...d }) => ({ ...d, stored: storagePath !== null })),
+          .map(({ storagePath, ...d }) => ({ ...d, stored: storagePath !== null, ocr: d.invoiceId ? (ocrOf.get(d.invoiceId) ?? null) : null })),
       }));
     }),
 
