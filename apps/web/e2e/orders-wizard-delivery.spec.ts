@@ -39,14 +39,18 @@ test.beforeAll(async () => {
   }
 });
 
-/** Tomorrow in Asia/Jerusalem, rolled past Fri/Sat — the wizard's default. */
+/**
+ * Tomorrow in Asia/Jerusalem, rolled past Fri/Sat — the wizard's default. Calendar days, not
+ * 24 h steps: on a DST change (the October fall-back day is 25 h) now + 24 h can land on the
+ * wrong date, so step whole days on a noon-UTC anchor of the restaurant's local date.
+ */
 function expectedDefaultDate(now = new Date()): string {
-  const key = (d: Date) =>
-    new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
-  const wd = (d: Date) => new Intl.DateTimeFormat('en-US', { timeZone: TZ, weekday: 'short' }).format(d);
-  let d = new Date(now.getTime() + 24 * 3600 * 1000);
-  while (wd(d) === 'Fri' || wd(d) === 'Sat') d = new Date(d.getTime() + 24 * 3600 * 1000);
-  return key(d);
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  const [y, m, d] = today.split('-').map(Number) as [number, number, number];
+  const day = new Date(Date.UTC(y, m - 1, d, 12));
+  day.setUTCDate(day.getUTCDate() + 1);
+  while (day.getUTCDay() === 5 || day.getUTCDay() === 6) day.setUTCDate(day.getUTCDate() + 1); // Fri, Sat
+  return day.toISOString().slice(0, 10);
 }
 
 for (const vp of VIEWPORTS) {
