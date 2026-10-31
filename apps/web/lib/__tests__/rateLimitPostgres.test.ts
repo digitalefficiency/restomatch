@@ -68,6 +68,28 @@ describe('PostgresRateLimitStore', () => {
     const counts = await Promise.all(Array.from({ length: 20 }, (_, i) => (i % 2 ? a : b).incr(`${PREFIX}:shared`, 60)));
     expect([...counts].sort((x, y) => x - y)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
   });
+
+  it('decr gives back one unit of a live window, never below 0, never creates a key', async () => {
+    const { PostgresRateLimitStore } = await import('../rateLimit');
+    const store = new PostgresRateLimitStore(createDb(URL));
+    const key = `${PREFIX}:decr`;
+    await store.incr(key, 60);
+    await store.incr(key, 60);
+    await store.decr(key);
+    const count = async (k: string) =>
+      (await raw<Array<{ count: number }>>`SELECT count FROM rate_limit_counters WHERE key = ${k}`)[0]?.count;
+    expect(await count(key)).toBe(1);
+    await store.decr(key);
+    await store.decr(key); // already 0: stays 0
+    expect(await count(key)).toBe(0);
+    await store.decr(`${PREFIX}:never-created`);
+    expect(await count(`${PREFIX}:never-created`)).toBeUndefined();
+    // An expired window is left alone.
+    await store.incr(`${PREFIX}:expired`, 60);
+    await raw`UPDATE rate_limit_counters SET expires_at = now() - interval '1 second' WHERE key = ${`${PREFIX}:expired`}`;
+    await store.decr(`${PREFIX}:expired`);
+    expect(await count(`${PREFIX}:expired`)).toBe(1);
+  });
 });
 
 describe('enforceRateLimit on Postgres', () => {
@@ -198,15 +220,51 @@ describe('password-login limit counts only FAILED attempts (demo: many logins in
     });
   });
 
-  it('the per-IP limit is unchanged: successes from one IP still count toward it', async () => {
+  // Owner decision 31.10: only FAILED attempts count per IP (staff share one
+  // restaurant Wi-Fi). Every attempt is still counted atomically; a success gives
+  // its unit back (refundLoginIp), so a parallel burst stays bounded.
+  it('per IP, successes are refunded: 40 successful logins from one IP all succeed', async () => {
     await withRealDb(async (rl) => {
       const ip = `10.4.0.1-${RUN}`;
-      for (let i = 0; i < rl.LOGIN_IP_LIMIT.limit; i++) {
+      for (let i = 0; i < 40; i++) {
         const email = `ip${i}-${RUN}@demo.test`;
-        expect((await rl.enforceLoginLimit(email, ip)).allowed).toBe(true);
-        await rl.clearLoginFailures(email);
+        expect((await rl.enforceLoginLimit(email, ip)).allowed, `login #${i + 1}`).toBe(true);
+        await rl.clearLoginFailures(email); // what authorize() does after a correct password
+        await rl.refundLoginIp(ip);
       }
-      expect((await rl.enforceLoginLimit(`ipx-${RUN}@demo.test`, ip)).allowed).toBe(false);
+    });
+  });
+
+  it('per IP, failures still count: the 31st failed attempt from one IP is refused', async () => {
+    await withRealDb(async (rl) => {
+      const ip = `10.4.1.1-${RUN}`;
+      for (let i = 0; i < rl.LOGIN_IP_LIMIT.limit; i++) {
+        expect((await rl.enforceLoginLimit(`fail${i}-${RUN}@demo.test`, ip)).allowed).toBe(true); // wrong password: no refund
+      }
+      expect((await rl.enforceLoginLimit(`failx-${RUN}@demo.test`, ip)).allowed).toBe(false);
+    });
+  });
+
+  it('per IP, a success gives back only its own unit (earlier failures stay counted)', async () => {
+    await withRealDb(async (rl) => {
+      const ip = `10.4.2.1-${RUN}`;
+      for (let i = 0; i < rl.LOGIN_IP_LIMIT.limit - 1; i++) {
+        await rl.enforceLoginLimit(`mix${i}-${RUN}@demo.test`, ip); // 29 failures
+      }
+      expect((await rl.enforceLoginLimit(`ok-${RUN}@demo.test`, ip)).allowed).toBe(true); // #30, correct password
+      await rl.refundLoginIp(ip); // back to 29
+      expect((await rl.enforceLoginLimit(`mix30-${RUN}@demo.test`, ip)).allowed).toBe(true); // #30 again (failure)
+      expect((await rl.enforceLoginLimit(`mix31-${RUN}@demo.test`, ip)).allowed).toBe(false); // #31 refused
+    });
+  });
+
+  it('per IP, a parallel burst stays bounded even with refunds pending', async () => {
+    await withRealDb(async (rl) => {
+      const ip = `10.4.3.1-${RUN}`;
+      const results = await Promise.all(
+        Array.from({ length: 50 }, (_, i) => rl.enforceLoginLimit(`burst${i}-${RUN}@demo.test`, ip)),
+      );
+      expect(results.filter((r) => r.allowed)).toHaveLength(rl.LOGIN_IP_LIMIT.limit);
     });
   });
 });

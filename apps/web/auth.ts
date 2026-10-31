@@ -27,7 +27,7 @@ import { LoginRateLimited } from './lib/loginRateLimited';
 import { authorizeCredentials, getSessionSecurityState } from './lib/passwords';
 import { SIGNOUT_COOKIE, issuedBeforeSignOut, signOutCookieOptions } from './lib/signOutTombstone';
 import { consumeTwoFactorTicket } from './lib/totp';
-import { clearLoginFailures, enforceLoginLimit, enforceMagicLinkLimit, trustedProxyHops } from './lib/rateLimit';
+import { clearLoginFailures, enforceLoginLimit, enforceMagicLinkLimit, refundLoginIp, trustedProxyHops } from './lib/rateLimit';
 import {
   SESSION_TTL_LONG_SEC,
   isSessionExpired,
@@ -180,6 +180,9 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         if (!result) return null;
         // Correct password: only FAILED attempts count toward the per-account limit.
         await clearLoginFailures(email);
+        // Give back this attempt's per-IP unit: only failures count per network
+        // (owner decision 31.10; staff share one restaurant Wi-Fi).
+        await refundLoginIp(ip);
         const rememberMe =
           creds?.rememberMe === true ||
           creds?.rememberMe === 'true' ||
