@@ -23,6 +23,12 @@ export const NEXT: Record<RecoveryStatus, RecoveryStatus[]> = {
   written_off: ['claimed'],
 };
 
+/**
+ * Ask recovery.list for EVERY claim (packages/api MAX_CLAIMS) — screens that sum
+ * claims (letters, banner, tab counts) must never sum a 200-row first page.
+ */
+export const ALL_CLAIMS = 5000;
+
 /** Waiting on the supplier (the countdown runs) — packages/api AWAITING_SUPPLIER. */
 export const AWAITING: readonly RecoveryStatus[] = ['claimed', 'letter_sent', 'acknowledged'];
 export const CLOSED: readonly RecoveryStatus[] = ['recovered', 'written_off'];
@@ -163,27 +169,58 @@ export function countdownOf(
   return { tone: left <= 7 ? 'warn' : 'neutral', daysLeft: left, dueIso };
 }
 
-/** The two T2 queues of the banner: letters never sent, and sent letters past the answer window. */
+/**
+ * The two T2 queues of the banner: letters never sent, and sent letters past the
+ * answer window. "Late" is the SAME rule as the claims page's sent list and its
+ * reminder: a supplier's letter is late when its LATEST send date is more than
+ * ANSWER_DAYS ago, and then all its `letter_sent` claims wait (an acknowledged
+ * claim is answered, so it is not "waiting").
+ */
 export function followUps(
-  claims: ReadonlyArray<{ status: RecoveryStatus; outstandingAgorot: number; letterSentAt: string | null; claimedAt: string }>,
+  claims: ReadonlyArray<{
+    status: RecoveryStatus;
+    outstandingAgorot: number;
+    letterSentAt: string | null;
+    claimedAt: string;
+    supplierName?: string | null;
+  }>,
   nowIso: string,
 ): { unsent: { count: number; agorot: number }; waiting: { count: number; agorot: number } } {
   const unsent = { count: 0, agorot: 0 };
   const waiting = { count: 0, agorot: 0 };
+  const sent = new Map<string, { latest: string; count: number; agorot: number }>();
   for (const c of claims) {
     if (c.outstandingAgorot <= 0) continue;
     if (c.status === 'claimed') {
       unsent.count += 1;
       unsent.agorot += c.outstandingAgorot;
-    } else if (c.status === 'letter_sent' || c.status === 'acknowledged') {
-      const cd = countdownOf(c, nowIso);
-      if (cd?.tone === 'danger') {
-        waiting.count += 1;
-        waiting.agorot += c.outstandingAgorot;
-      }
+    } else if (c.status === 'letter_sent' && c.letterSentAt) {
+      const key = (c.supplierName ?? '').trim() || '—';
+      const g = sent.get(key) ?? { latest: c.letterSentAt, count: 0, agorot: 0 };
+      g.count += 1;
+      g.agorot += c.outstandingAgorot;
+      if (c.letterSentAt > g.latest) g.latest = c.letterSentAt;
+      sent.set(key, g);
+    }
+  }
+  for (const g of sent.values()) {
+    if (israelDay(g.latest) + ANSWER_DAYS - israelDay(nowIso) < 0) {
+      waiting.count += g.count;
+      waiting.agorot += g.agorot;
     }
   }
   return { unsent, waiting };
+}
+
+/**
+ * The ₪ a closing confirm names: "הכסף חזר" names the money that CAME BACK
+ * (Σ credited), a write-off names what is given up (Σ still owed).
+ */
+export function confirmAgorot(
+  claims: ReadonlyArray<{ creditedAgorot: number; outstandingAgorot: number }>,
+  to: 'recovered' | 'written_off',
+): number {
+  return claims.reduce((s, c) => s + (to === 'recovered' ? c.creditedAgorot : c.outstandingAgorot), 0);
 }
 
 /** Claims grouped by supplier (phone cards), largest outstanding first. */

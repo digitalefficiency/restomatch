@@ -70,10 +70,11 @@ export function DeltaBadge({
         title={t('delta.thinBase')}
         data-delta="thin"
       >
-        <bdi className="tabular-nums">
+        {/* The sign sits OUTSIDE the isolate, in the text's own direction: a Hebrew reader meets it first (never "₪12+"). */}
+        <span className="tabular-nums" data-delta-signed>
           {v.up ? '+' : '−'}
-          {abs(Math.abs(v.diff))}
-        </bdi>
+          <bdi>{abs(Math.abs(v.diff))}</bdi>
+        </span>
         {bare ? null : <span className="font-normal text-subtle">{vs}</span>}
         <span className="font-normal text-subtle">· {t('delta.thinBase')}</span>
       </span>
@@ -99,10 +100,10 @@ export function DeltaBadge({
       <span aria-hidden="true">{flat ? '' : up ? '▲' : '▼'}</span>
       <span>{text}</span>
       {showAmount && !flat && pct ? (
-        <bdi className="tabular-nums">
+        <span className="tabular-nums" data-delta-signed>
           ({up ? '+' : '−'}
-          {abs(Math.abs(diff))})
-        </bdi>
+          <bdi>{abs(Math.abs(diff))}</bdi>)
+        </span>
       ) : null}
       {bare ? null : <span className="font-normal text-subtle">{vs}</span>}
     </span>

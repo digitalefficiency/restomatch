@@ -13,9 +13,10 @@ import { Badge, Card, EmptyState, SectionHeader } from '@/lib/components';
 import { discrepancyLabel, displayName } from '../../approvals/vocab';
 import { PrintButton } from './print-button';
 import { LetterActions } from './letter-actions';
+import { DeferredProvider } from '../../recovery/deferred';
 import { addDays, buildLetters, daysLeft, sumAgora, type LetterLine, type SupplierLetter } from './letters';
 import { lineMathText } from './why';
-import { ANSWER_DAYS } from '../../recovery/logic';
+import { ALL_CLAIMS, ANSWER_DAYS } from '../../recovery/logic';
 
 const REASON_TYPES = [
   'PRICE_HIGHER',
@@ -62,13 +63,14 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
     caller.owner.viewOptions(),
   ]);
   // Tracker claims (any status: `claimed` get letters, `letter_sent` show as sent, the rest are handled).
-  const tracked = flags.recovery ? await caller.recovery.list().catch(() => []) : [];
+  // No .catch: a failed read is the route's error state ("not available · try again"), never "no letters".
+  const tracked = flags.recovery ? await caller.recovery.list({ limit: ALL_CLAIMS }) : [];
   const history = flags.recovery
     ? (
         await Promise.all(
           Array.from({ length: HISTORY_MONTHS }, (_, i) => -i)
             .filter((o) => o !== monthOffset)
-            .map((o) => caller.owner.leakBreakdown({ monthOffset: o, limit: 200 }).catch(() => [])),
+            .map((o) => caller.owner.leakBreakdown({ monthOffset: o, limit: 200 })),
         )
       ).flat()
     : [];
@@ -92,6 +94,11 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
   }));
   const letters = onlySupplier ? withIds.filter((l) => l.supplierId === onlySupplier) : withIds;
   const sent = onlySupplier ? built.sent.filter((s) => s.supplierId === onlySupplier) : built.sent;
+  // Lines nobody decided on yet are never in a letter (decision 18): a T2 "decide" prompt instead.
+  const onlyName = onlySupplier ? (options.suppliers.find((s) => s.id === onlySupplier)?.name ?? '').trim() : null;
+  const undecided = onlySupplier
+    ? (built.undecided.bySupplier.get(onlyName || '—') ?? { count: 0, amount: 0 })
+    : built.undecided;
   const lineCount = letters.reduce((n, l) => n + l.beforePayment.length + l.forCredit.length, 0);
   const pageTotal = sumAgora(letters.map((l) => l.total));
   const filteredName = onlySupplier
@@ -246,8 +253,6 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                 days: formatNumber(ANSWER_DAYS, locale),
               }),
               undoMoved: t('claims.undoMoved', { supplier: supplierOf(letter), amount: ils(letter.total) }),
-              undo: tr('undo.cta'),
-              seconds: tr('undo.seconds'),
               failed: tr('actions.failed'),
               notTracked: t('claims.notTracked'),
             }}
@@ -301,12 +306,35 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
         ) : null}
       </div>
 
+      {undecided.count > 0 ? (
+        <Card
+          padding="md"
+          className="mb-4 flex flex-wrap items-center justify-between gap-3 border-warn/40 print:hidden"
+          data-testid="claims-undecided"
+          data-amount={undecided.amount}
+        >
+          <p className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-ink">
+            <Badge tone="warning-solid">{t('claims.undecided.badge')}</Badge>
+            <strong className="tabular-nums">{ils(undecided.amount)}</strong>
+            <span>{t('claims.undecided.body', { count: formatNumber(undecided.count, locale) })}</span>
+          </p>
+          <Link
+            href="/dashboard/approvals"
+            className="inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-on-primary hover:brightness-90"
+          >
+            {t('claims.undecided.cta')}
+          </Link>
+        </Card>
+      ) : null}
+
       {letters.length === 0 && sent.length === 0 ? (
         <EmptyState icon={<FileCheck2 className="h-6 w-6" />} title={t('claims.empty')} description={t('claims.note')} />
       ) : (
         <div className="space-y-6">
           {letters.length > 0 ? <p className="text-xs text-subtle print:hidden">{t('claims.note')}</p> : null}
-          {letters.map(renderLetter)}
+          <DeferredProvider undoLabel={tr('undo.cta')} secondsLabel={tr('undo.seconds')}>
+            <div className="space-y-6">{letters.map(renderLetter)}</div>
+          </DeferredProvider>
 
           {sent.length > 0 ? (
             <section aria-labelledby="sent-letters-title" className="print:hidden" data-testid="sent-letters">
