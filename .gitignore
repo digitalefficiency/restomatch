@@ -45,3 +45,7 @@ playwright-report/
 # scripts/verify.sh step logs
 .verify/
 .demo-local/
+
+# Pilot tenant configs hold real customer data: keep them out of git (better: ~/restomatch-pilot/).
+packages/db/scripts/pilot.local.json
+*.pilot.json
