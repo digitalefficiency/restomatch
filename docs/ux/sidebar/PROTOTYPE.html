@@ -756,7 +756,9 @@ const IT = {
 /* Hash names: plain ASCII, none of the names the artifact host reserves. */
 const HASH = { payRun: 'pay-run', settings: 'restaurant-settings' };
 const hashOf = (k) => HASH[k] || k;
-const keyOfHash = (h) => { const e = Object.entries(HASH).find(([, v]) => v === h); return e ? e[0] : h; };
+/* Untrusted input (hash, query, localStorage) is mapped to a known constant key before use; the raw value never reaches the page. */
+const knownKey = (obj, v) => Object.keys(obj).find((k) => k === v) || '';
+const keyOfHash = (h) => { const e = Object.entries(HASH).find(([, v]) => v === h); return e ? e[0] : knownKey(IT, h); };
 const GR = {
   fav: { t: 'מועדפים', i: 'star', m: 'מסכים שהצמדת' },
   money: { t: 'כסף', i: 'wallet', m: 'אישורים, תשלומים וזיכויים' },
@@ -1326,8 +1328,9 @@ function updateFades() {
 
 /* ───────── Navigation ───────── */
 function announce(t) { const l = $('#live'); l.textContent = ''; setTimeout(() => { l.textContent = t; }, 40); }
-function setActive(key, viaUser) {
-  if (!IT[key]) return;
+function setActive(v, viaUser) {
+  let key = knownKey(IT, v);
+  if (!key) return;
   if (IT[key].bar) { toast('צילום חשבונית נפתח בטלפון'); return; }
   if (['help', 'a11y', 'contact'].includes(key)) { toast((IT[key].full || IT[key].t) + ' · נפתח בעמוד הנגישות'); return; }
   if (!visibleKeys().includes(key)) {
@@ -1736,7 +1739,8 @@ $('#more').addEventListener('click', (e) => {
 });
 
 /* ───────── Branch switch keeps the page ───────── */
-function switchScope(k) {
+function switchScope(v) {
+  const k = knownKey(MEM, v); if (!k) return;
   S.scope = k; closePop();
   renderSidebar(); renderTop(); renderPage(); renderBar();
   document.title = (IT[S.active].full || IT[S.active].t) + ' · ' + MEM[k].t + ' — RestoMatch';
@@ -1827,7 +1831,7 @@ ROOT.addEventListener('change', (e) => {
   const t = e.target;
   if (t.name === 'rp') { setRole(t.value); return; }
   if (t.name === 'navmode') { const wantRail = t.value === 'rail'; if (wantRail !== isRail()) toggleRail(); return; }
-  if (t.name === 'qscope') { S.qScope = t.value; S.qSel = 0; renderPage(); const f = $('#qs-' + t.value); if (f) f.focus(); return; }
+  if (t.name === 'qscope') { S.qScope = t.value === 'all' ? 'all' : 'mine'; S.qSel = 0; renderPage(); const f = $('#qs-' + S.qScope); if (f) f.focus(); return; }
   if (t.matches('[data-bulk]')) {
     const ids = $$('[data-bulk]').filter((x) => x.checked).map((x) => x.dataset.bulk);
     const v = sum(GAPS.filter((g) => ids.includes(g.id)).map((g) => g.v));
@@ -1958,8 +1962,9 @@ function renderDeck() {
   set.insertAdjacentHTML('beforeend', FIVE.map((k) => '<input type="radio" name="rp" id="rp-' + k + '" value="' + k + '"' + (S.role === k ? ' checked' : '') + '><label for="rp-' + k + '">' + ROLES[k].label + '</label>').join(''));
   syncDeckNav();
 }
-function setRole(k) {
-  if (!ROLES[k] || k === S.role) return;
+function setRole(v) {
+  const k = knownKey(ROLES, v);
+  if (!k || k === S.role) return;
   S.role = k; S.scope = 'main'; S.active = 'home'; S.bellUnread = true; S.qScope = 'mine'; S.approved = new Set(); S.recent = []; S.ovl = false;
   loadPrefs();
   LS.set('rm:proto:role', k);
@@ -1971,8 +1976,8 @@ function setRole(k) {
   announce('תצוגה כ־' + ROLES[k].label);
 }
 function loadPrefs() {
-  try { S.groups = JSON.parse(LS.get('rm:nav:groups:' + S.role) || '{}') || {}; } catch (e) { S.groups = {}; }
-  try { S.fav = (JSON.parse(LS.get('rm:nav:fav:' + S.role) || '[]') || []).filter((x) => visibleKeys().includes(x)).slice(0, 5); } catch (e) { S.fav = []; }
+  try { const g = JSON.parse(LS.get('rm:nav:groups:' + S.role) || '{}') || {}; S.groups = {}; Object.keys(g).forEach((k) => { if (g[k] === true) S.groups[k] = true; }); } catch (e) { S.groups = {}; }
+  try { const v = visibleKeys(); S.fav = (JSON.parse(LS.get('rm:nav:fav:' + S.role) || '[]') || []).map((x) => v.find((k) => k === x)).filter(Boolean).slice(0, 5); } catch (e) { S.fav = []; }
   S.lru = {};
 }
 
@@ -1983,7 +1988,7 @@ function loadPrefs() {
   if (qp.get('clean') === '1') ROOT.classList.add('clean');
   if (qp.get('reset') === '1') { try { Object.keys(window.localStorage).filter((k) => k.startsWith('rm:')).forEach((k) => window.localStorage.removeItem(k)); } catch (e) { /* ignore */ } }
   const role = qp.get('role') || LS.get('rm:proto:role') || 'owner';
-  S.role = ROLES[role] ? role : 'owner';
+  S.role = knownKey(ROLES, role) || 'owner';
   S.keys1 = LS.get('rm:keys:single') !== '0';
   S.railPref = qp.get('nav') === 'rail' ? true : qp.get('nav') === 'open' ? false : LS.get('rm:nav:rail') === '1';
   loadPrefs();
