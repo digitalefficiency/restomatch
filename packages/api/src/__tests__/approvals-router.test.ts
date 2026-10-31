@@ -584,7 +584,7 @@ describe('decisions: verbs, reasons, preconditions (approvals-01/-05/-11)', () =
     await ownerOf(s).approvals.reject({ discrepancyId: s.discrepancyOwnerId, reason: 'מחיר עודכן בהסכמה', reasonCode: 'price_agreed' });
     const rows = await db.select().from(activityEvents);
     expect(rows.map((r) => r.title).sort()).toEqual([DECISION_COPY.he.approved, DECISION_COPY.he.rejected].sort());
-    expect(DECISION_COPY.he).toMatchObject({ approve: 'דרוש {amount} מהספק', reject: 'שלם כפי שחויב', escalate: 'העבר לבעלים' });
+    expect(DECISION_COPY.he).toMatchObject({ approve: 'דרשו {amount} מהספק', reject: 'שלמו כפי שחויב', escalate: 'העבירו לבעלים' });
   });
 
   it('a waive reason chip stores its code in the audit after', async () => {
@@ -642,7 +642,7 @@ describe('approval e-mail names the decisions', () => {
     const { approvalNeededEmail, DECISION_COPY } = await import('../notifications/templates');
     const { html, text } = approvalNeededEmail({ supplierName: 'שטיינברג', discrepancyCount: 1, atRiskIls: '₪104.80' });
     expect(text).toContain(DECISION_COPY.he.reject);
-    expect(text).toContain('דרוש מהספק');
+    expect(text).toContain('דרשו מהספק');
     expect(html).toContain(DECISION_COPY.he.reject);
   });
 });

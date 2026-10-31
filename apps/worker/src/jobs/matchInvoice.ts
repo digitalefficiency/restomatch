@@ -8,6 +8,8 @@ import {
   createWhatsAppNotifier,
   getEntitlements,
   loadPriorDecisions,
+  materializeClaims,
+  releaseClaimsForRematch,
   receiptStillOpen,
   persistMatchRun,
   rematchHoldReason,
@@ -17,7 +19,19 @@ import {
   formatIlsAgorot,
 } from '@restomatch/api';
 import { computeInvoiceLeak } from '@restomatch/charts';
-import { and, desc, eq, invoices, matchRuns, restaurants, suppliers, type Database } from '@restomatch/db';
+import {
+  and,
+  desc,
+  discrepancies,
+  eq,
+  inArray,
+  invoices,
+  isNotNull,
+  matchRuns,
+  restaurants,
+  suppliers,
+  type Database,
+} from '@restomatch/db';
 import { runMatch, type MatchOutput } from '@restomatch/matching';
 import { makeWorker, type WorkerJob } from '../queue';
 import { appBaseUrl } from '../lib/notifyHelpers';
@@ -135,12 +149,16 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
     const tx = rawTx as unknown as Database;
     let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;
     if (priorRun) {
+      // Claims reference the discrepancies about to be deleted (FK). Release the
+      // bare ones first; a claim with money history (letter, credit) refuses the
+      // re-match with CONFLICT, which fails this job loudly (never swallowed).
+      await releaseClaimsForRematch(tx, restaurantId, invoiceId);
       prior = await loadPriorDecisions(tx, restaurantId, invoiceId);
       await tx
         .delete(matchRuns)
         .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
     }
-    return persistMatchRun(
+    const out = await persistMatchRun(
       tx,
       { restaurantId, invoiceId, poId: built.poId, grId: built.grId },
       built.input,
@@ -148,6 +166,8 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
       rules,
       prior,
     );
+    if (priorRun) await rebindDecidedClaims(tx, restaurantId, out.matchRunId);
+    return out;
   });
   return { result, persisted, replaced: Boolean(priorRun) };
 }
@@ -159,6 +179,30 @@ const whatsapp = createWhatsAppNotifier();
 const push = createPushNotifier();
 // Real Resend email when RESEND_API_KEY is set, else dev/console EmailNotifier.
 const email = createEmailNotifier();
+
+/**
+ * After a re-match, the people's decisions were re-applied to the findings that
+ * still exist. Their claims (released above) come back under the ORIGINAL
+ * decider (`resolved_by`), never the job — one `materializeClaims` per decider.
+ */
+async function rebindDecidedClaims(tx: Database, restaurantId: string, matchRunId: string): Promise<void> {
+  const decided = await tx
+    .select({ id: discrepancies.id, by: discrepancies.resolvedBy })
+    .from(discrepancies)
+    .where(
+      and(
+        eq(discrepancies.restaurantId, restaurantId),
+        eq(discrepancies.matchRunId, matchRunId),
+        inArray(discrepancies.resolutionStatus, ['accepted', 'resolved']),
+        isNotNull(discrepancies.resolvedBy),
+      ),
+    );
+  const byDecider = new Map<string, string[]>();
+  for (const d of decided) byDecider.set(d.by!, [...(byDecider.get(d.by!) ?? []), d.id]);
+  for (const [actorId, discrepancyIds] of byDecider) {
+    await materializeClaims(tx, { restaurantId, discrepancyIds, actorId });
+  }
+}
 
 /**
  * The branch-aware deep link of every approval notification (ia-nav-09):

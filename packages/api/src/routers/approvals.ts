@@ -714,7 +714,7 @@ const AUDIT_ACTION: Record<Decision, string> = {
  *  3. the audit row records the decision and the ₪ the decider saw
  *     (`after.decision`, `after.amountAgorot` — G-03's column takes it later);
  *  4. the claim, in this transaction, under the decider's name (W2-10a). An
- *     accepted DUPLICATE_INVOICE is a hold on the copy, not a claim;
+ *     accepted DUPLICATE_INVOICE is held from payment AND claimed (incl. VAT);
  *  5. the activity row (metadata v2, no baked ₪ string), in a savepoint.
  * TODO(G-05): emit('discrepancy.<decision>') once the events kernel is on this base.
  */
@@ -785,8 +785,11 @@ async function decide(
     })
     .returning({ id: auditLog.id });
 
+  // An accepted duplicate is BOTH held from payment (pay run, "duplicateHeld"
+  // wording) AND claimed (the supplier is asked to cancel it, incl. VAT) —
+  // the letters and syncClaims already count it (orchestrator, 31.10).
   const heldDuplicate = opts.decision === 'accepted' && row.type === 'DUPLICATE_INVOICE';
-  if (opts.decision !== 'escalated' && !heldDuplicate) {
+  if (opts.decision !== 'escalated') {
     await materializeClaims(tx, { restaurantId: rid, discrepancyIds: [row.id], actorId: ctx.session.userId });
   }
 

@@ -3,10 +3,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { and, createDb, eq, notificationsOutbox, restaurants, sql, testDbUrl } from '@restomatch/db';
-import { awaitingDecision, claimableLines, formatIlsAgorot } from '@restomatch/api';
+import { awaitingDecision, claimableLines, formatIlsAgorot, materializeClaims } from '@restomatch/api';
 import { computeInvoiceLeak } from '@restomatch/charts';
 import { processEndOfDayReport } from '../jobs/endOfDayReport';
-import { approvalsGoLink, invoiceClaimAgorot } from '../jobs/matchInvoice';
+import { approvalsGoLink, invoiceClaimAgorot, matchInvoiceForJob } from '../jobs/matchInvoice';
 
 /**
  * W2-04 §5.11-12 (deep-fix class 5): the end-of-day digest's "awaiting
@@ -74,4 +74,46 @@ describe('match-invoice notification copy', () => {
     expect(await invoiceClaimAgorot(db, restaurantId, invoiceId)).toBe(expected);
   });
 
+});
+
+describe('match-invoice re-match keeps claims honest (W2-04 §8)', () => {
+  async function decidedInvoice() {
+    const [row = null] = (await db.execute(sql`
+      SELECT d.id, mr.invoice_id, m.user_id
+      FROM discrepancies d
+      JOIN match_runs mr ON mr.id = d.match_run_id
+      JOIN memberships m ON m.restaurant_id = d.restaurant_id AND m.role = 'manager'
+      WHERE d.restaurant_id = ${restaurantId} AND d.resolution_status IN ('open','escalated')
+        AND d.severity IN ('warn','block') AND d.type = 'PRICE_HIGHER' AND mr.invoice_id IS NOT NULL
+      ORDER BY abs(d.delta_amount) DESC LIMIT 1`)) as unknown as Array<{ id: string; invoice_id: string; user_id: string }>;
+    return row!;
+  }
+
+  it('releases the bare claim before deleting runs and rebinds it to the ORIGINAL decider', async () => {
+    const { id, invoice_id: invoiceId, user_id: decider } = await decidedInvoice();
+    await db.transaction(async (raw) => {
+      const tx = raw as unknown as typeof db;
+      await tx.execute(sql`UPDATE discrepancies SET resolution_status = 'accepted', resolved_by = ${decider}::uuid, resolved_at = now() WHERE id = ${id}::uuid`);
+      await materializeClaims(tx, { restaurantId, discrepancyIds: [id], actorId: decider });
+    });
+    const out = await matchInvoiceForJob(db, { restaurantId, invoiceId, rematch: true });
+    if (!out.persisted) throw new Error(`re-match skipped: ${out.skipped}`);
+    const rows = (await db.execute(sql`
+      SELECT c.created_by, d.resolution_status FROM recovery_claims c
+      JOIN discrepancies d ON d.id = c.discrepancy_id
+      JOIN match_runs mr ON mr.id = d.match_run_id
+      WHERE mr.invoice_id = ${invoiceId}::uuid`)) as unknown as Array<{ created_by: string; resolution_status: string }>;
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.created_by === decider && r.resolution_status === 'accepted')).toBe(true);
+  });
+
+  it('a claim with money history refuses the re-match with CONFLICT (surfaced, not swallowed)', async () => {
+    const [inv] = (await db.execute(sql`
+      SELECT mr.invoice_id FROM recovery_claims c JOIN discrepancies d ON d.id = c.discrepancy_id
+      JOIN match_runs mr ON mr.id = d.match_run_id WHERE c.restaurant_id = ${restaurantId} LIMIT 1`)) as unknown as Array<{ invoice_id: string }>;
+    await db.execute(sql`UPDATE recovery_claims SET letter_sent_at = now() WHERE invoice_id = ${inv!.invoice_id}::uuid`);
+    await expect(matchInvoiceForJob(db, { restaurantId, invoiceId: inv!.invoice_id, rematch: true })).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+  });
 });

@@ -4,7 +4,9 @@
  * Undecided rows never get a claim (decision 18); reads write nothing.
  */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { createDb, discrepancies, eq, recoveryClaims, restaurants, sql, testDbUrl } from '@restomatch/db';
+import { activityEvents, createDb, discrepancies, eq, recoveryClaims, restaurants, sql, testDbUrl } from '@restomatch/db';
+import { awaitingDecision } from '../approvals/awaiting';
+import { DECISION_COPY } from '../notifications/templates';
 import { resetDb } from './fixtures';
 import { addGap, addInvoice, callerAs, payloadOf, seedDesk, type Desk } from './approvals-desk.fixtures';
 import { AMOUNT_CHANGED_PREFIX } from '../routers/approvals';
@@ -68,12 +70,29 @@ describe('claim at decision', () => {
     expect(rows).toHaveLength(0);
   });
 
-  it('a waive (reject) makes no claim; an accepted duplicate is a hold, not a claim', async () => {
+  it('a waive (reject) makes no claim', async () => {
     await callerAs(db, T, 'manager').approvals.reject({ discrepancyId: T.discrepancyId, reason: 'מחיר מוסכם', reasonCode: 'price_agreed' });
-    const { matchRunId } = await addInvoice(db, T, 'dup');
-    const dup = await addGap(db, T, matchRunId, { deltaAmount: '1170.00', type: 'DUPLICATE_INVOICE', severity: 'warn', requiresRole: 'bookkeeper' });
-    await callerAs(db, T, 'bookkeeper').approvals.approve({ discrepancyId: dup });
     expect((await counts()).claims).toBe(0);
+  });
+
+  it('an accepted duplicate: one claim on the incl.-VAT basis + a held copy; never double-counted in awaitingDecision', async () => {
+    const { invoiceId, matchRunId } = await addInvoice(db, T, 'dup');
+    const dup = await addGap(db, T, matchRunId, { deltaAmount: '1170.00', type: 'DUPLICATE_INVOICE', severity: 'warn', requiresRole: 'bookkeeper' });
+    const session = { restaurantId: T.restaurantId, role: 'owner' as const };
+    const before = await awaitingDecision(db, { session }, { scope: 'all', filters: { invoiceIds: [invoiceId] } });
+    expect(before.count).toBe(1);
+    expect(before.ils).toMatchObject({ excl: 0, incl: 1170, vat: 0 });
+
+    await callerAs(db, T, 'bookkeeper').approvals.approve({ discrepancyId: dup });
+    const claims = await db.select().from(recoveryClaims).where(eq(recoveryClaims.discrepancyId, dup));
+    expect(claims).toHaveLength(1);
+    expect(claims[0]).toMatchObject({ amountAgorot: 117_000, createdBy: T.users.bookkeeper, invoiceId });
+    // The copy is held: the activity keeps the hold wording.
+    const [act] = await db.select().from(activityEvents).where(eq(activityEvents.entityId, dup));
+    expect(act!.title).toBe(DECISION_COPY.he.duplicateHeld);
+    const after = await awaitingDecision(db, { session }, { scope: 'all', filters: { invoiceIds: [invoiceId] } });
+    expect(after.count).toBe(0);
+    expect(after.ils).toMatchObject({ excl: 0, incl: 0, vat: 0 });
   });
 
   it('the ₪ the decider saw moved → CONFLICT, nothing decided, no claim', async () => {

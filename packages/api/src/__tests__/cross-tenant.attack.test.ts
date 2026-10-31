@@ -120,6 +120,9 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // W1-07: server queue totals + the decision undo.
   'approvals.queueSummary': 'isolation',
   'approvals.reopen': 'attack',
+  // W2-04: bulk decide / undo — attack tests in approvals-bulk.attack.test.ts.
+  'approvals.decideMany': 'attack — approvals-bulk.attack.test.ts',
+  'approvals.reopenMany': 'attack — approvals-bulk.attack.test.ts',
   'exports.invoicesCsv': 'isolation',
   'exports.uniform1000': 'isolation',
   'onboarding.myMemberships': 'isolation',

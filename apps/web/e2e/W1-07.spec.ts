@@ -161,8 +161,8 @@ test.describe('phone 390×844', () => {
     await expect(first).toContainText('בירה מהחבית');
     const approve = first.getByTestId('decide-approve');
     const reject = first.getByTestId('decide-reject');
-    await expect(approve).toHaveText(/דרוש .*104\.80.* מהספק/);
-    await expect(reject).toHaveText('שלם כפי שחויב');
+    await expect(approve).toHaveText(/דרשו .*104\.80.* מהספק/);
+    await expect(reject).toHaveText('שלמו כפי שחויב');
     const a = (await approve.boundingBox())!;
     const r = (await reject.boundingBox())!;
     expect(a.height).toBeGreaterThanOrEqual(48);

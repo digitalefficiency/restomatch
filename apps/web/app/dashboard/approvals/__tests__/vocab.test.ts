@@ -126,9 +126,9 @@ describe('decision verbs name what happens to the money (approvals-01, functiona
     const [ap, rj] = decisionActions('PRICE_HIGHER');
     expect(ap).toMatchObject({ kind: 'approve', procedure: 'approve' });
     expect(rj).toMatchObject({ kind: 'reject', procedure: 'reject' });
-    expect(he(ap!.label as never, { amount: '₪104.80' })).toBe('דרוש ₪104.80 מהספק');
-    expect(he(rj!.label as never)).toBe('שלם כפי שחויב');
-    expect(he('decision.escalate')).toBe('העבר לבעלים');
+    expect(he(ap!.label as never, { amount: '₪104.80' })).toBe('דרשו ₪104.80 מהספק');
+    expect(he(rj!.label as never)).toBe('שלמו כפי שחויב');
+    expect(he('decision.escalate')).toBe('העבירו לבעלים');
     expect(en(ap!.label as never, { amount: '₪104.80' })).toBe('Claim ₪104.80 back');
     expect(en(rj!.label as never)).toBe('Pay as billed');
   });

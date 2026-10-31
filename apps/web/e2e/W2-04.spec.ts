@@ -277,7 +277,7 @@ test.describe('manager: escalation sheet → an outbox row per owner', () => {
     await loginViaMagicLink(page, 'manager@kfar-hazeitim.test', '/dashboard/approvals');
     const card = cardsOf(page, 'W204-3').first();
     await card.getByTestId('card-more').click();
-    await page.getByRole('menuitem', { name: 'העבר לבעלים' }).click();
+    await page.getByRole('menuitem', { name: 'העבירו לבעלים' }).click();
     await page.getByRole('button', { name: 'מחיר חריג' }).click();
     await page.getByTestId('escalate-send').click();
     await expect.poll(() => statuses([fx.c])).toEqual(['escalated']);
