@@ -2,6 +2,8 @@ import { cache } from 'react';
 import type { UserRole } from '@restomatch/db';
 import { createServerCaller } from '@/lib/trpc/server';
 import { enabledFeatures } from '@/lib/ingest/features';
+import { db } from '@/lib/db';
+import { decideSummary } from './queue-summary';
 
 /**
  * Request-scoped loaders for the finance homes. `cache` dedupes a source read by
@@ -14,9 +16,12 @@ export const loadFeatures = cache(async (restaurantId: string) => enabledFeature
 
 export const loadRecoveryFlags = cache(async () => (await caller()).recovery.flags());
 
-/** Items routed to the viewer (owner: everyone's), newest first; capped like the queue's first page. */
-export const QUEUE_CAP = 100;
-export const loadMyQueue = cache(async () => (await caller()).approvals.myQueue({ limit: QUEUE_CAP }));
+/**
+ * The viewer's whole decision queue (owner: everyone's) in ₪ and count — one SQL
+ * aggregate under the restaurant GUC, see queue-summary.ts.
+ * TODO(W2-08): switch to approvals.queueSummary.
+ */
+export const loadDecide = cache(async (restaurantId: string, role: UserRole) => decideSummary(db, restaurantId, role));
 
 export const loadVatAtRisk = cache(async (restaurantId: string, role: UserRole) => {
   if (role !== 'owner' && role !== 'manager' && role !== 'bookkeeper') return null;
@@ -44,17 +49,6 @@ export const loadOpenCount = cache(async () => {
 });
 
 export const loadSuppliers = cache(async () => (await caller()).suppliers.list());
-
-/** Σ |Δ| of the queue, like the approvals summary strip ("סכום בסיכון"); PRICE_LOWER is never at risk. */
-export function queueAtRisk(items: readonly { type: string; deltaAmount: string | number | null; severity: string }[]) {
-  let agorot = 0;
-  let blocking = 0;
-  for (const d of items) {
-    if (d.type !== 'PRICE_LOWER') agorot += Math.round(Math.abs(Number(d.deltaAmount ?? 0)) * 100);
-    if (d.severity === 'block') blocking += 1;
-  }
-  return { count: items.length, atRiskIls: agorot / 100, blocking };
-}
 
 /** The leak trend for a view (keyed by its serialized input), shared by the toolbar CSV and the trend card. */
 export const loadTrend = cache(async (viewInputJson: string, compare: 'off' | 'prev' | 'yoy') =>

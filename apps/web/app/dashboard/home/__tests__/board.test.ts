@@ -26,6 +26,14 @@ describe('truckState', () => {
     expect(truckState({ receiptStatus: 'pending' })).toBe('inProgress');
     expect(truckState({ receiptStatus: 'completed' })).toBe('received');
     expect(truckState({ receiptStatus: 'partial' })).toBe('receivedPartial');
+    // A turned-away truck is closed, not "not started" (so never late).
+    expect(truckState({ receiptStatus: 'rejected' })).toBe('receivedPartial');
+  });
+
+  it('a rejected receipt past its window is closed, never under באיחור', () => {
+    const b = buildBoard([po('r', { receiptStatus: 'rejected', receiptId: 'g', closedAt: at(-10), expectedAt: at(-120) })], NOW);
+    expect(b.late).toEqual([]);
+    expect(b.received.map((i) => i.poId)).toEqual(['r']);
   });
 });
 
@@ -84,6 +92,25 @@ describe('buildBoard', () => {
     const b = buildBoard([po('u', { hasDeliveryDate: false }), po('d')], NOW);
     expect(b.next?.poId).toBe('d');
     expect(b.undated.map((i) => i.poId)).toEqual(['u']);
+  });
+
+  it('an undated receipt closed on an earlier day is history: not "received today", and received never exceeds total', () => {
+    const b = buildBoard(
+      [
+        po('old', { hasDeliveryDate: false, receiptStatus: 'completed', closedAt: at(-3 * 24 * 60) }),
+        po('today', { hasDeliveryDate: false, receiptStatus: 'completed', closedAt: at(-30) }),
+        po('d'),
+      ],
+      NOW,
+    );
+    expect(b.received.map((i) => i.poId)).toEqual(['today']);
+    expect(b.summary).toEqual({ total: 2, received: 1, late: 0 });
+  });
+
+  it('a late truck received today counts as received today', () => {
+    const b = buildBoard([po('y', { late: false, expectedAt: at(-24 * 60), receiptStatus: 'completed', closedAt: at(-15) })], NOW);
+    expect(b.received.map((i) => i.poId)).toEqual(['y']);
+    expect(b.summary).toEqual({ total: 1, received: 1, late: 0 });
   });
 
   it('every truck appears exactly once', () => {

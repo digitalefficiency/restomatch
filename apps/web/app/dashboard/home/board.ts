@@ -51,9 +51,15 @@ export const NOW_WINDOW_MS = 90 * 60_000;
 
 export function truckState(e: Pick<BoardExpectation, 'receiptStatus'>): TruckState {
   if (e.receiptStatus === 'completed') return 'received';
-  if (e.receiptStatus === 'partial') return 'receivedPartial';
+  // A rejected receipt (the truck was turned away) is closed too — never "late".
+  if (e.receiptStatus === 'partial' || e.receiptStatus === 'rejected') return 'receivedPartial';
   if (e.receiptStatus === 'pending') return 'inProgress';
   return 'notStarted';
+}
+
+/** The calendar day on the restaurant's wall clock (Israel, like the rest of the web app). */
+function localDay(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 }
 
 export function isClosed(state: TruckState): boolean {
@@ -71,7 +77,12 @@ export function buildBoard(rows: readonly BoardExpectation[], now: Date = new Da
     return { ...r, state, isLate };
   });
 
-  const received = items.filter((i) => isClosed(i.state)).sort((a, b) => Date.parse(b.closedAt ?? b.expectedAt) - Date.parse(a.closedAt ?? a.expectedAt));
+  // "Received" is today's: a receipt closed on an earlier day (an undated PO listed for
+  // its 14-day lookback) is history, not part of today's board.
+  const today = localDay(now);
+  const received = items
+    .filter((i) => isClosed(i.state) && localDay(new Date(i.closedAt ?? i.expectedAt)) === today)
+    .sort((a, b) => Date.parse(b.closedAt ?? b.expectedAt) - Date.parse(a.closedAt ?? a.expectedAt));
   const open = items.filter((i) => !isClosed(i.state));
   const late = open.filter((i) => i.isLate).sort(byTime);
   const undated = open.filter((i) => !i.isLate && !i.hasDeliveryDate);
@@ -95,8 +106,9 @@ export function buildBoard(rows: readonly BoardExpectation[], now: Date = new Da
     undated: without(undated),
     received,
     summary: {
-      // Today's trucks + the late ones carried over; undated POs are not "deliveries today".
-      total: items.filter((i) => i.hasDeliveryDate).length,
+      // Today's trucks (+ the late ones carried over) and whatever was received today;
+      // an open undated PO is not a "delivery today". received ≤ total by construction.
+      total: open.filter((i) => i.hasDeliveryDate).length + received.length,
       received: received.length,
       late: late.length,
     },
