@@ -91,13 +91,11 @@ describe('lib/contact — channels render only when configured (mkt-06)', () => 
     ).toBe('050-1234567');
   });
 
-  it('nothing is invented: the company legal details are still pending (null)', () => {
-    expect(PUBLIC_FACTS.company).toEqual({
-      legalName: null,
-      companyId: null,
-      address: null,
-      privacyContact: null,
-    });
+  it('the company is named on the statement; address and privacy contact stay pending (null)', () => {
+    expect(PUBLIC_FACTS.company.legalName?.he).toBe('דיגיטל אפישנסי בע״מ');
+    expect(PUBLIC_FACTS.company.companyId).toMatch(/^\d{9}$/);
+    expect(PUBLIC_FACTS.company.address).toBeNull();
+    expect(PUBLIC_FACTS.company.privacyContact).toBeNull();
   });
 });
 
@@ -116,8 +114,8 @@ describe('the statement never ships to production with a placeholder', () => {
     },
   };
 
-  it('lists what is still pending: only the company legal name and ח״פ', () => {
-    expect(pendingStatementFacts({})).toEqual(['company.legalName', 'company.companyId']);
+  it('lists what is still pending: nothing, now that every statement fact is supplied', () => {
+    expect(pendingStatementFacts({})).toEqual([]);
     expect(pendingStatementFacts({}, UNSET)).toEqual([
       'a11yCoordinator.name',
       'a11yCoordinator.phone',
@@ -129,7 +127,8 @@ describe('the statement never ships to production with a placeholder', () => {
   });
 
   it('a production deploy fails while anything is pending', () => {
-    expect(() => assertStatementPublishable('production', {})).toThrow(
+    const noCompany = { ...PUBLIC_FACTS, company: UNSET.company };
+    expect(() => assertStatementPublishable('production', {}, noCompany)).toThrow(
       /company\.legalName, company\.companyId/,
     );
     expect(() => assertStatementPublishable('production', {}, UNSET)).toThrow(
@@ -141,6 +140,8 @@ describe('the statement never ships to production with a placeholder', () => {
     expect(() => assertStatementPublishable('preview', {})).not.toThrow();
     expect(() => assertStatementPublishable(undefined, {})).not.toThrow();
     expect(() => assertStatementPublishable('production', {}, filled)).not.toThrow();
+    // The real config is complete: the production build is allowed.
+    expect(() => assertStatementPublishable('production', {})).not.toThrow();
   });
 });
 

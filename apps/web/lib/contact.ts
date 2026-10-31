@@ -35,8 +35,12 @@ export const PUBLIC_FACTS: {
     email: 'info@digitalefficiency.co.il', // owner-confirmed 2026-10-31
   },
   company: {
-    legalName: null, // pending from the owner
-    companyId: null, // pending from the owner
+    // Owner-supplied 2026-10-31. The Hebrew name is owner-confirmed; the English form is the
+    // orchestrator's transliteration, pending owner confirmation.
+    legalName: { he: 'דיגיטל אפישנסי בע״מ', en: 'Digital Efficiency Ltd.' },
+    // Owner-supplied 2026-10-31, being re-verified with the owner: a בע״מ registration number
+    // normally starts with 51, and this one has the shape of a personal ID. Correct it here.
+    companyId: '318163235',
     address: null, // pending from the owner
     privacyContact: null, // pending from the owner (legal text signing is H-02)
   },
