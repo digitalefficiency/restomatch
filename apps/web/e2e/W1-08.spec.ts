@@ -48,7 +48,8 @@ test('explorer: bars total = Σ bars; the T1 tile carries the exact leak, the ca
   expect(agora(total)).toBeGreaterThanOrEqual(agora(leak));
   if (agora(total) > agora(leak)) await expect(page.getByTestId('explorer-cap-note')).toBeVisible();
   else await expect(page.getByTestId('explorer-cap-note')).toHaveCount(0);
-  await expect(tile).toHaveAttribute('title', new RegExp(at2dp(leak).replace(/[.,]/g, '\\$&')));
+  // A plain substring check — no hand-built regex from a number.
+  expect(await tile.getAttribute('title')).toContain(at2dp(leak));
   // "מול 1–25 בספט׳": the default compare is the aligned previous period.
   await expect(page.locator('main')).toContainText(/מול 1–\d+/);
 });
