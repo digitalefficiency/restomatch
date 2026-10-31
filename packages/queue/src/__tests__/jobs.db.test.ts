@@ -1,5 +1,5 @@
 import postgres from 'postgres';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   backoffMs,
   claimJob,
@@ -13,6 +13,8 @@ import {
   failedJobs,
   isTerminalJobError,
   OCR_JOB_HEADROOM_DEFAULT_MS,
+  OCR_JOB_HEADROOM_MAX_MS,
+  ocrJobDeadlineMs,
   ocrJobHeadroomMs,
   TERMINAL_JOB_ERROR,
   insertJob,
@@ -241,5 +243,16 @@ describe('OCR-A PR-OCR-3: terminal errors and OCR headroom', () => {
     expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: ' 90000 ' })).toBe(90_000);
     expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: '0' })).toBe(0);
     for (const bad of ['', 'abc', '-5', 'Infinity']) expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: bad })).toBe(120_000);
+  });
+
+  it('OCR_JOB_HEADROOM_MS is clamped below the cron claim window (one warning); the job deadline keeps a persistence margin', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(OCR_JOB_HEADROOM_MAX_MS).toBe(200_000);
+    expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: '300000' })).toBe(200_000);
+    expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: '999999' })).toBe(200_000);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+    expect(ocrJobDeadlineMs({})).toBe(100_000); // 120 s headroom − 20 s to persist
+    expect(ocrJobDeadlineMs({ OCR_JOB_HEADROOM_MS: '0' })).toBe(10_000); // never below 10 s
   });
 });

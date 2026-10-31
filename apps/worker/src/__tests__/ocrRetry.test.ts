@@ -31,7 +31,7 @@ vi.mock('@restomatch/api', async (importOriginal) => {
   return { ...real, meterOcrScan: h.meter };
 });
 
-const { classifyOcrError } = await import('../jobs/ocrInvoice');
+const { classifyOcrError, OcrDeadlineError, withOcrDeadline } = await import('../jobs/ocrInvoice');
 const { NOT_FOUND_REFUSAL } = await import('../jobs/ocrSweep');
 const { runQueuedJobs } = await import('../serverless');
 
@@ -63,6 +63,13 @@ describe('classifyOcrError', () => {
     ['parse: schema', Object.assign(new Error('invalid'), { name: 'ZodError' }), true],
   ])('%s → retryable', (_l, err, retryable) => {
     expect(classifyOcrError(err).retryable).toBe(retryable);
+  });
+
+  it('the per-job deadline (review #10): a read that outlives it rejects with a RETRYABLE timeout', async () => {
+    const never = new Promise<never>(() => {});
+    await expect(withOcrDeadline(never, 20)).rejects.toBeInstanceOf(OcrDeadlineError);
+    expect(classifyOcrError(new OcrDeadlineError(20)).retryable).toBe(true);
+    await expect(withOcrDeadline(Promise.resolve(7), 1_000)).resolves.toBe(7);
   });
 
   it.each([

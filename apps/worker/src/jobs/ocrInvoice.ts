@@ -17,7 +17,7 @@ import {
   type CatalogMatcherFn,
   type OcrProvider,
 } from '@restomatch/ocr';
-import { enqueueMatchInvoice, TERMINAL_JOB_ERROR } from '@restomatch/queue';
+import { enqueueMatchInvoice, ocrJobDeadlineMs, TERMINAL_JOB_ERROR } from '@restomatch/queue';
 import type { InvoiceOcrResult, OcrInvoiceJob } from '@restomatch/types';
 import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
@@ -96,6 +96,30 @@ export async function ocrModeFor(
   if (claudeOcrRestaurantIds(opts.env ?? process.env).has(restaurantId.toLowerCase())) return 'claude';
   if (opts.grId && (await opts.isDemo(restaurantId))) return 'stub';
   return 'disabled';
+}
+
+/** Thrown when a read outlives its per-job deadline — retryable (message says "timed out"). */
+export class OcrDeadlineError extends Error {
+  constructor(ms: number) {
+    super(`OCR read timed out after ${ms}ms (per-job deadline)`);
+    this.name = 'OcrDeadlineError';
+  }
+}
+
+/** `p`, or an OcrDeadlineError after `ms`. */
+export async function withOcrDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new OcrDeadlineError(ms)), ms);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** First 8 characters of an id, for logs. */
@@ -261,11 +285,18 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
       .limit(1);
     const reviewThreshold = restaurant[0]?.settings?.ocrReviewThreshold;
 
-    const result = await runOcrPipeline(imageUrl, {
-      ...providers,
-      catalogMatcher: matcher,
-      ...(reviewThreshold !== undefined ? { reviewThreshold } : {}),
-    });
+    // A per-job deadline (review #10): the read must end before the invocation's
+    // headroom does. Hitting it is a retryable timeout (attempt 2 in a later run),
+    // never an in-job retry. The provider call itself is not cancelled (the
+    // ClaudeVision API takes no signal yet — S14): its result is just not waited for.
+    const result = await withOcrDeadline(
+      runOcrPipeline(imageUrl, {
+        ...providers,
+        catalogMatcher: matcher,
+        ...(reviewThreshold !== undefined ? { reviewThreshold } : {}),
+      }),
+      ocrJobDeadlineMs(),
+    );
 
     const r = result.reconciled;
     // The receipt this photo was taken on — so a receipt submit claims exactly
