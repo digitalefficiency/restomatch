@@ -17,26 +17,46 @@
  * A row whose channel has no provider configured is parked as `failed` with
  * last_error = SKIPPED_NO_PROVIDER — never `sent` — so the order page can say
  * "supplier sending isn't configured" instead of "sent by email".
+ *
+ * Owner rules for STAFF alerts (pilot, sendWindow.ts): none 23:00–06:00, none
+ * on Shabbat, at most STAFF_ALERT_DAILY_CAP per person per Israel day. A row
+ * that may not go out now goes back to `queued` with scheduled_at = the next
+ * allowed instant — it does not consume an attempt and is never dropped.
+ * Supplier messages a user explicitly sent (a PO send) are exempt.
  */
 import {
   SKIPPED_NO_PROVIDER,
+  STAFF_ALERT_DAILY_CAP,
+  capKey,
+  isExemptFromSendWindow,
   isResendConfigured,
+  isUndeliverableAddress,
+  localDay,
+  nextDayAllowedAt,
+  shabbatWindow,
+  staffAlertWindow,
   isWhatsAppCloudConfigured,
   makeResendDispatcher,
   WhatsAppCloudNotifier,
   type EmailAttachment,
   type NotificationPayload,
 } from '@restomatch/api';
-import { eq, notificationsOutbox, sql } from '@restomatch/db';
+import { eq, notificationsOutbox, sql, type Database } from '@restomatch/db';
 import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
 
 export interface OutboxDispatchJob {
   /** Process up to this many queued rows per tick. */
   batchSize?: number;
+  /** Test seam: the tick's "now" (ISO). Defaults to the real clock. */
+  now?: string;
 }
 
 const MAX_ATTEMPTS = 5;
+
+/** last_error for an email the dispatcher refused to hand a real provider (demo / .test domain). */
+export const SKIPPED_UNDELIVERABLE = 'skipped_undeliverable_address';
+const LOG_ERROR_CHARS = 160;
 
 /** Shape of a claimed outbox row (subset we dispatch with). */
 interface ClaimedRow {
@@ -49,6 +69,8 @@ interface ClaimedRow {
   payload: Record<string, unknown> | null;
   related_entity_type: string | null;
   related_entity_id: string | null;
+  dedupe_key: string | null;
+  scheduled_at: string | Date;
   attempt_count: number;
 }
 
@@ -76,6 +98,7 @@ export async function processOutboxDispatch(job: WorkerJob<OutboxDispatchJob>) {
   const db = jobDb(url);
 
   const batchSize = job.data.batchSize ?? 50;
+  const now = job.data.now ? new Date(job.data.now) : new Date();
 
   // Atomically CLAIM a batch: flip queued -> sending and stamp claimed_at in a
   // single statement whose subquery locks the chosen rows FOR UPDATE SKIP
@@ -88,13 +111,13 @@ export async function processOutboxDispatch(job: WorkerJob<OutboxDispatchJob>) {
     SET status = 'sending', claimed_at = now()
     WHERE id IN (
       SELECT id FROM ${notificationsOutbox}
-      WHERE status = 'queued' AND scheduled_at <= now()
+      WHERE status = 'queued' AND scheduled_at <= ${now.toISOString()}::timestamptz
       ORDER BY scheduled_at
       FOR UPDATE SKIP LOCKED
       LIMIT ${batchSize}
     )
     RETURNING id, restaurant_id, channel, target, subject, body, payload,
-              related_entity_type, related_entity_id, attempt_count
+              related_entity_type, related_entity_id, dedupe_key, scheduled_at, attempt_count
   `)) as unknown as ClaimedRow[];
 
   if (claimed.length === 0) {
@@ -104,8 +127,42 @@ export async function processOutboxDispatch(job: WorkerJob<OutboxDispatchJob>) {
   let dispatched = 0;
   let failed = 0;
   let skipped = 0;
+  const deferred = { quiet: 0, shabbat: 0, cap: 0 };
+
+  const window = shabbatWindow();
+  const gate = staffAlertWindow(now, window);
+  const isStaff = (r: ClaimedRow) =>
+    !isExemptFromSendWindow({ relatedEntityType: r.related_entity_type, dedupeKey: r.dedupe_key });
+  // Staff alerts already sent today, per person — loaded only when the window is open.
+  const sentToday = gate.open ? await staffAlertsSentToday(db, now, claimed.filter(isStaff)) : new Map<string, number>();
+
+  // RETURNING has no order: oldest first, so the first alerts of the day are the ones that go out.
+  claimed.sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
 
   for (const claimedRow of claimed) {
+    if (isStaff(claimedRow)) {
+      let until: Date | null = null;
+      if (!gate.open) {
+        until = gate.nextAllowedAt;
+        deferred[gate.reason] += 1;
+      } else {
+        const key = capKey({ restaurantId: claimedRow.restaurant_id, target: claimedRow.target });
+        if ((sentToday.get(key) ?? 0) >= STAFF_ALERT_DAILY_CAP) {
+          until = nextDayAllowedAt(now, window);
+          deferred.cap += 1;
+        }
+      }
+      if (until) {
+        // Back to queued at the next allowed instant. attempt_count and
+        // last_error are left as they are: waiting is not a failed attempt.
+        await db
+          .update(notificationsOutbox)
+          .set({ status: 'queued', scheduledAt: until, claimedAt: null })
+          .where(eq(notificationsOutbox.id, claimedRow.id));
+        continue;
+      }
+    }
+
     const row = {
       id: claimedRow.id,
       restaurantId: claimedRow.restaurant_id,
@@ -121,22 +178,31 @@ export async function processOutboxDispatch(job: WorkerJob<OutboxDispatchJob>) {
     };
     try {
       const outcome = await dispatch(row);
-      if (outcome === 'no_provider') {
+      if (outcome !== 'sent') {
         await db
           .update(notificationsOutbox)
-          .set({ status: 'failed', lastError: SKIPPED_NO_PROVIDER, claimedAt: null })
+          .set({ status: 'failed', lastError: outcome === 'no_provider' ? SKIPPED_NO_PROVIDER : SKIPPED_UNDELIVERABLE, claimedAt: null })
           .where(eq(notificationsOutbox.id, row.id));
         skipped += 1;
         continue;
       }
       await db
         .update(notificationsOutbox)
-        .set({ status: 'sent', sentAt: new Date() })
+        .set({ status: 'sent', sentAt: now })
         .where(eq(notificationsOutbox.id, row.id));
       dispatched += 1;
+      if (isStaff(claimedRow)) {
+        const key = capKey({ restaurantId: row.restaurantId, target: row.target });
+        sentToday.set(key, (sentToday.get(key) ?? 0) + 1);
+      }
     } catch (err) {
       const newAttempt = (row.attemptCount ?? 0) + 1;
       const errMessage = err instanceof Error ? err.message : String(err);
+      // One line per failed row — the outage used to be visible only in
+      // last_error. Never the address: the error text is redacted first.
+      console.error(
+        `[outbox-dispatch] failed id=${row.id.slice(0, 8)} channel=${row.channel} attempt=${newAttempt}/${MAX_ATTEMPTS} error="${redactError(errMessage, row.target)}"`,
+      );
       if (newAttempt >= MAX_ATTEMPTS) {
         // Terminal failure: leave it parked as `failed` (claimedAt cleared).
         await db
@@ -167,10 +233,56 @@ export async function processOutboxDispatch(job: WorkerJob<OutboxDispatchJob>) {
     }
   }
 
+  const deferredTotal = deferred.quiet + deferred.shabbat + deferred.cap;
+  if (deferredTotal > 0) {
+    console.log(`[outbox-dispatch] deferred quiet=${deferred.quiet} shabbat=${deferred.shabbat} cap=${deferred.cap}`);
+  }
   console.log(
     `[outbox-dispatch] claimed=${claimed.length} dispatched=${dispatched} failed=${failed} skipped_no_provider=${skipped}`,
   );
-  return { dispatched, failed, skipped };
+  return { dispatched, failed, skipped, deferred };
+}
+
+/**
+ * Staff alerts already sent on `now`'s Israel day, per cap key, for the
+ * people in this batch. Rows a mock notifier marked sent at enqueue count too:
+ * the person was alerted either way.
+ */
+async function staffAlertsSentToday(db: Database, now: Date, rows: ClaimedRow[]): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (rows.length === 0) return counts;
+  const targets = [...new Set(rows.map((r) => r.target.trim().toLowerCase()))];
+  const day = localDay(now);
+  const sent = (await db.execute(sql`
+    SELECT restaurant_id, target, related_entity_type, dedupe_key
+    FROM ${notificationsOutbox}
+    WHERE status = 'sent'
+      AND sent_at >= ${day.start.toISOString()}::timestamptz
+      AND sent_at < ${day.end.toISOString()}::timestamptz
+      AND lower(btrim(target)) IN (${sql.join(targets.map((t) => sql`${t}`), sql`, `)})
+  `)) as unknown as Array<{ restaurant_id: string; target: string; related_entity_type: string | null; dedupe_key: string | null }>;
+  for (const r of sent) {
+    if (isExemptFromSendWindow({ relatedEntityType: r.related_entity_type, dedupeKey: r.dedupe_key })) continue;
+    const key = capKey({ restaurantId: r.restaurant_id, target: r.target });
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * The first LOG_ERROR_CHARS of a provider error with every address taken out
+ * (the row's target, any email, any phone number) — logs must not carry PII.
+ */
+export function redactError(message: string, target: string): string {
+  let out = message;
+  const t = target.trim();
+  if (t) out = out.split(t).join('<target>');
+  out = out
+    .replace(/[^\s"'<>,;:()\[\]]+@[^\s"'<>,;:()\[\]]+/g, '<email>')
+    .replace(/\+?\d[\d\s().-]{7,}\d/g, '<phone>')
+    .replace(/\s+/g, ' ')
+    .replace(/"/g, "'");
+  return out.slice(0, LOG_ERROR_CHARS);
 }
 
 /**
@@ -198,7 +310,7 @@ export async function dispatch(row: {
   attachments?: EmailAttachment[];
   relatedEntityType: string | null;
   relatedEntityId: string | null;
-}): Promise<'sent' | 'no_provider'> {
+}): Promise<'sent' | 'no_provider' | 'undeliverable'> {
   // Typed as the notifier env: under the web app's ProcessEnv (Next augments it)
   // the bare process.env fails TS's weak-type check against NotifierFactoryEnv.
   const env = process.env as NonNullable<Parameters<typeof isResendConfigured>[0]>;
@@ -216,6 +328,9 @@ export async function dispatch(row: {
 
   if (row.channel === 'email') {
     if (!isResendConfigured(env)) return 'no_provider';
+    // Never hand a real provider a demo / .test address: each one is a bounce
+    // against the Resend quota (PO sends to demo suppliers included).
+    if (isUndeliverableAddress(row.target)) return 'undeliverable';
     const send = makeResendDispatcher({
       apiKey: env.RESEND_API_KEY!,
       from: env.RESEND_FROM ?? env.EMAIL_FROM,
