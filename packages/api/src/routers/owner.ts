@@ -29,6 +29,7 @@ import { z } from 'zod';
 import { discrepancyType, eq, restaurants } from '@restomatch/db';
 import { appError } from '../errors';
 import { featureEnabled } from '../lib/features';
+import { moneyKeys, nullFields, seesNoMoney } from '../lib/staffMoney';
 import { vatAtRisk, type VatAtRiskResult } from '../vat/vatAtRisk';
 import {
   financeProcedure,
@@ -82,6 +83,15 @@ type ViewInputT = z.infer<typeof ViewInput>;
 const CompareInput = z.enum(VIEW_COMPARES).default('off');
 const specOf = (v: ViewInputT): ViewSpec => ({ period: v.period, from: v.from, to: v.to, filters: v.filters });
 
+/**
+ * G-07 strip (pilot): a receiver / chef gets the hero's counts and month bounds
+ * but every ₪ figure (…Ils) and the leak % of spend nulled. Their screens never
+ * request these (staff homes); this closes the direct tRPC call.
+ */
+function stripHero(hero: LeakHero): LeakHero {
+  return nullFields(hero, moneyKeys(hero, ['leakPct']));
+}
+
 export const ownerRouter = router({
   /**
    * VAT at risk (flag `vatAtRisk`): tax invoices above the allocation-number
@@ -108,12 +118,20 @@ export const ownerRouter = router({
       if (!featureEnabled(r?.settings, 'vatAtRisk')) {
         throw appError('FORBIDDEN', 'FEATURE_DISABLED', 'הפיצ׳ר אינו פעיל עבור המסעדה');
       }
-      return vatAtRisk(ctx.db, ctx.session.restaurantId, input.period, { invoiceId: input.invoiceId });
+      const result = await vatAtRisk(ctx.db, ctx.session.restaurantId, input.period, { invoiceId: input.invoiceId });
+      // G-07 strip (pilot): the receiver (an invoice reader) sees no ₪.
+      if (!seesNoMoney(ctx.session.role)) return result;
+      return {
+        ...nullFields(result, ['totalVatAtRisk', 'currentThresholdIls']),
+        rows: result.rows.map((r) => nullFields(r, ['totalExclVat', 'vatAtRisk', 'thresholdIls'])),
+      };
     }),
 
   // KPIs stay on the core plan — the dashboard headline numbers are table stakes.
   kpis: memberProcedure.query(async ({ ctx }): Promise<OwnerKpis> => {
-    return computeOwnerKpis(ctx.db, ctx.session.restaurantId);
+    const kpis = await computeOwnerKpis(ctx.db, ctx.session.restaurantId);
+    // G-07 strip (pilot): receiver / chef get the counts, never the ₪.
+    return seesNoMoney(ctx.session.role) ? nullFields(kpis, moneyKeys(kpis)) : kpis;
   }),
 
   // The leak hero ("₪X leaked this month, Y% of spend, Z caught before payment")
@@ -121,7 +139,8 @@ export const ownerRouter = router({
   leakHero: memberProcedure
     .input(z.object({ monthOffset: z.number().int().min(-24).max(0).optional() }).optional())
     .query(async ({ ctx, input }): Promise<LeakHero> => {
-      return computeLeakHero(ctx.db, ctx.session.restaurantId, { monthOffset: input?.monthOffset });
+      const hero = await computeLeakHero(ctx.db, ctx.session.restaurantId, { monthOffset: input?.monthOffset });
+      return seesNoMoney(ctx.session.role) ? stripHero(hero) : hero;
     }),
 
   // Invoice-level drill-down (supplier, invoice number, line deltas) — the same
@@ -163,6 +182,9 @@ export const ownerRouter = router({
         computeLeakSummary(ctx.db, rid, spec),
         input.compare === 'off' ? Promise.resolve(null) : computeLeakSummary(ctx.db, rid, spec, input.compare),
       ]);
+      if (seesNoMoney(ctx.session.role)) {
+        return { current: stripHero(current), previous: previous ? stripHero(previous) : null };
+      }
       return { current, previous };
     }),
 

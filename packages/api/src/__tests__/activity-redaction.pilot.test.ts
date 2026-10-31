@@ -14,7 +14,7 @@ let A: Tenant;
 let B: Tenant;
 
 const MONEY_KEY = /(Ils|Agorot)$|amount|savings|total|price/i;
-const SHEKEL = /₪|ש["״'׳]ח/;
+const SHEKEL = /₪|ש(?:''|["״”'׳])ח|שח|שקל|\bILS|\bNIS|nis\s*\d|ILS\d/i;
 
 function caller(t: Tenant, role: UserRole) {
   const session: Session = { userId: t.ownerUserId, restaurantId: t.restaurantId, role };
@@ -68,6 +68,31 @@ async function seed(t: Tenant) {
       metadata: { notes: ['₪1,234.50', 'נסרקה'] },
       createdAt: at(4),
     },
+    // Review of 158d162: free-text reason in metadata, and every spelling in titles.
+    {
+      restaurantId: t.restaurantId,
+      eventType: 'discrepancy_rejected',
+      title: 'פער נדחה: הספק חייב 45 שקל',
+      detail: 'הספק חייב 45 שקל',
+      metadata: { discrepancyType: 'PRICE_INCREASE', reason: 'הספק חייב 45 שקל', reasonCode: 'other', role: 'manager' },
+      createdAt: at(6),
+    },
+    ...[
+      'זיכוי 30 ש”ח',
+      "זיכוי 31 ש''ח",
+      'זיכוי 32 שח',
+      'זיכוי 33 שקלים',
+      'זיכוי nis 34',
+      'זיכוי ILS35',
+      'זיכוי 36 ש״ח',
+    ].map((title, i) => ({
+      restaurantId: t.restaurantId,
+      eventType: 'invoice_received' as const,
+      title,
+      detail: null,
+      metadata: { note: title, invoiceNumber: `S-${i}` },
+      createdAt: at(10 + i),
+    })),
     {
       restaurantId: t.restaurantId,
       eventType: 'sync_completed',
@@ -103,7 +128,7 @@ describe('PILOT activity.feed — no ₪ for receiver / chef', () => {
   for (const role of ['receiver', 'chef'] as const) {
     it(`${role}: no ₪ (any spelling) and no amount key anywhere in the JSON; detail null; same shape`, async () => {
       const rows = await caller(A, role).activity.feed();
-      expect(rows).toHaveLength(6);
+      expect(rows).toHaveLength(14);
       const json = JSON.stringify(rows);
       expect(json).not.toMatch(SHEKEL);
       const walk = (v: unknown): void => {
@@ -125,20 +150,34 @@ describe('PILOT activity.feed — no ₪ for receiver / chef', () => {
       expect(titles).toContain('חשבונית התקבלה');
       expect(titles).toContain('סנכרון הסתיים');
       expect(rows.find((r) => r.title === 'סנכרון הסתיים')?.metadata).toEqual({ rows: 12 });
-      expect(rows.find((r) => r.title === 'חשבונית התקבלה')?.metadata).toEqual({ notes: ['נסרקה'] });
-      expect(rows.find((r) => r.title === 'פער נדחה')?.metadata).toEqual({ nested: { note: 'בסדר' } });
+      // Allow-list: free text (notes, nested, reason, note) never reaches staff.
+      expect(rows.find((r) => r.title === 'חשבונית התקבלה')?.metadata).toEqual({});
+      expect(rows.find((r) => r.title === 'פער נדחה')?.metadata).toEqual({});
+      expect(rows.find((r) => r.title === 'פער נדחה: הספק חייב')?.metadata).toEqual({
+        discrepancyType: 'PRICE_INCREASE',
+        reasonCode: 'other',
+        role: 'manager',
+      });
+      // Every spelling is cut together with its digits; the invoice number stays.
+      for (let i = 0; i < 7; i++) {
+        const r = rows.find((x) => x.metadata.invoiceNumber === `S-${i}`);
+        expect(r?.title).toBe('זיכוי');
+        expect(r?.metadata).toEqual({ invoiceNumber: `S-${i}` });
+      }
+      expect(json).not.toMatch(/\b3[0-6]\b|\b45\b/);
     });
   }
 
   it('owner / manager / bookkeeper: unchanged (₪ in title, detail and metadata as stored)', async () => {
     const owner = await caller(A, 'owner').activity.feed();
-    expect(owner).toHaveLength(6);
+    expect(owner).toHaveLength(14);
     expect(owner.find((r) => r.eventType === 'discrepancy_approved')).toMatchObject({
       detail: '‏₪120.50',
       metadata: { savingsIls: 120.5 },
     });
     expect(owner.map((r) => r.title)).toContain('חשבונית 1001 הותאמה · הפסד פוטנציאלי ₪12');
-    expect(owner.find((r) => r.eventType === 'invoice_received')?.detail).toBe('סה"כ כולל מע"מ 1,234.50 ש״ח');
+    expect(owner.find((r) => r.title.startsWith('חשבונית התקבלה'))?.detail).toBe('סה"כ כולל מע"מ 1,234.50 ש״ח');
+    expect(owner.find((r) => r.title === 'פער נדחה: הספק חייב 45 שקל')?.metadata).toMatchObject({ reason: 'הספק חייב 45 שקל' });
     expect(await caller(A, 'manager').activity.feed()).toEqual(owner);
     expect(await caller(A, 'bookkeeper').activity.feed()).toEqual(owner);
   });

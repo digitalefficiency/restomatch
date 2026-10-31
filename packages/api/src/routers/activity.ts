@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { activityEvents, and, desc, eq, lt, type UserRole } from '@restomatch/db';
+import { NO_MONEY_ROLES, hasShekel, stripShekelFigures } from '../lib/staffMoney';
 import { memberProcedure, router } from '../trpc';
 
 /**
@@ -8,7 +9,7 @@ import { memberProcedure, router } from '../trpc';
  * is the data-tier backstop: their homes don't mount the feed, but tRPC is
  * callable directly. Superseded by G-07 (#182), which keeps these names.
  */
-export const NO_MONEY_ROLES: ReadonlySet<UserRole> = new Set<UserRole>(['receiver', 'chef']);
+export { NO_MONEY_ROLES };
 
 /** Event kinds whose `detail` carries purchase / leak ₪. */
 export const MONEY_BEARING_EVENT_TYPES: ReadonlySet<string> = new Set([
@@ -20,39 +21,44 @@ export const MONEY_BEARING_EVENT_TYPES: ReadonlySet<string> = new Set([
 /** Metadata keys that carry ₪ (potentialLossIls, leakIls, savingsIls, amountIls, …). */
 export const MONEY_METADATA_KEY = /(Ils|Agorot)$|amount|savings|total|price/i;
 
-/** ₪ in any spelling: the sign, ש"ח / ש״ח / ש'ח, or the ISO code. */
-const SHEKEL_MARK = /₪|ש["״'׳]ח|\bILS\b|\bNIS\b/;
-/** A ₪ figure in either order (incl. bidi marks and a sign). */
-const SHEKEL_FIGURE =
-  /[\u200e\u200f\u2066-\u2069]*[-−+]?\s*(?:₪|ש["״'׳]ח|ILS|NIS)\s*[-−]?[\d.,]+|[-−]?[\d.,]+\s*(?:₪|ש["״'׳]ח|ILS|NIS)/g;
+/**
+ * The ONLY metadata keys a receiver / chef receives: the money-free keys the
+ * writers produce (match/persist.ts, approvals approve/reject, the demo seeds).
+ * Everything else is dropped, including free text such as `reason` ("הספק חייב
+ * 45 שקל"), so a new money key or a new free-text field can't leak by default.
+ */
+export const STAFF_METADATA_KEYS: ReadonlySet<string> = new Set([
+  'invoiceId',
+  'invoiceNumber',
+  'supplierName',
+  'supplierNameEn',
+  'discrepancyId',
+  'discrepancyType',
+  'discrepancyCount',
+  'leakCount',
+  'reviewCount',
+  'pendingLink',
+  'poMatched',
+  'status',
+  'duplicateKey',
+  'reasonCode',
+  'role',
+  'consolidated',
+  'kind',
+  'v',
+  'rows',
+  'count',
+]);
 
-function hasShekel(text: string): boolean {
-  return SHEKEL_MARK.test(text);
-}
-
-function stripShekelFigures(text: string): string {
-  return text
-    .replace(SHEKEL_FIGURE, '')
-    .replace(new RegExp(SHEKEL_MARK.source, 'g'), '')
-    .replace(/\s*[·:,–-]\s*$/, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
-
-function redactMetadata(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.filter((v) => !(typeof v === 'string' && hasShekel(v))).map(redactMetadata);
+function redactMetadata(meta: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(meta ?? {})) {
+    if (!STAFF_METADATA_KEYS.has(k) || MONEY_METADATA_KEY.test(k)) continue;
+    // Primitives only: a nested object or array could carry anything.
+    if (v === null || typeof v === 'number' || typeof v === 'boolean') out[k] = v;
+    else if (typeof v === 'string' && !hasShekel(v)) out[k] = v;
   }
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (MONEY_METADATA_KEY.test(k)) continue;
-      if (typeof v === 'string' && hasShekel(v)) continue;
-      out[k] = redactMetadata(v);
-    }
-    return out;
-  }
-  return value;
+  return out;
 }
 
 interface FeedRow {
@@ -66,9 +72,10 @@ interface FeedRow {
 
 /**
  * Receiver / chef: `detail` is always null (legacy v1 rows put ₪ in the free
- * text, which the web's legacy parser re-renders), ₪ metadata keys and
- * ₪-bearing strings are dropped, and ₪ figures are cut from the title. Owner,
- * manager and bookkeeper get the row untouched (same reference).
+ * text, which the web's legacy parser re-renders), metadata keeps only the
+ * allow-listed money-free keys, and ₪ figures (₪, ש"ח, ש״ח, ש”ח, ש''ח, שח, שקל,
+ * ILS, NIS, with the adjacent digits) are cut from the title. Owner, manager
+ * and bookkeeper get the row untouched (same reference).
  */
 export function redactActivityForRole<T extends FeedRow>(role: UserRole, row: T): T {
   if (!NO_MONEY_ROLES.has(role)) return row;
@@ -76,7 +83,7 @@ export function redactActivityForRole<T extends FeedRow>(role: UserRole, row: T)
     ...row,
     title: hasShekel(row.title) ? stripShekelFigures(row.title) : row.title,
     detail: null,
-    metadata: redactMetadata(row.metadata ?? {}) as Record<string, unknown>,
+    metadata: redactMetadata(row.metadata),
   };
 }
 
