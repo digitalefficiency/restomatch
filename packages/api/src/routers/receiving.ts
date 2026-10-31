@@ -35,6 +35,7 @@ import type { InvoiceOcrResult } from '@restomatch/types';
 import { assertGrOwned, assertSupplierOwned } from '../tenant';
 import { fillEnglishNames } from '../receiving/english';
 import { lineOrder } from '../receiving/lineOrder';
+import { linkInvoiceToReceipt, linkedInvoiceId } from '../receiving/invoiceLink';
 import {
   invoicesWaitingOnReceipt,
   lockReceipt,
@@ -1007,6 +1008,54 @@ export const receivingRouter = router({
     }),
 
   /**
+   * W2-05 · resume a Delivery Check on ANY phone (receiving-02): the receipt of
+   * this PO, its saved line marks, and the invoice registered for it in THIS
+   * open/close cycle — so a reload or a second phone lands on review with no
+   * re-shoot and no second OCR job. No ₪ (quantities and states only).
+   */
+  resumeState: receiverProcedure
+    .input(z.object({ poId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      const [po] = await ctx.db
+        .select({ id: purchaseOrders.id })
+        .from(purchaseOrders)
+        .where(and(eq(purchaseOrders.id, input.poId), eq(purchaseOrders.restaurantId, restaurantId)))
+        .limit(1);
+      if (!po) throw new TRPCError({ code: 'NOT_FOUND', message: 'PO not found' });
+      const [gr] = await ctx.db
+        .select({ id: goodsReceipts.id, status: goodsReceipts.status, updatedAt: goodsReceipts.updatedAt })
+        .from(goodsReceipts)
+        .where(and(eq(goodsReceipts.poId, input.poId), eq(goodsReceipts.restaurantId, restaurantId)))
+        .limit(1);
+      if (!gr) return { grId: null, status: null, version: null, marks: [], invoice: null };
+      const version = gr.updatedAt.toISOString();
+      const marks = await ctx.db
+        .select({
+          grLineId: grLines.id,
+          poLineId: grLines.poLineId,
+          qtyReceived: grLines.qtyReceived,
+          qtyRejected: grLines.qtyRejected,
+          rejectReason: grLines.rejectReason,
+          conditionNotes: grLines.conditionNotes,
+        })
+        .from(grLines)
+        .where(eq(grLines.grId, gr.id))
+        .orderBy(asc(grLines.id));
+      const invoiceId = await linkedInvoiceId(ctx.db, { restaurantId, grId: gr.id, version });
+      let invoice: { invoiceId: string; status: string } | null = null;
+      if (invoiceId) {
+        const [inv] = await ctx.db
+          .select({ id: invoices.id, status: invoices.status })
+          .from(invoices)
+          .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
+          .limit(1);
+        if (inv) invoice = { invoiceId: inv.id, status: inv.status };
+      }
+      return { grId: gr.id, status: gr.status, version, marks, invoice };
+    }),
+
+  /**
    * Register an invoice for a goods receipt. Creates the invoice row in
    * status=ocr_pending. Caller can then enqueue an `ocr-invoice` job
    * (worker handles OCR + persistence + line creation).
@@ -1065,7 +1114,10 @@ export const receivingRouter = router({
             ),
           )
           .limit(1);
-        if (existing) return { invoiceId: existing.id, created: false as const };
+        if (existing) {
+          await linkInvoiceToReceipt(tx, { restaurantId, userId: ctx.session.userId, grId: input.grId, invoiceId: existing.id });
+          return { invoiceId: existing.id, created: false as const };
+        }
 
         const [row] = await tx
           .insert(invoices)
@@ -1079,6 +1131,7 @@ export const receivingRouter = router({
           })
           .returning({ id: invoices.id });
         if (!row) throw new Error('failed to register invoice');
+        await linkInvoiceToReceipt(tx, { restaurantId, userId: ctx.session.userId, grId: input.grId, invoiceId: row.id });
         return { invoiceId: row.id, created: true as const };
       });
       if (!outcome.created) {

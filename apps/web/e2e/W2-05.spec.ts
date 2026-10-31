@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Route } from '@playwright/test';
 import { DEMO_RESTAURANT_NAME } from './env';
 import { e2eSql } from './helpers';
 
@@ -39,7 +39,7 @@ test.beforeEach(async ({ page }) => {
 interface Po {
   poId: string;
   supplierName: string;
-  lines: Array<{ poLineId: string; name: string }>;
+  lines: Array<{ poLineId: string; productId: string; name: string }>;
 }
 
 async function freshPo(tag: string, n: number): Promise<Po> {
@@ -59,7 +59,7 @@ async function freshPo(tag: string, n: number): Promise<Po> {
       const [pl] = await sql<{ id: string }[]>`
         insert into po_lines (po_id, product_id, raw_description, qty_ordered, unit, unit_price_expected)
         values (${po!.id}, ${p.id}, ${p.name}, 5, 'יח׳', 10) returning id`;
-      lines.push({ poLineId: pl!.id, name: p.name });
+      lines.push({ poLineId: pl!.id, productId: p.id, name: p.name });
     }
     return { poId: po!.id, supplierName: sup!.name, lines };
   } finally {
@@ -257,4 +257,86 @@ test('security: another user signing in on the same phone (no sign-out) never se
   await expect
     .poll(() => page.evaluate(async () => (await caches.keys()).includes('rm-receiver-snapshot-v1')), { timeout: 20_000 })
     .toBe(false);
+});
+
+const TINY_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+test('resume on ANOTHER phone: the same receipt lands on review — no re-shoot, no second invoice or OCR job', async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const po = await freshPo('resume', 2);
+  let invoiceId = '';
+  await page.route('**/api/trpc/receiving.registerInvoice**', async (route: Route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as Array<{ result?: { data?: { json?: Record<string, unknown> } } }>;
+    const json = body[0]?.result?.data?.json;
+    if (json) {
+      invoiceId = String(json.invoiceId);
+      json.ocrQueued = true; // the e2e server has no worker: the test plays it
+    }
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.goto(`/dashboard/receiving/${po.poId}`);
+  await page.waitForLoadState('networkidle');
+  await page.getByTestId('scan-input').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
+  await expect(page.getByTestId('scan-process')).toBeEnabled({ timeout: 60_000 });
+  await page.getByTestId('scan-process').tap();
+  await expect.poll(() => invoiceId, { timeout: 30_000 }).not.toBe('');
+  // The test is the OCR worker: the invoice is read.
+  const sql = e2eSql();
+  try {
+    for (const l of po.lines) {
+      await sql`insert into invoice_lines (invoice_id, product_id, raw_description, qty_billed, unit, unit_price_billed, line_total, ocr_confidence_line)
+                values (${invoiceId}, ${l.productId}, ${l.name}, 5, 'יח׳', 10, 50, 0.97)`;
+    }
+    await sql`update invoices set status = 'parsed', ocr_confidence = 0.96, invoice_number = ${`W25-${invoiceId.slice(0, 6)}`}, total_incl_vat = 118 where id = ${invoiceId}`;
+  } finally {
+    await sql.end();
+  }
+
+  // A second phone: same receiver, no local draft, nothing on that device.
+  const other = await browser.newContext({
+    baseURL: test.info().project.use.baseURL,
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  const url = test.info().project.use.baseURL!;
+  await other.addCookies([
+    { name: 'rm_locale', value: 'he', url },
+    { name: 'rm_cookie_consent', value: 'necessary', url },
+    ...receiverCookies,
+  ]);
+  const phone2 = await other.newPage();
+  const registers: string[] = [];
+  phone2.on('request', (r) => {
+    if (r.url().includes('receiving.registerInvoice') || r.url().includes('scans.upload')) registers.push(r.url());
+  });
+  await phone2.goto(`/dashboard/receiving/${po.poId}`);
+  await phone2.waitForLoadState('networkidle');
+  // It resumes the count WITH the invoice already read (the billed quantities are there).
+  await expect(phone2.getByTestId('delivery-check')).toBeVisible({ timeout: 60_000 });
+  await expect(phone2.getByTestId('delivery-check')).toContainText('חויב 5');
+  await expect(phone2.getByTestId('scan-input')).toHaveCount(0);
+  expect(registers).toEqual([]);
+
+  const sql2 = e2eSql();
+  try {
+    const [inv] = await sql2<{ n: number }[]>`
+      select count(*)::int as n from invoices i
+      where i.restaurant_id = (select restaurant_id from purchase_orders where id = ${po.poId}) and i.created_at > now() - interval '10 minutes'
+        and i.invoice_number = ${`W25-${invoiceId.slice(0, 6)}`}`;
+    expect(inv!.n).toBe(1);
+    const jobs = await sql2<{ n: number }[]>`
+      select count(*)::int as n from job_queue where queue = 'ocr-invoice' and payload->>'invoiceId' = ${invoiceId}`;
+    expect(jobs[0]!.n).toBeLessThanOrEqual(1);
+  } finally {
+    await sql2.end();
+  }
+  await other.close();
 });

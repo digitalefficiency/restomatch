@@ -648,17 +648,27 @@ export function ReceivingWizard({
   useEffect(() => {
     if (step !== 'RESUMING' || !existingReceipt) return;
     const draft = readDraft(draftKey);
-    // Only an invoice read in THIS open/close cycle of the receipt (not before a close / reopen).
-    const knownInvoice = draft?.grId === existingReceipt.id && draft.version === existingReceipt.version ? draft.invoiceId : null;
     const serverProgress = existingReceipt.lines.some(
       (l) => Number(l.qtyReceived ?? 0) > 0 || Number(l.qtyRejected ?? 0) > 0 || Boolean(l.rejectReason),
     );
-    if (!serverProgress && !knownInvoice && outbox.pendingCount() === 0 && !draft) {
-      setStep('SCAN_INVOICE');
-      return;
-    }
-    setResumed(true);
     void (async () => {
+      // Only an invoice read in THIS open/close cycle of the receipt (not before a close / reopen).
+      // This phone's draft first; else the server's record (a reload after the draft was lost,
+      // or another phone): resume at review — never a re-shoot, never a second OCR job (W2-05).
+      let knownInvoice = draft?.grId === existingReceipt.id && draft.version === existingReceipt.version ? draft.invoiceId : null;
+      if (!knownInvoice) {
+        const server = await utils.receiving.resumeState
+          .fetch({ poId: po.id }, { networkMode: 'always' })
+          .catch(() => null);
+        if (server?.grId === existingReceipt.id && server.version === existingReceipt.version && server.invoice) {
+          knownInvoice = server.invoice.invoiceId;
+        }
+      }
+      if (!serverProgress && !knownInvoice && outbox.pendingCount() === 0 && !draft) {
+        setStep('SCAN_INVOICE');
+        return;
+      }
+      setResumed(true);
       if (knownInvoice) {
         setInvoiceId(knownInvoice);
         try {

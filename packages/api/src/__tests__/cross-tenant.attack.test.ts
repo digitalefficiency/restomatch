@@ -173,6 +173,9 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // po_lines / invoice_lines / products must stay untranslated.
   'receiving.ensureEnglish': 'attack',
   'receiving.dockSlip': 'attack',
+  // W2-05: reads one PO's receipt + linked invoice; a foreign poId is NOT_FOUND
+  // (attack — receiving-resume.test.ts: "another restaurant's PO is NOT_FOUND").
+  'receiving.resumeState': 'attack',
   'scans.upload':
     'memberProcedure write keyed to ctx.session.restaurantId; takes NO client-supplied tenant id or storage prefix (PR1/A.3 — the tenant + object path are derived server-side from the session), so it cannot target another tenant. The actual byte upload + service-role mapping insert are Supabase-network-bound and verified by storage.attack.test (membership gate) + against real Supabase; role denial is implicit in memberProcedure.',
   'admin.listRestaurants': 'admin-denial',
