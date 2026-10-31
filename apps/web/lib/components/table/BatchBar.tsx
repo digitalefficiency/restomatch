@@ -17,25 +17,24 @@ export interface BatchBarAction {
 }
 
 /**
- * "N נבחרו · ₪Σ · [primary] [clear · Esc]" (RUBRIC C2). An approve/pay action is
- * disabled with its reason while any selected row is above the ₪200 cap. It replaces the table
+ * "N נבחרו · ₪Σ · [primary] [clear · Esc]" (RUBRIC C2). It replaces the table
  * toolbar while rows are selected and stays sticky above the rows. The ₪ is
- * Σ|amount| of the rows the actions will touch; rows above the per-item cap
- * are counted but named as held back (R-12).
+ * Σ|amount| of the selected rows with a known amount. A disabled action always
+ * shows its reason (an approve/pay action over the ₪200 cap, an unknown amount,
+ * or no server enforcement yet), linked through aria-describedby.
  */
 export function BatchBar({
   count,
   sumAgorot,
-  overCapCount = 0,
-  capAgorot,
+  notes = [],
   actions,
   onClear,
   className,
 }: {
   count: number;
   sumAgorot?: number;
-  overCapCount?: number;
-  capAgorot?: number | null;
+  /** Short status lines under the count (held-back rows, failures). */
+  notes?: string[];
   actions: BatchBarAction[];
   onClear: () => void;
   className?: string;
@@ -48,6 +47,13 @@ export function BatchBar({
       role="region"
       aria-label={copy.selected(count)}
       data-batchbar=""
+      onKeyDown={(e) => {
+        // Esc clears from anywhere in the bar too, not only from the rows.
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          onClear();
+        }
+      }}
       className={cn(
         'sticky top-0 z-[45] flex min-h-10 flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-primary/40 bg-surface px-3 py-1.5 shadow-card',
         className,
@@ -64,9 +70,11 @@ export function BatchBar({
           </>
         ) : null}
       </p>
-      {overCapCount > 0 && capAgorot != null ? (
-        <p className="text-xs text-warn">{copy.overCap(overCapCount, formatIls(capAgorot / 100, { locale }))}</p>
-      ) : null}
+      {notes.map((n) => (
+        <p key={n} className="text-xs text-warn" data-batch-note="">
+          {n}
+        </p>
+      ))}
       {actions
         .filter((a) => a.disabled && a.disabledReason)
         .map((a) => (
