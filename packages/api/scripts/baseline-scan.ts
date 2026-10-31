@@ -506,7 +506,8 @@ export const KIND_HE: Record<BaselineFindingKind, string> = {
 };
 
 const ils = (agorot: number) => formatIlsAgorot(agorot, { maximumFractionDigits: 2 });
-const cell = (s: string) => s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+/** OCR text inside a Markdown table cell: escape backslashes first, then pipes; one line. */
+export const cell = (s: string) => s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
 
 export function toCsv(result: BaselineResult): string {
   const header = [

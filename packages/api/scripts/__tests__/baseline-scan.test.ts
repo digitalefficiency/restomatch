@@ -236,6 +236,12 @@ describe('baseline scan', () => {
     }
   });
 
+  it('Markdown cells escape OCR text (backslash before pipe) and stay on one line', () => {
+    expect(scan.cell('a|b')).toBe('a\\|b');
+    expect(scan.cell('a\\|b')).toBe('a\\\\\\|b');
+    expect(scan.cell('x\r\ny')).toBe('x y');
+  });
+
   it('never loads a database or storage client', () => {
     expect(touched.modules).toEqual([]);
   });
