@@ -541,6 +541,56 @@ test('the session expires mid-count: the sign-in sheet opens (never "no connecti
   expect(Number(row.qty)).toBe(b!.qty);
 });
 
+test('a receipt closed elsewhere and reopened: the offline count from before is HELD — never replayed over the record', async ({ page, context }) => {
+  test.setTimeout(180_000);
+  const po = await freshPo('stale');
+  await openPo(page, po.poId);
+  await page.getByTestId('scan-no-invoice').tap();
+  const weighed = po.lines[1]!;
+  const phoneQty = weighed.qty + 5;
+  const recordQty = weighed.qty - 2;
+  const line = page.getByTestId('count-line').filter({ hasText: weighed.name });
+  await expect(line).toBeVisible({ timeout: 30_000 });
+  // A counts in the walk-in with no signal: the row stays on the phone.
+  await context.setOffline(true);
+  await line.getByTestId('count-edit').tap();
+  await line.getByTestId('count-qty').fill(String(phoneQty));
+  if (await line.getByTestId('count-confirm-qty').isVisible().catch(() => false)) await line.getByTestId('count-confirm-qty').tap();
+  await expect(line.getByTestId('line-save-state')).toHaveAttribute('data-state', 'queued', { timeout: 15_000 });
+  await page.close({ runBeforeUnload: false });
+
+  // Meanwhile B counts on the office tablet and closes the receipt as partial;
+  // next day W1-05's "follow-up delivery" reopens the same receipt.
+  const sql = e2eSql();
+  try {
+    await sql`update gr_lines gl set qty_received = ${recordQty} from goods_receipts g
+              where g.id = gl.gr_id and g.po_id = ${po.poId} and gl.po_line_id = ${weighed.poLineId}`;
+    await sql`update goods_receipts set status = 'partial', updated_at = now() where po_id = ${po.poId}`;
+    await sql`update goods_receipts set status = 'pending', updated_at = now() + interval '1 second' where po_id = ${po.poId}`;
+  } finally {
+    await sql.end();
+  }
+
+  await context.setOffline(false);
+  const again = await context.newPage();
+  await openPo(again, po.poId);
+  await expect(again.getByTestId('delivery-check')).toBeVisible({ timeout: 30_000 });
+  // HELD: shown with both numbers for A to decide — not sent, not shown as the count.
+  const held = again.getByTestId('held-line');
+  await expect(held).toHaveCount(1);
+  await expect(held).toContainText(String(phoneQty));
+  await expect(held).toContainText(String(recordQty));
+  await again.waitForTimeout(2_000); // past the debounce and the immediate retry
+  const record = async () => Number((await grLines(po.poId)).find((r) => r.poLineId === weighed.poLineId)!.qty);
+  expect(await record(), "B's count, the one the match and claims used, is untouched").toBe(recordQty);
+  await expect(again.getByTestId('count-line').filter({ hasText: weighed.name }).getByTestId('count-line-result')).toHaveText(new RegExp(`^${recordQty}\\b`));
+
+  // A applies the phone count: it becomes this cycle's count, sent like any other.
+  await held.getByTestId('held-apply').tap();
+  await expect(again.getByTestId('held-counts')).toHaveCount(0);
+  await expect.poll(record, { timeout: 15_000 }).toBe(phoneQty);
+});
+
 test('field mode: bar in the bottom third at 390×844 and 375×667, 48 px targets, axe clean (he + en)', async ({ page }) => {
   test.setTimeout(180_000);
   let po = await freshPo('field');

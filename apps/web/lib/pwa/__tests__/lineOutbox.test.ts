@@ -101,6 +101,55 @@ describe('lineOutbox (Delivery Check saves on change)', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it('a row written before the receipt was closed/reopened is HELD: never sent, never overlaid, kept until apply/discard', async () => {
+    // A counted 10 offline on version v1; B closed (v2) and the receipt was reopened (v3).
+    const stale = { ...row('a', 10), stamp: { grId: 'gr', version: 'v1' } };
+    const fresh = { ...row('b', 3), stamp: { grId: 'gr', version: 'v3' } };
+    const storage = memoryStorage([stale, fresh]);
+    const send = vi.fn().mockResolvedValue({});
+    let current: string | null = null;
+    const box = createLineOutbox({
+      send,
+      isNetworkError,
+      storage,
+      rowStatus: (p) => (current === null ? 'unknown' : p.stamp?.grId === 'gr' && p.stamp.version === current ? 'current' : 'stale'),
+    });
+    // The receipt version is not known yet: nothing is sent at all.
+    await box.retry();
+    expect(send).not.toHaveBeenCalled();
+    current = 'v3';
+    await box.retry();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(row('b', 3)); // the stamp never reaches the server
+    expect(box.states().a).toBe('held');
+    expect(box.held()).toEqual([stale]);
+    expect(box.latest()).toEqual([row('b', 3)].map((r) => ({ ...r, stamp: fresh.stamp })));
+    expect(box.pendingCount()).toBe(0);
+    expect(storage.items).toEqual([stale]); // kept on the phone — never silently dropped
+    // Discard: gone from the phone.
+    box.discard('a');
+    expect(box.held()).toEqual([]);
+    expect(storage.items).toEqual([]);
+  });
+
+  it('applying a held row re-stamps it with the current version and sends it', async () => {
+    const stale = { ...row('a', 10), stamp: { grId: 'gr', version: 'v1' } };
+    const send = vi.fn().mockResolvedValue({});
+    const box = createLineOutbox({
+      send,
+      isNetworkError,
+      storage: memoryStorage([stale]),
+      rowStatus: (p) => (p.stamp?.version === 'v3' ? 'current' : 'stale'),
+    });
+    await box.retry();
+    expect(box.states().a).toBe('held');
+    box.set({ ...row('a', 10), stamp: { grId: 'gr', version: 'v3' } });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(send).toHaveBeenCalledWith(row('a', 10));
+    expect(box.states().a).toBe('saved');
+    expect(box.held()).toEqual([]);
+  });
+
   it('a reload restores unsent rows from storage as queued and sends them', async () => {
     const storage = memoryStorage([row('a', 7), row('b', 0, { rejectReason: 'missing' })]);
     const send = vi.fn().mockResolvedValue({});

@@ -16,7 +16,20 @@
  */
 import { requestPersistentStorage } from './offlineQueue';
 
+/**
+ * Which receipt (and which open/close cycle of it) a row was counted against:
+ * the receipt's version is its `updatedAt`, which changes only when it is
+ * closed or reopened. A row from an earlier cycle is never replayed into the
+ * receipt (it is held for the receiver to apply or discard).
+ */
+export interface RowStamp {
+  grId: string;
+  version: string;
+}
+
 export interface GrLinePayload {
+  /** Local only — stripped before the row is sent. */
+  stamp?: RowStamp;
   grLineId: string;
   qtyReceived: number;
   qtyRejected: number;
@@ -25,8 +38,16 @@ export interface GrLinePayload {
   conditionNotes?: string;
 }
 
-/** saving: waiting for the debounce or in flight · saved: on the server · queued: on the phone, no network · error: rejected. */
-export type LineSaveState = 'saving' | 'saved' | 'queued' | 'error';
+/**
+ * saving: waiting for the debounce or in flight · saved: on the server ·
+ * queued: on the phone, no network · error: rejected · held: counted against an
+ * earlier open/close cycle of the receipt — kept on the phone, never sent until
+ * the receiver applies it (or discarded).
+ */
+export type LineSaveState = 'saving' | 'saved' | 'queued' | 'error' | 'held';
+
+/** Is a row for the receipt as it is now? `unknown` while the receipt's version is not loaded yet. */
+export type RowStatus = 'current' | 'stale' | 'unknown';
 
 export interface OutboxStorage {
   load(): GrLinePayload[];
@@ -37,6 +58,8 @@ export interface LineOutboxOptions {
   send: (payload: GrLinePayload) => Promise<unknown>;
   isNetworkError: (err: unknown) => boolean;
   storage?: OutboxStorage;
+  /** Default: every row is current. */
+  rowStatus?: (payload: GrLinePayload) => RowStatus;
   debounceMs?: number;
   onChange?: (states: Readonly<Record<string, LineSaveState>>) => void;
 }
@@ -64,6 +87,10 @@ export interface LineOutbox {
    * predate a row the retry just sent (the resume race).
    */
   latest(): GrLinePayload[];
+  /** Rows held back because the receipt was closed / reopened after they were counted. */
+  held(): GrLinePayload[];
+  /** The receiver chose to drop a held row. (To apply it, `set()` it again with the current stamp.) */
+  discard(grLineId: string): void;
   /** Forget every unsent row and the stored copy (the receipt was closed). */
   clear(): void;
   states(): Readonly<Record<string, LineSaveState>>;
@@ -71,6 +98,13 @@ export interface LineOutbox {
 }
 
 export const LINE_SAVE_DEBOUNCE_MS = 300;
+
+/** The row as the server takes it (the stamp is local only). */
+export function withoutStamp(p: GrLinePayload): GrLinePayload {
+  const row = { ...p };
+  delete row.stamp;
+  return row;
+}
 
 const same = (a: GrLinePayload, b: GrLinePayload) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -97,12 +131,21 @@ export function createLineOutbox(opts: LineOutboxOptions): LineOutbox {
     emit();
   }
 
+  const rowStatus = opts.rowStatus ?? (() => 'current' as const);
+  const isHeld = (id: string) => states.get(id) === 'held';
+
   async function sendNow(id: string): Promise<void> {
     const payload = pending.get(id);
     if (!payload || disposed) return;
+    const status = rowStatus(payload);
+    if (status === 'unknown') return; // the receipt's version is not loaded yet: send nothing
+    if (status === 'stale') {
+      setState(id, 'held'); // counted before the receipt was closed / reopened: never replayed
+      return;
+    }
     setState(id, 'saving');
     try {
-      await opts.send(payload);
+      await opts.send(withoutStamp(payload));
       lastSent.set(id, payload);
       // A newer value may have arrived while this one was in flight — keep it.
       if (pending.get(id) === payload) {
@@ -167,12 +210,22 @@ export function createLineOutbox(opts: LineOutboxOptions): LineOutbox {
       await Promise.all(ids.map((id) => enqueueSend(id)));
       return collect(ids);
     },
-    pendingCount: () => pending.size,
-    pending: () => [...pending.values()],
+    pendingCount: () => [...pending.keys()].filter((id) => !isHeld(id)).length,
+    pending: () => [...pending].filter(([id]) => !isHeld(id)).map(([, p]) => p),
     latest: () => {
       const out = new Map(lastSent);
-      for (const [id, p] of pending) out.set(id, p);
+      for (const [id, p] of pending) if (!isHeld(id)) out.set(id, p);
       return [...out.values()];
+    },
+    held: () => [...pending].filter(([id]) => isHeld(id)).map(([, p]) => p),
+    discard(id) {
+      const t = timers.get(id);
+      if (t) clearTimeout(t);
+      timers.delete(id);
+      pending.delete(id);
+      states.delete(id);
+      persist();
+      emit();
     },
     clear() {
       for (const t of timers.values()) clearTimeout(t);
