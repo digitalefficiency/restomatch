@@ -258,13 +258,21 @@ describe('OCR_JOB_HEADROOM_MS: an OCR read is kicked only with room to finish (O
     expect(schedule).toHaveBeenCalledTimes(1);
   });
 
-  it('late in a 300 s invocation (under 120 s left) OCR is not kicked', async () => {
-    vi.stubEnv('OCR_JOB_HEADROOM_MS', '200000');
+  it('late in a 300 s invocation (under 120 s left) OCR is not kicked; with room it is', async () => {
+    const clock = { t: 0 };
+    const now = () => clock.t;
     const schedule = vi.fn();
-    expect(kickQueue('ocr-invoice', schedule, async () => vi.fn(), () => 0)).toBe(true);
-    __resetJobKicks();
-    vi.stubEnv('OCR_JOB_HEADROOM_MS', '300001');
-    expect(kickQueue('ocr-invoice', schedule, async () => vi.fn(), () => 0)).toBe(false);
+    await withKickBudget(
+      300,
+      async () => {
+        clock.t = 200_000; // 100 s before the cut-off: a read may not finish
+        expect(kickQueue('ocr-invoice', schedule, async () => vi.fn(), now)).toBe(false);
+        clock.t = 150_000; // 150 s left: fits
+        expect(kickQueue('ocr-invoice', schedule, async () => vi.fn(), now)).toBe(true);
+      },
+      now,
+    );
+    expect(schedule).toHaveBeenCalledTimes(1);
   });
 
   it('kickInvocationEnd: the declared route end, else request time + the platform default', async () => {
