@@ -494,7 +494,7 @@ test.describe('phone 390 · manager · review fixes', () => {
     expect(pos.map((p) => p.status)).toEqual(['sent']);
   });
 
-  test('edits after the draft exists reach it; a draft replaced by an added line stays out of the list', async ({ page }) => {
+  test('edits after the draft exists reach it; an added line joins the SAME draft (W2-06: one draft, never replaced)', async ({ page }) => {
     test.setTimeout(150_000);
     const since = new Date(Date.now() - 1000);
     await setLocale(page, 'he');
@@ -515,17 +515,16 @@ test.describe('phone 390 · manager · review fixes', () => {
     await lines.nth(1).getByRole('button', { name: /הסרת/ }).tap();
     await expect.poll(async () => (await poLines(d)).map((l) => l.qty), { timeout: 15_000 }).toEqual([7]);
 
-    // Adding a line after the draft exists replaces it at the next review: the old one
-    // is cancelled and never shows in the orders list.
-    await addItem(page, items.nth(1)); // re-add the removed product: a new line for the draft
+    // W2-06 (§5.7, deliberate change): an added line is saved INTO the same server draft
+    // (one open draft per supplier and author) — no replacement, no cancelled phantom row.
+    await addItem(page, items.nth(1)); // re-add the removed product
     await expect(page.getByTestId('order-line')).toHaveCount(2);
+    await expect.poll(async () => (await poLines(d)).length, { timeout: 15_000 }).toBe(2);
     await page.getByTestId('cart-primary').tap();
-    await expect.poll(async () => (await deviceCarts(page))[supplierB.id]?.draftId, { timeout: 30_000 }).not.toBe(d);
-    expect(await poStatus(d)).toBe('cancelled');
-    await page.goto('/dashboard/orders');
-    await expect(page.getByTestId('order-card').first()).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator(`a[href="/dashboard/orders/${d}"]`)).toHaveCount(0);
-    expect((await posSince(supplierB.id, since)).filter((p) => p.status === 'draft')).toHaveLength(1);
+    expect((await deviceCarts(page))[supplierB.id]?.draftId).toBe(d);
+    expect(await poStatus(d)).toBe('draft');
+    const mine = await posSince(supplierB.id, since);
+    expect(mine.filter((p) => p.status === 'cancelled'), 'no phantom cancelled row').toEqual([]);
   });
 });
 
