@@ -231,4 +231,26 @@ export const he = {
     method:
       'שיטה: פערים בחומרת אזהרה או חסימה מול הזמנות ותעודות משלוח, מוגבל לסכום כל חשבונית. לא כולל "מחיר נמוך מהמצופה" ו"ממתינה לשיוך להזמנה". ההוצאה כוללת רק חשבוניות שנבדקו.',
   },
+  /** W2-09b: the ledger why-line (flags/why.ts, layout 'ledger') — one short line, shared by every leak surface. */
+  why: {
+    price: 'חויב {actual} × {qty} {unit}',
+    priceNoQty: 'חויב {actual} ליחידה',
+    priceP90: 'חויב {actual} × {qty} {unit}',
+    priceP90NoQty: 'חויב {actual} ליחידה',
+    expected: 'צפוי {expected}',
+    sourcePo: 'בהזמנה {expected} ({po}, {date})',
+    expectedP90: 'אחוזון 90 של הספק {expected}',
+    sourceP90: 'אחוזון 90 של הספק {expected}',
+    equals: 'פער {amount}',
+    qtyOver: 'חויבו {billed} {unit}, התקבלו {received}',
+    qtyShort: 'הוזמנו {ordered} {unit}, התקבלו {received}',
+    threshold: 'סף {tolerance}',
+    capped: 'מוגבל לסכום החשבונית',
+    unavailable: 'פירוט לא זמין',
+  },
+  /** W2-09b: DrillLink's accessible name — the number is a door to its rows. */
+  drill: {
+    open: '{label} {amount} — {count, plural, =0 {אין שורות} one {פתחו שורה אחת} other {פתחו # שורות}}',
+    openNoCount: '{label} {amount} — פתחו את הפירוט',
+  },
 };
