@@ -3,7 +3,7 @@ import type { InvoiceOcrResult } from '@restomatch/types';
 /** Both providers produce identical, perfect output. */
 export const AGREEMENT_PERFECT: { docAi: InvoiceOcrResult; claude: InvoiceOcrResult } = {
   docAi: {
-    supplier: { name: 'ירקני אבי', businessId: '301234563' },
+    supplier: { name: 'ירקני אבי', businessId: '301234561' },
     invoiceNumber: 'INV-1001',
     invoiceDate: '2026-05-21',
     allocationNumber: null,
@@ -15,7 +15,7 @@ export const AGREEMENT_PERFECT: { docAi: InvoiceOcrResult; claude: InvoiceOcrRes
     confidence: 0.97,
   },
   claude: {
-    supplier: { name: 'ירקני אבי', businessId: '301234563' },
+    supplier: { name: 'ירקני אבי', businessId: '301234561' },
     invoiceNumber: 'INV-1001',
     invoiceDate: '2026-05-21',
     allocationNumber: null,

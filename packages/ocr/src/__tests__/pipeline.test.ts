@@ -4,11 +4,30 @@ import { StubOcrProvider } from '../providers/stub';
 import { runOcrPipeline } from '../pipeline';
 import type { CatalogMatcherFn, ProductCandidate } from '../types';
 import {
-  AGREEMENT_PERFECT,
+  AGREEMENT_PERFECT as AGREEMENT_PERFECT_RAW,
   HEBREW_OCR_NOISE,
   MISSING_LINE_IN_CLAUDE,
   SINGLE_DISAGREEMENT,
 } from './fixtures';
+
+/**
+ * The shared fixture prints ח״פ 301234561, which fails the Israeli check digit,
+ * so the PR-OCR-2 gate (rightly) sends it to review. These pipeline tests are
+ * about reconciliation and thresholds, so they use the same invoice with a
+ * valid ח״פ (301234563). fixtures.ts itself is left untouched.
+ */
+const VALID_SUPPLIER_ID = '301234563';
+const AGREEMENT_PERFECT: typeof AGREEMENT_PERFECT_RAW = {
+  docAi: { ...AGREEMENT_PERFECT_RAW.docAi, supplier: { ...AGREEMENT_PERFECT_RAW.docAi.supplier, businessId: VALID_SUPPLIER_ID } },
+  claude: { ...AGREEMENT_PERFECT_RAW.claude, supplier: { ...AGREEMENT_PERFECT_RAW.claude.supplier, businessId: VALID_SUPPLIER_ID } },
+};
+
+it('the raw shared fixture is flagged for its invalid ח״פ', async () => {
+  const p = new StubOcrProvider('claude_vision', AGREEMENT_PERFECT_RAW.claude);
+  const r = await runOcrPipeline('x', { documentAi: p, claude: p });
+  expect(r.checks.reasons).toEqual(['supplier_id_invalid']);
+  expect(r.needsHumanReview).toBe(true);
+});
 
 function makeProviders(fixture: typeof AGREEMENT_PERFECT) {
   return {
