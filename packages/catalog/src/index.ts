@@ -24,6 +24,7 @@ export {
   decideLink,
   isExactKey,
   normalizeLinkName,
+  LINK_WS_CLASS,
   rankSuggestions,
   aliasProvenance,
   provenanceConfidence,
@@ -37,3 +38,4 @@ export {
   type LinkDecisionKind,
   type LinkDecision,
 } from './linkPolicy';
+export { normNameSql } from './normName';

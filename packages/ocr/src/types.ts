@@ -30,6 +30,8 @@ export interface ProductCandidate {
   canonicalName: string;
   confidence: number;
   matchedBy: 'sku' | 'alias' | 'barcode' | 'embedding' | 'fuzzy';
+  /** G-08: where a stored link came from (catalog aliasProvenance); absent for plain name matches. */
+  provenance?: 'human' | 'exactKey' | 'newProduct' | 'guess' | 'legacy';
 }
 
 export interface ResolvedInvoiceLine extends InvoiceOcrLine {

@@ -24,6 +24,8 @@ import { components } from '@/lib/i18n/messages/components';
 type Outputs = inferRouterOutputs<AppRouter>;
 type UnmappedSku = Outputs['mapping']['unmapped'][number];
 type ConfirmResult = Outputs['mapping']['confirm'];
+/** A confirm, or an answer (answerLink) whose undo is a server-signed token. */
+type LinkResult = Omit<ConfirmResult, 'undo'> & { undo: ConfirmResult['undo'] | null; undoToken?: string | null };
 
 /** How long "ביטול" stays on screen after a link (an action needs ≥10 s). */
 const UNDO_MS = 10_000;
@@ -41,7 +43,7 @@ const rowKey = (row: UnmappedSku) => `${row.supplierId}::${row.kind}::${row.supp
 /** The last link, with what it changed, so it can be undone. */
 interface LastLink {
   row: UnmappedSku;
-  result: ConfirmResult;
+  result: LinkResult;
   /** Made through mapping.answerLink (a suggestion chip): undone the same way. */
   answered?: boolean;
 }
@@ -161,7 +163,7 @@ function LinkStatus({ last, chef, onUndone }: { last: LastLink; chef: boolean; o
   const toast = useToast();
   const { row, result } = last;
   const undoHandlers = {
-    onSuccess: (r: ConfirmResult) => {
+    onSuccess: (r: LinkResult) => {
       toast.success(
         t('mapping.undone', {
           count: formatNumber(r.poLinesUpdated + r.invoiceLinesUpdated, locale),
@@ -204,7 +206,7 @@ function LinkStatus({ last, chef, onUndone }: { last: LastLink; chef: boolean; o
           </p>
         )}
       </div>
-      {result.undo && (
+      {(viaAnswer ? result.undoToken : result.undo) && (
         <Button
           id="map-undo"
           variant="secondary"
@@ -221,7 +223,7 @@ function LinkStatus({ last, chef, onUndone }: { last: LastLink; chef: boolean; o
                   supplierId: row.supplierId,
                   rawName: row.sampleDescription,
                   productId: result.productId,
-                  revert: result.undo!,
+                  revert: result.undoToken!,
                 })
               : undoConfirm.mutate({ ...confirmKey(row), revert: result.undo! })
           }

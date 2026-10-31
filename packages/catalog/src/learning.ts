@@ -1,5 +1,6 @@
-import { and, eq, isNull, productAliases, type Database } from '@restomatch/db';
-import { provenanceConfidence, type ConfirmedProvenance } from './linkPolicy';
+import { and, desc, eq, isNull, productAliases, sql, type Database } from '@restomatch/db';
+import { normalizeLinkName, provenanceConfidence, type ConfirmedProvenance } from './linkPolicy';
+import { normNameSql } from './normName';
 
 export interface RecordConfirmedMatchParams {
   productId: string;
@@ -18,6 +19,8 @@ export interface RecordConfirmedMatchParams {
 export interface RecordConfirmedMatchResult {
   aliasId: string;
   created: boolean;
+  /** The alias's confidence before this call (null when created) — an undo restores it (G-08). */
+  previousConfidence: string | null;
 }
 
 /**
@@ -46,10 +49,12 @@ export async function recordConfirmedMatch(
     .where(
       and(
         eq(productAliases.productId, params.productId),
-        eq(productAliases.supplierNameRaw, rawName),
+        // G-08: the same NORMALIZED name is the same alias (spacing, gershayim, NBSP).
+        sql`${normNameSql(productAliases.supplierNameRaw)} = ${normalizeLinkName(rawName)}`,
         supplierFilter,
       ),
     )
+    .orderBy(desc(productAliases.confidence), desc(productAliases.createdAt))
     .limit(1);
 
   if (existing[0]) {
@@ -61,7 +66,7 @@ export async function recordConfirmedMatch(
     const updates: { confidence: string; supplierSku?: string } = { confidence: kept };
     if (params.supplierSku) updates.supplierSku = params.supplierSku;
     await db.update(productAliases).set(updates).where(eq(productAliases.id, existing[0].id));
-    return { aliasId: existing[0].id, created: false };
+    return { aliasId: existing[0].id, created: false, previousConfidence: existing[0].confidence ?? null };
   }
 
   const [inserted] = await db
@@ -78,5 +83,5 @@ export async function recordConfirmedMatch(
   if (!inserted) {
     throw new Error('failed to insert product_alias');
   }
-  return { aliasId: inserted.id, created: true };
+  return { aliasId: inserted.id, created: true, previousConfidence: null };
 }

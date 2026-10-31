@@ -16,7 +16,14 @@ import {
   supplierCatalogItems,
   type Database,
 } from '@restomatch/db';
-import { matchProductTopN, normalizeLinkName, recordConfirmedMatch } from '@restomatch/catalog';
+import {
+  MACHINE_MAX_CONFIDENCE,
+  matchProductTopN,
+  normNameSql,
+  normalizeLinkName,
+  recordConfirmedMatch,
+} from '@restomatch/catalog';
+import { signAnswerUndo, verifyAnswerUndo } from '../catalog/answerUndo';
 import { enqueue, isQueueUnavailableError, MATCH_INVOICE_QUEUE, type MatchInvoiceQueueJob } from '@restomatch/queue';
 import { chefProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
@@ -111,6 +118,11 @@ const RevertSchema = z
     poLineIds: z.array(z.string().uuid()).max(5000),
     invoiceLineIds: z.array(z.string().uuid()).max(5000),
     catalogItemIds: z.array(z.string().uuid()).max(5000),
+    /** G-08: an existing alias this link raised (e.g. a legacy 0.95 → 0.999): undo restores its confidence. */
+    aliasRestore: z
+      .object({ id: z.string().uuid(), confidence: z.string().regex(/^[01]\.\d{3}$/) })
+      .nullable()
+      .optional(),
     /** The alias this confirm created (null when it only refreshed an existing one). */
     aliasId: z.string().uuid().nullable(),
     /** The confirm created productId ("מוצר חדש"): undo removes it too when nothing else uses it. */
@@ -144,13 +156,6 @@ export interface UnmappedSku {
 /** Name-keyed questions are capped per read (suggestions cost two queries each). */
 export const NAME_QUESTIONS_MAX = 50;
 
-/**
- * SQL twin of `normalizeLinkName` (catalog/linkPolicy): NFC, gershayim/geresh
- * folded to ASCII quotes, whitespace collapsed, trimmed, lower-cased.
- */
-export function normNameSql(col: unknown) {
-  return sql`lower(btrim(regexp_replace(translate(normalize(${col}, NFC), '״“”׳‘’', '"""' || repeat(chr(39), 3)), '[[:space:]]+', ' ', 'g')))`;
-}
 
 /**
  * Name-keyed open questions (G-08): unlinked invoice / order / price-list lines
@@ -203,25 +208,112 @@ async function suggestionsFor(db: Database, rid: string, supplierId: string, raw
   return cands.map((c) => ({ productId: c.productId, canonicalName: c.canonicalName, confidence: c.confidence }));
 }
 
-/** Is there an open name-keyed question for (supplier, normalized name) in this restaurant? */
-async function questionOpen(db: Database, rid: string, supplierId: string, nameKey: string): Promise<boolean> {
+/**
+ * The open name-keyed question for (supplier, normalized name) in this
+ * restaurant, with its server-side sample spelling — or null when none is open.
+ */
+async function openQuestion(
+  db: Database,
+  rid: string,
+  supplierId: string,
+  nameKey: string,
+): Promise<{ sample: string } | null> {
   const [r] = (await db.execute(sql`
-    select exists (
-      select 1 from invoice_lines il
+    with lines as (
+      select il.raw_description as raw from invoice_lines il
         join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${supplierId}
-       where il.product_id is null and il.supplier_sku is null and ${normNameSql(sql`il.raw_description`)} = ${nameKey}
+       where il.product_id is null and il.supplier_sku is null
       union all
-      select 1 from po_lines pl
+      select pl.raw_description from po_lines pl
         join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid} and po.supplier_id = ${supplierId}
-       where pl.product_id is null and pl.supplier_sku is null and ${normNameSql(sql`pl.raw_description`)} = ${nameKey}
+       where pl.product_id is null and pl.supplier_sku is null
       union all
-      select 1 from supplier_catalog_items sci
+      select sci.supplier_name_raw from supplier_catalog_items sci
        where sci.restaurant_id = ${rid} and sci.supplier_id = ${supplierId}
          and sci.product_id is null and sci.supplier_sku is null
-         and ${normNameSql(sql`sci.supplier_name_raw`)} = ${nameKey}
-    ) as open
-  `)) as unknown as Array<{ open: boolean }>;
-  return Boolean(r?.open);
+    )
+    select min(btrim(raw)) as sample from lines where ${normNameSql(sql`raw`)} = ${nameKey}
+  `)) as unknown as Array<{ sample: string | null }>;
+  return r?.sample ? { sample: r.sample } : null;
+}
+
+/**
+ * Invoices whose latest match run is against the orders owning these PO lines
+ * (rid-scoped): a PO line that gains or loses its product changes their MISSING
+ * findings, so they are re-matched too (G-08, HIGH-3).
+ */
+async function invoicesForPoLines(db: Database, rid: string, poLineIds: string[]): Promise<string[]> {
+  if (poLineIds.length === 0) return [];
+  const rows = (await db.execute(sql`
+    select distinct mr.invoice_id as id
+      from match_runs mr
+     where mr.restaurant_id = ${rid}
+       and mr.po_id in (
+         select pl.po_id from po_lines pl
+           join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid}
+          where pl.id in (${sql.join(poLineIds.map((id) => sql`${id}::uuid`), sql`, `)})
+       )
+       and mr.run_at = (select max(m2.run_at) from match_runs m2
+                         where m2.invoice_id = mr.invoice_id and m2.restaurant_id = ${rid})
+  `)) as unknown as Array<{ id: string }>;
+  return rows.map((r) => String(r.id));
+}
+
+/**
+ * G-08 (CRITICAL-1): OCR holds an invoice ('parsed') while any line has no
+ * product, because the engine pairs only by product / SKU and would report a
+ * false MISSING + UNORDERED pair. Once an answer links the LAST unlinked line of
+ * an invoice held ONLY for that reason (raw.reviewReasons = ['unlinked'], not a
+ * duplicate), release it to 'matched' so the re-match runs. Returns the ids.
+ */
+async function releaseLinkHolds(db: Database, rid: string, invoiceIds: string[]): Promise<string[]> {
+  if (invoiceIds.length === 0) return [];
+  const rows = (await db.execute(sql`
+    update invoices i
+       set status = 'matched',
+           ocr_payload = jsonb_set(i.ocr_payload, '{linkReleasedAt}', to_jsonb(now()::text))
+     where i.restaurant_id = ${rid}
+       and i.id in (${sql.join([...new Set(invoiceIds)].map((id) => sql`${id}::uuid`), sql`, `)})
+       and i.status = 'parsed'
+       and i.ocr_payload -> 'raw' -> 'reviewReasons' = '["unlinked"]'::jsonb
+       and (i.ocr_payload -> 'raw' -> 'duplicateOf') is null
+       and not exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null)
+       and not exists (select 1 from match_runs mr where mr.invoice_id = i.id and mr.restaurant_id = ${rid})
+    returning i.id
+  `)) as unknown as Array<{ id: string }>;
+  return rows.map((r) => String(r.id));
+}
+
+/**
+ * The undo of an answer that released an invoice: once a line is unlinked
+ * again, put the invoice back on hold ('parsed') and drop the run made in the
+ * meantime, instead of re-matching it into a false leak. A run a claim already
+ * hangs on is left alone (the savepoint refuses). Returns the re-held ids.
+ */
+async function reholdLinkHolds(db: Database, rid: string, invoiceIds: string[]): Promise<string[]> {
+  const held: string[] = [];
+  for (const id of [...new Set(invoiceIds)]) {
+    try {
+      await db.transaction(async (sp) => {
+        const t = sp as unknown as Database;
+        const rows = (await t.execute(sql`
+          update invoices i
+             set status = 'parsed', ocr_payload = i.ocr_payload - 'linkReleasedAt'
+           where i.restaurant_id = ${rid} and i.id = ${id}::uuid
+             and i.status in ('matched', 'disputed')
+             and i.ocr_payload ? 'linkReleasedAt'
+             and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null)
+          returning i.id
+        `)) as unknown as Array<{ id: string }>;
+        if (rows.length === 0) return;
+        await t.execute(sql`delete from match_runs where invoice_id = ${id}::uuid and restaurant_id = ${rid}`);
+        held.push(id);
+      });
+    } catch {
+      // A claim hangs on that run: leave it to the people.
+    }
+  }
+  return held;
 }
 
 /** How many name-keyed questions are open (the home "זה אותו מוצר?" line). Restaurant-scoped. */
@@ -286,6 +378,11 @@ async function applyLink(db: Database, rid: string, input: LinkInput) {
         sql`${normNameSql(supplierCatalogItems.supplierNameRaw)} = ${nameKey}`,
       );
 
+  // An alias belongs to this key: its SKU, or (name path) its normalized name.
+  const aliasKey = sku
+    ? eq(productAliases.supplierSku, sku)
+    : sql`${normNameSql(productAliases.supplierNameRaw)} = ${nameKey}`;
+
   const poIds = db
     .select({ id: purchaseOrders.id })
     .from(purchaseOrders)
@@ -335,6 +432,8 @@ async function applyLink(db: Database, rid: string, input: LinkInput) {
             eq(supplierCatalogItems.restaurantId, rid),
             eq(supplierCatalogItems.supplierId, input.supplierId),
             eq(supplierCatalogItems.productId, r.productId),
+            // G-08: only rows of THIS key (never a SKU row from a name answer).
+            itemKey,
           ),
         );
     }
@@ -352,6 +451,27 @@ async function applyLink(db: Database, rid: string, input: LinkInput) {
             eq(productAliases.productId, r.productId),
             eq(productAliases.supplierId, input.supplierId),
             inArray(productAliases.productId, own),
+            aliasKey,
+          ),
+        );
+    }
+    if (r.aliasRestore) {
+      // G-08 (MEDIUM-2): the link raised an existing alias (e.g. a legacy 0.95 to
+      // 0.999); put its confidence back, through a product of this restaurant.
+      const own = db
+        .select({ id: products.id })
+        .from(products)
+        .where(and(eq(products.id, r.productId), eq(products.restaurantId, rid)));
+      await db
+        .update(productAliases)
+        .set({ confidence: r.aliasRestore.confidence })
+        .where(
+          and(
+            eq(productAliases.id, r.aliasRestore.id),
+            eq(productAliases.productId, r.productId),
+            eq(productAliases.supplierId, input.supplierId),
+            inArray(productAliases.productId, own),
+            aliasKey,
           ),
         );
     }
@@ -373,11 +493,14 @@ async function applyLink(db: Database, rid: string, input: LinkInput) {
         // Still used elsewhere: leave it.
       }
     }
-    const rematch = await requeueInvoicesForRematch(
-      db,
-      rid,
-      undoneInv.map((l) => l.invoiceId),
-    );
+    // An invoice an answer released goes back on hold rather than re-matching
+    // into a false leak; the rest re-match (incl. invoices of undone PO lines).
+    const reheld = new Set(await reholdLinkHolds(db, rid, undoneInv.map((l) => l.invoiceId)));
+    const toRematch = [
+      ...undoneInv.map((l) => l.invoiceId),
+      ...(await invoicesForPoLines(db, rid, undonePo.map((l) => l.id))),
+    ].filter((id) => !reheld.has(id));
+    const rematch = await requeueInvoicesForRematch(db, rid, toRematch);
     return {
       productId: r.productId,
       createdProduct: false,
@@ -410,6 +533,32 @@ async function applyLink(db: Database, rid: string, input: LinkInput) {
     if (!created) throw new Error('failed to create product');
     productId = created.id;
     createdProduct = true;
+  }
+
+  if (!sku) {
+    // G-08 (MEDIUM-3): serialize answers on one (supplier, name key), require an
+    // open question, and refuse a second, different product for a key that a
+    // confirmed alias already resolves.
+    await db.execute(sql`select pg_advisory_xact_lock(hashtext(${`g08:${rid}:${input.supplierId}:${nameKey}`}))`);
+    if (!(await openQuestion(db, rid, input.supplierId, nameKey))) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'no open question' });
+    }
+    const [other] = await db
+      .select({ id: productAliases.id })
+      .from(productAliases)
+      .innerJoin(products, and(eq(products.id, productAliases.productId), eq(products.restaurantId, rid)))
+      .where(
+        and(
+          eq(productAliases.supplierId, input.supplierId),
+          aliasKey,
+          sql`${productAliases.confidence} >= ${MACHINE_MAX_CONFIDENCE.toFixed(3)}`,
+          sql`${productAliases.productId} <> ${productId}`,
+        ),
+      )
+      .limit(1);
+    if (other) {
+      throw new TRPCError({ code: 'CONFLICT', message: 'this name is already linked to another product' });
+    }
   }
 
   // Learn the alias (name + SKU) so future imports/OCR auto-resolve. A SKU
@@ -462,12 +611,18 @@ async function applyLink(db: Database, rid: string, input: LinkInput) {
     )
     .returning({ id: supplierCatalogItems.id });
 
-  // The lines changed, so their invoices' findings (and the leak) must too.
-  const rematch = await requeueInvoicesForRematch(
-    db,
-    rid,
-    updatedInv.map((l) => l.invoiceId),
-  );
+  // An invoice OCR held only for unlinked lines is released once none is left;
+  // then every touched invoice re-matches — incl. those of linked PO lines.
+  await releaseLinkHolds(db, rid, updatedInv.map((l) => l.invoiceId));
+  const rematch = await requeueInvoicesForRematch(db, rid, [
+    ...updatedInv.map((l) => l.invoiceId),
+    ...(await invoicesForPoLines(db, rid, updatedPo.map((l) => l.id))),
+  ]);
+  const newConfidence = sku ? '1.000' : MACHINE_MAX_CONFIDENCE.toFixed(3);
+  const aliasRestore =
+    !alias.created && alias.previousConfidence !== null && Number(alias.previousConfidence) < Number(newConfidence)
+      ? { id: alias.aliasId, confidence: alias.previousConfidence }
+      : null;
 
   return {
     productId,
@@ -481,6 +636,7 @@ async function applyLink(db: Database, rid: string, input: LinkInput) {
       invoiceLineIds: updatedInv.map((l) => l.id),
       catalogItemIds: linkedItems.map((l) => l.id),
       aliasId: alias.created ? alias.aliasId : null,
+      aliasRestore,
       createdProduct,
     },
   };
@@ -680,23 +836,33 @@ export const mappingRouter = router({
           supplierId: z.string().uuid(),
           rawName: z.string().trim().min(1).max(400),
           productId: z.string().uuid(),
-          revert: RevertSchema.optional(),
+          /** The opaque, server-signed undo token this user's answer returned (HIGH-1). */
+          revert: z.string().min(1).max(200_000).optional(),
         })
         .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
+      const who = { userId: ctx.session.userId, restaurantId: rid };
       await assertSupplierOwned(ctx.db, input.supplierId, rid);
       if (input.revert) {
-        // Undo only what an answer did: never a product removal.
-        if (input.revert.productId !== input.productId || input.revert.createdProduct) {
+        // Undo exactly what THIS user's answer changed (signed, expiring, bound
+        // to the restaurant, supplier, name key and product) — never a client list.
+        const undo = verifyAnswerUndo(input.revert, who);
+        if (
+          !undo ||
+          undo.supplierId !== input.supplierId ||
+          undo.change.productId !== input.productId ||
+          undo.nameKey !== normalizeLinkName(input.rawName)
+        ) {
           throw new TRPCError({ code: 'FORBIDDEN', message: 'not an answer to undo' });
         }
-        return applyLink(ctx.db, rid, {
-          supplierId: input.supplierId,
-          rawName: input.rawName,
-          revert: { ...input.revert, createdProduct: false },
+        const r = await applyLink(ctx.db, rid, {
+          supplierId: undo.supplierId,
+          rawName: undo.nameKey,
+          revert: { ...undo.change, createdProduct: false },
         });
+        return { ...r, undo: null, undoToken: null };
       }
       const [owned] = await ctx.db
         .select({ id: products.id })
@@ -704,17 +870,30 @@ export const mappingRouter = router({
         .where(and(eq(products.id, input.productId), eq(products.restaurantId, rid)))
         .limit(1);
       if (!owned) throw new TRPCError({ code: 'NOT_FOUND', message: 'product not found' });
-      if (!(await questionOpen(ctx.db, rid, input.supplierId, normalizeLinkName(input.rawName)))) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'no open question' });
-      }
-      const suggestions = await suggestionsFor(ctx.db, rid, input.supplierId, input.rawName);
+      // LOW-1: the question's OWN server-side spelling drives the suggestions and
+      // the learned alias, not the client's rawName.
+      const nameKey = normalizeLinkName(input.rawName);
+      const q = await openQuestion(ctx.db, rid, input.supplierId, nameKey);
+      if (!q) throw new TRPCError({ code: 'NOT_FOUND', message: 'no open question' });
+      const suggestions = await suggestionsFor(ctx.db, rid, input.supplierId, q.sample);
       if (!suggestions.some((sug) => sug.productId === input.productId)) {
         throw new TRPCError({ code: 'FORBIDDEN', message: 'not a suggested product' });
       }
-      return applyLink(ctx.db, rid, {
+      const r = await applyLink(ctx.db, rid, {
         supplierId: input.supplierId,
-        rawName: input.rawName,
+        rawName: q.sample,
         productId: input.productId,
       });
+      const undoToken = r.undo
+        ? signAnswerUndo(who, { supplierId: input.supplierId, nameKey }, {
+            productId: r.undo.productId,
+            poLineIds: r.undo.poLineIds,
+            invoiceLineIds: r.undo.invoiceLineIds,
+            catalogItemIds: r.undo.catalogItemIds,
+            aliasId: r.undo.aliasId,
+            aliasRestore: r.undo.aliasRestore,
+          })
+        : null;
+      return { ...r, undo: null, undoToken };
     }),
 });

@@ -134,6 +134,18 @@ describe('runOcrPipeline — catalog integration', () => {
       expect((await run([c(1, 'alias')])).reconciled.lines[0]?.productId).toBe('p1');
     });
 
+    it('CRITICAL-1: a review line (candidates, no product) holds the invoice: needsHumanReview, reason unlinked', async () => {
+      const r = await run([c(0.8, 'fuzzy')]);
+      expect(r.reconciled.lines.every((l) => l.productId === null && l.productCandidates.length === 1)).toBe(true);
+      expect(r.needsHumanReview).toBe(true);
+      expect(r.reviewReasons).toContain('unlinked');
+      expect(r.unlinkedLines).toBe(r.reconciled.lines.length);
+      // Every line linked by an exact key → no 'unlinked' hold.
+      const linked = await run([c(0.999, 'sku')]);
+      expect(linked.reviewReasons).not.toContain('unlinked');
+      expect(linked.unlinkedLines).toBe(0);
+    });
+
     it('with an injected decider, its decision is used (called with unitPack unknown)', async () => {
       const decider = vi.fn(() => ({ decision: 'auto' as const, productId: 'decided' }));
       const r = await run([c(0.61, 'fuzzy')], decider);

@@ -1,5 +1,5 @@
 import { fillEnglishNames, meterOcrScan, receiptState, scanReceiptToStamp, withScanGrId } from '@restomatch/api';
-import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
+import { decideLink, matchProductTopN, MockEmbeddingProvider, type EmbeddingProvider } from '@restomatch/catalog'; // G-08 link
 import { HELD_FOR_RECEIPTS_KEY, receiptsBeingCountedForScan } from '@restomatch/charts';
 import { and, eq, invoiceLines, invoices, ne, restaurants, sql, type Database } from '@restomatch/db';
 import {
@@ -51,6 +51,41 @@ function buildProviders(job: OcrInvoiceJob): { documentAi: OcrProvider; claude: 
   return { documentAi: claude, claude };
 }
 
+/**
+ * G-08 link: the OCR catalog matcher. Supplier-scoped candidates, SKU first, each
+ * with its PROVENANCE (a stored guess is never read as an exact key; an identical
+ * same-supplier name is). Exported so the worker test drives the same code.
+ */
+export function ocrCatalogMatcher(
+  db: Database,
+  restaurantId: string,
+  supplierId: string | null,
+  embedder: EmbeddingProvider,
+): CatalogMatcherFn {
+  return async (line) => {
+    const embedding = await embedder.embed(line.rawDescription);
+    const candidates = await matchProductTopN(
+      db,
+      {
+        restaurantId,
+        supplierId,
+        rawDescription: line.rawDescription,
+        // מק״ט from the invoice — strategy-0 exact key when the supplier prints it.
+        supplierSku: line.sku ?? undefined,
+        embedding,
+      },
+      3,
+    );
+    return candidates.map((c) => ({
+      productId: c.productId,
+      canonicalName: c.canonicalName,
+      confidence: c.confidence,
+      matchedBy: c.matchedBy,
+      ...(c.provenance ? { provenance: c.provenance } : {}),
+    }));
+  };
+}
+
 export function startOcrInvoiceWorker() {
   return makeWorker<OcrInvoiceJob>('ocr-invoice', processOcrInvoice);
 }
@@ -81,27 +116,8 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
 
     const providers = buildProviders(job.data);
 
-    const matcher: CatalogMatcherFn = async (line) => {
-      const embedding = await embedder.embed(line.rawDescription);
-      const candidates = await matchProductTopN(
-        db,
-        {
-          restaurantId: job.data.restaurantId,
-          supplierId: invoice.supplierId,
-          rawDescription: line.rawDescription,
-          // מק״ט from the invoice — strategy-0 exact key when the supplier prints it.
-          supplierSku: line.sku ?? undefined,
-          embedding,
-        },
-        3,
-      );
-      return candidates.map((c) => ({
-        productId: c.productId,
-        canonicalName: c.canonicalName,
-        confidence: c.confidence,
-        matchedBy: c.matchedBy,
-      }));
-    };
+    // G-08 link: the catalog matcher, carrying each candidate's provenance.
+    const matcher = ocrCatalogMatcher(db, job.data.restaurantId, invoice.supplierId, embedder);
 
     // Per-restaurant review threshold (falls back to pipeline default)
     const restaurant = await db
@@ -114,6 +130,8 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
     const result = await runOcrPipeline(job.data.imageUrl, {
       ...providers,
       catalogMatcher: matcher,
+      // G-08 link: the ONE link policy (auto only on an exact key; else a question).
+      decideLink,
       ...(reviewThreshold !== undefined ? { reviewThreshold } : {}),
     });
 

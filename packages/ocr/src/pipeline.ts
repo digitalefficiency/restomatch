@@ -33,6 +33,21 @@ export interface OcrPipelineRunOptions extends OcrPipelineOptions {
   decideLink?: OcrLinkDecider;
 }
 
+/**
+ * Why the pipeline held an invoice for a person (G-08). 'unlinked' = the link
+ * policy left at least one line without a product (a question to a person):
+ * the engine pairs only by product / SKU, so matching such an invoice would
+ * report the ordered line MISSING and the billed line UNORDERED — a false leak.
+ */
+export type OcrReviewReason = 'confidence' | 'lowLines' | 'unlinked';
+
+export interface OcrPipelineRunResult extends OcrPipelineResult {
+  /** Every reason the invoice waits for a person (empty ⇔ needsHumanReview false). */
+  reviewReasons: OcrReviewReason[];
+  /** Lines the policy left without a product (0 without a catalog matcher). */
+  unlinkedLines: number;
+}
+
 /** Interim encoding (G-08): 0.999 = exact key / new product, 1.000 = a person. */
 const EXACT_ALIAS_MIN_CONFIDENCE = 0.999;
 
@@ -72,7 +87,7 @@ export const defaultOcrLinkDecider: OcrLinkDecider = (candidates) => {
 export async function runOcrPipeline(
   image: ImageSource,
   options: OcrPipelineRunOptions,
-): Promise<OcrPipelineResult> {
+): Promise<OcrPipelineRunResult> {
   // M11: a single-provider deployment wires the SAME instance into both slots
   // (Document AI not yet live). Call it once — two identical paid extractions
   // added cost and latency but no information (the reconciler sees full
@@ -95,10 +110,14 @@ export async function runOcrPipeline(
 
   const reviewThreshold = options.reviewThreshold ?? DEFAULT_REVIEW_THRESHOLD;
   const matcherWasUsed = options.catalogMatcher !== undefined;
-  const needsHumanReview =
-    confidence < reviewThreshold ||
-    hasLowConfidenceLines(reconciledInvoice) ||
-    (matcherWasUsed && hasUnresolvedLines(reconciledInvoice));
+  // G-08: ANY line the policy left unlinked holds the invoice — not only lines
+  // with no candidate at all. A 'review' line has candidates but no product.
+  const unlinkedLines = matcherWasUsed ? countUnlinkedLines(reconciledInvoice) : 0;
+  const reviewReasons: OcrReviewReason[] = [];
+  if (confidence < reviewThreshold) reviewReasons.push('confidence');
+  if (hasLowConfidenceLines(reconciledInvoice)) reviewReasons.push('lowLines');
+  if (unlinkedLines > 0) reviewReasons.push('unlinked');
+  const needsHumanReview = reviewReasons.length > 0;
 
   return {
     primary: claude,
@@ -107,6 +126,8 @@ export async function runOcrPipeline(
     confidence,
     needsHumanReview,
     conflicts,
+    reviewReasons,
+    unlinkedLines,
   };
 }
 
@@ -132,6 +153,6 @@ function hasLowConfidenceLines(invoice: { lines: ResolvedInvoiceLine[] }): boole
   return invoice.lines.some((l) => l.confidence !== undefined && l.confidence < LINE_REVIEW_THRESHOLD);
 }
 
-function hasUnresolvedLines(invoice: { lines: ResolvedInvoiceLine[] }): boolean {
-  return invoice.lines.some((l) => l.productId === null && l.productCandidates.length === 0);
+function countUnlinkedLines(invoice: { lines: ResolvedInvoiceLine[] }): number {
+  return invoice.lines.filter((l) => l.productId === null).length;
 }

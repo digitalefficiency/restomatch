@@ -8,6 +8,7 @@ import {
   discrepancies,
   eq,
   memberships,
+  sql,
   poLines,
   priceBaselines,
   priceHistory,
@@ -30,6 +31,8 @@ import {
   matchProductTopN,
 } from '../matcher';
 import { recordConfirmedMatch } from '../learning';
+import { normalizeLinkName } from '../linkPolicy';
+import { normNameSql } from '../normName';
 
 const TEST_DB_URL =
   testDbUrl();
@@ -997,5 +1000,40 @@ describe('recordConfirmedMatch (learning loop)', () => {
     });
     expect(second?.matchedBy).toBe('alias');
     expect(second?.confidence).toBe(1);
+  });
+});
+
+describe('G-08 name normalization — SQL ≡ JS (MEDIUM-1) and one alias for every spelling (MEDIUM-4)', () => {
+  it.each([
+    ['פלפל\u00a0אדום'],
+    ['פלפל\u2009אדום'],
+    ['פלפל\u202fאדום\u2007חריף'],
+    ['\ufeffפלפל אדום'],
+    ['  פלפל   אדום  '],
+    ['חלב 1 ל״ט'],
+    ['חלב 1 ל"ט'],
+    ['Cherry\tTomato'],
+  ])('normNameSql(%j) equals normalizeLinkName', async (raw) => {
+    const [r] = (await db.execute(sql`select ${normNameSql(sql`${raw}::text`)} as n`)) as unknown as Array<{ n: string }>;
+    expect(r!.n).toBe(normalizeLinkName(raw));
+  });
+
+  it('an alias learned on one spelling answers the others (NBSP, double space, gershayim)', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    await recordConfirmedMatch(db, { productId: tomato.id, supplierId, rawName: 'עגבניה שרי 1 ק"ג', provenance: 'human' });
+    for (const variant of ['עגבניה\u00a0שרי 1 ק״ג', 'עגבניה  שרי 1 ק"ג', ' עגבניה שרי\u20091 ק״ג ']) {
+      expect(await matchByAlias(db, restaurantId, supplierId, variant)).toMatchObject({ productId: tomato.id, matchedBy: 'alias' });
+    }
+  });
+
+  it('recordConfirmedMatch on another spelling updates the SAME alias and reports its previous confidence', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    await db.insert(productAliases).values({ productId: tomato.id, supplierId, supplierNameRaw: 'שרי  ארוז', confidence: '0.950' });
+    const r = await recordConfirmedMatch(db, { productId: tomato.id, supplierId, rawName: 'שרי ארוז', provenance: 'exactKey' });
+    expect(r).toMatchObject({ created: false, previousConfidence: '0.950' });
+    const rows = await db.select().from(productAliases).where(eq(productAliases.productId, tomato.id));
+    expect(rows.filter((x) => normalizeLinkName(x.supplierNameRaw) === 'שרי ארוז')).toHaveLength(1);
+    const created = await recordConfirmedMatch(db, { productId: tomato.id, supplierId, rawName: 'חדש', provenance: 'human' });
+    expect(created.previousConfidence).toBeNull();
   });
 });

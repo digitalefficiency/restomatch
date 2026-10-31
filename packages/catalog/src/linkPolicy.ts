@@ -106,10 +106,19 @@ export function normalizeLinkName(name: string): string {
     .normalize('NFC')
     .replace(/[\u05F4\u201C\u201D]/g, '"')
     .replace(/[\u05F3\u2018\u2019]/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim()
+    .replace(LINK_WS_RE, ' ')
+    .replace(/^ | $/g, '')
     .toLowerCase();
 }
+
+/**
+ * The ONE whitespace set for link names, shared by `normalizeLinkName` (JS) and
+ * `normNameSql` (Postgres): JS `\s` spelled out, so NBSP (U+00A0), figure /
+ * narrow spaces (U+2007, U+202F) and the BOM (U+FEFF) fold the same way on
+ * both sides — Postgres `[[:space:]]` under C.UTF-8 does not include them.
+ */
+export const LINK_WS_CLASS = '[\\t\\n\\v\\f\\r \\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]+';
+const LINK_WS_RE = new RegExp(LINK_WS_CLASS, 'g');
 
 /** Best first (stable on ties), one entry per product, at most MAX_SUGGESTIONS. */
 export function rankSuggestions<C extends LinkCandidate>(candidates: readonly C[]): C[] {

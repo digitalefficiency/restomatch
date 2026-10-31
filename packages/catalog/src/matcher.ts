@@ -1,5 +1,6 @@
 import {
   and,
+  desc,
   eq,
   isNull,
   or,
@@ -16,6 +17,7 @@ import {
   type MatcherThresholds,
 } from './types';
 import { aliasProvenance, MACHINE_MAX_CONFIDENCE, normalizeLinkName } from './linkPolicy';
+import { normNameSql } from './normName';
 
 /** A stored alias's confidence (numeric(4,3) string) as a number; a missing one reads as the column default. */
 function storedConfidence(c: string | null | undefined): number {
@@ -223,7 +225,9 @@ export async function matchByAlias(
   supplierId: string | null,
   rawName: string,
 ): Promise<MatchCandidate | null> {
-  const normalized = rawName.trim().toLowerCase();
+  // G-08: compare NORMALIZED names (spacing, gershayim, NBSP), so one learned
+  // alias answers every spelling of the same name.
+  const normalized = normalizeLinkName(rawName);
   if (!normalized) return null;
 
   const supplierFilter = supplierId
@@ -245,7 +249,9 @@ export async function matchByAlias(
       products,
       and(eq(products.id, productAliases.productId), eq(products.restaurantId, restaurantId)),
     )
-    .where(and(supplierFilter, sql`lower(${productAliases.supplierNameRaw}) = ${normalized}`))
+    .where(and(supplierFilter, sql`${normNameSql(productAliases.supplierNameRaw)} = ${normalized}`))
+    // Deterministic when two aliases share a name: the strongest, then the newest.
+    .orderBy(desc(productAliases.confidence), desc(productAliases.createdAt))
     .limit(1);
 
   const row = rows[0];

@@ -249,7 +249,7 @@ describe('G-08 mapping.answerLink — the chef may answer "זה אותו מוצ�
       supplierId: A.supplierId,
       rawName: q.sampleDescription,
       productId: pepper,
-      revert: r.undo!,
+      revert: r.undoToken!,
     });
     const [back] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, l1));
     expect(back?.productId).toBeNull();
@@ -297,13 +297,54 @@ describe('G-08 mapping.answerLink — the chef may answer "זה אותו מוצ�
     }
   });
 
-  it('an answer cannot undo a product creation or a different product', async () => {
+  it('HIGH-1: the undo is a signed token — a forged / tampered / other user\'s token is refused, rows stay linked', async () => {
+    const pepper = await supplierProduct(A, 'פלפל אדום');
+    const l1 = await unlinkedInvoiceLine(A, 'פלפל אדום חריף');
+    const r = await callerFor(A, 'chef').mapping.answerLink({ supplierId: A.supplierId, rawName: 'פלפל אדום חריף', productId: pepper });
+    expect(r.undo).toBeNull();
+    expect(typeof r.undoToken).toBe('string');
+    const [body, sig] = r.undoToken!.split('.');
+    // Tamper: add a foreign id to the change set, keep the signature.
+    const payload = JSON.parse(Buffer.from(body!.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+    payload.ch.catalogItemIds.push('00000000-0000-4000-8000-000000000000');
+    const forged = `${Buffer.from(JSON.stringify(payload)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}.${sig}`;
+    const otherUser = appRouter.createCaller({
+      db,
+      session: { userId: '11111111-1111-4111-8111-111111111111', restaurantId: A.restaurantId, role: 'chef' },
+    } as AppContext);
+    for (const attempt of [
+      () => callerFor(A, 'chef').mapping.answerLink({ supplierId: A.supplierId, rawName: 'פלפל אדום חריף', productId: pepper, revert: forged }),
+      () => callerFor(A, 'chef').mapping.answerLink({ supplierId: A.supplierId, rawName: 'פלפל אדום חריף', productId: pepper, revert: 'garbage' }),
+      () => otherUser.mapping.answerLink({ supplierId: A.supplierId, rawName: 'פלפל אדום חריף', productId: pepper, revert: r.undoToken! }),
+      () => callerFor(A, 'chef').mapping.answerLink({ supplierId: A.supplierId, rawName: 'שם אחר', productId: pepper, revert: r.undoToken! }),
+    ]) {
+      await expect(attempt()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+    const [l] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, l1));
+    expect(l?.productId).toBe(pepper);
+  });
+
+  it('HIGH-1: a name-key revert never unlinks a SKU price-list row or a foreign PO line (key filter on every statement)', async () => {
     const pepper = await supplierProduct(A, 'פלפל אדום');
     await unlinkedInvoiceLine(A, 'פלפל אדום חריף');
-    const undo = { productId: pepper, poLineIds: [], invoiceLineIds: [], catalogItemIds: [], aliasId: null, createdProduct: true };
-    await expect(
-      callerFor(A, 'chef').mapping.answerLink({ supplierId: A.supplierId, rawName: 'פלפל אדום חריף', productId: pepper, revert: undo }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    const [skuRow] = await db
+      .insert(supplierCatalogItems)
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, productId: pepper, supplierSku: 'SKU-1', supplierNameRaw: 'פלפל אדום חריף' })
+      .returning({ id: supplierCatalogItems.id });
+    const [otherPo] = await db
+      .insert(poLines)
+      .values({ poId: A.poId, productId: pepper, rawDescription: 'מוצר אחר', qtyOrdered: '1', unit: 'kg' })
+      .returning({ id: poLines.id });
+    const r = await callerFor(A, 'manager').mapping.confirm({ supplierId: A.supplierId, rawName: 'פלפל אדום חריף', productId: pepper });
+    await callerFor(A, 'manager').mapping.confirm({
+      supplierId: A.supplierId,
+      rawName: 'פלפל אדום חריף',
+      revert: { ...r.undo!, catalogItemIds: [...r.undo!.catalogItemIds, skuRow!.id], poLineIds: [...r.undo!.poLineIds, otherPo!.id] },
+    });
+    const [item] = await db.select({ productId: supplierCatalogItems.productId }).from(supplierCatalogItems).where(eq(supplierCatalogItems.id, skuRow!.id));
+    expect(item?.productId).toBe(pepper);
+    const [po] = await db.select({ productId: poLines.productId }).from(poLines).where(eq(poLines.id, otherPo!.id));
+    expect(po?.productId).toBe(pepper);
   });
 
   it('chef is still FORBIDDEN on mapping.confirm (the immutable rule holds)', async () => {
