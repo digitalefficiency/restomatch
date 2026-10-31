@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import { Boxes, Check, Plus, Search } from 'lucide-react';
@@ -23,6 +23,16 @@ import { components } from '@/lib/i18n/messages/components';
 
 type Outputs = inferRouterOutputs<AppRouter>;
 type UnmappedSku = Outputs['mapping']['unmapped'][number];
+type ConfirmResult = Outputs['mapping']['confirm'];
+
+/** How long "ביטול" stays on screen after a link (an action needs ≥10 s). */
+const UNDO_MS = 10_000;
+
+/** The last link, with what it changed, so it can be undone. */
+interface LastLink {
+  row: UnmappedSku;
+  result: ConfirmResult;
+}
 
 export function SkuMapper({ initial }: { initial: UnmappedSku[] }) {
   const t = useT(catalogNs);
@@ -30,40 +40,161 @@ export function SkuMapper({ initial }: { initial: UnmappedSku[] }) {
   const utils = trpc.useUtils();
   const q = trpc.mapping.unmapped.useQuery(undefined, { initialData: initial });
   const rows = q.data ?? [];
+  const [last, setLast] = useState<LastLink | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+  /** The undo window runs only while nobody is on it: hover / focus pause it, leaving restarts it. */
+  const pause = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  const resume = () => {
+    pause();
+    timer.current = setTimeout(() => setLast(null), UNDO_MS);
+  };
+  const onLinked = (link: LastLink) => {
+    setLast(link);
+    resume();
+    void utils.mapping.unmapped.invalidate();
+  };
 
-  if (q.isLoading) {
-    return (
-      <div className="flex items-center gap-2 py-8 text-muted">
-        <Spinner className="h-4 w-4" /> {t('mapping.loading')}
-      </div>
-    );
-  }
-
-  if (rows.length === 0) {
-    return (
-      <EmptyState
-        icon={<Boxes className="h-6 w-6" />}
-        title={t('mapping.emptyTitle')}
-        description={t('mapping.emptyBody')}
-      />
-    );
-  }
+  // The live region is always mounted (outside the loading / empty / list
+  // branches), so the link outcome is announced, not just painted.
+  const status = (
+    <div
+      role="status"
+      aria-live="polite"
+      onMouseEnter={pause}
+      onMouseLeave={() => last && resume()}
+      onFocus={pause}
+      onBlur={(e) => {
+        if (last && !e.currentTarget.contains(e.relatedTarget as Node | null)) resume();
+      }}
+    >
+      {last ? (
+        <LinkStatus
+          key={last.result.productId + last.row.supplierSku}
+          last={last}
+          onUndone={() => {
+            pause();
+            setLast(null);
+            void utils.mapping.unmapped.invalidate();
+          }}
+        />
+      ) : null}
+    </div>
+  );
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted">{t('mapping.pending', { count: formatNumber(rows.length, locale) })}</p>
-      <ul className="space-y-3">
-        {rows.map((row) => (
-          <li key={`${row.supplierId}::${row.supplierSku}`}>
-            <MapRow row={row} onDone={() => utils.mapping.unmapped.invalidate()} />
-          </li>
-        ))}
-      </ul>
+      {status}
+      {q.isLoading ? (
+        <div className="flex items-center gap-2 py-8 text-muted">
+          <Spinner className="h-4 w-4" /> {t('mapping.loading')}
+        </div>
+      ) : rows.length === 0 ? (
+        <EmptyState
+          icon={<Boxes className="h-6 w-6" />}
+          title={t('mapping.emptyTitle')}
+          description={t('mapping.emptyBody')}
+        />
+      ) : (
+        <>
+          <p className="text-sm text-muted">
+            {t('mapping.pending', { count: formatNumber(rows.length, locale) })}
+          </p>
+          <ul className="space-y-3">
+            {rows.map((row) => (
+              <li key={`${row.supplierId}::${row.supplierSku}`}>
+                <MapRow row={row} onLinked={onLinked} />
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }
 
-function MapRow({ row, onDone }: { row: UnmappedSku; onDone: () => void }) {
+/**
+ * "קושר · 6 שורות · 3 חשבוניות נשלחו לבדיקה מחדש · ביטול" — the link changed
+ * invoice lines, so their invoices are re-matched (the leak ₪ follows). Inline
+ * (not a toast) so the undo button can stay for 10 s and be reached by keyboard.
+ */
+function LinkStatus({ last, onUndone }: { last: LastLink; onUndone: () => void }) {
+  const t = useT(catalogNs);
+  const tc = useT(components);
+  const locale = useLocale();
+  const toast = useToast();
+  const { row, result } = last;
+  const undo = trpc.mapping.confirm.useMutation({
+    onSuccess: (r) => {
+      toast.success(
+        t('mapping.undone', {
+          count: formatNumber(r.poLinesUpdated + r.invoiceLinesUpdated, locale),
+        }),
+      );
+      onUndone();
+    },
+    onError: (e) => toast.error(friendlyError(e, tc)),
+  });
+  const n = (v: number) => formatNumber(v, locale);
+  // The linked row just left the list, so focus would fall to <body>: move it to
+  // the undo (the next likely action), where it also pauses the 10 s window.
+  useEffect(() => {
+    document.getElementById('map-undo')?.focus();
+  }, []);
+  const skipped = (key: 'linkedBlocked' | 'linkedSettled' | 'linkedConsolidated', count: number) =>
+    count > 0 ? (
+      <p className="text-xs text-muted">{t(`mapping.${key}`, { count: n(count) })}</p>
+    ) : null;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-ink">
+      <div className="min-w-0">
+        <p className="font-medium">
+          {t('mapping.linked', {
+            count: n(result.poLinesUpdated + result.invoiceLinesUpdated),
+            invoices: n(result.rematch.requeued),
+          })}
+        </p>
+        {skipped('linkedBlocked', result.rematch.blockedByClaims)}
+        {skipped('linkedSettled', result.rematch.settled)}
+        {skipped('linkedConsolidated', result.rematch.consolidated)}
+        {result.rematch.failed > 0 && (
+          <p className="text-xs text-danger">
+            {t('mapping.linkedFailed', { count: n(result.rematch.failed) })}
+          </p>
+        )}
+      </div>
+      {result.undo && (
+        <Button
+          id="map-undo"
+          variant="secondary"
+          size="sm"
+          loading={undo.isPending}
+          aria-label={t('mapping.undoLabel', { sku: row.supplierSku })}
+          onClick={() =>
+            undo.mutate({
+              supplierId: row.supplierId,
+              supplierSku: row.supplierSku,
+              rawName: row.sampleDescription || row.supplierSku,
+              revert: result.undo!,
+            })
+          }
+        >
+          {t('mapping.undo')}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function MapRow({ row, onLinked }: { row: UnmappedSku; onLinked: (link: LastLink) => void }) {
   const t = useT(catalogNs);
   const tc = useT(components);
   const locale = useLocale();
@@ -85,13 +216,7 @@ function MapRow({ row, onDone }: { row: UnmappedSku; onDone: () => void }) {
   const confirm = trpc.mapping.confirm.useMutation({
     onSuccess: (r) => {
       setOpen(false);
-      toast.success(
-        t('mapping.linked', {
-          sku: row.supplierSku,
-          count: formatNumber(r.poLinesUpdated + r.invoiceLinesUpdated, locale),
-        }),
-      );
-      onDone();
+      onLinked({ row, result: r });
     },
     onError: (e) => toast.error(friendlyError(e, tc)),
   });
@@ -112,7 +237,9 @@ function MapRow({ row, onDone }: { row: UnmappedSku; onDone: () => void }) {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <Badge>{row.supplierName}</Badge>
-            <span className="font-mono text-sm text-subtle">{t('mapping.sku', { sku: row.supplierSku })}</span>
+            <span className="font-mono text-sm text-subtle">
+              {t('mapping.sku', { sku: row.supplierSku })}
+            </span>
             {row.occurrences > 1 && (
               <span className="text-xs text-subtle">
                 · {t('mapping.occurrences', { count: formatNumber(row.occurrences, locale) })}
@@ -171,7 +298,9 @@ function MapRow({ row, onDone }: { row: UnmappedSku; onDone: () => void }) {
                 >
                   <span className="min-w-0 truncate">
                     {name.primary}
-                    {name.secondary ? <span className="ms-2 text-xs text-subtle">{name.secondary}</span> : null}
+                    {name.secondary ? (
+                      <span className="ms-2 text-xs text-subtle">{name.secondary}</span>
+                    ) : null}
                   </span>
                   <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
                 </button>

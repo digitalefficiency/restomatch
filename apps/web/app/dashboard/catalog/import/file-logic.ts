@@ -31,7 +31,8 @@ export type CatalogErrorKey =
   | 'UNREADABLE'
   | 'EMPTY'
   | 'NO_ROWS'
-  | 'MAPPING_NAME';
+  | 'MAPPING_NAME'
+  | 'FLAGGED_PRICES';
 
 const KNOWN: CatalogErrorKey[] = [
   'TOO_LARGE',
@@ -41,6 +42,7 @@ const KNOWN: CatalogErrorKey[] = [
   'EMPTY',
   'NO_ROWS',
   'MAPPING_NAME',
+  'FLAGGED_PRICES',
 ];
 
 /** Extract the stable `CATALOG_FILE_<code>` / `CATALOG_MAPPING_NAME` token from a server error. */
