@@ -122,9 +122,14 @@ export function ApprovalsList({
   const visible = items.filter((d) => !hidden.has(d.id));
 
   /** Server totals after a decision settles (counts only — page 1 is never refetched). */
+  // Overlapping refreshes (two quick decisions): only the newest request may
+  // land, so an older, slower response never overwrites fresher tiles.
+  const summarySeq = useRef(0);
   const refreshSummary = useCallback(async () => {
+    const seq = ++summarySeq.current;
     try {
-      setSummary(await utils.approvals.queueSummary.fetch(filters, { staleTime: 0 }));
+      const fresh = await utils.approvals.queueSummary.fetch(filters, { staleTime: 0 });
+      if (seq === summarySeq.current) setSummary(fresh);
     } catch {
       /* the optimistic numbers stay; the next decision retries */
     }
@@ -276,9 +281,13 @@ export function ApprovalsList({
   async function loadMore() {
     setLoadingMore(true);
     try {
-      // Decided rows have left the server set too: the rows still held ARE the offset.
+      // Keyset paging after the last loaded row (decided or not — the server
+      // recomputes its sort key from the row), so rows decided elsewhere never
+      // make the next page skip anything.
+      const last = items[items.length - 1];
+      if (!last) return;
       const next = await utils.approvals.myQueue.fetch(
-        { limit: PAGE, ...filters, offset: visible.length },
+        { limit: PAGE, ...filters, afterId: last.id },
         { staleTime: 0 },
       );
       setItems((prev) => {
@@ -364,6 +373,9 @@ export function ApprovalsList({
             <p className="text-xs text-muted">
               {t('summary.duplicates', { amount: money(summary.duplicateIls) })}
             </p>
+          ) : null}
+          {summary.vatIls > 0 ? (
+            <p className="text-xs text-muted">{t('summary.vat', { amount: money(summary.vatIls) })}</p>
           ) : null}
         </>
       ) : null}

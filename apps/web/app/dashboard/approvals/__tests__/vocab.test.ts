@@ -295,3 +295,20 @@ describe('verbs keyed by type AND claimability (deep-fix)', () => {
     expect(enText).toContain('90th-percentile');
   });
 });
+
+describe('pre-merge review findings (#141), web', () => {
+  it('F6: the ₪ label states a true fact for every type', () => {
+    expect(he(amountLabelKey('MISSING_ON_INVOICE'))).toBe('שווי השורה שלא חויבה');
+    expect(he(amountLabelKey('UNORDERED_ITEM'))).toBe('חויב על פריט שלא הוזמן');
+    expect(he(amountLabelKey('VAT_MISMATCH'))).toBe('הפרש במע״מ');
+    for (const type of ['MISSING_ON_INVOICE', 'UNORDERED_ITEM', 'VAT_MISMATCH']) {
+      expect(he(amountLabelKey(type)), type).not.toBe('חויב על חוסר');
+      expect(HEBREW.test(en(amountLabelKey(type))), type).toBe(false);
+    }
+  });
+
+  it('F7: the "mark as checked" done label equals the activity title the server writes', () => {
+    expect(he('decision.reviewedDone')).toBe(DECISION_COPY.he.reviewed);
+    expect(en('decision.reviewedDone')).toBe(DECISION_COPY.en.reviewed);
+  });
+});

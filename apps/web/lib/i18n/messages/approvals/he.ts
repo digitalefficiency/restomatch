@@ -23,6 +23,7 @@ export const he = {
     oldest: 'הוותיק ביותר',
     line: '{count} בתור · {amount} לדרישה · {blockers} חוסמים',
     duplicates: '+ {amount} בחשבוניות כפולות (כולל מע״מ)',
+    vat: '+ {amount} בהפרשי מע״מ (סכום המע״מ עצמו)',
   },
   others: {
     title: 'ממתין לאחרים',
@@ -57,6 +58,9 @@ export const he = {
   amountLabel: {
     price: 'חויב ביותר',
     qty: 'חויב על חוסר',
+    vat: 'הפרש במע״מ',
+    missing: 'שווי השורה שלא חויבה',
+    unordered: 'חויב על פריט שלא הוזמן',
     duplicate: 'סכום בסיכון',
     other: 'הפרש',
   },
@@ -118,6 +122,8 @@ export const he = {
   },
   errorPage: {
     title: 'תור האישורים לא נטען',
+    titlePayRun: 'ריצת התשלומים לא נטענה',
+    bodyPayRun: 'משהו השתבש בטעינת ריצת התשלומים. שום תשלום לא סומן.',
     body: 'משהו השתבש בטעינת הפערים. שום החלטה לא אבדה.',
     retry: 'נסו שוב',
     home: 'לדף הבית',

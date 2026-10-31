@@ -182,12 +182,13 @@ export function waiveReasons(type: string): WaiveReason[] {
 
 /** Which label names the card's ₪ (approvals-17: a computed fact is never "estimated"). */
 export function amountLabelKey(type: string): MessageKey<Tree> {
-  if (type === 'PRICE_HIGHER' || type === 'PRICE_LOWER' || type === 'TOTAL_MISMATCH' || type === 'VAT_MISMATCH') {
-    return 'amountLabel.price';
-  }
-  if (type === 'QTY_SHORT' || type === 'QTY_OVER' || type === 'MISSING_ON_INVOICE' || type === 'UNORDERED_ITEM') {
-    return 'amountLabel.qty';
-  }
+  if (type === 'PRICE_HIGHER' || type === 'PRICE_LOWER' || type === 'TOTAL_MISMATCH') return 'amountLabel.price';
+  if (type === 'VAT_MISMATCH') return 'amountLabel.vat';
+  if (type === 'QTY_SHORT' || type === 'QTY_OVER') return 'amountLabel.qty';
+  // Ordered but never billed: nothing was charged — it is the value of the missing line.
+  if (type === 'MISSING_ON_INVOICE') return 'amountLabel.missing';
+  // Billed for a line nobody ordered.
+  if (type === 'UNORDERED_ITEM') return 'amountLabel.unordered';
   if (type === 'DUPLICATE_INVOICE' || type === 'UNORDERED_ARRIVAL') return 'amountLabel.duplicate';
   return 'amountLabel.other';
 }
