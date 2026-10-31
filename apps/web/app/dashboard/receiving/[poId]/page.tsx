@@ -63,15 +63,20 @@ export default async function ReceivingPoPage({
     .then((r) => r.enabled)
     .catch(() => false);
   // An existing receipt: resume the count, or show it read-only once closed.
-  // Today's list already says whether this PO has one — a fresh PO then costs no
-  // NOT_FOUND (every procedure error is reported); a PO outside today's window asks directly.
+  // Never probe getReceipt for a receipt that may not exist: every procedure error
+  // is reported (console.error in dev, replayed into the browser), so a fresh PO
+  // must cost no NOT_FOUND. Today's list says whether this PO has a receipt; a PO
+  // outside today's window (e.g. due after midnight in the restaurant's timezone)
+  // asks the order's own receipt status first.
   const receipt = caller.receiving
     .todayExpectations()
     .catch(() => null)
-    .then((today) => {
+    .then(async (today) => {
       const row = today?.find((e) => e.poId === poId);
-      if (row && !row.receiptId) return null;
-      return caller.receiving.getReceipt(row?.receiptId ? { grId: row.receiptId } : { poId }).catch(() => null);
+      if (row) return row.receiptId ? caller.receiving.getReceipt({ grId: row.receiptId }).catch(() => null) : null;
+      const order = await caller.orders.get({ poId }).catch(() => null);
+      if (!order?.receiptStatus) return null;
+      return caller.receiving.getReceipt({ poId }).catch(() => null);
     });
 
   // English names first: getPo must read the names it fills.
