@@ -655,9 +655,11 @@ test.describe('phone 390 · manager · scope fixes', () => {
     const price = page.getByTestId('order-line').first().getByRole('textbox', { name: /מחיר ליח׳/ });
     await price.fill('1,250');
     await page.getByTestId('order-line').first().getByRole('textbox', { name: /כמות/ }).fill('1');
-    await expect(page.getByTestId('order-total')).toContainText('1,250.00');
+    // The line's own total: the cart may hold a resumed server draft's other lines (W2-06).
+    const line = page.getByTestId('order-line').first();
+    await expect(line).toContainText('1,250.00');
     await price.fill('0,250');
-    await expect(page.getByTestId('order-total')).toContainText('0.25');
+    await expect(line).toContainText('0.25');
   });
 });
 
