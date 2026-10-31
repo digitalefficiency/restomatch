@@ -20,6 +20,7 @@ export const en: Shape<typeof he> = {
     oldest: 'Oldest',
     line: '{count} in queue · {amount} to claim · {blockers} blockers',
     duplicates: '+ {amount} in duplicate invoices (incl. VAT)',
+    vat: '+ {amount} in VAT differences (the VAT itself)',
   },
   others: {
     title: 'Waiting for others',
@@ -54,6 +55,9 @@ export const en: Shape<typeof he> = {
   amountLabel: {
     price: 'Overbilled',
     qty: 'Billed for a shortfall',
+    vat: 'VAT difference',
+    missing: 'Value of the line not billed',
+    unordered: 'Billed for an item not ordered',
     duplicate: 'At risk',
     other: 'Difference',
   },
@@ -115,6 +119,8 @@ export const en: Shape<typeof he> = {
   },
   errorPage: {
     title: "The approvals queue didn't load",
+    titlePayRun: "The pay run didn't load",
+    bodyPayRun: 'Something went wrong loading the pay run. No payment was marked.',
     body: 'Something went wrong loading the discrepancies. No decision was lost.',
     retry: 'Try again',
     home: 'Go to home',

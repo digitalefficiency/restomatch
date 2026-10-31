@@ -10,6 +10,7 @@ import {
   grLines,
   inArray,
   invoiceLines,
+  isNull,
   invoices,
   lt,
   matchRuns,
@@ -22,11 +23,12 @@ import {
   users,
   type UserRole,
 } from '@restomatch/db';
-import { computeInvoiceLeak, notZeroShortTwin } from '@restomatch/charts';
+import { LEAK_FILTER, notZeroShortTwin, type LeakBreakdownInvoice } from '@restomatch/charts';
 import { authedProcedure, financeProcedure, memberProcedure, router } from '../trpc';
 import { logActivity } from '../activity';
 import { canActOn, expandVisibleRoles } from '../lib/roles';
-import { claimableLines, sumClaims } from '../lib/claims';
+import { claimableLines, sumClaims, type VatBasis } from '../lib/claims';
+import { formatIlsAgorot } from '../reports/money';
 import { DECISION_COPY } from '../notifications/templates';
 
 const ResolutionEnum = z.enum(['accepted', 'rejected', 'escalated']);
@@ -145,6 +147,30 @@ function filterWhere(input: QueueFilterInput | undefined) {
 /** block → warn → info, then the invoice that is due first, then the biggest ₪ (approvals-14). */
 const SEVERITY_RANK = sql`CASE ${discrepancies.severity} WHEN 'block' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END`;
 
+/**
+ * The priority order as one all-ascending key (severity, due date — none last,
+ * biggest ₪, newest, id), so "rows after X" is a row-value comparison. The
+ * subquery recomputes X's key from the row itself, whatever its status now.
+ */
+const PRIORITY_KEY = sql`(${SEVERITY_RANK},
+  COALESCE(EXTRACT(EPOCH FROM ${invoices.dueDate}), 'Infinity'::numeric),
+  -ABS(COALESCE(${discrepancies.deltaAmount}, 0)),
+  -EXTRACT(EPOCH FROM ${discrepancies.createdAt}),
+  ${discrepancies.id})`;
+function afterRow(restaurantId: string, afterId: string) {
+  return sql`${PRIORITY_KEY} > (
+    SELECT CASE d2.severity WHEN 'block' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END,
+      COALESCE(EXTRACT(EPOCH FROM i2.due_date), 'Infinity'::numeric),
+      -ABS(COALESCE(d2.delta_amount, 0)),
+      -EXTRACT(EPOCH FROM d2.created_at),
+      d2.id
+    FROM discrepancies d2
+    JOIN match_runs m2 ON m2.id = d2.match_run_id AND m2.restaurant_id = ${restaurantId}
+    LEFT JOIN invoices i2 ON i2.id = m2.invoice_id AND i2.restaurant_id = ${restaurantId}
+    WHERE d2.id = ${afterId}::uuid AND d2.restaurant_id = ${restaurantId}
+  )`;
+}
+
 export const approvalsRouter = router({
   /**
    * Items waiting for my role to decide.
@@ -166,6 +192,9 @@ export const approvalsRouter = router({
           // first. Return shape stays an array.
           cursor: z.string().datetime().optional(),
           offset: z.number().int().min(0).max(10_000).optional(),
+          // Keyset paging in the priority order: rows strictly after this row's
+          // sort key. Robust to rows decided elsewhere (an offset would skip).
+          afterId: z.string().uuid().optional(),
           ...QueueFilters,
         })
         .optional(),
@@ -240,21 +269,16 @@ export const approvalsRouter = router({
             notZeroShortTwin(),
             inArray(discrepancies.requiresRole, roles),
             cursorDate ? lt(discrepancies.createdAt, cursorDate) : undefined,
+            !cursorDate && input?.afterId ? afterRow(rid, input.afterId) : undefined,
             ...filterWhere(input),
           ),
         );
       const rows = cursorDate
         ? await base.orderBy(desc(discrepancies.createdAt)).limit(limit)
         : await base
-            .orderBy(
-              SEVERITY_RANK,
-              sql`${invoices.dueDate} ASC NULLS LAST`,
-              sql`ABS(${discrepancies.deltaAmount}) DESC NULLS LAST`,
-              desc(discrepancies.createdAt),
-              discrepancies.id,
-            )
+            .orderBy(PRIORITY_KEY)
             .limit(limit)
-            .offset(input?.offset ?? 0);
+            .offset(input?.afterId ? 0 : (input?.offset ?? 0));
       // A PO line from another tenant can never be joined in (its PO join is
       // tenant-scoped); drop its orphan facts rather than show them.
       return rows.map((r) => ({
@@ -269,8 +293,9 @@ export const approvalsRouter = router({
    *
    *  • count / blockers / oldest — over the viewer's own queue under the filters;
    *  • claimableIls — the lib/claims rule (the credit letters' per-invoice cap),
-   *    restricted to the queue's own lines, 2 dp, before VAT (a duplicate's ₪ is
-   *    incl. VAT and is reported apart as `duplicateIls`);
+   *    restricted to the queue's own claimable lines, 2 dp, ONE basis: before
+   *    VAT. A duplicate's ₪ (incl. VAT) is `duplicateIls`; a VAT mismatch (a VAT
+   *    amount) is `vatIls` — never added to the before-VAT figure;
    *  • toDecide / toReview — the viewer's rows split by isClaimableRow:
    *    "להחלטה (₪)" carries the claimable ₪, "לבדיקה (ללא ₪)" is a count only
    *    (W1-05 reads toDecide for the manager's ₪ awaiting);
@@ -313,17 +338,22 @@ export const approvalsRouter = router({
 
     // The ₪ and the split come from the same rows, so "להחלטה" count and ₪ always agree.
     const decide = mine.filter(isClaimableRow);
-    const { claimableIls, duplicateIls } = await claimableOf(ctx.db, rid, decide);
+    const showOthers = DECIDER_ROLES.includes(ctx.session.role);
+    const othersClaimable = showOthers ? others.filter(isClaimableRow) : [];
+    // ONE query for both sets (lib/claims cap per invoice), then split by row id.
+    const amounts = await claimsByRow(ctx.db, rid, [...decide, ...othersClaimable]);
+    const { claimableIls, duplicateIls, vatIls } = basisTotals(decide, amounts);
     const oldest = mine.reduce<Date | null>((o, r) => (!o || r.createdAt < o ? r.createdAt : o), null);
 
-    const showOthers = DECIDER_ROLES.includes(ctx.session.role);
+    // Others lane: the same claims rule and the same before-VAT basis as the tile.
     const byRole = new Map<string, { count: number; agorot: number }>();
     if (showOthers) {
       for (const r of others) {
         const key = r.requiredRole ?? 'manager';
         const e = byRole.get(key) ?? { count: 0, agorot: 0 };
         e.count += 1;
-        if (isClaimableRow(r)) e.agorot += Math.abs(Math.round(Number(r.deltaAmount ?? 0) * 100));
+        const a = amounts.get(r.id);
+        if (a && a.basis === 'excl') e.agorot += Math.round(a.amount * 100);
         byRole.set(key, e);
       }
     }
@@ -334,6 +364,7 @@ export const approvalsRouter = router({
       oldestAt: oldest,
       claimableIls,
       duplicateIls,
+      vatIls,
       toDecide: { count: decide.length, amountIls: claimableIls },
       toReview: { count: mine.length - decide.length },
       others: {
@@ -356,7 +387,7 @@ export const approvalsRouter = router({
           resolvedAt: new Date(),
           resolutionNote: input.note ?? null,
         })
-        .where(openRow(ctx.session.restaurantId, input.discrepancyId))
+        .where(checkedRow(ctx.session.restaurantId, input.discrepancyId, before))
         .returning();
       if (!updated) throw await decidedConflict(ctx, input.discrepancyId);
 
@@ -374,7 +405,9 @@ export const approvalsRouter = router({
         eventType: 'discrepancy_approved',
         // An accepted duplicate is a hold on the copy, not a claim.
         title: updated.type === 'DUPLICATE_INVOICE' ? DECISION_COPY.he.duplicateHeld : DECISION_COPY.he.approved,
-        detail: updated.deltaAmount ? `₪${Math.abs(Number(updated.deltaAmount)).toFixed(2)}` : null,
+        detail: updated.deltaAmount
+          ? formatIlsAgorot(Math.abs(Math.round(Number(updated.deltaAmount) * 100)), { maximumFractionDigits: 2 })
+          : null,
         entityType: 'discrepancy',
         entityId: input.discrepancyId,
         actorId: ctx.session.userId,
@@ -405,7 +438,7 @@ export const approvalsRouter = router({
           resolvedAt: new Date(),
           resolutionNote: input.reason,
         })
-        .where(openRow(ctx.session.restaurantId, input.discrepancyId))
+        .where(checkedRow(ctx.session.restaurantId, input.discrepancyId, before))
         .returning();
       if (!updated) throw await decidedConflict(ctx, input.discrepancyId);
 
@@ -426,7 +459,8 @@ export const approvalsRouter = router({
       await logActivity(ctx.db, {
         restaurantId: ctx.session.restaurantId,
         eventType: 'discrepancy_rejected',
-        title: DECISION_COPY.he.rejected,
+        // "סמנו כנבדק" is a check with nothing to claim, not a payment decision.
+        title: input.reasonCode === 'reviewed' ? DECISION_COPY.he.reviewed : DECISION_COPY.he.rejected,
         detail: input.reason,
         entityType: 'discrepancy',
         entityId: input.discrepancyId,
@@ -453,7 +487,7 @@ export const approvalsRouter = router({
           requiresRole: 'owner',
           resolutionNote: input.note ?? null,
         })
-        .where(openRow(ctx.session.restaurantId, input.discrepancyId))
+        .where(checkedRow(ctx.session.restaurantId, input.discrepancyId, before))
         .returning();
       if (!updated) throw await decidedConflict(ctx, input.discrepancyId);
 
@@ -585,12 +619,25 @@ const DECIDED_BY_ACTION: Record<string, string> = {
   'discrepancy.escalated': 'escalated',
 };
 
-/** The row, in this tenant, still waiting for a decision — the only rows a decision may write. */
-function openRow(restaurantId: string, discrepancyId: string) {
+/**
+ * The row, in this tenant, still waiting for a decision AND still in exactly
+ * the state the role check saw: same status, same routing. A concurrent
+ * escalation (or any decision) between the check and the write makes the
+ * UPDATE match nothing, so the caller gets CONFLICT instead of overriding it.
+ */
+function checkedRow(
+  restaurantId: string,
+  discrepancyId: string,
+  before: { status: string; requiresRole: UserRole | null },
+) {
   return and(
     eq(discrepancies.id, discrepancyId),
     eq(discrepancies.restaurantId, restaurantId),
     inArray(discrepancies.resolutionStatus, [...OPEN_STATUSES]),
+    eq(discrepancies.resolutionStatus, before.status as (typeof OPEN_STATUSES)[number]),
+    before.requiresRole === null
+      ? isNull(discrepancies.requiresRole)
+      : eq(discrepancies.requiresRole, before.requiresRole),
   );
 }
 
@@ -633,30 +680,96 @@ async function decidedConflict(ctx: Ctx, discrepancyId: string): Promise<TRPCErr
 }
 
 /**
- * The claimable ₪ of the given queue rows, by the lib/claims rule (the same
- * per-invoice cap as the credit letters and the pay run), restricted to these
- * rows. Rows without an invoice have nothing to claim yet.
+ * The claimable ₪ of each given queue row, by the lib/claims rule (the same
+ * per-invoice cap as the credit letters and the pay run). ONE query loads every
+ * discrepancy line of the rows' invoices with the charts LEAK_FILTER flag —
+ * the same inputs computeInvoiceLeak reads per invoice (cap = LEAST(Σ leak
+ * lines, invoice total); a paid invoice or one still waiting for its PO link
+ * claims nothing) — and claimableLines applies the cap. Rows without an invoice
+ * have nothing to claim yet.
  */
-async function claimableOf(
+async function claimsByRow(
   db: import('@restomatch/db').Database,
   restaurantId: string,
   rows: ReadonlyArray<{ id: string; invoiceId: string | null }>,
-): Promise<{ claimableIls: number; duplicateIls: number }> {
-  const ids = new Set(rows.map((r) => r.id));
+): Promise<Map<string, { amount: number; basis: VatBasis }>> {
+  const out = new Map<string, { amount: number; basis: VatBasis }>();
   const invoiceIds = [...new Set(rows.map((r) => r.invoiceId).filter((v): v is string => !!v))];
-  const lines: Array<{ amount: number; type: string }> = [];
-  for (const invoiceId of invoiceIds) {
-    const inv = await computeInvoiceLeak(db, restaurantId, invoiceId);
-    if (!inv) continue;
+  if (invoiceIds.length === 0) return out;
+  const res = await db.execute(sql`
+    SELECT mr.invoice_id, i.status, COALESCE(i.total_incl_vat, 0) AS total,
+      d.id, d.type, d.severity, d.resolution_status, d.delta_amount, (${LEAK_FILTER}) AS counts
+    FROM discrepancies d
+    JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
+    JOIN invoices i ON i.id = mr.invoice_id AND i.restaurant_id = ${restaurantId}
+    WHERE d.restaurant_id = ${restaurantId}
+      AND mr.invoice_id IN (${sql.join(invoiceIds.map((id) => sql`${id}::uuid`), sql`, `)})
+    ORDER BY ABS(d.delta_amount) DESC, d.id
+  `);
+  type Row = Record<string, unknown>;
+  const list: Row[] = Array.isArray(res) ? (res as Row[]) : ((res as { rows?: Row[] }).rows ?? []);
+  const byInvoice = new Map<string, LeakBreakdownInvoice>();
+  const rawLeak = new Map<string, number>();
+  for (const r of list) {
+    const key = String(r.invoice_id);
+    let inv = byInvoice.get(key);
+    if (!inv) {
+      inv = {
+        invoiceId: key,
+        invoiceNumber: null,
+        invoiceDate: null,
+        status: String(r.status),
+        supplierName: null,
+        supplierNameEn: null,
+        totalInclVat: Number(r.total),
+        leakIls: 0,
+        pendingLink: false,
+        lines: [],
+      };
+      byInvoice.set(key, inv);
+    }
+    const delta = Number(r.delta_amount ?? 0);
+    const counts = Boolean(r.counts);
+    if (counts) rawLeak.set(key, (rawLeak.get(key) ?? 0) + Math.abs(Math.round(delta * 100)));
+    if (r.type === 'UNORDERED_ARRIVAL' && (r.resolution_status === 'open' || r.resolution_status === 'escalated')) {
+      inv.pendingLink = true;
+    }
+    inv.lines.push({
+      discrepancyId: String(r.id),
+      type: String(r.type),
+      severity: String(r.severity),
+      resolutionStatus: String(r.resolution_status),
+      deltaAmount: delta,
+      expected: null,
+      actual: null,
+      countsAsLeak: counts,
+      productName: null,
+      productNameEn: null,
+      lineDescription: null,
+      lineDescriptionEn: null,
+      poLineId: null,
+      invoiceLineId: null,
+      productId: null,
+    });
+  }
+  const wanted = new Set(rows.map((r) => r.id));
+  for (const inv of byInvoice.values()) {
+    inv.leakIls = Math.min((rawLeak.get(inv.invoiceId) ?? 0) / 100, inv.totalInclVat);
     for (const c of claimableLines(inv)) {
-      if (ids.has(c.line.discrepancyId)) lines.push({ amount: c.amount, type: c.line.type });
+      if (wanted.has(c.line.discrepancyId)) out.set(c.line.discrepancyId, { amount: c.amount, basis: c.basis });
     }
   }
-  const isDup = (l: { type: string }) => l.type === 'DUPLICATE_INVOICE';
-  return {
-    claimableIls: sumClaims(lines.filter((l) => !isDup(l))),
-    duplicateIls: sumClaims(lines.filter(isDup)),
-  };
+  return out;
+}
+
+/** Σ per VAT basis, never mixed: before VAT, duplicates (incl. VAT), VAT amounts. */
+function basisTotals(
+  rows: ReadonlyArray<{ id: string }>,
+  amounts: Map<string, { amount: number; basis: VatBasis }>,
+): { claimableIls: number; duplicateIls: number; vatIls: number } {
+  const of = (basis: VatBasis) =>
+    sumClaims(rows.map((r) => amounts.get(r.id)).filter((a): a is { amount: number; basis: VatBasis } => a?.basis === basis));
+  return { claimableIls: of('excl'), duplicateIls: of('incl'), vatIls: of('vat') };
 }
 
 /**
@@ -693,6 +806,9 @@ async function ensureCanAct(
     });
   }
   if (!canActOn(ctx.session.role, row.requiredRole)) {
+    // A colleague escalated this card away from my role: it is already decided
+    // for me, not a permission problem.
+    if (row.status === 'escalated') throw await decidedConflict(ctx, discrepancyId);
     throw new TRPCError({
       code: 'FORBIDDEN',
       message: `role ${ctx.session.role} cannot act on discrepancy requiring ${row.requiredRole}`,
