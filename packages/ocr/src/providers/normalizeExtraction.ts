@@ -105,6 +105,15 @@ export function normalizeExtraction(raw: unknown): unknown {
     inv.lines = inv.lines.map(repairLine).filter((l): l is Record<string, unknown> => l !== undefined);
   }
   if (inv.totals === undefined) inv.totals = {};
+  else if (typeof inv.totals === 'object' && !Array.isArray(inv.totals)) {
+    // Printed VAT rate in percent (18) → fraction, like the line vatRate.
+    const t = { ...(inv.totals as Record<string, unknown>) };
+    let rate = num(t.vatRate);
+    if (rate !== undefined && rate > 1 && rate <= 100) rate = round(rate / 100, 4);
+    if (rate === undefined || rate < 0 || rate >= 1) delete t.vatRate;
+    else t.vatRate = rate;
+    inv.totals = t;
+  }
   const conf = num(inv.confidence);
   if (conf !== undefined) inv.confidence = Math.max(0, Math.min(1, conf));
   return inv;
