@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { PDFDocument } from 'pdf-lib';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  and,
   createDb,
   creditNotes,
   discrepancies,
@@ -304,20 +305,22 @@ describe('monthly report', () => {
     await expect(caller('chef').monthlyReport.pdf({ month: month(), locale: 'he' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
-  it('sendMonthlyReports: freezes last month once, emails managers via the outbox, WhatsApp via the stub', async () => {
+  it('sendMonthlyReports: freezes last month once, e-mails managers via notify(); nothing is "sent" until the dispatcher says so (G-06)', async () => {
     const now = new Date();
     const r1 = await sendMonthlyReports(db, { restaurantId: T.restaurantId, now, appUrl: 'https://app.test' });
-    expect(r1).toMatchObject({ restaurants: 1, emails: 1, whatsapp: 1, skipped: 0 });
+    // No verified phone (G-03 + OTP) → no WhatsApp row at all, instead of a stub "sent".
+    expect(r1).toMatchObject({ restaurants: 1, emails: 1, whatsapp: 0, skipped: 0 });
     const rows = await db.select().from(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, T.restaurantId));
-    const wa = rows.find((r) => r.channel === 'whatsapp')!;
-    expect(wa.status).toBe('sent'); // stub provider: marked sent, nothing left the building
+    expect(rows.filter((r) => r.channel === 'whatsapp')).toHaveLength(0);
+    expect(rows.filter((r) => r.target.startsWith('role:'))).toHaveLength(0);
+    expect(rows.filter((r) => r.status === 'sent')).toHaveLength(0);
     expect(rows.find((r) => r.channel === 'email')!.status).toBe('queued');
     const [stored] = await db.select().from(monthlyReports).where(eq(monthlyReports.restaurantId, T.restaurantId));
-    expect(stored!.sentAt).not.toBeNull();
-    // Second run: already sent → skipped, no new outbox rows.
+    expect(stored!.sentAt).toBeNull(); // only the reconcile sets it, from a row the dispatcher really sent
+    // Second run: nothing new to enqueue → skipped, no new outbox rows.
     const r2 = await sendMonthlyReports(db, { restaurantId: T.restaurantId, now });
     expect(r2).toMatchObject({ emails: 0, whatsapp: 0, skipped: 1 });
-    expect(await db.select().from(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, T.restaurantId))).toHaveLength(2);
+    expect(await db.select().from(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, T.restaurantId))).toHaveLength(rows.length);
   });
 
   it('digest preview (flag monthlyDigestPreview): same numbers as the report, owner recipients, nothing queued', async () => {
@@ -570,7 +573,14 @@ describe('money cross-QA (S3) regressions', () => {
   it('LOW: a sent snapshot is never rewritten, even with refresh', async () => {
     const now = new Date();
     await sendMonthlyReports(db, { restaurantId: T.restaurantId, now });
+    // G-06: the snapshot is "sent" once the dispatcher really sent a row; the next run reconciles sent_at.
+    await db
+      .update(notificationsOutbox)
+      .set({ status: 'sent', sentAt: now })
+      .where(and(eq(notificationsOutbox.restaurantId, T.restaurantId), eq(notificationsOutbox.relatedEntityType, 'monthly_report')));
+    expect(await sendMonthlyReports(db, { restaurantId: T.restaurantId, now })).toMatchObject({ emails: 0, skipped: 1 });
     const [row] = await db.select().from(monthlyReports).where(eq(monthlyReports.restaurantId, T.restaurantId));
+    expect(row!.sentAt).not.toBeNull();
     await db.update(monthlyReports).set({ snapshot: { ...(row!.snapshot as object), leakAgorot: 1 } }).where(eq(monthlyReports.id, row!.id));
     const again = await ensureMonthlyReport(db, T.restaurantId, (row!.month as string).slice(0, 7), { refresh: true });
     expect(again.data.leakAgorot).toBe(1);
@@ -622,7 +632,14 @@ describe('sendMonthlyReports isolates a failing restaurant (S4 M1)', () => {
     expect(res.failed).toEqual([bad.restaurantId]);
     for (const id of [T.restaurantId, good.restaurantId]) {
       const [stored] = await db.select().from(monthlyReports).where(eq(monthlyReports.restaurantId, id));
-      expect(stored?.sentAt).not.toBeNull();
+      expect(stored).toBeDefined(); // frozen…
+      expect(stored!.sentAt).toBeNull(); // …and honestly not "sent" until the dispatcher sends (G-06)
+      const queued = await db
+        .select()
+        .from(notificationsOutbox)
+        .where(and(eq(notificationsOutbox.relatedEntityId, stored!.id), eq(notificationsOutbox.channel, 'email')));
+      expect(queued.length).toBeGreaterThan(0);
+      expect(queued.every((r) => r.status === 'queued' && !r.target.startsWith('role:'))).toBe(true);
     }
     expect(await db.select().from(monthlyReports).where(eq(monthlyReports.restaurantId, bad.restaurantId))).toHaveLength(0);
   });
