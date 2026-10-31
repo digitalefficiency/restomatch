@@ -127,7 +127,7 @@ export function OnboardingForm({ next, initialName }: { next: string; initialNam
           inputMode="numeric"
           dir="ltr"
           maxLength={20}
-          placeholder="514778123"
+          placeholder="512345678"
           className="min-h-11 text-base rtl:text-right"
         />
         {errorLine('businessId')}

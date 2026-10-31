@@ -23,6 +23,8 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'team.userNotFound': 'userNotFound',
   'team.inviteWrongEmail': 'inviteWrongEmail',
   'onboarding.accountGone': 'accountGone',
+  // /onboarding shows its own invitation-only note; this is the generic fallback.
+  signup_closed: 'forbidden',
   'settings.invalidTimezone': 'invalidTimezone',
   'settings.noChanges': 'noChanges',
   'dsr.soleOwner': 'soleOwner',

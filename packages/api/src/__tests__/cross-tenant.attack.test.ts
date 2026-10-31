@@ -122,6 +122,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'exports.invoicesCsv': 'isolation',
   'exports.uniform1000': 'isolation',
   'onboarding.myMemberships': 'isolation',
+  'onboarding.signupStatus':
+    'userScopedProcedure read of the CALLER\'s own users row only (keyed to ctx.session.userId, no client input) — returns one boolean (may this caller create a restaurant), no tenant data.',
   'onboarding.createRestaurant':
     'creates a brand-new tenant; takes no entity ids and reads nothing tenant-scoped',
   // Chain / branches (S8). Exercised on the RLS-enforced app role in

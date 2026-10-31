@@ -1,10 +1,53 @@
 import { randomUUID } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
-import { eq, memberships, restaurants, sql, storageNamespaces, users } from '@restomatch/db';
+import { eq, memberships, restaurants, sql, storageNamespaces, users, type Database } from '@restomatch/db';
 import { z } from 'zod';
 import { appError } from '../errors';
 import { router, userScopedProcedure } from '../trpc';
 import { hasNoControlChars, NO_CONTROL_CHARS_MESSAGE } from '../lib/text';
+
+/** The caller fields the sign-up gate reads (their own users row). */
+interface SignupCaller {
+  email: string;
+  emailVerified: Date | null;
+  isPlatformAdmin: boolean;
+}
+
+function emailList(raw: string | undefined): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * May this caller create a tenant? Each new tenant gets an implicit trial with
+ * real, unmetered OCR, so open self-sign-up is closed in production (pilot: by
+ * invitation only). Allowed when any of:
+ *  - SIGNUP_OPEN === '1' (an explicit '0' closes it everywhere);
+ *  - the caller's VERIFIED email is in SIGNUP_ALLOWLIST (comma list, any case);
+ *  - the caller is a platform admin (users.is_platform_admin, or a verified
+ *    PLATFORM_ADMIN_EMAILS address — the same rule as adminProcedure).
+ * With SIGNUP_OPEN unset: closed when NODE_ENV=production, open in dev/test.
+ */
+export function signupAllowed(user: SignupCaller, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.SIGNUP_OPEN === '1') return true;
+  const openByDefault = env.SIGNUP_OPEN === undefined && env.NODE_ENV !== 'production';
+  if (openByDefault) return true;
+  if (user.isPlatformAdmin) return true;
+  if (user.emailVerified == null) return false;
+  const email = user.email.toLowerCase();
+  return emailList(env.SIGNUP_ALLOWLIST).includes(email) || emailList(env.PLATFORM_ADMIN_EMAILS).includes(email);
+}
+
+async function signupCaller(db: Database, userId: string): Promise<SignupCaller | null> {
+  const [user] = await db
+    .select({ email: users.email, emailVerified: users.emailVerified, isPlatformAdmin: users.isPlatformAdmin })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  return user ?? null;
+}
 
 export const onboardingRouter = router({
   myMemberships: userScopedProcedure.query(async ({ ctx }) => {
@@ -18,6 +61,12 @@ export const onboardingRouter = router({
       .innerJoin(restaurants, eq(memberships.restaurantId, restaurants.id))
       .where(eq(memberships.userId, ctx.session.userId));
     return rows;
+  }),
+
+  /** Whether the caller may create a restaurant (the onboarding page shows the invitation-only note otherwise). */
+  signupStatus: userScopedProcedure.query(async ({ ctx }) => {
+    const user = await signupCaller(ctx.db, ctx.session.userId);
+    return { open: user != null && signupAllowed(user) };
   }),
 
   createRestaurant: userScopedProcedure
@@ -37,17 +86,16 @@ export const onboardingRouter = router({
       // DB was reseeded/reset the user row can be gone while the cookie still
       // carries a ghost userId. Verify the user exists first, otherwise the
       // membership insert dies on a raw FK violation and orphans a restaurant.
-      const [user] = await ctx.db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.id, ctx.session.userId))
-        .limit(1);
+      const user = await signupCaller(ctx.db, ctx.session.userId);
       if (!user) {
         throw appError(
           'UNAUTHORIZED',
           'onboarding.accountGone',
           'החשבון שלך כבר לא קיים. התנתק והתחבר מחדש כדי להמשיך.',
         );
+      }
+      if (!signupAllowed(user)) {
+        throw appError('FORBIDDEN', 'signup_closed', 'ההרשמה כרגע בהזמנה בלבד.');
       }
 
       return ctx.db.transaction(async (tx) => {
