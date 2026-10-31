@@ -29,6 +29,32 @@ export interface DemoCheck {
   facts: string[];
 }
 
+/**
+ * 12:00 on the Israel wall clock of `today` (YYYY-MM-DD) as a UTC instant — the
+ * "now" every hero / month figure of the demo check is computed at, so the check
+ * describes the seeded DEMO_TODAY and not the real date. DST-correct per date
+ * (25.10.2026 is the day IDT ends: 12:00 IL = 10:00Z, not 09:00Z).
+ */
+export function demoNow(today: string, tz = 'Asia/Jerusalem'): Date {
+  const [y, m, d] = today.split('-').map(Number) as [number, number, number];
+  const guess = Date.UTC(y, m - 1, d, 12);
+  const wall = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+      .formatToParts(new Date(guess))
+      .map((p) => [p.type, p.value]),
+  );
+  const asUtc = Date.UTC(+wall.year!, +wall.month! - 1, +wall.day!, +wall.hour!, +wall.minute!);
+  return new Date(guess - (asUtc - guess));
+}
+
 export async function checkDemo(url: string, today: string): Promise<DemoCheck> {
   const sql = postgres(url, { max: 1, prepare: false, onnotice: () => undefined });
   const problems: string[] = [];
@@ -41,13 +67,15 @@ export async function checkDemo(url: string, today: string): Promise<DemoCheck> 
     if (rids.length !== 3) problems.push(`expected 3 demo restaurants (main + Haifa + Jerusalem), found ${rids.length}`);
 
     // 1. The hero: the North Star band.
-    const h = await computeLeakHero(createDb(url), main.id);
+    // At DEMO_TODAY (not the real clock): a lab seeded for 25.10 checked in November
+    // used to read "hero leak 0.00%" — the month it looked at was empty.
+    const now = demoNow(today);
+    const h = await computeLeakHero(createDb(url), main.id, { now });
     facts.push(`hero: ₪${Math.round(h.leakIls)} of ₪${Math.round(h.spendIls)} (${((h.leakPct ?? 0) * 100).toFixed(1)}%)`);
     if (!((h.leakPct ?? 0) >= 0.015 && (h.leakPct ?? 0) <= 0.03)) problems.push(`hero leak ${((h.leakPct ?? 0) * 100).toFixed(2)}% is outside the 1.5–3% demo band`);
 
     // 1b. Month compares (last month vs the month before): both months fully seeded,
     //     comparable spend and a believable leak — a thin base reads as "+2,926%".
-    const now = new Date(`${today}T12:00:00+03:00`);
     const prev = await computeLeakHero(createDb(url), main.id, { now, monthOffset: -1 });
     const prev2 = await computeLeakHero(createDb(url), main.id, { now, monthOffset: -2 });
     facts.push(`last month ₪${Math.round(prev.leakIls)} of ₪${Math.round(prev.spendIls)} (${((prev.leakPct ?? 0) * 100).toFixed(1)}%) · month before ₪${Math.round(prev2.leakIls)} of ₪${Math.round(prev2.spendIls)} (${((prev2.leakPct ?? 0) * 100).toFixed(1)}%)`);
