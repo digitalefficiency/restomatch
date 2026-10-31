@@ -65,6 +65,17 @@ export function resolveAppLocale(value: unknown): AppLocale {
   return isAppLocale(value) ? value : DEFAULT_LOCALE;
 }
 
+/**
+ * The language of the FIRST paint: the device's choice (the `rm_locale`
+ * cookie — the switcher always wins on that device); with none, the signed-in
+ * member's saved language. Before, a device without the cookie painted Hebrew
+ * and switched after LocaleSync's refresh (a visible he → en flash).
+ */
+export function pickAppLocale(cookieValue: string | undefined | null, memberLocale: string | undefined | null): AppLocale {
+  if (isAppLocale(cookieValue)) return cookieValue;
+  return resolveAppLocale(memberLocale);
+}
+
 export function dirOf(locale: AppLocale): 'rtl' | 'ltr' {
   return locale === 'he' || locale === 'ar' ? 'rtl' : 'ltr';
 }

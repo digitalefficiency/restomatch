@@ -747,6 +747,69 @@ test('sign-out with a queued invoice photo offline: a sheet names the count; "wa
   await context.setOffline(false);
 });
 
+test('a receiver whose saved language is English gets English in the FIRST paint (no Hebrew → English flash)', async ({ page, context }) => {
+  const sql = e2eSql();
+  const setPref = (locale: string | null) => sql`
+    update memberships m set preferred_locale = ${locale}
+    from users u where u.id = m.user_id and u.email = ${RECEIVER}`;
+  try {
+    await setPref('en');
+    // This device never chose a language: no rm_locale cookie.
+    const url = test.info().project.use.baseURL!;
+    await context.clearCookies();
+    await context.addCookies([...receiverCookies.filter((c) => c.name !== 'rm_locale'), { name: 'rm_cookie_consent', value: 'necessary', url }]);
+    const res = await page.request.get('/dashboard/receiving');
+    const html = await res.text();
+    expect(html, 'the server-rendered first paint is already English').toMatch(/<html[^>]*lang="en"/);
+    expect(html).toMatch(/<html[^>]*dir="ltr"/);
+  } finally {
+    await setPref(null);
+    await sql.end();
+  }
+});
+
+test('a registration error says "not saved" with one-tap retry — never a silent count without the invoice', async ({ page }) => {
+  test.setTimeout(150_000);
+  const po = await freshPo('register-fail');
+  let fail = true;
+  await page.route('**/api/trpc/receiving.registerInvoice**', (route) =>
+    fail
+      ? route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify([{ error: { json: { message: 'boom', code: -32603, data: { code: 'INTERNAL_SERVER_ERROR', httpStatus: 500 } } } }]),
+        })
+      : route.continue(),
+  );
+  await openPo(page, po.poId);
+  await page.getByTestId('scan-input').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
+  await expect(page.getByTestId('scan-process')).toBeEnabled({ timeout: 60_000 });
+  await page.getByTestId('scan-process').tap();
+  await expect(page.getByTestId('register-failed')).toContainText('החשבונית לא נשמרה — צלמו שוב');
+  // Not quietly dropped into a count with no invoice.
+  await expect(page.getByTestId('delivery-check')).toHaveCount(0);
+  fail = false;
+  await page.getByTestId('register-retry').tap();
+  await expect(page.getByTestId('register-failed')).toHaveCount(0);
+  await expect(page.getByTestId('processing-elapsed').or(page.getByRole('heading', { name: 'תוצאת ההצלבה' }))).toBeVisible({ timeout: 30_000 });
+});
+
+test('dead Wi-Fi (navigator.onLine stays true): exactly one "no connection" chip on the delivery', async ({ page }) => {
+  test.setTimeout(120_000);
+  const po = await freshPo('dead-wifi');
+  await openPo(page, po.poId);
+  // A captive portal / dead access point: every request fails, the browser still says "online".
+  await page.route('**/api/trpc/**', (r) => r.abort('internetdisconnected'));
+  await page.route('**/api/healthz**', (r) => r.abort('internetdisconnected'));
+  expect(await page.evaluate(() => navigator.onLine)).toBe(true);
+  // The receiver photographs the invoice; the upload fails at the network layer.
+  await page.getByTestId('scan-input').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
+  await expect(page.getByTestId('pwa-offline-banner')).toBeVisible({ timeout: 20_000 });
+  await page.waitForTimeout(500);
+  // One chip — never zero (before: the PWA chip followed window events only, and the shell's had yielded).
+  await expect(page.getByTestId('pwa-offline-banner').or(page.getByTestId('offline-chip'))).toHaveCount(1);
+});
+
 test('offline with a queued photo on a delivery: exactly one status chip, and "N waiting" is not covered (W1-04 seam)', async ({
   page,
   context,

@@ -174,3 +174,15 @@ describe('fallback chain: overlaid namespace → overlay → Hebrew; no overlays
     expect(createTranslator('th', auth)('signin.showPassword')).toMatch(SCRIPT.th);
   });
 });
+
+describe('first paint in the member’s language (no Hebrew → English flash)', () => {
+  it('the device cookie wins; with none, a signed-in member’s saved language renders from the first paint', async () => {
+    const { pickAppLocale } = await import('../i18n/config');
+    expect(pickAppLocale('he', 'en')).toBe('he'); // the device chose — the switcher always wins
+    expect(pickAppLocale(undefined, 'en')).toBe('en'); // before: Hebrew first, English after a refresh
+    expect(pickAppLocale(undefined, 'th')).toBe('th');
+    expect(pickAppLocale('xx', 'en')).toBe('en'); // a junk cookie is no choice
+    expect(pickAppLocale(undefined, null)).toBe('he');
+    expect(pickAppLocale(undefined, 'fr')).toBe('he');
+  });
+});

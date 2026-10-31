@@ -6,6 +6,8 @@ import type { he } from '../../../receiving/delivery.he';
 export const receivingDelivery: Shape<typeof he> = {
   delivery: {
     scan: {
+      registerFailed: 'لم تُحفظ الفاتورة — صوّر مرة أخرى',
+      registerRetry: 'حاول الحفظ مرة أخرى',
       upload: 'ارفع ملفًا / PDF',
       uploaded: 'تم رفع الفاتورة',
       uploading: 'جارٍ رفع الفاتورة · {seconds} ثانية',
@@ -16,6 +18,7 @@ export const receivingDelivery: Shape<typeof he> = {
       useAnyway: 'استخدم الصورة رغم ذلك',
     },
     processing: {
+      ocrDisabled: 'القراءة التلقائية غير مفعّلة في هذا الحساب — تابع مقابل الطلبية',
       uploaded: 'تم استلام الفاتورة',
       reading: 'نقرأ أسطر الفاتورة',
       compare: 'نقارن مع الطلبية',
