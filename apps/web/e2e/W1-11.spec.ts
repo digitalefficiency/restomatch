@@ -624,13 +624,15 @@ test.describe('phone 390 · manager · scope fixes', () => {
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
     await addItem(page, items.nth(0));
+    // W2-06: the wizard may resume this supplier's server draft, so count, don't assume 1.
+    const lineCount = await page.getByTestId('order-line').count();
     await page.getByTestId('cart-primary').tap(); // review
     await page.locator('#ord-channel').selectOption('none');
     await page.getByTestId('cart-primary').tap(); // send → countdown
     await expect(page.getByTestId('send-undo')).toBeVisible({ timeout: 30_000 });
     // The tab reloads inside the window (crash, swipe-refresh): nothing was sent yet.
     await page.reload();
-    await expect(page.getByTestId('order-line')).toHaveCount(1, { timeout: 30_000 });
+    await expect(page.getByTestId('order-line')).toHaveCount(lineCount, { timeout: 30_000 });
     const draftId = (await deviceCarts(page))[supplierB.id]?.draftId;
     expect(draftId, 'the draft id survived the reload').toBeTruthy();
     // Retry: review → send again, let it go through.
@@ -638,9 +640,10 @@ test.describe('phone 390 · manager · scope fixes', () => {
     await page.locator('#ord-channel').selectOption('none');
     await page.getByTestId('cart-primary').tap();
     await expect(page.getByRole('status').filter({ hasText: MSG.he.wizard.markedTitle })).toBeVisible({ timeout: 30_000 });
-    const pos = await posSince(supplierB.id, since);
-    expect(pos.map((p) => p.status), 'one PO, sent — never a second draft').toEqual(['sent']);
-    expect(pos[0]!.id).toBe(draftId);
+    // One PO, sent — never a second draft (the draft may predate this test: resumed, W2-06).
+    expect(await poStatus(draftId!)).toBe('sent');
+    const others = (await posSince(supplierB.id, since)).filter((p) => p.id !== draftId);
+    expect(others, 'one PO, sent — never a second draft').toEqual([]);
   });
 
   test('a unit price typed as "1,250" is ₪1,250 (and "0,250" is ₪0.25)', async ({ page }) => {
