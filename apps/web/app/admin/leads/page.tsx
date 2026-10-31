@@ -3,11 +3,19 @@ import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { admin } from '@/lib/i18n/messages/admin';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { formatIls } from '@/lib/money';
+import { isAdmin2faRequired, TwoFactorRequired } from '../TwoFactorRequired';
 import { LeadEraseButton } from './erase-button';
 
 export default async function AdminLeadsPage() {
   const caller = await createServerCaller();
-  const [leads, t, locale] = await Promise.all([caller.admin.listLeads(), getT(admin), getLocale()]);
+  let leads;
+  try {
+    leads = await caller.admin.listLeads();
+  } catch (err) {
+    if (isAdmin2faRequired(err)) return <TwoFactorRequired />;
+    throw err;
+  }
+  const [t, locale] = await Promise.all([getT(admin), getLocale()]);
 
   return (
     <div>

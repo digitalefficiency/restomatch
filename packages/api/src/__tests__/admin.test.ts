@@ -1,6 +1,6 @@
 import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { createDb, eq, leads, memberships, users } from '@restomatch/db';
+import { createDb, eq, leads, memberships, userCredentials, users } from '@restomatch/db';
 import { appRouter } from '../index';
 import { getEntitlements } from '../entitlements';
 import type { AppContext, Session } from '../context';
@@ -28,6 +28,8 @@ beforeEach(async () => {
     .values({ email: 'ops@restomatch.co', name: 'Ops', isPlatformAdmin: true })
     .returning();
   adminUserId = admin!.id;
+  // The console requires an enrolled authenticator (admin-pilot.test covers the gate).
+  await db.insert(userCredentials).values({ userId: adminUserId, totpSecretEnc: 'ciphertext', totpEnabledAt: new Date() });
 });
 
 afterAll(async () => {
@@ -41,6 +43,7 @@ describe('adminProcedure authorization', () => {
 
   it('allows a user via PLATFORM_ADMIN_EMAILS allowlist', async () => {
     process.env.PLATFORM_ADMIN_EMAILS = 'owner-AdminT@attack.test';
+    await db.insert(userCredentials).values({ userId: T.ownerUserId, totpSecretEnc: 'ciphertext', totpEnabledAt: new Date() });
     try {
       await expect(adminCaller(T.ownerUserId).admin.listRestaurants()).resolves.toBeDefined();
     } finally {

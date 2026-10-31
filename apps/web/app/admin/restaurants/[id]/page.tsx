@@ -8,6 +8,8 @@ import type { MessageKey } from '@/lib/i18n/translate';
 import { AssignPlanForm } from './AssignPlanForm';
 import { OverridesForm } from './OverridesForm';
 import { MemberRoles } from './MemberRoles';
+import { FeaturesPanel } from './FeaturesPanel';
+import { isAdmin2faRequired, TwoFactorRequired } from '../../TwoFactorRequired';
 
 type Overrides = {
   limits?: { invoicesPerMonth?: number | null; restaurants?: number | null; seatsPerRestaurant?: number | null };
@@ -35,11 +37,12 @@ export default async function AdminRestaurantDetail({ params }: PageProps) {
   let data;
   try {
     data = await caller.admin.getRestaurant({ restaurantId: id });
-  } catch {
+  } catch (err) {
+    if (isAdmin2faRequired(err)) return <TwoFactorRequired />;
     notFound();
   }
   const [t, locale] = await Promise.all([getT(admin), getLocale()]);
-  const { restaurant, subscription, members } = data;
+  const { restaurant, subscription, members, features } = data;
 
   return (
     <div>
@@ -63,7 +66,7 @@ export default async function AdminRestaurantDetail({ params }: PageProps) {
               <Row label={t('detail.plan')} value={t(`plans.${subscription.planKey}` as AdminKey)} />
               <Row label={t('detail.status')} value={t(`statuses.${subscription.status}` as AdminKey)} />
               {subscription.trialEndsAt ? (
-                <Row label={t('detail.trialEnds')} value={formatDate(subscription.trialEndsAt, locale)} />
+                <Row label={t('detail.trialEnds')} value={formatDate(subscription.trialEndsAt, locale, { dateStyle: 'full' })} />
               ) : null}
               <Row
                 label={t('detail.overrides')}
@@ -74,7 +77,11 @@ export default async function AdminRestaurantDetail({ params }: PageProps) {
             <p className="text-sm text-subtle">{t('detail.noSubscription')}</p>
           )}
           <div className="mt-5 border-t border-line pt-5">
-            <AssignPlanForm restaurantId={restaurant.id} currentPlan={subscription?.planKey ?? null} />
+            <AssignPlanForm
+              restaurantId={restaurant.id}
+              currentPlan={subscription?.planKey ?? null}
+              currentStatus={subscription?.status ?? null}
+            />
           </div>
           {subscription ? (
             <OverridesForm restaurantId={restaurant.id} current={(subscription.overrides ?? {}) as Overrides} />
@@ -92,6 +99,8 @@ export default async function AdminRestaurantDetail({ params }: PageProps) {
           )}
         </section>
       </div>
+
+      <FeaturesPanel restaurantId={restaurant.id} state={features} />
     </div>
   );
 }

@@ -4,16 +4,20 @@ import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { admin } from '@/lib/i18n/messages/admin';
 import { getLocale, getT } from '@/lib/i18n/server';
 import type { MessageKey } from '@/lib/i18n/translate';
+import { isAdmin2faRequired, TwoFactorRequired } from './TwoFactorRequired';
 
 type AdminKey = MessageKey<typeof admin.he>;
 
 export default async function AdminRestaurantsPage() {
   const caller = await createServerCaller();
-  const [restaurants, t, locale] = await Promise.all([
-    caller.admin.listRestaurants(),
-    getT(admin),
-    getLocale(),
-  ]);
+  let restaurants;
+  try {
+    restaurants = await caller.admin.listRestaurants();
+  } catch (err) {
+    if (isAdmin2faRequired(err)) return <TwoFactorRequired />;
+    throw err;
+  }
+  const [t, locale] = await Promise.all([getT(admin), getLocale()]);
   const plan = (key: string) => t(`plans.${key}` as AdminKey);
   const status = (key: string) => t(`statuses.${key}` as AdminKey);
 
