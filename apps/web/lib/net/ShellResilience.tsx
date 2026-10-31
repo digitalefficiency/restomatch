@@ -7,7 +7,9 @@ import { Button, cn, Field, Input } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { common } from '@/lib/i18n/messages/common';
 import { useOnline } from './online';
+import { switchBranchAction } from '@/app/dashboard/branch-actions';
 import { abandonReauth, completeReauth, dismissReauth, useReauthOpen } from './reauth';
+import { decideAfterSignIn } from './reauthDecision';
 
 /**
  * The shell's "no dead ends" layer (W1-04; lens-perf-states §2.5), mounted once
@@ -16,9 +18,12 @@ import { abandonReauth, completeReauth, dismissReauth, useReauthOpen } from './r
  * - **Offline chip** (perf-states-08): T4 neutral, never red, polite live
  *   region, under the header. Shown within ~0 s of the `offline` event.
  * - **Re-auth sheet** (perf-states-15): an `UNAUTHORIZED` tRPC answer opens it
- *   IN PLACE. The page stays mounted (counts, order lines, typed text survive);
- *   after sign-in the failed calls are replayed. Signing in as somebody else
- *   drops the replay and reloads home — one user's work never runs as another.
+ *   IN PLACE. The page stays mounted (counts, order lines, typed text survive).
+ *   After sign-in, failed READS re-fetch; a failed action is never replayed —
+ *   its own control already says "not sent" and the user taps again. The page
+ *   keeps its branch (a fresh login is switched back before anything re-runs);
+ *   somebody else signing in reloads home — one worker's screen never acts for
+ *   another (lib/net/reauthDecision.ts).
  */
 export function ShellResilience() {
   return (
@@ -55,6 +60,7 @@ function OfflineChip() {
 interface Identity {
   id: string;
   email: string;
+  restaurantId: string | null;
 }
 
 type Phase =
@@ -69,11 +75,16 @@ type Phase =
 /** Who is signed in right now (null when the session is gone or 2FA is pending). */
 async function currentIdentity(): Promise<(Identity & { pending: boolean }) | null> {
   const s = (await getSession().catch(() => null)) as
-    | { user?: { id?: string; email?: string | null; twoFactorPending?: boolean } }
+    | { user?: { id?: string; email?: string | null; twoFactorPending?: boolean; restaurantId?: string | null } }
     | null;
   const id = s?.user?.id;
   if (!id) return null;
-  return { id, email: s?.user?.email ?? '', pending: s?.user?.twoFactorPending === true };
+  return {
+    id,
+    email: s?.user?.email ?? '',
+    restaurantId: s?.user?.restaurantId ?? null,
+    pending: s?.user?.twoFactorPending === true,
+  };
 }
 
 function ReauthSheet() {
@@ -93,7 +104,7 @@ function ReauthSheet() {
     let alive = true;
     void currentIdentity().then((who) => {
       if (!alive || !who || who.pending) return;
-      owner.current = { id: who.id, email: who.email };
+      owner.current = { id: who.id, email: who.email, restaurantId: who.restaurantId };
       setEmail((e) => e || who.email);
     });
     return () => {
@@ -104,11 +115,27 @@ function ReauthSheet() {
   useEffect(() => {
     const d = ref.current;
     if (!d || typeof d.showModal !== 'function') return;
-    if (open && !d.open) {
+    if (!open) {
+      if (d.open) d.close();
+      return;
+    }
+    if (d.open) return;
+    let alive = true;
+    // An UNAUTHORIZED with a still-valid session is not an expiry (review minor 5):
+    // never show the sheet for it, so it cannot flap or wipe a typed password.
+    void currentIdentity().then((who) => {
+      if (!alive) return;
+      if (who && !who.pending && owner.current?.id === who.id) {
+        abandonReauth();
+        return;
+      }
       setPhase({ kind: 'form' });
       setPassword('');
       d.showModal();
-    } else if (!open && d.open) d.close();
+    });
+    return () => {
+      alive = false;
+    };
   }, [open]);
 
   // Signed in from another tab (magic link, 2FA page): pick it up on return.
@@ -123,26 +150,41 @@ function ReauthSheet() {
     };
   }, [open]);
 
-  /** Check the session; replay or reload. `loud` = the user asked (shows "still signed out"). */
+  /** Check the session and act on it (reauthDecision). `loud` = the user asked (shows "still signed out"). */
   async function finish(loud: boolean): Promise<boolean> {
     const who = await currentIdentity();
-    if (!who) {
-      if (loud) setPhase({ kind: 'stillOut' });
-      return false;
+    const next = decideAfterSignIn(
+      owner.current ? { id: owner.current.id, restaurantId: owner.current.restaurantId } : null,
+      who,
+    );
+    switch (next.kind) {
+      case 'stillOut':
+        if (loud) setPhase({ kind: 'stillOut' });
+        return false;
+      case 'twoFactor':
+        setPhase({ kind: 'twoFactor' });
+        return false;
+      case 'reload':
+        setPhase({ kind: 'otherUser' });
+        abandonReauth();
+        window.location.assign('/dashboard');
+        return true;
+      case 'switchBack': {
+        // Restore the branch this page belongs to before anything re-runs.
+        const res = await switchBranchAction(next.restaurantId).catch(() => ({ ok: false as const }));
+        const after = res.ok ? await currentIdentity() : null;
+        if (!after || after.restaurantId !== next.restaurantId) {
+          abandonReauth();
+          window.location.assign('/dashboard');
+          return true;
+        }
+        completeReauth();
+        return true;
+      }
+      case 'resume':
+        completeReauth();
+        return true;
     }
-    if (who.pending) {
-      setPhase({ kind: 'twoFactor' });
-      return false;
-    }
-    if (owner.current && owner.current.id !== who.id) {
-      setPhase({ kind: 'otherUser' });
-      abandonReauth();
-      window.location.assign('/dashboard');
-      return true;
-    }
-    owner.current = { id: who.id, email: who.email };
-    completeReauth();
-    return true;
   }
 
   async function onSubmit(e: React.FormEvent) {

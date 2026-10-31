@@ -28,6 +28,8 @@ export const FORBIDDEN_PAIRS: ReadonlyArray<readonly [UserRole, string]> = [
   ['chef', '/dashboard/receiving'],
   ['chef', '/dashboard/leaks'],
   ['chef', '/dashboard/invoices/00000000-0000-4000-8000-000000000000'],
-  ['chef', '/dashboard/orders'],
+  // TODO(W2-06): the chef may draft orders (owner decision 25.10); `/dashboard/orders`
+  // is deliberately NOT pinned either way until the role rule changes.
+  ['chef', '/dashboard/team'],
   ['chef', '/dashboard/exports'],
 ];

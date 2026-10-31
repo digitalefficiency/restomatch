@@ -23,7 +23,7 @@ describe('forbiddenRewrite (middleware role gate → in-shell 403, ia-nav-07)', 
     }
     expect(forbiddenRewrite('/dashboard/orders', '', 'owner')).toBeNull();
     expect(forbiddenRewrite('/dashboard/receiving/abc', '', 'receiver')).toBeNull();
-    expect(forbiddenRewrite('/dashboard/suppliers/ledger', '', 'receiver')).toBeNull();
+    // TODO(W1-03/W2): the receiver loses the ledger (owner decision 25.10) — not pinned here.
   });
 
   it('agrees with allowedRolesForPath for every role (no drift from the role table)', () => {
