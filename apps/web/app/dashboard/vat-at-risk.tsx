@@ -83,22 +83,32 @@ export function VatAtRiskCard({
     );
   }
 
+  // H8: the deadline sets the tone — neutral while far, warn inside 30 days, danger inside 7.
+  const minDays = Math.min(...rows.map((r) => r.daysLeft));
+  const urgency: 'neutral' | 'warn' | 'danger' = minDays <= 7 ? 'danger' : minDays <= 30 ? 'warn' : 'neutral';
+  const tone = {
+    neutral: { border: 'border-line', rail: 'bg-line-strong', icon: 'text-muted', badge: 'neutral' as const, amount: 'text-ink' },
+    warn: { border: 'border-warn/40', rail: 'bg-warn', icon: 'text-warn', badge: 'warning-solid' as const, amount: 'text-warn' },
+    danger: { border: 'border-danger/40', rail: 'bg-danger', icon: 'text-danger', badge: 'danger-solid' as const, amount: 'text-danger' },
+  }[urgency];
+
   return (
     <section
       data-testid="vat-at-risk-card"
       data-state="at-risk"
-      className="relative mt-4 overflow-hidden rounded-2xl border border-warn/40 bg-surface p-5 shadow-card"
+      data-urgency={urgency}
+      className={cn('relative mt-4 overflow-hidden rounded-2xl border bg-surface p-5 shadow-card', tone.border)}
     >
-      <span aria-hidden="true" className="absolute inset-y-0 start-0 w-1 bg-warn" />
+      <span aria-hidden="true" className={cn('absolute inset-y-0 start-0 w-1', tone.rail)} />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 font-bold text-ink">
-            <FileWarning className="h-5 w-5 shrink-0 text-warn" aria-hidden="true" />
+            <FileWarning className={cn('h-5 w-5 shrink-0', tone.icon)} aria-hidden="true" />
             {t('card.title')}
           </h2>
           <p className="mt-1 max-w-2xl text-sm text-muted">{t('card.subtitle', { threshold })}</p>
         </div>
-        <Badge tone="warning-solid">
+        <Badge tone={tone.badge}>
           {rows.length === 1 ? t('card.countOne') : t('card.count', { count: formatNumber(rows.length, locale) })}
         </Badge>
       </div>
@@ -106,7 +116,7 @@ export function VatAtRiskCard({
       <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-1">
         <div>
           <p className="text-xs font-semibold text-muted">{t('card.amountLabel')}</p>
-          <p className="text-3xl font-bold tabular-nums text-warn" data-testid="vat-at-risk-total">
+          <p className={cn('text-2xl font-bold tabular-nums', tone.amount)} data-testid="vat-at-risk-total">
             {formatIls(total, { locale })}
           </p>
         </div>
@@ -120,7 +130,7 @@ export function VatAtRiskCard({
             <li key={r.invoiceId} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm">
               <Link
                 href={`/dashboard/invoices/${r.invoiceId}`}
-                className="touch-target w-full min-w-0 font-semibold text-ink hover:text-primary hover:underline sm:w-auto sm:flex-1"
+                className="touch-target w-full min-w-0 font-semibold text-ink hover:text-primary hover:underline"
               >
                 <span {...originalProps(name)}>{name}</span>
                 <span className="text-muted">
@@ -134,7 +144,7 @@ export function VatAtRiskCard({
               <span className="whitespace-nowrap text-xs font-semibold text-ink">
                 {r.daysLeft === 0 ? t('card.lastDay') : t('card.daysLeft', { days: formatNumber(r.daysLeft, locale) })}
               </span>
-              <span className="ms-auto whitespace-nowrap font-semibold tabular-nums text-warn sm:ms-0">
+              <span className="ms-auto whitespace-nowrap font-semibold tabular-nums text-ink">
                 {formatIls(r.vatAtRisk, { locale })}
               </span>
             </li>

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export * from './number-input';
+
 export const Currency = z.enum(['ILS', 'USD', 'EUR']);
 export type Currency = z.infer<typeof Currency>;
 

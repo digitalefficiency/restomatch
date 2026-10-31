@@ -340,7 +340,7 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
                         {l.qty != null && l.status === 'ok' && l.valueAgorot != null ? (
                           <bdi dir="ltr" className="tabular-nums">{ils(l.valueAgorot, locale)}</bdi>
                         ) : null}
-                        {l.qty != null && (l.status === 'noPrice' || l.status === 'unitMismatch') ? <Badge tone="neutral">{t('count.noPrice')}</Badge> : null}
+                        {draft.showMoney && l.qty != null && (l.status === 'noPrice' || l.status === 'unitMismatch') ? <Badge tone="neutral">{t('count.noPrice')}</Badge> : null}
                         {l.check ? (
                           <span title={t('count.checkHint')}>
                             <Badge tone="warning">{t('count.check')}</Badge>
@@ -400,14 +400,17 @@ function CountForm({ draft, onDone }: { draft: Draft; onDone: (d: Done) => void 
       </div>
 
       {/* Finish: one primary action, pinned to the bottom of the phone screen. */}
-      <div className="fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom)+var(--consent-h,0px))] z-20 border-t border-line bg-surface/95 p-3 backdrop-blur lg:bottom-[var(--consent-h,0px)]">
+      <div className="fixed inset-x-0 bottom-[calc(max(var(--rm-bottomnav-h,0px),env(safe-area-inset-bottom))+var(--consent-h,0px))] z-20 border-t border-line bg-surface/95 p-3 backdrop-blur lg:bottom-[var(--consent-h,0px)]">
         <div className="mx-auto max-w-3xl">
           <div className="mb-2" data-testid="count-progress">
             <div className="flex items-center justify-between gap-2 text-xs">
               <span className="font-semibold text-ink">{t('count.progress', { counted, lines: lines.length })}</span>
-              <span className="text-muted">
-                {t('count.liveValue')}: <bdi dir="ltr" className="font-semibold tabular-nums text-ink">{ils(draft.totalValueAgorot, locale, 0)}</bdi>
-              </span>
+              {/* The chef sees no ₪ (owner decision): the server sends no value. */}
+              {draft.showMoney ? (
+                <span className="text-muted">
+                  {t('count.liveValue')}: <bdi dir="ltr" className="font-semibold tabular-nums text-ink">{ils(draft.totalValueAgorot, locale, 0)}</bdi>
+                </span>
+              ) : null}
               <span className="text-muted" role="status" aria-live="polite">
                 {saveState === 'saving' ? t('count.saving') : saveState === 'saved' ? t('count.saved') : saveState === 'error' ? t('count.saveError') : ''}
               </span>

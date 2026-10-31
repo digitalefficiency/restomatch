@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { History } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import { Badge, Card, Spinner, type BadgeTone } from '@/lib/components';
@@ -60,6 +61,14 @@ export function ImportHistory({ supplierId }: { supplierId: string }) {
                     {t('history.rows')}: {n(imp.rowCount)} · {t('history.created')}: {n(imp.createdItems)} ·{' '}
                     {t('history.updated')}: {n(imp.updatedItems)}
                   </span>
+                  {imp.unlinkedItems > 0 ? (
+                    <Link
+                      href={`/dashboard/catalog/import?supplierId=${encodeURIComponent(supplierId)}&review=${encodeURIComponent(imp.id)}`}
+                      className="inline-flex min-h-6 items-center rounded text-xs font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 [@media(pointer:coarse)]:min-h-[44px]"
+                    >
+                      {t('history.review', { count: n(imp.unlinkedItems) })}
+                    </Link>
+                  ) : null}
                   {status === 'failed' && imp.error ? (
                     <p className="w-full truncate text-xs text-danger" title={imp.error}>
                       {t('history.failedHint', { error: imp.error.replace(/^CATALOG_[A-Z_]+:\s*/, '') })}

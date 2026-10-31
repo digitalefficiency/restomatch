@@ -6,4 +6,4 @@ import { auth as th } from './th/auth';
 import { auth as ti } from './ti/auth';
 
 /** Receiver-locale overlays of 'auth' — complete in every receiver locale (type-checked). */
-export const authOverlays: CompleteOverlays<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor'>> = { ar, ru, th, ti };
+export const authOverlays: CompleteOverlays<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 'signin'>> = { ar, ru, th, ti };

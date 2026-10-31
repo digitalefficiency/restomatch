@@ -206,6 +206,14 @@ async function prodFlagOff(browser: Browser, rid: string) {
       (await page.getByTestId('ingest-channels').count()) === 0 &&
       (await page.getByText('404', { exact: true }).count()) > 0;
     check(notFoundUi && (res?.status() ?? 500) < 500, `flag off: /dashboard/inbox renders the 404 page (HTTP ${res?.status()}), no inbox data`);
+    // The leak pages' "no data yet" CTA (a fresh pilot restaurant, ingest flags off) must not lead to the inbox 404.
+    await page.goto(`${BASE}/dashboard/leaks/breakdown?m=-24`, { waitUntil: 'networkidle' });
+    check((await page.getByTestId('leak-state').getAttribute('data-state')) === 'noData', 'flag off: an empty month shows the breakdown noData state');
+    check((await page.locator('main a[href="/dashboard/inbox"]').count()) === 0, 'flag off: the breakdown noData state has no link to /dashboard/inbox');
+    check(
+      (await page.getByTestId('leak-state-cta').getAttribute('href')) === '/dashboard/receiving',
+      'flag off: the breakdown noData CTA goes to receiving (as the home does)',
+    );
     await page.goto(`${BASE}/dashboard/receiving`, { waitUntil: 'networkidle' });
     check((await page.locator('link[rel="manifest"]').count()) === 0, 'flag off: no PWA manifest on receiving');
     await context.close();
@@ -302,21 +310,25 @@ async function mobileReceiver(browser: Browser, rid: string, locale: Locale, exp
     // so the photo must STAY queued (never lost) and the receiver sees why.
     await page.waitForTimeout(3000);
     check((await queueCount(page)) === 1, 'prod build without storage: photo stays queued (not lost) after a refused upload');
-    // S4 I3: the queue never outlives the session on a shared device.
+    // S4 I3, flipped (decision 22 default: keep and attribute). Leaving never
+    // wipes an unsent photo: it stays on this device and uploads — attributed
+    // ("צולם על ידי") — with the next signed-in user of this branch.
+    // NOTE: the expired-session case needs /login's PwaQueueReset to stop
+    // clearing the queue (W1-09's file); until then this check fails by design.
     if (locale === 'he') {
-      // Session expired: no cookie → middleware redirects to /login → queue wiped.
       await context.clearCookies();
       await page.goto(`${BASE}/dashboard/receiving`, { waitUntil: 'networkidle' });
       check(new URL(page.url()).pathname.startsWith('/login'), 'expired session → /login');
-      for (let i = 0; i < 20 && (await queueCount(page)) !== 0; i += 1) await page.waitForTimeout(250);
-      check((await queueCount(page)) === 0, 'session-expired redirect to /login clears the offline photo queue');
+      await page.waitForTimeout(1500);
+      check((await queueCount(page)) === 1, 'session-expired redirect to /login keeps the unsent photo on the device');
     } else {
       await page.getByRole('button', { name: 'Open menu' }).click();
-      await Promise.all([
-        page.waitForURL((u) => !u.pathname.startsWith('/dashboard'), { timeout: 30_000 }),
-        page.getByRole('button', { name: 'Sign out' }).last().click(),
-      ]);
-      check((await queueCount(page)) === 0, 'sign-out clears the offline photo queue (shared device)');
+      await page.getByRole('button', { name: 'Sign out' }).last().click();
+      // The upload is refused here, so the sign-out guard asks: keep it on the phone and sign out.
+      await page.getByTestId('logout-keep').click();
+      await page.waitForURL((u) => !u.pathname.startsWith('/dashboard'), { timeout: 30_000 });
+      await page.waitForTimeout(1500);
+      check((await queueCount(page)) === 1, 'sign-out keeps the unsent photo on the device (uploads attributed later)');
     }
   }
   check(w.serverErrors.filter((e) => !/\/api\/trpc\/scans\.upload/.test(e)).length === 0, `mobile/${locale}: zero unexpected 5xx`);

@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { Button, Card, cn } from '@/lib/components';
 import { UnitText } from '@/lib/components/UnitText';
@@ -8,36 +9,43 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { supplierConfirm } from '@/lib/i18n/messages/supplierConfirm';
 import { formatIls } from '@/lib/money';
-import { parsePrice } from '@/app/dashboard/contracts/logic';
+import { DiffList } from './Diff';
+import { answerBody, computeAnswer, primaryAction, type DiffItem, type PortalLine } from './logic';
+import { rememberAttempt } from './attempt';
 
-export interface PortalLine {
-  id: string;
-  name: string;
-  sku: string | null;
-  qtyOrdered: number;
-  unit: string;
-  unitPrice: number | null;
-  /** The order price IS the contract price → "agreed"; otherwise "order price". */
-  agreed: boolean;
-}
+export type { PortalLine } from './logic';
 
-/** "12", "7.5", "7,5", "0" → number ≥ 0; anything else null. */
-function parseQty(raw: string): number | null {
-  const s = raw.trim().replace(',', '.');
-  if (!/^\d+(?:\.\d{1,3})?$/.test(s)) return null;
-  return Number(s);
-}
-
-type Phase = { kind: 'edit' } | { kind: 'sending' } | { kind: 'done'; status: 'confirmed' | 'changes' } | { kind: 'error'; key: ErrorKey };
+type Phase =
+  | { kind: 'edit' }
+  | { kind: 'sending'; what: 'answer' | 'asIs' }
+  | { kind: 'done'; status: 'confirmed' | 'changes'; diff: DiffItem[]; note: string | null }
+  | { kind: 'error'; key: ErrorKey };
 type ErrorKey = 'notFound' | 'expired' | 'rateLimited' | 'generic';
 
+const inputClass =
+  'mt-1 block min-h-12 w-full rounded-lg border bg-surface px-3 py-2.5 text-base text-ink tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+
 /**
- * The supplier's answer: per line, the quantity they will deliver and their unit
- * price (both prefilled with the order). "Confirm as is" sends no changes.
+ * ₪ in a plain `<bdi>` — no `dir`, so in Hebrew the ₪ sits left of the digits (E4).
+ * TODO(W2-15): adopt W1-01's `<Money context="line">` (no cross-package imports in wave 1).
  */
-export function SupplierAnswerForm({ token, lines }: { token: string; lines: PortalLine[] }) {
+function Ils({ agorot, locale }: { agorot: number; locale: 'he' | 'en' }) {
+  return <bdi className="tabular-nums">{formatIls(agorot / 100, { locale, maximumFractionDigits: 2 })}</bdi>;
+}
+
+/**
+ * The supplier's answer (auth-02, auth-16, auth-28): per line the quantity they
+ * will deliver ("אין במלאי" in one tap) and their unit price, both prefilled
+ * with the order. ONE adaptive, sticky primary:
+ *  - nothing changed → "אישור ההזמנה כפי שהיא";
+ *  - something changed → "שליחת התשובה · N שינויים" with the diff above it, and
+ *    "as ordered" demoted to a text button that first asks to discard the edits.
+ * A marked change can therefore never be dropped by the natural tap.
+ */
+export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; poNumber: string; lines: PortalLine[] }) {
   const t = useT(supplierConfirm);
   const locale = useLocale();
+  const router = useRouter();
   const [qty, setQty] = useState<Record<string, string>>(() =>
     Object.fromEntries(lines.map((l) => [l.id, String(l.qtyOrdered)])),
   );
@@ -46,33 +54,25 @@ export function SupplierAnswerForm({ token, lines }: { token: string; lines: Por
   );
   const [note, setNote] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'edit' });
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const asIsRef = useRef<HTMLButtonElement>(null);
+  const wasConfirming = useRef(false);
+  // Closing the discard question returns focus to the button that opened it.
+  useEffect(() => {
+    if (wasConfirming.current && !confirmDiscard) asIsRef.current?.focus();
+    wasConfirming.current = confirmDiscard;
+  }, [confirmDiscard]);
+  const [showInvalid, setShowInvalid] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
 
-  const parsed = useMemo(
-    () =>
-      lines.map((l) => {
-        const q = parseQty(qty[l.id] ?? '');
-        const rawP = (price[l.id] ?? '').trim();
-        const p = rawP === '' ? null : parsePrice(rawP);
-        const qtyBad = q === null;
-        const priceBad = rawP !== '' && p === null;
-        const shortage = q !== null && q < l.qtyOrdered;
-        const priceChanged = p !== null && (l.unitPrice == null || Math.round(p * 10000) !== Math.round(l.unitPrice * 10000));
-        const qtyChanged = q !== null && q !== l.qtyOrdered;
-        return { l, q, p, qtyBad, priceBad, shortage, changed: qtyChanged || priceChanged, priceChanged };
-      }),
-    [lines, qty, price],
-  );
-  const invalid = parsed.some((x) => x.qtyBad || x.priceBad);
-  const changeCount = parsed.filter((x) => x.changed).length;
+  const answer = useMemo(() => computeAnswer(lines, qty, price, note), [lines, qty, price, note]);
+  const { rows, diff, changeCount, lineChangeCount, invalid } = answer;
+  const hasChanges = changeCount > 0;
 
-  async function send(asIs: boolean) {
-    setPhase({ kind: 'sending' });
-    const body = {
-      lines: asIs
-        ? []
-        : parsed.map((x) => ({ poLineId: x.l.id, qtyAvailable: x.q, proposedUnitPrice: x.p })),
-      note: asIs ? null : note.trim() || null,
-    };
+  async function send(what: 'answer' | 'asIs') {
+    setConfirmDiscard(false);
+    setPhase({ kind: 'sending', what });
+    const body = answerBody(what, answer, note);
     try {
       const res = await fetch(`/api/supplier-confirm/${encodeURIComponent(token)}`, {
         method: 'POST',
@@ -80,8 +80,24 @@ export function SupplierAnswerForm({ token, lines }: { token: string; lines: Por
         body: JSON.stringify(body),
       });
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; status?: 'confirmed' | 'changes' };
-      if (res.ok && data.ok && data.status) return setPhase({ kind: 'done', status: data.status });
-      if (res.status === 409) return setPhase({ kind: 'done', status: 'changes' });
+      if (res.ok && data.ok && data.status) {
+        return setPhase({
+          kind: 'done',
+          status: data.status,
+          diff: what === 'asIs' ? [] : diff,
+          note: body.note,
+        });
+      }
+      // auth-03: someone already answered this order. Never a false success —
+      // reload the page, which shows the RECORDED answer, its date, and that
+      // these changes were not saved.
+      if (res.status === 409) {
+        // The page then compares the recorded answer with this attempt: a
+        // retried submit whose first try did land is the supplier's own answer.
+        rememberAttempt(token, body);
+        router.refresh();
+        return;
+      }
       const key: ErrorKey =
         res.status === 404 ? 'notFound' : res.status === 410 ? 'expired' : res.status === 429 ? 'rateLimited' : 'generic';
       setPhase({ kind: 'error', key });
@@ -92,119 +108,278 @@ export function SupplierAnswerForm({ token, lines }: { token: string; lines: Por
 
   if (phase.kind === 'done') {
     return (
-      <Card elevated padding="md" className="mt-6" role="status">
+      <Card elevated padding="md" className="mt-6" role="status" data-testid="portal-done">
         <p className="flex items-center gap-2 text-lg font-bold text-ink">
           <CheckCircle2 className="h-5 w-5 text-primary" aria-hidden="true" />
           {t('portal.doneTitle')}
         </p>
-        <p className="mt-2 text-sm text-muted">
-          {phase.status === 'confirmed' ? t('portal.doneConfirmed') : t('portal.doneChanges')}
-        </p>
+        {phase.diff.length === 0 && !phase.note ? (
+          <p className="mt-2 text-base text-ink">{t('portal.doneConfirmedOrder', { number: poNumber })}</p>
+        ) : (
+          <>
+            <p className="mt-2 text-base text-ink">{t('portal.doneChangesOrder', { number: poNumber })}</p>
+            <DiffList items={phase.diff} note={phase.note} className="mt-2 space-y-1 text-sm text-ink" />
+            <p className="mt-3 text-sm text-muted">{t('portal.doneChanges')}</p>
+          </>
+        )}
       </Card>
     );
   }
 
   const busy = phase.kind === 'sending';
+  const primaryLabel = !hasChanges
+    ? t('portal.confirmAll')
+    : changeCount === 1
+      ? t('portal.sendAnswerOne')
+      : t('portal.sendAnswerMany', { count: formatNumber(changeCount, locale) });
+
+  function onPrimary() {
+    const action = primaryAction(answer);
+    if (action === 'invalid') {
+      // An invalid field blocks the send — never a fallback to "as is", never a
+      // silently disabled button: say why and go to the first bad field.
+      setShowInvalid(true);
+      formRef.current?.querySelector<HTMLInputElement>('[aria-invalid="true"]')?.focus();
+      return;
+    }
+    void send(action);
+  }
+
   return (
     <form
-      className="mt-6 space-y-3"
+      ref={formRef}
+      className="mt-6 space-y-3 pb-64"
+      noValidate
       onSubmit={(e) => {
         e.preventDefault();
-        if (!invalid) void send(false);
+        onPrimary();
       }}
     >
+      <OrderTotals answer={answer} locale={locale} />
+
       <ul className="space-y-3">
-        {parsed.map(({ l, qtyBad, priceBad, shortage, priceChanged }) => (
-          <li key={l.id}>
-            <Card padding="sm" className={cn((shortage || priceChanged) && 'border-warn/40')}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-semibold text-ink">{l.name}</p>
-                  {l.sku ? <p className="text-xs text-subtle">{t('portal.sku', { sku: l.sku })}</p> : null}
+        {rows.map(({ line: l, qtyBad, priceBad, shortage, out, priceChanged, orderAgorot, answerAgorot, changed }) => {
+          const qtyId = `qty-${l.id}`;
+          const priceId = `price-${l.id}`;
+          return (
+            <li key={l.id}>
+              <Card padding="sm" className={cn((shortage || priceChanged) && 'border-warn')}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-base font-semibold text-ink">{l.name}</p>
+                    {l.sku ? <p className="text-sm text-muted">{t('portal.sku', { sku: l.sku })}</p> : null}
+                  </div>
+                  <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                    {shortage && !out ? (
+                      <span className="rounded-full border border-warn px-2 py-0.5 text-sm font-semibold text-ink">{t('portal.shortage')}</span>
+                    ) : null}
+                    {priceChanged ? (
+                      <span className="rounded-full border border-warn px-2 py-0.5 text-sm font-semibold text-ink">{t('portal.priceChange')}</span>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="flex shrink-0 gap-1">
-                  {shortage ? <span className="rounded-full bg-warn/15 px-2 py-0.5 text-xs font-semibold text-warn">{t('portal.shortage')}</span> : null}
-                  {priceChanged ? <span className="rounded-full bg-warn/15 px-2 py-0.5 text-xs font-semibold text-warn">{t('portal.priceChange')}</span> : null}
-                </div>
-              </div>
-              <p className="mt-1 text-sm text-muted">
-                {t('portal.ordered')}: <bdi className="font-mono tabular-nums">{formatNumber(l.qtyOrdered, locale)}</bdi> <UnitText unit={l.unit} />
-                {l.unitPrice != null ? (
-                  <>
-                    {' · '}
-                    {t(l.agreed ? 'portal.agreedPrice' : 'portal.orderPrice')}: <bdi dir="ltr" className="font-mono tabular-nums">{formatIls(l.unitPrice, { locale, maximumFractionDigits: 2 })}</bdi>
-                  </>
+                <p className="mt-1 text-sm text-ink">
+                  {t('portal.ordered')}: <bdi className="tabular-nums">{formatNumber(l.qtyOrdered, locale)}</bdi>{' '}
+                  <UnitText unit={l.unit} />
+                  {l.unitPrice != null ? (
+                    <>
+                      {' · '}
+                      {t(l.agreed ? 'portal.agreedPrice' : 'portal.orderPrice')}:{' '}
+                      <bdi className="tabular-nums">{formatIls(l.unitPrice, { locale, maximumFractionDigits: 2 })}</bdi>
+                    </>
+                  ) : null}
+                </p>
+                {orderAgorot !== null ? (
+                  <p className="mt-0.5 text-sm text-muted" data-testid="line-total">
+                    {t('portal.lineTotal')}: <Ils agorot={orderAgorot} locale={locale} />
+                    {changed && answerAgorot !== null && answerAgorot !== orderAgorot ? (
+                      <>
+                        {' · '}
+                        {t('portal.answerLineTotal')}: <Ils agorot={answerAgorot} locale={locale} />
+                      </>
+                    ) : null}
+                  </p>
                 ) : null}
-              </p>
-              <div className="mt-3 grid grid-cols-2 gap-3">
-                <label className="block text-xs font-medium text-muted">
-                  {t('portal.available')}
-                  <input
-                    inputMode="decimal"
-                    dir="ltr"
-                    value={qty[l.id] ?? ''}
-                    onChange={(e) => setQty((s) => ({ ...s, [l.id]: e.target.value }))}
-                    aria-invalid={qtyBad || undefined}
+
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    aria-pressed={out}
+                    onClick={() => setQty((s) => ({ ...s, [l.id]: out ? String(l.qtyOrdered) : '0' }))}
                     className={cn(
-                      'mt-1 block w-full rounded-lg border bg-surface px-3 py-2.5 text-base text-ink tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
-                      qtyBad ? 'border-danger' : 'border-line',
+                      'inline-flex min-h-11 items-center rounded-full border px-4 text-sm font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                      out ? 'border-warn bg-warn text-on-primary' : 'border-line-strong bg-surface text-ink',
                     )}
-                  />
-                  {qtyBad ? <span className="mt-1 block text-danger">{t('portal.invalidQty')}</span> : null}
-                </label>
-                <label className="block text-xs font-medium text-muted">
-                  {t('portal.yourPrice')}{' '}
-                  <span className="text-subtle">
-                    ({t('portal.perUnit')} <UnitText unit={l.unit} />)
-                  </span>
-                  <input
-                    inputMode="decimal"
-                    dir="ltr"
-                    value={price[l.id] ?? ''}
-                    onChange={(e) => setPrice((s) => ({ ...s, [l.id]: e.target.value }))}
-                    aria-invalid={priceBad || undefined}
-                    className={cn(
-                      'mt-1 block w-full rounded-lg border bg-surface px-3 py-2.5 text-base text-ink tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
-                      priceBad ? 'border-danger' : 'border-line',
-                    )}
-                  />
-                  {priceBad ? <span className="mt-1 block text-danger">{t('portal.invalidPrice')}</span> : null}
-                </label>
-              </div>
-            </Card>
-          </li>
-        ))}
+                  >
+                    {t('portal.outOfStock')}
+                  </button>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor={qtyId} className="block text-sm font-medium text-ink">
+                      {t('portal.available')}
+                    </label>
+                    <input
+                      id={qtyId}
+                      inputMode="decimal"
+                      dir="ltr"
+                      autoComplete="off"
+                      value={qty[l.id] ?? ''}
+                      onChange={(e) => setQty((s) => ({ ...s, [l.id]: e.target.value }))}
+                      aria-invalid={qtyBad || undefined}
+                      aria-describedby={qtyBad ? `${qtyId}-error` : undefined}
+                      className={cn(inputClass, qtyBad ? 'border-danger' : 'border-line-strong')}
+                    />
+                    {qtyBad ? (
+                      <span id={`${qtyId}-error`} className="mt-1 block text-sm text-danger">
+                        {t('portal.invalidQty')}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div>
+                    <label htmlFor={priceId} className="block text-sm font-medium text-ink">
+                      {t('portal.yourPrice')}{' '}
+                      <span className="font-normal text-muted">
+                        ({t('portal.perUnit')} <UnitText unit={l.unit} /> · {t('portal.beforeVat')})
+                      </span>
+                    </label>
+                    <input
+                      id={priceId}
+                      inputMode="decimal"
+                      dir="ltr"
+                      autoComplete="off"
+                      value={price[l.id] ?? ''}
+                      onChange={(e) => setPrice((s) => ({ ...s, [l.id]: e.target.value }))}
+                      aria-invalid={priceBad || undefined}
+                      aria-describedby={priceBad ? `${priceId}-error` : undefined}
+                      className={cn(inputClass, priceBad ? 'border-danger' : 'border-line-strong')}
+                    />
+                    {priceBad ? (
+                      <span id={`${priceId}-error`} className="mt-1 block text-sm text-danger">
+                        {t('portal.invalidPrice')}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              </Card>
+            </li>
+          );
+        })}
       </ul>
 
-      <label className="block text-sm font-medium text-muted">
-        {t('portal.note')}
+      <div>
+        <label htmlFor="portal-note" className="block text-sm font-medium text-ink">
+          {t('portal.note')}
+        </label>
         <textarea
+          id="portal-note"
           value={note}
           maxLength={1000}
           rows={2}
           onChange={(e) => setNote(e.target.value)}
           placeholder={t('portal.notePlaceholder')}
-          className="mt-1 block w-full rounded-lg border border-line bg-surface px-3 py-2 text-base text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          className="mt-1 block w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-base text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         />
-      </label>
+      </div>
 
-      {phase.kind === 'error' ? (
-        <p role="alert" className="text-sm font-medium text-danger">
-          {t(`portal.errors.${phase.key}`)}
-        </p>
-      ) : null}
+      {/* The sticky action bar — above the cookie bar and the home indicator. */}
+      <div
+        className="fixed inset-x-0 z-30 border-t border-line bg-surface/95 shadow-card backdrop-blur"
+        style={{ bottom: 'var(--consent-h, 0px)' }}
+        data-testid="portal-actions"
+      >
+        <div className="mx-auto w-full max-w-xl px-4 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-3">
+          <div aria-live="polite" className="mb-2">
+            {diff.length > 0 || note.trim() ? (
+              <div className="rounded-lg border border-warn bg-surface px-3 py-2" data-testid="portal-diff">
+                <DiffList items={diff} note={note.trim() || null} limit={3} className="space-y-0.5 text-sm text-ink" />
+              </div>
+            ) : !hasChanges ? (
+              <p className="text-sm text-muted">{t('portal.noChanges')}</p>
+            ) : null}
+            {showInvalid && invalid ? (
+              <p role="alert" className="mt-1 text-sm font-medium text-danger">
+                {t('portal.fixFields')}
+              </p>
+            ) : null}
+            {phase.kind === 'error' ? (
+              <p role="alert" className="mt-1 text-sm font-medium text-danger">
+                {t(`portal.errors.${phase.key}`)}
+              </p>
+            ) : null}
+          </div>
 
-      <p className="text-sm text-muted" aria-live="polite">
-        {changeCount > 0 ? t('portal.changesCount', { count: formatNumber(changeCount, locale) }) : t('portal.noChanges')}
-      </p>
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <Button type="button" className="w-full" disabled={busy} onClick={() => void send(true)}>
-          {busy ? t('portal.sending') : t('portal.confirmAll')}
-        </Button>
-        <Button type="submit" variant="secondary" className="w-full" disabled={busy || invalid || (changeCount === 0 && !note.trim())}>
-          {t('portal.sendChanges')}
-        </Button>
+          {confirmDiscard ? (
+            <div role="alertdialog" aria-labelledby="discard-q" className="space-y-2">
+              <p id="discard-q" className="text-base font-semibold text-ink">
+                {lineChangeCount === 1
+                  ? t('portal.discardOne')
+                  : t('portal.discardMany', { count: formatNumber(lineChangeCount, locale) })}
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <Button type="button" variant="secondary" className="min-h-12" onClick={() => setConfirmDiscard(false)} autoFocus>
+                  {t('portal.discardNo')}
+                </Button>
+                <Button type="button" variant="danger" className="min-h-12" onClick={() => void send('asIs')}>
+                  {t('portal.discardYes')}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <Button
+                type="submit"
+                data-keep-clear
+                data-primary
+                className="min-h-14 w-full text-base"
+                disabled={busy}
+                loading={busy}
+              >
+                {busy ? t('portal.sending') : primaryLabel}
+              </Button>
+              {lineChangeCount > 0 ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  ref={asIsRef}
+                  onClick={() => setConfirmDiscard(true)}
+                  className="mt-1 inline-flex min-h-11 w-full items-center justify-center text-sm font-semibold text-primary hover:underline disabled:opacity-50"
+                >
+                  {t('portal.asIsText')}
+                </button>
+              ) : null}
+            </>
+          )}
+        </div>
       </div>
     </form>
+  );
+}
+
+function OrderTotals({ answer, locale }: { answer: ReturnType<typeof computeAnswer>; locale: 'he' | 'en' }) {
+  const t = useT(supplierConfirm);
+  const { orderTotalAgorot, answerTotalAgorot, unpriced, rows, changeCount, invalid } = answer;
+  if (rows.length === unpriced) return null;
+  return (
+    <div className="rounded-xl border border-line-strong bg-surface px-3 py-3" data-testid="order-total">
+      <p className="flex items-baseline justify-between gap-3 text-base font-semibold text-ink">
+        <span>
+          {t('portal.orderTotal')} <span className="text-sm font-normal text-muted">({t('portal.beforeVat')})</span>
+        </span>
+        <Ils agorot={orderTotalAgorot} locale={locale} />
+      </p>
+      {changeCount > 0 && !invalid && answerTotalAgorot !== orderTotalAgorot ? (
+        <p className="mt-1 flex items-baseline justify-between gap-3 text-sm text-ink">
+          <span>{t('portal.answerOrderTotal')}</span>
+          <Ils agorot={answerTotalAgorot} locale={locale} />
+        </p>
+      ) : null}
+      {unpriced > 0 ? (
+        <p className="mt-1 text-sm text-muted">
+          {unpriced === 1 ? t('portal.unpricedOne') : t('portal.unpricedMany', { count: formatNumber(unpriced, locale) })}
+        </p>
+      ) : null}
+    </div>
   );
 }

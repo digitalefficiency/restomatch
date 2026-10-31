@@ -2,7 +2,7 @@ import type { Shape } from '../../../../translate';
 import type { he } from '../../../auth/he';
 
 /** auth — ar overlay (Arabic). */
-export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor'>> = {
+export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 'signin'>> = {
   login: {
     title: 'تسجيل الدخول إلى RestoMatch',
     subtitle: 'سجّل الدخول بكلمة المرور، أو اطلب رابط دخول إلى بريدك الإلكتروني.',
@@ -40,5 +40,21 @@ export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor'>> 
     codeLabel: 'رمز التحقق',
     submit: 'تحقق',
     switchAccount: 'الدخول بحساب آخر',
+  },
+  signin: {
+    forgotShort: 'نسيت؟',
+    showPassword: 'إظهار كلمة المرور',
+    hidePassword: 'إخفاء كلمة المرور',
+    pending: 'لحظة…',
+    lockoutHint: 'بعد عدة محاولات خاطئة يُقفل الدخول لوقت قصير. يمكنك الدخول أيضًا بدون كلمة مرور:',
+    magicFallback: 'احصل على رابط دخول بالبريد',
+    emailMissing: 'أدخل عنوان بريدك الإلكتروني لتحصل على رابط دخول.',
+    queuedOne: 'صورة فاتورة واحدة تنتظر على الجهاز · ستُرسل عندما يدخل من صوّرها',
+    queuedMany: '{count} صور فواتير تنتظر على الجهاز · ستُرسل عندما يدخل من صوّرها',
+    signedInAs: 'أنت مسجّل الدخول بالفعل باسم {email}',
+    continue: 'تابع إلى الحساب',
+    switchUser: 'الدخول بمستخدم آخر',
+    newHere: 'جديد في RestoMatch؟ أول دخول برابط من البريد يفتح حسابًا.',
+    demo: 'شاهد العرض التجريبي',
   },
 };

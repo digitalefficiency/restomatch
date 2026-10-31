@@ -87,3 +87,24 @@ export function startRouteProgress(href: string): void {
   }
   document.dispatchEvent(new CustomEvent(ROUTE_START_EVENT, { detail: { target } }));
 }
+
+const WRAPPED = Symbol.for('rm.routeProgress.push');
+
+/**
+ * Make `router.push(href)` show the bar (perf-states-01 d): wraps the app
+ * router's `push` once so every call site — the ones after a mutation
+ * included — starts the bar without each having to call `startRouteProgress`.
+ * Returns false when there is nothing to wrap or it is already wrapped.
+ */
+export function wrapRouterPush(router: { push?: (href: string, ...rest: never[]) => unknown } | null | undefined): boolean {
+  if (!router || typeof router.push !== 'function') return false;
+  const marked = router as unknown as Record<symbol, boolean>;
+  if (marked[WRAPPED]) return false;
+  const original = router.push.bind(router) as (href: string, ...rest: unknown[]) => unknown;
+  (router as { push: (href: string, ...rest: unknown[]) => unknown }).push = (href: string, ...rest: unknown[]) => {
+    startRouteProgress(href);
+    return original(href, ...rest);
+  };
+  marked[WRAPPED] = true;
+  return true;
+}

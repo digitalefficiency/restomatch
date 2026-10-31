@@ -12,6 +12,7 @@
 
 import { useGSAP } from '@gsap/react';
 import { gsap } from 'gsap';
+import { whenMotionOk } from '../../_lib/motion';
 import {
   AlertTriangle,
   ArrowDown,
@@ -106,14 +107,15 @@ export function InvoicePoCompareViewer({ data, lines, invoiceScan, onClose }: Pr
   const [focusKey, setFocusKey] = useState<LineKey | null>(null);
 
   useGSAP(
-    () => {
-      gsap.fromTo(overlayRef.current, { opacity: 0 }, { opacity: 1, duration: 0.2 });
-      gsap.fromTo(
-        sheetRef.current,
-        { y: 24, opacity: 0, scale: 0.98 },
-        { y: 0, opacity: 1, scale: 1, duration: 0.4, ease: 'power3.out' },
-      );
-    },
+    () =>
+      whenMotionOk(() => {
+        gsap.fromTo(overlayRef.current, { opacity: 0 }, { opacity: 1, duration: 0.2 });
+        gsap.fromTo(
+          sheetRef.current,
+          { y: 24, opacity: 0, scale: 0.98 },
+          { y: 0, opacity: 1, scale: 1, duration: 0.4, ease: 'power3.out' },
+        );
+      }),
     { dependencies: [data.invoiceNumber] },
   );
 
@@ -220,7 +222,7 @@ export function InvoicePoCompareViewer({ data, lines, invoiceScan, onClose }: Pr
           {/* Diff panel */}
           <aside className="w-80 shrink-0 border-e border-line bg-surface overflow-y-auto hidden xl:flex flex-col">
             <div className="px-5 py-4 border-b border-line">
-              <div className="text-xs uppercase tracking-wider text-muted font-semibold mb-1">
+              <div className="text-xs ltr:uppercase ltr:tracking-wider text-muted font-semibold mb-1">
                 {t('compare.analysis')}
               </div>
               <div className="text-xs text-muted">{t('compare.analysisHint')}</div>
@@ -247,13 +249,13 @@ export function InvoicePoCompareViewer({ data, lines, invoiceScan, onClose }: Pr
                         {mockText(line.productName, locale)}
                       </span>
                       <span
-                        className={`shrink-0 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${accent.tint}`}
+                        className={`shrink-0 inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-medium ${accent.tint}`}
                       >
                         {accent.icon}
                         <span>{t(accent.labelKey)}</span>
                       </span>
                     </div>
-                    <div className="grid grid-cols-2 gap-1 text-[11px]">
+                    <div className="grid grid-cols-2 gap-1 text-xs">
                       <DiffCell
                         label={t('compare.order')}
                         missingLabel={t('compare.missing')}
@@ -271,7 +273,7 @@ export function InvoicePoCompareViewer({ data, lines, invoiceScan, onClose }: Pr
                       />
                     </div>
                     {line.variance > 0 ? (
-                      <div className="mt-1.5 flex items-center justify-between text-[10px]">
+                      <div className="mt-1.5 flex items-center justify-between text-xs">
                         <span className="text-muted">{t('compare.potentialLoss')}</span>
                         <span className="font-bold text-danger font-mono tabular-nums">
                           {formatIls(line.variance, { locale, maximumFractionDigits: 2 })}
@@ -299,14 +301,14 @@ export function InvoicePoCompareViewer({ data, lines, invoiceScan, onClose }: Pr
                 </span>
               </div>
               {issueLines.length > 0 ? (
-                <div className="text-[11px] text-warn bg-warn/8 border border-warn/25 rounded-lg px-2.5 py-1.5 flex items-start gap-1.5">
+                <div className="text-xs text-warn bg-warn/8 border border-warn/25 rounded-lg px-2.5 py-1.5 flex items-start gap-1.5">
                   <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
                   <span>
                     {t('compare.toReview', { count: issueLines.length, adjusted: stats.adjustedCount })}
                   </span>
                 </div>
               ) : (
-                <div className="text-[11px] text-primary bg-primary/8 border border-primary/25 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                <div className="text-xs text-primary bg-primary/8 border border-primary/25 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
                   <Check className="w-3 h-3" strokeWidth={3} />
                   <span>{t('compare.allMatched')}</span>
                 </div>
@@ -418,7 +420,7 @@ function PoPaper({
       <div className="rounded-t-md bg-gradient-to-l from-stone-900 to-teal-900 px-6 py-4 flex items-center justify-between text-white">
         <div>
           <div className="text-xl font-extrabold tracking-tight">{mockText(data.customerName, locale)}</div>
-          <div className="text-[11px] opacity-80 mt-0.5">
+          <div className="text-xs opacity-80 mt-0.5">
             {t('compare.po.companyNo', { id: data.customerBusinessId })} · {t('compare.po.address')}
           </div>
         </div>
@@ -449,7 +451,7 @@ function PoPaper({
 
         {/* Supplier block */}
         <div className="bg-stone-50 rounded-lg px-4 py-2.5 mb-5 border border-stone-200/70 text-xs">
-          <div className="uppercase tracking-wider text-stone-500 font-semibold mb-1 text-[10px]">
+          <div className="ltr:uppercase ltr:tracking-wider text-stone-500 font-semibold mb-1 text-xs">
             {t('compare.po.to')}
           </div>
           <div className="font-bold text-sm">{mockText(data.supplierName, locale)}</div>
@@ -463,19 +465,19 @@ function PoPaper({
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-stone-100/70 text-stone-700">
-                <th className="px-2 py-2 text-start font-semibold text-[10px] uppercase tracking-wider w-8">
+                <th className="px-2 py-2 text-start font-semibold text-xs ltr:uppercase ltr:tracking-wider w-8">
                   #
                 </th>
-                <th className="px-2 py-2 text-start font-semibold text-[10px] uppercase tracking-wider">
+                <th className="px-2 py-2 text-start font-semibold text-xs ltr:uppercase ltr:tracking-wider">
                   {t('compare.po.item')}
                 </th>
-                <th className="px-2 py-2 text-start font-semibold text-[10px] uppercase tracking-wider tabular-nums">
+                <th className="px-2 py-2 text-start font-semibold text-xs ltr:uppercase ltr:tracking-wider tabular-nums">
                   {t('compare.po.qty')}
                 </th>
-                <th className="px-2 py-2 text-start font-semibold text-[10px] uppercase tracking-wider tabular-nums">
+                <th className="px-2 py-2 text-start font-semibold text-xs ltr:uppercase ltr:tracking-wider tabular-nums">
                   {t('compare.po.price')}
                 </th>
-                <th className="px-2 py-2 text-start font-semibold text-[10px] uppercase tracking-wider tabular-nums">
+                <th className="px-2 py-2 text-start font-semibold text-xs ltr:uppercase ltr:tracking-wider tabular-nums">
                   {t('compare.po.total')}
                 </th>
               </tr>
@@ -529,7 +531,7 @@ function PoPaper({
             <PaperTotalRow label={t('compare.po.vat')} value={money(vat)} />
             <div className="border-t-2 border-stone-300 my-1" />
             <div className="flex items-baseline justify-between bg-teal-900 text-white px-3 py-2 rounded-md">
-              <span className="text-[10px] uppercase tracking-wider opacity-80">
+              <span className="text-xs ltr:uppercase ltr:tracking-wider opacity-80">
                 {t('compare.po.orderTotal')}
               </span>
               <span className="font-bold tabular-nums">{money(total)}</span>
@@ -538,7 +540,7 @@ function PoPaper({
         </div>
 
         {/* Footer */}
-        <div className="mt-8 border-t border-dashed border-stone-300 pt-3 text-[11px] text-stone-500 flex items-end justify-between">
+        <div className="mt-8 border-t border-dashed border-stone-300 pt-3 text-xs text-stone-500 flex items-end justify-between">
           <div>
             <div>{t('compare.po.approvedBy', { name: mockText(data.poApprovedBy, locale) })}</div>
             <div className="mt-0.5">{t('compare.po.terms')}</div>
@@ -600,7 +602,7 @@ function PaperLabel({
         {icon}
         <span>{label}</span>
       </div>
-      <span className="text-[11px] text-muted">{sub}</span>
+      <span className="text-xs text-muted">{sub}</span>
     </div>
   );
 }
@@ -632,18 +634,18 @@ function DiffCell({
   const locale = useLocale();
   return (
     <div className={`rounded-lg px-2 py-1.5 ${emphasize ? 'bg-warn/8 border border-warn/25' : 'bg-surface border border-line'}`}>
-      <div className="text-[9px] uppercase tracking-wider text-muted font-semibold">
+      <div className="text-xs ltr:uppercase ltr:tracking-wider text-muted font-semibold">
         {label}
       </div>
       {qty !== null ? (
         <div className="font-bold font-mono tabular-nums text-ink">
-          {qty} <span className="text-[10px] font-normal text-muted">{unit}</span>
+          {qty} <span className="text-xs font-normal text-muted">{unit}</span>
         </div>
       ) : (
         <div className="text-muted italic text-xs">{missingLabel}</div>
       )}
       {price !== null && qty !== null ? (
-        <div className="text-[9px] text-muted font-mono tabular-nums">× {formatIls(price, { locale, maximumFractionDigits: 2 })}</div>
+        <div className="text-xs text-muted font-mono tabular-nums">× {formatIls(price, { locale, maximumFractionDigits: 2 })}</div>
       ) : null}
     </div>
   );
@@ -680,14 +682,14 @@ function DiffStatBadge({
   const locale = useLocale();
   if (stats.issueCount === 0) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full ring-1 ring-primary/25 bg-primary/12 px-2 py-0.5 text-[10px] font-semibold text-primary">
+      <span className="inline-flex items-center gap-1 rounded-full ring-1 ring-primary/25 bg-primary/12 px-2 py-0.5 text-xs font-semibold text-primary">
         <Check className="w-3 h-3" strokeWidth={3} />
         {t('compare.matchedBadge')}
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-full ring-1 ring-warn/25 bg-warn/12 px-2 py-0.5 text-[10px] font-semibold text-warn">
+    <span className="inline-flex items-center gap-1 rounded-full ring-1 ring-warn/25 bg-warn/12 px-2 py-0.5 text-xs font-semibold text-warn">
       <AlertTriangle className="w-3 h-3" />
       {stats.issueCount === 1
         ? t('common.varianceOne')

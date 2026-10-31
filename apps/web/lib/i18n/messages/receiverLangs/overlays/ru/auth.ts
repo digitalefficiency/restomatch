@@ -2,7 +2,7 @@ import type { Shape } from '../../../../translate';
 import type { he } from '../../../auth/he';
 
 /** auth — ru overlay (Russian). */
-export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor'>> = {
+export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 'signin'>> = {
   login: {
     title: 'Вход в RestoMatch',
     subtitle: 'Войдите с паролем или получите ссылку для входа по почте.',
@@ -40,5 +40,21 @@ export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor'>> 
     codeLabel: 'Код подтверждения',
     submit: 'Подтвердить',
     switchAccount: 'Войти с другим аккаунтом',
+  },
+  signin: {
+    forgotShort: 'Забыли?',
+    showPassword: 'Показать пароль',
+    hidePassword: 'Скрыть пароль',
+    pending: 'Минутку…',
+    lockoutHint: 'После нескольких неверных попыток вход ненадолго блокируется. Можно войти и без пароля:',
+    magicFallback: 'Получить ссылку для входа на почту',
+    emailMissing: 'Введите адрес почты, чтобы получить ссылку для входа.',
+    queuedOne: 'Одно фото накладной ждёт на устройстве · отправится, когда войдёт тот, кто его снял',
+    queuedMany: 'Фото накладных ждут на устройстве: {count} · отправятся, когда войдёт тот, кто их снял',
+    signedInAs: 'Вы уже вошли как {email}',
+    continue: 'Перейти в аккаунт',
+    switchUser: 'Войти как другой пользователь',
+    newHere: 'Впервые в RestoMatch? Первый вход по ссылке из письма открывает аккаунт.',
+    demo: 'Посмотреть демо',
   },
 };

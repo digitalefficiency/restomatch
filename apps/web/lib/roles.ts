@@ -1,5 +1,6 @@
 import type { UserRole } from '@restomatch/db';
 import type { Locale } from './i18n/config';
+import { generateRouteRoles } from './nav/registry';
 
 /**
  * Single source of truth for tenant-role display + dashboard visibility.
@@ -36,64 +37,14 @@ export function labelForRole(role: string, locale: Locale = 'he'): string {
 }
 
 /**
- * Which roles may see each dashboard route. A `receiver` (shift manager) sees
- * only the overview + receiving inbox — least privilege. Drives both the nav
- * filter and the per-page server guards.
+ * Which roles may see each dashboard route — generated from the nav registry
+ * (lib/nav/routes/*.ts, one file per route folder), so the nav, the middleware
+ * gate and the per-page guards never drift apart. A `receiver` (shift manager)
+ * gets the overview, receiving and other no-₪ screens — never a supplier
+ * ledger or invoice page (owner decision: the receiver sees no ₪). Exact path → roles;
+ * sub-paths inherit by longest prefix (`allowedRolesForPath`).
  */
-export const ROUTE_ROLES: Record<string, UserRole[]> = {
-  '/dashboard': ALL_ROLES,
-  '/dashboard/receiving': ['owner', 'manager', 'receiver'],
-  // Bookkeeper included: duplicate invoices are routed to them (approvals engine),
-  // and approvals.approve/reject/escalate accept bookkeeper-routed items.
-  '/dashboard/approvals': ['owner', 'manager', 'bookkeeper'],
-  // S13 invoice inbox (WhatsApp / e-mail ingestion): managers act, bookkeepers read.
-  '/dashboard/inbox': ['owner', 'manager', 'bookkeeper'],
-  '/dashboard/leaks': ['owner', 'manager', 'bookkeeper'],
-  // S12 leakProof: the proof sheet lists invoice-level detail (like the breakdown).
-  '/dashboard/leaks/proof': ['owner', 'manager', 'bookkeeper'],
-  // Wave 1 (S12): ₪-back tracker = finance roles (like leaks); the monthly report = owner/manager.
-  '/dashboard/recovery': ['owner', 'manager', 'bookkeeper'],
-  '/dashboard/reports': ['owner', 'manager'],
-  // Exact entry too: nav visibility (canSeeRoute) is an exact-path lookup.
-  '/dashboard/reports/monthly': ['owner', 'manager'],
-  // AI assistant (S14, flag aiAssistant): owner + manager only.
-  '/dashboard/ask': ['owner', 'manager'],
-  '/dashboard/reports/digest': ['owner', 'manager'],
-  '/dashboard/suppliers': ['owner', 'manager'],
-  // Supplier ledger grid (flag supplierLedger): every invoice reader, incl. the
-  // bookkeeper's CSV — never the chef. Mirrors suppliers.ledgerGrid.
-  '/dashboard/suppliers/ledger': ['owner', 'manager', 'receiver', 'bookkeeper'],
-  '/dashboard/catalog': ['owner', 'manager'],
-  // Product pages are part of the catalog (names grid, price history, cheapest
-  // supplier); without this rule every role could open them by URL.
-  '/dashboard/products': ['owner', 'manager'],
-  '/dashboard/orders': ['owner', 'manager'],
-  // Wave-1 contracts + price alerts: finance tier, same as the contracts/priceAlerts
-  // routers (financeProcedure). The nav entry is additionally feature-flag gated.
-  '/dashboard/contracts': ['owner', 'manager', 'bookkeeper'],
-  // Food cost per dish (wave 1, flag `recipes`): the chef owns the recipes.
-  '/dashboard/recipes': ['owner', 'manager', 'chef'],
-  // Inventory counting (flag `inventoryCount`): the chef/manager counts in the walk-in.
-  '/dashboard/inventory': ['owner', 'manager', 'chef'],
-  '/dashboard/exports': ['owner', 'bookkeeper'],
-  // Wave-1 integrations hub (flag-gated in the page): accounting codes for
-  // owner + bookkeeper, POS sales + procurement for owner + manager.
-  '/dashboard/integrations': ['owner', 'manager', 'bookkeeper'],
-  // One supplier invoice (prices, lines, image): opened from receiving, approvals
-  // and the leak drill-down — never the chef. Mirrors receiving.getInvoice.
-  '/dashboard/invoices': ['owner', 'manager', 'receiver', 'bookkeeper'],
-  // Team: owners manage the roster; managers see it read-only and may set a
-  // member's app language (e.g. an English-speaking receiver).
-  '/dashboard/team': ['owner', 'manager'],
-  // Settings holds PERSONAL security (password, 2FA, language, DSR) for every
-  // role; the restaurant sections inside are owner-edit / manager+bookkeeper
-  // read-only / hidden for receiver + chef (see app/dashboard/settings/page.tsx).
-  '/dashboard/settings': ALL_ROLES,
-  // Chain (S8): owner-level money across branches + branch management. The
-  // chain router re-checks owner membership in the DB per request.
-  '/dashboard/chain': ['owner'],
-  '/dashboard/branches': ['owner'],
-};
+export const ROUTE_ROLES: Record<string, UserRole[]> = generateRouteRoles();
 
 /** Whether `role` may see `href` (exact match). Unknown routes default to visible. */
 export function canSeeRoute(role: UserRole, href: string): boolean {
