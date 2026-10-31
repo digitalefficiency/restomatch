@@ -54,7 +54,43 @@ export type AuditAction =
   // Inventory counts (inventory router, flag inventoryCount)
   | 'inventory.count_closed'
   | 'inventory.count_discarded'
-  | 'inventory.line_amended';
+  | 'inventory.line_amended'
+  // ── Wave 2 (G-05): pre-added for the lifecycle kernel's adopters, so no
+  // adopter edits this file. Values are emitted only once a package adopts
+  // the transition. Request new ones through the orchestrator.
+  // Invoice lifecycle (lifecycle/machines.ts `invoiceMachine`)
+  | 'invoice.approved_for_payment'
+  | 'invoice.marked_paid'
+  | 'invoice.unmarked_paid'
+  | 'invoice.rematch_locked'
+  | 'invoice.external_sync'
+  | 'invoice.corrected'
+  // Intake, discrepancy decisions, recovery claims
+  | 'intake.approved'
+  | 'discrepancy.decided'
+  | 'discrepancy.reopened'
+  | 'recovery.transitioned'
+  // Receiving
+  | 'receipt.walk_in_confirmed'
+  // Settings and team (W2-14)
+  | 'settings.updated'
+  | 'settings.profile_updated'
+  | 'team.ownership_transferred'
+  // Integrations (W2-14)
+  | 'integrations.accounting_config_changed'
+  | 'integrations.pos_import_replaced'
+  // Orders (W2-06)
+  | 'order.sent'
+  | 'order.sent_manually'
+  | 'order.amended'
+  // Inventory (W2-07)
+  | 'inventory.sales_set'
+  | 'inventory.count_submitted'
+  // Contracts and price alerts (W2-12)
+  | 'contracts.price_set'
+  | 'contracts.prices_locked'
+  | 'price_alert.dismissed'
+  | 'price_alert.reopened';
 
 export interface AuditEntry {
   /** Tenant the action belongs to. On a tenant connection this must equal the GUC. */
