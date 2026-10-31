@@ -8,6 +8,7 @@ import {
   type Database,
 } from '@restomatch/db';
 import type { ParsedTable } from '../catalog/parse';
+import { parsePriceCell } from '../lib/parseMoneyCell';
 
 /** Column mapping for a contract price-list upload. */
 export interface ContractColumnMapping {
@@ -30,24 +31,8 @@ export interface ContractImportRow {
   invalid?: 'NO_PRICE' | 'NO_DATE' | 'BAD_UNIT';
 }
 
-/**
- * Strict, locale-safe price cell (₪ and spaces ignored). Accepted:
- *   "1250" · "12.5" · "1,250" / "12,345,678" (comma = thousands, groups of 3)
- *   "1,234.50" (comma thousands + dot decimals) · "12,5" / "1,25" (comma decimal, 1–2 digits)
- * Everything else is rejected rather than reinterpreted: exponents ("1e3"),
- * accounting negatives ("(5)"), "1.250,5", "1,2345", signs.
- */
-export function parsePriceCell(raw: string | null): number | null {
-  if (raw == null) return null;
-  const s = raw.replace(/[₪\s\u00a0]/g, '');
-  let norm: string | null = null;
-  if (/^\d+(?:\.\d+)?$/.test(s)) norm = s;
-  else if (/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(s)) norm = s.replace(/,/g, '');
-  else if (/^\d+,\d{1,2}$/.test(s)) norm = s.replace(',', '.');
-  if (norm === null) return null;
-  const n = Number(norm);
-  return Number.isFinite(n) ? n : null;
-}
+/** The strict price-cell parser now lives in lib/parseMoneyCell (shared with the catalog import). */
+export { parsePriceCell };
 
 /** A unit fits varchar(32) and can't be a spreadsheet formula. */
 const UNIT_OK = (u: string): boolean => u.length <= 32 && !/^[=+\-@]/.test(u);

@@ -45,7 +45,7 @@ export const receiving: Shape<typeof he> = {
       uploading: 'جارٍ الرفع…',
       process: 'معالجة الفاتورة',
       retake: 'أعد التصوير',
-      capture: 'التقط صورة / ارفع ملفًا',
+      capture: 'صوّر الفاتورة',
       useDemo: 'استخدم فاتورة تجريبية (بدون رفع)',
       backToSupplier: 'العودة إلى المورد',
       back: 'رجوع',
@@ -83,7 +83,7 @@ export const receiving: Shape<typeof he> = {
     recon: {
       title: 'نتيجة المطابقة',
       subtitle: 'الفاتورة {number} · دقة القراءة {confidence}',
-      matched: 'مطابق',
+      matched: 'الفاتورة = الطلبية',
       different: 'مختلف',
       unordered: 'لم يُطلب',
       missing: 'ناقص في الفاتورة',
@@ -114,7 +114,7 @@ export const receiving: Shape<typeof he> = {
       duplicateInvoice: 'رقم الفاتورة {number} موجود مسبقًا لدى هذا المورد — تم وضع علامة للمراجعة كفاتورة مكررة محتملة. يمكنك متابعة الاستلام كالمعتاد.',
     },
     status: {
-      matched: 'مطابق',
+      matched: 'الفاتورة = الطلبية',
       qty_diff: 'الكمية مختلفة',
       price_diff: 'السعر مختلف',
       unordered: 'ليس في الطلبية',
@@ -122,7 +122,7 @@ export const receiving: Shape<typeof he> = {
       pending_review: 'راجِع يدويًا',
     },
     adjust: {
-      title: 'كم وصل فعلًا؟',
+      title: 'فحص الشحنة',
       subtitle: '{pending} أسطر متبقية للفحص · {done} تم فحصها · {matched} مطابقة تلقائيًا',
       matchedSummary: '{count} أسطر مطابقة — تمت الموافقة تلقائيًا',
       tapToExpand: 'اضغط للعرض',

@@ -231,6 +231,8 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
 
 export interface RecoveryClaimRow {
   id: string;
+  /** The discrepancy this claim is for — the exact key a letter line pairs on. */
+  discrepancyId: string;
   status: RecoveryStatus;
   amountAgorot: number;
   creditedAgorot: number;
@@ -275,7 +277,7 @@ export async function listClaims(
   const limit = opts.limit === null ? null : Math.min(Math.max(opts.limit ?? 200, 1), MAX_CLAIMS);
   const res = await db.execute(sql`
     SELECT
-      c.id, c.status, c.amount_agorot, c.credited_agorot, c.supplier_id, c.invoice_id,
+      c.id, c.discrepancy_id, c.status, c.amount_agorot, c.credited_agorot, c.supplier_id, c.invoice_id,
       c.claimed_at, c.letter_sent_at, c.acknowledged_at, c.credited_at, c.recovered_at, c.closed_at,
       c.last_reminder_at, c.note,
       s.name AS supplier_name, s.name_en AS supplier_name_en,
@@ -311,6 +313,7 @@ export async function listClaims(
     const open = (OPEN_STATUSES as readonly string[]).includes(status);
     return {
       id: String(r.id),
+      discrepancyId: String(r.discrepancy_id),
       status,
       amountAgorot: amount,
       creditedAgorot: credited,

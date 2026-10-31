@@ -12,8 +12,12 @@ import { ils } from '../recipes/recipe-ui';
 import { dayText } from './inventory-ui';
 import { PeriodCard } from './period-card';
 
-/** Start / continue a count, the period's actual food cost, and past counts with their ₪ value. */
-export function InventoryHome() {
+/**
+ * Start / continue a count, the period's actual food cost, and past counts with
+ * their ₪ value. Without `showMoney` (the chef): the count card and the history
+ * with item counts only — no period card, no ₪, and no ₪ query is sent.
+ */
+export function InventoryHome({ showMoney }: { showMoney: boolean }) {
   const t = useT(inventoryNs);
   const tc = useT(components);
   const locale = useLocale();
@@ -57,7 +61,7 @@ export function InventoryHome() {
         )}
       </Card>
 
-      <PeriodCard />
+      {showMoney ? <PeriodCard /> : null}
 
       <section aria-labelledby="history-title">
         <h2 id="history-title" className="mb-3 text-sm font-semibold text-muted">
@@ -83,15 +87,17 @@ export function InventoryHome() {
                     <span className="block font-medium text-ink">{dayText(h.countDate, locale)}</span>
                     <span className="flex flex-wrap items-center gap-2 text-xs text-muted">
                       {t('home.items', { counted: h.counted })}
-                      {h.unpriced > 0 ? <Badge tone="neutral">{t('home.unpriced', { count: h.unpriced })}</Badge> : null}
+                      {showMoney && h.unpriced > 0 ? <Badge tone="neutral">{t('home.unpriced', { count: h.unpriced })}</Badge> : null}
                     </span>
                   </span>
-                  <span className="text-end">
-                    <span className="block text-xs text-muted">{t('home.value')}</span>
-                    <bdi dir="ltr" className="font-semibold tabular-nums text-ink">
-                      {ils(h.totalValueAgorot, locale, 0)}
-                    </bdi>
-                  </span>
+                  {showMoney ? (
+                    <span className="text-end">
+                      <span className="block text-xs text-muted">{t('home.value')}</span>
+                      <bdi dir="ltr" className="font-semibold tabular-nums text-ink">
+                        {ils(h.totalValueAgorot, locale, 0)}
+                      </bdi>
+                    </span>
+                  ) : null}
                 </Link>
               </li>
             ))}

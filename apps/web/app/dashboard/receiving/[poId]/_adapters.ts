@@ -15,6 +15,7 @@ import type {
   ReconciliationResult,
 } from '@/app/showcase/receiver/_mock';
 import { lineKey, type LineMark } from '@/app/showcase/receiver/_state';
+import { UNCOUNTED, fromGrLine, stripMethod, toGrLine, type GrLineFields, type LineCount } from './_count';
 
 // ── Source row shapes (mirrors of the tRPC outputs; numerics arrive as strings).
 export interface PoHeader {
@@ -47,6 +48,9 @@ export interface ReceiptLineRow {
   unit: string | null;
   qtyReceived: string | number | null;
   qtyRejected: string | number | null;
+  /** 'missing' / 'damaged' — what the Delivery Check recorded (getReceipt). */
+  rejectReason?: string | null;
+  conditionNotes?: string | null;
 }
 export interface InvoiceLineRow {
   id: string;
@@ -260,23 +264,7 @@ export function adaptReconciliation(args: {
     const key = lineKey(line);
     if (gr) grLineIdByKey[key] = gr.grLineId;
 
-    // Seed the mark from what was already received (or default to expected qty).
-    const recordedReceived = gr ? num(gr.qtyReceived) : null;
-    const recordedRejected = gr ? num(gr.qtyRejected) : null;
-    const defaultQty =
-      recordedReceived !== null && recordedReceived > 0
-        ? recordedReceived
-        : invoiceQty ?? poQty ?? 0;
-    initialMarks[key] = {
-      poLineId: line.poLineId,
-      invoiceLineIndex: line.invoiceLineIndex,
-      productId: line.productId,
-      productName: line.productName,
-      qtyReceived: defaultQty,
-      qtyRejected: recordedRejected ?? 0,
-      condition: (recordedRejected ?? 0) > 0 ? 'rejected' : 'ok',
-      touched: status === 'matched' || (recordedReceived !== null && recordedReceived > 0),
-    };
+    initialMarks[key] = markFromReceipt(line, gr, poQty ?? 0);
   });
 
   // 2. Invoice lines that never matched a PO line. A line linked to a known
@@ -311,7 +299,9 @@ export function adaptReconciliation(args: {
       invoiceLineIndex: line.invoiceLineIndex,
       productId: line.productId,
       productName: line.productName,
-      qtyReceived: invoiceQty ?? 0,
+      // Billed but not ordered: nothing is assumed to have arrived — the
+      // receiver counts it (a count never comes from the invoice).
+      qtyReceived: 0,
       qtyRejected: 0,
       condition: 'ok',
       touched: false,
@@ -358,6 +348,72 @@ export function adaptReconciliation(args: {
 }
 
 /**
+ * Seed a line's mark from what the Delivery Check already saved on its gr_line
+ * (a reload / a resumed receipt restores every mark, and how it was counted),
+ * else pre-fill the editor with the ORDERED quantity, UNRESOLVED. "Invoice =
+ * order" is never "arrived" (RCV-01), and the invoice never stands in for a
+ * count: `defaultQty` is the order (0 for a line that was not ordered).
+ */
+export function markFromReceipt(
+  line: Pick<ReconciliationLine, 'poLineId' | 'invoiceLineIndex' | 'productId' | 'productName'>,
+  gr: ReceiptLineRow | undefined,
+  defaultQty: number,
+): LineMark {
+  return markFromCount(line, fromGrLine(gr, defaultQty), defaultQty, gr?.conditionNotes ?? null);
+}
+
+/** The UI mark for a count (`defaultQty` only pre-fills the editor of an uncounted line). */
+export function markFromCount(
+  line: Pick<ReconciliationLine, 'poLineId' | 'invoiceLineIndex' | 'productId' | 'productName'>,
+  count: LineCount,
+  defaultQty: number,
+  notes: string | null = null,
+): LineMark {
+  const base = {
+    poLineId: line.poLineId,
+    invoiceLineIndex: line.invoiceLineIndex,
+    productId: line.productId,
+    productName: line.productName,
+  };
+  if (count.kind === 'uncounted') {
+    return { ...base, qtyReceived: defaultQty, qtyRejected: 0, condition: 'ok', rejectReason: null, touched: false };
+  }
+  const damaged = count.outcome === 'damaged';
+  return {
+    ...base,
+    qtyReceived: count.qtyReceived,
+    qtyRejected: count.qtyRejected,
+    condition: damaged ? 'damaged' : count.qtyRejected > 0 ? 'rejected' : 'ok',
+    rejectReason: count.outcome === 'missing' ? 'missing' : damaged ? 'damaged' : null,
+    touched: true,
+    method: count.method,
+    // What a person wrote, without the method token or the server's "damaged:" prefix
+    // (re-saving re-adds both, never twice).
+    ...(personNotes(notes) ? { notes: personNotes(notes) } : {}),
+  };
+}
+
+function personNotes(notes: string | null): string {
+  return stripMethod(notes).replace(/^damaged:\s*/, '').trim();
+}
+
+/** The count a UI mark stands for (an unresolved mark is `uncounted`, whatever it pre-fills). */
+export function countFromMark(mark: LineMark): LineCount {
+  if (!mark.touched) return UNCOUNTED;
+  const method = mark.method ?? 'per_line';
+  if (mark.rejectReason === 'missing') return { kind: 'counted', qtyReceived: 0, qtyRejected: 0, outcome: 'missing', method };
+  if (mark.condition === 'damaged') {
+    return { kind: 'counted', qtyReceived: mark.qtyReceived, qtyRejected: mark.qtyRejected, outcome: 'damaged', method };
+  }
+  return { kind: 'counted', qtyReceived: mark.qtyReceived, qtyRejected: mark.qtyRejected, outcome: 'counted', method };
+}
+
+/** The gr_line row to save for a mark. */
+export function grLineForMark(mark: LineMark): GrLineFields {
+  return toGrLine(countFromMark(mark), mark.notes);
+}
+
+/**
  * Rebuild marks for a new review projection without losing what the receiver
  * already counted: for every line they adjusted by hand, keep their quantity /
  * rejection / condition; everything else takes the fresh defaults.
@@ -372,7 +428,15 @@ export function keepAdjusted(
     const p = prev[key];
     const n = next[key];
     if (!p || !n) continue;
-    out[key] = { ...n, qtyReceived: p.qtyReceived, qtyRejected: p.qtyRejected, condition: p.condition, touched: true };
+    out[key] = {
+      ...n,
+      qtyReceived: p.qtyReceived,
+      qtyRejected: p.qtyRejected,
+      condition: p.condition,
+      rejectReason: p.rejectReason ?? null,
+      touched: p.touched,
+      method: p.method,
+    };
   }
   return out;
 }

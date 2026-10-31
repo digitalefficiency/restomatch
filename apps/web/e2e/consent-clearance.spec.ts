@@ -4,12 +4,14 @@ import { e2eSql } from './helpers';
 
 /**
  * Fresh phone, cookie banner not answered yet: the dashboard's bottom nav and
- * the receiving wizard's sticky "close receipt" CTA must stay clickable — the
- * banner sits below them (app/dashboard/consent-clearance.tsx), never on top.
+ * the Delivery Check's sticky primary CTA must stay clickable. Inside
+ * the app the banner is an inline strip at the top of the page (W1-01,
+ * a11y-12 / mobile-field-19) — it never overlaps fixed chrome, so the nav keeps
+ * the bottom edge and nothing has to make room for it.
  */
 test.use({ storageState: OWNER_STATE, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
-const BANNER = '[role="dialog"][aria-label="הסכמה לשימוש בעוגיות"]';
+const BANNER = '[role="region"][aria-label="הסכמה לשימוש בעוגיות"]';
 
 /** True when the element's centre is the top-most hit target (nothing over it). */
 async function onTop(page: Page, loc: Locator): Promise<boolean> {
@@ -32,22 +34,27 @@ test.beforeEach(async ({ page }) => {
   await ctx.addCookies([{ name: 'rm_locale', value: 'he', url: test.info().project.use.baseURL! }]);
 });
 
-test('bottom nav stays clickable above the unanswered cookie banner, and drops back after a choice', async ({ page }) => {
+test('bottom nav stays clickable with the unanswered cookie banner, which sits inline at the top', async ({ page }) => {
   await page.goto('/dashboard');
   const banner = page.locator(BANNER);
   await expect(banner).toBeVisible();
-  const bottomNav = page.locator('nav.fixed').filter({ has: page.locator('a[href="/dashboard/receiving"]') });
-  const receiving = bottomNav.locator('a[href="/dashboard/receiving"]');
-  await expect(receiving).toBeVisible();
+  await expect(banner).toHaveAttribute('data-consent', 'inline');
+  // Shell v2 (W1-03): the owner's bar is בית · אישורים · דליפות · הזמנות · עוד.
+  const bottomNav = page.getByTestId('bottom-bar');
+  const approvals = bottomNav.locator('a[href="/dashboard/approvals"]');
+  await expect(approvals).toBeVisible();
 
+  // Inline at the top: in the document flow, above the page, never over fixed chrome.
+  const bannerBox = (await banner.boundingBox())!;
+  expect(bannerBox.y, 'banner starts at the top of the page').toBeLessThanOrEqual(1);
+  expect(await banner.evaluate((el) => getComputedStyle(el).position)).toBe('static');
   const navBox = (await bottomNav.boundingBox())!;
-  const bannerBox = (await banner.locator('> div').boundingBox())!;
-  expect(navBox.y + navBox.height, 'nav sits above the banner').toBeLessThanOrEqual(bannerBox.y + 1);
-  expect(await onTop(page, receiving), 'bottom-nav link is not covered').toBe(true);
-  await receiving.click();
-  await expect(page).toHaveURL(/\/dashboard\/receiving$/);
+  expect(Math.round(navBox.y + navBox.height), 'nav keeps the bottom edge').toBe(844);
+  expect(await onTop(page, approvals), 'bottom-nav link is not covered').toBe(true);
+  await approvals.click();
+  await expect(page).toHaveURL(/\/dashboard\/approvals$/);
 
-  // Choosing releases the space: the nav returns to the bottom edge.
+  // Choosing removes the strip.
   await page.getByRole('button', { name: 'רק חיוניות' }).click();
   await expect(banner).toHaveCount(0);
   await expect
@@ -58,7 +65,7 @@ test('bottom nav stays clickable above the unanswered cookie banner, and drops b
     .toBe(844);
 });
 
-test('receiving wizard: the sticky "close receipt" CTA stays clickable with the banner visible', async ({ page }) => {
+test('Delivery Check: the sticky primary CTA stays clickable with the banner visible', async ({ page }) => {
   test.setTimeout(120_000);
   const sql = e2eSql();
   let poId = '';
@@ -82,18 +89,18 @@ test('receiving wizard: the sticky "close receipt" CTA stays clickable with the 
 
   await page.goto(`/dashboard/receiving/${poId}`);
   await expect(page.locator(BANNER)).toBeVisible();
-  // The banner never covers the wizard's own buttons either.
-  const demo = page.getByRole('button', { name: 'השתמש בחשבונית-דמה (ללא העלאה)' });
-  expect(await onTop(page, demo), '"use a demo invoice" is not covered').toBe(true);
-  await demo.click();
-  await page.getByRole('button', { name: /^עבד את החשבונית/ }).click();
-  await expect(page.getByRole('heading', { name: 'תוצאת ההצלבה' })).toBeVisible({ timeout: 60_000 });
-  await page.getByTestId('continue-adjust').click();
+  // The banner never covers the Delivery Check's own buttons either (W1-06: the
+  // live flow has no demo invoice; it offers "no invoice right now").
+  const noInvoice = page.getByTestId('scan-no-invoice');
+  expect(await onTop(page, noInvoice), '"no invoice right now" is not covered').toBe(true);
+  await noInvoice.click();
+  await expect(page.getByTestId('delivery-check')).toBeVisible({ timeout: 30_000 });
 
-  const cta = page.getByTestId('close-receipt');
+  // The sticky primary at the bottom ("everything arrived as ordered") is the close path.
+  const cta = page.getByTestId('all-arrived');
   await expect(cta).toBeVisible();
   await expect(page.locator(BANNER)).toBeVisible();
-  expect(await onTop(page, cta), 'close-receipt CTA is not covered by the banner or the nav').toBe(true);
-  const nav = page.locator('nav.fixed').filter({ has: page.locator('a[href="/dashboard/receiving"]') });
-  expect(await onTop(page, nav.locator('a[href="/dashboard/receiving"]')), 'bottom nav still clickable').toBe(true);
+  expect(await onTop(page, cta), 'the Delivery Check primary is not covered by the banner or the nav').toBe(true);
+  // Field route (W1-03 focus mode): no bottom bar competes with the CTA.
+  await expect(page.getByTestId('bottom-bar')).toBeHidden();
 });

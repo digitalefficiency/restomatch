@@ -1,3 +1,4 @@
+import { deliveryState, latestReceiptStatusSql } from '@restomatch/api';
 import {
   and,
   asc,
@@ -65,13 +66,14 @@ export async function processDailyExpectations(job: WorkerJob<DailyExpectationsJ
   const summary: Array<{ restaurantId: string; count: number }> = [];
 
   for (const restaurant of restaurantRows) {
-    const rows = await db
+    const all = await db
       .select({
         poId: purchaseOrders.id,
         supplierId: purchaseOrders.supplierId,
         supplierName: suppliers.name,
         expectedAt: purchaseOrders.expectedDeliveryAt,
         status: purchaseOrders.status,
+        latestReceipt: latestReceiptStatusSql(restaurant.id),
       })
       .from(purchaseOrders)
       .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
@@ -84,6 +86,19 @@ export async function processDailyExpectations(job: WorkerJob<DailyExpectationsJ
         ),
       )
       .orderBy(asc(purchaseOrders.expectedDeliveryAt));
+
+    // The same delivery state as the late-delivery e-mail: a PO that already has a
+    // goods receipt (in progress, received, partially received) is not "expected".
+    const tz = restaurant.timezone ?? 'Asia/Jerusalem';
+    const rows = all.filter((r) => {
+      const state = deliveryState({
+        po: { status: r.status, expectedDeliveryAt: r.expectedAt },
+        latestReceipt: r.latestReceipt ? { status: r.latestReceipt } : null,
+        now: targetDate,
+        tz,
+      });
+      return state === 'upcoming' || state === 'due_today' || state === 'late';
+    });
 
     const poIds = rows.map((r) => r.poId);
     const lineCountMap = new Map<string, number>();
