@@ -10,6 +10,7 @@ import {
   toViewInput,
 } from '../state';
 import { toCsv } from '../csv';
+import { compareSpanLabel, spanLabel } from '../labels';
 import { localDay } from '../labels';
 import { deleteSavedView, listSavedViews, saveView } from '../savedViews';
 
@@ -57,7 +58,7 @@ describe('view state ⇄ URL', () => {
       sev: 'info',
     });
     expect(v.period).toBe('this_month');
-    expect(v.compare).toBe('off');
+    expect(v.compare).toBe(DEFAULT_VIEW.compare);
     expect(v.chart).toBe('bar');
     expect(v.filters.supplierIds).toEqual([SUP]);
     expect(v.filters.types).toEqual(['PRICE_HIGHER']);
@@ -84,11 +85,34 @@ describe('view state ⇄ URL', () => {
 
   it('keeps unrelated params (lang, m) and drops stale view params', () => {
     const keep = new URLSearchParams('lang=en&p=ytd&m=-1');
-    const out = serializeView({ ...DEFAULT_VIEW, compare: 'prev' }, keep);
+    const out = serializeView({ ...DEFAULT_VIEW, compare: 'off' }, keep);
     expect(out.get('lang')).toBe('en');
     expect(out.get('m')).toBe('-1');
     expect(out.get('p')).toBeNull();
-    expect(out.get('cmp')).toBe('prev');
+    expect(out.get('cmp')).toBe('off');
+  });
+
+  it('compares like-for-like by default (W1-08): cmp=prev is the default, cmp=off must be explicit', () => {
+    expect(DEFAULT_VIEW.compare).toBe('prev');
+    expect(parseView(new URLSearchParams()).compare).toBe('prev');
+    expect(serializeView({ ...DEFAULT_VIEW }).has('cmp')).toBe(false);
+    const off = parseView(new URLSearchParams('cmp=off'));
+    expect(off.compare).toBe('off');
+    // Compare is not data: this month, no filters is the default data either way.
+    expect(isDefaultData(off)).toBe(true);
+    expect(isDefaultData(parseView(new URLSearchParams('cmp=yoy')))).toBe(true);
+    expect(parseView(serializeView(off))).toEqual(off);
+  });
+
+  it('names the compared spans: "1–25 Oct" vs "1–25 Sep" (a running span is cut at now)', () => {
+    const cur = { monthStart: '2026-09-30T21:00:00.000Z', monthEnd: '2026-10-31T22:00:00.000Z' };
+    const prev = { monthStart: '2026-08-31T21:00:00.000Z', monthEnd: '2026-09-25T21:00:00.000Z' };
+    const en = compareSpanLabel(cur, prev, 'en', '2026-10-25T12:00:00.000Z');
+    expect(en).toEqual({ current: '1–25 Oct', previous: '1–25 Sept' });
+    const he = compareSpanLabel(cur, prev, 'he', '2026-10-25T12:00:00.000Z');
+    expect(he.current).toMatch(/^1–25 /);
+    expect(he.previous).toMatch(/^1–25 /);
+    expect(spanLabel('2026-09-27T21:00:00.000Z', '2026-10-03T21:00:00.000Z', 'en')).toBe('28 Sept – 3 Oct');
   });
 
   it('toViewInput sends only what the router needs', () => {

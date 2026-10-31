@@ -1,12 +1,15 @@
 import Link from 'next/link';
-import { ArrowLeft, ArrowRight, ExternalLink, FileBarChart, FileCheck2, FileText, Hourglass, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ExternalLink, FileBarChart, FileCheck2, FileText, Hourglass, Info } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
-import { formatDate, formatPercent } from '@/lib/i18n/format';
+import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { leaks as leaksNs } from '@/lib/i18n/messages/leaks';
 import { approvals as approvalsNs } from '@/lib/i18n/messages/approvals';
-import { Badge, Card, EmptyState, SectionHeader, type BadgeTone } from '@/lib/components';
+import { Badge, Card, SectionHeader, type BadgeTone } from '@/lib/components';
+import { sumAgora } from '../claims/letters';
+import { LeakStateNote, leakStateOf } from '../leak-state';
+import { zeroNoteOf } from '../states';
 import {
   discrepancyLabel,
   displayName,
@@ -16,6 +19,7 @@ import {
 import { views as viewsNs } from '@/lib/i18n/messages/views';
 import {
   DeltaBadge,
+  compareSpanLabel,
   isThinBase,
   ViewToolbar,
   isDefaultData,
@@ -50,7 +54,13 @@ export default async function LeakBreakdownPage({
   const [summary, rows, options] = await Promise.all([
     viewMode
       ? caller.owner.leakSummary({ view: viewInput, compare: view.compare })
-      : caller.owner.leakHero({ monthOffset }).then((current) => ({ current, previous: null })),
+      : monthOffset === 0 && view.compare !== 'off'
+        ? // This month, compared like-for-like (the same day-span of the comparison period).
+          Promise.all([
+            caller.owner.leakHero({ monthOffset }),
+            caller.owner.leakSummary({ view: { period: 'this_month' }, compare: view.compare }),
+          ]).then(([current, aligned]) => ({ current, previous: aligned.previous }))
+        : caller.owner.leakHero({ monthOffset }).then((current) => ({ current, previous: null })),
     viewMode
       ? caller.owner.leakBreakdown({ view: viewInput, limit: 200 })
       : caller.owner.leakBreakdown({ monthOffset, limit: 100 }),
@@ -59,12 +69,22 @@ export default async function LeakBreakdownPage({
   const hero = summary.current;
   const compact = view.density === 'compact';
 
-  const ils = (v: number, digits = 2) => formatIls(v, { locale, maximumFractionDigits: digits });
+  const ils = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
   const month = rangeLabel(viewMode ? view.period : 'this_month', hero.monthStart, hero.monthEnd, locale);
   // Claims are month-based (?m=): offer them for the month periods only.
   const claimsOffset = !viewMode ? monthOffset : view.period === 'this_month' ? 0 : view.period === 'last_month' ? -1 : null;
-  const leaking = rows.filter((r) => !r.pendingLink);
-  const pending = rows.filter((r) => r.pendingLink);
+  // Every invoice that carries leak (a pending one too — its finding is in the hero); pending
+  // invoices without leak wait calmly below.
+  const leaking = rows.filter((r) => r.leakIls > 0);
+  const pending = rows.filter((r) => r.pendingLink && r.leakIls <= 0);
+  const state = leakStateOf(hero);
+  const rowsTotal = sumAgora(leaking.map((r) => r.leakIls));
+  // The list is capped (limit); anything it does not show is named, so Σ rows + rest = the hero.
+  const notShownIls = Math.round((hero.leakIls - rowsTotal) * 100) / 100;
+  const previous = summary.previous && summary.previous.invoiceCount > 0 ? summary.previous : null;
+  const vs = previous
+    ? tv('delta.vsSpan', compareSpanLabel(hero, previous, locale, new Date().toISOString()))
+    : undefined;
 
   const navLink =
     'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60';
@@ -107,31 +127,44 @@ export default async function LeakBreakdownPage({
         }}
       />
 
-      {/* Month switcher + total — the same number as the hero. */}
+      {/* Month switcher + total — the same number as the hero, to the agora (its rows sum to it). */}
       <Card
         padding="md"
-        tone={hero.leakIls > 0 ? 'danger' : 'default'}
+        tone={state === 'leak' ? 'danger' : 'default'}
         className="relative mb-6 flex flex-col gap-4 overflow-hidden sm:flex-row sm:items-center sm:justify-between"
+        data-view-region
       >
         {/* T1 — the one number: danger start rail when money leaked. */}
-        {hero.leakIls > 0 ? <div className="absolute inset-y-0 start-0 w-1.5 bg-danger" aria-hidden="true" /> : null}
+        {state === 'leak' ? <div className="absolute inset-y-0 start-0 w-1.5 bg-danger" aria-hidden="true" /> : null}
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-subtle">
-            {t('breakdown.total')} · {month}
+          <p className="text-sm font-semibold text-muted">
+            {viewMode && view.period !== 'this_month' ? t('breakdown.totalPeriod') : t('breakdown.total')} · {month}
           </p>
-          <p className={`mt-1 font-mono text-4xl font-extrabold tabular-nums ${hero.leakIls > 0 ? 'text-ink' : 'text-primary'}`}>
-            {ils(hero.leakIls, 0)}
-          </p>
+          {state === 'noData' ? (
+            <p className="mt-1 text-4xl font-extrabold tabular-nums text-subtle" aria-label={t('states.noData')}>
+              —
+            </p>
+          ) : (
+            <p
+              className="mt-1 text-4xl font-extrabold tabular-nums text-ink"
+              data-testid="breakdown-total"
+              data-amount={hero.leakIls}
+              title={ils(hero.leakIls)}
+            >
+              <bdi>{ils(hero.leakIls)}</bdi>
+            </p>
+          )}
           {hero.leakPct != null ? (
             <p className="text-sm text-muted">{t('breakdown.ofSpend', { pct: formatPercent(hero.leakPct, locale, 1) })}</p>
           ) : null}
-          {summary.previous ? (
+          {previous ? (
             <DeltaBadge
               className="mt-1"
               current={hero.leakIls}
-              previous={summary.previous.leakIls}
+              previous={previous.leakIls}
               compare={view.compare}
-              thinBase={isThinBase(hero.spendIls, summary.previous.spendIls)}
+              thinBase={isThinBase(hero.spendIls, previous.spendIls)}
+              vs={vs}
               showAmount
             />
           ) : null}
@@ -147,7 +180,7 @@ export default async function LeakBreakdownPage({
           {leaking.length > 0 && claimsOffset != null ? (
             <Link
               href={`/dashboard/leaks/claims${claimsOffset ? `?m=${claimsOffset}` : ''}`}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-gold/12 px-3 py-1.5 text-sm font-semibold text-gold ring-1 ring-gold/30 hover:bg-gold/20"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-primary px-3 py-1.5 text-sm font-semibold text-on-primary hover:brightness-90"
             >
               <FileCheck2 className="h-4 w-4" aria-hidden="true" />
               {t('claims.open')}
@@ -173,14 +206,15 @@ export default async function LeakBreakdownPage({
         </nav>
       </Card>
 
-      {leaking.length === 0 ? (
-        <EmptyState
-          icon={<ShieldCheck className="h-6 w-6" />}
-          title={t('breakdown.emptyTitle')}
-          description={t('breakdown.emptyDescription')}
+      {state === 'noData' ? (
+        <LeakStateNote state="noData" labels={{ title: t('states.noData'), hint: t('states.noDataHint'), cta: t('states.noDataCta') }} />
+      ) : leaking.length === 0 ? (
+        <LeakStateNote
+          state="clean"
+          labels={{ title: t('states.clean', { count: formatNumber(hero.matchedInvoiceCount, locale) }), hint: t('states.cleanHint') }}
         />
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-4" data-view-region>
           {leaking.map((inv) => {
             const supplier = displayName(locale, inv.supplierName, inv.supplierNameEn);
             const rawSum = inv.lines.filter((l) => l.countsAsLeak).reduce((s, l) => s + Math.abs(l.deltaAmount), 0);
@@ -195,7 +229,7 @@ export default async function LeakBreakdownPage({
                         {t('breakdown.invoice', { number: inv.invoiceNumber ?? t('breakdown.noNumber') })}
                       </span>
                     </h2>
-                    <p className="mt-0.5 text-xs text-subtle">
+                    <p className="mt-0.5 flex flex-wrap items-center gap-x-1 text-xs text-subtle">
                       {inv.invoiceDate ? formatDate(inv.invoiceDate, locale, { dateStyle: 'medium' }) : null}
                       {' · '}
                       {t('breakdown.invoiceTotal', { amount: ils(inv.totalInclVat) })}
@@ -207,8 +241,10 @@ export default async function LeakBreakdownPage({
                   </div>
                   <div className="shrink-0 sm:text-end">
                     <p className="text-xs font-semibold text-subtle">{t('breakdown.leak')}</p>
-                    <p className="font-mono text-2xl font-extrabold tabular-nums text-danger">{ils(inv.leakIls)}</p>
-                    {capped ? <p className="text-[11px] text-muted">{t('breakdown.capped')}</p> : null}
+                    <p className="text-2xl font-extrabold tabular-nums text-ink" data-testid="breakdown-row" data-amount={inv.leakIls}>
+                      {ils(inv.leakIls)}
+                    </p>
+                    {capped ? <p className="text-xs text-muted">{t('breakdown.capped')}</p> : null}
                   </div>
                 </header>
 
@@ -217,29 +253,41 @@ export default async function LeakBreakdownPage({
                     const item =
                       displayName(locale, l.productName, l.productNameEn) ||
                       displayName(locale, l.lineDescription, l.lineDescriptionEn);
+                    const noMoney = Math.abs(l.deltaAmount) < 0.005;
                     return (
                       <li
                         key={l.discrepancyId}
-                        className={`flex flex-col gap-1 px-4 ${compact ? 'py-1.5' : 'py-3'} sm:flex-row sm:items-center sm:justify-between ${l.countsAsLeak ? '' : 'opacity-70'}`}
+                        className={`flex flex-col gap-1 px-4 ${compact ? 'py-1.5' : 'py-3'} sm:flex-row sm:items-center sm:justify-between ${l.countsAsLeak && !noMoney ? '' : 'text-muted'}`}
+                        data-testid={noMoney ? 'line-no-money' : 'line'}
                       >
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <Badge tone={severityTone(l.severity)}>{severityLabel(ta, l.severity)}</Badge>
-                            <span className="font-semibold text-ink">{discrepancyLabel(ta, l.type)}</span>
+                            {noMoney ? (
+                              <Info className="h-4 w-4 shrink-0 text-info" aria-hidden="true" />
+                            ) : (
+                              <Badge tone={severityTone(l.severity)}>{severityLabel(ta, l.severity)}</Badge>
+                            )}
+                            <span className={noMoney ? 'font-medium' : 'font-semibold text-ink'}>{discrepancyLabel(ta, l.type)}</span>
                             {item ? <span className="text-sm text-muted">· {item}</span> : null}
                           </div>
-                          <p className="mt-0.5 text-xs text-subtle">{resolutionLabel(ta, l.resolutionStatus)}</p>
+                          <p className="mt-0.5 text-xs text-subtle">
+                            {noMoney
+                              ? zeroNoteOf(l, inv.lines) === 'billedShort'
+                                ? t('breakdown.noMoneyShort')
+                                : t('breakdown.noMoney')
+                              : resolutionLabel(ta, l.resolutionStatus)}
+                          </p>
                         </div>
-                        <div className="shrink-0 text-start sm:text-end">
-                          <span
-                            className={`font-mono font-semibold tabular-nums ${l.countsAsLeak ? 'text-danger' : 'text-muted line-through decoration-1'}`}
-                          >
-                            {ils(Math.abs(l.deltaAmount))}
-                          </span>
-                          {!l.countsAsLeak ? (
-                            <span className="ms-2 text-[11px] text-subtle">{t('breakdown.notCounted')}</span>
-                          ) : null}
-                        </div>
+                        {noMoney ? null : (
+                          <div className="shrink-0 text-start sm:text-end">
+                            <span
+                              className={`font-semibold tabular-nums ${l.countsAsLeak ? 'text-ink' : 'text-muted line-through decoration-1'}`}
+                            >
+                              {ils(Math.abs(l.deltaAmount))}
+                            </span>
+                            {!l.countsAsLeak ? <span className="ms-2 text-xs text-subtle">{t('breakdown.notCounted')}</span> : null}
+                          </div>
+                        )}
                       </li>
                     );
                   })}
@@ -264,6 +312,22 @@ export default async function LeakBreakdownPage({
               </Card>
             );
           })}
+          <p
+            className="flex flex-wrap items-baseline justify-between gap-2 rounded-xl border border-line bg-surface-2 px-4 py-3 text-sm"
+            data-testid="breakdown-rows-total"
+            data-amount={rowsTotal}
+          >
+            <span className="font-semibold text-ink">{t('breakdown.rowsTotal', { count: formatNumber(leaking.length, locale) })}</span>
+            <span className="text-lg font-bold tabular-nums text-ink">{ils(rowsTotal)}</span>
+            {notShownIls > 0.005 ? (
+              <span className="w-full text-xs text-muted">
+                {t('breakdown.notShown', {
+                  count: formatNumber(Math.max(1, hero.invoicesWithLeak - leaking.length), locale),
+                  amount: ils(notShownIls),
+                })}
+              </span>
+            ) : null}
+          </p>
         </div>
       )}
 
@@ -284,7 +348,7 @@ export default async function LeakBreakdownPage({
                     {t('breakdown.invoice', { number: inv.invoiceNumber ?? t('breakdown.noNumber') })}
                   </span>
                 </span>
-                <span className="shrink-0 font-mono text-sm tabular-nums text-muted">{ils(inv.totalInclVat)}</span>
+                <span className="shrink-0 text-sm tabular-nums text-muted">{ils(inv.totalInclVat)}</span>
               </Link>
             ))}
           </Card>
