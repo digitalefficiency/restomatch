@@ -3,6 +3,7 @@ import {
   fillEnglishNames,
   isAllowedScanUrl,
   meterOcrScan,
+  signedUrlForStoragePath,
   receiptState,
   scanReceiptToStamp,
   withScanGrId,
@@ -101,6 +102,34 @@ export async function ocrModeFor(
 /** The string entries of an unknown value that should be a string[] (else none). */
 function stringList(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length <= 64) : [];
+}
+
+/**
+ * The URL a real read fetches for the scan on the invoice ROW (review #3). The
+ * row is the trust boundary — the payload's imageUrl is never used.
+ *
+ *   - a full URL (has a scheme): returned as is; the caller's isAllowedScanUrl
+ *     pins it to our signed invoice-scans bucket (SSRF), as before;
+ *   - a bare storage path (G-09 #190 stores `<restaurantId>/<scan>` once
+ *     STORE_OBJECT_PATH lands): accepted ONLY under the row's own tenant prefix,
+ *     with no scheme, no leading '/', no '..' or backslash, then signed now
+ *     (bucket TTL, ingest/store.ts) — an old row never fails on an expired URL;
+ *   - anything else: null (refused).
+ *
+ * TODO(G-09): swap to toObjectRef/signObjectRef once #190 is on main.
+ */
+export async function rowScanUrl(restaurantId: string, stored: string): Promise<string | null> {
+  const value = stored.trim();
+  if (!value) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return value;
+  if (value.startsWith('/') || value.includes('..') || value.includes('\\') || !value.startsWith(`${restaurantId}/`)) return null;
+  if (value.length <= restaurantId.length + 1) return null;
+  try {
+    return await signedUrlForStoragePath(restaurantId, value);
+  } catch (err) {
+    console.warn(`[ocr-invoice] signing the scan path failed: ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
 }
 
 /** Thrown when a read outlives its per-job deadline — retryable (message says "timed out"). */
@@ -265,8 +294,10 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
     mode = mock ? 'mock' : await ocrModeFor(job.data.restaurantId, { grId: job.data.grId, isDemo: (id) => isDemoTenant(db, id) });
 
     let providers: { documentAi: OcrProvider; claude: OcrProvider };
-    // The URL on the ROW, never the payload's.
-    const imageUrl = invoice.rawImageUrl ?? '';
+    // The scan on the ROW, never the payload's URL. A real read resolves it to a
+    // fetchable URL (a bare storage path is signed at read time — review #3).
+    let imageUrl = invoice.rawImageUrl ?? '';
+    if (mode === 'claude') imageUrl = (await rowScanUrl(job.data.restaurantId, imageUrl)) ?? '';
     if (mode === 'disabled') {
       await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, null, 'ocr_disabled');
       outcome = 'skipped=ocr_disabled';
@@ -624,18 +655,19 @@ export function documentFacts(extraction: unknown): DocumentFacts {
 }
 
 /**
- * A ח.פ. / ע.מ. / ת.ז. as 9 canonical digits, or null when it is not a valid
- * Israeli id (review #6): digits only (spaces, dashes, a "ח.פ." label are
- * dropped), leading zeros not significant, at most 9 significant digits (a phone
- * number is not an id), padded to 9, and the check digit must hold (the
- * standard Israeli id checksum: weights 1,2,1,2… with digit-sum of products).
- * Null = unknown — never a mismatch.
+ * A ח.פ. / ע.מ. / ת.ז. as 9 canonical digits, or null (= unknown, never a
+ * mismatch). The SAME semantics as S14's `normalizeBusinessId` in @restomatch/ocr
+ * (checks.ts), which replaces this copy once it is on main:
+ * digits only (spaces, dashes, a "ח.פ." label dropped); a 10-digit value with a
+ * leading 0 loses it; 8–9 digits are padded to 9; any other length → null; the
+ * Israeli check digit must hold (weights 1,2,1,2…, digit-sum of products).
  */
 export function normalizeBusinessId(v: unknown): string | null {
   if (typeof v !== 'string' && typeof v !== 'number') return null;
-  const significant = String(v).replace(/\D/g, '').replace(/^0+/, '');
-  if (significant.length === 0 || significant.length > 9) return null;
-  const id = significant.padStart(9, '0');
+  let digits = String(v).replace(/\D/g, '');
+  if (digits.length === 10 && digits.startsWith('0')) digits = digits.slice(1);
+  if (digits.length < 8 || digits.length > 9) return null;
+  const id = digits.padStart(9, '0');
   let sum = 0;
   for (let k = 0; k < 9; k++) {
     const p = Number(id[k]) * (k % 2 === 0 ? 1 : 2);

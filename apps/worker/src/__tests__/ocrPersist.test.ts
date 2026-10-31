@@ -80,13 +80,16 @@ describe('documentFacts', () => {
     expect(documentFacts({ documentKind: 'consolidated', consolidation: 'regular' }).kind).toBe('tax_invoice');
     expect(documentFacts({ consolidation: 'consolidated', deliveryNotes: [{ number: '1' }, { number: '2' }] }).kind).toBe('consolidated');
   });
-  it('ח.פ. normalisation (review #6): digits only, ≤ 9 significant, padded to 9, check digit holds — else unknown', () => {
+  it('ח.פ. normalisation (review #6, S14 semantics): digits only, 10→9 on a leading 0, 8–9 padded, check digit — else unknown', () => {
     expect(normalizeBusinessId('51-477812-5')).toBe('514778125');
     expect(normalizeBusinessId('0514778125')).toBe('514778125'); // a leading 0 is not significant
     expect(normalizeBusinessId('ח.פ. 514778125')).toBe('514778125');
     expect(normalizeBusinessId('12345674')).toBe('012345674'); // 8 digits → padded (valid checksum)
     expect(normalizeBusinessId('012345674')).toBe('012345674'); // the same id either way: symmetric
-    expect(normalizeBusinessId('18')).toBe('000000018');
+    expect(normalizeBusinessId('18')).toBeNull(); // too short (S14 semantics: 8–9 digits, or 10 with a leading 0)
+    expect(normalizeBusinessId('514276385')).toBe('514276385');
+    expect(normalizeBusinessId('515209641')).toBe('515209641');
+    expect(normalizeBusinessId('1514778125')).toBeNull(); // 10 digits without a leading 0
     expect(normalizeBusinessId('514778123')).toBeNull(); // check digit fails → unknown, not a mismatch
     expect(normalizeBusinessId('0541234567')).toBeNull(); // a phone number: 10 significant digits
     expect(normalizeBusinessId(undefined)).toBeNull();
