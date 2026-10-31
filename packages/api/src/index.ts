@@ -351,6 +351,7 @@ export {
   recordCreditNote,
   creditLineSuggestions,
   OVERDUE_DAYS,
+  releaseClaimsForRematch, materializeClaims, type MaterializeClaimsInput,
   type RecoveryClaimRow,
   type RecoverySummary,
   type RecoverySupplierRow,
