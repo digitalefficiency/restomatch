@@ -6,6 +6,33 @@ import type { DeliverySchedule } from '@restomatch/db';
 export type Day = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat';
 export const DAY_KEYS: Day[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
+/** The VAT select: 18% standard, 0% fresh produce, the restaurant default, or a stored rate the form can't set. */
+export type VatChoice = 'default' | '0' | '0.18' | 'other';
+
+/** Stored suppliers.vat_rate (NUMERIC string, e.g. "0.0000") → the select value. */
+export function vatChoiceOf(raw: string | number | null | undefined): VatChoice {
+  if (raw === null || raw === undefined || raw === '') return 'default';
+  const n = Number(raw);
+  if (n === 0) return '0';
+  if (Math.round(n * 10000) === 1800) return '0.18';
+  return 'other';
+}
+
+/** The select value → the API's vatRate; undefined = leave the stored rate as it is. */
+export function vatRateOfChoice(c: VatChoice): 0 | 0.18 | null | undefined {
+  if (c === '0') return 0;
+  if (c === '0.18') return 0.18;
+  if (c === 'default') return null;
+  return undefined;
+}
+
+/** Which duplicate the server refused, from the tRPC error code (see suppliers router). */
+export function duplicateKindOf(code: string | undefined): 'businessId' | 'name' | null {
+  if (code === 'CONFLICT') return 'businessId';
+  if (code === 'PRECONDITION_FAILED') return 'name';
+  return null;
+}
+
 export interface FormState {
   name: string;
   nameEn: string;
@@ -13,6 +40,7 @@ export interface FormState {
   contactEmail: string;
   contactWhatsapp: string;
   paymentTerms: string;
+  vatRate: VatChoice;
   /** day → expected delivery / cutoff time "HH:MM" (absent = no delivery that day) */
   schedule: Partial<Record<Day, string>>;
 }
@@ -24,6 +52,7 @@ export const emptyForm: FormState = {
   contactEmail: '',
   contactWhatsapp: '',
   paymentTerms: '',
+  vatRate: 'default',
   schedule: {},
 };
 
@@ -64,6 +93,7 @@ export function toCreateInput(form: FormState) {
     contactEmail: form.contactEmail.trim() || undefined,
     contactWhatsapp: form.contactWhatsapp.trim() || undefined,
     paymentTerms: form.paymentTerms.trim() || undefined,
+    ...(vatRateOfChoice(form.vatRate) != null ? { vatRate: vatRateOfChoice(form.vatRate) } : {}),
     ...(deliverySchedule ? { deliverySchedule } : {}),
   };
 }
@@ -82,6 +112,7 @@ export function toUpdatePatch(form: FormState) {
     contactEmail: form.contactEmail.trim() || null,
     contactWhatsapp: form.contactWhatsapp.trim() || null,
     paymentTerms: form.paymentTerms.trim() || null,
+    ...(vatRateOfChoice(form.vatRate) !== undefined ? { vatRate: vatRateOfChoice(form.vatRate) } : {}),
     deliverySchedule: deliveryScheduleOf(form),
   };
 }
