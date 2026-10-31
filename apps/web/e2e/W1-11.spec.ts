@@ -544,15 +544,17 @@ test.describe('phone 390 · manager · verifier fixes', () => {
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
     await addItem(page, items.nth(0));
-    await expect(page.getByTestId('order-line')).toHaveCount(1);
+    // W2-06: the cart may also hold this supplier's resumed server draft — count, don't assume 1.
+    const n = await page.getByTestId('order-line').count();
+    expect(n).toBeGreaterThanOrEqual(1);
     const before = await page.getByTestId('order-line').first().innerText();
 
     await page.goto(`/dashboard/orders/new?from=${reorderPo}`);
     await page.getByRole('button', { name: MSG.he.reorder.keep }).tap();
-    await expect(page.getByTestId('order-line')).toHaveCount(1);
+    await expect(page.getByTestId('order-line')).toHaveCount(n);
     expect(await page.getByTestId('order-line').first().innerText()).toBe(before);
     await expect(page.getByTestId('reorder-notice')).toHaveCount(0);
-    expect((await deviceCarts(page))[supplierA.id]?.lines).toHaveLength(1);
+    expect((await deviceCarts(page))[supplierA.id]?.lines).toHaveLength(n);
   });
 
   test('a line removed on the order page meanwhile is re-paired, not a stuck save', async ({ page }) => {
