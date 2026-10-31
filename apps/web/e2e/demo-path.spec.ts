@@ -499,8 +499,12 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
     expect(inQueue, 'approvals "in queue" vs dashboard "waiting for your decision"').toBe(n.pendingApprovals);
     expect(n.atRisk, 'approvals "amount at risk" vs dashboard "waiting for your decision" ₪').toBe(n.decide);
     // Owner sees Approve / Reject, never "escalate to owner" (pack 5:30).
-    await expect(page.getByRole('button', { name: m.approvals.card.approve, exact: true }).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: m.approvals.card.escalate })).toHaveCount(0);
+    // W1-02: the approve label carries the claim ₪ ("דרוש {amount} מהספק"), so match around it.
+    const approveName = new RegExp(
+      '^' + m.approvals.decision.approve.split('{amount}').map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.+') + '$',
+    );
+    await expect(page.getByRole('button', { name: approveName }).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: m.approvals.decision.escalate })).toHaveCount(0);
     await checkScreen(page, errors, L, 'B4-approvals');
   });
 
