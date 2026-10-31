@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { releaseClaimsForRematch } from '../recovery/service';
 import { and, desc, eq, invoices, matchRuns, restaurants } from '@restomatch/db';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
-import { managerProcedure, router } from '../trpc';
+import { can, router } from '../trpc';
+import { invoiceStateOf } from '../invoices/state';
 import { assertInvoiceOwned } from '../tenant';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 import { readConsolidatedRaw } from '../match/consolidated';
@@ -16,7 +17,15 @@ export interface RunForInvoiceResult {
   totalDiscrepancyAmount: number;
   discrepancyCount: number;
   poMatched: boolean;
+  /**
+   * The invoice's gap (G-05 `leakIls`, the register's and hero's figure) before
+   * and after this run, integer agorot — the cockpit's "₪ לפני → אחרי" (W2-02).
+   */
+  before: number;
+  after: number;
 }
+
+const agorotOf = (ils: number | undefined) => Math.round((ils ?? 0) * 100);
 
 /**
  * On-demand 3-way match for an invoice — the interactive counterpart to the
@@ -28,7 +37,8 @@ export interface RunForInvoiceResult {
  * to the findings that still exist.
  */
 export const matchRouter = router({
-  runForInvoice: managerProcedure
+  // W2-02: the bookkeeper corrects OCR and re-matches — capability, not a role list.
+  runForInvoice: can('invoice.correct')
     .input(z.object({ invoiceId: z.string().uuid() }))
     .mutation(async ({ ctx, input }): Promise<RunForInvoiceResult> => {
       const { restaurantId } = ctx.session;
@@ -57,6 +67,7 @@ export const matchRouter = router({
         .where(and(eq(matchRuns.invoiceId, input.invoiceId), eq(matchRuns.restaurantId, restaurantId)))
         .orderBy(desc(matchRuns.runAt))
         .limit(1);
+      const before = agorotOf((await invoiceStateOf(ctx.db, restaurantId, input.invoiceId))?.leakIls);
       const built = await buildMatchInputForInvoice(ctx.db, restaurantId, input.invoiceId, {
         pinnedPoId: priorRun?.poId ?? null,
       });
@@ -67,6 +78,8 @@ export const matchRouter = router({
           totalDiscrepancyAmount: 0,
           discrepancyCount: 0,
           poMatched: false,
+          before,
+          after: before,
         };
       }
 
@@ -104,6 +117,8 @@ export const matchRouter = router({
         totalDiscrepancyAmount: result.totalDiscrepancyAmount,
         discrepancyCount: persisted.discrepancyCount,
         poMatched: built.poId != null,
+        before,
+        after: agorotOf((await invoiceStateOf(ctx.db, restaurantId, input.invoiceId))?.leakIls),
       };
     }),
 });
