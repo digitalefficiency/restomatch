@@ -700,11 +700,12 @@ test('sign-out with a queued invoice photo offline: a sheet names the count; "wa
   await page.evaluate(
     ({ userId, restaurantId }) =>
       new Promise<void>((resolve, reject) => {
-        const req = indexedDB.open('restomatch-receiver', 1);
-        req.onupgradeneeded = () => req.result.createObjectStore('photos', { keyPath: 'clientUploadId' });
+        // W2-05: the photo queue lives in the field outbox (key photo:<clientUploadId>).
+        const req = indexedDB.open('restomatch-outbox', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('items', { keyPath: 'key' });
         req.onsuccess = () => {
-          const tx = req.result.transaction('photos', 'readwrite');
-          tx.objectStore('photos').put({
+          const tx = req.result.transaction('items', 'readwrite');
+          const photo = {
             clientUploadId: '11111111-1111-4111-8111-111111111111',
             restaurantId,
             userId,
@@ -716,6 +717,22 @@ test('sign-out with a queued invoice photo offline: a sheet names the count; "wa
             createdAt: Date.now(),
             attempts: 0,
             lastError: null,
+          };
+          tx.objectStore('items').put({
+            key: `photo:${photo.clientUploadId}`,
+            kind: 'photo',
+            group: null,
+            payload: photo,
+            restaurantId: photo.restaurantId,
+            userId: photo.userId,
+            capturedByName: null,
+            createdAt: photo.createdAt,
+            revision: 1,
+            attempts: 0,
+            nextAttemptAt: photo.createdAt,
+            lastError: null,
+            status: 'pending',
+            warnedAt: null,
           });
           tx.oncomplete = () => resolve();
           tx.onerror = () => reject(tx.error);
@@ -736,10 +753,11 @@ test('sign-out with a queued invoice photo offline: a sheet names the count; "wa
   const left = await page.evaluate(
     () =>
       new Promise<number>((resolve) => {
-        const req = indexedDB.open('restomatch-receiver', 1);
+        // W2-05: the photo queue lives in the field outbox; count its photo:* items.
+        const req = indexedDB.open('restomatch-outbox', 1);
         req.onsuccess = () => {
-          const r = req.result.transaction('photos').objectStore('photos').count();
-          r.onsuccess = () => resolve(r.result);
+          const r = req.result.transaction('items').objectStore('items').getAllKeys();
+          r.onsuccess = () => resolve(r.result.filter((k) => String(k).startsWith('photo:')).length);
         };
       }),
   );
@@ -771,11 +789,12 @@ test('offline with a queued photo on a delivery: exactly one status chip, and "N
   await page.evaluate(
     ({ userId, restaurantId, poId }) =>
       new Promise<void>((resolve, reject) => {
-        const req = indexedDB.open('restomatch-receiver', 1);
-        req.onupgradeneeded = () => req.result.createObjectStore('photos', { keyPath: 'clientUploadId' });
+        // W2-05: the photo queue lives in the field outbox (key photo:<clientUploadId>).
+        const req = indexedDB.open('restomatch-outbox', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('items', { keyPath: 'key' });
         req.onsuccess = () => {
-          const tx = req.result.transaction('photos', 'readwrite');
-          tx.objectStore('photos').put({
+          const tx = req.result.transaction('items', 'readwrite');
+          const photo = {
             clientUploadId: '22222222-2222-4222-8222-222222222222',
             restaurantId,
             userId,
@@ -787,6 +806,22 @@ test('offline with a queued photo on a delivery: exactly one status chip, and "N
             createdAt: Date.now(),
             attempts: 0,
             lastError: null,
+          };
+          tx.objectStore('items').put({
+            key: `photo:${photo.clientUploadId}`,
+            kind: 'photo',
+            group: null,
+            payload: photo,
+            restaurantId: photo.restaurantId,
+            userId: photo.userId,
+            capturedByName: null,
+            createdAt: photo.createdAt,
+            revision: 1,
+            attempts: 0,
+            nextAttemptAt: photo.createdAt,
+            lastError: null,
+            status: 'pending',
+            warnedAt: null,
           });
           tx.oncomplete = () => resolve();
           tx.onerror = () => reject(tx.error);
@@ -815,10 +850,10 @@ test('offline with a queued photo on a delivery: exactly one status chip, and "N
   await page.evaluate(
     () =>
       new Promise<void>((resolve) => {
-        const req = indexedDB.open('restomatch-receiver', 1);
+        const req = indexedDB.open('restomatch-outbox', 1);
         req.onsuccess = () => {
-          const tx = req.result.transaction('photos', 'readwrite');
-          tx.objectStore('photos').delete('22222222-2222-4222-8222-222222222222');
+          const tx = req.result.transaction('items', 'readwrite');
+          tx.objectStore('items').delete('photo:22222222-2222-4222-8222-222222222222');
           tx.oncomplete = () => resolve();
         };
       }),
