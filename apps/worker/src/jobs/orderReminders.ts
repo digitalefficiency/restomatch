@@ -30,6 +30,15 @@ export interface OrderRemindersJob {
   forDate?: string;
 }
 
+/**
+ * Where the reminder lands: the new-order wizard with the supplier picked. The page
+ * reads `supplierId` (it also accepts the old `supplier` alias, for reminders already
+ * sitting in inboxes).
+ */
+export function orderReminderUrl(baseUrl: string, supplierId: string): string {
+  return `${baseUrl}/dashboard/orders/new?supplierId=${encodeURIComponent(supplierId)}`;
+}
+
 export function startOrderRemindersWorker() {
   return makeWorker<OrderRemindersJob>('order-reminders', processOrderReminders);
 }
@@ -98,7 +107,7 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
         supplierName: s.name,
         orderDayLabel: weekdayLabel,
         cutoffLabel: window?.cutoff,
-        ordersUrl: `${appBaseUrl()}/dashboard/orders/new?supplier=${s.id}`,
+        ordersUrl: orderReminderUrl(appBaseUrl(), s.id),
       });
       for (const recipient of recipients) {
         const { deduped } = await enqueueNotification(db, {
