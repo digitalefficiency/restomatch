@@ -1,13 +1,18 @@
-import { AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
-import { Button, Card, Field, Input } from '@/lib/components';
+import { Field } from '@/lib/components';
 import { auth as authMessages } from '@/lib/i18n/messages/auth';
 import { getT } from '@/lib/i18n/server';
 import { hasPassword } from '@/lib/passwords';
 import { MIN_PASSWORD_LENGTH } from '@/lib/passwordPolicy';
+import { AuthShell, authTitle } from '../_components/AuthShell';
+import { Notice } from '../_components/Notice';
+import { PasswordInput } from '../_components/PasswordInput';
+import { SubmitButton } from '../_components/SubmitButton';
 import { changePasswordAction, setPasswordAction } from '../actions';
+
+export const generateMetadata = () => authTitle('shell.titles.setPassword');
 
 interface PageProps {
   searchParams: Promise<{ error?: string; changed?: string }>;
@@ -35,76 +40,68 @@ export default async function SetPasswordPage({ searchParams }: PageProps) {
   const existing = await hasPassword(session.user.id);
   const t = await getT(authMessages);
 
+  const eye = { showLabel: t('signin.showPassword'), hideLabel: t('signin.hidePassword') };
   return (
-    <main className="flex min-h-screen items-center justify-center p-6 pb-[calc(1.5rem+var(--consent-h,0px))]">
-      <Card elevated flow padding="lg" className="w-full max-w-md">
-        <h1 className="mb-2 text-2xl font-bold text-ink">
-          {existing ? t('setPassword.titleChange') : t('setPassword.titleSet')}
-        </h1>
-        <p className="mb-6 text-sm text-muted">
-          {existing ? t('setPassword.subtitleChange') : t('setPassword.subtitleSet')}
-        </p>
+    <AuthShell>
+      <h1 className="mb-2 text-2xl font-bold text-ink">
+        {existing ? t('setPassword.titleChange') : t('setPassword.titleSet')}
+      </h1>
+      <p className="mb-6 text-sm text-muted">
+        {existing ? t('setPassword.subtitleChange') : t('setPassword.subtitleSet')}
+      </p>
 
-        {changed ? (
-          <div
-            role="status"
-            className="mb-4 rounded-md border-s-4 border-primary bg-primary/5 px-3 py-2 text-sm text-primary"
-          >
-            {t('setPassword.changed')}
-          </div>
-        ) : null}
-        {error ? (
-          <div
-            role="alert"
-            className="mb-4 flex items-start gap-2 rounded-md border-s-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
-          >
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-            <span>{t(errorKey(error), { min: MIN_PASSWORD_LENGTH })}</span>
-          </div>
-        ) : null}
+      {changed ? <Notice tone="success">{t('setPassword.changed')}</Notice> : null}
+      {error ? (
+        <Notice tone="error" id="password-error">
+          {t(errorKey(error), { min: MIN_PASSWORD_LENGTH })}
+        </Notice>
+      ) : null}
 
-        <form action={existing ? changePasswordAction : setPasswordAction} className="space-y-4">
-          {existing ? (
-            <Field label={t('setPassword.current')} htmlFor="current">
-              <Input
-                id="current"
-                name="current"
-                type="password"
-                required
-                dir="ltr"
-                autoComplete="current-password"
-              />
-            </Field>
-          ) : null}
-          <Field
-            label={t('setPassword.newPassword')}
-            htmlFor="password"
-            hint={t('setPassword.hint', { min: MIN_PASSWORD_LENGTH })}
-          >
-            <Input
-              id="password"
-              name="password"
-              type="password"
+      <form action={existing ? changePasswordAction : setPasswordAction} className="space-y-4">
+        {existing ? (
+          <Field label={t('setPassword.current')} htmlFor="current">
+            <PasswordInput
+              id="current"
+              name="current"
               required
-              minLength={MIN_PASSWORD_LENGTH}
-              autoComplete="new-password"
               dir="ltr"
-              placeholder="••••••••••"
+              autoComplete="current-password"
+              aria-invalid={error === 'current' || undefined}
+              {...eye}
             />
           </Field>
-          <Field label={t('setPassword.confirm')} htmlFor="confirm">
-            <Input id="confirm" name="confirm" type="password" required dir="ltr" autoComplete="new-password" />
-          </Field>
-          <Button type="submit" data-keep-clear className="w-full">
-            {existing ? t('setPassword.submitChange') : t('setPassword.submitSet')}
-          </Button>
-        </form>
-        <p className="mt-6 text-center text-xs">
-          <Link href="/dashboard/settings" className="text-primary hover:underline">
-            {t('setPassword.back')}
-          </Link>
-        </p>
-      </Card>
-    </main>
+        ) : null}
+        <div>
+          <label htmlFor="password" className="mb-1 block text-sm font-medium text-muted">
+            {t('setPassword.newPassword')}
+          </label>
+          <p id="password-hint" className="mb-1.5 text-sm text-muted">
+            {t('setPassword.hint', { min: MIN_PASSWORD_LENGTH })}
+          </p>
+          <PasswordInput
+            id="password"
+            name="password"
+            required
+            minLength={MIN_PASSWORD_LENGTH}
+            autoComplete="new-password"
+            dir="ltr"
+            aria-describedby={error ? 'password-hint password-error' : 'password-hint'}
+            aria-invalid={error === 'policy' || error === 'mismatch' || undefined}
+            {...eye}
+          />
+        </div>
+        <Field label={t('setPassword.confirm')} htmlFor="confirm">
+          <PasswordInput id="confirm" name="confirm" required dir="ltr" autoComplete="new-password" {...eye} />
+        </Field>
+        <SubmitButton data-keep-clear className="min-h-12 w-full text-base">
+          {existing ? t('setPassword.submitChange') : t('setPassword.submitSet')}
+        </SubmitButton>
+      </form>
+      <p className="mt-6 text-center text-sm">
+        <Link href="/dashboard/settings" className="inline-flex min-h-11 items-center font-medium text-primary hover:underline">
+          {t('setPassword.back')}
+        </Link>
+      </p>
+    </AuthShell>
   );
 }

@@ -28,7 +28,9 @@ export async function verifyTwoFactorAction(formData: FormData): Promise<void> {
   // Validated same-origin destination (open-redirect guard) — e.g. an invite link.
   const next = safeRelativePath(formData.get('callbackUrl'));
   if (!session.user.twoFactorPending) redirect(next);
-  const retry = `/login/2fa?error=invalid&callbackUrl=${encodeURIComponent(next)}`;
+  // A failed recovery code comes back to the recovery (text-keyboard) mode.
+  const mode = formData.get('mode') === 'recovery' ? '&mode=recovery' : '';
+  const retry = `/login/2fa?error=invalid&callbackUrl=${encodeURIComponent(next)}${mode}`;
 
   const code = String(formData.get('code') ?? '').trim();
   if (!code) redirect(retry);
