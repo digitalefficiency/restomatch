@@ -590,6 +590,52 @@ test.describe('phone 390 · manager · verifier fixes', () => {
   });
 });
 
+test.describe('phone 390 · manager · scope fixes', () => {
+  test.use(PHONE);
+
+  test('a send retried after a reload re-uses the persisted draft: exactly one PO', async ({ page }) => {
+    test.setTimeout(150_000);
+    const since = new Date(Date.now() - 1000);
+    await setLocale(page, 'he');
+    page.on('dialog', (d) => void d.accept());
+    await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
+    const items = page.getByTestId('catalog-item');
+    await expect(items.first()).toBeVisible({ timeout: 30_000 });
+    await items.nth(0).tap();
+    await page.getByTestId('cart-primary').tap(); // review
+    await page.locator('#ord-channel').selectOption('none');
+    await page.getByTestId('cart-primary').tap(); // send → countdown
+    await expect(page.getByTestId('send-undo')).toBeVisible({ timeout: 30_000 });
+    // The tab reloads inside the window (crash, swipe-refresh): nothing was sent yet.
+    await page.reload();
+    await expect(page.getByTestId('order-line')).toHaveCount(1, { timeout: 30_000 });
+    const draftId = (await deviceCarts(page))[supplierB.id]?.draftId;
+    expect(draftId, 'the draft id survived the reload').toBeTruthy();
+    // Retry: review → send again, let it go through.
+    await page.getByTestId('cart-primary').tap();
+    await page.locator('#ord-channel').selectOption('none');
+    await page.getByTestId('cart-primary').tap();
+    await expect(page.getByRole('status').filter({ hasText: MSG.he.wizard.markedTitle })).toBeVisible({ timeout: 30_000 });
+    const pos = await posSince(supplierB.id, since);
+    expect(pos.map((p) => p.status), 'one PO, sent — never a second draft').toEqual(['sent']);
+    expect(pos[0]!.id).toBe(draftId);
+  });
+
+  test('a unit price typed as "1,250" is ₪1,250 (and "0,250" is ₪0.25)', async ({ page }) => {
+    await setLocale(page, 'he');
+    page.on('dialog', (d) => void d.accept());
+    await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
+    await expect(page.getByTestId('catalog-item').first()).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId('catalog-item').first().tap();
+    const price = page.getByTestId('order-line').first().getByRole('textbox', { name: /מחיר ליח׳/ });
+    await price.fill('1,250');
+    await page.getByTestId('order-line').first().getByRole('textbox', { name: /כמות/ }).fill('1');
+    await expect(page.getByTestId('order-total')).toContainText('1,250.00');
+    await price.fill('0,250');
+    await expect(page.getByTestId('order-total')).toContainText('0.25');
+  });
+});
+
 test.describe('desktop 1440 · manager · keyboard', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 

@@ -272,3 +272,57 @@ export function cancelNoticeText(input: {
     .join('\n');
   return { subject, body };
 }
+
+const GROUPED = (parts: string[]) =>
+  parts.length > 1 && /^\d{1,3}$/.test(parts[0]!) && parts.slice(1).every((p) => /^\d{3}$/.test(p));
+
+/**
+ * Strict ₪ entry for an order line's unit price (never a guess):
+ *  - "1,250" = 1,250 (one 3-digit comma group after 1–3 digits is thousands);
+ *  - "0,250" = 0.25 and "7,5" / "12,40" = decimal comma (a leading 0, or 1–2 digits);
+ *  - "1,250.50" / "1.250,50" = the last separator is the decimal one, the other groups by 3;
+ *  - spaces and ₪ are ignored; blank → null (clear); anything else ("12,3456",
+ *    "1,2,3", "-5", "1e3") → 'invalid'.
+ * TODO(G-13): adopt the shared number-input parser (packages/types, W1-10) in wave 2.
+ */
+export function parsePriceInput(raw: string): number | null | 'invalid' {
+  const t = raw.replace(/[\s ‏‎₪]/g, '');
+  if (t === '') return null;
+  if (!/^[\d.,]+$/.test(t)) return 'invalid';
+  const lastDot = t.lastIndexOf('.');
+  const lastComma = t.lastIndexOf(',');
+  let int: string;
+  let frac = '';
+  if (lastDot >= 0 && lastComma >= 0) {
+    const decAt = Math.max(lastDot, lastComma);
+    const thousands = decAt === lastDot ? ',' : '.';
+    const head = t.slice(0, decAt);
+    frac = t.slice(decAt + 1);
+    if (head.includes(decAt === lastDot ? '.' : ',')) return 'invalid'; // two decimal separators
+    const groups = head.split(thousands);
+    if (!GROUPED(groups) || !/^\d+$/.test(frac)) return 'invalid';
+    int = groups.join('');
+  } else if (lastComma >= 0 || lastDot >= 0) {
+    const sep = lastComma >= 0 ? ',' : '.';
+    const parts = t.split(sep);
+    if (parts.some((p) => p === '')) return 'invalid';
+    if (parts.length > 2) {
+      if (!GROUPED(parts)) return 'invalid';
+      int = parts.join('');
+    } else {
+      const [a, b] = parts as [string, string];
+      if (sep === '.' || a === '0' || b.length <= 2) {
+        int = a;
+        frac = b;
+      } else if (b.length === 3 && /^\d{1,3}$/.test(a)) {
+        int = a + b;
+      } else {
+        return 'invalid';
+      }
+    }
+  } else {
+    int = t;
+  }
+  const n = Number(frac ? `${int}.${frac}` : int);
+  return Number.isFinite(n) && n >= 0 ? n : 'invalid';
+}

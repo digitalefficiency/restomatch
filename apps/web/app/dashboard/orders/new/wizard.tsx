@@ -584,6 +584,9 @@ export function NewOrderWizard({
       if (cur?.po && cur.po.status !== 'draft') throw new StaleDraftError(id, cur.po.status);
       if (!cur?.po) id = null;
     }
+    // A persisted draft id without its snapshot (a reload before the read-back):
+    // pair with the draft's real rows instead of replacing it.
+    if (id && !serverRef.current) await readBack(id, lines);
     if (id) {
       const plan = planDraftSync({ lines, deliveryDate, deliveryDay, server: serverRef.current });
       if (!plan.replace) {
@@ -615,6 +618,23 @@ export function NewOrderWizard({
     // The stale draft this one replaces (a line was added or the day changed). It
     // was never sent; the orders list keeps never-sent cancelled drafts out of view.
     if (id) await cancelOrder.mutateAsync({ poId: id }).catch(() => undefined);
+    // Persist the draft id NOW, not on the next render: a reload or a crash between
+    // here and the save effect must still find it, so a retried send re-uses this
+    // draft (validated) and never creates a second draft or PO.
+    const savedCart = store.current.carts[supplierId];
+    store.current = {
+      ...withCart(store.current, supplierId, {
+        ...(savedCart ?? emptyCart()),
+        lines,
+        deliveryDate,
+        channel,
+        draftId: created.poId,
+        server: null,
+        updatedAt: Date.now(),
+      }),
+      activeSupplierId: supplierId,
+    };
+    saveStore(restaurantId, store.current);
     setDraftId(created.poId);
     await readBack(created.poId, lines);
     return created.poId;

@@ -34,7 +34,7 @@ import {
   ltrIsolate,
   mailtoLink,
   parsePositive,
-  parsePrice,
+  parsePriceInput,
   poRefOf,
   unpricedCount,
   waLink,
@@ -211,7 +211,7 @@ export function OrderDetail({
   function saveLine(l: Line) {
     const qty = parsePositive(ld.qtyOrdered);
     if (qty == null) return setLineError(t('detail.qtyInvalid'));
-    const price = parsePrice(ld.unitPriceExpected);
+    const price = parsePriceInput(ld.unitPriceExpected);
     if (price === 'invalid') return setLineError(t('detail.priceInvalid'));
     setLineError(null);
     updateLine.mutate({
