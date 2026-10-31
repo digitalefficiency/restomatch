@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ClaudeVision } from '../providers/claudeVision';
+import { OcrExtractionError } from '../errors';
+import { ClaudeVision, DEFAULT_OCR_MODEL } from '../providers/claudeVision';
 
 // Canned Hebrew invoice the mocked model "returns" as a JSON text block.
 // Units are Hebrew (ק״ג / יח׳), there's an allocation number, per-line +
@@ -33,6 +34,7 @@ const CANNED_INVOICE = {
 };
 
 const createMock = vi.fn();
+const clientOpts: unknown[] = [];
 
 // Mock the SDK so extract()'s lazy `import('@anthropic-ai/sdk')` resolves to a
 // fake client. The default export is a constructable returning { messages }.
@@ -40,7 +42,9 @@ vi.mock('@anthropic-ai/sdk', () => {
   return {
     default: class {
       messages = { create: createMock };
-      constructor(_opts: unknown) {}
+      constructor(opts: unknown) {
+        clientOpts.push(opts);
+      }
     },
   };
 });
@@ -95,13 +99,14 @@ describe('ClaudeVision.extract — mapping', () => {
     expect(result.invoiceNumber).toBe('A-10293');
   });
 
-  it('defaults the model from OCR_CLAUDE_MODEL then claude-opus-4-8', async () => {
+  it('defaults the model from OCR_CLAUDE_MODEL then claude-opus-5-5', async () => {
     mockTextResponse(CANNED_INVOICE);
     const provider = new ClaudeVision({ apiKey: 'test-key' });
     await provider.extract('https://example.com/invoice.jpg');
     expect(createMock).toHaveBeenCalledTimes(1);
     const arg = createMock.mock.calls[0]?.[0] as { model: string };
-    expect(arg.model).toBe(process.env.OCR_CLAUDE_MODEL ?? 'claude-opus-4-8');
+    expect(arg.model).toBe(process.env.OCR_CLAUDE_MODEL ?? 'claude-opus-5-5');
+    expect(DEFAULT_OCR_MODEL).toBe('claude-opus-5-5');
   });
 
   it('sends a URL image block for an http(s) image source', async () => {
@@ -218,10 +223,15 @@ describe('ClaudeVision — effort + usage (benchmark knobs)', () => {
     delete process.env.OCR_CLAUDE_EFFORT;
   });
 
-  it('sends no output_config by default (behaviour unchanged)', async () => {
+  it("always sends output_config.effort, 'low' by default (Opus 5.5 would default to medium)", async () => {
     mockTextResponse(CANNED_INVOICE);
     await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg');
-    expect(createMock.mock.calls[0]![0]).not.toHaveProperty('output_config');
+    const body = createMock.mock.calls[0]![0];
+    expect(body.output_config).toEqual({ effort: 'low' });
+    // No thinking config (Opus 5.5 rejects disabled) and no assistant prefill.
+    expect(body).not.toHaveProperty('thinking');
+    expect(body.messages).toHaveLength(1);
+    expect(body.messages[0].role).toBe('user');
   });
 
   it('sends output_config.effort from config or OCR_CLAUDE_EFFORT; ignores junk', async () => {
@@ -237,7 +247,7 @@ describe('ClaudeVision — effort + usage (benchmark knobs)', () => {
     process.env.OCR_CLAUDE_EFFORT = 'turbo';
     mockTextResponse(CANNED_INVOICE);
     await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg');
-    expect(createMock.mock.calls[2]![0]).not.toHaveProperty('output_config');
+    expect(createMock.mock.calls[2]![0].output_config).toEqual({ effort: 'low' });
   });
 
   it('reports usage to onUsage', async () => {
@@ -248,5 +258,128 @@ describe('ClaudeVision — effort + usage (benchmark knobs)', () => {
     const seen: unknown[] = [];
     await new ClaudeVision({ apiKey: 'k', onUsage: (u) => seen.push(u) }).extract('https://example.com/i.jpg');
     expect(seen).toEqual([{ input_tokens: 1500, output_tokens: 700 }]);
+  });
+});
+
+describe('ClaudeVision — client limits, stop reasons, meta (PR-OCR-2)', () => {
+  beforeEach(() => {
+    createMock.mockReset();
+    clientOpts.length = 0;
+    delete process.env.OCR_CLAUDE_TIMEOUT_MS;
+  });
+
+  it('builds the client with timeout 90 s (or OCR_CLAUDE_TIMEOUT_MS) and maxRetries 1', async () => {
+    mockTextResponse(CANNED_INVOICE);
+    await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg');
+    expect(clientOpts[0]).toMatchObject({ apiKey: 'k', timeout: 90_000, maxRetries: 1 });
+
+    process.env.OCR_CLAUDE_TIMEOUT_MS = '45000';
+    mockTextResponse(CANNED_INVOICE);
+    await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg');
+    expect(clientOpts[1]).toMatchObject({ timeout: 45_000, maxRetries: 1 });
+  });
+
+  it('returns usage and elapsedMs in meta', async () => {
+    createMock.mockResolvedValueOnce({
+      content: [{ type: 'text', text: JSON.stringify(CANNED_INVOICE) }],
+      usage: { input_tokens: 4100, output_tokens: 2300 },
+      stop_reason: 'end_turn',
+    });
+    const r = await new ClaudeVision({ apiKey: 'k', model: 'claude-sonnet-5-5', effort: 'medium' }).extract(
+      'https://example.com/i.jpg',
+    );
+    expect(r.meta).toMatchObject({
+      model: 'claude-sonnet-5-5',
+      effort: 'medium',
+      usage: { inputTokens: 4100, outputTokens: 2300 },
+    });
+    expect(r.meta.elapsedMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("stop_reason 'max_tokens' → a typed reviewable failure, not a parse crash", async () => {
+    createMock.mockResolvedValueOnce({
+      content: [{ type: 'text', text: '{"supplier": {"name": "ספק"}, "lines": [{"rawDescr' }],
+      usage: { input_tokens: 4000, output_tokens: 16000 },
+      stop_reason: 'max_tokens',
+    });
+    const err = await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg').catch((e) => e);
+    expect(err).toBeInstanceOf(OcrExtractionError);
+    expect(err).toMatchObject({ code: 'max_tokens', reviewable: true });
+    expect(err.details.usage).toEqual({ inputTokens: 4000, outputTokens: 16000 });
+    expect(String(err.message)).not.toContain('ספק');
+  });
+
+  it("stop_reason 'refusal' → a typed reviewable failure with the category", async () => {
+    createMock.mockResolvedValueOnce({
+      content: [],
+      usage: { input_tokens: 4000, output_tokens: 3 },
+      stop_reason: 'refusal',
+      stop_details: { type: 'refusal', category: null, explanation: null },
+    });
+    const err = await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg').catch((e) => e);
+    expect(err).toBeInstanceOf(OcrExtractionError);
+    expect(err).toMatchObject({ code: 'refusal', reviewable: true });
+  });
+
+  it('ignores thinking blocks and reads only the text block', async () => {
+    createMock.mockResolvedValueOnce({
+      content: [
+        { type: 'thinking', thinking: '{"not": "the answer"}' },
+        { type: 'text', text: JSON.stringify(CANNED_INVOICE) },
+      ],
+      stop_reason: 'end_turn',
+    });
+    const r = await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg');
+    expect(r.invoiceNumber).toBe('A-10293');
+  });
+
+  it('invalid JSON → invalid_output without echoing invoice text', async () => {
+    createMock.mockResolvedValueOnce({ content: [{ type: 'text', text: 'ספק: ירקני אבי, סה״כ 1,250' }] });
+    const err = await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg').catch((e) => e);
+    expect(err).toMatchObject({ code: 'invalid_output' });
+    expect(String(err.message)).not.toMatch(/ירקני|1,250/);
+  });
+
+  it('parses the v2 fields (documentKind, buyer, deliveryNotes, discounts, lineKind, flags)', async () => {
+    mockTextResponse({
+      ...CANNED_INVOICE,
+      documentKind: 'consolidated',
+      buyer: { name: 'מסעדת ציקטי', businessId: '515555551' },
+      deliveryNotes: [{ number: '7781', date: '2026-10-02' }, { number: '7790' }],
+      periodStart: '2026-10-01',
+      periodEnd: '2026-10-31',
+      invoiceDiscount: 12.5,
+      continuesOnAnotherPage: false,
+      handwrittenCorrection: true,
+      lines: [
+        { ...CANNED_INVOICE.lines[0], lineDiscountPct: 10, lineKind: 'item' },
+        { rawDescription: 'פיקדון ארגז', qty: 4, unit: 'יח׳', unitPrice: 5, lineTotal: 20, lineKind: 'deposit' },
+      ],
+      totals: { ...CANNED_INVOICE.totals, vatRate: 18 },
+    });
+    const r = await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg');
+    expect(r.documentKind).toBe('consolidated');
+    expect(r.buyer).toEqual({ name: 'מסעדת ציקטי', businessId: '515555551' });
+    expect(r.deliveryNotes).toHaveLength(2);
+    expect([r.periodStart, r.periodEnd]).toEqual(['2026-10-01', '2026-10-31']);
+    expect(r.invoiceDiscount).toBe(12.5);
+    expect(r.handwrittenCorrection).toBe(true);
+    expect(r.lines[0]).toMatchObject({ lineDiscountPct: 10, lineKind: 'item' });
+    expect(r.lines[1]).toMatchObject({ lineKind: 'deposit' });
+    expect(r.totals.vatRate).toBe(0.18); // printed "18" normalised to a fraction
+  });
+
+  it('an unknown documentKind / lineKind falls back instead of failing the invoice', async () => {
+    mockTextResponse({ ...CANNED_INVOICE, documentKind: 'menu', lines: [{ ...CANNED_INVOICE.lines[0], lineKind: 'tip' }] });
+    const r = await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg');
+    expect(r.documentKind).toBe('other');
+    expect(r.lines[0]!.lineKind).toBe('item');
+  });
+
+  it('HEIC bytes → unsupported_format before any API call', async () => {
+    const heic = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypheic'), Buffer.alloc(16)]);
+    const err = await new ClaudeVision({ apiKey: 'k' }).extract(heic).catch((e) => e);
+    expect(err).toMatchObject({ code: 'unsupported_format' });
+    expect(createMock).not.toHaveBeenCalled();
   });
 });

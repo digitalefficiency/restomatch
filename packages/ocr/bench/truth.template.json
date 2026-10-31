@@ -1,0 +1,11 @@
+{
+  "_comment": "Copy next to a real document as <same-name>.truth.json in your BENCH_DIR (OUTSIDE git). Type every value exactly as printed. Money as numbers with a decimal point; dates YYYY-MM-DD; businessId and allocationNumber as digits only. Delete this _comment line. Lines are matched by sku: if the supplier prints no SKU, give each line a unique sku like L1, L2 … and the bench will count those lines as missing (accuracy only).",
+  "supplier": { "name": "שם הספק כפי שמודפס", "businessId": "000000000" },
+  "invoiceNumber": "00000",
+  "invoiceDate": "2026-11-01",
+  "allocationNumber": null,
+  "lines": [
+    { "sku": "0000", "rawDescription": "שם הפריט", "qty": 1, "unit": "ק\"ג", "unitPrice": 0.0, "lineTotal": 0.0 }
+  ],
+  "totals": { "subtotal": 0.0, "vat": 0.0, "total": 0.0 }
+}
