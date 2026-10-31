@@ -41,6 +41,9 @@ beforeEach(async () => {
   await seedPlans(ownerDb);
   A = await seedTenant(ownerDb, 'RA'); // matched invoice, one open ₪100 PRICE_HIGHER
   B = await seedTenant(ownerDb, 'RB');
+  // The register reads the Israel-time month of "now"; the fixture's UTC-day date can
+  // fall in the previous Israel month just after midnight on the 1st. Date both invoices now.
+  for (const t of [A, B]) await ownerDb.update(invoices).set({ invoiceDate: new Date() }).where(eq(invoices.id, t.invoiceId));
 });
 afterAll(async () => {
   await resetDb(ownerDb);
