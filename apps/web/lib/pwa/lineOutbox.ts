@@ -14,6 +14,7 @@
  *
  * Pure (no React, no DOM besides the optional storage adapter) — unit-tested.
  */
+import { requestPersistentStorage } from './offlineQueue';
 
 export interface GrLinePayload {
   grLineId: string;
@@ -184,7 +185,10 @@ export function localStorageOutbox(key: string): OutboxStorage {
     save(items) {
       try {
         if (items.length === 0) window.localStorage.removeItem(key);
-        else window.localStorage.setItem(key, JSON.stringify(items));
+        else {
+          window.localStorage.setItem(key, JSON.stringify(items));
+          void requestPersistentStorage(); // once per page load: don't let the browser evict unsent counts
+        }
       } catch {
         /* storage blocked — the in-memory outbox still sends */
       }
