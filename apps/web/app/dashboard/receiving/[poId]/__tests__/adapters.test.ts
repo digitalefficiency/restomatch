@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { noLinePaired, reconSections } from '@/app/showcase/receiver/_state';
-import { adaptReconciliation, keepAdjusted, type InvoiceLineRow, type PoLineRow } from '../_adapters';
+import { adaptReconciliation, keepAdjusted, markFromReceipt, type InvoiceLineRow, type PoLineRow } from '../_adapters';
 
 /** EN-5: the receiving review is calm — no false "missing" / "not ordered" alarms. */
 const po = { id: 'po', supplierId: 's', supplierName: 'ספק', expectedAt: null, status: 'sent', totalEstimated: null };
@@ -221,5 +221,43 @@ describe('keepAdjusted (EN-4: "Show results" never discards what the receiver co
     expect(out.b!.qtyReceived).toBe(5); // auto-touched only — takes the new invoice default
     expect(out.c!.qtyReceived).toBe(1);
     expect(Object.keys(out).sort()).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('Delivery Check marks (RCV-01 / RCV-02)', () => {
+  const gr = (o: Partial<Parameters<typeof markFromReceipt>[1] & object>) => ({
+    grLineId: 'g1', poLineId: 'pl1', productId: 'p1', productName: 'חזה עוף', rawDescription: 'חזה עוף',
+    orderedQty: '4', unit: 'ק״ג', qtyReceived: '0', qtyRejected: '0', rejectReason: null, conditionNotes: null,
+    ...o,
+  });
+
+  it('a line where invoice = order is pre-filled with the order but NOT resolved', () => {
+    const { result, initialMarks } = adaptReconciliation({
+      po,
+      poLines: [poLines[0]!],
+      receiptLines: [gr({})],
+      invoiceLines: [inv({ id: 'a', productId: 'p1', qtyBilled: '4', unitPriceBilled: '20', lineTotal: '80' })],
+    });
+    expect(result.lines[0]!.status).toBe('matched');
+    expect(initialMarks['po-pl1']).toMatchObject({ qtyReceived: 4, touched: false });
+  });
+
+  it('a reload restores what was saved: a count, "missing" and "damaged"', () => {
+    const line = { poLineId: 'pl1', invoiceLineIndex: 0, productId: 'p1', productName: 'x' };
+    expect(markFromReceipt(line, gr({ qtyReceived: '8' }), 10)).toMatchObject({ qtyReceived: 8, touched: true, rejectReason: null });
+    expect(markFromReceipt(line, gr({ rejectReason: 'missing' }), 10)).toMatchObject({
+      qtyReceived: 0, qtyRejected: 0, condition: 'ok', rejectReason: 'missing', touched: true,
+    });
+    expect(markFromReceipt(line, gr({ qtyReceived: '4', conditionNotes: 'damaged:' }), 10)).toMatchObject({
+      condition: 'damaged', rejectReason: 'damaged', touched: true,
+    });
+    // A fresh gr_line (startReceipt) is "not counted yet".
+    expect(markFromReceipt(line, gr({}), 10)).toMatchObject({ qtyReceived: 10, touched: false });
+  });
+
+  it('keepAdjusted keeps an undone line unresolved', () => {
+    const m = { poLineId: 'pl', invoiceLineIndex: 0, productId: null, productName: 'x', qtyRejected: 0, condition: 'ok' as const };
+    const out = keepAdjusted({ a: { ...m, qtyReceived: 4, touched: false } }, { a: { ...m, qtyReceived: 9, touched: false } }, new Set(['a']));
+    expect(out.a).toMatchObject({ qtyReceived: 4, touched: false });
   });
 });

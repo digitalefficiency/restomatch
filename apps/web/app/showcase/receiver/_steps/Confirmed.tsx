@@ -1,15 +1,13 @@
 'use client';
 
-import { useGSAP } from '@gsap/react';
-import { gsap } from 'gsap';
-import { Check, ExternalLink, FileImage, Plus, Receipt, ShieldCheck } from 'lucide-react';
-import { useRef } from 'react';
+import { ArrowLeft, Check, ExternalLink, FileImage, Plus, Receipt } from 'lucide-react';
 import type { ReconciliationResult } from '../_mock';
 import type { CapturedImage } from '../_state';
 import { useDir, useLocale, useT } from '@/lib/i18n/client';
-import { formatDate } from '@/lib/i18n/format';
+import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { receiving } from '@/lib/i18n/messages/receiving';
-import { formatIls } from '@/lib/money';
+import { receivingDelivery } from '@/lib/i18n/messages/receiving/delivery';
+import { ActionBar, PRIMARY_56 } from './ActionBar';
 
 interface Props {
   supplierName: string;
@@ -19,8 +17,23 @@ interface Props {
   onReset: () => void;
   /** Label of the reset button (defaults to "another receipt"). */
   resetLabel?: string;
+  /** Lines the receiver recorded as different from the order (the wizard counts its marks). */
+  exceptions?: number;
+  /** The real invoice page (dashboard). The showcase links to its demo scan instead. */
+  invoiceHref?: string | null;
+  /** The engine's ₪ (the dock slip) or "set after the check" — never a client estimate (RCV-11). */
+  amount?: React.ReactNode;
+  /** Below the summary, above the bar (the dock slip). */
+  children?: React.ReactNode;
+  /** Who received the goods (the signed-in person on a shared tablet). */
+  receivedBy?: string | null;
 }
 
+/**
+ * The receipt is closed: a calm T3 summary (RCV-30) — when, from whom, how many
+ * lines and exceptions, the invoice — and one primary for what comes next. No
+ * celebration motion, no internal ids, no client-side "savings" figure.
+ */
 export function Confirmed({
   supplierName,
   result,
@@ -28,137 +41,83 @@ export function Confirmed({
   capturedImage,
   onReset,
   resetLabel,
+  exceptions,
+  invoiceHref,
+  amount,
+  children,
+  receivedBy,
 }: Props) {
-  const ref = useRef<HTMLDivElement>(null);
   const t = useT(receiving);
+  const td = useT(receivingDelivery);
   const locale = useLocale();
   const dir = useDir();
 
-  useGSAP(
-    () => {
-      gsap.from('.confirm-check', {
-        scale: 0,
-        opacity: 0,
-        duration: 0.6,
-        ease: 'back.out(2)',
-      });
-      gsap.from('.confirm-content', {
-        y: 16,
-        opacity: 0,
-        stagger: 0.08,
-        duration: 0.5,
-        ease: 'power3.out',
-        delay: 0.2,
-      });
-    },
-    { scope: ref },
-  );
-
   const time = confirmedAt ? formatDate(confirmedAt, locale, { hour: '2-digit', minute: '2-digit' }) : '';
+  const lines = result?.lines.length ?? 0;
+  const s = result?.summary;
+  const exc =
+    exceptions ??
+    (s ? s.qtyDiffCount + s.priceDiffCount + s.unorderedCount + s.missingCount + (s.pendingCount ?? 0) : 0);
+  const invoiceNumber = result && !result.invoiceMeta.noInvoice ? result.invoiceMeta.invoiceNumber : null;
+  const scanHref = invoiceHref ?? (capturedImage?.scanRouteUrl ? (capturedImage.publicUrl ?? capturedImage.scanRouteUrl) : null);
 
   return (
-    <div ref={ref} dir={dir} className="max-w-md mx-auto text-center py-8" data-testid="receipt-confirmed">
-      <div className="confirm-check w-24 h-24 rounded-full bg-primary text-on-primary mx-auto mb-6 flex items-center justify-center shadow-glow-primary">
-        <Check className="w-12 h-12" strokeWidth={3} />
-      </div>
-
-      <h1 className="confirm-content text-3xl font-extrabold tracking-tight text-ink mb-2">
-        {t('steps.confirmed.title')}
-      </h1>
-      <p className="confirm-content text-muted mb-8">
-        {t('steps.confirmed.subtitle', { time, supplier: supplierName })}
-      </p>
-
-      <div className="confirm-content relative overflow-hidden rounded-2xl border border-line bg-surface p-5 mb-6 text-start space-y-3 shadow-card">
-        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px flow-stream" />
-        <RowItem
-          icon={<Receipt className="w-4 h-4" />}
-          label={t('steps.confirmed.invoice')}
-          value={result?.invoiceMeta.invoiceNumber ?? '—'}
-        />
-        <RowItem
-          icon={<ShieldCheck className="w-4 h-4" />}
-          label={t('steps.confirmed.verified')}
-          value={t('steps.confirmed.verifiedValue', {
-            matched: result?.summary.matchedCount ?? 0,
-            manual:
-              (result?.summary.qtyDiffCount ?? 0) +
-              (result?.summary.priceDiffCount ?? 0) +
-              (result?.summary.unorderedCount ?? 0) +
-              (result?.summary.missingCount ?? 0) +
-              (result?.summary.pendingCount ?? 0),
-          })}
-        />
-        {result && result.summary.headlineDelta > 0 ? (
-          <RowItem
-            icon={<Plus className="w-4 h-4" />}
-            label={t('steps.confirmed.savings')}
-            value={formatIls(result.summary.headlineDelta, { locale, maximumFractionDigits: 2 })}
-            valueClass="text-gold font-bold font-mono tabular-nums"
-          />
-        ) : null}
-      </div>
-
-      {capturedImage?.scanRouteUrl ? (
-        <div className="confirm-content mb-4 rounded-2xl border border-primary/25 bg-primary/8 px-4 py-3 text-start">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-surface border border-primary/25 flex items-center justify-center shrink-0">
-              <FileImage className="w-5 h-5 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-ink">
-                {t('steps.confirmed.scanSaved')}
-              </div>
-              <div className="text-[11px] font-mono text-muted truncate">
-                {capturedImage.invoiceId}
-              </div>
-            </div>
-            {/* Showcase demo: link straight to the uploaded object URL. The
-                in-app /scans route is auth-gated tenant data, so it would
-                dead-end at /login for an anonymous demo visitor. */}
-            <a
-              href={capturedImage.publicUrl ?? capturedImage.scanRouteUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 inline-flex items-center gap-1 bg-primary hover:brightness-110 text-on-primary text-xs font-semibold px-3 py-2 rounded-lg shadow-glow-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
-            >
-              {t('steps.confirmed.viewScan')}
-              <ExternalLink className="w-3 h-3" />
-            </a>
-          </div>
+    <div dir={dir} className="mx-auto max-w-md py-4" data-testid="receipt-confirmed">
+      <div className="mb-4 flex items-center gap-3">
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary text-on-primary">
+          <Check className="h-7 w-7" strokeWidth={3} aria-hidden="true" />
+        </span>
+        <div className="min-w-0">
+          <h1 tabIndex={-1} data-step-heading="" className="text-2xl font-extrabold text-ink outline-none">
+            {t('steps.confirmed.title')}
+          </h1>
+          <p className="text-base text-muted">{t('steps.confirmed.subtitle', { time, supplier: supplierName })}</p>
         </div>
-      ) : null}
-
-      <button
-        type="button"
-        onClick={onReset}
-        className="confirm-content inline-flex min-h-12 items-center gap-2 bg-primary hover:brightness-110 text-on-primary rounded-xl px-5 py-3 font-medium shadow-glow-primary transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-bg focus-visible:ring-primary"
-      >
-        <Plus className="w-4 h-4" strokeWidth={3} />
-        {resetLabel ?? t('steps.confirmed.another')}
-      </button>
-    </div>
-  );
-}
-
-function RowItem({
-  icon,
-  label,
-  value,
-  valueClass = 'text-ink font-semibold',
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  valueClass?: string;
-}) {
-  return (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2 text-sm text-muted">
-        <span className="text-subtle">{icon}</span>
-        <span>{label}</span>
       </div>
-      <span className={`text-sm ${valueClass}`}>{value}</span>
+
+      <div className="mb-4 space-y-3 rounded-2xl border border-line bg-surface p-4 text-start">
+        <p className="text-lg font-semibold text-ink" data-testid="confirmed-summary">
+          {exc > 0
+            ? td('delivery.confirmed.summary', { lines: formatNumber(lines, locale), exceptions: formatNumber(exc, locale) })
+            : td('delivery.confirmed.noExceptions', { lines: formatNumber(lines, locale) })}
+        </p>
+        {invoiceNumber || scanHref ? (
+          <div className="flex items-center justify-between gap-3 text-base">
+            <span className="flex min-w-0 items-center gap-2 text-muted">
+              {invoiceHref ? <Receipt className="h-5 w-5 shrink-0" aria-hidden="true" /> : <FileImage className="h-5 w-5 shrink-0" aria-hidden="true" />}
+              {t('steps.confirmed.invoice')}
+              {invoiceNumber ? <bdi className="font-semibold text-ink">{invoiceNumber}</bdi> : null}
+            </span>
+            {scanHref ? (
+              <a
+                href={scanHref}
+                {...(invoiceHref ? {} : { target: '_blank', rel: 'noopener noreferrer' })}
+                className="inline-flex min-h-12 shrink-0 items-center gap-1.5 rounded-xl border border-line px-3 font-semibold text-primary"
+                data-testid="confirmed-invoice-link"
+              >
+                {invoiceHref ? td('delivery.confirmed.viewInvoice') : t('steps.confirmed.viewScan')}
+                {invoiceHref ? null : <ExternalLink className="h-4 w-4" aria-hidden="true" />}
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+        {receivedBy ? (
+          <p className="text-base text-muted" data-testid="confirmed-received-by">
+            {td('delivery.confirmed.receivedBy', { name: receivedBy })}
+          </p>
+        ) : null}
+        {amount ? <div className="text-base text-muted">{amount}</div> : null}
+      </div>
+
+      {children}
+
+      <ActionBar testId="confirmed-actions">
+        <button type="button" onClick={onReset} className={PRIMARY_56} data-testid="confirmed-next">
+          {resetLabel ? null : <Plus className="h-5 w-5" strokeWidth={3} aria-hidden="true" />}
+          {resetLabel ?? t('steps.confirmed.another')}
+          {resetLabel ? <ArrowLeft className="h-5 w-5 ltr:-scale-x-100" aria-hidden="true" /> : null}
+        </button>
+      </ActionBar>
     </div>
   );
 }
