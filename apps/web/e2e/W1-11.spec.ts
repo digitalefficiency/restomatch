@@ -107,6 +107,21 @@ async function setLocale(page: Page, locale: 'he' | 'en') {
   ]);
 }
 
+/**
+ * W2-06 (orders-01): a catalog line starts with an EMPTY qty — nothing is invented.
+ * These W1-11 flows used to get qty 1 for free; they now type it, as a user would.
+ */
+async function addItem(page: Page, item: Locator, how: 'tap' | 'click' = 'tap') {
+  await (how === 'tap' ? item.tap() : item.click());
+  const qty = page.getByTestId('order-line').getByRole('textbox', { name: /כמות|Quantity/ });
+  await expect(qty.last()).toBeVisible();
+  const n = await qty.count();
+  for (let i = 0; i < n; i++) {
+    const box = qty.nth(i);
+    if ((await box.inputValue()) === '') await box.fill('1');
+  }
+}
+
 /** Counts every tap the test makes — the acceptance is a tap budget. */
 function tapper() {
   let n = 0;
@@ -282,8 +297,8 @@ test.describe('phone 390 · manager · he', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
-    await items.nth(1).tap();
+    await addItem(page, items.nth(0));
+    await addItem(page, items.nth(1));
     await expect(page.getByTestId('order-line')).toHaveCount(2);
 
     // Switch to B: A's 2 lines are kept, the switch can be undone for 10 s.
@@ -298,7 +313,7 @@ test.describe('phone 390 · manager · he', () => {
     await page.getByTestId('change-supplier').tap();
     await page.getByRole('dialog').getByTestId('supplier-row').filter({ hasText: supplierB.name }).tap();
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
+    await addItem(page, items.nth(0));
     await expect(page.getByTestId('order-line')).toHaveCount(1);
     await expect(page).toHaveURL(new RegExp(`supplierId=${supplierB.id}`));
     await page.reload();
@@ -325,7 +340,7 @@ test.describe('phone 390 · manager · he', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
+    await addItem(page, items.nth(0));
     // The day is settled while building (before any server draft exists).
     await expect(page.getByTestId('delivery-chip').first()).toBeVisible();
     await page.getByTestId('cart-primary').tap();
@@ -402,8 +417,8 @@ test.describe('phone 390 · manager · review fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
-    await items.nth(1).tap();
+    await addItem(page, items.nth(0));
+    await addItem(page, items.nth(1));
     await expect(page.getByTestId('order-line')).toHaveCount(2);
 
     await page.goto(`/dashboard/orders/new?from=${reorderPo}`);
@@ -426,7 +441,7 @@ test.describe('phone 390 · manager · review fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
+    await addItem(page, items.nth(0));
     await page.getByTestId('cart-primary').tap(); // review → the server draft
     await expect.poll(async () => (await deviceCarts(page))[supplierB.id]?.draftId ?? null, { timeout: 30_000 }).not.toBeNull();
     const draftId = (await deviceCarts(page))[supplierB.id]!.draftId!;
@@ -458,7 +473,7 @@ test.describe('phone 390 · manager · review fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
+    await addItem(page, items.nth(0));
     const chips = page.getByTestId('delivery-chip');
     await expect(chips.nth(1)).toBeVisible();
     await chips.nth(1).tap();
@@ -479,8 +494,8 @@ test.describe('phone 390 · manager · review fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
-    await items.nth(1).tap();
+    await addItem(page, items.nth(0));
+    await addItem(page, items.nth(1));
     await page.getByTestId('cart-primary').tap(); // review → draft D
     await expect.poll(async () => (await deviceCarts(page))[supplierB.id]?.draftId ?? null, { timeout: 30_000 }).not.toBeNull();
     const d = (await deviceCarts(page))[supplierB.id]!.draftId!;
@@ -494,7 +509,7 @@ test.describe('phone 390 · manager · review fixes', () => {
 
     // Adding a line after the draft exists replaces it at the next review: the old one
     // is cancelled and never shows in the orders list.
-    await items.nth(1).tap(); // re-add the removed product: a new line for the draft
+    await addItem(page, items.nth(1)); // re-add the removed product: a new line for the draft
     await expect(page.getByTestId('order-line')).toHaveCount(2);
     await page.getByTestId('cart-primary').tap();
     await expect.poll(async () => (await deviceCarts(page))[supplierB.id]?.draftId, { timeout: 30_000 }).not.toBe(d);
@@ -515,7 +530,7 @@ test.describe('phone 390 · manager · verifier fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
+    await addItem(page, items.nth(0));
     await expect(page.getByTestId('order-line')).toHaveCount(1);
     const before = await page.getByTestId('order-line').first().innerText();
 
@@ -534,8 +549,8 @@ test.describe('phone 390 · manager · verifier fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
-    await items.nth(1).tap();
+    await addItem(page, items.nth(0));
+    await addItem(page, items.nth(1));
     await page.getByTestId('cart-primary').tap(); // review → draft D
     await expect.poll(async () => (await deviceCarts(page))[supplierB.id]?.draftId ?? null, { timeout: 30_000 }).not.toBeNull();
     const d = (await deviceCarts(page))[supplierB.id]!.draftId!;
@@ -566,8 +581,8 @@ test.describe('phone 390 · manager · verifier fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
-    await items.nth(1).tap();
+    await addItem(page, items.nth(0));
+    await addItem(page, items.nth(1));
     const bar = await page.getByTestId('cart-bar').boundingBox();
     // Walk the tab order through the build step; every focused control clears the bar.
     for (let i = 0; i < 40; i++) {
@@ -601,7 +616,7 @@ test.describe('phone 390 · manager · scope fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
+    await addItem(page, items.nth(0));
     await page.getByTestId('cart-primary').tap(); // review
     await page.locator('#ord-channel').selectOption('none');
     await page.getByTestId('cart-primary').tap(); // send → countdown
@@ -626,7 +641,7 @@ test.describe('phone 390 · manager · scope fixes', () => {
     page.on('dialog', (d) => void d.accept());
     await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
     await expect(page.getByTestId('catalog-item').first()).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId('catalog-item').first().tap();
+    await addItem(page, page.getByTestId('catalog-item').first());
     const price = page.getByTestId('order-line').first().getByRole('textbox', { name: /מחיר ליח׳/ });
     await price.fill('1,250');
     await page.getByTestId('order-line').first().getByRole('textbox', { name: /כמות/ }).fill('1');
@@ -645,7 +660,7 @@ test.describe('desktop 1440 · manager · keyboard', () => {
     page.on('dialog', (d) => void d.accept());
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     await expect(page.getByTestId('catalog-item').first()).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId('catalog-item').first().click();
+    await addItem(page, page.getByTestId('catalog-item').first(), 'click');
     await page.getByTestId('cart-primary').click();
     await page.locator('#ord-channel').selectOption('none');
     await page.getByTestId('cart-primary').focus();
@@ -689,7 +704,7 @@ test.describe('desktop 1440 · manager', () => {
     await setLocale(page, 'en');
     await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
     await expect(page.getByTestId('catalog-item').first()).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId('catalog-item').first().click();
+    await addItem(page, page.getByTestId('catalog-item').first(), 'click');
     await expect(page.getByTestId('delivery-reason').or(page.getByText(MSG.en.wizard.noSchedule))).toBeVisible();
     await page.getByTestId('cart-primary').click();
     await expect(page.getByTestId('cart-primary')).toContainText('Send to');
