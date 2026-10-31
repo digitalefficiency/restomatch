@@ -43,7 +43,8 @@ import {
   supabaseProjectRef,
 } from '@restomatch/db';
 import postgres from 'postgres';
-import { checkDemo, demoNow } from './check-demo';
+import { checkDemo } from './check-demo';
+import { demoNow } from '../src/lib/demoDates';
 import { DEMO_EXTRA_STEPS, scriptIsDemoScoped } from '../src/lib/demoExtras';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { demoNow } from '../../scripts/check-demo';
+import { demoNow } from '../lib/demoDates';
 
 // check:demo / reseed:demo compute the hero AT DEMO_TODAY (12:00 Israel), not the
 // real clock — a lab seeded for 25.10 checked in November read "hero 0.00%".
