@@ -68,46 +68,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const sessionRole = (session.user as { role?: string | null }).role ?? null;
 
   const caller = await createServerCaller();
-  // One parallel stage (perf-states-02): nothing below waits on anything else.
-  const [
-    memberships,
-    t,
-    locale,
-    flags,
-    enabled,
-    receiverLangsOn,
-    recipesFlag,
-    inventoryFlag,
-    askEnabled,
-    wave1Access,
-    chainBranches,
-    platformAdmin,
-    cookieStore,
-  ] = await Promise.all([
+  // Stage 1: the membership check, plus everything that needs no membership.
+  // Member-only procedures (recovery.flags…) throw for a user without one, so
+  // they wait until the /onboarding redirect below has had its chance.
+  const [memberships, t, locale, platformAdmin, cookieStore] = await Promise.all([
     caller.onboarding.myMemberships(),
     getT(nav),
     getLocale(),
-    caller.recovery.flags(),
-    enabledFeatures(session.user.restaurantId),
-    // Receiver languages (S14): the six-language picker replaces עב/EN when on.
-    caller.receiverLangs
-      .status()
-      .then((r) => r.enabled)
-      .catch(() => false),
-    // Wave-1 flag (MASTER-PLAN §1.3): a disabled feature's nav link is invisible.
-    caller.recipes.enabled().catch(() => ({ enabled: false })),
-    caller.inventory.enabled().catch(() => ({ enabled: false })),
-    // AI assistant (S14): owner/manager + flag on → nav item (role re-checked below).
-    sessionRole === 'owner' || sessionRole === 'manager'
-      ? caller.ask
-          .status()
-          .then((r) => r.enabled)
-          .catch(() => false)
-      : Promise.resolve(false),
-    // Wave-1 contracts / price alerts: flag on + finance role, plus the open-alert count; fails silent.
-    getWave1Access(),
-    // Chain (S8): asked only for owners; the chain router re-checks in the DB.
-    sessionRole === 'owner' ? caller.chain.branches().catch(() => null) : Promise.resolve(null),
     isPlatformAdmin(userId).catch(() => false),
     cookies(),
   ]);
@@ -115,6 +82,32 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (memberships.length === 0) {
     redirect('/onboarding');
   }
+
+  // Stage 2: one parallel batch for every member-scoped read (perf-states-02).
+  const [flags, enabled, receiverLangsOn, recipesFlag, inventoryFlag, askEnabled, wave1Access, chainBranches] =
+    await Promise.all([
+      caller.recovery.flags(),
+      enabledFeatures(session.user.restaurantId),
+      // Receiver languages (S14): the six-language picker replaces עב/EN when on.
+      caller.receiverLangs
+        .status()
+        .then((r) => r.enabled)
+        .catch(() => false),
+      // Wave-1 flag (MASTER-PLAN §1.3): a disabled feature's nav link is invisible.
+      caller.recipes.enabled().catch(() => ({ enabled: false })),
+      caller.inventory.enabled().catch(() => ({ enabled: false })),
+      // AI assistant (S14): owner/manager + flag on → nav item (role re-checked below).
+      sessionRole === 'owner' || sessionRole === 'manager'
+        ? caller.ask
+            .status()
+            .then((r) => r.enabled)
+            .catch(() => false)
+        : Promise.resolve(false),
+      // Wave-1 contracts / price alerts: flag on + finance role, plus the open-alert count; fails silent.
+      getWave1Access(),
+      // Chain (S8): asked only for owners; the chain router re-checks in the DB.
+      sessionRole === 'owner' ? caller.chain.branches().catch(() => null) : Promise.resolve(null),
+    ]);
 
   const active =
     memberships.find((m) => m.restaurantId === session.user.restaurantId) ?? memberships[0]!;

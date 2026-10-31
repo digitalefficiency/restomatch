@@ -39,9 +39,10 @@ test('bottom nav stays clickable with the unanswered cookie banner, which sits i
   const banner = page.locator(BANNER);
   await expect(banner).toBeVisible();
   await expect(banner).toHaveAttribute('data-consent', 'inline');
-  const bottomNav = page.locator('nav.fixed').filter({ has: page.locator('a[href="/dashboard/receiving"]') });
-  const receiving = bottomNav.locator('a[href="/dashboard/receiving"]');
-  await expect(receiving).toBeVisible();
+  // Shell v2 (W1-03): the owner's bar is בית · אישורים · דליפות · הזמנות · עוד.
+  const bottomNav = page.getByTestId('bottom-bar');
+  const approvals = bottomNav.locator('a[href="/dashboard/approvals"]');
+  await expect(approvals).toBeVisible();
 
   // Inline at the top: in the document flow, above the page, never over fixed chrome.
   const bannerBox = (await banner.boundingBox())!;
@@ -49,9 +50,9 @@ test('bottom nav stays clickable with the unanswered cookie banner, which sits i
   expect(await banner.evaluate((el) => getComputedStyle(el).position)).toBe('static');
   const navBox = (await bottomNav.boundingBox())!;
   expect(Math.round(navBox.y + navBox.height), 'nav keeps the bottom edge').toBe(844);
-  expect(await onTop(page, receiving), 'bottom-nav link is not covered').toBe(true);
-  await receiving.click();
-  await expect(page).toHaveURL(/\/dashboard\/receiving$/);
+  expect(await onTop(page, approvals), 'bottom-nav link is not covered').toBe(true);
+  await approvals.click();
+  await expect(page).toHaveURL(/\/dashboard\/approvals$/);
 
   // Choosing removes the strip.
   await page.getByRole('button', { name: 'רק חיוניות' }).click();
@@ -100,6 +101,6 @@ test('receiving wizard: the sticky "close receipt" CTA stays clickable with the 
   await expect(cta).toBeVisible();
   await expect(page.locator(BANNER)).toBeVisible();
   expect(await onTop(page, cta), 'close-receipt CTA is not covered by the banner or the nav').toBe(true);
-  const nav = page.locator('nav.fixed').filter({ has: page.locator('a[href="/dashboard/receiving"]') });
-  expect(await onTop(page, nav.locator('a[href="/dashboard/receiving"]')), 'bottom nav still clickable').toBe(true);
+  // Field route (W1-03 focus mode): no bottom bar competes with the CTA.
+  await expect(page.getByTestId('bottom-bar')).toBeHidden();
 });

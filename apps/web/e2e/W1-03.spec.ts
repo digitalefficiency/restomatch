@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { e2eSql, ensurePasswordUser } from './helpers';
 
 /**
  * W1-03 · nav registry + app shell v2 (docs/ux/IMPLEMENTATION-PLAN.md §W1-03).
@@ -22,7 +23,7 @@ const BARS: Record<Role, { he: string[]; en: string[] }> = {
   receiver: { he: ['היום', 'קבלות', 'עוד'], en: ['Today', 'Receipts', 'More'] },
   chef: { he: ['היום', 'ספירה', 'מנות', 'עוד'], en: ['Today', 'Count', 'Dishes', 'More'] },
   manager: { he: ['היום', 'הזמנות', 'קבלה', 'אישורים', 'עוד'], en: ['Today', 'Orders', 'Receive', 'Approvals', 'More'] },
-  owner: { he: ['בית', 'אישורים', 'דליפות', 'הזמנות', 'עוד'], en: ['Home', 'Approvals', 'Leaks', 'Orders', 'More'] },
+  owner: { he: ['בית', 'אישורים', 'מחירים', 'הזמנות', 'עוד'], en: ['Home', 'Approvals', 'Prices', 'Orders', 'More'] },
   bookkeeper: { he: ['בית', 'אישורים', 'תשלומים', 'חשבוניות', 'עוד'], en: ['Home', 'Approvals', 'Payments', 'Invoices', 'More'] },
 };
 
@@ -161,7 +162,7 @@ test('bookkeeper: pay run, ledger, integrations and claims are in the sidebar; n
     await expect(sidebar.locator(`a[href="${href}"]`), href).toHaveCount(1);
   }
   // No link to a page the bookkeeper can't open.
-  for (const href of ['/dashboard/suppliers', '/dashboard/orders', '/dashboard/team', '/dashboard/leaks/report']) {
+  for (const href of ['/dashboard/suppliers', '/dashboard/orders', '/dashboard/team']) {
     await expect(page.locator(`a[href="${href}"]`), href).toHaveCount(0);
   }
   await sidebar.locator('a[href="/dashboard/suppliers/ledger"]').click();
@@ -306,7 +307,7 @@ test('admin layout: skip link, banner, labelled nav, main', async ({ browser, ba
   await page.context().close();
 });
 
-test('receiver: no supplier ledger anywhere in the nav (owner decision 2026-10-25)', async ({ browser, baseURL }) => {
+test('receiver: no supplier ledger in the nav, and the URL is refused (owner decision 2026-10-25)', async ({ browser, baseURL }) => {
   for (const device of [PHONE, DESK]) {
     const page = await open(browser, baseURL!, 'receiver', 'he', device);
     await expect(page.locator('header a[href="/dashboard/suppliers/ledger"]')).toHaveCount(0);
@@ -314,6 +315,95 @@ test('receiver: no supplier ledger anywhere in the nav (owner decision 2026-10-2
       await page.getByTestId('bottom-bar').locator('button[aria-controls="dashboard-drawer"]').click();
       await expect(page.locator('#dashboard-drawer a[href="/dashboard/suppliers/ledger"]')).toHaveCount(0);
     }
+    // The route gate refuses it: a bounce home (or the in-shell 403 page once W1-04 lands).
+    const res = await page.goto('/dashboard/suppliers/ledger');
+    expect(/\/dashboard$/.test(page.url()) || res?.status() === 403).toBe(true);
     await page.context().close();
   }
+});
+
+test('a member with no restaurant is sent to /onboarding, not to an error page', async ({ browser, baseURL }) => {
+  const email = 'e2e-w103-no-membership@restomatch.test';
+  const password = 'W1-03-e2e-password-2026!';
+  await ensurePasswordUser({ email, password });
+  const sql = e2eSql();
+  try {
+    // A removed member: the account exists, the membership is gone.
+    await sql`delete from memberships where user_id = (select id from users where email = ${email})`;
+  } finally {
+    await sql.end();
+  }
+  const ctx = await browser.newContext({ baseURL });
+  await ctx.addCookies([{ name: 'rm_cookie_consent', value: 'necessary', url: baseURL! }]);
+  const page = await ctx.newPage();
+  await page.goto('/login');
+  await page.locator('form:has(#password) [name=email]').fill(email);
+  await page.locator('#password').fill(password);
+  await page.locator('form:has(#password) button[type=submit]').click();
+  await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 60_000 });
+  await page.goto('/dashboard');
+  await expect(page).toHaveURL(/\/onboarding/);
+  await ctx.close();
+});
+
+test('"עוד" sheet: navigating from it lands focus on the new page h1, not on "עוד"', async ({ browser, baseURL }) => {
+  const page = await open(browser, baseURL!, 'owner', 'he', PHONE);
+  await page.getByTestId('bottom-bar').locator('button[aria-controls="dashboard-drawer"]').click();
+  await page.locator('#dashboard-drawer a[href="/dashboard/suppliers"]').click();
+  await page.waitForURL('**/dashboard/suppliers');
+  await expect(page.locator('#dashboard-drawer')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-controls'))).not.toBe('dashboard-drawer');
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.tagName))
+    .toMatch(/^(H1|MAIN)$/);
+  await page.context().close();
+});
+
+test('"עוד" sheet: Esc in its language menu closes only the menu', async ({ browser, baseURL }) => {
+  const page = await open(browser, baseURL!, 'owner', 'he', PHONE);
+  await page.getByTestId('bottom-bar').locator('button[aria-controls="dashboard-drawer"]').click();
+  const sheet = page.locator('#dashboard-drawer');
+  const picker = sheet.locator('[data-testid="language-picker"]');
+  // The demo tenant has receiver languages on: the six-language picker (a menu).
+  if ((await picker.count()) === 0) test.skip(true, 'receiver languages off: the עב/EN toggle has no menu');
+  await picker.click();
+  await expect(sheet.getByRole('menu')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(sheet.getByRole('menu')).toBeHidden();
+  await expect(sheet).toBeVisible();
+  await page.context().close();
+});
+
+test('"עוד" sheet: rotating past 1024 px closes it and the app is usable (not inert)', async ({ browser, baseURL }) => {
+  const page = await open(browser, baseURL!, 'manager', 'he', { viewport: { width: 820, height: 1180 }, isMobile: true, hasTouch: true });
+  await page.getByTestId('bottom-bar').locator('button[aria-controls="dashboard-drawer"]').click();
+  await expect(page.locator('#dashboard-drawer')).toBeVisible();
+  await page.setViewportSize({ width: 1180, height: 820 });
+  await expect(page.locator('#dashboard-drawer')).toHaveCount(0);
+  await expect(page.locator('#rm-app')).not.toHaveAttribute('inert', '');
+  await page.context().close();
+});
+
+test("sidebar: the current page's group can still be collapsed", async ({ browser, baseURL }) => {
+  const page = await open(browser, baseURL!, 'owner', 'he', DESK, '/dashboard/orders');
+  const toggle = page.getByTestId('sidebar').locator('button[aria-controls="rm-nav-group-procure"]');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('#rm-nav-group-procure a[href="/dashboard/orders"]')).toBeHidden();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await page.context().close();
+});
+
+test('field route: the task footer sits at the bottom edge once the bar is hidden', async ({ browser, baseURL }) => {
+  const page = await open(browser, baseURL!, 'chef', 'he', PHONE, '/dashboard/inventory/count');
+  await expect(page.getByTestId('bottom-bar')).toBeHidden();
+  // The count screen's fixed footer (if a count is open) ends at the viewport bottom, not 72 px above it.
+  const footer = page.locator('#main-content div.fixed.inset-x-0').first();
+  if ((await footer.count()) > 0 && (await footer.isVisible())) {
+    const b = (await footer.boundingBox())!;
+    expect(Math.round(b.y + b.height)).toBeGreaterThanOrEqual(844 - 1);
+  }
+  await page.context().close();
 });

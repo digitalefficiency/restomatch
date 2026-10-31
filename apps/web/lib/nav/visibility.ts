@@ -19,12 +19,24 @@ export function canOpen(role: UserRole, def: RouteDef): boolean {
   return canOpenPath(role, def.path);
 }
 
+/** A flag-gated route whose flags are all off 404s, so nothing should link to it. */
+function flagsOn(viewer: Pick<NavViewer, 'features'>, def: RouteDef | undefined): boolean {
+  return !def?.features || def.features.some((f) => viewer.features.includes(f));
+}
+
+/**
+ * Whether a link to `path` leads somewhere for this viewer: the role gate lets
+ * them in and, for a registered page, one of its flags is on.
+ */
+export function canFollowPath(viewer: Pick<NavViewer, 'role' | 'features'>, path: string): boolean {
+  return canOpenPath(viewer.role, path) && flagsOn(viewer, matchRoute(path));
+}
+
 /** Visible in nav (sidebar / bar / sheet / search "מסכים") for this viewer. */
 export function isNavVisible(viewer: NavViewer, def: RouteDef): boolean {
   if (def.nav !== 'item') return false;
   if (!canOpen(viewer.role, def)) return false;
-  if (def.navHiddenFor?.includes(viewer.role)) return false;
-  if (def.features && !def.features.some((f) => viewer.features.includes(f))) return false;
+  if (!flagsOn(viewer, def)) return false;
   if (def.chain === 'only' && !viewer.showChain) return false;
   if (def.chain === 'single' && viewer.showChain) return false;
   return true;
@@ -109,9 +121,10 @@ export interface Crumb {
 /**
  * Breadcrumb trail for a pathname, root-most first, current page last. A
  * dynamic ancestor (`/suppliers/[id]`) takes its concrete path from the current
- * URL. Crumbs the viewer can't open carry no href (rendered as plain text).
+ * URL. Crumbs the viewer can't open — role gate, or a page whose flags are
+ * off — carry no href (rendered as plain text).
  */
-export function crumbsFor(pathname: string, role: UserRole): Crumb[] {
+export function crumbsFor(pathname: string, viewer: Pick<NavViewer, 'role' | 'features'>): Crumb[] {
   const def = matchRoute(pathname);
   if (!def) return [];
   const segs = pathname.split(/[?#]/)[0]!.replace(/\/+$/, '').split('/');
@@ -125,7 +138,8 @@ export function crumbsFor(pathname: string, role: UserRole): Crumb[] {
       : d.path.includes('[')
         ? undefined
         : d.path;
-    return { key: d.key, href: concrete && !d.gateOnly && canOpenPath(role, concrete) ? concrete : undefined };
+    const followable = concrete && !d.gateOnly && canOpenPath(viewer.role, concrete) && flagsOn(viewer, d);
+    return { key: d.key, href: followable ? concrete : undefined };
   });
 }
 

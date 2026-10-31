@@ -56,7 +56,7 @@ export function PageHeader({
   const heading = title ?? (def ? t(`links.${def.key}`) : null);
 
   // Up-link: the nearest ancestor crumb the viewer can open (path-aware for dynamic parents).
-  const crumbs = viewer && pathname ? crumbsFor(pathname, viewer.role) : [];
+  const crumbs = viewer && pathname ? crumbsFor(pathname, viewer) : [];
   const up = crumbs.length > 1 ? crumbs[crumbs.length - 2] : undefined;
 
   const contextParts = [viewer?.branch ?? null, context ?? null].filter((x) => x !== null && x !== '');
