@@ -3,6 +3,21 @@ import type { he } from './he';
 
 export const en: Shape<typeof he> = {
   inbox: {
+    preview: 'View document',
+    previewClose: 'Close the preview',
+    previewUnavailable: 'No preview for this file.',
+    previewFailed: "We couldn't load the document. Try again.",
+    selectDoc: 'Select {name}',
+    bulkRead: 'Read {count}',
+    bulkDone: '{count} documents sent to reading',
+    selected: '{count} selected',
+    clearSelection: 'Clear selection',
+    ocrReading: 'Reading…',
+    ocrRead: 'Read: {supplier} · {amount} · {lines} lines',
+    ocrReadNoSupplier: 'Read: {amount} · {lines} lines',
+    ocrFailed: 'Reading failed: {reason}',
+    settingsLink: 'Intake addresses and approved senders',
+    tabsLabel: 'Inbox filter',
     title: 'Invoice inbox',
     subtitle: 'Invoices your suppliers send by WhatsApp or e-mail land here and go to automatic reading.',
     filters: { all: 'All', needs_review: 'Needs review', errors: 'Errors' },
@@ -53,6 +68,12 @@ export const en: Shape<typeof he> = {
     unknown: 'Unknown error',
   },
   channels: {
+    revokeConfirmTitle: 'Revoke the {channel} address?',
+    revokeConfirmBody: "Suppliers who send to this address won't reach you until you create a new one.",
+    revokeConfirm: 'Revoke the address',
+    revokeFailed: 'Revoking failed. The address is still active.',
+    copyFailed: 'Copy it manually — the address is selected',
+    cancel: 'Keep it',
     title: 'Receiving addresses',
     subtitle: 'Each restaurant has its own secret address. Nobody who does not know it can send to it.',
     whatsappTitle: 'WhatsApp',
@@ -73,6 +94,11 @@ export const en: Shape<typeof he> = {
     disabled: '{kind} receiving is not enabled for this restaurant.',
   },
   senders: {
+    removeConfirmTitle: 'Remove {sender} from approved senders?',
+    removeConfirmBody: 'Invoices from them will wait for your review.',
+    removeConfirm: 'Remove',
+    removeFailed: 'Removing failed. The sender is still on the list.',
+    kindLabel: 'Channel',
     title: 'Approved senders',
     subtitle: 'Invoices from listed senders go to reading right away. Everything else waits for your review.',
     empty: 'No approved senders yet.',
@@ -133,5 +159,10 @@ export const en: Shape<typeof he> = {
     inboxOrder: 'Forwarded order',
     inboxOpenDraft: 'Open the draft order',
     inboxNeedsSupplier: 'Pick a supplier to create the order',
+  },
+  intakeSettings: {
+    title: 'Intake addresses and approved senders',
+    subtitle: 'Where invoices come in from, and who goes straight to reading.',
+    back: 'Back to the inbox',
   },
 };

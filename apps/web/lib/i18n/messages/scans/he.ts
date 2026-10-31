@@ -8,5 +8,5 @@ export const he = {
   pages: '{count} עמודים',
   localCopy: 'עותק מקומי (פיתוח)',
   notLoading: 'לא נטען? יכול להיות חוסם פופאפים או דפדפן ללא תוסף PDF.',
-  openInTab: 'פתח בטאב נפרד',
+  openInTab: 'פתחו בטאב נפרד',
 };

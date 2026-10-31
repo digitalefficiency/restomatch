@@ -6,6 +6,8 @@ import {
   discrepancies,
   ensureRlsAppRole,
   eq,
+  invoiceLines,
+  poLines,
   testDbUrl,
   type Database,
 } from '@restomatch/db';
@@ -34,6 +36,8 @@ beforeAll(async () => {
     .update(discrepancies)
     .set({ invoiceLineId: A.invoiceLineId, expectedValue: '8.5', actualValue: '10', toleranceUsed: '±0%' })
     .where(eq(discrepancies.id, A.discrepancyId));
+  await ownerDb.update(invoiceLines).set({ productId: A.productId }).where(eq(invoiceLines.id, A.invoiceLineId));
+  await ownerDb.update(poLines).set({ productId: A.productId }).where(eq(poLines.id, A.poLineId));
 });
 afterAll(async () => {
   await resetDb(ownerDb);
@@ -63,6 +67,11 @@ describe('invoices.detail', () => {
     expect(f.expectedSource).toBe('po_price');
     expect(f.expected).toBe(8.5);
     expect(f.toleranceUsed).toBe('±0%');
+    // Three-way: the fixture PO ordered 10 @ ₪8.50; the receipt counted 5.
+    expect(line.qtyOrdered).toBe(10);
+    expect(line.qtyReceived).toBe(5);
+    expect(line.expectedPrice).toBe(8.5);
+    expect(line.expectedPriceSource).toBe('po_price');
     expect(d.openCount).toBe(1);
     expect(d.openGapAgorot).toBe(10000);
     expect(d.totalInclVatAgorot).toBe(11700);
@@ -73,6 +82,8 @@ describe('invoices.detail', () => {
     expect(d.totalInclVatAgorot).toBeNull();
     expect(d.gapAgorot).toBeNull();
     expect(d.lines[0]!.unitPriceBilled).toBeNull();
+    expect(d.lines[0]!.expectedPrice).toBeNull();
+    expect(d.lines[0]!.qtyReceived).toBe(5); // quantities are not ₪
     expect(d.lines[0]!.lineTotalAgorot).toBeNull();
     expect(d.lines[0]!.findings[0]!.deltaAgorot).toBeNull();
     expect(moneyLeaves(d)).toEqual([]);

@@ -94,6 +94,7 @@ export const en: Shape<typeof he> = {
     paid: 'Paid',
   },
   cockpit: {
+    backToInvoice: 'Back to the invoice',
     back: 'Back',
     from: {
       approvals: 'Approvals',

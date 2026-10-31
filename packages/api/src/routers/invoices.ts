@@ -7,6 +7,8 @@ import {
   discrepancies,
   eq,
   goodsReceipts,
+  grLines,
+  poLines,
   ingestDocuments,
   inArray,
   invoiceLines,
@@ -245,6 +247,7 @@ export const invoicesRouter = router({
         grId: matchRuns.grId,
         poCustomerRef: purchaseOrders.customerRef,
         poVat: purchaseOrders.vatRate,
+        poDate: sql<Date | null>`COALESCE(${purchaseOrders.expectedDeliveryAt}, ${purchaseOrders.createdAt})`,
         grReceivedAt: goodsReceipts.receivedAt,
       })
       .from(matchRuns)
@@ -289,6 +292,31 @@ export const invoicesRouter = router({
           .where(and(eq(discrepancies.matchRunId, run.id), eq(discrepancies.restaurantId, rid)))
           .orderBy(asc(discrepancies.createdAt))
       : [];
+
+    // The three-way columns: ordered (PO line) and received (receipt line) per product.
+    const ordered = run?.poId
+      ? await ctx.db
+          .select({ productId: poLines.productId, qty: poLines.qtyOrdered, price: poLines.unitPriceExpected })
+          .from(poLines)
+          .innerJoin(purchaseOrders, and(eq(purchaseOrders.id, poLines.poId), eq(purchaseOrders.restaurantId, rid)))
+          .where(eq(poLines.poId, run.poId))
+      : [];
+    const received = run?.grId
+      ? await ctx.db
+          .select({
+            productId: sql<string | null>`COALESCE(${grLines.productId}, ${poLines.productId})`,
+            qty: grLines.qtyReceived,
+            rejected: grLines.qtyRejected,
+          })
+          .from(grLines)
+          .innerJoin(goodsReceipts, and(eq(goodsReceipts.id, grLines.grId), eq(goodsReceipts.restaurantId, rid)))
+          .leftJoin(poLines, eq(poLines.id, grLines.poLineId))
+          .where(eq(grLines.grId, run.grId))
+      : [];
+    const sumBy = <T extends { productId: string | null }>(rows: T[], f: (r: T) => number, pid: string | null) =>
+      pid == null || !rows.some((r) => r.productId === pid)
+        ? null
+        : rows.filter((r) => r.productId === pid).reduce((a, r) => a + f(r), 0);
 
     const money = canViewPrices(ctx.session.role);
     const num = (v: string | null) => (v == null ? null : Number(v));
@@ -367,6 +395,11 @@ export const invoicesRouter = router({
         unitPriceBilled: priceOrNull(l.unitPriceBilled),
         lineTotalAgorot: money ? agorot(l.lineTotal) : null,
         ocrConfidenceLine: num(l.ocrConfidenceLine),
+        qtyOrdered: sumBy(ordered, (r) => Number(r.qty), l.productId),
+        qtyReceived: sumBy(received, (r) => Number(r.qty) - Number(r.rejected ?? 0), l.productId),
+        expectedPrice: money ? num(ordered.find((r) => r.productId === l.productId && l.productId != null)?.price ?? null) : null,
+        expectedPriceSource: ordered.some((r) => r.productId === l.productId && l.productId != null) ? ('po_price' as const) : null,
+        expectedPriceAt: run?.poDate ?? null,
         findings: findings.filter((f) => lineOf(f) === l.id).map(findingOut),
       })),
       /** Findings that sit on no invoice line (missing on invoice, totals, duplicate). */

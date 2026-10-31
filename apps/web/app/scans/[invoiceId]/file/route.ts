@@ -19,7 +19,8 @@ export async function GET(
   const restaurantId = session?.user?.restaurantId ?? null;
   // A 2FA-pending session holds only the first factor — never serve tenant files
   // to it (middleware also redirects it; this route must not depend on that).
-  if (!session?.user?.id || session.user.twoFactorPending || !restaurantId) {
+  // Role rule = invoices: the chef never opens a supplier document (approvals-51).
+  if (!session?.user?.id || session.user.twoFactorPending || !restaurantId || session.user.role === 'chef') {
     return new Response('Not found', { status: 404 });
   }
 

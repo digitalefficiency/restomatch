@@ -14,7 +14,8 @@
  *      imported so they never ship in the production bundle.
  */
 
-import { ExternalLink, Lock } from 'lucide-react';
+import Link from 'next/link';
+import { ArrowLeft, ArrowRight, ExternalLink, Lock } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { auth } from '@/auth';
 import { InvoicePaper } from '@/app/showcase/dashboard/_components/InvoicePaperShared';
@@ -24,6 +25,7 @@ import { getLocale, getT } from '@/lib/i18n/server';
 import { dirOf } from '@/lib/i18n/config';
 import { formatNumber } from '@/lib/i18n/format';
 import { scans } from '@/lib/i18n/messages/scans';
+import { invoices } from '@/lib/i18n/messages/invoices';
 import type { Translator } from '@/lib/i18n/translate';
 
 interface PageProps {
@@ -41,6 +43,9 @@ function scanMocksEnabled(): boolean {
 export default async function ScanPage({ params }: PageProps) {
   const { invoiceId } = await params;
   const session = await auth();
+  // Role rule = invoices (approvals-51, ia-nav-23): owner, manager, receiver, bookkeeper.
+  // The chef never opens a supplier document.
+  if (session?.user?.role === 'chef') notFound();
 
   // 1. Real uploaded scan — requires auth + tenant ownership, served signed.
   //    Accepts a scan id OR an invoice UUID (the correction page links those).
@@ -54,8 +59,8 @@ export default async function ScanPage({ params }: PageProps) {
       }
     });
     if (uploaded) {
-      const [locale, t] = await Promise.all([getLocale(), getT(scans)]);
-      return <UploadedScanCanvas {...uploaded} t={t} locale={locale} />;
+      const [locale, t, ti] = await Promise.all([getLocale(), getT(scans), getT(invoices)]);
+      return <UploadedScanCanvas {...uploaded} invoiceId={invoiceId} backLabel={ti('cockpit.backToInvoice')} t={t} locale={locale} />;
     }
   }
 
@@ -92,16 +97,13 @@ async function loadDemoScan(invoiceId: string): Promise<ScanData | null> {
   return null;
 }
 
-/** Light stage: a soft surface with a faint money-green dot grid + top aura,
- *  on which the scanned paper floats. */
-const STAGE_BG =
-  'radial-gradient(circle at 1px 1px, rgba(6,107,74,0.08) 1px, transparent 0) 0 0 / 24px 24px, radial-gradient(120% 60% at 50% 0%, rgba(6,107,74,0.05) 0%, transparent 60%), #EEF3F0';
+/** The stage: a token surface (no hex — W1-01 tokens only). */
+const STAGE = 'bg-surface-2';
 
 function MockScanCanvas({ scanData }: { scanData: ScanData }) {
   return (
     <div
-      className="flex min-h-screen w-full items-center justify-center p-8"
-      style={{ background: STAGE_BG }}
+      className={`flex min-h-screen w-full items-center justify-center p-8 ${STAGE}`}
     >
       <InvoicePaper data={scanData} />
     </div>
@@ -114,9 +116,13 @@ function UploadedScanCanvas({
   pageCount,
   supplierName,
   source,
+  invoiceId,
+  backLabel,
   t,
   locale,
 }: {
+  invoiceId: string;
+  backLabel: string;
   signedUrl: string;
   mimeType: string;
   pageCount: number | null;
@@ -127,25 +133,33 @@ function UploadedScanCanvas({
 }) {
   const publicUrl = signedUrl;
   const isPdf = mimeType === 'application/pdf';
+  const Back = locale === 'he' ? ArrowRight : ArrowLeft;
   return (
     <div
-      className="flex min-h-screen w-full flex-col items-center justify-start p-4 sm:p-8"
+      className={`flex min-h-screen w-full flex-col items-center justify-start p-4 sm:p-8 ${STAGE}`}
       dir={dirOf(locale)}
-      style={{ background: STAGE_BG }}
     >
+      <nav aria-label={backLabel} className="mb-3 w-full max-w-3xl">
+        <Link
+          href={`/dashboard/invoices/${invoiceId}`}
+          data-testid="scan-back"
+          className="inline-flex min-h-11 items-center gap-1 text-sm font-semibold text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-info"
+        >
+          <Back className="h-4 w-4" aria-hidden="true" />
+          {backLabel}
+        </Link>
+      </nav>
+      <h1 className="sr-only">{t('scannedInvoice')}</h1>
       {/* Secure-link badge — kept prominent: a signed, tenant-scoped document. */}
       <div className="mb-3 flex w-full max-w-3xl items-center gap-2 rounded-full border border-line bg-surface/80 px-4 py-2 shadow-card backdrop-blur">
-        <span className="relative flex h-2 w-2 shrink-0">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/60" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-        </span>
-        <span className="truncate font-mono text-xs text-muted">
+        <span className="relative inline-flex h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
+        <span className="truncate text-xs text-muted">
           {t('scannedInvoice')}
           {supplierName ? ` · ${supplierName}` : ''}
           {source === 'local' ? ` · ${t('localCopy')}` : ''}
         </span>
-        <span className="me-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/12 px-2 py-0.5 text-[10px] font-semibold text-primary ring-1 ring-primary/25">
-          <Lock className="h-2.5 w-2.5" aria-hidden="true" />
+        <span className="me-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-primary-subtle px-2 py-0.5 text-xs font-semibold text-primary">
+          <Lock className="h-3 w-3" aria-hidden="true" />
           {t('secureLink')}
           {pageCount ? ` · ${t('pages', { count: formatNumber(pageCount, locale) })}` : ''}
         </span>
@@ -156,16 +170,15 @@ function UploadedScanCanvas({
           <iframe
             src={`${publicUrl}#toolbar=1&navpanes=0&view=FitH`}
             title={t('scannedInvoice')}
-            className="w-full border-0 bg-stone-100"
-            style={{ height: '80vh' }}
+            sandbox="allow-same-origin"
+            className="h-[80vh] w-full border-0 bg-surface-2"
           />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element -- signed / blob URL of a private scan: next/image cannot optimize it
           <img
             src={publicUrl}
             alt={t('scannedInvoice')}
-            className="h-auto w-full bg-stone-100"
-            style={{ maxHeight: '90vh', objectFit: 'contain' }}
+            className="h-auto max-h-[90vh] w-full bg-surface-2 object-contain"
           />
         )}
         <div className="flex items-center justify-between gap-3 border-t border-line bg-surface-2 px-4 py-3 text-xs">
