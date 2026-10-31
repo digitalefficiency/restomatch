@@ -81,10 +81,14 @@ for (const [lang, viewport] of [
       await expect(flagged).toHaveCount(1);
       await expect(flagged).toContainText('36');
       await expect(page.getByTestId('xmatch-note-finding')).toContainText(lang === 'he' ? 'חויב' : 'billed');
-      // W2-02: the one action is the supplier's credit-claim letter (W2-10), not a third print template.
-      await expect(page.getByTestId('xmatch-to-claim')).toHaveAttribute('href', /\/dashboard\/leaks\/claims/);
-      await expect(page.getByTestId('xmatch-to-claim')).toHaveText(lang === 'he' ? 'לדרישת הזיכוי' : 'To the credit claim');
-      await expect(page.getByTestId('xmatch-letter')).toHaveCount(0);
+      // Printed, the panel is a letter to the supplier: who, which invoice, the ask.
+      // TODO(H-03): this becomes W2-10's claim letter once the claims page carries ריכוז findings.
+      await page.emulateMedia({ media: 'print' });
+      const letter = page.getByTestId('xmatch-letter');
+      await expect(letter).toBeVisible();
+      await expect(letter).toContainText('61036');
+      await expect(letter).toContainText(lang === 'he' ? 'נא לזכות' : 'Please credit');
+      await page.emulateMedia({ media: 'screen' });
     }
     expect(await page.getByTestId('xmatch-products').locator('tbody tr').count()).toBeGreaterThan(0);
     // Units go through the shared translator: English reads "(litre)", never "(ליטר)".

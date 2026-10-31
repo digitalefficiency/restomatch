@@ -11,7 +11,7 @@ import type { Translator } from '@/lib/i18n/translate';
 import type { he as consolidatedHe } from '@/lib/i18n/messages/consolidated/he';
 import { formatIls } from '@/lib/money';
 import { translateUnit } from '@restomatch/translate/units';
-import Link from 'next/link';
+import { PrintButton } from '../../leaks/claims/print-button';
 import { Delta } from '@/lib/components/money';
 import { CellStateView } from '@/lib/components/table';
 
@@ -43,16 +43,14 @@ export function ConsolidatedPanel({
   proposal,
   t,
   locale,
-  supplierId = null,
+  supplierName,
+  invoiceNumber,
 }: {
   proposal: ConsolidatedProposal;
   t: T;
   locale: Locale;
-  /** Kept for callers; the letter (W2-10) prints them. */
-  supplierName?: string | null;
-  invoiceNumber?: string | null;
-  /** The supplier's credit-claim letter (W2-10) is this panel's one action. */
-  supplierId?: string | null;
+  supplierName: string | null;
+  invoiceNumber: string | null;
 }) {
   // Agorot: a cross-match is about small differences (₪0.86 must not read as ₪1).
   const ils = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
@@ -99,15 +97,44 @@ export function ConsolidatedPanel({
     return t('finding.other', { name, delta: ils(f.deltaAmount) });
   };
   const findingsOf = (number: string | null) => (number ? leaking.filter((f) => f.deliveryNoteNumber === number) : []);
-  // The supplier letter (with the ask, capped and split by VAT basis) is W2-10's —
-  // this panel links to it instead of printing a third template.
+  // The ask is the API's claim, capped exactly like the claims letters and split by
+  // each line's VAT basis (lib/claims.ts): "+ מע״מ" only on amounts before VAT.
+  const exclAsk = proposal.claim.exclIls;
+  const inclAsk = proposal.claim.inclIls;
+  const letterAsk =
+    exclAsk > 0 && inclAsk > 0
+      ? t('letter.askBoth', { excl: ils(exclAsk), incl: ils(inclAsk) })
+      : inclAsk > 0
+        ? t('letter.askIncl', { amount: ils(inclAsk) })
+        : t('letter.ask', { amount: ils(exclAsk) });
 
   return (
     <section
       className="mt-10 min-w-0 max-w-full print:mt-0"
       aria-label={t('title')}
       data-testid="consolidated-panel"
+      data-print-root="xmatch"
     >
+      {proposal.status === 'differences' ? (
+        // Print only: the letter for the supplier. TODO(H-03): move to W2-10's claim
+        // letter once consolidated_invoice_links lets the claims page carry ריכוז findings.
+        <div className="mb-6 hidden space-y-1 text-sm text-ink print:block" data-testid="xmatch-letter">
+          <p className="font-semibold">{t('letter.to', { supplier: supplierName ?? '—' })}</p>
+          <p>{t('letter.subject', { number: invoiceNumber ?? '—', period })}</p>
+          <p className="pt-2">{t('letter.intro')}</p>
+          <ul className="list-disc ps-5">
+            {leaking.map((f, i) => (
+              <li key={i}>
+                {f.deliveryNoteNumber ? `${t('finding.note', { number: f.deliveryNoteNumber })} · ` : ''}
+                {findingText(f)}
+                {f.basis !== 'excl' ? ` ${t('letter.inclVat')}` : ''}
+              </li>
+            ))}
+          </ul>
+          <p className="pt-2 font-semibold">{letterAsk}</p>
+        </div>
+      ) : null}
+
       <SectionHeader title={t('title')} subtitle={t('subtitle', { period })} />
 
       {/* T4: a proposal, not counted yet — calm and neutral. */}
@@ -134,13 +161,8 @@ export function ConsolidatedPanel({
             </p>
           </div>
           <div className="print:hidden">
-            <Link
-              href={supplierId ? `/dashboard/leaks/claims?sup=${supplierId}` : '/dashboard/leaks/claims'}
-              data-testid="xmatch-to-claim"
-              className="inline-flex min-h-11 items-center rounded-lg bg-primary px-4 text-sm font-semibold text-on-primary hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-info"
-            >
-              {t('toClaim')}
-            </Link>
+            {/* TODO(H-03): link to the supplier's claim letter (W2-10) instead, once the claims page includes ריכוז findings. */}
+            <PrintButton label={t('print')} primary scope="xmatch" />
           </div>
         </Card>
       ) : proposal.status === 'matched' ? (
