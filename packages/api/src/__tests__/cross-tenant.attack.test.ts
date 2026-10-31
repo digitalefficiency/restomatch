@@ -40,6 +40,7 @@ import {
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { syncClaims } from '../recovery/service';
 
 /**
  * CROSS-TENANT ATTACK SUITE
@@ -2040,6 +2041,9 @@ describe('recovery + monthly report (A → B)', () => {
     for (const t of [A, B]) {
       await db.update(restaurants).set({ settings: { features: { all: true } } as never }).where(eq(restaurants.id, t.restaurantId));
       await db.update(discrepancies).set({ resolutionStatus: 'accepted' }).where(eq(discrepancies.id, t.discrepancyId));
+      // W2-10a: a read no longer creates claims (they are made at decision
+      // time). Materialise the accepted claim here, as the decision would.
+      await syncClaims(db, t.restaurantId);
     }
     aClaimId = (await callerFor(A).recovery.list())[0]!.id;
     bClaimId = (await callerFor(B).recovery.list())[0]!.id;
