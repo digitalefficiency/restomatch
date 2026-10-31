@@ -15,12 +15,12 @@ const SCAN_FILE = /^scan-[a-z0-9]+-[a-f0-9]+(?:\.[a-z0-9]{1,5})?$/;
 const SIGNED_OBJECT = new RegExp(`/storage/v1/object/(?:sign|public|authenticated)/${INVOICE_SCANS_BUCKET}/([^?#]+)`);
 
 /**
- * G-09 §5.2 switch: store the bare PATH in new rows. Off until the scan viewer
- * (`resolveScan`, apps/web/lib/supabase/server.ts) can sign a bare path — with
- * it off, new rows hold the stable UNSIGNED object URL, which the viewer
- * already re-signs and which never expires. Either form maps to the same ref.
+ * G-09 §5.2: new rows store the bare tenant PATH (never a URL that expires).
+ * The scan viewer (`resolveScan`) signs a bare path since this PR. In local dev
+ * (no bucket) rows keep the dev route URL, which is what the dev viewer serves.
+ * Every form maps to the same ref through `toObjectRef`.
  */
-export const STORE_OBJECT_PATH = false;
+export const STORE_OBJECT_PATH = true;
 
 /** The validated ref for a path under the tenant prefix, else null (foreign, traversal, junk). */
 export function tenantPath(restaurantId: string, path: string): string | null {
@@ -80,11 +80,10 @@ export async function signObjectRef(restaurantId: string, ref: string): Promise<
 
 /** What a NEW row keeps in `invoices.raw_image_url` for this ref (see STORE_OBJECT_PATH). */
 export function storedImageValue(restaurantId: string, ref: string): string {
+  if (localScanStorageEnabled()) return localScanUrl(scanIdOf(ref));
   if (STORE_OBJECT_PATH) return ref;
   const prefix = allowedScanUrlPrefix();
-  if (prefix) return `${prefix}${ref}`;
-  if (localScanStorageEnabled()) return localScanUrl(scanIdOf(ref));
-  return ref;
+  return prefix ? `${prefix}${ref}` : ref;
 }
 
 /**

@@ -3,7 +3,8 @@ import { enqueueIngestJobs, type OcrJobToEnqueue } from '../ingest/pipeline';
 import { invoicePageRows, isPageMime, recomposeInvoice, type PageRow } from '../ingest/grouping';
 import { MAX_DOCUMENT_PAGES } from './compose';
 import { DocumentError, documentNotFound } from './errors';
-import { createIntakeInvoice, invoiceClosedReason, reocrEdgeEnabled, reopenForOcr, retireInvoice } from './intake';
+import { createIntakeInvoice, invoiceClosedReason } from './intake';
+import { reocrEdgeEnabled, reopenForOcr, retireInvoice } from './reocr';
 import { storedImageValue } from './objectRef';
 import type { AttachAsPageInput, AttachAsPageResult, SplitDocumentInput, SplitDocumentResult } from './types';
 

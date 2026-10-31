@@ -7,7 +7,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PDFDocument } from 'pdf-lib';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyAuditImmutableRls,
   applyAuthCredentialTables,
@@ -32,8 +32,8 @@ import { StubIngestProvider, type InboundMessage } from '@restomatch/ingest';
 import { composeDocument, composedPathFor } from '../documents/compose';
 import { DocumentError } from '../documents/errors';
 import { attachAsPage, splitDocument } from '../documents/attach';
-import { __setReocrEdgeForTests } from '../documents/intake';
-import { toObjectRef } from '../documents/objectRef';
+import { __setReocrEdgeForTests } from '../documents/reocr';
+import { storedImageValue, toObjectRef } from '../documents/objectRef';
 import { localDocumentStorage, type DocumentStorage } from '../documents/storage';
 import { processInboundMessage, type OcrJobToEnqueue, type ResolvedChannel } from '../ingest/pipeline';
 import { deterministicScanId } from '../routers/scans';
@@ -153,6 +153,17 @@ describe('toObjectRef', () => {
 
   it('the local dev URL → the extension-less ref of the same object', () => {
     expect(toObjectRef('http://localhost:3000/scans/scan-abc123-0123abcd/file', R)).toBe(`${R}/scan-abc123-0123abcd`);
+  });
+
+  it('with a bucket configured a new row stores the bare path (no token), which maps back to itself', () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://proj.supabase.co');
+    vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'k');
+    try {
+      expect(storedImageValue(R, path)).toBe(path);
+      expect(toObjectRef(storedImageValue(R, path), R)).toBe(path);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('another tenant, traversal, other buckets and junk → null', () => {

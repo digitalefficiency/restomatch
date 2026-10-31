@@ -31,7 +31,8 @@ import { ORDER_TEXT_MAX_CHARS, orderTextParserFromEnv } from '@restomatch/ocr';
 import { captureOrderDraft } from '../orders/captureOrder';
 import { featureEnabled } from '../lib/features';
 import { MAX_DOCUMENT_PAGES } from '../documents/compose';
-import { createIntakeInvoice, invoiceClosedReason, reopenForOcr, reocrEdgeEnabled, upsertInvoiceScan } from '../documents/intake';
+import { createIntakeInvoice, invoiceClosedReason, upsertInvoiceScan } from '../documents/intake';
+import { reopenForOcr, reocrEdgeEnabled } from '../documents/reocr';
 import { objectRefMatchValues, signObjectRef, storedImageValue, tenantPath } from '../documents/objectRef';
 import {
   findOpenCandidate,

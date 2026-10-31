@@ -29,7 +29,7 @@ import {
 } from '@restomatch/db';
 import { StubIngestProvider, type InboundMessage } from '@restomatch/ingest';
 import { processInboundMessage, registerReviewGroup, type ResolvedChannel } from '../ingest/pipeline';
-import { __setReocrEdgeForTests } from '../documents/intake';
+import { __setReocrEdgeForTests } from '../documents/reocr';
 import { toObjectRef } from '../documents/objectRef';
 import { localDocumentStorage } from '../documents/storage';
 import { resetDb, seedTenant, type Tenant } from './fixtures';

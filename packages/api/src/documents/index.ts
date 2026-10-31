@@ -5,5 +5,6 @@ export { composeDocument, MAX_DOCUMENT_PAGES } from './compose';
 export { toObjectRef, signObjectRef } from './objectRef';
 export { attachAsPage, splitDocument } from './attach';
 export { composedPathFor } from './compose';
-export { createIntakeInvoice, REOCR_EDGE_ENABLED, reocrEdgeEnabled } from './intake';
+export { createIntakeInvoice } from './intake';
+export { REOCR_EDGE_ENABLED, reocrEdgeEnabled } from './reocr';
 export { STORE_OBJECT_PATH } from './objectRef';
