@@ -23,7 +23,7 @@ const BARS: Record<Role, { he: string[]; en: string[] }> = {
   receiver: { he: ['היום', 'קבלות', 'עוד'], en: ['Today', 'Receipts', 'More'] },
   chef: { he: ['היום', 'ספירה', 'מנות', 'עוד'], en: ['Today', 'Count', 'Dishes', 'More'] },
   manager: { he: ['היום', 'הזמנות', 'קבלה', 'אישורים', 'עוד'], en: ['Today', 'Orders', 'Receive', 'Approvals', 'More'] },
-  owner: { he: ['בית', 'אישורים', 'מחירים', 'הזמנות', 'עוד'], en: ['Home', 'Approvals', 'Prices', 'Orders', 'More'] },
+  owner: { he: ['בית', 'אישורים', 'דליפה', 'הזמנות', 'עוד'], en: ['Home', 'Approvals', 'Leak', 'Orders', 'More'] },
   bookkeeper: { he: ['בית', 'אישורים', 'תשלומים', 'חשבוניות', 'עוד'], en: ['Home', 'Approvals', 'Payments', 'Invoices', 'More'] },
 };
 
@@ -405,5 +405,52 @@ test('field route: the task footer sits at the bottom edge once the bar is hidde
     const b = (await footer.boundingBox())!;
     expect(Math.round(b.y + b.height)).toBeGreaterThanOrEqual(844 - 1);
   }
+  await page.context().close();
+});
+
+test('owner: the "דליפה" bar slot opens the leak hub, and nav label = tab title = h1', async ({ browser, baseURL }) => {
+  const page = await open(browser, baseURL!, 'owner', 'he', PHONE);
+  await page.getByTestId('bottom-bar').getByRole('link', { name: 'דליפה' }).click();
+  await page.waitForURL(/\/dashboard\/leaks$/);
+  await expect(page.locator('main h1')).toHaveText('דליפה');
+  await expect(page).toHaveTitle(/^דליפה( · .+)? — RestoMatch$/);
+  // Price creep keeps its own address and name on the same page.
+  await expect(page.locator('#prices')).toHaveCount(1);
+  await page.context().close();
+});
+
+test('chef: the "ספירה" bar slot opens the count hub with no ₪ (owner decision)', async ({ browser, baseURL }) => {
+  const page = await open(browser, baseURL!, 'chef', 'he', PHONE);
+  const periods: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('inventory.period')) periods.push(r.url());
+  });
+  await page.getByTestId('bottom-bar').getByRole('link', { name: 'ספירה' }).click();
+  await page.waitForURL(/\/dashboard\/inventory$/);
+  await expect(page.locator('main h1')).toBeVisible();
+  await settle(page);
+  await expect(page.getByTestId('food-cost-period')).toHaveCount(0);
+  expect(await page.locator('main').innerText()).not.toContain('₪');
+  expect(periods, 'no ₪ query leaves the chef’s browser').toEqual([]);
+  await page.context().close();
+});
+
+test('receiver: searches screens only, and an invoice page is refused (owner decision: no ₪)', async ({ browser, baseURL }) => {
+  const page = await open(browser, baseURL!, 'receiver', 'he', PHONE);
+  const records: string[] = [];
+  page.on('request', (r) => {
+    if (r.url().includes('search.global')) records.push(r.url());
+  });
+  await page.locator('header').getByRole('button', { name: 'חיפוש' }).first().click();
+  const input = page.getByRole('combobox', { name: 'חיפוש כללי' }).last();
+  await expect(input).toHaveAttribute('placeholder', 'חיפוש מסך…');
+  await input.fill('INV');
+  await page.waitForTimeout(600);
+  expect(records, 'no record search for the receiver').toEqual([]);
+  await expect(page.locator('[role=group][aria-label="חשבוניות"]')).toHaveCount(0);
+  // Nothing matched: "no results", never the "type at least 2 characters" hint.
+  await expect(page.getByText('לא נמצאו תוצאות')).toBeVisible();
+  const res = await page.goto('/dashboard/invoices/00000000-0000-4000-8000-000000000000');
+  expect(/\/dashboard$/.test(page.url()) || res?.status() === 403).toBe(true);
   await page.context().close();
 });

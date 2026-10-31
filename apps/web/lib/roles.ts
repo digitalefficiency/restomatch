@@ -40,7 +40,8 @@ export function labelForRole(role: string, locale: Locale = 'he'): string {
  * Which roles may see each dashboard route — generated from the nav registry
  * (lib/nav/routes/*.ts, one file per route folder), so the nav, the middleware
  * gate and the per-page guards never drift apart. A `receiver` (shift manager)
- * sees only the overview + receiving — least privilege. Exact path → roles;
+ * gets the overview, receiving and other no-₪ screens — never a supplier
+ * ledger or invoice page (owner decision: the receiver sees no ₪). Exact path → roles;
  * sub-paths inherit by longest prefix (`allowedRolesForPath`).
  */
 export const ROUTE_ROLES: Record<string, UserRole[]> = generateRouteRoles();

@@ -1,7 +1,7 @@
 import type { UserRole } from '@restomatch/db';
 
 /**
- * The 24 forbidden role → route pairs (lens-ia-nav ia-nav-07 probe: every one
+ * The 25 forbidden role → route pairs (lens-ia-nav ia-nav-07 probe: every one
  * used to bounce silently to /dashboard). Shared by the unit test (middleware
  * rule) and the W1-04 e2e spec (the real in-shell 403 page).
  */
@@ -16,6 +16,8 @@ export const FORBIDDEN_PAIRS: ReadonlyArray<readonly [UserRole, string]> = [
   ['receiver', '/dashboard/exports'],
   ['receiver', '/dashboard/team'],
   ['receiver', '/dashboard/recipes'],
+  // Owner decision: the receiver sees no ₪ — the invoice page shows prices, line totals and VAT ₪.
+  ['receiver', '/dashboard/invoices/00000000-0000-4000-8000-000000000000'],
   ['bookkeeper', '/dashboard/orders'],
   ['bookkeeper', '/dashboard/receiving'],
   ['bookkeeper', '/dashboard/suppliers'],

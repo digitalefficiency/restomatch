@@ -3,7 +3,7 @@ import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { FEATURE_KEYS } from '@restomatch/api';
 import type { UserRole } from '@restomatch/db';
-import { ALL_ROLES, ROUTE_ROLES, allowedRolesForPath } from '../roles';
+import { ALL_ROLES, ROUTE_ROLES, allowedRolesForPath, canSeeRoute } from '../roles';
 import { REGISTRY, ancestry, matchRoute, routeByKey } from '../nav/registry';
 import {
   activeNavKey,
@@ -27,7 +27,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { PageHeader } from '../components/PageHeader';
 import { Breadcrumbs } from '../components/Breadcrumbs';
 import { NavProvider } from '../nav/NavProvider';
-import { buildScreenOptions, normalizeSearch } from '../../app/dashboard/searchOptions';
+import {
+  buildScreenOptions,
+  RECORD_SECTIONS,
+  buildSearchOptions,
+  normalizeSearch,
+  searchPlaceholderKey,
+} from '../../app/dashboard/searchOptions';
 
 const APP = join(__dirname, '..', '..', 'app');
 const DASH = join(APP, 'dashboard');
@@ -156,13 +162,20 @@ describe('ROUTE_ROLES generated from the registry', () => {
   const sorted = (m: Record<string, UserRole[]>) =>
     Object.fromEntries(Object.entries(m).map(([k, v]) => [k, [...v].sort()]));
 
-  it("equals today's map except the supplier ledger, which drops the receiver", () => {
-    const { ['/dashboard/suppliers/ledger']: ledger, ...rest } = ROUTE_ROLES;
-    const { ['/dashboard/suppliers/ledger']: ledgerBefore, ...restBefore } = ROUTE_ROLES_BEFORE;
+  it("equals today's map except the supplier ledger and the invoice page, which drop the receiver", () => {
+    const { ['/dashboard/suppliers/ledger']: ledger, ['/dashboard/invoices']: invoices, ...rest } = ROUTE_ROLES;
+    const {
+      ['/dashboard/suppliers/ledger']: ledgerBefore,
+      ['/dashboard/invoices']: invoicesBefore,
+      ...restBefore
+    } = ROUTE_ROLES_BEFORE;
     expect(sorted(rest)).toEqual(sorted(restBefore));
-    // The only delta (owner decision 2026-10-25): the receiver gets no supplier ledger (₪ totals).
+    // The only deltas (owner decision 2026-10-25: the receiver sees no ₪) tighten, never loosen:
+    // no supplier ledger (₪ totals) and no invoice page (unit prices, line totals, VAT ₪).
     expect(ledgerBefore).toContain('receiver');
     expect(ledger).toEqual(['owner', 'manager', 'bookkeeper']);
+    expect(invoicesBefore).toContain('receiver');
+    expect(invoices).toEqual(['owner', 'manager', 'bookkeeper']);
     // The printable leak report keeps inheriting /leaks (no silent bounce for the bookkeeper's button).
     expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
     expect(allowedRolesForPath('/dashboard/leaks/report')).toContain('bookkeeper');
@@ -260,7 +273,7 @@ describe('bottom bars', () => {
     expect(bar(viewer('receiver'))).toEqual(['home:today', 'receiving:receipts']);
     expect(bar(viewer('chef'))).toEqual(['home:today', 'inventory:count', 'recipes:dishes']);
     expect(bar(viewer('manager'))).toEqual(['home:today', 'orders:orders', 'receiving:receive', 'approvals:approvals']);
-    expect(bar(viewer('owner'))).toEqual(['home:home', 'approvals:approvals', 'leaks:prices', 'orders:orders']);
+    expect(bar(viewer('owner'))).toEqual(['home:home', 'approvals:approvals', 'leaks:leak', 'orders:orders']);
     expect(bar(viewer('bookkeeper'))).toEqual(['home:home', 'approvals:approvals', 'payRun:payments', 'inbox:invoices']);
   });
 
@@ -308,17 +321,42 @@ describe('matching, field routes, active item, crumbs, titles', () => {
     }
   });
 
-  it('"דליפה" names only the monthly leak; price creep is "מחירים שעלו" (nav, titles, search)', () => {
+  it('/dashboard/leaks is the monthly leak hub: "דליפה" in nav, bar and title; price creep still found by search', () => {
     const t = createTranslator('he', nav) as (k: string) => string;
-    expect(t('links.leaks')).toBe('מחירים שעלו');
-    expect(t('bar.prices')).toBe('מחירים');
+    const te = createTranslator('en', nav) as (k: string) => string;
+    // Nav label = page title (W1-08 hub.title 'דליפה').
+    expect(t('links.leaks')).toBe('דליפה');
+    expect(te('links.leaks')).toBe('Leak');
+    expect(t('bar.leak')).toBe('דליפה');
+    expect(titleFor(t('links.leaks'))).toBe('דליפה — RestoMatch');
     expect(t('links.leaksBreakdown')).toContain('דליפה');
     const aliases = routeByKey('leaks')!.aliases ?? [];
-    expect(aliases.some((a) => a.includes('דליפ'))).toBe(false);
+    expect(aliases).toEqual(expect.arrayContaining(['דליפה', 'דליפות', 'מחירים', 'מחירים שעלו']));
     const screens = navGroups(viewer('owner')).flatMap((g) =>
       g.items.map((d) => ({ key: d.key, href: d.path, label: t(`links.${d.key}`), aliases: d.aliases ?? [] })),
     );
+    expect(buildScreenOptions('דליפה', screens)[0]?.id).toBe('leaks');
     expect(buildScreenOptions('מחירים', screens)[0]?.id).toBe('leaks');
+  });
+
+  it('the receiver opens no invoice page (₪ lines) and is never offered one', () => {
+    expect(canOpenPath('receiver', '/dashboard/invoices/abc')).toBe(false);
+    expect(canOpenPath('chef', '/dashboard/invoices/abc')).toBe(false);
+    expect(canOpenPath('owner', '/dashboard/invoices/abc')).toBe(true);
+    expect(canOpenPath('bookkeeper', '/dashboard/invoices/abc')).toBe(true);
+    const data = { suppliers: [], products: [], invoices: [{ id: 'i1', invoiceNumber: 'INV-7' }] };
+    for (const role of ['receiver', 'chef'] as const) {
+      const opts = buildSearchOptions(data, { locale: 'he', canSee: (h) => canSeeRoute(role, h), noInvoiceNumber: '—' });
+      expect(opts.filter((o) => o.kind === 'invoice'), role).toEqual([]);
+      // The placeholder never promises invoices to a role that can't open one.
+      expect(searchPlaceholderKey(role), role).toBe('search.placeholderScreens');
+      // …and no record query is sent at all.
+      expect(RECORD_SECTIONS.some((h) => canSeeRoute(role, h)), role).toBe(false);
+    }
+    const owner = buildSearchOptions(data, { locale: 'he', canSee: (h) => canSeeRoute('owner', h), noInvoiceNumber: '—' });
+    expect(owner.map((o) => o.href)).toEqual(['/dashboard/invoices/i1']);
+    expect(searchPlaceholderKey('owner')).toBe('search.placeholder');
+    expect(searchPlaceholderKey('bookkeeper')).toBe('search.placeholder');
   });
 
   it('a detail page lights its nav parent', () => {
@@ -335,8 +373,7 @@ describe('matching, field routes, active item, crumbs, titles', () => {
       { key: 'supplierDetail', href: '/dashboard/suppliers/abc' },
       { key: 'supplierLeakCard' },
     ]);
-    // The bookkeeper may open an invoice but not every parent of it.
-    expect(crumbsFor('/dashboard/invoices/abc', viewer('receiver'))).toEqual([{ key: 'inbox' }, { key: 'invoiceDetail' }]);
+    // The bookkeeper may open an invoice and its inbox parent.
     expect(crumbsFor('/dashboard/invoices/abc', viewer('bookkeeper'))[0]).toEqual({ key: 'inbox', href: '/dashboard/inbox' });
     // Flag-aware: without the ingest flags the inbox 404s, so the crumb is plain text.
     expect(crumbsFor('/dashboard/invoices/abc', viewer('owner', { features: [] }))[0]).toEqual({ key: 'inbox' });
