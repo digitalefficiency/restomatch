@@ -138,6 +138,10 @@ describe('signupAllowed defaults', () => {
     expect(signupAllowed(user, { NODE_ENV: 'test' })).toBe(true);
     expect(signupAllowed(user, { NODE_ENV: 'production' })).toBe(false);
   });
+  it('fails closed for any other or missing NODE_ENV (staging, self-hosted)', () => {
+    expect(signupAllowed(user, { NODE_ENV: 'staging' } as NodeJS.ProcessEnv)).toBe(false);
+    expect(signupAllowed(user, {} as NodeJS.ProcessEnv)).toBe(false);
+  });
   it('only "1" opens it; any other SIGNUP_OPEN value in production stays closed', () => {
     expect(signupAllowed(user, { NODE_ENV: 'production', SIGNUP_OPEN: '1' })).toBe(true);
     expect(signupAllowed(user, { NODE_ENV: 'production', SIGNUP_OPEN: 'true' })).toBe(false);

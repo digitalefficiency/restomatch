@@ -28,11 +28,13 @@ function emailList(raw: string | undefined): string[] {
  *  - the caller's VERIFIED email is in SIGNUP_ALLOWLIST (comma list, any case);
  *  - the caller is a platform admin (users.is_platform_admin, or a verified
  *    PLATFORM_ADMIN_EMAILS address — the same rule as adminProcedure).
- * With SIGNUP_OPEN unset: closed when NODE_ENV=production, open in dev/test.
+ * With SIGNUP_OPEN unset: open only when NODE_ENV is exactly 'development' or
+ * 'test' (fail closed: production, staging, a missing NODE_ENV — all closed).
  */
 export function signupAllowed(user: SignupCaller, env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.SIGNUP_OPEN === '1') return true;
-  const openByDefault = env.SIGNUP_OPEN === undefined && env.NODE_ENV !== 'production';
+  const openByDefault =
+    env.SIGNUP_OPEN === undefined && (env.NODE_ENV === 'development' || env.NODE_ENV === 'test');
   if (openByDefault) return true;
   if (user.isPlatformAdmin) return true;
   if (user.emailVerified == null) return false;
