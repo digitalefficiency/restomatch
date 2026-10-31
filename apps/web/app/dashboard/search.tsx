@@ -11,15 +11,15 @@ import { nav } from '@/lib/i18n/messages/nav';
 import { canSeeRoute } from '@/lib/roles';
 import { navGroups } from '@/lib/nav';
 import { useNavViewer } from '@/lib/nav/NavProvider';
-import { buildScreenOptions, buildSearchOptions, type SearchOption, type SearchScreen } from './searchOptions';
+import {
+  buildScreenOptions,
+  buildSearchOptions,
+  RECORD_SECTIONS,
+  searchPlaceholderKey,
+  type SearchOption,
+  type SearchScreen,
+} from './searchOptions';
 import { startRouteProgress } from '@/lib/components/routeProgressState';
-
-/** What the role can actually find (ia-nav-04): the placeholder never promises more. */
-function placeholderKey(role: UserRole) {
-  if (role === 'receiver') return 'search.placeholderReceiver' as const;
-  if (role === 'chef') return 'search.placeholderChef' as const;
-  return 'search.placeholder' as const;
-}
 
 /**
  * Global search box. Screens ("מסכים", from the nav registry, filtered by role
@@ -68,7 +68,10 @@ export function DashboardSearch({
     return () => clearTimeout(timer);
   }, [raw]);
 
-  const enabled = query.length >= 2;
+  // A role that opens no supplier, product or invoice page (receiver, chef)
+  // searches screens only — no record query leaves the browser.
+  const findsRecords = RECORD_SECTIONS.some((href) => canSeeRoute(role, href));
+  const enabled = findsRecords && query.length >= 2;
   const results = trpc.search.global.useQuery({ q: query }, { enabled, staleTime: 30_000 });
 
   // Close on outside click.
@@ -181,7 +184,7 @@ export function DashboardSearch({
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
-          placeholder={t(placeholderKey(role))}
+          placeholder={t(searchPlaceholderKey(role))}
           aria-label={t('search.label')}
           role="combobox"
           aria-expanded={showPanel}
@@ -203,7 +206,7 @@ export function DashboardSearch({
           aria-label={t('search.label')}
           className="absolute z-50 mt-2 max-h-96 w-full min-w-[18rem] overflow-auto rounded-xl border border-line bg-surface p-1 shadow-card"
         >
-          {options.length === 0 && !enabled ? (
+          {options.length === 0 && query.length < 2 ? (
             <p className="px-3 py-4 text-center text-sm text-subtle">{t('search.minChars')}</p>
           ) : options.length === 0 && results.isError ? (
             <p className="px-3 py-4 text-center text-sm text-danger">{t('search.error')}</p>

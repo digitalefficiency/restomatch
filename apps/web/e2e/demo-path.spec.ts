@@ -481,7 +481,7 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
     await checkScreen(page, errors, L, 'B2-hero');
   });
 
-  await test.step('leak detective (בלש דליפות): same ₪ / % / spend, price creep', async () => {
+  await test.step('leak hub (דליפה): same ₪ / % / spend, then price creep (מחירים שעלו)', async () => {
     await clickNav(page, m.nav.links.leaks, '/dashboard/leaks');
     await expect(page.locator('main h1, main h2').first()).toBeVisible();
     // The default view is this month, so the T1 tile reads "דליפה החודש" (W1-08: the label names its period).

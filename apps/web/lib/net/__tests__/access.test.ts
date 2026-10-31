@@ -4,8 +4,8 @@ import { FORBIDDEN_PATH, forbiddenFrom, forbiddenRewrite, screenKeyForPath } fro
 import { FORBIDDEN_PAIRS } from './forbiddenPairs';
 
 describe('forbiddenRewrite (middleware role gate → in-shell 403, ia-nav-07)', () => {
-  it('rewrites all 24 probed role/route pairs to the forbidden page, keeping the original URL in `from`', () => {
-    expect(FORBIDDEN_PAIRS).toHaveLength(24);
+  it('rewrites all 25 probed role/route pairs to the forbidden page, keeping the original URL in `from`', () => {
+    expect(FORBIDDEN_PAIRS).toHaveLength(25);
     for (const [role, path] of FORBIDDEN_PAIRS) {
       const to = forbiddenRewrite(path, '?sev=block', role);
       expect(to, `${role} → ${path}`).not.toBeNull();

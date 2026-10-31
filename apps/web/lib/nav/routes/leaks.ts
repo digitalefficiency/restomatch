@@ -8,9 +8,23 @@ export const routes: RouteDef[] = [
     rank: 10,
     roles: ['owner', 'manager', 'bookkeeper'],
     nav: 'item',
-    bar: { owner: { slot: 3, label: 'prices' } },
-    // Price creep (the detective): "דליפה" names only the monthly leak.
-    aliases: ['מחירים', 'מחירים שעלו', 'זחילת מחירים', 'בלש', 'price', 'prices', 'price creep', 'detective'],
+    bar: { owner: { slot: 3, label: 'leak' } },
+    // The monthly leak hub (W1-08): its h1 is "דליפה". Price creep ("מחירים שעלו")
+    // is a section of this page (`#prices`), so search still finds it by those words.
+    aliases: [
+      'דליפה',
+      'דליפות',
+      'מחירים',
+      'מחירים שעלו',
+      'זחילת מחירים',
+      'בלש',
+      'leak',
+      'leaks',
+      'price',
+      'prices',
+      'price creep',
+      'detective',
+    ],
   },
   { key: 'leaksBreakdown', path: '/dashboard/leaks/breakdown', group: 'leaks', parent: 'leaks', nav: 'linked' },
   {

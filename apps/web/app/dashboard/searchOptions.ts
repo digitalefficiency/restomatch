@@ -1,3 +1,4 @@
+import type { UserRole } from '@restomatch/db';
 import type { Locale } from '@/lib/i18n/config';
 import { displayName } from '@/lib/components/displayName';
 
@@ -15,6 +16,9 @@ export interface SearchOption {
   secondary?: string;
   href: string;
 }
+
+/** The section routes `search.global` results open (suppliers, products, invoices). */
+export const RECORD_SECTIONS = ['/dashboard/suppliers', '/dashboard/catalog', '/dashboard/invoices'] as const;
 
 /**
  * Flatten `search.global` into keyboard-navigable options, in display order
@@ -62,6 +66,16 @@ export function buildSearchOptions(
     }
   }
   return out;
+}
+
+/**
+ * What the role can actually find (ia-nav-04): the placeholder never promises
+ * more. The receiver and the chef open no supplier, product or invoice page
+ * (they see no ₪), so their search finds screens only.
+ */
+export function searchPlaceholderKey(role: UserRole) {
+  if (role === 'receiver' || role === 'chef') return 'search.placeholderScreens' as const;
+  return 'search.placeholder' as const;
 }
 
 /** A registry screen the viewer may open (label already localized). */

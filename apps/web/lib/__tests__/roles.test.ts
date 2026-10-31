@@ -49,13 +49,16 @@ describe('roles matrix', () => {
     expect(allowedRolesForPath('/dashboard/approvals/pay-run')).not.toContain('chef');
   });
 
-  it('an invoice page is for the roles that reach it (receiving, approvals, leaks) — never the chef', () => {
-    for (const r of ['owner', 'manager', 'receiver', 'bookkeeper'] as const) {
+  it('an invoice page is for the roles that reach it (approvals, inbox, leaks) — never the chef or the receiver (no ₪)', () => {
+    for (const r of ['owner', 'manager', 'bookkeeper'] as const) {
       expect(canSeeRoute(r, '/dashboard/invoices')).toBe(true);
     }
-    expect(canSeeRoute('chef', '/dashboard/invoices')).toBe(false);
-    // The detail route inherits it (middleware gate + global-search links).
-    expect(allowedRolesForPath('/dashboard/invoices/3f1c0e3e-0000-4000-8000-000000000000')).not.toContain('chef');
+    // Owner decision: the receiver and the chef see no ₪ (unit prices, line totals, VAT).
+    for (const r of ['chef', 'receiver'] as const) {
+      expect(canSeeRoute(r, '/dashboard/invoices')).toBe(false);
+      // The detail route inherits it (middleware gate + global-search links).
+      expect(allowedRolesForPath('/dashboard/invoices/3f1c0e3e-0000-4000-8000-000000000000')).not.toContain(r);
+    }
   });
 
   it('labels roles in both languages', () => {

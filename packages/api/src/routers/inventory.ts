@@ -41,6 +41,16 @@ const inventoryProcedure = chefProcedure.use(async ({ ctx, next }) => {
   return next({ ctx: { ...ctx, rc } });
 });
 
+/**
+ * Owner decision: the chef counts but sees no ₪. Every ₪ field (values, unit
+ * costs and their invoice sources, food sales, the period) stays on the server
+ * for the chef — never merely hidden in the UI.
+ */
+const seesMoney = (role: string) => role !== 'chef';
+function noMoney(): never {
+  throw new TRPCError({ code: 'FORBIDDEN', message: 'Required role: owner|manager, got: chef' });
+}
+
 const YMD = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -134,8 +144,12 @@ async function draftView(db: Database, restaurantId: string, tz: string, countId
   const lastClosedDate = done.find((x) => x.id !== c.id)?.countDate ?? null;
   const prevLines = prev ? new Map((await loadLines(db, restaurantId, prev.id)).map((l) => [l.productId, l] as const)) : new Map();
   const received = prev ? await receivedBetween(db, restaurantId, tz, prev.countDate, c.countDate, ids) : new Map();
+  const money = seesMoney(role);
   const out = lines.map((l) => {
     const v = sum.values.get(l.productId)!;
+    const unitCost = snap ? l.unitCost : v.unitCost;
+    const valueAgorot = snap ? (l.valueAgorot == null ? null : Number(l.valueAgorot)) : v.valueAgorot;
+    const priceSource = snap ? (l.priceSource ?? null) : (prices.get(l.productId)?.source ?? null);
     return {
       productId: l.productId,
       name: l.name,
@@ -144,10 +158,10 @@ async function draftView(db: Database, restaurantId: string, tz: string, countId
       qty: l.qty,
       unit: l.unit,
       // A completed count shows its snapshot, never today's prices.
-      unitCost: snap ? l.unitCost : v.unitCost,
-      valueAgorot: snap ? (l.valueAgorot == null ? null : Number(l.valueAgorot)) : v.valueAgorot,
+      unitCost: money ? unitCost : null,
+      valueAgorot: money ? valueAgorot : null,
       status: snap ? (l.qty == null ? 'notCounted' : l.valueAgorot == null ? 'noPrice' : 'ok') : v.status,
-      priceSource: snap ? (l.priceSource ?? null) : (prices.get(l.productId)?.source ?? null),
+      priceSource: money ? priceSource : null,
       check: overCount(l.qty, l.unit, prevLines.get(l.productId), received.get(l.productId)) === true,
     };
   });
@@ -156,9 +170,11 @@ async function draftView(db: Database, restaurantId: string, tz: string, countId
     countDate: c.countDate,
     status: c.status as 'draft' | 'completed',
     notes: c.notes,
-    foodSalesExVat: c.foodSalesExVat,
+    foodSalesExVat: money ? c.foodSalesExVat : null,
     completedAt: c.completedAt?.toISOString() ?? null,
-    totalValueAgorot: c.status === 'completed' ? Number(c.totalValueAgorot ?? 0) : sum.totalValueAgorot,
+    totalValueAgorot: money ? (c.status === 'completed' ? Number(c.totalValueAgorot ?? 0) : sum.totalValueAgorot) : null,
+    /** False for the chef: every ₪ field above is null, so the UI shows quantities only. */
+    showMoney: money,
     progress,
     /** Owner/manager close (and lock) a count; the chef counts. Owner alone amends a closed one. */
     canClose: CLOSERS.has(role),
@@ -400,7 +416,11 @@ export const inventoryRouter = router({
         set.countDate = input.countDate;
       }
       if (input.notes !== undefined) set.notes = input.notes;
-      if (input.foodSalesExVat !== undefined) set.foodSalesExVat = input.foodSalesExVat;
+      if (input.foodSalesExVat !== undefined) {
+        // Food sales ₪ feed the period: owner and manager only.
+        if (!seesMoney(ctx.session.role)) noMoney();
+        set.foodSalesExVat = input.foodSalesExVat;
+      }
       if (Object.keys(set).length > 0) {
         await ctx.db.update(inventoryCounts).set(set).where(and(eq(inventoryCounts.restaurantId, rid), eq(inventoryCounts.id, c.id)));
       }
@@ -506,6 +526,7 @@ export const inventoryRouter = router({
 
   /** A closed count as CSV for the accountant (item, unit, qty, unit cost, value, area, price source). */
   exportCsv: inventoryProcedure.input(z.object({ countId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    if (!seesMoney(ctx.session.role)) noMoney();
     const rid = ctx.session.restaurantId;
     const c = await loadCount(ctx.db, rid, input.countId);
     if (c.status !== 'completed') throw new TRPCError({ code: 'CONFLICT', message: 'count is not closed' });
@@ -552,9 +573,10 @@ export const inventoryRouter = router({
     draftView(ctx.db, ctx.session.restaurantId, ctx.rc.timezone, input.countId, ctx.session.role),
   ),
 
-  /** Completed counts, newest first, with their ₪ value and line tallies. */
+  /** Completed counts, newest first, with their ₪ value (null for the chef) and line tallies. */
   history: inventoryProcedure.query(async ({ ctx }) => {
     const rid = ctx.session.restaurantId;
+    const money = seesMoney(ctx.session.role);
     const done = await completedCounts(ctx.db, rid, 24);
     if (done.length === 0) return [];
     const tallies = (await ctx.db
@@ -572,8 +594,8 @@ export const inventoryRouter = router({
       id: c.id,
       countDate: c.countDate,
       completedAt: c.completedAt?.toISOString() ?? null,
-      totalValueAgorot: Number(c.totalValueAgorot ?? 0),
-      foodSalesExVat: c.foodSalesExVat,
+      totalValueAgorot: money ? Number(c.totalValueAgorot ?? 0) : null,
+      foodSalesExVat: money ? c.foodSalesExVat : null,
       lines: byId.get(c.id)?.lines ?? 0,
       counted: byId.get(c.id)?.counted ?? 0,
       unpriced: byId.get(c.id)?.unpriced ?? 0,
@@ -585,7 +607,9 @@ export const inventoryRouter = router({
    * the latest): opening count + food purchases − closing count, vs food sales,
    * and — with recipes + POS — vs the theoretical cost ("unexplained usage").
    */
-  period: inventoryProcedure.input(z.object({ closingId: z.string().uuid().optional() }).optional()).query(({ ctx, input }) =>
-    periodFor(ctx.db, ctx.session.restaurantId, ctx.rc, input?.closingId),
-  ),
+  period: inventoryProcedure.input(z.object({ closingId: z.string().uuid().optional() }).optional()).query(({ ctx, input }) => {
+    // The period is all ₪ (purchases, credits, sales, food cost): owner and manager only.
+    if (!seesMoney(ctx.session.role)) noMoney();
+    return periodFor(ctx.db, ctx.session.restaurantId, ctx.rc, input?.closingId);
+  }),
 });

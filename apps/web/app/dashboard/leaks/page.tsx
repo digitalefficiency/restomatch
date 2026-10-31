@@ -90,7 +90,9 @@ export default async function LeaksPage({
           {explorer}
         </div>
         <OverContractCard variant="compact" />
-        <SectionHeader title={t('detective.title')} />
+        <div id="prices" className="scroll-mt-24">
+          <SectionHeader title={t('detective.title')} />
+        </div>
         <EntitlementUpsell feature="advanced_analytics" title={t('detective.upsell')} />
       </div>
     );
@@ -106,7 +108,7 @@ export default async function LeaksPage({
         </div>
         <OverContractCard variant="compact" />
         {/* T4: a calm note, never an alarm, for a section this role does not see. */}
-        <Card padding="md" className="flex items-center gap-3 bg-surface-2 text-muted" data-testid="creep-role-note">
+        <Card id="prices" padding="md" className="flex scroll-mt-24 items-center gap-3 bg-surface-2 text-muted" data-testid="creep-role-note">
           <Lock className="h-5 w-5 shrink-0" aria-hidden="true" />
           <span>{t('detective.roleOnly')}</span>
         </Card>
@@ -137,7 +139,10 @@ export default async function LeaksPage({
       <OverContractCard variant="compact" />
 
       {/* Prices that rose: a 30-day trend in its own calm section — never the leak's word, red or droplet. */}
-      <SectionHeader title={t('detective.title')} subtitle={t('detective.subtitle')} />
+      {/* `#prices`: the price-creep section's own address ("מחירים שעלו"), e.g. from the home's price card. */}
+      <div id="prices" className="scroll-mt-24">
+        <SectionHeader title={t('detective.title')} subtitle={t('detective.subtitle')} />
+      </div>
 
       {rows.length === 0 ? (
         <EmptyState

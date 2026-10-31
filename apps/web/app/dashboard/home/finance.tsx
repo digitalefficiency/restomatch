@@ -560,7 +560,7 @@ async function Heatmap({ caller, t, tl, locale }: Ctx) {
         subtitle={t('leaks.subtitle')}
         action={
           <Link
-            href="/dashboard/leaks"
+            href="/dashboard/leaks#prices"
             className="touch-target inline-flex items-center gap-1 rounded-lg text-sm font-semibold text-primary hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
           >
             {t('leaks.all')}
