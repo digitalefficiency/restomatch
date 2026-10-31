@@ -7,12 +7,12 @@ import type { AppRouter } from '@restomatch/api';
 
 type SupplierWithFlags = inferRouterOutputs<AppRouter>['suppliers']['get'];
 import { trpc } from '@/lib/trpc/client';
-import { ErrorNotice, Spinner, friendlyError, useToast } from '@/lib/components';
+import { ErrorNotice, Spinner, friendlyError, trpcErrorCode, useToast } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
 import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
 import { SupplierForm } from '../manager';
-import { scheduleToForm, toUpdatePatch } from '../form-logic';
+import { duplicateKindOf, scheduleToForm, toUpdatePatch, vatChoiceOf } from '../form-logic';
 
 /**
  * Details tab — reuses the canonical SupplierForm from the manager so name /
@@ -63,12 +63,17 @@ export function SupplierDetailsTab({ supplierId, initial }: { supplierId: string
         contactEmail: s.contactEmail ?? '',
         contactWhatsapp: s.contactWhatsapp ?? '',
         paymentTerms: s.paymentTerms ?? '',
+        vatRate: vatChoiceOf(s.vatRate),
         schedule: scheduleToForm(s.deliverySchedule),
       }}
       submitting={update.isPending}
+      storedVatRate={s.vatRate}
       error={update.error ? friendlyError(update.error, tc) : null}
+      duplicate={duplicateKindOf(trpcErrorCode(update.error))}
       onCancel={() => update.reset()}
-      onSubmit={(form) => update.mutate({ supplierId, patch: toUpdatePatch(form) })}
+      onSubmit={(form, allowDuplicate) =>
+        update.mutate({ supplierId, patch: toUpdatePatch(form), ...(allowDuplicate ? { allowDuplicate: true } : {}) })
+      }
     />
   );
 }

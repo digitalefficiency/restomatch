@@ -1,6 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { and, asc, eq, suppliers, type Supplier } from '@restomatch/db';
+import { and, asc, eq, suppliers, type Database, type Supplier } from '@restomatch/db';
 import { OrderSchedule } from '@restomatch/types';
 import { invoiceReaderProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
@@ -33,6 +33,14 @@ const DeliveryScheduleSchema = z
   })
   .strict();
 
+/**
+ * The supplier's VAT rate: 0.18 standard, 0 for fresh fruit and vegetables;
+ * null = the restaurant default. The matcher reads the PO rate, then this,
+ * then the restaurant's, so a 0% produce supplier never shows its subtotal × 18%
+ * as a VAT_MISMATCH leak.
+ */
+const VatRate = z.union([z.literal(0), z.literal(0.18)]).nullable();
+
 const SupplierCreate = z
   .object({
     name: z.string().trim().min(1).max(200),
@@ -45,6 +53,9 @@ const SupplierCreate = z
     deliverySchedule: DeliveryScheduleSchema.optional(),
     /** ACTIONABLE order cadence (drives expectedDeliveryAt). Info-only deliverySchedule stays separate. */
     orderSchedule: OrderSchedule.optional(),
+    vatRate: VatRate.optional(),
+    /** Confirm a duplicate ח.פ. / name the guard refused (another branch of the same company, …). */
+    allowDuplicate: z.boolean().optional(),
   })
   .strict();
 
@@ -59,8 +70,58 @@ const SupplierPatch = z
     paymentTerms: z.string().trim().max(500).nullish(),
     deliverySchedule: DeliveryScheduleSchema.nullish(),
     orderSchedule: OrderSchedule.nullish(),
+    vatRate: VatRate.optional(),
   })
   .strict();
+
+const vatRateValue = (v: 0 | 0.18 | null): string | null => (v === null ? null : v.toFixed(4));
+
+/** ח.פ. digits only ("51-234567-8" ≡ "512345678"); null when there are none. */
+export function normalizeBusinessId(raw: string | null | undefined): string | null {
+  const d = (raw ?? '').replace(/\D/g, '');
+  return d.length > 0 ? d : null;
+}
+
+/** Name for duplicate detection: no quotes/punctuation, no legal suffix (בע״מ, Ltd), one space, lower case. */
+export function normalizeSupplierName(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/["'`״׳.,\-–—_()]/g, ' ')
+    .replace(/(^|\s)(בעמ|בע מ|ltd|inc)(?=\s|$)/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Duplicate guard: an ACTIVE supplier of this restaurant with the same ח.פ.
+ * is refused (CONFLICT); one with the same normalised name is a confirmable
+ * warning (PRECONDITION_FAILED). `allowDuplicate` skips both. Another tenant's
+ * suppliers are never read (explicit restaurant filter on top of RLS).
+ */
+async function assertNoDuplicate(
+  db: Database,
+  restaurantId: string,
+  candidate: { name?: string; businessId?: string | null },
+  opts: { exceptId?: string; checkName: boolean },
+): Promise<void> {
+  const rows = await db
+    .select({ id: suppliers.id, name: suppliers.name, businessId: suppliers.businessId })
+    .from(suppliers)
+    .where(and(eq(suppliers.restaurantId, restaurantId), eq(suppliers.active, true)));
+  const others = rows.filter((r) => r.id !== opts.exceptId);
+  const biz = normalizeBusinessId(candidate.businessId);
+  const sameBiz = biz ? others.find((r) => normalizeBusinessId(r.businessId) === biz) : undefined;
+  if (sameBiz) {
+    throw new TRPCError({ code: 'CONFLICT', message: `ספק פעיל עם אותו ח.פ. כבר קיים: ${sameBiz.name}` });
+  }
+  if (opts.checkName && candidate.name) {
+    const name = normalizeSupplierName(candidate.name);
+    const sameName = name ? others.find((r) => normalizeSupplierName(r.name) === name) : undefined;
+    if (sameName) {
+      throw new TRPCError({ code: 'PRECONDITION_FAILED', message: `ספק פעיל בשם דומה כבר קיים: ${sameName.name}` });
+    }
+  }
+}
 
 function mustExist<T>(row: T | undefined, what: string): T {
   if (!row) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: `${what} write returned no row` });
@@ -120,6 +181,9 @@ export const suppliersRouter = router({
   create: managerProcedure
     .input(SupplierCreate)
     .mutation(async ({ ctx, input }): Promise<Supplier> => {
+      if (!input.allowDuplicate) {
+        await assertNoDuplicate(ctx.db, ctx.session.restaurantId, input, { checkName: true });
+      }
       const [row] = await ctx.db
         .insert(suppliers)
         .values({
@@ -132,15 +196,42 @@ export const suppliersRouter = router({
           paymentTerms: input.paymentTerms ?? null,
           deliverySchedule: input.deliverySchedule ?? null,
           orderSchedule: input.orderSchedule ?? null,
+          vatRate: input.vatRate === undefined ? null : vatRateValue(input.vatRate),
         })
         .returning();
       return mustExist(row, 'supplier');
     }),
 
   update: managerProcedure
-    .input(z.object({ supplierId: z.string().uuid(), patch: SupplierPatch }))
+    .input(
+      z.object({ supplierId: z.string().uuid(), patch: SupplierPatch, allowDuplicate: z.boolean().optional() }),
+    )
     .mutation(async ({ ctx, input }): Promise<Supplier> => {
       await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
+      if (!input.allowDuplicate && (input.patch.businessId || input.patch.name)) {
+        // Only a CHANGED ח.פ. / name is checked, so saving a long-standing pair doesn't nag.
+        const [cur] = await ctx.db
+          .select({ name: suppliers.name, businessId: suppliers.businessId, active: suppliers.active })
+          .from(suppliers)
+          .where(eq(suppliers.id, input.supplierId))
+          .limit(1);
+        if (cur?.active) {
+          const bizChanged =
+            input.patch.businessId != null &&
+            normalizeBusinessId(input.patch.businessId) !== normalizeBusinessId(cur.businessId);
+          const nameChanged =
+            input.patch.name !== undefined &&
+            normalizeSupplierName(input.patch.name) !== normalizeSupplierName(cur.name);
+          if (bizChanged || nameChanged) {
+            await assertNoDuplicate(
+              ctx.db,
+              ctx.session.restaurantId,
+              { name: nameChanged ? input.patch.name : undefined, businessId: bizChanged ? input.patch.businessId : null },
+              { exceptId: input.supplierId, checkName: nameChanged },
+            );
+          }
+        }
+      }
       const set: Partial<typeof suppliers.$inferInsert> = { updatedAt: new Date() };
       const { patch } = input;
       if (patch.name !== undefined) set.name = patch.name;
@@ -151,6 +242,7 @@ export const suppliersRouter = router({
       if (patch.paymentTerms !== undefined) set.paymentTerms = patch.paymentTerms;
       if (patch.deliverySchedule !== undefined) set.deliverySchedule = patch.deliverySchedule;
       if (patch.orderSchedule !== undefined) set.orderSchedule = patch.orderSchedule;
+      if (patch.vatRate !== undefined) set.vatRate = vatRateValue(patch.vatRate);
       const [row] = await ctx.db
         .update(suppliers)
         .set(set)
@@ -162,9 +254,23 @@ export const suppliersRouter = router({
     }),
 
   setActive: managerProcedure
-    .input(z.object({ supplierId: z.string().uuid(), active: z.boolean() }))
+    .input(z.object({ supplierId: z.string().uuid(), active: z.boolean(), allowDuplicate: z.boolean().optional() }))
     .mutation(async ({ ctx, input }): Promise<Supplier> => {
       await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
+      if (input.active && !input.allowDuplicate) {
+        // Reactivating must not bring back a second active supplier with the same ח.פ.
+        const [cur] = await ctx.db
+          .select({ businessId: suppliers.businessId, active: suppliers.active })
+          .from(suppliers)
+          .where(eq(suppliers.id, input.supplierId))
+          .limit(1);
+        if (cur && !cur.active) {
+          await assertNoDuplicate(ctx.db, ctx.session.restaurantId, { businessId: cur.businessId }, {
+            exceptId: input.supplierId,
+            checkName: false,
+          });
+        }
+      }
       const [row] = await ctx.db
         .update(suppliers)
         .set({ active: input.active, updatedAt: new Date() })

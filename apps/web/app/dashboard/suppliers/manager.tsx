@@ -10,21 +10,26 @@ import {
   Badge,
   Button,
   Card,
+  ConfirmDialog,
   EmptyState,
   ErrorNotice,
   Field,
   Input,
+  Select,
   Spinner,
   displayName,
   friendlyError,
+  trpcErrorCode,
   useToast,
   useSingleFlight,
 } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
+import { formatPercent } from '@/lib/i18n/format';
 import { components } from '@/lib/i18n/messages/components';
 import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
 import {
   DAY_KEYS,
+  duplicateKindOf,
   emptyForm,
   matchesSupplierFilter,
   parsePaymentTerms,
@@ -32,6 +37,7 @@ import {
   validateSupplierForm,
   type Day,
   type FormState,
+  type VatChoice,
 } from './form-logic';
 
 /**
@@ -47,6 +53,7 @@ interface Supplier {
   contactEmail: string | null;
   contactWhatsapp: string | null;
   paymentTerms: string | null;
+  vatRate: string | null;
   deliverySchedule: DeliverySchedule | null;
   active: boolean;
   sourcePlatform: string | null;
@@ -63,6 +70,8 @@ export function SupplierManager() {
   const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState('');
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  // Reactivation refused for a duplicate ח.פ. — ask, then retry with allowDuplicate.
+  const [reactivate, setReactivate] = useState<Supplier | null>(null);
 
   const invalidate = () => utils.suppliers.list.invalidate();
   const create = trpc.suppliers.create.useMutation({
@@ -77,9 +86,17 @@ export function SupplierManager() {
       toast.success(t(row.active ? 'manager.activated' : 'manager.deactivated', { name: row.name }));
       void invalidate();
     },
-    onError: (e) => toast.error(friendlyError(e, tc)),
+    onError: (e, vars) => {
+      const s = suppliersList().find((x) => x.id === vars.supplierId);
+      if (vars.active && !vars.allowDuplicate && duplicateKindOf(trpcErrorCode(e)) === 'businessId' && s) {
+        setReactivate(s);
+        return;
+      }
+      toast.error(friendlyError(e, tc));
+    },
     onSettled: () => setTogglingId(null),
   });
+  const suppliersList = () => (list.data ?? []) as Supplier[];
 
   const suppliers = useMemo(() => (list.data ?? []) as Supplier[], [list.data]);
   const visible = useMemo(
@@ -139,8 +156,16 @@ export function SupplierManager() {
           initial={emptyForm}
           submitting={create.isPending}
           error={create.error ? friendlyError(create.error, tc) : null}
-          onCancel={() => setCreating(false)}
-          onSubmit={(form) => once(() => create.mutateAsync(toCreateInput(form)))}
+          duplicate={duplicateKindOf(trpcErrorCode(create.error))}
+          onCancel={() => {
+            create.reset();
+            setCreating(false);
+          }}
+          onSubmit={(form, allowDuplicate) =>
+            once(() =>
+              create.mutateAsync({ ...toCreateInput(form), ...(allowDuplicate ? { allowDuplicate: true } : {}) }),
+            )
+          }
         />
       )}
 
@@ -173,6 +198,22 @@ export function SupplierManager() {
           ))}
         </ul>
       )}
+      <ConfirmDialog
+        open={reactivate !== null}
+        danger={false}
+        title={t('duplicate.reactivateTitle')}
+        body={reactivate ? <p>{t('duplicate.reactivateBody', { name: reactivate.name })}</p> : null}
+        confirmLabel={t('duplicate.reactivateConfirm')}
+        cancelLabel={t('duplicate.keep')}
+        loading={setActive.isPending}
+        onConfirm={() => {
+          if (!reactivate) return;
+          setTogglingId(reactivate.id);
+          setActive.mutate({ supplierId: reactivate.id, active: true, allowDuplicate: true });
+          setReactivate(null);
+        }}
+        onClose={() => setReactivate(null)}
+      />
     </div>
   );
 }
@@ -232,6 +273,11 @@ function SupplierRow({
                 />
               </span>
             )}
+            <span className="tabular-nums" data-testid="supplier-vat">
+              {supplier.vatRate === null
+                ? t('manager.vatDefault')
+                : t('manager.vat', { rate: formatPercent(Number(supplier.vatRate), locale, 2) })}
+            </span>
             {days.length > 0 ? (
               <span>
                 {t('manager.delivery', {
@@ -266,24 +312,31 @@ export function SupplierForm({
   initial,
   submitting,
   error,
+  duplicate = null,
   onCancel,
   onSubmit,
   cancelLabel,
+  storedVatRate = null,
 }: {
   title: string;
   initial: FormState;
   submitting: boolean;
   error: string | null;
+  /** The server refused a duplicate ח.פ. / name: show why and offer "save anyway". */
+  duplicate?: 'businessId' | 'name' | null;
   onCancel: () => void;
-  onSubmit: (form: FormState) => void;
+  onSubmit: (form: FormState, allowDuplicate?: boolean) => void;
   cancelLabel?: string;
+  /** The stored rate when it is neither 0% nor 18% (kept unless changed). */
+  storedVatRate?: string | null;
 }) {
   const t = useT(suppliersNs);
+  const locale = useLocale();
   const [form, setForm] = useState<FormState>(initial);
   const [touched, setTouched] = useState(false);
   const errors = validateSupplierForm(form);
   const set =
-    (k: Exclude<keyof FormState, 'schedule'>) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    (k: Exclude<keyof FormState, 'schedule' | 'vatRate'>) => (e: React.ChangeEvent<HTMLInputElement>) =>
       setForm((f) => ({ ...f, [k]: e.target.value }));
   const toggleDay = (day: Day) => () =>
     setForm((f) => {
@@ -380,6 +433,21 @@ export function SupplierForm({
             placeholder={t('form.paymentTermsPlaceholder')}
           />
         </Field>
+        <Field label={t('form.vatRate')} htmlFor="sup-vat" hint={t('form.vatHint')}>
+          <Select
+            id="sup-vat"
+            value={form.vatRate}
+            onChange={(e) => setForm((f) => ({ ...f, vatRate: e.target.value as VatChoice }))}
+            aria-describedby="sup-vat-hint"
+          >
+            <option value="0.18">{t('form.vatStandard')}</option>
+            <option value="0">{t('form.vatProduce')}</option>
+            <option value="default">{t('form.vatDefault')}</option>
+            {initial.vatRate === 'other' && storedVatRate != null ? (
+              <option value="other">{t('form.vatOther', { rate: formatPercent(Number(storedVatRate), locale, 2) })}</option>
+            ) : null}
+          </Select>
+        </Field>
         <fieldset className="sm:col-span-2">
           <legend className="mb-2 text-sm font-medium text-ink">{t('form.deliveryTitle')}</legend>
           <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 sm:grid-cols-4">
@@ -418,11 +486,35 @@ export function SupplierForm({
           <p className="mt-2 text-xs text-subtle">{t('form.deliveryHint')}</p>
         </fieldset>
       </div>
-      {error && (
+      {duplicate ? (
+        <div
+          role="alert"
+          className={`mt-3 rounded-xl border p-3 text-sm ${
+            duplicate === 'businessId' ? 'border-danger/40 bg-danger/5' : 'border-warn/40 bg-warn/5'
+          }`}
+        >
+          <p className={`font-semibold ${duplicate === 'businessId' ? 'text-danger' : 'text-warn'}`}>
+            {t(duplicate === 'businessId' ? 'duplicate.businessIdTitle' : 'duplicate.nameTitle')}
+          </p>
+          <p className="mt-1 text-ink">
+            {t(duplicate === 'businessId' ? 'duplicate.businessIdBody' : 'duplicate.nameBody')}
+          </p>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="mt-2"
+            loading={submitting}
+            onClick={() => onSubmit(form, true)}
+          >
+            {t('duplicate.saveAnyway')}
+          </Button>
+        </div>
+      ) : error ? (
         <p role="alert" className="mt-3 text-sm text-danger">
           {error}
         </p>
-      )}
+      ) : null}
       <div className="mt-4 flex items-center gap-2">
         <Button type="submit" variant="primary" size="sm" loading={submitting}>
           {t('form.save')}
