@@ -320,12 +320,15 @@ describe('recipes: refuter regressions', () => {
 
   it('D4: mangled numbers are rejected, not reinterpreted', async () => {
     const res = await caller().recipes.importCsv({
-      csv: ['recipe,ingredient,quantity,unit,waste_pct,menu_price', 'n1,Flour,1,ק״ג,0x10,', 'n2,Flour,1,ק״ג,1e1,', 'n3,Flour,1,ק״ג,,"68,50"'].join('\n'),
+      csv: ['recipe,ingredient,quantity,unit,waste_pct,menu_price', 'n1,Flour,1,ק״ג,0x10,', 'n2,Flour,1,ק״ג,1e1,', 'n3,Flour,1,ק״ג,,"1.250"'].join('\n'),
       dryRun: true,
     });
     expect(res.errors.map((e) => e.code).sort()).toEqual(['badPrice', 'badWaste', 'badWaste']);
     const ok = await caller().recipes.importCsv({ csv: 'recipe,ingredient,quantity,unit,menu_price\nn4,Flour,1,ק״ג,"1,250.50"', dryRun: true });
     expect(ok.ok).toBe(true);
+    // G-13: a decimal comma is a price, not a mangled number ("68,50" = ₪68.50); "1.250" above stays refused (ambiguous).
+    const comma = await caller().recipes.importCsv({ csv: 'recipe,ingredient,quantity,unit,menu_price\nn5,Flour,1,ק״ג,"68,50"', dryRun: true });
+    expect(comma.ok).toBe(true);
   });
 
   it('names are unique case-insensitively; waste keeps ≤ 2 decimals exactly', async () => {
