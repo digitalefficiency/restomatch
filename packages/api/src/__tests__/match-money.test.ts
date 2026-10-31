@@ -16,7 +16,7 @@ import { appRouter } from '../index';
 import type { AppContext } from '../context';
 import { normalizeInvoiceNumber } from '../match/buildMatchInput';
 import { backfillPriceHistory, writePriceHistoryForInvoice } from '../match/priceHistory';
-import { decisionStillApplies, matchActivitySummary, pairPriorDecisions, type PriorDecision } from '../match/persist';
+import { decisionStillApplies, matchActivitySummary, matchAlert, pairPriorDecisions, type PriorDecision } from '../match/persist';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -552,6 +552,37 @@ describe('the feed tells the hero’s story (matchActivitySummary)', () => {
     // Pending a PO link, plus the small VAT finding that counts as leak (the hero counts it too).
     expect(ev!.detail).toBe(`${A.supplierName} · ממתינה לשיוך להזמנה · חריגה אחת · הפסד פוטנציאלי ₪1`);
     expect(ev!.metadata).toMatchObject({ pendingLink: true, poMatched: false, leakCount: 1, leakIls: 1 });
+  });
+});
+
+describe('match alerts (push / WhatsApp / approval email) use the hero leak rule, not the engine total (money review E)', () => {
+  const f = (type: string, severity: string, deltaAmount: number, resolutionStatus = 'open') => ({ type, severity, deltaAmount, resolutionStatus });
+
+  it('a MISSING_ON_INVOICE line and an info line are never in the alert ₪', () => {
+    const s = matchActivitySummary([f('MISSING_ON_INVOICE', 'block', 640), f('QTY_SHORT', 'info', 50), f('PRICE_HIGHER', 'warn', 104.8)], 5000);
+    const a = matchAlert(s);
+    expect(a.summary).toBe('פער אחד, סה"כ הפסד פוטנציאלי ₪105 · 1 לבדיקה');
+    expect(a).toMatchObject({ count: 1, atRiskIls: '₪105' });
+  });
+
+  it('plural, capped at the invoice total like the hero', () => {
+    const a = matchAlert(matchActivitySummary([f('DUPLICATE_INVOICE', 'block', 1180), f('PRICE_HIGHER', 'block', 400)], 1180));
+    expect(a).toEqual({ summary: '2 פערים, סה"כ הפסד פוטנציאלי ₪1,180', count: 2, atRiskIls: '₪1,180' });
+  });
+
+  it('a review-only match reads "N לבדיקה" with no ₪', () => {
+    const a = matchAlert(matchActivitySummary([f('MISSING_ON_INVOICE', 'block', 640), f('PRICE_LOWER', 'warn', 12)], 5000));
+    expect(a).toEqual({ summary: '2 לבדיקה', count: 2, atRiskIls: null });
+    expect(a.summary).not.toContain('₪');
+  });
+
+  it('runForInvoice returns the hero-rule leakIls (the correction screen’s "דליפה") and keeps the engine total raw (F)', async () => {
+    const A = await seedTenant(db, 'A');
+    const res = await ownerCaller(A).match.runForInvoice({ invoiceId: A.invoiceId });
+    const [ev] = await db.select().from(activityEvents).where(eq(activityEvents.entityId, res.matchRunId!));
+    const meta = ev!.metadata as { leakIls: number; potentialLossIls: number };
+    expect(res.leakIls).toBe(meta.leakIls);
+    expect(res.totalDiscrepancyAmount).toBe(meta.potentialLossIls);
   });
 });
 

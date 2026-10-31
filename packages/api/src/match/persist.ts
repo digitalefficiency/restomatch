@@ -287,12 +287,37 @@ export function matchActivitySummary(
   return { detail: parts.join(' · '), leakCount: leaking.length, leakIls, pendingLink, poMatched, reviewCount };
 }
 
+/**
+ * The decision alert (push / WhatsApp / the approval email): the hero's leak rule
+ * (matchActivitySummary), never the engine total — a MISSING_ON_INVOICE or an info
+ * line is never ₪ at risk. A review-only match names no ₪.
+ */
+export function matchAlert(s: { leakCount: number; leakIls: number; reviewCount: number; pendingLink: boolean }): {
+  summary: string;
+  count: number;
+  atRiskIls: string | null;
+} {
+  if (s.leakCount > 0) {
+    const ils = `₪${Math.round(s.leakIls).toLocaleString('he-IL')}`;
+    const n = s.leakCount === 1 ? 'פער אחד' : `${s.leakCount} פערים`;
+    const review = s.reviewCount > 0 ? ` · ${s.reviewCount} לבדיקה` : '';
+    return { summary: `${n}, סה"כ הפסד פוטנציאלי ${ils}${review}`, count: s.leakCount, atRiskIls: ils };
+  }
+  if (s.reviewCount > 0) return { summary: `${s.reviewCount} לבדיקה`, count: s.reviewCount, atRiskIls: null };
+  return { summary: s.pendingLink ? 'ממתינה לשיוך להזמנה' : 'לבדיקה', count: 0, atRiskIls: null };
+}
+
 export interface PersistMatchResult {
   matchRunId: string;
   /** Roles that an open (non-auto-approved) discrepancy routed to — the worker
    *  notifies these; the interactive router ignores them. */
   rolesNeedingNotification: UserRole[];
   discrepancyCount: number;
+  /** The hero's leak rule for this run (matchActivitySummary) — what alerts and screens tell. */
+  leakIls: number;
+  leakCount: number;
+  reviewCount: number;
+  pendingLink: boolean;
 }
 
 /**
@@ -463,5 +488,9 @@ export async function persistMatchRun(
     matchRunId: matchRun.id,
     rolesNeedingNotification: [...rolesNeedingNotification],
     discrepancyCount: result.discrepancies.length,
+    leakIls: feed.leakIls,
+    leakCount: feed.leakCount,
+    reviewCount: feed.reviewCount,
+    pendingLink: feed.pendingLink,
   };
 }

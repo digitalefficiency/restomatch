@@ -184,7 +184,7 @@ export {
   withScanGrId,
 } from './receiving/matchTriggers';
 export { backfillPriceHistory, writePriceHistoryForInvoice } from './match/priceHistory';
-export { loadPriorDecisions, matchActivitySummary, persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
+export { loadPriorDecisions, matchActivitySummary, matchAlert, persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
 export {
   parseCatalogFile,
   autoDetectMapping,
