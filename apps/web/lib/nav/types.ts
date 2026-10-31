@@ -24,7 +24,7 @@ export type BarLabel =
   | 'today'
   | 'home'
   | 'approvals'
-  | 'leaks'
+  | 'prices'
   | 'orders'
   | 'receive'
   | 'receipts'
@@ -56,8 +56,6 @@ export interface RouteDef {
   chain?: 'only' | 'single';
   /** Group for a single-branch owner when it differs (branches → ניהול). */
   groupWhenSingle?: GroupKey;
-  /** Roles that never get a nav entry even though the gate lets them in (owner decision pending). */
-  navHiddenFor?: readonly UserRole[];
   nav: NavKind;
   /** Field task route: no bottom bar (focus mode). */
   field?: boolean;

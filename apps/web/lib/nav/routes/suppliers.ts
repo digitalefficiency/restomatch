@@ -11,18 +11,17 @@ export const routes: RouteDef[] = [
     aliases: ['ספק', 'suppliers', 'vendors'],
   },
   {
-    // Supplier ledger grid (flag supplierLedger): every invoice reader, incl. the
-    // bookkeeper's CSV — never the chef. Mirrors suppliers.ledgerGrid.
-    // First nav path for the bookkeeper (SUP-01). Owner decision (2026-10-25):
-    // the receiver sees no supplier ledger or ₪ screens — no nav entry; the
-    // server-side block is H-11 (human PR), which then drops `receiver` here.
+    // Supplier ledger grid (flag supplierLedger): owner, manager and the
+    // bookkeeper's CSV — never the chef. First nav path for the bookkeeper
+    // (SUP-01). Owner decision (2026-10-25): the receiver sees no supplier
+    // ledger or ₪ screens, so the route gate excludes them; the matching block
+    // in suppliers.ledgerGrid is H-11 (human PR).
     key: 'ledger',
     path: '/dashboard/suppliers/ledger',
     group: 'money',
     rank: 60,
-    roles: ['owner', 'manager', 'receiver', 'bookkeeper'],
+    roles: ['owner', 'manager', 'bookkeeper'],
     features: ['supplierLedger'],
-    navHiddenFor: ['receiver'],
     nav: 'item',
     aliases: ['כרטסת', 'כרט', 'הנה״ח', 'ledger'],
   },

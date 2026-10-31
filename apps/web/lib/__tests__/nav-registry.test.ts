@@ -8,6 +8,7 @@ import { REGISTRY, ancestry, matchRoute, routeByKey } from '../nav/registry';
 import {
   activeNavKey,
   barItems,
+  canFollowPath,
   canOpen,
   canOpenPath,
   crumbsFor,
@@ -155,17 +156,22 @@ describe('ROUTE_ROLES generated from the registry', () => {
   const sorted = (m: Record<string, UserRole[]>) =>
     Object.fromEntries(Object.entries(m).map(([k, v]) => [k, [...v].sort()]));
 
-  it("equals today's map except the explicit leaks/report entry", () => {
-    const { ['/dashboard/leaks/report']: report, ...rest } = ROUTE_ROLES;
-    expect(sorted(rest)).toEqual(sorted(ROUTE_ROLES_BEFORE));
-    // Delta 1: now explicit, matching owner.leakReport (managerProcedure) — the
-    // bookkeeper no longer opens a page whose data call is always FORBIDDEN.
-    expect(report).toEqual(['owner', 'manager']);
+  it("equals today's map except the supplier ledger, which drops the receiver", () => {
+    const { ['/dashboard/suppliers/ledger']: ledger, ...rest } = ROUTE_ROLES;
+    const { ['/dashboard/suppliers/ledger']: ledgerBefore, ...restBefore } = ROUTE_ROLES_BEFORE;
+    expect(sorted(rest)).toEqual(sorted(restBefore));
+    // The only delta (owner decision 2026-10-25): the receiver gets no supplier ledger (₪ totals).
+    expect(ledgerBefore).toContain('receiver');
+    expect(ledger).toEqual(['owner', 'manager', 'bookkeeper']);
+    // The printable leak report keeps inheriting /leaks (no silent bounce for the bookkeeper's button).
+    expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
+    expect(allowedRolesForPath('/dashboard/leaks/report')).toContain('bookkeeper');
   });
 
-  it('delta 2: the supplier ledger keeps its roles and gains a bookkeeper nav entry', () => {
-    expect(ROUTE_ROLES['/dashboard/suppliers/ledger']).toEqual(ROUTE_ROLES_BEFORE['/dashboard/suppliers/ledger']);
+  it('the supplier ledger gains a bookkeeper nav entry and is closed to the receiver', () => {
     expect(navGroups(viewer('bookkeeper')).flatMap((g) => g.items.map((d) => d.key))).toContain('ledger');
+    expect(canOpenPath('receiver', '/dashboard/suppliers/ledger')).toBe(false);
+    expect(canOpenPath('receiver', '/dashboard/suppliers/ledger?m=2026-10')).toBe(false);
   });
 
   it('never loosens a path compared to before, for every role and every page', () => {
@@ -209,8 +215,6 @@ describe('nav per role', () => {
           (d) =>
             (d.nav === 'item' || d.nav === 'linked') &&
             canOpen(role, d) &&
-            // Owner decision: kept off this role's nav until the server-side block lands.
-            !d.navHiddenFor?.includes(role) &&
             !(d.chain === 'only' && !showChain) &&
             !(d.chain === 'single' && showChain),
         );
@@ -256,7 +260,7 @@ describe('bottom bars', () => {
     expect(bar(viewer('receiver'))).toEqual(['home:today', 'receiving:receipts']);
     expect(bar(viewer('chef'))).toEqual(['home:today', 'inventory:count', 'recipes:dishes']);
     expect(bar(viewer('manager'))).toEqual(['home:today', 'orders:orders', 'receiving:receive', 'approvals:approvals']);
-    expect(bar(viewer('owner'))).toEqual(['home:home', 'approvals:approvals', 'leaks:leaks', 'orders:orders']);
+    expect(bar(viewer('owner'))).toEqual(['home:home', 'approvals:approvals', 'leaks:prices', 'orders:orders']);
     expect(bar(viewer('bookkeeper'))).toEqual(['home:home', 'approvals:approvals', 'payRun:payments', 'inbox:invoices']);
   });
 
@@ -304,6 +308,19 @@ describe('matching, field routes, active item, crumbs, titles', () => {
     }
   });
 
+  it('"דליפה" names only the monthly leak; price creep is "מחירים שעלו" (nav, titles, search)', () => {
+    const t = createTranslator('he', nav) as (k: string) => string;
+    expect(t('links.leaks')).toBe('מחירים שעלו');
+    expect(t('bar.prices')).toBe('מחירים');
+    expect(t('links.leaksBreakdown')).toContain('דליפה');
+    const aliases = routeByKey('leaks')!.aliases ?? [];
+    expect(aliases.some((a) => a.includes('דליפ'))).toBe(false);
+    const screens = navGroups(viewer('owner')).flatMap((g) =>
+      g.items.map((d) => ({ key: d.key, href: d.path, label: t(`links.${d.key}`), aliases: d.aliases ?? [] })),
+    );
+    expect(buildScreenOptions('מחירים', screens)[0]?.id).toBe('leaks');
+  });
+
   it('a detail page lights its nav parent', () => {
     expect(activeNavKey('/dashboard/invoices/abc')).toBe('inbox');
     expect(activeNavKey('/dashboard/products/abc')).toBe('catalog');
@@ -313,14 +330,19 @@ describe('matching, field routes, active item, crumbs, titles', () => {
   });
 
   it('crumbs: concrete dynamic parents, plain text where the role cannot open', () => {
-    expect(crumbsFor('/dashboard/suppliers/abc/leak-card', 'owner')).toEqual([
+    expect(crumbsFor('/dashboard/suppliers/abc/leak-card', viewer('owner'))).toEqual([
       { key: 'suppliers', href: '/dashboard/suppliers' },
       { key: 'supplierDetail', href: '/dashboard/suppliers/abc' },
       { key: 'supplierLeakCard' },
     ]);
     // The bookkeeper may open an invoice but not every parent of it.
-    expect(crumbsFor('/dashboard/invoices/abc', 'receiver')).toEqual([{ key: 'inbox' }, { key: 'invoiceDetail' }]);
-    expect(crumbsFor('/dashboard/invoices/abc', 'bookkeeper')[0]).toEqual({ key: 'inbox', href: '/dashboard/inbox' });
+    expect(crumbsFor('/dashboard/invoices/abc', viewer('receiver'))).toEqual([{ key: 'inbox' }, { key: 'invoiceDetail' }]);
+    expect(crumbsFor('/dashboard/invoices/abc', viewer('bookkeeper'))[0]).toEqual({ key: 'inbox', href: '/dashboard/inbox' });
+    // Flag-aware: without the ingest flags the inbox 404s, so the crumb is plain text.
+    expect(crumbsFor('/dashboard/invoices/abc', viewer('owner', { features: [] }))[0]).toEqual({ key: 'inbox' });
+    expect(canFollowPath(viewer('owner', { features: [] }), '/dashboard/inbox')).toBe(false);
+    expect(canFollowPath(viewer('owner', { features: ['ingestEmail'] }), '/dashboard/inbox')).toBe(true);
+    expect(canFollowPath(viewer('owner', { features: [] }), '/dashboard/approvals')).toBe(true);
     expect(canOpenPath('bookkeeper', '/dashboard/suppliers')).toBe(false);
     expect(canOpenPath('bookkeeper', '/dashboard/suppliers/ledger?m=2026-10')).toBe(true);
   });
@@ -407,6 +429,17 @@ describe('Breadcrumbs: a crumb the role cannot open is plain text', () => {
     expect(render('bookkeeper')).not.toContain('href="/dashboard/suppliers"');
     expect(render('receiver')).not.toContain('href="/dashboard/suppliers"');
     expect(render('bookkeeper')).toContain('ספקים');
+  });
+
+  it('a crumb to a flagged-off page is plain text', () => {
+    const html = renderToStaticMarkup(
+      h(
+        NavProvider,
+        { value: { ...viewer('owner', { features: [] }), branch: null } },
+        h(Breadcrumbs, { items: [{ label: 'נכנסות', href: '/dashboard/inbox' }, { label: 'MF-1' }], label: 'x' }),
+      ),
+    );
+    expect(html).not.toContain('href="/dashboard/inbox"');
   });
 
   it('outside the dashboard (no viewer) links stay as given', () => {

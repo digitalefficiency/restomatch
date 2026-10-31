@@ -106,10 +106,18 @@ export function DashboardSearch({
     [screenOptions, results.data, enabled, locale, role, t],
   );
 
-  // Reset the highlighted row whenever the result set changes.
+  // When the result set changes (e.g. records arrive after the screens), keep
+  // the highlighted row on the same result; reset to the first only when it is gone.
+  const activeKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    setActiveIdx(options.length > 0 ? 0 : -1);
+    const key = activeKeyRef.current;
+    const kept = key ? options.findIndex((o) => `${o.kind}:${o.id}` === key) : -1;
+    setActiveIdx(kept >= 0 ? kept : options.length > 0 ? 0 : -1);
   }, [options]);
+  useEffect(() => {
+    const o = activeIdx >= 0 ? options[activeIdx] : undefined;
+    activeKeyRef.current = o ? `${o.kind}:${o.id}` : null;
+  }, [activeIdx, options]);
 
   const showPanel = open && raw.trim().length > 0;
 

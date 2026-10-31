@@ -78,15 +78,14 @@ describe('wave 1 · S12 routes (₪-back tracker, monthly report)', () => {
 });
 
 describe('W1-03 · ROUTE_ROLES from the nav registry', () => {
-  it('the printable leak report is owner / manager (matches owner.leakReport), explicitly', () => {
-    expect(ROUTE_ROLES['/dashboard/leaks/report']).toEqual(['owner', 'manager']);
-    expect(allowedRolesForPath('/dashboard/leaks/report')).not.toContain('bookkeeper');
-    // The rest of /leaks keeps the finance tier.
-    expect(allowedRolesForPath('/dashboard/leaks/breakdown')).toContain('bookkeeper');
+  it('the printable leak report inherits the /leaks gate (the bookkeeper sees its role card, not a bounce)', () => {
+    expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
+    expect(allowedRolesForPath('/dashboard/leaks/report')).toEqual(['owner', 'manager', 'bookkeeper']);
   });
 
-  it('the supplier ledger keeps its readers (never the chef)', () => {
-    expect(allowedRolesForPath('/dashboard/suppliers/ledger')).toEqual(['owner', 'manager', 'receiver', 'bookkeeper']);
+  it('the supplier ledger: owner, manager, bookkeeper — never the receiver (owner decision) or the chef', () => {
+    expect(allowedRolesForPath('/dashboard/suppliers/ledger')).toEqual(['owner', 'manager', 'bookkeeper']);
+    expect(canSeeRoute('receiver', '/dashboard/suppliers/ledger')).toBe(false);
     expect(canSeeRoute('chef', '/dashboard/suppliers/ledger')).toBe(false);
   });
 });

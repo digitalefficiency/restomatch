@@ -46,7 +46,8 @@ interface ShellUi {
   toggleRail: () => void;
   moreOpen: boolean;
   openMore: (opener?: HTMLElement | null) => void;
-  closeMore: () => void;
+  /** `restoreFocus: false` when closing because of a navigation: the new page's h1 takes focus. */
+  closeMore: (opts?: { restoreFocus?: boolean }) => void;
   searchOpen: boolean;
   openSearch: (opener?: HTMLElement | null) => void;
   closeSearch: () => void;
@@ -124,33 +125,35 @@ export function ShellFrame({ initialRail, children }: { initialRail: boolean; ch
     return () => document.removeEventListener('keydown', onKey);
   }, [toggleRail]);
 
-  const value: ShellUi = {
-    rail,
-    toggleRail,
-    moreOpen,
-    openMore: (opener) => {
-      openerRef.current = opener ?? (document.activeElement as HTMLElement | null);
-      setSearchOpen(false);
-      setMoreOpen(true);
-    },
-    closeMore: () => {
-      setMoreOpen(false);
-      const opener = openerRef.current;
-      requestAnimationFrame(() => restoreFocus(opener));
-    },
-    searchOpen,
-    openSearch: (opener) => {
+  // Stable callbacks: the overlays' effects depend on them, and a fresh function
+  // per render would re-run those effects (and re-focus the sheet's close button).
+  const openMore = useCallback((opener?: HTMLElement | null) => {
+    openerRef.current = opener ?? (document.activeElement as HTMLElement | null);
+    setSearchOpen(false);
+    setMoreOpen(true);
+  }, []);
+  const closeMore = useCallback((opts?: { restoreFocus?: boolean }) => {
+    setMoreOpen(false);
+    if (opts?.restoreFocus === false) return;
+    const opener = openerRef.current;
+    requestAnimationFrame(() => restoreFocus(opener));
+  }, []);
+  const openSearch = useCallback(
+    (opener?: HTMLElement | null) => {
       // Opened from the "עוד" sheet: focus returns to its opener ("עוד") afterwards.
       if (!moreOpen) openerRef.current = opener ?? (document.activeElement as HTMLElement | null);
       setMoreOpen(false);
       setSearchOpen(true);
     },
-    closeSearch: () => {
-      setSearchOpen(false);
-      const opener = openerRef.current;
-      requestAnimationFrame(() => restoreFocus(opener));
-    },
-  };
+    [moreOpen],
+  );
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    const opener = openerRef.current;
+    requestAnimationFrame(() => restoreFocus(opener));
+  }, []);
+
+  const value: ShellUi = { rail, toggleRail, moreOpen, openMore, closeMore, searchOpen, openSearch, closeSearch };
 
   return (
     <ShellUiProvider value={value}>
@@ -379,8 +382,13 @@ export function Sidebar({
       return next;
     });
 
-  // The group holding the current page is always open.
-  const isOpen = (g: NavGroup) => open.has(g.group) || g.items.some((d) => d.key === activeKey);
+  // Navigating opens the group holding the current page; its toggle still works afterwards.
+  const activeGroup = [...groups, ...footer].find((g) => g.items.some((d) => d.key === activeKey))?.group;
+  useEffect(() => {
+    if (!activeGroup) return;
+    setOpen((prev) => (prev.has(activeGroup) ? prev : new Set(prev).add(activeGroup)));
+  }, [activeGroup]);
+  const isOpen = (g: NavGroup) => open.has(g.group);
   const RailIcon = rail ? PanelLeftOpen : PanelLeftClose;
 
   return (
@@ -501,7 +509,7 @@ export function SupportLinks({ variant }: { variant: 'sidebar' | 'rail' | 'sheet
 export function TopCrumbs({ viewer }: { viewer: NavViewer }) {
   const t = useT(nav) as unknown as (key: string) => string;
   const pathname = usePathname();
-  const crumbs = crumbsFor(pathname, viewer.role);
+  const crumbs = crumbsFor(pathname, viewer);
   if (crumbs.length === 0) return null;
   return (
     <nav aria-label={t('shell.breadcrumbs')} className="hidden min-w-0 lg:block" data-testid="top-crumbs">
@@ -562,7 +570,7 @@ export function SearchSheet({ role }: { role: NavViewer['role'] }) {
     if (!searchOpen) return;
     ref.current?.querySelector<HTMLInputElement>('input')?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeSearch();
+      if (e.key === 'Escape' && !e.defaultPrevented) closeSearch();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -854,15 +862,28 @@ export function MoreSheet({
   // Close on navigation.
   const lastPath = useRef(pathname);
   useEffect(() => {
-    if (lastPath.current !== pathname && moreOpen) closeMore();
+    if (lastPath.current !== pathname && moreOpen) closeMore({ restoreFocus: false });
     lastPath.current = pathname;
   }, [pathname, moreOpen, closeMore]);
+
+  // Rotating a tablet past 1024 px hides the sheet (lg:hidden): close it, or the app would stay inert.
+  useEffect(() => {
+    if (!moreOpen) return;
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const onChange = () => {
+      if (mq.matches) closeMore({ restoreFocus: false });
+    };
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [moreOpen, closeMore]);
 
   useEffect(() => {
     if (!moreOpen) return;
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeMore();
+      // An inner control that handled Esc itself (the language menu) keeps the sheet open.
+      if (e.key === 'Escape' && !e.defaultPrevented) closeMore();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -871,7 +892,7 @@ export function MoreSheet({
   if (!mounted || !moreOpen) return null;
   return <>{createPortal(
     <div className="fixed inset-0 z-50 lg:hidden">
-      <button type="button" tabIndex={-1} aria-hidden="true" className="absolute inset-0 bg-ink/40" onClick={closeMore} />
+      <button type="button" tabIndex={-1} aria-hidden="true" className="absolute inset-0 bg-ink/40" onClick={() => closeMore()} />
       <div
         id="dashboard-drawer"
         role="dialog"
@@ -887,7 +908,7 @@ export function MoreSheet({
           <button
             ref={closeRef}
             type="button"
-            onClick={closeMore}
+            onClick={() => closeMore()}
             aria-label={t('menu.close')}
             className={cn('inline-flex h-11 w-11 items-center justify-center rounded-xl text-muted hover:text-ink', focusRing)}
           >

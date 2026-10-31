@@ -8,8 +8,9 @@ export const routes: RouteDef[] = [
     rank: 10,
     roles: ['owner', 'manager', 'bookkeeper'],
     nav: 'item',
-    bar: { owner: { slot: 3, label: 'leaks' } },
-    aliases: ['דליפות', 'בלש דליפות', 'leak', 'leaks', 'detective'],
+    bar: { owner: { slot: 3, label: 'prices' } },
+    // Price creep (the detective): "דליפה" names only the monthly leak.
+    aliases: ['מחירים', 'מחירים שעלו', 'זחילת מחירים', 'בלש', 'price', 'prices', 'price creep', 'detective'],
   },
   { key: 'leaksBreakdown', path: '/dashboard/leaks/breakdown', group: 'leaks', parent: 'leaks', nav: 'linked' },
   {
@@ -25,13 +26,14 @@ export const routes: RouteDef[] = [
     aliases: ['הוכחה', 'proof'],
   },
   {
-    // Now explicit (leaks-22): the printable report calls owner.leakReport, a
-    // managerProcedure — the bookkeeper used to land on a warn "owner only" card.
+    // Inherits the /leaks gate. The bookkeeper reaches it from the leaks page and
+    // gets the page's own role card until owner.leakReport admits them (owner
+    // decision: the bookkeeper reads everything); a gate here would turn that
+    // button into a silent bounce home.
     key: 'leaksReport',
     path: '/dashboard/leaks/report',
     group: 'leaks',
     parent: 'leaks',
-    roles: ['owner', 'manager'],
     nav: 'linked',
     aliases: ['דוח דליפות', 'pdf', 'report'],
   },
