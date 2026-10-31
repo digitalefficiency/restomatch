@@ -551,9 +551,12 @@ export const approvalsRouter = router({
           channel: 'desk',
         });
         // After the CAS (a stale card still gets its CONFLICT), still inside the
-        // transaction: no owner connection → INTERNAL, and the escalation rolls back.
-        escalationReader(ctx);
-        await notifyOwnersOfEscalation(tx, ctx, row, input.note ?? null, auditId);
+        // transaction. A non-owner's escalation must reach an owner: no owner
+        // connection → INTERNAL, and the escalation rolls back. An owner who
+        // escalates IS an owner it reached; co-owners are told when the owner
+        // connection is there.
+        if (ctx.session.role !== 'owner') escalationReader(ctx);
+        if (ctx.adminDb) await notifyOwnersOfEscalation(tx, ctx, row, input.note ?? null, auditId);
         return updated;
       }),
     ),

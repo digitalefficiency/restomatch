@@ -98,4 +98,13 @@ describe('approvals.escalate', () => {
     expect(d!.resolutionStatus).toBe('open');
     expect(await db.select().from(auditLog).where(eq(auditLog.action, 'discrepancy.escalated'))).toHaveLength(0);
   });
+
+  it('an owner escalating without the owner connection still escalates (the owner is reached) and queues nothing', async () => {
+    const ctx: AppContext = { db, session: { userId: T.ownerUserId, restaurantId: T.restaurantId, role: 'owner' } };
+    await appRouter.createCaller(ctx).approvals.escalate({ discrepancyId: T.discrepancyId });
+    const [d] = await db.select().from(discrepancies).where(eq(discrepancies.id, T.discrepancyId));
+    expect(d).toMatchObject({ resolutionStatus: 'escalated', requiresRole: 'owner' });
+    const rows = await db.select().from(notificationsOutbox).where(and(eq(notificationsOutbox.restaurantId, T.restaurantId), eq(notificationsOutbox.relatedEntityType, 'discrepancy')));
+    expect(rows).toHaveLength(0);
+  });
 });
