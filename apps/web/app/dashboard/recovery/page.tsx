@@ -217,6 +217,12 @@ export default async function RecoveryPage({
             </div>
           ) : null}
 
+          {claims.length < summary.claimCount ? (
+            // chain-27: never a silent cut — the tiles count everything, the list says what it shows.
+            <p className="text-sm text-muted" role="status" data-testid="recovery-paged">
+              {t('tracker.paged', { shown: formatNumber(claims.length, locale), total: formatNumber(summary.claimCount, locale) })}
+            </p>
+          ) : null}
           <TrackerClient claims={claims} suggestions={suggestions} nowIso={nowIso} initialTab={initialTab} />
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.4fr] [&>*]:min-w-0">

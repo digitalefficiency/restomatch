@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   CONFIRMED_MOVES,
-  NEXT,
   batchMoves,
   bySupplier,
   confirmAgorot,
@@ -49,6 +48,21 @@ describe('the recovery funnel', () => {
   });
 });
 
+/**
+ * The server's `next[]` per status (packages/api lifecycle.ts). The table's own
+ * cases moved to packages/api/src/__tests__/recovery-transition-batch.test.ts;
+ * here it is only the input the screen receives.
+ */
+const NEXT: Record<RecoveryStatus, RecoveryStatus[]> = {
+  claimed: ['letter_sent', 'acknowledged', 'disputed', 'written_off'],
+  letter_sent: ['acknowledged', 'disputed', 'written_off'],
+  acknowledged: ['disputed', 'written_off'],
+  credited: ['recovered', 'disputed'],
+  recovered: [],
+  disputed: ['letter_sent', 'acknowledged', 'written_off'],
+  written_off: ['claimed'],
+};
+
 describe('row actions: never a money move on select change (chain-01)', () => {
   it('one next step per status', () => {
     expect(nextStep('claimed')).toEqual({ kind: 'move', to: 'letter_sent' });
@@ -59,7 +73,7 @@ describe('row actions: never a money move on select change (chain-01)', () => {
   });
   it('the ⋯ menu holds the other allowed moves, never the primary twice, never a disallowed one', () => {
     for (const s of Object.keys(NEXT) as RecoveryStatus[]) {
-      const menu = menuMoves(s);
+      const menu = menuMoves(s, NEXT[s]);
       for (const to of menu) expect(NEXT[s]).toContain(to);
       const p = nextStep(s);
       if (p?.kind === 'move') expect(menu).not.toContain(p.to);
@@ -69,8 +83,8 @@ describe('row actions: never a money move on select change (chain-01)', () => {
     expect(CONFIRMED_MOVES).toEqual(['written_off', 'recovered']);
   });
   it('a batch offers only the moves valid for EVERY selected claim', () => {
-    expect(batchMoves(['claimed', 'letter_sent'])).toEqual(['acknowledged', 'disputed', 'written_off']);
-    expect(batchMoves(['claimed', 'credited'])).toEqual(['disputed']);
+    expect(batchMoves([NEXT.claimed, NEXT.letter_sent])).toEqual(['acknowledged', 'disputed', 'written_off']);
+    expect(batchMoves([NEXT.claimed, NEXT.credited])).toEqual(['disputed']);
     expect(batchMoves([])).toEqual([]);
   });
 });
@@ -152,5 +166,34 @@ describe('phone cards grouped by supplier', () => {
       ['b', 1, 500],
       ['a', 2, 400],
     ]);
+  });
+});
+
+describe('credit form VAT preview (display only; the server converts)', () => {
+  it('matches the server examples: ₪118.00 incl. at 18% → ₪100.00; half-up', async () => {
+    const { previewExclAgorot } = await import('../logic');
+    expect(previewExclAgorot(11_800, 'incl', 1800)).toBe(10_000);
+    expect(previewExclAgorot(11_800, 'excl', 1800)).toBe(11_800);
+    expect(previewExclAgorot(3, 'incl', 10_000)).toBe(2);
+    expect(previewExclAgorot(59, 'incl', 1800)).toBe(50);
+  });
+  it('"1,250" is ₪1,250.00 and "12,50" is ₪12.50', async () => {
+    const { parseIlsInput } = await import('../parseIls');
+    expect(parseIlsInput('1,250')).toBe(125_000);
+    expect(parseIlsInput('12,50')).toBe(1_250);
+  });
+});
+
+describe('desk ranking: owed ₪ × days overdue (W2-10)', () => {
+  it('ranks by Σ owed × days overdue, then owed; ₪0-owed suppliers never lead', async () => {
+    const { bySupplier } = await import('../logic');
+    const g = bySupplier([
+      { supplierId: 'big-fresh', supplierName: 'A', outstandingAgorot: 90_000, daysOverdue: 0 },
+      { supplierId: 'small-late', supplierName: 'B', outstandingAgorot: 10_000, daysOverdue: 20 },
+      { supplierId: 'credited', supplierName: 'C', outstandingAgorot: 0, daysOverdue: 40 },
+      { supplierId: 'mid-late', supplierName: 'D', outstandingAgorot: 30_000, daysOverdue: 3 },
+    ]);
+    expect(g.map((x) => x.key)).toEqual(['small-late', 'mid-late', 'big-fresh', 'credited']);
+    expect(g[0]!.urgency).toBe(200_000);
   });
 });

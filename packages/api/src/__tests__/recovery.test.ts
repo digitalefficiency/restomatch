@@ -786,3 +786,25 @@ describe('refuter round 4 (S3 fixes)', () => {
     for (const o of await Promise.all([tr, sm])) expect(o).not.toBe('INTERNAL_SERVER_ERROR');
   });
 });
+
+describe('W2-10: history names the actor (chain-05)', () => {
+  it('returns the actor display name and membership role per step; a system step has neither', async () => {
+    // Own tenant: earlier re-match tests replace T's discrepancy.
+    const X = await seedTenant(db, 'RH');
+    await db.update(restaurants).set({ settings: { features: { all: true } } as never }).where(eq(restaurants.id, X.restaurantId));
+    await db.update(discrepancies).set({ resolutionStatus: 'accepted', resolvedAt: new Date() }).where(eq(discrepancies.id, X.discrepancyId));
+    await materializeClaims(db, { restaurantId: X.restaurantId, discrepancyIds: [X.discrepancyId], actorId: X.ownerUserId });
+    const c = appRouter.createCaller({ db, session: { userId: X.ownerUserId, restaurantId: X.restaurantId, role: 'owner' } } as AppContext);
+    const [claim] = await c.recovery.list();
+    await c.recovery.transition({ items: [{ claimId: claim!.id, expectedStatus: 'claimed' }], to: 'letter_sent' });
+    const history = await c.recovery.history({ claimId: claim!.id });
+    expect(history.map((h) => [h.toStatus, h.actorName, h.actorRole])).toEqual([
+      ['claimed', 'Owner RH', 'owner'],
+      ['letter_sent', 'Owner RH', 'owner'],
+    ]);
+    await db.update(discrepancies).set({ resolutionStatus: 'rejected' }).where(eq(discrepancies.id, X.discrepancyId));
+    await syncClaims(db, X.restaurantId);
+    const last = (await c.recovery.history({ claimId: claim!.id })).at(-1)!;
+    expect(last).toMatchObject({ toStatus: 'written_off', actorId: null, actorName: null, actorRole: null });
+  });
+});

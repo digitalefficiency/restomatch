@@ -3,6 +3,7 @@ import type { he } from './he';
 
 export const en: Shape<typeof he> = {
   tracker: {
+    paged: 'Showing {shown} of {total} claims',
     loading: 'Loading the ₪-back tracker',
     errorTitle: 'The ₪-back tracker is not available right now',
     errorBody: 'We could not load the claims. No change was lost — try again.',
@@ -138,6 +139,7 @@ export const en: Shape<typeof he> = {
     recoveredLetGo: 'The part not credited, {amount}, will be closed as let go.',
     recoveredCta: 'Confirm: money back',
     reason: 'Reason (kept in the claim history)',
+    reasonRequired: 'Pick a reason to close it.',
     cancel: 'Back',
     reasons: {
       written_off: {
@@ -153,7 +155,40 @@ export const en: Shape<typeof he> = {
       },
     },
   },
+  reminder: {
+    title: 'Supplier reminders',
+    hint: 'Drafts only. They open in WhatsApp or email only when you click.',
+    line: 'Reminder to {supplier} · {count} claims',
+    why: 'Why?',
+    whyText: 'A week passed with no credit note. The oldest has waited {days} days.',
+    whatsapp: 'Open in WhatsApp',
+    mail: 'Open in email',
+    subject: 'Reminder: credit request · {count} gaps · {amount}',
+    body: 'Hello {supplier}, a reminder about our credit request: {count} gaps totalling {amount} before VAT; the oldest has waited {days} days. A credit note or a corrected invoice would be appreciated. Thank you!',
+  },
+  peek: {
+    claimed: 'Claimed',
+    owed: 'Still owed',
+    invoice: 'Invoice {number}',
+    history: 'History',
+    loading: 'Loading…',
+    retry: 'Try again',
+    system: 'System',
+    open: 'History',
+    role: { owner: 'Owner', manager: 'Manager', bookkeeper: 'Bookkeeper', receiver: 'Receiving', chef: 'Chef' },
+  },
+  exportMenu: {
+    csv: 'Export CSV',
+    xlsx: 'Export Excel',
+    failed: 'The export failed. Try again.',
+  },
   creditForm: {
+    amountAsPrinted: 'Amount as printed on the note',
+    vatLegend: 'The amount on the note is',
+    vat: { incl: 'Incl. VAT', excl: 'Before VAT' },
+    vatRequired: 'Choose whether the amount includes VAT',
+    running: 'Selected {chosen} of {typed} before VAT',
+    diff: 'Difference {amount}',
     title: 'Record a credit note · {supplier}',
     number: 'Credit note number',
     amount: 'Amount (₪, before VAT)',

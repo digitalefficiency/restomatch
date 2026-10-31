@@ -322,6 +322,12 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'recovery.recordCreditNote': 'attack',
   'recovery.creditLineSuggestions': 'isolation',
   'recovery.returnedThisMonth': 'isolation',
+  // W2-10 (added with the procedures; move to coverage/W2-10.ts once W2-01's loader merges).
+  'recovery.letters': 'isolation — recovery-letters.attack.test.ts: a foreign supplierId returns no letter; letters hold only the caller restaurant claims',
+  'recovery.sendLetter': 'attack — recovery-letters.attack.test.ts: a foreign supplierId or claimId is NOT_FOUND and no claim of either tenant moves',
+  'recovery.unsendLetter': 'attack — recovery-letters.attack.test.ts: a foreign claimId is NOT_FOUND and the foreign claim stays letter_sent',
+  'recovery.reminderDraft': 'attack — recovery-letters.attack.test.ts: a foreign supplierId is NOT_FOUND (no name, contact or ₪ leaks)',
+  'recovery.export': 'isolation — recovery-letters.attack.test.ts: the export of tenant A never contains a tenant B claim id or supplier',
   'monthlyReport.preview': 'isolation',
   'monthlyReport.pdf': 'isolation',
   // S13 invoice ingestion (WhatsApp / e-mail). Reads are restaurant-scoped;

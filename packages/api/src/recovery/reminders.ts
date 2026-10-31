@@ -1,3 +1,4 @@
+import { TRPCError } from '@trpc/server';
 import {
   and,
   eq,
@@ -6,6 +7,7 @@ import {
   recoveryClaims,
   restaurants,
   sql,
+  suppliers,
   type Database,
 } from '@restomatch/db';
 import { isFeatureOn } from '../lib/featureGate';
@@ -185,4 +187,60 @@ export async function enqueueRecoveryReminders(
     }
   }
   return { restaurants: processed, emails, claims, failed };
+}
+
+export interface SupplierReminderDraft {
+  supplierId: string;
+  supplierName: string;
+  supplierNameEn: string | null;
+  /** Where the click may hand off to (wa.me / mailto); null = no contact on file. */
+  whatsapp: string | null;
+  email: string | null;
+  count: number;
+  outstandingAgorot: number;
+  oldestDays: number;
+  claimIds: string[];
+}
+
+/**
+ * Owner decision 16: an overdue reminder to a SUPPLIER is a per-supplier DRAFT
+ * ("תזכורת לספק · 3 דרישות · ₪451.00") that the web opens in wa.me / mailto
+ * only on a click. This only reads: nothing is queued, sent or stamped. The
+ * overdue rule is the tracker's (OVERDUE_DAYS after the letter, or the claim
+ * when no letter went out) — never a hard-coded day count. A foreign or
+ * unknown supplier is NOT_FOUND.
+ */
+export async function supplierReminderDraft(
+  db: Database,
+  restaurantId: string,
+  supplierId: string,
+  now: Date = new Date(),
+): Promise<SupplierReminderDraft> {
+  const [s] = await db
+    .select({ id: suppliers.id, name: suppliers.name, nameEn: suppliers.nameEn, email: suppliers.contactEmail, whatsapp: suppliers.contactWhatsapp })
+    .from(suppliers)
+    .where(and(eq(suppliers.id, supplierId), eq(suppliers.restaurantId, restaurantId)));
+  if (!s) throw new TRPCError({ code: 'NOT_FOUND', message: 'supplier not found' });
+  const res = await db.execute(sql`
+    SELECT c.id, GREATEST(0, c.amount_agorot - c.credited_agorot) AS outstanding,
+           floor(extract(epoch FROM (${now.toISOString()}::timestamptz - COALESCE(c.letter_sent_at, c.claimed_at))) / 86400)::int AS waiting
+    FROM recovery_claims c
+    WHERE c.restaurant_id = ${restaurantId} AND c.supplier_id = ${supplierId}
+      AND c.status IN (${sql.join(AWAITING_SUPPLIER.map((st) => sql`${st}`), sql`, `)})
+      AND c.amount_agorot > c.credited_agorot
+      AND COALESCE(c.letter_sent_at, c.claimed_at) < ${now.toISOString()}::timestamptz - make_interval(days => ${OVERDUE_DAYS})
+    ORDER BY waiting DESC, c.id
+  `);
+  const rows = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
+  return {
+    supplierId: s.id,
+    supplierName: s.name,
+    supplierNameEn: s.nameEn ?? null,
+    whatsapp: s.whatsapp?.trim() || null,
+    email: s.email?.trim() || null,
+    count: rows.length,
+    outstandingAgorot: rows.reduce((a, r) => a + Number(r.outstanding), 0),
+    oldestDays: rows.length ? Number(rows[0]!.waiting) : 0,
+    claimIds: rows.map((r) => String(r.id)),
+  };
 }

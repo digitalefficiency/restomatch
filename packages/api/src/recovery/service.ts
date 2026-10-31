@@ -18,6 +18,9 @@ import {
   ageingBucket,
   allocateCredit,
   canTransition,
+  edgeRequiresReason,
+  nextEdges,
+  type RecoveryEdge,
   stampFor,
   type AgeingBucket,
 } from './lifecycle';
@@ -314,6 +317,19 @@ export interface RecoveryClaimRow {
   note: string | null;
 }
 
+/** A `listClaims` row: the claim plus the moves it may take next, from the server machine (no client mirror). */
+export interface RecoveryClaimListRow extends RecoveryClaimRow {
+  next: RecoveryEdge[];
+  /** The VAT rate this supplier's paper uses (basis points): supplier rate ?? restaurant rate — for the credit form's preview. */
+  vatRateBp: number;
+  /**
+   * Whole days past the answer deadline (OVERDUE_DAYS after the letter, or
+   * the claim when no letter went out); 0 when not overdue or not waiting on
+   * the supplier. The desk ranks suppliers by owed ₪ × these days.
+   */
+  daysOverdue: number;
+}
+
 /** Waiting on the supplier this many days after the letter (or the claim) ⇒ overdue. */
 export const OVERDUE_DAYS = 14;
 /** Do not chase the same claim more often than this. */
@@ -326,7 +342,7 @@ export async function listClaims(
   restaurantId: string,
   /** `limit: null` = every claim (summaries); otherwise one list page, at most MAX_CLAIMS. */
   opts: { status?: RecoveryStatus; supplierId?: string; now?: Date; limit?: number | null } = {},
-): Promise<RecoveryClaimRow[]> {
+): Promise<RecoveryClaimListRow[]> {
   const now = opts.now ?? new Date();
   const limit = opts.limit === null ? null : Math.min(Math.max(opts.limit ?? 200, 1), MAX_CLAIMS);
   const res = await db.execute(sql`
@@ -335,6 +351,7 @@ export async function listClaims(
       c.claimed_at, c.letter_sent_at, c.acknowledged_at, c.credited_at, c.recovered_at, c.closed_at,
       c.last_reminder_at, c.note,
       s.name AS supplier_name, s.name_en AS supplier_name_en,
+      round(COALESCE(s.vat_rate, tz.vat_rate) * 10000)::int AS vat_rate_bp,
       i.invoice_number,
       d.type AS discrepancy_type,
       p.canonical_name AS product_name, p.name_en AS product_name_en,
@@ -343,9 +360,10 @@ export async function listClaims(
       -- Ageing in the restaurant's calendar days (Asia/Jerusalem by default).
       ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date - (c.claimed_at AT TIME ZONE tz.tz)::date) AS age_days,
       -- Overdue: exactly the reminder job's rule (findOverdue), so the badge and the email agree.
-      (COALESCE(c.letter_sent_at, c.claimed_at) < ${now.toISOString()}::timestamptz - make_interval(days => ${OVERDUE_DAYS})) AS waiting_overdue
+      (COALESCE(c.letter_sent_at, c.claimed_at) < ${now.toISOString()}::timestamptz - make_interval(days => ${OVERDUE_DAYS})) AS waiting_overdue,
+      GREATEST(0, floor(extract(epoch FROM (${now.toISOString()}::timestamptz - COALESCE(c.letter_sent_at, c.claimed_at))) / 86400)::int - ${OVERDUE_DAYS}) AS days_past
     FROM recovery_claims c
-    CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) tz
+    CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz, vat_rate FROM restaurants WHERE id = ${restaurantId}) tz
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
     LEFT JOIN suppliers s ON s.id = c.supplier_id AND s.restaurant_id = ${restaurantId}
     LEFT JOIN invoices i ON i.id = c.invoice_id AND i.restaurant_id = ${restaurantId}
@@ -393,6 +411,9 @@ export async function listClaims(
       overdue: (AWAITING_SUPPLIER as readonly string[]).includes(status) && r.waiting_overdue === true,
       creditNoteNumber: (r.credit_note_number as string | null) ?? null,
       note: (r.note as string | null) ?? null,
+      next: nextEdges(status, { amountAgorot: amount, creditedAgorot: credited }),
+      vatRateBp: int(r.vat_rate_bp),
+      daysOverdue: (AWAITING_SUPPLIER as readonly string[]).includes(status) && r.waiting_overdue === true ? int(r.days_past) : 0,
     };
   });
 }
@@ -440,7 +461,7 @@ const ALL_STATUSES: RecoveryStatus[] = [
 ];
 
 /** Totals, ageing and per-supplier recovery rate — all integer agorot, summed from listClaims. */
-export function summarize(claims: RecoveryClaimRow[]): RecoverySummary {
+export function summarize(claims: ReadonlyArray<RecoveryClaimRow>): RecoverySummary {
   const ageing: Record<AgeingBucket, number> = { d0_30: 0, d31_60: 0, d61_90: 0, d90p: 0 };
   const byStatus = Object.fromEntries(ALL_STATUSES.map((s) => [s, { count: 0, agorot: 0 }])) as RecoverySummary['byStatus'];
   const suppliers = new Map<string, RecoverySupplierRow>();
@@ -629,6 +650,54 @@ export async function transitionClaim(
   return { id: claim.id, status: input.to };
 }
 
+export interface TransitionItem {
+  claimId: string;
+  /** The status the screen showed: a claim that moved meanwhile is a CONFLICT, not a silent move. */
+  expectedStatus: RecoveryStatus;
+}
+
+/**
+ * Move several claims together, ALL OR NOTHING (W2-10, deep-fix class 8):
+ * every claim is owned (NOT_FOUND first, so a foreign id never leaks a state),
+ * still in its `expectedStatus` (CONFLICT naming the claim) and allowed to
+ * take the edge; a terminal edge (or a short `recovered`) needs a reason.
+ * Any failure throws before the first write, and the caller's transaction
+ * rolls back whatever already ran.
+ */
+export async function transitionClaims(
+  db: Database,
+  restaurantId: string,
+  input: { items: TransitionItem[]; to: RecoveryStatus; note?: string | null; actorId?: string | null; at?: Date },
+): Promise<Array<{ id: string; status: RecoveryStatus }>> {
+  const ids = [...new Set(input.items.map((i) => i.claimId))];
+  if (ids.length !== input.items.length) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'a claim is listed twice' });
+  }
+  const rows = await loadOwnedClaims(db, restaurantId, ids, true);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const note = input.note?.trim() || null;
+  for (const item of input.items) {
+    const claim = byId.get(item.claimId)!;
+    if (claim.status !== item.expectedStatus) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: `claim ${item.claimId} is ${claim.status}, not ${item.expectedStatus} — refresh and try again`,
+      });
+    }
+    if (input.to !== 'credited' && !canTransition(claim.status, input.to)) {
+      throw new TRPCError({ code: 'CONFLICT', message: `claim ${item.claimId}: cannot move from ${claim.status} to ${input.to}` });
+    }
+    if (!note && edgeRequiresReason(input.to, claim)) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: `moving a claim to ${input.to} needs a reason` });
+    }
+  }
+  const out: Array<{ id: string; status: RecoveryStatus }> = [];
+  for (const id of [...ids].sort()) {
+    out.push(await transitionClaim(db, restaurantId, { claimId: id, to: input.to, note, actorId: input.actorId, at: input.at }));
+  }
+  return out;
+}
+
 export interface CreditLineSuggestion {
   invoiceLineId: string;
   invoiceId: string;
@@ -688,6 +757,40 @@ export async function creditLineSuggestions(
     descriptionEn: (r.raw_description_en as string | null) ?? null,
     amountAgorot: int(r.amount_agorot),
   }));
+}
+
+/** How the credit-note amount was typed: as printed incl. VAT, or before VAT. */
+export type CreditVatMode = 'incl' | 'excl';
+
+/**
+ * Before-VAT agorot of an amount typed as printed (W2-10, chain-09). Pure,
+ * integer, half-up: `excl = round(printed / (1 + rate))`, the rate in basis
+ * points (NUMERIC(5,4) × 10,000). ₪118.00 incl. at 0.18 → ₪100.00.
+ */
+export function exclVatAgorot(printedAgorot: number, vat: CreditVatMode, rateBp: number): number {
+  if (!Number.isSafeInteger(printedAgorot) || printedAgorot <= 0) throw new Error('amount must be a positive integer of agorot');
+  if (vat === 'excl') return printedAgorot;
+  if (!Number.isInteger(rateBp) || rateBp < 0 || rateBp > 10_000) throw new Error('VAT rate out of range');
+  const den = 10_000 + rateBp;
+  return Math.floor((2 * printedAgorot * 10_000 + den) / (2 * den));
+}
+
+/**
+ * The VAT rate a supplier's paper uses, in basis points: the supplier's own
+ * rate, else the restaurant's (default 0.18). Never the engine's 0.17 — that
+ * is a matching constant, not a conversion rate. NOT_FOUND for a foreign supplier.
+ */
+export async function creditVatRateBp(db: Database, restaurantId: string, supplierId: string): Promise<number> {
+  const [r] = rowsOf(
+    await db.execute(sql`
+      SELECT round(COALESCE(s.vat_rate, rt.vat_rate) * 10000)::int AS bp
+      FROM suppliers s
+      JOIN restaurants rt ON rt.id = s.restaurant_id
+      WHERE s.id = ${supplierId}::uuid AND s.restaurant_id = ${restaurantId}
+    `),
+  );
+  if (!r) throw notFound('supplier');
+  return int(r.bp);
 }
 
 export interface RecordCreditNoteInput {
@@ -940,19 +1043,78 @@ export async function releaseClaimsForRematch(db: Database, restaurantId: string
   return claims.length;
 }
 
-/** Lifecycle history of one claim (oldest first). */
+/**
+ * Lifecycle history of one claim (oldest first), with WHO did each step
+ * (chain-05): the actor's display name and their role in THIS restaurant.
+ * A system step (no actor) has both null.
+ */
 export async function claimHistory(db: Database, restaurantId: string, claimId: string) {
   await loadOwnedClaims(db, restaurantId, [claimId]);
-  return db
-    .select({
-      id: recoveryEvents.id,
-      fromStatus: recoveryEvents.fromStatus,
-      toStatus: recoveryEvents.toStatus,
-      amountAgorot: recoveryEvents.amountAgorot,
-      note: recoveryEvents.note,
-      createdAt: recoveryEvents.createdAt,
-    })
-    .from(recoveryEvents)
-    .where(and(eq(recoveryEvents.claimId, claimId), eq(recoveryEvents.restaurantId, restaurantId)))
-    .orderBy(recoveryEvents.createdAt);
+  const res = await db.execute(sql`
+    SELECT e.id, e.from_status, e.to_status, e.amount_agorot, e.note, e.created_at, e.actor_id,
+           u.name AS actor_name, m.role AS actor_role
+    FROM recovery_events e
+    LEFT JOIN users u ON u.id = e.actor_id
+    LEFT JOIN memberships m ON m.user_id = e.actor_id AND m.restaurant_id = ${restaurantId}
+    WHERE e.claim_id = ${claimId}::uuid AND e.restaurant_id = ${restaurantId}
+    ORDER BY e.created_at, e.id
+  `);
+  return rowsOf(res).map((r) => ({
+    id: String(r.id),
+    fromStatus: (r.from_status as RecoveryStatus | null) ?? null,
+    toStatus: String(r.to_status) as RecoveryStatus,
+    amountAgorot: r.amount_agorot == null ? null : int(r.amount_agorot),
+    note: (r.note as string | null) ?? null,
+    createdAt: new Date(String(r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at)),
+    actorId: (r.actor_id as string | null) ?? null,
+    actorName: (r.actor_name as string | null) ?? null,
+    actorRole: (r.actor_role as string | null) ?? null,
+  }));
+}
+
+/**
+ * Auto-advance (W2-10, chain-10): a fully credited claim whose credit line
+ * sits on an invoice that is now PAID was offset in that payment — it moves
+ * `credited → recovered` by itself, with the note "קוזז בחשבונית X ששולמה
+ * dd.MM" (the paid event's time, Israel date) and no actor (a system step). A partly credited claim stays: the
+ * shortfall is a person's call (a reason). Idempotent.
+ * Driven by the paid event: G-05 `invoice.paid` once it ships (W2-03
+ * `markPaid` after H-03); until then the caller is the test fixture.
+ */
+export async function autoAdvanceOnPaid(db: Database, restaurantId: string, invoiceId: string, at: Date = new Date()): Promise<string[]> {
+  await lockRecovery(db, restaurantId);
+  const rows = rowsOf(
+    await db.execute(sql`
+      SELECT c.id, i.invoice_number,
+             to_char((${at.toISOString()}::timestamptz AT TIME ZONE rt.timezone), 'DD.MM') AS paid_on
+      FROM recovery_claims c
+      JOIN credit_notes cn ON cn.id = c.credit_note_id AND cn.restaurant_id = ${restaurantId}
+      JOIN invoices i ON i.id = cn.invoice_id AND i.restaurant_id = ${restaurantId}
+      JOIN restaurants rt ON rt.id = ${restaurantId}
+      WHERE c.restaurant_id = ${restaurantId}
+        AND cn.invoice_id = ${invoiceId}::uuid
+        AND i.status = 'paid'
+        AND c.status = 'credited'
+        AND c.credited_agorot >= c.amount_agorot
+      ORDER BY c.id
+      FOR UPDATE OF c
+    `),
+  );
+  for (const r of rows) {
+    const note = `קוזז בחשבונית ${String(r.invoice_number ?? '—')} ששולמה ${String(r.paid_on)}`;
+    await db
+      .update(recoveryClaims)
+      .set({ status: 'recovered', recoveredAt: at, note })
+      .where(and(eq(recoveryClaims.id, String(r.id)), eq(recoveryClaims.restaurantId, restaurantId)));
+    await db.insert(recoveryEvents).values({
+      restaurantId,
+      claimId: String(r.id),
+      fromStatus: 'credited',
+      toStatus: 'recovered',
+      actorId: null,
+      note,
+      createdAt: at,
+    });
+  }
+  return rows.map((r) => String(r.id));
 }
