@@ -1,8 +1,6 @@
-import { cache } from 'react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { TRPCError } from '@trpc/server';
 import { FileWarning } from 'lucide-react';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
@@ -23,10 +21,10 @@ import { InvoiceCorrection } from './correction-client';
 import { dockPriceNotesForInvoice, mergeLineBadges } from './dock-price-notes';
 import { ConsolidatedPanel } from './consolidated-panel';
 import { Cockpit, type CockpitCopy, type CockpitFrom } from './cockpit';
+import { loadDetail } from './load';
 
 export const dynamic = 'force-dynamic';
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FROM: readonly CockpitFrom[] = ['approvals', 'payRun', 'inbox', 'register', 'leaks'];
 const FROM_HREF: Record<CockpitFrom, string> = {
   approvals: '/dashboard/approvals',
@@ -35,18 +33,6 @@ const FROM_HREF: Record<CockpitFrom, string> = {
   register: '/dashboard/invoices',
   leaks: '/dashboard/leaks',
 };
-
-/** One detail read per request, shared by the page and its <title>. */
-const loadDetail = cache(async (invoiceId: string) => {
-  if (!UUID.test(invoiceId)) return null;
-  const caller = await createServerCaller();
-  try {
-    return await caller.invoices.detail({ invoiceId });
-  } catch (err) {
-    if (err instanceof TRPCError && ['NOT_FOUND', 'FORBIDDEN', 'BAD_REQUEST'].includes(err.code)) return null;
-    throw err;
-  }
-});
 
 export async function generateMetadata({ params }: { params: Promise<{ invoiceId: string }> }): Promise<Metadata> {
   const { invoiceId } = await params;
