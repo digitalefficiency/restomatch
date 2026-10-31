@@ -5,7 +5,7 @@ import type { MoneyState } from '@restomatch/ui-tokens';
 import { useLocale, useT } from '@/lib/i18n/client';
 import type { Locale } from '@/lib/i18n/config';
 import { components } from '@/lib/i18n/messages/components';
-import { cn } from '../cn';
+import { cnMerge as cn } from '../cn';
 import { exactText, moneyText, MONEY_DECIMALS, shekelsOf, splitGlyph, stateClass, type MoneyContext } from './format';
 
 const CONTEXT_CLASS: Record<MoneyContext, string> = {

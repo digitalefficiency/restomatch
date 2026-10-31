@@ -1,7 +1,7 @@
 import type { MoneyState } from '@restomatch/ui-tokens';
 import Link from 'next/link';
 import { moneyStates } from '@restomatch/ui-tokens';
-import { cn } from '../cn';
+import { cnMerge as cn } from '../cn';
 import { Skeleton } from '../Skeleton';
 import { NUM_ALIGN } from './format';
 

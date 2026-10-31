@@ -615,10 +615,9 @@ html[lang='ti'] .font-sans {
     );
   }
 
-  /* Coarse pointers: row and list links get the 44 px floor too (a11y-17). */
+  /* Coarse pointers: row links get the 44 px floor too (a11y-17). Opt-in per row
+     (`data-row-link`), so existing table/list layouts don't change; areas adopt it from wave 2. */
   @media (pointer: coarse) {
-    table a,
-    li > a,
     [data-row-link] {
       min-height: 44px;
       display: inline-flex;

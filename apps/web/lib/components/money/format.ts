@@ -63,11 +63,22 @@ export function stateClass(state: MoneyState | undefined, value: number | null):
   return FIGURE_CLASS[moneyStates[state].figure];
 }
 
-/** Whole days from `today` to `due` (both read as calendar days); negative when late. */
+/** The Israel calendar day of an instant (or of a 'yyyy-mm-dd' date) as a UTC-midnight timestamp. */
+function israelDay(value: Date | string): number {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return Date.parse(`${value}T00:00:00Z`);
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(
+    new Date(value),
+  );
+  return Date.parse(`${parts}T00:00:00Z`);
+}
+
+/**
+ * Whole calendar days from `today` to `due` in Israel time (the same zone
+ * formatDay prints), so the count and the printed date agree on any server or
+ * browser; negative when late.
+ */
 export function daysUntil(due: Date | string, today: Date = new Date()): number {
-  const d = typeof due === 'string' ? new Date(due) : due;
-  const utc = (x: Date) => Date.UTC(x.getFullYear(), x.getMonth(), x.getDate());
-  return Math.round((utc(d) - utc(today)) / 86_400_000);
+  return Math.round((israelDay(due) - israelDay(today)) / 86_400_000);
 }
 
 /** DeadlineChip tone: neutral above 7 days, warn at 7 or less, danger only when late (H8). */

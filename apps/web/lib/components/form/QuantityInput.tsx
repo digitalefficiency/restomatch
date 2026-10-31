@@ -4,7 +4,7 @@ import { useEffect, useId, useState } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
-import { cn } from '../cn';
+import { cnMerge as cn } from '../cn';
 import { fieldBase } from '../Input';
 import { formatQuantityField, parseQuantityInput } from './parse';
 
@@ -27,6 +27,7 @@ export function QuantityInput({
   maxDecimals = 3,
   name,
   className,
+  onBlur,
   'aria-describedby': describedBy,
   'aria-invalid': ariaInvalid,
   ...rest
@@ -91,10 +92,11 @@ export function QuantityInput({
               setQty(parsed);
               onValueChange?.(parsed);
             }}
-            onBlur={() => {
+            onBlur={(e) => {
               const parsed = parseQuantityInput(text, maxDecimals);
               if (parsed !== null) setText(formatQuantityField(parsed, maxDecimals));
               setInvalid(text.trim() !== '' && parsed === null);
+              onBlur?.(e);
             }}
           />
           {unit ? (

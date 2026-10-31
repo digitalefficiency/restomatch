@@ -1,5 +1,5 @@
 import { CircleCheck, Clock, Coins, Info, OctagonAlert, TriangleAlert } from 'lucide-react';
-import { cn } from '../cn';
+import { cnMerge as cn } from '../cn';
 
 export type StatusTone = 'danger' | 'warn' | 'success' | 'gold' | 'info' | 'neutral';
 

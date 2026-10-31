@@ -2,7 +2,7 @@
 
 import { useLocale, useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
-import { cn } from '../cn';
+import { cnMerge as cn } from '../cn';
 import { moneyText, type MoneyContext } from './format';
 
 /**
