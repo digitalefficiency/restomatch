@@ -396,3 +396,4 @@ export { CLAIMABLE_STATUSES, claimableLines, sumClaims, vatBasisOf, type ClaimLi
 export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunClaim } from './routers/payRun';
 export { SKIPPED_NO_PROVIDER, providerConfigured, supplierMessageState, type SupplierMessageState } from './notifications/delivery';
 export { awaitingDecision, type AwaitingDecision } from './approvals/awaiting';
+export { rebindDecidedClaims } from './approvals/rebind'; // W2-04 (orchestrator-approved line)

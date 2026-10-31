@@ -4,7 +4,7 @@
  * Undecided rows never get a claim (decision 18); reads write nothing.
  */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { activityEvents, createDb, discrepancies, eq, recoveryClaims, restaurants, sql, testDbUrl } from '@restomatch/db';
+import { activityEvents, createDb, discrepancies, eq, memberships, recoveryClaims, restaurants, sql, testDbUrl, users } from '@restomatch/db';
 import { awaitingDecision } from '../approvals/awaiting';
 import { DECISION_COPY } from '../notifications/templates';
 import { resetDb } from './fixtures';
@@ -115,5 +115,30 @@ describe('claim at decision', () => {
     expect((await counts()).claims).toBe(0);
     await callerAs(db, T, 'manager').approvals.approve({ discrepancyId: T.discrepancyId });
     expect((await counts()).claims).toBe(1);
+  });
+
+  it('match.runForInvoice after an approve: the claim is rebound to the ORIGINAL decider, 0 claims lost (W2-04 rebind)', async () => {
+    const owner = callerAs(db, T, 'owner');
+    await owner.match.runForInvoice({ invoiceId: T.invoiceId });
+    const rows = (await db.execute(sql`
+      SELECT d.id FROM discrepancies d JOIN match_runs mr ON mr.id = d.match_run_id
+      WHERE mr.invoice_id = ${T.invoiceId}::uuid AND d.severity IN ('warn','block')
+        AND d.type IN ('QTY_SHORT','QTY_OVER','PRICE_HIGHER') AND d.delta_amount <> 0
+      ORDER BY abs(d.delta_amount) DESC LIMIT 1`)) as unknown as Array<{ id: string }>;
+    expect(rows.length).toBe(1);
+    const id = rows[0]!.id;
+    // A co-owner decides (the new run routes it to the owner again, so the decision is carried).
+    const [co] = await db.insert(users).values({ email: 'coowner-cd@desk.test', name: 'שותפה' }).returning();
+    await db.insert(memberships).values({ userId: co!.id, restaurantId: T.restaurantId, role: 'owner' });
+    await callerAs(db, T, 'owner', co!.id).approvals.approve({ discrepancyId: id });
+    const before = await counts();
+    expect(before.claims).toBe(1);
+
+    await owner.match.runForInvoice({ invoiceId: T.invoiceId });
+    expect((await counts()).claims).toBe(before.claims);
+    const [c] = (await db.execute(sql`
+      SELECT c.created_by, d.resolution_status FROM recovery_claims c JOIN discrepancies d ON d.id = c.discrepancy_id
+      WHERE c.restaurant_id = ${T.restaurantId}`)) as unknown as Array<{ created_by: string; resolution_status: string }>;
+    expect(c).toMatchObject({ created_by: co!.id, resolution_status: 'accepted' });
   });
 });

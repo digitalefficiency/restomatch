@@ -8,7 +8,7 @@ import {
   createWhatsAppNotifier,
   getEntitlements,
   loadPriorDecisions,
-  materializeClaims,
+  rebindDecidedClaims,
   releaseClaimsForRematch,
   receiptStillOpen,
   persistMatchRun,
@@ -24,9 +24,7 @@ import {
   desc,
   discrepancies,
   eq,
-  inArray,
   invoices,
-  isNotNull,
   matchRuns,
   restaurants,
   suppliers,
@@ -209,34 +207,6 @@ const whatsapp = createWhatsAppNotifier();
 const push = createPushNotifier();
 // Real Resend email when RESEND_API_KEY is set, else dev/console EmailNotifier.
 const email = createEmailNotifier();
-
-/**
- * After a re-match, the people's decisions were re-applied to the findings that
- * still exist. Their claims (released above) come back under the ORIGINAL
- * decider (`resolved_by`), never the job — one `materializeClaims` per decider.
- */
-async function rebindDecidedClaims(
-  tx: Database,
-  restaurantId: string,
-  matchRunId: string,
-): Promise<void> {
-  const decided = await tx
-    .select({ id: discrepancies.id, by: discrepancies.resolvedBy })
-    .from(discrepancies)
-    .where(
-      and(
-        eq(discrepancies.restaurantId, restaurantId),
-        eq(discrepancies.matchRunId, matchRunId),
-        inArray(discrepancies.resolutionStatus, ['accepted', 'resolved']),
-        isNotNull(discrepancies.resolvedBy),
-      ),
-    );
-  const byDecider = new Map<string, string[]>();
-  for (const d of decided) byDecider.set(d.by!, [...(byDecider.get(d.by!) ?? []), d.id]);
-  for (const [actorId, discrepancyIds] of byDecider) {
-    await materializeClaims(tx, { restaurantId, discrepancyIds, actorId });
-  }
-}
 
 /**
  * The branch-aware deep link of every approval notification (ia-nav-09):
