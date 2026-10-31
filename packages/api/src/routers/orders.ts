@@ -18,7 +18,6 @@ import {
   restaurants,
   sql,
   suppliers,
-  supplierCatalogItems,
   users,
   type Database,
 } from '@restomatch/db';
@@ -28,7 +27,8 @@ import { resolveTolerances } from '@restomatch/matching';
 import { ClaudePoParser, ORDER_TEXT_MAX_CHARS, orderTextParserFromEnv } from '@restomatch/ocr';
 import { ZesttAdapter } from '@restomatch/procurement';
 import { managerProcedure, memberProcedure, requireFeature, router } from '../trpc';
-import { contractPricesForOrder, orderPriceKey } from '../contracts/orderPrices';
+import { orderPriceKey } from '../contracts/orderPrices';
+import { resolveExpectedPrice, type ExpectedPrice } from '../orders/expectedPrice';
 import { assertPoOwned, assertSupplierOwned } from '../tenant';
 import { getEntitlements } from '../entitlements';
 import { importPurchaseOrder } from '../orders/importPo';
@@ -477,48 +477,30 @@ export const ordersRouter = router({
         }
       }
 
-      // Pre-fill missing unit prices from the supplier's catalog list price.
-      const productIds = input.lines
-        .map((l) => l.productId)
-        .filter((id): id is string => !!id);
-      const priceByProduct = new Map<string, string>();
-      if (productIds.length > 0) {
-        const catRows = await ctx.db
-          .select({ productId: supplierCatalogItems.productId, listPrice: supplierCatalogItems.listPrice })
-          .from(supplierCatalogItems)
-          .where(
-            and(
-              eq(supplierCatalogItems.restaurantId, restaurantId),
-              eq(supplierCatalogItems.supplierId, input.supplierId),
-              inArray(supplierCatalogItems.productId, productIds),
-            ),
-          );
-        for (const r of catRows) {
-          if (r.productId && r.listPrice != null) priceByProduct.set(r.productId, r.listPrice);
-        }
-      }
-
-      // Flag `contracts`: a contract price in force today (in the line's unit)
-      // wins over the catalog list price for lines left unpriced.
+      // Pre-fill unpriced lines with THE expected price (W2-06 §5.8):
+      // contract > the restaurant's own last sent price > list. Never the invoice.
       const unpriced = input.lines.filter(
         (l): l is typeof l & { productId: string } => l.unitPriceExpected == null && !!l.productId,
       );
-      const contractByKey =
-        unpriced.length > 0 && (await isFeatureOn(ctx.db, restaurantId, 'contracts'))
-          ? await contractPricesForOrder(ctx.db, restaurantId, input.supplierId, unpriced)
-          : new Map<string, number>();
+      const expected =
+        unpriced.length > 0
+          ? await resolveExpectedPrice(ctx.db, {
+              restaurantId,
+              supplierId: input.supplierId,
+              at: new Date(),
+              lines: unpriced.map((l) => ({ productId: l.productId, unit: l.unit })),
+            })
+          : new Map<string, ExpectedPrice>();
 
       const resolvedLines = input.lines.map((l) => {
-        const fromContract =
-          l.unitPriceExpected == null && l.productId ? contractByKey.get(orderPriceKey(l.productId, l.unit)) : undefined;
-        const fromCatalog =
-          l.unitPriceExpected == null && l.productId ? priceByProduct.get(l.productId) : undefined;
+        const fromExpected =
+          l.unitPriceExpected == null && l.productId ? expected.get(orderPriceKey(l.productId, l.unit)) : undefined;
         const unitPriceExpected =
           l.unitPriceExpected != null
             ? l.unitPriceExpected.toString()
-            : fromContract !== undefined
-              ? fromContract.toString()
-              : (fromCatalog ?? null);
+            : fromExpected !== undefined
+              ? fromExpected.unitPrice.toString()
+              : null;
         return { ...l, unitPriceExpected };
       });
 
