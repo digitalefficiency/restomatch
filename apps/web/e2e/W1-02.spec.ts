@@ -44,8 +44,10 @@ const sel = (page: Page) => new URL(page.url()).searchParams.get('sel');
 
 /** The page, sorted by gap ascending, where rows under and over the ₪200 cap meet. */
 function crossingPage(): number {
+  // Pending (unknown) gaps sort last, so they never count toward the early pages.
   const ranked = [...labRows()]
     .map((r, i) => ({ r, i }))
+    .filter((x) => !x.r.pendingDelta)
     .sort((a, b) => Math.abs(a.r.deltaAgorot) - Math.abs(b.r.deltaAgorot) || a.i - b.i);
   const firstOver = ranked.findIndex((x) => Math.abs(x.r.deltaAgorot) > 20_000);
   return Math.floor((firstOver - 3) / 50) + 1;
@@ -210,11 +212,42 @@ test.describe('W1-02 DataTable', () => {
     await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('tbody'))).toBe(true);
 
     // An unknown (pending) gap is never ₪0: it blocks the capped action with its own reason.
-    await open(page, 'he', `${LAB}?sort=atRisk:asc&enforced=1`);
+    // Pending gaps sort last in both directions: the last page.
+    await open(page, 'he', `${LAB}?sort=atRisk:desc&page=10&enforced=1`);
     const unknown = page.locator('tr[data-amount-unknown]').first();
     await unknown.locator('input[type=checkbox]').check();
     await expect(approve).toBeDisabled();
     await expect(bar.locator('[data-batch-why="approve"]')).toContainText('עוד לא ידוע');
+  });
+
+  test('an unknown (pending) amount never reads as ₪0: alone it is pending, mixed it is "₪X + N"', async ({ page }) => {
+    // Pending gaps sort last in both directions, so they are on the last page.
+    await open(page, 'he', `${LAB}?sort=atRisk:desc&page=10`);
+    const bar = page.locator('[data-batchbar]');
+    const pending = page.locator('tr[data-amount-unknown]').first();
+    await expect(pending).toContainText('ממתין');
+    await pending.locator('input[type=checkbox]').check();
+    await expect(bar.locator('[data-batch-sum]')).toHaveText('ממתין');
+    await expect(bar.locator('[data-batch-sum]')).not.toContainText('0.00');
+    // Peek shows the pending state too, never ₪0.
+    const pendingId = (await pending.getAttribute('data-row-id'))!;
+    await bar.getByRole('button', { name: /ניקוי/ }).click();
+
+    // Mixed: a known row (from an earlier page) plus the pending one.
+    await open(page, 'he', `${LAB}?sort=atRisk:desc&page=4`);
+    const known = page.locator('tr[data-row-id]:not([data-block]):not([data-amount-unknown])').first();
+    const knownId = (await known.getAttribute('data-row-id'))!;
+    await known.locator('input[type=checkbox]').check();
+    for (let p = 4; p < 10; p++) await page.getByRole('button', { name: 'הבא' }).click();
+    await page.locator(`tr[data-row-id="${pendingId}"] input[type=checkbox]`).check();
+    const knownAgorot = Math.abs(labRows().find((r) => r.id === knownId)!.deltaAgorot);
+    const sum = bar.locator('[data-batch-sum]');
+    await expect(bar.locator('[data-batch-count]')).toHaveText('2 נבחרו');
+    await expect(sum).toContainText(new Intl.NumberFormat('he-IL', { minimumFractionDigits: 2 }).format(knownAgorot / 100));
+    await expect(sum).toContainText('+ שורה אחת ללא סכום ידוע');
+
+    await open(page, 'he', `${LAB}?sel=${pendingId}&peek=${pendingId}`);
+    await expect(page.getByRole('dialog').locator('[data-peek-pending]')).toHaveText('ממתין');
   });
 
   test('a partly failed batch keeps only the failed rows selected and says so', async ({ page }) => {

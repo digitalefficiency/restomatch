@@ -88,9 +88,15 @@ export function exportTable<Row>(
   columns: readonly ColumnDef<Row>[],
   rows: readonly Row[],
   totals?: { label: string; columnId?: string; sumAgorot?: number },
+  /** Written in a money cell whose amount is unknown (pending) — never blank, never 0. */
+  unknownLabel = '',
 ): { columns: CsvColumn[]; rows: CsvRow[]; totals?: CsvRow } {
   const money = (agorot: unknown) =>
-    typeof agorot === 'number' ? Math.round(agorot) / 100 : (agorot as string | null | undefined);
+    typeof agorot === 'number' && Number.isFinite(agorot)
+      ? Math.round(agorot) / 100
+      : agorot == null || typeof agorot === 'number'
+        ? unknownLabel
+        : (agorot as string);
   const csvColumns = columns.map((c) => ({ key: c.id, label: c.kind === 'money' ? moneyHeaderText(c.header) : c.header }));
   const csvRows = rows.map((r) => {
     const out: CsvRow = {};

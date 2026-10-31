@@ -114,7 +114,8 @@ export function DeskLab({
         header: t.col.atRisk,
         kind: 'money',
         decimals: 2,
-        value: (r) => Math.abs(r.deltaAgorot),
+        // A pending gap is unknown: it sorts last, exports as "ממתין" and never reads as ₪0.
+        value: (r) => (r.pendingDelta ? null : Math.abs(r.deltaAgorot)),
         cell: (r) => (r.pendingDelta ? 'pending' : undefined),
       },
       {
@@ -177,7 +178,13 @@ export function DeskLab({
           <div>
             <dt className="text-muted">{t.col.atRisk}</dt>
             <dd className="text-lg font-bold tabular-nums text-ink">
-              <bdi>{formatIls(Math.abs(r.deltaAgorot) / 100, { maximumFractionDigits: 2, locale })}</bdi>
+              {r.pendingDelta ? (
+                <span className="text-muted" data-peek-pending="">
+                  {deskCopy(locale).pending}
+                </span>
+              ) : (
+                <bdi>{formatIls(Math.abs(r.deltaAgorot) / 100, { maximumFractionDigits: 2, locale })}</bdi>
+              )}
             </dd>
           </div>
           <div>
