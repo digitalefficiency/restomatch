@@ -51,18 +51,31 @@ import {
 export const REGISTER_TABS = ['review', 'awaiting', 'matched', 'held', 'paid', 'noAllocation', 'intake'] as const;
 export type RegisterTab = (typeof REGISTER_TABS)[number];
 
-export const TAB_STATES: Readonly<Record<'review' | 'awaiting' | 'matched' | 'held' | 'paid', ReadonlyArray<InvoiceState>>> = {
-  review: ['flagged_open'],
-  awaiting: ['awaiting_link', 'in_ocr'],
-  matched: ['clean', 'approved', 'claim_open'],
-  held: ['awaiting_count', 'held_duplicate'],
-  paid: ['paid'],
+type StateTab = 'review' | 'awaiting' | 'matched' | 'held' | 'paid';
+
+/** The tab of each canonical state — a total map, so a new G-05 state fails typecheck here. */
+export const TAB_OF_STATE: Readonly<Record<InvoiceState, StateTab>> = {
+  flagged_open: 'review',
+  awaiting_link: 'awaiting',
+  in_ocr: 'awaiting',
+  clean: 'matched',
+  approved: 'matched',
+  claim_open: 'matched',
+  awaiting_count: 'held',
+  held_duplicate: 'held',
+  paid: 'paid',
 };
 
+export const TAB_STATES: Readonly<Record<StateTab, ReadonlyArray<InvoiceState>>> = Object.fromEntries(
+  (['review', 'awaiting', 'matched', 'held', 'paid'] as const).map((tab) => [
+    tab,
+    INVOICE_STATES.filter((st) => TAB_OF_STATE[st] === tab),
+  ]),
+) as unknown as Record<StateTab, ReadonlyArray<InvoiceState>>;
+
 /** The tab an invoice state belongs to (the partition above). */
-export function tabOfState(state: InvoiceState): keyof typeof TAB_STATES {
-  for (const [tab, states] of Object.entries(TAB_STATES)) if (states.includes(state)) return tab as keyof typeof TAB_STATES;
-  return 'review';
+export function tabOfState(state: InvoiceState): StateTab {
+  return TAB_OF_STATE[state];
 }
 
 const agorot = (ils: number | string | null | undefined) => Math.round(Number(ils ?? 0) * 100);
@@ -79,7 +92,7 @@ export interface RegisterRow {
   /** The hero's per-invoice leak (G-05 `leakIls`), integer agorot. */
   gapAgorot: number;
   state: InvoiceState;
-  tab: keyof typeof TAB_STATES;
+  tab: StateTab;
   hasAllocation: boolean;
   consolidated: boolean;
 }
