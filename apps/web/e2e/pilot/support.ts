@@ -100,7 +100,8 @@ export function watchErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
-    if (m.type() === 'error') errors.push(`console: ${m.text()}`);
+    // "Failed to load resource" carries the resource in its location: name it in the report.
+    if (m.type() === 'error') errors.push(`console: ${m.text()}${m.location().url ? ` [${m.location().url.replace(/^https?:\/\/[^/]+/, '')}]` : ''}`);
   });
   return errors;
 }

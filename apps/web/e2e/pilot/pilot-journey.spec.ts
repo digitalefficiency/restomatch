@@ -274,10 +274,11 @@ async function placeRecordOnlyOrder(page: Page, date: string, role: Role = 'owne
   await page.locator('#ord-delivery-date').fill(date);
   await main(page).getByRole('button', { name: 'המשך לסקירה' }).click();
   await page.locator('#ord-channel').selectOption('none');
-  await page.getByRole('button', { name: /^סמנו כנשלחה/ }).click();
+  // "סמנו כנשלחה…" on main + #167; "רשמו במערכת…" once W1-11 lands.
+  await page.getByRole('button', { name: /^(סמנו כנשלחה|רשמו במערכת)/ }).click();
   // Send-with-undo: a 10 s countdown, then the confirmation.
-  await expect(main(page)).toContainText('ההזמנה סומנה כנשלחה', { timeout: 30_000 });
-  await expect(main(page)).toContainText('לא נשלח דבר לספק');
+  await expect(main(page)).toContainText(/ההזמנה סומנה כנשלחה|נרשמה במערכת/, { timeout: 30_000 });
+  await expect(main(page)).toContainText(/לא נשלח דבר לספק|לא נשלחה לספק/);
   const confirmation = await mainText(page);
   expect(confirmation, 'record-only must never claim it went out').not.toMatch(/בתור לשליחה|נשלחה ב(?:וואטסאפ|אימייל)/);
   await main(page).getByRole('link', { name: 'צפייה בהזמנה' }).click();
@@ -291,12 +292,15 @@ test('4 · a "ללא שליחה" (record only) order never says it was sent', as
   const orderTodayId = await placeRecordOnlyOrder(page, israelDate(0));
   remember({ orderTodayId });
   const detail = await mainText(page);
+  const sendStatus = page.getByTestId('send-status'); // W1-11: the send state, machine-readable
+  if ((await sendStatus.count()) > 0) await expect.soft(sendStatus.first(), 'send state of a record-only order').toHaveAttribute('data-state', 'none');
   await shot(page, info, '4-order-detail');
   const orderLateId = await placeRecordOnlyOrder(page, israelDate(0));
   remember({ orderLateId });
   if (LAB) backdate(orderLateId, 1);
   // The detail page is where "sent" copy would mislead the owner later (soft: setup above must finish).
-  expect.soft(detail, 'order page: status copy says "sent" for a record-only order').not.toMatch(/נשלחה/);
+  // "נשלחה" (sent) is wrong here; "לא נשלחה" (not sent) / "נרשמה" (recorded) is right.
+  expect.soft(detail, 'order page: status copy says "sent" for a record-only order').not.toMatch(/(?<!לא )נשלחה/);
   expectCleanConsole('owner', 'orders');
 });
 
