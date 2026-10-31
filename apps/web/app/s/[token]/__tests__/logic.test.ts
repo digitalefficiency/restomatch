@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { answerBody, computeAnswer, contactNumbers, lineAgorot, recordedDiff, type PortalLine } from '../logic';
+import { answerBody, computeAnswer, contactNumbers, isOwnAnswer, lineAgorot, primaryAction, recordedDiff, type PortalLine } from '../logic';
 
 const LINES: PortalLine[] = [
   { id: 'a', name: 'עגבניות', sku: null, qtyOrdered: 10, unit: 'kg', unitPrice: 6.5, agreed: true },
@@ -40,10 +40,21 @@ describe('supplier answer (auth-02): a marked change is never dropped', () => {
     expect(answerBody('answer', a, ' יגיע מחר ').note).toBe('יגיע מחר');
   });
 
-  it('only the explicit "as ordered" choice sends no lines', () => {
+  it('only the explicit "as ordered" choice sends no lines — and it still carries the note', () => {
     const { qty, price } = asOrdered();
     qty.a = '6';
-    expect(answerBody('asIs', computeAnswer(LINES, qty, price, 'x'), 'x')).toEqual({ lines: [], note: null });
+    const a = computeAnswer(LINES, qty, price, ' יגיע מחר ');
+    expect(a.lineChangeCount).toBe(1);
+    expect(answerBody('asIs', a, ' יגיע מחר ')).toEqual({ lines: [], note: 'יגיע מחר' });
+    expect(answerBody('asIs', a, '')).toEqual({ lines: [], note: null });
+  });
+
+  it('the answer body gives every line an explicit quantity (the server refuses partial answers)', () => {
+    const { qty, price } = asOrdered();
+    qty.a = '6';
+    const body = answerBody('answer', computeAnswer(LINES, qty, price, ''), '');
+    expect(body.lines.map((l) => l.poLineId)).toEqual(LINES.map((l) => l.id));
+    expect(body.lines.every((l) => l.qtyAvailable !== null)).toBe(true);
   });
 
   it('flags invalid fields instead of guessing', () => {
@@ -92,5 +103,37 @@ describe('recorded answer + contact', () => {
     expect(contactNumbers('+972 3 555 1234')).toEqual({ tel: '+97235551234', wa: '97235551234' });
     expect(contactNumbers('12')).toBeNull();
     expect(contactNumbers(null)).toBeNull();
+  });
+});
+
+describe('review findings (W1-09 correctness pass)', () => {
+  it('an invalid edit with no other change blocks the send — never "confirm as is"', () => {
+    const { qty, price } = asOrdered();
+    qty.a = '6 ק"ג';
+    const a = computeAnswer(LINES, qty, price, '');
+    expect(primaryAction(a)).toBe('invalid');
+    expect(a.changeCount).toBe(1);
+    price.b = 'abc';
+    qty.a = '10';
+    expect(primaryAction(computeAnswer(LINES, qty, price, ''))).toBe('invalid');
+    expect(primaryAction(computeAnswer(LINES, asOrdered().qty, asOrdered().price, ''))).toBe('asIs');
+  });
+
+  it('the answer total covers the same lines as the order total and the line totals', () => {
+    const { qty, price } = asOrdered();
+    price.c = '3'; // the supplier prices a line the order had no price for
+    const a = computeAnswer(LINES, qty, price, '');
+    expect(a.answerTotalAgorot).toBe(a.orderTotalAgorot);
+    expect(a.unpriced).toBe(1);
+  });
+
+  it('a 409 on the supplier\'s own retried answer is recognised as theirs', () => {
+    const { qty, price } = asOrdered();
+    qty.a = '6';
+    const body = answerBody('answer', computeAnswer(LINES, qty, price, 'מחר'), 'מחר');
+    expect(isOwnAnswer(LINES, body, { lines: [{ poLineId: 'a', qtyAvailable: 6, proposedUnitPrice: null }], note: 'מחר' })).toBe(true);
+    expect(isOwnAnswer(LINES, body, { lines: [{ poLineId: 'a', qtyAvailable: 5, proposedUnitPrice: null }], note: 'מחר' })).toBe(false);
+    expect(isOwnAnswer(LINES, body, { lines: [{ poLineId: 'a', qtyAvailable: 6, proposedUnitPrice: null }], note: null })).toBe(false);
+    expect(isOwnAnswer(LINES, { lines: [], note: null }, { lines: [], note: null })).toBe(true);
   });
 });

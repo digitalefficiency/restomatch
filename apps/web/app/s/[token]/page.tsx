@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
-import { CheckCircle2, Clock, Info, MessageCircle, Phone } from 'lucide-react';
+import { Clock, MessageCircle, Phone } from 'lucide-react';
 import { Card, displayName } from '@/lib/components';
 import { formatDate, formatDateTime } from '@/lib/i18n/format';
 import { supplierConfirm } from '@/lib/i18n/messages/supplierConfirm';
@@ -12,6 +12,7 @@ import { AuthShell } from '../../(auth)/_components/AuthShell';
 import { SupplierAnswerForm } from './answer-form';
 import { portalContact } from './contact';
 import { DiffList } from './Diff';
+import { RecordedNotice } from './RecordedNotice';
 import { recordedDiff, type PortalLine } from './logic';
 
 export const dynamic = 'force-dynamic';
@@ -32,14 +33,8 @@ export async function generateMetadata(): Promise<Metadata> {
  * revoked or flag-off links get the portal's own not-found (no dashboard CTA);
  * an expired link explains itself.
  */
-export default async function SupplierPortalPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ token: string }>;
-  searchParams: Promise<{ answered?: string }>;
-}) {
-  const [{ token }, { answered }] = await Promise.all([params, searchParams]);
+export default async function SupplierPortalPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
   const [t, locale] = await Promise.all([getT(supplierConfirm), getLocale()]);
 
   const limited = await guardSupplierView(await headers());
@@ -114,19 +109,12 @@ export default async function SupplierPortalPage({
           {/* auth-03: a second submit (409) lands here — the recorded answer and
               its date, and a plain statement that the new changes were NOT saved. */}
           <Card elevated padding="md" className="mt-6" data-testid="portal-answered">
-            <p className="flex items-center gap-2 text-lg font-bold text-ink">
-              {answered ? (
-                <Info className="h-5 w-5 text-muted" aria-hidden="true" />
-              ) : (
-                <CheckCircle2 className="h-5 w-5 text-primary" aria-hidden="true" />
-              )}
-              {t('portal.alreadyTitle')}
-            </p>
-            <p className="mt-2 text-base text-ink" role={answered ? 'alert' : undefined}>
-              {answered
-                ? t('portal.conflictBody', { date: formatDateTime(v.response.submittedAt, locale) })
-                : t('portal.alreadyBody', { date: formatDateTime(v.response.submittedAt, locale) })}
-            </p>
+            <RecordedNotice
+              token={token}
+              lines={lines}
+              recorded={{ lines: v.response.lines, note: v.response.note }}
+              date={formatDateTime(v.response.submittedAt, locale)}
+            />
             <div className="mt-4 border-t border-line pt-3">
               {v.response.status === 'confirmed' && !v.response.note ? (
                 <p className="text-sm text-ink">{t('portal.recordedConfirmed')}</p>

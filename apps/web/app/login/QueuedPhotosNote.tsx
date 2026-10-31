@@ -9,10 +9,12 @@ import { idbQueueStore, queueDbExists, QUEUE_EVENT } from '@/lib/pwa/offlineQueu
 /**
  * auth-01: the sign-in page never touches the receiver's offline photo queue —
  * it only READS how many photos wait on this device and says so (T4 neutral).
- * They upload by themselves once the receiver is signed in again. Shared-device
+ * Photos upload only under the user who took them (a different user's sign-in
+ * drops them — PwaSessionGuard), so the note never invites just anyone to send them. Shared-device
  * privacy stays with PwaSessionGuard: other users' items are dropped at the next
  * sign-in, and an explicit sign-out still clears the queue.
  */
+// TODO(W2-05): read the count via W1-06's pendingCountOnDevice() once wave 2 adopts it.
 export function QueuedPhotosNote() {
   const t = useT(authMessages);
   const [count, setCount] = useState(0);

@@ -10,7 +10,10 @@ import { safeRelativePath } from '@/lib/safeRedirect';
 import { AuthShell, authTitle } from '../(auth)/_components/AuthShell';
 import { Notice } from '../(auth)/_components/Notice';
 import { PasswordInput } from '../(auth)/_components/PasswordInput';
+import { OutsideSubmitButton } from '../(auth)/_components/OutsideSubmitButton';
 import { SubmitButton } from '../(auth)/_components/SubmitButton';
+import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
+import { LOGOUT_FORM_ATTR } from '@/lib/pwa/offlineQueue';
 import { clearHint, readHint, writeHint } from './hint';
 import { FALLBACK_AFTER_FAILS } from './hintCodec';
 import { QueuedPhotosNote } from './QueuedPhotosNote';
@@ -76,8 +79,10 @@ export default async function LoginPage({ searchParams }: PageProps) {
 
   const [t, hint] = await Promise.all([getT(authMessages), readHint()]);
   // auth-06: a wrong password keeps the typed address (from the httpOnly hint,
-  // never the URL) and puts the cursor back in the password field.
-  const prefill = lockedEmail ?? hint?.email;
+  // never the URL) and puts the cursor back in the password field. Only right
+  // after a failed attempt: on a shared device the next person (or a page after
+  // sign-out) never sees the previous person's address.
+  const prefill = lockedEmail ?? (error === 'CredentialsSignin' ? hint?.email : undefined);
   const wrongPassword = error === 'CredentialsSignin';
   const offerFallback = wrongPassword && (hint?.fails ?? 0) >= FALLBACK_AFTER_FAILS;
 
@@ -143,6 +148,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
 
   async function switchUserAction() {
     'use server';
+    await clearHint();
     await signOut({ redirectTo: '/login' });
   }
 
@@ -154,7 +160,10 @@ export default async function LoginPage({ searchParams }: PageProps) {
         <LinkButton href={redirectTo} className="min-h-12 w-full text-base">
           {t('signin.continue')}
         </LinkButton>
-        <form action={switchUserAction} className="mt-3">
+        {/* An explicit sign-out: the same shared-device rule as the dashboard
+            (PwaSessionGuard wipes the photo queue on a data-rm-logout submit). */}
+        <PwaSessionGuard userId={session!.user!.id!} />
+        <form action={switchUserAction} className="mt-3" {...{ [LOGOUT_FORM_ATTR]: '' }}>
           <SubmitButton variant="secondary" className="min-h-12 w-full text-base">
             {t('signin.switchUser')}
           </SubmitButton>
@@ -180,26 +189,29 @@ export default async function LoginPage({ searchParams }: PageProps) {
         <Notice tone="success">{reset ? t('login.resetDone') : signedOut ? t('login.signedOut') : t('login.sent')}</Notice>
       ) : null}
 
-      {/* ONE form, ONE email field: the primary submits the password; the
-          secondary sends a sign-in link to the same address (auth-05). */}
-      <form action={passwordAction} className="space-y-4">
-        {offerFallback ? (
-          // auth-25: after repeated failures, say that sign-in locks and offer
-          // the passwordless way in — same uniform text, no enumeration.
-          <Notice tone="error" id="login-error">
-            <p>{t('login.errors.credentials')}</p>
-            <p className="mt-1 text-ink">{t('signin.lockoutHint')}</p>
-            <SubmitButton
-              variant="secondary"
-              formAction={magicLinkAction}
-              formNoValidate
-              className="mt-2 min-h-11 w-full"
-              data-testid="magic-fallback"
-            >
-              {t('signin.magicFallback')}
-            </SubmitButton>
-          </Notice>
-        ) : null}
+      {offerFallback ? (
+        // auth-25: after repeated failures, say that sign-in locks and offer
+        // the passwordless way in — same uniform text, no enumeration.
+        <Notice tone="error" id="login-error">
+          <p>{t('login.errors.credentials')}</p>
+          <p className="mt-1 text-ink">{t('signin.lockoutHint')}</p>
+          <OutsideSubmitButton
+            form="login-form"
+            variant="secondary"
+            formAction={magicLinkAction}
+            formNoValidate
+            className="mt-2 min-h-11 w-full"
+            data-testid="magic-fallback"
+          >
+            {t('signin.magicFallback')}
+          </OutsideSubmitButton>
+        </Notice>
+      ) : null}
+
+      {/* ONE form, ONE email field (auth-05). The password submit is the form's
+          ONLY in-tree submit, so Enter always tries the password; the email-link
+          buttons sit outside and join the same form through form="login-form". */}
+      <form id="login-form" action={passwordAction} className="space-y-4">
         <Field
           label={t('login.email')}
           htmlFor="email"
@@ -249,25 +261,26 @@ export default async function LoginPage({ searchParams }: PageProps) {
         <SubmitButton className="min-h-12 w-full text-base">
           {t('login.submit')}
         </SubmitButton>
-
-        <div className="flex items-center gap-3 text-xs text-muted" aria-hidden="true">
-          <span className="h-px flex-1 bg-line" />
-          {t('login.or')}
-          <span className="h-px flex-1 bg-line" />
-        </div>
-
-        {/* data-keep-clear on the LOWER of the two sign-in buttons: the cookie
-            bar waits until it is scrolled clear, so both stay tappable (auth-31). */}
-        <SubmitButton
-          variant="secondary"
-          formAction={magicLinkAction}
-          formNoValidate
-          data-keep-clear
-          className="min-h-12 w-full text-base"
-        >
-          {t('login.magicSubmit')}
-        </SubmitButton>
       </form>
+
+      <div className="my-4 flex items-center gap-3 text-xs text-muted" aria-hidden="true">
+        <span className="h-px flex-1 bg-line" />
+        {t('login.or')}
+        <span className="h-px flex-1 bg-line" />
+      </div>
+
+      {/* data-keep-clear on the LOWER of the two sign-in buttons: the cookie
+          bar waits until it is scrolled clear, so both stay tappable (auth-31). */}
+      <OutsideSubmitButton
+        form="login-form"
+        variant="secondary"
+        formAction={magicLinkAction}
+        formNoValidate
+        data-keep-clear
+        className="min-h-12 w-full text-base"
+      >
+        {t('login.magicSubmit')}
+      </OutsideSubmitButton>
 
       <p className="mt-6 text-center text-sm text-muted">
         {t('signin.newHere')}{' '}
