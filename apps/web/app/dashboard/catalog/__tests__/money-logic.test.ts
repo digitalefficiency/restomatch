@@ -24,6 +24,8 @@ const CASES = [
   'abc',
   '1.250,5',
   '1e3',
+  '0,125',
+  '0,750',
 ];
 
 describe('typed catalog prices (catalog-02 / -20)', () => {
@@ -32,6 +34,9 @@ describe('typed catalog prices (catalog-02 / -20)', () => {
     expect(parsePriceInput('7,5')).toBe(7.5);
     expect(parsePriceInput('12,90')).toBe(12.9);
     expect(parsePriceInput('1,250.50')).toBe(1250.5);
+    // A leading "0," is a decimal comma, never thousands (review finding 3).
+    expect(parsePriceInput('0,125')).toBe(0.125);
+    expect(parsePriceInput('0,750')).toBe(0.75);
     expect(parsePriceInput('  ')).toBeNull();
     expect(parsePriceInput('-5')).toBe('invalid');
     expect(parsePriceInput('1,2345')).toBe('invalid');

@@ -217,8 +217,9 @@ describe('analyzeCatalogRows: held rows, VAT basis', () => {
       ['A5', null],
     ]);
     expect(a.held).toEqual([
-      { rowNumber: 3, supplierNameRaw: 'מלח', supplierSku: 'A3', rawPrice: '-5', reason: 'UNCLEAR_PRICE' },
-      { rowNumber: 4, supplierNameRaw: 'סוכר', supplierSku: 'A4', rawPrice: 'לפי משקל', reason: 'UNCLEAR_PRICE' },
+      // Spreadsheet line numbers: the header is line 1, so the 3rd data row is line 4.
+      { rowNumber: 4, supplierNameRaw: 'מלח', supplierSku: 'A3', rawPrice: '-5', reason: 'UNCLEAR_PRICE' },
+      { rowNumber: 5, supplierNameRaw: 'סוכר', supplierSku: 'A4', rawPrice: 'לפי משקל', reason: 'UNCLEAR_PRICE' },
     ]);
     // The worker's path uses the same rows: a held row can never be stored as a guess.
     expect(extractCatalogRows(table, mapping).map((r) => r.supplierSku)).toEqual(['A1', 'A2', 'A5']);
@@ -237,12 +238,13 @@ describe('analyzeCatalogRows: held rows, VAT basis', () => {
     expect(priceUnitsToNumeric(123_456)).toBe('12.3456');
   });
 
-  it('pre-sets the VAT basis from a "כולל מע״מ" header', () => {
-    expect(detectVatBasis(['תיאור', 'מחיר כולל מע"מ'])).toBe('inc');
-    expect(detectVatBasis(['תיאור', 'מחיר כולל מע״מ'])).toBe('inc');
-    expect(detectVatBasis(['Description', 'Price incl. VAT'])).toBe('inc');
-    expect(detectVatBasis(['תיאור', 'מחיר לא כולל מע"מ'])).toBe('ex');
-    expect(detectVatBasis(['תיאור', 'מחיר'])).toBeNull();
+  it('pre-sets the VAT basis from the PRICE column\'s header only', () => {
+    expect(detectVatBasis('מחיר כולל מע"מ')).toBe('inc');
+    expect(detectVatBasis('מחיר כולל מע״מ')).toBe('inc');
+    expect(detectVatBasis('Price incl. VAT')).toBe('inc');
+    expect(detectVatBasis('מחיר לא כולל מע"מ')).toBe('ex');
+    expect(detectVatBasis('מחיר')).toBeNull();
+    expect(detectVatBasis(undefined)).toBeNull();
   });
 
   it('reads a comma-decimal file per its own locale', () => {
@@ -256,5 +258,49 @@ describe('analyzeCatalogRows: held rows, VAT basis', () => {
     const a = analyzeCatalogRows(t, { name: 'תיאור', price: 'מחיר' });
     expect(a.decimal).toBe('comma');
     expect(a.rows.map((r) => r.listPrice)).toEqual([1250, 7.5]);
+  });
+});
+
+// ── W1-10 review fixes ─────────────────────────────────────────────────────────
+describe('review: "0,125" is a decimal, never thousands (finding 3)', () => {
+  it.each([
+    ['0,125', 0.125],
+    ['0,750', 0.75],
+    ['₪0,125', 0.125],
+    ['0,5', 0.5],
+  ])('%s → %d', (raw, expected) => {
+    expect(parseMoneyCell(raw)).toEqual({ kind: 'ok', value: expected });
+  });
+  it('real thousands still group: "1,250" → 1250, "10,125" → 10125', () => {
+    expect(parseNumeric('1,250')).toBe(1250);
+    expect(parseNumeric('10,125')).toBe(10125);
+  });
+  it('a comma-decimal file never reads "0.125" as thousands', () => {
+    expect(parseMoneyCell('0.125', 'comma').kind).toBe('invalid');
+  });
+});
+
+describe('review: typed Excel numbers and real row numbers (findings 6, 12)', () => {
+  it('a comma-decimal column keeps a typed number as is (no 1000× re-read)', async () => {
+    const buf = await xlsxBufferFromAoa([
+      ['תיאור', 'מחיר'],
+      ['שמן', '1.250,00'],
+      ['מלח', 1.125],
+      [],
+      ['סוכר', 'abc'],
+    ]);
+    const table = await parseCatalogFile({ filename: 'p.xlsx', base64: buf.toString('base64') });
+    const a = analyzeCatalogRows(table, { name: 'תיאור', price: 'מחיר' });
+    expect(a.decimal).toBe('comma');
+    expect(a.rows.map((r) => [r.supplierNameRaw, r.listPrice, r.rowNumber])).toEqual([
+      ['שמן', 1250, 2],
+      ['מלח', 1.125, 3],
+    ]);
+    // The blank row 4 is skipped but row 5 keeps its number.
+    expect(a.held.map((h) => h.rowNumber)).toEqual([5]);
+  });
+  it('a CSV keeps its line numbers across blank lines', async () => {
+    const table = await parseCatalogFile({ filename: 'p.csv', text: 'תיאור,מחיר\nשמן,10\n\nמלח,-5\n' });
+    expect(analyzeCatalogRows(table, { name: 'תיאור', price: 'מחיר' }).held[0]!.rowNumber).toBe(4);
   });
 });

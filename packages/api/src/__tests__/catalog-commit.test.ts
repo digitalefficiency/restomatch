@@ -9,6 +9,7 @@ import {
   productAliases,
   products,
   supplierCatalogItems,
+  suppliers,
   testDbUrl,
 } from '@restomatch/db';
 import { MockEmbeddingProvider } from '@restomatch/catalog';
@@ -305,5 +306,110 @@ describe('one catalogUnitPrice for the sweep and the product page (catalog-13)',
     });
     d = await callerFor(A).catalog.productDetail({ productId: A.productId });
     expect(d!.cheapestUnitPrice).toBe(9.5);
+  });
+});
+
+// ── W1-10 review fixes ─────────────────────────────────────────────────────────
+describe('review: VAT basis + rate, flagged prices, aliases, packs', () => {
+  const mapping = { sku: 'מק"ט', name: 'תיאור', price: 'מחיר' };
+  const priceOf = async (sku: string) => {
+    const [it] = await db
+      .select({ listPrice: supplierCatalogItems.listPrice })
+      .from(supplierCatalogItems)
+      .where(and(eq(supplierCatalogItems.restaurantId, A.restaurantId), eq(supplierCatalogItems.supplierSku, sku)));
+    return it?.listPrice ?? null;
+  };
+
+  it('finding 1: "כולל מע״מ" on ANOTHER column does not pre-set the price basis', async () => {
+    const pre = await callerFor(A).catalog.parsePreview({
+      supplierId: A.supplierId,
+      file: { filename: 'p.csv', text: 'תיאור,מחיר,הובלה כולל מע"מ\nשמן,100,20\n' },
+    });
+    expect(pre.mapping.price).toBe('מחיר');
+    expect(pre.vatBasisDetected).toBeNull();
+    expect(pre.check.rows[0]?.price).toBe(100);
+  });
+
+  it('finding 2: an inc-VAT list converts at the SUPPLIER\'s override rate, as the engine does', async () => {
+    await db.update(suppliers).set({ vatRate: '0.17' }).where(eq(suppliers.id, A.supplierId));
+    const res = await callerFor(A).catalog.commitImport({
+      supplierId: A.supplierId,
+      file: { filename: 'p.csv', text: 'מק"ט,תיאור,מחיר\nV-1,שמן,"1,250"\n' },
+      mapping,
+      vatBasis: 'inc',
+    });
+    expect(await priceOf('V-1')).toBe('1068.3761'); // 1250 / 1.17, half-up at 4 dp
+    const [imp] = await db.select().from(catalogImports).where(eq(catalogImports.id, res.importId));
+    expect(imp!.columnMapping).toMatchObject({ vatBasis: 'inc', vatRate: '0.1700' });
+  });
+
+  it('finding 7: a flagged price is refused unless confirmed — re-checked on the committed file', async () => {
+    await db.insert(supplierCatalogItems).values({
+      restaurantId: A.restaurantId,
+      supplierId: A.supplierId,
+      supplierSku: 'F-1',
+      supplierNameRaw: 'אורז',
+      listPrice: '2',
+    });
+    const file = { filename: 'p.csv', text: 'מק"ט,תיאור,מחיר\nF-1,אורז,"1,250"\n' };
+    await expect(
+      callerFor(A).catalog.commitImport({ supplierId: A.supplierId, file, mapping, vatBasis: 'ex' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringMatching(/^CATALOG_FLAGGED_PRICES/) });
+    expect(await priceOf('F-1')).toBe('2.0000');
+    await callerFor(A).catalog.commitImport({ supplierId: A.supplierId, file, mapping, vatBasis: 'ex', confirmFlagged: true });
+    expect(await priceOf('F-1')).toBe('1250.0000');
+  });
+
+  it('finding 10: re-linking a row supersedes the old alias of the same SKU (one SKU, one product)', async () => {
+    const [other] = await db
+      .insert(products)
+      .values({ restaurantId: A.restaurantId, canonicalName: 'מוצר אחר' })
+      .returning({ id: products.id });
+    const [it] = await db
+      .insert(supplierCatalogItems)
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, supplierNameRaw: 'עגבניה שרי', supplierSku: 'Q-9' })
+      .returning({ id: supplierCatalogItems.id });
+    await callerFor(A).catalog.updateItem({ itemId: it!.id, patch: { productId: A.productId } });
+    await callerFor(A).catalog.updateItem({ itemId: it!.id, patch: { productId: other!.id } });
+    const aliases = await db
+      .select({ productId: productAliases.productId })
+      .from(productAliases)
+      .where(and(eq(productAliases.supplierId, A.supplierId), eq(productAliases.supplierSku, 'Q-9')));
+    expect(aliases).toEqual([{ productId: other!.id }]);
+  });
+
+  it('finding 11: a pack row vs the supplier\'s UNPACKED row of the product is a pack mismatch', async () => {
+    await db.insert(supplierCatalogItems).values({
+      restaurantId: A.restaurantId,
+      supplierId: A.supplierId,
+      productId: A.productId,
+      supplierNameRaw: 'עגבניה',
+      listPrice: '9',
+    });
+    nextCandidate.value = { productId: A.productId, canonicalName: 'עגבניה A', confidence: 1, matchedBy: 'alias' };
+    const res = await commitCatalogRows(
+      db,
+      { restaurantId: A.restaurantId, supplierId: A.supplierId },
+      [row({ packSize: 6 })],
+      embedder,
+    );
+    expect(res.ambiguous[0]?.reasons).toEqual(['PACK_MISMATCH']);
+  });
+
+  it('finding 4: the review persists — imports report their unlinked rows until each is resolved', async () => {
+    nextCandidate.value = { productId: A.productId, canonicalName: 'עגבניה A', confidence: 0.75, matchedBy: 'fuzzy' };
+    const res = await callerFor(A).catalog.commitImport({
+      supplierId: A.supplierId,
+      file: { filename: 'p.csv', text: 'מק"ט,תיאור,מחיר\nR-1,עגבניה שרי מובחרת,9\n' },
+      mapping,
+      vatBasis: 'ex',
+    });
+    const listed = async () =>
+      (await callerFor(A).catalog.imports({ supplierId: A.supplierId })).find((i) => i.id === res.importId)!.unlinkedItems;
+    expect(await listed()).toBe(1);
+    const queue = await callerFor(A).catalog.items({ importId: res.importId, unlinkedOnly: true });
+    expect(queue.map((i) => i.supplierSku)).toEqual(['R-1']);
+    await callerFor(A).catalog.updateItem({ itemId: queue[0]!.id, patch: { productId: A.productId } });
+    expect(await listed()).toBe(0);
   });
 });

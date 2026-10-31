@@ -13,8 +13,8 @@ export function parsePriceInput(raw: string): PriceInput {
   if (s === '') return null;
   let norm: string | null = null;
   if (/^\d+(?:\.\d+)?$/.test(s)) norm = s;
-  else if (/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(s)) norm = s.replace(/,/g, '');
-  else if (/^\d+,\d{1,2}$/.test(s)) norm = s.replace(',', '.');
+  else if (/^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d+)?$/.test(s)) norm = s.replace(/,/g, '');
+  else if (/^\d+,\d{1,2}$/.test(s) || /^0,\d+$/.test(s)) norm = s.replace(',', '.');
   if (norm === null) return 'invalid';
   const n = Number(norm);
   return Number.isFinite(n) ? n : 'invalid';

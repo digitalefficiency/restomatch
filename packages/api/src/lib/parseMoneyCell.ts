@@ -11,6 +11,7 @@
  *   "1250" · "12.5"                       plain
  *   "1,250" · "1,250,000" · "1,250.00"    comma = thousands (groups of 3)
  *   "12,90" · "7,5"                       comma decimal (1–2 digits, no other separator)
+ *   "0,125" · "0,750"                     comma decimal after a leading 0 (never thousands)
  * With `decimal: 'comma'` (the file's own cells use "1.250,00"):
  *   "1.250,50" · "1.250" · "7,5"          dot = thousands, comma = decimal
  * Rejected: signs ("-5"), accounting negatives ("(5)"), exponents ("1e3"),
@@ -39,10 +40,11 @@ export function parseMoneyCell(raw: string | null | undefined, decimal: DecimalS
   let norm: string | null = null;
   if (decimal === 'comma') {
     if (/^\d+(?:,\d+)?$/.test(s)) norm = s.replace(',', '.');
-    else if (/^\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(s)) norm = s.replace(/\./g, '').replace(',', '.');
+    else if (/^[1-9]\d{0,2}(?:\.\d{3})+(?:,\d+)?$/.test(s)) norm = s.replace(/\./g, '').replace(',', '.');
   } else if (/^\d+(?:\.\d+)?$/.test(s)) norm = s;
-  else if (/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(s)) norm = s.replace(/,/g, '');
-  else if (/^\d+,\d{1,2}$/.test(s)) norm = s.replace(',', '.');
+  // Thousands groups never start with 0: "0,125" is a third of a shekel, not 125.
+  else if (/^[1-9]\d{0,2}(?:,\d{3})+(?:\.\d+)?$/.test(s)) norm = s.replace(/,/g, '');
+  else if (/^\d+,\d{1,2}$/.test(s) || /^0,\d+$/.test(s)) norm = s.replace(',', '.');
   if (norm === null) return { kind: 'invalid', raw: original };
   const n = Number(norm);
   return Number.isFinite(n) ? { kind: 'ok', value: n } : { kind: 'invalid', raw: original };

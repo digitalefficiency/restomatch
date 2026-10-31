@@ -119,6 +119,8 @@ test('import: "1,250" → ₪1,250.00, "-5" held, VAT basis required, ₪ on the
   // Owner decision: numbers in tables are always physically right-aligned (he and en).
   expect(await imported.first().evaluate((el) => getComputedStyle(el).textAlign)).toBe('right');
   await expect(page.getByText('מחיר לא ברור · 1 שורות לא ייובאו')).toBeVisible();
+  // The file's "-5" is bidi-isolated: it must not read "5-" in RTL (review finding 15).
+  await expect(page.locator('bdi[dir=ltr]', { hasText: '"-5"' })).toBeVisible();
   if (SHOTS) {
     mkdirSync(SHOTS, { recursive: true });
     await page.screenshot({ path: `${SHOTS}/import-check-he-1440.png`, fullPage: true });
@@ -181,10 +183,21 @@ test('a 0.6–0.9 match is never linked: "בדיקה" step, accept learns the al
     expect(saved!.product_id).toBeNull();
     expect(await sql`select 1 from product_aliases where supplier_name_raw = ${RAW}`).toHaveLength(0);
 
-    await page.getByRole('button', { name: 'אישור ההצעה' }).click();
+    // "אבדוק אחר כך" leads somewhere: the review persists on the server and the
+    // supplier's import history links back to it (review finding 4).
+    await page.getByRole('button', { name: 'אבדוק אחר כך' }).click();
+    await page.goto(`/dashboard/suppliers/${tomato!.supplier_id}?tab=catalog`);
+    await page.getByRole('link', { name: 'בדיקה · 1 התאמות דורשות אישור' }).first().click();
+    await expect(page.getByRole('heading', { name: 'בדיקה · 1 התאמות דורשות אישור' })).toBeVisible();
+    await expect(page.getByText(RAW)).toBeVisible();
+
+    await page.getByRole('button', { name: 'בחירת מוצר אחר' }).click();
+    await page.getByRole('searchbox', { name: 'חיפוש מוצר לקישור' }).fill('עגבניות שרי');
+    await page.getByRole('button', { name: 'קישור ל-עגבניות שרי', exact: true }).click();
     await expect(page.getByText('קושר ל-עגבניות שרי')).toBeVisible();
-    await page.getByRole('button', { name: 'סיום הבדיקה' }).click();
-    await expect(page.getByRole('status').filter({ hasText: 'הייבוא הושלם' }).first()).toBeVisible();
+    // Focus is not lost: with no rows left it lands on the finish button (review finding 14).
+    await expect(page.locator('#rv-finish')).toBeFocused();
+    await expect(page.getByRole('button', { name: 'סיום הבדיקה' })).toBeVisible();
     const [linked] = await sql<{ product_id: string | null }[]>`
       select product_id from supplier_catalog_items where supplier_sku = ${`${SKU}-T`}`;
     expect(linked!.product_id).toBe(tomato!.product_id);
@@ -263,3 +276,16 @@ for (const locale of ['he', 'en'] as const) {
     });
   }
 }
+
+test('names grid: a product-link click with unsaved English names asks first (review finding 13)', async ({ page }) => {
+  await setLocale(page, 'he');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/dashboard/products');
+  const first = page.locator('input[id^="name-en-"]').first();
+  await first.fill(`W110 ${SKU}`);
+  await page.locator('a[id^="name-en-"][id$="-label"]').first().click();
+  await expect(page.getByRole('alertdialog')).toBeVisible();
+  await page.getByRole('button', { name: 'המשך עריכה' }).click();
+  await expect(page).toHaveURL(/\/dashboard\/products$/);
+  await expect(first).toHaveValue(`W110 ${SKU}`);
+});

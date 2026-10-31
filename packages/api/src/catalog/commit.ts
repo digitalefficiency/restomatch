@@ -2,7 +2,6 @@ import {
   and,
   catalogImports,
   eq,
-  isNotNull,
   products,
   suppliers,
   supplierCatalogItems,
@@ -297,11 +296,11 @@ async function unitPackFit(
         eq(supplierCatalogItems.restaurantId, restaurantId),
         eq(supplierCatalogItems.supplierId, supplierId),
         eq(supplierCatalogItems.productId, productId),
-        isNotNull(supplierCatalogItems.packSize),
       ),
     )
-    .limit(5);
+    .limit(20);
+  // No pack size = sold per single unit (1), on both sides — an unpacked row counts.
   const rowPack = row.packSize ?? 1;
-  if (packs.length > 0 && packs.every((x) => Number(x.packSize) !== rowPack)) reasons.push('PACK_MISMATCH');
+  if (packs.length > 0 && packs.every((x) => Number(x.packSize ?? 1) !== rowPack)) reasons.push('PACK_MISMATCH');
   return { productUnit, reasons };
 }

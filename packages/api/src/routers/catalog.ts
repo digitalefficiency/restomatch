@@ -11,7 +11,11 @@ import {
   suppliers,
   supplierCatalogItems,
   catalogImports,
+  inArray,
   isNull,
+  ne,
+  or,
+  productAliases,
   restaurants,
   type Database,
 } from '@restomatch/db';
@@ -91,14 +95,21 @@ const MappingSchema = z
 /** The price list's VAT basis — asked in the wizard, stored with the mapping. */
 const VatBasisSchema = z.enum(['ex', 'inc']);
 
-/** The restaurant's VAT rate as stored (the rate the matching engine is given). */
-async function restaurantVatRate(db: Database, restaurantId: string): Promise<string> {
+/**
+ * The VAT rate this supplier's prices carry, resolved the way the matching
+ * engine's input is (match/buildMatchInput: a PO's rate, else the supplier's
+ * override, else the restaurant's). A price list has no PO, so: supplier
+ * override → restaurant rate. Read-only — the rate is never redefined here.
+ */
+async function supplierVatRate(db: Database, restaurantId: string, supplierId: string): Promise<string> {
   const [r] = await db
-    .select({ vatRate: restaurants.vatRate })
+    .select({ supplierRate: suppliers.vatRate, restaurantRate: restaurants.vatRate })
     .from(restaurants)
+    .leftJoin(suppliers, and(eq(suppliers.id, supplierId), eq(suppliers.restaurantId, restaurantId)))
     .where(eq(restaurants.id, restaurantId))
     .limit(1);
-  return r?.vatRate ?? '0.18';
+  // restaurants.vat_rate is NOT NULL (default 0.18); the literal only covers a missing row.
+  return r?.supplierRate ?? r?.restaurantRate ?? '0.18';
 }
 
 export type PriceFlag = 'ZERO' | 'HIGH' | 'LOW';
@@ -317,8 +328,8 @@ export const catalogRouter = router({
       const table = await parseUpload(input.file);
       const detected = autoDetectMapping(table.headers);
       const mapping = input.mapping ?? detected;
-      const vatBasisDetected = detectVatBasis(table.headers);
-      const vatRate = await restaurantVatRate(ctx.db, restaurantId);
+      const vatBasisDetected = detectVatBasis(mapping.price);
+      const vatRate = await supplierVatRate(ctx.db, restaurantId, input.supplierId);
       const vatBasis = input.vatBasis ?? vatBasisDetected ?? 'ex';
       const analysis = analyzeCatalogRows(table, { ...mapping, vatBasis, vatRate });
       const current = await currentPrices(ctx.db, restaurantId, input.supplierId);
@@ -364,6 +375,12 @@ export const catalogRouter = router({
         mapping: MappingSchema,
         /** Required by the wizard; an API caller that omits it means ex-VAT (the old behaviour). */
         vatBasis: VatBasisSchema.optional(),
+        /**
+         * The person checked the prices flagged against the current list (0, >5×,
+         * <0.2×). Re-checked here on the file being committed, so a stale preview
+         * can't wave a flagged price through.
+         */
+        confirmFlagged: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -378,9 +395,21 @@ export const catalogRouter = router({
       const mapping: CatalogImportMapping = {
         ...input.mapping,
         vatBasis: input.vatBasis ?? 'ex',
-        vatRate: await restaurantVatRate(ctx.db, restaurantId),
+        vatRate: await supplierVatRate(ctx.db, restaurantId, input.supplierId),
       };
       const analysis = analyzeCatalogRows(table, mapping);
+      if (!input.confirmFlagged) {
+        const current = await currentPrices(ctx.db, restaurantId, input.supplierId);
+        const flagged = analysis.rows.filter(
+          (r) => priceFlag(r.listPrice, current(r.supplierSku, r.supplierNameRaw)) != null,
+        ).length;
+        if (flagged > 0) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `CATALOG_FLAGGED_PRICES: ${flagged} מחירים רחוקים מהמחירון הנוכחי — יש לאשר אותם`,
+          });
+        }
+      }
       const rows = analysis.rows.map(({ supplierSku, supplierNameRaw, unit, listPrice, barcodeEan, packSize }) => ({
         supplierSku,
         supplierNameRaw,
@@ -481,6 +510,13 @@ export const catalogRouter = router({
           updatedItems: catalogImports.updatedItems,
           error: catalogImports.error,
           createdAt: catalogImports.createdAt,
+          /**
+           * Rows this import saved without a product link — still waiting in its
+           * "בדיקה" (the review persists here). The outer column is spelled out:
+           * drizzle renders it unqualified, which inside the subquery means sci.id.
+           */
+          unlinkedItems: sql<number>`(SELECT count(*)::int FROM supplier_catalog_items sci
+            WHERE sci.source_import_id = "catalog_imports"."id" AND sci.restaurant_id = ${rid} AND sci.product_id IS NULL)`,
         })
         .from(catalogImports)
         .where(
@@ -647,6 +683,26 @@ export const catalogRouter = router({
       // A person linked this row to a product: that is a confirmation, so learn
       // the supplier-name (+ SKU) → product alias for future invoices and imports.
       if (set.productId) {
+        const rawName = set.supplierNameRaw ?? item.supplierNameRaw;
+        const sku = set.supplierSku !== undefined ? set.supplierSku : item.supplierSku;
+        // A person's link supersedes any earlier alias of this supplier's name /
+        // SKU to another product — otherwise one SKU would resolve two ways.
+        const own = ctx.db
+          .select({ id: products.id })
+          .from(products)
+          .where(eq(products.restaurantId, restaurantId));
+        await ctx.db
+          .delete(productAliases)
+          .where(
+            and(
+              eq(productAliases.supplierId, item.supplierId),
+              ne(productAliases.productId, set.productId),
+              inArray(productAliases.productId, own),
+              sku
+                ? or(eq(productAliases.supplierNameRaw, rawName.trim()), eq(productAliases.supplierSku, sku))
+                : eq(productAliases.supplierNameRaw, rawName.trim()),
+            ),
+          );
         await recordConfirmedMatch(ctx.db, {
           productId: set.productId,
           rawName: set.supplierNameRaw ?? item.supplierNameRaw,

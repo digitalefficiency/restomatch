@@ -73,7 +73,6 @@ export async function requeueInvoicesForRematch(
     id: string;
   }>;
   const blocked = new Set(claimedRows.map((r) => String(r.id)));
-  const runAt = new Date(Date.now() + REMATCH_DELAY_MS);
   for (const inv of rows) {
     if (readConsolidatedRaw(inv.ocrPayload)) {
       report.consolidated += 1;
@@ -89,7 +88,9 @@ export async function requeueInvoicesForRematch(
     }
     const job: MatchInvoiceQueueJob = { restaurantId, invoiceId: inv.id, rematch: true };
     try {
-      await enqueue(MATCH_INVOICE_QUEUE, job, { runAt });
+      // Per job: each enqueue can take up to its own timeout, so a runAt fixed
+      // before the loop could expire before this request commits.
+      await enqueue(MATCH_INVOICE_QUEUE, job, { runAt: new Date(Date.now() + REMATCH_DELAY_MS) });
       report.requeued += 1;
     } catch (err) {
       report.failed += 1;
@@ -112,6 +113,8 @@ const RevertSchema = z
     catalogItemIds: z.array(z.string().uuid()).max(5000),
     /** The alias this confirm created (null when it only refreshed an existing one). */
     aliasId: z.string().uuid().nullable(),
+    /** The confirm created productId ("מוצר חדש"): undo removes it too when nothing else uses it. */
+    createdProduct: z.boolean().optional(),
   })
   .strict();
 
@@ -322,6 +325,24 @@ export const mappingRouter = router({
               ),
             );
         }
+        if (r.createdProduct) {
+          // Remove the product this confirm made — only while no order, invoice or
+          // price-list line still points at it (those are ON DELETE SET NULL and
+          // would be silently unlinked). Recipes / counts are RESTRICT: the
+          // savepoint catches that refusal and the product stays.
+          const used = sql`EXISTS (SELECT 1 FROM invoice_lines WHERE product_id = ${r.productId})
+            OR EXISTS (SELECT 1 FROM po_lines WHERE product_id = ${r.productId})
+            OR EXISTS (SELECT 1 FROM supplier_catalog_items WHERE product_id = ${r.productId})`;
+          try {
+            await ctx.db.transaction(async (sp) => {
+              await (sp as unknown as Database)
+                .delete(products)
+                .where(and(eq(products.id, r.productId), eq(products.restaurantId, rid), sql`NOT (${used})`));
+            });
+          } catch {
+            // Still used elsewhere: leave it.
+          }
+        }
         const rematch = await requeueInvoicesForRematch(
           ctx.db,
           rid,
@@ -428,6 +449,7 @@ export const mappingRouter = router({
           invoiceLineIds: updatedInv.map((l) => l.id),
           catalogItemIds: linkedItems.map((l) => l.id),
           aliasId: alias.created ? alias.aliasId : null,
+          createdProduct,
         },
       };
     }),

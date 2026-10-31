@@ -14,6 +14,7 @@ import {
   priceUnitsToNumeric,
   toPriceUnits,
   type DecimalStyle,
+  type MoneyCell,
 } from '../lib/parseMoneyCell';
 
 /**
@@ -50,6 +51,10 @@ export class CatalogFileError extends Error {
 export interface ParsedTable {
   headers: string[];
   rows: Array<Record<string, string>>;
+  /** Each row's line in the file as the user sees it (header = line 1); absent → index + 2. */
+  rowNumbers?: number[];
+  /** Per row, the headers whose Excel cell was a typed number (already unambiguous, never re-read by locale). */
+  numericCells?: Array<Set<string>>;
 }
 
 export interface CatalogRow {
@@ -70,14 +75,22 @@ export interface CatalogFileInput {
 }
 
 function parseCsv(text: string): ParsedTable {
+  // Blank lines are kept while parsing (and dropped below) so each row keeps
+  // its line number in the file — what "שורה 7" must point at.
   const out = Papa.parse<Record<string, string>>(text, {
     header: true,
-    skipEmptyLines: 'greedy',
+    skipEmptyLines: false,
     transformHeader: (h) => h.trim(),
   });
   const headers = (out.meta.fields ?? []).map((h) => h.trim()).filter(Boolean);
-  const rows = (out.data ?? []).filter((r) => r && Object.keys(r).length > 0);
-  return { headers, rows };
+  const rows: Array<Record<string, string>> = [];
+  const rowNumbers: number[] = [];
+  (out.data ?? []).forEach((r, i) => {
+    if (!r || !Object.values(r).some((v) => typeof v === 'string' && v.trim() !== '')) return;
+    rows.push(r);
+    rowNumbers.push(i + 2);
+  });
+  return { headers, rows, rowNumbers };
 }
 
 /**
@@ -104,6 +117,13 @@ function cellToString(cell: Cell): string {
     return '';
   }
   return String(v);
+}
+
+/** A typed Excel number (or a formula that evaluates to one): its String() is a plain JS number. */
+function isNumberCell(cell: Cell): boolean {
+  const v = cell.value;
+  if (typeof v === 'number') return true;
+  return typeof v === 'object' && v !== null && 'result' in v && typeof (v as { result?: unknown }).result === 'number';
 }
 
 async function parseXlsx(buf: Buffer): Promise<ParsedTable> {
@@ -140,6 +160,8 @@ async function parseXlsx(buf: Buffer): Promise<ParsedTable> {
   for (let i = 0; i < headers.length; i++) headers[i] = headers[i] ?? '';
 
   const rows: Array<Record<string, string>> = [];
+  const rowNumbers: number[] = [];
+  const numericCells: Array<Set<string>> = [];
   const lastRow = sheet.rowCount;
   for (let r = 2; r <= lastRow; r++) {
     const line = sheet.getRow(r);
@@ -147,15 +169,22 @@ async function parseXlsx(buf: Buffer): Promise<ParsedTable> {
     // can never reach Object.prototype (defence-in-depth vs prototype pollution).
     const row: Record<string, string> = Object.create(null) as Record<string, string>;
     let hasValue = false;
+    const numeric = new Set<string>();
     for (let i = 0; i < headers.length; i++) {
       const h = headers[i] ?? '';
-      const v = cellToString(line.getCell(i + 1)).trim();
+      const cell = line.getCell(i + 1);
+      const v = cellToString(cell).trim();
       if (h) row[h] = v;
+      if (h && v && isNumberCell(cell)) numeric.add(h);
       if (v) hasValue = true;
     }
-    if (hasValue) rows.push(row);
+    if (hasValue) {
+      rows.push(row);
+      rowNumbers.push(r);
+      numericCells.push(numeric);
+    }
   }
-  return { headers: headers.filter(Boolean), rows };
+  return { headers: headers.filter(Boolean), rows, rowNumbers, numericCells };
 }
 
 /**
@@ -268,10 +297,15 @@ export type CatalogImportMapping = CatalogColumnMapping & CatalogImportOptions;
 const INC_VAT = /כולל\s*מע["״'׳]?מ|כולל\s*מעמ|incl(?:uding|\.)?\s*vat|vat\s*incl/i;
 const EX_VAT = /(?:לא\s*כולל|ללא|לפני)\s*מע["״'׳]?מ|excl(?:uding|\.)?\s*vat|before\s*vat|\+\s*מע["״'׳]?מ/i;
 
-/** Pre-set the VAT basis from the headers: a "כולל מע״מ" header → 'inc', else null (ask). */
-export function detectVatBasis(headers: string[]): VatBasis | null {
-  if (headers.some((h) => EX_VAT.test(h))) return 'ex';
-  if (headers.some((h) => INC_VAT.test(h))) return 'inc';
+/**
+ * Pre-set the VAT basis from the header of the column mapped as the price
+ * ("מחיר כולל מע״מ" → 'inc'). Only that column counts: another column's
+ * "הובלה כולל מע״מ" says nothing about the prices. Null → ask.
+ */
+export function detectVatBasis(priceHeader: string | undefined | null): VatBasis | null {
+  if (!priceHeader) return null;
+  if (EX_VAT.test(priceHeader)) return 'ex';
+  if (INC_VAT.test(priceHeader)) return 'inc';
   return null;
 }
 
@@ -279,7 +313,7 @@ export function detectVatBasis(headers: string[]): VatBasis | null {
 export type HeldReason = 'UNCLEAR_PRICE';
 
 export interface HeldRow {
-  /** 1-based data-row number (the header is row 0) — what the user sees in the file. */
+  /** The row's line in the spreadsheet / CSV (the header is line 1) — what the user sees in the file. */
   rowNumber: number;
   supplierNameRaw: string;
   supplierSku: string | null;
@@ -324,9 +358,15 @@ export function analyzeCatalogRows(table: ParsedTable, mapping: CatalogImportMap
     if (!supplierNameRaw) return; // a row without a description can't be a catalog item
     const supplierSku = get(row, mapping.sku);
     const rawPrice = get(row, mapping.price);
-    const cell = parseMoneyCell(rawPrice, decimal);
+    const rowNumber = table.rowNumbers?.[i] ?? i + 2;
+    // A typed Excel number is already a number: never re-read it by the column's locale.
+    const typed = !!mapping.price && !!table.numericCells?.[i]?.has(mapping.price);
+    const cell: MoneyCell =
+      typed && rawPrice != null && Number.isFinite(Number(rawPrice)) && Number(rawPrice) >= 0
+        ? { kind: 'ok', value: Number(rawPrice) }
+        : parseMoneyCell(rawPrice, decimal);
     if (cell.kind === 'invalid') {
-      held.push({ rowNumber: i + 1, supplierNameRaw, supplierSku, rawPrice: cell.raw, reason: 'UNCLEAR_PRICE' });
+      held.push({ rowNumber, supplierNameRaw, supplierSku, rawPrice: cell.raw, reason: 'UNCLEAR_PRICE' });
       return;
     }
     let listPrice: number | null = cell.kind === 'ok' ? cell.value : null;
@@ -335,7 +375,7 @@ export function analyzeCatalogRows(table: ParsedTable, mapping: CatalogImportMap
       listPrice = Number(priceUnitsToNumeric(inc ? exVatPriceUnits(units, vatRate) : units));
     }
     rows.push({
-      rowNumber: i + 1,
+      rowNumber,
       rawPrice,
       supplierSku,
       supplierNameRaw,
