@@ -44,6 +44,7 @@ export type AuditAction =
   | 'team.member_removed'
   | 'team.member_locale_changed'
   | 'settings.my_locale_changed'
+  | 'settings.letterhead_updated'
   // Approvals (already emitted by the approvals router)
   | 'discrepancy.approved'
   | 'discrepancy.rejected'

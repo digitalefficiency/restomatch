@@ -212,6 +212,44 @@ test('recovery: "the money came back" names the ₪ credited (never ₪0) and, o
   }
 });
 
+test('letterhead: empty → a calm prompt (printing never blocked); filled once in settings → on every letter', async ({ page }) => {
+  const sql = e2eSql();
+  const [row] = await sql<{ settings: Record<string, unknown> }[]>`select settings from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
+  const before = row!.settings;
+  try {
+    await sql`update restaurants set settings = settings - 'letterhead' where name = ${DEMO_RESTAURANT_NAME}`;
+    await page.goto('/dashboard/leaks/claims');
+    const letter = page.getByTestId('supplier-letter').first();
+    await expect(letter.getByTestId('letterhead-prompt')).toContainText('השלימו פרטי מסעדה למכתב');
+    await expect(letter.getByRole('button', { name: /הדפסה \/ PDF/ })).toBeEnabled();
+
+    await page.goto('/dashboard/settings#letterhead');
+    const form = page.getByTestId('letterhead-form');
+    await form.getByLabel('שם משפטי').fill('כפר הזיתים מסעדות בע״מ');
+    await form.getByLabel('ח״פ / עוסק מורשה').fill('514778123');
+    await form.getByLabel('כתובת').fill('דרך הנמל 12, חיפה');
+    await form.getByLabel('טלפון').fill('04-8123456');
+    await form.getByLabel('דוא״ל').fill('office@kfar-hazeitim.test');
+    await page.getByTestId('letterhead-save').click();
+    await expect(form.getByRole('status')).toContainText('נשמרו');
+
+    await page.goto('/dashboard/leaks/claims');
+    const filled = page.getByTestId('supplier-letter').first();
+    await expect(filled.getByTestId('letterhead-legal-name')).toHaveText('כפר הזיתים מסעדות בע״מ');
+    await expect(filled.getByTestId('letter-business-id')).toContainText('514778123');
+    await expect(filled.getByTestId('letterhead-address')).toHaveText('דרך הנמל 12, חיפה');
+    await expect(filled.getByTestId('letterhead-contact')).toContainText('04-8123456');
+    await expect(filled.getByTestId('letterhead-contact')).toContainText('office@kfar-hazeitim.test');
+    await expect(filled.getByTestId('letterhead-prompt')).toHaveCount(0);
+    // Merged, never replaced: the restaurant's feature flags are intact.
+    const [rowAfter] = await sql<{ settings: Record<string, unknown> }[]>`select settings from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
+    expect(rowAfter!.settings.features).toEqual(before.features);
+  } finally {
+    await sql`update restaurants set settings = ${sql.json(before as never)} where name = ${DEMO_RESTAURANT_NAME}`;
+    await sql.end();
+  }
+});
+
 test('report: like-for-like compare, the money partition adds up', async ({ page }) => {
   await page.goto('/dashboard/leaks/report');
   await expect(page.getByTestId('report-compare')).toContainText(/1–\d+ .+ מול 1–\d+/);

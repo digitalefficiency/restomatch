@@ -10,6 +10,7 @@ import { ReferralCard } from '@/lib/growth/ReferralCard';
 import { AccountSection } from './account-section';
 import { SettingsForm } from './form';
 import { ProfileForm } from './profile-form';
+import { LetterheadForm } from './letterhead-form';
 import { DsrSection } from './dsr';
 import { TwoFactorSection } from './TwoFactorSection';
 
@@ -41,9 +42,9 @@ export default async function SettingsPage() {
   const isOwner = role === 'owner';
   const seesRestaurant = role === 'owner' || role === 'manager' || role === 'bookkeeper';
 
-  const [restaurantSettings, profile] = seesRestaurant
-    ? await Promise.all([caller.settings.get(), caller.settings.profile()])
-    : [null, null];
+  const [restaurantSettings, profile, letterhead] = seesRestaurant
+    ? await Promise.all([caller.settings.get(), caller.settings.profile(), caller.settings.letterhead()])
+    : [null, null, null];
   // Referral programme (wave 1, S15 — flag `growth`): owner/manager see the
   // restaurant's code + stats; only the owner may redeem someone else's code.
   const referralOn =
@@ -63,6 +64,22 @@ export default async function SettingsPage() {
         <div>
           <SectionHeader title={t('sections.profileTitle')} subtitle={t('sections.profileSubtitle')} />
           <ProfileForm initial={profile} canEdit={isOwner} />
+        </div>
+      ) : null}
+      {profile && letterhead ? (
+        <div id="letterhead" className="scroll-mt-24">
+          <SectionHeader title={t('sections.letterheadTitle')} subtitle={t('sections.letterheadSubtitle')} />
+          {/* Prefilled from the restaurant's name and ח״פ until the letterhead is saved. */}
+          <LetterheadForm
+            initial={{
+              legalName: letterhead.legalName ?? profile.name,
+              businessId: letterhead.businessId ?? (/^\d{9}$/.test(profile.businessId ?? '') ? profile.businessId! : ''),
+              address: letterhead.address ?? '',
+              phone: letterhead.phone ?? '',
+              email: letterhead.email ?? '',
+            }}
+            canEdit={role === 'owner' || role === 'manager'}
+          />
         </div>
       ) : null}
       {restaurantSettings ? (

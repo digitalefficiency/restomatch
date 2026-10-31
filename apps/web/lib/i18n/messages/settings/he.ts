@@ -7,6 +7,8 @@ export const he = {
   sections: {
     accountTitle: 'החשבון שלי',
     accountSubtitle: 'שפת האפליקציה, סיסמה וניתוק מכשירים — הגדרות אישיות שלכם בלבד.',
+    letterheadTitle: 'פרטים למכתבי דרישת זיכוי',
+    letterheadSubtitle: 'מופיעים בראש כל מכתב דרישת זיכוי לספק. ממלאים פעם אחת.',
     profileTitle: 'פרטי המסעדה',
     profileSubtitle: 'שם, ח״פ, שיעור מע״מ ואזור זמן — נושאי משקל לחישוב הדליפה ולגבולות היום.',
     matchingTitle: 'הגדרות התאמה',
@@ -36,6 +38,19 @@ export const he = {
   readOnly: {
     profile: 'תצוגה בלבד — רק לבעלי תפקיד "בעלים" יש הרשאה לעדכן את פרטי המסעדה.',
     matching: 'תצוגה בלבד — רק לבעלי תפקיד "בעלים" יש הרשאה לעדכן את הגדרות ההתאמה.',
+    letterhead: 'תצוגה בלבד — בעלים או מנהל יכולים לעדכן את פרטי המכתב.',
+  },
+  letterhead: {
+    cardTitle: 'כותרת המכתב',
+    legalName: 'שם משפטי',
+    businessId: 'ח״פ / עוסק מורשה',
+    businessIdHint: '9 ספרות',
+    address: 'כתובת',
+    phone: 'טלפון',
+    email: 'דוא״ל',
+    save: 'שמירה',
+    saved: 'פרטי המכתב נשמרו.',
+    failed: 'לא נשמר — בדקו את הפרטים ונסו שוב.',
   },
   profile: {
     cardTitle: 'פרטי המסעדה',
