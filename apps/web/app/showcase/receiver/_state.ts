@@ -6,6 +6,7 @@
  */
 
 import { lineTotalIls } from '@/app/dashboard/orders/order-logic';
+import { spotCountMatches, type CountMethod, type CountTolerance } from '@/app/dashboard/receiving/[poId]/_count';
 import type { MockSupplierExpectation, ReconciliationLine, ReconciliationResult } from './_mock';
 
 export type WizardStep =
@@ -38,8 +39,15 @@ export interface LineMark {
   qtyReceived: number;
   qtyRejected: number;
   condition: 'ok' | 'damaged' | 'rejected';
+  /** Why less arrived: 'missing' (never arrived — not a rejection) or 'damaged'. */
+  rejectReason?: string | null;
   notes?: string;
+  /** The receiver resolved this line (✓ as ordered, a count, missing, damaged). */
   touched: boolean;
+  /** How it was resolved: one by one (default), the bulk "as ordered", or a blind spot count. */
+  method?: CountMethod;
+  /** A typed count waiting for the tolerance confirm — not resolved, but a count: no bulk may overwrite it. */
+  unconfirmed?: boolean;
 }
 
 export interface WizardState {
@@ -97,10 +105,10 @@ export function reducer(state: WizardState, action: WizardAction): WizardState {
       const initialMarks: Record<string, LineMark> = {};
       for (const l of action.result.lines) {
         const key = lineKey(l);
-        const defaultQty =
-          l.status === 'matched'
-            ? (l.invoiceQty ?? l.poQty ?? 0)
-            : (l.invoiceQty ?? l.poQty ?? 0);
+        // Pre-filled with what was ordered; nothing is resolved until the
+        // receiver says so (RCV-01: "invoice = order" is not "arrived"). Never
+        // the invoice qty: a count is evidence against the invoice.
+        const defaultQty = l.poQty ?? 0;
         initialMarks[key] = {
           poLineId: l.poLineId,
           invoiceLineIndex: l.invoiceLineIndex,
@@ -109,7 +117,7 @@ export function reducer(state: WizardState, action: WizardAction): WizardState {
           qtyReceived: defaultQty,
           qtyRejected: 0,
           condition: 'ok',
-          touched: l.status === 'matched', // auto-touched
+          touched: false,
         };
       }
       return {
@@ -136,7 +144,11 @@ export function reducer(state: WizardState, action: WizardAction): WizardState {
           [action.lineKey]: {
             ...existing,
             ...action.patch,
-            touched: true,
+            // An explicit `touched: false` is an undo; every other change resolves the line.
+            touched: action.patch.touched ?? true,
+            // A hand change is a per-line count unless the patch says otherwise (bulk, spot check, undo).
+            method: action.patch.method ?? 'per_line',
+            unconfirmed: action.patch.unconfirmed ?? false,
           },
         },
       };
@@ -165,31 +177,106 @@ export function reducer(state: WizardState, action: WizardAction): WizardState {
   }
 }
 
-/** Count how many non-matched lines still need a touch in ADJUST_QUANTITIES. */
-export function pendingMarksCount(
+/** Delivery Check progress: how many of the lines the receiver has resolved ("9 מתוך 12 אושרו"). */
+export function countProgress(
   reconciliation: ReconciliationResult | null,
   marks: Record<string, LineMark>,
-): { pending: number; total: number; matched: number } {
-  if (!reconciliation) return { pending: 0, total: 0, matched: 0 };
-  let pending = 0;
-  let total = 0;
-  let matched = 0;
-  for (const l of reconciliation.lines) {
-    if (l.status === 'matched') {
-      matched += 1;
-      continue;
-    }
-    total += 1;
-    const mark = marks[lineKey(l)];
-    if (!mark || !mark.touched) pending += 1;
-  }
-  return { pending, total, matched };
+): { resolved: number; total: number } {
+  if (!reconciliation) return { resolved: 0, total: 0 };
+  let resolved = 0;
+  for (const l of reconciliation.lines) if (marks[lineKey(l)]?.touched) resolved += 1;
+  return { resolved, total: reconciliation.lines.length };
 }
 
-/** Returns only the non-matched lines for the AdjustQuantities screen. */
-export function nonMatchedLines(result: ReconciliationResult | null): ReconciliationLine[] {
+/**
+ * Order lines a bulk "as ordered" may fill: nobody counted them at all. A line
+ * with ANY count — resolved, or a typed weight still waiting for its tolerance
+ * confirm — is never overwritten by a bulk action.
+ */
+export function unresolvedOrderLines(
+  result: ReconciliationResult | null,
+  marks: Record<string, LineMark>,
+): ReconciliationLine[] {
   if (!result) return [];
-  return result.lines.filter((l) => l.status !== 'matched');
+  return result.lines.filter((l) => {
+    const m = marks[lineKey(l)];
+    return l.poLineId !== null && !m?.touched && !m?.unconfirmed;
+  });
+}
+
+/** ✓ as ordered. */
+export function asOrderedPatch(line: ReconciliationLine): Partial<LineMark> {
+  return { qtyReceived: line.poQty ?? 0, qtyRejected: 0, condition: 'ok', rejectReason: null };
+}
+
+/** Nothing of it arrived: 0 received, NOTHING rejected (the slip says "חסר", never "נפסל/פגום"). */
+export const MISSING_PATCH: Partial<LineMark> = { qtyReceived: 0, qtyRejected: 0, condition: 'ok', rejectReason: 'missing' };
+
+/** Arrived damaged (kept as a quality note; the count stays what was counted). */
+export const DAMAGED_PATCH: Partial<LineMark> = { condition: 'damaged', rejectReason: 'damaged' };
+
+/** A typed / stepped count. 0 is "missing"; a count clears an earlier "missing". */
+export function qtyPatch(mark: LineMark, qty: number): Partial<LineMark> {
+  if (qty === 0) return MISSING_PATCH;
+  return {
+    qtyReceived: qty,
+    qtyRejected: 0,
+    condition: mark.condition === 'rejected' ? 'ok' : mark.condition,
+    rejectReason: mark.rejectReason === 'missing' ? null : (mark.rejectReason ?? null),
+  };
+}
+
+/**
+ * "✓ סמנו את השאר כמו בהזמנה": every unresolved ORDER line becomes "as
+ * ordered", recorded as `bulk_as_ordered` (nobody counted it one by one).
+ * Lines that are only on the invoice (not ordered) are left for the receiver —
+ * "as ordered" says nothing about them. Returns the new marks and the previous
+ * marks of the lines it changed (for the 10 s undo).
+ */
+export function markRestAsOrdered(
+  result: ReconciliationResult | null,
+  marks: Record<string, LineMark>,
+): { next: Record<string, LineMark>; previous: Record<string, LineMark> } {
+  const next = { ...marks };
+  const previous: Record<string, LineMark> = {};
+  for (const line of unresolvedOrderLines(result, marks)) {
+    const key = lineKey(line);
+    const prev = marks[key];
+    if (!prev) continue;
+    previous[key] = prev;
+    next[key] = { ...prev, ...asOrderedPatch(line), touched: true, method: 'bulk_as_ordered' };
+  }
+  return { next, previous };
+}
+
+/**
+ * The spot check before a bulk "as ordered": the receiver counted `counts`
+ * (lineKey → qty) blind. Each is recorded as a `spot_check` count. If every
+ * one agrees with the order (the engine's quantity tolerance), the rest is
+ * marked as ordered in bulk; if any disagrees, NOTHING is bulked — the
+ * receiver counts the rest one by one. `previous` covers every changed line (undo).
+ */
+export function confirmSpotCheck(
+  result: ReconciliationResult | null,
+  marks: Record<string, LineMark>,
+  counts: Record<string, number>,
+  tolerance: CountTolerance | undefined,
+): { next: Record<string, LineMark>; previous: Record<string, LineMark>; mismatched: string[] } {
+  const next = { ...marks };
+  const previous: Record<string, LineMark> = {};
+  const mismatched: string[] = [];
+  for (const line of result?.lines ?? []) {
+    const key = lineKey(line);
+    const qty = counts[key];
+    const prev = marks[key];
+    if (qty === undefined || !prev) continue;
+    previous[key] = prev;
+    next[key] = { ...prev, ...qtyPatch(prev, qty), touched: true, method: 'spot_check' };
+    if (line.poQty === null || !spotCountMatches(qty, line.poQty, tolerance)) mismatched.push(key);
+  }
+  if (mismatched.length > 0) return { next, previous, mismatched };
+  const bulk = markRestAsOrdered(result, next);
+  return { next: bulk.next, previous: { ...bulk.previous, ...previous }, mismatched };
 }
 
 /**

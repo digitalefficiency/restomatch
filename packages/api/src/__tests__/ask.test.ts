@@ -408,6 +408,58 @@ describe('ask: prompt injection from invoice text is data, not instructions', ()
   });
 });
 
+describe('ask: leakChange is like-for-like, and "כמה" alone is not the leak (W1-08)', () => {
+  // 20+ owner phrasings → the intent the offline engine answers with.
+  const PHRASINGS: Array<[string, ReturnType<typeof classifyQuestion>]> = [
+    ['למה הדליפה עלתה החודש?', 'leakChange'],
+    ['למה דלף יותר החודש?', 'leakChange'],
+    ['הדליפה השתנתה מהחודש שעבר?', 'leakChange'],
+    ['Why is the leak higher than last month?', 'leakChange'],
+    ['Did the leak go up?', 'leakChange'],
+    ['כמה כסף דלף החודש?', 'leakTotal'],
+    ['כמה הפסדנו החודש?', 'leakTotal'],
+    ['כמה דליפה יש לנו?', 'leakTotal'],
+    ['What is the leak this month?', 'leakTotal'],
+    ['How much did we lose this month?', 'leakTotal'],
+    ['כמה?', null],
+    ['כמה הזמנות יש היום?', null],
+    ['כמה עולה סלמון?', null],
+    ['כמה חשבוניות קיבלנו?', null],
+    ['How much is the salmon?', null],
+    ['how much', null],
+    ['מה כדאי לתבוע השבוע?', 'claimWeek'],
+    ['על מה לבקש זיכוי?', 'claimWeek'],
+    ['מי העלה מחירים?', 'priceRaise'],
+    ['Which supplier raised prices?', 'priceRaise'],
+    ['איזה ספק הכי דולף?', 'topSupplier'],
+    ['Which supplier is the worst?', 'topSupplier'],
+  ];
+  it.each(PHRASINGS)('"%s" → %s', (question, intent) => {
+    expect(classifyQuestion(question)).toBe(intent);
+  });
+
+  it('compares this month to date with the SAME day-span of last month, and names both spans', async () => {
+    const r = await caller(A).ask.ask({ question: 'Why did the leak go up?', locale: 'en' });
+    expect(r.intent).toBe('leakChange');
+    const f = r.facts as Record<string, string | number>;
+    const day = (d: Date) =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+    const today = day(new Date());
+    const [y, m, d] = today.split('-').map(Number) as [number, number, number];
+    const prevMonthDays = new Date(Date.UTC(y, m - 1, 0)).getUTCDate();
+    const prev = new Date(Date.UTC(y, m - 2, 1));
+    const pad = (n: number) => String(n).padStart(2, '0');
+    expect(f.from).toBe(`${y}-${pad(m)}-01`);
+    expect(f.to).toBe(today);
+    expect(f.prevFrom).toBe(`${prev.getUTCFullYear()}-${pad(prev.getUTCMonth() + 1)}-01`);
+    // The comparison stops on the same day of last month (or its last day), never at its end.
+    expect(f.prevTo).toBe(`${prev.getUTCFullYear()}-${pad(prev.getUTCMonth() + 1)}-${pad(Math.min(d, prevMonthDays))}`);
+    expect(f.leakIls).toBe(100);
+    expect(f.prevLeakIls).toBe(0);
+    expect(f.deltaIls).toBe(100);
+  });
+});
+
 describe('ask: tenant isolation', () => {
   it('chain owner: each branch answers with its own data only (no cross-branch leak)', async () => {
     __setAskClient(null);

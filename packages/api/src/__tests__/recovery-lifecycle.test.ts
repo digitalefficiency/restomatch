@@ -59,6 +59,7 @@ describe('recovery lifecycle', () => {
       productNameEn: null,
       lineDescription: null,
       lineDescriptionEn: null,
+      discrepancyId: 'd',
       claimedAt: '2026-10-01T00:00:00.000Z',
       letterSentAt: null,
       acknowledgedAt: null,

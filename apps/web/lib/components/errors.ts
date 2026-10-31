@@ -1,5 +1,6 @@
-import type { Translator } from '@/lib/i18n/translate';
+import { createTranslator, type Translator } from '@/lib/i18n/translate';
 import type { components } from '@/lib/i18n/messages/components';
+import { common } from '@/lib/i18n/messages/common';
 
 type ComponentsTree = (typeof components)['he'];
 
@@ -28,8 +29,13 @@ export function friendlyError(
   if (code && overrides[code]) return overrides[code]!;
   switch (code) {
     case 'FORBIDDEN':
-    case 'UNAUTHORIZED':
       return t('errors.forbidden');
+    // The session is gone, not the permission: say so (perf-states-15). The copy
+    // lives in `common` (W1-04 owns it), in the same locale as `t`.
+    case 'UNAUTHORIZED': {
+      // The call was NOT sent (mutations are never replayed after re-auth).
+      return createTranslator(t.appLocale, common)('shell.session.notSent');
+    }
     case 'NOT_FOUND':
       return t('errors.notFound');
     case 'BAD_REQUEST':
@@ -41,6 +47,6 @@ export function friendlyError(
       break;
   }
   const message = err instanceof Error ? err.message : '';
-  if (/fetch|network|Failed to fetch|NetworkError/i.test(message)) return t('errors.network');
+  if (/fetch|network|Failed to fetch|NetworkError|Load failed/i.test(message)) return t('errors.network');
   return t('errors.generic');
 }

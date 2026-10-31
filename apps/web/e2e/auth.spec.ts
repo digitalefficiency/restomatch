@@ -13,6 +13,12 @@ const formAlert = (page: Page) =>
  */
 const PASSWORD = 'E2e-Correct-Horse-9!';
 
+/** The password form's primary submit ("כניסה" / "Sign in"), by its exact name. */
+const passwordSubmit = (page: Page) =>
+  page
+    .locator('form', { has: page.locator('input[name="password"]') })
+    .getByRole('button', { name: /^(כניסה|Sign in)$/ });
+
 test.describe('password login', () => {
   test.beforeAll(async () => {
     await ensurePasswordUser({ email: 'e2e-password@restomatch.test', password: PASSWORD });
@@ -23,7 +29,8 @@ test.describe('password login', () => {
     const form = page.locator('form', { has: page.locator('input[name="password"]') });
     await form.locator('input[name="email"]').fill('e2e-password@restomatch.test');
     await form.locator('input[name="password"]').fill(PASSWORD);
-    await form.locator('button[type="submit"]').click();
+    // The form also carries the email-link button (formAction): press the password submit.
+    await passwordSubmit(page).click();
     await expect(page).toHaveURL(/\/dashboard/);
     await expect(page.locator('header')).toContainText('e2e-password@restomatch.test');
   });
@@ -33,7 +40,8 @@ test.describe('password login', () => {
     const form = page.locator('form', { has: page.locator('input[name="password"]') });
     await form.locator('input[name="email"]').fill('e2e-password@restomatch.test');
     await form.locator('input[name="password"]').fill('definitely-wrong');
-    await form.locator('button[type="submit"]').click();
+    // The form also carries the email-link button (formAction): press the password submit.
+    await passwordSubmit(page).click();
     await expect(page).toHaveURL(/\/login\?error=CredentialsSignin/);
     // Next's route announcer (#__next-route-announcer__) is also role=alert since 15.5.28.
     await expect(formAlert(page)).toBeVisible();
@@ -57,7 +65,8 @@ test.describe('two-factor (TOTP)', () => {
     const form = page.locator('form', { has: page.locator('input[name="password"]') });
     await form.locator('input[name="email"]').fill('e2e-2fa@restomatch.test');
     await form.locator('input[name="password"]').fill(PASSWORD);
-    await form.locator('button[type="submit"]').click();
+    // The form also carries the email-link button (formAction): press the password submit.
+    await passwordSubmit(page).click();
     // The 2FA screen renders, but after the password server action the address
     // bar can keep the action's redirect target (/dashboard) — a Next quirk when
     // middleware redirects the RSC fetch (reported to S4). Assert on the form.
@@ -80,7 +89,8 @@ test.describe('two-factor (TOTP)', () => {
     const form = page.locator('form', { has: page.locator('input[name="password"]') });
     await form.locator('input[name="email"]').fill('e2e-2fa@restomatch.test');
     await form.locator('input[name="password"]').fill(PASSWORD);
-    await form.locator('button[type="submit"]').click();
+    // The form also carries the email-link button (formAction): press the password submit.
+    await passwordSubmit(page).click();
     // The 2FA screen renders, but after the password server action the address
     // bar can keep the action's redirect target (/dashboard) — a Next quirk when
     // middleware redirects the RSC fetch (reported to S4). Assert on the form.
@@ -114,6 +124,7 @@ test.describe('magic link (backup) + onboarding', () => {
     await loginViaMagicLink(page, email, '/dashboard');
     await expect(page).toHaveURL(/\/onboarding/);
     const form = page.locator('form', { has: page.locator('input#name') });
+    await form.locator('input#yourName').fill('דנה E2E');
     await form.locator('input#name').fill('מסעדת E2E');
     await form.locator('button[type="submit"]').click();
     await expect(page).toHaveURL(/\/dashboard/);

@@ -12,6 +12,7 @@ import {
   RoiSection,
   TrustSection,
 } from '../_components/detail-sections';
+import { primaryCtaHref } from '../_components/cta';
 import { alternatesFor, metadataBase, socialFor } from '../_components/seo';
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -82,7 +83,7 @@ export default async function AboutPage() {
           <p className="mt-2 text-sm text-muted">{t('about.ctaBody')}</p>
           <div className="mt-5 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
-              href="/#lead"
+              href={primaryCtaHref()}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-on-primary shadow-glow-primary transition-all hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
             >
               {t('about.cta')}

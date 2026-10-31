@@ -116,8 +116,8 @@ const EN: Record<string, string> = {
   'צילם את החשבונית': 'Photographed the invoice',
   'צילמה את החשבונית': 'Photographed the invoice',
   'OCR בביטחון 94%': 'OCR confidence 94%',
-  'זיהתה 4 חריגות': 'Found 4 variances',
-  'זיהתה 2 חריגות': 'Found 2 variances',
+  'זיהתה 4 פערים': 'Found 4 variances',
+  'זיהתה 2 פערים': 'Found 2 variances',
   'מחיר גבוה, כמות חסרה, פריט לא בהזמנה, פריט שלא סופק':
     'Price up, short quantity, item not ordered, item not delivered',
   'עדכן כמות פלפל אדום': 'Corrected red pepper quantity',
@@ -164,7 +164,7 @@ const EN: Record<string, string> = {
   // ── Owner dashboard live feed ────────────────────────────────────────────
   'INV-4882 מקצביית הכרם — סומנה לבירור': 'INV-4882 from HaKerem Butchery — flagged for review',
   'PO-1235 התקבל מלא': 'PO-1235 received in full',
-  'חריגת מחיר ממתינה לאישור': 'Price variance awaiting approval',
+  'פער מחיר ממתין לאישור': 'Price variance awaiting approval',
   'סנכרון Market Man': 'MarketMan sync',
   '14 הזמנות חדשות נכנסו ל-PO queue': '14 new orders added to the PO queue',
   'PO-1234 בקבלה': 'PO-1234 being received',
@@ -177,15 +177,15 @@ const EN: Record<string, string> = {
   'חשבונית גדולה שלא נמצאה הזמנת רכש תואמת': 'A large invoice with no matching purchase order',
   'הסכמת ספק שזה משלוח חירום, אישור ידני': 'Supplier confirmed an emergency delivery; approved manually',
   'פריט שלא הוזמן (> ₪100)': 'Unordered item (over ₪100)',
-  'שורה בחשבונית שאין לה PO line תואם, מעל ערך ₪100':
+  'שורה בחשבונית שאין לה שורת הזמנה תואמת, מעל ערך ₪100':
     'An invoice line with no matching PO line, worth more than ₪100',
   'מבצע לקראת חג': 'Holiday promotion',
-  'הפרש מחיר > 10%': 'Price variance over 10%',
-  'מחיר חויב חרג מעל סף ה-block המוגדר': 'The billed price exceeded the configured blocking threshold',
+  'פער מחיר > 10%': 'Price variance over 10%',
+  'המחיר שחויב חרג מסף החסימה המוגדר': 'The billed price exceeded the configured blocking threshold',
   'דרשנו הסבר מאבי הירקן': 'We asked Avi the greengrocer for an explanation',
-  'הפרש מחיר 2-10%': 'Price variance 2–10%',
-  'חריגה בינונית — דרושה סקירה של מנהל משמרת': 'Moderate variance — needs a shift manager review',
-  'הפרשים < 2%': 'Variances under 2%',
+  'פער מחיר 2-10%': 'Price variance 2–10%',
+  'פער בינוני — דרושה סקירה של מנהל משמרת': 'Moderate variance — needs a shift manager review',
+  'פערים < 2%': 'Variances under 2%',
   'תנודה זניחה — אישור אוטומטי, רישום בלבד': 'Negligible movement — auto-approved, logged only',
 };
 

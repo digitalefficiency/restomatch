@@ -8,6 +8,7 @@ import { getUserEmailById } from '@/lib/passwords';
 import { enforceTwoFactorLimit, trustedProxyHops } from '@/lib/rateLimit';
 import { safeRelativePath } from '@/lib/safeRedirect';
 import { issueTwoFactorTicket, verifySecondFactor } from '@/lib/totp';
+import { clearHint } from '../hint';
 
 /**
  * Second-factor verification (Epic C). Runs ONLY for a session that already
@@ -28,7 +29,9 @@ export async function verifyTwoFactorAction(formData: FormData): Promise<void> {
   // Validated same-origin destination (open-redirect guard) — e.g. an invite link.
   const next = safeRelativePath(formData.get('callbackUrl'));
   if (!session.user.twoFactorPending) redirect(next);
-  const retry = `/login/2fa?error=invalid&callbackUrl=${encodeURIComponent(next)}`;
+  // A failed recovery code comes back to the recovery (text-keyboard) mode.
+  const mode = formData.get('mode') === 'recovery' ? '&mode=recovery' : '';
+  const retry = `/login/2fa?error=invalid&callbackUrl=${encodeURIComponent(next)}${mode}`;
 
   const code = String(formData.get('code') ?? '').trim();
   if (!code) redirect(retry);
@@ -52,5 +55,6 @@ export async function verifyTwoFactorAction(formData: FormData): Promise<void> {
 
 /** Abandon the second step and return to a clean login. */
 export async function cancelTwoFactorAction(): Promise<void> {
+  await clearHint();
   await signOut({ redirectTo: '/login' });
 }
