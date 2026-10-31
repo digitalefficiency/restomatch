@@ -11,7 +11,7 @@ import {
   sql,
   suppliers,
 } from '@restomatch/db';
-import { financeProcedure, managerProcedure, memberProcedure, router } from '../trpc';
+import { chefProcedure, financeProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
 import { contractPricesForOrder, orderPriceKey } from '../contracts/orderPrices';
@@ -370,9 +370,12 @@ export const contractsRouter = router({
   /**
    * Contract unit prices for an order being built (new-order wizard): for each
    * (product, unit) of `supplierId`, the contract price in force today, in that
-   * unit. Managers only (same as orders.createDraft). Flag off → `enabled: false`.
+   * unit. Owner / manager / chef — the same roles as orders.createDraft (owner
+   * decision 31.10: the chef orders freely, so "הזמן שוב" must use contract prices,
+   * not list prices — a PO at list price would hide a supplier invoicing above
+   * contract). Read-only. Flag off → `enabled: false`.
    */
-  orderPrices: managerProcedure
+  orderPrices: chefProcedure
     .input(
       z
         .object({

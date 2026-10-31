@@ -6,11 +6,13 @@ export const routes: RouteDef[] = [
     path: '/dashboard/orders',
     group: 'procure',
     rank: 10,
-    roles: ['owner', 'manager'],
+    // Owner decision 31.10 (pilot): the chef orders freely — sees, creates, sends, cancels.
+    roles: ['owner', 'manager', 'chef'],
     nav: 'item',
     bar: {
       manager: { slot: 2, label: 'orders' },
       owner: { slot: 4, label: 'orders' },
+      chef: { slot: 4, label: 'orders' },
     },
     aliases: ['הזמנה', 'הזמנות', 'orders', 'po'],
   },

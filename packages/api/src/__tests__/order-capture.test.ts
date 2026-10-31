@@ -120,9 +120,12 @@ describe('order capture', () => {
     expect(pos).toHaveLength(1); // the seeded PO only
   });
 
-  it('router: flag gate, manager-only, and one-tap confirm sends nothing to the supplier', async () => {
+  it('router: flag gate, writers only, and one-tap confirm sends nothing to the supplier', async () => {
     const text = `ספק: ${A.supplierName}\n10 ק״ג tomato-A`;
-    await expect(callerFor(A, 'chef').orders.captureFromText({ text })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    // Owner decision 31.10 (pilot): the chef orders freely (orders-chef.test.ts); receiver and bookkeeper never write.
+    for (const role of ['receiver', 'bookkeeper'] as const) {
+      await expect(callerFor(A, role).orders.captureFromText({ text })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
     const r = await callerFor(A).orders.captureFromText({ text });
     expect(r.status).toBe('draft');
     if (r.status !== 'draft') return;

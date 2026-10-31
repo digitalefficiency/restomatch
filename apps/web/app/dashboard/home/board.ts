@@ -68,10 +68,29 @@ export function isClosed(state: TruckState): boolean {
 
 const byTime = (a: BoardItem, b: BoardItem) => Date.parse(a.expectedAt) - Date.parse(b.expectedAt);
 
+/** The wall-clock HH:MM of an instant in Israel. */
+function localHm(d: Date): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d);
+}
+
+/**
+ * Past its delivery window (+ grace)? A PO with a day but no hour is stored at the
+ * day's local 00:00 (deriveExpectedDelivery / the wizard's date): its window is the
+ * whole day, so it is never late from the board's own clock — only once the day is
+ * over (the server's `late`, a past-day PO still not received). Pilot fix: a PO
+ * dated today used to show "באיחור" from 00:30.
+ */
+export function isOverdue(r: Pick<BoardExpectation, 'expectedAt' | 'hasDeliveryDate'>, now: Date): boolean {
+  if (!r.hasDeliveryDate) return false;
+  const expected = new Date(r.expectedAt);
+  if (localHm(expected) === '00:00') return false;
+  return expected.getTime() + LATE_GRACE_MS < now.getTime();
+}
+
 export function buildBoard(rows: readonly BoardExpectation[], now: Date = new Date()): Board {
   const items: BoardItem[] = rows.map((r) => {
     const state = truckState(r);
-    const overdue = r.hasDeliveryDate && Date.parse(r.expectedAt) + LATE_GRACE_MS < now.getTime();
+    const overdue = isOverdue(r, now);
     // An open receipt is being received — not late, even past its window (in a past day it is).
     const isLate = !isClosed(state) && (r.late || (state === 'notStarted' && overdue));
     return { ...r, state, isLate };

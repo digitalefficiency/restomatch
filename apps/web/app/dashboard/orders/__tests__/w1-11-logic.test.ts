@@ -306,3 +306,32 @@ describe('parsePriceInput (strict ₪ entry)', () => {
     }
   });
 });
+
+describe('pilot: a placed order never reads "sent" on faith', () => {
+  it('record-only ("ללא שליחה") reads "recorded"; a failed / skipped message "not sent"', async () => {
+    const { deliveryStatusOf, sendStateOfRow } = await import('../order-logic');
+    expect(deliveryStatusOf('sent', null, 'none')).toBe('recorded');
+    expect(deliveryStatusOf('sent', null, 'failed')).toBe('unsent');
+    expect(deliveryStatusOf('sent', null, 'skipped')).toBe('unsent');
+    expect(deliveryStatusOf('sent', null, 'queued')).toBe('sent');
+    expect(deliveryStatusOf('sent', null, 'sent')).toBe('sent');
+    expect(deliveryStatusOf('sent', null)).toBe('sent');
+    // A receipt beats the send state: what arrived is what counts.
+    expect(deliveryStatusOf('sent', 'completed', 'none')).toBe('received');
+    expect(deliveryStatusOf('cancelled', null, 'none')).toBe('cancelled');
+    // The list row: placed here with no channel = recorded; a synced PO (no sentAt) keeps "sent".
+    expect(sendStateOfRow({ status: 'sent', sentAt: '2026-11-08T07:00:00Z', sentChannel: null })).toBe('none');
+    expect(sendStateOfRow({ status: 'sent', sentAt: null, sentChannel: null })).toBeNull();
+    expect(sendStateOfRow({ status: 'sent', sentAt: '2026-11-08T07:00:00Z', sentChannel: 'email' })).toBeNull();
+    expect(sendStateOfRow({ status: 'sent', sentAt: '2026-11-08T07:00:00Z' })).toBeNull();
+  });
+
+  it('the "ללא שליחה" choice says why, in both locales; no "סימון כנשלחה" left', () => {
+    expect(ordersHe.wizard.channelNone).toBe('ללא שליחה (כבר הזמנתי בטלפון/וואטסאפ)');
+    expect(ordersHe.detail.channels.none).toBe(ordersHe.wizard.channelNone);
+    expect(JSON.stringify(ordersHe)).not.toMatch(/כנשלחה/);
+    expect(JSON.stringify(ordersEn)).not.toMatch(/mark(ed|ing)? as sent/i);
+    expect(ordersHe.sendStatus.none).toBe('נרשמה במערכת · לא נשלחה לספק');
+    expect(ordersHe.sendStatus.failed).toBe('ההזמנה נשמרה — לא נשלחה לספק');
+  });
+});
