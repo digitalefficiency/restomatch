@@ -91,6 +91,9 @@ function tapper() {
     get count() {
       return n;
     },
+    bump() {
+      n += 1;
+    },
     async tap(l: Locator) {
       n += 1;
       await l.tap();
@@ -117,6 +120,9 @@ test.describe('phone (he 390, touch)', () => {
     await expect(page.getByTestId('guide-undo')).toBeVisible();
     await expect(page.getByTestId('server-save')).toHaveAttribute('data-state', 'saved', { timeout: 15_000 });
     await t.tap(page.getByTestId('cart-primary')); // 2 → review
+    // The lab plan has the platform WhatsApp, so pick "מהוואטסאפ שלי" explicitly (one tap).
+    await page.locator('#ord-channel').selectOption('manual');
+    t.bump(); // the channel pick counts as a tap
     await expect(page.getByTestId('manual-send')).toBeVisible({ timeout: 15_000 });
     // "מהוואטסאפ שלי": stub window.open, then two taps (prepare, open + record).
     await page.evaluate(() => {

@@ -648,6 +648,8 @@ export function NewOrderWizard({
         clientMutationId: newKey(),
       });
       versionRef.current = r.version;
+      // What is on the server now: the background save skips an identical re-save.
+      lastSaved.current = `${supplierId}|${deliveryDate}|${JSON.stringify(payload)}`;
       if (r.draftId !== draftId) {
         // Persist the id NOW: a reload before the next render must find this draft.
         const savedCart = store.current.carts[supplierId];
@@ -761,9 +763,6 @@ export function NewOrderWizard({
       if (syncing.current) return;
       const snapshot = lines;
       syncing.current = syncServerDraft(snapshot)
-        .then(() => {
-          lastSaved.current = sig;
-        })
         .catch((e) => {
           if (e instanceof StaleDraftError) dropStale(e);
           // Otherwise quiet: the chip says "לא נשמר" and the next change retries.
