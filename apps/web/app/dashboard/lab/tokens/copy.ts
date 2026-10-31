@@ -64,7 +64,7 @@ export const labHe = {
   view: 'צפייה',
   remove: 'הסרה',
   emptyFirstUse: 'עוד אין ספקים',
-  emptyFirstUseBody: 'הוסיפו ספק ראשון כדי להתחיל לקלוט חשבוניות.',
+  emptyFirstUseBody: 'הוסיפו ספק ראשון כדי לקלוט חשבוניות.',
   addSupplier: 'הוספת ספק',
   emptyNoResults: 'אין תוצאות לסינון הזה',
   emptyInboxZero: 'הכול טופל',
