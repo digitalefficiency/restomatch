@@ -7,6 +7,7 @@ import {
   createWhatsAppNotifier,
   getEntitlements,
   loadPriorDecisions,
+  matchAlert,
   receiptStillOpen,
   persistMatchRun,
   rematchHoldReason,
@@ -191,7 +192,9 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
   if (!replaced && persisted.rolesNeedingNotification.length > 0) {
     const ent = await getEntitlements(db, restaurantId);
     const whatsappAllowed = ent.active && ent.features.includes('whatsapp_alerts');
-    const summary = `${result.discrepancies.length} חריגות, סה"כ הפסד פוטנציאלי ₪${result.totalDiscrepancyAmount.toFixed(0)}`;
+    // The hero's leak rule (never the engine total): no MISSING_ON_INVOICE / info ₪; review-only names no ₪.
+    const alert = matchAlert(persisted);
+    const summary = alert.summary;
     for (const role of persisted.rolesNeedingNotification) {
       if (whatsappAllowed) {
         await whatsapp.send(db, {
@@ -236,8 +239,8 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
         .limit(1);
       const rendered = approvalNeededEmail({
         supplierName: sup?.name ?? 'ספק',
-        discrepancyCount: result.discrepancies.length,
-        atRiskIls: `₪${result.totalDiscrepancyAmount.toFixed(0)}`,
+        discrepancyCount: alert.count,
+        atRiskIls: alert.atRiskIls,
         approvalsUrl: `${appBaseUrl()}/dashboard/approvals`,
       });
       for (const r of recipients) {

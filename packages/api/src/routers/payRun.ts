@@ -1,6 +1,15 @@
 import { z } from 'zod';
-import { computeLeakBreakdown, computeLeakHero, scanAwaitingCountSql, type LeakBreakdownInvoice } from '@restomatch/charts';
+import {
+  LEAK_EXCLUDED_TYPES,
+  computeLeakBreakdown,
+  computeLeakHero,
+  scanAwaitingCountSql,
+  type LeakBreakdownInvoice,
+} from '@restomatch/charts';
 import { eq, restaurants, sql, type Database } from '@restomatch/db';
+
+/** The charts leak exclusion list (LEAK_EXCLUDED_TYPES) as SQL values. */
+const LEAK_EXCLUDED_SQL = sql.join(LEAK_EXCLUDED_TYPES.map((t) => sql`${t}`), sql`, `);
 import { claimableLines, sumClaims, type VatBasis } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
 import { financeProcedure, router } from '../trpc';
@@ -182,7 +191,7 @@ export const payRunRouter = router({
                  JOIN discrepancies d ON d.match_run_id = mr2.id AND d.restaurant_id = ${rid}
                  WHERE mr2.invoice_id = i.id AND mr2.restaurant_id = ${rid}
                    AND d.severity IN ('warn','block') AND d.resolution_status IN ('open','escalated')
-                   AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL') AND ABS(d.delta_amount) > 0
+                   AND d.type NOT IN (${LEAK_EXCLUDED_SQL}) AND ABS(d.delta_amount) > 0
                ) AS has_open,
                -- …and accepted real findings still ask for a credit (Σ |Δ|, capped at the
                -- invoice total like the hero's per-invoice cap), never "can pay".
@@ -192,7 +201,7 @@ export const payRunRouter = router({
                  JOIN discrepancies d ON d.match_run_id = mr3.id AND d.restaurant_id = ${rid}
                  WHERE mr3.invoice_id = i.id AND mr3.restaurant_id = ${rid}
                    AND d.severity IN ('warn','block') AND d.resolution_status = 'accepted'
-                   AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL','DUPLICATE_INVOICE') AND ABS(d.delta_amount) > 0
+                   AND d.type NOT IN (${LEAK_EXCLUDED_SQL}, 'DUPLICATE_INVOICE') AND ABS(d.delta_amount) > 0
                ) AS accepted_ils,
                -- …a non-waived duplicate copy is held ("don't pay this copy"); its ₪ is the copy's total.
                (

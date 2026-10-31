@@ -362,24 +362,29 @@ export const DECISION_COPY = {
 export function approvalNeededEmail(args: {
   supplierName: string;
   discrepancyCount: number;
-  atRiskIls: string; // formatted ₪
+  /** Formatted ₪ by the hero's leak rule; null for a review-only match (no ₪ named). */
+  atRiskIls: string | null;
   approvalsUrl?: string;
 }): RenderedEmail {
-  const subject = `דרושה החלטה — ${args.discrepancyCount} פערים בחשבונית מ-${args.supplierName}`;
+  const atRisk = args.atRiskIls;
+  const what = atRisk ? `${args.discrepancyCount} פערים` : `${args.discrepancyCount} לבדיקה`;
+  const subject = `דרושה החלטה — ${what} בחשבונית מ-${args.supplierName}`;
   const html = renderEmail({
     accent: COLORS.danger,
-    preview: `${args.discrepancyCount} פערים בסכום של ${args.atRiskIls} ממתינים לאישור.`,
+    preview: atRisk ? `${args.discrepancyCount} פערים בסכום של ${atRisk} ממתינים לאישור.` : `${args.discrepancyCount} פערים ממתינים לבדיקה.`,
     heading: 'דרושה החלטה לחשבונית',
     bodyHtml: `
       ${callout(
-        `נמצאו <strong>${args.discrepancyCount}</strong> פערים בחשבונית מ-<strong>${escapeHtml(args.supplierName)}</strong>.<br>
-         סכום בסיכון: ${ilsSpan(args.atRiskIls, 'danger')}`,
+        atRisk
+          ? `נמצאו <strong>${args.discrepancyCount}</strong> פערים בחשבונית מ-<strong>${escapeHtml(args.supplierName)}</strong>.<br>
+         סכום בסיכון: ${ilsSpan(atRisk, 'danger')}`
+          : `<strong>${args.discrepancyCount}</strong> פערים לבדיקה בחשבונית מ-<strong>${escapeHtml(args.supplierName)}</strong>.`,
         'danger',
       )}
       <p style="margin:10px 0 0">לכל פער שתי אפשרויות: <strong>«${DECISION_COPY.he.approve.replace(' {amount}', '')}»</strong> או <strong>«${DECISION_COPY.he.reject}»</strong>.</p>`,
     cta: args.approvalsUrl ? { label: 'מעבר לתור האישורים', url: args.approvalsUrl } : undefined,
   });
-  const text = `דרושה החלטה — ${args.supplierName}\n\n${args.discrepancyCount} פערים, סכום בסיכון ${args.atRiskIls}.\n${DECISION_COPY.he.approve.replace(' {amount}', '')} / ${DECISION_COPY.he.reject}${args.approvalsUrl ? `\n\nתור האישורים: ${args.approvalsUrl}` : ''}`;
+  const text = `דרושה החלטה — ${args.supplierName}\n\n${atRisk ? `${args.discrepancyCount} פערים, סכום בסיכון ${atRisk}` : `${args.discrepancyCount} פערים לבדיקה`}.\n${DECISION_COPY.he.approve.replace(' {amount}', '')} / ${DECISION_COPY.he.reject}${args.approvalsUrl ? `\n\nתור האישורים: ${args.approvalsUrl}` : ''}`;
   return { subject, html, text };
 }
 
