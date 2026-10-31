@@ -8,6 +8,10 @@
  *   tsx lab.ts facts <cfg.json> <out.json>
  *                                  writes what the journey needs and cannot click to: the QA restaurant
  *                                  id, a demo PO id (isolation check) and the demo supplier names.
+ *   tsx lab.ts backdate <poId> <days>  moves an order's delivery into the past (one late PO).
+ *   tsx lab.ts failed-invoice <restaurantId> <supplierName>
+ *                                  an invoice whose OCR did not run (ocr_disabled), as production
+ *                                  leaves it after a photo with no OCR key; prints INVOICE_ID=…
  *
  * Every command refuses a DATABASE_URL whose host is not localhost / 127.0.0.1: the password
  * write must never reach Supabase. Production users set their own password (/login → שכחתי סיסמה).
@@ -84,6 +88,26 @@ async function main(argv: string[]): Promise<void> {
         returning id`;
       if (rows.length !== 1) throw new Error(`[pilot-lab] no purchase order ${a}`);
       console.log(`[pilot-lab] PO ${a} moved ${days} day(s) into the past`);
+    } finally {
+      await sql.end();
+    }
+    return;
+  }
+  if (cmd === 'failed-invoice') {
+    // What production does after a receiver photographs an invoice with no OCR key (non-demo
+    // tenant: ocr_disabled). The lab's scan storage is a placeholder, so the lab writes that row.
+    if (!a || !b) throw new Error('usage: lab.ts failed-invoice <restaurantId> <supplierName>');
+    const sql = postgres(url, { max: 1, onnotice: () => {} });
+    try {
+      const [sup] = await sql<{ id: string }[]>`
+        select id from suppliers where restaurant_id = ${a} and name = ${b} order by created_at desc limit 1`;
+      if (!sup) throw new Error(`[pilot-lab] no supplier "${b}" in restaurant ${a}`);
+      const [inv] = await sql<{ id: string }[]>`
+        insert into invoices (restaurant_id, supplier_id, status, source, raw_image_url, invoice_date, ocr_confidence, ocr_payload)
+        values (${a}, ${sup.id}, 'parsed', 'photo', 'https://example.invalid/pilot-lab-scan.jpg', now(), 0,
+                ${sql.json({ provider: 'pilot-lab', raw: { ocrFailed: true, reason: 'ocr_disabled' } })})
+        returning id`;
+      console.log(`INVOICE_ID=${inv!.id}`);
     } finally {
       await sql.end();
     }

@@ -40,8 +40,16 @@ scripts/pilot-lab.sh`. Once it merges, it goes into `MERGED_ON_MAIN` in the spec
   - In Stage C, it also expects the upload to succeed and the calm "automatic reading is off"
     notice (no OCR key for a non-demo tenant).
 - 7b (the chef places an order and sees ₪ on the orders screens) waits on W1-11.
-- 8, 9 and 11 (approve/reject/undo, the claims letter, a manual line on an OCR-failed invoice) wait
-  on S2's manual invoice lines. Without OCR keys, a fresh tenant gets no invoice lines.
+- 11, 8 and 9 wait on S2's manual invoice lines (#216). Without OCR keys, a fresh tenant gets no
+  invoice lines. Step 11 runs first because it makes the findings for 8 and 9.
+  - 11: the owner enters two lines by hand on an OCR-failed invoice.
+    - In the lab, `lab.ts failed-invoice` writes that invoice row, as production does after a photo
+      when there's no OCR key.
+    - In Stage C, it is the invoice from 5b's upload.
+  - 8: approve one finding, reject one with a written note, and undo the rejection within 10 s.
+    It runs as the manager unless the queue routes the findings to the owner; the report then
+    notes "routing".
+  - 9: the claims letter carries the supplier and the approved ₪ amount.
 
 ## Stage A — local lab
 

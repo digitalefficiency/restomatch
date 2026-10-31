@@ -50,7 +50,7 @@ const WAITS = {
   /** W1-06 follow-up: client-side shrink of a phone photo before upload (6 MB JPEG). */
   uploadShrink: 'W1-06 image shrink (6 MB phone photo) — not on main + #167',
   /** S2: manual invoice lines — the only way a non-demo tenant gets findings without OCR. */
-  manualLines: "S2's manual invoice lines — without them a fresh tenant has no invoice lines, so no findings",
+  manualLines: "S2's manual invoice lines (#216) — without them a fresh tenant has no invoice lines, so no findings",
   /** W1-11: open order writes to the chef (route, nav entry, server: managerProcedure today). */
   chefOrders: 'W1-11 chef order writes (route + nav + server) — not on main + #167',
 } as const;
@@ -58,10 +58,12 @@ const WAITS = {
  * Waiting PRs that are on the tested tree: list them in MERGED_ON_MAIN once they merge, or name them in
  * PILOT_ON_TREE (comma list) to run a lab built from their branch, e.g. PILOT_ON_TREE=w1-06.
  */
-const MERGED_ON_MAIN: readonly string[] = []; // add 'w1-06' / 'w1-11' as they merge
+const MERGED_ON_MAIN: readonly string[] = []; // add 'w1-06' / 's2' / 'w1-11' as they merge
 const ON_TREE = new Set([...MERGED_ON_MAIN, ...(process.env.PILOT_ON_TREE ?? '').split(',').map((s) => s.trim().toLowerCase())]);
 /** W1-06's photo shrink (#210) → step 5b runs. */
 const UPLOAD_SHRINK_ON_TREE = ON_TREE.has('w1-06');
+/** S2's manual invoice lines (#216) → steps 11, 8 and 9 run. */
+const MANUAL_LINES_ON_TREE = ON_TREE.has('s2');
 /** W1-11's chef ordering → step 7b runs. */
 const CHEF_ORDERS_ON_TREE = ON_TREE.has('w1-11');
 
@@ -89,6 +91,10 @@ const STATE_FILE = resolve(HERE, `../../test-results/pilot/state-${RUN_ID}.json`
 interface JourneyState {
   orderTodayId?: string;
   orderLateId?: string;
+  /** Step 11's invoice (OCR did not run; lines entered by hand). */
+  invoiceId?: string;
+  /** Step 8: the finding approved for a claim (what step 9's letter must carry). */
+  claimed?: { amount: string; what: string };
   /** A login landed on a tenant that is not the QA tenant: no further logins this run. */
   refused?: string;
   /** Every screen text visited, for the isolation sweep (no demo supplier names anywhere). */
@@ -157,15 +163,20 @@ function expectCleanConsole(role: Role, where: string): void {
   list.length = 0;
 }
 
-/** Lab only: move an order's expected delivery into the past (the UI refuses past dates). */
-function backdate(poId: string, days: number): void {
+/** Lab only: run an e2e/pilot/lab.ts command against the lab database; returns its stdout. */
+function labTool(...args: string[]): string {
   const db = process.env.PILOT_LAB_DATABASE_URL;
   if (!db) throw new Error('PILOT_LAB_DATABASE_URL is not set (scripts/pilot-lab.sh sets it)');
-  execFileSync('pnpm', ['--filter', '@restomatch/db', 'exec', 'tsx', resolve(HERE, 'lab.ts'), 'backdate', poId, String(days)], {
+  return execFileSync('pnpm', ['--filter', '@restomatch/db', 'exec', 'tsx', resolve(HERE, 'lab.ts'), ...args], {
     cwd: resolve(HERE, '../../../..'),
     env: { ...process.env, DATABASE_URL: db },
-    stdio: 'inherit',
+    encoding: 'utf8',
   });
+}
+
+/** Lab only: move an order's expected delivery into the past (the UI refuses past dates). */
+function backdate(poId: string, days: number): void {
+  labTool('backdate', poId, String(days));
 }
 
 test.beforeAll(async ({ browser }) => {
@@ -400,8 +411,14 @@ test('5b · receiver uploads a 6 MB phone photo of the invoice', async ({}, info
     for (let i = list.length - 1; i >= 0; i--) if (/status of 500/.test(list[i]!)) list.splice(i, 1);
   } else {
     expect(upload!.ok(), `scans.upload ${upload!.status()}`).toBe(true);
+    // The invoice this photo became: step 11 enters its lines by hand.
+    const registered = page.waitForResponse((r) => r.url().includes('/api/trpc/receiving.registerInvoice'), { timeout: 60_000 });
     await expect(main(page)).not.toContainText(/Upload failed|העלאת הסריקה נכשלה/);
     await page.getByTestId('scan-process').click();
+    const reg = (await (await registered).json().catch(() => null)) as Array<{ result?: { data?: { json?: { invoiceId?: string } } } }> | null;
+    const invoiceId = reg?.[0]?.result?.data?.json?.invoiceId;
+    expect(invoiceId, 'registerInvoice returned the invoice id').toBeTruthy();
+    remember({ invoiceId });
     // No ANTHROPIC_API_KEY for a non-demo tenant: a calm "not read automatically" notice, then the count.
     await expect(
       main(page).getByText(/קריאה אוטומטית אינה פעילה|Automatic reading is off|Delivery check|בדיקת משלוח|Reading|קוראים/i).first(),
@@ -456,13 +473,110 @@ test('7b · chef orders per CHEF_CAN_CREATE_ORDERS; ₪ on the orders screens on
   expectCleanConsole('chef', 'chef orders');
 });
 
-test.fixme('8 · manager approves one finding, rejects one with a note, undoes within 10 s', async () => {
-  // Waits on: S2's manual invoice lines (no OCR for a non-demo tenant ⇒ no findings yet).
-  void WAITS.manualLines;
+test('11 · an OCR-failed invoice gets manual lines (runs before 8–9: it makes their findings)', async ({}, info) => {
+  test.fixme(!MANUAL_LINES_ON_TREE, WAITS.manualLines);
+  const page = await as('owner');
+  // Production: the invoice the receiver photographed in 5b (no OCR key → ocr_disabled). The lab's
+  // scan storage is a placeholder, so the lab writes that same row (lab.ts failed-invoice).
+  const invoiceId = LAB
+    ? /INVOICE_ID=(\S+)/.exec(labTool('failed-invoice', facts.restaurantId, SUPPLIER_PRODUCE))?.[1]
+    : state().invoiceId;
+  expect(invoiceId, LAB ? 'lab failed-invoice id' : "5b's uploaded invoice (state file)").toBeTruthy();
+  remember({ invoiceId });
+  await visit(page, 'owner', `/dashboard/invoices/${invoiceId}`);
+  await expect(page.getByTestId('invoice-ocr-failed')).toBeVisible({ timeout: 30_000 });
+  const row = page.getByTestId('add-invoice-line-row');
+  for (const l of MANUAL_LINES) {
+    await row.getByLabel('תיאור', { exact: true }).fill(l.desc);
+    await row.getByLabel('כמות', { exact: true }).fill(l.qty);
+    await row.getByLabel('יחידה', { exact: true }).fill(l.unit);
+    await row.getByLabel('מחיר יח׳', { exact: true }).fill(l.price);
+    await page.getByTestId('add-invoice-line').click();
+    await expect(row.getByLabel('תיאור', { exact: true })).toHaveValue('', { timeout: 30_000 }); // cleared on success
+  }
+  await page.reload();
+  const text = await mainText(page);
+  expect(text).toMatch(/1,320\.00\s?₪/);
+  expect(text).toMatch(/38\.70\s?₪/);
+  await expectMoneyRightAligned(page, 'invoice');
+  await shot(page, info, '11-invoice-manual-lines');
+  // The oil was ordered at 1,250: the owner's truth is a 70 ₪ price gap on it, not an unordered item.
+  const queue = await visit(page, 'owner', '/dashboard/approvals');
+  expect
+    .soft(queue, 'hand-entered oil line should match the ordered product (70.00 ₪ price gap), not "item not ordered"')
+    .toMatch(/70\.00\s?₪/);
+  expectCleanConsole('owner', 'invoice manual lines');
 });
 
-test.fixme('9 · the claims letter renders with the supplier and ₪', async () => {
-  void WAITS.manualLines;
+/** Hand-entered lines: an overcharge on the oil (1,320 vs 1,250 ordered) and 3 kg of tomatoes billed. */
+const MANUAL_LINES = [
+  { desc: 'שמן זית 18 ליטר', qty: '1', unit: 'יח׳', price: '1320' },
+  { desc: 'עגבניה שרי', qty: '3', unit: 'ק״ג', price: '12.90' },
+] as const;
+
+/** The role the approvals queue routes these findings to: the manager, unless the queue says owner. */
+async function decider(): Promise<{ role: Role; page: Page }> {
+  const manager = await as('manager');
+  await visit(manager, 'manager', '/dashboard/approvals');
+  if ((await manager.getByTestId('decide-approve').count()) > 0) return { role: 'manager', page: manager };
+  test.info().annotations.push({
+    type: 'routing',
+    description: 'the manager’s queue routes these findings to the owner ("ממתינים לבעלים") — the owner decides',
+  });
+  const owner = await as('owner');
+  await visit(owner, 'owner', '/dashboard/approvals');
+  return { role: 'owner', page: owner };
+}
+
+test('8 · manager approves one finding, rejects one with a note, undoes within 10 s', async ({}, info) => {
+  test.fixme(!MANUAL_LINES_ON_TREE, WAITS.manualLines);
+  expect(state().invoiceId, "step 11's invoice (state file)").toBeTruthy();
+  const { role, page } = await decider();
+  const cards = page.getByTestId('approval-card');
+  const before = await cards.count();
+  expect(before, 'findings waiting in the queue').toBeGreaterThanOrEqual(2);
+  await shot(page, info, `8-approvals-${role}`);
+  await expectMoneyRightAligned(page, 'approvals');
+
+  // Approve the first (→ claim): remember what step 9's letter must carry.
+  const first = cards.first();
+  const what = ((await first.innerText()).split('\n').find((l) => l.includes(SUPPLIER_PRODUCE)) ?? '').trim();
+  const amount = ((await first.getByTestId('card-amount').innerText()) || '').replace(/[‎‏]/g, '').trim();
+  await first.getByTestId('decide-approve').click();
+  await expect(page.getByTestId('approvals-undo')).toBeVisible();
+  remember({ claimed: { amount, what } });
+  // Let its 10 s undo window lapse, so the approval sticks.
+  await expect(page.getByTestId('approvals-undo')).toBeHidden({ timeout: 20_000 });
+  await expect(cards).toHaveCount(before - 1);
+
+  // Reject the next ("pay as billed") with a written note — then undo it inside the 10 s.
+  const next = cards.first();
+  await next.getByTestId('decide-reject').click();
+  const reasons = page.getByTestId('waive-reasons');
+  await reasons.getByRole('button', { name: 'אחר' }).click();
+  await reasons.locator('textarea').fill('בדיקת פיילוט — הספק אישר בטלפון');
+  await reasons.getByRole('button', { name: 'שלם כפי שחויב' }).click();
+  await expect(page.getByTestId('approvals-undo')).toBeVisible();
+  await expect(cards).toHaveCount(before - 2);
+  await page.getByTestId('approvals-undo-button').click();
+  await expect(page.getByText('ההחלטה בוטלה · הפער חזר לתור').first()).toBeVisible();
+  await expect(cards).toHaveCount(before - 1);
+  await shot(page, info, '8-after-undo');
+  expectCleanConsole(role, 'approvals');
+});
+
+test('9 · the claims letter renders with the supplier and ₪', async ({}, info) => {
+  test.fixme(!MANUAL_LINES_ON_TREE, WAITS.manualLines);
+  const { claimed } = state();
+  expect(claimed, "step 8's approved finding (state file)").toBeTruthy();
+  const page = await as('owner');
+  const text = await visit(page, 'owner', '/dashboard/leaks/claims');
+  await shot(page, info, '9-claims');
+  expect(text).toContain(TERMINOLOGY.creditClaim);
+  expect(text, 'the letter names the supplier').toContain(SUPPLIER_PRODUCE);
+  expect(text, `the letter carries the approved ${claimed!.amount}`).toContain(claimed!.amount);
+  await expectMoneyRightAligned(page, 'claims letter');
+  expectCleanConsole('owner', 'claims');
 });
 
 test('10 · bookkeeper downloads the CSV export', async ({}, info) => {
@@ -477,9 +591,6 @@ test('10 · bookkeeper downloads the CSV export', async ({}, info) => {
   expectCleanConsole('bookkeeper', 'exports');
 });
 
-test.fixme('11 · an OCR-failed invoice gets a manual line', async () => {
-  void WAITS.manualLines;
-});
 
 test('12 · isolation: one branch, no demo names, a demo PO id is not found', async ({}, info) => {
   const page = await as('owner');
