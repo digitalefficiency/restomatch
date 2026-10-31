@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { LeakBreakdownInvoice, LeakBreakdownLine } from '@restomatch/charts';
-import { claimableLines, sumClaims, vatBasisOf } from '../lib/claims';
+import { CLAIM_ANSWER_DAYS, NEVER_CLAIMABLE_TYPES, claimableLines, isNeverClaimable, sumClaims, vatBasisOf } from '../lib/claims';
+import { isClaimableRow } from '../routers/approvals';
+import { OVERDUE_DAYS } from '../recovery/service';
 import { payRunStatusOf } from '../routers/payRun';
 
 /**
@@ -186,5 +188,33 @@ describe('payRunStatusOf', () => {
       invoice({ lines: [line({ discrepancyId: 'a', resolutionStatus: 'rejected' }), line({ discrepancyId: 'b', resolutionStatus: 'resolved' })] }),
     );
     expect(s).toMatchObject({ status: 'pay', claims: [], creditIls: 0 });
+  });
+});
+
+describe('owner decisions 31.10 — the claim rules', () => {
+  it('ONE never-claimable set: PRICE_LOWER, UNORDERED_ARRIVAL and MISSING_ON_INVOICE ("לא")', () => {
+    expect([...NEVER_CLAIMABLE_TYPES].sort()).toEqual(['MISSING_ON_INVOICE', 'PRICE_LOWER', 'UNORDERED_ARRIVAL']);
+    for (const t of NEVER_CLAIMABLE_TYPES) {
+      expect(isNeverClaimable(t)).toBe(true);
+      // approvals uses the same set: never "דרוש ₪X" for these.
+      expect(isClaimableRow({ type: t, severity: 'block', deltaAmount: '30.00' })).toBe(false);
+    }
+    expect(isClaimableRow({ type: 'PRICE_HIGHER', severity: 'warn', deltaAmount: '30.00' })).toBe(true);
+  });
+
+  it('a MISSING_ON_INVOICE line is never a claim line, even if it counts and is accepted', () => {
+    const inv = invoice({
+      leakIls: 200,
+      lines: [
+        line({ discrepancyId: 'm', type: 'MISSING_ON_INVOICE', resolutionStatus: 'accepted', deltaAmount: 64, countsAsLeak: true }),
+        line({ discrepancyId: 'p', type: 'PRICE_HIGHER', resolutionStatus: 'accepted', deltaAmount: 30 }),
+      ],
+    });
+    expect(claimableLines(inv).map((c) => c.line.discrepancyId)).toEqual(['p']);
+  });
+
+  it('a claim is overdue after a week ("שבוע"): one constant, the reminder job uses it', () => {
+    expect(CLAIM_ANSWER_DAYS).toBe(7);
+    expect(OVERDUE_DAYS).toBe(CLAIM_ANSWER_DAYS);
   });
 });

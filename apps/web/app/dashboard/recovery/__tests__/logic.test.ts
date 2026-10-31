@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { CLAIM_ANSWER_DAYS } from '@restomatch/api';
 import {
+  ANSWER_DAYS,
   CONFIRMED_MOVES,
   NEXT,
   batchMoves,
@@ -75,20 +77,28 @@ describe('row actions: never a money move on select change (chain-01)', () => {
   });
 });
 
-describe('answer countdown from COALESCE(letterSentAt, claimedAt) + 14 (chain-04)', () => {
+describe('answer countdown from COALESCE(letterSentAt, claimedAt) + a week (owner 31.10)', () => {
   const now = '2026-10-25T10:00:00.000Z';
-  it('neutral above 7 days, warn at 7 or fewer, danger when late', () => {
+  it('one constant with the server: ANSWER_DAYS = @restomatch/api CLAIM_ANSWER_DAYS = 7', () => {
+    expect(ANSWER_DAYS).toBe(7);
+    expect(ANSWER_DAYS).toBe(CLAIM_ANSWER_DAYS);
+  });
+  it('neutral above 3 days, warn at 3 or fewer, danger when late (after 7 days)', () => {
     expect(countdownOf({ status: 'letter_sent', letterSentAt: '2026-10-24T10:00:00.000Z', claimedAt: '2026-09-01T00:00:00Z' }, now)).toMatchObject({
       tone: 'neutral',
-      daysLeft: 13,
+      daysLeft: 6,
     });
-    expect(countdownOf({ status: 'claimed', letterSentAt: null, claimedAt: '2026-10-18T10:00:00.000Z' }, now)).toMatchObject({
+    expect(countdownOf({ status: 'claimed', letterSentAt: null, claimedAt: '2026-10-21T10:00:00.000Z' }, now)).toMatchObject({
       tone: 'warn',
-      daysLeft: 7,
+      daysLeft: 3,
     });
-    expect(countdownOf({ status: 'acknowledged', letterSentAt: '2026-10-02T10:00:00.000Z', claimedAt: '2026-09-01T00:00:00Z' }, now)).toMatchObject({
+    expect(countdownOf({ status: 'letter_sent', letterSentAt: '2026-10-18T10:00:00.000Z', claimedAt: '2026-09-01T00:00:00Z' }, now)).toMatchObject({
+      tone: 'warn',
+      daysLeft: 0,
+    });
+    expect(countdownOf({ status: 'acknowledged', letterSentAt: '2026-10-16T10:00:00.000Z', claimedAt: '2026-09-01T00:00:00Z' }, now)).toMatchObject({
       tone: 'danger',
-      daysLate: 9,
+      daysLate: 2,
     });
   });
   it('no countdown once the supplier is not the one we wait for', () => {
@@ -127,6 +137,13 @@ describe('follow-up queues (the banner split)', () => {
       '2026-10-25T10:00:00.000Z',
     );
     expect(q.waiting).toEqual({ count: 2, agorot: 900 });
+  });
+  it('waiting starts after a week (owner 31.10): 6 days → not yet, 8 days → waiting', () => {
+    const now = '2026-10-25T10:00:00.000Z';
+    const sent = (iso: string, supplierName: string) =>
+      ({ status: 'letter_sent' as const, outstandingAgorot: 1000, letterSentAt: iso, claimedAt: '2026-09-01T00:00:00Z', supplierName });
+    expect(followUps([sent('2026-10-19T10:00:00.000Z', 'A')], now).waiting.count).toBe(0);
+    expect(followUps([sent('2026-10-17T10:00:00.000Z', 'B')], now).waiting.count).toBe(1);
   });
 });
 

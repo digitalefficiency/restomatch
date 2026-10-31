@@ -20,7 +20,7 @@ import { computeLeakHero } from '@restomatch/charts';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { enqueueRecoveryReminders } from '../recovery/reminders';
-import { AUTO_WRITE_OFF_NOTE, listClaims, MAX_CLAIMS, syncClaims } from '../recovery/service';
+import { AUTO_WRITE_OFF_NOTE, listClaims, MAX_CLAIMS, OVERDUE_DAYS, syncClaims } from '../recovery/service';
 import { computeMonthlyReport, ensureMonthlyReport, monthlyReportEmail, monthlyReportWhatsApp, WHATSAPP_MAX } from '../reports/monthly';
 import { renderMonthlyReportPdf } from '../reports/pdf';
 import { sendMonthlyReports } from '../reports/send';
@@ -132,6 +132,39 @@ describe('claims', () => {
     expect(await syncClaims(db, T.restaurantId)).toBe(0);
   });
 
+  it('never claims an accepted MISSING_ON_INVOICE (owner 31.10), and writes off one already in the tracker', async () => {
+    await db.update(discrepancies).set({ resolutionStatus: 'open' }).where(eq(discrepancies.id, T.discrepancyId));
+    const [m] = await db
+      .insert(discrepancies)
+      .values({
+        matchRunId: T.matchRunId,
+        restaurantId: T.restaurantId,
+        type: 'MISSING_ON_INVOICE',
+        severity: 'block',
+        deltaAmount: '40.00',
+        resolutionStatus: 'accepted',
+      })
+      .returning({ id: discrepancies.id });
+    try {
+      expect(await syncClaims(db, T.restaurantId)).toBe(0);
+      expect(await db.select().from(recoveryClaims).where(eq(recoveryClaims.discrepancyId, m!.id))).toHaveLength(0);
+
+      // A claim made before the rule (an older build) is closed by the next sync — never chased.
+      const [old] = await db
+        .insert(recoveryClaims)
+        .values({ restaurantId: T.restaurantId, discrepancyId: m!.id, supplierId: T.supplierId, invoiceId: T.invoiceId, amountAgorot: 1700, status: 'claimed' })
+        .returning({ id: recoveryClaims.id });
+      await syncClaims(db, T.restaurantId);
+      const [after] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.id, old!.id));
+      expect(after!.status).toBe('written_off');
+    } finally {
+      const held = await db.select({ id: recoveryClaims.id }).from(recoveryClaims).where(eq(recoveryClaims.discrepancyId, m!.id));
+      for (const h of held) await db.delete(recoveryEvents).where(eq(recoveryEvents.claimId, h.id));
+      await db.delete(recoveryClaims).where(eq(recoveryClaims.discrepancyId, m!.id));
+      await dropDiscrepancies(eq(discrepancies.type, 'MISSING_ON_INVOICE'));
+    }
+  });
+
   it('each claim names its discrepancy, and list takes a limit up to MAX_CLAIMS (W1-08 letters pair on the id)', async () => {
     const c = caller();
     const claims = await c.recovery.list();
@@ -219,7 +252,19 @@ describe('claims', () => {
 });
 
 describe('overdue reminders (outbox)', () => {
-  it('chases claims waiting > 14 days once a week, one deduped email per manager per day', async () => {
+  it('a claim is overdue after a WEEK (owner 31.10): 6 days → no reminder, 8 days → chased', async () => {
+    await syncClaims(db, T.restaurantId);
+    const at = (days: number) => new Date(Date.now() - days * 86_400_000);
+    await db.update(recoveryClaims).set({ status: 'letter_sent', letterSentAt: at(6) }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
+    expect((await enqueueRecoveryReminders(db, { restaurantId: T.restaurantId })).claims).toBe(0);
+    await db.update(recoveryClaims).set({ letterSentAt: at(8) }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
+    expect((await enqueueRecoveryReminders(db, { restaurantId: T.restaurantId })).claims).toBe(1);
+    const [c] = await listClaims(db, T.restaurantId, {});
+    expect(c!.overdue).toBe(true);
+    await db.delete(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, T.restaurantId));
+  });
+
+  it('chases claims waiting > a week, then once a week, one deduped email per manager per day', async () => {
     await syncClaims(db, T.restaurantId);
     const old = new Date(Date.now() - 20 * 86_400_000);
     await db.update(recoveryClaims).set({ status: 'letter_sent', letterSentAt: old }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
@@ -576,14 +621,14 @@ describe('money cross-QA (S3) regressions', () => {
     expect(again.data.leakAgorot).toBe(1);
   });
 
-  it('LOW: the overdue badge and the reminder job agree at the 14-day boundary', async () => {
+  it('LOW: the overdue badge and the reminder job agree at the OVERDUE_DAYS (a week) boundary', async () => {
     await syncClaims(db, T.restaurantId);
     const now = new Date('2026-10-30T09:00:00Z');
-    const justOver = new Date(now.getTime() - 14 * 86_400_000 - 60_000);
+    const justOver = new Date(now.getTime() - OVERDUE_DAYS * 86_400_000 - 60_000);
     await db.update(recoveryClaims).set({ status: 'letter_sent', letterSentAt: justOver, lastReminderAt: null }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
     const [row] = await listClaims(db, T.restaurantId, { now });
     expect(row!.overdue).toBe(true);
-    const almost = new Date(now.getTime() - 14 * 86_400_000 + 60_000);
+    const almost = new Date(now.getTime() - OVERDUE_DAYS * 86_400_000 + 60_000);
     await db.update(recoveryClaims).set({ letterSentAt: almost }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
     const [row2] = await listClaims(db, T.restaurantId, { now });
     expect(row2!.overdue).toBe(false);

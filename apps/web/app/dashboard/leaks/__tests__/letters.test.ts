@@ -337,3 +337,20 @@ describe('a ₪0 line says why only when the engine proves it', () => {
     expect(he.breakdown.noMoneyShort).not.toMatch(/לא חויבתם/);
   });
 });
+
+describe('owner decision 31.10: MISSING_ON_INVOICE is never claimed', () => {
+  it('an accepted MISSING_ON_INVOICE line never reaches a letter — nor the "decide" count', () => {
+    const inv = invoice({
+      invoiceId: 'mi',
+      leakIls: 200,
+      lines: [
+        line({ discrepancyId: 'mi-1', type: 'MISSING_ON_INVOICE', resolutionStatus: 'accepted', deltaAmount: 64 }),
+        line({ discrepancyId: 'mi-2', type: 'MISSING_ON_INVOICE', resolutionStatus: 'open', deltaAmount: 30 }),
+        line({ discrepancyId: 'ph', type: 'PRICE_HIGHER', resolutionStatus: 'accepted', deltaAmount: 100 }),
+      ],
+    });
+    const { letters, undecided } = buildLetters({ month: [inv], tracked: [] });
+    expect(letters.flatMap((l) => [...l.beforePayment, ...l.forCredit]).map((l) => l.key)).toEqual(['ph']);
+    expect(undecided.count).toBe(0);
+  });
+});

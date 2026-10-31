@@ -11,6 +11,7 @@ import {
   type RecoveryStatus,
 } from '@restomatch/db';
 import { assertSupplierOwned } from '../tenant';
+import { CLAIM_ANSWER_DAYS, NEVER_CLAIMABLE_TYPES } from '../lib/claims';
 import {
   AWAITING_SUPPLIER,
   CREDITABLE,
@@ -41,8 +42,12 @@ const isoOrNull = (v: unknown): string | null =>
 
 const notFound = (what: string) => new TRPCError({ code: 'NOT_FOUND', message: `${what} not found` });
 
+// The shared never-claimable list (lib/claims) — MISSING_ON_INVOICE included (owner 31.10).
 const CLAIMABLE_FILTER = sql`d.severity IN ('warn','block')
-  AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL')
+  AND d.type NOT IN (${sql.join(
+    NEVER_CLAIMABLE_TYPES.map((t) => sql`${t}`),
+    sql`, `,
+  )})
   AND d.resolution_status IN ('accepted','resolved')`;
 
 /** Event note marking a claim the system wrote off because its discrepancy is no longer accepted. */
@@ -260,8 +265,8 @@ export interface RecoveryClaimRow {
   note: string | null;
 }
 
-/** Waiting on the supplier this many days after the letter (or the claim) ⇒ overdue. */
-export const OVERDUE_DAYS = 14;
+/** Waiting on the supplier this many days after the letter (or the claim) ⇒ overdue (owner 31.10: a week). */
+export const OVERDUE_DAYS = CLAIM_ANSWER_DAYS;
 /** Do not chase the same claim more often than this. */
 export const REMIND_EVERY_DAYS = 7;
 /** Upper bound for one page of the claims LIST (totals never truncate — see computeRecoverySummary). */

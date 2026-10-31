@@ -26,7 +26,7 @@ describe('claimNeedRows — the recovery page’s follow-up queues', () => {
     claim({ outstandingAgorot: 5_050, supplierName: 'ספק א' }),
     claim({ status: 'acknowledged', letterSentAt: daysAgo(40) }), // answered → never "late"
     claim({ status: 'claimed', letterSentAt: null, outstandingAgorot: 2_500 }), // never sent
-    claim({ letterSentAt: daysAgo(3), supplierName: 'ספק ב' }), // still inside 14 days
+    claim({ letterSentAt: daysAgo(3), supplierName: 'ספק ב' }), // still inside the week
   ];
 
   it('the values are exactly followUps(): waiting and unsent, each with its count', () => {
@@ -38,6 +38,12 @@ describe('claimNeedRows — the recovery page’s follow-up queues', () => {
     expect(rows[0]!.sub).toContain('"count":"2"');
     expect(rows[1]!.value).toBe('₪25.00');
     expect(rows[1]!.href).toBe('/dashboard/recovery');
+  });
+
+  it('the row says the window it uses — a week (owner 31.10), not 14 days', () => {
+    const rows = claimNeedRows(followUps([claim({ letterSentAt: daysAgo(8) })], NOW), fmt);
+    expect(rows.map((r) => r.key)).toEqual(['claimsWaiting']);
+    expect(rows[0]!.label).toContain('"days":"7"');
   });
 
   it('nothing waiting, nothing unsent → no rows', () => {
