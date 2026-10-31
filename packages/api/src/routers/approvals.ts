@@ -2,8 +2,10 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import {
   and,
+  activityEvents,
   auditLog,
   desc,
+  recoveryClaims,
   discrepancies,
   discrepancyType,
   eq,
@@ -25,11 +27,22 @@ import {
 } from '@restomatch/db';
 import { LEAK_FILTER, notZeroShortTwin, type LeakBreakdownInvoice } from '@restomatch/charts';
 import { authedProcedure, financeProcedure, memberProcedure, router } from '../trpc';
-import { logActivity } from '../activity';
 import { canActOn, expandVisibleRoles } from '../lib/roles';
 import { claimableLines, sumClaims, type VatBasis } from '../lib/claims';
 import { formatIlsAgorot } from '../reports/money';
 import { DECISION_COPY } from '../notifications/templates';
+import { materializeClaims, NEVER_CLAIMABLE_TYPES } from '../recovery/service';
+import { awaitingDecision, type AwaitingRouting } from '../approvals/awaiting';
+import {
+  bulkRefusals,
+  DECIDE_MANY_MAX_ITEMS,
+  quickApproveRefusal,
+  type BulkRefusal,
+} from '../approvals/bulkPolicy';
+import { recipientsForRestaurant } from '../notifications/recipients';
+import { enqueueNotification } from '../notifications/outbox';
+import { stripTrailingSlashes } from '../lib/urls';
+import type { Database } from '@restomatch/db';
 
 const ResolutionEnum = z.enum(['accepted', 'rejected', 'escalated']);
 
@@ -51,6 +64,13 @@ const deciderProcedure = memberProcedure.use(({ ctx, next }) => {
   }
   return next();
 });
+
+/** Receiver / chef: FORBIDDEN on every approvals read and write. */
+function assertDecider(role: UserRole): void {
+  if (!DECIDER_ROLES.includes(role)) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: `Required role: ${DECIDER_ROLES.join('|')}, got: ${role}` });
+  }
+}
 
 /** Only these rows are still a decision; every write is conditioned on it (approvals-11). */
 const OPEN_STATUSES = ['open', 'escalated'] as const;
@@ -94,7 +114,8 @@ export const DECIDED_CONFLICT_PREFIX = 'approvals.decided:';
  * fails it is a check ("סמנו כנבדק"), never "דרוש ₪X" — the UI keys its verbs on
  * this, and queueSummary splits "להחלטה (₪)" from "לבדיקה (ללא ₪)".
  */
-const NEVER_CLAIMABLE = new Set(['PRICE_LOWER', 'UNORDERED_ARRIVAL', 'MISSING_ON_INVOICE']);
+// ONE never-claimable set (owner decision 31.10), shared with the claims side.
+const NEVER_CLAIMABLE = new Set<string>(NEVER_CLAIMABLE_TYPES);
 export function isClaimableRow(r: { type: string; severity: string; deltaAmount: string | null }): boolean {
   return (
     (r.severity === 'warn' || r.severity === 'block') &&
@@ -129,11 +150,14 @@ const QueueFilters = {
   types: z.array(z.enum(discrepancyType.enumValues)).max(12).optional(),
   severities: z.array(z.enum(severityEnum.enumValues)).max(3).optional(),
   supplierIds: z.array(z.string().uuid()).max(50).optional(),
+  /** One invoice's rows (the notification landing: `?invoice=<id>`). Foreign ids match nothing. */
+  invoiceIds: z.array(z.string().uuid()).max(50).optional(),
 };
 type QueueFilterInput = {
   types?: (typeof discrepancyType.enumValues)[number][];
   severities?: (typeof severityEnum.enumValues)[number][];
   supplierIds?: string[];
+  invoiceIds?: string[];
 };
 
 function filterWhere(input: QueueFilterInput | undefined) {
@@ -141,6 +165,7 @@ function filterWhere(input: QueueFilterInput | undefined) {
     input?.types?.length ? inArray(discrepancies.type, input.types) : undefined,
     input?.severities?.length ? inArray(discrepancies.severity, input.severities) : undefined,
     input?.supplierIds?.length ? inArray(invoices.supplierId, input.supplierIds) : undefined,
+    input?.invoiceIds?.length ? inArray(matchRuns.invoiceId, input.invoiceIds) : undefined,
   ];
 }
 
@@ -195,6 +220,13 @@ export const approvalsRouter = router({
           // Keyset paging in the priority order: rows strictly after this row's
           // sort key. Robust to rows decided elsewhere (an offset would skip).
           afterId: z.string().uuid().optional(),
+          /**
+           * `mine` (default): the rows I decide. `all`: every open row a decider
+           * role may read (the bookkeeper reads everything, decides only
+           * bookkeeper-routed rows; an escalator keeps seeing what it handed on).
+           * Each row says `canAct` and `waitingOn` either way (additive output).
+           */
+          scope: z.enum(['mine', 'all']).optional(),
           ...QueueFilters,
         })
         .optional(),
@@ -202,6 +234,9 @@ export const approvalsRouter = router({
     .query(async ({ ctx, input }) => {
       const limit = input?.limit ?? 50;
       const cursorDate = input?.cursor ? new Date(input.cursor) : null;
+      const scope = input?.scope ?? 'mine';
+      // Receiver / chef never read the decision queue (no purchase ₪ for them).
+      assertDecider(ctx.session.role);
       const roles = expandVisibleRoles(ctx.session.role);
       const rid = ctx.session.restaurantId;
       const base = ctx.db
@@ -225,6 +260,11 @@ export const approvalsRouter = router({
           supplierNameEn: suppliers.nameEn,
           invoiceNumber: invoices.invoiceNumber,
           invoiceDueDate: invoices.dueDate,
+          // Decision 19: the effect line names the channel by invoice state
+          // (unpaid → offset at payment, paid → credit claim).
+          invoiceStatus: invoices.status,
+          // The evidence pane shows /scans/<invoiceId>/file when a scan exists.
+          hasScan: sql<boolean>`EXISTS (SELECT 1 FROM invoice_scans s WHERE s.invoice_id = ${invoices.id} AND s.restaurant_id = ${rid})`.mapWith(Boolean),
           message: discrepancies.resolutionNote, // reuse field for now
           createdAt: discrepancies.createdAt,
           matchRunId: discrepancies.matchRunId,
@@ -267,7 +307,7 @@ export const approvalsRouter = router({
             eq(discrepancies.restaurantId, rid),
             inArray(discrepancies.resolutionStatus, [...OPEN_STATUSES]),
             notZeroShortTwin(),
-            inArray(discrepancies.requiresRole, roles),
+            scope === 'mine' ? inArray(discrepancies.requiresRole, roles) : undefined,
             cursorDate ? lt(discrepancies.createdAt, cursorDate) : undefined,
             !cursorDate && input?.afterId ? afterRow(rid, input.afterId) : undefined,
             ...filterWhere(input),
@@ -281,9 +321,16 @@ export const approvalsRouter = router({
             .offset(input?.afterId ? 0 : (input?.offset ?? 0));
       // A PO line from another tenant can never be joined in (its PO join is
       // tenant-scoped); drop its orphan facts rather than show them.
+      // The claimable ₪ per row (lib/claims rule, per-invoice cap): the group
+      // header, the BatchBar Σ and `seenClaimAgorot` on approve all read it.
+      const claims = await claimsByRow(ctx.db, rid, rows.filter(isClaimableRow));
       return rows.map((r) => ({
         ...(r.poId ? r : { ...r, qtyOrdered: null, orderedUnit: null, poRef: null, poDate: null }),
         claimable: isClaimableRow(r),
+        claimAgorot: isClaimableRow(r) ? Math.round((claims.get(r.id)?.amount ?? 0) * 100) : 0,
+        canAct: canActOn(ctx.session.role, r.requiredRole),
+        /** Who decides it: its routed role, or 'unrouted' (owner / manager). */
+        waitingOn: (r.requiredRole ?? 'unrouted') as AwaitingRouting,
       }));
     }),
 
@@ -310,115 +357,87 @@ export const approvalsRouter = router({
    * match-run id. W2-13 scopes both to the invoice's latest run.
    */
   queueSummary: memberProcedure.input(z.object(QueueFilters).optional()).query(async ({ ctx, input }) => {
-    const rid = ctx.session.restaurantId;
-    const roles = expandVisibleRoles(ctx.session.role);
-    const rows = await ctx.db
-      .select({
-        id: discrepancies.id,
-        type: discrepancies.type,
-        severity: discrepancies.severity,
-        requiredRole: discrepancies.requiresRole,
-        deltaAmount: discrepancies.deltaAmount,
-        createdAt: discrepancies.createdAt,
-        invoiceId: matchRuns.invoiceId,
-      })
-      .from(discrepancies)
-      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
-      .leftJoin(invoices, and(eq(invoices.id, matchRuns.invoiceId), eq(invoices.restaurantId, rid)))
-      .where(
-        and(
-          eq(discrepancies.restaurantId, rid),
-          inArray(discrepancies.resolutionStatus, [...OPEN_STATUSES]),
-          notZeroShortTwin(),
-          ...filterWhere(input),
-        ),
-      );
-    const mine = rows.filter((r) => r.requiredRole && roles.includes(r.requiredRole));
-    const others = rows.filter((r) => !r.requiredRole || !roles.includes(r.requiredRole));
-
-    // The ₪ and the split come from the same rows, so "להחלטה" count and ₪ always agree.
-    const decide = mine.filter(isClaimableRow);
+    // ONE definition (G-12a): the same rows and ₪ as home, the nav badge and the
+    // digest e-mail. This procedure only maps `awaitingDecision` to its shape.
+    const session = { restaurantId: ctx.session.restaurantId, role: ctx.session.role };
+    const filters = {
+      types: input?.types,
+      severities: input?.severities,
+      supplierIds: input?.supplierIds,
+      invoiceIds: input?.invoiceIds,
+    };
     const showOthers = DECIDER_ROLES.includes(ctx.session.role);
-    const othersClaimable = showOthers ? others.filter(isClaimableRow) : [];
-    // ONE query for both sets (lib/claims cap per invoice), then split by row id.
-    const amounts = await claimsByRow(ctx.db, rid, [...decide, ...othersClaimable]);
-    const { claimableIls, duplicateIls, vatIls } = basisTotals(decide, amounts);
-    const oldest = mine.reduce<Date | null>((o, r) => (!o || r.createdAt < o ? r.createdAt : o), null);
-
-    // Others lane: the same claims rule and the same before-VAT basis as the tile.
-    const byRole = new Map<string, { count: number; agorot: number }>();
-    if (showOthers) {
-      for (const r of others) {
-        const key = r.requiredRole ?? 'manager';
-        const e = byRole.get(key) ?? { count: 0, agorot: 0 };
-        e.count += 1;
-        const a = amounts.get(r.id);
-        if (a && a.basis === 'excl') e.agorot += Math.round(a.amount * 100);
-        byRole.set(key, e);
-      }
-    }
-    const othersTotal = [...byRole.values()].reduce((s, e) => s + e.agorot, 0);
+    const [mine, all] = await Promise.all([
+      awaitingDecision(ctx.db, { session }, { scope: 'mine', filters }),
+      showOthers ? awaitingDecision(ctx.db, { session }, { scope: 'all', filters }) : null,
+    ]);
+    const claimableIls = mine.ils?.excl ?? 0;
+    // Others lane: the routings I do not decide (incl. unrouted), before-VAT ₪
+    // like the tile. A lane is exactly one stored routing, so mine ∪ others = all.
+    const lanes = (all?.byRole ?? []).filter(
+      (l) => l.role === 'unrouted' || !canActOn(ctx.session.role, l.role),
+    );
+    const laneAgorot = (l: (typeof lanes)[number]) => Math.round((l.ils?.excl ?? 0) * 100);
     return {
-      count: mine.length,
-      blockers: mine.filter((r) => r.severity === 'block').length,
-      oldestAt: oldest,
+      count: mine.count,
+      blockers: mine.blockers,
+      oldestAt: mine.oldestAt,
       claimableIls,
-      duplicateIls,
-      vatIls,
-      toDecide: { count: decide.length, amountIls: claimableIls },
-      toReview: { count: mine.length - decide.length },
+      duplicateIls: mine.ils?.incl ?? 0,
+      vatIls: mine.ils?.vat ?? 0,
+      toDecide: { count: mine.toDecide.count, amountIls: claimableIls },
+      toReview: { count: mine.reviewOnly.count },
       others: {
-        count: showOthers ? others.length : 0,
-        amountIls: othersTotal / 100,
-        byRole: [...byRole.entries()].map(([role, e]) => ({ role, count: e.count, amountIls: e.agorot / 100 })),
+        count: lanes.reduce((n, l) => n + l.count, 0),
+        amountIls: lanes.reduce((n, l) => n + laneAgorot(l), 0) / 100,
+        byRole: lanes.map((l) => ({ role: l.role as string, count: l.count, amountIls: laneAgorot(l) / 100 })),
       },
     };
   }),
 
+  /**
+   * Approve one row: the decision, its audit row, the claim (W2-10a
+   * `materializeClaims`, created_by = the decider) and the activity row in ONE
+   * transaction. `channel: 'quick'` is the one-tap path (H-05 wires the button):
+   * refused for a blocking row or claimable ₪ > ₪500. `seenClaimAgorot` = the ₪
+   * the decider saw; if the claimable ₪ moved since, CONFLICT (nothing written).
+   */
   approve: deciderProcedure
-    .input(z.object({ discrepancyId: z.string().uuid(), note: z.string().max(500).optional() }))
-    .mutation(async ({ ctx, input }) => {
-      const before = await ensureCanAct(ctx, input.discrepancyId);
-      const [updated] = await ctx.db
-        .update(discrepancies)
-        .set({
-          resolutionStatus: 'accepted',
-          resolvedBy: ctx.session.userId,
-          resolvedAt: new Date(),
-          resolutionNote: input.note ?? null,
-        })
-        .where(checkedRow(ctx.session.restaurantId, input.discrepancyId, before))
-        .returning();
-      if (!updated) throw await decidedConflict(ctx, input.discrepancyId);
-
-      await ctx.db.insert(auditLog).values({
-        restaurantId: ctx.session.restaurantId,
-        userId: ctx.session.userId,
-        action: 'discrepancy.approved',
-        entityType: 'discrepancy',
-        entityId: input.discrepancyId,
-        before,
-        after: { status: 'accepted', note: input.note ?? null, role: ctx.session.role },
-      });
-      await logActivity(ctx.db, {
-        restaurantId: ctx.session.restaurantId,
-        eventType: 'discrepancy_approved',
-        // An accepted duplicate is a hold on the copy, not a claim.
-        title: updated.type === 'DUPLICATE_INVOICE' ? DECISION_COPY.he.duplicateHeld : DECISION_COPY.he.approved,
-        detail: updated.deltaAmount
-          ? formatIlsAgorot(Math.abs(Math.round(Number(updated.deltaAmount) * 100)), { maximumFractionDigits: 2 })
-          : null,
-        entityType: 'discrepancy',
-        entityId: input.discrepancyId,
-        actorId: ctx.session.userId,
-        metadata: {
-          discrepancyType: updated.type,
-          savingsIls: updated.deltaAmount ? Number(updated.deltaAmount) : null,
-          role: ctx.session.role,
-        },
-      });
-      return updated;
-    }),
+    .input(
+      z.object({
+        discrepancyId: z.string().uuid(),
+        note: z.string().max(500).optional(),
+        channel: z.enum(['desk', 'quick']).optional(),
+        expectedStatus: z.enum(OPEN_STATUSES).optional(),
+        seenClaimAgorot: z.number().int().min(0).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      inTx(ctx, async (tx) => {
+        const row = await loadDecisionRows(tx, ctx, [input.discrepancyId]).then((m) => m.get(input.discrepancyId)!);
+        if (input.channel === 'quick') {
+          const why = quickApproveRefusal(row);
+          if (why) {
+            throw new TRPCError({ code: 'FORBIDDEN', message: QUICK_REFUSED_PREFIX + JSON.stringify({ reason: why }) });
+          }
+        }
+        const { updated, committedAgorot } = await decide(tx, ctx, row, {
+          decision: 'accepted',
+          note: input.note ?? null,
+          expectedStatus: input.expectedStatus,
+          seenClaimAgorot: input.seenClaimAgorot,
+          channel: input.channel ?? 'desk',
+        });
+        if (input.channel === 'quick') {
+          // Fail closed on what was actually claimed (the preview can read 0).
+          const why = quickApproveRefusal({ severity: row.severity, claimAgorot: committedAgorot });
+          if (why) {
+            throw new TRPCError({ code: 'FORBIDDEN', message: QUICK_REFUSED_PREFIX + JSON.stringify({ reason: why }) });
+          }
+        }
+        return updated;
+      }),
+    ),
 
   reject: deciderProcedure
     .input(
@@ -426,182 +445,202 @@ export const approvalsRouter = router({
         discrepancyId: z.string().uuid(),
         reason: z.string().min(1).max(500),
         reasonCode: z.enum(WAIVE_REASON_CODES).optional(),
+        expectedStatus: z.enum(OPEN_STATUSES).optional(),
       }),
     )
-    .mutation(async ({ ctx, input }) => {
-      const before = await ensureCanAct(ctx, input.discrepancyId);
-      const [updated] = await ctx.db
-        .update(discrepancies)
-        .set({
-          resolutionStatus: 'rejected',
-          resolvedBy: ctx.session.userId,
-          resolvedAt: new Date(),
-          resolutionNote: input.reason,
-        })
-        .where(checkedRow(ctx.session.restaurantId, input.discrepancyId, before))
-        .returning();
-      if (!updated) throw await decidedConflict(ctx, input.discrepancyId);
+    .mutation(async ({ ctx, input }) =>
+      inTx(ctx, async (tx) => {
+        const row = await loadDecisionRows(tx, ctx, [input.discrepancyId]).then((m) => m.get(input.discrepancyId)!);
+        const { updated } = await decide(tx, ctx, row, {
+          decision: 'rejected',
+          reason: input.reason,
+          reasonCode: input.reasonCode ?? null,
+          expectedStatus: input.expectedStatus,
+          channel: 'desk',
+        });
+        return updated;
+      }),
+    ),
 
-      await ctx.db.insert(auditLog).values({
-        restaurantId: ctx.session.restaurantId,
-        userId: ctx.session.userId,
-        action: 'discrepancy.rejected',
-        entityType: 'discrepancy',
-        entityId: input.discrepancyId,
-        before,
-        after: {
-          status: 'rejected',
-          reason: input.reason,
-          reasonCode: input.reasonCode ?? null,
-          role: ctx.session.role,
-        },
+  /**
+   * Bulk decide (exec-desktop-08), all-or-nothing in ONE transaction. The
+   * SERVER refuses (FORBIDDEN, nothing written) any blocking row and any
+   * invoice whose selected claimable ₪ > ₪200 (`BULK_APPROVE_CAP_AGOROT`);
+   * a stale `expectedStatus` on any item → CONFLICT with per-item detail and
+   * no write. One audit row per item. A replay of the same
+   * `clientMutationId` returns the first result and writes nothing.
+   */
+  decideMany: deciderProcedure
+    .input(
+      z
+        .object({
+          items: z
+            .array(z.object({ discrepancyId: z.string().uuid(), expectedStatus: z.enum(OPEN_STATUSES) }))
+            .min(1)
+            .max(DECIDE_MANY_MAX_ITEMS),
+          decision: z.enum(['accepted', 'rejected']),
+          reasonCode: z.enum(WAIVE_REASON_CODES).optional(),
+          reason: z.string().min(1).max(500).optional(),
+          clientMutationId: z.string().min(8).max(64),
+        })
+        .refine((v) => v.decision === 'accepted' || !!v.reason || !!v.reasonCode, {
+          message: 'a bulk waive needs a reason',
+        }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const replay = await replayOf(ctx, input.clientMutationId);
+      if (replay) return replay;
+      return inTx(ctx, async (tx) => {
+        const ids = [...new Set(input.items.map((i) => i.discrepancyId))];
+        const rows = await loadDecisionRows(tx, ctx, ids);
+        const refusals = bulkRefusals([...rows.values()].map((r) => ({ ...r, discrepancyId: r.id })));
+        if (refusals.size > 0) {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message:
+              BULK_REFUSED_PREFIX +
+              JSON.stringify([...refusals].map(([discrepancyId, reason]) => ({ discrepancyId, reason }))),
+          });
+        }
+        const stale = input.items.filter((i) => rows.get(i.discrepancyId)!.status !== i.expectedStatus);
+        if (stale.length > 0) {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message:
+              BATCH_CONFLICT_PREFIX +
+              JSON.stringify(stale.map((i) => ({ discrepancyId: i.discrepancyId, status: rows.get(i.discrepancyId)!.status }))),
+          });
+        }
+        const reason = input.decision === 'rejected' ? (input.reason ?? input.reasonCode ?? null) : null;
+        const decided: Array<{ discrepancyId: string; amountAgorot: number }> = [];
+        for (const item of input.items) {
+          const row = rows.get(item.discrepancyId)!;
+          const { committedAgorot } = await decide(tx, ctx, row, {
+            decision: input.decision,
+            reason,
+            reasonCode: input.reasonCode ?? null,
+            expectedStatus: item.expectedStatus,
+            channel: 'bulk',
+            clientMutationId: input.clientMutationId,
+          });
+          decided.push({
+            discrepancyId: row.id,
+            amountAgorot: input.decision === 'accepted' ? committedAgorot : row.claimAgorot,
+          });
+        }
+        if (input.decision === 'accepted') {
+          // The cap again, on the COMMITTED claims (Σ per invoice across the
+          // batch): a preview of 0 must never let ₪300 through. Fail closed —
+          // the throw rolls back every decision of the batch.
+          const late = bulkRefusals(
+            decided.map((d) => ({
+              discrepancyId: d.discrepancyId,
+              invoiceId: rows.get(d.discrepancyId)!.invoiceId,
+              severity: rows.get(d.discrepancyId)!.severity,
+              claimAgorot: d.amountAgorot,
+            })),
+          );
+          if (late.size > 0) {
+            throw new TRPCError({
+              code: 'FORBIDDEN',
+              message:
+                BULK_REFUSED_PREFIX +
+                JSON.stringify([...late].map(([discrepancyId, reason]) => ({ discrepancyId, reason }))),
+            });
+          }
+        }
+        return {
+          decided,
+          totalAgorot: decided.reduce((n, d) => n + d.amountAgorot, 0),
+          replayed: false as boolean,
+        };
       });
-      await logActivity(ctx.db, {
-        restaurantId: ctx.session.restaurantId,
-        eventType: 'discrepancy_rejected',
-        // "סמנו כנבדק" is a check with nothing to claim, not a payment decision.
-        title: input.reasonCode === 'reviewed' ? DECISION_COPY.he.reviewed : DECISION_COPY.he.rejected,
-        detail: input.reason,
-        entityType: 'discrepancy',
-        entityId: input.discrepancyId,
-        actorId: ctx.session.userId,
-        metadata: {
-          discrepancyType: updated.type,
-          amountIls: updated.deltaAmount ? Number(updated.deltaAmount) : null,
-          reason: input.reason,
-          reasonCode: input.reasonCode ?? null,
-          role: ctx.session.role,
-        },
-      });
-      return updated;
     }),
 
+  /**
+   * Hand a row to the owner (functional-flows-03, deep-fix class 14): the
+   * routing moves to the owner with its provenance (`fromRole`, `escalatedBy`
+   * in the audit), the activity timeline gets a row, and every owner gets a
+   * notification with the ₪ and the supplier — queued in the outbox, so the
+   * dispatcher's quiet hours apply (never sent in-process). The escalator
+   * keeps seeing it via `myQueue({scope:'all'})` (`waitingOn: 'owner'`).
+   */
   escalate: deciderProcedure
-    .input(z.object({ discrepancyId: z.string().uuid(), note: z.string().max(500).optional() }))
-    .mutation(async ({ ctx, input }) => {
-      const before = await ensureCanAct(ctx, input.discrepancyId);
-      const [updated] = await ctx.db
-        .update(discrepancies)
-        .set({
-          resolutionStatus: 'escalated',
-          requiresRole: 'owner',
-          resolutionNote: input.note ?? null,
-        })
-        .where(checkedRow(ctx.session.restaurantId, input.discrepancyId, before))
-        .returning();
-      if (!updated) throw await decidedConflict(ctx, input.discrepancyId);
-
-      await ctx.db.insert(auditLog).values({
-        restaurantId: ctx.session.restaurantId,
-        userId: ctx.session.userId,
-        action: 'discrepancy.escalated',
-        entityType: 'discrepancy',
-        entityId: input.discrepancyId,
-        before,
-        after: { status: 'escalated', note: input.note ?? null, fromRole: ctx.session.role },
-      });
-      return updated;
-    }),
+    .input(
+      z.object({
+        discrepancyId: z.string().uuid(),
+        note: z.string().max(500).optional(),
+        expectedStatus: z.enum(OPEN_STATUSES).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      inTx(ctx, async (tx) => {
+        const row = await loadDecisionRows(tx, ctx, [input.discrepancyId]).then((m) => m.get(input.discrepancyId)!);
+        const { updated, auditId } = await decide(tx, ctx, row, {
+          decision: 'escalated',
+          note: input.note ?? null,
+          expectedStatus: input.expectedStatus,
+          channel: 'desk',
+        });
+        // After the CAS (a stale card still gets its CONFLICT), still inside the
+        // transaction. A non-owner's escalation must reach an owner: no owner
+        // connection → INTERNAL, and the escalation rolls back. An owner who
+        // escalates IS an owner it reached; co-owners are told when the owner
+        // connection is there.
+        if (ctx.session.role !== 'owner') escalationReader(ctx);
+        if (ctx.adminDb) await notifyOwnersOfEscalation(tx, ctx, row, input.note ?? null, auditId);
+        return updated;
+      }),
+    ),
 
   /**
    * Undo (approvals-04): put a decision back in the queue. Only the person who
    * made it, only inside the undo window, and only while the row still holds
    * exactly that decision (nobody acted since). The prior status, routing and
    * note come from the decision's own audit `before`; a compensating
-   * `discrepancy.reopened` audit row records the undo (audit is append-only), and
-   * the decision's activity row is withdrawn so the feed never shows a claim
-   * that no longer exists.
+   * `discrepancy.reopened` audit row records the undo (audit is append-only),
+   * the decision's activity row is withdrawn, and the claim the decision
+   * created is written off in the same transaction (`materializeClaims`).
    */
   reopen: deciderProcedure
     .input(z.object({ discrepancyId: z.string().uuid() }))
-    .mutation(async ({ ctx, input }) => {
-      const rid = ctx.session.restaurantId;
-      const [row] = await ctx.db
-        .select({
-          id: discrepancies.id,
-          resolutionStatus: discrepancies.resolutionStatus,
-          resolvedBy: discrepancies.resolvedBy,
-        })
-        .from(discrepancies)
-        .where(and(eq(discrepancies.id, input.discrepancyId), eq(discrepancies.restaurantId, rid)))
-        .limit(1);
-      if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'discrepancy not found' });
+    .mutation(async ({ ctx, input }) => inTx(ctx, (tx) => reopenOne(tx, ctx, input.discrepancyId))),
 
-      const since = new Date(Date.now() - REOPEN_WINDOW_MS);
-      const [last] = await ctx.db
-        .select({ id: auditLog.id, action: auditLog.action, userId: auditLog.userId, before: auditLog.before, at: auditLog.at })
-        .from(auditLog)
-        .where(
-          and(
-            eq(auditLog.restaurantId, rid),
-            eq(auditLog.entityType, 'discrepancy'),
-            eq(auditLog.entityId, input.discrepancyId),
-          ),
-        )
-        .orderBy(desc(auditLog.at), desc(auditLog.id))
-        .limit(1);
-      const decided = last ? DECIDED_BY_ACTION[last.action] : undefined;
-      if (!last || !decided || decided !== row.resolutionStatus) {
-        throw new TRPCError({ code: 'CONFLICT', message: 'nothing to undo' });
-      }
-      if (last.userId !== ctx.session.userId) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'only the person who decided can undo it' });
-      }
-      if (last.at < since) {
-        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'the undo window has passed' });
-      }
-      const prior = (last.before ?? {}) as { status?: string; requiresRole?: UserRole | null; note?: string | null };
-      const priorStatus = prior.status === 'escalated' ? 'escalated' : 'open';
-      const [updated] = await ctx.db
-        .update(discrepancies)
-        .set({
-          resolutionStatus: priorStatus,
-          // Escalation re-routed the row to the owner; undo restores the routing.
-          ...(prior.requiresRole !== undefined ? { requiresRole: prior.requiresRole } : {}),
-          resolvedBy: null,
-          resolvedAt: null,
-          resolutionNote: prior.note ?? null,
-        })
-        .where(
-          and(
-            eq(discrepancies.id, input.discrepancyId),
-            eq(discrepancies.restaurantId, rid),
-            eq(discrepancies.resolutionStatus, decided),
-          ),
-        )
-        .returning();
-      if (!updated) throw new TRPCError({ code: 'CONFLICT', message: 'nothing to undo' });
+  /** Undo a bulk decision: every item or none (one foreign / stale id → nothing changes). */
+  reopenMany: deciderProcedure
+    .input(z.object({ discrepancyIds: z.array(z.string().uuid()).min(1).max(DECIDE_MANY_MAX_ITEMS) }))
+    .mutation(async ({ ctx, input }) =>
+      inTx(ctx, async (tx) => {
+        const out = [];
+        for (const id of new Set(input.discrepancyIds)) out.push(await reopenOne(tx, ctx, id));
+        return { reopened: out.map((r) => r.id) };
+      }),
+    ),
 
-      await ctx.db.insert(auditLog).values({
-        restaurantId: rid,
-        userId: ctx.session.userId,
-        action: 'discrepancy.reopened',
-        entityType: 'discrepancy',
-        entityId: input.discrepancyId,
-        before: { status: decided, undoes: last.id },
-        after: { status: priorStatus, requiresRole: updated.requiresRole, role: ctx.session.role },
-      });
-      // Withdraw the decision's own feed row (written moments ago by this user).
-      await ctx.db.execute(sql`
-        DELETE FROM activity_events
-        WHERE restaurant_id = ${rid}
-          AND entity_type = 'discrepancy' AND entity_id = ${input.discrepancyId}
-          AND actor_id = ${ctx.session.userId}
-          AND event_type IN ('discrepancy_approved', 'discrepancy_rejected')
-          AND created_at >= ${since.toISOString()}::timestamptz
-      `);
-      return updated;
-    }),
-
-  /** Audit trail for a single discrepancy. */
-  // A discrepancy's decision trail (amounts, notes, who waived what) — the same
-  // roles that can decide (owner/manager/bookkeeper), not receiver/chef.
+  /**
+   * A discrepancy's decision trail, newest first (who, role, when, decision,
+   * note) — the same roles that can decide (owner/manager/bookkeeper), not
+   * receiver/chef. `limit` for the card's "היסטוריה" disclosure (last 3).
+   */
   history: financeProcedure
-    .input(z.object({ discrepancyId: z.string().uuid() }))
+    .input(z.object({ discrepancyId: z.string().uuid(), limit: z.number().int().min(1).max(100).optional() }))
     .query(async ({ ctx, input }) => {
-      return ctx.db
-        .select()
+      const q = ctx.db
+        .select({
+          id: auditLog.id,
+          restaurantId: auditLog.restaurantId,
+          userId: auditLog.userId,
+          action: auditLog.action,
+          entityType: auditLog.entityType,
+          entityId: auditLog.entityId,
+          before: auditLog.before,
+          after: auditLog.after,
+          at: auditLog.at,
+          // null when the tenant connection cannot read that user (RLS: users are self-only).
+          actorName: users.name,
+        })
         .from(auditLog)
+        .leftJoin(users, eq(users.id, auditLog.userId))
         .where(
           and(
             eq(auditLog.restaurantId, ctx.session.restaurantId),
@@ -609,7 +648,8 @@ export const approvalsRouter = router({
             eq(auditLog.entityId, input.discrepancyId),
           ),
         )
-        .orderBy(desc(auditLog.at));
+        .orderBy(desc(auditLog.at), desc(auditLog.id));
+      return input.limit ? q.limit(input.limit) : q;
     }),
 });
 
@@ -618,6 +658,479 @@ const DECIDED_BY_ACTION: Record<string, string> = {
   'discrepancy.rejected': 'rejected',
   'discrepancy.escalated': 'escalated',
 };
+
+/** CONFLICT: the claimable ₪ moved since the decider looked (`{seenAgorot, nowAgorot}`). */
+export const AMOUNT_CHANGED_PREFIX = 'approvals.amountChanged:';
+/** FORBIDDEN from `decideMany`: `[{discrepancyId, reason: 'block'|'over_cap'}]`. */
+export const BULK_REFUSED_PREFIX = 'approvals.bulkRefused:';
+/** CONFLICT from `decideMany`: the stale items, `[{discrepancyId, status}]`. */
+export const BATCH_CONFLICT_PREFIX = 'approvals.batchConflict:';
+/** FORBIDDEN from `approve({channel:'quick'})`: `{reason: 'block'|'over_cap'}`. */
+export const QUICK_REFUSED_PREFIX = 'approvals.quickRefused:';
+export type { BulkRefusal };
+
+type Decision = 'accepted' | 'rejected' | 'escalated';
+
+/** A row as a decision sees it: state, routing, money and the facts a notification names. */
+interface DecisionRow {
+  id: string;
+  type: string;
+  severity: string;
+  status: string;
+  requiresRole: UserRole | null;
+  note: string | null;
+  deltaAmount: string | null;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
+  supplierName: string | null;
+  /** The row's claimable ₪ now (lib/claims rule, per-invoice cap), integer agorot; 0 = nothing to claim. */
+  claimAgorot: number;
+}
+
+/** Every write of a decision runs in ONE transaction (a savepoint when the caller already holds one). */
+function inTx<T>(ctx: Ctx, fn: (tx: Database) => Promise<T>): Promise<T> {
+  return ctx.db.transaction(async (raw) => {
+    const tx = raw as unknown as Database;
+    // The recovery lock FIRST, before any row is updated: materializeClaims
+    // takes the same (re-entrant) key, so every decision path locks in ONE
+    // order and two batches can never deadlock (row CAS ↔ advisory lock).
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'recovery:' + ctx.session.restaurantId}))`);
+    return fn(tx);
+  });
+}
+
+/** The agorot of the claim this decision actually holds now (0 = none). */
+async function committedClaimAgorot(tx: Database, restaurantId: string, discrepancyId: string): Promise<number> {
+  const [c] = await tx
+    .select({ amount: recoveryClaims.amountAgorot })
+    .from(recoveryClaims)
+    .where(
+      and(
+        eq(recoveryClaims.restaurantId, restaurantId),
+        eq(recoveryClaims.discrepancyId, discrepancyId),
+        eq(recoveryClaims.status, 'claimed'),
+      ),
+    )
+    .limit(1);
+  return c ? Number(c.amount) : 0;
+}
+
+/** A side effect that must never roll the decision back (G-05: effects run in savepoints). */
+async function inSavepoint(tx: Database, what: string, fn: (sp: Database) => Promise<void>): Promise<void> {
+  try {
+    await tx.transaction(async (raw) => fn(raw as unknown as Database));
+  } catch (err) {
+    console.error(`[approvals] ${what} failed (decision kept)`, err);
+  }
+}
+
+/**
+ * Load the rows to decide, in this tenant, and check the caller may act on
+ * each (`ensureCanAct` rules). Any id that is not this tenant's → NOT_FOUND
+ * (a batch with one foreign id changes nothing).
+ */
+async function loadDecisionRows(tx: Database, ctx: Ctx, ids: readonly string[]): Promise<Map<string, DecisionRow>> {
+  const rid = ctx.session.restaurantId;
+  const found = await tx
+    .select({
+      id: discrepancies.id,
+      type: discrepancies.type,
+      severity: discrepancies.severity,
+      status: discrepancies.resolutionStatus,
+      requiresRole: discrepancies.requiresRole,
+      note: discrepancies.resolutionNote,
+      deltaAmount: discrepancies.deltaAmount,
+      invoiceId: matchRuns.invoiceId,
+      invoiceNumber: invoices.invoiceNumber,
+      supplierName: suppliers.name,
+    })
+    .from(discrepancies)
+    .innerJoin(matchRuns, and(eq(matchRuns.id, discrepancies.matchRunId), eq(matchRuns.restaurantId, rid)))
+    .leftJoin(invoices, and(eq(invoices.id, matchRuns.invoiceId), eq(invoices.restaurantId, rid)))
+    .leftJoin(suppliers, and(eq(suppliers.id, invoices.supplierId), eq(suppliers.restaurantId, rid)))
+    .where(and(eq(discrepancies.restaurantId, rid), inArray(discrepancies.id, [...ids])));
+  if (found.length !== new Set(ids).size) throw new TRPCError({ code: 'NOT_FOUND', message: 'discrepancy not found' });
+  const tctx = { ...ctx, db: tx };
+  for (const r of found) await assertCanAct(tctx, r);
+  const amounts = await claimsByRow(tx, rid, found);
+  return new Map(
+    found.map((r) => {
+      const a = amounts.get(r.id);
+      return [r.id, { ...r, claimAgorot: a && isClaimableRow(r) ? Math.round(a.amount * 100) : 0 }];
+    }),
+  );
+}
+
+const AUDIT_ACTION: Record<Decision, string> = {
+  accepted: 'discrepancy.approved',
+  rejected: 'discrepancy.rejected',
+  escalated: 'discrepancy.escalated',
+};
+
+/**
+ * THE decision (deep-fix classes 6 + 7). One call site to swap for G-05's
+ * `transition(tx, discrepancyMachine, …)` (from open|escalated, expectedStatus):
+ *  1. stale `expectedStatus` or a moved claimable ₪ → CONFLICT, nothing written;
+ *  2. the wave-1 CAS update (`checkedRow`) — a concurrent decision → CONFLICT;
+ *  3. the audit row records the decision and the ₪ the decider saw
+ *     (`after.decision`, `after.amountAgorot` — G-03's column takes it later);
+ *  4. the claim, in this transaction, under the decider's name (W2-10a). An
+ *     accepted DUPLICATE_INVOICE is held from payment AND claimed (incl. VAT);
+ *  5. the activity row (metadata v2, no baked ₪ string), in a savepoint.
+ * TODO(G-05): emit('discrepancy.<decision>') once the events kernel is on this base.
+ */
+async function decide(
+  tx: Database,
+  ctx: Ctx,
+  row: DecisionRow,
+  opts: {
+    decision: Decision;
+    note?: string | null;
+    reason?: string | null;
+    reasonCode?: string | null;
+    expectedStatus?: string;
+    seenClaimAgorot?: number;
+    channel: 'desk' | 'quick' | 'bulk';
+    clientMutationId?: string;
+  },
+): Promise<{ updated: typeof discrepancies.$inferSelect; auditId: string; committedAgorot: number }> {
+  const rid = ctx.session.restaurantId;
+  const tctx = { ...ctx, db: tx };
+  if (opts.expectedStatus && row.status !== opts.expectedStatus) throw await decidedConflict(tctx, row.id);
+  const now = new Date();
+  const set =
+    opts.decision === 'escalated'
+      ? { resolutionStatus: 'escalated' as const, requiresRole: 'owner' as const, resolutionNote: opts.note ?? null }
+      : {
+          resolutionStatus: opts.decision,
+          resolvedBy: ctx.session.userId,
+          resolvedAt: now,
+          resolutionNote: opts.decision === 'accepted' ? (opts.note ?? null) : (opts.reason ?? null),
+        };
+  const [updated] = await tx
+    .update(discrepancies)
+    .set(set)
+    .where(checkedRow(rid, row.id, { status: row.status, requiresRole: row.requiresRole }))
+    .returning();
+  if (!updated) throw await decidedConflict(tctx, row.id);
+
+  // The claim first (W2-10a), then read back what it COMMITTED: the gates, the
+  // audit, the activity and the response all use this one figure, never the
+  // queue's preview (which can differ on a paid / pending-link invoice or when
+  // the invoice cap binds in decision order). A throw rolls everything back.
+  // An accepted duplicate is BOTH held from payment (pay run, "duplicateHeld"
+  // wording) AND claimed (incl. VAT) — the letters and syncClaims count it too.
+  const heldDuplicate = opts.decision === 'accepted' && row.type === 'DUPLICATE_INVOICE';
+  if (opts.decision !== 'escalated') {
+    await materializeClaims(tx, { restaurantId: rid, discrepancyIds: [row.id], actorId: ctx.session.userId });
+  }
+  const committedAgorot = opts.decision === 'accepted' ? await committedClaimAgorot(tx, rid, row.id) : 0;
+  if (opts.decision === 'accepted' && opts.seenClaimAgorot !== undefined && opts.seenClaimAgorot !== committedAgorot) {
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: AMOUNT_CHANGED_PREFIX + JSON.stringify({ seenAgorot: opts.seenClaimAgorot, nowAgorot: committedAgorot }),
+    });
+  }
+  // Approve: the ₪ now claimed. Waive / escalate: the ₪ the decider saw on the row.
+  const amountAgorot = opts.decision === 'accepted' ? committedAgorot : row.claimAgorot;
+
+  const before = { status: row.status, requiresRole: row.requiresRole, note: row.note };
+  const common = {
+    decision: opts.decision,
+    amountAgorot,
+    channel: opts.channel,
+    ...(opts.clientMutationId ? { clientMutationId: opts.clientMutationId } : {}),
+  };
+  const after =
+    opts.decision === 'accepted'
+      ? { status: 'accepted', note: opts.note ?? null, role: ctx.session.role, ...common }
+      : opts.decision === 'rejected'
+        ? { status: 'rejected', reason: opts.reason ?? null, reasonCode: opts.reasonCode ?? null, role: ctx.session.role, ...common }
+        : { status: 'escalated', note: opts.note ?? null, fromRole: ctx.session.role, escalatedBy: ctx.session.userId, ...common };
+  const [audit] = await tx
+    .insert(auditLog)
+    .values({
+      restaurantId: rid,
+      userId: ctx.session.userId,
+      action: AUDIT_ACTION[opts.decision],
+      entityType: 'discrepancy',
+      entityId: row.id,
+      before,
+      after,
+    })
+    .returning({ id: auditLog.id });
+
+  const metadata = {
+    v: 2,
+    decision: opts.decision,
+    amountAgorot,
+    supplierName: row.supplierName,
+    /** |Δ| of the gap itself (may exceed the claimable ₪ after the invoice cap). */
+    deltaAgorot: Math.abs(Math.round(Number(row.deltaAmount ?? 0) * 100)),
+    invoiceId: row.invoiceId,
+    discrepancyType: row.type,
+    role: ctx.session.role,
+    channel: opts.channel,
+    ...(opts.decision === 'rejected' ? { reason: opts.reason ?? null, reasonCode: opts.reasonCode ?? null } : {}),
+  };
+  if (opts.decision === 'escalated') {
+    await logEscalationActivity(tx, ctx, row, metadata);
+  } else {
+    await inSavepoint(tx, 'activity', async (sp) => {
+      await sp.insert(activityEvents).values({
+        restaurantId: rid,
+        eventType: opts.decision === 'accepted' ? 'discrepancy_approved' : 'discrepancy_rejected',
+        title:
+          opts.decision === 'accepted'
+            ? heldDuplicate
+              ? DECISION_COPY.he.duplicateHeld
+              : DECISION_COPY.he.approved
+            : opts.reasonCode === 'reviewed'
+              ? DECISION_COPY.he.reviewed
+              : DECISION_COPY.he.rejected,
+        // ₪ lives in metadata (amountAgorot); W2-13's feed formats it. The
+        // waive reason is the only free text here.
+        detail: opts.decision === 'rejected' ? (opts.reason ?? null) : null,
+        entityType: 'discrepancy',
+        entityId: row.id,
+        actorId: ctx.session.userId,
+        metadata,
+      });
+    });
+  }
+  return { updated, auditId: audit!.id, committedAgorot };
+}
+
+/**
+ * INTERIM(G-05): = `logDomainEvent(tx, {kind: 'discrepancy.escalated', …})`.
+ * The `'event'` activity kind ships with G-03; until it is deployed no row is
+ * written (the audit row is the trail). Never rolls the decision back.
+ */
+async function logEscalationActivity(
+  tx: Database,
+  ctx: Ctx,
+  row: DecisionRow,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  const res = await tx.execute(sql`
+    SELECT 1 AS ok FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+    WHERE t.typname = 'activity_event_type' AND e.enumlabel = 'event'`);
+  const list = Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? []);
+  if (list.length === 0) return;
+  await inSavepoint(tx, 'escalation activity', async (sp) => {
+    await sp.insert(activityEvents).values({
+      restaurantId: ctx.session.restaurantId,
+      eventType: 'event' as never,
+      title: DECISION_COPY.he.escalated,
+      detail: null,
+      entityType: 'discrepancy',
+      entityId: row.id,
+      actorId: ctx.session.userId,
+      metadata: { ...metadata, kind: 'discrepancy.escalated' },
+    });
+  });
+}
+
+/** Public app base URL for deep links (no trailing slash). */
+function appBaseUrl(): string {
+  return stripTrailingSlashes(process.env.APP_BASE_URL ?? process.env.APP_URL ?? process.env.AUTH_URL ?? 'https://app.restomatch.co.il');
+}
+
+/** The branch-aware deep link every approvals notification carries (ia-nav-09). */
+export function approvalsGoLink(restaurantId: string, invoiceId: string | null, base = appBaseUrl()): string {
+  const to = invoiceId ? `/dashboard/approvals?invoice=${invoiceId}` : '/dashboard/approvals';
+  return `${base}/dashboard/go?r=${encodeURIComponent(restaurantId)}&to=${encodeURIComponent(to)}`;
+}
+
+/** Thrown (INTERNAL) when the owner connection is missing: an escalation must never reach nobody. */
+export const ESCALATION_NO_READER = 'approvals.escalationNoReader';
+
+/**
+ * The connection that may read the owners' addresses. Never the tenant
+ * connection: there `users` is self-only, so it would find only the decider
+ * (who is skipped) and the escalation would silently reach nobody.
+ */
+function escalationReader(ctx: Ctx): Database {
+  if (!ctx.adminDb) throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: ESCALATION_NO_READER });
+  return ctx.adminDb;
+}
+
+/**
+ * One outbox row per owner, to a concrete address (never a `role:` target),
+ * with the ₪ and the supplier. The dispatcher applies the quiet hours; nothing
+ * is sent in-process. INTERIM(G-06): swap the loop for
+ * `notify(tx, { audience: { roles: ['owner'] }, event: 'discrepancy.escalated', … })`.
+ * TODO(W2-13): the copy moves to an `escalatedToOwnerEmail` template.
+ */
+async function notifyOwnersOfEscalation(
+  tx: Database,
+  ctx: Ctx,
+  row: DecisionRow,
+  note: string | null,
+  auditId: string,
+): Promise<void> {
+  const adminDb = escalationReader(ctx);
+  await inSavepoint(tx, 'escalation notification', async (sp) => {
+    // The owners' addresses live in `users`, which the tenant (RLS) connection
+    // reads self-only — a manager would find no owner at all. Read them on the
+    // owner connection (as dsr.ts does), filtered to THIS session's restaurant
+    // only; the outbox insert itself stays on the tenant transaction.
+    // INTERIM(G-06): notify() resolves the audience.
+    const owners = await recipientsForRestaurant(adminDb, ctx.session.restaurantId, ['owner']);
+    const link = approvalsGoLink(ctx.session.restaurantId, row.invoiceId);
+    const supplier = row.supplierName ?? 'ספק';
+    const amount = row.claimAgorot > 0 ? formatIlsAgorot(row.claimAgorot, { maximumFractionDigits: 2 }) : null;
+    const subject = `${DECISION_COPY.he.escalated}: פער ${supplier}${amount ? ` · ${amount}` : ''}`;
+    const body = [
+      `${DECISION_COPY.he.escalated} — ${supplier}${row.invoiceNumber ? ` · ${row.invoiceNumber}` : ''}`,
+      amount ? `סכום לדרישת זיכוי: ${amount}` : 'פער לבדיקה (ללא ₪)',
+      note ? `הערה: ${note}` : null,
+      `לפתיחת הפער: ${link}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    for (const o of owners) {
+      if (o.userId === ctx.session.userId) continue;
+      await enqueueNotification(sp, {
+        restaurantId: ctx.session.restaurantId,
+        channel: 'email',
+        target: o.email,
+        subject,
+        body,
+        payload: { kind: 'discrepancy.escalated', discrepancyId: row.id, invoiceId: row.invoiceId, amountAgorot: row.claimAgorot, supplierName: row.supplierName, link },
+        relatedEntityType: 'discrepancy',
+        relatedEntityId: row.id,
+        dedupeKey: `approvals.escalated:${auditId}:${o.userId}`,
+      });
+    }
+  });
+}
+
+/**
+ * INTERIM(G-05): = the idempotency-keys replay. A `decideMany` already applied
+ * under this `clientMutationId` (by this user) returns its result again.
+ */
+async function replayOf(ctx: Ctx, clientMutationId: string) {
+  const rows = await ctx.db
+    .select({ entityId: auditLog.entityId, after: auditLog.after })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.restaurantId, ctx.session.restaurantId),
+        eq(auditLog.userId, ctx.session.userId),
+        eq(auditLog.entityType, 'discrepancy'),
+        inArray(auditLog.action, ['discrepancy.approved', 'discrepancy.rejected']),
+        sql`${auditLog.after}->>'clientMutationId' = ${clientMutationId}`,
+      ),
+    );
+  if (rows.length === 0) return null;
+  const decided = rows.map((r) => ({
+    discrepancyId: String(r.entityId),
+    amountAgorot: Number((r.after as { amountAgorot?: number } | null)?.amountAgorot ?? 0),
+  }));
+  return { decided, totalAgorot: decided.reduce((n, d) => n + d.amountAgorot, 0), replayed: true as boolean };
+}
+
+/** Undo one decision (see `reopen`); runs inside the caller's transaction. */
+async function reopenOne(tx: Database, ctx: Ctx, discrepancyId: string) {
+  const rid = ctx.session.restaurantId;
+  const [row] = await tx
+    .select({ id: discrepancies.id, resolutionStatus: discrepancies.resolutionStatus })
+    .from(discrepancies)
+    .where(and(eq(discrepancies.id, discrepancyId), eq(discrepancies.restaurantId, rid)))
+    .limit(1);
+  if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'discrepancy not found' });
+
+  const since = new Date(Date.now() - REOPEN_WINDOW_MS);
+  const [last] = await tx
+    .select({ id: auditLog.id, action: auditLog.action, userId: auditLog.userId, before: auditLog.before, at: auditLog.at })
+    .from(auditLog)
+    .where(and(eq(auditLog.restaurantId, rid), eq(auditLog.entityType, 'discrepancy'), eq(auditLog.entityId, discrepancyId)))
+    .orderBy(desc(auditLog.at), desc(auditLog.id))
+    .limit(1);
+  const decided = last ? DECIDED_BY_ACTION[last.action] : undefined;
+  if (!last || !decided || decided !== row.resolutionStatus) {
+    throw new TRPCError({ code: 'CONFLICT', message: 'nothing to undo' });
+  }
+  if (last.userId !== ctx.session.userId) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'only the person who decided can undo it' });
+  }
+  if (last.at < since) {
+    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'the undo window has passed' });
+  }
+  const prior = (last.before ?? {}) as { status?: string; requiresRole?: UserRole | null; note?: string | null };
+  const priorStatus = prior.status === 'escalated' ? 'escalated' : 'open';
+  const [updated] = await tx
+    .update(discrepancies)
+    .set({
+      resolutionStatus: priorStatus,
+      // Escalation re-routed the row to the owner; undo restores the routing.
+      ...(prior.requiresRole !== undefined ? { requiresRole: prior.requiresRole } : {}),
+      resolvedBy: null,
+      resolvedAt: null,
+      resolutionNote: prior.note ?? null,
+    })
+    .where(
+      and(
+        eq(discrepancies.id, discrepancyId),
+        eq(discrepancies.restaurantId, rid),
+        eq(discrepancies.resolutionStatus, decided as (typeof OPEN_STATUSES)[number] | 'accepted' | 'rejected'),
+      ),
+    )
+    .returning();
+  if (!updated) throw new TRPCError({ code: 'CONFLICT', message: 'nothing to undo' });
+
+  await tx.insert(auditLog).values({
+    restaurantId: rid,
+    userId: ctx.session.userId,
+    action: 'discrepancy.reopened',
+    entityType: 'discrepancy',
+    entityId: discrepancyId,
+    before: { status: decided, undoes: last.id },
+    after: { status: priorStatus, requiresRole: updated.requiresRole, role: ctx.session.role },
+  });
+  // The decision's claim goes with it. A BARE claim (no money, no letter, only
+  // its own "claimed" / system events — the releaseClaimsForRematch rule) is
+  // deleted, so a later re-accept creates a fresh claim under the person who
+  // decides then, with a fresh overdue clock. Anything with history is
+  // written off by materializeClaims as before.
+  await tx.execute(sql`
+    WITH bare AS (
+      SELECT c.id FROM recovery_claims c
+      WHERE c.restaurant_id = ${rid} AND c.discrepancy_id = ${discrepancyId}::uuid
+        AND c.status = 'claimed' AND c.credited_agorot = 0
+        AND c.letter_sent_at IS NULL AND c.acknowledged_at IS NULL AND c.credited_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM recovery_events e
+          WHERE e.claim_id = c.id AND e.restaurant_id = ${rid}
+            AND NOT (e.to_status = 'claimed' AND (e.from_status IS NULL OR e.actor_id IS NULL))
+        )
+    ), gone AS (
+      DELETE FROM recovery_events e USING bare WHERE e.claim_id = bare.id AND e.restaurant_id = ${rid}
+    )
+    DELETE FROM recovery_claims c USING bare WHERE c.id = bare.id AND c.restaurant_id = ${rid}
+  `);
+  await materializeClaims(tx, { restaurantId: rid, discrepancyIds: [discrepancyId], actorId: ctx.session.userId });
+  if (decided === 'escalated') {
+    // The owners were told about a hand-off that no longer exists: cancel the
+    // still-queued e-mails of THAT escalation (outbox.ts untouched).
+    await tx.execute(sql`
+      UPDATE notifications_outbox SET status = 'cancelled'
+      WHERE restaurant_id = ${rid} AND status = 'queued'
+        AND dedupe_key LIKE ${`approvals.escalated:${last.id}:%`}
+    `);
+  }
+  // Withdraw the decision's own feed row (written moments ago by this user).
+  await tx.execute(sql`
+    DELETE FROM activity_events
+    WHERE restaurant_id = ${rid}
+      AND entity_type = 'discrepancy' AND entity_id = ${discrepancyId}
+      AND actor_id = ${ctx.session.userId}
+      AND event_type IN ('discrepancy_approved', 'discrepancy_rejected')
+      AND created_at >= ${since.toISOString()}::timestamptz
+  `);
+  return updated;
+}
 
 /**
  * The row, in this tenant, still waiting for a decision AND still in exactly
@@ -641,7 +1154,7 @@ function checkedRow(
   );
 }
 
-type Ctx = { db: import('@restomatch/db').Database; session: { restaurantId: string; userId: string; role: UserRole } };
+type Ctx = { db: Database; adminDb?: Database; session: { restaurantId: string; userId: string; role: UserRole } };
 
 /**
  * The CONFLICT for a decision that lost the race (or came from a stale card):
@@ -773,48 +1286,28 @@ function basisTotals(
 }
 
 /**
- * Role check for a decision; returns the row's prior state (the audit `before`
- * that `reopen` restores).
+ * Role check for a decision. No required role → owner/manager (not a
+ * bookkeeper, whose authority is limited to bookkeeper-routed items). A row a
+ * colleague escalated away from my role is "already decided" (CONFLICT).
  */
-async function ensureCanAct(
+async function assertCanAct(
   ctx: Ctx,
-  discrepancyId: string,
-): Promise<{ status: string; requiresRole: UserRole | null; note: string | null }> {
-  const [row] = await ctx.db
-    .select({
-      requiredRole: discrepancies.requiresRole,
-      status: discrepancies.resolutionStatus,
-      note: discrepancies.resolutionNote,
-    })
-    .from(discrepancies)
-    .where(
-      and(
-        eq(discrepancies.id, discrepancyId),
-        eq(discrepancies.restaurantId, ctx.session.restaurantId),
-      ),
-    )
-    .limit(1);
-  if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'discrepancy not found' });
-  const before = { status: row.status, requiresRole: row.requiredRole, note: row.note };
-  // No required role → owner/manager may resolve (not a bookkeeper, whose
-  // authority is limited to bookkeeper-routed items).
-  if (!row.requiredRole) {
-    if (canActOn(ctx.session.role, null)) return before;
+  row: { id: string; status: string; requiresRole: UserRole | null },
+): Promise<void> {
+  if (!row.requiresRole) {
+    if (canActOn(ctx.session.role, null)) return;
     throw new TRPCError({
       code: 'FORBIDDEN',
       message: `role ${ctx.session.role} cannot act on an unrouted discrepancy`,
     });
   }
-  if (!canActOn(ctx.session.role, row.requiredRole)) {
-    // A colleague escalated this card away from my role: it is already decided
-    // for me, not a permission problem.
-    if (row.status === 'escalated') throw await decidedConflict(ctx, discrepancyId);
+  if (!canActOn(ctx.session.role, row.requiresRole)) {
+    if (row.status === 'escalated') throw await decidedConflict(ctx, row.id);
     throw new TRPCError({
       code: 'FORBIDDEN',
-      message: `role ${ctx.session.role} cannot act on discrepancy requiring ${row.requiredRole}`,
+      message: `role ${ctx.session.role} cannot act on discrepancy requiring ${row.requiresRole}`,
     });
   }
-  return before;
 }
 
 // keep import stable

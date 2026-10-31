@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { releaseClaimsForRematch } from '../recovery/service';
+import { rebindDecidedClaims } from '../approvals/rebind'; // W2-04 rebind
 import { and, desc, eq, invoices, matchRuns, restaurants } from '@restomatch/db';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
 import { managerProcedure, router } from '../trpc';
@@ -97,6 +98,9 @@ export const matchRouter = router({
         rules,
         priorDecisions,
       );
+      // W2-04 rebind: the claims released above come back for the re-applied
+      // accepted decisions, under their ORIGINAL decider (shared with the worker).
+      await rebindDecidedClaims(ctx.db, restaurantId, persisted.matchRunId);
 
       return {
         matchRunId: persisted.matchRunId,

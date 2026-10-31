@@ -1,8 +1,8 @@
 /**
  * end-of-day-report — 19:00 IL digest emailed to each restaurant's managers.
  *
- * Summarizes the day's money picture, led by OPEN CREDITS — discrepancies still
- * `open`/`escalated` whose ₪ delta is recoverable from the supplier — plus what
+ * Summarizes the day's money picture, led by OPEN CREDITS — the claimable ₪ of
+ * the gaps still awaiting a decision (`awaitingDecision`, G-12a) — plus what
  * was caught today and how many items await a decision. Quiet days (no open
  * credits and nothing caught) are skipped to avoid inbox noise.
  *
@@ -10,11 +10,14 @@
  * happens through outbox-dispatch.
  */
 import {
+  awaitingDecision,
   enqueueNotification,
   endOfDayReportEmail,
+  formatIlsAgorot,
   recipientsForRestaurant,
 } from '@restomatch/api';
-import { and, count, discrepancies, eq, gte, inArray, restaurants, sql } from '@restomatch/db';
+import { and, count, discrepancies, eq, gte, restaurants, sql } from '@restomatch/db';
+import { approvalsGoLink } from './matchInvoice';
 import { makeWorker, type WorkerJob } from '../queue';
 import { appBaseUrl, formatIlsAmount, formatIlDate, startOfIlDay } from '../lib/notifyHelpers';
 import { jobDb } from '../db';
@@ -25,9 +28,6 @@ export interface EndOfDayReportJob {
   /** Optional override for "today" (tests). */
   forDate?: string;
 }
-
-/** Discrepancies in these states are still recoverable money ("open credits"). */
-const OPEN_STATES = ['open', 'escalated'] as const;
 
 export function startEndOfDayReportWorker() {
   return makeWorker<EndOfDayReportJob>('end-of-day-report', processEndOfDayReport);
@@ -51,19 +51,14 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
   let skipped = 0;
 
   for (const restaurant of restaurantRows) {
-    // Open credits: unresolved discrepancies with recoverable ₪.
-    const [openAgg] = await db
-      .select({
-        cnt: count(discrepancies.id),
-        total: sql<string>`coalesce(sum(abs(${discrepancies.deltaAmount})), 0)`,
-      })
-      .from(discrepancies)
-      .where(
-        and(
-          eq(discrepancies.restaurantId, restaurant.id),
-          inArray(discrepancies.resolutionStatus, [...OPEN_STATES]),
-        ),
-      );
+    // Open credits = THE "awaiting decision" figure (G-12a): the same rows and
+    // ₪ (the letters' claims rule, before VAT) as the queue tiles, home and the
+    // nav badge — never a raw Σ|Δ|. Restaurant-wide (scope 'all', owner view).
+    const awaiting = await awaitingDecision(
+      db,
+      { session: { restaurantId: restaurant.id, role: 'owner' } },
+      { scope: 'all' },
+    );
 
     // What was flagged today.
     const [todayAgg] = await db
@@ -79,25 +74,14 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
         ),
       );
 
-    const openCount = Number(openAgg?.cnt ?? 0);
+    const openCount = awaiting.toDecide.count;
     const todayCount = Number(todayAgg?.cnt ?? 0);
 
     // Quiet day → skip (no open credits, nothing caught today).
-    if (openCount === 0 && todayCount === 0) {
+    if (awaiting.count === 0 && todayCount === 0) {
       skipped += 1;
       continue;
     }
-
-    // Items awaiting a manager decision (subset of open).
-    const [pendingAgg] = await db
-      .select({ cnt: count(discrepancies.id) })
-      .from(discrepancies)
-      .where(
-        and(
-          eq(discrepancies.restaurantId, restaurant.id),
-          eq(discrepancies.resolutionStatus, 'open'),
-        ),
-      );
 
     const recipients = await recipientsForRestaurant(db, restaurant.id);
     if (recipients.length === 0) {
@@ -108,11 +92,11 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
     const email = endOfDayReportEmail({
       dateLabel: formatIlDate(startToday).split(',')[0]?.trim() ?? todayKey,
       openCreditsCount: openCount,
-      openCreditsIls: formatIlsAmount(Number(openAgg?.total ?? 0)),
+      openCreditsIls: formatIlsAgorot(Math.round((awaiting.ils?.excl ?? 0) * 100), { maximumFractionDigits: 0 }),
       todayCaughtCount: todayCount,
       todayCaughtIls: formatIlsAmount(Number(todayAgg?.total ?? 0)),
-      pendingApprovals: Number(pendingAgg?.cnt ?? 0),
-      approvalsUrl: `${appBaseUrl()}/dashboard/approvals`,
+      pendingApprovals: awaiting.count,
+      approvalsUrl: approvalsGoLink(restaurant.id, null, appBaseUrl()),
     });
 
     for (const recipient of recipients) {

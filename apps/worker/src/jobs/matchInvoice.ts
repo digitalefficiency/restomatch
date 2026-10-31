@@ -1,20 +1,35 @@
 import {
   approvalNeededEmail,
   buildMatchInputForInvoice,
+  claimableLines,
   buildRules,
   createEmailNotifier,
   createPushNotifier,
   createWhatsAppNotifier,
   getEntitlements,
   loadPriorDecisions,
+  rebindDecidedClaims,
+  releaseClaimsForRematch,
   receiptStillOpen,
   persistMatchRun,
   rematchHoldReason,
   recipientsForRestaurant,
   recordUsage,
   resolveApprovalThresholds,
+  formatIlsAgorot,
 } from '@restomatch/api';
-import { and, desc, eq, invoices, matchRuns, restaurants, suppliers, type Database } from '@restomatch/db';
+import { computeInvoiceLeak } from '@restomatch/charts';
+import {
+  and,
+  desc,
+  discrepancies,
+  eq,
+  invoices,
+  matchRuns,
+  restaurants,
+  suppliers,
+  type Database,
+} from '@restomatch/db';
 import { runMatch, type MatchOutput } from '@restomatch/matching';
 import { makeWorker, type WorkerJob } from '../queue';
 import { appBaseUrl } from '../lib/notifyHelpers';
@@ -52,7 +67,16 @@ export interface MatchJobOutcome {
   /** True when this run replaced an earlier run of the same invoice. */
   replaced: boolean;
   /** Why nothing ran (logs/tests). */
-  skipped?: 'ocr_pending' | 'already_matched' | 'awaiting_review' | 'no_lines' | 'settled' | 'po_rejected' | 'receipt_open';
+  skipped?:
+    | 'ocr_pending'
+    | 'already_matched'
+    | 'awaiting_review'
+    | 'no_lines'
+    | 'settled'
+    | 'po_rejected'
+    | 'receipt_open'
+    /** A claim on the old run has money history (letter / credit): keep the run, don't retry. */
+    | 'claims_in_progress';
 }
 
 /**
@@ -67,7 +91,10 @@ export interface MatchJobOutcome {
  *    OCR held for a human (low confidence → 'parsed', or a possible duplicate)
  *    still waits for that human.
  */
-export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): Promise<MatchJobOutcome> {
+export async function matchInvoiceForJob(
+  db: Database,
+  data: MatchInvoiceJob,
+): Promise<MatchJobOutcome> {
   const { restaurantId, invoiceId } = data;
   const [inv] = await db
     .select({ status: invoices.status, ocrPayload: invoices.ocrPayload })
@@ -107,7 +134,9 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   // (other supplier, outside the window, a sibling PO preferred), don't fall back
   // to some other order — skip.
   if (data.poId && built.poId !== data.poId) {
-    console.warn(`[match-invoice] invoice=${invoiceId} does not pair with the job's po=${data.poId} — skipping`);
+    console.warn(
+      `[match-invoice] invoice=${invoiceId} does not pair with the job's po=${data.poId} — skipping`,
+    );
     return { result: CLEAN, persisted: null, replaced: false, skipped: 'po_rejected' };
   }
   // Never match against a receipt that is still being counted (every line would
@@ -115,7 +144,9 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   // waits for that submit to commit.
   if (built.grId) {
     const grId = built.grId;
-    const open = await db.transaction((tx) => receiptStillOpen(tx as unknown as Database, restaurantId, grId));
+    const open = await db.transaction((tx) =>
+      receiptStillOpen(tx as unknown as Database, restaurantId, grId),
+    );
     if (open) return { result: CLEAN, persisted: null, replaced: false, skipped: 'receipt_open' };
   }
 
@@ -128,24 +159,44 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   const rules = buildRules(resolveApprovalThresholds(restaurant?.settings?.approvalThresholds));
   const result = runMatch(built.input);
 
-  const persisted = await db.transaction(async (rawTx) => {
-    const tx = rawTx as unknown as Database;
-    let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;
-    if (priorRun) {
-      prior = await loadPriorDecisions(tx, restaurantId, invoiceId);
-      await tx
-        .delete(matchRuns)
-        .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
+  let persisted: Awaited<ReturnType<typeof persistMatchRun>>;
+  try {
+    persisted = await db.transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Database;
+      let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;
+      if (priorRun) {
+        // Claims reference the discrepancies about to be deleted (FK). Release the
+        // bare ones first; a claim with money history (letter, credit) refuses the
+        // re-match with CONFLICT, which fails this job loudly (never swallowed).
+        await releaseClaimsForRematch(tx, restaurantId, invoiceId);
+        prior = await loadPriorDecisions(tx, restaurantId, invoiceId);
+        await tx
+          .delete(matchRuns)
+          .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
+      }
+      const out = await persistMatchRun(
+        tx,
+        { restaurantId, invoiceId, poId: built.poId, grId: built.grId },
+        built.input,
+        result,
+        rules,
+        prior,
+      );
+      if (priorRun) await rebindDecidedClaims(tx, restaurantId, out.matchRunId);
+      return out;
+    });
+  } catch (err) {
+    // releaseClaimsForRematch refused: a claim of the old run already has money
+    // history. Retrying can never succeed, so keep the existing run, write ONE
+    // ops line and skip (the tx rolled back; nothing was deleted).
+    if ((err as { code?: string }).code === 'CONFLICT') {
+      console.warn(
+        `[match-invoice] restaurant=${restaurantId} invoice=${invoiceId} re-match skipped: ${(err as Error).message}`,
+      );
+      return { result: CLEAN, persisted: null, replaced: false, skipped: 'claims_in_progress' };
     }
-    return persistMatchRun(
-      tx,
-      { restaurantId, invoiceId, poId: built.poId, grId: built.grId },
-      built.input,
-      result,
-      rules,
-      prior,
-    );
-  });
+    throw err;
+  }
   return { result, persisted, replaced: Boolean(priorRun) };
 }
 
@@ -156,6 +207,56 @@ const whatsapp = createWhatsAppNotifier();
 const push = createPushNotifier();
 // Real Resend email when RESEND_API_KEY is set, else dev/console EmailNotifier.
 const email = createEmailNotifier();
+
+/**
+ * The branch-aware deep link of every approval notification (ia-nav-09):
+ * `/dashboard/go?r=<restaurantId>&to=/dashboard/approvals?invoice=<id>`.
+ */
+export function approvalsGoLink(
+  restaurantId: string,
+  invoiceId: string | null,
+  base = appBaseUrl(),
+): string {
+  const to = invoiceId ? `/dashboard/approvals?invoice=${invoiceId}` : '/dashboard/approvals';
+  return `${base}/dashboard/go?r=${encodeURIComponent(restaurantId)}&to=${encodeURIComponent(to)}`;
+}
+
+/** Σ claimable agorot of one invoice: `claimableLines(computeInvoiceLeak(id))`. */
+export async function invoiceClaimAgorot(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+): Promise<number> {
+  return (await invoiceClaim(db, restaurantId, invoiceId)).agorot;
+}
+
+/**
+ * The invoice's claimable ₪ on the BEFORE-VAT basis only (a duplicate's incl.
+ * VAT or a VAT amount is never added into it), and whether it still waits for
+ * its PO link (then there is nothing to claim yet, and the copy says so).
+ */
+export async function invoiceClaim(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+): Promise<{ agorot: number; pendingLink: boolean }> {
+  const inv = await computeInvoiceLeak(db, restaurantId, invoiceId);
+  if (!inv) return { agorot: 0, pendingLink: false };
+  const agorot = claimableLines(inv)
+    .filter((c) => c.basis === 'excl')
+    .reduce((n, c) => n + Math.round(c.amount * 100), 0);
+  return { agorot, pendingLink: inv.pendingLink };
+}
+
+/** Push / WhatsApp body: "N פערים · ₪X לדרישת זיכוי" + the link. No baked ₪ template string. */
+export function approvalSummary(count: number, claimAgorot: number, link: string): string {
+  const gaps = count === 1 ? 'פער אחד' : `${count} פערים`;
+  const money =
+    claimAgorot > 0
+      ? ` · ${formatIlsAgorot(claimAgorot, { maximumFractionDigits: 2 })} לדרישת זיכוי`
+      : '';
+  return `${gaps} בחשבונית${money}\n${link}`;
+}
 
 export function startMatchInvoiceWorker() {
   return makeWorker<MatchInvoiceJob>('match-invoice', processMatchInvoice);
@@ -191,7 +292,11 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
   if (!replaced && persisted.rolesNeedingNotification.length > 0) {
     const ent = await getEntitlements(db, restaurantId);
     const whatsappAllowed = ent.active && ent.features.includes('whatsapp_alerts');
-    const summary = `${result.discrepancies.length} חריגות, סה"כ הפסד פוטנציאלי ₪${result.totalDiscrepancyAmount.toFixed(0)}`;
+    // ₪ = what this invoice can actually claim (the letters' rule), never the
+    // engine's raw Σ|Δ|; formatted once by the server money util.
+    const { agorot: claimAgorot, pendingLink } = await invoiceClaim(db, restaurantId, invoiceId);
+    const link = approvalsGoLink(restaurantId, invoiceId);
+    const summary = approvalSummary(result.discrepancies.length, claimAgorot, link);
     for (const role of persisted.rolesNeedingNotification) {
       if (whatsappAllowed) {
         await whatsapp.send(db, {
@@ -237,8 +342,15 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
       const rendered = approvalNeededEmail({
         supplierName: sup?.name ?? 'ספק',
         discrepancyCount: result.discrepancies.length,
-        atRiskIls: `₪${result.totalDiscrepancyAmount.toFixed(0)}`,
-        approvalsUrl: `${appBaseUrl()}/dashboard/approvals`,
+        // TODO(W2-13 13a): `claimableIls` + `invoiceUrl` once the template takes them (one line).
+        // ₪ only when there is ₪ to claim; never "₪0.00 בסיכון".
+        atRiskIls:
+          claimAgorot > 0
+            ? formatIlsAgorot(claimAgorot, { maximumFractionDigits: 2 })
+            : pendingLink
+              ? 'ממתין לקישור להזמנה'
+              : 'ללא סכום לדרישה',
+        approvalsUrl: link,
       });
       for (const r of recipients) {
         await email.send(db, {
@@ -258,7 +370,7 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
   console.log(
     `[match-invoice] restaurant=${restaurantId} invoice=${invoiceId} ` +
       `status=${result.status} discrepancies=${persisted.discrepancyCount} ` +
-      `loss=₪${result.totalDiscrepancyAmount.toFixed(2)} ` +
+      `deltaAgorot=${Math.round(result.totalDiscrepancyAmount * 100)} ` +
       `notifications=${persisted.rolesNeedingNotification.length}`,
   );
 

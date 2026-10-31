@@ -351,6 +351,7 @@ export {
   recordCreditNote,
   creditLineSuggestions,
   OVERDUE_DAYS,
+  releaseClaimsForRematch, materializeClaims, type MaterializeClaimsInput,
   type RecoveryClaimRow,
   type RecoverySummary,
   type RecoverySupplierRow,
@@ -394,3 +395,5 @@ export * from './ledger';
 export { CLAIMABLE_STATUSES, claimableLines, sumClaims, vatBasisOf, type ClaimLine, type VatBasis } from './lib/claims';
 export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunClaim } from './routers/payRun';
 export { SKIPPED_NO_PROVIDER, providerConfigured, supplierMessageState, type SupplierMessageState } from './notifications/delivery';
+export { awaitingDecision, type AwaitingDecision } from './approvals/awaiting';
+export { rebindDecidedClaims } from './approvals/rebind'; // W2-04 (orchestrator-approved line)

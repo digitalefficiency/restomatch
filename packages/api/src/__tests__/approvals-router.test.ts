@@ -17,6 +17,8 @@ import {
   productAliases,
   products,
   purchaseOrders,
+  recoveryClaims,
+  recoveryEvents,
   restaurants,
   suppliers,
   users,
@@ -31,6 +33,9 @@ const TEST_DB_URL =
 const db = createDb(TEST_DB_URL);
 
 async function resetDb() {
+  // Claims are born at decision time (W2-10a) and reference the discrepancy.
+  await db.delete(recoveryEvents);
+  await db.delete(recoveryClaims);
   await db.delete(notificationsOutbox);
   await db.delete(auditLog);
   await db.delete(discrepancies);
@@ -115,7 +120,8 @@ async function seed(): Promise<Scenario> {
 }
 
 function caller(session: { userId: string; restaurantId: string; role: 'owner' | 'manager' | 'bookkeeper' }) {
-  const ctx: AppContext = { db, session };
+  // adminDb: the owner connection the web passes (escalation reads the owners' addresses on it).
+  const ctx: AppContext = { db, adminDb: db, session };
   return appRouter.createCaller(ctx);
 }
 
@@ -579,7 +585,7 @@ describe('decisions: verbs, reasons, preconditions (approvals-01/-05/-11)', () =
     await ownerOf(s).approvals.reject({ discrepancyId: s.discrepancyOwnerId, reason: 'מחיר עודכן בהסכמה', reasonCode: 'price_agreed' });
     const rows = await db.select().from(activityEvents);
     expect(rows.map((r) => r.title).sort()).toEqual([DECISION_COPY.he.approved, DECISION_COPY.he.rejected].sort());
-    expect(DECISION_COPY.he).toMatchObject({ approve: 'דרוש {amount} מהספק', reject: 'שלם כפי שחויב', escalate: 'העבר לבעלים' });
+    expect(DECISION_COPY.he).toMatchObject({ approve: 'דרשו {amount} מהספק', reject: 'שלמו כפי שחויב', escalate: 'העבירו לבעלים' });
   });
 
   it('a waive reason chip stores its code in the audit after', async () => {
@@ -637,7 +643,7 @@ describe('approval e-mail names the decisions', () => {
     const { approvalNeededEmail, DECISION_COPY } = await import('../notifications/templates');
     const { html, text } = approvalNeededEmail({ supplierName: 'שטיינברג', discrepancyCount: 1, atRiskIls: '₪104.80' });
     expect(text).toContain(DECISION_COPY.he.reject);
-    expect(text).toContain('דרוש מהספק');
+    expect(text).toContain('דרשו מהספק');
     expect(html).toContain(DECISION_COPY.he.reject);
   });
 });
@@ -747,9 +753,12 @@ describe('pre-merge review findings (#141)', () => {
     });
   });
 
-  it('F7 + F8: "mark as checked" logs a check, and the activity ₪ goes through the shared formatter', async () => {
+  // W2-04: the activity ₪ is no longer a baked string in `detail` (it was
+  // formatted once, at write time, in one locale). It is integer agorot in the
+  // v2 metadata and the feed formats it at display (W2-13). Stricter than before:
+  // no ₪ text is stored at all, and the figures are exact agorot.
+  it('F7 + F8: "mark as checked" logs a check, and the activity ₪ is integer agorot in metadata v2', async () => {
     const { DECISION_COPY, } = await import('../notifications/templates');
-    const { formatIlsAgorot } = await import('../reports/money');
     const { activityEvents } = await import('@restomatch/db');
     const s = await seed();
     const info = await insertD(s, { type: 'QTY_SHORT', severity: 'info', deltaAmount: '4.50' });
@@ -757,9 +766,11 @@ describe('pre-merge review findings (#141)', () => {
     await managerOf(s).approvals.approve({ discrepancyId: s.discrepancyManagerId });
     const rows = await db.select().from(activityEvents);
     expect(rows.find((r) => r.entityId === info.id)!.title).toBe(DECISION_COPY.he.reviewed);
-    expect(rows.find((r) => r.entityId === s.discrepancyManagerId)!.detail).toBe(
-      formatIlsAgorot(8000, { maximumFractionDigits: 2 }),
-    );
+    const approved = rows.find((r) => r.entityId === s.discrepancyManagerId)!;
+    expect(approved.detail).toBeNull();
+    // No invoice behind this row → nothing claimable (0); the gap itself is 8000 agorot.
+    expect(approved.metadata).toMatchObject({ v: 2, decision: 'accepted', amountAgorot: 0, deltaAgorot: 8000, supplierName: null });
+    expect(rows.every((r) => !/₪/.test(r.detail ?? ''))).toBe(true);
   });
 });
 

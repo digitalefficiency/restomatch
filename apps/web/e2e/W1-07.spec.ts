@@ -104,6 +104,9 @@ test.afterAll(async () => {
   try {
     const ids = [fx.priceId, fx.qtyId, fx.price2Id];
     await sql`delete from activity_events where entity_id in ${sql(ids)}`;
+    // W2-04: an approve now creates its claim in the same transaction (claims at decision).
+    await sql`delete from recovery_events where claim_id in (select c.id from recovery_claims c join discrepancies d on d.id = c.discrepancy_id where d.rule_id = ${TAG})`;
+    await sql`delete from recovery_claims where discrepancy_id in (select id from discrepancies where rule_id = ${TAG})`;
     await sql`delete from discrepancies where rule_id = ${TAG}`;
     await sql`delete from match_runs where invoice_id = ${fx.invoiceId}`;
     await sql`delete from invoice_lines where invoice_id = ${fx.invoiceId}`;
@@ -158,8 +161,8 @@ test.describe('phone 390×844', () => {
     await expect(first).toContainText('בירה מהחבית');
     const approve = first.getByTestId('decide-approve');
     const reject = first.getByTestId('decide-reject');
-    await expect(approve).toHaveText(/דרוש .*104\.80.* מהספק/);
-    await expect(reject).toHaveText('שלם כפי שחויב');
+    await expect(approve).toHaveText(/דרשו .*104\.80.* מהספק/);
+    await expect(reject).toHaveText('שלמו כפי שחויב');
     const a = (await approve.boundingBox())!;
     const r = (await reject.boundingBox())!;
     expect(a.height).toBeGreaterThanOrEqual(48);

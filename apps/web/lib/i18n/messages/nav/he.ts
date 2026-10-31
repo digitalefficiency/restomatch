@@ -15,6 +15,7 @@ export const he = {
     labDesk: 'מעבדת טבלאות',
     labDeskRow: 'שורה',
     approvals: 'אישורים',
+    approvalInvoice: 'החלטה על חשבונית',
     payRun: 'ריצת תשלומים',
     inbox: 'חשבוניות נכנסות',
     invoices: 'חשבוניות',

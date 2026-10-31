@@ -336,9 +336,9 @@ export function orderNotPlacedEmail(args: {
  */
 export const DECISION_COPY = {
   he: {
-    approve: 'דרוש {amount} מהספק',
-    reject: 'שלם כפי שחויב',
-    escalate: 'העבר לבעלים',
+    approve: 'דרשו {amount} מהספק',
+    reject: 'שלמו כפי שחויב',
+    escalate: 'העבירו לבעלים',
     approved: 'נדרש מהספק',
     rejected: 'שולם כפי שחויב',
     escalated: 'הועבר לבעלים',

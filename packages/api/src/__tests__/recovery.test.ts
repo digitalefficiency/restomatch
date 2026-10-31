@@ -20,7 +20,7 @@ import { computeLeakHero } from '@restomatch/charts';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { enqueueRecoveryReminders } from '../recovery/reminders';
-import { AUTO_WRITE_OFF_NOTE, listClaims, MAX_CLAIMS, syncClaims } from '../recovery/service';
+import { AUTO_WRITE_OFF_NOTE, listClaims, materializeClaims, MAX_CLAIMS, syncClaims } from '../recovery/service';
 import { computeMonthlyReport, ensureMonthlyReport, monthlyReportEmail, monthlyReportWhatsApp, WHATSAPP_MAX } from '../reports/monthly';
 import { renderMonthlyReportPdf } from '../reports/pdf';
 import { sendMonthlyReports } from '../reports/send';
@@ -41,6 +41,19 @@ async function dropDiscrepancies(where: ReturnType<typeof eq>) {
     await db.delete(recoveryClaims).where(eq(recoveryClaims.discrepancyId, id));
     await db.delete(discrepancies).where(eq(discrepancies.id, id));
   }
+}
+
+/**
+ * W2-10a: a read no longer creates claims — the decision does. Tests that
+ * start from "an accepted leak has its claim" take that decision step here
+ * (what approve does inside its transaction), instead of relying on a GET.
+ */
+async function claimsAtDecision(...extraIds: string[]) {
+  await materializeClaims(db, {
+    restaurantId: T.restaurantId,
+    discrepancyIds: [T.discrepancyId, ...extraIds],
+    actorId: T.ownerUserId,
+  });
 }
 
 async function setFlags(features: Record<string, boolean>) {
@@ -133,6 +146,7 @@ describe('claims', () => {
   });
 
   it('each claim names its discrepancy, and list takes a limit up to MAX_CLAIMS (W1-08 letters pair on the id)', async () => {
+    await claimsAtDecision();
     const c = caller();
     const claims = await c.recovery.list();
     expect(claims.length).toBeGreaterThan(0);
@@ -143,6 +157,7 @@ describe('claims', () => {
   });
 
   it('walks claimed → letter sent → acknowledged → credited (credit note) → recovered', async () => {
+    await claimsAtDecision();
     const c = caller();
     const { summary } = await c.recovery.summary();
     expect(summary.claimedAgorot).toBe(10000);
@@ -181,6 +196,7 @@ describe('claims', () => {
   });
 
   it('matches a later invoice credit line: amount/number/date come from the invoice, used once', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     const [inv] = await db
@@ -210,6 +226,7 @@ describe('claims', () => {
   });
 
   it('refuses a positive line as a credit note and a claim of another supplier', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     await expect(c.recovery.recordCreditNote({ claimIds: [claim!.id], invoiceLineId: T.invoiceLineId })).rejects.toMatchObject({
@@ -369,6 +386,7 @@ describe('refuter regressions', () => {
   });
 
   it('parallel credit notes on one claim never over-credit (row lock)', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     const results = await Promise.allSettled(
@@ -388,6 +406,7 @@ describe('refuter regressions', () => {
   });
 
   it('a partly credited claim can be topped up; recovering short books the shortfall as written off', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     await c.recovery.recordCreditNote({ claimIds: [claim!.id], supplierId: T.supplierId, amountAgorot: 6000, issuedOn: '2026-10-10' });
@@ -401,6 +420,7 @@ describe('refuter regressions', () => {
   });
 
   it('re-using a credit line is a CONFLICT, not a 500', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     const [inv] = await db
@@ -449,6 +469,7 @@ describe('bulk transitions', () => {
       .insert(discrepancies)
       .values({ matchRunId: T.matchRunId, restaurantId: T.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '5.00', resolutionStatus: 'accepted' })
       .returning();
+    await claimsAtDecision(extra!.id);
     try {
       const list = await caller().recovery.list();
       const [a, b] = list.map((x) => x.id);
@@ -533,6 +554,7 @@ describe('money cross-QA (S3) regressions', () => {
   });
 
   it('MEDIUM 5: a credit-note number is recorded once per supplier; an idempotency key replays', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     const key = randomUUID();
@@ -552,6 +574,7 @@ describe('money cross-QA (S3) regressions', () => {
       .insert(discrepancies)
       .values({ matchRunId: T.matchRunId, restaurantId: T.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '10.00', resolutionStatus: 'accepted' })
       .returning();
+    await claimsAtDecision(extra!.id);
     try {
       const c = caller();
       const claims = await c.recovery.list();

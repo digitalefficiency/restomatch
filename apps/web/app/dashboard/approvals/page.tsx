@@ -13,6 +13,7 @@ import { ApprovalsList, FiltersDisclosure, type QueueFilters } from './list';
 import { discrepancyLabel, displayName, severityLabel } from './vocab';
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * No route-level loading.tsx here: it sits above the page AND the pay run, and on
@@ -38,13 +39,18 @@ export default function ApprovalsPage({ searchParams }: { searchParams: SearchPa
 
 async function ApprovalsContent({ searchParams }: { searchParams: SearchParams }) {
   // View controls: type / severity / supplier filters + density, all in the URL.
-  const view = parseView(await searchParams);
+  const sp = await searchParams;
+  const view = parseView(sp);
+  // The notification deep link (`/dashboard/go?…&to=/dashboard/approvals?invoice=<id>`):
+  // the queue narrows to that invoice. A foreign or malformed id matches nothing.
+  const invoiceParam = typeof sp.invoice === 'string' && UUID.test(sp.invoice) ? sp.invoice : null;
   const filters: QueueFilters = {
+    ...(invoiceParam ? { invoiceIds: [invoiceParam] } : {}),
     ...(view.filters.types.length ? { types: view.filters.types } : {}),
     ...(view.filters.severities.length ? { severities: view.filters.severities } : {}),
     ...(view.filters.supplierIds.length ? { supplierIds: view.filters.supplierIds } : {}),
   };
-  const filtered = hasFilters(view);
+  const filtered = hasFilters(view) || invoiceParam != null;
   const activeFilters =
     view.filters.types.length + view.filters.severities.length + view.filters.supplierIds.length;
   const caller = await createServerCaller();
