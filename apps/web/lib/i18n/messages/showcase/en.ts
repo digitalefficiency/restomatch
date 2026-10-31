@@ -20,7 +20,25 @@ export const en: Shape<typeof he> = {
     demoBadge: 'Demo · illustrative data',
     demoNote: 'Every restaurant, supplier, person and amount on these pages is fictional and for illustration only.',
     backToSite: 'Back to site',
-    cta: 'Book a demo',
+    cta: 'Free leak check',
+    ctaShort: 'Free check',
+    skip: 'Skip to main content',
+    pickDemo: 'Pick a demo',
+    pickDemoTitle: 'Demo screens',
+    closePicker: 'Close the demo list',
+    aboutDemo: 'About the demo data',
+    footerLabel: 'Footer links',
+  },
+  endCard: {
+    eyebrow: 'What you just saw',
+    body: 'Want to see this on your own invoices? In the pilot we run them and show you the gap in shekels.',
+    ctaPilot: 'Start a free pilot',
+    ctaWhatsapp: 'Send an invoice on WhatsApp',
+    whatsappText: "Hi, I saw the RestoMatch demo and I'd like to send an invoice for a check.",
+    receiver: '{amount} caught on this delivery — before payment.',
+    receiverClean: 'This delivery matches the order — and RestoMatch checks every one like it.',
+    dashboard: '{amount} caught this month at the sample restaurant — before payment.',
+    invoices: '{amount} caught on these invoices — before payment.',
   },
 
   index: {
@@ -57,7 +75,7 @@ export const en: Shape<typeof he> = {
     },
     ctaTitle: 'Want to see this on your own invoices?',
     ctaBody: "We'll run RestoMatch on real invoices from your restaurant and look together at how much has been leaking.",
-    ctaButton: 'Book a demo',
+    ctaButton: 'Free leak check',
   },
 
   lineStatus: {
@@ -132,6 +150,7 @@ export const en: Shape<typeof he> = {
       empty: 'No invoices match this filter.',
     },
     row: {
+      toggle: 'Invoice {number} from {name} — details',
       supplierLink: 'Open supplier page: {name}',
       items: '{count} items',
       clean: 'Clean',
