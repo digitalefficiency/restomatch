@@ -151,12 +151,19 @@ export interface DraftSyncPlan {
 const sameNum = (a: number | null | undefined, b: number | null | undefined) =>
   (a ?? null) === null ? (b ?? null) === null : b != null && Math.round(a! * 1000) === Math.round(b * 1000);
 
-/** How to bring the saved server draft in line with the cart. */
-export function planDraftSync(cart: Pick<Cart, 'lines' | 'deliveryDate' | 'server'>): DraftSyncPlan {
+/**
+ * How to bring the saved server draft in line with the cart. `deliveryDay` is the
+ * EFFECTIVE day the screen shows (the manager's pick, else the supplier's default) —
+ * an empty pick does not mean "whatever the draft has".
+ */
+export function planDraftSync(
+  cart: Pick<Cart, 'lines' | 'deliveryDate' | 'server'> & { deliveryDay?: string },
+): DraftSyncPlan {
   const plan: DraftSyncPlan = { updates: [], deletes: [], replace: false };
   const server = cart.server;
   if (!server) return { ...plan, replace: true };
-  if (cart.deliveryDate && cart.deliveryDate !== server.deliveryDate) plan.replace = true;
+  const day = cart.deliveryDay || cart.deliveryDate;
+  if (day && day !== server.deliveryDate) plan.replace = true;
   const keys = new Set(cart.lines.map((l) => l.key));
   for (const l of cart.lines) {
     const s = server.lines[l.key];

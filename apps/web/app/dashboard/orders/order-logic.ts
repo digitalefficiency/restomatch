@@ -171,6 +171,8 @@ export interface ReorderSourceLine {
 export interface ReorderCatalogItem {
   productId: string | null;
   listPrice: string | number | null;
+  /** The unit the list price is quoted in (null = unknown: the price is not used). */
+  unit: string | null;
   active?: boolean | null;
 }
 
@@ -187,7 +189,8 @@ export interface ReorderLine {
 /**
  * "Order again": the lines of a past PO, re-priced for today.
  *  - a catalog product line takes today's contract price, else the catalog list
- *    price, else the price it was last ordered at;
+ *    price IN THE LINE'S UNIT, else the price it was last ordered at (a ₪6/ק״ג list
+ *    price never lands on a ₪60 ארגז line — that would plant a false price gap);
  *  - a free-text line (no product) is copied verbatim, at its last price;
  *  - a product the supplier no longer lists (the catalog is known and the product
  *    isn't in it) is NOT added — it comes back in `unavailable` so the screen can
@@ -200,11 +203,15 @@ export function reorderLines(
   /** False when the catalog page was capped: a product missing from it may still be listed. */
   catalogComplete = true,
 ): { lines: ReorderLine[]; unavailable: string[] } {
-  const listed = new Map<string, number | undefined>();
+  const unitKey = (u: string | null | undefined) => (u ?? '').trim();
+  /** productId → (unit → list price). A product listed in any unit is available. */
+  const listed = new Map<string, Map<string, number>>();
   for (const c of catalog) {
     if (!c.productId || c.active === false) continue;
-    const price = c.listPrice == null || c.listPrice === '' ? undefined : Number(c.listPrice);
-    listed.set(c.productId, Number.isFinite(price) ? price : undefined);
+    const byUnit = listed.get(c.productId) ?? new Map<string, number>();
+    const price = c.listPrice == null || c.listPrice === '' ? NaN : Number(c.listPrice);
+    if (Number.isFinite(price) && unitKey(c.unit)) byUnit.set(unitKey(c.unit), price);
+    listed.set(c.productId, byUnit);
   }
   const knowCatalog = listed.size > 0;
   const lines: ReorderLine[] = [];
@@ -220,7 +227,7 @@ export function reorderLines(
         continue;
       }
       const contract = contractPrice(l.productId, l.unit);
-      const list = listed.get(l.productId);
+      const list = listed.get(l.productId)?.get(unitKey(l.unit));
       const [unitPriceExpected, priceSource] =
         contract !== undefined
           ? [contract, 'contract' as const]

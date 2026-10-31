@@ -92,8 +92,8 @@ describe('reorderLines', () => {
     { productId: null, rawDescription: '  ', qtyOrdered: '1', unit: 'יח׳', unitPriceExpected: null },
   ];
   const catalog = [
-    { productId: 'p-tomato', listPrice: '7.10' },
-    { productId: 'p-cucumber', listPrice: null },
+    { productId: 'p-tomato', listPrice: '7.10', unit: 'ק״ג' },
+    { productId: 'p-cucumber', listPrice: null, unit: 'ק״ג' },
   ];
   const contract = (id: string) => (id === 'p-tomato' ? 6.9 : undefined);
 
@@ -110,6 +110,20 @@ describe('reorderLines', () => {
   it('without contracts the catalog list price wins over the last price', () => {
     const r = reorderLines(src, catalog, () => undefined);
     expect(r.lines[0]).toMatchObject({ unitPriceExpected: 7.1, priceSource: 'catalog' });
+  });
+
+  it('a list price is only used in the unit it is quoted in (no ₪6/ק״ג on a ₪60 ארגז line)', () => {
+    const box = [{ productId: 'p-tomato', rawDescription: 'עגבניות', qtyOrdered: '2', unit: 'ארגז', unitPriceExpected: '60' }];
+    const kg = [{ productId: 'p-tomato', listPrice: '6.00', unit: 'ק״ג' }];
+    expect(reorderLines(box, kg, () => undefined).lines[0]).toMatchObject({ unit: 'ארגז', unitPriceExpected: 60, priceSource: 'last' });
+    // Same unit (whitespace aside): today's list price wins.
+    const boxed = [{ productId: 'p-tomato', listPrice: '58', unit: ' ארגז ' }];
+    expect(reorderLines(box, boxed, () => undefined).lines[0]).toMatchObject({ unitPriceExpected: 58, priceSource: 'catalog' });
+    // Listed in another unit only and never priced before: no price rather than a wrong one.
+    const unpriced = [{ ...box[0]!, unitPriceExpected: null }];
+    expect(reorderLines(unpriced, kg, () => undefined).lines[0]).toMatchObject({ unitPriceExpected: undefined, priceSource: 'none' });
+    // Still available: the product is listed, just in another unit.
+    expect(reorderLines(box, kg, () => undefined).unavailable).toEqual([]);
   });
 
   it('a capped catalog page never marks a product unavailable', () => {
@@ -241,5 +255,16 @@ describe('draft store', () => {
     expect(planDraftSync({ lines: [a, b, line('c')], deliveryDate: '2026-10-27', server: saved }).replace).toBe(true);
     expect(planDraftSync({ lines: [a, b], deliveryDate: '2026-10-28', server: saved }).replace).toBe(true);
     expect(planDraftSync({ lines: [a], deliveryDate: '', server: null }).replace).toBe(true);
+  });
+
+  it('compares the EFFECTIVE delivery day: a draft saved for another day is replaced even when nothing was picked', () => {
+    const a = line('a');
+    const saved = { deliveryDate: '2026-10-27', lines: { a: srv('1', a) } };
+    // The manager picked nothing ('' = default) but the default is now the 28th.
+    expect(planDraftSync({ lines: [a], deliveryDate: '', deliveryDay: '2026-10-28', server: saved }).replace).toBe(true);
+    expect(planDraftSync({ lines: [a], deliveryDate: '', deliveryDay: '2026-10-27', server: saved }).replace).toBe(false);
+    // A draft whose day we don't know (resumed before it was read back) can't be trusted.
+    const unknownDay = { deliveryDate: '', lines: { a: srv('1', a) } };
+    expect(planDraftSync({ lines: [a], deliveryDate: '', deliveryDay: '2026-10-27', server: unknownDay }).replace).toBe(true);
   });
 });

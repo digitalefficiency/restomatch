@@ -34,6 +34,7 @@ import {
   displayName,
   entitlementCauseOf,
   friendlyError,
+  trpcErrorCode,
   useSingleFlight,
   useToast,
 } from '@/lib/components';
@@ -57,7 +58,7 @@ import { FieldMode } from '../field-mode';
 import { UNDO_MS, UndoCountdown } from '../undo-bar';
 import { InlineDocument } from '../supplier-document';
 import { OverContractNote, useOrderContractPrices } from './contract-price';
-import { addDays, nextDeliveryOptions, type DeliveryOption } from './delivery-days';
+import { addDays, localNow, nextDeliveryOptions, type DeliveryOption } from './delivery-days';
 import {
   emptyCart,
   loadStore,
@@ -119,6 +120,19 @@ const cartLineOf = (l: PoLine): CartLine => ({
   unitPriceExpected: l.unitPriceExpected == null ? undefined : Number(l.unitPriceExpected),
 });
 
+/** The restaurant-local day of a stored delivery instant ('' when none). */
+const dayKeyOf = (at: Date | string | null | undefined) => (at ? localNow(new Date(at), TZ).date : '');
+
+/** The device cart's server draft was sent or cancelled somewhere else. */
+class StaleDraftError extends Error {
+  constructor(
+    readonly poId: string,
+    readonly status: string,
+  ) {
+    super('stale draft');
+  }
+}
+
 interface PendingReorder {
   supplierId: string;
   lines: CartLine[];
@@ -151,7 +165,13 @@ export function NewOrderWizard({
   const [deliveryDate, setDeliveryDate] = useState('');
   /** The server draft this order is saved as, and its lines as saved. */
   const [draftId, setDraftId] = useState<string | null>(null);
-  const [server, setServer] = useState<Cart['server']>(null);
+  const [server, setServerState] = useState<Cart['server']>(null);
+  /** Mirrors `server` for async code that must see the latest snapshot mid-handler. */
+  const serverRef = useRef<Cart['server']>(null);
+  const setServer = useCallback((v: Cart['server']) => {
+    serverRef.current = v;
+    setServerState(v);
+  }, []);
   const [rawSearch, setRawSearch] = useState('');
   const [search, setSearch] = useState('');
   const [announce, setAnnounce] = useState('');
@@ -172,6 +192,8 @@ export function NewOrderWizard({
   const [sent, setSent] = useState<{ poId: string; channel: Channel; supplier: string; day: string } | null>(null);
   /** Bumped after every server sync so the literal document re-renders from the saved draft. */
   const [docVersion, setDocVersion] = useState(0);
+  /** A device cart dropped because its draft was sent / cancelled elsewhere. */
+  const [stale, setStale] = useState<{ supplierId: string; poId: string; status: string } | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setSearch(rawSearch.trim()), 250);
@@ -188,17 +210,48 @@ export function NewOrderWizard({
 
   // ── This device's carts: load once, restore the one for a pre-picked supplier,
   //    otherwise offer the last unsent one ("המשך מהטיוטה (7 פריטים)").
+  //    A cart whose server draft is no longer a draft (sent / cancelled on another
+  //    screen or device) is dropped first — never offered, never sent twice.
   useEffect(() => {
-    store.current = loadStore(restaurantId);
-    const s = store.current;
-    if (!fromPoId && initialSupplierId && s.carts[initialSupplierId]) {
-      const c = s.carts[initialSupplierId]!;
-      applyCart(c);
-      if (c.lines.length > 0) setRestoredNote(c.lines.length);
-    } else if (!fromPoId && !initialSupplierId && s.activeSupplierId && s.carts[s.activeSupplierId]?.lines.length) {
-      setResumeOffer({ supplierId: s.activeSupplierId, count: s.carts[s.activeSupplierId]!.lines.length });
-    }
-    setHydrated(true);
+    let cancelled = false;
+    void (async () => {
+      let s = loadStore(restaurantId);
+      const saved = Object.entries(s.carts).filter(([, c]) => c.draftId);
+      const checks = await Promise.all(
+        saved.map(async ([sid, c]) => {
+          try {
+            const d = await utils.orders.get.fetch({ poId: c.draftId! });
+            return { sid, poId: c.draftId!, status: d.po?.status ?? null };
+          } catch (e) {
+            // Gone → drop quietly; unreachable → keep (the send re-checks it).
+            return { sid, poId: c.draftId!, status: trpcErrorCode(e) === 'NOT_FOUND' ? null : 'unknown' };
+          }
+        }),
+      );
+      if (cancelled) return;
+      let staleFound: { supplierId: string; poId: string; status: string } | null = null;
+      for (const ch of checks) {
+        if (ch.status === 'draft' || ch.status === 'unknown') continue;
+        s = withCart(s, ch.sid, null);
+        if (ch.status && (!staleFound || ch.sid === initialSupplierId || ch.sid === s.activeSupplierId)) {
+          staleFound = { supplierId: ch.sid, poId: ch.poId, status: ch.status };
+        }
+      }
+      if (checks.length > 0) saveStore(restaurantId, s);
+      store.current = s;
+      if (staleFound) setStale(staleFound);
+      if (!fromPoId && initialSupplierId && s.carts[initialSupplierId]) {
+        const c = s.carts[initialSupplierId]!;
+        applyCart(c);
+        if (c.lines.length > 0) setRestoredNote(c.lines.length);
+      } else if (!fromPoId && !initialSupplierId && s.activeSupplierId && s.carts[s.activeSupplierId]?.lines.length) {
+        setResumeOffer({ supplierId: s.activeSupplierId, count: s.carts[s.activeSupplierId]!.lines.length });
+      }
+      setHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -210,13 +263,16 @@ export function NewOrderWizard({
     setServer(c.server);
   }
 
-  // Every change is saved on the device (one cart per supplier).
+  // Every change is saved on the device (one cart per supplier). Not while "order
+  //    again" is still deciding: the screen's empty cart then is not the supplier's
+  //    cart, and saving it would erase the unsent one the choice card protects.
+  const reorderOpen = !!fromPoId && (!reorderDone || !!pendingReorder);
   useEffect(() => {
-    if (!hydrated || !supplierId || step === 'SENT') return;
+    if (!hydrated || !supplierId || step === 'SENT' || reorderOpen) return;
     const cart: Cart = { lines, deliveryDate, channel, draftId, server, updatedAt: Date.now() };
     store.current = { ...withCart(store.current, supplierId, cart), activeSupplierId: supplierId };
     saveStore(restaurantId, store.current);
-  }, [hydrated, supplierId, lines, deliveryDate, channel, draftId, server, step, restaurantId]);
+  }, [hydrated, supplierId, lines, deliveryDate, channel, draftId, server, step, restaurantId, reorderOpen]);
 
   // An unknown/foreign ?supplierId= falls back to the picker instead of a dead end.
   useEffect(() => {
@@ -416,11 +472,15 @@ export function NewOrderWizard({
       const rows = d?.lines ?? [];
       const own = rows.map(cartLineOf);
       const paired = pairServerLines(own, rows.map(toServerLine));
+      const isDraft = d?.po?.status === 'draft';
+      // The screen shows the day the draft is saved for (not a fresh default).
+      const day = isDraft ? dayKeyOf(d?.po?.expectedDeliveryAt) : '';
       base = {
         ...emptyCart(),
         lines: own,
-        draftId: d?.po?.status === 'draft' ? p.existing.draftId : null,
-        server: d?.po?.status === 'draft' ? { deliveryDate: '', lines: paired } : null,
+        deliveryDate: day,
+        draftId: isDraft ? p.existing.draftId : null,
+        server: isDraft ? { deliveryDate: day, lines: paired } : null,
       };
     }
     let next = mode === 'replace' ? [] : base.lines;
@@ -478,10 +538,11 @@ export function NewOrderWizard({
 
   // ── The server draft. Created when the order reaches review (so the supplier's
   //    literal document can be shown) and brought in line before sending.
-  async function readBack(poId: string, cartLines: CartLine[], day: string) {
+  async function readBack(poId: string, cartLines: CartLine[]) {
     const d = await utils.orders.get.fetch({ poId });
     const paired = pairServerLines(cartLines, d.lines.map(toServerLine));
-    setServer({ deliveryDate: day, lines: paired });
+    // The day as the server saved it (it re-derives a scheduled supplier's default).
+    setServer({ deliveryDate: dayKeyOf(d.po?.expectedDeliveryAt), lines: paired });
     // Prices the server filled in (catalog / contract) show on the review.
     setLines((ls) =>
       ls.map((l) => {
@@ -493,22 +554,24 @@ export function NewOrderWizard({
   }
 
   async function ensureServerDraft(): Promise<string> {
-    const day = deliveryDay;
+    // A background line sync may be mid-flight: let it land first.
+    if (syncing.current) await syncing.current.catch(() => undefined);
     let id = draftId;
-    let snap = server;
     if (id) {
-      const cur = await utils.orders.get.fetch({ poId: id }).catch(() => null);
-      if (!cur?.po || cur.po.status !== 'draft') {
-        id = null;
-        snap = null;
+      let cur: Awaited<ReturnType<typeof utils.orders.get.fetch>> | null = null;
+      try {
+        cur = await utils.orders.get.fetch({ poId: id });
+      } catch (e) {
+        if (trpcErrorCode(e) !== 'NOT_FOUND') throw e; // unreachable: never guess, never duplicate
       }
+      if (cur?.po && cur.po.status !== 'draft') throw new StaleDraftError(id, cur.po.status);
+      if (!cur?.po) id = null;
     }
     if (id) {
-      const plan = planDraftSync({ lines, deliveryDate, server: snap });
+      const plan = planDraftSync({ lines, deliveryDate, deliveryDay, server: serverRef.current });
       if (!plan.replace) {
-        for (const lineId of plan.deletes) await deleteLine.mutateAsync({ lineId });
-        for (const u of plan.updates) await updateLine.mutateAsync({ lineId: u.lineId, patch: u.patch });
-        if (plan.deletes.length > 0 || plan.updates.length > 0) await readBack(id, lines, snap?.deliveryDate ?? day);
+        await applyPlan(plan);
+        if (plan.deletes.length > 0 || plan.updates.length > 0) await readBack(id, lines);
         return id;
       }
     }
@@ -525,11 +588,27 @@ export function NewOrderWizard({
         unitPriceExpected: l.unitPriceExpected,
       })),
     });
-    // The stale draft this one replaces (a line was added or the day changed).
+    // The stale draft this one replaces (a line was added or the day changed). It
+    // was never sent; the orders list keeps never-sent cancelled drafts out of view.
     if (id) await cancelOrder.mutateAsync({ poId: id }).catch(() => undefined);
     setDraftId(created.poId);
-    await readBack(created.poId, lines, day);
+    await readBack(created.poId, lines);
     return created.poId;
+  }
+
+  async function applyPlan(plan: ReturnType<typeof planDraftSync>) {
+    for (const lineId of plan.deletes) await deleteLine.mutateAsync({ lineId });
+    for (const u of plan.updates) await updateLine.mutateAsync({ lineId: u.lineId, patch: u.patch });
+  }
+
+  /** The draft is gone from "unsent": drop the device cart and say where the order is. */
+  function dropStale(err: StaleDraftError) {
+    store.current = withCart(store.current, supplierId, null);
+    saveStore(restaurantId, store.current);
+    applyCart(emptyCart());
+    setSending(null);
+    setStale({ supplierId, poId: err.poId, status: err.status });
+    setStep('BUILD');
   }
 
   async function save(): Promise<string | null> {
@@ -538,12 +617,45 @@ export function NewOrderWizard({
     try {
       return await ensureServerDraft();
     } catch (e) {
-      setSaveError(e);
+      if (e instanceof StaleDraftError) dropStale(e);
+      else setSaveError(e);
       return null;
     } finally {
       setSaving(false);
     }
   }
+
+  // ── Edits after the server draft exists reach it on their own (debounced), so the
+  //    order page never shows — or sends — stale lines. Additions and a day change
+  //    can't be patched (no add-line procedure yet): those wait for the next save.
+  const syncing = useRef<Promise<void> | null>(null);
+  useEffect(() => {
+    if (!draftId || !server || saving || sending || step === 'SENT' || !linesValid(lines)) return;
+    const plan = planDraftSync({ lines, deliveryDate, deliveryDay, server });
+    if (plan.replace || (plan.updates.length === 0 && plan.deletes.length === 0)) return;
+    const timer = window.setTimeout(() => {
+      if (syncing.current) return;
+      const poId = draftId;
+      const snapshot = lines;
+      syncing.current = (async () => {
+        try {
+          const cur = await utils.orders.get.fetch({ poId });
+          if (cur.po?.status !== 'draft') {
+            if (cur.po) dropStale(new StaleDraftError(poId, cur.po.status));
+            return;
+          }
+          await applyPlan(plan);
+          await readBack(poId, snapshot);
+        } catch {
+          // Quiet: the next save (review / send) brings the draft in line or says why not.
+        }
+      })().finally(() => {
+        syncing.current = null;
+      });
+    }, 800);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lines, deliveryDate, deliveryDay, draftId, server, saving, sending, step]);
 
   function goReview() {
     if (!valid) return;
@@ -656,6 +768,26 @@ export function NewOrderWizard({
             }}
             onElapse={() => setSwitchUndo(null)}
           />
+        ) : null}
+
+        {stale ? (
+          <Card elevated className="mb-4 border-warn/50" data-testid="stale-draft">
+            <p className="flex items-start gap-2 text-sm text-ink" role="status">
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden="true" />
+              {t(stale.status === 'cancelled' ? 'draft.staleCancelled' : 'draft.staleSent', {
+                supplier: nameOf(suppliers.data?.find((x) => x.id === stale.supplierId)),
+                ref: poRefOf(stale.poId),
+              })}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <LinkButton href={`/dashboard/orders/${stale.poId}`} variant="secondary" className="min-h-12">
+                {t('draft.staleOpen')}
+              </LinkButton>
+              <Button variant="ghost" className="min-h-12" onClick={() => setStale(null)}>
+                {t('draft.close')}
+              </Button>
+            </div>
+          </Card>
         ) : null}
 
         {resumeOffer && step === 'SUPPLIER' ? (
@@ -951,6 +1083,18 @@ export function NewOrderWizard({
                 </ul>
               )}
               {lines.length > 0 && !valid ? <p className="mt-3 text-sm text-warn">{t('wizard.fixLines')}</p> : null}
+              {lines.length > 0 ? (
+                <DeliveryChips
+                  d={delivery.data ?? null}
+                  loading={delivery.isLoading}
+                  options={options}
+                  value={deliveryDay}
+                  onChange={setDeliveryDate}
+                  disabled={busy}
+                  dayShort={dayShort}
+                  dayLong={dayLong}
+                />
+              ) : null}
             </Card>
           </div>
         )}
@@ -1026,16 +1170,23 @@ export function NewOrderWizard({
               ) : null}
             </div>
 
-            <DeliveryChips
-              d={delivery.data ?? null}
-              loading={delivery.isLoading}
-              options={options}
-              value={deliveryDay}
-              onChange={setDeliveryDate}
-              disabled={busy}
-              dayShort={dayShort}
-              dayLong={dayLong}
-            />
+            {/* The day was settled while building (before the server draft); changing it goes back. */}
+            {deliveryDay ? (
+              <p className="mt-4 flex flex-wrap items-center gap-2 text-sm text-ink" data-testid="order-delivery-headline">
+                <CalendarClock className="h-4 w-4 text-primary" aria-hidden="true" />
+                <span>
+                  {t('wizard.deliveryExpected')} <span className="font-semibold">{dayLong(deliveryDay)}</span>
+                </span>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setStep('BUILD')}
+                  className="min-h-11 rounded px-1 text-primary underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
+                >
+                  {t('wizard.changeDay')}
+                </button>
+              </p>
+            ) : null}
 
             {guardrail.isFetching && (
               <p className="mt-3 flex items-center gap-2 text-xs text-subtle">

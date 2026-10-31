@@ -88,6 +88,9 @@ export const en: Shape<typeof he> = {
     close: 'Close',
     exit: 'Leave the order',
     saved: 'Saved as a draft',
+    staleSent: 'The order to {supplier} was already sent (#{ref}), so the draft on this device was removed and won’t be sent again.',
+    staleCancelled: 'The order to {supplier} was cancelled (#{ref}), so the draft on this device was removed.',
+    staleOpen: 'Open the order',
   },
   send: {
     cta: {
@@ -254,6 +257,7 @@ export const en: Shape<typeof he> = {
     reasonOn: 'Order by {time} on {orderDay} → delivery {day}',
     reasonNoSchedule: 'This supplier has no order schedule — pick a delivery day.',
     otherDate: 'Another date',
+    changeDay: 'Change day',
     today: 'today',
     tomorrow: 'tomorrow',
     pricesOn: 'Prices appear on the supplier’s order',

@@ -65,12 +65,13 @@ for (const vp of VIEWPORTS) {
         const firstItem = page.getByTestId('catalog-item').first();
         await expect(firstItem).toBeVisible({ timeout: 30_000 });
         await firstItem.click();
-        await page.getByRole('button', { name: m.wizard.toReview }).click();
 
+        // The day is settled while building (W1-11: before the server draft exists).
         const date = page.getByTestId('order-delivery-date');
         const expected = expectedDefaultDate();
         await expect(date).toHaveValue(expected);
         await expect(page.getByText(m.wizard.noSchedule)).toBeVisible();
+        await page.getByRole('button', { name: m.wizard.toReview }).click();
 
         await page.locator('#ord-channel').selectOption('none');
         // The send button names the effect (W1-11) and waits out a 10 s undo window.

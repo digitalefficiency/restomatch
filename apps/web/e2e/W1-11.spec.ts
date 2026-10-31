@@ -173,6 +173,37 @@ async function poStatus(id: string): Promise<string | null> {
   }
 }
 
+async function poLines(id: string): Promise<Array<{ qty: number; raw: string | null }>> {
+  const sql = e2eSql();
+  try {
+    return await sql<{ qty: number; raw: string | null }[]>`
+      select qty_ordered::float as qty, raw_description as raw from po_lines where po_id = ${id} order by raw_description`;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** POs for a supplier created since `since` (this test's own), by status. */
+async function posSince(supplierId: string, since: Date): Promise<Array<{ id: string; status: string }>> {
+  const sql = e2eSql();
+  try {
+    return await sql<{ id: string; status: string }[]>`
+      select id, status::text as status from purchase_orders
+      where supplier_id = ${supplierId} and created_at >= ${since} order by created_at`;
+  } finally {
+    await sql.end();
+  }
+}
+
+type StoredCarts = { carts: Record<string, { lines: unknown[]; draftId: string | null }> };
+async function deviceCarts(page: Page): Promise<StoredCarts['carts']> {
+  const raw = await page.evaluate(() => {
+    const k = Object.keys(localStorage).find((x) => x.startsWith('rm:orders:cart:v1:'));
+    return k ? localStorage.getItem(k) : null;
+  });
+  return raw ? (JSON.parse(raw) as StoredCarts).carts : {};
+}
+
 test.describe('phone 390 · manager · he', () => {
   test.use(PHONE);
 
@@ -198,8 +229,8 @@ test.describe('phone 390 · manager · he', () => {
     await expectThumbZonePrimary(page);
     expect(await shekelLeftOfDigits(page.getByTestId('cart-summary')), '₪ left of the digits in he').toBe(true);
 
-    await taps.tap(page.getByTestId('cart-primary')); // → review
     await expect(page.getByTestId('delivery-chip').first()).toBeVisible();
+    await taps.tap(page.getByTestId('cart-primary')); // → review
     await expect(page.getByTestId('order-document-preview')).toBeVisible({ timeout: 30_000 });
     const send = page.getByTestId('cart-primary');
     await expect(send).toHaveText(m.send.cta.email.replace('{supplier}', supplierA.name));
@@ -279,8 +310,9 @@ test.describe('phone 390 · manager · he', () => {
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
     await items.nth(0).tap();
-    await page.getByTestId('cart-primary').tap();
+    // The day is settled while building (before any server draft exists).
     await expect(page.getByTestId('delivery-chip').first()).toBeVisible();
+    await page.getByTestId('cart-primary').tap();
     await page.locator('#ord-channel').selectOption('none');
 
     await page.getByTestId('cart-primary').tap();
@@ -345,6 +377,119 @@ test.describe('phone 390 · manager · he', () => {
   });
 });
 
+test.describe('phone 390 · manager · review fixes', () => {
+  test.use(PHONE);
+
+  test('"order again" never erases this device\'s unsent cart, even on a reload at the attach/replace choice', async ({ page }) => {
+    await setLocale(page, 'he');
+    page.on('dialog', (d) => void d.accept());
+    await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
+    const items = page.getByTestId('catalog-item');
+    await expect(items.first()).toBeVisible({ timeout: 30_000 });
+    await items.nth(0).tap();
+    await items.nth(1).tap();
+    await expect(page.getByTestId('order-line')).toHaveCount(2);
+
+    await page.goto(`/dashboard/orders/new?from=${reorderPo}`);
+    await expect(page.getByTestId('reorder-choice')).toBeVisible({ timeout: 30_000 });
+    expect((await deviceCarts(page))[supplierA.id]?.lines, 'cart kept while the choice is open').toHaveLength(2);
+    await page.reload();
+    await expect(page.getByTestId('reorder-choice')).toBeVisible({ timeout: 30_000 });
+    expect((await deviceCarts(page))[supplierA.id]?.lines, 'cart kept across a reload').toHaveLength(2);
+    // Attach merges both: the 2 cart lines + the reorder's lines (its 2 catalog lines overlap).
+    await page.getByRole('button', { name: MSG.he.reorder.attach }).tap();
+    await expect(page.getByTestId('order-line').first()).toBeVisible();
+    expect((await page.getByTestId('order-line').count())).toBeGreaterThanOrEqual(2);
+  });
+
+  test('a saved cart whose draft was sent elsewhere is never offered (or sent) again', async ({ page }) => {
+    test.setTimeout(150_000);
+    const since = new Date(Date.now() - 1000);
+    await setLocale(page, 'he');
+    page.on('dialog', (d) => void d.accept());
+    await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
+    const items = page.getByTestId('catalog-item');
+    await expect(items.first()).toBeVisible({ timeout: 30_000 });
+    await items.nth(0).tap();
+    await page.getByTestId('cart-primary').tap(); // review → the server draft
+    await expect.poll(async () => (await deviceCarts(page))[supplierB.id]?.draftId ?? null, { timeout: 30_000 }).not.toBeNull();
+    const draftId = (await deviceCarts(page))[supplierB.id]!.draftId!;
+
+    // Someone sends it from the order page on another device.
+    const sql = e2eSql();
+    try {
+      await sql`update purchase_orders set status = 'sent', sent_at = now() where id = ${draftId}`;
+    } finally {
+      await sql.end();
+    }
+
+    await page.goto('/dashboard/orders/new');
+    await expect(page.getByTestId('stale-draft')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('stale-draft').locator(`a[href="/dashboard/orders/${draftId}"]`)).toBeVisible();
+    await expect(page.getByTestId('resume-offer')).toHaveCount(0);
+    expect((await deviceCarts(page))[supplierB.id], 'the stale cart is dropped').toBeUndefined();
+    await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
+    await expect(page.getByTestId('catalog-item').first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('order-line')).toHaveCount(0);
+    expect((await posSince(supplierB.id, since)).map((p) => p.id), 'no second PO').toEqual([draftId]);
+  });
+
+  test('the day is settled before the draft: picking another day sends ONE order, no phantom cancelled row', async ({ page }) => {
+    test.setTimeout(150_000);
+    const since = new Date(Date.now() - 1000);
+    await setLocale(page, 'he');
+    page.on('dialog', (d) => void d.accept());
+    await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
+    const items = page.getByTestId('catalog-item');
+    await expect(items.first()).toBeVisible({ timeout: 30_000 });
+    await items.nth(0).tap();
+    const chips = page.getByTestId('delivery-chip');
+    await expect(chips.nth(1)).toBeVisible();
+    await chips.nth(1).tap();
+    await expect(chips.nth(1)).toHaveAttribute('aria-checked', 'true');
+    await page.getByTestId('cart-primary').tap(); // review
+    await page.locator('#ord-channel').selectOption('none');
+    await page.getByTestId('cart-primary').tap();
+    await expect(page.getByRole('status').filter({ hasText: MSG.he.wizard.markedTitle })).toBeVisible({ timeout: 30_000 });
+    const pos = await posSince(supplierB.id, since);
+    expect(pos.map((p) => p.status)).toEqual(['sent']);
+  });
+
+  test('edits after the draft exists reach it; a draft replaced by an added line stays out of the list', async ({ page }) => {
+    test.setTimeout(150_000);
+    const since = new Date(Date.now() - 1000);
+    await setLocale(page, 'he');
+    page.on('dialog', (d) => void d.accept());
+    await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
+    const items = page.getByTestId('catalog-item');
+    await expect(items.first()).toBeVisible({ timeout: 30_000 });
+    await items.nth(0).tap();
+    await items.nth(1).tap();
+    await page.getByTestId('cart-primary').tap(); // review → draft D
+    await expect.poll(async () => (await deviceCarts(page))[supplierB.id]?.draftId ?? null, { timeout: 30_000 }).not.toBeNull();
+    const d = (await deviceCarts(page))[supplierB.id]!.draftId!;
+    await page.getByRole('button', { name: MSG.he.wizard.back }).tap();
+
+    // Edit qty of line 1, remove line 2: both reach D without a send (the order page shows them).
+    const lines = page.getByTestId('order-line');
+    await lines.nth(0).getByRole('textbox', { name: /כמות/ }).fill('7');
+    await lines.nth(1).getByRole('button', { name: /הסרת/ }).tap();
+    await expect.poll(async () => (await poLines(d)).map((l) => l.qty), { timeout: 15_000 }).toEqual([7]);
+
+    // Adding a line after the draft exists replaces it at the next review: the old one
+    // is cancelled and never shows in the orders list.
+    await items.nth(1).tap(); // re-add the removed product: a new line for the draft
+    await expect(page.getByTestId('order-line')).toHaveCount(2);
+    await page.getByTestId('cart-primary').tap();
+    await expect.poll(async () => (await deviceCarts(page))[supplierB.id]?.draftId, { timeout: 30_000 }).not.toBe(d);
+    expect(await poStatus(d)).toBe('cancelled');
+    await page.goto('/dashboard/orders');
+    await expect(page.getByTestId('order-card').first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(`a[href="/dashboard/orders/${d}"]`)).toHaveCount(0);
+    expect((await posSince(supplierB.id, since)).filter((p) => p.status === 'draft')).toHaveLength(1);
+  });
+});
+
 test.describe('desktop 1440 · manager', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -375,9 +520,9 @@ test.describe('desktop 1440 · manager', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
     await expect(page.getByTestId('catalog-item').first()).toBeVisible({ timeout: 30_000 });
     await page.getByTestId('catalog-item').first().click();
+    await expect(page.getByTestId('delivery-reason').or(page.getByText(MSG.en.wizard.noSchedule))).toBeVisible();
     await page.getByTestId('cart-primary').click();
     await expect(page.getByTestId('cart-primary')).toContainText('Send to');
-    await expect(page.getByTestId('delivery-reason').or(page.getByText(MSG.en.wizard.noSchedule))).toBeVisible();
     expect(await axeSeriousOrWorse(page), 'axe on review (en)').toEqual([]);
   });
 });

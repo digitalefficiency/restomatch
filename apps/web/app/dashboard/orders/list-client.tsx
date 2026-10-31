@@ -52,7 +52,11 @@ export function OrdersList({ initial, canEdit }: { initial: Order[]; canEdit: bo
   );
   const first = q.data ?? [];
   const seen = new Set(first.map((o) => o.id));
-  const all = [...first, ...more.filter((o) => !seen.has(o.id))];
+  // A cancelled order that never went to the supplier (a replaced wizard draft, an
+  // abandoned draft) is not an order: it stays out of "הכל" and shows under "בוטלו".
+  const all = [...first, ...more.filter((o) => !seen.has(o.id))].filter(
+    (o) => status !== 'all' || o.status !== 'cancelled' || o.sentAt != null,
+  );
   const orders = query.trim() ? all.filter((o) => matchesOrderSearch(o, query)) : all;
   const hasMore = (lastPage ?? first.length) >= PAGE;
 

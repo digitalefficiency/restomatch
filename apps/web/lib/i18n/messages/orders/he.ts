@@ -89,6 +89,9 @@ export const he = {
     close: 'סגירה',
     exit: 'יציאה מההזמנה',
     saved: 'נשמר כטיוטה',
+    staleSent: 'ההזמנה ל{supplier} כבר נשלחה (#{ref}), לכן הטיוטה שבמכשיר הוסרה ולא תישלח שוב.',
+    staleCancelled: 'ההזמנה ל{supplier} בוטלה (#{ref}), לכן הטיוטה שבמכשיר הוסרה.',
+    staleOpen: 'פתחו את ההזמנה',
   },
   send: {
     cta: {
@@ -255,6 +258,7 @@ export const he = {
     reasonOn: 'הזמנה עד {time} ב{orderDay} → אספקה {day}',
     reasonNoSchedule: 'לספק אין לוח הזמנות — בחרו יום אספקה.',
     otherDate: 'תאריך אחר',
+    changeDay: 'שינוי יום',
     today: 'היום',
     tomorrow: 'מחר',
     pricesOn: 'המחירים יופיעו בהזמנה לספק',
