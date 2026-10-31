@@ -182,6 +182,8 @@ export const en: Shape<typeof he> = {
     unauthorized: 'Your session has expired. Please sign in again.',
     invalidInput: 'One of the values you entered is invalid.',
     invoiceNumberTaken: 'Invoice number {invoiceNumber} is already on another invoice from this supplier (dated {holderDate}). Check the number — or open the existing invoice.',
+    lifecycleConflict: 'Someone already updated this item in the meantime. Refresh to see its current state.',
+    lifecycleRefused: 'This action is not possible in the item’s current state.',
     generic: 'The action failed. Please try again.',
   },
 };

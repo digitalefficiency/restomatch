@@ -64,6 +64,13 @@ describe('localizeServerError', () => {
       const err = { message: 'm', data: { appCode: 'quota.exceeded', appParams: { limit: 50 } } };
       expect(localizeServerError(err, 'en')).toBe('You have used this month’s scan quota (50). Upgrade your plan to continue.');
     });
+    it('translates the G-05 lifecycle codes, never the raw prefixed message', () => {
+      const conflict = { message: 'lifecycle.conflict:{"currentStatus":"accepted"}', data: { code: 'CONFLICT', appCode: 'lifecycle.conflict', appParams: { currentStatus: 'accepted', actorName: 'Dana', at: '2026-10-31T10:00:00.000Z' } } };
+      expect(localizeServerError(conflict, 'en')).toBe('Someone already updated this item in the meantime. Refresh to see its current state.');
+      expect(localizeServerError(conflict, 'he')).toBe('מישהו כבר עדכן את הפריט הזה בינתיים. רעננו את המסך ובדקו את המצב העדכני.');
+      const refused = { message: 'lifecycle.refused:invoice_has_claim: x', data: { code: 'PRECONDITION_FAILED', appCode: 'lifecycle.refused', appParams: { reason: 'invoice_has_claim' } } };
+      expect(localizeServerError(refused, 'en')).toBe('This action is not possible in the item’s current state.');
+    });
     it('ignores an unknown appCode and falls back to the message mapping', () => {
       const err = { message: 'תוקף ההזמנה פג.', data: { appCode: 'not.a.code' } };
       expect(localizeServerError(err, 'en')).toBe('This invite has expired.');
