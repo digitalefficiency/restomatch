@@ -256,6 +256,24 @@ export async function migrateLegacyLines(scope: MirrorScope, store: OutboxStore 
   return n;
 }
 
+/** Is any W1-06 localStorage row on this device not yet in the outbox (needs `migrateLegacyLines`)? */
+export async function hasUnmirroredLegacyLines(store: OutboxStore = idbOutboxStore): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  const keys: string[] = [];
+  try {
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const k = window.localStorage.key(i);
+      if (k?.startsWith(LEGACY_LINES_PREFIX)) keys.push(k);
+    }
+  } catch {
+    return false;
+  }
+  for (const k of keys) {
+    for (const row of readLegacy(k)) if (!(await store.get(outboxKey('grLine', row.grLineId)))) return true;
+  }
+  return false;
+}
+
 /** The server acked a mirrored row: drop it from the W1-06 localStorage copy too (unless a newer value replaced it). */
 export function dropLegacyLine(legacyKey: string | undefined, sent: GrLinePayload): void {
   if (!legacyKey || typeof window === 'undefined') return;

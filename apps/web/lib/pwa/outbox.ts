@@ -237,6 +237,27 @@ export async function retryItem(store: OutboxStore, key: string, now = Date.now(
 export type GroupLock = (name: string, fn: () => Promise<void>) => Promise<boolean>;
 
 const heldInPage = new Set<string>();
+/** Groups a screen of THIS page has claimed (whatever the lock backend). */
+const claimedHere = new Set<string>();
+
+/** Is this group being worked on by a screen of this page? */
+export function claimedInThisPage(group: string | null): boolean {
+  return group !== null && claimedHere.has(group);
+}
+
+/**
+ * Anything a drainer of this page could send now? (Due, not parked, a registered
+ * kind, not in a group a screen here holds.) False → no session check, no network.
+ */
+export function hasSendable(items: OutboxItem[], now = Date.now()): boolean {
+  return items.some(
+    (i) =>
+      i.status === 'pending' &&
+      i.nextAttemptAt <= now &&
+      registry.has(i.kind) &&
+      !claimedInThisPage(i.group),
+  );
+}
 
 /**
  * Web Locks when the browser has them (cross-tab), an in-page set otherwise.
@@ -279,13 +300,18 @@ export function claimOutboxGroup(group: string): () => void {
   const done = new Promise<void>((r) => {
     release = r;
   });
+  claimedHere.add(group);
   const locks = (typeof navigator === 'undefined' ? undefined : navigator.locks) as LockManager | undefined;
   if (locks?.request) {
     void locks.request(name, () => done).catch(() => null);
-    return release;
+    return () => {
+      claimedHere.delete(group);
+      release();
+    };
   }
   heldInPage.add(name);
   return () => {
+    claimedHere.delete(group);
     heldInPage.delete(name);
     release();
   };

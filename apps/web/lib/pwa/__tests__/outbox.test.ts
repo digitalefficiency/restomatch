@@ -324,7 +324,10 @@ describe("grLine kind: W1-06's localStorage rows migrate with zero loss", () => 
     ls.set('rm-rcv-lines:u-2:po-2', JSON.stringify([line('l3', 5, 'gr-2')]));
     ls.set('rm-rcv-unordered:u-1:po-1', JSON.stringify({ marks: {} })); // wizard-local marks: not server work
     const store = memoryOutboxStore();
+    const { hasUnmirroredLegacyLines } = await import('../fieldOutbox');
+    expect(await hasUnmirroredLegacyLines(store)).toBe(true);
     expect(await migrateLegacyLines(A, store)).toBe(3);
+    expect(await hasUnmirroredLegacyLines(store)).toBe(false);
     expect(await migrateLegacyLines(A, store)).toBe(0); // idempotent
     const items = await store.list();
     expect(items.map((i) => i.key).sort()).toEqual(['grLine:l1', 'grLine:l2', 'grLine:l3']);
@@ -365,5 +368,23 @@ describe("grLine kind: W1-06's localStorage rows migrate with zero loss", () => 
     storage.save([]); // receipt closed
     await vi.waitFor(async () => expect(await store.list()).toEqual([]));
     expect(ls.has('rm-rcv-lines:u-1:po-1')).toBe(false);
+  });
+});
+
+describe('hasSendable (no network when nothing can go)', () => {
+  afterEach(() => resetOutboxKinds());
+
+  it('a row of the receipt open on this page, or one backing off, is not sendable', async () => {
+    const { claimOutboxGroup, hasSendable } = await import('../outbox');
+    registerOutboxKind('grLine', { ...GR_LINE_KIND, send: vi.fn() });
+    const store = memoryOutboxStore();
+    await enqueue(store, 'grLine', line('l1', 1, 'gr-1'), A, { now: 0 });
+    const release = claimOutboxGroup('gr:gr-1');
+    expect(hasSendable(await store.list(), 10)).toBe(false);
+    release();
+    expect(hasSendable(await store.list(), 10)).toBe(true);
+    expect(hasSendable(await store.list(), -1)).toBe(false); // not due yet
+    resetOutboxKinds();
+    expect(hasSendable(await store.list(), 10)).toBe(false); // no sender on this page
   });
 });

@@ -10,6 +10,7 @@ import {
   PHOTO_KIND,
   dropLegacyLine,
   ensurePhotosMigrated,
+  hasUnmirroredLegacyLines,
   migrateLegacyLines,
 } from './fieldOutbox';
 import type { GrLinePayload } from './lineOutbox';
@@ -19,6 +20,7 @@ import {
   OUTBOX_EVENT,
   OutboxHeldError,
   drainOutbox,
+  hasSendable,
   idbOutboxStore,
   nextDueAt,
   outboxDbExists,
@@ -105,9 +107,22 @@ export function useOutboxDrainer(userId: string): void {
     const run = (async (): Promise<DrainResult | null> => {
       if (authHeld.current || !navigator.onLine) return null;
       if (!(await outboxDbExists(FIELD_DB_NAMES)) && !hasLegacyLines()) return null;
+      await ensurePhotosMigrated();
+      // Only rows written before this release (not mirrored by an open screen) need the migration.
+      const legacy = await hasUnmirroredLegacyLines();
+      // Nothing this page could send right now (e.g. every row belongs to the receipt
+      // that is open on screen): no session check, no network at all.
+      const before = await idbOutboxStore.list();
+      if (!legacy && !hasSendable(before, Date.now())) {
+        // Something still waits (backing off, or on the open screen): look again later.
+        if (before.some((i) => i.status === 'pending')) {
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = setTimeout(() => void drain(), HELD_RECHECK_MS);
+        }
+        return null;
+      }
       const scope = await sessionScope().catch(() => null);
       if (!scope || scope.userId !== userId) return null;
-      await ensurePhotosMigrated();
       await migrateLegacyLines(scope);
       await sweepExpired(idbOutboxStore);
       const result = await drainOutbox(idbOutboxStore, { scope });
