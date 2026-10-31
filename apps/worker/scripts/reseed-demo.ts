@@ -104,7 +104,7 @@ async function planExtras(sql: postgres.Sql) {
 /** Every hero figure of every demo restaurant, this month and the last two. */
 async function heroSnapshot(rids: string[], day: string): Promise<Record<string, string>> {
   const db = createDb(url!);
-  const now = new Date(`${day}T12:00:00+03:00`);
+  const now = demoNow(day);
   const out: Record<string, string> = {};
   for (const rid of rids) {
     for (const monthOffset of [0, -1, -2]) {
