@@ -11,6 +11,10 @@ import {
   OCR_INVOICE_QUEUE,
   failJob,
   failedJobs,
+  isTerminalJobError,
+  OCR_JOB_HEADROOM_DEFAULT_MS,
+  ocrJobHeadroomMs,
+  TERMINAL_JOB_ERROR,
   insertJob,
   pruneJobs,
   queueCounts,
@@ -180,6 +184,7 @@ describe('producer payloads reach the worker unchanged', () => {
       const job = await claimJob<typeof payload>(sql, OCR_INVOICE_QUEUE, 'w-test');
       expect(job?.payload).toEqual(payload); // job.data.grId reaches ocrAutoMatchDecision
       expect(job?.restaurantId).toBe(r!.id);
+      expect(job?.maxAttempts).toBe(2); // OCR-A: one retry of a transient failure, never more
       // A scan with no receipt (e-mail / WhatsApp ingest) has no grId and matches at once.
       const { grId: _omit, ...noReceipt } = payload;
       expect(await enqueueOcrInvoice(noReceipt)).toBe(true);
@@ -216,5 +221,25 @@ describe('concurrency: 50 jobs, 2 workers', () => {
     expect(seen).toHaveLength(50);
     expect(new Set(seen).size).toBe(50);
     expect(await queueCounts(sql, Q)).toMatchObject({ done: 50, active: 0, waiting: 0 });
+  });
+});
+
+describe('OCR-A PR-OCR-3: terminal errors and OCR headroom', () => {
+  it('a terminal error is dead-lettered at once, even with attempts left', async () => {
+    await insertJob(sql, Q, {}, { maxAttempts: 2 });
+    const first = await claimJob(sql, Q, 'w1');
+    expect(await failJob(sql, first!, `${TERMINAL_JOB_ERROR}quota exceeded`, 'w1')).toBe('failed');
+    const [row] = await sql<Array<{ status: string; attempts: number }>>`SELECT status, attempts FROM job_queue WHERE id = ${first!.id}`;
+    expect(row).toEqual({ status: 'failed', attempts: 1 });
+    expect(isTerminalJobError('[terminal] x')).toBe(true);
+    expect(isTerminalJobError('boom [terminal]')).toBe(false);
+  });
+
+  it('OCR_JOB_HEADROOM_MS: default 120 s; a number overrides; garbage falls back to the default', () => {
+    expect(OCR_JOB_HEADROOM_DEFAULT_MS).toBe(120_000);
+    expect(ocrJobHeadroomMs({})).toBe(120_000);
+    expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: ' 90000 ' })).toBe(90_000);
+    expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: '0' })).toBe(0);
+    for (const bad of ['', 'abc', '-5', 'Infinity']) expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: bad })).toBe(120_000);
   });
 });

@@ -55,8 +55,30 @@ export async function withDeadline<T>(p: Promise<T>, ms: number, onTimeout: () =
   }
 }
 
-/** Per-queue defaults: match-invoice is cheap and idempotent, so it retries. */
-const MAX_ATTEMPTS: Record<string, number> = { 'match-invoice': 3 };
+/**
+ * Per-queue defaults: match-invoice is cheap and idempotent, so it retries.
+ * ocr-invoice gets ONE retry: each attempt is a paid Claude read, so only a
+ * transient failure (429, 5xx, timeout, unparsable answer) is retried; a
+ * terminal one is dead-lettered at once (TERMINAL_JOB_ERROR, apps/worker
+ * ocrInvoice.ts classifyOcrError).
+ */
+export const MAX_ATTEMPTS: Readonly<Record<string, number>> = { 'match-invoice': 3, 'ocr-invoice': 2 };
+
+/** Default for OCR_JOB_HEADROOM_MS: a Claude read takes ≈ 10–40 s, its retry path more. */
+export const OCR_JOB_HEADROOM_DEFAULT_MS = 120_000;
+
+/**
+ * The time an ocr-invoice job must have left in its invocation before it is
+ * claimed (OCR_JOB_HEADROOM_MS, ms; default 120 s). A read cut off by the
+ * function's maxDuration stalls, is retried, and can be dead-lettered — after
+ * being paid for. Used by the serverless runner and the after() kick.
+ */
+export function ocrJobHeadroomMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.OCR_JOB_HEADROOM_MS?.trim();
+  if (!raw) return OCR_JOB_HEADROOM_DEFAULT_MS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : OCR_JOB_HEADROOM_DEFAULT_MS;
+}
 
 /**
  * Insert a job with a hard deadline. Returns false when no queue database is

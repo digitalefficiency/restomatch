@@ -162,8 +162,9 @@ describe('(a) photo → OCR → match, run by the serverless runner (no worker)'
     const queued = await qsql<Array<{ queue: string }>>`SELECT queue FROM job_queue WHERE status = 'queued'`;
     expect(queued.map((j) => j.queue)).toEqual(['ocr-invoice']);
 
-    // The after() kick runs only the OCR queue; the match job joins the run.
-    const run = await runQueuedJobs({ budgetMs: 60_000, queues: ['ocr-invoice'] });
+    // The after() kick runs only the OCR queue; the match job joins the run. Like the
+    // kick, it passes the invocation's end (300 s route): OCR_JOB_HEADROOM_MS fits.
+    const run = await runQueuedJobs({ budgetMs: 60_000, queues: ['ocr-invoice'], endsAt: Date.now() + 300_000 });
     expect(run).toMatchObject({ ran: 2, done: 2, failed: 0, stoppedBy: 'empty', byQueue: { 'ocr-invoice': 1, 'match-invoice': 1 } });
     const jobs = await qsql<Array<{ queue: string; status: string; finished_at: Date }>>`
       SELECT queue, status, finished_at FROM job_queue ORDER BY id`;

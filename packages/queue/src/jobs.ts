@@ -259,9 +259,22 @@ export function backoffMs(attempt: number): number {
   return Math.min(5_000 * 2 ** Math.max(0, attempt - 1), 10 * 60_000);
 }
 
-/** Record a failure: retry after a backoff while attempts remain, else 'failed'. */
+/**
+ * A processor that knows a retry can only fail the same way (quota, tenant guard,
+ * an unreadable format) prefixes its error message with this mark: failJob then
+ * dead-letters the job at once instead of retrying it (OCR-A PR-OCR-3 — a retry
+ * of an OCR job is a second paid call). The processor sees only `throw`, and the
+ * runner passes the message through, so the mark travels in the message.
+ */
+export const TERMINAL_JOB_ERROR = '[terminal] ';
+
+export function isTerminalJobError(message: string): boolean {
+  return message.startsWith(TERMINAL_JOB_ERROR);
+}
+
+/** Record a failure: retry after a backoff while attempts remain (and the error is not terminal), else 'failed'. */
 export async function failJob(sql: Sql, job: Pick<JobRow, 'id' | 'attempts' | 'maxAttempts'>, error: string, workerId: string): Promise<'retry' | 'failed'> {
-  const retry = job.attempts < job.maxAttempts;
+  const retry = job.attempts < job.maxAttempts && !isTerminalJobError(error);
   const msg = error.slice(0, 2_000);
   if (retry) {
     await sql`
@@ -300,7 +313,7 @@ export async function recoverStalled(
   staleMs: number,
   excludeIds: string[] = [],
 ): Promise<{ requeued: number; failed: number }> {
-  const rows = await sql<Array<{ status: JobStatus }>>`
+  const rows = await sql<Array<{ status: JobStatus; queue: string; payload: unknown; restaurant_id: string | null }>>`
     UPDATE job_queue
        SET status = CASE WHEN stalled_count < ${MAX_STALLED} THEN 'queued' ELSE 'failed' END,
            finished_at = CASE WHEN stalled_count < ${MAX_STALLED} THEN NULL ELSE now() END,
@@ -310,11 +323,46 @@ export async function recoverStalled(
            locked_at = NULL, locked_by = NULL
      WHERE status = 'active' AND locked_at < now() - ${staleMs} * interval '1 millisecond'
        AND NOT (id = ANY(${excludeIds}::bigint[]))
-    RETURNING status`;
+    RETURNING status, queue, payload, restaurant_id::text`;
+  const ocrDead = rows.filter((r) => r.status === 'failed' && r.queue === 'ocr-invoice');
+  if (ocrDead.length) await markStalledOcrInvoicesFailed(sql, ocrDead);
   return {
     requeued: rows.filter((r) => r.status === 'queued').length,
     failed: rows.filter((r) => r.status === 'failed').length,
   };
+}
+
+/**
+ * An ocr-invoice job dead-lettered by stall recovery (its runner died twice
+ * mid-read — e.g. a serverless function hit maxDuration) never reached the job's
+ * own failure handling, so its invoice stayed 'ocr_pending' and the receiver's
+ * screen spun forever. Give the invoice the same terminal state a failed read
+ * gets (apps/worker ocrInvoice.ts markOcrFailed): status 'parsed', confidence 0,
+ * `raw.ocrFailed` with reason 'stalled', no lines. Only while still
+ * 'ocr_pending', only the job's own tenant. A failure here is logged, never
+ * thrown: the queue's maintenance must keep running.
+ */
+async function markStalledOcrInvoicesFailed(
+  sql: Sql,
+  jobs: Array<{ payload: unknown; restaurant_id: string | null }>,
+): Promise<void> {
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  for (const j of jobs) {
+    const invoiceId = (j.payload as { invoiceId?: unknown } | null)?.invoiceId;
+    if (typeof invoiceId !== 'string' || !UUID.test(invoiceId) || !j.restaurant_id) continue;
+    try {
+      await sql`
+        UPDATE invoices
+           SET status = 'parsed', ocr_confidence = 0, updated_at = now(),
+               ocr_payload = jsonb_build_object(
+                 'provider', 'claude_vision',
+                 'raw', jsonb_build_object('ocrFailed', true, 'reason', 'stalled'),
+                 'reconciledAt', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
+         WHERE id = ${invoiceId}::uuid AND restaurant_id = ${j.restaurant_id}::uuid AND status = 'ocr_pending'`;
+    } catch (err) {
+      console.warn(`[queue] could not mark the invoice of a stalled OCR job failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
 }
 
 export interface QueueCounts {
