@@ -138,7 +138,7 @@ describe('can() / requireCap()', () => {
       expect(err, `${role}.${proc}`).toBeInstanceOf(TRPCError);
       expect((err as TRPCError).code).toBe('FORBIDDEN');
       expect((err as TRPCError & { cause: { appCode: string; appParams: unknown } }).cause).toMatchObject({
-        appCode: 'auth.forbidden',
+        appCode: 'capability.required',
         appParams: { capability: proc === 'viaCan' ? 'order.send' : 'money.view' },
       });
     }

@@ -42,6 +42,7 @@ export const ACT_ON: Readonly<Record<UserRole, ReadonlyArray<Routing>>> = {
   owner: ['owner', 'manager', 'bookkeeper', 'unrouted'],
   manager: ['manager', 'unrouted'],
   bookkeeper: ['bookkeeper'],
+  // Parity with wave 1 only — unreachable via the engine; removing them is a separate change.
   receiver: ['receiver'],
   chef: ['chef'],
 };

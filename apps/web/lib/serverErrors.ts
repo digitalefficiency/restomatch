@@ -33,6 +33,7 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'entitlement.required': 'entitlementRequired',
   'auth.unauthorized': 'unauthorized',
   'auth.forbidden': 'forbidden',
+  'capability.required': 'forbidden',
   'input.invalid': 'invalidInput',
   'invoice.numberTaken': 'invoiceNumberTaken',
   // Wave-1 (S15) codes: generic fallbacks here; the owning screens (growth /

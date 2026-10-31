@@ -253,14 +253,13 @@ export function requireFeature(feature: FeatureKey) {
 /**
  * Capability gate as a composable middleware (no meta): `anyTier.use(requireCap('order.send'))`.
  * Prefer `can()`, which also records `meta.cap` for the procedure walk.
- * FORBIDDEN with appCode `auth.forbidden` + `appParams.capability` (interim
- * until the dedicated `capability.required` code lands in errors.ts).
+ * FORBIDDEN with appCode `capability.required` + `appParams.capability`.
  */
 export function requireCap(cap: Cap) {
   return t.middleware(({ ctx, next }) => {
     const session = ctx.session as MemberSession | null;
     if (!session?.role || !hasCap(session.role, cap)) {
-      throw appError('FORBIDDEN', 'auth.forbidden', `Required capability: ${cap}`, {
+      throw appError('FORBIDDEN', 'capability.required', `Required capability: ${cap}`, {
         capability: cap,
       });
     }
