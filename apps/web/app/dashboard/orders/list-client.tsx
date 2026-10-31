@@ -9,6 +9,11 @@ import { EmptyState, ErrorNotice, Input, LinkButton, LoadMore, Skeleton, cn } fr
 import { useT } from '@/lib/i18n/client';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { OrdersTable, type OrderStatus } from './orders-table';
+import { ViewTabs } from '@/lib/components/table/ViewTabs';
+
+/** Mirrors packages/api/src/orders/views.ts ORDER_VIEWS (the server owns the definitions). */
+const ORDER_VIEWS = ['action', 'today', 'late', 'drafts', 'week'] as const;
+type OrderView = (typeof ORDER_VIEWS)[number];
 import { matchesOrderSearch } from './order-logic';
 import { sumVisibleAgorot } from './w2-logic';
 import { useLocale } from '@/lib/i18n/client';
@@ -47,6 +52,9 @@ export function OrdersList({
 }) {
   const t = useT(ordersNs);
   const [status, setStatus] = useState<StatusFilter>('all');
+  /** W2-06 §5.6: the queue view ('all' = no view); a view and a status filter never stack. */
+  const [view, setView] = useState<OrderView | 'all'>('all');
+  const counts = trpc.orders.viewCounts.useQuery(undefined, { retry: false });
   // Pages past the first, fetched by offset (orders.list caps `limit` at 100, so
   // growing one query's limit broke "load more" at the third page).
   const [more, setMore] = useState<Order[]>([]);
@@ -57,9 +65,9 @@ export function OrdersList({
   const utils = trpc.useUtils();
 
   const q = trpc.orders.list.useQuery(
-    { ...queryOf(status), limit: PAGE },
+    { ...queryOf(status), ...(view !== 'all' ? { view } : {}), limit: PAGE },
     {
-      initialData: status === 'all' ? initial : undefined,
+      initialData: status === 'all' && view === 'all' ? initial : undefined,
       placeholderData: (prev) => prev,
     },
   );
@@ -68,7 +76,7 @@ export function OrdersList({
   // A cancelled order that never went to the supplier (a replaced wizard draft, an
   // abandoned draft) is not an order: it stays out of "הכל" and shows under "בוטלו".
   const all = [...first, ...more.filter((o) => !seen.has(o.id))].filter(
-    (o) => status !== 'all' || o.status !== 'cancelled' || o.sentAt != null,
+    (o) => status !== 'all' || view !== 'all' || o.status !== 'cancelled' || o.sentAt != null,
   );
   const orders = query.trim() ? all.filter((o) => matchesOrderSearch(o, query)) : all;
   const hasMore = (lastPage ?? first.length) >= PAGE;
@@ -77,7 +85,12 @@ export function OrdersList({
     setLoadingMore(true);
     setMoreError(false);
     try {
-      const page = await utils.orders.list.fetch({ ...queryOf(status), limit: PAGE, offset: first.length + more.length });
+      const page = await utils.orders.list.fetch({
+        ...queryOf(status),
+        ...(view !== 'all' ? { view } : {}),
+        limit: PAGE,
+        offset: first.length + more.length,
+      });
       setMore((m) => [...m, ...page]);
       setLastPage(page.length);
     } catch {
@@ -107,6 +120,20 @@ export function OrdersList({
           {t('list.searchScope')}
         </p>
       </div>
+      <ViewTabs
+        views={[
+          { id: 'all', label: t('w2.views.all') },
+          ...ORDER_VIEWS.map((v) => ({ id: v, label: t(`w2.views.${v}`), count: counts.data?.[v] })),
+        ]}
+        active={view}
+        onChange={(id) => {
+          setView(id as OrderView | 'all');
+          setStatus('all');
+          setMore([]);
+          setLastPage(null);
+          setMoreError(false);
+        }}
+      />
       <div role="group" aria-label={t('filters.label')} className="flex gap-1 overflow-x-auto pb-1">
         {FILTERS.map((f) => (
           <button
@@ -115,6 +142,7 @@ export function OrdersList({
             aria-pressed={status === f}
             onClick={() => {
               setStatus(f);
+              setView('all');
               setMore([]);
               setLastPage(null);
               setMoreError(false);

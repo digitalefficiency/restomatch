@@ -33,6 +33,8 @@ import { forRole, orderWriteProcedure } from '../orders/access';
 import { buildOrderGuide } from '../orders/guide';
 import { buildSupplierBoard } from '../orders/board';
 import { loadDraft, openDraft as openServerDraft, saveDraft as saveServerDraft } from '../orders/drafts';
+import { ORDER_VIEWS, orderViewConditions } from '../orders/views';
+import { buildThreeWay } from '../orders/threeWay';
 import { assertNoReceipt, lockPo, markSentManually as markPoSentManually, supplierAddress } from '../orders/manualSend';
 import { assertPoOwned, assertSupplierOwned } from '../tenant';
 import { getEntitlements } from '../entitlements';
@@ -500,6 +502,8 @@ export const ordersRouter = router({
           supplierId: z.string().uuid().optional(),
           /** Open POs by their goods receipt: not yet received / partially / fully received. */
           delivery: z.enum(['awaiting', 'partial', 'received']).optional(),
+          /** W2-06 §5.6 queue views (same definition as orders.viewCounts). */
+          view: z.enum(ORDER_VIEWS).optional(),
           limit: z.number().int().min(1).max(100).default(50),
           offset: z.number().int().min(0).default(0),
         })
@@ -511,6 +515,9 @@ export const ordersRouter = router({
       if (input?.status) conds.push(eq(purchaseOrders.status, input.status));
       if (input?.supplierId) conds.push(eq(purchaseOrders.supplierId, input.supplierId));
       const receipt = latestReceiptStatus(restaurantId);
+      if (input?.view) {
+        conds.push(orderViewConditions(restaurantId, await restaurantTz(ctx.db, restaurantId))[input.view]);
+      }
       if (input?.delivery) {
         conds.push(inArray(purchaseOrders.status, [...OPEN_PO_STATUSES]));
         if (input.delivery === 'received') conds.push(sql`${receipt} = 'completed'`);
@@ -1415,5 +1422,31 @@ export const ordersRouter = router({
       });
       const text = `תיקון להזמנה #${poRefOf(input.poId)}: ${parts.join(', ')}`;
       return { poId: input.poId, text, cutoffAt: derived?.nextOrderCutoffAt.toISOString() ?? null };
+    }),
+
+  /** Live counts for the list's queue views (§5.6): one query, the list's own definitions. */
+  viewCounts: memberProcedure.query(async ({ ctx }) => {
+    const restaurantId = ctx.session.restaurantId;
+    const v = orderViewConditions(restaurantId, await restaurantTz(ctx.db, restaurantId));
+    const [row] = await ctx.db
+      .select({
+        action: sql<number>`count(*) filter (where ${v.action})::int`,
+        today: sql<number>`count(*) filter (where ${v.today})::int`,
+        late: sql<number>`count(*) filter (where ${v.late})::int`,
+        drafts: sql<number>`count(*) filter (where ${v.drafts})::int`,
+        week: sql<number>`count(*) filter (where ${v.week})::int`,
+      })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.restaurantId, restaurantId));
+    return { action: row?.action ?? 0, today: row?.today ?? 0, late: row?.late ?? 0, drafts: row?.drafts ?? 0, week: row?.week ?? 0 };
+  }),
+
+  /** The order's ordered · received · billed · gap ₪ per line (§5.5). ₪ stripped for the receiver. */
+  threeWay: memberProcedure
+    .input(z.object({ poId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      await assertPoOwned(ctx.db, input.poId, restaurantId);
+      return forRole(ctx.session.role, await buildThreeWay(ctx.db, { restaurantId, poId: input.poId }));
     }),
 });

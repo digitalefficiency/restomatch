@@ -193,6 +193,22 @@ test.describe('phone (he 390, touch)', () => {
   });
 });
 
+test.describe('desktop 1440 (he)', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test('list views carry live counts; "טיוטות" shows exactly its count of rows', async ({ page }) => {
+    await asManager(page);
+    await page.goto('/dashboard/orders');
+    const drafts = page.locator('[data-view="drafts"]');
+    await expect(drafts).toBeVisible({ timeout: 30_000 });
+    await expect(drafts).toContainText(/\d/, { timeout: 15_000 });
+    const count = Number((await drafts.innerText()).replace(/\D+/g, ' ').trim().split(' ').pop());
+    await drafts.click();
+    await expect(page.getByTestId('order-row').first().or(page.getByText(M.list.emptyFilteredTitle))).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('order-row')).toHaveCount(Math.min(count, 50));
+  });
+});
+
 test('receiver: a shared WhatsApp order opens the in-shell forward page (no 403/404, no ₪, no drafting)', async ({ page }) => {
   const url = test.info().project.use.baseURL ?? 'http://localhost:3100';
   await page.context().addCookies([...receiverCookies, { name: 'rm_cookie_consent', value: 'necessary', url }]);

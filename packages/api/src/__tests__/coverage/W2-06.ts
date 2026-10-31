@@ -12,6 +12,8 @@ const coverage: CoverageFragment = {
   'orders.markSentManually': "attack — orders-w2-06.attack.test.ts: B's poId → NOT_FOUND, B's draft stays a draft",
   'orders.addOrderLine': "attack — orders-w2-06.attack.test.ts: B's poId or B's productId → NOT_FOUND, no line written",
   'orders.sendMany': "attack — orders-w2-06.attack.test.ts: B's poId in the batch → NOT_FOUND, nothing sent or queued",
+  'orders.viewCounts': "isolation — orders-views.test.ts: A's view counts never include B's orders",
+  'orders.threeWay': "attack — orders-three-way.test.ts: A asking for B's PO 3-way view → NOT_FOUND",
   'orders.amendSent': "attack — orders-w2-06.attack.test.ts: B's poId or productId → NOT_FOUND, no amendment text",
 };
 export default coverage;
