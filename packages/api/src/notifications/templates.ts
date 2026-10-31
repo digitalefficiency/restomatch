@@ -501,29 +501,47 @@ export function endOfDayReportEmail(args: {
 /* ─────────────────────── invoice could not be read (G-06) ───────── */
 
 /**
- * A terminal OCR failure, for the uploader and the owner/manager members (G-06).
- * Carries no ₪ at all, so it is safe for every role. Pass `supplierName`/`fileName`
- * only to recipients who may see them.
+ * A terminal OCR failure (G-06). Two audiences: `uploader` (what failed + what to do next)
+ * and `managers` (who uploaded + what failed). Carries no ₪ at all, so it is safe for every
+ * role. The supplier is named only when `showSupplier` is not false.
  */
 export function invoiceOcrFailedEmail(args: {
+  audience?: 'uploader' | 'managers';
   supplierName?: string | null;
   fileName?: string | null;
+  /** The uploader's display name (managers version). */
+  uploaderName?: string | null;
   /** Short, human reason (already localised by the caller), e.g. "הצילום מטושטש". */
   reason?: string | null;
+  /** Default true. Pass false for a recipient who may not see the supplier. */
+  showSupplier?: boolean;
   url?: string;
   locale?: EmailLocale;
 }): RenderedEmail {
   const l = loc(args.locale);
   const c = copyOf(l).invoiceOcrFailed;
-  const vars = { supplier: args.supplierName ?? '', file: args.fileName ?? '', reason: args.reason ?? '' };
-  const subject = args.supplierName ? txt(l, c.subjectSupplier, vars) : c.subject;
-  const body = args.fileName ? c.bodyFile : c.body;
+  const supplier = args.showSupplier === false ? null : args.supplierName;
+  const vars = {
+    supplier: supplier ?? '',
+    file: args.fileName ?? '',
+    reason: args.reason ?? '',
+    uploader: args.uploaderName || c.someone,
+  };
+  const subject = supplier ? txt(l, c.subjectSupplier, vars) : c.subject;
+  const body =
+    args.audience === 'managers'
+      ? args.fileName
+        ? c.managersFile
+        : c.managers
+      : args.fileName
+        ? c.uploaderFile
+        : c.uploader;
   const html = renderEmail({
     locale: l,
     accent: COLORS.danger,
     preview: txt(l, body, vars),
     heading: c.heading,
-    bodyHtml: `${P}${htm(l, body, vars, ['file'])}</p>${args.reason ? `${NOTE}${htm(l, c.reason, vars)}</p>` : ''}`,
+    bodyHtml: `${P}${htm(l, body, vars, ['file', 'uploader'])}</p>${args.reason ? `${NOTE}${htm(l, c.reason, vars)}</p>` : ''}`,
     cta: args.url ? { label: c.cta, url: args.url } : undefined,
   });
   const text = lines(

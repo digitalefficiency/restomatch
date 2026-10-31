@@ -115,6 +115,18 @@ describe('EMAIL_COPY (W2-13)', () => {
     expect(taskNoticeEmail({ title: 'T', amountIls: '‏50 ₪' }).html).toContain('‏50 ₪');
   });
 
+  it('OCR failure: uploader vs managers audience, supplier hidden when showSupplier is false', () => {
+    const up = invoiceOcrFailedEmail({ audience: 'uploader', fileName: 'scan.pdf' });
+    expect(up.text).toContain('צלמו את החשבונית שוב, או שהמנהלים יטפלו בה');
+    const mg = invoiceOcrFailedEmail({ audience: 'managers', uploaderName: 'דנה', supplierName: 'תנובה' });
+    expect(mg.text).toContain('שהועלתה על ידי דנה');
+    expect(mg.subject).toContain('תנובה');
+    expect(invoiceOcrFailedEmail({ audience: 'managers' }).text).toContain('מישהו מהצוות');
+    const hidden = invoiceOcrFailedEmail({ audience: 'managers', supplierName: 'תנובה', showSupplier: false });
+    expect(hidden.subject + hidden.html + hidden.text).not.toContain('תנובה');
+    expect(invoiceOcrFailedEmail({ audience: 'managers', uploaderName: 'Dana', locale: 'en' }).text).toContain('uploaded by Dana');
+  });
+
   it('approval e-mail: claimable ₪ and the invoice deep link (W2-04)', () => {
     const e = approvalNeededEmail({
       supplierName: 'תנובה',
