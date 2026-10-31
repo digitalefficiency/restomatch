@@ -654,9 +654,19 @@ export function documentFacts(extraction: unknown): DocumentFacts {
   const day = (v: unknown) => (typeof v === 'string' && LOCAL_DAY.test(v.trim()) ? v.trim() : null);
   const notes = Array.isArray(e.deliveryNotes) ? e.deliveryNotes : [];
   const byNumber = new Map<string, { number: string; printed?: string }>();
+  // Evidence the canonical numbers alone miss: a raw entry that is a range or a
+  // list ('1001-1005', '12, 14'), or ≥ 2 distinct alphanumeric raw entries.
+  const rawEntries = new Set<string>();
+  let rangeOrList = false;
   for (const n of notes) {
     const v = typeof n === 'object' && n !== null ? (n as { number?: unknown }).number : n;
     const number = canonicalNoteNumber(v);
+    if (typeof v === 'string' || typeof v === 'number') {
+      const r = String(v).trim().toLowerCase();
+      // Keyed by the canonical number when there is one: '12345' and 'ת.מ. 12345' are one note.
+      if (/[a-z0-9]/i.test(r)) rawEntries.add(number ?? r);
+      if (!number && /\d+\D+\d+/.test(r)) rangeOrList = true;
+    }
     if (!number || byNumber.has(number)) continue;
     const printed = typeof v === 'string' && v.trim() !== number ? v.trim().slice(0, 64) : undefined;
     byNumber.set(number, printed ? { number, printed } : { number });
@@ -668,7 +678,9 @@ export function documentFacts(extraction: unknown): DocumentFacts {
     periodStart,
     periodEnd,
     deliveryNotes: [...byNumber.values()],
-    consolidatedEvidence: kind === 'tax_invoice' && (byNumber.size >= 2 || periodStart !== null || periodEnd !== null),
+    consolidatedEvidence:
+      kind === 'tax_invoice' &&
+      (byNumber.size >= 2 || rawEntries.size >= 2 || rangeOrList || periodStart !== null || periodEnd !== null),
   };
 }
 
@@ -686,6 +698,7 @@ export function normalizeBusinessId(v: unknown): string | null {
   if (digits.length === 10 && digits.startsWith('0')) digits = digits.slice(1);
   if (digits.length < 8 || digits.length > 9) return null;
   const id = digits.padStart(9, '0');
+  if (/^0+$/.test(id)) return null; // passes the check digit, but is no one's ח.פ.
   let sum = 0;
   for (let k = 0; k < 9; k++) {
     const p = Number(id[k]) * (k % 2 === 0 ? 1 : 2);

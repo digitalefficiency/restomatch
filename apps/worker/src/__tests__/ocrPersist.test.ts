@@ -93,6 +93,8 @@ describe('documentFacts', () => {
     expect(normalizeBusinessId('514778123')).toBeNull(); // check digit fails → unknown, not a mismatch
     expect(normalizeBusinessId('0541234567')).toBeNull(); // a phone number: 10 significant digits
     expect(normalizeBusinessId(undefined)).toBeNull();
+    // All zeros passes the check digit but is no one's ח.פ. (S14 semantics).
+    for (const zeros of ['000000000', '00000000', '0000000000', '00-000000-0']) expect(normalizeBusinessId(zeros), zeros).toBeNull();
   });
   it('delivery-note numbers are canonical (review #9): label stripped, ranges and lists rejected', () => {
     expect(canonicalNoteNumber('ת.מ. 9001')).toBe('9001');
@@ -110,6 +112,13 @@ describe('documentFacts', () => {
     expect(documentFacts({ deliveryNotes: [{ number: '1' }, { number: '2' }] })).toMatchObject({ kind: 'tax_invoice', consolidatedEvidence: true });
     expect(documentFacts({ billingPeriod: { from: '2026-10-01', to: '2026-10-31' } })).toMatchObject({ kind: 'tax_invoice', consolidatedEvidence: true });
     expect(documentFacts({ deliveryNotes: [{ number: '1' }] }).consolidatedEvidence).toBe(false);
+    // A raw range or list, or ≥ 2 distinct alphanumeric entries, is evidence too (delta review, optional).
+    expect(documentFacts({ deliveryNotes: [{ number: '1001-1005' }] }).consolidatedEvidence).toBe(true);
+    expect(documentFacts({ deliveryNotes: ['12, 14'] }).consolidatedEvidence).toBe(true);
+    expect(documentFacts({ deliveryNotes: [{ number: 'A12' }, { number: 'B7' }] }).consolidatedEvidence).toBe(true);
+    // …but one note printed twice (with and without its prefix) is still one note.
+    expect(documentFacts({ deliveryNotes: [{ number: '12345' }, { number: 'ת.מ. 12345' }] }).consolidatedEvidence).toBe(false);
+    expect(documentFacts({ deliveryNotes: [{ number: 'A12' }] }).consolidatedEvidence).toBe(false);
     expect(documentFacts(consolidated).consolidatedEvidence).toBe(false); // already consolidated
   });
   it('estimated cost from the list price; an unknown model is not guessed', () => {
@@ -249,7 +258,9 @@ describe('processOcrInvoice persistence (DB)', () => {
   it("another tenant's supplier row is never consulted", async () => {
     const [other] = await db.insert(restaurants).values({ name: 'OCR persist other' }).returning();
     try {
-      const [s2] = await db.insert(suppliers).values({ restaurantId: other!.id, name: 'x', businessId: '599999990' }).returning();
+      // A VALID ח.פ. (599999992 passes the check digit), so a cross-tenant read
+      // would really flag a mismatch — the test is not vacuous.
+      const [s2] = await db.insert(suppliers).values({ restaurantId: other!.id, name: 'x', businessId: '599999992' }).returning();
       h.result = { ...base, supplier: { name: 'x', businessId: '511111114' } };
       // An invoice of OUR tenant pointing at the other tenant's supplier id (a corrupt row).
       const [inv] = await db
@@ -258,6 +269,11 @@ describe('processOcrInvoice persistence (DB)', () => {
         .returning();
       await run(inv!.id);
       expect(await raw(inv!.id)).not.toHaveProperty('reviewReasons');
+      // Positive control: the same pair on OUR supplier is a mismatch.
+      await db.update(suppliers).set({ businessId: '599999992' }).where(eq(suppliers.id, supplierId));
+      const ours = await newInvoice();
+      await run(ours);
+      expect((await raw(ours)).reviewReasons).toEqual(['supplier_id_mismatch']);
     } finally {
       await db.delete(restaurants).where(eq(restaurants.id, other!.id));
     }
