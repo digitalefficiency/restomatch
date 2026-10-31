@@ -15,7 +15,7 @@ import {
   type MatchCandidate,
   type MatcherThresholds,
 } from './types';
-import { aliasProvenance, MACHINE_MAX_CONFIDENCE } from './linkPolicy';
+import { aliasProvenance, MACHINE_MAX_CONFIDENCE, normalizeLinkName } from './linkPolicy';
 
 /** A stored alias's confidence (numeric(4,3) string) as a number; a missing one reads as the column default. */
 function storedConfidence(c: string | null | undefined): number {
@@ -491,7 +491,17 @@ export async function matchProductTopN(
     if (!candidates.some((c) => c.productId === f.productId)) candidates.push(f);
   }
 
-  return candidates.sort((a, b) => b.confidence - a.confidence).slice(0, limit);
+  // G-08 (owner decision 31.10): a candidate whose normalized name is IDENTICAL
+  // to the line's is an exact key — every candidate here is already scoped to
+  // THIS supplier (the false-leak guard), so a same-name product of another
+  // supplier never reaches this point. Anything less stays a name guess.
+  const wanted = normalizeLinkName(input.rawDescription);
+  const marked = candidates.map((c) =>
+    normalizeLinkName(c.canonicalName) === wanted
+      ? { ...c, confidence: Math.max(c.confidence, MACHINE_MAX_CONFIDENCE), provenance: 'exactKey' as const }
+      : c,
+  );
+  return marked.sort((a, b) => b.confidence - a.confidence).slice(0, limit);
 }
 
 async function topNByEmbedding(

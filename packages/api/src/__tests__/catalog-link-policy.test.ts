@@ -5,9 +5,10 @@ import {
   productAliases,
   products,
   supplierCatalogItems,
+  suppliers,
   testDbUrl,
 } from '@restomatch/db';
-import { decideLink, MockEmbeddingProvider, type LinkCandidate } from '@restomatch/catalog';
+import { decideLink, matchProductTopN, MockEmbeddingProvider, type LinkCandidate } from '@restomatch/catalog';
 import { runOcrPipeline, StubOcrProvider } from '@restomatch/ocr';
 // Test-only deep imports: the default decider + the OCR stub fixture (the stub
 // provider only; real OCR is credential-gated).
@@ -183,5 +184,53 @@ describe('G-08 golden cases through the real matcher', () => {
       .from(productAliases)
       .where(eq(productAliases.supplierNameRaw, 'שורה עם מק״ט'));
     expect(learned).toEqual([{ confidence: '0.999' }]);
+  });
+});
+
+describe('G-08 identical same-supplier name = exact key (owner decision 31.10)', () => {
+  async function namedProduct(supplierId: string, name: string) {
+    const [p] = await db
+      .insert(products)
+      .values({ restaurantId: A.restaurantId, supplierId, canonicalName: name, defaultUnit: 'ק״ג' })
+      .returning({ id: products.id });
+    await db.insert(supplierCatalogItems).values({
+      restaurantId: A.restaurantId,
+      supplierId,
+      productId: p!.id,
+      supplierNameRaw: name,
+      unit: 'ק״ג',
+    });
+    return p!.id;
+  }
+  const ocrLink = async (supplierId: string, raw: string) => {
+    const r = await runOcrPipeline('img', {
+      documentAi: new StubOcrProvider('document_ai', AGREEMENT_PERFECT.docAi),
+      claude: new StubOcrProvider('claude_vision', AGREEMENT_PERFECT.claude),
+      catalogMatcher: async () => matchProductTopN(db, { restaurantId: A.restaurantId, supplierId, rawDescription: raw }, 3),
+      decideLink,
+    });
+    return r.reconciled.lines[0]?.productId ?? null;
+  };
+
+  it('same supplier + same normalized name → auto (import and OCR)', async () => {
+    const id = await namedProduct(A.supplierId, 'גבינה צהובה 28%');
+    expect(await ocrLink(A.supplierId, 'גבינה  צהובה 28% ')).toBe(id);
+    const res = await commitCatalogRows(
+      db,
+      { restaurantId: A.restaurantId, supplierId: A.supplierId },
+      [row({ supplierNameRaw: 'גבינה צהובה 28% ' })],
+      embedder,
+    );
+    expect(res.ambiguous).toEqual([]);
+    expect(res.createdProducts).toBe(0);
+  });
+
+  it('a different supplier with the same name → not linked', async () => {
+    await namedProduct(A.supplierId, 'גבינה צהובה 28%');
+    const [other] = await db
+      .insert(suppliers)
+      .values({ restaurantId: A.restaurantId, name: 'מחלבת אחר' })
+      .returning({ id: suppliers.id });
+    expect(await ocrLink(other!.id, 'גבינה צהובה 28%')).toBeNull();
   });
 });

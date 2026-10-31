@@ -38,8 +38,9 @@ const EXACT_ALIAS_MIN_CONFIDENCE = 0.999;
 
 /**
  * Default when no policy is injected: auto-link ONLY what is provably an exact
- * key — a barcode, or a SKU/alias hit whose stored confidence is ≥ 0.999 (a
- * person's or an exact-key link) and is not marked a guess. A name match
+ * key — a barcode, a SKU/alias hit whose stored confidence is ≥ 0.999 (a
+ * person's or an exact-key link) and is not marked a guess, or a name the
+ * matcher marked `exactKey` (identical normalized name, same supplier). A name match
  * (embedding / fuzzy), however confident, stays unlinked for review. Every
  * 'auto' here is also 'auto' under `decideLink` (parity-tested in the api).
  */
@@ -51,7 +52,9 @@ export const defaultOcrLinkDecider: OcrLinkDecider = (candidates) => {
     !guessed &&
     (best.matchedBy === 'barcode' ||
       ((best.matchedBy === 'sku' || best.matchedBy === 'alias') &&
-        best.confidence >= EXACT_ALIAS_MIN_CONFIDENCE));
+        best.confidence >= EXACT_ALIAS_MIN_CONFIDENCE) ||
+      // An identical same-supplier name the matcher marked as an exact key.
+      (best.provenance === 'exactKey' && best.confidence >= EXACT_ALIAS_MIN_CONFIDENCE));
   return exact ? { decision: 'auto', productId: best.productId } : { decision: 'review', productId: null };
 };
 

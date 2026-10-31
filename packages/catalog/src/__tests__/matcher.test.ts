@@ -726,6 +726,20 @@ describe('matchProduct (composite)', () => {
 });
 
 describe('matchProductTopN', () => {
+  it('G-08: an identical normalized name for the SAME supplier is an exact key; another supplier gets no link', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id]);
+    const same = await matchProductTopN(db, { restaurantId, supplierId, rawDescription: '  עגבניה   שרי ' }, 3);
+    expect(same[0]).toMatchObject({ productId: tomato.id, matchedBy: 'fuzzy', provenance: 'exactKey' });
+    expect(same[0]!.confidence).toBeGreaterThanOrEqual(0.999);
+    // A longer, merely similar name stays a guess.
+    const similar = await matchProductTopN(db, { restaurantId, supplierId, rawDescription: 'עגבניה שרי תמר' }, 3);
+    expect(similar.find((c) => c.productId === tomato.id)?.provenance).toBeUndefined();
+    // Same name, a supplier that does not sell it: no candidate at all (false-leak guard).
+    const other = await matchProductTopN(db, { restaurantId, supplierId: altSupplierId, rawDescription: 'עגבניה שרי' }, 3);
+    expect(other).toEqual([]);
+  });
+
   it('returns multiple candidates ranked by confidence', async () => {
     const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
     await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);

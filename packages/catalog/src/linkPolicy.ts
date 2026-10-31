@@ -85,11 +85,30 @@ export interface LinkDecision<C extends LinkCandidate = LinkCandidate> {
 
 const CONFIRMED: ReadonlySet<LinkProvenance> = new Set(['human', 'exactKey', 'newProduct']);
 
-/** Exact key: SKU/barcode, or an alias a person / exact key / new product made — never a guess. */
+/**
+ * Exact key: SKU/barcode; an alias a person / exact key / new product made; or
+ * a name candidate the matcher marked `exactKey` because its normalized name is
+ * IDENTICAL to the line's, for the SAME supplier (owner decision 31.10). Never a guess.
+ */
 export function isExactKey(c: LinkCandidate): boolean {
   if (c.provenance === 'guess' || c.provenance === 'legacy') return false;
   if (c.matchedBy === 'sku' || c.matchedBy === 'barcode') return true;
-  return c.matchedBy === 'alias' && c.provenance !== undefined && CONFIRMED.has(c.provenance);
+  return c.provenance !== undefined && CONFIRMED.has(c.provenance);
+}
+
+/**
+ * The name normalization for the identical-name exact key: trim, lower-case,
+ * one space, Hebrew gershayim/geresh folded to ASCII quotes. Nothing fuzzier —
+ * "פלפל אדום חריף" is NOT "פלפל אדום", and a word swap is not identical.
+ */
+export function normalizeLinkName(name: string): string {
+  return name
+    .normalize('NFC')
+    .replace(/[\u05F4\u201C\u201D]/g, '"')
+    .replace(/[\u05F3\u2018\u2019]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 }
 
 /** Best first (stable on ties), one entry per product, at most MAX_SUGGESTIONS. */

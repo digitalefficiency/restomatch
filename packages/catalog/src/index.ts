@@ -23,6 +23,7 @@ export {
   MAX_SUGGESTIONS,
   decideLink,
   isExactKey,
+  normalizeLinkName,
   rankSuggestions,
   aliasProvenance,
   provenanceConfidence,

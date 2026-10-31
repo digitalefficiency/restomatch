@@ -5,6 +5,7 @@ import {
   aliasProvenance,
   decideLink,
   isExactKey,
+  normalizeLinkName,
   provenanceConfidence,
   rankSuggestions,
   type LinkCandidate,
@@ -176,5 +177,29 @@ describe('G-08 aliasProvenance — interim encoding and the G-03 source column',
     expect(provenanceConfidence('exactKey')).toBe('0.999');
     expect(provenanceConfidence('newProduct')).toBe('0.999');
     expect(aliasProvenance({ confidence: provenanceConfidence('newProduct') })).toBe('exactKey');
+  });
+});
+
+describe('G-08 identical same-supplier name = exact key (owner decision 31.10)', () => {
+  it('a name candidate the matcher marked exactKey auto-links, even with an unknown unit (OCR)', () => {
+    const c = cand(0.999, 'fuzzy', 'exactKey');
+    expect(isExactKey(c)).toBe(true);
+    expect(decideLink([c], { unitPack: 'unknown' })).toMatchObject({ decision: 'auto', productId: 'p-top' });
+    expect(decideLink([c], { unitPack: 'mismatch' }).decision).toBe('review');
+  });
+
+  it('an unmarked name match at 1.0 is still not an exact key', () => {
+    expect(isExactKey(cand(1, 'fuzzy'))).toBe(false);
+    expect(decideLink([cand(1, 'fuzzy')], { unitPack: 'unknown' }).decision).toBe('review');
+  });
+
+  it.each([
+    ['  פלפל   אדום ', 'פלפל אדום', true],
+    ['חלב 3% 1 ל״ט', 'חלב 3% 1 ל"ט', true],
+    ['Cherry Tomato', 'cherry tomato', true],
+    ['פלפל אדום חריף', 'פלפל אדום', false],
+    ['אדום פלפל', 'פלפל אדום', false],
+  ] as const)('normalizeLinkName(%s) ≡ normalizeLinkName(%s): %s', (a, b, same) => {
+    expect(normalizeLinkName(a) === normalizeLinkName(b)).toBe(same);
   });
 });
