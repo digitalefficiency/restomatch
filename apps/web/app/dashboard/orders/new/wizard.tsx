@@ -678,6 +678,8 @@ export function NewOrderWizard({
           changed = true;
           return { ...l, unitPriceExpected: m.unitPriceExpected ?? undefined };
         });
+        // The server priced these lines itself: their filled prices are already saved.
+        lastSaved.current = `${supplierId}|${deliveryDate}|${JSON.stringify(savableLines(changed ? next : ls))}`;
         return changed ? next : ls;
       });
       setServerSave('saved');
