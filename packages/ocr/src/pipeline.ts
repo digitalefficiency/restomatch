@@ -35,10 +35,11 @@ export async function runOcrPipeline(
   // added cost and latency but no information (the reconciler sees full
   // agreement either way).
   const singleProvider = options.documentAi === options.claude;
+  const xopts = options.signal ? { signal: options.signal } : undefined;
   const [documentAi, claude] =
     singleProvider
-      ? await options.claude.extract(image).then((r) => [r, r] as const)
-      : await Promise.all([options.documentAi.extract(image), options.claude.extract(image)]);
+      ? await options.claude.extract(image, xopts).then((r) => [r, r] as const)
+      : await Promise.all([options.documentAi.extract(image, xopts), options.claude.extract(image, xopts)]);
 
   const reconciledResult = reconcile(documentAi, claude);
   const { result: reconciledInvoice, conflicts } = reconciledResult;

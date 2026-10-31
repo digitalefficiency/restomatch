@@ -18,7 +18,8 @@ export interface PoDocumentParser {
 
 export interface OcrProvider {
   readonly id: OcrProviderId;
-  extract(image: ImageSource): Promise<InvoiceOcrResult>;
+  /** `signal` cancels the in-flight read (ClaudeVision → OcrExtractionError 'aborted'). */
+  extract(image: ImageSource, opts?: OcrExtractOptions): Promise<InvoiceOcrResult>;
 }
 
 export interface OcrConflict {
@@ -97,6 +98,12 @@ export interface OcrPipelineOptions {
   reviewThreshold?: number;
   /** The supplier's ח״פ on file; a different printed one adds 'supplier_id_mismatch'. */
   expectedSupplierBusinessId?: string | null;
+  /** Cancels the provider reads (e.g. the worker's per-job deadline). */
+  signal?: AbortSignal;
+}
+
+export interface OcrExtractOptions {
+  signal?: AbortSignal;
 }
 
 export const DEFAULT_REVIEW_THRESHOLD = 0.85;

@@ -15,7 +15,7 @@
  */
 
 import { OcrExtractionError, type OcrUsage } from '../errors';
-import type { ImageSource, OcrProvider } from '../types';
+import type { ImageSource, OcrExtractOptions, OcrProvider } from '../types';
 import {
   joinTextBlocks,
   mustFetchBytes,
@@ -54,6 +54,11 @@ export interface ClaudeVisionConfig {
   effort?: OcrEffort;
   /** Request timeout in ms. Falls back to OCR_CLAUDE_TIMEOUT_MS, then DEFAULT_OCR_TIMEOUT_MS. */
   timeoutMs?: number;
+  /**
+   * SDK client retries. Default OCR_MAX_RETRIES (1); the worker passes 0 because
+   * its job queue already retries.
+   */
+  maxRetries?: number;
   /** Called with the API usage of each call (benchmark cost accounting). */
   onUsage?: (usage: { input_tokens?: number; output_tokens?: number }) => void;
 }
@@ -152,18 +157,22 @@ export class ClaudeVision implements OcrProvider {
     return EFFORTS.includes(e as OcrEffort) ? (e as OcrEffort) : DEFAULT_OCR_EFFORT;
   }
 
-  async extract(image: ImageSource): Promise<ClaudeInvoiceExtraction> {
+  async extract(image: ImageSource, opts: OcrExtractOptions = {}): Promise<ClaudeInvoiceExtraction> {
+    const { signal } = opts;
+    const aborted = () => new OcrExtractionError('aborted', 'the caller cancelled the read');
+    if (signal?.aborted) throw aborted();
     // LAZY import: keeps the package typecheck/test green when the SDK isn't
     // fetched in the sandbox. Typed loosely (any) on purpose (SDK 0.69).
     const { default: Anthropic } = (await import('@anthropic-ai/sdk')) as { default: any };
     const client = new Anthropic({
       apiKey: this.config.apiKey,
       timeout: this.config.timeoutMs ?? ocrTimeoutMs(),
-      maxRetries: OCR_MAX_RETRIES,
+      maxRetries: this.config.maxRetries ?? OCR_MAX_RETRIES,
     });
 
     const fetchBytes = this.config.fetchBytes ?? mustFetchBytes(image);
     const payload = await resolveImage(image, fetchBytes);
+    if (signal?.aborted) throw aborted();
 
     const model = this.model;
     const effort = this.effort;
@@ -172,7 +181,7 @@ export class ClaudeVision implements OcrProvider {
     // Opus 5.5 always thinks and effort is its only control; thinking blocks in
     // the answer are skipped by joinTextBlocks. Effort is ALWAYS sent — Opus
     // 5.5 would otherwise default to medium.
-    const response = await client.messages.create({
+    const request = {
       model,
       max_tokens: this.config.maxTokens ?? DEFAULT_MAX_TOKENS,
       output_config: { effort },
@@ -186,7 +195,16 @@ export class ClaudeVision implements OcrProvider {
           ],
         },
       ],
-    });
+    };
+    // The SDK's APIUserAbortError is unwrapped into OcrExtractionError('aborted');
+    // request options are only passed when there is a signal (unchanged call otherwise).
+    let response: any;
+    try {
+      response = signal ? await client.messages.create(request, { signal }) : await client.messages.create(request);
+    } catch (err) {
+      if (signal?.aborted || (err as { name?: string } | null)?.name === 'APIUserAbortError') throw aborted();
+      throw err;
+    }
     const elapsedMs = Date.now() - t0;
     this.config.onUsage?.(response.usage ?? {});
     const usage: OcrUsage = {
