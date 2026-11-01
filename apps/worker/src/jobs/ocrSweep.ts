@@ -64,31 +64,45 @@ export interface OcrSweepResult {
 export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepResult> {
   const staleBefore = new Date(now.getTime() - OCR_SWEEP_STALE_AFTER_MS);
   const notBefore = new Date(now.getTime() - OCR_SWEEP_MAX_AGE_MS);
+  // A scan is pending since it was registered — or since its latest RETAKE
+  // (registerInvoice: same invoice, new photo, back to ocr_pending; audited
+  // 'receiving.invoice_retaken'). Only jobs from that moment on are "on record":
+  // the first read's finished job says nothing about the retake's.
   const stale = await sql<
-    Array<{ id: string; restaurant_id: string; supplier_id: string | null; raw_image_url: string; gr_id: string | null }>
+    Array<{ id: string; restaurant_id: string; supplier_id: string | null; raw_image_url: string; gr_id: string | null; retaken_at: Date | null }>
   >`
-    SELECT i.id, i.restaurant_id, i.supplier_id, i.raw_image_url,
+    SELECT s.id, s.restaurant_id, s.supplier_id, s.raw_image_url, s.retaken_at,
            -- the receipt the scan was taken on, from its original (refused) job
            (SELECT j.payload->>'grId' FROM job_queue j
-             WHERE j.queue = 'ocr-invoice' AND j.payload->>'invoiceId' = i.id::text
-               AND j.payload->>'restaurantId' = i.restaurant_id::text AND j.payload->>'grId' IS NOT NULL
+             WHERE j.queue = 'ocr-invoice' AND j.payload->>'invoiceId' = s.id::text
+               AND j.payload->>'restaurantId' = s.restaurant_id::text AND j.payload->>'grId' IS NOT NULL
              ORDER BY j.id LIMIT 1) AS gr_id
-      FROM invoices i
-     WHERE i.status = 'ocr_pending'
-       AND i.raw_image_url ~* '^https?://'
-       AND i.created_at < ${staleBefore}
-       AND i.created_at >= ${notBefore}
+      FROM (
+        SELECT i.id, i.restaurant_id, i.supplier_id, i.raw_image_url, i.created_at, r.retaken_at,
+               greatest(i.created_at, coalesce(r.retaken_at, i.created_at)) AS pending_since
+          FROM invoices i
+          LEFT JOIN LATERAL (
+            SELECT max(a.at) AS retaken_at FROM audit_log a
+             WHERE a.entity_id = i.id AND a.restaurant_id = i.restaurant_id
+               AND a.action = 'receiving.invoice_retaken'
+          ) r ON true
+         WHERE i.status = 'ocr_pending'
+           AND i.raw_image_url ~* '^https?://'
+      ) s
+     WHERE s.pending_since < ${staleBefore}
+       AND s.pending_since >= ${notBefore}
        AND NOT EXISTS (
          SELECT 1 FROM job_queue j
-          WHERE j.queue = 'ocr-invoice' AND j.payload->>'invoiceId' = i.id::text
+          WHERE j.queue = 'ocr-invoice' AND j.payload->>'invoiceId' = s.id::text
+            AND j.created_at >= s.pending_since - interval '5 seconds'
             -- the ORIGINAL job's commit-race refusal never ran: not "on record"
             AND NOT (
               j.status = 'failed'
-              AND j.dedupe_key IS DISTINCT FROM ('ocr-sweep-' || i.id::text)
+              AND NOT starts_with(coalesce(j.dedupe_key, ''), 'ocr-sweep-' || s.id::text)
               AND coalesce(j.last_error, '') ~ ${NOT_FOUND_REFUSAL_PG}
             )
        )
-     ORDER BY i.created_at
+     ORDER BY s.pending_since
      LIMIT ${OCR_SWEEP_BATCH}`;
 
   const result: OcrSweepResult = { requeued: [], raced: [] };
@@ -103,7 +117,8 @@ export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepR
         imageUrl: inv.raw_image_url,
         ...(inv.gr_id ? { grId: inv.gr_id } : {}),
       },
-      { restaurantId: inv.restaurant_id, dedupeKey: `ocr-sweep-${inv.id}` },
+      // One sweep retry per read: a retake's read gets its own key.
+      { restaurantId: inv.restaurant_id, dedupeKey: inv.retaken_at ? `ocr-sweep-${inv.id}-r${new Date(inv.retaken_at).getTime()}` : `ocr-sweep-${inv.id}` },
     );
     (inserted ? result.requeued : result.raced).push(inv.id);
   }

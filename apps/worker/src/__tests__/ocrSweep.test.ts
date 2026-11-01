@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, eq, invoices, restaurants, testDbUrl } from '@restomatch/db';
+import { auditLog, createDb, eq, invoices, restaurants, testDbUrl } from '@restomatch/db';
 import { insertJob, queueSql } from '@restomatch/queue';
 import { runOcrSweep } from '../jobs/ocrSweep';
 
@@ -45,6 +45,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await sql`DELETE FROM job_queue WHERE restaurant_id = ${restaurantId}`;
+  await db.delete(auditLog).where(eq(auditLog.restaurantId, restaurantId));
   await db.delete(invoices).where(eq(invoices.restaurantId, restaurantId));
   await db.delete(restaurants).where(eq(restaurants.id, restaurantId));
 });
@@ -137,5 +138,50 @@ describe('ocr-pending retry sweep — commit-race refusal (Postgres queue)', () 
     // A scan whose original job carried no receipt gets none.
     const plain = (await jobsFor(ids2.refused!)).find((j) => j.dedupe_key === `ocr-sweep-${ids2.refused}`);
     expect(plain?.payload).not.toHaveProperty('grId');
+  });
+});
+
+describe('a RETAKE (#216 round 3, C): the same invoice back to ocr_pending with a new photo', () => {
+  /** Registered an hour ago and read then (its job done); retaken `retakeAge` minutes ago, the retake's enqueue lost. */
+  async function retaken(key: string, retakeAge: number) {
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId, source: 'photo', status: 'ocr_pending', rawImageUrl: `https://x.example/scan-${key}.jpg`, createdAt: minutesAgo(60) })
+      .returning({ id: invoices.id });
+    ids[key] = inv!.id;
+    await insertJob(sql, 'ocr-invoice', { restaurantId, invoiceId: inv!.id, grId: '00000000-0000-4000-8000-000000000001' });
+    await sql`UPDATE job_queue SET status = 'done', finished_at = ${minutesAgo(59)}, created_at = ${minutesAgo(60)}
+               WHERE payload->>'invoiceId' = ${inv!.id}`;
+    await db.insert(auditLog).values({
+      restaurantId,
+      action: 'receiving.invoice_retaken',
+      entityType: 'invoice',
+      entityId: inv!.id,
+      before: { status: 'matched' },
+      after: { status: 'ocr_pending' },
+      at: minutesAgo(retakeAge),
+    });
+    return inv!.id;
+  }
+
+  it('is retried: staleness runs from the retake, and the FIRST read\'s finished job is not "on record" for it', async () => {
+    const id = await retaken('retake', 12);
+    const res = await runOcrSweep(sql, NOW);
+    expect(res.requeued).toContain(id);
+    const jobs = await jobsFor(id);
+    expect(jobs).toHaveLength(2);
+    const retry = jobs.find((j) => j.dedupe_key?.startsWith(`ocr-sweep-${id}-r`));
+    expect(retry).toBeDefined();
+    expect(retry!.payload).toMatchObject({ invoiceId: id, imageUrl: 'https://x.example/scan-retake.jpg' });
+    // …and once only.
+    expect(mine((await runOcrSweep(sql, new Date(NOW.getTime() + 60_000))).requeued)).not.toContain(id);
+  });
+
+  it('a fresh retake (< 10 min) is left to its own job; one past the signed-URL age is not retried', async () => {
+    const fresh = await retaken('retakeFresh', 4);
+    const old = await retaken('retakeOld', 40);
+    const res = await runOcrSweep(sql, NOW);
+    expect(res.requeued).not.toContain(fresh);
+    expect(res.requeued).not.toContain(old);
   });
 });

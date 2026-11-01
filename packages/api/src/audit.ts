@@ -54,7 +54,13 @@ export type AuditAction =
   // Inventory counts (inventory router, flag inventoryCount)
   | 'inventory.count_closed'
   | 'inventory.count_discarded'
-  | 'inventory.line_amended';
+  | 'inventory.line_amended'
+  // Invoice edits (receiving router): OCR corrections and hand-entered lines
+  | 'receiving.invoice_header_updated'
+  | 'receiving.invoice_line_updated'
+  | 'receiving.invoice_line_added'
+  | 'receiving.invoice_line_deleted'
+  | 'receiving.invoice_retaken';
 
 export interface AuditEntry {
   /** Tenant the action belongs to. On a tenant connection this must equal the GUC. */

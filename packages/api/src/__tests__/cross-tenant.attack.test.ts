@@ -167,6 +167,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'receiving.registerInvoice': 'attack',
   'receiving.updateInvoiceHeader': 'attack',
   'receiving.updateInvoiceLine': 'attack',
+  'receiving.addInvoiceLine': 'attack',
+  'receiving.deleteInvoiceLine': 'attack',
   'receiving.pendingInvoices': 'isolation',
   // S2 "Receiver in English": writes ONLY display columns, but still takes a
   // client-supplied poId / invoiceId — a foreign id must be NOT_FOUND and B's
@@ -1209,6 +1211,55 @@ describe('match router + receiving detail reads: foreign id attacks (A → B)', 
       .where(eq(invoiceLines.id, B.invoiceLineId));
     expect(row?.qtyBilled).toBe('10.000'); // B's seeded line, untouched
     expect(row?.unitPriceBilled).toBe('10.0000');
+  });
+
+  // B8 manual entry. B's invoice is made editable ('parsed') first, so the only
+  // thing standing between A and B's invoice is the tenant check.
+  it('receiving.addInvoiceLine rejects a foreign invoiceId — no line, B untouched', async () => {
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, B.invoiceId));
+    try {
+      await expect(
+        callerFor(A).receiving.addInvoiceLine({
+          invoiceId: B.invoiceId,
+          line: { rawDescription: 'attack', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1 },
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      const lines = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, B.invoiceId));
+      expect(lines).toHaveLength(1);
+      const [inv] = await db.select({ total: invoices.totalInclVat }).from(invoices).where(eq(invoices.id, B.invoiceId));
+      expect(inv?.total).toBe('117.00');
+    } finally {
+      await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, B.invoiceId));
+    }
+  });
+
+  it("receiving.addInvoiceLine on A's own invoice rejects B's productId", async () => {
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, A.invoiceId));
+    try {
+      await expect(
+        callerFor(A).receiving.addInvoiceLine({
+          invoiceId: A.invoiceId,
+          line: { rawDescription: 'attack', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1, productId: B.productId },
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      const lines = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, A.invoiceId));
+      expect(lines).toHaveLength(1);
+    } finally {
+      await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, A.invoiceId));
+    }
+  });
+
+  it('receiving.deleteInvoiceLine rejects a foreign lineId — B keeps its line', async () => {
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, B.invoiceId));
+    try {
+      await expect(callerFor(A).receiving.deleteInvoiceLine({ lineId: B.invoiceLineId })).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+      const [row] = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.id, B.invoiceLineId));
+      expect(row?.id).toBe(B.invoiceLineId);
+    } finally {
+      await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, B.invoiceId));
+    }
   });
 });
 

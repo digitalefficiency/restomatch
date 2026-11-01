@@ -55,8 +55,8 @@ const num = (v: string | null, fallback = 0): number => (v == null ? fallback : 
 /** Default Israeli VAT used when no rate is configured at any level (18% since 2025-01-01). */
 const DEFAULT_VAT_RATE = 0.18;
 
-/** First non-null rate (numeric string) wins; otherwise the default. */
-const firstVatRate = (...rates: Array<string | null>): number => {
+/** First non-null rate (numeric string) wins; otherwise the default. Shared with receiving's manual totals. */
+export const firstVatRate = (...rates: Array<string | null>): number => {
   for (const r of rates) {
     if (r != null) return Number(r);
   }
@@ -106,7 +106,8 @@ export async function buildMatchInputForInvoice(
   restaurantId: string,
   invoiceId: string,
   /** skipPoDiscovery: build the invoice side only (lines, VAT, baselines, known numbers) — the consolidated cross-match adds its own multi-PO lines. */
-  options: { pinnedPoId?: string | null; skipPoDiscovery?: boolean } = {},
+  /** strictPin (S2): the pinned PO is the order the receiver COUNTED for this scan — when it is a valid candidate, it is the PO (no nearer order displaces it). */
+  options: { pinnedPoId?: string | null; skipPoDiscovery?: boolean; strictPin?: boolean } = {},
 ): Promise<BuiltMatchInput | null> {
   const [inv] = await db
     .select({
@@ -269,11 +270,13 @@ export async function buildMatchInputForInvoice(
     // without (the next standing order must not take a received invoice away).
     const pinned = options.pinnedPoId ? candidates.find((c) => c.id === options.pinnedPoId) : undefined;
     po =
-      inv.source === 'photo'
-        ? pickNearest(candidates, invoiceDate, tz, { receivedFirst: true })
-        : pickNearest(pinned?.received ? candidates.filter((c) => c.received) : candidates, invoiceDate, tz, {
-            receivedFirst: false,
-          });
+      options.strictPin && pinned
+        ? pinned // S2 counted order
+        : inv.source === 'photo'
+          ? pickNearest(candidates, invoiceDate, tz, { receivedFirst: true })
+          : pickNearest(pinned?.received ? candidates.filter((c) => c.received) : candidates, invoiceDate, tz, {
+              receivedFirst: false,
+            });
   }
 
   let poLineInputs: PoLineInput[] = [];
@@ -426,6 +429,29 @@ export async function buildMatchInputForInvoice(
     }
     if (Object.keys(acc).length > 0) baselines = acc;
   }
+
+  // S2 picker pairing — a hand line picked from an order line (the invoice
+  // page's picker, raw.manualLinePoLines: invoice line → PO line) pairs with
+  // THAT line. The engine pairs each PO line, in order, with the first unpaired
+  // invoice line of its product, so two order lines of one product could cross-
+  // pair (false QTY / PRICE / MISSING). Put the picked pairs first, in the same
+  // order on both sides; everything else keeps its place after them.
+  const picks = (inv.ocrPayload?.raw as { manualLinePoLines?: unknown } | null | undefined)?.manualLinePoLines;
+  if (picks && typeof picks === 'object' && poLineInputs.length > 0) {
+    const poIndex = new Map(poLineInputs.map((p, i) => [p.id, i]));
+    const pairs = Object.entries(picks as Record<string, unknown>)
+      .filter((e): e is [string, string] => typeof e[1] === 'string' && poIndex.has(e[1]) && invoiceLineInputs.some((l) => l.id === e[0]))
+      .sort((a, b) => poIndex.get(a[1])! - poIndex.get(b[1])!);
+    if (pairs.length > 0) {
+      const pickedPo = new Set(pairs.map(([, po]) => po));
+      const pickedInv = new Set(pairs.map(([il]) => il));
+      const invById = new Map(invoiceLineInputs.map((l) => [l.id, l]));
+      const poById = new Map(poLineInputs.map((p) => [p.id, p]));
+      poLineInputs = [...pairs.map(([, po]) => poById.get(po)!), ...poLineInputs.filter((p) => !pickedPo.has(p.id))];
+      invoiceLineInputs.splice(0, invoiceLineInputs.length, ...pairs.map(([il]) => invById.get(il)!), ...invoiceLineInputs.filter((l) => !pickedInv.has(l.id)));
+    }
+  }
+  // end S2 picker pairing
 
   const input: MatchInput = {
     invoice: {

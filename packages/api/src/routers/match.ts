@@ -1,7 +1,9 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { releaseClaimsForRematch } from '../recovery/service';
-import { and, desc, eq, invoices, matchRuns, restaurants } from '@restomatch/db';
+import { and, desc, eq, goodsReceipts, invoices, matchRuns, restaurants } from '@restomatch/db';
+import { scanOwnerReceipt } from '../receiving/matchTriggers';
+import { appError } from '../errors';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
 import { managerProcedure, router } from '../trpc';
 import { assertInvoiceOwned } from '../tenant';
@@ -38,7 +40,7 @@ export const matchRouter = router({
       // only mark the whole invoice UNORDERED_ARRIVAL. It is cross-matched against
       // its delivery notes on the invoice page (read-only) instead.
       const [kind] = await ctx.db
-        .select({ ocrPayload: invoices.ocrPayload })
+        .select({ ocrPayload: invoices.ocrPayload, source: invoices.source })
         .from(invoices)
         .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)))
         .limit(1);
@@ -49,6 +51,25 @@ export const matchRouter = router({
         });
       }
 
+      // S2 receipt hold — not while the invoice's receipt is still being counted:
+      // every line would read "received 0" (the leak hero jumping by the whole
+      // invoice). The receipt's submit matches it.
+      // The scan's receipt: the stamp, else a photo held for ONE receipt.
+      const scanGrId = scanOwnerReceipt(kind?.ocrPayload, kind?.source);
+      let scanPoId: string | null = null;
+      if (scanGrId) {
+        const [gr] = await ctx.db
+          .select({ status: goodsReceipts.status, poId: goodsReceipts.poId })
+          .from(goodsReceipts)
+          .where(and(eq(goodsReceipts.id, scanGrId), eq(goodsReceipts.restaurantId, restaurantId)))
+          .limit(1);
+        if (gr?.status === 'pending') {
+          throw appError('PRECONDITION_FAILED', 'invoice.receiptOpen', 'הספירה עדיין פתוחה — ההתאמה תרוץ כשהקבלה תיסגר');
+        }
+        scanPoId = gr?.poId ?? null;
+      }
+      // end S2 receipt hold
+
       // A re-match checks against the PO the invoice was already matched to, even
       // once that PO is received/closed (discovery only looks at open POs).
       const [priorRun] = await ctx.db
@@ -57,8 +78,11 @@ export const matchRouter = router({
         .where(and(eq(matchRuns.invoiceId, input.invoiceId), eq(matchRuns.restaurantId, restaurantId)))
         .orderBy(desc(matchRuns.runAt))
         .limit(1);
+      // H: the order the receiver counted for this scan wins (as the worker's
+      // job poId does) — never a same-day second order found by discovery.
       const built = await buildMatchInputForInvoice(ctx.db, restaurantId, input.invoiceId, {
-        pinnedPoId: priorRun?.poId ?? null,
+        pinnedPoId: scanPoId ?? priorRun?.poId ?? null,
+        strictPin: scanPoId != null,
       });
       if (!built) {
         return {
