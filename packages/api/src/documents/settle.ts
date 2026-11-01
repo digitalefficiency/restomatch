@@ -17,10 +17,11 @@ import {
 } from '@restomatch/db';
 import { TRPCError } from '@trpc/server';
 import { INGEST_LIMITS } from '@restomatch/ingest';
-import { enqueueMatchInvoice } from '@restomatch/queue';
+import { enqueue, enqueueMatchInvoice, MATCH_INVOICE_QUEUE } from '@restomatch/queue';
 import { enqueueIngestJobs, type OcrJobToEnqueue } from '../ingest/pipeline';
 import { groupMinutes, invoicePageRows, isPageMime, multiPageEnabled, recomposeInvoice, type PageRow } from '../ingest/grouping';
 import { MAX_DOCUMENT_PAGES } from './compose';
+import { normalizeInvoiceNumber as canonicalInvoiceNumber } from '../match/buildMatchInput';
 import { objectRefMatchValues, tenantPath } from './objectRef';
 import { defaultDocumentStorage } from './storage';
 import { PAGES_RECOMPOSED_ACTION, reopenForOcr, retireBlocker, retireInvoice } from './reocr';
@@ -69,6 +70,13 @@ export interface SettleResult {
 export interface SettleDeps {
   enqueueOcr?: (jobs: OcrJobToEnqueue[]) => Promise<void>;
   enqueueMatch?: (job: { restaurantId: string; invoiceId: string }) => Promise<unknown>;
+  /** A match that runs when the cluster window closes (a lone page held for page 2). */
+  enqueueDelayedMatch?: (job: { restaurantId: string; invoiceId: string }, runAt: Date) => Promise<unknown>;
+}
+
+/** The match job of a held lone page, run when its cluster window closes (idempotent). */
+function defaultDelayedMatch(job: { restaurantId: string; invoiceId: string }, runAt: Date): Promise<unknown> {
+  return enqueue(MATCH_INVOICE_QUEUE, job, { dedupeKey: `g09-window-${job.invoiceId}`, runAt, maxAttempts: 3 });
 }
 
 export interface PageHeader {
@@ -107,16 +115,20 @@ function digits(v: string | null | undefined): string | null {
   return d.length >= 5 ? d : null;
 }
 
-/** An invoice number for comparison: case-folded, without spaces and punctuation ('A 100' = 'A-100'). */
+/**
+ * An invoice number for comparison: the CANONICAL form used by the matching
+ * engine's duplicate detection (NFKC, letters/digits only, upper-case, leading
+ * zeros dropped) — 'A 100' = 'a-100' = 'A-0100'.
+ */
 export function normalizeInvoiceNumber(v: string | null | undefined): string | null {
-  const s = (v ?? '').toLowerCase().replace(/[^0-9a-z֐-׿]/g, '');
-  return s.length > 0 ? s : null;
+  return canonicalInvoiceNumber(v);
 }
 const alnum = normalizeInvoiceNumber;
 
 /** A supplier name without legal suffixes, quotes and punctuation. */
 export function normalizeSupplierName(v: string | null | undefined): string | null {
   const s = (v ?? '')
+    .normalize('NFKC')
     .replace(/בע["״'׳]?מ/g, '')
     .replace(/\b(ltd|inc|llc|co)\b\.?/gi, '')
     .toLowerCase()
@@ -129,20 +141,31 @@ export function hasHeaderEvidence(page: PageHeader): boolean {
   return Boolean(alnum(page.invoiceNumber) || digits(page.businessId) || normalizeSupplierName(page.supplierName));
 }
 
-/** The identity a document chain has established so far (page 1 plus every merged page). */
+/**
+ * The identity a document chain has established so far. Fields ADOPTED from a
+ * merged page may REFUSE a later page, but only page 1's own (anchored) ח.פ. and
+ * name may vouch that a page bringing a new invoice number belongs.
+ */
 export interface ChainIdentity {
   supplierId: string | null;
   number: string | null;
   businessId: string | null;
   name: string | null;
+  /** Page 1's own ח.פ. / name (anchored evidence). */
+  anchoredBusinessId: string | null;
+  anchoredName: string | null;
 }
 
 export function identityOf(page: PageHeader): ChainIdentity {
+  const businessId = digits(page.businessId);
+  const name = normalizeSupplierName(page.supplierName);
   return {
     supplierId: page.supplierId,
     number: alnum(page.invoiceNumber),
-    businessId: digits(page.businessId),
-    name: normalizeSupplierName(page.supplierName),
+    businessId,
+    name,
+    anchoredBusinessId: businessId,
+    anchoredName: name,
   };
 }
 
@@ -151,11 +174,12 @@ function namesAgree(a: string | null, b: string | null): boolean {
 }
 
 /**
- * Why `page` may NOT join a chain with identity `chain` (null = it may).
- * Any positive evidence of another supplier or another invoice number refuses.
- * A page that brings a NUMBER the chain does not have yet joins only when its
- * ח.פ. AND supplier name both match the chain's (a name-only page 1 cannot
- * adopt someone's invoice number).
+ * Why `page` may NOT join a chain (null = it may). Any positive evidence of
+ * another supplier or another invoice number refuses (adopted fields included).
+ * A page that brings an invoice NUMBER the chain lacks joins only when page 1's
+ * OWN ח.פ. matches it exactly (a name may be absent on either side), or the
+ * chain's ח.פ. matches and page 1's own name matches it EXACTLY — never on a
+ * name substring, never on a ח.פ. the chain merely adopted. In doubt: a person.
  */
 export function chainMismatch(chain: ChainIdentity, page: PageHeader): 'page_other_supplier' | 'page_other_invoice' | 'page_not_merged' | null {
   const p = identityOf(page);
@@ -164,8 +188,11 @@ export function chainMismatch(chain: ChainIdentity, page: PageHeader): 'page_oth
   if (!(chain.businessId && p.businessId) && chain.name && p.name && !namesAgree(chain.name, p.name)) return 'page_other_supplier';
   if (chain.number && p.number && chain.number !== p.number) return 'page_other_invoice';
   if (p.number && !chain.number) {
-    const bizOk = Boolean(chain.businessId && p.businessId && chain.businessId === p.businessId);
-    if (!bizOk || !namesAgree(chain.name, p.name)) return 'page_not_merged';
+    const anchoredBiz = Boolean(chain.anchoredBusinessId && p.businessId && chain.anchoredBusinessId === p.businessId);
+    const adoptedBizWithExactName = Boolean(
+      chain.businessId && p.businessId && chain.businessId === p.businessId && chain.anchoredName && p.name && chain.anchoredName === p.name,
+    );
+    if (!anchoredBiz && !adoptedBizWithExactName) return 'page_not_merged';
   }
   return null;
 }
@@ -176,6 +203,7 @@ export function pageMismatch(first: PageHeader, page: PageHeader): 'page_other_s
   return r === 'page_not_merged' ? null : r;
 }
 
+/** Adopt a merged page's fields. Adopted fields refuse; they never become anchored evidence. */
 function absorb(chain: ChainIdentity, page: PageHeader): void {
   const p = identityOf(page);
   chain.number ??= p.number;
@@ -190,79 +218,145 @@ const num = (v: string | null | undefined): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-const close = (a: number | null, b: number | null) =>
-  a !== null && b !== null && Math.abs(a - b) <= Math.max(0.5, 0.005 * Math.max(Math.abs(a), Math.abs(b)));
-
-function tokens(v: string | null | undefined): Set<string> {
-  return new Set((v ?? '').toLowerCase().split(/[^0-9a-z֐-׿]+/).filter((t) => t.length > 1));
+function normText(v: string | null | undefined): string {
+  return (v ?? '').normalize('NFKC').toLowerCase().replace(/[^0-9a-z֐-׿]+/g, ' ').trim();
 }
 
-function similarText(a: string | null | undefined, b: string | null | undefined): boolean {
+function tokens(v: string | null | undefined): Set<string> {
+  return new Set(normText(v).split(' ').filter((t) => t.length > 1));
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let diag = prev[0]!;
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = prev[j]!;
+      prev[j] = Math.min(prev[j]! + 1, prev[j - 1]! + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diag = tmp;
+    }
+  }
+  return prev[b.length]!;
+}
+
+/**
+ * Two line descriptions name the same item: equal or contained after
+ * normalising, or a few letters apart (a one-letter misread), or sharing at
+ * least 40% of their words (a re-worded line).
+ */
+export function similarText(a: string | null | undefined, b: string | null | undefined): boolean {
+  const [na, nb] = [normText(a), normText(b)];
+  if (!na || !nb) return false;
+  if (na === nb || na.includes(nb) || nb.includes(na)) return true;
+  if (levenshtein(na, nb) <= Math.max(1, Math.floor(0.2 * Math.max(na.length, nb.length)))) return true;
   const [ta, tb] = [tokens(a), tokens(b)];
   if (ta.size === 0 || tb.size === 0) return false;
   let both = 0;
   for (const t of ta) if (tb.has(t)) both += 1;
-  return both / (ta.size + tb.size - both) >= 0.6;
+  return both / (ta.size + tb.size - both) >= 0.4;
 }
 
-/**
- * Same CONTENT: similar line counts and at least 80% of the lines matching on
- * description, quantity, unit price and line total (within ₪0.50 or 0.5% —
- * a re-shot photo reads a little differently). A total alone is never enough.
- */
-export function sameContent(a: PagePrint | undefined, b: PagePrint | undefined): boolean {
-  if (!a || !b || a.lines.length === 0 || b.lines.length === 0) return false;
-  const [na, nb] = [a.lines.length, b.lines.length];
-  if (Math.abs(na - nb) > Math.max(1, Math.floor(0.2 * Math.max(na, nb)))) return false;
-  const free = [...b.lines];
+function matchCount(
+  a: PagePrint['lines'],
+  b: PagePrint['lines'],
+  same: (x: PagePrint['lines'][number], y: PagePrint['lines'][number]) => boolean,
+): number {
+  const free = [...b];
   let matched = 0;
-  for (const l of a.lines) {
-    const i = free.findIndex(
-      (m) =>
-        num(m.qty) === num(l.qty) &&
-        close(num(m.total), num(l.total)) &&
-        (l.unitPrice == null || m.unitPrice == null || close(num(m.unitPrice), num(l.unitPrice))) &&
-        similarText(m.description, l.description),
-    );
+  for (const l of a) {
+    const i = free.findIndex((m) => same(l, m));
     if (i >= 0) {
       matched += 1;
       free.splice(i, 1);
     }
   }
-  return matched / Math.max(na, nb) >= 0.8;
+  return matched;
+}
+
+const totalsEqual = (a: PagePrint, b: PagePrint) => {
+  const pairs: Array<[number | null, number | null]> = [
+    [num(a.totalInclVat), num(b.totalInclVat)],
+    [num(a.totalExclVat), num(b.totalExclVat)],
+  ];
+  return pairs.some(([x, y]) => x !== null && y !== null && x !== 0 && Math.abs(x - y) <= 0.1);
+};
+
+/**
+ * The OVERLAP guard (round 4): a page that substantially repeats a chain page
+ * is never merged — whatever its number says. Substantial = the same non-zero
+ * printed total, or at least half of the SMALLER page's lines matching on
+ * description + quantity (prices optional: an unpriced signed delivery note of
+ * the same items overlaps too).
+ */
+export function overlaps(a: PagePrint | undefined, b: PagePrint | undefined): boolean {
+  if (!a || !b) return false;
+  if (totalsEqual(a, b)) return true;
+  const small = Math.min(a.lines.length, b.lines.length);
+  if (small === 0) return false;
+  const m = matchCount(a.lines, b.lines, (x, y) => num(x.qty) === num(y.qty) && similarText(x.description, y.description));
+  return m / small >= 0.5;
 }
 
 /**
- * A re-shot copy of a page already in the chain: IDENTITY (the same normalised
- * number; or a duplicateOf pointing into the chain; or neither page carries a
- * number) AND the same content.
+ * An EXACT copy (round 4): no conflicting numbers (or duplicateOf inside the
+ * chain), the totals close when both have them, the same line count, and every
+ * line matching 1:1 on description + quantity with the line total within ₪0.10.
+ * Anything less is "overlapping, but not proven a copy" → page_not_merged.
  */
-export function samePage(
-  earlier: PagePrint | undefined,
-  page: PagePrint | undefined,
-  opts: { duplicateOfChain?: boolean } = {},
-): boolean {
-  if (!earlier || !page) return false;
-  const [ne, np] = [alnum(earlier.number), alnum(page.number)];
-  const identity = opts.duplicateOfChain || (ne !== null && ne === np) || (ne === null && np === null);
-  return identity && sameContent(earlier, page);
+export function exactCopy(a: PagePrint | undefined, b: PagePrint | undefined, opts: { duplicateOfChain?: boolean } = {}): boolean {
+  if (!a || !b || a.lines.length === 0 || a.lines.length !== b.lines.length) return false;
+  const [ne, np] = [alnum(a.number), alnum(b.number)];
+  if (!(opts.duplicateOfChain || ne === null || np === null || ne === np)) return false;
+  for (const k of ['totalInclVat', 'totalExclVat'] as const) {
+    const [x, y] = [num(a[k]), num(b[k])];
+    if (x !== null && y !== null && Math.abs(x - y) > 0.1) return false;
+  }
+  const m = matchCount(a.lines, b.lines, (x, y) => {
+    const [tx, ty] = [num(x.total), num(y.total)];
+    return num(x.qty) === num(y.qty) && similarText(x.description, y.description) && tx !== null && ty !== null && Math.abs(tx - ty) <= 0.1;
+  });
+  return m === a.lines.length;
+}
+
+/** Kept for callers: a re-shot copy = an exact copy. */
+export function samePage(earlier: PagePrint | undefined, page: PagePrint | undefined, opts: { duplicateOfChain?: boolean } = {}): boolean {
+  return exactCopy(earlier, page, opts);
+}
+
+/** A complete invoice on its own: lines that add up to its printed total (excl. VAT). */
+export function selfComplete(print: PagePrint | undefined): boolean {
+  if (!print || print.lines.length === 0) return false;
+  const total = num(print.totalExclVat);
+  if (total === null) return false;
+  const sum = print.lines.reduce((n, l) => n + (num(l.total) ?? 0), 0);
+  return Math.abs(sum - total) <= 0.1;
+}
+
+/** A credit note (no OCR kind yet: a negative total or negative lines). Never merged into an invoice. */
+export function creditKind(print: PagePrint | undefined): boolean {
+  if (!print) return false;
+  const t = num(print.totalExclVat) ?? num(print.totalInclVat);
+  if (t !== null && t < 0) return true;
+  const sum = print.lines.reduce((n, l) => n + (num(l.total) ?? 0), 0);
+  return print.lines.length > 0 && sum < 0;
 }
 
 /**
  * The merge decision for an ordered cluster (page 1 first). Pure, so every
- * false-leak path is unit-testable:
- *  - nothing merges into a page 1 that is unreadable, carries NO header
- *    evidence, or was itself flagged;
- *  - the chain's IDENTITY (number, ח.פ., name) accumulates from page 1 and every
- *    merged page; each candidate is checked against it (chainMismatch);
- *  - a page flagged earlier is a chain BREAK (kept, never a candidate) — except
- *    an earlier page_duplicate that still matches a chain page (identity + content);
- *  - a page that is unreadable, a duplicate of an invoice OUTSIDE the cluster,
- *    a re-shot copy of a CHAIN page (samePage against page 1, the merged pages
- *    and their stored single-page prints — never against flagged pages), or
- *    that disagrees with the chain is flagged, and breaks the chain;
- *  - after the first break nothing merges; before it, an evidence-less page
- *    continues the page right before it (which is in the chain).
+ * false-leak path is unit-testable. WHEN IN DOUBT, FLAG FOR A PERSON, NEVER MERGE:
+ *  - nothing merges into a page 1 that is unreadable, flagged, carries NO header
+ *    evidence, is a complete invoice on its own, or is a credit note;
+ *  - a page flagged earlier (or marked separate by a person) is a chain BREAK —
+ *    except an earlier page_duplicate that is still an exact copy of a chain page;
+ *  - each candidate is checked, in order: unreadable → a duplicate of an invoice
+ *    outside the cluster → the chain identity (chainMismatch, with provenance) →
+ *    the OVERLAP guard against every chain page and stored print (an exact copy
+ *    is page_duplicate, any other overlap page_not_merged) → a complete invoice
+ *    or credit note on its own (its own invoice; it breaks the chain silently)
+ *    → after a break, page_not_merged;
+ *  - an evidence-less page continues the page right before it.
  */
 export function decidePages(
   members: PageHeader[],
@@ -274,35 +368,44 @@ export function decidePages(
   const ids = new Set(members.map((m) => m.invoiceId));
   const chainIds = new Set<string>([first.invoiceId]);
   const chain = identityOf(first);
-  let broken = Boolean(first.unreadable || first.alreadyFlagged || !hasHeaderEvidence(first));
+  let broken = Boolean(
+    first.unreadable || first.alreadyFlagged || !hasHeaderEvidence(first) || selfComplete(first.print) || creditKind(first.print),
+  );
   const chainPrints: PagePrint[] = [];
   const addPrints = (m: PageHeader) => {
     if (m.print) chainPrints.push(m.print);
     for (const p of m.absorbedPrints ?? []) chainPrints.push(p);
   };
   addPrints(first);
-  const isChainDuplicate = (page: PageHeader) =>
-    chainPrints.some((p) =>
-      samePage(p, page.print, { duplicateOfChain: Boolean(page.duplicateOf && chainIds.has(page.duplicateOf)) }),
-    );
   for (const page of rest) {
+    const dupOfChain = Boolean(page.duplicateOf && chainIds.has(page.duplicateOf));
     if (page.alreadyFlagged) {
-      // A re-shot duplicate of a chain page does not break the chain; anything else does.
-      if (!(page.alreadyFlagged === 'page_duplicate' && isChainDuplicate(page))) broken = true;
+      // An exact re-shot copy of a chain page does not cut the document; anything else does.
+      const copy = chainPrints.some((p) => exactCopy(p, page.print, { duplicateOfChain: dupOfChain }));
+      if (!(page.alreadyFlagged === 'page_duplicate' && copy)) broken = true;
       continue;
     }
     let reason: PageFlag | null = null;
+    let silentBreak = false;
     if (page.unreadable) reason = 'page_unreadable';
     else if (page.duplicateOf && !chainIds.has(page.duplicateOf) && !ids.has(page.duplicateOf)) {
       reason = 'page_other_invoice'; // its number is ANOTHER invoice already on file
     }
-    if (!reason && isChainDuplicate(page)) reason = 'page_duplicate';
     if (!reason) reason = chainMismatch(chain, page);
-    if (!reason && broken) reason = 'page_not_merged';
+    if (!reason) {
+      const hit = chainPrints.filter((p) => overlaps(p, page.print));
+      if (hit.length > 0) {
+        reason = hit.some((p) => exactCopy(p, page.print, { duplicateOfChain: dupOfChain })) ? 'page_duplicate' : 'page_not_merged';
+      }
+    }
+    if (!reason && (selfComplete(page.print) || creditKind(page.print))) silentBreak = true;
+    if (!reason && !silentBreak && broken) reason = 'page_not_merged';
     if (reason) {
       flagged.push({ invoiceId: page.invoiceId, reason });
-      // A chain duplicate is just a copy: it does not cut the document.
+      // An exact copy is just a copy: it does not cut the document.
       if (reason !== 'page_duplicate') broken = true;
+    } else if (silentBreak) {
+      broken = true; // its own complete invoice / credit note: matched alone, not a question
     } else {
       merge.push(page);
       chainIds.add(page.invoiceId);
@@ -383,10 +486,11 @@ interface ClusterRow {
  */
 export async function settleDocumentPages(
   db: Database,
-  args: { restaurantId: string; invoiceId: string },
+  args: { restaurantId: string; invoiceId: string; now?: Date },
   deps: SettleDeps = {},
 ): Promise<SettleResult> {
   const { restaurantId, invoiceId } = args;
+  const now = args.now ?? new Date();
   const attempt = () => db.transaction(async (raw) => {
     const tx = raw as unknown as Database;
     const [restaurant] = await tx
@@ -481,7 +585,31 @@ export async function settleDocumentPages(
     }
     const cluster = clusters.find((c) => c.some((r) => r.invoiceId === invoiceId)) ?? [];
     const memberIds = [...new Set(cluster.map((r) => r.invoiceId))];
-    if (memberIds.length < 2) return { result: NOTHING, ocr: [], match: [], superseded: null };
+    if (memberIds.length < 2) {
+      // A LONE page while its cluster window is still open: page 2 may still be
+      // on its way. Matching now would put a run (often a goods-receipt link) on
+      // page 1 and block the merge, so hold it and match when the window closes.
+      const opensAt = cluster[0]?.receivedAt;
+      const closesAt = opensAt ? new Date(opensAt.getTime() + minutes * 60_000) : null;
+      const lonePage = cluster.length > 0 && !cluster.some((r) => r.flag);
+      if (lonePage && closesAt && now < closesAt) {
+        const [inv] = await tx
+          .select({ status: invoices.status })
+          .from(invoices)
+          .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
+          .limit(1);
+        if (inv?.status === 'matched') {
+          return {
+            result: { ...NOTHING, hold: true },
+            ocr: [],
+            match: [],
+            superseded: null,
+            delayed: { invoiceId, runAt: new Date(closesAt.getTime() + 60_000) },
+          };
+        }
+      }
+      return { result: NOTHING, ocr: [], match: [], superseded: null };
+    }
 
     // Lock the members and their gaps before any check: a decision, claim,
     // credit note or price-history row cannot appear between check and delete
@@ -605,8 +733,6 @@ export async function settleDocumentPages(
 
     const ocr: OcrJobToEnqueue[] = [];
     let merged = false;
-    /** A transient failure (deadlock, storage, signing) after the bounded retries: leave the pages held. */
-    let transientHold = false;
     let superseded: { from: string; to: string } | null = null;
     if (merging.length > 0) {
       // Page 1's current object (from its mapping row: always a full path with
@@ -667,8 +793,8 @@ export async function settleDocumentPages(
           const permanent = err instanceof PermanentMergeError || err instanceof TRPCError;
           if (!permanent && tries < 2) continue;
           console.warn(`[documents] merge into invoice=${first.invoiceId} failed (${permanent ? 'permanent' : 'transient'})`, err);
-          if (permanent) for (const page of merging) flagged.push({ invoiceId: page.invoiceId, reason: 'page_not_merged' });
-          else transientHold = true;
+          // Retries exhausted or permanent: a person decides (never released unflagged).
+          for (const page of merging) flagged.push({ invoiceId: page.invoiceId, reason: 'page_not_merged' });
           merging = [];
           break;
         }
@@ -695,7 +821,7 @@ export async function settleDocumentPages(
     const settledIds = members
       .map((m) => m.invoiceId)
       .filter((id) => id !== invoiceId && !(merged && (id === first.invoiceId || merging.some((m) => m.invoiceId === id))));
-    if (settledIds.length > 0 && !transientHold) {
+    if (settledIds.length > 0) {
       const runs = await tx
         .select({ invoiceId: matchRuns.invoiceId })
         .from(matchRuns)
@@ -711,7 +837,7 @@ export async function settleDocumentPages(
     const currentIsDuplicate =
       flagOf.get(invoiceId) === 'page_duplicate' || flagged.some((f) => f.invoiceId === invoiceId && f.reason === 'page_duplicate');
     const result: SettleResult = {
-      hold: (merged && first.invoiceId === invoiceId) || currentIsDuplicate || transientHold,
+      hold: (merged && first.invoiceId === invoiceId) || currentIsDuplicate,
       absorbed,
       ...(absorbed || (merged && first.invoiceId === invoiceId) ? { mergedInto: first.invoiceId } : {}),
       flagged,
@@ -732,6 +858,14 @@ export async function settleDocumentPages(
   }
 
   await (deps.enqueueOcr ?? enqueueIngestJobs)(outcome.ocr);
+  const delayed = (outcome as { delayed?: { invoiceId: string; runAt: Date } }).delayed;
+  if (delayed) {
+    try {
+      await (deps.enqueueDelayedMatch ?? defaultDelayedMatch)({ restaurantId, invoiceId: delayed.invoiceId }, delayed.runAt);
+    } catch (err) {
+      console.warn(`[documents] failed to enqueue the delayed match for invoice=${delayed.invoiceId}`, err);
+    }
+  }
   if (outcome.superseded) await removeSupersededObject(db, restaurantId, outcome.superseded.from);
   for (const id of outcome.match) {
     try {

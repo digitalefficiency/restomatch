@@ -197,9 +197,12 @@ export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepR
             AND m2.channel_id = m.channel_id AND m2.sender = m.sender
             AND i2.id <> i.id AND i2.status = 'ocr_pending'
             AND m2.received_at BETWEEN m.received_at - interval '2 hours' AND m.received_at + interval '2 hours'
-            -- a sibling blocks only while it is plausibly still being read:
-            -- one stuck longer than 2× the hold cap no longer holds this page
-            AND coalesce(i2.updated_at, i2.created_at) >= ${siblingSince})
+            -- a sibling blocks while it is plausibly still being read: updated
+            -- within 2× the hold cap, or with a live (queued / active) OCR job
+            AND (coalesce(i2.updated_at, i2.created_at) >= ${siblingSince}
+                 OR EXISTS (SELECT 1 FROM job_queue jq
+                             WHERE jq.queue = 'ocr-invoice' AND jq.payload->>'invoiceId' = i2.id::text
+                               AND jq.status IN ('queued', 'active'))))
        AND NOT EXISTS (SELECT 1 FROM match_runs m WHERE m.invoice_id = i.id AND m.restaurant_id = i.restaurant_id)
        AND NOT EXISTS (SELECT 1 FROM job_queue j
                         WHERE j.queue = 'match-invoice' AND j.payload->>'invoiceId' = i.id::text)

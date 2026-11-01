@@ -1,8 +1,8 @@
 import { TRPCError } from '@trpc/server';
-import { and, auditLog, eq, ingestDocuments, invoices, matchRuns, type Database } from '@restomatch/db';
+import { and, auditLog, discrepancies, eq, ingestDocuments, invoices, matchRuns, ne, sql, type Database } from '@restomatch/db';
 import { enqueueMatchInvoice } from '@restomatch/queue';
 import { DocumentError, documentNotFound } from './errors';
-import { retireInvoice } from './reocr';
+import { PAGES_RECOMPOSED_ACTION, retireInvoice } from './reocr';
 import { PAGE_FLAGS, type PageFlag } from './settle';
 
 /**
@@ -45,23 +45,88 @@ export async function resolvePageFlag(
       throw new TRPCError({ code: 'CONFLICT', message: 'not_flagged' });
     }
     const invoiceId = doc.invoiceId;
+    // The same locks settle/attach take: no decision, claim or credit note can
+    // land on this invoice between the checks below and the retire.
     const [inv] = await tx
-      .select({ id: invoices.id, status: invoices.status })
+      .select({ id: invoices.id, status: invoices.status, invoiceNumber: invoices.invoiceNumber })
       .from(invoices)
       .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
       .limit(1)
       .for('update');
     if (!inv) throw documentNotFound();
+    await tx.execute(sql`
+      select d.id from ${discrepancies} d
+      join ${matchRuns} r on r.id = d.match_run_id and r.restaurant_id = d.restaurant_id
+      where d.restaurant_id = ${restaurantId} and r.invoice_id = ${invoiceId}
+      for update of d`);
 
     if (action === 'delete_duplicate') {
       if (flag !== 'page_duplicate') throw new TRPCError({ code: 'CONFLICT', message: 'not_a_duplicate' });
-      const retired = await retireInvoice(tx, { restaurantId, invoiceId, absorbedInto: null, userId: args.userId });
-      if (!retired.ok) throw retired.reason === 'not_found' ? documentNotFound() : new DocumentError(retired.reason);
+      // Only a ONE-page invoice: never delete pages that are not the duplicate.
+      const others = await tx
+        .select({ id: ingestDocuments.id })
+        .from(ingestDocuments)
+        .where(
+          and(
+            eq(ingestDocuments.restaurantId, restaurantId),
+            eq(ingestDocuments.invoiceId, invoiceId),
+            eq(ingestDocuments.status, 'registered'),
+            ne(ingestDocuments.id, doc.id),
+          ),
+        )
+        .limit(1);
+      const [recomposed] = await tx
+        .select({ id: auditLog.id })
+        .from(auditLog)
+        .where(
+          and(
+            eq(auditLog.entityType, 'invoice'),
+            eq(auditLog.entityId, invoiceId),
+            eq(auditLog.restaurantId, restaurantId),
+            eq(auditLog.action, PAGES_RECOMPOSED_ACTION),
+          ),
+        )
+        .limit(1);
+      if (others.length > 0 || recomposed) throw new DocumentError('multi_page');
+      // An invoice the worker blanked as "a duplicate of THIS copy" keeps the
+      // number: it takes it over, loses the marker, and is matched.
+      const keepers = (await tx.execute(sql`
+        select id, ocr_payload from ${invoices}
+        where restaurant_id = ${restaurantId} and id <> ${invoiceId}
+          and ocr_payload -> 'raw' -> 'duplicateOf' ->> 'invoiceId' = ${invoiceId}
+        for update`)) as unknown as Array<{ id: string; ocr_payload: { raw?: Record<string, unknown> } | null }>;
+      // Clear the flags on ALL its rows first (ON DELETE SET NULL clears invoice_id after the retire).
       await tx
         .update(ingestDocuments)
-        .set({ status: 'duplicate', error: null, invoiceId: null, updatedAt: new Date() })
-        .where(and(eq(ingestDocuments.restaurantId, restaurantId), eq(ingestDocuments.id, doc.id)));
-      return { invoiceId: null, match: false };
+        .set({ status: 'duplicate', error: null, updatedAt: new Date() })
+        .where(and(eq(ingestDocuments.restaurantId, restaurantId), eq(ingestDocuments.invoiceId, invoiceId)));
+      const retired = await retireInvoice(tx, { restaurantId, invoiceId, absorbedInto: null, userId: args.userId });
+      if (!retired.ok) throw retired.reason === 'not_found' ? documentNotFound() : new DocumentError(retired.reason);
+      const released: string[] = [];
+      for (const k of keepers) {
+        const raw = { ...(k.ocr_payload?.raw ?? {}) };
+        const dup = raw.duplicateOf as { invoiceNumber?: string } | undefined;
+        delete raw.duplicateOf;
+        await tx
+          .update(invoices)
+          .set({
+            invoiceNumber: dup?.invoiceNumber ?? inv.invoiceNumber ?? null,
+            ocrPayload: { ...(k.ocr_payload ?? {}), raw } as never,
+            updatedAt: new Date(),
+          })
+          .where(and(eq(invoices.id, k.id), eq(invoices.restaurantId, restaurantId)));
+        await tx.insert(auditLog).values({
+          restaurantId,
+          userId: args.userId,
+          action: 'document.duplicate_marker_moved',
+          entityType: 'invoice',
+          entityId: k.id,
+          before: { duplicateOf: invoiceId } as never,
+          after: { invoiceNumber: dup?.invoiceNumber ?? inv.invoiceNumber ?? null } as never,
+        });
+        released.push(k.id);
+      }
+      return { invoiceId: null, match: false, released };
     }
 
     // separate: every row of this invoice carries the decision.
@@ -83,13 +148,14 @@ export async function resolvePageFlag(
       .from(matchRuns)
       .where(and(eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.invoiceId, invoiceId)))
       .limit(1);
-    return { invoiceId, match: !run && inv.status === 'matched' };
+    return { invoiceId, match: !run && inv.status === 'matched', released: [] as string[] };
   });
-  if (out.match && out.invoiceId) {
+  const toMatch = [...(out.match && out.invoiceId ? [out.invoiceId] : []), ...out.released];
+  for (const id of toMatch) {
     try {
-      await (deps.enqueueMatch ?? enqueueMatchInvoice)({ restaurantId, invoiceId: out.invoiceId });
+      await (deps.enqueueMatch ?? enqueueMatchInvoice)({ restaurantId, invoiceId: id });
     } catch (err) {
-      console.warn(`[documents] failed to enqueue match for invoice=${out.invoiceId}`, err);
+      console.warn(`[documents] failed to enqueue match for invoice=${id}`, err);
     }
   }
   return { invoiceId: out.invoiceId, action };

@@ -129,11 +129,20 @@ beforeAll(async () => {
   await ingestPage(A, slowHeld, { sender: '9727' });
   const slow = await invoice(A, 'slowSibling', { status: 'ocr_pending', age: 4, url: `${A}/scan-h1-00000007.jpg` });
   await ingestPage(A, slow, { sender: '9727', at: minutesAgo(38) });
-  // A held page whose sibling has been stuck in ocr_pending for hours: no longer blocks.
+  // A held page whose sibling has been stuck in ocr_pending for hours with NO live
+  // OCR job (its job failed and is on record): no longer blocks.
   const stuckHeld = await invoice(A, 'heldStuckSibling', { status: 'matched', age: 40, url: `${A}/scan-h1-00000008.jpg` });
   await ingestPage(A, stuckHeld, { sender: '9728' });
   const stuck = await invoice(A, 'stuckSibling', { status: 'ocr_pending', age: 180, url: `${A}/scan-h1-00000009.jpg` });
   await ingestPage(A, stuck, { sender: '9728', at: minutesAgo(39) });
+  await insertJob(sql, 'ocr-invoice', { restaurantId: A, invoiceId: stuck }, { restaurantId: A, dedupeKey: `ocr:${stuck}:scan-h1-00000009:0` });
+  await sql`UPDATE job_queue SET status = 'failed', finished_at = now() WHERE payload->>'invoiceId' = ${stuck}`;
+  // A held page whose old sibling still has a LIVE (queued) OCR job: still blocks (item 13).
+  const liveHeld = await invoice(A, 'heldLiveSibling', { status: 'matched', age: 40, url: `${A}/scan-h1-0000000a.jpg` });
+  await ingestPage(A, liveHeld, { sender: '9729' });
+  const live = await invoice(A, 'liveSibling', { status: 'ocr_pending', age: 180, url: `${A}/scan-h1-0000000b.jpg` });
+  await ingestPage(A, live, { sender: '9729', at: minutesAgo(39) });
+  await insertJob(sql, 'ocr-invoice', { restaurantId: A, invoiceId: live }, { restaurantId: A, dedupeKey: `ocr:${live}:scan-h1-0000000b:0` });
 });
 
 afterAll(async () => {
@@ -151,7 +160,7 @@ afterAll(async () => {
 describe('G-09 sweep', () => {
   it('U-1: a path-form ocr_pending invoice whose job was lost is retried, signed at sweep time', async () => {
     const res = await runOcrSweep(sql, NOW);
-    expect(mine(res.requeued).sort()).toEqual([ids.lost, ids.reocr, ids.returned, ids.stuckSibling].sort()); // the stuck sibling's lost job too
+    expect(mine(res.requeued).sort()).toEqual([ids.lost, ids.reocr, ids.returned].sort());
     // Same object, next generation: the old job does not block the retry.
     expect((await jobs('ocr-invoice', ids.returned!)).map((j) => j.dedupe_key)).toEqual([
       `ocr:${ids.returned}:scan-b0b0-0000abcd:0`,
@@ -177,7 +186,9 @@ describe('G-09 sweep', () => {
     for (const k of ['held', 'heldSwitchOff', 'heldStuckSibling']) {
       expect((await jobs('match-invoice', ids[k]!)).map((j) => j.dedupe_key)).toEqual([`g09-release-${ids[k]}`]);
     }
-    for (const k of ['heldYoung', 'notIngested', 'heldDuplicate', 'heldSlowSibling']) expect(await jobs('match-invoice', ids[k]!)).toHaveLength(0);
+    for (const k of ['heldYoung', 'notIngested', 'heldDuplicate', 'heldSlowSibling', 'heldLiveSibling']) {
+      expect(await jobs('match-invoice', ids[k]!)).toHaveLength(0);
+    }
     expect(mine(res.requeued)).toEqual([]); // idempotent
   });
 });

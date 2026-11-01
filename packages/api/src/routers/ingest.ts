@@ -11,6 +11,7 @@ import {
   ingestDocuments,
   ingestMessages,
   ingestSenders,
+  invoices,
   restaurants,
   sql,
   suppliers,
@@ -291,6 +292,9 @@ export const ingestRouter = router({
               error: ingestDocuments.error,
               invoiceId: ingestDocuments.invoiceId,
               storagePath: ingestDocuments.storagePath,
+              // G-09: the invoice a page_duplicate repeats, when the OCR recorded it.
+              repeatsInvoiceId: sql<string | null>`(select i.ocr_payload -> 'raw' -> 'duplicateOf' ->> 'invoiceId'
+                from ${invoices} i where i.id = ${ingestDocuments.invoiceId} and i.restaurant_id = ${ingestDocuments.restaurantId})`,
             })
             .from(ingestDocuments)
             .where(and(eq(ingestDocuments.restaurantId, rid), inArray(ingestDocuments.messageId, ids)))

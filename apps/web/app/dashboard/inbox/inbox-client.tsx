@@ -17,6 +17,7 @@ import {
   Badge,
   Button,
   Card,
+  ConfirmDialog,
   EmptyState,
   Input,
   Select,
@@ -51,6 +52,8 @@ export interface InboxMessage {
     error: string | null;
     invoiceId: string | null;
     stored: boolean;
+    /** G-09: the invoice a page_duplicate repeats (when known). */
+    repeatsInvoiceId?: string | null;
   }>;
   /** orderCapture: a forwarded WhatsApp order (text) and the draft PO captured from it. */
   order?: { poId: string | null; poStatus: string | null } | null;
@@ -108,6 +111,8 @@ const KNOWN_ERRORS = [
   'page_not_merged',
   'page_separate',
 ] as const;
+/** Named refusals of ingest.resolvePageFlag, shown as copy. */
+const REFUSALS = ['not_flagged', 'not_a_duplicate', 'approved_or_paid', 'has_claim', 'decided', 'linked', 'multi_page'] as const;
 /** Flags that still ask a person something (page_separate is already answered). */
 const PAGE_QUESTIONS: readonly string[] = [
   'page_other_supplier',
@@ -136,6 +141,8 @@ export function InboxClient(props: Props) {
   const reject = trpc.ingest.rejectDocument.useMutation();
   const resolvePage = trpc.ingest.resolvePageFlag.useMutation();
   const [supplierFor, setSupplierFor] = useState<Record<string, string>>({});
+  /** The document whose duplicate invoice is about to be deleted (confirm first). */
+  const [confirmDup, setConfirmDup] = useState<InboxMessage['documents'][number] | null>(null);
 
   const errorText = (code: string | null) =>
     code && (KNOWN_ERRORS as readonly string[]).includes(code)
@@ -148,7 +155,12 @@ export function InboxClient(props: Props) {
       toast.success(ok);
       router.refresh();
     } catch (err) {
-      toast.error(t('inbox.actionFailed', { message: err instanceof Error ? err.message : '' }));
+      const code = err instanceof Error ? err.message : '';
+      // A named refusal reads as a sentence, never as a raw code.
+      const message = (REFUSALS as readonly string[]).includes(code)
+        ? t(`refusals.${code as (typeof REFUSALS)[number]}`)
+        : code;
+      toast.error(t('inbox.actionFailed', { message }));
     }
   }
 
@@ -287,11 +299,15 @@ export function InboxClient(props: Props) {
                             </span>
                           ) : null}
                           <Badge tone={DOC_TONE[d.status]}>{t(`documentStatus.${d.status}`)}</Badge>
+                          {d.error === 'page_duplicate' ? (
+                            // T2: a possible double payment is an act-now item, never calm.
+                            <Badge tone="danger-solid">{t('inbox.possibleDuplicate')}</Badge>
+                          ) : null}
                           {d.error ? (
                             <span
                               className={cn(
                                 'inline-flex items-center gap-1 text-xs',
-                                d.status === 'failed' ? 'text-danger' : 'text-muted',
+                                d.status === 'failed' || d.error === 'page_duplicate' ? 'text-danger' : 'text-muted',
                               )}
                             >
                               <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
@@ -407,12 +423,7 @@ export function InboxClient(props: Props) {
                                   variant="secondary"
                                   className="min-h-11"
                                   disabled={resolvePage.isPending}
-                                  onClick={() =>
-                                    act(
-                                      () => resolvePage.mutateAsync({ documentId: d.id, action: 'delete_duplicate' }),
-                                      t('inbox.pageDuplicateDeleted'),
-                                    )
-                                  }
+                                  onClick={() => setConfirmDup(d)}
                                 >
                                   {t('inbox.pageDeleteDuplicate')}
                                 </Button>
@@ -429,6 +440,35 @@ export function InboxClient(props: Props) {
           ))}
         </ul>
       )}
+
+      <ConfirmDialog
+        open={confirmDup !== null}
+        title={t('inbox.pageDeleteConfirmTitle')}
+        body={
+          <>
+            <span>{t('inbox.pageDeleteConfirmBody')}</span>
+            {confirmDup?.repeatsInvoiceId ? (
+              <Link
+                href={`/dashboard/invoices/${confirmDup.repeatsInvoiceId}`}
+                className="mt-2 block font-semibold text-primary hover:underline"
+              >
+                {t('inbox.pageDeleteConfirmRepeats')}
+              </Link>
+            ) : null}
+          </>
+        }
+        party={confirmDup?.filename ?? undefined}
+        confirmLabel={t('inbox.pageDeleteDuplicate')}
+        cancelLabel={t('inbox.keep')}
+        danger
+        loading={resolvePage.isPending}
+        onClose={() => setConfirmDup(null)}
+        onConfirm={() => {
+          const d = confirmDup;
+          setConfirmDup(null);
+          if (d) void act(() => resolvePage.mutateAsync({ documentId: d.id, action: 'delete_duplicate' }), t('inbox.pageDuplicateDeleted'));
+        }}
+      />
 
       {/* Channels + allow-list */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

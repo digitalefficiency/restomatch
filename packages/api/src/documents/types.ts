@@ -23,6 +23,8 @@ export type DocumentFailureReason =
   | 'approved_or_paid'
   /** attach: the absorbed invoice is referenced (a goods receipt, price history, a credit note): never retired. */
   | 'linked'
+  /** delete_duplicate: the invoice holds more than this one page (or was recomposed). */
+  | 'multi_page'
   /** attach: both ids are the same invoice. */
   | 'same_invoice'
   /** split: the page groups are not a partition of the document's pages. */
