@@ -18,6 +18,7 @@ import {
 } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
+import { formatIls } from '@/lib/money';
 import { catalog as catalogNs } from '@/lib/i18n/messages/catalog';
 import { components } from '@/lib/i18n/messages/components';
 
@@ -163,11 +164,16 @@ function ChargeKeys() {
   const toast = useToast();
   const utils = trpc.useUtils();
   const keys = trpc.mapping.chargeKeys.useQuery();
+  const locale = useLocale();
   const remove = trpc.mapping.removeChargeKey.useMutation({
-    onSuccess: () => {
-      toast.success(t('mapping.chargeKeyRemoved'));
+    onSuccess: (r) => {
+      toast.success(r.linesReturned > 0 || r.linesLocked > 0
+        ? t('mapping.chargeKeyRemoved', { count: formatNumber(r.linesReturned, locale) }) +
+          (r.linesLocked > 0 ? ` ${t('mapping.chargeKeyLocked', { count: formatNumber(r.linesLocked, locale) })}` : '')
+        : t('mapping.chargeKeyRemovedNone'));
       void utils.mapping.chargeKeys.invalidate();
       void utils.mapping.unmapped.invalidate();
+      void utils.mapping.questionCount.invalidate();
     },
     onError: (e) => toast.error(friendlyError(e, tc)),
   });
@@ -359,6 +365,10 @@ function MapRow({
     onError: (e) => toast.error(friendlyError(e, tc)),
   });
   const pending = confirm.isPending || answer.isPending || charge.isPending;
+  // Round 5: the amount shown with "שורת חיוב" — fetched only when the panel is open
+  // (owner / manager); the question list itself carries no ₪.
+  const sample = trpc.mapping.chargeSample.useQuery(confirmKey(row), { enabled: open && !chef });
+  const chargeSample = sample.data ?? null;
   const pick = (productId: string) =>
     answer.mutate({ supplierId: row.supplierId, rawName: row.sampleDescription, productId });
 
@@ -505,13 +515,27 @@ function MapRow({
           </div>
 
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
-            <span className="text-sm text-muted">{t('mapping.chargeHint')}</span>
+            <span className="text-sm text-muted">
+              {t('mapping.chargeHint')}
+              {chargeSample ? (
+                <>
+                  {' '}
+                  {t('mapping.chargeSample', { amount: formatIls(chargeSample.lineTotal, { locale }) })}
+                </>
+              ) : null}
+            </span>
             <Button
               variant="secondary"
               size="sm"
               loading={charge.isPending}
               disabled={pending || !row.sampleDescription}
-              onClick={() => charge.mutate({ ...confirmKey(row) })}
+              onClick={() =>
+                charge.mutate({
+                  ...confirmKey(row),
+                  // Round 5: only the line shown here bounds what the key auto-marks later.
+                  ...(chargeSample ? { shownLineIds: [chargeSample.invoiceLineId] } : {}),
+                })
+              }
             >
               {t('mapping.markCharge')}
             </Button>

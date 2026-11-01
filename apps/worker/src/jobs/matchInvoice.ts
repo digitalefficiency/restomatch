@@ -212,7 +212,9 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
         from invoices i where i.id = ${invoiceId}::uuid and i.restaurant_id = ${restaurantId}
        for update
     `)) as unknown as Array<{ unlinked: boolean; link_held: boolean }>;
-    if (race && race.link_held && race.unlinked) return null;
+    // Only a FIRST match is guarded (round 5): an invoice with a run re-matches
+    // with its line back as a question, keeping the people's decisions.
+    if (!priorRun && race && race.link_held && race.unlinked) return null;
     let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;
     if (priorRun) {
       prior = await loadPriorDecisions(tx, restaurantId, invoiceId);

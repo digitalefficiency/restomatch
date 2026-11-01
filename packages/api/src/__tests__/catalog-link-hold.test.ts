@@ -24,7 +24,7 @@ import type { AppContext, Session } from '../context';
 import { rematchHoldReason } from '../receiving/matchTriggers';
 import { signAnswerUndo, UNDO_TTL_MS, verifyAnswerUndo } from '../catalog/answerUndo';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
-import { applyLearnedCharges, orderQuestionCount } from '../catalog/linkQuestions';
+import { applyLearnedCharges, invoiceQuestionCount, orderQuestionCount } from '../catalog/linkQuestions';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 
 /**
@@ -85,6 +85,9 @@ async function heldInvoice(raw: string, reasons: string[] = ['unlinked']) {
       source: 'photo',
       invoiceDate: new Date(),
       totalExclVat: '22.00',
+      // A printed VAT (18%), so a clean match is clean (round 5: an undo keeps a run with findings).
+      vatAmount: '3.96',
+      totalInclVat: '25.96',
       ocrPayload: { provider: 'reconciled', raw: { reviewReasons: reasons } } as never,
     })
     .returning({ id: invoices.id });
@@ -381,7 +384,7 @@ describe('R2 M-2: "שורת חיוב — לא מוצר" keeps a charge line out 
     expect((await invoiceRow(invoiceId)).ocrPayload).not.toHaveProperty('chargeLineIds');
 
     const r = await callerFor(A, 'manager').mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים' });
-    expect(Object.keys(r).sort()).toEqual(['invoiceLinesMarked', 'learnedKey', 'rematch', 'undo']);
+    expect(Object.keys(r).sort()).toEqual(['invoiceLinesMarked', 'learnedKey', 'linesLocked', 'rematch', 'undo']);
     expect((await invoiceRow(oInv!.id)).ocrPayload ?? {}).not.toHaveProperty('chargeLineIds');
     // A foreign undo list never touches lines of another supplier.
     const [oLine] = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, oInv!.id));
@@ -391,6 +394,13 @@ describe('R2 M-2: "שורת חיוב — לא מוצר" keeps a charge line out 
 });
 
 /* ── G-08 review round 3 (31.10) ─────────────────────────────────────────── */
+
+/** Mark as the mapper does: the question's sample line (its amount was shown) bounds the learned key. */
+async function markShown(rawName: string, supplierSku?: string) {
+  const sample = await callerFor(A).mapping.chargeSample({ supplierId: S, rawName, ...(supplierSku ? { supplierSku } : {}) });
+  const shownLineIds = sample ? [sample.invoiceLineId] : [];
+  return callerFor(A).mapping.markCharge({ supplierId: S, rawName, ...(supplierSku ? { supplierSku } : {}), shownLineIds });
+}
 
 const reasonsOf = async (id: string) =>
   ((await invoiceRow(id)).ocrPayload as unknown as { raw?: { reviewReasons?: string[] } } | null)?.raw?.reviewReasons ?? [];
@@ -480,7 +490,7 @@ describe('R3 MEDIUM: a charge answer is learned', () => {
   it("week 2's same line is pre-marked a charge line with no hold; its order line is no question either", async () => {
     await order([{ productId: P, raw: 'פלפל אדום' }]);
     await invoiceWithCharge({ raw: 'פיקדון ארגזים', total: 10, vatRate: 0 }, 0.18);
-    await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים' });
+    await markShown('פיקדון ארגזים');
     expect(await callerFor(A).mapping.chargeKeys()).toEqual([
       expect.objectContaining({ supplierId: S, sku: null, nameKey: 'פיקדון ארגזים' }),
     ]);
@@ -655,7 +665,7 @@ describe('R4 MEDIUM: money truth for charge lines', () => {
   it('a learned key auto-marks only within the amount it was answered at (+ the price tolerance); a SKU key needs the same name', async () => {
     const first = await plainInvoice({ excl: '10.00', vat: '0', incl: '10.00', status: 'parsed', reasons: ['unlinked'] });
     await addLine(first, { productId: null, raw: 'פיקדון ארגזים', total: '10', vatRate: '0' });
-    await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים' });
+    await markShown('פיקדון ארגזים');
     expect((await callerFor(A).mapping.chargeKeys())[0]).toMatchObject({ rawName: 'פיקדון ארגזים' });
 
     // ₪10.20 is within 2% of ₪10 → auto-marked, released, matched.
@@ -673,7 +683,8 @@ describe('R4 MEDIUM: money truth for charge lines', () => {
     // A SKU key: the same מק״ט under another name is a question.
     const skuInv = await plainInvoice({ excl: '20.00', vat: '3.60', incl: '23.60', status: 'parsed', reasons: ['unlinked'] });
     await addLine(skuInv, { productId: null, raw: 'דמי משלוח', total: '20', sku: 'DLV-1' });
-    await callerFor(A).mapping.markCharge({ supplierId: S, supplierSku: 'DLV-1', rawName: 'דמי משלוח' });
+    await markShown('דמי משלוח', 'DLV-1');
+    expect((await callerFor(A).mapping.chargeKeys()).find((k) => k.sku === 'DLV-1')).toMatchObject({ nameKey: 'דמי משלוח' });
     const misused = await plainInvoice({ excl: '20.00', vat: '3.60', incl: '23.60', status: 'parsed', reasons: ['unlinked'] });
     await addLine(misused, { productId: null, raw: 'גבינה צהובה', total: '20', sku: 'DLV-1' });
     expect(await applyLearnedCharges(db, A.restaurantId, misused)).toEqual({ charged: 0, released: false });
@@ -713,7 +724,8 @@ describe('R4 MEDIUM: money truth for charge lines', () => {
     await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים' });
     await db.update(invoices).set({ status: 'paid' }).where(eq(invoices.id, paid));
     const r = await callerFor(A).mapping.removeChargeKey({ supplierId: S, sku: null, nameKey: 'פיקדון ארגזים' });
-    expect(r).toEqual({ removed: true, linesReturned: 1 });
+    // The paid invoice's mark is signed off: it stays (round 5) and is reported.
+    expect(r).toEqual({ removed: true, linesReturned: 1, linesLocked: 1 });
     expect((await invoiceRow(unpaid)).ocrPayload).toMatchObject({ chargeLineIds: [] });
     expect((await invoiceRow(unpaid)).status).toBe('parsed');
     expect(((await invoiceRow(paid)).ocrPayload as unknown as { chargeLineIds: string[] }).chargeLineIds).toHaveLength(1);
@@ -747,5 +759,124 @@ describe('R4 LOW-8: an undo after a prune puts the question back in the bucket',
     await callerFor(A).mapping.confirm({ supplierId: S, rawName: 'פלפל אדום חריף', revert: r.undo! });
     expect(await reasonsOf(inv.invoiceId)).toEqual(['confidence', 'unlinked']);
     expect((await computeLeakHero(db, A.restaurantId)).awaitingQuestionCount).toBe(1);
+  });
+});
+
+/* ── G-08 review round 5 (1.11) ─────────────────────────────────────────── */
+
+describe('R5 HIGH-2: an undo never deletes a run with findings or the people\'s decisions', () => {
+  it('a disputed invoice with a decided finding → undo the charge → the run and the decision stay; it re-matches instead', async () => {
+    await order([{ productId: P, raw: 'פלפל אדום' }]);
+    // Billed above the order (₪15 vs ₪11) + a deposit line.
+    const inv = await plainInvoice({ excl: '40.00', vat: '5.40', incl: '45.40', status: 'parsed', reasons: ['unlinked'] });
+    await db.insert(invoiceLines).values({ invoiceId: inv, productId: P, rawDescription: 'פלפל אדום', qtyBilled: '2', unit: 'ק״ג', unitPriceBilled: '15', lineTotal: '30' });
+    const dep = await addLine(inv, { productId: null, raw: 'פיקדון ארגזים', total: '10', vatRate: '0' });
+    await markShown('פיקדון ארגזים');
+    await callerFor(A).match.runForInvoice({ invoiceId: inv });
+    const [finding] = await db
+      .select({ id: discrepancies.id })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(and(eq(matchRuns.invoiceId, inv), eq(discrepancies.type, 'PRICE_HIGHER')));
+    expect(finding).toBeDefined();
+    await callerFor(A).approvals.reject({ discrepancyId: finding!.id, reason: 'agreed by phone' });
+    await db.update(invoices).set({ status: 'disputed' }).where(eq(invoices.id, inv));
+    enqueued.length = 0;
+
+    await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים', undo: { invoiceLineIds: [dep] } });
+    const [still] = await db.select({ status: discrepancies.resolutionStatus }).from(discrepancies).where(eq(discrepancies.id, finding!.id));
+    expect(still!.status).toBe('rejected'); // the decision is kept
+    expect((await invoiceRow(inv)).status).toBe('disputed'); // not re-held
+    expect(rematched()).toContain(inv); // re-matched instead (the job keeps decisions)
+  });
+
+  it('an approved invoice is never un-marked (linesLocked); its marks stay', async () => {
+    const inv = await plainInvoice({ excl: '10.00', vat: '0', incl: '10.00', status: 'parsed', reasons: ['unlinked'] });
+    const dep = await addLine(inv, { productId: null, raw: 'פיקדון ארגזים', total: '10', vatRate: '0' });
+    await markShown('פיקדון ארגזים');
+    await db.update(invoices).set({ status: 'approved' }).where(eq(invoices.id, inv));
+    const r = await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים', undo: { invoiceLineIds: [dep] } });
+    expect(r.linesLocked).toBe(1);
+    expect(((await invoiceRow(inv)).ocrPayload as unknown as { chargeLineIds: string[] }).chargeLineIds).toEqual([dep]);
+  });
+});
+
+describe('R5 MEDIUM-3: a manual SKU mark is SKU + name, like a learned SKU key', () => {
+  it('two lines share a מק״ט under different names → marking one name marks only that line', async () => {
+    const inv = await plainInvoice({ excl: '70.00', vat: '12.60', incl: '82.60', status: 'parsed', reasons: ['unlinked'] });
+    await addLine(inv, { productId: null, raw: 'הובלה', total: '20', sku: 'X-9' });
+    await addLine(inv, { productId: null, raw: 'גבינה צהובה', total: '50', sku: 'X-9' });
+    const r = await callerFor(A).mapping.markCharge({ supplierId: S, supplierSku: 'X-9', rawName: 'הובלה' });
+    expect(r.invoiceLinesMarked).toBe(1);
+    expect(await invoiceQuestionCount(db, A.restaurantId, inv)).toBe(1);
+  });
+});
+
+describe('R5 MEDIUM-4: "all-charge" is clean only when subtotal, VAT and total all reconcile', () => {
+  it('a NULL subtotal with a misread VAT is checked (no silent ₪0); nothing printed is checked too', async () => {
+    for (const header of [
+      { excl: null, vat: '50.00', incl: '100.00' },
+      { excl: null, vat: null, incl: null },
+    ]) {
+      const [row] = await db
+        .insert(invoices)
+        .values({
+          restaurantId: A.restaurantId,
+          supplierId: S,
+          status: 'parsed',
+          source: 'photo',
+          invoiceDate: new Date(),
+          totalExclVat: header.excl,
+          vatAmount: header.vat,
+          totalInclVat: header.incl,
+          ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinked'] } } as never,
+        })
+        .returning({ id: invoices.id });
+      await addLine(row!.id, { productId: null, raw: 'הובלה', total: '50', vatRate: '0' });
+      await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'הובלה' }).catch(() => null);
+      const r = await callerFor(A).match.runForInvoice({ invoiceId: row!.id });
+      expect(r.status).not.toBe('clean');
+      expect(r.discrepancyCount).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe('R5 MEDIUM-5: a learned key bounds what it hides', () => {
+  it('learns only from the shown line; needs the same sign; at most one auto-mark per key per invoice', async () => {
+    // Answered without being shown an amount → learns no range → never auto-marks.
+    const a = await plainInvoice({ excl: '10.00', vat: '0', incl: '10.00', status: 'parsed', reasons: ['unlinked'] });
+    await addLine(a, { productId: null, raw: 'פיקדון ארגזים', total: '10', vatRate: '0' });
+    await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים' });
+    const b = await plainInvoice({ excl: '10.00', vat: '0', incl: '10.00', status: 'parsed', reasons: ['unlinked'] });
+    await addLine(b, { productId: null, raw: 'פיקדון ארגזים', total: '10', vatRate: '0' });
+    expect(await applyLearnedCharges(db, A.restaurantId, b)).toEqual({ charged: 0, released: false });
+
+    // Answered on the shown ₪10 line → the range is [₪10, ₪10].
+    await markShown('פיקדון ארגזים');
+    const flip = await plainInvoice({ excl: '-10.00', vat: '0', incl: '-10.00', status: 'parsed', reasons: ['unlinked'] });
+    await addLine(flip, { productId: null, raw: 'פיקדון ארגזים', total: '-10', vatRate: '0' });
+    expect(await applyLearnedCharges(db, A.restaurantId, flip)).toEqual({ charged: 0, released: false }); // sign flip → a question
+
+    const twice = await plainInvoice({ excl: '20.00', vat: '0', incl: '20.00', status: 'parsed', reasons: ['unlinked'] });
+    await addLine(twice, { productId: null, raw: 'פיקדון ארגזים', total: '10', vatRate: '0' });
+    await addLine(twice, { productId: null, raw: 'פיקדון ארגזים', total: '10', vatRate: '0' });
+    expect(await applyLearnedCharges(db, A.restaurantId, twice)).toEqual({ charged: 1, released: false }); // the 2nd is a question
+    expect(await invoiceQuestionCount(db, A.restaurantId, twice)).toBe(1);
+  });
+});
+
+describe('R5: mapping.chargeSample (the amount shown with "שורת חיוב")', () => {
+  it('owner/manager only; a B supplier → NOT_FOUND; the question list itself carries no ₪', async () => {
+    const B = await seedTenant(db, 'B');
+    const inv = await plainInvoice({ excl: '10.00', vat: '0', incl: '10.00', status: 'parsed', reasons: ['unlinked'] });
+    const line = await addLine(inv, { productId: null, raw: 'פיקדון ארגזים', total: '10', vatRate: '0' });
+    expect(await callerFor(A, 'manager').mapping.chargeSample({ supplierId: S, rawName: 'פיקדון ארגזים' })).toMatchObject({
+      invoiceLineId: line,
+      lineTotal: 10,
+    });
+    await expect(callerFor(A, 'chef').mapping.chargeSample({ supplierId: S, rawName: 'פיקדון ארגזים' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    const [bSup] = await db.insert(suppliers).values({ restaurantId: B.restaurantId, name: 'ספק B' }).returning({ id: suppliers.id });
+    await expect(callerFor(A).mapping.chargeSample({ supplierId: bSup!.id, rawName: 'פיקדון ארגזים' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(JSON.stringify(await callerFor(A).mapping.unmapped())).not.toMatch(/lineTotal|₪/);
   });
 });

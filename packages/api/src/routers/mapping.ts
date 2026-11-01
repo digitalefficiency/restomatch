@@ -48,6 +48,8 @@ import { readConsolidatedRaw } from '../match/consolidated';
  * on the queue's own connection at once, the backfill only when this request's
  * transaction does — a worker that claimed it sooner would match the old lines.
  */
+type SQL = ReturnType<typeof sql>;
+
 const REMATCH_DELAY_MS = 3_000;
 
 export interface RematchReport {
@@ -165,6 +167,26 @@ export interface UnmappedSku {
   occurrences: number;
   /** G-08: the top 1–3 products the policy suggests for a 'name' row ("זה אותו מוצר?"). */
   suggestions: LinkSuggestion[];
+}
+
+/** One unlinked, non-charge invoice line of a question's key — the one shown with "שורת חיוב" (round 5). */
+async function chargeSampleFor(
+  db: Database,
+  rid: string,
+  row: Pick<UnmappedSku, 'supplierId' | 'supplierSku' | 'nameKey' | 'sampleDescription'>,
+): Promise<{ invoiceLineId: string; description: string; lineTotal: number } | null> {
+  const nameKey = row.nameKey ?? normalizeLinkName(row.sampleDescription);
+  const key = row.supplierSku
+    ? sql`il.supplier_sku = ${row.supplierSku} and ${normNameSql(sql`il.raw_description`)} = ${nameKey}`
+    : sql`il.supplier_sku is null and ${normNameSql(sql`il.raw_description`)} = ${nameKey}`;
+  const [r] = (await db.execute(sql`
+    select il.id, il.raw_description, il.line_total from invoice_lines il
+      join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${row.supplierId}
+     where il.product_id is null and ${key} and ${IL_NOT_CHARGE}
+     order by i.created_at desc, il.id
+     limit 1
+  `)) as unknown as Array<{ id: string; raw_description: string; line_total: string }>;
+  return r ? { invoiceLineId: String(r.id), description: String(r.raw_description), lineTotal: Number(r.line_total) } : null;
 }
 
 /** Name-keyed questions are capped per read (suggestions cost two queries each). */
@@ -316,6 +338,12 @@ async function reholdLinkHolds(db: Database, rid: string, invoiceIds: string[]):
              and i.status in ('matched', 'disputed')
              and i.ocr_payload ? 'linkReleasedAt'
              and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${IL_NOT_CHARGE})
+             -- Round 5: never delete a run that carries findings (or the people's
+             -- decisions on them) — such an invoice re-matches instead, keeping them.
+             and not exists (
+               select 1 from match_runs mr join discrepancies d on d.match_run_id = mr.id and d.restaurant_id = ${rid}
+                where mr.invoice_id = i.id and mr.restaurant_id = ${rid}
+             )
           returning i.id
         `)) as unknown as Array<{ id: string }>;
         if (rows.length === 0) return;
@@ -715,6 +743,8 @@ export interface ChargeInput {
   rawName: string;
   /** Undo ("בטל") a mark made moments ago: exactly these lines become questions again; forgetKey drops the learned key it added. */
   undo?: { invoiceLineIds: string[]; forgetKey?: boolean };
+  /** The invoice lines the person was SHOWN when answering (their amounts bound the learned key — round 5). */
+  shownLineIds?: string[];
 }
 
 /** The charge key of an input: (supplier, SKU) or (supplier, normalized name). */
@@ -743,9 +773,12 @@ function chargeKeyOf(input: ChargeInput) {
 async function applyCharge(db: Database, rid: string, userId: string, input: ChargeInput) {
   await assertSupplierOwned(db, input.supplierId, rid);
   const key = chargeKeyOf(input);
-  const lineKey = key.sku
-    ? sql`il.supplier_sku = ${key.sku}`
-    : sql`il.supplier_sku is null and ${normNameSql(sql`il.raw_description`)} = ${key.nameKey}`;
+  // Round 5: a SKU key is SKU + normalized name, everywhere (mark, check, lock, undo).
+  const keyOn = (skuCol: SQL, rawCol: SQL) =>
+    key.sku
+      ? sql`${skuCol} = ${key.sku} and ${normNameSql(rawCol)} = ${key.nameKey}`
+      : sql`${skuCol} is null and ${normNameSql(rawCol)} = ${key.nameKey}`;
+  const lineKey = keyOn(sql`il.supplier_sku`, sql`il.raw_description`);
   await db.execute(
     sql`select pg_advisory_xact_lock(hashtext(${`g08:${rid}:${input.supplierId}:${key.sku ?? key.nameKey}`}))`,
   );
@@ -753,6 +786,7 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
   if (input.undo) {
     const ids = input.undo.invoiceLineIds;
     let target: Array<{ id: string; invoice_id: string }> = [];
+    let linesLocked = 0;
     if (ids.length > 0) {
       await db.execute(sql`
         select i.id from invoices i
@@ -760,13 +794,17 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
            and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)}))
          order by i.id for update
       `);
-      target = (await db.execute(sql`
-        select il.id, il.invoice_id from invoice_lines il
+      const rows = (await db.execute(sql`
+        select il.id, il.invoice_id, ${INVOICE_LOCKED} as locked from invoice_lines il
           join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
          where il.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)}) and il.product_id is null and ${lineKey}
            and coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text
          order by il.invoice_id
-      `)) as unknown as Array<{ id: string; invoice_id: string }>;
+      `)) as unknown as Array<{ id: string; invoice_id: string; locked: boolean }>;
+      // Round 5: an approved / paid invoice, or one a credit claim hangs on, was
+      // signed off — its marks stay; the person re-checks it by hand.
+      linesLocked = rows.filter((r) => r.locked).length;
+      target = rows.filter((r) => !r.locked);
     }
     const byInv = groupByInvoice(target);
     for (const [invoiceId, lineIds] of byInv) {
@@ -795,7 +833,7 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
       entityId: input.supplierId,
       after: { sku: key.sku, nameKey: key.nameKey, lineIds: target.map((t) => String(t.id)), invoiceIds: touched, forgotKey: !!input.undo.forgetKey },
     });
-    return { invoiceLinesMarked: 0, learnedKey: false, rematch, undo: null };
+    return { invoiceLinesMarked: 0, learnedKey: false, rematch, undo: null, linesLocked };
   }
 
   // An open question of this key must exist: an invoice line, an order line or a price-list row.
@@ -804,9 +842,9 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
       exists (select 1 from invoice_lines il join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
                where il.product_id is null and ${lineKey} and ${IL_NOT_CHARGE})
       or exists (select 1 from po_lines pl join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid} and po.supplier_id = ${input.supplierId}
-               where pl.product_id is null and ${key.sku ? sql`pl.supplier_sku = ${key.sku}` : sql`pl.supplier_sku is null and ${normNameSql(sql`pl.raw_description`)} = ${key.nameKey}`})
+               where pl.product_id is null and ${keyOn(sql`pl.supplier_sku`, sql`pl.raw_description`)})
       or exists (select 1 from supplier_catalog_items sci where sci.restaurant_id = ${rid} and sci.supplier_id = ${input.supplierId}
-               and sci.product_id is null and ${key.sku ? sql`sci.supplier_sku = ${key.sku}` : sql`sci.supplier_sku is null and ${normNameSql(sql`sci.supplier_name_raw`)} = ${key.nameKey}`})
+               and sci.product_id is null and ${keyOn(sql`sci.supplier_sku`, sql`sci.supplier_name_raw`)})
     ) as open
   `)) as unknown as Array<{ open: boolean }>;
   if (!open?.open) throw new TRPCError({ code: 'NOT_FOUND', message: 'no open question' });
@@ -839,9 +877,10 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
 
   // Learn the key: next week's line of it is pre-marked by the OCR job — only
   // up to the largest amount answered here (+ the price tolerance; round 4).
-  const maxAbsAgorot =
-    target.length > 0 ? Math.max(...target.map((t) => Math.abs(Math.round(Number(t.line_total) * 100)))) : null;
-  const learnedNew = await learnChargeKey(db, rid, { ...key, rawName: input.rawName }, maxAbsAgorot, userId);
+  // Only the amounts the person was shown (round 5) bound what the key auto-marks later.
+  const shown = new Set(input.shownLineIds ?? []);
+  const shownAgorot = target.filter((t) => shown.has(String(t.id))).map((t) => Math.round(Number(t.line_total) * 100));
+  const learnedNew = await learnChargeKey(db, rid, { ...key, rawName: input.rawName }, shownAgorot, userId);
   const learned = learnedNew ? [true] : [];
 
   // Invoices whose first match waits for an order line of this key (M-4) are touched too.
@@ -851,7 +890,7 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
        and (i.ocr_payload ->> 'heldPoId') is not null
        and exists (select 1 from po_lines pl join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid} and po.supplier_id = ${input.supplierId}
                     where pl.po_id = (i.ocr_payload ->> 'heldPoId')::uuid and pl.product_id is null
-                      and ${key.sku ? sql`pl.supplier_sku = ${key.sku}` : sql`pl.supplier_sku is null and ${normNameSql(sql`pl.raw_description`)} = ${key.nameKey}`})
+                      and ${keyOn(sql`pl.supplier_sku`, sql`pl.raw_description`)})
   `)) as unknown as Array<{ id: string }>;
   const touched = [...new Set([...byInv.keys(), ...heldOnOrder.map((r) => String(r.id))])];
   await releaseLinkHolds(db, rid, touched);
@@ -878,8 +917,13 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
     learnedKey: learned.length > 0,
     rematch,
     undo: { invoiceLineIds: target.map((t) => String(t.id)), forgetKey: learned.length > 0 },
+    linesLocked: 0,
   };
 }
+
+/** Signed off (approved / paid) or a credit claim hangs on its findings — never re-opened automatically (round 5). Alias i. */
+const INVOICE_LOCKED = sql.raw(`(i.status in ('approved', 'paid') or exists (
+  select 1 from recovery_claims rc where rc.invoice_id = i.id and rc.restaurant_id = i.restaurant_id))`);
 
 function groupByInvoice(rows: Array<{ id: string; invoice_id: string }>): Map<string, string[]> {
   const m = new Map<string, string[]>();
@@ -977,7 +1021,8 @@ export const mappingRouter = router({
         );
 
       const byKey = new Map<string, UnmappedSku>();
-      for (const r of [...poRows, ...invRows, ...catalogRows]) {
+      // Round 5: the sample description comes from an invoice line when one exists.
+      for (const r of [...invRows, ...poRows, ...catalogRows]) {
         if (!r.supplierId || !r.supplierSku) continue;
         const key = `${r.supplierId}::${r.supplierSku}`;
         const existing = byKey.get(key);
@@ -1018,7 +1063,8 @@ export const mappingRouter = router({
       }
       // The chef answers only "זה אותו מוצר?" (G-08, orchestrator 31.10): no SKU rows.
       if (ctx.session.role === 'chef') return named;
-      return [...byKey.values(), ...named].sort((a, b) => b.occurrences - a.occurrences);
+      const all = [...byKey.values(), ...named];
+      return all.sort((a, b) => b.occurrences - a.occurrences);
     }),
 
   /** G-08: how many "זה אותו מוצר?" questions are open (the home line). No ₪. */
@@ -1166,10 +1212,37 @@ export const mappingRouter = router({
             .object({ invoiceLineIds: z.array(z.string().uuid()).max(5000), forgetKey: z.boolean().optional() })
             .strict()
             .optional(),
+          shownLineIds: z.array(z.string().uuid()).max(50).optional(),
         })
         .strict(),
     )
     .mutation(({ ctx, input }) => applyCharge(ctx.db, ctx.session.restaurantId, ctx.session.userId, input)),
+
+  /**
+   * G-08 charge (round 5): the invoice line shown next to "שורת חיוב — לא מוצר"
+   * with its amount — owner / manager only, fetched when that panel opens (the
+   * question list itself carries no ₪). markCharge learns the key's range only
+   * from lines shown this way (shownLineIds).
+   */
+  chargeSample: managerProcedure
+    .input(
+      z
+        .object({
+          supplierId: z.string().uuid(),
+          supplierSku: z.string().trim().min(1).max(64).optional(),
+          rawName: z.string().trim().min(1).max(400),
+        })
+        .strict(),
+    )
+    .query(async ({ ctx, input }) => {
+      await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
+      return chargeSampleFor(ctx.db, ctx.session.restaurantId, {
+        supplierId: input.supplierId,
+        supplierSku: input.supplierSku ?? null,
+        nameKey: normalizeLinkName(input.rawName),
+        sampleDescription: input.rawName,
+      });
+    }),
 
   /** G-08 charge keys (round 3): the learned "שורת חיוב — לא מוצר" keys, visible to owner / manager. No ₪. */
   chargeKeys: managerProcedure.query(async ({ ctx }) => {
@@ -1219,18 +1292,20 @@ export const mappingRouter = router({
       const marked = (await ctx.db.execute(sql`
         select il.id from invoice_lines il
           join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
-         where il.product_id is null and ${lineKey} and i.status <> 'paid'
+         where il.product_id is null and ${lineKey}
            and coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text
       `)) as unknown as Array<{ id: string }>;
       let linesReturned = 0;
+      let linesLocked = 0;
       if (marked.length > 0) {
-        await applyCharge(ctx.db, rid, ctx.session.userId, {
+        const r = await applyCharge(ctx.db, rid, ctx.session.userId, {
           supplierId: input.supplierId,
           ...(input.sku ? { supplierSku: input.sku } : {}),
           rawName: nameKey,
           undo: { invoiceLineIds: marked.map((m) => String(m.id)), forgetKey: true },
         });
-        linesReturned = marked.length;
+        linesLocked = r.linesLocked;
+        linesReturned = marked.length - r.linesLocked;
       }
       const removed = (await forgetChargeKey(ctx.db, rid, { supplierId: input.supplierId, sku: input.sku, nameKey })) || marked.length > 0;
       if (removed) {
@@ -1240,9 +1315,9 @@ export const mappingRouter = router({
           action: 'mapping.removeChargeKey',
           entityType: 'supplier',
           entityId: input.supplierId,
-          after: { sku: input.sku, nameKey, linesReturned },
+          after: { sku: input.sku, nameKey, linesReturned, linesLocked },
         });
       }
-      return { removed, linesReturned };
+      return { removed, linesReturned, linesLocked };
     }),
 });

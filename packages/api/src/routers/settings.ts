@@ -111,7 +111,7 @@ export const settingsRouter = router({
       .limit(1)
       // G-08 (round 4): lock the row — a concurrent writer of other keys
       // (learned charge keys) must not be lost by this read-modify-write.
-      .for('update');
+      .for('no key update');
     const current: RestaurantSettings = row?.settings ?? {};
 
     const next: RestaurantSettings = { ...current };

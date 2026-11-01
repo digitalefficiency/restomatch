@@ -1,5 +1,5 @@
 import { sql, type Database } from '@restomatch/db';
-import { normNameSql } from '@restomatch/catalog';
+import { normNameSql, normalizeLinkName } from '@restomatch/catalog';
 import { resolveTolerances } from '@restomatch/matching';
 
 type SQL = ReturnType<typeof sql>;
@@ -32,28 +32,20 @@ export const NOT_CHARGE_ROW = sql.raw(
  * A learned charge key of this restaurant covers the row: the same supplier,
  * and the same SKU AND normalized name (a SKU key never covers a line that reads
  * like something else — round 4), or for a name key the same normalized name.
- * With `amountAgorot`, the line's |amount| must also be within the amount the
- * key was learned at, plus the restaurant's price tolerance (round 4: an
- * inflated "charge" is a question, never hidden).
+ * Amounts are checked in JS by applyLearnedCharges (withinChargeRange).
  */
 export function chargeKeyCovers(
   rid: string,
   supplierCol: SQL,
   skuCol: SQL,
   rawCol: SQL,
-  amountAgorot?: { col: SQL; pricePercent: number },
 ): SQL {
-  const amount = amountAgorot
-    ? sql`and (ck ->> 'maxAbsAgorot') is not null
-          and abs(round((${amountAgorot.col})::numeric * 100)) <= floor((ck ->> 'maxAbsAgorot')::numeric * ${1 + amountAgorot.pricePercent}::numeric)`
-    : sql``;
   return sql`exists (
     select 1 from restaurants ckr, jsonb_array_elements(coalesce(ckr.settings -> 'chargeKeys', '[]'::jsonb)) ck
      where ckr.id = ${rid} and ck ->> 'supplierId' = (${supplierCol})::text
        and case when ${skuCol} is not null
                 then ck ->> 'sku' = ${skuCol} and (ck ->> 'nameKey') is not null and ck ->> 'nameKey' = ${normNameSql(rawCol)}
                 else (ck ->> 'sku') is null and ck ->> 'nameKey' = ${normNameSql(rawCol)} end
-       ${amount}
   )`;
 }
 
@@ -172,8 +164,13 @@ export interface ChargeKey {
   nameKey: string | null;
   /** The human label it was answered on (shown in the mapper's learned list). */
   rawName: string | null;
-  /** The largest |line total| (agorot) it was answered at; auto-marking stays within it + the price tolerance. Null = never auto-marks. */
-  maxAbsAgorot: number | null;
+  /**
+   * Signed range (agorot) of the line totals a person was SHOWN when answering
+   * (round 5): auto-marking needs the same sign and an amount within
+   * [min×(1−tol), max×(1+tol)] in magnitude. Null = never auto-marks.
+   */
+  minAgorot: number | null;
+  maxAgorot: number | null;
   by: string | null;
   at: string;
 }
@@ -193,7 +190,8 @@ export async function readChargeKeys(db: Database, rid: string): Promise<ChargeK
         sku: typeof o.sku === 'string' ? o.sku : null,
         nameKey: typeof o.nameKey === 'string' ? o.nameKey : null,
         rawName: typeof o.rawName === 'string' ? o.rawName : null,
-        maxAbsAgorot: typeof o.maxAbsAgorot === 'number' ? o.maxAbsAgorot : null,
+        minAgorot: typeof o.minAgorot === 'number' ? o.minAgorot : null,
+        maxAgorot: typeof o.maxAgorot === 'number' ? o.maxAgorot : null,
         by: typeof o.by === 'string' ? o.by : null,
         at: o.at,
       },
@@ -201,12 +199,29 @@ export async function readChargeKeys(db: Database, rid: string): Promise<ChargeK
   });
 }
 
+/** Is a signed amount (agorot) inside a key's learned range, with the same sign? (round 5) */
+export function withinChargeRange(amountAg: number, k: Pick<ChargeKey, 'minAgorot' | 'maxAgorot'>, pricePercent: number): boolean {
+  if (k.minAgorot == null || k.maxAgorot == null || amountAg === 0) return false;
+  const sign = Math.sign(amountAg);
+  if (Math.sign(k.minAgorot) !== sign || Math.sign(k.maxAgorot) !== sign) return false;
+  const lo = Math.min(Math.abs(k.minAgorot), Math.abs(k.maxAgorot));
+  const hi = Math.max(Math.abs(k.minAgorot), Math.abs(k.maxAgorot));
+  const a = Math.abs(amountAg);
+  return a >= Math.ceil(lo * (1 - pricePercent)) && a <= Math.floor(hi * (1 + pricePercent));
+}
+
 /**
- * The OCR job's pre-mark (round 3): after the lines are written, mark every
- * unlinked line whose (supplier, SKU / normalized name) is a learned charge key
- * as a charge line (jsonb merge, `auto: true`) and audit it. An invoice held
- * only for those lines is released (`released: true` — the caller then chains
- * into the match like any confident scan); held for another reason too, the
+ * The OCR job's pre-mark (rounds 3–5): after the lines are written, mark an
+ * unlinked line as a charge line (jsonb merge, `auto: true`, audited) only when
+ *   - its (supplier, SKU + normalized name, or normalized name) is a learned key;
+ *   - its signed amount is within the range a person answered at (+/− the
+ *     restaurant's price tolerance) — an inflated or sign-flipped "charge" is a
+ *     question;
+ *   - it is the FIRST such line of that key on the invoice (a second identical
+ *     charge is a question, never hidden);
+ *   - the invoice is not a duplicate copy.
+ * An invoice held only for those lines is released (`released: true` — the
+ * caller then chains into the match); held for another reason too, the
  * answered 'unlinked' reason is pruned.
  */
 export async function applyLearnedCharges(
@@ -214,23 +229,35 @@ export async function applyLearnedCharges(
   rid: string,
   invoiceId: string,
 ): Promise<{ charged: number; released: boolean }> {
-  // Round 4: only within the amount the key was answered at (+ the restaurant's
-  // price tolerance); a duplicate copy is never charge-filtered.
   const [r] = (await db.execute(sql`
     select settings -> 'tolerances' as tol from restaurants where id = ${rid}
   `)) as unknown as Array<{ tol: unknown }>;
   const { pricePercent } = resolveTolerances((r?.tol ?? null) as Parameters<typeof resolveTolerances>[0]);
-  const lines = (await db.execute(sql`
-    select il.id, il.line_total, i.supplier_id from invoice_lines il
+  const keys = await readChargeKeys(db, rid);
+  if (keys.length === 0) return { charged: 0, released: false };
+  const candidates = (await db.execute(sql`
+    select il.id, il.line_total, il.supplier_sku, il.raw_description, i.supplier_id
+      from invoice_lines il
       join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid}
      where il.invoice_id = ${invoiceId}::uuid and il.product_id is null and ${IL_NOT_CHARGE}
        and i.supplier_id is not null
        and (i.ocr_payload -> 'raw' -> 'duplicateOf') is null
-       and ${chargeKeyCovers(rid, sql`i.supplier_id`, sql`il.supplier_sku`, sql`il.raw_description`, {
-         col: sql`il.line_total`,
-         pricePercent,
-       })}
-  `)) as unknown as Array<{ id: string; line_total: string; supplier_id: string }>;
+     order by il.id
+  `)) as unknown as Array<{ id: string; line_total: string; supplier_sku: string | null; raw_description: string; supplier_id: string }>;
+  const used = new Set<number>();
+  const lines: typeof candidates = [];
+  for (const c of candidates) {
+    const nameKey = normalizeLinkName(c.raw_description ?? '');
+    const ki = keys.findIndex(
+      (k) =>
+        k.supplierId === String(c.supplier_id) &&
+        (c.supplier_sku ? k.sku === c.supplier_sku && k.nameKey === nameKey : k.sku == null && k.nameKey === nameKey),
+    );
+    if (ki < 0 || used.has(ki)) continue; // not a key, or a second line of the same key → a question
+    if (!withinChargeRange(Math.round(Number(c.line_total) * 100), keys[ki]!, pricePercent)) continue;
+    used.add(ki);
+    lines.push(c);
+  }
   if (lines.length > 0) {
     const ids = lines.map((l) => String(l.id));
     const meta = ids.map((id) => ({ id, by: null, at: new Date().toISOString(), auto: true }));
@@ -250,8 +277,6 @@ export async function applyLearnedCharges(
         chargedIls: sumAbsIls(lines.map((l) => l.line_total)),
       })}::jsonb)
     `);
-    // Held only because of these lines → released ('matched') like an answer;
-    // held for another reason too → the answered reason is pruned.
     const released = (await releaseQuestionHolds(db, rid, [invoiceId])).length > 0;
     if (!released) await pruneAnsweredReasons(db, rid, [invoiceId]);
     return { charged: lines.length, released };
@@ -276,23 +301,39 @@ export async function learnChargeKey(
   db: Database,
   rid: string,
   key: { supplierId: string; sku: string | null; nameKey: string | null; rawName: string },
-  maxAbsAgorot: number | null,
+  /** Signed totals (agorot) of the lines the person was SHOWN and answered — never auto-marks (round 5). */
+  shownAgorot: number[],
   by: string,
 ): Promise<boolean> {
   const [row] = (await db.execute(sql`
-    select coalesce(settings -> 'chargeKeys', '[]'::jsonb) as keys from restaurants where id = ${rid} for update
+    select coalesce(settings -> 'chargeKeys', '[]'::jsonb) as keys from restaurants where id = ${rid} for no key update
   `)) as unknown as Array<{ keys: unknown }>;
   const keys = (Array.isArray(row?.keys) ? (row!.keys as Array<Record<string, unknown>>) : []).slice();
   const same = (k: Record<string, unknown>) =>
     k.supplierId === key.supplierId && (k.sku ?? null) === key.sku && (k.nameKey ?? null) === key.nameKey;
   const i = keys.findIndex(same);
   const at = new Date().toISOString();
+  const shown = shownAgorot.filter((a) => Number.isFinite(a) && a !== 0);
+  const num = (v: unknown) => (typeof v === 'number' ? v : null);
   if (i >= 0) {
-    const prev = typeof keys[i]!.maxAbsAgorot === 'number' ? (keys[i]!.maxAbsAgorot as number) : null;
-    const next = prev == null ? maxAbsAgorot : maxAbsAgorot == null ? prev : Math.max(prev, maxAbsAgorot);
-    keys[i] = { ...keys[i], maxAbsAgorot: next, rawName: keys[i]!.rawName ?? key.rawName };
+    // A re-answer widens the range only with the lines it showed.
+    const prevMin = num(keys[i]!.minAgorot);
+    const prevMax = num(keys[i]!.maxAgorot);
+    const all = [...shown, ...(prevMin != null ? [prevMin] : []), ...(prevMax != null ? [prevMax] : [])];
+    keys[i] = {
+      ...keys[i],
+      minAgorot: all.length ? Math.min(...all) : null,
+      maxAgorot: all.length ? Math.max(...all) : null,
+      rawName: keys[i]!.rawName ?? key.rawName,
+    };
   } else {
-    keys.push({ ...key, maxAbsAgorot, by, at });
+    keys.push({
+      ...key,
+      minAgorot: shown.length ? Math.min(...shown) : null,
+      maxAgorot: shown.length ? Math.max(...shown) : null,
+      by,
+      at,
+    });
   }
   await db.execute(sql`
     update restaurants set settings = jsonb_set(settings, '{chargeKeys}', ${JSON.stringify(keys)}::jsonb, true)
@@ -308,7 +349,7 @@ export async function forgetChargeKey(
   key: { supplierId: string; sku: string | null; nameKey: string | null },
 ): Promise<boolean> {
   const [row] = (await db.execute(sql`
-    select coalesce(settings -> 'chargeKeys', '[]'::jsonb) as keys from restaurants where id = ${rid} for update
+    select coalesce(settings -> 'chargeKeys', '[]'::jsonb) as keys from restaurants where id = ${rid} for no key update
   `)) as unknown as Array<{ keys: unknown }>;
   const keys = Array.isArray(row?.keys) ? (row!.keys as Array<Record<string, unknown>>) : [];
   const kept = keys.filter(

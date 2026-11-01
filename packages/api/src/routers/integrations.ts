@@ -55,7 +55,7 @@ async function loadSettings(
     .from(restaurants)
     .where(eq(restaurants.id, restaurantId))
     .limit(1);
-  const [row] = forUpdate ? await q.for('update') : await q;
+  const [row] = forUpdate ? await q.for('no key update') : await q;
   return (row?.settings ?? {}) as IntegrationSettings;
 }
 

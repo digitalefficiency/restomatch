@@ -210,31 +210,6 @@ export async function buildMatchInputForInvoice(
   const chargeIds = isDuplicate ? new Set<string>() : readChargeLineIds(inv.ocrPayload);
   let chargeRows = invLineRows.filter((l) => chargeIds.has(l.id));
   let productRows = chargeRows.length > 0 ? invLineRows.filter((l) => !chargeIds.has(l.id)) : invLineRows;
-  // Round 4: "every line a charge" only when the charges ARE the invoice — a
-  // printed subtotal still > 10 agorot away from them is checked like any
-  // invoice (all lines, the printed header), never a silent ₪0.
-  if (chargeRows.length > 0 && productRows.length === 0 && inv.totalExclVat != null) {
-    let netAg = 0;
-    for (const l of chargeRows) netAg += Math.round(num(l.lineTotal) * 100);
-    if (Math.abs(Math.round(num(inv.totalExclVat) * 100) - netAg) > 10) {
-      chargeRows = [];
-      productRows = invLineRows;
-    }
-  }
-  // Every line a charge (a deposit-only slip): nothing to compare — matched clean
-  // (round 3 LOW). No PO is discovered: an empty engine input yields no finding.
-  const allCharge = productRows.length === 0;
-
-  const invoiceLineInputs: InvoiceLineInput[] = productRows.map((l) => ({
-    id: l.id,
-    productId: l.productId,
-    supplierSku: l.supplierSku,
-    qtyBilled: num(l.qtyBilled),
-    unit: l.unit,
-    unitPriceBilled: num(l.unitPriceBilled),
-    lineTotal: num(l.lineTotal),
-  }));
-
   const invoiceDate = inv.invoiceDate ?? inv.createdAt;
 
   // ── Restaurant settings: timezone, tolerances, vat rate, baseline window. ──
@@ -251,6 +226,56 @@ export async function buildMatchInputForInvoice(
     .limit(1);
   const tz = restaurant?.timezone ?? DEFAULT_TZ;
 
+  // VAT rate precedence: PO override → supplier override → restaurant default →
+  // the 18% default. A supplier billing at a non-default rate (e.g. a 17%
+  // legacy invoice or a VAT-exempt Eilat supplier) would otherwise false-fire
+  // VAT_MISMATCH against the restaurant default. (The PO part is applied below.)
+  let supplierVatRate: string | null = null;
+  if (inv.supplierId) {
+    const [sup] = await db
+      .select({ vatRate: suppliers.vatRate })
+      .from(suppliers)
+      .where(and(eq(suppliers.id, inv.supplierId), eq(suppliers.restaurantId, restaurantId)))
+      .limit(1);
+    supplierVatRate = sup?.vatRate ?? null;
+  }
+
+  // G-08 charge (rounds 3–5): "every line a charge" (a deposit-only slip) is
+  // matched clean ONLY when the charges ARE the printed invoice — its subtotal,
+  // VAT and total (each one printed) reconcile with the charge lines (per-line
+  // VAT, signed) within 10 agorot. Nothing printed, or a gap: the invoice is
+  // checked with all its lines and the printed header (no silent ₪0), still
+  // without discovering an unrelated order.
+  const allChargeCandidate = chargeRows.length > 0 && productRows.length === 0;
+  if (allChargeCandidate) {
+    const rate = firstVatRate(null, supplierVatRate, restaurant?.vatRate ?? null);
+    let netAg = 0;
+    let vatAg = 0;
+    for (const l of chargeRows) {
+      const lineAg = Math.round(num(l.lineTotal) * 100);
+      netAg += lineAg;
+      vatAg += Math.sign(lineAg) * Math.round(Math.abs(lineAg) * (l.vatRate == null ? rate : Number(l.vatRate)));
+    }
+    const printed = [inv.totalExclVat, inv.vatAmount, inv.totalInclVat].some((v) => v != null);
+    const near = (v: string | null, expectedAg: number) => v == null || Math.abs(Math.round(num(v) * 100) - expectedAg) <= 10;
+    const reconciled =
+      printed && near(inv.totalExclVat, netAg) && near(inv.vatAmount, vatAg) && near(inv.totalInclVat, netAg + vatAg);
+    if (!reconciled) {
+      chargeRows = [];
+      productRows = invLineRows;
+    }
+  }
+
+  const invoiceLineInputs: InvoiceLineInput[] = productRows.map((l) => ({
+    id: l.id,
+    productId: l.productId,
+    supplierSku: l.supplierSku,
+    qtyBilled: num(l.qtyBilled),
+    unit: l.unit,
+    unitPriceBilled: num(l.unitPriceBilled),
+    lineTotal: num(l.lineTotal),
+  }));
+
   // ── Discover the candidate PO: same supplier, eligible status, expected
   //    delivery within ±window of the invoice date; nearest delivery wins. ──
   let po: PoCandidate | null = null;
@@ -264,7 +289,7 @@ export async function buildMatchInputForInvoice(
   const lo = startOfDayInTz(addCalendarDaysInTz(invoiceDate, -PO_MATCH_WINDOW_DAYS, tz), tz);
   const hi = endOfDayInTz(addCalendarDaysInTz(invoiceDate, PO_MATCH_WINDOW_DAYS, tz), tz);
   const inWindow = (at: Date | null) => at == null || (at >= lo && at <= hi);
-  if (inv.supplierId && !options.skipPoDiscovery && !allCharge) {
+  if (inv.supplierId && !options.skipPoDiscovery && !allChargeCandidate) {
     const candidates: PoCandidate[] = [];
     // A re-match's pinned PO is ONE MORE candidate, never a short-circuit: it
     // skips the status filter (by then it is usually closed / received, which
@@ -360,7 +385,12 @@ export async function buildMatchInputForInvoice(
       })
       .from(poLines)
       .where(eq(poLines.poId, po.id));
-    poLineInputs = poLineRows.filter((p) => p.charge !== true && p.blank !== true).map((p) => ({
+    // Round 5 LOW: an order whose only lines are learned charges stays an order
+    // (its charge lines, priced null): an unordered product is UNORDERED_ITEM,
+    // not an UNORDERED_ARRIVAL left out of the leak.
+    const kept = poLineRows.filter((p) => p.charge !== true && p.blank !== true);
+    const chargeOnly = kept.length === 0 ? poLineRows.filter((p) => p.charge === true) : [];
+    poLineInputs = [...kept, ...chargeOnly.map((p) => ({ ...p, unitPriceExpected: null }))].map((p) => ({
       id: p.id,
       productId: p.productId,
       supplierSku: p.supplierSku,
@@ -412,19 +442,6 @@ export async function buildMatchInputForInvoice(
   // ── Tolerances, vat rate, baseline window (restaurant loaded above). ──
   const tolerances = resolveTolerances(restaurant?.settings?.tolerances);
 
-  // VAT rate precedence: PO override → supplier override → restaurant default →
-  // the 18% default. A supplier billing at a non-default rate (e.g. a 17%
-  // legacy invoice or a VAT-exempt Eilat supplier) would otherwise false-fire
-  // VAT_MISMATCH against the restaurant default.
-  let supplierVatRate: string | null = null;
-  if (inv.supplierId) {
-    const [sup] = await db
-      .select({ vatRate: suppliers.vatRate })
-      .from(suppliers)
-      .where(and(eq(suppliers.id, inv.supplierId), eq(suppliers.restaurantId, restaurantId)))
-      .limit(1);
-    supplierVatRate = sup?.vatRate ?? null;
-  }
   const vatRate = firstVatRate(po?.vatRate ?? null, supplierVatRate, restaurant?.vatRate ?? null);
   const baselineWindow = restaurant?.settings?.baselineWindowDays ?? DEFAULT_BASELINE_WINDOW_DAYS;
 
