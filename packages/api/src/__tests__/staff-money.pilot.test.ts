@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, eq, restaurants, testDbUrl, type UserRole } from '@restomatch/db';
+import { createDb, eq, invoices, restaurants, testDbUrl, type UserRole } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
@@ -56,6 +56,15 @@ beforeAll(async () => {
     .update(restaurants)
     .set({ settings: { features: { vatAtRisk: true } } as typeof restaurants.$inferInsert['settings'] })
     .where(eq(restaurants.id, A.restaurantId));
+  // Pin the invoice into the Israel calendar month (the hero's month), whatever
+  // the UTC hour: noon of today's Israel date. The fixture dates it on the
+  // runner's day, which falls in the previous Israel month 22:00-24:00 UTC at a
+  // month boundary.
+  const israelToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
+  await db
+    .update(invoices)
+    .set({ invoiceDate: new Date(`${israelToday}T09:00:00Z`) })
+    .where(eq(invoices.id, A.invoiceId));
 });
 
 afterAll(async () => {
