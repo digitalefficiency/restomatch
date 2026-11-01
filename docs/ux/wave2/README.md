@@ -309,3 +309,7 @@ Findings and evidence stay in `docs/ux/review/area-*.md` and `lens-*.md` (`grep 
   - the pilot freeze runs 06.11–10.11;
   - the first wave-2 integration comes after 10.11.
   G-17 and the G-04 addendum start after train B is on `main`.
+- **Month start (found 1.11):**
+  - Every "this month" figure starts the month at or near ₪0: the hero, the leak hub, the monthly report and the supplier ledger. Until the first counted invoice of the month is matched, the owner sees an almost empty home on the 1st of every month.
+  - Wave-2 rule for W2-09 (leak hub) and the home hero: when the current Israel month has no counted leak yet, show the empty month honestly. Next to it, show the previous month's figure as context, e.g. "החודש עוד ריק · חודש שעבר ₪X", with a link to it. Never silently swap months. The hero keeps one definition (`owner.leakHero`).
+  - Tests that read "this month" use the seeded month (`apps/web/e2e/seededMonth.ts`, #178) or the Israel-day fixtures (`israelToday`/`israelMonth`, #227). Never the UTC day.
