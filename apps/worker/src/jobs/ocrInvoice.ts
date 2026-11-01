@@ -1,4 +1,4 @@
-import { fillEnglishNames, meterOcrScan, receiptState, scanReceiptToStamp, withScanGrId } from '@restomatch/api';
+import { fillEnglishNames, meterOcrScan, receiptState, scanReceiptToStamp, settleDocumentPages, withScanGrId } from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
 import { HELD_FOR_RECEIPTS_KEY, receiptsBeingCountedForScan } from '@restomatch/charts';
 import { and, eq, invoiceLines, invoices, ne, restaurants, sql, type Database } from '@restomatch/db';
@@ -183,6 +183,28 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
         (duplicateOf !== undefined ? ` duplicateOf=${duplicateOf ?? 'unknown'}` : ''),
     );
 
+    // G-09 settle — multi-page documents from the same supplier (api/documents/settle.ts).
+    // Pages of one document are OCR'd alone; this merges a page into page 1 ONLY
+    // when supplier + invoice number agree, else flags it. Hold the match while a
+    // sibling page is still being read; an absorbed page no longer exists. No-op
+    // unless the restaurant's `features.multiPage` is on. Never fails the job.
+    try {
+      const settled = await settleDocumentPages(db, { restaurantId: job.data.restaurantId, invoiceId: job.data.invoiceId });
+      if (settled.hold || settled.absorbed) {
+        return {
+          invoiceId: job.data.invoiceId,
+          confidence: result.confidence,
+          needsHumanReview,
+          conflicts: result.conflicts.length,
+          lines: r.lines.length,
+          settled,
+        };
+      }
+    } catch (err) {
+      console.warn(`[ocr-invoice] G-09 settle failed for invoice=${job.data.invoiceId}`, err);
+    }
+    // end G-09 settle
+
     // Chain into the 3-way PO↔invoice match when OCR is confident enough to
     // auto-proceed. Low-confidence (parsed / needs-review) invoices wait for a
     // human to confirm product matches first (match.runForInvoice on demand).
@@ -228,6 +250,13 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
       await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, err).catch((e) =>
         console.error(`[ocr-invoice] could not mark invoice=${job.data.invoiceId} failed`, e),
       );
+      // G-09 release — a terminal failure settles the page's cluster too: the
+      // failed page is flagged page_unreadable (never a continuation) and the
+      // siblings held for it are released to the match. Never masks `err`.
+      await settleDocumentPages(db, { restaurantId: job.data.restaurantId, invoiceId: job.data.invoiceId }).catch((e) =>
+        console.warn(`[ocr-invoice] G-09 release failed for invoice=${job.data.invoiceId}`, e),
+      );
+      // end G-09 release
     }
     throw err;
   }

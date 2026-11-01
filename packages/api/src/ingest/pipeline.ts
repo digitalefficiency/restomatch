@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
+import { PDFDocument } from 'pdf-lib';
 import {
   and,
   eq,
   ingestDocuments,
   ingestMessages,
   ingestSenders,
+  inArray,
   invoices,
   restaurants,
   sql,
@@ -24,12 +26,14 @@ import {
   type IngestProvider,
   type InboundMessage,
 } from '@restomatch/ingest';
-import { enqueueOcrInvoice } from '@restomatch/queue';
+import { enqueue, enqueueOcrInvoice, OCR_INVOICE_QUEUE } from '@restomatch/queue';
 import { ORDER_TEXT_MAX_CHARS, orderTextParserFromEnv } from '@restomatch/ocr';
 import { captureOrderDraft } from '../orders/captureOrder';
 import { featureEnabled } from '../lib/features';
-import { isAllowedScanUrl } from '../lib/scanUrls';
-import { signedUrlForStoragePath, storeIngestedFile } from './store';
+import { createIntakeInvoice, upsertInvoiceScan } from '../documents/intake';
+import { objectRefMatchValues, signObjectRef, storedImageValue, tenantPath } from '../documents/objectRef';
+import { groupMinutes, INLINE_IMAGE_MAX_BYTES, isPageMime, mimeOfRef, multiPageEnabled, ocrDedupeKey, reviewGroupOf } from './grouping';
+import { storeIngestedFile } from './store';
 
 /** Feature key per channel kind (MASTER-PLAN §3). */
 export const INGEST_FEATURE: Record<IngestKind, 'ingestWhatsapp' | 'ingestEmail'> = {
@@ -68,6 +72,8 @@ export interface OcrJobToEnqueue {
   invoiceId: string;
   supplierId: string | null;
   imageUrl: string;
+  /** G-09: at most one OCR job per key (`ocr:<invoiceId>:<pageCount>`). */
+  dedupeKey?: string;
 }
 
 export type InboundOutcome =
@@ -77,9 +83,14 @@ export type InboundOutcome =
 
 /**
  * Register one stored document as an invoice — the same row the receiving
- * wizard creates (status ocr_pending), deduped per (restaurant, object) under
- * the same advisory lock as receiving.registerInvoice. Runs inside the caller's
- * restaurant-scoped transaction; returns the OCR job to enqueue AFTER commit.
+ * wizard creates (G-05 machine `initial`), deduped per (restaurant, OBJECT)
+ * under the same advisory lock key shape as receiving.registerInvoice. Runs
+ * inside the caller's restaurant-scoped transaction; returns the OCR job to
+ * enqueue AFTER commit.
+ *
+ * G-09 (additive): the dedupe key is the object ref (`toObjectRef`), not a
+ * signed URL; `extraDocumentIds` are further pages of the same document (all
+ * rows point at the one invoice); `pageCount` lands in `invoice_scans`.
  */
 export async function registerIngestedDocument(
   tx: Database,
@@ -90,65 +101,117 @@ export async function registerIngestedDocument(
     kind: IngestKind;
     supplierId: string | null;
     userId: string | null;
+    extraDocumentIds?: string[];
+    pageCount?: number | null;
   },
 ): Promise<{ invoiceId: string; job: OcrJobToEnqueue | null }> {
-  const imageUrl = await signedUrlForStoragePath(args.restaurantId, args.storagePath);
-  if (!imageUrl || !isAllowedScanUrl(imageUrl)) throw new Error('could not sign the stored document');
-  const objectUrl = imageUrl.split('?')[0]!;
-  await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtext(${`register-invoice:${args.restaurantId}:${objectUrl}`}))`,
-  );
+  const ref = tenantPath(args.restaurantId, args.storagePath);
+  if (!ref) throw new Error('could not sign the stored document');
+  const imageUrl = await signObjectRef(args.restaurantId, ref);
+  if (!imageUrl) throw new Error('could not sign the stored document');
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`register-invoice:${args.restaurantId}:${ref}`}))`);
+  const matchValues = objectRefMatchValues(args.restaurantId, ref);
   const [existing] = await tx
     .select({ id: invoices.id })
     .from(invoices)
     .where(
       and(
         eq(invoices.restaurantId, args.restaurantId),
-        sql`split_part(${invoices.rawImageUrl}, '?', 1) = ${objectUrl}`,
+        sql`split_part(${invoices.rawImageUrl}, '?', 1) in (${sql.join(
+          matchValues.map((v) => sql`${v}`),
+          sql`, `,
+        )})`,
       ),
     )
     .limit(1);
   let invoiceId: string;
   let job: OcrJobToEnqueue | null = null;
+  const pageCount = args.pageCount ?? (isPageMime(mimeOfRef(ref)) ? 1 : null);
   if (existing) {
     invoiceId = existing.id;
   } else {
-    const [row] = await tx
-      .insert(invoices)
-      .values({
-        restaurantId: args.restaurantId,
-        supplierId: args.supplierId,
-        rawImageUrl: imageUrl,
-        status: 'ocr_pending',
-        source: args.kind === 'whatsapp' ? 'whatsapp' : 'email',
-        createdBy: args.userId,
-      })
-      .returning({ id: invoices.id });
-    if (!row) throw new Error('failed to register invoice');
-    invoiceId = row.id;
-    job = { restaurantId: args.restaurantId, invoiceId, supplierId: args.supplierId, imageUrl };
+    invoiceId = await createIntakeInvoice(tx, {
+      restaurantId: args.restaurantId,
+      supplierId: args.supplierId,
+      rawImageUrl: storedImageValue(args.restaurantId, ref),
+      source: args.kind === 'whatsapp' ? 'whatsapp' : 'email',
+      createdBy: args.userId,
+    });
+    await upsertInvoiceScan(tx, {
+      restaurantId: args.restaurantId,
+      invoiceId,
+      storagePath: ref,
+      mimeType: mimeOfRef(ref),
+      pageCount,
+    });
+    job = {
+      restaurantId: args.restaurantId,
+      invoiceId,
+      supplierId: args.supplierId,
+      imageUrl,
+      dedupeKey: ocrDedupeKey(invoiceId, ref),
+    };
   }
   // Only a document still awaiting review can be registered (approve/reject race).
+  const ids = [args.documentId, ...(args.extraDocumentIds ?? [])];
   const moved = await tx
     .update(ingestDocuments)
     .set({ status: 'registered', invoiceId, error: null, updatedAt: new Date() })
     .where(
       and(
-        eq(ingestDocuments.id, args.documentId),
+        inArray(ingestDocuments.id, ids),
         eq(ingestDocuments.restaurantId, args.restaurantId),
         eq(ingestDocuments.status, 'needs_review'),
       ),
     )
     .returning({ id: ingestDocuments.id });
-  if (moved.length === 0) throw new Error('document is no longer awaiting review');
+  if (!moved.some((m) => m.id === args.documentId)) throw new Error('document is no longer awaiting review');
   return { invoiceId, job };
+}
+
+/**
+ * G-09: approve a review document TOGETHER with its review group (the other
+ * needs_review images of the same sender within N minutes). Each page becomes
+ * its own invoice and is OCR'd alone; settleDocumentPages merges them after
+ * OCR when their supplier and invoice number agree. A non-image document
+ * registers alone, exactly like registerIngestedDocument.
+ */
+export async function registerReviewGroup(
+  tx: Database,
+  args: { restaurantId: string; documentId: string; kind: IngestKind; supplierId: string | null; userId: string | null },
+): Promise<{ invoiceIds: string[]; jobs: OcrJobToEnqueue[]; documentIds: string[] }> {
+  const [restaurant] = await tx
+    .select({ settings: restaurants.settings })
+    .from(restaurants)
+    .where(eq(restaurants.id, args.restaurantId))
+    .limit(1);
+  const group = await reviewGroupOf(tx, args.restaurantId, args.documentId, groupMinutes(restaurant?.settings));
+  if (group.length === 0) throw new Error('document is no longer awaiting review');
+  const invoiceIds: string[] = [];
+  const jobs: OcrJobToEnqueue[] = [];
+  for (const page of group) {
+    const reg = await registerIngestedDocument(tx, {
+      restaurantId: args.restaurantId,
+      documentId: page.id,
+      storagePath: page.storagePath,
+      kind: args.kind,
+      supplierId: args.supplierId,
+      userId: args.userId,
+      pageCount: isPageMime(page.mimeType) ? 1 : null,
+    });
+    invoiceIds.push(reg.invoiceId);
+    if (reg.job) jobs.push(reg.job);
+  }
+  return { invoiceIds, jobs, documentIds: group.map((g) => g.id) };
 }
 
 /** Enqueue OCR jobs after the transaction committed. Never throws. */
 export async function enqueueIngestJobs(jobs: OcrJobToEnqueue[]): Promise<void> {
   for (const job of jobs) {
     try {
-      await enqueueOcrInvoice(job);
+      const { dedupeKey, ...payload } = job;
+      if (dedupeKey) await enqueue(OCR_INVOICE_QUEUE, payload, { dedupeKey });
+      else await enqueueOcrInvoice(payload);
     } catch (err) {
       console.error(`[ingest] failed to enqueue ocr-invoice for invoice=${job.invoiceId}`, err);
     }
@@ -195,8 +258,10 @@ export async function processInboundMessage(
   channel: ResolvedChannel,
   message: InboundMessage,
   provider: IngestProvider,
+  opts: { now?: Date } = {},
 ): Promise<InboundOutcome> {
   const jobs: OcrJobToEnqueue[] = [];
+  const now = opts.now ?? new Date();
   const outcome = await withRestaurant(db, channel.restaurantId, async (tx): Promise<InboundOutcome> => {
     const [restaurant] = await tx
       .select({ settings: restaurants.settings })
@@ -246,6 +311,7 @@ export async function processInboundMessage(
         supplierId,
         subject: message.subject?.slice(0, 500) ?? null,
         status: 'empty',
+        receivedAt: now,
       })
       .onConflictDoNothing()
       .returning({ id: ingestMessages.id });
@@ -257,6 +323,8 @@ export async function processInboundMessage(
         restaurantId: channel.restaurantId,
         messageId: msg.id,
         filename: a.filename?.slice(0, 255) ?? null,
+        // Page order = insertion order, also inside one transaction.
+        createdAt: sql`clock_timestamp()`,
       };
       if (i >= INGEST_LIMITS.attachmentsPerMessage) {
         const [d] = await tx
@@ -287,6 +355,21 @@ export async function processInboundMessage(
           .values({ ...base, sizeBytes: bytes.byteLength, sha256, status: 'rejected', error: 'unsupported_type' })
           .returning({ id: ingestDocuments.id });
         docs.push({ id: d!.id, status: 'rejected' });
+        continue;
+      }
+      // An e-mail signature logo / inline image is not a page — only where the
+      // multi-page switch is on (elsewhere every image registers, as before).
+      if (
+        channel.kind === 'email' &&
+        mime !== 'application/pdf' &&
+        bytes.byteLength < INLINE_IMAGE_MAX_BYTES &&
+        multiPageEnabled(restaurant.settings)
+      ) {
+        const [d] = await tx
+          .insert(ingestDocuments)
+          .values({ ...base, mimeType: mime, sizeBytes: bytes.byteLength, sha256, status: 'skipped', error: 'inline_image' })
+          .returning({ id: ingestDocuments.id });
+        docs.push({ id: d!.id, status: 'skipped' });
         continue;
       }
       // Same bytes already registered for this restaurant → link, don't re-OCR.
@@ -356,6 +439,9 @@ export async function processInboundMessage(
           .returning({ id: ingestDocuments.id });
         docId = d!.id;
         if (autoRegister) {
+          // G-09: every page is its own invoice and is OCR'd alone; pages of one
+          // document are merged AFTER OCR, only when their supplier and invoice
+          // number agree (documents/settle.ts).
           const reg = await registerIngestedDocument(tx, {
             restaurantId: channel.restaurantId,
             documentId: docId,
@@ -363,6 +449,7 @@ export async function processInboundMessage(
             kind: channel.kind,
             supplierId,
             userId: null,
+            pageCount: mime === 'application/pdf' ? await pdfPageCount(bytes) : 1,
           });
           if (reg.job) jobs.push(reg.job);
           docs.push({ id: docId, status: 'registered' });
@@ -433,4 +520,14 @@ export async function processInboundMessage(
   });
   await enqueueIngestJobs(jobs);
   return outcome;
+}
+
+/** Pages in a PDF attachment (null when it does not parse — OCR still reads it). */
+async function pdfPageCount(bytes: Uint8Array): Promise<number | null> {
+  try {
+    const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+    return pdf.getPageCount();
+  } catch {
+    return null;
+  }
 }

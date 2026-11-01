@@ -336,6 +336,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'ingest.inbox': 'isolation',
   'ingest.approveDocument': 'attack',
   'ingest.rejectDocument': 'attack',
+  'ingest.resolvePageFlag': 'attack', // G-09: attack test in ingest-grouping.test.ts
   // Growth (wave 1, S15 — flag `growth`). pricing is a pure public quote over
   // the plan catalog (no tenant data, no ids); the referral procedures are
   // tenant-scoped — see the growth.* block at the end of this file.
