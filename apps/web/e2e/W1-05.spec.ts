@@ -228,7 +228,8 @@ test.describe('owner home', () => {
     const state = await page.getByTestId('leak-hero').getAttribute('data-state');
     const seeded = await seedMonthFacts(0);
     if (seeded.leakFindings > 0) expect(state, `oracle: ${seeded.leakFindings} seeded leak findings this month → hero in 'leak'`).toBe('leak');
-    else expect(['leak', 'noData', 'pendingOnly', 'clean'], 'hero state before the seed leaks this month').toContain(state);
+    else if (seeded.matchedInvoices > 0) expect(['leak', 'clean'], `oracle: ${seeded.matchedInvoices} checked invoices this month → the hero has data`).toContain(state);
+    else expect(['leak', 'noData', 'pendingOnly', 'clean'], 'hero state before the seed checks an invoice this month').toContain(state);
     if (state === 'noData') {
       // Nothing checked yet: no amount, no delta.
       await expect(page.getByTestId('leak-hero-delta')).toHaveCount(0);
@@ -241,6 +242,8 @@ test.describe('owner home', () => {
     if (state === 'leak' || state === 'clean') {
       await expect(delta).toBeVisible();
       if ((await delta.getAttribute('data-direction')) !== 'none') await expect(delta).toContainText(/לעומת \d+–\d+ ב/);
+    } else {
+      await expect(delta, 'no delta while only invoices waiting for a PO link').toHaveCount(0);
     }
     // DoD-4: in Hebrew the ₪ glyph sits left of the first digit.
     const shekelLeft = await page.getByTestId('leak-hero-amount').evaluate((el) => {
