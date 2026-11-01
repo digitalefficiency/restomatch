@@ -27,19 +27,19 @@ export function DockPriceHint({ data }: { data: DockPriceHintData }) {
   const pct = data.pctVsUsual;
   return (
     <p
-      className="mt-1 text-xs text-muted"
+      className="mt-1 text-sm text-muted"
       data-testid="dock-price-hint"
       title={t('title', { days: DOCK_PRICE_DAYS, count: data.samples })}
     >
       {t('usual')}{' '}
-      <bdi dir="ltr" className="font-mono tabular-nums">
-        {formatIls(data.usualUnitPrice, { locale, maximumFractionDigits: 2 })}
-      </bdi>{' '}
+      {/* ₪ in the page direction (no LTR isolate, no mono): ₪ sits left of the digits in Hebrew. */}
+      <bdi className="tabular-nums">{formatIls(data.usualUnitPrice, { locale, maximumFractionDigits: 2 })}</bdi>{' '}
       {t('window', { days: DOCK_PRICE_DAYS })}
       {Math.abs(pct) >= MIN_SHOWN_PCT ? (
         <>
           {' · '}
-          <bdi dir="ltr" className={`font-mono tabular-nums ${pct > 0 ? 'text-warn' : ''}`}>
+          {/* A percentage, not money: the sign stays in front of the digits. */}
+          <bdi dir="ltr" className={`tabular-nums ${pct > 0 ? 'text-warn' : ''}`}>
             {pct > 0 ? '+' : ''}
             {formatPercent(pct, locale, 1)}
           </bdi>

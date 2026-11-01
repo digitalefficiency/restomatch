@@ -28,3 +28,16 @@ export function requestedRestaurantOf(update: unknown): string | undefined {
   const v = (update as { activeRestaurantId?: unknown } | null | undefined)?.activeRestaurantId;
   return typeof v === 'string' && v ? v : undefined;
 }
+
+/**
+ * The membership of the session's ACTIVE restaurant — what a document signs as
+ * (the claim letter's "מאת", the report's subtitle). Never "the first
+ * membership": myMemberships has no order, so `rows[0]` can be another branch.
+ * Undefined when the active restaurant is not among the rows.
+ */
+export function activeMembershipOf<T extends { restaurantId: string }>(
+  rows: readonly T[],
+  activeRestaurantId: string | null | undefined,
+): T | undefined {
+  return activeRestaurantId ? rows.find((m) => m.restaurantId === activeRestaurantId) : undefined;
+}

@@ -116,6 +116,9 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'approvals.reject': 'attack',
   'approvals.escalate': 'attack',
   'approvals.history': 'attack',
+  // W1-07: server queue totals + the decision undo.
+  'approvals.queueSummary': 'isolation',
+  'approvals.reopen': 'attack',
   'exports.invoicesCsv': 'isolation',
   'exports.uniform1000': 'isolation',
   'onboarding.myMemberships': 'isolation',
@@ -516,6 +519,23 @@ describe('foreign-id attacks (A → B)', () => {
     expect(d?.requiresRole).toBe('manager');
   });
 
+  it('approvals.reopen rejects a foreign discrepancyId and leaves its decision alone', async () => {
+    await callerFor(B).approvals.reject({ discrepancyId: B.discrepancyId, reason: 'B waives' });
+    try {
+      await expect(callerFor(A).approvals.reopen({ discrepancyId: B.discrepancyId })).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+      const [d] = await db
+        .select({ resolutionStatus: discrepancies.resolutionStatus })
+        .from(discrepancies)
+        .where(eq(discrepancies.id, B.discrepancyId));
+      expect(d?.resolutionStatus).toBe('rejected');
+    } finally {
+      // B's own undo puts the shared fixture back to open for the tests below.
+      await callerFor(B).approvals.reopen({ discrepancyId: B.discrepancyId });
+    }
+  });
+
   it('approvals.history returns no audit rows for a foreign discrepancyId', async () => {
     const caller = callerFor(A);
     const rows = await caller.approvals.history({ discrepancyId: B.discrepancyId });
@@ -533,6 +553,16 @@ describe('list/aggregate isolation (A must not see B)', () => {
     const feed = await caller.activity.feed();
     expect(feed.some((e) => e.title.includes('של B'))).toBe(false);
     expect(feed.some((e) => e.title.includes('של A'))).toBe(true);
+  });
+
+  it('approvals.queueSummary counts only A (its ₪ and the others lane exclude B)', async () => {
+    const summary = await callerFor(A).approvals.queueSummary();
+    // A's own fixture: one open manager-routed PRICE_HIGHER ₪100 (visible to the owner).
+    expect(summary.count).toBe(1);
+    expect(summary.claimableIls).toBe(100);
+    expect(summary.others.count).toBe(0);
+    const asManager = await callerWithRole(A, 'manager').approvals.queueSummary();
+    expect(asManager.count).toBe(1);
   });
 
   it('approvals.myQueue excludes B discrepancies', async () => {

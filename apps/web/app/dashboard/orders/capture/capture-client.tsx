@@ -255,7 +255,7 @@ export function CaptureClient({ initialText }: { initialText: string }) {
             onChange={(e) => setText(e.target.value)}
             placeholder={t('orderCapture.textPlaceholder')}
             data-testid="capture-text"
-            className="font-mono text-base"
+            className="text-base"
           />
         </Field>
         {errorBox}

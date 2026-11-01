@@ -11,23 +11,40 @@ import {
   suppliers,
   supplierCatalogItems,
   catalogImports,
+  inArray,
+  isNull,
+  ne,
+  or,
+  productAliases,
+  restaurants,
   type Database,
 } from '@restomatch/db';
-import { MockEmbeddingProvider } from '@restomatch/catalog';
+import { MockEmbeddingProvider, recordConfirmedMatch } from '@restomatch/catalog';
 import { enqueueCatalogImport, isQueueUnavailableError } from '@restomatch/queue';
 import { managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 import {
+  analyzeCatalogRows,
   autoDetectMapping,
   CatalogFileError,
-  extractCatalogRows,
+  detectVatBasis,
   parseCatalogFile,
+  type CatalogImportMapping,
   type ParsedTable,
 } from '../catalog/parse';
 import { commitCatalogRows } from '../catalog/commit';
+import { catalogUnitPrice, cheapestComparable } from '../lib/unitPrice';
 
-/** Above this row count a commit is handed to the import-catalog worker. */
-const INLINE_ROW_LIMIT = 1500;
+/**
+ * Above this row count a commit is handed to the import-catalog worker (about 4
+ * queries a row: 200 rows stay well inside one request; more get a progress card).
+ */
+const INLINE_ROW_LIMIT = 200;
+/** A parsed price this many times above / below the current list price is flagged in the preview. */
+const OUTLIER_HIGH = 5;
+const OUTLIER_LOW = 0.2;
+/** Cap on the per-row lists the preview / commit return (the counts stay exact). */
+const LIST_CAP = 200;
 /** Hard cap to bound request size / parse cost. */
 const MAX_ROWS = 20000;
 
@@ -49,8 +66,11 @@ const ItemPatchSchema = z
     listPrice: z.number().finite().nonnegative().max(10_000_000).nullable().optional(),
     barcodeEan: z.string().trim().max(32).nullable().optional(),
     productId: z.string().uuid().nullable().optional(),
+    /** Link to a NEW product with this name (the import review's "מוצר חדש"). */
+    newProductName: z.string().trim().min(1).max(200).optional(),
   })
-  .strict();
+  .strict()
+  .refine((v) => !(v.newProductName && v.productId), { message: 'productId or newProductName, not both' });
 
 const FileInput = z
   .object({
@@ -71,6 +91,60 @@ const MappingSchema = z
     packSize: z.string().optional(),
   })
   .strict();
+
+/** The price list's VAT basis — asked in the wizard, stored with the mapping. */
+const VatBasisSchema = z.enum(['ex', 'inc']);
+
+/**
+ * The VAT rate this supplier's prices carry, resolved the way the matching
+ * engine's input is (match/buildMatchInput: a PO's rate, else the supplier's
+ * override, else the restaurant's). A price list has no PO, so: supplier
+ * override → restaurant rate. Read-only — the rate is never redefined here.
+ */
+async function supplierVatRate(db: Database, restaurantId: string, supplierId: string): Promise<string> {
+  const [r] = await db
+    .select({ supplierRate: suppliers.vatRate, restaurantRate: restaurants.vatRate })
+    .from(restaurants)
+    .leftJoin(suppliers, and(eq(suppliers.id, supplierId), eq(suppliers.restaurantId, restaurantId)))
+    .where(eq(restaurants.id, restaurantId))
+    .limit(1);
+  // restaurants.vat_rate is NOT NULL (default 0.18); the literal only covers a missing row.
+  return r?.supplierRate ?? r?.restaurantRate ?? '0.18';
+}
+
+export type PriceFlag = 'ZERO' | 'HIGH' | 'LOW';
+
+/** 0, or more than 5× / less than 0.2× the supplier's current list price for the same item. */
+function priceFlag(price: number | null, current: number | null): PriceFlag | null {
+  if (price == null) return null;
+  if (price === 0) return 'ZERO';
+  if (current == null || !(current > 0)) return null;
+  if (price > current * OUTLIER_HIGH) return 'HIGH';
+  if (price < current * OUTLIER_LOW) return 'LOW';
+  return null;
+}
+
+/** The supplier's current list prices, keyed the way commit finds an existing row (SKU, else name). */
+async function currentPrices(db: Database, restaurantId: string, supplierId: string) {
+  const items = await db
+    .select({
+      supplierSku: supplierCatalogItems.supplierSku,
+      supplierNameRaw: supplierCatalogItems.supplierNameRaw,
+      listPrice: supplierCatalogItems.listPrice,
+    })
+    .from(supplierCatalogItems)
+    .where(and(eq(supplierCatalogItems.restaurantId, restaurantId), eq(supplierCatalogItems.supplierId, supplierId)));
+  const bySku = new Map<string, number>();
+  const byName = new Map<string, number>();
+  for (const it of items) {
+    if (it.listPrice == null) continue;
+    const v = Number(it.listPrice);
+    if (it.supplierSku) bySku.set(it.supplierSku, v);
+    byName.set(it.supplierNameRaw, v);
+  }
+  return (sku: string | null, name: string): number | null =>
+    (sku ? bySku.get(sku) : byName.get(name)) ?? null;
+}
 
 const embedder = new MockEmbeddingProvider(1536);
 
@@ -113,12 +187,18 @@ export const catalogRouter = router({
           limit: z.number().int().min(1).max(200).default(50),
           offset: z.number().int().min(0).default(0),
           includeInactive: z.boolean().optional(),
+          /** Rows written by one import (the wizard's review after a background import). */
+          importId: z.string().uuid().optional(),
+          /** Only rows with no product link (to be reviewed). */
+          unlinkedOnly: z.boolean().optional(),
         })
         .optional(),
     )
     .query(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       const conds = [eq(supplierCatalogItems.restaurantId, restaurantId)];
+      if (input?.importId) conds.push(eq(supplierCatalogItems.sourceImportId, input.importId));
+      if (input?.unlinkedOnly) conds.push(isNull(supplierCatalogItems.productId));
       if (input?.supplierId) conds.push(eq(supplierCatalogItems.supplierId, input.supplierId));
       if (!input?.includeInactive) conds.push(eq(supplierCatalogItems.active, true));
       if (input?.search) {
@@ -177,7 +257,7 @@ export const catalogRouter = router({
         .where(and(eq(products.id, input.productId), eq(products.restaurantId, restaurantId)))
         .limit(1);
       if (!product) return null;
-      const items = await ctx.db
+      const rawItems = await ctx.db
         .select({
           id: supplierCatalogItems.id,
           supplierId: supplierCatalogItems.supplierId,
@@ -185,6 +265,7 @@ export const catalogRouter = router({
           supplierNameEn: suppliers.nameEn,
           supplierSku: supplierCatalogItems.supplierSku,
           unit: supplierCatalogItems.unit,
+          packSize: supplierCatalogItems.packSize,
           listPrice: supplierCatalogItems.listPrice,
           active: supplierCatalogItems.active,
         })
@@ -197,6 +278,16 @@ export const catalogRouter = router({
           ),
         )
         .orderBy(asc(suppliers.name));
+      // ₪ per the product's default unit — the same normalisation the price-alert
+      // sweep uses (one catalogUnitPrice), so "הזול ביותר" only ever compares
+      // like with like, and only when two or more active prices are comparable.
+      const priced = rawItems.map((it) => ({
+        ...it,
+        unitPricePerDefaultUnit: catalogUnitPrice({ ...it, productUnit: product.defaultUnit }),
+      }));
+      const cheapestUnitPrice = cheapestComparable(
+        priced.filter((it) => it.active).map((it) => it.unitPricePerDefaultUnit),
+      );
       const history = await ctx.db
         .select({
           supplierId: priceHistory.supplierId,
@@ -212,26 +303,86 @@ export const catalogRouter = router({
         )
         .orderBy(desc(priceHistory.observedAt))
         .limit(24);
-      return { product, items, history };
+      return { product, items: priced, cheapestUnitPrice, history };
     }),
 
-  /** Parse an uploaded file and return headers + sample + auto-mapping for the UI. */
+  /**
+   * Parse an uploaded file and return headers + sample + auto-mapping for the
+   * UI, plus the price check for the chosen mapping: every row's parsed ₪ (ex
+   * VAT), the rows held out as "מחיר לא ברור", and the rows flagged against the
+   * current list price (0, >5×, <0.2×). Re-called when the mapping or VAT basis
+   * changes; nothing is written.
+   */
   parsePreview: managerProcedure
-    .input(z.object({ supplierId: z.string().uuid(), file: FileInput }))
+    .input(
+      z.object({
+        supplierId: z.string().uuid(),
+        file: FileInput,
+        mapping: MappingSchema.optional(),
+        vatBasis: VatBasisSchema.optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
-      await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
+      const restaurantId = ctx.session.restaurantId;
+      await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
       const table = await parseUpload(input.file);
+      const detected = autoDetectMapping(table.headers);
+      const mapping = input.mapping ?? detected;
+      const vatBasisDetected = detectVatBasis(mapping.price);
+      const vatRate = await supplierVatRate(ctx.db, restaurantId, input.supplierId);
+      const vatBasis = input.vatBasis ?? vatBasisDetected ?? 'ex';
+      const analysis = analyzeCatalogRows(table, { ...mapping, vatBasis, vatRate });
+      const current = await currentPrices(ctx.db, restaurantId, input.supplierId);
+      const priced = analysis.rows.map((r) => {
+        const cur = current(r.supplierSku, r.supplierNameRaw);
+        return {
+          rowNumber: r.rowNumber,
+          supplierNameRaw: r.supplierNameRaw,
+          supplierSku: r.supplierSku,
+          unit: r.unit,
+          rawPrice: r.rawPrice,
+          price: r.listPrice,
+          currentPrice: cur,
+          flag: priceFlag(r.listPrice, cur),
+        };
+      });
+      const flagged = priced.filter((r) => r.flag != null);
       return {
         headers: table.headers,
         sample: table.rows.slice(0, 20),
         rowCount: table.rows.length,
-        mapping: autoDetectMapping(table.headers),
+        mapping: detected,
+        vatBasisDetected,
+        vatRate,
+        check: {
+          decimal: analysis.decimal,
+          committable: analysis.rows.length,
+          rows: priced.slice(0, 20),
+          held: analysis.held.slice(0, LIST_CAP),
+          heldCount: analysis.held.length,
+          flagged: flagged.slice(0, LIST_CAP),
+          flaggedCount: flagged.length,
+        },
       };
     }),
 
   /** Commit an import: parse → dedupe → upsert. Inline for small files, worker for large. */
   commitImport: managerProcedure
-    .input(z.object({ supplierId: z.string().uuid(), file: FileInput, mapping: MappingSchema }))
+    .input(
+      z.object({
+        supplierId: z.string().uuid(),
+        file: FileInput,
+        mapping: MappingSchema,
+        /** Required by the wizard; an API caller that omits it means ex-VAT (the old behaviour). */
+        vatBasis: VatBasisSchema.optional(),
+        /**
+         * The person checked the prices flagged against the current list (0, >5×,
+         * <0.2×). Re-checked here on the file being committed, so a stale preview
+         * can't wave a flagged price through.
+         */
+        confirmFlagged: z.boolean().optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       await assertSupplierOwned(ctx.db, input.supplierId, restaurantId);
@@ -239,7 +390,36 @@ export const catalogRouter = router({
         throw new TRPCError({ code: 'BAD_REQUEST', message: 'CATALOG_MAPPING_NAME: חובה למפות עמודת שם/תיאור' });
       }
       const table = await parseUpload(input.file);
-      const rows = extractCatalogRows(table, input.mapping);
+      // The VAT basis and the rate it was converted with live beside the column
+      // mapping (catalog_imports.column_mapping jsonb) and travel in the job payload.
+      const mapping: CatalogImportMapping = {
+        ...input.mapping,
+        vatBasis: input.vatBasis ?? 'ex',
+        vatRate: await supplierVatRate(ctx.db, restaurantId, input.supplierId),
+      };
+      const analysis = analyzeCatalogRows(table, mapping);
+      if (!input.confirmFlagged) {
+        const current = await currentPrices(ctx.db, restaurantId, input.supplierId);
+        const flagged = analysis.rows.filter(
+          (r) => priceFlag(r.listPrice, current(r.supplierSku, r.supplierNameRaw)) != null,
+        ).length;
+        if (flagged > 0) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: `CATALOG_FLAGGED_PRICES: ${flagged} מחירים רחוקים מהמחירון הנוכחי — יש לאשר אותם`,
+          });
+        }
+      }
+      const rows = analysis.rows.map(({ supplierSku, supplierNameRaw, unit, listPrice, barcodeEan, packSize }) => ({
+        supplierSku,
+        supplierNameRaw,
+        unit,
+        listPrice,
+        barcodeEan,
+        packSize,
+      }));
+      const held = analysis.held.slice(0, LIST_CAP);
+      const heldCount = analysis.held.length;
       if (rows.length === 0) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -255,7 +435,7 @@ export const catalogRouter = router({
           filename: input.file.filename,
           status: 'pending',
           rowCount: rows.length,
-          columnMapping: input.mapping,
+          columnMapping: mapping,
           createdBy: ctx.session.userId,
         })
         .returning({ id: catalogImports.id });
@@ -269,7 +449,7 @@ export const catalogRouter = router({
           supplierId: input.supplierId,
           importId: imp.id,
           file: input.file,
-          mapping: input.mapping,
+          mapping: { ...mapping },
         }).catch((err: unknown) => {
           if (!isQueueUnavailableError(err)) throw err;
           console.warn(`[catalog.import] ${err.message} — committing import=${imp.id} inline`);
@@ -284,6 +464,8 @@ export const catalogRouter = router({
             updated: 0,
             createdProducts: 0,
             ambiguous: [],
+            held,
+            heldCount,
           };
         }
         // No queue available → fall through to inline (slower but never silently drops).
@@ -299,7 +481,7 @@ export const catalogRouter = router({
         .update(catalogImports)
         .set({ status: 'committed', createdItems: result.created, updatedItems: result.updated })
         .where(eq(catalogImports.id, imp.id));
-      return { importId: imp.id, queued: false, rowCount: rows.length, ...result };
+      return { importId: imp.id, queued: false, rowCount: rows.length, ...result, held, heldCount };
     }),
 
   /**
@@ -328,6 +510,13 @@ export const catalogRouter = router({
           updatedItems: catalogImports.updatedItems,
           error: catalogImports.error,
           createdAt: catalogImports.createdAt,
+          /**
+           * Rows this import saved without a product link — still waiting in its
+           * "בדיקה" (the review persists here). The outer column is spelled out:
+           * drizzle renders it unqualified, which inside the subquery means sci.id.
+           */
+          unlinkedItems: sql<number>`(SELECT count(*)::int FROM supplier_catalog_items sci
+            WHERE sci.source_import_id = "catalog_imports"."id" AND sci.restaurant_id = ${rid} AND sci.product_id IS NULL)`,
         })
         .from(catalogImports)
         .where(
@@ -427,6 +616,19 @@ export const catalogRouter = router({
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
       const p = input.patch;
+      const [item] = await ctx.db
+        .select({
+          id: supplierCatalogItems.id,
+          supplierId: supplierCatalogItems.supplierId,
+          supplierNameRaw: supplierCatalogItems.supplierNameRaw,
+          supplierSku: supplierCatalogItems.supplierSku,
+          unit: supplierCatalogItems.unit,
+          barcodeEan: supplierCatalogItems.barcodeEan,
+        })
+        .from(supplierCatalogItems)
+        .where(and(eq(supplierCatalogItems.id, input.itemId), eq(supplierCatalogItems.restaurantId, restaurantId)))
+        .limit(1);
+      if (!item) throw new TRPCError({ code: 'NOT_FOUND', message: 'catalog item not found' });
       if (p.productId) {
         const [owned] = await ctx.db
           .select({ id: products.id })
@@ -443,6 +645,22 @@ export const catalogRouter = router({
       if (p.listPrice !== undefined) set.listPrice = p.listPrice == null ? null : String(p.listPrice);
       if (p.barcodeEan !== undefined) set.barcodeEan = p.barcodeEan?.trim() || null;
       if (p.productId !== undefined) set.productId = p.productId;
+      if (p.newProductName) {
+        // "מוצר חדש" from the import review: a product owned by this item's
+        // supplier (same tenant — the item was read restaurant-scoped above).
+        const [created] = await ctx.db
+          .insert(products)
+          .values({
+            restaurantId,
+            supplierId: item.supplierId,
+            canonicalName: p.newProductName,
+            defaultUnit: set.unit !== undefined ? set.unit : item.unit,
+            barcodeEan: set.barcodeEan !== undefined ? set.barcodeEan : item.barcodeEan,
+          })
+          .returning({ id: products.id });
+        if (!created) throw new Error('failed to create product');
+        set.productId = created.id;
+      }
 
       try {
         const [row] = await ctx.db
@@ -456,13 +674,44 @@ export const catalogRouter = router({
           )
           .returning({ id: supplierCatalogItems.id });
         if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'catalog item not found' });
-        return { ok: true };
       } catch (err) {
         if (isUniqueViolation(err)) {
           throw new TRPCError({ code: 'CONFLICT', message: 'כבר קיים פריט עם המק״ט הזה לספק.' });
         }
         throw err;
       }
+      // A person linked this row to a product: that is a confirmation, so learn
+      // the supplier-name (+ SKU) → product alias for future invoices and imports.
+      if (set.productId) {
+        const rawName = set.supplierNameRaw ?? item.supplierNameRaw;
+        const sku = set.supplierSku !== undefined ? set.supplierSku : item.supplierSku;
+        // A person's link supersedes any earlier alias of this supplier's name /
+        // SKU to another product — otherwise one SKU would resolve two ways.
+        const own = ctx.db
+          .select({ id: products.id })
+          .from(products)
+          .where(eq(products.restaurantId, restaurantId));
+        await ctx.db
+          .delete(productAliases)
+          .where(
+            and(
+              eq(productAliases.supplierId, item.supplierId),
+              ne(productAliases.productId, set.productId),
+              inArray(productAliases.productId, own),
+              sku
+                ? or(eq(productAliases.supplierNameRaw, rawName.trim()), eq(productAliases.supplierSku, sku))
+                : eq(productAliases.supplierNameRaw, rawName.trim()),
+            ),
+          );
+        await recordConfirmedMatch(ctx.db, {
+          productId: set.productId,
+          rawName: set.supplierNameRaw ?? item.supplierNameRaw,
+          supplierId: item.supplierId,
+          supplierSku: set.supplierSku !== undefined ? set.supplierSku : item.supplierSku,
+          confidence: 1,
+        });
+      }
+      return { ok: true, productId: set.productId ?? null };
     }),
 
   /** Delete a single catalog row. */

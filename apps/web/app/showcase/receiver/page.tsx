@@ -1,7 +1,6 @@
 'use client';
 
 import { useReducer } from 'react';
-import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { useDir, useLocale, useT } from '@/lib/i18n/client';
 import { receiving } from '@/lib/i18n/messages/receiving';
 import { AdjustQuantities } from './_steps/AdjustQuantities';
@@ -11,6 +10,7 @@ import { Processing } from './_steps/Processing';
 import { Reconciliation } from './_steps/Reconciliation';
 import { SupplierSelect } from './_steps/SupplierSelect';
 import { initialState, reducer, type WizardStep } from './_state';
+import { ShowcaseEndCard } from '../_components/ShowcaseEndCard';
 
 const STEP_ORDER: WizardStep[] = [
   'SELECT_SUPPLIER',
@@ -33,10 +33,10 @@ export default function ReceiverWizard() {
 
   return (
     <main className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-10 min-h-[calc(100dvh-72px)]">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3" dir={dir}>
-        <p className="text-xs text-muted">{t('demo.banner')}</p>
-        <LocaleSwitcher />
-      </div>
+      {/* The language switch lives in the showcase header only (mkt-32). */}
+      <p className="mb-6 text-sm text-muted" dir={dir}>
+        {t('demo.banner')}
+      </p>
 
       {/* Progress bar */}
       <div className="mb-10 flex items-center gap-2" dir={dir}>
@@ -109,6 +109,9 @@ export default function ReceiverWizard() {
           capturedImage={state.image}
           onReset={() => dispatch({ type: 'RESET' })}
         />
+      ) : null}
+      {state.step === 'CONFIRMED' ? (
+        <ShowcaseEndCard kind="receiver" amountIls={state.reconciliation?.summary.headlineDelta ?? null} />
       ) : null}
     </main>
   );

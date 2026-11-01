@@ -65,15 +65,19 @@ for (const vp of VIEWPORTS) {
         const firstItem = page.getByTestId('catalog-item').first();
         await expect(firstItem).toBeVisible({ timeout: 30_000 });
         await firstItem.click();
-        await page.getByRole('button', { name: m.wizard.toReview }).click();
 
+        // The day is settled while building (W1-11: before the server draft exists).
         const date = page.getByTestId('order-delivery-date');
         const expected = expectedDefaultDate();
         await expect(date).toHaveValue(expected);
         await expect(page.getByText(m.wizard.noSchedule)).toBeVisible();
+        await page.getByRole('button', { name: m.wizard.toReview }).click();
 
         await page.locator('#ord-channel').selectOption('none');
-        await page.getByRole('button', { name: m.wizard.submit }).click();
+        // The send button names the effect (W1-11) and waits out a 10 s undo window.
+        const send = page.getByTestId('cart-primary');
+        await expect(send).toHaveText(new RegExp(m.send.cta.none.split('{supplier}')[0]!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+        await send.click();
         await expect(page.getByRole('status').filter({ hasText: m.wizard.markedTitle })).toBeVisible({ timeout: 30_000 });
         const href = await page.getByRole('link', { name: m.wizard.viewOrder }).getAttribute('href');
         const poId = href!.split('/').pop()!;
