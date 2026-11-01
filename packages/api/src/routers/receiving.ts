@@ -43,7 +43,9 @@ import {
   invoicesWaitingOnReceipt,
   lockReceipt,
   readScanGrId,
+  receiptState,
   rematchHoldReason,
+  scanOwnerReceipt,
   scannedInvoicesForReceipt,
 } from '../receiving/matchTriggers';
 import { devOcrStubEnabled, buildDevOcrStub } from '../receiving/devOcrStub';
@@ -714,7 +716,9 @@ export const receivingRouter = router({
         sameMoney(set.vatAmount, current.vatAmount) &&
         sameMoney(set.totalInclVat, current.totalInclVat)
       );
-      if (totalsTyped) {
+      // Clearing the totals is not typing them: decided by the post-patch excl.
+      const exclAfter = set.totalExclVat !== undefined ? set.totalExclVat : current.totalExclVat;
+      if (totalsTyped && exclAfter != null) {
         set.ocrPayload = withMarkers(set.ocrPayload ?? current.ocrPayload, { headerEntered: true, manualHeader: false });
       }
       try {
@@ -816,6 +820,22 @@ export const receivingRouter = router({
       if (!owned) throw new TRPCError({ code: 'NOT_FOUND', message: 'invoice line not found' });
       assertNotBeingRead(owned.status);
 
+      const [parent] = await ctx.db
+        .select({ status: invoices.status, ocrPayload: invoices.ocrPayload, supplierId: invoices.supplierId })
+        .from(invoices)
+        .where(and(eq(invoices.id, owned.invoiceId), eq(invoices.restaurantId, restaurantId)))
+        .limit(1);
+      if (!parent) throw new TRPCError({ code: 'NOT_FOUND', message: 'invoice line not found' });
+      // E: money history is never edited away (approved / paid, a credit note,
+      // a claim in progress) — one rule with add / delete, before any write.
+      await assertNoMoneyHistory(ctx.db, restaurantId, owned.invoiceId, parent.status);
+      const m = readMarkers(parent.ocrPayload);
+      // D: a HAND line (typed: the OCR read nothing, or added by hand) is ours —
+      // its total is always qty × price to the agora. A printed line is
+      // evidence: its total stays as read.
+      const hand = m.ocrFailed || m.manualLineIds.includes(input.lineId);
+      const ownedHeader = headerOwned(m);
+
       const p = input.patch;
       const set: Partial<typeof invoiceLines.$inferInsert> = {};
       if (p.rawDescription !== undefined) {
@@ -828,7 +848,15 @@ export const receivingRouter = router({
       if (p.unit !== undefined) set.unit = p.unit;
       if (p.unitPriceBilled !== undefined) set.unitPriceBilled = String(p.unitPriceBilled);
       if (p.lineTotal !== undefined) set.lineTotal = String(p.lineTotal);
+      if (hand) {
+        const agorot = lineTotalAgorot(set.qtyBilled ?? owned.qtyBilled, set.unitPriceBilled ?? owned.unitPriceBilled);
+        if (agorot === null || agorot > MAX_NUMERIC_12_2_AGOROT) throw new TRPCError({ code: 'BAD_REQUEST', message: 'סכום השורה גדול מדי' });
+        set.lineTotal = agorotToPlain(agorot);
+      }
       await ctx.db.update(invoiceLines).set(set).where(eq(invoiceLines.id, input.lineId));
+      // A: a person corrected a line — a re-scan never reads it away (the
+      // retake predicate resumes). Under the invoice row lock (FOR UPDATE above).
+      const payload = await writeManualMarkers(ctx.db, restaurantId, { id: owned.invoiceId, ocrPayload: parent.ocrPayload }, { linesCorrected: true });
       const keys = (['rawDescription', 'qtyBilled', 'unit', 'unitPriceBilled', 'lineTotal'] as const).filter(
         (k) => set[k] !== undefined,
       );
@@ -841,26 +869,11 @@ export const receivingRouter = router({
         before: { invoiceId: owned.invoiceId, ...Object.fromEntries(keys.map((k) => [k, owned[k]])) },
         after: { invoiceId: owned.invoiceId, ...Object.fromEntries(keys.map((k) => [k, set[k]])) },
       });
-      // A line of a header WE compute (typed by hand): its total is qty × price
-      // to the agora, the header follows and the invoice is re-matched — or the
-      // stale header would read as a TOTAL_MISMATCH against its own lines.
-      const [parent] = await ctx.db
-        .select({ ocrPayload: invoices.ocrPayload, supplierId: invoices.supplierId })
-        .from(invoices)
-        .where(and(eq(invoices.id, owned.invoiceId), eq(invoices.restaurantId, restaurantId)))
-        .limit(1);
-      if (!parent || !headerOwned(readMarkers(parent.ocrPayload))) return { ok: true, totals: null, headerRecomputed: false };
-      const [row] = await ctx.db
-        .select({ qtyBilled: invoiceLines.qtyBilled, unitPriceBilled: invoiceLines.unitPriceBilled })
-        .from(invoiceLines)
-        .where(eq(invoiceLines.id, input.lineId))
-        .limit(1);
-      const agorot = row ? lineTotalAgorot(row.qtyBilled, row.unitPriceBilled) : null;
-      if (agorot === null || agorot > MAX_NUMERIC_12_2_AGOROT) throw new TRPCError({ code: 'BAD_REQUEST', message: 'סכום השורה גדול מדי' });
-      await ctx.db.update(invoiceLines).set({ lineTotal: agorotToPlain(agorot) }).where(eq(invoiceLines.id, input.lineId));
-      const totals = await recomputeInvoiceTotals(ctx.db, restaurantId, { id: owned.invoiceId, supplierId: parent.supplierId, ocrPayload: parent.ocrPayload });
-      const rematch = await rematchAfterEdit(ctx, owned.invoiceId);
-      return { ok: true, totals, headerRecomputed: true, ...rematch };
+      // A hand line, or a header WE compute: the header follows the lines and
+      // the invoice is re-matched — or a stale total reads as TOTAL_MISMATCH.
+      if (!hand && !ownedHeader) return { ok: true, totals: null, headerRecomputed: false };
+      const done = await recomputeAndRematch(ctx, { id: owned.invoiceId, supplierId: parent.supplierId, ocrPayload: payload }, ownedHeader);
+      return { ok: true, totals: done.totals, headerRecomputed: ownedHeader, ...done.rematch };
     }),
 
   /**
@@ -981,8 +994,8 @@ export const receivingRouter = router({
           totals,
         },
       });
-      const rematch = await rematchAfterEdit(ctx, inv.id);
-      return { lineId: line.id, totals, headerRecomputed: owned, ...rematch };
+      const done = await rematchThenSettleHeader(ctx, { ...inv, ocrPayload: payload }, owned, totals);
+      return { lineId: line.id, totals: done.totals, headerRecomputed: owned, ...done.rematch };
     }),
 
   /** B8 — remove a hand-entered (or misread) line; same rules as addInvoiceLine. */
@@ -1013,6 +1026,22 @@ export const receivingRouter = router({
       if (!m.ocrFailed && !m.manualLineIds.includes(line.id)) {
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'אפשר למחוק רק שורה שנוספה ידנית — שורה שנקראה מהחשבונית מתקנים' });
       }
+      // F: the LAST line takes the run with it (H-2) — and with it the people's
+      // decisions on its findings (a rejected "duplicate" would come back as a
+      // whole-invoice leak on the next read). Not while any finding is decided.
+      const [{ n }] = (await ctx.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(invoiceLines)
+        .where(eq(invoiceLines.invoiceId, inv.id))) as [{ n: number }];
+      if (n <= 1) {
+        const [decided] = await ctx.db
+          .select({ id: discrepancies.id })
+          .from(discrepancies)
+          .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+          .where(and(eq(matchRuns.invoiceId, inv.id), eq(matchRuns.restaurantId, restaurantId), ne(discrepancies.resolutionStatus, 'open')))
+          .limit(1);
+        if (decided) throw appError('PRECONDITION_FAILED', 'invoice.linesLocked', LINES_LOCKED_MSG.decided);
+      }
       await ctx.db.delete(invoiceLines).where(eq(invoiceLines.id, line.id));
       const { [line.id]: _picked, ...restPicked } = m.manualLinePoLines;
       const payload = await writeManualMarkers(ctx.db, restaurantId, inv, {
@@ -1031,8 +1060,8 @@ export const receivingRouter = router({
         before: { invoiceId: inv.id, line: gone, totals: inv.totals },
         after: { invoiceId: inv.id, totals },
       });
-      const rematch = await rematchAfterEdit(ctx, inv.id);
-      return { ok: true, totals, headerRecomputed: owned, ...rematch };
+      const done = await rematchThenSettleHeader(ctx, { ...inv, ocrPayload: payload }, owned, totals);
+      return { ok: true, totals: done.totals, headerRecomputed: owned, ...done.rematch };
     }),
 
   /**
@@ -1336,7 +1365,7 @@ export const receivingRouter = router({
       // The scan is stamped with this receipt and claimed only by it: an invoice
       // of another supplier would never pair with it and be orphaned (no run).
       const [grPo] = await ctx.db
-        .select({ supplierId: purchaseOrders.supplierId })
+        .select({ supplierId: purchaseOrders.supplierId, grStatus: goodsReceipts.status })
         .from(goodsReceipts)
         .innerJoin(purchaseOrders, eq(purchaseOrders.id, goodsReceipts.poId))
         .where(and(eq(goodsReceipts.id, input.grId), eq(goodsReceipts.restaurantId, ctx.session.restaurantId)))
@@ -1405,6 +1434,15 @@ export const receivingRouter = router({
             .orderBy(asc(invoices.createdAt), asc(invoices.id))
             .limit(1)
             .for('update');
+          // B: who may retake. A receiver only while the receipt is still being
+          // counted and the invoice was never matched (round 1's guard); after the
+          // count, a re-scan would erase open ₪ findings — that is an owner /
+          // manager call. Otherwise it resumes.
+          const managerTier = ctx.session.role === 'owner' || ctx.session.role === 'manager';
+          const receiverMayRetake = grPo?.grStatus === 'pending';
+          if (own && !managerTier && !receiverMayRetake) {
+            return { invoiceId: own.id, created: false as const, resumed: true as const };
+          }
           if (own) {
             // A re-scan of this delivery's invoice is a RETAKE (the wizard's
             // "צלם שוב": same invoice, the new photo, read again) — but only of
@@ -1430,6 +1468,9 @@ export const receivingRouter = router({
                   inArray(invoices.status, ['parsed', 'matched', 'disputed']),
                   sql`coalesce(${invoices.ocrPayload} -> 'raw' ->> 'manualLines', 'false') <> 'true'`,
                   sql`coalesce(${invoices.ocrPayload} -> 'raw' ->> 'headerEntered', 'false') <> 'true'`,
+                  // A: a line a person corrected (pencil) is never read away.
+                  sql`coalesce(${invoices.ocrPayload} -> 'raw' ->> 'linesCorrected', 'false') <> 'true'`,
+                  managerTier ? undefined : sql`not exists (select 1 from ${matchRuns} r where r.invoice_id = ${invoices.id})`,
                   sql`not exists (select 1 from ${auditLog} where ${auditLog.restaurantId} = ${restaurantId} and ${auditLog.entityId} = ${invoices.id} and ${auditLog.action} = 'receiving.invoice_header_updated')`,
                   sql`not exists (select 1 from ${discrepancies} d join ${matchRuns} r on r.id = d.match_run_id where r.invoice_id = ${invoices.id} and d.resolution_status <> 'open')`,
                   sql`not exists (select 1 from ${recoveryClaims} c where c.invoice_id = ${invoices.id} and c.restaurant_id = ${restaurantId})`,
@@ -1438,6 +1479,15 @@ export const receivingRouter = router({
               )
               .returning({ id: invoices.id });
             if (!retaken) return { invoiceId: own.id, created: false as const, resumed: true as const };
+            // The ₪ the old read's findings showed, for the audit (B).
+            const [dropped] = await tx
+              .select({
+                findings: sql<number>`count(*)::int`,
+                leak: sql<string>`coalesce(sum(abs(${discrepancies.deltaAmount})), 0)::text`,
+              })
+              .from(discrepancies)
+              .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+              .where(and(eq(matchRuns.invoiceId, own.id), eq(matchRuns.restaurantId, restaurantId)));
             // The old read's runs go with it (no decision / claim on them — the
             // predicate): the new read is matched afresh.
             await tx.delete(matchRuns).where(and(eq(matchRuns.invoiceId, own.id), eq(matchRuns.restaurantId, restaurantId)));
@@ -1450,7 +1500,12 @@ export const receivingRouter = router({
               action: 'receiving.invoice_retaken',
               entityType: 'invoice',
               entityId: own.id,
-              before: { status: own.status, rawImageUrl: own.rawImageUrl?.split('?')[0] ?? null },
+              before: {
+                status: own.status,
+                rawImageUrl: own.rawImageUrl?.split('?')[0] ?? null,
+                droppedFindings: dropped?.findings ?? 0,
+                droppedLeakIls: dropped?.leak ?? '0',
+              },
               after: { status: 'ocr_pending', rawImageUrl: objectUrl },
             });
             return { invoiceId: own.id, created: true as const };
@@ -1715,6 +1770,8 @@ type Markers = {
   manualLines: boolean;
   manualHeader: boolean;
   headerEntered: boolean;
+  /** A person corrected a line with the pencil (updateInvoiceLine): a re-scan resumes, never reads it away. */
+  linesCorrected: boolean;
   manualLineIds: string[];
   manualLinePoLines: Record<string, string>;
 };
@@ -1727,6 +1784,7 @@ function readMarkers(ocrPayload: OcrPayload | null): Markers {
     manualLines: raw?.manualLines === true,
     manualHeader: raw?.manualHeader === true,
     headerEntered: raw?.headerEntered === true,
+    linesCorrected: raw?.linesCorrected === true,
     manualLineIds: ids,
     manualLinePoLines: map,
   };
@@ -1812,11 +1870,27 @@ async function linesLockReason(
   return claim ? 'claim' : null;
 }
 
-const LINES_LOCKED_MSG: Record<'consolidated' | 'credit_note' | 'claim', string> = {
+const LINES_LOCKED_MSG: Record<'consolidated' | 'credit_note' | 'claim' | 'settled' | 'decided', string> = {
   consolidated: 'חשבונית ריכוז מוצלבת מול תעודות המשלוח — אין בה עריכת שורות ידנית',
   credit_note: 'לחשבונית יש הודעת זיכוי רשומה — אי אפשר לשנות את שורותיה',
   claim: 'יש לחשבונית דרישת זיכוי בתהליך — סגרו או מחקו אותה לפני שינוי השורות',
+  settled: 'החשבונית כבר אושרה או שולמה — אי אפשר לשנות את שורותיה',
+  decided: 'יש החלטות על הפערים של החשבונית — אי אפשר למחוק את השורה האחרונה',
 };
+
+/**
+ * E: money history is never edited away — ONE rule for add / update / delete
+ * (and so before any header recompute): an approved / paid invoice, a credit
+ * note recorded on it (credit_notes → invoice_lines cascades), or a credit
+ * claim in progress (letter / acknowledgement / credit — releaseClaimsForRematch's
+ * own predicate). Read-only; bare claims are released by the re-match.
+ */
+async function assertNoMoneyHistory(db: Database, restaurantId: string, invoiceId: string, status: string): Promise<void> {
+  if (status === 'approved' || status === 'paid') throw appError('PRECONDITION_FAILED', 'invoice.linesLocked', LINES_LOCKED_MSG.settled);
+  const reason = await linesLockReason(db, restaurantId, invoiceId, null);
+  if (reason === 'credit_note') throw appError('PRECONDITION_FAILED', 'invoice.linesLocked', LINES_LOCKED_MSG.credit_note);
+  if (reason === 'claim') throw appError('CONFLICT', 'invoice.linesLocked', LINES_LOCKED_MSG.claim);
+}
 
 type OrderLine = {
   id: string;
@@ -1876,8 +1950,15 @@ async function invoiceOrderRef(
     .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)))
     .orderBy(desc(matchRuns.runAt))
     .limit(1);
-  const stamped = readScanGrId(ocrPayload);
-  const grId = stamped ?? run?.grId ?? null;
+  const [src] = await db
+    .select({ source: invoices.source })
+    .from(invoices)
+    .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
+    .limit(1);
+  // The receipt the scan belongs to (the stamp, else a photo held for ONE
+  // receipt — the same rule every reader uses), else the latest run's.
+  const owner = scanOwnerReceipt(ocrPayload, src?.source);
+  const grId = owner ?? run?.grId ?? null;
   let poId = run?.poId ?? null;
   if (!poId && grId) {
     const [gr] = await db
@@ -2005,12 +2086,7 @@ async function editableInvoice(db: Database, restaurantId: string, invoiceId: st
   // in progress (letter / acknowledgement / credit: releaseClaimsForRematch's
   // own predicate, which refuses CONFLICT; bare claims are released here, as
   // the re-match after the edit would).
-  const [credit] = await db
-    .select({ id: creditNotes.id })
-    .from(creditNotes)
-    .where(and(eq(creditNotes.invoiceId, inv.id), eq(creditNotes.restaurantId, restaurantId)))
-    .limit(1);
-  if (credit) throw appError('PRECONDITION_FAILED', 'invoice.linesLocked', LINES_LOCKED_MSG.credit_note);
+  await assertNoMoneyHistory(db, restaurantId, inv.id, inv.status);
   try {
     await releaseClaimsForRematch(db, restaurantId, inv.id);
   } catch (err) {
@@ -2159,25 +2235,31 @@ async function rematchAfterEdit(ctx: { db: Database; session: MemberSession }, i
     return { rematched: false, rematchSkipped: 'no_lines' };
   }
   const { grId } = await invoiceOrderRef(ctx.db, restaurantId, invoiceId, inv?.ocrPayload ?? null);
-  if (grId) {
-    const [gr] = await ctx.db
-      .select({ status: goodsReceipts.status })
-      .from(goodsReceipts)
-      .where(and(eq(goodsReceipts.id, grId), eq(goodsReceipts.restaurantId, restaurantId)))
+  // G: decided under the receipt lock (receiptState), so a submit in flight
+  // either commits first (we see it closed and match) or waits for this edit
+  // to commit (and then finds the invoice held for it).
+  if (grId && (await receiptState(ctx.db, restaurantId, grId)).open) {
+    // A receipt reopened for a follow-up delivery was counted before: this
+    // invoice's run against it stands on that count. Holding would leave that
+    // stale run's ₪ showing for an edit it never saw — refuse the edit instead.
+    const [counted] = await ctx.db
+      .select({ id: matchRuns.id })
+      .from(matchRuns)
+      .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.grId, grId)))
       .limit(1);
-    if (gr?.status === 'pending') {
-      // Held for the count. A person entered these lines, so the receipt's
-      // submit must match them (rematchHoldReason holds a never-matched
-      // 'parsed' invoice for review): it is 'matched' (reviewed), waiting.
-      await ctx.db.execute(sql`
-        UPDATE invoices
-           SET ocr_payload = jsonb_set(ocr_payload, ${`{raw,${HELD_FOR_RECEIPTS_KEY}}`}::text[], ${JSON.stringify([grId])}::jsonb, true),
-               status = CASE WHEN status = 'parsed' THEN 'matched'::invoice_status ELSE status END,
-               updated_at = now()
-         WHERE id = ${invoiceId} AND restaurant_id = ${restaurantId}
-           AND jsonb_typeof(ocr_payload -> 'raw') = 'object'`);
-      return { rematched: false, rematchSkipped: 'receipt_open' };
-    }
+    if (counted) throw appError('PRECONDITION_FAILED', 'invoice.receiptOpen', RECEIPT_OPEN_MSG);
+    // Held for the count. A person entered these lines, so the receipt's
+    // submit must match them (rematchHoldReason holds a never-matched
+    // 'parsed' invoice for review): it is 'matched' (reviewed), waiting —
+    // except a possible duplicate copy (J): that stays for its review.
+    await ctx.db.execute(sql`
+      UPDATE invoices
+         SET ocr_payload = jsonb_set(ocr_payload, ${`{raw,${HELD_FOR_RECEIPTS_KEY}}`}::text[], ${JSON.stringify([grId])}::jsonb, true),
+             status = CASE WHEN status = 'parsed' AND NOT (ocr_payload -> 'raw' ? 'duplicateOf') THEN 'matched'::invoice_status ELSE status END,
+             updated_at = now()
+       WHERE id = ${invoiceId} AND restaurant_id = ${restaurantId}
+         AND jsonb_typeof(ocr_payload -> 'raw') = 'object'`);
+    return { rematched: false, rematchSkipped: 'receipt_open' };
   }
   try {
     await ctx.db.transaction(async (sp) => {
@@ -2188,4 +2270,38 @@ async function rematchAfterEdit(ctx: { db: Database; session: MemberSession }, i
     console.warn(`[receiving] re-match after a manual line edit was refused for invoice=${invoiceId}`, err);
     return { rematched: false, rematchSkipped: 'refused' };
   }
+}
+
+const RECEIPT_OPEN_MSG = 'הקבלה פתוחה לספירה — אפשר לערוך את השורות אחרי שהספירה תיסגר';
+
+/**
+ * Re-match after an edit; when the header is OURS, settle it on the run's
+ * order (L): before the first run the header used the scan's order / supplier /
+ * restaurant VAT rate; the run's PO may carry another — recompute, and when
+ * that moved the header, match once more so the run sees the final figures.
+ */
+async function rematchThenSettleHeader(
+  ctx: { db: Database; session: MemberSession },
+  inv: { id: string; supplierId: string | null; ocrPayload: OcrPayload | null },
+  owned: boolean,
+  totals: InvoiceTotals,
+): Promise<{ totals: InvoiceTotals; rematch: RematchOutcome }> {
+  let rematch = await rematchAfterEdit(ctx, inv.id);
+  if (!owned || !rematch.rematched) return { totals, rematch };
+  const settled = await recomputeInvoiceTotals(ctx.db, ctx.session.restaurantId, inv);
+  if (settled.totalExclVat !== totals.totalExclVat || settled.vatAmount !== totals.vatAmount || settled.totalInclVat !== totals.totalInclVat) {
+    rematch = await rematchAfterEdit(ctx, inv.id);
+  }
+  return { totals: settled, rematch };
+}
+
+/** The pencil path: recompute our header (when ours), then re-match and settle it. */
+async function recomputeAndRematch(
+  ctx: { db: Database; session: MemberSession },
+  inv: { id: string; supplierId: string | null; ocrPayload: OcrPayload | null },
+  owned: boolean,
+): Promise<{ totals: InvoiceTotals | null; rematch: RematchOutcome }> {
+  const totals = owned ? await recomputeInvoiceTotals(ctx.db, ctx.session.restaurantId, inv) : null;
+  if (!totals) return { totals: null, rematch: await rematchAfterEdit(ctx, inv.id) };
+  return rematchThenSettleHeader(ctx, inv, owned, totals);
 }

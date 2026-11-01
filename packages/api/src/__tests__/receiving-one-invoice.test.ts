@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { and, auditLog, createDb, eq, goodsReceipts, invoiceLines, invoices, matchRuns, testDbUrl } from '@restomatch/db';
+import { and, auditLog, createDb, discrepancies, eq, goodsReceipts, invoiceLines, invoices, matchRuns, testDbUrl } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
@@ -53,11 +53,11 @@ describe('registerInvoice — one receipt, one invoice', () => {
     expect(enqueueOcrInvoice).toHaveBeenCalledTimes(1); // no second OCR job (no second spend)
   });
 
-  it("item 4: a re-scan of the receipt's OCR-read (matched) invoice is a RETAKE — same id, new photo, old read's runs + lines gone, read again", async () => {
+  it("item 4: an owner's re-scan of the receipt's OCR-read (matched) invoice is a RETAKE — same id, new photo, old read's runs + lines gone, read again", async () => {
     const before = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, A.invoiceId));
     expect(before.length).toBeGreaterThan(0);
     const count = (await invoicesOf(A)).length;
-    const r = await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('3'), supplierId: A.supplierId });
+    const r = await as(A, 'owner').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('3'), supplierId: A.supplierId });
     expect(r).toMatchObject({ invoiceId: A.invoiceId, alreadyExisted: false });
     const [row] = await db.select().from(invoices).where(eq(invoices.id, A.invoiceId));
     expect(row!.status).toBe('ocr_pending');
@@ -176,5 +176,55 @@ describe('registerInvoice — one receipt, one invoice', () => {
     expect(after).toEqual(before);
     expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, A.invoiceId))).not.toHaveLength(0);
     expect(enqueueOcrInvoice).not.toHaveBeenCalled();
+  });
+  it("round 3 A: a line a manager corrected with the pencil is never read away — even an owner's re-scan resumes", async () => {
+    const [line] = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, A.invoiceId)).limit(1);
+    await as(A, 'manager').receiving.updateInvoiceLine({ lineId: line!.id, patch: { unitPriceBilled: 54 } });
+    const r = await as(A, 'owner').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('pencil'), supplierId: A.supplierId });
+    expect(r).toEqual({ invoiceId: A.invoiceId, alreadyExisted: true, resumed: true });
+    const [kept] = await db.select({ price: invoiceLines.unitPriceBilled }).from(invoiceLines).where(eq(invoiceLines.id, line!.id));
+    expect(Number(kept!.price)).toBe(54);
+    expect(enqueueOcrInvoice).not.toHaveBeenCalled();
+  });
+
+  it("round 3 B: a RECEIVER's re-scan never erases a matched invoice's findings — it resumes, open receipt or closed", async () => {
+    const findings = async () =>
+      (await db.select({ id: discrepancies.id }).from(discrepancies).innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId)).where(eq(matchRuns.invoiceId, A.invoiceId))).length;
+    const before = await findings();
+    expect(before).toBeGreaterThan(0);
+    for (const status of ['pending', 'completed'] as const) {
+      await db.update(goodsReceipts).set({ status }).where(eq(goodsReceipts.id, A.grId));
+      const r = await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan(`rcv-${status}`), supplierId: A.supplierId });
+      expect(r).toEqual({ invoiceId: A.invoiceId, alreadyExisted: true, resumed: true });
+      expect(await findings()).toBe(before);
+    }
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, A.invoiceId))).not.toHaveLength(0);
+    expect(enqueueOcrInvoice).not.toHaveBeenCalled();
+  });
+
+  it('round 3 B: a receiver may still retake a never-matched scan while the receipt is being counted', async () => {
+    await db.delete(matchRuns).where(eq(matchRuns.restaurantId, A.restaurantId));
+    const first = await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('n1'), supplierId: A.supplierId });
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, first.invoiceId)); // the blurry read, held
+    const again = await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('n2'), supplierId: A.supplierId });
+    expect(again).toMatchObject({ invoiceId: first.invoiceId, alreadyExisted: false });
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, first.invoiceId));
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId)); // after the count: no
+    const late = await as(A, 'receiver').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('n3'), supplierId: A.supplierId });
+    expect(late).toEqual({ invoiceId: first.invoiceId, alreadyExisted: true, resumed: true });
+  });
+
+  it("round 3 B: an owner's retake records the ₪ it dropped in its audit", async () => {
+    const rows = await db
+      .select({ delta: discrepancies.deltaAmount })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(eq(matchRuns.invoiceId, A.invoiceId));
+    expect(rows.length).toBeGreaterThan(0);
+    const leak = rows.reduce((t, r) => t + Math.round(Math.abs(Number(r.delta ?? 0)) * 100), 0);
+    await as(A, 'owner').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('own'), supplierId: A.supplierId });
+    const [audit] = await db.select().from(auditLog).where(and(eq(auditLog.entityId, A.invoiceId), eq(auditLog.action, 'receiving.invoice_retaken')));
+    expect(audit!.before).toMatchObject({ droppedFindings: rows.length });
+    expect(Math.round(Number((audit!.before as { droppedLeakIls: string }).droppedLeakIls) * 100)).toBe(leak);
   });
 });

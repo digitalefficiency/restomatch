@@ -133,14 +133,49 @@ describe('#216 item 1: a hand line on an open receipt is held, then matched by t
     const out = await matchInvoiceForJob(db, job!);
     expect(out.skipped).toBeUndefined();
     expect(out.persisted).not.toBeNull();
-    const types = (
-      await db
-        .select({ type: discrepancies.type })
-        .from(discrepancies)
-        .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
-        .where(and(eq(matchRuns.invoiceId, reg.invoiceId), eq(matchRuns.restaurantId, restaurantId)))
-    ).map((r) => r.type);
-    expect(types).toContain('PRICE_HIGHER');
-    expect(types).not.toContain('QTY_SHORT');
+    const found = await db
+      .select({ type: discrepancies.type, delta: discrepancies.deltaAmount })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(and(eq(matchRuns.invoiceId, reg.invoiceId), eq(matchRuns.restaurantId, restaurantId)));
+    // Exactly the overcharge: 10 × (132 − 125) = 70.00 — nothing read off an empty count.
+    expect(found.map((f) => f.type)).toEqual(['PRICE_HIGHER']);
+    expect(found[0]!.delta).toBe('70.00');
+  });
+});
+
+describe('#216 round 3, K: a match job never writes a run over an invoice sent back to OCR (retake) mid-job', () => {
+  it('the persist step re-checks the status under the invoice row lock', async () => {
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, grId));
+    const [po] = await db.select({ poId: goodsReceipts.poId }).from(goodsReceipts).where(eq(goodsReceipts.id, grId));
+    const [inv] = await db
+      .insert(invoices)
+      .values({
+        restaurantId,
+        supplierId,
+        status: 'matched',
+        source: 'photo',
+        rawImageUrl: 'https://example.com/scans/k.jpg',
+        totalExclVat: '1320.00',
+        vatAmount: '237.60',
+        totalInclVat: '1557.60',
+        ocrPayload: { provider: 'claude_vision', raw: { scanGrId: grId } },
+      })
+      .returning();
+    await db.insert(invoiceLines).values({ invoiceId: inv!.id, rawDescription: 'שמן זית 1 ליטר', qtyBilled: '10', unit: 'ליטר', unitPriceBilled: '132', lineTotal: '1320.00' });
+
+    const other = createDb(testDbUrl()); // the retake, holding the invoice row
+    let job: ReturnType<typeof matchInvoiceForJob> | undefined;
+    await other.transaction(async (tx) => {
+      await tx.select({ id: invoices.id }).from(invoices).where(eq(invoices.id, inv!.id)).for('update');
+      job = matchInvoiceForJob(db, { restaurantId, invoiceId: inv!.id, rematch: true, poId: po!.poId! });
+      await new Promise((r) => setTimeout(r, 300)); // the job reads the old status, builds, then waits on the row
+      await tx.update(invoices).set({ status: 'ocr_pending' }).where(eq(invoices.id, inv!.id));
+    });
+    const out = await job!;
+    expect(out.skipped).toBe('ocr_pending');
+    expect(out.persisted).toBeNull();
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, inv!.id))).toHaveLength(0);
   });
 });

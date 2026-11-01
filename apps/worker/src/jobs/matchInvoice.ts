@@ -130,6 +130,16 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
 
   const persisted = await db.transaction(async (rawTx) => {
     const tx = rawTx as unknown as Database;
+    // K: a retake (registerInvoice) may have sent the invoice back to OCR while
+    // this job was matching the OLD read. Under the invoice row lock (the retake
+    // takes it too): an invoice being read again gets no run.
+    const [now] = await tx
+      .select({ status: invoices.status })
+      .from(invoices)
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
+      .limit(1)
+      .for('update');
+    if (!now || now.status === 'ocr_pending') return null;
     let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;
     if (priorRun) {
       prior = await loadPriorDecisions(tx, restaurantId, invoiceId);
@@ -146,6 +156,7 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
       prior,
     );
   });
+  if (!persisted) return { result: CLEAN, persisted: null, replaced: false, skipped: 'ocr_pending' };
   return { result, persisted, replaced: Boolean(priorRun) };
 }
 
