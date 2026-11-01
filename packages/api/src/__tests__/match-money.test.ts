@@ -11,6 +11,7 @@ import {
   priceHistory,
   purchaseOrders,
   testDbUrl,
+  products,
 } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext } from '../context';
@@ -661,6 +662,21 @@ describe('a decision only carries to an equivalent finding (decisionStillApplies
 describe('re-match: a materially different finding starts fresh (router)', () => {
   it('rejected finding grows after a correction → open again, routed, not the old note', async () => {
     const A = await seedTenant(db, 'A');
+    // An item the order never had (G-08: the seed's order line now carries its
+    // product, so the unordered item is a real one, not a name-only false pair).
+    const [extraProduct] = await db
+      .insert(products)
+      .values({ restaurantId: A.restaurantId, canonicalName: 'מלפפון', defaultUnit: 'ק״ג' })
+      .returning({ id: products.id });
+    await db.insert(invoiceLines).values({
+      invoiceId: A.invoiceId,
+      productId: extraProduct!.id,
+      rawDescription: 'מלפפון',
+      qtyBilled: '10',
+      unit: 'kg',
+      unitPriceBilled: '9',
+      lineTotal: '90.00',
+    });
     const caller = ownerCaller(A);
     await caller.match.runForInvoice({ invoiceId: A.invoiceId });
     const find = async () =>

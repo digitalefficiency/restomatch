@@ -179,6 +179,10 @@ export const payRunRouter = router({
       // date rule as the hero.
       const res = await ctx.db.execute(sql`
         SELECT i.id, i.invoice_number, i.status AS inv_status, COALESCE(i.invoice_date, i.created_at) AS at,
+               -- G-08: OCR held it for a person (review reasons), not a consolidated invoice waiting for its link.
+               (jsonb_typeof(i.ocr_payload -> 'raw' -> 'reviewReasons') = 'array'
+                 AND jsonb_array_length(i.ocr_payload -> 'raw' -> 'reviewReasons') > 0
+                 AND COALESCE(i.ocr_payload -> 'raw' ->> 'kind', '') <> 'consolidated') AS review_held,
                COALESCE(i.total_incl_vat, 0) AS total_incl, COALESCE(i.total_excl_vat, 0) AS total_excl,
                i.supplier_id, s.name AS supplier_name, s.name_en AS supplier_name_en,
                -- Safety net for an invoice past the breakdown's 200-row window: any open
@@ -263,7 +267,7 @@ export const payRunRouter = router({
         const awaitingQuestion = !awaitingCount && row.matched !== true && row.question === true;
         // …and held for a person with no question open (confidence / lowLines): "לבדיקה".
         const awaitingReview =
-          !awaitingCount && !awaitingQuestion && row.matched !== true && row.inv_status === 'parsed' && row.has_dup !== true;
+          !awaitingCount && !awaitingQuestion && row.matched !== true && row.inv_status === 'parsed' && row.review_held === true && row.has_dup !== true;
         const pendingLink =
           !awaitingCount &&
           !awaitingQuestion &&

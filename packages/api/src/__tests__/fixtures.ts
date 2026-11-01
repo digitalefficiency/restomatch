@@ -227,6 +227,9 @@ export async function seedTenant(db: Database, tag: string): Promise<Tenant> {
     .insert(poLines)
     .values({
       poId: po.id,
+      // G-08: an order line carries its product — a name-only line is an open
+      // "זה אותו מוצר?" question that (rightly) holds a first match.
+      productId: product.id,
       rawDescription: `עגבניות ${tag}`,
       qtyOrdered: '10',
       unit: 'kg',
