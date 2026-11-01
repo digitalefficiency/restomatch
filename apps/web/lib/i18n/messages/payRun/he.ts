@@ -41,7 +41,7 @@ export const he = {
     pending: 'ממתין להחלטה: {amount}',
     toApprovals: 'לתור האישורים',
     toQuestions: 'לשאלות',
-    openInvoice: 'פתח חשבונית',
+    openInvoice: 'פתיחת החשבונית',
   },
   supplier: {
     subtotal: 'ביניים לספק',

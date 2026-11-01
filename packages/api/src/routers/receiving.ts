@@ -562,6 +562,8 @@ export const receivingRouter = router({
         .select({
           id: invoiceLines.id,
           productId: invoiceLines.productId,
+          // G-08 (round 4): the charge line's key, for "לא שורת חיוב — להחזיר לשאלות".
+          supplierSku: invoiceLines.supplierSku,
           rawDescription: invoiceLines.rawDescription,
           rawDescriptionEn: invoiceLines.rawDescriptionEn,
           productNameEn: products.nameEn,

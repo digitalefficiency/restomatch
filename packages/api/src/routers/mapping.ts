@@ -31,8 +31,11 @@ import {
   NOT_CHARGE_ROW,
   poLineIsQuestion,
   pruneAnsweredReasons,
+  forgetChargeKey,
+  learnChargeKey,
   readChargeKeys,
   releaseQuestionHolds,
+  restoreQuestionReason,
   sumAbsIls,
 } from '../catalog/linkQuestions';
 import { enqueue, isQueueUnavailableError, MATCH_INVOICE_QUEUE, type MatchInvoiceQueueJob } from '@restomatch/queue';
@@ -542,6 +545,8 @@ async function applyLink(db: Database, rid: string, input: LinkInput) {
     // An invoice an answer released goes back on hold rather than re-matching
     // into a false leak; the rest re-match (incl. invoices of undone PO lines).
     const reheld = new Set(await reholdLinkHolds(db, rid, undoneInv.map((l) => l.invoiceId)));
+    // A held invoice whose line is a question again is in the bucket again (round 4 LOW-8).
+    await restoreQuestionReason(db, rid, undoneInv.map((l) => l.invoiceId));
     const toRematch = [
       ...undoneInv.map((l) => l.invoiceId),
       ...(await invoicesForPoLines(db, rid, undonePo.map((l) => l.id))),
@@ -714,16 +719,13 @@ export interface ChargeInput {
 
 /** The charge key of an input: (supplier, SKU) or (supplier, normalized name). */
 function chargeKeyOf(input: ChargeInput) {
-  return input.supplierSku
-    ? { supplierId: input.supplierId, sku: input.supplierSku, nameKey: null as string | null }
-    : { supplierId: input.supplierId, sku: null as string | null, nameKey: normalizeLinkName(input.rawName) };
+  // A SKU key keeps the normalized name too: it covers only lines that read the same (round 4).
+  return {
+    supplierId: input.supplierId,
+    sku: input.supplierSku ?? null,
+    nameKey: normalizeLinkName(input.rawName),
+  };
 }
-
-/** Is `ck` (jsonb element alias) this key? */
-const sameChargeKey = (k: { supplierId: string; sku: string | null; nameKey: string | null }) =>
-  k.sku
-    ? sql`ck ->> 'supplierId' = ${k.supplierId} and ck ->> 'sku' = ${k.sku}`
-    : sql`ck ->> 'supplierId' = ${k.supplierId} and (ck ->> 'sku') is null and ck ->> 'nameKey' = ${k.nameKey}`;
 
 /**
  * G-08 charge (review M-2, round 3): mark a key (supplier + SKU, or supplier +
@@ -747,7 +749,6 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
   await db.execute(
     sql`select pg_advisory_xact_lock(hashtext(${`g08:${rid}:${input.supplierId}:${key.sku ?? key.nameKey}`}))`,
   );
-  const sameKey = sameChargeKey(key);
 
   if (input.undo) {
     const ids = input.undo.invoiceLineIds;
@@ -780,9 +781,11 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
          where i.id = ${invoiceId}::uuid and i.restaurant_id = ${rid}
       `);
     }
-    if (input.undo.forgetKey) await forgetChargeKey(db, rid, sameKey);
+    if (input.undo.forgetKey) await forgetChargeKey(db, rid, key);
     const touched = [...byInv.keys()];
     const reheld = new Set(await reholdLinkHolds(db, rid, touched));
+    // A held invoice whose line is a question again is in the bucket again (round 4 LOW-8).
+    await restoreQuestionReason(db, rid, touched);
     const rematch = await requeueInvoicesForRematch(db, rid, touched.filter((id) => !reheld.has(id)));
     await db.insert(auditLog).values({
       restaurantId: rid,
@@ -834,15 +837,12 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
     `);
   }
 
-  // Learn the key (once): next week's line of it is pre-marked by the OCR job.
-  const learned = (await db.execute(sql`
-    update restaurants r
-       set settings = r.settings || jsonb_build_object('chargeKeys',
-             coalesce(r.settings -> 'chargeKeys', '[]'::jsonb) || ${JSON.stringify([{ ...key, by: userId, at }])}::jsonb)
-     where r.id = ${rid}
-       and not exists (select 1 from jsonb_array_elements(coalesce(r.settings -> 'chargeKeys', '[]'::jsonb)) ck where ${sameKey})
-    returning r.id
-  `)) as unknown as Array<{ id: string }>;
+  // Learn the key: next week's line of it is pre-marked by the OCR job — only
+  // up to the largest amount answered here (+ the price tolerance; round 4).
+  const maxAbsAgorot =
+    target.length > 0 ? Math.max(...target.map((t) => Math.abs(Math.round(Number(t.line_total) * 100)))) : null;
+  const learnedNew = await learnChargeKey(db, rid, { ...key, rawName: input.rawName }, maxAbsAgorot, userId);
+  const learned = learnedNew ? [true] : [];
 
   // Invoices whose first match waits for an order line of this key (M-4) are touched too.
   const heldOnOrder = (await db.execute(sql`
@@ -879,17 +879,6 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
     rematch,
     undo: { invoiceLineIds: target.map((t) => String(t.id)), forgetKey: learned.length > 0 },
   };
-}
-
-/** Drop a learned charge key (restaurant-scoped). */
-async function forgetChargeKey(db: Database, rid: string, sameKey: ReturnType<typeof sql>) {
-  await db.execute(sql`
-    update restaurants r
-       set settings = r.settings || jsonb_build_object('chargeKeys', coalesce(
-             (select jsonb_agg(ck) from jsonb_array_elements(coalesce(r.settings -> 'chargeKeys', '[]'::jsonb)) ck where not (${sameKey})),
-             '[]'::jsonb))
-     where r.id = ${rid}
-  `);
 }
 
 function groupByInvoice(rows: Array<{ id: string; invoice_id: string }>): Map<string, string[]> {
@@ -1194,34 +1183,66 @@ export const mappingRouter = router({
     const names = new Map(sups.map((x) => [x.id, x.name]));
     return keys
       .filter((k) => names.has(k.supplierId))
-      .map((k) => ({ supplierId: k.supplierId, supplierName: names.get(k.supplierId)!, sku: k.sku, nameKey: k.nameKey, at: k.at }));
+      .map((k) => ({
+        supplierId: k.supplierId,
+        supplierName: names.get(k.supplierId)!,
+        sku: k.sku,
+        nameKey: k.nameKey,
+        rawName: k.rawName,
+        at: k.at,
+      }));
   }),
 
-  /** Forget a learned charge key: future lines of it are questions again (lines already marked stay marked). Audited. */
+  /**
+   * Forget a learned charge key (round 4): future lines of it are questions
+   * again, order / price-list lines of it are questions again at once, and the
+   * lines it still marks on UNPAID invoices are put back as questions (their ₪
+   * returns to the check). Audited.
+   */
   removeChargeKey: managerProcedure
     .input(
       z
         .object({
           supplierId: z.string().uuid(),
           sku: z.string().trim().min(1).max(64).nullable(),
-          nameKey: z.string().min(1).max(400).nullable(),
+          nameKey: z.string().min(1).max(400),
         })
-        .strict()
-        .refine((v) => (v.sku == null) !== (v.nameKey == null), { message: 'sku or nameKey' }),
+        .strict(),
     )
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
       await assertSupplierOwned(ctx.db, input.supplierId, rid);
-      const key = { supplierId: input.supplierId, sku: input.sku, nameKey: input.nameKey };
-      await forgetChargeKey(ctx.db, rid, sameChargeKey(key));
-      await ctx.db.insert(auditLog).values({
-        restaurantId: rid,
-        userId: ctx.session.userId,
-        action: 'mapping.removeChargeKey',
-        entityType: 'supplier',
-        entityId: input.supplierId,
-        after: { sku: input.sku, nameKey: input.nameKey },
-      });
-      return { removed: true };
+      const nameKey = normalizeLinkName(input.nameKey);
+      const lineKey = input.sku
+        ? sql`il.supplier_sku = ${input.sku} and ${normNameSql(sql`il.raw_description`)} = ${nameKey}`
+        : sql`il.supplier_sku is null and ${normNameSql(sql`il.raw_description`)} = ${nameKey}`;
+      const marked = (await ctx.db.execute(sql`
+        select il.id from invoice_lines il
+          join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
+         where il.product_id is null and ${lineKey} and i.status <> 'paid'
+           and coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text
+      `)) as unknown as Array<{ id: string }>;
+      let linesReturned = 0;
+      if (marked.length > 0) {
+        await applyCharge(ctx.db, rid, ctx.session.userId, {
+          supplierId: input.supplierId,
+          ...(input.sku ? { supplierSku: input.sku } : {}),
+          rawName: nameKey,
+          undo: { invoiceLineIds: marked.map((m) => String(m.id)), forgetKey: true },
+        });
+        linesReturned = marked.length;
+      }
+      const removed = (await forgetChargeKey(ctx.db, rid, { supplierId: input.supplierId, sku: input.sku, nameKey })) || marked.length > 0;
+      if (removed) {
+        await ctx.db.insert(auditLog).values({
+          restaurantId: rid,
+          userId: ctx.session.userId,
+          action: 'mapping.removeChargeKey',
+          entityType: 'supplier',
+          entityId: input.supplierId,
+          after: { sku: input.sku, nameKey, linesReturned },
+        });
+      }
+      return { removed, linesReturned };
     }),
 });

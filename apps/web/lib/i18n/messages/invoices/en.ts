@@ -6,7 +6,9 @@ export const en: Shape<typeof he> = {
     openQuestions: 'Answer the questions',
     charge: 'Marked as a charge line — not a product',
     chargeBy: 'Marked as a charge line by {name}',
-    chargeAuto: 'Marked a charge line automatically (learned from an earlier answer)',
+    chargeAuto: 'Marked as a charge line automatically (learned from an earlier answer)',
+    notCharge: 'Not a charge line — back to the questions',
+    chargeUndone: 'Back to the questions — the line is checked after the answer',
     title: 'Correct invoice',
     subtitle:
       'Fix values the OCR read wrong (quantity / price / total) and re-run the match — the leak figure is calculated from these lines.',

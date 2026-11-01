@@ -1,5 +1,6 @@
 import { sql, type Database } from '@restomatch/db';
 import { normNameSql } from '@restomatch/catalog';
+import { resolveTolerances } from '@restomatch/matching';
 
 type SQL = ReturnType<typeof sql>;
 
@@ -27,13 +28,32 @@ export const NOT_CHARGE_ROW = sql.raw(
   `not exists (select 1 from invoices ci where ci.id = "invoice_lines"."invoice_id" and coalesce(ci.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? "invoice_lines"."id"::text)`,
 );
 
-/** A learned charge key of this restaurant covers the row (supplier + SKU, or supplier + normalized name). */
-export function chargeKeyCovers(rid: string, supplierCol: SQL, skuCol: SQL, rawCol: SQL): SQL {
+/**
+ * A learned charge key of this restaurant covers the row: the same supplier,
+ * and the same SKU AND normalized name (a SKU key never covers a line that reads
+ * like something else — round 4), or for a name key the same normalized name.
+ * With `amountAgorot`, the line's |amount| must also be within the amount the
+ * key was learned at, plus the restaurant's price tolerance (round 4: an
+ * inflated "charge" is a question, never hidden).
+ */
+export function chargeKeyCovers(
+  rid: string,
+  supplierCol: SQL,
+  skuCol: SQL,
+  rawCol: SQL,
+  amountAgorot?: { col: SQL; pricePercent: number },
+): SQL {
+  const amount = amountAgorot
+    ? sql`and (ck ->> 'maxAbsAgorot') is not null
+          and abs(round((${amountAgorot.col})::numeric * 100)) <= floor((ck ->> 'maxAbsAgorot')::numeric * ${1 + amountAgorot.pricePercent}::numeric)`
+    : sql``;
   return sql`exists (
     select 1 from restaurants ckr, jsonb_array_elements(coalesce(ckr.settings -> 'chargeKeys', '[]'::jsonb)) ck
      where ckr.id = ${rid} and ck ->> 'supplierId' = (${supplierCol})::text
-       and case when ${skuCol} is not null then ck ->> 'sku' = ${skuCol}
+       and case when ${skuCol} is not null
+                then ck ->> 'sku' = ${skuCol} and (ck ->> 'nameKey') is not null and ck ->> 'nameKey' = ${normNameSql(rawCol)}
                 else (ck ->> 'sku') is null and ck ->> 'nameKey' = ${normNameSql(rawCol)} end
+       ${amount}
   )`;
 }
 
@@ -148,7 +168,12 @@ export async function pruneAnsweredReasons(db: Database, rid: string, invoiceIds
 export interface ChargeKey {
   supplierId: string;
   sku: string | null;
+  /** The normalized name — for a SKU key too (a SKU key covers only lines that read the same). */
   nameKey: string | null;
+  /** The human label it was answered on (shown in the mapper's learned list). */
+  rawName: string | null;
+  /** The largest |line total| (agorot) it was answered at; auto-marking stays within it + the price tolerance. Null = never auto-marks. */
+  maxAbsAgorot: number | null;
   by: string | null;
   at: string;
 }
@@ -167,6 +192,8 @@ export async function readChargeKeys(db: Database, rid: string): Promise<ChargeK
         supplierId: o.supplierId,
         sku: typeof o.sku === 'string' ? o.sku : null,
         nameKey: typeof o.nameKey === 'string' ? o.nameKey : null,
+        rawName: typeof o.rawName === 'string' ? o.rawName : null,
+        maxAbsAgorot: typeof o.maxAbsAgorot === 'number' ? o.maxAbsAgorot : null,
         by: typeof o.by === 'string' ? o.by : null,
         at: o.at,
       },
@@ -187,12 +214,22 @@ export async function applyLearnedCharges(
   rid: string,
   invoiceId: string,
 ): Promise<{ charged: number; released: boolean }> {
+  // Round 4: only within the amount the key was answered at (+ the restaurant's
+  // price tolerance); a duplicate copy is never charge-filtered.
+  const [r] = (await db.execute(sql`
+    select settings -> 'tolerances' as tol from restaurants where id = ${rid}
+  `)) as unknown as Array<{ tol: unknown }>;
+  const { pricePercent } = resolveTolerances((r?.tol ?? null) as Parameters<typeof resolveTolerances>[0]);
   const lines = (await db.execute(sql`
     select il.id, il.line_total, i.supplier_id from invoice_lines il
       join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid}
      where il.invoice_id = ${invoiceId}::uuid and il.product_id is null and ${IL_NOT_CHARGE}
        and i.supplier_id is not null
-       and ${chargeKeyCovers(rid, sql`i.supplier_id`, sql`il.supplier_sku`, sql`il.raw_description`)}
+       and (i.ocr_payload -> 'raw' -> 'duplicateOf') is null
+       and ${chargeKeyCovers(rid, sql`i.supplier_id`, sql`il.supplier_sku`, sql`il.raw_description`, {
+         col: sql`il.line_total`,
+         pricePercent,
+       })}
   `)) as unknown as Array<{ id: string; line_total: string; supplier_id: string }>;
   if (lines.length > 0) {
     const ids = lines.map((l) => String(l.id));
@@ -227,4 +264,80 @@ export function sumAbsIls(amounts: Array<string | number | null>): number {
   let ag = 0;
   for (const a of amounts) ag += Math.abs(Math.round(Number(a ?? 0) * 100));
   return ag / 100;
+}
+
+/**
+ * Learn (or widen) a charge key under the restaurant row lock (round 4 LOW-7:
+ * no lost update against another settings writer that also locks the row).
+ * One entry per (supplier, sku, nameKey); maxAbsAgorot keeps the largest amount
+ * a person answered "charge" at. Returns true when the key is new.
+ */
+export async function learnChargeKey(
+  db: Database,
+  rid: string,
+  key: { supplierId: string; sku: string | null; nameKey: string | null; rawName: string },
+  maxAbsAgorot: number | null,
+  by: string,
+): Promise<boolean> {
+  const [row] = (await db.execute(sql`
+    select coalesce(settings -> 'chargeKeys', '[]'::jsonb) as keys from restaurants where id = ${rid} for update
+  `)) as unknown as Array<{ keys: unknown }>;
+  const keys = (Array.isArray(row?.keys) ? (row!.keys as Array<Record<string, unknown>>) : []).slice();
+  const same = (k: Record<string, unknown>) =>
+    k.supplierId === key.supplierId && (k.sku ?? null) === key.sku && (k.nameKey ?? null) === key.nameKey;
+  const i = keys.findIndex(same);
+  const at = new Date().toISOString();
+  if (i >= 0) {
+    const prev = typeof keys[i]!.maxAbsAgorot === 'number' ? (keys[i]!.maxAbsAgorot as number) : null;
+    const next = prev == null ? maxAbsAgorot : maxAbsAgorot == null ? prev : Math.max(prev, maxAbsAgorot);
+    keys[i] = { ...keys[i], maxAbsAgorot: next, rawName: keys[i]!.rawName ?? key.rawName };
+  } else {
+    keys.push({ ...key, maxAbsAgorot, by, at });
+  }
+  await db.execute(sql`
+    update restaurants set settings = jsonb_set(settings, '{chargeKeys}', ${JSON.stringify(keys)}::jsonb, true)
+     where id = ${rid}
+  `);
+  return i < 0;
+}
+
+/** Forget a learned charge key (under the restaurant row lock). Returns true when one was removed. */
+export async function forgetChargeKey(
+  db: Database,
+  rid: string,
+  key: { supplierId: string; sku: string | null; nameKey: string | null },
+): Promise<boolean> {
+  const [row] = (await db.execute(sql`
+    select coalesce(settings -> 'chargeKeys', '[]'::jsonb) as keys from restaurants where id = ${rid} for update
+  `)) as unknown as Array<{ keys: unknown }>;
+  const keys = Array.isArray(row?.keys) ? (row!.keys as Array<Record<string, unknown>>) : [];
+  const kept = keys.filter(
+    (k) => !(k.supplierId === key.supplierId && (k.sku ?? null) === key.sku && (k.nameKey ?? null) === key.nameKey),
+  );
+  if (kept.length === keys.length) return false;
+  await db.execute(sql`
+    update restaurants set settings = jsonb_set(settings, '{chargeKeys}', ${JSON.stringify(kept)}::jsonb, true)
+     where id = ${rid}
+  `);
+  return true;
+}
+
+/**
+ * Round 4 LOW-8: an undo (link or charge) that leaves a held invoice with an
+ * unlinked, non-charge line again puts 'unlinked' back in its review reasons
+ * (union), so it is in the "awaiting question" bucket again.
+ */
+export async function restoreQuestionReason(db: Database, rid: string, invoiceIds: string[]): Promise<void> {
+  if (invoiceIds.length === 0) return;
+  await db.execute(sql`
+    update invoices i
+       set ocr_payload = jsonb_set(coalesce(i.ocr_payload, '{}'::jsonb), '{raw}',
+             coalesce(i.ocr_payload -> 'raw', '{}'::jsonb) || jsonb_build_object('reviewReasons',
+               coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) || '["unlinked"]'::jsonb), true)
+     where i.restaurant_id = ${rid}
+       and i.id in (${sql.join([...new Set(invoiceIds)].map((id) => sql`${id}::uuid`), sql`, `)})
+       and i.status = 'parsed'
+       and not (coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ? 'unlinked')
+       and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${IL_NOT_CHARGE})
+  `);
 }

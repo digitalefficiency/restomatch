@@ -38,7 +38,7 @@ export const en = {
     pending: 'Awaiting a decision: {amount}',
     toApprovals: 'To the approvals queue',
     toQuestions: 'To the questions',
-    openInvoice: 'Open invoice',
+    openInvoice: 'Open the invoice',
   },
   supplier: {
     subtotal: 'Supplier subtotal',

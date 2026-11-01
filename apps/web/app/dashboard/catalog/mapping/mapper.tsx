@@ -181,14 +181,16 @@ function ChargeKeys() {
           <li key={`${k.supplierId}:${k.sku ?? ''}:${k.nameKey ?? ''}`} className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex flex-wrap items-center gap-2 text-sm text-ink">
               <Badge>{k.supplierName}</Badge>
-              {k.sku ? <span className="font-mono">{t('mapping.sku', { sku: k.sku })}</span> : <span>{k.nameKey}</span>}
+              <span>{k.rawName ?? k.nameKey}</span>
+              {k.sku ? <span className="font-mono text-subtle">{t('mapping.sku', { sku: k.sku })}</span> : null}
             </span>
             <Button
               size="sm"
               variant="ghost"
-              loading={remove.isPending}
-              aria-label={t('mapping.chargeKeyRemoveLabel', { name: k.sku ?? k.nameKey ?? '' })}
-              onClick={() => remove.mutate({ supplierId: k.supplierId, sku: k.sku, nameKey: k.nameKey })}
+              loading={remove.isPending && remove.variables?.supplierId === k.supplierId && remove.variables?.nameKey === k.nameKey && remove.variables?.sku === k.sku}
+              aria-label={t('mapping.chargeKeyRemoveLabel', { name: k.rawName ?? k.nameKey ?? k.sku ?? '' })}
+              disabled={!k.nameKey}
+              onClick={() => k.nameKey && remove.mutate({ supplierId: k.supplierId, sku: k.sku, nameKey: k.nameKey })}
             >
               {t('mapping.chargeKeyRemove')}
             </Button>

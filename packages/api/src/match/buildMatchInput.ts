@@ -33,6 +33,7 @@ import { addCalendarDaysInTz, endOfDayInTz, startOfDayInTz } from '../lib/time';
 import { featureEnabled } from '../lib/features';
 import { applyContractPrices } from '../contracts/load';
 import { localDateKey } from '../contracts/core';
+import { chargeKeyCovers } from '../catalog/linkQuestions';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 
@@ -154,6 +155,38 @@ export async function buildMatchInputForInvoice(
       ? heldDuplicate.invoiceId
       : null;
 
+  // ── Known invoice numbers for the supplier (duplicate detection). ──
+  let knownInvoiceNumbers: Set<string> | undefined;
+  if (inv.supplierId) {
+    const rows = await db
+      .select({ invoiceNumber: invoices.invoiceNumber })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.restaurantId, restaurantId),
+          eq(invoices.supplierId, inv.supplierId),
+          ne(invoices.id, invoiceId),
+          // Only invoices that arrived BEFORE this one: re-matching the original
+          // after its duplicate shows up must not flag the original too (the
+          // pair would otherwise both be blocked and the total counted twice).
+          // Ties (same-batch inserts) break on id so exactly one of a pair flags.
+          or(
+            lt(invoices.createdAt, inv.createdAt),
+            and(eq(invoices.createdAt, inv.createdAt), lt(invoices.id, invoiceId)),
+            ...(heldDuplicateOfId ? [eq(invoices.id, heldDuplicateOfId)] : []),
+          ),
+        ),
+      );
+    knownInvoiceNumbers = new Set(
+      rows.map((r) => normalizeInvoiceNumber(r.invoiceNumber)).filter((n): n is string => !!n),
+    );
+  }
+
+  // G-08 charge (round 4): a duplicate copy is never charge-filtered — its
+  // DUPLICATE_INVOICE ₪ is the whole printed invoice, charges included.
+  const normalizedNumber = normalizeInvoiceNumber(invoiceNumber);
+  const isDuplicate = !!normalizedNumber && (knownInvoiceNumbers?.has(normalizedNumber) ?? false);
+
   const invLineRows = await db
     .select({
       id: invoiceLines.id,
@@ -174,9 +207,20 @@ export async function buildMatchInputForInvoice(
   // them UNORDERED_ITEM. They stay out of the engine input, and the invoice totals
   // passed in are reduced by exactly their amounts (below), so TOTAL / VAT checks
   // stay reconciled. No charge line ⇒ byte-identical input to before.
-  const chargeIds = readChargeLineIds(inv.ocrPayload);
-  const chargeRows = invLineRows.filter((l) => chargeIds.has(l.id));
-  const productRows = chargeRows.length > 0 ? invLineRows.filter((l) => !chargeIds.has(l.id)) : invLineRows;
+  const chargeIds = isDuplicate ? new Set<string>() : readChargeLineIds(inv.ocrPayload);
+  let chargeRows = invLineRows.filter((l) => chargeIds.has(l.id));
+  let productRows = chargeRows.length > 0 ? invLineRows.filter((l) => !chargeIds.has(l.id)) : invLineRows;
+  // Round 4: "every line a charge" only when the charges ARE the invoice — a
+  // printed subtotal still > 10 agorot away from them is checked like any
+  // invoice (all lines, the printed header), never a silent ₪0.
+  if (chargeRows.length > 0 && productRows.length === 0 && inv.totalExclVat != null) {
+    let netAg = 0;
+    for (const l of chargeRows) netAg += Math.round(num(l.lineTotal) * 100);
+    if (Math.abs(Math.round(num(inv.totalExclVat) * 100) - netAg) > 10) {
+      chargeRows = [];
+      productRows = invLineRows;
+    }
+  }
   // Every line a charge (a deposit-only slip): nothing to compare — matched clean
   // (round 3 LOW). No PO is discovered: an empty engine input yields no finding.
   const allCharge = productRows.length === 0;
@@ -301,10 +345,22 @@ export async function buildMatchInputForInvoice(
         qtyOrdered: poLines.qtyOrdered,
         unit: poLines.unit,
         unitPriceExpected: poLines.unitPriceExpected,
+        // G-08 charge (round 4 HIGH): an order line a learned charge key covers
+        // ("משלוח") is not a product — it could never pair and would read MISSING.
+        charge: inv.supplierId
+          ? sql<boolean>`("po_lines"."product_id" is null and ${chargeKeyCovers(
+              restaurantId,
+              sql`${inv.supplierId}::uuid`,
+              sql.raw('"po_lines"."supplier_sku"'),
+              sql.raw('"po_lines"."raw_description"'),
+            )})`
+          : sql<boolean>`false`,
+        // …and a blank name-only order line is never a question nor a product (round 4).
+        blank: sql<boolean>`("po_lines"."product_id" is null and "po_lines"."supplier_sku" is null and coalesce(btrim("po_lines"."raw_description"), '') = '')`,
       })
       .from(poLines)
       .where(eq(poLines.poId, po.id));
-    poLineInputs = poLineRows.map((p) => ({
+    poLineInputs = poLineRows.filter((p) => p.charge !== true && p.blank !== true).map((p) => ({
       id: p.id,
       productId: p.productId,
       supplierSku: p.supplierSku,
@@ -372,33 +428,6 @@ export async function buildMatchInputForInvoice(
   const vatRate = firstVatRate(po?.vatRate ?? null, supplierVatRate, restaurant?.vatRate ?? null);
   const baselineWindow = restaurant?.settings?.baselineWindowDays ?? DEFAULT_BASELINE_WINDOW_DAYS;
 
-  // ── Known invoice numbers for the supplier (duplicate detection). ──
-  let knownInvoiceNumbers: Set<string> | undefined;
-  if (inv.supplierId) {
-    const rows = await db
-      .select({ invoiceNumber: invoices.invoiceNumber })
-      .from(invoices)
-      .where(
-        and(
-          eq(invoices.restaurantId, restaurantId),
-          eq(invoices.supplierId, inv.supplierId),
-          ne(invoices.id, invoiceId),
-          // Only invoices that arrived BEFORE this one: re-matching the original
-          // after its duplicate shows up must not flag the original too (the
-          // pair would otherwise both be blocked and the total counted twice).
-          // Ties (same-batch inserts) break on id so exactly one of a pair flags.
-          or(
-            lt(invoices.createdAt, inv.createdAt),
-            and(eq(invoices.createdAt, inv.createdAt), lt(invoices.id, invoiceId)),
-            ...(heldDuplicateOfId ? [eq(invoices.id, heldDuplicateOfId)] : []),
-          ),
-        ),
-      );
-    knownInvoiceNumbers = new Set(
-      rows.map((r) => normalizeInvoiceNumber(r.invoiceNumber)).filter((n): n is string => !!n),
-    );
-  }
-
   // ── Price baselines per product (supplier-specific preferred over global). ──
   const productIds = [
     ...new Set(
@@ -465,7 +494,7 @@ export async function buildMatchInputForInvoice(
     invoice: {
       // Normalized (see normalizeInvoiceNumber) — the engine only uses it for
       // duplicate detection + its message, and compares it to the known set.
-      invoiceNumber: normalizeInvoiceNumber(invoiceNumber) ?? '',
+      invoiceNumber: normalizedNumber ?? '',
       invoiceDate,
       supplierId: inv.supplierId ?? '',
       totalExclVat,

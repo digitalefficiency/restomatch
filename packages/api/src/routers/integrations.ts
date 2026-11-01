@@ -44,12 +44,18 @@ type IntegrationSettings = RestaurantSettings & {
   integrations?: { accounting?: Partial<AccountingConfig> };
 };
 
-async function loadSettings(db: import('@restomatch/db').Database, restaurantId: string) {
-  const [row] = await db
+async function loadSettings(
+  db: import('@restomatch/db').Database,
+  restaurantId: string,
+  /** Read-modify-write: lock the row so a concurrent settings writer (e.g. G-08's learned charge keys) is not lost. */
+  forUpdate = false,
+) {
+  const q = db
     .select({ settings: restaurants.settings })
     .from(restaurants)
     .where(eq(restaurants.id, restaurantId))
     .limit(1);
+  const [row] = forUpdate ? await q.for('update') : await q;
   return (row?.settings ?? {}) as IntegrationSettings;
 }
 
@@ -206,7 +212,7 @@ export const integrationsRouter = router({
       const supplierAccounts = Object.fromEntries(
         Object.entries(input.supplierAccounts).filter(([, code]) => code.length > 0),
       );
-      const current = await loadSettings(ctx.db, ctx.session.restaurantId);
+      const current = await loadSettings(ctx.db, ctx.session.restaurantId, true); // G-08: row lock
       const next: IntegrationSettings = {
         ...current,
         integrations: {

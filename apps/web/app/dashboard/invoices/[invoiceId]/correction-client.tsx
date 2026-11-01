@@ -111,6 +111,11 @@ export function InvoiceCorrection({
     },
     onError: onErr,
   });
+  // G-08 charge (round 4): a wrong "שורת חיוב" mark is reversible here, any time.
+  const unCharge = trpc.mapping.markCharge.useMutation({
+    onSuccess: () => onOk(t('correction.chargeUndone')),
+    onError: onErr,
+  });
   const runMatch = trpc.match.runForInvoice.useMutation({
     onSuccess: (res) => {
       setRematch(res);
@@ -181,9 +186,14 @@ export function InvoiceCorrection({
     <div className="space-y-6">
       {error && (
         <div
-          role="alert"
+          // G-08 (round 4): an open question is a neutral T4 note, not an alarm.
+          role={openQuestions ? 'status' : 'alert'}
           data-testid="correction-error"
-          className="rounded-md border-s-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
+          className={
+            openQuestions
+              ? 'rounded-md border-s-4 border-line bg-surface-2 px-3 py-2 text-sm text-ink'
+              : 'rounded-md border-s-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger'
+          }
         >
           {error}
           {openQuestions ? (
@@ -362,6 +372,27 @@ export function InvoiceCorrection({
                           : l.charge.byName
                             ? t('correction.chargeBy', { name: l.charge.byName })
                             : t('correction.charge')}
+                        {canEdit && invoice.supplierId ? (
+                          <>
+                            {' '}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              loading={unCharge.isPending}
+                              data-testid="invoice-line-uncharge"
+                              onClick={() =>
+                                unCharge.mutate({
+                                  supplierId: invoice.supplierId!,
+                                  ...(l.supplierSku ? { supplierSku: l.supplierSku } : {}),
+                                  rawName: l.rawDescription,
+                                  undo: { invoiceLineIds: [l.id] },
+                                })
+                              }
+                            >
+                              {t('correction.notCharge')}
+                            </Button>
+                          </>
+                        ) : null}
                       </p>
                     ) : null}
                   </td>

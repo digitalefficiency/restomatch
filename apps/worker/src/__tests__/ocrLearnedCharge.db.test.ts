@@ -32,7 +32,7 @@ beforeEach(async () => {
   // Last week's answer, learned (mapping.markCharge).
   await db
     .update(restaurants)
-    .set({ settings: { chargeKeys: [{ supplierId, sku: null, nameKey: 'פיקדון ארגזים', by: null, at: '2026-10-24T08:00:00Z' }] } as never })
+    .set({ settings: { chargeKeys: [{ supplierId, sku: null, nameKey: 'פיקדון ארגזים', rawName: 'פיקדון ארגזים', maxAbsAgorot: 1000, by: null, at: '2026-10-24T08:00:00Z' }] } as never })
     .where(eq(restaurants.id, restaurantId));
 });
 afterAll(cleanup);
