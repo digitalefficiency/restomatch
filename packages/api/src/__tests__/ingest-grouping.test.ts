@@ -1016,14 +1016,15 @@ describe('round-3 LOW items', () => {
 
 /* ───────────────────────── round 4 ───────────────────────── */
 
-const L5 = [
+const L5: LineIn[] = [
   { qty: '5', total: '120.00', desc: 'חלב תנובה 3% קרטון', unitPrice: '24.00' },
   { qty: '2', total: '30.00', desc: 'לחם אחיד פרוס', unitPrice: '15.00' },
   { qty: '10', total: '45.00', desc: 'ביצים L תבנית', unitPrice: '4.50' },
   { qty: '1', total: '80.00', desc: 'גבינה צהובה עמק 1 קג', unitPrice: '80.00' },
   { qty: '3', total: '27.00', desc: 'יוגורט דנונה 1.5%', unitPrice: '9.00' },
 ];
-type Head = Partial<PageHeader> & { lines?: typeof L5; totalExclVat?: string | null; totalInclVat?: string | null; number?: string | null };
+type LineIn = { qty: string; total: string; desc: string; unitPrice?: string };
+type Head = Partial<PageHeader> & { lines?: LineIn[]; totalExclVat?: string | null; totalInclVat?: string | null; number?: string | null };
 const H = (id: string, h: Head = {}): PageHeader => ({
   invoiceId: id,
   status: 'matched',
@@ -1042,7 +1043,7 @@ const H = (id: string, h: Head = {}): PageHeader => ({
   },
 });
 const TNUVA = { supplierName: 'תנובה בע"מ', businessId: '510001234' };
-const OTHERL = [
+const OTHERL: LineIn[] = [
   { qty: '7', total: '210.00', desc: 'קמח לבן 25 קג' },
   { qty: '4', total: '64.00', desc: 'שמן קנולה 4 ליטר' },
 ];
@@ -1081,7 +1082,7 @@ describe('round 4 · decidePages (pure): in doubt, a person — never a merge', 
 
   it('HIGH-1: an unpriced signed delivery note of the same items is never merged into the invoice', () => {
     const note = L5.map((l) => ({ qty: l.qty, total: '', desc: l.desc }));
-    expect(verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { lines: note as typeof L5 })])).toEqual({
+    expect(verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { lines: note })])).toEqual({
       merged: [],
       flagged: [{ invoiceId: 'p2', reason: 'page_not_merged' }],
     });
@@ -1119,7 +1120,7 @@ describe('round 4 · decidePages (pure): in doubt, a person — never a merge', 
     const complete = { lines: OTHERL, totalExclVat: '274.00' };
     expect(verdict([H('p1', { ...TNUVA, ...complete }), H('p2', { lines: L5.slice(0, 1) })]).merged).toEqual([]);
     expect(verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { ...complete })])).toEqual({ merged: [], flagged: [] });
-    const credit = [{ qty: '1', total: '-50.00', desc: 'זיכוי החזרה' }];
+    const credit: LineIn[] = [{ qty: '1', total: '-50.00', desc: 'זיכוי החזרה' }];
     expect(verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { lines: credit })]).merged).toEqual([]);
   });
 
@@ -1154,8 +1155,8 @@ describe('round 4 · DB', () => {
   it('HIGH-3: deleting the copy that HOLDS the number moves the number to the kept page 1 and matches it', async () => {
     const [keep, copy] = await pages(2, 'r4k');
     const L = [{ qty: '6', total: '66.00', desc: 'פלפל אדום' }];
-    await writeOcr(copy, { ...ACME, invoiceNumber: 'A-990', lines: L }); // read first, took the number
-    await writeOcr(keep, { ...ACME, duplicateOf: { invoiceId: copy!, invoiceNumber: 'A-990' }, lines: L });
+    await writeOcr(copy!, { ...ACME, invoiceNumber: 'A-990', lines: L }); // read first, took the number
+    await writeOcr(keep!, { ...ACME, duplicateOf: { invoiceId: copy!, invoiceNumber: 'A-990' }, lines: L });
     const s = await settle(keep!);
     expect(s.flagged).toEqual([{ invoiceId: copy, reason: 'page_duplicate' }]);
     const [dCopy] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, copy!));
