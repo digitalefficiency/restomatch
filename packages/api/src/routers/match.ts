@@ -1,12 +1,14 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { releaseClaimsForRematch } from '../recovery/service';
-import { and, desc, eq, invoices, matchRuns, restaurants } from '@restomatch/db';
+import { and, desc, eq, invoices, matchRuns, restaurants, sql } from '@restomatch/db';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
 import { managerProcedure, router } from '../trpc';
 import { assertInvoiceOwned } from '../tenant';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 import { readConsolidatedRaw } from '../match/consolidated';
+import { appError } from '../errors';
+import { invoiceQuestionCount, orderQuestionCount } from '../catalog/linkQuestions';
 import { loadPriorDecisions, persistMatchRun } from '../match/persist';
 import { buildRules, resolveApprovalThresholds } from '../approvals/engine';
 
@@ -49,6 +51,15 @@ export const matchRouter = router({
         });
       }
 
+      // G-08 hold: an unlinked line is an open "זה אותו מוצר?" question — the engine
+      // pairs only by product / SKU and would report a false MISSING + UNORDERED pair.
+      const open = await invoiceQuestionCount(ctx.db, restaurantId, input.invoiceId);
+      if (open > 0) {
+        throw appError('PRECONDITION_FAILED', 'invoice.unlinkedLines', 'Invoice lines are not linked to a product yet.', {
+          count: open,
+        });
+      }
+
       // A re-match checks against the PO the invoice was already matched to, even
       // once that PO is received/closed (discovery only looks at open POs).
       const [priorRun] = await ctx.db
@@ -60,6 +71,17 @@ export const matchRouter = router({
       const built = await buildMatchInputForInvoice(ctx.db, restaurantId, input.invoiceId, {
         pinnedPoId: priorRun?.poId ?? null,
       });
+      // G-08 hold (round 3 HIGH): a FIRST match against an order that still has
+      // name-only questions would report a false MISSING + UNORDERED pair — the
+      // same rule as the match-invoice job's M-4 hold (shared helper).
+      if (built && built.poId && !priorRun) {
+        const orderOpen = await orderQuestionCount(ctx.db, restaurantId, built.poId);
+        if (orderOpen > 0) {
+          throw appError('PRECONDITION_FAILED', 'order.unlinkedLines', 'Order lines are not linked to a product yet.', {
+            count: orderOpen,
+          });
+        }
+      }
       if (!built) {
         return {
           matchRunId: null,
@@ -97,6 +119,11 @@ export const matchRouter = router({
         rules,
         priorDecisions,
       );
+      // G-08 hold: a matched invoice no longer waits for an order — drop a stale marker.
+      await ctx.db.execute(sql`
+        update invoices set ocr_payload = ocr_payload - 'heldPoId'
+         where id = ${input.invoiceId}::uuid and restaurant_id = ${restaurantId} and ocr_payload ? 'heldPoId'
+      `);
 
       return {
         matchRunId: persisted.matchRunId,

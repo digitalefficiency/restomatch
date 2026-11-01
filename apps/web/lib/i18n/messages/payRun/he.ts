@@ -16,6 +16,8 @@ export const he = {
     hold: 'להשהות — ממתין להחלטה',
     holdLink: 'ממתינה לשיוך להזמנה',
     holdCount: 'ממתינה לספירת קבלת הסחורה',
+    holdQuestion: 'מחכה לשאלה: זה אותו מוצר?',
+    holdReview: 'לבדיקה',
     holdDuplicate: 'להשהות — עותק כפול, לא לשלם',
     claim: 'לבקש זיכוי {amount}',
   },
@@ -38,7 +40,8 @@ export const he = {
     action: 'פעולה',
     pending: 'ממתין להחלטה: {amount}',
     toApprovals: 'לתור האישורים',
-    openInvoice: 'פתח חשבונית',
+    toQuestions: 'לשאלות',
+    openInvoice: 'פתיחת החשבונית',
   },
   supplier: {
     subtotal: 'ביניים לספק',

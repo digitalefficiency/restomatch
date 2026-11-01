@@ -6,7 +6,9 @@ import {
   invoices,
   matchRuns,
   discrepancies,
+  eq,
   memberships,
+  sql,
   poLines,
   priceBaselines,
   priceHistory,
@@ -29,6 +31,8 @@ import {
   matchProductTopN,
 } from '../matcher';
 import { recordConfirmedMatch } from '../learning';
+import { normalizeLinkName } from '../linkPolicy';
+import { normNameSql } from '../normName';
 
 const TEST_DB_URL =
   testDbUrl();
@@ -198,6 +202,20 @@ describe('matchByAlias', () => {
     expect(match).toBeNull();
   });
 
+  it('G-08: returns the STORED confidence and its provenance, not a hard-coded 1.0', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    for (const [name, confidence, expected, provenance] of [
+      ['guess-alias', '0.900', 0.9, 'guess'],
+      ['human-alias', '1.000', 1, 'human'],
+      ['machine-alias', '0.999', 0.999, 'exactKey'],
+      ['legacy-alias', '0.970', 0.97, 'legacy'],
+    ] as const) {
+      await db.insert(productAliases).values({ productId: tomato.id, supplierId, supplierNameRaw: name, confidence });
+      const match = await matchByAlias(db, restaurantId, supplierId, name);
+      expect(match).toMatchObject({ matchedBy: 'alias', confidence: expected, provenance });
+    }
+  });
+
   it('returns null when supplier does not match', async () => {
     const { tomato } = await seedRestaurantWithProducts();
     await db.insert(productAliases).values({
@@ -236,6 +254,32 @@ describe('matchByAlias', () => {
 });
 
 describe('matchBySku (מק״ט, strategy-0)', () => {
+  it('G-08: an alias SKU hit carries the stored confidence + provenance; a catalog-item SKU hit is 0.999', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    await db.insert(productAliases).values({
+      productId: tomato.id,
+      supplierId,
+      supplierSku: 'G08-GUESS',
+      supplierNameRaw: 'ניחוש',
+      confidence: '0.900',
+    });
+    expect(await matchBySku(db, restaurantId, supplierId, 'G08-GUESS')).toMatchObject({
+      matchedBy: 'sku',
+      confidence: 0.9,
+      provenance: 'guess',
+    });
+    await db.insert(supplierCatalogItems).values({
+      restaurantId,
+      supplierId,
+      productId: tomato.id,
+      supplierSku: 'G08-ITEM',
+      supplierNameRaw: 'פריט מחירון',
+    });
+    const item = await matchBySku(db, restaurantId, supplierId, 'G08-ITEM');
+    expect(item).toMatchObject({ matchedBy: 'sku', confidence: 0.999 });
+    expect(item?.provenance).toBeUndefined();
+  });
+
   it('finds product by exact (supplier, sku) via product_aliases', async () => {
     const { tomato } = await seedRestaurantWithProducts();
     await db.insert(productAliases).values({
@@ -685,6 +729,20 @@ describe('matchProduct (composite)', () => {
 });
 
 describe('matchProductTopN', () => {
+  it('G-08: an identical normalized name for the SAME supplier is an exact key; another supplier gets no link', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    await linkProductsToSupplier(supplierId, [tomato.id]);
+    const same = await matchProductTopN(db, { restaurantId, supplierId, rawDescription: '  עגבניה   שרי ' }, 3);
+    expect(same[0]).toMatchObject({ productId: tomato.id, matchedBy: 'fuzzy', provenance: 'exactKey' });
+    expect(same[0]!.confidence).toBeGreaterThanOrEqual(0.999);
+    // A longer, merely similar name stays a guess.
+    const similar = await matchProductTopN(db, { restaurantId, supplierId, rawDescription: 'עגבניה שרי תמר' }, 3);
+    expect(similar.find((c) => c.productId === tomato.id)?.provenance).toBeUndefined();
+    // Same name, a supplier that does not sell it: no candidate at all (false-leak guard).
+    const other = await matchProductTopN(db, { restaurantId, supplierId: altSupplierId, rawDescription: 'עגבניה שרי' }, 3);
+    expect(other).toEqual([]);
+  });
+
   it('returns multiple candidates ranked by confidence', async () => {
     const { tomato, cucumber, lettuce } = await seedRestaurantWithProducts();
     await linkProductsToSupplier(supplierId, [tomato.id, cucumber.id, lettuce.id]);
@@ -815,6 +873,7 @@ describe('recordConfirmedMatch (learning loop)', () => {
       productId: tomato.id,
       supplierId,
       rawName: 'cherry tomatoes 1kg',
+      provenance: 'human',
     });
     expect(result.created).toBe(true);
     expect(result.aliasId).toBeTruthy();
@@ -831,6 +890,7 @@ describe('recordConfirmedMatch (learning loop)', () => {
       productId: tomato.id,
       supplierId,
       rawName: 'עגבניה שרי קילו',
+      provenance: 'human',
     });
     expect(first.created).toBe(true);
     expect(await matchBySku(db, restaurantId, supplierId, '300099')).toBeNull();
@@ -841,6 +901,7 @@ describe('recordConfirmedMatch (learning loop)', () => {
       supplierId,
       rawName: 'עגבניה שרי קילו',
       supplierSku: '300099',
+      provenance: 'human',
     });
     expect(second.created).toBe(false);
     expect(second.aliasId).toBe(first.aliasId);
@@ -856,7 +917,7 @@ describe('recordConfirmedMatch (learning loop)', () => {
       productId: tomato.id,
       supplierId,
       rawName: 'cherry tomato',
-      confidence: 0.7,
+      provenance: 'exactKey',
     });
     expect(first.created).toBe(true);
 
@@ -864,10 +925,42 @@ describe('recordConfirmedMatch (learning loop)', () => {
       productId: tomato.id,
       supplierId,
       rawName: 'cherry tomato',
-      confidence: 1.0,
+      provenance: 'human',
     });
     expect(second.created).toBe(false);
     expect(second.aliasId).toBe(first.aliasId);
+    const [row] = await db
+      .select({ confidence: productAliases.confidence })
+      .from(productAliases)
+      .where(eq(productAliases.id, first.aliasId));
+    expect(row?.confidence).toBe('1.000');
+  });
+
+  it('G-08: a machine re-learn never downgrades a person\'s 1.000', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    const first = await recordConfirmedMatch(db, { productId: tomato.id, supplierId, rawName: 'שרי', provenance: 'human' });
+    await recordConfirmedMatch(db, { productId: tomato.id, supplierId, rawName: 'שרי', provenance: 'newProduct' });
+    const [row] = await db
+      .select({ confidence: productAliases.confidence })
+      .from(productAliases)
+      .where(eq(productAliases.id, first.aliasId));
+    expect(row?.confidence).toBe('1.000');
+  });
+
+  it('G-08: provenance maps to the interim encoding (human 1.000, exactKey/newProduct 0.999)', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    for (const [rawName, provenance, expected] of [
+      ['p-human', 'human', '1.000'],
+      ['p-exact', 'exactKey', '0.999'],
+      ['p-new', 'newProduct', '0.999'],
+    ] as const) {
+      const r = await recordConfirmedMatch(db, { productId: tomato.id, supplierId, rawName, provenance });
+      const [row] = await db
+        .select({ confidence: productAliases.confidence })
+        .from(productAliases)
+        .where(eq(productAliases.id, r.aliasId));
+      expect(row?.confidence).toBe(expected);
+    }
   });
 
   it('integration: scan-confirm-rescan finds via alias on second run', async () => {
@@ -887,6 +980,7 @@ describe('recordConfirmedMatch (learning loop)', () => {
         productId: tomato.id,
         supplierId,
         rawName: 'עגבניה אורגנית',
+        provenance: 'human',
       });
     } else {
       // simulate the user confirming the suggested match
@@ -894,6 +988,7 @@ describe('recordConfirmedMatch (learning loop)', () => {
         productId: first.productId,
         supplierId,
         rawName: 'עגבניה אורגנית',
+        provenance: 'human',
       });
     }
 
@@ -905,5 +1000,40 @@ describe('recordConfirmedMatch (learning loop)', () => {
     });
     expect(second?.matchedBy).toBe('alias');
     expect(second?.confidence).toBe(1);
+  });
+});
+
+describe('G-08 name normalization — SQL ≡ JS (MEDIUM-1) and one alias for every spelling (MEDIUM-4)', () => {
+  it.each([
+    ['פלפל\u00a0אדום'],
+    ['פלפל\u2009אדום'],
+    ['פלפל\u202fאדום\u2007חריף'],
+    ['\ufeffפלפל אדום'],
+    ['  פלפל   אדום  '],
+    ['חלב 1 ל״ט'],
+    ['חלב 1 ל"ט'],
+    ['Cherry\tTomato'],
+  ])('normNameSql(%j) equals normalizeLinkName', async (raw) => {
+    const [r] = (await db.execute(sql`select ${normNameSql(sql`${raw}::text`)} as n`)) as unknown as Array<{ n: string }>;
+    expect(r!.n).toBe(normalizeLinkName(raw));
+  });
+
+  it('an alias learned on one spelling answers the others (NBSP, double space, gershayim)', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    await recordConfirmedMatch(db, { productId: tomato.id, supplierId, rawName: 'עגבניה שרי 1 ק"ג', provenance: 'human' });
+    for (const variant of ['עגבניה\u00a0שרי 1 ק״ג', 'עגבניה  שרי 1 ק"ג', ' עגבניה שרי\u20091 ק״ג ']) {
+      expect(await matchByAlias(db, restaurantId, supplierId, variant)).toMatchObject({ productId: tomato.id, matchedBy: 'alias' });
+    }
+  });
+
+  it('recordConfirmedMatch on another spelling updates the SAME alias and reports its previous confidence', async () => {
+    const { tomato } = await seedRestaurantWithProducts();
+    await db.insert(productAliases).values({ productId: tomato.id, supplierId, supplierNameRaw: 'שרי  ארוז', confidence: '0.950' });
+    const r = await recordConfirmedMatch(db, { productId: tomato.id, supplierId, rawName: 'שרי ארוז', provenance: 'exactKey' });
+    expect(r).toMatchObject({ created: false, previousConfidence: '0.950' });
+    const rows = await db.select().from(productAliases).where(eq(productAliases.productId, tomato.id));
+    expect(rows.filter((x) => normalizeLinkName(x.supplierNameRaw) === 'שרי ארוז')).toHaveLength(1);
+    const created = await recordConfirmedMatch(db, { productId: tomato.id, supplierId, rawName: 'חדש', provenance: 'human' });
+    expect(created.previousConfidence).toBeNull();
   });
 });

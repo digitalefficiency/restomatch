@@ -168,6 +168,33 @@ describe('payRun.month', () => {
     }
   });
 
+  it('G-08: an invoice OCR held for a person with no question open reads "לבדיקה" (T4), never "waiting to be linked"; the bookkeeper gets no mapper CTA', async () => {
+    const [held] = await ownerDb
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber: 'INV-PA-REVIEW',
+        invoiceDate: new Date(),
+        totalExclVat: '40.00',
+        vatAmount: '7.20',
+        totalInclVat: '47.20',
+        status: 'parsed',
+        source: 'photo',
+        ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['confidence'] } } as never,
+      })
+      .returning();
+    try {
+      const r = await asA().payRun.month();
+      const row = r.suppliers.flatMap((x) => x.invoices).find((i) => i.invoiceId === held!.id)!;
+      expect(row).toMatchObject({ status: 'hold', awaitingReview: true, awaitingQuestion: false, pendingLink: false });
+      expect(r.canAnswer).toBe(true);
+      expect((await asA('bookkeeper').payRun.month()).canAnswer).toBe(false);
+    } finally {
+      await ownerDb.delete(invoices).where(eq(invoices.id, held!.id));
+    }
+  });
+
   it('an unmatched consolidated invoice is listed as "waiting to be linked" (T4), outside pay / hold ₪', async () => {
     const [extra] = await ownerDb
       .insert(invoices)

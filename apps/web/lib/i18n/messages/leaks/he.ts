@@ -194,6 +194,8 @@ export const he = {
     noSpend: 'אין חשבוניות שנבדקו בחודש זה',
     compareSpan: '{current} מול {previous}',
     pending: '{count} חשבוניות ({amount}) ממתינות לשיוך להזמנה ואינן כלולות.',
+    awaitingQuestion: '{count} חשבוניות ({amount}) מחכות לשאלה: זה אותו מוצר? הן אינן כלולות עד התשובה.',
+    awaitingQuestionCta: 'לשאלות',
     statusTitle: 'מה קרה לכסף',
     found: 'נמצא',
     foundHint: 'סכום שורות הפער החודש',

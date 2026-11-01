@@ -58,6 +58,8 @@ export function InvoiceCorrection({
   const unit = useUnitLabel();
   const money = (v: number) => formatIls(v, { maximumFractionDigits: 2, locale });
   const [error, setError] = useState<string | null>(null);
+  // G-08 hold: the re-match was refused for open "זה אותו מוצר?" questions.
+  const [openQuestions, setOpenQuestions] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
   const [rematch, setRematch] = useState<MatchResult | null>(null);
   /** The invoice that already carries the number the user tried to save. */
@@ -109,13 +111,25 @@ export function InvoiceCorrection({
     },
     onError: onErr,
   });
+  // G-08 charge (round 4): a wrong "שורת חיוב" mark is reversible here, any time.
+  const unCharge = trpc.mapping.markCharge.useMutation({
+    onSuccess: () => onOk(t('correction.chargeUndone')),
+    onError: onErr,
+  });
   const runMatch = trpc.match.runForInvoice.useMutation({
     onSuccess: (res) => {
       setRematch(res);
       setError(null);
+      setOpenQuestions(false);
       router.refresh();
     },
-    onError: onErr,
+    onError: (e) => {
+      // G-08 hold: unlinked lines → the questions, not a raw failure.
+      const code = (e as { data?: { appCode?: unknown } | null }).data?.appCode;
+      setOpenQuestions(code === 'invoice.unlinkedLines' || code === 'order.unlinkedLines');
+      setError(localizeServerError(e, locale, t('correction.failed')));
+      setSaved(null);
+    },
   });
 
   function saveHeader() {
@@ -172,11 +186,28 @@ export function InvoiceCorrection({
     <div className="space-y-6">
       {error && (
         <div
-          role="alert"
+          // G-08 (round 4): an open question is a neutral T4 note, not an alarm.
+          role={openQuestions ? 'status' : 'alert'}
           data-testid="correction-error"
-          className="rounded-md border-s-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger"
+          className={
+            openQuestions
+              ? 'rounded-md border-s-4 border-line bg-surface-2 px-3 py-2 text-sm text-ink'
+              : 'rounded-md border-s-4 border-danger bg-danger/5 px-3 py-2 text-sm text-danger'
+          }
         >
           {error}
+          {openQuestions ? (
+            <>
+              {' '}
+              <Link
+                href="/dashboard/catalog/mapping"
+                data-testid="open-questions-link"
+                className="font-semibold underline underline-offset-2"
+              >
+                {t('correction.openQuestions')}
+              </Link>
+            </>
+          ) : null}
           {holderId ? (
             <>
               {' '}
@@ -323,7 +354,8 @@ export function InvoiceCorrection({
                   key={l.id}
                   // Deep-link target (#line-<id>) from the leak proof sheet: highlighted when targeted.
                   id={`line-${l.id}`}
-                  className="scroll-mt-28 border-b border-line/60 last:border-0 hover:bg-surface-2/60 target:bg-surface-2 target:ring-2 target:ring-inset target:ring-primary/50"
+                  className={`scroll-mt-28 border-b border-line/60 last:border-0 hover:bg-surface-2/60 target:bg-surface-2 target:ring-2 target:ring-inset target:ring-primary/50${l.charge ? ' bg-surface-2/60 text-muted' : ''}`}
+                  data-charge={l.charge ? 'true' : undefined}
                 >
                   <td className="px-4 py-3 text-ink">
                     {editing ? (
@@ -332,6 +364,37 @@ export function InvoiceCorrection({
                       <ItemName he={l.rawDescription} en={l.rawDescriptionEn ?? l.productNameEn} />
                     )}
                     {!editing && lineBadges?.[l.id] ? lineBadges[l.id] : null}
+                    {/* G-08 charge: not a product, not checked against the order (T4, neutral). */}
+                    {!editing && l.charge ? (
+                      <p className="mt-1 text-xs text-muted" data-testid="invoice-line-charge">
+                        {l.charge.auto
+                          ? t('correction.chargeAuto')
+                          : l.charge.byName
+                            ? t('correction.chargeBy', { name: l.charge.byName })
+                            : t('correction.charge')}
+                        {canEdit && invoice.supplierId ? (
+                          <>
+                            {' '}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              loading={unCharge.isPending}
+                              data-testid="invoice-line-uncharge"
+                              onClick={() =>
+                                unCharge.mutate({
+                                  supplierId: invoice.supplierId!,
+                                  ...(l.supplierSku ? { supplierSku: l.supplierSku } : {}),
+                                  rawName: l.rawDescription,
+                                  undo: { invoiceLineIds: [l.id] },
+                                })
+                              }
+                            >
+                              {t('correction.notCharge')}
+                            </Button>
+                          </>
+                        ) : null}
+                      </p>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 font-mono tabular-nums text-muted">
                     {editing ? (

@@ -97,12 +97,18 @@ describe('commitCatalogRows: suggest, never link a guess (catalog-01)', () => {
     expect(res.createdProducts).toBe(0);
   });
 
-  it('a ≥0.95 match with the same unit links, learning the alias at its real confidence (not 1)', async () => {
+  // G-08 (stricter): a name-similarity auto-link links the price-list row but
+  // learns NO confirmed alias — a guess must never auto-resolve future invoices.
+  it('a ≥0.95 fuzzy match with the same unit links the row, but learns no alias (G-08)', async () => {
     nextCandidate.value = { productId: A.productId, canonicalName: 'עגבניה A', confidence: 0.97, matchedBy: 'fuzzy' };
     const res = await commitCatalogRows(db, args(), [row()], embedder);
     expect(res.ambiguous).toEqual([]);
-    const aliases = await aliasesFor('עגבניה שרי מובחרת');
-    expect(aliases).toEqual([{ productId: A.productId, confidence: '0.970' }]);
+    const [item] = await db
+      .select({ productId: supplierCatalogItems.productId })
+      .from(supplierCatalogItems)
+      .where(eq(supplierCatalogItems.supplierNameRaw, 'עגבניה שרי מובחרת'));
+    expect(item?.productId).toBe(A.productId);
+    expect(await aliasesFor('עגבניה שרי מובחרת')).toEqual([]);
   });
 
   it('a 0.9–0.95 match is a suggestion, not a link (auto-link floor 0.95)', async () => {

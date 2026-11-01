@@ -144,6 +144,8 @@ const ROUTE_ROLES_BEFORE: Record<string, UserRole[]> = {
   '/dashboard/suppliers': ['owner', 'manager'],
   '/dashboard/suppliers/ledger': ['owner', 'manager', 'receiver', 'bookkeeper'],
   '/dashboard/catalog': ['owner', 'manager'],
+  // G-08 (orchestrator 31.10): the chef answers "זה אותו מוצר?" on the mapper only.
+  '/dashboard/catalog/mapping': ['owner', 'manager', 'chef'],
   '/dashboard/products': ['owner', 'manager'],
   '/dashboard/orders': ['owner', 'manager'],
   '/dashboard/contracts': ['owner', 'manager', 'bookkeeper'],
@@ -219,6 +221,15 @@ describe('nav per role', () => {
     }
   });
 
+  /**
+   * Named exceptions: a page a role reaches from a home line, not from nav. Each
+   * entry must be backed by a test that proves that home link
+   * (G-08: app/dashboard/home/__tests__/questions.server.test.ts).
+   */
+  const REACHED_FROM_HOME: ReadonlyArray<{ role: UserRole; route: string; via: string }> = [
+    { role: 'chef', route: 'catalogMapping', via: 'home question line' },
+  ];
+
   it('every allowed non-detail page is reachable in ≤ 2 interactions, per role', () => {
     for (const role of ALL_ROLES) {
       for (const showChain of role === 'owner' ? [false, true] : [false]) {
@@ -231,9 +242,18 @@ describe('nav per role', () => {
             !(d.chain === 'only' && !showChain) &&
             !(d.chain === 'single' && showChain),
         );
-        expect(allowed.filter((d) => !reach.has(d.key)).map((d) => d.path), `${role} chain=${showChain}`).toEqual([]);
+        const viaHome = new Set(REACHED_FROM_HOME.filter((x) => x.role === role).map((x) => x.route));
+        expect(
+          allowed.filter((d) => !reach.has(d.key) && !viaHome.has(d.key)).map((d) => d.path),
+          `${role} chain=${showChain}`,
+        ).toEqual([]);
       }
     }
+  });
+
+  it('the home-line exceptions stay narrow: catalogMapping is still nav-reachable for owner and manager', () => {
+    expect(REACHED_FROM_HOME).toEqual([{ role: 'chef', route: 'catalogMapping', via: 'home question line' }]);
+    for (const role of ['owner', 'manager'] as const) expect(reachableKeys(viewer(role)).has('catalogMapping')).toBe(true);
   });
 
   it('pay run, supplier ledger and integrations are in nav for the right roles', () => {

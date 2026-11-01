@@ -33,6 +33,7 @@ import { addCalendarDaysInTz, endOfDayInTz, startOfDayInTz } from '../lib/time';
 import { featureEnabled } from '../lib/features';
 import { applyContractPrices } from '../contracts/load';
 import { localDateKey } from '../contracts/core';
+import { chargeKeyCovers } from '../catalog/linkQuestions';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 
@@ -154,6 +155,38 @@ export async function buildMatchInputForInvoice(
       ? heldDuplicate.invoiceId
       : null;
 
+  // ── Known invoice numbers for the supplier (duplicate detection). ──
+  let knownInvoiceNumbers: Set<string> | undefined;
+  if (inv.supplierId) {
+    const rows = await db
+      .select({ invoiceNumber: invoices.invoiceNumber })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.restaurantId, restaurantId),
+          eq(invoices.supplierId, inv.supplierId),
+          ne(invoices.id, invoiceId),
+          // Only invoices that arrived BEFORE this one: re-matching the original
+          // after its duplicate shows up must not flag the original too (the
+          // pair would otherwise both be blocked and the total counted twice).
+          // Ties (same-batch inserts) break on id so exactly one of a pair flags.
+          or(
+            lt(invoices.createdAt, inv.createdAt),
+            and(eq(invoices.createdAt, inv.createdAt), lt(invoices.id, invoiceId)),
+            ...(heldDuplicateOfId ? [eq(invoices.id, heldDuplicateOfId)] : []),
+          ),
+        ),
+      );
+    knownInvoiceNumbers = new Set(
+      rows.map((r) => normalizeInvoiceNumber(r.invoiceNumber)).filter((n): n is string => !!n),
+    );
+  }
+
+  // G-08 charge (round 4): a duplicate copy is never charge-filtered — its
+  // DUPLICATE_INVOICE ₪ is the whole printed invoice, charges included.
+  const normalizedNumber = normalizeInvoiceNumber(invoiceNumber);
+  const isDuplicate = !!normalizedNumber && (knownInvoiceNumbers?.has(normalizedNumber) ?? false);
+
   const invLineRows = await db
     .select({
       id: invoiceLines.id,
@@ -163,21 +196,20 @@ export async function buildMatchInputForInvoice(
       unit: invoiceLines.unit,
       unitPriceBilled: invoiceLines.unitPriceBilled,
       lineTotal: invoiceLines.lineTotal,
+      vatRate: invoiceLines.vatRate, // G-08 charge
     })
     .from(invoiceLines)
     .where(eq(invoiceLines.invoiceId, invoiceId));
   if (invLineRows.length === 0) return null;
 
-  const invoiceLineInputs: InvoiceLineInput[] = invLineRows.map((l) => ({
-    id: l.id,
-    productId: l.productId,
-    supplierSku: l.supplierSku,
-    qtyBilled: num(l.qtyBilled),
-    unit: l.unit,
-    unitPriceBilled: num(l.unitPriceBilled),
-    lineTotal: num(l.lineTotal),
-  }));
-
+  // G-08 charge: lines a person answered "שורת חיוב — לא מוצר" (deposit, delivery,
+  // discount; ocr_payload.chargeLineIds) are not products — the engine would call
+  // them UNORDERED_ITEM. They stay out of the engine input, and the invoice totals
+  // passed in are reduced by exactly their amounts (below), so TOTAL / VAT checks
+  // stay reconciled. No charge line ⇒ byte-identical input to before.
+  const chargeIds = isDuplicate ? new Set<string>() : readChargeLineIds(inv.ocrPayload);
+  let chargeRows = invLineRows.filter((l) => chargeIds.has(l.id));
+  let productRows = chargeRows.length > 0 ? invLineRows.filter((l) => !chargeIds.has(l.id)) : invLineRows;
   const invoiceDate = inv.invoiceDate ?? inv.createdAt;
 
   // ── Restaurant settings: timezone, tolerances, vat rate, baseline window. ──
@@ -194,6 +226,56 @@ export async function buildMatchInputForInvoice(
     .limit(1);
   const tz = restaurant?.timezone ?? DEFAULT_TZ;
 
+  // VAT rate precedence: PO override → supplier override → restaurant default →
+  // the 18% default. A supplier billing at a non-default rate (e.g. a 17%
+  // legacy invoice or a VAT-exempt Eilat supplier) would otherwise false-fire
+  // VAT_MISMATCH against the restaurant default. (The PO part is applied below.)
+  let supplierVatRate: string | null = null;
+  if (inv.supplierId) {
+    const [sup] = await db
+      .select({ vatRate: suppliers.vatRate })
+      .from(suppliers)
+      .where(and(eq(suppliers.id, inv.supplierId), eq(suppliers.restaurantId, restaurantId)))
+      .limit(1);
+    supplierVatRate = sup?.vatRate ?? null;
+  }
+
+  // G-08 charge (rounds 3–5): "every line a charge" (a deposit-only slip) is
+  // matched clean ONLY when the charges ARE the printed invoice — its subtotal,
+  // VAT and total (each one printed) reconcile with the charge lines (per-line
+  // VAT, signed) within 10 agorot. Nothing printed, or a gap: the invoice is
+  // checked with all its lines and the printed header (no silent ₪0), still
+  // without discovering an unrelated order.
+  const allChargeCandidate = chargeRows.length > 0 && productRows.length === 0;
+  if (allChargeCandidate) {
+    const rate = firstVatRate(null, supplierVatRate, restaurant?.vatRate ?? null);
+    let netAg = 0;
+    let vatAg = 0;
+    for (const l of chargeRows) {
+      const lineAg = Math.round(num(l.lineTotal) * 100);
+      netAg += lineAg;
+      vatAg += Math.sign(lineAg) * Math.round(Math.abs(lineAg) * (l.vatRate == null ? rate : Number(l.vatRate)));
+    }
+    const printed = [inv.totalExclVat, inv.vatAmount, inv.totalInclVat].some((v) => v != null);
+    const near = (v: string | null, expectedAg: number) => v == null || Math.abs(Math.round(num(v) * 100) - expectedAg) <= 10;
+    const reconciled =
+      printed && near(inv.totalExclVat, netAg) && near(inv.vatAmount, vatAg) && near(inv.totalInclVat, netAg + vatAg);
+    if (!reconciled) {
+      chargeRows = [];
+      productRows = invLineRows;
+    }
+  }
+
+  const invoiceLineInputs: InvoiceLineInput[] = productRows.map((l) => ({
+    id: l.id,
+    productId: l.productId,
+    supplierSku: l.supplierSku,
+    qtyBilled: num(l.qtyBilled),
+    unit: l.unit,
+    unitPriceBilled: num(l.unitPriceBilled),
+    lineTotal: num(l.lineTotal),
+  }));
+
   // ── Discover the candidate PO: same supplier, eligible status, expected
   //    delivery within ±window of the invoice date; nearest delivery wins. ──
   let po: PoCandidate | null = null;
@@ -207,7 +289,7 @@ export async function buildMatchInputForInvoice(
   const lo = startOfDayInTz(addCalendarDaysInTz(invoiceDate, -PO_MATCH_WINDOW_DAYS, tz), tz);
   const hi = endOfDayInTz(addCalendarDaysInTz(invoiceDate, PO_MATCH_WINDOW_DAYS, tz), tz);
   const inWindow = (at: Date | null) => at == null || (at >= lo && at <= hi);
-  if (inv.supplierId && !options.skipPoDiscovery) {
+  if (inv.supplierId && !options.skipPoDiscovery && !allChargeCandidate) {
     const candidates: PoCandidate[] = [];
     // A re-match's pinned PO is ONE MORE candidate, never a short-circuit: it
     // skips the status filter (by then it is usually closed / received, which
@@ -288,10 +370,27 @@ export async function buildMatchInputForInvoice(
         qtyOrdered: poLines.qtyOrdered,
         unit: poLines.unit,
         unitPriceExpected: poLines.unitPriceExpected,
+        // G-08 charge (round 4 HIGH): an order line a learned charge key covers
+        // ("משלוח") is not a product — it could never pair and would read MISSING.
+        charge: inv.supplierId
+          ? sql<boolean>`("po_lines"."product_id" is null and ${chargeKeyCovers(
+              restaurantId,
+              sql`${inv.supplierId}::uuid`,
+              sql.raw('"po_lines"."supplier_sku"'),
+              sql.raw('"po_lines"."raw_description"'),
+            )})`
+          : sql<boolean>`false`,
+        // …and a blank name-only order line is never a question nor a product (round 4).
+        blank: sql<boolean>`("po_lines"."product_id" is null and "po_lines"."supplier_sku" is null and coalesce(btrim("po_lines"."raw_description"), '') = '')`,
       })
       .from(poLines)
       .where(eq(poLines.poId, po.id));
-    poLineInputs = poLineRows.map((p) => ({
+    // Round 5 LOW: an order whose only lines are learned charges stays an order
+    // (its charge lines, priced null): an unordered product is UNORDERED_ITEM,
+    // not an UNORDERED_ARRIVAL left out of the leak.
+    const kept = poLineRows.filter((p) => p.charge !== true && p.blank !== true);
+    const chargeOnly = kept.length === 0 ? poLineRows.filter((p) => p.charge === true) : [];
+    poLineInputs = [...kept, ...chargeOnly.map((p) => ({ ...p, unitPriceExpected: null }))].map((p) => ({
       id: p.id,
       productId: p.productId,
       supplierSku: p.supplierSku,
@@ -343,48 +442,8 @@ export async function buildMatchInputForInvoice(
   // ── Tolerances, vat rate, baseline window (restaurant loaded above). ──
   const tolerances = resolveTolerances(restaurant?.settings?.tolerances);
 
-  // VAT rate precedence: PO override → supplier override → restaurant default →
-  // the 18% default. A supplier billing at a non-default rate (e.g. a 17%
-  // legacy invoice or a VAT-exempt Eilat supplier) would otherwise false-fire
-  // VAT_MISMATCH against the restaurant default.
-  let supplierVatRate: string | null = null;
-  if (inv.supplierId) {
-    const [sup] = await db
-      .select({ vatRate: suppliers.vatRate })
-      .from(suppliers)
-      .where(and(eq(suppliers.id, inv.supplierId), eq(suppliers.restaurantId, restaurantId)))
-      .limit(1);
-    supplierVatRate = sup?.vatRate ?? null;
-  }
   const vatRate = firstVatRate(po?.vatRate ?? null, supplierVatRate, restaurant?.vatRate ?? null);
   const baselineWindow = restaurant?.settings?.baselineWindowDays ?? DEFAULT_BASELINE_WINDOW_DAYS;
-
-  // ── Known invoice numbers for the supplier (duplicate detection). ──
-  let knownInvoiceNumbers: Set<string> | undefined;
-  if (inv.supplierId) {
-    const rows = await db
-      .select({ invoiceNumber: invoices.invoiceNumber })
-      .from(invoices)
-      .where(
-        and(
-          eq(invoices.restaurantId, restaurantId),
-          eq(invoices.supplierId, inv.supplierId),
-          ne(invoices.id, invoiceId),
-          // Only invoices that arrived BEFORE this one: re-matching the original
-          // after its duplicate shows up must not flag the original too (the
-          // pair would otherwise both be blocked and the total counted twice).
-          // Ties (same-batch inserts) break on id so exactly one of a pair flags.
-          or(
-            lt(invoices.createdAt, inv.createdAt),
-            and(eq(invoices.createdAt, inv.createdAt), lt(invoices.id, invoiceId)),
-            ...(heldDuplicateOfId ? [eq(invoices.id, heldDuplicateOfId)] : []),
-          ),
-        ),
-      );
-    knownInvoiceNumbers = new Set(
-      rows.map((r) => normalizeInvoiceNumber(r.invoiceNumber)).filter((n): n is string => !!n),
-    );
-  }
 
   // ── Price baselines per product (supplier-specific preferred over global). ──
   const productIds = [
@@ -427,16 +486,37 @@ export async function buildMatchInputForInvoice(
     if (Object.keys(acc).length > 0) baselines = acc;
   }
 
+  // G-08 charge: take the charge lines' net and VAT (each line's own vat_rate,
+  // e.g. 0 for a deposit; else the invoice rate) out of the totals, in integer
+  // agorot, half-up per line.
+  let totalExclVat = num(inv.totalExclVat);
+  let vatAmount = num(inv.vatAmount);
+  let totalInclVat = num(inv.totalInclVat);
+  // Only from a total the supplier printed (round 3 LOW): a NULL header total
+  // stays 0 rather than turning negative.
+  if (chargeRows.length > 0) {
+    let netAg = 0;
+    let vatAg = 0;
+    for (const l of chargeRows) {
+      const lineAg = Math.round(num(l.lineTotal) * 100);
+      netAg += lineAg;
+      vatAg += Math.sign(lineAg) * Math.round(Math.abs(lineAg) * (l.vatRate == null ? vatRate : Number(l.vatRate)));
+    }
+    if (inv.totalExclVat != null) totalExclVat = (Math.round(totalExclVat * 100) - netAg) / 100;
+    if (inv.vatAmount != null) vatAmount = (Math.round(vatAmount * 100) - vatAg) / 100;
+    if (inv.totalInclVat != null) totalInclVat = (Math.round(totalInclVat * 100) - netAg - vatAg) / 100;
+  }
+
   const input: MatchInput = {
     invoice: {
       // Normalized (see normalizeInvoiceNumber) — the engine only uses it for
       // duplicate detection + its message, and compares it to the known set.
-      invoiceNumber: normalizeInvoiceNumber(invoiceNumber) ?? '',
+      invoiceNumber: normalizedNumber ?? '',
       invoiceDate,
       supplierId: inv.supplierId ?? '',
-      totalExclVat: num(inv.totalExclVat),
-      vatAmount: num(inv.vatAmount),
-      totalInclVat: num(inv.totalInclVat),
+      totalExclVat,
+      vatAmount,
+      totalInclVat,
     },
     poLines: poLineInputs,
     grLines: grLineInputs,
@@ -449,6 +529,12 @@ export async function buildMatchInputForInvoice(
   };
 
   return { input, poId: po?.id ?? null, grId };
+}
+
+/** G-08 charge: the invoice-line ids marked "שורת חיוב — לא מוצר" (ocr_payload.chargeLineIds). */
+export function readChargeLineIds(payload: unknown): Set<string> {
+  const ids = (payload as { chargeLineIds?: unknown } | null | undefined)?.chargeLineIds;
+  return new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : []);
 }
 
 /**

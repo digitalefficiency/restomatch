@@ -11,6 +11,7 @@ import {
   grLines,
   gte,
   inArray,
+  memberships,
   isNotNull,
   isNull,
   invoiceLines,
@@ -44,6 +45,7 @@ import { devOcrStubEnabled, buildDevOcrStub } from '../receiving/devOcrStub';
 import { isAllowedScanUrl } from '../lib/scanUrls';
 import { isInvoiceNumberTaken, readDuplicateOf, withoutDuplicateOf } from '../lib/invoiceDedupe';
 import { appError } from '../errors';
+import { readChargeLineIds } from '../match/buildMatchInput';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
 import { claimableLines } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
@@ -560,6 +562,8 @@ export const receivingRouter = router({
         .select({
           id: invoiceLines.id,
           productId: invoiceLines.productId,
+          // G-08 (round 4): the charge line's key, for "לא שורת חיוב — להחזיר לשאלות".
+          supplierSku: invoiceLines.supplierSku,
           rawDescription: invoiceLines.rawDescription,
           rawDescriptionEn: invoiceLines.rawDescriptionEn,
           productNameEn: products.nameEn,
@@ -582,6 +586,38 @@ export const receivingRouter = router({
       // only the flag + reason (never the raw extraction payload).
       const { ocrPayload, ...invoiceFields } = invoice;
       const failure = (ocrPayload?.raw ?? null) as { ocrFailed?: boolean; reason?: string } | null;
+      // G-08 charge (round 3): a line answered "שורת חיוב — לא מוצר" — who / when,
+      // shown greyed on the invoice. Names only of members of THIS restaurant.
+      const chargeIds = readChargeLineIds(ocrPayload);
+      const chargeMeta = new Map<string, { by: string | null; at: string | null; auto: boolean }>();
+      const chargeLines = (ocrPayload as unknown as { chargeLines?: unknown } | null)?.chargeLines;
+      for (const c of Array.isArray(chargeLines) ? (chargeLines as Array<Record<string, unknown>>) : []) {
+        if (typeof c?.id === 'string') {
+          chargeMeta.set(c.id, {
+            by: typeof c.by === 'string' ? c.by : null,
+            at: typeof c.at === 'string' ? c.at : null,
+            auto: c.auto === true,
+          });
+        }
+      }
+      const byIds = [...new Set([...chargeMeta.values()].map((m) => m.by).filter((x): x is string => !!x))];
+      const byNames = new Map<string, string | null>();
+      if (byIds.length > 0) {
+        const rows = await ctx.db
+          .select({ id: users.id, name: users.name })
+          .from(users)
+          .innerJoin(
+            memberships,
+            and(eq(memberships.userId, users.id), eq(memberships.restaurantId, ctx.session.restaurantId)),
+          )
+          .where(inArray(users.id, byIds));
+        for (const r of rows) byNames.set(r.id, r.name ?? null);
+      }
+      const linesOut = lines.map((l) => {
+        if (!chargeIds.has(l.id)) return { ...l, charge: null };
+        const m = chargeMeta.get(l.id);
+        return { ...l, charge: { byName: m?.by ? (byNames.get(m.by) ?? null) : null, at: m?.at ?? null, auto: m?.auto ?? false } };
+      });
       return {
         ...invoiceFields,
         ocrFailed: failure?.ocrFailed === true,
@@ -597,7 +633,7 @@ export const receivingRouter = router({
         })(),
         supplierName: supplier?.name ?? null,
         supplierNameEn: supplier?.nameEn ?? null,
-        lines,
+        lines: linesOut,
       };
     }),
 

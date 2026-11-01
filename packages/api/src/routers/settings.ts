@@ -108,7 +108,10 @@ export const settingsRouter = router({
       .select({ settings: restaurants.settings })
       .from(restaurants)
       .where(eq(restaurants.id, ctx.session.restaurantId))
-      .limit(1);
+      .limit(1)
+      // G-08 (round 4): lock the row — a concurrent writer of other keys
+      // (learned charge keys) must not be lost by this read-modify-write.
+      .for('no key update');
     const current: RestaurantSettings = row?.settings ?? {};
 
     const next: RestaurantSettings = { ...current };

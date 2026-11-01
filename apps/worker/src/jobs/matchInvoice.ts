@@ -7,6 +7,9 @@ import {
   createWhatsAppNotifier,
   getEntitlements,
   loadPriorDecisions,
+  orderQuestionCount,
+  pruneAnsweredReasons,
+  releaseQuestionHolds,
   receiptStillOpen,
   persistMatchRun,
   rematchHoldReason,
@@ -14,7 +17,7 @@ import {
   recordUsage,
   resolveApprovalThresholds,
 } from '@restomatch/api';
-import { and, desc, eq, invoices, matchRuns, restaurants, suppliers, type Database } from '@restomatch/db';
+import { and, desc, eq, invoices, matchRuns, restaurants, sql, suppliers, type Database } from '@restomatch/db';
 import { runMatch, type MatchOutput } from '@restomatch/matching';
 import { makeWorker, type WorkerJob } from '../queue';
 import { appBaseUrl } from '../lib/notifyHelpers';
@@ -44,6 +47,57 @@ export interface MatchInvoiceJob {
 }
 
 const CLEAN: MatchOutput = { status: 'clean', totalDiscrepancyAmount: 0, discrepancies: [] };
+
+/* ── G-08 hold ───────────────────────────────────────────────────────────────
+ * The engine pairs lines only by product / SKU, so an unlinked line (a "זה אותו
+ * מוצר?" question) on the invoice or on its order would be reported MISSING +
+ * UNORDERED — a false leak. OCR holds such an invoice ('parsed', raw.reviewReasons
+ * 'unlinked'); this job holds a first match whose order still has unlinked
+ * name-only lines ('unlinkedPo'), and releases either hold here — AFTER every
+ * answer has committed — once nothing is left unlinked.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+/** Reasons only a person's answer clears; any other reason keeps the human hold. */
+const LINK_HOLD_REASONS = sql`array['unlinked', 'unlinkedPo']`;
+
+/**
+ * Release an invoice held ONLY for questions (the shared rule, @restomatch/api
+ * releaseQuestionHolds); returns the receipt's order (raw.scanGrId) to pin to.
+ */
+async function releaseLinkHold(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+): Promise<{ released: boolean; pinPoId: string | null }> {
+  const [rel] = await releaseQuestionHolds(db, restaurantId, [invoiceId]);
+  if (!rel) {
+    // Held for another reason too: prune the answered question reasons (round 3).
+    await pruneAnsweredReasons(db, restaurantId, [invoiceId]);
+    return { released: false, pinPoId: null };
+  }
+  if (!rel.scanGrId) return { released: true, pinPoId: null };
+  const [pin] = (await db.execute(sql`
+    select po_id from goods_receipts where id = ${rel.scanGrId}::uuid and restaurant_id = ${restaurantId}
+  `)) as unknown as Array<{ po_id: string | null }>;
+  return { released: true, pinPoId: pin?.po_id ?? null };
+}
+
+/** Hold a first match for the order's open questions (raw.reviewReasons += 'unlinkedPo'). */
+async function holdForOrderQuestions(db: Database, restaurantId: string, invoiceId: string, poId: string) {
+  await db.execute(sql`
+    update invoices i
+       set status = 'parsed',
+           ocr_payload = coalesce(i.ocr_payload, '{}'::jsonb) || jsonb_build_object(
+             'heldPoId', ${poId}::text,
+             'raw', coalesce(i.ocr_payload -> 'raw', '{}'::jsonb) || jsonb_build_object(
+               'reviewReasons',
+               (select coalesce(jsonb_agg(distinct x), '[]'::jsonb) from (
+                  select jsonb_array_elements_text(coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb)) as x
+                  union select 'unlinkedPo') u)))
+     where i.restaurant_id = ${restaurantId} and i.id = ${invoiceId}::uuid
+       and i.status not in ('approved', 'paid')
+  `);
+}
 
 export interface MatchJobOutcome {
   result: MatchOutput;
@@ -87,6 +141,17 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   if (priorRun && !data.rematch) {
     return { result: CLEAN, persisted: null, replaced: false, skipped: 'already_matched' };
   }
+  // G-08 hold: an invoice held only for questions is released here, after the
+  // answers committed (two concurrent answers can't strand it), and its match
+  // stays pinned to the order of the receipt it was scanned on.
+  let pinPoId: string | null = null;
+  if (!priorRun && inv.status === 'parsed') {
+    const rel = await releaseLinkHold(db, restaurantId, invoiceId);
+    if (rel.released) {
+      inv.status = 'matched';
+      pinPoId = rel.pinPoId;
+    }
+  }
   // A person already signed this invoice off (a receipt submit never rewrites
   // its match — only match.runForInvoice, a manager action, may), or the OCR
   // held a never-matched invoice for a human. Shared with the dock slip.
@@ -99,14 +164,14 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   // resolved from the restaurant inside the assembler). The receipt's PO first,
   // else a re-match stays on the PO it was matched against.
   const built = await buildMatchInputForInvoice(db, restaurantId, invoiceId, {
-    pinnedPoId: data.poId ?? priorRun?.poId ?? null,
+    pinnedPoId: data.poId ?? priorRun?.poId ?? pinPoId,
   });
   if (!built) return { result: CLEAN, persisted: null, replaced: false, skipped: 'no_lines' };
   // The payload is not a trust boundary. A job's poId names the order that was
   // counted for this invoice: if the matcher wouldn't pair the invoice with it
   // (other supplier, outside the window, a sibling PO preferred), don't fall back
   // to some other order — skip.
-  if (data.poId && built.poId !== data.poId) {
+  if (data.poId && built.poId !== data.poId && built.input.invoiceLines.length > 0) {
     console.warn(`[match-invoice] invoice=${invoiceId} does not pair with the job's po=${data.poId} — skipping`);
     return { result: CLEAN, persisted: null, replaced: false, skipped: 'po_rejected' };
   }
@@ -117,6 +182,13 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
     const grId = built.grId;
     const open = await db.transaction((tx) => receiptStillOpen(tx as unknown as Database, restaurantId, grId));
     if (open) return { result: CLEAN, persisted: null, replaced: false, skipped: 'receipt_open' };
+  }
+
+  // G-08 hold (M-4, after the receipt check): a first match waits while its order still has unlinked
+  // name-only lines (a WhatsApp / text order) — the question is in the mapper.
+  if (!priorRun && built.poId && (await orderQuestionCount(db, restaurantId, built.poId)) > 0) {
+    await holdForOrderQuestions(db, restaurantId, invoiceId, built.poId);
+    return { result: CLEAN, persisted: null, replaced: false, skipped: 'awaiting_review' };
   }
 
   // Per-restaurant approval-routing thresholds (settings.approvalThresholds).
@@ -130,6 +202,19 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
 
   const persisted = await db.transaction(async (rawTx) => {
     const tx = rawTx as unknown as Database;
+    // G-08 hold: an answer undone while this job ran unlinks a line again — never
+    // persist a run over an unlinked line of an invoice held for questions.
+    const [race] = (await tx.execute(sql`
+      select exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null
+           and not (coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text)) as unlinked,
+             ((i.ocr_payload ? 'linkReleasedAt')
+               or coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS}) as link_held
+        from invoices i where i.id = ${invoiceId}::uuid and i.restaurant_id = ${restaurantId}
+       for update
+    `)) as unknown as Array<{ unlinked: boolean; link_held: boolean }>;
+    // Only a FIRST match is guarded (round 5): an invoice with a run re-matches
+    // with its line back as a question, keeping the people's decisions.
+    if (!priorRun && race && race.link_held && race.unlinked) return null;
     let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;
     if (priorRun) {
       prior = await loadPriorDecisions(tx, restaurantId, invoiceId);
@@ -146,6 +231,7 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
       prior,
     );
   });
+  if (!persisted) return { result: CLEAN, persisted: null, replaced: false, skipped: 'awaiting_review' };
   return { result, persisted, replaced: Boolean(priorRun) };
 }
 

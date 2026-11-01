@@ -206,6 +206,7 @@ export const he = {
     decideOpen: 'להחליט על {count} פערים פתוחים ({amount})',
     sendClaims: 'לשלוח מכתבי דרישה על {count} פערים ({amount})',
     linkPending: 'לשייך {count} חשבוניות ממתינות להזמנה',
+    answerQuestions: 'לענות על "זה אותו מוצר?" — {count} חשבוניות מחכות לשאלה',
     talkToSupplier: 'לשוחח עם {supplier} — דליפה של {pct} מהרכש',
     allClear: 'אין משימות פתוחות — כל הכבוד',
   },

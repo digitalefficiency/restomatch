@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, FileText, Hourglass, ListChecks, Scale, Sigma } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
+import { auth } from '@/auth';
+import { canSeeRoute } from '@/lib/roles';
 import { formatIls } from '@/lib/money';
 import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
 import { getLocale, getT } from '@/lib/i18n/server';
@@ -25,6 +27,9 @@ export default async function LeakProofPage({ searchParams }: { searchParams: Pr
   const parsed = Number.parseInt(sp.m ?? '0', 10);
   const monthOffset = Number.isFinite(parsed) ? Math.min(0, Math.max(-24, parsed)) : 0;
   const caller = await createServerCaller();
+  // G-08: the mapper link only for a role that may answer (never the bookkeeper).
+  const role = ((await auth())?.user as { role?: string } | undefined)?.role;
+  const canAnswer = !!role && canSeeRoute(role as Parameters<typeof canSeeRoute>[0], '/dashboard/catalog/mapping');
   const flags = await caller.recovery.flags();
   if (!flags.leakProof) notFound();
 
@@ -117,6 +122,17 @@ export default async function LeakProofPage({ searchParams }: { searchParams: Pr
                 ? t('pending', { count: num(hero.pendingLinkCount), amount: exact(hero.pendingLinkIls) })
                 : t('pendingNone')}
             </p>
+            {/* G-08: held for a "זה אותו מוצר?" question — in neither leak nor spend. */}
+            {(hero.awaitingQuestionCount ?? 0) > 0 ? (
+              <p className="mt-1 text-sm text-muted" data-testid="proof-awaiting-question">
+                {t('awaitingQuestion', { count: num(hero.awaitingQuestionCount ?? 0), amount: exact(hero.awaitingQuestionIls ?? 0) })}{' '}
+                {canAnswer ? (
+                  <Link href="/dashboard/catalog/mapping" className="font-medium text-primary underline-offset-2 hover:underline">
+                    {t('awaitingQuestionCta')}
+                  </Link>
+                ) : null}
+              </p>
+            ) : null}
           </div>
         </div>
       </Card>
