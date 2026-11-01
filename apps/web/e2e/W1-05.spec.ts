@@ -6,7 +6,7 @@ import { en as ovEn } from '../lib/i18n/messages/overview/en';
 import { he as apHe } from '../lib/i18n/messages/approvals/he';
 import { DEMO_RESTAURANT_NAME, OWNER_STATE } from './env';
 import { e2eSql, loginViaMagicLink } from './helpers';
-import { thisMonthLeakIls } from './seededMonth';
+import { seedMonthFacts } from './seededMonth';
 
 /**
  * W1-05 · Role homes ("Today") and the receiving board, with an honest leak hero.
@@ -222,21 +222,26 @@ test.describe('owner home', () => {
     // No target line (R-14 default) and no full-month "חודש קודם" caption in the hero.
     await expect(page.getByTestId('leak-hero')).not.toContainText('יעד');
     await expect(page.getByTestId('leak-hero')).not.toContainText('חודש קודם');
-    // In a month's first days the seed's leak is all last month's (e2e/seededMonth.ts): when this
-    // month has no leak yet, the hero is honestly in a non-leak state (nothing checked / only
-    // invoices waiting for a PO link / clean) — never a leak amount, and no delta before a leak.
-    if ((await thisMonthLeakIls(page.request)) === 0) {
-      const state = await page.getByTestId('leak-hero').getAttribute('data-state');
-      expect(['noData', 'pendingOnly', 'clean'], `hero state with ₪0 leak this month`).toContain(state);
-      if (state !== 'clean') await expect(page.getByTestId('leak-hero-delta')).toHaveCount(0);
-      test.info().annotations.push({ type: 'month-start', description: 'this month has no leak yet: hero no-data state asserted, delta / ₪ position next month-day' });
+    // Which state the hero must be in comes from an oracle the hero does not compute (raw SQL over
+    // the seed's findings — e2e/seededMonth.ts): the seed leaked this month (before today) → 'leak'.
+    // Only in a month's first days, before the seed's first leak lands, may it be in another state.
+    const state = await page.getByTestId('leak-hero').getAttribute('data-state');
+    const seeded = await seedMonthFacts(0);
+    if (seeded.leakFindings > 0) expect(state, `oracle: ${seeded.leakFindings} seeded leak findings this month → hero in 'leak'`).toBe('leak');
+    else expect(['leak', 'noData', 'pendingOnly', 'clean'], 'hero state before the seed leaks this month').toContain(state);
+    if (state === 'noData') {
+      // Nothing checked yet: no amount, no delta.
+      await expect(page.getByTestId('leak-hero-delta')).toHaveCount(0);
+      test.info().annotations.push({ type: 'month-start', description: 'hero has no data yet this month: no-data state asserted' });
       expect(await axeSerious(page)).toEqual([]);
       return;
     }
     // The delta compares the same day-span ("לעומת 1–25 בספטמבר"), never the whole previous month.
     const delta = page.getByTestId('leak-hero-delta');
-    await expect(delta).toBeVisible();
-    if ((await delta.getAttribute('data-direction')) !== 'none') await expect(delta).toContainText(/לעומת \d+–\d+ ב/);
+    if (state === 'leak' || state === 'clean') {
+      await expect(delta).toBeVisible();
+      if ((await delta.getAttribute('data-direction')) !== 'none') await expect(delta).toContainText(/לעומת \d+–\d+ ב/);
+    }
     // DoD-4: in Hebrew the ₪ glyph sits left of the first digit.
     const shekelLeft = await page.getByTestId('leak-hero-amount').evaluate((el) => {
       const text = el.textContent ?? '';

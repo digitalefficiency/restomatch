@@ -26,7 +26,7 @@ test('breakdown: the invoice rows add up to the leak total, shown to the agora',
   const errors = collectPageErrors(page);
   // The month the seed populated (last month in a month's first days — e2e/seededMonth.ts).
   await page.goto('/dashboard');
-  await page.goto(`/dashboard/leaks/breakdown${monthQuery(await seededLeakMonth(page.request))}`);
+  await page.goto(`/dashboard/leaks/breakdown${monthQuery(await seededLeakMonth(page.request, { mix: true }))}`);
   const total = Number(await page.getByTestId('breakdown-total').getAttribute('data-amount'));
   expect(total).toBeGreaterThan(0);
   const rows = await amounts(page, 'breakdown-row');
@@ -34,7 +34,8 @@ test('breakdown: the invoice rows add up to the leak total, shown to the agora',
   expect(Number(await page.getByTestId('breakdown-rows-total').getAttribute('data-amount'))).toBe(total);
   // Shown at 2 dp next to its rows; the exact value is also in the title.
   await expect(page.getByTestId('breakdown-total')).toContainText(at2dp(total));
-  // A zero-₪ finding is a calm note, never a red ₪0.00.
+  // A zero-₪ finding is a calm note, never a red ₪0.00 (the seeded month has one — a degenerate month fails here).
+  expect(await page.getByTestId('line-no-money').count(), 'the month carries a ₪0 finding').toBeGreaterThan(0);
   await expect(page.getByTestId('line-no-money').first()).not.toContainText('0.00');
   expect(errors).toEqual([]);
 });
@@ -56,8 +57,8 @@ test('explorer: bars total = Σ bars; the T1 tile carries the exact leak, the ca
   else await expect(page.getByTestId('explorer-cap-note')).toHaveCount(0);
   // A plain substring check — no hand-built regex from a number.
   expect(await tile.getAttribute('title')).toContain(at2dp(leak));
-  // "מול 1–25 בספט׳": the default (open-month) view compares the aligned previous period.
-  if (offset === 0) await expect(page.locator('main')).toContainText(/מול 1–\d+/);
+  // "מול 1–25 בספט׳" (open month, aligned) / "מול 1–30 בספט׳" (a closed month): compare is on.
+  await expect(page.locator('main')).toContainText(/מול 1–\d+/);
 });
 
 test('no data yet: the CTA starts where the home does (receiving), never the flag-gated inbox', async ({ page }) => {
@@ -78,10 +79,12 @@ test('proof: the top catches plus "and N more" add up to the number', async ({ p
   // An independent source: the breakdown's per-invoice rows (the proof's "rest" is derived, so it can't check itself).
   // Both read the month the seed populated (last month in a month's first days — e2e/seededMonth.ts).
   await page.goto('/dashboard');
-  const m = monthQuery(await seededLeakMonth(page.request));
+  const m = monthQuery(await seededLeakMonth(page.request, { mix: true }));
   await page.goto(`/dashboard/leaks/breakdown${m}`);
   const invoiceRows = (await amounts(page, 'breakdown-row')).map(agora);
   await page.goto(`/dashboard/leaks/proof${m}`);
+  // More invoices than the top catches, so "and N more" exists (a degenerate month fails here).
+  expect(invoiceRows.length, 'invoice rows > the top catches').toBeGreaterThan(await page.getByTestId('proof-catch-amount').count());
   const leak = Number((await page.getByTestId('proof-leak').innerText()).replace(/[^\d.]/g, ''));
   const catches = await page.getByTestId('proof-catch-amount').evaluateAll((els) =>
     els.map((e) => Number((e.textContent ?? '').replace(/[^\d.]/g, ''))),
@@ -230,6 +233,11 @@ test('report: like-for-like compare, the money partition adds up', async ({ page
     // The open month: like-for-like ("1–25 … מול 1–25 …") and marked as still open.
     await expect(page.getByTestId('report-compare')).toContainText(/1–\d+ .+ מול 1–\d+/);
     await expect(page.getByTestId('report-freshness')).toContainText(/פתוח/);
+  } else {
+    // A closed month: marked as ended, still compared — never "open".
+    await expect(page.getByTestId('report-freshness')).toContainText(/הסתיים/);
+    await expect(page.getByTestId('report-freshness')).not.toContainText(/פתוח/);
+    await expect(page.getByTestId('report-compare')).toContainText(/ מול /);
   }
   await expect(page.getByTestId('report-subtitle')).toContainText(DEMO_RESTAURANT_NAME);
   const parts = await amounts(page, 'report-part');
