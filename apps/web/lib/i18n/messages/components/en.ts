@@ -36,7 +36,7 @@ export const en: Shape<typeof he> = {
     types: {
       invoice_received: 'Invoice received',
       invoice_matched: 'Invoice matched',
-      discrepancy_approved: 'Claimed from supplier',
+      discrepancy_approved: 'Added to the credit request',
       discrepancy_rejected: 'Paid as billed',
       alias_learned: 'Learned a product name',
       sync_completed: 'Sync completed',
@@ -51,7 +51,7 @@ export const en: Shape<typeof he> = {
     discrepancyOne: '1 discrepancy',
     discrepancies: 'Discrepancies: {count}',
     potentialLoss: '{amount} in discrepancies',
-    savings: 'claimed {amount}',
+    savings: 'approved for a credit request · {amount}',
     matchesOrderAndReceipt: 'matches the order and the goods receipt',
     awaitingMonthlyMatch: "waiting to be matched against this month's delivery notes",
     awaitingPoLink: 'waiting to be linked to an order',
