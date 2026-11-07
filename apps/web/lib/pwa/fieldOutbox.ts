@@ -5,8 +5,10 @@
  * - `photo`: the W1 offline invoice-photo queue ("restomatch-receiver" /
  *   "photos") now lives in the outbox. `outboxPhotoStore` is the same
  *   `QueueStore` interface over it (every caller of the photo queue is
- *   unchanged), and `migrateLegacyPhotos` moves the old database's items over,
- *   deleting each old entry only after its copy is written.
+ *   unchanged). `migrateLegacyPhotos` COPIES the old database's items forward
+ *   and deletes none; the outbox mirrors every photo write and delete back into
+ *   the old store (`legacyPhotoMirror`), so it always holds exactly the unsent
+ *   photos and a rolled-back W1 build still uploads them (rollback safety).
  * - `grLine`: the Delivery Check keeps its per-line engine (lineOutbox: 300 ms
  *   debounce, ordered writes, held rows) and its synchronous localStorage copy
  *   `rm-rcv-lines:<userId>:<poId>` for an instant resume; `fieldLineStorage`
@@ -28,6 +30,8 @@ import {
   OUTBOX_DB,
   OUTBOX_EVENT,
   enqueue,
+  registerStoreMirror,
+  type StoreMirror,
   idbOutboxStore,
   outboxKey,
   type OutboxItem,
@@ -121,40 +125,107 @@ export function outboxPhotoStore(store: OutboxStore = idbOutboxStore, ready: () 
   };
 }
 
-/** Move the W1 photo database's items into the outbox; each old entry is deleted only after its copy is written. */
-export async function migrateLegacyPhotos(store: OutboxStore = idbOutboxStore): Promise<number> {
-  if (typeof indexedDB === 'undefined') return 0;
+/* ── rollback safety: the W1 photo queue stays true ─────────────────────── */
+
+/**
+ * The W1 photo queue ("restomatch-receiver" / "photos", keyPath clientUploadId,
+ * the QueuedPhoto shape) as a store. The outbox MIRRORS every photo write and
+ * delete into it, so it always holds exactly the photos not yet sent: a rolled-back
+ * W1 build still finds and uploads them, and never one this build already sent.
+ */
+export interface LegacyPhotoStore {
+  list(): Promise<QueuedPhoto[]>;
+  put(p: QueuedPhoto): Promise<void>;
+  remove(clientUploadId: string): Promise<void>;
+}
+
+async function legacyDbExists(): Promise<boolean> {
+  if (typeof indexedDB === 'undefined') return false;
   const list = (indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> }).databases;
-  if (list && !(await list.call(indexedDB)).some((d) => d.name === LEGACY_PHOTO_DB)) return 0;
-  const db = await new Promise<IDBDatabase | null>((resolve) => {
-    const req = indexedDB.open(LEGACY_PHOTO_DB);
-    // Opening a database that never existed creates it empty: nothing to move.
-    req.onupgradeneeded = () => req.transaction?.abort();
+  if (!list) return true;
+  return (await list.call(indexedDB)).some((d) => d.name === LEGACY_PHOTO_DB);
+}
+
+/** Open the W1 database with W1's own schema (version 1, store "photos"), creating it only when asked. */
+function openLegacy(create: boolean): Promise<IDBDatabase | null> {
+  return new Promise((resolve) => {
+    const req = indexedDB.open(LEGACY_PHOTO_DB, 1);
+    req.onupgradeneeded = () => {
+      if (!create) {
+        req.transaction?.abort(); // never create it just to look
+        return;
+      }
+      if (!req.result.objectStoreNames.contains(LEGACY_PHOTO_STORE)) {
+        req.result.createObjectStore(LEGACY_PHOTO_STORE, { keyPath: 'clientUploadId' });
+      }
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => resolve(null);
   });
-  if (!db) return 0;
+}
+
+async function legacyTx<T>(create: boolean, mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T> | void): Promise<T | undefined> {
+  if (!create && !(await legacyDbExists())) return undefined;
+  const db = await openLegacy(create);
+  if (!db) return undefined;
   try {
-    if (!db.objectStoreNames.contains(LEGACY_PHOTO_STORE)) return 0;
-    const old = await new Promise<QueuedPhoto[]>((resolve, reject) => {
-      const r = db.transaction(LEGACY_PHOTO_STORE, 'readonly').objectStore(LEGACY_PHOTO_STORE).getAll();
-      r.onsuccess = () => resolve((r.result as QueuedPhoto[]) ?? []);
-      r.onerror = () => reject(r.error);
+    if (!db.objectStoreNames.contains(LEGACY_PHOTO_STORE)) return undefined;
+    return await new Promise<T | undefined>((resolve, reject) => {
+      const t = db.transaction(LEGACY_PHOTO_STORE, mode);
+      const r = fn(t.objectStore(LEGACY_PHOTO_STORE));
+      t.oncomplete = () => resolve(r ? r.result : undefined);
+      t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error);
     });
-    const view = outboxPhotoStore(store);
-    for (const p of old) {
-      await view.put(p);
-      await new Promise<void>((resolve, reject) => {
-        const t = db.transaction(LEGACY_PHOTO_STORE, 'readwrite');
-        t.objectStore(LEGACY_PHOTO_STORE).delete(p.clientUploadId);
-        t.oncomplete = () => resolve();
-        t.onerror = () => reject(t.error);
-      });
-    }
-    return old.length;
   } finally {
     db.close();
   }
+}
+
+export const idbLegacyPhotoStore: LegacyPhotoStore = {
+  async list() {
+    return ((await legacyTx<QueuedPhoto[]>(false, 'readonly', (s) => s.getAll() as IDBRequest<QueuedPhoto[]>)) ?? []) as QueuedPhoto[];
+  },
+  async put(p) {
+    // A photo captured by this build is written where a W1 build would look too.
+    await legacyTx(true, 'readwrite', (s) => void s.put(p));
+  },
+  async remove(id) {
+    await legacyTx(false, 'readwrite', (s) => void s.delete(id));
+  },
+};
+
+/** The outbox → W1 queue mirror: photo puts and deletes only. */
+export function legacyPhotoMirror(legacy: LegacyPhotoStore): StoreMirror {
+  return {
+    async onPut(item) {
+      if (item.kind === 'photo') await legacy.put(asPhoto(item));
+    },
+    async onRemove(key) {
+      if (key.startsWith('photo:')) await legacy.remove(key.slice('photo:'.length));
+    },
+  };
+}
+
+if (typeof indexedDB !== 'undefined') registerStoreMirror(legacyPhotoMirror(idbLegacyPhotoStore));
+
+/**
+ * Copy the W1 queue's photos into the outbox, forward only: NOTHING is deleted
+ * from the W1 queue here. An entry leaves it only when the outbox sends or
+ * deletes that photo (the mirror), so a rollback at any point loses nothing.
+ */
+export async function migrateLegacyPhotos(
+  store: OutboxStore = idbOutboxStore,
+  legacy: LegacyPhotoStore = idbLegacyPhotoStore,
+): Promise<number> {
+  let copied = 0;
+  for (const p of await legacy.list()) {
+    const key = outboxKey('photo', p.clientUploadId);
+    if (await store.get(key)) continue; // already in the outbox: it is the newer copy
+    await store.put(photoItem(p, undefined) as OutboxItem);
+    copied += 1;
+  }
+  return copied;
 }
 
 /* ── grLine: W1-06's localStorage rows, mirrored ───────────────────────── */

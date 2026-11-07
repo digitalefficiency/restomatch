@@ -524,7 +524,44 @@ function run<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<
   );
 }
 
-export const idbOutboxStore: OutboxStore = {
+/**
+ * A store mirror: told about every write and delete AFTER the outbox committed it.
+ * Used for rollback safety (fieldOutbox: the W1 photo queue keeps exactly the
+ * unsent photos, so a W1 build still finds them). A mirror's failure never fails
+ * the outbox write: the item is safe in the outbox either way.
+ */
+export interface StoreMirror {
+  onPut?: (item: OutboxItem) => Promise<void>;
+  onRemove?: (key: string) => Promise<void>;
+}
+
+const mirrors: StoreMirror[] = [];
+
+export function registerStoreMirror(m: StoreMirror): () => void {
+  mirrors.push(m);
+  return () => {
+    const i = mirrors.indexOf(m);
+    if (i >= 0) mirrors.splice(i, 1);
+  };
+}
+
+/** `base` with every put / remove also told to the mirrors (in order, awaited, failures swallowed). */
+export function withMirrors(base: OutboxStore, list: StoreMirror[] = mirrors): OutboxStore {
+  return {
+    get: (key) => base.get(key),
+    list: () => base.list(),
+    async put(item) {
+      await base.put(item);
+      for (const m of list) await m.onPut?.(item).catch(() => undefined);
+    },
+    async remove(key) {
+      await base.remove(key);
+      for (const m of list) await m.onRemove?.(key).catch(() => undefined);
+    },
+  };
+}
+
+const rawIdbOutboxStore: OutboxStore = {
   async get(key) {
     return (await run<OutboxItem | undefined>('readonly', (s) => s.get(key) as IDBRequest<OutboxItem | undefined>)) ?? undefined;
   },
@@ -538,6 +575,9 @@ export const idbOutboxStore: OutboxStore = {
     await run('readwrite', (s) => s.delete(key));
   },
 };
+
+/** The browser's outbox, with the registered mirrors (the W1 photo queue, see fieldOutbox). */
+export const idbOutboxStore: OutboxStore = withMirrors(rawIdbOutboxStore);
 
 /** Only touch IndexedDB if an outbox (or the W1 photo queue) already exists — never create one just to look. */
 export async function outboxDbExists(names: string[] = [OUTBOX_DB]): Promise<boolean> {
