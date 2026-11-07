@@ -131,50 +131,77 @@ Abbreviations as wave-2 README §9: `dash/` = `apps/web/app/dashboard/`, `api/` 
 **Ownership exception (AGENTS.md map).** `apps/worker` is ocr-procurement-engineer's and `packages/matching` + charts SQL are matching-engine-guardian's. Where a package crosses those boundaries, its brief names a co-owner per boundary: ocr-procurement-engineer takes the worker job edits in AU-03/AU-11/AU-12/AU-13 (web-feature-engineer leads and owns the pure builders, api and web); web-feature-engineer takes AU-09's router and panel (matching-engine-guardian owns the set search and residual logic); AU-07 splits SQL and page the same way. **`jobs/allocationDeadline.ts`** (and its handler/index lines) is assigned to **AU-12** before H-05a opens. New i18n namespaces (`msg/automations`) go through the owner of `messages/index.ts` (W2-13 in wave 2, W3-08 in wave 3). Only the wave's dependency owner adds packages to `package.json`.
 
 ## 10. Start order and batches
-At most 8 AU sessions at a time. Every package may **start** before its dependencies merge (build against the named interim); none may **merge** before them. A slot frees when a session's draft PR is green and waiting.
+> **No AU session starts before this amendment (orchestrator, 7.11; §14) lands.** The programme plan (`§3` W-f..W-j, `§6.4`, `§7`, Appendix A `§12`) is newer than any date in the briefs; where they differ, this section and the programme plan win.
 
-Hard/soft columns copy each brief's §3, which is authoritative if they ever differ.
+**Shared cap (binding).** AU sessions are **not** a separate pool: they count **inside the programme's 8 build slots**. At most **2 AU sessions run until Thu 3.12**, at most **3 in December**, and the cap of 3 carries on (January, phase C, and every §13 package) until the orchestrator changes it. A slot frees when a session's draft PR is GREEN and waiting (GREEN-pending-#180 counts as GREEN). Every package may **start** before its dependencies merge (build against the named interim); none may **merge** before them.
 
-| Package | Phase | Depends on (hard / soft) | Can run with | Sessions in phase |
-|---|---|---|---|---|
-| AU-01 | A (16–30.11) | none / W2-14 (settings audit), W2-01, G-07 | all of Phase A | 6 at once |
-| AU-02 | A | train B, G-06, G-17, G-09, W2-02 (PR b) / G-08, G-07, AU-01 | all of Phase A | |
-| AU-03 | A | W2-10, W2-04 / G-06, G-13, W2-11, AU-01, W2-08 | all of Phase A | |
-| AU-04 | A | W2-04, G-06, G-12a, G-13 / W2-03, AU-03, AU-02, AU-01, W2-11, W2-08, H-11 | all of Phase A | |
-| AU-06 | A | G-12 (a + b) / W2-03, AU-03, AU-02, G-07, W2-02, G-05 | all of Phase A | |
-| AU-07 | A | W2-09a, W2-01 (fragment) / G-05, H-07, AU-01 | all of Phase A; **measure first** (rule below) | |
-| AU-08 | B1 (Dec) | W2-02, W2-03, W2-08 / G-05, G-13, G-06, W2-11, AU-01 (+ the `owner.vatAtRisk` narrowing, AD1) | B1 | 5 (B1) |
-| AU-09 | B1 | train B, G-04 §9, AU-02, W2-02 / G-05, W2-03, W2-08, AU-01 | B1 | |
-| AU-10 | B1 | AU-02, W2-02, G-09, G-05 / AU-01, G-07, W2-05, G-17 | B1 | |
-| AU-13 | B1 | W2-12, G-06, G-13 / AU-01 (flag on), W3-02 seam, G-08/W3-10 import diff | B1 | |
-| AU-15 | B1 | W2-12, G-05 / W2-04, G-05/W2-05 correction audit (PR b), G-08, W3-10, AU-01, W2-06 | B1 | |
-| AU-11 | B2 | W2-06, AU-04, G-05, G-06 / W2-05, G-13, AU-01, H-05 add. (cut-off slot) | B2 | 3 (B2, after AU-04 merges) |
-| AU-12 | B2 | AU-04, G-12a, G-06, G-13, W2-03 / W2-08, AU-03, AU-08, H-03, H-05 add. (Sunday slot) | B2 | |
-| AU-14 | B2 | W2-03, H-03 deployed / W2-11, G-03, AU-10, G-07 | B2 | |
-| H-12 (human) | C (Jan–Mar) | G-15, G-14, H-13 (commit b), H-03 / AU-07, AU-16 shadow, owner sign-off AD7 + AD8 | C | 4 + human PRs |
-| H-13 (human) | C | H-03 deployed, H-04 if in flight / G-03 | C | |
-| AU-16 | C | AU-01, AU-07 (PR a, shadow); + H-13 deployed (PR b); + H-12 merged (PR c) / G-05, G-07, G-14, H-03 | C | |
-| AU-17 | C | W2-10, G-06, AU-03, H-05 core, H-06 (every PR); + H-13 (PR b, c) / H-06 portal answers, H-05 reply-to, W3-11, G-05 | C | |
-| AU-18 | C | W3-05, W3-11 (or stubbed flags), AU-08 / H-05a row 2, H-13, G-06, AU-12; ITA credential (Phase-6) for PR c | C | |
-| AU-19 | C | W2-03 (+ `PAY_RUN_MARK_PAID`), H-03 + decrypt helper, G-03, AU-14 / W2-10, G-05, G-14, AU-07 | C | |
+**Start rule.** Branch from `main` **after train B** (Tue 10.11). A brief's "Base:" line names what must be on `main` before the PR **merges**; rebase onto those merges as they land.
 
-**Measure first (P5).** AU-07 PR a merges **before** AU-03 and AU-04 switch their options on at ציקטי; if it can't, the orchestrator takes a baseline snapshot from the existing tables for 11.11–16.11 (documents in, arrival → first `invoice_matched` event, decision ages, claim stamps, outbox rows) before those options go on. No Phase A automation is enabled at the pilot without a baseline.
+**Shared prep (orchestrator, before the first AU start).**
+- **Routers:** one PR pre-registers the empty AU routers in `packages/api/src/index.ts` (W1-04 style; list in §9 "Shared one-liners"). `api/index.ts` lines stay orchestrator-serialised.
+- **Audit values:** G-05 gets **one batched list** of every AU `AuditAction` value (from the briefs' §5 / KPI hooks) **before 12.11**. A brief that says "request on day 1" means: verify the value is in the batch; only a missing one is a QUESTION.
+- **Schema lane:** **G-03 is assigned now** (human schema PR, W-a) and is **on the critical path**: G-03ʰ → H-03ʰ, serial in the schema lane, merging Tue 24.11. AU-14, AU-19 and H-13 wait on it.
 
-Phase A is path-disjoint by construction: the worker jobs split AU-02 (`ocrInvoice`, `ocrSweep`) / AU-03 (`recoveryReminders`) / AU-04 (`dailyExpectations`, `endOfDayReport`, `orderReminders`, `supplierDelays`, `matchInvoice`, `notifyHelpers`). Total ≈ 17 agent packages + 3 human-PR proposals (H-05 addendum, H-12, H-13).
+**Window schedule (AU slots only; programme plan §3).**
+| Window | AU cap | AU sessions (✱ = start) | Review / merge order |
+|---|---|---|---|
+| W-a..W-e (7.11 → 22.11) | 0 | none. Meanwhile G-03ʰ (now) → H-03ʰ; G-17 starts Mon 16.11 and takes the `ocrInvoice.ts` lock after G-09 r5 | — |
+| **W-f** Mon 23.11 → Sun 29.11 | ≤2 | ✱**AU-07** (~23.11, measure first, `⟨AU-hook:kpi⟩`) → ✱**AU-01** (second AU slot, `⟨AU-hook:switch⟩`) | **16–30.11: AU-07a → AU-01a → AU-07b** |
+| **W-g** Mon 30.11 → Sun 6.12 | ≤2 until Thu 3.12, then ≤3 | once AU-07/AU-01 are GREEN: ✱**AU-04** (30.11, first December AU slot, `⟨AU-hook:briefs⟩`; must be GREEN and integrated before H-05ʰ and W3-03b start) · ✱**AU-02** (30.11, only after G-17 releases `ocrInvoice.ts`, `⟨AU-hook:intake⟩`) · from Thu 3.12 ✱**AU-03** (`⟨AU-hook:recovery⟩`) | **1–12.12: AU-04 → AU-03 → AU-02a** |
+| **W-h** 7.12 → 20.12 | ≤3 | queue, each start as an AU slot goes GREEN: **AU-14** (after W2-03 + H-03 deployed) · **AU-06** (after G-12b merged in δ) · **AU-08** (after W2-02 + W2-08) · **AU-10** (after AU-02 is integrated; GREEN before W3-11 starts) · **AU-13** (after W2-12 merged in γ; path-disjoint beside W3-10). **AU-11 is not an AU slot:** it is an addendum slice inside ✱W3-09 (after AU-04 is integrated) | in hook order, AU merges ride the W3 train ahead of their successor |
+| **W-i** 21.12 → 16.1 | ≤3 | **AU-09** (after G-15 merges in W3-β) · **AU-12** (after W3-03 merges in W3-β) · **AU-15** (after W3-10 merges in W3-β) · then phase-B leftovers, then §13 B1/B2 (below) | — |
+| **W-j** 17.1 → 30.1 | ≤3 | phase C **server-only** (W4-01 holds `apps/web`): AU-16 PR a, AU-17..19 pure builders; UI parts after 30.1 | H-12ʰ after G-15; H-13ʰ after H-04, on a deploy Tuesday |
+| Feb → Mar 2027 | ≤3 | phase C UI, then §13 phase C | — |
 
-**Dependency diagram (→ = must merge before):**
+**Competitive packages (§13, AU-20..AU-26) inside the cap.** They come **after the AU-01..19 queue of their phase** and never push the AU count past the cap: **B1** (AU-20 PR a, AU-24) takes the first AU slot free **after AU-09/AU-12/AU-15 have started in W-i** (realistically early January; if it slips into W-j only its server part runs, UI after 30.1); **B2** (AU-21 PR a, AU-22) follows in **W-j → February** (AU-21 PR a is server-side and may run in W-j; AU-22's page after 30.1); **C** (AU-21 PR b, AU-23, AU-25) runs **Feb–Mar after AU-16..19** have their slots, gated on wave 3 as §13.4 says; **D** stays **Apr–Jun 2027**. AU-20 PR b and the MarketMan layout wait for AU-10 (W-h), so they run with B1 at the earliest. In §13, "AU-11" means the AU-11 addendum slice of W3-09.
+
+**Pause order under WARNING (programme plan §7).** When the weekly-limit status turns to WARNING: (1) **AU and wave-3 starts pause first**: start nothing new and park any running AU-xx (`[AU-xx] PAUSE · push WIP at the next green test, then idle`; the state lives on the branch); (2) then non-gate wave-2 builds; (3) then the G-04 addendum, G-09 r5, G-17. At CRITICAL (~90 %) only the pilot and the orchestrator run. After a reset, resume in reverse order, critical path first. Pilot sessions preempt: when a pilot session is paged and no slot is free, the newest non-critical session (an AU start counts) pauses.
+
+**Dependency table** (hard / soft; each brief's §3 is authoritative if they ever differ).
+| Package | Window (start) | Depends on (hard / soft) | Lane hook |
+|---|---|---|---|
+| AU-07 | W-f ~23.11 | W2-09a, W2-01 (fragment) / G-05, H-07, AU-01 | `⟨AU-hook:kpi⟩` |
+| AU-01 | W-f | none / W2-14 (settings audit; subfolder carved out), W2-01, G-07 | `⟨AU-hook:switch⟩` |
+| AU-04 | W-g 30.11 | W2-04, G-06, G-12a / **G-13 (soft: `formatIlsAgorot` interim)**, W2-03, AU-03, AU-02, AU-01, W2-11, W2-08, H-11 | `⟨AU-hook:briefs⟩` |
+| AU-02 | W-g 30.11 (after G-17 releases the lock) | train B, G-06, G-17, G-09, W2-02 (PR b) / G-08, G-07, AU-01 | `⟨AU-hook:intake⟩` |
+| AU-03 | W-g from 3.12 | W2-10, W2-04 / G-06, G-13, W2-11, AU-01, W2-08 | `⟨AU-hook:recovery⟩` |
+| AU-14 | W-h | W2-03, H-03 deployed / W2-11, G-03, AU-10, G-07 | `⟨AU-hook:payrun⟩` |
+| AU-06 | W-h | G-12 (a + b) / W2-03, AU-03, AU-02, G-07, W2-02, G-05 | `⟨AU-hook:ask⟩` |
+| AU-08 | W-h | W2-02, W2-03, W2-08 / G-05, G-13, G-06, W2-11, AU-01 (+ AD1 for `vatAtRisk`) | `⟨AU-hook:vat⟩` |
+| AU-10 | W-h | AU-02, W2-02, G-09, G-05 / AU-01, G-07, W2-05, G-17 | `⟨AU-hook:intake⟩` |
+| AU-13 | W-h | W2-12, G-06, G-13 / AU-01 (flag on), W3-02 seam, G-08/W3-10 import diff | `⟨AU-hook:prices⟩` |
+| AU-11 | W-h, **inside W3-09** | W2-06, AU-04, G-05, G-06 / W2-05, G-13, AU-01, H-05 add. (cut-off slot) | `⟨AU-hook:orders⟩` |
+| AU-09 | W-i | train B, G-04 §9, W2-02 / **AU-02 (soft)**, G-05, W2-03, W2-08, AU-01; starts after G-15 merges | `⟨AU-hook:consolidated⟩` |
+| AU-12 | W-i | AU-04, G-12a, G-06, G-13 / **W2-03 (soft: due/hold lines omitted)**, W2-08, AU-03, AU-08, H-03, H-05 add. (Sunday slot); starts after W3-03 merges | `⟨AU-hook:briefs⟩` |
+| AU-15 | W-i | W2-12, G-05 / W2-04, G-05/W2-05 correction audit (PR b), G-08, W3-10, AU-01, W2-06; starts after W3-10 merges | `⟨AU-hook:learn⟩` |
+| H-12 (human) | C (Jan–Mar) | G-15, G-14, H-13 (commit b), H-03 / AU-07, AU-16 shadow, owner sign-off AD7 + AD8 | L13 |
+| H-13 (human) | C | H-03 deployed, H-04 / G-03 | L12 |
+| AU-16 | W-j (PR a, server) | AU-01, AU-07 (PR a, shadow); + H-13 deployed (PR b); + H-12 merged (PR c) / G-05, G-07, G-14, H-03 | free |
+| AU-17 | C | W2-10, G-06, AU-03, H-05 core, H-06 (every PR); + H-13 (PR b, c) / H-06 portal answers, H-05 reply-to, W3-11, G-05 | free |
+| AU-18 | C | W3-05, W3-11 (or stubbed flags), AU-08 / H-05a row 2, H-13, G-06, AU-12; ITA credential (Phase-6) for PR c | free |
+| AU-19 | C | W2-03 (+ `PAY_RUN_MARK_PAID`), H-03 + decrypt helper, G-03, AU-14 / W2-10, G-05, G-14, AU-07 | free |
+
+**Measure first (P5).** AU-07 PR a merges **before** AU-03 and AU-04 switch their options on at ציקטי; if it can't, the orchestrator takes a baseline snapshot from the existing tables for 11.11–16.11 (documents in, arrival → first `invoice_matched` event, decision ages, claim stamps, outbox rows) before those options go on. No AU automation is enabled at the pilot without a baseline.
+
+The December merges are path-disjoint by construction: the worker jobs split AU-02 (`ocrInvoice`, `ocrSweep`) / AU-03 (`recoveryReminders`) / AU-04 (`dailyExpectations`, `endOfDayReport`, `orderReminders`, `supplierDelays`, `matchInvoice`, `notifyHelpers`). Total ≈ 17 AU sessions (AU-01..AU-19 without AU-05 and AU-11) + the AU-11 addendum slice of W3-09 + 3 human-PR proposals (H-05 addendum, H-12, H-13).
+
+**Dependency diagram (→ = must merge before; ⇢ = soft):**
 ```
-train B ──┬─→ AU-02 ──┬─→ AU-09 ─→ (H-08 accept, human)
+ocrInvoice.ts lock: G-06 → G-09 r5 → G-17 → AU-02 → AU-10 → W3-11
+train B ──┬─→ AU-02 ──┬─⇢ AU-09 ─→ (H-08 accept, human)      G-15 ─→ AU-09 (start)
           │           └─→ AU-10 ─→ W3-11
-G-06, G-12a, G-13, W2-04 ─→ AU-04 ──┬─→ AU-11 ─→ W3-09
-                                    └─→ AU-12 ─→ W3-03
-W2-10 ─→ AU-03 ─→ W3-11          G-12b ─→ AU-06 ─→ W3-04
+G-06, G-12a, W2-04 ─→ AU-04 (G-13 ⇢) ──┬─→ AU-11 (addendum slice of W3-09)
+                                       └─→ AU-12 (W2-03 ⇢; starts after W3-03 merges)
+W2-10 ─→ AU-03 ─→ W3-11          G-12b ─→ AU-06 ─→ W3-04b
+AU-07a → AU-01a → AU-07b (review 16–30.11); AU-04 → AU-03 → AU-02a (review 1–12.12)
 AU-01 + AU-07 ─→ AU-16 PR a (shadow)
-H-03 ─→ H-13 (human) ─→ AU-16 PR b (grants)        G-14, G-15, H-13 ─→ H-12 (human) ─→ AU-16 PR c (auto-decide)
-AU-01 ─→ AU-13        W2-12 ─→ AU-13, AU-15
-W2-02, W2-03, W2-08 ─→ AU-08 ─→ H-05a ←─ AU-12 (weekly-digest + allocation-deadline jobs)        W2-03 + H-03 ─→ AU-14 ─→ AU-19
+G-03 → H-03 (schema lane, 24.11) ─→ H-13 (human) ─→ AU-16 PR b (grants)        G-14, G-15, H-13 ─→ H-12 (human) ─→ AU-16 PR c (auto-decide)
+AU-01 ─→ AU-13        W2-12 ─→ AU-13 (beside W3-10)        W3-10 ─→ AU-15
+W2-02, W2-03, W2-08 ─→ AU-08 ─→ H-05a ←─ AU-12 (weekly-digest + allocation-deadline jobs)        W2-03 + H-03 ─→ AU-14 ─→ AU-19 ←─ G-03
 H-05 core + H-06 ─→ AU-17 (all PRs) ←─ H-13 (PR b, c)       W3-05 + W3-11 + AU-08 ─→ AU-18
 ```
+
+> **Conflict noted for the orchestrator (7.11):** the review-sequencing item "AU-02 lands before G-17, G-17 rebases on it" contradicts the newer programme-plan lock order G-06 → G-09 r5 → G-17 → AU-02 → AU-10 → W3-11; this README follows the programme plan (G-17 before AU-02).
 
 ## 10a. Where AU slots in the W3/W4 plan
 No W3-xx ids are created for automation. Each catalogue item (`docs/research/אוטומציות במוצר/notes/10-catalogue-and-impact.md` §A–§C, authoritative) is credited to the existing W2/G/W3/W4/H package that already covers it; the AU package builds only the automation delta. "Lands after" = must merge first; "lands before / hands back to" = the W3/W4/H package that takes the AU-owned paths after the AU merge (wave-3 overlap ledger, `IMPLEMENTATION-PLAN.md` §4).
@@ -183,21 +210,21 @@ No W3-xx ids are created for automation. Each catalogue item (`docs/research/א�
 |---|---|---|---|---|---|
 | A1 | Pilot switch-on + owner toggles | W2-14 (settings audit), G-07 (`can()`) | AU-01 | train B; W2-14 for PR b | settings subfolder → W3-07a |
 | A2 | Time ledger + automation KPIs | W2-09a (charts exports), H-07 (₪ definitions) | AU-07 | W2-09a, W2-01 | admin page → W3-07a |
-| A3 | Receiver morning truck brief (no ₪) | W3-03 (06:00 receiver brief), W2-05 (`todayExpectations` board), H-11 / #219 (₪ strip) | AU-04 (pulls W3-03's brief forward) | W2-04, G-06, G-12a, G-13 | `dailyExpectations.ts` / `supplierDelays.ts` → W3-03 |
+| A3 | Receiver morning truck brief (no ₪) | W3-03 (06:00 receiver brief), W2-05 (`todayExpectations` board), H-11 / #219 (₪ strip) | AU-04 (pulls W3-03's brief forward) | W2-04, G-06, G-12a (G-13 soft) | `dailyExpectations.ts` / `supplierDelays.ts` → W3-03 |
 | A4 | Evening decision digest, fixed | W2-04 (`endOfDayReport.ts` → G-12), #211 (EOD on `LEAK_FILTER`) | AU-04 | as A3 | `briefs/**` + `endOfDayReport.ts` → AU-12 |
 | A5 | Order reminder truth | W1-11 / W2-06 (reminder link, order guide) | AU-04 | as A3 | `orderReminders.ts` → AU-11 → W3-09 |
 | A6 | Late-truck chase draft | H-05 (15-min late check, WhatsApp template) | AU-04 | as A3 | `supplierDelays.ts` → W3-03; late check = H-05 |
 | A7 | Honest match alerts | W2-04 (`matchInvoice` → `notify()`), H-12 (routing) | AU-04 | as A3 | `matchInvoice.ts` → H-05 |
-| A8 | Supplier from ח״פ + dead check revived | train B (`supplierBusinessIdMismatch`), G-17 (header persistence) | AU-02 (NULL-supplier suggestion only) | train B, G-06, G-17, G-09 | `ingest/**` → AU-10 → W3-11 |
+| A8 | Supplier from ח״פ + dead check revived | train B (`supplierBusinessIdMismatch`), G-17 (header persistence) | AU-02 (NULL-supplier suggestion only) | train B, G-06, G-09 r5 → G-17 (`ocrInvoice.ts` lock) | `ingest/**` → AU-10 → W3-11 |
 | A9 | Consolidated recognition from real OCR | **train B #224 / #232** (real consolidated recognition) | AU-02 (verify + tests only) | train B | `packages/ocr/**` → W3-11 |
 | A10 | Stuck-OCR re-sign + review nudge | G-06 (OCR-failure hand-off), #216 (manual lines), #222 (waiting-for-lines list), #223 (OCR retries) | AU-02 | train B, G-06 | `ocrInvoice.ts` → AU-10 → W3-11 |
 | A11 | Ask: waiting / stuck / owed / to pay | G-12a/b (`awaitingDecision`, Ask period) | AU-06 | G-12a, G-12b | `ask/**` + `dash/ask/**` → W3-04 |
 | A12 | Recovery chase loop v1 | W2-10 (claims, letters, reminder drafts), W2-04 (claims at decision), H-05 (chase send) | AU-03 | W2-10, W2-04 | `recovery/**` + `dash/recovery/**` → W3-11; `recoveryReminders.ts` → H-05 |
 | A13 | Allocation-number guard + chase | W2-02 (register tab), W2-03 (hold), W2-08 (vat card, task type) | AU-08 | W2-02, W2-03, W2-08 | feeds W3-05 checklist and AU-18; deadline slot → H-05a |
-| A14 | Consolidated autopilot (propose) | G-04 §9 (three flags), H-08 (accept, wave 4 human) | AU-09 | train B, G-04 §9, AU-02, W2-02 | accept-write → H-08 (W4) |
+| A14 | Consolidated autopilot (propose) | G-04 §9 (three flags), H-08 (accept, wave 4 human) | AU-09 | train B, G-04 §9, W2-02, G-15 (start); AU-02 soft | accept-write → H-08 (W4) |
 | A15 | Intake autopilot 2 | W2-02 (inbox, bulk), G-09 (sender grouping) | AU-10 | AU-02, W2-02, G-09, G-05 | `ingest/**` + `routers/ingest.ts` + `dash/inbox/**` → W3-11 |
-| A16 | Order autopilot | W2-06 (guide, cut-off board, wa.me), W3-09 (PO lifecycle) | AU-11 | W2-06, AU-04, G-05, G-06 | `orders/**` + orders/receiving routers → W3-09 (lands before it, or as its addendum) |
-| A17 | Decision SLA nudge + weekly bookkeeper digest | W2-04 (go-links), G-12a, H-05 (digest send) | AU-12 | AU-04, G-12a, G-06, G-13, W2-03 | `settings/notifications/digest-preview/**` → W3-03; `weeklyDigest.ts` / `allocationDeadline.ts` → H-05 (via H-05a) |
+| A16 | Order autopilot | W2-06 (guide, cut-off board, wa.me), W3-09 (PO lifecycle) | AU-11 (**addendum slice of W3-09**, built in the W3-09 session) | W2-06, AU-04 integrated, G-05, G-06 | stays with W3-09 |
+| A17 | Decision SLA nudge + weekly bookkeeper digest | W2-04 (go-links), G-12a, H-05 (digest send) | AU-12 | AU-04, G-12a, G-06, G-13, W3-03 merged (start); W2-03 soft | `settings/notifications/digest-preview/**` → W3-03; `weeklyDigest.ts` / `allocationDeadline.ts` → H-05 (via H-05a) |
 | A18 | Price creep in ₪/month | W2-12 (₪ queue, ₪/month helper), W3-10 (price-list inbox), W3-02 (recipes room) | AU-13 | W2-12, G-06, G-13 | contracts → W2-12; catalog / import diff → W3-10; `recipes/**` stays W3-02 |
 | A19 | Pay-run pre-flight | W2-03 (holds, `markPaid`), H-03 (bank columns) | AU-14 | W2-03, H-03 deployed | pay-run page + `routers/payRun.ts` → W3-01; `payRun/**` → AU-19 |
 | A20 | Learn from decisions | W2-12 (contracts), W3-10 (mapping), G-08 (`decideLink`) | AU-15 | W2-12, G-05 | cards → W2-12 (contracts) / W3-10 (mapping) |
@@ -209,58 +236,83 @@ No W3-xx ids are created for automation. Each catalogue item (`docs/research/א�
 | A26 | POS Z-report feed (opt) | W2-07 / W3-02 (`posSales`, food-cost room) cover the data side | none (backlog, ICP veto risk) | — | — |
 | — | Automation schedules in `cron.ts` | H-05 (delivery and scheduling) | **H-05a** (addendum, human PR) | AU-12, AU-08 job files (AU-11 for the cut-off line) | → H-05 |
 
-**AU packages against the W3/W4 timeline.** Wave 3 itself is gated on W2-01, W2-08, W2-13 and H-03 merged (`IMPLEMENTATION-PLAN.md` §6); W2-08 and H-03 have **not started** (§10b), so the W3 packages AU-xx hand back to are later than the plan's dates. That ordering is safe: every AU package that hands paths back lands **before** the W3 owner starts, and none waits on a W3 package except AU-18 (W3-05, W3-11) and AU-17 PR b (W3-11).
-- **Before W3-03:** AU-04 (`dailyExpectations`, `supplierDelays`), AU-12 (digest preview under `settings/notifications/**`).
-- **Before W3-04:** AU-06 (`ask/**`).
-- **Before W3-09:** AU-11 (`orders/**`, orders/receiving routers), or as its addendum.
+**AU packages against the W3/W4 timeline.** Wave 3 itself is gated on W2-01, W2-08, W2-13 and H-03 merged (`IMPLEMENTATION-PLAN.md` §6); W2-08 starts 10.11 and H-03 follows G-03 in the schema lane (merging Tue 24.11; §10b), so the W3 packages AU-xx hand back to are later than the plan's dates. That ordering is safe: every AU package that hands paths back lands **before** the W3 owner starts, and only these wait on a W3 package: AU-12 (starts after W3-03 merges), AU-15 (after W3-10 merges), AU-09 (after G-15 merges in W3-β), AU-11 (built inside W3-09), AU-18 (W3-05, W3-11) and AU-17 PR b (W3-11).
+- **Before W3-03b / H-05:** AU-04 (`dailyExpectations`, `supplierDelays`) is GREEN and integrated. **After W3-03 merges (W3-β):** AU-12 starts; its digest preview hands over to W3-03.
+- **Before W3-04b:** AU-06 (`ask/**`).
+- **W3-09:** AU-11 is an addendum slice of W3-09 (`⟨AU-hook:orders⟩`), not a separate session.
 - **Before W3-11:** AU-02 → AU-10 (`ingest/**`, inbox, `ocrInvoice.ts` hook, `packages/ocr/**`), AU-03 (`recovery/**`).
-- **Before W3-07a:** AU-01 (settings subfolder), AU-07 (admin page).
+- **Before W3-07a-1:** AU-01 and AU-07 GREEN (settings subfolder, admin page).
 - **Before W3-01:** AU-14 (pay-run page, `routers/payRun.ts`).
-- **With W2-12 / W3-10:** AU-13, AU-15 mount cards by props; the contracts queue stays W2-12's, mapping and the price-list inbox are W3-10's.
+- **With W2-12 / W3-10:** AU-13 runs beside W3-10 (path-disjoint); AU-15 starts after W3-10 merges; both mount cards by props; the contracts queue stays W2-12's, mapping and the price-list inbox are W3-10's.
 - **After W3-05 (+ W3-11):** AU-18.
 - **Wave 4:** AU-09's accept path is H-08; H-11 closes the receiver ₪ list that #219 starts. W4-01's DS/a11y sweep covers AU screens like any other; no AU package waits on wave 4.
 
+### 10a.1 Lanes and named AU hooks (programme plan §6.4 and Appendix A §12; binding)
+**Rule:** an AU package runs **after** its lane's wave-2 owner is GREEN and integrated, and its merge lands **before** the wave-3 successor takes the same files; where that can't fit, it becomes an **addendum slice of the successor**. AU sessions count toward the 8 slots (≤2 until 3.12, ≤3 in December, §10). AU merges ride the W3 train ahead of their successor. Messages and PR bodies name the hook (`⟨AU-hook:…⟩`).
+
+| Lane | Wave-2 owner(s) | AU hook (window; train) | Wave-3 / wave-4 successor |
+|---|---|---|---|
+| L1 desk / scope | W2-02, W2-03, W2-04, W2-08 | `⟨AU-hook:payrun⟩` AU-14 (W-h, after W2-03 + the H-03 deploy; W3-β) · `⟨AU-hook:vat⟩` AU-08 (W-h, after W2-02 + W2-08; W3-β) | W3-01 (pay-run column after AU-14); W3-05 (AU-08) |
+| L2 money definitions | W2-03, W2-09, W2-10, W2-12, W2-13 (+ G-03/H-03) | `⟨AU-hook:kpi⟩` AU-07 (W-f, first AU slot after 23.11; new `charts/automation.ts`, matching-engine-guardian co-owns; AU-07 owns the ₪ funnel definition, G-14/H-07 align later; W3-α) | G-14ʰ → H-07ʰ → W3-08b, W3-11; H-11ʰ (W4) |
+| L3 kitchen | W2-07 | `⟨AU-hook:prices⟩` AU-13 reads `recipes/alerts.ts` only | W3-02b |
+| L4 documents / OCR (`ocrInvoice.ts` lock: G-06 → G-09 r5 → G-17 → AU-02 → AU-10 → W3-11) | G-06, G-09, G-17, W2-02, W2-10, W2-11 | `⟨AU-hook:intake⟩` AU-02 (W-g, 30.11; W3-α) → AU-10 (W-h, after AU-02 is integrated + W2-02; its `crossChannelHold` hook in `ocrInvoice.ts`; W3-β) · `⟨AU-hook:recovery⟩` AU-03 (W-g, from 3.12, after W2-10 + W2-04; W3-β) | W3-11 (≥28.12) |
+| L5 catalog / prices | G-08 (train B), W2-12 | `⟨AU-hook:prices⟩` AU-13 (W-h; path-disjoint from W3-10: `priceAlerts.ts`, `api/priceAlerts/**`; after W2-12 merged in γ; W3-β) · `⟨AU-hook:learn⟩` AU-15 (W-i, after W3-10 merges in W3-β; cards as props; W3-γ) | W3-10 |
+| L6 admin | W2-14, G-11 (`admin/layout`), W2-16b (admin copy) | `⟨AU-hook:switch⟩` AU-01 (W-f, second AU slot; `FeaturesPanel` PILOT_DEFAULTS, `features.ts` `OWNER_TOGGLEABLE`, `pilot-config.ts`; `settings/automations/**` carved out of W2-14; W3-α) · AU-07's page in the `admin/automation/**` carve-out + `admin.automationKpis` | W3-07a-1 (**after AU-01 + AU-07 GREEN**), W3-05b, W3-07b |
+| L7 marketing / legal | G-11, H-02 | — | W3-06, W3-07b (`/join`) |
+| L8 orders | W2-06, G-10, W2-05 (receiving router) | `⟨AU-hook:orders⟩` **AU-11 = an addendum slice of W3-09** (needs W2-06 + AU-04 merged) | W3-09 (after AU-04 is integrated) |
+| L9 Ask | G-12b | `⟨AU-hook:ask⟩` AU-06 (W-h, after G-12b merged in δ; W3-β) | W3-04b |
+| L10 delivery | G-06, W2-13, W2-04, #173 | `⟨AU-hook:briefs⟩` AU-04 (W-g, **30.11, first December AU slot**; W3-α) → AU-12 (W-i, after W3-03 merges in W3-β; W3-γ) | H-05ʰ and W3-03b start only after AU-04 is integrated → H-04 CHECK → H-06ʰ → AU-17 |
+| L11 field | W2-05 C, W2-15 final (`package.json`) | AU-12's digest preview hands over to W3-03 after W3-03 has merged | W3-03 |
+| L12 schema (strictly serial: `schema.ts`, `drizzle/**`, RLS files, `supabase/**`) | **G-03ʰ (assigned 7.11) → H-03ʰ** (Tue 24.11) | — | H-04ʰ (Tue 22.12) → H-13ʰ (AU) |
+| L13 engine (`consolidated.ts`, `engine.ts`, `approvals/engine.ts`) | G-04 addendum | `⟨AU-hook:consolidated⟩` AU-09 (W-i, after G-15 merges in W3-β; W3-γ) | G-15ʰ → H-12ʰ (AU, `approvals/engine.ts`) → H-08ʰ (W4) |
+| L14 guards | W2-15 (`eslint`), W2-08/W2-09 | — | G-16 → W4-01 → H-09ʰ |
+| free | — | AU-16/17/18/19 (phase C, from January; server-only until 30.1); §13 AU-20..26 per §10 | H-06ʰ, H-10ʰ |
+
+Hook successors in one line each: `switch` AU-01 → W3-07a-1 · `kpi` AU-07 → G-14/H-07, W3-07a-1 · `intake` AU-02 → AU-10 → W3-11 · `recovery` AU-03 → W3-11 / H-05 · `briefs` AU-04 → AU-12 → H-05 / W3-03 · `ask` AU-06 → W3-04b · `vat` AU-08 → W3-05 · `consolidated` AU-09 → H-08ʰ · `orders` AU-11 = W3-09 addendum · `prices` AU-13 beside W3-10 · `learn` AU-15 after W3-10 · `payrun` AU-14 → W3-01 · phase C: AU-16 + H-12ʰ/H-13ʰ, AU-17 (after H-05 + H-06), AU-18 (after W3-05 + W3-11), AU-19 (after AU-14). Human PRs from this track follow the same serial lanes: H-12ʰ after G-15; H-13ʰ after H-04, merged on a deploy Tuesday; the H-05a addendum folds into H-05.
+
 ## 10b. Wave-2 status this plan builds on
-Source: open-PR read of 2026-11-07 (~07:45Z; `origin/main` = `4c887688`). Re-check before each batch start.
+Source: open-PR read of 2026-11-07 (~07:45Z; `origin/main` = `4c887688`), amended by the orchestrator on 7.11 (§14). Re-check before each batch start.
 
-**Built, draft, not merged (wave 2 + G):** #180 W2-01 COVERAGE fragments (human-PR) · #181 H-01 signDisplay (human-PR) · #182 G-07 capabilities · #183 W2-09a charts exports · #184 W2-06 Orders 2 · #185 G-05 write kernel · #186 W2-15a drafts kit · #187 G-13 agorot boundary / `moneyText` (human-PR) · #188 G-04 match-input truth · #189 / #202 W2-05 receiving slices A/B · #190 G-09 multi-page · #191 W2-09b drill helpers · #192 G-12a `awaitingDecision` · #193 / #194 / #197 W2-10a / W2-10 claims at decision + recovery desk · #195 G-12b Ask period · #196 W2-09 leak drill (in progress) · #198 G-05c invoice state · #199 G-06 real recipients · #200 G-08 link provenance · #201 / #212 W2-13 copy system · #203 / #214 / #218 W2-15 fixes · #204 W2-16 copy focus · #209 W2-04 approvals desk · #217 W2-02 invoice register / cockpit / intake.
+**Built, draft, not merged (wave 2 + G):** #180 W2-01 COVERAGE fragments (human-PR) · #181 H-01 signDisplay (human-PR) · #182 G-07 capabilities · #183 W2-09a charts exports · #184 W2-06 Orders 2 · #185 G-05 write kernel · #186 W2-15a drafts kit · #187 G-13 agorot boundary / `moneyText` (human-PR) · #188 G-04 match-input truth · #189 / #202 W2-05 receiving slices A/B · #190 G-09 multi-page · #191 W2-09b drill helpers · #192 G-12a `awaitingDecision` · #193 / #194 / #197 W2-10a / W2-10 claims at decision + recovery desk · #195 G-12b Ask period · #196 W2-09 leak drill (in progress) · #198 G-05c invoice state · #199 G-06 real recipients · #201 / #212 W2-13 copy system · #203 / #218 W2-15 fixes · #204 W2-16 copy focus · #209 W2-04 approvals desk · #217 W2-02 invoice register / cockpit / intake.
 
-**Not started:** W2-03, W2-07, W2-08, W2-11, W2-12, W2-14, G-10, G-11, H-03, G-17.
+**In train B (merges Tue 10.11):** **#200** G-08 link provenance and **#214** W2-15 fix (with #211, #216, #222–#224, #230–#232 per the pilot list below). Briefs that cite them as drafts read them as on `main` after train B.
 
-**Not in the PR read (verify before relying on them):** G-03, G-14, G-15, H-04, H-05 core, H-06, H-07, H-08, H-11. Train A merges this weekend (#228), train B Tue 10.11.
+**Not started (scheduled by the programme plan §3):** W2-12, G-10, G-11 (W-a, 7.11); W2-03, W2-08, W2-07 (W-c, 10.11); W2-11 (12.11); W2-14 (14.11); **G-17** (Mon 16.11, after G-09 r5; takes the `ocrInvoice.ts` lock); **G-03ʰ assigned now** (7.11) → H-03ʰ (same slot, serial; schema merge Tue 24.11).
+
+**Not in the PR read (verify before relying on them):** G-14 (from ~24.11), G-15, H-04, H-05 core, H-06, H-07, H-08, H-11. Train A merges this weekend (#228), train B Tue 10.11.
 
 **Per AU package: hard dependencies that have not started (these push the package).**
 | Pkg | Hard deps not started | Effect: interim or slip |
 |---|---|---|
 | AU-01 | none (soft W2-14 not started) | PR a on time; PR b (settings link line on W2-14's page) slips until W2-14, or mounts at `dash/settings/automations/**` without the audit-drawer link |
-| AU-02 | **G-17** | PR a builds on train B + G-06 (#199) + G-09 (#190); merge needs G-17's `ocrInvoice.ts` edits first, so either G-17 starts now or the orchestrator lets AU-02 land first and G-17 rebase on it. A9 is verify + tests only (#224/#232) |
-| AU-03 | none (W2-10 #193/#194/#197, W2-04 #209 built); soft W2-11, W2-08 not started | on time against their interims (ported `waPhone`, recovery-page banner) |
-| AU-04 | none (W2-04 #209, G-06 #199, G-12a #192, G-13 #187 built); soft W2-03, W2-11, W2-08 not started | on time; the "due ≤2 days" line, wa.me normaliser and bell rows stay omitted per §3 interims |
+| AU-02 | **G-17** (starts 16.11) | starts 30.11 when G-17 releases the `ocrInvoice.ts` lock (G-06 → G-09 r5 → G-17 → AU-02 → AU-10 → W3-11); builds on train B + G-06 (#199) + G-09 (#190); merges last of 1–12.12 (AU-02a). A9 is verify + tests only (#224/#232) |
+| AU-03 | none (W2-10 #193/#194/#197, W2-04 #209 built); soft W2-11, W2-08 not started | starts from Thu 3.12 (third AU slot), against their interims (ported `waPhone`, recovery-page banner) |
+| AU-04 | none (W2-04 #209, G-06 #199, G-12a #192 built; G-13 #187 **soft**, `formatIlsAgorot` interim); soft W2-03, W2-11, W2-08 | starts 30.11; the "due ≤2 days" line, wa.me normaliser and bell rows stay omitted per §3 interims |
 | AU-06 | none (G-12a #192, G-12b #195 built); soft W2-03 not started | on time; `to_pay_this_week` answers "not live yet", never ₪0 |
 | AU-07 | none (W2-09a #183, W2-01 #180 built) | on time |
 | AU-08 | **W2-03, W2-08** | API part (`vatAtRisk()`, draft builder) can start in B1; the hold and the card cannot mount, so **Phase B1 merge is gated** on W2-03 + W2-08 |
-| AU-09 | none directly (G-04 #188: verify it carries the §9 addendum); **G-17 via AU-02** | PR a (pure set search on fixtures) on time; merge slips with AU-02 |
+| AU-09 | none directly (G-04 #188: verify it carries the §9 addendum); AU-02 is **soft** (7.11) | starts W-i after G-15 merges; PR a (pure set search on fixtures) does not wait for AU-02 |
 | AU-10 | **G-17 via AU-02** (G-05 #185, G-09 #190, W2-02 #217 built) | slips with AU-02 |
-| AU-11 | none (W2-06 #184, G-05 #185, G-06 #199 built; AU-04) | B2 after AU-04 as planned |
-| AU-12 | **W2-03** | builders + preview can start; the due list and hold lines are omitted (brief §3 rule "never ₪0"); merge gated on W2-03 unless the orchestrator downgrades it to soft with those lines omitted |
+| AU-11 | none (W2-06 #184, G-05 #185, G-06 #199 built; AU-04) | addendum slice of W3-09 (W-h), after AU-04 is integrated |
+| AU-12 | none (W2-03 **downgraded to soft**, 7.11) | starts W-i after W3-03 merges; the due list and hold lines are omitted until W2-03 merges (`DUE_LINES_LIVE`, never ₪0) |
 | AU-13 | **W2-12** | **Phase B1 start gated**: `priceAlerts/**` and the ₪/month helper are W2-12's |
-| AU-14 | **W2-03, H-03** | **Phase B2 start gated** on W2-03 + H-03 deployed |
+| AU-14 | **W2-03, H-03** | W-h start gated on W2-03 + H-03 deployed (H-03 follows G-03, schema merge 24.11) |
 | AU-15 | **W2-12** | **Phase B1 start gated** (contracts queue is W2-12's) |
 | AU-16 | **H-03 via H-13** (PR b); G-14/G-15 via H-12 (status unknown) | PR a (shadow) on time after AU-01 + AU-07; PR b/c slip with H-03 |
 | AU-17 | **H-03 via H-13** (PR b, c); H-05 core, H-06 unknown | PR a waits for H-05 core + H-06 as before; PR b/c also slip with H-03 |
 | AU-18 | W3-05, W3-11 (wave 3, gated on **W2-08 + H-03**); AU-08 (gated on W2-03 + W2-08) | Phase C start slips with wave 3; the stand-alone `dash/close/missing-docs` interim stays available |
-| AU-19 | **W2-03, H-03** (G-03 unknown) | pure builder/matcher on fixtures only until both land |
+| AU-19 | **W2-03, H-03, G-03** (G-03 assigned 7.11; critical path) | pure builder/matcher on fixtures only until they land |
 | H-05a | none (job files from AU-12, AU-08) | slips with AU-12 / AU-08 (W2-03) |
 | H-12 | **H-03** (bank signal), H-13 (needs H-03); G-14, G-15 unknown | commit (a) can be drafted; (b) slips with H-03 |
 | H-13 | **H-03** | cannot take a migration number until H-03 is deployed |
 
-**The critical path is W2-03 + H-03 + W2-12 + G-17** (plus W2-08 for AU-08 and wave 3). Nothing in Phase A except AU-02 (G-17) is held by a not-started package; Phase B1 is held by W2-03/W2-08 (AU-08) and W2-12 (AU-13, AU-15); Phase B2 by W2-03/H-03 (AU-12, AU-14).
+**The critical path is G-03 → H-03 (schema lane) + W2-03 + W2-12 + G-17** (plus W2-08 for AU-08 and wave 3). In W-f nothing is held by a not-started package; in W-g only AU-02 (G-17); in W-h AU-08 (W2-03/W2-08), AU-13 (W2-12) and AU-14 (W2-03/H-03); in W-i AU-09/AU-12/AU-15 wait on G-15/W3-03/W3-10.
 
 **Open pilot PRs that change brief premises (verify on `main` after train B):**
 - **#211** MISSING_ON_INVOICE leaves the leak figure (owner-approved 31.10): fixes charts `LEAK_FILTER` and moves the EOD digest onto it. AU-07's labelled "חסר בחשבונית (ממתין לתיקון H-07)" line reads ₪0 and is hidden once merged; AU-04's EOD ₪ fix is already done (verify only). W2-04 draft #209 also rewrites `endOfDayReport.ts` (open credits = `awaitingDecision`): the second of #209/#211 to merge rebases.
 - **#219** no ₪ to receiver/chef (activity, receiving reads, owner aggregates, `lib/staffMoney.ts`): partially closes the H-11 list; AU-04 still builds ₪-free payloads and tests them.
 - **#224 / #232** (train B) real consolidated invoices recognised: AU-02's A9 item becomes **verify + tests**; AU-09's "real scans reach your code" precondition is met by them.
-- **#173** quiet hours, Shabbat and the 6/day cap for staff alerts (`notifications/sendWindow.ts`): overlaps G-06's rule; every AU brief that cites "quiet hours via G-06" uses whichever lands as `staffAlertHold` / `notify()`; do not re-implement.
+- **#173** quiet hours, Shabbat and the 6/day cap for staff alerts: **quiet hours now come from #173's `notifications/sendWindow.ts`** (7.11). G-06 `notify()` applies that window; every AU brief that cites "quiet hours via G-06" gets it through `notify()` / `staffAlertHold`, never a second rule.
 - **#230** W1-11 `sendStatus` dedupe on orders: AU-04 (A5) and AU-11 read `sendStatus` after it.
 - **#222** list of invoices waiting for lines (hold reasons): AU-02's needs-review nudge and AU-06's `intake_stuck` link to it rather than add a list.
 - **#216** manual invoice lines when OCR fails (`ocrSweep.ts`, `matchInvoice.ts`): AU-02 rebases its `ocrSweep.ts` re-sign on it; AU-04 rebases `matchInvoice.ts` on it.
@@ -374,15 +426,15 @@ W2-06 (#184) + G-07 (#182) ─→ AU-24 ─→ AU-11 (orders/document/** handed 
 AU-01 ─→ registry rows for every AU-20+ option (all default off); orderPricesOut owner toggle (AU-24)        AU-07 ─→ KPI rows below
 ```
 
-### 13.4 Slotting by phase (sessions are AU sessions; at most 8 at a time, §10)
-| Phase | Window | AU-20+ work | Hard gates not yet merged (open-PR read 2026-11-07) | AU sessions in phase (existing + new) |
+### 13.4 Slotting by phase (inside the shared AU cap of §10: ≤3 AU sessions at once, after the AU-01..19 queue of each phase; §10 names the windows)
+| Phase | Window | AU-20+ work | Hard gates not yet merged (open-PR read 2026-11-07) | AU packages in phase (existing + new; never more than 3 running, §10) |
 |---|---|---|---|---|
-| B1 | December 2026 | AU-20 PR a (+ PR b and the MarketMan layout after AU-10 / AU-02), AU-24 | #211, #219, G-04 #188, W2-06 #184, G-07 #182 (all built or open); **G-17 not started**, which gates AU-02 and through it only AU-20 PR b and the MarketMan layout (PR a does not wait); MarketMan PO samples (pilot ops) | 5 + 2 = **7** |
-| B2 | Dec 2026–Jan 2027 (after AU-04 merges) | AU-21 PR a, AU-22 | **W2-12 not started** (AU-22, via AU-13); G-08 #200; W2-10 #193/#194/#197; G-13 #187 | 3 + 2 = **5** |
-| C | Jan–Mar 2027 | AU-21 PR b, AU-23, AU-25 | **wave 3 gated on W2-08 + H-03 (not started)**: W3-10, W3-02, W3-04, W3-08, W3-05; OD-C3, OD-C7, OD-C10 | 4 + 3 = **7** (+ H-12, H-13 human) |
+| B1 | early Jan 2027 (W-i tail, after AU-09/12/15 start; §10) | AU-20 PR a (+ PR b and the MarketMan layout after AU-10 / AU-02), AU-24 | #211, #219, G-04 #188, W2-06 #184, G-07 #182 (all built or open); **G-17 not started**, which gates AU-02 and through it only AU-20 PR b and the MarketMan layout (PR a does not wait); MarketMan PO samples (pilot ops) | 5 + 2 = **7** |
+| B2 | W-j → Feb 2027 (AU-21 PR a server-side in W-j; AU-22 page after 30.1) | AU-21 PR a, AU-22 | **W2-12 not started** (AU-22, via AU-13); G-08 #200; W2-10 #193/#194/#197; G-13 #187 | 3 + 2 = **5** |
+| C | Feb–Mar 2027 (after AU-16..19 have their slots) | AU-21 PR b, AU-23, AU-25 | **wave 3 gated on W2-08 + H-03 (not started)**: W3-10, W3-02, W3-04, W3-08, W3-05; OD-C3, OD-C7, OD-C10 | 4 + 3 = **7** (+ H-12, H-13 human) |
 | **D (new)** | **Apr–Jun 2027** | AU-21 PR c + PR d, the delivery-note brief (split from AU-20; written when H-04 lands), AU-26 (+ AU-23 / AU-25 if wave 3 slips) | W3-07a, H-04, H-05a row 5 addendum (human), Phase-6 credentials, AU-11 + W3-10 + OD-C9 | **3** (up to 5 with slips) |
 
-**Why a Phase D.** Every Phase-D item waits on something that cannot land in Jan–Mar under the current state: wave 3 itself is gated on W2-08 and H-03, neither started (§10b), so W3-10 / W3-07a land late in C at best; H-04 is a human schema batch not in the PR read; AU-21 PR c needs Phase-6 credentials (human only) and a human `cron.ts` row that OD-C1 forbids until PR a + G-04 + #211 are merged. Putting them in C would create packages that start and stall. Phase D keeps C's session count at 7 and gives the human PRs (H-04, H-05a row 5) a quarter to land. If wave 3 starts on time, AU-23 and AU-25 stay in C; AU-26 does not move earlier (it also needs AU-11's drafts in production for its quantity basis).
+**Why a Phase D.** Every Phase-D item waits on something that cannot land in Jan–Mar under the current state: wave 3 itself is gated on W2-08 and H-03, neither started (§10b), so W3-10 / W3-07a land late in C at best; H-04 is a human schema batch not in the PR read; AU-21 PR c needs Phase-6 credentials (human only) and a human `cron.ts` row that OD-C1 forbids until PR a + G-04 + #211 are merged. Putting them in C would create packages that start and stall. Phase D keeps C's package count at 7 (run ≤3 at a time) and gives the human PRs (H-04, H-05a row 5) a quarter to land. If wave 3 starts on time, AU-23 and AU-25 stay in C; AU-26 does not move earlier (it also needs AU-11's drafts in production for its quantity basis).
 
 ### 13.5 Ownership ledger additions (same rules as §9; anything not listed is read-only)
 | Pkg | Phase | Owns | Collision → resolved by ordering | Hands back after merge |
@@ -421,3 +473,7 @@ OD-C1 documents first, no sync scheduler before AU-21 PR a + G-04 + #211 (AU-20,
 - AU-25: storing the sales figure as a `pos_sales` row would pollute `posVsTheory`; the brief uses a jsonb month map with audit (no schema change).
 - AU-26: `supplier_catalog_items.pack_size` already exists (`schema.ts:648`); the real dependency is W3-10's item master. AU-13 defines no digest section interface; PR b is one module plus one import line.
 - Review pass (2026-11-07): the `procurement_platform` enum holds `marketman`, `zester`, `zestt`, `tabit`, `yarpa`, `nash`, `restigo`, `restomatch` (`schema.ts:103-110`; `zester` ≠ `zestt`); flags OFF in the pilot are read from `PILOT_FEATURES` (`packages/db/scripts/pilot-config.ts:26-37`), not from the key list in `lib/features.ts`; `orderPricesOut` is built but OFF in the pilot; a manually typed food-sales figure and a purchases-based food-cost bp already exist (`schema.ts:1190-1191`, `routers/inventory.ts:195-210, 404-422`); no manual sync trigger exists on `main` (`sinceOverride` only in `syncPlatforms.ts:21, 62`); `buildMatchInput` eligibility is status-only (`:40`); `NormalizedProduct` has no price (`procurement/src/types.ts:29-36`); AU-20 PR b never touches `importPo.ts`, so it returns to AU-11 after PR a.
+
+## 14. Updates from the orchestrator
+- **7.11 (binding; programme plan §3, §6.4, §7, Appendix A §12):** shared cap: AU sessions count inside the 8 build slots, ≤2 until Thu 3.12, ≤3 in December and after; **no AU session starts before this amendment lands** (§10) · start rule: branch from `main` after train B · AU track starts ~23.11 with AU-07 then AU-01 (W-f); AU-04 + AU-02 from 30.11 (W-g), AU-03 from 3.12; December queue AU-14, AU-06, AU-08, AU-10, AU-13; January AU-09, AU-12, AU-15, then phase C; AU-20..26 after that queue in their phases (§10, §13.4) · review order 16–30.11 AU-07a → AU-01a → AU-07b; 1–12.12 AU-04 → AU-03 → AU-02a · **AU-11 is an addendum slice of W3-09**, not its own session · lanes and `⟨AU-hook:…⟩` names adopted (§10a.1); pause order under WARNING: AU starts pause first (§10) · G-03ʰ assigned now, on the critical path (G-03 → H-03, 24.11) · `ocrInvoice.ts` lock G-06 → G-09 r5 → G-17 → AU-02 → AU-10 → W3-11 · one orchestrator PR pre-registers the empty AU routers in `api/index.ts` (W1-04 style); `api/index.ts` lines orchestrator-serialised · G-05 gets one batched AU `AuditAction` list before 12.11 · ledger carve-outs: W2-14 → `settings/automations/**` + `settings/notifications/digest-preview/**`; G-17 → `packages/ocr/src/{checks.ts,supplierHint.ts}` (AU-02) · AU-07 owns the ₪ funnel definition · one `isLate` rule in `api/lib/deliveryState.ts` · downgraded to soft: AU-09 on AU-02, AU-04 on G-13 (`formatIlsAgorot` interim), AU-12 on W2-03 · AD1: `vatAtRisk` only after #219 is on `main` and a receiver call returns `null` ₪ · §10b: #200 and #214 are in train B; quiet hours come from #173's `sendWindow.ts`.
+- **7.11 conflict (for the orchestrator):** "AU-02 lands before G-17, G-17 rebases on it" contradicts the programme plan's lock order (G-17 → AU-02); this README and the briefs follow the programme plan.
