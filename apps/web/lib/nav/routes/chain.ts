@@ -15,13 +15,14 @@ export const routes: RouteDef[] = [
   },
   {
     // W3-01 roll-up matrix: every branch side by side, one click from the chain
-    // page. Inherits the chain page's owner gate; the bookkeeper's read-only
-    // web entry comes with slice b (chain.matrix already serves her, decision 7).
-    // The chain router re-checks the membership per branch.
+    // page. The owner, and the chain's bookkeeper read-only (decision 7: the
+    // bookkeeper reads everything). The chain router re-checks the membership
+    // per branch.
     key: 'chainMatrix',
     path: '/dashboard/chain/matrix',
     group: 'chain',
     parent: 'chain',
+    roles: ['owner', 'bookkeeper'],
     chain: 'only',
     nav: 'linked',
     aliases: ['כל הסניפים', 'מטריצת סניפים', 'matrix'],

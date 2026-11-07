@@ -163,7 +163,13 @@ describe('ROUTE_ROLES generated from the registry', () => {
     Object.fromEntries(Object.entries(m).map(([k, v]) => [k, [...v].sort()]));
 
   it("equals today's map except the supplier ledger and the invoice page, which drop the receiver", () => {
-    const { ['/dashboard/suppliers/ledger']: ledger, ['/dashboard/invoices']: invoices, ['/dashboard/orders']: orders, ...rest } = ROUTE_ROLES;
+    const {
+      ['/dashboard/suppliers/ledger']: ledger,
+      ['/dashboard/invoices']: invoices,
+      ['/dashboard/orders']: orders,
+      ['/dashboard/chain/matrix']: chainMatrix,
+      ...rest
+    } = ROUTE_ROLES;
     const {
       ['/dashboard/suppliers/ledger']: ledgerBefore,
       ['/dashboard/invoices']: invoicesBefore,
@@ -180,6 +186,9 @@ describe('ROUTE_ROLES generated from the registry', () => {
     // The one loosening, owner decision 31.10 (pilot): the chef orders freely.
     expect(ordersBefore).toEqual(['owner', 'manager']);
     expect(orders).toEqual(['owner', 'manager', 'chef']);
+    // W3-01 (decision 7, granted 7.11): the chain's bookkeeper reads the branch matrix, read-only.
+    expect(ROUTE_ROLES_BEFORE['/dashboard/chain/matrix']).toBeUndefined();
+    expect([...(chainMatrix ?? [])].sort()).toEqual(['bookkeeper', 'owner']);
     // The printable leak report keeps inheriting /leaks (no silent bounce for the bookkeeper's button).
     expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
     expect(allowedRolesForPath('/dashboard/leaks/report')).toContain('bookkeeper');
@@ -207,7 +216,9 @@ describe('ROUTE_ROLES generated from the registry', () => {
       const was = before(concrete) ?? ALL_ROLES;
       // Owner decision 31.10 (pilot): the chef opens orders (list, detail, new, capture).
       const ordersChef = (role: UserRole) => role === 'chef' && (concrete === '/dashboard/orders' || concrete.startsWith('/dashboard/orders/'));
-      for (const role of now) if (!ordersChef(role)) expect(was, `${role} on ${concrete}`).toContain(role);
+      // W3-01 (decision 7): the bookkeeper reads the chain matrix (read-only; chain.matrix re-checks per branch).
+      const matrixBookkeeper = (role: UserRole) => role === 'bookkeeper' && concrete === '/dashboard/chain/matrix';
+      for (const role of now) if (!ordersChef(role) && !matrixBookkeeper(role)) expect(was, `${role} on ${concrete}`).toContain(role);
     }
   });
 });
