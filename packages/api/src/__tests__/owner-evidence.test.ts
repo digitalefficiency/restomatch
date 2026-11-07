@@ -159,3 +159,46 @@ describe.skipIf(!LAB)('owner evidence on the lab month (read-only)', () => {
     expect(ev.filter((e) => e.verified === true).length).toBeGreaterThan(0);
   });
 });
+
+// ── owner.lineHistory (W2-09c) ──────────────────────────────────────────────
+import { afterAll as afterAllH, beforeEach as beforeEachH } from 'vitest';
+import { auditLog } from '@restomatch/db';
+import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { callerFor, db as testDb } from './owner-test-helpers';
+
+describe('owner.lineHistory', () => {
+  let A: Tenant;
+  let B: Tenant;
+  beforeEachH(async () => {
+    await resetDb(testDb);
+    A = await seedTenant(testDb, 'A');
+    B = await seedTenant(testDb, 'B');
+  });
+  afterAllH(async () => resetDb(testDb));
+
+  it('latest entries first: who (role at decision time), verb, before→after', async () => {
+    const at = (m: number) => new Date(Date.UTC(2026, 9, 20, 9, m));
+    await testDb.insert(auditLog).values([
+      { restaurantId: A.restaurantId, userId: A.ownerUserId, action: 'discrepancy.escalated', entityType: 'discrepancy', entityId: A.discrepancyId, before: { status: 'open' }, after: { status: 'escalated', role: 'manager' }, at: at(1) },
+      { restaurantId: A.restaurantId, userId: A.ownerUserId, action: 'discrepancy.approved', entityType: 'discrepancy', entityId: A.discrepancyId, before: { status: 'escalated' }, after: { status: 'accepted', role: 'owner' }, at: at(2) },
+    ]);
+    // The seed's own 'discrepancy.created' row (now) is real history too; check the decisions.
+    const h = (await callerFor(A).owner.lineHistory({ discrepancyId: A.discrepancyId, limit: 5 })).filter((e) => e.action !== 'discrepancy.created');
+    expect(h.map((e) => [e.action, e.userRole, e.before, e.after])).toEqual([
+      ['discrepancy.approved', 'owner', 'escalated', 'accepted'],
+      ['discrepancy.escalated', 'manager', 'open', 'escalated'],
+    ]);
+    expect(h[0]!.at).toBe(at(2).toISOString());
+  });
+
+  it('attack: a foreign discrepancyId → NOT_FOUND (never an empty history)', async () => {
+    await expect(callerFor(A).owner.lineHistory({ discrepancyId: B.discrepancyId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(callerFor(A).owner.lineHistory({ discrepancyId: '00000000-0000-4000-8000-000000000000' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('receiver and chef are FORBIDDEN', async () => {
+    for (const role of ['receiver', 'chef'] as const) {
+      await expect(callerFor(A, role).owner.lineHistory({ discrepancyId: A.discrepancyId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+  });
+});
