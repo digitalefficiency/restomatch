@@ -7,6 +7,7 @@ import { runDoctor } from '../doctor';
 import { findJournalGaps, readJournal, runMigrator } from '../migrations';
 import { planSupabaseSync, repoRoot, SUPABASE_LOCK, SUPABASE_MIGRATIONS_DIR } from '../supabaseSync';
 import { testDbUrl } from '../test-env';
+import { NEEDS_TRANSACTION_BLOCK, NOT_IN_PIPELINE, splitSqlStatements, stripSqlComments } from './sqlStatements';
 
 /**
  * The Supabase GitHub-integration path, proven on an EMULATED Supabase:
@@ -15,8 +16,12 @@ import { testDbUrl } from '../test-env';
  *   - `storage` (buckets/objects/foldername) is owned by a separate
  *     supabase_storage_admin role; anon/authenticated/service_role exist;
  *   - uuid-ossp is pre-installed in an `extensions` schema, as on Supabase;
- *   - every supabase/migrations file is applied in filename order, one
- *     transaction per file, aborting on the first error (psql -1 ON_ERROR_STOP).
+ *   - every supabase/migrations file is applied in filename order the way the
+ *     Supabase CLI does it: its statements go out as a pipeline with NO BEGIN
+ *     (the CLI queues them into one pgconn batch with a single Sync). Here each
+ *     statement is sent on its own, also without BEGIN, which is stricter: any
+ *     statement that needs a transaction block (a top-level LOCK, SET LOCAL, …)
+ *     fails exactly as on Supabase (25P01). Aborts on the first error.
  * Then: drizzle sees the DB as fully migrated, the doctor reports no FAIL, the
  * RLS file is idempotent, and the storage block degrades to a WARNING instead
  * of failing the deploy when the role may not touch storage.objects.
@@ -46,8 +51,10 @@ let canCreate = true;
 const notices: string[] = [];
 
 async function applyFile(sql: postgres.Sql, file: string): Promise<void> {
-  const body = readFileSync(join(migDir, file), 'utf8');
-  await sql.begin((tx) => tx.unsafe(body));
+  // Pipeline mode, like the Supabase CLI: no explicit BEGIN around the file.
+  for (const stmt of splitSqlStatements(readFileSync(join(migDir, file), 'utf8'))) {
+    await sql.unsafe(stmt);
+  }
 }
 
 const TENANT_POLICIES = ['invoice_scans_tenant_delete', 'invoice_scans_tenant_insert', 'invoice_scans_tenant_select', 'invoice_scans_tenant_update'];
@@ -417,5 +424,26 @@ describe('git deploy onto an emulated Supabase project', () => {
     } finally {
       await fresh.end();
     }
+  });
+});
+
+describe('every supabase/migrations file is safe for the CLI pipeline (one Sync, no BEGIN)', () => {
+  it('has no top-level statement that needs a transaction block or cannot run in a pipeline', () => {
+    const bad: string[] = [];
+    for (const f of files) {
+      for (const stmt of splitSqlStatements(readFileSync(join(migDir, f), 'utf8'))) {
+        const head = stripSqlComments(stmt).trim();
+        if (NEEDS_TRANSACTION_BLOCK.test(head) || NOT_IN_PIPELINE.test(head)) bad.push(`${f}: ${head.slice(0, 60)}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('the scanner itself catches the round-1 shape (top-level LOCK / SET LOCAL) and allows a LOCK inside DO', () => {
+    const stmts = splitSqlStatements(
+      "SET LOCAL lock_timeout = '5s';\nLOCK TABLE a IN ACCESS EXCLUSIVE MODE;\nDO $$ BEGIN LOCK TABLE a; END $$;\nCREATE INDEX CONCURRENTLY i ON a (x);\nselect set_config('lock_timeout', '5s', true);",
+    ).map((x) => stripSqlComments(x).trim());
+    expect(stmts).toHaveLength(5);
+    expect(stmts.map((x) => NEEDS_TRANSACTION_BLOCK.test(x) || NOT_IN_PIPELINE.test(x))).toEqual([true, true, false, true, false]);
   });
 });

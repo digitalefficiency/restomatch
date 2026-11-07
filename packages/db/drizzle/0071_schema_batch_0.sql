@@ -56,14 +56,25 @@
 -- 0072) — may reference 'event' or 'skipped'. App code starts writing them only
 -- after the deploy.
 --
--- Locks: the FIRST statement sets lock_timeout = 5s for this transaction, and the
--- second takes every ACCESS EXCLUSIVE lock this file needs, up front, in one fixed
--- order. So no lock is upgraded mid-file (goods_receipts AccessShare → AccessExclusive,
--- users ShareRowExclusive → AccessExclusive), and a long reader or an idle-in-
--- transaction session makes the migration FAIL FAST (55P03, nothing applied) instead
--- of queueing every read behind it. Retry once traffic is quiet; a re-run is safe.
--- (FK creation also takes SHARE ROW EXCLUSIVE on restaurants/suppliers/invoices:
--- acquired once each, never upgraded, bounded by the same timeout.)
+-- Locks: 5 s per lock wait, the whole lock phase bounded at 6 s.
+--   * lock_timeout = 5s and statement_timeout = 6s are set with set_config(…, true)
+--     (transaction-local) — NOT `SET LOCAL` / a top-level `LOCK TABLE`: the Supabase
+--     CLI applies a file as ONE pipeline with a single Sync and NO BEGIN, where a
+--     top-level LOCK fails with 25P01 ("can only be used in transaction blocks").
+--     Inside a DO block it is fine on both paths (drizzle's BEGIN and the pipeline).
+--   * Every lock this file needs is taken in that ONE DO block, up front, in a fixed
+--     PARENT-FIRST order that matches the app (startReceiving: purchase_orders →
+--     goods_receipts → gr_lines), so no lock is upgraded mid-file and the migration
+--     does not deadlock with a live receipt start. ACCESS EXCLUSIVE on the 7 altered
+--     tables; SHARE ROW EXCLUSIVE on restaurants/suppliers/invoices (the new FKs'
+--     targets), taken here so the FK DDL below never waits.
+--   * A long reader or an idle-in-transaction session makes the migration FAIL FAST
+--     (55P03 / 57014): nothing of this file is applied or recorded. Retry when quiet.
+--   * statement_timeout is restored right after the lock phase, to the session's
+--     reset value (pg_settings.reset_val: no state carried between statements), so
+--     the backfill and the DDL run without the 6 s bound. Residual risk: another multi-statement app transaction
+--     that locks these tables in a different order can still meet 40P01; one of the
+--     two is cancelled and the migration is simply re-run.
 --
 -- Additive only, idempotent (IF NOT EXISTS / guarded DO blocks); a second run is a
 -- no-op. ROLLBACK is an ordered procedure, NOT a list of DROPs. It is in the PR body
@@ -73,8 +84,17 @@
 -- (3) revert the rls/0002 list in the same change; (4) the data in the 3 new tables
 -- is lost. Enum values cannot be dropped and stay harmless.
 
-SET LOCAL lock_timeout = '5s';--> statement-breakpoint
-LOCK TABLE "gr_lines", "goods_receipts", "purchase_orders", "discrepancies", "recovery_claims", "product_aliases", "users" IN ACCESS EXCLUSIVE MODE;--> statement-breakpoint
+SELECT set_config('lock_timeout', '5s', true);--> statement-breakpoint
+SELECT set_config('statement_timeout', '6s', true);--> statement-breakpoint
+DO $$
+BEGIN
+  -- Parent-first. Never reorder without checking the app's lock order.
+  LOCK TABLE "restaurants", "suppliers" IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE "purchase_orders", "goods_receipts", "gr_lines" IN ACCESS EXCLUSIVE MODE;
+  LOCK TABLE "invoices" IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE "discrepancies", "recovery_claims", "product_aliases", "users" IN ACCESS EXCLUSIVE MODE;
+END $$;--> statement-breakpoint
+SELECT set_config('statement_timeout', (SELECT reset_val FROM pg_settings WHERE name = 'statement_timeout'), true);--> statement-breakpoint
 
 -- ── gr_lines: count truth ─────────────────────────────────────────────────────
 ALTER TABLE "gr_lines" ADD COLUMN IF NOT EXISTS "counted_at" timestamp with time zone;--> statement-breakpoint
