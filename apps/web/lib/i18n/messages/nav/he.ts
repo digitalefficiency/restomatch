@@ -54,6 +54,7 @@ export const he = {
     inventoryCount: 'ספירה',
     inventoryDetail: 'פרטי ספירה',
     chain: 'סקירת רשת',
+    chainMatrix: 'כל הסניפים',
     branches: 'סניפים',
     team: 'צוות',
     integrations: 'חיבורים',

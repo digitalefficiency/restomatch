@@ -161,6 +161,9 @@ export default async function ChainPage({
             <span className="text-subtle">{t('dashboard.scopeNote', { count: formatNumber(data.branches.length, locale) })}</span>{' '}
             <Link href="/dashboard/branches" className="font-semibold text-primary hover:text-ink" data-testid="chain-manage-branches">
               {t('switcher.manageLink')}
+            </Link>{' '}
+            <Link href="/dashboard/chain/matrix" className="font-semibold text-primary hover:text-ink" data-testid="chain-open-matrix">
+              {t('matrix.open')}
             </Link>
           </>
         }

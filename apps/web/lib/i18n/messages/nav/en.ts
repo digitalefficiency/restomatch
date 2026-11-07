@@ -51,6 +51,7 @@ export const en: Shape<typeof he> = {
     inventoryCount: 'Count',
     inventoryDetail: 'Count details',
     chain: 'Chain overview',
+    chainMatrix: 'All branches',
     branches: 'Branches',
     team: 'Team',
     integrations: 'Integrations',

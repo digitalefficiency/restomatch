@@ -308,71 +308,9 @@ export const approvalsRouter = router({
    * decider named on a CONFLICT is read back from audit_log, which carries no
    * match-run id. W2-13 scopes both to the invoice's latest run.
    */
-  queueSummary: memberProcedure.input(z.object(QueueFilters).optional()).query(async ({ ctx, input }) => {
-    const rid = ctx.session.restaurantId;
-    const roles = expandVisibleRoles(ctx.session.role);
-    const rows = await ctx.db
-      .select({
-        id: discrepancies.id,
-        type: discrepancies.type,
-        severity: discrepancies.severity,
-        requiredRole: discrepancies.requiresRole,
-        deltaAmount: discrepancies.deltaAmount,
-        createdAt: discrepancies.createdAt,
-        invoiceId: matchRuns.invoiceId,
-      })
-      .from(discrepancies)
-      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
-      .leftJoin(invoices, and(eq(invoices.id, matchRuns.invoiceId), eq(invoices.restaurantId, rid)))
-      .where(
-        and(
-          eq(discrepancies.restaurantId, rid),
-          inArray(discrepancies.resolutionStatus, [...OPEN_STATUSES]),
-          notZeroShortTwin(),
-          ...filterWhere(input),
-        ),
-      );
-    const mine = rows.filter((r) => r.requiredRole && roles.includes(r.requiredRole));
-    const others = rows.filter((r) => !r.requiredRole || !roles.includes(r.requiredRole));
-
-    // The ₪ and the split come from the same rows, so "להחלטה" count and ₪ always agree.
-    const decide = mine.filter(isClaimableRow);
-    const showOthers = DECIDER_ROLES.includes(ctx.session.role);
-    const othersClaimable = showOthers ? others.filter(isClaimableRow) : [];
-    // ONE query for both sets (lib/claims cap per invoice), then split by row id.
-    const amounts = await claimsByRow(ctx.db, rid, [...decide, ...othersClaimable]);
-    const { claimableIls, duplicateIls, vatIls } = basisTotals(decide, amounts);
-    const oldest = mine.reduce<Date | null>((o, r) => (!o || r.createdAt < o ? r.createdAt : o), null);
-
-    // Others lane: the same claims rule and the same before-VAT basis as the tile.
-    const byRole = new Map<string, { count: number; agorot: number }>();
-    if (showOthers) {
-      for (const r of others) {
-        const key = r.requiredRole ?? 'manager';
-        const e = byRole.get(key) ?? { count: 0, agorot: 0 };
-        e.count += 1;
-        const a = amounts.get(r.id);
-        if (a && a.basis === 'excl') e.agorot += Math.round(a.amount * 100);
-        byRole.set(key, e);
-      }
-    }
-    const othersTotal = [...byRole.values()].reduce((s, e) => s + e.agorot, 0);
-    return {
-      count: mine.length,
-      blockers: mine.filter((r) => r.severity === 'block').length,
-      oldestAt: oldest,
-      claimableIls,
-      duplicateIls,
-      vatIls,
-      toDecide: { count: decide.length, amountIls: claimableIls },
-      toReview: { count: mine.length - decide.length },
-      others: {
-        count: showOthers ? others.length : 0,
-        amountIls: othersTotal / 100,
-        byRole: [...byRole.entries()].map(([role, e]) => ({ role, count: e.count, amountIls: e.agorot / 100 })),
-      },
-    };
-  }),
+  queueSummary: memberProcedure
+    .input(z.object(QueueFilters).optional())
+    .query(({ ctx, input }) => computeQueueSummary(ctx.db, ctx.session.restaurantId, ctx.session.role, input)),
 
   approve: deciderProcedure
     .input(z.object({ discrepancyId: z.string().uuid(), note: z.string().max(500).optional() }))
@@ -818,3 +756,80 @@ async function ensureCanAct(
 
 // keep import stable
 void authedProcedure;
+
+/**
+ * The body of `approvals.queueSummary`, exported so the chain matrix (W3-01)
+ * reads each branch's "₪ awaiting" from the very same rows and the same claims
+ * rule as the approvals tile. MUST run inside that restaurant's own RLS
+ * transaction (`memberProcedure` / chain `inBranch`); `role` is the caller's
+ * role in THAT restaurant.
+ */
+export async function computeQueueSummary(
+  db: import('@restomatch/db').Database,
+  rid: string,
+  role: UserRole,
+  input?: QueueFilterInput,
+) {
+  const roles = expandVisibleRoles(role);
+  const rows = await db
+    .select({
+      id: discrepancies.id,
+      type: discrepancies.type,
+      severity: discrepancies.severity,
+      requiredRole: discrepancies.requiresRole,
+      deltaAmount: discrepancies.deltaAmount,
+      createdAt: discrepancies.createdAt,
+      invoiceId: matchRuns.invoiceId,
+    })
+    .from(discrepancies)
+    .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+    .leftJoin(invoices, and(eq(invoices.id, matchRuns.invoiceId), eq(invoices.restaurantId, rid)))
+    .where(
+      and(
+        eq(discrepancies.restaurantId, rid),
+        inArray(discrepancies.resolutionStatus, [...OPEN_STATUSES]),
+        notZeroShortTwin(),
+        ...filterWhere(input),
+      ),
+    );
+  const mine = rows.filter((r) => r.requiredRole && roles.includes(r.requiredRole));
+  const others = rows.filter((r) => !r.requiredRole || !roles.includes(r.requiredRole));
+
+  // The ₪ and the split come from the same rows, so "להחלטה" count and ₪ always agree.
+  const decide = mine.filter(isClaimableRow);
+  const showOthers = DECIDER_ROLES.includes(role);
+  const othersClaimable = showOthers ? others.filter(isClaimableRow) : [];
+  // ONE query for both sets (lib/claims cap per invoice), then split by row id.
+  const amounts = await claimsByRow(db, rid, [...decide, ...othersClaimable]);
+  const { claimableIls, duplicateIls, vatIls } = basisTotals(decide, amounts);
+  const oldest = mine.reduce<Date | null>((o, r) => (!o || r.createdAt < o ? r.createdAt : o), null);
+
+  // Others lane: the same claims rule and the same before-VAT basis as the tile.
+  const byRole = new Map<string, { count: number; agorot: number }>();
+  if (showOthers) {
+    for (const r of others) {
+      const key = r.requiredRole ?? 'manager';
+      const e = byRole.get(key) ?? { count: 0, agorot: 0 };
+      e.count += 1;
+      const a = amounts.get(r.id);
+      if (a && a.basis === 'excl') e.agorot += Math.round(a.amount * 100);
+      byRole.set(key, e);
+    }
+  }
+  const othersTotal = [...byRole.values()].reduce((s, e) => s + e.agorot, 0);
+  return {
+    count: mine.length,
+    blockers: mine.filter((r) => r.severity === 'block').length,
+    oldestAt: oldest,
+    claimableIls,
+    duplicateIls,
+    vatIls,
+    toDecide: { count: decide.length, amountIls: claimableIls },
+    toReview: { count: mine.length - decide.length },
+    others: {
+      count: showOthers ? others.length : 0,
+      amountIls: othersTotal / 100,
+      byRole: [...byRole.entries()].map(([key, e]) => ({ role: key, count: e.count, amountIls: e.agorot / 100 })),
+    },
+  };
+}

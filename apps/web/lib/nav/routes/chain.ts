@@ -13,4 +13,17 @@ export const routes: RouteDef[] = [
     nav: 'item',
     aliases: ['רשת', 'סניפים', 'chain', 'branches'],
   },
+  {
+    // W3-01 roll-up matrix: every branch side by side, one click from the chain
+    // page. Inherits the chain page's owner gate; the bookkeeper's read-only
+    // web entry comes with slice b (chain.matrix already serves her, decision 7).
+    // The chain router re-checks the membership per branch.
+    key: 'chainMatrix',
+    path: '/dashboard/chain/matrix',
+    group: 'chain',
+    parent: 'chain',
+    chain: 'only',
+    nav: 'linked',
+    aliases: ['כל הסניפים', 'מטריצת סניפים', 'matrix'],
+  },
 ];
