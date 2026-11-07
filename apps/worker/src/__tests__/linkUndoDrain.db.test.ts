@@ -410,3 +410,71 @@ describe('R8 MEDIUM: answering an order question "charge line" re-matches the in
     expect(types).not.toContain('UNORDERED_ITEM');
   });
 });
+
+/* ── G-08 order-question kill switch (default ON) ────────────────────────── */
+
+describe('kill switch: settings.features.orderQuestions / FEATURES_OFF=orderQuestions', () => {
+  const setOrderQuestions = (on: boolean) =>
+    db.update(restaurants).set({ settings: { features: { orderQuestions: on } } as never }).where(eq(restaurants.id, restaurantId));
+
+  it('OFF: a name-only order line is no question, an order-held invoice releases on the next re-match; invoice-line questions stay ON', async () => {
+    const po = await order([
+      { productId: P, raw: 'פלפל אדום' },
+      { productId: null, raw: 'בצל סגול' },
+    ]);
+    const held = await heldInvoice({ raw: 'פלפל אדום', productId: P, reasons: ['unlinkedPo'], heldPoId: po, vat: { vat: '3.96', incl: '25.96' } });
+    expect((await computeLeakHero(db, restaurantId)).awaitingQuestionCount).toBe(1);
+    expect((await owner().mapping.questionCount()).count).toBe(1);
+
+    await setOrderQuestions(false);
+    expect((await owner().mapping.questionCount()).count).toBe(0);
+    expect((await computeLeakHero(db, restaurantId)).awaitingQuestionCount).toBe(0);
+    const out = await matchInvoiceForJob(db, { restaurantId, invoiceId: held, rematch: true });
+    expect(out.persisted).not.toBeNull();
+    expect(await statusOf(held)).not.toBe('parsed');
+
+    // Invoice-line questions (and their hold) are unaffected.
+    const q = await heldInvoice({ raw: 'פלפל אדום חריף', productId: null });
+    expect((await owner().mapping.questionCount()).count).toBe(1);
+    expect((await matchInvoiceForJob(db, { restaurantId, invoiceId: q, rematch: true })).skipped).toBe('awaiting_review');
+    // …and a charge answer still works and is learned.
+    const ch = await heldInvoice({ raw: 'פיקדון ארגזים', productId: null });
+    const sample = await owner().mapping.chargeSample({ supplierId: S, rawName: 'פיקדון ארגזים' });
+    const r = await owner().mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים', shownLineIds: sample!.lineIds });
+    expect(r).toMatchObject({ invoiceLinesMarked: 1, learnedKey: true });
+    expect(await runsOf(ch)).toEqual([]); // released + re-queued, not matched inline
+  });
+
+  it('ON (default, and explicit true): unchanged — the order line holds the first match', async () => {
+    for (const on of [null, true]) {
+      if (on != null) await setOrderQuestions(on);
+      const po = await order([
+        { productId: P, raw: 'פלפל אדום' },
+        { productId: null, raw: 'בצל סגול' },
+      ]);
+      const inv = await heldInvoice({ raw: 'פלפל אדום', productId: P, reasons: [], vat: { vat: '3.96', incl: '25.96' } });
+      await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, inv));
+      const out = await matchInvoiceForJob(db, { restaurantId, invoiceId: inv, poId: po });
+      expect(out.skipped).toBe('awaiting_review');
+      expect(await statusOf(inv)).toBe('parsed');
+    }
+  });
+
+  it('FEATURES_OFF=orderQuestions turns it off for every tenant', async () => {
+    const po = await order([
+      { productId: P, raw: 'פלפל אדום' },
+      { productId: null, raw: 'בצל סגול' },
+    ]);
+    const inv = await heldInvoice({ raw: 'פלפל אדום', productId: P, reasons: [], vat: { vat: '3.96', incl: '25.96' } });
+    await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, inv));
+    const prev = process.env.FEATURES_OFF;
+    process.env.FEATURES_OFF = 'orderQuestions';
+    try {
+      const out = await matchInvoiceForJob(db, { restaurantId, invoiceId: inv, poId: po });
+      expect(out.persisted).not.toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.FEATURES_OFF;
+      else process.env.FEATURES_OFF = prev;
+    }
+  });
+});

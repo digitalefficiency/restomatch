@@ -11,6 +11,13 @@ import { sql } from '@restomatch/db';
  * The api's pruneAnsweredReasons clears heldPoId when a learned charge key
  * covers the order's last question.
  */
+// The order-question kill switch (G-08, default ON — packages/api lib/features.ts):
+// FEATURES_OFF=orderQuestions (read at boot) or settings.features.orderQuestions = false (live).
+const ORDER_QUESTIONS_KILLED = (process.env.FEATURES_OFF ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .some((k) => k === 'all' || k === 'orderQuestions');
+
 export const AWAITING_QUESTION_SQL = sql.raw(`(i.status = 'parsed' AND (
   (COALESCE(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ? 'unlinked'
     AND EXISTS (SELECT 1 FROM invoice_lines qil
@@ -22,5 +29,8 @@ export const AWAITING_QUESTION_SQL = sql.raw(`(i.status = 'parsed' AND (
                   JOIN purchase_orders qpo ON qpo.id = qpl.po_id AND qpo.restaurant_id = i.restaurant_id
                  WHERE qpl.po_id = (i.ocr_payload ->> 'heldPoId')::uuid
                    AND qpl.product_id IS NULL AND qpl.supplier_sku IS NULL
-                   AND COALESCE(btrim(qpl.raw_description), '') <> ''))
+                   AND COALESCE(btrim(qpl.raw_description), '') <> ''
+                   AND ${ORDER_QUESTIONS_KILLED ? 'FALSE' : 'TRUE'}
+                   AND COALESCE((SELECT oqr.settings -> 'features' ->> 'orderQuestions'
+                                   FROM restaurants oqr WHERE oqr.id = i.restaurant_id), 'true') <> 'false'))
 ))`);

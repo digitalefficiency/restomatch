@@ -1,6 +1,7 @@
 import { sql, type Database } from '@restomatch/db';
 import { normNameSql, normalizeLinkName } from '@restomatch/catalog';
 import { resolveTolerances } from '@restomatch/matching';
+import { killed } from '../lib/features';
 
 type SQL = ReturnType<typeof sql>;
 
@@ -55,10 +56,17 @@ export function chargeKeyCovers(
  * charge key. Aliases: pl (po_lines) / po (purchase_orders).
  */
 export function poLineIsQuestion(rid: string): SQL {
-  return sql`(pl.product_id is null and pl.supplier_sku is null
+  // The order-question kill switch (G-08 round 8, default ON): FEATURES_OFF=orderQuestions
+  // for every tenant, or settings.features.orderQuestions = false for one (live, no deploy).
+  if (killed('orderQuestions')) return sql`false`;
+  return sql`(${ORDER_QUESTIONS_ON(rid)} and pl.product_id is null and pl.supplier_sku is null
     and coalesce(btrim(pl.raw_description), '') <> ''
     and not ${chargeKeyCovers(rid, sql`po.supplier_id`, sql`pl.supplier_sku`, sql`pl.raw_description`)})`;
 }
+
+/** settings.features.orderQuestions is not false for this restaurant. */
+const ORDER_QUESTIONS_ON = (rid: string) =>
+  sql`coalesce((select oqr.settings -> 'features' ->> 'orderQuestions' from restaurants oqr where oqr.id = ${rid}), 'true') <> 'false'`;
 
 /** How many open questions an order still has (restaurant-scoped). M-4 hold + runForInvoice. */
 export async function orderQuestionCount(db: Database, rid: string, poId: string): Promise<number> {

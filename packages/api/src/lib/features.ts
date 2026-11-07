@@ -45,7 +45,14 @@ export const FEATURE_KEYS = [
   'supplierLedger',
   // S17: inventory counting (ספירת מלאי) → actual food cost per period.
   'inventoryCount',
+  // G-08: name-only ORDER lines are "זה אותו מוצר?" questions (they hold the match).
+  // DEFAULT ON — the kill switch: settings.features.orderQuestions = false, or
+  // FEATURES_OFF=orderQuestions. Invoice-line questions and charge lines stay on.
+  'orderQuestions',
 ] as const;
+
+/** Keys that are ON unless a restaurant sets them false (or FEATURES_OFF kills them). */
+export const DEFAULT_ON_FEATURES: readonly FeatureKey[] = ['orderQuestions'];
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
@@ -53,7 +60,7 @@ interface FeatureSettings {
   features?: Partial<Record<FeatureKey | 'all', boolean>>;
 }
 
-function killed(key: FeatureKey, env: NodeJS.ProcessEnv): boolean {
+export function killed(key: FeatureKey, env: NodeJS.ProcessEnv = process.env): boolean {
   const off = env.FEATURES_OFF?.split(',').map((s) => s.trim()).filter(Boolean) ?? [];
   return off.includes('all') || off.includes(key);
 }
@@ -66,6 +73,7 @@ export function featureEnabled(
 ): boolean {
   if (killed(key, env)) return false;
   const features = (settings as FeatureSettings | null | undefined)?.features;
+  if (DEFAULT_ON_FEATURES.includes(key)) return features?.[key] !== false;
   if (!features) return false;
   return features[key] === true || (features.all === true && features[key] !== false);
 }
