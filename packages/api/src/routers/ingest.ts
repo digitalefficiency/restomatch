@@ -1,4 +1,5 @@
 import { TRPCError } from '@trpc/server';
+import { classifyDocument } from '../ingest/docType';
 import { z } from 'zod';
 import {
   and,
@@ -310,7 +311,12 @@ export const ingestRouter = router({
           : null,
         documents: docs
           .filter((d) => d.messageId === m.id)
-          .map(({ storagePath, ...d }) => ({ ...d, stored: storagePath !== null })),
+          .map(({ storagePath, ...d }) => ({
+            ...d,
+            stored: storagePath !== null,
+            // W3-11: a suggestion only (chip on the row); the user confirms it.
+            docTypeSuggestion: classifyDocument({ filename: d.filename, subject: m.subject }),
+          })),
       }));
     }),
 

@@ -51,6 +51,11 @@ export interface InboxMessage {
     error: string | null;
     invoiceId: string | null;
     stored: boolean;
+    /** W3-11: suggested type (chip); confirming it is persisted once ingest_documents.doc_type exists. */
+    docTypeSuggestion: {
+      type: 'credit_note' | 'statement' | 'consolidated' | 'delivery_note' | 'invoice' | null;
+      confidence: 'high' | 'low';
+    };
   }>;
   /** orderCapture: a forwarded WhatsApp order (text) and the draft PO captured from it. */
   order?: { poId: string | null; poStatus: string | null } | null;
@@ -271,6 +276,26 @@ export function InboxClient(props: Props) {
                             </span>
                           ) : null}
                           <Badge tone={DOC_TONE[d.status]}>{t(`documentStatus.${d.status}`)}</Badge>
+                          {d.docTypeSuggestion.type && d.docTypeSuggestion.type !== 'invoice' ? (
+                            <span className="inline-flex items-center gap-1.5" data-testid="doc-type-chip">
+                              <Badge tone="info">
+                                {d.docTypeSuggestion.confidence === 'low' ? `${t('docType.guess')} ` : ''}
+                                {t(`docType.${d.docTypeSuggestion.type}`)}
+                              </Badge>
+                              {d.docTypeSuggestion.type === 'credit_note' ? (
+                                <Link href="/dashboard/recovery" className="text-xs font-semibold text-primary hover:underline">
+                                  {t('docType.toRecovery')}
+                                </Link>
+                              ) : d.docTypeSuggestion.type === 'statement' ? (
+                                <Link
+                                  href="/dashboard/suppliers/ledger/statement"
+                                  className="text-xs font-semibold text-primary hover:underline"
+                                >
+                                  {t('docType.toStatement')}
+                                </Link>
+                              ) : null}
+                            </span>
+                          ) : null}
                           {d.error ? (
                             <span
                               className={cn(

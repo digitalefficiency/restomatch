@@ -76,6 +76,7 @@ export default async function InboxPage({
               error: d.error,
               invoiceId: d.invoiceId,
               stored: d.stored,
+              docTypeSuggestion: d.docTypeSuggestion,
             })),
           }),
         )}

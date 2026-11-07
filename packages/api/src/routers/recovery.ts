@@ -14,6 +14,7 @@ import {
   syncClaims,
   transitionClaim,
 } from '../recovery/service';
+import { proposeCreditAllocation } from '../recovery/allocation';
 import { financeProcedure, memberProcedure } from '../trpc';
 import { router } from '../trpc';
 
@@ -127,6 +128,19 @@ export const recoveryRouter = router({
     .mutation(({ ctx, input }) =>
       recordCreditNote(ctx.db, ctx.session.restaurantId, { ...input, actorId: ctx.session.userId }),
     ),
+
+  /**
+   * W3-11 · "שיוך זיכוי": which open credit requests of the supplier a credit note of
+   * this amount (before VAT) answers. Read only; "אשר שיוך" = recordCreditNote with the ids.
+   */
+  suggestAllocation: recoveryProcedure
+    .input(
+      z.object({
+        supplierId: z.string().uuid(),
+        amountAgorot: z.number().int().positive().max(100_000_000_00),
+      }),
+    )
+    .query(({ ctx, input }) => proposeCreditAllocation(ctx.db, ctx.session.restaurantId, input)),
 
   creditLineSuggestions: recoveryProcedure
     .input(z.object({ supplierId: z.string().uuid().optional() }).optional())

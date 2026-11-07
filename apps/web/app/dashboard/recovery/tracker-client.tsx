@@ -525,6 +525,7 @@ export function TrackerClient({
                   <CreditForm
                     key={`${g.supplierId}:${creditLine?.invoiceLineId ?? 'manual'}`}
                     supplier={g.name}
+                    supplierId={g.supplierId}
                     claims={g.claims}
                     line={creditLine && creditLine.supplierId === g.supplierId ? creditLine : null}
                     busy={credit.isPending}
@@ -624,6 +625,7 @@ export function TrackerClient({
 
 function CreditForm({
   supplier,
+  supplierId,
   claims,
   line,
   busy,
@@ -631,6 +633,7 @@ function CreditForm({
   onCancel,
 }: {
   supplier: string;
+  supplierId: string;
   claims: Claim[];
   /** A suggested invoice credit line: amount / number / date come from the invoice. */
   line: Suggestion | null;
@@ -658,6 +661,31 @@ function CreditForm({
   const [amount, setAmount] = useState(((line?.amountAgorot ?? owed) / 100).toFixed(2));
   const [date, setDate] = useState(line?.invoiceDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10));
   const [error, setError] = useState<string | null>(null);
+  // W3-11 · "שיוך זיכוי": the server proposes which requests the note answers; the user confirms.
+  const utils = trpc.useUtils();
+  const [basis, setBasis] = useState<Out['suggestAllocation']['suggestion']['basis'] | null>(null);
+  const [remainder, setRemainder] = useState(0);
+  const [suggesting, setSuggesting] = useState(false);
+  async function suggest() {
+    const agorot = line ? line.amountAgorot : parseIlsInput(amount);
+    if (agorot == null || agorot <= 0) {
+      setError(t('creditForm.invalidAmount'));
+      return;
+    }
+    setSuggesting(true);
+    setError(null);
+    try {
+      const r = await utils.recovery.suggestAllocation.fetch({ supplierId, amountAgorot: agorot });
+      const known = new Set(claims.map((c) => c.id));
+      setSelected(new Set(r.suggestion.allocations.map((a) => a.id).filter((id) => known.has(id))));
+      setBasis(r.suggestion.basis);
+      setRemainder(r.suggestion.remainderAgorot);
+    } catch {
+      setError(t('allocation.failed'));
+    } finally {
+      setSuggesting(false);
+    }
+  }
   const toggle = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -709,7 +737,16 @@ function CreditForm({
         <Input value={number} onChange={(e) => setNumber(e.target.value)} maxLength={64} readOnly={!!line} />
       </Field>
       <Field label={t('creditForm.amount')} hint={error ?? undefined}>
-        <Input inputMode="decimal" dir="ltr" value={amount} onChange={(e) => setAmount(e.target.value)} readOnly={!!line} />
+        <Input
+          inputMode="decimal"
+          dir="ltr"
+          value={amount}
+          onChange={(e) => {
+            setAmount(e.target.value);
+            setBasis(null);
+          }}
+          readOnly={!!line}
+        />
       </Field>
       <Field label={t('creditForm.date')}>
         <Input type="date" dir="ltr" value={date} onChange={(e) => setDate(e.target.value)} required readOnly={!!line} />
@@ -717,9 +754,16 @@ function CreditForm({
       <p className="text-xs text-muted sm:col-span-3">
         {t('creditForm.claims', { count: chosen.length, amount: ils(owed) })} {t('creditForm.vatNote')}
       </p>
-      <div className="flex gap-2 sm:col-span-3">
+      <p className="text-xs text-muted sm:col-span-3" data-testid="allocation-basis" aria-live="polite">
+        {basis ? t(`allocation.basis.${basis}`) : t('allocation.hint')}
+        {basis && remainder > 0 ? ` · ${t('allocation.remainder', { amount: ils(remainder) })}` : ''}
+      </p>
+      <div className="flex flex-wrap gap-2 sm:col-span-3">
+        <Button type="button" size="sm" variant="secondary" loading={suggesting} onClick={() => void suggest()}>
+          {t('allocation.suggest')}
+        </Button>
         <Button type="submit" size="sm" variant="gold" loading={busy}>
-          {t('creditForm.submit')}
+          {basis ? t('allocation.confirm') : t('creditForm.submit')}
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
           {t('creditForm.cancel')}

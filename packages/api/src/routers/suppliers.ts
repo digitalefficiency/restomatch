@@ -2,10 +2,13 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { and, asc, eq, suppliers, type Database, type Supplier } from '@restomatch/db';
 import { OrderSchedule } from '@restomatch/types';
-import { invoiceReaderProcedure, managerProcedure, memberProcedure, router } from '../trpc';
+import { financeProcedure, invoiceReaderProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
 import { computeLedgerGrid, computeSupplierLedger } from '../ledger';
+import { reconcileSupplierStatement } from '../ledger/statementData';
+import type { StatementResult } from '../ledger/statement';
+import { MAX_STATEMENT_CSV_CHARS, parseStatementCsv } from '../ledger/statementCsv';
 
 /**
  * Supplier setup (Phase-2). The CRUD surface for the suppliers a restaurant
@@ -176,6 +179,37 @@ export const suppliersRouter = router({
     .query(async ({ ctx, input }) => {
       await assertFeatureOn(ctx.db, ctx.session.restaurantId, 'supplierLedger');
       return computeLedgerGrid(ctx.db, ctx.session.restaurantId, input?.months ?? 6);
+    }),
+
+  /**
+   * W3-11 · Reconcile a supplier statement (כרטסת) against our invoices, credit notes
+   * and agreed credit requests. Finance roles only (receiver/chef see no ₪). Stateless:
+   * the parsed lines come from the client; nothing is stored.
+   */
+  reconcileStatement: financeProcedure
+    .input(
+      z.object({
+        supplierId: z.string().uuid(),
+        /** The statement as CSV / pasted from a spreadsheet (parsed server-side, never stored). */
+        csv: z.string().min(1).max(MAX_STATEMENT_CSV_CHARS),
+      }),
+    )
+    // A mutation only so the statement travels in a POST body, not a URL. No writes.
+    .mutation(async ({ ctx, input }) => {
+      await assertFeatureOn(ctx.db, ctx.session.restaurantId, 'supplierLedger');
+      await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
+      const parsed = parseStatementCsv(input.csv);
+      const empty: StatementResult = {
+        period: { from: null, to: null },
+        totals: { invoicedAgorot: 0, creditedAgorot: 0, paidAgorot: 0, otherLines: 0 },
+        matched: { invoices: 0, credits: 0 },
+        flags: [],
+      };
+      const result =
+        parsed.headerFound && parsed.lines.length > 0
+          ? await reconcileSupplierStatement(ctx.db, ctx.session.restaurantId, input.supplierId, parsed.lines)
+          : empty;
+      return { ...result, headerFound: parsed.headerFound, lineCount: parsed.lines.length, skipped: parsed.skipped };
     }),
 
   create: managerProcedure

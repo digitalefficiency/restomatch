@@ -135,4 +135,16 @@ export const he = {
     inboxOpenDraft: 'לטיוטת ההזמנה',
     inboxNeedsSupplier: 'בחרו ספק כדי ליצור הזמנה',
   },
+  /** W3-11 · suggested document type (chip on the inbox row). */
+  docType: {
+    label: 'סוג מסמך',
+    guess: 'נראה כמו',
+    credit_note: 'חשבונית זיכוי',
+    statement: 'כרטסת',
+    consolidated: 'חשבונית מרכזת',
+    delivery_note: 'תעודת משלוח',
+    invoice: 'חשבונית',
+    toRecovery: 'לשיוך לבקשות זיכוי',
+    toStatement: 'להתאמת כרטסת',
+  },
 } as const;

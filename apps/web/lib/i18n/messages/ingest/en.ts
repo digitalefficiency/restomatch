@@ -134,4 +134,15 @@ export const en: Shape<typeof he> = {
     inboxOpenDraft: 'Open the draft order',
     inboxNeedsSupplier: 'Pick a supplier to create the order',
   },
+  docType: {
+    label: 'Document type',
+    guess: 'Looks like',
+    credit_note: 'Credit note',
+    statement: 'Statement',
+    consolidated: 'Consolidated invoice',
+    delivery_note: 'Delivery note',
+    invoice: 'Invoice',
+    toRecovery: 'Match to credit requests',
+    toStatement: 'Check the statement',
+  },
 };
