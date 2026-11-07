@@ -1,8 +1,8 @@
 {
-  "supplier": { "name": "ירקות השרון בע\"מ", "businessId": "514276389" },
+  "supplier": { "name": "ירקות השרון בע\"מ", "businessId": "514276385" },
   "invoiceNumber": "40917",
   "invoiceDate": "2026-10-14",
-  "allocationNumber": "202610140917",
+  "allocationNumber": "204917335",
   "lines": [
     { "sku": "1102", "rawDescription": "עגבניות שרי", "qty": 12, "unit": "ק\"ג", "unitPrice": 14.9, "lineTotal": 178.8 },
     { "sku": "1107", "rawDescription": "מלפפונים", "qty": 20, "unit": "ק\"ג", "unitPrice": 6.5, "lineTotal": 130 },

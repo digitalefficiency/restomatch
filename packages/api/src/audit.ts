@@ -35,6 +35,9 @@ export type AuditAction =
   | 'admin.plan_assigned'
   | 'admin.overrides_set'
   | 'admin.role_set'
+  | 'admin.features'
+  // A platform admin read a tenant's data (cross-tenant console reads)
+  | 'admin.viewed'
   // Team & membership (tenant connection)
   | 'team.member_invited'
   | 'team.invite_resent'
