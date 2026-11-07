@@ -22,6 +22,7 @@ import { dockPriceNotesForInvoice, mergeLineBadges } from './dock-price-notes';
 import { ConsolidatedPanel } from './consolidated-panel';
 import { Cockpit, type CockpitCopy, type CockpitFrom } from './cockpit';
 import { loadDetail } from './load';
+import { anyFailed, settled, valueOf } from './partial';
 
 export const dynamic = 'force-dynamic';
 
@@ -84,7 +85,6 @@ export default async function InvoiceCockpitPage({
   const canEdit = role === 'owner' || role === 'manager';
   const canRematch = finance;
 
-  const settled = <T,>(p: Promise<T>) => p.then((value) => ({ ok: true as const, value }), () => ({ ok: false as const }));
   const features = restaurantId ? await enabledFeatures(restaurantId) : [];
   const [invoice, overContract, dockPrice, tc, vatRes, proposalRes, scan, needsRes] = await Promise.all([
     caller.receiving.getInvoice({ invoiceId }),
@@ -104,11 +104,12 @@ export default async function InvoiceCockpitPage({
     // #222: a held invoice says why (S13 review reasons; link-only holds are G-08's). No ₪; finance roles only.
     finance ? settled(caller.invoices.needsLines()) : Promise.resolve(null),
   ]);
-  const vatRow = vatRes?.ok ? (vatRes.value.rows[0] ?? null) : null;
+  const vatRow = valueOf(vatRes)?.rows[0] ?? null;
   const tv = vatRow ? await getT(vat) : null;
-  const proposal = proposalRes?.ok ? proposalRes.value : null;
-  const partialError = vatRes?.ok === false || proposalRes?.ok === false || needsRes?.ok === false;
-  const held = (needsRes?.ok ? needsRes.value.rows.find((r) => r.id === invoiceId && r.reviewReasons.length > 0) : null) ?? null;
+  const proposal = valueOf(proposalRes);
+  // A failed read is "couldn't load" (neutral T4 + retry), never ₪0 / "nothing at risk" / "not held" (G-16).
+  const partialError = anyFailed(vatRes, proposalRes, needsRes);
+  const held = valueOf(needsRes)?.rows.find((r) => r.id === invoiceId && r.reviewReasons.length > 0) ?? null;
 
   const from: CockpitFrom = FROM.includes(sp.from as CockpitFrom) ? (sp.from as CockpitFrom) : 'register';
   const supplier = locale === 'en' && detail.supplierNameEn ? detail.supplierNameEn : detail.supplierName;
@@ -178,7 +179,7 @@ export default async function InvoiceCockpitPage({
     <div>
       {partialError ? (
         <Banner
-          tone="warn"
+          tone="neutral"
           title={t('cockpit.loadError')}
           className="mb-4"
           action={
