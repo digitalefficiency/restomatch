@@ -47,4 +47,13 @@ describe('held-invoice reasons (pilot #222)', () => {
   it('prototype keys never resolve to a reason', () => {
     expect(holdReasonKeys(['toString', '__proto__', 'constructor'])).toEqual(['unknown']);
   });
+  it('S14 train-B codes get their own neutral copy (not the generic fallback, not "math")', () => {
+    for (const c of ['invoice_discount', 'mixed_vat', 'deposit_or_fee_line', 'delivery_notes_total_mismatch']) {
+      expect(holdReasonKey(c)).toBe(c);
+      expect(he.needsLines.held[c as keyof typeof he.needsLines.held]).not.toBe(he.needsLines.held.unknown);
+      expect(he.needsLines.held[c as keyof typeof he.needsLines.held]).not.toMatch(/₪/);
+      expect(en.needsLines.held[c as keyof typeof en.needsLines.held]).not.toMatch(/₪/);
+    }
+    expect(holdReasonKeys(['mixed_vat', 'vat_mismatch', 'brand_new_code'])).toEqual(['mixed_vat', 'math', 'unknown']);
+  });
 });

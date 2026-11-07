@@ -19,6 +19,10 @@ export const HOLD_REASON_KEYS = [
   'doc_kind_receipt',
   'doc_kind_quote',
   'doc_kind',
+  'invoice_discount',
+  'mixed_vat',
+  'deposit_or_fee_line',
+  'delivery_notes_total_mismatch',
   'unknown',
 ] as const;
 export type HoldReasonKey = (typeof HOLD_REASON_KEYS)[number];
@@ -40,6 +44,11 @@ const DIRECT: Record<string, HoldReasonKey> = {
   doc_kind_credit_note: 'doc_kind_credit_note',
   doc_kind_receipt: 'doc_kind_receipt',
   doc_kind_quote: 'doc_kind_quote',
+  // S14 train B (OcrChecks.reasons): held for a person, neutral T4 copy.
+  invoice_discount: 'invoice_discount',
+  mixed_vat: 'mixed_vat',
+  deposit_or_fee_line: 'deposit_or_fee_line',
+  delivery_notes_total_mismatch: 'delivery_notes_total_mismatch',
 };
 
 export function holdReasonKey(code: string): HoldReasonKey {
