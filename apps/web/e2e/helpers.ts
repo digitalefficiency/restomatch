@@ -3,6 +3,15 @@ import { readFile, unlink } from 'node:fs/promises';
 import { expect, type Page } from '@playwright/test';
 import postgres from 'postgres';
 import { hashPassword } from '@restomatch/crypto';
+import {
+  drillMismatch,
+  shekelPlacement,
+  totalMismatch,
+  zeroViolation,
+  type GlyphBoxes,
+  type MoneyState,
+  type TotalCheck,
+} from './invariants/logic';
 import { DEMO_RESTAURANT_NAME, E2E_AUTH_ENC_KEY, E2E_DATABASE_URL, MAGIC_LINK_FILE } from './env';
 
 /** Owner connection to the e2e DB (fixtures only — the app itself runs on the RLS role). */
@@ -117,4 +126,94 @@ export function collectPageErrors(page: Page): string[] {
   });
   page.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`));
   return errors;
+}
+
+// ─── G-16 cross-surface invariants (slice b) ─────────────────────────────────
+// Each helper returns its violations. Warn mode (default) logs them with the page;
+// G16_MODE=error (W4-01) turns them into a failed expect. The rules live in
+// ./invariants/logic.ts (unit-tested); these only read the page.
+
+const G16_ERROR = process.env.G16_MODE === 'error';
+
+function g16Report(page: Page, rule: string, violations: string[]): string[] {
+  if (violations.length) console.warn(`[G-16] ${rule} · ${new URL(page.url()).pathname}: ${violations.length}\n  ${violations.join('\n  ')}`);
+  if (G16_ERROR) expect(violations, `G-16 ${rule} on ${page.url()}`).toEqual([]);
+  return violations;
+}
+
+/** Every [data-money-sum-of] total equals its [data-money-row-of] rows to the agora (cap honoured). */
+export async function expectTotalsMatchRows(page: Page): Promise<string[]> {
+  const checks = await page.evaluate(() => {
+    const int = (v: string | null) => (v == null || v === '' ? NaN : Number(v));
+    return [...document.querySelectorAll<HTMLElement>('[data-money-sum-of]')].map((el) => {
+      const group = el.dataset.moneySumOf ?? '';
+      const rows = [...document.querySelectorAll<HTMLElement>(`[data-money-row-of="${CSS.escape(group)}"]`)];
+      const cap = el.dataset.moneyCapAgorot;
+      return {
+        group,
+        totalAgorot: int(el.dataset.moneyAgorot ?? null),
+        rowAgorot: rows.map((r) => int(r.dataset.moneyAgorot ?? null)),
+        capAgorot: cap != null ? Number(cap) : null,
+      };
+    });
+  });
+  return g16Report(page, 'totals-match-rows', checks.map((c: TotalCheck) => totalMismatch(c)).filter((v): v is string => v != null));
+}
+
+/** Follows every [data-drill] on the page and checks the list's [data-drill-total] to the agora. */
+export async function expectDrillParity(page: Page): Promise<string[]> {
+  const links = await page.$$eval('a[data-drill][data-money-agorot]', (as) =>
+    (as as HTMLAnchorElement[]).map((a) => ({ href: a.getAttribute('href') ?? '', agorot: Number(a.dataset.moneyAgorot) })),
+  );
+  const from = page.url();
+  const out: string[] = [];
+  for (const link of links) {
+    if (!link.href) continue;
+    await page.goto(link.href);
+    const total = await page
+      .locator('[data-drill-total]')
+      .first()
+      .getAttribute('data-drill-total', { timeout: 5000 })
+      .catch(() => null);
+    const v = drillMismatch(link, total == null ? null : Number(total));
+    if (v) out.push(v);
+  }
+  if (links.length) await page.goto(from);
+  return g16Report(page, 'drill-parity', out);
+}
+
+/** In he, the ₪ glyph renders left of the first digit in every element holding a ₪ amount. */
+export async function expectShekelLeftOfDigits(page: Page): Promise<string[]> {
+  const boxes = await page.evaluate(() => {
+    const out: GlyphBoxes[] = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const box = (node: Text, i: number) => {
+      const r = document.createRange();
+      r.setStart(node, i);
+      r.setEnd(node, i + 1);
+      const b = r.getBoundingClientRect();
+      return b.width > 0 ? { left: b.left, right: b.right } : null;
+    };
+    for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+      const t = n.data;
+      const s = t.indexOf('₪');
+      const d = t.search(/\d/);
+      if (s < 0 || d < 0) continue;
+      out.push({ text: t, shekel: box(n, s), firstDigit: box(n, d) });
+    }
+    return out;
+  });
+  return g16Report(page, 'shekel-left-of-digits', boxes.map(shekelPlacement).filter((v): v is string => v != null));
+}
+
+/** No red ₪0, and no ₪0 where [data-money-state] says unmeasured / unavailable. */
+export async function expectNoZeroForUnknown(page: Page): Promise<string[]> {
+  const items = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('[data-money-agorot], [data-money-state]')].map((el) => ({
+      text: el.innerText ?? '',
+      state: (el.dataset.moneyState ?? null) as MoneyState | null,
+      color: getComputedStyle(el).color,
+    })),
+  );
+  return g16Report(page, 'no-zero-for-unknown', items.map(zeroViolation).filter((v): v is string => v != null));
 }
