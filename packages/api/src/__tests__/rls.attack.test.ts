@@ -9,6 +9,7 @@ import {
   auditLog,
   billingAccounts,
   catalogImports,
+  claimLetters,
   createDb,
   discrepancies,
   emailInboxes,
@@ -17,6 +18,7 @@ import {
   eq,
   goodsReceipts,
   grLines,
+  idempotencyKeys,
   invitations,
   invoiceLines,
   invoiceScans,
@@ -25,6 +27,7 @@ import {
   memberships,
   notificationsOutbox,
   passwordResetTokens,
+  paymentDeductions,
   plans,
   poLines,
   priceAlertThresholds,
@@ -806,5 +809,111 @@ describe('wave 1 (S11) supplier portal under the RLS app role', () => {
         tx.insert(supplierResponses).values({ restaurantId: A.restaurantId, poId: A.poId, linkId: forged.linkId, status: 'confirmed' }),
       ),
     ).rejects.toThrow();
+  });
+});
+
+// ── 0071 (wave 2, G-03): the three new tenant tables. Add-only probes, one block per
+// table, same template as the S11 block: GUC=A sees only A; a cross-tenant INSERT is
+// refused; an UPDATE aimed at B's rows touches nothing.
+
+describe('0071 (G-03) idempotency_keys (raw RLS)', () => {
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await ownerDb.insert(idempotencyKeys).values({ restaurantId: t.restaurantId, key: `rls-${t.restaurantId}`, procedure: 'receiving.complete' });
+    }
+  });
+  afterAll(async () => {
+    await ownerDb.delete(idempotencyKeys);
+  });
+
+  it('GUC=A sees only tenant-A rows', async () => {
+    const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.select({ rid: idempotencyKeys.restaurantId }).from(idempotencyKeys),
+    );
+    expect(rows).toEqual([{ rid: A.restaurantId }]);
+  });
+
+  it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(idempotencyKeys).values({ restaurantId: B.restaurantId, key: 'forged', procedure: 'x' }),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx
+        .update(idempotencyKeys)
+        .set({ response: { forged: true } })
+        .where(eq(idempotencyKeys.restaurantId, B.restaurantId))
+        .returning({ id: idempotencyKeys.id }),
+    );
+    expect(updated).toHaveLength(0);
+  });
+});
+
+describe('0071 (G-03) claim_letters (raw RLS)', () => {
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await ownerDb.insert(claimLetters).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, seqNo: 1 });
+    }
+  });
+  afterAll(async () => {
+    await ownerDb.delete(claimLetters);
+  });
+
+  it('GUC=A sees only tenant-A rows', async () => {
+    const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.select({ rid: claimLetters.restaurantId }).from(claimLetters),
+    );
+    expect(rows).toEqual([{ rid: A.restaurantId }]);
+  });
+
+  it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(claimLetters).values({ restaurantId: B.restaurantId, supplierId: B.supplierId, seqNo: 2 }),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx
+        .update(claimLetters)
+        .set({ status: 'closed' })
+        .where(eq(claimLetters.restaurantId, B.restaurantId))
+        .returning({ id: claimLetters.id }),
+    );
+    expect(updated).toHaveLength(0);
+  });
+});
+
+describe('0071 (G-03) payment_deductions (raw RLS)', () => {
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await ownerDb.insert(paymentDeductions).values({ restaurantId: t.restaurantId, invoiceId: t.invoiceId, amountAgorot: 1000 });
+    }
+  });
+  afterAll(async () => {
+    await ownerDb.delete(paymentDeductions);
+  });
+
+  it('GUC=A sees only tenant-A rows', async () => {
+    const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.select({ rid: paymentDeductions.restaurantId }).from(paymentDeductions),
+    );
+    expect(rows).toEqual([{ rid: A.restaurantId }]);
+  });
+
+  it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(paymentDeductions).values({ restaurantId: B.restaurantId, invoiceId: B.invoiceId, amountAgorot: 1 }),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx
+        .update(paymentDeductions)
+        .set({ amountAgorot: 999_999 })
+        .where(eq(paymentDeductions.restaurantId, B.restaurantId))
+        .returning({ id: paymentDeductions.id }),
+    );
+    expect(updated).toHaveLength(0);
   });
 });
