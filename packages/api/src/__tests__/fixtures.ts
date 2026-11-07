@@ -41,6 +41,7 @@ import {
   type FeatureKey,
   type SubscriptionOverrides,
 } from '@restomatch/db';
+import { restaurantTodayAt } from './helpers/il-day';
 
 /** A fully-populated tenant graph for isolation/attack tests. */
 export interface Tenant {
@@ -209,8 +210,9 @@ export async function seedTenant(db: Database, tag: string): Promise<Tenant> {
     .returning();
   if (!productAlias) throw new Error('seed: productAlias');
 
-  const today = new Date();
-  today.setHours(11, 0, 0, 0);
+  // 11:00 on the restaurant's (Israeli) day — the day receiving.todayExpectations
+  // reads — never the runner's local day (see helpers/il-day.ts).
+  const today = restaurantTodayAt(11);
   const [po] = await db
     .insert(purchaseOrders)
     .values({

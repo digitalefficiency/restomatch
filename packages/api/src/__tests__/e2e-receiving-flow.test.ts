@@ -34,6 +34,7 @@ import type { InvoiceOcrResult } from '@restomatch/types';
 import { appRouter } from '../index';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 import type { AppContext } from '../context';
+import { restaurantTodayAt } from './helpers/il-day';
 
 const TEST_DB_URL =
   testDbUrl();
@@ -93,8 +94,7 @@ describe('E2E — full receiving flow', () => {
       .returning();
 
     // ── PO scheduled for today
-    const today = new Date();
-    today.setHours(8, 0, 0, 0);
+    const today = restaurantTodayAt(8);
     const [po] = await db
       .insert(purchaseOrders)
       .values({
@@ -279,8 +279,7 @@ describe('E2E — full receiving flow', () => {
         defaultUnit: 'ק״ג',
       })
       .returning();
-    const today = new Date();
-    today.setHours(8, 0, 0, 0);
+    const today = restaurantTodayAt(8);
     const [po] = await db
       .insert(purchaseOrders)
       .values({
