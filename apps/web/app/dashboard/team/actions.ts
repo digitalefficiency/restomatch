@@ -198,3 +198,18 @@ export async function setMemberLocale(input: {
     return fail(e, 'members.localeFailed');
   }
 }
+
+/** Hand the restaurant to another member (W2-14). Owner only; audited server-side. */
+export async function transferOwnership(input: {
+  toUserId: string;
+  myNewRole: 'owner' | 'manager' | 'bookkeeper';
+}): Promise<ActionResult> {
+  try {
+    const caller = await createServerCaller();
+    await caller.team.transferOwnership(input);
+    revalidatePath('/dashboard/team');
+    return { ok: true, message: (await getT(team))('transfer.done') };
+  } catch (e) {
+    return fail(e, 'transfer.failed');
+  }
+}

@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { originalProps } from '@/lib/i18n/original';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import type { UserRole } from '@restomatch/db';
 import { CheckCircle2, Copy, Info, RefreshCw, Trash2, UserPlus, XCircle } from 'lucide-react';
-import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, Input } from '@/lib/components';
+import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, Input, useToast } from '@/lib/components';
 import type { Locale } from '@/lib/i18n/config';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatDate } from '@/lib/i18n/format';
@@ -18,6 +18,7 @@ import {
   resendInvite,
   revokeInvite,
   setMemberLocale,
+  transferOwnership,
   updateMemberRole,
 } from './actions';
 import { needsRoleConfirm } from './role-change';
@@ -31,6 +32,28 @@ function omit<T>(rec: Record<string, T>, key: string): Record<string, T> {
   const next = { ...rec };
   delete next[key];
   return next;
+}
+
+/** How long a revoke waits for Undo before it is committed (≥ the toast's 10 s). */
+const REVOKE_UNDO_MS = 10_000;
+
+/**
+ * Commit a deferred revoke even as the page goes away (pagehide): a keepalive
+ * POST straight to the tRPC procedure (superjson body), so a revoke never
+ * silently fails to happen because the tab closed inside the Undo window.
+ */
+function flushRevoke(id: string) {
+  try {
+    void fetch('/api/trpc/team.revokeInvite', {
+      method: 'POST',
+      keepalive: true,
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ json: { id } }),
+    });
+  } catch {
+    /* best effort on unload */
+  }
 }
 
 const selectClass =
@@ -62,6 +85,63 @@ export function TeamClient({
   const [rowStatus, setRowStatus] = useState<Record<string, ActionResult>>({});
   const [confirmRole, setConfirmRole] = useState<{ userId: string; name: string; from: UserRole; to: UserRole } | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<{ userId: string; name: string } | null>(null);
+  const toast = useToast();
+  // Deferred revoke (W2-14, admin-26): hidden at once, committed after the Undo window.
+  const pendingRevokes = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const [hiddenInvites, setHiddenInvites] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const flushAll = () => {
+      for (const [id, timer] of pendingRevokes.current) {
+        clearTimeout(timer);
+        flushRevoke(id);
+      }
+      pendingRevokes.current.clear();
+    };
+    window.addEventListener('pagehide', flushAll);
+    return () => {
+      window.removeEventListener('pagehide', flushAll);
+      flushAll(); // client-side navigation away also commits
+    };
+  }, []);
+
+  function revokeWithUndo(id: string, email: string) {
+    setHiddenInvites((s) => new Set(s).add(id));
+    const timer = setTimeout(() => {
+      pendingRevokes.current.delete(id);
+      void revokeInvite({ id }).then((res) => {
+        if (!res.ok) {
+          setHiddenInvites((s) => {
+            const next = new Set(s);
+            next.delete(id);
+            return next;
+          });
+          setStatus(res);
+        }
+      });
+    }, REVOKE_UNDO_MS);
+    pendingRevokes.current.set(id, timer);
+    toast.info(t('pending.revokedUndo', { email }), {
+      duration: REVOKE_UNDO_MS,
+      action: {
+        label: t('pending.undo'),
+        onClick: () => {
+          clearTimeout(pendingRevokes.current.get(id));
+          pendingRevokes.current.delete(id);
+          setHiddenInvites((s) => {
+            const next = new Set(s);
+            next.delete(id);
+            return next;
+          });
+        },
+      },
+    });
+  }
+
+  // Ownership transfer (W2-14): owner only, to an active member, confirmed.
+  const others = initial.members.filter((m) => m.userId !== currentUserId);
+  const [transferTo, setTransferTo] = useState('');
+  const [myNewRole, setMyNewRole] = useState<'owner' | 'manager' | 'bookkeeper'>('manager');
+  const [confirmTransfer, setConfirmTransfer] = useState(false);
 
   function runRow(userId: string, action: () => Promise<ActionResult>, after?: (r: ActionResult) => void) {
     setRowBusy(userId);
@@ -325,11 +405,11 @@ export function TeamClient({
         )}
       </Card>
 
-      {initial.invites.length ? (
+      {initial.invites.some((i) => !hiddenInvites.has(i.id)) ? (
         <Card flow elevated padding="lg">
           <h3 className="mb-4 text-lg font-bold text-ink">{t('pending.title')}</h3>
           <ul className="divide-y divide-line">
-            {initial.invites.map((inv) => (
+            {initial.invites.filter((inv) => !hiddenInvites.has(inv.id)).map((inv) => (
               <li key={inv.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
                   <p className="flex flex-wrap items-center gap-2 truncate font-medium text-ink">
@@ -345,8 +425,8 @@ export function TeamClient({
                     <Button
                       variant="secondary"
                       size="sm"
-                      disabled={pending}
-                      onClick={() => run(() => resendInvite({ id: inv.id }))}
+                      disabled={rowBusy === inv.id}
+                      onClick={() => runRow(inv.id, () => resendInvite({ id: inv.id }))}
                     >
                       <RefreshCw className="h-4 w-4" aria-hidden="true" />
                       {t('pending.resend')}
@@ -354,19 +434,90 @@ export function TeamClient({
                     <Button
                       variant="ghost"
                       size="sm"
-                      disabled={pending}
-                      onClick={() => run(() => revokeInvite({ id: inv.id }))}
+                      onClick={() => revokeWithUndo(inv.id, inv.email)}
                       className="text-danger"
                     >
                       {t('pending.revoke')}
                     </Button>
                   </div>
                 ) : null}
+                {rowStatus[inv.id] ? (
+                  <p role="status" className={`w-full text-sm ${rowStatus[inv.id]!.ok ? 'text-primary' : 'text-danger'}`}>
+                    {rowStatus[inv.id]!.message}
+                  </p>
+                ) : null}
               </li>
             ))}
           </ul>
         </Card>
       ) : null}
+      {canManage && others.length > 0 ? (
+        <Card flow elevated padding="lg" className="border-danger/40" data-testid="transfer-ownership">
+          <h3 className="mb-1 text-lg font-bold text-ink">{t('transfer.title')}</h3>
+          <p className="mb-4 text-sm text-muted">{t('transfer.body')}</p>
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label={t('transfer.to')} htmlFor="transfer-to" className="min-w-[14rem] flex-1">
+              <select
+                id="transfer-to"
+                value={transferTo}
+                onChange={(e) => setTransferTo(e.target.value)}
+                className={`${selectClass} w-full`}
+              >
+                <option value="">{t('transfer.choose')}</option>
+                {others.map((m) => (
+                  <option key={m.userId} value={m.userId}>
+                    {m.name || m.email}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={t('transfer.myRole')} htmlFor="transfer-my-role">
+              <select
+                id="transfer-my-role"
+                value={myNewRole}
+                onChange={(e) => setMyNewRole(e.target.value as typeof myNewRole)}
+                className={selectClass}
+              >
+                {(['manager', 'bookkeeper', 'owner'] as const).map((r) => (
+                  <option key={r} value={r}>
+                    {labels[r]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Button
+              variant="secondary"
+              className="border-danger/60 text-danger"
+              disabled={!transferTo || pending}
+              onClick={() => setConfirmTransfer(true)}
+            >
+              {t('transfer.cta')}
+            </Button>
+          </div>
+        </Card>
+      ) : null}
+      <ConfirmDialog
+        open={confirmTransfer}
+        title={t('transfer.confirmTitle', {
+          name: others.find((m) => m.userId === transferTo)?.name || others.find((m) => m.userId === transferTo)?.email || '',
+        })}
+        body={
+          <div className="space-y-2">
+            <p>{t('roleSummary.owner')}</p>
+            <p>{t('transfer.confirmMine', { role: labels[myNewRole] })}</p>
+          </div>
+        }
+        confirmLabel={t('transfer.cta')}
+        cancelLabel={t('members.cancel')}
+        danger
+        loading={pending}
+        onConfirm={() => {
+          const to = transferTo;
+          setConfirmTransfer(false);
+          run(() => transferOwnership({ toUserId: to, myNewRole }));
+        }}
+        onClose={() => setConfirmTransfer(false)}
+      />
       <ConfirmDialog
         open={confirmRole !== null}
         title={

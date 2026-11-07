@@ -100,6 +100,20 @@ test('settings: one h1, the approval rules in force with ₪ and a default/custo
   // No number inputs remain for ₪ rules on this route's new sections.
   await expect(rules.locator('input[type=number]')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'טלפון נייד' })).toBeVisible();
+  // The rule inputs are text + decimal (no type=number), accept "7,5", and a
+  // change raises the dirty bar; Discard restores. VAT is read-only + "שנו…".
+  await expect(page.locator('input[type=number]')).toHaveCount(0);
+  const pricePct = page.locator('#set-pricePercent');
+  await expect(pricePct).toHaveAttribute('inputmode', 'decimal');
+  await pricePct.fill('7,5');
+  const dirtyBar = page.getByTestId('settings-dirty-bar');
+  await expect(dirtyBar).toContainText('יש שינויים שלא נשמרו');
+  await pricePct.fill('170');
+  await expect(page.getByText('אחוז בין 0 ל-100')).toBeVisible();
+  await dirtyBar.getByRole('button', { name: 'בטלו' }).click();
+  await expect(dirtyBar).toHaveCount(0);
+  await expect(page.getByTestId('vat-readonly')).toContainText('%');
+  await expect(page.locator('#prof-tz')).toHaveJSProperty('tagName', 'SELECT');
   await shot(page, 'settings-he-1440');
   expect(await seriousAxe(page)).toEqual([]);
 
@@ -149,6 +163,7 @@ test('team: a role change is staged, Cancel reverts, owner promotion confirms, o
   await expect(dialog).toBeHidden();
   await expect(managerRole).toHaveValue('owner'); // still only staged, nothing saved
 
+  await expect(page.getByTestId('transfer-ownership')).toBeVisible();
   // The caller's own row cannot change its own role.
   await expect(page.getByRole('combobox', { name: 'תפקיד עבור owner@kfar-hazeitim.test' })).toBeDisabled();
 

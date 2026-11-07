@@ -87,7 +87,7 @@ export default async function SettingsPage() {
       {restaurantSettings ? (
         <div>
           <SectionHeader title={t('sections.matchingTitle')} subtitle={t('sections.matchingSubtitle')} />
-          <SettingsForm initial={restaurantSettings} canEdit={isOwner} />
+          <SettingsForm initial={restaurantSettings} canEdit={isOwner} effective={effective!} />
         </div>
       ) : null}
       {referralOn ? <ReferralCard canRedeem={isOwner} /> : null}
