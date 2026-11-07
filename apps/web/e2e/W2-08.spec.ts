@@ -17,7 +17,8 @@ import { e2eSql, loginViaMagicLink } from './helpers';
  */
 
 const AXE = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
-const SHOTS = 'e2e/__screenshots__/W2-08';
+// W2_08_SHOTS lets a local rerun write elsewhere (the committed set is refreshed deliberately).
+const SHOTS = process.env.W2_08_SHOTS ?? 'e2e/__screenshots__/W2-08';
 const PHONE_SMALL = { viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true };
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 const DESKTOP = { viewport: { width: 1440, height: 900 } };
