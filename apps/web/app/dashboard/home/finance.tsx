@@ -148,9 +148,6 @@ async function Hero(ctx: Ctx) {
   const state = leakHeroState(current);
   const split = leakSplit(current);
   const drillHref = '/dashboard/leaks/breakdown';
-  const curSpan = daySpan(current.monthStart, current.monthEnd);
-  const today = new Date();
-  const eyebrowRange = spanLabel(t, locale, curSpan.from, today < curSpan.to ? today : curSpan.to);
 
   const d = heroDelta(current, previous);
   let delta: LeakHeroProps['delta'] = null;
@@ -203,7 +200,8 @@ async function Hero(ctx: Ctx) {
   return (
     <LeakHero
       state={state}
-      eyebrow={t('hero.eyebrow', { month: eyebrowRange })}
+      // No date eyebrow (IA density budget): the Δ line already names the compared span.
+      eyebrow=""
       label={t('hero.leakedLabel')}
       amount={ils(current.leakIls)}
       // The number itself is the link (IA rule 7: no "לחשבוניות שמאחורי ₪760" button).

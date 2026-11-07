@@ -86,8 +86,8 @@ export const he = {
       vat: '+ {amount} בהפרשי מע״מ',
     },
     // The recovery page's two follow-up queues, in its own words.
-    claimsWaiting: { label: 'בקשות זיכוי שממתינות לתשובת ספק מעל {days} ימים', sub: '{count} בקשות', verb: 'לתזכורות' },
-    claimsUnsent: { label: 'בקשות זיכוי שעוד לא נשלחו לספק', sub: '{count} בקשות', verb: 'לשליחה' },
+    claimsWaiting: { label: 'ממתינות לתשובת ספק מעל {days} ימים', sub: '{count} בקשות', verb: 'לתזכורות' },
+    claimsUnsent: { label: 'בקשות זיכוי לשליחה', sub: '{count} בקשות', verb: 'לשליחה' },
     vat: { label: 'ללא מספר הקצאה', sub: '{count} חשבוניות · נותרו {days} ימים', verb: 'לבקשה מהספק' },
     payRun: { label: 'ריצת התשלומים של החודש', sub: '{count} חשבוניות לתשלום', verb: 'לריצה' },
     deliveries: { label: 'משלוחים היום', sub: '{received} התקבלו · {late} באיחור', verb: 'לקבלה' },

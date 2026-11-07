@@ -60,14 +60,15 @@ describe('server rules = the screens they summarise (W2-08 parity)', () => {
 });
 
 describe('"מחכה לך" rows from tasks (W2-08 §5.2)', () => {
-  it('the decision row carries the task ₪ untouched, the blockers, the review count and the age', () => {
+  it('the decision row carries the task ₪ untouched, the blockers and the review count — no age (I1 density)', () => {
     const r = taskRow(task({}), t, 'he', () => '₪0')!;
     expect(r.agorot).toBe(29_600);
     expect(r.tone).toBe('danger');
     expect(r.href).toBe('/dashboard/approvals');
     expect(r.sub).toContain('2 חוסמים תשלום');
     expect(r.sub).toContain('1 לבדיקה');
-    expect(r.sub).toContain('לפני 3 ימים');
+    // Owner decision I1: the age ranks the row on the server but is not printed.
+    expect(r.sub).not.toContain('לפני');
   });
 
   it('a count task has no ₪; a staff (redacted) decision would show a count, never ₪', () => {

@@ -103,9 +103,9 @@ export function LeakHero(p: LeakHeroProps) {
       ) : null}
 
       <div>
-        <p className={cn('text-xs font-semibold text-subtle', p.more?.items.length ? 'pe-10' : '')}>
-          {p.eyebrow}
-        </p>
+        {p.eyebrow ? (
+          <p className={cn('text-xs font-semibold text-subtle', p.more?.items.length ? 'pe-10' : '')}>{p.eyebrow}</p>
+        ) : null}
         {p.more && p.more.items.length > 0 ? (
           <details className="absolute end-2 top-2 z-10">
             <summary

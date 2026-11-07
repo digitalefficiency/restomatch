@@ -53,8 +53,8 @@ const ROW_KEY: Partial<Record<Task['type'], string>> = {
 export function taskRow(task: Task, t: T, locale: Locale, sideMoney: (agorot: number) => string): TaskRow | null {
   const n = (v: number | string | null | undefined) => formatNumber(Number(v ?? 0), locale);
   const d = task.detail ?? {};
-  const age =
-    task.ageDays === null ? null : task.ageDays === 0 ? t('needs.age.today') : t('needs.age.days', { days: n(task.ageDays) });
+  // No age on the row (IA density budget, owner decision I1): the server ranks by it; the row says ₪ · what · how many.
+  const age = null;
   const join = (...xs: (string | null | undefined | false)[]) => xs.filter(Boolean).join(' · ') || undefined;
   const base = { key: ROW_KEY[task.type] ?? task.entityId, type: task.type, tone: task.tone as RowTone, href: task.deepLink, agorot: task.ilsAgorot, decimals: 0 as 0 | 2, countText: null as string | null };
   switch (task.type) {
