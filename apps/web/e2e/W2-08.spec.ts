@@ -80,7 +80,7 @@ async function axeSerious(page: Page) {
 const digits = (s: string) => s.replace(BIDI, '').replace(/[^\d.]/g, '');
 
 test.describe('owner: one figure on the home row, the badge and the bell', () => {
-  test('4 items · ₪296 · 2 blocking, everywhere', async ({ browser, baseURL }) => {
+  test('the decision queue · ₪296 · 2 blocking, the same everywhere', async ({ browser, baseURL }) => {
     const { context, page } = await asRole(browser, 'owner', DESKTOP, baseURL!);
     await page.goto('/dashboard');
     const row = page.getByTestId('needs-decide');
@@ -90,7 +90,12 @@ test.describe('owner: one figure on the home row, the badge and the bell', () =>
 
     const link = page.locator('aside a[href="/dashboard/approvals"], nav a[href="/dashboard/approvals"]').first();
     // The badge words are the link's description (aria-describedby → a hidden span), not its name.
-    await expect.poll(async () => (await page.locator(`#${(await link.getAttribute('aria-describedby')) ?? 'none'}`).textContent().catch(() => '')) ?? '', { timeout: 20_000 }).toContain('4 פריטים');
+    // Same count as the home row (the lab seed alone: 4; another spec's parity rows add info rows, never ₪).
+    const rowCount = Number(/(\d+)\s*פערים/.exec(((await page.getByTestId('needs-decide-sub').innerText()) ?? '').replace(BIDI, ''))?.[1]);
+    expect(rowCount).toBeGreaterThanOrEqual(4);
+    await expect
+      .poll(async () => (await page.locator(`#${(await link.getAttribute('aria-describedby')) ?? 'none'}`).textContent().catch(() => '')) ?? '', { timeout: 20_000 })
+      .toContain(`${rowCount} פריטים`);
     const aria = ((await page.locator(`#${await link.getAttribute('aria-describedby')}`).textContent()) ?? '').replace(BIDI, '');
     expect(aria).toMatch(/296/);
     expect(aria).toContain('חוסם תשלום');
