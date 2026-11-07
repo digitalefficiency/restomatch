@@ -5,7 +5,7 @@ import { originalProps } from '@/lib/i18n/original';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import type { UserRole } from '@restomatch/db';
-import { CheckCircle2, Copy, Info, RefreshCw, Trash2, UserPlus, XCircle } from 'lucide-react';
+import { CheckCircle2, Copy, Info, MessageCircle, RefreshCw, Trash2, UserPlus, XCircle } from 'lucide-react';
 import { Badge, Button, Card, EmptyState, Field, Input } from '@/lib/components';
 import type { Locale } from '@/lib/i18n/config';
 import { useLocale, useT } from '@/lib/i18n/client';
@@ -22,7 +22,7 @@ import {
 } from './actions';
 
 type TeamData = inferRouterOutputs<AppRouter>['team']['list'];
-type ActionResult = { ok: boolean; message: string; devLink?: string };
+type ActionResult = { ok: boolean; message: string; shareLink?: string; shareText?: string };
 /** '' = no preference (follow the device / Hebrew default). */
 type LocaleChoice = '' | Locale;
 
@@ -92,19 +92,31 @@ export function TeamClient({
             <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
           )}
           <span className="text-sm font-medium">{status.message}</span>
-          {status.devLink ? (
-            <button
-              type="button"
-              onClick={() => {
-                void navigator.clipboard?.writeText(status.devLink!);
-                setCopied(true);
-              }}
-              className="inline-flex items-center gap-1 text-xs text-muted hover:text-ink"
-              title={t('invite.copyLinkTitle')}
-            >
-              <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-              {copied ? t('invite.copied') : t('invite.copyLink')}
-            </button>
+          {status.shareLink ? (
+            <span className="inline-flex flex-wrap items-center gap-2" data-testid="invite-share">
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(status.shareLink!);
+                  setCopied(true);
+                }}
+                className="inline-flex min-h-11 items-center gap-1 rounded-lg px-2 text-sm text-ink hover:bg-surface-2"
+                title={t('invite.copyLinkTitle')}
+              >
+                <Copy className="h-4 w-4" aria-hidden="true" />
+                {copied ? t('invite.copied') : t('invite.copyLink')}
+              </button>
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(status.shareText ?? status.shareLink)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-11 items-center gap-1 rounded-lg px-2 text-sm text-ink hover:bg-surface-2"
+                data-testid="invite-whatsapp"
+              >
+                <MessageCircle className="h-4 w-4" aria-hidden="true" />
+                {t('invite.whatsapp')}
+              </a>
+            </span>
           ) : null}
         </Card>
       ) : null}
