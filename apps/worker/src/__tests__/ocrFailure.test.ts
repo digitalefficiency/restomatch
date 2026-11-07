@@ -55,6 +55,29 @@ describe('markOcrFailed (EN-3)', () => {
     expect(row!.ocrPayload?.raw).toEqual({ ocrFailed: true, reason: 'quota_exceeded' });
   });
 
+  it('merges into the raw already on the row: scanGrId (and other stamped keys) survive a failed read', async () => {
+    const id = await newInvoice();
+    const scanGrId = crypto.randomUUID();
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'claude_vision', raw: { scanGrId, heldForReceipts: [scanGrId], ocrFailed: false } } })
+      .where(eq(invoices.id, id));
+    await markOcrFailed(db, restaurantId, id, new Error('ZodError: invalid'));
+    const [row] = await db.select().from(invoices).where(eq(invoices.id, id));
+    expect(row!.status).toBe('parsed');
+    expect(row!.ocrPayload?.provider).toBe('claude_vision');
+    expect(row!.ocrPayload?.reconciledAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(row!.ocrPayload?.raw).toEqual({ scanGrId, heldForReceipts: [scanGrId], ocrFailed: true, reason: 'extraction_failed' });
+  });
+
+  it('a non-object raw on the row is replaced, never merged into', async () => {
+    const id = await newInvoice();
+    await db.update(invoices).set({ ocrPayload: { provider: 'claude_vision', raw: 'garbage' } }).where(eq(invoices.id, id));
+    await markOcrFailed(db, restaurantId, id, null, 'ocr_disabled');
+    const [row] = await db.select().from(invoices).where(eq(invoices.id, id));
+    expect(row!.ocrPayload?.raw).toEqual({ ocrFailed: true, reason: 'ocr_disabled' });
+  });
+
   it('never touches an invoice that already left ocr_pending, or another tenant', async () => {
     const done = await newInvoice('matched');
     await markOcrFailed(db, restaurantId, done, new Error('late'));
