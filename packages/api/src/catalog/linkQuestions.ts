@@ -251,7 +251,9 @@ export async function applyLearnedCharges(
     const ki = keys.findIndex(
       (k) =>
         k.supplierId === String(c.supplier_id) &&
-        (c.supplier_sku ? k.sku === c.supplier_sku && k.nameKey === nameKey : k.sku == null && k.nameKey === nameKey),
+        (c.supplier_sku || null
+          ? (k.sku || null) === c.supplier_sku && k.nameKey === nameKey
+          : !(k.sku || null) && k.nameKey === nameKey),
     );
     if (ki < 0 || used.has(ki)) continue; // not a key, or a second line of the same key → a question
     if (!withinChargeRange(Math.round(Number(c.line_total) * 100), keys[ki]!, pricePercent)) continue;
@@ -294,7 +296,7 @@ export function sumAbsIls(amounts: Array<string | number | null>): number {
 /**
  * Learn (or widen) a charge key under the restaurant row lock (round 4 LOW-7:
  * no lost update against another settings writer that also locks the row).
- * One entry per (supplier, sku, nameKey); maxAbsAgorot keeps the largest amount
+ * One entry per (supplier, sku, nameKey); min/maxAgorot keep the signed range of the amounts
  * a person answered "charge" at. Returns true when the key is new.
  */
 export async function learnChargeKey(
@@ -304,11 +306,12 @@ export async function learnChargeKey(
   /** Signed totals (agorot) of the lines the person was SHOWN and answered — never auto-marks (round 5). */
   shownAgorot: number[],
   by: string,
-): Promise<boolean> {
+): Promise<{ created: boolean; prevRange: { minAgorot: number | null; maxAgorot: number | null } | null }> {
   const [row] = (await db.execute(sql`
     select coalesce(settings -> 'chargeKeys', '[]'::jsonb) as keys from restaurants where id = ${rid} for no key update
   `)) as unknown as Array<{ keys: unknown }>;
   const keys = (Array.isArray(row?.keys) ? (row!.keys as Array<Record<string, unknown>>) : []).slice();
+  let prevRange: { minAgorot: number | null; maxAgorot: number | null } | null = null;
   const same = (k: Record<string, unknown>) =>
     k.supplierId === key.supplierId && (k.sku ?? null) === key.sku && (k.nameKey ?? null) === key.nameKey;
   const i = keys.findIndex(same);
@@ -319,6 +322,7 @@ export async function learnChargeKey(
     // A re-answer widens the range only with the lines it showed.
     const prevMin = num(keys[i]!.minAgorot);
     const prevMax = num(keys[i]!.maxAgorot);
+    prevRange = { minAgorot: prevMin, maxAgorot: prevMax };
     const all = [...shown, ...(prevMin != null ? [prevMin] : []), ...(prevMax != null ? [prevMax] : [])];
     keys[i] = {
       ...keys[i],
@@ -339,7 +343,45 @@ export async function learnChargeKey(
     update restaurants set settings = jsonb_set(settings, '{chargeKeys}', ${JSON.stringify(keys)}::jsonb, true)
      where id = ${rid}
   `);
-  return i < 0;
+  return { created: i < 0, prevRange };
+}
+
+/**
+ * Round 6: the undo of a re-answer puts the key's previous range back. Server-
+ * validated: it may only NARROW the current range (a client cannot widen it).
+ */
+export async function restoreChargeKeyRange(
+  db: Database,
+  rid: string,
+  key: { supplierId: string; sku: string | null; nameKey: string | null },
+  prev: { minAgorot: number | null; maxAgorot: number | null },
+): Promise<boolean> {
+  const [row] = (await db.execute(sql`
+    select coalesce(settings -> 'chargeKeys', '[]'::jsonb) as keys from restaurants where id = ${rid} for no key update
+  `)) as unknown as Array<{ keys: unknown }>;
+  const keys = (Array.isArray(row?.keys) ? (row!.keys as Array<Record<string, unknown>>) : []).slice();
+  const i = keys.findIndex(
+    (k) => k.supplierId === key.supplierId && (k.sku ?? null) === key.sku && (k.nameKey ?? null) === key.nameKey,
+  );
+  if (i < 0) return false;
+  const curMin = typeof keys[i]!.minAgorot === 'number' ? (keys[i]!.minAgorot as number) : null;
+  const curMax = typeof keys[i]!.maxAgorot === 'number' ? (keys[i]!.maxAgorot as number) : null;
+  const narrows =
+    (prev.minAgorot == null && prev.maxAgorot == null) ||
+    (prev.minAgorot != null &&
+      prev.maxAgorot != null &&
+      curMin != null &&
+      curMax != null &&
+      prev.minAgorot >= curMin &&
+      prev.maxAgorot <= curMax &&
+      prev.minAgorot <= prev.maxAgorot);
+  if (!narrows) return false;
+  keys[i] = { ...keys[i], minAgorot: prev.minAgorot, maxAgorot: prev.maxAgorot };
+  await db.execute(sql`
+    update restaurants set settings = jsonb_set(settings, '{chargeKeys}', ${JSON.stringify(keys)}::jsonb, true)
+     where id = ${rid}
+  `);
+  return true;
 }
 
 /** Forget a learned charge key (under the restaurant row lock). Returns true when one was removed. */
@@ -381,4 +423,26 @@ export async function restoreQuestionReason(db: Database, rid: string, invoiceId
        and not (coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ? 'unlinked')
        and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${IL_NOT_CHARGE})
   `);
+}
+
+/**
+ * Round 6 HIGH: the invoices among `ids` the match-invoice job would NOT skip —
+ * the same rule as its guard: an invoice held for questions (linkReleasedAt or a
+ * question reason) that has an open question line (unlinked, non-charge) keeps
+ * its run and decisions until the question is answered, so it is not re-queued.
+ * A never-held invoice re-matches as before (its SKU still pairs).
+ */
+export async function withoutOpenQuestions(db: Database, rid: string, ids: string[]): Promise<string[]> {
+  const uniq = [...new Set(ids)];
+  if (uniq.length === 0) return [];
+  const rows = (await db.execute(sql`
+    select i.id from invoices i
+     where i.restaurant_id = ${rid} and i.id in (${sql.join(uniq.map((id) => sql`${id}::uuid`), sql`, `)})
+       and not (
+         (coalesce(i.ocr_payload ? 'linkReleasedAt', false)
+           or coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| array['unlinked', 'unlinkedPo'])
+         and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${IL_NOT_CHARGE})
+       )
+  `)) as unknown as Array<{ id: string }>;
+  return rows.map((r) => String(r.id));
 }

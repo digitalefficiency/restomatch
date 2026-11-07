@@ -9,6 +9,7 @@ export const en: Shape<typeof he> = {
     chargeAuto: 'Marked as a charge line automatically (learned from an earlier answer)',
     notCharge: 'Not a charge line — back to the questions',
     chargeUndone: 'Back to the questions — the line is checked after the answer',
+    chargeLocked: 'This invoice is approved, paid or has a credit claim — the mark stays. Check it by hand.',
     title: 'Correct invoice',
     subtitle:
       'Fix values the OCR read wrong (quantity / price / total) and re-run the match — the leak figure is calculated from these lines.',

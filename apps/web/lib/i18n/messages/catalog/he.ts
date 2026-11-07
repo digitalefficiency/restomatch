@@ -245,6 +245,7 @@ export const he = {
     chargeKeyLocked: '{count} שורות בחשבוניות שאושרו, שולמו או שיש עליהן דרישת זיכוי נשארו — לבדיקה ידנית.',
     chargeKeyRemovedNone: 'הוסר — שורות חדשות יישאלו שוב',
     chargeSample: '(בחשבונית: {amount})',
+    chargeSampleMany: '({count} שורות בחשבוניות, סה״כ {total}, בין {min} ל־{max})',
     chargeKeyRemoveLabel: 'הסרה של {name} משורות החיוב',
     chargeKeyRemoved: 'הוסר — {count} שורות חזרו לשאלות',
     linking: 'מקשר ומעדכן שורות…',

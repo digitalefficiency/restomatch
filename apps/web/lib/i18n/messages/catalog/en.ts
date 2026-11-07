@@ -244,6 +244,7 @@ export const en: Shape<typeof he> = {
     chargeKeyLocked: '{count} lines on approved or paid invoices, or with a credit claim, stay — check them by hand.',
     chargeKeyRemovedNone: 'Removed — new lines will be asked again',
     chargeSample: '(on the invoice: {amount})',
+    chargeSampleMany: '({count} invoice lines, {total} in all, from {min} to {max})',
     chargeKeyRemoveLabel: 'Remove {name} from charge lines',
     chargeKeyRemoved: 'Removed — {count} lines are questions again',
     linking: 'Linking and updating lines…',

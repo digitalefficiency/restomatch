@@ -113,7 +113,13 @@ export function InvoiceCorrection({
   });
   // G-08 charge (round 4): a wrong "שורת חיוב" mark is reversible here, any time.
   const unCharge = trpc.mapping.markCharge.useMutation({
-    onSuccess: () => onOk(t('correction.chargeUndone')),
+    // Round 6: a signed-off invoice keeps its mark — say so, never a success.
+    onSuccess: (r) => {
+      if (r.linesLocked > 0) {
+        setError(t('correction.chargeLocked'));
+        setSaved(null);
+      } else onOk(t('correction.chargeUndone'));
+    },
     onError: onErr,
   });
   const runMatch = trpc.match.runForInvoice.useMutation({

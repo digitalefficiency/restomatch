@@ -202,19 +202,26 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
 
   const persisted = await db.transaction(async (rawTx) => {
     const tx = rawTx as unknown as Database;
-    // G-08 hold: an answer undone while this job ran unlinks a line again — never
-    // persist a run over an unlinked line of an invoice held for questions.
+    // G-08 hold (rounds 2–6), decided INSIDE this tx under the invoice row lock:
+    //   - never persist a run over an unlinked (question) line of an invoice held
+    //     for questions — first match or re-match: the prior run and its
+    //     decisions stay until the question is answered (round 6 HIGH);
+    //   - the invoice was put back on hold meanwhile ('parsed' with a question
+    //     reason), or the run seen at the start is gone (re-held) → skip.
     const [race] = (await tx.execute(sql`
-      select exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null
+      select i.status,
+             exists (select 1 from match_runs mr where mr.invoice_id = i.id and mr.restaurant_id = i.restaurant_id) as has_run,
+             exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null
            and not (coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text)) as unlinked,
-             ((i.ocr_payload ? 'linkReleasedAt')
-               or coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS}) as link_held
+             (coalesce(i.ocr_payload ? 'linkReleasedAt', false)
+               or coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS}) as link_held,
+             coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS} as question_reason
         from invoices i where i.id = ${invoiceId}::uuid and i.restaurant_id = ${restaurantId}
        for update
-    `)) as unknown as Array<{ unlinked: boolean; link_held: boolean }>;
-    // Only a FIRST match is guarded (round 5): an invoice with a run re-matches
-    // with its line back as a question, keeping the people's decisions.
-    if (!priorRun && race && race.link_held && race.unlinked) return null;
+    `)) as unknown as Array<{ status: string; has_run: boolean; unlinked: boolean; link_held: boolean; question_reason: boolean }>;
+    if (race && race.link_held && race.unlinked) return null;
+    if (race && race.status === 'parsed' && race.question_reason) return null;
+    if (race && priorRun && !race.has_run) return null;
     let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;
     if (priorRun) {
       prior = await loadPriorDecisions(tx, restaurantId, invoiceId);

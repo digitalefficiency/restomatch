@@ -35,7 +35,9 @@ import {
   learnChargeKey,
   readChargeKeys,
   releaseQuestionHolds,
+  restoreChargeKeyRange,
   restoreQuestionReason,
+  withoutOpenQuestions,
   sumAbsIls,
 } from '../catalog/linkQuestions';
 import { enqueue, isQueueUnavailableError, MATCH_INVOICE_QUEUE, type MatchInvoiceQueueJob } from '@restomatch/queue';
@@ -169,24 +171,49 @@ export interface UnmappedSku {
   suggestions: LinkSuggestion[];
 }
 
-/** One unlinked, non-charge invoice line of a question's key — the one shown with "שורת חיוב" (round 5). */
+/**
+ * What "שורת חיוב — לא מוצר" will mark for a question's key (round 6): every
+ * unlinked, non-charge invoice line of it — their count, total and range, and
+ * their ids (the lines the person is shown; markCharge learns the key's range
+ * from exactly these). Null when the key has no invoice line yet.
+ */
 async function chargeSampleFor(
   db: Database,
   rid: string,
   row: Pick<UnmappedSku, 'supplierId' | 'supplierSku' | 'nameKey' | 'sampleDescription'>,
-): Promise<{ invoiceLineId: string; description: string; lineTotal: number } | null> {
+): Promise<{
+  invoiceLineId: string;
+  description: string;
+  lineTotal: number;
+  lineIds: string[];
+  count: number;
+  totalIls: number;
+  minIls: number;
+  maxIls: number;
+} | null> {
   const nameKey = row.nameKey ?? normalizeLinkName(row.sampleDescription);
   const key = row.supplierSku
     ? sql`il.supplier_sku = ${row.supplierSku} and ${normNameSql(sql`il.raw_description`)} = ${nameKey}`
     : sql`il.supplier_sku is null and ${normNameSql(sql`il.raw_description`)} = ${nameKey}`;
-  const [r] = (await db.execute(sql`
+  const rows = (await db.execute(sql`
     select il.id, il.raw_description, il.line_total from invoice_lines il
       join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${row.supplierId}
      where il.product_id is null and ${key} and ${IL_NOT_CHARGE}
      order by i.created_at desc, il.id
-     limit 1
+     limit 500
   `)) as unknown as Array<{ id: string; raw_description: string; line_total: string }>;
-  return r ? { invoiceLineId: String(r.id), description: String(r.raw_description), lineTotal: Number(r.line_total) } : null;
+  if (rows.length === 0) return null;
+  const totals = rows.map((r) => Number(r.line_total));
+  return {
+    invoiceLineId: String(rows[0]!.id),
+    description: String(rows[0]!.raw_description),
+    lineTotal: totals[0]!,
+    lineIds: rows.map((r) => String(r.id)),
+    count: rows.length,
+    totalIls: Math.round(totals.reduce((a, b) => a + Math.round(b * 100), 0)) / 100,
+    minIls: Math.min(...totals),
+    maxIls: Math.max(...totals),
+  };
 }
 
 /** Name-keyed questions are capped per read (suggestions cost two queries each). */
@@ -579,7 +606,8 @@ async function applyLink(db: Database, rid: string, input: LinkInput) {
       ...undoneInv.map((l) => l.invoiceId),
       ...(await invoicesForPoLines(db, rid, undonePo.map((l) => l.id))),
     ].filter((id) => !reheld.has(id));
-    const rematch = await requeueInvoicesForRematch(db, rid, toRematch);
+    // Round 6: an invoice with a question line again keeps its run (no re-match over it).
+    const rematch = await requeueInvoicesForRematch(db, rid, await withoutOpenQuestions(db, rid, toRematch));
     return {
       productId: r.productId,
       createdProduct: false,
@@ -742,7 +770,11 @@ export interface ChargeInput {
   supplierSku?: string;
   rawName: string;
   /** Undo ("בטל") a mark made moments ago: exactly these lines become questions again; forgetKey drops the learned key it added. */
-  undo?: { invoiceLineIds: string[]; forgetKey?: boolean };
+  undo?: {
+    invoiceLineIds: string[];
+    forgetKey?: boolean;
+    prevRange?: { minAgorot: number | null; maxAgorot: number | null };
+  };
   /** The invoice lines the person was SHOWN when answering (their amounts bound the learned key — round 5). */
   shownLineIds?: string[];
 }
@@ -820,11 +852,17 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
       `);
     }
     if (input.undo.forgetKey) await forgetChargeKey(db, rid, key);
+    else if (input.undo.prevRange) await restoreChargeKeyRange(db, rid, key, input.undo.prevRange);
     const touched = [...byInv.keys()];
     const reheld = new Set(await reholdLinkHolds(db, rid, touched));
     // A held invoice whose line is a question again is in the bucket again (round 4 LOW-8).
     await restoreQuestionReason(db, rid, touched);
-    const rematch = await requeueInvoicesForRematch(db, rid, touched.filter((id) => !reheld.has(id)));
+    // Round 6: an invoice with a question line again keeps its run (no re-match over it).
+    const rematch = await requeueInvoicesForRematch(
+      db,
+      rid,
+      await withoutOpenQuestions(db, rid, touched.filter((id) => !reheld.has(id))),
+    );
     await db.insert(auditLog).values({
       restaurantId: rid,
       userId,
@@ -880,8 +918,8 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
   // Only the amounts the person was shown (round 5) bound what the key auto-marks later.
   const shown = new Set(input.shownLineIds ?? []);
   const shownAgorot = target.filter((t) => shown.has(String(t.id))).map((t) => Math.round(Number(t.line_total) * 100));
-  const learnedNew = await learnChargeKey(db, rid, { ...key, rawName: input.rawName }, shownAgorot, userId);
-  const learned = learnedNew ? [true] : [];
+  const learnedRes = await learnChargeKey(db, rid, { ...key, rawName: input.rawName }, shownAgorot, userId);
+  const learned = learnedRes.created ? [true] : [];
 
   // Invoices whose first match waits for an order line of this key (M-4) are touched too.
   const heldOnOrder = (await db.execute(sql`
@@ -916,7 +954,12 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
     invoiceLinesMarked: target.length,
     learnedKey: learned.length > 0,
     rematch,
-    undo: { invoiceLineIds: target.map((t) => String(t.id)), forgetKey: learned.length > 0 },
+    undo: {
+      invoiceLineIds: target.map((t) => String(t.id)),
+      forgetKey: learned.length > 0,
+      // Round 6: a re-answer's undo puts the previous range back (server-validated: narrow only).
+      ...(learnedRes.prevRange ? { prevRange: learnedRes.prevRange } : {}),
+    },
     linesLocked: 0,
   };
 }
@@ -1209,10 +1252,17 @@ export const mappingRouter = router({
           supplierSku: z.string().trim().min(1).max(64).optional(),
           rawName: z.string().trim().min(1).max(400),
           undo: z
-            .object({ invoiceLineIds: z.array(z.string().uuid()).max(5000), forgetKey: z.boolean().optional() })
+            .object({
+              invoiceLineIds: z.array(z.string().uuid()).max(5000),
+              forgetKey: z.boolean().optional(),
+              prevRange: z
+                .object({ minAgorot: z.number().int().nullable(), maxAgorot: z.number().int().nullable() })
+                .strict()
+                .optional(),
+            })
             .strict()
             .optional(),
-          shownLineIds: z.array(z.string().uuid()).max(50).optional(),
+          shownLineIds: z.array(z.string().uuid()).max(500).optional(),
         })
         .strict(),
     )

@@ -34,6 +34,7 @@ import { featureEnabled } from '../lib/features';
 import { applyContractPrices } from '../contracts/load';
 import { localDateKey } from '../contracts/core';
 import { chargeKeyCovers } from '../catalog/linkQuestions';
+import { normalizeLinkName } from '@restomatch/catalog';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 
@@ -192,6 +193,7 @@ export async function buildMatchInputForInvoice(
       id: invoiceLines.id,
       productId: invoiceLines.productId,
       supplierSku: invoiceLines.supplierSku,
+      rawDescription: invoiceLines.rawDescription, // G-08 charge (round 6)
       qtyBilled: invoiceLines.qtyBilled,
       unit: invoiceLines.unit,
       unitPriceBilled: invoiceLines.unitPriceBilled,
@@ -258,8 +260,18 @@ export async function buildMatchInputForInvoice(
     }
     const printed = [inv.totalExclVat, inv.vatAmount, inv.totalInclVat].some((v) => v != null);
     const near = (v: string | null, expectedAg: number) => v == null || Math.abs(Math.round(num(v) * 100) - expectedAg) <= 10;
+    // Round 6: a VAT-exempt slip (deposits) prints VAT 0 even when its lines carry no
+    // vat_rate — any printed VAT between 0 and the default-rate VAT reconciles (VAT
+    // below expectation is never a leak); the total must then add up with it.
+    const vatPrintedAg = inv.vatAmount == null ? null : Math.round(num(inv.vatAmount) * 100);
+    const vatOk =
+      vatPrintedAg == null ||
+      (vatAg >= 0 ? vatPrintedAg >= -10 && vatPrintedAg <= vatAg + 10 : vatPrintedAg <= 10 && vatPrintedAg >= vatAg - 10);
     const reconciled =
-      printed && near(inv.totalExclVat, netAg) && near(inv.vatAmount, vatAg) && near(inv.totalInclVat, netAg + vatAg);
+      printed &&
+      near(inv.totalExclVat, netAg) &&
+      vatOk &&
+      near(inv.totalInclVat, netAg + (vatPrintedAg ?? vatAg));
     if (!reconciled) {
       chargeRows = [];
       productRows = invLineRows;
@@ -367,6 +379,7 @@ export async function buildMatchInputForInvoice(
         id: poLines.id,
         productId: poLines.productId,
         supplierSku: poLines.supplierSku,
+        rawDescription: poLines.rawDescription, // G-08 charge (round 6)
         qtyOrdered: poLines.qtyOrdered,
         unit: poLines.unit,
         unitPriceExpected: poLines.unitPriceExpected,
@@ -389,8 +402,31 @@ export async function buildMatchInputForInvoice(
     // (its charge lines, priced null): an unordered product is UNORDERED_ITEM,
     // not an UNORDERED_ARRIVAL left out of the leak.
     const kept = poLineRows.filter((p) => p.charge !== true && p.blank !== true);
+    // Round 6: never with the real SKU (it would SKU-pair with a linked product and
+    // hide it). When the invoice carries the same charge line, the two pair on a
+    // synthetic key at ₪0 (no MISSING for a charge that did arrive); otherwise the
+    // order's charge line is unpriced (₪0).
+    const invoiceCharges = invLineRows.filter((l) => chargeIds.has(l.id));
     const chargeOnly = kept.length === 0 ? poLineRows.filter((p) => p.charge === true) : [];
-    poLineInputs = [...kept, ...chargeOnly.map((p) => ({ ...p, unitPriceExpected: null }))].map((p) => ({
+    const used = new Set<string>();
+    const pairedChargePo = chargeOnly.map((p) => {
+      const name = normalizeLinkName(p.rawDescription ?? '');
+      const twin = invoiceCharges.find((l) => !used.has(l.id) && normalizeLinkName(l.rawDescription ?? '') === name);
+      if (!twin) return { ...p, supplierSku: null, unitPriceExpected: null };
+      used.add(twin.id);
+      const synthetic = `g08-charge:${p.id}`;
+      invoiceLineInputs.push({
+        id: twin.id,
+        productId: null,
+        supplierSku: synthetic,
+        qtyBilled: num(p.qtyOrdered),
+        unit: p.unit,
+        unitPriceBilled: 0,
+        lineTotal: 0,
+      });
+      return { ...p, supplierSku: synthetic, unitPriceExpected: null };
+    });
+    poLineInputs = [...kept, ...pairedChargePo].map((p) => ({
       id: p.id,
       productId: p.productId,
       supplierSku: p.supplierSku,

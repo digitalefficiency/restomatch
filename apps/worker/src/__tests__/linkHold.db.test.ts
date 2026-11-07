@@ -158,3 +158,20 @@ describe('LOW: an undo racing the release never leaves a run over an unlinked li
     expect((await findings(inv.invoiceId)).runs).toBe(0);
   });
 });
+
+describe('round 6: the guard holds for a re-match too (decided inside the tx)', () => {
+  it('a matched invoice with a run whose line is a question again → no new run; the old run stays', async () => {
+    await order([{ productId: P, raw: 'פלפל אדום' }]);
+    const inv = await invoiceWith({ status: 'matched', reasons: ['unlinked'], lineProductId: P, payload: { linkReleasedAt: new Date().toISOString() } });
+    const first = await matchInvoiceForJob(db, { restaurantId, invoiceId: inv.invoiceId });
+    expect(first.persisted).not.toBeNull();
+    const before = await db.select({ id: matchRuns.id }).from(matchRuns).where(eq(matchRuns.invoiceId, inv.invoiceId));
+    // An undo unlinks the line again.
+    await db.update(invoiceLines).set({ productId: null }).where(eq(invoiceLines.id, inv.lineId));
+    const again = await matchInvoiceForJob(db, { restaurantId, invoiceId: inv.invoiceId, rematch: true });
+    expect(again.persisted).toBeNull();
+    const after = await db.select({ id: matchRuns.id }).from(matchRuns).where(eq(matchRuns.invoiceId, inv.invoiceId));
+    expect(after).toEqual(before); // the run (and its decisions) stayed
+    expect((await findings(inv.invoiceId)).types).not.toContain('MISSING_ON_INVOICE');
+  });
+});

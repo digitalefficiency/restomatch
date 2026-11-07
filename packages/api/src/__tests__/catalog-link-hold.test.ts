@@ -787,7 +787,11 @@ describe('R5 HIGH-2: an undo never deletes a run with findings or the people\'s 
     const [still] = await db.select({ status: discrepancies.resolutionStatus }).from(discrepancies).where(eq(discrepancies.id, finding!.id));
     expect(still!.status).toBe('rejected'); // the decision is kept
     expect((await invoiceRow(inv)).status).toBe('disputed'); // not re-held
-    expect(rematched()).toContain(inv); // re-matched instead (the job keeps decisions)
+    // Round 6: and NOT re-matched over the question line (no invented MISSING/UNORDERED):
+    // the run and its decisions stay until the question is answered.
+    expect(rematched()).not.toContain(inv);
+    expect(await findingTypes(inv)).not.toContain('UNORDERED_ITEM');
+    expect(await findingTypes(inv)).not.toContain('MISSING_ON_INVOICE');
   });
 
   it('an approved invoice is never un-marked (linesLocked); its marks stay', async () => {
@@ -837,6 +841,9 @@ describe('R5 MEDIUM-4: "all-charge" is clean only when subtotal, VAT and total a
       const r = await callerFor(A).match.runForInvoice({ invoiceId: row!.id });
       expect(r.status).not.toBe('clean');
       expect(r.discrepancyCount).toBeGreaterThan(0);
+      // Round 6 LOW-8: and it is visible in the approvals queue, not a calm ₪0.
+      const queue = await callerFor(A).approvals.myQueue({ limit: 100 });
+      expect(JSON.stringify(queue)).toContain(row!.id);
     }
   });
 });
@@ -878,5 +885,80 @@ describe('R5: mapping.chargeSample (the amount shown with "שורת חיוב")',
     const [bSup] = await db.insert(suppliers).values({ restaurantId: B.restaurantId, name: 'ספק B' }).returning({ id: suppliers.id });
     await expect(callerFor(A).mapping.chargeSample({ supplierId: bSup!.id, rawName: 'פיקדון ארגזים' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     expect(JSON.stringify(await callerFor(A).mapping.unmapped())).not.toMatch(/lineTotal|₪/);
+  });
+});
+
+/* ── G-08 review round 6 (7.11) ─────────────────────────────────────────── */
+
+describe('R6 MEDIUM-3: the charge panel shows everything a mark will hide', () => {
+  it('chargeSample counts, totals and ranges every line of the key; markCharge learns the range from all of them', async () => {
+    for (const total of ['10', '14']) {
+      const inv = await plainInvoice({ excl: `${total}.00`, vat: '0', incl: `${total}.00`, status: 'parsed', reasons: ['unlinked'] });
+      await addLine(inv, { productId: null, raw: 'פיקדון ארגזים', total, vatRate: '0' });
+    }
+    const sample = await callerFor(A).mapping.chargeSample({ supplierId: S, rawName: 'פיקדון ארגזים' });
+    expect(sample).toMatchObject({ count: 2, totalIls: 24, minIls: 10, maxIls: 14 });
+    expect(sample!.lineIds).toHaveLength(2);
+    await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים', shownLineIds: sample!.lineIds });
+    const [k] = (await db.select({ s: restaurants.settings }).from(restaurants).where(eq(restaurants.id, A.restaurantId))).map(
+      (r) => (r.s as unknown as { chargeKeys: Array<{ minAgorot: number; maxAgorot: number }> }).chargeKeys,
+    )[0]!;
+    expect(k).toMatchObject({ minAgorot: 1000, maxAgorot: 1400 });
+  });
+});
+
+describe('R6 MEDIUM-4: a VAT-exempt deposit slip (VAT 0 printed, lines without a rate) is clean', () => {
+  it('excl 10, VAT 0, total 10 with one ₪10 charge line (no vat_rate) → matched clean, no VAT_MISMATCH', async () => {
+    const inv = await plainInvoice({ excl: '10.00', vat: '0.00', incl: '10.00', status: 'parsed', reasons: ['unlinked'] });
+    await addLine(inv, { productId: null, raw: 'פיקדון ארגזים', total: '10' });
+    await markShown('פיקדון ארגזים');
+    const r = await callerFor(A).match.runForInvoice({ invoiceId: inv });
+    expect(r.status).toBe('clean');
+    expect(await findingTypes(inv)).not.toContain('VAT_MISMATCH');
+  });
+});
+
+describe('R6 MEDIUM-5: charge-only order lines never SKU-pair and add no ₪0 MISSING', () => {
+  it('an order of only a learned "משלוח" (SKU) line: a product with that SKU is UNORDERED; the same charge on the invoice adds no MISSING', async () => {
+    const po = await order([]);
+    await db.insert(poLines).values({ poId: po.poId, productId: null, supplierSku: 'SH-1', rawDescription: 'משלוח', qtyOrdered: '1', unit: 'יח׳', unitPriceExpected: '20' });
+    await callerFor(A).mapping.markCharge({ supplierId: S, supplierSku: 'SH-1', rawName: 'משלוח' });
+    const inv = await plainInvoice({ excl: '42.00', vat: '7.56', incl: '49.56' });
+    await addLine(inv, { productId: P, raw: 'פלפל אדום', total: '22', sku: 'SH-1' });
+    const ch = await addLine(inv, { productId: null, raw: 'משלוח', total: '20', sku: 'SH-1' });
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'reconciled', raw: {}, chargeLineIds: [ch] } as never })
+      .where(eq(invoices.id, inv));
+    await callerFor(A).match.runForInvoice({ invoiceId: inv });
+    const types = await findingTypes(inv);
+    expect(types).toContain('UNORDERED_ITEM'); // the product is checked, not SKU-paired away
+    expect(types).not.toContain('MISSING_ON_INVOICE');
+  });
+});
+
+describe('R6 MEDIUM-6: undoing a re-answer restores the previous range (server-validated)', () => {
+  it('a re-answer widens [10,10] to [10,30]; its undo narrows back; a forged wider range is refused', async () => {
+    const a = await plainInvoice({ excl: '10.00', vat: '0', incl: '10.00', status: 'parsed', reasons: ['unlinked'] });
+    await addLine(a, { productId: null, raw: 'פיקדון ארגזים', total: '10', vatRate: '0' });
+    await markShown('פיקדון ארגזים');
+    const b = await plainInvoice({ excl: '30.00', vat: '0', incl: '30.00', status: 'parsed', reasons: ['unlinked'] });
+    await addLine(b, { productId: null, raw: 'פיקדון ארגזים', total: '30', vatRate: '0' });
+    const re = await markShown('פיקדון ארגזים');
+    const range = async () =>
+      ((await db.select({ s: restaurants.settings }).from(restaurants).where(eq(restaurants.id, A.restaurantId)))[0]!.s as unknown as {
+        chargeKeys: Array<{ minAgorot: number; maxAgorot: number }>;
+      }).chargeKeys[0];
+    expect(await range()).toMatchObject({ minAgorot: 1000, maxAgorot: 3000 });
+    expect(re.undo).toMatchObject({ forgetKey: false, prevRange: { minAgorot: 1000, maxAgorot: 1000 } });
+    // A forged range that would WIDEN is refused (range unchanged).
+    await callerFor(A).mapping.markCharge({
+      supplierId: S,
+      rawName: 'פיקדון ארגזים',
+      undo: { invoiceLineIds: [], prevRange: { minAgorot: 1, maxAgorot: 999_999 } },
+    });
+    expect(await range()).toMatchObject({ minAgorot: 1000, maxAgorot: 3000 });
+    await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים', undo: re.undo! });
+    expect(await range()).toMatchObject({ minAgorot: 1000, maxAgorot: 1000 });
   });
 });

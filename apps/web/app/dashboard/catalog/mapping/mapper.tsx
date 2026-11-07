@@ -355,7 +355,13 @@ function MapRow({
                 onClick: () =>
                   void unCharge
                     .mutateAsync({ ...confirmKey(row), undo })
-                    .then(refresh, (e: Parameters<typeof friendlyError>[0]) => toast.error(friendlyError(e, tc))),
+                    .then(
+                      (u) => {
+                        if (u.linesLocked > 0) toast.info(t('mapping.chargeKeyLocked', { count: formatNumber(u.linesLocked, locale) }));
+                        refresh();
+                      },
+                      (e: Parameters<typeof friendlyError>[0]) => toast.error(friendlyError(e, tc)),
+                    ),
               },
             }
           : undefined,
@@ -520,7 +526,14 @@ function MapRow({
               {chargeSample ? (
                 <>
                   {' '}
-                  {t('mapping.chargeSample', { amount: formatIls(chargeSample.lineTotal, { locale }) })}
+                  {chargeSample.count > 1
+                    ? t('mapping.chargeSampleMany', {
+                        count: formatNumber(chargeSample.count, locale),
+                        total: formatIls(chargeSample.totalIls, { locale }),
+                        min: formatIls(chargeSample.minIls, { locale }),
+                        max: formatIls(chargeSample.maxIls, { locale }),
+                      })
+                    : t('mapping.chargeSample', { amount: formatIls(chargeSample.lineTotal, { locale }) })}
                 </>
               ) : null}
             </span>
@@ -528,12 +541,14 @@ function MapRow({
               variant="secondary"
               size="sm"
               loading={charge.isPending}
-              disabled={pending || !row.sampleDescription}
+              // Round 6: only once the person can see what it marks.
+              disabled={pending || !row.sampleDescription || sample.isLoading}
               onClick={() =>
                 charge.mutate({
                   ...confirmKey(row),
                   // Round 5: only the line shown here bounds what the key auto-marks later.
-                  ...(chargeSample ? { shownLineIds: [chargeSample.invoiceLineId] } : {}),
+                  // Round 6: every line this marks is shown above (count, total, range).
+                  ...(chargeSample ? { shownLineIds: chargeSample.lineIds } : {}),
                 })
               }
             >
