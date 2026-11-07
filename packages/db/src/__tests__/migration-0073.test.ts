@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -486,5 +486,49 @@ describe('0073 notification_seen', () => {
     await db.insert(notificationSeen).values({ restaurantId: B.restaurantId, userId: u2!.id, itemKey: 'invoice:1:decide' });
     await db.delete(users).where(eq(users.id, u2!.id));
     expect(await db.select().from(notificationSeen).where(eq(notificationSeen.userId, u2!.id))).toHaveLength(0);
+  });
+});
+
+describe('H-04 part 2: the PENDING outbox role-target CHECK (deploys 19.1, after H-05)', () => {
+  const PENDING = join(migrationsDir(), 'pending', 'outbox_no_role_target.sql');
+
+  it('is NOT in the journal and NOT in supabase/migrations (so neither drizzle nor the integration applies it before H-05)', () => {
+    const j = readFileSync(join(migrationsDir(), 'meta', '_journal.json'), 'utf8');
+    expect(j).not.toMatch(/outbox_no_role_target/);
+    const supa = join(migrationsDir(), '..', '..', '..', 'supabase', 'migrations');
+    const files = readdirSync(supa);
+    expect(files.filter((f) => /outbox_no_role_target/.test(f))).toEqual([]);
+    expect(readFileSync(join(migrationsDir(), FILE), 'utf8')).not.toMatch(/no_role_target/);
+  });
+
+  it('is pipeline-safe, and (applied in a rolled-back transaction) refuses a new role: row but keeps old ones (NOT VALID)', async () => {
+    const stmts = readFileSync(PENDING, 'utf8').split('--> statement-breakpoint').map((x) => x.trim()).filter(Boolean);
+    const top = readFileSync(PENDING, 'utf8')
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('--'))
+      .join('\n')
+      .replace(/\$\$[\s\S]*?\$\$/g, '$$$$');
+    expect(top).not.toMatch(/^\s*LOCK\s+TABLE/im);
+    expect(top).not.toMatch(/\bSET\s+LOCAL\b/i);
+    const ROLLBACK = new Error('rollback');
+    await expect(
+      sql.begin(async (tx) => {
+        await tx`insert into notifications_outbox (restaurant_id, channel, target, body) values (${A.restaurantId}, 'email', 'role:owner', 'old')`;
+        for (const st of stmts) await tx.unsafe(st);
+        for (const st of stmts) await tx.unsafe(st); // idempotent
+        const [{ v }] = (await tx`select convalidated as v from pg_constraint where conname = 'notifications_outbox_no_role_target_check'`) as unknown as [
+          { v: boolean },
+        ];
+        expect(v).toBe(false);
+        await tx`insert into notifications_outbox (restaurant_id, channel, target, body) values (${A.restaurantId}, 'email', 'owner@a.test', 'ok')`;
+        await tx`savepoint s`;
+        await expect(
+          tx`insert into notifications_outbox (restaurant_id, channel, target, body) values (${A.restaurantId}, 'push', 'role:manager', 'new')`,
+        ).rejects.toMatchObject({ code: CHECK_VIOLATION });
+        await tx`rollback to savepoint s`;
+        throw ROLLBACK;
+      }),
+    ).rejects.toBe(ROLLBACK);
+    expect(await checkDef('notifications_outbox_no_role_target_check')).toBeUndefined();
   });
 });
