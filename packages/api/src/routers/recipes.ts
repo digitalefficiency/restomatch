@@ -46,6 +46,7 @@ import {
 import { parseRecipeCsv, type CsvRecipe } from '../recipes/csv';
 import { posVsTheory } from '../recipes/pos';
 import { dishPriceAlerts } from '../recipes/alerts';
+import { previewDraft } from '../recipes/preview';
 
 /**
  * Food cost per dish (wave 1, flag `recipes`). Owner / manager / chef read and
@@ -456,6 +457,58 @@ export const recipesRouter = router({
         };
       }),
     };
+  }),
+
+  /**
+   * W3-02 · cost a draft recipe live (the editor, debounced) — NO write. The
+   * draft replaces the saved recipe of the same id. Foreign or unknown ids
+   * (recipe, product, sub-recipe) are NOT_FOUND with the save's tokens; unit
+   * mismatches and missing prices are line statuses, not errors (mid-typing).
+   */
+  preview: recipesProcedure.input(recipeInput).query(async ({ ctx, input }) => {
+    const rid = ctx.session.restaurantId;
+    const { rows, items } = await loadRecipes(ctx.db, rid);
+    if (input.id && !rows.some((r) => r.id === input.id)) fail('NOT_FOUND', 'notFound');
+    const productIds = [...new Set(input.items.map((i) => i.productId).filter((x): x is string => !!x))];
+    if (productIds.length) {
+      const owned = await loadProducts(ctx.db, rid, productIds);
+      if (owned.size !== productIds.length) fail('NOT_FOUND', 'productNotFound');
+    }
+    const byId = new Map(rows.map((r) => [r.id, r] as const));
+    for (const it of input.items) {
+      if (!it.subRecipeId) continue;
+      const sub = byId.get(it.subRecipeId);
+      if (!sub) fail('NOT_FOUND', 'subRecipeNotFound');
+      if (!sub.isSubRecipe) fail('BAD_REQUEST', 'notSubRecipe');
+    }
+    const saved = toCostRecipes(rows, items);
+    const allProducts = [
+      ...new Set([...productIds, ...items.map((i) => i.productId).filter((x): x is string => !!x)]),
+    ];
+    const prices = await latestPrices(ctx.db, rid, { productIds: allProducts });
+    return previewDraft(
+      saved,
+      {
+        id: input.id,
+        name: input.name,
+        isSubRecipe: input.isSubRecipe,
+        yieldQty: input.yieldQty,
+        yieldUnit: input.yieldUnit,
+        menuPriceAgorot: input.menuPriceAgorot ?? null,
+        menuPriceIncludesVat: input.menuPriceIncludesVat,
+        items: input.items.map((it) => ({
+          productId: it.productId ?? null,
+          subRecipeId: it.subRecipeId ?? null,
+          quantity: it.quantity,
+          unit: it.unit,
+          wastePct: it.wastePct.toFixed(2),
+          unitsPerProductUnit: it.unitsPerProductUnit ?? null,
+        })),
+      },
+      prices,
+      ctx.rc.vatBp,
+      ctx.rc.targetBp,
+    );
   }),
 
   /** Create (no id) or replace (id) a recipe and all its lines. */

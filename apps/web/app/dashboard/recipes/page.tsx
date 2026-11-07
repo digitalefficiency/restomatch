@@ -25,11 +25,15 @@ export default async function RecipesPage() {
   ]);
   const active = memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
   const canSetTarget = active?.role === 'owner' || active?.role === 'manager';
+  // IA-02 (W3-02): inventory.period is owner/manager only (all ₪). Rendering the
+  // card for the chef gave her an error card at the top of "עלות מנה"; she sees
+  // the dishes first instead, and no ₪ query leaves her browser.
+  const showPeriod = inventoryFlag.enabled && canSetTarget;
   return (
     <div>
       <SectionHeader level={1} title={t('title')} subtitle={t('subtitle')} />
-      {/* Actual food cost from inventory counts (flag `inventoryCount`): its own KPI, next to food cost per dish. */}
-      {inventoryFlag.enabled ? (
+      {/* Actual food cost from inventory counts (flag `inventoryCount`, owner/manager): its own KPI, next to food cost per dish. */}
+      {showPeriod ? (
         <div className="mb-6">
           <PeriodCard compact />
         </div>

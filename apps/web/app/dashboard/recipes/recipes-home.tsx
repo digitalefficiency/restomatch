@@ -137,24 +137,21 @@ function TargetBar({ targetBp, canSetTarget }: { targetBp: number; canSetTarget:
   );
 }
 
+/**
+ * IA-02 (W3-02): two tiles, not four. "מנות מעל הרצוי" always; "חסר מחיר" only
+ * when > 0. The dish count and the unweighted menu average left the tile row
+ * (the target is shown once, in the TargetBar above).
+ */
 function Summary({ data }: { data: ListOutput }) {
   const t = useT(recipesNs);
   const locale = useLocale();
   const dishes = data.recipes.filter((r) => !r.isSubRecipe && r.active);
-  const priced = dishes.filter((r) => r.foodCostBp != null);
-  const avg = priced.length ? Math.round(priced.reduce((a, r) => a + r.foodCostBp!, 0) / priced.length) : null;
   const above = dishes.filter((r) => r.light === 'red' || r.light === 'amber').length;
   const incomplete = data.recipes.filter((r) => !r.complete).length;
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-      <StatCard label={t('summary.dishes')} value={formatNumber(dishes.length, locale)} />
-      <StatCard
-        label={t('summary.avgFoodCost')}
-        value={pct(avg, locale)}
-        tone={avg == null ? 'neutral' : avg <= data.targetBp ? 'primary' : 'warn'}
-      />
+    <div className="grid grid-cols-2 gap-3 md:max-w-xl" data-testid="recipes-summary">
       <StatCard label={t('summary.aboveTarget')} value={formatNumber(above, locale)} tone={above ? 'danger' : 'neutral'} />
-      <StatCard label={t('summary.incomplete')} value={formatNumber(incomplete, locale)} tone={incomplete ? 'warn' : 'neutral'} />
+      {incomplete ? <StatCard label={t('summary.incomplete')} value={formatNumber(incomplete, locale)} tone="warn" /> : null}
     </div>
   );
 }
