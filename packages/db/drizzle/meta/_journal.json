@@ -372,6 +372,13 @@
       "when": 1782400000000,
       "tag": "0071_schema_batch_0",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1782500000000,
+      "tag": "0072_schema_batch_a",
+      "breakpoints": true
     }
   ]
 }

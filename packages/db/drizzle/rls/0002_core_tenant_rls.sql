@@ -54,7 +54,12 @@ begin
     'price_baselines','approval_rules','audit_log','procurement_connections',
     'email_inboxes','supplier_integrations','notifications_outbox',
     -- 0071 (wave 2, G-03)
-    'idempotency_keys','claim_letters','payment_deductions'
+    'idempotency_keys','claim_letters','payment_deductions',
+    -- 0072 (wave 2, H-03)
+    'export_runs','export_run_invoices','consolidated_invoice_links',
+    'leak_month_snapshots','leak_month_corrections',
+    'supplier_bank_accounts','supplier_bank_account_changes',
+    'push_subscriptions','notification_prefs'
   ] loop
     if exists (
       select 1 from information_schema.columns

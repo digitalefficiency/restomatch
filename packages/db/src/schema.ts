@@ -11,7 +11,9 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  smallint,
   text,
+  time,
   timestamp,
   unique,
   uniqueIndex,
@@ -144,6 +146,10 @@ export const restaurants = pgTable('restaurants', {
   settings: jsonb('settings').$type<RestaurantSettings>().notNull().default({}),
   /** Billing account this restaurant belongs to (a chain shares one). */
   billingAccountId: uuid('billing_account_id'),
+  /** Postal address, printed on the claim letter (0072, H-03). */
+  address: text('address'),
+  /** Contact phone, printed on the claim letter (0072, H-03). */
+  contactPhone: varchar('contact_phone', { length: 32 }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -170,6 +176,9 @@ export interface RestaurantSettings {
   ocrReviewThreshold?: number;
 }
 
+export const WHATSAPP_OPT_IN_SOURCES = ['settings', 'onboarding', 'whatsapp_reply', 'admin'] as const;
+export type WhatsappOptInSource = (typeof WHATSAPP_OPT_IN_SOURCES)[number];
+
 export const users = pgTable(
   'users',
   {
@@ -184,6 +193,13 @@ export const users = pgTable(
      * connection: the tenant app role has no INSERT/UPDATE/DELETE on users.
      */
     phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
+    /**
+     * WhatsApp consent (0072, H-03): the flag, when it was given and where
+     * (CHECK in 0072). Written ONLY on the auth/owner connection, like phone_verified_at.
+     */
+    whatsappOptIn: boolean('whatsapp_opt_in').notNull().default(false),
+    whatsappOptInAt: timestamp('whatsapp_opt_in_at', { withTimezone: true }),
+    whatsappOptInSource: varchar('whatsapp_opt_in_source', { length: 16 }).$type<WhatsappOptInSource>(),
     /** Platform operator (internal ops console). NOT a tenant role. */
     isPlatformAdmin: boolean('is_platform_admin').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -460,6 +476,10 @@ export const suppliers = pgTable(
       .default(sql`NULL`),
     /** Soft-deactivate: a supplier with POs can't be hard-deleted (po.supplierId is onDelete:restrict). */
     active: boolean('active').notNull().default(true),
+    /** Minimum order, shekels (0072, H-03; CHECK >= 0). NULL = none known. */
+    minOrderIls: numeric('min_order_ils', { precision: 12, scale: 2 }),
+    /** Delivery fee, shekels (0072, H-03; CHECK >= 0). NULL = none known. */
+    deliveryFeeIls: numeric('delivery_fee_ils', { precision: 12, scale: 2 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -668,6 +688,8 @@ export const supplierCatalogItems = pgTable(
       onDelete: 'set null',
     }),
     observedAt: timestamp('observed_at', { withTimezone: true }),
+    /** The date this price-list row takes effect (0072, H-03). NULL = unknown. */
+    effectiveFrom: date('effective_from'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -756,8 +778,14 @@ export const poLines = pgTable(
     unit: varchar('unit', { length: 32 }).notNull(),
     unitPriceExpected: numeric('unit_price_expected', { precision: 12, scale: 4 }),
     notes: text('notes'),
+    /** Printed line order, 1-based (0072, H-03; CHECK >= 1). NULL on lines before 0072. */
+    lineNo: integer('line_no'),
   },
-  (t) => [index('po_lines_po_idx').on(t.poId), index('po_lines_product_idx').on(t.productId)],
+  (t) => [
+    index('po_lines_po_idx').on(t.poId),
+    index('po_lines_product_idx').on(t.productId),
+    index('po_lines_po_line_no_idx').on(t.poId, t.lineNo),
+  ],
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -836,6 +864,9 @@ export const grLines = pgTable(
  * Invoices
  * ────────────────────────────────────────────────────────────────────────── */
 
+export const PAYMENT_METHODS = ['bank_transfer', 'check', 'cash', 'card', 'offset', 'other'] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
 export const invoices = pgTable(
   'invoices',
   {
@@ -860,6 +891,15 @@ export const invoices = pgTable(
     status: invoiceStatus('status').notNull().default('ocr_pending'),
     source: invoiceSource('source').notNull(),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    /**
+     * Payment facts (0072, H-03). paid_at and paid_amount (shekels) are both NULL or
+     * both set; method/ref only when paid (CHECKs in 0072). Never backfilled: an
+     * invoice already 'paid' before 0072 keeps paid_at NULL (= unknown when).
+     */
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+    paidAmount: numeric('paid_amount', { precision: 12, scale: 2 }),
+    paymentMethod: varchar('payment_method', { length: 16 }).$type<PaymentMethod>(),
+    paymentRef: text('payment_ref'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -902,10 +942,13 @@ export const invoiceLines = pgTable(
     lineTotal: numeric('line_total', { precision: 12, scale: 2 }).notNull(),
     vatRate: numeric('vat_rate', { precision: 5, scale: 4 }),
     ocrConfidenceLine: numeric('ocr_confidence_line', { precision: 4, scale: 3 }),
+    /** Printed line order, 1-based (0072, H-03; CHECK >= 1). NULL on lines before 0072. */
+    lineNo: integer('line_no'),
   },
   (t) => [
     index('invoice_lines_invoice_product_idx').on(t.invoiceId, t.productId),
     index('invoice_lines_product_idx').on(t.productId),
+    index('invoice_lines_invoice_line_no_idx').on(t.invoiceId, t.lineNo),
   ],
 );
 
@@ -2226,10 +2269,13 @@ export const recoveryClaims = pgTable(
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     /** The claim letter this claim went out in (0071, G-03; same-tenant composite FK in 0071). */
     letterId: uuid('letter_id'),
+    /** Per-restaurant claim reference number (0072, H-03; unique per restaurant, CHECK > 0). */
+    seqNo: integer('seq_no'),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('recovery_claims_letter_idx').on(t.letterId, t.restaurantId),
+    uniqueIndex('recovery_claims_restaurant_seq_unique').on(t.restaurantId, t.seqNo),
     uniqueIndex('recovery_claims_discrepancy_unique').on(t.discrepancyId),
     index('recovery_claims_restaurant_status_idx').on(t.restaurantId, t.status, t.claimedAt),
     index('recovery_claims_discrepancy_tenant_idx').on(t.discrepancyId, t.restaurantId),
@@ -2516,3 +2562,266 @@ export const paymentDeductions = pgTable(
     index('payment_deductions_created_by_idx').on(t.createdBy),
   ],
 );
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Schema batch A (wave 2, H-03, migration 0072): export log, consolidated
+ * links, frozen leak months, supplier bank details + audit, push subscriptions,
+ * notification prefs. All nine are tenant tables: restaurant_id NOT NULL,
+ * UNIQUE (id, restaurant_id), RLS `<table>_tenant` (0072 + rls/0002). The
+ * same-tenant composite FKs, CHECKs and append-only triggers live in 0072's SQL;
+ * Drizzle mirrors the columns. Money: integer agorot (bigint) in these ledgers.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const EXPORT_RUN_FORMATS = ['hashavshevet', 'priority', 'rivhit', 'csv'] as const;
+export type ExportRunFormat = (typeof EXPORT_RUN_FORMATS)[number];
+export const EXPORT_RUN_MODES = ['new_only', 'all'] as const;
+export type ExportRunMode = (typeof EXPORT_RUN_MODES)[number];
+
+/** One accounting export, as it went out. */
+export const exportRuns = pgTable(
+  'export_runs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    rangeFrom: date('range_from').notNull(),
+    rangeTo: date('range_to').notNull(),
+    format: varchar('format', { length: 16 }).$type<ExportRunFormat>().notNull(),
+    mode: varchar('mode', { length: 16 }).$type<ExportRunMode>().notNull(),
+    invoiceCount: integer('invoice_count').notNull().default(0),
+    totalAgorot: bigint('total_agorot', { mode: 'number' }).notNull().default(0),
+    skippedCount: integer('skipped_count').notNull().default(0),
+    replacedChars: integer('replaced_chars').notNull().default(0),
+  },
+  (t) => [
+    unique('export_runs_id_restaurant_id_key').on(t.id, t.restaurantId),
+    index('export_runs_restaurant_created_idx').on(t.restaurantId, t.createdAt),
+    index('export_runs_created_by_idx').on(t.createdBy),
+  ],
+);
+
+/** Which invoices went out in which export run (the "not yet exported" source). */
+export const exportRunInvoices = pgTable(
+  'export_run_invoices',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FKs in 0072: run → cascade, invoice → NO ACTION.
+    exportRunId: uuid('export_run_id').notNull(),
+    invoiceId: uuid('invoice_id').notNull(),
+  },
+  (t) => [
+    unique('export_run_invoices_id_restaurant_id_key').on(t.id, t.restaurantId),
+    unique('export_run_invoices_run_invoice_key').on(t.exportRunId, t.invoiceId),
+    index('export_run_invoices_run_idx').on(t.exportRunId, t.restaurantId),
+    index('export_run_invoices_invoice_idx').on(t.invoiceId, t.restaurantId),
+    index('export_run_invoices_restaurant_idx').on(t.restaurantId),
+  ],
+);
+
+export const CONSOLIDATED_LINK_SOURCES = ['proposal_accept', 'manual'] as const;
+export type ConsolidatedLinkSource = (typeof CONSOLIDATED_LINK_SOURCES)[number];
+
+/** A consolidated invoice (חשבונית ריכוז) linked to a goods receipt it covers. */
+export const consolidatedInvoiceLinks = pgTable(
+  'consolidated_invoice_links',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FKs in 0072 (both cascade).
+    invoiceId: uuid('invoice_id').notNull(),
+    goodsReceiptId: uuid('goods_receipt_id').notNull(),
+    linkedBy: uuid('linked_by').references(() => users.id, { onDelete: 'set null' }),
+    linkedAt: timestamp('linked_at', { withTimezone: true }).notNull().defaultNow(),
+    source: varchar('source', { length: 16 }).$type<ConsolidatedLinkSource>().notNull(),
+  },
+  (t) => [
+    unique('consolidated_invoice_links_id_restaurant_id_key').on(t.id, t.restaurantId),
+    unique('consolidated_invoice_links_invoice_gr_key').on(t.invoiceId, t.goodsReceiptId),
+    index('consolidated_invoice_links_invoice_idx').on(t.invoiceId, t.restaurantId),
+    index('consolidated_invoice_links_gr_idx').on(t.goodsReceiptId, t.restaurantId),
+    index('consolidated_invoice_links_linked_by_idx').on(t.linkedBy),
+    index('consolidated_invoice_links_restaurant_idx').on(t.restaurantId, t.linkedAt),
+  ],
+);
+
+/**
+ * The frozen leak of a closed month, per version (APPEND-ONLY: an UPDATE raises).
+ * `month` is the 1st of the month. A re-close writes version n+1; a late change is
+ * a leak_month_corrections row. Nothing reads these yet (H-07 writes them first).
+ */
+export const leakMonthSnapshots = pgTable(
+  'leak_month_snapshots',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    month: date('month').notNull(),
+    version: integer('version').notNull().default(1),
+    computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+    leakAgorot: bigint('leak_agorot', { mode: 'number' }).notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+  },
+  (t) => [
+    unique('leak_month_snapshots_id_restaurant_id_key').on(t.id, t.restaurantId),
+    unique('leak_month_snapshots_month_version_key').on(t.restaurantId, t.month, t.version),
+  ],
+);
+
+/** A signed late change (agorot) against a frozen month, with its reason (APPEND-ONLY). */
+export const leakMonthCorrections = pgTable(
+  'leak_month_corrections',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FK in 0072 (NO ACTION: a snapshot with corrections stays).
+    snapshotId: uuid('snapshot_id').notNull(),
+    deltaAgorot: bigint('delta_agorot', { mode: 'number' }).notNull(),
+    reason: text('reason').notNull(),
+    entityType: varchar('entity_type', { length: 32 }),
+    entityId: uuid('entity_id'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('leak_month_corrections_id_restaurant_id_key').on(t.id, t.restaurantId),
+    index('leak_month_corrections_snapshot_idx').on(t.snapshotId, t.restaurantId),
+    index('leak_month_corrections_entity_idx').on(t.entityType, t.entityId),
+    index('leak_month_corrections_created_by_idx').on(t.createdBy),
+    index('leak_month_corrections_restaurant_idx').on(t.restaurantId, t.createdAt),
+  ],
+);
+
+/**
+ * A supplier's bank account. `accountNumberEnc` is CIPHERTEXT (@restomatch/crypto);
+ * screens show `accountLast4` only. One active account per supplier.
+ */
+export const supplierBankAccounts = pgTable(
+  'supplier_bank_accounts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FK in 0072 (NO ACTION).
+    supplierId: uuid('supplier_id').notNull(),
+    bankCode: varchar('bank_code', { length: 3 }).notNull(),
+    branchCode: varchar('branch_code', { length: 4 }).notNull(),
+    accountNumberEnc: text('account_number_enc').notNull(),
+    accountLast4: varchar('account_last4', { length: 4 }).notNull(),
+    holderName: text('holder_name'),
+    verifiedBy: uuid('verified_by').references(() => users.id, { onDelete: 'set null' }),
+    verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('supplier_bank_accounts_id_restaurant_id_key').on(t.id, t.restaurantId),
+    index('supplier_bank_accounts_supplier_idx').on(t.supplierId, t.restaurantId),
+    uniqueIndex('supplier_bank_accounts_one_active').on(t.supplierId).where(sql`active`),
+    index('supplier_bank_accounts_restaurant_idx').on(t.restaurantId),
+    index('supplier_bank_accounts_verified_by_idx').on(t.verifiedBy),
+  ],
+);
+
+/** The bank-details change audit: MASKED before/after (APPEND-ONLY). */
+export const supplierBankAccountChanges = pgTable(
+  'supplier_bank_account_changes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FK in 0072 (NO ACTION).
+    bankAccountId: uuid('bank_account_id').notNull(),
+    changedBy: uuid('changed_by').references(() => users.id, { onDelete: 'set null' }),
+    changedAt: timestamp('changed_at', { withTimezone: true }).notNull().defaultNow(),
+    before: jsonb('before').$type<Record<string, unknown> | null>(),
+    after: jsonb('after').$type<Record<string, unknown>>().notNull(),
+  },
+  (t) => [
+    unique('supplier_bank_account_changes_id_restaurant_id_key').on(t.id, t.restaurantId),
+    index('supplier_bank_account_changes_account_idx').on(t.bankAccountId, t.restaurantId),
+    index('supplier_bank_account_changes_changed_by_idx').on(t.changedBy),
+    index('supplier_bank_account_changes_restaurant_idx').on(t.restaurantId, t.changedAt),
+  ],
+);
+
+/** A Web Push subscription for one user device. */
+export const pushSubscriptions = pgTable(
+  'push_subscriptions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    endpoint: text('endpoint').notNull(),
+    p256dh: text('p256dh').notNull(),
+    auth: text('auth').notNull(),
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => [
+    unique('push_subscriptions_id_restaurant_id_key').on(t.id, t.restaurantId),
+    unique('push_subscriptions_endpoint_key').on(t.endpoint),
+    index('push_subscriptions_user_idx').on(t.userId),
+    index('push_subscriptions_restaurant_user_idx').on(t.restaurantId, t.userId),
+  ],
+);
+
+export const NOTIFICATION_PREF_CHANNELS = ['email', 'whatsapp', 'push'] as const;
+export type NotificationPrefChannel = (typeof NOTIFICATION_PREF_CHANNELS)[number];
+
+/** Per user × channel × event kind: on/off, quiet hours, Shabbat, daily cap (owner defaults). */
+export const notificationPrefs = pgTable(
+  'notification_prefs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    channel: varchar('channel', { length: 16 }).$type<NotificationPrefChannel>().notNull(),
+    eventKind: varchar('event_kind', { length: 48 }).notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    quietStart: time('quiet_start').notNull().default('23:00'),
+    quietEnd: time('quiet_end').notNull().default('06:00'),
+    observeShabbat: boolean('observe_shabbat').notNull().default(true),
+    dailyCap: smallint('daily_cap').notNull().default(6),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('notification_prefs_id_restaurant_id_key').on(t.id, t.restaurantId),
+    unique('notification_prefs_user_channel_kind_key').on(t.restaurantId, t.userId, t.channel, t.eventKind),
+    index('notification_prefs_user_idx').on(t.userId),
+  ],
+);
+
+export type ExportRun = typeof exportRuns.$inferSelect;
+export type ExportRunInvoice = typeof exportRunInvoices.$inferSelect;
+export type ConsolidatedInvoiceLink = typeof consolidatedInvoiceLinks.$inferSelect;
+export type LeakMonthSnapshot = typeof leakMonthSnapshots.$inferSelect;
+export type LeakMonthCorrection = typeof leakMonthCorrections.$inferSelect;
+export type SupplierBankAccount = typeof supplierBankAccounts.$inferSelect;
+export type SupplierBankAccountChange = typeof supplierBankAccountChanges.$inferSelect;
+export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;
+export type NotificationPref = typeof notificationPrefs.$inferSelect;
