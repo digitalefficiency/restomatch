@@ -44,6 +44,8 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'growth.referralInvalid': 'invalidInput',
   'growth.referralSelf': 'invalidInput',
   'growth.referralAlreadyRedeemed': 'invalidInput',
+  // AU-01: the automations page only offers allow-listed switches.
+  'automations.notOwnerToggleable': 'forbidden',
 };
 
 /**

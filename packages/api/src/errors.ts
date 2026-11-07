@@ -38,6 +38,8 @@ export const APP_ERROR_CODES = [
   'growth.referralInvalid',
   'growth.referralSelf',
   'growth.referralAlreadyRedeemed',
+  // AU-01: the owner tried to switch a flag that is admin-only (not on OWNER_TOGGLEABLE).
+  'automations.notOwnerToggleable',
 ] as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];
