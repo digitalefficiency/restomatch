@@ -53,3 +53,18 @@ Sources the build sessions read: `docs/ux/ds2/` (DS2-SPEC, VERDICT, PROCESSES, F
 |---|---|
 | W1 | Our letter is **"מכתב בקשת זיכוי"**. The supplier's document is "חשבונית זיכוי" (or "תעודת זיכוי"). |
 | W2 | The tone guide in `terms/GLOSSARY.md` §2 is approved. Ask, don't demand; the invoice is the subject; keep the hard facts; assume good faith; send a small reminder; thank them for each credit. |
+
+## Signatures, Sat 7.11 evening (binding)
+
+The owner signed every item on the signing page (13 of 13, all as recommended, 20:51–20:52Z). Each Hebrew summary was cross-checked against the diff before signing; the PR bodies carry the signed text.
+
+| Item | Signed |
+|---|---|
+| H-02 legal pages #234 (privacy, terms, cookies) | Publish now, still tagged "for counsel review" → train B (Tue 10.11) |
+| G-03 #237 · H-03 #241 (schema) | Signed. Upload **Tue 24.11 at 15:30**, backup first, the app goes up only after the deploy checks pass |
+| H-05 #261 (notification send path) | Signed |
+| Supplier reminder rule | **(a) the first reminder after 7 full days (day 8), then every 7 days.** The day-3 courtesy flag stays off. A manager always presses send |
+| H-06 #266 (supplier reply link) · H-07 #263 (monthly close) · H-11 #258 (server ₪ strip) | Signed |
+| G-13 #187 commit 87c705f (half-agora rounding) · W2-01 #180 delta edd1a4a (AU/WA/IA fragments) | Signed |
+| DS2 β font (#284, VR-2 shots) | Approved for 24.11 |
+| rls/0003 on the AGENTS.md immutable list | Yes → human-PR proposal #285 (the owner merges it) |
