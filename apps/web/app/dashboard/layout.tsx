@@ -208,7 +208,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   </div>
                   <MobileSearchButton />
                   {/* The bell (W2-08): the same task spine as the home and the badges. */}
-                  <Bell />
+                  <Bell activity={active.role === 'owner' || active.role === 'manager' || active.role === 'bookkeeper'} />
                   {/* Phone: language lives in "עוד", except for the receiver with receiver languages
                       on — that phone is often shared, so it stays one tap away. */}
                   <div className={receiverLangsOn && active.role === 'receiver' ? 'block' : 'hidden lg:block'}>

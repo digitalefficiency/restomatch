@@ -17,8 +17,9 @@ const rail: Record<NeedTone, string> = {
 
 /**
  * "מחכה לך" (T2): one ≥48 px link per act-now family, ranked by the caller (₪ ×
- * urgency). Phone: the first `phoneMax` rows, the rest behind "עוד N". Desktop:
- * a strip of up to `deskMax` tiles. Inbox zero is one calm T3 line.
+ * urgency, on the server). A stacked list of at most `max` rows — one verb
+ * each — and the rest behind "עוד N" on every viewport (IA rule 4: a home holds
+ * ≤5 blocks). Inbox zero is one calm T3 line.
  */
 export function NeedsYou({
   title,
@@ -26,8 +27,7 @@ export function NeedsYou({
   zero,
   zeroTone = 'good',
   moreLabel,
-  phoneMax = 3,
-  deskMax = 5,
+  max = 3,
 }: {
   title: string;
   rows: NeedRow[];
@@ -35,11 +35,11 @@ export function NeedsYou({
   /** `good` (T3) only when the whole restaurant is clear; `neutral` when it waits on others. */
   zeroTone?: 'good' | 'neutral';
   moreLabel: (count: number) => string;
-  phoneMax?: number;
-  deskMax?: number;
+  /** Rows shown before "עוד N" (owner 3; manager and bookkeeper 5 — their home is the list). */
+  max?: number;
 }) {
-  const shown = rows.slice(0, deskMax);
-  const hiddenOnPhone = Math.max(0, shown.length - phoneMax);
+  const shown = rows.slice(0, max);
+  const rest = rows.slice(max);
   return (
     <section aria-labelledby="needs-you-title" data-testid="needs-you">
       <h2 id="needs-you-title" className="mb-2 text-sm font-bold text-ink">
@@ -56,23 +56,22 @@ export function NeedsYou({
         </p>
       ) : (
         <>
-          <ul className={cn('grid grid-cols-1 gap-2', shown.length > 1 && 'lg:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))]')}>
-            {shown.map((row, i) => (
-              <li key={row.key} className={i >= phoneMax ? 'max-lg:hidden' : undefined} data-needs-row={row.key}>
+          <ul className="grid grid-cols-1 gap-2">
+            {shown.map((row) => (
+              <li key={row.key} data-needs-row={row.key}>
                 <NeedLink row={row} />
               </li>
             ))}
           </ul>
-          {hiddenOnPhone > 0 ? (
-            <details className="mt-2 lg:hidden" data-testid="needs-you-more">
+          {rest.length > 0 ? (
+            <details className="mt-2" data-testid="needs-you-more">
               <summary className="flex min-h-12 cursor-pointer list-none items-center justify-center rounded-xl text-sm font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [&::-webkit-details-marker]:hidden">
-                {moreLabel(hiddenOnPhone)}
+                {moreLabel(rest.length)}
               </summary>
               <ul className="mt-2 grid grid-cols-1 gap-2">
-                {shown.slice(phoneMax).map((row) => (
-                  <li key={row.key}>
-                    {/* The phone's copy of a desk row: no test ids (one owner per id). */}
-                    <NeedLink row={row} copy />
+                {rest.map((row) => (
+                  <li key={row.key} data-needs-row={row.key}>
+                    <NeedLink row={row} />
                   </li>
                 ))}
               </ul>
@@ -84,8 +83,8 @@ export function NeedsYou({
   );
 }
 
-function NeedLink({ row, copy = false }: { row: NeedRow; copy?: boolean }) {
-  const tid = (suffix = '') => (copy ? undefined : `needs-${row.key}${suffix}`);
+function NeedLink({ row }: { row: NeedRow }) {
+  const tid = (suffix = '') => `needs-${row.key}${suffix}`;
   return (
     <Link
       href={row.href}

@@ -22,6 +22,9 @@ import {
 } from './sources';
 import type { Task, TasksResult } from './types';
 
+/** Owner decision I1: the owner sees VAT at risk as a task only this close to its deadline. */
+export const VAT_OWNER_WINDOW_DAYS = 30;
+
 export type SourceKey = 'decision' | 'orders' | 'claims' | 'vat' | 'payRun' | 'deliveries' | 'count';
 
 /**
@@ -74,7 +77,13 @@ export async function collectTasks(ctx: MemberContext, opts: { now?: Date; only?
     decision: async () => decisionTasks(await approvalsRouter.createCaller(sub).queueSummary(), today),
     orders: async () => orderTasks(await suppliersRouter.createCaller(sub).list(), now, today),
     claims: async () => ((await on('recovery')) ? claimTasks(await recoveryRouter.createCaller(sub).list({ limit: MAX_CLAIMS }), now, today) : []),
-    vat: async () => ((await on('vatAtRisk')) ? vatTasks(await ownerRouter.createCaller(sub).vatAtRisk({ period: 'open' })) : []),
+    vat: async () => {
+      if (!(await on('vatAtRisk'))) return [];
+      const tasks = vatTasks(await ownerRouter.createCaller(sub).vatAtRisk({ period: 'open' }));
+      // Owner decision I1 (7.11): VAT is the owner's task only within VAT_OWNER_WINDOW_DAYS of its
+      // deadline; before that it lives in the bookkeeper's queue (and the month close).
+      return role === 'owner' ? tasks.filter((t) => Number(t.detail?.daysLeft ?? 0) <= VAT_OWNER_WINDOW_DAYS) : tasks;
+    },
     payRun: async () => payRunTasks(await payRunRouter.createCaller(sub).month()),
     deliveries: async () => deliveryTasks(await receivingRouter.createCaller(sub).todayExpectations({ includeLate: true }), now, today),
     count: async () => ((await on('inventoryCount')) ? countTasks(await inventoryRouter.createCaller(sub).current(), today) : []),

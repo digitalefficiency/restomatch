@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import Link from 'next/link';
 import { ArrowLeft, Bell as BellIcon, X } from 'lucide-react';
 import { cn } from '@/lib/components/cn';
+import { ActivityFeed } from '@/lib/components';
 import { Money } from '@/lib/components/money';
 import { Sheet } from '@/lib/components/overlay';
 import { useMediaQuery } from '@/lib/components/desk/useMediaQuery';
@@ -32,7 +33,7 @@ function storage(): Storage | null {
  * the app badge mirrors the unseen count where supported. No OS notification
  * and no sound (quiet hours, Shabbat and the daily cap are H-05).
  */
-export function Bell({ className }: { className?: string }) {
+export function Bell({ className, activity = false }: { className?: string; /** Finance roles: "מה קרה" (the activity log, which carries ₪) moves here from the home (I1). */ activity?: boolean }) {
   const t = useT(nav);
   const to = useT(overview);
   const locale = useLocale();
@@ -42,6 +43,7 @@ export function Bell({ className }: { className?: string }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const q = trpc.tasks.mine.useQuery(undefined, { staleTime: 30_000, refetchInterval: 60_000, refetchOnWindowFocus: true, retry: 1 });
   const tasks: Task[] = useMemo(() => q.data?.tasks ?? [], [q.data]);
+  const feed = trpc.activity.feed.useQuery({ limit: 8 }, { enabled: activity && open, staleTime: 30_000 });
 
   useEffect(() => setSeen(readSeen(storage())), []);
   const unseen = unseenCount(tasks, seen);
@@ -145,6 +147,14 @@ export function Bell({ className }: { className?: string }) {
           ))}
         </ul>
         {rows.length > 0 && others ? <p className="text-xs text-muted">{others}</p> : null}
+        {activity && feed.data && feed.data.length > 0 ? (
+          <section aria-labelledby="bell-activity-title" data-testid="bell-activity" className="border-t border-line pt-3">
+            <h3 id="bell-activity-title" className="mb-2 text-sm font-bold text-ink">
+              {t('bell.activity')}
+            </h3>
+            <ActivityFeed items={feed.data} />
+          </section>
+        ) : null}
       </div>
     );
   }

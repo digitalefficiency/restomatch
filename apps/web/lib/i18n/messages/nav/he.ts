@@ -136,6 +136,7 @@ export const he = {
     blocking: 'חוסם תשלום',
   },
   bell: {
+    activity: 'מה קרה',
     label: 'מחכה לך',
     unseen: '{count} חדשים',
     title: 'מחכה לך',

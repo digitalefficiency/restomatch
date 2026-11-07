@@ -132,6 +132,7 @@ export const nav: Shape<typeof he> = {
     blocking: 'ระงับการชำระเงิน',
   },
   bell: {
+    activity: 'เกิดอะไรขึ้น',
     label: 'รอคุณอยู่',
     unseen: 'ใหม่ {count}',
     title: 'รอคุณอยู่',

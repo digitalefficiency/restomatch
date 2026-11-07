@@ -132,6 +132,7 @@ export const nav: Shape<typeof he> = {
     blocking: 'ክፍሊት የዕግት',
   },
   bell: {
+    activity: 'እንታይ ተፈጺሙ',
     label: 'ይጽበየካ ኣሎ',
     unseen: '{count} ሓደሽቲ',
     title: 'ይጽበየካ ኣሎ',

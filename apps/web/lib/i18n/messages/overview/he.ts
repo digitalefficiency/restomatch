@@ -86,8 +86,8 @@ export const he = {
       vat: '+ {amount} בהפרשי מע״מ',
     },
     // The recovery page's two follow-up queues, in its own words.
-    claimsWaiting: { label: 'ממתינות לתשובת ספק מעל {days} ימים', sub: '{count} דרישות', verb: 'לתזכורות' },
-    claimsUnsent: { label: 'דרישות שעוד לא נשלחו לספק', sub: '{count} דרישות', verb: 'לשליחה' },
+    claimsWaiting: { label: 'בקשות זיכוי שממתינות לתשובת ספק מעל {days} ימים', sub: '{count} בקשות', verb: 'לתזכורות' },
+    claimsUnsent: { label: 'בקשות זיכוי שעוד לא נשלחו לספק', sub: '{count} בקשות', verb: 'לשליחה' },
     vat: { label: 'ללא מספר הקצאה', sub: '{count} חשבוניות · נותרו {days} ימים', verb: 'לבקשה מהספק' },
     payRun: { label: 'ריצת התשלומים של החודש', sub: '{count} חשבוניות לתשלום', verb: 'לריצה' },
     deliveries: { label: 'משלוחים היום', sub: '{received} התקבלו · {late} באיחור', verb: 'לקבלה' },
@@ -98,6 +98,11 @@ export const he = {
     cutoffsValue: '{count} ספקים',
     exportLast: { label: 'ייצוא אחרון להנהלת החשבונות', value: 'עדיין לא נרשם', verb: 'לייצוא' },
     // W2-08 task spine.
+    leakLink: 'דליפה החודש',
+    why: 'איך הגענו לסכום?',
+    whyBase: 'מתוך קניות של {spend} לפני מע״מ שנבדקו.',
+    whySplit: 'בחשבוניות שעוד לא שולמו: {unpaid} · בחשבוניות ששולמו: {paid}.',
+    whyProof: 'לפירוט המלא',
     age: { today: 'מהיום', days: 'לפני {days} ימים' },
     othersLine: 'אצלך הכול מטופל · {count} ממתינים אצל {who} · {amount}',
     othersLineCount: 'אצלך הכול מטופל · {count} ממתינים אצל {who}',

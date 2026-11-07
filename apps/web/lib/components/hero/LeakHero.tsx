@@ -62,11 +62,17 @@ export interface LeakHeroProps {
   calcLabel?: string;
   /** Secondary actions (report, digest…) in a ⋯ menu at the hero's top end. */
   more?: { label: string; items: LeakHeroLink[] } | null;
+  /**
+   * "למה?" (IA rule 2, owner decision I1): the base, the unpaid/paid split, the
+   * waiting-for-PO-link line and the leak rule, closed by default and opened in
+   * place. With it, the compact hero shows only the WHAT (₪ · % · Δ · completeness).
+   */
+  why?: { label: string; children: React.ReactNode; testId?: string } | null;
   className?: string;
 }
 
 const linkFocus =
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2';
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2';
 
 /**
  * The T1 leak hero: one number, one story, one primary action. Pure and
@@ -258,6 +264,19 @@ export function LeakHero(p: LeakHeroProps) {
                     </Link>
                   ) : null}
                 </div>
+              ) : null}
+              {p.why ? (
+                <details className="group mt-1" data-testid={p.why.testId ?? 'leak-hero-why'}>
+                  <summary
+                    className={cn(
+                      'inline-flex min-h-8 cursor-pointer list-none items-center gap-1 rounded-lg text-sm font-semibold text-primary hover:underline [&::-webkit-details-marker]:hidden',
+                      linkFocus,
+                    )}
+                  >
+                    {p.why.label}
+                  </summary>
+                  <div className="mt-2 space-y-1.5 border-s-2 border-line ps-3 text-sm text-muted">{p.why.children}</div>
+                </details>
               ) : null}
             </>
           )}

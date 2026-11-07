@@ -132,6 +132,7 @@ export const en: Shape<typeof he> = {
     blocking: 'blocking payment',
   },
   bell: {
+    activity: 'What happened',
     label: 'Waiting for you',
     unseen: '{count} new',
     title: 'Waiting for you',

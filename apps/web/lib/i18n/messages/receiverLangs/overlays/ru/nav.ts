@@ -132,6 +132,7 @@ export const nav: Shape<typeof he> = {
     blocking: 'блокирует оплату',
   },
   bell: {
+    activity: 'Что произошло',
     label: 'Ждёт вас',
     unseen: 'новых: {count}',
     title: 'Ждёт вас',
