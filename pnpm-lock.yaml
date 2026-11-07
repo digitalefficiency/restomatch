@@ -362,6 +362,9 @@ importers:
       '@restomatch/types':
         specifier: workspace:*
         version: link:../types
+      '@restomatch/ui-tokens':
+        specifier: workspace:*
+        version: link:../ui-tokens
       '@supabase/supabase-js':
         specifier: ^2.106.1
         version: 2.106.1
