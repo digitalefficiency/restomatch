@@ -14,6 +14,7 @@ import {
   syncClaims,
   transitionClaim,
 } from '../recovery/service';
+import { confirmCreditSuggestion, creditSuggestions } from '../recovery/creditSuggest';
 import { financeProcedure, memberProcedure } from '../trpc';
 import { router } from '../trpc';
 
@@ -131,6 +132,29 @@ export const recoveryRouter = router({
   creditLineSuggestions: recoveryProcedure
     .input(z.object({ supplierId: z.string().uuid().optional() }).optional())
     .query(({ ctx, input }) => creditLineSuggestions(ctx.db, ctx.session.restaurantId, input ?? {})),
+
+  /**
+   * AU-03 (A12): credit lines on later invoices with a PROPOSED oldest-first
+   * allocation over the supplier's open claims. Read only — books nothing.
+   */
+  creditSuggestions: recoveryProcedure.query(({ ctx }) => creditSuggestions(ctx.db, ctx.session.restaurantId)),
+
+  /**
+   * AU-03 (A12): a human confirms a credit suggestion with the claims they
+   * ticked. Foreign line/claim → NOT_FOUND; a claim of another supplier →
+   * BAD_REQUEST supplier_mismatch; books through recordCreditNote.
+   */
+  confirmCreditSuggestion: recoveryProcedure
+    .input(
+      z.object({
+        invoiceLineId: z.string().uuid(),
+        claimIds: z.array(z.string().uuid()).min(1).max(200),
+        idempotencyKey: z.string().uuid().optional(),
+      }),
+    )
+    .mutation(({ ctx, input }) =>
+      confirmCreditSuggestion(ctx.db, ctx.session.restaurantId, { ...input, actorId: ctx.session.userId }),
+    ),
 
   /** Hero tile: "₪ actually returned this month" — aggregate only, any member (like the hero). */
   returnedThisMonth: flagged(memberProcedure)

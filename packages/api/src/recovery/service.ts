@@ -12,6 +12,7 @@ import {
 } from '@restomatch/db';
 import { assertSupplierOwned } from '../tenant';
 import { CLAIM_ANSWER_DAYS, NEVER_CLAIMABLE_TYPES } from '../lib/claims';
+import { awaitingChaseSql, pastAnswerWindowSql } from './overdue';
 import {
   AWAITING_SUPPLIER,
   CREDITABLE,
@@ -68,8 +69,8 @@ export const NEVER_CLAIMABLE_TYPE_SQL = sql`d.type IN (${NEVER_CLAIMABLE_SQL})`;
  * days) all use this one rule, so they can never be a day apart.
  */
 export function overdueSql(now: Date, tz: SQL): SQL {
-  return sql`((${now.toISOString()}::timestamptz AT TIME ZONE ${tz})::date
-    - (COALESCE(c.letter_sent_at, c.claimed_at) AT TIME ZONE ${tz})::date) > ${OVERDUE_DAYS}`;
+  // AU-03: the boundary lives in recovery/overdue.ts (TS + SQL twins of one rule).
+  return pastAnswerWindowSql(now, tz);
 }
 
 /** Event note of the narrow never-claimable write-off (owner 31.10). */
@@ -346,9 +347,9 @@ export async function listClaims(
       cn.number AS credit_note_number,
       -- Ageing in the restaurant's calendar days (Asia/Jerusalem by default).
       ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date - (c.claimed_at AT TIME ZONE tz.tz)::date) AS age_days,
-      -- Overdue: exactly the reminder job's rule (findOverdue), so the badge and the email agree;
-      -- never a type the owner decided is not claimed (it is not "owed").
-      (${overdueSql(now, sql`tz.tz`)} AND NOT ${NEVER_CLAIMABLE_TYPE_SQL}) AS waiting_overdue
+      -- Overdue: the ONE chase predicate (recovery/overdue.ts) the 08:30 digest uses, so the badge,
+      -- the e-mail and the web banner agree per claim.
+      ${awaitingChaseSql(now, sql`tz.tz`)} AS waiting_overdue
     FROM recovery_claims c
     CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) tz
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}

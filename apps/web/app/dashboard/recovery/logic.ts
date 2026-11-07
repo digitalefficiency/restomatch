@@ -177,11 +177,42 @@ export function countdownOf(
 }
 
 /**
- * The two T2 queues of the banner: letters never sent, and sent letters past the
- * answer window. "Late" is the SAME rule as the claims page's sent list and its
- * reminder: a supplier's letter is late when its LATEST send date is more than
- * ANSWER_DAYS ago, and then all its `letter_sent` claims wait (an acknowledged
- * claim is answered, so it is not "waiting").
+ * AU-03 · the browser mirror of packages/api `isAwaitingChase`
+ * (recovery/overdue.ts) — SAME signature and rule; this module runs in the
+ * browser and cannot import the server package, so a parity test
+ * (__tests__/logic.test.ts) runs every OVERDUE_BOUNDARY_CASES case and the
+ * status / option / outstanding / type cases through both and requires them
+ * to agree. A claim is awaiting a chase when its status is claimed,
+ * letter_sent or acknowledged (acknowledged only with `chaseAcknowledged`,
+ * default on), something is outstanding, its type is never one the owner does
+ * not ask back, and MORE than ANSWER_DAYS whole Israel days passed since the
+ * letter (or the claim). Membership is per claim — never by a supplier's
+ * latest letter (a fresh letter must not hide older waiting claims).
+ */
+export const NEVER_CLAIMABLE_TYPES_WEB = ['PRICE_LOWER', 'UNORDERED_ARRIVAL', 'MISSING_ON_INVOICE'] as const;
+export interface ChaseClaimWeb {
+  status: string;
+  outstandingAgorot: number;
+  letterSentAt: string | null;
+  claimedAt: string;
+  discrepancyType?: string | null;
+}
+export function isAwaitingChaseWeb(c: ChaseClaimWeb, nowIso: string, opts: { chaseAcknowledged?: boolean } = {}): boolean {
+  const chaseAck = opts.chaseAcknowledged ?? true;
+  if (!(AWAITING as readonly string[]).includes(c.status)) return false;
+  if (c.status === 'acknowledged' && !chaseAck) return false;
+  if (!(c.outstandingAgorot > 0)) return false;
+  if (c.discrepancyType && (NEVER_CLAIMABLE_TYPES_WEB as readonly string[]).includes(c.discrepancyType)) return false;
+  return israelDay(nowIso) - israelDay(c.letterSentAt ?? c.claimedAt) > ANSWER_DAYS;
+}
+
+/**
+ * The two T2 queues of the banner (and the home rows): letters never sent, and
+ * sent letters with no reply past the answer window. "Waiting" is the 08:30
+ * digest's rule (AU-03, one predicate, per claim) and equals the digest's
+ * "אין תשובה" section to the agora. An acknowledged claim did answer: it is not
+ * "waiting" here (the digest lists it under its own heading, AD5) unless a
+ * caller passes `chaseAcknowledged: true`.
  */
 export function followUps(
   claims: ReadonlyArray<{
@@ -190,30 +221,21 @@ export function followUps(
     letterSentAt: string | null;
     claimedAt: string;
     supplierName?: string | null;
+    discrepancyType?: string | null;
   }>,
   nowIso: string,
+  opts: { chaseAcknowledged?: boolean } = {},
 ): { unsent: { count: number; agorot: number }; waiting: { count: number; agorot: number } } {
   const unsent = { count: 0, agorot: 0 };
   const waiting = { count: 0, agorot: 0 };
-  const sent = new Map<string, { latest: string; count: number; agorot: number }>();
   for (const c of claims) {
     if (c.outstandingAgorot <= 0) continue;
     if (c.status === 'claimed') {
       unsent.count += 1;
       unsent.agorot += c.outstandingAgorot;
-    } else if (c.status === 'letter_sent' && c.letterSentAt) {
-      const key = (c.supplierName ?? '').trim() || '—';
-      const g = sent.get(key) ?? { latest: c.letterSentAt, count: 0, agorot: 0 };
-      g.count += 1;
-      g.agorot += c.outstandingAgorot;
-      if (c.letterSentAt > g.latest) g.latest = c.letterSentAt;
-      sent.set(key, g);
-    }
-  }
-  for (const g of sent.values()) {
-    if (israelDay(g.latest) + ANSWER_DAYS - israelDay(nowIso) < 0) {
-      waiting.count += g.count;
-      waiting.agorot += g.agorot;
+    } else if (isAwaitingChaseWeb(c, nowIso, { chaseAcknowledged: opts.chaseAcknowledged ?? false })) {
+      waiting.count += 1;
+      waiting.agorot += c.outstandingAgorot;
     }
   }
   return { unsent, waiting };
