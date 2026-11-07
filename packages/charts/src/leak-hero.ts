@@ -59,8 +59,15 @@ export interface LeakHeroOptions {
   monthOffset?: number;
 }
 
-/** Shared CTEs: month bounds in the restaurant tz + the month's invoices. */
-function monthInvoicesCte(restaurantId: string, now: Date, offset: number) {
+/**
+ * Shared CTEs: month bounds in the restaurant tz + the month's invoices.
+ * Defines `r` (tz), `b` (lo, hi), `inv` and `per` — one row per invoice of the
+ * month with: id, status, total (incl. VAT), total_excl, matched, raw_leak,
+ * raw_recovered, pending_link, awaiting_count, dup_copy. The hero leak of an
+ * invoice is `LEAST(raw_leak, total)`. Use as `WITH ${monthInvoicesCte(…)} …`.
+ * Exported (W2-09a) for G-05/G-12/W2-03; the ₪ definition is unchanged.
+ */
+export function monthInvoicesCte(restaurantId: string, now: Date, offset: number) {
   return sql`
     r AS (
       SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}
@@ -302,42 +309,91 @@ async function breakdownLines(
 }
 
 /**
- * One invoice's leak exactly as the month breakdown computes it (same filter,
- * same cap at the invoice total, same pending-link rule) — whatever its date.
- * Null when the invoice is not this restaurant's.
+ * The per-invoice leak state of the given invoices, whatever their dates —
+ * the same filter, cap and pending-link rule as the month breakdown (this is
+ * the CTE behind `computeInvoiceLeak` / `computeInvoicesLeak`). Defines `per`
+ * with one row per invoice of this restaurant among `invoiceIds`:
+ *   id, status, total (incl. VAT), total_excl, matched, raw_leak,
+ *   leak = LEAST(raw_leak, total), raw_recovered, recovered (same cap),
+ *   pending_link.
+ * Use as `WITH ${invoiceLeakStateCte(rid, ids)} SELECT … FROM per`.
+ * `invoiceIds` must be non-empty. A foreign invoice id yields no row.
  */
-export async function computeInvoiceLeak(
-  db: Database,
-  restaurantId: string,
-  invoiceId: string,
-): Promise<LeakBreakdownInvoice | null> {
-  const res = await db.execute(sql`
-    WITH per AS (
+export function invoiceLeakStateCte(restaurantId: string, invoiceIds: readonly string[]) {
+  if (invoiceIds.length === 0) throw new Error('invoiceLeakStateCte: invoiceIds is empty');
+  return sql`
+    per AS (
       SELECT
         i.id,
         i.status,
         COALESCE(i.total_incl_vat, 0) AS total,
+        COALESCE(i.total_excl_vat, 0) AS total_excl,
+        COALESCE(bool_or(mr.id IS NOT NULL), false) AS matched,
         COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER}), 0) AS raw_leak,
+        LEAST(COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER}), 0), COALESCE(i.total_incl_vat, 0)) AS leak,
+        COALESCE(SUM(ABS(d.delta_amount)) FILTER (
+          WHERE ${LEAK_FILTER} AND d.resolution_status IN ('accepted','resolved')
+        ), 0) AS raw_recovered,
+        LEAST(
+          COALESCE(SUM(ABS(d.delta_amount)) FILTER (
+            WHERE ${LEAK_FILTER} AND d.resolution_status IN ('accepted','resolved')
+          ), 0),
+          LEAST(COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER}), 0), COALESCE(i.total_incl_vat, 0))
+        ) AS recovered,
         (NOT bool_or(mr.id IS NOT NULL))
           OR COALESCE(bool_or(d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')), false)
           AS pending_link
       FROM invoices i
       LEFT JOIN match_runs mr ON mr.invoice_id = i.id AND mr.restaurant_id = ${restaurantId}
       LEFT JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
-      WHERE i.id = ${invoiceId}::uuid AND i.restaurant_id = ${restaurantId}
-      GROUP BY i.id, i.status, i.total_incl_vat
-    )
-    SELECT
-      per.id, per.status, per.total, LEAST(per.raw_leak, per.total) AS leak, per.pending_link,
-      i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS invoice_date,
-      s.name AS supplier_name, s.name_en AS supplier_name_en
-    FROM per
-    JOIN invoices i ON i.id = per.id
-    LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${restaurantId}
-  `);
-  const [r] = rowsOf(res);
-  if (!r) return null;
-  const lines = await breakdownLines(db, restaurantId, [String(r.id)], LEAK_FILTER);
+      WHERE i.restaurant_id = ${restaurantId}
+        AND i.id IN (${sql.join(invoiceIds.map((id) => sql`${id}::uuid`), sql`, `)})
+      GROUP BY i.id, i.status, i.total_incl_vat, i.total_excl_vat
+    )`;
+}
+
+/** Ids per batch query (keeps the IN list and the line fetch bounded). */
+const INVOICE_BATCH = 500;
+
+/**
+ * Many invoices' leaks in one pass (W2-09a): each value is exactly what
+ * `computeInvoiceLeak` returns for that id. Keyed by invoice id, in the input
+ * order; ids that are not this restaurant's (or do not exist) are absent.
+ * Duplicate ids are fetched once.
+ */
+export async function computeInvoicesLeak(
+  db: Database,
+  restaurantId: string,
+  invoiceIds: readonly string[],
+): Promise<Map<string, LeakBreakdownInvoice>> {
+  const ids = [...new Set(invoiceIds)];
+  const found = new Map<string, LeakBreakdownInvoice>();
+  for (let at = 0; at < ids.length; at += INVOICE_BATCH) {
+    const chunk = ids.slice(at, at + INVOICE_BATCH);
+    const res = await db.execute(sql`
+      WITH ${invoiceLeakStateCte(restaurantId, chunk)}
+      SELECT
+        per.id, per.status, per.total, per.leak, per.pending_link,
+        i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS invoice_date,
+        s.name AS supplier_name, s.name_en AS supplier_name_en
+      FROM per
+      JOIN invoices i ON i.id = per.id
+      LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${restaurantId}
+    `);
+    const rows = rowsOf(res);
+    if (rows.length === 0) continue;
+    const lines = await breakdownLines(db, restaurantId, rows.map((r) => String(r.id)), LEAK_FILTER);
+    for (const r of rows) found.set(String(r.id), invoiceOf(r, lines));
+  }
+  const out = new Map<string, LeakBreakdownInvoice>();
+  for (const id of ids) {
+    const v = found.get(id);
+    if (v) out.set(id, v);
+  }
+  return out;
+}
+
+function invoiceOf(r: Row, lines: Map<string, LeakBreakdownLine[]>): LeakBreakdownInvoice {
   return {
     invoiceId: String(r.id),
     invoiceNumber: (r.invoice_number as string | null) ?? null,
@@ -350,4 +406,17 @@ export async function computeInvoiceLeak(
     pendingLink: Boolean(r.pending_link),
     lines: lines.get(String(r.id)) ?? [],
   };
+}
+
+/**
+ * One invoice's leak exactly as the month breakdown computes it (same filter,
+ * same cap at the invoice total, same pending-link rule) — whatever its date.
+ * Null when the invoice is not this restaurant's.
+ */
+export async function computeInvoiceLeak(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+): Promise<LeakBreakdownInvoice | null> {
+  return (await computeInvoicesLeak(db, restaurantId, [invoiceId])).get(invoiceId) ?? null;
 }
