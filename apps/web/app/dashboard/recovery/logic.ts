@@ -136,8 +136,15 @@ export function funnelOf(s: FunnelInput): Funnel {
   };
 }
 
-/** Days to wait for the supplier's answer after the letter (or the claim) — the reminder job's OVERDUE_DAYS. */
-export const ANSWER_DAYS = 14;
+/**
+ * Days to wait for the supplier's answer after the letter (or the claim) — owner
+ * decision 31.10: a week. The value is @restomatch/api CLAIM_ANSWER_DAYS (= the
+ * reminder job's OVERDUE_DAYS); this module runs in the browser, which cannot import
+ * the server package, so a unit test locks the two equal.
+ */
+export const ANSWER_DAYS = 7;
+/** The countdown turns amber in the second half of the window (≤ 3 of 7 days left). */
+export const ANSWER_WARN_DAYS = Math.floor(ANSWER_DAYS / 2);
 
 function israelDay(iso: string): number {
   const [y, m, d] = new Intl.DateTimeFormat('en-CA', {
@@ -156,7 +163,7 @@ export type Countdown =
   | { tone: 'neutral' | 'warn'; daysLeft: number; dueIso: string }
   | { tone: 'danger'; daysLate: number; dueIso: string };
 
-/** The answer countdown from COALESCE(letterSentAt, claimedAt) + 14 days; null when not waiting on the supplier. */
+/** The answer countdown from COALESCE(letterSentAt, claimedAt) + ANSWER_DAYS; null when not waiting on the supplier. */
 export function countdownOf(
   c: { status: RecoveryStatus; letterSentAt: string | null; claimedAt: string },
   nowIso: string,
@@ -166,7 +173,7 @@ export function countdownOf(
   const dueIso = new Date(new Date(from).getTime() + ANSWER_DAYS * 86_400_000).toISOString();
   const left = israelDay(from) + ANSWER_DAYS - israelDay(nowIso);
   if (left < 0) return { tone: 'danger', daysLate: -left, dueIso };
-  return { tone: left <= 7 ? 'warn' : 'neutral', daysLeft: left, dueIso };
+  return { tone: left <= ANSWER_WARN_DAYS ? 'warn' : 'neutral', daysLeft: left, dueIso };
 }
 
 /**

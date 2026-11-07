@@ -20,6 +20,8 @@
     "rehearse-cutover": "tsx scripts/rehearse-cutover.ts",
     "seed": "tsx scripts/seed.ts",
     "pilot:setup": "tsx scripts/pilot-setup.ts",
+    "pilot:verify": "tsx scripts/pilot-verify.ts",
+    "pilot:config": "tsx scripts/pilot-config.ts",
     "reset": "tsx scripts/reset.ts && pnpm migrate && pnpm seed",
     "studio": "drizzle-kit studio",
     "push": "drizzle-kit push",
