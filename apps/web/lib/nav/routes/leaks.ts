@@ -62,6 +62,7 @@ export const routes: RouteDef[] = [
     rank: 40,
     parent: 'leaks',
     nav: 'item',
-    aliases: ['זיכויים', 'דרישה', 'מכתב', 'claims', 'credits'],
+    // 'דרישה' stays: people type the old word (orchestrator, 7.11 wording).
+    aliases: ['זיכויים', 'בקשה', 'בקשות', 'דרישה', 'מכתב', 'claims', 'credits'],
   },
 ];
