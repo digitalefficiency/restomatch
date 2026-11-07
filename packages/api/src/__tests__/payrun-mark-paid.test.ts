@@ -138,21 +138,23 @@ describe('holdReasonsOf', () => {
 describe('termsCheck (interim stub with G-17 signature)', () => {
   it('printed שוטף+30 vs agreed שוטף+60 ⇒ shorter, with both dates', () => {
     expect(termsCheckStub('שוטף+60', '2026-10-05', 'שוטף + 30', null)).toEqual({
-      result: 'shorter',
-      printedDueDate: '2026-11-30',
-      agreedDueDate: '2026-12-30',
+      verdict: 'shorter',
+      agreedDue: '2026-12-30',
+      printedDue: '2026-11-30',
+      printedSource: 'terms',
     });
   });
   it('a printed date wins over printed terms when they disagree', () => {
     expect(termsCheckStub('שוטף+30', '2026-10-05', 'שוטף+60', '2026-11-10')).toMatchObject({
-      result: 'shorter',
-      printedDueDate: '2026-11-10',
+      verdict: 'shorter',
+      printedDue: '2026-11-10',
+      printedSource: 'date',
     });
   });
   it('equal or later printed ⇒ ok; a missing side ⇒ unknown (neutral)', () => {
-    expect(termsCheckStub('שוטף+30', '2026-10-05', 'שוטף+30', null).result).toBe('ok');
-    expect(termsCheckStub(null, '2026-10-05', 'שוטף+30', null).result).toBe('unknown');
-    expect(termsCheckStub('שוטף+30', '2026-10-05', null, null).result).toBe('unknown');
+    expect(termsCheckStub('שוטף+30', '2026-10-05', 'שוטף+30', null).verdict).toBe('ok');
+    expect(termsCheckStub(null, '2026-10-05', 'שוטף+30', null).verdict).toBe('unknown');
+    expect(termsCheckStub('שוטף+30', '2026-10-05', null, null).verdict).toBe('unknown');
   });
 });
 

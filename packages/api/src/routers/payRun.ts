@@ -333,11 +333,12 @@ export function markPaidEnabled(env: Record<string, string | undefined> = proces
  * lib/dueDate. Swap the import for `lib/termsCheck` when G-17 lands; delete this.
  */
 export interface TermsCheckResult {
-  result: 'ok' | 'shorter' | 'unknown';
-  /** The due day the paper states (printed date, else printed terms). */
-  printedDueDate: string | null;
+  verdict: 'ok' | 'shorter' | 'unknown';
   /** The due day from the agreed supplier terms. */
-  agreedDueDate: string | null;
+  agreedDue: string | null;
+  /** The due day the paper states (printed date, else printed terms). */
+  printedDue: string | null;
+  printedSource: 'date' | 'terms' | null;
 }
 export function termsCheckStub(
   agreedTerms: string | null | undefined,
@@ -346,18 +347,14 @@ export function termsCheckStub(
   printedDueDate: Date | string | null | undefined,
 ): TermsCheckResult {
   const invDay = jerusalemDayKey(invoiceDate);
-  const agreed = invDay ? dueDateFromTerms(invDay, parsePaymentTerms(agreedTerms)) : null;
+  const agreedDue = invDay ? dueDateFromTerms(invDay, parsePaymentTerms(agreedTerms)) : null;
   // A printed date wins over printed terms when the two disagree (G-17 §5).
-  const printed =
-    jerusalemDayKey(printedDueDate) ??
-    (invDay ? dueDateFromTerms(invDay, parsePaymentTerms(printedTerms)) : null);
-  if (!agreed || !printed)
-    return { result: 'unknown', printedDueDate: printed, agreedDueDate: agreed };
-  return {
-    result: printed < agreed ? 'shorter' : 'ok',
-    printedDueDate: printed,
-    agreedDueDate: agreed,
-  };
+  const fromDate = jerusalemDayKey(printedDueDate);
+  const fromTerms = invDay ? dueDateFromTerms(invDay, parsePaymentTerms(printedTerms)) : null;
+  const printedDue = fromDate ?? fromTerms;
+  const printedSource = fromDate ? 'date' : fromTerms ? 'terms' : null;
+  if (!agreedDue || !printedDue) return { verdict: 'unknown', agreedDue, printedDue, printedSource };
+  return { verdict: printedDue < agreedDue ? 'shorter' : 'ok', agreedDue, printedDue, printedSource };
 }
 
 /** Why a row can't be paid now — each one is shown as text, never only as a colour. */

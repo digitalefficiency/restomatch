@@ -432,7 +432,7 @@ describe('payRun.list (W2-03)', () => {
   it('no agreed terms and no date ⇒ bucket unknown (never a guess)', async () => {
     const row = (await asA().payRun.list({ now: NOW })).rows[0]!;
     expect(row).toMatchObject({ dueDate: null, dueSource: 'unknown', bucket: 'unknown' });
-    expect(row.termsCheck.result).toBe('unknown');
+    expect(row.termsCheck.verdict).toBe('unknown');
   });
 
   it('receiver and chef are FORBIDDEN on every W2-03 procedure', async () => {
