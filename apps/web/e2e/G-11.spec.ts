@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { expect, test, type Page } from '@playwright/test';
 import { LEGAL_LINKS } from '../lib/legal/registry';
-import { e2eSql, loginViaMagicLink } from './helpers';
+import { e2eSql } from './helpers';
 import { DEMO_RESTAURANT_NAME } from './env';
 
 /**
@@ -16,6 +16,17 @@ import { DEMO_RESTAURANT_NAME } from './env';
 const AXE_SOURCE = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
 const SHOTS = process.env.G_11_SHOTS ? 'e2e/__screenshots__/G-11' : null;
 const ORDER = LEGAL_LINKS.map((l) => l.id);
+const PASSWORD = process.env.DEMO_PASSWORD ?? 'RestoMatch-Demo-2026!';
+
+/** The real /login password form (the demo-path pattern; no magic-link rate limit). */
+async function login(page: Page, email: string) {
+  await open(page, '/login');
+  const form = page.locator('form', { has: page.locator('input[name="password"]') });
+  await form.locator('input[name="email"]').fill(email);
+  await form.locator('input[name="password"]').fill(PASSWORD);
+  await form.locator('button[type="submit"]').click();
+  await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 30_000 });
+}
 type Locale = 'he' | 'en';
 
 async function open(page: Page, path: string, locale: Locale = 'he') {
@@ -115,12 +126,16 @@ test.describe('G-11 legal links: same links, same order, every shell', () => {
     }
   });
 
-  test('admin console (signed in as the platform admin)', async ({ page }) => {
-    await loginViaMagicLink(page, 'owner@kfar-hazeitim.test', '/admin');
+  test('admin console and the root 404 (signed in as the platform admin)', async ({ page }) => {
+    await login(page, 'owner@kfar-hazeitim.test');
     await open(page, '/admin');
     await expect(page).toHaveURL(/\/admin$/);
     await expectLegalOrder(page);
     expect(await axeSerious(page, 'footer')).toEqual([]);
+    // Root 404, signed in: the bare card branch of app/not-found.tsx.
+    const res = await open(page, '/g11-no-such-page');
+    expect(res?.status()).toBe(404);
+    await expectLegalOrder(page);
   });
 
   test('root 404, anonymous (marketing chrome)', async ({ page }) => {
@@ -130,8 +145,6 @@ test.describe('G-11 legal links: same links, same order, every shell', () => {
     await expectLegalOrder(page);
   });
 
-  // app/not-found.tsx's signed-in branch is a bare card outside G-11's boundary.
-  test.fixme('root 404, signed in (awaiting a footer in app/not-found.tsx)', async () => {});
 
   test.fixme('dashboard + settings footer (awaiting W2-08 footer)', async () => {});
   test.fixme('/scans/<id> footer (awaiting W2-02)', async () => {});
