@@ -87,8 +87,8 @@ export function recoveryReminderEmail(args: {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const name = (s: OverdueSupplier) => (en && s.supplierNameEn ? s.supplierNameEn : s.supplierName);
   const subject = en
-    ? `${count} credit requests are overdue (${ils(total)})`
-    : `${count} דרישות זיכוי באיחור (${ils(total)})`;
+    ? `${ils(total)} in open credits — no reply for ${OVERDUE_DAYS}+ days`
+    : `${ils(total)} בזיכויים פתוחים — בלי תשובה ${OVERDUE_DAYS}+ ימים`;
   const items = args.suppliers
     .map((s) =>
       en
@@ -100,13 +100,13 @@ export function recoveryReminderEmail(args: {
     locale,
     accent: '#dc2626',
     preview: subject,
-    heading: en ? 'Suppliers still owe you money' : 'ספקים עדיין חייבים לך כסף',
+    heading: en ? `${ils(total)} in open credits — no reply for ${OVERDUE_DAYS}+ days` : `${ils(total)} בזיכויים פתוחים — בלי תשובה ${OVERDUE_DAYS}+ ימים`,
     bodyHtml: `<p style="margin:0 0 8px">${
       en
-        ? `No credit note has arrived for more than ${OVERDUE_DAYS} days. A short call usually closes it:`
-        : `לא התקבלה תעודת זיכוי כבר יותר מ-${OVERDUE_DAYS} ימים. שיחה קצרה בדרך כלל סוגרת את זה:`
+        ? `${count} credit requests have had no credit invoice for ${OVERDUE_DAYS}+ days. A short call usually settles it:`
+        : `${count} בקשות זיכוי בלי חשבונית זיכוי כבר ${OVERDUE_DAYS}+ ימים. שיחה קצרה בדרך כלל מסדרת את זה:`
     }</p><ul style="margin:6px 0 10px">${items}</ul>`,
-    cta: args.trackerUrl ? { label: en ? 'Open the ₪-back tracker' : 'פתיחת מעקב ה-₪ החוזר', url: args.trackerUrl } : undefined,
+    cta: args.trackerUrl ? { label: en ? 'Open the credit requests' : 'לבקשות הזיכוי', url: args.trackerUrl } : undefined,
   });
   const text = [
     subject,
@@ -199,6 +199,8 @@ export interface SupplierReminderDraft {
   count: number;
   outstandingAgorot: number;
   oldestDays: number;
+  /** When the oldest overdue request went out (the letter, else the claim): the reminder's "ששלחנו ב-{date}". */
+  oldestSentAt: string | null;
   claimIds: string[];
 }
 
@@ -223,6 +225,7 @@ export async function supplierReminderDraft(
   if (!s) throw new TRPCError({ code: 'NOT_FOUND', message: 'supplier not found' });
   const res = await db.execute(sql`
     SELECT c.id, GREATEST(0, c.amount_agorot - c.credited_agorot) AS outstanding,
+           COALESCE(c.letter_sent_at, c.claimed_at) AS sent_at,
            floor(extract(epoch FROM (${now.toISOString()}::timestamptz - COALESCE(c.letter_sent_at, c.claimed_at))) / 86400)::int AS waiting
     FROM recovery_claims c
     WHERE c.restaurant_id = ${restaurantId} AND c.supplier_id = ${supplierId}
@@ -241,6 +244,7 @@ export async function supplierReminderDraft(
     count: rows.length,
     outstandingAgorot: rows.reduce((a, r) => a + Number(r.outstanding), 0),
     oldestDays: rows.length ? Number(rows[0]!.waiting) : 0,
+    oldestSentAt: rows.length ? new Date(rows[0]!.sent_at as string | Date).toISOString() : null,
     claimIds: rows.map((r) => String(r.id)),
   };
 }

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { BellRing, Mail, MessageCircle } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import { formatIls } from '@/lib/money';
-import { formatNumber } from '@/lib/i18n/format';
+import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { recovery } from '@/lib/i18n/messages/recovery';
 import { Card } from '@/lib/components';
@@ -15,7 +15,13 @@ import { Card } from '@/lib/components';
  * wa.me / mailto link; the user's own click opens it. Nothing is sent
  * automatically and the server stamps nothing (recovery.reminderDraft reads).
  */
-export function ReminderDrafts({ suppliers }: { suppliers: Array<{ supplierId: string; name: string }> }) {
+export function ReminderDrafts({
+  suppliers,
+  sender,
+}: {
+  suppliers: Array<{ supplierId: string; name: string }>;
+  sender: { restaurant: string; signer: string };
+}) {
   const t = useT(recovery);
   if (suppliers.length === 0) return null;
   return (
@@ -27,14 +33,14 @@ export function ReminderDrafts({ suppliers }: { suppliers: Array<{ supplierId: s
       <p className="mt-0.5 text-xs text-muted">{t('reminder.hint')}</p>
       <ul className="mt-2 divide-y divide-line/60">
         {suppliers.map((s) => (
-          <ReminderRow key={s.supplierId} supplierId={s.supplierId} name={s.name} />
+          <ReminderRow key={s.supplierId} supplierId={s.supplierId} name={s.name} sender={sender} />
         ))}
       </ul>
     </Card>
   );
 }
 
-function ReminderRow({ supplierId, name }: { supplierId: string; name: string }) {
+function ReminderRow({ supplierId, name, sender }: { supplierId: string; name: string; sender: { restaurant: string; signer: string } }) {
   const t = useT(recovery);
   const locale = useLocale();
   const [why, setWhy] = useState(false);
@@ -43,7 +49,14 @@ function ReminderRow({ supplierId, name }: { supplierId: string; name: string })
   if (!d || d.count === 0) return null;
   const amount = formatIls(d.outstandingAgorot / 100, { locale, maximumFractionDigits: 2 });
   const count = formatNumber(d.count, locale);
-  const body = t('reminder.body', { supplier: name, count, amount, days: formatNumber(d.oldestDays, locale) });
+  const body = t('reminder.body', {
+    supplier: name,
+    restaurant: sender.restaurant,
+    date: d.oldestSentAt ? formatDate(d.oldestSentAt, locale) : '—',
+    count,
+    amount,
+    signer: sender.signer || sender.restaurant,
+  });
   const subject = t('reminder.subject', { count, amount });
   const phone = d.whatsapp?.replace(/[^\d]/g, '') ?? '';
   const wa = `https://wa.me/${phone}?text=${encodeURIComponent(body)}`;

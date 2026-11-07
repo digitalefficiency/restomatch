@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { FileCheck2, HandCoins, Mail, Send } from 'lucide-react';
+import { auth } from '@/auth';
+import { activeMembershipOf } from '@/lib/activeRestaurant';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -46,6 +48,10 @@ export default async function RecoveryPage({
     caller.recovery.list({ limit: ALL_CLAIMS }),
     caller.recovery.creditLineSuggestions(),
   ]);
+  // The reminder draft is signed like the letters: the ACTIVE restaurant and the signed-in person.
+  const [session, memberships, profile] = await Promise.all([auth(), caller.onboarding.myMemberships(), caller.settings.profile()]);
+  const restaurantName = activeMembershipOf(memberships, session?.user?.restaurantId)?.restaurantName ?? profile.name ?? '';
+  const signer = session?.user?.name?.trim() || restaurantName;
   const nowIso = new Date().toISOString();
   const exact = (agorot: number) => formatIls(agorot / 100, { locale, maximumFractionDigits: 2 });
   const whole = (shekels: number) => formatIls(shekels, { locale, maximumFractionDigits: 0 });
@@ -223,7 +229,7 @@ export default async function RecoveryPage({
               {t('tracker.paged', { shown: formatNumber(claims.length, locale), total: formatNumber(summary.claimCount, locale) })}
             </p>
           ) : null}
-          <TrackerClient claims={claims} suggestions={suggestions} nowIso={nowIso} initialTab={initialTab} />
+          <TrackerClient claims={claims} suggestions={suggestions} nowIso={nowIso} initialTab={initialTab} sender={{ restaurant: restaurantName, signer }} />
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.4fr] [&>*]:min-w-0">
             <Card padding="lg">

@@ -31,7 +31,7 @@ describe('Hamilton rounding: printed parts add up to the printed whole', () => {
 });
 
 describe('the recovery funnel', () => {
-  it('נדרש = הוחזר + זוכה + פתוח + במחלוקת + ויתרנו, in agorot and in whole shekels', () => {
+  it('הוחלט לבקש = חזר + זוכה + פתוח + בבירור מול הספק + נסגר בלי זיכוי, in agorot and in whole shekels', () => {
     const f = funnelOf({
       claimedAgorot: 367210,
       creditedAgorot: 191400,

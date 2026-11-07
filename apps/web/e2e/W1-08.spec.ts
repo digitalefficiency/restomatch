@@ -238,12 +238,12 @@ test('recovery: the funnel adds up; no select writes money; a write-off needs a 
 
   const row = page.getByTestId('claim-row').filter({ has: page.getByRole('button', { name: /פעולות נוספות/ }) }).first();
   await row.getByRole('button', { name: /פעולות נוספות/ }).click();
-  const writeOff = page.getByRole('menuitem', { name: /ויתור/ });
+  const writeOff = page.getByRole('menuitem', { name: /סגירה בלי זיכוי/ });
   if (await writeOff.count()) {
     await writeOff.click();
     const dialog = page.getByRole('alertdialog');
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText(/לוותר על .*₪.* מול /);
+    await expect(dialog).toContainText(/לסגור בלי זיכוי .*₪.* מול /);
     await expect(dialog.getByRole('radio', { name: 'הספק סירב' })).toBeVisible();
     await dialog.getByRole('button', { name: 'חזרה' }).click();
     await expect(dialog).toBeHidden();

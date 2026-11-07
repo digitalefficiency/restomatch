@@ -64,11 +64,14 @@ export function TrackerClient({
   suggestions,
   nowIso,
   initialTab = 'todo',
+  sender = { restaurant: '', signer: '' },
 }: {
   claims: Claim[];
   suggestions: Suggestion[];
   nowIso: string;
   initialTab?: Tab;
+  /** Who signs a supplier reminder draft (the active restaurant + the signed-in person). */
+  sender?: { restaurant: string; signer: string };
 }) {
   const t = useT(recovery);
   const ta = useT(approvals);
@@ -333,6 +336,7 @@ export function TrackerClient({
 
       {overdueGroups.length > 0 ? (
         <ReminderDrafts
+          sender={sender}
           suppliers={overdueGroups
             .filter((g) => g.claims[0]?.supplierId)
             .map((g) => ({ supplierId: g.claims[0]!.supplierId!, name: supplierOf(g.claims[0]!) }))}
@@ -587,6 +591,7 @@ export function TrackerClient({
                               printedAgorot: v.printedAgorot,
                               vat: v.vat,
                               issuedOn: v.issuedOn,
+                              note: v.note,
                               idempotencyKey: v.idempotencyKey,
                             },
                       )
@@ -713,6 +718,7 @@ function CreditForm({
     vat?: 'incl' | 'excl';
     issuedOn?: string;
     invoiceLineId?: string;
+    note?: string;
     idempotencyKey: string;
   }) => void;
   onCancel: () => void;
@@ -731,6 +737,8 @@ function CreditForm({
   const [amount, setAmount] = useState(line ? (line.amountAgorot / 100).toFixed(2) : '');
   // As printed: incl. or excl. VAT — NO default; the server converts (agorot, half-up, the supplier's rate).
   const [vat, setVat] = useState<'incl' | 'excl' | null>(line ? 'excl' : null);
+  // Owner 7.11: which document arrived — the supplier's credit invoice, or a credit note (kept on the note).
+  const [docKind, setDocKind] = useState<'invoice' | 'note' | null>(line ? 'invoice' : null);
   const [date, setDate] = useState(line?.invoiceDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10));
   const [error, setError] = useState<string | null>(null);
   // TODO(G-13): parseDecimalInput(raw, 'ils') once it lands; "1,250" = ₪1,250.00 either way.
@@ -746,7 +754,7 @@ function CreditForm({
       else next.add(id);
       return next;
     });
-  const canSubmit = chosen.length > 0 && (line != null || (vat != null && typed != null));
+  const canSubmit = chosen.length > 0 && (line != null || (vat != null && typed != null && docKind != null));
   return (
     <form
       className="mt-3 grid gap-3 rounded-xl border border-line bg-surface-2/60 p-3 sm:grid-cols-3"
@@ -770,7 +778,19 @@ function CreditForm({
           setError(t('creditForm.vatRequired'));
           return;
         }
-        onSubmit({ claimIds, number: number.trim() || undefined, printedAgorot: typed, vat, issuedOn: date, idempotencyKey });
+        if (!docKind) {
+          setError(t('creditForm.docRequired'));
+          return;
+        }
+        onSubmit({
+          claimIds,
+          number: number.trim() || undefined,
+          printedAgorot: typed,
+          vat,
+          issuedOn: date,
+          note: t(`creditForm.doc.${docKind}`),
+          idempotencyKey,
+        });
       }}
     >
       <p className="text-sm font-semibold text-ink sm:col-span-3">{t('creditForm.title', { supplier })}</p>
@@ -791,6 +811,31 @@ function CreditForm({
           ))}
         </ul>
       </fieldset>
+      {line ? null : (
+        <fieldset className="sm:col-span-3">
+          <legend className="mb-1.5 text-sm font-medium text-muted">{t('creditForm.docLegend')}</legend>
+          <div role="radiogroup" aria-label={t('creditForm.docLegend')} className="flex flex-wrap gap-2" data-testid="credit-doc">
+            {(['invoice', 'note'] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                role="radio"
+                aria-checked={docKind === k}
+                onClick={() => {
+                  setDocKind(k);
+                  setError(null);
+                }}
+                className={cn(
+                  'min-h-11 rounded-full border px-3 text-sm md:min-h-9',
+                  docKind === k ? 'border-primary bg-primary/10 font-semibold text-ink' : 'border-line text-muted hover:text-ink',
+                )}
+              >
+                {t(`creditForm.doc.${k}`)}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      )}
       <Field label={t('creditForm.number')}>
         <Input value={number} onChange={(e) => setNumber(e.target.value)} maxLength={64} readOnly={!!line} />
       </Field>
