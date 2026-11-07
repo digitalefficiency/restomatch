@@ -409,11 +409,80 @@ describe('git deploy onto an emulated Supabase project', () => {
     expect(await status('Supabase Data API locked out')).toBe('PASS');
   });
 
+  /** Apply a file inside ONE transaction (the CLI pipeline's atomicity); `inspect` runs before commit. */
+  async function applyFileInTx(conn: postgres.Sql, file: string, inspect?: (tx: postgres.TransactionSql) => Promise<void>) {
+    await conn.begin(async (tx) => {
+      for (const stmt of splitSqlStatements(readFileSync(join(migDir, file), 'utf8'))) await tx.unsafe(stmt);
+      if (inspect) await inspect(tx);
+    });
+  }
+  const strongLocks = async (tx: postgres.TransactionSql) =>
+    (await tx`
+      select c.relname, l.mode from pg_locks l join pg_class c on c.oid = l.relation
+      where l.pid = pg_backend_pid() and l.mode in ('AccessExclusiveLock', 'ShareRowExclusiveLock', 'ExclusiveLock')
+        and c.relnamespace in ('public'::regnamespace, 'storage'::regnamespace)
+      order by 1`) as unknown as Array<{ relname: string; mode: string }>;
+
+  it('LOCK-SAFE RLS file: a second apply on a provisioned project plans nothing and takes no strong lock', async (ctx) => {
+    if (!canCreate) ctx.skip();
+    let planned = -1;
+    let locks: Array<{ relname: string; mode: string }> = [{ relname: '?', mode: '?' }];
+    await sql.begin(async (tx) => {
+      for (const stmt of splitSqlStatements(readFileSync(join(migDir, rlsFile), 'utf8'))) {
+        if (/drop table if exists pg_temp\.rm_todo/.test(stmt)) {
+          planned = ((await tx`select count(*)::int as n from pg_temp.rm_todo`) as unknown as [{ n: number }])[0].n;
+        }
+        await tx.unsafe(stmt);
+      }
+      locks = await strongLocks(tx);
+    });
+    expect(planned).toBe(0);
+    expect(locks).toEqual([]);
+  });
+
+  it('LOCK-SAFE RLS file: with work to do, a live startReceipt (goods_receipts, then purchase_orders FOR UPDATE) is not deadlocked', async (ctx) => {
+    if (!canCreate) ctx.skip();
+    // Make the file do real work on exactly the two tables startReceipt touches.
+    await sql.unsafe('drop policy if exists purchase_orders_tenant on purchase_orders');
+    await sql.unsafe('drop policy if exists goods_receipts_tenant on goods_receipts');
+    const app = postgres(migratorUrl.toString(), { max: 1, prepare: false, onnotice: () => undefined });
+    try {
+      let forUpdateMs = -1;
+      const appTx = app.begin(async (tx) => {
+        await tx`select count(*) from goods_receipts`; // startReceipt step 1
+        await new Promise((r) => setTimeout(r, 300)); // the RLS file starts meanwhile
+        const t = Date.now();
+        await tx`select id from purchase_orders for update`; // step 2: the cycle the old file closed
+        forUpdateMs = Date.now() - t;
+      });
+      await new Promise((r) => setTimeout(r, 100));
+      const deploy = applyFileInTx(sql, rlsFile);
+      await appTx; // no 40P01 for the receiver
+      await deploy; // and the deploy then applies
+      expect(forUpdateMs).toBeGreaterThanOrEqual(0);
+      expect(forUpdateMs).toBeLessThan(1_000); // the file held nothing while it waited
+    } finally {
+      await app.end();
+    }
+    const pols = (await sql`
+      select polname from pg_policy where polname in ('purchase_orders_tenant', 'goods_receipts_tenant') order by 1`) as unknown as Array<{ polname: string }>;
+    expect(pols.map((p) => p.polname)).toEqual(['goods_receipts_tenant', 'purchase_orders_tenant']);
+    // Restored exactly: the next apply has nothing left to do.
+    let locks: Array<{ relname: string; mode: string }> = [{ relname: '?', mode: '?' }];
+    await applyFileInTx(sql, rlsFile, async (tx) => {
+      locks = await strongLocks(tx);
+    });
+    expect(locks).toEqual([]);
+  }, 30_000);
+
   it('without rights on storage.objects the RLS file still applies (WARNING, deploy not blocked)', async (ctx) => {
     if (!canCreate) ctx.skip();
     const sup = postgres(superUrl.toString(), { max: 1, prepare: false, onnotice: () => undefined });
     try {
       await sup.unsafe(`revoke supabase_storage_admin from ${MIGRATOR}`);
+      // The RLS file is lock-safe: it only touches a storage policy that differs. Make one
+      // differ, so the file has storage work to do that this role may not perform.
+      await sup.unsafe('drop policy if exists invoice_scans_tenant_select on storage.objects');
     } finally {
       await sup.end();
     }
