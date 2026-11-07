@@ -200,10 +200,10 @@ describe('the ₪ basis of a line (expected vs charged)', () => {
     });
     const he = (v: number) => formatIls(v, { locale: 'he', maximumFractionDigits: 2 });
     expect(lineMathText({ type: 'PRICE_HIGHER', expected: 139, actual: 149, deltaAmount: 100 }, 'he')).toBe(
-      `חויב 10 × ${he(149)} · מחיר צפוי ${he(139)}`,
+      `בחשבונית 10 × ${he(149)} · מחיר צפוי ${he(139)}`,
     );
     expect(lineMathText({ type: 'PRICE_HIGHER', expected: 89, actual: 96, deltaAmount: 52.5 }, 'en')).toBe(
-      'Billed 7.5 × ₪96.00 · expected price ₪89.00',
+      'On the invoice 7.5 × ₪96.00 · expected price ₪89.00',
     );
     expect(lineMathText({ type: 'PRICE_HIGHER', expected: 139, actual: 149, deltaAmount: 100 }, 'he')).not.toContain('בהזמנה');
   });
@@ -393,5 +393,16 @@ describe('W2-10: the letter line in the supplier\'s words (owner 7.11)', () => {
   it('returns null when the engine left no basis', async () => {
     const { letterLineText } = await import('../claims/letter-line');
     expect(letterLineText({ type: 'DATE_ANOMALY', expected: null, actual: null, deltaAmount: null, invoiceDate: null, amount: 5 }, 'he')).toBeNull();
+  });
+});
+
+describe('glossary §2 rule 2: supplier text keeps the invoice as the subject', () => {
+  it('no claims.math.* or claims.reason.* string says "חויב" / "We were billed"', async () => {
+    const { leaks } = await import('@/lib/i18n/messages/leaks');
+    for (const [loc, msgs] of [['he', leaks.he], ['en', leaks.en]] as Array<[string, { claims: { math: Record<string, string>; reason: Record<string, string> } }]>) {
+      for (const [k, v] of Object.entries({ ...msgs.claims.math, ...msgs.claims.reason })) {
+        expect(v, `${loc} ${k}`).not.toMatch(/חויב|We were billed/);
+      }
+    }
   });
 });
