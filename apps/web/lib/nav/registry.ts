@@ -23,6 +23,7 @@ import { routes as suppliers } from './routes/suppliers';
 import { routes as system } from './routes/system';
 import { routes as team } from './routes/team';
 import type { RouteDef } from './types';
+import { READ_ONLY_ROUTES } from '../roleLens/readOnly';
 
 /**
  * The nav registry: one entry per dashboard route. It drives the sidebar, the
@@ -118,5 +119,6 @@ export function ancestry(def: RouteDef): RouteDef[] {
 export function generateRouteRoles(): Record<string, UserRole[]> {
   const out: Record<string, UserRole[]> = {};
   for (const r of REGISTRY) if (r.roles) out[r.path] = [...r.roles];
+  for (const [p, rs] of Object.entries(READ_ONLY_ROUTES)) out[p] = [...new Set([...(out[p] ?? []), ...rs])]; // IA-03 · I3 read-only (orchestrator line)
   return out;
 }
