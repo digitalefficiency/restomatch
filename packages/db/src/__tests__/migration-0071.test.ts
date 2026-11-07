@@ -195,7 +195,7 @@ describe('0071 gr_lines count truth', () => {
     await db.delete(goodsReceipts).where(eq(goodsReceipts.id, gr!.id));
   });
 
-  it('the legacy backfill stamps only unstamped, valid lines of closed receipts, with the receipt time, and is idempotent', async () => {
+  it('the legacy backfill stamps only unstamped, interim-counted, valid lines of closed receipts, with the receipt time, and is idempotent', async () => {
     const file = readFileSync(join(migrationsDir(), '0071_schema_batch_0.sql'), 'utf8');
     const backfill = /UPDATE "gr_lines" AS gl[\s\S]*?;/.exec(file)?.[0];
     expect(backfill, 'the backfill UPDATE is in 0071').toBeTruthy();
@@ -210,12 +210,15 @@ describe('0071 gr_lines count truth', () => {
     let secondCount = -1;
     await expect(
       sql.begin(async (tx) => {
-        const mk = async (status: string) => {
+        const mk = async (status: string, line: { qty?: number; reason?: string; notes?: string } = { qty: 2 }) => {
           const [gr] = (await tx`insert into goods_receipts (restaurant_id, status) values (${A.restaurantId}, ${status}::gr_status) returning id`) as unknown as [{ id: string }];
-          const [line] = (await tx`insert into gr_lines (gr_id, qty_received) values (${gr.id}, 2) returning id`) as unknown as [{ id: string }];
+          const [row] = (await tx`
+            insert into gr_lines (gr_id, qty_received, reject_reason, condition_notes)
+            values (${gr.id}, ${line.qty ?? 0}, ${line.reason ?? null}, ${line.notes ?? null}) returning id
+          `) as unknown as [{ id: string }];
           // an explicit updated_at survives the house trigger (it only stamps unchanged values)
           await tx`update goods_receipts set updated_at = ${closedAt} where id = ${gr.id}`;
-          return line.id;
+          return row.id;
         };
         const ids = {
           completed: await mk('completed'),
@@ -225,6 +228,16 @@ describe('0071 gr_lines count truth', () => {
           counted: await mk('completed'),
           // A legacy line that breaks 0032's NOT VALID check: stamping it would abort the batch.
           negative: await mk('completed'),
+          // Counted by the interim marker although 0 received (G-04 countedLineSql ≡ fromGrLine):
+          missing: await mk('partial', { reason: 'missing' }),
+          damagedNote: await mk('completed', { notes: 'damaged: box crushed' }),
+          bulk: await mk('completed', { qty: 5, notes: 'count:bulk_as_ordered' }),
+          spot: await mk('partial', { notes: 'נבדק count:spot_check' }),
+          // NOT counted: an untouched 0/0 line ("לא נספר") and a free-text note alone.
+          untouched: await mk('partial', { qty: 0 }),
+          noteOnly: await mk('completed', { qty: 0, notes: 'הספק התקשר' }),
+          // A token glued to a word is not a token (ASCII word boundary, like the JS \b).
+          glued: await mk('completed', { qty: 0, notes: 'xcount:per_line' }),
         };
         await tx`alter table gr_lines drop constraint gr_lines_qty_received_nonneg`;
         await tx`update gr_lines set qty_received = -1 where id = ${ids.negative}`;
@@ -241,14 +254,18 @@ describe('0071 gr_lines count truth', () => {
       }),
     ).rejects.toBe(ROLLBACK);
 
-    for (const k of ['completed', 'partial']) {
-      expect(seen[k]!.counted_at?.toISOString()).toBe(closedAt.toISOString());
-      expect(seen[k]!.count_method).toBe('legacy');
-      expect(seen[k]!.counted_by).toBeNull();
+    for (const k of ['completed', 'partial', 'missing', 'damagedNote', 'spot']) {
+      expect(seen[k]!.counted_at?.toISOString(), k).toBe(closedAt.toISOString());
+      expect(seen[k]!.count_method, k).toBe('legacy');
+      expect(seen[k]!.counted_by, k).toBeNull();
     }
-    for (const k of ['pending', 'rejected', 'negative']) {
-      expect(seen[k]!.counted_at).toBeNull();
-      expect(seen[k]!.count_method).toBeNull();
+    expect(seen.bulk!.counted_at?.toISOString()).toBe(closedAt.toISOString());
+    expect(seen.bulk!.count_method).toBe('bulk_as_ordered');
+    // Unknown stays unknown: G-04's switch to counted_at IS NOT NULL must not turn
+    // an untouched line into "received 0" (a false whole-line shortfall).
+    for (const k of ['pending', 'rejected', 'negative', 'untouched', 'noteOnly', 'glued']) {
+      expect(seen[k]!.counted_at, k).toBeNull();
+      expect(seen[k]!.count_method, k).toBeNull();
     }
     expect(seen.counted!.counted_at?.toISOString()).toBe(already.toISOString());
     expect(seen.counted!.count_method).toBe('line');
@@ -323,6 +340,10 @@ describe('0071 claim_letters + recovery_claims.letter_id', () => {
     expect(l).toMatchObject({ status: 'draft', version: 1, sentAt: null, channel: null });
     await expectPgError(sql`update claim_letters set status = 'paid' where id = ${l!.id}`, CHECK_VIOLATION);
     await expectPgError(sql`update claim_letters set version = 0 where id = ${l!.id}`, CHECK_VIOLATION);
+    for (const c of ['whatsapp', 'email', 'print'] as const) {
+      await db.update(claimLetters).set({ channel: c }).where(eq(claimLetters.id, l!.id));
+    }
+    await expectPgError(sql`update claim_letters set channel = 'fax' where id = ${l!.id}`, CHECK_VIOLATION);
     await expectPgError(
       db.insert(claimLetters).values({ restaurantId: A.restaurantId, supplierId: A.supplierId, seqNo: 0 }),
       CHECK_VIOLATION,
@@ -447,4 +468,59 @@ describe('0071 enum values', () => {
       { typname: 'notification_status', labels: ['queued', 'sending', 'sent', 'failed', 'cancelled', 'skipped'] },
     ]);
   });
+});
+
+describe('0071 fails fast on a lock instead of queueing', () => {
+  const statements = () =>
+    readFileSync(join(migrationsDir(), '0071_schema_batch_0.sql'), 'utf8')
+      .split('--> statement-breakpoint')
+      .map((x) => x.trim())
+      .filter(Boolean);
+
+  it('starts with lock_timeout and takes every ACCESS EXCLUSIVE lock up front, in one fixed order', () => {
+    const [first, second] = statements();
+    expect(first!.split('\n').filter((l) => !l.startsWith('--')).join('\n').trim()).toBe("SET LOCAL lock_timeout = '5s';");
+    expect(second).toBe(
+      'LOCK TABLE "gr_lines", "goods_receipts", "purchase_orders", "discrepancies", "recovery_claims", "product_aliases", "users" IN ACCESS EXCLUSIVE MODE;',
+    );
+  });
+
+  it('a long reader on users → 55P03 within the timeout, nothing applied; once it ends, a re-run succeeds', async () => {
+    // A closed receipt with a counted, unstamped line: the backfill's witness.
+    const [gr] = await db.insert(goodsReceipts).values({ restaurantId: A.restaurantId, status: 'completed' }).returning();
+    const [line] = await db.insert(grLines).values({ grId: gr!.id, qtyReceived: '3' }).returning();
+    const run = () =>
+      sql.begin(async (tx) => {
+        for (const st of statements()) await tx.unsafe(st);
+      });
+
+    const blocker = postgres(url, { max: 1, prepare: false });
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let locked!: () => void;
+    const lockTaken = new Promise<void>((r) => (locked = r));
+    const reader = blocker.begin(async (tx) => {
+      await tx`select count(*) from users`; // AccessShare on users, held until commit
+      locked();
+      await held;
+    });
+    try {
+      await lockTaken;
+      const t0 = Date.now();
+      await expectPgError(run(), '55P03'); // lock_not_available
+      expect(Date.now() - t0).toBeLessThan(9_000);
+      const [after] = await db.select().from(grLines).where(eq(grLines.id, line!.id));
+      expect(after!.countedAt).toBeNull(); // the whole transaction rolled back
+    } finally {
+      release();
+      await reader;
+      await blocker.end();
+    }
+
+    await run(); // traffic is quiet: the same file applies (idempotent)
+    const [stamped] = await db.select().from(grLines).where(eq(grLines.id, line!.id));
+    expect(stamped!.countedAt).not.toBeNull();
+    expect(stamped!.countMethod).toBe('legacy');
+    await db.delete(goodsReceipts).where(eq(goodsReceipts.id, gr!.id));
+  }, 30_000);
 });

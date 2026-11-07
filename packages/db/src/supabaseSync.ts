@@ -117,6 +117,12 @@ export function rlsSql(dir: string = migrationsDir()): string {
   return `${GENERATED_MARK} — DO NOT EDIT. Idempotent; re-emitted after schema changes.
 -- = \`pnpm --filter @restomatch/db provision-rls\` (PROVISION_STORAGE_RLS=1) as a migration.
 
+-- Fail fast instead of queueing: this file takes ACCESS EXCLUSIVE on every tenant
+-- table (enable RLS / create policy) in one transaction. One long reader would make
+-- every read wait behind it. With a timeout it errors (55P03), applies nothing, and
+-- is re-run once traffic is quiet.
+set local lock_timeout = '5s';
+
 -- 1. The non-owner tenant role. NOLOGIN and NO password in git: after the first
 --    deploy the owner runs  ALTER ROLE restomatch_app WITH LOGIN PASSWORD '…';
 --    (docs/SUPABASE-GITHUB-DEPLOY.md), or provision-rls with APP_ROLE_PASSWORD.
