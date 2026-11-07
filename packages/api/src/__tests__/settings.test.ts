@@ -2,6 +2,7 @@ import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { and, auditLog, createDb, eq, inArray, restaurants } from '@restomatch/db';
 import { normalizeIlPhone } from '../routers/settings';
+import { DEFAULT_VAT_RATE, vatRateOf } from '../lib/vat';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -152,5 +153,31 @@ describe('settings router', () => {
     expect(normalizeIlPhone('03-1234567')).toBe('+97231234567');
     expect(normalizeIlPhone('12345')).toBeNull();
     expect(normalizeIlPhone('+1 415 555 0100')).toBeNull();
+  });
+
+  // ── VAT fallback: 18% (Israel since 01.01.2025), never a stale 17% ─────────
+  it('a missing vat_rate falls back to 0.18, never 0.17', () => {
+    expect(DEFAULT_VAT_RATE).toBe(0.18);
+    expect(vatRateOf(null)).toBe(0.18);
+    expect(vatRateOf(undefined)).toBe(0.18);
+    expect(vatRateOf('')).toBe(0.18);
+    expect(vatRateOf('0.1800')).toBe(0.18);
+  });
+
+  it('profile returns 0.18 for a restaurant on the DB default', async () => {
+    const [r] = await db.insert(restaurants).values({ name: 'VAT default' }).returning();
+    const caller = appRouter.createCaller({
+      db,
+      session: { userId: A.ownerUserId, restaurantId: r!.id, role: 'owner' },
+    } as AppContext);
+    expect((await caller.settings.profile()).vatRate).toBe(0.18);
+  });
+
+  it('saving the profile without touching VAT never writes 0.17', async () => {
+    await db.update(restaurants).set({ vatRate: '0.18' }).where(eq(restaurants.id, A.restaurantId));
+    const out = await callerFor(A).settings.updateProfile({ name: 'Resto A', timezone: 'Asia/Jerusalem' });
+    expect(out.vatRate).toBe(0.18);
+    const [row] = await db.select({ v: restaurants.vatRate }).from(restaurants).where(eq(restaurants.id, A.restaurantId));
+    expect(Number(row?.v)).toBe(0.18);
   });
 });

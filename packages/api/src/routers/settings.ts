@@ -16,6 +16,7 @@ import { DEFAULT_REVIEW_THRESHOLD } from '@restomatch/ocr';
 import { resolveApprovalThresholds } from '../approvals/engine';
 import { recordAudit, type AuditAction } from '../audit';
 import { appError } from '../errors';
+import { vatRateOf } from '../lib/vat';
 import { financeProcedure, memberProcedure, ownerProcedure, router } from '../trpc';
 import { hasNoControlChars, NO_CONTROL_CHARS_MESSAGE } from '../lib/text';
 
@@ -92,7 +93,7 @@ const timezoneSchema = z
     { message: 'אזור זמן לא תקין', params: { appCode: 'settings.invalidTimezone' } },
   );
 
-/** Restaurant profile patch. vatRate is a fraction (0.17 = 17%). businessId
+/** Restaurant profile patch. vatRate is a fraction (0.18 = 18%). businessId
  *  nullable so it can be cleared. At least one field required. */
 const ProfileUpdateInput = z
   .object({
@@ -313,7 +314,7 @@ export const settingsRouter = router({
       name: row?.name ?? '',
       businessId: row?.businessId ?? null,
       // vatRate is NUMERIC → Drizzle returns a string; expose it as a fraction number.
-      vatRate: row?.vatRate != null ? Number(row.vatRate) : 0.17,
+      vatRate: vatRateOf(row?.vatRate),
       timezone: row?.timezone ?? 'Asia/Jerusalem',
     };
   }),
@@ -365,7 +366,7 @@ export const settingsRouter = router({
     return {
       name: updated?.name ?? '',
       businessId: updated?.businessId ?? null,
-      vatRate: updated?.vatRate != null ? Number(updated.vatRate) : 0.17,
+      vatRate: vatRateOf(updated?.vatRate),
       timezone: updated?.timezone ?? 'Asia/Jerusalem',
     };
   }),
