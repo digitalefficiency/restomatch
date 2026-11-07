@@ -31,6 +31,22 @@ export interface TaskRow {
 type T = Translator<typeof overviewHe>;
 
 /**
+ * Stable row keys (the `needs-<key>` test ids and `data-needs-row`) — the W1-05
+ * names, so specs and deep links that pin them keep working.
+ */
+const ROW_KEY: Partial<Record<Task['type'], string>> = {
+  decision: 'decide',
+  claim_to_send: 'claimsUnsent',
+  credit_to_match: 'claimsWaiting',
+  allocation_missing: 'vat',
+  payment_due: 'payRun',
+  delivery_due: 'deliveries',
+  delivery_late: 'deliveries',
+  close_step: 'count',
+  order_due: 'cutoffs',
+};
+
+/**
  * Task → row words. The ₪ is the task's own (server) figure; this only names it.
  * `others` tasks become the one "waiting on others" line, not a row.
  */
@@ -40,7 +56,7 @@ export function taskRow(task: Task, t: T, locale: Locale, sideMoney: (agorot: nu
   const age =
     task.ageDays === null ? null : task.ageDays === 0 ? t('needs.age.today') : t('needs.age.days', { days: n(task.ageDays) });
   const join = (...xs: (string | null | undefined | false)[]) => xs.filter(Boolean).join(' · ') || undefined;
-  const base = { key: task.entityId, type: task.type, tone: task.tone as RowTone, href: task.deepLink, agorot: task.ilsAgorot, decimals: 0 as 0 | 2, countText: null as string | null };
+  const base = { key: ROW_KEY[task.type] ?? task.entityId, type: task.type, tone: task.tone as RowTone, href: task.deepLink, agorot: task.ilsAgorot, decimals: 0 as 0 | 2, countText: null as string | null };
   switch (task.type) {
     case 'decision':
       return {

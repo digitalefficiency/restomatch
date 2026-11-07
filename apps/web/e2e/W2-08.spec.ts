@@ -83,10 +83,10 @@ test.describe('owner: one figure on the home row, the badge and the bell', () =>
   test('4 items · ₪296 · 2 blocking, everywhere', async ({ browser, baseURL }) => {
     const { context, page } = await asRole(browser, 'owner', DESKTOP, baseURL!);
     await page.goto('/dashboard');
-    const row = page.getByTestId('needs-decision:mine');
+    const row = page.getByTestId('needs-decide');
     await expect(row).toBeVisible();
-    expect(digits(await page.getByTestId('needs-decision:mine-value').innerText())).toBe('296');
-    await expect(page.getByTestId('needs-decision:mine-sub')).toContainText('2 חוסמים תשלום');
+    expect(digits(await page.getByTestId('needs-decide-value').innerText())).toBe('296');
+    await expect(page.getByTestId('needs-decide-sub')).toContainText('2 חוסמים תשלום');
 
     const link = page.locator('aside a[href="/dashboard/approvals"], nav a[href="/dashboard/approvals"]').first();
     // The accessible name = the visible label + an sr-only badge suffix (no aria-label override).
