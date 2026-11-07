@@ -1,0 +1,16 @@
+{
+  "caseId": "WA-G-OWNER-03",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": null,
+      "toolCalls": [],
+      "outbound": []
+    }
+  ],
+  "staged": [],
+  "state": {
+    "proactiveSent": 0
+  }
+}

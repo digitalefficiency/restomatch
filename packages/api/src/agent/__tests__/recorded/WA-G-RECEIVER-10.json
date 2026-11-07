@@ -1,0 +1,50 @@
+{
+  "caseId": "WA-G-RECEIVER-10",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "receiving.today",
+      "toolCalls": [
+        {
+          "name": "receiving.todayExpectations",
+          "args": {},
+          "result": {
+            "deliveries": [
+              {
+                "supplier": "מאפיית ברנר",
+                "until": "06:00",
+                "lineCount": 4
+              },
+              {
+                "supplier": "ירקות השרון",
+                "until": "07:30",
+                "lineCount": 9
+              },
+              {
+                "supplier": "יבשים בן-עמי",
+                "until": "13:00",
+                "lineCount": 7
+              }
+            ]
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "היום מגיעים 3 משלוחים:\n• מאפיית ברנר עד 06:00 (4 שורות)\n• ירקות השרון עד 07:30 (9 שורות)\n• יבשים בן-עמי עד 13:00 (7 שורות)",
+          "buttons": [
+            {
+              "id": "b:29",
+              "title": "פתח קבלה"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

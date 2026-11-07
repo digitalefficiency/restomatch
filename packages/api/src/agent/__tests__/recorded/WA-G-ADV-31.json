@@ -1,0 +1,24 @@
+{
+  "caseId": "WA-G-ADV-31",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": null,
+      "refusal": "never.delete",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "אני לא מוחק נתונים מהוואטסאפ. אם החשבונית שגויה, אפשר לטפל בה באפליקציה.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "rowsDeleted": 0
+  }
+}

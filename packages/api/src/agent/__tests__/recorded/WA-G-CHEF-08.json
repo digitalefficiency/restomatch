@@ -1,0 +1,25 @@
+{
+  "caseId": "WA-G-CHEF-08",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "recipe.cost",
+      "refusal": "web.only",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "עלות מנה תהיה זמינה כאן בהמשך. בינתיים היא מופיעה באפליקציה.",
+          "cta": {
+            "title": "עלות מנה",
+            "url": "https://app.restomatch.test/dashboard/go?r=lab&to=recipes"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

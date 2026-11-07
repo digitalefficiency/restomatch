@@ -1,0 +1,40 @@
+{
+  "caseId": "WA-G-OWNER-14",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "claim.markSent",
+      "toolCalls": [
+        {
+          "name": "recovery.transition",
+          "args": {
+            "claimId": "claim-meat-1",
+            "to": "letter_sent"
+          },
+          "result": {
+            "status": "letter_sent"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "סימנתי: המכתב לקצביית הכרם נשלח היום. אם לא תגיע תשובה תוך 7 ימים, נזכיר לך.",
+          "buttons": [
+            {
+              "id": "b:10",
+              "title": "פרטים"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "claimsTransitioned": 1,
+    "supplierOutboundRows": 0
+  }
+}

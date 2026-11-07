@@ -1,0 +1,82 @@
+{
+  "caseId": "WA-G-MANAGER-02",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "decide.claim",
+      "toolCalls": [
+        {
+          "name": "wa.stageAction",
+          "args": {
+            "discrepancyId": "d-bakery-551-2",
+            "action": "approve"
+          },
+          "result": {
+            "staged": true,
+            "token": "stg_lab_mgr02",
+            "amountAgorot": 1800
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "לבקש זיכוי של 18 ₪ ממאפיית ברנר על חשבונית 551?",
+          "buttons": [
+            {
+              "id": "tok:stg_lab_mgr02",
+              "title": "אשר 18 ₪"
+            },
+            {
+              "id": "cancel",
+              "title": "ביטול"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "intent": null,
+      "toolCalls": [
+        {
+          "name": "approvals.approve",
+          "args": {
+            "discrepancyId": "d-bakery-551-2"
+          },
+          "result": {
+            "status": "accepted"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "נרשם: 18 ₪ נוספו לבקשת הזיכוי מול מאפיית ברנר. אפשר לבטל עד 10:12.",
+          "buttons": [
+            {
+              "id": "undo:d-bakery-551-2",
+              "title": "בטל"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [
+    {
+      "token": "stg_lab_mgr02",
+      "amountAgorot": 1800,
+      "block": false,
+      "bulk": false,
+      "requiredRole": "manager"
+    }
+  ],
+  "state": {
+    "stagedTokens": 1,
+    "tokensCommitted": 1,
+    "approvalsDecided": 1
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "caseId": "WA-G-MANAGER-04",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "delivery.late",
+      "toolCalls": [
+        {
+          "name": "receiving.todayExpectations",
+          "args": {},
+          "result": {
+            "deliveries": [
+              {
+                "supplier": "ירקות השרון",
+                "until": "07:30",
+                "lineCount": 9,
+                "orderId": "po-1043",
+                "received": false
+              }
+            ]
+          }
+        },
+        {
+          "name": "orders.sendStatus",
+          "args": {
+            "orderId": "po-1043"
+          },
+          "result": {
+            "status": "sent",
+            "sentVia": "manual"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "template",
+          "text": "המשלוח מירקות השרון היה אמור להגיע עד 07:30 ועוד לא נקלט. בהזמנה 1043 יש 9 פריטים. אפשר לשאול את הספק מהטלפון שלך.",
+          "template": {
+            "name": "rm_delivery_late",
+            "vars": [
+              "ירקות השרון",
+              "07:30",
+              "1043",
+              "9"
+            ]
+          },
+          "buttons": [
+            {
+              "id": "late:arrived:po-1043",
+              "title": "הגיע, אעדכן"
+            },
+            {
+              "id": "late:postpone:po-1043",
+              "title": "דחה למחר"
+            }
+          ],
+          "cta": {
+            "title": "שאל את הספק",
+            "url": "https://wa.me/972521110102?text=%D7%94%D7%99%D7%99%2C%20%D7%90%D7%99%D7%A4%D7%94%20%D7%94%D7%9E%D7%A9%D7%90%D7%99%D7%AA%20%D7%A9%D7%9C%20%D7%94%D7%96%D7%9E%D7%A0%D7%94%201043%3F"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "proactiveSent": 1,
+    "supplierOutboundRows": 0
+  }
+}

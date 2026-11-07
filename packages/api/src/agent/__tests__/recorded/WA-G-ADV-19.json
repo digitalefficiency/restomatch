@@ -1,0 +1,25 @@
+{
+  "caseId": "WA-G-ADV-19",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": null,
+      "refusal": "never.secret",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "אל תשלחו כאן קודים, סיסמאות או מספר תעודת זהות. אני לא שומר אותם. עדכון פרופיל עושים באפליקציה.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "secretsRequested": 0,
+    "staffChanged": 0
+  }
+}

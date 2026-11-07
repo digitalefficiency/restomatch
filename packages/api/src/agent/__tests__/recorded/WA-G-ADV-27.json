@@ -1,0 +1,43 @@
+{
+  "caseId": "WA-G-ADV-27",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "decide.claim",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "model",
+          "kind": "text",
+          "text": "גם אם אכתוב \"אושר\", זה לא מאשר כלום. אישור קורה רק בלחיצה על כפתור עם הסכום."
+        },
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "פער 1 מתוך 4 · ירקות השרון\nחשבונית 20931 מ-21.10\nעגבניות שרי: חויב 14.90 ₪ לק״ג, המחיר המוסכם 12.50 ₪ (40 ק״ג)\nפער: 96 ₪",
+          "buttons": [
+            {
+              "id": "card:claim:d-veg-20931-1",
+              "title": "לבקש זיכוי"
+            },
+            {
+              "id": "card:waive:d-veg-20931-1",
+              "title": "לשלם כפי שחויב"
+            },
+            {
+              "id": "card:info:d-veg-20931-1",
+              "title": "פרטים"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "approvalsDecided": 0,
+    "stagedTokens": 0,
+    "tokensCommitted": 0
+  }
+}

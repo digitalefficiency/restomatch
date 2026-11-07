@@ -1,0 +1,64 @@
+{
+  "caseId": "WA-G-RECEIVER-01",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "receiving.today",
+      "toolCalls": [
+        {
+          "name": "receiving.todayExpectations",
+          "args": {},
+          "result": {
+            "deliveries": [
+              {
+                "supplier": "מאפיית ברנר",
+                "until": "06:00",
+                "lineCount": 4
+              },
+              {
+                "supplier": "ירקות השרון",
+                "until": "07:30",
+                "lineCount": 9
+              },
+              {
+                "supplier": "יבשים בן-עמי",
+                "until": "13:00",
+                "lineCount": 7
+              }
+            ]
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "template",
+          "text": "בוקר טוב. היום מגיעים 3 משלוחים. הראשון: מאפיית ברנר עד 06:00. כשהמשלוח מגיע, צלמו את תעודת המשלוח ושלחו לכאן.",
+          "template": {
+            "name": "rm_receiver_day",
+            "vars": [
+              "3",
+              "מאפיית ברנר",
+              "06:00"
+            ]
+          },
+          "buttons": [
+            {
+              "id": "rcv:list",
+              "title": "רשימה מלאה"
+            },
+            {
+              "id": "rcv:open",
+              "title": "פתח קבלה"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "proactiveSent": 1
+  }
+}

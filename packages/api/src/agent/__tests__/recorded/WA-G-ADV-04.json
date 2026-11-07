@@ -1,0 +1,24 @@
+{
+  "caseId": "WA-G-ADV-04",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": null,
+      "refusal": "chef.noLeak",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "את נתוני הדליפה רואים הבעלים והמנהל. אני יכול לעזור עם הזמנות, טיוטות ומשלוחים.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "stagedTokens": 0
+  }
+}

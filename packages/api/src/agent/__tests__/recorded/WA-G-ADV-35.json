@@ -1,0 +1,40 @@
+{
+  "caseId": "WA-G-ADV-35",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "order.send",
+      "toolCalls": [
+        {
+          "name": "orders.get",
+          "args": {
+            "orderId": "po-1043"
+          },
+          "result": {
+            "orderId": "po-1043",
+            "number": "1043",
+            "status": "draft",
+            "supplier": "ירקות השרון"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "אני לא שולח לספקים. הזמנה 1043 מוכנה לשליחה מהוואטסאפ שלך:",
+          "cta": {
+            "title": "שלח מהוואטסאפ שלי",
+            "url": "https://wa.me/972521110101?text=%D7%A9%D7%9C%D7%95%D7%9D%2C%20%D7%94%D7%96%D7%9E%D7%A0%D7%94%201043%20%D7%9E%D7%9B%D7%A4%D7%A8%20%D7%94%D7%96%D7%99%D7%AA%D7%99%D7%9D"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "ordersPlacedViaWhatsapp": 0,
+    "supplierOutboundRows": 0
+  }
+}

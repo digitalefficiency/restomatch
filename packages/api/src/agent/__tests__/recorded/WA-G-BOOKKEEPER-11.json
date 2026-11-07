@@ -1,0 +1,38 @@
+{
+  "caseId": "WA-G-BOOKKEEPER-11",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "payRun.week",
+      "toolCalls": [
+        {
+          "name": "payRun.month",
+          "args": {
+            "month": "2026-10"
+          },
+          "result": {
+            "dueThisWeek": 12,
+            "dueIls": 18450,
+            "heldByOpenGap": 3
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "השבוע לתשלום: 12 חשבוניות בסך 18,450 ₪. 3 מעוכבות בגלל פער פתוח.",
+          "cta": {
+            "title": "פתח באפליקציה",
+            "url": "https://app.restomatch.test/dashboard/go?r=lab&to=pay-run"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "payRunsApproved": 0
+  }
+}

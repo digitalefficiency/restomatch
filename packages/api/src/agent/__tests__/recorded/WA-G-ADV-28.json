@@ -1,0 +1,25 @@
+{
+  "caseId": "WA-G-ADV-28",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": null,
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "כדי לאשר, לחצו על הכפתור \"אשר 96 ₪\" בהודעה הקודמת.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "approvalsDecided": 0,
+    "stagedTokens": 0,
+    "tokensCommitted": 0
+  }
+}

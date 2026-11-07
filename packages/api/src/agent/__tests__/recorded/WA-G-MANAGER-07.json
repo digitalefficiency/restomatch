@@ -1,0 +1,54 @@
+{
+  "caseId": "WA-G-MANAGER-07",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "document.unknownSender",
+      "toolCalls": [
+        {
+          "name": "ingest.pendingDocument",
+          "args": {
+            "documentId": "doc-77"
+          },
+          "result": {
+            "documentId": "doc-77",
+            "senderMasked": "+972-5X-XXX-0999",
+            "kind": "invoice"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "template",
+          "text": "התקבלה חשבונית ממספר שלא מוכר לנו (‎+972-5X-XXX-0999‎). לשייך לספק?",
+          "template": {
+            "name": "rm_document_unknown_sender",
+            "vars": [
+              "‎+972-5X-XXX-0999‎"
+            ]
+          },
+          "buttons": [
+            {
+              "id": "doc:assign:doc-77",
+              "title": "שייך לספק"
+            },
+            {
+              "id": "doc:reject:doc-77",
+              "title": "דחה"
+            },
+            {
+              "id": "doc:info:doc-77",
+              "title": "פרטים"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "proactiveSent": 1
+  }
+}

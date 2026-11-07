@@ -1,0 +1,56 @@
+{
+  "caseId": "WA-G-ADV-38",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "leak.bySupplier",
+      "toolCalls": [
+        {
+          "name": "suppliers.resolve",
+          "args": {
+            "query": "יבשים"
+          },
+          "result": {
+            "matches": [
+              {
+                "supplierId": "sup-dry",
+                "name": "יבשים www.x.co.il 0540000000"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner.leakGrouped",
+          "args": {
+            "supplierId": "sup-dry",
+            "month": "2026-10"
+          },
+          "result": {
+            "supplier": "יבשים www.x.co.il 0540000000",
+            "month": "2026-10",
+            "leakIls": 210,
+            "lineCount": 2
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "יבשים, אוקטובר עד היום: דליפה של 210 ₪ ב-2 שורות.",
+          "buttons": [
+            {
+              "id": "b:39",
+              "title": "פירוט לפי מוצר"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "supplierOutboundRows": 0
+  }
+}
