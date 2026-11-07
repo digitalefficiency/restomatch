@@ -87,7 +87,7 @@
 
 > **בוקר טוב. ב{{1}} מחכים לך היום:**
 > • {{2}} פערים להחלטה, בסך {{3}}
-> • {{4}} תביעות שעברו 7 ימים בלי תשובה מהספק
+> • {{4}} בקשות זיכוי שעברו 7 ימים בלי תשובה מהספק
 > הדליפה החודש עד עכשיו: {{5}}. הפרטים באפליקציה.
 > [להחלטות עכשיו] [השתק להיום] + URL button [פתח באפליקציה]
 
@@ -105,32 +105,32 @@ Decision card:
 > חשבונית 20931 מ-05.11
 > עגבניות שרי: חויב 14.90 ₪ לק״ג, המחיר המוסכם 12.50 ₪ (40 ק״ג)
 > פער: 96 ₪
-> [לתבוע מהספק] [לוותר] [פרטים]
+> [לבקש זיכוי] [לשלם כפי שחויב] [פרטים]
 
-After "לתבוע מהספק" the server stages the action and asks for an amount-specific confirm:
-> לאשר תביעה של **96 ₪** מירקות השרון על חשבונית 20931?
+After "לבקש זיכוי" the server stages the action and asks for an amount-specific confirm:
+> לבקש זיכוי של **96 ₪** מירקות השרון על חשבונית 20931?
 > [אשר 96 ₪] [ביטול]
 
 After "אשר 96 ₪" (committed, then reported):
-> נרשם: 96 ₪ נוספו לתביעה מול ירקות השרון. אפשר לבטל עד 07:52.
+> נרשם: 96 ₪ נוספו לבקשת הזיכוי מול ירקות השרון. אפשר לבטל עד 07:52.
 > [בטל] [הפער הבא]
 
-"לוותר" opens a reason list (the `WAIVE_REASON_CODES`), then the same amount-specific confirm "[אשר ויתור 96 ₪]":
-> [רשימה: סיבת ויתור] סוכם מראש עם הספק · טעות שלנו בהזמנה · סכום זניח · אחר (אפרט באפליקציה)
+"לשלם כפי שחויב" opens a reason list (the `WAIVE_REASON_CODES`), then the same amount-specific confirm "[אשר כפי שחויב 96 ₪]":
+> [רשימה: בחרו סיבה] סוכם מראש עם הספק · טעות שלנו בהזמנה · סכום זניח · אחר (אפרט באפליקציה)
 
 - **Tool calls:** `approvals.myQueue` (memberProcedure; with W2-04's `canAct`/`waitingOn`) to build cards · on confirm `approvals.approve` or `approvals.reject` (**deciderProcedure** = owner/manager/bookkeeper; `ensureCanAct` checks `requiredRole`) · undo `approvals.reopen` (deciderProcedure).
 - **Confirmed how:** two taps. The first records intent; the second names the exact amount and commits through `withIdempotency` (G-05) keyed on the WhatsApp message id of the tap. The decision's audit row carries `source: 'whatsapp'`, the staged-action id and the user id.
 - **Undo:** `REOPEN_WINDOW_MS` is 15 seconds today ([code] `approvals.ts:62`), too short for a chat. Proposal: a **10-minute** undo for WhatsApp-originated decisions (WD3), changed in the approvals *router* (not the immutable `approvals/engine.ts`).
 - **Step-up (WD2, decided: the binding ₪500 one-tap rule):** an item above **₪500** claimable (W2-04's `ONE_TAP_APPROVE_CAP_AGOROT`), any block, any bulk request, or an item routed to another role gets a [CTA ↗] "לאישור באפליקציה" instead of the confirm button, with no token; the server refuses those even with a valid token.
-- **MISSING_ON_INVOICE:** such a line is never shown as a "לתבוע" card. It appears, if at all, as information with [פרטים] only.
+- **MISSING_ON_INVOICE:** such a line is never shown as a "לבקש זיכוי" card. It appears, if at all, as information with [פרטים] only.
 - **Taps today:** tap the e-mail, sign in, approvals, open row, choose, confirm ≈ 5–7 taps. **WhatsApp:** 2 taps per gap, with no sign-in.
 
 **O3 · "כמה דלף אצל קצביית הכרם?"** (free text → the agent loop).
 
 > **קצביית הכרם, נובמבר עד היום:** דליפה של 1,240 ₪ ב-9 שורות.
 > הגדול ביותר: חזה עוף, 3 חשבוניות מעל המחיר המוסכם (610 ₪).
-> מתוך זה 860 ₪ אפשר לתבוע, ו-380 ₪ כבר בתביעה.
-> [להכין מכתב תביעה] [פירוט לפי מוצר] [חודש קודם]
+> מתוך זה 860 ₪ אפשר לבקש זיכוי, ו-380 ₪ כבר בבקשת זיכוי.
+> [להכין מכתב בקשת זיכוי] [פירוט לפי מוצר] [חודש קודם]
 
 - **Tool calls:** the Ask tools `leak_breakdown` / `leak_report` / `claimable_lines` (today behind `ask.ask`, managerProcedure), or directly `owner.leakGrouped` (financeProcedure) with a supplier filter. Supplier resolution: a fuzzy match on the tenant's own supplier names (W3-04a `normalizeHe`). Two candidates → a list message "למי התכוונת?". Zero → "לא מצאתי ספק בשם הזה" plus the supplier list.
 - **Grounding:** every number in the reply must equal a tool figure of the same unit, or the reply is replaced by the offline renderer's facts (Ask grounding, [code] `ask/grounding.ts`). The model never writes ₪; the renderer does.
@@ -138,7 +138,7 @@ After "אשר 96 ₪" (committed, then reported):
 - **Taps today:** dashboard, leaks, breakdown, supplier filter ≈ 4–5 taps. **WhatsApp:** one message.
 
 **O4 · Claim letter, sent only by the owner's own tap** (follows O3 or the brief).
-> מכתב תביעה לקצביית הכרם מוכן: 860 ₪ על 6 שורות (בלי שורות "חסר בחשבונית").
+> מכתב בקשת זיכוי לקצביית הכרם מוכן: 860 ₪ על 6 שורות (בלי שורות "חסר בחשבונית").
 > [CTA ↗ שלח מהוואטסאפ שלי]
 
 The CTA opens `wa.me/<supplier contact_whatsapp>` in the **owner's own WhatsApp**, with the letter text and its portal link prefilled. The owner presses send. RestoMatch's number never messages the supplier. On the owner's next message, or after 10 minutes:
@@ -465,10 +465,10 @@ Rules: no promotion, upsell or survey line (one such line re-bills at ≈ 6.7×,
 
 | Name | To | Trigger | Body (Hebrew) | Buttons |
 |---|---|---|---|---|
-| `rm_owner_brief` | owner | 07:30 Sun–Fri | בוקר טוב. ב{{1}} מחכים לך היום: {{2}} פערים להחלטה, בסך {{3}}, ו-{{4}} תביעות שעברו 7 ימים בלי תשובה. הדליפה החודש עד עכשיו: {{5}}. הפרטים באפליקציה. | להחלטות עכשיו · השתק להיום · [URL] פתח באפליקציה |
+| `rm_owner_brief` | owner | 07:30 Sun–Fri | בוקר טוב. ב{{1}} מחכים לך היום: {{2}} פערים להחלטה, בסך {{3}}, ו-{{4}} בקשות זיכוי שממתינות לתשובה יותר מ-7 ימים. הדליפה החודש עד עכשיו: {{5}}. הפרטים באפליקציה. | להחלטות עכשיו · השתק להיום · [URL] פתח באפליקציה |
 | `rm_decision_needed` (H-05) | owner/manager/bookkeeper | new routed gap, AU-12 nudge at 24 h | ב{{1}} מחכה להחלטתך פער מול {{2}} בסך {{3}}, בחשבונית {{4}}. התשלום לספק מעוכב עד ההחלטה. | לפרטים והחלטה · [URL] פתח באפליקציה |
-| `rm_claim_overdue` | owner/manager | day 7 after `letter_sent` (AU-03 08:30) | עברו 7 ימים מאז נשלח מכתב התביעה ל{{1}} על {{2}}, ואין תשובה. אפשר לשלוח תזכורת מהטלפון שלך. | הכן תזכורת · כבר טופל · [URL] פתח באפליקציה |
-| `rm_claim_reply` (H-05) | owner | supplier answered on the portal (H-06) | {{1}} השיבו על מכתב התביעה בסך {{2}}: {{3}}. ההחלטה שלך באפליקציה. | לפרטים · [URL] פתח באפליקציה |
+| `rm_claim_overdue` | owner/manager | day 7 after `letter_sent` (AU-03 08:30) | עברו 7 ימים מאז נשלחה בקשת הזיכוי ל{{1}} על {{2}}, ועוד אין תשובה. אפשר לשלוח תזכורת מהטלפון שלך. | הכן תזכורת · כבר טופל · [URL] פתח באפליקציה |
+| `rm_claim_reply` (H-05) | owner | supplier answered on the portal (H-06) | {{1}} השיבו על בקשת הזיכוי בסך {{2}}: {{3}}. ההחלטה שלך באפליקציה. | לפרטים · [URL] פתח באפליקציה |
 | `rm_delivery_late` (H-05) | manager | late-truck check | המשלוח מ{{1}} היה אמור להגיע עד {{2}} ועוד לא נקלט. בהזמנה {{3}} יש {{4}} פריטים. אפשר לשאול את הספק מהטלפון שלך. | [URL] שאל את הספק · הגיע, אעדכן · דחה למחר |
 | `rm_receiver_day` | receiver | 06:00 (AU-04) | בוקר טוב. היום מגיעים {{1}} משלוחים. הראשון: {{2}} עד {{3}}. כשהמשלוח מגיע, צלמו את תעודת המשלוח ושלחו לכאן. | רשימה מלאה · פתח קבלה |
 | `rm_receiver_late` | receiver | late-truck check | המשלוח מ{{1}} עדיין לא הגיע. המנהל מעודכן, אין צורך לעשות דבר כרגע. | הגיע עכשיו |

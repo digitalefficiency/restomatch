@@ -149,7 +149,7 @@ Delivery and scheduling live in the immutable `outbox.ts` and `cron.ts`. Any cha
 
 1. **Zero-install onboarding through the channel itself.** The owner taps a `wa.me` link from the web app and the first message binds the phone to the user (role→phone, H-05). There is no app to install. This copies Instinct's "Text Instinct to get started".
 2. **A hard money gate outside the model.** Instinct's one-time card for an approved amount is the right pattern: **the model proposes, a deterministic control executes.** For RestoMatch:
-   - a WhatsApp button "אשר טיוטת תביעה" only marks a draft as approved in our DB;
+   - a WhatsApp button "אשר טיוטת בקשת זיכוי" only marks a draft as approved in our DB;
    - sending to a supplier stays a separate, explicit owner action;
    - pay-run and Masav file generation stay human.
 3. **Proactive, but budgeted.** Proactivity is Instinct's best-loved trait. Copy it as a **daily owner digest**: "₪X leak caught yesterday, 2 claims overdue (7+ days)". This also mirrors Meta's morning briefing. Keep within ≤6 alerts per person per day, quiet hours and Shabbat. Batch into the digest rather than ping per event.

@@ -144,22 +144,22 @@
 
 **OWN-01 · "מה מחכה לי היום?"** — *pilot (read-only, Dec)* · WA-08
 - Trigger: user text ("מה מחכה לי", "בוקר", "סיכום"). The proactive twin is PRO-01.
-- Message: `ב{מסעדה} מחכים לך היום: 4 פערים להחלטה בסך ₪1,412 · 2 תביעות שעברו 7 ימים בלי תשובה. הדליפה החודש עד עכשיו: ₪3,180.`
-- Buttons: `[להחלטות]` `[תביעות באיחור]` `[פתח באפליקציה]` (pilot: the first two answer as read-only lists; deciding opens the app until WA-07).
+- Message: `ב{מסעדה} מחכים לך היום: 4 פערים להחלטה בסך ₪1,412 · 2 בקשות זיכוי שעברו 7 ימים בלי תשובה. הדליפה החודש עד עכשיו: ₪3,180.`
+- Buttons: `[להחלטות]` `[בקשות זיכוי בלי תשובה 7 ימים]` `[פתח באפליקציה]` (pilot: the first two answer as read-only lists; deciding opens the app until WA-07).
 - tRPC: `owner.leakHero` (member) · `approvals.queueSummary` (member) · `recovery.list` (finance, recovery flag) · `owner.kpis` (member).
 - Confirm/undo: none (read-only). ₪: all. Steps: web 4–6 + sign-in · WA 1 message.
 
 **OWN-02 · "כמה דלף החודש?"** — *pilot* · WA-02/08
 - Trigger: user text.
-- Message: `נובמבר עד היום: דליפה של ₪3,180 ב-27 שורות, 1.7% מהקניות. ₪2,140 אפשר לתבוע, ₪620 כבר בתביעה. (לא כולל שורות "חסר בחשבונית".)`
+- Message: `נובמבר עד היום: דליפה של ₪3,180 ב-27 שורות, 1.7% מהקניות. ₪2,140 אפשר לבקש זיכוי, ₪620 כבר בבקשת זיכוי. (לא כולל שורות "חסר בחשבונית".)`
 - Buttons: `[לפי ספק]` `[לפי מוצר]` `[חודש קודם]`.
 - tRPC: `owner.leakHero` · `owner.leakSummary` (member); via Ask tools `leak_hero` / `leak_report` (`ask.ask`, manager).
 - ₪: all; grounded by `ask/grounding.ts`. Steps: web 2–3 · WA 1 message.
 
 **OWN-03 · "כמה דלף אצל קצביית הכרם?"** — *pilot* · WA-02/08
 - Trigger: user text naming a supplier (fuzzy match, W3-04a `normalizeHe`). Two matches → list "למי התכוונת?"; none → "לא מצאתי ספק בשם הזה" + supplier list (≤ 10 rows, "עוד…" → web).
-- Message: `קצביית הכרם, נובמבר עד היום: דליפה של ₪1,240 ב-9 שורות. הגדול ביותר: חזה עוף, 3 חשבוניות מעל המחיר המוסכם (₪610). מתוך זה ₪860 אפשר לתבוע, ו-₪380 כבר בתביעה.`
-- Buttons: `[להכין מכתב תביעה]` `[פירוט לפי מוצר]` `[חודש קודם]`.
+- Message: `קצביית הכרם, נובמבר עד היום: דליפה של ₪1,240 ב-9 שורות. הגדול ביותר: חזה עוף, 3 חשבוניות מעל המחיר המוסכם (₪610). מתוך זה ₪860 אפשר לבקש זיכוי, ו-₪380 כבר בבקשת זיכוי.`
+- Buttons: `[להכין מכתב בקשת זיכוי]` `[פירוט לפי מוצר]` `[חודש קודם]`.
 - tRPC: `owner.leakGrouped` (finance) with supplier filter; Ask tools `leak_breakdown`, `claimable_lines`.
 - ₪: all. Steps: web 4–5 · WA 1 message.
 
@@ -174,8 +174,8 @@
 - Buttons: `[לפי ספק]` `[פתח באפליקציה]`.
 - tRPC: `owner.leakTrend` (finance). ₪: all. Steps: web 3–4 · WA 1 message.
 
-**OWN-06 · "מה אפשר לתבוע עכשיו?"** — *pilot* · WA-02/08
-- Message: `אפשר לתבוע ₪2,140 מ-4 ספקים: קצביית הכרם ₪860 · ירקות השרון ₪640 · מחלבת הגליל ₪410 · דגי הים ₪230. שורות "חסר בחשבונית" לא נכללות.`
+**OWN-06 · "מה אפשר לבקש זיכוי עכשיו?"** — *pilot* · WA-02/08
+- Message: `אפשר לבקש זיכוי ₪2,140 מ-4 ספקים: קצביית הכרם ₪860 · ירקות השרון ₪640 · מחלבת הגליל ₪410 · דגי הים ₪230. שורות "חסר בחשבונית" לא נכללות.`
 - List: button `בחר ספק`, rows = suppliers (≤ 10).
 - tRPC: Ask tool `claimable_lines` (`ask.ask`) · `owner.leakGrouped`.
 - ₪: all. Steps: web 4–6 · WA 1 message.
@@ -183,36 +183,36 @@
 **OWN-07 · Browse the decision queue** — *pilot* · WA-08
 - Trigger: "פערים", button "להחלטות" (OWN-01/PRO-01).
 - Card: `פער 1 מתוך 4 · ירקות השרון · חשבונית 20931 מ-05.11 · עגבניות שרי: חויב ₪14.90 לק״ג, המחיר המוסכם ₪12.50 (40 ק״ג) · פער: ₪96`
-- Buttons (pilot): `[הפער הבא]` `[פרטים]` `[להחליט באפליקציה]`. After WA-07 they become OWN-08/09's `[לתבוע מהספק]` `[לוותר]` `[פרטים]`.
+- Buttons (pilot): `[הפער הבא]` `[פרטים]` `[להחליט באפליקציה]`. After WA-07 they become OWN-08/09's `[לבקש זיכוי]` `[לשלם כפי שחויב]` `[פרטים]`.
 - tRPC: `approvals.myQueue` (member; W2-04 `canAct`/`waitingOn`).
 - MISSING_ON_INVOICE: shown only as information with `[פרטים]`, never as a claim card.
 - ₪: all. Steps: web 4–5 + sign-in · WA 1 tap.
 
 **OWN-08 · Claim a gap** — *after WA-07 (money)* · WA-07/08
-- Trigger: button `[לתבוע מהספק]` on a card.
-- Confirm: `לאשר תביעה של ₪96 מירקות השרון על חשבונית 20931?` → `[אשר ₪96]` `[ביטול]`.
-- Done: `נרשם: ₪96 נוספו לתביעה מול ירקות השרון. אפשר לבטל עד 07:52.` → `[בטל]` `[הפער הבא]`.
+- Trigger: button `[לבקש זיכוי]` on a card.
+- Confirm: `לבקש זיכוי של ₪96 מירקות השרון על חשבונית 20931?` → `[אשר ₪96]` `[ביטול]`.
+- Done: `נרשם: ₪96 נוספו לבקשת הזיכוי מול ירקות השרון. אפשר לבטל עד 07:52.` → `[בטל]` `[הפער הבא]`.
 - tRPC: `approvals.approve` (deciderProcedure; `ensureCanAct` + `requiredRole`).
 - Confirm/undo: two taps; amount-named token; idempotent `wa:<wamid>`; 10-min undo (OWN-10). Above ₪500, a block, or another role's item → `[לאישור באפליקציה]` CTA, no token (WD2).
 - ₪: all. Steps: web 5–7 + sign-in · WA 2.
 
 **OWN-09 · Waive a gap, with a reason** — *after WA-07 (money)* · WA-07/08
-- Trigger: button `[לוותר]`.
-- List: button `סיבת ויתור`, rows (from `WAIVE_REASON_CODES`, 10): `סוכם מחיר עם הספק` · `מבצע שלא הופיע` · `קיבלנו בפועל` · `יגיע בהמשך` · `זוכה במקום אחר` · `לא כפילות` · `סכום זניח` · `הכלל שגוי` · `נבדק` · `אחר`.
-- Confirm: `לוותר על ₪96 מול ירקות השרון (סיבה: סכום זניח)?` → `[אשר ויתור ₪96]` `[ביטול]`.
+- Trigger: button `[לשלם כפי שחויב]`.
+- List: button `בחרו סיבה`, rows (from `WAIVE_REASON_CODES`, 10): `סוכם מחיר עם הספק` · `מבצע שלא הופיע` · `קיבלנו בפועל` · `יגיע בהמשך` · `זוכה במקום אחר` · `לא כפילות` · `סכום זניח` · `הכלל שגוי` · `נבדק` · `אחר`.
+- Confirm: `לשלם כפי שחויב את ₪96 מול ירקות השרון (סיבה: סכום זניח)?` → `[אשר כפי שחויב ₪96]` `[ביטול]`.
 - tRPC: `approvals.reject` (deciderProcedure). Undo: 10 min (OWN-10). Step-up as OWN-08.
 - ₪: all. Steps: web 6–8 · WA 3.
 
 **OWN-10 · Undo a decision** — *after WA-07 (money)* · WA-07
 - Trigger: button `[בטל]` in a "done" message, within 10 minutes.
-- Message: `בוטל: התביעה של ₪96 מול ירקות השרון חזרה להמתנה להחלטה.` → `[להחליט שוב]`.
+- Message: `בוטל: בקשת הזיכוי של ₪96 מול ירקות השרון חזרה להמתנה להחלטה.` → `[להחליט שוב]`.
 - After 10 minutes: `עבר זמן הביטול. אפשר לשנות באפליקציה.` + CTA.
 - tRPC: `approvals.reopen` (deciderProcedure); the 10-minute WhatsApp window is a router branch (today `REOPEN_WINDOW_MS` = 15 s), not `approvals/engine.ts`.
 - ₪: all. Steps: web: not possible after 15 s · WA 1.
 
 **OWN-11 · Claim letter, sent from the owner's own WhatsApp** — *after WA-07 (money)* · WA-08 (depends on H-06ʰ)
-- Trigger: `[להכין מכתב תביעה]` (OWN-03/06) or "תכין מכתב לקצביית הכרם".
-- Message: `מכתב תביעה לקצביית הכרם מוכן: ₪860 על 6 שורות (בלי שורות "חסר בחשבונית").` + CTA `[שלח מהוואטסאפ שלי]` (opens `wa.me/<supplier>` with the letter text and the portal link prefilled in the **owner's** WhatsApp).
+- Trigger: `[להכין מכתב בקשת זיכוי]` (OWN-03/06) or "תכין מכתב לקצביית הכרם".
+- Message: `מכתב בקשת זיכוי לקצביית הכרם מוכן: ₪860 על 6 שורות (בלי שורות "חסר בחשבונית").` + CTA `[שלח מהוואטסאפ שלי]` (opens `wa.me/<supplier>` with the letter text and the portal link prefilled in the **owner's** WhatsApp).
 - tRPC: **new: `claimLetters.draft`** (H-06ʰ `claimPortal/**` + G-03 `claim_letters`; no router on `main`).
 - Confirm: the owner's own send tap. RestoMatch's number never messages the supplier. Follow-up is OWN-12.
 - ₪: all. Steps: web 4–6 per supplier · WA 2 (CTA + send).
@@ -223,14 +223,14 @@
 - tRPC: `recovery.transition` (`to: 'letter_sent'`; recoveryProcedure = finance + flag). Starts the 7-day overdue clock (PRO-03).
 - Undo: 10 min, transition back to `claimed`. ₪: all. Steps: web 3–4 · WA 1.
 
-**OWN-13 · "מה מצב התביעות?"** — *pilot* · WA-08
-- Message: `תביעות פתוחות: ₪2,310 מול 5 ספקים. 2 עברו 7 ימים בלי תשובה (₪1,100). זוכה החודש: ₪540.`
-- Buttons: `[באיחור]` `[לפי ספק]` `[פתח באפליקציה]`.
+**OWN-13 · "מה מצב בקשות הזיכוי?"** — *pilot* · WA-08
+- Message: `בקשות זיכוי פתוחות: ₪2,310 מול 5 ספקים. 2 עברו 7 ימים בלי תשובה (₪1,100). זוכה החודש: ₪540.`
+- Buttons: `[אין תשובה 7 ימים]` `[לפי ספק]` `[פתח באפליקציה]`.
 - tRPC: `recovery.summary` · `recovery.list` (recoveryProcedure). ₪: all. Steps: web 3–4 · WA 1 message.
 
 **OWN-14 · Record a supplier credit** — *after WA-07 (money)* · WA-07/08
 - Trigger: "ירקות השרון זיכו 96 על חשבונית 20931" or `[קיבלנו זיכוי]` on a claim.
-- Confirm: `לרשום זיכוי של ₪96 מירקות השרון מ-07.11 מול התביעה על חשבונית 20931?` → `[אשר זיכוי ₪96]` `[ביטול]`.
+- Confirm: `לרשום זיכוי של ₪96 מירקות השרון מ-07.11 מול בקשת הזיכוי על חשבונית 20931?` → `[אשר זיכוי ₪96]` `[ביטול]`.
 - tRPC: `recovery.recordCreditNote` (recoveryProcedure; `idempotencyKey` = derived from `wamid`) · `recovery.creditLineSuggestions` to match.
 - Undo: none on WhatsApp (no delete path, and deletion is never from WhatsApp) → correction on the web. Step-up above ₪500 (WD2). ₪: all. Steps: web 5–6 · WA 2.
 
@@ -264,7 +264,7 @@
 - tRPC: `approvals.myQueue` (member; owner-only items shown as info). ₪: decisions. Steps: web 4–5 + sign-in · WA 1.
 
 **MGR-02 · Claim or waive a gap within my limit** — *after WA-07 (money)* · WA-07/08
-- Same cards, list and confirms as OWN-08/09/10: `[לתבוע מהספק]` `[לוותר]` `[פרטים]` → `[אשר ₪132]` / `[אשר ויתור ₪132]` → `[בטל]` (10 min).
+- Same cards, list and confirms as OWN-08/09/10: `[לבקש זיכוי]` `[לשלם כפי שחויב]` `[פרטים]` → `[אשר ₪132]` / `[אשר כפי שחויב ₪132]` → `[בטל]` (10 min).
 - tRPC: `approvals.approve` / `reject` / `reopen` (deciderProcedure; `requiredRole` blocks owner-only items).
 - Step-up: above ₪500, a block, or an owner-routed item → app (WD2; a manager acts only on manager-routed items). ₪: decisions. Steps: web 5–7 · WA 2.
 
@@ -428,11 +428,11 @@ All receiver actions wait for **H-11ʰ in production for 2 weeks + G-07**, and a
 - tRPC: **new: `close.status` (W3-05a; `routers/close.ts` is an empty router today)**. ₪: all. Steps: web 4 · WA 1.
 
 **BKP-07 · Decide a gap** — *after WA-07 (money)* · WA-07/08
-- Same cards and confirms as OWN-08/09/10 (`[אשר ₪96]`, `[אשר ויתור ₪96]`, `[בטל]` 10 min), limited by `requiredRole`.
+- Same cards and confirms as OWN-08/09/10 (`[אשר ₪96]`, `[אשר כפי שחויב ₪96]`, `[בטל]` 10 min), limited by `requiredRole`.
 - tRPC: `approvals.approve` / `reject` / `reopen` (deciderProcedure includes bookkeeper). Step-up above ₪500 or on a block (WD2). ₪: all. Steps: web 5–7 · WA 2.
 
 **BKP-08 · Claim status change** — *after WA-07 (money)* · WA-07/08
-- Trigger: "קצביית הכרם אישרו את התביעה" → `לסמן את התביעה של ₪860 מול קצביית הכרם כ"הספק אישר"?` → `[אשר ₪860]` `[ביטול]`.
+- Trigger: "קצביית הכרם אישרו את בקשת הזיכוי" → `לסמן את בקשת הזיכוי של ₪860 מול קצביית הכרם כ"הספק אישר"?` → `[אשר ₪860]` `[ביטול]`.
 - tRPC: `recovery.transition` (`to: 'letter_sent' | 'acknowledged' | 'disputed'`; `credited`, `written_off` and bulk changes stay on the web). Undo 10 min. ₪: all. Steps: web 4 · WA 2.
 
 **BKP-09 · Record a supplier credit** — *after WA-07 (money)* · WA-07/08
@@ -466,7 +466,7 @@ All go through G-06 `notify()` and the outbox, obey quiet hours 23:00–06:00 + 
 
 **PRO-01 · `rm_owner_brief`** — *after H-05* · WA-06ʰ (07:30 `cron.ts` line, immutable → human PR) / WA-08
 - To: owner. When: 07:30 Sun–Fri, skipped when nothing waits, no Shabbat/holiday send.
-- Body: `בוקר טוב. ב{{1}} מחכים לך היום: {{2}} פערים להחלטה, בסך {{3}}, ו-{{4}} תביעות שעברו 7 ימים בלי תשובה. הדליפה החודש עד עכשיו: {{5}}. הפרטים באפליקציה.`
+- Body: `בוקר טוב. ב{{1}} מחכים לך היום: {{2}} פערים להחלטה, בסך {{3}}, ו-{{4}} בקשות זיכוי שממתינות לתשובה יותר מ-7 ימים. הדליפה החודש עד עכשיו: {{5}}. הפרטים באפליקציה.`
 - Buttons: `[להחלטות עכשיו]` `[השתק להיום]` + URL `[פתח באפליקציה]`.
 - tRPC (server, no model): `owner.leakHero` · `approvals.queueSummary` · `recovery.list` · `owner.vatAtRisk`. Stays off until #211 removes MISSING_ON_INVOICE from the leak figure.
 
@@ -478,13 +478,13 @@ All go through G-06 `notify()` and the outbox, obey quiet hours 23:00–06:00 + 
 
 **PRO-03 · `rm_claim_overdue`** — *after H-05* · WA-06ʰ/08
 - To: owner / manager. When: day 7 after `letter_sent` (AU-03, 08:30).
-- Body: `עברו 7 ימים מאז נשלח מכתב התביעה ל{{1}} על {{2}}, ואין תשובה. אפשר לשלוח תזכורת מהטלפון שלך.`
+- Body: `עברו 7 ימים מאז נשלחה בקשת הזיכוי ל{{1}} על {{2}}, ועוד אין תשובה. אפשר לשלוח תזכורת מהטלפון שלך.`
 - Buttons: `[הכן תזכורת]` (→ wa.me hand-off, owner's own send) `[כבר טופל]` (→ status via OWN-12/BKP-08) + URL.
 - tRPC: `recovery.list` (overdue = `OVERDUE_DAYS`).
 
 **PRO-04 · `rm_claim_reply`** — *after H-05* · WA-06ʰ/08
 - To: owner. When: the supplier answered on the H-06ʰ portal.
-- Body: `{{1}} השיבו על מכתב התביעה בסך {{2}}: {{3}}. ההחלטה שלך באפליקציה.` (`{{3}}` is a fixed server word: "מקבלים" / "חולקים על חלק מהשורות".)
+- Body: `{{1}} השיבו על בקשת הזיכוי בסך {{2}}: {{3}}. ההחלטה שלך באפליקציה.` (`{{3}}` is a fixed server word: "מקבלים" / "חולקים על חלק מהשורות".)
 - Buttons: `[לפרטים]` + URL.
 
 **PRO-05 · `rm_delivery_late`** — *after H-05* · WA-06ʰ/08
