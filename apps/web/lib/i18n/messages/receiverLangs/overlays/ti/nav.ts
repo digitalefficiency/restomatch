@@ -52,6 +52,7 @@ export const nav: Shape<typeof he> = {
     inventoryCount: 'ቆጸራ',
     inventoryDetail: 'ዝርዝር ቆጸራ',
     chain: 'ሓፈሻዊ ርእይቶ ሰንሰለት',
+    chainMatrix: 'ኩሎም ጨንፈራት',
     branches: 'ጨናፍር',
     team: 'ጉጅለ',
     integrations: 'ምትእስሳራት',

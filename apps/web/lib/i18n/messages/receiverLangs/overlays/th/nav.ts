@@ -52,6 +52,7 @@ export const nav: Shape<typeof he> = {
     inventoryCount: 'การนับ',
     inventoryDetail: 'รายละเอียดการนับ',
     chain: 'ภาพรวมเครือ',
+    chainMatrix: 'ทุกสาขา',
     branches: 'สาขา',
     team: 'ทีม',
     integrations: 'การเชื่อมต่อ',

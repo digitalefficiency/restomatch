@@ -52,6 +52,7 @@ export const nav: Shape<typeof he> = {
     inventoryCount: 'Подсчёт',
     inventoryDetail: 'Детали подсчёта',
     chain: 'Обзор сети',
+    chainMatrix: 'Все филиалы',
     branches: 'Филиалы',
     team: 'Команда',
     integrations: 'Интеграции',
