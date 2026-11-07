@@ -286,6 +286,13 @@ export interface NotifyInput {
   now?: Date;
   /** Restaurant tz; read from `restaurants.timezone` when omitted. */
   timezone?: string;
+  /**
+   * Extra keys stored on each row's `payload` as given (e.g. `invoiceId`, so an
+   * alert can be joined to its invoice for the "acted within 48h" KPI). The
+   * reserved keys (userId, event, template, locale, deepLink, digest) always win.
+   * Never put ₪ here: payload is not redacted per recipient.
+   */
+  payload?: Record<string, unknown>;
 }
 
 export interface NotifyRow {
@@ -370,6 +377,7 @@ export async function notify(tx: Database, input: NotifyInput): Promise<NotifyRe
         const sentToday = await sentTodayCount(tx, input.restaurantId, m.userId, channel, dayStart);
         const plan = planSchedule({ now, tz, sentToday });
         const payload: Record<string, unknown> = {
+          ...(input.payload ?? {}),
           userId: m.userId,
           event: input.event,
           template: input.template,
@@ -457,6 +465,7 @@ export async function notifyInvoiceOcrFailed(
     event: 'invoice.ocr_failed',
     template: 'invoiceOcrFailed',
     entity: { type: 'invoice', id: input.invoiceId },
+    payload: { invoiceId: input.invoiceId },
     channels: DEFAULT_CHANNELS,
     now: input.now,
     render: input.render,

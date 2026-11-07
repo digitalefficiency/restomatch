@@ -102,6 +102,7 @@ describe('OCR failure hand-off (G-06)', () => {
       expect(r.status).toBe('queued');
       expect(r.relatedEntityId).toBe(id);
       expect((r.payload as Record<string, unknown>).event).toBe('invoice.ocr_failed');
+      expect((r.payload as Record<string, unknown>).invoiceId).toBe(id);
     }
     const uploader = byUser.get(u.receiver!)!;
     expect(uploader.body).not.toMatch(/₪|1,?180/);

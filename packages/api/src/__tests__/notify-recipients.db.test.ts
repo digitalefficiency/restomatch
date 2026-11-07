@@ -116,6 +116,19 @@ describe('notify()', () => {
     }
   });
 
+  it('caller payload keys (e.g. invoiceId) are kept; reserved keys cannot be overridden', async () => {
+    await notify(db, {
+      ...base(),
+      audience: { userIds: [ids.mgr2A!] },
+      payload: { invoiceId: A.invoiceId, userId: 'spoofed', event: 'spoofed' },
+    });
+    const [row] = await rowsOf(A.restaurantId);
+    const p = row!.payload as Record<string, unknown>;
+    expect(p.invoiceId).toBe(A.invoiceId);
+    expect(p.userId).toBe(ids.mgr2A);
+    expect(p.event).toBe('test.event');
+  });
+
   it('a verified phone adds one WhatsApp row (E.164 digits); unverified adds none', async () => {
     // Interim (G-03 absent): no phone counts as verified, so 0 WhatsApp rows today.
     await notify(db, { ...base(), audience: { userIds: [ids.mgrA!] } });
