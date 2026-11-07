@@ -582,6 +582,29 @@ async function loadOwnedClaims(db: Database, restaurantId: string, ids: string[]
   return rows;
 }
 
+/**
+ * H-06 security review: the instant a transition is recorded at. A caller-supplied
+ * `at` is clamped to now() (a back-dated or future `at` is never trusted), and never
+ * earlier than the claim's last event, so the event history stays ordered and a
+ * back-dated move can't slip under a later one (or under a supplier link's issue time).
+ */
+export async function clampTransitionAt(
+  db: Database,
+  restaurantId: string,
+  claimId: string,
+  now: Date = new Date(),
+): Promise<Date> {
+  const wanted = now;
+  const [last] = rowsOf(
+    await db.execute(sql`
+      SELECT max(created_at) AS at FROM recovery_events
+      WHERE claim_id = ${claimId}::uuid AND restaurant_id = ${restaurantId}::uuid
+    `),
+  );
+  const floor = last?.at ? new Date(last.at as string | Date) : null;
+  return floor && floor.getTime() > wanted.getTime() ? floor : wanted;
+}
+
 /** Move one claim along the lifecycle (not into `credited` — see recordCreditNote). */
 export async function transitionClaim(
   db: Database,
@@ -596,11 +619,16 @@ export async function transitionClaim(
   if (!canTransition(claim.status, input.to)) {
     throw new TRPCError({ code: 'CONFLICT', message: `cannot move a claim from ${claim.status} to ${input.to}` });
   }
-  const at = input.at ?? new Date();
+  // input.at is not trusted: a back-dated (or future) instant is clamped to now().
+  const at = await clampTransitionAt(db, restaurantId, claim.id);
   const stamp = stampFor(input.to);
   const patch: Partial<typeof recoveryClaims.$inferInsert> = { status: input.to };
   if (stamp) patch[stamp] = at;
   if (input.to === 'claimed') patch.closedAt = null;
+  // H-06 security review: a re-opened request is a new request. Re-stamping
+  // letter_sent_at makes every supplier link issued before the re-open stale, so an
+  // old link can't act on it (and the 7-day answer clock restarts from the re-open).
+  if (claim.status === 'written_off' && input.to === 'claimed') patch.letterSentAt = at;
   if (claim.status === 'written_off' && input.to === 'claimed' && claim.creditedAgorot === 0) {
     // A re-open takes a share of the invoice cap again: re-cap it like the
     // system re-open does (another claim may hold the freed share by now).
