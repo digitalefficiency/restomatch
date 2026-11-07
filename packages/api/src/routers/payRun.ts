@@ -822,6 +822,18 @@ export const payRunRouter = router({
     throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'payRun.markPaidAwaitsH03' });
   }),
 
+  /**
+   * "שלחו תזכורת" on a held row the viewer cannot decide: ONE in-app reminder to the decider of
+   * the oldest open finding, sent only on this click. It goes through G-06 `notify()` once that
+   * is on the base — never a `role:` target. Until then: finance tier + ownership check, then
+   * NOT_IMPLEMENTED (the UI hides the button).
+   */
+  remind: financeProcedure.input(z.object({ invoiceId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    await assertOwnInvoices(ctx.db, ctx.session.restaurantId, [input.invoiceId]);
+    // TODO(G-06): notify({ to: <decider user ids>, kind: 'payrun.reminder', invoiceId }) — one per click.
+    throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'payRun.remindAwaitsG06' });
+  }),
+
   /** Undo of "סמן כשולם" (the ≥10 s toast action). Same guards as `markPaid`. */
   unmarkPaid: financeProcedure.input(UNMARK_PAID_INPUT).mutation(async ({ ctx, input }) => {
     await assertOwnInvoices(
