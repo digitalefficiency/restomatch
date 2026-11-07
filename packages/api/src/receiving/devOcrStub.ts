@@ -11,6 +11,10 @@
  */
 import { and, asc, eq, goodsReceipts, poLines, restaurants, suppliers, purchaseOrders, type Database } from '@restomatch/db';
 import type { InvoiceOcrResult } from '@restomatch/types';
+import { localDateKeyInTz } from '../lib/time';
+
+/** restaurants.timezone default (schema) — the zone the matcher reads days in. */
+const DEFAULT_TZ = 'Asia/Jerusalem';
 
 export function devOcrStubEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.NODE_ENV === 'production') return false;
@@ -49,6 +53,7 @@ export async function buildDevOcrStub(
       poVat: purchaseOrders.vatRate,
       supplierVat: suppliers.vatRate,
       restaurantVat: restaurants.vatRate,
+      timezone: restaurants.timezone,
     })
     .from(goodsReceipts)
     .innerJoin(purchaseOrders, eq(purchaseOrders.id, goodsReceipts.poId))
@@ -96,7 +101,12 @@ export async function buildDevOcrStub(
   return {
     supplier: { name: gr.supplierName },
     invoiceNumber: `${opts.invoicePrefix ?? 'DEV-'}${Date.now().toString(36).toUpperCase()}`,
-    invoiceDate: new Date().toISOString().slice(0, 10),
+    // The invoice is dated on the RESTAURANT'S calendar day, as a printed
+    // Israeli invoice is — not the UTC day, which is the restaurant's YESTERDAY
+    // every night 00:00–02:00 (03:00 in summer). The matcher pairs POs by local
+    // day (buildMatchInput pickNearest), so a UTC date made a demo scan at 00:30
+    // pair with yesterday's sibling PO instead of the receipt being counted.
+    invoiceDate: localDateKeyInTz(new Date(), gr.timezone ?? DEFAULT_TZ),
     allocationNumber: null,
     lines,
     totals: { subtotal, vat, total: round2(subtotal + vat) },
