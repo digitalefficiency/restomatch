@@ -2,10 +2,12 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { and, asc, eq, suppliers, type Database, type Supplier } from '@restomatch/db';
 import { OrderSchedule } from '@restomatch/types';
-import { invoiceReaderProcedure, managerProcedure, memberProcedure, router } from '../trpc';
+import { financeProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
 import { computeLedgerGrid, computeSupplierLedger } from '../ledger';
+import { computeSupplierOverview, computeSupplierTable } from '../ledger/overview';
+import { canonicalPaymentTerms, normalizeIsraeliPhone } from '../ledger/supplierFields';
 
 /**
  * Supplier setup (Phase-2). The CRUD surface for the suppliers a restaurant
@@ -160,9 +162,11 @@ export const suppliersRouter = router({
    * Supplier ledger by month (כרטסת ספק, flag `supplierLedger`): delivery notes
    * vs regular / consolidated invoices per restaurant calendar month, with the
    * engine's leak, credits asked, paid and open balance, and a drill-down of
-   * which invoice covers each delivery note. Invoice readers (not the chef).
+   * which invoice covers each delivery note. Finance roles only (owner,
+   * manager, bookkeeper): the receiver and the chef get no supplier ledger ₪
+   * (owner decision; W2-11).
    */
-  ledger: invoiceReaderProcedure
+  ledger: financeProcedure
     .input(z.object({ supplierId: z.string().uuid(), months: z.number().int().min(1).max(24).default(6) }))
     .query(async ({ ctx, input }) => {
       await assertFeatureOn(ctx.db, ctx.session.restaurantId, 'supplierLedger');
@@ -171,12 +175,31 @@ export const suppliersRouter = router({
     }),
 
   /** Every supplier × month of the ledger (the all-suppliers grid + bookkeeper CSV). */
-  ledgerGrid: invoiceReaderProcedure
+  ledgerGrid: financeProcedure
     .input(z.object({ months: z.number().int().min(1).max(24).default(6) }).optional())
     .query(async ({ ctx, input }) => {
       await assertFeatureOn(ctx.db, ctx.session.restaurantId, 'supplierLedger');
       return computeLedgerGrid(ctx.db, ctx.session.restaurantId, input?.months ?? 6);
     }),
+
+  /**
+   * W2-11 · the supplier page "what now": the 90-day leak (the same figure as
+   * owner.leakGrouped / the leak card), its open part, the order rhythm, 6
+   * months of spend and the last invoices. Finance roles only.
+   */
+  overview: financeProcedure
+    .input(z.object({ supplierId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
+      return computeSupplierOverview(ctx.db, ctx.session.restaurantId, input.supplierId);
+    }),
+
+  /** W2-11 · the owner's vendor table: every supplier in one pass, 90-day leak desc, totals = Σ rows. */
+  table: financeProcedure
+    .input(z.object({ includeInactive: z.boolean().optional() }).optional())
+    .query(async ({ ctx, input }) =>
+      computeSupplierTable(ctx.db, ctx.session.restaurantId, { includeInactive: input?.includeInactive }),
+    ),
 
   create: managerProcedure
     .input(SupplierCreate)
@@ -192,8 +215,8 @@ export const suppliersRouter = router({
           nameEn: input.nameEn || null,
           businessId: input.businessId ?? null,
           contactEmail: input.contactEmail ?? null,
-          contactWhatsapp: input.contactWhatsapp ?? null,
-          paymentTerms: input.paymentTerms ?? null,
+          contactWhatsapp: normalizeIsraeliPhone(input.contactWhatsapp),
+          paymentTerms: canonicalPaymentTerms(input.paymentTerms),
           deliverySchedule: input.deliverySchedule ?? null,
           orderSchedule: input.orderSchedule ?? null,
           vatRate: input.vatRate === undefined ? null : vatRateValue(input.vatRate),
@@ -238,8 +261,8 @@ export const suppliersRouter = router({
       if (patch.nameEn !== undefined) set.nameEn = patch.nameEn || null;
       if (patch.businessId !== undefined) set.businessId = patch.businessId;
       if (patch.contactEmail !== undefined) set.contactEmail = patch.contactEmail;
-      if (patch.contactWhatsapp !== undefined) set.contactWhatsapp = patch.contactWhatsapp;
-      if (patch.paymentTerms !== undefined) set.paymentTerms = patch.paymentTerms;
+      if (patch.contactWhatsapp !== undefined) set.contactWhatsapp = normalizeIsraeliPhone(patch.contactWhatsapp);
+      if (patch.paymentTerms !== undefined) set.paymentTerms = canonicalPaymentTerms(patch.paymentTerms);
       if (patch.deliverySchedule !== undefined) set.deliverySchedule = patch.deliverySchedule;
       if (patch.orderSchedule !== undefined) set.orderSchedule = patch.orderSchedule;
       if (patch.vatRate !== undefined) set.vatRate = vatRateValue(patch.vatRate);
