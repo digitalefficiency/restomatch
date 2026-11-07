@@ -843,9 +843,10 @@ export const grLines = pgTable(
     photos: jsonb('photos').$type<string[]>().notNull().default([]),
     /**
      * Count truth (0071, G-03): when the line was counted, by whom, and how
-     * ('line' | 'bulk_as_ordered' | 'legacy'; CHECK in 0071). Lines of receipts
-     * closed before 0071 were backfilled: counted_at = the receipt's completion
-     * time, method 'legacy', counted_by NULL.
+     * ('line' | 'bulk_as_ordered' | 'legacy'; CHECK in 0071). The 0071 backfill
+     * stamped only lines the interim marker counted, on receipts closed before
+     * 0071: counted_at = the receipt's updated_at ("counted NO LATER THAN", never
+     * an ordering key), counted_by NULL. Untouched 0/0 lines stay NULL (unknown).
      */
     countedAt: timestamp('counted_at', { withTimezone: true }),
     countedBy: uuid('counted_by').references(() => users.id, { onDelete: 'set null' }),
@@ -2495,6 +2496,8 @@ export const idempotencyKeys = pgTable(
 
 export const CLAIM_LETTER_STATUSES = ['draft', 'sent', 'answered', 'closed'] as const;
 export type ClaimLetterStatus = (typeof CLAIM_LETTER_STATUSES)[number];
+export const CLAIM_LETTER_CHANNELS = ['whatsapp', 'email', 'print'] as const;
+export type ClaimLetterChannel = (typeof CLAIM_LETTER_CHANNELS)[number];
 
 /** One credit-claim letter (דרישת זיכוי) to one supplier, numbered per restaurant. */
 export const claimLetters = pgTable(
@@ -2510,8 +2513,8 @@ export const claimLetters = pgTable(
     seqNo: integer('seq_no').notNull(),
     /** 'draft' | 'sent' | 'answered' | 'closed' (CHECK in 0071). */
     status: varchar('status', { length: 16 }).$type<ClaimLetterStatus>().notNull().default('draft'),
-    /** How it went out; free text until its first writer (W2-10) fixes the set. */
-    channel: varchar('channel', { length: 16 }),
+    /** How it went out: 'whatsapp' | 'email' | 'print' (CHECK in 0071); NULL = not sent yet. */
+    channel: varchar('channel', { length: 16 }).$type<ClaimLetterChannel>(),
     sentAt: timestamp('sent_at', { withTimezone: true }),
     /** The answer deadline printed on the letter (local date). */
     replyBy: date('reply_by', { mode: 'string' }),

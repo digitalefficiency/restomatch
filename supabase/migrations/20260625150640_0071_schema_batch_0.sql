@@ -3,8 +3,10 @@
 -- the final INSERT records it in drizzle.__drizzle_migrations exactly as drizzle-orm would.
 -- 0071_schema_batch_0 (wave 2, G-03): the facts the money loop is missing.
 -- HUMAN-PR proposal. Every change is additive (nullable or defaulted); no existing
--- column changes meaning. No app code reads or writes these objects in this PR:
--- every reader keeps its interim until its own package rebases onto the deploy.
+-- column changes meaning. No hand-written app code reads or writes the new objects
+-- yet, BUT the Drizzle mirror (schema.ts) names every column of a table in its
+-- generated SELECT/INSERT: the app built from this commit fails (42703) against a
+-- database without 0071. Deploy order: 0071 applied and verified FIRST, then promote.
 --
 -- gr_lines (+counted_at, counted_by, count_method, updated_at)
 --                        count truth per receipt line: WHEN it was counted, by WHOM,
@@ -57,17 +59,25 @@
 -- 0072) — may reference 'event' or 'skipped'. App code starts writing them only
 -- after the deploy.
 --
+-- Locks: the FIRST statement sets lock_timeout = 5s for this transaction, and the
+-- second takes every ACCESS EXCLUSIVE lock this file needs, up front, in one fixed
+-- order. So no lock is upgraded mid-file (goods_receipts AccessShare → AccessExclusive,
+-- users ShareRowExclusive → AccessExclusive), and a long reader or an idle-in-
+-- transaction session makes the migration FAIL FAST (55P03, nothing applied) instead
+-- of queueing every read behind it. Retry once traffic is quiet; a re-run is safe.
+-- (FK creation also takes SHARE ROW EXCLUSIVE on restaurants/suppliers/invoices:
+-- acquired once each, never upgraded, bounded by the same timeout.)
+--
 -- Additive only, idempotent (IF NOT EXISTS / guarded DO blocks); a second run is a
--- no-op. Rollback (enum values cannot be dropped and stay harmless):
---   ALTER TABLE recovery_claims DROP COLUMN letter_id; DROP TABLE payment_deductions;
---   DROP TABLE claim_letters; DROP TABLE idempotency_keys;
---   ALTER TABLE gr_lines DROP COLUMN counted_at, DROP COLUMN counted_by,
---     DROP COLUMN count_method, DROP COLUMN updated_at;
---   ALTER TABLE purchase_orders DROP COLUMN kind, DROP COLUMN po_number;
---   ALTER TABLE goods_receipts DROP COLUMN delivery_note_number;
---   ALTER TABLE discrepancies DROP COLUMN decision, DROP COLUMN basis,
---     DROP COLUMN escalated_from_role, DROP COLUMN escalated_by;
---   ALTER TABLE product_aliases DROP COLUMN source; ALTER TABLE users DROP COLUMN phone_verified_at;
+-- no-op. ROLLBACK is an ordered procedure, NOT a list of DROPs. It is in the PR body
+-- ("Rollback"): (1) revert the app deploy first; (2) ship the reverse as a NEW forward
+-- migration that drops gr_lines_set_updated_at BEFORE gr_lines.updated_at (otherwise
+-- every later UPDATE of gr_lines fails: record "new" has no field "updated_at");
+-- (3) revert the rls/0002 list in the same change; (4) the data in the 3 new tables
+-- is lost. Enum values cannot be dropped and stay harmless.
+
+SET LOCAL lock_timeout = '5s';--> statement-breakpoint
+LOCK TABLE "gr_lines", "goods_receipts", "purchase_orders", "discrepancies", "recovery_claims", "product_aliases", "users" IN ACCESS EXCLUSIVE MODE;--> statement-breakpoint
 
 -- ── gr_lines: count truth ─────────────────────────────────────────────────────
 ALTER TABLE "gr_lines" ADD COLUMN IF NOT EXISTS "counted_at" timestamp with time zone;--> statement-breakpoint
@@ -77,23 +87,43 @@ ALTER TABLE "gr_lines" ADD COLUMN IF NOT EXISTS "count_method" varchar(16)
   CONSTRAINT "gr_lines_count_method_check" CHECK ("count_method" IN ('line', 'bulk_as_ordered', 'legacy'));--> statement-breakpoint
 ALTER TABLE "gr_lines" ADD COLUMN IF NOT EXISTS "updated_at" timestamp with time zone DEFAULT now() NOT NULL;--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "gr_lines_counted_by_idx" ON "gr_lines" USING btree ("counted_by");--> statement-breakpoint
--- Legacy backfill (owner decision 24, data fix): every line of a CLOSED receipt
--- (completed | partial) that has no count stamp gets the receipt's completion time
--- and method 'legacy'. goods_receipts has no completed_at: completeReceipt stamps
--- updated_at = now() when it closes the receipt, so updated_at is that time (a later
--- edit of the receipt can only move it later, never before the close). counted_by
--- stays NULL: who counted is unknown. Idempotent: only rows still unstamped.
--- Lines that break 0032's NOT VALID checks (a negative qty_received/qty_rejected)
--- are SKIPPED: an UPDATE re-checks every CHECK on the row, so stamping one would
--- abort the whole migration batch. They stay unstamped; db:doctor already lists them.
+-- Legacy backfill (owner decision 24, data fix). It stamps ONLY the lines that the
+-- interim count marker already treats as counted, so G-04's switch of
+-- countedLineSql to `counted_at IS NOT NULL` changes nothing on legacy data:
+--   * the receipt is CLOSED (completed | partial);
+--   * the line is still unstamped (idempotent);
+--   * the line is COUNTED by the interim rule: G-04 receiptTruth.ts countedLineSql
+--     ≡ apps/web .../receiving/[poId]/_count.ts fromGrLine: received > 0, rejected
+--     > 0, any reject reason, a note starting `damaged`, or a `count:<method>` token.
+--     An untouched 0/0 line ("לא נספר", heldNotCounted) is UNKNOWN, not "received 0",
+--     and stays NULL on purpose;
+--   * its quantities are not negative. Those lines break 0032's NOT VALID checks;
+--     an UPDATE re-checks every CHECK on the row, so stamping one would abort the
+--     whole batch. They stay NULL; db:doctor lists them for a decision-24 repair.
+-- counted_at = goods_receipts.updated_at. There is no completed_at: submitReceipt
+-- stamps updated_at = now() when it closes the receipt, and the 0031 trigger moves
+-- it on any LATER update. So a legacy counted_at means "counted NO LATER THAN this
+-- time"; no reader may use it for ordering. counted_by stays NULL (unknown).
+-- count_method = 'bulk_as_ordered' when the line carries that token, else 'legacy'.
 UPDATE "gr_lines" AS gl
-SET "counted_at" = g."updated_at", "count_method" = 'legacy'
+SET "counted_at" = g."updated_at",
+    "count_method" = CASE
+      WHEN coalesce(gl."condition_notes", '') ~ '(^|[^A-Za-z0-9_])count:bulk_as_ordered([^A-Za-z0-9_]|$)' THEN 'bulk_as_ordered'
+      ELSE 'legacy'
+    END
 FROM "goods_receipts" AS g
 WHERE g."id" = gl."gr_id"
   AND g."status" IN ('completed', 'partial')
   AND gl."counted_at" IS NULL
   AND gl."qty_received" >= 0
-  AND gl."qty_rejected" >= 0;--> statement-breakpoint
+  AND gl."qty_rejected" >= 0
+  AND (
+    gl."qty_received" > 0
+    OR gl."qty_rejected" > 0
+    OR gl."reject_reason" IS NOT NULL
+    OR coalesce(gl."condition_notes", '') ~ '^damaged'
+    OR coalesce(gl."condition_notes", '') ~ '(^|[^A-Za-z0-9_])count:(bulk_as_ordered|spot_check|per_line)([^A-Za-z0-9_]|$)'
+  );--> statement-breakpoint
 DROP TRIGGER IF EXISTS "gr_lines_set_updated_at" ON "gr_lines";--> statement-breakpoint
 CREATE TRIGGER "gr_lines_set_updated_at" BEFORE UPDATE ON "gr_lines" FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();--> statement-breakpoint
 
@@ -113,7 +143,7 @@ CREATE TABLE IF NOT EXISTS "idempotency_keys" (
   CONSTRAINT "idempotency_keys_procedure_nonempty_check" CHECK (btrim("procedure") <> '')
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idempotency_keys_user_idx" ON "idempotency_keys" USING btree ("user_id");--> statement-breakpoint
--- For the expiry sweep (old keys are deleted by age).
+-- For the age sweep G-05 adds (retention.ts, behind RETENTION_PURGE_ENABLED).
 CREATE INDEX IF NOT EXISTS "idempotency_keys_created_at_idx" ON "idempotency_keys" USING btree ("created_at");--> statement-breakpoint
 
 -- ── purchase_orders / goods_receipts: walk-in POs and printed numbers ──────────
@@ -154,6 +184,8 @@ CREATE TABLE IF NOT EXISTS "claim_letters" (
   CONSTRAINT "claim_letters_supplier_same_tenant_fk" FOREIGN KEY ("supplier_id", "restaurant_id")
     REFERENCES "public"."suppliers"("id", "restaurant_id") ON DELETE no action,
   CONSTRAINT "claim_letters_status_check" CHECK ("status" IN ('draft', 'sent', 'answered', 'closed')),
+  -- W2-10: sent from the user's own WhatsApp or mail, or printed (PDF). NULL = not sent yet.
+  CONSTRAINT "claim_letters_channel_check" CHECK ("channel" IN ('whatsapp', 'email', 'print')),
   CONSTRAINT "claim_letters_seq_check" CHECK ("seq_no" > 0),
   CONSTRAINT "claim_letters_version_check" CHECK ("version" >= 1)
 );--> statement-breakpoint
@@ -223,5 +255,5 @@ ALTER TYPE "public"."activity_event_type" ADD VALUE IF NOT EXISTS 'event';--> st
 ALTER TYPE "public"."notification_status" ADD VALUE IF NOT EXISTS 'skipped';
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '175d4bcc2333c7588693346631cce5435f7707f2120dc028179ad6a30a8fef47', 1782400000000
+select '27e4d04c0ccb34712648cc101af05043ffee6b6362763293040398813e8caad6', 1782400000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782400000000);
