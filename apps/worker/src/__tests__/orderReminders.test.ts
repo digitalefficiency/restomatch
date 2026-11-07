@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { testDbUrl } from '@restomatch/db';
 import { queueSql } from '@restomatch/queue';
-import { orderReminderUrl, processOrderReminders } from '../jobs/orderReminders';
+import { legacyOrderReminderKey, orderReminderUrl, processOrderReminders } from '../jobs/orderReminders';
 import type { WorkerJob } from '../queue';
 
 /**
@@ -183,6 +183,25 @@ describe('A5 order-reminder truth (DB)', () => {
     const out = await rows();
     expect(out).toHaveLength(3);
     expect(out[0]!.body).toContain('/dashboard/orders/new?supplierId=');
+  });
+
+  it('deploy day: a recipient already reminded under the OLD key is not reminded again; the chef (new) is', async () => {
+    await resetPos();
+    for (const role of ['owner', 'manager']) {
+      const email = `${TAG5}-${role}@example.test`;
+      await sql`insert into notifications_outbox (restaurant_id, channel, target, body, status, dedupe_key)
+                values (${rid}, 'email', ${email}, 'old', 'sent', ${legacyOrderReminderKey(sid, '2026-10-25', email)})`;
+    }
+    const r = await processOrderReminders(job({ restaurantId: rid, forDate: SLOT }));
+    expect(r.enqueued).toBe(1);
+    const fresh = (await rows()).filter((o) => o.dedupe_key.startsWith('au:A5:'));
+    expect(fresh.map((o) => o.target)).toEqual([`${TAG5}-chef@example.test`]);
+    // a different day's old key does not suppress today's reminder
+    await resetPos();
+    const email = `${TAG5}-owner@example.test`;
+    await sql`insert into notifications_outbox (restaurant_id, channel, target, body, status, dedupe_key)
+              values (${rid}, 'email', ${email}, 'old', 'sent', ${legacyOrderReminderKey(sid, '2026-10-24', email)})`;
+    expect((await processOrderReminders(job({ restaurantId: rid, forDate: SLOT }))).enqueued).toBe(3);
   });
 
   it('a replay the same day enqueues nothing new', async () => {

@@ -25,6 +25,7 @@ import {
   inArray,
   isNotNull,
   ne,
+  notificationsOutbox,
   or,
   purchaseOrders,
   restaurants,
@@ -61,6 +62,20 @@ export function orderReminderUrl(baseUrl: string, supplierId: string): string {
 export const ORDERED_STATUSES = ['sent', 'confirmed', 'partial', 'closed'] as const;
 /** Who hears the reminder: the chef orders directly (`chefProcedure`), so the chef too. */
 export const ORDER_REMINDER_ROLES = ['owner', 'manager', 'chef'] as const;
+
+/**
+ * DEPLOY-DAY GUARD (one-time; delete after B2 deploy day + 1, i.e. from 14.11.2026).
+ * The reminder used to dedupe on `supplier:<sid>:order-reminder:<day>:<email>`; it
+ * now dedupes on `au:A5:<rid>:<userId>:<sid>:<day>`. On the deploy day a 09:00 run on
+ * the old code followed by any same-day re-run on the new code (retry, catch-up, a
+ * manual run) would send everyone the reminder twice. A recipient who already has
+ * an old-format row for this supplier today is skipped. A new recipient (the chef)
+ * has no old row and is not affected. After the deploy day no old-format row is ever
+ * written again, so the guard is inert.
+ */
+export function legacyOrderReminderKey(supplierId: string, ilDay: string, email: string): string {
+  return `supplier:${supplierId}:order-reminder:${ilDay}:${email}`;
+}
 
 export function startOrderRemindersWorker() {
   return makeWorker<OrderRemindersJob>('order-reminders', processOrderReminders);
@@ -163,6 +178,21 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
     const recipients = await recipientsForRestaurant(db, restaurant.id, [...ORDER_REMINDER_ROLES]);
     if (recipients.length === 0) continue;
 
+    // Deploy-day guard (see legacyOrderReminderKey): today's old-format keys.
+    const legacyToday = new Set(
+      (
+        await db
+          .select({ key: notificationsOutbox.dedupeKey })
+          .from(notificationsOutbox)
+          .where(
+            and(
+              eq(notificationsOutbox.restaurantId, restaurant.id),
+              sql`${notificationsOutbox.dedupeKey} like ${`supplier:%:order-reminder:${todayKey}:%`}`,
+            ),
+          )
+      ).map((r) => r.key),
+    );
+
     for (const s of missing) {
       const window = s.orderSchedule?.windows?.find((w) => w.orderDays.includes(weekday));
       const msg = orderReminderBrief({
@@ -176,6 +206,7 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
         draftPoId: draftBySupplier.get(s.id) ?? null,
       });
       for (const recipient of recipients) {
+        if (legacyToday.has(legacyOrderReminderKey(s.id, todayKey, recipient.email))) continue;
         // One call site: it becomes G-06 `notify()` (quiet hours, Shabbat, ≤6/day) when G-06 merges.
         const { deduped } = await enqueueNotification(db, {
           restaurantId: restaurant.id,
