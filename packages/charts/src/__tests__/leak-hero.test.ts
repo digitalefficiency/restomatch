@@ -4,9 +4,11 @@ import {
   discrepancies,
   eq,
   goodsReceipts,
+  grLines,
   invoiceLines,
   invoices,
   matchRuns,
+  poLines,
   products,
   purchaseOrders,
   restaurants,
@@ -18,6 +20,7 @@ import {
   computeInvoicesLeak,
   computeLeakBreakdown,
   computeLeakHero,
+  expectedSourceOf,
   invoiceLeakStateCte,
   monthInvoicesCte,
 } from '../leak-hero';
@@ -34,7 +37,9 @@ async function resetDb() {
   await db.delete(matchRuns);
   await db.delete(invoiceLines);
   await db.delete(invoices);
+  await db.delete(grLines);
   await db.delete(goodsReceipts);
+  await db.delete(poLines);
   await db.delete(purchaseOrders);
   await db.delete(products);
   await db.delete(suppliers);
@@ -761,5 +766,57 @@ describe('a receiving scan waiting for its count (#94) is not "waiting to be lin
       awaitingCountCount: 0,
       awaitingCountIls: 0,
     });
+  });
+});
+
+describe('breakdown line evidence (W2-09c, additive)', () => {
+  it('carries qty, unit, billed and PO prices, PO id/date, receipt note and the expected source', async () => {
+    const [r] = await db.insert(restaurants).values({ name: 'Evidence Bistro' }).returning();
+    const [s] = await db.insert(suppliers).values({ restaurantId: r!.id, name: 'קצביית הכרם' }).returning();
+    const [p] = await db.insert(products).values({ restaurantId: r!.id, canonicalName: 'אנטריקוט', defaultUnit: 'ק״ג' }).returning();
+    const poAt = new Date('2026-10-14T07:00:00Z');
+    const [po] = await db.insert(purchaseOrders).values({ restaurantId: r!.id, supplierId: s!.id, status: 'sent', createdAt: poAt }).returning();
+    const [pl] = await db.insert(poLines).values({ poId: po!.id, productId: p!.id, qtyOrdered: '10', unit: 'ק״ג', unitPriceExpected: '139.0000' }).returning();
+    const grAt = new Date('2026-10-15T06:00:00Z');
+    const [gr] = await db.insert(goodsReceipts).values({ restaurantId: r!.id, poId: po!.id, receivedAt: grAt, notes: 'ת.מ. 61036' }).returning();
+    const [grl] = await db.insert(grLines).values({ grId: gr!.id, poLineId: pl!.id, productId: p!.id, qtyReceived: '9' }).returning();
+    const [inv] = await db.insert(invoices).values({
+      restaurantId: r!.id, supplierId: s!.id, invoiceNumber: 'E-1', invoiceDate: THIS_MONTH,
+      totalExclVat: '1490', vatAmount: '0', totalInclVat: '1490', status: 'matched', source: 'photo',
+    }).returning();
+    const [il] = await db.insert(invoiceLines).values({
+      invoiceId: inv!.id, productId: p!.id, rawDescription: 'אנטריקוט', qtyBilled: '10', unit: 'ק״ג',
+      unitPriceBilled: '149.0000', lineTotal: '1490',
+    }).returning();
+    const [mr] = await db.insert(matchRuns).values({
+      restaurantId: r!.id, invoiceId: inv!.id, poId: po!.id, grId: gr!.id, overallStatus: 'major', totalDiscrepancyAmount: '0',
+    }).returning();
+    const base = { restaurantId: r!.id, matchRunId: mr!.id, productId: p!.id, invoiceLineId: il!.id, poLineId: pl!.id } as const;
+    await db.insert(discrepancies).values([
+      { ...base, type: 'PRICE_HIGHER', severity: 'block', expectedValue: '139', actualValue: '149', deltaAmount: '100', toleranceUsed: 'price: ±2% or ₪5' },
+      { ...base, grLineId: grl!.id, type: 'QTY_OVER', severity: 'warn', expectedValue: '9', actualValue: '10', deltaAmount: '149', toleranceUsed: 'qty: ±2% or 0.5 units' },
+    ]);
+
+    const [row] = await computeLeakBreakdown(db, r!.id, { now: NOW });
+    expect(row!.leakIls).toBe(249); // ₪ unchanged: Σ|Δ|, the evidence is display only
+    const price = row!.lines.find((l) => l.type === 'PRICE_HIGHER')!;
+    expect(price).toMatchObject({
+      toleranceUsed: 'price: ±2% or ₪5', qtyBilled: 10, unit: 'ק״ג', unitPriceBilled: 149, unitPriceExpected: 139, poUnit: 'ק״ג',
+      poId: po!.id, poNumber: null, deliveryNoteNumber: null, receiptNote: 'ת.מ. 61036',
+      expectedSource: 'po', expectedAsOf: poAt.toISOString(),
+    });
+    const qty = row!.lines.find((l) => l.type === 'QTY_OVER')!;
+    expect([qty.expectedSource, qty.expectedAsOf]).toEqual(['receipt', grAt.toISOString()]);
+    // The same fields reach the per-invoice and batch readers.
+    expect((await computeInvoiceLeak(db, r!.id, inv!.id))!.lines).toEqual(row!.lines);
+  });
+
+  it('expectedSourceOf: p90 wins, then by type', () => {
+    expect(expectedSourceOf('PRICE_HIGHER', 'actual exceeds historical p90 of ₪139.00')).toBe('p90');
+    expect(expectedSourceOf('PRICE_HIGHER', 'price: ±2% or ₪5')).toBe('po');
+    expect(expectedSourceOf('QTY_OVER', null)).toBe('receipt');
+    expect(expectedSourceOf('TOTAL_MISMATCH', '±₪1')).toBe('invoiceTotal');
+    expect(expectedSourceOf('VAT_MISMATCH', null)).toBe('vat');
+    expect(expectedSourceOf('DUPLICATE_INVOICE', null)).toBeNull();
   });
 });

@@ -19,10 +19,12 @@ export {
   computeInvoicesLeak,
   computeLeakBreakdown,
   computeLeakHero,
+  expectedSourceOf,
   invoiceLeakStateCte,
   monthInvoicesCte,
   type LeakBreakdownInvoice,
   type LeakBreakdownLine,
+  type LeakExpectedSource,
   type LeakHero,
   type LeakHeroOptions,
 } from './leak-hero';
