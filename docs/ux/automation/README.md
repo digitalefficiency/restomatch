@@ -327,3 +327,93 @@ Owned and rendered by AU-07 per restaurant per week; hours-₪ and leak-₪ show
 | C | AU-18 | Missing documents resolved before the 15th | measured |
 
 Pilot telemetry replaces the research assumptions after 30 days; until then every impact number states its assumption and shows a range.
+
+## 13. Competitive track (AU-20+): packages, dependencies, slotting
+Source: `docs/research/אוטומציות במוצר/notes/21-owner-chef-value-and-new-automations.md` (AU-20..AU-26, riders R1–R3, owner decisions OD-C1..OD-C10), built on note 20 (matrix rows M#1–71). Same contract as §0–§12: one brief per package (`AU-20.md` … `AU-26.md`), PR-only, ONE message to the orchestrator `session_015veCjPjLCiZbqnYFJpdzvR` per package. None of these packages crosses an ICP veto (`docs/ICP.md` §5): no par/forecast, no recurring auto-send, no cross-supplier compare, no inventory as core. AU-25 and AU-26 sit near the line and are gated (OD-C7, OD-C9). Every ₪ below is an ASSUMPTION for the ₪200k/month restaurant; hours-₪ and money-₪ are never added; "surfaced" leak is the existing engine's figure on more POs, not recovered money and not a new type.
+
+### 13.1 Package index (AU-20+)
+`id · one line · owner agent · effort · phase · humanPR`
+- **AU-20** · Coexistence by documents: forwarded MarketMan/Zestt orders become labelled POs (MarketMan PO layout new, Zestt import made platform-aware), new supplier names need a confirm; PR c = Zestt delivery notes as expected qty · ocr-procurement-engineer (web-feature-engineer: `coexist` router + UI props; growth-pmm-engineer: forwarding copy) · M · B1 (PR a, b), D (PR c) · no
+- **AU-21** · Coexistence by API: synced lines carry SKU and upsert, our status wins after the dock (PR a); price list = expected price via W3-10 (PR b); health reader + cursor + real contracts (PR c); labelled imported receipts (PR d) · ocr-procurement-engineer (matching-engine-guardian consulted on C3) · L · B2 (a), C (b), D (c, d) · no for its PRs; **H-04** (columns) + **H-05a row 5** (`sync-platforms` slot) are human PRs it proposes
+- **AU-22** · Supplier negotiation pack: owner-only page + PDF per supplier (spend, paid-price history, "מחירים שעלו" ₪/month, agreed vs billed, our claims record, ₪-free fill rate), reply draft never sent · web-feature-engineer (matching-engine-guardian: one new charts file) · M · B2 · no
+- **AU-23** · Recipe quick-start: 90-day bought-products shortlist + draft dish outlines from the menu (W3-04, draft-only); chef confirms each recipe · web-feature-engineer (as W3-02's addendum; icp-keeper placement gate) · M · C (slips to D with wave 3) · no
+- **AU-24** · Agreed (contract-in-force) price printed per line on orders to opted-in suppliers; default off; non-contract prices never printed for them · web-feature-engineer (money-format-marshal, leak-economist sign) · S · B1 · no
+- **AU-25** · Food-cost % lite (**OWNER DECISION OD-C7**): one typed monthly sales figure → one report line, purchases-based %, leak in food-cost points · web-feature-engineer (W3-08's owner; leak-economist, icp-keeper sign) · S · C (slips to D with wave 3) · no
+- **AU-26** · Same-supplier pack-size hint on order drafts + owner mail section (**icp-keeper gate, OD-C9**); never cross-supplier, never `product_group_id` · web-feature-engineer (icp-keeper, leak-economist) · M · D · no
+
+### 13.2 Items mapped to existing packages (no new brief; the W3/W4 plan is not edited)
+| Item (note 21) | Mapped to | What the existing package already covers | What stays with the AU package |
+|---|---|---|---|
+| **R1** dish-alert names the purchase + four standard responses as copy | **AU-13** (A18, B1) | dish crossing section (AU-13 §5.3); W3-02's "הצע מחיר תפריט" for crossings | nothing new: AU-13 adds the invoice reference and the four responses to its chef section when it builds it |
+| **R2** ingredient find-and-replace across recipes | **W3-02** | recipe workbench (`recipes/**`) | none (W3-02 rider; offered when W3-10 merges two products) |
+| **R3** chef gets the ₪-free "arrived short" list for kitchen lines | **W2-05** exception event via **G-06** `notify()` | W2-05 partial-delivery alert (manager + owner) | none (add the chef audience to the same event; no second job) |
+| AU-21 PR b "מה ישתנה" review screen | **W3-10** | price-list inbox, diff with ₪/month, revert via audit | AU-21 supplies the diff from `listProducts` only |
+| AU-21 PR c health line | **W3-07a** | "חיבורים" hub: status chips, last sync, plain-Hebrew last error, one fix CTA | AU-21 supplies the `health` reader and the skipped-order counter |
+| AU-21 schedule | **H-05a** (row 5, human) | the four automation slots | proposal text only, after AU-21 PR a + G-04 + #211 merge (OD-C1) |
+| AU-21 durable line id + receipt source | **H-04** (human; OD-C2) | schema batch B (`po_lines` revised columns, …) | proposal text only |
+| AU-20 / AU-21 coverage effect | **W3-09** | coverage line "בדקנו 78% מהרכש" with drill-down | none: it reports the larger PO base by itself |
+| AU-22 host page | **W2-11** (Supplier 360) | supplier page, tabs | the `pack/**` subfolder; interim link on the leak tab |
+| AU-23 outlines and mapping | **W3-04** (AI drafts, kill-switch), **W3-10** ("לקשר" queue) | draft-only tools, labels, acceptance tracking; mapping triage | the shortlist and the outline validator |
+| AU-24 send paths | **W2-06** (`manualSend`, `redactPrices`), `orderPricesOut` (live) | the order document, contract label "(מחיר חוזה)" | per-supplier opt-in, contract-only printing |
+| AU-25 report and checklist | **W3-08**, **W3-05**, **H-07** | monthly report tabs, close checklist, closed months | the formula, the sales input, one line |
+| AU-26 units | **W3-10** item master | one unit and pack size per catalog row | the same-supplier comparator |
+
+### 13.3 Dependency map (→ = must merge before)
+```
+#211 + G-04 (#188) + W2-06 (#184) + #219 + AU-02 ──→ AU-20 PR a ──→ AU-20 PR b (hook in ingest, via AU-10) ──→ AU-11 (orders/importPo.ts handed back)
+                                                     └─(shared coexist/**)─→ AU-21 PR a ──→ H-05a row 5 (human) ─┐
+G-08 (#200) ─────────────────────────────────────────────────────────────→ AU-21 PR a                           │
+W2-08 + H-03 ─→ wave 3 ─┬─→ W3-10 ─→ AU-21 PR b ─→ W3-07a ─→ AU-21 PR c ←─ Phase-6 credentials ←────────────────┘
+                        │                                     H-04 (human, OD-C2) ─→ AU-21 PR d ; ─→ AU-20 PR c
+                        ├─→ W3-02 (+ OD-C3, #219) ─→ AU-23 PR a ─→ W3-04 (+ OD-C10) ─→ AU-23 PR b
+                        ├─→ W3-08 + W3-05 (+ OD-C7, #211; soft H-07) ─→ AU-25
+                        └─→ W3-10 + AU-11 + W2-12 (+ OD-C9) ─→ AU-26 PR a ─→ AU-13 ─→ AU-26 PR b
+W2-12 ─→ AU-13 ─→ AU-22 PR b        W2-12 + W2-10 (#193/#194/#197) + G-13 (#187) ─→ AU-22 PR a        (W2-11: soft host)
+W2-06 (#184) + G-07 (#182) ─→ AU-24 ─→ AU-11 (orders/document/** handed back) ─→ W3-09
+AU-01 ─→ registry rows for every AU-20+ option (all default off)        AU-07 ─→ KPI rows below
+```
+
+### 13.4 Slotting by phase (sessions are AU sessions; at most 8 at a time, §10)
+| Phase | Window | AU-20+ work | Hard gates not yet merged (open-PR read 2026-11-07) | AU sessions in phase (existing + new) |
+|---|---|---|---|---|
+| B1 | December 2026 | AU-20 PR a (+ PR b after AU-10), AU-24 | #211, #219, G-04 #188, W2-06 #184, G-07 #182 (all built or open, none unstarted); MarketMan PO samples (pilot ops) | 5 + 2 = **7** |
+| B2 | Dec 2026–Jan 2027 (after AU-04 merges) | AU-21 PR a, AU-22 | **W2-12 not started** (AU-22, via AU-13); G-08 #200; W2-10 #193/#194/#197; G-13 #187 | 3 + 2 = **5** |
+| C | Jan–Mar 2027 | AU-21 PR b, AU-23, AU-25 | **wave 3 gated on W2-08 + H-03 (not started)**: W3-10, W3-02, W3-04, W3-08, W3-05; OD-C3, OD-C7, OD-C10 | 4 + 3 = **7** (+ H-12, H-13 human) |
+| **D (new)** | **Apr–Jun 2027** | AU-21 PR c + PR d, AU-20 PR c, AU-26 (+ AU-23 / AU-25 if wave 3 slips) | W3-07a, H-04, H-05a row 5 (human), Phase-6 credentials, AU-11 + W3-10 + OD-C9 | **3** (up to 5 with slips) |
+
+**Why a Phase D.** Every Phase-D item waits on something that cannot land in Jan–Mar under the current state: wave 3 itself is gated on W2-08 and H-03, neither started (§10b), so W3-10 / W3-07a land late in C at best; H-04 is a human schema batch not in the PR read; AU-21 PR c needs Phase-6 credentials (human only) and a human `cron.ts` row that OD-C1 forbids until PR a + G-04 + #211 are merged. Putting them in C would create packages that start and stall. Phase D keeps C's session count at 7 and gives the human PRs (H-04, H-05a row 5) a quarter to land. If wave 3 starts on time, AU-23 and AU-25 stay in C; AU-26 does not move earlier (it also needs AU-11's drafts in production for its quantity basis).
+
+### 13.5 Ownership ledger additions (same rules as §9; anything not listed is read-only)
+| Pkg | Phase | Owns | Collision → resolved by ordering | Hands back after merge |
+|---|---|---|---|---|
+| AU-20 | B1 (+D) | `api/orders/importPo.ts` (carve-out), `api/coexist/**` (except `coexist/sync/**`), `api/routers/coexist.ts`, `procurement/src/adapters/marketmanDocument.ts`, `ocr/src/providers/poLayouts/marketman.ts` (+ one import line), label chip, inbox action as props | `orders/**` is W2-06's → after W2-06; AU-11 owns `orders/**` in B2 → AU-20 PR b merges before AU-11 starts or AU-11 rebases; `ingest/**` is AU-10's in B1 → one hook line by AU-10; `packages/ocr/**` after AU-02 | `importPo.ts` → AU-11 → W3-09; `coexist/**` → AU-21 (Phase C+) |
+| AU-21 | B2, C, D | `wkr/src/jobs/syncPlatforms.ts`, `packages/procurement/**` (except AU-20's file), `api/coexist/sync/**` | `catalog/**` (W3-10) and the hub (W3-07a) receive readers by props, never edited; `cron.ts` → H-05a row 5 (human); `schema.ts` → H-04 (human) | — |
+| AU-22 | B2 | `dash/suppliers/[id]/pack/**` (carve-out from W2-11), `api/supplierPack/**`, `api/routers/supplierPack.ts`, `packages/charts/src/supplierPack.ts` (matching-engine-guardian) | W2-11 owns `suppliers/**` → subfolder only + one entry line by W2-11; W2-09's leak-card files untouched | pack → W2-11's successor (W3-01 for branch scope) |
+| AU-23 | C | `api/recipes/quickstart/**`, two procedures in `routers/recipes.ts`, `dash/recipes/quickstart/**`, one W3-04 tool handler | `recipes/**` is W3-02's → after W3-02 merges, or inside W3-02's session | → W3-02's owner |
+| AU-24 | B1 | `api/orders/document/**` (carve-out), `api/routers/agreedPrice.ts`, `dash/settings/automations/agreed-price/**` (carve-out from AU-01) | W2-06 → AU-24 → AU-11 (B2) → W3-09 | `orders/document/**` → AU-11 |
+| AU-25 | C | `api/reports/foodCostLite*.ts`, two procedures in `routers/monthlyReport.ts`, report line + checklist step as props | `reports/**` is W3-08's → after W3-08 | → W3-08's owner |
+| AU-26 | D | `api/packHint/**`, `api/routers/packHint.ts`, `apps/web/lib/components/orders/PackHint.tsx`, `priceAlerts/sections/packHint.ts` (PR b) | drafts are AU-11's → W3-09's (prop slot); `priceAlerts/**` is AU-13's (one import line) | — |
+
+**New shared one-liners (serialised by the orchestrator, §9):** `appRouter` lines for `coexist`, `supplierPack`, `agreedPrice`, `packHint`; one export in `packages/charts/src/index.ts` (AU-22); registry rows in `automations/registry.ts`: `coexistDocs`, `coexistPoSenders`, `procurementSync`, `procurementPriceList`, `supplierPack`, `recipeQuickstart`, `agreedPriceOnOrders`, `foodCostLite`, `packHint` (all default **off**); one hook line in `ingest/pipeline.ts` (AU-10 adds it for AU-20 PR b).
+
+### 13.6 Owner decisions this track needs (from note 21 §3; recommended defaults until answered)
+OD-C1 documents first, no sync scheduler before AU-21 PR a + G-04 + #211 (AU-20, AU-21, H-05a) · OD-C2 approve `po_lines` external line id + `goods_receipts.source` into H-04 (AU-21) · OD-C3 switch `recipes` + `dishPriceAlert` on for one pilot tenant after #219; `inventoryCount` stays off (AU-01, AU-23) · OD-C4 no ₪ to the chef on counts (W2-07, W3-02) · OD-C5 dish cost = last paid price (W3-02, AU-23) · OD-C6 agreed price on POs opt-in per supplier, default off, contract only (AU-24) · **OD-C7 food-cost % lite: allow narrowly or not at all (AU-25 does not merge without an answer)** · OD-C8 pack sections owner-picked; internal notes and staff names excluded; never system-sent (AU-22) · **OD-C9 same-supplier pack hints in Phase D behind icp-keeper (AU-26 does not start without it)** · OD-C10 AI dish outlines draft-only, ₪ never from the model (AU-23, W3-04).
+
+### 13.7 KPIs (AU-07 adds one row each; hours-₪ and leak-₪ never summed)
+| Phase | Package | KPI | Reading |
+|---|---|---|---|
+| B1 | AU-20 | POs imported by platform; share of invoices matched against an imported PO | reported; "surfaced" ₪ labelled, never "recovered" |
+| B1 | AU-24 | PRICE_HIGHER count and ₪ per opted-in supplier, 60 days before vs after | comparison, not causality |
+| B2 | AU-21 | share of invoices matched against a synced PO; skipped orders (supplier not linked) | skipped → 0 |
+| B2 | AU-22 | packs exported per supplier; items whose paid price held or fell in the next 60 days | reported (A18 act rate) |
+| C | AU-23 | recipes created in 14 days after `recipes` on; outline acceptance % | acceptance ≥60% (W3-04 kill-switch) |
+| C | AU-25 | months with a sales figure; owners opening the report before vs after | reported |
+| D | AU-26 | pack hints shown / applied %; avoided cost on applied hints (הערכה) | reported, outside the leak |
+
+### 13.8 Spec corrections found while writing the briefs (verified on `main`, train A merged)
+- AU-20: the PO import is Zestt-only end to end (`orders/importPo.ts:177, 241, 295, 308`; `routers/orders.ts` `importPo` input `z.literal('zestt')`), and the intake pipeline turns every document into an invoice (`ingest/pipeline.ts:117-125`): "forward to the ingest address" needs a routing step.
+- AU-21: `sync-platforms` was never registered (`cron.ts:9-10` vs `54-150`); the health line already has a home in W3-07a's acceptance.
+- AU-22: a per-restaurant supplier scorecard already exists, plan-gated (`packages/charts/src/suppliers.ts:19-29`); reuse it where entitled.
+- AU-24: `orderPricesOut` already prints PO prices and labels contract prices (`orders/document/text.ts:20-28`, `load.ts:15-25, 89-110`); the delta is per-supplier opt-in, default off, and suppressing non-contract prices. `resolveExpectedPrice` is W2-06's (#184), not on `main`.
+- AU-25: storing the sales figure as a `pos_sales` row would pollute `posVsTheory`; the brief uses a jsonb month map with audit (no schema change).
+- AU-26: `supplier_catalog_items.pack_size` already exists (`schema.ts:648`); the real dependency is W3-10's item master.
