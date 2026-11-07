@@ -87,10 +87,10 @@ describe('A5 order-reminder truth (DB)', () => {
     await sql`delete from notifications_outbox where restaurant_id = ${rid}`;
     await sql`delete from purchase_orders where restaurant_id = ${rid}`;
   }
-  async function po(status: string, createdAt: string, sentAt: string | null) {
+  async function po(status: string, createdAt: string, sentAt: string | null, source = 'manual') {
     const [p] = await sql<{ id: string }[]>`
-      insert into purchase_orders (restaurant_id, supplier_id, status, created_at, sent_at)
-      values (${rid}, ${sid}, ${status}, ${createdAt}, ${sentAt}) returning id`;
+      insert into purchase_orders (restaurant_id, supplier_id, status, created_at, sent_at, source)
+      values (${rid}, ${sid}, ${status}, ${createdAt}, ${sentAt}, ${source}) returning id`;
     return p!.id;
   }
   async function rows() {
@@ -170,6 +170,21 @@ describe('A5 order-reminder truth (DB)', () => {
     expect(out[0]!.body).toContain(`https://app.example.test/dashboard/orders/new?supplierId=${sid}`);
   });
 
+  it('a platform import today (sent, no sent_at) → ordered; a checksum-held import draft too, never linked', async () => {
+    await resetPos();
+    await po('sent', TODAY_EARLY, null, 'platform');
+    expect((await processOrderReminders(job({ restaurantId: rid, forDate: SLOT }))).enqueued).toBe(0);
+    await resetPos();
+    await po('draft', TODAY_EARLY, null, 'platform');
+    expect((await processOrderReminders(job({ restaurantId: rid, forDate: SLOT }))).enqueued).toBe(0);
+    await resetPos();
+    await po('draft', YESTERDAY, null, 'platform'); // an old held import is not today's order and not "your draft"
+    await processOrderReminders(job({ restaurantId: rid, forDate: SLOT }));
+    const out = await rows();
+    expect(out).toHaveLength(3);
+    expect(out[0]!.body).toContain('/dashboard/orders/new?supplierId=');
+  });
+
   it('a replay the same day enqueues nothing new', async () => {
     await resetPos();
     await processOrderReminders(job({ restaurantId: rid, forDate: SLOT }));
@@ -182,11 +197,11 @@ describe('A5 order-reminder truth (DB)', () => {
     await resetPos();
     await sql`update restaurants set settings = ${sql.json({ automations: { orderReminders: false } })} where id = ${rid}`;
     const off = await processOrderReminders(job({ restaurantId: rid, forDate: SLOT }));
-    expect(off).toMatchObject({ enqueued: 0, skipped: 1 });
+    expect(off).toMatchObject({ enqueued: 0 });
     expect(await rows()).toHaveLength(0);
     await sql`update restaurants set settings = ${sql.json({ automations: { orderReminders: true } })} where id = ${rid}`;
     const on = await processOrderReminders(job({ restaurantId: rid, forDate: SLOT }));
-    expect(on).toMatchObject({ enqueued: 3, skipped: 0 });
+    expect(on).toMatchObject({ enqueued: 3 });
     await sql`update restaurants set settings = '{}'::jsonb where id = ${rid}`;
   });
 });

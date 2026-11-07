@@ -21,12 +21,13 @@ import {
   and,
   desc,
   eq,
-  gte,
   inArray,
   isNotNull,
-  lt,
+  ne,
+  or,
   purchaseOrders,
   restaurants,
+  sql,
   suppliers,
 } from '@restomatch/db';
 import { makeWorker, type WorkerJob } from '../queue';
@@ -108,18 +109,25 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
       continue;
     }
 
-    // "Ordered today" = SENT in today's Israel day (never keyed on created_at: a
-    // draft prepared yesterday and sent this morning is ordered; a PO created
-    // today but still a draft is not).
+    // "Ordered today" = SENT in today's Israel day (never keyed on created_at for a
+    // manual PO: a draft prepared yesterday and sent this morning is ordered; a PO
+    // created today but still a draft is not). Imported / synced platform orders
+    // were placed on the platform: they carry no sent_at (importPo.ts,
+    // syncPlatforms.ts), so their created_at is the send time, and a checksum-held
+    // platform 'draft' still counts as ordered.
+    const sentOrCreated = sql`coalesce(${purchaseOrders.sentAt}, ${purchaseOrders.createdAt})`;
     const orderedToday = await db
       .selectDistinct({ supplierId: purchaseOrders.supplierId })
       .from(purchaseOrders)
       .where(
         and(
           eq(purchaseOrders.restaurantId, restaurant.id),
-          inArray(purchaseOrders.status, [...ORDERED_STATUSES]),
-          gte(purchaseOrders.sentAt, startToday),
-          lt(purchaseOrders.sentAt, endToday),
+          or(
+            inArray(purchaseOrders.status, [...ORDERED_STATUSES]),
+            and(eq(purchaseOrders.status, 'draft'), ne(purchaseOrders.source, 'manual')),
+          ),
+          sql`${sentOrCreated} >= ${startToday.toISOString()}::timestamptz`,
+          sql`${sentOrCreated} < ${endToday.toISOString()}::timestamptz`,
         ),
       );
     const orderedSet = new Set(orderedToday.map((r) => r.supplierId));
@@ -140,6 +148,7 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
         and(
           eq(purchaseOrders.restaurantId, restaurant.id),
           eq(purchaseOrders.status, 'draft'),
+          eq(purchaseOrders.source, 'manual'), // the buyer's own drafts, never a held import
           inArray(
             purchaseOrders.supplierId,
             missing.map((s) => s.id),
@@ -187,5 +196,6 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
   console.log(
     `[order-reminders] date=${todayKey} weekday=${weekday} restaurants=${restaurantRows.length} due=${dueToday} enqueued=${enqueued} skipped=${skipped}`,
   );
-  return { date: todayKey, dueToday, enqueued, skipped };
+  // The result shape is pinned (reminderDay.db.test.ts); option-off is in the log line.
+  return { date: todayKey, dueToday, enqueued };
 }

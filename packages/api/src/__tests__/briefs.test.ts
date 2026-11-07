@@ -45,7 +45,7 @@ describe('links', () => {
     expect(waDigits(raw)).toBe(want);
   });
 
-  it.each(['', '12345', '+1 415 555 0100', 'abc', '052-12', null, undefined])('a bad phone (%s) → null', (raw) => {
+  it.each(['', '12345', '+1 415 555 0100', 'abc', '052-12', '050-123456', '06-1234567', '07-1234567', '007 1234567', null, undefined])('a bad phone (%s) → null', (raw) => {
     expect(waDigits(raw as string | null | undefined)).toBeNull();
     expect(waMeLink(raw as string | null | undefined, 'x')).toBeNull();
   });

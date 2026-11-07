@@ -28,9 +28,10 @@ export function waDigits(raw: string | null | undefined): string | null {
   else if (compact.startsWith('972')) national = compact.slice(3);
   else if (compact.startsWith('0')) national = compact.slice(1);
   else return null;
-  if (national.startsWith('0')) national = national.slice(1); // "+972 05x…" typed by hand
-  // Mobile 5x + 7 digits (9), landline / 7x 8 digits; nothing else.
-  if (!/^(5\d{8}|[2-9]\d{7}|7\d{8})$/.test(national)) return null;
+  // "+972 05x…" typed by hand: one extra 0, only after a 972 prefix.
+  if (national.startsWith('0') && compact.replace(/^\+|^00/, '').startsWith('972')) national = national.slice(1);
+  // Mobile 5x + 7 digits (9); landlines 02/03/04/08/09 + 7 (8); 07x + 7 (9). Nothing else.
+  if (!/^(5\d{8}|[2-489]\d{7}|7\d{8})$/.test(national)) return null;
   return `972${national}`;
 }
 
