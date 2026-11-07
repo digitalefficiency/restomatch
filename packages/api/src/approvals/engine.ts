@@ -7,6 +7,11 @@
  *
  * Implements the 6 default rules from plan §7. Restaurant-specific
  * overrides are applied on top of the defaults when present.
+ *
+ * G-15: a row the leak does not count (LEAK_FILTER, packages/charts) is
+ * acknowledged with no ₪ (`non-leak-acknowledge`) before the cumulative
+ * rules — no owner queue entry, no "דרוש ₪X", for a row that is not
+ * claimable. `evaluatePayApproval` is the pay-approval rule (decision 9).
  */
 
 import type { UserRole } from '@restomatch/db';
@@ -102,6 +107,19 @@ export function resolveApprovalThresholds(
   return { ...DEFAULT_APPROVAL_THRESHOLDS, ...clean };
 }
 
+/**
+ * Does this row count in the leak? The routing-time part of the charts
+ * LEAK_FILTER (packages/charts/src/leak-views.ts):
+ *   severity IN ('warn','block') AND type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL')
+ * The filter's third clause (a duplicate the user REJECTED) is a decision,
+ * not a routing input — a fresh row is never rejected. Parity is tested in
+ * approvals-engine-routing.test.ts.
+ */
+export const NON_LEAK_TYPES: ReadonlySet<DiscrepancyType> = new Set(['PRICE_LOWER', 'UNORDERED_ARRIVAL']);
+export function countsAsLeak(d: { type: DiscrepancyType; severity: Severity }): boolean {
+  return (d.severity === 'warn' || d.severity === 'block') && !NON_LEAK_TYPES.has(d.type);
+}
+
 function discrepancyPct(ctx: ApprovalContext): number {
   return ctx.matchRun.totalInvoiceAmount > 0
     ? ctx.matchRun.totalDiscrepancyAmount / ctx.matchRun.totalInvoiceAmount
@@ -145,6 +163,16 @@ export function buildRules(t: Required<ApprovalThresholds> = DEFAULT_APPROVAL_TH
       priority: 80,
       predicate: (ctx) => ctx.discrepancy.severity === 'block',
       decision: { requiredRole: 'owner', action: 'block' },
+    },
+    {
+      // Below every control (duplicate, no-PO, unordered, severity-block),
+      // above the cumulative ₪ rules: a non-leak row never inherits the
+      // invoice's cumulative ₪ and never waits in a ₪ queue.
+      id: 'non-leak-acknowledge',
+      name: 'פער ללא ₪ לדליפה — נרשם לידיעה',
+      priority: 75,
+      predicate: (ctx) => !countsAsLeak(ctx.discrepancy),
+      decision: { requiredRole: null, action: 'auto_approve' },
     },
     {
       id: 'cumulative-large',
@@ -216,4 +244,58 @@ export function evaluateApproval(
 export function decisionMessage(decision: ApprovalDecision): string {
   const role = decision.requiredRole ?? 'system';
   return `${decision.ruleName} → ${role} (${decision.action})`;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Pay-approval rule (owner decision 9 / G-15)
+ *
+ * "Over ₪N, or a new supplier → the owner approves for payment." Pure; the
+ * thresholds are READ from `restaurants.settings.approvalThresholds`
+ * (`payApprovalOverAmount`, `newSupplierInvoiceCount`) — no write path is
+ * added here. W2-03's `approve_for_payment` calls it.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export interface PayApprovalThresholds {
+  /** Invoice total incl. VAT strictly above this (₪) → owner approves for payment. */
+  payApprovalOverAmount: number;
+  /** A supplier with fewer than this many prior invoices is "new" → owner. */
+  newSupplierInvoiceCount: number;
+}
+
+/** Defaults pending the owner's N (decision 9): ₪5,000, and a supplier's first invoice. */
+export const DEFAULT_PAY_APPROVAL_THRESHOLDS: PayApprovalThresholds = {
+  payApprovalOverAmount: 5000,
+  newSupplierInvoiceCount: 1,
+};
+
+/** Read the pay-approval thresholds from a restaurant's approvalThresholds (unknown keys ignored). */
+export function resolvePayApprovalThresholds(settings?: Record<string, unknown> | null): PayApprovalThresholds {
+  const num = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined;
+  return {
+    payApprovalOverAmount: num(settings?.payApprovalOverAmount) ?? DEFAULT_PAY_APPROVAL_THRESHOLDS.payApprovalOverAmount,
+    newSupplierInvoiceCount:
+      num(settings?.newSupplierInvoiceCount) ?? DEFAULT_PAY_APPROVAL_THRESHOLDS.newSupplierInvoiceCount,
+  };
+}
+
+export type PayApprovalReason = 'over_amount' | 'new_supplier';
+
+export interface PayApprovalDecision {
+  /** true → only the owner may approve this invoice for payment. */
+  requiresOwner: boolean;
+  requiredRole: UserRole | null;
+  reasons: PayApprovalReason[];
+}
+
+export function evaluatePayApproval(
+  invoice: { totalInclVat: number; supplierPriorInvoices: number },
+  t: PayApprovalThresholds = DEFAULT_PAY_APPROVAL_THRESHOLDS,
+): PayApprovalDecision {
+  const reasons: PayApprovalReason[] = [];
+  // Compared in agorot so ₪5,000.00 is not "over" ₪5,000.
+  if (Math.round(invoice.totalInclVat * 100) > Math.round(t.payApprovalOverAmount * 100)) reasons.push('over_amount');
+  if (invoice.supplierPriorInvoices < t.newSupplierInvoiceCount) reasons.push('new_supplier');
+  const requiresOwner = reasons.length > 0;
+  return { requiresOwner, requiredRole: requiresOwner ? 'owner' : null, reasons };
 }
