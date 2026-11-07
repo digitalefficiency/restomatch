@@ -1,4 +1,4 @@
-import { discrepancies, eq, invoices, sql, suppliers, type Database } from '@restomatch/db';
+import { discrepancies, eq, invoices, poLines, sql, suppliers, type Database } from '@restomatch/db';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetDb, seedPlans, seedTenant, type Tenant } from '../../__tests__/fixtures';
 import { __resetAgentBudget } from '../budget';
@@ -158,6 +158,57 @@ describe('conversation memory', () => {
     await runAgent(appDb, fakeBinding(A, 'receiver'), 'מה מגיע היום?', { enableRoles: ['receiver'] });
     expect(JSON.stringify(m.bodies[0]!.messages)).not.toContain('₪');
     expect(m.bodies[0]!.messages).toHaveLength(1);
+  });
+});
+
+describe('security review cases', () => {
+  it('receiver: delivery_detail is an allow-list; a price in a line note never reaches the model', async () => {
+    await ownerDb.update(poLines).set({ notes: 'מחיר מוסכם 42 ש״ח לק״ג', supplierSku: 'SKU-42' }).where(eq(poLines.poId, A.poId));
+    const r = await callTool(appDb, fakeBinding(A, 'receiver'), 'delivery_detail', { poId: A.poId });
+    const json = JSON.stringify(r.data);
+    expect(json).not.toContain('42');
+    expect(json).not.toContain('notes');
+    expect(moneyLeaks(r.data)).toEqual([]);
+    expect(Object.keys((r.data as { lines: object[] }).lines[0]!).sort()).toEqual(['qtyOrdered', 'rawDescription', 'unit']);
+  });
+
+  it('a table-owner connection is refused like a superuser', async () => {
+    const role = `wa_owner_probe_${Date.now()}`;
+    await ownerDb.execute(sql.raw(`create role ${role} login password 'x'`));
+    await ownerDb.execute(sql.raw(`create table public.${role}_t (id int)`));
+    await ownerDb.execute(sql.raw(`alter table public.${role}_t owner to ${role}`));
+    try {
+      const url = new URL(process.env.DATABASE_URL_TEST ?? process.env.DATABASE_URL!);
+      url.username = role;
+      url.password = 'x';
+      const { createDb } = await import('@restomatch/db');
+      const probe = createDb(url.toString());
+      await expect(runAgent(probe, fakeBinding(A), 'כמה דלף החודש?')).rejects.toBeInstanceOf(AgentDbError);
+    } finally {
+      await ownerDb.execute(sql.raw(`drop table public.${role}_t`));
+      await ownerDb.execute(sql.raw(`drop role ${role}`));
+    }
+  });
+
+  it('an ambiguous or too-short partial supplier name is "not found"', async () => {
+    const extra = await ownerDb
+      .insert(suppliers)
+      .values([
+        { restaurantId: A.restaurantId, name: '-', businessId: '519999991' },
+        { restaurantId: A.restaurantId, name: 'ירקות הגליל', businessId: '519999992' },
+        { restaurantId: A.restaurantId, name: 'ירקות הגליל המערבי', businessId: '519999993' },
+      ])
+      .returning();
+    try {
+      // the punctuation-only "-" supplier (empty key) never matches by reverse-includes
+      expect((await callTool(appDb, fakeBinding(A), 'supplier_leak', { supplier: 'משהו אחר לגמרי' })).verdict).toBe(HE.supplierNotFound);
+      // two partial candidates → refuse instead of guessing
+      expect((await callTool(appDb, fakeBinding(A), 'supplier_leak', { supplier: 'הגליל' })).verdict).toBe(HE.supplierNotFound);
+      // an exact name still resolves
+      expect((await callTool(appDb, fakeBinding(A), 'supplier_leak', { supplier: 'ירקות הגליל' })).data).toMatchObject({ found: true });
+    } finally {
+      for (const e of extra) await ownerDb.delete(suppliers).where(eq(suppliers.id, e.id));
+    }
   });
 });
 

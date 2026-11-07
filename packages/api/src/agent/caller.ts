@@ -56,10 +56,13 @@ export function assertAgentConnection(db: Database): Promise<void> {
   if (!p) {
     p = (async () => {
       const rows = (await db.execute(
-        sql`select r.rolsuper as super, r.rolbypassrls as bypass from pg_roles r where r.rolname = current_user`,
-      )) as unknown as Array<{ super: boolean; bypass: boolean }>;
+        sql`select r.rolsuper as super, r.rolbypassrls as bypass,
+                   exists (select 1 from pg_tables t where t.schemaname = 'public' and t.tableowner = current_user) as owns
+            from pg_roles r where r.rolname = current_user`,
+      )) as unknown as Array<{ super: boolean; bypass: boolean; owns: boolean }>;
       const r = rows[0];
-      if (!r || r.super || r.bypass) {
+      // A table owner skips RLS too (the policies are not FORCEd): refuse it like a superuser.
+      if (!r || r.super || r.bypass || r.owns) {
         throw new AgentDbError('WhatsApp agent turns run on the app-role connection only (RLS enforced)');
       }
     })();

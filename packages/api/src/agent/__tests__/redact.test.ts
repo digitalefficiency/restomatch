@@ -54,4 +54,11 @@ describe('redaction before the model (WA-02 §5.4)', () => {
     const out = redactFor('receiver', 'receiving.todayExpectations', [{ supplierName: 'ספק 500 ₪ הנחה', lineCount: 3 }]);
     expect(out).toEqual([{ lineCount: 3 }]);
   });
+
+  it('every Hebrew spelling of a shekel amount is dropped for the receiver', () => {
+    for (const v of ['42 ש״ח לק״ג', '42 ש"ח', '42 שח', '42 שקלים', '42 nis', '42 ILS', '₪42']) {
+      expect(redactFor('receiver', 'receiving.getPo', { notes: v })).toEqual({});
+    }
+    expect(redactFor('receiver', 'receiving.getPo', { notes: 'שחור לבן' })).toEqual({ notes: 'שחור לבן' });
+  });
 });

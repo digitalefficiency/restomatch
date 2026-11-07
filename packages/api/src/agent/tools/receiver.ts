@@ -28,6 +28,16 @@ export const todayDeliveries = procedureTool<{ includeLate?: boolean }>({
     properties: { includeLate: { type: 'boolean', description: 'Also late deliveries of the last week.' } },
     additionalProperties: false,
   },
+  // Allow-list (not only the strip): the receiver's model sees these fields and nothing else.
+  post: (rows) =>
+    arr(rows).map((r) => ({
+      poId: r.poId,
+      supplierName: r.supplierName,
+      expectedAt: r.expectedAt,
+      lineCount: r.lineCount,
+      status: r.status,
+      receiptStatus: r.receiptStatus,
+    })),
   links: () => ['/dashboard/receiving'],
   facts: (d) => {
     const rows = arr(d);
@@ -46,6 +56,18 @@ export const deliveryDetail = procedureTool<{ poId: string }>({
   description: 'One expected delivery (by poId): supplier, expected time and the lines with quantities and units.',
   input: PO_INPUT,
   inputJson: PO_INPUT_JSON,
+  // Allow-list: no notes, SKUs or prices (free text can carry a price in any spelling).
+  post: (r) => {
+    const o = obj(r);
+    const po = obj(o.po);
+    return {
+      poId: po.id,
+      supplierName: po.supplierName,
+      expectedAt: po.expectedAt,
+      status: po.status,
+      lines: arr(o.lines).map((l) => ({ rawDescription: l.rawDescription, qtyOrdered: l.qtyOrdered, unit: l.unit })),
+    };
+  },
   links: (i) => [`/dashboard/receiving/${i.poId}`],
   facts: (d) => {
     const o = obj(d);

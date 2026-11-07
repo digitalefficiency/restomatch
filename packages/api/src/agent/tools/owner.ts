@@ -130,9 +130,16 @@ export const supplierLeak: AgentTool<z.infer<typeof SupplierIn>> = {
         .from(suppliers)
         .where(and(eq(suppliers.restaurantId, rid)));
       const want = nameKey(input.supplier);
-      const match =
-        rows.find((r) => nameKey(r.name) === want || (r.nameEn && nameKey(r.nameEn) === want)) ??
-        rows.find((r) => want.length >= 3 && (nameKey(r.name).includes(want) || want.includes(nameKey(r.name))));
+      const exact = rows.filter((r) => nameKey(r.name) === want || (r.nameEn && nameKey(r.nameEn) === want));
+      // Partial match only on keys of ≥3 chars both ways, and only when it is unambiguous.
+      const partial = want.length >= 3
+        ? rows.filter((r) => {
+            const k = nameKey(r.name);
+            return k.length >= 3 && (k.includes(want) || want.includes(k));
+          })
+        : [];
+      const candidates = exact.length ? exact : partial;
+      const match = candidates.length === 1 ? candidates[0] : undefined;
       if (!match) return { data: { found: false } };
       const invoices = dropMissingOnInvoice(await computeLeakBreakdown(tx, rid, { monthOffset: 0, limit: 200, now: ctx.now }));
       let agorot = 0;

@@ -23,7 +23,8 @@ export type RedactionProfile = 'none' | 'chef' | 'receiver';
 
 /** Keys that carry money (or a money-derived figure). Over-stripping is the safe side. */
 export const MONEY_KEY = /ils|agorot|amount|total|price|cost|vat|leak|delta/i;
-const SHEKEL = /₪|ש"ח|שח\b|NIS\b|ILS\b/;
+/** ₪ in any spelling: the sign, ש"ח / ש״ח, a bare שח, שקל/שקלים, NIS, ILS. Hebrew has no \b, so lookarounds. */
+const SHEKEL = /₪|ש["״]ח|(?<![\u05D0-\u05EA])שח(?![\u05D0-\u05EA])|שקל|\bNIS\b|\bILS\b/i;
 
 /** Interim G-07 capability map: who may see ₪ at all. */
 const MONEY_VIEW: Record<UserRole, boolean> = {
