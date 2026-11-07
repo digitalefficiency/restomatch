@@ -52,7 +52,7 @@ export const nav: Shape<typeof he> = {
     inventoryCount: 'جرد',
     inventoryDetail: 'تفاصيل الجرد',
     chain: 'نظرة على السلسلة',
-    chainMatrix: 'كل الفروع',
+    chainMatrix: 'كل الفروع', // review
     branches: 'الفروع',
     team: 'الفريق',
     integrations: 'الربط',
