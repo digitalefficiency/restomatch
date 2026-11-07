@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createDb, eq, inArray, memberships, restaurants, testDbUrl, users } from '@restomatch/db';
 import { isUndeliverableAddress, recipientsForRestaurant } from '../notifications/recipients';
+import type { NotifierFactoryEnv } from '../notifications/factory';
 
 /**
  * 7.11: the demo tenant's members are @kfar-hazeitim.test. In production its
@@ -10,8 +11,8 @@ import { isUndeliverableAddress, recipientsForRestaurant } from '../notification
  */
 const db = createDb(testDbUrl());
 const RUN = `${process.pid}-${Date.now()}`;
-const PROD = { NODE_ENV: 'production' } as NodeJS.ProcessEnv;
-const TEST = { NODE_ENV: 'test' } as NodeJS.ProcessEnv;
+const PROD = { NODE_ENV: 'production' } as NotifierFactoryEnv; // no RESEND_API_KEY: production alone drops them
+const TEST = { NODE_ENV: 'test' } as NotifierFactoryEnv; // no provider either
 
 let restaurantId = '';
 const userIds: string[] = [];
@@ -53,7 +54,7 @@ describe('isUndeliverableAddress', () => {
 describe('recipientsForRestaurant — reserved TLDs', () => {
   it('production: skips them, keeps the real address, logs the domain only', async () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
-    const got = await recipientsForRestaurant(db, restaurantId, undefined, { env: PROD });
+    const got = await recipientsForRestaurant(db, restaurantId, undefined, PROD);
     expect(got.map((r) => r.email)).toEqual([REAL]);
     const lines = info.mock.calls.map((c) => String(c[0]));
     expect(lines).toHaveLength(2);
@@ -66,7 +67,7 @@ describe('recipientsForRestaurant — reserved TLDs', () => {
   });
 
   it('dev / test: unchanged — every member address is returned', async () => {
-    const got = await recipientsForRestaurant(db, restaurantId, undefined, { env: TEST });
+    const got = await recipientsForRestaurant(db, restaurantId, undefined, TEST);
     expect(got.map((r) => r.email).sort()).toEqual([REAL, DEMO, LOCAL].sort());
   });
 });
