@@ -1,6 +1,7 @@
 import 'server-only';
 import { cache } from 'react';
 import { createServerCaller } from '@/lib/trpc/server';
+import { loadSupplierLeakCard } from './leak-card-data';
 
 type Caller = Awaited<ReturnType<typeof createServerCaller>>;
 export type SupplierOverview = Awaited<ReturnType<Caller['suppliers']['overview']>>;
@@ -19,3 +20,10 @@ export const loadSupplierOverview = cache(async (supplierId: string): Promise<Su
     return null;
   }
 });
+
+/**
+ * The leak card (W2-09's loader, consumed read-only), loaded once per request:
+ * the overview's "open to claim" card names the card's letter ₪ — the claims
+ * page's own model — and the leak card under the overview reuses this load.
+ */
+export const loadLeakCardOnce = cache((supplierId: string) => loadSupplierLeakCard(supplierId));

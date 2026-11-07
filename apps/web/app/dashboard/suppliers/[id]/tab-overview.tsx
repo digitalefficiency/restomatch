@@ -5,7 +5,7 @@ import { createServerCaller } from '@/lib/trpc/server';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
 import { formatIls } from '@/lib/money';
-import { loadSupplierOverview } from './overview-data';
+import { loadLeakCardOnce, loadSupplierOverview } from './overview-data';
 import { rhythmParts } from './rhythm';
 
 /**
@@ -14,16 +14,17 @@ import { rhythmParts } from './rhythm';
  * (₪-ranked, at most 3), the order rhythm, 6 months of spend and the last 5
  * invoices. The WHY (the leak card) renders below it, on demand.
  */
-export async function SupplierOverviewTab({ supplierId }: { supplierId: string }) {
+export async function SupplierOverviewTab({ supplierId, leakCard }: { supplierId: string; leakCard: boolean }) {
   const caller = await createServerCaller();
-  const [overview, queue, t, locale] = await Promise.all([
+  const [overview, queue, card, t, locale] = await Promise.all([
     loadSupplierOverview(supplierId),
     caller.approvals.queueSummary({ supplierIds: [supplierId] }).catch(() => null),
+    leakCard ? loadLeakCardOnce(supplierId).catch(() => null) : Promise.resolve(null),
     getT(suppliersNs),
     getLocale(),
   ]);
 
-  type Card = { key: string; label: string; agorot: number; count: number; href: string; cta: string; tone: 'danger' | 'warn' };
+  type Card = { key: string; label: string; agorot: number; count: number | null; href: string; cta: string; tone: 'danger' | 'warn' };
   const cards: Card[] = [];
   if (queue && queue.toDecide.count > 0) {
     cards.push({
@@ -36,12 +37,14 @@ export async function SupplierOverviewTab({ supplierId }: { supplierId: string }
       tone: 'danger',
     });
   }
-  if (overview && overview.openAgorot > 0) {
+  // The credit-request letter ₪ (the claims page's own model) — never the open
+  // leak, which would count the lines still awaiting a decision twice.
+  if (card && card.letterAgorot > 0) {
     cards.push({
-      key: 'open',
+      key: 'claim',
       label: t('overview.openToClaim'),
-      agorot: overview.openAgorot,
-      count: overview.openCount,
+      agorot: card.letterAgorot,
+      count: null,
       href: `/dashboard/leaks/claims?sup=${supplierId}`,
       cta: t('overview.openToClaimCta'),
       tone: 'warn',
@@ -78,7 +81,11 @@ export async function SupplierOverviewTab({ supplierId }: { supplierId: string }
                     {c.label}
                   </Badge>
                   <Money agorot={c.agorot} context="tile" locale={locale} className="text-2xl font-bold" />
-                  <span className="text-xs text-subtle">{t('overview.lines', { count: c.count })}</span>
+                  {c.count != null ? (
+                    <span className="text-xs text-subtle">
+                      {c.count === 1 ? t('overview.lineOne') : t('overview.lines', { count: c.count })}
+                    </span>
+                  ) : null}
                   <LinkButton href={c.href} size="sm" variant={c.tone === 'danger' ? 'primary' : 'secondary'} className="mt-auto self-start">
                     {c.cta}
                   </LinkButton>
@@ -126,9 +133,11 @@ export async function SupplierOverviewTab({ supplierId }: { supplierId: string }
             <ul className="divide-y divide-line">
               {overview.lastInvoices.map((inv) => (
                 <li key={inv.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                  <Link href={`/dashboard/invoices/${inv.id}`} className="min-w-0 truncate text-ink hover:underline">
-                    {inv.invoiceNumber ? t('overview.invoiceNo', { number: inv.invoiceNumber }) : t('overview.invoiceNoNumber')}
-                    <span className="ms-2 text-xs text-subtle tabular-nums">
+                  <Link href={`/dashboard/invoices/${inv.id}`} className="flex min-w-0 items-baseline gap-3 text-ink hover:underline">
+                    <span className="truncate">
+                      {inv.invoiceNumber ? t('overview.invoiceNo', { number: inv.invoiceNumber }) : t('overview.invoiceNoNumber')}
+                    </span>
+                    <span className="shrink-0 text-xs text-subtle tabular-nums">
                       {new Intl.DateTimeFormat(locale === 'he' ? 'he-IL' : 'en-GB', { timeZone: 'Asia/Jerusalem', day: '2-digit', month: '2-digit' }).format(new Date(inv.at))}
                     </span>
                   </Link>

@@ -37,7 +37,7 @@ export default async function SupplierDetailPage({
     case 'overview':
       return (
         <div className="space-y-8">
-          <SupplierOverviewTab supplierId={id} />
+          <SupplierOverviewTab supplierId={id} leakCard={initial.leakCardEnabled} />
           {initial.leakCardEnabled ? (
             <section id="leak-card" className="scroll-mt-24">
               <SupplierLeakTab supplierId={id} />
