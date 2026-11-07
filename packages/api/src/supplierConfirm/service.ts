@@ -38,6 +38,25 @@ import { contractPricesForOrder, isContractPrice, orderPriceKey } from '../contr
 export const LINK_TTL_MS = 72 * 60 * 60 * 1000;
 /** Orders a supplier can be asked to confirm (sent, not yet received/closed). */
 const CONFIRMABLE_STATUSES = ['sent', 'confirmed', 'partial'] as const;
+const isConfirmable = (status: string) => (CONFIRMABLE_STATUSES as readonly string[]).includes(status);
+
+/** The answer's bounds (G-10). The portal reads them from `SupplierOrderView.limits`, so client and server share one source. */
+export const SUPPLIER_MAX_QTY = 1_000_000;
+export const SUPPLIER_MAX_PRICE = 10_000_000;
+
+/**
+ * A fingerprint of the order's lines AS THE SUPPLIER SAW THEM (id, ordered qty,
+ * order price), so an answer to a form that is now stale (the PO was
+ * re-imported or edited after the supplier opened it) is refused with
+ * ORDER_CHANGED instead of storing a shortage the supplier never typed.
+ */
+export function linesVersionOf(lines: ReadonlyArray<{ id: string; qty: number | string; price: number | string | null }>): string {
+  const canon = [...lines]
+    .map((l) => `${l.id}:${Math.round(Number(l.qty) * 1000)}:${l.price == null ? '-' : Math.round(Number(l.price) * 10_000)}`)
+    .sort()
+    .join('|');
+  return createHash('sha256').update(canon, 'utf8').digest('base64url').slice(0, 22);
+}
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
 export function mintToken(): string {
@@ -187,6 +206,12 @@ export interface SupplierOrderView {
     agreed: boolean;
   }>;
   response: { status: 'confirmed' | 'changes'; submittedAt: Date; lines: SupplierResponseLine[]; note: string | null } | null;
+  /** G-10: `linesVersionOf` the lines above — the portal sends it back with the answer. */
+  linesVersion: string;
+  /** G-10: false once the order is cancelled, closed or received (no new answer is accepted). */
+  confirmable: boolean;
+  /** G-10: the answer's bounds, shared with the portal's inputs. */
+  limits: { maxQty: number; maxPrice: number };
 }
 
 /**
@@ -216,6 +241,7 @@ export async function loadSupplierOrder(db: Database, link: ResolvedLink): Promi
       id: purchaseOrders.id,
       supplierId: purchaseOrders.supplierId,
       createdAt: purchaseOrders.createdAt,
+      status: purchaseOrders.status,
       expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
       restaurantName: restaurants.name,
       supplierName: suppliers.name,
@@ -280,6 +306,9 @@ export async function loadSupplierOrder(db: Database, link: ResolvedLink): Promi
       agreed: agreed.has(l.id),
     })),
     response: resp ?? null,
+    linesVersion: linesVersionOf(lines.map((l) => ({ id: l.id, qty: l.qtyOrdered, price: l.unitPriceExpected }))),
+    confirmable: isConfirmable(po.status),
+    limits: { maxQty: SUPPLIER_MAX_QTY, maxPrice: SUPPLIER_MAX_PRICE },
   };
 }
 
@@ -299,6 +328,11 @@ export interface SupplierAnswerInput {
    * completeness rule applies either way.
    */
   intent?: SupplierAnswerIntent;
+  /**
+   * `SupplierOrderView.linesVersion` of the form the supplier answered. Sent by
+   * the portal; when it no longer matches the order → ORDER_CHANGED.
+   */
+  linesVersion?: string;
   /** EVERY line of the order, exactly once. */
   lines: Array<{ poLineId: string; qtyAvailable?: number | null; proposedUnitPrice?: number | null }>;
   note?: string | null;
@@ -308,12 +342,22 @@ export interface SupplierAnswerInput {
  * - `BAD_LINE`: a line of another order, or a line twice;
  * - `BAD_VALUE`: a quantity or price out of range;
  * - `INCOMPLETE_ANSWER`: an order line is missing, or `with_changes` leaves a quantity empty;
- * - `INTENT_MISMATCH`: `as_ordered` with a changed line, or `with_changes` with no change and no note.
+ * - `INTENT_MISMATCH`: `as_ordered` with a changed line, or `with_changes` with no change and no note;
+ * - `ORDER_CHANGED`: the order's lines changed since the supplier opened the form (`linesVersion`);
+ * - `ORDER_CLOSED`: the order is cancelled, closed or received.
  */
-export type SubmitError = 'NOT_FOUND' | 'ALREADY_ANSWERED' | 'BAD_LINE' | 'BAD_VALUE' | 'INCOMPLETE_ANSWER' | 'INTENT_MISMATCH';
+export type SubmitError =
+  | 'NOT_FOUND'
+  | 'ALREADY_ANSWERED'
+  | 'BAD_LINE'
+  | 'BAD_VALUE'
+  | 'INCOMPLETE_ANSWER'
+  | 'INTENT_MISMATCH'
+  | 'ORDER_CHANGED'
+  | 'ORDER_CLOSED';
 
-const MAX_QTY = 1_000_000;
-const MAX_PRICE = 10_000_000;
+const MAX_QTY = SUPPLIER_MAX_QTY;
+const MAX_PRICE = SUPPLIER_MAX_PRICE;
 const round = (n: number, dp: number) => Math.round(n * 10 ** dp) / 10 ** dp;
 
 /**
@@ -336,17 +380,29 @@ export async function submitSupplierAnswer(
   now: Date = new Date(),
 ): Promise<{ ok: true; status: 'confirmed' | 'changes' } | { ok: false; error: SubmitError }> {
   const [po] = await db
-    .select({ id: purchaseOrders.id })
+    .select({ id: purchaseOrders.id, status: purchaseOrders.status })
     .from(purchaseOrders)
     .where(and(eq(purchaseOrders.id, link.poId), eq(purchaseOrders.restaurantId, link.restaurantId)))
     .limit(1);
   if (!po) return { ok: false, error: 'NOT_FOUND' };
+  // A replay is always a 409 with the recorded answer — checked before the lines,
+  // so a second answer to a since-changed order still reads as "already answered".
+  const [answered] = await db
+    .select({ id: supplierResponses.id })
+    .from(supplierResponses)
+    .where(and(eq(supplierResponses.poId, po.id), eq(supplierResponses.restaurantId, link.restaurantId)))
+    .limit(1);
+  if (answered) return { ok: false, error: 'ALREADY_ANSWERED' };
+  if (!isConfirmable(po.status)) return { ok: false, error: 'ORDER_CLOSED' };
 
   const own = await db
     .select({ id: poLines.id, qty: poLines.qtyOrdered, price: poLines.unitPriceExpected })
     .from(poLines)
     .where(eq(poLines.poId, po.id));
   const byId = new Map(own.map((l) => [l.id, l]));
+  if (input.linesVersion !== undefined && input.linesVersion !== linesVersionOf(own)) {
+    return { ok: false, error: 'ORDER_CHANGED' };
+  }
 
   const seen = new Set<string>();
   const changes: SupplierResponseLine[] = [];
@@ -361,6 +417,10 @@ export async function submitSupplierAnswer(
     if (price !== null && (!Number.isFinite(price) || price <= 0 || price > MAX_PRICE)) {
       return { ok: false, error: 'BAD_VALUE' };
     }
+    // Validated as STORED (after rounding): a positive qty that rounds to 0 would
+    // read as "out of stock", and a price that rounds to ₪0 is no price.
+    if (qty !== null && qty > 0 && round(qty, 3) === 0) return { ok: false, error: 'BAD_VALUE' };
+    if (price !== null && round(price, 4) === 0) return { ok: false, error: 'BAD_VALUE' };
     if (qty === null) qtyMissing = true;
     const qtyChanged = qty !== null && round(qty, 3) !== round(Number(mine.qty), 3);
     const priceChanged = price !== null && (mine.price == null || round(price, 4) !== round(Number(mine.price), 4));

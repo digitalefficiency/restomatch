@@ -112,6 +112,25 @@ async function seriousAxe(page: Page): Promise<string[]> {
   });
 }
 
+/**
+ * The order's `linesVersion` as the portal shows it — the same canonical form as
+ * `linesVersionOf` in the service (id : qty×1000 : price×10000, sorted, sha256).
+ */
+async function linesVersion(poId: string): Promise<string> {
+  const sql = e2eSql();
+  try {
+    const rows = await sql<{ id: string; q: string; p: string | null }[]>`
+      select id, qty_ordered::text as q, unit_price_expected::text as p from po_lines where po_id = ${poId}`;
+    const canon = rows
+      .map((l) => `${l.id}:${Math.round(Number(l.q) * 1000)}:${l.p == null ? '-' : Math.round(Number(l.p) * 10_000)}`)
+      .sort()
+      .join('|');
+    return createHash('sha256').update(canon, 'utf8').digest('base64url').slice(0, 22);
+  } finally {
+    await sql.end();
+  }
+}
+
 /** POST an answer like the portal does (same origin), without a page view — the
  * portal's per-IP view limiter is shared with every other spec on the server. */
 async function postAnswer(page: Page, token: string, body: unknown) {
@@ -170,7 +189,12 @@ test.describe('G-10 · supplier answer contract (he 390, touch)', () => {
     // A second browser (another person at the supplier) posts: 409 with the recorded answer, then the notice with its date.
     const other = await secondBrowserPage(browser);
     await other.goto(`/s/${token}`);
-    const replay = await postAnswer(other, token, { intent: 'as_ordered', lines: lineIds.map((id) => ({ poLineId: id, qtyAvailable: null })), note: 'ניסיון שני' });
+    const replay = await postAnswer(other, token, {
+      intent: 'as_ordered',
+      linesVersion: await linesVersion(poId),
+      lines: lineIds.map((id) => ({ poLineId: id, qtyAvailable: null })),
+      note: 'ניסיון שני',
+    });
     expect(replay.status).toBe(409);
     expect(replay.json).toMatchObject({ ok: false, error: 'already_answered', recorded: { status: 'changes', lines: row?.lines } });
     expect(JSON.stringify(replay.json)).not.toContain('ניסיון שני');
@@ -183,11 +207,38 @@ test.describe('G-10 · supplier answer contract (he 390, touch)', () => {
   test('a contradictory answer (as_ordered with a shortage) → 422 intent_mismatch; nothing stored', async ({ page }) => {
     const { token, poId, lineIds } = await freshSupplierLink();
     const lines = lineIds.map((id, i) => ({ poLineId: id, qtyAvailable: i === 0 ? 0 : null }));
-    const mismatch = await postAnswer(page, token, { intent: 'as_ordered', lines });
+    const v = await linesVersion(poId);
+    const mismatch = await postAnswer(page, token, { intent: 'as_ordered', linesVersion: v, lines });
     expect(mismatch).toEqual({ status: 422, json: { ok: false, error: 'intent_mismatch' } });
-    const partial = await postAnswer(page, token, { intent: 'as_ordered', lines: [] });
+    const partial = await postAnswer(page, token, { intent: 'as_ordered', linesVersion: v, lines: [] });
     expect(partial).toEqual({ status: 422, json: { ok: false, error: 'incomplete_answer' } });
     expect(await stored(poId)).toBeNull();
+  });
+
+  test('the order changed while the form was open → "ההזמנה עודכנה", the new line appears, nothing stored', async ({ page }) => {
+    const { token, poId } = await freshSupplierLink();
+    await setLocale(page, 'he');
+    await page.goto(`/s/${token}`);
+    const sql = e2eSql();
+    let added = '';
+    try {
+      const [l] = await sql<{ id: string }[]>`
+        insert into po_lines (po_id, raw_description, qty_ordered, unit) values (${poId}, 'שורה שנוספה', 3, 'unit') returning id`;
+      added = l!.id;
+    } finally {
+      await sql.end();
+    }
+    await page.locator('[data-primary]').click();
+    await expect(page.getByTestId('portal-actions').getByRole('alert')).toContainText('ההזמנה עודכנה');
+    await expect(page.locator(`#qty-${added}`)).toHaveValue('3');
+    await expect(page.getByTestId('portal-done')).toHaveCount(0);
+    expect(await stored(poId)).toBeNull();
+    const clean = e2eSql();
+    try {
+      await clean`delete from po_lines where id = ${added}`;
+    } finally {
+      await clean.end();
+    }
   });
 
   test('a 422 from the server is an inline error on the form, never the done card', async ({ page }) => {
@@ -225,15 +276,17 @@ for (const [locale, vp, use] of VIEWS) {
           const { token, poId, lineIds } = await freshSupplierLink(state === 'expired' ? -1 : 72);
           path = `/s/${token}`;
           if (state === 'answered') {
+            const v = await linesVersion(poId);
             const r = await postAnswer(page, token, {
               intent: 'with_changes',
+              linesVersion: v,
               lines: lineIds.map((id, i) => ({ poLineId: id, qtyAvailable: i === 0 ? 0 : null })),
               note: 'יגיע מחר',
             });
             // with_changes needs every quantity → 422; answer it completely instead.
             expect(r.status).toBe(422);
             const full = await Promise.all(lineIds.map(async (id, i) => ({ poLineId: id, qtyAvailable: i === 0 ? 0 : await qtyOrdered(id) })));
-            expect((await postAnswer(page, token, { intent: 'with_changes', lines: full, note: 'יגיע מחר' })).status).toBe(200);
+            expect((await postAnswer(page, token, { intent: 'with_changes', linesVersion: v, lines: full, note: 'יגיע מחר' })).status).toBe(200);
             expect((await stored(poId))?.lines).toHaveLength(1);
           }
         }

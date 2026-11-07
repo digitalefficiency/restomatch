@@ -11,7 +11,7 @@ const asOrdered = () => ({
   price: Object.fromEntries(LINES.map((l) => [l.id, l.unitPrice == null ? '' : String(l.unitPrice)])),
 });
 const build = (qty: Record<string, string>, price: Record<string, string>, note = '') =>
-  buildAnswer({ lines: LINES, qtyText: qty, priceText: price, note });
+  buildAnswer({ lines: LINES, linesVersion: 'v1', qtyText: qty, priceText: price, note });
 const everyLineAsOrdered = LINES.map((l) => ({ poLineId: l.id, qtyAvailable: l.qtyOrdered, proposedUnitPrice: null }));
 
 describe('supplier answer (auth-02): a marked change is never dropped', () => {
@@ -50,15 +50,48 @@ describe('supplier answer (auth-02): a marked change is never dropped', () => {
     qty.a = '6';
     const b = build(qty, price, ' יגיע מחר ');
     expect(b.discardCount).toBe(1);
-    expect(b.asOrderedBody).toEqual({ intent: 'as_ordered', lines: everyLineAsOrdered, note: 'יגיע מחר' });
-    expect(build(qty, price).asOrderedBody).toEqual({ intent: 'as_ordered', lines: everyLineAsOrdered, note: null });
+    expect(b.asOrderedBody).toEqual({ intent: 'as_ordered', linesVersion: 'v1', lines: everyLineAsOrdered, note: 'יגיע מחר' });
+    expect(build(qty, price).asOrderedBody).toEqual({ intent: 'as_ordered', linesVersion: 'v1', lines: everyLineAsOrdered, note: null });
   });
 
   it('G-10: no edits → the primary is as_ordered and its body is every line, never `lines: []`', () => {
     const { qty, price } = asOrdered();
     const b = build(qty, price);
     expect(b).toMatchObject({ primary: 'as_ordered', intent: 'as_ordered', count: 0, diff: [] });
-    expect(b.body).toEqual({ intent: 'as_ordered', lines: everyLineAsOrdered, note: null });
+    expect(b.body).toEqual({ intent: 'as_ordered', linesVersion: 'v1', lines: everyLineAsOrdered, note: null });
+    expect(build(qty, price, 'x').body.linesVersion).toBe('v1');
+  });
+
+  it('G-10 review #6: a ₪0 order line\'s prefilled "0" is unchanged, not invalid — the primary stays as_ordered', () => {
+    const zero: PortalLine[] = [...LINES, { id: 'z', name: 'דוגמית', sku: null, qtyOrdered: 1, unit: 'unit', unitPrice: 0, agreed: false }];
+    const qty = { ...asOrdered().qty, z: '1' };
+    const price = { ...asOrdered().price, z: '0' };
+    const b = buildAnswer({ lines: zero, linesVersion: 'v', qtyText: qty, priceText: price, note: '' });
+    expect(b).toMatchObject({ primary: 'as_ordered', count: 0 });
+    expect(b.answer.rows.find((r) => r.line.id === 'z')).toMatchObject({ priceBad: false, priceChanged: false, price: null });
+    // a real shortage on the same form is still carried by the primary
+    const short = buildAnswer({ lines: zero, linesVersion: 'v', qtyText: { ...qty, a: '6' }, priceText: price, note: '' });
+    expect(short).toMatchObject({ primary: 'with_changes', count: 1 });
+    expect(short.body.lines.find((l) => l.poLineId === 'z')).toEqual({ poLineId: 'z', qtyAvailable: 1, proposedUnitPrice: null });
+    // "8,5" for an 8.5 line is the same price too
+    const same = buildAnswer({ lines: zero, linesVersion: 'v', qtyText: qty, priceText: { ...price, a: '6,50' }, note: '' });
+    expect(same.primary).toBe('as_ordered');
+  });
+
+  it('G-10 review #5: a value above the server bounds is invalid inline (never a 400)', () => {
+    const { qty, price } = asOrdered();
+    const limits = { maxQty: 1_000_000, maxPrice: 10_000_000 };
+    qty.a = '1000001';
+    const big = buildAnswer({ lines: LINES, linesVersion: 'v', limits, qtyText: qty, priceText: price, note: '' });
+    expect(big.primary).toBe('invalid');
+    expect(big.answer.rows[0]!.qtyBad).toBe(true);
+    qty.a = '1000000';
+    price.b = '10000001';
+    const pricey = buildAnswer({ lines: LINES, linesVersion: 'v', limits, qtyText: qty, priceText: price, note: '' });
+    expect(pricey.answer.rows[0]!.qtyBad).toBe(false);
+    expect(pricey.answer.rows[1]!.priceBad).toBe(true);
+    expect(parseQty('1000001', 1_000_000)).toBeNull();
+    expect(parseUnitPrice('10,000,000', 10_000_000)).toBe(10_000_000);
   });
 
   it('G-10 buildAnswer table: 0 / 1 / many changes, out of stock, note only, invalid', () => {

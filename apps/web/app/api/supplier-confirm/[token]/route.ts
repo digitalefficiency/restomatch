@@ -18,12 +18,15 @@ const LIMIT = { limit: 10, windowSec: 600, prefix: 'rl:supplier-confirm' };
 const Body = z
   .object({
     intent: z.enum(['as_ordered', 'with_changes']),
+    /** The `linesVersion` of the form the supplier answered (a changed order → 409 order_changed). */
+    linesVersion: z.string().min(1).max(64),
     lines: z
       .array(
         z
           .object({
             poLineId: z.string().uuid(),
-            qtyAvailable: z.number().finite().nullable().optional(),
+            // A required key (G-10 §5.1): every line states its quantity, or null = as ordered.
+            qtyAvailable: z.number().finite().nullable(),
             proposedUnitPrice: z.number().finite().nullable().optional(),
           })
           .strict(),
@@ -57,7 +60,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
     case 'NOT_FOUND':
       return json(404, { ok: false, error: 'not_found' });
     case 'EXPIRED':
+    case 'ORDER_CLOSED':
       return json(410, { ok: false, error: 'expired' });
+    case 'ORDER_CHANGED':
+      return json(409, { ok: false, error: 'order_changed' });
     case 'INCOMPLETE_ANSWER':
       return json(422, { ok: false, error: 'incomplete_answer' });
     case 'INTENT_MISMATCH':

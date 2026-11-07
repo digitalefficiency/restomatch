@@ -131,7 +131,7 @@ export default async function SupplierPortalPage({ params }: { params: Promise<{
       ) : (
         <>
           {contactBar}
-          <SupplierAnswerForm token={token} poNumber={v.poNumber} lines={lines} />
+          <SupplierAnswerForm token={token} poNumber={v.poNumber} lines={lines} linesVersion={v.linesVersion} limits={v.limits} />
         </>
       )}
       <p className="mt-10 text-center text-sm text-muted">{t('portal.poweredBy')}</p>

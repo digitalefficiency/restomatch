@@ -10,7 +10,7 @@ import { formatNumber } from '@/lib/i18n/format';
 import { supplierConfirm } from '@/lib/i18n/messages/supplierConfirm';
 import { Money } from '@/lib/components/money';
 import { DiffList } from './Diff';
-import { buildAnswer, type Answer, type DiffItem, type PortalLine } from './logic';
+import { buildAnswer, type Answer, type AnswerLimits, type DiffItem, type PortalLine } from './logic';
 import { rememberAttempt } from './attempt';
 
 export type { PortalLine } from './logic';
@@ -20,7 +20,7 @@ type Phase =
   | { kind: 'sending'; what: 'answer' | 'asIs' }
   | { kind: 'done'; status: 'confirmed' | 'changes'; diff: DiffItem[]; note: string | null }
   | { kind: 'error'; key: ErrorKey };
-type ErrorKey = 'notFound' | 'expired' | 'rateLimited' | 'incomplete' | 'intentMismatch' | 'generic';
+type ErrorKey = 'notFound' | 'expired' | 'rateLimited' | 'incomplete' | 'intentMismatch' | 'orderChanged' | 'tooLarge' | 'generic';
 
 const inputClass =
   'mt-1 block min-h-12 w-full rounded-lg border bg-surface px-3 py-2.5 text-base text-ink tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-primary';
@@ -39,7 +39,19 @@ function Ils({ agorot, locale }: { agorot: number; locale: 'he' | 'en' }) {
  *    "as ordered" demoted to a text button that first asks to discard the edits.
  * A marked change can therefore never be dropped by the natural tap.
  */
-export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; poNumber: string; lines: PortalLine[] }) {
+export function SupplierAnswerForm({
+  token,
+  poNumber,
+  lines,
+  linesVersion,
+  limits,
+}: {
+  token: string;
+  poNumber: string;
+  lines: PortalLine[];
+  linesVersion: string;
+  limits: AnswerLimits;
+}) {
   const t = useT(supplierConfirm);
   const locale = useLocale();
   const router = useRouter();
@@ -51,6 +63,15 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
   );
   const [note, setNote] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'edit' });
+  // The order changed under the supplier (409 order_changed → refresh): reload the
+  // fields from the NEW lines; the "the order was updated" message stays on screen.
+  const shownVersion = useRef(linesVersion);
+  useEffect(() => {
+    if (shownVersion.current === linesVersion) return;
+    shownVersion.current = linesVersion;
+    setQty(Object.fromEntries(lines.map((l) => [l.id, String(l.qtyOrdered)])));
+    setPrice(Object.fromEntries(lines.map((l) => [l.id, l.unitPrice == null ? '' : String(l.unitPrice)])));
+  }, [linesVersion, lines]);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const asIsRef = useRef<HTMLButtonElement>(null);
   const wasConfirming = useRef(false);
@@ -63,7 +84,10 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
   const formRef = useRef<HTMLFormElement>(null);
 
   // ONE answer model (G-10): the primary, its count, "as ordered" and the discard confirm.
-  const built = useMemo(() => buildAnswer({ lines, qtyText: qty, priceText: price, note }), [lines, qty, price, note]);
+  const built = useMemo(
+    () => buildAnswer({ lines, linesVersion, limits, qtyText: qty, priceText: price, note }),
+    [lines, linesVersion, limits, qty, price, note],
+  );
   const { answer, diff, count: changeCount, discardCount: lineChangeCount } = built;
   const { rows, invalid } = answer;
   const hasChanges = changeCount > 0;
@@ -90,6 +114,13 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
       // auth-03: someone already answered this order. Never a false success —
       // reload the page, which shows the RECORDED answer, its date, and that
       // these changes were not saved.
+      // The order changed after this form was opened: nothing was saved. Reload
+      // the order and ask the supplier to check it again.
+      if (res.status === 409 && data.error === 'order_changed') {
+        setPhase({ kind: 'error', key: 'orderChanged' });
+        router.refresh();
+        return;
+      }
       if (res.status === 409) {
         // The page then compares the recorded answer with this attempt: a
         // retried submit whose first try did land is the supplier's own answer.
@@ -105,7 +136,9 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
             : data.error === 'intent_mismatch'
               ? 'intentMismatch'
               : 'generic'
-          : res.status === 404 ? 'notFound' : res.status === 410 ? 'expired' : res.status === 429 ? 'rateLimited' : 'generic';
+          : res.status === 413
+            ? 'tooLarge'
+            : res.status === 404 ? 'notFound' : res.status === 410 ? 'expired' : res.status === 429 ? 'rateLimited' : 'generic';
       setPhase({ kind: 'error', key });
     } catch {
       setPhase({ kind: 'error', key: 'generic' });

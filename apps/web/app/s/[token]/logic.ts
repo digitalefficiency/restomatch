@@ -16,20 +16,36 @@ export interface PortalLine {
   agreed: boolean;
 }
 
+/** The server's bounds (`SupplierOrderView.limits`); a value above them is invalid inline, not a 400. */
+export interface AnswerLimits {
+  maxQty: number;
+  maxPrice: number;
+}
+const NO_LIMITS: AnswerLimits = { maxQty: Number.POSITIVE_INFINITY, maxPrice: Number.POSITIVE_INFINITY };
+
 /**
  * A typed quantity: "12", "7.5", "7,5", "0,250" → number ≥ 0 (3 dp, no thousands
- * grouping — "1,250" is ambiguous for a quantity and is refused); anything else null.
+ * grouping — "1,250" is ambiguous for a quantity and is refused), ≤ `max`;
+ * anything else null.
  * TODO(G-13): switch to `parseDecimalInput` once it lands.
+ * TODO(G-13): the shared parser drops inner spaces, so "12 5" reads as 125 — G-13 refuses it.
  */
-export function parseQty(raw: string): number | null {
+export function parseQty(raw: string, max = NO_LIMITS.maxQty): number | null {
   const c = parseNumberInput(raw, { scale: 3, grouping: false });
-  return c.kind === 'ok' && c.value >= 0 ? c.value : null;
+  return c.kind === 'ok' && c.value >= 0 && c.value <= max ? c.value : null;
 }
 
-/** A typed unit price: "9.25", "9,25", "1,250" (thousands) → number > 0 (4 dp); anything else null. */
-export function parseUnitPrice(raw: string): number | null {
+/** A typed unit price: "9.25", "9,25", "1,250" (thousands) → number > 0 (4 dp), ≤ `max`; anything else null. */
+export function parseUnitPrice(raw: string, max = NO_LIMITS.maxPrice): number | null {
   const c = parseNumberInput(raw, { scale: 4 });
-  return c.kind === 'ok' && c.value > 0 ? c.value : null;
+  return c.kind === 'ok' && c.value > 0 && c.value <= max ? c.value : null;
+}
+
+/** The typed price text says exactly the order's price (including ₪0) → unchanged, never "invalid". */
+function isOrderPrice(raw: string, unitPrice: number | null): boolean {
+  if (unitPrice == null) return false;
+  const c = parseNumberInput(raw, { scale: 4 });
+  return c.kind === 'ok' && c.scaled === Math.round(unitPrice * 10_000);
 }
 
 /**
@@ -85,11 +101,15 @@ export function computeAnswer(
   qtyText: Record<string, string>,
   priceText: Record<string, string>,
   note: string,
+  limits: AnswerLimits = NO_LIMITS,
 ): Answer {
   const rows = lines.map((l): AnswerRow => {
-    const qty = parseQty(qtyText[l.id] ?? '');
-    const rawP = (priceText[l.id] ?? '').trim();
-    const price = rawP === '' ? null : parseUnitPrice(rawP);
+    const qty = parseQty(qtyText[l.id] ?? '', limits.maxQty);
+    const typedP = (priceText[l.id] ?? '').trim();
+    // The order's own price (a ₪0 line's prefilled "0" included) is "no price
+    // change" — checked BEFORE validity, so an untouched form is never invalid.
+    const rawP = isOrderPrice(typedP, l.unitPrice) ? '' : typedP;
+    const price = rawP === '' ? null : parseUnitPrice(rawP, limits.maxPrice);
     const qtyBad = qty === null;
     const priceBad = rawP !== '' && price === null;
     const qtyChanged = qty !== null && Math.round(qty * 1000) !== Math.round(l.qtyOrdered * 1000);
@@ -139,12 +159,16 @@ export type AnswerIntent = 'as_ordered' | 'with_changes';
 
 export interface AnswerBody {
   intent: AnswerIntent;
+  /** `SupplierOrderView.linesVersion` of the form being answered. */
+  linesVersion: string;
   lines: Array<{ poLineId: string; qtyAvailable: number | null; proposedUnitPrice: number | null }>;
   note: string | null;
 }
 
 export interface AnswerState {
   lines: PortalLine[];
+  linesVersion: string;
+  limits?: AnswerLimits;
   qtyText: Record<string, string>;
   priceText: Record<string, string>;
   note: string;
@@ -174,12 +198,13 @@ export interface BuiltAnswer {
  * its ordered quantity with `intent: 'as_ordered'`.
  */
 export function buildAnswer(state: AnswerState): BuiltAnswer {
-  const answer = computeAnswer(state.lines, state.qtyText, state.priceText, state.note);
+  const answer = computeAnswer(state.lines, state.qtyText, state.priceText, state.note, state.limits);
   const note = state.note.trim() || null;
   const primary: BuiltAnswer['primary'] = answer.invalid ? 'invalid' : answer.changeCount === 0 ? 'as_ordered' : 'with_changes';
   const intent: AnswerIntent = primary === 'as_ordered' ? 'as_ordered' : 'with_changes';
   const asOrderedBody: AnswerBody = {
     intent: 'as_ordered',
+    linesVersion: state.linesVersion,
     lines: state.lines.map((l) => ({ poLineId: l.id, qtyAvailable: l.qtyOrdered, proposedUnitPrice: null })),
     note,
   };
@@ -188,6 +213,7 @@ export function buildAnswer(state: AnswerState): BuiltAnswer {
       ? asOrderedBody
       : {
           intent: 'with_changes',
+          linesVersion: state.linesVersion,
           lines: answer.rows.map((r) => ({ poLineId: r.line.id, qtyAvailable: r.qty, proposedUnitPrice: r.price })),
           note,
         };

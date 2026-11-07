@@ -41,6 +41,8 @@ export const en: Shape<typeof he> = {
       rateLimited: 'Too many attempts. Try again in a few minutes.',
       incomplete: 'A line is missing its quantity. Fill in a quantity for every line (0 = out of stock).',
       intentMismatch: 'You marked changes. Send the answer with the changes, or discard them.',
+      orderChanged: 'The order was updated — check the lines again and resend.',
+      tooLarge: 'The answer is too long. Shorten the note and try again, or contact the restaurant.',
       generic: 'Something went wrong. Please try again.',
     },
     invalidTitle: 'Link unavailable',
