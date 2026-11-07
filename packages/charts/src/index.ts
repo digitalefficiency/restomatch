@@ -82,3 +82,16 @@ export {
   type DisparityMatchMethod,
   type PriceDisparityRow,
 } from './chain-disparity';
+export {
+  computeLeakComparison,
+  COVERAGE_GAP,
+  localToday,
+  measuredStateOf,
+  resolveWindow,
+  type Coverage,
+  type DateSpan,
+  type LeakComparison,
+  type LeakComparisonWindow,
+  type MeasuredState,
+  type ResolvedWindow,
+} from './period';
