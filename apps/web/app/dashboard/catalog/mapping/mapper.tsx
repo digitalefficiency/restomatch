@@ -101,7 +101,6 @@ export function SkuMapper({ initial }: { initial: UnmappedSku[] }) {
         <EmptyState
           icon={<Boxes className="h-6 w-6" />}
           title={t('mapping.emptyTitle')}
-          description={t('mapping.emptyBody')}
         />
       ) : (
         <>
