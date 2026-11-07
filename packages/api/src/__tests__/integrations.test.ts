@@ -375,3 +375,19 @@ describe('integrations: no invented supplier card codes (W2-14, admin-10)', () =
     expect(JSON.stringify(cfg)).not.toMatch(/"S[0-9A-F]{8}"/);
   });
 });
+
+describe('integrations: bookkeeper mapping write stays tenant-scoped (W2-14)', () => {
+  it("a bookkeeper mapping B's supplier id → NOT_FOUND, A's mapping unchanged", async () => {
+    await setFlag(A, true);
+    await expect(
+      callerFor(A, 'bookkeeper').integrations.setAccountingConfig({
+        expenseAccount: '1',
+        vatInputAccount: '2',
+        movementType: 'x',
+        supplierAccounts: { [B.supplierId]: '99999' },
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const cfg = await callerFor(A).integrations.accountingConfig();
+    expect(cfg.config.supplierAccounts).toEqual({});
+  });
+});
