@@ -11,6 +11,7 @@ export const routes: RouteDef[] = [
     roles: ['owner'],
     chain: 'only',
     nav: 'item',
+    badge: null,
     aliases: ['רשת', 'סניפים', 'chain', 'branches'],
   },
 ];

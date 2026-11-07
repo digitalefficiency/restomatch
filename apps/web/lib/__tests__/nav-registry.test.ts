@@ -489,3 +489,26 @@ describe('Breadcrumbs: a crumb the role cannot open is plain text', () => {
     expect(render(null)).toContain('href="/dashboard/suppliers"');
   });
 });
+
+describe('nav badges (W2-08)', () => {
+  it('every badge key resolves to a known source and a registered, linkable entry', async () => {
+    const { BADGE_KEYS } = await import('../nav/types');
+    const { DEFAULT_ROUTE_BADGES, badgeFor, routeBadgeMap } = await import('../nav/badges');
+    for (const key of Object.keys(DEFAULT_ROUTE_BADGES)) expect(routeByKey(key), key).toBeDefined();
+    const map = routeBadgeMap();
+    for (const [routeKey, badge] of Object.entries(map)) {
+      expect(BADGE_KEYS).toContain(badge);
+      expect(routeByKey(routeKey)!.nav, routeKey).toBe('item');
+    }
+    // One entry per source: a queue's badge shows in exactly one place.
+    expect(new Set(Object.values(map)).size).toBe(Object.values(map).length);
+    expect([...new Set(Object.values(map))].sort()).toEqual([...BADGE_KEYS].sort());
+    // The unowned route files decided "no badge" explicitly.
+    for (const r of REGISTRY) {
+      if (['ask', 'branches', 'catalog', 'chain', 'products', 'recipes', 'reports'].some((seg) => r.path.startsWith(`/dashboard/${seg}`))) {
+        expect(r.badge, r.key).toBeNull();
+        expect(badgeFor(r)).toBeNull();
+      }
+    }
+  });
+});
