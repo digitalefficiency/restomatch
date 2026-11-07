@@ -1,7 +1,7 @@
 import { and, auditLog, eq, sql, type Database } from '@restomatch/db';
 import { recordAudit, type AuditAction } from '../audit';
 import { formatIlsAgorot, ilsToAgorot } from '../reports/money';
-import { A13, VAT_ALLOCATION_REQUESTED, VAT_ALLOCATION_SET, israelDay } from './caseState';
+import { A13, VAT_ALLOCATION_REQUESTED, VAT_ALLOCATION_SET, daysSinceRequest, israelDay } from './caseState';
 import { vatAtRisk, type VatAtRiskRow } from './vatAtRisk';
 
 /**
@@ -114,10 +114,16 @@ export interface DraftInvoice {
  * screen language). Partner tone (GLOSSARY §2): ask, the invoice is the
  * subject, keep the hard facts, thank them. Nothing is sent by the system.
  */
+/** First ask, or a gentle reminder after an earlier request (GLOSSARY §2: "send a small reminder"). */
+export type AllocationRequestKind = 'request' | 'reminder';
+
 export function allocationRequestText(args: {
   supplierName: string;
   restaurantName: string;
   invoices: ReadonlyArray<Pick<DraftInvoice, 'invoiceNumber' | 'invoiceDate' | 'totalExclVat' | 'deductionDeadline'>>;
+  kind?: AllocationRequestKind;
+  /** Israel day of the earlier request (reminder only), shown as "ביקשנו ב-DD.MM.YYYY". */
+  requestedOn?: string | null;
 }): string {
   const one = args.invoices.length === 1;
   const lines = args.invoices.map(
@@ -125,6 +131,20 @@ export function allocationRequestText(args: {
       `• חשבונית ${i.invoiceNumber ? `מס׳ ${i.invoiceNumber}` : 'ללא מספר'} מיום ${heDay(i.invoiceDate)} — ${ils(i.totalExclVat)} לפני מע״מ`,
   );
   const earliest = args.invoices.map((i) => i.deductionDeadline).sort()[0];
+  const ask = `נשמח ${one ? 'לחשבונית מתוקנת' : 'לחשבוניות מתוקנות'} עם מספר הקצאה${earliest ? `, אם אפשר לפני ${heDay(earliest)}` : ''}.`;
+  if (args.kind === 'reminder') {
+    return [
+      `שלום ${args.supplierName},`,
+      '',
+      `תזכורת קטנה לבקשה ששלחנו${args.requestedOn ? ` ב-${heDay(args.requestedOn)}` : ''} לגבי ${one ? 'החשבונית' : 'החשבוניות'} ללא מספר הקצאה:`,
+      ...lines,
+      '',
+      `${ask} אם כבר שלחתם — תודה, ונבדוק שוב אצלנו.`,
+      '',
+      'תודה רבה,',
+      args.restaurantName,
+    ].join('\n');
+  }
   return [
     `שלום ${args.supplierName},`,
     '',
@@ -133,7 +153,7 @@ export function allocationRequestText(args: {
       : 'החשבוניות הבאות התקבלו אצלנו ללא מספר הקצאה תקין:',
     ...lines,
     '',
-    `לפי רפורמת חשבוניות ישראל נוכל לקזז את המע״מ ${one ? 'שלה' : 'שלהן'} רק עם מספר הקצאה מרשות המסים. נשמח ${one ? 'לחשבונית מתוקנת' : 'לחשבוניות מתוקנות'} עם מספר הקצאה${earliest ? `, אם אפשר לפני ${heDay(earliest)}` : ''}.`,
+    `לפי רפורמת חשבוניות ישראל נוכל לקזז את המע״מ ${one ? 'שלה' : 'שלהן'} רק עם מספר הקצאה מרשות המסים. ${ask}`,
     '',
     'תודה רבה,',
     args.restaurantName,
@@ -152,6 +172,12 @@ export interface AllocationRequestDraft {
   needsContact: boolean;
   /** Where the hint links. */
   supplierHref: string;
+  /** 'reminder' once any of these invoices was already requested (latest audit row). */
+  kind: AllocationRequestKind;
+  /** Latest request for these invoices (ISO), or null. */
+  lastRequestedAt: string | null;
+  /** Israel days since `lastRequestedAt`, for "אין מענה N ימים"; null when never requested. */
+  daysSinceRequest: number | null;
   invoices: DraftInvoice[];
 }
 
@@ -178,9 +204,15 @@ export async function allocationRequestDraft(
     restaurant_name: string;
   }>;
   if (!sup) return null;
-  const res = await vatAtRisk(db, restaurantId, 'open', { now: opts.now });
-  const invoices: DraftInvoice[] = res.rows
-    .filter((r) => r.supplierId === supplierId)
+  const now = opts.now ?? new Date();
+  const res = await vatAtRisk(db, restaurantId, 'open', { now });
+  const rows = res.rows.filter((r) => r.supplierId === supplierId);
+  const lastRequestedAt = rows.reduce<string | null>(
+    (acc, r) => (r.requestedAt && (!acc || r.requestedAt > acc) ? r.requestedAt : acc),
+    null,
+  );
+  const kind: AllocationRequestKind = lastRequestedAt ? 'reminder' : 'request';
+  const invoices: DraftInvoice[] = rows
     .map((r) => ({
       invoiceId: r.invoiceId,
       invoiceNumber: r.invoiceNumber,
@@ -191,11 +223,18 @@ export async function allocationRequestDraft(
       daysLeft: r.daysLeft,
     }));
   const text = invoices.length
-    ? allocationRequestText({ supplierName: sup.name, restaurantName: sup.restaurant_name, invoices })
+    ? allocationRequestText({
+        supplierName: sup.name,
+        restaurantName: sup.restaurant_name,
+        invoices,
+        kind,
+        requestedOn: lastRequestedAt ? israelDay(new Date(lastRequestedAt)) : null,
+      })
     : '';
   const wa = waDigits(sup.contact_whatsapp);
   const email = cleanEmail(sup.contact_email);
-  const subject = invoices.length === 1 ? 'בקשה לחשבונית מתוקנת עם מספר הקצאה' : 'בקשה לחשבוניות מתוקנות עם מספר הקצאה';
+  const subjectBase = invoices.length === 1 ? 'בקשה לחשבונית מתוקנת עם מספר הקצאה' : 'בקשה לחשבוניות מתוקנות עם מספר הקצאה';
+  const subject = kind === 'reminder' ? `תזכורת: ${subjectBase}` : subjectBase;
   return {
     supplierId,
     supplierName: sup.name,
@@ -207,6 +246,9 @@ export async function allocationRequestDraft(
         : null,
     needsContact: !wa && !email,
     supplierHref: `/dashboard/suppliers/${supplierId}`,
+    kind,
+    lastRequestedAt,
+    daysSinceRequest: daysSinceRequest(lastRequestedAt, israelDay(now)),
     invoices,
   };
 }

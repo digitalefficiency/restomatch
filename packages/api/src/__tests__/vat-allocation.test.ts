@@ -7,6 +7,7 @@ import type { AppContext, Session } from '../context';
 import { vatRouter } from '../routers/vat';
 import {
   allocationDeadlineItems,
+  allocationRequestDraft,
   allocationRequestText,
   cleanEmail,
   deadlineBucket,
@@ -113,6 +114,19 @@ describe('AU-08 pure helpers', () => {
     expect(text).toMatch(/6,000\.00.*₪|₪.*6,000\.00/);
     expect(text).toContain('לפני 05.04.2027');
     for (const banned of ['דרישה', 'תביעה', 'מחלוקת', 'חוב', 'באיחור', 'דליפה']) expect(text).not.toContain(banned);
+  });
+
+  it('reminder text: a small, polite chase that names the earlier request and keeps the facts', () => {
+    const inv = [{ invoiceNumber: '881', invoiceDate: '2026-10-05', totalExclVat: 6000, deductionDeadline: '2027-04-05' }];
+    const text = allocationRequestText({ supplierName: 'טרי בע״מ', restaurantName: 'ציקטי', invoices: inv, kind: 'reminder', requestedOn: '2026-10-20' });
+    expect(text).toContain('תזכורת קטנה');
+    expect(text).toContain('ב-20.10.2026');
+    expect(text).toContain('מס׳ 881');
+    expect(text).toContain('לפני 05.04.2027');
+    expect(text).toContain('תודה');
+    for (const banned of ['דרישה', 'תביעה', 'מחלוקת', 'חוב', 'באיחור', 'דליפה']) expect(text).not.toContain(banned);
+    // The first ask is unchanged when kind is omitted.
+    expect(allocationRequestText({ supplierName: 'טרי בע״מ', restaurantName: 'ציקטי', invoices: inv })).not.toContain('תזכורת');
   });
 
   it('ITA fields: six copy-ready values in order; URL not guessed', () => {
@@ -258,6 +272,24 @@ describe('AU-08 allocation case (DB)', () => {
     expect(decodeURIComponent(d!.waHref!.split('text=')[1]!)).toBe(d!.text);
     expect(d!.mailtoHref).toMatch(/^mailto:orders%40supplier\.co\.il\?subject=/);
     expect(d!.needsContact).toBe(false);
+  });
+
+  it('requestDraft turns into a reminder after markRequested, with days since the request', async () => {
+    const id = await invoice(A, { day: dayOffset(-5), exVat: '6000.00', vat: '1080.00', number: '881' });
+    await db.update(suppliers).set({ contactEmail: 'orders@supplier.co.il' }).where(eq(suppliers.id, A.supplierId));
+    const { vat } = callerFor(A);
+    const first = await vat.requestDraft({ supplierId: A.supplierId });
+    expect(first).toMatchObject({ kind: 'request', lastRequestedAt: null, daysSinceRequest: null });
+    expect(first!.text).not.toContain('תזכורת');
+
+    await vat.markRequested({ supplierId: A.supplierId, invoiceIds: [id], channel: 'email', clientMutationId: cmid() });
+    const now = await vat.requestDraft({ supplierId: A.supplierId });
+    expect(now).toMatchObject({ kind: 'reminder', daysSinceRequest: 0 });
+    expect(now!.text).toContain('תזכורת קטנה');
+    expect(decodeURIComponent(now!.mailtoHref!.split('subject=')[1]!.split('&')[0]!)).toMatch(/^תזכורת: /);
+
+    const later = await allocationRequestDraft(db, A.restaurantId, A.supplierId, { now: plusDays(9) });
+    expect(later).toMatchObject({ kind: 'reminder', daysSinceRequest: 9 });
   });
 
   it('a 0%-VAT produce invoice never appears; thresholds measured on the invoice date', async () => {
