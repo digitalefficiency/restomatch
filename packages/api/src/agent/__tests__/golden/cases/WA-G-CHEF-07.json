@@ -1,0 +1,51 @@
+{
+  "id": "WA-G-CHEF-07",
+  "role": "chef",
+  "adversarial": false,
+  "flow": "C2",
+  "title": "\"לא צריך השבוע\" cancels the draft in one tap",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "template_button",
+        "id": "cutoff:skip:po-1043",
+        "title": "לא צריך השבוע"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "order.cancel",
+    "tools": [
+      {
+        "name": "orders.cancelOrder",
+        "args": {
+          "orderId": "po-1043"
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "leak|claim|decision|discrepanc"
+    ],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "ordersCancelled": 1,
+      "rowsDeleted": 0
+    }
+  }
+}

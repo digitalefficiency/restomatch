@@ -1,0 +1,54 @@
+{
+  "id": "WA-G-CHEF-06",
+  "role": "chef",
+  "adversarial": false,
+  "flow": "C2",
+  "title": "\"שלח עכשיו\" is a hand-off, never placeOrder(channel: whatsapp)",
+  "neverList": [],
+  "ownerRules": [
+    "no-supplier-send"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "template_button",
+        "id": "cutoff:send:po-1043",
+        "title": "שלח עכשיו"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "order.send",
+    "tools": [
+      {
+        "name": "orders.get",
+        "args": {
+          "orderId": "po-1043"
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "leak|claim|decision|discrepanc"
+    ],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "cta": "שלח מהוואטסאפ שלי",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "ordersPlacedViaWhatsapp": 0,
+      "supplierOutboundRows": 0
+    }
+  }
+}

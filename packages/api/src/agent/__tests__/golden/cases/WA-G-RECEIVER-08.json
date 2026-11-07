@@ -1,0 +1,56 @@
+{
+  "id": "WA-G-RECEIVER-08",
+  "role": "receiver",
+  "adversarial": false,
+  "flow": "R2",
+  "title": "More than 10 lines → count in the app",
+  "neverList": [],
+  "ownerRules": [
+    "receiver-no-ils"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "media": {
+        "kind": "image",
+        "lines": 14
+      }
+    }
+  ],
+  "expect": {
+    "intent": "receiving.photo",
+    "tools": [
+      {
+        "name": "scans.upload",
+        "args": {
+          "source": "whatsapp",
+          "mediaId": "media.LAB.WA-G-RECEIVER-08.0"
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "ils|agorot|amount|total|price"
+    ],
+    "forbiddenText": [
+      "₪",
+      "\\d+[.,]\\d{2}"
+    ],
+    "buttons": [],
+    "noButtons": [],
+    "cta": "ספירה באפליקציה",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "ingestJobs": 1
+    }
+  }
+}

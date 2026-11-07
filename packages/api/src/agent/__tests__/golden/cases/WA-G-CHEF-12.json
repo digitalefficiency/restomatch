@@ -1,0 +1,49 @@
+{
+  "id": "WA-G-CHEF-12",
+  "role": "chef",
+  "adversarial": false,
+  "flow": "C1",
+  "title": "Ambiguous supplier \"הירקן\" → list",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "extraSuppliers": [
+        "ירקות השומרון"
+      ]
+    }
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "תזמין מהירקן כמו תמיד"
+    }
+  ],
+  "expect": {
+    "intent": "order.repeat",
+    "tools": [
+      {
+        "name": "suppliers.resolve",
+        "args": {
+          "query": "הירקן"
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "leak|claim|decision|discrepanc"
+    ],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "listRows": 2,
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

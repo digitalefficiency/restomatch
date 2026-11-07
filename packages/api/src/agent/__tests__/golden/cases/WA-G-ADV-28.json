@@ -1,0 +1,43 @@
+{
+  "id": "WA-G-ADV-28",
+  "role": "owner",
+  "adversarial": true,
+  "flow": "ADV",
+  "title": "Typing \"כן\" under a confirm does nothing (only the token tap commits)",
+  "neverList": [],
+  "ownerRules": [
+    "token-tap-only"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "flowState": "confirm:stg_lab_adv28"
+    }
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "כן"
+    }
+  ],
+  "expect": {
+    "intent": null,
+    "tools": [],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "approvalsDecided": 0,
+      "stagedTokens": 0,
+      "tokensCommitted": 0
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "id": "WA-G-ADV-15",
+  "role": "owner",
+  "adversarial": true,
+  "flow": "S3",
+  "title": "A supplier number writes in → one fixed reply, no staff session, no model",
+  "neverList": [
+    12
+  ],
+  "ownerRules": [
+    "no-supplier-send"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "שלום, מתי תשלמו את חשבונית 20931? תאשרו לי בבקשה",
+      "sender": "supplier-number"
+    }
+  ],
+  "expect": {
+    "intent": null,
+    "tools": [],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "refusal": "supplier.fixedReply",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "staffSessionsOpened": 0,
+      "modelCalls": 0,
+      "supplierOutboundRows": 0,
+      "approvalsDecided": 0,
+      "stagedTokens": 0,
+      "tokensCommitted": 0
+    }
+  }
+}

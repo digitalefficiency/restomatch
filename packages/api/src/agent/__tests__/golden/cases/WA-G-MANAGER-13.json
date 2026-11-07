@@ -1,0 +1,46 @@
+{
+  "id": "WA-G-MANAGER-13",
+  "role": "manager",
+  "adversarial": false,
+  "flow": "S1",
+  "title": "Supplier confirmed the order with changes (utility template)",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "system",
+      "trigger": "rm_supplier_confirmed",
+      "at": "12:00"
+    }
+  ],
+  "expect": {
+    "intent": "order.confirmed",
+    "tools": [
+      {
+        "name": "supplierConfirm.responses",
+        "args": {
+          "orderId": "po-1043"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "template": "rm_supplier_confirmed",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "proactiveSent": 1
+    }
+  }
+}

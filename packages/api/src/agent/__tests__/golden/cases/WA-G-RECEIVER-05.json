@@ -1,0 +1,76 @@
+{
+  "id": "WA-G-RECEIVER-05",
+  "role": "receiver",
+  "adversarial": false,
+  "flow": "R2",
+  "title": "Count line 1: everything arrived",
+  "neverList": [],
+  "ownerRules": [
+    "receiver-no-ils"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "gr:start:scan-1",
+        "title": "התחל ספירה"
+      }
+    },
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "gr:all:1",
+        "title": "הגיע הכל"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "receiving.count",
+    "tools": [
+      {
+        "name": "receiving.startReceipt",
+        "args": {
+          "orderId": "po-1043",
+          "scanId": "scan-1"
+        }
+      },
+      {
+        "name": "receiving.markGrLine",
+        "args": {
+          "receiptId": "gr-1",
+          "lineNo": 1,
+          "receivedQty": 40
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "ils|agorot|amount|total|price"
+    ],
+    "forbiddenText": [
+      "₪",
+      "\\d+[.,]\\d{2}"
+    ],
+    "buttons": [
+      "הגיע הכל",
+      "חסר / שונה",
+      "דלג"
+    ],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "grLinesMarked": 1
+    }
+  }
+}

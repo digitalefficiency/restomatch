@@ -1,0 +1,54 @@
+{
+  "id": "WA-G-OWNER-07",
+  "role": "owner",
+  "adversarial": false,
+  "flow": "O2",
+  "title": "Undo a WhatsApp decision inside 10 minutes (WD3)",
+  "neverList": [],
+  "ownerRules": [
+    "token-tap-only"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "decidedVia": "whatsapp",
+      "decidedAt": "07:42"
+    }
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "undo:d-veg-20931-1",
+        "title": "בטל"
+      },
+      "at": "07:49"
+    }
+  ],
+  "expect": {
+    "intent": "decide.undo",
+    "tools": [
+      {
+        "name": "approvals.reopen",
+        "args": {
+          "discrepancyId": "d-veg-20931-1"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "approvalsReopened": 1
+    }
+  }
+}

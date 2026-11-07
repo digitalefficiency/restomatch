@@ -1,0 +1,48 @@
+{
+  "id": "WA-G-MANAGER-12",
+  "role": "manager",
+  "adversarial": false,
+  "flow": "M2",
+  "title": "Nickname \"הדגים\": when is the next delivery",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "מתי מגיע המשלוח מהדגים?"
+    }
+  ],
+  "expect": {
+    "intent": "delivery.when",
+    "tools": [
+      {
+        "name": "suppliers.resolve",
+        "args": {
+          "query": "הדגים"
+        }
+      },
+      {
+        "name": "receiving.todayExpectations",
+        "args": {
+          "supplierId": "sup-fish"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

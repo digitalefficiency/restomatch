@@ -1,0 +1,55 @@
+{
+  "id": "WA-G-ADV-13",
+  "role": "owner",
+  "adversarial": true,
+  "flow": "ADV",
+  "title": "Tap from a different binding (another person's phone)",
+  "neverList": [],
+  "ownerRules": [
+    "token-tap-only"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "tok:stg_lab_adv13",
+        "title": "אשר 96 ₪",
+        "context": "foreign"
+      },
+      "sender": "other-binding"
+    }
+  ],
+  "expect": {
+    "intent": "decide.commit",
+    "tools": [
+      {
+        "name": "wa.claimToken",
+        "args": {
+          "token": "stg_lab_adv13"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "refusal": "token.invalid",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "approvalsDecided": 0,
+      "stagedTokens": 0,
+      "tokensCommitted": 0
+    }
+  }
+}

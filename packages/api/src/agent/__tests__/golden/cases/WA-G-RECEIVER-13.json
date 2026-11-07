@@ -1,0 +1,72 @@
+{
+  "id": "WA-G-RECEIVER-13",
+  "role": "receiver",
+  "adversarial": false,
+  "flow": "R2",
+  "title": "Fix a line from the summary",
+  "neverList": [],
+  "ownerRules": [
+    "receiver-no-ils"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "flowState": "receiving.summary:gr-1"
+    }
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "gr:fix:gr-1",
+        "title": "תקן שורה"
+      }
+    },
+    {
+      "from": "user",
+      "tap": {
+        "kind": "list_reply",
+        "id": "line:3",
+        "title": "פטרוזיליה"
+      }
+    },
+    {
+      "from": "user",
+      "text": "12"
+    }
+  ],
+  "expect": {
+    "intent": "receiving.fix",
+    "tools": [
+      {
+        "name": "receiving.markGrLine",
+        "args": {
+          "receiptId": "gr-1",
+          "lineNo": 3,
+          "receivedQty": 12
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "ils|agorot|amount|total|price"
+    ],
+    "forbiddenText": [
+      "₪",
+      "\\d+[.,]\\d{2}"
+    ],
+    "buttons": [],
+    "noButtons": [],
+    "listRows": 9,
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "grLinesMarked": 1
+    }
+  }
+}

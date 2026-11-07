@@ -1,0 +1,43 @@
+{
+  "id": "WA-G-BOOKKEEPER-05",
+  "role": "bookkeeper",
+  "adversarial": false,
+  "flow": "K3",
+  "title": "Export button from the digest → link",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "template_button",
+        "id": "bk:export",
+        "title": "קובץ לייצוא"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "export.request",
+    "tools": [],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "cta": "להורדה",
+    "refusal": "web.only",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "filesAttached": 0
+    }
+  }
+}
