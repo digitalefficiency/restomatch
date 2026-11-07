@@ -11,10 +11,9 @@ describe('roles matrix', () => {
     }
   });
 
-  it('Team is owner + manager, plus the bookkeeper read-only (I3)', () => {
-    expect(allowedRolesForPath('/dashboard/team')).toEqual(['owner', 'manager', 'bookkeeper']);
-    expect(routeAccess('bookkeeper', '/dashboard/team')).toBe('read');
-    for (const role of ['receiver', 'chef'] as const) {
+  it('Team is owner + manager only (I3 read waits for a team read procedure, W3-07b)', () => {
+    expect(allowedRolesForPath('/dashboard/team')).toEqual(['owner', 'manager']);
+    for (const role of ['receiver', 'bookkeeper', 'chef'] as const) {
       expect(canSeeRoute(role, '/dashboard/team')).toBe(false);
     }
   });
@@ -75,8 +74,8 @@ describe('wave 1 · S12 routes (₪-back tracker, monthly report)', () => {
   it('nav visibility (exact path) and middleware gating (prefix) agree', () => {
     for (const role of ['owner', 'manager', 'bookkeeper', 'receiver', 'chef'] as const) {
       const finance = ['owner', 'manager', 'bookkeeper'].includes(role);
-      // I3: the bookkeeper reads the monthly report too (read-only).
-      const managers = ['owner', 'manager', 'bookkeeper'].includes(role);
+      // I3 for the monthly report waits for a read procedure (W3-08).
+      const managers = ['owner', 'manager'].includes(role);
       expect(canSeeRoute(role, '/dashboard/recovery')).toBe(finance);
       expect(canSeeRoute(role, '/dashboard/reports/monthly')).toBe(managers);
       expect(allowedRolesForPath('/dashboard/reports/monthly/pdf')?.includes(role)).toBe(managers);

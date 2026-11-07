@@ -34,7 +34,7 @@ import {
   normalizeSearch,
   searchPlaceholderKey,
 } from '../../app/dashboard/searchOptions';
-import { BOOKKEEPER_READ_ONLY_ROUTES } from '../roleLens/readOnly';
+import { I3_READY } from '../roleLens/readOnly';
 
 const APP = join(__dirname, '..', '..', 'app');
 const DASH = join(APP, 'dashboard');
@@ -174,9 +174,9 @@ describe('ROUTE_ROLES generated from the registry', () => {
     // Owner decision I3 (7.11, IA-03): the bookkeeper READS the 10 screens blocked to her.
     // That is the only other delta: strip it, then the map must equal the old one exactly.
     const noI3 = (m: Record<string, UserRole[]>) =>
-      Object.fromEntries(Object.entries(m).map(([k, v]) => [k, (BOOKKEEPER_READ_ONLY_ROUTES as readonly string[]).includes(k) ? v.filter((r) => r !== 'bookkeeper') : v]));
+      Object.fromEntries(Object.entries(m).map(([k, v]) => [k, (I3_READY as readonly string[]).includes(k) ? v.filter((r) => r !== 'bookkeeper') : v]));
     expect(sorted(noI3(rest))).toEqual(sorted(restBefore));
-    for (const p of BOOKKEEPER_READ_ONLY_ROUTES) {
+    for (const p of I3_READY) {
       expect(ROUTE_ROLES_BEFORE[p], p).not.toContain('bookkeeper');
       expect(ROUTE_ROLES[p], p).toContain('bookkeeper');
     }
@@ -218,7 +218,7 @@ describe('ROUTE_ROLES generated from the registry', () => {
       const ordersChef = (role: UserRole) => role === 'chef' && (concrete === '/dashboard/orders' || concrete.startsWith('/dashboard/orders/'));
       // Owner decision I3 (7.11, IA-03): the bookkeeper reads the 10 screens, read-only.
       const i3Read = (role: UserRole) =>
-        role === 'bookkeeper' && BOOKKEEPER_READ_ONLY_ROUTES.some((k) => concrete === k || concrete.startsWith(`${k}/`));
+        role === 'bookkeeper' && I3_READY.some((k) => concrete === k || concrete.startsWith(`${k}/`));
       for (const role of now) if (!ordersChef(role) && !i3Read(role)) expect(was, `${role} on ${concrete}`).toContain(role);
     }
   });

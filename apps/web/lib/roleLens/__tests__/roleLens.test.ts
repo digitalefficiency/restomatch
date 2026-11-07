@@ -4,6 +4,8 @@ import { REGISTRY } from '../../nav/registry';
 import { ALL_ROLES, ROUTE_ROLES } from '../../roles';
 import {
   BOOKKEEPER_READ_ONLY_ROUTES,
+  I3_PENDING_SERVER_READ,
+  I3_READY,
   READ_ONLY_ROUTES,
   accessFrom,
   NEXT_STEP,
@@ -65,20 +67,25 @@ describe('I3: the bookkeeper reads the 10 screens blocked to her', () => {
   it('lists exactly the 10 screens', () => {
     expect(BOOKKEEPER_READ_ONLY_ROUTES).toHaveLength(10);
   });
-  it('each of them (and its sub-paths) is `read` for her', () => {
-    for (const p of BOOKKEEPER_READ_ONLY_ROUTES) {
+  it('the server-ready ones (and their sub-paths) are `read` for her', () => {
+    expect(I3_READY).toEqual(['/dashboard/orders', '/dashboard/receiving', '/dashboard/suppliers', '/dashboard/catalog', '/dashboard/products']);
+    for (const p of I3_READY) {
       expect(routeAccess('bookkeeper', p), p).toBe('read');
       expect(routeAccess('bookkeeper', `${p}/x`), `${p}/x`).toBe('read');
     }
+  });
+  it('the 5 whose server reads reject her stay `none` until their owner ships a read procedure', () => {
+    expect([...I3_READY, ...I3_PENDING_SERVER_READ].sort()).toEqual([...BOOKKEEPER_READ_ONLY_ROUTES].sort());
+    for (const p of I3_PENDING_SERVER_READ) expect(routeAccess('bookkeeper', p), p).toBe('none');
   });
   it('stays `read` after the registry union line adds her to the gate', () => {
     const unioned = { ...ROUTE_ROLES, '/dashboard/orders': [...(ROUTE_ROLES['/dashboard/orders'] ?? []), 'bookkeeper' as const] };
     expect(accessFrom('bookkeeper', '/dashboard/orders/1', unioned, READ_ONLY_ROUTES)).toBe('read');
   });
   it('a deeper, stricter gate under a read-only prefix wins (no read-through)', () => {
-    const gates = { ...ROUTE_ROLES, '/dashboard/team/billing': ['owner' as const] };
-    expect(accessFrom('bookkeeper', '/dashboard/team/billing', gates, READ_ONLY_ROUTES)).toBe('none');
-    expect(accessFrom('bookkeeper', '/dashboard/team', gates, READ_ONLY_ROUTES)).toBe('read');
+    const gates = { ...ROUTE_ROLES, '/dashboard/suppliers/secret': ['owner' as const] };
+    expect(accessFrom('bookkeeper', '/dashboard/suppliers/secret', gates, READ_ONLY_ROUTES)).toBe('none');
+    expect(accessFrom('bookkeeper', '/dashboard/suppliers', gates, READ_ONLY_ROUTES)).toBe('read');
   });
   it('her own screens stay `edit`; the ledger keeps its own gate', () => {
     expect(routeAccess('bookkeeper', '/dashboard/approvals')).toBe('edit');
@@ -93,7 +100,9 @@ describe('I3: the bookkeeper reads the 10 screens blocked to her', () => {
     }
   });
   it('she can link to the monthly report from the breakdown (no lock card)', () => {
-    expect(linkableFor('bookkeeper', '/dashboard/reports/monthly?month=2026-10')).toBe(true);
+    expect(linkableFor('bookkeeper', '/dashboard/suppliers?tab=x')).toBe(true);
+    // Pending server read: no link to a screen that would 500 for her.
+    expect(linkableFor('bookkeeper', '/dashboard/reports/monthly?month=2026-10')).toBe(false);
   });
 });
 
