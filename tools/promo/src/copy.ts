@@ -25,6 +25,24 @@ export const FACTS = {
 };
 export type Facts = typeof FACTS;
 
+/**
+ * The public site's ONE sample month (apps/web/app/(marketing)/_components/sampleMonth.ts on
+ * claude/ux-w3-06-marketing): every landing asset shows these, never the demo seed above.
+ * Shekels, ex-VAT. An illustration, labelled "דוגמה" — not a promise or a target.
+ */
+export const SAMPLE = {
+  purchasing: 150_000,
+  leakPct: 1.5,
+  leak: 2_250, // 150,000 × 1.5%
+  unpaid: 1_530, // "נתפסו לפני תשלום"
+  paid: 720,
+  checked: 35,
+  withGap: 13,
+  decide: { amount: 910, count: 2 }, // T2 "ממתין להחלטה שלך" (inside the unpaid part)
+  credit: { amount: 720, count: 3 }, // T2 credit requests to send (the paid part)
+  goodNews: 620, // unpaid − undecided
+};
+
 /** Override demo numbers at render time (input prop `facts`) — e.g. after the seed changes. */
 export const applyFacts = (over?: Partial<Facts>) => {
   if (over) Object.assign(FACTS, over);
@@ -116,7 +134,25 @@ const he = {
   },
   loop: { chip: 'נתוני הדגמה' },
   // portrait hero loop: partner wording toward suppliers — a credit *request*, not a demand
-  loopVertical: { held: 'ממתין לאישור שלך:', claim: 'בקשת זיכוי לספק — בלחיצה' },
+  loopVertical: { held: 'ממתין להחלטה שלך:', claim: 'בקשת זיכוי לספק — בלחיצה' },
+  // the site's showcase wording for the sample month (showcase/overview messages on W3-06)
+  sample: {
+    eyebrow: 'דוגמה · דליפה שזוהתה · אוקטובר',
+    label: 'דליפה החודש',
+    pct: '{pct} מהקניות שנבדקו',
+    base: 'מתוך {amount} לפני מע״מ',
+    completeness: '{checked} חשבוניות נבדקו · {withGap} עם פער',
+    caught: 'נתפסו לפני תשלום',
+    needsTitle: 'מחכה לך',
+    decide: 'ממתין להחלטה שלך',
+    credit: 'בקשות זיכוי לשליחה',
+    gaps: '{count} פערים',
+    decideVerb: 'להחלטה',
+    creditVerb: 'שליחת המכתב',
+    example: 'לדוגמה: בירה מהחבית — חבית 30 ל׳',
+    goodNews: '{amount} כבר אושרו לקיזוז בתשלום',
+    title: 'לוח הבעלים',
+  },
 };
 
 const en: typeof he = {
@@ -196,7 +232,24 @@ const en: typeof he = {
     url: SITE,
   },
   loop: { chip: 'Demo data' },
-  loopVertical: { held: 'Held for your approval:', claim: 'Credit request to the supplier — one click' },
+  loopVertical: { held: 'Awaiting your decision:', claim: 'Credit request to the supplier — one click' },
+  sample: {
+    eyebrow: 'Sample · leak found · October',
+    label: 'Leak this month',
+    pct: '{pct} of purchases checked',
+    base: 'of {amount} before VAT',
+    completeness: '{checked} invoices checked · {withGap} with a gap',
+    caught: 'Caught before payment',
+    needsTitle: 'Waiting for you',
+    decide: 'Awaiting your decision',
+    credit: 'Credit requests to send',
+    gaps: '{count} gaps',
+    decideVerb: 'Decide',
+    creditVerb: 'Send the letter',
+    example: 'e.g. Draft beer keg 30L',
+    goodNews: '{amount} already approved for offset at payment',
+    title: 'Owner dashboard',
+  },
 };
 
 export const COPY = { he, en };
