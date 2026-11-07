@@ -311,6 +311,7 @@ export {
   type FillEnglishResult,
 } from './receiving/english';
 export { devOcrStubEnabled, buildDevOcrStub } from './receiving/devOcrStub';
+export { isAllowedScanUrl } from './lib/scanUrls';
 export {
   localScanStorageEnabled,
   readLocalScan,
@@ -400,6 +401,18 @@ export {
 export { NOT_BILLING_OWNER } from './routers/chain';
 
 export * from './ledger';
-export { CLAIMABLE_STATUSES, claimableLines, sumClaims, vatBasisOf, type ClaimLine, type VatBasis } from './lib/claims';
+export {
+  CLAIMABLE_STATUSES,
+  CLAIM_ANSWER_DAYS,
+  OVERDUE_BOUNDARY_CASES,
+  OVERDUE_BOUNDARY_NOW,
+  NEVER_CLAIMABLE_TYPES,
+  claimableLines,
+  isNeverClaimable,
+  sumClaims,
+  vatBasisOf,
+  type ClaimLine,
+  type VatBasis,
+} from './lib/claims';
 export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunClaim } from './routers/payRun';
 export { SKIPPED_NO_PROVIDER, providerConfigured, supplierMessageState, type SupplierMessageState } from './notifications/delivery';

@@ -1,11 +1,67 @@
 # RestoMatch — Build State
 
+**Updated:** 2026-10-31 · ציקטי pilot, go-live **Sun 8.11.2026**
+**How to read this file:** the top section is current. Everything under **History** below is the earlier record, kept verbatim. It is stale wherever it disagrees with the top section (for example the worker, Redis, the Vercel project and the Supabase project).
+
+## Production (as of 2026-10-31)
+
+| Area | State |
+|---|---|
+| Web | https://restomatchrrr.vercel.app — Vercel project `prj_Q5nXFU4JOJO6LucWFvnkfE4yqcKg`, region `hnd1`. |
+| Background jobs | **No worker process in production.** Every background job (OCR, matching, e-mails, the scheduled tasks of `apps/worker/src/cron.ts`, stall recovery) runs inside Vercel via `/api/cron/jobs` (Vercel Cron, every minute; #136). |
+| Queue / rate limits / heartbeat | In Postgres (migration **0061**). **Redis is gone** — see `docs/REDIS-REMOVAL.md`. |
+| Database | Supabase project `rutbnmvkwirqtixvuhdq` (Tokyo). |
+| Demo tenant | כפר הזיתים — accounts `@kfar-hazeitim.test`, `features.all`. |
+| Pilot tenant | ציקטי — Tel Aviv, 1 branch. Goes live **Sun 8.11.2026**. |
+
+## Paging and monitoring
+
+- **Today nobody is paged.** `WORKER_ALERT_EMAILS`, `HEALTH_DIGEST_EMAILS` and `PLATFORM_ADMIN_EMAILS` are unset; no Sentry, no uptime monitor, no log drain.
+- The **S7 pilot PR** adds:
+  - a public `/api/healthz?jobs=1` probe;
+  - the owner's alert card (`docs/ops/ALERT-CARD.he.md`);
+  - read-only daily checks (`docs/ops/DAILY-CHECKS.sql`);
+  - the UptimeRobot spec (`docs/MONITORING.md` U1/U2/U3).
+- The owner sets the env vars and creates the monitors himself. Agents do not.
+
+## Wave 1
+
+- **#167 "release: wave 1"** = 12 UX packages (#140–#153) + **G-01** (#165: no "late delivery" e-mail for POs already received), in one merge.
+- **Merged** to `main` on **Sat 31.10.2026** (merge commit `759fb554`), earlier than the planned Sun 1.11 ~12:00. Next step: one production build → smoke → promote, done by Rom.
+
+## Pilot timeline (IST)
+
+| When | What |
+|---|---|
+| Sat 31.10 | #167 merged (`759fb554`). |
+| Mon 2.11 20:00 | Release train **A** cut-off: the pilot PRs that must be in before go-live. |
+| Tue 3.11 20:00 | Release train **B** cut-off (e.g. the Sentry dependency). `SENTRY_DSN` stays unset until the sub-processor list, `/privacy` and the DPA all name Sentry. |
+| Wed 4.11 | After this date `SERVERLESS_CRON_SKIP` is removed from production, so all scheduled tasks run. |
+| Sun 8.11 | ציקטי goes live. |
+
+The orchestrator assembles release trains. **Rom (the owner) merges and deploys.** Agents never merge (`AGENTS.md`).
+
+## Pointers
+
+- `AGENTS.md` — the binding agent contract (PR-only, immutability list, ownership map).
+- `OPERATING.md` — the operator's view: cadence, kill-switch, cost.
+- `docs/ENV-PRODUCTION.md` — production env vars, including the list of vars that **must be ABSENT in Production**.
+- `docs/MONITORING.md` — monitoring spec, including UptimeRobot U1/U2/U3.
+- `docs/ops/ALERT-CARD.he.md` — the owner's alert card (Hebrew).
+- `docs/REDIS-REMOVAL.md` — how and why Redis was replaced by Postgres.
+
+## History
+
+The content below is the earlier STATE.md, unchanged apart from its headings, which were demoted (`#` → `###`, `##` → `####`) so they sit under this section.
+
+### RestoMatch — Build State
+
 **Updated:** 2026-09-08 · plan v2, Wave 0, Sessions 1–2 done (branches `wave0/s1-ci-state` → `wave0/s2-precutover` → `wave0/s2-human-prs`, plus `wave0/s2-deps-security`; all off `release/security-hardening` @ 6daed6b)
 **Canonical repo:** `~/restomatch`. **Never** work in `~/Desktop/restomatch` — it is an iCloud-evicted replica (dataless git objects, 90% of files missing).
 **Master plan:** `~/.claude/plans/idempotent-shimmying-wave.md` — 8 waves, ~32 sessions. Read it before touching anything; this file is the per-session pointer.
 **Go-live checklist:** `docs/GO-LIVE.md` (the one ordered list; 👤 = owner-run prod steps).
 
-## Where things stand (verified 2026-09-08)
+#### Where things stand (verified 2026-09-08)
 
 | Area | State |
 |---|---|
@@ -18,14 +74,14 @@
 
 **Known-wrong things that hit pilot users today (fix order in the plan):** VAT default 17% (M4); receiving inbox hides POs without a delivery date (R5); password reset + legal pages bounce to `/login` (R7); double-tap creates a second goods receipt / a second invoice + OCR spend (M7/M8); `price_history` has no writer so the leak detective is empty (M1); partial deliveries fabricate QTY_SHORT (M2); baseline check double-counts (M3); OCR calls Opus twice per scan (M11).
 
-## Wave 0 progress
+#### Wave 0 progress
 
 - [x] **Session 1** — move to `~/restomatch`; T0 CI matrix (`.github/workflows/ci.yml`: web build + typecheck soak, worker tests with job-scoped Redis, `provision-rls` + `check-rls` after migrate, Playwright soak, dependency-review non-blocking until Dependency graph is enabled); `testDbUrl()` in `packages/db/src/test-env.ts` replacing 28 hard-coded `romkoren@localhost` DSNs; first `apps/worker` test; `docs/GO-LIVE.md`; stale cutover docs retired. → **PR #10** (human-PR: `ci.yml`). First-ever `next build` in CI exposed and fixed an edge-bundle leak in `instrumentation.ts`.
 - [x] **Session 2 (agent part)** — **PR #11**: S2–S5, R7, M8, worker heartbeat + `/api/cron/worker-heartbeat` + dashboard banner, `start-worker.sh` + launchd, `cutoverChecks.ts` + `verify-cutover` + `rehearse-cutover`. **PR #12 (HUMAN-PR)**: S1 app-role password, M4 VAT 18%, M7 one receipt per PO, migration **0027_leak_trust**. **PR #13**: security dependency bump (next 15.5.25, next-auth beta.32, sharp, postcss) — clears the audit gate.
 - [ ] **👤 Merge order** (each PR is stacked; GitHub retargets the base automatically): **#13 → into `wave0/s1-ci-state`**, then **#10 → `release/security-hardening`**, then **#11**, then **#12**. Every PR is CI-green on `typecheck + test`, `worker tests`, `web build + typecheck`; only `pnpm audit` is red until #13 lands. Then enable **Dependency graph** in repo settings.
 - [ ] **Session 3** — 👤 live verification, backup + restore rehearsal (`rehearse-cutover`), Resend domain, inbox MX, security-stack cutover Phases 0–8 (with `APP_ROLE_PASSWORD`), `main` + Preview env, MarketMan partner email. See GO-LIVE §C–F.
 
-## Quick start
+#### Quick start
 
 ```bash
 cd ~/restomatch && git status
@@ -38,7 +94,7 @@ pnpm --filter @restomatch/worker exec vitest run src/lib/__tests__/notifyHelpers
 
 **The gate is CI, not a local claim.** Push the branch, wait for the green run, record its URL in the PR. Budget ≥2 CI rounds (~10–15 min each) per session.
 
-## Rules that changed with plan v2
+#### Rules that changed with plan v2
 
 - **Test DB DSN:** `testDbUrl()` from `@restomatch/db` (`packages/db/src/test-env.ts`); default `postgres://postgres:postgres@localhost:5432/restomatch_test` (matches docker-compose + CI). A brew Postgres without that role exports `DATABASE_URL_TEST`. Only `apps/web/vitest.config.ts` and `playwright.config.ts` inline the expression (config files cannot import workspace packages).
 - **Migrations are hand-written** (`drizzle-kit generate` is unsupported — the snapshot chain stops at 0013). Next number: **0027**. Every migration ≥ 0019 gets a shape test. `ALTER TYPE … ADD VALUE` lives alone in its own file. New tenant tables go into `drizzle/rls/0002_core_tenant_rls.sql`'s list or `check-rls` fails CI.
@@ -47,15 +103,15 @@ pnpm --filter @restomatch/worker exec vitest run src/lib/__tests__/notifyHelpers
 - **Playwright** runs in CI against `next dev` (non-blocking soak). Moving it to a production build needs an e2e-aware email transport: `assertWebEnv` demands `RESEND_API_KEY` in production and `isEmailConfigured()` then routes magic links to Resend instead of the `MAGIC_LINK_FILE` hook. Scheduled for W2 (Session 7) with the auth-flow refresh (the current spec predates password/2FA).
 - **Web typecheck in CI** is `continue-on-error` during a soak: `next.config.ts` documents an intermittent tRPC `AppRouter` inference flake. Promote to blocking once measured clean, then drop `typescript.ignoreBuildErrors`.
 
-## Demo data
+#### Demo data
 
 `apps/worker/scripts/seed-demo.ts` turns the static seed into a fully matched dataset via the real engines (`DATABASE_URL=...dev pnpm --filter @restomatch/worker exec tsx scripts/seed-demo.ts`). Dev seed owner `owner@kfar-hazeitim.test` is flagged `is_platform_admin`. **`packages/db/scripts/seed.ts` deletes all tenant data and has no prod guard until Session 2 (S5) — never point it at production.**
 
-## RAOS (agent operating system)
+#### RAOS (agent operating system)
 
 `AGENTS.md` + `OPERATING.md` contract, 11 `.claude/agents/*.md`, 7 `.claude/workflows/*.js`. Cron scheduling is opt-in and **not** activated. `.claude/workflows/quality-gate-pr.js` runs the suite locally and will stall on this Mac — it needs a mode that reads the GitHub check status (follow-up). `canary.js` now targets `project-6bs41.vercel.app`.
 
-## Architecture notes (carry forward)
+#### Architecture notes (carry forward)
 
 - Relative imports MUST NOT use `.js` extension — bundlers can't resolve `.js`→`.ts` re-exports.
 - Auth.js v5 requires `auth.config.ts` (Edge-safe for middleware) + `auth.ts` (full).

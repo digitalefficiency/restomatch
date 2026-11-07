@@ -81,7 +81,7 @@ export const he = {
   followUp: {
     unsent: '{count} דרישות עוד לא נשלחו לספק · {amount}',
     unsentCta: 'לשליחת הדרישות',
-    waiting: '{count} ממתינות לתשובת ספק מעל 14 יום · {amount}',
+    waiting: '{count} ממתינות לתשובת ספק מעל {days} ימים · {amount}',
     waitingCta: 'להכנת תזכורות לספקים',
     reminderNote: 'התזכורת האוטומטית מגיעה אליכם בלבד. לספק מכינים טיוטה, והיא נשלחת רק בלחיצה שלכם.',
   },

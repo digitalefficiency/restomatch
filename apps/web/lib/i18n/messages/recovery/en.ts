@@ -80,7 +80,7 @@ export const en: Shape<typeof he> = {
   followUp: {
     unsent: '{count} claims not yet sent to the supplier · {amount}',
     unsentCta: 'Send the claims',
-    waiting: '{count} waiting over 14 days for the supplier · {amount}',
+    waiting: '{count} waiting over {days} days for the supplier · {amount}',
     waitingCta: 'Draft reminders to suppliers',
     reminderNote: 'The automatic reminder reaches you only. For the supplier you get a draft, sent only when you click.',
   },

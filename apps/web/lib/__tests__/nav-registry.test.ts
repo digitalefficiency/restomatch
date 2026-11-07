@@ -165,10 +165,11 @@ describe('ROUTE_ROLES generated from the registry', () => {
     Object.fromEntries(Object.entries(m).map(([k, v]) => [k, [...v].sort()]));
 
   it("equals today's map except the supplier ledger and the invoice page, which drop the receiver", () => {
-    const { ['/dashboard/suppliers/ledger']: ledger, ['/dashboard/invoices']: invoices, ...rest } = ROUTE_ROLES;
+    const { ['/dashboard/suppliers/ledger']: ledger, ['/dashboard/invoices']: invoices, ['/dashboard/orders']: orders, ...rest } = ROUTE_ROLES;
     const {
       ['/dashboard/suppliers/ledger']: ledgerBefore,
       ['/dashboard/invoices']: invoicesBefore,
+      ['/dashboard/orders']: ordersBefore,
       ...restBefore
     } = ROUTE_ROLES_BEFORE;
     expect(sorted(rest)).toEqual(sorted(restBefore));
@@ -178,6 +179,9 @@ describe('ROUTE_ROLES generated from the registry', () => {
     expect(ledger).toEqual(['owner', 'manager', 'bookkeeper']);
     expect(invoicesBefore).toContain('receiver');
     expect(invoices).toEqual(['owner', 'manager', 'bookkeeper']);
+    // The one loosening, owner decision 31.10 (pilot): the chef orders freely.
+    expect(ordersBefore).toEqual(['owner', 'manager']);
+    expect(orders).toEqual(['owner', 'manager', 'chef']);
     // The printable leak report keeps inheriting /leaks (no silent bounce for the bookkeeper's button).
     expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
     expect(allowedRolesForPath('/dashboard/leaks/report')).toContain('bookkeeper');
@@ -203,7 +207,9 @@ describe('ROUTE_ROLES generated from the registry', () => {
       const concrete = page.replace(/\[[^\]]+\]/g, 'x');
       const now = allowedRolesForPath(concrete) ?? ALL_ROLES;
       const was = before(concrete) ?? ALL_ROLES;
-      for (const role of now) expect(was, `${role} on ${concrete}`).toContain(role);
+      // Owner decision 31.10 (pilot): the chef opens orders (list, detail, new, capture).
+      const ordersChef = (role: UserRole) => role === 'chef' && (concrete === '/dashboard/orders' || concrete.startsWith('/dashboard/orders/'));
+      for (const role of now) if (!ordersChef(role)) expect(was, `${role} on ${concrete}`).toContain(role);
     }
   });
 });
@@ -291,7 +297,7 @@ describe('bottom bars', () => {
 
   it('per-role sets (slot order, start → end)', () => {
     expect(bar(viewer('receiver'))).toEqual(['home:today', 'receiving:receipts']);
-    expect(bar(viewer('chef'))).toEqual(['home:today', 'inventory:count', 'recipes:dishes']);
+    expect(bar(viewer('chef'))).toEqual(['home:today', 'inventory:count', 'recipes:dishes', 'orders:orders']); // pilot 31.10: the chef orders
     expect(bar(viewer('manager'))).toEqual(['home:today', 'orders:orders', 'receiving:receive', 'approvals:approvals']);
     expect(bar(viewer('owner'))).toEqual(['home:home', 'approvals:approvals', 'leaks:leak', 'orders:orders']);
     expect(bar(viewer('bookkeeper'))).toEqual(['home:home', 'approvals:approvals', 'payRun:payments', 'inbox:invoices']);
