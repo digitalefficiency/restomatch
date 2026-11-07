@@ -130,39 +130,58 @@ export async function requeueInvoicesForRematch(
 }
 
 /**
- * Round 9 (kill switch): once order questions are OFF (settings.features.
+ * Rounds 9–10 (kill switch): once order questions are OFF (settings.features.
  * orderQuestions = false, or FEATURES_OFF=orderQuestions), invoices already held
  * for an order's questions ('parsed' + heldPoId) have nothing left to wait for.
  * Release them (releaseQuestionHolds — the order stays their pin, linkPinPoId),
  * prune the answered reasons of those held for something else too, and re-queue
- * the released ones. `'all'` sweeps every restaurant (the env kill: run after the
- * redeploy, `pnpm --filter @restomatch/worker run release-order-holds`).
+ * the released ones. Idempotent — safe to run again (round 10): it also re-queues
+ * a released invoice left with no run ('matched' + linkReleasedAt, no match_run —
+ * the leftover of a failed enqueue). `'all'` sweeps every restaurant (the env
+ * kill: run after the web + worker redeploy, `pnpm --filter @restomatch/worker run
+ * release-order-holds`).
  */
 export async function releaseOrderQuestionHolds(
   db: Database,
   scope: string | 'all',
-): Promise<{ restaurants: number; released: number; pruned: number; rematch: RematchReport[] }> {
-  const rows = (await db.execute(sql`
+): Promise<{ restaurants: number; released: number; pruned: number; requeued: number; failed: number }> {
+  const only = scope === 'all' ? sql`` : sql`and i.restaurant_id = ${scope}::uuid`;
+  const held = (await db.execute(sql`
     select i.restaurant_id, i.id from invoices i
-     where i.status = 'parsed' and (i.ocr_payload ->> 'heldPoId') is not null
-       ${scope === 'all' ? sql`` : sql`and i.restaurant_id = ${scope}::uuid`}
+     where i.status = 'parsed' and (i.ocr_payload ->> 'heldPoId') is not null ${only}
      order by i.restaurant_id, i.id
   `)) as unknown as Array<{ restaurant_id: string; id: string }>;
-  const byRid = new Map<string, string[]>();
-  for (const r of rows) byRid.set(String(r.restaurant_id), [...(byRid.get(String(r.restaurant_id)) ?? []), String(r.id)]);
+  const stranded = (await db.execute(sql`
+    select i.restaurant_id, i.id from invoices i
+     where i.status = 'matched' and coalesce(i.ocr_payload ? 'linkReleasedAt', false) ${only}
+       and not exists (select 1 from match_runs mr where mr.invoice_id = i.id and mr.restaurant_id = i.restaurant_id)
+     order by i.restaurant_id, i.id
+  `)) as unknown as Array<{ restaurant_id: string; id: string }>;
+  const group = (rows: Array<{ restaurant_id: string; id: string }>) => {
+    const m = new Map<string, string[]>();
+    for (const r of rows) m.set(String(r.restaurant_id), [...(m.get(String(r.restaurant_id)) ?? []), String(r.id)]);
+    return m;
+  };
+  const heldBy = group(held);
+  const strandedBy = group(stranded);
   let released = 0;
   let pruned = 0;
-  const rematch: RematchReport[] = [];
-  for (const [rid, ids] of byRid) {
+  let requeued = 0;
+  let failed = 0;
+  for (const rid of new Set([...heldBy.keys(), ...strandedBy.keys()])) {
+    const ids = heldBy.get(rid) ?? [];
     const rel = (await releaseQuestionHolds(db, rid, ids)).map((r) => r.id);
     released += rel.length;
     const done = new Set(rel);
-    const rest = ids.filter((id) => !done.has(id));
-    await pruneAnsweredReasons(db, rid, rest);
-    pruned += rest.length;
-    if (rel.length) rematch.push(await requeueInvoicesForRematch(db, rid, rel));
+    pruned += await pruneAnsweredReasons(db, rid, ids.filter((id) => !done.has(id)));
+    const toQueue = [...new Set([...rel, ...(strandedBy.get(rid) ?? [])])];
+    if (toQueue.length) {
+      const r = await requeueInvoicesForRematch(db, rid, toQueue);
+      requeued += r.requeued;
+      failed += r.failed;
+    }
   }
-  return { restaurants: byRid.size, released, pruned, rematch };
+  return { restaurants: new Set([...heldBy.keys(), ...strandedBy.keys()]).size, released, pruned, requeued, failed };
 }
 
 /** Exactly what a confirm changed, handed back so "בטל" can put it back. */
@@ -419,7 +438,12 @@ async function reholdLinkHolds(db: Database, rid: string, invoiceIds: string[]):
         const t = sp as unknown as Database;
         const rows = (await t.execute(sql`
           update invoices i
-             set status = 'parsed', ocr_payload = i.ocr_payload - 'linkReleasedAt'
+             set status = 'parsed',
+                 -- Round 10: the run it drops keeps its order as the pin (a closed order is not lost).
+                 ocr_payload = (i.ocr_payload - 'linkReleasedAt') || coalesce((
+                   select jsonb_build_object('linkPinPoId', mr.po_id::text) from match_runs mr
+                    where mr.invoice_id = i.id and mr.restaurant_id = ${rid} and mr.po_id is not null
+                    order by mr.run_at desc limit 1), '{}'::jsonb)
            where i.restaurant_id = ${rid} and i.id = ${id}::uuid
              and i.status in ('matched', 'disputed')
              and i.ocr_payload ? 'linkReleasedAt'
@@ -465,6 +489,7 @@ async function reholdOrderHolds(db: Database, rid: string, invoiceIds: string[])
              set status = 'parsed',
                  ocr_payload = coalesce(i.ocr_payload, '{}'::jsonb) || jsonb_build_object(
                    'heldPoId', mr.po_id::text,
+                   'linkPinPoId', mr.po_id::text,
                    'raw', coalesce(i.ocr_payload -> 'raw', '{}'::jsonb) || jsonb_build_object(
                      'reviewReasons',
                      (select coalesce(jsonb_agg(distinct x), '[]'::jsonb) from (
@@ -515,7 +540,20 @@ async function reholdKeyOrders(
     select pl.id from po_lines pl join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid} and po.supplier_id = ${supplierId}
      where pl.product_id is null and ${keyOn(sql`pl.supplier_sku`, sql`pl.raw_description`)}
   `)) as unknown as Array<{ id: string }>;
-  return reholdOrderHolds(db, rid, await invoicesForPoLines(db, rid, lines.map((l) => String(l.id))));
+  // Round 10: bounded like the mark's re-queue — only runs with a finding on those lines.
+  return reholdOrderHolds(db, rid, await invoicesWithFindingsOn(db, rid, lines.map((l) => String(l.id))));
+}
+
+/** Invoices whose current run carries a finding on one of these order lines (rid-scoped). */
+async function invoicesWithFindingsOn(db: Database, rid: string, poLineIds: string[]): Promise<string[]> {
+  if (poLineIds.length === 0) return [];
+  const rows = (await db.execute(sql`
+    select distinct mr.invoice_id as id from match_runs mr
+      join discrepancies d on d.match_run_id = mr.id and d.restaurant_id = ${rid}
+     where mr.restaurant_id = ${rid}
+       and d.po_line_id in (${sql.join(poLineIds.map((id) => sql`${id}::uuid`), sql`, `)})
+  `)) as unknown as Array<{ id: string }>;
+  return rows.map((r) => String(r.id));
 }
 
 /**
@@ -1098,14 +1136,7 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
      where pl.product_id is null and ${keyOn(sql`pl.supplier_sku`, sql`pl.raw_description`)}
   `)) as unknown as Array<{ id: string }>;
   // Round 9 LOW: only invoices whose current run carries a finding on those order lines.
-  const onOrder = keyPoLines.length
-    ? ((await db.execute(sql`
-        select distinct mr.invoice_id as id from match_runs mr
-          join discrepancies d on d.match_run_id = mr.id and d.restaurant_id = ${rid}
-         where mr.restaurant_id = ${rid}
-           and d.po_line_id in (${sql.join(keyPoLines.map((r) => sql`${String(r.id)}::uuid`), sql`, `)})
-      `)) as unknown as Array<{ id: string }>).map((r) => String(r.id))
-    : [];
+  const onOrder = await invoicesWithFindingsOn(db, rid, keyPoLines.map((r) => String(r.id)));
   const touched = [...new Set([...byInv.keys(), ...heldOnOrder.map((r) => String(r.id)), ...onOrder])];
   await releaseLinkHolds(db, rid, touched);
   const rematch = await requeueInvoicesForRematch(db, rid, touched);

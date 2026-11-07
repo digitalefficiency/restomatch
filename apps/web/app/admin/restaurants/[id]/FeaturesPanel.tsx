@@ -136,6 +136,12 @@ export function FeaturesPanel({ restaurantId, state }: { restaurantId: string; s
           <span className="text-xs text-danger">{localizeServerError(save.error, locale, t('generic'))}</span>
         ) : null}
         {save.isSuccess ? <span className="text-xs text-primary">{t('features.saved')}</span> : null}
+        {/* G-08 kill switch: the save stuck, but releasing the held invoices did not — the ops fallback. */}
+        {save.data && 'release' in save.data && save.data.release && !save.data.release.ok ? (
+          <span className="text-xs text-danger" dir="ltr">
+            {save.data.release.error}
+          </span>
+        ) : null}
       </div>
     </section>
   );

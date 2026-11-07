@@ -89,6 +89,22 @@ export async function invoiceQuestionCount(db: Database, rid: string, invoiceId:
 }
 
 /**
+ * Round 10: a 'checks' hold (train A's OCR checks) whose only check reason is
+ * 'deposit_or_fee_line' is a question too: it is answered once every non-item
+ * line the read tagged (deposit / delivery fee) is a charge line — the learned
+ * charge pre-mark then releases it like an 'unlinked' hold. Any other check
+ * reason (arithmetic, ח״פ, document flags) still needs a person. Alias i.
+ */
+const DEPOSIT_ONLY_CHECKS = sql.raw(`(
+  jsonb_typeof(i.ocr_payload -> 'raw' -> 'checks' -> 'reasons') = 'array'
+  and jsonb_array_length(i.ocr_payload -> 'raw' -> 'checks' -> 'reasons') > 0
+  and not exists (select 1 from jsonb_array_elements_text(i.ocr_payload -> 'raw' -> 'checks' -> 'reasons') c(reason)
+                   where c.reason <> 'deposit_or_fee_line')
+  and jsonb_array_length(coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb)) >= (
+        select count(*) from jsonb_array_elements(coalesce(i.ocr_payload -> 'raw' -> 'reconciled' -> 'lines', '[]'::jsonb)) l
+         where coalesce(l ->> 'lineKind', 'item') <> 'item'))`);
+
+/**
  * Release a question hold (G-08): an invoice held ONLY for questions (reasons ⊆
  * unlinked / unlinkedPo, not a duplicate, never matched) once none of its lines —
  * nor of the order it waited for — is a question. Sets 'matched' and
@@ -117,6 +133,7 @@ export async function releaseQuestionHolds(
        and not exists (
          select 1 from jsonb_array_elements_text(i.ocr_payload -> 'raw' -> 'reviewReasons') r(reason)
           where r.reason not in ('unlinked', 'unlinkedPo')
+            and not (r.reason = 'checks' and ${DEPOSIT_ONLY_CHECKS})
        )
        and (i.ocr_payload -> 'raw' -> 'duplicateOf') is null
        and not exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${IL_NOT_CHARGE})
@@ -141,19 +158,20 @@ export async function releaseQuestionHolds(
  * 'unlinked' goes once no non-charge line is unlinked; 'unlinkedPo' (and
  * heldPoId) once the order has no question left. Run AFTER releaseQuestionHolds.
  */
-export async function pruneAnsweredReasons(db: Database, rid: string, invoiceIds: string[]): Promise<void> {
-  if (invoiceIds.length === 0) return;
+export async function pruneAnsweredReasons(db: Database, rid: string, invoiceIds: string[]): Promise<number> {
+  if (invoiceIds.length === 0) return 0;
   const ids = sql.join([...new Set(invoiceIds)].map((id) => sql`${id}::uuid`), sql`, `);
   const drop = (reason: string) => sql`jsonb_set(i.ocr_payload, '{raw,reviewReasons}', coalesce(
       (select jsonb_agg(r) from jsonb_array_elements(i.ocr_payload -> 'raw' -> 'reviewReasons') r where r <> to_jsonb(${reason}::text)),
       '[]'::jsonb))`;
-  await db.execute(sql`
+  const a = (await db.execute(sql`
     update invoices i set ocr_payload = ${drop('unlinked')}
      where i.restaurant_id = ${rid} and i.id in (${ids}) and i.status = 'parsed'
        and coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ? 'unlinked'
        and not exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${IL_NOT_CHARGE})
-  `);
-  await db.execute(sql`
+    returning i.id
+  `)) as unknown as Array<{ id: string }>;
+  const b = (await db.execute(sql`
     update invoices i set ocr_payload = (${drop('unlinkedPo')} - 'heldPoId')
       || case when (i.ocr_payload ->> 'heldPoId') is not null
               then jsonb_build_object('linkPinPoId', i.ocr_payload ->> 'heldPoId') else '{}'::jsonb end
@@ -167,7 +185,10 @@ export async function pruneAnsweredReasons(db: Database, rid: string, invoiceIds
             where pl.po_id = (i.ocr_payload ->> 'heldPoId')::uuid and ${poLineIsQuestion(rid)}
          )
        )
-  `);
+    returning i.id
+  `)) as unknown as Array<{ id: string }>;
+  // Round 10: how many invoices actually had an answered reason pruned.
+  return new Set([...a, ...b].map((r) => String(r.id))).size;
 }
 
 /**
@@ -178,7 +199,8 @@ export async function pruneAnsweredReasons(db: Database, rid: string, invoiceIds
  */
 export function linkPinPoIdOf(ocrPayload: unknown): string | null {
   const p = ocrPayload as { linkPinPoId?: unknown; heldPoId?: unknown } | null | undefined;
-  const v = typeof p?.linkPinPoId === 'string' ? p.linkPinPoId : typeof p?.heldPoId === 'string' ? p.heldPoId : null;
+  // heldPoId first: the order a hold waits for NOW beats an older pin (round 10).
+  const v = typeof p?.heldPoId === 'string' ? p.heldPoId : typeof p?.linkPinPoId === 'string' ? p.linkPinPoId : null;
   return v && /^[0-9a-f-]{36}$/i.test(v) ? v : null;
 }
 

@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDb, eq, invoiceLines, invoices, restaurants, suppliers, testDbUrl } from '@restomatch/db';
 import type { InvoiceOcrResult } from '@restomatch/types';
+import { applyLearnedCharges } from '@restomatch/api';
 
 /**
  * G-08 review round 3 (MEDIUM "charge answers aren't learned"): a line a person
@@ -102,3 +103,45 @@ describe('R7 LOW-11: a blank מק״ט is no SKU', () => {
   });
 });
 
+
+describe("R10: a 'checks' hold for a deposit line only (train B #232) is released by the learned charge", () => {
+  async function checksHeld(checkReasons: string[]) {
+    const [inv] = await db
+      .insert(invoices)
+      .values({
+        restaurantId,
+        supplierId,
+        status: 'parsed',
+        source: 'photo',
+        invoiceDate: new Date(),
+        totalExclVat: '10.00',
+        vatAmount: '0',
+        totalInclVat: '10.00',
+        ocrPayload: {
+          provider: 'reconciled',
+          raw: {
+            reviewReasons: ['checks', 'unlinked'],
+            checks: { passed: false, reasons: checkReasons },
+            reconciled: { lines: [{ rawDescription: 'פיקדון ארגזים', lineKind: 'deposit', qty: 1, lineTotal: 10 }] },
+          },
+        } as never,
+      })
+      .returning({ id: invoices.id });
+    await db.insert(invoiceLines).values({ invoiceId: inv!.id, productId: null, rawDescription: 'פיקדון ארגזים', qtyBilled: '1', unit: 'יח׳', unitPriceBilled: '10', lineTotal: '10' });
+    return inv!.id;
+  }
+
+  it("checks.reasons ⊆ {deposit_or_fee_line} + the deposit line pre-marked → released, matched", async () => {
+    const id = await checksHeld(['deposit_or_fee_line']);
+    expect(await applyLearnedCharges(db, restaurantId, id)).toEqual({ charged: 1, released: true });
+    const [row] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, id));
+    expect(row!.status).toBe('matched');
+  });
+
+  it('any other check reason still needs a person → not released', async () => {
+    const id = await checksHeld(['deposit_or_fee_line', 'vat_mismatch']);
+    expect(await applyLearnedCharges(db, restaurantId, id)).toEqual({ charged: 1, released: false });
+    const [row] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, id));
+    expect(row!.status).toBe('parsed');
+  });
+});

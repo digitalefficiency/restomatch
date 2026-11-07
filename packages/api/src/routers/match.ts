@@ -119,10 +119,14 @@ export const matchRouter = router({
         rules,
         priorDecisions,
       );
-      // G-08 hold: a matched invoice no longer waits for an order — drop a stale marker.
+      // G-08 hold: a matched invoice no longer waits for an order — drop a stale marker;
+      // and (round 10) its order pin follows THIS run's order (none → no pin).
       await ctx.db.execute(sql`
-        update invoices set ocr_payload = ocr_payload - 'heldPoId'
-         where id = ${input.invoiceId}::uuid and restaurant_id = ${restaurantId} and ocr_payload ? 'heldPoId'
+        update invoices
+           set ocr_payload = (coalesce(ocr_payload, '{}'::jsonb) - 'heldPoId' - 'linkPinPoId')
+             || ${built.poId ? sql`jsonb_build_object('linkPinPoId', ${built.poId}::text)` : sql`'{}'::jsonb`}
+         where id = ${input.invoiceId}::uuid and restaurant_id = ${restaurantId}
+           and (ocr_payload ? 'heldPoId' or ocr_payload ? 'linkPinPoId')
       `);
 
       return {

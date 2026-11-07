@@ -373,7 +373,7 @@ export const adminRouter = router({
   setFeatures: adminProcedure
     .input(z.object({ restaurantId: z.string().uuid(), features: FeaturePatchSchema }))
     .mutation(async ({ ctx, input }) => {
-      let orderQuestionsTurnedOff = false;
+      let orderQuestionsOff = false;
       const out = await ctx.db.transaction(async (tx) => {
         const [r] = await tx
           .select({ id: restaurants.id, settings: restaurants.settings })
@@ -385,7 +385,6 @@ export const adminRouter = router({
           .limit(1);
         if (!r) throw appError('NOT_FOUND', 'admin.notFound', 'restaurant not found');
         const before = storedFeatures(r.settings);
-        const orderQuestionsBefore = featureEnabled(r.settings, 'orderQuestions');
 
         const [updated] = await tx
           .update(restaurants)
@@ -396,7 +395,7 @@ export const adminRouter = router({
           .where(eq(restaurants.id, r.id))
           .returning({ settings: restaurants.settings });
         const after = storedFeatures(updated?.settings);
-        orderQuestionsTurnedOff = orderQuestionsBefore && !featureEnabled(updated?.settings, 'orderQuestions');
+        orderQuestionsOff = !featureEnabled(updated?.settings, 'orderQuestions');
 
         await recordAudit(tx, {
           restaurantId: r.id,
@@ -409,10 +408,23 @@ export const adminRouter = router({
         });
         return { features: featureState(updated?.settings) };
       });
-      // G-08 kill switch: invoices waiting for this restaurant's order questions are
-      // released and re-matched (after the commit, so the job reads the new flag).
-      if (orderQuestionsTurnedOff) await releaseOrderQuestionHolds(ctx.db, input.restaurantId);
-      return out;
+      // G-08 kill switch: while order questions are OFF, every save releases and
+      // re-matches the invoices still waiting for them (after the commit, so the job
+      // reads the new flag). Idempotent, so a save is also the retry (round 10).
+      if (!orderQuestionsOff) return out;
+      try {
+        const r = await releaseOrderQuestionHolds(ctx.db, input.restaurantId);
+        return { ...out, release: { ok: true as const, released: r.released, requeued: r.requeued, failed: r.failed } };
+      } catch (err) {
+        console.error(`[admin.setFeatures] order-question release failed for restaurant=${input.restaurantId}`, err);
+        return {
+          ...out,
+          release: {
+            ok: false as const,
+            error: `saved; release failed — run release-order-holds --restaurant ${input.restaurantId}`,
+          },
+        };
+      }
     }),
 
   /** Change a member's role within a restaurant. */

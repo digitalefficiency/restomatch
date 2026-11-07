@@ -5,6 +5,7 @@ import {
   and,
   auditLog,
   createDb,
+  goodsReceipts,
   discrepancies,
   eq,
   invoiceLines,
@@ -604,21 +605,124 @@ describe('R9 LOWs: the charge path on order lines', () => {
     expect(r.rematch.requeued).toBe(0);
   });
 
-  it('LOW-7: undoing a charge mark that re-opens the order line re-holds a run with only open findings', async () => {
+  it('LOW-7 (bounded, round 10): undoing a charge mark re-holds only a run with a finding on that order line', async () => {
     const po = await order([
       { productId: P2, raw: 'בצל סגול' },
       { productId: null, raw: 'משלוח', price: '30' },
     ]);
-    // Billed above the order (₪15 vs ₪11) → PRICE_HIGHER, open.
+    // Billed above the order (₪15 vs ₪11) → PRICE_HIGHER, open — a finding on the ONIONS, not on the charge.
     const inv = await heldInvoice({ raw: 'בצל סגול', productId: P2, price: '15', reasons: ['unlinkedPo'], heldPoId: po, vat: { vat: '5.40', incl: '35.40' } });
     const mark = await owner().mapping.markCharge({ supplierId: S, rawName: 'משלוח', shownLineIds: [] });
     expect(mark.learnedKey).toBe(true);
     await drain();
     expect(await typesOf(inv)).toContain('PRICE_HIGHER');
+    const before = await runsOf(inv);
     await owner().mapping.markCharge({ supplierId: S, rawName: 'משלוח', undo: mark.undo! });
+    await drain();
+    // The run has nothing built on the charge answer: it stays (and is not re-matched over the question).
+    expect(await runsOf(inv)).toEqual(before);
+    expect(await typesOf(inv)).not.toContain('MISSING_ON_INVOICE');
+
+    // A run that DOES carry a finding on the key's order line goes back on the hold.
+    const mark2 = await owner().mapping.markCharge({ supplierId: S, rawName: 'משלוח', shownLineIds: [] });
+    const [pl] = await db.select({ id: poLines.id }).from(poLines).where(and(eq(poLines.poId, po), eq(poLines.rawDescription, 'משלוח')));
+    await db.insert(discrepancies).values({ restaurantId, matchRunId: before[0]!.id, type: 'MISSING_ON_INVOICE', severity: 'warn', poLineId: pl!.id, deltaAmount: '60' } as never);
+    await owner().mapping.markCharge({ supplierId: S, rawName: 'משלוח', undo: mark2.undo! });
     await drain();
     expect(await statusOf(inv)).toBe('parsed');
     expect(await runsOf(inv)).toEqual([]);
     expect((await computeLeakHero(db, restaurantId)).awaitingQuestionCount).toBe(1);
   });
 });
+
+/* ── G-08 review round 10 (7.11) ────────────────────────────────────────── */
+
+async function adminCaller() {
+  const [adm] = await db
+    .insert(users)
+    .values({ email: `g08-r10-admin-${Date.now()}-${Math.random().toString(36).slice(2)}@drain.test`, name: 'Ops', isPlatformAdmin: true })
+    .returning();
+  await db.insert(userCredentials).values({ userId: adm!.id, totpSecretEnc: 'ciphertext', totpEnabledAt: new Date() });
+  return {
+    caller: appRouter.createCaller({ db, session: { userId: adm!.id, restaurantId: null, role: null } } as Parameters<typeof appRouter.createCaller>[0]),
+    cleanup: async () => {
+      await db.delete(auditLog).where(eq(auditLog.userId, adm!.id));
+      await db.delete(users).where(eq(users.id, adm!.id));
+    },
+  };
+}
+
+describe('R10 MED: an invoice-line re-hold keeps the order pin too', () => {
+  it('answer → drain (run on the order) → order closed → undo → re-answer → drain: the same po_id, no UNORDERED_ARRIVAL', async () => {
+    const po = await order([{ productId: P, raw: 'פלפל אדום' }]);
+    const inv = await heldInvoice({ raw: 'פלפל אדום חריף', productId: null, price: '15', vat: { vat: '5.40', incl: '35.40' } });
+    const answer = await owner().mapping.confirm({ supplierId: S, rawName: 'פלפל אדום חריף', productId: P });
+    await drain();
+    expect(await poOf(inv)).toEqual([po]);
+    await db.update(purchaseOrders).set({ status: 'closed' }).where(eq(purchaseOrders.id, po));
+    await owner().mapping.confirm({ supplierId: S, rawName: 'פלפל אדום חריף', revert: answer.undo! });
+    expect(await runsOf(inv)).toEqual([]); // re-held (open findings only)
+    await owner().mapping.confirm({ supplierId: S, rawName: 'פלפל אדום חריף', productId: P });
+    await drain();
+    expect(await poOf(inv)).toEqual([po]);
+    expect(await typesOf(inv)).not.toContain('UNORDERED_ARRIVAL');
+    expect(await statusOf(inv)).not.toBe('parsed');
+  });
+});
+
+describe('R10 MED: the pin follows the last run (runForInvoice refreshes it)', () => {
+  it('a stale pin on order A; the run moves to B; runForInvoice → pin = B; a run-less re-match stays on B', async () => {
+    const poA = await order([{ productId: P, raw: 'פלפל אדום' }]);
+    const poB = await order([{ productId: P, raw: 'פלפל אדום' }]);
+    // B was delivered (a receipt) a day earlier and is CLOSED — discovery never finds it
+    // again; only a pin does. A is open and nearer.
+    await db.update(purchaseOrders).set({ expectedDeliveryAt: new Date(Date.now() - 86_400_000) }).where(eq(purchaseOrders.id, poB));
+    await db.insert(goodsReceipts).values({ restaurantId, poId: poB, status: 'completed' });
+    const inv = await heldInvoice({ raw: 'פלפל אדום', productId: P, reasons: [], vat: { vat: '3.96', incl: '25.96' } });
+    await db
+      .update(invoices)
+      .set({ status: 'matched', ocrPayload: { provider: 'reconciled', raw: { reviewReasons: [] }, linkPinPoId: poA } as never })
+      .where(eq(invoices.id, inv));
+    // The receipt on B was counted for this invoice → its run is on B.
+    await matchInvoiceForJob(db, { restaurantId, invoiceId: inv, poId: poB, rematch: true });
+    expect(await poOf(inv)).toEqual([poB]);
+    await db.update(purchaseOrders).set({ status: 'closed' }).where(eq(purchaseOrders.id, poB));
+    await owner().match.runForInvoice({ invoiceId: inv });
+    const [row] = await db.select({ p: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, inv));
+    expect((row!.p as unknown as { linkPinPoId?: string }).linkPinPoId).toBe(poB);
+    // A run-less re-match (after a re-hold / release) follows the pin, not the nearer A.
+    await db.delete(matchRuns).where(eq(matchRuns.invoiceId, inv));
+    await matchInvoiceForJob(db, { restaurantId, invoiceId: inv, rematch: true });
+    expect(await poOf(inv)).toEqual([poB]);
+  });
+});
+
+describe('R10 MED: the kill-switch sweep can be retried', () => {
+  it('a second OFF save releases a still-held invoice; a released invoice left with no run is re-queued', async () => {
+    const { caller, cleanup } = await adminCaller();
+    try {
+      await caller.admin.setFeatures({ restaurantId, features: { orderQuestions: false } });
+      // Held after the flip (e.g. a job that ran before the redeploy).
+      const po = await order([
+        { productId: P, raw: 'פלפל אדום' },
+        { productId: null, raw: 'בצל סגול' },
+      ]);
+      const held = await heldInvoice({ raw: 'פלפל אדום', productId: P, reasons: ['unlinkedPo'], heldPoId: po, vat: { vat: '3.96', incl: '25.96' } });
+      // Released earlier, but its enqueue failed: 'matched', linkReleasedAt, no run.
+      const stranded = await heldInvoice({ raw: 'פלפל אדום', productId: P, reasons: ['unlinked'], vat: { vat: '3.96', incl: '25.96' } });
+      await db
+        .update(invoices)
+        .set({ status: 'matched', ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinked'] }, linkReleasedAt: new Date().toISOString(), linkPinPoId: po } as never })
+        .where(eq(invoices.id, stranded));
+      const again = await caller.admin.setFeatures({ restaurantId, features: { orderQuestions: false } });
+      expect(again).toMatchObject({ release: { ok: true, released: 1, requeued: 2, failed: 0 } });
+      await drain();
+      expect(await poOf(held)).toEqual([po]);
+      expect(await statusOf(held)).not.toBe('parsed');
+      expect(await poOf(stranded)).toEqual([po]);
+    } finally {
+      await cleanup();
+    }
+  });
+});
+

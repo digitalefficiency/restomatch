@@ -1,13 +1,15 @@
 /**
- * G-08 kill switch — after `FEATURES_OFF=orderQuestions` is deployed (an env
- * change needs a redeploy), release the invoices that were already waiting for an
+ * G-08 kill switch — run it AFTER the web AND worker redeploy that carries
+ * `FEATURES_OFF=orderQuestions` (an env change needs a redeploy; until both run
+ * with it, a job could hold an invoice again). It releases the invoices already waiting for an
  * order's "זה אותו מוצר?" questions and re-queue their match:
  *
  *   DATABASE_URL=... pnpm --filter @restomatch/worker run release-order-holds [--restaurant <uuid>]
  *
  * (A per-restaurant flip in the admin console, settings.features.orderQuestions
  * = false, does this by itself.) Each released invoice stays pinned to the order it
- * waited for. Prints a one-line JSON summary. Refuses to run while the switch is
+ * waited for; one left 'matched' with no run (a failed enqueue) is re-queued. Safe
+ * to run again. Prints a one-line JSON summary. Refuses to run while the switch is
  * still ON for the scope (nothing would be released).
  */
 import { featureEnabled, releaseOrderQuestionHolds } from '@restomatch/api';
