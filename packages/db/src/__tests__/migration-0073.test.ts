@@ -280,12 +280,15 @@ describe('0073 the five new tenant tables', () => {
       where not p.polpermissive and c.relname in ${sql(TABLES)} order by c.relname, p.polname
     `) as unknown as Array<{ relname: string; polname: string; polcmd: string; expr: string }>;
     expect(rows.map((r) => `${r.relname}:${r.polname}:${r.polcmd}`)).toEqual([
+      'notification_seen:notification_seen_own_delete:d',
       'notification_seen:notification_seen_own_insert:a',
       'notification_seen:notification_seen_own_select:r',
       'notification_seen:notification_seen_own_update:w',
+      'saved_views:saved_views_own_delete:d',
       'saved_views:saved_views_own_insert:a',
       'saved_views:saved_views_own_select:r',
       'saved_views:saved_views_own_update:w',
+      'view_subscriptions:view_subscriptions_own_delete:d',
       'view_subscriptions:view_subscriptions_own_insert:a',
       'view_subscriptions:view_subscriptions_own_update:w',
     ]);

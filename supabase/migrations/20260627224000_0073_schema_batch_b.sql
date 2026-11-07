@@ -79,7 +79,8 @@
 --                        (AGOROT > 0); one row per payment × invoice.
 --
 -- Own-user RLS (the 0072 pattern): saved_views (personal rows), view_subscriptions
--- (writes) and notification_seen (all) add RESTRICTIVE `<table>_own_*` policies on
+-- (writes, incl. DELETE) and notification_seen (all, incl. DELETE) add RESTRICTIVE
+-- `<table>_own_*` policies on
 -- app.current_user_id(), so one member can't read or write another's.
 --
 -- Tenant safety: the 0057/0070/0071/0072 pattern. Every new table carries
@@ -506,8 +507,16 @@ CREATE POLICY "notification_seen_own_select" ON "notification_seen" AS RESTRICTI
 DROP POLICY IF EXISTS "notification_seen_own_insert" ON "notification_seen";--> statement-breakpoint
 CREATE POLICY "notification_seen_own_insert" ON "notification_seen" AS RESTRICTIVE FOR INSERT WITH CHECK ("user_id" = app.current_user_id());--> statement-breakpoint
 DROP POLICY IF EXISTS "notification_seen_own_update" ON "notification_seen";--> statement-breakpoint
-CREATE POLICY "notification_seen_own_update" ON "notification_seen" AS RESTRICTIVE FOR UPDATE USING ("user_id" = app.current_user_id()) WITH CHECK ("user_id" = app.current_user_id());
+CREATE POLICY "notification_seen_own_update" ON "notification_seen" AS RESTRICTIVE FOR UPDATE USING ("user_id" = app.current_user_id()) WITH CHECK ("user_id" = app.current_user_id());--> statement-breakpoint
+-- DELETE too (M1 lesson): a member can never delete a teammate's personal view,
+-- subscription or "seen" mark, neither by id nor with an unqualified DELETE.
+DROP POLICY IF EXISTS "saved_views_own_delete" ON "saved_views";--> statement-breakpoint
+CREATE POLICY "saved_views_own_delete" ON "saved_views" AS RESTRICTIVE FOR DELETE USING ("scope" = 'restaurant' OR "user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "view_subscriptions_own_delete" ON "view_subscriptions";--> statement-breakpoint
+CREATE POLICY "view_subscriptions_own_delete" ON "view_subscriptions" AS RESTRICTIVE FOR DELETE USING ("user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "notification_seen_own_delete" ON "notification_seen";--> statement-breakpoint
+CREATE POLICY "notification_seen_own_delete" ON "notification_seen" AS RESTRICTIVE FOR DELETE USING ("user_id" = app.current_user_id());
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '2b7cf5d473b1bf785c029589a4af048146178b932b160ab5f655d70e7fe951c0', 1782600000000
+select 'b99479e599b48558e332122caa169408137c5f85ac01fa675ba86b9f1baf056c', 1782600000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782600000000);

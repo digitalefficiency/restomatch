@@ -1726,3 +1726,44 @@ describe('0073 (H-04) own-user RLS: personal views, subscriptions, bell "seen" m
     await ownerDb.delete(notificationSeen).where(eq(notificationSeen.id, other!.id));
   });
 });
+
+describe('0073 (H-04) own-user DELETE: a member never deletes a teammate’s row (targeted or unqualified)', () => {
+  it('personal saved view: a targeted and an unqualified DELETE leave the teammate’s view; own view and team view behave as documented', async () => {
+    const [other] = await ownerDb.insert(savedViews).values({ restaurantId: A.restaurantId, page: 'leaks', name: 'של אחר', userId: B.ownerUserId }).returning();
+    const [mine] = await ownerDb.insert(savedViews).values({ restaurantId: A.restaurantId, page: 'leaks', name: 'שלי', userId: A.ownerUserId }).returning();
+    const targeted = await asMember(A.restaurantId, A.ownerUserId, (tx) => tx.delete(savedViews).where(eq(savedViews.id, other!.id)).returning({ id: savedViews.id }));
+    expect(targeted).toHaveLength(0);
+    const unqualified = await asMember(A.restaurantId, A.ownerUserId, (tx) => tx.delete(savedViews).returning({ id: savedViews.id }));
+    expect(unqualified.map((r) => r.id)).toEqual([mine!.id]);
+    expect(await ownerDb.select().from(savedViews).where(eq(savedViews.id, other!.id))).toHaveLength(1);
+    await ownerDb.delete(savedViews);
+  });
+
+  it('view subscription: a targeted and an unqualified DELETE leave the teammate’s subscription', async () => {
+    const [v] = await ownerDb.insert(savedViews).values({ restaurantId: A.restaurantId, page: 'leaks', name: 'צוות', scope: 'restaurant' }).returning();
+    const [other] = await ownerDb.insert(viewSubscriptions).values({ restaurantId: A.restaurantId, viewId: v!.id, userId: B.ownerUserId, cadence: 'daily' }).returning();
+    const [mine] = await ownerDb.insert(viewSubscriptions).values({ restaurantId: A.restaurantId, viewId: v!.id, userId: A.ownerUserId, cadence: 'daily' }).returning();
+    const targeted = await asMember(A.restaurantId, A.ownerUserId, (tx) =>
+      tx.delete(viewSubscriptions).where(eq(viewSubscriptions.id, other!.id)).returning({ id: viewSubscriptions.id }),
+    );
+    expect(targeted).toHaveLength(0);
+    const unqualified = await asMember(A.restaurantId, A.ownerUserId, (tx) => tx.delete(viewSubscriptions).returning({ id: viewSubscriptions.id }));
+    expect(unqualified.map((r) => r.id)).toEqual([mine!.id]);
+    expect(await ownerDb.select().from(viewSubscriptions).where(eq(viewSubscriptions.id, other!.id))).toHaveLength(1);
+    await ownerDb.delete(viewSubscriptions);
+    await ownerDb.delete(savedViews);
+  });
+
+  it('"seen" mark: a targeted and an unqualified DELETE leave the teammate’s mark', async () => {
+    const [other] = await ownerDb.insert(notificationSeen).values({ restaurantId: A.restaurantId, userId: B.ownerUserId, itemKey: 'del:other' }).returning();
+    const [mine] = await ownerDb.insert(notificationSeen).values({ restaurantId: A.restaurantId, userId: A.ownerUserId, itemKey: 'del:mine' }).returning();
+    const targeted = await asMember(A.restaurantId, A.ownerUserId, (tx) =>
+      tx.delete(notificationSeen).where(eq(notificationSeen.id, other!.id)).returning({ id: notificationSeen.id }),
+    );
+    expect(targeted).toHaveLength(0);
+    const unqualified = await asMember(A.restaurantId, A.ownerUserId, (tx) => tx.delete(notificationSeen).returning({ id: notificationSeen.id }));
+    expect(unqualified.map((r) => r.id)).toEqual([mine!.id]);
+    expect(await ownerDb.select().from(notificationSeen).where(eq(notificationSeen.id, other!.id))).toHaveLength(1);
+    await ownerDb.delete(notificationSeen).where(eq(notificationSeen.id, other!.id));
+  });
+});
