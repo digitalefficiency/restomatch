@@ -58,7 +58,7 @@ export function AutomationRowBody({ row, control }: { row: AutomationRowView; co
       : t('row.neverRan');
 
   return (
-    <li className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-4 shadow-card sm:flex-row sm:items-start sm:justify-between">
+    <li data-automation={row.key} className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-4 shadow-card sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-sm font-semibold text-ink">{itemText(t, row.key, 'name')}</h3>
