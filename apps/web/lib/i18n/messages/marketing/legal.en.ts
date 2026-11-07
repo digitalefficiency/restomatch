@@ -44,7 +44,7 @@ export const legalEn: Shape<typeof legalHe> = {
     },
     s3: {
       heading: '3. Purposes of use',
-      c1: 'We use the information to provide the service: matching order, goods receipt and invoice, showing discrepancies, running approvals and supplier credit claims, and sending operational alerts',
+      c1: 'We use the information to provide the service: matching order, goods receipt and invoice, showing discrepancies, running approvals and supplier credit requests, and sending operational alerts',
       c2: 'We also use information to secure the system, for billing and for support. A customer restaurant\'s information is used for nothing else; product improvement uses only aggregate data, and only with the restaurant\'s consent',
       c3: 'The legal basis for each purpose (performance of a contract, consent, legal obligation) is under review and will be set out here',
     },
