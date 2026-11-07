@@ -185,8 +185,9 @@ describe('0072 is registered', () => {
       .map((x) => x.trim())
       .filter(Boolean);
     const code = (x: string) => x.split('\n').filter((l) => !l.trimStart().startsWith('--')).join('\n').trim();
-    expect(code(stmts[0]!)).toBe("SET LOCAL lock_timeout = '5s';");
-    expect(code(stmts[1]!)).toMatch(/^LOCK TABLE [\s\S]* IN ACCESS EXCLUSIVE MODE;$/);
+    expect(code(stmts[0]!)).toMatch(/set_config\('lock_timeout', '5s', true\)[\s\S]*set_config\('statement_timeout', '6s', true\)/);
+    expect(code(stmts[1]!)).toMatch(/^DO \$\$\s*BEGIN\s*LOCK TABLE "restaurants", "users", [\s\S]* IN ACCESS EXCLUSIVE MODE;\s*END \$\$;$/);
+    expect(code(stmts[2]!)).toMatch(/set_config\('statement_timeout',[\s\S]*current_setting\('restomatch.prev_statement_timeout', true\)/);
     const reader = postgres(url, { max: 1, prepare: false });
     const runner = postgres(url, { max: 1, prepare: false });
     try {
@@ -211,7 +212,7 @@ describe('0072 is registered', () => {
         err = e;
       }
       const waited = Date.now() - started;
-      expect(pgCode(err)).toBe('55P03'); // lock_not_available
+      expect(['55P03', '57014']).toContain(pgCode(err)); // lock_not_available / statement_timeout
       expect(waited).toBeLessThan(15_000);
       release();
       await readerTx;
@@ -228,6 +229,35 @@ describe('0072 is registered', () => {
       await runner.end();
     }
   }, 30_000);
+
+  it('needs no transaction block: no top-level LOCK / SET LOCAL / SAVEPOINT / BEGIN / COMMIT (the Supabase CLI sends no BEGIN)', () => {
+    const file = readFileSync(join(migrationsDir(), '0072_schema_batch_a.sql'), 'utf8');
+    // Strip comments and every dollar-quoted body (DO blocks, functions): what is left is top level.
+    const top = file
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('--'))
+      .join('\n')
+      .replace(/\$\$[\s\S]*?\$\$/g, '$$$$');
+    expect(top).not.toMatch(/^\s*LOCK\s+TABLE/im);
+    expect(top).not.toMatch(/\bSET\s+LOCAL\b/i);
+    expect(top).not.toMatch(/\bSAVEPOINT\b/i);
+    expect(top).not.toMatch(/^\s*(BEGIN|COMMIT|START TRANSACTION)\s*;/im);
+  });
+
+  it('applies statement by statement with no BEGIN (autocommit, as the CLI applier): nothing raises 25P01, a re-run is a no-op', async () => {
+    const stmts = readFileSync(join(migrationsDir(), '0072_schema_batch_a.sql'), 'utf8')
+      .split('--> statement-breakpoint')
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const bare = postgres(url, { max: 1, prepare: false });
+    try {
+      for (const st of stmts) await bare.unsafe(st); // each statement is its own implicit transaction
+      // Control: the old top-level form is exactly what this applier refuses.
+      await expect(bare.unsafe('LOCK TABLE "users" IN ACCESS EXCLUSIVE MODE')).rejects.toMatchObject({ code: '25P01' });
+    } finally {
+      await bare.end();
+    }
+  });
 
   it('uses no enum value that 0071 adds in the same migrator batch', () => {
     const file = readFileSync(join(migrationsDir(), '0072_schema_batch_a.sql'), 'utf8')

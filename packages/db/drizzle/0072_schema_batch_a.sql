@@ -72,11 +72,19 @@
 -- Batch safety: no ALTER TYPE here, and nothing here uses 0071's new enum values
 -- ('event', 'skipped'): both migrations run in ONE migrator transaction.
 --
--- Locks: the FIRST statement sets lock_timeout = 5s, and the SECOND takes every lock
--- this file needs, ACCESS EXCLUSIVE, in one fixed (alphabetical) order, on the nine
--- existing tables it alters or references. So no lock is upgraded mid-file, and a long
--- reader makes the deploy fail fast (55P03) with nothing applied; re-run it when the
--- reader is gone. There is no backfill: no row is read, and none is updated.
+-- Locks: the Supabase CLI applies a file as ONE pipelined batch with no BEGIN, so a
+-- top-level LOCK TABLE / SET LOCAL / SAVEPOINT is refused there (25P01) and nothing
+-- applies. The prelude therefore (1) sets lock_timeout 5s and a 6s statement_timeout
+-- with set_config(..., is_local => true), keeping the previous statement_timeout in
+-- restomatch.prev_statement_timeout; (2) takes every lock in ONE DO block, parent-first
+-- (the app's order), ACCESS EXCLUSIVE on the nine existing tables this file alters or
+-- references (FK targets included), so nothing waits or upgrades mid-file; (3) restores
+-- statement_timeout. A long reader makes the file fail fast (55P03 / 57014) with
+-- nothing applied; re-run it in a quiet hour. There is no backfill: no row is read or
+-- updated.
+-- Stacked drizzle path: `pnpm db:migrate` applies 0071 + 0072 in ONE transaction, so
+-- 0072's lock phase upgrades/extends 0071's locks mid-batch; a busy table then fails
+-- the WHOLE batch fast (nothing applied). Re-run it.
 --
 -- App coupling: schema.ts names the new columns of EXISTING tables in every Drizzle
 -- select/insert, so a build of main that carries this schema.ts fails against a DB
@@ -103,9 +111,19 @@
 --   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1782500000000;
 --   DELETE FROM supabase_migrations.schema_migrations WHERE version IN ('20260626185320', '20260626185321');
 
-SET LOCAL lock_timeout = '5s';--> statement-breakpoint
-LOCK TABLE "goods_receipts", "invoice_lines", "invoices", "po_lines", "recovery_claims",
-  "restaurants", "supplier_catalog_items", "suppliers", "users" IN ACCESS EXCLUSIVE MODE;--> statement-breakpoint
+SELECT set_config('restomatch.prev_statement_timeout', current_setting('statement_timeout'), true),
+       set_config('lock_timeout', '5s', true),
+       set_config('statement_timeout', '6s', true);--> statement-breakpoint
+DO $$
+BEGIN
+  LOCK TABLE "restaurants", "users", "suppliers", "supplier_catalog_items", "po_lines",
+    "goods_receipts", "invoices", "invoice_lines", "recovery_claims" IN ACCESS EXCLUSIVE MODE;
+END $$;--> statement-breakpoint
+-- Restore. If the saved value is gone (an applier that commits per statement already
+-- reverted the local setting), keep the current one.
+SELECT set_config('statement_timeout',
+  coalesce(nullif(current_setting('restomatch.prev_statement_timeout', true), ''), current_setting('statement_timeout')),
+  true);--> statement-breakpoint
 
 -- ── shared: append-only guard (frozen snapshots, corrections, bank audit) ─────
 -- BEFORE UPDATE OR DELETE. "Owner" = the table owner's connection (migrations, ops,
