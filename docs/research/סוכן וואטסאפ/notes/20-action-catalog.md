@@ -144,7 +144,7 @@
 
 **OWN-01 · "מה מחכה לי היום?"** — *pilot (read-only, Dec)* · WA-08
 - Trigger: user text ("מה מחכה לי", "בוקר", "סיכום"). The proactive twin is PRO-01.
-- Message: `ב{מסעדה} מחכים לך היום: 4 פערים להחלטה בסך ₪1,412 · 2 בקשות זיכוי שעברו 7 ימים בלי תשובה. הדליפה החודש עד עכשיו: ₪3,180.`
+- Message: `ב{מסעדה} מחכים לך היום: 4 פערים להחלטה בסך ₪1,412 · 2 בקשות זיכוי שממתינות לתשובה יותר מ-7 ימים. הדליפה החודש עד עכשיו: ₪3,180.`
 - Buttons: `[להחלטות]` `[בקשות זיכוי בלי תשובה 7 ימים]` `[פתח באפליקציה]` (pilot: the first two answer as read-only lists; deciding opens the app until WA-07).
 - tRPC: `owner.leakHero` (member) · `approvals.queueSummary` (member) · `recovery.list` (finance, recovery flag) · `owner.kpis` (member).
 - Confirm/undo: none (read-only). ₪: all. Steps: web 4–6 + sign-in · WA 1 message.
@@ -159,7 +159,7 @@
 **OWN-03 · "כמה דלף אצל קצביית הכרם?"** — *pilot* · WA-02/08
 - Trigger: user text naming a supplier (fuzzy match, W3-04a `normalizeHe`). Two matches → list "למי התכוונת?"; none → "לא מצאתי ספק בשם הזה" + supplier list (≤ 10 rows, "עוד…" → web).
 - Message: `קצביית הכרם, נובמבר עד היום: דליפה של ₪1,240 ב-9 שורות. הגדול ביותר: חזה עוף, 3 חשבוניות מעל המחיר המוסכם (₪610). מתוך זה ₪860 אפשר לבקש זיכוי, ו-₪380 כבר בבקשת זיכוי.`
-- Buttons: `[להכין מכתב בקשת זיכוי]` `[פירוט לפי מוצר]` `[חודש קודם]`.
+- Buttons: `[להכין בקשת זיכוי]` `[פירוט לפי מוצר]` `[חודש קודם]`.
 - tRPC: `owner.leakGrouped` (finance) with supplier filter; Ask tools `leak_breakdown`, `claimable_lines`.
 - ₪: all. Steps: web 4–5 · WA 1 message.
 
@@ -211,7 +211,7 @@
 - ₪: all. Steps: web: not possible after 15 s · WA 1.
 
 **OWN-11 · Claim letter, sent from the owner's own WhatsApp** — *after WA-07 (money)* · WA-08 (depends on H-06ʰ)
-- Trigger: `[להכין מכתב בקשת זיכוי]` (OWN-03/06) or "תכין מכתב לקצביית הכרם".
+- Trigger: `[להכין בקשת זיכוי]` (OWN-03/06) or "תכין מכתב לקצביית הכרם".
 - Message: `מכתב בקשת זיכוי לקצביית הכרם מוכן: ₪860 על 6 שורות (בלי שורות "חסר בחשבונית").` + CTA `[שלח מהוואטסאפ שלי]` (opens `wa.me/<supplier>` with the letter text and the portal link prefilled in the **owner's** WhatsApp).
 - tRPC: **new: `claimLetters.draft`** (H-06ʰ `claimPortal/**` + G-03 `claim_letters`; no router on `main`).
 - Confirm: the owner's own send tap. RestoMatch's number never messages the supplier. Follow-up is OWN-12.

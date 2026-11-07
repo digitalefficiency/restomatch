@@ -87,7 +87,7 @@
 
 > **בוקר טוב. ב{{1}} מחכים לך היום:**
 > • {{2}} פערים להחלטה, בסך {{3}}
-> • {{4}} בקשות זיכוי שעברו 7 ימים בלי תשובה מהספק
+> • {{4}} בקשות זיכוי שממתינות לתשובה יותר מ-7 ימים מהספק
 > הדליפה החודש עד עכשיו: {{5}}. הפרטים באפליקציה.
 > [להחלטות עכשיו] [השתק להיום] + URL button [פתח באפליקציה]
 
@@ -130,7 +130,7 @@ After "אשר 96 ₪" (committed, then reported):
 > **קצביית הכרם, נובמבר עד היום:** דליפה של 1,240 ₪ ב-9 שורות.
 > הגדול ביותר: חזה עוף, 3 חשבוניות מעל המחיר המוסכם (610 ₪).
 > מתוך זה 860 ₪ אפשר לבקש זיכוי, ו-380 ₪ כבר בבקשת זיכוי.
-> [להכין מכתב בקשת זיכוי] [פירוט לפי מוצר] [חודש קודם]
+> [להכין בקשת זיכוי] [פירוט לפי מוצר] [חודש קודם]
 
 - **Tool calls:** the Ask tools `leak_breakdown` / `leak_report` / `claimable_lines` (today behind `ask.ask`, managerProcedure), or directly `owner.leakGrouped` (financeProcedure) with a supplier filter. Supplier resolution: a fuzzy match on the tenant's own supplier names (W3-04a `normalizeHe`). Two candidates → a list message "למי התכוונת?". Zero → "לא מצאתי ספק בשם הזה" plus the supplier list.
 - **Grounding:** every number in the reply must equal a tool figure of the same unit, or the reply is replaced by the offline renderer's facts (Ask grounding, [code] `ask/grounding.ts`). The model never writes ₪; the renderer does.
