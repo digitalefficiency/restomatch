@@ -43,6 +43,7 @@ describe('cron schedules', () => {
       { queue: 'monthly-report', id: 'monthly-report-1st-0745', repeat: { pattern: '45 7 1 * *', tz: TZ } },
       { queue: 'health-digest', id: 'health-digest-0645', repeat: { pattern: '45 6 * * *', tz: TZ } },
       { queue: 'ocr-sweep', id: 'ocr-sweep-5m', repeat: { every: 5 * 60_000 } },
+      { queue: 'leak-month-close', id: 'leak-month-close-0415', repeat: { pattern: '15 4 * * *', tz: TZ } },
     ]);
     // The job name each scheduler enqueues equals its queue name (what the worker listens on).
     for (const c of calls) expect(c.name).toBe(c.queue);
@@ -58,6 +59,7 @@ describe('cron schedules', () => {
         'monthly-report-1st-0745',
         'health-digest-0645',
         'ocr-sweep-5m',
+        'leak-month-close-0415',
       ]),
     );
   });
