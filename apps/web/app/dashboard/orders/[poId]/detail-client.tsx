@@ -42,6 +42,8 @@ import {
 } from '../order-logic';
 import { RowMenu } from '../row-menu';
 import { UNDO_MS, UndoCountdown } from '../undo-bar';
+import { SendStatusNote, useSendStatus } from '../send-status';
+import type { SendState } from '../order-logic';
 
 type OrderData = inferRouterOutputs<AppRouter>['orders']['get'];
 type Line = OrderData['lines'][number];
@@ -86,6 +88,10 @@ export function OrderDetail({
   const once = useSingleFlight();
   const router = useRouter();
   const po = data.po!;
+  // What really happened to the order message, polled until final (orders.sendStatus).
+  const sendStatus = useSendStatus(po.id, { enabled: !!po.sentAt });
+  const sendState: SendState = sendStatus.data?.state ?? (po.sentAt ? (po.sentChannel ? 'queued' : 'none') : 'none');
+  const sendChannel = sendStatus.data?.channel ?? (po.sentChannel === 'email' || po.sentChannel === 'whatsapp' ? po.sentChannel : null);
   const isDraft = po.status === 'draft';
   // A goods receipt makes the order history even while its status reads 'sent'.
   const canCancel = po.status !== 'cancelled' && po.status !== 'closed' && data.receiptStatus == null;
@@ -258,7 +264,7 @@ export function OrderDetail({
     <div className="space-y-6">
       <Card flow elevated padding="lg" data-testid="order-header">
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <OrderStatusBadge status={po.status} receiptStatus={data.receiptStatus} />
+          <OrderStatusBadge status={po.status} receiptStatus={data.receiptStatus} send={po.sentAt ? sendState : null} />
           <span className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface-2 px-2 py-0.5 text-sm text-ink">
             <span className="sr-only">{t('detail.refLabel')} </span>
             <bdi dir="ltr" className="font-mono tabular-nums" data-testid="order-ref">
@@ -298,21 +304,15 @@ export function OrderDetail({
             </div>
             {po.sentAt ? (
               <div>
-                <dt className="text-xs text-subtle">
-                  {po.sentChannel && data.supplierMessage !== 'not_configured' && data.supplierMessage !== 'failed'
-                    ? t(data.supplierMessage === 'pending' ? 'detail.sendingVia' : 'detail.sentVia', {
-                        channel: t(`detail.channelNames.${po.sentChannel as 'email' | 'whatsapp'}`),
-                      })
-                    : t('detail.sentAt')}
+                {/* Pilot (S16 step 4): "sent" only when the provider took it; else "recorded". */}
+                <dt className="text-xs text-subtle" data-testid="placed-label">
+                  {sendState === 'sent' && sendChannel
+                    ? t('detail.sentVia', { channel: t(`detail.channelNames.${sendChannel}`) })
+                    : t('detail.recordedAt')}
                 </dt>
                 <dd className="text-ink">
-                  <DateTimeText value={po.sentAt} locale={locale} />
+                  <DateTimeText value={sendStatus.data?.sentAt ?? po.sentAt} locale={locale} />
                 </dd>
-                {data.supplierMessage === 'not_configured' || data.supplierMessage === 'failed' ? (
-                  <dd className="mt-1 text-xs text-muted" data-testid="supplier-message-state" data-state={data.supplierMessage}>
-                    {t(data.supplierMessage === 'failed' ? 'detail.messageFailed' : 'detail.messageNotConfigured')}
-                  </dd>
-                ) : null}
               </div>
             ) : null}
             <div>
@@ -379,6 +379,15 @@ export function OrderDetail({
             </div>
           ) : null}
         </div>
+        {po.sentAt && po.status !== 'cancelled' ? (
+          <SendStatusNote
+            className="mt-4"
+            poId={po.id}
+            state={sendState}
+            channel={sendChannel}
+            sentAt={sendStatus.data?.sentAt ?? null}
+          />
+        ) : null}
         {sending !== null ? (
           <UndoCountdown
             className="mt-4"

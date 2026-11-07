@@ -1,3 +1,5 @@
+import { checkInvoice } from './checks';
+import type { InvoiceExtractionV2 } from './providers/invoiceSchema';
 import { reconcile } from './reconciler';
 import {
   DEFAULT_REVIEW_THRESHOLD,
@@ -14,7 +16,9 @@ import {
  *   1. Run both providers in parallel.
  *   2. Reconcile their outputs (field-by-field with tolerance).
  *   3. Optionally enrich each line with product candidates from the catalog.
- *   4. Compute overall confidence and human-review flag.
+ *   4. Run the arithmetic gate (./checks): a read that doesn't add up, a bad
+ *      ח״פ or a partial/hand-corrected document goes to a person.
+ *   5. Compute overall confidence and human-review flag.
  *
  * The pipeline is pure (no DB or HTTP) — callers wire up providers and the
  * catalog matcher via dependency injection. Production uses Google Document AI
@@ -28,12 +32,42 @@ export async function runOcrPipeline(
   // (Document AI not yet live). Call it once — two identical paid extractions
   // added cost and latency but no information (the reconciler sees full
   // agreement either way).
+  const singleProvider = options.documentAi === options.claude;
   const [documentAi, claude] =
-    options.documentAi === options.claude
+    singleProvider
       ? await options.claude.extract(image).then((r) => [r, r] as const)
       : await Promise.all([options.documentAi.extract(image), options.claude.extract(image)]);
 
-  const { result: reconciledInvoice, conflicts, confidence } = reconcile(documentAi, claude);
+  const reconciledResult = reconcile(documentAi, claude);
+  const { result: reconciledInvoice, conflicts } = reconciledResult;
+
+  // v2 document-level fields come from the Claude read (the reconciler only
+  // compares the canonical fields); the gate runs on the reconciled numbers.
+  const v2 = claude as Partial<InvoiceExtractionV2>;
+  Object.assign(reconciledInvoice, {
+    ...pick(v2, [
+      'documentKind',
+      'buyer',
+      'deliveryNotes',
+      'periodStart',
+      'periodEnd',
+      'invoiceDiscount',
+      'continuesOnAnotherPage',
+      'handwrittenCorrection',
+    ]),
+  });
+  if (v2.totals?.vatRate !== undefined) reconciledInvoice.totals.vatRate = v2.totals.vatRate;
+  const checks = checkInvoice(reconciledInvoice, {
+    expectedSupplierBusinessId: options.expectedSupplierBusinessId,
+  });
+
+  // Single provider: there is nothing to reconcile, so "agreement" said 1.0 and
+  // the owner's threshold never fired. Use the model's own confidence, capped by
+  // the gate.
+  const confidence = singleProvider
+    ? Math.min(claude.confidence ?? 1, checks.score)
+    : Math.min(reconciledResult.confidence, checks.score);
+  reconciledInvoice.confidence = confidence;
 
   if (options.catalogMatcher) {
     const matcher = options.catalogMatcher;
@@ -46,6 +80,7 @@ export async function runOcrPipeline(
   const reviewThreshold = options.reviewThreshold ?? DEFAULT_REVIEW_THRESHOLD;
   const matcherWasUsed = options.catalogMatcher !== undefined;
   const needsHumanReview =
+    !checks.passed ||
     confidence < reviewThreshold ||
     hasLowConfidenceLines(reconciledInvoice) ||
     (matcherWasUsed && hasUnresolvedLines(reconciledInvoice));
@@ -57,7 +92,14 @@ export async function runOcrPipeline(
     confidence,
     needsHumanReview,
     conflicts,
+    checks,
   };
+}
+
+function pick<T extends object, K extends keyof T>(obj: T, keys: K[]): Partial<Pick<T, K>> {
+  const out: Partial<Pick<T, K>> = {};
+  for (const k of keys) if (obj[k] !== undefined) out[k] = obj[k];
+  return out;
 }
 
 async function enrichLine(
