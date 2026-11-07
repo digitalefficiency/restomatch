@@ -24,8 +24,8 @@
 2. **The agent is a thin, role-scoped skin over procedures we already have.** It reuses the Ask engine (tool loop, budgets, grounding, offline fallback). Its tools are the existing tRPC procedures, run server-side under the person's own session and RLS. The model **proposes**; the server **decides** (§D).
 3. **WhatsApp identifies a chat. It does not authorise money.** A phone is bound to (user, restaurant, role) only through a two-factor wa.me code sent from a signed-in web session. A button tap commits a money decision only through a server-made, amount-specific, single-use, idempotent token. Large amounts step up to the web (§C).
 4. **Role safety is enforced on the server, before the model sees data.** The receiver's tool results contain no ₪ keys at all. A receiver- or chef-facing agent waits for G-07 + H-11ʰ. Prompts never carry authorisation (§C).
-5. **Cost is small and is never netted against the leak.** *Superseded by `30-cost-model.md` (verified tier prices): typical ≈ **₪24/restaurant/month** (₪7 light → ₪65 heavy), ≈ 4% of Pro.* First estimate: realistic ≈ **₪14 per restaurant per month at pilot** and ≈ **₪21 at 100 restaurants** (Meta fees + LLM tokens, direct Cloud API). Worst case (every person at the alert cap, every model exchange on the top tier without caching) ≈ ₪65. That is 2–4% of Pro (₪590/month) realistically, ~11% in the worst case. The hard ceiling on model spend is the restaurant's existing Ask budget (≈ $3/day, ≈ ₪289/month at 26 days), not the per-person turn limit (§E).
-6. **12 packages, WA-01…WA-12, 4 of them human-PR.** The server-side core starts after W3-γ (5.1.2027). The owner read-only pilot on WhatsApp lands after H-05 (deploy 19.1) and the wave-4 deploy (2.2). Decisions over WhatsApp follow, then chef, then receiver (after H-11ʰ). Meta Business Verification and the privacy pack start **now**, because they take elapsed weeks (§F).
+5. **Cost is small and is never netted against the leak.** *Superseded by `30-cost-model.md` (verified tier prices): typical ≈ **₪24/restaurant/month** (₪8–₪62 light→heavy at 10 restaurants), ≈ 4.1% of Pro.* First estimate: realistic ≈ **₪14 per restaurant per month at pilot** and ≈ **₪21 at 100 restaurants** (Meta fees + LLM tokens, direct Cloud API). Worst case (every person at the alert cap, every model exchange on the top tier without caching) ≈ ₪65. That is 2–4% of Pro (₪590/month) realistically, ~11% in the worst case. The hard ceiling on model spend is the restaurant's existing Ask budget (≈ $3/day, ≈ ₪289/month at 26 days; ≈ ₪333 at 30 days, metered at the top-tier rate), not the per-person turn limit (§E).
+6. **13 packages, WA-00…WA-12 (WA-00ʰ = the December pull-only pilot, added later), 5 of them human-PR.** The server-side core starts after W3-γ (5.1.2027). The owner read-only pilot on WhatsApp lands after H-05 (deploy 19.1) and the wave-4 deploy (2.2). Decisions over WhatsApp follow, then chef, then receiver (after H-11ʰ). Meta Business Verification and the privacy pack start **now**, because they take elapsed weeks (§F).
 7. **Our edge:** nobody runs the invoice-leak loop in the owner's chat. MarketMan and Zestt order from their apps; Choco reads WhatsApp on the distributor's side; Toast and Square have in-app assistants; Meta's Business Agent serves the restaurant's *diners* (§G).
 
 ---
@@ -121,7 +121,7 @@ After "אשר 96 ₪" (committed, then reported):
 - **Tool calls:** `approvals.myQueue` (memberProcedure; with W2-04's `canAct`/`waitingOn`) to build cards · on confirm `approvals.approve` or `approvals.reject` (**deciderProcedure** = owner/manager/bookkeeper; `ensureCanAct` checks `requiredRole`) · undo `approvals.reopen` (deciderProcedure).
 - **Confirmed how:** two taps. The first records intent; the second names the exact amount and commits through `withIdempotency` (G-05) keyed on the WhatsApp message id of the tap. The decision's audit row carries `source: 'whatsapp'`, the staged-action id and the user id.
 - **Undo:** `REOPEN_WINDOW_MS` is 15 seconds today ([code] `approvals.ts:62`), too short for a chat. Proposal: a **10-minute** undo for WhatsApp-originated decisions (WD3), changed in the approvals *router* (not the immutable `approvals/engine.ts`).
-- **Step-up:** a single decision above the owner's WhatsApp limit (WD2: recommended **₪1,000** per decision and **₪3,000** per day) gets a [CTA ↗] "לאישור באפליקציה" instead of the confirm button.
+- **Step-up (WD2, decided: the binding ₪500 one-tap rule):** an item above **₪500** claimable (W2-04's `ONE_TAP_APPROVE_CAP_AGOROT`), any block, any bulk request, or an item routed to another role gets a [CTA ↗] "לאישור באפליקציה" instead of the confirm button, with no token; the server refuses those even with a valid token.
 - **MISSING_ON_INVOICE:** such a line is never shown as a "לתבוע" card. It appears, if at all, as information with [פרטים] only.
 - **Taps today:** tap the e-mail, sign in, approvals, open row, choose, confirm ≈ 5–7 taps. **WhatsApp:** 2 taps per gap, with no sign-in.
 
@@ -296,7 +296,7 @@ Supplier documents keep arriving through the restaurant's existing intake channe
 
 This needs **no authentication template** (the user writes first, inbound is free), and no code is ever sent *to* the phone, so code-sharing scams have nothing to steal.
 
-**Multi-membership.** A person with several restaurants or roles starts in the **least-privileged** role. "החלף מסעדה" or "החלף תפקיד" opens a list message. Every switch is logged and shown in the next reply's header line ("ביסטרו הכרמל · מנהל").
+**Multi-membership.** One active binding per `(phone_hash, restaurant_id)` (unique `WHERE revoked_at IS NULL`); opt-in and notice version stored per binding; the resolver returns only the caller's own active bindings; each restaurant's owner lists and revokes only their own row; a role change or removal at restaurant B kills only the B context. A person with several restaurants or roles starts in the **least-privileged** role. "החלף מסעדה" or "החלף תפקיד" opens a list message. Every switch is logged and shown in the next reply's header line ("ביסטרו הכרמל · מנהל").
 
 **Re-verification.** Repeat steps 2–3:
 - every **90 days** (ASSUMPTION);
@@ -312,14 +312,14 @@ This needs **no authentication template** (the user writes first, inbound is fre
 - Onboarding recommends two-step verification on staff phones (a tip; not enforceable). RestoMatch's own sending number has two-step verification on, with the PIN held by a human (Phase-6).
 
 ### C.2 Identical permissions to the web, enforced on the server
-- Every tool is an existing tRPC procedure called through a **server-side caller** with `ctx.session = { userId, restaurantId, role }` taken from the binding. It goes through the same tier middleware, the same `withRestaurant` RLS transaction and `app.current_user_id` as the web ([code] `trpc.ts:98-132`). **No tenant id, user id or role ever comes from model output.**
+- Every tool is an existing tRPC procedure called through a **server-side caller** with `ctx.session = { userId, restaurantId, role }` taken from the binding. It goes through the same tier middleware, the same `withRestaurant` RLS transaction and `app.current_user_id` as the web ([code] `trpc.ts:98-132`). **No tenant id, user id or role ever comes from model output.** Agent turns run on the **app-role connection** (`DATABASE_URL_APP` / `resolveWebDbUrl`), also when invoked from `/api/cron/jobs`; the owner connection appears only inside named `SECURITY DEFINER` functions (test: `current_user = restomatch_app` in a tool call and in a commit). `activeContext()` re-reads `memberships`, `users.phone`, `phone_verified_at` and `tokenVersion` on every inbound message and in the commit transaction; any failure suspends the binding.
 - **Redaction before the model.** Every tool result passes a role filter (G-07 `money.view` / `price.view`, then H-11ʰ's server strip) **before** the model or a template sees it. The receiver's context contains no ₪ field at all. The chef's contains ₪ only from order and recipe procedures. The Ask grounding check guards *figures*; it does not decide *who may see them*.
 - **Per-role tool allow-list** (the model cannot call anything outside it):
 
 | Role | Read tools | Proposal tools (staged, need a tap) |
 |---|---|---|
 | Owner | leakHero, queueSummary/myQueue, leak_breakdown/report, claimable_lines, recovery.list, vatAtRisk, close status | approve_gap, waive_gap, mark_letter_sent, draft_claim_letter, create_order_draft |
-| Manager | myQueue, leak tools (as web), todayExpectations, sendStatus, supplierConfirm.responses | approve_gap, waive_gap, approve_unknown_document, postpone_delivery, create_confirm_link, create_order_draft |
+| Manager | myQueue, leak tools (as web), todayExpectations, sendStatus, supplierConfirm.responses | approve_gap, waive_gap (WD2: ≤ ₪500, manager-routed items only), postpone_delivery, create_confirm_link, create_order_draft |
 | Bookkeeper | myQueue, payRun.month, vatAtRisk, close status, recovery.list | approve_gap, waive_gap, mark_letter_sent |
 | Chef | orders.list/get (own restaurant), order guide | create_order_draft, edit_order_line, cancel_draft |
 | Receiver | todayExpectations (no ₪), receipt status | start_receipt, mark_gr_line, submit_receipt |
@@ -329,15 +329,15 @@ This needs **no authentication template** (the user writes first, inbound is fre
 ### C.3 Money actions: button, amount-specific confirm, undo, audit, idempotency
 1. The model may only **propose** a typed action from the role's list (for example `approve_gap{discrepancyId}`).
 2. The server validates it against the database, the tenant, the role and `requiredRole`. It **computes the ₪ itself** from the row, stores a staged action (single-use token, 30-minute expiry, payload hash, amount in agorot) and sends the confirm button with the amount in its title.
-3. The tap's button id carries the token. A commit happens only when the token is valid, unexpired, unused, matches the same binding and the row has not changed since staging (the existing optimistic `checkedRow` → `decidedConflict` check).
+3. The tap's button id carries the token. A commit happens only when the token is claimed with `UPDATE … WHERE status='staged' AND expires_at > now() RETURNING`, matches the same binding, the tap's `context.id` equals the outbound wamid that carried the token, the payload hash recomputed over `(id, type, deltaAmount, status, requiresRole, match_run_id)` matches, and the row has not changed since staging (the existing optimistic `checkedRow` → `decidedConflict` check).
 4. The commit runs the **real** mutation under `withIdempotency` (G-05), keyed on the WhatsApp message id of the tap (`wa:<wamid>`). A redelivered webhook or a double tap cannot decide twice. Inbound message ids are also unique-indexed.
-5. **Audit:** `audit_log` gets user id, role, `source: 'whatsapp'`, the staged-action id, the server-computed ₪, before/after and timestamps. Audit rows are append-only.
+5. **Audit:** the decision's own audit row (approve/reject/reopen) carries a server-only `ctx.channel = { source: 'whatsapp', stagedActionId }` in its `after`, plus user id, role, the server-computed ₪ and timestamps. No separate WhatsApp row is written ahead of it, because `approvals.reopen` reads the latest audit row (alternative: `entityType 'wa_staged_action'` with `reopen` checking `wa_staged_actions` committed). Test: a WhatsApp approve + undo within 10 min succeeds. Audit rows are append-only.
 6. **Undo:** 10 minutes for WhatsApp-originated decisions (WD3), offered in the "done" message.
 7. **Step-up:** above the WD2 limit, or for any action on the never list, the button is replaced by a CTA into the signed-in web app.
 8. **Owner rules that lower the bar** (for example "approve automatically when the gap is under ₪20") are owner-configured on the web (AU-01's automations page). The default is always "confirm".
 
 ### C.4 Prompt-injection defences (OWASP LLM01)
-- **Documents and messages are data.** OCR text, forwarded supplier messages, PDFs and voice transcripts go into a delimited data field, never into instructions. Only the person's own typed text is a request, and only within their role.
+- **Documents and messages are data.** OCR text, forwarded supplier messages, PDFs and voice transcripts go into a delimited data field, never into instructions. Only the person's own typed text is a request, and only within their role. Forwards are detected from `context.forwarded` / `frequently_forwarded` (field names unverified) and take the data-only path.
 - **Tools are allow-listed per role** (C.2). There is **no send-to-supplier tool, no payment tool, no SQL tool, no free-form HTTP tool** and no tool that takes a tenant or user id.
 - **No free-form SQL.** Every read is an existing procedure with a typed input.
 - **Output hygiene.** The grounding check strips links, phone numbers, e-mail addresses and unmatched figures from model prose ([code] `ask/grounding.ts`). Deep links are appended by the server **after** grounding, never written by the model.
@@ -349,12 +349,14 @@ This needs **no authentication template** (the user writes first, inbound is fre
 - **Roles:** the restaurant is most likely the controller of its staff and supplier data; RestoMatch is its "holder" (processor). RestoMatch is the controller for account and billing data and its own security logs. (ASSUMPTION A in ext-03.)
 - **Sub-processors:** Meta (WhatsApp Cloud API; messages kept at most 30 days, encrypted at rest; "no storage" and "local storage" options exist [Meta, via extract]) and the LLM provider (the latest Claude models via a commercial API with no training on inputs; the retention terms to be confirmed in Phase-6). Both are cross-border transfers that need a lawful basis (the PPA's 13 Apr 2026 position on foreign cloud providers).
 - **Holder agreement (DPA)** with each restaurant, listing the sub-processors. A one-page **DPIA** for the agent. A named privacy contact.
-- **Purpose limitation:** the agent is **not** a staff-monitoring tool. Response times only route the next alert; they are never shown as a per-person score.
+- **Purpose limitation:** the agent is **not** a staff-monitoring tool. No "last activity" per person (the owner sees "connected since" + "נתק"); response-time telemetry at restaurant level only. Connecting a personal phone is optional; web and push cover every job; the labour-law point goes to the lawyer.
+- **No training:** Meta's terms forbid using WhatsApp data, even anonymised, to train or improve any ML model; the AI-vendor contract must guarantee no training (confirm in WA-12ʰ).
+- **Lawyer list additions (unverified):** the s.17B security-officer duty; written undertakings from Meta and Anthropic under the 2001 Transfer Regulations reg. 3; breach notification under the Data Security Regulations; WD9 against the ≥ 24-month access-log duty.
 - **Retention (proposal, WD9):**
 
 | Data | Keep | Then |
 |---|---|---|
-| Binding (user, restaurant, role, verified_at, notice version) | life of membership | hashed number kept for audit only |
+| Binding (user, restaurant, role, verified_at, notice version) | life of membership | the phone hash (HMAC-SHA256 with a rotatable pepper over strict E.164) is personal data with its own end date; the DSR job revokes bindings, deletes conversation rows and nulls text before deleting the user |
 | Inbound message text (redacted of phone numbers) | 30 days | delete |
 | Raw inbound media | 90 days | keep only the invoice/receipt record (it has its own tax-retention duty) |
 | Model trace (intent, tools, figures, grounded flag) | 90 days | keep the decision record only |
@@ -365,15 +367,15 @@ This needs **no authentication template** (the user writes first, inbound is fre
 - **Never in a WhatsApp message or a prompt:** anyone's personal ID number, bank account or card details, passwords or one-time codes, salary data. Supplier bank details never enter the agent's context.
 
 ### C.6 Opt-in notice and AI disclosure (Hebrew; lawyer to review)
-Shown on the web before step 2 of C.1, and repeated in the first reply:
+Shown on the web before step 2 of C.1, and repeated in the first reply. It also states: connecting WhatsApp is optional and everything stays in the app; the controller's identity and contact; a privacy-notice and rights link; a retention summary. The notice version is stored per binding; the lawyer reviews it in WA-12ʰ:
 > אתם מתחברים לעוזר האוטומטי של RestoMatch בשם {מסעדה}. העוזר מבוסס בינה מלאכותית. הוא מעבד את ההודעות, התמונות ומספר הטלפון שלכם כדי להציג לכם את המשימות שלכם ולבצע פעולות שתאשרו בלחיצה. ההודעות עוברות דרך WhatsApp (Meta) ודרך ספק בינה מלאכותית מחוץ לישראל. כדי להפסיק בכל רגע, כתבו "עצור". לדבר עם אדם, כתבו "אדם".
 
 The opt-in names the business (Meta rule [Meta] https://developers.facebook.com/documentation/business-messaging/whatsapp/getting-opt-in) and is stored in `users.whatsapp_opt_in` (H-03ʰ) with the notice version. Staff alerts are not advertising; any marketing over WhatsApp needs separate written consent under section 30A (lawyer to confirm).
 
 ### C.7 Quiet hours, caps, rate limits, kill-switch
-- **Quiet hours 23:00–06:00 and Shabbat/holidays** for every proactive send, through `notify()` and the single `sendWindow` rule (#173). A held message goes out at 06:00, or after Shabbat ends. Only an owner rule can let a T2 alert through (WD4).
+- **Quiet hours 23:00–06:00 and Shabbat/holidays** for every proactive send, through `notify()` and the single `sendWindow` rule (#173). A held message goes out at 06:00, or after Shabbat ends. No exceptions in v1 (WD4); anything not sent inside the user's own turn is proactive. WA-06ʰ is gated on #173 (`sendWindow` is not on `main`). A per-person rest day is a lawyer item.
 - **≤ 6 proactive alerts per person per day.** Replies to a person who just wrote are not alerts (WD4); they have their own limit below.
-- **Rate limits** (proposal): per sender 20 inbound messages a minute and 300 a day; one in-flight model task per conversation; per person 30 model turns a day inside the restaurant's Ask budget (60 questions and ≈ $3 a day, [code] `ask/budget.ts`); media size caps as Meta's (image 5 MB, document 100 MB). The webhook keeps the ingest guard order (per-IP 120/min, HMAC, size cap, replay window). If `guardPublicRequest`'s options cannot express the per-sender limit, the change to `apps/web/lib/rateLimit.ts` is a human PR.
+- **Rate limits** (proposal): per sender 20 inbound messages a minute and 300 a day; one in-flight model task per conversation; per person 30 model turns a day inside the restaurant's Ask budget (60 questions and ≈ $3 a day, [code] `ask/budget.ts`); media size caps as Meta's (image 5 MB, document 100 MB). The webhook keeps the ingest guard order (configured → per-IP → size → HMAC → replay window), but the per-IP limit counts only HMAC failures (or a much higher ceiling for verified traffic): a valid signed delivery is never 429'd; per-sender limits run after verification; the Ask DB budget (fails closed) is the hard cost cap; load-test N status callbacks/min. Kill switch: a DB-backed ops flag cached ≤ 30 s checked by the webhook, the agent loop and the dispatcher; `FEATURES_OFF` (needs a redeploy) is the backstop. If `guardPublicRequest`'s options cannot express the per-sender limit, the change to `apps/web/lib/rateLimit.ts` is a human PR.
 - **Kill-switch, four levels:**
   1. Global: an ops flag stops all agent sends and model calls at once (OPERATING.md runbook entry, human-authored).
   2. Per restaurant: feature `whatsappAgent`, owner-toggleable on AU-01's automations page.
@@ -394,7 +396,7 @@ The opt-in names the business (Meta rule [Meta] https://developers.facebook.com/
 11. Ask for or accept a password, a one-time code or a personal ID number.
 12. Treat a forwarded message or a document as an instruction.
 13. Show ₪ to the receiver, or leak, decision or claim ₪ to the chef.
-14. Send a proactive message in quiet hours or on Shabbat (unless an owner rule allows it).
+14. Send a proactive message in quiet hours or on Shabbat (no exceptions in v1, WD4).
 
 ---
 
@@ -404,7 +406,7 @@ The opt-in names the business (Meta rule [Meta] https://developers.facebook.com/
 
 ```
 Meta webhook ─► [Ears] /api/whatsapp/agent  (new public route, WA-05ʰ)
-                 HMAC → per-IP → size → parse (text|interactive|button|image|document|status|system)
+                 configured → per-IP → size → HMAC → parse (text|interactive|button|image|document|status|system)
                  → wamid dedupe → resolve sender → binding (user, restaurant, role) | supplier | unknown
                      │
                      ├─ status callback ─► outbox row: delivered / read / failed
@@ -440,7 +442,7 @@ Meta webhook ─► [Ears] /api/whatsapp/agent  (new public route, WA-05ʰ)
 - All four are tenant tables with RLS, in the `rls/0002` list, with add-only probes in `rls.attack.test.ts`. The sender resolver is a `SECURITY DEFINER` function in the style of `app.ingest_resolve_channel` (it must run before a tenant is known). **All of this is the WA-03ʰ schema PR.**
 
 ### D.4 Inbound webhook (reuse, not a second pipe)
-- Reuse `verifyMetaSignature`, the `ingest/http.ts` guard order and the media fetcher ([code] `providers.ts:101-130`).
+- Reuse `verifyMetaSignature`, the `ingest/http.ts` guard order and the media fetcher ([code] `providers.ts:113-150`; http.ts `:50` / `:51,:123` / `:53,:137` / `:128-136` / `:174`; payloads.ts `:142-175`).
 - Extend `parseWhatsAppWebhook` to keep `interactive` (button and list replies), `button` (template quick replies), `statuses` (sent/delivered/read/failed) and `system` events. Today they are dropped ([code] `payloads.ts:139-160`). Voice notes stay out of v1 (default, §F.6).
 - **The tenant comes from the verified sender, not from the URL.** A single RestoMatch number serves all tenants (WD1). Today's per-restaurant intake tokens keep working unchanged.
 - Media from a bound receiver, manager or owner goes into the **existing** `processInboundMessage` with the binding's restaurant, so OCR, dedupe and the allow-list logic stay single-sourced.
@@ -503,7 +505,7 @@ A test harness that turns a golden conversation into Meta-shaped webhook payload
 
 ## E. Cost per restaurant per month
 
-> **Superseded by `notes/30-cost-model.md`** (added after the owner's addendum, Claude prices verified on the official page 2026-11-07): typical ≈ ₪24 (₪7–₪65 light→heavy, direct Cloud API), ≈ 4% of Pro. The small-tier price below ($1/$5) is outdated; the current small tier is $0.10/$0.50 and the mid tier $2/$10, with cache reads at 0.05× input on the mid and top tiers. The first estimate is kept for traceability.
+> **Superseded by `notes/30-cost-model.md`** (added after the owner's addendum, Claude prices verified on the official page 2026-11-07): typical ≈ ₪24 (₪8–₪62 light→heavy at 10 restaurants; ₪15–₪65 at the pilot; ₪7–₪61 at 100; direct Cloud API), ≈ 4.1% of Pro; like-for-like worst case ≈ ₪72–75; Ask ceiling ≈ ₪333/month. The small-tier price below ($1/$5) is outdated; the current small tier is $0.10/$0.50 and the mid tier $2/$10, with cache reads at 0.05× input on the mid and top tiers. The first estimate is kept for traceability.
 
 **Assumptions (all stated, all to be measured):**
 - One RestoMatch number for all tenants; **direct Cloud API** (no BSP fee).
@@ -565,7 +567,7 @@ A test harness that turns a golden conversation into Meta-shaped webhook payload
 | **WA-11** | Ops, cost and kill-switch: `whatsappAgent` flag levels, AU-01 automations row, AU-07 metrics, cost meter + per-restaurant daily cap, fallback rules, `docs/COSTS.md` line | web-feature-engineer · leak-economist (COSTS) · human for the OPERATING.md runbook entry | `packages/api/src/agent/ops/**`, `docs/COSTS.md` | AU-01, AU-07, WA-06ʰ | WA-D, alongside WA-08 | M | partly (OPERATING.md is human) |
 | **WA-12ʰ** | Phase-6 human intake: Meta app + Business Verification, the number, display name, two-step PIN, template submission, payment method and balance alert; the LLM provider's no-training/retention terms; lawyer's privacy pack (holder role, DPA, notice text, transfer basis, DPIA, security level, section 30A) | human only (the owner) | none (credentials and legal text) | none | **start now**; verification and legal take elapsed weeks; templates submitted once WA-06ʰ's text is final | S of work, weeks elapsed | **yes** (human only) |
 
-**Dependency spine:** WA-12ʰ (now) ∥ WA-01 (Dec) → WA-02 (Jan) → WA-03ʰ (2.2) → WA-04 + WA-07 → WA-05ʰ + WA-06ʰ → WA-08 (owner pilot, Feb) → WA-11 → WA-09 and WA-10 (Mar).
+**Dependency spine:** WA-12ʰ (≥ 12.11) ∥ WA-01 (Dec) → WA-02 (Jan) → WA-03ʰ (≥ 9.2) → WA-04 + WA-07 → WA-05ʰ + WA-06ʰ → WA-08 (owner pilot, Feb) → WA-11 → WA-09 and WA-10 (Mar).
 
 ### F.3 HUMAN-PR items (4 + human-only)
 1. **WA-03ʰ** schema + RLS + resolver (merge = production deploy; backup and the 2nd gate).
@@ -597,7 +599,7 @@ Dates are proposals and move with the programme plan.
 | 4 | Prompt injection through invoices or forwarded messages | Data-not-instructions, per-role tool allow-list, no send/payment/SQL tools, grounding, attack fixtures |
 | 5 | "Done" narrated without a state change (Instinct) | Done messages built from the committed row only; the model cannot confirm |
 | 6 | A utility template re-billed as marketing (≈ 6.7×) | No promo lines; `template_category_update` alert and pause |
-| 7 | WhatsApp outages (11–22 h in 2026) or a billing lapse | Push + e-mail fallback for every T2; billing/balance alert; web inbox always |
+| 7 | Cloud API partial disruptions (up to ~11–22 h in 2026) plus one global Meta outage (~2–4 h, 12 Jun 2026) or a billing lapse | Push + e-mail fallback for every T2; billing/balance alert; web inbox always |
 | 8 | Cost runaway (chatty users, loops) | Per-person budgets, rate limits, one in-flight task, model-off mode, daily per-restaurant cap |
 | 9 | Business Verification or legal sign-off late | WA-12ʰ starts now; E1/E2 need neither |
 | 10 | Slot and review contention (wave 3–4 is full; 4 more human PRs) | WA inside the AU allowance; server-only during W4-01; Hebrew one-pagers; WA-06ʰ folded into H-05's review where possible |
@@ -607,7 +609,17 @@ Dates are proposals and move with the programme plan.
 ### F.6 Owner decisions (≤ 10)
 
 - **WD1 · Number model and route.** One shared RestoMatch number for all restaurants, direct Cloud API; or a number per restaurant; or a BSP. **Recommendation:** one shared number, direct Cloud API; 360dialog only as a fallback if Meta onboarding stalls.
-- **WD2 · What a WhatsApp tap may do with money.** **Recommendation:** claim or waive a gap with a two-tap, amount-named confirm, up to **₪1,000 per decision and ₪3,000 per person per day**; above that, a link to the app. Payments, pay runs and "mark paid" never.
+- **WD2 · Money by tap: DECIDED (binding owner rule: one-tap WhatsApp approve at ₪500 per item; wave-2 README §7 and review decision #10).** A tap commits only when ALL hold:
+  1. the role passes the engine's `requiredRole`: a manager only on manager-routed items (₪50–300 cumulative per invoice / 2–5%, or `approvalThresholds`); the owner on owner-routed items and every block; the bookkeeper per `DECIDER_ROLES`; receiver and chef never;
+  2. claimable ₪ ≤ ₪500, computed by the server and named on the button: W2-04's `ONE_TAP_APPROVE_CAP_AGOROT` (PR #209, `bulkPolicy.ts`), imported; WA defines no constant of its own;
+  3. not a block, never bulk;
+  4. the server refuses > ₪500 or a block even with a valid token;
+  5. a waive that releases an invoice (`payRun.ts:14-23` hold → pay): the confirm shows the released invoice total; proposal for owner OK: the cap applies to max(gap, released invoice);
+  6. unknown-document approval and DUPLICATE "not a duplicate" are web-only in v1;
+  7. anything else → CTA "לאישור באפליקציה", no token;
+  8. never from WhatsApp: payments, pay runs, mark paid, bulk release, allow-list/intake changes, cap changes. AU-01 overrides may only LOWER the cap;
+  9. undo 10 min (WD3); a credit note has no undo, so corrections on the web only; the undo must pass `approvals.reopen`'s audit check.
+  Commit via `approvals.approve` / `reject` with `channel: 'quick'`.
 - **WD3 · Undo window for WhatsApp decisions.** **Recommendation:** 10 minutes (the web keeps 15 seconds).
 - **WD4 · What counts toward "6 alerts a day" and quiet hours.** **Recommendation:** only proactive messages count; replies to a person who just wrote do not, but are limited to 30 model turns per person per day. Quiet hours and Shabbat hold every proactive message, with no exceptions in v1.
 - **WD5 · Owner brief time and days.** **Recommendation:** 07:30 Sunday–Friday, skipped when nothing waits; on a new `cron.ts` line in WA-06ʰ (or riding 06:00 with a delayed send if you prefer no new slot).
@@ -615,8 +627,9 @@ Dates are proposals and move with the programme plan.
 - **WD7 · Packaging.** **Recommendation:** included in Pro and Chain (cost ≈ ₪24 per typical restaurant per month, `30-cost-model.md`); Basic gets alert templates only, with no conversational agent. Any plan change is an H-10-style human PR.
 - **WD8 · Model tier and budget.** **Recommendation:** a small tier of the latest Claude models for routing and simple reads, the top tier for complex requests; per-person 30 turns a day inside the restaurant's existing 60-question, ≈ $3/day Ask budget.
 - **WD9 · Retention and Meta storage.** **Recommendation:** the C.5 table (text 30 days, media 90 days, traces 90 days); ask the lawyer whether to use Meta's "no storage" mode.
-- **WD10 · December pull-only pilot (WA-00ʰ, added after the owner's 13:07Z addendum).** **Recommendation:** yes: the RestoMatch owner on lab data, then the pilot owner read-only (≈ 22.12–31.12); in-window replies only, no templates, no schema, an env allow-list; a human-authored reply path beside the outbox that WA-05ʰ deletes. Alternative: wait for E3 (Feb).
-- **Defaults (not decisions):** voice notes are not in v1 (revisit after E4 with he-IL transcription and "transcript shown before any write"); WA-12ʰ starts this week.
+- **WD10 · December pull-only pilot (WA-00ʰ, added after the owner's 13:07Z addendum).** **Recommendation:** yes: the RestoMatch owner on lab data (deploy Tue 22.12 via W3-α with owner OK and a named reviewer, or Tue 5.1 with W3-γ); the pilot owner read-only only after WA-12ʰ steps 6–7 (transfer basis, DPA, no-training terms); in-window replies only, no templates, no schema, an env allow-list; a human-authored reply path beside the outbox that WA-05ʰ deletes. Alternative: wait for E3 (Feb).
+- **Defaults (not decisions):** voice notes are not in v1 (revisit after E4 with he-IL transcription and "transcript shown before any write"); WA-12ʰ owner-only steps 1, 2, 7 start ≥ Thu 12.11; no WA session or decision before Sat 14.11.
+- **WD11 · Daily totals (OPEN):** a per-person WhatsApp money cap (≤ ₪1,500 a day, or none); a per-restaurant daily WhatsApp ₪ cap; and an owner e-mail/push for every WhatsApp money decision and every new binding (anti SIM-swap). Recommendation: a per-restaurant daily cap plus the owner notice on every money decision and binding.
 
 ### F.7 Success metrics
 **Adoption and speed (measured by AU-07; baselines taken in the 2 weeks before E3):**
@@ -648,7 +661,7 @@ Dates are proposals and move with the programme plan.
 | **MarketMan** | Par-based suggested POs approved in its own app, sent to suppliers; no WhatsApp channel found (UNVERIFIED) [vendor] | We meet the owner in the chat they already live in, and we audit the invoice after the order: the leak ₪ per supplier, with the claim ready |
 | **Zestt (Zester)** | Purchasing and inventory app; WhatsApp ordering to non-integrated suppliers UNVERIFIED [vendor] | Same as MarketMan; and role-safe chat (receiver no ₪) for small teams |
 | **Choco (Autopilot)** | Reads WhatsApp/SMS/voicemail orders **on the distributor's side**; "processes 50% of orders" for early adopters [vendor] | We sit on the restaurant's side and check what the distributor billed. Our default is the reverse of Autopilot: the human sends; automation only by owner rule |
-| **Meta Business Agent** | Global since 3.6.2026, free at launch [press]; token-billed ($2 per 1M tokens) from 1.8.2026 [Meta]; answers the business's *customers* | It knows nothing about invoices, agreed prices or claims. We serve the staff, about their own money. At Meta's example size (≈ 4–5 US cents a message) it costs ~10× the Meta fee we pay per reply ($0.0053), or ~4× our all-in cost per reply (that fee plus ≈ $0.005 of model tokens, §E) |
+| **Meta Business Agent** | Global since 3.6.2026, free at launch [press]; token-billed ($2 per 1M tokens) from 1.8.2026 [Meta]; answers the business's *customers* | It knows nothing about invoices, agreed prices or claims. We serve the staff, about their own money. At Meta's example size (≈ 4–5 US cents a message) it costs ~8–9× the Meta fee we pay per reply ($0.0053), or ~4× our all-in cost per reply (that fee plus ≈ $0.005 of model tokens, §E) |
 | **Toast IQ / Square AI** | In-app assistants; Square limits use to owners/admins [vendor/press] | Our agent is in WhatsApp, not behind an app login, and it is role-aware beyond owner/admin: chef and receiver get their jobs without ₪ |
 | **Restaurant365** | Capture AI for AP; no chat agent found [vendor] | The leak loop (found → decided → claimed → credited) in two taps, at an owner-operator price |
 | **Restomate "Tom" (IL)** | WhatsApp alerts on raw-material price rises with "switch supplier" options [vendor] | We hold the supplier to the **agreed** price and draft the claim; we don't push supplier switching (later in ICP.md) |

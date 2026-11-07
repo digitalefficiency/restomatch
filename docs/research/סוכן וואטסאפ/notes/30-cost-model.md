@@ -3,11 +3,11 @@
 **Date:** 2026-11-07. **Question (owner):** "Show me what our costs are for this."
 **Scope:** the marginal monthly cost of the WhatsApp business-function agent per restaurant: Meta fees, LLM tokens, infra, BSP. OCR of WhatsApp photos stays in the existing OCR line of `docs/COSTS.md` and is not counted here. This is a cost line, never netted against the leak ₪.
 **Calculator inputs and precomputed results:** `wa-cost-params.json` (session scratchpad; every number below comes from it).
-**No model identifiers** are written here; tiers are named by marketing name ("Haiku tier", "Sonnet tier", "Opus tier").
+**No model identifiers** are written here; tiers are named "small / mid / top tier of the latest Claude models"; prices are kept.
 
 ## 0. Headline
 
-**A typical restaurant costs ≈ ₪24 a month (≈ 4% of Pro's ₪590). The range is ₪7 to ₪65 across the light, typical and heavy profiles. Against the ₪2,250+ a month that the North Star leak surfaces for a Pro-sized restaurant, that is about 1:90.** The §E estimate (₪14 realistic) **rises to ≈ ₪24**, mainly because the tool-using answers now run on the mid tier at its verified price, and because the model now counts a fixed cost for the number. The worst case (≈ ₪65) still holds for a heavy restaurant on the default tiers. A heavy restaurant at every cap, on the top tier with no caching and with templates mis-billed as marketing, reaches ≈ ₪273. The Ask budget still caps model spend at ≈ ₪289.
+**A typical restaurant costs ≈ ₪24 a month, ≈ 4.1% of Pro's ₪590 (₪8–₪62 light→heavy at 10 restaurants; ₪15–₪65 at the 3-restaurant pilot; ₪7–₪61 at 100). Against the ₪2,250+ a month that the North Star leak surfaces for a Pro-sized restaurant, that is about 1:92.** The §E estimate (₪14 realistic) **rises to ≈ ₪24**, mainly because the tool-using answers now run on the mid tier at its verified price, and because the model now counts a fixed cost for the number. The worst case (≈ ₪65) still holds for a heavy restaurant on the default tiers. A heavy restaurant at every cap, on the top tier with no caching and with templates mis-billed as marketing, reaches ≈ ₪273. The Ask budget still caps model spend at ≈ ₪289.
 
 ## 1. Sources and verification status
 
@@ -16,24 +16,24 @@ Labels: **VERIFIED** = read on the vendor's own page this session. **VERIFIED (e
 | # | Fact | Value used | Status | Source |
 |---|---|---|---|---|
 | M1 | Billing per delivered message by category since **1 Jul 2025**, replacing conversation-based billing | — | VERIFIED (extract) + SECONDARY | https://developers.facebook.com/documentation/business-messaging/whatsapp/pricing ; deprecated conversation page https://developers.facebook.com/documentation/business-messaging/whatsapp/pricing/conversation-based-pricing ; Twilio notice https://support.twilio.com/hc/en-us/articles/53100480177819 |
-| M2 | From **1 Oct 2026**, service (non-template) messages are charged per message after **1,000 free per business phone number per month**. Free messages do not roll over; charging starts at the 1,001st. | 1,000 per number, 1 number | VERIFIED (extract) | https://developers.facebook.com/documentation/business-messaging/whatsapp/pricing/non-template-messages |
+| M2 | From **1 Oct 2026**, service (non-template) messages are charged per message after **1,000 free per business phone number per month**. Free messages do not roll over; charging starts at the 1,001st. | 1,000 per number, 1 number | VERIFIED: Meta page via search extract, corroborated by Twilio (help article 53100480177819), 360dialog and the tobachat mirror | https://developers.facebook.com/documentation/business-messaging/whatsapp/pricing/non-template-messages |
 | M3 | Service rate = the market's utility/authentication rate; **no volume tiers** on service | = utility | VERIFIED (extract) | same |
 | M4 | From 1 Oct 2026, **utility templates sent inside the 24-h window are charged** | all templates billed | VERIFIED (extract) | same; Twilio's page agrees |
 | M5 | Whether in-window utility messages count toward the 1,000 free | assumed **not** (conservative) | UNVERIFIED (Meta's pages are silent) | — |
 | M6 | No payment method → service messages beyond the free tier are not delivered | go-live prerequisite | VERIFIED (extract) | M2 page |
 | M7 | Free-entry-point window: all categories free, "up to 7 days" | not used (no ads) | VERIFIED (extract) | M2 page |
-| M8 | **Israel utility/auth ≈ $0.0053, marketing ≈ $0.0353** | base case | SECONDARY (Mumble "Meta rate card effective 1 Apr 2026"; agentdeals; RichAutomate cites the 1 Oct 2026 card for marketing $0.0353) | https://mumble.co.il/messages-pricing-calculator/ ; https://agentdeals.dev/whatsapp-business-api-pricing-2026 ; https://richautomate.in/blog/whatsapp-api-pricing-by-country-2026 |
-| M9 | Conflicting Israel rows: **$0.0056 / $0.0371** ("rate card effective July 2026", GoHighLevel); **$0.0061 / $0.0406** (ManyChat table effective 1 Jan 2026, per search summary) | high-rate sensitivity uses $0.0061 | SECONDARY, conflicting | https://ideas.gohighlevel.com/changelog/updated-whatsapp-per-message-pricing-effective-july-2026 ; https://help.manychat.com/hc/en-us/articles/14281380243740 |
-| M10 | "Israel Q2 2026 repricing" of utility | consistent with the Jan→Apr drop in M8/M9 | UNVERIFIED (blog, no figures) | https://blogs.timesofisrael.com/israels-quiet-q2-2026-bot-pricing-reset/ |
+| M8 | **Israel (Meta rate card effective 1 Oct 2026, via the tobachat mirror; source: Meta pricing page, checked 27.10.2026):** marketing $0.0353, utility $0.0053, authentication $0.0053, service $0.0053. Israel is not among the Oct-2026 changed rates | base case | VERIFIED via mirror (tobachat CHANGELOG / USD.csv row Israel 0.0353/0.0053/0.0053/—/0.0053) + SECONDARY (Mumble, agentdeals, RichAutomate) | mirror of https://developers.facebook.com/documentation/business-messaging/whatsapp/pricing |
+| M9 | Conflicting Israel rows: **$0.0056 / $0.0371** ("rate card effective July 2026", GoHighLevel); **$0.0061 / $0.0406** (ManyChat table effective 1 Jan 2026, per search summary) | high-rate sensitivity uses $0.0061 | SECONDARY, conflicting | https://ideas.gohighlevel.com/changelog/updated-whatsapp-per-message-pricing-effective-july-2026 ; https://help.manychat.com/hc/en-us/articles/14281380243740 (superseded by M8; sensitivity only) |
+| M10 | "Israel Q2 2026 repricing" blog (Times of Israel) | superseded: no Israel figures; Israel is not among the Oct-2026 changed rates | SUPERSEDED | https://blogs.timesofisrael.com/israels-quiet-q2-2026-bot-pricing-reset/ |
 | M11 | Some BSPs pass the change on later (Salesforce: in-window utility and service charged from **1 Nov 2026**) | n/a for direct | SECONDARY | https://www.salesforce.com/en-us/wp-content/uploads/sites/4/WhatsApp-Business-Messaging-1000-Nov-2026.docx.pdf |
 | B1 | **Twilio:** $0.005 per message, **inbound and outbound**, on top of Meta; ~$0.001 per failed message | $0.005 | SECONDARY (Twilio support notice + customer.io) | https://support.twilio.com/hc/en-us/articles/53100480177819 ; https://docs.customer.io/accounts/billing/whatsapp-billing/ |
 | B2 | **360dialog:** flat licence per number, ~€49/$59 Regular, $99–119 Premium; no per-message markup | $59/month | SECONDARY (listing sites; no official price list found this session) | https://pricingsaas.com/companies/360dialog |
 | B3 | **Gambot** from ₪179/month + VAT; **Reepli** from ₪275/month per bot; **Pulseem** ~₪200/month up to 10k messages | ₪179 | SECONDARY, carried from ext-02 (not re-checked; search returned nothing newer) | https://gambot.co.il/PriceList/ ; https://www.reepli.ai/he/resources/whatsapp-business-api-pricing/ |
-| L1 | **Haiku tier (5.5):** $0.10 in / $0.50 out per MTok (prompts ≤ 100K tokens; $0.50/$2.50 beyond); 5-min cache write $0.125; cache read $0.01 | cheap tier | **VERIFIED** | https://platform.claude.com/docs/en/about-claude/pricing |
-| L2 | **Sonnet tier (5.5):** $2 / $10; cache write $2.50 (5 min), $4 (1 h); **cache read $0.10 (0.05×)** | mid tier | **VERIFIED** | same |
-| L3 | **Opus tier (5.5):** $4 / $20; cache write $5; **cache read $0.20 (0.05×)** | top tier (never by default) | **VERIFIED** | same |
-| L4 | Cache multipliers: 5-min write 1.25×, 1-h write 2×, read 0.1× (0.05× on the 5.5 Sonnet and Opus tiers); Batch API −50% (not for live chat); `inference_geo: us` ×1.1 (not used) | — | **VERIFIED** | same |
-| L5 | Tool-use system prompt adds 286 tokens per call (5.5 tiers, tool_choice auto) | in prefix | **VERIFIED** | same |
+| L1 | **Small tier:** $0.10 in / $0.50 out per MTok (prompts ≤ 100K tokens; $0.50/$2.50 beyond); 5-min cache write $0.125; cache read $0.01 | cheap tier | **VERIFIED** | https://platform.claude.com/docs/en/about-claude/pricing |
+| L2 | **Mid tier:** $2 / $10; cache write $2.50 (5 min), $4 (1 h); **cache read $0.10 (0.05×)** | mid tier | **VERIFIED** | same |
+| L3 | **Top tier:** $4 / $20; cache write $5; **cache read $0.20 (0.05×)** | top tier (never by default) | **VERIFIED** | same |
+| L4 | Cache multipliers: 5-min write 1.25×, 1-h write 2×, read 0.1× on the small tier (0.05× on the mid and top tiers); Batch API −50% (not for live chat); `inference_geo: us` ×1.1 (not used) | — | **VERIFIED** | same |
+| L5 | Tool-use system prompt adds 286 tokens per call (latest tiers, tool_choice auto) | in prefix | **VERIFIED** | same |
 | I1 | Vercel Pro $20/seat/month with a $20 usage credit; invocations $0.60/M; Active CPU $0.128/CPU-h (iad1; region rates vary, prod runs in hnd1) | negligible marginal | SECONDARY (vercel.com not reached) | https://makerkit.dev/blog/saas/vercel-cost ; https://temps.sh/blog/vercel-pricing-2026-pro-plan-explained |
 | I2 | Supabase Pro $25/org/month incl. $10 compute credit, 8 GB DB, 100 GB file storage, 250 GB egress | negligible marginal | SECONDARY (supabase.com not reached) | https://makerkit.dev/blog/saas/supabase-pricing ; https://www.jetadmin.io/blog/supabase-pricing-2026-guide-to-plans-limits-and-real-world-costs/ |
 | F1 | FX: last Bank of Israel representative rate found **₪3.059/$ (5 Oct 2026)**; the dollar fell from 3.28 (Oct 2025) to 2.81 (May 2026) | model uses **₪3.7/$** (conservative, as briefed); sensitivity at 3.059 | SECONDARY | https://www.hon.co.il/ (investment guide citing BoI) |
@@ -107,7 +107,10 @@ total₪          = (metaUsd + llmUsd) × fx + infraIls + bspIls
 |---|---|---|---|---|---|
 | **Base** | 8.0 | 26.8 | 24.3 | 23.4 | 62.2 |
 | Every model call on the mid tier (router and brief too) | 9.5 | 29.0 | 26.6 | 25.7 | 67.4 |
-| No prompt caching (h = 0) | 9.9 | 33.8 | 31.4 | 30.5 | 81.2 |
+| Cache always misses (h = 0, write premium paid) | 9.9 | 33.8 | 31.4 | 30.5 | 81.2 |
+| Caching off (no write premium) | 9.3 | 31.7 | 29.3 | 28.4 | 75.5 |
+| **Mid-tier output ×2 / ×3** | 9.1 / 10.3 | 31.1 / 35.5 | 28.7 / 33.1 | 27.8 / 32.2 | 74.0 / 85.8 |
+| Service replies free (pre-1.10.2026 rule) | 7.8 | 26.3 | 19.3 | 16.6 | 46.5 |
 | Every call on the top tier, uncached | 19.7 | 61.6 | 59.1 | 58.2 | 154.0 |
 | **Templates billed as marketing by mistake** ($0.0353) | 13.5 | 40.0 | 37.5 | 36.6 | 95.5 |
 | Meta high rates ($0.0061 utility/service) | 8.1 | 27.2 | 25.5 | 24.8 | 65.4 |
@@ -116,9 +119,13 @@ total₪          = (metaUsd + llmUsd) × fx + infraIls + bspIls
 | BSP: 360dialog ($59/number/month, fleet-shared) | 29.8 | 99.5 | 46.2 | 25.6 | 84.0 |
 | BSP: Gambot (₪179/month, fleet-shared) | 25.9 | 86.4 | 42.2 | 25.2 | 80.1 |
 
-**Extreme case:** a heavy restaurant at the template cap (936), every call on the top tier uncached, at pilot scale, costs **≈ ₪169**. If its templates are also mis-billed as marketing, it costs **≈ ₪273** (46% of Pro). It is bounded by the Ask budget (≈ $3/day ≈ ₪289/month of model spend) and by the AU-07/WA-11 per-restaurant daily cap.
+**Extreme case:** a heavy restaurant at the template cap (936), every call on the top tier uncached, at pilot scale, costs **≈ ₪169**. If its templates are also mis-billed as marketing, it costs **≈ ₪273** (46% of Pro). It is bounded by the Ask budget (≈ $3/day ≈ ₪333/month over 30 days; the meter prices every token at the top-tier rate, `budget.ts:19-21`) and by the AU-07/WA-11 per-restaurant daily cap.
 
-What moves the number most, in order: **model tier** (top tier ≈ 2.4× the base), **template category** (marketing ≈ +₪13 for a typical restaurant), **a BSP at pilot scale** (a flat licence ≈ +₪60–73 per restaurant when only 3 share it), **caching** (+₪7), FX (−15%). Meta rate drift between the conflicting secondary rows is noise (< ₪1.5 typical, ≈ ₪3 heavy).
+**Like-for-like worst case:** typical usage at the template cap (780 = 5 people × 6 × 26), every call on the top tier uncached: **≈ ₪72–75** (₪74.8 / 72.4 / 71.5 at 3 / 10 / 100). Heavy on default tiers (₪61–65) is a different scenario. Alert at ≈ ₪75 for typical, or per profile.
+
+*Footnote:* if in-window utility templates were also free under the old rule, typical@10 would be ₪17.0.
+
+What moves the number most, in order: **model tier** (top tier ≈ 2.4× the base), **template category** (marketing ≈ +₪13 for a typical restaurant), **a BSP at pilot scale** (a flat licence ≈ +₪60–73 per restaurant when only 3 share it), **mid-tier output length** (×2 → +₪4.4, ×3 → +₪8.8: pin effort low/medium on WA answer calls and measure output tokens in AU-07), **caching** (+₪5 to +₪7), FX (−15%). Meta rate drift between the conflicting secondary rows is noise (< ₪1.5 typical, ≈ ₪3 heavy).
 
 ## 6. Against the ₪ the product surfaces
 
@@ -131,20 +138,20 @@ North Star leak = 1.5% of food spend (`docs/ICP.md`, `docs/GTM.md`):
 | ₪250k | ₪3,750 | 1:471 | 1:154 | 1:60 |
 | ₪400k | ₪6,000 | 1:754 | 1:247 | 1:97 |
 
-(Ratios at 10 restaurants. Heavy usage comes from bigger kitchens, so the heavy column mostly pairs with the larger spend rows.) As a share of Pro: **≈ 1–2.5% light, ≈ 4–4.5% typical, ≈ 10–11% heavy.** Pro's ≥ 75% gross-margin target in `docs/COSTS.md` holds in every non-extreme row.
+(Ratios at 10 restaurants. Heavy usage comes from bigger kitchens, so the heavy column mostly pairs with the larger spend rows.) As a share of Pro: **≈ 1–2.5% light, ≈ 4–4.5% typical, ≈ 10–11% heavy.** Pro stays ≥ 75% gross margin for light and typical; heavy (₪61–65) drops to ≈ 73–74% at `docs/COSTS.md`'s ~$25 midpoint, so watch heavy tenants in AU-07. `docs/COSTS.md` itself is stale (ARPU ₪400, a $1 WhatsApp line): flag for a leak-economist refresh.
 
 ## 7. Reconciliation with §E of 10-design-and-plan.md
 
 | §E said | This model | Why |
 |---|---|---|
-| Realistic ≈ **₪14** at pilot, ≈ ₪21 at 100 | Typical ≈ **₪27 at pilot, ₪24 at 10, ₪23 at 100** | (1) Tool-using answers run on the **mid tier** at its verified $2/$10, not 80% on a "$1/$5 small tier" (that is the older Haiku 4.5 price; the current cheap tier is $0.10/$0.50, so §E's small tier was really a mid-tier mix). (2) A **₪30 fixed number cost** is now counted, ₪10 per restaurant at pilot. (3) A thinking allowance in output. Partly offset by verified cache reads at **0.05×** (not 0.1×) on the 5.5 Sonnet and Opus tiers. The 100-restaurant figure barely moves because the fixed cost amortises. |
+| Realistic ≈ **₪14** at pilot, ≈ ₪21 at 100 | Typical ≈ **₪27 at pilot, ₪24 at 10, ₪23 at 100** | (1) Tool-using answers run on the **mid tier** at its verified $2/$10, not 80% on a "$1/$5 small tier" (that is an older small-tier price; the current small tier is $0.10/$0.50, so §E's small tier was really a mid-tier mix). (2) A **₪30 fixed number cost** is now counted, ₪10 per restaurant at pilot. (3) A thinking allowance in output. Partly offset by verified cache reads at **0.05×** (not 0.1×) on the 5.5 Sonnet and Opus tiers. The 100-restaurant figure barely moves because the fixed cost amortises. |
 | ~200 model exchanges | 148 (typical) | Taps, commands and photos are routed deterministically. |
 | LLM ≈ ₪9 | ₪13.6 typical | as above |
-| Worst ≈ **₪65** (top tier, uncached, cap) | All-top uncached on **typical** usage ≈ ₪58–62; **heavy on default tiers ≈ ₪61–65** | consistent; §E's worst is the heavy-profile number |
-| Hard ceiling = Ask budget ≈ ₪289 | unchanged; the model's extreme case is ₪273 | — |
+| Worst ≈ **₪65** (top tier, uncached, cap) | Like-for-like (typical, template cap 780, top tier uncached) **≈ ₪72–75**; heavy on default tiers ≈ ₪61–65 is a different scenario | §E's worst was understated |
+| Hard ceiling = Ask budget ≈ ₪289 | **≈ ₪333** (30 days × $3 × 3.7; metered at the top-tier rate); the model's extreme case is ₪273 | §E used 26 days |
 | 2–4% of Pro realistically | **≈ 4%** typical, 1–2.5% light | the realistic share moves to the top of §E's range |
 
-**Recommended edit to §E** (for a human or the leak-economist, not made here): change "Realistic ≈ ₪14 … ≈ ₪21 at 100" to "Typical ≈ ₪24 (₪7–₪65 light→heavy), ≈ 4% of Pro". Replace the "$1/$5 small tier" with the verified tier prices. Note the 0.05× cache read on the mid and top tiers.
+**Recommended edit to §E** (for a human or the leak-economist, not made here): change "Realistic ≈ ₪14 … ≈ ₪21 at 100" to "Typical ≈ ₪24 (₪8–₪62 light→heavy at 10), ≈ 4.1% of Pro" (done: §E now points here). Replace the "$1/$5 small tier" with the verified tier prices. Note the 0.05× cache read on the mid and top tiers.
 
 ## 8. Recommendation
 
@@ -153,4 +160,4 @@ North Star leak = 1.5% of food spend (`docs/ICP.md`, `docs/GTM.md`):
 3. **Keep templates strictly utility.** No promo line. Subscribe to `template_category_update`. This is the single cheapest risk to remove (+₪13 per typical restaurant).
 4. **Put a payment method and a balance alert on the WhatsApp account before go-live.** The shared 1,000 free replies run out at about the third typical restaurant.
 5. **Budget line for `docs/COSTS.md`** (leak-economist): ₪25 per restaurant per month (typical, rounded up), alert at ₪65, hard stop by the Ask budget. Re-price after 30 days of AU-07 telemetry.
-6. **Open items:** read Meta's official Israel rate-card row (allow `developers.facebook.com` in the session network, or a human downloads the CSV). Confirm whether in-window utility counts against the 1,000 free messages. Check the Vercel hnd1 regional rates and the current BoI rate.
+6. **Open items:** the Israel row is now taken from Meta's 1.10.2026 card via the tobachat mirror (closed). Still open: whether in-window utility counts against the 1,000 free messages. Check the Vercel hnd1 regional rates and the current BoI rate.

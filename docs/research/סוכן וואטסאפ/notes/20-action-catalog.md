@@ -18,12 +18,12 @@
 |---|---|---|
 | **pilot (read-only, Dec)** | Read-only answer to a message the person sends first (no template needed, no write, no button that commits). Specified and tested from December on the WA-01 golden set and simulator (E1). It reaches a real phone on a Meta test number (E2, late Jan) and then the pilot tenant (E3, mid-Feb) only once WA-12ʰ verification and WA-03ʰ/04/05ʰ are in. | WA-01 + WA-02 (+ WA-08 owner reads) |
 | **after H-05** | Needs outbound: an approved utility template outside the 24-hour window, or interactive buttons/lists through the outbox. Includes **non-money** one-tap writes. | H-05ʰ + WA-06ʰ (deploy 2.2) + WA-05ʰ |
-| **after WA-07 (money)** | Any action with a ₪ effect or a claim-status change: staged single-use token, exact ₪ in the button title, idempotent commit, audit `source:'whatsapp'`, 10-minute undo where reversible, WD2 step-up. | WA-07 (E4, late Feb) |
+| **after WA-07 (money)** | Any action with a ₪ effect or a claim-status change: staged single-use token, exact ₪ in the button title, idempotent commit, audit `source:'whatsapp'`, 10-minute undo where reversible, WD2 ₪500 one-tap cap (decided). | WA-07 (E4, late Feb) |
 | **later** | Chef flows (WA-09, needs G-07 chef profile + W3-09, ~Mar), receiver flows (WA-10, ≥ 2 weeks after H-11ʰ in production, ~Mar), or a procedure that does not exist yet (e.g. the close checklist). | WA-09 / WA-10 / named owner package |
 
 **Binding rules repeated on every money action (owner rules + design §C.3):**
 - Confirm is a **button whose title carries the exact ₪** ("אשר ₪96"). Free-text "כן" commits nothing.
-- **Above ₪1,000 per decision or ₪3,000 per person per day** → a CTA "לאישור באפליקציה" into the signed-in web app instead of the confirm button (WD2).
+- **WD2 (decided, the binding owner rule):** a button only when the role passes `requiredRole` (manager only on manager-routed items, ₪50–300 cumulative per invoice / 2–5%; owner on owner-routed items and every block; bookkeeper per `DECIDER_ROLES`), the claimable ₪ is **≤ ₪500** (W2-04's `ONE_TAP_APPROVE_CAP_AGOROT`), not a block and not bulk. Anything else → a CTA "לאישור באפליקציה" into the signed-in web app, no token; the server refuses > ₪500 or a block even with a valid token. A waive that releases an invoice shows the released invoice total. Daily totals are open (WD11).
 - **10-minute undo** where the action is reversible (WD3). Commit under `withIdempotency` keyed `wa:<wamid>`; staged token expires after 30 minutes.
 - The "done" message is built from the committed row only.
 - **MISSING_ON_INVOICE** is never a claim card and never in a leak figure (`NEVER_CLAIMABLE_TYPES`, `lib/claims.ts:22`; `LEAK_FILTER` once #211 lands).
@@ -193,7 +193,7 @@
 - Confirm: `לאשר תביעה של ₪96 מירקות השרון על חשבונית 20931?` → `[אשר ₪96]` `[ביטול]`.
 - Done: `נרשם: ₪96 נוספו לתביעה מול ירקות השרון. אפשר לבטל עד 07:52.` → `[בטל]` `[הפער הבא]`.
 - tRPC: `approvals.approve` (deciderProcedure; `ensureCanAct` + `requiredRole`).
-- Confirm/undo: two taps; amount-named token; idempotent `wa:<wamid>`; 10-min undo (OWN-10). Above ₪1,000 (or ₪3,000/day) → `[לאישור באפליקציה]` CTA.
+- Confirm/undo: two taps; amount-named token; idempotent `wa:<wamid>`; 10-min undo (OWN-10). Above ₪500, a block, or another role's item → `[לאישור באפליקציה]` CTA, no token (WD2).
 - ₪: all. Steps: web 5–7 + sign-in · WA 2.
 
 **OWN-09 · Waive a gap, with a reason** — *after WA-07 (money)* · WA-07/08
@@ -232,7 +232,7 @@
 - Trigger: "ירקות השרון זיכו 96 על חשבונית 20931" or `[קיבלנו זיכוי]` on a claim.
 - Confirm: `לרשום זיכוי של ₪96 מירקות השרון מ-07.11 מול התביעה על חשבונית 20931?` → `[אשר זיכוי ₪96]` `[ביטול]`.
 - tRPC: `recovery.recordCreditNote` (recoveryProcedure; `idempotencyKey` = derived from `wamid`) · `recovery.creditLineSuggestions` to match.
-- Undo: none on WhatsApp (no delete path, and deletion is never from WhatsApp) → correction on the web. Step-up above ₪1,000. ₪: all. Steps: web 5–6 · WA 2.
+- Undo: none on WhatsApp (no delete path, and deletion is never from WhatsApp) → correction on the web. Step-up above ₪500 (WD2). ₪: all. Steps: web 5–6 · WA 2.
 
 **OWN-15 · "כמה מע״מ בסיכון?"** — *pilot* · WA-08
 - Message: `מע״מ בסיכון: ₪1,870 ב-3 חשבוניות בלי מספר הקצאה. המועד הקרוב: 15.11.`
@@ -266,7 +266,7 @@
 **MGR-02 · Claim or waive a gap within my limit** — *after WA-07 (money)* · WA-07/08
 - Same cards, list and confirms as OWN-08/09/10: `[לתבוע מהספק]` `[לוותר]` `[פרטים]` → `[אשר ₪132]` / `[אשר ויתור ₪132]` → `[בטל]` (10 min).
 - tRPC: `approvals.approve` / `reject` / `reopen` (deciderProcedure; `requiredRole` blocks owner-only items).
-- Step-up: above ₪1,000 / ₪3,000 a day → app. ₪: decisions. Steps: web 5–7 · WA 2.
+- Step-up: above ₪500, a block, or an owner-routed item → app (WD2; a manager acts only on manager-routed items). ₪: decisions. Steps: web 5–7 · WA 2.
 
 **MGR-03 · Escalate a gap to the owner** — *after WA-07 (money)* · WA-07/08
 - Trigger: `[לבעלים]` in the card's `[פרטים]` view.
@@ -298,10 +298,9 @@
 - tRPC: `receiving.getReceipt` (member) · `orders.get` (member). The money decision, if the invoice still bills the full amount, arrives later as a normal gap (MGR-02). ₪: manager may see. Steps: web 4–5 · WA 1.
 
 **MGR-08 · Document from an unknown number** — *after H-05* · WA-08
-- Message: `התקבלה חשבונית ממספר שלא מוכר לנו (‎+972-5X-XXX-1234‎). לשייך לספק?` → `[שייך לספק]` `[דחה]` `[פרטים]`.
-- List: button `בחר ספק`, ≤ 10 suppliers, last row `עוד… (באפליקציה)`.
-- Confirm: `לשייך את המסמך לירקות השרון?` → `[שייך]` `[ביטול]`.
-- tRPC: `ingest.approveDocument` / `ingest.rejectDocument` (manager). Adding the number to the allow-list (`ingest.addSender`) stays **web-only** (§C.8 #6). ₪: none needed. Steps: web 4–5 · WA 2–3.
+- Message: `התקבלה חשבונית ממספר שלא מוכר לנו (‎…1234‎). אפשר לשייך אותה באפליקציה.` → `[פתח באפליקציה]` `[פרטים]`.
+- **v1: notice only, the approval is web-only** (WD2 rule 6): `approve_unknown_document` takes `allowSender` + a client `supplierId`, so it stays in the signed-in web app. `[דחה]` may come later once reviewed.
+- tRPC: none from WhatsApp in v1 (`ingest.approveDocument` / `ingest.rejectDocument` on the web). Adding the number to the allow-list (`ingest.addSender`) stays **web-only** (§C.8 #6). ₪: none needed. Steps: web 4–5 · WA 1 + web.
 
 **MGR-09 · "שלח לירקות השרון אישור על הזמנה 1043"** — *after H-05* · WA-08
 - Message: `קישור האישור להזמנה 1043 מוכן. הספק יוכל לאשר או לעדכן כמויות.` + CTA `[שלח מהוואטסאפ שלי]`.
@@ -430,14 +429,14 @@ All receiver actions wait for **H-11ʰ in production for 2 weeks + G-07**, and a
 
 **BKP-07 · Decide a gap** — *after WA-07 (money)* · WA-07/08
 - Same cards and confirms as OWN-08/09/10 (`[אשר ₪96]`, `[אשר ויתור ₪96]`, `[בטל]` 10 min), limited by `requiredRole`.
-- tRPC: `approvals.approve` / `reject` / `reopen` (deciderProcedure includes bookkeeper). Step-up above ₪1,000 / ₪3,000 a day. ₪: all. Steps: web 5–7 · WA 2.
+- tRPC: `approvals.approve` / `reject` / `reopen` (deciderProcedure includes bookkeeper). Step-up above ₪500 or on a block (WD2). ₪: all. Steps: web 5–7 · WA 2.
 
 **BKP-08 · Claim status change** — *after WA-07 (money)* · WA-07/08
 - Trigger: "קצביית הכרם אישרו את התביעה" → `לסמן את התביעה של ₪860 מול קצביית הכרם כ"הספק אישר"?` → `[אשר ₪860]` `[ביטול]`.
 - tRPC: `recovery.transition` (`to: 'letter_sent' | 'acknowledged' | 'disputed'`; `credited`, `written_off` and bulk changes stay on the web). Undo 10 min. ₪: all. Steps: web 4 · WA 2.
 
 **BKP-09 · Record a supplier credit** — *after WA-07 (money)* · WA-07/08
-- As OWN-14: `[אשר זיכוי ₪96]`. tRPC: `recovery.recordCreditNote`. No undo on WhatsApp; corrections on the web; step-up above ₪1,000. ₪: all. Steps: web 5–6 · WA 2.
+- As OWN-14: `[אשר זיכוי ₪96]`. tRPC: `recovery.recordCreditNote`. No undo on WhatsApp; corrections on the web; step-up above ₪500 (WD2). ₪: all. Steps: web 5–6 · WA 2.
 
 ---
 
@@ -544,7 +543,7 @@ Asked on WhatsApp, each gets a short fixed refusal plus a deep link to the web w
 | 13 | Show ₪ to the receiver, or leak/decision/claim ₪ to the chef | server strip (G-07 + H-11ʰ) |
 | 14 | Send a proactive message in quiet hours or on Shabbat (unless an owner rule allows it) | held until 06:00 / after Shabbat |
 
-**Also out of v1 by design (not on the §C.8 list, but not offered):** money decisions above ₪1,000 per decision or ₪3,000 per day (step-up to web), voice notes (WD10), any open-domain question (Meta policy; "ask our AI anything" is forbidden positioning), and server sends to suppliers after one owner tap (AU-17, a later owner decision).
+**Also out of v1 by design (not on the §C.8 list, but not offered):** money decisions above ₪500 per item, any block and any bulk decision (step-up to web, WD2), unknown-document approval and DUPLICATE "not a duplicate" (web-only in v1), voice notes (default), any open-domain question (Meta policy; "ask our AI anything" is forbidden positioning), and server sends to suppliers after one owner tap (AU-17, a later owner decision).
 
 ---
 
@@ -553,5 +552,5 @@ Asked on WhatsApp, each gets a short fixed refusal plus a deep link to the web w
 1. **"Dec pilot" vs the plan.** Per §F.4 the first real-phone exposure is E2 (late Jan, Meta test number, lab data) and E3 (mid-Feb, pilot tenant). December is the golden-set and simulator work (WA-01). The 19 "pilot" actions are the read-only set those experiments run.
 2. **New procedures this catalogue assumes:** `claimLetters.draft` and `claimPortal.responses` (H-06ʰ), `orders.reviseExpectedDate` (W3-09), `close.status` (W3-05a), `whatsapp.muteToday` and `whatsapp.switchContext` (WA-04). Each needs an add-only COVERAGE entry and a cross-tenant attack test.
 3. **New template:** `rm_receipt_mismatch` (PRO-12) is not in §D.6 yet.
-4. **Credit notes have no undo** (OWN-14/BKP-09): `recovery.recordCreditNote` has no reverse path, and deletion is never from WhatsApp. Owner to confirm that this is acceptable with the amount-named confirm and the ₪1,000 step-up.
+4. **Credit notes have no undo** (OWN-14/BKP-09): `recovery.recordCreditNote` has no reverse path, and deletion is never from WhatsApp. Owner to confirm that this is acceptable with the amount-named confirm and the ₪500 cap (WD2).
 5. **All step counts are ASSUMPTIONS** until AU-07 measures them.

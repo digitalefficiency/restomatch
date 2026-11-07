@@ -30,6 +30,13 @@ DoD-1..9 of the wave-2 README apply to any screen (WA-04's connect page, WA-11's
 8. **Money rules.** ₪ only via G-13 `moneyText` (server) / `formatIls()` (UI); the model never formats ₪. MISSING_ON_INVOICE is never claimable (`NEVER_CLAIMABLE_TYPES`, `lib/claims.ts:22`) and leaves the leak ₪ via `LEAK_FILTER` (`packages/charts/src/leak-views.ts:134`) once #211 (train B) lands; on `main` today `LEAK_FILTER` still counts it. A claim is overdue after 7 days (`recovery/service.ts:322`). Hours-₪ and money-₪ are never summed; WhatsApp claims **no new leak ₪** (it speeds the recovery bundle up).
 9. **WhatsApp is never the only channel.** Every T2 item stays in the web inbox and falls back to push/e-mail on a failed or unreceipted send (design §D.10).
 10. **Dedupe and KPI hook.** Every send has a stable `dedupeKey` (`wa:<template|flow>:<restaurantId>:<userId>:<IL date or entity>`); every proposal, confirm, expiry, refusal and opt-out writes `activity_events`/`audit_log` with `automationId: 'WA'` and `channel: 'whatsapp'` so AU-07 counts it with no schema change.
+11. **App-role connection only.** Agent turns and WA-07 commits run on the app-role connection (`DATABASE_URL_APP` / `resolveWebDbUrl`), also when called from `/api/cron/jobs`; the owner connection is used only inside named `SECURITY DEFINER` functions. Test: `current_user = restomatch_app` inside a tool call and inside a commit. Each message is processed in its own `withRestaurant` transaction; group-context messages are ignored.
+12. **Identity re-checked every message.** `activeContext()` re-reads `memberships`, `users.phone`, `phone_verified_at` and `tokenVersion` on every inbound message and again inside the commit transaction; any failure suspends the binding. Revoke on: phone changed/unverified, `tokenVersion` bump, admin set, DSR erasure, restaurant deletion, a Meta number/identity-change event (SIM swap; field names unverified → suspend until re-confirmed on the web). Owner e-mail/push on every new binding (and every WhatsApp money decision, WD11).
+13. **Forwards and taps.** Parse `context.forwarded` / `frequently_forwarded` / `context.id` (field names unverified); forwarded content takes a data-only path. A tap is accepted only when `context.id` equals the outbound wamid that carried its token.
+14. **Rate limits never drop signed traffic.** Per-IP limits count HMAC failures only (or a much higher ceiling for verified traffic); never 429 a valid signed delivery; per-sender limits run after verification; the Ask DB budget (fails closed) is the hard cost cap. Load-test N status callbacks/min.
+15. **Templates and variables.** Templates carry counts + a deep link, no ₪ and no supplier names. Every template/interactive variable passes the link/phone sanitiser plus a length cap (golden case: a supplier named "www.x.co.il 054-…").
+16. **Kill switch is fast.** A DB-backed ops flag cached ≤ 30 s, checked by the webhook, the agent loop and the dispatcher; `FEATURES_OFF` (needs a redeploy) stays as the backstop; the runbook also lists disabling the webhook in the Meta app.
+17. **Quiet hours = WD4, no exceptions in v1.** Anything not sent inside the user's own turn is proactive. WA-06ʰ is gated on #173 (`sendWindow` is not on `main`). A per-person rest day is a lawyer item.
 
 ## 3. Merge protocol and communication
 - Draft PR titled `wa(WA-xx): <title>`; body sections as the AU README §5 (Acceptance · Evidence · Builds on · Owner decisions applied · Off switch · KPI hook · Placeholders · Path additions · API for dependents · Human-PR proposals).
@@ -50,8 +57,8 @@ DoD-1..9 of the wave-2 README apply to any screen (WA-04's connect page, WA-11's
 | WA-01 | `api/agent/__tests__/golden/**` (cases), `api/agent/__tests__/sim/**` (simulator), `api/agent/__tests__/recorded/**` | golden set stays with test-sentinel |
 | WA-02 | `api/agent/{index,router,registry,redact,render,links,budget,prompt}.ts`, `api/agent/tools/**`; `ask/**` only as a W3-04b addendum line (`channel` option) | `agent/**` core → WA-07/08 add files only |
 | WA-03ʰ | `packages/db/src/schema.ts` (4 tables), one migration, `rls/0002` list, `rls.ts`, `rls.attack.test.ts` (add-only probes) | schema → H-lane owner |
-| WA-04 | `api/agent/identity/**`, `api/routers/whatsapp.ts` (pre-registered empty), `apps/web/app/dashboard/settings/whatsapp/**` (≥31.1) | settings page → W3-07a's successor |
-| WA-05ʰ | `apps/web/app/api/whatsapp/agent/**`, `api/agent/http.ts`, `packages/ingest/src/payloads.ts` (additive parse), `api/__tests__/wa-webhook.attack.test.ts`, `publicPaths.ts` one line | `payloads.ts` → ingest owner |
+| WA-04 | `api/agent/identity/**`, `api/routers/whatsapp.ts` (pre-registered empty); asks for a carve-out of `apps/web/app/dashboard/settings/whatsapp/**` after W3-07a-2 + W4-01 (read-only until then) | settings page → W3-07a's successor |
+| WA-05ʰ | `apps/web/app/api/whatsapp/agent/**`, `api/agent/http.ts`, `api/__tests__/wa-webhook.attack.test.ts`; **ask first:** `packages/ingest/**` is unowned, so the orchestrator grants the additive `payloads.ts` parse and the one orchestrator-serialised `publicPaths.ts` line | `payloads.ts` → ingest owner |
 | WA-06ʰ | `api/notifications/**` incl. `outbox.ts`, `apps/worker/src/cron.ts`, `jobs/outboxDispatch.ts` (inside H-05's paths) | → H-05 owner |
 | WA-07 | `api/agent/actions/**`; the WhatsApp undo window in `api/routers/approvals.ts` (one constant + one branch, after W3-01 releases it) | `approvals.ts` → W3-01 owner |
 | WA-08 | `api/agent/flows/{owner,manager,bookkeeper}/**`, `apps/worker/src/jobs/waOwnerBrief.ts` (new) + its `handlers.ts`/`index.ts` lines | — |
@@ -63,20 +70,20 @@ DoD-1..9 of the wave-2 README apply to any screen (WA-04's connect page, WA-11's
 **Shared one-liners:** `api/index.ts` exports and the `whatsapp` router line are orchestrator-serialised (one pre-registration PR, as the AU routers); `FEATURE_KEYS` gets `whatsappAgent` once (WA-11 owns it; WA-02 uses the interim `aiAssistant` check until then).
 
 ## 6. Start order, dependency map and the shared session cap
-**Cap (binding).** WA sessions count **inside the AU allowance, inside the programme's 8 build slots**: AU + WA ≤ 2 sessions at once until 3.12 and ≤ 3 from 3.12 (programme plan §2 and §3 AU cap; counting WA inside it is this track's proposal, the programme plan does not name WA). No WA session starts before 7.12. The pilot always preempts. A human-PR session frees its slot once its proposal is drafted. Under the WARNING pause order, WA pauses **with** AU (first). **Lanes (programme plan §6.4):** Ask after W3-04b (W3-γ 31.12, deploy Tue 5.1) · orders after W3-09 (W3-β) · ingest after W3-11 (W3-δ 14.1) · delivery after H-05ʰ (deploy Tue 19.1). **Wave 4 (17.1–30.1): W4-01 holds `apps/web` solo** → WA work is server-only; the connect page and the webhook route file land ≥31.1. Schema joins the serial schema lane after H-04's CHECK (Tue 19.1) and merges on a deploy Tuesday (2.2).
+**Cap (binding).** WA sessions count **inside the AU allowance, inside the programme's 8 build slots**: AU + WA ≤ 2 sessions at once until 3.12 and ≤ 3 from 3.12 (programme plan §2 and §3 AU cap; counting WA inside it is this track's proposal, the programme plan does not name WA). No WA session and no WA decision before the Sat 14.11 usage reset; no WA build session before 7.12. In W-h a WA session takes an AU slot only when one is truly idle, never ahead of AU-06/AU-10. The pilot always preempts. **Everything WA below is a proposal: not in the programme plan.** A human-PR session frees its slot once its proposal is drafted. Under the WARNING pause order, WA pauses **with** AU (first). **Lanes (programme plan §6.4):** Ask after W3-04b (W3-γ 31.12, deploy Tue 5.1) · orders after W3-09 (W3-β) · ingest after W3-11 (W3-δ 14.1) · delivery after H-05ʰ (deploy Tue 19.1). **Wave 4 (17.1–30.1): W4-01 holds `apps/web` solo** → WA work is server-only; the connect page and the webhook route file land ≥31.1. Schema (WA-03ʰ) queues after H-13ʰ as migration 0075 (renumbered at merge) on its own deploy Tuesday (≥ Tue 9.2, backup + second gate); WA-06ʰ and the WA server PRs go after H-09ʰ.
 
 | Window | WA sessions (inside AU+WA ≤3) | Notes |
 |---|---|---|
-| now → | **WA-12ʰ** (human, no slot) | Meta verification, number, lawyer pack: weeks elapsed |
-| W-h 7.12 → 20.12 | ✱WA-01 (first free AU/WA slot) · ✱WA-00ʰ draft (human author) | fixtures + simulator need no WA-02 to be written; WA-00ʰ only consumes `ask.ask` (no `ask/**` edit) |
-| 15.12 or 22.12 (deploy Tue) → 31.12 | WA-00ʰ live: RestoMatch owner on lab data, then the pilot owner read-only | the December "pull-only" pilot: no template, no outbox change, no schema |
+| ≥ Thu 12.11 | **WA-12ʰ** owner-only steps 1, 2, 7 (human, no slot) | Meta verification, number, lawyer pack: weeks elapsed |
+| W-h 7.12 → 20.12 | ✱WA-00ʰ draft (human author), only in a truly idle AU slot | WA-00ʰ only consumes `ask.ask` (no `ask/**` edit); WA-01 PR a lands in γ or later, by orchestrator decision only |
+| Thu 17.12 merge (W3-α) → Tue 22.12 deploy, or Tue 5.1 with W3-γ | WA-00ʰ live: **RestoMatch owner on lab data only** | needs orchestrator + owner OK + a named reviewer; deploy outside the 09:00 schema window. Pilot-owner data only after WA-12 steps 6–7 (legal basis) |
 | W-i/W-j 5.1 → 30.1 | ✱WA-02 (Tue 5.1) · WA-03ʰ draft · WA-04 + WA-07 server · WA-06ʰ draft (after H-05 merges) · WA-05ʰ server half | **server only** after 17.1 |
-| 2.2 (deploy Tue) | WA-03ʰ merge 09:00 → WA-06ʰ + WA-02/04/07 server in the wave-4 train | backup + 2nd gate |
-| Feb 2027 | WA-05ʰ route, WA-04 web, ✱WA-08 (owner read-only E3 → decisions E4 a week later), ✱WA-11 | E3 ~mid-Feb |
-| Mar 2027 | ✱WA-09 · ✱WA-10 (≥2 weeks after H-11ʰ is in production) | E5 |
+| ≥ Tue 9.2 (own deploy Tue) | WA-03ʰ merge (after H-13ʰ, migration 0075) → WA-06ʰ + WA-02/04/07 server after H-09ʰ | backup + 2nd gate |
+| Feb 2027 (after 9.2) | WA-05ʰ route, WA-04 web, ✱WA-08 (owner read-only E3 → decisions E4 a week later), ✱WA-11 | E3 ~late Feb |
+| Mar–Apr 2027 | ✱WA-09 · ✱WA-10 (≥2 weeks after H-11ʰ is in production) | E4 Mar, E5 Mar–Apr |
 
 ```
-WA-12ʰ (now, human) ─────────────────────────────────────────────┐ (E2 needs step 1; E3 needs all)
+WA-12ʰ (≥12.11, human) ────────────────────────────────────────────┐ (E2 needs step 1; E3 needs all)
 AU-06 + G-12b + W3-04b + G-07 + G-13 ─→ WA-02 ─┬─→ WA-07 ─┬─→ WA-08 ─→ WA-11 ─→ WA-09 (W3-09 + AU-11 ⇢)
 WA-01 (Dec, fixtures) ─⇢ runs on WA-02 ─────────┘          │            └─→ WA-10 (H-11ʰ prod ≥2 wks, W3-03)
 G-03ʰ + H-03ʰ + H-04 CHECK ─→ WA-03ʰ (2.2) ─→ WA-04 ─→ WA-05ʰ (W3-11) ─┘
@@ -105,12 +112,22 @@ H-05ʰ + H-05a + AU-04 + AU-12 ─→ WA-06ʰ ─→ WA-08
 - **Speed:** median gap created → decided **<24 h** on weekdays; median days leak found → claim letter sent **halved** vs baseline; letter → credited tracked (no target yet).
 - **Hours-₪ (ASSUMPTION, never summed with money-₪; overlaps with AU-04/06/12 not additive):** owner 0.5–1 h/week (₪225–445/month), manager 0.5–1 (₪225–445), chef 0.25–0.5 (₪135–275), receiver 0.25–0.5 (₪70–135), bookkeeper 0.1–0.25 (₪40–95).
 - **Money-₪:** none of its own; the recovery bundle (catalogue A12, central ≈ ₪540/month) arrives faster. Measured in days.
-- **Cost (a COSTS.md line, never netted against leak):** ≈ ₪24/restaurant/month typical, ₪7 light → ₪65 heavy (ASSUMPTIONS, `notes/30-cost-model.md`, which supersedes design §E; not a hard ceiling: model spend is bounded by the restaurant's ≈ $3/day Ask budget, ≈ ₪289/month).
+- **Cost (a COSTS.md line, never netted against leak):** ≈ ₪24/restaurant/month typical, ₪8 light → ₪62 heavy at 10 restaurants (₪15–₪65 at the 3-restaurant pilot, ₪7–₪61 at 100) (ASSUMPTIONS, `notes/30-cost-model.md`, which supersedes design §E; not a hard ceiling: model spend is bounded by the restaurant's ≈ $3/day Ask budget, ≈ ₪333/month at 30 days, metered at the top-tier rate).
 - **Safety (hard, weekly):** 0 ₪ fields in a receiver turn · 0 leak/decision/claim ₪ to a chef · 0 commits without a token tap · 0 messages from our number to a supplier · 0 cross-tenant reads · grounding failures <2% · delivery success ≥98% · opt-out <10% · 0 templates re-categorised.
 
-## 9. Owner decisions (build to the recommended default until the owner answers)
+## 9. Owner decisions (build to the recommended default until the owner answers, except WD2, which is decided and binding)
 - **WD1 · Number and route:** one shared RestoMatch number, direct Cloud API; 360dialog only if Meta onboarding stalls.
-- **WD2 · Money by tap:** claim or waive a gap with a two-tap, amount-named confirm up to **₪1,000 per decision, ₪3,000 per person per day**; above → link to the app. Payments, pay runs, "mark paid": never.
+- **WD2 · Money by tap: DECIDED (binding owner rule: one-tap WhatsApp approve at ₪500 per item; wave-2 README §7 and review decision #10).** A tap commits only when ALL hold:
+  1. the role passes the engine's `requiredRole`: a manager only on manager-routed items (₪50–300 cumulative per invoice / 2–5%, or `approvalThresholds`); the owner on owner-routed items and every block; the bookkeeper per `DECIDER_ROLES`; receiver and chef never;
+  2. claimable ₪ ≤ ₪500, computed by the server and named on the button: W2-04's `ONE_TAP_APPROVE_CAP_AGOROT` (PR #209, `bulkPolicy.ts`), imported; WA defines no constant of its own;
+  3. not a block, never bulk;
+  4. the server refuses > ₪500 or a block even with a valid token;
+  5. a waive that releases an invoice (`payRun.ts:14-23` hold → pay): the confirm shows the released invoice total; proposal for owner OK: the cap applies to max(gap, released invoice);
+  6. unknown-document approval and DUPLICATE "not a duplicate" are web-only in v1;
+  7. anything else → CTA "לאישור באפליקציה", no token;
+  8. never from WhatsApp: payments, pay runs, mark paid, bulk release, allow-list/intake changes, cap changes. AU-01 overrides may only LOWER the cap;
+  9. undo 10 min (WD3); a credit note has no undo, so corrections on the web only; the undo must pass `approvals.reopen`'s audit check.
+  Commit via `approvals.approve` / `reject` with `channel: 'quick'`.
 - **WD3 · Undo:** 10 minutes for WhatsApp-originated decisions (web keeps 15 s).
 - **WD4 · What counts as an alert:** only proactive sends count toward 6/day and quiet hours; replies don't, but ≤30 model turns/person/day. No quiet-hours exceptions in v1.
 - **WD5 · Owner brief:** 07:30 Sun–Fri, skipped when nothing waits, on a new `cron.ts` line (WA-06ʰ); or ride 06:00 with `scheduled_at` 07:30.
@@ -118,8 +135,9 @@ H-05ʰ + H-05a + AU-04 + AU-12 ─→ WA-06ʰ ─→ WA-08
 - **WD7 · Packaging:** in Pro and Chain; Basic gets alert templates only. Any plan change is an H-10-style human PR.
 - **WD8 · Model tier and budget:** a small tier of the latest Claude models for routing and simple reads, the top tier for complex requests; 30 turns/person/day inside the restaurant's 60-question, ≈$3/day Ask budget.
 - **WD9 · Retention:** text 30 days, media 90, traces 90, outbound log 13 months; ask the lawyer about Meta's "no storage" mode.
-- **WD10 · December pull-only pilot (WA-00ʰ):** yes: owner-only and read-only, with a reply path beside the outbox that WA-05ʰ deletes; or wait for E3 in February.
-- **Defaults (not decisions):** voice notes are not in v1; WA-12ʰ starts this week.
+- **WD10 · December pull-only pilot (WA-00ʰ):** yes: read-only, the RestoMatch owner on lab data first; the pilot owner only after WA-12 steps 6–7 (transfer basis, DPA/sub-processors, the AI provider's no-training terms); a reply path beside the outbox that WA-05ʰ deletes; or wait for E3 in February.
+- **WD11 · Daily totals (OPEN):** a per-person WhatsApp money cap (≤ ₪1,500 a day, or none); a per-restaurant daily WhatsApp ₪ cap; and an owner e-mail/push for every WhatsApp money decision and every new binding (anti SIM-swap). Recommendation: a per-restaurant daily cap plus the owner notice on every money decision and binding.
+- **Defaults (not decisions):** voice notes are not in v1; WA-12ʰ owner-only steps 1, 2 and 7 start ≥ Thu 12.11. WD1, WD3–WD11 go to the combined owner decision page after Sat 14.11.
 
 ## 10. Updates from the orchestrator
 (none yet)
