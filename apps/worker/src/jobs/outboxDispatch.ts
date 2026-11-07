@@ -28,6 +28,7 @@ import {
   type NotificationPayload,
 } from '@restomatch/api';
 import { eq, notificationsOutbox, sql } from '@restomatch/db';
+import { redactString } from '@restomatch/observability';
 import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
 
@@ -104,6 +105,9 @@ export async function processOutboxDispatch(job: WorkerJob<OutboxDispatchJob>) {
   let dispatched = 0;
   let failed = 0;
   let skipped = 0;
+  // A send that threw and went back to `queued` for a backoff retry. Counted
+  // and logged so a failing provider never reads as claimed=1 with 0/0/0.
+  let retried = 0;
 
   for (const claimedRow of claimed) {
     const row = {
@@ -163,14 +167,20 @@ export async function processOutboxDispatch(job: WorkerJob<OutboxDispatchJob>) {
             claimedAt: null,
           })
           .where(eq(notificationsOutbox.id, row.id));
+        retried += 1;
+        // One line per retry: the channel and the provider's error, first line
+        // only and redacted (never the recipient address or a token).
+        console.warn(
+          `[outbox-dispatch] retry ${newAttempt}/${MAX_ATTEMPTS} ${row.channel}: ${redactString(errMessage.split('\n')[0] ?? '').slice(0, 200)}`,
+        );
       }
     }
   }
 
   console.log(
-    `[outbox-dispatch] claimed=${claimed.length} dispatched=${dispatched} failed=${failed} skipped_no_provider=${skipped}`,
+    `[outbox-dispatch] claimed=${claimed.length} dispatched=${dispatched} failed=${failed} skipped_no_provider=${skipped} retried=${retried}`,
   );
-  return { dispatched, failed, skipped };
+  return { dispatched, failed, skipped, retried };
 }
 
 /**
