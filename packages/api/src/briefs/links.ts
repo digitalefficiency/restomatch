@@ -6,10 +6,17 @@
  * send (AU README §4 rule 2).
  */
 
+/** `baseUrl` without trailing slashes (a loop, not a regex: linear on any input). */
+export function trimBase(baseUrl: string): string {
+  let end = baseUrl.length;
+  while (end > 0 && baseUrl.charCodeAt(end - 1) === 47 /* '/' */) end -= 1;
+  return baseUrl.slice(0, end);
+}
+
 /** `/dashboard/go?r=<rid>&to=<path>` on `baseUrl`. `to` must be an in-app path. */
 export function goLink(baseUrl: string, restaurantId: string, to: string): string {
   const path = to.startsWith('/') ? to : `/${to}`;
-  return `${baseUrl.replace(/\/+$/, '')}/dashboard/go?r=${encodeURIComponent(restaurantId)}&to=${encodeURIComponent(path)}`;
+  return `${trimBase(baseUrl)}/dashboard/go?r=${encodeURIComponent(restaurantId)}&to=${encodeURIComponent(path)}`;
 }
 
 /**
@@ -41,11 +48,23 @@ export function waMeLink(phone: string | null | undefined, text: string): string
   return digits ? `https://wa.me/${digits}?text=${encodeURIComponent(text)}` : null;
 }
 
-const EMAIL_RE = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[^\s@<>()",;:]+$/;
+/** One part of an address: no whitespace, no '@', none of <>()",;: (a single class: linear). */
+const ADDRESS_PART = /^[^\s@<>()",;:]+$/;
+
+/** A plausible address: exactly one '@', a dotted domain with no empty label at either end. */
+function isEmail(to: string): boolean {
+  const at = to.indexOf('@');
+  if (at <= 0 || at !== to.lastIndexOf('@')) return false;
+  const local = to.slice(0, at);
+  const domain = to.slice(at + 1);
+  const dot = domain.indexOf('.');
+  if (dot <= 0 || domain.endsWith('.')) return false;
+  return ADDRESS_PART.test(local) && ADDRESS_PART.test(domain);
+}
 
 /** `mailto:<address>?subject=&body=`, or `null` when the address is not one. */
 export function mailtoLink(email: string | null | undefined, subject: string, body: string): string | null {
   const to = email?.trim();
-  if (!to || !EMAIL_RE.test(to)) return null;
+  if (!to || !isEmail(to)) return null;
   return `mailto:${encodeURIComponent(to).replace(/%40/g, '@')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }

@@ -257,3 +257,17 @@ describe('perishable morning briefs', () => {
     expect(isPerishableSkip(at('2026-10-30T21:30:00Z'), at('2026-11-01T04:00:00Z'))).toBe(true);
   });
 });
+
+describe('link helpers are linear on hostile input (CodeQL)', () => {
+  it('a long run of slashes / dots resolves fast and correctly', () => {
+    const slashes = `${BASE}${'/'.repeat(50_000)}`;
+    const t0 = Date.now();
+    expect(goLink(slashes, RID, '/dashboard')).toBe(`${BASE}/dashboard/go?r=${RID}&to=%2Fdashboard`);
+    expect(mailtoLink(`!@!.${'!.'.repeat(50_000)}`, 's', 'b')).toBeNull(); // ends with '.'
+    expect(mailtoLink(`!@!.${'!.'.repeat(50_000)}x`, 's', 'b')).not.toBeNull();
+    expect(mailtoLink('a@b.', 's', 'b')).toBeNull();
+    expect(mailtoLink('a@@b.c', 's', 'b')).toBeNull();
+    expect(mailtoLink('@b.c', 's', 'b')).toBeNull();
+    expect(Date.now() - t0).toBeLessThan(500);
+  });
+});

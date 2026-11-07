@@ -1,4 +1,5 @@
 import { briefCopy } from './copy';
+import { trimBase } from './links';
 import { briefHtml } from './render';
 import type { BriefContext, BriefMessage } from './types';
 
@@ -32,7 +33,7 @@ export function orderReminderBrief(input: OrderReminderInput): BriefMessage {
   const to = draft ? `/dashboard/orders/${encodeURIComponent(input.draftPoId!)}` : newOrderPath(input.supplierId);
   // Direct links, as today (brief AC 4: `orderReminderUrl` unchanged; the wizard
   // link is pinned by orderReminders.test.ts). The go-link swap is W2-04's sweep.
-  const deepLink = `${input.baseUrl.replace(/\/+$/, '')}${to}`;
+  const deepLink = `${trimBase(input.baseUrl)}${to}`;
   const subject = draft ? c.draftSubject(input.supplierName) : c.noOrderSubject(input.supplierName);
   const line = draft
     ? c.draftLine(input.supplierName, cutoff)

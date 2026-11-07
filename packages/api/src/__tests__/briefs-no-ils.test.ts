@@ -16,12 +16,15 @@ const ctx = { restaurantId: '11111111-1111-4111-8111-111111111111', baseUrl: 'ht
 const LOCALES: BriefLocale[] = ['he', 'en'];
 const MONEY_KEY = /ils|agorot|amount|total|price/i;
 
-/** Visible text of the html (styles and tags dropped: CSS numbers are not amounts). */
+/**
+ * Visible text of the html: everything inside a tag (incl. inline CSS, whose numbers
+ * are not amounts) is dropped. Test-only, never a sanitiser; the frame has no <style>.
+ */
 function visible(html: string): string {
   return html
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&[a-z]+;/g, ' ');
+    .split('<')
+    .map((chunk, i) => (i === 0 ? chunk : chunk.slice(chunk.indexOf('>') + 1)))
+    .join(' ');
 }
 
 function keysDeep(v: unknown, out: string[] = []): string[] {
