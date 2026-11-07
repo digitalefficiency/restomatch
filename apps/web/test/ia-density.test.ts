@@ -138,6 +138,9 @@ describe('DENSITY_SCREENS', () => {
     expect(DENSITY_SCREENS.some((s) => s.type === 'queue')).toBe(true);
     expect(DENSITY_SCREENS.some((s) => s.type === 'record')).toBe(true);
   });
+  it('measures every rule-4 screen type (home, queue, record, audit, field, setup)', () => {
+    expect(new Set(DENSITY_SCREENS.map((s) => s.type))).toEqual(new Set(Object.keys(DENSITY_BUDGET)));
+  });
   it('ids are unique and every screen names its adopter', () => {
     const ids = DENSITY_SCREENS.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);

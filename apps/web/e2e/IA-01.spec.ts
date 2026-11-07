@@ -2,6 +2,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, type Page } from '@playwright/test';
+import { en } from '../lib/i18n/messages/nav/en';
+import { he } from '../lib/i18n/messages/nav/he';
 import { DEMO_RESTAURANT_NAME } from './env';
 import { e2eSql, loginViaMagicLink } from './helpers';
 import { evaluateDensity, figureDrift, formatFinding, newFindings, VIEWPORTS, type DensityCounts, type Finding } from './ia/budget';
@@ -61,6 +63,27 @@ function resolve(route: string): string | null {
   return /\/$/.test(out) || out.includes('//') ? null : out;
 }
 
+/**
+ * The lab runs no worker, so every dashboard page shows the warn-toned "מנוע העיבוד לא זמין"
+ * status banner (dashboard/worker-status.tsx). Production runs jobs in Vercel cron and never
+ * shows it; counting it would add a T2 mark, a block and ~20 words to every screen.
+ */
+const WORKER_BANNER_TITLES = [he.worker.title, en.worker.title];
+
+async function stripLabOnlyBanners(page: Page): Promise<number> {
+  return page.evaluate((titles) => {
+    let n = 0;
+    for (const el of document.querySelectorAll('main [role="status"]')) {
+      const text = el.textContent ?? '';
+      if (titles.some((t) => text.includes(t))) {
+        el.remove();
+        n++;
+      }
+    }
+    return n;
+  }, WORKER_BANNER_TITLES);
+}
+
 async function measureScreen(page: Page, s: DensityScreen): Promise<ScreenResult> {
   const base = { id: s.id, route: s.route, role: s.role, vp: s.vp, type: s.type, adopter: s.adopter };
   const url = resolve(s.route);
@@ -70,7 +93,9 @@ async function measureScreen(page: Page, s: DensityScreen): Promise<ScreenResult
     const res = await page.goto(url, { waitUntil: 'networkidle' });
     // Late client islands (deferred cards) settle after networkidle in next dev.
     await page.waitForTimeout(500);
+    const labOnly = await stripLabOnlyBanners(page);
     const counts = await measureDensity(page);
+    if (labOnly) console.log(`[IA-01] ${s.id}: removed ${labOnly} lab-only worker banner(s) before measuring`);
     const findings = evaluateDensity(s.type, s.vp, counts);
     return { ...base, status: res?.status() ?? null, counts, findings, newFindings: newFindings(findings, s.allow) };
   } catch (e) {

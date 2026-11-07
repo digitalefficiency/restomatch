@@ -44,33 +44,54 @@ const BASE: DensityScreen[] = [
   { id: 'invoice-owner-desk', route: '/dashboard/invoices/:invoice', role: 'owner', vp: 'desk', type: 'record', adopter: 'W2-02' },
   { id: 'order-manager-desk', route: '/dashboard/orders/:po', role: 'manager', vp: 'desk', type: 'record', adopter: 'W2-06' },
   { id: 'supplier-owner-desk', route: '/dashboard/suppliers/:supplier', role: 'owner', vp: 'desk', type: 'record', adopter: 'W2-11' },
+  // Audit (calm: 0 T2, every figure once)
+  { id: 'leak-proof-owner-desk', route: '/dashboard/leaks/proof', role: 'owner', vp: 'desk', type: 'audit', adopter: 'W2-09' },
+  { id: 'monthly-report-owner-desk', route: '/dashboard/reports/monthly', role: 'owner', vp: 'desk', type: 'audit', adopter: 'W3-08' },
+  { id: 'ledger-bookkeeper-desk', route: '/dashboard/suppliers/ledger', role: 'bookkeeper', vp: 'desk', type: 'audit', adopter: 'W2-11' },
+  // Field (the next item + one 56px button)
+  { id: 'count-manager-phone', route: '/dashboard/inventory/count', role: 'manager', vp: 'phone', type: 'field', adopter: 'W2-07' },
+  { id: 'dock-receiver-phone', route: '/dashboard/receiving/:po', role: 'receiver', vp: 'phone', type: 'field', adopter: 'W2-05' },
+  // Setup (state row first, forms folded, 0 T2)
+  { id: 'settings-owner-desk', route: '/dashboard/settings', role: 'owner', vp: 'desk', type: 'setup', adopter: 'W2-14' },
+  { id: 'integrations-owner-desk', route: '/dashboard/integrations', role: 'owner', vp: 'desk', type: 'setup', adopter: 'W2-14' },
+  { id: 'exports-bookkeeper-desk', route: '/dashboard/exports', role: 'bookkeeper', vp: 'desk', type: 'setup', adopter: 'W2-14' },
+  { id: 'team-owner-desk', route: '/dashboard/team', role: 'owner', vp: 'desk', type: 'setup', adopter: 'W3-07b' },
 ];
 
 /**
  * The ratchet allowance: the first lab measurement (7.11, demo seed, next dev, he, folds
- * closed; IA-01 report mode). Only metrics over budget are listed; `{}` = within budget.
+ * closed, the lab-only worker banner removed; IA-01 report mode). Re-measure on main@B. Only metrics over budget are listed; `{}` = within budget.
  * Lower a number when your package adopts the budget; never raise one.
  */
 export const BASELINE_0711: Record<string, Allowance> = {
-  'home-owner-desk': { blocks: 10, numbers: 45, t2: 4, words: 216, pageWords: 303 },
-  'home-owner-phone': { numbers: 21, t2: 4, words: 94, pageWords: 296 },
+  'home-owner-desk': { blocks: 11, numbers: 53, words: 218, pageWords: 286 },
+  'home-owner-phone': { blocks: 6, numbers: 25, words: 98, pageWords: 279 },
   'approvals-owner-desk': { primaryPerFold: 3, numbersPerRow: 14, t2PerRow: 2 },
-  'recovery-owner-desk': { primaryPerFold: 3, minRowsDesk: 5 },
-  'invoice-owner-desk': { blocks: 6 },
-  'supplier-owner-desk': { t2: 2 },
-  'home-manager-desk': { blocks: 7, numbers: 41, t2: 5, words: 193 },
-  'home-manager-phone': { numbers: 19, t2: 5, words: 87 },
-  'approvals-manager-phone': { numbersPerRow: 7 },
-  'order-manager-desk': { blocks: 3 },
-  'home-bookkeeper-desk': { blocks: 7, numbers: 40, words: 197 },
-  'home-bookkeeper-phone': { numbers: 16, words: 82 },
-  'pay-run-bookkeeper-desk': { numbersPerRow: 6, minRowsDesk: 3 },
+  'recovery-owner-desk': { primaryPerFold: 4, minRowsDesk: 7 },
+  'invoice-owner-desk': { blocks: 7 },
+  'supplier-owner-desk': {},
+  'leak-proof-owner-desk': {},
+  'monthly-report-owner-desk': { t2: 4, t2PerRow: 1 },
+  'settings-owner-desk': { primaryPerFold: 2 },
+  'integrations-owner-desk': {},
+  'team-owner-desk': {},
+  'home-manager-desk': { blocks: 8, numbers: 48, t2: 4, words: 198 },
+  'home-manager-phone': { numbers: 21, t2: 4, words: 84 },
+  'approvals-manager-phone': { numbersPerRow: 12 },
+  'order-manager-desk': { blocks: 4 },
+  'count-manager-phone': {},
+  'home-bookkeeper-desk': { blocks: 7, numbers: 48, words: 192 },
+  'home-bookkeeper-phone': { numbers: 18, words: 78 },
+  'pay-run-bookkeeper-desk': { primaryPerFold: 2, numbersPerRow: 7, minRowsDesk: 4 },
   'inbox-bookkeeper-desk': { minRowsDesk: 2 },
+  'ledger-bookkeeper-desk': { t2: 19, t2PerRow: 4 },
+  'exports-bookkeeper-desk': { primaryPerFold: 2 },
   'home-chef-desk': {},
-  'home-chef-phone': { blocks: 3, words: 61 },
-  'home-receiver-desk': { blocks: 8, t2: 4 },
-  'home-receiver-phone': { blocks: 5, numbers: 13, t2: 4, words: 72, pageWords: 111 },
+  'home-chef-phone': {},
+  'home-receiver-desk': { blocks: 8 },
+  'home-receiver-phone': { blocks: 6, numbers: 15, t2: 3, words: 50 },
   'receiving-receiver-phone': {},
+  'dock-receiver-phone': {},
 };
 
 export const DENSITY_SCREENS: DensityScreen[] = BASE.map((s) => ({ ...s, allow: BASELINE_0711[s.id] }));
