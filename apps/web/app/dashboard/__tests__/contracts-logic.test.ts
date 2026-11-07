@@ -3,7 +3,11 @@ import {
   contractFileErrorKey,
   contractStatus,
   contractWriteErrorKey,
+  approvalsDeepLink,
+  daysUntil,
+  matchesSearch,
   parsePrice,
+  waDraftLink,
   todayIso,
   percentToFraction,
   periodParts,
@@ -12,10 +16,10 @@ import {
 } from '../contracts/logic';
 
 describe('contracts screen logic', () => {
-  it('shows tabs per feature flag', () => {
-    expect(visibleTabs({ contracts: true, priceAlerts: true })).toEqual(['contracts', 'alerts', 'thresholds']);
+  it('shows tabs per feature flag; "לטיפול" (queue) is first (W2-12)', () => {
+    expect(visibleTabs({ contracts: true, priceAlerts: true })).toEqual(['queue', 'contracts', 'alerts', 'thresholds']);
     expect(visibleTabs({ contracts: false, priceAlerts: true })).toEqual(['alerts', 'thresholds']);
-    expect(visibleTabs({ contracts: true, priceAlerts: false })).toEqual(['contracts']);
+    expect(visibleTabs({ contracts: true, priceAlerts: false })).toEqual(['queue', 'contracts']);
     expect(visibleTabs({ contracts: false, priceAlerts: false })).toEqual([]);
   });
 
@@ -24,6 +28,29 @@ describe('contracts screen logic', () => {
     expect(resolveTab('alerts', ['contracts'])).toBe('contracts');
     expect(resolveTab(undefined, ['alerts', 'thresholds'])).toBe('alerts');
     expect(resolveTab('x', [])).toBeNull();
+  });
+
+  it('defaults to the queue and keeps the legacy ?tab= keys (home teaser, e-mail links)', () => {
+    const all = visibleTabs({ contracts: true, priceAlerts: true });
+    expect(resolveTab(undefined, all)).toBe('queue');
+    expect(resolveTab('queue', all)).toBe('queue');
+    for (const legacy of ['contracts', 'alerts', 'thresholds'] as const) expect(resolveTab(legacy, all)).toBe(legacy);
+  });
+
+  it('builds the interim approvals deep link and a wa.me draft', () => {
+    expect(approvalsDeepLink('abc-1')).toBe('/dashboard/approvals?invoice=abc-1');
+    expect(waDraftLink('שלום ₪10', '050-1234567')).toBe(`https://wa.me/972501234567?text=${encodeURIComponent('שלום ₪10')}`);
+    expect(waDraftLink('x', null)).toBe('https://wa.me/?text=x');
+  });
+
+  it('expiry and search helpers', () => {
+    expect(daysUntil(null, '2026-11-08')).toBeNull();
+    expect(daysUntil('2026-11-30', '2026-11-08')).toBe(22);
+    expect(daysUntil('2026-11-01', '2026-11-08')).toBe(-7);
+    expect(matchesSearch('סלמ', 'פילה סלמון', null)).toBe(true);
+    expect(matchesSearch('SALM', 'פילה', 'Salmon fillet')).toBe(true);
+    expect(matchesSearch('', 'x')).toBe(true);
+    expect(matchesSearch('בקר', 'פילה סלמון')).toBe(false);
   });
 
   it('classifies contract validity', () => {

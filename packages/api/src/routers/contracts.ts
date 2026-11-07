@@ -20,9 +20,19 @@ import { CatalogFileError, parseCatalogFile, type ParsedTable } from '../catalog
 import {
   autoDetectContractMapping,
   commitContractRows,
+  diffContractRows,
   extractContractRows,
 } from '../contracts/import';
 import { findOverContractLines } from '../contracts/overContract';
+import { loadContractsQueue } from '../contracts/queue';
+import {
+  loadPriceContext,
+  lockCandidates,
+  lockCurrentPrices,
+  qty90ByProduct,
+  restaurantToday,
+} from '../contracts/priceContext';
+import { priceAlertReasonsOn } from '../priceAlerts/reasons';
 
 const MAX_ROWS = 5000;
 const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
@@ -70,6 +80,12 @@ async function parseUpload(file: z.infer<typeof FileInput>): Promise<ParsedTable
       throw new TRPCError({ code: 'BAD_REQUEST', message: `CATALOG_FILE_${err.code}: ${err.message}`, cause: err });
     }
     throw err;
+  }
+}
+
+function assertMapping(mapping: z.infer<typeof MappingSchema>) {
+  if ((!mapping.name && !mapping.sku) || !mapping.price) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'CONTRACT_MAPPING: חובה למפות עמודת מחיר ועמודת שם או מק״ט' });
   }
 }
 
@@ -314,6 +330,8 @@ export const contractsRouter = router({
           mapping: MappingSchema,
           defaultValidFrom: DAY,
           defaultValidTo: DAY.nullable().optional(),
+          /** Spreadsheet row numbers the person excluded in the diff step (W2-12). */
+          excludeRowIds: z.array(z.number().int().min(2).max(MAX_ROWS + 1)).max(MAX_ROWS).optional(),
         })
         .strict(),
     )
@@ -321,9 +339,7 @@ export const contractsRouter = router({
       const rid = ctx.session.restaurantId;
       await assertFeatureOn(ctx.db, rid, 'contracts');
       await assertSupplierOwned(ctx.db, input.supplierId, rid);
-      if ((!input.mapping.name && !input.mapping.sku) || !input.mapping.price) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'CONTRACT_MAPPING: חובה למפות עמודת מחיר ועמודת שם או מק״ט' });
-      }
+      assertMapping(input.mapping);
       const table = await parseUpload(input.file);
       const rows = extractContractRows(table, input.mapping);
       return commitContractRows(
@@ -334,9 +350,157 @@ export const contractsRouter = router({
           userId: ctx.session.userId,
           defaultValidFrom: input.defaultValidFrom,
           defaultValidTo: input.defaultValidTo ?? null,
+          excludeRowIds: input.excludeRowIds,
         },
         rows,
       );
+    }),
+
+  /**
+   * W2-12 "בדיקה" step: the diff an import WOULD write against the contract in
+   * force (מוצר · חוזה נוכחי · חדש · Δ% · ₪/חודש) — no writes. Manager tier, same
+   * as the commit it previews.
+   */
+  importDiff: managerProcedure
+    .input(
+      z
+        .object({
+          supplierId: z.string().uuid(),
+          file: FileInput,
+          mapping: MappingSchema,
+          defaultValidFrom: DAY,
+          defaultValidTo: DAY.nullable().optional(),
+        })
+        .strict(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      await assertFeatureOn(ctx.db, rid, 'contracts');
+      await assertSupplierOwned(ctx.db, input.supplierId, rid);
+      assertMapping(input.mapping);
+      const table = await parseUpload(input.file);
+      const rows = extractContractRows(table, input.mapping);
+      const qty90 = await qty90ByProduct(ctx.db, rid, input.supplierId);
+      return diffContractRows(
+        ctx.db,
+        {
+          restaurantId: rid,
+          supplierId: input.supplierId,
+          defaultValidFrom: input.defaultValidFrom,
+          defaultValidTo: input.defaultValidTo ?? null,
+          qty90,
+        },
+        rows,
+      );
+    }),
+
+  /**
+   * W2-12 "לטיפול": over-contract lines (billed ₪, the header) + open price
+   * alerts (estimates, never in the header), ranked by ₪. Finance tier.
+   */
+  queue: financeProcedure.query(async ({ ctx }) => {
+    const rid = ctx.session.restaurantId;
+    await assertFeatureOn(ctx.db, rid, 'contracts');
+    const alertsOn = await isFeatureOn(ctx.db, rid, 'priceAlerts');
+    const q = await loadContractsQueue(ctx.db, rid, { alerts: alertsOn });
+    return { ...q, alertsEnabled: alertsOn, dismissReasons: priceAlertReasonsOn() };
+  }),
+
+  /** "What you pay today" for the contract form: last invoiced price + date, 90-day median. Finance tier. */
+  priceContext: financeProcedure
+    .input(z.object({ supplierId: z.string().uuid(), productId: z.string().uuid() }).strict())
+    .query(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      await assertFeatureOn(ctx.db, rid, 'contracts');
+      await assertSupplierOwned(ctx.db, input.supplierId, rid);
+      await assertProductOwned(ctx.db, input.productId, rid);
+      return loadPriceContext(ctx.db, rid, input.supplierId, input.productId);
+    }),
+
+  /**
+   * "נעלו מחירים נוכחיים כחוזה": each product of the supplier with an invoiced
+   * price and no contract gets its last invoiced price as a contract from TODAY
+   * (restaurant tz; never backdated; idempotent per day). `dryRun` returns the
+   * count and ₪ the confirm dialog names, without writing. Manager tier.
+   */
+  lockCurrentPrices: managerProcedure
+    .input(z.object({ supplierId: z.string().uuid(), dryRun: z.boolean().default(false) }).strict())
+    .mutation(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      await assertFeatureOn(ctx.db, rid, 'contracts');
+      await assertSupplierOwned(ctx.db, input.supplierId, rid);
+      if (input.dryRun) {
+        const { today, candidates } = await lockCandidates(ctx.db, rid, input.supplierId);
+        return {
+          today,
+          count: candidates.length,
+          created: 0,
+          monthlyAgorot: candidates.reduce((s, c) => s + c.monthlyAgorot, 0),
+          candidates: candidates.slice(0, 50),
+        };
+      }
+      const res = await lockCurrentPrices(ctx.db, { restaurantId: rid, supplierId: input.supplierId, userId: ctx.session.userId });
+      return { today: res.today, count: res.created, created: res.created, monthlyAgorot: res.monthlyAgorot, candidates: [] };
+    }),
+
+  /**
+   * "עדכנו מחיר חוזה ל-₪X" from a queue card: a contract row from TODAY in the
+   * restaurant's timezone — never backdated, because a backdated contract would
+   * rewrite the leak of past invoices on re-match. A row already starting today
+   * is updated (its previous price is returned so the UI can undo). Manager tier.
+   */
+  adoptPrice: managerProcedure
+    .input(
+      z
+        .object({
+          supplierId: z.string().uuid(),
+          productId: z.string().uuid(),
+          contractPrice: PRICE,
+          unit: z.string().trim().max(32).nullable().optional(),
+        })
+        .strict(),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      await assertFeatureOn(ctx.db, rid, 'contracts');
+      await assertSupplierOwned(ctx.db, input.supplierId, rid);
+      await assertProductOwned(ctx.db, input.productId, rid);
+      const today = await restaurantToday(ctx.db, rid);
+      const [existing] = await ctx.db
+        .select({ id: supplierContractPrices.id, contractPrice: supplierContractPrices.contractPrice })
+        .from(supplierContractPrices)
+        .where(
+          and(
+            eq(supplierContractPrices.restaurantId, rid),
+            eq(supplierContractPrices.supplierId, input.supplierId),
+            eq(supplierContractPrices.productId, input.productId),
+            eq(supplierContractPrices.validFrom, today),
+          ),
+        )
+        .limit(1)
+        .for('update');
+      if (existing) {
+        await ctx.db
+          .update(supplierContractPrices)
+          .set({ contractPrice: input.contractPrice.toFixed(4), ...(input.unit !== undefined ? { unit: input.unit || null } : {}) })
+          .where(and(eq(supplierContractPrices.id, existing.id), eq(supplierContractPrices.restaurantId, rid)));
+        return { id: existing.id, validFrom: today, created: false as const, previousPrice: Number(existing.contractPrice) };
+      }
+      const [row] = await ctx.db
+        .insert(supplierContractPrices)
+        .values({
+          restaurantId: rid,
+          supplierId: input.supplierId,
+          productId: input.productId,
+          contractPrice: input.contractPrice.toFixed(4),
+          unit: input.unit || null,
+          validFrom: today,
+          validTo: null,
+          source: 'manual',
+          createdBy: ctx.session.userId,
+        })
+        .returning({ id: supplierContractPrices.id });
+      return { id: row!.id, validFrom: today, created: true as const, previousPrice: null };
     }),
 
   /** Over-contract lines of one invoice (the invoice-view badge). */
