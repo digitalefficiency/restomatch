@@ -87,6 +87,7 @@ export const he = {
       above_price_list: '{desc}: {qty} × {price} — במחירון שלכם {listPrice}',
     },
     notes: {
+      amountUnavailable: 'סכום לא זמין',
       title: 'לידיעתכם (לא נכלל בסכום)',
       same_file_twice: 'קובץ {n} זהה לקובץ {ref} — נבדק פעם אחת בלבד.',
       undercharge: 'חשבונית {n}, שורה {line}: חויבתם {amount} פחות מהחישוב — טעות לטובתכם.',

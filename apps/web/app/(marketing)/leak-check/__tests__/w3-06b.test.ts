@@ -33,3 +33,27 @@ describe('W3-06b · phone leak-check form rules', () => {
     expect(isPreviewable('application/pdf')).toBe(false);
   });
 });
+
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { formatIls } from '@/lib/money';
+import { noteAmountText } from '../result/noteAmount';
+
+describe('W3-06b · a missing note amount never prints ₪0 (G-16 money-swallow)', () => {
+  const fmt = (a: number) => formatIls(a / 100, { maximumFractionDigits: 2, locale: 'he' });
+  it('null / undefined / NaN → the neutral "unavailable" word, no ₪', () => {
+    for (const v of [null, undefined, Number.NaN]) {
+      const out = noteAmountText(v, fmt, 'סכום לא זמין');
+      expect(out).toBe('סכום לא זמין');
+      expect(out).not.toMatch(/₪|0/);
+    }
+  });
+  it('a real amount (including a real zero) is formatted', () => {
+    expect(noteAmountText(12_345, fmt, 'x')).toContain('123.45');
+    expect(noteAmountText(0, fmt, 'x')).toMatch(/0/);
+  });
+  it('the result page has no `amountAgorot ?? 0` left', () => {
+    const page = readFileSync(join(__dirname, '../result/page.tsx'), 'utf8');
+    expect(page).not.toMatch(/amountAgorot\s*\?\?\s*0/);
+  });
+});
