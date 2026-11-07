@@ -3,12 +3,23 @@
 import { useState } from 'react';
 import { Calculator } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
-import { Badge, Button, Card, Input, LinkButton, Spinner, friendlyError, useToast } from '@/lib/components';
+import { Badge, Button, Card, Input, LinkButton, Money, Spinner, friendlyError, useToast } from '@/lib/components';
+import { moneyText } from '@/lib/components/money/format';
 import { useLocale, useT } from '@/lib/i18n/client';
+import { formatPercent } from '@/lib/i18n/format';
+import type { Locale } from '@/lib/i18n/config';
 import { components } from '@/lib/i18n/messages/components';
 import { inventory as inventoryNs } from '@/lib/i18n/messages/inventory';
-import { ils, pct } from '../recipes/recipe-ui';
 import { dayText } from './inventory-ui';
+
+/** Basis points → "31.4%". */
+function pct(bp: number | null | undefined, locale: Locale): string {
+  return bp == null ? '—' : formatPercent(bp / 10_000, locale, 1);
+}
+/** Agorot → ₪ text for a sentence (the frozen formatIls via moneyText). */
+function ils(agorot: number | null | undefined, locale: Locale, digits = 2): string {
+  return agorot == null ? '—' : moneyText(agorot / 100, digits === 0 ? 'tile' : 'line', locale);
+}
 
 /**
  * Actual food cost for the period between the last two completed counts
@@ -17,7 +28,69 @@ import { dayText } from './inventory-ui';
  * (actual − theoretical) is T2 (solid badge + ₪ + one CTA) only above 2 points
  * of sales; otherwise it is calm.
  */
-export function PeriodCard({ compact = false }: { compact?: boolean }) {
+export function PeriodCard({
+  compact = false,
+  percentOnly = false,
+  canEditSales = true,
+}: {
+  compact?: boolean;
+  /** The chef (owner decision): the food cost % only — reads `periodPercent`, which carries no ₪ key. */
+  percentOnly?: boolean;
+  /** Food sales are a manager+ write (`setSales`, audited); the bookkeeper reads them. */
+  canEditSales?: boolean;
+}) {
+  if (percentOnly) return <PercentCard compact={compact} />;
+  return <MoneyPeriodCard compact={compact} canEditSales={canEditSales} />;
+}
+
+/** The chef's card: % and dates only. */
+function PercentCard({ compact }: { compact: boolean }) {
+  const t = useT(inventoryNs);
+  const tc = useT(components);
+  const locale = useLocale();
+  const q = trpc.inventory.periodPercent.useQuery(undefined, { staleTime: 30_000 });
+  const p = q.data;
+  return (
+    <Card padding="md" data-testid="food-cost-period">
+      <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
+        <Calculator className="h-4 w-4 text-muted" aria-hidden="true" />
+        {t('period.title')}
+      </h2>
+      {q.isLoading ? (
+        <Spinner />
+      ) : q.isError ? (
+        <p className="mt-1 text-sm text-muted" role="status">
+          {friendlyError(q.error, tc)}
+        </p>
+      ) : !p ? null : p.available ? (
+        <>
+          <p className="text-sm text-muted">{t('period.range', { from: dayText(p.openingDate, locale), to: dayText(p.closingDate, locale) })}</p>
+          {p.implausible ? (
+            <p className="mt-2 text-sm text-muted">
+              <span className="font-semibold text-ink">{t('period.implausibleTitle')}</span> {t('period.implausibleBody')}
+            </p>
+          ) : (
+            <p className="mt-2 text-3xl font-bold tabular-nums text-ink" data-testid="food-cost-actual">
+              {pct(p.actualBp, locale)}
+            </p>
+          )}
+          <p className="text-sm text-muted">
+            {t('period.percentOnly')} {t('period.target', { target: pct(p.targetBp, locale) })}
+          </p>
+        </>
+      ) : (
+        <p className="mt-1 text-sm text-muted">{p.reason === 'needOpening' ? t('period.needOpening') : t('period.noCounts')}</p>
+      )}
+      {compact ? (
+        <LinkButton href="/dashboard/inventory" size="sm" variant="secondary" className="touch-target mt-3">
+          {t('period.open')}
+        </LinkButton>
+      ) : null}
+    </Card>
+  );
+}
+
+function MoneyPeriodCard({ compact, canEditSales }: { compact: boolean; canEditSales: boolean }) {
   const t = useT(inventoryNs);
   const tc = useT(components);
   const locale = useLocale();
@@ -27,7 +100,7 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
   const [sales, setSales] = useState('');
   const [editingSales, setEditingSales] = useState(false);
   const [salesError, setSalesError] = useState<string | null>(null);
-  const setMeta = trpc.inventory.setMeta.useMutation({
+  const setMeta = trpc.inventory.setSales.useMutation({
     onSuccess: () => {
       setEditingSales(false);
       void utils.inventory.period.invalidate();
@@ -49,7 +122,7 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
           <Calculator className="h-4 w-4 text-muted" aria-hidden="true" />
           {t('period.title')}
         </h2>
-        <p className="mt-1 text-sm text-muted" role="alert">
+        <p className="mt-1 text-sm text-muted" role="status">
           {friendlyError(q.error, tc)}
         </p>
         <Button size="sm" variant="secondary" className="touch-target mt-2" onClick={() => void q.refetch()}>
@@ -74,7 +147,12 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
     setSalesError(null);
     if (closingId) setMeta.mutate({ countId: closingId, foodSalesExVat: v });
   };
-  const salesForm = (
+  const salesBy = p.salesEntry ? (
+    <p className="text-sm text-muted" data-testid="sales-by">
+      {t('period.salesBy', { name: p.salesEntry.by ?? '—', date: dayText(p.salesEntry.at.slice(0, 10), locale) })}
+    </p>
+  ) : null;
+  const salesForm = !canEditSales ? null : (
     <form onSubmit={saveSales} className="flex flex-wrap items-end gap-2">
       <label className="min-w-0 flex-1 text-xs text-muted" htmlFor="period-sales">
         {t('period.salesMissing')}
@@ -114,7 +192,7 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
           <div className="mt-3 border-t border-line pt-3" data-testid="purchase-food-cost">
             <p className="text-xs font-semibold text-muted">{t('period.purchaseFoodCost')}</p>
             <p className="text-2xl font-bold tabular-nums text-ink">
-              {p.purchaseFoodCost.bp != null ? pct(p.purchaseFoodCost.bp, locale) : <bdi dir="ltr">{ils(p.purchaseFoodCost.purchasesAgorot, locale, 0)}</bdi>}
+              {p.purchaseFoodCost.bp != null ? pct(p.purchaseFoodCost.bp, locale) : <Money agorot={p.purchaseFoodCost.purchasesAgorot} context="tile" />}
             </p>
             <p className="text-xs text-muted">
               {p.purchaseFoodCost.salesAgorot != null
@@ -126,7 +204,7 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
                   })
                 : null}
             </p>
-            {p.purchaseFoodCost.salesAgorot == null ? <div className="mt-2">{salesForm}</div> : null}
+            {p.purchaseFoodCost.salesAgorot == null ? <div className="mt-2">{salesForm}</div> : salesBy}
           </div>
         ) : null}
         {compact ? (
@@ -167,11 +245,11 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
       ) : null}
       <div className={p.implausible ? 'hidden' : 'mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1'}>
         <span className="text-3xl font-bold tabular-nums text-ink" data-testid="food-cost-actual">
-          {p.actualBp != null ? pct(p.actualBp, locale) : ils(p.actualAgorot, locale, 0)}
+          {p.actualBp != null ? pct(p.actualBp, locale) : <Money agorot={p.actualAgorot} context="tile" />}
         </span>
         {p.actualBp != null ? (
           <span className="text-sm text-muted">
-            {t('period.ofSales')} · <bdi dir="ltr" className="tabular-nums">{ils(p.actualAgorot, locale, 0)}</bdi> ·{' '}
+            {t('period.ofSales')} · <Money agorot={p.actualAgorot} context="tile" /> ·{' '}
             <span className={overTarget ? 'font-semibold text-warn' : ''}>{t('period.target', { target: pct(p.targetBp, locale) })}</span>
           </span>
         ) : null}
@@ -217,12 +295,12 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
           <ul className="mt-0.5 space-y-0.5">
             {p.purchases.accruedAgorot > 0 ? (
               <li>
-                <bdi dir="ltr" className="tabular-nums">+ {ils(p.purchases.accruedAgorot, locale)}</bdi> · {t('period.accruedLine', { count: p.purchases.accruedNotes })}
+                + <Money agorot={p.purchases.accruedAgorot} /> · {t('period.accruedLine', { count: p.purchases.accruedNotes })}
               </li>
             ) : null}
             {p.purchases.reversedAgorot > 0 ? (
               <li>
-                <bdi dir="ltr" className="tabular-nums">− {ils(p.purchases.reversedAgorot, locale)}</bdi> · {t('period.reversedLine')}
+                − <Money agorot={p.purchases.reversedAgorot} /> · {t('period.reversedLine')}
               </li>
             ) : null}
           </ul>
@@ -232,9 +310,9 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
       <div className="mt-3 border-t border-line pt-3 text-sm">
         {p.salesAgorot != null && !(editingSales && p.salesSource === 'manual') ? (
           <p className="flex flex-wrap items-center gap-x-2 text-muted">
-            {t('period.sales')}: <bdi dir="ltr" className="tabular-nums font-semibold text-ink">{ils(p.salesAgorot, locale, 0)}</bdi>{' '}
-            <span className="text-xs">({p.salesSource === 'pos' ? t('period.salesPos') : t('period.salesManual')})</span>
-            {p.salesSource === 'manual' ? (
+            {t('period.sales')}: <Money agorot={p.salesAgorot} context="tile" className="font-semibold text-ink" />{' '}
+            <span className="text-sm">({p.salesSource === 'pos' ? t('period.salesPos') : t('period.salesManual')})</span>
+            {p.salesSource === 'manual' && canEditSales ? (
               <Button
                 size="sm"
                 variant="ghost"
@@ -251,6 +329,7 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
         ) : (
           salesForm
         )}
+        {p.salesSource === 'manual' && !editingSales ? salesBy : null}
       </div>
 
       {p.theoreticalAgorot == null && p.theoreticalCoverageBp != null ? (
@@ -263,14 +342,12 @@ export function PeriodCard({ compact = false }: { compact?: boolean }) {
       {p.theoreticalAgorot != null && p.varianceAgorot != null ? (
         <div className="mt-3 border-t border-line pt-3 text-sm" data-testid="food-cost-variance">
           <p className="text-muted">
-            {t('period.theoretical')}: <bdi dir="ltr" className="tabular-nums text-ink">{ils(p.theoreticalAgorot, locale, 0)}</bdi>
+            {t('period.theoretical')}: <Money agorot={p.theoreticalAgorot} context="tile" className="text-ink" />
             {p.theoreticalBp != null ? <> ({pct(p.theoreticalBp, locale)})</> : null}
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <span className="font-semibold text-ink">{t('period.variance')}:</span>
-            <bdi dir="ltr" className={p.varianceAlert ? 'font-bold tabular-nums text-ink' : 'tabular-nums text-ink'}>
-              {ils(p.varianceAgorot, locale, 0)}
-            </bdi>
+            <Money agorot={p.varianceAgorot} context="tile" className={p.varianceAlert ? 'font-bold text-ink' : 'text-ink'} />
             {p.varianceBp != null ? <span className="text-muted">({pct(p.varianceBp, locale)})</span> : null}
             {p.varianceAlert ? <Badge tone="warning-solid">{t('period.varianceAlert')}</Badge> : null}
           </div>

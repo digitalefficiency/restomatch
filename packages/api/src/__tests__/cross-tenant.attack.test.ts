@@ -390,6 +390,10 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'inventory.amendLine': "attack — inventory-must-haves.test.ts: B amending A's closed count → NOT_FOUND; owner-only",
   'inventory.exportCsv': "attack — inventory-must-haves.test.ts: B exporting A's count → NOT_FOUND; lists only the caller's lines",
   'inventory.period': "attack — inventory-rls.attack.test.ts: B asking for the period of A's closed count → notFound; inventory-router.test.ts: A's purchases exclude B's ₪99,999 invoice on the same day; B's period is noCounts",
+  // W2-07 (add-only; moves to coverage/W2-07.ts when W2-01's fragments are on the base):
+  'inventory.setSales': "attack — inventory-rls.attack.test.ts: B setting sales on A's closed count → NOT_FOUND, A's sales untouched; inventory-sales.test.ts: manager+ only, audited",
+  'inventory.submitForClose': "attack — inventory-rls.attack.test.ts: B submitting A's draft → NOT_FOUND, no audit row and no notification for A",
+  'inventory.periodPercent': "attack — inventory-rls.attack.test.ts: B asking for the % period of A's closed count → notFound; no ₪ key for any role",
 };
 
 function listProcedurePaths(): string[] {

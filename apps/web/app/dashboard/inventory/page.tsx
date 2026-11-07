@@ -4,25 +4,28 @@ import { createServerCaller } from '@/lib/trpc/server';
 import { SectionHeader } from '@/lib/components';
 import { getT } from '@/lib/i18n/server';
 import { inventory as inventoryNs } from '@/lib/i18n/messages/inventory';
-import { InventoryHome } from './inventory-home';
+import { InventoryHome, type InventoryRole } from './inventory-home';
 
 /**
- * Inventory counting → actual food cost (flag `inventoryCount`). Owner /
- * manager / chef (lib/roles.ts); the chef counts but sees no ₪. A restaurant without the flag gets a 404 —
- * the feature is invisible, not "locked".
+ * Inventory counting → actual food cost (flag `inventoryCount`). Owner / manager /
+ * chef count; the bookkeeper reads (owner decision). The chef sees no ₪ — the
+ * server sends none. A restaurant without the flag gets a 404. `current` and
+ * `history` are fetched here as initial data (no SSR spinner, then fetch).
  */
 export default async function InventoryPage() {
   const caller = await createServerCaller();
   const [{ enabled }, session] = await Promise.all([caller.inventory.enabled(), auth()]);
   if (!enabled) notFound();
   const t = await getT(inventoryNs);
-  // Owner decision: the chef sees no ₪ — no period card, no count values
-  // (the server sends none to the chef either).
-  const showMoney = session?.user?.role !== 'chef';
+  const role = (session?.user?.role ?? 'chef') as InventoryRole;
+  const [initialCurrent, initialHistory] = await Promise.all([
+    role === 'bookkeeper' ? Promise.resolve(undefined) : caller.inventory.current().catch(() => undefined),
+    caller.inventory.history().catch(() => undefined),
+  ]);
   return (
     <div>
       <SectionHeader level={1} title={t('title')} subtitle={t('subtitle')} />
-      <InventoryHome showMoney={showMoney} />
+      <InventoryHome role={role} initialCurrent={initialCurrent} initialHistory={initialHistory} />
     </div>
   );
 }

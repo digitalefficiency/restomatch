@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   and,
+  auditLog,
+  inArray,
+  notificationsOutbox,
   applyAuditImmutableRls,
   applyAuthCredentialTables,
   applyCoreTenantRls,
@@ -144,5 +147,22 @@ describe('inventory router: a foreign count id or product never reaches another 
     expect(await callerFor(B, appDb).inventory.period({ closingId: aCount })).toEqual({ available: false, reason: 'notFound' });
     const own = await callerFor(B, appDb).inventory.period();
     expect(JSON.stringify(own)).not.toContain(aCount);
+  });
+
+  // W2-07 (add-only): the audited denominator, the chef's hand-off and the %-only period.
+  it("setSales / submitForClose / periodPercent on A's counts from B → NOT_FOUND / notFound, and A is untouched", async () => {
+    const [before] = await ownerDb.select().from(inventoryCounts).where(eq(inventoryCounts.id, aCount));
+    await expect(callerFor(B, appDb).inventory.setSales({ countId: aCount, foodSalesExVat: '1.00' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(callerFor(B, appDb).inventory.submitForClose({ countId: aDraft })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(await callerFor(B, appDb).inventory.periodPercent({ closingId: aCount })).toEqual({ available: false, reason: 'notFound', showMoney: false });
+    const [after] = await ownerDb.select().from(inventoryCounts).where(eq(inventoryCounts.id, aCount));
+    expect(after!.foodSalesExVat).toBe(before!.foodSalesExVat);
+    const audits = await ownerDb
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.restaurantId, A.restaurantId), inArray(auditLog.action, ['inventory.sales_set', 'inventory.count_submitted'])));
+    expect(audits).toHaveLength(0);
+    const notes = await ownerDb.select().from(notificationsOutbox).where(eq(notificationsOutbox.relatedEntityId, aDraft));
+    expect(notes).toHaveLength(0);
   });
 });
