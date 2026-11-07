@@ -113,11 +113,11 @@ describe('recipes.preview — cross-tenant', () => {
     expect(row!.name).toBe('מנה A');
   });
 
-  it('flag off → FORBIDDEN; receiver and bookkeeper → FORBIDDEN; chef and manager allowed', async () => {
+  it('flag off → FORBIDDEN; receiver → FORBIDDEN; chef, manager and the bookkeeper (I3, a read) allowed', async () => {
     await setFlag(A, false);
     await expect(caller(A).recipes.preview(draft([]))).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await setFlag(A, true);
-    for (const role of ['receiver', 'bookkeeper'] as const) await expect(caller(A, role).recipes.preview(draft([]))).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    for (const role of ['chef', 'manager'] as const) await expect(caller(A, role).recipes.preview(draft([]))).resolves.toBeDefined();
+    for (const role of ['receiver'] as const) await expect(caller(A, role).recipes.preview(draft([]))).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    for (const role of ['chef', 'manager', 'bookkeeper'] as const) await expect(caller(A, role).recipes.preview(draft([]))).resolves.toBeDefined();
   });
 });

@@ -105,6 +105,19 @@ const recipesProcedure = chefProcedure.use(async ({ ctx, next }) => {
   const rc = await assertRecipesEnabled(ctx.db, ctx.session.restaurantId);
   return next({ ctx: { ...ctx, rc } });
 });
+/**
+ * Owner decision I3 (W3-02): the bookkeeper reads everything, read-only. Every
+ * recipes.* READ (queries, preview included: it never writes) also admits the
+ * bookkeeper, ₪ visible (she is finance). Writes stay chef+ / manager+.
+ */
+const READ_ROLES = ['owner', 'manager', 'chef', 'bookkeeper'] as const;
+const recipesReadProcedure = memberProcedure.use(async ({ ctx, next }) => {
+  if (!(READ_ROLES as readonly string[]).includes(ctx.session.role)) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: `Required role: ${READ_ROLES.join('|')}, got: ${ctx.session.role}` });
+  }
+  const rc = await assertRecipesEnabled(ctx.db, ctx.session.restaurantId);
+  return next({ ctx: { ...ctx, rc } });
+});
 const recipesManagerProcedure = managerProcedure.use(async ({ ctx, next }) => {
   const rc = await assertRecipesEnabled(ctx.db, ctx.session.restaurantId);
   return next({ ctx: { ...ctx, rc } });
@@ -299,7 +312,7 @@ export const recipesRouter = router({
   }),
 
   /** Every recipe with its current cost, food-cost %, margin and traffic light. */
-  list: recipesProcedure.query(async ({ ctx }) => {
+  list: recipesReadProcedure.query(async ({ ctx }) => {
     const all = await loadAll(ctx.db, ctx.session.restaurantId, ctx.rc.vatBp);
     return {
       targetBp: ctx.rc.targetBp,
@@ -308,7 +321,7 @@ export const recipesRouter = router({
   }),
 
   /** One recipe with its costed lines (product / sub-recipe names, price used, unit). */
-  get: recipesProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {
+  get: recipesReadProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {
     const rid = ctx.session.restaurantId;
     const all = await loadAll(ctx.db, rid, ctx.rc.vatBp);
     const r = all.rows.find((x) => x.id === input.id);
@@ -353,7 +366,7 @@ export const recipesRouter = router({
    * (recipe, product, sub-recipe) are NOT_FOUND with the save's tokens; unit
    * mismatches and missing prices are line statuses, not errors (mid-typing).
    */
-  preview: recipesProcedure.input(recipeInput).query(async ({ ctx, input }) => {
+  preview: recipesReadProcedure.input(recipeInput).query(async ({ ctx, input }) => {
     const rid = ctx.session.restaurantId;
     const { rows, items } = await loadRecipes(ctx.db, rid);
     if (input.id && !rows.some((r) => r.id === input.id)) fail('NOT_FOUND', 'notFound');
@@ -425,7 +438,7 @@ export const recipesRouter = router({
   }),
 
   /** Product picker for the editor: name/English match, with the latest paid price + unit. */
-  searchProducts: recipesProcedure
+  searchProducts: recipesReadProcedure
     .input(z.object({ search: z.string().trim().max(100).default(''), limit: z.number().int().min(1).max(50).default(20) }))
     .query(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
@@ -450,7 +463,7 @@ export const recipesRouter = router({
     }),
 
   /** Sub-recipes available to use inside another recipe. */
-  subRecipes: recipesProcedure.query(async ({ ctx }) => {
+  subRecipes: recipesReadProcedure.query(async ({ ctx }) => {
     return ctx.db
       .select({ id: recipes.id, name: recipes.name, nameEn: recipes.nameEn, yieldQty: recipes.yieldQty, yieldUnit: recipes.yieldUnit })
       .from(recipes)
@@ -462,7 +475,7 @@ export const recipesRouter = router({
    * "What if": the dishes affected when one product's price moves by
    * `changePct` (−90…+500), e.g. chicken +12% → schnitzel 31% → 34%, −₪2.10/plate.
    */
-  impact: recipesProcedure
+  impact: recipesReadProcedure
     .input(z.object({ productId: z.string().uuid(), changePct: z.number().min(-90).max(500) }))
     .query(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
@@ -504,7 +517,7 @@ export const recipesRouter = router({
    * start of the restaurant's calendar month vs now, sorted by the biggest move,
    * with the ingredient that moved it most (the "why").
    */
-  changes: recipesProcedure.query(({ ctx }) => computeChanges(ctx.db, ctx.session.restaurantId, ctx.rc)),
+  changes: recipesReadProcedure.query(({ ctx }) => computeChanges(ctx.db, ctx.session.restaurantId, ctx.rc)),
 
   /**
    * Dish price alerts (flag `dishPriceAlert`, on top of `recipes`): dishes whose
@@ -513,7 +526,7 @@ export const recipesRouter = router({
    * per plate, the ingredient's price move and the supplier who charged it.
    * With the flag off: `{ enabled: false, alerts: [] }` — never an error.
    */
-  priceAlerts: recipesProcedure.query(async ({ ctx }) => {
+  priceAlerts: recipesReadProcedure.query(async ({ ctx }) => {
     if (!featureEnabled(ctx.rc.settings, 'dishPriceAlert')) return { enabled: false as const, targetBp: ctx.rc.targetBp, alerts: [] };
     const ch = await computeChanges(ctx.db, ctx.session.restaurantId, ctx.rc);
     return { enabled: true as const, targetBp: ch.targetBp, alerts: dishPriceAlerts(ch.rows, ch.targetBp) };
@@ -526,7 +539,7 @@ export const recipesRouter = router({
    * table — it answers `available: false` with the reason, so the recipes page
    * shows a neutral empty state.
    */
-  posVsTheory: recipesProcedure
+  posVsTheory: recipesReadProcedure
     .input(z.object({ month: z.enum(['current', 'previous']).default('current') }).optional())
     .query(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
