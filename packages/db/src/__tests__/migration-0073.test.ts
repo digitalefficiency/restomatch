@@ -154,9 +154,17 @@ describe('0073 is registered', () => {
     const stmts = statements();
     const code = (x: string) => x.split('\n').filter((l) => !l.trimStart().startsWith('--')).join('\n').trim();
     expect(code(stmts[0]!)).toMatch(/set_config\('lock_timeout', '5s', true\)[\s\S]*set_config\('statement_timeout', '6s', true\)/);
-    expect(code(stmts[1]!)).toMatch(
-      /^DO \$\$\s*BEGIN\s*LOCK TABLE "restaurants", "users" IN SHARE ROW EXCLUSIVE MODE;\s*LOCK TABLE "suppliers", "products", "purchase_orders", "po_lines", "recipes",\s*"inventory_counts", "inventory_count_lines" IN ACCESS EXCLUSIVE MODE;\s*END \$\$;$/,
-    );
+    const lockPhase = code(stmts[1]!);
+    expect(lockPhase).toMatch(/^DO \$\$\s*BEGIN\s*LOOP\s*BEGIN\s*LOCK TABLE "restaurants" IN SHARE ROW EXCLUSIVE MODE NOWAIT;/);
+    expect(lockPhase).toMatch(/EXCEPTION WHEN lock_not_available THEN\s*PERFORM pg_sleep\(0\.05\);/);
+    // Every LOCK is NOWAIT (nothing is held while waiting); parent-first, users last (0071/0072 order).
+    const locks = lockPhase.match(/LOCK TABLE [^;]+;/g) ?? [];
+    expect(locks).toHaveLength(4);
+    for (const l of locks) expect(l).toMatch(/NOWAIT;$/);
+    const order = ['"restaurants"', '"suppliers"', '"products"', '"purchase_orders"', '"po_lines"', '"recipes"', '"inventory_counts"', '"inventory_count_lines"', '"users"'];
+    const pos = order.map((t) => lockPhase.indexOf(t));
+    expect(pos.every((p) => p >= 0)).toBe(true);
+    expect([...pos].sort((a, b) => a - b)).toEqual(pos);
     expect(code(stmts[2]!)).toMatch(/set_config\('statement_timeout',[\s\S]*current_setting\('restomatch.prev_statement_timeout', true\)/);
     // No other LOCK anywhere after the prelude: nothing waits or upgrades mid-file.
     expect(stmts.slice(2).some((s) => /\bLOCK TABLE\b/i.test(code(s)))).toBe(false);
@@ -184,7 +192,7 @@ describe('0073 is registered', () => {
         err = e;
       }
       const waited = Date.now() - started;
-      expect(['55P03', '57014']).toContain(pgCode(err)); // lock_not_available / statement_timeout
+      expect(pgCode(err)).toBe('57014'); // the NOWAIT loop retries until the 6s statement_timeout
       expect(waited).toBeLessThan(15_000);
       release();
       await readerTx;

@@ -70,18 +70,19 @@
 -- top-level LOCK TABLE / SET LOCAL / SAVEPOINT is refused there (25P01) and nothing
 -- applies. The prelude therefore (1) sets lock_timeout 5s and a 6s statement_timeout
 -- with set_config(..., is_local => true), keeping the previous statement_timeout in
--- restomatch.prev_statement_timeout; (2) takes every lock in ONE DO block,
--- parent-first (the 0071/0072 order): SHARE ROW EXCLUSIVE on "restaurants" and
--- "users" (FK targets only), ACCESS EXCLUSIVE on the seven existing tables this file
--- alters (products and recipes are also FK targets); (3) restores statement_timeout.
--- A long reader makes the file fail fast (55P03 / 57014) with nothing applied;
--- re-run it in a quiet hour.
+-- restomatch.prev_statement_timeout; (2) takes every lock in ONE DO block with an
+-- all-or-nothing NOWAIT retry loop, parent-first (the 0071/0072 order, users last):
+-- SHARE ROW EXCLUSIVE on "restaurants" and "users" (FK targets only), ACCESS
+-- EXCLUSIVE on the seven existing tables this file alters (products and recipes are
+-- also FK targets); (3) restores statement_timeout. A long reader makes the file
+-- fail fast (57014 after 6s) with nothing applied; re-run it in a quiet hour.
 -- Stacked drizzle path: `pnpm db:migrate` applies 0071 + 0072 + 0073 in ONE
 -- transaction. 0073 asks for nothing stronger than what 0071/0072 already hold on
 -- restaurants (0072: ACCESS EXCLUSIVE), users (0072: AE), suppliers (0072: AE),
 -- purchase_orders (0071: AE) and po_lines (0072: AE); it takes NEW ACCESS EXCLUSIVE
 -- locks on products, recipes, inventory_counts and inventory_count_lines mid-batch.
--- A busy table then fails the WHOLE batch fast (nothing applied). Re-run it.
+-- The NOWAIT loop never waits holding a NEW lock, so a busy table fails the WHOLE
+-- batch within the 6s bound (nothing applied). Re-run it.
 --
 -- App coupling: schema.ts names the new columns of EXISTING tables in every Drizzle
 -- select/insert, so a build of main that carries this schema.ts fails against a DB
@@ -116,11 +117,26 @@
 SELECT set_config('restomatch.prev_statement_timeout', current_setting('statement_timeout'), true),
        set_config('lock_timeout', '5s', true),
        set_config('statement_timeout', '6s', true);--> statement-breakpoint
+-- All-or-nothing NOWAIT loop (as 0071/0072): take every lock with NOWAIT; if any one
+-- is busy, the sub-block rolls back and releases the locks it got, waits 50 ms and
+-- tries again. Nothing is held while waiting, so no deadlock with a live app
+-- transaction (40P01), and the 6s statement_timeout bounds the loop (57014).
+-- Order = 0071/0072's parent-first order (restaurants … users last), restricted to
+-- this file's tables: suppliers → products → purchase_orders → po_lines → recipes →
+-- inventory_counts → inventory_count_lines.
 DO $$
 BEGIN
-  LOCK TABLE "restaurants", "users" IN SHARE ROW EXCLUSIVE MODE;
-  LOCK TABLE "suppliers", "products", "purchase_orders", "po_lines", "recipes",
-    "inventory_counts", "inventory_count_lines" IN ACCESS EXCLUSIVE MODE;
+  LOOP
+    BEGIN
+      LOCK TABLE "restaurants" IN SHARE ROW EXCLUSIVE MODE NOWAIT;
+      LOCK TABLE "suppliers", "products", "purchase_orders", "po_lines" IN ACCESS EXCLUSIVE MODE NOWAIT;
+      LOCK TABLE "recipes", "inventory_counts", "inventory_count_lines" IN ACCESS EXCLUSIVE MODE NOWAIT;
+      LOCK TABLE "users" IN SHARE ROW EXCLUSIVE MODE NOWAIT;
+      EXIT;
+    EXCEPTION WHEN lock_not_available THEN
+      PERFORM pg_sleep(0.05);
+    END;
+  END LOOP;
 END $$;--> statement-breakpoint
 -- Restore. If the saved value is gone (an applier that commits per statement already
 -- reverted the local setting), keep the current one.

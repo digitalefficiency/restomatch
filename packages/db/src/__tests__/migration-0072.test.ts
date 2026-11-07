@@ -186,7 +186,14 @@ describe('0072 is registered', () => {
       .filter(Boolean);
     const code = (x: string) => x.split('\n').filter((l) => !l.trimStart().startsWith('--')).join('\n').trim();
     expect(code(stmts[0]!)).toMatch(/set_config\('lock_timeout', '5s', true\)[\s\S]*set_config\('statement_timeout', '6s', true\)/);
-    expect(code(stmts[1]!)).toMatch(/^DO \$\$\s*BEGIN\s*LOCK TABLE "restaurants", "users", [\s\S]* IN ACCESS EXCLUSIVE MODE;\s*END \$\$;$/);
+    const lockPhase = code(stmts[1]!);
+    expect(lockPhase).toMatch(/^DO \$\$\s*BEGIN\s*LOOP\s*BEGIN\s*LOCK TABLE "restaurants", "suppliers"/);
+    expect(lockPhase).toMatch(/EXCEPTION WHEN lock_not_available THEN\s*PERFORM pg_sleep\(0\.05\);/);
+    // Every LOCK is NOWAIT (nothing is held while waiting), parent-first: receipts before PO lines.
+    const locks = lockPhase.match(/LOCK TABLE [^;]+;/g) ?? [];
+    expect(locks.length).toBeGreaterThan(0);
+    for (const l of locks) expect(l).toMatch(/IN ACCESS EXCLUSIVE MODE NOWAIT;$/);
+    expect(lockPhase.indexOf('"goods_receipts"')).toBeLessThan(lockPhase.indexOf('"po_lines"'));
     expect(code(stmts[2]!)).toMatch(/set_config\('statement_timeout',[\s\S]*current_setting\('restomatch.prev_statement_timeout', true\)/);
     const reader = postgres(url, { max: 1, prepare: false });
     const runner = postgres(url, { max: 1, prepare: false });
@@ -212,7 +219,7 @@ describe('0072 is registered', () => {
         err = e;
       }
       const waited = Date.now() - started;
-      expect(['55P03', '57014']).toContain(pgCode(err)); // lock_not_available / statement_timeout
+      expect(pgCode(err)).toBe('57014'); // the NOWAIT loop retries until the 6s statement_timeout
       expect(waited).toBeLessThan(15_000);
       release();
       await readerTx;

@@ -77,10 +77,11 @@
 -- applies. The prelude therefore (1) sets lock_timeout 5s and a 6s statement_timeout
 -- with set_config(..., is_local => true), keeping the previous statement_timeout in
 -- restomatch.prev_statement_timeout; (2) takes every lock in ONE DO block, parent-first
--- (the app's order), ACCESS EXCLUSIVE on the nine existing tables this file alters or
--- references (FK targets included), so nothing waits or upgrades mid-file; (3) restores
--- statement_timeout. A long reader makes the file fail fast (55P03 / 57014) with
--- nothing applied; re-run it in a quiet hour. There is no backfill: no row is read or
+-- (0071's order), ACCESS EXCLUSIVE on the nine existing tables this file alters or
+-- references (FK targets included), in an all-or-nothing NOWAIT retry loop, so nothing
+-- waits holding a lock, nothing upgrades mid-file and nothing deadlocks; (3) restores
+-- statement_timeout. A long reader makes the file fail fast (57014; 55P03 / 40P01 on
+-- other paths) with nothing applied; re-run it in a quiet hour. There is no backfill: no row is read or
 -- updated.
 -- Stacked drizzle path: `pnpm db:migrate` applies 0071 + 0072 in ONE transaction, so
 -- 0072's lock phase upgrades/extends 0071's locks mid-batch; a busy table then fails
@@ -114,10 +115,24 @@
 SELECT set_config('restomatch.prev_statement_timeout', current_setting('statement_timeout'), true),
        set_config('lock_timeout', '5s', true),
        set_config('statement_timeout', '6s', true);--> statement-breakpoint
+-- All-or-nothing NOWAIT loop (as 0071): take every lock with NOWAIT; if any one is
+-- busy, the sub-block rolls back and releases the locks it got, waits 50 ms and
+-- tries again. Nothing is held while waiting, so no deadlock with a live
+-- startReceipt (40P01), and the 6s statement_timeout bounds the loop (57014).
+-- Order = 0071's parent-first order, restricted to this file's tables.
 DO $$
 BEGIN
-  LOCK TABLE "restaurants", "users", "suppliers", "supplier_catalog_items", "po_lines",
-    "goods_receipts", "invoices", "invoice_lines", "recovery_claims" IN ACCESS EXCLUSIVE MODE;
+  LOOP
+    BEGIN
+      LOCK TABLE "restaurants", "suppliers", "supplier_catalog_items" IN ACCESS EXCLUSIVE MODE NOWAIT;
+      LOCK TABLE "goods_receipts", "po_lines" IN ACCESS EXCLUSIVE MODE NOWAIT;
+      LOCK TABLE "invoices", "invoice_lines" IN ACCESS EXCLUSIVE MODE NOWAIT;
+      LOCK TABLE "recovery_claims", "users" IN ACCESS EXCLUSIVE MODE NOWAIT;
+      EXIT;
+    EXCEPTION WHEN lock_not_available THEN
+      PERFORM pg_sleep(0.05);
+    END;
+  END LOOP;
 END $$;--> statement-breakpoint
 -- Restore. If the saved value is gone (an applier that commits per statement already
 -- reverted the local setting), keep the current one.

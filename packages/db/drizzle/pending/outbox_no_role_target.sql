@@ -11,7 +11,7 @@
 -- └────────────────────────────────────────────────────────────────────────────────┘
 -- NOT VALID: existing (historic) role: rows are not re-checked, only new and updated
 -- rows. A later VALIDATE CONSTRAINT is optional, after the old rows are gone.
--- Pipeline-safe like 0071-0073: no top-level LOCK / SET LOCAL; one DO-block lock.
+-- Pipeline-safe like 0071-0073: no top-level LOCK / SET LOCAL; one DO-block NOWAIT lock loop.
 -- Idempotent. Rollback: ALTER TABLE notifications_outbox DROP CONSTRAINT
 --   notifications_outbox_no_role_target_check;  then delete its tracker rows.
 
@@ -20,7 +20,14 @@ SELECT set_config('restomatch.prev_statement_timeout', current_setting('statemen
        set_config('statement_timeout', '6s', true);--> statement-breakpoint
 DO $$
 BEGIN
-  LOCK TABLE "notifications_outbox" IN ACCESS EXCLUSIVE MODE;
+  LOOP
+    BEGIN
+      LOCK TABLE "notifications_outbox" IN ACCESS EXCLUSIVE MODE NOWAIT;
+      EXIT;
+    EXCEPTION WHEN lock_not_available THEN
+      PERFORM pg_sleep(0.05);
+    END;
+  END LOOP;
 END $$;--> statement-breakpoint
 SELECT set_config('statement_timeout',
   coalesce(nullif(current_setting('restomatch.prev_statement_timeout', true), ''), current_setting('statement_timeout')),
