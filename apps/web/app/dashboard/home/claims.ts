@@ -1,12 +1,12 @@
-import type { followUps } from '../recovery/logic';
+import { ANSWER_DAYS, type followUps } from '../recovery/logic';
 import type { NeedRow } from './needs-you';
 
 type Queues = ReturnType<typeof followUps>;
 
 /**
  * The home's credit-claim rows = the recovery page's two follow-up queues
- * (recovery/logic followUps: letters never sent; sent letters past the 14-day
- * answer window — an acknowledged claim is answered, so not waiting). Same rule,
+ * (recovery/logic followUps: letters never sent; sent letters past the ANSWER_DAYS
+ * (a week) answer window — an acknowledged claim is answered, so not waiting). Same rule,
  * same figures (to the agora), same wording, and the row lands on that banner.
  */
 export function claimNeedRows(
@@ -18,7 +18,7 @@ export function claimNeedRows(
     rows.push({
       key: 'claimsWaiting',
       tone: 'warn',
-      label: f.t('needs.claimsWaiting.label'),
+      label: f.t('needs.claimsWaiting.label', { days: f.n(ANSWER_DAYS) }),
       value: f.money(q.waiting.agorot),
       sub: f.t('needs.claimsWaiting.sub', { count: f.n(q.waiting.count) }),
       verb: f.t('needs.claimsWaiting.verb'),

@@ -35,12 +35,15 @@
  *     a receipt-less photo scan while its supplier has a receipt being counted
  *     (ocrInvoice.ts, ocrAutoMatchDecision); that receipt's submit matches it.
  *
- * Without ANTHROPIC_API_KEY a retry could only fail (the original job may have
- * carried dev stub results), so the sweep does nothing.
+ * Only tenants on real OCR (ocrInvoice.ts ocrModeFor → 'claude': ANTHROPIC_API_KEY
+ * set AND the restaurant in OCR_REAL_RESTAURANT_IDS) are swept. Anyone else's
+ * retry could only be refused ('disabled') or re-stub the demo, so with nobody
+ * listed the sweep does nothing.
  */
 import type { Sql } from '@restomatch/queue';
 import { insertJob } from '@restomatch/queue';
 import { makeWorker, workerSql, type WorkerJob } from '../queue';
+import { claudeOcrRestaurantIds } from './ocrInvoice';
 
 export type OcrSweepJob = { now?: string };
 
@@ -61,7 +64,17 @@ export interface OcrSweepResult {
   raced: string[];
 }
 
-export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepResult> {
+/**
+ * `restaurantIds` = the tenants on real OCR (claudeOcrRestaurantIds); others are
+ * never re-enqueued. Defaults to the environment's list (empty = nothing swept).
+ */
+export async function runOcrSweep(
+  sql: Sql,
+  now = new Date(),
+  restaurantIds: Iterable<string> = claudeOcrRestaurantIds(),
+): Promise<OcrSweepResult> {
+  const only = [...restaurantIds].map((id) => id.toLowerCase());
+  if (only.length === 0) return { requeued: [], raced: [] };
   const staleBefore = new Date(now.getTime() - OCR_SWEEP_STALE_AFTER_MS);
   const notBefore = new Date(now.getTime() - OCR_SWEEP_MAX_AGE_MS);
   // A scan is pending since it was registered — or since its latest RETAKE
@@ -87,6 +100,7 @@ export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepR
                AND a.action = 'receiving.invoice_retaken'
           ) r ON true
          WHERE i.status = 'ocr_pending'
+           AND i.restaurant_id::text = ANY(${sql.array(only)}::text[])
            AND i.raw_image_url ~* '^https?://'
       ) s
      WHERE s.pending_since < ${staleBefore}
@@ -131,8 +145,9 @@ export function startOcrSweepWorker() {
 
 /** The ocr-sweep job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
 export async function processOcrSweep(job: WorkerJob<OcrSweepJob>) {
-  if (!process.env.ANTHROPIC_API_KEY) return { skipped: 'ANTHROPIC_API_KEY unset — retries could only fail' };
-  const result = await runOcrSweep(workerSql(), job.data.now ? new Date(job.data.now) : new Date());
+  const only = claudeOcrRestaurantIds();
+  if (only.size === 0) return { skipped: 'no tenant on real OCR (ANTHROPIC_API_KEY + OCR_REAL_RESTAURANT_IDS)' };
+  const result = await runOcrSweep(workerSql(), job.data.now ? new Date(job.data.now) : new Date(), only);
   if (result.requeued.length) console.log(`[ocr-sweep] ${JSON.stringify(result)}`);
   return result;
 }

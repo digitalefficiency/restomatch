@@ -21,6 +21,7 @@ import {
 } from '@restomatch/db';
 import { appRouter, type AppContext } from '@restomatch/api';
 import { matchInvoiceForJob, type MatchInvoiceJob } from '../jobs/matchInvoice';
+import { markOcrFailed } from '../jobs/ocrInvoice';
 
 const enqueued: MatchInvoiceJob[] = [];
 vi.mock('@restomatch/queue', async (orig) => ({
@@ -213,5 +214,27 @@ describe('#216 round 4, item 2: the submit job matches the COUNTED order strictl
     expect(out.skipped).toBeUndefined();
     const [run] = await db.select({ poId: matchRuns.poId }).from(matchRuns).where(eq(matchRuns.invoiceId, inv!.id));
     expect(run).toMatchObject({ poId: gr!.poId });
+  });
+});
+
+describe('#216 HARD GATE (train A): a failed read keeps its receipt — the REAL markOcrFailed', () => {
+  it('register → markOcrFailed → the picker still has the order; a re-scan retakes the SAME invoice (ocr_pending)', async () => {
+    const reg = await as('receiver').receiving.registerInvoice({ grId, imageUrl: 'https://example.com/scans/blurry.jpg', supplierId });
+    expect(reg.alreadyExisted).toBe(false);
+    // The worker's own terminal failure (train A #171: merges into raw, keeps the stamp).
+    await markOcrFailed(db, restaurantId, reg.invoiceId, new Error('extraction failed'));
+    const [failed] = await db.select().from(invoices).where(eq(invoices.id, reg.invoiceId));
+    expect(failed!.status).toBe('parsed');
+    expect(failed!.ocrPayload?.raw).toMatchObject({ ocrFailed: true, scanGrId: grId });
+    // The receipt is still known: the hand-entry picker offers the order's lines.
+    const page = await as('owner').receiving.getInvoice({ invoiceId: reg.invoiceId });
+    expect(page.orderLines.map((l) => l.id)).toContain(poLineId);
+    // The receiver photographs it again: the SAME invoice, read again.
+    const again = await as('receiver').receiving.registerInvoice({ grId, imageUrl: 'https://example.com/scans/sharp.jpg', supplierId });
+    expect(again).toMatchObject({ invoiceId: reg.invoiceId, alreadyExisted: false });
+    const [retaken] = await db.select().from(invoices).where(eq(invoices.id, reg.invoiceId));
+    expect(retaken).toMatchObject({ status: 'ocr_pending', rawImageUrl: 'https://example.com/scans/sharp.jpg' });
+    expect(retaken!.ocrPayload?.raw).toMatchObject({ scanGrId: grId });
+    expect(await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.restaurantId, restaurantId))).toHaveLength(1);
   });
 });

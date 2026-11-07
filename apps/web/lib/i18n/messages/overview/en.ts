@@ -80,7 +80,7 @@ export const en: Shape<typeof he> = {
       duplicates: '+ {amount} in duplicate invoices (incl. VAT)',
       vat: '+ {amount} in VAT differences',
     },
-    claimsWaiting: { label: 'Waiting over 14 days for the supplier', sub: '{count} claims', verb: 'Reminders' },
+    claimsWaiting: { label: 'Waiting over {days} days for the supplier', sub: '{count} claims', verb: 'Reminders' },
     claimsUnsent: { label: 'Claims not yet sent to the supplier', sub: '{count} claims', verb: 'Send' },
     vat: { label: 'Missing allocation number', sub: '{count} invoices · {days} days left', verb: 'Ask the supplier' },
     payRun: { label: 'This month’s pay run', sub: '{count} invoices to pay', verb: 'Open pay run' },

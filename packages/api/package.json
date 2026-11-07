@@ -10,8 +10,9 @@
     "./client": "./src/client.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p scripts/__tests__/tsconfig.json",
+    "test": "vitest run && vitest run --config scripts/__tests__/vitest.config.ts",
+    "baseline:scan": "tsx scripts/baseline-scan.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",

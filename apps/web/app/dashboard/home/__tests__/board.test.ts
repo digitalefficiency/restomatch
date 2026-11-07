@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBoard, truckHref, truckState, type BoardExpectation } from '../board';
+import { buildBoard, isOverdue, truckHref, truckState, type BoardExpectation } from '../board';
 
 const NOW = new Date('2026-10-25T07:00:00.000Z'); // 10:00 in Israel
 const at = (minutesFromNow: number) => new Date(NOW.getTime() + minutesFromNow * 60_000).toISOString();
@@ -126,5 +126,24 @@ describe('truckHref', () => {
     expect(truckHref({ poId: 'p1', state: 'inProgress' })).toBe('/dashboard/receiving/p1');
     expect(truckHref({ poId: 'p1', state: 'received' })).toBe('/dashboard/receiving?receipt=p1');
     expect(truckHref({ poId: 'p1', state: 'receivedPartial' })).toBe('/dashboard/receiving?receipt=p1');
+  });
+});
+
+describe('isOverdue (pilot: "Late" never from midnight)', () => {
+  // 2026-10-25 00:00 in Israel (still UTC+3: the fall-back is at 02:00) — a day-only PO.
+  const todayMidnight = '2026-10-24T21:00:00.000Z';
+  it('a PO dated today with no hour is not late at 10:00, nor at 23:59', () => {
+    expect(isOverdue({ expectedAt: todayMidnight, hasDeliveryDate: true }, NOW)).toBe(false);
+    expect(isOverdue({ expectedAt: todayMidnight, hasDeliveryDate: true }, new Date('2026-10-25T21:59:00.000Z'))).toBe(false);
+    const b = buildBoard([po('t', { expectedAt: todayMidnight })], NOW);
+    expect(b.late).toEqual([]);
+  });
+  it('a PO with an hour is late only after that hour + grace', () => {
+    expect(isOverdue({ expectedAt: at(-29), hasDeliveryDate: true }, NOW)).toBe(false);
+    expect(isOverdue({ expectedAt: at(-31), hasDeliveryDate: true }, NOW)).toBe(true);
+  });
+  it('a past-day PO still comes in late through the server flag', () => {
+    const b = buildBoard([po('y', { late: true, expectedAt: '2026-10-23T22:00:00.000Z' })], NOW);
+    expect(b.late.map((i) => i.poId).concat(b.next?.poId ?? [])).toContain('y');
   });
 });

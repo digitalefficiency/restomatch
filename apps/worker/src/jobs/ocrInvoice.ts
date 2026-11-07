@@ -1,7 +1,15 @@
-import { fillEnglishNames, meterOcrScan, receiptState, scanReceiptToStamp, withScanGrId } from '@restomatch/api';
+import {
+  buildDevOcrStub,
+  fillEnglishNames,
+  isAllowedScanUrl,
+  meterOcrScan,
+  receiptState,
+  scanReceiptToStamp,
+  withScanGrId,
+} from '@restomatch/api';
 import { matchProductTopN, MockEmbeddingProvider } from '@restomatch/catalog';
 import { HELD_FOR_RECEIPTS_KEY, receiptsBeingCountedForScan } from '@restomatch/charts';
-import { and, eq, invoiceLines, invoices, ne, restaurants, sql, type Database } from '@restomatch/db';
+import { and, eq, findDemoTenants, invoiceLines, invoices, ne, restaurants, sql, type Database } from '@restomatch/db';
 import {
   ClaudeVision,
   runOcrPipeline,
@@ -10,7 +18,7 @@ import {
   type OcrProvider,
 } from '@restomatch/ocr';
 import { enqueueMatchInvoice } from '@restomatch/queue';
-import type { OcrInvoiceJob } from '@restomatch/types';
+import type { InvoiceOcrResult, OcrInvoiceJob } from '@restomatch/types';
 import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
 import { findJobInvoice } from './findJobInvoice';
@@ -19,21 +27,84 @@ export type { OcrInvoiceJob };
 
 const embedder = new MockEmbeddingProvider(1536);
 
-function buildProviders(job: OcrInvoiceJob): { documentAi: OcrProvider; claude: OcrProvider } {
-  if (job.mockProviders) {
-    return {
-      documentAi: new StubOcrProvider('document_ai', job.mockProviders.docAi),
-      claude: new StubOcrProvider('claude_vision', job.mockProviders.claude),
-    };
+/**
+ * Who gets which OCR (pilot gate, OCR-A).
+ *
+ *   'claude'   — real Claude Vision: ANTHROPIC_API_KEY is set AND the restaurant
+ *                is listed in OCR_REAL_RESTAURANT_IDS (comma-separated UUIDs).
+ *                Unset / empty list = nobody. The ONLY mode that is metered.
+ *   'stub'     — the demo identity only (packages/db demoTenants: כפר הזיתים and
+ *                its branches), and only for a receiving scan (job carries grId):
+ *                a deterministic "extraction" built from the receipt's PO, with
+ *                invoice numbers prefixed DEMO-. It fabricates lines, so it is
+ *                NEVER given to any other tenant.
+ *   'disabled' — everyone else: no provider call, no meter; the invoice is
+ *                marked OCR-failed with reason 'ocr_disabled' so the receiver
+ *                continues by hand.
+ *
+ * The demo's password was exposed: the demo must never reach a paid call, so
+ * the allowlist check comes first and the demo is simply never listed.
+ */
+export type OcrMode = 'claude' | 'stub' | 'disabled';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Malformed OCR_REAL_RESTAURANT_IDS entries already warned about (one warning each per process). */
+const warnedEntries = new Set<string>();
+
+/** The restaurants listed in OCR_REAL_RESTAURANT_IDS (lower-cased UUIDs). Malformed entries are ignored. */
+export function ocrRealRestaurantIds(env: NodeJS.ProcessEnv = process.env): Set<string> {
+  const ids = new Set<string>();
+  for (const part of (env.OCR_REAL_RESTAURANT_IDS ?? '').split(',')) {
+    const entry = part.trim();
+    if (!entry) continue;
+    if (UUID_RE.test(entry)) {
+      ids.add(entry.toLowerCase());
+    } else if (!warnedEntries.has(entry)) {
+      warnedEntries.add(entry);
+      console.warn(`[ocr-invoice] OCR_REAL_RESTAURANT_IDS: ignoring an entry that is not a UUID (${entry.length} chars)`);
+    }
   }
-  // CREDENTIAL GATE (AGENTS.md): a real provider is constructed ONLY when an
-  // ANTHROPIC_API_KEY is present. With no key we fail loudly rather than running
-  // an un-isolated real ingest — keep ingest on mockProviders until keys AND
-  // Supabase/RLS are live (Phase-6, human intake).
+  return ids;
+}
+
+/** The restaurants that get real OCR right now: none without ANTHROPIC_API_KEY. */
+export function claudeOcrRestaurantIds(env: NodeJS.ProcessEnv = process.env): Set<string> {
+  if (!env.ANTHROPIC_API_KEY) return new Set();
+  return ocrRealRestaurantIds(env);
+}
+
+/**
+ * Is `restaurantId` one of the demo tenants? By identity (findDemoTenants), never
+ * by name alone. When the demo set is mixed with real data findDemoTenants
+ * refuses — then nobody counts as demo (fail closed → 'disabled').
+ */
+export async function isDemoTenant(db: Database, restaurantId: string): Promise<boolean> {
+  try {
+    const client = (db as unknown as { $client: Parameters<typeof findDemoTenants>[0] }).$client;
+    const demo = await findDemoTenants(client);
+    return demo.restaurants.some((r) => r.id.toLowerCase() === restaurantId.toLowerCase());
+  } catch (err) {
+    console.warn('[ocr-invoice] demo-tenant check failed — treating the tenant as non-demo', err instanceof Error ? err.message.split('\n')[0] : err);
+    return false;
+  }
+}
+
+export async function ocrModeFor(
+  restaurantId: string,
+  opts: { grId?: string; env?: NodeJS.ProcessEnv; isDemo: (restaurantId: string) => Promise<boolean> },
+): Promise<OcrMode> {
+  if (claudeOcrRestaurantIds(opts.env ?? process.env).has(restaurantId.toLowerCase())) return 'claude';
+  if (opts.grId && (await opts.isDemo(restaurantId))) return 'stub';
+  return 'disabled';
+}
+
+/** First 8 characters of an id, for logs. */
+const short = (id: string) => id.slice(0, 8);
+
+function realProviders(): { documentAi: OcrProvider; claude: OcrProvider } {
+  // ocrModeFor returned 'claude', so the key is set.
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error('OCR providers not configured — provide mockProviders or set ANTHROPIC_API_KEY');
-  }
+  if (!apiKey) throw new Error('OCR providers not configured — ANTHROPIC_API_KEY unset');
 
   // Claude-only pilot: Google Document AI is not yet wired. We hand the SAME
   // ClaudeVision instance to BOTH provider slots. M11: runOcrPipeline detects
@@ -49,6 +120,26 @@ function buildProviders(job: OcrInvoiceJob): { documentAi: OcrProvider; claude: 
     fetchBytes: true,
   });
   return { documentAi: claude, claude };
+}
+
+/** One stub instance in both slots: the pipeline calls it once and sees full agreement. */
+function stubProviders(result: InvoiceOcrResult): { documentAi: OcrProvider; claude: OcrProvider } {
+  const stub = new StubOcrProvider('claude_vision', result);
+  return { documentAi: stub, claude: stub };
+}
+
+/**
+ * Test / local-QA hook: a payload's `mockProviders` (smoke scripts, the local
+ * dev stub from receiving.registerInvoice). Outside production only — in
+ * production a payload can never inject an extraction (payloads are not a
+ * trust boundary, and the lines would be fabricated).
+ */
+function payloadMockProviders(job: OcrInvoiceJob): { documentAi: OcrProvider; claude: OcrProvider } | null {
+  if (!job.mockProviders || process.env.NODE_ENV === 'production') return null;
+  return {
+    documentAi: new StubOcrProvider('document_ai', job.mockProviders.docAi),
+    claude: new StubOcrProvider('claude_vision', job.mockProviders.claude),
+  };
 }
 
 export function startOcrInvoiceWorker() {
@@ -72,14 +163,69 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
     );
   }
 
-  try {
-    // Authoritative usage metering — counts the scan and enforces the plan's
-    // monthly OCR cap here at the worker (race-safe), so the limit can't be
-    // bypassed by enqueuing jobs directly. No-op for restaurants without a
-    // billing account (implicit trial). Throws QuotaExceededError when over cap.
-    await meterOcrScan(db, job.data.restaurantId);
+  // One log line per job (mode, short ids, outcome) — never a URL or content.
+  let mode: OcrMode | 'mock' = 'disabled';
+  let outcome = '';
+  const logLine = () =>
+    console.log(
+      `[ocr-invoice] mode=${mode} restaurant=${short(job.data.restaurantId)} invoice=${short(job.data.invoiceId)}` +
+        (outcome ? ` ${outcome}` : ''),
+    );
 
-    const providers = buildProviders(job.data);
+  // Only an invoice still waiting for its read is read: a retry / duplicate job
+  // must never overwrite a read (or a human's correction) already on file.
+  if (invoice.status !== 'ocr_pending') {
+    mode = 'disabled';
+    outcome = `skipped=not_pending status=${invoice.status}`;
+    logLine();
+    return { invoiceId: job.data.invoiceId, skipped: 'not_pending' as const };
+  }
+
+  const mock = payloadMockProviders(job.data);
+  mode = mock ? 'mock' : await ocrModeFor(job.data.restaurantId, { grId: job.data.grId, isDemo: (id) => isDemoTenant(db, id) });
+
+  let providers: { documentAi: OcrProvider; claude: OcrProvider };
+  // The URL on the ROW, never the payload's.
+  const imageUrl = invoice.rawImageUrl ?? '';
+  if (mode === 'disabled') {
+    await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, null, 'ocr_disabled');
+    outcome = 'skipped=ocr_disabled';
+    logLine();
+    return { invoiceId: job.data.invoiceId, skipped: 'ocr_disabled' as const };
+  }
+  if (mode === 'claude' && !isAllowedScanUrl(imageUrl)) {
+    // Re-checked here: the row is the trust boundary, not the producer.
+    await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, null, 'scan_url_refused');
+    outcome = 'skipped=scan_url_refused';
+    logLine();
+    return { invoiceId: job.data.invoiceId, skipped: 'scan_url_refused' as const };
+  }
+  if (mode === 'stub') {
+    const stub = job.data.grId
+      ? await buildDevOcrStub(db, job.data.restaurantId, job.data.grId, { invoicePrefix: 'DEMO-' })
+      : null;
+    if (!stub) {
+      // A receipt with no PO lines: nothing to build, and nothing is made up.
+      await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, null, 'ocr_disabled');
+      outcome = 'skipped=no_po_lines';
+      logLine();
+      return { invoiceId: job.data.invoiceId, skipped: 'ocr_disabled' as const };
+    }
+    providers = stubProviders(stub);
+  } else {
+    providers = mock ?? realProviders();
+  }
+
+  try {
+    if (mode === 'claude' || mode === 'mock') {
+      // Authoritative usage metering — counts the scan and enforces the plan's
+      // monthly OCR cap here at the worker (race-safe), so the limit can't be
+      // bypassed by enqueuing jobs directly. No-op for restaurants without a
+      // billing account (implicit trial). Throws QuotaExceededError when over cap.
+      // Only a real read is metered ('mock' = the non-production test hook,
+      // metered like the real read it stands in for); the demo stub never is.
+      await meterOcrScan(db, job.data.restaurantId);
+    }
 
     const matcher: CatalogMatcherFn = async (line) => {
       const embedding = await embedder.embed(line.rawDescription);
@@ -111,7 +257,7 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
       .limit(1);
     const reviewThreshold = restaurant[0]?.settings?.ocrReviewThreshold;
 
-    const result = await runOcrPipeline(job.data.imageUrl, {
+    const result = await runOcrPipeline(imageUrl, {
       ...providers,
       catalogMatcher: matcher,
       ...(reviewThreshold !== undefined ? { reviewThreshold } : {}),
@@ -176,12 +322,10 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
       console.warn(`[ocr-invoice] English fill failed for invoice=${job.data.invoiceId}`, err);
     }
 
-    console.log(
-      `[ocr-invoice] restaurant=${job.data.restaurantId} invoice=${job.data.invoiceId} ` +
-        `confidence=${result.confidence.toFixed(2)} conflicts=${result.conflicts.length} ` +
-        `lines=${r.lines.length} needsReview=${needsHumanReview}` +
-        (duplicateOf !== undefined ? ` duplicateOf=${duplicateOf ?? 'unknown'}` : ''),
-    );
+    outcome =
+      `confidence=${result.confidence.toFixed(2)} conflicts=${result.conflicts.length} ` +
+      `lines=${r.lines.length} needsReview=${needsHumanReview}` +
+      (duplicateOf !== undefined ? ` duplicateOf=${duplicateOf ? short(duplicateOf) : 'unknown'}` : '');
 
     // Chain into the 3-way PO↔invoice match when OCR is confident enough to
     // auto-proceed. Low-confidence (parsed / needs-review) invoices wait for a
@@ -229,7 +373,10 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
         console.error(`[ocr-invoice] could not mark invoice=${job.data.invoiceId} failed`, e),
       );
     }
+    outcome = `failed=${err instanceof Error ? err.name : 'error'}`;
     throw err;
+  } finally {
+    logLine();
   }
 }
 
@@ -326,27 +473,37 @@ export async function writeOcrHeader(
  * receiving UI reads it via receiving.getInvoice → `ocrFailed` and lets the
  * receiver continue against the order. No invoice lines are written, so no
  * ₪ discrepancy is ever computed from a failed read.
+ *
+ * `forced` names a reason that is not an error: 'ocr_disabled' (the tenant is
+ * not on the real-OCR allowlist — nothing was read or metered) and
+ * 'scan_url_refused' (the row's URL is not one of our signed scan URLs).
  */
+export type OcrFailureReason = 'quota_exceeded' | 'extraction_failed' | 'ocr_disabled' | 'scan_url_refused';
+
 export async function markOcrFailed(
   db: Database,
   restaurantId: string,
   invoiceId: string,
   err: unknown,
+  forced?: OcrFailureReason,
 ): Promise<void> {
-  const reason =
-    err instanceof Error && err.name === 'QuotaExceededError'
-      ? 'quota_exceeded'
-      : 'extraction_failed';
+  const reason: OcrFailureReason =
+    forced ?? (err instanceof Error && err.name === 'QuotaExceededError' ? 'quota_exceeded' : 'extraction_failed');
   await db
     .update(invoices)
     .set({
       status: 'parsed',
       ocrConfidence: '0',
-      ocrPayload: {
-        provider: 'claude_vision',
-        raw: { ocrFailed: true, reason },
-        reconciledAt: new Date().toISOString(),
-      },
+      // MERGE into the raw already on the row: keys stamped before the read
+      // (raw.scanGrId — the receipt the scan was taken on, which the
+      // one-receipt-one-invoice resume keys on) survive a failed read. Only
+      // ocrFailed / reason are set; a non-object raw is replaced.
+      ocrPayload: sql`jsonb_build_object(
+        'provider', 'claude_vision',
+        'raw', (CASE WHEN jsonb_typeof(${invoices.ocrPayload} -> 'raw') = 'object'
+                     THEN ${invoices.ocrPayload} -> 'raw' ELSE '{}'::jsonb END)
+               || ${JSON.stringify({ ocrFailed: true, reason })}::jsonb,
+        'reconciledAt', ${new Date().toISOString()}::text)`,
       updatedAt: new Date(),
     })
     .where(
