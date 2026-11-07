@@ -5,7 +5,11 @@ import type { LeakBreakdownInvoice, LeakBreakdownLine } from '@restomatch/charts
  * (/dashboard/leaks/claims) and the pay run (/dashboard/approvals/pay-run).
  * One rule, so the two pages can never disagree on a shekel.
  *
- *  • an invoice still waiting for a PO link, or already marked paid, has nothing to claim;
+ *  • an invoice still waiting for a PO link has nothing to claim. A PAID invoice KEEPS its
+ *    claims (owner decision, W2-03 §5.5): marking an invoice paid never erases a shekel —
+ *    after payment the channel is a דרישת זיכוי letter (decision 19);
+ *  • a discrepancy that already holds a non-written-off claim (`claimedIds`) is skipped, so
+ *    the same ₪ is never asked twice;
  *  • a line is claimable when it counts as leak and is open, escalated or accepted (waived lines drop);
  *  • lines are taken in the breakdown's order (biggest |Δ| first) and never claim more on an
  *    invoice than its capped leak (`leakIls`, the hero's per-invoice cap).
@@ -62,25 +66,45 @@ export function vatBasisOf(type: string): VatBasis {
   return 'excl';
 }
 
+/** Statuses still waiting for a decision — never put on a supplier letter (decision 18). */
+export const UNDECIDED_STATUSES = ['open', 'escalated'] as const;
+const UNDECIDED = new Set<string>(UNDECIDED_STATUSES);
+
 export interface ClaimLine {
   line: LeakBreakdownLine;
   /** ₪ claimable on this line after the per-invoice cap. */
   amount: number;
   basis: VatBasis;
+  /**
+   * The line is still open / escalated: it counts toward the cap (so the ₪ a decision
+   * could turn into a claim is reserved) but it is NEVER put on a supplier letter or
+   * offset in a payment until someone decides it (decision 18).
+   */
+  undecided: boolean;
+}
+
+export interface ClaimableOptions {
+  /**
+   * Discrepancy ids that already hold a claim that is not written off (recovery). They
+   * are skipped — and do not use the invoice cap — so one ₪ is never claimed twice.
+   */
+  claimedIds?: ReadonlySet<string>;
 }
 
 /** The claimable lines of one invoice, capped like the claims letters. */
-export function claimableLines(inv: LeakBreakdownInvoice): ClaimLine[] {
-  if (inv.pendingLink || inv.status === 'paid') return [];
+export function claimableLines(inv: LeakBreakdownInvoice, opts: ClaimableOptions = {}): ClaimLine[] {
+  if (inv.pendingLink) return [];
+  const claimed = opts.claimedIds;
   const out: ClaimLine[] = [];
   let invClaimed = 0;
   for (const l of inv.lines) {
     if (!l.countsAsLeak || !CLAIMABLE.has(l.resolutionStatus) || NEVER_CLAIMABLE.has(l.type)) continue;
+    if (claimed?.has(l.discrepancyId)) continue;
     // Never claim more on an invoice than its capped leak.
     const amount = Math.min(Math.abs(l.deltaAmount), Math.max(0, inv.leakIls - invClaimed));
     if (amount <= 0) continue;
     invClaimed += amount;
-    out.push({ line: l, amount, basis: vatBasisOf(l.type) });
+    out.push({ line: l, amount, basis: vatBasisOf(l.type), undecided: UNDECIDED.has(l.resolutionStatus) });
   }
   return out;
 }

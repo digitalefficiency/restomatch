@@ -11,6 +11,7 @@ import {
   matchRuns,
   restaurants,
   sql,
+  suppliers,
   testDbUrl,
   type Database,
 } from '@restomatch/db';
@@ -366,5 +367,130 @@ describe('payRun.month', () => {
   it('rejects any month but this one and the previous', async () => {
     await expect(asA().payRun.month({ monthOffset: -2 as never })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     await expect(asA().payRun.month({ monthOffset: -1 })).resolves.toMatchObject({ enabled: true, totals: { invoices: 0 } });
+  });
+});
+
+/**
+ * W2-03 (add-only): payRun.list (the due-date desk) + payRun.markPaid / unmarkPaid.
+ * tenant-security-warden reviews these probes.
+ */
+describe('payRun.list (W2-03)', () => {
+  const NOW = new Date('2026-10-25T09:40:00Z'); // lab day, a Sunday
+
+  it('flag off ⇒ enabled:false, no rows', async () => {
+    await setFlag(A, false);
+    try {
+      expect(await asA().payRun.list({ now: NOW })).toMatchObject({ enabled: false, rows: [] });
+    } finally {
+      await setFlag(A, true);
+    }
+  });
+
+  it("lists only A's rows — B's invoice, supplier and findings never appear", async () => {
+    const r = await asA().payRun.list({ now: NOW });
+    expect(r.rows.map((x) => x.invoiceId)).toEqual([A.invoiceId]);
+    const json = JSON.stringify(r);
+    for (const leak of [B.invoiceId, B.discrepancyId, B.supplierName, B.supplierId]) expect(json).not.toContain(leak);
+  });
+
+  it('a held row says who it waits for and how much of the total is in dispute', async () => {
+    const r = await asA().payRun.list({ now: NOW });
+    const row = r.rows[0]!;
+    expect(row.selectable).toBe(false);
+    expect(row.holds).toEqual([
+      expect.objectContaining({ kind: 'decision', disputeIls: 100, ofIls: 117, canAct: true }),
+    ]);
+    // A bookkeeper can't decide an owner/manager item ⇒ "שלחו תזכורת", not "החליטו".
+    const bk = await asA('bookkeeper').payRun.list({ now: NOW });
+    expect(bk.rows[0]!.holds[0]).toMatchObject({ kind: 'decision', canAct: false });
+    expect(r.totals).toMatchObject({ invoices: 1, heldCount: 1, heldIls: 117, disputeIls: 100, payableCount: 0 });
+  });
+
+  it('due date from the agreed terms (שוטף+30: 28.09 → 30.10) lands in השבוע; a human date wins', async () => {
+    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, A.invoiceId));
+    await ownerDb.update(suppliers).set({ paymentTerms: 'שוטף + 30' }).where(eq(suppliers.id, A.supplierId));
+    await ownerDb.update(invoices).set({ invoiceDate: new Date('2026-09-28T07:00:00Z') }).where(eq(invoices.id, A.invoiceId));
+    try {
+      let row = (await asA().payRun.list({ now: NOW })).rows[0]!;
+      expect(row).toMatchObject({ dueDate: '2026-10-30', dueSource: 'agreed', bucket: 'this_week', daysToDue: 5 });
+      expect(row.exceedsLawLimit).toBe(false);
+      await ownerDb.update(invoices).set({ dueDate: new Date('2026-10-19T21:00:00Z') }).where(eq(invoices.id, A.invoiceId));
+      row = (await asA().payRun.list({ now: NOW })).rows[0]!;
+      expect(row).toMatchObject({ dueDate: '2026-10-20', dueSource: 'explicit', bucket: 'overdue', daysToDue: -5 });
+      // The month filter (?m=) still works: September is last month on 25.10.
+      expect((await asA().payRun.list({ now: NOW, monthOffset: -1 })).rows).toHaveLength(1);
+      expect((await asA().payRun.list({ now: NOW, monthOffset: 0 })).rows).toHaveLength(0);
+    } finally {
+      await ownerDb.update(suppliers).set({ paymentTerms: null }).where(eq(suppliers.id, A.supplierId));
+      await ownerDb
+        .update(invoices)
+        .set({ invoiceDate: inv!.invoiceDate, dueDate: null })
+        .where(eq(invoices.id, A.invoiceId));
+    }
+  });
+
+  it('no agreed terms and no date ⇒ bucket unknown (never a guess)', async () => {
+    const row = (await asA().payRun.list({ now: NOW })).rows[0]!;
+    expect(row).toMatchObject({ dueDate: null, dueSource: 'unknown', bucket: 'unknown' });
+    expect(row.termsCheck.result).toBe('unknown');
+  });
+
+  it('receiver and chef are FORBIDDEN on every W2-03 procedure', async () => {
+    const item = { invoiceId: A.invoiceId, expectedStatus: 'matched' as const };
+    for (const role of ['receiver', 'chef'] as const) {
+      await expect(asA(role).payRun.list()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(
+        asA(role).payRun.markPaid({ items: [item], paidOn: '2026-10-25', method: 'bank_transfer', clientMutationId: 'cmid-rc-0001' }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(asA(role).payRun.unmarkPaid({ items: [item], clientMutationId: 'cmid-rc-0002' })).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+      });
+    }
+  });
+
+  it("markPaid / unmarkPaid with B's invoiceId ⇒ NOT_FOUND (flag on or off), and B is untouched", async () => {
+    const prev = process.env.PAY_RUN_MARK_PAID;
+    const foreign = { invoiceId: B.invoiceId, expectedStatus: 'matched' as const };
+    const mixed = [{ invoiceId: A.invoiceId, expectedStatus: 'matched' as const }, foreign];
+    try {
+      for (const flag of ['0', '1']) {
+        process.env.PAY_RUN_MARK_PAID = flag;
+        await expect(
+          asA().payRun.markPaid({ items: [foreign], paidOn: '2026-10-25', method: 'bank_transfer', clientMutationId: `cmid-x-${flag}-01` }),
+        ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(
+          asA().payRun.markPaid({ items: mixed, paidOn: '2026-10-25', method: 'bank_transfer', clientMutationId: `cmid-x-${flag}-02` }),
+        ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(asA().payRun.unmarkPaid({ items: [foreign], clientMutationId: `cmid-x-${flag}-03` })).rejects.toMatchObject({
+          code: 'NOT_FOUND',
+        });
+      }
+    } finally {
+      if (prev === undefined) delete process.env.PAY_RUN_MARK_PAID;
+      else process.env.PAY_RUN_MARK_PAID = prev;
+    }
+    const [b] = await ownerDb.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, B.invoiceId));
+    const [a] = await ownerDb.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, A.invoiceId));
+    expect(b!.status).toBe('matched');
+    expect(a!.status).toBe('matched');
+  });
+
+  it('PAY_RUN_MARK_PAID off ⇒ NOT_IMPLEMENTED on an own invoice, nothing written', async () => {
+    const prev = process.env.PAY_RUN_MARK_PAID;
+    delete process.env.PAY_RUN_MARK_PAID;
+    try {
+      const items = [{ invoiceId: A.invoiceId, expectedStatus: 'matched' as const }];
+      await expect(
+        asA('bookkeeper').payRun.markPaid({ items, paidOn: '2026-10-25', method: 'bank_transfer', clientMutationId: 'cmid-off-0001' }),
+      ).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED' });
+      await expect(asA().payRun.unmarkPaid({ items, clientMutationId: 'cmid-off-0002' })).rejects.toMatchObject({
+        code: 'NOT_IMPLEMENTED',
+      });
+      expect((await asA().payRun.list({ now: NOW })).markPaidEnabled).toBe(false);
+    } finally {
+      if (prev !== undefined) process.env.PAY_RUN_MARK_PAID = prev;
+    }
+    const [a] = await ownerDb.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, A.invoiceId));
+    expect(a!.status).toBe('matched');
   });
 });

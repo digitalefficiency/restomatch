@@ -11,11 +11,14 @@ import { claimableData } from '../ask/tools';
  * into lib/claims.ts (shared with the pay run). `referenceLetterLines` is the
  * page's loop as it was before the move, verbatim in substance: the helper must
  * give the same lines and the same ₪ on every invoice.
+ *
+ * W2-03 (owner decision: a paid invoice keeps its claims): the reference no longer
+ * drops `status === 'paid'` — the only intended change to the rule.
  */
 const REF_CLAIMABLE = new Set(['open', 'escalated', 'accepted']);
 function referenceLetterLines(inv: LeakBreakdownInvoice): Array<{ id: string; amount: number }> {
   const out: Array<{ id: string; amount: number }> = [];
-  if (inv.pendingLink || inv.status === 'paid') return out;
+  if (inv.pendingLink) return out;
   let invClaimed = 0;
   for (const l of inv.lines) {
     if (!l.countsAsLeak || !REF_CLAIMABLE.has(l.resolutionStatus)) continue;
@@ -115,6 +118,63 @@ describe('claimableLines — no behaviour change vs the claims letters', () => {
     expect(vatBasisOf('VAT_MISMATCH')).toBe('vat');
     expect(vatBasisOf('PRICE_HIGHER')).toBe('excl');
     expect(vatBasisOf('TOTAL_MISMATCH')).toBe('excl');
+  });
+});
+
+describe('W2-03 claims rule — a paid invoice keeps its claims', () => {
+  it('a paid invoice keeps its accepted lines (same ₪ as unpaid)', () => {
+    const lines = [line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 40 })];
+    const unpaid = claimableLines(invoice({ lines, leakIls: 40, status: 'matched' }));
+    const paid = claimableLines(invoice({ lines, leakIls: 40, status: 'paid' }));
+    expect(paid).toEqual(unpaid);
+    expect(sumClaims(paid)).toBe(40);
+  });
+
+  it('claimedIds skips a line that already holds a claim, and frees the cap', () => {
+    const lines = [
+      line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 30 }),
+      line({ discrepancyId: 'b', resolutionStatus: 'accepted', deltaAmount: 30 }),
+    ];
+    const inv = invoice({ lines, leakIls: 40 });
+    expect(claimableLines(inv).map((c) => [c.line.discrepancyId, c.amount])).toEqual([
+      ['a', 30],
+      ['b', 10],
+    ]);
+    expect(claimableLines(inv, { claimedIds: new Set(['a']) }).map((c) => [c.line.discrepancyId, c.amount])).toEqual([
+      ['b', 30],
+    ]);
+  });
+
+  it('a written-off claim does not skip (the caller leaves it out of claimedIds)', () => {
+    const lines = [line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 30 })];
+    // The written-off claim on 'a' is not in the set ⇒ 'a' is claimable again.
+    expect(claimableLines(invoice({ lines, leakIls: 30 }), { claimedIds: new Set(['zz']) })).toHaveLength(1);
+  });
+
+  it('the cap is still per invoice, paid or not', () => {
+    const lines = [
+      line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 80 }),
+      line({ discrepancyId: 'b', resolutionStatus: 'accepted', deltaAmount: 80 }),
+    ];
+    expect(sumClaims(claimableLines(invoice({ lines, leakIls: 100, status: 'paid' })))).toBe(100);
+  });
+
+  it('undecided (open / escalated) lines are flagged so letters can keep excluding them', () => {
+    const lines = [
+      line({ discrepancyId: 'o', resolutionStatus: 'open', deltaAmount: 5 }),
+      line({ discrepancyId: 'e', resolutionStatus: 'escalated', deltaAmount: 5 }),
+      line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 5 }),
+    ];
+    expect(claimableLines(invoice({ lines, leakIls: 15 })).map((c) => [c.line.discrepancyId, c.undecided])).toEqual([
+      ['o', true],
+      ['e', true],
+      ['a', false],
+    ]);
+  });
+
+  it('a pending-link invoice still has nothing to claim', () => {
+    const lines = [line({ discrepancyId: 'a', resolutionStatus: 'accepted' })];
+    expect(claimableLines(invoice({ lines, pendingLink: true, status: 'paid' }))).toEqual([]);
   });
 });
 
@@ -235,7 +295,7 @@ describe('ask "what to claim" (claimableData / offline claimWeek) = the claims r
     expect(c.lines.map((l) => l.type)).not.toContain('MISSING_ON_INVOICE');
     expect(c.lines.map((l) => l.amountIls)).toEqual([40, 10]);
     expect(c.totalIls).toBe(50);
-    // A paid invoice has nothing left to claim (same as the letters).
-    expect(claimableData([{ ...inv, status: 'paid' }]).count).toBe(0);
+    // W2-03 (owner decision): a paid invoice KEEPS its claims — same lines as unpaid.
+    expect(claimableData([{ ...inv, status: 'paid' }]).totalIls).toBe(50);
   });
 });

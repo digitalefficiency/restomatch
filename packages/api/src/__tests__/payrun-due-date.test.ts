@@ -82,7 +82,9 @@ describe('computeDueDate', () => {
   });
 
   it('an explicit (human) due date wins over agreed and printed', () => {
-    const r = computeDueDate('2026-09-28', 'שוטף+30', '2026-10-05', { printedDueDate: '2026-10-01' });
+    const r = computeDueDate('2026-09-28', 'שוטף+30', '2026-10-05', {
+      printedDueDate: '2026-10-01',
+    });
     expect(r).toMatchObject({ dueDate: '2026-10-05', source: 'explicit' });
     expect(r.terms).toEqual({ kind: 'eom_plus', days: 30 });
   });
@@ -98,9 +100,15 @@ describe('computeDueDate', () => {
   });
 
   it('unknown terms with nothing else → unknown, never throws', () => {
-    expect(computeDueDate('2026-09-28', 'לפי סיכום')).toMatchObject({ dueDate: null, source: 'unknown' });
+    expect(computeDueDate('2026-09-28', 'לפי סיכום')).toMatchObject({
+      dueDate: null,
+      source: 'unknown',
+    });
     expect(computeDueDate(null, 'שוטף+30')).toMatchObject({ dueDate: null, source: 'unknown' });
-    expect(computeDueDate('garbage', 'שוטף+30')).toMatchObject({ dueDate: null, source: 'unknown' });
+    expect(computeDueDate('garbage', 'שוטף+30')).toMatchObject({
+      dueDate: null,
+      source: 'unknown',
+    });
     expect(computeDueDate('2026-02-30', 'שוטף+30').dueDate).toBeNull();
   });
 
