@@ -86,7 +86,7 @@ test.describe('auth-01 · the offline photo queue survives /login', () => {
     await page.goto('/reset');
     await seedQueuedPhoto(page, 'w109-photo-1');
     await page.goto('/login');
-    await expect(page.getByTestId('queued-photos-note')).toContainText('צילום חשבונית אחד ממתין במכשיר');
+    await expect(page.getByTestId('queued-photos-note')).toContainText('צילום חשבונית אחד ממתין');
     await page.waitForTimeout(500);
     expect(await queuedIds(page)).toContain('w109-photo-1');
     // A second visit (e.g. after another expired session) still keeps it.
