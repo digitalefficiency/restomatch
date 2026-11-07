@@ -355,7 +355,7 @@ export default async function Home() {
           </p>
           <p className="mt-4 text-center">
             <Link
-              href="/about#roi"
+              href="/product#roi"
               className="touch-target inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
             >
               {t('v2.proof.more')}
@@ -434,7 +434,7 @@ export default async function Home() {
           <p className="mt-6 text-center text-sm text-muted">
             <ShieldCheck className="me-1.5 inline h-4 w-4 text-info" aria-hidden="true" />
             {t('v2.cta.trust')} ·{' '}
-            <Link href="/about#trust" className="font-semibold text-primary hover:underline">
+            <Link href="/product#trust" className="font-semibold text-primary hover:underline">
               {t('v2.cta.trustLink')}
             </Link>
           </p>

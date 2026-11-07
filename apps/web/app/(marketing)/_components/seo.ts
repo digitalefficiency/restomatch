@@ -16,6 +16,7 @@ export const MARKETING_ROUTES = [
   '/',
   '/pricing',
   '/about',
+  '/product',
   '/showcase',
   '/privacy',
   '/terms',

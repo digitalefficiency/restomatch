@@ -145,6 +145,12 @@ export const en: Shape<typeof he> = {
     },
     unavailable: "We couldn't load the plans right now. Try refreshing, or talk to us.",
   },
+  product: {
+    metaTitle: 'Product · RestoMatch',
+    metaDescription: 'What RestoMatch does: compares order, delivery and invoice, and shows in shekels where money leaks — before you pay.',
+    title: 'What RestoMatch does, in shekels',
+    lead: 'Every invoice checked against the order and the delivery note, with the gap shown before you pay.',
+  },
   about: {
     metaTitle: 'About · RestoMatch',
     metaDescription: 'The story behind RestoMatch — why we built a system that finds leaks at goods receiving.',

@@ -147,6 +147,12 @@ export const he = {
     },
     unavailable: 'לא הצלחנו לטעון את המסלולים כרגע. נסו לרענן, או דברו איתנו.',
   },
+  product: {
+    metaTitle: 'המוצר · RestoMatch',
+    metaDescription: 'מה RestoMatch עושה: משווה הזמנה, משלוח וחשבונית, ומראה בשקלים איפה כסף דולף — לפני שמשלמים.',
+    title: 'מה RestoMatch עושה, בשקלים',
+    lead: 'משווים כל חשבונית מול ההזמנה ותעודת המשלוח, ומראים לכם את הפער לפני התשלום.',
+  },
   about: {
     metaTitle: 'אודות · RestoMatch',
     metaDescription: 'הסיפור מאחורי RestoMatch — למה בנינו מערכת שמוצאת דליפות בקבלת סחורה.',
