@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { FileText, FileUp, Loader2, ShieldCheck, X } from 'lucide-react';
 import { Field, Input } from '@/lib/components';
@@ -82,9 +82,6 @@ export function LeakCheckForm() {
   const [dropped, setDropped] = useState(0);
   const busy = phase !== 'idle';
 
-  // Object URLs for the image thumbnails; revoked when the list changes or the form unmounts.
-  const previews = useMemo(() => files.map((f) => (isPreviewable(f.type) ? URL.createObjectURL(f) : null)), [files]);
-  useEffect(() => () => previews.forEach((u) => u && URL.revokeObjectURL(u)), [previews]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -161,9 +158,8 @@ export function LeakCheckForm() {
           <ul className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5" data-testid="lc-thumbs">
             {files.map((f, i) => (
               <li key={`${f.name}:${f.size}:${f.lastModified}`} className="relative aspect-square overflow-hidden rounded-xl border border-line bg-surface-2">
-                {previews[i] ? (
-                  // eslint-disable-next-line @next/next/no-img-element -- a local object URL, not a remote image
-                  <img src={previews[i]!} alt="" className="h-full w-full object-cover" />
+                {isPreviewable(f.type) ? (
+                  <Thumb file={f} />
                 ) : (
                   <span className="flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center text-[11px] text-muted">
                     <FileText className="h-6 w-6" aria-hidden="true" />
@@ -279,4 +275,33 @@ export function LeakCheckForm() {
       </p>
     </form>
   );
+}
+
+/**
+ * An image thumbnail drawn on a canvas from the picked file's pixels
+ * (createImageBitmap). No file-derived string ever becomes a URL or markup.
+ */
+function Thumb({ file }: { file: File }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    let cancelled = false;
+    createImageBitmap(file)
+      .then((bitmap) => {
+        const canvas = ref.current;
+        if (cancelled || !canvas) return bitmap.close();
+        const size = 160;
+        const scale = Math.max(size / bitmap.width, size / bitmap.height);
+        const w = bitmap.width * scale;
+        const h = bitmap.height * scale;
+        canvas.width = size;
+        canvas.height = size;
+        canvas.getContext('2d')?.drawImage(bitmap, (size - w) / 2, (size - h) / 2, w, h);
+        bitmap.close();
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [file]);
+  return <canvas ref={ref} aria-hidden="true" className="h-full w-full" />;
 }
