@@ -357,6 +357,47 @@ describe('chain.matrix (W3-01)', () => {
   });
 });
 
+/* ── W3-01b · chain.byBranch (add-only) ───────────────────────────────────── */
+describe('chain.byBranch (W3-01b)', () => {
+  it('approvals per branch equal each branch’s own approvals.queueSummary; A + A2 only', async () => {
+    const r = await asA().chain.byBranch({ kind: 'approvals' });
+    expect(r.rows.map((x) => x.restaurantId).sort()).toEqual([A.restaurantId, A2.restaurantId].sort());
+    for (const t of [A, A2]) {
+      const own = await caller(A.ownerUserId, t.restaurantId).approvals.queueSummary();
+      const row = r.rows.find((x) => x.restaurantId === t.restaurantId);
+      expect(row?.status).toBe('ok');
+      if (row?.status === 'ok') {
+        expect(row.approvals?.count).toBe(own.count);
+        expect(Math.round((row.approvals?.toDecideIls ?? -1) * 100)).toBe(Math.round(own.toDecide.amountIls * 100));
+      }
+    }
+    const sumAg = r.rows.reduce((s, x) => s + (x.status === 'ok' ? Math.round((x.approvals?.toDecideIls ?? 0) * 100) : 0), 0);
+    expect(Math.round((r.totals.approvals?.toDecideIls ?? -1) * 100)).toBe(sumAg);
+    for (const other of [B.restaurantId, M.restaurantId, X.restaurantId]) expect(JSON.stringify(r)).not.toContain(other);
+  });
+
+  it('payRun per branch: flag off ⇒ enabled false and no ₪ total (never a fake ₪0)', async () => {
+    const r = await asA().chain.byBranch({ kind: 'payRun' });
+    expect(r.rows.every((x) => x.status === 'ok' && x.payRun !== null)).toBe(true);
+    if (r.rows.every((x) => x.status === 'ok' && x.payRun?.enabled === false)) expect(r.totals.payRun).toBeNull();
+  });
+
+  it('scope outside the memberships → NOT_FOUND; manager / forged session → FORBIDDEN', async () => {
+    for (const bad of [B.restaurantId, M.restaurantId, X.restaurantId, randomUUID(), `g:${randomUUID()}`]) {
+      await expect(asA().chain.byBranch({ kind: 'approvals', scope: bad })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    }
+    const one = await asA().chain.byBranch({ kind: 'approvals', scope: A2.restaurantId });
+    expect(one.rows.map((x) => x.restaurantId)).toEqual([A2.restaurantId]);
+    await expect(caller(A.ownerUserId, M.restaurantId, 'owner').chain.byBranch({ kind: 'approvals' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller(A.ownerUserId, B.restaurantId, 'owner').chain.byBranch({ kind: 'payRun' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('rejects an unknown kind or month offset', async () => {
+    await expect(asA().chain.byBranch({ kind: 'invoices' as never })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(asA().chain.byBranch({ kind: 'payRun', monthOffset: -5 as never })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+});
+
 describe('chain.overview price disparities', () => {
   // The same supplier (ח.פ of A's supplier) + product "עגבניה A" at ₪10 in A, ₪11 in A2 and ₪30 in B.
   // B shares the billing account but is not A's: its ₪30 must never appear.

@@ -165,180 +165,188 @@ export const payRunRouter = router({
 
   month: financeProcedure
     .input(z.object({ monthOffset: z.union([z.literal(0), z.literal(-1)]).default(0) }).optional())
-    .query(async ({ ctx, input }): Promise<PayRunResult> => {
-      const rid = ctx.session.restaurantId;
-      if (!(await flagOn(ctx.db, rid))) {
-        return { enabled: false, monthStart: null, monthEnd: null, suppliers: [], totals: EMPTY_TOTALS };
-      }
-      const monthOffset = input?.monthOffset ?? 0;
-      const hero = await computeLeakHero(ctx.db, rid, { monthOffset });
-      const breakdown = await computeLeakBreakdown(ctx.db, rid, { monthOffset, limit: 200 });
-      const byInvoice = new Map(breakdown.map((b) => [b.invoiceId, b]));
-
-      // The month's invoices not marked paid (matched, or read but waiting for a PO link) — same
-      // date rule as the hero.
-      const res = await ctx.db.execute(sql`
-        SELECT i.id, i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS at,
-               COALESCE(i.total_incl_vat, 0) AS total_incl, COALESCE(i.total_excl_vat, 0) AS total_excl,
-               i.supplier_id, s.name AS supplier_name, s.name_en AS supplier_name_en,
-               -- Safety net for an invoice past the breakdown's 200-row window: any open
-               -- warn/block finding still holds it (never shown as payable by omission).
-               EXISTS (
-                 SELECT 1 FROM match_runs mr2
-                 JOIN discrepancies d ON d.match_run_id = mr2.id AND d.restaurant_id = ${rid}
-                 WHERE mr2.invoice_id = i.id AND mr2.restaurant_id = ${rid}
-                   AND d.severity IN ('warn','block') AND d.resolution_status IN ('open','escalated')
-                   AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL') AND ABS(d.delta_amount) > 0
-               ) AS has_open,
-               -- …and accepted real findings still ask for a credit (Σ |Δ|, capped at the
-               -- invoice total like the hero's per-invoice cap), never "can pay".
-               (
-                 SELECT LEAST(COALESCE(SUM(ABS(d.delta_amount)), 0), COALESCE(i.total_incl_vat, 0))
-                 FROM match_runs mr3
-                 JOIN discrepancies d ON d.match_run_id = mr3.id AND d.restaurant_id = ${rid}
-                 WHERE mr3.invoice_id = i.id AND mr3.restaurant_id = ${rid}
-                   AND d.severity IN ('warn','block') AND d.resolution_status = 'accepted'
-                   AND d.type NOT IN (${NOT_A_CREDIT_SQL}) AND ABS(d.delta_amount) > 0
-               ) AS accepted_ils,
-               -- …a non-waived duplicate copy is held ("don't pay this copy"); its ₪ is the copy's total.
-               (
-                 SELECT LEAST(COALESCE(SUM(ABS(d.delta_amount)), 0), COALESCE(i.total_incl_vat, 0))
-                 FROM match_runs mr4
-                 JOIN discrepancies d ON d.match_run_id = mr4.id AND d.restaurant_id = ${rid}
-                 WHERE mr4.invoice_id = i.id AND mr4.restaurant_id = ${rid}
-                   AND d.type = 'DUPLICATE_INVOICE' AND d.severity IN ('warn','block')
-                   AND d.resolution_status IN ('open','escalated','accepted')
-               ) AS dup_ils,
-               EXISTS (
-                 SELECT 1 FROM match_runs mr5
-                 JOIN discrepancies d ON d.match_run_id = mr5.id AND d.restaurant_id = ${rid}
-                 WHERE mr5.invoice_id = i.id AND mr5.restaurant_id = ${rid}
-                   AND d.type = 'DUPLICATE_INVOICE' AND d.severity IN ('warn','block')
-                   AND d.resolution_status IN ('open','escalated','accepted')
-               ) AS has_dup,
-               -- …and an open unordered arrival means the invoice still waits for its PO link.
-               EXISTS (
-                 SELECT 1 FROM match_runs mr6
-                 JOIN discrepancies d ON d.match_run_id = mr6.id AND d.restaurant_id = ${rid}
-                 WHERE mr6.invoice_id = i.id AND mr6.restaurant_id = ${rid}
-                   AND d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')
-               ) AS has_ua,
-               EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${rid}) AS matched,
-               -- …a receiving scan the OCR held for its receipt's count (#94, same rule as the hero).
-               ${scanAwaitingCountSql(rid, sql`i`)} AS counting
-        FROM invoices i
-        LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${rid}
-        WHERE i.restaurant_id = ${rid}
-          AND i.status <> 'paid'
-          AND COALESCE(i.invoice_date, i.created_at) >= ${hero.monthStart}::timestamptz
-          AND COALESCE(i.invoice_date, i.created_at) < ${hero.monthEnd}::timestamptz
-          -- Checked invoices, plus the read-but-unmatched ones (consolidated invoices waiting
-          -- for their PO link, shown as T4 "waiting to be linked"); not invoices still in OCR.
-          AND i.status <> 'ocr_pending'
-        ORDER BY at DESC, i.invoice_number
-      `);
-
-      const groups = new Map<string, PayRunSupplier & { a: Record<string, number> }>();
-      for (const row of rowsOf(res)) {
-        const id = String(row.id);
-        const b = byInvoice.get(id) ?? null;
-        const s = payRunStatusOf(b);
-        // Past the breakdown's 200-row window (known limit, not reached by the demo): an open
-        // real finding still holds the invoice; an unmatched one waits for its link.
-        if (!b && row.has_open === true) s.status = 'hold';
-        if (!b && Number(row.accepted_ils ?? 0) > 0) {
-          s.creditIls = Math.round(Number(row.accepted_ils) * 100) / 100;
-          if (s.status === 'pay') s.status = 'claim';
-        }
-        if (!b && row.has_dup === true) {
-          s.duplicate = true;
-          s.duplicateIls = Math.round(Number(row.dup_ils ?? 0) * 100) / 100;
-          s.status = 'hold';
-        }
-        // Waiting for the count (#94): no run yet, but bound to its order — held, not T4.
-        const awaitingCount = row.matched !== true && row.counting === true;
-        const pendingLink =
-          !awaitingCount && ((b?.pendingLink ?? false) || row.matched !== true || (!b && row.has_ua === true));
-        if (pendingLink || awaitingCount) s.status = 'hold';
-        const inv: PayRunInvoice = {
-          invoiceId: id,
-          invoiceNumber: row.invoice_number == null ? null : String(row.invoice_number),
-          invoiceDate: iso(row.at),
-          status: s.status,
-          pendingLink,
-          awaitingCount,
-          duplicate: s.duplicate,
-          duplicateIls: s.duplicateIls,
-          totalInclVat: Number(row.total_incl),
-          totalExclVat: Number(row.total_excl),
-          pendingIls: s.pendingIls,
-          creditIls: s.creditIls,
-          claims: s.claims,
-        };
-        const key = row.supplier_id == null ? '' : String(row.supplier_id);
-        let g = groups.get(key);
-        if (!g) {
-          g = {
-            key,
-            supplierName: row.supplier_name == null ? null : String(row.supplier_name),
-            supplierNameEn: row.supplier_name_en == null ? null : String(row.supplier_name_en),
-            invoices: [],
-            payIls: 0,
-            holdIls: 0,
-            claimIls: 0,
-            creditIls: 0,
-            pendingIls: 0,
-            linkIls: 0,
-            a: { pay: 0, hold: 0, claim: 0, credit: 0, pending: 0, link: 0 },
-          };
-          groups.set(key, g);
-        }
-        g.invoices.push(inv);
-        // Waiting for a PO link is T4: its total is reported on its own, never as pay or hold ₪.
-        if (inv.pendingLink && !inv.duplicate) g.a.link! += ag(inv.totalInclVat);
-        else g.a[inv.status]! += ag(inv.totalInclVat);
-        g.a.credit! += ag(inv.creditIls);
-        g.a.pending! += ag(inv.pendingIls);
-      }
-
-      const t = { pay: 0, hold: 0, claim: 0, credit: 0, pending: 0, link: 0, invoices: 0, linkCount: 0 };
-      const suppliers: PayRunSupplier[] = [...groups.values()].map(({ a, ...g }) => {
-        for (const k of ['pay', 'hold', 'claim', 'credit', 'pending', 'link'] as const) t[k] += a[k]!;
-        t.invoices += g.invoices.length;
-        t.linkCount += g.invoices.filter((i) => i.pendingLink && !i.duplicate).length;
-        return {
-          ...g,
-          payIls: ils(a.pay!),
-          holdIls: ils(a.hold!),
-          claimIls: ils(a.claim!),
-          creditIls: ils(a.credit!),
-          pendingIls: ils(a.pending!),
-          linkIls: ils(a.link!),
-        };
-      });
-      // Suppliers needing action first (held ₪, then credits), then the payable ones.
-      suppliers.sort(
-        (x, y) =>
-          y.holdIls - x.holdIls ||
-          y.creditIls - x.creditIls ||
-          y.payIls - x.payIls ||
-          (x.supplierName ?? '').localeCompare(y.supplierName ?? '', 'he'),
-      );
-      return {
-        enabled: true,
-        monthStart: hero.monthStart,
-        monthEnd: hero.monthEnd,
-        suppliers,
-        totals: {
-          invoices: t.invoices,
-          payIls: ils(t.pay),
-          holdIls: ils(t.hold),
-          claimIls: ils(t.claim),
-          creditIls: ils(t.credit),
-          pendingIls: ils(t.pending),
-          linkIls: ils(t.link),
-          linkCount: t.linkCount,
-        },
-      };
-    }),
+    .query(({ ctx, input }): Promise<PayRunResult> =>
+      computePayRunMonth(ctx.db, ctx.session.restaurantId, input?.monthOffset ?? 0),
+    ),
 });
+
+/**
+ * The body of `payRun.month`, exported so the chain's per-branch view (W3-01b)
+ * reads each branch's pay run from the very same rows and rules. MUST run
+ * inside that restaurant's own RLS transaction (financeProcedure / chain
+ * `inBranch`).
+ */
+export async function computePayRunMonth(db: Database, rid: string, monthOffset: 0 | -1 = 0): Promise<PayRunResult> {
+  if (!(await flagOn(db, rid))) {
+    return { enabled: false, monthStart: null, monthEnd: null, suppliers: [], totals: EMPTY_TOTALS };
+  }
+  const hero = await computeLeakHero(db, rid, { monthOffset });
+  const breakdown = await computeLeakBreakdown(db, rid, { monthOffset, limit: 200 });
+  const byInvoice = new Map(breakdown.map((b) => [b.invoiceId, b]));
+
+  // The month's invoices not marked paid (matched, or read but waiting for a PO link) — same
+  // date rule as the hero.
+  const res = await db.execute(sql`
+    SELECT i.id, i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS at,
+           COALESCE(i.total_incl_vat, 0) AS total_incl, COALESCE(i.total_excl_vat, 0) AS total_excl,
+           i.supplier_id, s.name AS supplier_name, s.name_en AS supplier_name_en,
+           -- Safety net for an invoice past the breakdown's 200-row window: any open
+           -- warn/block finding still holds it (never shown as payable by omission).
+           EXISTS (
+             SELECT 1 FROM match_runs mr2
+             JOIN discrepancies d ON d.match_run_id = mr2.id AND d.restaurant_id = ${rid}
+             WHERE mr2.invoice_id = i.id AND mr2.restaurant_id = ${rid}
+               AND d.severity IN ('warn','block') AND d.resolution_status IN ('open','escalated')
+               AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL') AND ABS(d.delta_amount) > 0
+           ) AS has_open,
+           -- …and accepted real findings still ask for a credit (Σ |Δ|, capped at the
+           -- invoice total like the hero's per-invoice cap), never "can pay".
+           (
+             SELECT LEAST(COALESCE(SUM(ABS(d.delta_amount)), 0), COALESCE(i.total_incl_vat, 0))
+             FROM match_runs mr3
+             JOIN discrepancies d ON d.match_run_id = mr3.id AND d.restaurant_id = ${rid}
+             WHERE mr3.invoice_id = i.id AND mr3.restaurant_id = ${rid}
+               AND d.severity IN ('warn','block') AND d.resolution_status = 'accepted'
+               AND d.type NOT IN (${NOT_A_CREDIT_SQL}) AND ABS(d.delta_amount) > 0
+           ) AS accepted_ils,
+           -- …a non-waived duplicate copy is held ("don't pay this copy"); its ₪ is the copy's total.
+           (
+             SELECT LEAST(COALESCE(SUM(ABS(d.delta_amount)), 0), COALESCE(i.total_incl_vat, 0))
+             FROM match_runs mr4
+             JOIN discrepancies d ON d.match_run_id = mr4.id AND d.restaurant_id = ${rid}
+             WHERE mr4.invoice_id = i.id AND mr4.restaurant_id = ${rid}
+               AND d.type = 'DUPLICATE_INVOICE' AND d.severity IN ('warn','block')
+               AND d.resolution_status IN ('open','escalated','accepted')
+           ) AS dup_ils,
+           EXISTS (
+             SELECT 1 FROM match_runs mr5
+             JOIN discrepancies d ON d.match_run_id = mr5.id AND d.restaurant_id = ${rid}
+             WHERE mr5.invoice_id = i.id AND mr5.restaurant_id = ${rid}
+               AND d.type = 'DUPLICATE_INVOICE' AND d.severity IN ('warn','block')
+               AND d.resolution_status IN ('open','escalated','accepted')
+           ) AS has_dup,
+           -- …and an open unordered arrival means the invoice still waits for its PO link.
+           EXISTS (
+             SELECT 1 FROM match_runs mr6
+             JOIN discrepancies d ON d.match_run_id = mr6.id AND d.restaurant_id = ${rid}
+             WHERE mr6.invoice_id = i.id AND mr6.restaurant_id = ${rid}
+               AND d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')
+           ) AS has_ua,
+           EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${rid}) AS matched,
+           -- …a receiving scan the OCR held for its receipt's count (#94, same rule as the hero).
+           ${scanAwaitingCountSql(rid, sql`i`)} AS counting
+    FROM invoices i
+    LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${rid}
+    WHERE i.restaurant_id = ${rid}
+      AND i.status <> 'paid'
+      AND COALESCE(i.invoice_date, i.created_at) >= ${hero.monthStart}::timestamptz
+      AND COALESCE(i.invoice_date, i.created_at) < ${hero.monthEnd}::timestamptz
+      -- Checked invoices, plus the read-but-unmatched ones (consolidated invoices waiting
+      -- for their PO link, shown as T4 "waiting to be linked"); not invoices still in OCR.
+      AND i.status <> 'ocr_pending'
+    ORDER BY at DESC, i.invoice_number
+  `);
+
+  const groups = new Map<string, PayRunSupplier & { a: Record<string, number> }>();
+  for (const row of rowsOf(res)) {
+    const id = String(row.id);
+    const b = byInvoice.get(id) ?? null;
+    const s = payRunStatusOf(b);
+    // Past the breakdown's 200-row window (known limit, not reached by the demo): an open
+    // real finding still holds the invoice; an unmatched one waits for its link.
+    if (!b && row.has_open === true) s.status = 'hold';
+    if (!b && Number(row.accepted_ils ?? 0) > 0) {
+      s.creditIls = Math.round(Number(row.accepted_ils) * 100) / 100;
+      if (s.status === 'pay') s.status = 'claim';
+    }
+    if (!b && row.has_dup === true) {
+      s.duplicate = true;
+      s.duplicateIls = Math.round(Number(row.dup_ils ?? 0) * 100) / 100;
+      s.status = 'hold';
+    }
+    // Waiting for the count (#94): no run yet, but bound to its order — held, not T4.
+    const awaitingCount = row.matched !== true && row.counting === true;
+    const pendingLink =
+      !awaitingCount && ((b?.pendingLink ?? false) || row.matched !== true || (!b && row.has_ua === true));
+    if (pendingLink || awaitingCount) s.status = 'hold';
+    const inv: PayRunInvoice = {
+      invoiceId: id,
+      invoiceNumber: row.invoice_number == null ? null : String(row.invoice_number),
+      invoiceDate: iso(row.at),
+      status: s.status,
+      pendingLink,
+      awaitingCount,
+      duplicate: s.duplicate,
+      duplicateIls: s.duplicateIls,
+      totalInclVat: Number(row.total_incl),
+      totalExclVat: Number(row.total_excl),
+      pendingIls: s.pendingIls,
+      creditIls: s.creditIls,
+      claims: s.claims,
+    };
+    const key = row.supplier_id == null ? '' : String(row.supplier_id);
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        key,
+        supplierName: row.supplier_name == null ? null : String(row.supplier_name),
+        supplierNameEn: row.supplier_name_en == null ? null : String(row.supplier_name_en),
+        invoices: [],
+        payIls: 0,
+        holdIls: 0,
+        claimIls: 0,
+        creditIls: 0,
+        pendingIls: 0,
+        linkIls: 0,
+        a: { pay: 0, hold: 0, claim: 0, credit: 0, pending: 0, link: 0 },
+      };
+      groups.set(key, g);
+    }
+    g.invoices.push(inv);
+    // Waiting for a PO link is T4: its total is reported on its own, never as pay or hold ₪.
+    if (inv.pendingLink && !inv.duplicate) g.a.link! += ag(inv.totalInclVat);
+    else g.a[inv.status]! += ag(inv.totalInclVat);
+    g.a.credit! += ag(inv.creditIls);
+    g.a.pending! += ag(inv.pendingIls);
+  }
+
+  const t = { pay: 0, hold: 0, claim: 0, credit: 0, pending: 0, link: 0, invoices: 0, linkCount: 0 };
+  const suppliers: PayRunSupplier[] = [...groups.values()].map(({ a, ...g }) => {
+    for (const k of ['pay', 'hold', 'claim', 'credit', 'pending', 'link'] as const) t[k] += a[k]!;
+    t.invoices += g.invoices.length;
+    t.linkCount += g.invoices.filter((i) => i.pendingLink && !i.duplicate).length;
+    return {
+      ...g,
+      payIls: ils(a.pay!),
+      holdIls: ils(a.hold!),
+      claimIls: ils(a.claim!),
+      creditIls: ils(a.credit!),
+      pendingIls: ils(a.pending!),
+      linkIls: ils(a.link!),
+    };
+  });
+  // Suppliers needing action first (held ₪, then credits), then the payable ones.
+  suppliers.sort(
+    (x, y) =>
+      y.holdIls - x.holdIls ||
+      y.creditIls - x.creditIls ||
+      y.payIls - x.payIls ||
+      (x.supplierName ?? '').localeCompare(y.supplierName ?? '', 'he'),
+  );
+  return {
+    enabled: true,
+    monthStart: hero.monthStart,
+    monthEnd: hero.monthEnd,
+    suppliers,
+    totals: {
+      invoices: t.invoices,
+      payIls: ils(t.pay),
+      holdIls: ils(t.hold),
+      claimIls: ils(t.claim),
+      creditIls: ils(t.credit),
+      pendingIls: ils(t.pending),
+      linkIls: ils(t.link),
+      linkCount: t.linkCount,
+    },
+  };
+}
