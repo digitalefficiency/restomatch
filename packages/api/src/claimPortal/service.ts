@@ -291,7 +291,7 @@ export async function mintClaimLink(
   db: Database,
   restaurantId: string,
   supplierId: string,
-  opts: { now?: Date; env?: NodeJS.ProcessEnv } = {},
+  opts: { now?: Date; env?: NodeJS.ProcessEnv; /** G-03 claim_letters.id, once deployed (signed into a c2 token). */ letterId?: string | null } = {},
 ): Promise<{ token: string; expiresAt: Date } | null> {
   const env = opts.env ?? process.env;
   const now = opts.now ?? new Date();
@@ -309,7 +309,7 @@ export async function mintClaimLink(
   );
   if (!row || Number(row.n) === 0) return null;
   try {
-    const { token, expiresAt } = signClaimToken({ restaurantId, supplierId, now }, env);
+    const { token, expiresAt } = signClaimToken({ restaurantId, supplierId, letterId: opts.letterId ?? null, now }, env);
     return { token, expiresAt };
   } catch {
     return null;

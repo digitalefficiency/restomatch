@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CLAIM_LINK_TTL_MS,
   CLAIM_TOKEN_LENGTH,
+  CLAIM_TOKEN_LENGTH_WITH_LETTER,
   claimPortalSecret,
   hashClaimToken,
   signClaimToken,
@@ -24,7 +25,7 @@ describe('claim portal token (H-06ʰ)', () => {
     expect(token).toHaveLength(CLAIM_TOKEN_LENGTH);
     expect(expiresAt.getTime() - issuedAt.getTime()).toBe(CLAIM_LINK_TTL_MS);
     const v = verifyClaimToken(token, NOW, ENV);
-    expect(v).toEqual({ ok: true, claims: { restaurantId: R, supplierId: S, issuedAt, expiresAt } });
+    expect(v).toEqual({ ok: true, claims: { restaurantId: R, supplierId: S, letterId: null, issuedAt, expiresAt } });
   });
 
   it('rounds issuedAt UP to the second, so a line sent earlier in that second is inside the letter', () => {
@@ -106,5 +107,30 @@ describe('claim portal token (H-06ʰ)', () => {
     expect(h).toMatch(/^[0-9a-f]{64}$/);
     expect(h).not.toContain(token);
     expect(claimLinkUrl('https://app.example///', token)).toBe(`https://app.example/s/c/${token}`);
+  });
+
+  it('c2 carries an optional signed letter id (G-03 claim_letters) and round-trips', () => {
+    const L = '99999999-8888-4777-8666-555555555555';
+    const { token } = signClaimToken({ restaurantId: R, supplierId: S, letterId: L, now: NOW }, ENV);
+    expect(token.startsWith('c2.')).toBe(true);
+    expect(token).toHaveLength(CLAIM_TOKEN_LENGTH_WITH_LETTER);
+    const v = verifyClaimToken(token, NOW, ENV);
+    expect(v.ok && v.claims.letterId).toBe(L);
+    expect(v.ok && v.claims.restaurantId).toBe(R);
+  });
+
+  it('the version is signed: relabelling c1 <-> c2 or dropping the letter bytes fails', () => {
+    const L = '99999999-8888-4777-8666-555555555555';
+    const c2 = signClaimToken({ restaurantId: R, supplierId: S, letterId: L, now: NOW }, ENV).token;
+    const c1 = mint().token;
+    const [, p2, sig2] = c2.split('.');
+    const [, p1] = c1.split('.');
+    expect(verifyClaimToken(`c1.${p1}.${sig2}`, NOW, ENV).ok).toBe(false);
+    expect(verifyClaimToken(`c2.${p2}.${c1.split('.')[2]}`, NOW, ENV).ok).toBe(false);
+    for (let i = 3; i < c2.length; i += 7) {
+      if (c2[i] === '.') continue;
+      const forged = c2.slice(0, i) + (c2[i] === 'A' ? 'B' : 'A') + c2.slice(i + 1);
+      expect(verifyClaimToken(forged, NOW, ENV).ok).toBe(false);
+    }
   });
 });

@@ -2,6 +2,7 @@
 export {
   CLAIM_LINK_TTL_MS,
   CLAIM_TOKEN_LENGTH,
+  CLAIM_TOKEN_LENGTH_WITH_LETTER,
   claimPortalSecret,
   hashClaimToken,
   signClaimToken,
