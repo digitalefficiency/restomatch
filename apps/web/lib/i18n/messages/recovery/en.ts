@@ -202,6 +202,14 @@ export const en: Shape<typeof he> = {
     total: 'Invoice total {charged} · sum of lines {expected}',
     unordered: 'Invoice {qty} units not ordered',
   },
+  sheet: {
+    title: 'Credit requests · {supplier}',
+    print: 'Print or PDF',
+    date: 'Date',
+    total: 'Total of {count} requests',
+    open: 'Supplier sheet',
+  },
+  period: { label: 'Period:', all: 'All', month: 'This month', last: 'Last month', d90: '90 days' },
   creditForm: {
     docLegend: 'Which document arrived?',
     doc: { invoice: 'Credit invoice', note: 'Credit note' },

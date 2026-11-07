@@ -197,3 +197,23 @@ describe('desk ranking: owed ₪ × days overdue (W2-10)', () => {
     expect(g[0]!.urgency).toBe(200_000);
   });
 });
+
+describe('period filter (acceptance 11, interim until W2-09b)', () => {
+  it('month / last month / 90 days in Israel days; a claim counts if claimed, credited or recovered inside', async () => {
+    const { periodWindow, inPeriod } = await import('../logic');
+    const now = '2026-11-07T21:00:00.000Z'; // 23:00 on 7.11 in Israel (UTC+2)
+    const month = periodWindow('month', now)!;
+    const last = periodWindow('last', now)!;
+    expect(periodWindow('all', now)).toBeNull();
+    const c = (claimedAt: string, creditedAt: string | null = null, recoveredAt: string | null = null) => ({ claimedAt, creditedAt, recoveredAt });
+    expect(inPeriod(c('2026-11-01T08:00:00Z'), month)).toBe(true);
+    expect(inPeriod(c('2026-10-31T22:30:00Z'), month)).toBe(true); // 00:30 on 1.11 in Israel
+    expect(inPeriod(c('2026-10-31T21:30:00Z'), month)).toBe(false); // 23:30 on 31.10 in Israel
+    expect(inPeriod(c('2026-10-31T08:00:00Z'), month)).toBe(false);
+    expect(inPeriod(c('2026-10-31T08:00:00Z'), last)).toBe(true);
+    expect(inPeriod(c('2026-09-20T08:00:00Z', null, '2026-11-02T08:00:00Z'), month)).toBe(true);
+    expect(inPeriod(c('2026-09-20T08:00:00Z'), month)).toBe(false);
+    const d90 = periodWindow('d90', now)!;
+    expect(d90.to - d90.from).toBe(90);
+  });
+});

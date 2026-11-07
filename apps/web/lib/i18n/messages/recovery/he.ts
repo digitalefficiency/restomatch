@@ -203,6 +203,14 @@ export const he = {
     total: 'סה״כ בחשבונית {charged} · סכום השורות {expected}',
     unordered: 'בחשבונית {qty} יח׳ שלא הוזמנו',
   },
+  sheet: {
+    title: 'בקשות הזיכוי · {supplier}',
+    print: 'הדפסה או PDF',
+    date: 'תאריך',
+    total: 'סה״כ {count} בקשות',
+    open: 'דף לספק',
+  },
+  period: { label: 'תקופה:', all: 'הכל', month: 'החודש', last: 'החודש שעבר', d90: '90 יום' },
   creditForm: {
     docLegend: 'איזה מסמך הגיע?',
     doc: { invoice: 'חשבונית זיכוי', note: 'תעודת זיכוי' },

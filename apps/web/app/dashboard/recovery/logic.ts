@@ -264,3 +264,37 @@ export function previewExclAgorot(printedAgorot: number, vat: 'incl' | 'excl', r
   const den = 10_000 + rateBp;
   return Math.floor((2 * printedAgorot * 10_000 + den) / (2 * den));
 }
+
+/** The desk's period filter (acceptance 11). TODO(W2-09b): swap for `resolveWindow` once it lands. */
+export type Period = 'all' | 'month' | 'last' | 'd90';
+export const PERIODS: readonly Period[] = ['all', 'month', 'last', 'd90'];
+
+/**
+ * The window of a period in Israel calendar days, as [fromDay, toDay) day
+ * numbers (days since the epoch, like israelDay); null = no filter.
+ * month = this calendar month to today · last = the previous calendar month ·
+ * d90 = the last 90 days including today.
+ */
+export function periodWindow(p: Period, nowIso: string): { from: number; to: number } | null {
+  if (p === 'all') return null;
+  const today = israelDay(nowIso);
+  if (p === 'd90') return { from: today - 89, to: today + 1 };
+  const d = new Date(today * 86_400_000);
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  const startOf = (yy: number, mm: number) => Date.UTC(yy, mm, 1) / 86_400_000;
+  return p === 'month' ? { from: startOf(y, m), to: today + 1 } : { from: startOf(y, m - 1), to: startOf(y, m) };
+}
+
+/** A claim is in the period when it was claimed, credited or recovered inside it. */
+export function inPeriod(
+  c: { claimedAt: string; creditedAt: string | null; recoveredAt: string | null },
+  w: { from: number; to: number } | null,
+): boolean {
+  if (!w) return true;
+  return [c.claimedAt, c.creditedAt, c.recoveredAt].some((iso) => {
+    if (!iso) return false;
+    const day = israelDay(iso);
+    return day >= w.from && day < w.to;
+  });
+}

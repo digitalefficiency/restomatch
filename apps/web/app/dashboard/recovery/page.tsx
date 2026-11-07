@@ -11,7 +11,7 @@ import { recovery as recoveryNs } from '@/lib/i18n/messages/recovery';
 import { Card, EmptyState, SectionHeader } from '@/lib/components';
 import { displayName } from '../approvals/vocab';
 import { TrackerClient } from './tracker-client';
-import { ALL_CLAIMS, followUps, funnelOf, type FunnelPart } from './logic';
+import { ALL_CLAIMS, PERIODS, followUps, funnelOf, inPeriod, periodWindow, type FunnelPart, type Period } from './logic';
 
 const PART_ORDER: FunnelPart[] = ['returned', 'credited', 'open', 'disputed', 'writtenOff'];
 const PART_BAR: Record<FunnelPart, string> = {
@@ -43,14 +43,21 @@ export default async function RecoveryPage({
   const view: 'send' | 'track' | 'history' =
     tabParam === 'send' ? 'send' : tabParam === 'history' || tabParam === 'closed' || tabParam === 'all' ? 'history' : 'track';
   const remind = (Array.isArray(sp.remind) ? sp.remind[0] : sp.remind) === '1';
+  const pParam = Array.isArray(sp.p) ? sp.p[0] : sp.p;
+  const period: Period = (PERIODS as readonly string[]).includes(pParam ?? '') ? (pParam as Period) : 'all';
 
   const [t, locale] = await Promise.all([getT(recoveryNs), getLocale()]);
-  const [{ summary, returnedThisMonth }, claims, suggestions] = await Promise.all([
+  const [{ summary, returnedThisMonth: returnedNow }, allClaims, suggestions, returnedLast] = await Promise.all([
     caller.recovery.summary(),
     // Every claim: the banner, tab counts and cards sum them (never a 200-row first page).
     caller.recovery.list({ limit: ALL_CLAIMS }),
     caller.recovery.creditLineSuggestions(),
+    period === 'last' ? caller.recovery.returnedThisMonth({ monthOffset: -1 }) : Promise.resolve(null),
   ]);
+  // The period filter (acceptance 11): claimed, credited or recovered inside the window.
+  const win = periodWindow(period, new Date().toISOString());
+  const claims = allClaims.filter((c) => inPeriod(c, win));
+  const returnedThisMonth = returnedLast ?? returnedNow;
   // The reminder draft is signed like the letters: the ACTIVE restaurant and the signed-in person.
   const [session, memberships, profile] = await Promise.all([auth(), caller.onboarding.myMemberships(), caller.settings.profile()]);
   const restaurantName = activeMembershipOf(memberships, session?.user?.restaurantId)?.restaurantName ?? profile.name ?? '';
@@ -203,11 +210,33 @@ export default async function RecoveryPage({
               {t('tracker.paged', { shown: formatNumber(claims.length, locale), total: formatNumber(summary.claimCount, locale) })}
             </p>
           ) : null}
+          <nav aria-label={t('period.label')} className="flex flex-wrap items-center gap-2 text-sm" data-testid="recovery-period">
+            <span className="text-muted">{t('period.label')}</span>
+            {PERIODS.map((p) => {
+              const q = new URLSearchParams();
+              if (view !== 'track') q.set('tab', view);
+              if (p !== 'all') q.set('p', p);
+              const qs = q.toString();
+              return (
+                <Link
+                  key={p}
+                  href={`/dashboard/recovery${qs ? `?${qs}` : ''}`}
+                  aria-current={period === p ? 'true' : undefined}
+                  className={`inline-flex min-h-11 items-center rounded-full border px-3 md:min-h-8 ${
+                    period === p ? 'border-primary bg-primary/10 font-semibold text-ink' : 'border-line text-muted hover:text-ink'
+                  }`}
+                >
+                  {t(`period.${p}`)}
+                </Link>
+              );
+            })}
+          </nav>
+
           <nav aria-label={t('tracker.claimsTitle')} className="flex gap-1 border-b border-line" data-testid="recovery-tabs">
             {(['send', 'track', 'history'] as const).map((v) => (
               <Link
                 key={v}
-                href={v === 'track' ? '/dashboard/recovery' : `/dashboard/recovery?tab=${v}`}
+                href={`/dashboard/recovery${v === 'track' ? (period === 'all' ? '' : `?p=${period}`) : `?tab=${v}${period === 'all' ? '' : `&p=${period}`}`}`}
                 aria-current={view === v ? 'page' : undefined}
                 className={`-mb-px inline-flex min-h-11 items-center gap-2 border-b-2 px-3 text-sm font-semibold ${
                   view === v ? 'border-primary text-ink' : 'border-transparent text-muted hover:text-ink'
@@ -326,7 +355,14 @@ export default async function RecoveryPage({
                 <tbody>
                   {summary.bySupplier.map((s) => (
                     <tr key={s.supplierId ?? '—'} className="border-b border-line/60">
-                      <td className="py-2 pe-3 text-ink">{displayName(locale, s.supplierName, s.supplierNameEn) || '—'}</td>
+                      <td className="py-2 pe-3 text-ink">
+                        {displayName(locale, s.supplierName, s.supplierNameEn) || '—'}
+                        {s.supplierId ? (
+                          <Link href={`/dashboard/recovery/sheet/${s.supplierId}`} className="ms-2 text-xs font-semibold text-primary hover:underline">
+                            {t('sheet.open')}
+                          </Link>
+                        ) : null}
+                      </td>
                       <td className="py-2 pe-3 text-right font-semibold tabular-nums text-ink">{exact(s.outstandingAgorot)}</td>
                       <td className="py-2 pe-3 text-right tabular-nums text-muted">{exact(s.claimedAgorot)}</td>
                       <td className="py-2 pe-3 text-right tabular-nums text-primary">{exact(s.creditedAgorot)}</td>
