@@ -107,9 +107,13 @@ function linesSql(link: ClaimLink, extra = sql``) {
       AND c.status = 'letter_sent'
       AND c.letter_sent_at IS NOT NULL
       AND c.letter_sent_at <= ${link.issuedAt.toISOString()}::timestamptz
+      AND c.amount_agorot > c.credited_agorot
       ${extra}
   `;
 }
+
+/** The view's order: the answer accepts exactly the lines the page can show. */
+const LINE_ORDER = sql`ORDER BY i.invoice_date ASC NULLS LAST, i.invoice_number ASC NULLS LAST, c.claimed_at ASC, c.id`;
 
 /**
  * The letter as the supplier sees it. `db` must be the link's tenant
@@ -134,7 +138,7 @@ export async function loadClaimLetter(db: Database, link: ClaimLink): Promise<Cl
              COALESCE(p.canonical_name, il.raw_description) AS item,
              COALESCE(p.name_en, il.raw_description_en) AS item_en
       ${linesSql(link)}
-      ORDER BY i.invoice_date ASC NULLS LAST, i.invoice_number ASC NULLS LAST, c.claimed_at ASC, c.id
+      ${LINE_ORDER}
       LIMIT ${MAX_LETTER_LINES}
     `),
   );
@@ -185,7 +189,7 @@ const ANSWER_HE: Record<ClaimAnswer, string> = { agree: 'מאשרים', check: '
 function clean(s: string | null | undefined, max: number): string | null {
   if (s == null) return null;
   // eslint-disable-next-line no-control-regex
-  const t = s.replace(/[\u0000-\u0009\u000B-\u001F\u007F‎‏‪-‮⁦-⁩]/g, '').trim();
+  const t = s.replace(/[\u0000-\u0009\u000B-\u001F\u007F\u061C\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/g, '').trim();
   return t ? t.slice(0, max) : null;
 }
 
@@ -226,6 +230,12 @@ export async function submitClaimAnswer(
   );
   if (held.length !== ids.length) return { ok: false, error: 'INVALID_LINES' };
   if (held.some((h) => h.status !== 'letter_sent')) return { ok: false, error: 'ALREADY_ANSWERED' };
+  // Exactly the page's line set (same joins, credited filter, order and cap):
+  // a line the supplier was never shown cannot be answered.
+  const shown = new Set(
+    rowsOf(await db.execute(sql`SELECT c.id ${linesSql(link)} ${LINE_ORDER} LIMIT ${MAX_LETTER_LINES}`)).map((r) => String(r.id)),
+  );
+  if (ids.some((id) => !shown.has(id))) return { ok: false, error: 'INVALID_LINES' };
 
   const creditNo = clean(input.creditNoteNumber, MAX_CREDIT_NOTE_NUMBER_CHARS);
   const general = clean(input.note, MAX_NOTE_CHARS);

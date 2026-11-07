@@ -268,6 +268,28 @@ describe('claim portal: the answer', () => {
   });
 });
 
+describe('claim portal: the answer touches only lines the page shows (warden review)', () => {
+  it('a fully credited letter_sent line is not answerable', async () => {
+    const credited = await claim(A, { creditedAgorot: 1700 });
+    const link = await resolved(linkFor(A));
+    const res = await withRestaurant(db, A.restaurantId, (tx) =>
+      submitClaimAnswer(tx, link, { lines: [{ claimId: credited, answer: 'agree' }] }, NOW),
+    );
+    expect(res).toEqual({ ok: false, error: 'INVALID_LINES' });
+    expect((await statusOf(credited)).status).toBe('letter_sent');
+  });
+
+  it('strips bidi / zero-width / line-separator characters from the supplier note', async () => {
+    const id = await claim(A);
+    const link = await resolved(linkFor(A));
+    await withRestaurant(db, A.restaurantId, (tx) =>
+      submitClaimAnswer(tx, link, { lines: [{ claimId: id, answer: 'check', note: 'a\u061Cb\u200Bc\u2028d\u2067e\uFEFF' }] }, NOW),
+    );
+    const [ev] = await db.select().from(recoveryEvents).where(eq(recoveryEvents.claimId, id));
+    expect(ev!.note).toContain('הערה: abcde');
+  });
+});
+
 describe('claim portal: mint', () => {
   it('mints only for this tenant’s supplier with a sent line, and only with the secret set', async () => {
     await claim(A);
