@@ -30,7 +30,8 @@
 --                        a consolidated invoice (חשבונית ריכוז) linked to the goods
 --                        receipts it covers ('proposal_accept' | 'manual').
 -- leak_month_snapshots   the frozen leak of a closed month (agorot + payload), per
---                        version. APPEND-ONLY (trigger): a printed month never
+--                        version. APPEND-ONLY (trigger: no UPDATE, and no DELETE
+--                        from the tenant role): a printed month never
 --                        restates; a re-close writes version n+1.
 -- leak_month_corrections a late change against a frozen snapshot: signed delta
 --                        (agorot), a mandatory reason, and the entity it came from.
@@ -42,8 +43,9 @@
 -- restaurants (+address, contact_phone)
 --                        printed on the claim letter.
 -- supplier_bank_accounts the supplier's bank details: bank/branch codes, the account
---                        number ENCRYPTED by the app (@restomatch/crypto, AES-256-GCM
---                        envelope) in account_number_enc, last4 for display, holder,
+--                        number ENCRYPTED by the app (proposed: an AES-256-GCM helper
+--                        in @restomatch/crypto, as apps/web/lib/totp.ts does) in
+--                        account_number_enc, last4 for display, holder,
 --                        who verified it and when. One ACTIVE account per supplier.
 -- supplier_bank_account_changes
 --                        the change audit (BEC fraud): before / after as MASKED jsonb
@@ -54,7 +56,7 @@
 --                        the printed line order (1-based), indexed with the parent.
 -- supplier_catalog_items (+effective_from)
 --                        the date a price-list row takes effect.
--- push_subscriptions     a Web Push endpoint per user device (endpoint unique).
+-- push_subscriptions     a Web Push endpoint per user device (unique per restaurant).
 -- users (+whatsapp_opt_in, whatsapp_opt_in_at, whatsapp_opt_in_source)
 --                        WhatsApp consent. The _at/_source pair is the PROPOSED
 --                        stronger evidence (the human decides). The tenant app role
@@ -92,18 +94,32 @@
 --     DROP COLUMN whatsapp_opt_in_source;
 
 -- ── shared: append-only guard (frozen snapshots, corrections, bank audit) ─────
+-- BEFORE UPDATE OR DELETE. "Owner" = the table owner's connection (migrations, ops,
+-- tests) — referential cascades also run as the owner, so a restaurant delete still
+-- cascades. The tenant app role can never DELETE a row, and can never UPDATE one.
 -- The trigger arguments name the actor columns (FK → users ON DELETE SET NULL): an
--- UPDATE that only nulls those (a user is deleted / erased) is let through, so the
--- FK action and DSR erasure keep working. Any other change raises.
+-- UPDATE that only nulls those is let through inside a referential action (trigger
+-- depth > 1) or on the owner connection (DSR erasure); any other UPDATE raises.
+-- (A revoke in rls.ts would be the belt to this brace; proposed in the PR body.)
 CREATE OR REPLACE FUNCTION public.restomatch_append_only() RETURNS trigger
   LANGUAGE plpgsql
   AS $$
 DECLARE
-  o jsonb := to_jsonb(OLD);
-  n jsonb := to_jsonb(NEW);
+  is_owner boolean := pg_has_role(current_user, (SELECT relowner FROM pg_class WHERE oid = TG_RELID), 'MEMBER');
+  o jsonb;
+  n jsonb;
   c text;
 BEGIN
-  IF TG_NARGS > 0 THEN
+  IF TG_OP = 'DELETE' THEN
+    IF is_owner THEN
+      RETURN OLD;
+    END IF;
+    RAISE EXCEPTION '% is append-only: rows are never deleted', TG_TABLE_NAME
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  o := to_jsonb(OLD);
+  n := to_jsonb(NEW);
+  IF TG_NARGS > 0 AND (pg_trigger_depth() > 1 OR is_owner) THEN
     FOREACH c IN ARRAY TG_ARGV LOOP
       IF n -> c = 'null'::jsonb THEN
         o := o - c;
@@ -223,7 +239,7 @@ CREATE TABLE IF NOT EXISTS "leak_month_snapshots" (
   CONSTRAINT "leak_month_snapshots_leak_check" CHECK ("leak_agorot" >= 0)
 );--> statement-breakpoint
 DROP TRIGGER IF EXISTS "leak_month_snapshots_append_only" ON "leak_month_snapshots";--> statement-breakpoint
-CREATE TRIGGER "leak_month_snapshots_append_only" BEFORE UPDATE ON "leak_month_snapshots" FOR EACH ROW EXECUTE FUNCTION public.restomatch_append_only();--> statement-breakpoint
+CREATE TRIGGER "leak_month_snapshots_append_only" BEFORE UPDATE OR DELETE ON "leak_month_snapshots" FOR EACH ROW EXECUTE FUNCTION public.restomatch_append_only();--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "leak_month_corrections" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE cascade,
@@ -247,7 +263,7 @@ CREATE INDEX IF NOT EXISTS "leak_month_corrections_entity_idx" ON "leak_month_co
 CREATE INDEX IF NOT EXISTS "leak_month_corrections_created_by_idx" ON "leak_month_corrections" USING btree ("created_by");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "leak_month_corrections_restaurant_idx" ON "leak_month_corrections" USING btree ("restaurant_id", "created_at");--> statement-breakpoint
 DROP TRIGGER IF EXISTS "leak_month_corrections_append_only" ON "leak_month_corrections";--> statement-breakpoint
-CREATE TRIGGER "leak_month_corrections_append_only" BEFORE UPDATE ON "leak_month_corrections" FOR EACH ROW EXECUTE FUNCTION public.restomatch_append_only('created_by');--> statement-breakpoint
+CREATE TRIGGER "leak_month_corrections_append_only" BEFORE UPDATE OR DELETE ON "leak_month_corrections" FOR EACH ROW EXECUTE FUNCTION public.restomatch_append_only('created_by');--> statement-breakpoint
 
 -- ── recovery_claims.seq_no / restaurants address + phone ──────────────────────
 ALTER TABLE "recovery_claims" ADD COLUMN IF NOT EXISTS "seq_no" integer
@@ -311,7 +327,7 @@ CREATE INDEX IF NOT EXISTS "supplier_bank_account_changes_account_idx" ON "suppl
 CREATE INDEX IF NOT EXISTS "supplier_bank_account_changes_changed_by_idx" ON "supplier_bank_account_changes" USING btree ("changed_by");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "supplier_bank_account_changes_restaurant_idx" ON "supplier_bank_account_changes" USING btree ("restaurant_id", "changed_at");--> statement-breakpoint
 DROP TRIGGER IF EXISTS "supplier_bank_account_changes_append_only" ON "supplier_bank_account_changes";--> statement-breakpoint
-CREATE TRIGGER "supplier_bank_account_changes_append_only" BEFORE UPDATE ON "supplier_bank_account_changes" FOR EACH ROW EXECUTE FUNCTION public.restomatch_append_only('changed_by');--> statement-breakpoint
+CREATE TRIGGER "supplier_bank_account_changes_append_only" BEFORE UPDATE OR DELETE ON "supplier_bank_account_changes" FOR EACH ROW EXECUTE FUNCTION public.restomatch_append_only('changed_by');--> statement-breakpoint
 
 -- ── suppliers min order / fee; line order; price-list date ────────────────────
 ALTER TABLE "suppliers" ADD COLUMN IF NOT EXISTS "min_order_ils" numeric(12, 2)
@@ -339,7 +355,9 @@ CREATE TABLE IF NOT EXISTS "push_subscriptions" (
   "last_seen_at" timestamp with time zone,
   "revoked_at" timestamp with time zone,
   CONSTRAINT "push_subscriptions_id_restaurant_id_key" UNIQUE ("id", "restaurant_id"),
-  CONSTRAINT "push_subscriptions_endpoint_key" UNIQUE ("endpoint"),
+  -- Per restaurant: one device of a user in two restaurants has one row in each, and
+  -- a tenant never learns (by a unique violation) that another tenant holds it.
+  CONSTRAINT "push_subscriptions_restaurant_endpoint_key" UNIQUE ("restaurant_id", "endpoint"),
   CONSTRAINT "push_subscriptions_endpoint_https_check" CHECK ("endpoint" LIKE 'https://%')
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "push_subscriptions_user_idx" ON "push_subscriptions" USING btree ("user_id");--> statement-breakpoint
@@ -405,5 +423,5 @@ DROP POLICY IF EXISTS "notification_prefs_tenant" ON "notification_prefs";--> st
 CREATE POLICY "notification_prefs_tenant" ON "notification_prefs" USING ("restaurant_id" = app.current_restaurant_id());
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '0ab33c05a6a60778440aeb82c99473b5b757b75f2dcbdfa826bf56cfadcc83bb', 1782500000000
+select '1a193a1574285e4d56c1c5bf2c597c28871c7af7fc5736192d9877f18953d0e5', 1782500000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782500000000);

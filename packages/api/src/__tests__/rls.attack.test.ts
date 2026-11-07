@@ -1249,3 +1249,37 @@ describe('0072 (H-03) notification_prefs (raw RLS)', () => {
     expect(updated).toHaveLength(0);
   });
 });
+
+describe('0072 (H-03) append-only tables under the RLS app role', () => {
+  it('the tenant role cannot UPDATE or DELETE even its own frozen month, correction or bank audit', async () => {
+    const [snap] = await ownerDb.insert(leakMonthSnapshots).values({ restaurantId: A.restaurantId, month: '2026-04-01', leakAgorot: 100 }).returning();
+    const [corr] = await ownerDb
+      .insert(leakMonthCorrections)
+      .values({ restaurantId: A.restaurantId, snapshotId: snap!.id, deltaAgorot: 5, reason: 'late credit note' })
+      .returning();
+    const [acct] = await ownerDb
+      .insert(supplierBankAccounts)
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:ct', accountLast4: '6789' })
+      .returning();
+    const [ch] = await ownerDb
+      .insert(supplierBankAccountChanges)
+      .values({ restaurantId: A.restaurantId, bankAccountId: acct!.id, changedBy: A.ownerUserId, after: { last4: '6789' } })
+      .returning();
+    const asA = (fn: Parameters<typeof withRestaurant<unknown>>[2]) => withRestaurant(appDb, A.restaurantId, fn);
+    await expect(asA((tx) => tx.delete(leakMonthCorrections).where(eq(leakMonthCorrections.id, corr!.id)))).rejects.toThrow(/append-only/);
+    await expect(asA((tx) => tx.delete(leakMonthSnapshots).where(eq(leakMonthSnapshots.id, snap!.id)))).rejects.toThrow(/append-only|foreign key/);
+    await expect(asA((tx) => tx.update(leakMonthSnapshots).set({ leakAgorot: 1 }).where(eq(leakMonthSnapshots.id, snap!.id)))).rejects.toThrow(/append-only/);
+    await expect(asA((tx) => tx.delete(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.id, ch!.id)))).rejects.toThrow(/append-only/);
+    // The actor exemption is for referential actions only: the tenant cannot wipe who changed the bank details.
+    await expect(
+      asA((tx) => tx.update(supplierBankAccountChanges).set({ changedBy: null }).where(eq(supplierBankAccountChanges.id, ch!.id))),
+    ).rejects.toThrow(/append-only/);
+    // A snapshot with no corrections can't be deleted and re-inserted with another figure either.
+    const [lone] = await ownerDb.insert(leakMonthSnapshots).values({ restaurantId: A.restaurantId, month: '2026-03-01', leakAgorot: 100 }).returning();
+    await expect(asA((tx) => tx.delete(leakMonthSnapshots).where(eq(leakMonthSnapshots.id, lone!.id)))).rejects.toThrow(/append-only/);
+    await ownerDb.delete(supplierBankAccountChanges);
+    await ownerDb.delete(supplierBankAccounts);
+    await ownerDb.delete(leakMonthCorrections);
+    await ownerDb.delete(leakMonthSnapshots);
+  });
+});

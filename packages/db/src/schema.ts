@@ -2779,7 +2779,7 @@ export const pushSubscriptions = pgTable(
   },
   (t) => [
     unique('push_subscriptions_id_restaurant_id_key').on(t.id, t.restaurantId),
-    unique('push_subscriptions_endpoint_key').on(t.endpoint),
+    unique('push_subscriptions_restaurant_endpoint_key').on(t.restaurantId, t.endpoint),
     index('push_subscriptions_user_idx').on(t.userId),
     index('push_subscriptions_restaurant_user_idx').on(t.restaurantId, t.userId),
   ],

@@ -154,6 +154,31 @@ describe('0072 is registered', () => {
     expect(j.entries[i]!.when).toBeGreaterThan(j.entries[i - 1]!.when);
   });
 
+  it('is idempotent: re-running every statement on the migrated DB changes nothing and raises nothing', async () => {
+    const stmts = readFileSync(join(migrationsDir(), '0072_schema_batch_a.sql'), 'utf8')
+      .split('--> statement-breakpoint')
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const shape = async (q: typeof sql) =>
+      (await q`
+        select (select count(*) from pg_constraint c join pg_namespace n on n.oid = c.connamespace where n.nspname = 'public')::int as cons,
+               (select count(*) from pg_indexes where schemaname = 'public')::int as idx,
+               (select count(*) from pg_trigger where not tgisinternal)::int as trg,
+               (select count(*) from pg_policy)::int as pol`) as unknown as [{ cons: number; idx: number; trg: number; pol: number }];
+    const ROLLBACK = new Error('rollback');
+    let before: unknown;
+    let after: unknown;
+    await expect(
+      sql.begin(async (tx) => {
+        before = (await shape(tx as unknown as typeof sql))[0];
+        for (const st of stmts) await tx.unsafe(st);
+        after = (await shape(tx as unknown as typeof sql))[0];
+        throw ROLLBACK;
+      }),
+    ).rejects.toBe(ROLLBACK);
+    expect(after).toEqual(before);
+  });
+
   it('uses no enum value that 0071 adds in the same migrator batch', () => {
     const file = readFileSync(join(migrationsDir(), '0072_schema_batch_a.sql'), 'utf8')
       .split('\n')
@@ -345,6 +370,19 @@ describe('0072 leak_month_snapshots + leak_month_corrections (frozen months)', (
     );
   });
 
+  it('the append-only triggers fire on UPDATE and DELETE (the tenant-role DELETE denial is in rls.attack)', async () => {
+    const rows = (await sql`
+      select tgname, (tgtype & 8) <> 0 as on_delete, (tgtype & 16) <> 0 as on_update
+      from pg_trigger where tgname like '%_append_only' and not tgisinternal order by tgname`) as unknown as Array<{ tgname: string; on_delete: boolean; on_update: boolean }>;
+    expect(rows).toEqual(
+      ['leak_month_corrections', 'leak_month_snapshots', 'supplier_bank_account_changes'].map((t) => ({
+        tgname: `${t}_append_only`,
+        on_delete: true,
+        on_update: true,
+      })),
+    );
+  });
+
   it('a snapshot is append-only: no UPDATE, ever (a printed month never restates)', async () => {
     const [s] = await db.insert(leakMonthSnapshots).values({ restaurantId: A.restaurantId, month: '2026-06-01', leakAgorot: 100 }).returning();
     await expectPgError(sql`update leak_month_snapshots set leak_agorot = 99 where id = ${s!.id}`, RESTRICT_VIOLATION);
@@ -521,15 +559,17 @@ describe('0072 suppliers min order / fee, line order, price-list date', () => {
 });
 
 describe('0072 push_subscriptions / WhatsApp consent / notification_prefs', () => {
-  it('a push endpoint is unique and https; the subscription goes with its user', async () => {
+  it('a push endpoint is unique per restaurant and https; the subscription goes with its user', async () => {
     const [u] = await db.insert(users).values({ email: `h03-push-${Date.now()}@0072.test` }).returning();
     const endpoint = `https://push.test/${u!.id}`;
     const [p] = await db.insert(pushSubscriptions).values({ restaurantId: A.restaurantId, userId: u!.id, endpoint, p256dh: 'k', auth: 'a' }).returning();
     expect(p).toMatchObject({ lastSeenAt: null, revokedAt: null, userAgent: null });
     await expectPgError(
-      db.insert(pushSubscriptions).values({ restaurantId: B.restaurantId, userId: u!.id, endpoint, p256dh: 'k', auth: 'a' }),
+      db.insert(pushSubscriptions).values({ restaurantId: A.restaurantId, userId: u!.id, endpoint, p256dh: 'k2', auth: 'a2' }),
       UNIQUE_VIOLATION,
     );
+    // The same device in the user's other restaurant is its own row.
+    await db.insert(pushSubscriptions).values({ restaurantId: B.restaurantId, userId: u!.id, endpoint, p256dh: 'k', auth: 'a' });
     await expectPgError(
       db.insert(pushSubscriptions).values({ restaurantId: A.restaurantId, userId: u!.id, endpoint: 'http://push.test/x', p256dh: 'k', auth: 'a' }),
       CHECK_VIOLATION,
