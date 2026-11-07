@@ -7,7 +7,7 @@
 **Money rules applied throughout.**
 - One leak definition: Σ|deltaAmount|. MISSING_ON_INVOICE is out of the leak and not claimable (#211, owner-approved 31.10).
 - Three ₪ kinds, never summed: **leak ₪**, **avoided-cost ₪** (price creep, pack size, menu), **hours-₪** (labour value, not cash).
-- Chef sees ₪ only on orders and recipes. Receiver sees no ₪ anywhere, including notifications.
+- Chef sees ₪ only on orders and recipes. **Chef notifications carry ₪ only for dish/recipe cost (AU-13 dish section); no other chef notification carries ₪.** Receiver sees no ₪ anywhere, including notifications.
 - Every money action is human-confirmed unless an owner rule says otherwise. Nothing is sent to a supplier automatically.
 - The typical restaurant is `cat` §0: ₪200,000/month food spend before VAT, 1 branch, ~12 suppliers, ~14 deliveries/week, leak at 1.5% = ₪3,000/month. Loaded rates: receiver ₪63, bookkeeper ₪89, manager ₪103, chef ₪127, owner ₪103 (₪150 in brackets). **time-₪/month = h/week × 4.33 × rate.** Every input is an **ASSUMPTION** until AU-07 measures it.
 - Vendor numbers are context only and never enter the arithmetic.
@@ -93,7 +93,7 @@ Status words: **live**, **flag (P)** = on in the pilot, **flag (–)** = built b
 | **AU-23** | Recipe quick-start: ingredient shortlist from purchases + draft dish skeletons from the menu; chef confirms | chef, owner | M | C (with W3-02) | no |
 | **AU-24** | Agreed price on every PO the chef or manager sends (opt-in per supplier) | chef, manager, owner | S | B1 | no |
 | **AU-25** | Food-cost % lite: one typed sales figure per month → purchases-based %, leak shown in food-cost points | owner (bookkeeper fills) | S | C | no (**OWNER DECISION**) |
-| **AU-26** | Same-supplier pack-size hint on order drafts and price alerts | chef (₪ on orders), owner | M | C+ | no (**icp-keeper gate**) |
+| **AU-26** | Same-supplier pack-size hint on order drafts (chef) and in the owner/manager price digest (never a chef notification) | chef (₪ on orders), owner | M | C+ | no (**icp-keeper gate**) |
 | R1 | AU-13 rider: dish alert names the purchase + four standard responses as copy | chef, owner | S | B1 | no |
 | R2 | W3-02 rider: ingredient find-and-replace across recipes | chef | S | W3 | no |
 | R3 | W2-05 / G-06 rider: chef gets the ₪-free "arrived short" summary for kitchen lines | chef | S | after W2-05 | no |
@@ -125,7 +125,7 @@ Status words: **live**, **flag (P)** = on in the pilot, **flag (–)** = built b
   - Owner: ocr-procurement-engineer (parser, `packages/procurement`); growth-pmm-engineer (pilot ops copy).
 - **Gap.** Closes **M#45** (orders read from MarketMan/Zestt) for the zero-credential case. Narrows **M#55** (supplier digital delivery notes, a structural LOSE) by integrating Zestt's network rather than building one (20 §A.6).
   - MarketMan has no Israeli supplier link (06 §4).
-  - Zestt has **no restaurant-side API found** (07 §2.8, i08 §0.2), so documents are the only route.
+  - The public Zestt API we found is built for suppliers; we found no documented restaurant export (07 §0, §2.8; i08 §0.2), so we start from documents. The Zestt PDF import is live where real OCR is on and is the safe, recommended path.
 - **Risk → guardrail.** A misparsed PO makes a false leak. Guardrails:
   - A checksum fail → draft.
   - Lines without a SKU or product keep the PO **not eligible** (the same rule as AU-21 C1).
@@ -136,10 +136,11 @@ Status words: **live**, **flag (P)** = on in the pilot, **flag (–)** = built b
 - **Owner rules.** Nothing is written back to MarketMan or Zestt. Receiver: no ₪. One leak definition.
 
 #### AU-21 · Coexistence by API (procurement sync made real)
-- **One line.** The stub sync becomes safe and live, so orders, the supplier price list and, where available, receipts arrive by themselves.
+- **One line.** The MarketMan/Zester API sync, today built and unit-tested against guessed API shapes but dormant (no schedule, no way to connect an account, no credentials), becomes safe and live, so orders, the supplier price list and, where available, receipts arrive by themselves.
 - **Roles.** Owner, manager. Receiver: imported receipts are labelled and carry no ₪.
 - **Trigger → action → human confirms.** Four PRs, in this order:
   - **PR a, C1–C3:**
+    - Drop `'zester'` from the adapter registry and from `PROCUREMENT_PLATFORMS` (`packages/procurement/src/registry.ts:5-8`, `packages/api/src/routers/integrations.ts:125`), or keep it marked UNVERIFIED and hidden from the UI, until a restaurant-side Zestt API is confirmed. The public Zestt API we found is built for suppliers.
     - Map the platform product to `po_lines.supplier_sku` and run G-08 `decideLink` (auto only on SKU or alias).
     - Never delete or rewrite lines of a PO that has a receipt.
     - Our status wins after the dock; platform "closed" is metadata only.
@@ -149,7 +150,7 @@ Status words: **live**, **flag (P)** = on in the pilot, **flag (–)** = built b
     - `sync_cursor` written.
     - Real contracts replace the VERIFY shapes.
     - The scheduler is **H-05a (human PR)**. Credentials are **Phase-6, human only**.
-  - **PR d, C5:** platform receipts → `goods_receipts` labelled "נקלט ב-MarketMan". A receipt made in our app is never overwritten.
+  - **PR d, C5:** platform receipts, labelled "נקלט ב-MarketMan". A receipt made in our app is never overwritten. **Never insert a second `goods_receipts` row for a PO that already has one:** the partial unique index `goods_receipts_po_unique` blocks it, and a second GR would double the received qty in `buildMatchInput`. Either store the platform receipt elsewhere, or add an index relaxation **plus** a `source='platform'` exclusion in `buildMatchInput` to the H-04 proposal, with G-04 and matching-engine-guardian sign-off. A test asserts the received qty is not doubled.
 - **Value (ASSUMPTIONS).**
   - *Hours-₪.* Removes forwarding (14 × 0.5 min) and quarterly price-list uploads (12 suppliers × 10 min): ≈0.15–0.3 h/week × 4.33 × ₪103 = **₪65–135/month** over AU-20.
   - With C5, where the receiver would otherwise receive twice: 14 deliveries × 2–3 min ≈ 0.47–0.7 h/week × 4.33 × ₪63 = **₪130–190/month**.
@@ -161,12 +162,12 @@ Status words: **live**, **flag (P)** = on in the pilot, **flag (–)** = built b
   - **#211** (open; hard).
   - G-08 #200 (built).
   - W3-10 for PR b and W3-07a for PR c (wave 3, gated on W2-08 + H-03, **not started**).
-  - **H-04** schema batch: a `po_lines` external id (durable C2) and a `goods_receipts.source` column (C5). Not in the PR read.
+  - **H-04** schema batch: a `po_lines` external id (durable C2) and a source label for platform receipts (C5; see PR d for the one-GR-per-PO rule). Not in the PR read.
   - **H-05a**: `cron.ts`.
-  - Phase-6 credentials: MarketMan Open API add-on $25–$99/month [3P], Israeli availability UNVERIFIED (06 §4/§5); Zestt buyer export not found (07 §8).
+  - Phase-6 credentials: MarketMan Open API add-on $25–$99/month [3P], Israeli availability UNVERIFIED (06 §4/§5); no documented Zestt restaurant export found, the public Zestt API is built for suppliers (07 §0, §8).
   - Owner: ocr-procurement-engineer; matching-engine-guardian consulted on C3.
 - **Gap.** **M#45, M#46** (self-serve procurement integration), **M#58** (use their receipts). This is LOSE gap 1 in note 20 §A.7.
-- **Risk → guardrail.** Switching the sync on today **inflates the leak**: every invoice line becomes UNORDERED_ITEM, and a re-sync wipes `gr_lines.po_line_id` (i08 §1.3–§1.4). Guardrails:
+- **Risk → guardrail.** Switching the sync on today **inflates the leak** wherever PO discovery picks a synced PO (same supplier, sent/confirmed/partial, ±7 local days): the invoice lines become UNORDERED_ITEM and the PO lines MISSING_ON_INVOICE, about 2× the invoice before #211 and about 1× after, and the invoice is blocked. A re-sync also cuts the line-level link between receipt lines/findings and PO lines (3-way qty checks stop); the receipt stays on the PO header (i08 §0, §1.3–§1.4). Guardrails:
   - **No scheduler PR until PR a + G-04 + #211 are merged.**
   - A test asserts that a synced PO line with no SKU and no product is never eligible.
   - Delete + re-insert is replaced by upsert.
@@ -188,6 +189,7 @@ Status words: **live**, **flag (P)** = on in the pilot, **flag (–)** = built b
   - The claim figures shown are A12's leak ₪, in a separate column, never summed with creep.
 - **Effort.** M (read-only queries + page + PDF + reply draft).
 - **Dependencies.**
+  - **#211 (open): HARD dependency.** The leak column reads `LEAK_FILTER` / `owner.leakGrouped` and never applies its own MISSING_ON_INVOICE exclusion (one leak definition).
   - **AU-13** (B1, start gated on **W2-12, not started**) for creep ₪/month.
   - **W2-11** Supplier 360 (not started) as the host page. Interim: mount under the supplier leak card (`supplierLeakCard` (P), live).
   - W2-10 #193/#194/#197 (built) for the claim record; days to credit from W2-10 timestamps until AU-19's bank evidence.
@@ -223,7 +225,7 @@ Status words: **live**, **flag (P)** = on in the pilot, **flag (–)** = built b
   - The LLM invents quantities or prices → ₪ only ever comes from `price_history`. AI quantities are blank or flagged; each recipe needs a chef confirm. The W3-04 kill-switch fires below 60% acceptance.
   - Recipes drift into the first-value path → icp-keeper gate: never in onboarding before the first leak figure.
 - **Immutable files.** None.
-- **Owner rules.** The chef sees ₪ on recipes only. No ₪ in any chef notification outside recipes.
+- **Owner rules.** The chef sees ₪ on recipes (and orders). Chef notifications carry ₪ only for dish/recipe cost (AU-13 dish section); no other chef notification carries ₪.
 
 #### AU-24 · Agreed price on every PO
 - **One line.** When the chef or manager sends an order, each line carries the agreed price, so the supplier sees it before invoicing.
@@ -266,7 +268,7 @@ Status words: **live**, **flag (P)** = on in the pilot, **flag (–)** = built b
 - **Owner rules.** Owner/bookkeeper only. The leak definition is unchanged; the % is a translation, not a second leak.
 
 #### AU-26 · Same-supplier pack-size hint (Phase C+, icp-keeper gate) [plan: Phase **D**, README §13.4]
-- **One line.** On an order draft (A16) or a price alert (A18): "אותו ספק: 5 ק״ג זול ב-9% לק״ג מ-2.5 ק״ג".
+- **One line.** On an order draft (A16; chef, manager) or in the owner/manager price digest (A18; never a chef notification): "אותו ספק: 5 ק״ג זול ב-9% לק״ג מ-2.5 ק״ג".
 - **Roles.** Chef (₪ on orders), owner.
 - **Trigger → action → human confirms.** The draft builder compares unit prices within **one supplier's** own price list, using unit conversion. The chef decides; the system never changes a quantity or pack.
 - **Value (ASSUMPTIONS).**
@@ -313,7 +315,7 @@ Labelled **OD-C** so they never collide with AD1–AD14 (README §7.2) or IMPLEM
 | # | Question | Recommendation | Why | Affects |
 |---|---|---|---|---|
 | **OD-C1** | Coexistence order | **Documents first (AU-20), API later (AU-21).** Do not register the sync scheduler until AU-21 PR a + G-04 + #211 are merged | Zero credentials, works this quarter. The API sync inflates the leak today (i08 §1.3) | AU-20, AU-21, H-05a |
-| **OD-C2** | Schema for coexistence: `po_lines` external line id + `goods_receipts.source` | **Approve into the H-04 proposal** (human-authored) | Durable C2 (keeps dock evidence) and C5 (labelled imported receipts) | AU-21, H-04 |
+| **OD-C2** | Schema for coexistence: `po_lines` external line id + a source label for platform receipts | **Approve into the H-04 proposal** (human-authored). Platform receipts are never a second `goods_receipts` row for a PO that has one: store them elsewhere, or relax the index **and** exclude `source='platform'` in `buildMatchInput` (G-04 + matching-engine-guardian sign-off) | Durable C2 (keeps dock evidence) and C5 (labelled imported receipts, received qty never doubled) | AU-21, H-04 |
 | **OD-C3** | Switch the chef's area on in the pilot before W3-02 | **Yes for `recipes` + `dishPriceAlert`**, for one pilot tenant whose chef asks for it, after #219 merges. `inventoryCount` stays OFF | Closes LOSE gap 2 with built code. Recipes are already priced from the paid price | AU-01 (allow-list), W3-02 |
 | **OD-C4** | Chef and inventory ₪ (same question as i08 §4 Q5, 20 §B.6 #4) | **No ₪ to the chef on counts.** The chef sees quantities; valuation and "actual food cost" stay owner/manager | Keeps the rule "chef ₪ only on orders and recipes" literal | W2-07, W3-02 |
 | **OD-C5** | Recipe price basis | **Keep the last paid price** as the dish cost. Show the agreed price as a second, owner-visible column. Any switch to contract price is a ₪-semantics change (leak-economist + owner) | The paid price is the real cost; `cat` §G.2 #10 | W3-02 |

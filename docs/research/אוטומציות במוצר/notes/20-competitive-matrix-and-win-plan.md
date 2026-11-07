@@ -15,7 +15,7 @@
 - `i08 §n` = `notes/int-08-procurement-sync-and-inventory.md` (the code inventory of RestoMatch today; flags from `packages/api/src/lib/features.ts`, pilot set from `packages/db/scripts/pilot-config.ts`).
 - Plan ids: **W2-xx / W3-xx / W4-xx** (`docs/ux/IMPLEMENTATION-PLAN.md`), **AU-xx** (`docs/ux/automation/README.md`), **A-xx** (`10-catalogue-and-impact.md`), **G-xx / H-xx** (gap and human-PR items), **C1–C8** (coexistence steps, `i08 §2`), **#nnn** = open PR (from the session PR-status file).
 
-**"RestoMatch today"** = `origin/main` with train A merged, **plus train B** (#224/#232, OCR recognises real consolidated invoices). Status words: **live** (every tenant), **flag:x (P)** (in the pilot set), **flag:x (–)** (built but OFF in the pilot), **stub**, **PR** (open, not merged), **none**.
+**"RestoMatch today"** = `origin/main` with train A merged, **plus train B** (#224/#232, OCR recognises real consolidated invoices). Status words: **live** (every tenant), **flag:x (P)** (in the pilot set), **flag:x (–)** (built but OFF in the pilot), **stub**, **dormant** (real, tested code that nothing triggers), **PR** (open, not merged), **none**.
 
 **Verdict rule.** Judged from the ICP owner's seat, against the **stronger** of the two competitors on that row:
 - **WIN**: we do it and neither competitor does, or we do it materially closer to the North Star (₪ the owner believes).
@@ -44,11 +44,11 @@
 | 11 | Supplier leak card / supplier scorecard | None found | None found | **flag:supplierLeakCard (P)** (i08 §3.4) | AU-15 suggestions; negotiation pack candidate (09 §1 item 7, no id yet) | **WIN** | **WIN** |
 | 12 | P&L, COGS, budget, debts reports | **Yes**, COGS and AvT dashboards (06 §3) | **Yes**, budget, P&L, debts, monthly expenses [store] (07 §2.7) | **flag:monthlyReport (P)** "one number" monthly report (i08 §3.11) | W3-08 one report with tabs (leak-centred, not a P&L) | **LOSE·D** | **LOSE·D** |
 | 13 | Actual vs theoretical food cost (AvT) | **Yes**, core (06 §2) | Revenue vs raw-material use with POS (07 §2.5) | **flag:recipes + integrations (–)** POS vs theory (i08 §3.10) | Not planned as core (ICP §5; A26 later) | **LOSE·D** | **LOSE·D** |
-| 14 | Multi-branch roll-up | Per-location tiers (06 §5) | Sells to chains (Japanika ~45 branches) [press] (07 §2.10) | **live** branch switcher; **flag:chain/dashViews/chainAlerts (–)** (i08 §3.13) | W3-01 roll-up matrix | **LOSE** | **PARITY** |
+| 14 | Multi-branch roll-up | Per-location tiers (06 §5) | Sells to chains, e.g. Japanika, a 45-branch chain with central purchasing (near anti-ICP, not typical) [press] (07 §2.10) | **live** branch switcher; **flag:chain/dashViews/chainAlerts (–)** (i08 §3.13) | W3-01 roll-up matrix | **LOSE** | **PARITY** |
 | 15 | Ask in plain language | None found | None found | **flag:aiAssistant (–)** (i08 §3.11) | AU-06; W3-04 | **PARITY** | **WIN** |
 | 16 | Daily / weekly brief that dramatises ₪ | Alerts only (06 §2) | Reports "any time" (07 §2.7) | **live** end-of-day report (i08 §3.11) | AU-04, AU-12 weekly digest | **PARITY** | **WIN** |
 | 17 | First value before any setup | 6–12 weeks setup [3P, low]; "tedious" [U] (06 §6) | Supplier records before first order (07 §2.11) | Leak from uploaded invoices, but **without POs only DUPLICATE/VAT/TOTAL + contract checks fire** (i08 §2 "Value") | W3-06 mobile leak check; AU-02; C7 document path | **PARITY** | **WIN** |
-| 18 | Roles and what each sees | Full ₪ for every role (permission hiding UNVERIFIED) (06 §3) | Users added by email from desktop; no roles found (07 §2.11, §4.4) | **live** 5 roles with route gating; open ₪ exposures to receiver (i08 §3.14) | #219; W2-06 AC4 `redactPrices` | **WIN** | **WIN** |
+| 18 | Roles and what each sees | Full ₪ for every role (permission hiding UNVERIFIED) (06 §3) | Users added by email from desktop; no roles found (07 §2.11, §4.4) | **live** 5 roles with route gating; open ₪ exposures to receiver (i08 §3.14) | #219; W2-06 AC4 `redactPrices` | **PARITY** | **PARITY** |
 | 19 | Public price in ₪ | Public USD per location; no ₪ list (06 §5) | Not public; demo call only (07 §2.9) | Public ₪ tiers (`docs/GTM.md` §5.1, `packages/db/src/plans.ts`) | W3-06 "pricing that sells ROI" | **WIN** | **WIN** |
 
 ### A.2 Chef (שף)
@@ -64,7 +64,7 @@
 | 26 | Recipe / product tree with live dish cost | **Yes**, core (06 §2) | **Yes**, product tree with live cost (07 §2.6) | **flag:recipes (–)**, priced from last *paid* price (i08 §3.10) | W3-02 recipe workbench | **LOSE** | **PARITY** |
 | 27 | Dish crossed target because of a purchase (push) | Recipe cost recomputed, low-margin items highlighted (06 §2) | Not found | **flag:dishPriceAlert (–)**, pull only (i08 §3.10) | AU-13 push; A18 | **LOSE** | **PARITY** |
 | 28 | Dish cost from the **checked** invoice price | From scanned invoice price (06 §2) | From price lists / Plants Council (07 §2.2) | Paid price in the recipes code (i08 §3.10), flag OFF | W3-02 + one mapping feeding leak and dish cost (09 §2.1) | **LOSE** | **WIN** |
-| 29 | Chef sees ₪ only on orders and recipes | Chef sees ₪ on invoices too (hiding UNVERIFIED) (06 §3) | Chef sees costing (07 §3) | Chef route: orders (₪ allowed) + settings; inventory ₪ is an open owner question (i08 §3.14, §4 Q5) | Owner decision on inventory ₪ before `inventoryCount` reaches chef | **WIN** | **WIN** |
+| 29 | Chef sees ₪ only on orders and recipes | Chef sees ₪ on invoices too (hiding UNVERIFIED) (06 §3) | Chef sees costing (07 §3) | Chef route: orders (₪ allowed) + settings; inventory ₪ is an open owner question (i08 §3.14, §4 Q5) | Owner decision on inventory ₪ before `inventoryCount` reaches chef | **PARITY** | **PARITY** |
 | 30 | Inventory counts | **Yes**, core (06 §2) | **Yes**, counts, warehouses, year-end (07 §2.5) | **flag:inventoryCount (–)** (i08 §3.9) | W2-07 count as a field instrument (not core) | **LOSE·D** | **LOSE·D** |
 | 31 | Waste log | Growth+ (sources conflict) (06 §2) | Not found | none | Not planned (09 §1 item 6: "do not build") | **LOSE·D** | **LOSE·D** |
 | 32 | Menu engineering | Low-margin items highlighted (06 §2) | Not found | none | Later; needs POS (09 §1 item 3, A26) | **LOSE·D** | **LOSE·D** |
@@ -80,15 +80,15 @@
 | 37 | Bulk approve with a safety cap | Not documented | None | none | W2-04 bulk cap ₪200, never bulk `block` (i08 §3.5) | **PARITY** | **WIN** |
 | 38 | Duplicate invoice detection | Not documented (06 §2) | Not found | **live** DUPLICATE check in the engine (i08 §2 "Value") | AU-10 cross-channel duplicate hold | **WIN** | **WIN** |
 | 39 | Same invoice arriving by email + WhatsApp + photo | Not found | Not found | none (ingest channels OFF in pilot) | AU-10 | **PARITY** | **WIN** |
-| 40 | Credit request (דרישת זיכוי) drafted | **Not found**; one low-authority mention of "credit memo" (06 §0) | **Yes**: credit requests in app, "automatic credits" [V] (07 §4.2) | **live** letters per supplier (copy / wa.me / mailto); letterhead **PR** #213 (i08 §3.6) | W2-10 claim drafted at the decision (#193/#194/#197) | **PARITY** | **WIN** |
-| 41 | Claim status, ageing, overdue after 7 days | Not found | Not found (07 §4.2) | **flag:recovery (P)** overdue at 7 days, daily chase 08:30 (i08 §3.6) | AU-03 (also fixes web vs email count mismatch) | **WIN** | **WIN** |
+| 40 | Credit request (דרישת זיכוי) drafted | No claim workflow found; it flags the difference for review. One low-authority mention of "credit memo" (06 §0) | **Yes**: Zestt can raise a credit request (homepage "automatic credits" [V]; help centre "בקשות לזיכוי") (07 §0, §4.2). Restigo too [V] (08 §0) | **live** letters per supplier (copy / wa.me / mailto); letterhead **PR** #213 (i08 §3.6) | W2-10 claim drafted at the decision (#193/#194/#197) | **PARITY** | **WIN** |
+| 41 | Claim status, ageing, overdue after 7 days | Not found | No public tracking of credits that never arrived, no 7-day overdue flag, no recovered-₪ figure found (07 §4.2) | **flag:recovery (P)** overdue at 7 days, daily chase 08:30 (i08 §3.6) | AU-03 (also fixes web vs email count mismatch) | **WIN** | **WIN** |
 | 42 | Credit note matched to the claim | Not found | Not found (07 §4.2) | **flag:recovery (P)** manual credit-note entry (i08 §3.6) | W3-11 credit-note OCR routing; AU-17 | **WIN** | **WIN** |
 | 43 | Supplier reply tracked and classified | Not found | Not found | none | AU-17 read-only classifier + owner-tap send (needs H-06) | **PARITY** | **WIN** |
-| 44 | Nothing goes to a supplier without a human tap | Manager sends orders (06 §2) | Scheduled auto-send orders; credits "automatic" (07 §2.1, §4.2) | **live**: system sends nothing; human sends letters (i08 §3.6) | AU-17 owner-tap send | **WIN** | **WIN** |
-| 45 | Read orders from MarketMan / Zestt (coexistence) | n/a | n/a | Zestt PO **document** import **live** (needs OCR key); API sync **stub**, never runs; enabling it today would inflate the leak (i08 §0, §1.3) | C1–C8; G-04; W3-07a hub | **PARITY** | **WIN** |
-| 46 | Self-serve integrations (POS / accounting / procurement) | **Yes**: Tabit, Hashavshevet H-ERP partner (scope UNVERIFIED), Xero, QuickBooks (06 §4) | **Yes**: Tabit, Beecomm, H-ERP partner page (07 §2.8) | **flag:integrations (–)**; procurement preview is sample data only (i08 §1.1, §3.12) | W3-07a hub; C6/C7 (Phase-6 credentials, human) | **LOSE** | **PARITY** |
+| 44 | Nothing goes to a supplier without a human tap | Manager sends orders (06 §2) | Scheduled auto-send orders (07 §2.1); whether credit requests go out to the supplier automatically is UNVERIFIED (07 §4.2) | **live**: system sends nothing; human sends letters (i08 §3.6) | AU-17 owner-tap send | **WIN** | **WIN** |
+| 45 | Read orders from MarketMan / Zestt (coexistence) | n/a | n/a | Zestt PO **document** import **live** where real OCR is on (the safe path); MarketMan/Zester API sync built and unit-tested against guessed API shapes, **dormant** (no schedule, no connect path, no credentials); enabling it today would inflate the leak wherever discovery picks a synced PO (i08 §0, §1.3) | C1–C8; G-04; W3-07a hub | **PARITY** | **WIN** |
+| 46 | Self-serve integrations (POS / accounting / procurement) | **Yes**: listed as a partner by Tabit and Hashavshevet (no specific Hashavshevet export confirmed), Xero, QuickBooks (06 §4) | **Yes**: Tabit, Beecomm, H-ERP partner page (07 §2.8) | **flag:integrations (–)**; procurement preview is sample data only (i08 §1.1, §3.12) | W3-07a hub; C6/C7 (Phase-6 credentials, human) | **LOSE** | **PARITY** |
 | 47 | Staff notifications (email / SMS / WhatsApp / push) | Email/SMS price alerts (06 §2) | App reminders (07 §2.1) | Email outbox **live**; WhatsApp `role:` targets undeliverable; push mock (i08 §3.11); **PR** #173, #230, #231 | G-06 (#199); H-05 | **LOSE** | **PARITY** |
-| 48 | Native mobile app | **Yes**, rated ≈3.1–3.3/5 [U] (06 §7) | **Yes**, iOS/Android (07 §1) | **flag:receiverPwa (P)** for the receiver only (i08 §3.2) | W3-03 installable app + push | **LOSE** | **PARITY** |
+| 48 | Native mobile app | **Yes** (no app-store rating cited) (06 §7) | **Yes**, iOS/Android (07 §1) | **flag:receiverPwa (P)** for the receiver only (i08 §3.2) | W3-03 installable app + push | **LOSE** | **PARITY** |
 
 ### A.4 Receiver (מקבל סחורה, רמי)
 
@@ -99,7 +99,7 @@
 | 51 | Scan the delivery note to fill quantities | Barcode receiving mentioned once, UNVERIFIED (06 §2) | **ZesttScan**, ~30 h/month saved [V] (07 §2.3) | **flag:dockSlip (P)** delivery-note photo first; quantities still typed (i08 §3.2) | W2-05; G-09 multi-page (#190) | **LOSE** | **PARITY** |
 | 52 | Photo evidence and signature at the door | Not found (06 §8) | Not found (07 §3 receiver row) | **live** photos + signature (i08 §3.2) | W2-05 | **WIN** | **WIN** |
 | 53 | Reject reasons per line feeding a claim | Ticks quantities (06 §3) | Flags shortages (07 §4.2) | **live** reject reasons → engine → claimable lines (i08 §3.2, §3.6) | W2-05 walk-in / exceptions desk | **PARITY** | **WIN** |
-| 54 | Works offline at the dock | Users: fine "with good connectivity"; uploads fail [U] (06 §7) | UNVERIFIED | **flag:receiverPwa (P)** offline photo queue (i08 §3.2) | W2-05 full outbox | **WIN** | **WIN** |
+| 54 | Works offline at the dock | Users: fine "with good connectivity"; uploads fail [U] (06 §7) | UNVERIFIED | **flag:receiverPwa (P)** offline photo queue (i08 §3.2) | W2-05 full outbox | **WIN**, competitor UNVERIFIED | **WIN**, competitor UNVERIFIED |
 | 55 | Digital delivery note from the supplier before the truck | None in Israel (06 §4) | **Yes**, for integrated suppliers (07 §2.3) | Supplier confirm answer never reaches the dock (i08 §3.1) | W3-09 order-to-door loop; G-10 | **LOSE** | **LOSE** |
 | 56 | Expected deliveries for today | Scheduled-deliveries endpoint assumed in our adapter, contract UNVERIFIED (i08 §1.1) | Orders page (07 §2.3) | **live** today board; daily-expectations job (i08 §3.1, §3.2) | ICP §5 "pilot": accurate `expectedDeliveryAt` | **PARITY** | **PARITY** |
 | 57 | Receiver UI in other languages | Hebrew UI exists (06 §1) | Hebrew (07 §1) | **flag:receiverLanguages (–)** (i08 §3.2) | Flag on when piloted | **PARITY** | **WIN** |
@@ -117,26 +117,27 @@
 | 64 | Allocation-number (מספר הקצאה) guard | Not found (06 §8) | Not found (07 §4.3) | none | AU-08 / A13 allocation field in the cockpit | **PARITY** | **WIN** |
 | 65 | VAT at risk, shown apart from the leak | Tax only as a mapped account on Xero export (06 §8) | Not found (07 §4.3) | **flag:vatAtRisk (–)** (i08 §3.4) | AU-08 | **PARITY** | **WIN** |
 | 66 | Missing-documents report before the 15th | Not found; export only (06 §3) | Not found | none | AU-18 / A23 under W3-05 close desk | **PARITY** | **WIN** |
-| 67 | Israeli accounting export | Hashavshevet H-ERP partner (data scope UNVERIFIED); Xero/QBO, 17 QBO export incidents in 2 years [3P] (06 §4) | H-ERP partner page, content not retrieved (07 §2.8) | **flag:integrations (–)** + plan `accounting_export`: Hashavshevet / Priority / Rivhit (i08 §3.12) | W2-14 honest exports; W3-05 month close | **LOSE** | **PARITY** |
-| 68 | Supplier ledger (כרטסת) reconciliation | Not found (06 §2) | "Debts" report; reconciliation UNVERIFIED (07 §2.7) | **flag (P)** supplier ledger (i08 §0 item 6) | W3-11 supplier statements | **WIN** | **WIN** |
+| 67 | Israeli accounting export | Listed as a partner by Hashavshevet (no specific export confirmed); Xero/QBO, 17 QBO export incidents in 2 years [3P] (06 §4) | H-ERP partner page, content not retrieved (07 §2.8) | **flag:integrations (–)** + plan `accounting_export`: Hashavshevet / Priority / Rivhit (i08 §3.12) | W2-14 honest exports; W3-05 month close | **LOSE** | **PARITY** |
+| 68 | Supplier ledger (כרטסת) reconciliation | Not found (06 §2) | "Debts" report; reconciliation UNVERIFIED (07 §2.7) | **flag (P)** supplier ledger (i08 §0 item 6) | W3-11 supplier statements | **WIN**, competitor UNVERIFIED | **WIN**, competitor UNVERIFIED |
 | 69 | Invoice register, due dates, printed terms | Approvals + vendor payments (06 §2) | Payments report (07 §2.7) | none in main | W2-02 register/cockpit (#217); W2-03; G-17 | **LOSE** | **PARITY** |
 | 70 | Month close desk | Not found | Not found | none | W3-05 | **PARITY** | **WIN** |
 | 71 | Invoice image next to the reconciled record | **Yes**, praised by users [U] (06 §7) | Photo of the original "recommended" (07 §2.4) | **live** photo pipeline (i08 §3.3) | G-08 link provenance (#200) | **PARITY** | **PARITY** |
 
 ### A.6 Headline counts
 
-71 rows. Counted from the tables above.
+71 rows. Counted from the tables above (recounted 2026-11-07 after the review: rows 18 and 29 demoted to PARITY because the competitors' role-based price hiding is UNVERIFIED and our own receiver still has open ₪ exposures until #219; rows 54 and 68 stay WIN but are tagged "competitor UNVERIFIED"). `report.md` §10.2 uses the same numbers.
 
 | Verdict | Today | Planned (W2–W4 + AU) |
 |---|---|---|
-| **WIN** | **17** | **42** |
-| **PARITY** | **29** | **19** |
+| **WIN** (of which "competitor UNVERIFIED": rows 54, 68) | **15** | **40** |
+| **PARITY** | **31** | **21** |
 | **LOSE** (a gap to close) | **18** | **2** |
 | **LOSE·D** (lose by design, ICP veto) | **7** | **8** |
-| Rows where the verdict improves when the plan ships | — | **36** |
+| Rows whose verdict moves when the plan ships (incl. row 21, LOSE → LOSE·D) | — | **37** |
 
 How to read it:
-- **Today we win only on the leak loop itself** (rows 1–3, 10–11, 34–35, 38, 41–42, 44, 52, 54, 68), plus role discipline and a public ₪ price (rows 18–19, 29). Those are the money and trust rows. We lose on **breadth and on what the pilot switches off** (recipes, price alerts, consolidated match, integrations, intake channels, pay run).
+- **Today we win only on the leak loop itself** (rows 1–3, 10–11, 34–35, 38, 41–42, 44, 52, 54, 68; rows 54 and 68 with the competitor UNVERIFIED), plus a public ₪ price (row 19). Those are the money and trust rows. We lose on **breadth and on what the pilot switches off** (recipes, price alerts, consolidated match, integrations, intake channels, pay run).
+- **Caveat for MarketMan / Zestt prospects.** Today's line-level (row 34), 3-way (row 35) and claim (rows 40–42) wins need the restaurant's **orders inside RestoMatch**. A MarketMan or Zestt customer gets that today only through the **Zestt PDF upload** (where real OCR is on), until AU-20 ships. A MarketMan customer who will not retype orders has no path yet; without orders, only DUPLICATE, VAT, TOTAL and contract checks fire (row 17).
 - **Planned, the two LOSE rows left are structural**: the supplier network (row 25) and digital delivery notes from suppliers (row 55). Both belong to Zestt's two-sided network. The answer is to **integrate** with that network (C7 document path, §B.2), not to build one.
 - Row 21 moves from LOSE to LOSE·D because the owner rule (nothing sent automatically) caps AU-11 at drafts plus a human tap. That is a deliberate trade, not a gap.
 
@@ -144,7 +145,7 @@ How to read it:
 
 **Biggest LOSE gaps (ranked by how often they will kill a deal with a MarketMan / Zestt user):**
 
-1. **No live connection to MarketMan or Zestt** (rows 45–46). The sync is a stub that never runs, both API contracts are invented, and enabling it today would **inflate the leak**: synced PO lines have no `productId` or `supplierSku`, so every invoice line becomes UNORDERED_ITEM (inside `LEAK_FILTER`) and a re-sync wipes `gr_lines.po_line_id` (i08 §0 items 3–4). Fix: C1–C3 + G-04 first, then C6/C7. **Do not switch the scheduler on before C1–C3** (H-05 addendum is a human PR).
+1. **No live connection to MarketMan or Zestt** (rows 45–46). The MarketMan/Zester API sync is built and unit-tested against guessed API shapes, but dormant: no schedule, no way to connect an account, no credentials. Enabling it today would **inflate the leak** wherever PO discovery picks a synced PO (same supplier, sent/confirmed/partial, ±7 local days): synced PO lines have no `productId` or `supplierSku`, so the invoice lines become UNORDERED_ITEM and the PO lines MISSING_ON_INVOICE, about 2× the invoice before #211 and about 1× after, and the invoice is blocked. A re-sync also cuts the line-level link between receipt lines / findings and PO lines, so the 3-way quantity checks stop; the receipt stays on the PO header (i08 §0 items 3–4). The Zestt PDF import is live where real OCR is on and is the safe path meanwhile. Fix: C1–C3 + G-04 first, then C6/C7. **Do not switch the scheduler on before C1–C3** (H-05 addendum is a human PR).
 2. **The chef's area is empty in the pilot** (rows 26–28). Recipes, dish price alerts and inventory are all flagged OFF, while both competitors show live dish cost. Fix: W3-02 and AU-13 push, with one mapping feeding both the leak and the dish cost (09 §2.1).
 3. **Price-rise alerts are OFF in the pilot** (row 8). MarketMan's best-known feature is exactly this. Fix: W2-12 + AU-13 as ₪/month creep against the **agreed** price, labelled avoided cost, outside the leak.
 4. **Consolidated invoice matching is OFF** (row 63). Zestt has a working (manual) flow, and חשבוניות ריכוז are the norm for ICP suppliers. Fix: AU-09 on top of train B.
@@ -155,10 +156,10 @@ How to read it:
 **Biggest WIN moats (the deal is won here):**
 
 1. **One leak ₪ figure the owner believes** (rows 1–2): Σ|deltaAmount| with MISSING_ON_INVOICE excluded (#211), drillable to the line. MarketMan flags; Zestt claims "6%" with no method.
-2. **Found → claimed → overdue at 7 days → credited** (rows 3, 40–42). Neither competitor shows claim ageing or credit-note matching (06 §8, 07 §4.2).
-3. **The dock as evidence**: a 3-way match with photos, signature and reject reasons, and a receiver who sees no ₪ (rows 35, 50, 52–54). Both competitors put prices on the receiver's screen.
+2. **Found → claimed → overdue at 7 days → credited** (rows 3, 40–42). Zestt (and Restigo) can raise a credit request; we found no public tracking of which credits never arrived, no 7-day overdue flag and no recovered-₪ figure at either competitor (06 §8, 07 §4.2). Ask them to show it; never say "they don't do claims".
+3. **The dock as evidence**: a 3-way match with photos, signature and reject reasons, and a receiver who sees no ₪ once #219 lands (rows 35, 50, 52–54). ZesttScan fills prices at the door by its own description; whether MarketMan can hide prices from the receiver is UNVERIFIED.
 4. **Agreed price as the yardstick, with a hold before payment** (rows 5, 10). MarketMan updates its prices *from* the invoice; Zestt can auto-pay through PayMe.
-5. **Trust by design**: nothing is sent to a supplier without the owner's tap (row 44), and the bookkeeper desk is planned (allocation number, VAT at risk, missing documents, consolidated: rows 63–66). Neither competitor has any of those four (06 §8, 07 §4.3).
+5. **Trust by design**: nothing is sent to a supplier without the owner's tap (row 44), and the bookkeeper desk is planned (allocation number, VAT at risk, missing documents, consolidated: rows 63–66). We found none of those four at either competitor (06 §8, 07 §4.3; not found, not proven absent).
 
 **Why this note does not argue with the ICP veto.** The LOSE·D rows (12–13, 21, 23–24, 30–32) are MarketMan's and Zestt's home ground: pars, forecasts, AI ordering, counts, AvT, waste and menu engineering. ext-06 §9 and ext-07 §7 both found that competing there means fighting a $100M-backed incumbent (MarketMan) or a two-sided network (Zestt) on their turf, with weeks of setup the ICP owner does not want. Nothing in ext-06..09 or int-08 argues for reversing `docs/ICP.md` §5. The one in-scope use stays as it is: **expected quantity from order history as fuel for the goods-receipt check** (AU-11), with copy and placement subordinate to receiving (07 §7).
 
@@ -173,6 +174,7 @@ Draft lines. Hebrew-first copy belongs to `growth-pmm-engineer`, and the lines s
 - **Against MarketMan:** "MarketMan tells you what the dish should cost. RestoMatch tells you what the supplier owes you back, and gets it." (06 §9)
 - **Against Zestt:** "Zestt helps you order. RestoMatch tells you how many ₪ you lost after the order, and gets them back." (07 §7)
 - **For both (the coexistence line):** "Keep ordering where you order. We check what arrived and what was billed, and show you the ₪."
+- **When credits come up (approved line):** "Zestt (and Restigo) can raise a credit request. We found no public tracking of which credits never arrived, no 7-day overdue flag and no recovered-₪ figure — ask them to show you." For MarketMan: "We found no claim workflow; it flags the difference for review." Never say "they don't do claims".
 
 ### B.2 Switch or coexist: coexist, win on leak ₪ first, then expand
 
@@ -182,13 +184,13 @@ Draft lines. Hebrew-first copy belongs to `growth-pmm-engineer`, and the lines s
 
 | Stage | What the prospect gets | What must exist | Status / owner |
 |---|---|---|---|
-| **0. Land with zero credentials** | Leak ₪ on last month's invoices plus their PO documents | C7 document path: forward the PO PDF or email to the ingest address. Works today for Zestt (`importPo`, i08 §1.3); **MarketMan PO PDFs need a parser extension** | Parser: ocr-procurement-engineer. Pilot ops: growth-pmm-engineer |
+| **0. Land with zero credentials** | Leak ₪ on last month's invoices plus their PO documents | C7 document path: forward the PO PDF or email to the ingest address. Works today for Zestt, by upload, where real OCR is on (`importPo`, i08 §1.3, §3.1); **MarketMan PO PDFs need a parser extension** | Parser: ocr-procurement-engineer. Pilot ops: growth-pmm-engineer |
 | **1. Prove the number** | One leak figure, drillable, MISSING_ON_INVOICE excluded | #211 merged; W2-09 drill; AU-07 coverage line | #211 open (owner-approved 31.10) |
 | **2. Close the loop** | Claims drafted at decision, overdue at 7 days, credit matched | W2-10 (#193/#194/#197), AU-03, letterhead #213 | Built / open PRs |
 | **3. Pair lines safely** | Synced orders match line by line, no false UNORDERED_ITEM | **C1** SKU/product key on synced lines; **C2** upsert lines in place, never rewrite a received PO (durable form needs a `po_lines` external id: schema **human PR**, H-04); **C3** our status wins after the dock; **G-04** merged | Agent work (C1, C2 interim, C3); schema human PR |
 | **4. Expected price without a sheet** | PRICE_HIGHER against the supplier list | **C4** `listProducts` → `supplier_catalog_items` with "מה ישתנה" review (W3-10); list ≠ contract unless the owner locks it (W2-12) | ocr-procurement-engineer; leak-economist signs the label |
-| **5. Go live on the API** | No forwarding; orders arrive by themselves | **C8** real API contracts replace the VERIFY shapes; **C7** credentials (MarketMan Open API add-on, $25–$99/month [3P], Israeli availability UNVERIFIED; Zestt has **no restaurant-side API found**); **C6** scheduler + `sync_cursor` + "N orders skipped" health line in the W3-07a hub | **Phase-6, human only** for credentials; `cron.ts` is a **human PR** |
-| **6. Use their receipts** | 3-way match for restaurants that receive in the other tool | **C5** import receipts labelled "נקלט ב-MarketMan"; GR `source` column (schema human PR, H-04) | After stage 5 |
+| **5. Go live on the API** | No forwarding; orders arrive by themselves | **C8** real API contracts replace the VERIFY shapes; **C7** credentials (MarketMan Open API add-on, $25–$99/month [3P], Israeli availability UNVERIFIED; the public Zestt API we found is built for suppliers and we found no documented restaurant export, so Zestt starts from documents); **C6** scheduler + `sync_cursor` + "N orders skipped" health line in the W3-07a hub | **Phase-6, human only** for credentials; `cron.ts` is a **human PR** |
+| **6. Use their receipts** | 3-way match for restaurants that receive in the other tool | **C5** import receipts labelled "נקלט ב-MarketMan", never as a second `goods_receipts` row for a PO that already has one (unique index; would double received qty): store elsewhere, or index relaxation + `source='platform'` exclusion in `buildMatchInput` inside H-04 with G-04 and matching-engine-guardian sign-off (schema human PR) | After stage 5 |
 | **7. Expand** | Receiver flow without ₪ (#219, W2-05), bookkeeper desk (AU-08, AU-09, AU-18), approvals and pay-run hold (W2-04, AU-14) | As planned | Wave 2 → C |
 
 **Never built for coexistence:** write-back of any kind (no "approved" pushed to MarketMan, no claim pushed through Zestt), par and inventory import, recipe import as core, cross-supplier price compare (ICP "later, locked") (i08 §2).
@@ -199,11 +201,11 @@ Draft lines. Hebrew-first copy belongs to `growth-pmm-engineer`, and the lines s
 
 | | RestoMatch | MarketMan | Zestt |
 |---|---|---|---|
-| **List price** | Trial ₪0 (100 invoices) · Basic **₪349** (150) · **Pro ₪590** (400 invoices, 1 branch, 10 seats) · Chain **₪1,490** (5 branches) | Starter **$249** (was $199) · Growth **$299** (was $249) · Enterprise **from $449**. Sources conflict: a later snapshot shows $199/$249 again [3P] | **Not public.** Demo call only. "From ₪45,000" on its site is sample dashboard data, **not a price** |
+| **List price** | Trial ₪0 (100 invoices) · Basic **₪349** (150) · **Pro ₪590** (400 invoices, 1 branch, 10 seats) · Chain **₪1,490** (5 branches) | **Starter ~$199–249, Growth ~$249–299, Enterprise from $449** per location per month (third-party trackers, Aug–Sep 2026; prices changed during 2026) [3P] | **Not public.** Demo call only. "From ₪45,000" on its site is sample dashboard data, **not a price** |
 | **Source** | `docs/GTM.md` §5.1; `packages/db/src/plans.ts` (`priceAgorotMonthly` 34,900 / 59,000 / 149,000); `docs/ICP.md` line 16 (ROI vs ₪590) | 06 §5 (PricingSaaS 2026W34/W36, vendor page via search) | 07 §2.9 |
-| **In ₪ (ASSUMPTION $1 ≈ ₪3.7, not sourced)** | — | Starter ≈ ₪920 · Growth ≈ ₪1,100 · Enterprise ≈ ₪1,660+ | — |
+| **In ₪** | — | Not converted: no sourced, dated exchange rate. USD only | — |
 | **Basis** | Per restaurant (Pro = 1 branch) | Per location | UNVERIFIED |
-| **Setup** | None listed | ≈$500–$1,500, often waived in promotions (06 §5) | UNVERIFIED |
+| **Setup** | None listed | A one-time setup fee (one review says $500), often waived in promotions (06 §5) | UNVERIFIED |
 | **Caps / add-ons** | Invoices per month by tier | Starter 50 AI scans, +$50 per 50; AI Ordering Enterprise or paid add-on; API add-on $25–$199; commissary $499–$749 | UNVERIFIED whether ZesttScan is a paid add-on |
 | **Who pays** | The restaurant | The restaurant | **UNVERIFIED** (restaurant, supplier or both) |
 | **Contract** | Owner decision; founders price ₪354 in year 1 (`docs/GTM.md` line 89) | Annual, 60-day notice, billing after cancel reported [U] (06 §6) | UNVERIFIED |
@@ -219,14 +221,14 @@ Draft lines. Hebrew-first copy belongs to `growth-pmm-engineer`, and the lines s
 |---|---|---|
 | "MarketMan already flags invoice differences." | It flags and stops. We total them into one ₪ figure, draft the claim at your decision, mark it overdue after 7 days and match the credit note. | Last month's invoices → leak figure → open claims list (rows 1, 3, 41–42) |
 | "I won't type my orders twice." | You don't. Keep ordering in MarketMan. Forward the PO (document path) now; the API sync comes once credentials exist. | C7 document import; C1–C8 plan (§B.2). **Honest limit:** MarketMan PO PDF parsing is not built yet |
-| "I already pay about ₪1,100 a branch for software." | RestoMatch is priced off the leak it finds. Run the trial on last month; if the leak is smaller than the price, don't buy. | GTM §5.2 table. Never add software ₪ to leak ₪ |
+| "I already pay about $250–300 a branch a month for software." | RestoMatch is priced off the leak it finds. Run the trial on last month; if the leak is smaller than the price, don't buy. | GTM §5.2 table. Never add software ₪ to leak ₪ |
 
 **Zestt user**
 
 | Objection | Answer | Proof we can show |
 |---|---|---|
-| "Zestt already does automatic credits." | Ask where the list is of credits requested but not yet received, older than 7 days. We show that list, and we send nothing to your supplier without your tap. | Recovery desk (row 41); rule "nothing sent automatically" (row 44). Zestt's credit follow-through is UNVERIFIED, not proven absent (07 §4.2): say "show me", don't say "they can't" |
-| "My suppliers send digital notes through Zestt. Why photograph paper?" | Keep them. Forward Zestt documents to us; we import them. We add what Zestt doesn't: the check against the agreed price and the delivery. | Zestt document import **live** (i08 §3.1); rows 10, 34–35 |
+| "Zestt already does automatic credits." | Yes, Zestt can raise a credit request. Ask them to show you the list of credits requested but never received, older than 7 days, and the ₪ recovered. We found no public tracking of that; we show that list, and we send nothing to your supplier without your tap. | Recovery desk (row 41); rule "nothing sent automatically" (row 44). Zestt's credit follow-through is UNVERIFIED, not proven absent (07 §4.2): say "show me", never "they don't do claims" |
+| "My suppliers send digital notes through Zestt. Why photograph paper?" | Keep them. Upload your Zestt order PDFs to us; we import them. We add the check against the agreed price and the delivery, which we found no evidence of in Zestt. | Zestt order-PDF import **live** where real OCR is on (i08 §3.1); delivery-note import is planned (AU-20 stage D, format UNVERIFIED); rows 10, 34–35 |
 | "Zestt already handles consolidated invoices." | In Zestt you type the original total and hunt the gap by hand. We propose the delivery-note set and explain the ₪ residual. | **Honest limit:** AU-09 is planned and `consolidatedMatch` is OFF in the pilot. Promise it only when AU-09 is merged |
 
 Extra line for both: their headline numbers ("6% less spend", "30 hours a month") are vendor claims with no method (07 §4.1). Ours is one leak definition, line by line, with the evidence one tap away.
@@ -240,11 +242,11 @@ Extra line for both: their headline numbers ("6% less spend", "30 hours a month"
 | **Historical data** | An owner judges us on *his* last month, not a demo | Bulk upload of last month's invoices and their POs; consolidated invoices recognised (train B); "waiting for lines" list so no invoice silently drops out of the leak | W3-06 mobile leak check; AU-02; #216/#222/#223 |
 | **Staff habits** | Chef orders in MarketMan/Zestt; receiver already ticks quantities there | Chef keeps ordering where he orders. Receiver gets a no-₪ flow under 3 minutes, offline, or we read his receipts from the other tool. Owner gets one weekly brief instead of a new app to open | #219, W2-05, C5, AU-12, W2-08 |
 | **POS integration** | Competitors connect to Tabit and Beecomm | The leak needs **no POS**. Do not sell POS-dependent features (A26 later) | Messaging only |
-| **Accounting integration** | The bookkeeper is the channel (ICP); both competitors list a Hashavshevet partnership | Hashavshevet / Priority / Rivhit export on in the pilot, plus the bookkeeper's own reasons to log in: missing documents, allocation number, VAT at risk | W2-14, W3-05, AU-08, AU-18 |
+| **Accounting integration** | The bookkeeper is the channel (ICP); Hashavshevet lists both competitors as partners (no specific export confirmed) | Hashavshevet / Priority / Rivhit export on in the pilot, plus the bookkeeper's own reasons to log in: missing documents, allocation number, VAT at risk | W2-14, W3-05, AU-08, AU-18 |
 
 ### B.6 Decisions for the owner (routed, not decided here)
 
-1. **Pro covers one branch.** The ICP is 1–3 branches. A 2-branch owner pays 2 × ₪590 = ₪1,180 or Chain ₪1,490 (5 branches). Against MarketMan Growth at ≈₪2,200 for two branches (06 §5, ASSUMED rate) that is still lower, but the packaging should be deliberate. Owner + leak-economist (`plans.ts` is immutable: human PR).
+1. **Pro covers one branch.** The ICP is 1–3 branches. A 2-branch owner pays 2 × ₪590 = ₪1,180 or Chain ₪1,490 (5 branches). MarketMan Growth for two branches is about $500–600 a month (2 × ~$249–299, 06 §5; USD only, no sourced ₪ rate). The packaging should be deliberate. Owner + leak-economist (`plans.ts` is immutable: human PR).
 2. **Invoice caps per tier vs the "no scan cap" lesson.** ext-06 §9 says a capped plan means "leak not seen". Basic caps at 150 and Pro at 400 invoices a month. **ASSUMPTION:** a 1-branch ICP restaurant stays under 400; this needs checking against pilot volumes before it becomes a sales line.
 3. **Name collision with Restomate** (08 §0 item 3): a GTM and SEO risk for growth-pmm-engineer and icp-keeper.
 4. **Chef and inventory ₪** (i08 §4 Q5): needs a yes or no before `inventoryCount` reaches a chef.
