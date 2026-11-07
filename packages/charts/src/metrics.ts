@@ -12,6 +12,21 @@
  *  • drill     — where a tap on the number lands; its list total must equal the number.
  */
 
+/**
+ * SOURCE OF TRUTH FOR "PAID" (caughtBeforePayment, to_offset vs to_send, the partition):
+ * the payment ledger (H-04: `payments` + `payment_invoices`, deploys 22.12). An invoice's
+ * pay day = the Israel calendar day (`paid_on`) of the payment whose allocations first cover
+ * it; `invoices.paid_*` (H-03, 24.11) is a denormalised summary the writer keeps in sync.
+ * Transition, per invoice, until the ledger has allocations for it: H-03 `invoices.paid_at`,
+ * else (today) `updated_at` of an invoice whose status is `paid`.
+ */
+export const PAID_SOURCE = {
+  truth: 'payment_invoices',
+  summary: 'invoices.paid_at',
+  transition: ['payment_invoices', 'invoices.paid_at', "invoices.updated_at where status = 'paid'"],
+  compare: 'israel_calendar_day',
+} as const;
+
 export const METRIC_IDS = [
   'leak.month',
   'priceCreep.30d',
