@@ -15,7 +15,7 @@ import {
 import { computeLeakHero } from '../leak-hero';
 import * as views from '../leak-views';
 import { computeLeakSummary } from '../leak-views';
-import { caughtBefore, computeLeakLedger, computeLeakPartition, dayIn, parseBasis } from '../leak-ledger';
+import { caughtBefore, computeLeakLedger, computeLeakPartition, dayIn, parseBasis, partitionOf, type LeakLedgerRow } from '../leak-ledger';
 import { computeLeakBreakdown } from '../leak-hero';
 import { MONEY_STATES, type ClaimStatus } from '../decisions';
 
@@ -50,6 +50,8 @@ interface D {
   decidedAt?: Date | null;
   createdAt?: Date;
   claim?: { status: ClaimStatus; amountAgorot: number; creditedAgorot?: number };
+  /** The engine auto-approved it (an approval rule, no person): the system decision `tolerate`. */
+  tolerated?: boolean;
 }
 
 async function setup() {
@@ -98,7 +100,8 @@ async function setup() {
           severity: d.severity ?? 'warn',
           deltaAmount: d.delta,
           resolutionStatus: status,
-          resolvedAt,
+          resolvedAt: d.tolerated ? null : resolvedAt,
+          ruleId: d.tolerated ? 'minor-info' : null,
           // Distinct, ordered creation times (the allocator's order).
           createdAt: d.createdAt ?? new Date(Date.UTC(2026, 9, 10, 9, 0, k)),
         })
@@ -138,7 +141,9 @@ describe('leak ledger · the money-state partition [G-14]', () => {
         { type: 'PRICE_HIGHER', delta: '100.00' },
         { type: 'QTY_SHORT', delta: '50.00', status: 'accepted' },
         { type: 'UNIT_MISMATCH', delta: '20.00', status: 'rejected' },
-        { type: 'PRICE_HIGHER', delta: '5.00', status: 'accepted', decidedAt: null },
+        { type: 'PRICE_HIGHER', delta: '5.00', status: 'accepted', tolerated: true },
+        // An accept with no person AND no engine rule (legacy / seeded) stays a plain accept.
+        { type: 'QTY_SHORT', delta: '2.00', status: 'accepted', decidedAt: null },
         { type: 'PRICE_HIGHER', severity: 'info', delta: '9.00' },
         { type: 'PRICE_LOWER', delta: '7.00' },
         { type: 'QTY_OVER', delta: '3.33', status: 'escalated' },
@@ -169,7 +174,7 @@ describe('leak ledger · the money-state partition [G-14]', () => {
     const p = await computeLeakPartition(db, rid, SPEC);
     expect(p.states).toEqual({
       undecided: 10000 + 333,
-      to_offset: 5000,
+      to_offset: 5000 + 200,
       to_send: 1000 + 1800,
       requested: 1100 + 1200,
       disputed: 1300,
@@ -182,7 +187,7 @@ describe('leak ledger · the money-state partition [G-14]', () => {
     expect(p.heroAgorot).toBe(await heroAgorot(rid));
     expect(p.heroAgorot - missing).toBe(p.totalAgorot);
     expect(p.driftAgorot).toBe(missing);
-    expect(p.rowCount).toBe(13); // info, PRICE_LOWER and MISSING_ON_INVOICE never enter
+    expect(p.rowCount).toBe(14); // info, PRICE_LOWER and MISSING_ON_INVOICE never enter
     expect(Object.keys(p.states).sort()).toEqual([...MONEY_STATES].sort());
 
     const last = await computeLeakPartition(db, rid, { period: 'last_month', now: NOW });
@@ -272,6 +277,32 @@ describe('leak ledger · the money-state partition [G-14]', () => {
     expect(p).toMatchObject({ rowCount: 0, totalAgorot: 0, heroAgorot: 0, driftAgorot: 0 });
   });
 
+  it('a written-off claim with part credited: credited for what came back, waived for the rest', async () => {
+    const { rid, invoice } = await setup();
+    await invoice({
+      inclVat: '1000.00',
+      d: [
+        {
+          type: 'QTY_SHORT',
+          delta: '100.00',
+          status: 'accepted',
+          claim: { status: 'written_off', amountAgorot: 10000, creditedAgorot: 3000 },
+        },
+      ],
+    });
+    const [row] = await computeLeakLedger(db, rid, SPEC);
+    expect(row).toMatchObject({ moneyState: 'credited', cappedAgorot: 10000, writtenOffAgorot: 7000 });
+    const p = await computeLeakPartition(db, rid, SPEC);
+    expect(p.states).toMatchObject({ credited: 3000, waived: 7000 });
+    expect(p).toMatchObject({ totalAgorot: 10000, heroAgorot: 10000, driftAgorot: 0 });
+  });
+
+  it('drift that cancels across invoices still shows (Σ|drift| per invoice)', () => {
+    const row = (invoiceId: string, cappedAgorot: number) => ({ invoiceId, cappedAgorot, writtenOffAgorot: 0, moneyState: 'undecided', caughtBeforePayment: true, paidSource: null }) as unknown as LeakLedgerRow;
+    const p = partitionOf([row('A', 10000), row('B', 0)], new Map([['A', 7000], ['B', 3000]]));
+    expect(p).toMatchObject({ totalAgorot: 10000, heroAgorot: 10000, driftAgorot: 0, absDriftAgorot: 6000, driftInvoiceCount: 2 });
+  });
+
   it('drift is reported, never hidden: a claim holding less than |Δ| while the cap is free', async () => {
     const { rid, invoice } = await setup();
     await invoice({
@@ -317,7 +348,12 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
     expect(by.PRICE_HIGHER).toMatchObject({ invoicePaid: true, paidAt: paidAt.toISOString(), caughtBeforePayment: true });
     expect(by.QTY_SHORT).toMatchObject({ invoicePaid: true, caughtBeforePayment: false, moneyState: 'undecided' });
     expect(by.QTY_OVER).toMatchObject({ invoicePaid: false, paidAt: null, caughtBeforePayment: true });
-    expect((await computeLeakPartition(db, rid, SPEC)).caughtBeforePaymentAgorot).toBe(4000);
+    expect(by.PRICE_HIGHER!.paidSource).toBe('interim');
+    expect(by.QTY_OVER!.paidSource).toBeNull();
+    const p = await computeLeakPartition(db, rid, SPEC);
+    expect(p.caughtBeforePaymentAgorot).toBe(4000);
+    // The ₪10 resting on the interim updated_at pay day is reported as an estimate.
+    expect(p.caughtOnInterimPaidAgorot).toBe(1000);
   });
 
   it('caughtBefore compares Israel calendar days: same day as the payment = not caught', () => {
@@ -343,6 +379,7 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
     });
     const b = await invoice({ inclVat: '100.00', d: [{ type: 'QTY_SHORT', delta: '20.00' }] }); // half paid
     const c = await invoice({ inclVat: '100.00', d: [{ type: 'QTY_OVER', delta: '30.00' }] }); // no allocations
+    const e = await invoice({ inclVat: '100.00', d: [{ type: 'UNIT_MISMATCH', delta: '10.00' }] }); // short-paid
     const [sup] = (await db.execute(sql`SELECT supplier_id FROM invoices WHERE id = ${a.invoiceId}`)) as unknown as Array<{
       supplier_id: string;
     }>;
@@ -352,6 +389,9 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
     await db.execute(sql`CREATE TABLE IF NOT EXISTS payment_invoices (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), restaurant_id uuid NOT NULL, payment_id uuid NOT NULL,
       invoice_id uuid NOT NULL, amount_agorot bigint NOT NULL)`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS payment_deductions (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(), restaurant_id uuid NOT NULL, invoice_id uuid NOT NULL,
+      amount_agorot bigint NOT NULL)`);
     try {
       const pay = async (on: string, inv: string, agorot: number) => {
         const [p] = (await db.execute(sql`INSERT INTO payments (restaurant_id, supplier_id, paid_on, amount_agorot)
@@ -363,12 +403,23 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
       await pay('2026-10-11', a.invoiceId, 4000);
       await pay('2026-10-13', a.invoiceId, 6000);
       await pay('2026-10-11', b.invoiceId, 5000);
+      // E: ₪10 offset before payment, ₪90 paid on 14.10 → paid on 14.10 (not parked unpaid forever).
+      await db.execute(sql`INSERT INTO payment_deductions (restaurant_id, invoice_id, amount_agorot)
+        VALUES (${rid}, ${e.invoiceId}, 1000)`);
+      await pay('2026-10-14', e.invoiceId, 9000);
       const rows = await computeLeakLedger(db, rid, SPEC);
       const by = Object.fromEntries(rows.map((r) => [r.invoiceId, r]));
-      expect(by[a.invoiceId]).toMatchObject({ invoicePaid: true, paidAt: '2026-10-12T21:00:00.000Z', caughtBeforePayment: true });
+      expect(by[a.invoiceId]).toMatchObject({
+        invoicePaid: true,
+        paidAt: '2026-10-12T21:00:00.000Z',
+        caughtBeforePayment: true,
+        paidSource: 'ledger',
+      });
       expect(by[b.invoiceId]).toMatchObject({ invoicePaid: false, paidAt: null, moneyState: 'undecided' });
       expect(by[c.invoiceId]).toMatchObject({ invoicePaid: false, paidAt: null });
+      expect(by[e.invoiceId]).toMatchObject({ invoicePaid: true, paidAt: '2026-10-13T21:00:00.000Z' });
     } finally {
+      await db.execute(sql`DROP TABLE IF EXISTS payment_deductions`);
       await db.execute(sql`DROP TABLE IF EXISTS payment_invoices`);
       await db.execute(sql`DROP TABLE IF EXISTS payments`);
     }
@@ -379,8 +430,8 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
     await invoice({
       inclVat: '1000.00',
       d: [
-        { type: 'PRICE_HIGHER', delta: '5.00', status: 'accepted', decidedAt: null },
-        { type: 'QTY_SHORT', delta: '6.00', status: 'accepted' },
+        { type: 'PRICE_HIGHER', delta: '5.00', status: 'accepted', tolerated: true },
+        { type: 'QTY_SHORT', delta: '6.00', status: 'accepted', decidedAt: null },
       ],
     });
     const [inv] = await computeLeakBreakdown(db, rid, { now: NOW });
@@ -400,7 +451,7 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
         sql`UPDATE discrepancies SET basis = ${JSON.stringify({ source: 'po', qtyUsed: 2, unitPriceUsed: 5 })}::jsonb WHERE id = ${ids[0]!}`,
       );
       const [row] = await computeLeakLedger(db, rid, SPEC);
-      expect(row).toMatchObject({ invoicePaid: true, paidAt: '2026-10-09T08:00:00.000Z', caughtBeforePayment: false });
+      expect(row).toMatchObject({ invoicePaid: true, paidAt: '2026-10-09T08:00:00.000Z', caughtBeforePayment: false, paidSource: 'paid_at' });
       expect(row!.basis).toEqual({ source: 'po', qtyUsed: 2, unitPriceUsed: 5 });
     } finally {
       await db.execute(sql`ALTER TABLE invoices DROP COLUMN IF EXISTS paid_at`);

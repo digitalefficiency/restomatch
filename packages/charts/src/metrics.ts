@@ -68,7 +68,9 @@ export const METRICS: Readonly<Record<MetricId, MetricDef>> = {
     procedure: 'owner.leakHero',
     scope: 'restaurant',
     drill: '/dashboard/leaks',
-    meaning: 'The month’s leak: Σ of the ledger’s capped agorot by invoice date; = Σ of the eight money states.',
+    meaning:
+      'The month’s leak: Σ of the ledger’s capped agorot by invoice date; = Σ of the eight money states, ' +
+      'including what the team waived (shown beside the headline).',
   },
   'priceCreep.30d': {
     id: 'priceCreep.30d',
@@ -77,7 +79,9 @@ export const METRICS: Readonly<Record<MetricId, MetricDef>> = {
     procedure: 'owner.priceCreep',
     scope: 'restaurant+supplier',
     drill: '/dashboard/leaks?group=product',
-    meaning: 'Prices that went up (מחירים שעלו) over 30 days: a server total over every qualifying row, independent of the list limit.',
+    meaning:
+      'Prices that went up (מחירים שעלו) over 30 days: a server total over every qualifying row, independent of the list limit. ' +
+      'Uncapped and overlapping PRICE_HIGHER leak rows: never added to the leak.',
   },
   'supplierLeak.90d': {
     id: 'supplierLeak.90d',
@@ -131,7 +135,9 @@ export const METRICS: Readonly<Record<MetricId, MetricDef>> = {
     procedure: 'owner.leakHero',
     scope: 'restaurant',
     drill: '/dashboard/approvals',
-    meaning: 'Caught before payment: ledger rows whose detection or decision preceded paid_at (not “status ≠ paid”).',
+    meaning:
+      'Found before payment: ledger rows detected or decided on an Israel day before the pay day (not “status ≠ paid”). ' +
+      'Not a saving — waived and undecided rows count; the part resting on the interim paid date is shown as an estimate.',
   },
 };
 

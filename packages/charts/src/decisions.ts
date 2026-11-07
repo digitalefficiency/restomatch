@@ -22,8 +22,8 @@ type SQL = ReturnType<typeof sql>;
  * supplier — the same ₪ effect as `accepted` (a claim; syncClaims claims both).
  * `tolerated` is the system decision `tolerate` (engine auto-approve within
  * tolerance): the gap is accepted as paid and NOT asked back. Until slice b makes
- * persist.ts write it explicitly, a tolerated row is an `accepted` row with no
- * `resolved_at` (a person's accept always stamps it — routers/approvals.ts).
+ * persist.ts write it explicitly, a tolerated row is an `accepted` row with no person
+ * (no resolved_at / resolved_by) and an engine rule id — see TOLERATED_SQL.
  */
 
 /** The 12 engine discrepancy types (packages/matching/src/index.ts; immutable there). */
@@ -148,11 +148,17 @@ export function effectOf(type: string, statusOrDecision: string): Effect {
 }
 
 /**
- * SQL for the decision key of discrepancy alias `d` (`tolerated` = accepted with no
- * resolved_at, until slice b persists it explicitly).
+ * SQL for the decision key of discrepancy alias `d`. `tolerated` = the ENGINE accepted it:
+ * accepted, no person (no resolved_at, no resolved_by) and an approval rule recorded
+ * (persist.ts writes rule_id for every engine decision; a person's accept always stamps
+ * resolved_at — routers/approvals.ts). An accept with neither a person nor a rule (legacy
+ * or seeded rows) stays a plain `accepted`. With the default rules the engine auto-approves
+ * only `info` rows (approvals/engine.ts `minor-info`), which are outside the leak anyway.
  */
+export const TOLERATED_SQL: SQL = sql`(d.resolution_status = 'accepted' AND d.resolved_at IS NULL
+  AND d.resolved_by IS NULL AND d.rule_id IS NOT NULL)`;
 export const DECISION_KEY_SQL: SQL = sql`(CASE
-  WHEN d.resolution_status = 'accepted' AND d.resolved_at IS NULL THEN 'tolerated'
+  WHEN ${TOLERATED_SQL} THEN 'tolerated'
   ELSE d.resolution_status::text END)`;
 
 /** SQL for effectOf(d.type, decision key) — generated from DECISION_RULES, never hand-written. */

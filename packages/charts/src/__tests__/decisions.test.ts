@@ -48,7 +48,8 @@ function combos() {
 const valuesSql = () =>
   sql.join(
     combos().map(
-      (c) => sql`(${c.type}::text, ${c.key}::text, ${c.status}::text, ${c.resolvedAt}::timestamptz, 'warn'::text)`,
+      (c) =>
+        sql`(${c.type}::text, ${c.key}::text, ${c.status}::text, ${c.resolvedAt}::timestamptz, 'warn'::text, NULL::uuid, ${c.key === 'tolerated' ? 'minor-info' : null}::text)`,
     ),
     sql`, `,
   );
@@ -90,8 +91,8 @@ describe('DECISION_RULES / effectOf: the only status → ₪ map [G-14]', () => 
   it('SQL effectSql() == effectOf for every type × status (the ledger reads the same table)', async () => {
     const res = await db.execute(sql`
       SELECT d.type, x.key, ${effectSql()} AS effect
-      FROM (VALUES ${valuesSql()}) AS x(type, key, resolution_status, resolved_at, severity)
-      CROSS JOIN LATERAL (SELECT x.type, x.resolution_status, x.resolved_at, x.severity) AS d
+      FROM (VALUES ${valuesSql()}) AS x(type, key, resolution_status, resolved_at, severity, resolved_by, rule_id)
+      CROSS JOIN LATERAL (SELECT x.type, x.resolution_status, x.resolved_at, x.severity, x.resolved_by, x.rule_id) AS d
     `);
     const rows = rowsOf(res);
     expect(rows).toHaveLength(12 * DECISION_KEYS.length);
@@ -101,8 +102,8 @@ describe('DECISION_RULES / effectOf: the only status → ₪ map [G-14]', () => 
   it('LEAK_FILTER counts a warn/block row exactly when its effect is not excluded', async () => {
     const res = await db.execute(sql`
       SELECT d.type, x.key, (${LEAK_FILTER}) AS counts
-      FROM (VALUES ${valuesSql()}) AS x(type, key, resolution_status, resolved_at, severity)
-      CROSS JOIN LATERAL (SELECT x.type, x.resolution_status, x.resolved_at, x.severity) AS d
+      FROM (VALUES ${valuesSql()}) AS x(type, key, resolution_status, resolved_at, severity, resolved_by, rule_id)
+      CROSS JOIN LATERAL (SELECT x.type, x.resolution_status, x.resolved_at, x.severity, x.resolved_by, x.rule_id) AS d
     `);
     for (const r of rowsOf(res)) {
       if (!LEAK_FILTER_HAS_211 && r.type === 'MISSING_ON_INVOICE') {

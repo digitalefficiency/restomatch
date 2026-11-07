@@ -73,8 +73,18 @@ export interface LeakLedgerRow {
   invoicePaid: boolean;
   /** ISO; null = not paid. Interim source until H-03 deploys (see the module note). */
   paidAt: string | null;
-  /** The detection or the decision came before the payment (or nothing was paid yet). */
+  /**
+   * The gap was FOUND (detected or decided) on a day before the pay day, or nothing is paid
+   * yet. It is not a saving: waived and undecided rows count too (G-14 acceptance 3).
+   */
   caughtBeforePayment: boolean;
+  /** Where paidAt came from; 'interim' = the updated_at estimate until H-03/H-04 (label it). */
+  paidSource: PaidSource;
+  /**
+   * Part of cappedAgorot that a written-off claim never got back: the row's state is
+   * `credited` for its credited agorot only; this remainder is reported as `waived`.
+   */
+  writtenOffAgorot: number;
   claimId: string | null;
   claimStatus: ClaimStatus | null;
   claimAmountAgorot: number | null;
@@ -107,12 +117,33 @@ export const PAID_AT_SQL: SQL = sql`COALESCE(
  * first cover the invoice total; allocated but not covered = not paid yet. Without
  * allocations: PAID_AT_SQL. `tz` is the restaurant time zone expression.
  */
-export function paidAtSql(restaurantId: string, hasLedger: boolean, tz: SQL): SQL {
+/** Where a row's paid_at came from (metrics.PAID_SOURCE order); 'interim' = the updated_at estimate. */
+export type PaidSource = 'ledger' | 'paid_at' | 'interim' | null;
+
+/** SQL for the PaidSource of invoice alias `i` (mirrors paidAtSql's chain). */
+export function paidSourceSql(restaurantId: string, hasLedger: boolean): SQL {
+  const ledger = hasLedger
+    ? sql`WHEN EXISTS (
+        SELECT 1 FROM payment_invoices pa WHERE pa.invoice_id = i.id AND pa.restaurant_id = ${restaurantId}
+      ) THEN 'ledger'`
+    : sql``;
+  return sql`(CASE ${ledger}
+    WHEN NULLIF(to_jsonb(i) ->> 'paid_at', '') IS NOT NULL THEN 'paid_at'
+    WHEN i.status = 'paid' THEN 'interim'
+    ELSE NULL END)`;
+}
+
+export function paidAtSql(restaurantId: string, hasLedger: boolean, tz: SQL, hasDeductions = false): SQL {
   if (!hasLedger) return PAID_AT_SQL;
+  // What the payments must cover: the invoice total less any short-pay deductions (offsets).
+  const deducted = hasDeductions
+    ? sql`COALESCE((SELECT SUM(pd.amount_agorot) FROM payment_deductions pd
+        WHERE pd.invoice_id = i.id AND pd.restaurant_id = ${restaurantId}), 0)`
+    : sql`0`;
   return sql`(CASE
     WHEN EXISTS (
       SELECT 1 FROM payment_invoices pa WHERE pa.invoice_id = i.id AND pa.restaurant_id = ${restaurantId}
-    ) THEN (
+    ) THEN COALESCE((
       SELECT MIN(c.paid_on)::timestamp AT TIME ZONE ${tz}
       FROM (
         SELECT p.paid_on, SUM(pa.amount_agorot) OVER (
@@ -122,25 +153,37 @@ export function paidAtSql(restaurantId: string, hasLedger: boolean, tz: SQL): SQ
         JOIN payments p ON p.id = pa.payment_id AND p.restaurant_id = ${restaurantId}
         WHERE pa.invoice_id = i.id AND pa.restaurant_id = ${restaurantId}
       ) c
-      WHERE c.cum >= round(COALESCE(i.total_incl_vat, 0) * 100)
-    )
+      WHERE c.cum >= round(COALESCE(i.total_incl_vat, 0) * 100) - ${deducted}
+    ),
+    -- Allocated but short of the total (a discount, rounding): the writer's paid_at summary decides.
+    NULLIF(to_jsonb(i) ->> 'paid_at', '')::timestamptz)
     ELSE ${PAID_AT_SQL}
   END)`;
 }
 
 /** Is the H-04 payment ledger (`payments` + `payment_invoices`) in this database? */
 export async function hasPaymentLedger(db: Database): Promise<boolean> {
-  const res = await db.execute(
-    sql`SELECT to_regclass('public.payment_invoices') IS NOT NULL AND to_regclass('public.payments') IS NOT NULL AS has`,
-  );
-  return Boolean(rowsOf(res)[0]?.has);
+  return (await paymentTables(db)).ledger;
+}
+
+/** Which H-04 payment tables exist in this database (checked at run time). */
+export async function paymentTables(db: Database): Promise<{ ledger: boolean; deductions: boolean }> {
+  const res = await db.execute(sql`SELECT
+    to_regclass('public.payment_invoices') IS NOT NULL AND to_regclass('public.payments') IS NOT NULL AS ledger,
+    to_regclass('public.payment_deductions') IS NOT NULL AS deductions`);
+  const r = rowsOf(res)[0] ?? {};
+  return { ledger: Boolean(r.ledger), deductions: Boolean(r.deductions) };
 }
 
 /** The tier rule of decisions.allocationTier, in SQL over the ledger's `x` columns. */
 const TIER_SQL: SQL = sql`(CASE WHEN x.live_claim THEN 1 WHEN x.effect = 'undecided' THEN 3 ELSE 2 END)`;
 
 /** The ledger CTEs (`b`, `inv`, `per`, `x`, `led`) for a view. */
-export function leakLedgerSql(restaurantId: string, spec: ViewSpec, opts: { hasLedger?: boolean } = {}): SQL {
+export function leakLedgerSql(
+  restaurantId: string,
+  spec: ViewSpec,
+  opts: { hasLedger?: boolean; hasDeductions?: boolean } = {},
+): SQL {
   const LF = lineFilter(restaurantId, spec.filters);
   return sql`${viewInvoicesSql(restaurantId, spec)},
     x AS (
@@ -152,7 +195,8 @@ export function leakLedgerSql(restaurantId: string, spec: ViewSpec, opts: { hasL
         d.created_at, d.resolved_at,
         round(abs(COALESCE(d.delta_amount, 0)) * 100)::bigint AS raw_agorot,
         round(COALESCE(i.total_incl_vat, 0) * 100)::bigint AS cap_agorot,
-        ${paidAtSql(restaurantId, opts.hasLedger ?? false, sql`bt.tz`)} AS paid_at,
+        ${paidAtSql(restaurantId, opts.hasLedger ?? false, sql`bt.tz`, opts.hasDeductions ?? false)} AS paid_at,
+        ${paidSourceSql(restaurantId, opts.hasLedger ?? false)} AS paid_source,
         bt.tz AS tz,
         to_jsonb(d) -> 'basis' AS basis,
         rc.id AS claim_id, rc.status AS claim_status, rc.amount_agorot AS claim_amount,
@@ -185,9 +229,9 @@ export function leakLedgerSql(restaurantId: string, spec: ViewSpec, opts: { hasL
 
 /** Every counting discrepancy of the period with its capped agorot and money state. */
 export async function computeLeakLedger(db: Database, restaurantId: string, spec: ViewSpec): Promise<LeakLedgerRow[]> {
-  const hasLedger = await hasPaymentLedger(db);
+  const t = await paymentTables(db);
   const res = await db.execute(sql`
-    WITH ${leakLedgerSql(restaurantId, spec, { hasLedger })}
+    WITH ${leakLedgerSql(restaurantId, spec, { hasLedger: t.ledger, hasDeductions: t.deductions })}
     SELECT * FROM led ORDER BY invoice_id, tier, created_at, discrepancy_id
   `);
   return rowsOf(res).map(toLedgerRow);
@@ -219,6 +263,9 @@ function toLedgerRow(r: Row): LeakLedgerRow {
     invoicePaid,
     paidAt,
     caughtBeforePayment: caughtBefore(createdAt, resolvedAt, paidAt, String(r.tz ?? ISRAEL_TZ)),
+    paidSource: (r.paid_source as PaidSource) ?? null,
+    writtenOffAgorot:
+      claimStatus === 'written_off' && creditedAgorot > 0 ? Math.max(0, int(r.capped_agorot) - creditedAgorot) : 0,
     claimId: r.claim_id == null ? null : String(r.claim_id),
     claimStatus,
     claimAmountAgorot: r.claim_amount == null ? null : int(r.claim_amount),
@@ -280,8 +327,14 @@ export interface LeakPartition {
   heroAgorot: number;
   /** heroAgorot − totalAgorot. 0 = the states add up to the hero to the agora. */
   driftAgorot: number;
-  /** Σ capped of rows caught before payment. */
+  /** Σ over invoices of |hero − ledger| — drift that cancels across invoices still shows here. */
+  absDriftAgorot: number;
+  /** Invoices whose ledger ≠ their hero share. */
+  driftInvoiceCount: number;
+  /** Σ capped of rows found before payment (not a saving; see LeakLedgerRow.caughtBeforePayment). */
   caughtBeforePaymentAgorot: number;
+  /** Part of caughtBeforePaymentAgorot whose pay day is the interim updated_at estimate. */
+  caughtOnInterimPaidAgorot: number;
   rowCount: number;
 }
 
@@ -289,13 +342,23 @@ export function emptyStates(): Record<MoneyState, number> {
   return Object.fromEntries(MONEY_STATES.map((s) => [s, 0])) as Record<MoneyState, number>;
 }
 
-/** Fold ledger rows into the partition (pure; the hero figure comes from the caller). */
-export function partitionOf(rows: readonly LeakLedgerRow[], heroAgorot: number): LeakPartition {
+/**
+ * Fold ledger rows into the partition (pure). `hero` is the view's hero in agorot, or the
+ * hero per invoice (invoiceId → agorot), which also gives per-invoice drift.
+ */
+export function partitionOf(rows: readonly LeakLedgerRow[], hero: number | ReadonlyMap<string, number>): LeakPartition {
+  const heroAgorot = typeof hero === 'number' ? hero : [...hero.values()].reduce((a, b) => a + b, 0);
   const states = emptyStates();
   let caught = 0;
+  let caughtInterim = 0;
   for (const r of rows) {
-    states[r.moneyState] += r.cappedAgorot;
-    if (r.caughtBeforePayment) caught += r.cappedAgorot;
+    // A written-off claim with part credited: credited for what came back, waived for the rest.
+    states[r.moneyState] += r.cappedAgorot - r.writtenOffAgorot;
+    states.waived += r.writtenOffAgorot;
+    if (r.caughtBeforePayment) {
+      caught += r.cappedAgorot;
+      if (r.paidSource === 'interim') caughtInterim += r.cappedAgorot;
+    }
   }
   const totalAgorot = MONEY_STATES.reduce((s, k) => s + states[k], 0);
   return {
@@ -303,25 +366,54 @@ export function partitionOf(rows: readonly LeakLedgerRow[], heroAgorot: number):
     totalAgorot,
     heroAgorot,
     driftAgorot: heroAgorot - totalAgorot,
+    ...perInvoiceDrift(rows, hero, heroAgorot - totalAgorot),
     caughtBeforePaymentAgorot: caught,
+    caughtOnInterimPaidAgorot: caughtInterim,
     rowCount: rows.length,
   };
 }
 
-/** The hero's leak for a view, in agorot, from the very CTEs the hero uses. */
-export async function heroLeakAgorot(db: Database, restaurantId: string, spec: ViewSpec): Promise<number> {
+function perInvoiceDrift(
+  rows: readonly LeakLedgerRow[],
+  hero: number | ReadonlyMap<string, number>,
+  net: number,
+): { absDriftAgorot: number; driftInvoiceCount: number } {
+  if (typeof hero === 'number') return { absDriftAgorot: Math.abs(net), driftInvoiceCount: net === 0 ? 0 : 1 };
+  const led = new Map<string, number>();
+  for (const r of rows) led.set(r.invoiceId, (led.get(r.invoiceId) ?? 0) + r.cappedAgorot);
+  let abs = 0;
+  let count = 0;
+  for (const id of new Set([...hero.keys(), ...led.keys()])) {
+    const d = (hero.get(id) ?? 0) - (led.get(id) ?? 0);
+    if (d !== 0) {
+      abs += Math.abs(d);
+      count += 1;
+    }
+  }
+  return { absDriftAgorot: abs, driftInvoiceCount: count };
+}
+
+/** The hero's leak per invoice of a view, in agorot, from the very CTEs the hero uses. */
+export async function heroLeakByInvoice(db: Database, restaurantId: string, spec: ViewSpec): Promise<Map<string, number>> {
   const res = await db.execute(sql`
     WITH ${viewInvoicesSql(restaurantId, spec)}
-    SELECT COALESCE(SUM(round(LEAST(raw_leak, total) * 100)), 0)::bigint AS agorot FROM per
+    SELECT id, round(LEAST(raw_leak, total) * 100)::bigint AS agorot FROM per
   `);
-  return int(rowsOf(res)[0]?.agorot);
+  const out = new Map<string, number>();
+  for (const r of rowsOf(res)) if (int(r.agorot) !== 0) out.set(String(r.id), int(r.agorot));
+  return out;
+}
+
+/** The hero's leak for a view, in agorot. */
+export async function heroLeakAgorot(db: Database, restaurantId: string, spec: ViewSpec): Promise<number> {
+  return [...(await heroLeakByInvoice(db, restaurantId, spec)).values()].reduce((a, b) => a + b, 0);
 }
 
 /** The money-state partition of a view's leak, with the hero beside it. */
 export async function computeLeakPartition(db: Database, restaurantId: string, spec: ViewSpec): Promise<LeakPartition> {
   const [rows, hero] = await Promise.all([
     computeLeakLedger(db, restaurantId, spec),
-    heroLeakAgorot(db, restaurantId, spec),
+    heroLeakByInvoice(db, restaurantId, spec),
   ]);
   return partitionOf(rows, hero);
 }
