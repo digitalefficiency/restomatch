@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { authenticator } from 'otplib';
-import { ensurePasswordUser } from './helpers';
+import { e2eSql, ensurePasswordUser } from './helpers';
 
 /**
  * Train-A review (MEDIUM): a session minted BEFORE the account enrolled 2FA was
@@ -11,6 +11,18 @@ import { ensurePasswordUser } from './helpers';
  */
 const PASSWORD = 'E2e-Correct-Horse-9!';
 const BASE = () => test.info().project.use.baseURL ?? 'http://localhost:3100';
+
+/** Move the enrolment past the short arming grace (lib/secondFactorGate ENROLMENT_GRACE_MS). */
+async function backdateEnrolment(email: string) {
+  const sql = e2eSql();
+  try {
+    await sql`
+      update user_credentials set totp_enabled_at = now() - interval '1 minute'
+      where user_id = (select id from users where email = ${email})`;
+  } finally {
+    await sql.end();
+  }
+}
 
 test('a session from before 2FA enrolment is signed out; password + TOTP gets back in', async ({ page }) => {
   test.setTimeout(180_000);
@@ -35,6 +47,7 @@ test('a session from before 2FA enrolment is signed out; password + TOTP gets ba
   // token predates it and never passed a second factor.
   const secret = authenticator.generateSecret();
   await ensurePasswordUser({ email, password: PASSWORD, totpSecret: secret });
+  await backdateEnrolment(email);
 
   await page.goto('/dashboard/settings');
   await expect(page).toHaveURL(/\/login/);
@@ -47,6 +60,13 @@ test('a session from before 2FA enrolment is signed out; password + TOTP gets ba
   await expect(page).toHaveURL(/\/dashboard/);
   await page.goto('/dashboard/settings');
   await expect(page).toHaveURL(/\/dashboard\/settings/);
+
+  // Disable + re-enrol with a NEW secret: a session that passed the OLD factor
+  // (e.g. a stolen secret) must not survive the re-enrolment.
+  await ensurePasswordUser({ email, password: PASSWORD, totpSecret: authenticator.generateSecret() });
+  await backdateEnrolment(email);
+  await page.goto('/dashboard/settings');
+  await expect(page).toHaveURL(/\/login/);
 });
 
 test('enrolling 2FA in Settings keeps THIS session signed in (it just proved a TOTP code)', async ({ page }) => {

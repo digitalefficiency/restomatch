@@ -60,10 +60,11 @@ interface AppJwt {
   /** 2FA enrolled + second factor still pending (Epic C session gate). */
   twoFactorPending?: boolean;
   /**
-   * Epoch ms this session passed a server-verified second factor (a consumed
-   * 2FA ticket). Absent on a token that never did — see lib/secondFactorGate.
+   * The enrolment (user_credentials.totp_enabled_at, epoch ms) whose second
+   * factor this session passed, stamped when a server-verified 2FA ticket is
+   * consumed. Absent on a token that never did — see lib/secondFactorGate.
    */
-  mfaAt?: number;
+  mfaFor?: number;
   [key: string]: unknown;
 }
 
@@ -235,7 +236,9 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         if (typeof ticket === 'string' && ticket) {
           if (await consumeTwoFactorTicket(t.userId, ticket)) {
             t.twoFactorPending = false;
-            t.mfaAt = now;
+            const enrolment = (await getSessionSecurityState(t.userId)).twoFactorEnabledAt;
+            if (enrolment === null) delete t.mfaFor;
+            else t.mfaFor = enrolment;
           }
         }
       }
@@ -258,7 +261,7 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         t.ver = sec.tokenVersion;
         t.twoFactorPending = (u.twoFactorPending ?? false) || sec.twoFactorEnabled;
         // A fresh sign-in has not passed a second factor yet (in this session).
-        delete t.mfaAt;
+        delete t.mfaFor;
       }
       if (!t.userId) return t;
 
@@ -290,16 +293,17 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         if (issuedBeforeSignOut(t.loginAt, await readSignOutTombstone())) {
           return {} as AppJwt;
         }
-        // A token issued before the account enrolled 2FA was never pending and
-        // never passed a second factor: revoke it (same path as a token_version
+        // A token issued before the account enrolled 2FA (or before its current
+        // re-enrolment) was never pending and never passed THIS second factor:
+        // revoke it (same path as a token_version
         // mismatch — edge middleware, tRPC 401 and RSC all handle the empty
         // token), so the cross-tenant admin console and every other surface
         // require a session that proved the second factor.
         if (
           bypassesSecondFactor({
-            twoFactorEnabled: sec.twoFactorEnabled,
+            twoFactorEnabledAt: sec.twoFactorEnabledAt,
             twoFactorPending: t.twoFactorPending,
-            mfaAt: t.mfaAt,
+            mfaFor: t.mfaFor,
           })
         ) {
           return {} as AppJwt;
