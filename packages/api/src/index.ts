@@ -41,6 +41,7 @@ import { tasksRouter } from './routers/tasks';
 import { navRouter } from './routers/nav';
 import { pushRouter } from './routers/push';
 import { closeRouter } from './routers/close';
+import { vatRouter } from './routers/vat';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -84,6 +85,7 @@ export const appRouter = router({
   nav: navRouter,
   push: pushRouter,
   close: closeRouter,
+  vat: vatRouter,
 });
 
 export type AppRouter = typeof appRouter;
