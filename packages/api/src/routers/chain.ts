@@ -361,8 +361,11 @@ export function resolveMatrixScope(
   activeRestaurantId: string | null,
   scope: BranchScope,
 ): MatrixScope {
-  const active = rows.find((r) => r.restaurantId === activeRestaurantId);
-  if (!active || !MATRIX_READ_ROLES.includes(active.role)) {
+  // A user may hold several roles on one branch (PK user+restaurant+role): owner wins, then bookkeeper.
+  const active = MATRIX_READ_ROLES.map((role) =>
+    rows.find((r) => r.restaurantId === activeRestaurantId && r.role === role),
+  ).find((r) => r !== undefined);
+  if (!active) {
     throw new TRPCError({ code: 'FORBIDDEN', message: 'chain matrix is owner / bookkeeper only' });
   }
   const pool = active.billingAccountId
@@ -593,7 +596,7 @@ export const chainRouter = router({
             return { ok: true as const, snapshot, extras: await matrixExtras(tx, b.restaurantId) };
           });
         } catch (err) {
-          console.error('[chain.matrix] branch failed', b.restaurantId, err);
+          console.error('[chain.matrix] branch failed', b.restaurantId, err instanceof Error ? err.message : 'unknown');
           return { ok: false, restaurantId: b.restaurantId, name: b.name };
         }
       });

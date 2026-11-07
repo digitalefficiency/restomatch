@@ -298,10 +298,25 @@ describe('chain.matrix (W3-01)', () => {
     expect(m.lens).toBe('bookkeeper');
     expect(ids(m)).toEqual([A.restaurantId, A2.restaurantId].sort());
     expect(m.totals.leakIls).toBe(140);
-    expect(JSON.stringify(m)).not.toContain(X.restaurantId);
-    await expect(caller(bookkeeperId, A.restaurantId, 'bookkeeper').chain.matrix({ scope: X.restaurantId })).rejects.toMatchObject({
-      code: 'NOT_FOUND',
-    });
+    for (const other of [B.restaurantId, M.restaurantId, X.restaurantId]) expect(JSON.stringify(m)).not.toContain(other);
+    const bk = caller(bookkeeperId, A.restaurantId, 'bookkeeper');
+    expect(ids(await bk.chain.matrix({ scope: `g:${acct}` }))).toEqual([A.restaurantId, A2.restaurantId].sort());
+    for (const bad of [X.restaurantId, B.restaurantId, M.restaurantId, randomUUID(), `g:${randomUUID()}`]) {
+      await expect(bk.chain.matrix({ scope: bad })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    }
+  });
+
+  it('bookkeeper active on X (another account) sees X alone, never A or A2', async () => {
+    const m = await caller(bookkeeperId, X.restaurantId, 'bookkeeper').chain.matrix();
+    expect(ids(m)).toEqual([X.restaurantId]);
+    expect(JSON.stringify(m)).not.toContain(A.restaurantId);
+    expect(JSON.stringify(m)).not.toContain(A2.restaurantId);
+  });
+
+  it('a forged session role is ignored: the DB membership decides the lens', async () => {
+    const forged = caller(bookkeeperId, A.restaurantId, 'owner');
+    expect((await forged.chain.matrix()).lens).toBe('bookkeeper');
+    await expect(forged.chain.overview()).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
   it('bookkeeper stays read-only: chain writes and the owner-only overview are FORBIDDEN / NOT_FOUND', async () => {
@@ -324,15 +339,21 @@ describe('chain.matrix (W3-01)', () => {
     expect(p.restaurantId).toBe(A2.restaurantId);
     expect(p.leakIls).toBe(40);
     expect(p.biggestInvoices.length).toBeGreaterThan(0);
-    expect(p.topSuppliers.every((s) => s.name !== 'ספק B')).toBe(true);
+    for (const leak of [B.restaurantId, B.supplierId, M.restaurantId, M.supplierId, X.restaurantId]) {
+      expect(JSON.stringify(p)).not.toContain(leak);
+    }
     for (const bad of [B.restaurantId, M.restaurantId, X.restaurantId, randomUUID()]) {
       await expect(asA().chain.branchPeek({ restaurantId: bad })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     }
     await expect(caller(A.ownerUserId, B.restaurantId, 'owner').chain.branchPeek({ restaurantId: A.restaurantId })).rejects.toMatchObject({
       code: 'FORBIDDEN',
     });
-    const bk = await caller(bookkeeperId, A.restaurantId, 'bookkeeper').chain.branchPeek({ restaurantId: A2.restaurantId });
+    const bkCaller = caller(bookkeeperId, A.restaurantId, 'bookkeeper');
+    const bk = await bkCaller.chain.branchPeek({ restaurantId: A2.restaurantId });
     expect(bk.leakIls).toBe(40);
+    for (const bad of [B.restaurantId, M.restaurantId, X.restaurantId, randomUUID()]) {
+      await expect(bkCaller.chain.branchPeek({ restaurantId: bad })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    }
   });
 });
 

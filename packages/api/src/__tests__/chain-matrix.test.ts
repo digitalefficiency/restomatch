@@ -56,6 +56,12 @@ describe('resolveMatrixScope', () => {
     expect(s.lens).toBe('bookkeeper');
     expect(s.pool.map((r) => r.restaurantId).sort()).toEqual(['bk', 'bk2']);
   });
+  it('owner + bookkeeper on the same branch: the owner lens wins, whatever the row order', () => {
+    const both = [row('bk', 'bookkeeper', 'k'), row('a', 'bookkeeper', 'k'), row('a', 'owner', 'k'), row('a2', 'owner', 'k')];
+    const s = resolveMatrixScope(both, 'a', { kind: 'all' });
+    expect(s.lens).toBe('owner');
+    expect(s.pool.map((r) => r.restaurantId).sort()).toEqual(['a', 'a2']);
+  });
   it('manager / receiver / chef / non-member active branch → FORBIDDEN', () => {
     expect(() => resolveMatrixScope(rows, 'm', { kind: 'all' })).toThrow(/owner \/ bookkeeper/);
     expect(() => resolveMatrixScope(rows, 'nope', { kind: 'all' })).toThrow(/owner \/ bookkeeper/);
