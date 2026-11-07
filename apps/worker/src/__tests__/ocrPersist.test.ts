@@ -312,12 +312,22 @@ describe('processOcrInvoice persistence (DB)', () => {
     expect(r.reviewReasons).toEqual(['unlinked']);
   });
 
-  it('a document with consolidated evidence but read as an ordinary invoice is held, never auto-matched — review #8', async () => {
+  it('two delivery notes on a document read as an ordinary invoice: the pipeline (#232) calls it consolidated — held', async () => {
     h.result = { ...base, deliveryNotes: [{ number: '7001' }, { number: '7002' }] };
     const id = await newInvoice();
     await run(id);
     expect((await row(id)).status).toBe('parsed');
-    expect((await raw(id)).reviewReasons).toEqual(['consolidated_evidence']);
+    expect(await raw(id)).toMatchObject({ kind: 'consolidated', reviewReasons: ['consolidated'] });
+    expect(await matchJobs(id)).toHaveLength(0);
+  });
+
+  it('consolidated evidence the pipeline leaves regular (a printed period) is held, never auto-matched — review #8', async () => {
+    h.result = { ...base, periodStart: '2026-10-01', periodEnd: '2026-10-31' } as unknown as InvoiceOcrResult;
+    const id = await newInvoice();
+    await run(id);
+    expect((await row(id)).status).toBe('parsed');
+    expect((await raw(id)).reviewReasons).toEqual(expect.arrayContaining(['consolidated_evidence']));
+    expect((await raw(id)).kind).toBe('tax_invoice');
     expect(await matchJobs(id)).toHaveLength(0);
   });
 

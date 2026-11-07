@@ -23,12 +23,25 @@ const h = vi.hoisted(() => {
     answer: '' as string,
     stopReason: 'end_turn' as string,
     created: [] as Array<Record<string, unknown>>,
+    /** The SDK client options (maxRetries) and each create()'s request options (signal). */
+    clientOpts: [] as Array<Record<string, unknown>>,
+    requestOpts: [] as Array<{ signal?: AbortSignal } | undefined>,
+    /** When true, create() waits until its signal aborts, then rejects like the SDK. */
+    hang: false,
   };
   const fakeSdk = () => ({
     default: class {
+      constructor(opts: Record<string, unknown>) {
+        state.clientOpts.push(opts);
+      }
       messages = {
-        create: async (req: Record<string, unknown>) => {
+        create: async (req: Record<string, unknown>, ro?: { signal?: AbortSignal }) => {
           state.created.push(req);
+          state.requestOpts.push(ro);
+          if (state.hang) {
+            await new Promise<void>((resolve) => ro?.signal?.addEventListener('abort', () => resolve()));
+            throw Object.assign(new Error('Request was aborted.'), { name: 'APIUserAbortError' });
+          }
           return {
             stop_reason: state.stopReason,
             usage: { input_tokens: 3000, output_tokens: 700 },
@@ -48,7 +61,8 @@ vi.mock('@restomatch/api', async (importOriginal) => {
   return { ...real, meterOcrScan: async () => ({ metered: true, used: 1, limit: null }) };
 });
 
-const { processOcrInvoice } = await import('../jobs/ocrInvoice');
+const { classifyOcrError, OcrDeadlineError, processOcrInvoice, withOcrDeadline } = await import('../jobs/ocrInvoice');
+const { ClaudeVision, OcrExtractionError } = await import('@restomatch/ocr');
 
 const db = createDb(testDbUrl());
 const qsql = queueSql(testDbUrl());
@@ -102,6 +116,9 @@ describe('a real ClaudeVision read of a consolidated invoice (only messages.crea
     h.answer = JSON.stringify(consolidatedAnswer);
     h.stopReason = 'end_turn';
     h.created.length = 0;
+    h.clientOpts.length = 0;
+    h.requestOpts.length = 0;
+    h.hang = false;
     // The worker fetches the private scan itself (fetchBytes): a tiny PDF.
     // Anything else (the real SDK, were the mock not applied) fails loudly.
     vi.stubGlobal('fetch', async (url: unknown) => {
@@ -130,6 +147,10 @@ describe('a real ClaudeVision read of a consolidated invoice (only messages.crea
     const id = await newInvoice();
     expect(await run(id)).toMatchObject({ lines: 2 });
     expect(h.created).toHaveLength(1); // one paid call (single provider)
+    // The worker's wiring (#232): no SDK retry inside a job, and the read carries the deadline's signal.
+    expect(h.clientOpts[0]).toMatchObject({ maxRetries: 0 });
+    expect(h.requestOpts[0]?.signal).toBeInstanceOf(AbortSignal);
+    expect(h.requestOpts[0]?.signal?.aborted).toBe(false);
 
     const inv = await row(id);
     expect(inv.status).toBe('parsed');
@@ -138,7 +159,8 @@ describe('a real ClaudeVision read of a consolidated invoice (only messages.crea
       kind: 'consolidated',
       periodStart: '2026-10-01',
       periodEnd: '2026-10-31',
-      deliveryNotes: [{ number: '9001', printed: 'ת.מ. 9001' }, { number: '9002' }],
+      // #232 canonicalises the note numbers upstream (digits only, de-duplicated).
+      deliveryNotes: [{ number: '9001' }, { number: '9002' }],
     });
     expect(raw.reviewReasons).toEqual(expect.arrayContaining(['consolidated']));
     expect(await db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, id))).toHaveLength(2);
@@ -160,5 +182,39 @@ describe('a real ClaudeVision read of a consolidated invoice (only messages.crea
     expect((err as Error).message.startsWith('[terminal] ')).toBe(true);
     expect((await row(id)).ocrPayload?.raw).toMatchObject({ ocrFailed: true, reason: 'unreadable' });
     expect(h.created).toHaveLength(1);
+  });
+  it('the per-job deadline CANCELS the in-flight read (signal → SDK) and reports a retryable OcrDeadlineError', async () => {
+    h.hang = true;
+    const vision = new ClaudeVision({ apiKey: 'test-key-not-real', fetchBytes: true, maxRetries: 0 });
+    const url = `${SCAN_PREFIX}${rid}/scan-abc123-def456.pdf?token=t`;
+    const err = await withOcrDeadline((signal) => vision.extract(url, { signal }), 50).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OcrDeadlineError);
+    expect(classifyOcrError(err).retryable).toBe(true);
+    expect(h.requestOpts[0]?.signal?.aborted).toBe(true); // the HTTP request itself was cancelled
+  });
+
+  it("an 'aborted' read the deadline did not cause is still retryable (never a terminal review)", () => {
+    expect(classifyOcrError(new OcrExtractionError('aborted', 'the caller cancelled the read'))).toEqual({ retryable: true });
+  });
+
+  it("an invoice-level discount goes to review through the real pipeline (#232's gate): parsed, 'invoice_discount', no match job", async () => {
+    h.answer = JSON.stringify({
+      ...consolidatedAnswer,
+      documentKind: 'tax_invoice',
+      invoiceNumber: 'D-1',
+      deliveryNotes: [],
+      periodStart: null,
+      periodEnd: null,
+      invoiceDiscount: 8,
+      totals: { subtotal: 72, vat: 12.96, total: 84.96, vatRate: 0.18 },
+    });
+    const id = await newInvoice();
+    await run(id);
+    const inv = await row(id);
+    expect(inv.status).toBe('parsed');
+    const raw = inv.ocrPayload?.raw as Record<string, unknown>;
+    expect(raw.kind).toBe('tax_invoice');
+    expect(raw.reviewReasons).toEqual(expect.arrayContaining(['invoice_discount']));
+    expect(await qsql`SELECT id FROM job_queue WHERE queue = 'match-invoice' AND payload->>'invoiceId' = ${id}`).toHaveLength(0);
   });
 });

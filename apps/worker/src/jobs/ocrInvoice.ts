@@ -14,6 +14,7 @@ import { and, eq, findDemoTenants, invoiceLines, invoices, ne, restaurants, sql,
 import {
   ClaudeVision,
   isOcrExtractionError,
+  normalizeBusinessId,
   runOcrPipeline,
   StubOcrProvider,
   type CatalogMatcherFn,
@@ -160,13 +161,25 @@ export class OcrDeadlineError extends Error {
 }
 
 /** `p`, or an OcrDeadlineError after `ms`. */
-export async function withOcrDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+export async function withOcrDeadline<T>(work: Promise<T> | ((signal: AbortSignal) => Promise<T>), ms: number): Promise<T> {
+  // The read gets the signal (packages/ocr ClaudeVision passes it to the SDK):
+  // at the deadline the in-flight HTTP request is CANCELLED, not just no longer
+  // waited for — no paid answer arrives after the job has given up on it.
+  const ctrl = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const p = typeof work === 'function' ? work(ctrl.signal) : work;
   try {
     return await Promise.race([
-      p,
+      p.catch((err: unknown) => {
+        // The provider's own report of that cancellation is the same deadline.
+        if (ctrl.signal.aborted && isOcrExtractionError(err) && err.code === 'aborted') throw new OcrDeadlineError(ms);
+        throw err;
+      }),
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new OcrDeadlineError(ms)), ms);
+        timer = setTimeout(() => {
+          ctrl.abort();
+          reject(new OcrDeadlineError(ms));
+        }, ms);
         timer.unref?.();
       }),
     ]);
@@ -220,6 +233,9 @@ function realProviders(usage?: OcrUsage): { documentAi: OcrProvider; claude: Ocr
     apiKey,
     model: process.env.OCR_CLAUDE_MODEL,
     fetchBytes: true,
+    // The job queue already retries (ocr-invoice: 2 attempts, classifyOcrError);
+    // an SDK retry inside a job would be a second paid call the deadline does not see.
+    maxRetries: 0,
     onUsage: (u) => {
       if (!usage) return;
       usage.inputTokens += u.input_tokens ?? 0;
@@ -387,19 +403,22 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
     read = true;
     // A per-job deadline (review #10): the read must end before the invocation's
     // headroom does. Hitting it is a retryable timeout (attempt 2 in a later run),
-    // never an in-job retry. The provider call itself is not cancelled (the
-    // ClaudeVision API takes no signal yet — S14): its result is just not waited for.
+    // never an in-job retry. The read is cancelled at the deadline (signal).
     const result = await withOcrDeadline(
-      runOcrPipeline(imageUrl, {
-        ...providers,
-        catalogMatcher: matcher,
-        ...(reviewThreshold !== undefined ? { reviewThreshold } : {}),
-      }),
+      (signal) =>
+        runOcrPipeline(imageUrl, {
+          ...providers,
+          catalogMatcher: matcher,
+          signal,
+          ...(reviewThreshold !== undefined ? { reviewThreshold } : {}),
+        }),
       ocrJobDeadlineMs(),
     );
 
     // The cost log names the model the provider reports it used (meta.model).
-    const metaModel = (result.primary as { meta?: { model?: unknown } } | undefined)?.meta?.model;
+    const metaModel =
+      (result as { meta?: { model?: unknown } }).meta?.model ??
+      (result.primary as { meta?: { model?: unknown } } | undefined)?.meta?.model;
     if (typeof metaModel === 'string' && metaModel) usage.model = metaModel;
 
     const r = result.reconciled;
@@ -690,26 +709,10 @@ export function documentFacts(extraction: unknown): DocumentFacts {
 
 /**
  * A ח.פ. / ע.מ. / ת.ז. as 9 canonical digits, or null (= unknown, never a
- * mismatch). The SAME semantics as S14's `normalizeBusinessId` in @restomatch/ocr
- * (checks.ts), which replaces this copy once it is on main:
- * digits only (spaces, dashes, a "ח.פ." label dropped); a 10-digit value with a
- * leading 0 loses it; 8–9 digits are padded to 9; any other length → null; the
- * Israeli check digit must hold (weights 1,2,1,2…, digit-sum of products).
+ * mismatch) — S14's shared normaliser (@restomatch/ocr checks.ts), re-exported
+ * for this module's callers and tests.
  */
-export function normalizeBusinessId(v: unknown): string | null {
-  if (typeof v !== 'string' && typeof v !== 'number') return null;
-  let digits = String(v).replace(/\D/g, '');
-  if (digits.length === 10 && digits.startsWith('0')) digits = digits.slice(1);
-  if (digits.length < 8 || digits.length > 9) return null;
-  const id = digits.padStart(9, '0');
-  if (/^0+$/.test(id)) return null; // passes the check digit, but is no one's ח.פ.
-  let sum = 0;
-  for (let k = 0; k < 9; k++) {
-    const p = Number(id[k]) * (k % 2 === 0 ? 1 : 2);
-    sum += p > 9 ? p - 9 : p;
-  }
-  return sum % 10 === 0 ? id : null;
-}
+export { normalizeBusinessId };
 
 /**
  * True when the document prints a ח.פ. AND the invoice's supplier (this tenant's
@@ -881,7 +884,7 @@ export function classifyOcrError(err: unknown): { retryable: boolean; reason?: O
   const name = e.name ?? '';
   const msg = e.message ?? String(err ?? '');
   if (name === 'QuotaExceededError') return { retryable: false, reason: 'quota_exceeded' };
-  // packages/ocr's typed failures (#174). They are reviewable by contract: the
+  // packages/ocr's typed failures (#174, #232). All but 'aborted' are reviewable by contract: the
   // same document fails the same way, so a person reads it — no second paid
   // call. The one exception is a scan download that failed transiently.
   if (isOcrExtractionError(err)) {
@@ -892,6 +895,9 @@ export function classifyOcrError(err: unknown): { retryable: boolean; reason?: O
       case 'refusal':
       case 'invalid_output':
         return { retryable: false, reason: 'unreadable' };
+      case 'aborted':
+        // Our own deadline / cancellation — says nothing about the document.
+        return { retryable: true };
       case 'fetch_failed': {
         const http = Number(/HTTP (\d{3})/.exec(msg)?.[1] ?? NaN);
         if (http === 429 || http >= 500 || /timed? ?out|network error/i.test(msg)) return { retryable: true };
