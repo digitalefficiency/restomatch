@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDb, sql, testDbUrl } from '@restomatch/db';
+import * as views from '../leak-views';
 import { LEAK_FILTER } from '../leak-views';
 import {
   DECISIONS,
@@ -19,7 +20,16 @@ import {
   type Effect,
 } from '../decisions';
 
-const db = createDb(testDbUrl()); // read-only: VALUES rows only, no table writes
+const db = createDb(testDbUrl());
+
+/**
+ * Train-B #211 (merges Tue 10.11) takes MISSING_ON_INVOICE out of LEAK_FILTER (owner 31.10).
+ * Until main has it, LEAK_FILTER still counts that one type; parity is enforced for every
+ * other type now and for all 12 automatically once #211 is on main.
+ */
+const LEAK_FILTER_HAS_211 = (
+  ((views as Record<string, unknown>).LEAK_EXCLUDED_TYPES as readonly string[] | undefined) ?? []
+).includes('MISSING_ON_INVOICE'); // read-only: VALUES rows only, no table writes
 
 type Row = Record<string, unknown>;
 const rowsOf = (res: unknown): Row[] => (Array.isArray(res) ? (res as Row[]) : ((res as { rows?: Row[] }).rows ?? []));
@@ -66,8 +76,8 @@ describe('DECISION_RULES / effectOf: the only status → ₪ map [G-14]', () => 
     expect(effectOf('PRICE_HIGHER', 'tolerate')).toBe('waive'); // system auto-approve: paid, not asked back
     expect(effectOf('PRICE_HIGHER', 'rejected')).toBe('waive'); // the money leaked; not claimed
     expect(effectOf('DUPLICATE_INVOICE', 'reject')).toBe('excluded'); // "not a duplicate"
-    expect(effectOf('MISSING_ON_INVOICE', 'accept')).toBe('waive'); // never claimable (owner 31.10)
     for (const k of DECISION_KEYS) {
+      expect(effectOf('MISSING_ON_INVOICE', k)).toBe('excluded'); // out of the leak (owner 31.10)
       expect(effectOf('PRICE_LOWER', k)).toBe('excluded');
       expect(effectOf('UNORDERED_ARRIVAL', k)).toBe('excluded');
     }
@@ -95,6 +105,10 @@ describe('DECISION_RULES / effectOf: the only status → ₪ map [G-14]', () => 
       CROSS JOIN LATERAL (SELECT x.type, x.resolution_status, x.resolved_at, x.severity) AS d
     `);
     for (const r of rowsOf(res)) {
+      if (!LEAK_FILTER_HAS_211 && r.type === 'MISSING_ON_INVOICE') {
+        expect(r.counts).toBe(true); // main before #211 still counts it
+        continue;
+      }
       expect(r.counts, `${r.type}/${r.key}`).toBe(effectOf(String(r.type), String(r.key)) !== 'excluded');
     }
   });

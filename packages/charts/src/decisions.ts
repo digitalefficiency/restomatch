@@ -13,7 +13,8 @@ type SQL = ReturnType<typeof sql>;
  *  • `undecided` — counts in the leak; nobody decided yet (open / escalated).
  *  • `claim`     — counts in the leak and is asked back: an offset before payment, a
  *                  credit claim after it (owner decision 19).
- *  • `waive`     — counts in the leak (the money did leak) but is not asked back.
+ *  • `waive`     — counts in the leak (the money did leak) but a person waived it
+ *                  (rejected), or the system tolerated it. Never MISSING_ON_INVOICE.
  *  • `excluded`  — not leak at all (an under-charge, a delivery waiting for its PO, a
  *                  "not a duplicate"). Never in the ledger.
  *
@@ -68,14 +69,17 @@ export const DECISION_TO_STATUS: Readonly<Record<Decision, { status: ResolutionS
   tolerate: { status: 'accepted', key: 'tolerated' },
 };
 
-/** Never leak, whatever is decided: an under-charge and a delivery waiting for its PO link. */
-export const NEVER_LEAK_TYPES: ReadonlySet<DiscrepancyType> = new Set<DiscrepancyType>(['PRICE_LOWER', 'UNORDERED_ARRIVAL']);
 /**
- * Leak that is never asked back from a supplier (owner 31.10: an ordered line never
- * billed has nothing to credit). Mirrors lib/claims NEVER_CLAIMABLE_TYPES minus the
- * never-leak types; slice b points lib/claims here.
+ * Never leak, whatever is decided: an under-charge, a delivery waiting for its PO link,
+ * and an ordered line the invoice never billed (owner 31.10: MISSING_ON_INVOICE is out
+ * of the leak and never claimed — train-B #211 adds it to LEAK_FILTER). The same set as
+ * #211's LEAK_EXCLUDED_TYPES; slice b points both at one list.
  */
-export const NEVER_CLAIMED_LEAK_TYPES: ReadonlySet<DiscrepancyType> = new Set<DiscrepancyType>(['MISSING_ON_INVOICE']);
+export const NEVER_LEAK_TYPES: ReadonlySet<DiscrepancyType> = new Set<DiscrepancyType>([
+  'PRICE_LOWER',
+  'UNORDERED_ARRIVAL',
+  'MISSING_ON_INVOICE',
+]);
 
 export interface DecisionRule {
   /** Decisions a person (or, for `tolerate`, the system) may take on this type. */
@@ -98,13 +102,12 @@ function ruleFor(type: DiscrepancyType): DecisionRule {
   if (NEVER_LEAK_TYPES.has(type)) {
     return {
       allowed: HUMAN,
-      // A delivery with no PO is resolved by linking it; an under-charge is simply acknowledged.
+      // A delivery with no PO is resolved by linking it; the others are acknowledged.
       primary: type === 'UNORDERED_ARRIVAL' ? 'resolve' : 'accept',
       toStatus: TO_STATUS,
       effect: { open: 'excluded', escalated: 'excluded', accepted: 'excluded', resolved: 'excluded', rejected: 'excluded', tolerated: 'excluded' },
     };
   }
-  const decided: Effect = NEVER_CLAIMED_LEAK_TYPES.has(type) ? 'waive' : 'claim';
   return {
     allowed: [...HUMAN, 'tolerate'],
     primary: 'accept',
@@ -112,8 +115,8 @@ function ruleFor(type: DiscrepancyType): DecisionRule {
     effect: {
       open: 'undecided',
       escalated: 'undecided',
-      accepted: decided,
-      resolved: decided,
+      accepted: 'claim',
+      resolved: 'claim',
       tolerated: 'waive',
       // "Not a duplicate": no money was at risk — it leaves the leak (LEAK_FILTER).
       rejected: type === 'DUPLICATE_INVOICE' ? 'excluded' : 'waive',

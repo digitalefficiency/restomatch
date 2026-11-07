@@ -13,6 +13,7 @@ import {
   invoiceLines,
 } from '@restomatch/db';
 import { computeLeakHero } from '../leak-hero';
+import * as views from '../leak-views';
 import { computeLeakSummary } from '../leak-views';
 import { caughtBefore, computeLeakLedger, computeLeakPartition, parseBasis } from '../leak-ledger';
 import { MONEY_STATES, type ClaimStatus } from '../decisions';
@@ -119,6 +120,11 @@ async function setup() {
   return { rid: r!.id, invoice };
 }
 
+/** Train-B #211 takes MISSING_ON_INVOICE out of the hero; main counts it until Tue 10.11. */
+const HERO_HAS_211 = (
+  ((views as Record<string, unknown>).LEAK_EXCLUDED_TYPES as readonly string[] | undefined) ?? []
+).includes('MISSING_ON_INVOICE');
+
 const heroAgorot = async (rid: string) => Math.round((await computeLeakHero(db, rid, { now: NOW })).leakIls * 100);
 
 describe('leak ledger · the money-state partition [G-14]', () => {
@@ -168,12 +174,14 @@ describe('leak ledger · the money-state partition [G-14]', () => {
       disputed: 1300,
       credited: 1400,
       recovered: 1500,
-      waived: 2000 + 500 + 1600 + 1700,
+      waived: 2000 + 500 + 1600, // never MISSING_ON_INVOICE (owner 31.10)
     });
-    expect(p.totalAgorot).toBe(p.heroAgorot);
-    expect(p.driftAgorot).toBe(0);
+    // Σ states = the post-#211 hero to the agora; before #211 main's hero still adds the ₪17.00.
+    const missing = HERO_HAS_211 ? 0 : 1700;
     expect(p.heroAgorot).toBe(await heroAgorot(rid));
-    expect(p.rowCount).toBe(14); // info + PRICE_LOWER excluded
+    expect(p.heroAgorot - missing).toBe(p.totalAgorot);
+    expect(p.driftAgorot).toBe(missing);
+    expect(p.rowCount).toBe(13); // info, PRICE_LOWER and MISSING_ON_INVOICE never enter
     expect(Object.keys(p.states).sort()).toEqual([...MONEY_STATES].sort());
 
     const last = await computeLeakPartition(db, rid, { period: 'last_month', now: NOW });
@@ -236,6 +244,24 @@ describe('leak ledger · the money-state partition [G-14]', () => {
       ['PRICE_HIGHER', 0, 'undecided'],
     ]);
     expect((await computeLeakPartition(db, rid, SPEC)).driftAgorot).toBe(0);
+  });
+
+  it('MISSING_ON_INVOICE never enters the partition, whatever was decided (owner 31.10)', async () => {
+    const { rid, invoice } = await setup();
+    await invoice({
+      inclVat: '1000.00',
+      d: [
+        { type: 'MISSING_ON_INVOICE', delta: '17.00' },
+        { type: 'MISSING_ON_INVOICE', delta: '18.00', status: 'accepted' },
+        { type: 'MISSING_ON_INVOICE', delta: '19.00', status: 'rejected' },
+        { type: 'PRICE_HIGHER', delta: '10.00' },
+      ],
+    });
+    const rows = await computeLeakLedger(db, rid, SPEC);
+    expect(rows.map((r) => r.type)).toEqual(['PRICE_HIGHER']);
+    const p = await computeLeakPartition(db, rid, SPEC);
+    expect(p.totalAgorot).toBe(1000);
+    expect(p.driftAgorot).toBe(HERO_HAS_211 ? 0 : 1700 + 1800 + 1900);
   });
 
   it('"not a duplicate" leaves the ledger, like the hero', async () => {

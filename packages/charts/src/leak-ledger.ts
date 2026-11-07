@@ -29,7 +29,10 @@ type SQL = ReturnType<typeof sql>;
  * report's cappedIssues. capped = LEAST(want, GREATEST(0, cap − Σ wants before)).
  * So Σ capped per invoice = LEAST(Σ wants, cap), which equals the hero's
  * LEAST(Σ|Δ|, cap) unless a claim holds less than its |Δ| while cap is still free —
- * that gap is reported as `driftAgorot`, never hidden.
+ * that gap is reported as `driftAgorot`, never hidden. Rows are LEAK_FILTER ∩ an effect
+ * other than `excluded` (decisions.ts), so MISSING_ON_INVOICE (owner 31.10) never enters;
+ * until train-B #211 removes it from LEAK_FILTER too, main's hero still counts it and the
+ * difference shows as drift.
  *
  * INTERIMS (removed in slice b):
  *  • paid_at: H-03 adds `invoices.paid_at` (deploy Tue 24.11). It is read
@@ -119,7 +122,9 @@ export function leakLedgerSql(restaurantId: string, spec: ViewSpec): SQL {
       JOIN match_runs mr ON mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId}
       JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
       LEFT JOIN recovery_claims rc ON rc.discrepancy_id = d.id AND rc.restaurant_id = ${restaurantId}
-      WHERE ${LF}
+      -- decisions.ts decides what is leak; LEAK_FILTER (main) may still count a type the
+      -- owner took out (MISSING_ON_INVOICE until train-B #211): such rows never enter.
+      WHERE ${LF} AND ${effectSql()} <> 'excluded'
     ),
     w AS (
       SELECT x.*, ${TIER_SQL} AS tier,
