@@ -59,7 +59,7 @@ begin
     'export_runs','export_run_invoices','consolidated_invoice_links',
     'leak_month_snapshots','leak_month_corrections',
     'supplier_bank_accounts','supplier_bank_account_changes',
-    'push_subscriptions','notification_prefs'
+    'push_subscriptions','notification_prefs','notification_settings'
   ] loop
     if exists (
       select 1 from information_schema.columns

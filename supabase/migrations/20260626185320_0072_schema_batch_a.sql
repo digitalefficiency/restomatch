@@ -30,12 +30,13 @@
 --                        a consolidated invoice (חשבונית ריכוז) linked to the goods
 --                        receipts it covers ('proposal_accept' | 'manual').
 -- leak_month_snapshots   the frozen leak of a closed month (agorot + payload), per
---                        version. APPEND-ONLY (trigger: no UPDATE, and no DELETE
---                        from the tenant role): a printed month never
---                        restates; a re-close writes version n+1.
+--                        version, with reason (required from version 2) and author.
+--                        APPEND-ONLY (trigger) and owner-written only (rls.ts revokes
+--                        I/U/D from the tenant role): a printed month never restates;
+--                        a re-close writes version n+1.
 -- leak_month_corrections a late change against a frozen snapshot: signed delta
 --                        (agorot), a mandatory reason, and the entity it came from.
---                        APPEND-ONLY (trigger).
+--                        APPEND-ONLY (trigger), owner-written only (rls.ts).
 -- recovery_claims (+seq_no)
 --                        a per-restaurant claim reference number (nullable; unique
 --                        per restaurant). Open point: may be redundant with 0071's
@@ -43,27 +44,32 @@
 -- restaurants (+address, contact_phone)
 --                        printed on the claim letter.
 -- supplier_bank_accounts the supplier's bank details: bank/branch codes, the account
---                        number ENCRYPTED by the app (proposed: an AES-256-GCM helper
---                        in @restomatch/crypto, as apps/web/lib/totp.ts does) in
---                        account_number_enc, last4 for display, holder,
---                        who verified it and when. One ACTIVE account per supplier.
+--                        number as a versioned ciphertext envelope ('v<n>:…', CHECK;
+--                        a clear number is refused), last4 for display, holder, who
+--                        verified it and when. The details are IMMUTABLE (trigger):
+--                        only active / verified_* / holder_name change; a new account
+--                        is a new row. One ACTIVE account per (restaurant, supplier).
 -- supplier_bank_account_changes
---                        the change audit (BEC fraud): before / after as MASKED jsonb
---                        (a CHECK refuses any account-number key). APPEND-ONLY.
+--                        the change audit (BEC fraud), written BY TRIGGER on every
+--                        insert/change, changed_by = the session user. before/after
+--                        are MASKED jsonb, enforced by a key ALLOWLIST CHECK
+--                        (bank/branch, last4, holder, active, verified_*). APPEND-ONLY.
 -- suppliers (+min_order_ils, delivery_fee_ils)
 --                        minimum order and delivery fee, shekels, >= 0.
 -- po_lines / invoice_lines (+line_no)
 --                        the printed line order (1-based), indexed with the parent.
 -- supplier_catalog_items (+effective_from)
 --                        the date a price-list row takes effect.
--- push_subscriptions     a Web Push endpoint per user device (unique per restaurant).
--- users (+whatsapp_opt_in, whatsapp_opt_in_at, whatsapp_opt_in_source)
---                        WhatsApp consent. The _at/_source pair is the PROPOSED
---                        stronger evidence (the human decides). The tenant app role
---                        has no INSERT/UPDATE/DELETE on users (rls.ts): the only
---                        writer is the auth/owner connection.
--- notification_prefs     per user × channel × event kind: on/off, quiet hours
---                        (23:00-06:00), Shabbat, daily cap (6, 1..50).
+-- push_subscriptions     a Web Push endpoint per user device (unique per restaurant);
+--                        a member reads and writes only their own (RESTRICTIVE).
+-- users (+whatsapp_opt_in, _at, _source, _notice_version)
+--                        WhatsApp consent; _at/_source/_notice_version = the last
+--                        change. Opting in needs _at + _source (CHECK); an admin may
+--                        only revoke. The tenant app role has no INSERT/UPDATE/DELETE
+--                        on users (rls.ts): the only writer is the auth/owner connection.
+-- notification_prefs     per user × channel × event kind: on/off (own rows only).
+-- notification_settings  ONE row per (restaurant, user): quiet hours (23:00-06:00),
+--                        Shabbat, holidays, daily cap (6, 1..50) (own rows only).
 --
 -- Tenant safety: the 0057/0070/0071 pattern. Every new table carries restaurant_id
 -- NOT NULL, UNIQUE (id, restaurant_id), SAME-TENANT composite FKs to tenant tables,
@@ -97,11 +103,13 @@
 -- Additive only, idempotent (IF NOT EXISTS / guarded DO blocks); a second run is a
 -- no-op. Rollback = the ordered procedure in the PR body (app first, then this SQL,
 -- then the tracker rows, with the rls/0002 list reverted in the same revert):
---   DROP TABLE notification_prefs, push_subscriptions, supplier_bank_account_changes,
+--   DROP TABLE notification_settings, notification_prefs, push_subscriptions, supplier_bank_account_changes,
 --     supplier_bank_accounts, leak_month_corrections, leak_month_snapshots,
 --     consolidated_invoice_links, export_run_invoices, export_runs;  -- their triggers go with them
---   DROP FUNCTION public.restomatch_append_only();                  -- after the triggers
+--   DROP FUNCTION public.restomatch_append_only(), public.restomatch_bank_account_guard(),
+--     public.restomatch_bank_account_audit();                       -- after the triggers
 --   ALTER TABLE goods_receipts DROP CONSTRAINT goods_receipts_id_restaurant_id_key;
+--   (rls.ts: drop the leak_month_* revoke in the same revert.)
 --   ALTER TABLE invoices DROP CONSTRAINT invoices_paid_pair_check,
 --     DROP CONSTRAINT invoices_payment_requires_paid_check, DROP COLUMN paid_at,
 --     DROP COLUMN paid_amount, DROP COLUMN payment_method, DROP COLUMN payment_ref;
@@ -111,7 +119,8 @@
 --   ALTER TABLE po_lines DROP COLUMN line_no; ALTER TABLE invoice_lines DROP COLUMN line_no;
 --   ALTER TABLE supplier_catalog_items DROP COLUMN effective_from;
 --   ALTER TABLE users DROP COLUMN whatsapp_opt_in, DROP COLUMN whatsapp_opt_in_at,
---     DROP COLUMN whatsapp_opt_in_source;
+--     DROP CONSTRAINT users_whatsapp_consent_check, DROP COLUMN whatsapp_opt_in_source,
+--     DROP COLUMN whatsapp_opt_in_notice_version;
 --   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1782500000000;
 --   DELETE FROM supabase_migrations.schema_migrations WHERE version IN ('20260626185320', '20260626185321');
 
@@ -203,6 +212,7 @@ BEGIN
       CHECK ("paid_at" IS NOT NULL OR ("payment_method" IS NULL AND "payment_ref" IS NULL));
   END IF;
 END $$;--> statement-breakpoint
+COMMENT ON COLUMN "invoices"."paid_at" IS 'When the money left: the business payment date. When only a date is known it is stored as 00:00 Asia/Jerusalem of the pay day. The recording instant lives in audit_log.at. "Caught before payment" compares Israel calendar days (decision day < pay day). Never backfilled (0072, H-03).';--> statement-breakpoint
 
 -- ── export_runs + export_run_invoices ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS "export_runs" (
@@ -219,7 +229,7 @@ CREATE TABLE IF NOT EXISTS "export_runs" (
   "skipped_count" integer DEFAULT 0 NOT NULL,
   "replaced_chars" integer DEFAULT 0 NOT NULL,
   CONSTRAINT "export_runs_id_restaurant_id_key" UNIQUE ("id", "restaurant_id"),
-  CONSTRAINT "export_runs_format_check" CHECK ("format" IN ('hashavshevet', 'priority', 'rivhit', 'csv')),
+  CONSTRAINT "export_runs_format_check" CHECK ("format" IN ('hashavshevet', 'priority', 'rivhit', 'csv', 'accountant_pack')),
   CONSTRAINT "export_runs_mode_check" CHECK ("mode" IN ('new_only', 'all')),
   CONSTRAINT "export_runs_range_check" CHECK ("range_to" >= "range_from"),
   CONSTRAINT "export_runs_counts_check" CHECK ("invoice_count" >= 0 AND "skipped_count" >= 0 AND "replaced_chars" >= 0)
@@ -272,6 +282,7 @@ CREATE INDEX IF NOT EXISTS "consolidated_invoice_links_invoice_idx" ON "consolid
 CREATE INDEX IF NOT EXISTS "consolidated_invoice_links_gr_idx" ON "consolidated_invoice_links" USING btree ("goods_receipt_id", "restaurant_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "consolidated_invoice_links_linked_by_idx" ON "consolidated_invoice_links" USING btree ("linked_by");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "consolidated_invoice_links_restaurant_idx" ON "consolidated_invoice_links" USING btree ("restaurant_id", "linked_at");--> statement-breakpoint
+COMMENT ON TABLE "consolidated_invoice_links" IS 'A consolidated invoice linked to a goods receipt it covers (0072, H-03). One receipt MAY be linked to two consolidated invoices: the schema allows it on purpose, and the app must raise that as a billed-twice finding. Whether to forbid it (UNIQUE goods_receipt_id) is W3-11''s call, carried by H-04.';--> statement-breakpoint
 
 -- ── leak_month_snapshots + leak_month_corrections (append-only) ───────────────
 CREATE TABLE IF NOT EXISTS "leak_month_snapshots" (
@@ -282,14 +293,19 @@ CREATE TABLE IF NOT EXISTS "leak_month_snapshots" (
   "computed_at" timestamp with time zone DEFAULT now() NOT NULL,
   "leak_agorot" bigint NOT NULL,
   "payload" jsonb DEFAULT '{}'::jsonb NOT NULL,
+  -- Why this version exists. Version 1 is the first close; any re-close must say why.
+  "reason" text,
+  "created_by" uuid REFERENCES "users"("id") ON DELETE set null,
   CONSTRAINT "leak_month_snapshots_id_restaurant_id_key" UNIQUE ("id", "restaurant_id"),
   CONSTRAINT "leak_month_snapshots_month_version_key" UNIQUE ("restaurant_id", "month", "version"),
   CONSTRAINT "leak_month_snapshots_month_day1_check" CHECK (EXTRACT(DAY FROM "month") = 1),
   CONSTRAINT "leak_month_snapshots_version_check" CHECK ("version" >= 1),
-  CONSTRAINT "leak_month_snapshots_leak_check" CHECK ("leak_agorot" >= 0)
+  CONSTRAINT "leak_month_snapshots_leak_check" CHECK ("leak_agorot" >= 0),
+  CONSTRAINT "leak_month_snapshots_reason_check" CHECK ("version" = 1 OR btrim(coalesce("reason", '')) <> '')
 );--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "leak_month_snapshots_created_by_idx" ON "leak_month_snapshots" USING btree ("created_by");--> statement-breakpoint
 DROP TRIGGER IF EXISTS "leak_month_snapshots_append_only" ON "leak_month_snapshots";--> statement-breakpoint
-CREATE TRIGGER "leak_month_snapshots_append_only" BEFORE UPDATE OR DELETE ON "leak_month_snapshots" FOR EACH ROW EXECUTE FUNCTION public.restomatch_append_only();--> statement-breakpoint
+CREATE TRIGGER "leak_month_snapshots_append_only" BEFORE UPDATE OR DELETE ON "leak_month_snapshots" FOR EACH ROW EXECUTE FUNCTION public.restomatch_append_only('created_by');--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "leak_month_corrections" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE cascade,
@@ -329,7 +345,9 @@ CREATE TABLE IF NOT EXISTS "supplier_bank_accounts" (
   "supplier_id" uuid NOT NULL,
   "bank_code" varchar(3) NOT NULL,
   "branch_code" varchar(4) NOT NULL,
-  -- Ciphertext only (@restomatch/crypto envelope). Never the plain number.
+  -- Ciphertext only, never the plain number. Envelope (W2-11's writer):
+  -- encryptField() in @restomatch/crypto -> 'v1:<kid>:<iv>:<ct>:<tag>' (AES-256-GCM),
+  -- key = BANK_ENC_KEY (separate from AUTH_ENC_KEY), AAD = '<restaurant_id>:<supplier_id>'.
   "account_number_enc" text NOT NULL,
   "account_last4" varchar(4) NOT NULL,
   "holder_name" text,
@@ -346,11 +364,13 @@ CREATE TABLE IF NOT EXISTS "supplier_bank_accounts" (
   CONSTRAINT "supplier_bank_accounts_bank_code_check" CHECK ("bank_code" ~ '^[0-9]{2,3}$'),
   CONSTRAINT "supplier_bank_accounts_branch_code_check" CHECK ("branch_code" ~ '^[0-9]{3,4}$'),
   CONSTRAINT "supplier_bank_accounts_last4_check" CHECK ("account_last4" ~ '^[0-9]{1,4}$'),
-  CONSTRAINT "supplier_bank_accounts_enc_nonempty_check" CHECK (btrim("account_number_enc") <> '')
+  -- A clear number is refused: only a versioned envelope ('v<n>:…') is stored.
+  CONSTRAINT "supplier_bank_accounts_enc_envelope_check" CHECK ("account_number_enc" ~ '^v[0-9]+:')
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "supplier_bank_accounts_supplier_idx" ON "supplier_bank_accounts" USING btree ("supplier_id", "restaurant_id");--> statement-breakpoint
--- One ACTIVE account per supplier: a change deactivates the old row and inserts a new one.
-CREATE UNIQUE INDEX IF NOT EXISTS "supplier_bank_accounts_one_active" ON "supplier_bank_accounts" USING btree ("supplier_id") WHERE "active";--> statement-breakpoint
+-- One ACTIVE account per (restaurant, supplier): a change of account = a new row + the
+-- old one deactivated (the details themselves are immutable, see the guard below).
+CREATE UNIQUE INDEX IF NOT EXISTS "supplier_bank_accounts_one_active" ON "supplier_bank_accounts" USING btree ("restaurant_id", "supplier_id") WHERE "active";--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "supplier_bank_accounts_restaurant_idx" ON "supplier_bank_accounts" USING btree ("restaurant_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "supplier_bank_accounts_verified_by_idx" ON "supplier_bank_accounts" USING btree ("verified_by");--> statement-breakpoint
 DROP TRIGGER IF EXISTS "supplier_bank_accounts_set_updated_at" ON "supplier_bank_accounts";--> statement-breakpoint
@@ -367,10 +387,17 @@ CREATE TABLE IF NOT EXISTS "supplier_bank_account_changes" (
   -- The audit outlives nothing it describes: its account cannot be deleted (NO ACTION).
   CONSTRAINT "supplier_bank_account_changes_account_same_tenant_fk" FOREIGN KEY ("bank_account_id", "restaurant_id")
     REFERENCES "public"."supplier_bank_accounts"("id", "restaurant_id") ON DELETE no action,
-  -- MASKED only: neither side may carry the account number or its ciphertext.
+  -- MASKED only, by ALLOWLIST: each side is an object whose keys are only the masked
+  -- fields below (nothing nested can smuggle a number in under another key), and
+  -- account_last4 is at most 4 digits. The account number / ciphertext can never appear.
   CONSTRAINT "supplier_bank_account_changes_masked_check" CHECK (
-    NOT (coalesce("before", '{}'::jsonb) ?| ARRAY['account_number', 'account_number_enc', 'accountNumber', 'accountNumberEnc'])
-    AND NOT ("after" ?| ARRAY['account_number', 'account_number_enc', 'accountNumber', 'accountNumberEnc'])
+    ("before" IS NULL OR (
+      jsonb_typeof("before") = 'object'
+      AND "before" - ARRAY['bank_code', 'branch_code', 'account_last4', 'holder_name', 'active', 'verified_by', 'verified_at'] = '{}'::jsonb
+      AND coalesce("before" ->> 'account_last4', '0') ~ '^[0-9]{1,4}$'))
+    AND jsonb_typeof("after") = 'object'
+    AND "after" - ARRAY['bank_code', 'branch_code', 'account_last4', 'holder_name', 'active', 'verified_by', 'verified_at'] = '{}'::jsonb
+    AND coalesce("after" ->> 'account_last4', '0') ~ '^[0-9]{1,4}$'
   )
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "supplier_bank_account_changes_account_idx" ON "supplier_bank_account_changes" USING btree ("bank_account_id", "restaurant_id");--> statement-breakpoint
@@ -378,6 +405,54 @@ CREATE INDEX IF NOT EXISTS "supplier_bank_account_changes_changed_by_idx" ON "su
 CREATE INDEX IF NOT EXISTS "supplier_bank_account_changes_restaurant_idx" ON "supplier_bank_account_changes" USING btree ("restaurant_id", "changed_at");--> statement-breakpoint
 DROP TRIGGER IF EXISTS "supplier_bank_account_changes_append_only" ON "supplier_bank_account_changes";--> statement-breakpoint
 CREATE TRIGGER "supplier_bank_account_changes_append_only" BEFORE UPDATE OR DELETE ON "supplier_bank_account_changes" FOR EACH ROW EXECUTE FUNCTION public.restomatch_append_only('changed_by');--> statement-breakpoint
+-- Bank details are IMMUTABLE once written: only active / verified_by / verified_at /
+-- holder_name (and updated_at) may change. A different account is a new row.
+CREATE OR REPLACE FUNCTION public.restomatch_bank_account_guard() RETURNS trigger
+  LANGUAGE plpgsql
+  AS $$
+BEGIN
+  IF NEW.restaurant_id IS DISTINCT FROM OLD.restaurant_id
+     OR NEW.supplier_id IS DISTINCT FROM OLD.supplier_id
+     OR NEW.bank_code IS DISTINCT FROM OLD.bank_code
+     OR NEW.branch_code IS DISTINCT FROM OLD.branch_code
+     OR NEW.account_number_enc IS DISTINCT FROM OLD.account_number_enc
+     OR NEW.account_last4 IS DISTINCT FROM OLD.account_last4
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'supplier_bank_accounts: bank details are immutable; insert a new account and deactivate this one'
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END
+$$;--> statement-breakpoint
+DROP TRIGGER IF EXISTS "supplier_bank_accounts_immutable" ON "supplier_bank_accounts";--> statement-breakpoint
+CREATE TRIGGER "supplier_bank_accounts_immutable" BEFORE UPDATE ON "supplier_bank_accounts" FOR EACH ROW EXECUTE FUNCTION public.restomatch_bank_account_guard();--> statement-breakpoint
+-- Every insert and every change writes the MASKED audit row itself (BEC fraud): the
+-- app cannot forget it, and changed_by is the session user (app.current_user_id(),
+-- NULL on the owner connection). An UPDATE that changes no masked field logs nothing.
+CREATE OR REPLACE FUNCTION public.restomatch_bank_account_audit() RETURNS trigger
+  LANGUAGE plpgsql
+  AS $$
+DECLARE
+  b jsonb;
+  a jsonb := jsonb_build_object('bank_code', NEW.bank_code, 'branch_code', NEW.branch_code,
+    'account_last4', NEW.account_last4, 'holder_name', NEW.holder_name, 'active', NEW.active,
+    'verified_by', NEW.verified_by, 'verified_at', NEW.verified_at);
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    b := jsonb_build_object('bank_code', OLD.bank_code, 'branch_code', OLD.branch_code,
+      'account_last4', OLD.account_last4, 'holder_name', OLD.holder_name, 'active', OLD.active,
+      'verified_by', OLD.verified_by, 'verified_at', OLD.verified_at);
+    IF b = a THEN
+      RETURN NULL;
+    END IF;
+  END IF;
+  INSERT INTO public.supplier_bank_account_changes (restaurant_id, bank_account_id, changed_by, before, after)
+  VALUES (NEW.restaurant_id, NEW.id, app.current_user_id(), b, a);
+  RETURN NULL;
+END
+$$;--> statement-breakpoint
+DROP TRIGGER IF EXISTS "supplier_bank_accounts_audit" ON "supplier_bank_accounts";--> statement-breakpoint
+CREATE TRIGGER "supplier_bank_accounts_audit" AFTER INSERT OR UPDATE ON "supplier_bank_accounts" FOR EACH ROW EXECUTE FUNCTION public.restomatch_bank_account_audit();--> statement-breakpoint
 
 -- ── suppliers min order / fee; line order; price-list date ────────────────────
 ALTER TABLE "suppliers" ADD COLUMN IF NOT EXISTS "min_order_ils" numeric(12, 2)
@@ -416,6 +491,18 @@ ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "whatsapp_opt_in" boolean DEFAULT f
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "whatsapp_opt_in_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "whatsapp_opt_in_source" varchar(16)
   CONSTRAINT "users_whatsapp_opt_in_source_check" CHECK ("whatsapp_opt_in_source" IN ('settings', 'onboarding', 'whatsapp_reply', 'admin'));--> statement-breakpoint
+-- The consent notice the user saw (e.g. '2026-11'); _at / _source / _notice_version
+-- describe the LAST change (opt in or revoke). Per-binding consent: WA-03's wa_bindings.
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "whatsapp_opt_in_notice_version" varchar(32);--> statement-breakpoint
+-- Opting in needs its evidence (when + where), and an admin may only REVOKE.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_whatsapp_consent_check') THEN
+    ALTER TABLE "users" ADD CONSTRAINT "users_whatsapp_consent_check" CHECK (
+      NOT "whatsapp_opt_in"
+      OR ("whatsapp_opt_in_at" IS NOT NULL AND "whatsapp_opt_in_source" IS NOT NULL AND "whatsapp_opt_in_source" <> 'admin'));
+  END IF;
+END $$;--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "notification_prefs" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE cascade,
@@ -423,27 +510,46 @@ CREATE TABLE IF NOT EXISTS "notification_prefs" (
   "channel" varchar(16) NOT NULL,
   "event_kind" varchar(48) NOT NULL,
   "enabled" boolean DEFAULT true NOT NULL,
-  "quiet_start" time DEFAULT '23:00' NOT NULL,
-  "quiet_end" time DEFAULT '06:00' NOT NULL,
-  "observe_shabbat" boolean DEFAULT true NOT NULL,
-  "daily_cap" smallint DEFAULT 6 NOT NULL,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
   CONSTRAINT "notification_prefs_id_restaurant_id_key" UNIQUE ("id", "restaurant_id"),
   CONSTRAINT "notification_prefs_user_channel_kind_key" UNIQUE ("restaurant_id", "user_id", "channel", "event_kind"),
   CONSTRAINT "notification_prefs_channel_check" CHECK ("channel" IN ('email', 'whatsapp', 'push')),
-  CONSTRAINT "notification_prefs_event_kind_nonempty_check" CHECK (btrim("event_kind") <> ''),
-  CONSTRAINT "notification_prefs_daily_cap_check" CHECK ("daily_cap" BETWEEN 1 AND 50)
+  CONSTRAINT "notification_prefs_event_kind_nonempty_check" CHECK (btrim("event_kind") <> '')
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "notification_prefs_user_idx" ON "notification_prefs" USING btree ("user_id");--> statement-breakpoint
 DROP TRIGGER IF EXISTS "notification_prefs_set_updated_at" ON "notification_prefs";--> statement-breakpoint
 CREATE TRIGGER "notification_prefs_set_updated_at" BEFORE UPDATE ON "notification_prefs" FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();--> statement-breakpoint
+-- ONE quiet-hours rule per person per restaurant (H-05 and the WhatsApp track read
+-- this; restaurant-wide defaults stay in restaurants.settings). Owner defaults:
+-- quiet 23:00-06:00, Shabbat and holidays observed, at most 6 a day (1..50).
+CREATE TABLE IF NOT EXISTS "notification_settings" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE cascade,
+  "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE cascade,
+  "quiet_start" time DEFAULT '23:00' NOT NULL,
+  "quiet_end" time DEFAULT '06:00' NOT NULL,
+  "observe_shabbat" boolean DEFAULT true NOT NULL,
+  "observe_holidays" boolean DEFAULT true NOT NULL,
+  "daily_cap" smallint DEFAULT 6 NOT NULL,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT "notification_settings_id_restaurant_id_key" UNIQUE ("id", "restaurant_id"),
+  CONSTRAINT "notification_settings_user_key" UNIQUE ("restaurant_id", "user_id"),
+  CONSTRAINT "notification_settings_daily_cap_check" CHECK ("daily_cap" BETWEEN 1 AND 50)
+);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "notification_settings_user_idx" ON "notification_settings" USING btree ("user_id");--> statement-breakpoint
+DROP TRIGGER IF EXISTS "notification_settings_set_updated_at" ON "notification_settings";--> statement-breakpoint
+CREATE TRIGGER "notification_settings_set_updated_at" BEFORE UPDATE ON "notification_settings" FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();--> statement-breakpoint
 
--- ── RLS on the nine new tenant tables (also in rls/0002's list) ───────────────
+-- ── RLS on the ten new tenant tables (also in rls/0002's list) ───────────────
 CREATE SCHEMA IF NOT EXISTS app;--> statement-breakpoint
 CREATE OR REPLACE FUNCTION app.current_restaurant_id() RETURNS uuid
   LANGUAGE sql STABLE
   AS $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$;--> statement-breakpoint
+CREATE OR REPLACE FUNCTION app.current_user_id() RETURNS uuid
+  LANGUAGE sql STABLE
+  AS $$ select nullif(current_setting('app.current_user_id', true), '')::uuid $$;--> statement-breakpoint
 ALTER TABLE "export_runs" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "export_runs_tenant" ON "export_runs";--> statement-breakpoint
 CREATE POLICY "export_runs_tenant" ON "export_runs" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint
@@ -470,8 +576,28 @@ DROP POLICY IF EXISTS "push_subscriptions_tenant" ON "push_subscriptions";--> st
 CREATE POLICY "push_subscriptions_tenant" ON "push_subscriptions" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint
 ALTER TABLE "notification_prefs" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "notification_prefs_tenant" ON "notification_prefs";--> statement-breakpoint
-CREATE POLICY "notification_prefs_tenant" ON "notification_prefs" USING ("restaurant_id" = app.current_restaurant_id());
+CREATE POLICY "notification_prefs_tenant" ON "notification_prefs" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint
+ALTER TABLE "notification_settings" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "notification_settings_tenant" ON "notification_settings";--> statement-breakpoint
+CREATE POLICY "notification_settings_tenant" ON "notification_settings" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint
+-- Own-user only (RESTRICTIVE, on top of the tenant policy): a member writes only their
+-- own device / prefs / settings, and sees only their own push devices. The owner's
+-- view of everyone's devices goes through the owner connection.
+DROP POLICY IF EXISTS "push_subscriptions_own_select" ON "push_subscriptions";--> statement-breakpoint
+CREATE POLICY "push_subscriptions_own_select" ON "push_subscriptions" AS RESTRICTIVE FOR SELECT USING ("user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "push_subscriptions_own_insert" ON "push_subscriptions";--> statement-breakpoint
+CREATE POLICY "push_subscriptions_own_insert" ON "push_subscriptions" AS RESTRICTIVE FOR INSERT WITH CHECK ("user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "push_subscriptions_own_update" ON "push_subscriptions";--> statement-breakpoint
+CREATE POLICY "push_subscriptions_own_update" ON "push_subscriptions" AS RESTRICTIVE FOR UPDATE USING ("user_id" = app.current_user_id()) WITH CHECK ("user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "notification_prefs_own_insert" ON "notification_prefs";--> statement-breakpoint
+CREATE POLICY "notification_prefs_own_insert" ON "notification_prefs" AS RESTRICTIVE FOR INSERT WITH CHECK ("user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "notification_prefs_own_update" ON "notification_prefs";--> statement-breakpoint
+CREATE POLICY "notification_prefs_own_update" ON "notification_prefs" AS RESTRICTIVE FOR UPDATE USING ("user_id" = app.current_user_id()) WITH CHECK ("user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "notification_settings_own_insert" ON "notification_settings";--> statement-breakpoint
+CREATE POLICY "notification_settings_own_insert" ON "notification_settings" AS RESTRICTIVE FOR INSERT WITH CHECK ("user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "notification_settings_own_update" ON "notification_settings";--> statement-breakpoint
+CREATE POLICY "notification_settings_own_update" ON "notification_settings" AS RESTRICTIVE FOR UPDATE USING ("user_id" = app.current_user_id()) WITH CHECK ("user_id" = app.current_user_id());
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '0ebe671c3db85dcd3912b63b64431e6e2da5eb3da77c1ca8ab4425afddab9358', 1782500000000
+select '1a01a342490d5fe5d65026ea9931b7778bef0ec8d9ba6b45f59250df253f00b9', 1782500000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782500000000);

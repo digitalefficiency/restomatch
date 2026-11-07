@@ -19,6 +19,7 @@ import {
   leakMonthCorrections,
   leakMonthSnapshots,
   notificationPrefs,
+  notificationSettings,
   pushSubscriptions,
   supplierBankAccountChanges,
   supplierBankAccounts,
@@ -927,10 +928,19 @@ describe('0071 (G-03) payment_deductions (raw RLS)', () => {
   });
 });
 
-// ── 0072 (wave 2, H-03): the nine new tenant tables. Add-only probes, one block per
+// ── 0072 (wave 2, H-03): the ten new tenant tables. Add-only probes, one block per
 // table, same template as the 0071 blocks: GUC=A sees only A; a cross-tenant INSERT
 // is refused; an UPDATE aimed at B's rows touches nothing. Parent rows (export run,
-// snapshot, bank account) are seeded per tenant on the owner connection.
+// snapshot, bank account) are seeded per tenant on the owner connection. Tables with
+// own-user RESTRICTIVE policies run as a member (restaurant + user GUC, as
+// memberProcedure does) and also refuse a row for another user. The frozen months
+// are owner-written only (rls.ts revoke), so the tenant role gets "permission denied".
+type H03Tx = Parameters<Parameters<typeof withRestaurant<unknown>>[2]>[0];
+const asMember = <T>(restaurantId: string, userId: string, fn: (tx: H03Tx) => Promise<T>) =>
+  withRestaurant(appDb, restaurantId, async (tx) => {
+    await tx.execute(sql`select set_config('app.current_user_id', ${userId}, true)`);
+    return fn(tx);
+  });
 
 describe('0072 (H-03) export_runs (raw RLS)', () => {
   beforeAll(async () => {
@@ -1060,15 +1070,21 @@ describe('0072 (H-03) leak_month_snapshots (raw RLS)', () => {
       withRestaurant(appDb, A.restaurantId, (tx) =>
         tx.insert(leakMonthSnapshots).values({ restaurantId: B.restaurantId, month: '2026-08-01', leakAgorot: 1 }),
       ),
-    ).rejects.toThrow(/row-level security/);
-    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
-      tx
-        .update(leakMonthSnapshots)
-        .set({ leakAgorot: 0 })
-        .where(eq(leakMonthSnapshots.restaurantId, B.restaurantId))
-        .returning({ id: leakMonthSnapshots.id }),
-    );
-    expect(updated).toHaveLength(0);
+    ).rejects.toThrow(/row-level security|permission denied/);
+    // Revoked for the tenant role (rls.ts): an UPDATE is refused outright.
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.update(leakMonthSnapshots).set({ leakAgorot: 0 }).where(eq(leakMonthSnapshots.restaurantId, B.restaurantId)),
+      ),
+    ).rejects.toThrow(/permission denied/);
+  });
+
+  it('the tenant role cannot write a frozen month even for its own restaurant (owner-written only)', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(leakMonthSnapshots).values({ restaurantId: A.restaurantId, month: '2026-07-01', leakAgorot: 1 }),
+      ),
+    ).rejects.toThrow(/permission denied/);
   });
 });
 
@@ -1098,15 +1114,13 @@ describe('0072 (H-03) leak_month_corrections (raw RLS)', () => {
       withRestaurant(appDb, A.restaurantId, (tx) =>
         tx.insert(leakMonthCorrections).values({ restaurantId: B.restaurantId, snapshotId: snaps.get(B.restaurantId)!, deltaAgorot: -1, reason: 'forged' }),
       ),
-    ).rejects.toThrow(/row-level security/);
-    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
-      tx
-        .update(leakMonthCorrections)
-        .set({ deltaAgorot: 999_999 })
-        .where(eq(leakMonthCorrections.restaurantId, B.restaurantId))
-        .returning({ id: leakMonthCorrections.id }),
-    );
-    expect(updated).toHaveLength(0);
+    ).rejects.toThrow(/row-level security|permission denied/);
+    // Revoked for the tenant role (rls.ts): an UPDATE is refused outright.
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.update(leakMonthCorrections).set({ deltaAgorot: 999_999 }).where(eq(leakMonthCorrections.restaurantId, B.restaurantId)),
+      ),
+    ).rejects.toThrow(/permission denied/);
   });
 });
 
@@ -1117,6 +1131,7 @@ describe('0072 (H-03) supplier_bank_accounts (raw RLS)', () => {
     }
   });
   afterAll(async () => {
+    await ownerDb.delete(supplierBankAccountChanges); // the audit rows the insert trigger wrote
     await ownerDb.delete(supplierBankAccounts);
   });
 
@@ -1136,7 +1151,7 @@ describe('0072 (H-03) supplier_bank_accounts (raw RLS)', () => {
     const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
       tx
         .update(supplierBankAccounts)
-        .set({ accountLast4: '0000' })
+        .set({ holderName: 'forged' })
         .where(eq(supplierBankAccounts.restaurantId, B.restaurantId))
         .returning({ id: supplierBankAccounts.id }),
     );
@@ -1148,9 +1163,9 @@ describe('0072 (H-03) supplier_bank_account_changes (raw RLS)', () => {
   const accts = new Map<string, string>();
   beforeAll(async () => {
     for (const t of [A, B]) {
+      // The insert trigger writes exactly one masked change row per account.
       const [acct] = await ownerDb.insert(supplierBankAccounts).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:ct', accountLast4: '6789' }).returning();
       accts.set(t.restaurantId, acct!.id);
-      await ownerDb.insert(supplierBankAccountChanges).values({ restaurantId: t.restaurantId, bankAccountId: acct!.id, after: { last4: '6789' } });
     }
   });
   afterAll(async () => {
@@ -1168,13 +1183,13 @@ describe('0072 (H-03) supplier_bank_account_changes (raw RLS)', () => {
   it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
     await expect(
       withRestaurant(appDb, A.restaurantId, (tx) =>
-        tx.insert(supplierBankAccountChanges).values({ restaurantId: B.restaurantId, bankAccountId: accts.get(B.restaurantId)!, after: { last4: '0000' } }),
+        tx.insert(supplierBankAccountChanges).values({ restaurantId: B.restaurantId, bankAccountId: accts.get(B.restaurantId)!, after: { account_last4: '0000' } }),
       ),
     ).rejects.toThrow(/row-level security/);
     const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
       tx
         .update(supplierBankAccountChanges)
-        .set({ after: { last4: '0000' } })
+        .set({ changedBy: null })
         .where(eq(supplierBankAccountChanges.restaurantId, B.restaurantId))
         .returning({ id: supplierBankAccountChanges.id }),
     );
@@ -1193,7 +1208,7 @@ describe('0072 (H-03) push_subscriptions (raw RLS)', () => {
   });
 
   it('GUC=A sees only tenant-A rows', async () => {
-    const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
+    const rows = await asMember(A.restaurantId, A.ownerUserId, (tx) =>
       tx.select({ rid: pushSubscriptions.restaurantId }).from(pushSubscriptions),
     );
     expect(rows).toEqual([{ rid: A.restaurantId }]);
@@ -1201,11 +1216,11 @@ describe('0072 (H-03) push_subscriptions (raw RLS)', () => {
 
   it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
     await expect(
-      withRestaurant(appDb, A.restaurantId, (tx) =>
+      asMember(A.restaurantId, A.ownerUserId, (tx) =>
         tx.insert(pushSubscriptions).values({ restaurantId: B.restaurantId, userId: B.ownerUserId, endpoint: 'https://push.test/forged', p256dh: 'k', auth: 'a' }),
       ),
     ).rejects.toThrow(/row-level security/);
-    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
+    const updated = await asMember(A.restaurantId, A.ownerUserId, (tx) =>
       tx
         .update(pushSubscriptions)
         .set({ revokedAt: new Date() })
@@ -1213,6 +1228,26 @@ describe('0072 (H-03) push_subscriptions (raw RLS)', () => {
         .returning({ id: pushSubscriptions.id }),
     );
     expect(updated).toHaveLength(0);
+  });
+
+  it('a member sees and writes only their OWN devices, even in their own restaurant', async () => {
+    // Another person's device in restaurant A (B's owner stands in for a second member).
+    const [other] = await ownerDb
+      .insert(pushSubscriptions)
+      .values({ restaurantId: A.restaurantId, userId: B.ownerUserId, endpoint: 'https://push.test/a-other', p256dh: 'k', auth: 'a' })
+      .returning();
+    const seen = await asMember(A.restaurantId, A.ownerUserId, (tx) => tx.select({ uid: pushSubscriptions.userId }).from(pushSubscriptions));
+    expect(seen).toEqual([{ uid: A.ownerUserId }]);
+    await expect(
+      asMember(A.restaurantId, A.ownerUserId, (tx) =>
+        tx.insert(pushSubscriptions).values({ restaurantId: A.restaurantId, userId: B.ownerUserId, endpoint: 'https://push.test/x', p256dh: 'k', auth: 'a' }),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    const touched = await asMember(A.restaurantId, A.ownerUserId, (tx) =>
+      tx.update(pushSubscriptions).set({ revokedAt: new Date() }).where(eq(pushSubscriptions.id, other!.id)).returning({ id: pushSubscriptions.id }),
+    );
+    expect(touched).toHaveLength(0);
+    await ownerDb.delete(pushSubscriptions).where(eq(pushSubscriptions.id, other!.id));
   });
 });
 
@@ -1227,7 +1262,7 @@ describe('0072 (H-03) notification_prefs (raw RLS)', () => {
   });
 
   it('GUC=A sees only tenant-A rows', async () => {
-    const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
+    const rows = await asMember(A.restaurantId, A.ownerUserId, (tx) =>
       tx.select({ rid: notificationPrefs.restaurantId }).from(notificationPrefs),
     );
     expect(rows).toEqual([{ rid: A.restaurantId }]);
@@ -1235,11 +1270,11 @@ describe('0072 (H-03) notification_prefs (raw RLS)', () => {
 
   it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
     await expect(
-      withRestaurant(appDb, A.restaurantId, (tx) =>
+      asMember(A.restaurantId, A.ownerUserId, (tx) =>
         tx.insert(notificationPrefs).values({ restaurantId: B.restaurantId, userId: B.ownerUserId, channel: 'push', eventKind: 'forged' }),
       ),
     ).rejects.toThrow(/row-level security/);
-    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
+    const updated = await asMember(A.restaurantId, A.ownerUserId, (tx) =>
       tx
         .update(notificationPrefs)
         .set({ enabled: false })
@@ -1247,6 +1282,62 @@ describe('0072 (H-03) notification_prefs (raw RLS)', () => {
         .returning({ id: notificationPrefs.id }),
     );
     expect(updated).toHaveLength(0);
+  });
+
+  it('a member writes only their OWN row, even in their own restaurant', async () => {
+    await expect(
+      asMember(A.restaurantId, A.ownerUserId, (tx) => tx.insert(notificationPrefs).values({ restaurantId: A.restaurantId, userId: B.ownerUserId, channel: 'push', eventKind: 'someone_else' })),
+    ).rejects.toThrow(/row-level security/);
+    await expect(
+      asMember(A.restaurantId, A.ownerUserId, (tx) =>
+        tx.update(notificationPrefs).set({ userId: B.ownerUserId }).where(eq(notificationPrefs.restaurantId, A.restaurantId)),
+      ),
+    ).rejects.toThrow(/row-level security/);
+  });
+});
+
+describe('0072 (H-03) notification_settings (raw RLS)', () => {
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await ownerDb.insert(notificationSettings).values({ restaurantId: t.restaurantId, userId: t.ownerUserId });
+    }
+  });
+  afterAll(async () => {
+    await ownerDb.delete(notificationSettings);
+  });
+
+  it('GUC=A sees only tenant-A rows', async () => {
+    const rows = await asMember(A.restaurantId, A.ownerUserId, (tx) =>
+      tx.select({ rid: notificationSettings.restaurantId }).from(notificationSettings),
+    );
+    expect(rows).toEqual([{ rid: A.restaurantId }]);
+  });
+
+  it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
+    await expect(
+      asMember(A.restaurantId, A.ownerUserId, (tx) =>
+        tx.insert(notificationSettings).values({ restaurantId: B.restaurantId, userId: B.ownerUserId, dailyCap: 50 }),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    const updated = await asMember(A.restaurantId, A.ownerUserId, (tx) =>
+      tx
+        .update(notificationSettings)
+        .set({ dailyCap: 50 })
+        .where(eq(notificationSettings.restaurantId, B.restaurantId))
+        .returning({ id: notificationSettings.id }),
+    );
+    expect(updated).toHaveLength(0);
+  });
+
+  it('a member writes only their OWN row, even in their own restaurant', async () => {
+    await expect(
+      asMember(A.restaurantId, A.ownerUserId, (tx) => tx.insert(notificationSettings).values({ restaurantId: A.restaurantId, userId: B.ownerUserId })),
+    ).rejects.toThrow(/row-level security/);
+    await expect(
+      asMember(A.restaurantId, A.ownerUserId, (tx) =>
+        tx.update(notificationSettings).set({ userId: B.ownerUserId }).where(eq(notificationSettings.restaurantId, A.restaurantId)),
+      ),
+    ).rejects.toThrow(/row-level security/);
   });
 });
 
@@ -1261,25 +1352,47 @@ describe('0072 (H-03) append-only tables under the RLS app role', () => {
       .insert(supplierBankAccounts)
       .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:ct', accountLast4: '6789' })
       .returning();
+    const auto = await ownerDb.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.bankAccountId, acct!.id));
+    expect(auto).toHaveLength(1); // written by the insert trigger
+    // An audit row with a real actor, so "wipe changed_by" would be an actual change.
     const [ch] = await ownerDb
       .insert(supplierBankAccountChanges)
-      .values({ restaurantId: A.restaurantId, bankAccountId: acct!.id, changedBy: A.ownerUserId, after: { last4: '6789' } })
+      .values({ restaurantId: A.restaurantId, bankAccountId: acct!.id, changedBy: A.ownerUserId, after: { account_last4: '6789' } })
       .returning();
     const asA = (fn: Parameters<typeof withRestaurant<unknown>>[2]) => withRestaurant(appDb, A.restaurantId, fn);
-    await expect(asA((tx) => tx.delete(leakMonthCorrections).where(eq(leakMonthCorrections.id, corr!.id)))).rejects.toThrow(/append-only/);
-    await expect(asA((tx) => tx.delete(leakMonthSnapshots).where(eq(leakMonthSnapshots.id, snap!.id)))).rejects.toThrow(/append-only|foreign key/);
-    await expect(asA((tx) => tx.update(leakMonthSnapshots).set({ leakAgorot: 1 }).where(eq(leakMonthSnapshots.id, snap!.id)))).rejects.toThrow(/append-only/);
-    await expect(asA((tx) => tx.delete(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.id, ch!.id)))).rejects.toThrow(/append-only/);
+    const DENIED = /append-only|permission denied/;
+    await expect(asA((tx) => tx.delete(leakMonthCorrections).where(eq(leakMonthCorrections.id, corr!.id)))).rejects.toThrow(DENIED);
+    await expect(asA((tx) => tx.delete(leakMonthSnapshots).where(eq(leakMonthSnapshots.id, snap!.id)))).rejects.toThrow(DENIED);
+    await expect(asA((tx) => tx.update(leakMonthSnapshots).set({ leakAgorot: 1 }).where(eq(leakMonthSnapshots.id, snap!.id)))).rejects.toThrow(DENIED);
+    await expect(asA((tx) => tx.delete(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.id, ch!.id)))).rejects.toThrow(DENIED);
     // The actor exemption is for referential actions only: the tenant cannot wipe who changed the bank details.
     await expect(
       asA((tx) => tx.update(supplierBankAccountChanges).set({ changedBy: null }).where(eq(supplierBankAccountChanges.id, ch!.id))),
-    ).rejects.toThrow(/append-only/);
+    ).rejects.toThrow(DENIED);
+    // Bank details are immutable for the tenant role too; a change of account is a new row.
+    await expect(asA((tx) => tx.update(supplierBankAccounts).set({ accountLast4: '0000' }).where(eq(supplierBankAccounts.id, acct!.id)))).rejects.toThrow(
+      /immutable/,
+    );
     // A snapshot with no corrections can't be deleted and re-inserted with another figure either.
     const [lone] = await ownerDb.insert(leakMonthSnapshots).values({ restaurantId: A.restaurantId, month: '2026-03-01', leakAgorot: 100 }).returning();
-    await expect(asA((tx) => tx.delete(leakMonthSnapshots).where(eq(leakMonthSnapshots.id, lone!.id)))).rejects.toThrow(/append-only/);
+    await expect(asA((tx) => tx.delete(leakMonthSnapshots).where(eq(leakMonthSnapshots.id, lone!.id)))).rejects.toThrow(DENIED);
     await ownerDb.delete(supplierBankAccountChanges);
     await ownerDb.delete(supplierBankAccounts);
     await ownerDb.delete(leakMonthCorrections);
     await ownerDb.delete(leakMonthSnapshots);
+  });
+
+  it('a bank change made through the app is audited with the session user as changed_by', async () => {
+    const [acct] = await ownerDb
+      .insert(supplierBankAccounts)
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:ct', accountLast4: '6789' })
+      .returning();
+    await asMember(A.restaurantId, A.ownerUserId, (tx) =>
+      tx.update(supplierBankAccounts).set({ active: false }).where(eq(supplierBankAccounts.id, acct!.id)),
+    );
+    const log = await ownerDb.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.bankAccountId, acct!.id));
+    expect(log.map((r) => r.changedBy).sort()).toEqual([A.ownerUserId, null].sort());
+    await ownerDb.delete(supplierBankAccountChanges);
+    await ownerDb.delete(supplierBankAccounts);
   });
 });

@@ -16,6 +16,7 @@ import {
   leakMonthSnapshots,
   matchRuns,
   notificationPrefs,
+  notificationSettings,
   poLines,
   purchaseOrders,
   pushSubscriptions,
@@ -32,11 +33,12 @@ import { testDbUrl } from '../test-env';
 
 /**
  * Migration-shape test for 0072_schema_batch_a (wave 2, H-03): every new column and
- * table exists with its type, default and CHECK; the nine new tenant tables carry
- * restaurant_id NOT NULL + RLS + the `<table>_tenant` policy; the composite
- * same-tenant FKs refuse a cross-tenant reference; deletes cascade / null / block as
- * documented; the frozen-month and audit tables are append-only; the
- * notification_prefs owner defaults hold.
+ * table exists with its type, default and CHECK; the ten new tenant tables carry
+ * restaurant_id NOT NULL + RLS + the `<table>_tenant` policy (plus the own-user
+ * RESTRICTIVE policies); the composite same-tenant FKs refuse a cross-tenant
+ * reference; deletes cascade / null / block as documented; the frozen-month and audit
+ * tables are append-only; bank details are immutable and audited by trigger; the
+ * notification_settings owner defaults hold.
  */
 const url = testDbUrl();
 const sql = postgres(url, { max: 1, prepare: false });
@@ -138,6 +140,7 @@ const TABLES = [
   'leak_month_corrections',
   'leak_month_snapshots',
   'notification_prefs',
+  'notification_settings',
   'push_subscriptions',
   'supplier_bank_account_changes',
   'supplier_bank_accounts',
@@ -276,19 +279,38 @@ describe('0072 is registered', () => {
   });
 });
 
-describe('0072 the nine new tenant tables', () => {
+describe('0072 the ten new tenant tables', () => {
   it('carry a NOT NULL restaurant_id', async () => {
     for (const t of TABLES) expect((await col(t, 'restaurant_id'))?.is_nullable, t).toBe('NO');
   });
 
-  it('enable row security with exactly the per-restaurant `<table>_tenant` policy', async () => {
+  it('enable row security with exactly one permissive policy, the per-restaurant `<table>_tenant`', async () => {
     const rows = (await sql`
       select c.relname, c.relrowsecurity, p.polname, pg_get_expr(p.polqual, p.polrelid) as qual
-      from pg_class c left join pg_policy p on p.polrelid = c.oid
+      from pg_class c left join pg_policy p on p.polrelid = c.oid and p.polpermissive
       where c.relname in ${sql(TABLES)} order by c.relname
     `) as unknown as Array<{ relname: string; relrowsecurity: boolean; polname: string; qual: string }>;
     expect(rows.map((r) => [r.relname, r.relrowsecurity, r.polname])).toEqual(TABLES.map((t) => [t, true, `${t}_tenant`]));
     for (const r of rows) expect(r.qual).toContain('app.current_restaurant_id()');
+  });
+
+  it('push devices, notification prefs and settings carry own-user RESTRICTIVE policies', async () => {
+    const rows = (await sql`
+      select c.relname, p.polname, p.polcmd,
+             coalesce(pg_get_expr(p.polqual, p.polrelid), '') || ' ' || coalesce(pg_get_expr(p.polwithcheck, p.polrelid), '') as expr
+      from pg_policy p join pg_class c on c.oid = p.polrelid
+      where not p.polpermissive and c.relname in ${sql(TABLES)} order by c.relname, p.polname
+    `) as unknown as Array<{ relname: string; polname: string; polcmd: string; expr: string }>;
+    expect(rows.map((r) => [r.relname, r.polname, r.polcmd])).toEqual([
+      ['notification_prefs', 'notification_prefs_own_insert', 'a'],
+      ['notification_prefs', 'notification_prefs_own_update', 'w'],
+      ['notification_settings', 'notification_settings_own_insert', 'a'],
+      ['notification_settings', 'notification_settings_own_update', 'w'],
+      ['push_subscriptions', 'push_subscriptions_own_insert', 'a'],
+      ['push_subscriptions', 'push_subscriptions_own_select', 'r'],
+      ['push_subscriptions', 'push_subscriptions_own_update', 'w'],
+    ]);
+    for (const r of rows) expect(r.expr).toContain('app.current_user_id()');
   });
 
   it('are in the rls/0002 table list', () => {
@@ -314,9 +336,10 @@ describe('0072 the nine new tenant tables', () => {
       .insert(supplierBankAccounts)
       .values({ restaurantId: t.restaurantId, supplierId: t.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:x', accountLast4: '6789' })
       .returning();
-    await db.insert(supplierBankAccountChanges).values({ restaurantId: t.restaurantId, bankAccountId: acct!.id, after: { last4: '6789' } });
+    await db.insert(supplierBankAccountChanges).values({ restaurantId: t.restaurantId, bankAccountId: acct!.id, after: { account_last4: '6789' } });
     await db.insert(pushSubscriptions).values({ restaurantId: t.restaurantId, userId, endpoint: `https://push.test/${t.restaurantId}`, p256dh: 'k', auth: 'a' });
     await db.insert(notificationPrefs).values({ restaurantId: t.restaurantId, userId, channel: 'email', eventKind: 'claim_overdue' });
+    await db.insert(notificationSettings).values({ restaurantId: t.restaurantId, userId });
     await db.delete(recoveryClaims).where(eq(recoveryClaims.restaurantId, t.restaurantId));
     await db.delete(restaurants).where(eq(restaurants.id, t.restaurantId));
     for (const tbl of TABLES) {
@@ -359,6 +382,14 @@ describe('0072 invoices payment facts', () => {
     const file = readFileSync(join(migrationsDir(), '0072_schema_batch_a.sql'), 'utf8');
     expect(file).not.toMatch(/^\s*UPDATE\s/im); // no backfill statement anywhere in 0072
   });
+
+  it('documents what paid_at means (the business pay day, Israel midnight; the recording instant is in audit_log)', async () => {
+    const [{ c }] = (await sql`select col_description('invoices'::regclass, attnum) as c from pg_attribute
+      where attrelid = 'invoices'::regclass and attname = 'paid_at'`) as unknown as [{ c: string }];
+    expect(c).toMatch(/money left/);
+    expect(c).toMatch(/00:00 Asia\/Jerusalem/);
+    expect(c).toMatch(/audit_log\.at/);
+  });
 });
 
 describe('0072 export_runs + export_run_invoices', () => {
@@ -372,6 +403,7 @@ describe('0072 export_runs + export_run_invoices', () => {
     const [run] = await db.insert(exportRuns).values({ ...base, format: 'hashavshevet', mode: 'new_only' }).returning();
     expect(run).toMatchObject({ invoiceCount: 0, totalAgorot: 0, skippedCount: 0, replacedChars: 0 });
     await expectPgError(sql`update export_runs set format = 'xlsx' where id = ${run!.id}`, CHECK_VIOLATION);
+    await db.update(exportRuns).set({ format: 'accountant_pack' }).where(eq(exportRuns.id, run!.id)); // W3-05
     await expectPgError(sql`update export_runs set mode = 'some' where id = ${run!.id}`, CHECK_VIOLATION);
     await expectPgError(sql`update export_runs set range_to = '2026-09-30' where id = ${run!.id}`, CHECK_VIOLATION);
     await expectPgError(sql`update export_runs set skipped_count = -1 where id = ${run!.id}`, CHECK_VIOLATION);
@@ -447,7 +479,23 @@ describe('0072 leak_month_snapshots + leak_month_corrections (frozen months)', (
       db.insert(leakMonthSnapshots).values({ restaurantId: A.restaurantId, month: '2026-08-01', leakAgorot: 1 }),
       UNIQUE_VIOLATION,
     );
-    await db.insert(leakMonthSnapshots).values({ restaurantId: A.restaurantId, month: '2026-08-01', version: 2, leakAgorot: 36000 });
+    // A re-close (version >= 2) must say why; version 1 may not.
+    await expectPgError(
+      db.insert(leakMonthSnapshots).values({ restaurantId: A.restaurantId, month: '2026-08-01', version: 2, leakAgorot: 36000 }),
+      CHECK_VIOLATION,
+    );
+    await expectPgError(
+      db.insert(leakMonthSnapshots).values({ restaurantId: A.restaurantId, month: '2026-08-01', version: 2, leakAgorot: 36000, reason: '  ' }),
+      CHECK_VIOLATION,
+    );
+    const [u] = await db.insert(users).values({ email: `h03-snap-${Date.now()}@0072.test` }).returning();
+    const [v2] = await db
+      .insert(leakMonthSnapshots)
+      .values({ restaurantId: A.restaurantId, month: '2026-08-01', version: 2, leakAgorot: 36000, reason: 'late credit note re-close', createdBy: u!.id })
+      .returning();
+    await db.delete(users).where(eq(users.id, u!.id)); // the actor FK still nulls through the append-only guard
+    const [v2after] = await db.select().from(leakMonthSnapshots).where(eq(leakMonthSnapshots.id, v2!.id));
+    expect(v2after).toMatchObject({ createdBy: null, leakAgorot: 36000, reason: 'late credit note re-close' });
     await db.insert(leakMonthSnapshots).values({ restaurantId: B.restaurantId, month: '2026-08-01', leakAgorot: 1 });
     await expectPgError(db.insert(leakMonthSnapshots).values({ restaurantId: A.restaurantId, month: '2026-08-15', leakAgorot: 1 }), CHECK_VIOLATION);
     await expectPgError(db.insert(leakMonthSnapshots).values({ restaurantId: A.restaurantId, month: '2026-07-01', leakAgorot: -1 }), CHECK_VIOLATION);
@@ -545,13 +593,24 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
     ...over,
   });
 
-  it('CHECKs the codes and last4, keeps the ciphertext non-empty, one ACTIVE account per supplier, updated_at by trigger', async () => {
+  const dropAccounts = async (where: ReturnType<typeof eq>) => {
+    const ids = (await db.select({ id: supplierBankAccounts.id }).from(supplierBankAccounts).where(where)).map((r) => r.id);
+    for (const id of ids) await db.delete(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.bankAccountId, id));
+    await db.delete(supplierBankAccounts).where(where);
+  };
+  const changesOf = (id: string) =>
+    db.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.bankAccountId, id)).orderBy(supplierBankAccountChanges.changedAt);
+
+  it('CHECKs the codes and last4, refuses a clear number (only a v<n>: envelope), one ACTIVE account per (restaurant, supplier), updated_at by trigger', async () => {
     expect(await col('supplier_bank_accounts', 'account_number_enc')).toMatchObject({ data_type: 'text', is_nullable: 'NO' });
     expect(await col('supplier_bank_accounts', 'active')).toMatchObject({ is_nullable: 'NO', column_default: 'true' });
     await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId, { bankCode: 'AB' })), CHECK_VIOLATION);
     await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId, { branchCode: '12' })), CHECK_VIOLATION);
     await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId, { accountLast4: 'x123' })), CHECK_VIOLATION);
     await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId, { accountNumberEnc: ' ' })), CHECK_VIOLATION);
+    await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId, { accountNumberEnc: '123456789' })), CHECK_VIOLATION);
+    await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId, { accountNumberEnc: 'enc:123' })), CHECK_VIOLATION);
+    expect(await indexDef('supplier_bank_accounts_one_active')).toMatch(/\(restaurant_id, supplier_id\) WHERE active/);
     const [a1] = await db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId)).returning();
     await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId)), UNIQUE_VIOLATION);
     await db.update(supplierBankAccounts).set({ active: false }).where(eq(supplierBankAccounts.id, a1!.id));
@@ -560,28 +619,81 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
     await sql`update supplier_bank_accounts set holder_name = 'ספק בע"מ' where id = ${a2!.id}`;
     const [{ updated_at }] = (await sql`select updated_at from supplier_bank_accounts where id = ${a2!.id}`) as unknown as [{ updated_at: Date }];
     expect(updated_at.getUTCFullYear()).toBeGreaterThan(2000);
-    await db.delete(supplierBankAccounts).where(eq(supplierBankAccounts.supplierId, A.supplierId));
+    await dropAccounts(eq(supplierBankAccounts.supplierId, A.supplierId));
+  });
+
+  it('bank details are immutable: only active / verified_* / holder_name may change (a new account is a new row)', async () => {
+    const [a] = await db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId)).returning();
+    for (const [c, v] of [
+      ['bank_code', '13'],
+      ['branch_code', '999'],
+      ['account_number_enc', 'v2:other'],
+      ['account_last4', '0000'],
+      ['supplier_id', B.supplierId],
+    ] as const) {
+      await expectPgError(sql`update supplier_bank_accounts set ${sql(c)} = ${v} where id = ${a!.id}`, RESTRICT_VIOLATION);
+    }
+    await db
+      .update(supplierBankAccounts)
+      .set({ active: false, verifiedBy: userId, verifiedAt: new Date(), holderName: 'שם בעל החשבון' })
+      .where(eq(supplierBankAccounts.id, a!.id));
+    const [after] = await db.select().from(supplierBankAccounts).where(eq(supplierBankAccounts.id, a!.id));
+    expect(after).toMatchObject({ bankCode: '12', accountLast4: '6789', accountNumberEnc: 'v1:iv:ct:tag', active: false, verifiedBy: userId });
+    await dropAccounts(eq(supplierBankAccounts.id, a!.id));
+  });
+
+  it('every insert and masked change writes the audit row itself (changed_by = the session user); a no-op update logs nothing', async () => {
+    let id = '';
+    await sql.begin(async (tx) => {
+      await tx`select set_config('app.current_user_id', ${userId}, true)`;
+      const [r] = (await tx`insert into supplier_bank_accounts (restaurant_id, supplier_id, bank_code, branch_code, account_number_enc, account_last4)
+        values (${A.restaurantId}, ${A.supplierId}, '12', '345', 'v1:k:iv:ct:tag', '6789') returning id`) as unknown as [{ id: string }];
+      id = r.id;
+    });
+    let log = await changesOf(id);
+    expect(log).toHaveLength(1);
+    expect(log[0]).toMatchObject({
+      restaurantId: A.restaurantId,
+      changedBy: userId,
+      before: null,
+      after: { bank_code: '12', branch_code: '345', account_last4: '6789', holder_name: null, active: true, verified_by: null, verified_at: null },
+    });
+    expect(JSON.stringify(log[0])).not.toContain('v1:k:iv:ct:tag'); // the ciphertext never reaches the audit
+    await sql`update supplier_bank_accounts set updated_at = now() where id = ${id}`; // no masked field changed
+    expect(await changesOf(id)).toHaveLength(1);
+    await db.update(supplierBankAccounts).set({ active: false }).where(eq(supplierBankAccounts.id, id));
+    log = await changesOf(id);
+    expect(log).toHaveLength(2);
+    expect(log[1]).toMatchObject({ changedBy: null, before: { active: true }, after: { active: false } }); // owner connection: no session user
+    await dropAccounts(eq(supplierBankAccounts.id, id));
   });
 
   it('refuses another restaurant’s supplier and blocks deleting a supplier that has bank details', async () => {
     await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, B.supplierId)), FK_VIOLATION);
     const [s] = await db.insert(suppliers).values({ restaurantId: A.restaurantId, name: '0072 banked' }).returning();
-    const [a] = await db.insert(supplierBankAccounts).values(acct(A.restaurantId, s!.id)).returning();
+    await db.insert(supplierBankAccounts).values(acct(A.restaurantId, s!.id));
     await expectPgError(db.delete(suppliers).where(eq(suppliers.id, s!.id)), FK_VIOLATION);
-    await db.delete(supplierBankAccounts).where(eq(supplierBankAccounts.id, a!.id));
+    await dropAccounts(eq(supplierBankAccounts.supplierId, s!.id));
     await db.delete(suppliers).where(eq(suppliers.id, s!.id));
   });
 
-  it('the change audit is masked (no account number key), append-only, blocks deleting its account, refuses cross-tenant', async () => {
+  it('the change audit is masked by an ALLOWLIST (nothing nested sneaks through), append-only, blocks deleting its account, refuses cross-tenant', async () => {
     const [a] = await db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId)).returning();
     const [ab] = await db.insert(supplierBankAccounts).values(acct(B.restaurantId, B.supplierId)).returning();
     const [u] = await db.insert(users).values({ email: `h03-bank-${Date.now()}@0072.test` }).returning();
-    const masked = { bankCode: '12', branchCode: '345', last4: '6789' };
+    const masked = { bank_code: '12', branch_code: '345', account_last4: '6789' };
     const [ch] = await db
       .insert(supplierBankAccountChanges)
       .values({ restaurantId: A.restaurantId, bankAccountId: a!.id, changedBy: u!.id, before: null, after: masked })
       .returning();
-    for (const leaked of [{ account_number: '123456789' }, { accountNumber: '123456789' }, { account_number_enc: 'v1:x' }, { accountNumberEnc: 'v1:x' }]) {
+    const leaks: Array<Record<string, unknown>> = [
+      { account_number: '123456789' },
+      { accountNumber: '123456789' },
+      { account_number_enc: 'v1:x' },
+      { note: { account_number: '123456789' } }, // nested under a key that is not allowed
+      { holder: 'x' },
+    ];
+    for (const leaked of leaks) {
       await expectPgError(
         db.insert(supplierBankAccountChanges).values({ restaurantId: A.restaurantId, bankAccountId: a!.id, after: { ...masked, ...leaked } }),
         CHECK_VIOLATION,
@@ -591,6 +703,10 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
         CHECK_VIOLATION,
       );
     }
+    for (const bad of [{ ...masked, account_last4: '123456789' }, { ...masked, account_last4: 'abcd' }]) {
+      await expectPgError(db.insert(supplierBankAccountChanges).values({ restaurantId: A.restaurantId, bankAccountId: a!.id, after: bad }), CHECK_VIOLATION);
+    }
+    await expectPgError(sql`insert into supplier_bank_account_changes (restaurant_id, bank_account_id, after) values (${A.restaurantId}, ${a!.id}, '["12"]')`, CHECK_VIOLATION);
     await expectPgError(
       db.insert(supplierBankAccountChanges).values({ restaurantId: A.restaurantId, bankAccountId: ab!.id, after: masked }),
       FK_VIOLATION,
@@ -600,9 +716,8 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
     await db.delete(users).where(eq(users.id, u!.id));
     const [after] = await db.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.id, ch!.id));
     expect(after).toMatchObject({ changedBy: null, after: masked });
-    await db.delete(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.id, ch!.id));
-    await db.delete(supplierBankAccounts).where(eq(supplierBankAccounts.id, a!.id));
-    await db.delete(supplierBankAccounts).where(eq(supplierBankAccounts.id, ab!.id));
+    await dropAccounts(eq(supplierBankAccounts.id, a!.id));
+    await dropAccounts(eq(supplierBankAccounts.id, ab!.id));
   });
 });
 
@@ -645,7 +760,7 @@ describe('0072 suppliers min order / fee, line order, price-list date', () => {
   });
 });
 
-describe('0072 push_subscriptions / WhatsApp consent / notification_prefs', () => {
+describe('0072 push_subscriptions / WhatsApp consent / notification_prefs + settings', () => {
   it('a push endpoint is unique per restaurant and https; the subscription goes with its user', async () => {
     const [u] = await db.insert(users).values({ email: `h03-push-${Date.now()}@0072.test` }).returning();
     const endpoint = `https://push.test/${u!.id}`;
@@ -665,31 +780,36 @@ describe('0072 push_subscriptions / WhatsApp consent / notification_prefs', () =
     expect(await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.id, p!.id))).toHaveLength(0);
   });
 
-  it('users.whatsapp_opt_in defaults false; _at / _source are nullable, _source CHECKed', async () => {
+  it('users WhatsApp consent: opting in needs _at + _source; an admin may only revoke; notice version recorded', async () => {
     expect(await col('users', 'whatsapp_opt_in')).toMatchObject({ data_type: 'boolean', is_nullable: 'NO', column_default: 'false' });
     expect(await col('users', 'whatsapp_opt_in_at')).toMatchObject({ data_type: 'timestamp with time zone', is_nullable: 'YES' });
     expect(await col('users', 'whatsapp_opt_in_source')).toMatchObject({ data_type: 'character varying', is_nullable: 'YES' });
+    expect(await col('users', 'whatsapp_opt_in_notice_version')).toMatchObject({ data_type: 'character varying', is_nullable: 'YES' });
     const [u] = await db.select().from(users).where(eq(users.id, userId));
-    expect(u).toMatchObject({ whatsappOptIn: false, whatsappOptInAt: null, whatsappOptInSource: null });
-    for (const v of ['settings', 'onboarding', 'whatsapp_reply', 'admin'] as const) {
-      await db.update(users).set({ whatsappOptIn: true, whatsappOptInAt: new Date(), whatsappOptInSource: v }).where(eq(users.id, userId));
+    expect(u).toMatchObject({ whatsappOptIn: false, whatsappOptInAt: null, whatsappOptInSource: null, whatsappOptInNoticeVersion: null });
+    for (const v of ['settings', 'onboarding', 'whatsapp_reply'] as const) {
+      await db
+        .update(users)
+        .set({ whatsappOptIn: true, whatsappOptInAt: new Date(), whatsappOptInSource: v, whatsappOptInNoticeVersion: '2026-11' })
+        .where(eq(users.id, userId));
     }
     await expectPgError(sql`update users set whatsapp_opt_in_source = 'sms' where id = ${userId}`, CHECK_VIOLATION);
-    await db.update(users).set({ whatsappOptIn: false, whatsappOptInAt: null, whatsappOptInSource: null }).where(eq(users.id, userId));
+    await expectPgError(sql`update users set whatsapp_opt_in_source = 'admin' where id = ${userId}`, CHECK_VIOLATION); // admin cannot opt someone in
+    await expectPgError(sql`update users set whatsapp_opt_in_at = null where id = ${userId}`, CHECK_VIOLATION); // opted in without a when
+    await expectPgError(sql`update users set whatsapp_opt_in_source = null where id = ${userId}`, CHECK_VIOLATION); // nor a where
+    // An admin revoke is fine: opt_in false, source 'admin' = the last change.
+    await db.update(users).set({ whatsappOptIn: false, whatsappOptInAt: new Date(), whatsappOptInSource: 'admin' }).where(eq(users.id, userId));
+    await expectPgError(sql`update users set whatsapp_opt_in = true where id = ${userId}`, CHECK_VIOLATION);
+    await db.update(users).set({ whatsappOptIn: false, whatsappOptInAt: null, whatsappOptInSource: null, whatsappOptInNoticeVersion: null }).where(eq(users.id, userId));
   });
 
-  it('notification_prefs owner defaults: enabled, quiet 23:00–06:00, Shabbat on, cap 6 (1..50)', async () => {
+  it('notification_prefs is only the per (channel × event) on/off toggle', async () => {
+    for (const gone of ['quiet_start', 'quiet_end', 'observe_shabbat', 'daily_cap']) expect(await col('notification_prefs', gone), gone).toBeUndefined();
     const [p] = await db
       .insert(notificationPrefs)
       .values({ restaurantId: A.restaurantId, userId, channel: 'whatsapp', eventKind: 'approval_waiting' })
       .returning();
-    expect(p).toMatchObject({ enabled: true, quietStart: '23:00:00', quietEnd: '06:00:00', observeShabbat: true, dailyCap: 6 });
-    expect(await col('notification_prefs', 'daily_cap')).toMatchObject({ data_type: 'smallint', is_nullable: 'NO' });
-    expect(await col('notification_prefs', 'quiet_start')).toMatchObject({ data_type: 'time without time zone', is_nullable: 'NO' });
-    await db.update(notificationPrefs).set({ dailyCap: 1 }).where(eq(notificationPrefs.id, p!.id));
-    await db.update(notificationPrefs).set({ dailyCap: 50 }).where(eq(notificationPrefs.id, p!.id));
-    await expectPgError(sql`update notification_prefs set daily_cap = 0 where id = ${p!.id}`, CHECK_VIOLATION);
-    await expectPgError(sql`update notification_prefs set daily_cap = 51 where id = ${p!.id}`, CHECK_VIOLATION);
+    expect(p).toMatchObject({ enabled: true });
     await expectPgError(sql`update notification_prefs set channel = 'sms' where id = ${p!.id}`, CHECK_VIOLATION);
     await expectPgError(sql`update notification_prefs set event_kind = ' ' where id = ${p!.id}`, CHECK_VIOLATION);
     await expectPgError(
@@ -702,5 +822,23 @@ describe('0072 push_subscriptions / WhatsApp consent / notification_prefs', () =
     const [{ updated_at }] = (await sql`select updated_at from notification_prefs where id = ${p!.id}`) as unknown as [{ updated_at: Date }];
     expect(updated_at.getUTCFullYear()).toBeGreaterThan(2000);
     await db.delete(notificationPrefs).where(eq(notificationPrefs.userId, userId));
+  });
+
+  it('notification_settings: ONE row per (restaurant, user) with the owner defaults: quiet 23:00–06:00, Shabbat + holidays, cap 6 (1..50)', async () => {
+    const [st] = await db.insert(notificationSettings).values({ restaurantId: A.restaurantId, userId }).returning();
+    expect(st).toMatchObject({ quietStart: '23:00:00', quietEnd: '06:00:00', observeShabbat: true, observeHolidays: true, dailyCap: 6 });
+    expect(await col('notification_settings', 'daily_cap')).toMatchObject({ data_type: 'smallint', is_nullable: 'NO' });
+    expect(await col('notification_settings', 'quiet_start')).toMatchObject({ data_type: 'time without time zone', is_nullable: 'NO' });
+    await db.update(notificationSettings).set({ dailyCap: 1 }).where(eq(notificationSettings.id, st!.id));
+    await db.update(notificationSettings).set({ dailyCap: 50 }).where(eq(notificationSettings.id, st!.id));
+    await expectPgError(sql`update notification_settings set daily_cap = 0 where id = ${st!.id}`, CHECK_VIOLATION);
+    await expectPgError(sql`update notification_settings set daily_cap = 51 where id = ${st!.id}`, CHECK_VIOLATION);
+    await expectPgError(db.insert(notificationSettings).values({ restaurantId: A.restaurantId, userId }), UNIQUE_VIOLATION);
+    await db.insert(notificationSettings).values({ restaurantId: B.restaurantId, userId }); // the same person in another restaurant
+    await sql`update notification_settings set updated_at = '2000-01-01' where id = ${st!.id}`;
+    await sql`update notification_settings set observe_holidays = false where id = ${st!.id}`;
+    const [{ updated_at }] = (await sql`select updated_at from notification_settings where id = ${st!.id}`) as unknown as [{ updated_at: Date }];
+    expect(updated_at.getUTCFullYear()).toBeGreaterThan(2000);
+    await db.delete(notificationSettings).where(eq(notificationSettings.userId, userId));
   });
 });
