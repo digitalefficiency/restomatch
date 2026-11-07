@@ -171,9 +171,9 @@ export function buildLetters(input: {
   // 1. This month's DECIDED lines no claim holds; undecided ones are counted, not sent.
   const undecided: UndecidedLines = { count: 0, amount: 0, bySupplier: new Map() };
   for (const inv of input.month) {
-    for (const { line, amount, basis } of claimableLines(inv)) {
+    for (const { line, amount, basis, undecided: isUndecided } of claimableLines(inv)) {
       if (claimOf.has(line.discrepancyId)) continue;
-      if (line.resolutionStatus !== 'accepted') {
+      if (isUndecided) {
         const key = supplierKey(inv.supplierName);
         const u = undecided.bySupplier.get(key) ?? { count: 0, amount: 0 };
         u.count += 1;

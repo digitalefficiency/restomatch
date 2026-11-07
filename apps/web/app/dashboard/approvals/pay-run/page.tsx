@@ -84,7 +84,7 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
     data.suppliers.reduce((n, s) => n + s.invoices.filter((i) => i.status === st && !isLink(i)).length, 0);
   /** The credit's VAT basis: one basis, or "mixed" (never silently summed as one). */
   const creditBasis = (claims: Array<{ resolutionStatus: string; basis: 'excl' | 'incl' | 'vat' }>) => {
-    const bases = new Set(claims.filter((c) => c.resolutionStatus === 'accepted').map((c) => c.basis));
+    const bases = new Set(claims.filter((c) => c.resolutionStatus === 'accepted' || c.resolutionStatus === 'resolved').map((c) => c.basis));
     if (bases.size === 0) return '';
     return bases.size === 1 ? t(`basis.${[...bases][0]!}`) : t('mixedBasis');
   };

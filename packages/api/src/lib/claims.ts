@@ -10,12 +10,24 @@ import type { LeakBreakdownInvoice, LeakBreakdownLine } from '@restomatch/charts
  *    after payment the channel is a בקשת זיכוי letter (decision 19);
  *  • a discrepancy that already holds a non-written-off claim (`claimedIds`) is skipped, so
  *    the same ₪ is never asked twice;
- *  • a line is claimable when it counts as leak and is open, escalated or accepted (waived lines drop);
+ *  • a line is claimable when it counts as leak and is open, escalated, accepted or resolved
+ *    (waived lines drop); open / escalated ones are flagged `undecided`;
  *  • lines are taken in the breakdown's order (biggest |Δ| first) and never claim more on an
  *    invoice than its capped leak (`leakIls`, the hero's per-invoice cap).
  */
-export const CLAIMABLE_STATUSES = ['open', 'escalated', 'accepted'] as const;
+/**
+ * Decided "ask the supplier" statuses. Owner decision 7.11 (M5): 'resolved' counts as decided,
+ * exactly like 'accepted' — the same rule recovery (CLAIMABLE_FILTER) and the charts use.
+ */
+export const CLAIMABLE_DECIDED_STATUSES = ['accepted', 'resolved'] as const;
+/** Statuses still waiting for a decision — never put on a supplier letter (decision 18). */
+export const UNDECIDED_STATUSES = ['open', 'escalated'] as const;
+export const CLAIMABLE_STATUSES = [...UNDECIDED_STATUSES, ...CLAIMABLE_DECIDED_STATUSES] as const;
+/** Only real findings are ever asked back. */
+export const CLAIM_SEVERITIES = ['warn', 'block'] as const;
 const CLAIMABLE = new Set<string>(CLAIMABLE_STATUSES);
+const DECIDED = new Set<string>(CLAIMABLE_DECIDED_STATUSES);
+const SEVERITIES = new Set<string>(CLAIM_SEVERITIES);
 
 /**
  * Discrepancy types that are NEVER asked back from a supplier — the ONE list used by
@@ -66,9 +78,21 @@ export function vatBasisOf(type: string): VatBasis {
   return 'excl';
 }
 
-/** Statuses still waiting for a decision — never put on a supplier letter (decision 18). */
-export const UNDECIDED_STATUSES = ['open', 'escalated'] as const;
 const UNDECIDED = new Set<string>(UNDECIDED_STATUSES);
+
+export interface ClaimRuleInput {
+  type: string;
+  severity: string;
+  resolutionStatus: string;
+}
+/** THE claimable predicate (decided or undecided). recovery's SQL builds from the same constants. */
+export function isClaimable(d: ClaimRuleInput): boolean {
+  return SEVERITIES.has(d.severity) && !NEVER_CLAIMABLE.has(d.type) && CLAIMABLE.has(d.resolutionStatus);
+}
+/** Decided and claimable: what may go on a letter / be offset (= recovery's CLAIMABLE_FILTER). */
+export function isDecidedClaim(d: ClaimRuleInput): boolean {
+  return isClaimable(d) && DECIDED.has(d.resolutionStatus);
+}
 
 export interface ClaimLine {
   line: LeakBreakdownLine;

@@ -167,7 +167,7 @@ export function payRunStatusOf(b: LeakBreakdownInvoice | null): {
   const duplicateIls = sumClaims(claims.filter(isDup));
   const rest = claims.filter((c) => !isDup(c));
   const pendingIls = sumClaims(rest.filter((c) => OPEN.has(c.resolutionStatus)));
-  const creditIls = sumClaims(rest.filter((c) => c.resolutionStatus === 'accepted'));
+  const creditIls = sumClaims(rest.filter((c) => !OPEN.has(c.resolutionStatus)));
   // An open / escalated leak finding holds the invoice, even one whose ₪ the cap already used up —
   // but, like the claimable rule, only a real one: a ₪0 line (the engine's QTY_SHORT "twin" of a
   // billed QTY_OVER) or a non-leak line never keeps an invoice on hold.
@@ -205,7 +205,7 @@ function unpaidInvoicesSql(rid: string, window: { start: string; end: string } |
                  FROM match_runs mr3
                  JOIN discrepancies d ON d.match_run_id = mr3.id AND d.restaurant_id = ${rid}
                  WHERE mr3.invoice_id = i.id AND mr3.restaurant_id = ${rid}
-                   AND d.severity IN ('warn','block') AND d.resolution_status = 'accepted'
+                   AND d.severity IN ('warn','block') AND d.resolution_status IN ('accepted','resolved')
                    AND d.type NOT IN (${NOT_A_CREDIT_SQL}) AND ABS(d.delta_amount) > 0
                ) AS accepted_ils,
                -- …a non-waived duplicate copy is held ("don't pay this copy"); its ₪ is the copy's total.
