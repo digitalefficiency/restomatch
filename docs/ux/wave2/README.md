@@ -104,7 +104,8 @@ What a default run does:
 
 ## 7. Owner decisions (binding)
 - **Terms:**
-  - חשבונית מרכזת (consolidated invoice), פער (discrepancy), דרישת זיכוי (credit claim) and קבלת סחורה (receiving);
+  - חשבונית מרכזת (consolidated invoice), פער (discrepancy), בקשת זיכוי (credit request) and קבלת סחורה (receiving);
+  - **Partner wording toward suppliers (owner, 7.11; replaces "דרישת זיכוי"):** our letter is **מכתב בקשת זיכוי** (never "מכתב זיכוי", which reads like the supplier's own credit document); the supplier's document is **חשבונית זיכוי** (or תעודת זיכוי against delivery notes). Text a supplier sees never says דרישה / תביעה / מחלוקת / חוב / חייבים / באיחור / דליפה / חריגה. Internally: "בבירור מול הספק" (not "במחלוקת"), "זיכויים פתוחים" (not "עדיין חייבים לך"), "אין תשובה N ימים" (not "באיחור", for credits; late deliveries keep "באיחור"), "נסגר בלי זיכוי" (not "ויתרנו"). Enum values and keys do not change. Glossary + tone guide: the orchestrator's terms pack; guard: `apps/web/lib/__tests__/supplier-wording.test.ts`;
   - "דליפה" only for the monthly leak; price creep is "מחירים שעלו";
   - never show a "1.5% target".
 - **Roles:**
