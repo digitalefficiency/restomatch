@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { ALL_ROLES, allowedRolesForPath } from '@/lib/roles';
 import { FORBIDDEN_PATH, forbiddenFrom, forbiddenRewrite, screenKeyForPath } from '../access';
+import { BOOKKEEPER_READ_ONLY_ROUTES } from '@/lib/roleLens/readOnly';
 import { FORBIDDEN_PAIRS } from './forbiddenPairs';
 
 describe('forbiddenRewrite (middleware role gate → in-shell 403, ia-nav-07)', () => {
-  it('rewrites all 25 probed role/route pairs to the forbidden page, keeping the original URL in `from`', () => {
-    expect(FORBIDDEN_PAIRS).toHaveLength(25);
+  it('rewrites all 19 probed role/route pairs to the forbidden page, keeping the original URL in `from`', () => {
+    // 25 probed pairs, minus the 6 bookkeeper pairs owner decision I3 (7.11) opened read-only.
+    expect(FORBIDDEN_PAIRS).toHaveLength(19);
     for (const [role, path] of FORBIDDEN_PAIRS) {
       const to = forbiddenRewrite(path, '?sev=block', role);
       expect(to, `${role} → ${path}`).not.toBeNull();
@@ -23,6 +25,8 @@ describe('forbiddenRewrite (middleware role gate → in-shell 403, ia-nav-07)', 
     }
     expect(forbiddenRewrite('/dashboard/orders', '', 'owner')).toBeNull();
     expect(forbiddenRewrite('/dashboard/receiving/abc', '', 'receiver')).toBeNull();
+    // I3 (IA-03): the bookkeeper opens the 10 screens read-only.
+    for (const path of BOOKKEEPER_READ_ONLY_ROUTES) expect(forbiddenRewrite(path, '', 'bookkeeper'), path).toBeNull();
     // TODO(W1-03/W2): the receiver loses the ledger (owner decision 25.10) — not pinned here.
   });
 

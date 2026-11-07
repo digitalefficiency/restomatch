@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ALL_ROLES, ROUTE_ROLES, allowedRolesForPath, canSeeRoute, labelForRole } from '../roles';
+import { routeAccess } from '@/lib/roleLens';
 
 /** The role matrix the nav, middleware and page guards all share. */
 describe('roles matrix', () => {
@@ -10,9 +11,10 @@ describe('roles matrix', () => {
     }
   });
 
-  it('Team is owner + manager only', () => {
-    expect(allowedRolesForPath('/dashboard/team')).toEqual(['owner', 'manager']);
-    for (const role of ['receiver', 'bookkeeper', 'chef'] as const) {
+  it('Team is owner + manager, plus the bookkeeper read-only (I3)', () => {
+    expect(allowedRolesForPath('/dashboard/team')).toEqual(['owner', 'manager', 'bookkeeper']);
+    expect(routeAccess('bookkeeper', '/dashboard/team')).toBe('read');
+    for (const role of ['receiver', 'chef'] as const) {
       expect(canSeeRoute(role, '/dashboard/team')).toBe(false);
     }
   });
@@ -24,10 +26,11 @@ describe('roles matrix', () => {
     expect(allowedRolesForPath('/dashboard/receiving/abc')).toContain('receiver');
   });
 
-  it('product pages follow the catalog (owner + manager only)', () => {
-    expect(allowedRolesForPath('/dashboard/products')).toEqual(['owner', 'manager']);
-    expect(allowedRolesForPath('/dashboard/products/abc')).toEqual(['owner', 'manager']);
-    for (const role of ['receiver', 'bookkeeper', 'chef'] as const) {
+  it('product pages follow the catalog (owner + manager; the bookkeeper reads, I3)', () => {
+    expect(allowedRolesForPath('/dashboard/products')).toEqual(['owner', 'manager', 'bookkeeper']);
+    expect(allowedRolesForPath('/dashboard/products/abc')).toEqual(['owner', 'manager', 'bookkeeper']);
+    expect(routeAccess('bookkeeper', '/dashboard/products/abc')).toBe('read');
+    for (const role of ['receiver', 'chef'] as const) {
       expect(canSeeRoute(role, '/dashboard/products')).toBe(false);
     }
   });
@@ -72,7 +75,8 @@ describe('wave 1 · S12 routes (₪-back tracker, monthly report)', () => {
   it('nav visibility (exact path) and middleware gating (prefix) agree', () => {
     for (const role of ['owner', 'manager', 'bookkeeper', 'receiver', 'chef'] as const) {
       const finance = ['owner', 'manager', 'bookkeeper'].includes(role);
-      const managers = ['owner', 'manager'].includes(role);
+      // I3: the bookkeeper reads the monthly report too (read-only).
+      const managers = ['owner', 'manager', 'bookkeeper'].includes(role);
       expect(canSeeRoute(role, '/dashboard/recovery')).toBe(finance);
       expect(canSeeRoute(role, '/dashboard/reports/monthly')).toBe(managers);
       expect(allowedRolesForPath('/dashboard/reports/monthly/pdf')?.includes(role)).toBe(managers);
