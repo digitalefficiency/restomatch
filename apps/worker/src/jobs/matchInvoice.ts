@@ -208,6 +208,9 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
     //     decisions stay until the question is answered (round 6 HIGH);
     //   - the invoice was put back on hold meanwhile ('parsed' with a question
     //     reason), or the run seen at the start is gone (re-held) → skip.
+    //   FOR NO KEY UPDATE (round 7, as S2's #216): still serialises edits / re-holds
+    //   / re-matches of this invoice, but lets a claim's FK (KEY SHARE) through — a
+    //   plain FOR UPDATE deadlocks with the claims-tracker sync.
     const [race] = (await tx.execute(sql`
       select i.status,
              exists (select 1 from match_runs mr where mr.invoice_id = i.id and mr.restaurant_id = i.restaurant_id) as has_run,
@@ -217,7 +220,7 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
                or coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS}) as link_held,
              coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS} as question_reason
         from invoices i where i.id = ${invoiceId}::uuid and i.restaurant_id = ${restaurantId}
-       for update
+       for no key update
     `)) as unknown as Array<{ status: string; has_run: boolean; unlinked: boolean; link_held: boolean; question_reason: boolean }>;
     if (race && race.link_held && race.unlinked) return null;
     if (race && race.status === 'parsed' && race.question_reason) return null;

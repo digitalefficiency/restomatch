@@ -690,7 +690,7 @@ async function applyLink(db: Database, rid: string, input: LinkInput) {
             and ${sku ? sql`il.supplier_sku = ${sku}` : sql`il.supplier_sku is null and ${normNameSql(sql`il.raw_description`)} = ${nameKey}`}
        )
      order by i.id
-       for update
+       for no key update
   `);
 
   // Backfill already-imported lines, scoped to this restaurant + supplier.
@@ -824,7 +824,7 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
         select i.id from invoices i
          where i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
            and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)}))
-         order by i.id for update
+         order by i.id for no key update
       `);
       const rows = (await db.execute(sql`
         select il.id, il.invoice_id, ${INVOICE_LOCKED} as locked from invoice_lines il
@@ -892,7 +892,7 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
     select i.id from invoices i
      where i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
        and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${lineKey} and ${IL_NOT_CHARGE})
-     order by i.id for update
+     order by i.id for no key update
   `);
   const target = (await db.execute(sql`
     select il.id, il.invoice_id, il.line_total from invoice_lines il
