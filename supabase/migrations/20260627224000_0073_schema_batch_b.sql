@@ -471,12 +471,16 @@ COMMENT ON TABLE "consolidated_invoice_links" IS 'A consolidated invoice linked 
 
 -- ── RLS on the eight new tenant tables (also in rls/0002's list) ──────────────
 CREATE SCHEMA IF NOT EXISTS app;--> statement-breakpoint
-CREATE OR REPLACE FUNCTION app.current_restaurant_id() RETURNS uuid
+-- Byte-identical to 0072 (H-03 r8): pinned search_path, schema-qualified. A plain
+-- re-create here would strip the pin and fail db:doctor.
+CREATE OR REPLACE FUNCTION app.current_restaurant_id() RETURNS pg_catalog.uuid
   LANGUAGE sql STABLE
-  AS $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$;--> statement-breakpoint
-CREATE OR REPLACE FUNCTION app.current_user_id() RETURNS uuid
+  SET search_path = pg_catalog, pg_temp
+  AS $$ select nullif(pg_catalog.current_setting('app.current_restaurant_id', true), '')::pg_catalog.uuid $$;--> statement-breakpoint
+CREATE OR REPLACE FUNCTION app.current_user_id() RETURNS pg_catalog.uuid
   LANGUAGE sql STABLE
-  AS $$ select nullif(current_setting('app.current_user_id', true), '')::uuid $$;--> statement-breakpoint
+  SET search_path = pg_catalog, pg_temp
+  AS $$ select nullif(pg_catalog.current_setting('app.current_user_id', true), '')::pg_catalog.uuid $$;--> statement-breakpoint
 ALTER TABLE "saved_views" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "saved_views_tenant" ON "saved_views";--> statement-breakpoint
 CREATE POLICY "saved_views_tenant" ON "saved_views" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint
@@ -531,5 +535,5 @@ DROP POLICY IF EXISTS "notification_seen_own_delete" ON "notification_seen";--> 
 CREATE POLICY "notification_seen_own_delete" ON "notification_seen" AS RESTRICTIVE FOR DELETE USING ("user_id" = app.current_user_id());
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '3c15f8ebc89a071a637f348366f47d085ef8d17d8a02a498f1ab568762b1d917', 1782600000000
+select '70609141ab25ad665b535bf418722eb143c7bb40427b379d265d3b12a62cc968', 1782600000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782600000000);
