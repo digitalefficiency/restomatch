@@ -56,7 +56,7 @@ export const matchRouter = router({
         .from(invoices)
         .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)))
         .limit(1)
-        .for('update');
+        .for('no key update'); // not FOR UPDATE: a tracker sync's claim FK check (KEY SHARE) must pass, or it deadlocks on the recovery lock
       if (kind?.status === 'ocr_pending') {
         throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'החשבונית עדיין נקראת — נסו שוב בעוד דקה' });
       }

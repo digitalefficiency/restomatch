@@ -141,7 +141,7 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
       .from(invoices)
       .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
       .limit(1)
-      .for('update');
+      .for('no key update'); // not FOR UPDATE: claim FK checks (KEY SHARE) must pass
     if (!now || now.status === 'ocr_pending') return null;
     let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;
     if (priorRun) {

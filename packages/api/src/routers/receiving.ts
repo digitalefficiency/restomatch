@@ -690,7 +690,7 @@ export const receivingRouter = router({
         .from(invoices)
         .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)))
         .limit(1)
-        .for('update'); // a retake (→ ocr_pending) takes the same row lock
+        .for('no key update'); // a retake (→ ocr_pending) takes the same row lock
       if (!current) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
       assertNotBeingRead(current.status);
       const p = input.patch;
@@ -820,7 +820,7 @@ export const receivingRouter = router({
         )
         .where(eq(invoiceLines.id, input.lineId))
         .limit(1)
-        .for('update');
+        .for('no key update');
       if (!owned) throw new TRPCError({ code: 'NOT_FOUND', message: 'invoice line not found' });
       assertNotBeingRead(owned.status);
 
@@ -1437,7 +1437,7 @@ export const receivingRouter = router({
             )
             .orderBy(asc(invoices.createdAt), asc(invoices.id))
             .limit(1)
-            .for('update');
+            .for('no key update');
           // B: who may retake. A receiver only while the receipt is still being
           // counted and the invoice was never matched (round 1's guard); after the
           // count, a re-scan would erase open ₪ findings — that is an owner /
@@ -2071,7 +2071,7 @@ async function editableInvoice(db: Database, restaurantId: string, invoiceId: st
     .from(invoices)
     .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
     .limit(1)
-    .for('update');
+    .for('no key update'); // not FOR UPDATE: claim FK checks (KEY SHARE) under the recovery lock must pass
   if (!inv) throw new TRPCError({ code: 'NOT_FOUND', message: 'Invoice not found' });
   assertNotBeingRead(inv.status);
   const handEntered = isHandEntered(inv.ocrPayload);
