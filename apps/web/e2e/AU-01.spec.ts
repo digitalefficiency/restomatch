@@ -75,13 +75,13 @@ test.describe('AU-01 automations page', () => {
     const sw = row.getByRole('switch');
     await expect(sw).toHaveAttribute('aria-checked', 'true');
     await sw.click();
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByRole('alertdialog');
     await expect(dialog).toContainText(he.items.priceAlerts.name);
     await dialog.getByRole('button', { name: he.confirm.off }).click();
     await expect(sw).toHaveAttribute('aria-checked', 'false');
     await sw.click();
-    await expect(page.getByRole('dialog')).toContainText(he.items.priceAlerts.when);
-    await page.getByRole('dialog').getByRole('button', { name: he.confirm.on }).click();
+    await expect(page.getByRole('alertdialog')).toContainText(he.items.priceAlerts.when);
+    await page.getByRole('alertdialog').getByRole('button', { name: he.confirm.on }).click();
     await expect(sw).toHaveAttribute('aria-checked', 'true');
 
     expect(await axe(page)).toEqual([]);
