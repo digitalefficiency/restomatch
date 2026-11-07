@@ -456,11 +456,13 @@ describe('0072 consolidated_invoice_links', () => {
       db.insert(consolidatedInvoiceLinks).values({ restaurantId: A.restaurantId, invoiceId: A.invoiceId, goodsReceiptId: B.grId, source: 'manual' }),
       FK_VIOLATION,
     );
+    const [gr] = await db.insert(goodsReceipts).values({ restaurantId: A.restaurantId }).returning();
+    // Another tenant's invoice is refused (against an unlinked receipt: since 0073 a
+    // receipt already linked once would hit UNIQUE (goods_receipt_id) first).
     await expectPgError(
-      db.insert(consolidatedInvoiceLinks).values({ restaurantId: A.restaurantId, invoiceId: B.invoiceId, goodsReceiptId: A.grId, source: 'manual' }),
+      db.insert(consolidatedInvoiceLinks).values({ restaurantId: A.restaurantId, invoiceId: B.invoiceId, goodsReceiptId: gr!.id, source: 'manual' }),
       FK_VIOLATION,
     );
-    const [gr] = await db.insert(goodsReceipts).values({ restaurantId: A.restaurantId }).returning();
     await db.insert(consolidatedInvoiceLinks).values({ restaurantId: A.restaurantId, invoiceId: A.invoiceId, goodsReceiptId: gr!.id, source: 'manual' });
     await db.delete(goodsReceipts).where(eq(goodsReceipts.id, gr!.id));
     const left = await db.select().from(consolidatedInvoiceLinks).where(eq(consolidatedInvoiceLinks.goodsReceiptId, gr!.id));

@@ -74,6 +74,11 @@
 --                        short-pay: those stay in 0071's payment_deductions.
 -- payment_invoices       which invoices one payment settles, with the allocated amount
 --                        (AGOROT > 0); one row per payment × invoice.
+-- consolidated_invoice_links (+UNIQUE goods_receipt_id; W3-11 decision)
+--                        a goods receipt sits under at most ONE consolidated invoice. A
+--                        second invoice listing it is a double charge: flagged by the
+--                        app, never split. The index build FAILS (nothing applied) if a
+--                        receipt is already linked twice: the pre-deploy count must be 0.
 --
 -- Own-user RLS (the 0072 pattern): saved_views (personal rows), view_subscriptions
 -- (writes, incl. DELETE) and notification_seen (all, incl. DELETE) add RESTRICTIVE
@@ -95,7 +100,7 @@
 -- restomatch.prev_statement_timeout; (2) takes every lock in ONE DO block with an
 -- all-or-nothing NOWAIT retry loop, parent-first (the 0071/0072 order, users last):
 -- SHARE ROW EXCLUSIVE on "restaurants", "invoices" and "users" (FK targets only),
--- ACCESS EXCLUSIVE on the eight existing tables this file alters (products, recipes
+-- ACCESS EXCLUSIVE on the nine existing tables this file alters (products, recipes
 -- and ingest_documents are also FK targets); (3) restores statement_timeout. A long reader makes the file
 -- fail fast (57014 after 6s) with nothing applied; re-run it in a quiet hour.
 -- Stacked drizzle path: `pnpm db:migrate` applies 0071 + 0072 + 0073 in ONE
@@ -118,6 +123,7 @@
 --   DROP TRIGGER saved_views_set_updated_at ON saved_views;  -- and the three other
 --     *_set_updated_at triggers on view_subscriptions, product_count_units, waste_entries
 --   DROP TRIGGER supplier_statements_set_updated_at ON supplier_statements;  -- and payments_set_updated_at
+--   DROP INDEX consolidated_invoice_links_gr_unique;
 --   DROP TABLE payment_invoices, payments, supplier_statements;
 --   ALTER TABLE ingest_documents DROP COLUMN doc_type,
 --     DROP CONSTRAINT ingest_documents_id_restaurant_id_key;
@@ -150,7 +156,8 @@ SELECT set_config('restomatch.prev_statement_timeout', current_setting('statemen
 -- transaction (40P01), and the 6s statement_timeout bounds the loop (57014).
 -- Order = 0071/0072's parent-first order (restaurants … users last), restricted to
 -- this file's tables: suppliers → products → purchase_orders → po_lines → recipes →
--- inventory_counts → inventory_count_lines → invoices → ingest_documents.
+-- inventory_counts → inventory_count_lines → invoices → consolidated_invoice_links
+-- → ingest_documents.
 DO $$
 BEGIN
   LOOP
@@ -159,6 +166,7 @@ BEGIN
       LOCK TABLE "suppliers", "products", "purchase_orders", "po_lines" IN ACCESS EXCLUSIVE MODE NOWAIT;
       LOCK TABLE "recipes", "inventory_counts", "inventory_count_lines" IN ACCESS EXCLUSIVE MODE NOWAIT;
       LOCK TABLE "invoices" IN SHARE ROW EXCLUSIVE MODE NOWAIT;
+      LOCK TABLE "consolidated_invoice_links" IN ACCESS EXCLUSIVE MODE NOWAIT;
       LOCK TABLE "ingest_documents" IN ACCESS EXCLUSIVE MODE NOWAIT;
       LOCK TABLE "users" IN SHARE ROW EXCLUSIVE MODE NOWAIT;
       EXIT;
@@ -409,6 +417,8 @@ CREATE INDEX IF NOT EXISTS "supplier_statements_uploaded_by_idx" ON "supplier_st
 CREATE INDEX IF NOT EXISTS "supplier_statements_restaurant_idx" ON "supplier_statements" USING btree ("restaurant_id", "period_start");--> statement-breakpoint
 DROP TRIGGER IF EXISTS "supplier_statements_set_updated_at" ON "supplier_statements";--> statement-breakpoint
 CREATE TRIGGER "supplier_statements_set_updated_at" BEFORE UPDATE ON "supplier_statements" FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();--> statement-breakpoint
+COMMENT ON COLUMN "supplier_statements"."opening_balance_agorot" IS 'Opening balance in integer agorot, in the SUPPLIER''s view: positive = we owe the supplier, negative = a credit in our favour. No sign CHECK (0073, H-04 / W3-11).';--> statement-breakpoint
+COMMENT ON COLUMN "supplier_statements"."closing_balance_agorot" IS 'Closing balance in integer agorot, in the SUPPLIER''s view: positive = we owe the supplier, negative = a credit in our favour. No sign CHECK (0073, H-04 / W3-11).';--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "payments" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE cascade,
@@ -452,6 +462,9 @@ CREATE TABLE IF NOT EXISTS "payment_invoices" (
 CREATE INDEX IF NOT EXISTS "payment_invoices_payment_idx" ON "payment_invoices" USING btree ("payment_id", "restaurant_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "payment_invoices_invoice_idx" ON "payment_invoices" USING btree ("invoice_id", "restaurant_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "payment_invoices_restaurant_idx" ON "payment_invoices" USING btree ("restaurant_id");--> statement-breakpoint
+-- W3-11 decision: one consolidated invoice per goods receipt (a second is a double charge).
+CREATE UNIQUE INDEX IF NOT EXISTS "consolidated_invoice_links_gr_unique" ON "consolidated_invoice_links" USING btree ("goods_receipt_id");--> statement-breakpoint
+COMMENT ON TABLE "consolidated_invoice_links" IS 'A consolidated invoice linked to a goods receipt it covers (0072, H-03). A receipt sits under at most ONE consolidated invoice (UNIQUE goods_receipt_id, 0073 / W3-11): a second invoice listing it is a double charge, flagged by the app, never split.';--> statement-breakpoint
 
 -- ── RLS on the eight new tenant tables (also in rls/0002's list) ──────────────
 CREATE SCHEMA IF NOT EXISTS app;--> statement-breakpoint

@@ -2717,6 +2717,8 @@ export const consolidatedInvoiceLinks = pgTable(
     unique('consolidated_invoice_links_invoice_gr_key').on(t.invoiceId, t.goodsReceiptId),
     index('consolidated_invoice_links_invoice_idx').on(t.invoiceId, t.restaurantId),
     index('consolidated_invoice_links_gr_idx').on(t.goodsReceiptId, t.restaurantId),
+    // 0073 (H-04 / W3-11): a receipt sits under at most one consolidated invoice.
+    uniqueIndex('consolidated_invoice_links_gr_unique').on(t.goodsReceiptId),
     index('consolidated_invoice_links_linked_by_idx').on(t.linkedBy),
     index('consolidated_invoice_links_restaurant_idx').on(t.restaurantId, t.linkedAt),
   ],
@@ -3118,6 +3120,7 @@ export const supplierStatements = pgTable(
     supplierId: uuid('supplier_id').notNull(),
     periodStart: date('period_start', { mode: 'string' }).notNull(),
     periodEnd: date('period_end', { mode: 'string' }).notNull(),
+    /** Supplier's view: positive = we owe the supplier, negative = a credit in our favour. */
     openingBalanceAgorot: bigint('opening_balance_agorot', { mode: 'number' }),
     closingBalanceAgorot: bigint('closing_balance_agorot', { mode: 'number' }),
     source: varchar('source', { length: 16 }).$type<SupplierStatementSource>().notNull(),

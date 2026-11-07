@@ -4,6 +4,8 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   createDb,
+  consolidatedInvoiceLinks,
+  goodsReceipts,
   invoices,
   paymentDeductions,
   paymentInvoices,
@@ -173,9 +175,9 @@ describe('0073 is registered', () => {
     expect(lockPhase).toMatch(/EXCEPTION WHEN lock_not_available THEN\s*PERFORM pg_sleep\(0\.05\);/);
     // Every LOCK is NOWAIT (nothing is held while waiting); parent-first, users last (0071/0072 order).
     const locks = lockPhase.match(/LOCK TABLE [^;]+;/g) ?? [];
-    expect(locks).toHaveLength(6);
+    expect(locks).toHaveLength(7);
     for (const l of locks) expect(l).toMatch(/NOWAIT;$/);
-    const order = ['"restaurants"', '"suppliers"', '"products"', '"purchase_orders"', '"po_lines"', '"recipes"', '"inventory_counts"', '"inventory_count_lines"', '"invoices"', '"ingest_documents"', '"users"'];
+    const order = ['"restaurants"', '"suppliers"', '"products"', '"purchase_orders"', '"po_lines"', '"recipes"', '"inventory_counts"', '"inventory_count_lines"', '"invoices"', '"consolidated_invoice_links"', '"ingest_documents"', '"users"'];
     const pos = order.map((t) => lockPhase.indexOf(t));
     expect(pos.every((p) => p >= 0)).toBe(true);
     expect([...pos].sort((a, b) => a - b)).toEqual(pos);
@@ -643,5 +645,39 @@ describe('0073 addendum 1 (W3-11): doc_type, supplier_statements, payments + pay
     await db.delete(invoices).where(eq(invoices.id, inv!.id));
     await db.delete(invoices).where(eq(invoices.id, inv2!.id));
     await db.delete(invoices).where(eq(invoices.id, invB!.id));
+  });
+});
+
+describe('0073 W3-11 decisions: one consolidated invoice per receipt; statement balance sign', () => {
+  it('a second consolidated link for the same goods receipt is refused (a double charge is flagged, never split)', async () => {
+    expect(await indexDef('consolidated_invoice_links_gr_unique')).toMatch(/UNIQUE INDEX[\s\S]*\(goods_receipt_id\)/);
+    const r = A.restaurantId;
+    const [gr] = await db.insert(goodsReceipts).values({ restaurantId: r, poId: A.poId }).returning();
+    const [inv1] = await db.insert(invoices).values({ restaurantId: r, supplierId: A.supplierId, source: 'manual' }).returning();
+    const [inv2] = await db.insert(invoices).values({ restaurantId: r, supplierId: A.supplierId, source: 'manual' }).returning();
+    await db.insert(consolidatedInvoiceLinks).values({ restaurantId: r, invoiceId: inv1!.id, goodsReceiptId: gr!.id, source: 'manual' });
+    await expectPgError(
+      db.insert(consolidatedInvoiceLinks).values({ restaurantId: r, invoiceId: inv2!.id, goodsReceiptId: gr!.id, source: 'proposal_accept' }),
+      UNIQUE_VIOLATION,
+    );
+    const [{ d }] = (await sql`select obj_description('consolidated_invoice_links'::regclass, 'pg_class') as d`) as unknown as [{ d: string }];
+    expect(d).toMatch(/at most ONE consolidated invoice/);
+    await db.delete(consolidatedInvoiceLinks).where(eq(consolidatedInvoiceLinks.goodsReceiptId, gr!.id));
+    await db.delete(invoices).where(eq(invoices.id, inv1!.id));
+    await db.delete(invoices).where(eq(invoices.id, inv2!.id));
+    await db.delete(goodsReceipts).where(eq(goodsReceipts.id, gr!.id));
+  });
+
+  it('statement balances are documented in the supplier’s view (positive = we owe) and carry no sign CHECK', async () => {
+    for (const c of ['opening_balance_agorot', 'closing_balance_agorot']) {
+      const [{ d }] = (await sql`
+        select col_description('supplier_statements'::regclass, a.attnum) as d
+        from pg_attribute a where a.attrelid = 'supplier_statements'::regclass and a.attname = ${c}`) as unknown as [{ d: string }];
+      expect(d, c).toMatch(/positive = we owe the supplier, negative = a credit in our favour/);
+    }
+    const rows = (await sql`
+      select pg_get_constraintdef(oid) as def from pg_constraint
+      where conrelid = 'supplier_statements'::regclass and contype = 'c'`) as unknown as Array<{ def: string }>;
+    expect(rows.some((r) => /balance_agorot/.test(r.def))).toBe(false);
   });
 });
