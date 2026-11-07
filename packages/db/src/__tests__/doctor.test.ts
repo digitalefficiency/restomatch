@@ -52,6 +52,48 @@ describe('db:doctor', () => {
     expect(again.findings.find((x) => x.name === 'applied migrations intact')?.status).toBe('PASS');
   });
 
+  it('FAILs when the app role can write the bank audit or the frozen months (0072)', async () => {
+    const before = (await runDoctor(url)).findings.find((f) => f.name === 'read-only tables');
+    if (!before) return; // no app role on this DB yet: the app-role section is skipped
+    expect(before.status).toBe('PASS');
+    for (const t of ['supplier_bank_account_changes', 'leak_month_snapshots', 'leak_month_corrections']) {
+      // Committed briefly (the doctor reads in its own session), revoked again below.
+      await sql.unsafe(`grant insert on ${t} to restomatch_app`);
+      try {
+        const f = (await runDoctor(url)).findings.find((x) => x.name === 'read-only tables');
+        expect(f?.status, t).toBe('FAIL');
+        expect(f?.detail).toContain(t);
+      } finally {
+        await sql.unsafe(`revoke insert on ${t} from restomatch_app`);
+      }
+    }
+    expect((await runDoctor(url)).findings.find((f) => f.name === 'read-only tables')?.status).toBe('PASS');
+  });
+
+  it('FAILs a SECURITY DEFINER function without pg_temp last in its search_path, or with PUBLIC EXECUTE', async () => {
+    const ok = (await runDoctor(url)).findings.find((f) => f.name === 'SECURITY DEFINER hardening');
+    if (!ok) return; // no app role on this DB yet: the app-role section is skipped
+    expect(ok.status).toBe('PASS');
+    const fn = 'public.restomatch_bank_account_audit()';
+    await sql.unsafe(`alter function ${fn} set search_path = pg_catalog, public`);
+    try {
+      const f = (await runDoctor(url)).findings.find((x) => x.name === 'SECURITY DEFINER hardening');
+      expect(f?.status).toBe('FAIL');
+      expect(f?.detail).toMatch(/restomatch_bank_account_audit .*pg_temp must be listed LAST/);
+    } finally {
+      await sql.unsafe(`alter function ${fn} set search_path = pg_catalog, public, pg_temp`);
+    }
+    await sql.unsafe(`grant execute on function ${fn} to public`);
+    try {
+      const f = (await runDoctor(url)).findings.find((x) => x.name === 'SECURITY DEFINER hardening');
+      expect(f?.status).toBe('FAIL');
+      expect(f?.detail).toMatch(/restomatch_bank_account_audit .*PUBLIC can EXECUTE/);
+    } finally {
+      await sql.unsafe(`revoke execute on function ${fn} from public`);
+    }
+    expect((await runDoctor(url)).findings.find((f) => f.name === 'SECURITY DEFINER hardening')?.status).toBe('PASS');
+  });
+
   it('redacts the password and prints a PASS/WARN/FAIL summary', async () => {
     expect(redactUrl('postgres://u:s3cret@h:5432/db')).toBe('postgres://u:***@h:5432/db');
     const r = await runDoctor(url);

@@ -528,8 +528,32 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
         if (usersP && (usersP.ins || usersP.upd || usersP.del)) writable.push('users');
         const auditP = priv.get('audit_log');
         if (auditP && (auditP.upd || auditP.del)) writable.push('audit_log(update/delete)');
+        // 0072: the bank audit is written only by its SECURITY DEFINER trigger, frozen
+        // months only by the owner connection (rls.ts revokes; absent before 0072).
+        for (const t of ['supplier_bank_account_changes', 'leak_month_snapshots', 'leak_month_corrections']) {
+          const p = priv.get(t);
+          if (p && (p.ins || p.upd || p.del)) writable.push(t);
+        }
         add('app role', 'read-only tables', writable.length ? 'FAIL' : 'PASS',
-          writable.length ? `${appRole} can write: ${writable.join(', ')} (tenant self-escalation)` : 'plans/billing/users read-only, audit_log append-only');
+          writable.length
+            ? `${appRole} can write: ${writable.join(', ')} (tenant self-escalation / forged audit) — re-run provision-rls`
+            : 'plans/billing/users, bank audit and frozen months read-only, audit_log append-only');
+        // Every SECURITY DEFINER function in public/app runs as its owner: its search_path
+        // must be pinned with pg_temp LAST (else pg_temp types/relations shadow the real
+        // ones and run attacker code as the owner), and PUBLIC must not EXECUTE it.
+        const definers = (await tx`
+          select n.nspname || '.' || p.proname as f,
+                 coalesce((select c from unnest(p.proconfig) c where c like 'search_path=%' limit 1), '') as sp,
+                 (p.proacl is null or exists (select 1 from aclexplode(p.proacl) a where a.grantee = 0 and a.privilege_type = 'EXECUTE')) as public_exec
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+          where p.prosecdef and n.nspname in ('public', 'app') order by 1`) as unknown as Array<{ f: string; sp: string; public_exec: boolean }>;
+        const unsafeDefiners = definers
+          .filter((d) => !/,\s*pg_temp\s*$/.test(d.sp) || d.public_exec)
+          .map((d) => `${d.f}${!/,\s*pg_temp\s*$/.test(d.sp) ? ` (search_path ${d.sp ? `'${d.sp.slice(12)}'` : 'unset'}: pg_temp must be listed LAST)` : ''}${d.public_exec ? ' (PUBLIC can EXECUTE)' : ''}`);
+        add('app role', 'SECURITY DEFINER hardening', unsafeDefiners.length ? 'FAIL' : 'PASS',
+          unsafeDefiners.length
+            ? `unsafe: ${unsafeDefiners.join('; ')}`
+            : `${definers.length} SECURITY DEFINER function(s): search_path ends with pg_temp, no PUBLIC EXECUTE`);
         const leakedOwnerOnly = OWNER_ONLY_TABLES.filter((t) => {
           const p = priv.get(t);
           return p && (p.sel || p.ins || p.upd || p.del);

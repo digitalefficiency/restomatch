@@ -371,8 +371,13 @@ CREATE TABLE IF NOT EXISTS "supplier_bank_accounts" (
   CONSTRAINT "supplier_bank_accounts_bank_code_check" CHECK ("bank_code" ~ '^[0-9]{2,3}$'),
   CONSTRAINT "supplier_bank_accounts_branch_code_check" CHECK ("branch_code" ~ '^[0-9]{3,4}$'),
   CONSTRAINT "supplier_bank_accounts_last4_check" CHECK ("account_last4" ~ '^[0-9]{1,4}$'),
-  -- A clear number is refused: only a versioned envelope ('v<n>:…') is stored.
-  CONSTRAINT "supplier_bank_accounts_enc_envelope_check" CHECK ("account_number_enc" ~ '^v[0-9]+:')
+  -- A clear number is refused: only the full envelope encryptField() writes is stored,
+  -- 'v<n>:<kid>:<iv>:<ct>:<tag>' (five colon-separated parts, none empty).
+  CONSTRAINT "supplier_bank_accounts_enc_envelope_check" CHECK ("account_number_enc" ~ '^v[0-9]+:[^:]+:[^:]+:[^:]+:[^:]+$'),
+  -- The holder is a name, never a ciphertext envelope (any case, leading blanks). No
+  -- digit-run rule: a company name may carry its ח.פ. number.
+  CONSTRAINT "supplier_bank_accounts_holder_name_check" CHECK (
+    "holder_name" IS NULL OR (length("holder_name") <= 200 AND "holder_name" !~* '^\s*v[0-9]+:'))
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "supplier_bank_accounts_supplier_idx" ON "supplier_bank_accounts" USING btree ("supplier_id", "restaurant_id");--> statement-breakpoint
 -- One ACTIVE account per (restaurant, supplier): a change of account = a new row + the
@@ -387,20 +392,22 @@ CREATE TRIGGER "supplier_bank_accounts_set_updated_at" BEFORE UPDATE ON "supplie
 -- last4 = a string of at most 4 digits, holder_name = a short string (never a
 -- ciphertext envelope) or null, active = a boolean, verified_by / verified_at = a
 -- string or null. So nothing nested, and no number or ciphertext, can ride along.
-CREATE OR REPLACE FUNCTION public.restomatch_bank_audit_masked(j jsonb) RETURNS boolean
+-- (A backstop: the base table's own CHECKs refuse a bad holder first.) Every type and
+-- function is schema-qualified, and pg_temp is searched LAST.
+CREATE OR REPLACE FUNCTION public.restomatch_bank_audit_masked(j pg_catalog.jsonb) RETURNS pg_catalog.bool
   LANGUAGE sql IMMUTABLE
-  SET search_path = pg_catalog, public
+  SET search_path = pg_catalog, public, pg_temp
   AS $$
-  SELECT jsonb_typeof(j) = 'object'
-    AND j - ARRAY['bank_code', 'branch_code', 'account_last4', 'holder_name', 'active', 'verified_by', 'verified_at'] = '{}'::jsonb
-    AND jsonb_typeof(coalesce(j -> 'bank_code', '"0"')) = 'string' AND (j ->> 'bank_code') ~ '^[0-9]{1,3}$' IS NOT FALSE
-    AND jsonb_typeof(coalesce(j -> 'branch_code', '"0"')) = 'string' AND (j ->> 'branch_code') ~ '^[0-9]{1,4}$' IS NOT FALSE
-    AND jsonb_typeof(coalesce(j -> 'account_last4', '"0"')) = 'string' AND (j ->> 'account_last4') ~ '^[0-9]{1,4}$' IS NOT FALSE
-    AND jsonb_typeof(coalesce(j -> 'holder_name', 'null')) IN ('string', 'null')
-    AND (j ->> 'holder_name') !~ '^v[0-9]+:' IS NOT FALSE AND length(coalesce(j ->> 'holder_name', '')) <= 200
-    AND jsonb_typeof(coalesce(j -> 'active', 'true')) = 'boolean'
-    AND jsonb_typeof(coalesce(j -> 'verified_by', 'null')) IN ('string', 'null') AND length(coalesce(j ->> 'verified_by', '')) <= 64
-    AND jsonb_typeof(coalesce(j -> 'verified_at', 'null')) IN ('string', 'null') AND length(coalesce(j ->> 'verified_at', '')) <= 64
+  SELECT pg_catalog.jsonb_typeof(j) = 'object'
+    AND j - ARRAY['bank_code', 'branch_code', 'account_last4', 'holder_name', 'active', 'verified_by', 'verified_at']::pg_catalog.text[] = '{}'::pg_catalog.jsonb
+    AND pg_catalog.jsonb_typeof(coalesce(j -> 'bank_code', '"0"'::pg_catalog.jsonb)) = 'string' AND (j ->> 'bank_code') ~ '^[0-9]{1,3}$' IS NOT FALSE
+    AND pg_catalog.jsonb_typeof(coalesce(j -> 'branch_code', '"0"'::pg_catalog.jsonb)) = 'string' AND (j ->> 'branch_code') ~ '^[0-9]{1,4}$' IS NOT FALSE
+    AND pg_catalog.jsonb_typeof(coalesce(j -> 'account_last4', '"0"'::pg_catalog.jsonb)) = 'string' AND (j ->> 'account_last4') ~ '^[0-9]{1,4}$' IS NOT FALSE
+    AND pg_catalog.jsonb_typeof(coalesce(j -> 'holder_name', 'null'::pg_catalog.jsonb)) IN ('string', 'null')
+    AND (j ->> 'holder_name') !~* '^\s*v[0-9]+:' IS NOT FALSE AND pg_catalog.length(coalesce(j ->> 'holder_name', '')) <= 200
+    AND pg_catalog.jsonb_typeof(coalesce(j -> 'active', 'true'::pg_catalog.jsonb)) = 'boolean'
+    AND pg_catalog.jsonb_typeof(coalesce(j -> 'verified_by', 'null'::pg_catalog.jsonb)) IN ('string', 'null') AND pg_catalog.length(coalesce(j ->> 'verified_by', '')) <= 64
+    AND pg_catalog.jsonb_typeof(coalesce(j -> 'verified_at', 'null'::pg_catalog.jsonb)) IN ('string', 'null') AND pg_catalog.length(coalesce(j ->> 'verified_at', '')) <= 64
 $$;--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "supplier_bank_account_changes" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -450,26 +457,32 @@ CREATE TRIGGER "supplier_bank_accounts_immutable" BEFORE UPDATE ON "supplier_ban
 -- Every insert and every change writes the MASKED audit row itself (BEC fraud): the
 -- app cannot forget it, and changed_by is the session user (app.current_user_id(),
 -- NULL on the owner connection). An UPDATE that changes no masked field logs nothing.
--- SECURITY DEFINER (owned by the table owner, pinned search_path): the trigger is the
+-- SECURITY DEFINER (owned by the table owner, search_path pinned with pg_temp LAST,
+-- every type/object schema-qualified, TG_RELID checked, no EXECUTE for anyone): the trigger is the
 -- ONLY writer; rls.ts revokes INSERT/UPDATE/DELETE on the audit from the tenant role,
 -- so a forged audit row is refused. Remaining limit: changed_by comes from the
 -- app.current_user_id GUC, which the app's session middleware sets.
 CREATE OR REPLACE FUNCTION public.restomatch_bank_account_audit() RETURNS trigger
   LANGUAGE plpgsql
   SECURITY DEFINER
-  SET search_path = pg_catalog, public
+  SET search_path = pg_catalog, public, pg_temp
   AS $$
 DECLARE
-  b jsonb;
-  a jsonb := jsonb_build_object('bank_code', NEW.bank_code, 'branch_code', NEW.branch_code,
+  b pg_catalog.jsonb;
+  a pg_catalog.jsonb;
+BEGIN
+  -- Only ever as the trigger on supplier_bank_accounts (no temp-table or other-table reuse).
+  IF TG_RELID IS DISTINCT FROM 'public.supplier_bank_accounts'::pg_catalog.regclass THEN
+    RAISE EXCEPTION 'restomatch_bank_account_audit: wrong table' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  a := pg_catalog.jsonb_build_object('bank_code', NEW.bank_code, 'branch_code', NEW.branch_code,
     'account_last4', NEW.account_last4, 'holder_name', NEW.holder_name, 'active', NEW.active,
     'verified_by', NEW.verified_by, 'verified_at', NEW.verified_at);
-BEGIN
   IF TG_OP = 'UPDATE' THEN
-    b := jsonb_build_object('bank_code', OLD.bank_code, 'branch_code', OLD.branch_code,
+    b := pg_catalog.jsonb_build_object('bank_code', OLD.bank_code, 'branch_code', OLD.branch_code,
       'account_last4', OLD.account_last4, 'holder_name', OLD.holder_name, 'active', OLD.active,
       'verified_by', OLD.verified_by, 'verified_at', OLD.verified_at);
-    IF b = a THEN
+    IF b OPERATOR(pg_catalog.=) a THEN
       RETURN NULL;
     END IF;
   END IF;
@@ -478,6 +491,18 @@ BEGIN
   RETURN NULL;
 END
 $$;--> statement-breakpoint
+-- Nobody calls it directly: no PUBLIC / API-role / app-role EXECUTE (the attached
+-- trigger still fires; EXECUTE is checked when a trigger is CREATED).
+REVOKE ALL ON FUNCTION public.restomatch_bank_account_audit() FROM PUBLIC;--> statement-breakpoint
+DO $$
+DECLARE r text;
+BEGIN
+  FOREACH r IN ARRAY ARRAY['anon', 'authenticated', 'service_role', 'restomatch_app'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = r) THEN
+      EXECUTE pg_catalog.format('REVOKE ALL ON FUNCTION public.restomatch_bank_account_audit() FROM %I', r);
+    END IF;
+  END LOOP;
+END $$;--> statement-breakpoint
 DROP TRIGGER IF EXISTS "supplier_bank_accounts_audit" ON "supplier_bank_accounts";--> statement-breakpoint
 CREATE TRIGGER "supplier_bank_accounts_audit" AFTER INSERT OR UPDATE ON "supplier_bank_accounts" FOR EACH ROW EXECUTE FUNCTION public.restomatch_bank_account_audit();--> statement-breakpoint
 
@@ -528,7 +553,7 @@ BEGIN
     ALTER TABLE "users" ADD CONSTRAINT "users_whatsapp_consent_check" CHECK (
       NOT "whatsapp_opt_in"
       OR ("whatsapp_opt_in_at" IS NOT NULL AND "whatsapp_opt_in_source" IS NOT NULL
-          AND "whatsapp_opt_in_source" <> 'admin' AND "whatsapp_opt_in_notice_version" IS NOT NULL));
+          AND "whatsapp_opt_in_source" <> 'admin' AND pg_catalog.btrim(coalesce("whatsapp_opt_in_notice_version", '')) <> ''));
   END IF;
 END $$;--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "notification_prefs" (
@@ -636,5 +661,5 @@ DROP POLICY IF EXISTS "notification_settings_own_delete" ON "notification_settin
 CREATE POLICY "notification_settings_own_delete" ON "notification_settings" AS RESTRICTIVE FOR DELETE USING ("user_id" = app.current_user_id());
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '442c6526babdc0d4763ac399585d2771b570673e4f971f8d7a2fa55e9f0b4e1d', 1782500000000
+select 'c42186333495a7d413ed66ebd65bcffecc972d67ad9c98cbe63e3546f552d363', 1782500000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782500000000);

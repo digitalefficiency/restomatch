@@ -2714,7 +2714,7 @@ export const leakMonthCorrections = pgTable(
 );
 
 /**
- * A supplier's bank account. `accountNumberEnc` is a CIPHERTEXT envelope 'v<n>:…'
+ * A supplier's bank account. `accountNumberEnc` is a CIPHERTEXT envelope 'v<n>:<kid>:<iv>:<ct>:<tag>'
  * (CHECK; @restomatch/crypto encryptField, BANK_ENC_KEY, AAD restaurant:supplier);
  * screens show `accountLast4` only. The bank details are immutable (trigger): only
  * active / verified_* / holder_name change. One active account per (restaurant,
