@@ -80,7 +80,7 @@ describe('holdReasonsOf', () => {
     expect(holdReasonsOf(BASE)).toEqual([]);
   });
 
-  it('"ממתין להחלטת: בעלים · 4 ימים · ₪100.00 במחלוקת מתוך ₪4,513.15"', () => {
+  it('"ממתין להחלטת: בעלים · 4 ימים · ₪100.00 בבירור מול הספק מתוך ₪4,513.15"', () => {
     expect(
       holdReasonsOf({ ...BASE, status: 'hold', pendingIls: 100, openRole: 'owner', openDays: 4 }),
     ).toEqual([

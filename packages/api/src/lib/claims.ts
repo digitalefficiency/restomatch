@@ -7,7 +7,7 @@ import type { LeakBreakdownInvoice, LeakBreakdownLine } from '@restomatch/charts
  *
  *  • an invoice still waiting for a PO link has nothing to claim. A PAID invoice KEEPS its
  *    claims (owner decision, W2-03 §5.5): marking an invoice paid never erases a shekel —
- *    after payment the channel is a דרישת זיכוי letter (decision 19);
+ *    after payment the channel is a בקשת זיכוי letter (decision 19);
  *  • a discrepancy that already holds a non-written-off claim (`claimedIds`) is skipped, so
  *    the same ₪ is never asked twice;
  *  • a line is claimable when it counts as leak and is open, escalated or accepted (waived lines drop);
