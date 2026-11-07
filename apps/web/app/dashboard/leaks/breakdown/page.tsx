@@ -16,6 +16,7 @@ import { noDataCtaFor, zeroNoteOf } from '../states';
 import { legacyPeriodRedirect, monthParams } from '../period-url';
 import { leakWhyLabels } from '../why-labels';
 import { LineHistory } from './LineHistory';
+import { HubTabs } from '../hub-tabs';
 import {
   discrepancyLabel,
   displayName,
@@ -76,6 +77,7 @@ export default async function LeakBreakdownPage({
       : caller.owner.leakBreakdown({ monthOffset, limit: 100 }),
     caller.owner.viewOptions(),
   ]);
+  const proofOn = (await caller.recovery.flags().catch(() => null))?.leakProof ?? false;
   const hero = summary.current;
   const compact = view.density === 'compact';
 
@@ -116,6 +118,7 @@ export default async function LeakBreakdownPage({
       </Link>
 
       <SectionHeader level={1} title={t('breakdown.title')} subtitle={t('breakdown.subtitle', { month })} />
+      <HubTabs active="breakdown" proof={proofOn} />
 
       <ViewToolbar
         page="breakdown"

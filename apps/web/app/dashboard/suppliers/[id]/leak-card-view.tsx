@@ -10,7 +10,8 @@ import { createTranslator } from '@/lib/i18n/translate';
 import { leaks as leaksNs } from '@/lib/i18n/messages/leaks';
 import { Badge, LinkButton, cn } from '@/lib/components';
 import { discrepancyLabel, displayName } from '../../approvals/vocab';
-import { lineMathText } from '../../leaks/claims/why';
+import { WhyLine, whySegments } from '@/lib/components/flags';
+import { leakWhyLabels } from '../../leaks/why-labels';
 import type { SupplierLeakCard } from './leak-card-data';
 
 const ils = (agorot: number, locale: Locale) => formatIls(agorot / 100, { locale, maximumFractionDigits: 2 });
@@ -141,21 +142,14 @@ export function LeakCardBody({
             {card.topLines.map((l) => {
               const item = displayName(locale, l.productName ?? l.lineDescription, l.productNameEn ?? l.lineDescriptionEn);
               const inv = l.invoiceNumber ? t('leakCard.invoice', { number: l.invoiceNumber }) : t('leakCard.invoiceNoNumber');
-              // Expected vs charged, so the supplier can verify the line (SUP-02).
-              // TODO(W2-09): render through W1-07's flags/WhyLine once both are on main (no cross-package imports in wave 1).
-              const math = lineMathText(
-                { type: l.type, severity: l.severity ?? null, expected: l.expected ?? null, actual: l.actual ?? null, deltaAmount: l.deltaAmount },
-                t.appLocale,
-              );
+              // The line's verified basis, so the supplier can check it (SUP-02, W2-09c): the one
+              // shared why formatter — "חויב ₪149.00 × 10 ק״ג · בהזמנה ₪139.00 (PO-…, 14.10) · פער ₪100.00".
+              const math = l.evidence ? whySegments(l.evidence.facts, leakWhyLabels(t.appLocale)) : null;
               return (
                 <li key={l.discrepancyId} className="flex items-start justify-between gap-3 py-2" data-testid="supplier-leak-line">
                   <div className="min-w-0">
                     <p className="truncate text-ink">{item || discrepancyLabel(ta, l.type)}</p>
-                    {math ? (
-                      <p className="text-xs text-ink" data-testid="supplier-leak-math">
-                        {math}
-                      </p>
-                    ) : null}
+                    {math ? <WhyLine id={`why-${l.discrepancyId}`} groups={math} className="text-xs" /> : null}
                     <p className="text-xs text-subtle">
                       {discrepancyLabel(ta, l.type)} ·{' '}
                       {print ? (

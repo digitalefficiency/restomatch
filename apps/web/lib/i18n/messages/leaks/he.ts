@@ -9,6 +9,8 @@
 export const he = {
   loading: 'טוען',
   hub: {
+    tabsLabel: 'אזורי הדליפה',
+    tabs: { overview: 'סקירה', breakdown: 'פירוק', proof: 'הוכחה', prices: 'מחירים שעלו', report: 'דוח' },
     title: 'דליפה',
     subtitle: 'דליפה = כסף שחויבתם מעבר להזמנה ולמה שהתקבל, בחשבוניות שנבדקו, לפני מע״מ.',
     loadingLabel: 'טוען את נתוני הדליפה',

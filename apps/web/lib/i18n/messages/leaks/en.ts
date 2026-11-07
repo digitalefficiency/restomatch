@@ -4,6 +4,8 @@ import type { he } from './he';
 export const en: Shape<typeof he> = {
   loading: 'Loading',
   hub: {
+    tabsLabel: 'Leak sections',
+    tabs: { overview: 'Overview', breakdown: 'Breakdown', proof: 'Proof', prices: 'Prices that rose', report: 'Report' },
     title: 'Leak',
     subtitle: 'Leak = money you were billed beyond the order and what arrived, in checked invoices, before VAT.',
     loadingLabel: 'Loading the leak figures',

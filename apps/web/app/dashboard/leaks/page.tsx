@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { originalProps } from '@/lib/i18n/original';
 import { auth } from '@/auth';
 import { TRPCError } from '@trpc/server';
-import { ArrowLeft, FileBarChart, FileCheck2, Lock, TrendingUp } from 'lucide-react';
+import { FileCheck2, Lock, TrendingUp } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -23,6 +23,7 @@ import { parseView } from '@/lib/components/views';
 import { displayName } from '../approvals/vocab';
 import { LeakExplorer } from './explorer';
 import { OverContractCard } from '../contracts/over-contract';
+import { HubTabs } from './hub-tabs';
 
 export default async function LeaksPage({
   searchParams,
@@ -53,26 +54,20 @@ export default async function LeaksPage({
     }
   }
 
-  // The report is owner|manager only: never offer a link the role cannot open (leaks-22).
-  const canReport = role === 'owner' || role === 'manager';
+  // The report is for finance roles (the bookkeeper reads everything): never offer a link
+  // the role cannot open (leaks-22).
+  const canReport = role === 'owner' || role === 'manager' || role === 'bookkeeper';
+  const proofOn = (await caller.recovery.flags().catch(() => null))?.leakProof ?? false;
+  const tabs = <HubTabs active="overview" proof={proofOn} report={canReport} />;
   const linkCls =
     'touch-target inline-flex max-w-full items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary ring-1 ring-line transition-colors hover:bg-surface-2 hover:text-ink';
+  // The hub tabs carry breakdown / proof / prices / report; claims (W2-10) stays a link.
   const leakLinks = (
     <div className="mb-4 flex flex-wrap items-center gap-2">
-      <Link href="/dashboard/leaks/breakdown" className={linkCls}>
-        {t('detective.toBreakdown')}
-        <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
-      </Link>
       <Link href="/dashboard/leaks/claims" className={linkCls}>
         <FileCheck2 className="h-4 w-4" aria-hidden="true" />
         {t('claims.open')}
       </Link>
-      {canReport ? (
-        <Link href="/dashboard/leaks/report" className={linkCls}>
-          <FileBarChart className="h-4 w-4" aria-hidden="true" />
-          {t('report.open')}
-        </Link>
-      ) : null}
     </div>
   );
   // The explorer is for every finance role (owner/manager/bookkeeper); the
@@ -85,6 +80,7 @@ export default async function LeaksPage({
     return (
       <div>
         <SectionHeader level={1} title={t('hub.title')} subtitle={t('hub.subtitle')} />
+        {tabs}
         <div className="flex flex-col">
           <div className="order-last sm:order-first">{leakLinks}</div>
           {explorer}
@@ -102,6 +98,7 @@ export default async function LeaksPage({
     return (
       <div>
         <SectionHeader level={1} title={t('hub.title')} subtitle={t('hub.subtitle')} />
+        {tabs}
         <div className="flex flex-col">
           <div className="order-last sm:order-first">{leakLinks}</div>
           {explorer}
@@ -131,6 +128,7 @@ export default async function LeaksPage({
   return (
     <div>
       <SectionHeader level={1} title={t('hub.title')} subtitle={t('hub.subtitle')} />
+        {tabs}
       <div className="flex flex-col">
         <div className="order-last sm:order-first">{leakLinks}</div>
         {explorer}
@@ -165,12 +163,13 @@ export default async function LeaksPage({
 
           {/* The signature glowing heatmap. */}
           <LeakHeatmap
-            items={rows}
+            // Each tile is a door to its row below (a11y-19, the drill contract).
+            items={rows.map((r, i) => ({ ...r, href: `#creep-${i}` }))}
             locale={locale}
             labels={{ mild: t('heatmap.mild'), severe: t('heatmap.severe'), more: t('heatmap.more') }}
           />
 
-          {/* Full breakdown table — scrolls horizontally on phones. */}
+          {/* Full table — on phones each row is a card with ₪ at the line end (leaks-09: no hidden ₪, no sideways scroll). */}
           {/* Focusable + labelled so keyboard users can scroll it (axe scrollable-region-focusable). */}
           <Card
             elevated
@@ -181,9 +180,9 @@ export default async function LeaksPage({
             aria-label={t('detective.caption')}
             className="overflow-x-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
           >
-            <table className="w-full min-w-[640px] text-sm">
+            <table className="w-full text-sm sm:min-w-[640px]">
               <caption className="sr-only">{t('detective.caption')}</caption>
-              <thead className="border-b border-line bg-surface-2 text-xs text-subtle">
+              <thead className="border-b border-line bg-surface-2 text-xs text-subtle max-sm:sr-only">
                 <tr>
                   <th scope="col" className="p-3 text-start font-semibold">{t('detective.colProduct')}</th>
                   <th scope="col" className="p-3 text-start font-semibold">{t('detective.colSupplier')}</th>
@@ -195,10 +194,12 @@ export default async function LeaksPage({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {rows.map((row, i) => (
                   <tr
                     key={`${row.productId}-${row.supplierId}`}
-                    className="border-t border-line transition-colors hover:bg-surface-2/60"
+                    id={`creep-${i}`}
+                    data-amount={row.monthExcessIls}
+                    className="scroll-mt-24 border-t border-line transition-colors hover:bg-surface-2/60 target:bg-warn/12 max-sm:grid max-sm:grid-cols-[1fr_auto] max-sm:gap-x-3 max-sm:px-3 max-sm:py-2 [&>td]:max-sm:p-0"
                   >
                     <td className="p-3">
                       <div className="font-medium text-ink">{row.productName}</div>

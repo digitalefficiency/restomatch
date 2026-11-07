@@ -1,6 +1,9 @@
 import { formatIls } from '../money';
 import type { Locale } from '../i18n/config';
 import { formatPercent } from '../i18n/format';
+import { creepStep } from './data-viz/palette';
+import { drillAttrs } from './drill/attrs';
+import { cnMerge as cn } from './cn';
 
 export interface LeakCell {
   productName: string;
@@ -8,33 +11,21 @@ export interface LeakCell {
   deltaPct: number;
   monthExcessIls: number;
   category?: string | null;
+  /** W2-09c: where the tile drills to (its row in the "מחירים שעלו" table). Without it the tile is not a link. */
+  href?: string;
+}
+
+/** Price creep (~5%..50%+ over the usual price) → a 0..1 intensity for the creep ramp (tokens). */
+function creepIntensity(deltaPct: number): number {
+  return Math.max(0.12, Math.min(1, (deltaPct - 0.05) / 0.45));
 }
 
 /**
- * Interpolate a pale warn tint → deep warn by price creep (~5%..50%+ over
- * baseline). Returns a background, a text color that stays WCAG AA (≥4.5:1) on
- * it, and the raw intensity. The ramp skips the band where neither ink nor
- * white text would reach 4.5:1: ink up to t=0.55, white from t=0.68.
- */
-function leakColor(deltaPct: number): { bg: string; text: string; intensity: number } {
-  const intensity = Math.max(0.12, Math.min(1, (deltaPct - 0.05) / 0.45));
-  const t = intensity <= 0.55 ? intensity : 0.68 + ((intensity - 0.55) / 0.45) * 0.32;
-  // Warn hue, not danger: price creep is a separate, rolling measure — not this
-  // month's leak (the T1 hero), so it must not compete with it.
-  // #FDF0E8 (253,240,232) → #6E2800 (110,40,0)
-  const r = Math.round(253 + (110 - 253) * t);
-  const g = Math.round(240 + (40 - 240) * t);
-  const b = Math.round(232 + (0 - 232) * t);
-  const text = t <= 0.55 ? '#0F1F17' : '#FFFFFF';
-  return { bg: `rgb(${r}, ${g}, ${b})`, text, intensity };
-}
-
-
-/**
- * Leak heatmap — the signature data-viz. Each tile is a leaking (product,
- * supplier) pair, colored by how far the last price exceeds its baseline, with
- * a danger shadow that intensifies with the leak, sorted by monthly money lost.
- * Server-safe (no hooks).
+ * Leak heatmap — the signature data-viz. Each tile is a (product, supplier)
+ * pair whose price rose, coloured by the creep ramp tokens by how far the last
+ * price exceeds the usual one, sorted by money paid above it. Every tile prints
+ * its values (colour is never the only signal) and has a full-sentence name;
+ * with `href` it is a door (a11y-19, the drill contract). Server-safe (no hooks).
  */
 export function LeakHeatmap({
   items,
@@ -58,43 +49,53 @@ export function LeakHeatmap({
 
   return (
     <div>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+      <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
         {shown.map((c, i) => {
-          const { bg, text, intensity } = leakColor(c.deltaPct);
-          const hot = intensity > 0.55;
-          return (
-            <div
-              key={`${c.productName}-${c.supplierName}-${i}`}
-              className="relative overflow-hidden rounded-xl p-3 ring-1 ring-line transition-transform hover:scale-[1.03]"
-              style={{
-                background: bg,
-                color: text,
-                boxShadow: hot
-                  ? `0 0 0 1px rgba(110,40,0,${0.2 + intensity * 0.3}), 0 8px 22px -12px rgba(110,40,0,${0.25 + intensity * 0.25})`
-                  : undefined,
-              }}
-              title={`${c.productName} · ${c.supplierName}: +${pct(c.deltaPct)} · ${fmtIls(c.monthExcessIls)}`}
-            >
-              <div className="font-mono text-lg font-extrabold tabular-nums" dir="ltr">
-                +{pct(c.deltaPct)}
+          const { bg, text, step } = creepStep(creepIntensity(c.deltaPct));
+          const name = `${c.productName} · ${c.supplierName}: +${pct(c.deltaPct)} · ${fmtIls(c.monthExcessIls)}`;
+          const cls = cn(
+            'relative block overflow-hidden rounded-xl p-3 ring-1 ring-line transition-transform',
+            bg,
+            text,
+            step >= 4 && 'shadow-md',
+            c.href && 'hover:scale-[1.03]',
+          );
+          const body = (
+            <>
+              <div className="text-lg font-extrabold tabular-nums">
+                <bdi>+{pct(c.deltaPct)}</bdi>
               </div>
               <div className="mt-1 truncate text-sm font-semibold">{c.productName}</div>
               <div className="truncate text-xs">{c.supplierName}</div>
-              <div className="mt-2 font-mono text-xs font-semibold tabular-nums">
-                {fmtIls(c.monthExcessIls)}
+              <div className="mt-2 text-xs font-semibold tabular-nums">
+                <bdi>{fmtIls(c.monthExcessIls)}</bdi>
               </div>
-            </div>
+            </>
+          );
+          const key = `${c.productName}-${c.supplierName}-${i}`;
+          return (
+            <li key={key} className="list-none">
+              {c.href ? (
+                <a href={c.href} className={cls} aria-label={name} {...drillAttrs(Math.round(c.monthExcessIls * 100))} data-testid="heatmap-tile">
+                  {body}
+                </a>
+              ) : (
+                <div className={cls} aria-label={name} role="group" data-testid="heatmap-tile">
+                  {body}
+                </div>
+              )}
+            </li>
           );
         })}
-      </div>
+      </ul>
       <div className="mt-4 flex items-center justify-between text-xs text-muted">
         <div className="flex items-center gap-2">
           <span>{l.mild}</span>
-          <span
-            className="h-3 w-24 rounded-full ring-1 ring-line rtl:-scale-x-100"
-            style={{ background: 'linear-gradient(90deg, #FDF0E8, #6E2800)' }}
-            aria-hidden="true"
-          />
+          <span className="flex h-3 w-24 overflow-hidden rounded-full ring-1 ring-line" aria-hidden="true">
+            {[0.1, 0.3, 0.5, 0.7, 0.9].map((x) => (
+              <span key={x} className={cn('h-full flex-1', creepStep(x).bg)} />
+            ))}
+          </span>
           <span>{l.severe}</span>
         </div>
         {hidden > 0 ? <span>{l.more.replace('{count}', String(hidden))}</span> : null}

@@ -5,14 +5,9 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { leaks } from '@/lib/i18n/messages/leaks';
 import { cnMerge as cn } from '../cn';
 import { moneyText, type MoneyContext } from '../money/format';
+import { drillAttrs } from './attrs';
 
-/** `data-*` the drill contract stamps on every door (links and buttons alike). */
-export function drillAttrs(totalAgorot: number): { 'data-drill': ''; 'data-drill-total': string } {
-  if (!Number.isSafeInteger(totalAgorot)) {
-    throw new RangeError(`DrillLink: totalAgorot must be integer agorot, got ${totalAgorot}`);
-  }
-  return { 'data-drill': '', 'data-drill-total': String(totalAgorot) };
-}
+export { drillAttrs };
 
 export interface DrillLinkProps {
   href: string;

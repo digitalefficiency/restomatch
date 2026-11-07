@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { permanentRedirect } from 'next/navigation';
 import { legacyPeriodRedirect, monthParams } from '../period-url';
 import { ReportExportButtons } from './ExportButtons';
+import { HubTabs } from '../hub-tabs';
 import { WithOriginal } from '@/lib/i18n/original';
 import { auth } from '@/auth';
 import { TRPCError } from '@trpc/server';
@@ -196,6 +197,7 @@ export default async function LeakReportPage({
         </div>
       </div>
 
+      <HubTabs active="report" proof={flags.leakProof} />
       <ViewToolbar
         page="report"
         view={view}

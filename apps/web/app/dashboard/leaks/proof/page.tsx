@@ -14,6 +14,7 @@ import { PrintButton } from './print-button';
 import { WhyLine, whySegments } from '@/lib/components/flags';
 import { legacyPeriodRedirect } from '../period-url';
 import { leakWhyLabels } from '../why-labels';
+import { HubTabs } from '../hub-tabs';
 import { approvedNotClaimed, sumAgora } from '../claims/letters';
 import { ALL_CLAIMS } from '../../recovery/logic';
 
@@ -85,6 +86,9 @@ export default async function LeakProofPage({
         <PrintButton label={t('print')} />
       </div>
 
+      <div data-print-hide>
+        <HubTabs active="proof" />
+      </div>
       <SectionHeader level={1} title={t('title', { amount: exact(hero.leakIls) })} subtitle={t('subtitle', { month })} />
 
       {/* T1 — the number and how it is made. */}
