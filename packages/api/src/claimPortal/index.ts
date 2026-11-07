@@ -1,0 +1,29 @@
+/** H-06ʰ — the supplier's reply link for a "מכתב בקשת זיכוי" (public, token-scoped). */
+export {
+  CLAIM_LINK_TTL_MS,
+  CLAIM_TOKEN_LENGTH,
+  claimPortalSecret,
+  hashClaimToken,
+  signClaimToken,
+  verifyClaimToken,
+  type ClaimLinkClaims,
+  type ClaimTokenCheck,
+} from './token';
+export {
+  MAX_CREDIT_NOTE_NUMBER_CHARS,
+  MAX_LETTER_LINES,
+  MAX_NOTE_CHARS,
+  claimLinkUrl,
+  loadClaimLetter,
+  mintClaimLink,
+  resolveClaimLink,
+  submitClaimAnswer,
+  type ClaimAnswer,
+  type ClaimAnswerInput,
+  type ClaimAnswerResult,
+  type ClaimLetterLine,
+  type ClaimLetterView,
+  type ClaimLineReason,
+  type ClaimLink,
+  type ClaimLinkError,
+} from './service';
