@@ -614,7 +614,7 @@ describe('#216 money review — round 2', () => {
     expect(await as('manager').match.runForInvoice({ invoiceId: failedId })).toMatchObject({ matchRunId: null, status: 'held', held: 'receipt_open' });
     expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId))).toHaveLength(0);
     const [row] = await db.select({ status: invoices.status, payload: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, failedId));
-    expect(row!.status).toBe('matched'); // routed: waits on the count, not on a person
+    expect(row!.status).toBe('parsed'); // round 7: not "checked" before its run (export / pending list)
     expect((row!.payload as { raw: Record<string, unknown> }).raw).toMatchObject({ heldForReceipts: [A.grId], scanGrId: A.grId });
     await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
     expect((await as('manager').match.runForInvoice({ invoiceId: failedId })).matchRunId).not.toBeNull();
@@ -990,6 +990,88 @@ describe('#216 round 6, item 2: one lock order everywhere — invoice row → re
       as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 } }),
     );
     expect(out).toMatchObject({ rematched: true });
+  });
+
+  it('round 7 (item 6): the pencil on a hand line re-matched under the same sibling never deadlocks (no 40P01)', async () => {
+    await stamped();
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    const out = await siblingParksBetweenRecoveryAndGrClose(() =>
+      as('manager').receiving.updateInvoiceLine({ lineId: a.lineId, patch: { qtyBilled: 2 } }),
+    );
+    expect(out).toMatchObject({ rematched: true });
+  });
+});
+
+describe('#216 round 7', () => {
+  const runs = () => db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId));
+  const raw = async () =>
+    ((await db.select({ p: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, failedId)))[0]!.p as { raw?: Record<string, unknown> } | null)?.raw ?? {};
+  const stamped = () =>
+    db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: A.grId } } })
+      .where(eq(invoices.id, failedId));
+
+  it('item 2 + 4: a held invoice with no run stays unchecked (parsed: pending list, editable, not exported) and the page knows it waits for the count', async () => {
+    await stamped();
+    await db
+      .update(invoices)
+      .set({ invoiceNumber: 'HELD-7', invoiceDate: new Date(), totalExclVat: '1.00', vatAmount: '0.18', totalInclVat: '1.18' })
+      .where(eq(invoices.id, failedId));
+    await db.insert(invoiceLines).values({ invoiceId: failedId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' });
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    expect(await as('manager').match.runForInvoice({ invoiceId: failedId })).toMatchObject({ status: 'held' });
+
+    const page = await as('manager').receiving.getInvoice({ invoiceId: failedId });
+    expect(page).toMatchObject({ status: 'parsed', awaitingCount: true, linesEditable: true });
+    expect((await as('manager').receiving.pendingInvoices()).map((i) => i.id)).toContain(failedId);
+    const day = new Date().toISOString().slice(0, 10);
+    const csv = await as('owner').exports.invoicesCsv({ from: day, to: day });
+    expect(csv.content).not.toContain('HELD-7');
+
+    // The count closes (a run would follow from the job): no longer waiting.
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
+    expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).awaitingCount).toBe(false);
+  });
+
+  it('item 3: a run persisted on the receipt it was held for ends the hold (no re-claim, no permanent pin)', async () => {
+    await stamped();
+    await db.insert(invoiceLines).values({ invoiceId: failedId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' });
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    await as('manager').match.runForInvoice({ invoiceId: failedId });
+    expect((await raw()).heldForReceipts).toEqual([A.grId]);
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
+    const out = await as('manager').match.runForInvoice({ invoiceId: failedId });
+    expect(out.matchRunId).not.toBeNull();
+    expect((await raw()).heldForReceipts).toBeUndefined();
+    expect((await raw()).scanGrId).toBe(A.grId); // the stamp stays
+  });
+
+  it('item 6 (P3): matched on a counted receipt, then the receipt is reopened → Re-run refuses (receiptOpen), no hold written, the run unchanged', async () => {
+    await stamped();
+    await as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 } });
+    const before = (await runs()).map((r) => r.id);
+    expect(before).toHaveLength(1);
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId)); // reopened
+    await expect(as('manager').match.runForInvoice({ invoiceId: failedId })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      cause: { appCode: 'invoice.receiptOpen' },
+    });
+    expect((await raw()).heldForReceipts).toBeUndefined();
+    expect((await runs()).map((r) => r.id)).toEqual(before);
+  });
+
+  it('item 7: a read whose subtotal is unknown (total-only) may clear its VAT alone; with a subtotal it is still refused', async () => {
+    await db.update(invoices).set({ totalExclVat: null, vatAmount: '15.30', totalInclVat: '100.30' }).where(eq(invoices.id, failedId));
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { vatAmount: null } });
+    expect(await header(failedId)).toEqual({ excl: null, vat: null, incl: '100.30' });
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 85, vatAmount: 15.3, totalInclVat: 100.3 } });
+    await expect(as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { vatAmount: null } })).rejects.toMatchObject({
+      cause: { appCode: 'invoice.partialHeaderClear' },
+    });
   });
 });
 

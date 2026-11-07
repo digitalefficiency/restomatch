@@ -119,6 +119,11 @@ export const matchRouter = router({
           if (counted) {
             throw appError('PRECONDITION_FAILED', 'invoice.receiptOpen', 'הקבלה פתוחה לספירה — אפשר להריץ את ההתאמה אחרי שהספירה תיסגר');
           }
+          // Its earlier run (none, or one with no receipt) is replaced by the
+          // receipt's job: bare claims on it go now, and a claim in progress
+          // refuses the Re-run visibly (invoice.claimInProgress) — the job would
+          // otherwise fail on the claim's FK and leave the stale ₪ (round 7).
+          await releaseClaimsForRematch(ctx.db, restaurantId, input.invoiceId);
           const held = await holdForReceipt(ctx.db, restaurantId, input.invoiceId, landedGrId);
           return { matchRunId: null, status: 'held', totalDiscrepancyAmount: 0, discrepancyCount: 0, poMatched: built?.poId != null, held };
         }

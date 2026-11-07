@@ -181,6 +181,7 @@ export const en: Shape<typeof he> = {
     forbidden: 'You do not have permission to do this.',
     unauthorized: 'Your session has expired. Please sign in again.',
     invalidInput: 'One of the values you entered is invalid.',
+    invoiceClaimInProgress: 'A credit claim on this invoice is in progress — finish it or write it off in the ₪-back tracker, then run the match again.',
     invoicePartialHeaderClear: 'Clear the invoice totals together: before VAT, VAT and total. Or fill in all three.',
     invoiceBeingRead: 'This invoice is still being read. Try again in a minute.',
     invoiceReceiptOpen: "The goods receipt for this invoice is still being counted. The match runs when the count is closed, and you can edit the lines after that.",

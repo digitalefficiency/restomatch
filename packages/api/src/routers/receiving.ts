@@ -41,6 +41,7 @@ import { assertGrOwned, assertSupplierOwned } from '../tenant';
 import { fillEnglishNames } from '../receiving/english';
 import {
   invoicesWaitingOnReceipt,
+  heldForReceipts,
   holdForReceipt,
   lockReceipt,
   readScanGrId,
@@ -489,7 +490,7 @@ export const receivingRouter = router({
             .select({ any: count() })
             .from(matchRuns)
             .where(and(eq(matchRuns.invoiceId, inv.id), eq(matchRuns.restaurantId, restaurantId)));
-          holdReason = rematchHoldReason(inv, Number(any) > 0);
+          holdReason = rematchHoldReason(inv, Number(any) > 0, gr.grId);
         }
         const leak = ready ? await computeInvoiceLeak(ctx.db, restaurantId, inv.id) : null;
         const claim = leak ? claimableLines(leak) : [];
@@ -638,6 +639,31 @@ export const receivingRouter = router({
         })()),
         // A חשבונית ריכוז: cross-matched against its delivery notes, never re-matched to a PO.
         consolidated: readConsolidatedRaw(ocrPayload) !== null,
+        // Held for a receipt still being counted, with no run yet (round 7): the
+        // page shows "the match runs when the count is closed" on every load,
+        // not only right after the Re-run that held it.
+        awaitingCount: await (async () => {
+          const held = heldForReceipts(ocrPayload);
+          if (held.length === 0) return false;
+          const [run] = await ctx.db
+            .select({ id: matchRuns.id })
+            .from(matchRuns)
+            .where(and(eq(matchRuns.invoiceId, invoice.id), eq(matchRuns.restaurantId, ctx.session.restaurantId)))
+            .limit(1);
+          if (run) return false;
+          const [pending] = await ctx.db
+            .select({ id: goodsReceipts.id })
+            .from(goodsReceipts)
+            .where(
+              and(
+                eq(goodsReceipts.restaurantId, ctx.session.restaurantId),
+                inArray(goodsReceipts.id, held),
+                eq(goodsReceipts.status, 'pending'),
+              ),
+            )
+            .limit(1);
+          return Boolean(pending);
+        })(),
         // The scanned number already belongs to another invoice of this
         // supplier (worker writeOcrHeader). Only the number is exposed — never
         // the other invoice's id or payload.
@@ -727,9 +753,12 @@ export const receivingRouter = router({
       // Any PARTIAL clear is refused (round 6): a total that WAS there removed
       // while another stays would read as a VAT / TOTAL mismatch of the whole
       // invoice. Only all three cleared together. A header read / typed with
-      // some total never known (null before) stays as it is.
+      // some total never known (null before) stays as it is. Round 7: a read
+      // whose subtotal was never known (a total-only result) may drop its VAT /
+      // total one at a time — there is no subtotal for them to contradict (the
+      // correction form clears a misread VAT that way).
       const clearedOne = (['totalExclVat', 'vatAmount', 'totalInclVat'] as const).some((k) => current[k] != null && after(k) == null);
-      if (totalsTyped && clearedOne && !allCleared) {
+      if (totalsTyped && clearedOne && !allCleared && current.totalExclVat != null) {
         throw appError('BAD_REQUEST', 'invoice.partialHeaderClear', 'אפשר לנקות את סכומי החשבונית רק יחד — לפני מע״מ, מע״מ וסה״כ');
       }
       if (totalsTyped && exclAfter != null) {
@@ -2283,9 +2312,11 @@ async function rematchAfterEdit(ctx: { db: Database; session: MemberSession }, i
       .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.grId, grId)))
       .limit(1);
     if (counted) throw appError('PRECONDITION_FAILED', 'invoice.receiptOpen', RECEIPT_OPEN_MSG);
-    // Held for the count (holdForReceipt: the receipt's submit claims it; a
-    // never-matched 'parsed' invoice becomes 'matched' — a person entered these
-    // lines — except a possible duplicate copy (J), which waits for its review).
+    // Held for the count (holdForReceipt: the receipt's submit claims it and
+    // its job matches it; a possible duplicate copy (J) waits for its review).
+    // Bare claims on an earlier run go now (round 7): that run is replaced by
+    // the job; a claim in progress refuses the hold visibly (claimInProgress).
+    await releaseClaimsForRematch(ctx.db, restaurantId, invoiceId);
     return { rematched: false, rematchSkipped: await holdForReceipt(ctx.db, restaurantId, invoiceId, grId) };
   }
   try {

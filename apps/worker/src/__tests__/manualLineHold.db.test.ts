@@ -14,6 +14,7 @@ import {
   productAliases,
   products,
   purchaseOrders,
+  recoveryClaims,
   restaurants,
   sql,
   suppliers,
@@ -52,6 +53,7 @@ let productId = '';
 
 async function cleanup() {
   if (!restaurantId) return;
+  await db.delete(recoveryClaims).where(eq(recoveryClaims.restaurantId, restaurantId));
   await db.delete(matchRuns).where(eq(matchRuns.restaurantId, restaurantId));
   for (const i of await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.restaurantId, restaurantId)))
     await db.delete(invoiceLines).where(eq(invoiceLines.invoiceId, i.id));
@@ -125,7 +127,7 @@ describe('#216 item 1: a hand line on an open receipt is held, then matched by t
     expect(added.rematched).toBe(false);
     expect(added.rematchSkipped).toBe('receipt_open');
     const [held] = await db.select().from(invoices).where(eq(invoices.id, reg.invoiceId));
-    expect(held!.status).toBe('matched'); // past the OCR's review gate: the submit may match it
+    expect(held!.status).toBe('parsed'); // round 7: not "checked" until its run lands (out of the export)
     expect((held!.ocrPayload?.raw as { heldForReceipts?: string[] }).heldForReceipts).toEqual([grId]);
     expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, reg.invoiceId))).toHaveLength(0);
 
@@ -269,6 +271,10 @@ describe('#216 round 6, items 1+3: an invoice whose receipt is still being count
     const out = await matchInvoiceForJob(db, job!);
     expect(out.skipped).toBeUndefined();
     expect(out.persisted).not.toBeNull();
+    // Round 7 item 3: the run on the receipt it waited for ends the hold.
+    const [after] = await db.select({ status: invoices.status, payload: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, invoiceId));
+    expect(after!.status).toBe('matched');
+    expect((after!.payload?.raw as Record<string, unknown> | undefined)?.heldForReceipts).toBeUndefined();
   }
 
   it('email + parsed + open receipt → Re-run holds it (no run) → submitReceipt enqueues it → the job matches it clean on the receipt', async () => {
@@ -276,7 +282,7 @@ describe('#216 round 6, items 1+3: an invoice whose receipt is still being count
     expect(await as('owner').match.runForInvoice({ invoiceId: inv })).toMatchObject({ matchRunId: null, status: 'held', held: 'receipt_open' });
     expect(await runsOf(inv)).toHaveLength(0);
     const [held] = await db.select().from(invoices).where(eq(invoices.id, inv));
-    expect(held!.status).toBe('matched'); // past the review gate: the submit may match it
+    expect(held!.status).toBe('parsed'); // round 7: stays unchecked (export, pending list) until the run
     expect(held!.ocrPayload?.raw).toEqual({ heldForReceipts: [grId] });
 
     await submitAndRunJob(inv);
@@ -314,7 +320,7 @@ describe('#216 round 6, items 1+3: an invoice whose receipt is still being count
     });
     expect(added).toMatchObject({ rematched: false, rematchSkipped: 'receipt_open' });
     const [held] = await db.select().from(invoices).where(eq(invoices.id, inv!.id));
-    expect(held!.status).toBe('matched');
+    expect(held!.status).toBe('parsed');
     expect((held!.ocrPayload?.raw as { heldForReceipts?: string[] }).heldForReceipts).toEqual([grId]);
     expect(await runsOf(inv!.id)).toHaveLength(0);
 
@@ -322,5 +328,75 @@ describe('#216 round 6, items 1+3: an invoice whose receipt is still being count
     const [run] = await runsOf(inv!.id);
     expect(run).toMatchObject({ grId });
     expect(await typesOf(inv!.id)).toEqual([]);
+  });
+});
+
+describe('#216 round 7', () => {
+  async function emailInvoice() {
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId, supplierId, status: 'matched', source: 'email', totalExclVat: '1250.00', vatAmount: '225.00', totalInclVat: '1475.00' })
+      .returning();
+    await db.insert(invoiceLines).values({ invoiceId: inv!.id, productId, rawDescription: 'שמן זית 1 ליטר', qtyBilled: '10', unit: 'ליטר', unitPriceBilled: '125', lineTotal: '1250.00' });
+    return inv!.id;
+  }
+  /** A run from before the count (no receipt): the whole invoice "missing", with a claim on it. */
+  async function priorRunWithClaim(inv: string, claim: { letterSent: boolean }) {
+    const [gr] = await db.select({ poId: goodsReceipts.poId }).from(goodsReceipts).where(eq(goodsReceipts.id, grId));
+    const [run] = await db
+      .insert(matchRuns)
+      .values({ restaurantId, poId: gr!.poId, grId: null, invoiceId: inv, overallStatus: 'blocked', totalDiscrepancyAmount: '1250.00', runAt: new Date(Date.now() - 3_600_000) })
+      .returning();
+    const [d] = await db
+      .insert(discrepancies)
+      .values({ matchRunId: run!.id, restaurantId, type: 'QTY_SHORT', severity: 'block', deltaAmount: '1250.00', resolutionStatus: 'accepted' } as never)
+      .returning();
+    const [c] = await db
+      .insert(recoveryClaims)
+      .values({ restaurantId, discrepancyId: d!.id, supplierId, invoiceId: inv, amountAgorot: 125_000, ...(claim.letterSent ? { status: 'letter_sent', letterSentAt: new Date() } : {}) } as never)
+      .returning();
+    return { runId: run!.id, claimId: c!.id };
+  }
+  const claimsOf = (inv: string) => db.select().from(recoveryClaims).where(eq(recoveryClaims.invoiceId, inv));
+
+  it('item 1: a prior run carrying a bare claim → Re-run holds it (claim released) → submit → the job matches it clean on the receipt', async () => {
+    const inv = await emailInvoice();
+    await priorRunWithClaim(inv, { letterSent: false });
+    expect(await as('owner').match.runForInvoice({ invoiceId: inv })).toMatchObject({ status: 'held', held: 'receipt_open' });
+    expect(await claimsOf(inv)).toHaveLength(0); // bare claim released with the hold
+
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
+    await as('receiver').receiving.submitReceipt({ grId });
+    const job = enqueued.find((j) => j.invoiceId === inv);
+    expect(job).toBeDefined();
+    const out = await matchInvoiceForJob(db, job!);
+    expect(out.skipped).toBeUndefined(); // no FK 23503 on the claim
+    const runs = await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, inv));
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ grId, overallStatus: 'clean' });
+  });
+
+  it('item 1 (variant B): a claim whose letter was sent refuses the Re-run visibly (invoice.claimInProgress) — no hold, the run and claim stand', async () => {
+    const inv = await emailInvoice();
+    const { runId, claimId } = await priorRunWithClaim(inv, { letterSent: true });
+    await expect(as('owner').match.runForInvoice({ invoiceId: inv })).rejects.toMatchObject({ code: 'CONFLICT', cause: { appCode: 'invoice.claimInProgress' } });
+    const [row] = await db.select({ payload: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, inv));
+    expect((row!.payload?.raw as Record<string, unknown> | undefined)?.heldForReceipts).toBeUndefined();
+    expect((await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, inv))).map((r) => r.id)).toEqual([runId]);
+    expect((await claimsOf(inv)).map((c) => c.id)).toEqual([claimId]);
+  });
+
+  it('item 1 (job side): a held invoice whose run gained a claim in progress → the job skips (claim_in_progress), never throws on the claim FK', async () => {
+    const inv = await emailInvoice();
+    const { runId } = await priorRunWithClaim(inv, { letterSent: true });
+    await db.update(invoices).set({ ocrPayload: { raw: { heldForReceipts: [grId] } } as never }).where(eq(invoices.id, inv));
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
+    await as('receiver').receiving.submitReceipt({ grId });
+    const job = enqueued.find((j) => j.invoiceId === inv);
+    expect(job).toBeDefined();
+    const out = await matchInvoiceForJob(db, job!);
+    expect(out).toMatchObject({ skipped: 'claim_in_progress', persisted: null });
+    expect((await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, inv))).map((r) => r.id)).toEqual([runId]);
+    expect(await claimsOf(inv)).toHaveLength(1);
   });
 });

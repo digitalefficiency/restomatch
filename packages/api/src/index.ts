@@ -172,6 +172,7 @@ export {
 export { logActivity, type ActivityEventInput, type ActivityEventType } from './activity';
 export { buildMatchInputForInvoice, type BuiltMatchInput } from './match/buildMatchInput';
 export {
+  heldForReceipts,
   invoicesWaitingOnReceipt,
   lockReceipt,
   readScanGrId,
@@ -351,6 +352,8 @@ export {
   transitionClaim,
   recordCreditNote,
   creditLineSuggestions,
+  lockRecovery,
+  releaseClaimsForRematch,
   OVERDUE_DAYS,
   type RecoveryClaimRow,
   type RecoverySummary,

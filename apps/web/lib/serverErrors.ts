@@ -41,6 +41,7 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'invoice.receiptOpen': 'invoiceReceiptOpen',
   'invoice.beingRead': 'invoiceBeingRead',
   'invoice.partialHeaderClear': 'invoicePartialHeaderClear',
+  'invoice.claimInProgress': 'invoiceClaimInProgress',
   // Wave-1 (S15) codes: generic fallbacks here; the owning screens (growth /
   // leakCheck namespaces) show their own specific copy.
   FEATURE_DISABLED: 'forbidden',

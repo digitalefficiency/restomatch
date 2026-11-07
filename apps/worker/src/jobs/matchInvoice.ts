@@ -6,12 +6,15 @@ import {
   createPushNotifier,
   createWhatsAppNotifier,
   getEntitlements,
+  heldForReceipts,
   loadPriorDecisions,
+  lockRecovery,
   receiptStillOpen,
   persistMatchRun,
   rematchHoldReason,
   recipientsForRestaurant,
   recordUsage,
+  releaseClaimsForRematch,
   resolveApprovalThresholds,
 } from '@restomatch/api';
 import { and, desc, eq, invoices, matchRuns, restaurants, suppliers, type Database } from '@restomatch/db';
@@ -52,7 +55,15 @@ export interface MatchJobOutcome {
   /** True when this run replaced an earlier run of the same invoice. */
   replaced: boolean;
   /** Why nothing ran (logs/tests). */
-  skipped?: 'ocr_pending' | 'already_matched' | 'awaiting_review' | 'no_lines' | 'settled' | 'po_rejected' | 'receipt_open';
+  skipped?:
+    | 'ocr_pending'
+    | 'already_matched'
+    | 'awaiting_review'
+    | 'no_lines'
+    | 'settled'
+    | 'po_rejected'
+    | 'receipt_open'
+    | 'claim_in_progress';
 }
 
 /**
@@ -90,9 +101,15 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   // A person already signed this invoice off (a receipt submit never rewrites
   // its match — only match.runForInvoice, a manager action, may), or the OCR
   // held a never-matched invoice for a human. Shared with the dock slip.
+  // A never-matched invoice a person / a Re-run held for a receipt's count
+  // (raw.heldForReceipts) goes through only for THAT receipt — decided below,
+  // once the receipt this job matches against is known.
+  const heldFor = heldForReceipts(inv.ocrPayload);
   if (data.rematch) {
     const hold = rematchHoldReason(inv, Boolean(priorRun));
-    if (hold) return { result: CLEAN, persisted: null, replaced: false, skipped: hold };
+    if (hold && !(hold === 'awaiting_review' && heldFor.length > 0)) {
+      return { result: CLEAN, persisted: null, replaced: false, skipped: hold };
+    }
   }
 
   // Discover the PO + assemble the 3-way MatchInput (tolerances/vat/baselines
@@ -109,6 +126,9 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   // counted for this invoice: if the matcher wouldn't pair the invoice with it
   // (other supplier, outside the window, a sibling PO preferred), don't fall back
   // to some other order — skip.
+  if (data.rematch && rematchHoldReason(inv, Boolean(priorRun), built.grId)) {
+    return { result: CLEAN, persisted: null, replaced: false, skipped: 'awaiting_review' };
+  }
   if (data.poId && built.poId !== data.poId) {
     console.warn(`[match-invoice] invoice=${invoiceId} does not pair with the job's po=${data.poId} — skipping`);
     return { result: CLEAN, persisted: null, replaced: false, skipped: 'po_rejected' };
@@ -142,9 +162,20 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
       .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
       .limit(1)
       .for('no key update'); // not FOR UPDATE: claim FK checks (KEY SHARE) must pass
-    if (!now || now.status === 'ocr_pending') return null;
+    if (!now || now.status === 'ocr_pending') return 'ocr_pending' as const;
     let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;
     if (priorRun) {
+      // Claims on the run being replaced (round 7): bare ones go, a claim in
+      // progress is money history — skip (visible: the invoice keeps its run and
+      // the tracker shows the claim), never fail on the claim → finding FK.
+      // Lock order as everywhere: the invoice row (above) → recovery.
+      await lockRecovery(tx, restaurantId);
+      try {
+        await releaseClaimsForRematch(tx, restaurantId, invoiceId);
+      } catch (err) {
+        if ((err as { code?: string }).code === 'CONFLICT') return 'claim_in_progress' as const;
+        throw err;
+      }
       prior = await loadPriorDecisions(tx, restaurantId, invoiceId);
       await tx
         .delete(matchRuns)
@@ -159,7 +190,12 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
       prior,
     );
   });
-  if (!persisted) return { result: CLEAN, persisted: null, replaced: false, skipped: 'ocr_pending' };
+  if (typeof persisted === 'string') {
+    if (persisted === 'claim_in_progress') {
+      console.warn(`[match-invoice] invoice=${invoiceId} keeps its run — a credit claim on it is in progress`);
+    }
+    return { result: CLEAN, persisted: null, replaced: false, skipped: persisted };
+  }
   return { result, persisted, replaced: Boolean(priorRun) };
 }
 

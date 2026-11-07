@@ -58,10 +58,12 @@ export async function receiptState(
  * HOLD an invoice for a receipt still being counted (round 6): matching now
  * would read every line "received 0". Marks it raw.heldForReceipts = [grId] —
  * the receipt's submit claims it (invoicesWaitingOnReceipt) and its job matches
- * it — and, since a person or the matcher put it there, moves a never-matched
- * 'parsed' invoice to 'matched' so that job is not held for review; a possible
- * duplicate copy (raw.duplicateOf) stays 'parsed', waiting for its review.
- * Works on an invoice with no ocr_payload / raw yet (an emailed copy).
+ * it (rematchHoldReason lets a never-matched invoice held for THAT receipt
+ * through). The status is left as it is (round 7): a 'parsed' invoice with no
+ * run is not "checked" — it stays out of the accounting export, in the pending
+ * list, and its lines stay editable until the run lands. A possible duplicate
+ * copy (raw.duplicateOf) waits for its review ('awaiting_review': the job skips
+ * it). Works on an invoice with no ocr_payload / raw yet (an emailed copy).
  * Call under the invoice row lock.
  */
 export async function holdForReceipt(
@@ -76,8 +78,6 @@ export async function holdForReceipt(
              'raw',
              (CASE WHEN jsonb_typeof(ocr_payload -> 'raw') = 'object' THEN ocr_payload -> 'raw' ELSE '{}'::jsonb END)
                || jsonb_build_object(${HELD_FOR_RECEIPTS_KEY}::text, jsonb_build_array(${grId}::text))),
-           status = CASE WHEN status = 'parsed' AND NOT coalesce(ocr_payload -> 'raw' ? 'duplicateOf', false)
-                         THEN 'matched'::invoice_status ELSE status END,
            updated_at = now()
      WHERE id = ${invoiceId} AND restaurant_id = ${restaurantId}
      RETURNING coalesce(ocr_payload -> 'raw' ? 'duplicateOf', false) AS duplicate`)) as unknown as Array<{ duplicate: boolean }>;
@@ -348,13 +348,27 @@ export async function scannedInvoicesForReceipt(
  *  • 'settled' — a person already approved/paid it on an earlier run; a submit
  *    never rewrites that match (only match.runForInvoice may);
  *  • 'awaiting_review' — never matched, and the OCR held it for a human (low
- *    confidence → 'parsed', or a possible duplicate copy).
+ *    confidence → 'parsed', or a possible duplicate copy). Not when a person or
+ *    a manager's Re-run held it for THIS receipt's count (holdForReceipt:
+ *    raw.heldForReceipts ∋ grId — the OCR job records a hold only on a
+ *    confident read, already 'matched'); a duplicate copy always waits.
  */
 export function rematchHoldReason(
   inv: { status: string; ocrPayload: unknown },
   hasPriorRun: boolean,
+  /** The receipt this re-match runs against (the job's / the slip's), when known. */
+  grId?: string | null,
 ): 'settled' | 'awaiting_review' | null {
   if (hasPriorRun) return inv.status === 'approved' || inv.status === 'paid' ? 'settled' : null;
   const raw = (inv.ocrPayload as { raw?: { duplicateOf?: unknown } } | null | undefined)?.raw;
-  return inv.status !== 'matched' || raw?.duplicateOf !== undefined ? 'awaiting_review' : null;
+  if (raw?.duplicateOf !== undefined) return 'awaiting_review';
+  if (inv.status === 'matched') return null;
+  return grId && heldForReceipts(inv.ocrPayload).includes(grId) ? null : 'awaiting_review';
+}
+
+/** The receipts an invoice is held for (raw.heldForReceipts), [] when none. */
+export function heldForReceipts(ocrPayload: unknown): string[] {
+  const raw = (ocrPayload as { raw?: Record<string, unknown> } | null | undefined)?.raw;
+  const held = raw && typeof raw === 'object' ? raw[HELD_FOR_RECEIPTS_KEY] : undefined;
+  return Array.isArray(held) ? held.filter((x): x is string => typeof x === 'string') : [];
 }

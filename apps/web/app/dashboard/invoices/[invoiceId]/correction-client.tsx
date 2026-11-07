@@ -237,7 +237,14 @@ export function InvoiceCorrection({
   }
 
   // Held for an open receipt count (T4, neutral): no figure yet, never an alarm.
-  const held = rematch?.status === 'held' ? rematch.held ?? 'receipt_open' : null;
+  // On a reload, the server says so (getInvoice.awaitingCount).
+  const held = rematch
+    ? rematch.status === 'held'
+      ? rematch.held ?? 'receipt_open'
+      : null
+    : invoice.awaitingCount
+      ? 'receipt_open'
+      : null;
   const st: { label: string; tone: BadgeTone } | null = rematch && !held
     ? STATUS_TONE[rematch.status]
       ? {

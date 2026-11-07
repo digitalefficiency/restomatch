@@ -11,6 +11,7 @@ import {
   type RecoveryStatus,
 } from '@restomatch/db';
 import { assertSupplierOwned } from '../tenant';
+import { appError } from '../errors';
 import { CLAIM_ANSWER_DAYS, NEVER_CLAIMABLE_TYPES } from '../lib/claims';
 import {
   AWAITING_SUPPLIER,
@@ -933,10 +934,12 @@ export async function releaseClaimsForRematch(db: Database, restaurantId: string
   );
   const blocked = claims.filter((r) => r.releasable !== true);
   if (blocked.length > 0) {
-    throw new TRPCError({
-      code: 'CONFLICT',
-      message: `this invoice has ${blocked.length} credit claim(s) in progress (₪-back tracker) — finish or write them off before re-matching`,
-    });
+    throw appError(
+      'CONFLICT',
+      'invoice.claimInProgress',
+      `this invoice has ${blocked.length} credit claim(s) in progress (₪-back tracker) — finish or write them off before re-matching`,
+      { count: blocked.length },
+    );
   }
   if (claims.length === 0) return 0;
   await db
