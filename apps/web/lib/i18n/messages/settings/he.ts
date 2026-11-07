@@ -7,8 +7,8 @@ export const he = {
   sections: {
     accountTitle: 'החשבון שלי',
     accountSubtitle: 'שפת האפליקציה, סיסמה וניתוק מכשירים — הגדרות אישיות שלכם בלבד.',
-    letterheadTitle: 'פרטים למכתבי דרישת זיכוי',
-    letterheadSubtitle: 'מופיעים בראש כל מכתב דרישת זיכוי לספק. ממלאים פעם אחת.',
+    letterheadTitle: 'פרטים למכתבי בקשת זיכוי',
+    letterheadSubtitle: 'מופיעים בראש כל מכתב בקשת זיכוי לספק. ממלאים פעם אחת.',
     profileTitle: 'פרטי המסעדה',
     profileSubtitle: 'שם, ח״פ, שיעור מע״מ ואזור זמן — נושאי משקל לחישוב הדליפה ולגבולות היום.',
     matchingTitle: 'הגדרות התאמה',

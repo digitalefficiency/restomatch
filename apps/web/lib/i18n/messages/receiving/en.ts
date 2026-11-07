@@ -162,7 +162,7 @@ export const en: Shape<typeof he> = {
     invoice: 'Invoice',
     at: 'Time',
     receiver: 'Received by',
-    duplicate: 'Invoice number {number} already exists for this supplier — possible duplicate invoice.',
+    duplicate: 'Invoice number {number} is already on file with us — it may have reached us twice.',
     issue: {
       short: 'Short: ordered {ordered}, received {received}',
       rejected: 'Rejected / damaged: {rejected}',
@@ -173,7 +173,7 @@ export const en: Shape<typeof he> = {
     },
     atStake: 'At stake',
     quantitiesOnly: 'Quantities only',
-    total: 'Total to claim',
+    total: 'Total of gaps',
     computing: 'The matching engine is calculating the amounts…',
     afterClose: 'The ₪ at stake is set once you close the receipt — the matching engine checks it against the actual count.',
     slow: 'This is taking longer than usual. The quantities are here; the ₪ will follow.',
