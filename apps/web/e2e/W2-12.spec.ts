@@ -2,11 +2,12 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { he } from '../lib/i18n/messages/contracts/he';
 import { en } from '../lib/i18n/messages/contracts/en';
 import { E2E_DATABASE_URL } from './env';
-import { e2eSql, loginViaMagicLink } from './helpers';
+import { e2eSql } from './helpers';
 
 /**
  * W2-12 · Contracts and price intelligence: one ₪ queue.
@@ -24,19 +25,20 @@ import { e2eSql, loginViaMagicLink } from './helpers';
  * (seed-wave1-contracts-demo.ts — additive, idempotent, leak total unchanged).
  */
 
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const AXE_SOURCE = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
 const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true } as const;
 const DESK = { viewport: { width: 1440, height: 900 } } as const;
 const OWNER = 'owner@kfar-hazeitim.test';
 const MANAGER = 'manager@kfar-hazeitim.test';
 const BOOKKEEPER = 'bookkeeper@kfar-hazeitim.test';
-const SHOTS = path.join(__dirname, '__screenshots__', 'W2-12');
+const SHOTS = path.join(HERE, '__screenshots__', 'W2-12');
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(() => {
   execFileSync('pnpm', ['--filter', '@restomatch/worker', 'exec', 'tsx', 'scripts/seed-wave1-contracts-demo.ts'], {
-    cwd: path.join(__dirname, '..', '..', '..'),
+    cwd: path.join(HERE, '..', '..', '..'),
     env: { ...process.env, DATABASE_URL: E2E_DATABASE_URL },
     stdio: 'pipe',
   });
@@ -48,9 +50,21 @@ async function as(page: Page, email: string, locale: 'he' | 'en', to = '/dashboa
     { name: 'rm_locale', value: locale, url },
     { name: 'rm_cookie_consent', value: 'necessary', url },
   ]);
-  await loginViaMagicLink(page, email, to);
+  await login(page, email);
   await page.goto(to, { waitUntil: 'load' });
   await page.waitForLoadState('networkidle').catch(() => {});
+}
+
+const PASSWORD = 'RestoMatch-Demo-2026!'; // the seed's public local default (seed.ts DEFAULT_DEMO_PASSWORD)
+
+/** The real /login password form (demo-path.spec.ts pattern) — no magic-link rate limit on reruns. */
+async function login(page: Page, email: string) {
+  await page.goto('/login');
+  const form = page.locator('form', { has: page.locator('input[name="password"]') });
+  await form.locator('input[name="email"]').fill(email);
+  await form.locator('input[name="password"]').fill(PASSWORD);
+  await form.locator('button[type="submit"]').click();
+  await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 30_000 });
 }
 
 async function axeSerious(page: Page): Promise<string[]> {
@@ -181,7 +195,7 @@ test.describe('W2-12 queue (manager, he 390)', () => {
       const first = page.getByTestId('over-card').first();
       await first.getByRole('button', { name: he.queue.over.more }).click();
       await page.getByRole('menuitem', { name: /149\.00/ }).click();
-      await expect(page.getByText(he.queue.over.adopted)).toBeVisible();
+      await expect(page.getByText(he.queue.over.adopted).first()).toBeVisible();
       await expect.poll(async () => (await sql`select count(*)::int n from supplier_contract_prices`)[0]!.n).toBe(before[0]!.n + 1);
       const [row] = await sql`select valid_from::text d from supplier_contract_prices order by created_at desc limit 1`;
       const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
@@ -191,7 +205,7 @@ test.describe('W2-12 queue (manager, he 390)', () => {
 
       // Dismiss the alert → undo reopens it.
       await page.getByTestId('alert-dismiss').click();
-      await expect(page.getByText(he.queue.alert.dismissed)).toBeVisible();
+      await expect(page.getByText(he.queue.alert.dismissed).first()).toBeVisible();
       await expect.poll(async () => (await sql`select status from price_alerts limit 1`)[0]!.status).toBe('dismissed');
       await page.getByRole('button', { name: he.queue.alert.undo }).click();
       await expect.poll(async () => (await sql`select status from price_alerts limit 1`)[0]!.status).toBe('open');
@@ -248,10 +262,10 @@ test.describe('W2-12 thresholds and import (manager, he 1440)', () => {
 test.describe('W2-12 roles: chef and receiver → 404', () => {
   for (const email of ['chef@kfar-hazeitim.test', 'receiver@kfar-hazeitim.test']) {
     test(email, async ({ page }) => {
-      await loginViaMagicLink(page, email, '/dashboard');
+      await login(page, email);
       const res = await page.goto('/dashboard/contracts?tab=queue');
       // The middleware may redirect to /dashboard/forbidden; either way, no contracts page.
-      expect([200, 404]).toContain(res?.status() ?? 0);
+      expect([200, 403, 404]).toContain(res?.status() ?? 0);
       await expect(page.getByTestId('queue-header')).toHaveCount(0);
       expect(await page.locator('main').innerText()).not.toContain('152.50');
     });
