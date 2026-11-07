@@ -6,6 +6,8 @@ import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { admin } from '@/lib/i18n/messages/admin';
 import { nav } from '@/lib/i18n/messages/nav';
 import { getT } from '@/lib/i18n/server';
+import { LegalLinks } from '@/lib/legal/LegalLinks';
+import { LEGAL_NAV_LABEL } from '@/lib/legal/registry';
 import { TrpcProvider } from '@/lib/trpc/client';
 
 /**
@@ -55,6 +57,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         <main id="main-content" tabIndex={-1} className="mx-auto max-w-6xl px-6 py-8 focus:outline-none">
           {children}
         </main>
+        <footer className="border-t border-line px-6 py-4 text-muted">
+          <nav aria-label={LEGAL_NAV_LABEL[t.locale === 'he' ? 'he' : 'en']}>
+            <LegalLinks locale={t.locale} variant="inline-row" />
+          </nav>
+        </footer>
       </div>
     </TrpcProvider>
   );

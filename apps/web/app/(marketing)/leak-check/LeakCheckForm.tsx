@@ -6,6 +6,7 @@ import { FileUp, Loader2, ShieldCheck } from 'lucide-react';
 import { Field, Input } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { leakCheck } from '@/lib/i18n/messages/leakCheck';
+import { legalHref } from '@/lib/legal/registry';
 
 const MAX_FILES = 10;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
@@ -199,7 +200,7 @@ export function LeakCheckForm() {
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
         <span>
           {t('form.privacy')}{' '}
-          <Link href="/privacy" className="text-primary underline underline-offset-2">
+          <Link href={legalHref('privacy')} className="text-primary underline underline-offset-2">
             {t('form.privacyLink')}
           </Link>
         </span>

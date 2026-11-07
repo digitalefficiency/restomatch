@@ -9,6 +9,7 @@ import { Button, Input } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { contactChannels, whatsappHref } from '@/lib/contact';
+import { legalHref } from '@/lib/legal/registry';
 import { readAttribution } from './Attribution';
 import {
   buildLeadSource,
@@ -348,7 +349,7 @@ function LeadFormInner({ cta }: { cta: string }) {
       </Button>
       <p className="text-center text-xs text-muted">
         {t('lead.privacyNoteA')}{' '}
-        <Link href="/privacy" className="underline hover:text-ink">
+        <Link href={legalHref('privacy')} className="underline hover:text-ink">
           {t('lead.privacyLink')}
         </Link>
         .

@@ -2,6 +2,8 @@
 
 import { useEffect } from 'react';
 import { dirOf, localeFromCookieHeader } from '@/lib/i18n/config';
+import { LegalLinks } from '@/lib/legal/LegalLinks';
+import { LEGAL_NAV_LABEL } from '@/lib/legal/registry';
 import './globals.css';
 
 /**
@@ -106,6 +108,9 @@ export default function GlobalError({
           >
             {en ? 'Try again' : 'נסו שוב'}
           </button>
+          <nav aria-label={LEGAL_NAV_LABEL[locale]} style={{ marginTop: '1.5rem' }}>
+            <LegalLinks locale={locale} variant="plain" />
+          </nav>
         </div>
       </body>
     </html>
