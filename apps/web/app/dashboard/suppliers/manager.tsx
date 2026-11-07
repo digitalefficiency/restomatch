@@ -1,5 +1,7 @@
 'use client';
 
+import { TermsPicker } from './terms-picker';
+import { businessIdProblem, termsProblem, termsStringOf, termsValueOf } from './terms';
 import { useMemo, useState } from 'react';
 import { WithOriginal } from '@/lib/i18n/original';
 import Link from 'next/link';
@@ -335,6 +337,10 @@ export function SupplierForm({
   const [form, setForm] = useState<FormState>(initial);
   const [touched, setTouched] = useState(false);
   const errors = validateSupplierForm(form);
+  // W2-11 · structured terms + the ח״פ check digit (an unchanged legacy ח״פ never blocks Save).
+  const [terms, setTerms] = useState(() => termsValueOf(initial.paymentTerms));
+  const bizErr = form.businessId !== initial.businessId ? businessIdProblem(form.businessId) : null;
+  const blocked = errors.length > 0 || bizErr !== null || termsProblem(terms) !== null;
   const set =
     (k: Exclude<keyof FormState, 'schedule' | 'vatRate'>) => (e: React.ChangeEvent<HTMLInputElement>) =>
       setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -355,7 +361,7 @@ export function SupplierForm({
       onSubmit={(e) => {
         e.preventDefault();
         setTouched(true);
-        if (errors.length === 0) onSubmit(form);
+        if (!blocked) onSubmit(form);
       }}
     >
     <Card elevated flow>
@@ -392,11 +398,18 @@ export function SupplierForm({
             id="sup-biz"
             value={form.businessId}
             onChange={set('businessId')}
-            maxLength={32}
+            maxLength={11}
             inputMode="numeric"
             dir="ltr"
             placeholder="514…"
+            aria-invalid={bizErr ? true : undefined}
+            aria-describedby={bizErr ? 'sup-biz-err' : undefined}
           />
+          {bizErr ? (
+            <p id="sup-biz-err" className="mt-1 text-xs text-danger">
+              {t(`bizId.${bizErr}`)}
+            </p>
+          ) : null}
         </Field>
         <Field label={t('form.email')} htmlFor="sup-email">
           <Input
@@ -425,12 +438,13 @@ export function SupplierForm({
           />
         </Field>
         <Field label={t('form.paymentTerms')} htmlFor="sup-terms">
-          <Input
-            id="sup-terms"
-            value={form.paymentTerms}
-            onChange={set('paymentTerms')}
-            maxLength={500}
-            placeholder={t('form.paymentTermsPlaceholder')}
+          <TermsPicker
+            value={terms}
+            showProblem={touched}
+            onChange={(v) => {
+              setTerms(v);
+              setForm((f) => ({ ...f, paymentTerms: termsStringOf(v) }));
+            }}
           />
         </Field>
         <Field label={t('form.vatRate')} htmlFor="sup-vat" hint={t('form.vatHint')}>

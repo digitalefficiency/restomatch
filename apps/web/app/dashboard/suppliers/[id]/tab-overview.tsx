@@ -1,0 +1,144 @@
+import Link from 'next/link';
+import { Badge, Card, LinkButton, Sparkline } from '@/lib/components';
+import { Money } from '@/lib/components/money';
+import { createServerCaller } from '@/lib/trpc/server';
+import { getLocale, getT } from '@/lib/i18n/server';
+import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
+import { formatIls } from '@/lib/money';
+import { loadSupplierOverview } from './overview-data';
+import { rhythmParts } from './rhythm';
+
+/**
+ * W2-11 · "what do I do with this supplier now, in ₪". The leak ₪ itself lives
+ * in the header (one home per number); this tab carries the act-now cards
+ * (₪-ranked, at most 3), the order rhythm, 6 months of spend and the last 5
+ * invoices. The WHY (the leak card) renders below it, on demand.
+ */
+export async function SupplierOverviewTab({ supplierId }: { supplierId: string }) {
+  const caller = await createServerCaller();
+  const [overview, queue, t, locale] = await Promise.all([
+    loadSupplierOverview(supplierId),
+    caller.approvals.queueSummary({ supplierIds: [supplierId] }).catch(() => null),
+    getT(suppliersNs),
+    getLocale(),
+  ]);
+
+  type Card = { key: string; label: string; agorot: number; count: number; href: string; cta: string; tone: 'danger' | 'warn' };
+  const cards: Card[] = [];
+  if (queue && queue.toDecide.count > 0) {
+    cards.push({
+      key: 'awaiting',
+      label: t('overview.awaiting'),
+      agorot: Math.round(queue.toDecide.amountIls * 100),
+      count: queue.toDecide.count,
+      href: `/dashboard/approvals?sup=${supplierId}`,
+      cta: t('overview.awaitingCta'),
+      tone: 'danger',
+    });
+  }
+  if (overview && overview.openAgorot > 0) {
+    cards.push({
+      key: 'open',
+      label: t('overview.openToClaim'),
+      agorot: overview.openAgorot,
+      count: overview.openCount,
+      href: `/dashboard/leaks/claims?sup=${supplierId}`,
+      cta: t('overview.openToClaimCta'),
+      tone: 'warn',
+    });
+  }
+  // TODO(W2-12): the over-contract card ("מעל חוזה") once findOverContractLines is on the base.
+  cards.sort((a, b) => b.agorot - a.agorot);
+
+  const rhythm = overview?.rhythm ? rhythmParts(overview.rhythm, locale) : null;
+  const spend = overview?.spend ?? [];
+  const spendAria =
+    spend.length > 1
+      ? t('overview.spendAria', {
+          from: spend[0]!.month,
+          to: spend[spend.length - 1]!.month,
+          values: spend.map((s) => formatIls(s.agorot / 100, { locale })).join(', '),
+        })
+      : undefined;
+
+  return (
+    <div className="space-y-6" data-testid="supplier-overview">
+      <section aria-labelledby="act-now" className="space-y-3">
+        <h2 id="act-now" className="text-lg font-bold text-ink">
+          {t('overview.actNowTitle')}
+        </h2>
+        {cards.length === 0 ? (
+          <p className="text-sm text-muted">{overview ? t('overview.allClear') : t('overview.unavailable')}</p>
+        ) : (
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {cards.slice(0, 3).map((c) => (
+              <li key={c.key}>
+                <Card padding="md" className="flex h-full flex-col gap-2" data-testid={`act-now-${c.key}`}>
+                  <Badge tone={c.tone === 'danger' ? 'danger-solid' : 'warning-solid'} className="self-start">
+                    {c.label}
+                  </Badge>
+                  <Money agorot={c.agorot} context="tile" locale={locale} className="text-2xl font-bold" />
+                  <span className="text-xs text-subtle">{t('overview.lines', { count: c.count })}</span>
+                  <LinkButton href={c.href} size="sm" variant={c.tone === 'danger' ? 'primary' : 'secondary'} className="mt-auto self-start">
+                    {c.cta}
+                  </LinkButton>
+                </Card>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section aria-labelledby="rhythm" className="space-y-1">
+        <h2 id="rhythm" className="text-sm font-semibold text-muted">
+          {t('overview.rhythmTitle')}
+        </h2>
+        {rhythm ? (
+          <p className="text-base text-ink tabular-nums" data-testid="order-rhythm">
+            {t('overview.rhythm', rhythm)}
+          </p>
+        ) : (
+          <p className="text-sm text-muted">
+            {t('overview.rhythmNone')}{' '}
+            <Link className="font-semibold text-primary underline-offset-2 hover:underline" href={`/dashboard/suppliers/${supplierId}?tab=details#days-and-times`}>
+              {t('overview.rhythmSet')}
+            </Link>
+          </p>
+        )}
+      </section>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card padding="md" className="space-y-2">
+          <h2 className="text-sm font-semibold text-muted">{t('overview.spendTitle')}</h2>
+          {overview ? (
+            <Sparkline data={spend.map((s) => s.agorot / 100)} label={spendAria} tone="muted" className="h-10 w-full" />
+          ) : (
+            <p className="text-sm text-muted">{t('overview.unavailable')}</p>
+          )}
+        </Card>
+        <Card padding="md" className="space-y-2">
+          <h2 className="text-sm font-semibold text-muted">{t('overview.lastInvoicesTitle')}</h2>
+          {!overview ? (
+            <p className="text-sm text-muted">{t('overview.unavailable')}</p>
+          ) : overview.lastInvoices.length === 0 ? (
+            <p className="text-sm text-muted">{t('overview.noInvoices')}</p>
+          ) : (
+            <ul className="divide-y divide-line">
+              {overview.lastInvoices.map((inv) => (
+                <li key={inv.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                  <Link href={`/dashboard/invoices/${inv.id}`} className="min-w-0 truncate text-ink hover:underline">
+                    {inv.invoiceNumber ? t('overview.invoiceNo', { number: inv.invoiceNumber }) : t('overview.invoiceNoNumber')}
+                    <span className="ms-2 text-xs text-subtle tabular-nums">
+                      {new Intl.DateTimeFormat(locale === 'he' ? 'he-IL' : 'en-GB', { timeZone: 'Asia/Jerusalem', day: '2-digit', month: '2-digit' }).format(new Date(inv.at))}
+                    </span>
+                  </Link>
+                  <Money value={inv.totalAgorot == null ? null : inv.totalAgorot / 100} context="line" locale={locale} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
