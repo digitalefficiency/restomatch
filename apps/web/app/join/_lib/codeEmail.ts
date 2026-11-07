@@ -43,9 +43,12 @@ export async function deliverJoinCode(input: {
     console.log(`to: ${input.to}`);
     console.log(`code: ${input.code}`);
     console.log('───────────────────────────\n');
-    if (process.env.JOIN_CODE_FILE) {
+    // The e2e suite already sets MAGIC_LINK_FILE; the code lands beside it.
+    const file =
+      process.env.JOIN_CODE_FILE ?? process.env.MAGIC_LINK_FILE?.replace('magic-link', 'join-code');
+    if (file) {
       const { writeFile } = await import('node:fs/promises');
-      await writeFile(process.env.JOIN_CODE_FILE, JSON.stringify({ to: input.to, code: input.code, at: Date.now() }), 'utf8');
+      await writeFile(file, JSON.stringify({ to: input.to, code: input.code, at: Date.now() }), 'utf8');
     }
     return;
   }
