@@ -8,7 +8,7 @@ import { assertInvoiceOwned } from '../tenant';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 import { readConsolidatedRaw } from '../match/consolidated';
 import { appError } from '../errors';
-import { invoiceQuestionCount, orderQuestionCount } from '../catalog/linkQuestions';
+import { invoiceQuestionCount, linkPinPoIdOf, orderQuestionCount } from '../catalog/linkQuestions';
 import { loadPriorDecisions, persistMatchRun } from '../match/persist';
 import { buildRules, resolveApprovalThresholds } from '../approvals/engine';
 
@@ -69,7 +69,8 @@ export const matchRouter = router({
         .orderBy(desc(matchRuns.runAt))
         .limit(1);
       const built = await buildMatchInputForInvoice(ctx.db, restaurantId, input.invoiceId, {
-        pinnedPoId: priorRun?.poId ?? null,
+        // G-08 round 11: a run-less invoice (a question hold / its release) keeps its order pin.
+        pinnedPoId: priorRun?.poId ?? linkPinPoIdOf(kind?.ocrPayload),
       });
       // G-08 hold (rounds 3/8): a match — first or re-match — against an order that
       // still has name-only questions would report a false MISSING + UNORDERED pair:

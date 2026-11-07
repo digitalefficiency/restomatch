@@ -726,3 +726,57 @@ describe('R10 MED: the kill-switch sweep can be retried', () => {
   });
 });
 
+
+/* ── G-08 round 11 (7.11): the manager's "re-run match" keeps the pin ───── */
+
+describe('R11: match.runForInvoice pins a run-less invoice to its question-hold order', () => {
+  it('(a) an M-4 hold on a CLOSED order → refuses order.unlinkedLines; heldPoId is kept, no run', async () => {
+    const po = await order([
+      { productId: P, raw: 'פלפל אדום' },
+      { productId: null, raw: 'בצל סגול' },
+    ]);
+    await db.update(purchaseOrders).set({ status: 'closed' }).where(eq(purchaseOrders.id, po));
+    const inv = await heldInvoice({ raw: 'פלפל אדום', productId: P, reasons: ['unlinkedPo'], heldPoId: po, vat: { vat: '3.96', incl: '25.96' } });
+    const err = await owner()
+      .match.runForInvoice({ invoiceId: inv })
+      .then(() => null, (e: unknown) => e as { code: string; cause?: { appCode?: string } });
+    expect(err?.code).toBe('PRECONDITION_FAILED');
+    expect(err?.cause?.appCode).toBe('order.unlinkedLines');
+    expect(await runsOf(inv)).toEqual([]);
+    const [row] = await db.select({ p: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, inv));
+    expect((row!.p as unknown as { heldPoId?: string }).heldPoId).toBe(po);
+  });
+
+  it('(b) released, no run, pinned to closed+received B, open nearer A → runs on B; the pin stays B', async () => {
+    const poA = await order([{ productId: P, raw: 'פלפל אדום' }]);
+    const poB = await order([{ productId: P, raw: 'פלפל אדום' }]);
+    await db.update(purchaseOrders).set({ status: 'closed', expectedDeliveryAt: new Date(Date.now() - 86_400_000) }).where(eq(purchaseOrders.id, poB));
+    await db.insert(goodsReceipts).values({ restaurantId, poId: poB, status: 'completed' });
+    const inv = await heldInvoice({ raw: 'פלפל אדום', productId: P, reasons: ['unlinked'], vat: { vat: '3.96', incl: '25.96' } });
+    await db
+      .update(invoices)
+      .set({ status: 'matched', ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinked'] }, linkReleasedAt: new Date().toISOString(), linkPinPoId: poB } as never })
+      .where(eq(invoices.id, inv));
+    await owner().match.runForInvoice({ invoiceId: inv });
+    expect(await poOf(inv)).toEqual([poB]);
+    expect(await typesOf(inv)).not.toContain('UNORDERED_ARRIVAL');
+    const [row] = await db.select({ p: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, inv));
+    expect((row!.p as unknown as { linkPinPoId?: string }).linkPinPoId).toBe(poB);
+    void poA;
+  });
+
+  it('heldPoId and linkPinPoId differ → the hold\'s order wins (the job pins to heldPoId)', async () => {
+    const old = await order([{ productId: P, raw: 'פלפל אדום' }]);
+    const po = await order([{ productId: P, raw: 'פלפל אדום' }]);
+    await db.update(purchaseOrders).set({ status: 'closed' }).where(eq(purchaseOrders.id, po));
+    await db.update(purchaseOrders).set({ status: 'closed' }).where(eq(purchaseOrders.id, old));
+    const inv = await heldInvoice({ raw: 'פלפל אדום', productId: P, reasons: ['unlinkedPo'], heldPoId: po, vat: { vat: '3.96', incl: '25.96' } });
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinkedPo'] }, heldPoId: po, linkPinPoId: old } as never })
+      .where(eq(invoices.id, inv));
+    const out = await matchInvoiceForJob(db, { restaurantId, invoiceId: inv, rematch: true });
+    expect(out.persisted).not.toBeNull();
+    expect(await poOf(inv)).toEqual([po]);
+  });
+});

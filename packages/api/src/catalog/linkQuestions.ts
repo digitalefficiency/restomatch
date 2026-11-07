@@ -133,7 +133,8 @@ export async function releaseQuestionHolds(
        and not exists (
          select 1 from jsonb_array_elements_text(i.ocr_payload -> 'raw' -> 'reviewReasons') r(reason)
           where r.reason not in ('unlinked', 'unlinkedPo')
-            and not (r.reason = 'checks' and ${DEPOSIT_ONLY_CHECKS})
+            -- round 11: after #224 the check reason itself is in reviewReasons too
+            and not (r.reason in ('checks', 'deposit_or_fee_line') and ${DEPOSIT_ONLY_CHECKS})
        )
        and (i.ocr_payload -> 'raw' -> 'duplicateOf') is null
        and not exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${IL_NOT_CHARGE})

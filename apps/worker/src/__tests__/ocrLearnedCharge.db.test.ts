@@ -105,7 +105,7 @@ describe('R7 LOW-11: a blank מק״ט is no SKU', () => {
 
 
 describe("R10: a 'checks' hold for a deposit line only (train B #232) is released by the learned charge", () => {
-  async function checksHeld(checkReasons: string[]) {
+  async function checksHeld(checkReasons: string[], reviewReasons: string[] = ['checks', 'unlinked']) {
     const [inv] = await db
       .insert(invoices)
       .values({
@@ -120,7 +120,7 @@ describe("R10: a 'checks' hold for a deposit line only (train B #232) is release
         ocrPayload: {
           provider: 'reconciled',
           raw: {
-            reviewReasons: ['checks', 'unlinked'],
+            reviewReasons,
             checks: { passed: false, reasons: checkReasons },
             reconciled: { lines: [{ rawDescription: 'פיקדון ארגזים', lineKind: 'deposit', qty: 1, lineTotal: 10 }] },
           },
@@ -143,5 +143,12 @@ describe("R10: a 'checks' hold for a deposit line only (train B #232) is release
     expect(await applyLearnedCharges(db, restaurantId, id)).toEqual({ charged: 1, released: false });
     const [row] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, id));
     expect(row!.status).toBe('parsed');
+  });
+
+  it("round 11 (#224 shape): reviewReasons also carry 'deposit_or_fee_line' itself → still released", async () => {
+    const id = await checksHeld(['deposit_or_fee_line'], ['checks', 'unlinked', 'deposit_or_fee_line']);
+    expect(await applyLearnedCharges(db, restaurantId, id)).toEqual({ charged: 1, released: true });
+    const neg = await checksHeld(['deposit_or_fee_line', 'vat_mismatch'], ['checks', 'unlinked', 'deposit_or_fee_line', 'vat_mismatch']);
+    expect(await applyLearnedCharges(db, restaurantId, neg)).toEqual({ charged: 1, released: false });
   });
 });

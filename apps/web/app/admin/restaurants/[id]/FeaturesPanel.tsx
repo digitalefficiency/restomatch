@@ -7,6 +7,7 @@ import { Button } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { admin } from '@/lib/i18n/messages/admin';
 import { localizeServerError } from '@/lib/serverErrors';
+import { releaseNotice } from './releaseNotice';
 
 /** What admin.getRestaurant reports for one tenant's wave-1 flags. */
 export interface FeatureState {
@@ -136,10 +137,10 @@ export function FeaturesPanel({ restaurantId, state }: { restaurantId: string; s
           <span className="text-xs text-danger">{localizeServerError(save.error, locale, t('generic'))}</span>
         ) : null}
         {save.isSuccess ? <span className="text-xs text-primary">{t('features.saved')}</span> : null}
-        {/* G-08 kill switch: the save stuck, but releasing the held invoices did not — the ops fallback. */}
-        {save.data && 'release' in save.data && save.data.release && !save.data.release.ok ? (
+        {/* G-08 kill switch: the save stuck, but releasing the held invoices did not (or not all) — the ops fallback. */}
+        {save.data && 'release' in save.data && releaseNotice(save.data.release, restaurantId) ? (
           <span className="text-xs text-danger" dir="ltr">
-            {save.data.release.error}
+            {releaseNotice(save.data.release, restaurantId)}
           </span>
         ) : null}
       </div>
