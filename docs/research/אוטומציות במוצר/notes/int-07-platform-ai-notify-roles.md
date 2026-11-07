@@ -89,7 +89,7 @@ Approvals, claims, overdue recovery and receiving have **no badge**. `navRouter`
 |---|---|
 | Router: `managerProcedure`; gated by flag `aiAssistant` (`assertFeature`) | `packages/api/src/routers/ask.ts:12-33` |
 | Orchestration: Claude when `ANTHROPIC_API_KEY` is set and `ASK_WITH_CLAUDE!=='0'`, otherwise the deterministic offline engine; any Claude error falls back to offline | `packages/api/src/ask/index.ts:35-100` |
-| Model `claude-opus-5-5`, ≤4 tool round-trips, 8000 max tokens | `packages/api/src/ask/claude.ts:18-21` |
+| Model id pinned in code, ≤4 tool round-trips, 8000 max tokens | `packages/api/src/ask/claude.ts:18-21` |
 | Budgets: 60 questions/day/restaurant, $3/day, burst 30/min | `packages/api/src/ask/budget.ts:10-21` |
 | **Read-only** tools: `leak_hero`, `leak_report`, `leak_breakdown`, `claimable_lines` | `packages/api/src/ask/tools.ts:178-210` |
 | `claimable_lines` keeps open/escalated lines only and runs through `claimableLines` (which honours `NEVER_CLAIMABLE_TYPES` = PRICE_LOWER, UNORDERED_ARRIVAL, MISSING_ON_INVOICE) | `tools.ts:136-152`, `packages/api/src/lib/claims.ts:19-22` |

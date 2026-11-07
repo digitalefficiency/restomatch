@@ -1,10 +1,10 @@
-# Wave 3 automation track: the shared playbook (read this first, once)
+# Automation track (AU): the shared playbook (read this first, once)
 
 ## 0. You are here
 - You are **one automation package session (AU-xx)** for RestoMatch: a Hebrew-first, RTL B2B web app that catches supplier-invoice leaks in ₪ for Israeli restaurants. Next.js 15 in `apps/web`, tRPC in `packages/api`, Drizzle + Postgres RLS in `packages/db`, the engine in `packages/matching`, jobs inside Vercel at `/api/cron/jobs` (schedules registered in `apps/worker/src/cron.ts`, reused by `apps/worker/src/serverless.ts`).
 - **Your brief is `docs/ux/automation/AU-xx.md`** (new; one per package). It holds your write boundary, dependencies, interims, acceptance list, tests and line pointers. This README is the contract shared by all AU sessions. On package specifics the brief wins; `AGENTS.md` wins over both; the wave-2 playbook `docs/ux/wave2/README.md` (§7, §8, §12, §13) binds wherever this file is silent.
 - **The orchestrator is session `session_015veCjPjLCiZbqnYFJpdzvR`.** It assigns work, answers boundary questions, integrates, reviews and merges. You build one package on one branch and open a **draft** PR.
-- **What this track is.** The AU packages are the **automation layer** on top of the existing plan. `docs/ux/IMPLEMENTATION-PLAN.md` §4 already sketches wave 3 (W3-01..W3-11) and the human-PR track (H-04..H-11); wave 2 (`docs/ux/wave2/`) is in flight. AU packages **credit and never duplicate** W2/G/W3/H items: they wire, schedule, route and measure what those packages build. If your work overlaps a W2/W3/H item, you build only the automation delta and name the item you build on in the PR body.
+- **What this track is.** The AU packages are the **automation layer** on top of the existing plan. `docs/ux/IMPLEMENTATION-PLAN.md` §4 already sketches wave 3 (W3-01..W3-11) and the human-PR track (H-04..H-11); wave 2 (`docs/ux/wave2/`) is in flight. AU packages **credit and never duplicate** W2/G/W3/H items: they wire, schedule, route and measure what those packages build. If your work overlaps a W2/W3/H item, you build only the automation delta and name the item you build on in the PR body. The AU packages are **not** wave-3 packages and take no W3-xx ids: each catalogue item maps to the existing W2/G/W3/W4/H package that covers it where one fits, and only the remainder is an AU package (§10a). The wave-2 work they build on is mostly built but not merged (§10b).
 - **Already planned elsewhere (do not rebuild):** claims at decision, auto-built letters, 10 s undo, overdue reminder drafts (W2-10, W2-04); auto re-match on OCR edit (W2-02); due dates, mark paid, holds, the G-17 terms flag (W2-03, G-17, W2-11); order guide and wa.me send (W2-06); task spine, badges, bell (W2-08); real recipients, quiet hours, ≤6/day (G-06); `awaitingDecision` (G-12); `moneyText` (G-13); PO lifecycle and supplier-answer notify (W3-09); credit-note OCR and statements (W3-11); price-list inbox (W3-10); Ask drafts and palette (W3-04); close checklist and exports (W3-05); real push, WhatsApp templates, role→phone, late-truck 15 min (H-05; its "chase drafts 3/7/14" are re-scoped to the 7-day rule and AU-03's builder, §8); claim portal (H-06); funnel and closed months (H-07); revised expectation and consolidated accept (H-08); least-privilege ₪ (H-11).
 - **Timing.** Train A merges this weekend (#228), train B Tue 10.11, the pilot at ציקטי goes live Wed 11.11. Phase A runs 16–30.11, Phase B in December, Phase C Jan–Mar 2027. Every AU branch starts from `main` **after train B** plus the wave-2 merges your brief names. Vercel builds only `main`; GitHub CI runs on every PR push.
 
@@ -99,8 +99,8 @@ The list in `AGENTS.md` and `docs/ux/wave2/README.md` §8 applies unchanged. The
 - **H-13 · Schema batch C: automation** (`schema.ts` + one migration + RLS list + shape tests). `autonomy_grants` (restaurant_id, supplier_id, max_agorot, types[], granted_by, revoked_at) for AU-16; `claim_replies` (classifier tags) for AU-17; `suppliers.reconciliation_email` + `suppliers.reconciliation_whatsapp` (two columns; a contact needs a channel) and `suppliers.whatsapp_opt_in_at/_source`. Masav runs stay in `audit_log` (`payments.masav_built`), not `export_runs`. Prefer existing jsonb settings for automation settings (likely no column). The brief `H-13.md` is authoritative. Keep minimal; list what lives in jsonb instead. AU-07 sends any missing telemetry column here, never a local schema edit.
 
 **Notes on existing human-PR packages:**
-- **H-07 (₪ definitions and closed months):** on train A, charts `LEAK_FILTER` (`packages/charts/src/leak-views.ts:134-136`) excludes PRICE_LOWER and UNORDERED_ARRIVAL but still counts MISSING_ON_INVOICE, which the owner took out of the leak (train B, W1-08). AU-07 verifies on `main` after train B; if still counted, flag it to matching-engine-guardian / H-07 as a pre-pilot bug. The AU-07 funnel uses H-07's definitions and never patches `LEAK_FILTER`.
-- **H-11 (least-privilege ₪):** receiver ₪ still leaves the server (owner KPIs, leak hero/summary, `owner.vatAtRisk`, `orders.list` totals, catalog list price, ledger via the invoice reader, PO/dock slip). `owner.vatAtRisk` is narrowed before `vatAtRisk` joins the pilot defaults (AD1). That is a prerequisite for any receiver automation that carries data; AU-04 builds ₪-free receiver payloads regardless and tests them.
+- **H-07 (₪ definitions and closed months):** on train A, charts `LEAK_FILTER` (`packages/charts/src/leak-views.ts:134-136`) excludes PRICE_LOWER and UNORDERED_ARRIVAL but still counts MISSING_ON_INVOICE, which the owner took out of the leak (train B, W1-08). AU-07 verifies on `main` after train B; if still counted, flag it to matching-engine-guardian / H-07 as a pre-pilot bug. The AU-07 funnel uses H-07's definitions and never patches `LEAK_FILTER`. **Open pilot PR #211** (owner-approved 31.10) takes MISSING_ON_INVOICE out of `LEAK_FILTER` and moves the EOD digest onto it; once it merges, H-07 and AU-07 only verify.
+- **H-11 (least-privilege ₪):** receiver ₪ still leaves the server (owner KPIs, leak hero/summary, `owner.vatAtRisk`, `orders.list` totals, catalog list price, ledger via the invoice reader, PO/dock slip). `owner.vatAtRisk` is narrowed before `vatAtRisk` joins the pilot defaults (AD1). That is a prerequisite for any receiver automation that carries data; AU-04 builds ₪-free receiver payloads regardless and tests them. **Open pilot PR #219** strips ₪ for receiver/chef from activity, receiving reads and owner aggregates (`lib/staffMoney.ts`); it closes part of this list, H-11 closes the rest.
 
 ## 9. Ownership ledger (who may edit what, when)
 Abbreviations as wave-2 README §9: `dash/` = `apps/web/app/dashboard/`, `api/` = `packages/api/src/`, `wkr/` = `apps/worker/`, `msg/` = `apps/web/lib/i18n/messages/`. "(new)" = does not exist on train A. Every package also owns its `api/__tests__/coverage/AU-xx.ts`, `apps/web/e2e/AU-xx.spec.ts` + `__screenshots__/AU-xx/**` and the tests its brief lists. **Anything not listed is read-only: ask first.**
@@ -175,6 +175,96 @@ AU-01 ─→ AU-13        W2-12 ─→ AU-13, AU-15
 W2-02, W2-03, W2-08 ─→ AU-08 ─→ H-05a ←─ AU-12 (weekly-digest + allocation-deadline jobs)        W2-03 + H-03 ─→ AU-14 ─→ AU-19
 H-05 core + H-06 ─→ AU-17 (all PRs) ←─ H-13 (PR b, c)       W3-05 + W3-11 + AU-08 ─→ AU-18
 ```
+
+## 10a. Where AU slots in the W3/W4 plan
+No W3-xx ids are created for automation. Each catalogue item (`docs/research/אוטומציות במוצר/notes/10-catalogue-and-impact.md` §A–§C, authoritative) is credited to the existing W2/G/W3/W4/H package that already covers it; the AU package builds only the automation delta. "Lands after" = must merge first; "lands before / hands back to" = the W3/W4/H package that takes the AU-owned paths after the AU merge (wave-3 overlap ledger, `IMPLEMENTATION-PLAN.md` §4).
+
+| A-id | Automation | Already covered by (credit, do not rebuild) | AU package (delta) | Lands after | Lands before / hands back to |
+|---|---|---|---|---|---|
+| A1 | Pilot switch-on + owner toggles | W2-14 (settings audit), G-07 (`can()`) | AU-01 | train B; W2-14 for PR b | settings subfolder → W3-07a |
+| A2 | Time ledger + automation KPIs | W2-09a (charts exports), H-07 (₪ definitions) | AU-07 | W2-09a, W2-01 | admin page → W3-07a |
+| A3 | Receiver morning truck brief (no ₪) | W3-03 (06:00 receiver brief), W2-05 (`todayExpectations` board), H-11 / #219 (₪ strip) | AU-04 (pulls W3-03's brief forward) | W2-04, G-06, G-12a, G-13 | `dailyExpectations.ts` / `supplierDelays.ts` → W3-03 |
+| A4 | Evening decision digest, fixed | W2-04 (`endOfDayReport.ts` → G-12), #211 (EOD on `LEAK_FILTER`) | AU-04 | as A3 | `briefs/**` + `endOfDayReport.ts` → AU-12 |
+| A5 | Order reminder truth | W1-11 / W2-06 (reminder link, order guide) | AU-04 | as A3 | `orderReminders.ts` → AU-11 → W3-09 |
+| A6 | Late-truck chase draft | H-05 (15-min late check, WhatsApp template) | AU-04 | as A3 | `supplierDelays.ts` → W3-03; late check = H-05 |
+| A7 | Honest match alerts | W2-04 (`matchInvoice` → `notify()`), H-12 (routing) | AU-04 | as A3 | `matchInvoice.ts` → H-05 |
+| A8 | Supplier from ח״פ + dead check revived | train B (`supplierBusinessIdMismatch`), G-17 (header persistence) | AU-02 (NULL-supplier suggestion only) | train B, G-06, G-17, G-09 | `ingest/**` → AU-10 → W3-11 |
+| A9 | Consolidated recognition from real OCR | **train B #224 / #232** (real consolidated recognition) | AU-02 (verify + tests only) | train B | `packages/ocr/**` → W3-11 |
+| A10 | Stuck-OCR re-sign + review nudge | G-06 (OCR-failure hand-off), #216 (manual lines), #222 (waiting-for-lines list), #223 (OCR retries) | AU-02 | train B, G-06 | `ocrInvoice.ts` → AU-10 → W3-11 |
+| A11 | Ask: waiting / stuck / owed / to pay | G-12a/b (`awaitingDecision`, Ask period) | AU-06 | G-12a, G-12b | `ask/**` + `dash/ask/**` → W3-04 |
+| A12 | Recovery chase loop v1 | W2-10 (claims, letters, reminder drafts), W2-04 (claims at decision), H-05 (chase send) | AU-03 | W2-10, W2-04 | `recovery/**` + `dash/recovery/**` → W3-11; `recoveryReminders.ts` → H-05 |
+| A13 | Allocation-number guard + chase | W2-02 (register tab), W2-03 (hold), W2-08 (vat card, task type) | AU-08 | W2-02, W2-03, W2-08 | feeds W3-05 checklist and AU-18; deadline slot → H-05a |
+| A14 | Consolidated autopilot (propose) | G-04 §9 (three flags), H-08 (accept, wave 4 human) | AU-09 | train B, G-04 §9, AU-02, W2-02 | accept-write → H-08 (W4) |
+| A15 | Intake autopilot 2 | W2-02 (inbox, bulk), G-09 (sender grouping) | AU-10 | AU-02, W2-02, G-09, G-05 | `ingest/**` + `routers/ingest.ts` + `dash/inbox/**` → W3-11 |
+| A16 | Order autopilot | W2-06 (guide, cut-off board, wa.me), W3-09 (PO lifecycle) | AU-11 | W2-06, AU-04, G-05, G-06 | `orders/**` + orders/receiving routers → W3-09 (lands before it, or as its addendum) |
+| A17 | Decision SLA nudge + weekly bookkeeper digest | W2-04 (go-links), G-12a, H-05 (digest send) | AU-12 | AU-04, G-12a, G-06, G-13, W2-03 | `settings/notifications/digest-preview/**` → W3-03; `weeklyDigest.ts` / `allocationDeadline.ts` → H-05 (via H-05a) |
+| A18 | Price creep in ₪/month | W2-12 (₪ queue, ₪/month helper), W3-10 (price-list inbox), W3-02 (recipes room) | AU-13 | W2-12, G-06, G-13 | contracts → W2-12; catalog / import diff → W3-10; `recipes/**` stays W3-02 |
+| A19 | Pay-run pre-flight | W2-03 (holds, `markPaid`), H-03 (bank columns) | AU-14 | W2-03, H-03 deployed | pay-run page + `routers/payRun.ts` → W3-01; `payRun/**` → AU-19 |
+| A20 | Learn from decisions | W2-12 (contracts), W3-10 (mapping), G-08 (`decideLink`) | AU-15 | W2-12, G-05 | cards → W2-12 (contracts) / W3-10 (mapping) |
+| A21 | Earned autonomy (claim, never waive) | — (new); engine rule = H-12, grants table = H-13 (both AU human-PR proposals) | AU-16 | AU-01, AU-07; H-13 (PR b); H-12 (PR c) | — |
+| A22 | Supplier communication loop | W2-10 (letters), H-05 core, H-06 (portal + server send) | AU-17 | W2-10, G-06, AU-03, H-05 core, H-06; W3-11 for PR b | — |
+| A23 | Missing-documents report + ITA diff | W3-05 (close checklist), W3-11 (statements) | AU-18 | W3-05, W3-11, AU-08 | panel lives under W3-05's close desk; 8th slot → H-05 (via H-05a) |
+| A24 | Payment file + bank-evidenced recovery | W2-03 (`markPaid`), H-03, G-03 | AU-19 | W2-03, H-03, G-03, AU-14 | — |
+| A25 | Produce market benchmark (opt) | — | none (backlog, icp-keeper gate) | — | — |
+| A26 | POS Z-report feed (opt) | W2-07 / W3-02 (`posSales`, food-cost room) cover the data side | none (backlog, ICP veto risk) | — | — |
+| — | Automation schedules in `cron.ts` | H-05 (delivery and scheduling) | **H-05a** (addendum, human PR) | AU-12, AU-08 job files (AU-11 for the cut-off line) | → H-05 |
+
+**AU packages against the W3/W4 timeline.** Wave 3 itself is gated on W2-01, W2-08, W2-13 and H-03 merged (`IMPLEMENTATION-PLAN.md` §6); W2-08 and H-03 have **not started** (§10b), so the W3 packages AU-xx hand back to are later than the plan's dates. That ordering is safe: every AU package that hands paths back lands **before** the W3 owner starts, and none waits on a W3 package except AU-18 (W3-05, W3-11) and AU-17 PR b (W3-11).
+- **Before W3-03:** AU-04 (`dailyExpectations`, `supplierDelays`), AU-12 (digest preview under `settings/notifications/**`).
+- **Before W3-04:** AU-06 (`ask/**`).
+- **Before W3-09:** AU-11 (`orders/**`, orders/receiving routers), or as its addendum.
+- **Before W3-11:** AU-02 → AU-10 (`ingest/**`, inbox, `ocrInvoice.ts` hook, `packages/ocr/**`), AU-03 (`recovery/**`).
+- **Before W3-07a:** AU-01 (settings subfolder), AU-07 (admin page).
+- **Before W3-01:** AU-14 (pay-run page, `routers/payRun.ts`).
+- **With W2-12 / W3-10:** AU-13, AU-15 mount cards by props; the contracts queue stays W2-12's, mapping and the price-list inbox are W3-10's.
+- **After W3-05 (+ W3-11):** AU-18.
+- **Wave 4:** AU-09's accept path is H-08; H-11 closes the receiver ₪ list that #219 starts. W4-01's DS/a11y sweep covers AU screens like any other; no AU package waits on wave 4.
+
+## 10b. Wave-2 status this plan builds on
+Source: open-PR read of 2026-11-07 (~07:45Z; `origin/main` = `4c887688`). Re-check before each batch start.
+
+**Built, draft, not merged (wave 2 + G):** #180 W2-01 COVERAGE fragments (human-PR) · #181 H-01 signDisplay (human-PR) · #182 G-07 capabilities · #183 W2-09a charts exports · #184 W2-06 Orders 2 · #185 G-05 write kernel · #186 W2-15a drafts kit · #187 G-13 agorot boundary / `moneyText` (human-PR) · #188 G-04 match-input truth · #189 / #202 W2-05 receiving slices A/B · #190 G-09 multi-page · #191 W2-09b drill helpers · #192 G-12a `awaitingDecision` · #193 / #194 / #197 W2-10a / W2-10 claims at decision + recovery desk · #195 G-12b Ask period · #196 W2-09 leak drill (in progress) · #198 G-05c invoice state · #199 G-06 real recipients · #200 G-08 link provenance · #201 / #212 W2-13 copy system · #203 / #214 / #218 W2-15 fixes · #204 W2-16 copy focus · #209 W2-04 approvals desk · #217 W2-02 invoice register / cockpit / intake.
+
+**Not started:** W2-03, W2-07, W2-08, W2-11, W2-12, W2-14, G-10, G-11, H-03, G-17.
+
+**Not in the PR read (verify before relying on them):** G-03, G-14, G-15, H-04, H-05 core, H-06, H-07, H-08, H-11. Train A merges this weekend (#228), train B Tue 10.11.
+
+**Per AU package: hard dependencies that have not started (these push the package).**
+| Pkg | Hard deps not started | Effect: interim or slip |
+|---|---|---|
+| AU-01 | none (soft W2-14 not started) | PR a on time; PR b (settings link line on W2-14's page) slips until W2-14, or mounts at `dash/settings/automations/**` without the audit-drawer link |
+| AU-02 | **G-17** | PR a builds on train B + G-06 (#199) + G-09 (#190); merge needs G-17's `ocrInvoice.ts` edits first, so either G-17 starts now or the orchestrator lets AU-02 land first and G-17 rebase on it. A9 is verify + tests only (#224/#232) |
+| AU-03 | none (W2-10 #193/#194/#197, W2-04 #209 built); soft W2-11, W2-08 not started | on time against their interims (ported `waPhone`, recovery-page banner) |
+| AU-04 | none (W2-04 #209, G-06 #199, G-12a #192, G-13 #187 built); soft W2-03, W2-11, W2-08 not started | on time; the "due ≤2 days" line, wa.me normaliser and bell rows stay omitted per §3 interims |
+| AU-06 | none (G-12a #192, G-12b #195 built); soft W2-03 not started | on time; `to_pay_this_week` answers "not live yet", never ₪0 |
+| AU-07 | none (W2-09a #183, W2-01 #180 built) | on time |
+| AU-08 | **W2-03, W2-08** | API part (`vatAtRisk()`, draft builder) can start in B1; the hold and the card cannot mount, so **Phase B1 merge is gated** on W2-03 + W2-08 |
+| AU-09 | none directly (G-04 #188: verify it carries the §9 addendum); **G-17 via AU-02** | PR a (pure set search on fixtures) on time; merge slips with AU-02 |
+| AU-10 | **G-17 via AU-02** (G-05 #185, G-09 #190, W2-02 #217 built) | slips with AU-02 |
+| AU-11 | none (W2-06 #184, G-05 #185, G-06 #199 built; AU-04) | B2 after AU-04 as planned |
+| AU-12 | **W2-03** | builders + preview can start; the due list and hold lines are omitted (brief §3 rule "never ₪0"); merge gated on W2-03 unless the orchestrator downgrades it to soft with those lines omitted |
+| AU-13 | **W2-12** | **Phase B1 start gated**: `priceAlerts/**` and the ₪/month helper are W2-12's |
+| AU-14 | **W2-03, H-03** | **Phase B2 start gated** on W2-03 + H-03 deployed |
+| AU-15 | **W2-12** | **Phase B1 start gated** (contracts queue is W2-12's) |
+| AU-16 | **H-03 via H-13** (PR b); G-14/G-15 via H-12 (status unknown) | PR a (shadow) on time after AU-01 + AU-07; PR b/c slip with H-03 |
+| AU-17 | **H-03 via H-13** (PR b, c); H-05 core, H-06 unknown | PR a waits for H-05 core + H-06 as before; PR b/c also slip with H-03 |
+| AU-18 | W3-05, W3-11 (wave 3, gated on **W2-08 + H-03**); AU-08 (gated on W2-03 + W2-08) | Phase C start slips with wave 3; the stand-alone `dash/close/missing-docs` interim stays available |
+| AU-19 | **W2-03, H-03** (G-03 unknown) | pure builder/matcher on fixtures only until both land |
+| H-05a | none (job files from AU-12, AU-08) | slips with AU-12 / AU-08 (W2-03) |
+| H-12 | **H-03** (bank signal), H-13 (needs H-03); G-14, G-15 unknown | commit (a) can be drafted; (b) slips with H-03 |
+| H-13 | **H-03** | cannot take a migration number until H-03 is deployed |
+
+**The critical path is W2-03 + H-03 + W2-12 + G-17** (plus W2-08 for AU-08 and wave 3). Nothing in Phase A except AU-02 (G-17) is held by a not-started package; Phase B1 is held by W2-03/W2-08 (AU-08) and W2-12 (AU-13, AU-15); Phase B2 by W2-03/H-03 (AU-12, AU-14).
+
+**Open pilot PRs that change brief premises (verify on `main` after train B):**
+- **#211** MISSING_ON_INVOICE leaves the leak figure (owner-approved 31.10): fixes charts `LEAK_FILTER` and moves the EOD digest onto it. AU-07's labelled "חסר בחשבונית (ממתין לתיקון H-07)" line reads ₪0 and is hidden once merged; AU-04's EOD ₪ fix is already done (verify only). W2-04 draft #209 also rewrites `endOfDayReport.ts` (open credits = `awaitingDecision`): the second of #209/#211 to merge rebases.
+- **#219** no ₪ to receiver/chef (activity, receiving reads, owner aggregates, `lib/staffMoney.ts`): partially closes the H-11 list; AU-04 still builds ₪-free payloads and tests them.
+- **#224 / #232** (train B) real consolidated invoices recognised: AU-02's A9 item becomes **verify + tests**; AU-09's "real scans reach your code" precondition is met by them.
+- **#173** quiet hours, Shabbat and the 6/day cap for staff alerts (`notifications/sendWindow.ts`): overlaps G-06's rule; every AU brief that cites "quiet hours via G-06" uses whichever lands as `staffAlertHold` / `notify()`; do not re-implement.
+- **#230** W1-11 `sendStatus` dedupe on orders: AU-04 (A5) and AU-11 read `sendStatus` after it.
+- **#222** list of invoices waiting for lines (hold reasons): AU-02's needs-review nudge and AU-06's `intake_stuck` link to it rather than add a list.
+- **#216** manual invoice lines when OCR fails (`ocrSweep.ts`, `matchInvoice.ts`): AU-02 rebases its `ocrSweep.ts` re-sign on it; AU-04 rebases `matchInvoice.ts` on it.
+- Also relevant: #223 OCR headroom/retries (AU-02), #213 letterhead for דרישת זיכוי (AU-03 drafts, AU-17), #231 outbox retry logging (AU-07).
 
 ## 11. Package index
 `id · one line · owner agent · effort · phase · humanPR`
