@@ -103,7 +103,7 @@ describe('supplier leak card — the basis per type (W2-09c)', () => {
       const text = whyTextOf(whyOf(facts(type), leakLabels('he')));
       expect([type, /\{\w+\}/.test(text), /פער/.test(text)]).toEqual([type, false, true]);
     }
-    expect(whyTextOf(whyOf(facts('PRICE_HIGHER'), leakLabels('he')))).toMatch(/^חויב .*149\.00.* × 10 ק״ג · בהזמנה .*139\.00/);
+    expect(whyTextOf(whyOf(facts('PRICE_HIGHER'), leakLabels('he')))).toMatch(/^בחשבונית .*149\.00.* × 10 ק״ג · בהזמנה .*139\.00/);
   });
 
   it('an unverifiable line reads "פירוט לא זמין", never a wrong formula', () => {

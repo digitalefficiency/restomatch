@@ -78,7 +78,7 @@ describe('whySegments (flags/why.ts)', () => {
 
   it('ledger layout reads billed · ordered price with PO · difference · threshold (he)', () => {
     const text = whyText(whySegments(price, leakWhyLabels('he')));
-    expect(text).toMatch(/^חויב .*149\.00.* × 10 ק״ג · בהזמנה .*139\.00.* \(PO-123, 14\.10\) · פער .*100\.00.* · סף ±2% מהמחיר או .*5/);
+    expect(text).toMatch(/^בחשבונית .*149\.00.* × 10 ק״ג · בהזמנה .*139\.00.* \(PO-123, 14\.10\) · פער .*100\.00.* · סף ±2% מהמחיר או .*5/);
   });
 
   it('ledger: a p90 basis is never called an order price', () => {
@@ -115,6 +115,13 @@ describe('whySegments (flags/why.ts)', () => {
     expect(nums.some((n) => /149\.00/.test(n))).toBe(true);
     expect(nums.some((n) => /100\.00/.test(n))).toBe(true);
     expect(nums).toContain('PO-123');
+  });
+
+  it('the invoice is the subject, never the person ("חויב" / "billed" never appear: these lines reach suppliers)', () => {
+    for (const type of TYPES) {
+      expect(whyText(whySegments(factsFor(type), leakWhyLabels('he')))).not.toMatch(/חויב/);
+      expect(whyText(whySegments(factsFor(type), leakWhyLabels('en')))).not.toMatch(/\bbilled\b/i);
+    }
   });
 
   it('English translates the unit (ק״ג → kg)', () => {
