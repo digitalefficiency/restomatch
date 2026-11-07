@@ -52,6 +52,108 @@ describe('db:doctor', () => {
     expect(again.findings.find((x) => x.name === 'applied migrations intact')?.status).toBe('PASS');
   });
 
+  it('FAILs when the app role can write the bank audit or the frozen months (0072)', async () => {
+    const before = (await runDoctor(url)).findings.find((f) => f.name === 'read-only tables');
+    if (!before) return; // no app role on this DB yet: the app-role section is skipped
+    expect(before.status).toBe('PASS');
+    for (const t of ['supplier_bank_account_changes', 'leak_month_snapshots', 'leak_month_corrections']) {
+      // Committed briefly (the doctor reads in its own session), revoked again below.
+      await sql.unsafe(`grant insert on ${t} to restomatch_app`);
+      try {
+        const f = (await runDoctor(url)).findings.find((x) => x.name === 'read-only tables');
+        expect(f?.status, t).toBe('FAIL');
+        expect(f?.detail).toContain(t);
+      } finally {
+        await sql.unsafe(`revoke insert on ${t} from restomatch_app`);
+      }
+    }
+    expect((await runDoctor(url)).findings.find((f) => f.name === 'read-only tables')?.status).toBe('PASS');
+  });
+
+  it('FAILs any plpgsql/sql function in public/app without pg_temp last in its search_path, and a PUBLIC-executable SECURITY DEFINER', async () => {
+    const name = 'function search_path hardening';
+    const ok = (await runDoctor(url)).findings.find((f) => f.name === name);
+    if (!ok) return; // no app role on this DB yet: the app-role section is skipped
+    expect(ok.status).toBe('PASS');
+    // A SECURITY DEFINER without pg_temp last, and a plain trigger function (invoker) with no pin.
+    for (const [fn, restore] of [
+      ['public.restomatch_bank_account_audit()', 'pg_catalog, public, pg_temp'],
+      ['public.set_updated_at()', 'pg_catalog, pg_temp'],
+    ] as const) {
+      await sql.unsafe(`alter function ${fn} reset search_path`);
+      try {
+        const f = (await runDoctor(url)).findings.find((x) => x.name === name);
+        expect(f?.status, fn).toBe('FAIL');
+        expect(f?.detail).toContain(`${fn} (search_path unset: pin it, pg_temp LAST)`);
+      } finally {
+        await sql.unsafe(`alter function ${fn} set search_path = ${restore}`);
+      }
+    }
+    // A search_path that does not END with pg_temp is not a pin.
+    await sql.unsafe(`alter function public.set_updated_at() set search_path = pg_temp, pg_catalog`);
+    try {
+      expect((await runDoctor(url)).findings.find((x) => x.name === name)?.status).toBe('FAIL');
+    } finally {
+      await sql.unsafe(`alter function public.set_updated_at() set search_path = pg_catalog, pg_temp`);
+    }
+    const fn = 'public.restomatch_bank_account_audit()';
+    await sql.unsafe(`grant execute on function ${fn} to public`);
+    try {
+      const f = (await runDoctor(url)).findings.find((x) => x.name === name);
+      expect(f?.status).toBe('FAIL');
+      expect(f?.detail).toContain(`${fn} (SECURITY DEFINER, PUBLIC can EXECUTE)`);
+    } finally {
+      await sql.unsafe(`revoke execute on function ${fn} from public`);
+    }
+    // Extension functions (pgvector's, in public) are not ours: never flagged.
+    expect((await runDoctor(url)).findings.find((f) => f.name === name)).toMatchObject({ status: 'PASS' });
+    expect((await runDoctor(url)).findings.find((f) => f.name === name)?.detail).not.toMatch(/vector/);
+  });
+
+  it('allows ONLY the two RLS helpers unpinned, and only with their exact qualified body; covers trigger functions in any schema', async () => {
+    const name = 'function search_path hardening';
+    const ok = (await runDoctor(url)).findings.find((f) => f.name === name);
+    if (!ok) return;
+    expect(ok.status).toBe('PASS');
+    // An unqualified body (a pg_temp uuid could resolve) is no longer allowed unpinned.
+    const qualified = `select nullif(pg_catalog.current_setting('app.current_restaurant_id', true), '')::pg_catalog.uuid`;
+    await sql.unsafe(`create or replace function app.current_restaurant_id() returns uuid language sql stable
+      as $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$`);
+    try {
+      const f = (await runDoctor(url)).findings.find((x) => x.name === name);
+      expect(f?.status).toBe('FAIL');
+      expect(f?.detail).toContain('app.current_restaurant_id() (search_path unset');
+    } finally {
+      await sql.unsafe(`create or replace function app.current_restaurant_id() returns pg_catalog.uuid language sql stable as $$ ${qualified} $$`);
+    }
+    // A trigger function in ANOTHER schema, called by a trigger on a public table, is in scope.
+    await sql.unsafe(`create schema if not exists h03_doctor_probe`);
+    await sql.unsafe(`create or replace function h03_doctor_probe.touch() returns trigger language plpgsql as $$ begin return new; end $$`);
+    await sql.unsafe(`create trigger h03_doctor_probe_touch before update on suppliers for each row execute function h03_doctor_probe.touch()`);
+    try {
+      const f = (await runDoctor(url)).findings.find((x) => x.name === name);
+      expect(f?.status).toBe('FAIL');
+      expect(f?.detail).toContain('h03_doctor_probe.touch()');
+    } finally {
+      await sql.unsafe(`drop trigger if exists h03_doctor_probe_touch on suppliers`);
+      await sql.unsafe(`drop schema if exists h03_doctor_probe cascade`);
+    }
+    expect((await runDoctor(url)).findings.find((f) => f.name === name)?.status).toBe('PASS');
+  });
+
+  it('FAILs when the app role can DELETE restaurants (no owner-run cascade from the tenant role)', async () => {
+    const before = (await runDoctor(url)).findings.find((f) => f.name === 'read-only tables');
+    if (!before) return;
+    await sql.unsafe(`grant delete on restaurants to restomatch_app`);
+    try {
+      const f = (await runDoctor(url)).findings.find((x) => x.name === 'read-only tables');
+      expect(f?.status).toBe('FAIL');
+      expect(f?.detail).toContain('restaurants(delete)');
+    } finally {
+      await sql.unsafe(`revoke delete on restaurants from restomatch_app`);
+    }
+  });
+
   it('redacts the password and prints a PASS/WARN/FAIL summary', async () => {
     expect(redactUrl('postgres://u:s3cret@h:5432/db')).toBe('postgres://u:***@h:5432/db');
     const r = await runDoctor(url);

@@ -466,14 +466,19 @@ end $$;
 create schema if not exists app;
 
 -- Reads the active restaurant from the per-transaction GUC (NULL if unset).
-create or replace function app.current_restaurant_id() returns uuid
+-- Every name is schema-qualified (no planted pg_temp type can resolve here), but there
+-- is NO `SET search_path`: a SET makes a sql function non-inlinable, and these sit in
+-- every RLS policy (pinning measured 4-15x slower per-row filters). They never run as
+-- the owner (no FORCE RLS; the bank audit reads the GUC itself). db:doctor allows
+-- exactly these two bodies unpinned.
+create or replace function app.current_restaurant_id() returns pg_catalog.uuid
   language sql stable
-  as $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$;
+  as $$ select nullif(pg_catalog.current_setting('app.current_restaurant_id', true), '')::pg_catalog.uuid $$;
 
 -- Reads the acting user from the per-transaction GUC (NULL if unset).
-create or replace function app.current_user_id() returns uuid
+create or replace function app.current_user_id() returns pg_catalog.uuid
   language sql stable
-  as $$ select nullif(current_setting('app.current_user_id', true), '')::uuid $$;
+  as $$ select nullif(pg_catalog.current_setting('app.current_user_id', true), '')::pg_catalog.uuid $$;
 
 select pg_temp.rm_run(1);
 
@@ -759,20 +764,27 @@ select pg_temp.rm_run(99);
 --    superusers, roles flagged BYPASSRLS (service_role / worker), and the table
 --    owner (migrations, retention purge, cascade deletes). Everyone else — most
 --    importantly the non-owner restomatch_app tenant role — is rejected.
-create or replace function app.audit_log_is_maintenance_role() returns boolean
-  language sql stable as $$
+--    Both run as the table OWNER inside cascades (restaurant delete → audit_log), so
+--    their search_path is pinned with pg_temp LAST and every catalog, type and cast is
+--    schema-qualified: a planted pg_temp.pg_roles / regclass must never resolve here.
+create or replace function app.audit_log_is_maintenance_role() returns pg_catalog.bool
+  language sql stable
+  set search_path = pg_catalog, pg_temp
+  as $$
   select exists (
-      select 1 from pg_roles r
-      where r.rolname = current_user and (r.rolsuper or r.rolbypassrls)
+      select 1 from pg_catalog.pg_roles r
+      where r.rolname OPERATOR(pg_catalog.=) current_user and (r.rolsuper or r.rolbypassrls)
     )
-    or current_user = (
-      select pg_catalog.pg_get_userbyid(relowner)
-      from pg_class where oid = 'public.audit_log'::regclass
+    or current_user OPERATOR(pg_catalog.=) (
+      select pg_catalog.pg_get_userbyid(c.relowner)
+      from pg_catalog.pg_class c where c.oid OPERATOR(pg_catalog.=) 'public.audit_log'::pg_catalog.regclass
     )
 $$;
 
 create or replace function app.audit_log_immutable() returns trigger
-  language plpgsql as $$
+  language plpgsql
+  set search_path = pg_catalog, pg_temp
+  as $$
 begin
   if app.audit_log_is_maintenance_role() then
     return case when tg_op = 'DELETE' then old else new end;
@@ -850,6 +862,14 @@ grant usage on schema public to restomatch_app;
         -- append-only trigger is the backstop for the owner side.
         if to_regclass('public.leak_month_snapshots') is not null then
           execute 'revoke insert, update, delete on leak_month_snapshots, leak_month_corrections from restomatch_app';
+        end if;
+        -- No app path deletes a restaurant as the tenant role (seed / e2e cleanup / ops use
+        -- the owner connection). Without DELETE the tenant cannot start an owner-run
+        -- cascade (restaurant → audit rows) at all.
+        execute 'revoke delete on restaurants from restomatch_app';
+        -- 0072: the bank audit is written ONLY by its SECURITY DEFINER trigger.
+        if to_regclass('public.supplier_bank_account_changes') is not null then
+          execute 'revoke insert, update, delete on supplier_bank_account_changes from restomatch_app';
         end if;
       end $$;
 
