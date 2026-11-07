@@ -181,6 +181,7 @@ export const en: Shape<typeof he> = {
     forbidden: 'You do not have permission to do this.',
     unauthorized: 'Your session has expired. Please sign in again.',
     invalidInput: 'One of the values you entered is invalid.',
+    invoicePartialHeaderClear: 'Clear the invoice totals together: before VAT, VAT and total. Or fill in all three.',
     invoiceBeingRead: 'This invoice is still being read. Try again in a minute.',
     invoiceReceiptOpen: "The goods receipt for this invoice is still being counted. The match runs when the count is closed, and you can edit the lines after that.",
     invoiceLinesLocked: "This invoice's lines can't be changed: it was approved or paid, it has a credit claim in progress or a recorded credit note, its findings were already decided, or it is a consolidated invoice. Close a claim in the credits tracker first.",

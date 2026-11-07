@@ -11,6 +11,7 @@ import {
   matchRuns,
   memberships,
   poLines,
+  productAliases,
   products,
   purchaseOrders,
   restaurants,
@@ -47,6 +48,7 @@ let poLineId = '';
 let grId = '';
 let grLineId = '';
 let supplierId = '';
+let productId = '';
 
 async function cleanup() {
   if (!restaurantId) return;
@@ -60,6 +62,7 @@ async function cleanup() {
   for (const p of await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.restaurantId, restaurantId)))
     await db.delete(poLines).where(eq(poLines.poId, p.id));
   await db.delete(purchaseOrders).where(eq(purchaseOrders.restaurantId, restaurantId));
+  await db.delete(productAliases).where(eq(productAliases.supplierId, supplierId));
   await db.delete(products).where(eq(products.restaurantId, restaurantId));
   await db.delete(suppliers).where(eq(suppliers.restaurantId, restaurantId));
   await db.delete(memberships).where(eq(memberships.restaurantId, restaurantId));
@@ -84,6 +87,7 @@ beforeEach(async () => {
     .insert(products)
     .values({ restaurantId, canonicalName: 'שמן זית', category: 'שמנים', defaultUnit: 'ליטר' })
     .returning();
+  productId = p!.id;
   const [po] = await db
     .insert(purchaseOrders)
     .values({ restaurantId, supplierId, expectedDeliveryAt: new Date(), status: 'sent', source: 'manual' })
@@ -239,5 +243,84 @@ describe('#216 HARD GATE (train A): a failed read keeps its receipt — the REAL
     expect(retaken).toMatchObject({ status: 'ocr_pending', rawImageUrl: 'https://example.com/scans/sharp.jpg' });
     expect(retaken!.ocrPayload?.raw).toMatchObject({ scanGrId: grId });
     expect(await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.restaurantId, restaurantId))).toHaveLength(1);
+  });
+});
+
+describe('#216 round 6, items 1+3: an invoice whose receipt is still being counted is HELD, then matched by the real submit', () => {
+  /** An emailed invoice (no scan stamp, no OCR markers): its order + receipt are found by discovery. */
+  async function emailInvoice(status: 'parsed' | 'matched' = 'parsed') {
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId, supplierId, status, source: 'email', totalExclVat: '1250.00', vatAmount: '225.00', totalInclVat: '1475.00' })
+      .returning();
+    await db.insert(invoiceLines).values({ invoiceId: inv!.id, productId, rawDescription: 'שמן זית 1 ליטר', qtyBilled: '10', unit: 'ליטר', unitPriceBilled: '125', lineTotal: '1250.00' });
+    return inv!.id;
+  }
+  const runsOf = (id: string) => db.select().from(matchRuns).where(eq(matchRuns.invoiceId, id));
+  const typesOf = async (id: string) =>
+    (
+      await db.select({ type: discrepancies.type }).from(discrepancies).innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId)).where(eq(matchRuns.invoiceId, id))
+    ).map((r) => r.type);
+  async function submitAndRunJob(invoiceId: string) {
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId)); // counted = ordered
+    await as('receiver').receiving.submitReceipt({ grId });
+    const job = enqueued.find((j) => j.invoiceId === invoiceId);
+    expect(job).toBeDefined(); // the submit claimed the held invoice
+    const out = await matchInvoiceForJob(db, job!);
+    expect(out.skipped).toBeUndefined();
+    expect(out.persisted).not.toBeNull();
+  }
+
+  it('email + parsed + open receipt → Re-run holds it (no run) → submitReceipt enqueues it → the job matches it clean on the receipt', async () => {
+    const inv = await emailInvoice('parsed');
+    expect(await as('owner').match.runForInvoice({ invoiceId: inv })).toMatchObject({ matchRunId: null, status: 'held', held: 'receipt_open' });
+    expect(await runsOf(inv)).toHaveLength(0);
+    const [held] = await db.select().from(invoices).where(eq(invoices.id, inv));
+    expect(held!.status).toBe('matched'); // past the review gate: the submit may match it
+    expect(held!.ocrPayload?.raw).toEqual({ heldForReceipts: [grId] });
+
+    await submitAndRunJob(inv);
+    const [run] = await runsOf(inv);
+    expect(run).toMatchObject({ grId, overallStatus: 'clean' });
+    expect(await typesOf(inv)).toEqual([]);
+  });
+
+  it('email + a prior run with NO receipt (grId null) → held → submitReceipt → re-matched on the receipt', async () => {
+    const inv = await emailInvoice('matched');
+    const [gr] = await db.select({ poId: goodsReceipts.poId }).from(goodsReceipts).where(eq(goodsReceipts.id, grId));
+    // Matched before the delivery was being counted: a run on the order, no receipt.
+    await db.insert(matchRuns).values({ restaurantId, poId: gr!.poId, grId: null, invoiceId: inv, overallStatus: 'blocked', totalDiscrepancyAmount: '1250.00', runAt: new Date(Date.now() - 3_600_000) });
+    expect(await as('owner').match.runForInvoice({ invoiceId: inv })).toMatchObject({ status: 'held', held: 'receipt_open' });
+    expect((await runsOf(inv)).map((r) => r.grId)).toEqual([null]); // the old run is untouched until the count
+
+    await submitAndRunJob(inv);
+    const runs = await runsOf(inv);
+    expect(runs).toHaveLength(1); // replaced, not stacked
+    expect(runs[0]).toMatchObject({ grId, overallStatus: 'clean' });
+    expect(await typesOf(inv)).toEqual([]);
+  });
+
+  it('edit path: a hand line on an UNSTAMPED invoice whose discovered receipt is open → held (heldForReceipts), never orphaned', async () => {
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId, supplierId, status: 'parsed', source: 'email', ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed' } } })
+      .returning();
+    // This supplier's name for the product (the catalogue links the free-text line to it).
+    await db.insert(productAliases).values({ productId, supplierId, supplierNameRaw: 'שמן זית 1 ליטר' });
+    const added = await as('owner').receiving.addInvoiceLine({
+      invoiceId: inv!.id,
+      // Free text: an unstamped invoice has no order the picker could offer yet.
+      line: { rawDescription: 'שמן זית 1 ליטר', qtyBilled: 10, unit: 'ליטר', unitPriceBilled: 125 },
+    });
+    expect(added).toMatchObject({ rematched: false, rematchSkipped: 'receipt_open' });
+    const [held] = await db.select().from(invoices).where(eq(invoices.id, inv!.id));
+    expect(held!.status).toBe('matched');
+    expect((held!.ocrPayload?.raw as { heldForReceipts?: string[] }).heldForReceipts).toEqual([grId]);
+    expect(await runsOf(inv!.id)).toHaveLength(0);
+
+    await submitAndRunJob(inv!.id);
+    const [run] = await runsOf(inv!.id);
+    expect(run).toMatchObject({ grId });
+    expect(await typesOf(inv!.id)).toEqual([]);
   });
 });

@@ -607,15 +607,15 @@ describe('#216 money review — round 2', () => {
     expect(await as('manager').receiving.getInvoice({ invoiceId: failedId })).toMatchObject({ linesEditable: false, linesLockReason: 'consolidated' });
   });
 
-  it('#13: "הרץ התאמה מחדש" is refused while the invoice\'s receipt is still being counted', async () => {
+  it('#13 (round 6): "הרץ התאמה מחדש" while the receipt is still being counted HOLDS the invoice for it (no run, no throw)', async () => {
     await stampOn(A.grId);
     await db.insert(invoiceLines).values({ invoiceId: failedId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' });
     await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
-    await expect(as('manager').match.runForInvoice({ invoiceId: failedId })).rejects.toMatchObject({
-      code: 'PRECONDITION_FAILED',
-      cause: { appCode: 'invoice.receiptOpen' },
-    });
+    expect(await as('manager').match.runForInvoice({ invoiceId: failedId })).toMatchObject({ matchRunId: null, status: 'held', held: 'receipt_open' });
     expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId))).toHaveLength(0);
+    const [row] = await db.select({ status: invoices.status, payload: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, failedId));
+    expect(row!.status).toBe('matched'); // routed: waits on the count, not on a person
+    expect((row!.payload as { raw: Record<string, unknown> }).raw).toMatchObject({ heldForReceipts: [A.grId], scanGrId: A.grId });
     await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
     expect((await as('manager').match.runForInvoice({ invoiceId: failedId })).matchRunId).not.toBeNull();
   });
@@ -840,7 +840,8 @@ describe('#216 money review — round 3', () => {
     });
     expect(r).toMatchObject({ rematched: false, rematchSkipped: 'receipt_open' });
     expect(await runs()).toHaveLength(0);
-    await expect(as('manager').match.runForInvoice({ invoiceId: failedId })).rejects.toMatchObject({ cause: { appCode: 'invoice.receiptOpen' } });
+    expect(await as('manager').match.runForInvoice({ invoiceId: failedId })).toMatchObject({ status: 'held', held: 'receipt_open' });
+    expect(await runs()).toHaveLength(0);
   });
 
   it('L: a receipt reopened after it was counted refuses the edit (its run stands on that count) — nothing written', async () => {
@@ -948,6 +949,50 @@ describe('#216 round 4', () => {
   });
 });
 
+describe('#216 round 6, item 2: one lock order everywhere — invoice row → recovery → gr-close', () => {
+  const stamped = () =>
+    db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: A.grId } } })
+      .where(eq(invoices.id, failedId));
+  /**
+   * A sibling (a hand line on another invoice of this restaurant, a claim
+   * transition) holds recovery:<restaurant> and then wants gr-close:<receipt>.
+   * The call under test must queue on recovery FIRST — had it taken gr-close
+   * first, the two would wait on each other and Postgres would abort one (40P01).
+   */
+  async function siblingParksBetweenRecoveryAndGrClose(start: () => Promise<unknown>) {
+    const other = createDb(testDbUrl());
+    let call: Promise<unknown> | undefined;
+    await other.transaction(async (tx) => {
+      const holder = await backendPid(tx);
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'recovery:' + A.restaurantId}))`);
+      call = start();
+      call.catch(() => undefined);
+      await waitForBlockedBy(holder); // the call waits on recovery — holding no gr-close
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`gr-close:${A.grId}`}))`); // never waits on the call
+    });
+    return call!;
+  }
+
+  it('Re-run: a sibling parked between recovery and gr-close never deadlocks it (no 40P01) — the run lands on the receipt', async () => {
+    await stamped();
+    await db.insert(invoiceLines).values({ invoiceId: failedId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' });
+    const out = await siblingParksBetweenRecoveryAndGrClose(() => as('manager').match.runForInvoice({ invoiceId: failedId }));
+    expect(out).toMatchObject({ matchRunId: expect.any(String) });
+    const [run] = await db.select({ grId: matchRuns.grId }).from(matchRuns).where(eq(matchRuns.invoiceId, failedId));
+    expect(run).toEqual({ grId: A.grId });
+  });
+
+  it('edit path: a hand line re-matched under the same sibling never deadlocks either (no 40P01)', async () => {
+    await stamped();
+    const out = await siblingParksBetweenRecoveryAndGrClose(() =>
+      as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 } }),
+    );
+    expect(out).toMatchObject({ rematched: true });
+  });
+});
+
 describe('#216 round 4 verdict', () => {
   const runs = () => db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId));
   const types = async () =>
@@ -974,26 +1019,40 @@ describe('#216 round 4 verdict', () => {
     expect((await computeInvoiceLeak(db, A.restaurantId, failedId))!.leakIls).toBe(42.5); // 5 short × 8.5
   });
 
-  it('LOW 6: clearing only the subtotal under a VAT / total is refused — nothing written', async () => {
+  it('LOW 6: clearing only the subtotal under a VAT / total is refused (appCode invoice.partialHeaderClear) — nothing written', async () => {
     await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 90, vatAmount: 16.2, totalInclVat: 106.2 } });
     await expect(as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: null } })).rejects.toMatchObject({
       code: 'BAD_REQUEST',
-      message: 'הזינו גם סכום לפני מע״מ',
+      cause: { appCode: 'invoice.partialHeaderClear' },
     });
     expect(await header(failedId)).toEqual({ excl: '90.00', vat: '16.20', incl: '106.20' });
   });
 
-  it('F3: an unstamped invoice whose order is still being counted is refused (receiptOpen, no run); once submitted it matches clean', async () => {
+  it('round 6 LOW: clearing ONLY the VAT (or only the total) is refused too — nothing written', async () => {
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 90, vatAmount: 16.2, totalInclVat: 106.2 } });
+    await expect(as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { vatAmount: null } })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      cause: { appCode: 'invoice.partialHeaderClear' },
+    });
+    await expect(as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalInclVat: null } })).rejects.toMatchObject({
+      cause: { appCode: 'invoice.partialHeaderClear' },
+    });
+    expect(await header(failedId)).toEqual({ excl: '90.00', vat: '16.20', incl: '106.20' });
+    // All three together is a clear (the header is ours again).
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: null, vatAmount: null, totalInclVat: null } });
+    expect(await header(failedId)).toEqual({ excl: null, vat: null, incl: null });
+  });
+
+  it('F3 (round 6): an unstamped invoice whose order is still being counted is HELD for that receipt (no run); once counted it matches clean', async () => {
     await linkOrder();
     // No scan stamp (an emailed copy): its order is found by discovery — and A's receipt is still counting.
     await db.update(invoices).set({ source: 'email', ocrPayload: null, totalExclVat: '85.00', vatAmount: '15.30', totalInclVat: '100.30' }).where(eq(invoices.id, failedId));
     await db.insert(invoiceLines).values({ invoiceId: failedId, productId: A.productId, rawDescription: 'עגבניות', qtyBilled: '10', unit: 'kg', unitPriceBilled: '8.5', lineTotal: '85.00' });
     await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
-    await expect(as('manager').match.runForInvoice({ invoiceId: failedId })).rejects.toMatchObject({
-      code: 'PRECONDITION_FAILED',
-      cause: { appCode: 'invoice.receiptOpen' },
-    });
+    expect(await as('manager').match.runForInvoice({ invoiceId: failedId })).toMatchObject({ status: 'held', held: 'receipt_open', poMatched: true });
     expect(await runs()).toHaveLength(0);
+    const [row] = await db.select({ payload: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, failedId));
+    expect((row!.payload as { raw: Record<string, unknown> }).raw).toEqual({ heldForReceipts: [A.grId] });
     // Control: the count is in (10 received) and submitted → a clean run.
     await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, A.grLineId));
     await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));

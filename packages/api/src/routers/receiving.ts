@@ -41,6 +41,7 @@ import { assertGrOwned, assertSupplierOwned } from '../tenant';
 import { fillEnglishNames } from '../receiving/english';
 import {
   invoicesWaitingOnReceipt,
+  holdForReceipt,
   lockReceipt,
   readScanGrId,
   receiptState,
@@ -55,7 +56,7 @@ import { appError } from '../errors';
 import { recordAudit } from '../audit';
 import type { MemberSession } from '../context';
 import { matchRouter } from './match';
-import { releaseClaimsForRematch } from '../recovery/service';
+import { lockRecovery, releaseClaimsForRematch } from '../recovery/service';
 import { firstVatRate } from '../match/buildMatchInput';
 import { lineTotalAgorot } from '../orders/document/build';
 import { agorotToPlain, numericToAgorot } from '../integrations/accounting/common';
@@ -723,10 +724,13 @@ export const receivingRouter = router({
       const after = (k: 'totalExclVat' | 'vatAmount' | 'totalInclVat') => (set[k] !== undefined ? set[k] : current[k]);
       const exclAfter = after('totalExclVat');
       const allCleared = exclAfter == null && after('vatAmount') == null && after('totalInclVat') == null;
-      // (only a subtotal that WAS there and is removed: a header read / typed with
-      // a total alone, its subtotal never known, stays as it is.)
-      if (totalsTyped && current.totalExclVat != null && exclAfter == null && !allCleared) {
-        throw new TRPCError({ code: 'BAD_REQUEST', message: 'הזינו גם סכום לפני מע״מ' });
+      // Any PARTIAL clear is refused (round 6): a total that WAS there removed
+      // while another stays would read as a VAT / TOTAL mismatch of the whole
+      // invoice. Only all three cleared together. A header read / typed with
+      // some total never known (null before) stays as it is.
+      const clearedOne = (['totalExclVat', 'vatAmount', 'totalInclVat'] as const).some((k) => current[k] != null && after(k) == null);
+      if (totalsTyped && clearedOne && !allCleared) {
+        throw appError('BAD_REQUEST', 'invoice.partialHeaderClear', 'אפשר לנקות את סכומי החשבונית רק יחד — לפני מע״מ, מע״מ וסה״כ');
       }
       if (totalsTyped && exclAfter != null) {
         set.ocrPayload = withMarkers(set.ocrPayload ?? current.ocrPayload, { headerEntered: true, manualHeader: false });
@@ -2266,7 +2270,9 @@ async function rematchAfterEdit(ctx: { db: Database; session: MemberSession }, i
   const { grId } = await invoiceOrderRef(ctx.db, restaurantId, invoiceId, inv?.ocrPayload ?? null);
   // G: decided under the receipt lock (receiptState), so a submit in flight
   // either commits first (we see it closed and match) or waits for this edit
-  // to commit (and then finds the invoice held for it).
+  // to commit (and then finds the invoice held for it). Lock order, everywhere:
+  // the invoice row → recovery → gr-close (runForInvoice takes the same).
+  if (grId) await lockRecovery(ctx.db, restaurantId);
   if (grId && (await receiptState(ctx.db, restaurantId, grId)).open) {
     // A receipt reopened for a follow-up delivery was counted before: this
     // invoice's run against it stands on that count. Holding would leave that
@@ -2277,26 +2283,18 @@ async function rematchAfterEdit(ctx: { db: Database; session: MemberSession }, i
       .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.grId, grId)))
       .limit(1);
     if (counted) throw appError('PRECONDITION_FAILED', 'invoice.receiptOpen', RECEIPT_OPEN_MSG);
-    // Held for the count. A person entered these lines, so the receipt's
-    // submit must match them (rematchHoldReason holds a never-matched
-    // 'parsed' invoice for review): it is 'matched' (reviewed), waiting —
-    // except a possible duplicate copy (J): that stays for its review.
-    await ctx.db.execute(sql`
-      UPDATE invoices
-         SET ocr_payload = jsonb_set(ocr_payload, ${`{raw,${HELD_FOR_RECEIPTS_KEY}}`}::text[], ${JSON.stringify([grId])}::jsonb, true),
-             status = CASE WHEN status = 'parsed' AND NOT (ocr_payload -> 'raw' ? 'duplicateOf') THEN 'matched'::invoice_status ELSE status END,
-             updated_at = now()
-       WHERE id = ${invoiceId} AND restaurant_id = ${restaurantId}
-         AND jsonb_typeof(ocr_payload -> 'raw') = 'object'`);
-    // A possible duplicate copy waits for its review, not only for the count (J).
-    const held = (inv?.ocrPayload?.raw ?? null) as Record<string, unknown> | null;
-    if (held && 'duplicateOf' in held) return { rematched: false, rematchSkipped: 'awaiting_review' };
-    return { rematched: false, rematchSkipped: 'receipt_open' };
+    // Held for the count (holdForReceipt: the receipt's submit claims it; a
+    // never-matched 'parsed' invoice becomes 'matched' — a person entered these
+    // lines — except a possible duplicate copy (J), which waits for its review).
+    return { rematched: false, rematchSkipped: await holdForReceipt(ctx.db, restaurantId, invoiceId, grId) };
   }
   try {
-    await ctx.db.transaction(async (sp) => {
-      await matchRouter.createCaller({ db: sp as unknown as Database, session: ctx.session }).runForInvoice({ invoiceId });
-    });
+    // runForInvoice itself HOLDS an invoice whose match lands on a receipt
+    // still being counted (an unstamped one found by discovery — round 6).
+    const res = await ctx.db.transaction(async (sp) =>
+      matchRouter.createCaller({ db: sp as unknown as Database, session: ctx.session }).runForInvoice({ invoiceId }),
+    );
+    if (res.status === 'held') return { rematched: false, rematchSkipped: res.held ?? 'receipt_open' };
     return { rematched: true };
   } catch (err) {
     console.warn(`[receiving] re-match after a manual line edit was refused for invoice=${invoiceId}`, err);

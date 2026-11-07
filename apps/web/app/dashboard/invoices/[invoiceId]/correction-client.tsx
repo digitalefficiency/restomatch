@@ -152,7 +152,7 @@ export function InvoiceCorrection({
         : res.rematchSkipped === 'no_lines'
           ? ''
         : res.rematchSkipped === 'receipt_open'
-          ? t('correction.rematchAfterCount')
+          ? t('correction.heldForCount')
         : res.rematchSkipped === 'awaiting_review'
           ? t('correction.rematchAwaitingReview')
           : t('correction.rematchLater');
@@ -236,7 +236,9 @@ export function InvoiceCorrection({
     });
   }
 
-  const st: { label: string; tone: BadgeTone } | null = rematch
+  // Held for an open receipt count (T4, neutral): no figure yet, never an alarm.
+  const held = rematch?.status === 'held' ? rematch.held ?? 'receipt_open' : null;
+  const st: { label: string; tone: BadgeTone } | null = rematch && !held
     ? STATUS_TONE[rematch.status]
       ? {
           label: t(`status.${rematch.status as 'clean' | 'minor' | 'major' | 'blocked'}`),
@@ -342,6 +344,16 @@ export function InvoiceCorrection({
             )}
           </div>
         </div>
+
+        {held && (
+          <p
+            data-testid="rematch-held"
+            role="status"
+            className="mb-4 rounded-lg border border-line bg-surface-2/50 px-4 py-3 text-sm text-muted"
+          >
+            {held === 'awaiting_review' ? t('correction.rematchAwaitingReview') : t('correction.heldForCount')}
+          </p>
+        )}
 
         {st && (
           <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface-2/50 px-4 py-3">

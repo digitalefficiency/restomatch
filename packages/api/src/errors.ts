@@ -41,6 +41,7 @@ export const APP_ERROR_CODES = [
   'invoice.linesLocked',
   'invoice.receiptOpen',
   'invoice.beingRead',
+  'invoice.partialHeaderClear',
 ] as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];

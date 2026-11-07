@@ -82,7 +82,7 @@ export const AUTO_WRITE_OFF_NOTE = 'auto: discrepancy no longer accepted';
  * Serialises claim bookkeeping per restaurant (syncClaims, re-match release):
  * held to the end of the caller's transaction.
  */
-async function lockRecovery(db: Database, restaurantId: string): Promise<void> {
+export async function lockRecovery(db: Database, restaurantId: string): Promise<void> {
   await db.execute(sql`select pg_advisory_xact_lock(hashtext(${'recovery:' + restaurantId}))`);
 }
 

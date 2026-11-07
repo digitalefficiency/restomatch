@@ -1,8 +1,8 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { releaseClaimsForRematch } from '../recovery/service';
+import { lockRecovery, releaseClaimsForRematch } from '../recovery/service';
 import { and, desc, eq, goodsReceipts, invoiceLines, invoices, matchRuns, restaurants } from '@restomatch/db';
-import { receiptStillOpen, scanOwnerReceipt } from '../receiving/matchTriggers';
+import { holdForReceipt, receiptStillOpen, scanOwnerReceipt } from '../receiving/matchTriggers';
 import { appError } from '../errors';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
 import { managerProcedure, router } from '../trpc';
@@ -14,10 +14,13 @@ import { buildRules, resolveApprovalThresholds } from '../approvals/engine';
 
 export interface RunForInvoiceResult {
   matchRunId: string | null;
-  status: MatchStatus;
+  /** 'held': not matched now — waiting for its receipt's count (see `held`). */
+  status: MatchStatus | 'held';
   totalDiscrepancyAmount: number;
   discrepancyCount: number;
   poMatched: boolean;
+  /** Why it was held: its receipt is still being counted, or (a possible duplicate) it waits for review. */
+  held?: 'receipt_open' | 'awaiting_review';
 }
 
 /**
@@ -63,21 +66,18 @@ export const matchRouter = router({
         return { matchRunId: null, status: 'clean', totalDiscrepancyAmount: 0, discrepancyCount: 0, poMatched: false };
       }
 
-      // S2 receipt hold — not while the invoice's receipt is still being counted:
-      // every line would read "received 0" (the leak hero jumping by the whole
-      // invoice). The receipt's submit matches it.
-      // The scan's receipt: the stamp, else a photo held for ONE receipt.
+      // S2 receipt hold — the scan's receipt (the stamp, else a photo held for
+      // ONE receipt) is the order the receiver counted: the match is pinned to
+      // it; whether it is still being counted is decided below, on the receipt
+      // the match actually lands on.
       const scanGrId = scanOwnerReceipt(kind?.ocrPayload, kind?.source);
       let scanPoId: string | null = null;
       if (scanGrId) {
         const [gr] = await ctx.db
-          .select({ status: goodsReceipts.status, poId: goodsReceipts.poId })
+          .select({ poId: goodsReceipts.poId })
           .from(goodsReceipts)
           .where(and(eq(goodsReceipts.id, scanGrId), eq(goodsReceipts.restaurantId, restaurantId)))
           .limit(1);
-        if (gr?.status === 'pending') {
-          throw appError('PRECONDITION_FAILED', 'invoice.receiptOpen', 'הספירה עדיין פתוחה — ההתאמה תרוץ כשהקבלה תיסגר');
-        }
         scanPoId = gr?.poId ?? null;
       }
       // end S2 receipt hold
@@ -97,13 +97,31 @@ export const matchRouter = router({
         pinnedPoId: scanPoId ?? priorRun?.poId ?? null,
         strictPin: scanPoId != null,
       });
-      // F3: whichever receipt the match landed on (an unstamped emailed invoice
-      // finds its order by discovery) must not still be counting — every line
-      // would read "received 0" (a whole-invoice leak). Under the receipt's
-      // close lock (lock order: the invoice row above, then gr-close), as the
-      // match job does (matchInvoice.ts).
-      if (built?.grId && (await receiptStillOpen(ctx.db, restaurantId, built.grId))) {
-        throw appError('PRECONDITION_FAILED', 'invoice.receiptOpen', 'הספירה עדיין פתוחה — ההתאמה תרוץ כשהקבלה תיסגר');
+      // F3 / round 6: the receipt the match lands on (the scan's, or one found
+      // by discovery for an unstamped emailed invoice) must not still be
+      // counting — every line would read "received 0" (a whole-invoice leak).
+      // Then the invoice is HELD for it (not refused): the receipt's submit
+      // claims it and matches it once the count is in.
+      // Lock order, everywhere: the invoice row (above) → recovery → gr-close
+      // (a sibling invoice's edit takes recovery before gr-close too).
+      const landedGrId = built?.grId ?? scanGrId;
+      if (landedGrId) {
+        await lockRecovery(ctx.db, restaurantId);
+        if (await receiptStillOpen(ctx.db, restaurantId, landedGrId)) {
+          // A run already stands on this receipt's earlier count (a receipt
+          // reopened for a follow-up delivery): a hold would leave that stale
+          // run's ₪ showing — refuse instead (as a hand edit does).
+          const [counted] = await ctx.db
+            .select({ id: matchRuns.id })
+            .from(matchRuns)
+            .where(and(eq(matchRuns.invoiceId, input.invoiceId), eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.grId, landedGrId)))
+            .limit(1);
+          if (counted) {
+            throw appError('PRECONDITION_FAILED', 'invoice.receiptOpen', 'הקבלה פתוחה לספירה — אפשר להריץ את ההתאמה אחרי שהספירה תיסגר');
+          }
+          const held = await holdForReceipt(ctx.db, restaurantId, input.invoiceId, landedGrId);
+          return { matchRunId: null, status: 'held', totalDiscrepancyAmount: 0, discrepancyCount: 0, poMatched: built?.poId != null, held };
+        }
       }
       if (!built) {
         return {
