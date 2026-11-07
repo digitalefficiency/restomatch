@@ -1,4 +1,7 @@
 import Link from 'next/link';
+import { permanentRedirect } from 'next/navigation';
+import { legacyPeriodRedirect, monthParams } from '../period-url';
+import { ReportExportButtons } from './ExportButtons';
 import { WithOriginal } from '@/lib/i18n/original';
 import { auth } from '@/auth';
 import { TRPCError } from '@trpc/server';
@@ -58,12 +61,21 @@ export default async function LeakReportPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
+  // W2-09c: the old `?month=YYYY-MM` answers a 308 to the one period grammar (`p`, `from`, `to`).
+  const legacy = legacyPeriodRedirect('/dashboard/leaks/report', sp, new Date());
+  if (legacy) permanentRedirect(legacy);
   const thisMonth = currentMonth();
-  const monthParam = Array.isArray(sp.month) ? sp.month[0] : sp.month;
-  const month = monthParam && MONTH_RE.test(monthParam) && monthParam <= thisMonth ? monthParam : thisMonth;
-  const openMonth = month === thisMonth;
   // `?cmp=prev|yoy` (default prev) adds ▲/▼ against the previous month or the same month last year.
   const view = parseView(sp);
+  // The report is one month: this month, last month, or a custom range that starts on a 1st.
+  const viewMonth =
+    view.period === 'last_month'
+      ? shiftMonth(thisMonth, -1)
+      : view.period === 'custom' && view.from && view.from.endsWith('-01')
+        ? view.from.slice(0, 7)
+        : thisMonth;
+  const month = MONTH_RE.test(viewMonth) && viewMonth <= thisMonth ? viewMonth : thisMonth;
+  const openMonth = month === thisMonth;
   const compareMonth = view.compare === 'off' ? null : shiftMonth(month, view.compare === 'yoy' ? -12 : -1);
 
   const caller = await createServerCaller();
@@ -71,8 +83,9 @@ export default async function LeakReportPage({
   const [t, ta, tv, locale] = await Promise.all([getT(leaksNs), getT(approvalsNs), getT(viewsNs), getLocale()]);
   const role = (session?.user as { role?: string } | undefined)?.role;
 
-  // owner|manager only — a calm T4 card for other roles (never an alarm).
-  if (role !== 'owner' && role !== 'manager') {
+  // Finance roles (owner, manager, bookkeeper — the bookkeeper reads everything) — a calm
+  // T4 card for other roles (never an alarm).
+  if (role !== 'owner' && role !== 'manager' && role !== 'bookkeeper') {
     return <RoleCard title={t('report.title')} body={t('report.roleOnly')} />;
   }
   let report: Awaited<ReturnType<typeof caller.owner.leakReport>>;
@@ -99,7 +112,8 @@ export default async function LeakReportPage({
   const [memberships, profile, lines, flags] = await Promise.all([
     caller.onboarding.myMemberships(),
     caller.settings.profile(),
-    monthOffset >= -24 ? caller.owner.leakBreakdown({ monthOffset, limit: 200 }).catch(() => []) : Promise.resolve([]),
+    // No `.catch(() => [])`: a failed breakdown is the route's error state, never "nothing" (W2-09c).
+    monthOffset >= -24 ? caller.owner.leakBreakdown({ monthOffset, limit: 200 }) : Promise.resolve([]),
     caller.recovery.flags(),
   ]);
   // Approved lines no ₪-back claim holds (only meaningful with the tracker on).
@@ -167,16 +181,17 @@ export default async function LeakReportPage({
           {t('hub.title')}
         </Link>
         <div className="flex flex-wrap items-center gap-2">
-          <Link href={`/dashboard/leaks/report?month=${shiftMonth(month, -1)}${cmpQ}`} className={navLink}>
+          <Link href={reportMonthHref(shiftMonth(month, -1), cmpQ)} className={navLink}>
             <ArrowRight className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
             {t('report.prevMonth')}
           </Link>
           {month < thisMonth ? (
-            <Link href={`/dashboard/leaks/report?month=${shiftMonth(month, 1)}${cmpQ}`} className={navLink}>
+            <Link href={reportMonthHref(shiftMonth(month, 1), cmpQ)} className={navLink}>
               {t('report.nextMonth')}
               <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
             </Link>
           ) : null}
+          <ReportExportButtons month={month} />
           <PrintButton label={t('report.print')} />
         </div>
       </div>
@@ -439,6 +454,16 @@ export default async function LeakReportPage({
       </article>
     </div>
   );
+}
+
+/** The report URL of a month in the one period grammar (+ the compare query, which starts with '&'). */
+function reportMonthHref(month: string, cmpQ: string): string {
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  const qs = new URLSearchParams(monthParams(y, m, new Date()));
+  const extra = new URLSearchParams(cmpQ.replace(/^[&?]/, ''));
+  for (const [k, v] of extra) qs.set(k, v);
+  const q = qs.toString();
+  return `/dashboard/leaks/report${q ? `?${q}` : ''}`;
 }
 
 function RoleCard({ title, body }: { title: string; body: string }) {

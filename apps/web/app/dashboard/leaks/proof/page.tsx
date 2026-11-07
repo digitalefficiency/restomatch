@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, permanentRedirect } from 'next/navigation';
 import { ArrowLeft, FileText, Hourglass, ListChecks, Scale, Sigma } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
@@ -11,6 +11,9 @@ import { Card, SectionHeader } from '@/lib/components';
 import { buildProof } from '@/lib/leakProof';
 import { discrepancyLabel, displayName } from '../../approvals/vocab';
 import { PrintButton } from './print-button';
+import { WhyLine, whySegments } from '@/lib/components/flags';
+import { legacyPeriodRedirect } from '../period-url';
+import { leakWhyLabels } from '../why-labels';
 import { approvedNotClaimed, sumAgora } from '../claims/letters';
 import { ALL_CLAIMS } from '../../recovery/logic';
 
@@ -20,10 +23,18 @@ import { ALL_CLAIMS } from '../../recovery/logic';
  * owner.leakBreakdown, so every ₪ here equals the hero to the agora.
  * Finance roles (the breakdown is finance detail, like /dashboard/leaks).
  */
-export default async function LeakProofPage({ searchParams }: { searchParams: Promise<{ m?: string }> }) {
+export default async function LeakProofPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const sp = await searchParams;
-  const parsed = Number.parseInt(sp.m ?? '0', 10);
-  const monthOffset = Number.isFinite(parsed) ? Math.min(0, Math.max(-24, parsed)) : 0;
+  // W2-09c: the old `?m=-1` answers a 308 to the one period grammar (`?p=last_month`).
+  const legacy = legacyPeriodRedirect('/dashboard/leaks/proof', sp, new Date());
+  if (legacy) permanentRedirect(legacy);
+  const p = Array.isArray(sp.p) ? sp.p[0] : sp.p;
+  // The proof sheet is a month: this month, or last month (`p=last_month`).
+  const monthOffset = p === 'last_month' ? -1 : 0;
   const caller = await createServerCaller();
   const flags = await caller.recovery.flags();
   if (!flags.leakProof) notFound();
@@ -54,6 +65,9 @@ export default async function LeakProofPage({ searchParams }: { searchParams: Pr
   const exact = (ils: number) => formatIls(ils, { locale, maximumFractionDigits: 2 });
   const num = (n: number) => formatNumber(n, locale);
   const month = formatDate(hero.monthStart, locale, { month: 'long', year: 'numeric' });
+  // W2-09c: each finding's verified basis, from the same breakdown rows (no second query).
+  const why = leakWhyLabels(locale);
+  const evidenceById = new Map(breakdown.flatMap((inv) => inv.lines.map((l) => [l.discrepancyId, l.evidence] as const)));
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 print:max-w-none print:space-y-4" data-testid="leak-proof">
@@ -62,7 +76,7 @@ export default async function LeakProofPage({ searchParams }: { searchParams: Pr
 
       <div className="flex flex-wrap items-center justify-between gap-3" data-print-hide>
         <Link
-          href="/dashboard"
+          href="/dashboard/leaks"
           className="inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
         >
           <ArrowLeft className="h-4 w-4 rtl:-scale-x-100" aria-hidden="true" />
@@ -166,6 +180,9 @@ export default async function LeakProofPage({ searchParams }: { searchParams: Pr
                             <span className="font-medium text-ink">{discrepancyLabel(ta, f.type)}</span>
                             {f.level === 'line' && item ? <span className="text-muted"> · {item}</span> : null}
                             {f.level === 'invoice' ? <span className="text-muted"> · {t('invoiceLevel')}</span> : null}
+                            {evidenceById.get(f.discrepancyId) ? (
+                              <WhyLine groups={whySegments(evidenceById.get(f.discrepancyId)!.facts, why)} className="text-xs" />
+                            ) : null}
                           </span>
                           <span className="flex shrink-0 items-center gap-3">
                             <span className="tabular-nums text-ink">{exact(f.amountIls)}</span>

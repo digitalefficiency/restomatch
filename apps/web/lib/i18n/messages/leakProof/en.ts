@@ -6,7 +6,7 @@ export const en: Shape<typeof he> = {
   title: 'How did we get to {amount}?',
   subtitle: 'Every shekel in the number, and where it came from · {month}',
   print: 'Print',
-  back: 'Back to the control room',
+  back: 'To the leak',
   generated: 'Generated {date}',
   numberTitle: 'The number',
   number: '{amount} = findings on {withLeak} of {matched} checked invoices ({total} invoices this month)',

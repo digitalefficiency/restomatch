@@ -8,7 +8,7 @@ export const he = {
   title: 'איך הגענו ל־{amount}?',
   subtitle: 'כל שקל במספר, ומאיפה הוא הגיע · {month}',
   print: 'הדפסה',
-  back: 'חזרה לחדר הבקרה',
+  back: 'לדליפה',
   generated: 'הופק ב־{date}',
   numberTitle: 'המספר',
   number: '{amount} = ממצאים ב־{withLeak} מתוך {matched} חשבוניות שנבדקו ({total} חשבוניות החודש)',

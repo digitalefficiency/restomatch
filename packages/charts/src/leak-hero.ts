@@ -244,6 +244,8 @@ export interface LeakBreakdownInvoice {
   status: string;
   supplierName: string | null;
   supplierNameEn: string | null;
+  /** W2-09c (optional, additive): the supplier, for the claims link of a paid invoice. */
+  supplierId?: string | null;
   totalInclVat: number;
   /** This invoice's contribution to the hero leak (capped at its total). */
   leakIls: number;
@@ -276,7 +278,7 @@ export async function computeLeakBreakdown(
       per.id, per.status, per.total, LEAST(per.raw_leak, per.total) AS leak,
       per.pending_link AND NOT per.awaiting_count AS pending_link,
       i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS invoice_date,
-      s.name AS supplier_name, s.name_en AS supplier_name_en
+      s.name AS supplier_name, s.name_en AS supplier_name_en, i.supplier_id
     FROM per
     JOIN invoices i ON i.id = per.id
     LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${restaurantId}
@@ -302,6 +304,7 @@ export async function computeLeakBreakdown(
     status: String(r.status),
     supplierName: (r.supplier_name as string | null) ?? null,
     supplierNameEn: (r.supplier_name_en as string | null) ?? null,
+    supplierId: r.supplier_id == null ? null : String(r.supplier_id),
     totalInclVat: ils(r.total),
     leakIls: ils(r.leak),
     pendingLink: Boolean(r.pending_link),
@@ -432,7 +435,7 @@ export async function computeInvoicesLeak(
       SELECT
         per.id, per.status, per.total, per.leak, per.pending_link,
         i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS invoice_date,
-        s.name AS supplier_name, s.name_en AS supplier_name_en
+        s.name AS supplier_name, s.name_en AS supplier_name_en, i.supplier_id
       FROM per
       JOIN invoices i ON i.id = per.id
       LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${restaurantId}
@@ -458,6 +461,7 @@ function invoiceOf(r: Row, lines: Map<string, LeakBreakdownLine[]>): LeakBreakdo
     status: String(r.status),
     supplierName: (r.supplier_name as string | null) ?? null,
     supplierNameEn: (r.supplier_name_en as string | null) ?? null,
+    supplierId: r.supplier_id == null ? null : String(r.supplier_id),
     totalInclVat: ils(r.total),
     leakIls: ils(r.leak),
     pendingLink: Boolean(r.pending_link),
