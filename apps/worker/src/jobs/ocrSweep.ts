@@ -100,7 +100,11 @@ export async function runOcrSweep(
                AND a.action = 'receiving.invoice_retaken'
           ) r ON true
          WHERE i.status = 'ocr_pending'
-           AND i.restaurant_id::text = ANY(${sql.array(only)}::text[])
+           -- ONE text parameter, split in SQL: postgres.js serialises sql.array()
+           -- as a bare string on a connection that has not loaded its types yet
+           -- (the first query of a fresh serverless / pooler connection) →
+           -- "malformed array literal". The ids are validated UUIDs (no commas).
+           AND i.restaurant_id::text = ANY(string_to_array(${only.join(',')}, ','))
            AND i.raw_image_url ~* '^https?://'
       ) s
      WHERE s.pending_since < ${staleBefore}

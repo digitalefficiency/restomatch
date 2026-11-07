@@ -191,3 +191,32 @@ describe('a RETAKE (#216 round 3, C): the same invoice back to ocr_pending with 
     expect(res.requeued).not.toContain(old);
   });
 });
+
+describe('production: the tenant filter on a COLD connection (prepare: false, as workerSql)', () => {
+  it('a fresh connection whose first query is the sweep: one and two listed tenants, never "malformed array literal"', async () => {
+    // A tenant of our own with one stale scan; another tenant's stale scan must stay untouched.
+    const [r] = await db.insert(restaurants).values({ name: 'OCR sweep cold' }).returning({ id: restaurants.id });
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId: r!.id, source: 'photo', status: 'ocr_pending', rawImageUrl: 'https://x.example/scan-cold.jpg', createdAt: minutesAgo(15) })
+      .returning({ id: invoices.id });
+    try {
+      for (const list of [[r!.id], [r!.id, '33333333-3333-4333-8333-333333333333']]) {
+        await sql`DELETE FROM job_queue WHERE payload->>'invoiceId' = ${inv!.id}`;
+        // The worker's production client (queueSql: prepare false), brand new: a pool
+        // key of its own, so the sweep is the first query on the connection.
+        const cold = queueSql(testDbUrl(), 1, 900 + list.length);
+        try {
+          const res = await runOcrSweep(cold, NOW, list);
+          expect(res.requeued).toEqual([inv!.id]); // only the listed tenant's scan
+        } finally {
+          await cold.end();
+        }
+      }
+    } finally {
+      await sql`DELETE FROM job_queue WHERE restaurant_id = ${r!.id}`;
+      await db.delete(invoices).where(eq(invoices.restaurantId, r!.id));
+      await db.delete(restaurants).where(eq(restaurants.id, r!.id));
+    }
+  });
+});
