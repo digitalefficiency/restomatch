@@ -182,7 +182,12 @@ export interface GlobalResults {
   suppliers?: ReadonlyArray<{ id: string; name: string; nameEn?: string | null }>;
   products?: ReadonlyArray<{ id: string; canonicalName: string; nameEn?: string | null }>;
   invoices?: ReadonlyArray<{ id: string; invoiceNumber: string | null }>;
-  orders?: ReadonlyArray<{ id: string; supplierName: string; customerRef: string | null }>;
+  orders?: ReadonlyArray<{
+    id: string;
+    supplierName: string;
+    customerRef: string | null;
+    expectedDeliveryAt?: Date | string | null;
+  }>;
   recipes?: ReadonlyArray<{ id: string; name: string; nameEn?: string | null }>;
 }
 
@@ -230,6 +235,8 @@ export function recordItems(
         kind: 'order',
         id: o.id,
         label: opts.orderLabel(o.supplierName, o.customerRef),
+        // Same-supplier orders differ by date: show the expected delivery (d.m).
+        secondary: o.expectedDeliveryAt ? shortDate(o.expectedDeliveryAt) : undefined,
         href: `/dashboard/orders/${o.id}`,
       });
   if (opts.canSee('/dashboard/recipes'))
@@ -241,4 +248,10 @@ export function recordItems(
         href: `/dashboard/recipes/${r.id}`,
       });
   return out;
+}
+
+/** d.m (he-IL numerals, no year): enough to tell same-supplier orders apart. */
+function shortDate(d: Date | string): string | undefined {
+  const t = new Date(d);
+  return Number.isNaN(t.getTime()) ? undefined : `${t.getDate()}.${t.getMonth() + 1}`;
 }

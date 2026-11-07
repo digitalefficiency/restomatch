@@ -83,7 +83,14 @@ describe('recordItems', () => {
   const data = {
     suppliers: [{ id: 's1', name: 'תנובה', nameEn: 'Tnuva' }],
     invoices: [{ id: 'i1', invoiceNumber: null }],
-    orders: [{ id: 'o1', supplierName: 'תנובה', customerRef: '77' }],
+    orders: [
+      {
+        id: 'o1',
+        supplierName: 'תנובה',
+        customerRef: '77',
+        expectedDeliveryAt: '2026-10-25T06:00:00Z',
+      },
+    ],
     recipes: [{ id: 'r1', name: 'שקשוקה' }],
   };
   const opts = { locale: 'en' as const, noInvoiceNumber: 'n/a', orderLabel: paletteCopy.en.order };
@@ -98,7 +105,10 @@ describe('recordItems', () => {
     const all = recordItems(data, { ...opts, canSee: () => true });
     expect(all[0]).toMatchObject({ label: 'Tnuva', secondary: 'תנובה' });
     expect(all.find((i) => i.kind === 'invoice')?.label).toBe('n/a');
-    expect(all.find((i) => i.kind === 'order')?.label).toBe('Order 77 · תנובה');
+    expect(all.find((i) => i.kind === 'order')).toMatchObject({
+      label: 'Order 77 · תנובה',
+      secondary: '25.10',
+    });
   });
 });
 
