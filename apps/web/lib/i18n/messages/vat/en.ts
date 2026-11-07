@@ -4,15 +4,14 @@ import type { he } from './he';
 export const en: Shape<typeof he> = {
   card: {
     title: 'VAT at risk — invoices without an allocation number',
-    subtitle:
-      'A tax invoice above {threshold} before VAT without an allocation number cannot have its VAT deducted. You have 6 months from the invoice date to get a corrected invoice.',
+    subtitle: 'A tax invoice above {threshold} without an allocation number — its VAT can’t be deducted. You have 6 months to fix it.',
     count: '{count} invoices',
     countOne: '1 invoice',
     amountLabel: 'VAT at risk',
-    separate: 'Separate from the leak — this is VAT, not a supplier discrepancy.',
+    separate: 'Not part of the leak',
     cta: 'Ask the supplier for an allocation number',
     clear: 'Every invoice above {threshold} has an allocation number ✓',
-    clearHint: 'Checked the tax invoices you can still deduct (the last 6 months).',
+    clearHint: 'Checked the last 6 months.',
     more: 'and {count} more invoices',
     noNumber: 'No allocation number',
     badNumber: 'Invalid allocation number',
@@ -23,7 +22,7 @@ export const en: Shape<typeof he> = {
   },
   request: {
     title: 'Request to the supplier (Hebrew)',
-    hint: 'Copy it and send it to the supplier on WhatsApp or by e-mail. The system sends nothing.',
+    hint: 'Copy it and send it to the supplier. The system sends nothing.',
     copy: 'Copy the text',
     copied: 'Copied ✓',
     close: 'Close',
@@ -32,7 +31,7 @@ export const en: Shape<typeof he> = {
     badge: 'VAT at risk: {amount}',
     missing: 'No allocation number — the VAT cannot be deducted.',
     invalid: 'The allocation number on the invoice is invalid — the VAT cannot be deducted.',
-    deadline: 'You can still deduct it until about {date} if a corrected invoice arrives.',
-    closed: 'The 6-month deduction window (from the invoice date) closed around {date}.',
+    deadline: 'Deductible until about {date}, with a corrected invoice.',
+    closed: 'The deduction window closed around {date}.',
   },
 };
