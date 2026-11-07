@@ -1,5 +1,7 @@
 # 20 · The full WhatsApp action catalogue (owner asked: "Give me full actions!")
 
+> **Update (after this catalogue was written):** `docs/ux/whatsapp-agent/WA-00.md` adds a December pull-only owner pilot (WD10). The owner's read-only text actions labelled "pilot" here can run from ≈ 22.12 on in-window replies, with no templates and no schema. Buttons, manager and bookkeeper actions still wait for E3.
+
 **Status:** research deliverable, docs only. Builds on `10-design-and-plan.md` (authoritative: §B role jobs, §C safety, §C.8 never list, §D.6 templates, §F plan) and `int-01-code-map-whatsapp.md` (code map). Builder briefs: `docs/ux/whatsapp-agent/README.md`, `WA-01..WA-12.md`. Written 2026-11-07.
 
 **Procedure names were checked by grep** on `packages/api/src/routers/*.ts` (branch `claude/whatsapp-agent-research`). Where no procedure exists, the entry says **`new: <proposedName> (WA-xx / owner package)`**. Nothing here is a promise of a date; dates follow the programme plan.
