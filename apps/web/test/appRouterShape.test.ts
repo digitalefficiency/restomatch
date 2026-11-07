@@ -57,6 +57,7 @@ const ROUTER_KEYS = [
   'suppliers',
   'tasks',
   'team',
+  'vat',
 ] as const satisfies readonly RouterKey[];
 
 // Fails to compile if the inferred type has a router the list doesn't name.
