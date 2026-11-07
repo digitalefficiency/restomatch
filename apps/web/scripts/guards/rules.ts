@@ -103,10 +103,15 @@ function handlerText(expr: ts.Expression, file: SourceFile, locals: Map<string, 
   return text;
 }
 
+/** Escapes every RegExp metacharacter (identifiers may contain `$`). */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function reachesCommit(text: string, actions: Set<string>): string | null {
   const m = text.match(COMMIT_CALL);
   if (m) return m[0].replace(/\s*\($/, '').replace(/^[^\w.]/, '').trim();
-  for (const a of actions) if (new RegExp(`\\b${a.replace(/\$/g, '\\$')}\\s*\\(`).test(text)) return `${a}() (server action)`;
+  for (const a of actions) if (new RegExp(`(^|[^\\w$])${escapeRegExp(a)}\\s*\\(`).test(text)) return `${a}() (server action)`;
   return null;
 }
 
@@ -259,7 +264,7 @@ function isExportedDefinition(n: ts.ArrayLiteralExpression): boolean {
 export const statusLiterals: Rule = {
   id: 'status-literals',
   describe: 'status literal arrays outside the lifecycle modules',
-  applies: (p) => (WEB_SRC.test(p) || API_SRC.test(p)) && !LIFECYCLE_MODULE.test(p) && !/\/db\/|schema\.ts$/.test(p),
+  applies: (p) => (WEB_SRC.test(p) || API_SRC.test(p)) && !LIFECYCLE_MODULE.test(p) && !p.includes('/db/') && !p.endsWith('schema.ts'),
   check(file, report) {
     walk(file.ast, (n) => {
       if (!ts.isArrayLiteralExpression(n) || n.elements.length < 2) return;

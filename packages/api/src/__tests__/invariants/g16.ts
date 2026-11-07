@@ -4,7 +4,7 @@
  * Each detector also has a hard self-test with a planted violation, so warn mode
  * never passes because a detector went blind.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { drizzle } from 'drizzle-orm/postgres-js';
@@ -77,11 +77,12 @@ export interface SourceText {
 export function readSources(roots: readonly string[]): SourceText[] {
   const out: SourceText[] = [];
   const walk = (dir: string) => {
-    for (const name of readdirSync(dir)) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const name = entry.name;
       const full = join(dir, name);
-      if (statSync(full).isDirectory()) {
+      if (entry.isDirectory()) {
         if (!SKIP.has(name)) walk(full);
-      } else if (SRC.test(name) && !TEST.test(name) && !name.endsWith('.d.ts')) {
+      } else if (entry.isFile() && SRC.test(name) && !TEST.test(name) && !name.endsWith('.d.ts')) {
         out.push({ path: relative(REPO_ROOT, full).split(sep).join('/'), text: readFileSync(full, 'utf8') });
       }
     }

@@ -7,7 +7,7 @@
  * the run exits 0). W4-01 flips them to error (`--strict` / G16_MODE=error); H-09ʰ
  * makes that CI-blocking. Nothing here edits a file.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import ts from 'typescript';
 
@@ -122,12 +122,11 @@ const TEST_FILE = /\.(test|spec)\.(tsx?|jsx?)$/;
 export const DEFAULT_ROOTS = ['apps/web/app', 'apps/web/lib', 'packages/api/src'] as const;
 
 function walk(dir: string, out: string[]) {
-  for (const name of readdirSync(dir)) {
-    const full = join(dir, name);
-    const st = statSync(full);
-    if (st.isDirectory()) {
-      if (!SKIP_DIRS.has(name)) walk(full, out);
-    } else if (SOURCE.test(name) && !TEST_FILE.test(name) && !name.endsWith('.d.ts')) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (!SKIP_DIRS.has(entry.name)) walk(full, out);
+    } else if (entry.isFile() && SOURCE.test(entry.name) && !TEST_FILE.test(entry.name) && !entry.name.endsWith('.d.ts')) {
       out.push(full);
     }
   }
@@ -137,8 +136,13 @@ function importReader(absFile: string) {
   return (specifier: string): string | null => {
     if (!specifier.startsWith('.')) return null;
     const base = resolve(dirname(absFile), specifier);
-    for (const c of [base, `${base}.ts`, `${base}.tsx`, join(base, 'index.ts'), join(base, 'index.tsx')]) {
-      if (existsSync(c) && statSync(c).isFile()) return readFileSync(c, 'utf8');
+    for (const c of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts'), join(base, 'index.tsx'), base]) {
+      // Read directly (no exists/stat check first): a missing file or a directory just throws.
+      try {
+        return readFileSync(c, 'utf8');
+      } catch {
+        /* try the next candidate */
+      }
     }
     return null;
   };
