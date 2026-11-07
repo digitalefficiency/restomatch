@@ -12,7 +12,7 @@ export const he = {
     viewScan: 'צפה בסריקה',
     rerun: 'הרץ התאמה מחדש',
     leak: 'דליפה:',
-    discrepancies: '{count} חריגות',
+    discrepancies: '{count} פערים',
     noMatchingPo: 'ללא הזמנה תואמת',
     number: 'מספר חשבונית',
     date: 'תאריך',
@@ -41,9 +41,9 @@ export const he = {
     showHebrew: 'הצג מקור בעברית',
   },
   status: {
-    clean: 'נקי — אין חריגות',
-    minor: 'חריגות קלות',
-    major: 'חריגות חמורות',
+    clean: 'נקי — אין פערים',
+    minor: 'פערים קלים',
+    major: 'פערים חמורים',
     blocked: 'חוסם',
   },
 };

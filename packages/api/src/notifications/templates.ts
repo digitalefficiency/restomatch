@@ -428,7 +428,7 @@ export function endOfDayReportEmail(args: {
 }): RenderedEmail {
   const subject = `סיכום יומי · ${args.openCreditsCount} זיכויים פתוחים (${args.openCreditsIls})`;
   const rows = [
-    statRow('זיכויים פתוחים לגבייה', `${ilsSpan(args.openCreditsIls, 'danger')} · ${args.openCreditsCount}`),
+    statRow('זיכויים פתוחים', `${ilsSpan(args.openCreditsIls, 'danger')} · ${args.openCreditsCount}`),
     statRow('פערים שזוהו היום', `${ilsSpan(args.todayCaughtIls, 'gold')} · ${args.todayCaughtCount}`),
     args.pendingApprovals != null
       ? statRow('ממתינים להחלטה', `<strong>${args.pendingApprovals}</strong>`)
@@ -447,7 +447,7 @@ export function endOfDayReportEmail(args: {
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0">${rows}</table>
       ${
         args.openCreditsCount > 0
-          ? `<p style="margin:12px 0 0;color:${COLORS.muted};font-size:13px">זיכויים פתוחים הם כסף שעדיין אפשר לגבות חזרה מהספקים. כדאי לסגור אותם לפני התשלום הבא.</p>`
+          ? `<p style="margin:12px 0 0;color:${COLORS.muted};font-size:13px">זיכויים פתוחים הם כסף שעוד אמור לחזור מהספקים. כדאי לסגור אותם לפני התשלום הבא.</p>`
           : `<p style="margin:12px 0 0;color:${COLORS.gold};font-weight:700">כל הכבוד — אין זיכויים פתוחים. 🎉</p>`
       }`,
     cta: args.approvalsUrl ? { label: 'מעבר לתור האישורים', url: args.approvalsUrl } : undefined,
@@ -455,7 +455,7 @@ export function endOfDayReportEmail(args: {
 
   const text =
     `סיכום סוף יום · ${args.dateLabel}\n\n` +
-    `זיכויים פתוחים לגבייה: ${args.openCreditsIls} (${args.openCreditsCount})\n` +
+    `זיכויים פתוחים: ${args.openCreditsIls} (${args.openCreditsCount})\n` +
     `פערים שזוהו היום: ${args.todayCaughtIls} (${args.todayCaughtCount})\n` +
     (args.pendingApprovals != null ? `ממתינים להחלטה: ${args.pendingApprovals}\n` : '') +
     (args.topSupplier ? `ספק בולט: ${args.topSupplier}\n` : '') +
