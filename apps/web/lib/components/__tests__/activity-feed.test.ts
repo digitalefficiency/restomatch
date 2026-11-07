@@ -30,7 +30,7 @@ describe('localizeActivity (moved from ops-components)', () => {
   it('maps the event titles and falls back to the event label', () => {
     expect(
       localizeActivity({ eventType: 'discrepancy_approved', title: 'חריגה אושרה', detail: 'חיסכון ₪1,200', metadata: { amountAgorot: 120000 } }, 'en'),
-    ).toEqual({ title: 'Claimed from supplier', detail: 'claimed ₪1,200' });
+    ).toEqual({ title: 'Added to the credit request', detail: 'approved for a credit request · ₪1,200' }); // owner 7.11
     expect(localizeActivity({ eventType: 'mystery', title: 'משהו', detail: null }, 'en').title).toBe('Update');
     expect(
       localizeActivity(

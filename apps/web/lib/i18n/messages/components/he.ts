@@ -37,7 +37,7 @@ export const he = {
     types: {
       invoice_received: 'חשבונית התקבלה',
       invoice_matched: 'חשבונית הותאמה',
-      discrepancy_approved: 'נדרש מהספק',
+      discrepancy_approved: 'נוסף לבקשת הזיכוי',
       discrepancy_rejected: 'שולם כפי שחויב',
       alias_learned: 'המערכת למדה שם מוצר',
       sync_completed: 'סנכרון הושלם',
@@ -52,7 +52,7 @@ export const he = {
     discrepancyOne: 'פער אחד',
     discrepancies: 'פערים: {count}',
     potentialLoss: '{amount} בפערים',
-    savings: 'נדרש {amount}',
+    savings: 'אושר לבקשת זיכוי · {amount}',
     matchesOrderAndReceipt: 'תואמת להזמנה ולקבלת הסחורה',
     awaitingMonthlyMatch: 'ממתינה להתאמה מול תעודות המשלוח של החודש',
     awaitingPoLink: 'ממתינה לשיוך להזמנה',
