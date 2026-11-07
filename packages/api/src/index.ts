@@ -41,6 +41,7 @@ import { tasksRouter } from './routers/tasks';
 import { navRouter } from './routers/nav';
 import { pushRouter } from './routers/push';
 import { closeRouter } from './routers/close';
+import { automationsRouter } from './routers/automations';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -84,9 +85,11 @@ export const appRouter = router({
   nav: navRouter,
   push: pushRouter,
   close: closeRouter,
+  automations: automationsRouter,
 });
 
 export type AppRouter = typeof appRouter;
+export { automationOption, AUTOMATIONS, type AutomationDef, type AutomationOptionKey } from './automations/options';
 export type { ConsolidatedProposal, DeliveryNoteCoverage } from './match/consolidated';
 export type {
   AppContext,
