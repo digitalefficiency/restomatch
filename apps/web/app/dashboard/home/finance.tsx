@@ -601,6 +601,8 @@ async function ReturnedTile({ caller, role, t, locale }: Ctx) {
   const flags = await loadRecoveryFlags();
   if (!flags.recovery) return null;
   const returned = await caller.recovery.returnedThisMonth();
+  // H-11 strip: a role without ₪ gets null; never render it as ₪0.
+  if (returned.returnedAgorot == null) return null;
   const value = formatIls(returned.returnedAgorot / 100, { locale });
   const body = (
     <>
