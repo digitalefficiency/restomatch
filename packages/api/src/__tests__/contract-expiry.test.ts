@@ -1,8 +1,13 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { and, auditLog, createDb, eq, notificationsOutbox, restaurants, supplierContractPrices, testDbUrl, type RestaurantSettings } from '@restomatch/db';
 import { addDays, contractsEnding, endingContractGroups } from '../priceAlerts/contractExpiry';
+import { mailMoney } from '../priceAlerts/money';
 import { runPriceAlertSweep } from '../priceAlerts/sweep';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
+
+/** Compare text with the bidi isolates (U+2066–U+2069) removed. */
+const P = (s: string | null): string => (s ?? '').replace(/[\u2066-\u2069]/g, '');
+const M = (agorot: number, l: 'he' | 'en', d: 0 | 2) => P(mailMoney(agorot, l, d));
 
 const r = (o: { productId?: string; supplierId?: string; validFrom?: string; validTo: string | null }) => ({
   supplierId: o.supplierId ?? 's',
@@ -63,9 +68,9 @@ describe('contract expiry in the 07:00 mail', () => {
     const run = new Date('2026-11-16T05:00:00Z'); // 07:00 IST
     expect((await runPriceAlertSweep(db, A.restaurantId, { now: run, notify: true, appBaseUrl: 'http://x' })).enqueued).toBe(1);
     const [mail] = await digestMail(A);
-    expect(mail!.subject).toBe('חוזה מחירים מסתיים בקרוב');
-    expect(mail!.body).toContain(`חוזה מחירים עם ${A.supplierName} מסתיים ב-30.11 · מוצר אחד`);
-    expect(mail!.body).toContain('לחידוש');
+    expect(P(mail!.subject)).toBe('חוזה מחירים מסתיים בקרוב');
+    expect(P(mail!.body)).toContain(`חוזה מחירים עם ${A.supplierName} מסתיים ב-30.11 · מוצר אחד`);
+    expect(P(mail!.body)).toContain('לחידוש');
     expect(await db.select().from(auditLog).where(and(eq(auditLog.restaurantId, A.restaurantId), eq(auditLog.action, 'prices.contract_expiry_notified')))).toHaveLength(1);
     // next morning: already announced
     expect((await runPriceAlertSweep(db, A.restaurantId, { now: new Date(run.getTime() + 86_400_000), notify: true })).enqueued).toBe(0);

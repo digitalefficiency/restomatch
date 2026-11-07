@@ -115,8 +115,15 @@ export function rankCreep(lines: readonly CreepLine[]): CreepLine[] {
 
 /* ───────────────────────────── copy ───────────────────────────── */
 
-const pct = (ratio: number): string => `+${Math.round(ratio * 100)}%`;
-const pctBp = (bp: number, sign = false): string => `${sign && bp > 0 ? '+' : ''}${Math.round(bp / 100)}%`;
+/**
+ * Bidi isolates (as `moneyText` does for ₪): a Hebrew product or supplier name
+ * inside an English line, or "+12%" inside a Hebrew one, must not reorder its
+ * neighbours. FSI…PDI around names, LRI…PDI around signed percentages.
+ */
+const n = (s: string): string => `\u2068${s}\u2069`;
+const ltr = (s: string): string => `\u2066${s}\u2069`;
+const pct = (ratio: number): string => ltr(`+${Math.round(ratio * 100)}%`);
+const pctBp = (bp: number, sign = false): string => ltr(`${sign && bp > 0 ? '+' : ''}${Math.round(bp / 100)}%`);
 const weeks = (days: number): number => Math.max(1, Math.round(days / 7));
 /** "2026-11-30" → "30.11" (string slicing: never a UTC Date). */
 const dayMonth = (ymd: string): string => `${Number(ymd.slice(8, 10))}.${Number(ymd.slice(5, 7))}`;
@@ -159,37 +166,37 @@ const HE: Copy = {
   estimate: (m) => `≈${m} בחודש (הערכה)`,
   unknown: 'אין מספיק נתונים',
   creepLine: (l, loc) =>
-    `${l.productName} · ${l.supplierName} · ${pct(l.pctChange)} ב-${weeks(l.windowDays)} שבועות · ` +
+    `${n(l.productName)} · ${n(l.supplierName)} · ${pct(l.pctChange)} ב-${weeks(l.windowDays)} שבועות · ` +
     `מ-${unitPrice(l.startPrice, loc)} ל-${unitPrice(l.endPrice, loc)} ליחידה · ` +
     (l.monthlyAgorot == null ? 'אין מספיק נתונים' : `≈${perMonth(l.monthlyAgorot, loc)} בחודש (הערכה)`),
-  cheaper: (s, p) => `אותו מוצר אצל ${s}: ${p} ליחידה`,
+  cheaper: (s, p) => `אותו מוצר אצל ${n(s)}: ${p} ליחידה`,
   more: (n) => `ועוד ${n}`,
   actNow: 'לטיפול עכשיו',
   toQueue: 'לרשימת המחירים לטיפול',
   contractsHeading: 'חוזי מחירים שמסתיימים בשבועיים הקרובים',
   contractLine: (g) =>
-    `חוזה מחירים עם ${g.supplierName} מסתיים ב-${dayMonth(g.validTo)} · ${g.productCount === 1 ? 'מוצר אחד' : `${g.productCount} מוצרים`}`,
+    `חוזה מחירים עם ${n(g.supplierName)} מסתיים ב-${dayMonth(g.validTo)} · ${g.productCount === 1 ? 'מוצר אחד' : `${g.productCount} מוצרים`}`,
   renew: 'לחידוש',
   dishHeading: 'מנות שעברו את יעד עלות המזון',
   dishLine: (d, loc) =>
-    `${d.name} ${pctBp(d.afterFoodCostBp)} (יעד ${pctBp(d.targetBp)}) · ${mailMoney(d.costDeltaAgorot, loc, 2)} יותר למנה · ` +
-    `${d.productName} ${pctBp(d.productChangeBp, true)}${d.supplierName ? ` אצל ${d.supplierName}` : ''}`,
+    `${n(d.name)} ${pctBp(d.afterFoodCostBp)} (יעד ${pctBp(d.targetBp)}) · ${mailMoney(d.costDeltaAgorot, loc, 2)} יותר למנה · ` +
+    `${n(d.productName)} ${pctBp(d.productChangeBp, true)}${d.supplierName ? ` אצל ${n(d.supplierName)}` : ''}`,
   toRecipe: 'למתכון',
   listHeading: 'מחירון חדש',
   listLine: (s, loc) =>
-    `מחירון חדש מ${s.supplierName} (${dayMonth(s.importedOn)}): ${s.risesCount === 1 ? 'מחיר אחד עלה' : `${s.risesCount} מחירים עלו`} · ` +
+    `מחירון חדש מ${n(s.supplierName)} (${dayMonth(s.importedOn)}): ${s.risesCount === 1 ? 'מחיר אחד עלה' : `${s.risesCount} מחירים עלו`} · ` +
     `ממוצע ${pctBp(s.avgRiseBp, true)} · הגבוהים: ` +
     s.top
-      .map((t) => `${t.name} ${pctBp(t.changeBp)} ${unitPrice(t.oldListPrice, loc)} → ${unitPrice(t.newListPrice, loc)}`)
+      .map((t) => `${n(t.name)} ${pctBp(t.changeBp)} ${unitPrice(t.oldListPrice, loc)} → ${unitPrice(t.newListPrice, loc)}`)
       .join(' · '),
   toCatalog: 'למחירון',
   footer: 'ההערכה החודשית מחושבת לפי הכמויות שהזמנתם ב-90 הימים האחרונים. היא אינה חלק מסכום הכסף שאיתרנו בחשבוניות.',
-  subjectCreep: (n, first, total) =>
-    `מחירים שעלו: ${n === 1 ? `${first.productName} ${pct(first.pctChange)}` : `${n} מוצרים`}` +
+  subjectCreep: (count, first, total) =>
+    `מחירים שעלו: ${count === 1 ? `${n(first.productName)} ${pct(first.pctChange)}` : `${count} מוצרים`}` +
     (total ? ` · ≈${total} בחודש (הערכה)` : ''),
   subjectContracts: (n) => (n === 1 ? 'חוזה מחירים מסתיים בקרוב' : `${n} חוזי מחירים מסתיימים בקרוב`),
   subjectDishes: (n) => (n === 1 ? 'מנה אחת עברה את יעד עלות המזון' : `${n} מנות עברו את יעד עלות המזון`),
-  subjectList: (s) => `מחירון חדש מ${s}`,
+  subjectList: (s) => `מחירון חדש מ${n(s)}`,
 };
 
 const EN: Copy = {
@@ -200,37 +207,37 @@ const EN: Copy = {
   estimate: (m) => `≈${m}/month (estimate)`,
   unknown: 'Not enough data',
   creepLine: (l, loc) =>
-    `${l.productName} · ${l.supplierName} · ${pct(l.pctChange)} in ${weeks(l.windowDays)} weeks · ` +
+    `${n(l.productName)} · ${n(l.supplierName)} · ${pct(l.pctChange)} in ${weeks(l.windowDays)} weeks · ` +
     `from ${unitPrice(l.startPrice, loc)} to ${unitPrice(l.endPrice, loc)} per unit · ` +
     (l.monthlyAgorot == null ? 'Not enough data' : `≈${perMonth(l.monthlyAgorot, loc)}/month (estimate)`),
-  cheaper: (s, p) => `Same product at ${s}: ${p} per unit`,
+  cheaper: (s, p) => `Same product at ${n(s)}: ${p} per unit`,
   more: (n) => `and ${n} more`,
   actNow: 'Act now',
   toQueue: 'Open the price queue',
   contractsHeading: 'Contract prices ending in the next two weeks',
   contractLine: (g) =>
-    `Contract prices with ${g.supplierName} end on ${dayMonth(g.validTo)} · ${g.productCount === 1 ? '1 product' : `${g.productCount} products`}`,
+    `Contract prices with ${n(g.supplierName)} end on ${dayMonth(g.validTo)} · ${g.productCount === 1 ? '1 product' : `${g.productCount} products`}`,
   renew: 'Renew',
   dishHeading: 'Dishes over their food-cost target',
   dishLine: (d, loc) =>
-    `${d.name} ${pctBp(d.afterFoodCostBp)} (target ${pctBp(d.targetBp)}) · ${mailMoney(d.costDeltaAgorot, loc, 2)} more per plate · ` +
-    `${d.productName} ${pctBp(d.productChangeBp, true)}${d.supplierName ? ` at ${d.supplierName}` : ''}`,
+    `${n(d.name)} ${pctBp(d.afterFoodCostBp)} (target ${pctBp(d.targetBp)}) · ${mailMoney(d.costDeltaAgorot, loc, 2)} more per plate · ` +
+    `${n(d.productName)} ${pctBp(d.productChangeBp, true)}${d.supplierName ? ` at ${n(d.supplierName)}` : ''}`,
   toRecipe: 'Open recipe',
   listHeading: 'New price list',
   listLine: (s, loc) =>
-    `New price list from ${s.supplierName} (${dayMonth(s.importedOn)}): ${s.risesCount === 1 ? '1 price went up' : `${s.risesCount} prices went up`} · ` +
+    `New price list from ${n(s.supplierName)} (${dayMonth(s.importedOn)}): ${s.risesCount === 1 ? '1 price went up' : `${s.risesCount} prices went up`} · ` +
     `average ${pctBp(s.avgRiseBp, true)} · largest: ` +
     s.top
-      .map((t) => `${t.name} ${pctBp(t.changeBp)} ${unitPrice(t.oldListPrice, loc)} → ${unitPrice(t.newListPrice, loc)}`)
+      .map((t) => `${n(t.name)} ${pctBp(t.changeBp)} ${unitPrice(t.oldListPrice, loc)} → ${unitPrice(t.newListPrice, loc)}`)
       .join(' · '),
   toCatalog: 'Open price list',
   footer: 'The monthly estimate uses the quantities you ordered in the last 90 days. It is not part of the money we found on your invoices.',
-  subjectCreep: (n, first, total) =>
-    `Prices that went up: ${n === 1 ? `${first.productName} ${pct(first.pctChange)}` : `${n} products`}` +
+  subjectCreep: (count, first, total) =>
+    `Prices that went up: ${count === 1 ? `${n(first.productName)} ${pct(first.pctChange)}` : `${count} products`}` +
     (total ? ` · ≈${total}/month (estimate)` : ''),
   subjectContracts: (n) => (n === 1 ? 'A price contract ends soon' : `${n} price contracts end soon`),
   subjectDishes: (n) => (n === 1 ? '1 dish is over its food-cost target' : `${n} dishes are over their food-cost target`),
-  subjectList: (s) => `New price list from ${s}`,
+  subjectList: (s) => `New price list from ${n(s)}`,
 };
 
 const copyFor = (l: MailLocale): Copy => (l === 'en' ? EN : HE);

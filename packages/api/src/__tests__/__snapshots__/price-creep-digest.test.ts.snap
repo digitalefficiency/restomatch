@@ -4,10 +4,10 @@ exports[`AU-13 digest builder (pure) > LIGHT template: he rtl, en ltr, light can
 "Prices that went up: 1 product · ≈⁨₪212⁩/month (estimate)
 
 Supplier prices that went up
-- [Act now] עגבניות · תנובה · +12% in 3 weeks · from ⁨₪6.20⁩ to ⁨₪6.94⁩ per unit · ≈⁨₪212⁩/month (estimate)
+- [Act now] ⁨עגבניות⁩ · ⁨תנובה⁩ · ⁦+12%⁩ in 3 weeks · from ⁨₪6.20⁩ to ⁨₪6.94⁩ per unit · ≈⁨₪212⁩/month (estimate)
 
 Dishes over their food-cost target
-- שניצל 31% (target 28%) · ⁨₪1.40⁩ more per plate · חזה עוף +12% at טיב טעם
+- ⁨שניצל⁩ ⁦31%⁩ (target ⁦28%⁩) · ⁨₪1.40⁩ more per plate · ⁨חזה עוף⁩ ⁦+12%⁩ at ⁨טיב טעם⁩
 
 The monthly estimate uses the quantities you ordered in the last 90 days. It is not part of the money we found on your invoices."
 `;
@@ -16,10 +16,10 @@ exports[`AU-13 digest builder (pure) > LIGHT template: he rtl, en ltr, light can
 "מחירים שעלו: מוצר אחד · ≈⁨‏212 ‏₪⁩ בחודש (הערכה)
 
 מחירים שעלו אצל הספקים
-- [לטיפול עכשיו] עגבניות · תנובה · +12% ב-3 שבועות · מ-⁨‏6.20 ‏₪⁩ ל-⁨‏6.94 ‏₪⁩ ליחידה · ≈⁨‏212 ‏₪⁩ בחודש (הערכה)
+- [לטיפול עכשיו] ⁨עגבניות⁩ · ⁨תנובה⁩ · ⁦+12%⁩ ב-3 שבועות · מ-⁨‏6.20 ‏₪⁩ ל-⁨‏6.94 ‏₪⁩ ליחידה · ≈⁨‏212 ‏₪⁩ בחודש (הערכה)
 
 מנות שעברו את יעד עלות המזון
-- שניצל 31% (יעד 28%) · ⁨‏1.40 ‏₪⁩ יותר למנה · חזה עוף +12% אצל טיב טעם
+- ⁨שניצל⁩ ⁦31%⁩ (יעד ⁦28%⁩) · ⁨‏1.40 ‏₪⁩ יותר למנה · ⁨חזה עוף⁩ ⁦+12%⁩ אצל ⁨טיב טעם⁩
 
 ההערכה החודשית מחושבת לפי הכמויות שהזמנתם ב-90 הימים האחרונים. היא אינה חלק מסכום הכסף שאיתרנו בחשבוניות."
 `;

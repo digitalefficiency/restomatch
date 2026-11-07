@@ -20,6 +20,10 @@ import { mailMoney } from '../priceAlerts/money';
 import { runPriceAlertSweep } from '../priceAlerts/sweep';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
+/** Compare text with the bidi isolates (U+2066–U+2069) removed. */
+const P = (s: string | null): string => (s ?? '').replace(/[\u2066-\u2069]/g, '');
+const M = (agorot: number, l: 'he' | 'en', d: 0 | 2) => P(mailMoney(agorot, l, d));
+
 /* ───────────────────────── pure builder ───────────────────────── */
 
 const line = (o: Partial<CreepLine>): CreepLine => ({
@@ -58,11 +62,11 @@ describe('AU-13 digest builder (pure)', () => {
     expect(rankCreep(lines).map((l) => l.alertId)).toEqual(['big', 'small', 'unknown']);
     const mail = buildOwnerDigest({ locale: 'he', creep: lines, ...empty })!;
     expect(mail.alertIds).toEqual(['big', 'small', 'unknown']);
-    const unknownLine = mail.text.split('\n').find((l) => l.includes('- א'))!;
+    const unknownLine = P(mail.text).split('\n').find((l) => l.includes('- א'))!;
     expect(unknownLine).toContain('אין מספיק נתונים');
-    expect(unknownLine).not.toContain(mailMoney(0, 'he', 0));
-    expect(mail.text.indexOf('- ג')).toBeLessThan(mail.text.indexOf('- ב'));
-    expect(mail.text.indexOf('- ב')).toBeLessThan(mail.text.indexOf('- א'));
+    expect(unknownLine).not.toContain(M(0, 'he', 0));
+    expect(P(mail.text).indexOf('- ג')).toBeLessThan(P(mail.text).indexOf('- ב'));
+    expect(P(mail.text).indexOf('- ב')).toBeLessThan(P(mail.text).indexOf('- א'));
   });
 
   it('subject: count + Σ known ≈₪/month (estimate); the line format of the brief', () => {
@@ -71,10 +75,10 @@ describe('AU-13 digest builder (pure)', () => {
       creep: [line({ alertId: '1', monthlyAgorot: 21_200 }), line({ alertId: '2', productName: 'חלב', monthlyAgorot: 30_000 }), line({ alertId: '3', productName: 'שמן', monthlyAgorot: 12_800 })],
       ...empty,
     })!;
-    expect(mail.subject).toBe(`מחירים שעלו: 3 מוצרים · ≈${mailMoney(64_000, 'he', 0)} בחודש (הערכה)`);
+    expect(P(mail.subject)).toBe(`מחירים שעלו: 3 מוצרים · ≈${M(64_000, 'he', 0)} בחודש (הערכה)`);
     expect(mail.creepMonthlyAgorot).toBe(64_000);
-    expect(mail.text).toContain(
-      `עגבניות · תנובה · +12% ב-3 שבועות · מ-${mailMoney(620, 'he', 2)} ל-${mailMoney(694, 'he', 2)} ליחידה · ≈${mailMoney(21_200, 'he', 0)} בחודש (הערכה)`,
+    expect(P(mail.text)).toContain(
+      `עגבניות · תנובה · +12% ב-3 שבועות · מ-${M(620, 'he', 2)} ל-${M(694, 'he', 2)} ליחידה · ≈${M(21_200, 'he', 0)} בחודש (הערכה)`,
     );
   });
 
@@ -84,15 +88,15 @@ describe('AU-13 digest builder (pure)', () => {
     );
     const mail = buildOwnerDigest({ locale: 'he', creep: lines, ...empty })!;
     expect(mail.text.split('\n').filter((l) => l.startsWith('- '))).toHaveLength(5);
-    expect(mail.text).toContain('ועוד 4');
-    expect(mail.text).toContain(`אותו מוצר אצל ספק זול: ${mailMoney(610, 'he', 2)} ליחידה`);
+    expect(P(mail.text)).toContain('ועוד 4');
+    expect(P(mail.text)).toContain(`אותו מוצר אצל ספק זול: ${M(610, 'he', 2)} ליחידה`);
     expect(mail.alertIds).toHaveLength(9);
   });
 
   it('T2 lines carry the act-now badge; T4 lines stay neutral (tone comes from W2-12, never recomputed here)', () => {
     const mail = buildOwnerDigest({ locale: 'he', creep: [line({ alertId: 'x', tone: 't2' }), line({ alertId: 'y', productName: 'חלב', tone: 't4', monthlyAgorot: 4_999 })], ...empty })!;
-    expect(mail.text).toContain('- [לטיפול עכשיו] עגבניות');
-    expect(mail.text).toContain('- חלב');
+    expect(P(mail.text)).toContain('- [לטיפול עכשיו] עגבניות');
+    expect(P(mail.text)).toContain('- חלב');
     expect(mail.text.match(/לטיפול עכשיו/g)).toHaveLength(1);
   });
 
@@ -109,16 +113,16 @@ describe('AU-13 digest builder (pure)', () => {
         if (m === he) expect(s).not.toMatch(/₪\s?\d/); // he: ₪ only through the shared formatter (it suffixes)
       }
     }
-    expect(en.subject).toBe(`Prices that went up: עגבניות +12% · ≈${mailMoney(21_200, 'en', 0)}/month (estimate)`);
+    expect(P(en.subject)).toBe(`Prices that went up: עגבניות +12% · ≈${M(21_200, 'en', 0)}/month (estimate)`);
     expect(he.text).toMatchSnapshot('he');
     expect(en.text).toMatchSnapshot('en');
   });
 
   it('the chef payload holds ONLY the dish section — no supplier price-creep line', () => {
     const chef = buildChefDigest({ locale: 'he', dishes: [dish], links: { recipe: (id) => `http://x/r/${id}` } })!;
-    expect(chef.text).toContain(`שניצל 31% (יעד 28%) · ${mailMoney(140, 'he', 2)} יותר למנה · חזה עוף +12% אצל טיב טעם`);
-    expect(chef.text).toContain('למתכון: http://x/r/r1');
-    expect(chef.text).not.toContain('מחירים שעלו');
+    expect(P(chef.text)).toContain(`שניצל 31% (יעד 28%) · ${M(140, 'he', 2)} יותר למנה · חזה עוף +12% אצל טיב טעם`);
+    expect(P(chef.text)).toContain('למתכון: http://x/r/r1');
+    expect(P(chef.text)).not.toContain('מחירים שעלו');
     expect(chef.alertIds).toEqual([]);
     expect(buildChefDigest({ locale: 'he', dishes: [], links: {} })).toBeNull();
   });
@@ -195,9 +199,9 @@ describe('AU-13 sweep: one morning mail per person', () => {
     expect(new Set(mail.map((m) => m.dedupeKey))).toEqual(
       new Set([`au:A18:${A.restaurantId}:${A.ownerUserId}:2026-10-18`, `au:A18:${A.restaurantId}:${mgr.id}:2026-10-18`]),
     );
-    expect(mail[0]!.subject).toBe('מחירים שעלו: 2 מוצרים');
-    expect(mail[0]!.body).toContain('אין מספיק נתונים');
-    expect(mail[0]!.body).toContain(`http://x/dashboard/go?r=${A.restaurantId}&to=${encodeURIComponent('/dashboard/contracts?tab=queue')}`);
+    expect(P(mail[0]!.subject)).toBe('מחירים שעלו: 2 מוצרים');
+    expect(P(mail[0]!.body)).toContain('אין מספיק נתונים');
+    expect(P(mail[0]!.body)).toContain(`http://x/dashboard/go?r=${A.restaurantId}&to=${encodeURIComponent('/dashboard/contracts?tab=queue')}`);
     expect(mail[0]!.payload).toMatchObject({ kpi: 'A18' });
 
     const alerts = await db.select().from(priceAlerts).where(eq(priceAlerts.restaurantId, A.restaurantId));
@@ -260,9 +264,9 @@ describe('AU-13 sweep: one morning mail per person', () => {
     const mail = await digestMail(A);
     const chefMail = mail.find((m) => m.target === chef.email)!;
     const ownerMail = mail.find((m) => m.target === 'owner-A@attack.test')!;
-    expect(chefMail.body).toContain('שניצל 31% (יעד 28%)');
-    expect(chefMail.body).not.toContain('מחירים שעלו');
-    expect(ownerMail.body).toContain('מנות שעברו את יעד עלות המזון');
+    expect(P(chefMail.body)).toContain('שניצל 31% (יעד 28%)');
+    expect(P(chefMail.body)).not.toContain('מחירים שעלו');
+    expect(P(ownerMail.body)).toContain('מנות שעברו את יעד עלות המזון');
     expect(mail.map((m) => m.target)).toHaveLength(2); // receiver + bookkeeper: zero rows
     const audit = await db.select().from(auditLog).where(and(eq(auditLog.restaurantId, A.restaurantId), eq(auditLog.action, 'prices.dish_crossing_notified')));
     expect(audit).toHaveLength(1);

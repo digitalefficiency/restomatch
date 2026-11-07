@@ -1,9 +1,14 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { auditLog, count, createDb, eq, notificationsOutbox, priceBaselines, priceHistory, restaurants, testDbUrl, type RestaurantSettings } from '@restomatch/db';
 import { listDiffSection } from '../priceAlerts/priceListDiff';
+import { digestOptions } from '../priceAlerts/options';
 import { mailMoney } from '../priceAlerts/money';
 import { runPriceAlertSweep } from '../priceAlerts/sweep';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
+
+/** Compare text with the bidi isolates (U+2066–U+2069) removed. */
+const P = (s: string | null): string => (s ?? '').replace(/[\u2066-\u2069]/g, '');
+const M = (agorot: number, l: 'he' | 'en', d: 0 | 2) => P(mailMoney(agorot, l, d));
 
 /**
  * AD11: a supplier price list never feeds `price_history` / baselines. The
@@ -60,13 +65,20 @@ describe('a full sweep with an import diff record', () => {
       history: (await db.select({ n: count() }).from(priceHistory))[0]!.n,
       baselines: (await db.select({ n: count() }).from(priceBaselines))[0]!.n,
     });
+    // priceListDiff defaults OFF (new behaviour, waits on the catalog record): default → no mail.
+    expect(digestOptions({} as RestaurantSettings).priceListDiff).toBe(false);
+    expect((await runPriceAlertSweep(db, A.restaurantId, { now, notify: true })).enqueued).toBe(0);
+    await db
+      .update(restaurants)
+      .set({ settings: { features: { priceAlerts: true }, automations: { priceListDiff: true } } as RestaurantSettings })
+      .where(eq(restaurants.id, A.restaurantId));
     const before = await rows();
     expect((await runPriceAlertSweep(db, A.restaurantId, { now, notify: true })).enqueued).toBe(1);
     expect(await rows()).toEqual(before);
     const [mail] = await digestMail(A);
-    expect(mail!.subject).toBe(`מחירון חדש מ${A.supplierName}`);
-    expect(mail!.body).toContain(`מחירון חדש מ${A.supplierName} (12.11): מחיר אחד עלה · ממוצע +3% · הגבוהים: חלב 3% ${mailMoney(590, 'he', 2)} → ${mailMoney(608, 'he', 2)}`);
-    expect(mail!.body).not.toMatch(/בחודש/);
+    expect(P(mail!.subject)).toBe(`מחירון חדש מ${A.supplierName}`);
+    expect(P(mail!.body)).toContain(`מחירון חדש מ${A.supplierName} (12.11): מחיר אחד עלה · ממוצע +3% · הגבוהים: חלב 3% ${M(590, 'he', 2)} → ${M(608, 'he', 2)}`);
+    expect(P(mail!.body)).not.toMatch(/בחודש/);
     expect((await runPriceAlertSweep(db, A.restaurantId, { now: new Date(now.getTime() + 86_400_000), notify: true })).enqueued).toBe(0);
     const off = { priceCreepDigest: true, contractExpiry: true, priceListDiff: false };
     expect((await runPriceAlertSweep(db, A.restaurantId, { now, notify: true, digestOptions: off })).enqueued).toBe(0);
