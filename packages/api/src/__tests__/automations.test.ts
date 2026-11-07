@@ -147,11 +147,12 @@ describe('automationOption', () => {
     expect(automationOption({ automations: { eveningDigest: false } }, 'eveningDigest')).toBe(false);
     expect(automationOption({ automations: { eveningDigest: 'no' } }, 'eveningDigest')).toBe(true);
     expect(automationOption({ automations: [] }, 'supplierDelays')).toBe(true);
-    // AU-13 rows default OFF (orchestrator 7.11)
-    for (const k of ['priceCreepDigest', 'contractExpiry', 'priceListDiff'] as const) {
-      expect(automationOption({}, k)).toBe(false);
-      expect(automationOption({ automations: { [k]: true } }, k)).toBe(true);
-    }
+    // AU-13 rows (orchestrator 7.11): digest + contract expiry ON, list diff OFF
+    expect(automationOption({}, 'priceCreepDigest')).toBe(true);
+    expect(automationOption({}, 'contractExpiry')).toBe(true);
+    expect(automationOption({}, 'priceListDiff')).toBe(false);
+    expect(automationOption({ automations: { priceListDiff: true } }, 'priceListDiff')).toBe(true);
+    expect(automationOption({ automations: { contractExpiry: false } }, 'contractExpiry')).toBe(false);
   });
 });
 
