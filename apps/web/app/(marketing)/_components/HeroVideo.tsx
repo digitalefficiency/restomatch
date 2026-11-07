@@ -1,7 +1,8 @@
 'use client';
 
 import { Pause, Play } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { PHONE_MEDIA, loopSourcesFor } from '@/lib/heroMedia';
 
 /**
  * Hero product loop (used when heroMedia.available).
@@ -18,6 +19,11 @@ import { useEffect, useRef, useState } from 'react';
  * `minWidth` (W3-06b): a media query below which this loop is hidden (phones
  * show HeroMatch until a 9:16 cut exists). Below it, neither the video sources
  * nor the 16:9 poster are fetched (a 1×1 data-URI <source> wins on phones).
+ *
+ * `phone` (W3-06b): a 9:16 cut for phones. The sources are chosen ONCE at
+ * attach time (matchMedia), so a phone downloads only the 9:16 files and a
+ * desktop only the 16:9 ones; the poster switches through <picture>. If the
+ * video can't play (every source errors), `fallback` replaces it.
  */
 /** 1×1 transparent GIF: what a hidden-below-`minWidth` poster resolves to (no network). */
 const BLANK_PIXEL =
@@ -33,6 +39,8 @@ export function HeroVideo({
   pauseLabel,
   playLabel,
   minWidth,
+  phone = null,
+  fallback,
 }: {
   webm: string;
   mp4: string;
@@ -43,26 +51,34 @@ export function HeroVideo({
   pauseLabel: string;
   playLabel: string;
   minWidth?: string;
+  phone?: { webm: string; mp4: string; poster: string } | null;
+  fallback?: ReactNode;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
   const [started, setStarted] = useState(false);
   const [shown, setShown] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const v = ref.current;
     if (!v || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     if (minWidth && !window.matchMedia(minWidth).matches) return;
     const attach = () => {
-      for (const [src, type] of [
-        [webm, 'video/webm'],
-        [mp4, 'video/mp4'],
-      ] as const) {
+      const chosen = loopSourcesFor(window.matchMedia(PHONE_MEDIA).matches, { webm, mp4 }, phone);
+      const pairs = [
+        [chosen.webm, 'video/webm'],
+        [chosen.mp4, 'video/mp4'],
+      ] as const;
+      pairs.forEach(([src, type], i) => {
         const s = document.createElement('source');
         s.src = src;
         s.type = type;
+        // The last source failing means nothing can play: show the fallback.
+        if (i === pairs.length - 1)
+          s.addEventListener('error', () => setFailed(true), { once: true });
         v.appendChild(s);
-      }
+      });
       v.load();
       setStarted(true);
       void v.play().catch(() => undefined);
@@ -70,15 +86,24 @@ export function HeroVideo({
     if (document.readyState === 'complete') attach();
     else window.addEventListener('load', attach, { once: true });
     return () => window.removeEventListener('load', attach);
-  }, [webm, mp4, minWidth]);
+  }, [webm, mp4, minWidth, phone]);
+
+  if (failed && fallback) return <>{fallback}</>;
 
   return (
     <div className="relative mx-auto w-full max-w-xl overflow-hidden rounded-3xl border border-line bg-surface shadow-card">
       <span aria-hidden="true" className="absolute inset-x-0 top-0 z-10 h-px flow-stream" />
-      <div className="relative aspect-video w-full">
+      <div
+        className={
+          'relative w-full ' +
+          (phone ? 'aspect-[9/16] max-h-[78svh] sm:aspect-video sm:max-h-none' : 'aspect-video')
+        }
+        data-testid="hero-video-frame"
+      >
         {/* Static 1280×720 poster, preloaded with fetchpriority=high; next/image would add a hop. */}
         <picture>
           {minWidth ? <source media={`not all and ${minWidth}`} srcSet={BLANK_PIXEL} /> : null}
+          {phone ? <source media={PHONE_MEDIA} srcSet={phone.poster} /> : null}
           <img
             src={poster}
             srcSet={posterSrcSet}

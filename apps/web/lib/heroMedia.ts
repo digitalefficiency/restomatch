@@ -37,11 +37,15 @@ export const heroMedia = {
     en: { src: '/media/promo-en-720.mp4', poster: '/media/promo-poster-en.jpg' },
   } as PromoSources | null,
   /**
-   * 9:16 phone loop (W3-06b). null until S10's pipeline delivers
-   * hero-loop-9x16.{webm,mp4} + its poster; until then phones show the legible
-   * HeroMatch mock and the 16:9 loop is desktop/tablet (sm+) only.
+   * 9:16 phone loop (W3-06b; S10's HeroLoopVertical, demo data only). Phones
+   * (below `sm`) get only these files — never the 16:9 loop too. Set to null to
+   * fall back to the legible HeroMatch mock on phones.
    */
-  phoneLoop: null as null | { webm: string; mp4: string; poster: string },
+  phoneLoop: {
+    webm: '/media/hero-loop-9x16.webm',
+    mp4: '/media/hero-loop-9x16.mp4',
+    poster: '/media/hero-poster-9x16.jpg',
+  } as null | { webm: string; mp4: string; poster: string },
   /** English hero loop (same motion, English dashboard + callouts); Hebrew is the default above. */
   loopEn: {
     webm: '/media/hero-loop-en.webm',
@@ -52,6 +56,23 @@ export const heroMedia = {
 } as const;
 
 export type HeroMedia = typeof heroMedia;
+
+/** Below Tailwind's `sm` (640px): the phone cut. */
+export const PHONE_MEDIA = '(max-width: 639.98px)';
+
+/**
+ * Which loop a viewport plays: one set of sources, never both (page weight).
+ * Pure, so the unit test pins the choice.
+ */
+export function loopSourcesFor(
+  isPhone: boolean,
+  desk: { webm: string; mp4: string },
+  phone: { webm: string; mp4: string } | null,
+): { webm: string; mp4: string } {
+  return isPhone && phone
+    ? { webm: phone.webm, mp4: phone.mp4 }
+    : { webm: desk.webm, mp4: desk.mp4 };
+}
 
 /** The hero loop + poster for this viewer's language (Hebrew is the default). */
 export function heroLoopFor(locale: Locale) {

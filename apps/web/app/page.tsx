@@ -1,14 +1,13 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { preload } from 'react-dom';
 import { Camera, Check, GitCompareArrows, Languages, PlayCircle, ShieldCheck } from 'lucide-react';
 import { PLAN_SEED } from '@restomatch/db';
 import { auth } from '@/auth';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { landing } from '@/lib/i18n/messages/landing';
 import { formatNumber } from '@/lib/i18n/format';
-import { heroLoopFor, heroMedia, promoVideoFor } from '@/lib/heroMedia';
+import { PHONE_MEDIA, heroLoopFor, heroMedia, promoVideoFor } from '@/lib/heroMedia';
 import { formatIls } from '@/lib/money';
 import { landingFlag } from '@/lib/landingFlags';
 import { cn } from '@/lib/components/cn';
@@ -72,17 +71,6 @@ export default async function Home() {
   const t = await getT(landing);
   const locale = await getLocale();
   const heroLoop = heroLoopFor(locale);
-  // The hero poster is the LCP: fetch it first, ahead of scripts and fonts.
-  if (heroMedia.available) {
-    preload(heroLoop.poster, {
-      as: 'image',
-      fetchPriority: 'high',
-      imageSrcSet: heroLoop.posterSrcSet,
-      imageSizes: heroMedia.posterSizes,
-      // Without a 9:16 cut, phones show HeroMatch instead: don't make them fetch the 16:9 poster.
-      ...(heroMedia.phoneLoop ? {} : { media: '(min-width: 640px)' }),
-    });
-  }
   const promoSrc = promoVideoFor(locale);
   const ctaHref = primaryCtaHref();
   const ils = (n: number) => formatIls(n, { locale });
@@ -150,6 +138,28 @@ export default async function Home() {
 
   return (
     <MarketingShell>
+      {/* The hero poster is the LCP: fetch it first. One poster per viewport (W3-06b):
+          phones never fetch the 16:9 one, desktops never the 9:16 one. React hoists these to <head>. */}
+      {heroMedia.available ? (
+        <link
+          rel="preload"
+          as="image"
+          href={heroLoop.poster}
+          imageSrcSet={heroLoop.posterSrcSet}
+          imageSizes={heroMedia.posterSizes}
+          fetchPriority="high"
+          media="(min-width: 640px)"
+        />
+      ) : null}
+      {heroMedia.available && heroMedia.phoneLoop ? (
+        <link
+          rel="preload"
+          as="image"
+          href={heroMedia.phoneLoop.poster}
+          fetchPriority="high"
+          media={PHONE_MEDIA}
+        />
+      ) : null}
       <link rel="canonical" href={locale === 'en' ? `${SITE_URL}/?lang=en` : `${SITE_URL}/`} />
       <link rel="alternate" hrefLang="he" href={`${SITE_URL}/`} />
       <link rel="alternate" hrefLang="en" href={`${SITE_URL}/?lang=en`} />
@@ -241,6 +251,8 @@ export default async function Home() {
                   pauseLabel={t('v2.video.pause')}
                   playLabel={t('v2.video.play')}
                   minWidth={heroMedia.phoneLoop ? undefined : '(min-width: 640px)'}
+                  phone={heroMedia.phoneLoop}
+                  fallback={<HeroMatch />}
                 />
               </div>
             </>
