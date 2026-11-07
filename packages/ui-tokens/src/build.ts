@@ -22,6 +22,7 @@ import {
   typeRolesV2,
 } from './scale';
 import { colorVarsV2, v2Css } from './modes';
+import { ACTIVE_FACE, fontFaceCss } from './fonts';
 
 /** '#066B4A' → '6 107 74' (channels, so Tailwind's `/opacity` modifiers keep working). */
 export function channels(hex: string): string {
@@ -142,6 +143,8 @@ export function cssVariables(): string {
     '}',
   );
   // DS2 phase 1 (additive): the v1 lines above are byte-for-byte unchanged.
+  // DS2 phase 2 (β): the self-hosted faces and their measured fallbacks.
+  if (ACTIVE_FACE !== 'heebo') lines.push(fontFaceCss());
   lines.push(v2Css(), TOKENS_END);
   return lines.join('\n');
 }

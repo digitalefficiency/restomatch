@@ -24,8 +24,8 @@ function isSubset(sub: unknown, full: unknown, path = ''): string | null {
 }
 
 describe('DS2 α is additive (0 pixels change)', () => {
-  it('runs in phase 1', () => {
-    expect(DS2_PHASE).toBe(1);
+  it('no colour, row or radius value moves before phase 3', () => {
+    expect(DS2_PHASE).toBeLessThan(3);
   });
 
   it('the generated block starts with the v1 block, byte for byte', () => {
@@ -49,8 +49,7 @@ describe('DS2 α is additive (0 pixels change)', () => {
     expect(cellPx()).toEqual({ compact: 12, default: 16, touch: 16 });
   });
 
-  it('fonts: Heebo stays the face until β; id is not consumed yet', () => {
-    expect(activeFonts.ui.startsWith("'Heebo'")).toBe(true);
+  it('the number family is always the UI family (N1)', () => {
     expect(activeFonts.num).toBe('var(--font-ui)');
   });
 
