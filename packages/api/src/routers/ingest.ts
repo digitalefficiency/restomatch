@@ -293,7 +293,7 @@ export const ingestRouter = router({
               invoiceId: ingestDocuments.invoiceId,
               storagePath: ingestDocuments.storagePath,
               // G-09: the invoice a page_duplicate repeats, when the OCR recorded it.
-              repeatsInvoiceId: sql<string | null>`(select i.ocr_payload -> 'raw' -> 'duplicateOf' ->> 'invoiceId'
+              repeatsInvoiceId: sql<string | null>`(select coalesce(i.ocr_payload -> 'raw' -> 'pageRepeats' ->> 'invoiceId', i.ocr_payload -> 'raw' -> 'duplicateOf' ->> 'invoiceId')
                 from ${invoices} i where i.id = ${ingestDocuments.invoiceId} and i.restaurant_id = ${ingestDocuments.restaurantId})`,
             })
             .from(ingestDocuments)

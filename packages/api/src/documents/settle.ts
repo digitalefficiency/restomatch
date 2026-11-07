@@ -57,6 +57,13 @@ export const PAGE_FLAGS: readonly PageFlag[] = [
   'page_not_merged',
 ];
 
+/** A flagged page; `repeats` = the in-cluster chain page a page_duplicate repeats. */
+export interface PageFlagged {
+  invoiceId: string;
+  reason: PageFlag;
+  repeats?: string;
+}
+
 export interface SettleResult {
   /** Don't match this invoice now: a sibling is pending, or it is being re-OCR'd. */
   hold: boolean;
@@ -64,7 +71,7 @@ export interface SettleResult {
   absorbed: boolean;
   mergedInto?: string;
   /** Invoices that were NOT merged, with the reason (the inbox's question). */
-  flagged: Array<{ invoiceId: string; reason: PageFlag }>;
+  flagged: PageFlagged[];
 }
 
 export interface SettleDeps {
@@ -176,10 +183,8 @@ function namesAgree(a: string | null, b: string | null): boolean {
 /**
  * Why `page` may NOT join a chain (null = it may). Any positive evidence of
  * another supplier or another invoice number refuses (adopted fields included).
- * A page that brings an invoice NUMBER the chain lacks joins only when page 1's
- * OWN ח.פ. matches it exactly (a name may be absent on either side), or the
- * chain's ח.פ. matches and page 1's own name matches it EXACTLY — never on a
- * name substring, never on a ח.פ. the chain merely adopted. In doubt: a person.
+ * A page that brings an invoice NUMBER the chain lacks never joins (round 5):
+ * it may be the next invoice of the same supplier. In doubt: a person.
  */
 export function chainMismatch(chain: ChainIdentity, page: PageHeader): 'page_other_supplier' | 'page_other_invoice' | 'page_not_merged' | null {
   const p = identityOf(page);
@@ -187,13 +192,9 @@ export function chainMismatch(chain: ChainIdentity, page: PageHeader): 'page_oth
   if (chain.businessId && p.businessId && chain.businessId !== p.businessId) return 'page_other_supplier';
   if (!(chain.businessId && p.businessId) && chain.name && p.name && !namesAgree(chain.name, p.name)) return 'page_other_supplier';
   if (chain.number && p.number && chain.number !== p.number) return 'page_other_invoice';
-  if (p.number && !chain.number) {
-    const anchoredBiz = Boolean(chain.anchoredBusinessId && p.businessId && chain.anchoredBusinessId === p.businessId);
-    const adoptedBizWithExactName = Boolean(
-      chain.businessId && p.businessId && chain.businessId === p.businessId && chain.anchoredName && p.name && chain.anchoredName === p.name,
-    );
-    if (!anchoredBiz && !adoptedBizWithExactName) return 'page_not_merged';
-  }
+  // Round 5: a page bringing an invoice NUMBER the chain lacks may be a second
+  // invoice of the same supplier (whatever its ח.פ. / name say): a person.
+  if (p.number && !chain.number) return 'page_not_merged';
   return null;
 }
 
@@ -353,28 +354,33 @@ export function creditKind(print: PagePrint | undefined): boolean {
  *  - each candidate is checked, in order: unreadable → a duplicate of an invoice
  *    outside the cluster → the chain identity (chainMismatch, with provenance) →
  *    the OVERLAP guard against every chain page and stored print (an exact copy
- *    is page_duplicate, any other overlap page_not_merged) → a complete invoice
- *    or credit note on its own (its own invoice; it breaks the chain silently)
+ *    is page_duplicate that does not cut the chain; any other overlap is a held,
+ *    deletable page_duplicate that does) → a complete invoice or credit note
+ *    (silent only when page 1 is one too; after an open document, page_not_merged)
  *    → after a break, page_not_merged;
  *  - an evidence-less page continues the page right before it.
  */
 export function decidePages(
   members: PageHeader[],
-): { merge: PageHeader[]; flagged: Array<{ invoiceId: string; reason: PageFlag }> } {
+): { merge: PageHeader[]; flagged: PageFlagged[] } {
   const [first, ...rest] = members;
   const merge: PageHeader[] = [];
-  const flagged: Array<{ invoiceId: string; reason: PageFlag }> = [];
+  const flagged: PageFlagged[] = [];
   if (!first) return { merge, flagged };
   const ids = new Set(members.map((m) => m.invoiceId));
   const chainIds = new Set<string>([first.invoiceId]);
   const chain = identityOf(first);
-  let broken = Boolean(
-    first.unreadable || first.alreadyFlagged || !hasHeaderEvidence(first) || selfComplete(first.print) || creditKind(first.print),
-  );
+  // Page 1 is a whole invoice / credit note on its own: there is no open
+  // document, so later whole invoices are simply their own (no question).
+  const standaloneHead = selfComplete(first.print) || creditKind(first.print);
+  let broken = Boolean(first.unreadable || first.alreadyFlagged || !hasHeaderEvidence(first) || standaloneHead);
+  const owned: Array<{ print: PagePrint; owner: string }> = [];
   const chainPrints: PagePrint[] = [];
   const addPrints = (m: PageHeader) => {
-    if (m.print) chainPrints.push(m.print);
-    for (const p of m.absorbedPrints ?? []) chainPrints.push(p);
+    for (const p of [...(m.print ? [m.print] : []), ...(m.absorbedPrints ?? [])]) {
+      chainPrints.push(p);
+      owned.push({ print: p, owner: m.invoiceId });
+    }
   };
   addPrints(first);
   for (const page of rest) {
@@ -387,23 +393,35 @@ export function decidePages(
     }
     let reason: PageFlag | null = null;
     let silentBreak = false;
+    let exact = false;
+    let repeats: string | undefined;
     if (page.unreadable) reason = 'page_unreadable';
     else if (page.duplicateOf && !chainIds.has(page.duplicateOf) && !ids.has(page.duplicateOf)) {
       reason = 'page_other_invoice'; // its number is ANOTHER invoice already on file
     }
     if (!reason) reason = chainMismatch(chain, page);
     if (!reason) {
-      const hit = chainPrints.filter((p) => overlaps(p, page.print));
+      // Round 5: ANY overlap is held as a possible duplicate (never matched,
+      // deletable in the inbox) — a near-copy flagged but matched is billed twice.
+      const hit = owned.filter((o) => overlaps(o.print, page.print));
       if (hit.length > 0) {
-        reason = hit.some((p) => exactCopy(p, page.print, { duplicateOfChain: dupOfChain })) ? 'page_duplicate' : 'page_not_merged';
+        const copyOf = hit.find((o) => exactCopy(o.print, page.print, { duplicateOfChain: dupOfChain }));
+        exact = Boolean(copyOf);
+        repeats = (copyOf ?? hit[0]!).owner;
+        reason = 'page_duplicate';
       }
     }
-    if (!reason && (selfComplete(page.print) || creditKind(page.print))) silentBreak = true;
+    // A whole invoice / credit note after an OPEN document may be a carried-
+    // forward page 2, a crisp re-shot or a discount page: a person (round 5).
+    if (!reason && (selfComplete(page.print) || creditKind(page.print))) {
+      if (standaloneHead) silentBreak = true;
+      else reason = 'page_not_merged';
+    }
     if (!reason && !silentBreak && broken) reason = 'page_not_merged';
     if (reason) {
-      flagged.push({ invoiceId: page.invoiceId, reason });
-      // An exact copy is just a copy: it does not cut the document.
-      if (reason !== 'page_duplicate') broken = true;
+      flagged.push({ invoiceId: page.invoiceId, reason, ...(repeats ? { repeats } : {}) });
+      // An exact copy is just a copy: it does not cut the document; a near-copy does.
+      if (!(reason === 'page_duplicate' && exact)) broken = true;
     } else if (silentBreak) {
       broken = true; // its own complete invoice / credit note: matched alone, not a question
     } else {
@@ -802,7 +820,7 @@ export async function settleDocumentPages(
     }
 
     for (const f of flagged) {
-      await tx
+      const set = await tx
         .update(ingestDocuments)
         .set({ error: f.reason, updatedAt: new Date() })
         .where(
@@ -811,7 +829,17 @@ export async function settleDocumentPages(
             eq(ingestDocuments.invoiceId, f.invoiceId),
             sql`${ingestDocuments.error} is null`,
           ),
-        );
+        )
+        .returning({ id: ingestDocuments.id });
+      // The chain page a held duplicate repeats: the inbox links it, and only it
+      // may take the number back when the copy is deleted (round 5).
+      if (set.length > 0 && f.reason === 'page_duplicate' && f.repeats) {
+        await tx.execute(sql`
+          update ${invoices}
+          set ocr_payload = coalesce(ocr_payload, '{}'::jsonb) || jsonb_build_object('raw',
+                coalesce(ocr_payload -> 'raw', '{}'::jsonb) || jsonb_build_object('pageRepeats', jsonb_build_object('invoiceId', ${f.repeats}::text)))
+          where id = ${f.invoiceId} and restaurant_id = ${restaurantId}`);
+      }
     }
 
     // Pages that were held for this decision and stay their own invoice get

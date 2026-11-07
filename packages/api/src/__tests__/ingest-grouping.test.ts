@@ -388,7 +388,7 @@ describe('review fixes: false-leak paths (CRITICAL-1/2, HIGH-1)', () => {
     const [p1, p2] = await pages(2, 'h1');
     await ocr(p1!, { ...ACME, lineTotal: '77.00', totalInclVat: '90.86' });
     const s2 = await ocr(p2!, { ...ACME, duplicateOf: { invoiceId: p1!, invoiceNumber: 'A-100' }, lineTotal: '77.00', totalInclVat: '90.86' });
-    expect(s2.flagged).toEqual([{ invoiceId: p2, reason: 'page_duplicate' }]);
+    expect(s2.flagged).toEqual([{ invoiceId: p2, reason: 'page_duplicate', repeats: p1 }]);
     expect(await invoicesOfA()).toHaveLength(2);
     const [dup] = await ownerDb.select().from(invoices).where(eq(invoices.id, p2!));
     expect(dup!.status).toBe('parsed'); // the duplicate hold stays for a human
@@ -812,7 +812,7 @@ describe('re-review fixes (C-1, C-2, H-1)', () => {
       duplicateOf: { invoiceId: p1!, invoiceNumber: 'A-100' },
       lines: [{ qty: '3', total: '77.10', desc: 'עגבניות שרי' }],
     });
-    expect(s2.flagged).toEqual([{ invoiceId: p2, reason: 'page_duplicate' }]);
+    expect(s2.flagged).toEqual([{ invoiceId: p2, reason: 'page_duplicate', repeats: p1 }]);
     expect(s2.hold).toBe(true); // never auto-matched
     expect(await invoicesOfA()).toHaveLength(2);
   });
@@ -830,7 +830,7 @@ describe('re-review fixes (C-1, C-2, H-1)', () => {
       duplicateOf: { invoiceId: p1!, invoiceNumber: 'A-100' },
       lines: [{ qty: '3', total: '77.10' }, { qty: '2', total: '40.00' }],
     });
-    expect(s.flagged).toEqual([{ invoiceId: re, reason: 'page_duplicate' }]);
+    expect(s.flagged).toEqual([{ invoiceId: re, reason: 'page_duplicate', repeats: p1 }]);
     expect(await pdfPagesOf(p1!)).toBe(2);
   });
 
@@ -842,7 +842,7 @@ describe('re-review fixes (C-1, C-2, H-1)', () => {
     const re2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('h1c-reshot2')]), at(3)));
     expect((await ocr(re2, { ...NOHEAD, lines: L2 })).hold).toBe(true); // page 1 is being re-read
     const s1 = await ocr(p1!, ACME); // the composed re-OCR settles the cluster
-    expect(s1.flagged).toEqual([{ invoiceId: re2, reason: 'page_duplicate' }]);
+    expect(s1.flagged).toEqual([{ invoiceId: re2, reason: 'page_duplicate', repeats: p1 }]);
     expect(await pdfPagesOf(p1!)).toBe(2);
     expect(matchCalls).not.toContain(re2);
   });
@@ -881,10 +881,13 @@ describe('round-3 fixes (HIGH chain identity, MEDIUM samePage, inbox recourse)',
     expect((await invoicesOfA()).map((i) => i.id).sort()).toEqual([p1, p3].sort());
   });
 
-  it('HIGH: page 1 with name + ח.פ. and no number still takes a page 2 that adds the number with the SAME name + ח.פ.', async () => {
+  it('round 5 (was round 3): page 1 with name + ח.פ. and no number does NOT take a page 2 that adds a number — maybe the next invoice', async () => {
     const [p1, p2] = await pages(2, 'r3h3');
     await ocr(p1!, { ...ACME, invoiceNumber: null });
-    expect(await ocr(p2!, { ...ACME, invoiceNumber: 'A-900' })).toMatchObject({ absorbed: true, mergedInto: p1 });
+    expect(await ocr(p2!, { ...ACME, invoiceNumber: 'A-900' })).toMatchObject({
+      absorbed: false,
+      flagged: [{ invoiceId: p2, reason: 'page_not_merged' }],
+    });
   });
 
   it('round 4: a page that REPEATS page 1\'s items is NEVER merged (in doubt, a person decides)', async () => {
@@ -896,11 +899,11 @@ describe('round-3 fixes (HIGH chain identity, MEDIUM samePage, inbox recourse)',
     expect(s2.flagged).toHaveLength(1);
   });
 
-  it('round 4: an equal printed total is overlap enough — never merged, but not proven a copy (page_not_merged)', async () => {
+  it('round 5: an equal printed total is overlap enough — never merged; held as a possible duplicate (never billed twice)', async () => {
     const [p1, p2] = await pages(2, 'r3m2');
     await ocr(p1!, { ...ACME, invoiceNumber: 'A-920', totalInclVat: '500.00' });
     const s2 = await ocr(p2!, { ...ACME, duplicateOf: { invoiceId: p1!, invoiceNumber: 'A-920' }, totalInclVat: '500.00' });
-    expect(s2).toMatchObject({ absorbed: false, flagged: [{ invoiceId: p2, reason: 'page_not_merged' }] });
+    expect(s2).toMatchObject({ absorbed: false, hold: true, flagged: [{ invoiceId: p2, reason: 'page_duplicate', repeats: p1 }] });
   });
 
   it("MEDIUM: a page is never a 'duplicate' of a FLAGGED other-supplier page; it is just not merged", async () => {
@@ -1056,7 +1059,7 @@ describe('round 4 · decidePages (pure): in doubt, a person — never a merge', 
   it('HIGH-1 c1: an exact re-shot whose number was lost to glare → page_duplicate, not page 2', () => {
     expect(verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { lines: L5 })])).toEqual({
       merged: [],
-      flagged: [{ invoiceId: 'p2', reason: 'page_duplicate' }],
+      flagged: [{ invoiceId: 'p2', reason: 'page_duplicate', repeats: 'p1' }],
     });
   });
 
@@ -1067,12 +1070,12 @@ describe('round 4 · decidePages (pure): in doubt, a person — never a merge', 
     expect(v.flagged[0]!.invoiceId).toBe('p2');
   });
 
-  it('HIGH-1 c3 / c3b: a cropped first shot, or a cropped re-shot, overlaps → page_not_merged', () => {
+  it('HIGH-1 c3 / c3b: a cropped first shot, or a cropped re-shot, overlaps → held possible duplicate (round 5)', () => {
     expect(verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5.slice(0, 3) }), H('p2', { lines: L5 })]).flagged).toEqual([
-      { invoiceId: 'p2', reason: 'page_not_merged' },
+      { invoiceId: 'p2', reason: 'page_duplicate', repeats: 'p1' },
     ]);
     expect(verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { lines: L5.slice(1, 4) })]).flagged).toEqual([
-      { invoiceId: 'p2', reason: 'page_not_merged' },
+      { invoiceId: 'p2', reason: 'page_duplicate', repeats: 'p1' },
     ]);
   });
 
@@ -1084,7 +1087,7 @@ describe('round 4 · decidePages (pure): in doubt, a person — never a merge', 
     const note = L5.map((l) => ({ qty: l.qty, total: '', desc: l.desc }));
     expect(verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { lines: note })])).toEqual({
       merged: [],
-      flagged: [{ invoiceId: 'p2', reason: 'page_not_merged' }],
+      flagged: [{ invoiceId: 'p2', reason: 'page_duplicate', repeats: 'p1' }],
     });
   });
 
@@ -1107,28 +1110,40 @@ describe('round 4 · decidePages (pure): in doubt, a person — never a merge', 
     expect(v.flagged).toContainEqual({ invoiceId: 'p3', reason: 'page_not_merged' });
   });
 
-  it("LOW-12: a reversed invoice whose footer page 1 shows only the ח.פ. takes the header page on an exact ח.פ. match", () => {
+  it('round 5 (was LOW-12): a footer-only page 1 (ח.פ.) does NOT take a header page bringing a number — a person decides', () => {
     expect(
       verdict([
         H('p1', { businessId: '510001234', lines: L5.slice(0, 2) }),
         H('p2', { ...TNUVA, number: 'A-5', lines: OTHERL }),
-      ]).merged,
-    ).toEqual(['p2']);
+      ]),
+    ).toEqual({ merged: [], flagged: [{ invoiceId: 'p2', reason: 'page_not_merged' }] });
   });
 
   it('MEDIUM-7: a self-complete number-less invoice absorbs nothing and is never absorbed; a credit note never merges', () => {
     const complete = { lines: OTHERL, totalExclVat: '274.00' };
     expect(verdict([H('p1', { ...TNUVA, ...complete }), H('p2', { lines: L5.slice(0, 1) })]).merged).toEqual([]);
-    expect(verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { ...complete })])).toEqual({ merged: [], flagged: [] });
+    // round 5: after an OPEN document a whole invoice is a question, never silent
+    expect(verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { ...complete })])).toEqual({
+      merged: [],
+      flagged: [{ invoiceId: 'p2', reason: 'page_not_merged' }],
+    });
     const credit: LineIn[] = [{ qty: '1', total: '-50.00', desc: 'זיכוי החזרה' }];
     expect(verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { lines: credit })]).merged).toEqual([]);
   });
 
-  it('MEDIUM-6: two different standing-order pages (an overcharged line) are not an exact copy → page_not_merged, never page_duplicate', () => {
+  it('MEDIUM-6 (round 5): an overcharged near-copy is held as a possible duplicate (never matched), and it cuts the chain', () => {
     const overcharged = L5.map((l, i) => (i === 0 ? { ...l, total: '156.00' } : l));
     expect(verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { lines: overcharged })]).flagged).toEqual([
-      { invoiceId: 'p2', reason: 'page_not_merged' },
+      { invoiceId: 'p2', reason: 'page_duplicate', repeats: 'p1' },
     ]);
+    const v = verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { lines: overcharged }), H('p3', { lines: OTHERL })]);
+    expect(v).toEqual({
+      merged: [],
+      flagged: [
+        { invoiceId: 'p2', reason: 'page_duplicate', repeats: 'p1' },
+        { invoiceId: 'p3', reason: 'page_not_merged' },
+      ],
+    });
   });
 });
 
@@ -1158,7 +1173,7 @@ describe('round 4 · DB', () => {
     await writeOcr(copy!, { ...ACME, invoiceNumber: 'A-990', lines: L }); // read first, took the number
     await writeOcr(keep!, { ...ACME, duplicateOf: { invoiceId: copy!, invoiceNumber: 'A-990' }, lines: L });
     const s = await settle(keep!);
-    expect(s.flagged).toEqual([{ invoiceId: copy, reason: 'page_duplicate' }]);
+    expect(s.flagged).toEqual([{ invoiceId: copy, reason: 'page_duplicate', repeats: keep }]);
     const [dCopy] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, copy!));
     matchCalls = [];
     await withRestaurant(appDb, A.restaurantId, (tx) =>
@@ -1185,5 +1200,91 @@ describe('round 4 · DB', () => {
     );
     expect(code).toBe('multi_page');
     expect(await ownerDb.select().from(invoices).where(eq(invoices.id, p1!))).toHaveLength(1);
+  });
+});
+
+describe('round 5 · decidePages (pure): HIGH money findings', () => {
+  it('HIGH silentBreak: a carried-forward page 2 that "adds up" after an open document → page_not_merged, never silent', () => {
+    const carried = { lines: OTHERL, totalExclVat: '274.00' }; // its lines add up to its own subtotal
+    expect(verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', carried)])).toEqual({
+      merged: [],
+      flagged: [{ invoiceId: 'p2', reason: 'page_not_merged' }],
+    });
+  });
+
+  it('HIGH silentBreak: a discount / credit page after an open document → page_not_merged, never silent', () => {
+    const discount: LineIn[] = [{ qty: '1', total: '-35.00', desc: 'הנחה' }];
+    expect(verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { lines: discount })]).flagged).toEqual([
+      { invoiceId: 'p2', reason: 'page_not_merged' },
+    ]);
+  });
+
+  it('silentBreak stays silent only when page 1 is itself a whole invoice (two separate invoices)', () => {
+    const whole = { lines: OTHERL, totalExclVat: '274.00' };
+    const other = { lines: L5, totalExclVat: L5.reduce((n, l) => n + Number(l.total), 0).toFixed(2) };
+    expect(verdict([H('p1', { ...TNUVA, ...whole }), H('p2', { ...other })])).toEqual({ merged: [], flagged: [] });
+  });
+
+  it('HIGH two invoices: page 1 without a number never takes a page bringing one (VAT-inclusive lines miss selfComplete)', () => {
+    const vatIncl: LineIn[] = OTHERL.map((l) => ({ ...l, total: String((Number(l.total) * 1.17).toFixed(2)) }));
+    expect(
+      verdict([H('p1', { ...TNUVA, lines: L5.slice(0, 2) }), H('p2', { ...TNUVA, number: 'A-77', lines: vatIncl, totalExclVat: '274.00' })]),
+    ).toEqual({ merged: [], flagged: [{ invoiceId: 'p2', reason: 'page_not_merged' }] });
+  });
+
+  it('HIGH near-copy: an overlapping page records the chain page it repeats (the delete keeper)', () => {
+    const cropped = L5.slice(0, 3);
+    const v = verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { lines: cropped })]);
+    expect(v.flagged).toEqual([{ invoiceId: 'p2', reason: 'page_duplicate', repeats: 'p1' }]);
+  });
+});
+
+describe('round 5 · DB: HIGH money findings', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+    delayedCalls = [];
+  });
+
+  it('HIGH near-copy: an overcharged near-copy is HELD (never matched) and can be deleted in the inbox', async () => {
+    const [p1, p2] = await pages(2, 'r5nc');
+    const L = [
+      { qty: '5', total: '120.00', desc: 'חלב 3%' },
+      { qty: '2', total: '30.00', desc: 'לחם אחיד' },
+    ];
+    await writeOcr(p1!, { ...ACME, invoiceNumber: 'A-551', lines: L });
+    await writeOcr(p2!, { ...ACME, invoiceNumber: null, lines: [{ ...L[0]!, total: '126.00' }, L[1]!] });
+    const s = await settle(p2!);
+    expect(s).toMatchObject({ absorbed: false, hold: true, flagged: [{ invoiceId: p2, reason: 'page_duplicate', repeats: p1 }] });
+    expect(matchCalls).not.toContain(p2);
+    const [d2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, p2!));
+    await withRestaurant(appDb, A.restaurantId, (tx) =>
+      resolvePageFlag(tx, { restaurantId: A.restaurantId, documentId: d2!.id, action: 'delete_duplicate', userId: A.ownerUserId }, { enqueueMatch: async (j) => void matchCalls.push(j.invoiceId) }),
+    );
+    expect(await ownerDb.select().from(invoices).where(eq(invoices.id, p2!))).toHaveLength(0);
+    const [k] = await ownerDb.select().from(invoices).where(eq(invoices.id, p1!));
+    expect(k!.invoiceNumber).toBe('A-551');
+  });
+
+  it('HIGH keeper: deleting the copy un-blanks ONLY the chain page it repeats; an unrelated re-send stays blanked and unmatched', async () => {
+    const [keep, copy] = await pages(2, 'r5k');
+    const L = [{ qty: '6', total: '66.00', desc: 'פלפל אדום' }];
+    await writeOcr(copy!, { ...ACME, invoiceNumber: 'A-991', lines: L }); // read first, took the number
+    await writeOcr(keep!, { ...ACME, duplicateOf: { invoiceId: copy!, invoiceNumber: 'A-991' }, lines: L });
+    // an unrelated re-send an hour later (another cluster), also blanked against the copy
+    const resend = await invoiceOf(await send(ch.wa, wa([jpegBytes('r5k-resend')]), at(60)));
+    await writeOcr(resend, { ...ACME, duplicateOf: { invoiceId: copy!, invoiceNumber: 'A-991' }, lines: L });
+    expect((await settle(keep!)).flagged).toEqual([{ invoiceId: copy, reason: 'page_duplicate', repeats: keep }]);
+    const [dCopy] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, copy!));
+    matchCalls = [];
+    await withRestaurant(appDb, A.restaurantId, (tx) =>
+      resolvePageFlag(tx, { restaurantId: A.restaurantId, documentId: dCopy!.id, action: 'delete_duplicate', userId: A.ownerUserId }, { enqueueMatch: async (j) => void matchCalls.push(j.invoiceId) }),
+    );
+    expect(matchCalls).toEqual([keep]);
+    const [k] = await ownerDb.select().from(invoices).where(eq(invoices.id, keep!));
+    expect(k!.invoiceNumber).toBe('A-991');
+    const [r] = await ownerDb.select().from(invoices).where(eq(invoices.id, resend));
+    expect(r!.invoiceNumber).toBeNull();
+    expect((r!.ocrPayload as { raw?: { duplicateOf?: { invoiceId?: string } } }).raw?.duplicateOf?.invoiceId).toBe(keep);
   });
 });

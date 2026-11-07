@@ -88,13 +88,22 @@ export async function resolvePageFlag(
         )
         .limit(1);
       if (others.length > 0 || recomposed) throw new DocumentError('multi_page');
-      // An invoice the worker blanked as "a duplicate of THIS copy" keeps the
-      // number: it takes it over, loses the marker, and is matched.
-      const keepers = (await tx.execute(sql`
+      // Invoices the worker blanked as "a duplicate of THIS copy". Only the
+      // in-cluster chain page the copy repeats (recorded by settle) takes the
+      // number back and is matched; any other (an unrelated re-send) stays
+      // blanked, its marker re-pointed at that keeper (round 5).
+      const [self] = (await tx.execute(sql`
+        select ocr_payload -> 'raw' -> 'pageRepeats' ->> 'invoiceId' as repeats
+        from ${invoices} where id = ${invoiceId} and restaurant_id = ${restaurantId}`)) as unknown as Array<{ repeats: string | null }>;
+      const repeats = self?.repeats ?? null;
+      const blanked = (await tx.execute(sql`
         select id, ocr_payload from ${invoices}
         where restaurant_id = ${restaurantId} and id <> ${invoiceId}
           and ocr_payload -> 'raw' -> 'duplicateOf' ->> 'invoiceId' = ${invoiceId}
+        order by id
         for update`)) as unknown as Array<{ id: string; ocr_payload: { raw?: Record<string, unknown> } | null }>;
+      const keepers = blanked.filter((k) => k.id === repeats);
+      const bystanders = blanked.filter((k) => k.id !== repeats);
       // Clear the flags on ALL its rows first (ON DELETE SET NULL clears invoice_id after the retire).
       await tx
         .update(ingestDocuments)
@@ -125,6 +134,15 @@ export async function resolvePageFlag(
           after: { invoiceNumber: dup?.invoiceNumber ?? inv.invoiceNumber ?? null } as never,
         });
         released.push(k.id);
+      }
+      for (const o of bystanders) {
+        if (keepers.length === 0) continue; // nothing to point at: left as it is
+        const raw = { ...(o.ocr_payload?.raw ?? {}) };
+        raw.duplicateOf = { ...(raw.duplicateOf as Record<string, unknown>), invoiceId: keepers[0]!.id };
+        await tx
+          .update(invoices)
+          .set({ ocrPayload: { ...(o.ocr_payload ?? {}), raw } as never, updatedAt: new Date() })
+          .where(and(eq(invoices.id, o.id), eq(invoices.restaurantId, restaurantId)));
       }
       return { invoiceId: null, match: false, released };
     }
