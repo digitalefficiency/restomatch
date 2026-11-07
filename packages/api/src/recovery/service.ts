@@ -12,7 +12,7 @@ import {
 } from '@restomatch/db';
 import { assertSupplierOwned } from '../tenant';
 import { CLAIM_ANSWER_DAYS, NEVER_CLAIMABLE_TYPES } from '../lib/claims';
-import { awaitingChaseSql, pastAnswerWindowSql } from './overdue';
+import { REMIND_EVERY_CALENDAR_DAYS, awaitingChaseSql, pastAnswerWindowSql } from './overdue';
 import {
   AWAITING_SUPPLIER,
   CREDITABLE,
@@ -322,7 +322,7 @@ export interface RecoveryClaimRow {
 /** Waiting on the supplier this many days after the letter (or the claim) ⇒ overdue (owner 31.10: a week). */
 export const OVERDUE_DAYS = CLAIM_ANSWER_DAYS;
 /** Do not chase the same claim more often than this. */
-export const REMIND_EVERY_DAYS = 7;
+export const REMIND_EVERY_DAYS = REMIND_EVERY_CALENDAR_DAYS;
 /** Upper bound for one page of the claims LIST (totals never truncate — see computeRecoverySummary). */
 export const MAX_CLAIMS = 5000;
 

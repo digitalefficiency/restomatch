@@ -132,3 +132,26 @@ describe('AU-03 · the job and the badge use the one rule; ₪ summed per claim'
     expect((await findOverdue(db, T.restaurantId, NOW)).count).toBe(1);
   });
 });
+
+describe('AU-03 · owner cadence (signed 7.11): first reminder on day 8, then every 7 calendar days, no day-3 note', () => {
+  it('pure isRechaseDue counts calendar days, not instants', async () => {
+    const { isRechaseDue } = await import('../recovery/overdue');
+    expect(isRechaseDue(null, NOW.toISOString())).toBe(true);
+    // Last week's run at 08:30 IL; this week's at 08:29 IL — still due (an instant rule said no).
+    expect(isRechaseDue('2026-10-18T06:30:00.000Z', '2026-10-25T06:29:00.000Z')).toBe(true);
+    expect(isRechaseDue('2026-10-19T06:30:00.000Z', '2026-10-25T06:29:00.000Z')).toBe(false);
+  });
+
+  it('the job: day 3 nothing, day 7 nothing, day 8 first digest, day 14 nothing, day 15 again', async () => {
+    const { enqueueRecoveryReminders } = await import('../recovery/reminders');
+    const letter = new Date('2026-10-01T07:00:00.000Z'); // 01.10 10:00 IL
+    await addClaim(db, T, { status: 'letter_sent', letterSentAt: letter, claimedAt: letter });
+    const at = (day: string, hhmm = '06:30') => new Date(`2026-10-${day}T${hhmm}:00.000Z`);
+    const run = async (d: Date) => (await enqueueRecoveryReminders(db, { restaurantId: T.restaurantId, now: d })).claims;
+    expect(await run(at('04'))).toBe(0); // day 3
+    expect(await run(at('08'))).toBe(0); // day 7
+    expect(await run(at('09'))).toBe(1); // day 8: first reminder
+    expect(await run(at('15'))).toBe(0); // 6 days later
+    expect(await run(at('16', '06:29'))).toBe(1); // 7 calendar days later, a minute earlier
+  });
+});

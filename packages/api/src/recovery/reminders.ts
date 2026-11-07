@@ -16,8 +16,8 @@ import { renderEmail, ilsSpan, type RenderedEmail } from '../notifications/templ
 import type { ReportLocale } from '../reports/money';
 import { chaseMoney, ddMM } from './chase';
 import { creditSuggestions } from './creditSuggest';
-import { CHASE_DEFAULTS, awaitingChaseSql, chaseKindOf, type ChaseKind, type ChaseOptions } from './overdue';
-import { OVERDUE_DAYS, REMIND_EVERY_DAYS, syncClaims } from './service';
+import { CHASE_DEFAULTS, awaitingChaseSql, chaseKindOf, rechaseDueSql, type ChaseKind, type ChaseOptions } from './overdue';
+import { OVERDUE_DAYS, syncClaims } from './service';
 
 /**
  * AU-03 · the 08:30 recovery digest (catalogue A12). A claim still waiting on
@@ -74,8 +74,7 @@ export async function findOverdue(
            c.letter_sent_at,
            ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date
              - (COALESCE(c.letter_sent_at, c.claimed_at) AT TIME ZONE tz.tz)::date) AS waiting,
-           (c.last_reminder_at IS NULL
-             OR c.last_reminder_at < ${now.toISOString()}::timestamptz - make_interval(days => ${REMIND_EVERY_DAYS})) AS due
+           ${rechaseDueSql(now, sql`tz.tz`)} AS due
     FROM recovery_claims c
     CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) tz
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}

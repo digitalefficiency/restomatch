@@ -110,3 +110,22 @@ export function pastAnswerWindowSql(now: Date, tz: SQL): SQL {
   return sql`((${now.toISOString()}::timestamptz AT TIME ZONE ${tz})::date
     - (COALESCE(c.letter_sent_at, c.claimed_at) AT TIME ZONE ${tz})::date) > ${CLAIM_ANSWER_DAYS}`;
 }
+
+/**
+ * Owner rule (signed 7.11): the first reminder after 7 full days (day 8), then
+ * every REMIND_EVERY_DAYS (7) — counted in whole calendar days like the
+ * overdue boundary, never as an instant interval (an 08:30 run a minute
+ * earlier than last week's must not slip a week). No day-3 courtesy note.
+ */
+export const REMIND_EVERY_CALENDAR_DAYS = 7;
+
+export function isRechaseDue(lastReminderAt: string | null, nowIso: string, tz = 'Asia/Jerusalem'): boolean {
+  return lastReminderAt == null || calendarDaysBetween(lastReminderAt, nowIso, tz) >= REMIND_EVERY_CALENDAR_DAYS;
+}
+
+/** SQL twin of `isRechaseDue` (alias c). */
+export function rechaseDueSql(now: Date, tz: SQL): SQL {
+  return sql`(c.last_reminder_at IS NULL
+    OR ((${now.toISOString()}::timestamptz AT TIME ZONE ${tz})::date
+        - (c.last_reminder_at AT TIME ZONE ${tz})::date) >= ${REMIND_EVERY_CALENDAR_DAYS})`;
+}
