@@ -14,7 +14,7 @@
     "bench": "tsx src/bench/run.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.69.0",
+    "@anthropic-ai/sdk": "^0.137.0",
     "@restomatch/types": "workspace:*",
     "zod": "^3.24.1"
   },
