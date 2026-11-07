@@ -5,7 +5,13 @@
  * Every check is binary. `moneyExact` is the one that matters for RestoMatch:
  * every line total and the three invoice totals equal to the agora — a wrong
  * amount becomes a wrong leak figure.
+ *
+ * Consolidated invoices (חשבונית מרכזת): when the truth states `consolidation`,
+ * the pipeline's classification is checked; listed delivery-note numbers and the
+ * billing period are checked when the truth has them.
  */
+import type { DocumentKind } from '../providers/invoiceSchema';
+
 export interface TruthLine {
   sku: string;
   rawDescription: string;
@@ -22,6 +28,12 @@ export interface TruthInvoice {
   allocationNumber?: string | null;
   lines: TruthLine[];
   totals: { subtotal: number; vat: number; total: number };
+  documentKind?: DocumentKind;
+  /** What the pipeline must classify the document as. */
+  consolidation?: 'regular' | 'consolidated';
+  deliveryNotes?: Array<{ number: string; date?: string; totalExclVat?: number }>;
+  periodStart?: string;
+  periodEnd?: string;
 }
 
 export interface ExtractedInvoice {
@@ -31,6 +43,11 @@ export interface ExtractedInvoice {
   allocationNumber?: string | null;
   lines?: Array<Partial<Omit<TruthLine, 'sku'>> & { sku?: string | null }> | null;
   totals?: Partial<TruthInvoice['totals']> | null;
+  /** The pipeline's classification (OcrPipelineResult.reconciled.consolidation). */
+  consolidation?: string | null;
+  deliveryNotes?: Array<{ number?: string | number | null; totalExclVat?: number | null }> | null;
+  periodStart?: string | null;
+  periodEnd?: string | null;
 }
 
 export interface ScoreResult {
@@ -93,6 +110,23 @@ export function scoreExtraction(truth: TruthInvoice, got: ExtractedInvoice): Sco
   }
   check('lines.count', (got.lines ?? []).length === truth.lines.length);
   for (const k of ['subtotal', 'vat', 'total'] as const) check(`totals.${k}`, sameMoney(got.totals?.[k], truth.totals[k]), true);
+
+  if (truth.consolidation) check('consolidation', got.consolidation === truth.consolidation);
+  if (truth.deliveryNotes?.length) {
+    const gotNotes = new Map(
+      (got.deliveryNotes ?? []).map((n) => [String(n.number ?? '').replace(/\D/g, ''), n] as const),
+    );
+    for (const n of truth.deliveryNotes) {
+      const g = gotNotes.get(n.number);
+      check(`deliveryNote ${n.number}`, g !== undefined);
+      if (n.totalExclVat !== undefined) {
+        check(`deliveryNote ${n.number}.totalExclVat`, sameMoney(g?.totalExclVat, n.totalExclVat), true);
+      }
+    }
+    check('deliveryNotes.count', gotNotes.size === truth.deliveryNotes.length);
+  }
+  if (truth.periodStart) check('periodStart', got.periodStart === truth.periodStart);
+  if (truth.periodEnd) check('periodEnd', got.periodEnd === truth.periodEnd);
 
   return { checks, passed, accuracy: checks ? passed / checks : 0, moneyExact, missingLines, failures };
 }
