@@ -19,6 +19,7 @@ export const FACTS = {
   checked: 35, // checked invoices (dashboard "13 מתוך 35")
   beerFrom: 520, // leak detective: beer keg baseline ₪520.00
   beerTo: 575, // last price ₪575.00 (+10.6%)
+  apprAmount: 104.8, // /dashboard/approvals top card: beer keg ST-24108, "ההפסד המוערך 104.80 ₪"
   chainLeakPct: '2.9%', // /dashboard/chain: worst branch (Jerusalem ₪975 of ₪33,056) — seed:chain-demo
   pilotTarget: '1.5%', // North Star / pilot target (docs/ICP.md, AGENTS.md)
 };
@@ -114,6 +115,8 @@ const he = {
     url: SITE,
   },
   loop: { chip: 'נתוני הדגמה' },
+  // portrait hero loop: partner wording toward suppliers — a credit *request*, not a demand
+  loopVertical: { held: 'ממתין לאישור שלך:', claim: 'בקשת זיכוי לספק — בלחיצה' },
 };
 
 const en: typeof he = {
@@ -193,6 +196,7 @@ const en: typeof he = {
     url: SITE,
   },
   loop: { chip: 'Demo data' },
+  loopVertical: { held: 'Held for your approval:', claim: 'Credit request to the supplier — one click' },
 };
 
 export const COPY = { he, en };
