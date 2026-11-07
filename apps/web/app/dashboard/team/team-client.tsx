@@ -33,11 +33,14 @@ export function TeamClient({
   initial,
   currentUserId,
   canManage,
+  readOnly = false,
 }: {
   initial: TeamData;
   currentUserId: string;
   /** Owner: invites + roles + removal. Manager: read-only roster + language. */
   canManage: boolean;
+  /** Bookkeeper: names and roles only, no controls at all. */
+  readOnly?: boolean;
 }) {
   const t = useT(team);
   const locale = useLocale();
@@ -179,7 +182,7 @@ export function TeamClient({
       ) : (
         <Card padding="md" className="flex items-center gap-3 border-line text-sm text-muted">
           <Info className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-          {t('managerNote')}
+          {readOnly ? t('readOnlyNote') : t('managerNote')}
         </Card>
       )}
 
@@ -193,7 +196,7 @@ export function TeamClient({
               <li key={m.userId} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
                   <p className="truncate font-medium text-ink">
-                    <span {...originalProps(m.name)}>{m.name || m.email}</span>
+                    <span {...originalProps(m.name)}>{m.name || m.email || '—'}</span>
                     {m.userId === currentUserId ? (
                       <span className="ms-1 text-xs text-subtle">{t('members.you')}</span>
                     ) : null}
@@ -203,6 +206,7 @@ export function TeamClient({
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  {readOnly ? null : (
                   <select
                     aria-label={t('members.languageFor', { email: m.email })}
                     value={m.preferredLocale ?? ''}
@@ -224,6 +228,7 @@ export function TeamClient({
                       </option>
                     ))}
                   </select>
+                  )}
                   {canManage ? (
                     <>
                       <select

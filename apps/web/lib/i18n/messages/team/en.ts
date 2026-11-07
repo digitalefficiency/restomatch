@@ -4,6 +4,7 @@ import type { he } from './he';
 export const en: Shape<typeof he> = {
   title: 'Team',
   subtitle: 'Invite staff, set roles and app language, and manage access to the restaurant.',
+  readOnlyNote: 'View only: team names and roles. Invites and changes are made by the owner.',
   managerNote: 'As a manager you can see the team and set each member’s app language. Invites and roles are managed by the owner.',
   invite: {
     title: 'Invite a team member',

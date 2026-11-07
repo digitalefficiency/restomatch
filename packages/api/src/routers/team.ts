@@ -15,7 +15,7 @@ import { canonicalizeEmail } from '../email';
 import { recordAudit } from '../audit';
 import { appError } from '../errors';
 import type { MemberContext } from '../context';
-import { managerProcedure, ownerProcedure, router, userScopedProcedure } from '../trpc';
+import { financeProcedure, managerProcedure, ownerProcedure, router, userScopedProcedure } from '../trpc';
 
 /** Invite link validity. */
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -63,8 +63,10 @@ export const teamRouter = router({
    * Members (memberships ⋈ users) + pending invites for the caller's restaurant.
    * Owner + manager: a manager sees the roster (and may set a member's app
    * language via setMemberLocale) but every roster WRITE stays owner-only.
+   * Bookkeeper (owner decision I3, read-only): names and roles only — no
+   * e-mails, no languages, no pending invites; every write stays FORBIDDEN.
    */
-  list: managerProcedure.query(async ({ ctx }) => {
+  list: financeProcedure.query(async ({ ctx }) => {
     const adminDb = ctx.adminDb ?? ctx.db;
     // Memberships are visible under the tenant RLS policy.
     const memberRows = await ctx.db
@@ -96,6 +98,21 @@ export const teamRouter = router({
       preferredLocale: asLocale(m.preferredLocale),
       createdAt: m.createdAt,
     }));
+
+    if (ctx.session.role === 'bookkeeper') {
+      return {
+        members: members.map((m) => ({ ...m, email: '', preferredLocale: null })),
+        invites: [] as Array<{
+          id: string;
+          email: string;
+          role: (typeof members)[number]['role'];
+          invitedByUserId: string | null;
+          preferredLocale: string | null;
+          expiresAt: Date;
+          createdAt: Date;
+        }>,
+      };
+    }
 
     const invites = await ctx.db
       .select({
