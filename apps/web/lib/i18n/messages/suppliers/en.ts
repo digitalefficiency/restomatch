@@ -48,6 +48,7 @@ export const en: Shape<typeof he> = {
     loadError: 'Couldn’t load suppliers.',
   },
   form: {
+    unsaved: 'You have unsaved changes',
     newTitle: 'New supplier',
     detailsTitle: 'Supplier details',
     name: 'Supplier name (Hebrew, as on invoices)',
@@ -129,6 +130,8 @@ export const en: Shape<typeof he> = {
     firstOrder: 'First order',
   },
   schedule: {
+    saveNeedsWindow: 'Add at least one order window to save.',
+    saveBlocked: 'Complete the marked fields in every window to save.',
     loading: 'Loading order schedule…',
     emptyTitle: 'No order schedule set',
     emptyBody:
@@ -282,6 +285,11 @@ export const en: Shape<typeof he> = {
     pickDays: 'Type a number of days (1–365).',
     typeTerms: 'Type the terms, or pick from the list.',
     hint: 'EOM+30 = end of the invoice month plus 30 days. The payment date is computed from it.',
+  },
+  time: {
+    other: 'Other',
+    typed: '{label} · time (24 h)',
+    invalid: 'Type a time between 00:00 and 23:59',
   },
   bizId: {
     bizLength: 'A company number has 9 digits',

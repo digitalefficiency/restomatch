@@ -1,8 +1,9 @@
 'use client';
 
 import { TermsPicker } from './terms-picker';
+import { TimeField } from './time-field';
 import { businessIdProblem, termsProblem, termsStringOf, termsValueOf } from './terms';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { WithOriginal } from '@/lib/i18n/original';
 import Link from 'next/link';
 import type { DeliverySchedule } from '@restomatch/db';
@@ -341,6 +342,17 @@ export function SupplierForm({
   const [terms, setTerms] = useState(() => termsValueOf(initial.paymentTerms));
   const bizErr = form.businessId !== initial.businessId ? businessIdProblem(form.businessId) : null;
   const blocked = errors.length > 0 || bizErr !== null || termsProblem(terms) !== null;
+  // Dirty guard: leaving the page with unsaved edits asks first (beforeunload).
+  const dirty = JSON.stringify(form) !== JSON.stringify(initial);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
   const set =
     (k: Exclude<keyof FormState, 'schedule' | 'vatRate'>) => (e: React.ChangeEvent<HTMLInputElement>) =>
       setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -351,8 +363,8 @@ export function SupplierForm({
       else next[day] = '08:00';
       return { ...f, schedule: next };
     });
-  const setDayTime = (day: Day) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((f) => ({ ...f, schedule: { ...f.schedule, [day]: e.target.value } }));
+  const setDayTime = (day: Day) => (v: string) =>
+    setForm((f) => ({ ...f, schedule: { ...f.schedule, [day]: v } }));
   const showErr = (k: 'nameRequired' | 'emailInvalid') => touched && errors.includes(k);
 
   return (
@@ -464,13 +476,13 @@ export function SupplierForm({
         </Field>
         <fieldset className="sm:col-span-2">
           <legend className="mb-2 text-sm font-medium text-ink">{t('form.deliveryTitle')}</legend>
-          <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 sm:grid-cols-4">
+          <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
             {DAY_KEYS.map((d) => {
               const active = form.schedule[d] !== undefined;
               return (
                 <div
                   key={d}
-                  className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                  className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
                     active ? 'border-primary/40 bg-primary/5' : 'border-line'
                   }`}
                 >
@@ -485,12 +497,11 @@ export function SupplierForm({
                     {t(`days.${d}`)}
                   </label>
                   {active ? (
-                    <input
-                      type="time"
+                    <TimeField
+                      id={`sup-day-time-${d}`}
+                      label={t(`days.${d}`)}
                       value={form.schedule[d] ?? ''}
                       onChange={setDayTime(d)}
-                      aria-label={t(`days.${d}`)}
-                      className="rounded border border-line-strong bg-surface px-1.5 py-0.5 text-ink tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
                     />
                   ) : null}
                 </div>
@@ -529,7 +540,12 @@ export function SupplierForm({
           {error}
         </p>
       ) : null}
-      <div className="mt-4 flex items-center gap-2">
+      <div className="sticky bottom-0 z-10 -mx-4 mt-4 flex flex-wrap items-center gap-2 border-t border-line bg-surface px-4 py-3 sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0">
+        {dirty ? (
+          <span className="w-full text-xs text-muted sm:w-auto" data-testid="supplier-form-dirty">
+            {t('form.unsaved')}
+          </span>
+        ) : null}
         <Button type="submit" variant="primary" size="sm" loading={submitting}>
           {t('form.save')}
         </Button>

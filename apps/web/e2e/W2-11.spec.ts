@@ -61,6 +61,14 @@ test.describe('owner', () => {
     }
   });
 
+  test('details: 24 h time chips, no native time/number inputs', async ({ page }) => {
+    const errors = collectPageErrors(page);
+    await page.goto(`/dashboard/suppliers/${suppliers[0]!.id}?tab=details`);
+    await expect(page.locator('#days-and-times')).toBeVisible();
+    await expect(page.locator('main input[type="time"], main input[type="number"]')).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
   test('the vendor table: sorted by the 90-day leak, totals = Σ rows', async ({ page }) => {
     const errors = collectPageErrors(page);
     await page.goto('/dashboard/suppliers');

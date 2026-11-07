@@ -50,6 +50,7 @@ export const he = {
     loadError: 'טעינת הספקים נכשלה.',
   },
   form: {
+    unsaved: 'יש שינויים שלא נשמרו',
     newTitle: 'ספק חדש',
     detailsTitle: 'פרטי ספק',
     name: 'שם ספק',
@@ -131,6 +132,8 @@ export const he = {
     firstOrder: 'הזמנה ראשונה',
   },
   schedule: {
+    saveNeedsWindow: 'הוסיפו לפחות חלון הזמנה אחד כדי לשמור.',
+    saveBlocked: 'השלימו את השדות המסומנים בכל חלון כדי לשמור.',
     loading: 'טוען לוח הזמנות…',
     emptyTitle: 'לא הוגדר לוח הזמנות לספק',
     emptyBody:
@@ -284,6 +287,11 @@ export const he = {
     pickDays: 'הקלידו מספר ימים (1–365).',
     typeTerms: 'כתבו את התנאים, או בחרו מהרשימה.',
     hint: 'שוטף+30 = סוף החודש של החשבונית ועוד 30 יום. כך מחושב מועד התשלום.',
+  },
+  time: {
+    other: 'אחר',
+    typed: '{label} · שעה (24 שעות)',
+    invalid: 'הקלידו שעה בין 00:00 ל-23:59',
   },
   bizId: {
     bizLength: 'ח״פ צריך 9 ספרות',
