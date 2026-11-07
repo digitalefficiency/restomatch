@@ -57,7 +57,7 @@ test.describe('owner', () => {
       ['details', 'פרטים'],
     ] as const) {
       await page.goto(`/dashboard/suppliers/${id}?tab=${legacy}`);
-      await expect(page.locator('nav a[aria-current="page"]')).toHaveText(current);
+      await expect(page.getByRole('navigation', { name: 'תצוגת ספק' }).locator('a[aria-current="page"]')).toHaveText(current);
     }
   });
 
