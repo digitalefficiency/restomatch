@@ -16,16 +16,32 @@ export const INVOICE_COMMIT_GRACE_MS: readonly number[] = [250, 500, 1000, 2000,
  * payload), re-checked with a short backoff before it is treated as missing.
  * A payload naming another restaurant's invoice still finds nothing and is
  * refused, only after the grace period instead of at once.
+ *
+ * Also returns the row's scan URL and status: the OCR job fetches the URL on
+ * the ROW (never the payload's `imageUrl` — payloads are not a trust boundary)
+ * and only reads an invoice that is still `ocr_pending`.
  */
+export interface JobInvoice {
+  id: string;
+  supplierId: string | null;
+  rawImageUrl: string | null;
+  status: typeof invoices.$inferSelect.status;
+}
+
 export async function findJobInvoice(
   db: Database,
   restaurantId: string,
   invoiceId: string,
   delaysMs: readonly number[] = INVOICE_COMMIT_GRACE_MS,
-): Promise<{ id: string; supplierId: string | null } | null> {
+): Promise<JobInvoice | null> {
   for (let attempt = 0; ; attempt++) {
     const [row] = await db
-      .select({ id: invoices.id, supplierId: invoices.supplierId })
+      .select({
+        id: invoices.id,
+        supplierId: invoices.supplierId,
+        rawImageUrl: invoices.rawImageUrl,
+        status: invoices.status,
+      })
       .from(invoices)
       .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
       .limit(1);
