@@ -101,6 +101,9 @@ describe('registry (pure)', () => {
         'recoveryBookkeeper',
         'chaseAcknowledged',
         'orderCapture',
+        'priceCreepDigest',
+        'contractExpiry',
+        'priceListDiff',
       ]),
     );
   });
@@ -144,6 +147,11 @@ describe('automationOption', () => {
     expect(automationOption({ automations: { eveningDigest: false } }, 'eveningDigest')).toBe(false);
     expect(automationOption({ automations: { eveningDigest: 'no' } }, 'eveningDigest')).toBe(true);
     expect(automationOption({ automations: [] }, 'supplierDelays')).toBe(true);
+    // AU-13 rows default OFF (orchestrator 7.11)
+    for (const k of ['priceCreepDigest', 'contractExpiry', 'priceListDiff'] as const) {
+      expect(automationOption({}, k)).toBe(false);
+      expect(automationOption({ automations: { [k]: true } }, k)).toBe(true);
+    }
   });
 });
 

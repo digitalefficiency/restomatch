@@ -22,6 +22,10 @@ export const AUTOMATION_OPTION_KEYS = [
   'receiverBrief',
   'recoveryBookkeeper',
   'chaseAcknowledged',
+  // AU-13 (A18) price-creep sections; default OFF until the orchestrator flips them.
+  'priceCreepDigest',
+  'contractExpiry',
+  'priceListDiff',
 ] as const;
 export type AutomationOptionKey = (typeof AUTOMATION_OPTION_KEYS)[number];
 
@@ -178,6 +182,34 @@ export const AUTOMATIONS: ReadonlyArray<AutomationDef> = [
     carriesIls: false,
     outboxMatch: { kind: 'none' },
     requires: 'ingestWhatsapp',
+  },
+  // AU-13 (catalogue A18): sections of the 07:00 price mail. Default OFF (orchestrator 7.11).
+  {
+    id: 'A18',
+    key: 'priceCreepDigest',
+    control: { kind: 'option', option: 'priceCreepDigest', default: false },
+    slot: '07:00',
+    audience: ['owner', 'manager'],
+    carriesIls: true,
+    outboxMatch: { kind: 'prefix', prefix: 'au:A18:' },
+  },
+  {
+    id: 'A18b',
+    key: 'contractExpiry',
+    control: { kind: 'option', option: 'contractExpiry', default: false },
+    slot: '07:00',
+    audience: ['owner', 'manager'],
+    carriesIls: true,
+    outboxMatch: { kind: 'none' },
+  },
+  {
+    id: 'A18c',
+    key: 'priceListDiff',
+    control: { kind: 'option', option: 'priceListDiff', default: false },
+    slot: '07:00',
+    audience: ['owner', 'manager'],
+    carriesIls: true,
+    outboxMatch: { kind: 'none' },
   },
 ];
 

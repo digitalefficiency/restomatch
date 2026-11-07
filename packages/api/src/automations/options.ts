@@ -19,3 +19,6 @@ export function automationOption(settings: unknown, key: AutomationOptionKey): b
   const v = storedAutomationOptions(settings)[key];
   return typeof v === 'boolean' ? v : optionDefault(key);
 }
+
+// The package's public surface in one place (one export line in api/index.ts).
+export { AUTOMATIONS, type AutomationDef, type AutomationOptionKey } from './registry';
