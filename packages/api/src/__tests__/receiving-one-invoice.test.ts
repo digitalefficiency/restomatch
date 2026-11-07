@@ -214,14 +214,22 @@ describe('registerInvoice — one receipt, one invoice', () => {
     expect(late).toEqual({ invoiceId: first.invoiceId, alreadyExisted: true, resumed: true });
   });
 
-  it("round 3 B: an owner's retake records the ₪ it dropped in its audit", async () => {
+  it("round 3 B: an owner's retake records the ₪ it dropped in its audit (leak findings only — round 4)", async () => {
+    // A non-leak finding (a lower price) next to the fixture's: it is not ₪ lost.
+    const [run] = await db.select({ id: matchRuns.id }).from(matchRuns).where(eq(matchRuns.invoiceId, A.invoiceId)).limit(1);
+    await db.insert(discrepancies).values({ matchRunId: run!.id, restaurantId: A.restaurantId, type: 'PRICE_LOWER', severity: 'warn', deltaAmount: '5.00' });
     const rows = await db
-      .select({ delta: discrepancies.deltaAmount })
+      .select({ delta: discrepancies.deltaAmount, type: discrepancies.type, severity: discrepancies.severity, status: discrepancies.resolutionStatus })
       .from(discrepancies)
       .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
       .where(eq(matchRuns.invoiceId, A.invoiceId));
-    expect(rows.length).toBeGreaterThan(0);
-    const leak = rows.reduce((t, r) => t + Math.round(Math.abs(Number(r.delta ?? 0)) * 100), 0);
+    expect(rows.length).toBeGreaterThan(1);
+    const isLeak = (r: (typeof rows)[number]) =>
+      (r.severity === 'warn' || r.severity === 'block') &&
+      r.type !== 'PRICE_LOWER' &&
+      r.type !== 'UNORDERED_ARRIVAL' &&
+      !(r.type === 'DUPLICATE_INVOICE' && r.status === 'rejected');
+    const leak = rows.filter(isLeak).reduce((t, r) => t + Math.round(Math.abs(Number(r.delta ?? 0)) * 100), 0);
     await as(A, 'owner').receiving.registerInvoice({ grId: A.grId, imageUrl: scan('own'), supplierId: A.supplierId });
     const [audit] = await db.select().from(auditLog).where(and(eq(auditLog.entityId, A.invoiceId), eq(auditLog.action, 'receiving.invoice_retaken')));
     expect(audit!.before).toMatchObject({ droppedFindings: rows.length });

@@ -48,6 +48,7 @@ export const he = {
     rematchAfterCount: 'ההתאמה תרוץ כשספירת הקבלה תיסגר.',
     rematchedNote: 'ההתאמה רצה שוב.',
     rematchLater: 'ההתאמה לא רצה הפעם — הריצו אותה שוב מהכפתור למעלה.',
+    rematchAwaitingReview: 'זו אולי חשבונית כפולה — היא ממתינה לבדיקה, וההתאמה תרוץ אחריה.',
     noLinesAddBelow: 'עדיין אין שורות — הוסיפו את שורות החשבונית למטה.',
     newLineDescription: 'תיאור הפריט כפי שמופיע בחשבונית',
     newLineUnit: 'ק״ג / יח׳',

@@ -441,7 +441,9 @@ export async function buildMatchInputForInvoice(
     const poIndex = new Map(poLineInputs.map((p, i) => [p.id, i]));
     const pairs = Object.entries(picks as Record<string, unknown>)
       .filter((e): e is [string, string] => typeof e[1] === 'string' && poIndex.has(e[1]) && invoiceLineInputs.some((l) => l.id === e[0]))
-      .sort((a, b) => poIndex.get(a[1])! - poIndex.get(b[1])!);
+      .sort((a, b) => poIndex.get(a[1])! - poIndex.get(b[1])!)
+      // one invoice line per PO line: a PO line listed twice would be counted twice
+      .filter((e, i, all) => all.findIndex((x) => x[1] === e[1]) === i);
     if (pairs.length > 0) {
       const pickedPo = new Set(pairs.map(([, po]) => po));
       const pickedInv = new Set(pairs.map(([il]) => il));

@@ -114,7 +114,8 @@ export function InvoiceCorrection({
   const updateLine = trpc.receiving.updateInvoiceLine.useMutation({
     onSuccess: (res) => {
       setEditingLine(null);
-      if (res.headerRecomputed) afterManual(t('correction.savedLine'), { rematched: false, ...res });
+      // A hand line (or our header) was re-matched / held: say so, as add / delete do.
+      if (res.headerRecomputed || 'rematched' in res) afterManual(t('correction.savedLine'), { rematched: false, ...res });
       else onOk(t('correction.savedLine'));
     },
     onError: onErr,
@@ -126,7 +127,7 @@ export function InvoiceCorrection({
     msg: string,
     res: {
       rematched: boolean;
-      rematchSkipped?: 'receipt_open' | 'no_lines' | 'refused';
+      rematchSkipped?: 'receipt_open' | 'no_lines' | 'refused' | 'awaiting_review';
       headerRecomputed: boolean;
       totals: { totalExclVat: string | null; vatAmount: string | null; totalInclVat: string | null } | null;
     },
@@ -146,6 +147,8 @@ export function InvoiceCorrection({
           ? ''
         : res.rematchSkipped === 'receipt_open'
           ? t('correction.rematchAfterCount')
+        : res.rematchSkipped === 'awaiting_review'
+          ? t('correction.rematchAwaitingReview')
           : t('correction.rematchLater');
     onOk(note ? `${msg} ${note}` : msg);
   };

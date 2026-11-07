@@ -98,8 +98,11 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   // Discover the PO + assemble the 3-way MatchInput (tolerances/vat/baselines
   // resolved from the restaurant inside the assembler). The receipt's PO first,
   // else a re-match stays on the PO it was matched against.
+  // The receipt's PO is the order the receiver COUNTED: strict (no nearer
+  // order displaces it — the same rule as match.runForInvoice's scan pin).
   const built = await buildMatchInputForInvoice(db, restaurantId, invoiceId, {
     pinnedPoId: data.poId ?? priorRun?.poId ?? null,
+    strictPin: Boolean(data.poId),
   });
   if (!built) return { result: CLEAN, persisted: null, replaced: false, skipped: 'no_lines' };
   // The payload is not a trust boundary. A job's poId names the order that was

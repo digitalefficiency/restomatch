@@ -14,6 +14,7 @@ import {
   products,
   purchaseOrders,
   restaurants,
+  sql,
   suppliers,
   testDbUrl,
   users,
@@ -144,6 +145,17 @@ describe('#216 item 1: a hand line on an open receipt is held, then matched by t
   });
 });
 
+/** Until some backend waits on a lock — no fixed sleep (round 4). */
+async function waitForLockWait(timeoutMs = 10_000) {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const rows = (await db.execute(sql`select count(*)::int as n from pg_locks where not granted`)) as unknown as Array<{ n: number }>;
+    if (rows[0]!.n > 0) return;
+    if (Date.now() > until) throw new Error('no backend waited on a lock');
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
 describe('#216 round 3, K: a match job never writes a run over an invoice sent back to OCR (retake) mid-job', () => {
   it('the persist step re-checks the status under the invoice row lock', async () => {
     await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
@@ -170,12 +182,36 @@ describe('#216 round 3, K: a match job never writes a run over an invoice sent b
     await other.transaction(async (tx) => {
       await tx.select({ id: invoices.id }).from(invoices).where(eq(invoices.id, inv!.id)).for('update');
       job = matchInvoiceForJob(db, { restaurantId, invoiceId: inv!.id, rematch: true, poId: po!.poId! });
-      await new Promise((r) => setTimeout(r, 300)); // the job reads the old status, builds, then waits on the row
+      await waitForLockWait(); // the job read the old status, built, and now waits on the row
       await tx.update(invoices).set({ status: 'ocr_pending' }).where(eq(invoices.id, inv!.id));
     });
     const out = await job!;
     expect(out.skipped).toBe('ocr_pending');
     expect(out.persisted).toBeNull();
     expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, inv!.id))).toHaveLength(0);
+  });
+});
+
+describe('#216 round 4, item 2: the submit job matches the COUNTED order strictly', () => {
+  it('a same-day second order (received, nearer) never takes the job — a run on the job\'s PO, not po_rejected', async () => {
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, grId));
+    const [gr] = await db.select({ poId: goodsReceipts.poId }).from(goodsReceipts).where(eq(goodsReceipts.id, grId));
+    await db.update(purchaseOrders).set({ expectedDeliveryAt: new Date(Date.now() - 2 * 86_400_000) }).where(eq(purchaseOrders.id, gr!.poId!));
+    const [po2] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId, supplierId, expectedDeliveryAt: new Date(), status: 'sent', source: 'manual' })
+      .returning();
+    await db.insert(poLines).values({ poId: po2!.id, rawDescription: 'שמן זית 1 ליטר', qtyOrdered: '10', unit: 'ליטר', unitPriceExpected: '125' });
+    await db.insert(goodsReceipts).values({ restaurantId, poId: po2!.id, status: 'completed', receivedAt: new Date() });
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId, supplierId, status: 'matched', source: 'photo', rawImageUrl: 'https://example.com/scans/two.jpg', ocrPayload: { provider: 'claude_vision', raw: { scanGrId: grId } } })
+      .returning();
+    await db.insert(invoiceLines).values({ invoiceId: inv!.id, rawDescription: 'שמן זית 1 ליטר', qtyBilled: '10', unit: 'ליטר', unitPriceBilled: '132', lineTotal: '1320.00' });
+    const out = await matchInvoiceForJob(db, { restaurantId, invoiceId: inv!.id, rematch: true, poId: gr!.poId! });
+    expect(out.skipped).toBeUndefined();
+    const [run] = await db.select({ poId: matchRuns.poId }).from(matchRuns).where(eq(matchRuns.invoiceId, inv!.id));
+    expect(run).toMatchObject({ poId: gr!.poId });
   });
 });

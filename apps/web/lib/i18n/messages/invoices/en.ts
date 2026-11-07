@@ -47,6 +47,7 @@ export const en: Shape<typeof he> = {
     rematchAfterCount: 'The match runs once the receipt count is closed.',
     rematchedNote: 'The match was re-run.',
     rematchLater: "The match didn't run this time — run it again with the button above.",
+    rematchAwaitingReview: 'This may be a duplicate invoice. It is waiting for review, and the match runs after that.',
     noLinesAddBelow: 'No lines yet — add the invoice lines below.',
     newLineDescription: 'Item as written on the invoice',
     newLineUnit: 'kg / unit',

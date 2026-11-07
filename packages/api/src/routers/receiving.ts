@@ -33,7 +33,7 @@ import {
   type Database,
   type OcrPayload,
 } from '@restomatch/db';
-import { computeInvoiceLeak, HELD_FOR_RECEIPTS_KEY } from '@restomatch/charts';
+import { computeInvoiceLeak, HELD_FOR_RECEIPTS_KEY, LEAK_FILTER } from '@restomatch/charts';
 import { matchByAlias } from '@restomatch/catalog';
 import { enqueueMatchInvoice, enqueueOcrInvoice, isQueueUnavailableError } from '@restomatch/queue';
 import type { InvoiceOcrResult } from '@restomatch/types';
@@ -720,6 +720,10 @@ export const receivingRouter = router({
       const exclAfter = set.totalExclVat !== undefined ? set.totalExclVat : current.totalExclVat;
       if (totalsTyped && exclAfter != null) {
         set.ocrPayload = withMarkers(set.ocrPayload ?? current.ocrPayload, { headerEntered: true, manualHeader: false });
+      } else if (totalsTyped && exclAfter == null) {
+        // Cleared: there is no billed header any more — it is ours to compute
+        // from the lines again (never a stale "typed" flag over nothing).
+        set.ocrPayload = withMarkers(set.ocrPayload ?? current.ocrPayload, { headerEntered: false, manualHeader: true });
       }
       try {
         // Savepoint: procedures may already run inside a transaction (RLS), and
@@ -1480,14 +1484,13 @@ export const receivingRouter = router({
               .returning({ id: invoices.id });
             if (!retaken) return { invoiceId: own.id, created: false as const, resumed: true as const };
             // The ₪ the old read's findings showed, for the audit (B).
-            const [dropped] = await tx
-              .select({
-                findings: sql<number>`count(*)::int`,
-                leak: sql<string>`coalesce(sum(abs(${discrepancies.deltaAmount})), 0)::text`,
-              })
-              .from(discrepancies)
-              .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
-              .where(and(eq(matchRuns.invoiceId, own.id), eq(matchRuns.restaurantId, restaurantId)));
+            // (the leak ₪ by the shared LEAK_FILTER — what the hero counted)
+            const droppedRows = (await tx.execute(sql`
+              SELECT count(*)::int AS findings,
+                     coalesce(sum(abs(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER}), 0)::text AS leak
+                FROM discrepancies d JOIN match_runs r ON r.id = d.match_run_id
+               WHERE r.invoice_id = ${own.id} AND r.restaurant_id = ${restaurantId}`)) as unknown as Array<{ findings: number; leak: string }>;
+            const dropped = droppedRows[0];
             // The old read's runs go with it (no decision / claim on them — the
             // predicate): the new read is matched afresh.
             await tx.delete(matchRuns).where(and(eq(matchRuns.invoiceId, own.id), eq(matchRuns.restaurantId, restaurantId)));
@@ -2203,7 +2206,7 @@ function decimalHalfUp(n: number, scale: number): string | null {
   return scale > 0 ? `${whole}.${rest}` : `${whole}`;
 }
 
-type RematchOutcome = { rematched: boolean; rematchSkipped?: 'receipt_open' | 'no_lines' | 'refused' };
+type RematchOutcome = { rematched: boolean; rematchSkipped?: 'receipt_open' | 'no_lines' | 'refused' | 'awaiting_review' };
 
 /**
  * Re-match after a manual line edit — through match.runForInvoice itself (its
@@ -2259,6 +2262,9 @@ async function rematchAfterEdit(ctx: { db: Database; session: MemberSession }, i
              updated_at = now()
        WHERE id = ${invoiceId} AND restaurant_id = ${restaurantId}
          AND jsonb_typeof(ocr_payload -> 'raw') = 'object'`);
+    // A possible duplicate copy waits for its review, not only for the count (J).
+    const held = (inv?.ocrPayload?.raw ?? null) as Record<string, unknown> | null;
+    if (held && 'duplicateOf' in held) return { rematched: false, rematchSkipped: 'awaiting_review' };
     return { rematched: false, rematchSkipped: 'receipt_open' };
   }
   try {

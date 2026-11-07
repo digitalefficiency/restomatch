@@ -1,7 +1,8 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { releaseClaimsForRematch } from '../recovery/service';
-import { and, desc, eq, goodsReceipts, invoices, matchRuns, restaurants } from '@restomatch/db';
+import { and, desc, eq, goodsReceipts, invoices, matchRuns, purchaseOrders, restaurants, type Database } from '@restomatch/db';
+import { recordAudit } from '../audit';
 import { scanOwnerReceipt } from '../receiving/matchTriggers';
 import { appError } from '../errors';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
@@ -31,7 +32,16 @@ export interface RunForInvoiceResult {
  */
 export const matchRouter = router({
   runForInvoice: managerProcedure
-    .input(z.object({ invoiceId: z.string().uuid() }))
+    .input(
+      z.object({
+        invoiceId: z.string().uuid(),
+        /**
+         * The way out of a wrong pin (round 4): match against THIS order — one of
+         * this restaurant's, from the invoice's own supplier. Strict, audited.
+         */
+        poId: z.string().uuid().optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }): Promise<RunForInvoiceResult> => {
       const { restaurantId } = ctx.session;
       await assertInvoiceOwned(ctx.db, input.invoiceId, restaurantId);
@@ -39,11 +49,17 @@ export const matchRouter = router({
       // A consolidated invoice (חשבונית ריכוז) has no PO of its own: a PO match would
       // only mark the whole invoice UNORDERED_ARRIVAL. It is cross-matched against
       // its delivery notes on the invoice page (read-only) instead.
+      // Row-locked, and never while the invoice is being read again (a retake):
+      // the same rule as the match job's persist step.
       const [kind] = await ctx.db
-        .select({ ocrPayload: invoices.ocrPayload, source: invoices.source })
+        .select({ ocrPayload: invoices.ocrPayload, source: invoices.source, status: invoices.status, supplierId: invoices.supplierId })
         .from(invoices)
         .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)))
-        .limit(1);
+        .limit(1)
+        .for('update');
+      if (kind?.status === 'ocr_pending') {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'החשבונית עדיין נקראת — נסו שוב בעוד דקה' });
+      }
       if (readConsolidatedRaw(kind?.ocrPayload)) {
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
@@ -78,12 +94,46 @@ export const matchRouter = router({
         .where(and(eq(matchRuns.invoiceId, input.invoiceId), eq(matchRuns.restaurantId, restaurantId)))
         .orderBy(desc(matchRuns.runAt))
         .limit(1);
+      // A manager's explicit order (the way out of a wrong stamp: one driver,
+      // two orders) — this tenant's, the invoice's supplier, else NOT_FOUND.
+      let chosenPoId: string | null = null;
+      if (input.poId) {
+        const [po] = await ctx.db
+          .select({ id: purchaseOrders.id })
+          .from(purchaseOrders)
+          .where(
+            and(
+              eq(purchaseOrders.id, input.poId),
+              eq(purchaseOrders.restaurantId, restaurantId),
+              eq(purchaseOrders.supplierId, kind?.supplierId ?? '00000000-0000-0000-0000-000000000000'),
+            ),
+          )
+          .limit(1);
+        if (!po) throw new TRPCError({ code: 'NOT_FOUND', message: 'order not found' });
+        chosenPoId = po.id;
+      }
       // H: the order the receiver counted for this scan wins (as the worker's
       // job poId does) — never a same-day second order found by discovery.
+      const strictPoId = chosenPoId ?? scanPoId;
       const built = await buildMatchInputForInvoice(ctx.db, restaurantId, input.invoiceId, {
-        pinnedPoId: scanPoId ?? priorRun?.poId ?? null,
-        strictPin: scanPoId != null,
+        pinnedPoId: strictPoId ?? priorRun?.poId ?? null,
+        strictPin: strictPoId != null,
       });
+      if (chosenPoId && built?.poId !== chosenPoId) {
+        // Outside the match window / cancelled: say so rather than match elsewhere.
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'אי אפשר להתאים את החשבונית להזמנה הזו (מחוץ לחלון ההתאמה או מבוטלת)' });
+      }
+      if (chosenPoId) {
+        await recordAudit(ctx.db as Database, {
+          restaurantId,
+          userId: ctx.session.userId,
+          action: 'match.po_pinned',
+          entityType: 'invoice',
+          entityId: input.invoiceId,
+          before: { poId: priorRun?.poId ?? scanPoId ?? null },
+          after: { poId: chosenPoId },
+        });
+      }
       if (!built) {
         return {
           matchRunId: null,
