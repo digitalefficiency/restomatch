@@ -94,10 +94,11 @@ test.describe('owner: one figure on the home row, the badge and the bell', () =>
     // Same count as the home row (the lab seed alone: 4; another spec's parity rows add info rows, never ₪).
     const rowCount = Number(/(\d+)\s*פערים/.exec(((await page.getByTestId('needs-decide-sub').innerText()) ?? '').replace(BIDI, ''))?.[1]);
     expect(rowCount).toBeGreaterThanOrEqual(4);
-    await expect
-      .poll(async () => (await page.locator(`#${(await link.getAttribute('aria-describedby')) ?? 'none'}`).textContent().catch(() => '')) ?? '', { timeout: 20_000 })
-      .toContain(`${rowCount} פריטים`);
-    const aria = ((await page.locator(`#${await link.getAttribute('aria-describedby')}`).textContent()) ?? '').replace(BIDI, '');
+    await expect(link.locator('[data-nav-badge]')).toBeVisible({ timeout: 20_000 });
+    const descId = (await link.getAttribute('aria-describedby')) ?? 'none';
+    const desc = (await page.locator(`[id="${descId}"]`).first().textContent()) ?? '';
+    expect(`${descId} | ${desc}`).toContain(`${rowCount} פריטים`);
+    const aria = ((await page.locator(`[id="${await link.getAttribute('aria-describedby')}"]`).first().textContent()) ?? '').replace(BIDI, '');
     expect(aria).toMatch(/296/);
     expect(aria).toContain('חוסם תשלום');
     await expect(link.locator('[data-nav-badge="block"]')).toBeVisible();
