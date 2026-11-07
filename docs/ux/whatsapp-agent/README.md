@@ -105,7 +105,7 @@ H-05ʰ + H-05a + AU-04 + AU-12 ─→ WA-06ʰ ─→ WA-08
 - **Speed:** median gap created → decided **<24 h** on weekdays; median days leak found → claim letter sent **halved** vs baseline; letter → credited tracked (no target yet).
 - **Hours-₪ (ASSUMPTION, never summed with money-₪; overlaps with AU-04/06/12 not additive):** owner 0.5–1 h/week (₪225–445/month), manager 0.5–1 (₪225–445), chef 0.25–0.5 (₪135–275), receiver 0.25–0.5 (₪70–135), bookkeeper 0.1–0.25 (₪40–95).
 - **Money-₪:** none of its own; the recovery bundle (catalogue A12, central ≈ ₪540/month) arrives faster. Measured in days.
-- **Cost (a COSTS.md line, never netted against leak):** ≈ ₪14/restaurant/month at pilot, ≈ ₪21 at 100 restaurants, ≈ ₪65 worst case (ASSUMPTIONS, design §E; not a hard ceiling: model spend is bounded by the restaurant's ≈ $3/day Ask budget, ≈ ₪289/month).
+- **Cost (a COSTS.md line, never netted against leak):** ≈ ₪24/restaurant/month typical, ₪7 light → ₪65 heavy (ASSUMPTIONS, `notes/30-cost-model.md`, which supersedes design §E; not a hard ceiling: model spend is bounded by the restaurant's ≈ $3/day Ask budget, ≈ ₪289/month).
 - **Safety (hard, weekly):** 0 ₪ fields in a receiver turn · 0 leak/decision/claim ₪ to a chef · 0 commits without a token tap · 0 messages from our number to a supplier · 0 cross-tenant reads · grounding failures <2% · delivery success ≥98% · opt-out <10% · 0 templates re-categorised.
 
 ## 9. Owner decisions (build to the recommended default until the owner answers)
