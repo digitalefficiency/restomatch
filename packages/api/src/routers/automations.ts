@@ -92,6 +92,8 @@ export interface AutomationRow {
   id: string;
   key: string;
   kind: 'flag' | 'option' | 'always';
+  /** What `setEnabled({ key })` takes for this row: the flag or option key; null for 'always'. */
+  controlKey: string | null;
   slot: AutomationDef['slot'];
   audience: AutomationDef['audience'];
   carriesIls: boolean;
@@ -139,6 +141,7 @@ export async function listAutomations(db: Database, restaurantId: string, now = 
     out.push({
       id: def.id,
       key: def.key,
+      controlKey: def.control.kind === 'flag' ? def.control.flag : def.control.kind === 'option' ? def.control.option : null,
       slot: def.slot,
       audience: def.audience,
       carriesIls: def.carriesIls,

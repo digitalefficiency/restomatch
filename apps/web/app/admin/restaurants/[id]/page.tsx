@@ -9,6 +9,7 @@ import { AssignPlanForm } from './AssignPlanForm';
 import { OverridesForm } from './OverridesForm';
 import { MemberRoles } from './MemberRoles';
 import { FeaturesPanel } from './FeaturesPanel';
+import { AutomationsList } from './AutomationsList';
 import { isAdmin2faRequired, TwoFactorRequired } from '../../TwoFactorRequired';
 
 type Overrides = {
@@ -103,6 +104,7 @@ export default async function AdminRestaurantDetail({ params }: PageProps) {
       </div>
 
       <FeaturesPanel restaurantId={restaurant.id} state={features} />
+      <AutomationsList restaurantId={restaurant.id} />
     </div>
   );
 }
