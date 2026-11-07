@@ -37,6 +37,8 @@ export async function deliverJoinCode(input: {
   locale: 'he' | 'en';
 }): Promise<void> {
   if (!isEmailConfigured()) {
+    // A production deploy without a provider must fail loudly, never log live codes.
+    if (process.env.NODE_ENV === 'production') throw new Error('join code: e-mail provider not configured');
     console.log('\n──────── JOIN CODE ────────');
     console.log(`to: ${input.to}`);
     console.log(`code: ${input.code}`);

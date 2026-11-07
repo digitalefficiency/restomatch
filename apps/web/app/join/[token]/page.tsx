@@ -13,7 +13,8 @@ import { joinAcceptPath } from '../paths';
 import { JoinCodeForm } from './JoinCodeForm';
 
 export const dynamic = 'force-dynamic';
-export const generateMetadata = () => authTitle('join.title');
+// The invite token is in the path: never send it on in a Referer header.
+export const generateMetadata = async () => ({ ...(await authTitle('join.title')), referrer: 'no-referrer' as const });
 
 interface PageProps {
   params: Promise<{ token: string }>;

@@ -7,12 +7,16 @@ import {
   gt,
   invitations,
   inArray,
+  isNotNull,
+  or,
+  sql,
   restaurants,
   userCredentials,
   users,
   verificationTokens,
   type UserRole,
 } from '@restomatch/db';
+import { canonicalizeEmail } from '@restomatch/api';
 import { authDb } from '@/lib/authDb';
 import { passwordPolicyError } from '@/lib/passwordPolicy';
 import { normalizeLoginEmail, setUserPassword } from '@/lib/passwords';
@@ -138,17 +142,37 @@ export async function loadInvite(token: string, now = Date.now()): Promise<Invit
   };
 }
 
+/**
+ * Canonical form of `users.email` in SQL — the same rules as @restomatch/api
+ * canonicalizeEmail (strip +tag; Gmail ignores dots, googlemail = gmail), so an
+ * alias of an address that already has a password is treated as that account.
+ */
+function canonicalEmailSql() {
+  return sql<string>`(case when split_part(lower(${users.email}), '@', 2) in ('gmail.com', 'googlemail.com')
+    then replace(regexp_replace(split_part(lower(${users.email}), '@', 1), '[+].*$', ''), '.', '') || '@gmail.com'
+    else regexp_replace(split_part(lower(${users.email}), '@', 1), '[+].*$', '') || '@' || split_part(lower(${users.email}), '@', 2) end)`;
+}
+
+/** Any account for this address (or a canonical alias of it) that already has a password. */
+async function passwordAccountExists(email: string): Promise<boolean> {
+  const [u] = await authDb
+    .select({ id: users.id })
+    .from(users)
+    .innerJoin(userCredentials, eq(userCredentials.userId, users.id))
+    .where(
+      or(
+        eq(users.email, normalizeLoginEmail(email)),
+        and(isNotNull(userCredentials.passwordHash), eq(canonicalEmailSql(), canonicalizeEmail(email))),
+      ),
+    )
+    .limit(1);
+  return Boolean(u);
+}
+
 /** Does the invited address already have a password? Then it signs in instead of joining by code. */
 export async function invitedAccountHasPassword(token: string): Promise<boolean> {
   const row = await inviteRowByToken(token);
-  if (!row) return false;
-  const [u] = await authDb
-    .select({ hasPassword: userCredentials.passwordHash })
-    .from(users)
-    .leftJoin(userCredentials, eq(userCredentials.userId, users.id))
-    .where(eq(users.email, normalizeLoginEmail(row.email)))
-    .limit(1);
-  return Boolean(u?.hasPassword);
+  return row ? passwordAccountExists(row.email) : false;
 }
 
 /* ── the e-mail code ─────────────────────────────────────────────────────── */
@@ -279,8 +303,9 @@ export async function completeJoin(
     .leftJoin(userCredentials, eq(userCredentials.userId, users.id))
     .where(eq(users.email, email))
     .limit(1);
-  // An account that already has a password is never overwritten by a code.
-  if (existing?.hasPassword) return { ok: false, reason: 'hasPassword' };
+  // An account that already has a password (or a canonical alias that has one)
+  // is never overwritten or duplicated by a code.
+  if (existing?.hasPassword || (await passwordAccountExists(row.email))) return { ok: false, reason: 'hasPassword' };
 
   let userId = existing?.id;
   if (userId) {

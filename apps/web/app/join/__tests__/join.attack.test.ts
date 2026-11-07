@@ -114,6 +114,18 @@ describe('join attack: binding', () => {
   });
 });
 
+describe('join attack: aliases', () => {
+  it('a canonical alias of a password account is sent to sign in, not given a second account', async () => {
+    const rid = await makeRestaurant();
+    const n = `${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+    const uid = await makeUser(`w307b${n}@gmail.com`, 'Owner of mailbox');
+    await setUserPassword(uid, 'victim original password');
+    const { token } = await makeInvite({ restaurantId: rid, email: `w307b.${n}+kitchen@gmail.com` });
+    expect(await issueJoinCode(token)).toMatchObject({ ok: false, reason: 'hasPassword' });
+    expect(await userByEmail(`w307b.${n}+kitchen@gmail.com`)).toBeNull();
+  });
+});
+
 describe('join attack: guessing', () => {
   it(`the lifetime ceiling (${JOIN_CODE_MAX_TOTAL_ATTEMPTS}) holds across fresh codes and windows`, async () => {
     const rid = await makeRestaurant();
