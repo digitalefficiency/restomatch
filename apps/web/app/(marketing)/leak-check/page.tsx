@@ -68,10 +68,13 @@ export default async function LeakCheckPage() {
           </div>
         </div>
 
+        {/* Phone: the upload card comes first (W3-06b · mkt-14); desktop keeps the pitch on the start side. */}
         {available ? (
-          <LeakCheckForm />
+          <div className="order-first lg:order-none">
+            <LeakCheckForm />
+          </div>
         ) : (
-          <div className="rounded-3xl border border-line bg-surface p-8 text-center shadow-card">
+          <div className="order-first rounded-3xl border border-line bg-surface p-8 text-center shadow-card lg:order-none">
             <p className="text-base text-muted">{t('page.unavailable')}</p>
             <Link
               href="/#lead"

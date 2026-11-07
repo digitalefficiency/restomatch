@@ -42,6 +42,9 @@ export const en: Shape<typeof he> = {
     privacy: 'By submitting you agree we process the files to produce the check. The files themselves are not kept, and the results are deleted automatically after 7 days.',
     privacyLink: 'Privacy policy',
     submit: 'Check my invoices',
+    remove: 'Remove {name}',
+    dropped: 'Up to {max} files, so {n} were not added.',
+    stage: 'Step {n} of {total}',
     working: {
       challenge: 'Preparing your check…',
       pow: 'Making sure you’re not a bot…',
