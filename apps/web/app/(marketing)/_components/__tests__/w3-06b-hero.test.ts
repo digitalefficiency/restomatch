@@ -1,16 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { PHONE_MEDIA, heroMedia, loopSourcesFor } from '@/lib/heroMedia';
+import { APPROVED_PHONE_LOOP_FILES, PHONE_MEDIA, heroMedia, loopSourcesFor } from '@/lib/heroMedia';
 
 describe('W3-06b · the phone gets the 9:16 loop, never both', () => {
   const desk = heroMedia.loop;
-  const phone = heroMedia.phoneLoop;
+  /** A stand-in 9:16 cut for the source-choice tests (independent of the ship gate). */
+  const phone = { webm: '/media/x-9x16.webm', mp4: '/media/x-9x16.mp4', poster: '/media/x-9x16.jpg' };
 
-  it('ships the 9:16 cut (S10) with a 9:16 poster', () => {
-    expect(phone).toEqual({
-      webm: '/media/hero-loop-9x16.webm',
-      mp4: '/media/hero-loop-9x16.mp4',
-      poster: '/media/hero-poster-9x16.jpg',
-    });
+  it('SHIP GATE: phoneLoop is null, or every file is an approved sample-month render', () => {
+    const live = heroMedia.phoneLoop;
+    if (live === null) return;
+    for (const f of [live.webm, live.mp4, live.poster]) expect(APPROVED_PHONE_LOOP_FILES, f).toContain(f);
+  });
+
+  it('the first S10 cut (₪760 · 1.8%, a second figure set) is never approved', () => {
+    for (const f of ['/media/hero-loop-9x16.webm', '/media/hero-loop-9x16.mp4', '/media/hero-poster-9x16.jpg']) {
+      expect(APPROVED_PHONE_LOOP_FILES).not.toContain(f);
+    }
   });
 
   it('a phone gets only 9:16 sources, a desktop only 16:9 ones', () => {

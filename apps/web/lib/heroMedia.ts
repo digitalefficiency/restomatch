@@ -37,15 +37,17 @@ export const heroMedia = {
     en: { src: '/media/promo-en-720.mp4', poster: '/media/promo-poster-en.jpg' },
   } as PromoSources | null,
   /**
-   * 9:16 phone loop (W3-06b; S10's HeroLoopVertical, demo data only). Phones
-   * (below `sm`) get only these files — never the 16:9 loop too. Set to null to
-   * fall back to the legible HeroMatch mock on phones.
+   * 9:16 phone loop (W3-06b). Phones (below `sm`) get only these files — never
+   * the 16:9 loop too. null = phones show the legible HeroMatch mock.
+   *
+   * SHIP GATE (conductor, 7.11): one figure set across the site. The first S10
+   * cut (hero-loop-9x16.*) shows "₪760 · 1.8%", a second month figure, so it
+   * must not ship. phoneLoop stays null until S10's re-render from
+   * sampleMonth.ts (₪2,250 · 1.5%, "ממתין להחלטה שלך" ₪910) lands and its files
+   * are added to APPROVED_PHONE_LOOP_FILES. If that isn't on #293 by Wed 11.11
+   * 12:00 IL, Thursday ships with null. A unit test enforces both.
    */
-  phoneLoop: {
-    webm: '/media/hero-loop-9x16.webm',
-    mp4: '/media/hero-loop-9x16.mp4',
-    poster: '/media/hero-poster-9x16.jpg',
-  } as null | { webm: string; mp4: string; poster: string },
+  phoneLoop: null as null | { webm: string; mp4: string; poster: string },
   /** English hero loop (same motion, English dashboard + callouts); Hebrew is the default above. */
   loopEn: {
     webm: '/media/hero-loop-en.webm',
@@ -56,6 +58,13 @@ export const heroMedia = {
 } as const;
 
 export type HeroMedia = typeof heroMedia;
+
+/**
+ * Phone-loop files rendered from the ONE sample month (sampleMonth.ts) and
+ * approved to ship. Empty until S10's re-render lands; the first cut
+ * (hero-loop-9x16.*, ₪760 · 1.8%) is deliberately NOT here.
+ */
+export const APPROVED_PHONE_LOOP_FILES: readonly string[] = [];
 
 /** Below Tailwind's `sm` (640px): the phone cut. */
 export const PHONE_MEDIA = '(max-width: 639.98px)';
