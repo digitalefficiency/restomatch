@@ -6,7 +6,7 @@ import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import type { UserRole } from '@restomatch/db';
 import { CheckCircle2, Copy, Info, RefreshCw, Trash2, UserPlus, XCircle } from 'lucide-react';
-import { Badge, Button, Card, EmptyState, Field, Input } from '@/lib/components';
+import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, Input } from '@/lib/components';
 import type { Locale } from '@/lib/i18n/config';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatDate } from '@/lib/i18n/format';
@@ -20,11 +20,18 @@ import {
   setMemberLocale,
   updateMemberRole,
 } from './actions';
+import { needsRoleConfirm } from './role-change';
 
 type TeamData = inferRouterOutputs<AppRouter>['team']['list'];
 type ActionResult = { ok: boolean; message: string; devLink?: string };
 /** '' = no preference (follow the device / Hebrew default). */
 type LocaleChoice = '' | Locale;
+
+function omit<T>(rec: Record<string, T>, key: string): Record<string, T> {
+  const next = { ...rec };
+  delete next[key];
+  return next;
+}
 
 const selectClass =
   'rounded-xl border border-line-strong bg-surface px-3 py-2 text-sm text-ink transition-colors focus:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 disabled:opacity-50';
@@ -48,6 +55,38 @@ export function TeamClient({
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<UserRole>('receiver');
   const [inviteLocale, setInviteLocale] = useState<LocaleChoice>('');
+  // W2-14 staged role change: the select only STAGES; Save commits (with a
+  // confirm for guarded transitions). Pending and the result are per row.
+  const [staged, setStaged] = useState<Record<string, UserRole>>({});
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
+  const [rowStatus, setRowStatus] = useState<Record<string, ActionResult>>({});
+  const [confirmRole, setConfirmRole] = useState<{ userId: string; name: string; from: UserRole; to: UserRole } | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<{ userId: string; name: string } | null>(null);
+
+  function runRow(userId: string, action: () => Promise<ActionResult>, after?: (r: ActionResult) => void) {
+    setRowBusy(userId);
+    setRowStatus((s) => omit(s, userId));
+    start(async () => {
+      const res = await action();
+      setRowStatus((s) => ({ ...s, [userId]: res }));
+      after?.(res);
+      setRowBusy(null);
+    });
+  }
+
+  function clearStaged(userId: string) {
+    setStaged((s) => omit(s, userId));
+  }
+
+  function commitRole(userId: string, from: UserRole, to: UserRole) {
+    runRow(
+      userId,
+      () => updateMemberRole({ userId, role: to, expectedRole: from }),
+      (res) => {
+        if (res.ok) clearStaged(userId);
+      },
+    );
+  }
 
   const languageOptions: Array<[LocaleChoice, string]> = [
     ['', t('language.device')],
@@ -212,13 +251,14 @@ export function TeamClient({
                     <>
                       <select
                         aria-label={t('members.roleFor', { email: m.email })}
-                        value={m.role}
-                        disabled={pending}
-                        onChange={(e) =>
-                          run(() =>
-                            updateMemberRole({ userId: m.userId, role: e.target.value as UserRole }),
-                          )
-                        }
+                        value={staged[m.userId] ?? m.role}
+                        disabled={rowBusy === m.userId || m.userId === currentUserId}
+                        title={m.userId === currentUserId ? t('members.ownRoleLocked') : undefined}
+                        onChange={(e) => {
+                          const next = e.target.value as UserRole;
+                          if (next === m.role) clearStaged(m.userId);
+                          else setStaged((s) => ({ ...s, [m.userId]: next }));
+                        }}
                         className={selectClass}
                       >
                         {ALL_ROLES.map((value) => (
@@ -230,12 +270,8 @@ export function TeamClient({
                       <Button
                         variant="ghost"
                         size="sm"
-                        disabled={pending || m.userId === currentUserId}
-                        onClick={() => {
-                          if (window.confirm(t('members.confirmRemove', { email: m.email }))) {
-                            run(() => removeMember({ userId: m.userId }));
-                          }
-                        }}
+                        disabled={rowBusy === m.userId || m.userId === currentUserId}
+                        onClick={() => setConfirmRemove({ userId: m.userId, name: m.name || m.email })}
                         className="text-danger"
                         aria-label={t('members.remove', { email: m.email })}
                         title={t('members.remove', { email: m.email })}
@@ -247,6 +283,42 @@ export function TeamClient({
                     <Badge tone="neutral">{labels[m.role]}</Badge>
                   )}
                 </div>
+                {staged[m.userId] ? (
+                  <div
+                    className="flex w-full flex-wrap items-center gap-2 rounded-xl border border-line-strong bg-surface-2 px-3 py-2 text-sm text-ink"
+                    role="group"
+                    aria-label={t('members.stagedFor', { email: m.email })}
+                  >
+                    <span>
+                      {t('members.staged', { from: labels[m.role], to: labels[staged[m.userId]!] })}
+                    </span>
+                    <Button
+                      size="sm"
+                      disabled={rowBusy === m.userId}
+                      onClick={() => {
+                        const to = staged[m.userId]!;
+                        if (needsRoleConfirm(m.role, to)) {
+                          setConfirmRole({ userId: m.userId, name: m.name || m.email, from: m.role, to });
+                        } else {
+                          commitRole(m.userId, m.role, to);
+                        }
+                      }}
+                    >
+                      {t('members.save')}
+                    </Button>
+                    <Button variant="ghost" size="sm" disabled={rowBusy === m.userId} onClick={() => clearStaged(m.userId)}>
+                      {t('members.cancel')}
+                    </Button>
+                  </div>
+                ) : null}
+                {rowStatus[m.userId] ? (
+                  <p
+                    role="status"
+                    className={`w-full text-sm ${rowStatus[m.userId]!.ok ? 'text-primary' : 'text-danger'}`}
+                  >
+                    {rowStatus[m.userId]!.message}
+                  </p>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -295,6 +367,52 @@ export function TeamClient({
           </ul>
         </Card>
       ) : null}
+      <ConfirmDialog
+        open={confirmRole !== null}
+        title={
+          confirmRole
+            ? t('members.confirmRoleTitle', {
+                name: confirmRole.name,
+                from: labels[confirmRole.from],
+                to: labels[confirmRole.to],
+              })
+            : ''
+        }
+        body={
+          confirmRole ? (
+            <div className="space-y-2">
+              <p>{t(`roleSummary.${confirmRole.from}`)}</p>
+              <p className="font-medium">{t(`roleSummary.${confirmRole.to}`)}</p>
+              {confirmRole.to === 'owner' ? <p>{t('members.ownerWarning')}</p> : null}
+            </div>
+          ) : null
+        }
+        confirmLabel={t('members.confirmRoleCta')}
+        cancelLabel={t('members.cancel')}
+        danger={confirmRole?.to === 'owner'}
+        loading={confirmRole !== null && rowBusy === confirmRole.userId}
+        onConfirm={() => {
+          if (!confirmRole) return;
+          commitRole(confirmRole.userId, confirmRole.from, confirmRole.to);
+          setConfirmRole(null);
+        }}
+        onClose={() => setConfirmRole(null)}
+      />
+      <ConfirmDialog
+        open={confirmRemove !== null}
+        title={confirmRemove ? t('members.confirmRemoveTitle', { name: confirmRemove.name }) : ''}
+        body={t('members.confirmRemoveBody')}
+        confirmLabel={t('members.removeCta')}
+        cancelLabel={t('members.cancel')}
+        danger
+        onConfirm={() => {
+          if (!confirmRemove) return;
+          const { userId } = confirmRemove;
+          runRow(userId, () => removeMember({ userId }));
+          setConfirmRemove(null);
+        }}
+        onClose={() => setConfirmRemove(null)}
+      />
     </div>
   );
 }

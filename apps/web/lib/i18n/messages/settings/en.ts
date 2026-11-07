@@ -2,6 +2,7 @@ import type { Shape } from '../../translate';
 import type { he } from './he';
 
 export const en: Shape<typeof he> = {
+  title: 'Settings',
   loading: 'Loading',
   sections: {
     accountTitle: 'My account',
@@ -14,6 +15,38 @@ export const en: Shape<typeof he> = {
     securitySubtitle: 'Two-step verification adds a layer that can’t be bypassed even through the email magic link.',
     privacyTitle: 'Privacy and personal data',
     privacySubtitle: 'Export your personal data or delete your account — your data-subject rights.',
+  },
+  rules: {
+    title: 'Rules in force',
+    subtitle: 'When an invoice or a gap goes to approval. A value without a "Custom" tag is the system default.',
+    default: 'Default',
+    custom: 'Custom',
+    approvalsTitle: 'What goes to approval',
+    largeInvoiceWithoutPo: 'An invoice without an order above {a} goes to the owner',
+    unorderedItemSignificant: 'An unordered item with a gap above {a} goes to the owner',
+    cumulativeLarge: 'Gaps on an invoice above {a} or above {b} of its total go to the owner',
+    cumulativeMedium: 'Gaps on an invoice above {a} or above {b} of its total go to the manager',
+    tolerancesTitle: 'When a gap counts',
+    price: 'A price gap counts above {a} and above {b} per line',
+    qty: 'A quantity gap counts above {a} and above {b} units',
+    blockPrice: 'A price rise above {a} blocks the invoice',
+    ocrReview: 'An invoice read with confidence below {a} goes to manual review',
+    historyTitle: 'Change history ({n})',
+    historyEmpty: 'No changes yet.',
+    historyRules: 'Approval and matching rules',
+    historyProfile: 'Restaurant details',
+    historyUnknown: 'Unknown',
+  },
+  phone: {
+    title: 'Mobile phone',
+    hint: 'For WhatsApp approvals later. The number is saved unverified for now; verification turns on once sending is available.',
+    label: 'Phone number',
+    unverified: 'Not verified',
+    save: 'Save',
+    clear: 'Remove',
+    saved: 'Number saved.',
+    cleared: 'Number removed.',
+    failed: 'Not a valid phone number. For example: 050-1234567',
   },
   account: {
     languageTitle: 'App language',

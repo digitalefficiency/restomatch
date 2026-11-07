@@ -1,6 +1,7 @@
 import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createDb, eq, restaurants } from '@restomatch/db';
+import { and, auditLog, createDb, eq, inArray, restaurants } from '@restomatch/db';
+import { normalizeIlPhone } from '../routers/settings';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -80,5 +81,76 @@ describe('settings router', () => {
     await callerFor(A).settings.update({ ocrReviewThreshold: 0.6 });
     const settingsB = await callerFor(B).settings.get();
     expect(settingsB.ocrReviewThreshold).toBeUndefined();
+  });
+
+  // ── W2-14: effective values, null-restore, audit ───────────────────────────
+  it('effective shows the engine defaults (₪5,000 / ₪100) as isDefault on an empty blob', async () => {
+    const eff = await callerFor(A, 'manager').settings.effective();
+    expect(eff.approvalThresholds.largeInvoiceWithoutPo).toEqual({ value: 5000, isDefault: true });
+    expect(eff.approvalThresholds.unorderedItemSignificant).toEqual({ value: 100, isDefault: true });
+    expect(eff.approvalThresholds.cumulativeLargeAmount).toEqual({ value: 300, isDefault: true });
+    expect(eff.ocrReviewThreshold).toEqual({ value: 0.85, isDefault: true });
+    expect(eff.tolerances.pricePercent.isDefault).toBe(true);
+  });
+
+  it('effective marks an override as not default', async () => {
+    await callerFor(A).settings.update({ approvalThresholds: { largeInvoiceWithoutPo: 8000 } });
+    const eff = await callerFor(A).settings.effective();
+    expect(eff.approvalThresholds.largeInvoiceWithoutPo).toEqual({ value: 8000, isDefault: false });
+    expect(eff.approvalThresholds.unorderedItemSignificant.isDefault).toBe(true);
+  });
+
+  it('update with null removes the JSONB key (restores the default) and keeps the other keys', async () => {
+    const caller = callerFor(A);
+    await caller.settings.update({
+      approvalThresholds: { largeInvoiceWithoutPo: 8000, unorderedItemSignificant: 250 },
+      tolerances: { pricePercent: 0.04 },
+      ocrReviewThreshold: 0.9,
+    });
+    await caller.settings.update({
+      approvalThresholds: { largeInvoiceWithoutPo: null },
+      ocrReviewThreshold: null,
+    });
+    const [row] = await db.select({ s: restaurants.settings }).from(restaurants).where(eq(restaurants.id, A.restaurantId));
+    expect(row?.s.approvalThresholds).toEqual({ unorderedItemSignificant: 250 });
+    expect('largeInvoiceWithoutPo' in (row?.s.approvalThresholds ?? {})).toBe(false);
+    expect('ocrReviewThreshold' in (row?.s ?? {})).toBe(false);
+    expect(row?.s.tolerances).toEqual({ pricePercent: 0.04 });
+    const eff = await caller.settings.effective();
+    expect(eff.approvalThresholds.largeInvoiceWithoutPo).toEqual({ value: 5000, isDefault: true });
+  });
+
+  it('update and updateProfile write audit rows with before/after; history lists them', async () => {
+    await db.delete(auditLog).where(eq(auditLog.restaurantId, A.restaurantId));
+    await callerFor(A).settings.update({ approvalThresholds: { largeInvoiceWithoutPo: 7000 } });
+    await callerFor(A).settings.updateProfile({ vatRate: 0.18 });
+    const rows = await db
+      .select({ action: auditLog.action, before: auditLog.before, after: auditLog.after })
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.restaurantId, A.restaurantId),
+          inArray(auditLog.action, ['settings.updated', 'settings.profile_updated']),
+        ),
+      );
+    const rules = rows.find((r) => r.action === 'settings.updated');
+    expect(rules?.before).toMatchObject({ approvalThresholds: {} });
+    expect(rules?.after).toMatchObject({ approvalThresholds: { largeInvoiceWithoutPo: 7000 } });
+    const profile = rows.find((r) => r.action === 'settings.profile_updated');
+    expect(profile?.after).toEqual({ vatRate: '0.1800' });
+    expect(Object.keys(profile?.before as object)).toEqual(['vatRate']);
+
+    const hist = await callerFor(A, 'bookkeeper').settings.history();
+    expect(hist.map((h) => h.kind).sort()).toEqual(['profile', 'rules']);
+    expect(hist[0]?.byName).toBe('Owner A');
+  });
+
+  it('normalizeIlPhone → E.164 (+972) and rejects junk', () => {
+    expect(normalizeIlPhone('050-123 4567')).toBe('+972501234567');
+    expect(normalizeIlPhone('+972 50 123 4567')).toBe('+972501234567');
+    expect(normalizeIlPhone('00972-3-1234567')).toBe('+97231234567');
+    expect(normalizeIlPhone('03-1234567')).toBe('+97231234567');
+    expect(normalizeIlPhone('12345')).toBeNull();
+    expect(normalizeIlPhone('+1 415 555 0100')).toBeNull();
   });
 });

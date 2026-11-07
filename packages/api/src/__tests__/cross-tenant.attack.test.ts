@@ -104,6 +104,13 @@ afterAll(async () => {
  * other       → explicit justification for why no test is required
  * ────────────────────────────────────────────────────────────────────────── */
 const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
+  // W2-14 (add-only; moves to coverage/W2-14.ts once W2-01's fragments land).
+  'settings.effective': 'isolation — settings-admin.attack.test.ts: A reads only its own overrides',
+  'settings.history': 'isolation — settings-admin.attack.test.ts: A never sees B audit rows; receiver/chef FORBIDDEN',
+  'settings.myPhone': 'attack — settings-admin.attack.test.ts: reads only the caller users row',
+  'settings.setMyPhone': 'attack — settings-admin.attack.test.ts: writes only the caller users row (WHERE id = session.userId)',
+  'team.transferOwnership': 'attack — settings-admin.attack.test.ts: a B user → NOT_FOUND, B untouched; non-owner FORBIDDEN',
+  'exports.summary': 'isolation — settings-admin.attack.test.ts: counts and ₪ only from A invoices',
   // S14 wave 1 — receiver languages + AI assistant (flag-gated).
   'receiverLangs.status': 'isolation',
   'receiverLangs.localNames': 'attack',

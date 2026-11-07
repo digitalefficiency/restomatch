@@ -19,7 +19,7 @@ export default async function TeamPage() {
 
   return (
     <div>
-      <SectionHeader title={t('title')} subtitle={t('subtitle')} />
+      <SectionHeader level={1} title={t('title')} subtitle={t('subtitle')} />
       <TeamClient initial={data} currentUserId={session!.user.id} canManage={role === 'owner'} />
     </div>
   );
