@@ -71,7 +71,7 @@ export function ocrCatalogMatcher(
         supplierId,
         rawDescription: line.rawDescription,
         // מק״ט from the invoice — strategy-0 exact key when the supplier prints it.
-        supplierSku: line.sku ?? undefined,
+        supplierSku: line.sku?.trim() || undefined,
         embedding,
       },
       3,
@@ -171,7 +171,8 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
         r.lines.map((line) => ({
           invoiceId: job.data.invoiceId,
           productId: line.productId,
-          supplierSku: line.sku ?? null,
+          // Round 7 LOW-11: a blank מק״ט is no SKU (never an empty-string key).
+          supplierSku: line.sku?.trim() || null,
           rawDescription: line.rawDescription,
           // "Receiver in English": Claude Vision returns it in the same call.
           rawDescriptionEn: line.rawDescriptionEn ?? null,

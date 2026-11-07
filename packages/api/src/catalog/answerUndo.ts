@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import type { ChargeRange } from './linkQuestions';
 
 /**
  * G-08 · the undo of a "זה אותו מוצר?" answer (mapping.answerLink) is an opaque,
@@ -83,4 +84,68 @@ export function verifyAnswerUndo(
   }
   if (p.v !== 1 || p.uid !== who.userId || p.rid !== who.restaurantId || !(p.exp > now)) return null;
   return { supplierId: p.sid, nameKey: p.key, change: p.ch };
+}
+
+
+interface RangePayload {
+  v: 1;
+  uid: string;
+  rid: string;
+  sid: string;
+  sku: string | null;
+  key: string | null;
+  exp: number;
+  before: ChargeRange;
+  after: ChargeRange;
+}
+const signRange = (body: string) => b64url(createHmac('sha256', secret()).update(`g08-range.${body}`).digest());
+
+/**
+ * Round 7 LOW-9/10: the undo of a charge re-answer carries the range BEFORE and
+ * AFTER that answer, server-SIGNED (never a client-editable range): the undo can
+ * only put back the bounds this very answer moved.
+ */
+export function signChargeRangeUndo(
+  who: { userId: string; restaurantId: string },
+  key: { supplierId: string; sku: string | null; nameKey: string | null },
+  before: ChargeRange,
+  after: ChargeRange,
+  now = Date.now(),
+): string {
+  const payload: RangePayload = {
+    v: 1,
+    uid: who.userId,
+    rid: who.restaurantId,
+    sid: key.supplierId,
+    sku: key.sku,
+    key: key.nameKey,
+    exp: now + UNDO_TTL_MS,
+    before,
+    after,
+  };
+  const body = b64url(JSON.stringify(payload));
+  return `${body}.${signRange(body)}`;
+}
+
+/** The before / after ranges of a charge re-answer — null when forged, expired, another user's / restaurant's, or another key's. */
+export function verifyChargeRangeUndo(
+  token: string,
+  who: { userId: string; restaurantId: string },
+  key: { supplierId: string; sku: string | null; nameKey: string | null },
+  now = Date.now(),
+): { before: ChargeRange; after: ChargeRange } | null {
+  const [body, sig] = token.split('.');
+  if (!body || !sig) return null;
+  const a = Buffer.from(sig);
+  const b = Buffer.from(signRange(body));
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  let p: RangePayload;
+  try {
+    p = JSON.parse(Buffer.from(body.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')) as RangePayload;
+  } catch {
+    return null;
+  }
+  if (p.v !== 1 || p.uid !== who.userId || p.rid !== who.restaurantId || !(p.exp > now)) return null;
+  if (p.sid !== key.supplierId || (p.sku ?? null) !== key.sku || (p.key ?? null) !== key.nameKey) return null;
+  return { before: p.before, after: p.after };
 }

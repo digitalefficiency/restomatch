@@ -186,8 +186,11 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
 
   // G-08 hold (M-4, after the receipt check): a first match waits while its order still has unlinked
   // name-only lines (a WhatsApp / text order) — the question is in the mapper.
-  if (!priorRun && built.poId && (await orderQuestionCount(db, restaurantId, built.poId)) > 0) {
-    await holdForOrderQuestions(db, restaurantId, invoiceId, built.poId);
+  // Round 7 HIGH: a RE-match waits too (an undo re-opened an order line): the
+  // prior run and its decisions stay until the question is answered — never a
+  // run that reads the unlinked order line as MISSING + the invoice line as UNORDERED.
+  if (built.poId && (await orderQuestionCount(db, restaurantId, built.poId)) > 0) {
+    if (!priorRun) await holdForOrderQuestions(db, restaurantId, invoiceId, built.poId);
     return { result: CLEAN, persisted: null, replaced: false, skipped: 'awaiting_review' };
   }
 
@@ -207,7 +210,11 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
     //     for questions — first match or re-match: the prior run and its
     //     decisions stay until the question is answered (round 6 HIGH);
     //   - the invoice was put back on hold meanwhile ('parsed' with a question
-    //     reason), or the run seen at the start is gone (re-held) → skip.
+    //     reason — a re-hold, or an order hold set while this job waited on the
+    //     lock) → skip. This is THE race guard: the checks above ran before the
+    //     lock and may be stale;
+    //   - the run seen at the start is gone (deleted by a re-hold) → skip — a
+    //     belt-and-braces check for a re-match; it never fires on a first match.
     //   FOR NO KEY UPDATE (round 7, as S2's #216): still serialises edits / re-holds
     //   / re-matches of this invoice, but lets a claim's FK (KEY SHARE) through — a
     //   plain FOR UPDATE deadlocks with the claims-tracker sync.

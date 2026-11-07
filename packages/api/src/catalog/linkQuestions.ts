@@ -187,7 +187,7 @@ export async function readChargeKeys(db: Database, rid: string): Promise<ChargeK
     return [
       {
         supplierId: o.supplierId,
-        sku: typeof o.sku === 'string' ? o.sku : null,
+        sku: typeof o.sku === 'string' && o.sku.trim() ? o.sku : null, // round 7 LOW-11: '' is no SKU
         nameKey: typeof o.nameKey === 'string' ? o.nameKey : null,
         rawName: typeof o.rawName === 'string' ? o.rawName : null,
         minAgorot: typeof o.minAgorot === 'number' ? o.minAgorot : null,
@@ -297,7 +297,8 @@ export function sumAbsIls(amounts: Array<string | number | null>): number {
  * Learn (or widen) a charge key under the restaurant row lock (round 4 LOW-7:
  * no lost update against another settings writer that also locks the row).
  * One entry per (supplier, sku, nameKey); min/maxAgorot keep the signed range of the amounts
- * a person answered "charge" at. Returns true when the key is new.
+ * a person answered "charge" at. Returns whether the key is new, and for a
+ * re-answer the range before and after it (sealed into the undo — round 7).
  */
 export async function learnChargeKey(
   db: Database,
@@ -306,77 +307,78 @@ export async function learnChargeKey(
   /** Signed totals (agorot) of the lines the person was SHOWN and answered — never auto-marks (round 5). */
   shownAgorot: number[],
   by: string,
-): Promise<{ created: boolean; prevRange: { minAgorot: number | null; maxAgorot: number | null } | null }> {
+): Promise<{ created: boolean; prevRange: ChargeRange | null; newRange: ChargeRange }> {
   const [row] = (await db.execute(sql`
     select coalesce(settings -> 'chargeKeys', '[]'::jsonb) as keys from restaurants where id = ${rid} for no key update
   `)) as unknown as Array<{ keys: unknown }>;
   const keys = (Array.isArray(row?.keys) ? (row!.keys as Array<Record<string, unknown>>) : []).slice();
-  let prevRange: { minAgorot: number | null; maxAgorot: number | null } | null = null;
-  const same = (k: Record<string, unknown>) =>
-    k.supplierId === key.supplierId && (k.sku ?? null) === key.sku && (k.nameKey ?? null) === key.nameKey;
-  const i = keys.findIndex(same);
+  let prevRange: ChargeRange | null = null;
+  const i = keys.findIndex((k) => sameChargeKey(k, key));
   const at = new Date().toISOString();
   const shown = shownAgorot.filter((a) => Number.isFinite(a) && a !== 0);
-  const num = (v: unknown) => (typeof v === 'number' ? v : null);
+  let newRange: ChargeRange;
   if (i >= 0) {
     // A re-answer widens the range only with the lines it showed.
     const prevMin = num(keys[i]!.minAgorot);
     const prevMax = num(keys[i]!.maxAgorot);
     prevRange = { minAgorot: prevMin, maxAgorot: prevMax };
     const all = [...shown, ...(prevMin != null ? [prevMin] : []), ...(prevMax != null ? [prevMax] : [])];
-    keys[i] = {
-      ...keys[i],
-      minAgorot: all.length ? Math.min(...all) : null,
-      maxAgorot: all.length ? Math.max(...all) : null,
-      rawName: keys[i]!.rawName ?? key.rawName,
-    };
+    newRange = { minAgorot: all.length ? Math.min(...all) : null, maxAgorot: all.length ? Math.max(...all) : null };
+    keys[i] = { ...keys[i], ...newRange, rawName: keys[i]!.rawName ?? key.rawName };
   } else {
-    keys.push({
-      ...key,
-      minAgorot: shown.length ? Math.min(...shown) : null,
-      maxAgorot: shown.length ? Math.max(...shown) : null,
-      by,
-      at,
-    });
+    newRange = { minAgorot: shown.length ? Math.min(...shown) : null, maxAgorot: shown.length ? Math.max(...shown) : null };
+    keys.push({ ...key, ...newRange, by, at });
   }
   await db.execute(sql`
     update restaurants set settings = jsonb_set(settings, '{chargeKeys}', ${JSON.stringify(keys)}::jsonb, true)
      where id = ${rid}
   `);
-  return { created: i < 0, prevRange };
+  return { created: i < 0, prevRange, newRange };
+}
+
+/** A charge key's signed range (agorot). */
+export interface ChargeRange {
+  minAgorot: number | null;
+  maxAgorot: number | null;
+}
+const num = (v: unknown) => (typeof v === 'number' ? v : null);
+function sameChargeKey(k: Record<string, unknown>, key: { supplierId: string; sku: string | null; nameKey: string | null }) {
+  return k.supplierId === key.supplierId && ((k.sku as string | null) || null) === (key.sku || null) && (k.nameKey ?? null) === key.nameKey;
 }
 
 /**
- * Round 6: the undo of a re-answer puts the key's previous range back. Server-
- * validated: it may only NARROW the current range (a client cannot widen it).
+ * Rounds 6–7: the undo of a re-answer puts back ONLY the bounds that answer
+ * moved (before → after, from the server-signed undo), and only while the bound
+ * still reads what that answer set — a later answer's widening stays. It can
+ * only narrow the current range. Returns true when the range changed.
  */
 export async function restoreChargeKeyRange(
   db: Database,
   rid: string,
   key: { supplierId: string; sku: string | null; nameKey: string | null },
-  prev: { minAgorot: number | null; maxAgorot: number | null },
+  before: ChargeRange,
+  after: ChargeRange,
 ): Promise<boolean> {
   const [row] = (await db.execute(sql`
     select coalesce(settings -> 'chargeKeys', '[]'::jsonb) as keys from restaurants where id = ${rid} for no key update
   `)) as unknown as Array<{ keys: unknown }>;
   const keys = (Array.isArray(row?.keys) ? (row!.keys as Array<Record<string, unknown>>) : []).slice();
-  const i = keys.findIndex(
-    (k) => k.supplierId === key.supplierId && (k.sku ?? null) === key.sku && (k.nameKey ?? null) === key.nameKey,
-  );
+  const i = keys.findIndex((k) => sameChargeKey(k, key));
   if (i < 0) return false;
-  const curMin = typeof keys[i]!.minAgorot === 'number' ? (keys[i]!.minAgorot as number) : null;
-  const curMax = typeof keys[i]!.maxAgorot === 'number' ? (keys[i]!.maxAgorot as number) : null;
+  const curMin = num(keys[i]!.minAgorot);
+  const curMax = num(keys[i]!.maxAgorot);
+  let min = curMin;
+  let max = curMax;
+  if (before.minAgorot !== after.minAgorot && curMin === after.minAgorot) min = before.minAgorot;
+  if (before.maxAgorot !== after.maxAgorot && curMax === after.maxAgorot) max = before.maxAgorot;
+  // A half-known range never auto-marks: keep it whole or null.
+  if (min == null || max == null) min = max = null;
+  if (min === curMin && max === curMax) return false;
   const narrows =
-    (prev.minAgorot == null && prev.maxAgorot == null) ||
-    (prev.minAgorot != null &&
-      prev.maxAgorot != null &&
-      curMin != null &&
-      curMax != null &&
-      prev.minAgorot >= curMin &&
-      prev.maxAgorot <= curMax &&
-      prev.minAgorot <= prev.maxAgorot);
+    (min == null && max == null) ||
+    (min != null && max != null && curMin != null && curMax != null && min >= curMin && max <= curMax && min <= max);
   if (!narrows) return false;
-  keys[i] = { ...keys[i], minAgorot: prev.minAgorot, maxAgorot: prev.maxAgorot };
+  keys[i] = { ...keys[i], minAgorot: min, maxAgorot: max };
   await db.execute(sql`
     update restaurants set settings = jsonb_set(settings, '{chargeKeys}', ${JSON.stringify(keys)}::jsonb, true)
      where id = ${rid}
@@ -394,9 +396,7 @@ export async function forgetChargeKey(
     select coalesce(settings -> 'chargeKeys', '[]'::jsonb) as keys from restaurants where id = ${rid} for no key update
   `)) as unknown as Array<{ keys: unknown }>;
   const keys = Array.isArray(row?.keys) ? (row!.keys as Array<Record<string, unknown>>) : [];
-  const kept = keys.filter(
-    (k) => !(k.supplierId === key.supplierId && (k.sku ?? null) === key.sku && (k.nameKey ?? null) === key.nameKey),
-  );
+  const kept = keys.filter((k) => !sameChargeKey(k, key));
   if (kept.length === keys.length) return false;
   await db.execute(sql`
     update restaurants set settings = jsonb_set(settings, '{chargeKeys}', ${JSON.stringify(kept)}::jsonb, true)
@@ -430,7 +430,9 @@ export async function restoreQuestionReason(db: Database, rid: string, invoiceId
  * the same rule as its guard: an invoice held for questions (linkReleasedAt or a
  * question reason) that has an open question line (unlinked, non-charge) keeps
  * its run and decisions until the question is answered, so it is not re-queued.
- * A never-held invoice re-matches as before (its SKU still pairs).
+ * A never-held invoice re-matches as before (catalog-03; it pairs by מק״ט when
+ * its order line is SKU-keyed too) — unless its run's order has an open question
+ * line (round 7: the job skips that too).
  */
 export async function withoutOpenQuestions(db: Database, rid: string, ids: string[]): Promise<string[]> {
   const uniq = [...new Set(ids)];
@@ -442,6 +444,14 @@ export async function withoutOpenQuestions(db: Database, rid: string, ids: strin
          (coalesce(i.ocr_payload ? 'linkReleasedAt', false)
            or coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| array['unlinked', 'unlinkedPo'])
          and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${IL_NOT_CHARGE})
+       )
+       -- Round 7 HIGH: nor an invoice whose run is on an order with an open
+       -- question line again (the job keeps that run too).
+       and not exists (
+         select 1 from match_runs mr
+           join po_lines pl on pl.po_id = mr.po_id
+           join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid}
+          where mr.invoice_id = i.id and mr.restaurant_id = ${rid} and ${poLineIsQuestion(rid)}
        )
   `)) as unknown as Array<{ id: string }>;
   return rows.map((r) => String(r.id));

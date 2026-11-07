@@ -346,6 +346,7 @@ function MapRow({
     onSuccess: (r) => {
       setOpen(false);
       const undo = r.undo;
+      if (r.linesNotShown > 0) toast.info(t('mapping.chargeNotShown', { count: formatNumber(r.linesNotShown, locale) }));
       toast.success(
         t('mapping.chargeMarked'),
         undo
@@ -534,20 +535,35 @@ function MapRow({
                         max: formatIls(chargeSample.maxIls, { locale }),
                       })
                     : t('mapping.chargeSample', { amount: formatIls(chargeSample.lineTotal, { locale }) })}
+                  {chargeSample.more && (
+                    <>
+                      {' '}
+                      {t('mapping.chargeSampleMore', { shown: formatNumber(chargeSample.lineIds.length, locale) })}
+                    </>
+                  )}
                 </>
               ) : null}
+              {sample.isError && (
+                <>
+                  {' '}
+                  <button type="button" className="underline" onClick={() => void sample.refetch()}>
+                    {t('mapping.chargeSampleRetry')}
+                  </button>
+                </>
+              )}
             </span>
             <Button
               variant="secondary"
               size="sm"
               loading={charge.isPending}
-              // Round 6: only once the person can see what it marks.
-              disabled={pending || !row.sampleDescription || sample.isLoading}
+              // Rounds 6–7: only while the person sees what it marks — never on a
+              // failed, loading or refetching (possibly stale) sample.
+              disabled={pending || !row.sampleDescription || !sample.isSuccess || sample.isFetching}
               onClick={() =>
                 charge.mutate({
                   ...confirmKey(row),
                   // Round 5: only the line shown here bounds what the key auto-marks later.
-                  // Round 6: every line this marks is shown above (count, total, range).
+                  // Round 7: the mark covers exactly the lines shown above (count, total, range).
                   ...(chargeSample ? { shownLineIds: chargeSample.lineIds } : {}),
                 })
               }

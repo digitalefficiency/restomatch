@@ -258,12 +258,18 @@ export async function buildMatchInputForInvoice(
       netAg += lineAg;
       vatAg += Math.sign(lineAg) * Math.round(Math.abs(lineAg) * (l.vatRate == null ? rate : Number(l.vatRate)));
     }
-    const printed = [inv.totalExclVat, inv.vatAmount, inv.totalInclVat].some((v) => v != null);
     const near = (v: string | null, expectedAg: number) => v == null || Math.abs(Math.round(num(v) * 100) - expectedAg) <= 10;
     // Round 6: a VAT-exempt slip (deposits) prints VAT 0 even when its lines carry no
     // vat_rate — any printed VAT between 0 and the default-rate VAT reconciles (VAT
     // below expectation is never a leak); the total must then add up with it.
-    const vatPrintedAg = inv.vatAmount == null ? null : Math.round(num(inv.vatAmount) * 100);
+    // Round 7 LOW-2: no VAT printed but subtotal + total → the VAT is their gap.
+    const vatPrintedAg = printedOrImpliedVatAg(inv);
+    // Round 7 LOW-1: something printed must pin the charges down — the subtotal,
+    // the total, or a non-zero VAT that equals theirs. A lone "VAT 0.00" proves nothing.
+    const printed =
+      inv.totalExclVat != null ||
+      inv.totalInclVat != null ||
+      (vatPrintedAg != null && vatAg !== 0 && Math.abs(vatPrintedAg - vatAg) <= 10);
     const vatOk =
       vatPrintedAg == null ||
       (vatAg >= 0 ? vatPrintedAg >= -10 && vatPrintedAg <= vatAg + 10 : vatPrintedAg <= 10 && vatPrintedAg >= vatAg - 10);
@@ -411,7 +417,11 @@ export async function buildMatchInputForInvoice(
     const used = new Set<string>();
     const pairedChargePo = chargeOnly.map((p) => {
       const name = normalizeLinkName(p.rawDescription ?? '');
-      const twin = invoiceCharges.find((l) => !used.has(l.id) && normalizeLinkName(l.rawDescription ?? '') === name);
+      // The twin: the same name, else (round 7 LOW-8) the same printed SKU — "משלוח"
+      // ordered, "דמי משלוח" billed under one מק״ט is the same charge.
+      const twin =
+        invoiceCharges.find((l) => !used.has(l.id) && normalizeLinkName(l.rawDescription ?? '') === name) ??
+        (p.supplierSku ? invoiceCharges.find((l) => !used.has(l.id) && l.supplierSku === p.supplierSku) : undefined);
       if (!twin) return { ...p, supplierSku: null, unitPriceExpected: null };
       used.add(twin.id);
       const synthetic = `g08-charge:${p.id}`;
@@ -452,7 +462,10 @@ export async function buildMatchInputForInvoice(
         })
         .from(grLines)
         .where(inArray(grLines.grId, grIds));
-      grLineInputs = grLineRows.map((g) => ({
+      // Round 7 LOW-7: a charge order line is not counted goods — its receipt line
+      // ("received 0" for a deposit) would read QTY_OVER against the ₪0 twin.
+      const chargePoIds = new Set(poLineRows.filter((p) => p.charge === true).map((p) => p.id));
+      grLineInputs = grLineRows.filter((g) => !(g.poLineId && chargePoIds.has(g.poLineId))).map((g) => ({
         id: g.id,
         poLineId: g.poLineId,
         productId: g.productId,
@@ -532,11 +545,25 @@ export async function buildMatchInputForInvoice(
   // stays 0 rather than turning negative.
   if (chargeRows.length > 0) {
     let netAg = 0;
-    let vatAg = 0;
+    let knownAg = 0;
+    let unknownAg = 0;
     for (const l of chargeRows) {
       const lineAg = Math.round(num(l.lineTotal) * 100);
       netAg += lineAg;
-      vatAg += Math.sign(lineAg) * Math.round(Math.abs(lineAg) * (l.vatRate == null ? vatRate : Number(l.vatRate)));
+      const lineVat = Math.sign(lineAg) * Math.round(Math.abs(lineAg) * (l.vatRate == null ? vatRate : Number(l.vatRate)));
+      if (l.vatRate == null) unknownAg += lineVat;
+      else knownAg += lineVat;
+    }
+    // Round 7 MEDIUM: a charge line with NO vat_rate (often an exempt deposit) is
+    // not assumed to carry the invoice rate. With the subtotal and the VAT (or its
+    // implied gap) printed, it carries what the printed VAT leaves over after the
+    // goods' VAT — between 0 and the full rate; otherwise the full rate (as before).
+    const exclAg = inv.totalExclVat == null ? null : Math.round(num(inv.totalExclVat) * 100);
+    const vatPAg = printedOrImpliedVatAg(inv);
+    let vatAg = knownAg + unknownAg;
+    if (exclAg != null && vatPAg != null) {
+      const slack = vatPAg - Math.round((exclAg - netAg) * vatRate) - knownAg;
+      vatAg = knownAg + Math.min(Math.max(slack, Math.min(0, unknownAg)), Math.max(0, unknownAg));
     }
     if (inv.totalExclVat != null) totalExclVat = (Math.round(totalExclVat * 100) - netAg) / 100;
     if (inv.vatAmount != null) vatAmount = (Math.round(vatAmount * 100) - vatAg) / 100;
@@ -565,6 +592,15 @@ export async function buildMatchInputForInvoice(
   };
 
   return { input, poId: po?.id ?? null, grId };
+}
+
+/** The printed VAT in agorot; when none is printed but the subtotal and total are, their gap (round 7 LOW-2). */
+function printedOrImpliedVatAg(inv: { totalExclVat: string | null; vatAmount: string | null; totalInclVat: string | null }): number | null {
+  if (inv.vatAmount != null) return Math.round(num(inv.vatAmount) * 100);
+  if (inv.totalExclVat != null && inv.totalInclVat != null) {
+    return Math.round(num(inv.totalInclVat) * 100) - Math.round(num(inv.totalExclVat) * 100);
+  }
+  return null;
 }
 
 /** G-08 charge: the invoice-line ids marked "שורת חיוב — לא מוצר" (ocr_payload.chargeLineIds). */

@@ -78,3 +78,27 @@ describe('OCR pre-marks a learned charge key (round 3)', () => {
     expect(enqueued).toHaveLength(0);
   });
 });
+
+describe('R7 LOW-11: a blank מק״ט is no SKU', () => {
+  it("an OCR line printed with sku '  ' is stored without a SKU and still pre-marked by the name key", async () => {
+    const id = await runOcr(
+      scan([{ rawDescription: 'פיקדון ארגזים', sku: '  ', qty: 1, unit: 'יח׳', unitPrice: 10, lineTotal: 10 } as InvoiceOcrResult['lines'][number]]),
+    );
+    const [line] = await db.select({ id: invoiceLines.id, sku: invoiceLines.supplierSku }).from(invoiceLines).where(eq(invoiceLines.invoiceId, id));
+    expect(line!.sku).toBeNull();
+    const [row] = await db.select({ status: invoices.status, p: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, id));
+    expect((row!.p as unknown as { chargeLineIds: string[] }).chargeLineIds).toEqual([line!.id]);
+    expect(row!.status).toBe('matched');
+  });
+
+  it("a key learned with sku '' (before the fix) matches a line without a SKU", async () => {
+    await db
+      .update(restaurants)
+      .set({ settings: { chargeKeys: [{ supplierId, sku: '', nameKey: 'פיקדון ארגזים', rawName: 'פיקדון ארגזים', minAgorot: 1000, maxAgorot: 1000, by: null, at: '2026-10-24T08:00:00Z' }] } as never })
+      .where(eq(restaurants.id, restaurantId));
+    const id = await runOcr(scan([{ rawDescription: 'פיקדון ארגזים', qty: 1, unit: 'יח׳', unitPrice: 10, lineTotal: 10 }]));
+    const [row] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, id));
+    expect(row!.status).toBe('matched');
+  });
+});
+

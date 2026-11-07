@@ -24,7 +24,7 @@ import {
   normalizeLinkName,
   recordConfirmedMatch,
 } from '@restomatch/catalog';
-import { signAnswerUndo, verifyAnswerUndo } from '../catalog/answerUndo';
+import { signAnswerUndo, signChargeRangeUndo, verifyAnswerUndo, verifyChargeRangeUndo } from '../catalog/answerUndo';
 import {
   chargeKeyCovers,
   IL_NOT_CHARGE,
@@ -45,13 +45,13 @@ import { chefProcedure, managerProcedure, memberProcedure, router } from '../trp
 import { assertSupplierOwned } from '../tenant';
 import { readConsolidatedRaw } from '../match/consolidated';
 
+type SQL = ReturnType<typeof sql>;
+
 /**
  * A re-match job waits this long before it may be claimed: the job row commits
  * on the queue's own connection at once, the backfill only when this request's
  * transaction does — a worker that claimed it sooner would match the old lines.
  */
-type SQL = ReturnType<typeof sql>;
-
 const REMATCH_DELAY_MS = 3_000;
 
 export interface RematchReport {
@@ -187,6 +187,7 @@ async function chargeSampleFor(
   lineTotal: number;
   lineIds: string[];
   count: number;
+  more: boolean;
   totalIls: number;
   minIls: number;
   maxIls: number;
@@ -195,26 +196,39 @@ async function chargeSampleFor(
   const key = row.supplierSku
     ? sql`il.supplier_sku = ${row.supplierSku} and ${normNameSql(sql`il.raw_description`)} = ${nameKey}`
     : sql`il.supplier_sku is null and ${normNameSql(sql`il.raw_description`)} = ${nameKey}`;
-  const rows = (await db.execute(sql`
-    select il.id, il.raw_description, il.line_total from invoice_lines il
+  const where = sql`
+      from invoice_lines il
       join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${row.supplierId}
-     where il.product_id is null and ${key} and ${IL_NOT_CHARGE}
+     where il.product_id is null and ${key} and ${IL_NOT_CHARGE}`;
+  const rows = (await db.execute(sql`
+    select il.id, il.raw_description, il.line_total ${where}
      order by i.created_at desc, il.id
-     limit 500
+     limit ${CHARGE_SAMPLE_MAX}
   `)) as unknown as Array<{ id: string; raw_description: string; line_total: string }>;
   if (rows.length === 0) return null;
-  const totals = rows.map((r) => Number(r.line_total));
+  // Round 7 LOW-4/5: the aggregate is over EVERY line of the key (uncapped), and
+  // the total is Σ|amount| — the ₪ the engine would have flagged, never a net.
+  const [agg] = (await db.execute(sql`
+    select count(*)::int as n, coalesce(sum(abs(il.line_total)), 0)::text as total,
+           min(il.line_total)::text as lo, max(il.line_total)::text as hi ${where}
+  `)) as unknown as Array<{ n: number; total: string; lo: string; hi: string }>;
+  const count = Number(agg!.n);
   return {
     invoiceLineId: String(rows[0]!.id),
     description: String(rows[0]!.raw_description),
-    lineTotal: totals[0]!,
+    lineTotal: Number(rows[0]!.line_total),
     lineIds: rows.map((r) => String(r.id)),
-    count: rows.length,
-    totalIls: Math.round(totals.reduce((a, b) => a + Math.round(b * 100), 0)) / 100,
-    minIls: Math.min(...totals),
-    maxIls: Math.max(...totals),
+    count,
+    /** More lines than lineIds carries: the mark covers only the ones shown ("500+"). */
+    more: count > rows.length,
+    totalIls: Math.round(Number(agg!.total) * 100) / 100,
+    minIls: Number(agg!.lo),
+    maxIls: Number(agg!.hi),
   };
 }
+
+/** The charge panel shows (and a mark covers) at most this many lines per answer. */
+export const CHARGE_SAMPLE_MAX = 500;
 
 /** Name-keyed questions are capped per read (suggestions cost two queries each). */
 export const NAME_QUESTIONS_MAX = 50;
@@ -365,11 +379,15 @@ async function reholdLinkHolds(db: Database, rid: string, invoiceIds: string[]):
              and i.status in ('matched', 'disputed')
              and i.ocr_payload ? 'linkReleasedAt'
              and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${IL_NOT_CHARGE})
-             -- Round 5: never delete a run that carries findings (or the people's
-             -- decisions on them) — such an invoice re-matches instead, keeping them.
+             -- Round 5/7: never delete a run that carries a person's decision (a
+             -- finding no longer 'open') or a credit claim — such an invoice keeps
+             -- its run. Open findings built on the revoked link go with the run
+             -- (round 7 MEDIUM: no stale PRICE_HIGHER block after the undo).
              and not exists (
                select 1 from match_runs mr join discrepancies d on d.match_run_id = mr.id and d.restaurant_id = ${rid}
                 where mr.invoice_id = i.id and mr.restaurant_id = ${rid}
+                  and (d.resolution_status <> 'open'
+                       or exists (select 1 from recovery_claims c where c.discrepancy_id = d.id and c.restaurant_id = ${rid}))
              )
           returning i.id
         `)) as unknown as Array<{ id: string }>;
@@ -773,7 +791,8 @@ export interface ChargeInput {
   undo?: {
     invoiceLineIds: string[];
     forgetKey?: boolean;
-    prevRange?: { minAgorot: number | null; maxAgorot: number | null };
+    /** Round 7: the re-answer's range change, server-signed (signChargeRangeUndo) — never a client range. */
+    rangeToken?: string;
   };
   /** The invoice lines the person was SHOWN when answering (their amounts bound the learned key — round 5). */
   shownLineIds?: string[];
@@ -852,7 +871,11 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
       `);
     }
     if (input.undo.forgetKey) await forgetChargeKey(db, rid, key);
-    else if (input.undo.prevRange) await restoreChargeKeyRange(db, rid, key, input.undo.prevRange);
+    else if (input.undo.rangeToken) {
+      // Round 7 LOW-9/10: only a range this user's answer moved, sealed by the server.
+      const sealed = verifyChargeRangeUndo(input.undo.rangeToken, { userId, restaurantId: rid }, key);
+      if (sealed) await restoreChargeKeyRange(db, rid, key, sealed.before, sealed.after);
+    }
     const touched = [...byInv.keys()];
     const reheld = new Set(await reholdLinkHolds(db, rid, touched));
     // A held invoice whose line is a question again is in the bucket again (round 4 LOW-8).
@@ -871,7 +894,7 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
       entityId: input.supplierId,
       after: { sku: key.sku, nameKey: key.nameKey, lineIds: target.map((t) => String(t.id)), invoiceIds: touched, forgotKey: !!input.undo.forgetKey },
     });
-    return { invoiceLinesMarked: 0, learnedKey: false, rematch, undo: null, linesLocked };
+    return { invoiceLinesMarked: 0, learnedKey: false, rematch, undo: null, linesLocked, linesNotShown: 0 };
   }
 
   // An open question of this key must exist: an invoice line, an order line or a price-list row.
@@ -894,12 +917,21 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
        and exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${lineKey} and ${IL_NOT_CHARGE})
      order by i.id for no key update
   `);
-  const target = (await db.execute(sql`
+  const keyLines = (await db.execute(sql`
     select il.id, il.invoice_id, il.line_total from invoice_lines il
       join invoices i on i.id = il.invoice_id and i.restaurant_id = ${rid} and i.supplier_id = ${input.supplierId}
      where il.product_id is null and ${lineKey} and ${IL_NOT_CHARGE}
      order by il.invoice_id
   `)) as unknown as Array<{ id: string; invoice_id: string; line_total: string }>;
+  // Round 7 LOW-4: with the panel's shown lines, mark ONLY those — a line the
+  // person never saw (past the sample's cap, or arrived after it loaded) stays a
+  // question. Without shownLineIds (an order / price-list-only key) every line.
+  const shown = new Set(input.shownLineIds ?? []);
+  const target = input.shownLineIds ? keyLines.filter((t) => shown.has(String(t.id))) : keyLines;
+  const linesNotShown = keyLines.length - target.length;
+  if (input.shownLineIds && target.length === 0 && keyLines.length > 0) {
+    throw new TRPCError({ code: 'CONFLICT', message: 'the lines shown are gone — reload' });
+  }
   const byInv = groupByInvoice(target);
   const at = new Date().toISOString();
   for (const [invoiceId, lineIds] of byInv) {
@@ -913,10 +945,9 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
     `);
   }
 
-  // Learn the key: next week's line of it is pre-marked by the OCR job — only
-  // up to the largest amount answered here (+ the price tolerance; round 4).
-  // Only the amounts the person was shown (round 5) bound what the key auto-marks later.
-  const shown = new Set(input.shownLineIds ?? []);
+  // Learn the key: next week's line of it is pre-marked by the OCR job only with
+  // the same sign and an amount within the range answered here (± the price
+  // tolerance; rounds 4–5). Only the amounts the person was shown bound it.
   const shownAgorot = target.filter((t) => shown.has(String(t.id))).map((t) => Math.round(Number(t.line_total) * 100));
   const learnedRes = await learnChargeKey(db, rid, { ...key, rawName: input.rawName }, shownAgorot, userId);
   const learned = learnedRes.created ? [true] : [];
@@ -957,10 +988,13 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
     undo: {
       invoiceLineIds: target.map((t) => String(t.id)),
       forgetKey: learned.length > 0,
-      // Round 6: a re-answer's undo puts the previous range back (server-validated: narrow only).
-      ...(learnedRes.prevRange ? { prevRange: learnedRes.prevRange } : {}),
+      // Rounds 6–7: a re-answer's undo puts back only the bounds it moved (server-signed).
+      ...(learnedRes.prevRange
+        ? { rangeToken: signChargeRangeUndo({ userId, restaurantId: rid }, key, learnedRes.prevRange, learnedRes.newRange) }
+        : {}),
     },
     linesLocked: 0,
+    linesNotShown,
   };
 }
 
@@ -1255,10 +1289,7 @@ export const mappingRouter = router({
             .object({
               invoiceLineIds: z.array(z.string().uuid()).max(5000),
               forgetKey: z.boolean().optional(),
-              prevRange: z
-                .object({ minAgorot: z.number().int().nullable(), maxAgorot: z.number().int().nullable() })
-                .strict()
-                .optional(),
+              rangeToken: z.string().max(4000).optional(),
             })
             .strict()
             .optional(),
@@ -1319,8 +1350,9 @@ export const mappingRouter = router({
   /**
    * Forget a learned charge key (round 4): future lines of it are questions
    * again, order / price-list lines of it are questions again at once, and the
-   * lines it still marks on UNPAID invoices are put back as questions (their ₪
-   * returns to the check). Audited.
+   * lines it still marks are put back as questions (their ₪ returns to the
+   * check) — except on an invoice a person signed off (approved / paid) or a
+   * credit claim hangs on: those stay marked (linesLocked). Audited.
    */
   removeChargeKey: managerProcedure
     .input(
