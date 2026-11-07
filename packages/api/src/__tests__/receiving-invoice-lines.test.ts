@@ -3,7 +3,7 @@ import { and, auditLog, creditNotes, createDb, discrepancies, eq, goodsReceipts,
 import { computeInvoiceLeak } from '@restomatch/charts';
 import { appRouter } from '../index';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
-import { transitionClaim } from '../recovery/service';
+import { NEVER_CLAIMABLE_NOTE, transitionClaim } from '../recovery/service';
 import { invoicesWaitingOnReceipt } from '../receiving/matchTriggers';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
@@ -1176,6 +1176,33 @@ describe('#216 round 8', () => {
     expect(out).toMatchObject({ rematched: false, rematchSkipped: 'receipt_open' });
     expect(await claims()).toHaveLength(0); // released now — the receipt's job replaces that run
     expect((await raw()).heldForReceipts).toEqual([A.grId]);
+  });
+
+  it('round 9 item 1: a claim the SYSTEM wrote off as never-claimable is no history — the pencil works and Re-run runs', async () => {
+    await stampOn(A.grId);
+    const { lineId, claimId } = await handLineWithClaimedRun();
+    // syncClaims' own never-claimable write-off (owner 31.10): no actor, its note.
+    await db.update(recoveryClaims).set({ status: 'written_off', closedAt: new Date() } as never).where(eq(recoveryClaims.id, claimId));
+    await db.execute(sql`
+      INSERT INTO recovery_events (restaurant_id, claim_id, from_status, to_status, amount_agorot, actor_id, note)
+      VALUES (${A.restaurantId}, ${claimId}, 'claimed', 'written_off', 1500, NULL, ${NEVER_CLAIMABLE_NOTE})`);
+    const page = await as('manager').receiving.getInvoice({ invoiceId: failedId });
+    expect(page).toMatchObject({ linesLockReason: null, lineEditLock: null });
+    expect((await as('manager').match.runForInvoice({ invoiceId: failedId })).matchRunId).not.toBeNull();
+    expect(await claims()).toHaveLength(0); // released with the re-match
+    const out = await as('manager').receiving.updateInvoiceLine({ lineId, patch: { qtyBilled: 2 } });
+    expect(out).toMatchObject({ ok: true, rematched: true });
+  });
+
+  it('round 9 item 4: the pencil is offered only where the server takes it — lineEditLock on every status updateInvoiceLine accepts', async () => {
+    await stampOn(A.grId);
+    const { claimId } = await handLineWithClaimedRun();
+    await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, failedId)); // a read invoice: no add/delete, pencil only
+    expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).lineEditLock).toBeNull();
+    await personWritesOff(claimId);
+    expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).lineEditLock).toBe('claim');
+    await db.update(invoices).set({ status: 'approved' }).where(eq(invoices.id, failedId));
+    expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).lineEditLock).toBe('settled');
   });
 });
 

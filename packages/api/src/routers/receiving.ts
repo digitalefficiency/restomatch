@@ -619,6 +619,18 @@ export const receivingRouter = router({
           return {
             linesEditable: editable,
             linesLockReason: lockReason,
+            // The pencil (updateInvoiceLine) on ANY status it accepts: refused
+            // while being read, and by assertNoMoneyHistory's own rule — so the
+            // page never shows a dead affordance (round 9).
+            lineEditLock:
+              invoice.status === 'ocr_pending'
+                ? ('being_read' as const)
+                : invoice.status === 'approved' || invoice.status === 'paid'
+                  ? ('settled' as const)
+                  : await (async () => {
+                      const r = await linesLockReason(ctx.db, ctx.session.restaurantId, invoice.id, null);
+                      return r === 'credit_note' || r === 'claim' ? r : null;
+                    })(),
             // Which lines "מחיקת שורה" may remove (deleteInvoiceLine's own rule).
             deletableLineIds: editable ? deletableLineIds(ocrPayload, lines.map((l) => l.id)) : [],
             // The add-line picker: the order's lines that CAN pair (a product or a

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { ReconciliationLine } from '@/app/showcase/receiver/_mock';
 import { lineKey, type LineMark } from '@/app/showcase/receiver/_state';
+import { he as receivingHe } from '@/lib/i18n/messages/receiving/he';
+import { en as receivingEn } from '@/lib/i18n/messages/receiving/en';
+import { receiving as ru } from '@/lib/i18n/messages/receiverLangs/overlays/ru/receiving';
+import { receiving as th } from '@/lib/i18n/messages/receiverLangs/overlays/th/receiving';
+import { receiving as ar } from '@/lib/i18n/messages/receiverLangs/overlays/ar/receiving';
+import { receiving as ti } from '@/lib/i18n/messages/receiverLangs/overlays/ti/receiving';
 import { buildSlipLines, issueMessageKey, lineIssues, needsSlip, slipBullet, slipNote, sumIls, type EngineSlipLine } from '../_dockSlip';
 
 const line = (o: Partial<ReconciliationLine>): ReconciliationLine => ({
@@ -158,6 +164,16 @@ describe('dock slip — status note', () => {
   it('a held re-match says so at once — no spinner, no "will follow"', () => {
     expect(slipNote(e({ holdReason: 'awaiting_review' }), true, false)).toBe('held');
     expect(slipNote(e({ holdReason: 'settled' }), true, true)).toBe('held');
+    expect(slipNote(e({ holdReason: 'claim_in_progress' }), true, false)).toBe('held'); // #216 round 9
+  });
+  it('#216 round 9: a re-match blocked by a claim with history has its own copy — no promised unblock, every language', () => {
+    for (const m of [receivingHe, receivingEn, ru, th, ar, ti]) {
+      const d = m.dockSlip;
+      expect(d.heldClaim, 'heldClaim').toBeTruthy();
+      expect(d.heldClaim).not.toBe(d.heldReview);
+    }
+    expect(receivingHe.dockSlip.heldClaim).not.toMatch(/ייקבעו|אחרי בדיקת/);
+    expect(receivingEn.dockSlip.heldClaim).not.toMatch(/will be set|once|until/);
   });
   it('otherwise the spinner, then the calm "slow" note', () => {
     expect(slipNote(e({}), true, false)).toBe('computing');

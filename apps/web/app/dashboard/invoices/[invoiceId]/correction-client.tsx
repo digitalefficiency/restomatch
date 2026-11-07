@@ -488,9 +488,12 @@ export function InvoiceCorrection({
                         </div>
                       ) : (
                         <div className="flex items-center gap-1">
-                          <Button size="sm" variant="ghost" title={t('correction.edit')} aria-label={t('correction.edit')} onClick={() => startLine(l)}>
-                            <Pencil className="h-4 w-4" />
-                          </Button>
+                          {/* No dead pencil: hidden while the server would refuse it (getInvoice.lineEditLock). */}
+                          {!invoice.lineEditLock && (
+                            <Button size="sm" variant="ghost" title={t('correction.edit')} aria-label={t('correction.edit')} data-testid="edit-invoice-line" onClick={() => startLine(l)}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          )}
                           {linesEditable && invoice.deletableLineIds.includes(l.id) && (
                             <Button
                               size="sm"

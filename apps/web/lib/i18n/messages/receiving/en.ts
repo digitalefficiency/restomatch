@@ -178,6 +178,7 @@ export const en: Shape<typeof he> = {
     afterClose: 'The ₪ at stake is set once you close the receipt — the matching engine checks it against the actual count.',
     slow: 'This is taking longer than usual. The quantities are here; the ₪ will follow.',
     heldReview: 'The amounts will be set once the invoice has been checked.',
+    heldClaim: "The count's result was not applied to this invoice: it has a credit claim with history, which stays in the ₪-back tracker.",
     heldSettled: 'This invoice was already approved — its amounts are on the approvals screen.',
     refresh: 'Refresh',
     copy: 'Copy text',

@@ -113,8 +113,46 @@ export function claimReleasableSql(restaurantId: string) {
         AND NOT (
           (e.to_status = 'claimed' AND (e.from_status IS NULL OR e.actor_id IS NULL))
           OR ${SYSTEM_WRITE_OFF}
+          -- The system's never-claimable write-off (owner 31.10, MISSING_ON_INVOICE…)
+          -- is no person's history either (round 9). SYSTEM_WRITE_OFF itself stays
+          -- as it is: toReopen re-opens only an AUTO write-off.
+          OR (e.to_status = 'written_off' AND e.note = ${NEVER_CLAIMABLE_NOTE} AND e.actor_id IS NULL)
         )
     ))`;
+}
+
+/**
+ * A finding's run is one its invoice is HELD to replace: the invoice waits for a
+ * receipt still being counted that this run is not on (aliases `i` invoices,
+ * `mr` match_runs). syncClaims files no claim there (the hold released them; the
+ * count's run follows), and the tracker shows such findings as "waiting for the
+ * count" (heldForCountTotals) — one predicate for both.
+ */
+function heldRunSql(restaurantId: string) {
+  return sql`EXISTS (
+    SELECT 1 FROM goods_receipts hg
+    WHERE hg.restaurant_id = ${restaurantId}
+      AND hg.status = 'pending'
+      AND (i.ocr_payload -> 'raw' -> ${sql.raw(`'${HELD_FOR_RECEIPTS_KEY}'`)}) @> jsonb_build_array(hg.id::text)
+      AND mr.gr_id IS DISTINCT FROM hg.id
+  )`;
+}
+
+/** The claimable ₪ the tracker does not file while its invoice waits for a count (integer agorot). */
+export async function heldForCountTotals(db: Database, restaurantId: string): Promise<{ count: number; agorot: number }> {
+  const [row] = rowsOf(
+    await db.execute(sql`
+      SELECT count(*)::int AS n, COALESCE(SUM(round(abs(d.delta_amount) * 100)), 0)::bigint AS agorot
+      FROM discrepancies d
+      JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
+      JOIN invoices i ON i.id = mr.invoice_id AND i.restaurant_id = ${restaurantId}
+      WHERE d.restaurant_id = ${restaurantId}
+        AND d.delta_amount IS NOT NULL
+        AND ${CLAIMABLE_FILTER}
+        AND NOT EXISTS (SELECT 1 FROM recovery_claims rc WHERE rc.discrepancy_id = d.id)
+        AND ${heldRunSql(restaurantId)}`),
+  );
+  return { count: Number(row?.n ?? 0), agorot: Number(row?.agorot ?? 0) };
 }
 
 /** The claims a re-match of this invoice would touch: on its runs' findings, or filed against it. */
@@ -314,13 +352,8 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
         -- #216 round 8: not on a run its invoice is HELD to replace (held for a
         -- receipt still being counted that this run is not on): the hold released
         -- its bare claims, and a claim filed now would block the count's run.
-        AND NOT EXISTS (
-          SELECT 1 FROM goods_receipts hg
-          WHERE hg.restaurant_id = ${restaurantId}
-            AND hg.status = 'pending'
-            AND (i.ocr_payload -> 'raw' -> ${sql.raw(`'${HELD_FOR_RECEIPTS_KEY}'`)}) @> jsonb_build_array(hg.id::text)
-            AND mr.gr_id IS DISTINCT FROM hg.id
-        )
+        -- The tracker shows these as "waiting for the count" (heldForCountTotals).
+        AND NOT ${heldRunSql(restaurantId)}
     )
     INSERT INTO recovery_claims (restaurant_id, discrepancy_id, supplier_id, invoice_id, amount_agorot, claimed_at, created_by)
     SELECT ${restaurantId}, c.discrepancy_id, c.supplier_id, c.invoice_id,

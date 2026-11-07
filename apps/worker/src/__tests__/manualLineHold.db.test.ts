@@ -415,6 +415,9 @@ describe('#216 round 7', () => {
     // The ₪-back tracker opens (recovery.summary / list sync first): nothing re-filed on the run being replaced.
     expect(await syncClaims(db, restaurantId, userId)).toBe(0);
     expect(await claimsOf(inv)).toHaveLength(0);
+    // Round 9 item 2: …but never hidden either — the tracker shows it as waiting for the count (T4).
+    await db.update(restaurants).set({ settings: { features: { recovery: true } } as never }).where(eq(restaurants.id, restaurantId));
+    expect((await as('owner').recovery.summary()).summary.heldForCount).toEqual({ count: 1, agorot: 125_000 });
 
     await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
     await as('receiver').receiving.submitReceipt({ grId });
@@ -426,5 +429,6 @@ describe('#216 round 7', () => {
     expect(runs).toHaveLength(1);
     expect(runs[0]).toMatchObject({ grId, overallStatus: 'clean', totalDiscrepancyAmount: '0.00' });
     expect(await syncClaims(db, restaurantId, userId)).toBe(0); // nothing to claim on a clean run
+    expect((await as('owner').recovery.summary()).summary.heldForCount).toEqual({ count: 0, agorot: 0 });
   });
 });
