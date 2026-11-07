@@ -427,7 +427,9 @@ describe('ask: leakChange is like-for-like, and "כמה" alone is not the leak (
     ['כמה חשבוניות קיבלנו?', null],
     ['How much is the salmon?', null],
     ['how much', null],
-    ['מה כדאי לתבוע השבוע?', 'claimWeek'],
+    ['על מה כדאי לבקש זיכוי השבוע?', 'claimWeek'],
+    ['מה כדאי לתבוע השבוע?', 'claimWeek'], // typed by a user: still understood
+    ['What should I send a credit request for this week?', 'claimWeek'],
     ['על מה לבקש זיכוי?', 'claimWeek'],
     ['מי העלה מחירים?', 'priceRaise'],
     ['Which supplier raised prices?', 'priceRaise'],
