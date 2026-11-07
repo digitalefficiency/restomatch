@@ -95,3 +95,10 @@ export {
   type MeasuredState,
   type ResolvedWindow,
 } from './period';
+export {
+  computeLeakDrivers,
+  DRIVER_DIMENSIONS,
+  type DriverDimension,
+  type LeakDriver,
+  type LeakDrivers,
+} from './leak-drivers';
