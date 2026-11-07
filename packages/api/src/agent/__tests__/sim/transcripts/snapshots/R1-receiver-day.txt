@@ -1,0 +1,8 @@
+# WA-G-RECEIVER-01 · R1 · receiver · 06:00 today's trucks (no ₪ keys reach the template)
+# wave2-lab:kfar-hazeitim · 2026-10-25
+
+‏[מערכת 06:00] rm_receiver_day
+‏   ‹תבנית rm_receiver_day›
+‏RestoMatch: בוקר טוב. היום מגיעים 3 משלוחים. הראשון: מאפיית ברנר עד 06:00. כשהמשלוח מגיע, צלמו את תעודת המשלוח ושלחו לכאן.
+‏   [כפתור] רשימה מלאה
+‏   [כפתור] פתח קבלה

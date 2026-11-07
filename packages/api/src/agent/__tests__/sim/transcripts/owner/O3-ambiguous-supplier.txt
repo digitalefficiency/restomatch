@@ -1,0 +1,8 @@
+# WA-G-OWNER-10 · O3 · owner · Ambiguous supplier → "למי התכוונת?" list
+# wave2-lab:kfar-hazeitim · 2026-10-25
+
+‏אני: כמה דלף אצל ירקות הש
+‏RestoMatch: למי התכוונת?
+‏   [רשימה: בחרו ספק]
+‏      · ירקות השרון
+‏      · ירקות השומרון
