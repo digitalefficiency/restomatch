@@ -38,7 +38,7 @@ const MAX_AGOROT = 1_000_000_000_000;
 export type LeadActionState =
   | { status: 'idle' }
   | { status: 'ok'; name: string; phone: string; email: string }
-  | { status: 'invalid'; errors: LeadFieldErrors }
+  | { status: 'invalid'; errors: LeadFieldErrors; values: { name: string; phone: string; email: string; restaurantName: string } }
   | { status: 'rate' }
   | { status: 'error' };
 
@@ -89,7 +89,11 @@ export async function submitLead(fd: FormData, deps: LeadActionDeps): Promise<Le
   const phoneRaw = field(fd, 'phone', LEAD_FIELD_MAX.phone).trim();
   const email = field(fd, 'email', LEAD_FIELD_MAX.email).trim();
   const errors = validateLead({ name, phone: phoneRaw, email });
-  if (Object.keys(errors).length > 0) return { status: 'invalid', errors };
+  if (Object.keys(errors).length > 0) {
+    // Echo back only the bounded, already-typed fields so a JS-off retry keeps them.
+    const restaurantName = field(fd, 'restaurantName', LEAD_FIELD_MAX.restaurantName);
+    return { status: 'invalid', errors, values: { name, phone: phoneRaw, email, restaurantName } };
+  }
 
   const phone = phoneRaw ? formatIlPhone(phoneRaw) : '';
   const marketingConsent = field(fd, 'marketingConsent', 8) === 'on';

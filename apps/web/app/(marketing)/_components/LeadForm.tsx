@@ -43,19 +43,24 @@ function LeadFormInner({ cta, action }: { cta: string; action: LeadFormAction })
   // server-side as evidence of an informed marketing consent (E.7, Communications
   // Law §30A).
   const MARKETING_CONSENT_TEXT = t('lead.consentText');
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [restaurantName, setRestaurantName] = useState('');
+  const [state, formAction, isPending] = useActionState(action, LEAD_IDLE);
+  // JS off: a refused POST re-renders this form on the server, so the action's
+  // verdict and what was typed must seed the initial state (effects never run).
+  const back = state.status === 'invalid' ? state.values : null;
+  const [name, setName] = useState(back?.name ?? '');
+  const [phone, setPhone] = useState(back?.phone ?? '');
+  const [email, setEmail] = useState(back?.email ?? '');
+  const [restaurantName, setRestaurantName] = useState(back?.restaurantName ?? '');
   const [monthlyIls, setMonthlyIls] = useState('');
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [hp, setHp] = useState('');
-  const [errors, setErrors] = useState<LeadFieldErrors>({});
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<LeadFieldErrors>(() => (state.status === 'invalid' ? state.errors : {}));
+  const [submitError, setSubmitError] = useState<string | null>(() =>
+    state.status === 'rate' ? t('lead.errorRate') : state.status === 'error' ? t('lead.errorGeneric') : null,
+  );
   const successRef = useRef<HTMLHeadingElement>(null);
   const channels = contactChannels();
 
-  const [state, formAction, isPending] = useActionState(action, LEAD_IDLE);
   // Attribution lives in localStorage: read it after mount (the SSR value is the bare path).
   const [source, setSource] = useState(() => buildLeadSource(pathname, cta, null));
   useEffect(() => {

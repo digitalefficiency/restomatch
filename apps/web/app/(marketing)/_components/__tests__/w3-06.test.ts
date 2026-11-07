@@ -161,8 +161,12 @@ describe('W3-06 · the lead Server Action (same front door as the tRPC route)', 
 
   it('re-validates server-side: name only is refused with the contact error', async () => {
     const d = deps();
-    expect(await submitLead(fd({ name: 'רק שם' }), d)).toEqual({ status: 'invalid', errors: { contact: 'errorContact' } });
-    expect(await submitLead(fd({ name: '', email: 'x@y.co' }), d)).toEqual({ status: 'invalid', errors: { name: 'errorName' } });
+    expect(await submitLead(fd({ name: 'רק שם' }), d)).toEqual({
+      status: 'invalid',
+      errors: { contact: 'errorContact' },
+      values: { name: 'רק שם', phone: '', email: '', restaurantName: '' },
+    });
+    expect(await submitLead(fd({ name: '', email: 'x@y.co' }), d)).toMatchObject({ status: 'invalid', errors: { name: 'errorName' } });
     expect(await submitLead(fd({ name: 'א', phone: '12' }), d)).toMatchObject({ status: 'invalid', errors: { phone: 'errorPhone' } });
     expect(d.create).not.toHaveBeenCalled();
   });
@@ -217,6 +221,6 @@ describe('W3-06 · the lead Server Action (same front door as the tRPC route)', 
     const f = new FormData();
     f.set('name', new Blob(['x']), 'x.txt');
     f.set('email', 'a@b.co');
-    expect(await submitLead(f, deps())).toEqual({ status: 'invalid', errors: { name: 'errorName' } });
+    expect(await submitLead(f, deps())).toMatchObject({ status: 'invalid', errors: { name: 'errorName' } });
   });
 });
