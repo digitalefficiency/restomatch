@@ -384,17 +384,19 @@ CREATE TABLE IF NOT EXISTS "supplier_bank_accounts" (
   CONSTRAINT "supplier_bank_accounts_bank_code_check" CHECK ("bank_code" ~ '^[0-9]{2,3}$'),
   CONSTRAINT "supplier_bank_accounts_branch_code_check" CHECK ("branch_code" ~ '^[0-9]{3,4}$'),
   CONSTRAINT "supplier_bank_accounts_last4_check" CHECK ("account_last4" ~ '^[0-9]{1,4}$'),
-  -- A clear number is refused: only the envelope encryptField() writes is stored (the
-  -- W2-11 contract): 'v<n>:<kid>:<iv>:<ct>:<tag>', every part unpadded base64url;
-  -- kid 1..64 chars, iv = 12 bytes (16 chars), ct >= 2 chars, tag = 16 bytes (22 chars).
+  -- A clear number is refused: only the envelope W2-11's helper writes is stored, the
+  -- order of apps/web/lib/totp.ts encryptSecret() plus a key id:
+  -- 'v<n>:<kid>:<iv>:<tag>:<ct>', every part unpadded base64url; kid 1..64 chars,
+  -- iv = 12 bytes (16 chars), tag = 16 bytes (22 chars), ct >= 2 chars.
   CONSTRAINT "supplier_bank_accounts_enc_envelope_check" CHECK (
-    "account_number_enc" ~ '^v[0-9]{1,3}:[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{16}:[A-Za-z0-9_-]{2,}:[A-Za-z0-9_-]{22}$'),
+    "account_number_enc" ~ '^v[0-9]{1,3}:[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{16}:[A-Za-z0-9_-]{22}:[A-Za-z0-9_-]{2,}$'),
   -- The holder is a name, never a ciphertext envelope (any case, leading blanks incl.
-  -- Unicode spaces, zero-width characters and the BOM). No
+  -- Unicode spaces, zero-width / bidi marks (LRM, RLM, ALM), embeddings and isolates,
+  -- invisible operators, soft hyphen, Hangul fillers, variation selectors, the BOM). No
   -- digit-run rule: a company name may carry its ח.פ. number.
   CONSTRAINT "supplier_bank_accounts_holder_name_check" CHECK (
     "holder_name" IS NULL OR (pg_catalog.length("holder_name") <= 200
-      AND "holder_name" !~* U&'^[[:space:][:cntrl:]\00A0\1680\180E\2000-\200D\2028\2029\202F\205F\2060\3000\FEFF]*v[0-9]+:'))
+      AND "holder_name" !~* U&'^[[:space:][:cntrl:]\00A0\00AD\034F\061C\115F\1160\1680\17B4\17B5\180B-\180F\2000-\200F\2028-\202F\205F-\206F\3000\3164\FE00-\FE0F\FEFF\FFA0]*v[0-9]+:'))
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "supplier_bank_accounts_supplier_idx" ON "supplier_bank_accounts" USING btree ("supplier_id", "restaurant_id");--> statement-breakpoint
 -- One ACTIVE account per (restaurant, supplier): a change of account = a new row + the
@@ -421,7 +423,7 @@ CREATE OR REPLACE FUNCTION public.restomatch_bank_audit_masked(j pg_catalog.json
     AND pg_catalog.jsonb_typeof(coalesce(j -> 'branch_code', '"0"'::pg_catalog.jsonb)) = 'string' AND (j ->> 'branch_code') ~ '^[0-9]{1,4}$' IS NOT FALSE
     AND pg_catalog.jsonb_typeof(coalesce(j -> 'account_last4', '"0"'::pg_catalog.jsonb)) = 'string' AND (j ->> 'account_last4') ~ '^[0-9]{1,4}$' IS NOT FALSE
     AND pg_catalog.jsonb_typeof(coalesce(j -> 'holder_name', 'null'::pg_catalog.jsonb)) IN ('string', 'null')
-    AND (j ->> 'holder_name') !~* U&'^[[:space:][:cntrl:]\00A0\1680\180E\2000-\200D\2028\2029\202F\205F\2060\3000\FEFF]*v[0-9]+:' IS NOT FALSE AND pg_catalog.length(coalesce(j ->> 'holder_name', '')) <= 200
+    AND (j ->> 'holder_name') !~* U&'^[[:space:][:cntrl:]\00A0\00AD\034F\061C\115F\1160\1680\17B4\17B5\180B-\180F\2000-\200F\2028-\202F\205F-\206F\3000\3164\FE00-\FE0F\FEFF\FFA0]*v[0-9]+:' IS NOT FALSE AND pg_catalog.length(coalesce(j ->> 'holder_name', '')) <= 200
     AND pg_catalog.jsonb_typeof(coalesce(j -> 'active', 'true'::pg_catalog.jsonb)) = 'boolean'
     AND pg_catalog.jsonb_typeof(coalesce(j -> 'verified_by', 'null'::pg_catalog.jsonb)) IN ('string', 'null') AND pg_catalog.length(coalesce(j ->> 'verified_by', '')) <= 64
     AND pg_catalog.jsonb_typeof(coalesce(j -> 'verified_at', 'null'::pg_catalog.jsonb)) IN ('string', 'null') AND pg_catalog.length(coalesce(j ->> 'verified_at', '')) <= 64
@@ -497,7 +499,13 @@ BEGIN
     RAISE EXCEPTION 'restomatch_bank_account_audit: wrong table' USING ERRCODE = 'insufficient_privilege';
   END IF;
   -- Attribution: a named actor, and a newly set verifier, must belong to this restaurant.
-  -- The owner connection (GUC unset) writes as actor NULL: anonymous by design.
+  -- Only the OWNER login may write anonymously (GUC unset): a tenant-role session that
+  -- clears the GUC is refused, so no app write is ever unattributed.
+  IF actor IS NULL AND NOT pg_catalog.pg_has_role(session_user,
+       (SELECT c.relowner FROM pg_catalog.pg_class c WHERE c.oid OPERATOR(pg_catalog.=) TG_RELID), 'MEMBER') THEN
+    RAISE EXCEPTION 'restomatch_bank_account_audit: no acting user (app.current_user_id) on a non-owner connection'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
   IF actor IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM public.memberships m
     WHERE m.user_id OPERATOR(pg_catalog.=) actor AND m.restaurant_id OPERATOR(pg_catalog.=) NEW.restaurant_id
@@ -591,7 +599,7 @@ BEGIN
     ALTER TABLE "users" ADD CONSTRAINT "users_whatsapp_consent_check" CHECK (
       NOT "whatsapp_opt_in"
       OR ("whatsapp_opt_in_at" IS NOT NULL AND "whatsapp_opt_in_source" IS NOT NULL
-          AND "whatsapp_opt_in_source" <> 'admin' AND coalesce("whatsapp_opt_in_notice_version", '') ~ U&'[^[:space:][:cntrl:]\00A0\1680\180E\2000-\200D\2028\2029\202F\205F\2060\3000\FEFF]'));
+          AND "whatsapp_opt_in_source" <> 'admin' AND coalesce("whatsapp_opt_in_notice_version", '') ~ '[[:alnum:]]'));
   END IF;
 END $$;--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "notification_prefs" (
@@ -635,15 +643,41 @@ CREATE TRIGGER "notification_settings_set_updated_at" BEFORE UPDATE ON "notifica
 
 -- ── RLS on the ten new tenant tables (also in rls/0002's list) ───────────────
 CREATE SCHEMA IF NOT EXISTS app;--> statement-breakpoint
--- Same text as rls/0002 (which re-creates them after this file): pinned, qualified.
+-- Same text as rls/0002 (which re-creates them after this file): fully qualified, NOT
+-- pinned (a SET would stop them inlining into every RLS policy; see rls/0002).
 CREATE OR REPLACE FUNCTION app.current_restaurant_id() RETURNS pg_catalog.uuid
   LANGUAGE sql STABLE
-  SET search_path = pg_catalog, pg_temp
   AS $$ select nullif(pg_catalog.current_setting('app.current_restaurant_id', true), '')::pg_catalog.uuid $$;--> statement-breakpoint
 CREATE OR REPLACE FUNCTION app.current_user_id() RETURNS pg_catalog.uuid
   LANGUAGE sql STABLE
-  SET search_path = pg_catalog, pg_temp
   AS $$ select nullif(pg_catalog.current_setting('app.current_user_id', true), '')::pg_catalog.uuid $$;--> statement-breakpoint
+-- The audit_log pair, the SAME text as rls/0003 (the bundle re-creates it): pinned here
+-- too, so a failed bundle apply can never leave them unpinned after this migration.
+CREATE OR REPLACE FUNCTION app.audit_log_is_maintenance_role() RETURNS pg_catalog.bool
+  LANGUAGE sql STABLE
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+  select exists (
+      select 1 from pg_catalog.pg_roles r
+      where r.rolname OPERATOR(pg_catalog.=) current_user and (r.rolsuper or r.rolbypassrls)
+    )
+    or current_user OPERATOR(pg_catalog.=) (
+      select pg_catalog.pg_get_userbyid(c.relowner)
+      from pg_catalog.pg_class c where c.oid OPERATOR(pg_catalog.=) 'public.audit_log'::pg_catalog.regclass
+    )
+$$;--> statement-breakpoint
+CREATE OR REPLACE FUNCTION app.audit_log_immutable() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+begin
+  if app.audit_log_is_maintenance_role() then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+  raise exception 'audit_log is append-only: % is not permitted (role %)', tg_op, current_user
+    using errcode = 'check_violation';
+end;
+$$;--> statement-breakpoint
 ALTER TABLE "export_runs" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "export_runs_tenant" ON "export_runs";--> statement-breakpoint
 CREATE POLICY "export_runs_tenant" ON "export_runs" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint

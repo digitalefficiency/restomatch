@@ -318,6 +318,21 @@ describe('0072 the ten new tenant tables', () => {
     for (const r of rows) expect(r.expr).toContain('app.current_user_id()');
   });
 
+  it('the RLS helpers stay inlinable (no SET search_path) with a fully qualified body', async () => {
+    for (const fn of ['current_restaurant_id', 'current_user_id']) {
+      const [p] = (await sql`select p.proconfig, p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'app' and p.proname = ${fn}`) as unknown as Array<{ proconfig: string[] | null; prosrc: string }>;
+      expect(p!.proconfig, fn).toBeNull();
+      expect(p!.prosrc.trim()).toBe(`select nullif(pg_catalog.current_setting('app.${fn}', true), '')::pg_catalog.uuid`);
+    }
+    // Inlined: the plan shows the GUC read, not a function call per row.
+    const plan = ((await sql`explain (costs off) select 1 from invoices where restaurant_id = app.current_restaurant_id()`) as unknown as Array<Record<string, string>>)
+      .map((r) => Object.values(r)[0])
+      .join('\n');
+    expect(plan).toContain('current_setting');
+    expect(plan).not.toContain('current_restaurant_id()');
+  });
+
   it('are in the rls/0002 table list', () => {
     const rls = readFileSync(join(migrationsDir(), 'rls', '0002_core_tenant_rls.sql'), 'utf8');
     for (const t of TABLES) expect(rls).toContain(`'${t}'`);
@@ -339,7 +354,7 @@ describe('0072 the ten new tenant tables', () => {
     await db.insert(leakMonthCorrections).values({ restaurantId: t.restaurantId, snapshotId: snap!.id, deltaAgorot: 5, reason: 'late credit note' });
     const [acct] = await db
       .insert(supplierBankAccounts)
-      .values({ restaurantId: t.restaurantId, supplierId: t.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', accountLast4: '6789' })
+      .values({ restaurantId: t.restaurantId, supplierId: t.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' })
       .returning();
     await db.insert(supplierBankAccountChanges).values({ restaurantId: t.restaurantId, bankAccountId: acct!.id, after: { account_last4: '6789' } });
     await db.insert(pushSubscriptions).values({ restaurantId: t.restaurantId, userId, endpoint: `https://push.test/${t.restaurantId}`, p256dh: 'k', auth: 'a' });
@@ -593,7 +608,7 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
     supplierId,
     bankCode: '12',
     branchCode: '345',
-    accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB',
+    accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q',
     accountLast4: '6789',
     ...over,
   });
@@ -616,18 +631,21 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
     await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId, { accountNumberEnc: '123456789' })), CHECK_VIOLATION);
     await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId, { accountNumberEnc: 'enc:123' })), CHECK_VIOLATION);
     // Only the FULL five-part envelope encryptField() writes: a short 'v1:<number>' is a clear number.
-    // W2-11 contract: unpadded base64url parts, iv = 16 chars (12 bytes), tag = 22 chars (16 bytes).
+    // W2-11 contract (totp.ts encryptSecret order + a kid): v<n>:<kid>:<iv>:<tag>:<ct>,
+    // unpadded base64url, iv = 16 chars (12 bytes), tag = 22 chars (16 bytes), ct >= 2.
     const iv = 'AAAAAAAAAAAAAAAA';
     const tag = 'BBBBBBBBBBBBBBBBBBBBBB';
     for (const enc of [
       'v1:x:x:x:123456789012',
-      `v1:k1:${iv.slice(1)}:Y3Q:${tag}`,
-      `v1:k1:${iv}:Y3Q:${tag.slice(1)}`,
-      `v1:k1:${iv}:Y3Q:${tag}==`,
-      `v1:k1:${iv}:Y3+/:${tag}`,
-      `v1:k1:${iv}:Y3Q\n:${tag}`,
-      `v1:k\u0000:${iv}:Y3Q:${tag}`,
-      `v1:k1:${iv}:Y:${tag}`,
+      `v1:k1:${iv}:Y3Q:${tag}`, // the old <ct>:<tag> order
+      `v1:k1:${iv.slice(1)}:${tag}:Y3Q`,
+      `v1:k1:${iv}:${tag.slice(1)}:Y3Q`,
+      `v1:k1:${iv}:${tag}:Y3Q==`,
+      `v1:k1:${iv}:${tag}:Y3+/`,
+      `v1:k1:${iv}:${tag}:Y3Q\n`,
+      `v1:k\u0000:${iv}:${tag}:Y3Q`,
+      `v1:k1:${iv}:${tag}:Y`,
+      `v1:${iv}:${tag}:Y3Q`, // totp's own 4-part shape: no kid
     ]) {
       await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId, { accountNumberEnc: enc })), CHECK_VIOLATION).catch(async (e) => {
         // A NUL byte is refused by the driver/server before the CHECK; that is a refusal too.
@@ -648,11 +666,20 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
       '\u200bV1:kid', // zero-width space
       '\ufeffv1:kid', // BOM
       '\u2060\u3000v3:kid', // word joiner + ideographic space
+      '\u200ev1:kid', // LRM
+      '\u200fv1:kid', // RLM
+      '\u061cv1:kid', // ALM
+      '\u00adv1:kid', // soft hyphen
+      '\u202bv1:kid', // RLE (bidi embedding)
+      '\u2067v1:kid', // RLI (bidi isolate)
+      '\u2061v1:kid', // invisible function application
+      '\ufe0fv1:kid', // variation selector
+      '\u3164v1:kid', // Hangul filler
     ]) {
       let err: { code?: string; constraint_name?: string; table_name?: string } | undefined;
       try {
         await sql`insert into supplier_bank_accounts (restaurant_id, supplier_id, bank_code, branch_code, account_number_enc, account_last4, holder_name)
-          values (${A.restaurantId}, ${A.supplierId}, '12', '345', 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', '6789', ${holder})`;
+          values (${A.restaurantId}, ${A.supplierId}, '12', '345', 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', '6789', ${holder})`;
       } catch (e) {
         err = e as typeof err;
       }
@@ -719,7 +746,7 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
       .set({ active: false, verifiedBy: userId, verifiedAt: new Date(), holderName: 'שם בעל החשבון' })
       .where(eq(supplierBankAccounts.id, a!.id));
     const [after] = await db.select().from(supplierBankAccounts).where(eq(supplierBankAccounts.id, a!.id));
-    expect(after).toMatchObject({ bankCode: '12', accountLast4: '6789', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', active: false, verifiedBy: userId });
+    expect(after).toMatchObject({ bankCode: '12', accountLast4: '6789', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', active: false, verifiedBy: userId });
     await dropAccounts(eq(supplierBankAccounts.id, a!.id));
   });
 
@@ -728,7 +755,7 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
     await sql.begin(async (tx) => {
       await tx`select set_config('app.current_user_id', ${userId}, true)`;
       const [r] = (await tx`insert into supplier_bank_accounts (restaurant_id, supplier_id, bank_code, branch_code, account_number_enc, account_last4)
-        values (${A.restaurantId}, ${A.supplierId}, '12', '345', 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', '6789') returning id`) as unknown as [{ id: string }];
+        values (${A.restaurantId}, ${A.supplierId}, '12', '345', 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', '6789') returning id`) as unknown as [{ id: string }];
       id = r.id;
     });
     let log = await changesOf(id);
@@ -739,7 +766,7 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
       before: null,
       after: { bank_code: '12', branch_code: '345', account_last4: '6789', holder_name: null, active: true, verified_by: null, verified_at: null },
     });
-    expect(JSON.stringify(log[0])).not.toContain('v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB'); // the ciphertext never reaches the audit
+    expect(JSON.stringify(log[0])).not.toContain('v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q'); // the ciphertext never reaches the audit
     await sql`update supplier_bank_accounts set updated_at = now() where id = ${id}`; // no masked field changed
     expect(await changesOf(id)).toHaveLength(1);
     await db.update(supplierBankAccounts).set({ active: false }).where(eq(supplierBankAccounts.id, id));
@@ -913,7 +940,7 @@ describe('0072 push_subscriptions / WhatsApp consent / notification_prefs + sett
     await expectPgError(sql`update users set whatsapp_opt_in_notice_version = null where id = ${userId}`, CHECK_VIOLATION); // nor which notice
     await expectPgError(sql`update users set whatsapp_opt_in_notice_version = '' where id = ${userId}`, CHECK_VIOLATION);
     await expectPgError(sql`update users set whatsapp_opt_in_notice_version = '   ' where id = ${userId}`, CHECK_VIOLATION);
-    for (const invisible of ['\t', '\n', '\u00a0', '\u200b\ufeff', ' \u3000 ']) {
+    for (const invisible of ['\t', '\n', '\u00a0', '\u200b\ufeff', ' \u3000 ', '\u200e', '\u200f', '\u200e\u200f\u061c', '---', '.']) {
       await expectPgError(sql`update users set whatsapp_opt_in_notice_version = ${invisible} where id = ${userId}`, CHECK_VIOLATION);
     }
     // An admin revoke is fine: opt_in false, source 'admin' = the last change.

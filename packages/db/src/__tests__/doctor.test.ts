@@ -110,6 +110,37 @@ describe('db:doctor', () => {
     expect((await runDoctor(url)).findings.find((f) => f.name === name)?.detail).not.toMatch(/vector/);
   });
 
+  it('allows ONLY the two RLS helpers unpinned, and only with their exact qualified body; covers trigger functions in any schema', async () => {
+    const name = 'function search_path hardening';
+    const ok = (await runDoctor(url)).findings.find((f) => f.name === name);
+    if (!ok) return;
+    expect(ok.status).toBe('PASS');
+    // An unqualified body (a pg_temp uuid could resolve) is no longer allowed unpinned.
+    const qualified = `select nullif(pg_catalog.current_setting('app.current_restaurant_id', true), '')::pg_catalog.uuid`;
+    await sql.unsafe(`create or replace function app.current_restaurant_id() returns uuid language sql stable
+      as $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$`);
+    try {
+      const f = (await runDoctor(url)).findings.find((x) => x.name === name);
+      expect(f?.status).toBe('FAIL');
+      expect(f?.detail).toContain('app.current_restaurant_id() (search_path unset');
+    } finally {
+      await sql.unsafe(`create or replace function app.current_restaurant_id() returns pg_catalog.uuid language sql stable as $$ ${qualified} $$`);
+    }
+    // A trigger function in ANOTHER schema, called by a trigger on a public table, is in scope.
+    await sql.unsafe(`create schema if not exists h03_doctor_probe`);
+    await sql.unsafe(`create or replace function h03_doctor_probe.touch() returns trigger language plpgsql as $$ begin return new; end $$`);
+    await sql.unsafe(`create trigger h03_doctor_probe_touch before update on suppliers for each row execute function h03_doctor_probe.touch()`);
+    try {
+      const f = (await runDoctor(url)).findings.find((x) => x.name === name);
+      expect(f?.status).toBe('FAIL');
+      expect(f?.detail).toContain('h03_doctor_probe.touch()');
+    } finally {
+      await sql.unsafe(`drop trigger if exists h03_doctor_probe_touch on suppliers`);
+      await sql.unsafe(`drop schema if exists h03_doctor_probe cascade`);
+    }
+    expect((await runDoctor(url)).findings.find((f) => f.name === name)?.status).toBe('PASS');
+  });
+
   it('FAILs when the app role can DELETE restaurants (no owner-run cascade from the tenant role)', async () => {
     const before = (await runDoctor(url)).findings.find((f) => f.name === 'read-only tables');
     if (!before) return;

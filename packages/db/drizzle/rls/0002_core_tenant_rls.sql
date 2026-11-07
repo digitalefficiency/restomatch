@@ -17,17 +17,18 @@
 create schema if not exists app;
 
 -- Reads the active restaurant from the per-transaction GUC (NULL if unset).
--- search_path pinned (pg_temp LAST) and every name qualified: these run inside
--- owner-run cascades and triggers too, where a planted pg_temp type must not resolve.
+-- Every name is schema-qualified (no planted pg_temp type can resolve here), but there
+-- is NO `SET search_path`: a SET makes a sql function non-inlinable, and these sit in
+-- every RLS policy (pinning measured 4-15x slower per-row filters). They never run as
+-- the owner (no FORCE RLS; the bank audit reads the GUC itself). db:doctor allows
+-- exactly these two bodies unpinned.
 create or replace function app.current_restaurant_id() returns pg_catalog.uuid
   language sql stable
-  set search_path = pg_catalog, pg_temp
   as $$ select nullif(pg_catalog.current_setting('app.current_restaurant_id', true), '')::pg_catalog.uuid $$;
 
 -- Reads the acting user from the per-transaction GUC (NULL if unset).
 create or replace function app.current_user_id() returns pg_catalog.uuid
   language sql stable
-  set search_path = pg_catalog, pg_temp
   as $$ select nullif(pg_catalog.current_setting('app.current_user_id', true), '')::pg_catalog.uuid $$;
 
 -- The root tenant table keys on `id` rather than `restaurant_id`.

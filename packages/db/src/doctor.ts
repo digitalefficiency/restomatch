@@ -23,6 +23,15 @@ import { WAVE1_CROSS_TENANT_CHECKS, WAVE1_PRECONDITIONS, wave1CompositeFkFinding
  * SKIP never fail the run.
  */
 
+/**
+ * The RLS helpers (rls/0002) stay unpinned so they inline into every policy; the doctor
+ * accepts them only with exactly this fully qualified body (no pg_temp name can resolve).
+ */
+const UNPINNED_RLS_HELPERS: Record<string, string> = {
+  'app.current_restaurant_id()': "select nullif(pg_catalog.current_setting('app.current_restaurant_id', true), '')::pg_catalog.uuid",
+  'app.current_user_id()': "select nullif(pg_catalog.current_setting('app.current_user_id', true), '')::pg_catalog.uuid",
+};
+
 export type DoctorStatus = 'PASS' | 'WARN' | 'FAIL' | 'INFO' | 'SKIP';
 
 export interface DoctorFinding {
@@ -549,21 +558,31 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
           select n.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as f,
                  p.prosecdef as definer,
                  coalesce((select c from unnest(p.proconfig) c where c like 'search_path=%' limit 1), '') as sp,
-                 (p.proacl is null or exists (select 1 from aclexplode(p.proacl) a where a.grantee = 0 and a.privilege_type = 'EXECUTE')) as public_exec
+                 (p.proacl is null or exists (select 1 from aclexplode(p.proacl) a where a.grantee = 0 and a.privilege_type = 'EXECUTE')) as public_exec,
+                 p.prosrc as src
           from pg_proc p
           join pg_namespace n on n.oid = p.pronamespace
           join pg_language l on l.oid = p.prolang
-          where n.nspname in ('public', 'app') and l.lanname in ('plpgsql', 'sql')
+          where l.lanname in ('plpgsql', 'sql')
+            and (n.nspname in ('public', 'app')
+                 -- any schema: a function a trigger on a public table calls
+                 or p.oid in (select t.tgfoid from pg_trigger t join pg_class tc on tc.oid = t.tgrelid
+                              join pg_namespace tn on tn.oid = tc.relnamespace
+                              where tn.nspname = 'public' and not t.tgisinternal))
             and not exists (select 1 from pg_depend d where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e')
-          order by 1`) as unknown as Array<{ f: string; definer: boolean; sp: string; public_exec: boolean }>;
+          order by 1`) as unknown as Array<{ f: string; definer: boolean; sp: string; public_exec: boolean; src: string }>;
         const pinned = (sp: string) => /^search_path=.*,\s*pg_temp\s*$/.test(sp);
+        // The two RLS helpers are deliberately NOT pinned (a SET stops them inlining into
+        // every policy): allowed only while their body is exactly the fully qualified one.
+        const unpinnedOk = (d: { f: string; definer: boolean; src: string }) =>
+          !d.definer && UNPINNED_RLS_HELPERS[d.f] !== undefined && d.src.trim() === UNPINNED_RLS_HELPERS[d.f];
         const unsafeFns = fns
-          .filter((d) => !pinned(d.sp) || (d.definer && d.public_exec))
+          .filter((d) => (!pinned(d.sp) && !unpinnedOk(d)) || (d.definer && d.public_exec))
           .map((d) => `${d.f}${!pinned(d.sp) ? ` (search_path ${d.sp ? `'${d.sp.slice(12)}'` : 'unset'}: pin it, pg_temp LAST)` : ''}${d.definer && d.public_exec ? ' (SECURITY DEFINER, PUBLIC can EXECUTE)' : ''}`);
         add('app role', 'function search_path hardening', unsafeFns.length ? 'FAIL' : 'PASS',
           unsafeFns.length
             ? `unsafe: ${unsafeFns.join('; ')}`
-            : `${fns.length} plpgsql/sql function(s) in public/app: search_path ends with pg_temp; no SECURITY DEFINER is PUBLIC-executable`);
+            : `${fns.length} plpgsql/sql function(s) in public/app or behind a public trigger: search_path ends with pg_temp (the 2 RLS helpers: exact qualified body, unpinned for inlining); no SECURITY DEFINER is PUBLIC-executable`);
         const leakedOwnerOnly = OWNER_ONLY_TABLES.filter((t) => {
           const p = priv.get(t);
           return p && (p.sel || p.ins || p.upd || p.del);

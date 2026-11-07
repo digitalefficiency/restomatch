@@ -1127,7 +1127,7 @@ describe('0072 (H-03) leak_month_corrections (raw RLS)', () => {
 describe('0072 (H-03) supplier_bank_accounts (raw RLS)', () => {
   beforeAll(async () => {
     for (const t of [A, B]) {
-      await ownerDb.insert(supplierBankAccounts).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', accountLast4: '6789' });
+      await ownerDb.insert(supplierBankAccounts).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' });
     }
   });
   afterAll(async () => {
@@ -1145,7 +1145,7 @@ describe('0072 (H-03) supplier_bank_accounts (raw RLS)', () => {
   it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
     await expect(
       withRestaurant(appDb, A.restaurantId, (tx) =>
-        tx.insert(supplierBankAccounts).values({ restaurantId: B.restaurantId, supplierId: B.supplierId, bankCode: '99', branchCode: '999', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', accountLast4: '0000', active: false }),
+        tx.insert(supplierBankAccounts).values({ restaurantId: B.restaurantId, supplierId: B.supplierId, bankCode: '99', branchCode: '999', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '0000', active: false }),
       ),
     ).rejects.toThrow(/row-level security/);
     const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
@@ -1164,7 +1164,7 @@ describe('0072 (H-03) supplier_bank_account_changes (raw RLS)', () => {
   beforeAll(async () => {
     for (const t of [A, B]) {
       // The insert trigger writes exactly one masked change row per account.
-      const [acct] = await ownerDb.insert(supplierBankAccounts).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', accountLast4: '6789' }).returning();
+      const [acct] = await ownerDb.insert(supplierBankAccounts).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' }).returning();
       accts.set(t.restaurantId, acct!.id);
     }
   });
@@ -1398,7 +1398,7 @@ describe('0072 (H-03) append-only tables under the RLS app role', () => {
       .returning();
     const [acct] = await ownerDb
       .insert(supplierBankAccounts)
-      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', accountLast4: '6789' })
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' })
       .returning();
     const auto = await ownerDb.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.bankAccountId, acct!.id));
     expect(auto).toHaveLength(1); // written by the insert trigger
@@ -1433,7 +1433,7 @@ describe('0072 (H-03) append-only tables under the RLS app role', () => {
   it('a forged bank audit row is refused: only the trigger writes the audit (even same-tenant, even with a real actor)', async () => {
     const [acct] = await ownerDb
       .insert(supplierBankAccounts)
-      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', accountLast4: '6789' })
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' })
       .returning();
     await expect(
       asMember(A.restaurantId, A.ownerUserId, (tx) =>
@@ -1454,7 +1454,7 @@ describe('0072 (H-03) append-only tables under the RLS app role', () => {
   it('a pg_temp type shadow cannot run code as the owner through the SECURITY DEFINER audit', async () => {
     const [acct] = await ownerDb
       .insert(supplierBankAccounts)
-      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', accountLast4: '6789' })
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' })
       .returning();
     const before = await ownerDb.execute(sql`select has_table_privilege('restomatch_app', 'supplier_bank_account_changes', 'INSERT') as ins,
       has_table_privilege('restomatch_app', 'plans', 'UPDATE') as plans_upd`);
@@ -1496,7 +1496,7 @@ describe('0072 (H-03) append-only tables under the RLS app role', () => {
     const C = await seedTenant(ownerDb, 'C-cascade');
     await ownerDb
       .insert(supplierBankAccounts)
-      .values({ restaurantId: C.restaurantId, supplierId: C.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', accountLast4: '6789' });
+      .values({ restaurantId: C.restaurantId, supplierId: C.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' });
     await ownerDb.insert(auditLog).values({ restaurantId: C.restaurantId, userId: C.ownerUserId, action: 'team.member_invited', entityType: 'invitation', after: {} });
     const bAuditBefore = (await ownerDb.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.restaurantId, B.restaurantId))).length;
     // Belt: the tenant role may not delete a restaurant at all (rls.ts).
@@ -1541,7 +1541,7 @@ describe('0072 (H-03) append-only tables under the RLS app role', () => {
   it('the audit function cannot be reused on a temp table to forge audit rows (no EXECUTE, TG_RELID checked)', async () => {
     const [acct] = await ownerDb
       .insert(supplierBankAccounts)
-      .values({ restaurantId: B.restaurantId, supplierId: B.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', accountLast4: '6789' })
+      .values({ restaurantId: B.restaurantId, supplierId: B.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' })
       .returning();
     await expect(
       asMember(A.restaurantId, A.ownerUserId, async (tx) => {
@@ -1559,10 +1559,39 @@ describe('0072 (H-03) append-only tables under the RLS app role', () => {
     await ownerDb.delete(supplierBankAccounts);
   });
 
+  it('a tenant-role session with the actor GUC cleared cannot write an unattributed bank change', async () => {
+    const [acct] = await ownerDb
+      .insert(supplierBankAccounts)
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' })
+      .returning();
+    // No user GUC at all (withRestaurant sets only the restaurant).
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) => tx.update(supplierBankAccounts).set({ active: false }).where(eq(supplierBankAccounts.id, acct!.id))),
+    ).rejects.toThrow(/no acting user/);
+    // Explicitly cleared to ''.
+    await expect(
+      withRestaurant(appDb, A.restaurantId, async (tx) => {
+        await tx.execute(sql`select set_config('app.current_user_id', '', true)`);
+        await tx.update(supplierBankAccounts).set({ holderName: 'anon' }).where(eq(supplierBankAccounts.id, acct!.id));
+      }),
+    ).rejects.toThrow(/no acting user/);
+    // A new account without an actor is refused too.
+    await ownerDb.update(supplierBankAccounts).set({ active: false }).where(eq(supplierBankAccounts.id, acct!.id));
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(supplierBankAccounts).values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '1111' }),
+      ),
+    ).rejects.toThrow(/no acting user/);
+    const log = await ownerDb.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.restaurantId, A.restaurantId));
+    expect(log.map((r) => r.changedBy)).toEqual([null, null]); // only the owner connection's two writes, anonymous by design
+    await ownerDb.delete(supplierBankAccountChanges);
+    await ownerDb.delete(supplierBankAccounts);
+  });
+
   it('a bank change made through the app is audited with the session user as changed_by', async () => {
     const [acct] = await ownerDb
       .insert(supplierBankAccounts)
-      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', accountLast4: '6789' })
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' })
       .returning();
     await asMember(A.restaurantId, A.ownerUserId, (tx) =>
       tx.update(supplierBankAccounts).set({ active: false }).where(eq(supplierBankAccounts.id, acct!.id)),
