@@ -9,6 +9,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { cn } from '../cn';
+import { HERO_CTA_CLASS, heroCtaVariant } from './model';
 import type { DeltaDirection, LeakHeroState } from './model';
 
 export interface LeakHeroLink {
@@ -53,7 +54,7 @@ export interface LeakHeroProps {
   cleanSentence?: string | null;
   /** noData: one CTA. */
   noData?: { title: string; hint: string; cta: LeakHeroLink | null } | null;
-  /** One primary action (danger-solid only when money leaked). */
+  /** One primary action — always the secondary button, never red (D9). */
   primary?: LeakHeroLink | null;
   /** One tertiary text link ("איך חישבנו?"). */
   tertiary?: LeakHeroLink | null;
@@ -303,9 +304,7 @@ export function LeakHero(p: LeakHeroProps) {
               data-testid={p.primary.testId}
               className={cn(
                 'inline-flex min-h-12 items-center justify-center gap-1.5 rounded-xl px-4 text-sm font-semibold transition-colors max-lg:w-full sm:max-lg:w-auto',
-                leaked
-                  ? 'bg-danger text-on-primary hover:brightness-90'
-                  : 'border border-line-strong bg-surface text-ink hover:border-primary/40 hover:text-primary',
+                HERO_CTA_CLASS[heroCtaVariant(p.state)],
                 linkFocus,
               )}
             >
