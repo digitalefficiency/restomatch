@@ -554,3 +554,41 @@ describe('ask: AU-06 what-needs-me tools (add-only)', () => {
     expect(classifyQuestion('כמה מע״מ בסיכון?')).toBe('vatAtRisk');
   });
 });
+
+describe('ask: runAskLoop export + channel (AU-06 for WA-02, add-only)', () => {
+  it("the web path is unchanged: channel 'web' (default) and 'whatsapp' send the same request and answer alike", async () => {
+    const script = (_b: Body, call: number) =>
+      call === 0
+        ? toolUse('leak_hero')
+        : final({ answer: 'This month ₪100 leaked.', citations: [{ label: 'Leak', value: 100, unit: 'ils', href: '/dashboard' }] });
+    const { runAsk } = await import('../ask');
+    const a = fakeClaude(script);
+    __setAskClient(a.client);
+    const webDefault = await runAsk(db, A.restaurantId, 'How much leaked?', 'en', { role: 'owner' });
+    __resetAskBurst();
+    const b = fakeClaude(script);
+    __setAskClient(b.client);
+    const wa = await runAsk(db, A.restaurantId, 'How much leaked?', 'en', { role: 'owner', channel: 'whatsapp' });
+    expect(wa).toEqual(webDefault);
+    expect(b.bodies).toEqual(a.bodies);
+    expect(a.bodies[0]!.system).toBe(askSystemPrompt('en', a.bodies[0]!.system.match(/Today is (\S+) \(Israel\)/)[1]));
+  });
+
+  it('runAskLoop runs a caller-owned tool set and runner with the same answer schema', async () => {
+    const { runAskLoop, ASK_ANSWER_SCHEMA } = await import('../ask');
+    const { client, bodies } = fakeClaude((_b, call) =>
+      call === 0 ? toolUse('only_tool') : final({ answer: 'ok ₪5', citations: [{ label: 'x', value: 5, unit: 'ils', href: '/x' }] }),
+    );
+    const r = await runAskLoop(client, {
+      system: 'SYS',
+      tools: [{ name: 'only_tool', input_schema: { type: 'object', properties: {} }, strict: true }],
+      runTool: async () => ({ data: { aIls: 5 }, links: [{ screen: 'overview', href: '/x' }], figures: { ils: [5], pct: [], count: [] } }),
+      messages: [{ role: 'user', content: 'q' }],
+    });
+    expect(bodies[0]!.system).toBe('SYS');
+    expect(bodies[0]!.tools.map((t: { name: string }) => t.name)).toEqual(['only_tool']);
+    expect(r.figures.ils).toEqual([5]);
+    expect(r.toolsUsed).toEqual(['only_tool']);
+    expect(ASK_ANSWER_SCHEMA.parse(r.answer)).toEqual(r.answer);
+  });
+});

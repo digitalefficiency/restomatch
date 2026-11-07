@@ -13,7 +13,7 @@
  * The SDK is imported lazily so tests run without network; tests inject `client`.
  */
 import { z } from 'zod';
-import { runTool, TOOL_DEFINITIONS, type Figures, type ScreenLink, type ToolContext } from './tools';
+import { runTool, TOOL_DEFINITIONS, type Figures, type ScreenLink, type ToolContext, type ToolOutput } from './tools';
 
 export const ASK_MODEL = 'claude-opus-5-5';
 const MAX_TURNS = 4;
@@ -37,7 +37,8 @@ Rules:
 - In "citations", list the key figures you used (value exactly as in the tool result, unit 'ils' | 'pct' | 'count') and, for each, the screen link ("href") from the tool result that shows it. Only use hrefs that appear in a tool result's "links".`;
 }
 
-const AnswerSchema = z.object({
+/** The answer the model must return (validated); exported for WA-02. */
+export const AnswerSchema = z.object({
   answer: z.string().min(1).max(2000),
   citations: z
     .array(
@@ -52,7 +53,7 @@ const AnswerSchema = z.object({
 });
 export type ClaudeAnswer = z.infer<typeof AnswerSchema>;
 
-const ANSWER_JSON_SCHEMA = {
+export const ANSWER_JSON_SCHEMA = {
   type: 'object',
   properties: {
     answer: { type: 'string' },
@@ -129,9 +130,32 @@ export async function runClaude(
   ctx: ToolContext,
   today: string,
 ): Promise<ClaudeRunResult> {
-  const messages: Array<{ role: 'user' | 'assistant'; content: unknown }> = [
-    { role: 'user', content: question },
-  ];
+  return runAskLoop(client, {
+    system: askSystemPrompt(locale, today),
+    tools: TOOL_DEFINITIONS,
+    runTool: (name, input) => runTool(name, input, ctx),
+    messages: [{ role: 'user', content: question }],
+  });
+}
+
+export interface AskLoopOptions {
+  system: string;
+  /** Strict, read-only tool definitions sent to the model. */
+  tools: ReadonlyArray<unknown>;
+  /** Executes one tool call; a throw becomes an is_error tool_result. */
+  runTool: (name: string, input: unknown) => Promise<ToolOutput>;
+  /** The conversation so far (the web sends one user question). */
+  messages: Array<{ role: 'user' | 'assistant'; content: unknown }>;
+}
+
+/**
+ * The bounded tool loop behind Ask (AU-06 export for WA-02, the WhatsApp agent
+ * core): same model, effort, answer schema, turn cap and failure accounting as
+ * the web path. The caller owns the system prompt, the tool set and the tool
+ * runner (with its own role table); grounding is applied by the caller.
+ */
+export async function runAskLoop(client: AskClientLike, opts: AskLoopOptions): Promise<ClaudeRunResult> {
+  const messages = [...opts.messages];
   const links: ScreenLink[] = [];
   const figures: Figures = { ils: [], pct: [], count: [] };
   const toolsUsed: string[] = [];
@@ -156,8 +180,8 @@ export async function runClaude(
         },
         betas: ['server-side-fallback-2026-07-01'],
         fallbacks: 'default',
-        system: askSystemPrompt(locale, today),
-        tools: TOOL_DEFINITIONS,
+        system: opts.system,
+        tools: opts.tools,
         tool_choice: { type: 'auto' },
         messages,
       },
@@ -175,7 +199,7 @@ export async function runClaude(
         toolUses.map(async (b) => {
           toolsUsed.push(String(b.name));
           try {
-            const out = await runTool(String(b.name), b.input, ctx);
+            const out = await opts.runTool(String(b.name), b.input);
             links.push(...out.links);
             figures.ils.push(...out.figures.ils);
             figures.pct.push(...out.figures.pct);

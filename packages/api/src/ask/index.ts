@@ -14,6 +14,7 @@ import { isOpsIntent, OPS_INTENT_TOOL } from './opsOffline';
 import type { ScreenLink } from './tools';
 
 export type AskMode = 'claude' | 'offline';
+export type AskChannel = 'web' | 'whatsapp';
 export type OfflineReason = 'noKey' | 'budget' | 'error';
 
 export interface AskResult {
@@ -46,7 +47,14 @@ export async function runAsk(
   restaurantId: string,
   question: string,
   locale: 'he' | 'en',
-  opts: { now?: Date; env?: NodeJS.ProcessEnv; role?: UserRole; userId?: string | null } = {},
+  opts: {
+    now?: Date;
+    env?: NodeJS.ProcessEnv;
+    role?: UserRole;
+    userId?: string | null;
+    /** Where the question came from (WA-02 passes 'whatsapp'). No behaviour change yet. */
+    channel?: AskChannel;
+  } = {},
 ): Promise<AskResult> {
   const role = opts.role;
   const now = opts.now ?? new Date();
@@ -142,7 +150,17 @@ export {
   __resetAskBurst,
   type AskBurstLimiter,
 } from './budget';
-export { askSystemPrompt, ASK_MODEL, type AskClientLike } from './claude';
+export {
+  askSystemPrompt,
+  ASK_MODEL,
+  AnswerSchema as ASK_ANSWER_SCHEMA,
+  ANSWER_JSON_SCHEMA as ASK_ANSWER_JSON_SCHEMA,
+  runAskLoop,
+  type AskClientLike,
+  type AskLoopOptions,
+  type ClaudeAnswer,
+  type ClaudeRunResult,
+} from './claude';
 export { groundAnswer, figuresIn } from './grounding';
 export { clip, monthKey, runTool, TOOL_DEFINITIONS } from './tools';
 export { OPS_TOOL_NAMES, type OpsToolName } from './opsTools';
