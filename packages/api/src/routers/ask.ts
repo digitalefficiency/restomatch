@@ -29,6 +29,9 @@ export const askRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       await assertFeature(ctx.db, ctx.session.restaurantId, 'aiAssistant');
-      return runAsk(ctx.db, ctx.session.restaurantId, input.question, input.locale);
+      return runAsk(ctx.db, ctx.session.restaurantId, input.question, input.locale, {
+        role: ctx.session.role,
+        userId: ctx.session.userId,
+      });
     }),
 });

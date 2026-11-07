@@ -57,7 +57,9 @@ export type AuditAction =
   // Inventory counts (inventory router, flag inventoryCount)
   | 'inventory.count_closed'
   | 'inventory.count_discarded'
-  | 'inventory.line_amended';
+  | 'inventory.line_amended'
+  // Ask answered a question (AU-06 KPI hook for AU-07): no question text, no ₪.
+  | 'ask.answered';
 
 export interface AuditEntry {
   /** Tenant the action belongs to. On a tenant connection this must equal the GUC. */

@@ -157,7 +157,18 @@ describe('ask: Claude leg (mocked)', () => {
     expect(b.thinking).toBeUndefined();
     expect(b.tool_choice).toEqual({ type: 'auto' });
     expect(b.tools.map((t: { name: string }) => t.name).sort()).toEqual(
-      ['claimable_lines', 'leak_breakdown', 'leak_hero', 'leak_report'],
+      [
+        'claimable_lines',
+        'intake_stuck',
+        'leak_breakdown',
+        'leak_hero',
+        'leak_report',
+        // AU-06: what needs me
+        'to_pay_this_week',
+        'vat_at_risk',
+        'waiting_for_me',
+        'who_owes_me',
+      ],
     );
     expect(b.tools.every((t: { strict?: boolean }) => t.strict === true)).toBe(true);
     // The second call carries the tool_result for the session restaurant.
@@ -505,5 +516,40 @@ describe('ask: tenant isolation', () => {
     expect(all).not.toContain(B.invoiceId);
     expect(all).not.toContain(B.restaurantId);
     expect(results[2]!.is_error).toBe(true);
+  });
+});
+
+describe('ask: AU-06 what-needs-me tools (add-only)', () => {
+  it('grounding marks an invented ₪ as ungrounded for a new tool (who_owes_me)', async () => {
+    const { client } = fakeClaude((_b, call) =>
+      call === 0
+        ? toolUse('who_owes_me')
+        : final({
+            answer: 'ספק A חייב לך ₪999 על בקשות זיכוי.',
+            citations: [{ label: 'חייב', value: 999, unit: 'ils', href: '/dashboard/recovery' }],
+          }),
+    );
+    __setAskClient(client);
+    const r = await caller(A).ask.ask({ question: 'מי חייב לי זיכויים?', locale: 'he' });
+    expect(r.mode).toBe('claude');
+    expect(r.grounded).toBe(false);
+  });
+
+  it('runAsk receives the session role: a refused tool returns a tool error to the loop, never data', async () => {
+    const { client, bodies } = fakeClaude((_b, call) =>
+      call === 0 ? toolUse('who_owes_me') : final({ answer: 'אין לי את הנתון הזה.', citations: [] }),
+    );
+    __setAskClient(client);
+    const { runAsk } = await import('../ask');
+    await runAsk(db, A.restaurantId, 'מי חייב לי?', 'he', { role: 'receiver' });
+    const toolResult = bodies[1]!.messages.at(-1).content[0];
+    expect(toolResult).toMatchObject({ type: 'tool_result', is_error: true });
+    expect(String(toolResult.content)).toMatch(/^FORBIDDEN/);
+  });
+
+  it('the old chips keep their intents next to the new ones', () => {
+    expect(classifyQuestion('מה כדאי לתבוע השבוע?')).toBe('claimWeek');
+    expect(classifyQuestion('מי חייב לי זיכויים?')).toBe('whoOwesMe');
+    expect(classifyQuestion('כמה מע״מ בסיכון?')).toBe('vatAtRisk');
   });
 });

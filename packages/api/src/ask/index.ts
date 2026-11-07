@@ -3,12 +3,14 @@
  * (or on any Claude failure) the deterministic offline engine. Always records
  * one question in assistant_usage (no text stored).
  */
-import type { Database } from '@restomatch/db';
+import type { Database, UserRole } from '@restomatch/db';
+import { recordAudit } from '../audit';
 import { TRPCError } from '@trpc/server';
 import { addClaudeSpend, allowAskBurst, recordUsage, reserveQuestion } from './budget';
 import { anthropicAskClient, AskRunError, runClaude, type AskClientLike } from './claude';
 import { groundAnswer, type Citation } from './grounding';
 import { offlineAnswer, type CannedIntent } from './offline';
+import { isOpsIntent, OPS_INTENT_TOOL } from './opsOffline';
 import type { ScreenLink } from './tools';
 
 export type AskMode = 'claude' | 'offline';
@@ -44,8 +46,9 @@ export async function runAsk(
   restaurantId: string,
   question: string,
   locale: 'he' | 'en',
-  opts: { now?: Date; env?: NodeJS.ProcessEnv } = {},
+  opts: { now?: Date; env?: NodeJS.ProcessEnv; role?: UserRole; userId?: string | null } = {},
 ): Promise<AskResult> {
+  const role = opts.role;
   const now = opts.now ?? new Date();
   const client = askClient(opts.env ?? process.env);
   // Burst limit on every path (offline answers run DB aggregates too).
@@ -62,10 +65,11 @@ export async function runAsk(
   if (client && reason === null) {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(now);
     try {
-      const r = await runClaude(client, question, locale, { db, restaurantId, now, locale }, today);
+      const r = await runClaude(client, question, locale, { db, restaurantId, now, locale, role }, today);
       await addClaudeSpend(db, restaurantId, { claudeCalls: r.calls, inputTokens: r.inputTokens, outputTokens: r.outputTokens }, now);
       const g = groundAnswer(r.answer, r.links, r.figures);
       const linkSet = new Set(g.citations.map((c) => c.href));
+      await recordAnswered(db, restaurantId, opts.userId, { intent: null, tools: r.toolsUsed, mode: 'online', grounded: g.grounded });
       return {
         mode: 'claude',
         answer: g.answer,
@@ -85,8 +89,14 @@ export async function runAsk(
     }
   }
 
-  const off = await offlineAnswer(db, restaurantId, question, now, locale);
+  const off = await offlineAnswer(db, restaurantId, question, now, locale, role);
   if (!counted) await recordUsage(db, restaurantId, { claudeCalls: 0, inputTokens: 0, outputTokens: 0 }, now);
+  await recordAnswered(db, restaurantId, opts.userId, {
+    intent: off.intent,
+    tools: off.intent && isOpsIntent(off.intent) ? [OPS_INTENT_TOOL[off.intent]] : [],
+    mode: 'offline',
+    grounded: true,
+  });
   return {
     mode: 'offline',
     answer: null,
@@ -97,6 +107,25 @@ export async function runAsk(
     links: off.links,
     reason,
   };
+}
+
+/**
+ * KPI hook (AU-06 → AU-07): one audit_log row per answered question. Never the
+ * question text, never a ₪ figure — only which intent/tools answered and how.
+ */
+async function recordAnswered(
+  db: Database,
+  restaurantId: string,
+  userId: string | null | undefined,
+  after: { intent: CannedIntent | null; tools: string[]; mode: 'online' | 'offline'; grounded: boolean },
+): Promise<void> {
+  await recordAudit(db, {
+    restaurantId,
+    userId: userId ?? null,
+    action: 'ask.answered',
+    entityType: 'ask',
+    after: { automationId: 'A11', ...after, tools: [...new Set(after.tools)] },
+  });
 }
 
 export { AskRunError } from './claude';
@@ -113,3 +142,6 @@ export {
 export { askSystemPrompt, ASK_MODEL, type AskClientLike } from './claude';
 export { groundAnswer, figuresIn } from './grounding';
 export { clip, monthKey, runTool, TOOL_DEFINITIONS } from './tools';
+export { OPS_TOOL_NAMES, type OpsToolName } from './opsTools';
+export { OPS_INTENTS, type OpsIntent } from './opsOffline';
+export { TOOL_ROLES, canUseTool, redactForRole } from './roles';

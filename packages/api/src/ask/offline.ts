@@ -13,9 +13,11 @@ import {
   computeLeakSummary,
 } from '@restomatch/charts';
 import type { Database } from '@restomatch/db';
+import type { UserRole } from '@restomatch/db';
+import { classifyOps, isOpsIntent, OPS_INTENTS, opsOfflineAnswer } from './opsOffline';
 import { claimableData, clip, monthKey, reportData, type ScreenLink } from './tools';
 
-export const CANNED_INTENTS = ['leakChange', 'leakTotal', 'priceRaise', 'claimWeek', 'topSupplier'] as const;
+export const CANNED_INTENTS = ['leakChange', 'leakTotal', 'priceRaise', 'claimWeek', 'topSupplier', ...OPS_INTENTS] as const;
 export type CannedIntent = (typeof CANNED_INTENTS)[number];
 
 /** Keyword rules (he + en). First match wins; order = most specific first. */
@@ -31,13 +33,17 @@ const RULES: Array<[CannedIntent, RegExp]> = [
 ];
 
 export function classifyQuestion(question: string): CannedIntent | null {
+  // AU-06 "what needs me" rules first (narrow; see opsOffline.ts).
+  const ops = classifyOps(question);
+  if (ops) return ops;
   for (const [intent, re] of RULES) if (re.test(question)) return intent;
   return null;
 }
 
 export interface OfflineFacts {
   intent: CannedIntent | null;
-  facts: Record<string, string | number | null | Array<Record<string, string | number | null>>>;
+  /** Leak intents: flat numbers/names. AU-06 intents: the tool's data (see opsTools.ts). */
+  facts: Record<string, unknown>;
   links: ScreenLink[];
 }
 
@@ -49,8 +55,10 @@ export async function offlineAnswer(
   question: string,
   now: Date = new Date(),
   locale: 'he' | 'en' = 'en',
+  role?: UserRole,
 ): Promise<OfflineFacts> {
   const intent = classifyQuestion(question);
+  if (isOpsIntent(intent)) return opsOfflineAnswer(db, restaurantId, intent, now, locale, role);
   const month = monthKey(0, now);
   const prevMonth = monthKey(-1, now);
 
