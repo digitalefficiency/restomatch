@@ -19,6 +19,8 @@ import { approvedNotClaimed, sumAgora } from '../claims/letters';
 import { ALL_CLAIMS } from '../../recovery/logic';
 import { LeakStateNote, leakStateOf } from '../leak-state';
 import { noDataCtaFor } from '../states';
+import { components as componentsNs } from '@/lib/i18n/messages/components';
+import { resolvedNoteState, settle } from './money-read';
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -68,7 +70,7 @@ export default async function LeakReportPage({
 
   const caller = await createServerCaller();
   const session = await auth();
-  const [t, ta, tv, locale] = await Promise.all([getT(leaksNs), getT(approvalsNs), getT(viewsNs), getLocale()]);
+  const [t, ta, tv, tc, locale] = await Promise.all([getT(leaksNs), getT(approvalsNs), getT(viewsNs), getT(componentsNs), getLocale()]);
   const role = (session?.user as { role?: string } | undefined)?.role;
 
   // owner|manager only — a calm T4 card for other roles (never an alarm).
@@ -99,11 +101,12 @@ export default async function LeakReportPage({
   const [memberships, profile, lines, flags] = await Promise.all([
     caller.onboarding.myMemberships(),
     caller.settings.profile(),
-    monthOffset >= -24 ? caller.owner.leakBreakdown({ monthOffset, limit: 200 }).catch(() => []) : Promise.resolve([]),
+    // G-16: a failed read is "unavailable", never an empty list (W3-08).
+    monthOffset >= -24 ? settle(caller.owner.leakBreakdown({ monthOffset, limit: 200 })) : Promise.resolve({ ok: true as const, value: [] }),
     caller.recovery.flags(),
   ]);
   // Approved lines no ₪-back claim holds (only meaningful with the tracker on).
-  const tracked = flags.recovery ? await caller.recovery.list({ limit: ALL_CLAIMS }).catch(() => null) : null;
+  const tracked = flags.recovery ? await settle(caller.recovery.list({ limit: ALL_CLAIMS })) : null;
   // The report names the ACTIVE restaurant (never memberships[0]).
   const restaurant = activeMembershipOf(memberships, session?.user?.restaurantId)?.restaurantName ?? profile.name ?? '';
   const businessId = profile.businessId?.trim() || null;
@@ -123,7 +126,8 @@ export default async function LeakReportPage({
   const found = sumAgora([status.stillOpenIls, status.claimedIls, status.waivedIls]);
   const checkedCount = Math.max(0, hero.invoiceCount - hero.pendingLinkCount - hero.awaitingCountCount);
   // "טופל" lines count as approved-to-claim but no letter claims them: say so, in ₪.
-  const resolved = (tracked ? approvedNotClaimed(lines, tracked) : []).map(({ invoice, line }) => ({
+  const note = resolvedNoteState(lines, tracked, approvedNotClaimed);
+  const resolved = (note.kind === 'items' ? note.items : []).map(({ invoice, line }) => ({
     amount: Math.abs(line.deltaAmount),
     type: line.type,
     supplier: displayName(locale, invoice.supplierName, invoice.supplierNameEn),
@@ -297,6 +301,11 @@ export default async function LeakReportPage({
                 <Stat label={t('report.waived')} value={ils(status.waivedIls)} amount={status.waivedIls} hint={t('report.lines', { count: num(status.waivedCount) })} />
               </dl>
               <p className="mt-2 text-xs text-subtle">{t('report.partition')}</p>
+              {note.kind === 'unavailable' ? (
+                <p className="mt-1 text-xs text-muted" data-testid="report-resolved-unavailable">
+                  {tc('ds.money.unavailable')}
+                </p>
+              ) : null}
               {resolvedIls > 0 ? (
                 <p className="mt-1 text-xs text-muted" data-testid="report-resolved-note">
                   {t('report.resolvedNote', { amount: ils(resolvedIls), items: resolvedItems })}
