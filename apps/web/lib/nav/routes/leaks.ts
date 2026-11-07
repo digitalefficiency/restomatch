@@ -36,7 +36,10 @@ export const routes: RouteDef[] = [
     parent: 'leaks',
     roles: ['owner', 'manager', 'bookkeeper'],
     features: ['leakProof'],
-    nav: 'item',
+    // Owner decision I4 (7.11): one copy of the month — the proof leaves the side
+    // menu (interim, via W2-08). It stays reachable from the home hero's "איך הגענו?"
+    // and by URL; W3-08 folds it into "דוח החודש".
+    nav: 'hidden',
     aliases: ['הוכחה', 'proof'],
   },
   {
