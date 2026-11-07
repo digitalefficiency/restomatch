@@ -157,7 +157,7 @@ describe('KPI hook + no writes', () => {
     }
     const after = await counts();
     expect({ ...after, k: 0 }).toEqual({ ...before, k: 0 });
-    expect(after.k - before.k).toBe(20);
+    expect(after.k! - before.k!).toBe(20);
 
     const rows = await db.select().from(auditLog).where(eq(auditLog.action, 'ask.answered'));
     const last = rows.find((r) => (r.after as { intent?: string }).intent === 'whoOwesMe')!;

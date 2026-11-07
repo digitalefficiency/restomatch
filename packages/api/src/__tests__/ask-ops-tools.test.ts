@@ -95,7 +95,7 @@ describe('who_owes_me (recovery listClaims + overdueSql)', () => {
 
     const r = await runOpsTool('who_owes_me', {}, ctx(A));
     expect(r.data).toMatchObject({ available: true, supplierCount: 1, claimCount: 2, outstandingIls: 153.46 });
-    const d = r.data as { suppliers: Array<{ supplierId: string; outstandingIls: number }> };
+    const d = r.data as unknown as { suppliers: Array<{ supplierId: string; outstandingIls: number }> };
     expect(d.suppliers).toEqual([expect.objectContaining({ supplierId: A.supplierId, outstandingIls: 153.46 })]);
     expect(JSON.stringify(r.data)).not.toContain(B.supplierId);
     expect(r.links.map((l) => l.href)).toContain('/dashboard/recovery');
@@ -111,7 +111,7 @@ describe('who_owes_me (recovery listClaims + overdueSql)', () => {
   it.each(OVERDUE_BOUNDARY_CASES)('overdue boundary: letter $letterSentAt → overdue=$overdue ($why)', async (c) => {
     await claim(A, { status: 'letter_sent', letterSentAt: new Date(c.letterSentAt), claimedAt: new Date(c.letterSentAt) });
     const r = await runOpsTool('who_owes_me', {}, ctx(A));
-    const d = r.data as { overdueIls: number; suppliers: Array<{ overdue: boolean }> };
+    const d = r.data as unknown as { overdueIls: number; suppliers: Array<{ overdue: boolean }> };
     expect(d.suppliers[0]!.overdue).toBe(c.overdue);
     expect(d.overdueIls).toBe(c.overdue ? 10 : 0);
   });
@@ -125,7 +125,7 @@ describe('who_owes_me (recovery listClaims + overdueSql)', () => {
     });
     const r = await runOpsTool('who_owes_me', {}, ctx(A));
     expect(r.data).toMatchObject({ outstandingIls: 10, overdueIls: 10, overdueSupplierCount: 1 });
-    expect((r.data as { suppliers: Array<{ oldestWaitingDays: number }> }).suppliers[0]!.oldestWaitingDays).toBe(15);
+    expect((r.data as unknown as { suppliers: Array<{ oldestWaitingDays: number }> }).suppliers[0]!.oldestWaitingDays).toBe(15);
   });
 
   it('recovery off → an honest "not available", never ₪0', async () => {
@@ -160,7 +160,7 @@ describe('vat_at_risk (vat/vatAtRisk — its own figure)', () => {
       soonestDaysLeft: src.rows[0]!.daysLeft,
     });
     expect(JSON.stringify(r.data)).not.toMatch(/leak/i);
-    expect((r.data as { totalVatAtRiskIls: number }).totalVatAtRiskIls).toBe(2160);
+    expect((r.data as unknown as { totalVatAtRiskIls: number }).totalVatAtRiskIls).toBe(2160);
     expect(r.links.map((l) => l.href)).toContain(`/dashboard/invoices/${A.invoiceId}`);
   });
 
