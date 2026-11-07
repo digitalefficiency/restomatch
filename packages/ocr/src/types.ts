@@ -64,6 +64,10 @@ export interface ResolvedInvoice extends Omit<InvoiceOcrResult, 'lines' | 'total
   invoiceDiscount?: number;
   continuesOnAnotherPage?: boolean;
   handwrittenCorrection?: boolean;
+  /** G-17: payment terms as printed — persisted to ocr_payload.raw.printedTerms. */
+  paymentTermsText?: string;
+  /** G-17: due date as printed (YYYY-MM-DD) — persisted to ocr_payload.raw.printedDueDate. */
+  dueDate?: string;
   /** Consolidated invoice (חשבונית מרכזת)? Set by the pipeline (./consolidation), conservative. */
   consolidation?: Consolidation;
   /** Why it was called consolidated ('none' when regular). */
