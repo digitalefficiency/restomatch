@@ -15,7 +15,8 @@ import {
 import { computeLeakHero } from '../leak-hero';
 import * as views from '../leak-views';
 import { computeLeakSummary } from '../leak-views';
-import { caughtBefore, computeLeakLedger, computeLeakPartition, parseBasis } from '../leak-ledger';
+import { caughtBefore, computeLeakLedger, computeLeakPartition, dayIn, parseBasis } from '../leak-ledger';
+import { computeLeakBreakdown } from '../leak-hero';
 import { MONEY_STATES, type ClaimStatus } from '../decisions';
 
 const db = createDb(testDbUrl());
@@ -319,11 +320,72 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
     expect((await computeLeakPartition(db, rid, SPEC)).caughtBeforePaymentAgorot).toBe(4000);
   });
 
-  it('caughtBefore: the decision alone can precede the payment', () => {
-    const paid = '2026-10-12T08:00:00.000Z';
-    expect(caughtBefore('2026-10-13T00:00:00.000Z', '2026-10-11T00:00:00.000Z', paid)).toBe(true);
-    expect(caughtBefore('2026-10-13T00:00:00.000Z', null, paid)).toBe(false);
+  it('caughtBefore compares Israel calendar days: same day as the payment = not caught', () => {
+    // paid_at = the business pay day stored as Israel midnight: 12.10 00:00 IL = 11.10 21:00Z.
+    const paid = '2026-10-11T21:00:00.000Z';
+    expect(dayIn(paid, 'Asia/Jerusalem')).toBe('2026-10-12');
+    expect(caughtBefore('2026-10-11T20:59:00.000Z', null, paid)).toBe(true); // 11.10 23:59 IL
+    expect(caughtBefore('2026-10-11T21:00:00.000Z', null, paid)).toBe(false); // 12.10 00:00 IL, the pay day
+    expect(caughtBefore('2026-10-12T15:00:00.000Z', null, paid)).toBe(false); // later the same day
+    // The decision alone can precede the pay day.
+    expect(caughtBefore('2026-10-13T00:00:00.000Z', '2026-10-10T00:00:00.000Z', paid)).toBe(true);
     expect(caughtBefore('2026-10-13T00:00:00.000Z', null, null)).toBe(true);
+  });
+
+  it('PAID_SOURCE: the payment ledger wins once it has allocations (covering payment day); else paid_at', async () => {
+    const { rid, invoice } = await setup();
+    // Status paid with a late updated_at — the ledger must override it.
+    const a = await invoice({
+      inclVat: '100.00',
+      status: 'paid',
+      paidAt: new Date('2026-10-20T08:00:00Z'),
+      d: [{ type: 'PRICE_HIGHER', delta: '10.00', createdAt: new Date('2026-10-12T08:00:00Z') }],
+    });
+    const b = await invoice({ inclVat: '100.00', d: [{ type: 'QTY_SHORT', delta: '20.00' }] }); // half paid
+    const c = await invoice({ inclVat: '100.00', d: [{ type: 'QTY_OVER', delta: '30.00' }] }); // no allocations
+    const [sup] = (await db.execute(sql`SELECT supplier_id FROM invoices WHERE id = ${a.invoiceId}`)) as unknown as Array<{
+      supplier_id: string;
+    }>;
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS payments (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(), restaurant_id uuid NOT NULL, supplier_id uuid NOT NULL,
+      paid_on date NOT NULL, amount_agorot bigint NOT NULL)`);
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS payment_invoices (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(), restaurant_id uuid NOT NULL, payment_id uuid NOT NULL,
+      invoice_id uuid NOT NULL, amount_agorot bigint NOT NULL)`);
+    try {
+      const pay = async (on: string, inv: string, agorot: number) => {
+        const [p] = (await db.execute(sql`INSERT INTO payments (restaurant_id, supplier_id, paid_on, amount_agorot)
+          VALUES (${rid}, ${sup!.supplier_id}, ${on}::date, ${agorot}) RETURNING id`)) as unknown as Array<{ id: string }>;
+        await db.execute(sql`INSERT INTO payment_invoices (restaurant_id, payment_id, invoice_id, amount_agorot)
+          VALUES (${rid}, ${p!.id}, ${inv}, ${agorot})`);
+      };
+      // A: two payments; the one that covers the ₪100 is on 13.10 (after 12.10 detection → caught).
+      await pay('2026-10-11', a.invoiceId, 4000);
+      await pay('2026-10-13', a.invoiceId, 6000);
+      await pay('2026-10-11', b.invoiceId, 5000);
+      const rows = await computeLeakLedger(db, rid, SPEC);
+      const by = Object.fromEntries(rows.map((r) => [r.invoiceId, r]));
+      expect(by[a.invoiceId]).toMatchObject({ invoicePaid: true, paidAt: '2026-10-12T21:00:00.000Z', caughtBeforePayment: true });
+      expect(by[b.invoiceId]).toMatchObject({ invoicePaid: false, paidAt: null, moneyState: 'undecided' });
+      expect(by[c.invoiceId]).toMatchObject({ invoicePaid: false, paidAt: null });
+    } finally {
+      await db.execute(sql`DROP TABLE IF EXISTS payment_invoices`);
+      await db.execute(sql`DROP TABLE IF EXISTS payments`);
+    }
+  });
+
+  it('the breakdown marks tolerance rows the engine auto-approved (owner M7)', async () => {
+    const { rid, invoice } = await setup();
+    await invoice({
+      inclVat: '1000.00',
+      d: [
+        { type: 'PRICE_HIGHER', delta: '5.00', status: 'accepted', decidedAt: null },
+        { type: 'QTY_SHORT', delta: '6.00', status: 'accepted' },
+      ],
+    });
+    const [inv] = await computeLeakBreakdown(db, rid, { now: NOW });
+    const t = Object.fromEntries(inv!.lines.map((l) => [l.type, l.tolerated]));
+    expect(t).toEqual({ PRICE_HIGHER: true, QTY_SHORT: false });
   });
 
   it('reads invoices.paid_at and discrepancies.basis once H-03 / G-03 add them (same SQL)', async () => {

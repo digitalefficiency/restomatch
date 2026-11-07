@@ -7,6 +7,8 @@ import type { LeakBreakdownInvoice, LeakBreakdownLine } from '@restomatch/charts
  *
  *  • an invoice still waiting for a PO link, or already marked paid, has nothing to claim;
  *  • a line is claimable when it counts as leak and is open, escalated or accepted (waived lines drop);
+ *  • never a line the engine auto-approved within tolerance (`tolerated`, the system decision
+ *    `tolerate` → waive in charts DECISION_RULES; owner M7, 7.11): no credit request for it;
  *  • lines are taken in the breakdown's order (biggest |Δ| first) and never claim more on an
  *    invoice than its capped leak (`leakIls`, the hero's per-invoice cap).
  */
@@ -76,6 +78,8 @@ export function claimableLines(inv: LeakBreakdownInvoice): ClaimLine[] {
   let invClaimed = 0;
   for (const l of inv.lines) {
     if (!l.countsAsLeak || !CLAIMABLE.has(l.resolutionStatus) || NEVER_CLAIMABLE.has(l.type)) continue;
+    // Owner M7 (7.11): a tolerance row the engine auto-approved is waived — never asked back.
+    if (l.tolerated) continue;
     // Never claim more on an invoice than its capped leak.
     const amount = Math.min(Math.abs(l.deltaAmount), Math.max(0, inv.leakIls - invClaimed));
     if (amount <= 0) continue;

@@ -35,9 +35,10 @@ type SQL = ReturnType<typeof sql>;
  * difference shows as drift.
  *
  * INTERIMS (removed in slice b):
- *  • paid_at: H-03 adds `invoices.paid_at` (deploy Tue 24.11). It is read
- *    schema-tolerantly as `to_jsonb(i) ->> 'paid_at'`, so this SQL runs before and
- *    after that migration; with no paid_at, a `paid` invoice's `updated_at` stands in.
+ *  • paid (metrics.PAID_SOURCE): the H-04 payment ledger when present and allocated
+ *    (detected at run time), else H-03's `invoices.paid_at` read schema-tolerantly as
+ *    `to_jsonb(i) ->> 'paid_at'`, else `updated_at` of a `paid` invoice. Compared by
+ *    the restaurant's calendar day (caughtBefore).
  *  • basis: G-03 adds `discrepancies.basis` (jsonb). Read the same way, as opaque
  *    jsonb with the local DiscrepancyBasis type; G-14 never writes it.
  */
@@ -90,17 +91,56 @@ const int = (v: unknown): number => (v == null ? 0 : Number(v));
 const isoOrNull = (v: unknown): string | null =>
   v == null ? null : v instanceof Date ? v.toISOString() : new Date(String(v)).toISOString();
 
-/** The interim paid_at of invoice alias `i` (see the module note). */
+/**
+ * The summary/interim paid_at of invoice alias `i`: H-03's `invoices.paid_at` (read
+ * schema-tolerantly), else `updated_at` of a `paid` invoice (today).
+ */
 export const PAID_AT_SQL: SQL = sql`COALESCE(
   NULLIF(to_jsonb(i) ->> 'paid_at', '')::timestamptz,
   CASE WHEN i.status = 'paid' THEN i.updated_at END
 )`;
 
+/**
+ * paid_at per metrics.PAID_SOURCE. With the H-04 payment ledger present (`hasLedger`) and
+ * allocations for the invoice, the ledger is the truth: the Israel day (`paid_on`, as
+ * midnight in the restaurant's time zone) of the payment whose cumulative allocations
+ * first cover the invoice total; allocated but not covered = not paid yet. Without
+ * allocations: PAID_AT_SQL. `tz` is the restaurant time zone expression.
+ */
+export function paidAtSql(restaurantId: string, hasLedger: boolean, tz: SQL): SQL {
+  if (!hasLedger) return PAID_AT_SQL;
+  return sql`(CASE
+    WHEN EXISTS (
+      SELECT 1 FROM payment_invoices pa WHERE pa.invoice_id = i.id AND pa.restaurant_id = ${restaurantId}
+    ) THEN (
+      SELECT MIN(c.paid_on)::timestamp AT TIME ZONE ${tz}
+      FROM (
+        SELECT p.paid_on, SUM(pa.amount_agorot) OVER (
+          ORDER BY p.paid_on, p.id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS cum
+        FROM payment_invoices pa
+        JOIN payments p ON p.id = pa.payment_id AND p.restaurant_id = ${restaurantId}
+        WHERE pa.invoice_id = i.id AND pa.restaurant_id = ${restaurantId}
+      ) c
+      WHERE c.cum >= round(COALESCE(i.total_incl_vat, 0) * 100)
+    )
+    ELSE ${PAID_AT_SQL}
+  END)`;
+}
+
+/** Is the H-04 payment ledger (`payments` + `payment_invoices`) in this database? */
+export async function hasPaymentLedger(db: Database): Promise<boolean> {
+  const res = await db.execute(
+    sql`SELECT to_regclass('public.payment_invoices') IS NOT NULL AND to_regclass('public.payments') IS NOT NULL AS has`,
+  );
+  return Boolean(rowsOf(res)[0]?.has);
+}
+
 /** The tier rule of decisions.allocationTier, in SQL over the ledger's `x` columns. */
 const TIER_SQL: SQL = sql`(CASE WHEN x.live_claim THEN 1 WHEN x.effect = 'undecided' THEN 3 ELSE 2 END)`;
 
 /** The ledger CTEs (`b`, `inv`, `per`, `x`, `led`) for a view. */
-export function leakLedgerSql(restaurantId: string, spec: ViewSpec): SQL {
+export function leakLedgerSql(restaurantId: string, spec: ViewSpec, opts: { hasLedger?: boolean } = {}): SQL {
   const LF = lineFilter(restaurantId, spec.filters);
   return sql`${viewInvoicesSql(restaurantId, spec)},
     x AS (
@@ -112,12 +152,14 @@ export function leakLedgerSql(restaurantId: string, spec: ViewSpec): SQL {
         d.created_at, d.resolved_at,
         round(abs(COALESCE(d.delta_amount, 0)) * 100)::bigint AS raw_agorot,
         round(COALESCE(i.total_incl_vat, 0) * 100)::bigint AS cap_agorot,
-        ${PAID_AT_SQL} AS paid_at,
+        ${paidAtSql(restaurantId, opts.hasLedger ?? false, sql`bt.tz`)} AS paid_at,
+        bt.tz AS tz,
         to_jsonb(d) -> 'basis' AS basis,
         rc.id AS claim_id, rc.status AS claim_status, rc.amount_agorot AS claim_amount,
         COALESCE(rc.credited_agorot, 0) AS credited_agorot,
         (rc.id IS NOT NULL AND NOT (rc.status = 'written_off' AND COALESCE(rc.credited_agorot, 0) = 0)) AS live_claim
       FROM inv
+      CROSS JOIN (SELECT tz FROM b) bt
       JOIN invoices i ON i.id = inv.id AND i.restaurant_id = ${restaurantId}
       JOIN match_runs mr ON mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId}
       JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
@@ -143,8 +185,9 @@ export function leakLedgerSql(restaurantId: string, spec: ViewSpec): SQL {
 
 /** Every counting discrepancy of the period with its capped agorot and money state. */
 export async function computeLeakLedger(db: Database, restaurantId: string, spec: ViewSpec): Promise<LeakLedgerRow[]> {
+  const hasLedger = await hasPaymentLedger(db);
   const res = await db.execute(sql`
-    WITH ${leakLedgerSql(restaurantId, spec)}
+    WITH ${leakLedgerSql(restaurantId, spec, { hasLedger })}
     SELECT * FROM led ORDER BY invoice_id, tier, created_at, discrepancy_id
   `);
   return rowsOf(res).map(toLedgerRow);
@@ -175,7 +218,7 @@ function toLedgerRow(r: Row): LeakLedgerRow {
     tier,
     invoicePaid,
     paidAt,
-    caughtBeforePayment: caughtBefore(createdAt, resolvedAt, paidAt),
+    caughtBeforePayment: caughtBefore(createdAt, resolvedAt, paidAt, String(r.tz ?? ISRAEL_TZ)),
     claimId: r.claim_id == null ? null : String(r.claim_id),
     claimStatus,
     claimAmountAgorot: r.claim_amount == null ? null : int(r.claim_amount),
@@ -187,16 +230,30 @@ function toLedgerRow(r: Row): LeakLedgerRow {
   };
 }
 
+export const ISRAEL_TZ = 'Asia/Jerusalem';
+
+/** The calendar day (YYYY-MM-DD) of an instant in a time zone. */
+export function dayIn(isoInstant: string, tz: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(
+    new Date(isoInstant),
+  );
+}
+
 /**
- * "Caught before payment" (approvals-21): the leak was detected, or decided, before
- * the invoice was paid — measured by time, not by today's status (a paid invoice
- * whose gap was caught first is still caught; decision 7 "נתפס is measured at
- * decision time").
+ * "Caught before payment" (approvals-21; owner/H-03 7.11): the leak was detected, or
+ * decided, on a calendar day (restaurant time zone, Israel by default) BEFORE the pay
+ * day — not by today's status. Same day as the payment = not caught (paid_at is the
+ * business pay date, stored as midnight of that day). Nothing paid yet = caught.
  */
-export function caughtBefore(createdAt: string, resolvedAt: string | null, paidAt: string | null): boolean {
+export function caughtBefore(
+  createdAt: string,
+  resolvedAt: string | null,
+  paidAt: string | null,
+  tz: string = ISRAEL_TZ,
+): boolean {
   if (paidAt == null) return true;
-  const paid = Date.parse(paidAt);
-  return Date.parse(createdAt) < paid || (resolvedAt != null && Date.parse(resolvedAt) < paid);
+  const payDay = dayIn(paidAt, tz);
+  return dayIn(createdAt, tz) < payDay || (resolvedAt != null && dayIn(resolvedAt, tz) < payDay);
 }
 
 /** discrepancies.basis as G-14 reads it: an object, or null for anything else. */
