@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { heFromLatinLayout, latinFromHeLayout, matchesHe, normalizeHe, searchVariants } from '../normalizeHe';
+import {
+  heFromLatinLayout,
+  latinFromHeLayout,
+  matchesHe,
+  normalizeHe,
+  searchVariants,
+} from '../normalizeHe';
 
 describe('normalizeHe', () => {
   it('drops niqqud and cantillation, folds finals', () => {
     expect(normalizeHe('שָׁלוֹם')).toBe('שלומ');
-    expect(normalizeHe('שׁמן')).toBe('שמנ'); // שׁ presentation form
+    expect(normalizeHe('\uFB2Aמן')).toBe('שמנ'); // שׁ presentation form
   });
   it('folds every final letter', () => {
     expect(normalizeHe('ךםןףץ')).toBe('כמנפצ');
@@ -16,10 +22,10 @@ describe('normalizeHe', () => {
     expect(normalizeHe('ק״ג')).toBe('קג');
   });
   it('collapses spacing, maqaf, dashes, NBSP and bidi marks', () => {
-    expect(normalizeHe('  בית  קפה  ')).toBe('בית קפה');
+    expect(normalizeHe('  בית\u00A0\u00A0קפה  ')).toBe('בית קפה');
     expect(normalizeHe('בית־קפה')).toBe('בית קפה');
     expect(normalizeHe('בית-קפה')).toBe('בית קפה');
-    expect(normalizeHe('‏תנובה‎')).toBe('תנובה');
+    expect(normalizeHe('\u200Fתנובה\u200E')).toBe('תנובה');
   });
   it('lower-cases Latin and keeps digits', () => {
     expect(normalizeHe('PO-1024')).toBe('po 1024');

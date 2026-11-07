@@ -16,12 +16,12 @@ export function normalizeHe(input: string): string {
   return input
     .toLowerCase()
     .normalize('NFKD')
-    .replace(/[־׀׃]/g, ' ')
-    .replace(/[֑-ׇ]/g, '')
-    .replace(/[׳״'"`‘’‚‛“”„′″]/g, '')
-    .replace(/[​-‏‪-‮⁦-⁩﻿]/g, '')
-    .replace(/[ךםןףץ]/g, (c) => FINALS[c] ?? c)
-    .replace(/[\s _\-‐-―]+/g, ' ')
+    .replace(/[\u05BE\u05C0\u05C3]/g, ' ')
+    .replace(/[\u0591-\u05C7]/g, '')
+    .replace(/[\u05F3\u05F4'"`\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u2032\u2033]/g, '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+    .replace(/[\u05DA\u05DD\u05DF\u05E3\u05E5]/g, (c) => FINALS[c] ?? c)
+    .replace(/[\s\u00A0_\-\u2010-\u2015]+/g, ' ')
     .trim();
 }
 
@@ -29,14 +29,41 @@ const FINALS: Readonly<Record<string, string>> = { ך: 'כ', ם: 'מ', ן: 'נ',
 
 /** Israeli standard keyboard (SI-1452): the Hebrew letter on each Latin key. */
 const LATIN_TO_HE: Readonly<Record<string, string>> = {
-  q: '/', w: "'", e: 'ק', r: 'ר', t: 'א', y: 'ט', u: 'ו', i: 'ן', o: 'ם', p: 'פ',
-  a: 'ש', s: 'ד', d: 'ג', f: 'כ', g: 'ע', h: 'י', j: 'ח', k: 'ל', l: 'ך', ';': 'ף',
-  z: 'ז', x: 'ס', c: 'ב', v: 'ה', b: 'נ', n: 'מ', m: 'צ', ',': 'ת', '.': 'ץ', '/': '.',
+  q: '/',
+  w: "'",
+  e: 'ק',
+  r: 'ר',
+  t: 'א',
+  y: 'ט',
+  u: 'ו',
+  i: 'ן',
+  o: 'ם',
+  p: 'פ',
+  a: 'ש',
+  s: 'ד',
+  d: 'ג',
+  f: 'כ',
+  g: 'ע',
+  h: 'י',
+  j: 'ח',
+  k: 'ל',
+  l: 'ך',
+  ';': 'ף',
+  z: 'ז',
+  x: 'ס',
+  c: 'ב',
+  v: 'ה',
+  b: 'נ',
+  n: 'מ',
+  m: 'צ',
+  ',': 'ת',
+  '.': 'ץ',
+  '/': '.',
 };
 
 const HE_TO_LATIN: Readonly<Record<string, string>> = Object.fromEntries(
   Object.entries(LATIN_TO_HE)
-    .filter(([, he]) => /[א-ת]/.test(he))
+    .filter(([, he]) => /[\u05D0-\u05EA]/.test(he))
     .map(([latin, he]) => [he, latin]),
 );
 
