@@ -7,6 +7,7 @@ import {
   idempotencyKeys,
   paymentDeductions,
   exportRunInvoices,
+  notificationSettings,
   supplierBankAccountChanges,
   supplierBankAccounts,
   activityEvents,
@@ -88,6 +89,7 @@ export async function resetDb(db: Database): Promise<void> {
   await db.delete(exportRunInvoices);
   await db.delete(supplierBankAccountChanges);
   await db.delete(supplierBankAccounts);
+  await db.delete(notificationSettings);
   // 0073 addendum (H-04 / W3-11): payments block invoice + supplier deletes and
   // statements block supplier deletes (NO ACTION) — clear them before both.
   await db.delete(paymentInvoices);

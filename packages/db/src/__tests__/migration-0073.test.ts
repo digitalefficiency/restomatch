@@ -263,14 +263,34 @@ describe('0073 the five new tenant tables', () => {
     for (const t of TABLES) expect((await col(t, 'restaurant_id'))?.is_nullable, t).toBe('NO');
   });
 
-  it('enable row security with exactly the per-restaurant `<table>_tenant` policy', async () => {
+  it('enable row security with exactly one permissive policy, the per-restaurant `<table>_tenant`', async () => {
     const rows = (await sql`
       select c.relname, c.relrowsecurity, p.polname, pg_get_expr(p.polqual, p.polrelid) as qual
-      from pg_class c left join pg_policy p on p.polrelid = c.oid
+      from pg_class c left join pg_policy p on p.polrelid = c.oid and p.polpermissive
       where c.relname in ${sql(TABLES)} order by c.relname
     `) as unknown as Array<{ relname: string; relrowsecurity: boolean; polname: string; qual: string }>;
     expect(rows.map((r) => [r.relname, r.relrowsecurity, r.polname])).toEqual(TABLES.map((t) => [t, true, `${t}_tenant`]));
     for (const r of rows) expect(r.qual).toContain('app.current_restaurant_id()');
+  });
+
+  it('personal views, subscriptions and "seen" marks carry own-user RESTRICTIVE policies (the 0072 pattern)', async () => {
+    const rows = (await sql`
+      select c.relname, p.polname, p.polcmd, pg_get_expr(coalesce(p.polqual, p.polwithcheck), p.polrelid) as expr
+      from pg_policy p join pg_class c on c.oid = p.polrelid
+      where not p.polpermissive and c.relname in ${sql(TABLES)} order by c.relname, p.polname
+    `) as unknown as Array<{ relname: string; polname: string; polcmd: string; expr: string }>;
+    expect(rows.map((r) => `${r.relname}:${r.polname}:${r.polcmd}`)).toEqual([
+      'notification_seen:notification_seen_own_insert:a',
+      'notification_seen:notification_seen_own_select:r',
+      'notification_seen:notification_seen_own_update:w',
+      'saved_views:saved_views_own_insert:a',
+      'saved_views:saved_views_own_select:r',
+      'saved_views:saved_views_own_update:w',
+      'view_subscriptions:view_subscriptions_own_insert:a',
+      'view_subscriptions:view_subscriptions_own_update:w',
+    ]);
+    for (const r of rows) expect(r.expr).toContain('app.current_user_id()');
+    for (const r of rows.filter((x) => x.relname === 'saved_views')) expect(r.expr).toContain("'restaurant'");
   });
 
   it('are in the rls/0002 table list', () => {

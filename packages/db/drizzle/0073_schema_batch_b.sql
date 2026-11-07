@@ -75,6 +75,10 @@
 -- payment_invoices       which invoices one payment settles, with the allocated amount
 --                        (AGOROT > 0); one row per payment × invoice.
 --
+-- Own-user RLS (the 0072 pattern): saved_views (personal rows), view_subscriptions
+-- (writes) and notification_seen (all) add RESTRICTIVE `<table>_own_*` policies on
+-- app.current_user_id(), so one member can't read or write another's.
+--
 -- Tenant safety: the 0057/0070/0071/0072 pattern. Every new table carries
 -- restaurant_id NOT NULL, UNIQUE (id, restaurant_id), SAME-TENANT composite FKs to
 -- tenant tables, and RLS enabled HERE with the `<table>_tenant` policy that
@@ -453,6 +457,9 @@ CREATE SCHEMA IF NOT EXISTS app;--> statement-breakpoint
 CREATE OR REPLACE FUNCTION app.current_restaurant_id() RETURNS uuid
   LANGUAGE sql STABLE
   AS $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$;--> statement-breakpoint
+CREATE OR REPLACE FUNCTION app.current_user_id() RETURNS uuid
+  LANGUAGE sql STABLE
+  AS $$ select nullif(current_setting('app.current_user_id', true), '')::uuid $$;--> statement-breakpoint
 ALTER TABLE "saved_views" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "saved_views_tenant" ON "saved_views";--> statement-breakpoint
 CREATE POLICY "saved_views_tenant" ON "saved_views" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint
@@ -476,4 +483,24 @@ DROP POLICY IF EXISTS "payments_tenant" ON "payments";--> statement-breakpoint
 CREATE POLICY "payments_tenant" ON "payments" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint
 ALTER TABLE "payment_invoices" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "payment_invoices_tenant" ON "payment_invoices";--> statement-breakpoint
-CREATE POLICY "payment_invoices_tenant" ON "payment_invoices" USING ("restaurant_id" = app.current_restaurant_id());
+CREATE POLICY "payment_invoices_tenant" ON "payment_invoices" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint
+-- Own-user only (RESTRICTIVE, on top of the tenant policy; the 0072 pattern): a
+-- member's personal views, subscriptions and bell "seen" marks are theirs. A team
+-- view (scope 'restaurant') stays visible to the whole restaurant. Who may create a
+-- team view is the app's rule (W3-07a), not RLS. The owner connection sees all.
+DROP POLICY IF EXISTS "saved_views_own_select" ON "saved_views";--> statement-breakpoint
+CREATE POLICY "saved_views_own_select" ON "saved_views" AS RESTRICTIVE FOR SELECT USING ("scope" = 'restaurant' OR "user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "saved_views_own_insert" ON "saved_views";--> statement-breakpoint
+CREATE POLICY "saved_views_own_insert" ON "saved_views" AS RESTRICTIVE FOR INSERT WITH CHECK ("scope" = 'restaurant' OR "user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "saved_views_own_update" ON "saved_views";--> statement-breakpoint
+CREATE POLICY "saved_views_own_update" ON "saved_views" AS RESTRICTIVE FOR UPDATE USING ("scope" = 'restaurant' OR "user_id" = app.current_user_id()) WITH CHECK ("scope" = 'restaurant' OR "user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "view_subscriptions_own_insert" ON "view_subscriptions";--> statement-breakpoint
+CREATE POLICY "view_subscriptions_own_insert" ON "view_subscriptions" AS RESTRICTIVE FOR INSERT WITH CHECK ("user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "view_subscriptions_own_update" ON "view_subscriptions";--> statement-breakpoint
+CREATE POLICY "view_subscriptions_own_update" ON "view_subscriptions" AS RESTRICTIVE FOR UPDATE USING ("user_id" = app.current_user_id()) WITH CHECK ("user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "notification_seen_own_select" ON "notification_seen";--> statement-breakpoint
+CREATE POLICY "notification_seen_own_select" ON "notification_seen" AS RESTRICTIVE FOR SELECT USING ("user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "notification_seen_own_insert" ON "notification_seen";--> statement-breakpoint
+CREATE POLICY "notification_seen_own_insert" ON "notification_seen" AS RESTRICTIVE FOR INSERT WITH CHECK ("user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "notification_seen_own_update" ON "notification_seen";--> statement-breakpoint
+CREATE POLICY "notification_seen_own_update" ON "notification_seen" AS RESTRICTIVE FOR UPDATE USING ("user_id" = app.current_user_id()) WITH CHECK ("user_id" = app.current_user_id());

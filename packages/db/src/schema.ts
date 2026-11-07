@@ -194,12 +194,15 @@ export const users = pgTable(
      */
     phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
     /**
-     * WhatsApp consent (0072, H-03): the flag, when it was given and where
-     * (CHECK in 0072). Written ONLY on the auth/owner connection, like phone_verified_at.
+     * WhatsApp consent (0072, H-03): the flag, when it last changed and where (CHECK in
+     * 0072: opting in needs _at + _source; 'admin' may only revoke). Written ONLY on the
+     * auth/owner connection, like phone_verified_at.
      */
     whatsappOptIn: boolean('whatsapp_opt_in').notNull().default(false),
     whatsappOptInAt: timestamp('whatsapp_opt_in_at', { withTimezone: true }),
     whatsappOptInSource: varchar('whatsapp_opt_in_source', { length: 16 }).$type<WhatsappOptInSource>(),
+    /** The consent notice version the user saw (0072). _at/_source/_notice_version = the last change. */
+    whatsappOptInNoticeVersion: varchar('whatsapp_opt_in_notice_version', { length: 32 }),
     /** Platform operator (internal ops console). NOT a tenant role. */
     isPlatformAdmin: boolean('is_platform_admin').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -2633,13 +2636,13 @@ export const paymentDeductions = pgTable(
 /* ──────────────────────────────────────────────────────────────────────────
  * Schema batch A (wave 2, H-03, migration 0072): export log, consolidated
  * links, frozen leak months, supplier bank details + audit, push subscriptions,
- * notification prefs. All nine are tenant tables: restaurant_id NOT NULL,
+ * notification prefs + settings. All ten are tenant tables: restaurant_id NOT NULL,
  * UNIQUE (id, restaurant_id), RLS `<table>_tenant` (0072 + rls/0002). The
  * same-tenant composite FKs, CHECKs and append-only triggers live in 0072's SQL;
  * Drizzle mirrors the columns. Money: integer agorot (bigint) in these ledgers.
  * ────────────────────────────────────────────────────────────────────────── */
 
-export const EXPORT_RUN_FORMATS = ['hashavshevet', 'priority', 'rivhit', 'csv'] as const;
+export const EXPORT_RUN_FORMATS = ['hashavshevet', 'priority', 'rivhit', 'csv', 'accountant_pack'] as const;
 export type ExportRunFormat = (typeof EXPORT_RUN_FORMATS)[number];
 export const EXPORT_RUN_MODES = ['new_only', 'all'] as const;
 export type ExportRunMode = (typeof EXPORT_RUN_MODES)[number];
@@ -2720,7 +2723,8 @@ export const consolidatedInvoiceLinks = pgTable(
 );
 
 /**
- * The frozen leak of a closed month, per version (APPEND-ONLY: an UPDATE raises).
+ * The frozen leak of a closed month, per version (APPEND-ONLY trigger; written only on
+ * the owner connection — rls.ts revokes I/U/D from the tenant role).
  * `month` is the 1st of the month. A re-close writes version n+1; a late change is
  * a leak_month_corrections row. Nothing reads these yet (H-07 writes them first).
  */
@@ -2736,10 +2740,14 @@ export const leakMonthSnapshots = pgTable(
     computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
     leakAgorot: bigint('leak_agorot', { mode: 'number' }).notNull(),
     payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+    /** Why this version exists (CHECK: required from version 2). */
+    reason: text('reason'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   },
   (t) => [
     unique('leak_month_snapshots_id_restaurant_id_key').on(t.id, t.restaurantId),
     unique('leak_month_snapshots_month_version_key').on(t.restaurantId, t.month, t.version),
+    index('leak_month_snapshots_created_by_idx').on(t.createdBy),
   ],
 );
 
@@ -2770,8 +2778,11 @@ export const leakMonthCorrections = pgTable(
 );
 
 /**
- * A supplier's bank account. `accountNumberEnc` is CIPHERTEXT (@restomatch/crypto);
- * screens show `accountLast4` only. One active account per supplier.
+ * A supplier's bank account. `accountNumberEnc` is a CIPHERTEXT envelope 'v<n>:…'
+ * (CHECK; @restomatch/crypto encryptField, BANK_ENC_KEY, AAD restaurant:supplier);
+ * screens show `accountLast4` only. The bank details are immutable (trigger): only
+ * active / verified_* / holder_name change. One active account per (restaurant,
+ * supplier). Every insert/change writes a masked supplier_bank_account_changes row.
  */
 export const supplierBankAccounts = pgTable(
   'supplier_bank_accounts',
@@ -2796,13 +2807,13 @@ export const supplierBankAccounts = pgTable(
   (t) => [
     unique('supplier_bank_accounts_id_restaurant_id_key').on(t.id, t.restaurantId),
     index('supplier_bank_accounts_supplier_idx').on(t.supplierId, t.restaurantId),
-    uniqueIndex('supplier_bank_accounts_one_active').on(t.supplierId).where(sql`active`),
+    uniqueIndex('supplier_bank_accounts_one_active').on(t.restaurantId, t.supplierId).where(sql`active`),
     index('supplier_bank_accounts_restaurant_idx').on(t.restaurantId),
     index('supplier_bank_accounts_verified_by_idx').on(t.verifiedBy),
   ],
 );
 
-/** The bank-details change audit: MASKED before/after (APPEND-ONLY). */
+/** The bank-details change audit, written by trigger: MASKED before/after (key allowlist), APPEND-ONLY. */
 export const supplierBankAccountChanges = pgTable(
   'supplier_bank_account_changes',
   {
@@ -2855,7 +2866,7 @@ export const pushSubscriptions = pgTable(
 export const NOTIFICATION_PREF_CHANNELS = ['email', 'whatsapp', 'push'] as const;
 export type NotificationPrefChannel = (typeof NOTIFICATION_PREF_CHANNELS)[number];
 
-/** Per user × channel × event kind: on/off, quiet hours, Shabbat, daily cap (owner defaults). */
+/** Per user × channel × event kind: on/off (own rows only, RESTRICTIVE policy). */
 export const notificationPrefs = pgTable(
   'notification_prefs',
   {
@@ -2869,10 +2880,6 @@ export const notificationPrefs = pgTable(
     channel: varchar('channel', { length: 16 }).$type<NotificationPrefChannel>().notNull(),
     eventKind: varchar('event_kind', { length: 48 }).notNull(),
     enabled: boolean('enabled').notNull().default(true),
-    quietStart: time('quiet_start').notNull().default('23:00'),
-    quietEnd: time('quiet_end').notNull().default('06:00'),
-    observeShabbat: boolean('observe_shabbat').notNull().default(true),
-    dailyCap: smallint('daily_cap').notNull().default(6),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -2880,6 +2887,36 @@ export const notificationPrefs = pgTable(
     unique('notification_prefs_id_restaurant_id_key').on(t.id, t.restaurantId),
     unique('notification_prefs_user_channel_kind_key').on(t.restaurantId, t.userId, t.channel, t.eventKind),
     index('notification_prefs_user_idx').on(t.userId),
+  ],
+);
+
+/**
+ * ONE quiet-hours rule per (restaurant, user): quiet 23:00–06:00, Shabbat, holidays,
+ * daily cap 6 (CHECK 1..50) — owner defaults. Own rows only (RESTRICTIVE policy).
+ * Restaurant-wide defaults stay in restaurants.settings.
+ */
+export const notificationSettings = pgTable(
+  'notification_settings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    quietStart: time('quiet_start').notNull().default('23:00'),
+    quietEnd: time('quiet_end').notNull().default('06:00'),
+    observeShabbat: boolean('observe_shabbat').notNull().default(true),
+    observeHolidays: boolean('observe_holidays').notNull().default(true),
+    dailyCap: smallint('daily_cap').notNull().default(6),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('notification_settings_id_restaurant_id_key').on(t.id, t.restaurantId),
+    unique('notification_settings_user_key').on(t.restaurantId, t.userId),
+    index('notification_settings_user_idx').on(t.userId),
   ],
 );
 
@@ -2892,6 +2929,7 @@ export type SupplierBankAccount = typeof supplierBankAccounts.$inferSelect;
 export type SupplierBankAccountChange = typeof supplierBankAccountChanges.$inferSelect;
 export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;
 export type NotificationPref = typeof notificationPrefs.$inferSelect;
+export type NotificationSetting = typeof notificationSettings.$inferSelect;
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Schema batch B (wave 3, H-04, migration 0073): server-side saved views +
