@@ -71,7 +71,8 @@ export function NeedsYou({
               <ul className="mt-2 grid grid-cols-1 gap-2">
                 {shown.slice(phoneMax).map((row) => (
                   <li key={row.key}>
-                    <NeedLink row={row} />
+                    {/* The phone's copy of a desk row: no test ids (one owner per id). */}
+                    <NeedLink row={row} copy />
                   </li>
                 ))}
               </ul>
@@ -83,11 +84,12 @@ export function NeedsYou({
   );
 }
 
-function NeedLink({ row }: { row: NeedRow }) {
+function NeedLink({ row, copy = false }: { row: NeedRow; copy?: boolean }) {
+  const tid = (suffix = '') => (copy ? undefined : `needs-${row.key}${suffix}`);
   return (
     <Link
       href={row.href}
-      data-testid={`needs-${row.key}`}
+      data-testid={tid()}
       className={cn(
         'relative flex min-h-16 items-center justify-between gap-3 overflow-hidden rounded-xl border border-line bg-surface py-2 pe-3 ps-4 shadow-card transition-colors hover:border-primary/40',
         // T2 row-tone rail (3 px) on the start edge.
@@ -98,16 +100,16 @@ function NeedLink({ row }: { row: NeedRow }) {
     >
       <span className="min-w-0">
         <span className="block truncate text-xs font-semibold text-muted">{row.label}</span>
-        <span className="block text-2xl font-bold leading-7 tabular-nums text-ink" data-testid={`needs-${row.key}-value`}>
+        <span className="block text-2xl font-bold leading-7 tabular-nums text-ink" data-testid={tid('-value')}>
           {row.agorot !== null ? <Money agorot={row.agorot} context="tile" decimals={row.decimals} /> : <bdi>{row.countText}</bdi>}
         </span>
         {row.sub ? (
-          <span className="block truncate text-xs text-muted" data-testid={`needs-${row.key}-sub`}>
+          <span className="block truncate text-xs text-muted" data-testid={tid('-sub')}>
             {row.sub}
           </span>
         ) : null}
         {row.notes ? (
-          <span className="block truncate text-xs text-subtle" data-testid={`needs-${row.key}-notes`}>
+          <span className="block truncate text-xs text-subtle" data-testid={tid('-notes')}>
             {row.notes}
           </span>
         ) : null}

@@ -257,7 +257,12 @@ function NavBadge({ value, dot = false }: { value?: NavBadgeValue; dot?: boolean
  * the visible label (so the name starts with what is shown: no aria-label
  * override): "אישורים, 4 פריטים, ‏296 ₪ בסיכון".
  */
-function BadgeSr({ label, value }: { label: string; value?: NavBadgeValue }) {
+/**
+ * The badge's words, as the link's DESCRIPTION (`aria-describedby`): announced
+ * after the name, never part of the visible text or the accessible name (so the
+ * name still starts with what is shown). `hidden`: no layout, no innerText.
+ */
+function BadgeSr({ id, label, value }: { id: string; label: string; value?: NavBadgeValue }) {
   const t = useT(nav);
   const locale = useLocale();
   if (!value || value.count <= 0) return null;
@@ -267,11 +272,13 @@ function BadgeSr({ label, value }: { label: string; value?: NavBadgeValue }) {
     blocking: t('badge.blocking'),
   });
   return (
-    <span className="sr-only" data-badge-sr="">
-      {full.slice(label.length)}
+    <span id={id} hidden data-badge-sr="">
+      {full.slice(label.length).replace(/^,\s*/, '')}
     </span>
   );
 }
+
+const badgeId = (where: string, key: string) => `rm-badge-${where}-${key}`;
 
 /* ───────────────────────────── desktop sidebar ───────────────────────────── */
 
@@ -295,6 +302,7 @@ function SidebarItem({
         href={def.path}
         aria-current={active ? 'page' : undefined}
         title={rail ? label : undefined}
+        aria-describedby={badge && badge.count > 0 ? badgeId('side', def.key) : undefined}
         className={cn(
           'relative flex h-9 items-center gap-2.5 rounded-lg text-sm transition-colors',
           rail ? 'justify-center px-0' : 'ps-3 pe-2',
@@ -306,7 +314,7 @@ function SidebarItem({
         {active ? <span aria-hidden="true" className="absolute inset-y-1.5 start-0 w-[3px] rounded-full bg-primary" /> : null}
         <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
         <span className={rail ? 'sr-only' : 'min-w-0 truncate'}>{label}</span>
-        <BadgeSr label={label} value={badge} />
+        <BadgeSr id={badgeId('side', def.key)} label={label} value={badge} />
         <NavBadge value={badge} dot={rail} />
       </Link>
     </li>
@@ -828,6 +836,7 @@ export function BottomBar({ viewer }: { viewer: NavViewer }) {
               <Link
                 href={def.path}
                 aria-current={active ? 'page' : undefined}
+                aria-describedby={(badges[def.key]?.count ?? 0) > 0 ? badgeId('bar', def.key) : undefined}
                 className={cn(slot, focusRing, active ? 'font-semibold text-primary' : 'text-muted hover:text-ink')}
               >
                 <span className={cn(pill, active && 'bg-primary/12')}>
@@ -835,7 +844,7 @@ export function BottomBar({ viewer }: { viewer: NavViewer }) {
                   <NavBadge value={badges[def.key]} dot />
                 </span>
                 <span className="max-w-full whitespace-nowrap">{t(`bar.${label}`)}</span>
-                <BadgeSr label={t(`bar.${label}`)} value={badges[def.key]} />
+                <BadgeSr id={badgeId('bar', def.key)} label={t(`bar.${label}`)} value={badges[def.key]} />
               </Link>
             </li>
           );
@@ -983,6 +992,7 @@ export function MoreSheet({
                         <Link
                           href={d.path}
                           aria-current={active ? 'page' : undefined}
+                          aria-describedby={(badges[d.key]?.count ?? 0) > 0 ? badgeId('more', d.key) : undefined}
                           className={cn(
                             'flex min-h-16 items-center gap-2.5 rounded-xl border px-3 py-2 text-sm',
                             focusRing,
@@ -993,7 +1003,7 @@ export function MoreSheet({
                         >
                           <Icon className="h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
                           <span className="min-w-0 flex-1 break-words leading-5">{t(`links.${d.key}`)}</span>
-                          <BadgeSr label={t(`links.${d.key}`)} value={badges[d.key]} />
+                          <BadgeSr id={badgeId('more', d.key)} label={t(`links.${d.key}`)} value={badges[d.key]} />
                           <NavBadge value={badges[d.key]} />
                         </Link>
                       </li>

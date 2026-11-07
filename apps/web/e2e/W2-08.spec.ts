@@ -89,10 +89,9 @@ test.describe('owner: one figure on the home row, the badge and the bell', () =>
     await expect(page.getByTestId('needs-decide-sub')).toContainText('2 חוסמים תשלום');
 
     const link = page.locator('aside a[href="/dashboard/approvals"], nav a[href="/dashboard/approvals"]').first();
-    // The accessible name = the visible label + an sr-only badge suffix (no aria-label override).
-    const sr = link.locator('[data-badge-sr]');
-    await expect.poll(async () => (await sr.textContent().catch(() => '')) ?? '', { timeout: 20_000 }).toContain('4 פריטים');
-    const aria = ((await link.textContent()) ?? '').replace(BIDI, '');
+    // The badge words are the link's description (aria-describedby → a hidden span), not its name.
+    await expect.poll(async () => (await page.locator(`#${(await link.getAttribute('aria-describedby')) ?? 'none'}`).textContent().catch(() => '')) ?? '', { timeout: 20_000 }).toContain('4 פריטים');
+    const aria = ((await page.locator(`#${await link.getAttribute('aria-describedby')}`).textContent()) ?? '').replace(BIDI, '');
     expect(aria).toMatch(/296/);
     expect(aria).toContain('חוסם תשלום');
     await expect(link.locator('[data-nav-badge="block"]')).toBeVisible();
