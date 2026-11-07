@@ -8,7 +8,7 @@ import {
   visualOrder,
   type MoneyContext,
 } from '@restomatch/types';
-import { formatIlsAgorot } from '../reports/money';
+import { formatIlsAgorot, ilsToAgorot } from '../reports/money';
 import { visualOrder as reportsVisualOrder } from '../reports/bidi';
 
 /**
@@ -104,5 +104,54 @@ describe('formatIlsAmount (worker EOD e-mail) delegates byte-identically', () =>
     expect([0, 1240, 30_837].map((v) => formatIlsPlain(v, { locale: 'he', minimumFractionDigits: 0, maximumFractionDigits: 0 })))
       .toEqual([legacy(0), legacy(1240), legacy(30_837)]);
     expect(formatIlsPlain(1240, { locale: 'he', minimumFractionDigits: 0, maximumFractionDigits: 0 })).toBe('\u200f1,240\u00a0\u200f₪');
+  });
+});
+
+describe('ilsToAgorot: half-up at the agora from the decimal digits, never float × 100', () => {
+  it.each<[number | string, number]>([
+    [1.005, 101],
+    [0.285, 29],
+    [2.675, 268],
+    [12.345, 1235],
+    [12.344, 1234],
+    [-1.005, -101],
+    [-0.285, -29],
+    [-2.675, -268],
+    [-12.345, -1235],
+    [0.004, 0],
+    [-0.004, 0],
+    [1234.56, 123_456],
+    [0.29, 29],
+    [99_999_999.99, 9_999_999_999],
+    [1e-7, 0],
+    [0, 0],
+    ['1.005', 101],
+    ['0.2850', 29],
+    ['-2.675', -268],
+    ['12.3449', 1234],
+    ['38.9000', 3890],
+    ['42', 4200],
+    [' 7.5 ', 750],
+  ])('%s → %i agorot', (ils, agorot) => {
+    expect(ilsToAgorot(ils)).toBe(agorot);
+  });
+
+  it('the pre-fix float path really was wrong on these (guards the test itself)', () => {
+    expect([1.005, 0.285].map((x) => Math.round(x * 100))).toEqual([100, 28]); // 2.675 happens to round right (×100 = 267.5)
+  });
+
+  it('refuses a string that is not a plain decimal; NaN still passes through', () => {
+    for (const bad of ['', 'abc', '1,005', '1e3', '₪5']) expect(() => ilsToAgorot(bad)).toThrow(RangeError);
+    expect(ilsToAgorot(Number.NaN)).toBeNaN();
+  });
+
+  it('parity with formatIls rounding: the 2-dp ₪ of the agorot equals Intl rounding the shekels', () => {
+    for (const locale of ['he', 'en'] as const) {
+      for (const x of [1.005, 0.285, 2.675, 12.345, -1.005, -12.345, 0.125, 1234.565, 99.995]) {
+        expect(formatIlsAgorot(ilsToAgorot(x), { locale, maximumFractionDigits: 2 })).toBe(
+          formatIlsPlain(x, { locale, maximumFractionDigits: 2 }),
+        );
+      }
+    }
   });
 });
