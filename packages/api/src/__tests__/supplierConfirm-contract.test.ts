@@ -218,8 +218,8 @@ describe('the order changed after the supplier opened the form (G-10 review #2)'
     const o = await freshOrder();
     expect(o.version).toBe(
       linesVersionOf([
-        { id: o.a, qty: '10', price: '8.5', unit: 'kg', productId: null },
-        { id: o.b, qty: 4, price: 20, unit: 'box', productId: null },
+        { id: o.a, qty: '10', price: '8.5', unit: 'kg' },
+        { id: o.b, qty: 4, price: 20, unit: 'box' },
       ]),
     );
     expect(
@@ -273,6 +273,16 @@ describe('the order changed after the supplier opened the form (G-10 review #2)'
       error: 'ORDER_CHANGED',
     });
     expect(await rows(o.poId)).toEqual([]);
+  });
+
+  it('a productId-only change (a mapping confirmed by the restaurant) is NOT a changed order: the answer is accepted', async () => {
+    const o = await freshOrder();
+    await db.update(poLines).set({ productId: T.productId }).where(eq(poLines.id, o.a));
+    const lines = [{ poLineId: o.a, qtyAvailable: 6 }, { poLineId: o.b, qtyAvailable: 4 }];
+    expect(await submitSupplierAnswer(db, o.link, { intent: 'with_changes', linesVersion: o.version, lines })).toEqual({
+      ok: true,
+      status: 'changes',
+    });
   });
 
   it('a ₪0 order line: proposedUnitPrice 0 (its own price) is unchanged, not BAD_VALUE', async () => {

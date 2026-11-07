@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAnswer, computeAnswer, mergeAfterOrderChange, contactNumbers, isOwnAnswer, lineAgorot, parseQty, parseUnitPrice, recordedDiff, type PortalLine } from '../logic';
+import { buildAnswer, computeAnswer, mergeAfterOrderChange, orderChangedKey, contactNumbers, isOwnAnswer, lineAgorot, parseQty, parseUnitPrice, recordedDiff, type PortalLine } from '../logic';
 
 const LINES: PortalLine[] = [
   { id: 'a', name: 'עגבניות', sku: null, qtyOrdered: 10, unit: 'kg', unitPrice: 6.5, agreed: true },
@@ -231,13 +231,16 @@ describe('order changed under an open form (G-10 review round 2 #1)', () => {
     ];
     const m = mergeAfterOrderChange(LINES, next, qty, price);
     expect(m.qtyText).toEqual({ a: '2', b: '6', c: '2', d: '3' });
-    expect(m.priceText).toEqual({ a: '6.5', b: '13.9', c: '', d: '4' });
+    // round 3 #3: line b's ordered qty changed → qty re-filled, the typed price "15" is KEPT
+    expect(m.priceText).toEqual({ a: '6.5', b: '15', c: '', d: '4' });
     expect(m.changedIds).toEqual(['b', 'd']);
     expect(m.removed).toBe(0);
+    expect(m.refilled).toBe(0); // b's qty was untouched, so nothing typed was replaced
     // the primary still carries the preserved shortage — never a fallback to as-ordered
     const b = buildAnswer({ lines: next, linesVersion: 'v2', qtyText: m.qtyText, priceText: m.priceText, note: '' });
-    expect(b).toMatchObject({ primary: 'with_changes', count: 1 });
+    expect(b).toMatchObject({ primary: 'with_changes', count: 2 }); // a's shortage + b's kept price
     expect(b.body.lines.find((l) => l.poLineId === 'a')?.qtyAvailable).toBe(2);
+    expect(b.body.lines.find((l) => l.poLineId === 'b')?.proposedUnitPrice).toBe(15);
   });
 
   it('a unit or price change marks the line; a removed line is counted', () => {
@@ -246,5 +249,29 @@ describe('order changed under an open form (G-10 review round 2 #1)', () => {
     const m = mergeAfterOrderChange(LINES, next, qty, price);
     expect(m.changedIds).toEqual(['a', 'b']);
     expect(m.removed).toBe(1);
+  });
+
+  it('round 3 #3: a price-only change keeps a typed qty and re-fills the price; replacing a TYPED value is counted', () => {
+    const { qty, price } = asOrdered();
+    qty.a = '4';
+    price.a = '7';
+    qty.b = '1';
+    const next: PortalLine[] = [{ ...LINES[0]!, unitPrice: 6.9 }, { ...LINES[1]!, qtyOrdered: 5 }, LINES[2]!];
+    const m = mergeAfterOrderChange(LINES, next, qty, price);
+    expect(m.qtyText.a).toBe('4'); // typed qty kept
+    expect(m.priceText.a).toBe('6.9'); // typed "7" replaced by the new order price
+    expect(m.qtyText.b).toBe('5'); // typed "1" replaced by the new ordered qty
+    expect(m.refilled).toBe(2);
+  });
+
+  it('round 3 #1/#2: the message never claims a removal that did not happen', () => {
+    // nothing visible changed (e.g. a product mapping) → neutral
+    expect(mergeAfterOrderChange(LINES, LINES, asOrdered().qty, asOrdered().price)).toMatchObject({ changedIds: [], removed: 0 });
+    expect(orderChangedKey(0, 0)).toBe('orderChangedNeutral');
+    expect(orderChangedKey(1, 0)).toBe('orderChangedOne');
+    expect(orderChangedKey(3, 0)).toBe('orderChanged');
+    expect(orderChangedKey(0, 1)).toBe('orderChangedRemovedOne');
+    expect(orderChangedKey(0, 2)).toBe('orderChangedRemoved');
+    expect(orderChangedKey(2, 1)).toBe('orderChangedBoth');
   });
 });

@@ -222,38 +222,62 @@ export function buildAnswer(state: AnswerState): BuiltAnswer {
 
 /**
  * The order changed under an open form (409 order_changed → refresh). Keep what
- * the supplier typed for every line that is still the same line (id, ordered
- * qty, order price, unit), so a typed shortage is never silently reset to "as
- * ordered"; prefill only new or changed lines, and name them so the form can
- * mark them and move focus to the first one.
+ * the supplier typed wherever the restaurant did not change it, so a typed
+ * shortage is never silently reset to "as ordered":
+ *  - a line whose ordered qty, order price and unit are unchanged keeps both fields;
+ *  - a line whose ordered qty or unit changed gets its qty re-filled, and keeps a typed price;
+ *  - a line whose order price changed gets its price re-filled, and keeps a typed qty;
+ *  - a new line is prefilled.
+ * `changedIds` (new or changed lines) are marked and focused; `refilled` counts
+ * the lines where a value the supplier had TYPED was replaced, so the copy can say so.
  */
 export function mergeAfterOrderChange(
   prev: ReadonlyArray<PortalLine>,
   next: ReadonlyArray<PortalLine>,
   qtyText: Record<string, string>,
   priceText: Record<string, string>,
-): { qtyText: Record<string, string>; priceText: Record<string, string>; changedIds: string[]; removed: number } {
+): { qtyText: Record<string, string>; priceText: Record<string, string>; changedIds: string[]; removed: number; refilled: number } {
   const before = new Map(prev.map((l) => [l.id, l]));
-  const same = (a: PortalLine | undefined, b: PortalLine) =>
-    !!a &&
-    Math.round(a.qtyOrdered * 1000) === Math.round(b.qtyOrdered * 1000) &&
-    (a.unitPrice == null ? b.unitPrice == null : b.unitPrice != null && Math.round(a.unitPrice * 10_000) === Math.round(b.unitPrice * 10_000)) &&
-    a.unit === b.unit;
+  const qtyKey = (l: PortalLine) => `${Math.round(l.qtyOrdered * 1000)}:${l.unit}`;
+  const priceKey = (l: PortalLine) => (l.unitPrice == null ? '-' : String(Math.round(l.unitPrice * 10_000)));
+  const defaultQty = (l: PortalLine) => String(l.qtyOrdered);
+  const defaultPrice = (l: PortalLine) => (l.unitPrice == null ? '' : String(l.unitPrice));
   const q: Record<string, string> = {};
   const p: Record<string, string> = {};
   const changedIds: string[] = [];
+  let refilled = 0;
   for (const l of next) {
-    if (same(before.get(l.id), l)) {
-      q[l.id] = qtyText[l.id] ?? String(l.qtyOrdered);
-      p[l.id] = priceText[l.id] ?? (l.unitPrice == null ? '' : String(l.unitPrice));
-    } else {
+    const old = before.get(l.id);
+    if (!old) {
       changedIds.push(l.id);
-      q[l.id] = String(l.qtyOrdered);
-      p[l.id] = l.unitPrice == null ? '' : String(l.unitPrice);
+      q[l.id] = defaultQty(l);
+      p[l.id] = defaultPrice(l);
+      continue;
     }
+    const typedQ = qtyText[l.id] ?? defaultQty(old);
+    const typedP = priceText[l.id] ?? defaultPrice(old);
+    const qtyChanged = qtyKey(old) !== qtyKey(l);
+    const priceChanged = priceKey(old) !== priceKey(l);
+    if (qtyChanged || priceChanged) changedIds.push(l.id);
+    const lostQ = qtyChanged && typedQ.trim() !== defaultQty(old);
+    const lostP = priceChanged && typedP.trim() !== defaultPrice(old);
+    if (lostQ || lostP) refilled++;
+    q[l.id] = qtyChanged ? defaultQty(l) : typedQ;
+    p[l.id] = priceChanged ? defaultPrice(l) : typedP;
   }
   const ids = new Set(next.map((l) => l.id));
-  return { qtyText: q, priceText: p, changedIds, removed: prev.filter((l) => !ids.has(l.id)).length };
+  return { qtyText: q, priceText: p, changedIds, removed: prev.filter((l) => !ids.has(l.id)).length, refilled };
+}
+
+/** Which "the order was updated" message fits what actually changed (G-10 round 3: never claim a removal that didn't happen). */
+export function orderChangedKey(
+  changed: number,
+  removed: number,
+): 'orderChangedNeutral' | 'orderChangedOne' | 'orderChanged' | 'orderChangedRemovedOne' | 'orderChangedRemoved' | 'orderChangedBoth' {
+  if (changed === 0 && removed === 0) return 'orderChangedNeutral';
+  if (removed === 0) return changed === 1 ? 'orderChangedOne' : 'orderChanged';
+  if (changed === 0) return removed === 1 ? 'orderChangedRemovedOne' : 'orderChangedRemoved';
+  return 'orderChangedBoth';
 }
 
 /** A recorded answer (supplier_responses.lines) → the same diff items, for "already answered". */

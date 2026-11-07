@@ -10,7 +10,7 @@ import { formatNumber } from '@/lib/i18n/format';
 import { supplierConfirm } from '@/lib/i18n/messages/supplierConfirm';
 import { Money } from '@/lib/components/money';
 import { DiffList } from './Diff';
-import { buildAnswer, mergeAfterOrderChange, type Answer, type AnswerLimits, type DiffItem, type PortalLine } from './logic';
+import { buildAnswer, mergeAfterOrderChange, orderChangedKey, type Answer, type AnswerLimits, type DiffItem, type PortalLine } from './logic';
 import { rememberAttempt } from './attempt';
 
 export type { PortalLine } from './logic';
@@ -19,7 +19,7 @@ type Phase =
   | { kind: 'edit' }
   | { kind: 'sending'; what: 'answer' | 'asIs' }
   | { kind: 'done'; status: 'confirmed' | 'changes'; diff: DiffItem[]; note: string | null }
-  | { kind: 'error'; key: ErrorKey; count?: number };
+  | { kind: 'error'; key: ErrorKey; count?: number; removed?: number; refilled?: number };
 type ErrorKey =
   | 'notFound'
   | 'expired'
@@ -29,7 +29,10 @@ type ErrorKey =
   | 'intentMismatch'
   | 'orderChanged'
   | 'orderChangedOne'
+  | 'orderChangedNeutral'
+  | 'orderChangedRemovedOne'
   | 'orderChangedRemoved'
+  | 'orderChangedBoth'
   | 'tooLarge'
   | 'generic';
 
@@ -94,8 +97,10 @@ export function SupplierAnswerForm({
     const n = merged.changedIds.length;
     setPhase({
       kind: 'error',
-      key: n === 0 ? 'orderChangedRemoved' : n === 1 ? 'orderChangedOne' : 'orderChanged',
+      key: orderChangedKey(n, merged.removed),
       count: n,
+      removed: merged.removed,
+      refilled: merged.refilled,
     });
     const first = merged.changedIds[0];
     if (first) requestAnimationFrame(() => document.getElementById(`qty-${first}`)?.focus());
@@ -142,7 +147,9 @@ export function SupplierAnswerForm({
       // The order changed after this form was opened: nothing was saved. Reload
       // the order; the effect above keeps what was typed and marks what changed.
       if (res.status === 409 && data.error === 'order_changed') {
-        setPhase({ kind: 'edit' });
+        // Say so at once (a failed refresh still leaves feedback); the effect
+        // above refines the message once the new lines arrive.
+        setPhase({ kind: 'error', key: 'orderChangedNeutral' });
         router.refresh();
         return;
       }
@@ -382,7 +389,11 @@ export function SupplierAnswerForm({
             ) : null}
             {phase.kind === 'error' ? (
               <p role="alert" className="mt-1 text-sm font-medium text-danger">
-                {t(`portal.errors.${phase.key}`, { count: formatNumber(phase.count ?? 0, locale) })}
+                {t(`portal.errors.${phase.key}`, {
+                  count: formatNumber(phase.count ?? 0, locale),
+                  removed: formatNumber(phase.removed ?? 0, locale),
+                })}
+                {phase.refilled ? ` ${t('portal.errors.orderRefilled')}` : null}
               </p>
             ) : null}
           </div>

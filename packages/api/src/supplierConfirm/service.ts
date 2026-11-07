@@ -53,13 +53,13 @@ export const SUPPLIER_MAX_PRICE = 10_000_000;
  * ORDER_CHANGED instead of storing a shortage the supplier never typed.
  */
 export function linesVersionOf(
-  lines: ReadonlyArray<{ id: string; qty: number | string; price: number | string | null; unit: string; productId: string | null }>,
+  lines: ReadonlyArray<{ id: string; qty: number | string; price: number | string | null; unit: string }>,
 ): string {
+  // Only what the supplier SEES on a line (G-10 round 3): a product mapping
+  // confirmed by the restaurant changes nothing on the form, so it must not
+  // invalidate an open answer.
   const canon = [...lines]
-    .map(
-      (l) =>
-        `${l.id}:${Math.round(Number(l.qty) * 1000)}:${l.price == null ? '-' : Math.round(Number(l.price) * 10_000)}:${l.unit}:${l.productId ?? '-'}`,
-    )
+    .map((l) => `${l.id}:${Math.round(Number(l.qty) * 1000)}:${l.price == null ? '-' : Math.round(Number(l.price) * 10_000)}:${l.unit}`)
     .sort()
     .join('|');
   return createHash('sha256').update(canon, 'utf8').digest('base64url').slice(0, 22);
@@ -316,7 +316,7 @@ export async function loadSupplierOrder(db: Database, link: ResolvedLink): Promi
     })),
     response: resp ?? null,
     linesVersion: linesVersionOf(
-      lines.map((l) => ({ id: l.id, qty: l.qtyOrdered, price: l.unitPriceExpected, unit: l.unit, productId: l.productId })),
+      lines.map((l) => ({ id: l.id, qty: l.qtyOrdered, price: l.unitPriceExpected, unit: l.unit })),
     ),
     confirmable: isConfirmable(po.status),
     closed: isClosed(po.status),
@@ -411,7 +411,7 @@ export async function submitSupplierAnswer(
   if (!isConfirmable(po.status)) return { ok: false, error: 'ORDER_NOT_OPEN' };
 
   const own = await db
-    .select({ id: poLines.id, qty: poLines.qtyOrdered, price: poLines.unitPriceExpected, unit: poLines.unit, productId: poLines.productId })
+    .select({ id: poLines.id, qty: poLines.qtyOrdered, price: poLines.unitPriceExpected, unit: poLines.unit })
     .from(poLines)
     .where(eq(poLines.poId, po.id));
   const byId = new Map(own.map((l) => [l.id, l]));
