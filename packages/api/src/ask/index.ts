@@ -4,7 +4,7 @@
  * one question in assistant_usage (no text stored).
  */
 import type { Database, UserRole } from '@restomatch/db';
-import { recordAudit } from '../audit';
+import { recordAudit, type AuditAction } from '../audit';
 import { TRPCError } from '@trpc/server';
 import { addClaudeSpend, allowAskBurst, recordUsage, reserveQuestion } from './budget';
 import { anthropicAskClient, AskRunError, runClaude, type AskClientLike } from './claude';
@@ -109,6 +109,9 @@ export async function runAsk(
   };
 }
 
+/** INTERIM(G-05): G-05 adds 'ask.answered' to AuditAction in its sweep; then drop the cast. */
+const ASK_ANSWERED = 'ask.answered' as unknown as AuditAction;
+
 /**
  * KPI hook (AU-06 → AU-07): one audit_log row per answered question. Never the
  * question text, never a ₪ figure — only which intent/tools answered and how.
@@ -122,7 +125,7 @@ async function recordAnswered(
   await recordAudit(db, {
     restaurantId,
     userId: userId ?? null,
-    action: 'ask.answered',
+    action: ASK_ANSWERED,
     entityType: 'ask',
     after: { automationId: 'A11', ...after, tools: [...new Set(after.tools)] },
   });
