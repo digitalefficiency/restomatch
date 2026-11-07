@@ -36,7 +36,9 @@ export function decisionTasks(s: QueueSummaryLike, today: string): Task[] {
       count: s.count,
       blocking: s.blockers,
       tier: 'T2',
-      tone: s.blockers > 0 ? 'danger' : 'warn',
+      // IA rule 8: colour = urgency. Red only when something blocks a payment; without a block
+      // (and with no due date on the queue yet — W2-03 computeDueDate) the row stays neutral.
+      tone: s.blockers > 0 ? 'danger' : 'neutral',
       due: null,
       ageDays: ageOf(s.oldestAt, today),
       verb: 'decide',
@@ -84,7 +86,8 @@ export function claimTasks(claims: readonly ClaimLike[], now: Date, today: strin
       count: q.unsent.count,
       blocking: 0,
       tier: 'T2',
-      tone: 'warn',
+      // Not late yet (no answer window has started): neutral. The overdue follow-up is the orange one.
+      tone: 'neutral',
       due: null,
       ageDays: ageOf(q.unsent.oldest, today),
       verb: 'send',
