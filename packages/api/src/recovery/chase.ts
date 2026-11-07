@@ -68,10 +68,21 @@ export function waPhoneE164(raw: string | null | undefined): string | null {
   return e164;
 }
 
-const EMAIL_RE = /^[^\s@<>"',;]+@[^\s@<>"',;]+\.[^\s@<>"',;]+$/;
+const EMAIL_FORBIDDEN = /[\s<>"',;]/;
+/**
+ * A plausible supplier address for mailto: (linear checks only — no
+ * backtracking regex on stored data): one "@", no spaces / quotes / separators,
+ * a dotted domain, at most 254 characters.
+ */
 export function validEmail(raw: string | null | undefined): string | null {
   const e = (raw ?? '').trim();
-  return EMAIL_RE.test(e) ? e : null;
+  if (e.length < 3 || e.length > 254 || EMAIL_FORBIDDEN.test(e)) return null;
+  const at = e.indexOf('@');
+  if (at <= 0 || at !== e.lastIndexOf('@')) return null;
+  const domain = e.slice(at + 1);
+  const dot = domain.indexOf('.');
+  if (dot <= 0 || domain.endsWith('.')) return null;
+  return e;
 }
 
 /** dd.MM in Israel time. */

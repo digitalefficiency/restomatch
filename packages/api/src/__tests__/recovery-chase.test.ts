@@ -221,3 +221,15 @@ describe('AU-03 · 08:30 digest (DB)', () => {
     expect(await outbox()).toHaveLength(0);
   });
 });
+
+describe('AU-03 · validEmail (linear, CodeQL js/polynomial-redos)', () => {
+  it('accepts a plain address, rejects junk, and stays fast on adversarial input', async () => {
+    const { validEmail } = await import('../recovery/chase');
+    expect(validEmail(' office@sharon.test ')).toBe('office@sharon.test');
+    for (const bad of ['', 'a@b', '@b.c', 'a@@b.c', 'a@b.c.', 'a b@c.d', 'a@.c', 'a"@b.c']) expect(validEmail(bad), bad).toBeNull();
+    const evil = '!@!.' + '!.'.repeat(50_000);
+    const t = Date.now();
+    validEmail(evil);
+    expect(Date.now() - t).toBeLessThan(50);
+  });
+});
