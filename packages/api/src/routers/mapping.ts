@@ -403,6 +403,58 @@ async function reholdLinkHolds(db: Database, rid: string, invoiceIds: string[]):
 }
 
 /**
+ * Round 8: the order-line twin of reholdLinkHolds. An invoice whose run is on an
+ * order that has an open question line again, and whose run has findings that are
+ * ALL still open (no decision, no credit claim), is put back on the order hold
+ * ('parsed', reviewReasons ∪ 'unlinkedPo', heldPoId = the run's order — as the
+ * match-invoice job's M-4 hold) and the run is dropped: its findings were built
+ * on the revoked link. A clean run, or one carrying a decision / claim, stays.
+ */
+async function reholdOrderHolds(db: Database, rid: string, invoiceIds: string[]): Promise<string[]> {
+  const held: string[] = [];
+  for (const id of [...new Set(invoiceIds)]) {
+    try {
+      await db.transaction(async (sp) => {
+        const t = sp as unknown as Database;
+        const rows = (await t.execute(sql`
+          update invoices i
+             set status = 'parsed',
+                 ocr_payload = coalesce(i.ocr_payload, '{}'::jsonb) || jsonb_build_object(
+                   'heldPoId', mr.po_id::text,
+                   'raw', coalesce(i.ocr_payload -> 'raw', '{}'::jsonb) || jsonb_build_object(
+                     'reviewReasons',
+                     (select coalesce(jsonb_agg(distinct x), '[]'::jsonb) from (
+                        select jsonb_array_elements_text(coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb)) as x
+                        union select 'unlinkedPo') u)))
+            from match_runs mr
+           where i.restaurant_id = ${rid} and i.id = ${id}::uuid
+             and mr.invoice_id = i.id and mr.restaurant_id = ${rid} and mr.po_id is not null
+             and i.status in ('matched', 'disputed')
+             and exists (
+               select 1 from po_lines pl join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid}
+                where pl.po_id = mr.po_id and ${poLineIsQuestion(rid)}
+             )
+             and exists (select 1 from discrepancies d where d.match_run_id = mr.id and d.restaurant_id = ${rid})
+             and not exists (
+               select 1 from discrepancies d
+                where d.match_run_id = mr.id and d.restaurant_id = ${rid}
+                  and (d.resolution_status <> 'open'
+                       or exists (select 1 from recovery_claims c where c.discrepancy_id = d.id and c.restaurant_id = ${rid}))
+             )
+          returning i.id
+        `)) as unknown as Array<{ id: string }>;
+        if (rows.length === 0) return;
+        await t.execute(sql`delete from match_runs where invoice_id = ${id}::uuid and restaurant_id = ${rid}`);
+        held.push(id);
+      });
+    } catch {
+      // A claim hangs on that run: leave it to the people.
+    }
+  }
+  return held;
+}
+
+/**
  * How many questions are open (the home "זה אותו מוצר?" line). Restaurant-scoped.
  * Name-keyed (no SKU) always; with `includeSku` also the SKU-keyed unlinked
  * invoice / order lines (owner, manager — G-08 review H-2: a held invoice whose
@@ -618,6 +670,12 @@ async function applyLink(db: Database, rid: string, input: LinkInput) {
     // An invoice an answer released goes back on hold rather than re-matching
     // into a false leak; the rest re-match (incl. invoices of undone PO lines).
     const reheld = new Set(await reholdLinkHolds(db, rid, undoneInv.map((l) => l.invoiceId)));
+    // Round 8: an invoice whose run is on an order whose line this undo re-opened,
+    // with only OPEN findings (built on the revoked link), goes back on the order
+    // hold; a run with a decision or a claim stays.
+    for (const id of await reholdOrderHolds(db, rid, await invoicesForPoLines(db, rid, undonePo.map((l) => l.id)))) {
+      reheld.add(id);
+    }
     // A held invoice whose line is a question again is in the bucket again (round 4 LOW-8).
     await restoreQuestionReason(db, rid, undoneInv.map((l) => l.invoiceId));
     const toRematch = [
@@ -870,11 +928,16 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
          where i.id = ${invoiceId}::uuid and i.restaurant_id = ${rid}
       `);
     }
+    // Round 8: whether the re-answer's range was put back (null: nothing to put back).
+    let rangeRestored: boolean | null = null;
     if (input.undo.forgetKey) await forgetChargeKey(db, rid, key);
     else if (input.undo.rangeToken) {
       // Round 7 LOW-9/10: only a range this user's answer moved, sealed by the server.
+      // An expired / foreign token keeps the widened range — and says so.
       const sealed = verifyChargeRangeUndo(input.undo.rangeToken, { userId, restaurantId: rid }, key);
+      // true = the bounds this answer moved are back (a later answer's widening stays by design).
       if (sealed) await restoreChargeKeyRange(db, rid, key, sealed.before, sealed.after);
+      rangeRestored = sealed != null;
     }
     const touched = [...byInv.keys()];
     const reheld = new Set(await reholdLinkHolds(db, rid, touched));
@@ -894,7 +957,7 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
       entityId: input.supplierId,
       after: { sku: key.sku, nameKey: key.nameKey, lineIds: target.map((t) => String(t.id)), invoiceIds: touched, forgotKey: !!input.undo.forgetKey },
     });
-    return { invoiceLinesMarked: 0, learnedKey: false, rematch, undo: null, linesLocked, linesNotShown: 0 };
+    return { invoiceLinesMarked: 0, learnedKey: false, rematch, undo: null, linesLocked, linesNotShown: 0, rangeRestored };
   }
 
   // An open question of this key must exist: an invoice line, an order line or a price-list row.
@@ -961,7 +1024,14 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
                     where pl.po_id = (i.ocr_payload ->> 'heldPoId')::uuid and pl.product_id is null
                       and ${keyOn(sql`pl.supplier_sku`, sql`pl.raw_description`)})
   `)) as unknown as Array<{ id: string }>;
-  const touched = [...new Set([...byInv.keys(), ...heldOnOrder.map((r) => String(r.id))])];
+  // Round 8: and invoices whose run is on an order with a line of this key — the
+  // order line is no product now, its re-match drops the false MISSING (as applyLink).
+  const keyPoLines = (await db.execute(sql`
+    select pl.id from po_lines pl join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid} and po.supplier_id = ${input.supplierId}
+     where pl.product_id is null and ${keyOn(sql`pl.supplier_sku`, sql`pl.raw_description`)}
+  `)) as unknown as Array<{ id: string }>;
+  const onOrder = await invoicesForPoLines(db, rid, keyPoLines.map((r) => String(r.id)));
+  const touched = [...new Set([...byInv.keys(), ...heldOnOrder.map((r) => String(r.id)), ...onOrder])];
   await releaseLinkHolds(db, rid, touched);
   const rematch = await requeueInvoicesForRematch(db, rid, touched);
   await db.insert(auditLog).values({
@@ -995,6 +1065,7 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
     },
     linesLocked: 0,
     linesNotShown,
+    rangeRestored: null,
   };
 }
 

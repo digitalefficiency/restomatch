@@ -70,7 +70,9 @@ export function verifyAnswerUndo(
   who: { userId: string; restaurantId: string },
   now = Date.now(),
 ): { supplierId: string; nameKey: string; change: AnswerChange } | null {
-  const [body, sig] = token.split('.');
+  const parts = token.split('.');
+  if (parts.length !== 2) return null; // round 8: exactly body.signature
+  const [body, sig] = parts;
   if (!body || !sig) return null;
   const expected = sign(body);
   const a = Buffer.from(sig);
@@ -134,7 +136,9 @@ export function verifyChargeRangeUndo(
   key: { supplierId: string; sku: string | null; nameKey: string | null },
   now = Date.now(),
 ): { before: ChargeRange; after: ChargeRange } | null {
-  const [body, sig] = token.split('.');
+  const parts = token.split('.');
+  if (parts.length !== 2) return null; // round 8: exactly body.signature
+  const [body, sig] = parts;
   if (!body || !sig) return null;
   const a = Buffer.from(sig);
   const b = Buffer.from(signRange(body));

@@ -359,6 +359,8 @@ function MapRow({
                     .then(
                       (u) => {
                         if (u.linesLocked > 0) toast.info(t('mapping.chargeKeyLocked', { count: formatNumber(u.linesLocked, locale) }));
+                        // Round 8: past the undo window the learned range stays widened — say so.
+                        if (u.rangeRestored === false) toast.info(t('mapping.chargeRangeKept'));
                         refresh();
                       },
                       (e: Parameters<typeof friendlyError>[0]) => toast.error(friendlyError(e, tc)),
@@ -564,7 +566,8 @@ function MapRow({
                   ...confirmKey(row),
                   // Round 5: only the line shown here bounds what the key auto-marks later.
                   // Round 7: the mark covers exactly the lines shown above (count, total, range).
-                  ...(chargeSample ? { shownLineIds: chargeSample.lineIds } : {}),
+                  // Round 8: also when nothing is shown (an order-only key) — [] marks no invoice line.
+                  shownLineIds: chargeSample?.lineIds ?? [],
                 })
               }
             >

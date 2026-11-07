@@ -320,3 +320,93 @@ describe('R7 LOW-D: the in-tx guard catches a hold set while the job waits on th
     expect(await statusOf(inv)).toBe('parsed');
   });
 });
+
+/* ── G-08 review round 8 (7.11): the ORDER-question path ─────────────────── */
+
+/** Order: 'בצל סגול' (linked) + a name-only 'משלוח' ₪60 question; the invoice bills the onions only. */
+async function orderWithQuestion() {
+  const po = await order([
+    { productId: P2, raw: 'בצל סגול' },
+    { productId: null, raw: 'משלוח', price: '30' },
+  ]);
+  const inv = await heldInvoice({ raw: 'בצל סגול', productId: P2, reasons: ['unlinkedPo'], heldPoId: po, vat: { vat: '3.96', incl: '25.96' } });
+  // A WRONG answer: the delivery line is linked to a product → MISSING_ON_INVOICE (open).
+  const wrong = await owner().mapping.confirm({ supplierId: S, rawName: 'משלוח', productId: P });
+  await drain();
+  expect(await typesOf(inv)).toContain('MISSING_ON_INVOICE');
+  return { po, inv, wrong };
+}
+
+describe('R8 HIGH: the "re-run match" button refuses a re-opened order question', () => {
+  it('answer → drain → undo → match.runForInvoice → PRECONDITION_FAILED order.unlinkedLines; the run is untouched', async () => {
+    await order([{ productId: null, raw: 'בצל סגול' }]);
+    const po = (await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.restaurantId, restaurantId)))[0]!.id;
+    const inv = await heldInvoice({ raw: 'בצל סגול', productId: P2, reasons: ['unlinkedPo'], heldPoId: po, vat: { vat: '3.96', incl: '25.96' } });
+    const answer = await owner().mapping.confirm({ supplierId: S, rawName: 'בצל סגול', productId: P2 });
+    await drain();
+    const before = await runsOf(inv);
+    expect(before).toHaveLength(1);
+    await owner().mapping.confirm({ supplierId: S, rawName: 'בצל סגול', revert: answer.undo! });
+    const err = await owner()
+      .match.runForInvoice({ invoiceId: inv })
+      .then(() => null, (e: unknown) => e as { code: string; cause?: { appCode?: string } });
+    expect(err?.code).toBe('PRECONDITION_FAILED');
+    expect(err?.cause?.appCode).toBe('order.unlinkedLines');
+    expect(await runsOf(inv)).toEqual(before);
+    expect(await typesOf(inv)).toEqual([]);
+    expect((await computeLeakHero(db, restaurantId)).leakIls).toBe(0);
+  });
+});
+
+describe('R8 MEDIUM: undo of a wrong ORDER-line answer drops the run built on it (open findings only)', () => {
+  it('wrong answer → drain (MISSING) → undo: parsed (order hold), no run, ₪0 leak, 1 awaiting question', async () => {
+    const { po, inv, wrong } = await orderWithQuestion();
+    await owner().mapping.confirm({ supplierId: S, rawName: 'משלוח', revert: wrong.undo! });
+    await drain();
+    const [row] = await db.select({ s: invoices.status, p: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, inv));
+    expect(row!.s).toBe('parsed');
+    const p = row!.p as unknown as { heldPoId: string; raw: { reviewReasons: string[] } };
+    expect(p.heldPoId).toBe(po);
+    expect(p.raw.reviewReasons).toContain('unlinkedPo');
+    expect(await runsOf(inv)).toEqual([]);
+    const hero = await computeLeakHero(db, restaurantId);
+    expect(hero.leakIls).toBe(0);
+    expect(hero.awaitingQuestionCount).toBe(1);
+  });
+
+  it('a finding with a decision keeps the run', async () => {
+    const { inv, wrong } = await orderWithQuestion();
+    const [f] = await db
+      .select({ id: discrepancies.id })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(and(eq(matchRuns.invoiceId, inv), eq(discrepancies.type, 'MISSING_ON_INVOICE')));
+    await owner().approvals.reject({ discrepancyId: f!.id, reason: 'agreed by phone' });
+    const before = await runsOf(inv);
+    await owner().mapping.confirm({ supplierId: S, rawName: 'משלוח', revert: wrong.undo! });
+    await drain();
+    expect(await runsOf(inv)).toEqual(before);
+  });
+});
+
+describe('R8 MEDIUM: answering an order question "charge line" re-matches the invoice on that order', () => {
+  it('wrong answer → drain → (decision kept) undo → mark "משלוח" a charge → drain: the run has no MISSING from it', async () => {
+    const { inv, wrong } = await orderWithQuestion();
+    const [f] = await db
+      .select({ id: discrepancies.id })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(and(eq(matchRuns.invoiceId, inv), eq(discrepancies.type, 'MISSING_ON_INVOICE')));
+    await owner().approvals.reject({ discrepancyId: f!.id, reason: 'agreed by phone' });
+    await owner().mapping.confirm({ supplierId: S, rawName: 'משלוח', revert: wrong.undo! });
+    await drain();
+    expect(await typesOf(inv)).toContain('MISSING_ON_INVOICE'); // the old run, kept (a decision)
+    const r = await owner().mapping.markCharge({ supplierId: S, rawName: 'משלוח', shownLineIds: [] });
+    expect(r.invoiceLinesMarked).toBe(0);
+    expect(r.rematch.requeued).toBeGreaterThan(0);
+    await drain();
+    const types = await typesOf(inv);
+    expect(types).not.toContain('MISSING_ON_INVOICE');
+    expect(types).not.toContain('UNORDERED_ITEM');
+  });
+});

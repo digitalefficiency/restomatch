@@ -249,6 +249,7 @@ export const he = {
     chargeSampleMore: 'הסימון יחול על {shown} השורות האחרונות בלבד; השאר יישארו שאלות.',
     chargeSampleRetry: 'הסכומים לא נטענו — לנסות שוב',
     chargeNotShown: '{count} שורות שלא הוצגו נשארו שאלות',
+    chargeRangeKept: 'הסימון בוטל, אבל טווח הסכומים שנלמד נשאר (עבר זמן הביטול). אפשר להסיר את שורת החיוב מהרשימה.',
     chargeKeyRemoveLabel: 'הסרה של {name} משורות החיוב',
     chargeKeyRemoved: 'הוסר — {count} שורות חזרו לשאלות',
     linking: 'מקשר ומעדכן שורות…',

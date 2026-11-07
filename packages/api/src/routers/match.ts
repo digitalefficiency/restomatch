@@ -71,10 +71,10 @@ export const matchRouter = router({
       const built = await buildMatchInputForInvoice(ctx.db, restaurantId, input.invoiceId, {
         pinnedPoId: priorRun?.poId ?? null,
       });
-      // G-08 hold (round 3 HIGH): a FIRST match against an order that still has
-      // name-only questions would report a false MISSING + UNORDERED pair — the
-      // same rule as the match-invoice job's M-4 hold (shared helper).
-      if (built && built.poId && !priorRun) {
+      // G-08 hold (rounds 3/8): a match — first or re-match — against an order that
+      // still has name-only questions would report a false MISSING + UNORDERED pair:
+      // the same rule as the match-invoice job (shared helper).
+      if (built && built.poId) {
         const orderOpen = await orderQuestionCount(ctx.db, restaurantId, built.poId);
         if (orderOpen > 0) {
           throw appError('PRECONDITION_FAILED', 'order.unlinkedLines', 'Order lines are not linked to a product yet.', {

@@ -248,6 +248,7 @@ export const en: Shape<typeof he> = {
     chargeSampleMore: 'The mark covers only the latest {shown} lines; the rest stay questions.',
     chargeSampleRetry: 'The amounts did not load — try again',
     chargeNotShown: '{count} lines that were not shown stay questions',
+    chargeRangeKept: 'The mark is undone, but the learned amount range stays (the undo window passed). You can remove the charge line from the list.',
     chargeKeyRemoveLabel: 'Remove {name} from charge lines',
     chargeKeyRemoved: 'Removed — {count} lines are questions again',
     linking: 'Linking and updating lines…',

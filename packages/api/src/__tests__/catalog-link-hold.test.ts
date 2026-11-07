@@ -24,7 +24,7 @@ type Job = { restaurantId: string; invoiceId: string; rematch?: boolean };
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { rematchHoldReason } from '../receiving/matchTriggers';
-import { signAnswerUndo, UNDO_TTL_MS, verifyAnswerUndo, verifyChargeRangeUndo } from '../catalog/answerUndo';
+import { signAnswerUndo, signChargeRangeUndo, UNDO_TTL_MS, verifyAnswerUndo, verifyChargeRangeUndo } from '../catalog/answerUndo';
 import { normalizeLinkName } from '@restomatch/catalog';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 import { applyLearnedCharges, invoiceQuestionCount, orderQuestionCount } from '../catalog/linkQuestions';
@@ -390,7 +390,7 @@ describe('R2 M-2: "שורת חיוב — לא מוצר" keeps a charge line out 
     expect((await invoiceRow(invoiceId)).ocrPayload).not.toHaveProperty('chargeLineIds');
 
     const r = await callerFor(A, 'manager').mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים' });
-    expect(Object.keys(r).sort()).toEqual(['invoiceLinesMarked', 'learnedKey', 'linesLocked', 'linesNotShown', 'rematch', 'undo']);
+    expect(Object.keys(r).sort()).toEqual(['invoiceLinesMarked', 'learnedKey', 'linesLocked', 'linesNotShown', 'rangeRestored', 'rematch', 'undo']);
     expect((await invoiceRow(oInv!.id)).ocrPayload ?? {}).not.toHaveProperty('chargeLineIds');
     // A foreign undo list never touches lines of another supplier.
     const [oLine] = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, oInv!.id));
@@ -1121,3 +1121,34 @@ describe('R7 LOW-7/8: a charge-only order pairs its twin by SKU too, and its rec
   });
 });
 
+
+/* ── G-08 review round 8 (7.11) ─────────────────────────────────────────── */
+
+describe('R8 LOWs: undo tokens are exactly body.signature; an expired range undo says so', () => {
+  it('a valid token with an extra ".x" segment is refused (answer and range tokens)', () => {
+    const who = { userId: A.ownerUserId, restaurantId: A.restaurantId };
+    const answer = signAnswerUndo(who, { supplierId: S, nameKey: 'x' }, { productId: P, poLineIds: [], invoiceLineIds: [], catalogItemIds: [], aliasId: null, aliasRestore: null })!;
+    expect(verifyAnswerUndo(answer, who)).not.toBeNull();
+    expect(verifyAnswerUndo(`${answer}.x`, who)).toBeNull();
+    const key = { supplierId: S, sku: null, nameKey: 'x' };
+    const range = signChargeRangeUndo(who, key, { minAgorot: 1, maxAgorot: 1 }, { minAgorot: 1, maxAgorot: 2 });
+    expect(verifyChargeRangeUndo(range, who, key)).not.toBeNull();
+    expect(verifyChargeRangeUndo(`${range}.x`, who, key)).toBeNull();
+  });
+
+  it('the undo of a re-answer after the token expired keeps the range and returns rangeRestored: false', async () => {
+    await depositInvoice('10');
+    await markShown('פיקדון ארגזים');
+    await depositInvoice('30');
+    const re = await markShown('פיקדון ארגזים');
+    const key = { supplierId: S, sku: null, nameKey: normalizeLinkName('פיקדון ארגזים') };
+    const who = { userId: A.ownerUserId, restaurantId: A.restaurantId };
+    const expired = signChargeRangeUndo(who, key, { minAgorot: 1000, maxAgorot: 1000 }, { minAgorot: 1000, maxAgorot: 3000 }, Date.now() - UNDO_TTL_MS - 1000);
+    const late = await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים', undo: { invoiceLineIds: [], rangeToken: expired } });
+    expect(late.rangeRestored).toBe(false);
+    expect(await chargeRange()).toMatchObject({ minAgorot: 1000, maxAgorot: 3000 });
+    const inTime = await callerFor(A).mapping.markCharge({ supplierId: S, rawName: 'פיקדון ארגזים', undo: re.undo! });
+    expect(inTime.rangeRestored).toBe(true);
+    expect(await chargeRange()).toMatchObject({ minAgorot: 1000, maxAgorot: 1000 });
+  });
+});
