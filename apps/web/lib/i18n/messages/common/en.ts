@@ -146,7 +146,7 @@ export const en: Shape<typeof he> = {
       inbox: 'Incoming invoices',
       invoices: 'Invoices',
       leaks: 'Leak',
-      claims: 'Credit claims to send',
+      claims: 'Credit requests to send',
       leakProof: 'Leak proof',
       leakReport: 'Leak report',
       recovery: 'Money-back tracker',

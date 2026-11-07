@@ -145,7 +145,7 @@ export const he = {
       inbox: 'חשבוניות נכנסות',
       invoices: 'חשבוניות',
       leaks: 'דליפה',
-      claims: 'דרישות זיכוי לשליחה',
+      claims: 'בקשות זיכוי לשליחה',
       leakProof: 'הוכחת דליפה',
       leakReport: 'דוח דליפות',
       recovery: 'מעקב ₪ חוזר',

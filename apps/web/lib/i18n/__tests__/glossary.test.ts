@@ -43,8 +43,10 @@ describe('glossary (W2-13)', () => {
     expect(glossaryEntry('consolidatedInvoice').retireHe).toContain('חשבונית ריכוז');
     expect(glossaryEntry('discrepancy').he).toBe('פער');
     expect(glossaryEntry('discrepancy').retireHe).toEqual(expect.arrayContaining(['חריגה', 'הפרש']));
-    expect(glossaryEntry('creditClaim').he).toBe('דרישת זיכוי');
-    expect(glossaryEntry('creditClaim').retireHe).toContain('תביעה');
+    // Owner 7.11: "בקשת זיכוי" (never "דרישה" toward suppliers).
+    expect(glossaryEntry('creditClaim').he).toBe('בקשת זיכוי');
+    expect(glossaryEntry('creditClaim').retireHe).toEqual(expect.arrayContaining(['דרישת זיכוי', 'לדרוש זיכוי', 'תביעה', 'מכתב זיכוי']));
+    expect(glossaryEntry('creditClaim').retireHe).not.toContain('בקשת זיכוי');
     expect(glossaryEntry('goodsReceipt').he).toBe('קבלת סחורה');
     expect(glossaryEntry('leak').he).toBe('דליפה');
     expect(glossaryEntry('leak').retireHe).toEqual(expect.arrayContaining(['הפסד', 'חיסכון']));
