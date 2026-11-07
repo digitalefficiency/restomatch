@@ -49,14 +49,22 @@ test.afterAll(async () => {
   }
 });
 
+/** One magic-link login per role per run (the sign-in rate limit), then reused as storage state. */
+const states = new Map<string, Awaited<ReturnType<import('@playwright/test').BrowserContext['storageState']>>>();
+
 async function asRole(browser: Browser, role: string, opts: Parameters<Browser['newContext']>[0], baseURL: string, locale: 'he' | 'en' = 'he') {
-  const context = await browser.newContext({ ...opts, baseURL });
-  await context.addCookies([
+  const cookies = [
     { name: 'rm_cookie_consent', value: 'necessary', url: baseURL },
     { name: 'rm_locale', value: locale, url: baseURL },
-  ]);
+  ];
+  const saved = states.get(role);
+  const context = await browser.newContext({ ...opts, baseURL, ...(saved ? { storageState: saved } : {}) });
+  await context.addCookies(cookies);
   const page = await context.newPage();
-  await loginViaMagicLink(page, email(role));
+  if (!saved) {
+    await loginViaMagicLink(page, email(role));
+    states.set(role, await context.storageState());
+  }
   return { context, page };
 }
 
