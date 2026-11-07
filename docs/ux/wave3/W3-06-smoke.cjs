@@ -19,6 +19,9 @@
  *   3. The response page shows the success card (data-testid="lead-success").
  *   4. With JS off, a name-only submit is refused server-side: no success card,
  *      the contact error is shown (the action re-validates; it doesn't trust the client).
+ *   5. Phone hero (390 px, JS on): when the 9:16 loop is deployed (#293), the
+ *      phone requests ONLY 9:16 hero media — never the 16:9 loop or poster.
+ *      Skipped (not failed) when the deployment has no 9:16 cut yet.
  * It does NOT probe the rate limit (that would burn the 10/h `leads` bucket of
  * the runner's IP for an hour) — the parity unit test covers it.
  */
@@ -84,6 +87,30 @@ function fail(step, msg) {
     if ((await page.getByTestId('lead-success').count()) > 0) fail('4 validate', 'a name-only lead was accepted');
     if ((await page.locator('#lead-phone-error').count()) === 0) fail('4 validate', 'no contact error shown');
     console.log('✓ 4 name-only lead refused server-side');
+
+    // 5 — phone hero: one loop per viewport (page weight)
+    const phone = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+      locale: 'he-IL',
+      extraHTTPHeaders: headers,
+    });
+    await phone.addCookies([{ name: 'rm_cookie_consent', value: 'necessary', domain: host, path: '/' }]);
+    const pp = await phone.newPage();
+    const media = [];
+    pp.on('request', (r) => {
+      const name = r.url().split('?')[0].split('/').pop() || '';
+      if (/^hero-(loop|poster)/.test(name)) media.push(name);
+    });
+    await pp.goto(`${base}/`, { waitUntil: 'networkidle' });
+    await pp.waitForTimeout(3000);
+    const nine = media.filter((m) => m.includes('9x16'));
+    const wide = media.filter((m) => !m.includes('9x16'));
+    if (nine.length === 0) console.log(`– 5 phone hero: no 9:16 cut on this deployment (skipped; requested: ${media.join(', ') || 'none'})`);
+    else if (wide.length > 0) fail('5 phone hero', `phone also fetched 16:9 media: ${wide.join(', ')}`);
+    else console.log(`✓ 5 phone hero fetched only 9:16 media (${[...new Set(nine)].join(', ')})`);
+    await phone.close();
     console.log('SMOKE OK');
   } finally {
     await browser.close();
