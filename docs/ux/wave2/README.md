@@ -103,6 +103,7 @@ What a default run does:
 - **No progress chatter**, no "starting now" and no "still working". Batch the day-1 requests into one QUESTION. The answer arrives as a new turn; keep working on independent parts meanwhile.
 
 ## 7. Owner decisions (binding)
+- **7.11 update:** 30 owner decisions on design (DS2 direction A · IBM Plex Sans Hebrew), data order (IA), money and supplier wording are in `docs/ux/OWNER-DECISIONS-0711.md`. They bind on top of the list below.
 - **Terms:**
   - חשבונית מרכזת (consolidated invoice), פער (discrepancy), בקשת זיכוי (credit request) and קבלת סחורה (receiving);
   - **Partner wording toward suppliers (owner, 7.11; replaces "דרישת זיכוי"):** our letter is **מכתב בקשת זיכוי** (never "מכתב זיכוי", which reads like the supplier's own credit document); the supplier's document is **חשבונית זיכוי** (or תעודת זיכוי against delivery notes). Text a supplier sees never says דרישה / תביעה / מחלוקת / חוב / חייבים / באיחור / דליפה / חריגה. Internally: "בבירור מול הספק" (not "במחלוקת"), "זיכויים פתוחים" (not "עדיין חייבים לך"), "אין תשובה N ימים" (not "באיחור", for credits; late deliveries keep "באיחור"), "נסגר בלי זיכוי" (not "ויתרנו"). Enum values and keys do not change. Glossary + tone guide: the orchestrator's terms pack; guard: `apps/web/lib/__tests__/supplier-wording.test.ts`;

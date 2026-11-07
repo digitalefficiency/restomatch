@@ -166,6 +166,7 @@ Every package also owns:
 
 ## 13. Updates from the orchestrator
 - (at kit time) IMPLEMENTATION-PLAN:606 is amended: the registration of the H-07 close job moves from H-05 to H-07's human PR (owner approval 13).
+- (7.11) Owner decisions on design, data order, money and supplier wording: `docs/ux/OWNER-DECISIONS-0711.md` (binding). DS2 sources `docs/ux/ds2/`, IA sources `docs/ux/ia/`, glossary `docs/ux/terms/GLOSSARY.md`.
 - (binding updates are appended here with a date)
 ```
 
