@@ -10,7 +10,10 @@
  *
  * Tolerances (agorot): line 5, Σ lines vs subtotal 100, VAT 100, subtotal + VAT
  * vs total 5. A line with a printed discount skips the line check; an invoice
- * discount skips the Σ-lines check. Deposit (פיקדון) lines may sit inside or
+ * discount is subtracted in the Σ-lines check (and sends the invoice to review:
+ * 'invoice_discount'). Lines with ≥ 2 VAT rates ('mixed_vat') and deposit /
+ * delivery-fee lines ('deposit_or_fee_line') also go to review until matching
+ * handles them. Deposit (פיקדון) lines may sit inside or
  * outside the VAT base — both readings are accepted. VAT may be 0% (fresh
  * produce is zero-rated in Israel) or mixed per line (0% produce + 18% goods):
  * the VAT check accepts base × rate, Σ line × line rate, and a printed 0.
@@ -42,6 +45,9 @@ export type OcrCheckReason =
   | 'vat_mismatch'
   | 'total_mismatch'
   | 'delivery_notes_total_mismatch'
+  | 'invoice_discount'
+  | 'mixed_vat'
+  | 'deposit_or_fee_line'
   | 'supplier_id_invalid'
   | 'supplier_id_mismatch'
   | 'document_kind_not_invoice'
@@ -201,14 +207,18 @@ export function checkInvoice(inv: CheckableInvoice, opts: CheckOptions = {}): Oc
   const vat = inv.totals.vat !== undefined ? toAgorot(inv.totals.vat) : undefined;
   const total = inv.totals.total !== undefined ? toAgorot(inv.totals.total) : undefined;
 
-  // ── Σ lines = subtotal (deposits inside or outside it); skipped under an invoice discount
-  if (subtotal !== undefined && inv.lines.length > 0 && !((inv.invoiceDiscount ?? 0) > 0)) {
+  // ── Σ lines − invoice discount = subtotal (deposits inside or outside it)
+  const discountAgorot = (inv.invoiceDiscount ?? 0) > 0 ? toAgorot(inv.invoiceDiscount!) : 0;
+  if (subtotal !== undefined && inv.lines.length > 0) {
     const delta = Math.min(
-      Math.abs(linesAgorot - subtotal),
-      Math.abs(linesAgorot - depositAgorot - subtotal),
+      Math.abs(linesAgorot - discountAgorot - subtotal),
+      Math.abs(linesAgorot - depositAgorot - discountAgorot - subtotal),
     );
     if (delta > SUBTOTAL_TOLERANCE_AGOROT) add('subtotal_mismatch', { deltaAgorot: delta });
   }
+  // Matching persists only the subtotal and the lines, so the discount would
+  // surface as a TOTAL_MISMATCH leak — a person handles it until matching does.
+  if (discountAgorot > 0) add('invoice_discount');
 
   // ── VAT = base × rate (base = subtotal, or subtotal without VAT-exempt deposits),
   //    or Σ line × its own rate (mixed 0% produce + 18% goods), or a printed 0
@@ -247,6 +257,15 @@ export function checkInvoice(inv: CheckableInvoice, opts: CheckOptions = {}): Oc
     const delta = Math.abs(notesAgorot - subtotal);
     if (delta > DELIVERY_NOTES_TOLERANCE_AGOROT) add('delivery_notes_total_mismatch', { deltaAgorot: delta });
   }
+
+  // ── Lines matching cannot take as-is yet: ≥ 2 VAT rates (matching applies one
+  //    rate per invoice → false VAT_MISMATCH), and deposit / delivery-fee lines
+  //    (they are not products → UNORDERED_ITEM).
+  const lineRates = new Set(
+    inv.lines.map((l) => l.vatRate).filter((r): r is number => r !== undefined && r >= 0).map((r) => Math.round(r * 10000)),
+  );
+  if (lineRates.size >= 2) add('mixed_vat');
+  if (inv.lines.some((l) => l.lineKind !== undefined && l.lineKind !== 'item')) add('deposit_or_fee_line');
 
   // ── Supplier ח״פ
   const printedId = inv.supplier?.businessId;
