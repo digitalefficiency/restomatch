@@ -183,7 +183,8 @@ export function buildLetters(input: {
         undecided.amount = sumAgora([undecided.amount, amount]);
         continue;
       }
-      group(inv.supplierName, inv.supplierNameEn, null).beforePayment.push(fromBreakdown(inv, line, amount, basis));
+      const g1 = group(inv.supplierName, inv.supplierNameEn, null);
+      (unpaid(inv) ? g1.beforePayment : g1.forCredit).push(fromBreakdown(inv, line, amount, basis));
     }
   }
 

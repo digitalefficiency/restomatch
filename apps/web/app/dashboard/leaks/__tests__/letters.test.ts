@@ -139,9 +139,16 @@ describe('claim letters: one per supplier (leaks-07)', () => {
   });
 
   it('paid invoices have nothing before payment; the tracker claim on them is for credit', () => {
-    const { letters } = buildLetters({ month: [invoice({ status: 'paid' })], tracked: [claim()] });
+    // Decision 19 + W2-03 (a paid invoice keeps its claims): after payment the only channel is a
+    // דרישת זיכוי. The tracked claim and its own line are ONE item, never an offset.
+    const paid = invoice({ status: 'paid', lines: [line({ discrepancyId: 'd-paid', resolutionStatus: 'accepted' })] });
+    const { letters } = buildLetters({ month: [paid], tracked: [claim({ discrepancyId: 'd-paid' })] });
     expect(letters[0]!.beforePayment).toHaveLength(0);
     expect(letters[0]!.forCredit).toHaveLength(1);
+    // A decided line on a paid invoice that no claim holds yet is also for credit, never before payment.
+    const untracked = buildLetters({ month: [paid], tracked: [] }).letters[0]!;
+    expect(untracked.beforePayment).toHaveLength(0);
+    expect(untracked.forCredit).toHaveLength(1);
   });
 
   it('adds the invoice date and the ₪ basis to a tracker line from the breakdown history', () => {
