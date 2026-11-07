@@ -81,7 +81,12 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
     // An empty comparison period (no checked invoices) has no base: neutral "—", never a red ▲ +₪X.
     previous: grouped.previous && prev ? (prevByKey.get(r.key) ?? 0) : null,
   }));
-  const linesTotal = grouped.rows.reduce((s, r) => s + Math.round(r.leakIls * 100), 0) / 100;
+  // W2-09c: groups past the shown rows are one "אחר" row, so Σ rows = the groups' total.
+  if (grouped.otherIls > 0) {
+    rows.push({ key: '__other', label: t('explorer.other'), value: grouped.otherIls, count: grouped.otherCount, previous: null } as ChartRow);
+  }
+  const linesTotal =
+    (grouped.rows.reduce((s, r) => s + Math.round(r.leakIls * 100), 0) + Math.round(grouped.otherIls * 100)) / 100;
   const groupName = t(`groups.${view.group}`);
   const range = rangeLabel(view.period, cur.monthStart, cur.monthEnd, locale);
   const leakLabel = view.period === 'this_month' ? t('kpis.leakMonth') : t('kpis.leak');

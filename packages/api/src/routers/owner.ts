@@ -59,6 +59,8 @@ const realDate = (s: string) => {
   return y >= 2000 && y <= 2100 && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 };
 const FINANCE_ROLES: ReadonlyArray<string> = ['owner', 'manager', 'bookkeeper'];
+/** Grouped rows shown before the "other" remainder. */
+const GROUP_ROWS = 50;
 
 /**
  * A dashboard view: period (+ custom range) and filters. Every value is
@@ -276,17 +278,26 @@ export const ownerRouter = router({
   // Group-by breakdown and trend expose supplier/product detail → finance roles.
   leakGrouped: financeProcedure
     .input(z.object({ view: ViewInput, groupBy: z.enum(VIEW_GROUPS), compare: CompareInput }))
-    .query(async ({ ctx, input }): Promise<{ rows: LeakGroupRow[]; previous: LeakGroupRow[] | null }> => {
-      const spec = specOf(input.view);
-      const rid = ctx.session.restaurantId;
-      const [rows, previous] = await Promise.all([
-        computeLeakGrouped(ctx.db, rid, spec, input.groupBy),
-        input.compare === 'off'
-          ? Promise.resolve(null)
-          : computeLeakGrouped(ctx.db, rid, spec, input.groupBy, input.compare, 200),
-      ]);
-      return { rows, previous };
-    }),
+    .query(
+      async ({
+        ctx,
+        input,
+      }): Promise<{ rows: LeakGroupRow[]; previous: LeakGroupRow[] | null; otherIls: number; otherCount: number }> => {
+        const spec = specOf(input.view);
+        const rid = ctx.session.restaurantId;
+        const [all, previous] = await Promise.all([
+          computeLeakGrouped(ctx.db, rid, spec, input.groupBy, 'off', 200),
+          input.compare === 'off'
+            ? Promise.resolve(null)
+            : computeLeakGrouped(ctx.db, rid, spec, input.groupBy, input.compare, 200),
+        ]);
+        // W2-09c: past the shown rows, an "other" remainder keeps Σ rows = the group total (class 10).
+        const rows = all.slice(0, GROUP_ROWS);
+        const rest = all.slice(GROUP_ROWS);
+        const otherIls = rest.reduce((a, r) => a + Math.round(r.leakIls * 100), 0) / 100;
+        return { rows, previous, otherIls, otherCount: rest.length };
+      },
+    ),
 
   leakTrend: financeProcedure
     .input(z.object({ view: ViewInput, compare: CompareInput }))
