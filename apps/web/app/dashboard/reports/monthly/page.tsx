@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, Download, Hourglass, ListChecks, Mail, MessageCircle, Send, Sigma } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
-import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
+import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { reports as reportsNs } from '@/lib/i18n/messages/reports';
 import { approvals as approvalsNs } from '@/lib/i18n/messages/approvals';
@@ -71,7 +71,9 @@ export default async function MonthReportPage({
   const monthName = formatDate(`${month}-15T12:00:00Z`, locale, { month: 'long', year: 'numeric' });
   const day = (iso: string) => formatDate(iso, locale, { day: 'numeric', month: 'numeric', year: 'numeric' });
   const num = (n: number) => formatNumber(n, locale);
-  const pct = (r: number | null) => (r == null ? '—' : formatPercent(r, locale, 1));
+  // One decimal always ("2.0%", never "2%" beside "2.1%").
+  const pct = (r: number | null) =>
+    r == null ? '—' : formatNumber(r, locale, { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const [kicker, coverMonth, coverRestaurant] = coverText([t('coverKicker'), monthName, data.restaurantName]);
 
   return (

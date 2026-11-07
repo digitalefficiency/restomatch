@@ -40,6 +40,7 @@ test.beforeEach(async ({ page }) => {
 test('three tabs, the number once, the month kept', async ({ page }) => {
   const errors = collectPageErrors(page);
   await page.goto('/dashboard/reports/monthly');
+  await page.waitForLoadState('networkidle');
   const tabs = page.getByTestId('report-tabs').getByRole('link');
   await expect(tabs).toHaveText([he.tabs.proof, he.tabs.by, he.tabs.sent]);
   await expect(page.getByTestId('report-tab-proof')).toHaveAttribute('aria-current', 'page');
@@ -54,6 +55,7 @@ test('three tabs, the number once, the month kept', async ({ page }) => {
   await page.getByTestId('report-month').selectOption(last!);
   await page.getByRole('button', { name: he.show }).click();
   await expect(page).toHaveURL(new RegExp(`month=${last}`));
+  await page.waitForLoadState('networkidle');
   const numberAgorot = await page.getByTestId('report-number').getAttribute('data-agorot');
 
   await page.getByTestId('report-tab-by').click();
