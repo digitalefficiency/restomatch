@@ -10,7 +10,7 @@
  */
 import type { Database } from '@restomatch/db';
 import { startOfDayInTz } from '../lib/time';
-import { costLight, costRecipes, diffCosts, parseScaled, type CostRecipe } from './cost';
+import { costLight, costRecipes, diffCosts, parseNumericScaled, type CostRecipe } from './cost';
 import {
   earliestPricesFrom,
   latestPrices,
@@ -99,7 +99,7 @@ export function deriveChanges(input: ChangesInput) {
           const b0 = before.get(pid);
           const n0 = all.prices.get(pid);
           if (!b0 || !n0 || b0.supplierId !== n0.supplierId) continue;
-          if (parseScaled(n0.unitPrice, 4) <= parseScaled(b0.unitPrice, 4)) continue;
+          if (parseNumericScaled(n0.unitPrice, 4) <= parseNumericScaled(b0.unitPrice, 4)) continue;
           const delta = l.costAgorot - (d.before.lines.find((x) => x.itemId === l.itemId)?.costAgorot ?? 0);
           if (delta > 0 && (!riser || delta > riser.deltaAgorot)) riser = { itemId: l.itemId, productId: pid, deltaAgorot: delta };
         }
