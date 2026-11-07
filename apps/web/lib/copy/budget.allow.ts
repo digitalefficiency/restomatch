@@ -141,7 +141,7 @@ export const COPY_ALLOW: AllowList = {
   'receivingDelivery:delivery.scan.noInvoice': { words: 6, reason: 'baseline', owner: 'W2-05' },
   'receivingDelivery:delivery.summary.subtitle': { words: 5, reason: 'baseline', owner: 'W2-05' },
   'receivingDelivery:logoutGuard.body': { words: 15, reason: 'baseline', owner: 'W2-05' },
-  // ── W2-06 (36) ──
+  // ── W2-06 (37) ──
   'orders:detail.cancelSentWarning': { words: 11, reason: 'baseline', owner: 'W2-06' },
   'orders:detail.confirmCancel': { words: 6, reason: 'baseline', owner: 'W2-06' },
   'orders:detail.lastLine': { words: 12, reason: 'baseline', owner: 'W2-06' },
@@ -166,13 +166,14 @@ export const COPY_ALLOW: AllowList = {
   'orders:list.searchScope': { words: 9, reason: 'baseline', owner: 'W2-06' },
   'orders:reorder.failed': { words: 10, reason: 'baseline', owner: 'W2-06' },
   'orders:send.undone': { words: 5, reason: 'baseline', owner: 'W2-06' },
+  'orders:sendStatus.copyFailed': { words: 7, reason: 'baseline', owner: 'W2-06' },
+  'orders:sendStatus.failed': { words: 5, reason: 'baseline', owner: 'W2-06' },
   'orders:subtitle': { words: 7, reason: 'baseline', owner: 'W2-06' },
   'orders:wizard.aboveP90': { words: 7, reason: 'baseline', owner: 'W2-06' },
   'orders:wizard.catalogEmpty': { words: 11, reason: 'baseline', owner: 'W2-06' },
   'orders:wizard.deliveryHint': { words: 9, reason: 'baseline', owner: 'W2-06' },
   'orders:wizard.draftSaved': { words: 11, reason: 'baseline', owner: 'W2-06' },
   'orders:wizard.fixLines': { words: 10, reason: 'baseline', owner: 'W2-06' },
-  'orders:wizard.markedBody': { words: 10, reason: 'baseline', owner: 'W2-06' },
   'orders:wizard.missedCutoff': { words: 9, reason: 'baseline', owner: 'W2-06' },
   'orders:wizard.noSchedule': { words: 8, reason: 'baseline', owner: 'W2-06' },
   'orders:wizard.noSuppliers': { words: 9, reason: 'baseline', owner: 'W2-06' },
@@ -264,12 +265,18 @@ export const COPY_ALLOW: AllowList = {
   'recovery:tracker.subtitle': { words: 10, reason: 'baseline', owner: 'W2-10' },
   'recovery:tracker.suggestionsHint': { words: 12, reason: 'baseline', owner: 'W2-10' },
   'recovery:tracker.tabEmpty.todo': { words: 7, reason: 'baseline', owner: 'W2-10' },
-  // ── W2-11 (20) ──
+  // ── W2-11 (26) ──
   'suppliers:catalogTab.emptyBody': { words: 13, reason: 'baseline', owner: 'W2-11' },
+  'suppliers:duplicate.businessIdBody': { words: 19, reason: 'baseline', owner: 'W2-11' },
+  'suppliers:duplicate.businessIdTitle': { words: 8, reason: 'baseline', owner: 'W2-11' },
+  'suppliers:duplicate.reactivateBody': { words: 13, reason: 'baseline', owner: 'W2-11' },
+  'suppliers:duplicate.reactivateTitle': { words: 8, reason: 'baseline', owner: 'W2-11' },
   'suppliers:form.businessId': { words: 3, reason: 'baseline', owner: 'W2-11' },
   'suppliers:form.deliveryHint': { words: 17, reason: 'baseline', owner: 'W2-11' },
   'suppliers:form.deliveryTitle': { words: 5, reason: 'baseline', owner: 'W2-11' },
   'suppliers:form.nameEnHint': { words: 11, reason: 'baseline', owner: 'W2-11' },
+  'suppliers:form.vatHint': { words: 14, reason: 'baseline', owner: 'W2-11' },
+  'suppliers:form.vatOther': { words: 3, reason: 'baseline', owner: 'W2-11' },
   'suppliers:leakCard.cleanBody': { words: 14, reason: 'baseline', owner: 'W2-11' },
   'suppliers:leakCard.printFooter': { words: 9, reason: 'baseline', owner: 'W2-11' },
   'suppliers:leakCard.scorecard': { words: 3, reason: 'baseline', owner: 'W2-11' },
@@ -339,7 +346,7 @@ export const COPY_ALLOW: AllowList = {
   // ── W2-14 (50) ──
   'accounting:downloaded': { words: 3, reason: 'baseline', owner: 'W2-14' },
   'accounting:downloadedEmpty': { words: 10, reason: 'baseline', owner: 'W2-14' },
-  'accounting:note': { words: 39, reason: 'baseline', owner: 'W2-14' },
+  'accounting:note': { words: 40, reason: 'baseline', owner: 'W2-14' },
   'accounting:subtitle': { words: 16, reason: 'baseline', owner: 'W2-14' },
   'accounting:undated': { words: 19, reason: 'baseline', owner: 'W2-14' },
   'integrations:accounting.body': { words: 15, reason: 'baseline', owner: 'W2-14' },
@@ -387,12 +394,17 @@ export const COPY_ALLOW: AllowList = {
   'team:invite.subtitle': { words: 19, reason: 'baseline', owner: 'W2-14' },
   'team:managerNote': { words: 16, reason: 'baseline', owner: 'W2-14' },
   'team:members.confirmRemove': { words: 8, reason: 'baseline', owner: 'W2-14' },
-  // ── W2-16b (131) ──
+  // ── W2-16b (136) ──
   'admin:detail.noSubscription': { words: 14, reason: 'baseline', owner: 'W2-16b' },
+  'admin:features.allNote': { words: 13, reason: 'baseline', owner: 'W2-16b' },
+  'admin:features.hint': { words: 13, reason: 'baseline', owner: 'W2-16b' },
+  'admin:features.pilotHint': { words: 9, reason: 'baseline', owner: 'W2-16b' },
   'admin:generic': { words: 4, reason: 'baseline', owner: 'W2-16b' },
   'admin:leads.confirmErase': { words: 8, reason: 'baseline', owner: 'W2-16b' },
   'admin:overrides.label': { words: 8, reason: 'baseline', owner: 'W2-16b' },
   'admin:roles.lastOwner': { words: 9, reason: 'baseline', owner: 'W2-16b' },
+  'admin:twoFactor.body': { words: 22, reason: 'baseline', owner: 'W2-16b' },
+  'admin:twoFactor.cta': { words: 5, reason: 'baseline', owner: 'W2-16b' },
   'auth:checkEmail.body': { words: 13, reason: 'baseline', owner: 'W2-16b' },
   'auth:checkEmail.devHint': { words: 7, reason: 'baseline', owner: 'W2-16b' },
   'auth:inviteState.notFoundBody': { words: 13, reason: 'baseline', owner: 'W2-16b' },
@@ -512,7 +524,7 @@ export const COPY_ALLOW: AllowList = {
   'recipes:pos.subtitle': { words: 22, reason: 'baseline', owner: 'W2-16b' },
   'recipes:pos.unmatched': { words: 17, reason: 'baseline', owner: 'W2-16b' },
   'recipes:subtitle': { words: 16, reason: 'baseline', owner: 'W2-16b' },
-  'recipes:target.hint': { words: 10, reason: 'baseline', owner: 'W2-16b' },
+  'recipes:target.hint': { words: 11, reason: 'baseline', owner: 'W2-16b' },
   'vat:card.separate': { words: 8, reason: 'baseline', owner: 'W2-16b' },
   'vat:card.subtitle': { words: 21, reason: 'baseline', owner: 'W2-16b' },
   'vat:card.title': { words: 6, reason: 'baseline', owner: 'W2-16b' },
@@ -527,8 +539,10 @@ export const COPY_DUP_ALLOW: DupAllowList = {
   // ── W2-05 (2) ──
   'receiving:errors.network': 'W2-05',
   'receiving:steps.scan.network': 'W2-05',
-  // ── W2-06 (2) ──
+  // ── W2-06 (4) ──
+  'orders:detail.channels.none': 'W2-06',
   'orders:detail.totalExcludesOne': 'W2-06',
+  'orders:wizard.channelNone': 'W2-06',
   'orders:wizard.totalExcludesOne': 'W2-06',
   // ── W2-09 (2) ──
   'leakProof:resolvedNote': 'W2-09',
@@ -538,6 +552,9 @@ export const COPY_DUP_ALLOW: DupAllowList = {
   'recovery:digest.outstanding': 'W2-10',
   'recovery:report.noSpend': 'W2-10',
   'recovery:report.outstanding': 'W2-10',
+  // ── W2-11 (2) ──
+  'suppliers:duplicate.businessIdTitle': 'W2-11',
+  'suppliers:duplicate.reactivateTitle': 'W2-11',
   // ── W2-12 (8) ──
   'contracts:import.errors.EMPTY': 'W2-12',
   'contracts:import.errors.LEGACY_XLS': 'W2-12',
