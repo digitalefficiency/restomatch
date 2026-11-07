@@ -442,7 +442,7 @@ describe('payRun.list (W2-03)', () => {
       await expect(
         asA(role).payRun.markPaid({ items: [item], paidOn: '2026-10-25', method: 'bank_transfer', clientMutationId: 'cmid-rc-0001' }),
       ).rejects.toMatchObject({ code: 'FORBIDDEN' });
-      await expect(asA(role).payRun.unmarkPaid({ items: [item], clientMutationId: 'cmid-rc-0002' })).rejects.toMatchObject({
+      await expect(asA(role).payRun.unmarkPaid({ items: [item], reason: 'נרשם בטעות', clientMutationId: 'cmid-rc-0002' })).rejects.toMatchObject({
         code: 'FORBIDDEN',
       });
     }
@@ -461,7 +461,7 @@ describe('payRun.list (W2-03)', () => {
         await expect(
           asA().payRun.markPaid({ items: mixed, paidOn: '2026-10-25', method: 'bank_transfer', clientMutationId: `cmid-x-${flag}-02` }),
         ).rejects.toMatchObject({ code: 'NOT_FOUND' });
-        await expect(asA().payRun.unmarkPaid({ items: [foreign], clientMutationId: `cmid-x-${flag}-03` })).rejects.toMatchObject({
+        await expect(asA().payRun.unmarkPaid({ items: [foreign], reason: 'נרשם בטעות', clientMutationId: `cmid-x-${flag}-03` })).rejects.toMatchObject({
           code: 'NOT_FOUND',
         });
       }
@@ -475,6 +475,16 @@ describe('payRun.list (W2-03)', () => {
     expect(a!.status).toBe('matched');
   });
 
+  it('unmarkPaid requires a reason (owner I7) — BAD_REQUEST without one, before any lookup', async () => {
+    const items = [{ invoiceId: A.invoiceId, expectedStatus: 'paid' as const }];
+    await expect(asA().payRun.unmarkPaid({ items, clientMutationId: 'cmid-noreason-1' } as never)).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    });
+    await expect(asA().payRun.unmarkPaid({ items, reason: '  ', clientMutationId: 'cmid-noreason-2' })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+    });
+  });
+
   it('PAY_RUN_MARK_PAID off ⇒ NOT_IMPLEMENTED on an own invoice, nothing written', async () => {
     const prev = process.env.PAY_RUN_MARK_PAID;
     delete process.env.PAY_RUN_MARK_PAID;
@@ -483,7 +493,7 @@ describe('payRun.list (W2-03)', () => {
       await expect(
         asA('bookkeeper').payRun.markPaid({ items, paidOn: '2026-10-25', method: 'bank_transfer', clientMutationId: 'cmid-off-0001' }),
       ).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED' });
-      await expect(asA().payRun.unmarkPaid({ items, clientMutationId: 'cmid-off-0002' })).rejects.toMatchObject({
+      await expect(asA().payRun.unmarkPaid({ items, reason: 'נרשם בטעות', clientMutationId: 'cmid-off-0002' })).rejects.toMatchObject({
         code: 'NOT_IMPLEMENTED',
       });
       expect((await asA().payRun.list({ now: NOW })).markPaidEnabled).toBe(false);

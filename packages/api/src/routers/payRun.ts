@@ -495,6 +495,11 @@ const MARK_PAID_INPUT = z.object({
 });
 const UNMARK_PAID_INPUT = z.object({
   items: z.array(ITEM).min(1).max(200),
+  /**
+   * Owner decision I7 (7.11): a paid invoice is locked; reopening it (G-05 `unmark`, paid →
+   * approved) REQUIRES a reason ("סיבה (חובה)"). Passed through to G-05, which enforces it.
+   */
+  reason: z.string().trim().min(3).max(300),
   clientMutationId: z.string().min(8).max(80),
 });
 
