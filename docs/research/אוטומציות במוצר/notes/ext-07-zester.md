@@ -251,4 +251,4 @@
 - Beecomm (partners incl. Zester) — https://www.beecomm.com/
 - AllJobs (purchasing clerk updating prices in Zester) — https://www.alljobs.co.il/m/p/jobs/8704284
 - HRSearch (branch manager; MarketMan/Zester an advantage) — https://www.hrsearch.co.il/jobs/9543
-- Repo cross-refs: `notes/ext-01-israel-players.md` §4; `notes/int-06-catalog-inventory-recipes.md` (ZesttAdapter stub, sync-platforms); `notes/10-catalogue-and-impact.md` (A14, produce benchmark); `docs/ux/automation/README.md` (AU-03, AU-08, AU-09, AU-11, AU-13, AU-14); `docs/ICP.md` (later / anti-ICP list).
+- Repo cross-refs: `notes/ext-01-israel-players.md` §4; `notes/int-06-catalog-inventory-recipes.md` (ZesttAdapter document-only, sync-platforms); `notes/10-catalogue-and-impact.md` (A14, produce benchmark); `docs/ux/automation/README.md` (AU-03, AU-08, AU-09, AU-11, AU-13, AU-14); `docs/ICP.md` (later / anti-ICP list).
