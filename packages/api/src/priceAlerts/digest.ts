@@ -135,7 +135,7 @@ interface Copy {
   heading: string;
   creepHeading: string;
   products: (n: number) => string;
-  estimate: (money: string) => string;
+  estimate: (money: string, partial: boolean) => string;
   unknown: string;
   creepLine: (l: CreepLine, loc: MailLocale) => string;
   cheaper: (supplier: string, price: string) => string;
@@ -152,7 +152,7 @@ interface Copy {
   listLine: (s: ListDiffSection, loc: MailLocale) => string;
   toCatalog: string;
   footer: string;
-  subjectCreep: (n: number, first: CreepLine, total: string | null) => string;
+  subjectCreep: (n: number, first: CreepLine, total: string | null, partial: boolean) => string;
   subjectContracts: (n: number) => string;
   subjectDishes: (n: number) => string;
   subjectList: (supplier: string) => string;
@@ -163,7 +163,7 @@ const HE: Copy = {
   heading: 'מחירים שעלו',
   creepHeading: 'מחירים שעלו אצל הספקים',
   products: (n) => (n === 1 ? 'מוצר אחד' : `${n} מוצרים`),
-  estimate: (m) => `≈${m} בחודש (הערכה)`,
+  estimate: (m, partial) => `${partial ? 'לפחות ' : ''}≈${m} בחודש (הערכה)`,
   unknown: 'אין מספיק נתונים',
   creepLine: (l, loc) =>
     `${n(l.productName)} · ${n(l.supplierName)} · ${pct(l.pctChange)} ב-${weeks(l.windowDays)} שבועות · ` +
@@ -190,10 +190,10 @@ const HE: Copy = {
       .map((t) => `${n(t.name)} ${pctBp(t.changeBp)} ${unitPrice(t.oldListPrice, loc)} → ${unitPrice(t.newListPrice, loc)}`)
       .join(' · '),
   toCatalog: 'למחירון',
-  footer: 'ההערכה החודשית מחושבת לפי הכמויות שהזמנתם ב-90 הימים האחרונים. היא אינה חלק מסכום הכסף שאיתרנו בחשבוניות.',
-  subjectCreep: (count, first, total) =>
+  footer: 'ההערכה החודשית מחושבת לפי הכמויות שנקנו לפי החשבוניות ב-90 הימים האחרונים, בהנחה שהמחיר החדש נשאר. זו הערכה בלבד, לא כסף שאבד.',
+  subjectCreep: (count, first, total, partial) =>
     `מחירים שעלו: ${count === 1 ? `${n(first.productName)} ${pct(first.pctChange)}` : `${count} מוצרים`}` +
-    (total ? ` · ≈${total} בחודש (הערכה)` : ''),
+    (total ? ` · ${partial ? 'לפחות ' : ''}≈${total} בחודש (הערכה)` : ''),
   subjectContracts: (n) => (n === 1 ? 'חוזה מחירים מסתיים בקרוב' : `${n} חוזי מחירים מסתיימים בקרוב`),
   subjectDishes: (n) => (n === 1 ? 'מנה אחת עברה את יעד עלות המזון' : `${n} מנות עברו את יעד עלות המזון`),
   subjectList: (s) => `מחירון חדש מ${n(s)}`,
@@ -204,7 +204,7 @@ const EN: Copy = {
   heading: 'Prices that went up',
   creepHeading: 'Supplier prices that went up',
   products: (n) => (n === 1 ? '1 product' : `${n} products`),
-  estimate: (m) => `≈${m}/month (estimate)`,
+  estimate: (m, partial) => `${partial ? 'at least ' : ''}≈${m}/month (estimate)`,
   unknown: 'Not enough data',
   creepLine: (l, loc) =>
     `${n(l.productName)} · ${n(l.supplierName)} · ${pct(l.pctChange)} in ${weeks(l.windowDays)} weeks · ` +
@@ -231,10 +231,10 @@ const EN: Copy = {
       .map((t) => `${n(t.name)} ${pctBp(t.changeBp)} ${unitPrice(t.oldListPrice, loc)} → ${unitPrice(t.newListPrice, loc)}`)
       .join(' · '),
   toCatalog: 'Open price list',
-  footer: 'The monthly estimate uses the quantities you ordered in the last 90 days. It is not part of the money we found on your invoices.',
-  subjectCreep: (count, first, total) =>
+  footer: 'The monthly estimate uses quantities on your invoices over the last 90 days, assuming the new price stays. It is an estimate only, not money lost.',
+  subjectCreep: (count, first, total, partial) =>
     `Prices that went up: ${count === 1 ? `${n(first.productName)} ${pct(first.pctChange)}` : `${count} products`}` +
-    (total ? ` · ≈${total}/month (estimate)` : ''),
+    (total ? ` · ${partial ? 'at least ' : ''}≈${total}/month (estimate)` : ''),
   subjectContracts: (n) => (n === 1 ? 'A price contract ends soon' : `${n} price contracts end soon`),
   subjectDishes: (n) => (n === 1 ? '1 dish is over its food-cost target' : `${n} dishes are over their food-cost target`),
   subjectList: (s) => `New price list from ${n(s)}`,
@@ -410,16 +410,18 @@ export function buildOwnerDigest(input: OwnerDigestInput): DigestEmail | null {
   const creepMonthlyAgorot = known.reduce((s, l) => s + (l.monthlyAgorot ?? 0), 0);
   const total = creepMonthlyAgorot > 0 ? perMonth(creepMonthlyAgorot, input.locale) : null;
   const ranked = rankCreep(input.creep);
+  /** Some lines have no estimate: the sum is the low end, so say "at least". */
+  const partial = known.length > 0 && known.length < input.creep.length;
   const withRises = input.listDiffs.filter((s) => s.risesCount > 0);
   const subject =
     ranked.length > 0
-      ? c.subjectCreep(ranked.length, ranked[0]!, total)
+      ? c.subjectCreep(ranked.length, ranked[0]!, total, partial)
       : input.contracts.length > 0
         ? c.subjectContracts(input.contracts.length)
         : withRises.length > 0
           ? c.subjectList(withRises[0]!.supplierName)
           : c.subjectDishes(input.dishes.length);
-  const title = ranked.length > 0 ? `${c.heading}: ${c.products(ranked.length)}${total ? ` · ${c.estimate(total)}` : ''}` : subject;
+  const title = ranked.length > 0 ? `${c.heading}: ${c.products(ranked.length)}${total ? ` · ${c.estimate(total, partial)}` : ''}` : subject;
   const footer = ranked.length > 0 ? c.footer : null;
   return {
     subject,

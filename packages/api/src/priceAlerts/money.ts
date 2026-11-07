@@ -11,8 +11,8 @@ import { formatIlsAgorot } from '../reports/money';
  *
  * `decimals`: 2 for unit prices ("₪6.20 ליחידה"), 0 for the ≈₪/month estimate.
  */
-const FSI = '⁨';
-const PDI = '⁩';
+const FSI = '\u2068';
+const PDI = '\u2069';
 
 export type MailLocale = 'he' | 'en';
 
@@ -20,7 +20,13 @@ export function mailMoney(agorot: number, locale: MailLocale, decimals: 0 | 2): 
   return FSI + formatIlsAgorot(agorot, { locale, maximumFractionDigits: decimals }) + PDI;
 }
 
-/** Shekels (NUMERIC-derived) → integer agorot at the boundary, half-up at the agora. */
+/**
+ * Shekels (NUMERIC-derived) → integer agorot at the boundary: ONE half-up at
+ * the agora. The decimal point is shifted in the text (`"1.005e2"` = 100.5),
+ * never by a float multiply (1.005 × 100 = 100.4999… would round down).
+ * Prices here are non-negative.
+ */
 export function toAgorot(ils: number | string): number {
-  return Math.round(Number(ils) * 100);
+  const s = String(Number(ils));
+  return s.includes('e') ? Math.round(Number(ils) * 100) : Math.round(Number(`${s}e2`));
 }

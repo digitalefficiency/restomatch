@@ -9,7 +9,7 @@ Supplier prices that went up
 Dishes over their food-cost target
 - ⁨שניצל⁩ ⁦31%⁩ (target ⁦28%⁩) · ⁨₪1.40⁩ more per plate · ⁨חזה עוף⁩ ⁦+12%⁩ at ⁨טיב טעם⁩
 
-The monthly estimate uses the quantities you ordered in the last 90 days. It is not part of the money we found on your invoices."
+The monthly estimate uses quantities on your invoices over the last 90 days, assuming the new price stays. It is an estimate only, not money lost."
 `;
 
 exports[`AU-13 digest builder (pure) > LIGHT template: he rtl, en ltr, light canvas, no dark #0b1220; no leak words > he 1`] = `
@@ -21,5 +21,5 @@ exports[`AU-13 digest builder (pure) > LIGHT template: he rtl, en ltr, light can
 מנות שעברו את יעד עלות המזון
 - ⁨שניצל⁩ ⁦31%⁩ (יעד ⁦28%⁩) · ⁨‏1.40 ‏₪⁩ יותר למנה · ⁨חזה עוף⁩ ⁦+12%⁩ אצל ⁨טיב טעם⁩
 
-ההערכה החודשית מחושבת לפי הכמויות שהזמנתם ב-90 הימים האחרונים. היא אינה חלק מסכום הכסף שאיתרנו בחשבוניות."
+ההערכה החודשית מחושבת לפי הכמויות שנקנו לפי החשבוניות ב-90 הימים האחרונים, בהנחה שהמחיר החדש נשאר. זו הערכה בלבד, לא כסף שאבד."
 `;

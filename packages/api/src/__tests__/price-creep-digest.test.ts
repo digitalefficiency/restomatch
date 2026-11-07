@@ -16,7 +16,7 @@ import {
   type RestaurantSettings,
 } from '@restomatch/db';
 import { buildChefDigest, buildOwnerDigest, rankCreep, type CreepLine, type DishLine } from '../priceAlerts/digest';
-import { mailMoney } from '../priceAlerts/money';
+import { mailMoney, toAgorot } from '../priceAlerts/money';
 import { runPriceAlertSweep } from '../priceAlerts/sweep';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
@@ -80,6 +80,22 @@ describe('AU-13 digest builder (pure)', () => {
     expect(P(mail.text)).toContain(
       `עגבניות · תנובה · +12% ב-3 שבועות · מ-${M(620, 'he', 2)} ל-${M(694, 'he', 2)} ליחידה · ≈${M(21_200, 'he', 0)} בחודש (הערכה)`,
     );
+  });
+
+  it('some estimates unknown → the total says "at least" (it is the low end)', () => {
+    const lines = [line({ alertId: '1', monthlyAgorot: 21_200 }), line({ alertId: '2', productName: 'חלב', monthlyAgorot: null, tone: 't4' })];
+    const he = buildOwnerDigest({ locale: 'he', creep: lines, ...empty })!;
+    const en = buildOwnerDigest({ locale: 'en', creep: lines, ...empty })!;
+    expect(P(he.subject)).toBe(`מחירים שעלו: 2 מוצרים · לפחות ≈${M(21_200, 'he', 0)} בחודש (הערכה)`);
+    expect(P(en.subject)).toBe(`Prices that went up: 2 products · at least ≈${M(21_200, 'en', 0)}/month (estimate)`);
+  });
+
+  it('toAgorot: one half-up on the decimal, never a float multiply', () => {
+    expect(toAgorot(1.005)).toBe(101);
+    expect(toAgorot('6.2050')).toBe(621);
+    expect(toAgorot('6.2049')).toBe(620);
+    expect(toAgorot(2.675)).toBe(268);
+    expect(toAgorot('0')).toBe(0);
   });
 
   it('top 5 plus "ועוד N"; the cheaper offer when known', () => {
