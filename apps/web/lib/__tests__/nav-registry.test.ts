@@ -168,6 +168,7 @@ describe('ROUTE_ROLES generated from the registry', () => {
       ['/dashboard/invoices']: invoices,
       ['/dashboard/orders']: orders,
       ['/dashboard/suppliers']: suppliersHub,
+      ['/dashboard/inventory']: inventory,
       ...rest
     } = ROUTE_ROLES;
     const {
@@ -175,6 +176,7 @@ describe('ROUTE_ROLES generated from the registry', () => {
       ['/dashboard/invoices']: invoicesBefore,
       ['/dashboard/orders']: ordersBefore,
       ['/dashboard/suppliers']: suppliersHubBefore,
+      ['/dashboard/inventory']: inventoryBefore,
       ...restBefore
     } = ROUTE_ROLES_BEFORE;
     expect(sorted(rest)).toEqual(sorted(restBefore));
@@ -190,6 +192,9 @@ describe('ROUTE_ROLES generated from the registry', () => {
     // Owner decision (7.11, the bookkeeper reads everything): the suppliers hub opens to them, read-only.
     expect(suppliersHubBefore).toEqual(['owner', 'manager']);
     expect(suppliersHub).toEqual(['owner', 'manager', 'bookkeeper']);
+    // Same decision: inventory, read-only for the bookkeeper (W2-07 serves the read tier).
+    expect(inventoryBefore).toEqual(['owner', 'manager', 'chef']);
+    expect(inventory).toEqual(['owner', 'manager', 'chef', 'bookkeeper']);
     // The printable leak report keeps inheriting /leaks (no silent bounce for the bookkeeper's button).
     expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
     expect(allowedRolesForPath('/dashboard/leaks/report')).toContain('bookkeeper');
@@ -219,7 +224,8 @@ describe('ROUTE_ROLES generated from the registry', () => {
       const ordersChef = (role: UserRole) => role === 'chef' && (concrete === '/dashboard/orders' || concrete.startsWith('/dashboard/orders/'));
       // Owner decision 7.11 (the bookkeeper reads everything): the suppliers hub and its pages, read-only.
       const suppliersBookkeeper = (role: UserRole) =>
-        role === 'bookkeeper' && (concrete === '/dashboard/suppliers' || concrete.startsWith('/dashboard/suppliers/'));
+        role === 'bookkeeper' &&
+        ['/dashboard/suppliers', '/dashboard/inventory'].some((p) => concrete === p || concrete.startsWith(`${p}/`));
       for (const role of now) if (!ordersChef(role) && !suppliersBookkeeper(role)) expect(was, `${role} on ${concrete}`).toContain(role);
     }
   });
