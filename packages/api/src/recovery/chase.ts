@@ -1,5 +1,5 @@
 import { isNeverClaimable, vatBasisOf } from '../lib/claims';
-import type { ReportLocale } from '../reports/money';
+import { formatIlsAgorot, type ReportLocale } from '../reports/money';
 
 /**
  * AU-03 · the pre-addressed supplier reminder DRAFT (pure; catalogue A12).
@@ -85,12 +85,7 @@ export function ddMM(iso: string): string {
 
 /** ₪ with agorot (2 dp) — the interim for G-13 `moneyText`. */
 export function chaseMoney(agorot: number, locale: ReportLocale = 'he'): string {
-  return new Intl.NumberFormat(locale === 'en' ? 'en-GB' : 'he-IL', {
-    style: 'currency',
-    currency: 'ILS',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(agorot / 100);
+  return formatIlsAgorot(agorot, { locale, maximumFractionDigits: 2 });
 }
 
 /**
