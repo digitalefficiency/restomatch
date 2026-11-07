@@ -4,6 +4,11 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   createDb,
+  invoices,
+  paymentDeductions,
+  paymentInvoices,
+  payments,
+  supplierStatements,
   eq,
   inventoryCountLines,
   inventoryCounts,
@@ -106,7 +111,16 @@ const CHECK_VIOLATION = '23514';
 const FK_VIOLATION = '23503';
 const UNIQUE_VIOLATION = '23505';
 
-const TABLES = ['notification_seen', 'product_count_units', 'saved_views', 'view_subscriptions', 'waste_entries'];
+const TABLES = [
+  'notification_seen',
+  'payment_invoices',
+  'payments',
+  'product_count_units',
+  'saved_views',
+  'supplier_statements',
+  'view_subscriptions',
+  'waste_entries',
+];
 const statements = () =>
   readFileSync(join(migrationsDir(), FILE), 'utf8')
     .split('--> statement-breakpoint')
@@ -159,9 +173,9 @@ describe('0073 is registered', () => {
     expect(lockPhase).toMatch(/EXCEPTION WHEN lock_not_available THEN\s*PERFORM pg_sleep\(0\.05\);/);
     // Every LOCK is NOWAIT (nothing is held while waiting); parent-first, users last (0071/0072 order).
     const locks = lockPhase.match(/LOCK TABLE [^;]+;/g) ?? [];
-    expect(locks).toHaveLength(4);
+    expect(locks).toHaveLength(6);
     for (const l of locks) expect(l).toMatch(/NOWAIT;$/);
-    const order = ['"restaurants"', '"suppliers"', '"products"', '"purchase_orders"', '"po_lines"', '"recipes"', '"inventory_counts"', '"inventory_count_lines"', '"users"'];
+    const order = ['"restaurants"', '"suppliers"', '"products"', '"purchase_orders"', '"po_lines"', '"recipes"', '"inventory_counts"', '"inventory_count_lines"', '"invoices"', '"ingest_documents"', '"users"'];
     const pos = order.map((t) => lockPhase.indexOf(t));
     expect(pos.every((p) => p >= 0)).toBe(true);
     expect([...pos].sort((a, b) => a - b)).toEqual(pos);
@@ -276,6 +290,10 @@ describe('0073 the five new tenant tables', () => {
     await db.insert(wasteEntries).values({ restaurantId: t.restaurantId, productId: t.productId, qty: '2', unit: 'ק״ג', reason: 'spoiled' });
     await db.insert(wasteEntries).values({ restaurantId: t.restaurantId, recipeId: t.recipeId, qty: '1', unit: 'מנה', reason: 'returned' });
     await db.insert(notificationSeen).values({ restaurantId: t.restaurantId, userId, itemKey: 'invoice:x:decide' });
+    await db.insert(supplierStatements).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, periodStart: '2026-11-01', periodEnd: '2026-11-30', source: 'upload' });
+    const [inv] = await db.insert(invoices).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, source: 'manual' }).returning();
+    const [pay] = await db.insert(payments).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, paidOn: '2026-12-01', amountAgorot: 100, method: 'bank_transfer' }).returning();
+    await db.insert(paymentInvoices).values({ restaurantId: t.restaurantId, paymentId: pay!.id, invoiceId: inv!.id, amountAgorot: 100 });
     await db.delete(restaurants).where(eq(restaurants.id, t.restaurantId));
     for (const tbl of TABLES) {
       const [{ n }] = (await sql`select count(*)::int as n from ${sql(tbl)} where restaurant_id = ${t.restaurantId}`) as unknown as [{ n: number }];
@@ -538,5 +556,69 @@ describe('H-04 part 2: the PENDING outbox role-target CHECK (deploys 19.1, after
       }),
     ).rejects.toBe(ROLLBACK);
     expect(await checkDef('notifications_outbox_no_role_target_check')).toBeUndefined();
+  });
+});
+
+describe('0073 addendum 1 (W3-11): doc_type, supplier_statements, payments + payment_invoices', () => {
+  async function ingestDoc(restaurantId: string): Promise<string> {
+    const hash = (restaurantId.replace(/-/g, '') + restaurantId.replace(/-/g, '')).slice(0, 64);
+    const [ch] = (await sql`
+      insert into ingest_channels (restaurant_id, kind, token_hash, token_hint)
+      values (${restaurantId}, 'email', ${hash}, 'hint') returning id`) as unknown as [{ id: string }];
+    const [m] = (await sql`
+      insert into ingest_messages (restaurant_id, channel_id, kind, provider, provider_message_id, sender, sender_allowed, status)
+      values (${restaurantId}, ${ch.id}, 'email', 'test', ${'m-' + restaurantId}, 'a@b.test', true, 'accepted') returning id`) as unknown as [{ id: string }];
+    const [d] = (await sql`
+      insert into ingest_documents (restaurant_id, message_id, status) values (${restaurantId}, ${m.id}, 'registered') returning id`) as unknown as [{ id: string }];
+    return d.id;
+  }
+
+  it('ingest_documents.doc_type is a nullable CHECKed varchar (not backfilled); ingest_documents gains UNIQUE (id, restaurant_id)', async () => {
+    expect(await col('ingest_documents', 'doc_type')).toMatchObject({ data_type: 'character varying', is_nullable: 'YES', column_default: null });
+    expect(await checkDef('ingest_documents_id_restaurant_id_key')).toBe('UNIQUE (id, restaurant_id)');
+    const d = await ingestDoc(A.restaurantId);
+    const [{ doc_type }] = (await sql`select doc_type from ingest_documents where id = ${d}`) as unknown as [{ doc_type: string | null }];
+    expect(doc_type).toBeNull();
+    await sql`update ingest_documents set doc_type = 'statement' where id = ${d}`;
+    await expectPgError(sql`update ingest_documents set doc_type = 'receipt' where id = ${d}`, CHECK_VIOLATION);
+  });
+
+  it('a statement: period end >= start, a known source, a storage key (not a URL), signed balances; refuses another tenant’s supplier or document; blocks deleting its supplier', async () => {
+    const r = A.restaurantId;
+    const base = { restaurantId: r, supplierId: A.supplierId, periodStart: '2026-11-01', periodEnd: '2026-11-30', source: 'upload' as const };
+    const [st] = await db.insert(supplierStatements).values({ ...base, openingBalanceAgorot: -5000, closingBalanceAgorot: 123456, storagePath: `${r}/statements/1.pdf`, uploadedBy: userId }).returning();
+    expect(st).toMatchObject({ openingBalanceAgorot: -5000, closingBalanceAgorot: 123456 });
+    await expectPgError(db.insert(supplierStatements).values({ ...base, periodEnd: '2026-10-31' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(supplierStatements).values({ ...base, source: 'fax' as never }), CHECK_VIOLATION);
+    await expectPgError(db.insert(supplierStatements).values({ ...base, storagePath: 'https://x.test/a.pdf' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(supplierStatements).values({ ...base, supplierId: B.supplierId }), FK_VIOLATION);
+    const docB = await ingestDoc(B.restaurantId);
+    await expectPgError(db.insert(supplierStatements).values({ ...base, ingestDocumentId: docB }), FK_VIOLATION);
+    await expectPgError(db.delete(suppliers).where(eq(suppliers.id, A.supplierId)), FK_VIOLATION);
+    await db.delete(supplierStatements).where(eq(supplierStatements.restaurantId, r));
+  });
+
+  it('a payment: amount > 0 agorot, a known method; allocated once per invoice, > 0; refuses cross-tenant invoices; blocks deleting a paid invoice; allocations go with the payment; separate from payment_deductions', async () => {
+    const r = A.restaurantId;
+    const [inv] = await db.insert(invoices).values({ restaurantId: r, supplierId: A.supplierId, source: 'manual' }).returning();
+    const [invB] = await db.insert(invoices).values({ restaurantId: B.restaurantId, supplierId: B.supplierId, source: 'manual' }).returning();
+    const base = { restaurantId: r, supplierId: A.supplierId, paidOn: '2026-12-01', method: 'bank_transfer' as const };
+    await expectPgError(db.insert(payments).values({ ...base, amountAgorot: 0 }), CHECK_VIOLATION);
+    await expectPgError(db.insert(payments).values({ ...base, amountAgorot: 100, method: 'bitcoin' as never }), CHECK_VIOLATION);
+    await expectPgError(db.insert(payments).values({ ...base, supplierId: B.supplierId, amountAgorot: 100 }), FK_VIOLATION);
+    const [pay] = await db.insert(payments).values({ ...base, amountAgorot: 250000, reference: 'העברה 4471', createdBy: userId }).returning();
+    await db.insert(paymentInvoices).values({ restaurantId: r, paymentId: pay!.id, invoiceId: inv!.id, amountAgorot: 250000 });
+    await expectPgError(db.insert(paymentInvoices).values({ restaurantId: r, paymentId: pay!.id, invoiceId: inv!.id, amountAgorot: 1 }), UNIQUE_VIOLATION);
+    await expectPgError(db.insert(paymentInvoices).values({ restaurantId: r, paymentId: pay!.id, invoiceId: invB!.id, amountAgorot: 1 }), FK_VIOLATION);
+    await expectPgError(db.delete(invoices).where(eq(invoices.id, inv!.id)), FK_VIOLATION);
+    const [inv2] = await db.insert(invoices).values({ restaurantId: r, supplierId: A.supplierId, source: 'manual' }).returning();
+    await expectPgError(db.insert(paymentInvoices).values({ restaurantId: r, paymentId: pay!.id, invoiceId: inv2!.id, amountAgorot: 0 }), CHECK_VIOLATION);
+    await db.delete(payments).where(eq(payments.id, pay!.id));
+    expect(await db.select().from(paymentInvoices).where(eq(paymentInvoices.paymentId, pay!.id))).toHaveLength(0);
+    // A payment never writes a deduction (a credit note is never a short-pay).
+    expect(await db.select().from(paymentDeductions).where(eq(paymentDeductions.restaurantId, r))).toHaveLength(0);
+    await db.delete(invoices).where(eq(invoices.id, inv!.id));
+    await db.delete(invoices).where(eq(invoices.id, inv2!.id));
+    await db.delete(invoices).where(eq(invoices.id, invB!.id));
   });
 });

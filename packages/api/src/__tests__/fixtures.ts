@@ -1,5 +1,8 @@
 import {
   wasteEntries,
+  paymentInvoices,
+  payments,
+  supplierStatements,
   claimLetters,
   idempotencyKeys,
   paymentDeductions,
@@ -85,6 +88,11 @@ export async function resetDb(db: Database): Promise<void> {
   await db.delete(exportRunInvoices);
   await db.delete(supplierBankAccountChanges);
   await db.delete(supplierBankAccounts);
+  // 0073 addendum (H-04 / W3-11): payments block invoice + supplier deletes and
+  // statements block supplier deletes (NO ACTION) — clear them before both.
+  await db.delete(paymentInvoices);
+  await db.delete(payments);
+  await db.delete(supplierStatements);
   // Wave 1 (S12): claims block discrepancy deletes (0048, NO ACTION) — clear them first.
   await db.delete(recoveryEvents);
   await db.delete(recoveryClaims);

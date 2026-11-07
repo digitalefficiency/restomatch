@@ -11,7 +11,9 @@
 -- e-mail and password. The outbox `role:` CHECK is NOT here: it is a separate file
 -- (drizzle/pending/), journaled and deployed only after H-05.
 --
--- Money units (AGENTS.md money facts): waste_entries.unit_cost and
+-- Money units (AGENTS.md money facts): supplier_statements.*_balance_agorot,
+-- payments.amount_agorot and payment_invoices.amount_agorot are integer AGOROT
+-- bigint (derived ledgers). waste_entries.unit_cost and
 -- po_lines.unit_price_revised are NUMERIC(12,4) SHEKELS ex-VAT (like
 -- unit_price_expected / inventory_count_lines.unit_cost); waste_entries.value_agorot
 -- is an integer AGOROT bigint snapshot (like inventory_count_lines.value_agorot).
@@ -57,6 +59,21 @@
 --                        revised value is; the source then too.
 -- notification_seen      a member has seen (and maybe dismissed) one bell item,
 --                        named by a stable item_key (e.g. 'invoice:<id>:decide').
+-- ── Addendum 1 (W3-11, document intelligence; PR #275) ──
+-- ingest_documents (+doc_type)
+--                        what an ingested file is: 'invoice' | 'credit_note' |
+--                        'delivery_note' | 'statement' | 'other'. NULL = not yet
+--                        classified (every existing row; not backfilled). Gains UNIQUE
+--                        (id, restaurant_id) (additive) so a statement can point at it.
+-- supplier_statements    a supplier's account statement (כרטסת) for a period: opening
+--                        and closing balance (signed integer AGOROT: a balance may be in
+--                        the restaurant's favour), source, who uploaded it and when, and
+--                        its file (the ingest document and/or a storage path).
+-- payments               money actually paid to a supplier: date, amount (AGOROT > 0),
+--                        method, reference, who recorded it. NOT a credit note and NOT a
+--                        short-pay: those stay in 0071's payment_deductions.
+-- payment_invoices       which invoices one payment settles, with the allocated amount
+--                        (AGOROT > 0); one row per payment × invoice.
 --
 -- Tenant safety: the 0057/0070/0071/0072 pattern. Every new table carries
 -- restaurant_id NOT NULL, UNIQUE (id, restaurant_id), SAME-TENANT composite FKs to
@@ -72,15 +89,16 @@
 -- with set_config(..., is_local => true), keeping the previous statement_timeout in
 -- restomatch.prev_statement_timeout; (2) takes every lock in ONE DO block with an
 -- all-or-nothing NOWAIT retry loop, parent-first (the 0071/0072 order, users last):
--- SHARE ROW EXCLUSIVE on "restaurants" and "users" (FK targets only), ACCESS
--- EXCLUSIVE on the seven existing tables this file alters (products and recipes are
--- also FK targets); (3) restores statement_timeout. A long reader makes the file
+-- SHARE ROW EXCLUSIVE on "restaurants", "invoices" and "users" (FK targets only),
+-- ACCESS EXCLUSIVE on the eight existing tables this file alters (products, recipes
+-- and ingest_documents are also FK targets); (3) restores statement_timeout. A long reader makes the file
 -- fail fast (57014 after 6s) with nothing applied; re-run it in a quiet hour.
 -- Stacked drizzle path: `pnpm db:migrate` applies 0071 + 0072 + 0073 in ONE
 -- transaction. 0073 asks for nothing stronger than what 0071/0072 already hold on
 -- restaurants (0072: ACCESS EXCLUSIVE), users (0072: AE), suppliers (0072: AE),
--- purchase_orders (0071: AE) and po_lines (0072: AE); it takes NEW ACCESS EXCLUSIVE
--- locks on products, recipes, inventory_counts and inventory_count_lines mid-batch.
+-- invoices (0072: AE), purchase_orders (0071: AE) and po_lines (0072: AE); it takes
+-- NEW ACCESS EXCLUSIVE locks on products, recipes, inventory_counts,
+-- inventory_count_lines and ingest_documents mid-batch.
 -- The NOWAIT loop never waits holding a NEW lock, so a busy table fails the WHOLE
 -- batch within the 6s bound (nothing applied). Re-run it.
 --
@@ -94,6 +112,10 @@
 -- reverted in the same revert):
 --   DROP TRIGGER saved_views_set_updated_at ON saved_views;  -- and the three other
 --     *_set_updated_at triggers on view_subscriptions, product_count_units, waste_entries
+--   DROP TRIGGER supplier_statements_set_updated_at ON supplier_statements;  -- and payments_set_updated_at
+--   DROP TABLE payment_invoices, payments, supplier_statements;
+--   ALTER TABLE ingest_documents DROP COLUMN doc_type,
+--     DROP CONSTRAINT ingest_documents_id_restaurant_id_key;
 --   DROP TABLE notification_seen, waste_entries, product_count_units,
 --     view_subscriptions, saved_views;
 --   UPDATE inventory_counts SET status = 'draft' WHERE status = 'submitted';  -- forward-revert
@@ -123,7 +145,7 @@ SELECT set_config('restomatch.prev_statement_timeout', current_setting('statemen
 -- transaction (40P01), and the 6s statement_timeout bounds the loop (57014).
 -- Order = 0071/0072's parent-first order (restaurants … users last), restricted to
 -- this file's tables: suppliers → products → purchase_orders → po_lines → recipes →
--- inventory_counts → inventory_count_lines.
+-- inventory_counts → inventory_count_lines → invoices → ingest_documents.
 DO $$
 BEGIN
   LOOP
@@ -131,6 +153,8 @@ BEGIN
       LOCK TABLE "restaurants" IN SHARE ROW EXCLUSIVE MODE NOWAIT;
       LOCK TABLE "suppliers", "products", "purchase_orders", "po_lines" IN ACCESS EXCLUSIVE MODE NOWAIT;
       LOCK TABLE "recipes", "inventory_counts", "inventory_count_lines" IN ACCESS EXCLUSIVE MODE NOWAIT;
+      LOCK TABLE "invoices" IN SHARE ROW EXCLUSIVE MODE NOWAIT;
+      LOCK TABLE "ingest_documents" IN ACCESS EXCLUSIVE MODE NOWAIT;
       LOCK TABLE "users" IN SHARE ROW EXCLUSIVE MODE NOWAIT;
       EXIT;
     EXCEPTION WHEN lock_not_available THEN
@@ -338,7 +362,93 @@ CREATE TABLE IF NOT EXISTS "notification_seen" (
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "notification_seen_user_idx" ON "notification_seen" USING btree ("user_id");--> statement-breakpoint
 
--- ── RLS on the five new tenant tables (also in rls/0002's list) ───────────────
+-- ── Addendum 1 (W3-11): document type, supplier statements, payments ──────────
+ALTER TABLE "ingest_documents" ADD COLUMN IF NOT EXISTS "doc_type" varchar(16)
+  CONSTRAINT "ingest_documents_doc_type_check" CHECK ("doc_type" IN ('invoice', 'credit_note', 'delivery_note', 'statement', 'other'));--> statement-breakpoint
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ingest_documents_id_restaurant_id_key') THEN
+    ALTER TABLE "ingest_documents" ADD CONSTRAINT "ingest_documents_id_restaurant_id_key" UNIQUE ("id", "restaurant_id");
+  END IF;
+END $$;--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "supplier_statements" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE cascade,
+  "supplier_id" uuid NOT NULL,
+  "period_start" date NOT NULL,
+  "period_end" date NOT NULL,
+  -- Signed: a negative balance is in the restaurant's favour.
+  "opening_balance_agorot" bigint,
+  "closing_balance_agorot" bigint,
+  "source" varchar(16) NOT NULL,
+  "ingest_document_id" uuid,
+  "storage_path" text,
+  "uploaded_by" uuid REFERENCES "users"("id") ON DELETE set null,
+  "uploaded_at" timestamp with time zone DEFAULT now() NOT NULL,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT "supplier_statements_id_restaurant_id_key" UNIQUE ("id", "restaurant_id"),
+  -- A statement is reconciliation evidence: its supplier cannot be deleted from under
+  -- it (NO ACTION; suppliers are soft-deactivated, a restaurant delete still cascades).
+  CONSTRAINT "supplier_statements_supplier_same_tenant_fk" FOREIGN KEY ("supplier_id", "restaurant_id")
+    REFERENCES "public"."suppliers"("id", "restaurant_id") ON DELETE no action,
+  CONSTRAINT "supplier_statements_document_same_tenant_fk" FOREIGN KEY ("ingest_document_id", "restaurant_id")
+    REFERENCES "public"."ingest_documents"("id", "restaurant_id") ON DELETE no action,
+  CONSTRAINT "supplier_statements_period_check" CHECK ("period_end" >= "period_start"),
+  CONSTRAINT "supplier_statements_source_check" CHECK ("source" IN ('upload', 'email', 'whatsapp', 'manual')),
+  CONSTRAINT "supplier_statements_storage_path_check" CHECK ("storage_path" IS NULL OR (btrim("storage_path") <> '' AND "storage_path" NOT LIKE '%://%'))
+);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "supplier_statements_supplier_period_idx" ON "supplier_statements" USING btree ("supplier_id", "restaurant_id", "period_start");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "supplier_statements_document_idx" ON "supplier_statements" USING btree ("ingest_document_id", "restaurant_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "supplier_statements_uploaded_by_idx" ON "supplier_statements" USING btree ("uploaded_by");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "supplier_statements_restaurant_idx" ON "supplier_statements" USING btree ("restaurant_id", "period_start");--> statement-breakpoint
+DROP TRIGGER IF EXISTS "supplier_statements_set_updated_at" ON "supplier_statements";--> statement-breakpoint
+CREATE TRIGGER "supplier_statements_set_updated_at" BEFORE UPDATE ON "supplier_statements" FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "payments" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE cascade,
+  "supplier_id" uuid NOT NULL,
+  "paid_on" date NOT NULL,
+  "amount_agorot" bigint NOT NULL,
+  "method" varchar(16) NOT NULL,
+  "reference" text,
+  "created_by" uuid REFERENCES "users"("id") ON DELETE set null,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT "payments_id_restaurant_id_key" UNIQUE ("id", "restaurant_id"),
+  -- Money paid out is evidence: its supplier cannot be deleted from under it (NO ACTION).
+  CONSTRAINT "payments_supplier_same_tenant_fk" FOREIGN KEY ("supplier_id", "restaurant_id")
+    REFERENCES "public"."suppliers"("id", "restaurant_id") ON DELETE no action,
+  CONSTRAINT "payments_amount_check" CHECK ("amount_agorot" > 0),
+  -- The same list as invoices.payment_method (0072).
+  CONSTRAINT "payments_method_check" CHECK ("method" IN ('bank_transfer', 'check', 'cash', 'card', 'offset', 'other'))
+);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "payments_supplier_idx" ON "payments" USING btree ("supplier_id", "restaurant_id", "paid_on");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "payments_created_by_idx" ON "payments" USING btree ("created_by");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "payments_restaurant_idx" ON "payments" USING btree ("restaurant_id", "paid_on");--> statement-breakpoint
+DROP TRIGGER IF EXISTS "payments_set_updated_at" ON "payments";--> statement-breakpoint
+CREATE TRIGGER "payments_set_updated_at" BEFORE UPDATE ON "payments" FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "payment_invoices" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE cascade,
+  "payment_id" uuid NOT NULL,
+  "invoice_id" uuid NOT NULL,
+  "amount_agorot" bigint NOT NULL,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT "payment_invoices_id_restaurant_id_key" UNIQUE ("id", "restaurant_id"),
+  CONSTRAINT "payment_invoices_payment_invoice_key" UNIQUE ("payment_id", "invoice_id"),
+  CONSTRAINT "payment_invoices_payment_same_tenant_fk" FOREIGN KEY ("payment_id", "restaurant_id")
+    REFERENCES "public"."payments"("id", "restaurant_id") ON DELETE cascade,
+  -- A paid invoice cannot be deleted from under its payment (NO ACTION).
+  CONSTRAINT "payment_invoices_invoice_same_tenant_fk" FOREIGN KEY ("invoice_id", "restaurant_id")
+    REFERENCES "public"."invoices"("id", "restaurant_id") ON DELETE no action,
+  CONSTRAINT "payment_invoices_amount_check" CHECK ("amount_agorot" > 0)
+);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "payment_invoices_payment_idx" ON "payment_invoices" USING btree ("payment_id", "restaurant_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "payment_invoices_invoice_idx" ON "payment_invoices" USING btree ("invoice_id", "restaurant_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "payment_invoices_restaurant_idx" ON "payment_invoices" USING btree ("restaurant_id");--> statement-breakpoint
+
+-- ── RLS on the eight new tenant tables (also in rls/0002's list) ──────────────
 CREATE SCHEMA IF NOT EXISTS app;--> statement-breakpoint
 CREATE OR REPLACE FUNCTION app.current_restaurant_id() RETURNS uuid
   LANGUAGE sql STABLE
@@ -357,4 +467,13 @@ DROP POLICY IF EXISTS "waste_entries_tenant" ON "waste_entries";--> statement-br
 CREATE POLICY "waste_entries_tenant" ON "waste_entries" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint
 ALTER TABLE "notification_seen" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "notification_seen_tenant" ON "notification_seen";--> statement-breakpoint
-CREATE POLICY "notification_seen_tenant" ON "notification_seen" USING ("restaurant_id" = app.current_restaurant_id());
+CREATE POLICY "notification_seen_tenant" ON "notification_seen" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint
+ALTER TABLE "supplier_statements" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "supplier_statements_tenant" ON "supplier_statements";--> statement-breakpoint
+CREATE POLICY "supplier_statements_tenant" ON "supplier_statements" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint
+ALTER TABLE "payments" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "payments_tenant" ON "payments";--> statement-breakpoint
+CREATE POLICY "payments_tenant" ON "payments" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint
+ALTER TABLE "payment_invoices" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+DROP POLICY IF EXISTS "payment_invoices_tenant" ON "payment_invoices";--> statement-breakpoint
+CREATE POLICY "payment_invoices_tenant" ON "payment_invoices" USING ("restaurant_id" = app.current_restaurant_id());

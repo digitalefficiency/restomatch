@@ -1556,6 +1556,9 @@ export const ingestMessages = pgTable(
   ],
 );
 
+export const INGEST_DOC_TYPES = ['invoice', 'credit_note', 'delivery_note', 'statement', 'other'] as const;
+export type IngestDocType = (typeof INGEST_DOC_TYPES)[number];
+
 export const ingestDocuments = pgTable(
   'ingest_documents',
   {
@@ -1573,11 +1576,14 @@ export const ingestDocuments = pgTable(
     // Composite same-tenant FK (invoice_id, restaurant_id) → invoices — migration 0050.
     invoiceId: uuid('invoice_id'),
     status: varchar('status', { length: 16 }).$type<IngestDocumentStatus>().notNull(),
+    /** What the file is (0073 addendum 1, W3-11; CHECK in 0073). NULL = not yet classified. */
+    docType: varchar('doc_type', { length: 16 }).$type<IngestDocType>(),
     error: text('error'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    unique('ingest_documents_id_restaurant_id_key').on(t.id, t.restaurantId),
     index('ingest_documents_message_idx').on(t.messageId, t.restaurantId),
     index('ingest_documents_restaurant_sha_idx').on(t.restaurantId, t.sha256),
   ],
@@ -3051,3 +3057,97 @@ export type ViewSubscription = typeof viewSubscriptions.$inferSelect;
 export type ProductCountUnit = typeof productCountUnits.$inferSelect;
 export type WasteEntry = typeof wasteEntries.$inferSelect;
 export type NotificationSeenRow = typeof notificationSeen.$inferSelect;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 0073 addendum 1 (W3-11, document intelligence): supplier statements and
+ * payments. Tenant tables (RLS `<table>_tenant`, rls/0002). Money in integer
+ * agorot. A payment is money paid out: never a credit note, never a short-pay
+ * (those are 0071's payment_deductions).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const SUPPLIER_STATEMENT_SOURCES = ['upload', 'email', 'whatsapp', 'manual'] as const;
+export type SupplierStatementSource = (typeof SUPPLIER_STATEMENT_SOURCES)[number];
+
+/** A supplier's account statement (כרטסת) for a period; balances are signed agorot. */
+export const supplierStatements = pgTable(
+  'supplier_statements',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FKs in 0073 (NO ACTION): supplier, ingest document.
+    supplierId: uuid('supplier_id').notNull(),
+    periodStart: date('period_start', { mode: 'string' }).notNull(),
+    periodEnd: date('period_end', { mode: 'string' }).notNull(),
+    openingBalanceAgorot: bigint('opening_balance_agorot', { mode: 'number' }),
+    closingBalanceAgorot: bigint('closing_balance_agorot', { mode: 'number' }),
+    source: varchar('source', { length: 16 }).$type<SupplierStatementSource>().notNull(),
+    ingestDocumentId: uuid('ingest_document_id'),
+    storagePath: text('storage_path'),
+    uploadedBy: uuid('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
+    uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('supplier_statements_id_restaurant_id_key').on(t.id, t.restaurantId),
+    index('supplier_statements_supplier_period_idx').on(t.supplierId, t.restaurantId, t.periodStart),
+    index('supplier_statements_document_idx').on(t.ingestDocumentId, t.restaurantId),
+    index('supplier_statements_uploaded_by_idx').on(t.uploadedBy),
+    index('supplier_statements_restaurant_idx').on(t.restaurantId, t.periodStart),
+  ],
+);
+
+/** Money actually paid to a supplier (agorot > 0). method uses 0072's PAYMENT_METHODS. */
+export const payments = pgTable(
+  'payments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FK in 0073 (NO ACTION).
+    supplierId: uuid('supplier_id').notNull(),
+    paidOn: date('paid_on', { mode: 'string' }).notNull(),
+    amountAgorot: bigint('amount_agorot', { mode: 'number' }).notNull(),
+    method: varchar('method', { length: 16 }).$type<PaymentMethod>().notNull(),
+    reference: text('reference'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('payments_id_restaurant_id_key').on(t.id, t.restaurantId),
+    index('payments_supplier_idx').on(t.supplierId, t.restaurantId, t.paidOn),
+    index('payments_created_by_idx').on(t.createdBy),
+    index('payments_restaurant_idx').on(t.restaurantId, t.paidOn),
+  ],
+);
+
+/** Which invoices one payment settles, with the allocated agorot. */
+export const paymentInvoices = pgTable(
+  'payment_invoices',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FKs in 0073: payment → cascade, invoice → NO ACTION.
+    paymentId: uuid('payment_id').notNull(),
+    invoiceId: uuid('invoice_id').notNull(),
+    amountAgorot: bigint('amount_agorot', { mode: 'number' }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('payment_invoices_id_restaurant_id_key').on(t.id, t.restaurantId),
+    unique('payment_invoices_payment_invoice_key').on(t.paymentId, t.invoiceId),
+    index('payment_invoices_payment_idx').on(t.paymentId, t.restaurantId),
+    index('payment_invoices_invoice_idx').on(t.invoiceId, t.restaurantId),
+    index('payment_invoices_restaurant_idx').on(t.restaurantId),
+  ],
+);
+
+export type SupplierStatement = typeof supplierStatements.$inferSelect;
+export type Payment = typeof payments.$inferSelect;
+export type PaymentInvoice = typeof paymentInvoices.$inferSelect;
