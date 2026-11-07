@@ -478,8 +478,16 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
         joinNoRls.length ? `RLS DISABLED on: ${joinNoRls.join(', ')}` : `${joinScoped.length} child/identity/billing tables protected`);
       const [fn] = await tx`select to_regprocedure('app.current_restaurant_id()') is not null as e`;
       add('rls', 'app.current_restaurant_id()', fn?.e ? 'PASS' : 'FAIL', fn?.e ? 'present' : 'missing — rls/0002 not applied');
-      const [audit] = await tx`select count(*)::int as n from pg_trigger where tgname = 'audit_log_no_update_delete' and not tgisinternal`;
-      add('rls', 'audit_log append-only trigger', audit!.n ? 'PASS' : 'WARN', audit!.n ? 'present' : 'missing — rls/0003 not applied (provision-rls)');
+      const [audit] = await tx`
+        select count(*)::int as n, coalesce(string_agg(tgenabled::text, ','), '') as st
+        from pg_trigger where tgname = 'audit_log_no_update_delete' and not tgisinternal`;
+      const auditOn = audit!.n === 1 && audit!.st === 'O';
+      add('rls', 'audit_log append-only trigger', auditOn ? 'PASS' : 'WARN',
+        auditOn
+          ? 'present and enabled'
+          : audit!.n
+            ? `present but not enabled as ORIGIN (tgenabled=${audit!.st}; must be O) — re-run provision-rls / the RLS file`
+            : 'missing — rls/0003 not applied (provision-rls)');
 
       // ── 6. App role ─────────────────────────────────────────────────────
       const [role] = (await tx`

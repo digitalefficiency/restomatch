@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { runCutoverChecks } from '../cutoverChecks';
 import { runDoctor } from '../doctor';
 import { findJournalGaps, readJournal, runMigrator } from '../migrations';
 import { planSupabaseSync, repoRoot, SUPABASE_LOCK, SUPABASE_MIGRATIONS_DIR } from '../supabaseSync';
@@ -473,6 +474,91 @@ describe('git deploy onto an emulated Supabase project', () => {
       locks = await strongLocks(tx);
     });
     expect(locks).toEqual([]);
+  }, 30_000);
+
+  /** Apply the RLS file in one transaction; returns how many items it planned. */
+  async function applyCountingPlan(conn: postgres.Sql): Promise<number> {
+    let planned = -1;
+    await conn.begin(async (tx) => {
+      for (const stmt of splitSqlStatements(readFileSync(join(migDir, rlsFile), 'utf8'))) {
+        if (/drop table if exists pg_temp\.rm_todo/.test(stmt)) {
+          planned = ((await tx`select count(*)::int as n from pg_temp.rm_todo`) as unknown as [{ n: number }])[0].n;
+        }
+        await tx.unsafe(stmt);
+      }
+    });
+    return planned;
+  }
+  const auditTriggerState = async () =>
+    ((await sql`
+      select tgenabled::text as st from pg_trigger
+      where tgname = 'audit_log_no_update_delete' and not tgisinternal`) as unknown as Array<{ st: string }>).map((r) => r.st);
+
+  for (const [mode, st] of [['DISABLE', 'D'], ['ENABLE REPLICA', 'R'], ['ENABLE ALWAYS', 'A']] as const) {
+    it(`LOCK-SAFE RLS file: the audit_log trigger left "${mode}" is planned and restored to ORIGIN; doctor + cutover flag it until then`, async (ctx) => {
+      if (!canCreate) ctx.skip();
+      const sup = postgres(superUrl.toString(), { max: 1, prepare: false, onnotice: () => undefined });
+      try {
+        await sup.unsafe(`alter table public.audit_log ${mode} trigger audit_log_no_update_delete`);
+      } finally {
+        await sup.end();
+      }
+      expect(await auditTriggerState()).toEqual([st]);
+      const doctor = async () =>
+        (await runDoctor(migratorUrl.toString())).findings.find((f) => f.name === 'audit_log append-only trigger')?.status;
+      const cutover = async () =>
+        (await runCutoverChecks(migratorUrl.toString(), { checkDefaultPassword: false })).find((r) => r.name === 'audit_log_immutable')?.ok;
+      expect(await doctor()).toBe('WARN');
+      expect(await cutover()).toBe(false);
+
+      expect(await applyCountingPlan(sql)).toBeGreaterThanOrEqual(1);
+      expect(await auditTriggerState()).toEqual(['O']);
+      expect(await doctor()).toBe('PASS');
+      expect(await cutover()).toBe(true);
+      expect(await applyCountingPlan(sql)).toBe(0); // and a clean DB plans nothing again
+    });
+  }
+
+  it('LOCK-SAFE RLS file: storage.objects contention neither blocks nor rolls back the tenant repair (WARNING; storage done on the next run)', async (ctx) => {
+    if (!canCreate) ctx.skip();
+    const sup = postgres(superUrl.toString(), { max: 1, prepare: false, onnotice: () => undefined });
+    const reader = postgres(superUrl.toString(), { max: 1, prepare: false, onnotice: () => undefined });
+    const fresh = postgres(migratorUrl.toString(), { max: 1, prepare: false, onnotice: (n) => notices.push(String(n.message)) });
+    try {
+      // Work on both sides: one tenant policy and one storage policy missing.
+      await sup.unsafe('drop policy if exists purchase_orders_tenant on purchase_orders');
+      await sup.unsafe('drop policy if exists invoice_scans_tenant_select on storage.objects');
+      // A long storage reader holds storage.objects for the whole apply.
+      let release!: () => void;
+      const held = new Promise<void>((r) => (release = r));
+      let readerHas!: () => void;
+      const readerReady = new Promise<void>((r) => (readerHas = r));
+      const readerTx = reader.begin(async (tx) => {
+        await tx`select count(*) from storage.objects`;
+        readerHas();
+        await held;
+      });
+      await readerReady;
+      notices.length = 0;
+      const t = Date.now();
+      try {
+        await applyFileInTx(fresh, rlsFile);
+      } finally {
+        release();
+        await readerTx;
+      }
+      expect(Date.now() - t).toBeLessThan(5_000); // never waited out lock_timeout behind the reader
+      expect(notices.join('\n')).toMatch(/storage\.objects policies NOT applied/);
+      const pols = (await sql`
+        select polname from pg_policy where polname in ('purchase_orders_tenant', 'invoice_scans_tenant_select') order by 1`) as unknown as Array<{ polname: string }>;
+      expect(pols.map((p) => p.polname)).toEqual(['purchase_orders_tenant']); // tenant repaired, storage skipped
+      // Quiet again: the next run finishes storage and then has nothing left to do.
+      expect(await applyCountingPlan(fresh)).toBeGreaterThanOrEqual(1);
+      expect(await storagePolicies(sql)).toEqual(TENANT_POLICIES);
+      expect(await applyCountingPlan(fresh)).toBe(0);
+    } finally {
+      await Promise.all([sup.end(), reader.end(), fresh.end()]);
+    }
   }, 30_000);
 
   it('without rights on storage.objects the RLS file still applies (WARNING, deploy not blocked)', async (ctx) => {

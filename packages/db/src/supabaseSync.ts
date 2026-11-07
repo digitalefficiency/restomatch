@@ -130,7 +130,11 @@ const STORAGE_ALTER = 'alter table storage.objects enable row level security;';
  * The source files (rls/*.sql, immutable) are not edited: a statement the rewrite
  * does not recognise makes the generator throw instead of guessing.
  * storage.objects (Supabase-owned; the migration role may lack LOCK rights) is
- * guarded the same way but left out of the up-front lock set.
+ * guarded the same way but left out of the up-front lock set. When a storage item is
+ * planned, the storage block tries storage.objects with NOWAIT (a few short retries)
+ * BEFORE touching it; busy, not lockable, or any lock_not_available inside it → a
+ * WARNING and the storage part is skipped. So storage contention can neither make the
+ * file wait while it holds the tenant locks nor roll back the tenant repair.
  * ────────────────────────────────────────────────────────────────────────── */
 
 interface RlsPlanItem {
@@ -299,10 +303,12 @@ language sql stable as $f$
   from pg_policy where polrelid = p_rel and polname = p_name
 $f$;
 
--- Comparable signature of a trigger: its definition with the table name blanked.
+-- Comparable signature of a trigger: its enabled state ('O' after CREATE; D/R/A after
+-- ALTER TABLE … DISABLE / ENABLE REPLICA / ENABLE ALWAYS TRIGGER) plus its definition with
+-- the table name blanked. tgenabled is "char": the ::text cast is required.
 create or replace function pg_temp.rm_trigger_sig(p_rel regclass, p_name text) returns text
 language sql stable as $f$
-  select regexp_replace(pg_get_triggerdef(oid), ' ON \\S+ ', ' ON _ ')
+  select tgenabled::text || ' ' || regexp_replace(pg_get_triggerdef(oid), ' ON \\S+ ', ' ON _ ')
   from pg_trigger where tgrelid = p_rel and tgname = p_name and not tgisinternal
 $f$;
 
@@ -444,6 +450,9 @@ ${rlsAppRoleGrantsSql().trim()}
 --    create policies on it, this logs a WARNING instead of failing the deploy —
 --    apply rls/0001 from the SQL editor then (the doctor / verify-cutover report it).
 --    Each policy is applied only if it differs (planned above, not in the lock phase).
+--    With storage work planned, storage.objects is taken NOWAIT first (short retries);
+--    if it is busy or not lockable this WARNs and skips storage only: the tenant
+--    repair above is never held up or rolled back by storage contention.
 do $$ begin
   if to_regclass('storage.buckets') is not null then
     -- SB-3: private, ≤11 MiB, invoice formats only (enforced by the Storage API).
@@ -460,19 +469,39 @@ do $$ begin
   end if;
 end $$;
 
-do $restomatch_storage$ begin
+do $restomatch_storage$
+declare got_lock boolean := false;
+begin
   if to_regclass('storage.objects') is null then
     raise notice 'restomatch: no storage schema — skipping storage policies';
     return;
   end if;
+  -- Storage work planned? Take storage.objects with NOWAIT first (the tenant tables may
+  -- already be locked above: never wait behind a storage reader while holding them).
+  if exists (select 1 from pg_temp.rm_todo where sch = 'storage') then
+    for i in 1..40 loop
+      begin
+        lock table storage.objects in access exclusive mode nowait;
+        got_lock := true;
+        exit;
+      exception
+        when lock_not_available then perform pg_sleep(0.05);
+        when insufficient_privilege then exit;
+      end;
+    end loop;
+    if not got_lock then
+      raise warning 'restomatch: storage.objects policies NOT applied: storage.objects busy or not lockable as % — re-run in a quiet window or run packages/db/drizzle/rls/0001_invoice_scans_rls.sql in the SQL editor', current_user;
+      return;
+    end if;
+  end if;
   begin
     perform ${storageRls[0]!.slice('select '.length)}
-  exception when insufficient_privilege then
+  exception when insufficient_privilege or lock_not_available then
     raise notice 'restomatch: storage.objects RLS not altered (%), Supabase enables it by default', sqlerrm;
   end;
   begin
 ${storageBody}
-  exception when insufficient_privilege then
+  exception when insufficient_privilege or lock_not_available then
     raise warning 'restomatch: storage.objects policies NOT applied as % (%) — run packages/db/drizzle/rls/0001_invoice_scans_rls.sql in the SQL editor', current_user, sqlerrm;
   end;
 end $restomatch_storage$;
