@@ -171,6 +171,10 @@ export function TeamClient({
               {t('invite.submit')}
             </Button>
           </form>
+          {/* W3-07b placeholder: "מה התפקיד רואה" — swaps to IA's roleLens (apps/web/lib/roleLens) once it lands. */}
+          <p className="mt-4 text-sm text-muted" data-testid="role-sees">
+            <span className="font-medium text-ink">{t('invite.roleSeesTitle')}</span> {t(`invite.roleSees.${role}`)}
+          </p>
         </Card>
       ) : (
         <Card padding="md" className="flex items-center gap-3 border-line text-sm text-muted">
