@@ -148,6 +148,19 @@ describe('role tools and redaction before the model (§5.3, §5.4)', () => {
   });
 });
 
+describe('conversation memory', () => {
+  it("a role switch never carries an owner's ₪ answer into a receiver turn", async () => {
+    __setAgentClient(recordedModel((_b, call) => (call === 0 ? toolUse('leak_hero') : final('הדליפה החודש בחשבונית אחת.'))).client);
+    const owner = await runAgent(appDb, fakeBinding(A, 'owner'), 'כמה דלף החודש?');
+    expect(owner.text).toContain('₪');
+    const m = recordedModel(() => final('יש משלוח אחד.'));
+    __setAgentClient(m.client);
+    await runAgent(appDb, fakeBinding(A, 'receiver'), 'מה מגיע היום?', { enableRoles: ['receiver'] });
+    expect(JSON.stringify(m.bodies[0]!.messages)).not.toContain('₪');
+    expect(m.bodies[0]!.messages).toHaveLength(1);
+  });
+});
+
 describe('grounding, ₪ and links (§5.5, §5.6)', () => {
   it('a grounded answer + server ₪ facts + one absolute go-link', async () => {
     const m = recordedModel((_b, call) => (call === 0 ? toolUse('leak_hero') : final('הדליפה החודש היא בחשבונית אחת.', [{ label: 'x', value: 1, unit: 'count', href: '/dashboard' }])));

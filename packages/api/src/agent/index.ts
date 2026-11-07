@@ -205,7 +205,8 @@ export async function runAgent(db: Database, binding: AgentBinding, text: string
   await assertAgentConnection(db);
   const now = opts.now ?? new Date();
   const env = opts.env ?? process.env;
-  const convKey = `${binding.restaurantId}:${binding.userId}`;
+  // Role in the key: a role switch never carries an earlier answer (₪) into a narrower role's context.
+  const convKey = `${binding.restaurantId}:${binding.userId}:${binding.role}`;
   const tools: string[] = [];
   let modelCalls = 0;
   let costMicroUsd = 0;
