@@ -42,11 +42,16 @@ export function stubVatRate(...rates: Array<string | null | undefined>): number 
  * realistic deviations so the reconciliation screen has something to show:
  * line 1 billed ~8% above the agreed price, line 2 billed one unit more than
  * ordered. Returns null when the receipt has no PO lines.
+ *
+ * Also the worker's demo-tenant OCR (apps/worker ocrInvoice.ts, mode 'stub'),
+ * which passes `invoicePrefix: 'DEMO-'`. Only ever for the demo identity: it
+ * fabricates lines, so a real tenant must never get it.
  */
 export async function buildDevOcrStub(
   db: Database,
   restaurantId: string,
   grId: string,
+  opts: { invoicePrefix?: string } = {},
 ): Promise<InvoiceOcrResult | null> {
   const [gr] = await db
     .select({
@@ -102,7 +107,7 @@ export async function buildDevOcrStub(
   const vat = round2(subtotal * vatRate);
   return {
     supplier: { name: gr.supplierName },
-    invoiceNumber: `DEV-${Date.now().toString(36).toUpperCase()}`,
+    invoiceNumber: `${opts.invoicePrefix ?? 'DEV-'}${Date.now().toString(36).toUpperCase()}`,
     // The restaurant's calendar day, not the UTC one: between 22:00 and 24:00 UTC
     // the UTC day is yesterday in Israel, and the scan then looked a day older
     // than its own receipt (hero month, "opened before the scan", the pay run).

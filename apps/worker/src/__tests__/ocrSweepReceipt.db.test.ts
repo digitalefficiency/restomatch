@@ -167,7 +167,7 @@ async function scanWithoutOcr(grId: string) {
  * the sweep wrote it. Then the OCR consumer is back and the queue drains.
  */
 async function sweepAndRead(invoiceId: string, mockProviders: unknown) {
-  const swept = await runOcrSweep(qsql, new Date(Date.now() + 12 * 60_000));
+  const swept = await runOcrSweep(qsql, new Date(Date.now() + 12 * 60_000), [restaurantId]);
   expect(swept.requeued).toEqual([invoiceId]);
   const [retry] = await qsql<Array<{ id: string; payload: Record<string, unknown> }>>`
     SELECT id::text, payload FROM job_queue WHERE dedupe_key = ${`ocr-sweep-${invoiceId}`}`;
