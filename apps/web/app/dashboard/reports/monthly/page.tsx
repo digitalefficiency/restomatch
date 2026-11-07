@@ -37,9 +37,9 @@ import '../report.css';
  *
  * The number is the report's own (`monthlyReport.preview`: the frozen snapshot
  * once the month closed, else live), shown once. The by-supplier/type rows are
- * the live breakdown (`owner.leakReport`) and must add up to it; when a closed
+ * the live breakdown (`monthlyReport.breakdown`) and must add up to it; when a closed
  * month's live rows no longer do, a neutral note says so (the number never
- * restates). Owner/manager, flag `monthlyReport`. Read-only: nothing is sent.
+ * restates). Owner, manager and bookkeeper (I3: she reads, read-only), flag `monthlyReport`. Read-only: nothing is sent.
  */
 export default async function MonthReportPage({
   searchParams,
@@ -163,7 +163,7 @@ export default async function MonthReportPage({
     const needSuppliers = data.nextActions.some((a) => a.code === 'talkToSupplier');
     const [prevHero, live] = await Promise.all([
       prevOffset >= -24 ? caller.owner.leakHero({ monthOffset: prevOffset }).catch(() => null) : Promise.resolve(null),
-      needSuppliers ? caller.owner.leakReport({ month }).catch(() => null) : Promise.resolve(null),
+      needSuppliers ? caller.monthlyReport.breakdown({ month }).catch(() => null) : Promise.resolve(null),
     ]);
     const delta = deltaOf(data.leakAgorot, prevHero ? toAgorot(prevHero.leakIls) : null);
     const prevName = formatDate(`${previousMonth(month)}-15T12:00:00Z`, locale, { month: 'long' });
@@ -335,7 +335,7 @@ export default async function MonthReportPage({
 
   /* ───────────────────────── לפי ספק וסוג ───────────────────────── */
   async function ByTab() {
-    const report = await caller.owner.leakReport({ month });
+    const report = await caller.monthlyReport.breakdown({ month });
     const bySupplier = report.bySupplier;
     const supplierTotal = totalsOf(
       bySupplier.map((r) => r.leakIls),

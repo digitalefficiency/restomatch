@@ -115,7 +115,9 @@ describe('feature flag', () => {
 
   it('keeps role gates: a receiver cannot read the tracker or the report', async () => {
     await expect(caller('receiver').recovery.summary()).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    await expect(caller('bookkeeper').monthlyReport.preview()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller('receiver').monthlyReport.preview()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    // Owner decision I3 (7.11): the bookkeeper reads the month report, read-only (W3-08).
+    await expect(caller('bookkeeper').monthlyReport.preview()).resolves.toBeTruthy();
     await expect(caller('bookkeeper').recovery.summary()).resolves.toBeTruthy();
   });
 });
@@ -456,7 +458,9 @@ describe('monthly report', () => {
     expect(d.sendOn).toMatch(/^\d{4}-\d{2}-01$/);
     expect(d.subject.length).toBeGreaterThan(0);
     expect(await db.select().from(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, T.restaurantId))).toHaveLength(0);
-    await expect(caller('bookkeeper').monthlyReport.digest()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller('receiver').monthlyReport.digest()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    // Owner decision I3 (7.11): the bookkeeper reads the digest too (W3-08).
+    await expect(caller('bookkeeper').monthlyReport.digest()).resolves.toMatchObject({ data: { month: d.data.month } });
   });
 
   it('sendMonthlyReports skips restaurants without the flag', async () => {

@@ -163,13 +163,15 @@ describe('ROUTE_ROLES generated from the registry', () => {
     Object.fromEntries(Object.entries(m).map(([k, v]) => [k, [...v].sort()]));
 
   it("equals today's map except the supplier ledger and the invoice page, which drop the receiver", () => {
-    const { ['/dashboard/suppliers/ledger']: ledger, ['/dashboard/invoices']: invoices, ['/dashboard/orders']: orders, ...rest } = ROUTE_ROLES;
+    const REPORTS = ['/dashboard/reports', '/dashboard/reports/monthly', '/dashboard/reports/digest'];
+    const without = (m: Record<string, UserRole[]>) => Object.fromEntries(Object.entries(m).filter(([k]) => !REPORTS.includes(k)));
+    const { ['/dashboard/suppliers/ledger']: ledger, ['/dashboard/invoices']: invoices, ['/dashboard/orders']: orders, ...rest } = without(ROUTE_ROLES);
     const {
       ['/dashboard/suppliers/ledger']: ledgerBefore,
       ['/dashboard/invoices']: invoicesBefore,
       ['/dashboard/orders']: ordersBefore,
       ...restBefore
-    } = ROUTE_ROLES_BEFORE;
+    } = without(ROUTE_ROLES_BEFORE);
     expect(sorted(rest)).toEqual(sorted(restBefore));
     // The only deltas (owner decision 2026-10-25: the receiver sees no ₪) tighten, never loosen:
     // no supplier ledger (₪ totals) and no invoice page (unit prices, line totals, VAT ₪).
@@ -180,6 +182,11 @@ describe('ROUTE_ROLES generated from the registry', () => {
     // The one loosening, owner decision 31.10 (pilot): the chef orders freely.
     expect(ordersBefore).toEqual(['owner', 'manager']);
     expect(orders).toEqual(['owner', 'manager', 'chef']);
+    // Owner decision I3 (7.11): the bookkeeper reads "דוח החודש" (W3-08); receiver and chef still never.
+    for (const p of REPORTS) {
+      expect(ROUTE_ROLES_BEFORE[p]).toEqual(['owner', 'manager']);
+      expect(ROUTE_ROLES[p]).toEqual(['owner', 'manager', 'bookkeeper']);
+    }
     // The printable leak report keeps inheriting /leaks (no silent bounce for the bookkeeper's button).
     expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
     expect(allowedRolesForPath('/dashboard/leaks/report')).toContain('bookkeeper');
@@ -207,7 +214,9 @@ describe('ROUTE_ROLES generated from the registry', () => {
       const was = before(concrete) ?? ALL_ROLES;
       // Owner decision 31.10 (pilot): the chef opens orders (list, detail, new, capture).
       const ordersChef = (role: UserRole) => role === 'chef' && (concrete === '/dashboard/orders' || concrete.startsWith('/dashboard/orders/'));
-      for (const role of now) if (!ordersChef(role)) expect(was, `${role} on ${concrete}`).toContain(role);
+      // Owner decision I3 (7.11): the bookkeeper reads the month report (W3-08).
+      const reportsBookkeeper = (role: UserRole) => role === 'bookkeeper' && (concrete === '/dashboard/reports' || concrete.startsWith('/dashboard/reports/'));
+      for (const role of now) if (!ordersChef(role) && !reportsBookkeeper(role)) expect(was, `${role} on ${concrete}`).toContain(role);
     }
   });
 });

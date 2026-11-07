@@ -93,3 +93,31 @@ test('D11: Frank Ruhl Libre on the cover only, never on ₪', async ({ page }) =
   const shekelsInDisplay = await page.locator('.report-display').evaluateAll((els) => els.filter((e) => /₪/.test(e.textContent ?? '')).length);
   expect(shekelsInDisplay).toBe(0);
 });
+
+/** The seeded demo password (packages/db/scripts/seed.ts DEFAULT_DEMO_PASSWORD), as in W1-03. */
+const PASSWORD = process.env.DEMO_PASSWORD ?? 'RestoMatch-Demo-2026!';
+
+test.describe('owner decision I3: the bookkeeper reads the month report', () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  test('all 3 tabs and the digest open for the bookkeeper, read-only', async ({ page }) => {
+    await page.goto('/login');
+    await page.locator('form:has(#password) [name=email]').fill('bookkeeper@kfar-hazeitim.test');
+    await page.locator('#password').fill(PASSWORD);
+    await page.locator('form:has(#password) button[type=submit]').click();
+    await page.waitForURL(/\/dashboard/, { timeout: 60_000 });
+
+    for (const tab of ['proof', 'by', 'sent'] as const) {
+      const res = await page.goto(`/dashboard/reports/monthly?tab=${tab}`);
+      expect(res?.status(), tab).toBe(200);
+      await page.waitForLoadState('networkidle');
+      await expect(page.getByTestId(`report-tab-${tab}`)).toHaveAttribute('aria-current', 'page');
+      await expect(page.getByTestId(`report-${tab}`)).toBeVisible();
+    }
+    await page.goto('/dashboard/reports/digest');
+    await expect(page).toHaveURL(/tab=sent/);
+    await expect(page.getByTestId('report-sent')).toBeVisible();
+    // Read-only: nothing to send from here.
+    await expect(page.getByTestId('report-copy-me')).toBeDisabled();
+  });
+});
