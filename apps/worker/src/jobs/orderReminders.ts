@@ -12,6 +12,7 @@
 import {
   briefDedupeKey,
   briefOptionOn,
+  briefPayload,
   enqueueNotification,
   newOrderPath,
   orderReminderBrief,
@@ -183,7 +184,7 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
           subject: msg.subject,
           body: msg.text,
           html: msg.html,
-          payload: { automationId: msg.automationId },
+          payload: briefPayload(msg),
           relatedEntityType: 'supplier',
           relatedEntityId: s.id,
           dedupeKey: briefDedupeKey(msg, restaurant.id, recipient.userId),

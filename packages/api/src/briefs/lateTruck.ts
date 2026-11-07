@@ -22,6 +22,8 @@ export interface LateTruckInput extends BriefContext {
   lineCount: number;
   contactWhatsapp?: string | null;
   contactEmail?: string | null;
+  /** The PO's invoice, if one already arrived (AU-07 KPI join); usually absent for a late truck. */
+  invoiceId?: string | null;
 }
 
 /** The supplier-facing question (Hebrew always: it is the supplier's text). */
@@ -71,6 +73,7 @@ export function lateTruckManagerBrief(input: LateTruckInput): LateTruckManagerMe
     deepLink,
     dedupeSuffix: `${input.poId}:d${input.daysLate}`,
     automationId: 'A6',
+    ...(input.invoiceId ? { invoiceId: input.invoiceId } : {}),
     whatsappLink: wa,
     mailtoLink: mail,
   };
@@ -78,7 +81,7 @@ export function lateTruckManagerBrief(input: LateTruckInput): LateTruckManagerMe
 
 /** Day 1 only; any other chase day → `null`. No ₪, no supplier contact. */
 export function lateTruckReceiverBrief(
-  input: Pick<LateTruckInput, 'restaurantId' | 'baseUrl' | 'locale' | 'poId' | 'supplierName' | 'expectedAt' | 'daysLate'>,
+  input: Pick<LateTruckInput, 'restaurantId' | 'baseUrl' | 'locale' | 'poId' | 'supplierName' | 'expectedAt' | 'daysLate' | 'invoiceId'>,
 ): BriefMessage | null {
   if (input.daysLate !== 1) return null;
   const locale = input.locale ?? 'he';
@@ -88,5 +91,5 @@ export function lateTruckReceiverBrief(
   const subject = c.receiverSubject(input.supplierName);
   const text = `${line}\n\n${c.receiverCta}: ${deepLink}`;
   const html = briefHtml({ locale, preview: line, heading: subject, lines: [{ text: line }], cta: { label: c.receiverCta, url: deepLink } });
-  return { subject, text, html, deepLink, dedupeSuffix: `${input.poId}:d1`, automationId: 'A6' };
+  return { subject, text, html, deepLink, dedupeSuffix: `${input.poId}:d1`, automationId: 'A6', ...(input.invoiceId ? { invoiceId: input.invoiceId } : {}) };
 }

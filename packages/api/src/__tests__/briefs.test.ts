@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   briefDedupeKey,
+  briefPayload,
   eveningBrief,
   findingIdentity,
   goLink,
@@ -269,5 +270,18 @@ describe('link helpers are linear on hostile input (CodeQL)', () => {
     expect(mailtoLink('a@@b.c', 's', 'b')).toBeNull();
     expect(mailtoLink('@b.c', 's', 'b')).toBeNull();
     expect(Date.now() - t0).toBeLessThan(500);
+  });
+});
+
+describe('payload.invoiceId (AU-07 "acted within 48 h" join)', () => {
+  it('A7 always carries the invoice; A6 only when the PO has one; others never', () => {
+    const a7 = matchAlertBrief({ ...ctx, invoiceId: 'inv-1', invoiceRef: '1', supplierName: 's', newKeys: ['k'], leakAgorot: null })!;
+    expect(briefPayload(a7)).toEqual({ automationId: 'A7', invoiceId: 'inv-1' });
+    const late = { ...ctx, poId: 'po-1', poRef: '1', supplierName: 's', restaurantName: 'r', expectedAt: at('2026-10-24T06:00:00Z'), daysLate: 1, lineCount: 1 };
+    expect(briefPayload(lateTruckManagerBrief(late))).toEqual({ automationId: 'A6' });
+    expect(briefPayload(lateTruckManagerBrief({ ...late, invoiceId: 'inv-9' }))).toEqual({ automationId: 'A6', invoiceId: 'inv-9' });
+    expect(briefPayload(lateTruckReceiverBrief({ ...late, invoiceId: 'inv-9' })!)).toEqual({ automationId: 'A6', invoiceId: 'inv-9' });
+    const a5 = orderReminderBrief({ ...ctx, ilDate: 'd', supplierId: 's', supplierName: 's', orderDayLabel: 'x' });
+    expect(briefPayload(a5)).toEqual({ automationId: 'A5' });
   });
 });

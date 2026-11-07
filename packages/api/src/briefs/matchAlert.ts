@@ -70,5 +70,5 @@ export function matchAlertBrief(input: MatchAlertInput): BriefMessage | null {
     lines: [{ text: line }, ...(ilsLine ? [{ text: ilsLine }] : [])],
     cta: { label: c.cta, url: deepLink },
   });
-  return { subject, text, html, deepLink, dedupeSuffix: `${input.invoiceId}:${identitySetHash(input.newKeys)}`, automationId: 'A7' };
+  return { subject, text, html, deepLink, dedupeSuffix: `${input.invoiceId}:${identitySetHash(input.newKeys)}`, automationId: 'A7', invoiceId: input.invoiceId };
 }

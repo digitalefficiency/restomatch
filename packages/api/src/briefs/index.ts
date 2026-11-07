@@ -24,6 +24,14 @@ export {
   type MatchAlertInput,
 } from './matchAlert';
 
+/**
+ * The outbox `payload` every AU-04 send carries: `automationId` (AU-07 KPI hook)
+ * and, when the message concerns one invoice, `invoiceId`.
+ */
+export function briefPayload(msg: { automationId: string; invoiceId?: string }): Record<string, string> {
+  return msg.invoiceId ? { automationId: msg.automationId, invoiceId: msg.invoiceId } : { automationId: msg.automationId };
+}
+
 /** The outbox dedupe key shape every AU-04 send uses: `au:<A-id>:<rid>:<recipientId>:<suffix>`. */
 export function briefDedupeKey(
   msg: { automationId: string; dedupeSuffix: string },
