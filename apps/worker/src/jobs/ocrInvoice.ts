@@ -13,6 +13,7 @@ import { HELD_FOR_RECEIPTS_KEY, receiptsBeingCountedForScan } from '@restomatch/
 import { and, eq, findDemoTenants, invoiceLines, invoices, ne, restaurants, sql, suppliers, type Database } from '@restomatch/db';
 import {
   ClaudeVision,
+  isOcrExtractionError,
   runOcrPipeline,
   StubOcrProvider,
   type CatalogMatcherFn,
@@ -225,12 +226,11 @@ function realProviders(usage?: OcrUsage): { documentAi: OcrProvider; claude: Ocr
       usage.outputTokens += u.output_tokens ?? 0;
     },
   });
-  if (usage) usage.model = process.env.OCR_CLAUDE_MODEL ?? OCR_DEFAULT_MODEL;
+  // The model the call will use (the instance resolves OCR_CLAUDE_MODEL and the
+  // package default); replaced by the provider's own meta.model after a read.
+  if (usage) usage.model = claude.model;
   return { documentAi: claude, claude };
 }
-
-/** packages/ocr ClaudeVision's default when OCR_CLAUDE_MODEL is unset (log only). */
-const OCR_DEFAULT_MODEL = 'claude-opus-4-8';
 
 /** One stub instance in both slots: the pipeline calls it once and sees full agreement. */
 function stubProviders(result: InvoiceOcrResult): { documentAi: OcrProvider; claude: OcrProvider } {
@@ -397,6 +397,10 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
       }),
       ocrJobDeadlineMs(),
     );
+
+    // The cost log names the model the provider reports it used (meta.model).
+    const metaModel = (result.primary as { meta?: { model?: unknown } } | undefined)?.meta?.model;
+    if (typeof metaModel === 'string' && metaModel) usage.model = metaModel;
 
     const r = result.reconciled;
     // From the provider's own extraction: the reconciler keeps only the fields it
@@ -578,7 +582,7 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
         console.error(`[ocr-invoice] could not mark invoice=${job.data.invoiceId} failed`, e),
       );
     }
-    outcome = `failed=${err instanceof Error ? err.name : 'error'} class=${kind.retryable ? 'retryable' : 'terminal'}${final ? '' : ' retry=1'}`;
+    outcome = `failed=${err instanceof Error ? err.name : 'error'}${isOcrExtractionError(err) ? ` code=${err.code}` : ''} class=${kind.retryable ? 'retryable' : 'terminal'}${final ? '' : ' retry=1'}`;
     if (!kind.retryable && err instanceof Error && !err.message.startsWith(TERMINAL_JOB_ERROR)) {
       err.message = `${TERMINAL_JOB_ERROR}${err.message}`;
     }
@@ -851,7 +855,11 @@ export type OcrFailureReason =
   | 'ocr_disabled'
   | 'scan_url_refused'
   | 'unsupported_format'
-  | 'stalled';
+  | 'stalled'
+  /** The model's answer could not be used (cut off, declined, not the schema) — a person reads it. */
+  | 'unreadable'
+  /** Anthropic refused the credentials / model / endpoint (401/403/404) — configuration, not the scan. */
+  | 'provider_config';
 
 /**
  * Retry or not (ocr-invoice has 2 attempts — packages/queue MAX_ATTEMPTS).
@@ -861,9 +869,11 @@ export type OcrFailureReason =
  * connections, and an answer that did not parse (no JSON / schema mismatch).
  *
  * Terminal — a retry fails the same way and costs another call: quota exceeded,
- * an unsupported or unreadable format (Anthropic 400 on the document, 4xx on the
- * scan fetch — an expired / missing signed URL), and anything unrecognised
- * (spend-safe default). The tenant guard and ocr_disabled never reach here (the
+ * packages/ocr's typed OcrExtractionError (max_tokens / refusal / invalid_output
+ * → 'unreadable'; unsupported_format; a 4xx scan download), Anthropic 401/403/404
+ * ('provider_config'), another 4xx on the document, and anything unrecognised
+ * (spend-safe default). A typed fetch_failed that is a 5xx / timeout / network
+ * error is retryable. The tenant guard and ocr_disabled never reach here (the
  * guard throws terminal before the read; disabled returns without a call).
  */
 export function classifyOcrError(err: unknown): { retryable: boolean; reason?: OcrFailureReason } {
@@ -871,6 +881,27 @@ export function classifyOcrError(err: unknown): { retryable: boolean; reason?: O
   const name = e.name ?? '';
   const msg = e.message ?? String(err ?? '');
   if (name === 'QuotaExceededError') return { retryable: false, reason: 'quota_exceeded' };
+  // packages/ocr's typed failures (#174). They are reviewable by contract: the
+  // same document fails the same way, so a person reads it — no second paid
+  // call. The one exception is a scan download that failed transiently.
+  if (isOcrExtractionError(err)) {
+    switch (err.code) {
+      case 'unsupported_format':
+        return { retryable: false, reason: 'unsupported_format' };
+      case 'max_tokens':
+      case 'refusal':
+      case 'invalid_output':
+        return { retryable: false, reason: 'unreadable' };
+      case 'fetch_failed': {
+        const http = Number(/HTTP (\d{3})/.exec(msg)?.[1] ?? NaN);
+        if (http === 429 || http >= 500 || /timed? ?out|network error/i.test(msg)) return { retryable: true };
+        // A 4xx on our own signed URL: the object is gone or the link expired.
+        return { retryable: false, reason: 'unsupported_format' };
+      }
+      default:
+        return { retryable: false, reason: 'extraction_failed' };
+    }
+  }
   const status = typeof e.status === 'number' ? e.status : Number(/\((\d{3})\)/.exec(msg)?.[1] ?? NaN);
   if (status === 429 || status >= 500) return { retryable: true };
   if (/timed? ?out|timeout/i.test(msg) || /Timeout|AbortError/.test(name)) return { retryable: true };
@@ -878,6 +909,9 @@ export function classifyOcrError(err: unknown): { retryable: boolean; reason?: O
     return { retryable: true };
   }
   if (name === 'ZodError' || name === 'SyntaxError' || /no JSON object found|Unexpected token|JSON/i.test(msg)) return { retryable: true };
+  // Anthropic refusing the key / model / endpoint is configuration, not the scan.
+  // (The SDK's own `status` only — a code parsed from a message may be the scan's.)
+  if (e.status === 401 || e.status === 403 || e.status === 404) return { retryable: false, reason: 'provider_config' };
   if (status >= 400 && status < 500) return { retryable: false, reason: 'unsupported_format' };
   if (/unsupported|media.?type|could not process image|invalid image/i.test(msg)) return { retryable: false, reason: 'unsupported_format' };
   return { retryable: false, reason: 'extraction_failed' };

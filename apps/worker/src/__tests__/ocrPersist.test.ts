@@ -19,6 +19,10 @@ vi.mock('@restomatch/ocr', async (importOriginal) => {
   class FakeClaudeVision {
     readonly id = 'claude_vision' as const;
     constructor(private readonly opts: { onUsage?: (u: { input_tokens?: number; output_tokens?: number }) => void }) {}
+    /** Like ClaudeVision's getter: the model the call will use. */
+    get model() {
+      return 'claude-opus-4-8';
+    }
     async extract() {
       if (h.during) await h.during();
       this.opts.onUsage?.({ input_tokens: 2000, output_tokens: 500 });
@@ -212,6 +216,15 @@ describe('processOcrInvoice persistence (DB)', () => {
     expect(line).toMatch(/kind=consolidated .* model=claude-opus-4-8 tokens=2000\/500 ms=\d+ usd=0\.0225/);
     expect(line).not.toContain('scans.test');
     expect(line).not.toContain('עגבניות');
+  });
+
+  it("the cost log names the model the provider reports (meta.model), over the configured one", async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    h.result = { ...base, meta: { model: 'claude-sonnet-5-5', effort: 'low', usage: { inputTokens: 2000, outputTokens: 500 }, elapsedMs: 1 } };
+    const id = await newInvoice();
+    await run(id);
+    const line = log.mock.calls.map((c) => String(c[0])).find((l) => l.startsWith('[ocr-invoice] mode=claude'))!;
+    expect(line).toMatch(/model=claude-sonnet-5-5 tokens=2000\/500 ms=\d+ usd=0\.0090/);
   });
 
   it('consolidated with no known supplier: held for a human (review reason), no match — never guessed', async () => {

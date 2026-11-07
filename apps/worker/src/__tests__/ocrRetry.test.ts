@@ -32,6 +32,7 @@ vi.mock('@restomatch/api', async (importOriginal) => {
 });
 
 const { classifyOcrError, OcrDeadlineError, withOcrDeadline } = await import('../jobs/ocrInvoice');
+const { OcrExtractionError } = await import('@restomatch/ocr');
 const { NOT_FOUND_REFUSAL } = await import('../jobs/ocrSweep');
 const { runQueuedJobs } = await import('../serverless');
 
@@ -77,8 +78,29 @@ describe('classifyOcrError', () => {
     ['Anthropic 400 on the document', apiError(400, 'Could not process image'), 'unsupported_format'],
     ['expired signed URL (403)', new Error('Anthropic: failed to fetch document (403) from https://…'), 'unsupported_format'],
     ['unknown → spend-safe terminal', new Error('something odd'), 'extraction_failed'],
+    ['Anthropic 401 (bad key)', apiError(401, 'invalid x-api-key'), 'provider_config'],
+    ['Anthropic 403', apiError(403, 'permission denied'), 'provider_config'],
+    ['Anthropic 404 (unknown model)', apiError(404, 'model not found'), 'provider_config'],
   ])('%s → terminal (%s)', (_l, err, reason) => {
     expect(classifyOcrError(err)).toEqual({ retryable: false, reason });
+  });
+
+  // packages/ocr's typed failures (#174, errors.ts): reviewable by contract — a
+  // person reads it, no second paid call — except a transient scan download.
+  it.each([
+    ['max_tokens', new OcrExtractionError('max_tokens', 'the answer was cut off at max_tokens'), { retryable: false, reason: 'unreadable' }],
+    ['refusal', new OcrExtractionError('refusal', 'the model declined (category: none)'), { retryable: false, reason: 'unreadable' }],
+    ['invalid_output (no JSON)', new OcrExtractionError('invalid_output', 'no JSON object found in the response (12 chars)'), { retryable: false, reason: 'unreadable' }],
+    ['invalid_output (schema)', new OcrExtractionError('invalid_output', 'the JSON does not match the invoice schema (lines)'), { retryable: false, reason: 'unreadable' }],
+    ['unsupported_format (HEIC)', new OcrExtractionError('unsupported_format', 'HEIC/HEIF photo; send a JPEG, PNG or PDF'), { retryable: false, reason: 'unsupported_format' }],
+    ['fetch_failed HTTP 503', new OcrExtractionError('fetch_failed', 'document download failed (HTTP 503)'), { retryable: true }],
+    ['fetch_failed HTTP 429', new OcrExtractionError('fetch_failed', 'document download failed (HTTP 429)'), { retryable: true }],
+    ['fetch_failed timeout', new OcrExtractionError('fetch_failed', 'document download timed out after 20000ms'), { retryable: true }],
+    ['fetch_failed network', new OcrExtractionError('fetch_failed', 'document download failed (network error)'), { retryable: true }],
+    ['fetch_failed HTTP 403 (expired link)', new OcrExtractionError('fetch_failed', 'document download failed (HTTP 403)'), { retryable: false, reason: 'unsupported_format' }],
+    ['fetch_failed HTTP 404', new OcrExtractionError('fetch_failed', 'document download failed (HTTP 404)'), { retryable: false, reason: 'unsupported_format' }],
+  ])('typed %s', (_l, err, expected) => {
+    expect(classifyOcrError(err)).toEqual(expected);
   });
 });
 
@@ -164,6 +186,15 @@ describe('ocr-invoice through the serverless runner (Postgres queue)', () => {
     expect(row.last_error!.startsWith(TERMINAL_JOB_ERROR)).toBe(true);
     expect(h.calls).toBe(1);
     expect((await invoice(invoiceId)).ocrPayload?.raw).toEqual({ ocrFailed: true, reason: 'unsupported_format' });
+  });
+
+  it("a typed OcrExtractionError (max_tokens) is final at attempt 1 as 'unreadable': no second paid call", async () => {
+    h.script = [new OcrExtractionError('max_tokens', 'the answer was cut off at max_tokens'), extraction];
+    const { invoiceId, jobId } = await queued();
+    expect(await run()).toMatchObject({ ran: 1, failed: 1, retried: 0 });
+    expect(await jobRow(jobId)).toMatchObject({ status: 'failed', attempts: 1 });
+    expect(h.calls).toBe(1);
+    expect((await invoice(invoiceId)).ocrPayload?.raw).toEqual({ ocrFailed: true, reason: 'unreadable' });
   });
 
   it('quota exceeded is terminal: no read, no retry', async () => {
