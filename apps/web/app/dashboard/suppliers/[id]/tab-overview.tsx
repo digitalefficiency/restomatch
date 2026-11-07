@@ -39,7 +39,7 @@ export async function SupplierOverviewTab({ supplierId, leakCard }: { supplierId
   }
   // The credit-request letter ₪ (the claims page's own model) — never the open
   // leak, which would count the lines still awaiting a decision twice.
-  if (card && card.letterAgorot > 0) {
+  if (card && card.letterAgorot != null && card.letterAgorot > 0) {
     cards.push({
       key: 'claim',
       label: t('overview.openToClaim'),
