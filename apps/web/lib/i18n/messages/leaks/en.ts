@@ -196,7 +196,7 @@ export const en: Shape<typeof he> = {
     statusTitle: 'What happened to the money',
     found: 'Found',
     foundHint: 'Sum of this month’s discrepancy lines',
-    caughtChip: '{amount} can still be stopped before payment',
+    caughtChip: '{amount} identified before payment approval',
     stillOpen: 'Awaiting a decision',
     claimed: 'Approved to claim',
     claimedHint: '{count} lines · {suppliers} suppliers',

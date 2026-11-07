@@ -202,7 +202,7 @@ export const he = {
     statusTitle: 'מה קרה לכסף',
     found: 'נמצא',
     foundHint: 'סכום שורות הפער החודש',
-    caughtChip: '{amount} עוד אפשר לעצור לפני תשלום',
+    caughtChip: '{amount} זוהו לפני אישור התשלום',
     stillOpen: 'ממתין להחלטה',
     claimed: 'אושר לדרישה',
     claimedHint: '{count} שורות · {suppliers} ספקים',
