@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
-// Process-local limiter store (no DB) — set before the import so rateLimit.ts picks memory.
-delete process.env.DATABASE_URL;
-delete process.env.DATABASE_URL_APP;
-delete process.env.TRUSTED_PROXY_HOPS;
-process.env.APP_URL = 'http://localhost:3000';
+// Never mutate process.env here: the web suites share one fork (vitest.config
+// singleFork), so a deleted DATABASE_URL leaks into every later file. The limiter
+// uses whatever store the config gives (Postgres in CI); each run gets its own
+// random client-IP range so counters from earlier runs never collide.
+const RUN = `${10 + Math.floor(Math.random() * 200)}.${Math.floor(Math.random() * 250)}`;
 
 let h: typeof import('../handler');
 beforeAll(async () => {
@@ -14,7 +14,7 @@ beforeAll(async () => {
 const CLAIM = '0b8a2f36-3b0e-4b55-9a77-5d7c2e8f9a10';
 let n = 0;
 /** Each test gets its own fake client IP, so the limiters don't bleed between tests. */
-const ip = () => `10.0.${Math.floor(++n / 250)}.${n % 250}`;
+const ip = () => `${RUN}.${Math.floor(++n / 250)}.${n % 250}`;
 
 function post(token: string, body: unknown, opts: { ip?: string; origin?: string | null; method?: string; raw?: string } = {}) {
   const headers: Record<string, string> = { 'content-type': 'application/json', host: 'localhost:3000', 'x-forwarded-for': opts.ip ?? '10.9.9.9' };
