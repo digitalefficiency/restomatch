@@ -126,4 +126,23 @@ export const nav: Shape<typeof he> = {
     ownerNotified: 'تم إبلاغ صاحب المطعم.',
   },
   loading: 'جارٍ التحميل',
+  badge: {
+    items: '{count} عناصر',
+    atRisk: '{amount} معرّض للخطر',
+    blocking: 'يوقف الدفع',
+  },
+  bell: {
+    label: 'بانتظارك',
+    unseen: '{count} جديد',
+    title: 'بانتظارك',
+    empty: 'كل شيء منجز من جهتك ✓',
+    close: 'إغلاق',
+    all: 'إلى الصفحة الرئيسية',
+    failed: 'لم يتم التحميل · حاول مرة أخرى',
+    retry: 'حاول مرة أخرى',
+  },
+  whereIs: {
+    belongs: 'هذا السجل يتبع {branch}',
+    open: 'افتحه هناك',
+  },
 };

@@ -1,22 +1,13 @@
 import Link from 'next/link';
 import { ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/components';
+import { Money } from '@/lib/components/money';
 
-export type NeedTone = 'danger' | 'warn' | 'neutral';
+import type { TaskRow } from '@/lib/components/notifications/rows';
 
-export interface NeedRow {
-  key: string;
-  tone: NeedTone;
-  label: string;
-  /** The ₪ (formatIls) or count that the landing list repeats. */
-  value: string;
-  sub?: string;
-  /** Muted side items that are NOT part of the value (e.g. duplicates incl. VAT). */
-  notes?: string;
-  /** One verb that names what the tap does. */
-  verb: string;
-  href: string;
-}
+export type NeedTone = TaskRow['tone'];
+/** A "מחכה לך" row: the task spine's row (₪ in agorot via <Money>, or a count). */
+export type NeedRow = TaskRow;
 
 const rail: Record<NeedTone, string> = {
   danger: 'before:bg-danger',
@@ -33,6 +24,7 @@ export function NeedsYou({
   title,
   rows,
   zero,
+  zeroTone = 'good',
   moreLabel,
   phoneMax = 3,
   deskMax = 5,
@@ -40,6 +32,8 @@ export function NeedsYou({
   title: string;
   rows: NeedRow[];
   zero: string;
+  /** `good` (T3) only when the whole restaurant is clear; `neutral` when it waits on others. */
+  zeroTone?: 'good' | 'neutral';
   moreLabel: (count: number) => string;
   phoneMax?: number;
   deskMax?: number;
@@ -54,9 +48,10 @@ export function NeedsYou({
       {rows.length === 0 ? (
         <p
           data-testid="needs-you-zero"
-          className="flex min-h-12 items-center gap-2 rounded-2xl border border-line bg-surface px-4 text-sm font-semibold text-primary"
+          data-tone={zeroTone}
+          className={cn('flex min-h-12 items-center gap-2 rounded-2xl border border-line bg-surface px-4 text-sm font-semibold', zeroTone === 'good' ? 'text-primary' : 'text-ink')}
         >
-          <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+          {zeroTone === 'good' ? <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" /> : null}
           {zero}
         </p>
       ) : (
@@ -70,7 +65,7 @@ export function NeedsYou({
           </ul>
           {hiddenOnPhone > 0 ? (
             <details className="mt-2 lg:hidden" data-testid="needs-you-more">
-              <summary className="flex min-h-12 cursor-pointer list-none items-center justify-center rounded-xl text-sm font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 [&::-webkit-details-marker]:hidden">
+              <summary className="flex min-h-12 cursor-pointer list-none items-center justify-center rounded-xl text-sm font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [&::-webkit-details-marker]:hidden">
                 {moreLabel(hiddenOnPhone)}
               </summary>
               <ul className="mt-2 grid grid-cols-1 gap-2">
@@ -98,13 +93,13 @@ function NeedLink({ row }: { row: NeedRow }) {
         // T2 row-tone rail (3 px) on the start edge.
         "before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:content-['']",
         rail[row.tone],
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2',
       )}
     >
       <span className="min-w-0">
         <span className="block truncate text-xs font-semibold text-muted">{row.label}</span>
         <span className="block text-2xl font-bold leading-7 tabular-nums text-ink" data-testid={`needs-${row.key}-value`}>
-          <bdi>{row.value}</bdi>
+          {row.agorot !== null ? <Money agorot={row.agorot} context="tile" decimals={row.decimals} /> : <bdi>{row.countText}</bdi>}
         </span>
         {row.sub ? (
           <span className="block truncate text-xs text-muted" data-testid={`needs-${row.key}-sub`}>

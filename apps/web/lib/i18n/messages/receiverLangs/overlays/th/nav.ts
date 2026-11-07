@@ -126,4 +126,23 @@ export const nav: Shape<typeof he> = {
     ownerNotified: 'แจ้งเจ้าของร้านแล้ว',
   },
   loading: 'กำลังโหลด',
+  badge: {
+    items: '{count} รายการ',
+    atRisk: '{amount} มีความเสี่ยง',
+    blocking: 'ระงับการชำระเงิน',
+  },
+  bell: {
+    label: 'รอคุณอยู่',
+    unseen: 'ใหม่ {count}',
+    title: 'รอคุณอยู่',
+    empty: 'ฝั่งคุณเรียบร้อยแล้ว ✓',
+    close: 'ปิด',
+    all: 'ไปหน้าแรก',
+    failed: 'โหลดไม่สำเร็จ · ลองอีกครั้ง',
+    retry: 'ลองอีกครั้ง',
+  },
+  whereIs: {
+    belongs: 'รายการนี้เป็นของ {branch}',
+    open: 'เปิดที่นั่น',
+  },
 };

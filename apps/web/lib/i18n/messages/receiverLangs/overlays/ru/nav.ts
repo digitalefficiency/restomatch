@@ -126,4 +126,23 @@ export const nav: Shape<typeof he> = {
     ownerNotified: 'Владелец уже получил уведомление.',
   },
   loading: 'Загрузка',
+  badge: {
+    items: '{count} шт.',
+    atRisk: '{amount} под риском',
+    blocking: 'блокирует оплату',
+  },
+  bell: {
+    label: 'Ждёт вас',
+    unseen: 'новых: {count}',
+    title: 'Ждёт вас',
+    empty: 'У вас всё сделано ✓',
+    close: 'Закрыть',
+    all: 'На главную',
+    failed: 'Не загрузилось · попробуйте ещё раз',
+    retry: 'Попробовать ещё раз',
+  },
+  whereIs: {
+    belongs: 'Эта запись относится к {branch}',
+    open: 'Открыть там',
+  },
 };

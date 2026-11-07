@@ -31,6 +31,7 @@ import {
 import { DashboardSearch } from './search';
 import { WorkerStatusBanner, readWorkerStatus } from './worker-status';
 import { TrpcProvider } from '@/lib/trpc/client';
+import { Bell, NavBadgesProvider } from '@/lib/components/notifications';
 import { enabledFeatures } from '@/lib/ingest/features';
 import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
 
@@ -151,7 +152,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const multiBranch = memberships.length > 1;
 
   const viewer: NavViewer = { role: active.role, features, showChain };
-  const badges = { contracts: wave1Access.openAlerts };
   const rail = cookieStore.get(RAIL_COOKIE)?.value === '1';
 
   async function logout() {
@@ -167,6 +167,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <TrpcProvider identity={{ id: userId, email, restaurantId: session.user.restaurantId ?? null }}>
       <ToastProvider>
         <NavProvider value={{ ...viewer, branch: multiBranch ? active.restaurantName : null }}>
+          <NavBadgesProvider>
           <style>{CHROME_VARS}</style>
           <a
             href="#main-content"
@@ -179,7 +180,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <RouteFocus />
           <ShellFrame initialRail={rail}>
             <header className="sticky top-0 z-40 border-b border-line bg-surface lg:ps-[var(--rm-sidebar-w)]">
-              <Sidebar viewer={viewer} badges={badges} restaurantName={active.restaurantName} roleLabel={roleLabel} />
+              <Sidebar viewer={viewer} restaurantName={active.restaurantName} roleLabel={roleLabel} />
               {/* 55 px + the header's 1 px border = a 56 px top bar, level with the sidebar's brand row. */}
               <div className="flex h-[55px] items-center gap-2 px-3 sm:px-4 lg:gap-3 lg:px-8">
                 {multiBranch ? (
@@ -206,6 +207,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
                     <DashboardSearch role={active.role} className="w-72" />
                   </div>
                   <MobileSearchButton />
+                  {/* The bell (W2-08): the same task spine as the home and the badges. */}
+                  <Bell />
                   {/* Phone: language lives in "עוד", except for the receiver with receiver languages
                       on — that phone is often shared, so it stays one tap away. */}
                   <div className={receiverLangsOn && active.role === 'receiver' ? 'block' : 'hidden lg:block'}>
@@ -220,7 +223,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   />
                 </div>
               </div>
-              <BottomBar viewer={viewer} badges={badges} />
+              <BottomBar viewer={viewer} />
             </header>
             <main
               id="main-content"
@@ -239,7 +242,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
             {/* Overlays portal to <body>, outside #rm-app, which turns inert while they are open. */}
             <MoreSheet
               viewer={viewer}
-              badges={badges}
               // 44 px targets in the sheet (the picker's class lands on its wrapper, the toggle's on itself).
               language={languageFor('rm-lang-sheet min-h-11 [&>button]:min-h-11')}
               logout={logout}
@@ -251,6 +253,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             />
             <SearchSheet role={active.role} />
           </ShellFrame>
+          </NavBadgesProvider>
         </NavProvider>
       </ToastProvider>
     </TrpcProvider>

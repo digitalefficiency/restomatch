@@ -1,0 +1,12 @@
+// W2-08 COVERAGE fragment (W2-01 format). `CoverageFragment` (./index) is not on
+// this base yet (#180): at the rebase onto rw2-α this becomes
+// `import type { CoverageFragment } from './index'` with no other change.
+const coverage: Record<string, string> = {
+  'tasks.mine':
+    "isolation — tasks-mine.test.ts: A sees only A tasks (B's blocking ₪ never in A's payload); a role argument other than the session's is refused, never widened",
+  'nav.badges':
+    "isolation — nav-badges.test.ts: A badges never include B queues; receiver/chef badges carry counts only (tasks-redaction.test.ts: no ₪ on the wire)",
+  'nav.whereIs':
+    "attack — nav-whereis.attack.test.ts: a non-member asking for B's invoice/po/supplier gets exactly the random-uuid answer; a member of both gets {restaurantId, name, path}; one withRestaurant per other membership",
+};
+export default coverage;

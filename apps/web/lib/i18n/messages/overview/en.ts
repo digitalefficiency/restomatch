@@ -91,6 +91,14 @@ export const en: Shape<typeof he> = {
     cutoffs: { label: 'Orders closing today', sub: 'Next: {supplier} at {time}', verb: 'Order' },
     cutoffsValue: '{count} suppliers',
     exportLast: { label: 'Last export to the accountant', value: 'Not recorded yet', verb: 'Exports' },
+    // W2-08 task spine.
+    age: { today: 'Since today', days: '{days} days ago' },
+    othersLine: 'All handled on your side · {count} waiting with {who} · {amount}',
+    othersLineCount: 'All handled on your side · {count} waiting with {who}',
+    who: { owner: 'the owner', manager: 'the managers', bookkeeper: 'bookkeeping', receiver: 'receiving', chef: 'the kitchen' },
+    staffZero: 'All handled on your side ✓',
+    failed: 'Some tasks did not load · try again',
+    lateValue: '{count} late',
   },
   rail: {
     title: 'Also this month',

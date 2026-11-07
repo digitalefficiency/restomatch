@@ -126,4 +126,23 @@ export const nav: Shape<typeof he> = {
     ownerNotified: 'ወናኒ ተሓቢሩ ኣሎ።',
   },
   loading: 'ይጽዓን ኣሎ',
+  badge: {
+    items: '{count} ኣቕሓታት',
+    atRisk: '{amount} ኣብ ሓደጋ',
+    blocking: 'ክፍሊት የዕግት',
+  },
+  bell: {
+    label: 'ይጽበየካ ኣሎ',
+    unseen: '{count} ሓደሽቲ',
+    title: 'ይጽበየካ ኣሎ',
+    empty: 'ብወገንካ ኩሉ ተፈጺሙ ✓',
+    close: 'ዕጸው',
+    all: 'ናብ መበገሲ',
+    failed: 'ኣይተጻዕነን · እንደገና ፈትን',
+    retry: 'እንደገና ፈትን',
+  },
+  whereIs: {
+    belongs: 'እዚ መዝገብ ናይ {branch} እዩ',
+    open: 'ኣብኡ ክፈቶ',
+  },
 };

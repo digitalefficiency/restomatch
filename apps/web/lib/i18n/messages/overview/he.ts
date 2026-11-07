@@ -97,6 +97,14 @@ export const he = {
     cutoffs: { label: 'הזמנות שנסגרות היום', sub: 'הבא: {supplier} ב־{time}', verb: 'להזמנה' },
     cutoffsValue: '{count} ספקים',
     exportLast: { label: 'ייצוא אחרון להנהלת החשבונות', value: 'עדיין לא נרשם', verb: 'לייצוא' },
+    // W2-08 task spine.
+    age: { today: 'מהיום', days: 'לפני {days} ימים' },
+    othersLine: 'אצלך הכול מטופל · {count} ממתינים אצל {who} · {amount}',
+    othersLineCount: 'אצלך הכול מטופל · {count} ממתינים אצל {who}',
+    who: { owner: 'הבעלים', manager: 'המנהלים', bookkeeper: 'הנהלת החשבונות', receiver: 'הקבלה', chef: 'המטבח' },
+    staffZero: 'אצלך הכול מטופל ✓',
+    failed: 'חלק מהמשימות לא נטענו · נסו שוב',
+    lateValue: '{count} באיחור',
   },
   rail: {
     title: 'עוד החודש',

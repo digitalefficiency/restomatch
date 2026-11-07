@@ -2,8 +2,6 @@ import Link from 'next/link';
 import { Activity, ArrowLeft, Hourglass } from 'lucide-react';
 import type { UserRole } from '@restomatch/db';
 import { canSeeRoute } from '@/lib/roles';
-import { followUps } from '../recovery/logic';
-import { claimNeedRows } from './claims';
 import { formatIls } from '@/lib/money';
 import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
 import type { Locale } from '@/lib/i18n/config';
@@ -13,6 +11,7 @@ import type { he as viewsHe } from '@/lib/i18n/messages/views/he';
 import type { he as leaksHe } from '@/lib/i18n/messages/leaks/he';
 import type { he as recoveryHe } from '@/lib/i18n/messages/recovery/he';
 import type { he as leakProofHe } from '@/lib/i18n/messages/leakProof/he';
+import { MetricTile, Money } from '@/lib/components/money';
 import { EmptyState, EntitlementUpsell, LeakHeatmap, SectionHeader, entitlementCauseOf } from '@/lib/components';
 import { LeakHero, daySpan, heroDelta, leakHeroState, leakSplit, showsPct, type LeakHeroProps } from '@/lib/components/hero';
 import {
@@ -35,21 +34,14 @@ import { RecipesOverviewCard } from '../recipes/overview-card';
 import { VatAtRiskCard } from '../vat-at-risk';
 import { displayName } from '../approvals/vocab';
 import type { Caller } from './caller';
-import { buildBoard } from './board';
-import { todayCutoffs } from './cutoffs';
 import {
-  loadDecide,
-  loadOpenCount,
   loadHeroPair,
-  loadPayRun,
   loadRecoveryFlags,
-  loadRecoveryClaims,
-  loadSuppliers,
-  loadToday,
   loadTrend,
   loadVatAtRisk,
 } from './data';
-import { NeedsYou, type NeedRow, type NeedTone } from './needs-you';
+import { NeedsYou, type NeedRow } from './needs-you';
+import { othersLine, taskRow } from '@/lib/components/notifications/rows';
 import { HomeSection, Suspense } from './section';
 import { CardSkeleton, HeroSkeleton, NeedsSkeleton } from './skeletons';
 import { ViewDisclosure } from './view-disclosure';
@@ -118,7 +110,7 @@ export function FinanceHome(ctx: Ctx) {
 
         {canDrill ? (
           <details className="group max-lg:order-3 rounded-2xl border border-line bg-surface shadow-card" data-testid="home-trend">
-            <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-2 rounded-2xl px-4 text-sm font-semibold text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 [&::-webkit-details-marker]:hidden">
+            <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-2 rounded-2xl px-4 text-sm font-semibold text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [&::-webkit-details-marker]:hidden">
               {t('hero.trendShow')}
               <ArrowLeft className="h-4 w-4 transition-transform group-open:-rotate-90 ltr:-scale-x-100" aria-hidden="true" />
             </summary>
@@ -205,154 +197,32 @@ async function Toolbar(ctx: Ctx) {
 
 /* ─────────────────────────────── מחכה לך ─────────────────────────────── */
 
-type Settled<T> = { ok: true; value: T } | { ok: false };
-const settle = <T,>(p: Promise<T>): Promise<Settled<T>> => p.then((value) => ({ ok: true as const, value }), () => ({ ok: false as const }));
-const TONE_RANK: Record<NeedTone, number> = { danger: 0, warn: 1, neutral: 2 };
-
+/**
+ * "מחכה לך" from the task spine (`tasks.mine`, W2-08): the same tasks, ₪ and
+ * order as the nav badges and the bell. At most 3 rows on the phone ("עוד N"),
+ * ranked on the server (block > due today > age > ₪). "הכל טופל" only when the
+ * whole restaurant is clear; otherwise the line names who it waits on.
+ */
 async function Needs(ctx: Ctx) {
-  const { role, t, locale, restaurantId } = ctx;
-  const ils = (v: number) => formatIls(v, { locale });
-  const n = (v: number) => formatNumber(v, locale);
-  const wants = {
-    claims: role === 'owner' || role === 'manager',
-    vat: role === 'owner' || role === 'bookkeeper',
-    payRun: role === 'owner' || role === 'bookkeeper',
-    ops: role === 'manager',
-  };
-  const [queue, recovery, vat, payRun, today, count, suppliers] = await Promise.all([
-    settle(loadDecide()),
-    wants.claims ? settle(loadRecoveryClaims()) : null,
-    wants.vat ? settle(loadVatAtRisk(restaurantId, role)) : null,
-    wants.payRun ? settle(loadPayRun()) : null,
-    wants.ops ? settle(loadToday()) : null,
-    wants.ops ? settle(loadOpenCount()) : null,
-    wants.ops ? settle(loadSuppliers()) : null,
-  ]);
-  const sources: Settled<unknown>[] = [queue, recovery, vat, payRun, today, count, suppliers].filter((x) => x !== null) as Settled<unknown>[];
-  const rows: NeedRow[] = [];
-
-  // The decision queue is this card's core: if it can't be read, the card fails
-  // ("לא נטען · נסו שוב") rather than silently dropping its first row.
-  if (!queue.ok) throw new Error('[home] the decision queue could not be read');
-  const q = queue.value;
-  if (q.count > 0) {
-    rows.push({
-      key: 'decide',
-      tone: q.blocking > 0 ? 'danger' : 'warn',
-      label: t('needs.decide.label'),
-      // The approvals "ניתן לדרוש מהספקים" tile, same server rule (before VAT).
-      value: ils(q.amountIls),
-      sub: [
-        q.blocking > 0 ? t('needs.decide.subBlocking', { count: n(q.count), blocking: n(q.blocking) }) : t('needs.decide.sub', { count: n(q.count) }),
-        q.toReview > 0 ? t('needs.decide.review', { count: n(q.toReview) }) : null,
-      ]
-        .filter(Boolean)
-        .join(' · '),
-      notes:
-        [
-          q.duplicateIls > 0 ? t('needs.decide.duplicates', { amount: ils(q.duplicateIls) }) : null,
-          q.vatIls > 0 ? t('needs.decide.vat', { amount: ils(q.vatIls) }) : null,
-        ]
-          .filter(Boolean)
-          .join(' · ') || undefined,
-      verb: t('needs.decide.verb'),
-      href: '/dashboard/approvals',
-    });
-  }
-  if (role === 'manager' && suppliers?.ok) {
-    const cut = todayCutoffs(suppliers.value, new Date());
-    if (cut.length > 0) {
-      const first = cut[0]!;
-      rows.push({
-        key: 'cutoffs',
-        tone: first.minutesLeft <= 60 ? 'warn' : 'neutral',
-        label: t('needs.cutoffs.label'),
-        value: t('needs.cutoffsValue', { count: n(cut.length) }),
-        sub: t('needs.cutoffs.sub', { supplier: locale === 'en' && first.supplierNameEn ? first.supplierNameEn : first.supplierName, time: first.cutoff }),
-        verb: t('needs.cutoffs.verb'),
-        href: '/dashboard/orders/new',
-      });
-    }
-  }
-  if (recovery?.ok && recovery.value) {
-    // The recovery page's own follow-up queues, to the agora (same rule, same words).
-    const exact = (agorot: number) => formatIls(agorot / 100, { locale, maximumFractionDigits: 2 });
-    rows.push(...claimNeedRows(followUps(recovery.value, new Date().toISOString()), { t, money: exact, n }));
-  }
-  if (vat?.ok && vat.value && vat.value.rows.length > 0) {
-    const v = vat.value;
-    const days = Math.min(...v.rows.map((r) => r.daysLeft));
-    rows.push({
-      key: 'vat',
-      // H8: neutral far from the deadline, warn inside 30 days, danger inside 7 (or late).
-      tone: days <= 7 ? 'danger' : days <= 30 ? 'warn' : 'neutral',
-      label: t('needs.vat.label'),
-      value: ils(v.totalVatAtRisk),
-      sub: t('needs.vat.sub', { count: n(v.rows.length), days: n(Math.max(0, days)) }),
-      verb: t('needs.vat.verb'),
-      href: v.rows.length === 1 ? `/dashboard/invoices/${v.rows[0]!.invoiceId}` : '#vat-at-risk',
-    });
-  }
-  if (payRun?.ok && payRun.value?.enabled && payRun.value.totals.payIls > 0) {
-    const toPay = payRun.value.suppliers.reduce((sum, s) => sum + s.invoices.filter((i) => i.status === 'pay').length, 0);
-    rows.push({
-      key: 'payRun',
-      tone: 'neutral',
-      label: t('needs.payRun.label'),
-      value: ils(payRun.value.totals.payIls),
-      sub: t('needs.payRun.sub', { count: n(toPay) }),
-      verb: t('needs.payRun.verb'),
-      href: '/dashboard/approvals/pay-run',
-    });
-  }
-  if (today?.ok && today.value.length > 0) {
-    const b = buildBoard(today.value);
-    rows.push({
-      key: 'deliveries',
-      tone: b.summary.late > 0 ? 'warn' : 'neutral',
-      label: t('needs.deliveries.label'),
-      value: t('needs.deliveriesValue', { count: n(b.summary.total) }),
-      sub: t('needs.deliveries.sub', { received: n(b.summary.received), late: n(b.summary.late) }),
-      verb: t('needs.deliveries.verb'),
-      href: '/dashboard/receiving',
-    });
-  }
-  if (count?.ok && count.value && count.value.status === 'draft') {
-    const p = count.value.progress;
-    rows.push({
-      key: 'count',
-      tone: 'neutral',
-      label: t('needs.count.label'),
-      value: t('needs.countValue', { counted: n(p.counted), lines: n(p.lines) }),
-      sub: t('needs.count.sub', { counted: n(p.counted), lines: n(p.lines) }),
-      verb: t('needs.count.verb'),
-      href: '/dashboard/inventory/count',
-    });
-  }
-  if (role === 'bookkeeper') {
-    // PLACEHOLDER (W1-05): exports keep no log yet, so there is no real "last export" date.
-    rows.push({
-      key: 'export',
-      tone: 'neutral',
-      label: t('needs.exportLast.label'),
-      value: t('needs.exportLast.value'),
-      verb: t('needs.exportLast.verb'),
-      href: '/dashboard/exports',
-    });
-  }
-
-  // Unknown is never "all handled": a source that failed with nothing else to show fails the card.
-  const actionable = rows.filter((r) => r.key !== 'export');
-  if (actionable.length === 0 && sources.some((s) => !s.ok)) throw new Error('[home] needs-you sources failed');
-
-  const ranked = [...rows].sort((a, b) => TONE_RANK[a.tone] - TONE_RANK[b.tone]);
+  const { role, t, locale } = ctx;
+  const { tasks, failed, restaurantClear } = await ctx.caller.tasks.mine();
+  const side = (agorot: number) => formatIls(agorot / 100, { locale });
+  const rows: NeedRow[] = tasks
+    .filter((x) => x.scope === 'mine')
+    .map((x) => taskRow(x, t, locale, side))
+    .filter((r): r is NonNullable<typeof r> => r !== null);
+  // Unknown is never "all handled": a failed source with nothing to show fails the card.
+  if (failed.length > 0 && rows.length === 0) throw new Error(`[home] task sources failed: ${failed.join(',')}`);
+  const others = othersLine(tasks, t, locale, side);
+  const zero = others ?? (restaurantClear ? (role === 'bookkeeper' ? t('needs.zero') : t('needs.zeroCaught')) : t('needs.failed'));
   return (
     <div className={role === 'owner' ? '[&_#needs-you-title]:sr-only' : '[&_#needs-you-title]:lg:sr-only'}>
       <NeedsYou
         title={t('needs.title')}
-        rows={ranked}
-        zero={role === 'bookkeeper' ? t('needs.zero') : t('needs.zeroCaught')}
-        moreLabel={(c) => t('needs.more', { count: n(c) })}
+        rows={rows}
+        zero={zero}
+        zeroTone={others ? 'neutral' : 'good'}
+        moreLabel={(c) => t('needs.more', { count: formatNumber(c, locale) })}
       />
     </div>
   );
@@ -561,7 +431,7 @@ async function Heatmap({ caller, t, tl, locale }: Ctx) {
         action={
           <Link
             href="/dashboard/leaks#prices"
-            className="touch-target inline-flex items-center gap-1 rounded-lg text-sm font-semibold text-primary hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            className="touch-target inline-flex items-center gap-1 rounded-lg text-sm font-semibold text-primary hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
           >
             {t('leaks.all')}
             <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
@@ -601,28 +471,16 @@ async function ReturnedTile({ caller, role, t, locale }: Ctx) {
   const flags = await loadRecoveryFlags();
   if (!flags.recovery) return null;
   const returned = await caller.recovery.returnedThisMonth();
-  const value = formatIls(returned.returnedAgorot / 100, { locale });
-  const body = (
-    <>
-      <span className="block text-xs font-semibold text-subtle">{t('hero.returned')}</span>
-      <span className="mt-0.5 block text-2xl font-bold tabular-nums text-gold">
-        <bdi>{value}</bdi>
-      </span>
-      <span className="mt-0.5 block text-xs text-muted">{t('hero.returnedHint')}</span>
-    </>
-  );
-  const box = 'block rounded-2xl border border-line bg-surface p-4 shadow-card';
-  return canSeeRoute(role, '/dashboard/recovery') ? (
-    <Link
-      href="/dashboard/recovery"
-      data-testid="hero-returned"
-      className={`${box} min-h-12 hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60`}
-    >
-      {body}
-    </Link>
-  ) : (
-    <div className={box} data-testid="hero-returned">
-      {body}
+  // T3 good news: a calm MetricTile with the 0 dp <Money> (command-25/-29).
+  return (
+    <div data-testid="hero-returned">
+      <MetricTile
+        label={t('hero.returned')}
+        value={<Money agorot={returned.returnedAgorot} context="tile" locale={locale} />}
+        state="returned"
+        context={t('hero.returnedHint')}
+        href={canSeeRoute(role, '/dashboard/recovery') ? '/dashboard/recovery' : undefined}
+      />
     </div>
   );
 }
