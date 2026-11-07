@@ -191,7 +191,7 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
   if (!replaced && persisted.rolesNeedingNotification.length > 0) {
     const ent = await getEntitlements(db, restaurantId);
     const whatsappAllowed = ent.active && ent.features.includes('whatsapp_alerts');
-    const summary = `${result.discrepancies.length} חריגות, סה"כ הפסד פוטנציאלי ₪${result.totalDiscrepancyAmount.toFixed(0)}`;
+    const summary = `${result.discrepancies.length} פערים, סה"כ הפסד פוטנציאלי ₪${result.totalDiscrepancyAmount.toFixed(0)}`;
     for (const role of persisted.rolesNeedingNotification) {
       if (whatsappAllowed) {
         await whatsapp.send(db, {
