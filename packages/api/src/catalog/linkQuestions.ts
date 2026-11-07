@@ -104,7 +104,11 @@ export async function releaseQuestionHolds(
   const rows = (await db.execute(sql`
     update invoices i
        set status = 'matched',
+           -- Round 9 HIGH: the order it waited for stays its pin (linkPinPoId), so the
+           -- release's match is against THAT order even once it is closed.
            ocr_payload = (i.ocr_payload - 'heldPoId') || jsonb_build_object('linkReleasedAt', now()::text)
+             || case when (i.ocr_payload ->> 'heldPoId') is not null
+                     then jsonb_build_object('linkPinPoId', i.ocr_payload ->> 'heldPoId') else '{}'::jsonb end
      where i.restaurant_id = ${rid}
        and i.id in (${sql.join([...new Set(invoiceIds)].map((id) => sql`${id}::uuid`), sql`, `)})
        and i.status = 'parsed'
@@ -150,7 +154,9 @@ export async function pruneAnsweredReasons(db: Database, rid: string, invoiceIds
        and not exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null and ${IL_NOT_CHARGE})
   `);
   await db.execute(sql`
-    update invoices i set ocr_payload = ${drop('unlinkedPo')} - 'heldPoId'
+    update invoices i set ocr_payload = (${drop('unlinkedPo')} - 'heldPoId')
+      || case when (i.ocr_payload ->> 'heldPoId') is not null
+              then jsonb_build_object('linkPinPoId', i.ocr_payload ->> 'heldPoId') else '{}'::jsonb end
      where i.restaurant_id = ${rid} and i.id in (${ids}) and i.status = 'parsed'
        and coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ? 'unlinkedPo'
        and (
@@ -162,6 +168,18 @@ export async function pruneAnsweredReasons(db: Database, rid: string, invoiceIds
          )
        )
   `);
+}
+
+/**
+ * Round 9 HIGH: the order a question hold waited for (heldPoId while held,
+ * linkPinPoId once released) — the match-invoice job pins to it after the
+ * receipt's order, so a re-hold / release never loses its order (a closed order
+ * is not discovered again).
+ */
+export function linkPinPoIdOf(ocrPayload: unknown): string | null {
+  const p = ocrPayload as { linkPinPoId?: unknown; heldPoId?: unknown } | null | undefined;
+  const v = typeof p?.linkPinPoId === 'string' ? p.linkPinPoId : typeof p?.heldPoId === 'string' ? p.heldPoId : null;
+  return v && /^[0-9a-f-]{36}$/i.test(v) ? v : null;
 }
 
 /** A learned charge key ("שורת חיוב — לא מוצר" for this supplier + key). */

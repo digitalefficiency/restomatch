@@ -129,6 +129,42 @@ export async function requeueInvoicesForRematch(
   return report;
 }
 
+/**
+ * Round 9 (kill switch): once order questions are OFF (settings.features.
+ * orderQuestions = false, or FEATURES_OFF=orderQuestions), invoices already held
+ * for an order's questions ('parsed' + heldPoId) have nothing left to wait for.
+ * Release them (releaseQuestionHolds — the order stays their pin, linkPinPoId),
+ * prune the answered reasons of those held for something else too, and re-queue
+ * the released ones. `'all'` sweeps every restaurant (the env kill: run after the
+ * redeploy, `pnpm --filter @restomatch/worker run release-order-holds`).
+ */
+export async function releaseOrderQuestionHolds(
+  db: Database,
+  scope: string | 'all',
+): Promise<{ restaurants: number; released: number; pruned: number; rematch: RematchReport[] }> {
+  const rows = (await db.execute(sql`
+    select i.restaurant_id, i.id from invoices i
+     where i.status = 'parsed' and (i.ocr_payload ->> 'heldPoId') is not null
+       ${scope === 'all' ? sql`` : sql`and i.restaurant_id = ${scope}::uuid`}
+     order by i.restaurant_id, i.id
+  `)) as unknown as Array<{ restaurant_id: string; id: string }>;
+  const byRid = new Map<string, string[]>();
+  for (const r of rows) byRid.set(String(r.restaurant_id), [...(byRid.get(String(r.restaurant_id)) ?? []), String(r.id)]);
+  let released = 0;
+  let pruned = 0;
+  const rematch: RematchReport[] = [];
+  for (const [rid, ids] of byRid) {
+    const rel = (await releaseQuestionHolds(db, rid, ids)).map((r) => r.id);
+    released += rel.length;
+    const done = new Set(rel);
+    const rest = ids.filter((id) => !done.has(id));
+    await pruneAnsweredReasons(db, rid, rest);
+    pruned += rest.length;
+    if (rel.length) rematch.push(await requeueInvoicesForRematch(db, rid, rel));
+  }
+  return { restaurants: byRid.size, released, pruned, rematch };
+}
+
 /** Exactly what a confirm changed, handed back so "בטל" can put it back. */
 const RevertSchema = z
   .object({
@@ -361,6 +397,15 @@ async function releaseLinkHolds(db: Database, rid: string, invoiceIds: string[])
 }
 
 /**
+ * Rounds 5/7/9: a finding a PERSON decided (loadPriorDecisions' rule: resolved_at
+ * set, or escalated) or a credit claim hangs on. Engine auto-approvals
+ * ('accepted' with no resolved_at) are not a decision. Alias d; rid-free (the
+ * claim must match the finding's own restaurant).
+ */
+const A_PERSONS_DECISION = sql.raw(`(d.resolved_at is not null or d.resolution_status = 'escalated'
+  or exists (select 1 from recovery_claims c where c.discrepancy_id = d.id and c.restaurant_id = d.restaurant_id))`);
+
+/**
  * The undo of an answer that released an invoice: once a line is unlinked
  * again, put the invoice back on hold ('parsed') and drop the run made in the
  * meantime, instead of re-matching it into a false leak. A run a claim already
@@ -386,8 +431,7 @@ async function reholdLinkHolds(db: Database, rid: string, invoiceIds: string[]):
              and not exists (
                select 1 from match_runs mr join discrepancies d on d.match_run_id = mr.id and d.restaurant_id = ${rid}
                 where mr.invoice_id = i.id and mr.restaurant_id = ${rid}
-                  and (d.resolution_status <> 'open'
-                       or exists (select 1 from recovery_claims c where c.discrepancy_id = d.id and c.restaurant_id = ${rid}))
+                  and ${A_PERSONS_DECISION}
              )
           returning i.id
         `)) as unknown as Array<{ id: string }>;
@@ -430,6 +474,13 @@ async function reholdOrderHolds(db: Database, rid: string, invoiceIds: string[])
            where i.restaurant_id = ${rid} and i.id = ${id}::uuid
              and mr.invoice_id = i.id and mr.restaurant_id = ${rid} and mr.po_id is not null
              and i.status in ('matched', 'disputed')
+             -- Round 9: only an invoice whose hold would be a QUESTION hold — released by
+             -- an answer (linkReleasedAt) or held for nothing but questions. One a person
+             -- matched by hand past another reason ('confidence') keeps its run.
+             and (coalesce(i.ocr_payload ? 'linkReleasedAt', false)
+                  or not exists (
+                    select 1 from jsonb_array_elements_text(coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb)) r(reason)
+                     where r.reason not in ('unlinked', 'unlinkedPo')))
              and exists (
                select 1 from po_lines pl join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid}
                 where pl.po_id = mr.po_id and ${poLineIsQuestion(rid)}
@@ -438,8 +489,7 @@ async function reholdOrderHolds(db: Database, rid: string, invoiceIds: string[])
              and not exists (
                select 1 from discrepancies d
                 where d.match_run_id = mr.id and d.restaurant_id = ${rid}
-                  and (d.resolution_status <> 'open'
-                       or exists (select 1 from recovery_claims c where c.discrepancy_id = d.id and c.restaurant_id = ${rid}))
+                  and ${A_PERSONS_DECISION}
              )
           returning i.id
         `)) as unknown as Array<{ id: string }>;
@@ -452,6 +502,20 @@ async function reholdOrderHolds(db: Database, rid: string, invoiceIds: string[])
     }
   }
   return held;
+}
+
+/** Round 9: re-hold (reholdOrderHolds) the invoices on orders with an unlinked line of a charge key. */
+async function reholdKeyOrders(
+  db: Database,
+  rid: string,
+  supplierId: string,
+  keyOn: (skuCol: SQL, rawCol: SQL) => SQL,
+): Promise<string[]> {
+  const lines = (await db.execute(sql`
+    select pl.id from po_lines pl join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid} and po.supplier_id = ${supplierId}
+     where pl.product_id is null and ${keyOn(sql`pl.supplier_sku`, sql`pl.raw_description`)}
+  `)) as unknown as Array<{ id: string }>;
+  return reholdOrderHolds(db, rid, await invoicesForPoLines(db, rid, lines.map((l) => String(l.id))));
 }
 
 /**
@@ -941,6 +1005,9 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
     }
     const touched = [...byInv.keys()];
     const reheld = new Set(await reholdLinkHolds(db, rid, touched));
+    // Round 9 LOW: a forgotten key re-opens its order lines as questions — invoices
+    // whose run is on such an order re-hold as an order-line undo does.
+    if (input.undo.forgetKey) for (const id of await reholdKeyOrders(db, rid, input.supplierId, keyOn)) reheld.add(id);
     // A held invoice whose line is a question again is in the bucket again (round 4 LOW-8).
     await restoreQuestionReason(db, rid, touched);
     // Round 6: an invoice with a question line again keeps its run (no re-match over it).
@@ -1030,7 +1097,15 @@ async function applyCharge(db: Database, rid: string, userId: string, input: Cha
     select pl.id from po_lines pl join purchase_orders po on po.id = pl.po_id and po.restaurant_id = ${rid} and po.supplier_id = ${input.supplierId}
      where pl.product_id is null and ${keyOn(sql`pl.supplier_sku`, sql`pl.raw_description`)}
   `)) as unknown as Array<{ id: string }>;
-  const onOrder = await invoicesForPoLines(db, rid, keyPoLines.map((r) => String(r.id)));
+  // Round 9 LOW: only invoices whose current run carries a finding on those order lines.
+  const onOrder = keyPoLines.length
+    ? ((await db.execute(sql`
+        select distinct mr.invoice_id as id from match_runs mr
+          join discrepancies d on d.match_run_id = mr.id and d.restaurant_id = ${rid}
+         where mr.restaurant_id = ${rid}
+           and d.po_line_id in (${sql.join(keyPoLines.map((r) => sql`${String(r.id)}::uuid`), sql`, `)})
+      `)) as unknown as Array<{ id: string }>).map((r) => String(r.id))
+    : [];
   const touched = [...new Set([...byInv.keys(), ...heldOnOrder.map((r) => String(r.id)), ...onOrder])];
   await releaseLinkHolds(db, rid, touched);
   const rematch = await requeueInvoicesForRematch(db, rid, touched);
@@ -1460,7 +1535,15 @@ export const mappingRouter = router({
         linesLocked = r.linesLocked;
         linesReturned = marked.length - r.linesLocked;
       }
-      const removed = (await forgetChargeKey(ctx.db, rid, { supplierId: input.supplierId, sku: input.sku, nameKey })) || marked.length > 0;
+      const forgot = await forgetChargeKey(ctx.db, rid, { supplierId: input.supplierId, sku: input.sku, nameKey });
+      const removed = forgot || marked.length > 0;
+      // Round 9: with no marked line the undo above did not run — its order lines are
+      // questions again, so their invoices re-hold here.
+      if (forgot && marked.length === 0) {
+        await reholdKeyOrders(ctx.db, rid, input.supplierId, (skuCol, rawCol) =>
+          input.sku ? sql`${skuCol} = ${input.sku} and ${normNameSql(rawCol)} = ${nameKey}` : sql`${skuCol} is null and ${normNameSql(rawCol)} = ${nameKey}`,
+        );
+      }
       if (removed) {
         await ctx.db.insert(auditLog).values({
           restaurantId: rid,

@@ -10,6 +10,7 @@ import {
   orderQuestionCount,
   pruneAnsweredReasons,
   releaseQuestionHolds,
+  linkPinPoIdOf,
   receiptStillOpen,
   persistMatchRun,
   rematchHoldReason,
@@ -164,7 +165,7 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   // resolved from the restaurant inside the assembler). The receipt's PO first,
   // else a re-match stays on the PO it was matched against.
   const built = await buildMatchInputForInvoice(db, restaurantId, invoiceId, {
-    pinnedPoId: data.poId ?? priorRun?.poId ?? pinPoId,
+    pinnedPoId: data.poId ?? priorRun?.poId ?? pinPoId ?? linkPinPoIdOf(inv.ocrPayload), // G-08 round 9: the question hold's order
   });
   if (!built) return { result: CLEAN, persisted: null, replaced: false, skipped: 'no_lines' };
   // The payload is not a trust boundary. A job's poId names the order that was

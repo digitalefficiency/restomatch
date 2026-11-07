@@ -21,7 +21,8 @@ import { adminProcedure, authedProcedure, router } from '../trpc';
 import { recordAudit } from '../audit';
 import { appError } from '../errors';
 import { usagePeriod } from '../entitlements';
-import { FEATURE_KEYS, featureEnabled, type FeatureKey } from '../lib/features';
+import { DEFAULT_ON_FEATURES, FEATURE_KEYS, featureEnabled, type FeatureKey } from '../lib/features';
+import { releaseOrderQuestionHolds } from './mapping';
 
 const PlanKeyEnum = z.enum(['trial', 'basic', 'pro', 'chain']);
 const StatusEnum = z.enum(['trialing', 'active', 'past_due', 'canceled']);
@@ -66,6 +67,8 @@ function featureState(settings: unknown) {
   return {
     stored,
     all: stored.all === true,
+    /** On unless stored false (G-08 orderQuestions) — what an unticked, never-saved box means. */
+    defaultOn: [...DEFAULT_ON_FEATURES] as string[],
     effective: Object.fromEntries(FEATURE_KEYS.map((k) => [k, featureEnabled(settings, k)])) as Record<
       FeatureKey,
       boolean
@@ -370,15 +373,19 @@ export const adminRouter = router({
   setFeatures: adminProcedure
     .input(z.object({ restaurantId: z.string().uuid(), features: FeaturePatchSchema }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.db.transaction(async (tx) => {
+      let orderQuestionsTurnedOff = false;
+      const out = await ctx.db.transaction(async (tx) => {
         const [r] = await tx
           .select({ id: restaurants.id, settings: restaurants.settings })
           .from(restaurants)
           .where(eq(restaurants.id, input.restaurantId))
-          .for('update')
+          // NO KEY UPDATE (as train B's other settings writers): a queue / claim
+          // insert's FK KEY SHARE on this row is not blocked behind an admin save.
+          .for('no key update')
           .limit(1);
         if (!r) throw appError('NOT_FOUND', 'admin.notFound', 'restaurant not found');
         const before = storedFeatures(r.settings);
+        const orderQuestionsBefore = featureEnabled(r.settings, 'orderQuestions');
 
         const [updated] = await tx
           .update(restaurants)
@@ -389,6 +396,7 @@ export const adminRouter = router({
           .where(eq(restaurants.id, r.id))
           .returning({ settings: restaurants.settings });
         const after = storedFeatures(updated?.settings);
+        orderQuestionsTurnedOff = orderQuestionsBefore && !featureEnabled(updated?.settings, 'orderQuestions');
 
         await recordAudit(tx, {
           restaurantId: r.id,
@@ -401,6 +409,10 @@ export const adminRouter = router({
         });
         return { features: featureState(updated?.settings) };
       });
+      // G-08 kill switch: invoices waiting for this restaurant's order questions are
+      // released and re-matched (after the commit, so the job reads the new flag).
+      if (orderQuestionsTurnedOff) await releaseOrderQuestionHolds(ctx.db, input.restaurantId);
+      return out;
     }),
 
   /** Change a member's role within a restaurant. */

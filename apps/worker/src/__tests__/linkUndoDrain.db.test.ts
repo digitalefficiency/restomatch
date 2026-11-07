@@ -3,6 +3,7 @@ import { appRouter } from '@restomatch/api';
 import { computeLeakHero } from '@restomatch/charts';
 import {
   and,
+  auditLog,
   createDb,
   discrepancies,
   eq,
@@ -18,6 +19,7 @@ import {
   supplierCatalogItems,
   suppliers,
   testDbUrl,
+  userCredentials,
   users,
   type Database,
 } from '@restomatch/db';
@@ -476,5 +478,147 @@ describe('kill switch: settings.features.orderQuestions / FEATURES_OFF=orderQues
       if (prev === undefined) delete process.env.FEATURES_OFF;
       else process.env.FEATURES_OFF = prev;
     }
+  });
+});
+
+/* ── G-08 review round 9 (7.11) ─────────────────────────────────────────── */
+
+const findingIds = async (invoiceId: string, type: string) =>
+  (
+    await db
+      .select({ id: discrepancies.id })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(and(eq(matchRuns.invoiceId, invoiceId), eq(discrepancies.type, type as never)))
+  ).map((d) => d.id);
+const poOf = async (invoiceId: string) =>
+  (await db.select({ po: matchRuns.poId }).from(matchRuns).where(eq(matchRuns.invoiceId, invoiceId))).map((r) => r.po);
+
+describe('R9 HIGH: a re-hold / release keeps the order pin (a closed order is not lost)', () => {
+  it('first match → the order is closed → undo → mark "משלוח" a charge → drain: the same po_id, no UNORDERED_ARRIVAL', async () => {
+    const { po, inv, wrong } = await orderWithQuestion();
+    expect(await poOf(inv)).toEqual([po]);
+    await db.update(purchaseOrders).set({ status: 'closed' }).where(eq(purchaseOrders.id, po));
+    await owner().mapping.confirm({ supplierId: S, rawName: 'משלוח', revert: wrong.undo! });
+    expect(await runsOf(inv)).toEqual([]); // re-held on the order (R8)
+    await owner().mapping.markCharge({ supplierId: S, rawName: 'משלוח', shownLineIds: [] });
+    await drain();
+    expect(await poOf(inv)).toEqual([po]);
+    const types = await typesOf(inv);
+    expect(types).not.toContain('UNORDERED_ARRIVAL');
+    expect(types).not.toContain('MISSING_ON_INVOICE');
+    expect(await statusOf(inv)).not.toBe('parsed');
+  });
+});
+
+describe('R9 MEDIUM: an engine auto-approval is not a person\'s decision', () => {
+  it('order path: an auto-accepted finding (no resolved_at) next to the false MISSING → the undo re-holds; ₪0', async () => {
+    const { inv, wrong } = await orderWithQuestion();
+    // What the engine writes for an auto-approved finding: 'accepted', no resolved_at / resolved_by.
+    await db
+      .update(discrepancies)
+      .set({ resolutionStatus: 'accepted', resolvedAt: null, resolvedBy: null })
+      .where(sql`${discrepancies.id} in (${sql.join((await findingIds(inv, 'MISSING_ON_INVOICE')).map((id) => sql`${id}::uuid`), sql`, `)})`);
+    await owner().mapping.confirm({ supplierId: S, rawName: 'משלוח', revert: wrong.undo! });
+    await drain();
+    expect(await statusOf(inv)).toBe('parsed');
+    expect(await runsOf(inv)).toEqual([]);
+    expect((await computeLeakHero(db, restaurantId)).leakIls).toBe(0);
+  });
+
+  it('invoice-line path: the same rule in reholdLinkHolds', async () => {
+    await order([{ productId: P, raw: 'פלפל אדום' }]);
+    const inv = await heldInvoice({ raw: 'פלפל אדום חריף', productId: null, price: '15', vat: { vat: '5.40', incl: '35.40' } });
+    const answer = await owner().mapping.confirm({ supplierId: S, rawName: 'פלפל אדום חריף', productId: P });
+    await drain();
+    await db
+      .update(discrepancies)
+      .set({ resolutionStatus: 'accepted', resolvedAt: null, resolvedBy: null })
+      .where(sql`${discrepancies.id} in (${sql.join((await findingIds(inv, 'PRICE_HIGHER')).map((id) => sql`${id}::uuid`), sql`, `)})`);
+    await owner().mapping.confirm({ supplierId: S, rawName: 'פלפל אדום חריף', revert: answer.undo! });
+    await drain();
+    expect(await statusOf(inv)).toBe('parsed');
+    expect(await runsOf(inv)).toEqual([]);
+    expect((await computeLeakHero(db, restaurantId)).leakIls).toBe(0);
+  });
+});
+
+describe('R9 MEDIUM: an order re-hold never strands an invoice held for another reason', () => {
+  it("held for 'confidence', matched by the manager → wrong order answer undone → the run stays, not stranded in 'parsed'", async () => {
+    const po = await order([
+      { productId: P2, raw: 'בצל סגול' },
+      { productId: null, raw: 'משלוח', price: '30' },
+    ]);
+    const inv = await heldInvoice({ raw: 'בצל סגול', productId: P2, reasons: ['confidence'], vat: { vat: '3.96', incl: '25.96' } });
+    const wrong = await owner().mapping.confirm({ supplierId: S, rawName: 'משלוח', productId: P });
+    await owner().match.runForInvoice({ invoiceId: inv });
+    const before = await runsOf(inv);
+    expect(before).toHaveLength(1);
+    await owner().mapping.confirm({ supplierId: S, rawName: 'משלוח', revert: wrong.undo! });
+    await owner().mapping.markCharge({ supplierId: S, rawName: 'משלוח', shownLineIds: [] });
+    await drain();
+    expect(await statusOf(inv)).not.toBe('parsed');
+    const runs = await runsOf(inv);
+    expect(runs).toHaveLength(1);
+    expect(await poOf(inv)).toEqual([po]);
+  });
+});
+
+describe('R9 MEDIUM: turning order questions OFF releases the invoices already held', () => {
+  it('held (unlinkedPo) → admin.setFeatures({ orderQuestions: false }) → drain: 1 run on the order, not parsed', async () => {
+    const po = await order([
+      { productId: P, raw: 'פלפל אדום' },
+      { productId: null, raw: 'בצל סגול' },
+    ]);
+    const inv = await heldInvoice({ raw: 'פלפל אדום', productId: P, reasons: ['unlinkedPo'], heldPoId: po, vat: { vat: '3.96', incl: '25.96' } });
+    const [adm] = await db
+      .insert(users)
+      .values({ email: `g08-admin-${Date.now()}@drain.test`, name: 'Ops', isPlatformAdmin: true })
+      .returning();
+    try {
+      await db.insert(userCredentials).values({ userId: adm!.id, totpSecretEnc: 'ciphertext', totpEnabledAt: new Date() });
+      const admin = appRouter.createCaller({ db, session: { userId: adm!.id, restaurantId: null, role: null } } as Parameters<typeof appRouter.createCaller>[0]);
+      await admin.admin.setFeatures({ restaurantId, features: { orderQuestions: false } });
+      await drain();
+      expect(await poOf(inv)).toEqual([po]);
+      expect(await statusOf(inv)).not.toBe('parsed');
+    } finally {
+      await db.delete(auditLog).where(eq(auditLog.userId, adm!.id));
+      await db.delete(users).where(eq(users.id, adm!.id));
+    }
+  });
+});
+
+describe('R9 LOWs: the charge path on order lines', () => {
+  it('LOW-6: marking an order line a charge re-queues only invoices whose run has a finding on it', async () => {
+    const po = await order([
+      { productId: P2, raw: 'בצל סגול' },
+      { productId: null, raw: 'משלוח', price: '30' },
+    ]);
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId, supplierId: S, status: 'matched', source: 'photo', invoiceDate: new Date() })
+      .returning({ id: invoices.id });
+    await db.insert(matchRuns).values({ restaurantId, poId: po, invoiceId: inv!.id, overallStatus: 'clean' });
+    const r = await owner().mapping.markCharge({ supplierId: S, rawName: 'משלוח', shownLineIds: [] });
+    expect(r.rematch.requeued).toBe(0);
+  });
+
+  it('LOW-7: undoing a charge mark that re-opens the order line re-holds a run with only open findings', async () => {
+    const po = await order([
+      { productId: P2, raw: 'בצל סגול' },
+      { productId: null, raw: 'משלוח', price: '30' },
+    ]);
+    // Billed above the order (₪15 vs ₪11) → PRICE_HIGHER, open.
+    const inv = await heldInvoice({ raw: 'בצל סגול', productId: P2, price: '15', reasons: ['unlinkedPo'], heldPoId: po, vat: { vat: '5.40', incl: '35.40' } });
+    const mark = await owner().mapping.markCharge({ supplierId: S, rawName: 'משלוח', shownLineIds: [] });
+    expect(mark.learnedKey).toBe(true);
+    await drain();
+    expect(await typesOf(inv)).toContain('PRICE_HIGHER');
+    await owner().mapping.markCharge({ supplierId: S, rawName: 'משלוח', undo: mark.undo! });
+    await drain();
+    expect(await statusOf(inv)).toBe('parsed');
+    expect(await runsOf(inv)).toEqual([]);
+    expect((await computeLeakHero(db, restaurantId)).awaitingQuestionCount).toBe(1);
   });
 });

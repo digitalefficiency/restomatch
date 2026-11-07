@@ -46,8 +46,16 @@ export const FEATURE_KEYS = [
   // S17: inventory counting (ספירת מלאי) → actual food cost per period.
   'inventoryCount',
   // G-08: name-only ORDER lines are "זה אותו מוצר?" questions (they hold the match).
-  // DEFAULT ON — the kill switch: settings.features.orderQuestions = false, or
-  // FEATURES_OFF=orderQuestions. Invoice-line questions and charge lines stay on.
+  // DEFAULT ON — the kill switch: settings.features.orderQuestions = false (admin;
+  // it also releases the invoices already held), or FEATURES_OFF=orderQuestions
+  // (redeploy, then `pnpm --filter @restomatch/worker run release-order-holds`).
+  // Invoice-line questions and charge lines stay on. Notes:
+  //   - FEATURES_OFF=all kills it too: name-only order lines are then as on main
+  //     before G-08 (a first match can read them MISSING + UNORDERED);
+  //   - the charts read FEATURES_OFF at boot (on Vercel an env change redeploys anyway);
+  //   - turning it back ON does not re-hold invoices matched while it was OFF;
+  //   - a re-hold also hides the run's other open findings until the answer
+  //     (by design — the answer re-matches).
   'orderQuestions',
 ] as const;
 

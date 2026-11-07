@@ -12,6 +12,8 @@ import { localizeServerError } from '@/lib/serverErrors';
 export interface FeatureState {
   stored: Record<string, boolean | undefined>;
   all: boolean;
+  /** Keys that are on unless stored false (G-08 orderQuestions). */
+  defaultOn?: string[];
   effective: Record<string, boolean>;
   killed: string[];
 }
@@ -33,7 +35,7 @@ const PILOT_DEFAULTS = [
 /** On for this tenant before any kill-switch — what a ticked box means. */
 function storedOn(state: FeatureState, key: string): boolean {
   const v = state.stored[key];
-  return v === true || (state.all && v !== false);
+  return v === true || ((state.all || (state.defaultOn ?? []).includes(key)) && v !== false);
 }
 
 export function FeaturesPanel({ restaurantId, state }: { restaurantId: string; state: FeatureState }) {
