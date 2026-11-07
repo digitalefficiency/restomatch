@@ -240,10 +240,10 @@ export const he = {
   },
   /** W2-09b: the ledger why-line (flags/why.ts, layout 'ledger') — one short line, shared by every leak surface. */
   why: {
-    price: 'חויב {actual} × {qty} {unit}',
-    priceNoQty: 'חויב {actual} ליחידה',
-    priceP90: 'חויב {actual} × {qty} {unit}',
-    priceP90NoQty: 'חויב {actual} ליחידה',
+    price: 'בחשבונית {actual} × {qty} {unit}',
+    priceNoQty: 'בחשבונית {actual} ליחידה',
+    priceP90: 'בחשבונית {actual} × {qty} {unit}',
+    priceP90NoQty: 'בחשבונית {actual} ליחידה',
     expected: 'צפוי {expected}',
     sourcePo: 'בהזמנה {expected} ({po}, {date})',
     expectedP90: 'מעל המחיר הרגיל של הספק (90 יום): {expected}',
@@ -251,7 +251,7 @@ export const he = {
     /** The full p90 sentence, for the in-place "למה?" fold (W2-16). */
     p90Why: 'גבוה מ-90% מהמחירים של הספק ב-90 הימים האחרונים',
     equals: 'פער {amount}',
-    qtyOver: 'חויבו {billed} {unit}, התקבלו {received}',
+    qtyOver: 'בחשבונית {billed} {unit}, התקבלו {received}',
     qtyShort: 'הוזמנו {ordered} {unit}, התקבלו {received}',
     threshold: 'סף {tolerance}',
     capped: 'מוגבל לסכום החשבונית',
