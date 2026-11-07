@@ -54,7 +54,6 @@ export async function RecipesOverviewCard() {
                   ? t('overviewCard.count', { count: formatNumber(hurt.length, locale) })
                   : t('overviewCard.none')}
             </p>
-            {hurt.length ? <p className="text-xs text-subtle">{t('overviewCard.subtitle')}</p> : null}
           </div>
         </div>
         <Link
