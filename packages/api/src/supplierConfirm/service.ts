@@ -39,6 +39,8 @@ export const LINK_TTL_MS = 72 * 60 * 60 * 1000;
 /** Orders a supplier can be asked to confirm (sent, not yet received/closed). */
 const CONFIRMABLE_STATUSES = ['sent', 'confirmed', 'partial'] as const;
 const isConfirmable = (status: string) => (CONFIRMABLE_STATUSES as readonly string[]).includes(status);
+/** Cancelled or closed: the order is over, so the supplier needs no answer (not "ask for a new link"). */
+const isClosed = (status: string) => status === 'cancelled' || status === 'closed';
 
 /** The answer's bounds (G-10). The portal reads them from `SupplierOrderView.limits`, so client and server share one source. */
 export const SUPPLIER_MAX_QTY = 1_000_000;
@@ -50,9 +52,14 @@ export const SUPPLIER_MAX_PRICE = 10_000_000;
  * re-imported or edited after the supplier opened it) is refused with
  * ORDER_CHANGED instead of storing a shortage the supplier never typed.
  */
-export function linesVersionOf(lines: ReadonlyArray<{ id: string; qty: number | string; price: number | string | null }>): string {
+export function linesVersionOf(
+  lines: ReadonlyArray<{ id: string; qty: number | string; price: number | string | null; unit: string; productId: string | null }>,
+): string {
   const canon = [...lines]
-    .map((l) => `${l.id}:${Math.round(Number(l.qty) * 1000)}:${l.price == null ? '-' : Math.round(Number(l.price) * 10_000)}`)
+    .map(
+      (l) =>
+        `${l.id}:${Math.round(Number(l.qty) * 1000)}:${l.price == null ? '-' : Math.round(Number(l.price) * 10_000)}:${l.unit}:${l.productId ?? '-'}`,
+    )
     .sort()
     .join('|');
   return createHash('sha256').update(canon, 'utf8').digest('base64url').slice(0, 22);
@@ -208,8 +215,10 @@ export interface SupplierOrderView {
   response: { status: 'confirmed' | 'changes'; submittedAt: Date; lines: SupplierResponseLine[]; note: string | null } | null;
   /** G-10: `linesVersionOf` the lines above — the portal sends it back with the answer. */
   linesVersion: string;
-  /** G-10: false once the order is cancelled, closed or received (no new answer is accepted). */
+  /** G-10: false once the order is no longer open for an answer (no new answer is accepted). */
   confirmable: boolean;
+  /** G-10: the order was cancelled or closed (the portal says so, rather than "the link expired"). */
+  closed: boolean;
   /** G-10: the answer's bounds, shared with the portal's inputs. */
   limits: { maxQty: number; maxPrice: number };
 }
@@ -306,8 +315,11 @@ export async function loadSupplierOrder(db: Database, link: ResolvedLink): Promi
       agreed: agreed.has(l.id),
     })),
     response: resp ?? null,
-    linesVersion: linesVersionOf(lines.map((l) => ({ id: l.id, qty: l.qtyOrdered, price: l.unitPriceExpected }))),
+    linesVersion: linesVersionOf(
+      lines.map((l) => ({ id: l.id, qty: l.qtyOrdered, price: l.unitPriceExpected, unit: l.unit, productId: l.productId })),
+    ),
     confirmable: isConfirmable(po.status),
+    closed: isClosed(po.status),
     limits: { maxQty: SUPPLIER_MAX_QTY, maxPrice: SUPPLIER_MAX_PRICE },
   };
 }
@@ -344,7 +356,8 @@ export interface SupplierAnswerInput {
  * - `INCOMPLETE_ANSWER`: an order line is missing, or `with_changes` leaves a quantity empty;
  * - `INTENT_MISMATCH`: `as_ordered` with a changed line, or `with_changes` with no change and no note;
  * - `ORDER_CHANGED`: the order's lines changed since the supplier opened the form (`linesVersion`);
- * - `ORDER_CLOSED`: the order is cancelled, closed or received.
+ * - `ORDER_CLOSED`: the order is cancelled or closed;
+ * - `ORDER_NOT_OPEN`: the order is otherwise not open for an answer (e.g. back to draft).
  */
 export type SubmitError =
   | 'NOT_FOUND'
@@ -354,7 +367,8 @@ export type SubmitError =
   | 'INCOMPLETE_ANSWER'
   | 'INTENT_MISMATCH'
   | 'ORDER_CHANGED'
-  | 'ORDER_CLOSED';
+  | 'ORDER_CLOSED'
+  | 'ORDER_NOT_OPEN';
 
 const MAX_QTY = SUPPLIER_MAX_QTY;
 const MAX_PRICE = SUPPLIER_MAX_PRICE;
@@ -393,10 +407,11 @@ export async function submitSupplierAnswer(
     .where(and(eq(supplierResponses.poId, po.id), eq(supplierResponses.restaurantId, link.restaurantId)))
     .limit(1);
   if (answered) return { ok: false, error: 'ALREADY_ANSWERED' };
-  if (!isConfirmable(po.status)) return { ok: false, error: 'ORDER_CLOSED' };
+  if (isClosed(po.status)) return { ok: false, error: 'ORDER_CLOSED' };
+  if (!isConfirmable(po.status)) return { ok: false, error: 'ORDER_NOT_OPEN' };
 
   const own = await db
-    .select({ id: poLines.id, qty: poLines.qtyOrdered, price: poLines.unitPriceExpected })
+    .select({ id: poLines.id, qty: poLines.qtyOrdered, price: poLines.unitPriceExpected, unit: poLines.unit, productId: poLines.productId })
     .from(poLines)
     .where(eq(poLines.poId, po.id));
   const byId = new Map(own.map((l) => [l.id, l]));
@@ -412,7 +427,13 @@ export async function submitSupplierAnswer(
     if (!mine || seen.has(l.poLineId)) return { ok: false, error: 'BAD_LINE' };
     seen.add(l.poLineId);
     const qty = l.qtyAvailable ?? null;
-    const price = l.proposedUnitPrice ?? null;
+    // The order's own price (₪0 included) is "no price change" — checked before
+    // validity, mirroring the portal, so a ₪0 line's untouched "0" is not BAD_VALUE.
+    const sentPrice = l.proposedUnitPrice ?? null;
+    const price =
+      sentPrice !== null && Number.isFinite(sentPrice) && mine.price != null && round(sentPrice, 4) === round(Number(mine.price), 4)
+        ? null
+        : sentPrice;
     if (qty !== null && (!Number.isFinite(qty) || qty < 0 || qty > MAX_QTY)) return { ok: false, error: 'BAD_VALUE' };
     if (price !== null && (!Number.isFinite(price) || price <= 0 || price > MAX_PRICE)) {
       return { ok: false, error: 'BAD_VALUE' };

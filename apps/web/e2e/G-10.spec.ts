@@ -4,8 +4,10 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
+import { loadSupplierOrder, resolveSupplierToken } from '@restomatch/api';
+import { createDb } from '@restomatch/db';
 import { e2eSql } from './helpers';
-import { DEMO_RESTAURANT_NAME } from './env';
+import { DEMO_RESTAURANT_NAME, E2E_DATABASE_URL } from './env';
 
 /**
  * G-10 (auth-02, P0) · the supplier answer contract on `/s/<token>`: an explicit
@@ -112,23 +114,15 @@ async function seriousAxe(page: Page): Promise<string[]> {
   });
 }
 
-/**
- * The order's `linesVersion` as the portal shows it — the same canonical form as
- * `linesVersionOf` in the service (id : qty×1000 : price×10000, sorted, sha256).
- */
-async function linesVersion(poId: string): Promise<string> {
-  const sql = e2eSql();
-  try {
-    const rows = await sql<{ id: string; q: string; p: string | null }[]>`
-      select id, qty_ordered::text as q, unit_price_expected::text as p from po_lines where po_id = ${poId}`;
-    const canon = rows
-      .map((l) => `${l.id}:${Math.round(Number(l.q) * 1000)}:${l.p == null ? '-' : Math.round(Number(l.p) * 10_000)}`)
-      .sort()
-      .join('|');
-    return createHash('sha256').update(canon, 'utf8').digest('base64url').slice(0, 22);
-  } finally {
-    await sql.end();
-  }
+/** The order's `linesVersion` exactly as the portal page reads it (`loadSupplierOrder`), never re-implemented here. */
+let ownerDb: ReturnType<typeof createDb> | null = null;
+async function linesVersion(token: string): Promise<string> {
+  const db = (ownerDb ??= createDb(E2E_DATABASE_URL));
+  const r = await resolveSupplierToken(db, token);
+  if (!r.ok) throw new Error(`link ${r.error}`);
+  const view = await loadSupplierOrder(db, r.link);
+  if (!view) throw new Error('order not found');
+  return view.linesVersion;
 }
 
 /** POST an answer like the portal does (same origin), without a page view — the
@@ -191,7 +185,7 @@ test.describe('G-10 · supplier answer contract (he 390, touch)', () => {
     await other.goto(`/s/${token}`);
     const replay = await postAnswer(other, token, {
       intent: 'as_ordered',
-      linesVersion: await linesVersion(poId),
+      linesVersion: await linesVersion(token),
       lines: lineIds.map((id) => ({ poLineId: id, qtyAvailable: null })),
       note: 'ניסיון שני',
     });
@@ -207,7 +201,7 @@ test.describe('G-10 · supplier answer contract (he 390, touch)', () => {
   test('a contradictory answer (as_ordered with a shortage) → 422 intent_mismatch; nothing stored', async ({ page }) => {
     const { token, poId, lineIds } = await freshSupplierLink();
     const lines = lineIds.map((id, i) => ({ poLineId: id, qtyAvailable: i === 0 ? 0 : null }));
-    const v = await linesVersion(poId);
+    const v = await linesVersion(token);
     const mismatch = await postAnswer(page, token, { intent: 'as_ordered', linesVersion: v, lines });
     expect(mismatch).toEqual({ status: 422, json: { ok: false, error: 'intent_mismatch' } });
     const partial = await postAnswer(page, token, { intent: 'as_ordered', linesVersion: v, lines: [] });
@@ -215,10 +209,15 @@ test.describe('G-10 · supplier answer contract (he 390, touch)', () => {
     expect(await stored(poId)).toBeNull();
   });
 
-  test('the order changed while the form was open → "ההזמנה עודכנה", the new line appears, nothing stored', async ({ page }) => {
-    const { token, poId } = await freshSupplierLink();
+  test('the order changed while the form was open → the typed shortage is KEPT, the new line is marked, nothing stored', async ({ page }) => {
+    const { token, poId, lineIds } = await freshSupplierLink();
+    const ordered0 = await qtyOrdered(lineIds[0]!);
+    const short = String(Math.max(0, Math.floor(ordered0 * 0.5)));
     await setLocale(page, 'he');
     await page.goto(`/s/${token}`);
+    await page.locator(`#qty-${lineIds[0]}`).fill(short);
+    const primary = page.locator('[data-primary]');
+    await expect(primary).toHaveText('שליחת התשובה · שינוי אחד');
     const sql = e2eSql();
     let added = '';
     try {
@@ -228,16 +227,31 @@ test.describe('G-10 · supplier answer contract (he 390, touch)', () => {
     } finally {
       await sql.end();
     }
-    await page.locator('[data-primary]').click();
-    await expect(page.getByTestId('portal-actions').getByRole('alert')).toContainText('ההזמנה עודכנה');
-    await expect(page.locator(`#qty-${added}`)).toHaveValue('3');
-    await expect(page.getByTestId('portal-done')).toHaveCount(0);
-    expect(await stored(poId)).toBeNull();
-    const clean = e2eSql();
     try {
-      await clean`delete from po_lines where id = ${added}`;
+      await primary.click();
+      await expect(page.getByTestId('portal-actions').getByRole('alert')).toContainText('שורה אחת השתנתה או נוספה');
+      // the new line appears, prefilled, marked, and focused
+      await expect(page.locator(`#qty-${added}`)).toHaveValue('3');
+      await expect(page.locator(`li[data-order-changed]`)).toHaveCount(1);
+      await expect(page.locator(`li[data-order-changed] #qty-${added}`)).toBeVisible();
+      await expect(page.locator(`#qty-${added}`)).toBeFocused();
+      // the shortage typed before the change is kept, and the primary still carries it
+      await expect(page.locator(`#qty-${lineIds[0]}`)).toHaveValue(short);
+      await expect(primary).toHaveText('שליחת התשובה · שינוי אחד');
+      await expect(page.getByTestId('portal-done')).toHaveCount(0);
+      expect(await stored(poId)).toBeNull();
+      // sending now stores the supplier's shortage — not "as ordered"
+      await primary.click();
+      await expect(page.getByTestId('portal-done')).toContainText('חוסר');
+      expect((await stored(poId))?.lines).toEqual([{ poLineId: lineIds[0], qtyAvailable: Number(short), proposedUnitPrice: null }]);
     } finally {
-      await clean.end();
+      const clean = e2eSql();
+      try {
+        await clean`delete from supplier_responses where po_id = ${poId}`;
+        await clean`delete from po_lines where id = ${added}`;
+      } finally {
+        await clean.end();
+      }
     }
   });
 
@@ -276,7 +290,7 @@ for (const [locale, vp, use] of VIEWS) {
           const { token, poId, lineIds } = await freshSupplierLink(state === 'expired' ? -1 : 72);
           path = `/s/${token}`;
           if (state === 'answered') {
-            const v = await linesVersion(poId);
+            const v = await linesVersion(token);
             const r = await postAnswer(page, token, {
               intent: 'with_changes',
               linesVersion: v,

@@ -10,7 +10,7 @@ import { formatNumber } from '@/lib/i18n/format';
 import { supplierConfirm } from '@/lib/i18n/messages/supplierConfirm';
 import { Money } from '@/lib/components/money';
 import { DiffList } from './Diff';
-import { buildAnswer, type Answer, type AnswerLimits, type DiffItem, type PortalLine } from './logic';
+import { buildAnswer, mergeAfterOrderChange, type Answer, type AnswerLimits, type DiffItem, type PortalLine } from './logic';
 import { rememberAttempt } from './attempt';
 
 export type { PortalLine } from './logic';
@@ -19,8 +19,19 @@ type Phase =
   | { kind: 'edit' }
   | { kind: 'sending'; what: 'answer' | 'asIs' }
   | { kind: 'done'; status: 'confirmed' | 'changes'; diff: DiffItem[]; note: string | null }
-  | { kind: 'error'; key: ErrorKey };
-type ErrorKey = 'notFound' | 'expired' | 'rateLimited' | 'incomplete' | 'intentMismatch' | 'orderChanged' | 'tooLarge' | 'generic';
+  | { kind: 'error'; key: ErrorKey; count?: number };
+type ErrorKey =
+  | 'notFound'
+  | 'expired'
+  | 'closed'
+  | 'rateLimited'
+  | 'incomplete'
+  | 'intentMismatch'
+  | 'orderChanged'
+  | 'orderChangedOne'
+  | 'orderChangedRemoved'
+  | 'tooLarge'
+  | 'generic';
 
 const inputClass =
   'mt-1 block min-h-12 w-full rounded-lg border bg-surface px-3 py-2.5 text-base text-ink tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-primary';
@@ -63,14 +74,31 @@ export function SupplierAnswerForm({
   );
   const [note, setNote] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'edit' });
-  // The order changed under the supplier (409 order_changed → refresh): reload the
-  // fields from the NEW lines; the "the order was updated" message stays on screen.
-  const shownVersion = useRef(linesVersion);
+  // The order changed under the supplier (409 order_changed → refresh). Keep every
+  // value typed on a line that is still the same line — a typed shortage must never
+  // fall back to "as ordered" (G-10 review #2.1) — prefill only new or changed
+  // lines, mark them, and move focus to the first one.
+  const shown = useRef({ version: linesVersion, lines });
+  const [changedIds, setChangedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const qtyRef = useRef(qty);
+  const priceRef = useRef(price);
+  qtyRef.current = qty;
+  priceRef.current = price;
   useEffect(() => {
-    if (shownVersion.current === linesVersion) return;
-    shownVersion.current = linesVersion;
-    setQty(Object.fromEntries(lines.map((l) => [l.id, String(l.qtyOrdered)])));
-    setPrice(Object.fromEntries(lines.map((l) => [l.id, l.unitPrice == null ? '' : String(l.unitPrice)])));
+    if (shown.current.version === linesVersion) return;
+    const merged = mergeAfterOrderChange(shown.current.lines, lines, qtyRef.current, priceRef.current);
+    shown.current = { version: linesVersion, lines };
+    setQty(merged.qtyText);
+    setPrice(merged.priceText);
+    setChangedIds(new Set(merged.changedIds));
+    const n = merged.changedIds.length;
+    setPhase({
+      kind: 'error',
+      key: n === 0 ? 'orderChangedRemoved' : n === 1 ? 'orderChangedOne' : 'orderChanged',
+      count: n,
+    });
+    const first = merged.changedIds[0];
+    if (first) requestAnimationFrame(() => document.getElementById(`qty-${first}`)?.focus());
   }, [linesVersion, lines]);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const asIsRef = useRef<HTMLButtonElement>(null);
@@ -111,17 +139,24 @@ export function SupplierAnswerForm({
           note: body.note,
         });
       }
-      // auth-03: someone already answered this order. Never a false success —
-      // reload the page, which shows the RECORDED answer, its date, and that
-      // these changes were not saved.
       // The order changed after this form was opened: nothing was saved. Reload
-      // the order and ask the supplier to check it again.
+      // the order; the effect above keeps what was typed and marks what changed.
       if (res.status === 409 && data.error === 'order_changed') {
-        setPhase({ kind: 'error', key: 'orderChanged' });
+        setPhase({ kind: 'edit' });
+        router.refresh();
+        return;
+      }
+      // The order was cancelled or closed meanwhile: say so, then reload the page
+      // (which shows the same "closed" message instead of the form).
+      if (res.status === 410 && data.error === 'order_closed') {
+        setPhase({ kind: 'error', key: 'closed' });
         router.refresh();
         return;
       }
       if (res.status === 409) {
+        // auth-03: someone already answered this order. Never a false success —
+        // reload the page, which shows the RECORDED answer, its date, and that
+        // these changes were not saved.
         // The page then compares the recorded answer with this attempt: a
         // retried submit whose first try did land is the supplier's own answer.
         rememberAttempt(token, body);
@@ -201,14 +236,17 @@ export function SupplierAnswerForm({
           const qtyId = `qty-${l.id}`;
           const priceId = `price-${l.id}`;
           return (
-            <li key={l.id}>
-              <Card padding="sm" className={cn((shortage || priceChanged) && 'border-warn')}>
+            <li key={l.id} data-order-changed={changedIds.has(l.id) || undefined}>
+              <Card padding="sm" className={cn((shortage || priceChanged || changedIds.has(l.id)) && 'border-warn')}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-base font-semibold text-ink">{l.name}</p>
                     {l.sku ? <p className="text-sm text-muted">{t('portal.sku', { sku: l.sku })}</p> : null}
                   </div>
                   <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                    {changedIds.has(l.id) ? (
+                      <span className="rounded-full border border-warn px-2 py-0.5 text-sm font-semibold text-ink">{t('portal.lineUpdated')}</span>
+                    ) : null}
                     {shortage && !out ? (
                       <span className="rounded-full border border-warn px-2 py-0.5 text-sm font-semibold text-ink">{t('portal.shortage')}</span>
                     ) : null}
@@ -344,7 +382,7 @@ export function SupplierAnswerForm({
             ) : null}
             {phase.kind === 'error' ? (
               <p role="alert" className="mt-1 text-sm font-medium text-danger">
-                {t(`portal.errors.${phase.key}`)}
+                {t(`portal.errors.${phase.key}`, { count: formatNumber(phase.count ?? 0, locale) })}
               </p>
             ) : null}
           </div>

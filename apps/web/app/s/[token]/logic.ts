@@ -220,6 +220,42 @@ export function buildAnswer(state: AnswerState): BuiltAnswer {
   return { primary, intent, body, asOrderedBody, count: answer.changeCount, discardCount: answer.lineChangeCount, diff: answer.diff, answer };
 }
 
+/**
+ * The order changed under an open form (409 order_changed → refresh). Keep what
+ * the supplier typed for every line that is still the same line (id, ordered
+ * qty, order price, unit), so a typed shortage is never silently reset to "as
+ * ordered"; prefill only new or changed lines, and name them so the form can
+ * mark them and move focus to the first one.
+ */
+export function mergeAfterOrderChange(
+  prev: ReadonlyArray<PortalLine>,
+  next: ReadonlyArray<PortalLine>,
+  qtyText: Record<string, string>,
+  priceText: Record<string, string>,
+): { qtyText: Record<string, string>; priceText: Record<string, string>; changedIds: string[]; removed: number } {
+  const before = new Map(prev.map((l) => [l.id, l]));
+  const same = (a: PortalLine | undefined, b: PortalLine) =>
+    !!a &&
+    Math.round(a.qtyOrdered * 1000) === Math.round(b.qtyOrdered * 1000) &&
+    (a.unitPrice == null ? b.unitPrice == null : b.unitPrice != null && Math.round(a.unitPrice * 10_000) === Math.round(b.unitPrice * 10_000)) &&
+    a.unit === b.unit;
+  const q: Record<string, string> = {};
+  const p: Record<string, string> = {};
+  const changedIds: string[] = [];
+  for (const l of next) {
+    if (same(before.get(l.id), l)) {
+      q[l.id] = qtyText[l.id] ?? String(l.qtyOrdered);
+      p[l.id] = priceText[l.id] ?? (l.unitPrice == null ? '' : String(l.unitPrice));
+    } else {
+      changedIds.push(l.id);
+      q[l.id] = String(l.qtyOrdered);
+      p[l.id] = l.unitPrice == null ? '' : String(l.unitPrice);
+    }
+  }
+  const ids = new Set(next.map((l) => l.id));
+  return { qtyText: q, priceText: p, changedIds, removed: prev.filter((l) => !ids.has(l.id)).length };
+}
+
 /** A recorded answer (supplier_responses.lines) → the same diff items, for "already answered". */
 export function recordedDiff(
   lines: PortalLine[],

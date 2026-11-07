@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAnswer, computeAnswer, contactNumbers, isOwnAnswer, lineAgorot, parseQty, parseUnitPrice, recordedDiff, type PortalLine } from '../logic';
+import { buildAnswer, computeAnswer, mergeAfterOrderChange, contactNumbers, isOwnAnswer, lineAgorot, parseQty, parseUnitPrice, recordedDiff, type PortalLine } from '../logic';
 
 const LINES: PortalLine[] = [
   { id: 'a', name: 'עגבניות', sku: null, qtyOrdered: 10, unit: 'kg', unitPrice: 6.5, agreed: true },
@@ -215,5 +215,36 @@ describe('review findings (W1-09 correctness pass)', () => {
     expect(isOwnAnswer(LINES, body, { lines: [{ poLineId: 'a', qtyAvailable: 6, proposedUnitPrice: null }], note: null })).toBe(false);
     // the as-ordered body (every line, no differences) matches the stored `lines: []`
     expect(isOwnAnswer(LINES, build(asOrdered().qty, asOrdered().price).body, { lines: [], note: null })).toBe(true);
+  });
+});
+
+describe('order changed under an open form (G-10 review round 2 #1)', () => {
+  it('keeps every typed value on an unchanged line; prefills and names only new or changed lines', () => {
+    const { qty, price } = asOrdered();
+    qty.a = '2'; // the supplier's typed shortage
+    price.b = '15';
+    const next: PortalLine[] = [
+      LINES[0]!, // unchanged → keep "2"
+      { ...LINES[1]!, qtyOrdered: 6 }, // ordered qty edited → prefill 6
+      LINES[2]!,
+      { id: 'd', name: 'חדש', sku: null, qtyOrdered: 3, unit: 'unit', unitPrice: 4, agreed: false }, // added
+    ];
+    const m = mergeAfterOrderChange(LINES, next, qty, price);
+    expect(m.qtyText).toEqual({ a: '2', b: '6', c: '2', d: '3' });
+    expect(m.priceText).toEqual({ a: '6.5', b: '13.9', c: '', d: '4' });
+    expect(m.changedIds).toEqual(['b', 'd']);
+    expect(m.removed).toBe(0);
+    // the primary still carries the preserved shortage — never a fallback to as-ordered
+    const b = buildAnswer({ lines: next, linesVersion: 'v2', qtyText: m.qtyText, priceText: m.priceText, note: '' });
+    expect(b).toMatchObject({ primary: 'with_changes', count: 1 });
+    expect(b.body.lines.find((l) => l.poLineId === 'a')?.qtyAvailable).toBe(2);
+  });
+
+  it('a unit or price change marks the line; a removed line is counted', () => {
+    const { qty, price } = asOrdered();
+    const next: PortalLine[] = [{ ...LINES[0]!, unit: 'box' }, { ...LINES[1]!, unitPrice: 14 }];
+    const m = mergeAfterOrderChange(LINES, next, qty, price);
+    expect(m.changedIds).toEqual(['a', 'b']);
+    expect(m.removed).toBe(1);
   });
 });

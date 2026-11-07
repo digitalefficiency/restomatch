@@ -60,8 +60,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
     case 'NOT_FOUND':
       return json(404, { ok: false, error: 'not_found' });
     case 'EXPIRED':
-    case 'ORDER_CLOSED':
+    case 'ORDER_NOT_OPEN':
       return json(410, { ok: false, error: 'expired' });
+    case 'ORDER_CLOSED':
+      return json(410, { ok: false, error: 'order_closed' });
     case 'ORDER_CHANGED':
       return json(409, { ok: false, error: 'order_changed' });
     case 'INCOMPLETE_ANSWER':

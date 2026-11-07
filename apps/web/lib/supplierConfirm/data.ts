@@ -18,14 +18,15 @@ import { db } from '@/lib/db';
  */
 export async function supplierPortalView(
   token: string,
-): Promise<{ ok: true; view: SupplierOrderView } | { ok: false; error: 'NOT_FOUND' | 'EXPIRED' }> {
+): Promise<{ ok: true; view: SupplierOrderView } | { ok: false; error: 'NOT_FOUND' | 'EXPIRED' | 'CLOSED' }> {
   const r = await resolveSupplierToken(authDb, token);
   if (!r.ok) return r;
   const view = await withRestaurant(db, r.link.restaurantId, (tx) => loadSupplierOrder(tx, r.link));
   if (!view) return { ok: false, error: 'NOT_FOUND' };
-  // A cancelled or closed order takes no new answer: the link reads as no longer
-  // active. An answer already on record is still shown.
-  if (!view.confirmable && !view.response) return { ok: false, error: 'EXPIRED' };
+  // An order no longer open takes no new answer. Cancelled or closed → CLOSED
+  // ("no answer needed"); otherwise (e.g. back to draft) the link reads as no
+  // longer active. An answer already on record is still shown.
+  if (!view.confirmable && !view.response) return { ok: false, error: view.closed ? 'CLOSED' : 'EXPIRED' };
   return { ok: true, view };
 }
 

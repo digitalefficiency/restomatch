@@ -222,13 +222,17 @@ describe('POST /api/supplier-confirm/[token]', () => {
     }
   });
 
-  it('G-10 review #7: a cancelled order takes no answer through an old link → 410', async () => {
+  it('G-10 review #7 / round 2: a cancelled order takes no answer through an old link → 410 order_closed (draft → 410 expired)', async () => {
     const { token } = await link();
+    await db.update(purchaseOrders).set({ status: 'draft' }).where(eq(purchaseOrders.id, poId));
+    const draft = await post(token, asOrdered());
+    expect(draft.status).toBe(410);
+    expect(await draft.json()).toEqual({ ok: false, error: 'expired' });
     await db.update(purchaseOrders).set({ status: 'cancelled' }).where(eq(purchaseOrders.id, poId));
     try {
       const res = await post(token, asOrdered());
       expect(res.status).toBe(410);
-      expect(await res.json()).toEqual({ ok: false, error: 'expired' });
+      expect(await res.json()).toEqual({ ok: false, error: 'order_closed' });
       expect(await stored()).toEqual([]);
     } finally {
       await db.update(purchaseOrders).set({ status: 'sent' }).where(eq(purchaseOrders.id, poId));

@@ -216,7 +216,12 @@ describe('the order changed after the supplier opened the form (G-10 review #2)'
 
   it('the view carries a stable linesVersion; an unchanged order accepts the answer', async () => {
     const o = await freshOrder();
-    expect(o.version).toBe(linesVersionOf([{ id: o.a, qty: '10', price: '8.5' }, { id: o.b, qty: 4, price: 20 }]));
+    expect(o.version).toBe(
+      linesVersionOf([
+        { id: o.a, qty: '10', price: '8.5', unit: 'kg', productId: null },
+        { id: o.b, qty: 4, price: 20, unit: 'box', productId: null },
+      ]),
+    );
     expect(
       await submitSupplierAnswer(db, o.link, {
         intent: 'with_changes',
@@ -259,6 +264,34 @@ describe('the order changed after the supplier opened the form (G-10 review #2)'
     expect(await rows(o.poId)).toEqual([]);
   });
 
+  it('a UNIT edited since (kg → box) → ORDER_CHANGED', async () => {
+    const o = await freshOrder();
+    await db.update(poLines).set({ unit: 'box' }).where(eq(poLines.id, o.a));
+    const lines = [{ poLineId: o.a, qtyAvailable: 6 }, { poLineId: o.b, qtyAvailable: 4 }];
+    expect(await submitSupplierAnswer(db, o.link, { intent: 'with_changes', linesVersion: o.version, lines })).toEqual({
+      ok: false,
+      error: 'ORDER_CHANGED',
+    });
+    expect(await rows(o.poId)).toEqual([]);
+  });
+
+  it('a ₪0 order line: proposedUnitPrice 0 (its own price) is unchanged, not BAD_VALUE', async () => {
+    const o = await freshOrder();
+    await db.update(poLines).set({ unitPriceExpected: '0' }).where(eq(poLines.id, o.b));
+    const r = await resolveSupplierToken(db, (await createSupplierLink(db, T.restaurantId, o.poId))!.token);
+    if (!r.ok) throw new Error(r.error);
+    const view = (await loadSupplierOrder(db, r.link))!;
+    const lines = [
+      { poLineId: o.a, qtyAvailable: 6, proposedUnitPrice: 8.5 },
+      { poLineId: o.b, qtyAvailable: 4, proposedUnitPrice: 0 },
+    ];
+    expect(await submitSupplierAnswer(db, r.link, { intent: 'with_changes', linesVersion: view.linesVersion, lines })).toEqual({
+      ok: true,
+      status: 'changes',
+    });
+    expect((await rows(o.poId))[0]!.lines).toEqual([{ poLineId: o.a, qtyAvailable: 6, proposedUnitPrice: null }]);
+  });
+
   it('a replay is ALREADY_ANSWERED even when the lines would now fail validation (checked first)', async () => {
     const o = await freshOrder();
     const ok = [{ poLineId: o.a, qtyAvailable: 10 }, { poLineId: o.b, qtyAvailable: 4 }];
@@ -270,7 +303,18 @@ describe('the order changed after the supplier opened the form (G-10 review #2)'
     });
   });
 
-  it('a cancelled or closed order → ORDER_CLOSED; the view says confirmable: false', async () => {
+  it('an order back to draft → ORDER_NOT_OPEN; the view says confirmable: false, closed: false', async () => {
+    const o = await freshOrder();
+    await db.update(purchaseOrders).set({ status: 'draft' }).where(eq(purchaseOrders.id, o.poId));
+    const lines = [{ poLineId: o.a, qtyAvailable: 10 }, { poLineId: o.b, qtyAvailable: 4 }];
+    expect(await submitSupplierAnswer(db, o.link, { intent: 'as_ordered', linesVersion: o.version, lines })).toEqual({
+      ok: false,
+      error: 'ORDER_NOT_OPEN',
+    });
+    expect(await loadSupplierOrder(db, o.link)).toMatchObject({ confirmable: false, closed: false });
+  });
+
+  it('a cancelled or closed order → ORDER_CLOSED; the view says confirmable: false, closed: true', async () => {
     for (const status of ['cancelled', 'closed'] as const) {
       const o = await freshOrder();
       await db.update(purchaseOrders).set({ status }).where(eq(purchaseOrders.id, o.poId));
@@ -279,7 +323,7 @@ describe('the order changed after the supplier opened the form (G-10 review #2)'
         ok: false,
         error: 'ORDER_CLOSED',
       });
-      expect((await loadSupplierOrder(db, o.link))!.confirmable).toBe(false);
+      expect(await loadSupplierOrder(db, o.link)).toMatchObject({ confirmable: false, closed: true });
       expect(await rows(o.poId)).toEqual([]);
     }
   });
