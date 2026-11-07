@@ -28,9 +28,11 @@
 export const DUE_DATE_TZ = 'Asia/Jerusalem';
 
 /**
- * Payment-Delays law (חוק מוסר תשלומים לספקים) ceiling, in days after the end
- * of the invoice month. Terms beyond it get the warn chip "מעבר לתקרת החוק".
- * Proposed 45 — leak-economist confirms the number before merge.
+ * Payment-Delays law (חוק מוסר תשלומים לספקים) GENERAL ceiling: שוטף+45, in days after
+ * the end of the invoice month. Terms beyond it get the warn chip "מעבר לתקרת החוק" — a
+ * warning only, never ₪. The law has narrower rules (shorter terms for some goods, supplier
+ * type, invoice date), so the chip means "beyond the general ceiling", not "illegal".
+ * Owner-approved (M4, 7.11); leak-economist signed.
  */
 export const PAYMENT_LAW_MAX_DAYS_AFTER_EOM = 45;
 

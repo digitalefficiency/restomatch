@@ -475,6 +475,14 @@ describe('payRun.list (W2-03)', () => {
     expect(a!.status).toBe('matched');
   });
 
+  it("payRun.remind: B's invoice → NOT_FOUND; receiver/chef FORBIDDEN; own invoice → NOT_IMPLEMENTED until G-06", async () => {
+    await expect(asA().payRun.remind({ invoiceId: B.invoiceId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    for (const role of ['receiver', 'chef'] as const) {
+      await expect(asA(role).payRun.remind({ invoiceId: A.invoiceId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+    await expect(asA('bookkeeper').payRun.remind({ invoiceId: A.invoiceId })).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED' });
+  });
+
   it('unmarkPaid requires a reason (owner I7) — BAD_REQUEST without one, before any lookup', async () => {
     const items = [{ invoiceId: A.invoiceId, expectedStatus: 'paid' as const }];
     await expect(asA().payRun.unmarkPaid({ items, clientMutationId: 'cmid-noreason-1' } as never)).rejects.toMatchObject({
