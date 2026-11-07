@@ -79,6 +79,8 @@ export default async function Home() {
       fetchPriority: 'high',
       imageSrcSet: heroLoop.posterSrcSet,
       imageSizes: heroMedia.posterSizes,
+      // Without a 9:16 cut, phones show HeroMatch instead: don't make them fetch the 16:9 poster.
+      ...(heroMedia.phoneLoop ? {} : { media: '(min-width: 640px)' }),
     });
   }
   const promoSrc = promoVideoFor(locale);
@@ -218,16 +220,30 @@ export default async function Home() {
             </ul>
           </div>
           {heroMedia.available ? (
-            <HeroVideo
-              webm={heroLoop.webm}
-              mp4={heroLoop.mp4}
-              poster={heroLoop.poster}
-              posterSrcSet={heroLoop.posterSrcSet}
-              posterSizes={heroMedia.posterSizes}
-              label={t('hero.watchTitle')}
-              pauseLabel={t('v2.video.pause')}
-              playLabel={t('v2.video.play')}
-            />
+            <>
+              {/* W3-06b: no 9:16 loop yet → phones get the legible product mock; the video is sm+. */}
+              {heroMedia.phoneLoop ? null : (
+                <div className="sm:hidden" data-testid="hero-phone-mock">
+                  <HeroMatch />
+                </div>
+              )}
+              <div
+                className={heroMedia.phoneLoop ? undefined : 'hidden sm:block'}
+                data-testid="hero-video-wrap"
+              >
+                <HeroVideo
+                  webm={heroLoop.webm}
+                  mp4={heroLoop.mp4}
+                  poster={heroLoop.poster}
+                  posterSrcSet={heroLoop.posterSrcSet}
+                  posterSizes={heroMedia.posterSizes}
+                  label={t('hero.watchTitle')}
+                  pauseLabel={t('v2.video.pause')}
+                  playLabel={t('v2.video.play')}
+                  minWidth={heroMedia.phoneLoop ? undefined : '(min-width: 640px)'}
+                />
+              </div>
+            </>
           ) : (
             <HeroMatch />
           )}
@@ -307,7 +323,11 @@ export default async function Home() {
               lines={MORPH_LINES}
               originalLabel={t('v2.receiver.original')}
               englishLabel={t('v2.receiver.english')}
-              labels={{ pause: t('visual.pause'), play: t('visual.play'), replay: t('visual.replay') }}
+              labels={{
+                pause: t('visual.pause'),
+                play: t('visual.play'),
+                replay: t('visual.replay'),
+              }}
             />
           </div>
         </div>
@@ -319,7 +339,10 @@ export default async function Home() {
       {landingFlag('landingCompare') && <LandingCompare />}
 
       {/* ───────────── 4 · PROOF — the honest math (PLAN_SEED + formatIls) ───────────── */}
-      <section className="rm-defer border-y border-line bg-surface/30" aria-labelledby="proof-title">
+      <section
+        className="rm-defer border-y border-line bg-surface/30"
+        aria-labelledby="proof-title"
+      >
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
           <div className="mx-auto mb-10 max-w-2xl text-center">
             <Eyebrow tone="gold">{t('v2.proof.eyebrow')}</Eyebrow>
@@ -366,7 +389,10 @@ export default async function Home() {
       </section>
 
       {/* ───────────── 5 · PRICING TEASER ───────────── */}
-      <section className="rm-defer mx-auto max-w-6xl px-4 py-20 sm:px-6" aria-labelledby="pricing-title">
+      <section
+        className="rm-defer mx-auto max-w-6xl px-4 py-20 sm:px-6"
+        aria-labelledby="pricing-title"
+      >
         <div className="rm-reveal grid items-center gap-10 lg:grid-cols-[1fr_1.2fr]">
           <div>
             <Eyebrow tone="gold">{t('pricing.eyebrow')}</Eyebrow>

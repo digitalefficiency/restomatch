@@ -36,6 +36,12 @@ export const heroMedia = {
     he: { src: '/media/promo-he-720.mp4', poster: '/media/promo-poster-he.jpg' },
     en: { src: '/media/promo-en-720.mp4', poster: '/media/promo-poster-en.jpg' },
   } as PromoSources | null,
+  /**
+   * 9:16 phone loop (W3-06b). null until S10's pipeline delivers
+   * hero-loop-9x16.{webm,mp4} + its poster; until then phones show the legible
+   * HeroMatch mock and the 16:9 loop is desktop/tablet (sm+) only.
+   */
+  phoneLoop: null as null | { webm: string; mp4: string; poster: string },
   /** English hero loop (same motion, English dashboard + callouts); Hebrew is the default above. */
   loopEn: {
     webm: '/media/hero-loop-en.webm',

@@ -14,7 +14,15 @@ import { useEffect, useRef, useState } from 'react';
  * so it can never out-rank the poster.
  * Sources are attached only after `load`, never for prefers-reduced-motion
  * (the poster stays). A pause/play toggle is shown while it plays (WCAG 2.2.2).
+ *
+ * `minWidth` (W3-06b): a media query below which this loop is hidden (phones
+ * show HeroMatch until a 9:16 cut exists). Below it, neither the video sources
+ * nor the 16:9 poster are fetched (a 1×1 data-URI <source> wins on phones).
  */
+/** 1×1 transparent GIF: what a hidden-below-`minWidth` poster resolves to (no network). */
+const BLANK_PIXEL =
+  'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
 export function HeroVideo({
   webm,
   mp4,
@@ -24,6 +32,7 @@ export function HeroVideo({
   label,
   pauseLabel,
   playLabel,
+  minWidth,
 }: {
   webm: string;
   mp4: string;
@@ -33,6 +42,7 @@ export function HeroVideo({
   label: string;
   pauseLabel: string;
   playLabel: string;
+  minWidth?: string;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -42,6 +52,7 @@ export function HeroVideo({
   useEffect(() => {
     const v = ref.current;
     if (!v || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (minWidth && !window.matchMedia(minWidth).matches) return;
     const attach = () => {
       for (const [src, type] of [
         [webm, 'video/webm'],
@@ -59,23 +70,26 @@ export function HeroVideo({
     if (document.readyState === 'complete') attach();
     else window.addEventListener('load', attach, { once: true });
     return () => window.removeEventListener('load', attach);
-  }, [webm, mp4]);
+  }, [webm, mp4, minWidth]);
 
   return (
     <div className="relative mx-auto w-full max-w-xl overflow-hidden rounded-3xl border border-line bg-surface shadow-card">
       <span aria-hidden="true" className="absolute inset-x-0 top-0 z-10 h-px flow-stream" />
       <div className="relative aspect-video w-full">
-        {/* eslint-disable-next-line @next/next/no-img-element -- static 1280×720 poster, preloaded with fetchpriority=high; next/image would add a hop */}
-        <img
-          src={poster}
-          srcSet={posterSrcSet}
-          sizes={posterSrcSet ? posterSizes : undefined}
-          alt={label}
-          width={1280}
-          height={720}
-          fetchPriority="high"
-          className="absolute inset-0 h-full w-full object-cover"
-        />
+        {/* Static 1280×720 poster, preloaded with fetchpriority=high; next/image would add a hop. */}
+        <picture>
+          {minWidth ? <source media={`not all and ${minWidth}`} srcSet={BLANK_PIXEL} /> : null}
+          <img
+            src={poster}
+            srcSet={posterSrcSet}
+            sizes={posterSrcSet ? posterSizes : undefined}
+            alt={label}
+            width={1280}
+            height={720}
+            fetchPriority="high"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        </picture>
         <video
           ref={ref}
           muted
