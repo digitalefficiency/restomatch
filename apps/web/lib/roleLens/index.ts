@@ -1,6 +1,9 @@
 import type { UserRole } from '@restomatch/db';
 import type { Locale } from '../i18n/config';
 import { ALL_ROLES, ROUTE_ROLES } from '../roles';
+import { READ_ONLY_ROUTES } from './readOnly';
+
+export { BOOKKEEPER_READ_ONLY_ROUTES, READ_ONLY_ROUTES } from './readOnly';
 
 /**
  * IA-03 — visible role lenses (IA-SPEC rule 3, §6.1; owner decision I3, 7.11).
@@ -80,30 +83,6 @@ export function screenClassOf(path: string): ScreenClass {
   const seg = path.replace(/^\/dashboard\/?/, '').split(/[/?#]/)[0] ?? '';
   return SCREEN_CLASS[seg] ?? 'admin';
 }
-
-/**
- * I3: the 10 screens blocked to the bookkeeper on main (7.11) that she now READS:
- * הזמנות, קבלה, ספקים, קטלוג, מוצרים, מתכונים, מלאי, צוות, דוח חודשי, תקציר.
- * Sub-paths inherit (`/dashboard/orders/<id>`). `/dashboard/suppliers/ledger` already
- * allows her and keeps its own (edit) gate.
- */
-export const BOOKKEEPER_READ_ONLY_ROUTES = [
-  '/dashboard/orders',
-  '/dashboard/receiving',
-  '/dashboard/suppliers',
-  '/dashboard/catalog',
-  '/dashboard/products',
-  '/dashboard/recipes',
-  '/dashboard/inventory',
-  '/dashboard/team',
-  '/dashboard/reports/monthly',
-  '/dashboard/reports/digest',
-] as const;
-
-/** Path → roles that open it read-only. The registry unions these into ROUTE_ROLES (orchestrator line). */
-export const READ_ONLY_ROUTES: Readonly<Record<string, readonly UserRole[]>> = Object.fromEntries(
-  BOOKKEEPER_READ_ONLY_ROUTES.map((p) => [p, ['bookkeeper'] as const]),
-);
 
 /** Longest-prefix match of `path` against `READ_ONLY_ROUTES` (exact or `${key}/…`). */
 function longestMatch(path: string, table: Readonly<Record<string, readonly UserRole[]>>): { key: string; roles: readonly UserRole[] } | null {
