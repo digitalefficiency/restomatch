@@ -28,6 +28,7 @@ export const nav: Shape<typeof he> = {
     supplierDetail: 'ผู้จำหน่าย (รายละเอียด)',
     supplierLeakCard: 'การ์ดเงินรั่วไหลของผู้จำหน่าย',
     exports: 'ปิดเดือนและส่งออก',
+    close: 'ปิดเดือน', // review
     reports: 'รายงาน',
     monthlyReport: 'รายงานประจำเดือน',
     digest: 'ตัวอย่างอีเมลประจำเดือน',

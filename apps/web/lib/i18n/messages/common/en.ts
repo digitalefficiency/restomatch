@@ -160,7 +160,7 @@ export const en: Shape<typeof he> = {
       contracts: 'Contracts & prices',
       recipes: 'Dish cost',
       inventory: 'Inventory count',
-      exports: 'Close & export',
+      exports: 'Accounting export',
       integrations: 'Integrations',
       team: 'Team',
       settings: 'Settings',
