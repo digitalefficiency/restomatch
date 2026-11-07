@@ -37,20 +37,27 @@ create policy audit_log_insert on audit_log
 --    superusers, roles flagged BYPASSRLS (service_role / worker), and the table
 --    owner (migrations, retention purge, cascade deletes). Everyone else — most
 --    importantly the non-owner restomatch_app tenant role — is rejected.
-create or replace function app.audit_log_is_maintenance_role() returns boolean
-  language sql stable as $$
+--    Both run as the table OWNER inside cascades (restaurant delete → audit_log), so
+--    their search_path is pinned with pg_temp LAST and every catalog, type and cast is
+--    schema-qualified: a planted pg_temp.pg_roles / regclass must never resolve here.
+create or replace function app.audit_log_is_maintenance_role() returns pg_catalog.bool
+  language sql stable
+  set search_path = pg_catalog, pg_temp
+  as $$
   select exists (
-      select 1 from pg_roles r
-      where r.rolname = current_user and (r.rolsuper or r.rolbypassrls)
+      select 1 from pg_catalog.pg_roles r
+      where r.rolname OPERATOR(pg_catalog.=) current_user and (r.rolsuper or r.rolbypassrls)
     )
-    or current_user = (
-      select pg_catalog.pg_get_userbyid(relowner)
-      from pg_class where oid = 'public.audit_log'::regclass
+    or current_user OPERATOR(pg_catalog.=) (
+      select pg_catalog.pg_get_userbyid(c.relowner)
+      from pg_catalog.pg_class c where c.oid OPERATOR(pg_catalog.=) 'public.audit_log'::pg_catalog.regclass
     )
 $$;
 
 create or replace function app.audit_log_immutable() returns trigger
-  language plpgsql as $$
+  language plpgsql
+  set search_path = pg_catalog, pg_temp
+  as $$
 begin
   if app.audit_log_is_maintenance_role() then
     return case when tg_op = 'DELETE' then old else new end;

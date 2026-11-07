@@ -77,6 +77,15 @@
 --                        short-pay: those stay in 0071's payment_deductions.
 -- payment_invoices       which invoices one payment settles, with the allocated amount
 --                        (AGOROT > 0); one row per payment × invoice.
+-- ── Hygiene (H-03 sign-off verify; no writer touches these before 22.12) ──
+-- supplier_bank_accounts_holder_name_check + public.restomatch_bank_audit_masked()
+--                        the "never a ciphertext envelope" test now runs on the NFKC
+--                        form, skipping ANY leading non-alnum (TAG chars, VS17,
+--                        Braille blank, U+FFF9, ...; fullwidth ｖ１： folds to v1:),
+--                        plus the Hangul fillers glibc counts as alnum.
+-- users_whatsapp_consent_check
+--                        the notice version needs a VISIBLE character [0-9A-Za-zא-ת]
+--                        (U+3164 alone passed [[:alnum:]]).
 -- consolidated_invoice_links (+UNIQUE goods_receipt_id; W3-11 decision)
 --                        a goods receipt sits under at most ONE consolidated invoice. A
 --                        second invoice listing it is a double charge: flagged by the
@@ -102,8 +111,9 @@
 -- with set_config(..., is_local => true), keeping the previous statement_timeout in
 -- restomatch.prev_statement_timeout; (2) takes every lock in ONE DO block with an
 -- all-or-nothing NOWAIT retry loop, parent-first (the 0071/0072 order, users last):
--- SHARE ROW EXCLUSIVE on "restaurants", "invoices" and "users" (FK targets only),
--- ACCESS EXCLUSIVE on the nine existing tables this file alters (products, recipes
+-- SHARE ROW EXCLUSIVE on "restaurants" and "invoices" (FK targets only), ACCESS
+-- EXCLUSIVE on the eleven existing tables this file alters (incl. users and
+-- supplier_bank_accounts for the hygiene CHECKs) (products, recipes
 -- and ingest_documents are also FK targets); (3) restores statement_timeout. A long reader makes the file
 -- fail fast (57014 after 6s) with nothing applied; re-run it in a quiet hour.
 -- Stacked drizzle path: `pnpm db:migrate` applies 0071 + 0072 + 0073 in ONE
@@ -126,6 +136,8 @@
 --   DROP TRIGGER saved_views_set_updated_at ON saved_views;  -- and the three other
 --     *_set_updated_at triggers on view_subscriptions, product_count_units, waste_entries
 --   DROP TRIGGER supplier_statements_set_updated_at ON supplier_statements;  -- and payments_set_updated_at
+--   Restore 0072's holder_name CHECK, restomatch_bank_audit_masked() and consent CHECK
+--     text (CREATE OR REPLACE the function from 0072; drop + re-add the two CHECKs).
 --   DROP INDEX consolidated_invoice_links_gr_unique;
 --   DROP TABLE payment_invoices, payments, supplier_statements;
 --   ALTER TABLE ingest_documents DROP COLUMN doc_type,
@@ -158,7 +170,7 @@ SELECT set_config('restomatch.prev_statement_timeout', current_setting('statemen
 -- tries again. Nothing is held while waiting, so no deadlock with a live app
 -- transaction (40P01), and the 6s statement_timeout bounds the loop (57014).
 -- Order = 0071/0072's parent-first order (restaurants … users last), restricted to
--- this file's tables: suppliers → products → purchase_orders → po_lines → recipes →
+-- this file's tables: suppliers → supplier_bank_accounts → products → purchase_orders → po_lines → recipes →
 -- inventory_counts → inventory_count_lines → invoices → consolidated_invoice_links
 -- → ingest_documents.
 DO $$
@@ -166,12 +178,12 @@ BEGIN
   LOOP
     BEGIN
       LOCK TABLE "restaurants" IN SHARE ROW EXCLUSIVE MODE NOWAIT;
-      LOCK TABLE "suppliers", "products", "purchase_orders", "po_lines" IN ACCESS EXCLUSIVE MODE NOWAIT;
+      LOCK TABLE "suppliers", "supplier_bank_accounts", "products", "purchase_orders", "po_lines" IN ACCESS EXCLUSIVE MODE NOWAIT;
       LOCK TABLE "recipes", "inventory_counts", "inventory_count_lines" IN ACCESS EXCLUSIVE MODE NOWAIT;
       LOCK TABLE "invoices" IN SHARE ROW EXCLUSIVE MODE NOWAIT;
       LOCK TABLE "consolidated_invoice_links" IN ACCESS EXCLUSIVE MODE NOWAIT;
       LOCK TABLE "ingest_documents" IN ACCESS EXCLUSIVE MODE NOWAIT;
-      LOCK TABLE "users" IN SHARE ROW EXCLUSIVE MODE NOWAIT;
+      LOCK TABLE "users" IN ACCESS EXCLUSIVE MODE NOWAIT;
       EXIT;
     EXCEPTION WHEN lock_not_available THEN
       PERFORM pg_sleep(0.05);
@@ -469,17 +481,58 @@ CREATE INDEX IF NOT EXISTS "payment_invoices_restaurant_idx" ON "payment_invoice
 CREATE UNIQUE INDEX IF NOT EXISTS "consolidated_invoice_links_gr_unique" ON "consolidated_invoice_links" USING btree ("goods_receipt_id");--> statement-breakpoint
 COMMENT ON TABLE "consolidated_invoice_links" IS 'A consolidated invoice linked to a goods receipt it covers (0072, H-03). A receipt sits under at most ONE consolidated invoice (UNIQUE goods_receipt_id, 0073 / W3-11): a second invoice listing it is a double charge, flagged by the app, never split.';--> statement-breakpoint
 
+-- ── Hygiene: holder_name NFKC test; consent needs a visible character ─────────
+-- 0072's function with only the holder_name test replaced (same signature, same pinned
+-- search_path ending in pg_temp; no SECURITY DEFINER).
+CREATE OR REPLACE FUNCTION public.restomatch_bank_audit_masked(j pg_catalog.jsonb) RETURNS pg_catalog.bool
+  LANGUAGE sql IMMUTABLE
+  SET search_path = pg_catalog, public, pg_temp
+  AS $$
+  SELECT pg_catalog.jsonb_typeof(j) = 'object'
+    AND j - ARRAY['bank_code', 'branch_code', 'account_last4', 'holder_name', 'active', 'verified_by', 'verified_at']::pg_catalog.text[] = '{}'::pg_catalog.jsonb
+    AND pg_catalog.jsonb_typeof(coalesce(j -> 'bank_code', '"0"'::pg_catalog.jsonb)) = 'string' AND (j ->> 'bank_code') ~ '^[0-9]{1,3}$' IS NOT FALSE
+    AND pg_catalog.jsonb_typeof(coalesce(j -> 'branch_code', '"0"'::pg_catalog.jsonb)) = 'string' AND (j ->> 'branch_code') ~ '^[0-9]{1,4}$' IS NOT FALSE
+    AND pg_catalog.jsonb_typeof(coalesce(j -> 'account_last4', '"0"'::pg_catalog.jsonb)) = 'string' AND (j ->> 'account_last4') ~ '^[0-9]{1,4}$' IS NOT FALSE
+    AND pg_catalog.jsonb_typeof(coalesce(j -> 'holder_name', 'null'::pg_catalog.jsonb)) IN ('string', 'null')
+    AND pg_catalog.normalize(j ->> 'holder_name', 'NFKC') !~* U&'^([^[:alnum:]]|[\3164\115F\1160\FFA0])*v[0-9]+:' IS NOT FALSE AND pg_catalog.length(coalesce(j ->> 'holder_name', '')) <= 200
+    AND pg_catalog.jsonb_typeof(coalesce(j -> 'active', 'true'::pg_catalog.jsonb)) = 'boolean'
+    AND pg_catalog.jsonb_typeof(coalesce(j -> 'verified_by', 'null'::pg_catalog.jsonb)) IN ('string', 'null') AND pg_catalog.length(coalesce(j ->> 'verified_by', '')) <= 64
+    AND pg_catalog.jsonb_typeof(coalesce(j -> 'verified_at', 'null'::pg_catalog.jsonb)) IN ('string', 'null') AND pg_catalog.length(coalesce(j ->> 'verified_at', '')) <= 64
+$$;--> statement-breakpoint
+-- The holder is a name, never a ciphertext envelope: test the NFKC form, skipping any
+-- leading non-alnum, and the Hangul fillers (U+3164, U+115F, U+1160, U+FFA0) that
+-- glibc counts as alnum.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint
+    WHERE conname = 'supplier_bank_accounts_holder_name_check' AND pg_catalog.pg_get_constraintdef(oid) LIKE '%normalize%'
+  ) THEN
+    ALTER TABLE "supplier_bank_accounts" DROP CONSTRAINT IF EXISTS "supplier_bank_accounts_holder_name_check";
+    ALTER TABLE "supplier_bank_accounts" ADD CONSTRAINT "supplier_bank_accounts_holder_name_check" CHECK (
+      "holder_name" IS NULL OR (pg_catalog.length("holder_name") <= 200
+        AND pg_catalog.normalize("holder_name", 'NFKC') !~* U&'^([^[:alnum:]]|[\3164\115F\1160\FFA0])*v[0-9]+:'));
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint
+    WHERE conname = 'users_whatsapp_consent_check' AND pg_catalog.pg_get_constraintdef(oid) LIKE '%א-ת%'
+  ) THEN
+    ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_whatsapp_consent_check";
+    ALTER TABLE "users" ADD CONSTRAINT "users_whatsapp_consent_check" CHECK (
+      NOT "whatsapp_opt_in"
+      OR ("whatsapp_opt_in_at" IS NOT NULL AND "whatsapp_opt_in_source" IS NOT NULL
+          AND "whatsapp_opt_in_source" <> 'admin' AND coalesce("whatsapp_opt_in_notice_version", '') ~ '[0-9A-Za-zא-ת]'));
+  END IF;
+END $$;--> statement-breakpoint
 -- ── RLS on the eight new tenant tables (also in rls/0002's list) ──────────────
 CREATE SCHEMA IF NOT EXISTS app;--> statement-breakpoint
--- Byte-identical to 0072 (H-03 r8): pinned search_path, schema-qualified. A plain
--- re-create here would strip the pin and fail db:doctor.
+-- Same text as 0072 / rls/0002 (H-03 r9): fully qualified, NOT pinned (a SET would stop
+-- them inlining into every RLS policy; db:doctor allowlists exactly this pair).
 CREATE OR REPLACE FUNCTION app.current_restaurant_id() RETURNS pg_catalog.uuid
   LANGUAGE sql STABLE
-  SET search_path = pg_catalog, pg_temp
   AS $$ select nullif(pg_catalog.current_setting('app.current_restaurant_id', true), '')::pg_catalog.uuid $$;--> statement-breakpoint
 CREATE OR REPLACE FUNCTION app.current_user_id() RETURNS pg_catalog.uuid
   LANGUAGE sql STABLE
-  SET search_path = pg_catalog, pg_temp
   AS $$ select nullif(pg_catalog.current_setting('app.current_user_id', true), '')::pg_catalog.uuid $$;--> statement-breakpoint
 ALTER TABLE "saved_views" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "saved_views_tenant" ON "saved_views";--> statement-breakpoint
@@ -535,5 +588,5 @@ DROP POLICY IF EXISTS "notification_seen_own_delete" ON "notification_seen";--> 
 CREATE POLICY "notification_seen_own_delete" ON "notification_seen" AS RESTRICTIVE FOR DELETE USING ("user_id" = app.current_user_id());
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '70609141ab25ad665b535bf418722eb143c7bb40427b379d265d3b12a62cc968', 1782600000000
+select '384daa8960636340c6efdb046e0b12fed71ef1a067ce54388af3e2842fe693c5', 1782600000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782600000000);

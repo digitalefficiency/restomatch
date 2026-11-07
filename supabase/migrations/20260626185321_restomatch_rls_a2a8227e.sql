@@ -190,36 +190,12 @@ create policy notification_prefs_tenant on notification_prefs using (restaurant_
 select pg_temp.rm_plan(72, 'rls', 'public', 'notification_settings', '', null, $rm$alter table notification_settings enable row level security;$rm$, true);
 select pg_temp.rm_plan(73, 'policy', 'public', 'notification_settings', 'notification_settings_tenant', $rm$create policy notification_settings_tenant on pg_temp.notification_settings using (restaurant_id = app.current_restaurant_id());$rm$, $rm$drop policy if exists notification_settings_tenant on notification_settings;
 create policy notification_settings_tenant on notification_settings using (restaurant_id = app.current_restaurant_id());$rm$, true);
-select pg_temp.rm_plan(74, 'rls', 'public', 'saved_views', '', null, $rm$alter table saved_views enable row level security;$rm$, true);
-select pg_temp.rm_plan(75, 'policy', 'public', 'saved_views', 'saved_views_tenant', $rm$create policy saved_views_tenant on pg_temp.saved_views using (restaurant_id = app.current_restaurant_id());$rm$, $rm$drop policy if exists saved_views_tenant on saved_views;
-create policy saved_views_tenant on saved_views using (restaurant_id = app.current_restaurant_id());$rm$, true);
-select pg_temp.rm_plan(76, 'rls', 'public', 'view_subscriptions', '', null, $rm$alter table view_subscriptions enable row level security;$rm$, true);
-select pg_temp.rm_plan(77, 'policy', 'public', 'view_subscriptions', 'view_subscriptions_tenant', $rm$create policy view_subscriptions_tenant on pg_temp.view_subscriptions using (restaurant_id = app.current_restaurant_id());$rm$, $rm$drop policy if exists view_subscriptions_tenant on view_subscriptions;
-create policy view_subscriptions_tenant on view_subscriptions using (restaurant_id = app.current_restaurant_id());$rm$, true);
-select pg_temp.rm_plan(78, 'rls', 'public', 'product_count_units', '', null, $rm$alter table product_count_units enable row level security;$rm$, true);
-select pg_temp.rm_plan(79, 'policy', 'public', 'product_count_units', 'product_count_units_tenant', $rm$create policy product_count_units_tenant on pg_temp.product_count_units using (restaurant_id = app.current_restaurant_id());$rm$, $rm$drop policy if exists product_count_units_tenant on product_count_units;
-create policy product_count_units_tenant on product_count_units using (restaurant_id = app.current_restaurant_id());$rm$, true);
-select pg_temp.rm_plan(80, 'rls', 'public', 'waste_entries', '', null, $rm$alter table waste_entries enable row level security;$rm$, true);
-select pg_temp.rm_plan(81, 'policy', 'public', 'waste_entries', 'waste_entries_tenant', $rm$create policy waste_entries_tenant on pg_temp.waste_entries using (restaurant_id = app.current_restaurant_id());$rm$, $rm$drop policy if exists waste_entries_tenant on waste_entries;
-create policy waste_entries_tenant on waste_entries using (restaurant_id = app.current_restaurant_id());$rm$, true);
-select pg_temp.rm_plan(82, 'rls', 'public', 'notification_seen', '', null, $rm$alter table notification_seen enable row level security;$rm$, true);
-select pg_temp.rm_plan(83, 'policy', 'public', 'notification_seen', 'notification_seen_tenant', $rm$create policy notification_seen_tenant on pg_temp.notification_seen using (restaurant_id = app.current_restaurant_id());$rm$, $rm$drop policy if exists notification_seen_tenant on notification_seen;
-create policy notification_seen_tenant on notification_seen using (restaurant_id = app.current_restaurant_id());$rm$, true);
-select pg_temp.rm_plan(84, 'rls', 'public', 'supplier_statements', '', null, $rm$alter table supplier_statements enable row level security;$rm$, true);
-select pg_temp.rm_plan(85, 'policy', 'public', 'supplier_statements', 'supplier_statements_tenant', $rm$create policy supplier_statements_tenant on pg_temp.supplier_statements using (restaurant_id = app.current_restaurant_id());$rm$, $rm$drop policy if exists supplier_statements_tenant on supplier_statements;
-create policy supplier_statements_tenant on supplier_statements using (restaurant_id = app.current_restaurant_id());$rm$, true);
-select pg_temp.rm_plan(86, 'rls', 'public', 'payments', '', null, $rm$alter table payments enable row level security;$rm$, true);
-select pg_temp.rm_plan(87, 'policy', 'public', 'payments', 'payments_tenant', $rm$create policy payments_tenant on pg_temp.payments using (restaurant_id = app.current_restaurant_id());$rm$, $rm$drop policy if exists payments_tenant on payments;
-create policy payments_tenant on payments using (restaurant_id = app.current_restaurant_id());$rm$, true);
-select pg_temp.rm_plan(88, 'rls', 'public', 'payment_invoices', '', null, $rm$alter table payment_invoices enable row level security;$rm$, true);
-select pg_temp.rm_plan(89, 'policy', 'public', 'payment_invoices', 'payment_invoices_tenant', $rm$create policy payment_invoices_tenant on pg_temp.payment_invoices using (restaurant_id = app.current_restaurant_id());$rm$, $rm$drop policy if exists payment_invoices_tenant on payment_invoices;
-create policy payment_invoices_tenant on payment_invoices using (restaurant_id = app.current_restaurant_id());$rm$, true);
-select pg_temp.rm_plan(90, 'drop_policy', 'public', 'memberships', 'memberships_bootstrap', null, $rm$drop policy if exists memberships_bootstrap on memberships;$rm$, true);
-select pg_temp.rm_plan(91, 'policy', 'public', 'memberships', 'memberships_self', $rm$create policy memberships_self on pg_temp.memberships
+select pg_temp.rm_plan(74, 'drop_policy', 'public', 'memberships', 'memberships_bootstrap', null, $rm$drop policy if exists memberships_bootstrap on memberships;$rm$, true);
+select pg_temp.rm_plan(75, 'policy', 'public', 'memberships', 'memberships_self', $rm$create policy memberships_self on pg_temp.memberships
   for select using (user_id = app.current_user_id());$rm$, $rm$drop policy if exists memberships_self on memberships;
 create policy memberships_self on memberships
   for select using (user_id = app.current_user_id());$rm$, true);
-select pg_temp.rm_plan(92, 'policy', 'public', 'restaurants', 'restaurants_member_select', $rm$create policy restaurants_member_select on pg_temp.restaurants
+select pg_temp.rm_plan(76, 'policy', 'public', 'restaurants', 'restaurants_member_select', $rm$create policy restaurants_member_select on pg_temp.restaurants
   for select using (
     exists (
       select 1 from memberships m
@@ -235,13 +211,13 @@ create policy restaurants_member_select on restaurants
         and m.user_id = app.current_user_id()
     )
   );$rm$, true);
-select pg_temp.rm_plan(93, 'rls', 'public', 'users', '', null, $rm$alter table users enable row level security;$rm$, true);
-select pg_temp.rm_plan(94, 'policy', 'public', 'users', 'users_self', $rm$create policy users_self on pg_temp.users
+select pg_temp.rm_plan(77, 'rls', 'public', 'users', '', null, $rm$alter table users enable row level security;$rm$, true);
+select pg_temp.rm_plan(78, 'policy', 'public', 'users', 'users_self', $rm$create policy users_self on pg_temp.users
   for select using (id = app.current_user_id());$rm$, $rm$drop policy if exists users_self on users;
 create policy users_self on users
   for select using (id = app.current_user_id());$rm$, true);
-select pg_temp.rm_plan(95, 'rls', 'public', 'invoice_lines', '', null, $rm$alter table invoice_lines enable row level security;$rm$, true);
-select pg_temp.rm_plan(96, 'policy', 'public', 'invoice_lines', 'invoice_lines_tenant', $rm$create policy invoice_lines_tenant on pg_temp.invoice_lines
+select pg_temp.rm_plan(79, 'rls', 'public', 'invoice_lines', '', null, $rm$alter table invoice_lines enable row level security;$rm$, true);
+select pg_temp.rm_plan(80, 'policy', 'public', 'invoice_lines', 'invoice_lines_tenant', $rm$create policy invoice_lines_tenant on pg_temp.invoice_lines
   using (
     exists (
       select 1 from invoices i
@@ -257,8 +233,8 @@ create policy invoice_lines_tenant on invoice_lines
         and i.restaurant_id = app.current_restaurant_id()
     )
   );$rm$, true);
-select pg_temp.rm_plan(97, 'rls', 'public', 'po_lines', '', null, $rm$alter table po_lines enable row level security;$rm$, true);
-select pg_temp.rm_plan(98, 'policy', 'public', 'po_lines', 'po_lines_tenant', $rm$create policy po_lines_tenant on pg_temp.po_lines
+select pg_temp.rm_plan(81, 'rls', 'public', 'po_lines', '', null, $rm$alter table po_lines enable row level security;$rm$, true);
+select pg_temp.rm_plan(82, 'policy', 'public', 'po_lines', 'po_lines_tenant', $rm$create policy po_lines_tenant on pg_temp.po_lines
   using (
     exists (
       select 1 from purchase_orders po
@@ -274,8 +250,8 @@ create policy po_lines_tenant on po_lines
         and po.restaurant_id = app.current_restaurant_id()
     )
   );$rm$, true);
-select pg_temp.rm_plan(99, 'rls', 'public', 'gr_lines', '', null, $rm$alter table gr_lines enable row level security;$rm$, true);
-select pg_temp.rm_plan(100, 'policy', 'public', 'gr_lines', 'gr_lines_tenant', $rm$create policy gr_lines_tenant on pg_temp.gr_lines
+select pg_temp.rm_plan(83, 'rls', 'public', 'gr_lines', '', null, $rm$alter table gr_lines enable row level security;$rm$, true);
+select pg_temp.rm_plan(84, 'policy', 'public', 'gr_lines', 'gr_lines_tenant', $rm$create policy gr_lines_tenant on pg_temp.gr_lines
   using (
     exists (
       select 1 from goods_receipts gr
@@ -291,8 +267,8 @@ create policy gr_lines_tenant on gr_lines
         and gr.restaurant_id = app.current_restaurant_id()
     )
   );$rm$, true);
-select pg_temp.rm_plan(101, 'rls', 'public', 'product_aliases', '', null, $rm$alter table product_aliases enable row level security;$rm$, true);
-select pg_temp.rm_plan(102, 'policy', 'public', 'product_aliases', 'product_aliases_tenant', $rm$create policy product_aliases_tenant on pg_temp.product_aliases
+select pg_temp.rm_plan(85, 'rls', 'public', 'product_aliases', '', null, $rm$alter table product_aliases enable row level security;$rm$, true);
+select pg_temp.rm_plan(86, 'policy', 'public', 'product_aliases', 'product_aliases_tenant', $rm$create policy product_aliases_tenant on pg_temp.product_aliases
   using (
     exists (
       select 1 from products p
@@ -308,8 +284,8 @@ create policy product_aliases_tenant on product_aliases
         and p.restaurant_id = app.current_restaurant_id()
     )
   );$rm$, true);
-select pg_temp.rm_plan(103, 'rls', 'public', 'billing_accounts', '', null, $rm$alter table billing_accounts enable row level security;$rm$, true);
-select pg_temp.rm_plan(104, 'policy', 'public', 'billing_accounts', 'billing_accounts_tenant', $rm$create policy billing_accounts_tenant on pg_temp.billing_accounts
+select pg_temp.rm_plan(87, 'rls', 'public', 'billing_accounts', '', null, $rm$alter table billing_accounts enable row level security;$rm$, true);
+select pg_temp.rm_plan(88, 'policy', 'public', 'billing_accounts', 'billing_accounts_tenant', $rm$create policy billing_accounts_tenant on pg_temp.billing_accounts
   for select using (
     exists (
       select 1 from restaurants r
@@ -325,8 +301,8 @@ create policy billing_accounts_tenant on billing_accounts
         and r.id = app.current_restaurant_id()
     )
   );$rm$, true);
-select pg_temp.rm_plan(105, 'rls', 'public', 'subscriptions', '', null, $rm$alter table subscriptions enable row level security;$rm$, true);
-select pg_temp.rm_plan(106, 'policy', 'public', 'subscriptions', 'subscriptions_tenant', $rm$create policy subscriptions_tenant on pg_temp.subscriptions
+select pg_temp.rm_plan(89, 'rls', 'public', 'subscriptions', '', null, $rm$alter table subscriptions enable row level security;$rm$, true);
+select pg_temp.rm_plan(90, 'policy', 'public', 'subscriptions', 'subscriptions_tenant', $rm$create policy subscriptions_tenant on pg_temp.subscriptions
   for select using (
     exists (
       select 1 from restaurants r
@@ -342,8 +318,8 @@ create policy subscriptions_tenant on subscriptions
         and r.id = app.current_restaurant_id()
     )
   );$rm$, true);
-select pg_temp.rm_plan(107, 'rls', 'public', 'usage_counters', '', null, $rm$alter table usage_counters enable row level security;$rm$, true);
-select pg_temp.rm_plan(108, 'policy', 'public', 'usage_counters', 'usage_counters_tenant', $rm$create policy usage_counters_tenant on pg_temp.usage_counters
+select pg_temp.rm_plan(91, 'rls', 'public', 'usage_counters', '', null, $rm$alter table usage_counters enable row level security;$rm$, true);
+select pg_temp.rm_plan(92, 'policy', 'public', 'usage_counters', 'usage_counters_tenant', $rm$create policy usage_counters_tenant on pg_temp.usage_counters
   for select using (
     exists (
       select 1 from restaurants r
@@ -359,28 +335,28 @@ create policy usage_counters_tenant on usage_counters
         and r.id = app.current_restaurant_id()
     )
   );$rm$, true);
-select pg_temp.rm_plan(109, 'rls', 'public', 'billing_events', '', null, $rm$alter table billing_events enable row level security;$rm$, true);
-select pg_temp.rm_plan(110, 'rls', 'public', 'leads', '', null, $rm$alter table leads enable row level security;$rm$, true);
-select pg_temp.rm_plan(111, 'policy', 'public', 'leads', 'leads_insert', $rm$create policy leads_insert on pg_temp.leads for insert with check (true);$rm$, $rm$drop policy if exists leads_insert on leads;
+select pg_temp.rm_plan(93, 'rls', 'public', 'billing_events', '', null, $rm$alter table billing_events enable row level security;$rm$, true);
+select pg_temp.rm_plan(94, 'rls', 'public', 'leads', '', null, $rm$alter table leads enable row level security;$rm$, true);
+select pg_temp.rm_plan(95, 'policy', 'public', 'leads', 'leads_insert', $rm$create policy leads_insert on pg_temp.leads for insert with check (true);$rm$, $rm$drop policy if exists leads_insert on leads;
 create policy leads_insert on leads for insert with check (true);$rm$, true);
-select pg_temp.rm_plan(112, 'rls', 'public', 'audit_log', '', null, $rm$alter table audit_log enable row level security;$rm$, true);
-select pg_temp.rm_plan(113, 'drop_policy', 'public', 'audit_log', 'audit_log_tenant', null, $rm$drop policy if exists audit_log_tenant on audit_log;$rm$, true);
-select pg_temp.rm_plan(114, 'policy', 'public', 'audit_log', 'audit_log_select', $rm$create policy audit_log_select on pg_temp.audit_log
+select pg_temp.rm_plan(96, 'rls', 'public', 'audit_log', '', null, $rm$alter table audit_log enable row level security;$rm$, true);
+select pg_temp.rm_plan(97, 'drop_policy', 'public', 'audit_log', 'audit_log_tenant', null, $rm$drop policy if exists audit_log_tenant on audit_log;$rm$, true);
+select pg_temp.rm_plan(98, 'policy', 'public', 'audit_log', 'audit_log_select', $rm$create policy audit_log_select on pg_temp.audit_log
   for select using (restaurant_id = app.current_restaurant_id());$rm$, $rm$drop policy if exists audit_log_select on audit_log;
 create policy audit_log_select on audit_log
   for select using (restaurant_id = app.current_restaurant_id());$rm$, true);
-select pg_temp.rm_plan(115, 'policy', 'public', 'audit_log', 'audit_log_insert', $rm$create policy audit_log_insert on pg_temp.audit_log
+select pg_temp.rm_plan(99, 'policy', 'public', 'audit_log', 'audit_log_insert', $rm$create policy audit_log_insert on pg_temp.audit_log
   for insert with check (restaurant_id = app.current_restaurant_id());$rm$, $rm$drop policy if exists audit_log_insert on audit_log;
 create policy audit_log_insert on audit_log
   for insert with check (restaurant_id = app.current_restaurant_id());$rm$, true);
-select pg_temp.rm_plan(116, 'trigger', 'public', 'audit_log', 'audit_log_no_update_delete', $rm$create trigger audit_log_no_update_delete
+select pg_temp.rm_plan(100, 'trigger', 'public', 'audit_log', 'audit_log_no_update_delete', $rm$create trigger audit_log_no_update_delete
   before update or delete on pg_temp.audit_log
   for each row execute function app.audit_log_immutable();$rm$, $rm$drop trigger if exists audit_log_no_update_delete on audit_log;
 create trigger audit_log_no_update_delete
   before update or delete on audit_log
   for each row execute function app.audit_log_immutable();$rm$, true);
-select pg_temp.rm_plan(117, 'rls', 'storage', 'objects', '', null, $rm$alter table storage.objects enable row level security;$rm$, false) where to_regclass('storage.objects') is not null;
-select pg_temp.rm_plan(118, 'policy', 'storage', 'objects', 'invoice_scans_tenant_select', $rm$create policy invoice_scans_tenant_select on pg_temp.objects
+select pg_temp.rm_plan(101, 'rls', 'storage', 'objects', '', null, $rm$alter table storage.objects enable row level security;$rm$, false) where to_regclass('storage.objects') is not null;
+select pg_temp.rm_plan(102, 'policy', 'storage', 'objects', 'invoice_scans_tenant_select', $rm$create policy invoice_scans_tenant_select on pg_temp.objects
   for select
   using (
     bucket_id = 'invoice-scans'
@@ -392,7 +368,7 @@ create policy invoice_scans_tenant_select on storage.objects
     bucket_id = 'invoice-scans'
     and (storage.foldername(name))[1] = app.current_restaurant_id()::text
   );$rm$, false) where to_regclass('storage.objects') is not null;
-select pg_temp.rm_plan(119, 'policy', 'storage', 'objects', 'invoice_scans_tenant_insert', $rm$create policy invoice_scans_tenant_insert on pg_temp.objects
+select pg_temp.rm_plan(103, 'policy', 'storage', 'objects', 'invoice_scans_tenant_insert', $rm$create policy invoice_scans_tenant_insert on pg_temp.objects
   for insert
   with check (
     bucket_id = 'invoice-scans'
@@ -404,7 +380,7 @@ create policy invoice_scans_tenant_insert on storage.objects
     bucket_id = 'invoice-scans'
     and (storage.foldername(name))[1] = app.current_restaurant_id()::text
   );$rm$, false) where to_regclass('storage.objects') is not null;
-select pg_temp.rm_plan(120, 'policy', 'storage', 'objects', 'invoice_scans_tenant_update', $rm$create policy invoice_scans_tenant_update on pg_temp.objects
+select pg_temp.rm_plan(104, 'policy', 'storage', 'objects', 'invoice_scans_tenant_update', $rm$create policy invoice_scans_tenant_update on pg_temp.objects
   for update
   using (
     bucket_id = 'invoice-scans'
@@ -424,7 +400,7 @@ create policy invoice_scans_tenant_update on storage.objects
     bucket_id = 'invoice-scans'
     and (storage.foldername(name))[1] = app.current_restaurant_id()::text
   );$rm$, false) where to_regclass('storage.objects') is not null;
-select pg_temp.rm_plan(121, 'policy', 'storage', 'objects', 'invoice_scans_tenant_delete', $rm$create policy invoice_scans_tenant_delete on pg_temp.objects
+select pg_temp.rm_plan(105, 'policy', 'storage', 'objects', 'invoice_scans_tenant_delete', $rm$create policy invoice_scans_tenant_delete on pg_temp.objects
   for delete
   using (
     bucket_id = 'invoice-scans'
@@ -436,8 +412,8 @@ create policy invoice_scans_tenant_delete on storage.objects
     bucket_id = 'invoice-scans'
     and (storage.foldername(name))[1] = app.current_restaurant_id()::text
   );$rm$, false) where to_regclass('storage.objects') is not null;
-select pg_temp.rm_plan(122, 'drop_policy', 'storage', 'objects', 'invoice_scans_walkins_select', null, $rm$drop policy if exists invoice_scans_walkins_select on storage.objects;$rm$, false) where to_regclass('storage.objects') is not null;
-select pg_temp.rm_plan(123, 'drop_policy', 'storage', 'objects', 'invoice_scans_walkins_insert', null, $rm$drop policy if exists invoice_scans_walkins_insert on storage.objects;$rm$, false) where to_regclass('storage.objects') is not null;
+select pg_temp.rm_plan(106, 'drop_policy', 'storage', 'objects', 'invoice_scans_walkins_select', null, $rm$drop policy if exists invoice_scans_walkins_select on storage.objects;$rm$, false) where to_regclass('storage.objects') is not null;
+select pg_temp.rm_plan(107, 'drop_policy', 'storage', 'objects', 'invoice_scans_walkins_insert', null, $rm$drop policy if exists invoice_scans_walkins_insert on storage.objects;$rm$, false) where to_regclass('storage.objects') is not null;
 
 -- Lock phase: all-or-nothing NOWAIT over the tables still to change, bounded at 6 s.
 select set_config('restomatch.saved_statement_timeout', current_setting('statement_timeout'), true);
@@ -490,14 +466,19 @@ end $$;
 create schema if not exists app;
 
 -- Reads the active restaurant from the per-transaction GUC (NULL if unset).
-create or replace function app.current_restaurant_id() returns uuid
+-- Every name is schema-qualified (no planted pg_temp type can resolve here), but there
+-- is NO `SET search_path`: a SET makes a sql function non-inlinable, and these sit in
+-- every RLS policy (pinning measured 4-15x slower per-row filters). They never run as
+-- the owner (no FORCE RLS; the bank audit reads the GUC itself). db:doctor allows
+-- exactly these two bodies unpinned.
+create or replace function app.current_restaurant_id() returns pg_catalog.uuid
   language sql stable
-  as $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$;
+  as $$ select nullif(pg_catalog.current_setting('app.current_restaurant_id', true), '')::pg_catalog.uuid $$;
 
 -- Reads the acting user from the per-transaction GUC (NULL if unset).
-create or replace function app.current_user_id() returns uuid
+create or replace function app.current_user_id() returns pg_catalog.uuid
   language sql stable
-  as $$ select nullif(current_setting('app.current_user_id', true), '')::uuid $$;
+  as $$ select nullif(pg_catalog.current_setting('app.current_user_id', true), '')::pg_catalog.uuid $$;
 
 select pg_temp.rm_run(1);
 
@@ -509,7 +490,7 @@ select pg_temp.rm_run(3);
 do $$
 declare t text;
 begin
-  foreach t in array array['memberships', 'invitations', 'suppliers', 'products', 'supplier_catalog_items', 'catalog_imports', 'purchase_orders', 'goods_receipts', 'invoices', 'invoice_scans', 'storage_namespaces', 'match_runs', 'discrepancies', 'activity_events', 'price_history', 'price_baselines', 'approval_rules', 'audit_log', 'procurement_connections', 'email_inboxes', 'supplier_integrations', 'notifications_outbox', 'idempotency_keys', 'claim_letters', 'payment_deductions', 'export_runs', 'export_run_invoices', 'consolidated_invoice_links', 'leak_month_snapshots', 'leak_month_corrections', 'supplier_bank_accounts', 'supplier_bank_account_changes', 'push_subscriptions', 'notification_prefs', 'notification_settings', 'saved_views', 'view_subscriptions', 'product_count_units', 'waste_entries', 'notification_seen', 'supplier_statements', 'payments', 'payment_invoices'] loop
+  foreach t in array array['memberships', 'invitations', 'suppliers', 'products', 'supplier_catalog_items', 'catalog_imports', 'purchase_orders', 'goods_receipts', 'invoices', 'invoice_scans', 'storage_namespaces', 'match_runs', 'discrepancies', 'activity_events', 'price_history', 'price_baselines', 'approval_rules', 'audit_log', 'procurement_connections', 'email_inboxes', 'supplier_integrations', 'notifications_outbox', 'idempotency_keys', 'claim_letters', 'payment_deductions', 'export_runs', 'export_run_invoices', 'consolidated_invoice_links', 'leak_month_snapshots', 'leak_month_corrections', 'supplier_bank_accounts', 'supplier_bank_account_changes', 'push_subscriptions', 'notification_prefs', 'notification_settings'] loop
     if not exists (
       select 1 from information_schema.columns
       where table_schema = 'public' and table_name = t and column_name = 'restaurant_id'
@@ -703,38 +684,6 @@ select pg_temp.rm_run(94);
 
 select pg_temp.rm_run(95);
 
-select pg_temp.rm_run(96);
-
-select pg_temp.rm_run(97);
-
-select pg_temp.rm_run(98);
-
-select pg_temp.rm_run(99);
-
-select pg_temp.rm_run(100);
-
-select pg_temp.rm_run(101);
-
-select pg_temp.rm_run(102);
-
-select pg_temp.rm_run(103);
-
-select pg_temp.rm_run(104);
-
-select pg_temp.rm_run(105);
-
-select pg_temp.rm_run(106);
-
-select pg_temp.rm_run(107);
-
-select pg_temp.rm_run(108);
-
-select pg_temp.rm_run(109);
-
-select pg_temp.rm_run(110);
-
-select pg_temp.rm_run(111);
-
 -- plans is public pricing reference data — intentionally left without RLS so
 -- the catalog is readable everywhere.
 
@@ -803,32 +752,39 @@ end $$;
 
 create schema if not exists app;
 
-select pg_temp.rm_run(112);
+select pg_temp.rm_run(96);
 
-select pg_temp.rm_run(113);
+select pg_temp.rm_run(97);
 
-select pg_temp.rm_run(114);
+select pg_temp.rm_run(98);
 
-select pg_temp.rm_run(115);
+select pg_temp.rm_run(99);
 
 -- 3) Immutability trigger. Allows mutation only for trusted maintenance roles:
 --    superusers, roles flagged BYPASSRLS (service_role / worker), and the table
 --    owner (migrations, retention purge, cascade deletes). Everyone else — most
 --    importantly the non-owner restomatch_app tenant role — is rejected.
-create or replace function app.audit_log_is_maintenance_role() returns boolean
-  language sql stable as $$
+--    Both run as the table OWNER inside cascades (restaurant delete → audit_log), so
+--    their search_path is pinned with pg_temp LAST and every catalog, type and cast is
+--    schema-qualified: a planted pg_temp.pg_roles / regclass must never resolve here.
+create or replace function app.audit_log_is_maintenance_role() returns pg_catalog.bool
+  language sql stable
+  set search_path = pg_catalog, pg_temp
+  as $$
   select exists (
-      select 1 from pg_roles r
-      where r.rolname = current_user and (r.rolsuper or r.rolbypassrls)
+      select 1 from pg_catalog.pg_roles r
+      where r.rolname OPERATOR(pg_catalog.=) current_user and (r.rolsuper or r.rolbypassrls)
     )
-    or current_user = (
-      select pg_catalog.pg_get_userbyid(relowner)
-      from pg_class where oid = 'public.audit_log'::regclass
+    or current_user OPERATOR(pg_catalog.=) (
+      select pg_catalog.pg_get_userbyid(c.relowner)
+      from pg_catalog.pg_class c where c.oid OPERATOR(pg_catalog.=) 'public.audit_log'::pg_catalog.regclass
     )
 $$;
 
 create or replace function app.audit_log_immutable() returns trigger
-  language plpgsql as $$
+  language plpgsql
+  set search_path = pg_catalog, pg_temp
+  as $$
 begin
   if app.audit_log_is_maintenance_role() then
     return case when tg_op = 'DELETE' then old else new end;
@@ -838,7 +794,7 @@ begin
 end;
 $$;
 
-select pg_temp.rm_run(116);
+select pg_temp.rm_run(100);
 
 -- 4. Grants / revokes (packages/db/src/rls.ts → rlsAppRoleGrantsSql, same as ensureRlsAppRole)
 grant usage on schema public to restomatch_app;
@@ -907,6 +863,14 @@ grant usage on schema public to restomatch_app;
         if to_regclass('public.leak_month_snapshots') is not null then
           execute 'revoke insert, update, delete on leak_month_snapshots, leak_month_corrections from restomatch_app';
         end if;
+        -- No app path deletes a restaurant as the tenant role (seed / e2e cleanup / ops use
+        -- the owner connection). Without DELETE the tenant cannot start an owner-run
+        -- cascade (restaurant → audit rows) at all.
+        execute 'revoke delete on restaurants from restomatch_app';
+        -- 0072: the bank audit is written ONLY by its SECURITY DEFINER trigger.
+        if to_regclass('public.supplier_bank_account_changes') is not null then
+          execute 'revoke insert, update, delete on supplier_bank_account_changes from restomatch_app';
+        end if;
       end $$;
 
 -- 5. Storage (Supabase): the private invoice-scans bucket the app uploads to,
@@ -963,7 +927,7 @@ begin
     end if;
   end if;
   begin
-    perform pg_temp.rm_run(117);
+    perform pg_temp.rm_run(101);
   exception when insufficient_privilege or lock_not_available then
     raise notice 'restomatch: storage.objects RLS not altered (%), Supabase enables it by default', sqlerrm;
   end;
@@ -999,12 +963,12 @@ begin
 -- 1) Make the bucket private. After this the app MUST serve signed URLs
 --    (createSignedUrl) instead of getPublicUrl(); /object/public/... 400s.
 update storage.buckets set public = false where id = 'invoice-scans';$rm$;
-    perform pg_temp.rm_run(118);
-    perform pg_temp.rm_run(119);
-    perform pg_temp.rm_run(120);
-    perform pg_temp.rm_run(121);
-    perform pg_temp.rm_run(122);
-    perform pg_temp.rm_run(123);
+    perform pg_temp.rm_run(102);
+    perform pg_temp.rm_run(103);
+    perform pg_temp.rm_run(104);
+    perform pg_temp.rm_run(105);
+    perform pg_temp.rm_run(106);
+    perform pg_temp.rm_run(107);
   exception when insufficient_privilege or lock_not_available then
     raise warning 'restomatch: storage.objects policies NOT applied as % (%) — run packages/db/drizzle/rls/0001_invoice_scans_rls.sql in the SQL editor', current_user, sqlerrm;
   end;

@@ -1135,7 +1135,7 @@ describe('0072 (H-03) leak_month_corrections (raw RLS)', () => {
 describe('0072 (H-03) supplier_bank_accounts (raw RLS)', () => {
   beforeAll(async () => {
     for (const t of [A, B]) {
-      await ownerDb.insert(supplierBankAccounts).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:ct', accountLast4: '6789' });
+      await ownerDb.insert(supplierBankAccounts).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' });
     }
   });
   afterAll(async () => {
@@ -1153,7 +1153,7 @@ describe('0072 (H-03) supplier_bank_accounts (raw RLS)', () => {
   it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
     await expect(
       withRestaurant(appDb, A.restaurantId, (tx) =>
-        tx.insert(supplierBankAccounts).values({ restaurantId: B.restaurantId, supplierId: B.supplierId, bankCode: '99', branchCode: '999', accountNumberEnc: 'v1:forged', accountLast4: '0000', active: false }),
+        tx.insert(supplierBankAccounts).values({ restaurantId: B.restaurantId, supplierId: B.supplierId, bankCode: '99', branchCode: '999', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '0000', active: false }),
       ),
     ).rejects.toThrow(/row-level security/);
     const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
@@ -1172,7 +1172,7 @@ describe('0072 (H-03) supplier_bank_account_changes (raw RLS)', () => {
   beforeAll(async () => {
     for (const t of [A, B]) {
       // The insert trigger writes exactly one masked change row per account.
-      const [acct] = await ownerDb.insert(supplierBankAccounts).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:ct', accountLast4: '6789' }).returning();
+      const [acct] = await ownerDb.insert(supplierBankAccounts).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' }).returning();
       accts.set(t.restaurantId, acct!.id);
     }
   });
@@ -1193,15 +1193,15 @@ describe('0072 (H-03) supplier_bank_account_changes (raw RLS)', () => {
       withRestaurant(appDb, A.restaurantId, (tx) =>
         tx.insert(supplierBankAccountChanges).values({ restaurantId: B.restaurantId, bankAccountId: accts.get(B.restaurantId)!, after: { account_last4: '0000' } }),
       ),
-    ).rejects.toThrow(/row-level security/);
-    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
-      tx
-        .update(supplierBankAccountChanges)
-        .set({ changedBy: null })
-        .where(eq(supplierBankAccountChanges.restaurantId, B.restaurantId))
-        .returning({ id: supplierBankAccountChanges.id }),
-    );
-    expect(updated).toHaveLength(0);
+    ).rejects.toThrow(/permission denied/);
+    // The tenant role holds no UPDATE on the audit at all (rls.ts): refused outright.
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.update(supplierBankAccountChanges).set({ changedBy: null }).where(eq(supplierBankAccountChanges.restaurantId, B.restaurantId)),
+      ),
+    ).rejects.toThrow(/permission denied/);
+    const bRows = await ownerDb.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.restaurantId, B.restaurantId));
+    expect(bRows).toHaveLength(1);
   });
 });
 
@@ -1257,6 +1257,22 @@ describe('0072 (H-03) push_subscriptions (raw RLS)', () => {
     expect(touched).toHaveLength(0);
     await ownerDb.delete(pushSubscriptions).where(eq(pushSubscriptions.id, other!.id));
   });
+
+  it('a member DELETEs only their OWN rows: a targeted delete of a teammate\'s row is 0, an unqualified delete keeps them', async () => {
+    const [other] = await ownerDb.insert(pushSubscriptions).values({ restaurantId: A.restaurantId, userId: B.ownerUserId, endpoint: 'https://push.test/a-other-del', p256dh: 'k', auth: 'a' }).returning();
+    const targeted = await asMember(A.restaurantId, A.ownerUserId, (tx) =>
+      tx.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, B.ownerUserId)).returning({ id: pushSubscriptions.id }),
+    );
+    expect(targeted).toHaveLength(0);
+    await asMember(A.restaurantId, A.ownerUserId, (tx) => tx.delete(pushSubscriptions));
+    const left = await ownerDb.select({ id: pushSubscriptions.id }).from(pushSubscriptions).where(eq(pushSubscriptions.id, other!.id));
+    expect(left).toHaveLength(1);
+    // B's own row in B is untouched as well; A's own row was the only one removed.
+    const bLeft = await ownerDb.select({ id: pushSubscriptions.id }).from(pushSubscriptions).where(eq(pushSubscriptions.restaurantId, B.restaurantId));
+    expect(bLeft).toHaveLength(1);
+    await ownerDb.delete(pushSubscriptions).where(eq(pushSubscriptions.id, other!.id));
+    await ownerDb.insert(pushSubscriptions).values({ restaurantId: A.restaurantId, userId: A.ownerUserId, endpoint: `https://push.test/${A.restaurantId}`, p256dh: 'k', auth: 'a' });
+  });
 });
 
 describe('0072 (H-03) notification_prefs (raw RLS)', () => {
@@ -1301,6 +1317,22 @@ describe('0072 (H-03) notification_prefs (raw RLS)', () => {
         tx.update(notificationPrefs).set({ userId: B.ownerUserId }).where(eq(notificationPrefs.restaurantId, A.restaurantId)),
       ),
     ).rejects.toThrow(/row-level security/);
+  });
+
+  it('a member DELETEs only their OWN rows: a targeted delete of a teammate\'s row is 0, an unqualified delete keeps them', async () => {
+    const [other] = await ownerDb.insert(notificationPrefs).values({ restaurantId: A.restaurantId, userId: B.ownerUserId, channel: 'whatsapp', eventKind: 'opted_out' }).returning();
+    const targeted = await asMember(A.restaurantId, A.ownerUserId, (tx) =>
+      tx.delete(notificationPrefs).where(eq(notificationPrefs.userId, B.ownerUserId)).returning({ id: notificationPrefs.id }),
+    );
+    expect(targeted).toHaveLength(0);
+    await asMember(A.restaurantId, A.ownerUserId, (tx) => tx.delete(notificationPrefs));
+    const left = await ownerDb.select({ id: notificationPrefs.id }).from(notificationPrefs).where(eq(notificationPrefs.id, other!.id));
+    expect(left).toHaveLength(1);
+    // B's own row in B is untouched as well; A's own row was the only one removed.
+    const bLeft = await ownerDb.select({ id: notificationPrefs.id }).from(notificationPrefs).where(eq(notificationPrefs.restaurantId, B.restaurantId));
+    expect(bLeft).toHaveLength(1);
+    await ownerDb.delete(notificationPrefs).where(eq(notificationPrefs.id, other!.id));
+    await ownerDb.insert(notificationPrefs).values({ restaurantId: A.restaurantId, userId: A.ownerUserId, channel: 'email', eventKind: 'claim_overdue' });
   });
 });
 
@@ -1347,6 +1379,22 @@ describe('0072 (H-03) notification_settings (raw RLS)', () => {
       ),
     ).rejects.toThrow(/row-level security/);
   });
+
+  it('a member DELETEs only their OWN rows: a targeted delete of a teammate\'s row is 0, an unqualified delete keeps them', async () => {
+    const [other] = await ownerDb.insert(notificationSettings).values({ restaurantId: A.restaurantId, userId: B.ownerUserId }).returning();
+    const targeted = await asMember(A.restaurantId, A.ownerUserId, (tx) =>
+      tx.delete(notificationSettings).where(eq(notificationSettings.userId, B.ownerUserId)).returning({ id: notificationSettings.id }),
+    );
+    expect(targeted).toHaveLength(0);
+    await asMember(A.restaurantId, A.ownerUserId, (tx) => tx.delete(notificationSettings));
+    const left = await ownerDb.select({ id: notificationSettings.id }).from(notificationSettings).where(eq(notificationSettings.id, other!.id));
+    expect(left).toHaveLength(1);
+    // B's own row in B is untouched as well; A's own row was the only one removed.
+    const bLeft = await ownerDb.select({ id: notificationSettings.id }).from(notificationSettings).where(eq(notificationSettings.restaurantId, B.restaurantId));
+    expect(bLeft).toHaveLength(1);
+    await ownerDb.delete(notificationSettings).where(eq(notificationSettings.id, other!.id));
+    await ownerDb.insert(notificationSettings).values({ restaurantId: A.restaurantId, userId: A.ownerUserId });
+  });
 });
 
 describe('0072 (H-03) append-only tables under the RLS app role', () => {
@@ -1358,7 +1406,7 @@ describe('0072 (H-03) append-only tables under the RLS app role', () => {
       .returning();
     const [acct] = await ownerDb
       .insert(supplierBankAccounts)
-      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:ct', accountLast4: '6789' })
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' })
       .returning();
     const auto = await ownerDb.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.bankAccountId, acct!.id));
     expect(auto).toHaveLength(1); // written by the insert trigger
@@ -1390,10 +1438,168 @@ describe('0072 (H-03) append-only tables under the RLS app role', () => {
     await ownerDb.delete(leakMonthSnapshots);
   });
 
+  it('a forged bank audit row is refused: only the trigger writes the audit (even same-tenant, even with a real actor)', async () => {
+    const [acct] = await ownerDb
+      .insert(supplierBankAccounts)
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' })
+      .returning();
+    await expect(
+      asMember(A.restaurantId, A.ownerUserId, (tx) =>
+        tx.insert(supplierBankAccountChanges).values({
+          restaurantId: A.restaurantId,
+          bankAccountId: acct!.id,
+          changedBy: B.ownerUserId, // another tenant's user
+          after: { bank_code: '99', branch_code: '999', account_last4: '0000', holder_name: 'forged' },
+        }),
+      ),
+    ).rejects.toThrow(/permission denied/);
+    const log = await ownerDb.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.bankAccountId, acct!.id));
+    expect(log).toHaveLength(1); // only the insert trigger's row
+    await ownerDb.delete(supplierBankAccountChanges);
+    await ownerDb.delete(supplierBankAccounts);
+  });
+
+  it('a pg_temp type shadow cannot run code as the owner through the SECURITY DEFINER audit', async () => {
+    const [acct] = await ownerDb
+      .insert(supplierBankAccounts)
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' })
+      .returning();
+    const before = await ownerDb.execute(sql`select has_table_privilege('restomatch_app', 'supplier_bank_account_changes', 'INSERT') as ins,
+      has_table_privilege('restomatch_app', 'plans', 'UPDATE') as plans_upd`);
+    const seen = await asMember(A.restaurantId, A.ownerUserId, async (tx) => {
+      // The attack: a pg_temp jsonb domain whose CHECK calls attacker code. If pg_temp were
+      // searched first inside the definer, evil() would run as the owner and escalate.
+      await tx.execute(sql.raw(`create temp table h03_side (who text, escalated boolean)`));
+      await tx.execute(
+        sql.raw(`create function pg_temp.evil(pg_catalog.jsonb) returns pg_catalog.bool language plpgsql as $f$
+          begin
+            insert into pg_temp.h03_side values (current_user, current_user <> 'restomatch_app');
+            begin execute 'grant insert, update, delete on public.supplier_bank_account_changes to restomatch_app'; exception when others then null; end;
+            return true;
+          end $f$`),
+      );
+      await tx.execute(sql.raw(`create domain pg_temp.jsonb as pg_catalog.jsonb check (pg_temp.evil(value::pg_catalog.jsonb))`));
+      await tx.execute(sql.raw(`create domain pg_temp.uuid as pg_catalog.uuid check (pg_temp.evil('{}'::pg_catalog.jsonb))`));
+      await tx.execute(sql.raw(`create domain pg_temp.text as pg_catalog.text check (pg_temp.evil('{}'::pg_catalog.jsonb))`));
+      await tx.update(supplierBankAccounts).set({ active: false }).where(eq(supplierBankAccounts.id, acct!.id));
+      const rows = [...((await tx.execute(sql.raw(`select who, escalated from pg_temp.h03_side`))) as unknown as Iterable<unknown>)];
+      // The pooled connection lives on: drop every planted temp object before commit.
+      await tx.execute(sql.raw(`discard temp`));
+      return rows;
+    });
+    expect([...(seen as unknown as Iterable<unknown>)]).toEqual([]); // evil() never ran, as anyone
+    const after = await ownerDb.execute(sql`select has_table_privilege('restomatch_app', 'supplier_bank_account_changes', 'INSERT') as ins,
+      has_table_privilege('restomatch_app', 'plans', 'UPDATE') as plans_upd`);
+    expect([...(after as unknown as Iterable<unknown>)]).toEqual([...(before as unknown as Iterable<unknown>)]);
+    expect([...(after as unknown as Iterable<unknown>)]).toEqual([{ ins: false, plans_upd: false }]);
+    // The legit audit row is still written by the trigger.
+    const log = await ownerDb.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.bankAccountId, acct!.id));
+    expect(log).toHaveLength(2);
+    await ownerDb.delete(supplierBankAccountChanges);
+    await ownerDb.delete(supplierBankAccounts);
+  });
+
+  it('an owner-run CASCADE (restaurant delete → bank audit + audit_log) runs no planted pg_temp code as the owner', async () => {
+    // A throwaway tenant the attacker "owns", carrying a bank audit row and an audit_log row.
+    const C = await seedTenant(ownerDb, 'C-cascade');
+    await ownerDb
+      .insert(supplierBankAccounts)
+      .values({ restaurantId: C.restaurantId, supplierId: C.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' });
+    await ownerDb.insert(auditLog).values({ restaurantId: C.restaurantId, userId: C.ownerUserId, action: 'team.member_invited', entityType: 'invitation', after: {} });
+    const bAuditBefore = (await ownerDb.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.restaurantId, B.restaurantId))).length;
+    // Belt: the tenant role may not delete a restaurant at all (rls.ts).
+    await expect(
+      withRestaurant(appDb, C.restaurantId, (tx) => tx.delete(restaurants).where(eq(restaurants.id, C.restaurantId))),
+    ).rejects.toThrow(/permission denied/);
+    // The pin itself: re-open the cascade route for this test only (as round 7 had it).
+    await ownerDb.execute(sql`grant delete on restaurants to restomatch_app`);
+    try {
+      const seen = await withRestaurant(appDb, C.restaurantId, async (tx) => {
+        await tx.execute(sql.raw(`create temp table h03_cascade_side (who pg_catalog.text)`));
+        await tx.execute(
+          sql.raw(`create function pg_temp.evil0() returns pg_catalog.bool language plpgsql as $f$
+            begin
+              insert into pg_temp.h03_cascade_side values (current_user);
+              return true;
+            end $f$`),
+        );
+        for (const t of ['jsonb', 'uuid', 'text', 'regclass']) {
+          await tx.execute(sql.raw(`create domain pg_temp.${t} as pg_catalog.${t} check (pg_temp.evil0())`));
+        }
+        await tx.execute(
+          sql.raw(`create temp view pg_roles as select r.rolname, r.rolsuper, r.rolbypassrls from pg_catalog.pg_roles r where pg_temp.evil0()`),
+        );
+        await tx.execute(sql.raw(`create temp view pg_class as select c.oid, c.relowner from pg_catalog.pg_class c where pg_temp.evil0()`));
+        await tx.delete(restaurants).where(eq(restaurants.id, C.restaurantId));
+        const rows = [...((await tx.execute(sql.raw(`select who from pg_temp.h03_cascade_side`))) as unknown as Iterable<unknown>)];
+        await tx.execute(sql.raw(`discard temp`));
+        return rows;
+      });
+      const ran = [...(seen as unknown as Iterable<{ who: string }>)];
+      expect(ran.filter((r) => r.who !== 'restomatch_app')).toEqual([]); // nothing ran as the owner
+    } finally {
+      await ownerDb.execute(sql`revoke delete on restaurants from restomatch_app`);
+    }
+    // The cascade itself went through, and nothing was forged in another tenant.
+    expect(await ownerDb.select().from(restaurants).where(eq(restaurants.id, C.restaurantId))).toEqual([]);
+    expect((await ownerDb.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.restaurantId, B.restaurantId))).length).toBe(bAuditBefore);
+    await ownerDb.delete(users).where(eq(users.id, C.ownerUserId));
+  });
+
+  it('the audit function cannot be reused on a temp table to forge audit rows (no EXECUTE, TG_RELID checked)', async () => {
+    const [acct] = await ownerDb
+      .insert(supplierBankAccounts)
+      .values({ restaurantId: B.restaurantId, supplierId: B.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' })
+      .returning();
+    await expect(
+      asMember(A.restaurantId, A.ownerUserId, async (tx) => {
+        await tx.execute(
+          sql.raw(`create temp table h03_fake (id uuid, restaurant_id uuid, bank_code text, branch_code text, account_last4 text,
+            holder_name text, active boolean, verified_by uuid, verified_at timestamptz)`),
+        );
+        await tx.execute(sql.raw(`create trigger h03_forge after insert on pg_temp.h03_fake for each row execute function public.restomatch_bank_account_audit()`));
+        await tx.execute(sql`insert into pg_temp.h03_fake values (${acct!.id}, ${B.restaurantId}, '99', '999', '0000', 'forged', true, null, null)`);
+      }),
+    ).rejects.toThrow(/permission denied for function/);
+    const log = await ownerDb.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.bankAccountId, acct!.id));
+    expect(log).toHaveLength(1); // only the real insert trigger's row in B
+    await ownerDb.delete(supplierBankAccountChanges);
+    await ownerDb.delete(supplierBankAccounts);
+  });
+
+  it('a tenant-role session with the actor GUC cleared cannot write an unattributed bank change', async () => {
+    const [acct] = await ownerDb
+      .insert(supplierBankAccounts)
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' })
+      .returning();
+    // No user GUC at all (withRestaurant sets only the restaurant).
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) => tx.update(supplierBankAccounts).set({ active: false }).where(eq(supplierBankAccounts.id, acct!.id))),
+    ).rejects.toThrow(/no acting user/);
+    // Explicitly cleared to ''.
+    await expect(
+      withRestaurant(appDb, A.restaurantId, async (tx) => {
+        await tx.execute(sql`select set_config('app.current_user_id', '', true)`);
+        await tx.update(supplierBankAccounts).set({ holderName: 'anon' }).where(eq(supplierBankAccounts.id, acct!.id));
+      }),
+    ).rejects.toThrow(/no acting user/);
+    // A new account without an actor is refused too.
+    await ownerDb.update(supplierBankAccounts).set({ active: false }).where(eq(supplierBankAccounts.id, acct!.id));
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(supplierBankAccounts).values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '1111' }),
+      ),
+    ).rejects.toThrow(/no acting user/);
+    const log = await ownerDb.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.restaurantId, A.restaurantId));
+    expect(log.map((r) => r.changedBy)).toEqual([null, null]); // only the owner connection's two writes, anonymous by design
+    await ownerDb.delete(supplierBankAccountChanges);
+    await ownerDb.delete(supplierBankAccounts);
+  });
+
   it('a bank change made through the app is audited with the session user as changed_by', async () => {
     const [acct] = await ownerDb
       .insert(supplierBankAccounts)
-      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:ct', accountLast4: '6789' })
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q', accountLast4: '6789' })
       .returning();
     await asMember(A.restaurantId, A.ownerUserId, (tx) =>
       tx.update(supplierBankAccounts).set({ active: false }).where(eq(supplierBankAccounts.id, acct!.id)),

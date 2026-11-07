@@ -4,6 +4,7 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   createDb,
+  supplierBankAccounts,
   consolidatedInvoiceLinks,
   goodsReceipts,
   invoices,
@@ -177,7 +178,7 @@ describe('0073 is registered', () => {
     const locks = lockPhase.match(/LOCK TABLE [^;]+;/g) ?? [];
     expect(locks).toHaveLength(7);
     for (const l of locks) expect(l).toMatch(/NOWAIT;$/);
-    const order = ['"restaurants"', '"suppliers"', '"products"', '"purchase_orders"', '"po_lines"', '"recipes"', '"inventory_counts"', '"inventory_count_lines"', '"invoices"', '"consolidated_invoice_links"', '"ingest_documents"', '"users"'];
+    const order = ['"restaurants"', '"suppliers"', '"supplier_bank_accounts"', '"products"', '"purchase_orders"', '"po_lines"', '"recipes"', '"inventory_counts"', '"inventory_count_lines"', '"invoices"', '"consolidated_invoice_links"', '"ingest_documents"', '"users"'];
     const pos = order.map((t) => lockPhase.indexOf(t));
     expect(pos.every((p) => p >= 0)).toBe(true);
     expect([...pos].sort((a, b) => a - b)).toEqual(pos);
@@ -679,5 +680,67 @@ describe('0073 W3-11 decisions: one consolidated invoice per receipt; statement 
       select pg_get_constraintdef(oid) as def from pg_constraint
       where conrelid = 'supplier_statements'::regclass and contype = 'c'`) as unknown as Array<{ def: string }>;
     expect(rows.some((r) => /balance_agorot/.test(r.def))).toBe(false);
+  });
+});
+
+describe('0073 hygiene (H-03 sign-off): holder_name NFKC envelope test; consent needs a visible character', () => {
+  const ENC = 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q';
+  const acct = (holderName: string) => ({
+    restaurantId: A.restaurantId,
+    supplierId: A.supplierId,
+    bankCode: '12',
+    branchCode: '345',
+    accountNumberEnc: ENC,
+    accountLast4: '6789',
+    holderName,
+    active: false,
+  });
+  // Each of these hides a ciphertext envelope behind something invisible or a fold.
+  const BAD = [
+    'ｖ１：abc', // fullwidth, folds to v1: under NFKC
+    '\u{E0001}v1:abc', // TAG
+    '\u{E0100}v1:abc', // VS17
+    '⠀v1:abc', // Braille blank
+    '￹v1:abc', // interlinear annotation anchor
+    'ㅤv1:abc', // Hangul filler (glibc: alnum)
+    'ᅟv1:abc',
+    'ᅠv1:abc',
+    'ﾠv1:abc',
+    ' ​v2:abc', // the old list still holds
+  ];
+  const GOOD = ['ירקות השרון בע"מ', 'Galilee Dairies Ltd 514123456', 'v1 trading', 'V8 Foods'];
+
+  it('the base CHECK refuses every hidden envelope and keeps real names', async () => {
+    for (const h of BAD) await expectPgError(db.insert(supplierBankAccounts).values(acct(h)), CHECK_VIOLATION);
+    for (const h of GOOD) {
+      const [row] = await db.insert(supplierBankAccounts).values(acct(h)).returning();
+      expect(row!.holderName).toBe(h);
+    }
+    expect(await checkDef('supplier_bank_accounts_holder_name_check')).toMatch(/normalize/);
+  });
+
+  it('restomatch_bank_audit_masked() applies the same NFKC test and stays pinned (search_path ends in pg_temp)', async () => {
+    for (const h of BAD) {
+      const [{ ok }] = (await sql`select public.restomatch_bank_audit_masked(${sql.json({ holder_name: h })}::jsonb) as ok`) as unknown as [{ ok: boolean }];
+      expect(ok, JSON.stringify(h)).toBe(false);
+    }
+    for (const h of GOOD) {
+      const [{ ok }] = (await sql`select public.restomatch_bank_audit_masked(${sql.json({ holder_name: h })}::jsonb) as ok`) as unknown as [{ ok: boolean }];
+      expect(ok, h).toBe(true);
+    }
+    const [{ cfg, secdef }] = (await sql`
+      select array_to_string(p.proconfig, ',') as cfg, p.prosecdef as secdef from pg_proc p
+      where p.oid = 'public.restomatch_bank_audit_masked(jsonb)'::regprocedure`) as unknown as [{ cfg: string; secdef: boolean }];
+    expect(cfg).toMatch(/search_path=.*pg_temp$/);
+    expect(secdef).toBe(false);
+  });
+
+  it('the consent CHECK needs a visible character in the notice version (U+3164 alone is refused)', async () => {
+    const [u] = await db.insert(users).values({ email: `h04-consent-${Date.now()}@0073.test` }).returning();
+    const optIn = (v: string) =>
+      db.update(users).set({ whatsappOptIn: true, whatsappOptInAt: new Date(), whatsappOptInSource: 'settings', whatsappOptInNoticeVersion: v }).where(eq(users.id, u!.id));
+    for (const v of ['ㅤ', 'ᅟᅠ', 'ﾠ', ' ', '​']) await expectPgError(optIn(v), CHECK_VIOLATION);
+    for (const v of ['2026-11', 'v3', 'גרסה']) await optIn(v);
+    await db.delete(users).where(eq(users.id, u!.id));
   });
 });
