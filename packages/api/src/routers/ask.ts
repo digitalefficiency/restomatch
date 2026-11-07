@@ -1,15 +1,16 @@
 import { z } from 'zod';
 import { ASK_QUESTIONS_PER_DAY, runAsk, usageToday } from '../ask';
 import { assertFeature, isFeatureOn } from '../lib/featureGate';
-import { managerProcedure, router } from '../trpc';
+import { financeProcedure, router } from '../trpc';
 
 /**
- * "Ask RestoMatch" (wave 1, flag `aiAssistant`) — owner/manager only, under RLS
+ * "Ask RestoMatch" (wave 1, flag `aiAssistant`) — owner/manager/bookkeeper (AU-06:
+ * bookkeeper read-only, owner decision I3), never receiver or chef, under RLS
  * (member transaction). The model reads the restaurant's data only through the
  * read-only tools in ask/tools.ts, scoped to the SESSION restaurant.
  */
 export const askRouter = router({
-  status: managerProcedure.query(async ({ ctx }) => {
+  status: financeProcedure.query(async ({ ctx }) => {
     const enabled = await isFeatureOn(ctx.db, ctx.session.restaurantId, 'aiAssistant');
     if (!enabled) return { enabled: false, claude: false, questionsLeftToday: 0 };
     const u = await usageToday(ctx.db, ctx.session.restaurantId);
@@ -20,7 +21,7 @@ export const askRouter = router({
     };
   }),
 
-  ask: managerProcedure
+  ask: financeProcedure
     .input(
       z.object({
         question: z.string().trim().min(2).max(500),

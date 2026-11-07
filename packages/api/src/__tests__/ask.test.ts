@@ -87,14 +87,15 @@ describe('ask: feature flag + roles', () => {
     }
   });
 
-  it('owner/manager only: receiver, chef and bookkeeper are FORBIDDEN', async () => {
+  it('owner/manager/bookkeeper only (AU-06): receiver and chef are FORBIDDEN', async () => {
     __setAskClient(null);
-    for (const role of ['receiver', 'chef', 'bookkeeper'] as const) {
+    for (const role of ['receiver', 'chef'] as const) {
       await expect(caller(A, role).ask.ask({ question: 'how much leaked?', locale: 'en' })).rejects.toMatchObject({
         code: 'FORBIDDEN',
       });
     }
     await expect(caller(A, 'manager').ask.ask({ question: 'how much leaked?', locale: 'en' })).resolves.toBeTruthy();
+    await expect(caller(A, 'bookkeeper').ask.ask({ question: 'how much leaked?', locale: 'en' })).resolves.toBeTruthy();
   });
 });
 

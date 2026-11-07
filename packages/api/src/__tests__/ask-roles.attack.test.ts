@@ -46,6 +46,14 @@ describe('server: ask.* stays FORBIDDEN for receiver and chef', () => {
   });
 });
 
+describe('server: bookkeeper reads Ask (owner I3, read-only)', () => {
+  it('bookkeeper → ask.status and the new questions answer; still no write tool exists', async () => {
+    await expect(caller('bookkeeper').ask.status()).resolves.toMatchObject({ enabled: true });
+    const r = await caller('bookkeeper').ask.ask({ question: 'מי חייב לי זיכויים?', locale: 'he' });
+    expect(r.intent).toBe('whoOwesMe');
+  });
+});
+
 describe('role table (ask/roles.ts)', () => {
   it('covers every defined tool, and gives no tool to receiver or chef', () => {
     expect(Object.keys(TOOL_ROLES).sort()).toEqual(TOOL_DEFINITIONS.map((t) => t.name).sort());

@@ -163,11 +163,18 @@ describe('ROUTE_ROLES generated from the registry', () => {
     Object.fromEntries(Object.entries(m).map(([k, v]) => [k, [...v].sort()]));
 
   it("equals today's map except the supplier ledger and the invoice page, which drop the receiver", () => {
-    const { ['/dashboard/suppliers/ledger']: ledger, ['/dashboard/invoices']: invoices, ['/dashboard/orders']: orders, ...rest } = ROUTE_ROLES;
+    const {
+      ['/dashboard/suppliers/ledger']: ledger,
+      ['/dashboard/invoices']: invoices,
+      ['/dashboard/orders']: orders,
+      ['/dashboard/ask']: ask,
+      ...rest
+    } = ROUTE_ROLES;
     const {
       ['/dashboard/suppliers/ledger']: ledgerBefore,
       ['/dashboard/invoices']: invoicesBefore,
       ['/dashboard/orders']: ordersBefore,
+      ['/dashboard/ask']: askBefore,
       ...restBefore
     } = ROUTE_ROLES_BEFORE;
     expect(sorted(rest)).toEqual(sorted(restBefore));
@@ -180,6 +187,9 @@ describe('ROUTE_ROLES generated from the registry', () => {
     // The one loosening, owner decision 31.10 (pilot): the chef orders freely.
     expect(ordersBefore).toEqual(['owner', 'manager']);
     expect(orders).toEqual(['owner', 'manager', 'chef']);
+    // AU-06, owner decision I3: the bookkeeper reads Ask (read-only tools; never receiver or chef).
+    expect(askBefore).toEqual(['owner', 'manager']);
+    expect(ask).toEqual(['owner', 'manager', 'bookkeeper']);
     // The printable leak report keeps inheriting /leaks (no silent bounce for the bookkeeper's button).
     expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
     expect(allowedRolesForPath('/dashboard/leaks/report')).toContain('bookkeeper');
@@ -207,7 +217,9 @@ describe('ROUTE_ROLES generated from the registry', () => {
       const was = before(concrete) ?? ALL_ROLES;
       // Owner decision 31.10 (pilot): the chef opens orders (list, detail, new, capture).
       const ordersChef = (role: UserRole) => role === 'chef' && (concrete === '/dashboard/orders' || concrete.startsWith('/dashboard/orders/'));
-      for (const role of now) if (!ordersChef(role)) expect(was, `${role} on ${concrete}`).toContain(role);
+      // AU-06, owner decision I3: the bookkeeper opens Ask (read-only).
+      const askBookkeeper = (role: UserRole) => role === 'bookkeeper' && concrete === '/dashboard/ask';
+      for (const role of now) if (!ordersChef(role) && !askBookkeeper(role)) expect(was, `${role} on ${concrete}`).toContain(role);
     }
   });
 });
