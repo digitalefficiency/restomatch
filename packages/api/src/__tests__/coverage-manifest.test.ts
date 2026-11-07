@@ -78,6 +78,12 @@ describe('mergeCoverage', () => {
     }
   });
 
+  it('accepts the AU / WA / IA track ids (7.11)', () => {
+    expect(mergeCoverage(BASE, { './AU-01.ts': { 'au.proc': VALID_ATTACK } })).toHaveProperty('au.proc');
+    expect(mergeCoverage(BASE, { './IA-03.ts': { 'ia.proc': VALID_ISOLATION } })).toHaveProperty('ia.proc');
+    expect(() => mergeCoverage(BASE, { './AU-1.ts': { 'au.proc': VALID_ATTACK } })).toThrow(/AU-1\.ts/);
+  });
+
   it("rejects a bare 'attack' / 'isolation' in a fragment", () => {
     expect(() => mergeCoverage(BASE, { './W2-06.ts': { 'orders.x': 'attack' } })).toThrow(
       /orders\.x.*W2-06\.ts/s,

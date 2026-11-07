@@ -6,7 +6,7 @@ entry). COVERAGE = `BASE_COVERAGE` (human-owned, in the attack file) merged with
 fragments in this directory by `mergeCoverage()` in `./index.ts`.
 
 - **Each package owns exactly one file: `coverage/<package-id>.ts`** (`W2-09.ts`, `W2-09a.ts`,
-  `G-07.ts`, `H-03.ts`). Create yours when you add your first procedure; never edit
+  `G-07.ts`, `H-03.ts`, `AU-01.ts`, `WA-01.ts`, `IA-01.ts`). Create yours when you add your first procedure; never edit
   another package's file, and never pre-create one for someone else.
 - **The attack test goes in your package's own `*.attack.test.ts`** (or another test file of
   yours), never in `cross-tenant.attack.test.ts`. The fragment value names that file.
@@ -29,7 +29,7 @@ or a justification of ≥30 characters (why no tenant data can leak), without "T
 
 `mergeCoverage()` fails the suite, naming the source, when a fragment:
 1. declares a key already in the base or in another fragment (names both sources);
-2. has a file name that is not a package id (`^(W[1-4]-\d{2}[a-z]?|G-\d{2}|H-\d{2})\.ts$`);
+2. has a file name that is not a package id (`^(W[1-4]-\d{2}[a-z]?|G-\d{2}|H-\d{2}|AU-\d{2}|WA-\d{2}|IA-\d{2})\.ts$`);
 3. uses a bare `'attack'` / `'isolation'` (base-only: "a test below in this file"), a
    malformed attack/isolation value, or a justification under 30 characters or with "TODO";
 4. names a `<file>.test.ts` that does not exist under `src/__tests__/`.

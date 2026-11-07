@@ -9,7 +9,8 @@
  * mergeCoverage() is strict on purpose — a fragment can only ADD procedures:
  *   1. a key declared twice (base↔fragment or fragment↔fragment) throws, naming both
  *      sources — so a fragment can never override, and so never downgrade, a base entry;
- *   2. a fragment file name must be a package id (W2-09.ts, W2-09a.ts, G-07.ts, H-03.ts);
+ *   2. a fragment file name must be a package id (W2-09.ts, W2-09a.ts, G-07.ts, H-03.ts,
+ *      AU-01.ts, WA-01.ts, IA-01.ts);
  *   3. a fragment value is `attack — <file>.test.ts: <claim>` /
  *      `isolation — <file>.test.ts: <claim>`, or a justification of ≥30 characters
  *      without "TODO". A bare 'attack' / 'isolation' is base-only ("a test below");
@@ -36,7 +37,7 @@ export interface MergeOptions {
 
 const TESTS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BASE_SOURCE = 'BASE_COVERAGE (cross-tenant.attack.test.ts)';
-const FRAGMENT_FILE = /^(W[1-4]-\d{2}[a-z]?|G-\d{2}|H-\d{2})\.ts$/;
+const FRAGMENT_FILE = /^(W[1-4]-\d{2}[a-z]?|G-\d{2}|H-\d{2}|AU-\d{2}|WA-\d{2}|IA-\d{2})\.ts$/;
 const TESTED_VALUE = /^(attack|isolation)\s+[—-]\s+[\w./-]+\.test\.ts(\s*\+\s*[\w./-]+\.test\.ts)*:\s*\S/s;
 const TEST_FILE_REF = /[\w./-]+\.test\.ts/g;
 const MIN_JUSTIFICATION = 30;
@@ -93,7 +94,7 @@ export function mergeCoverage(
     const source = `coverage/${file}`;
     const fragment = fragments[path];
     if (!FRAGMENT_FILE.test(file)) {
-      errors.push(`${source}: file name must be a package id (W2-09.ts, W2-09a.ts, G-07.ts, H-03.ts)`);
+      errors.push(`${source}: file name must be a package id (W2-09.ts, W2-09a.ts, G-07.ts, H-03.ts, AU-01.ts, WA-01.ts, IA-01.ts)`);
       continue;
     }
     if (!fragment || typeof fragment !== 'object') {
