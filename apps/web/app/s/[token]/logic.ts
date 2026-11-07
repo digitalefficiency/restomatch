@@ -1,4 +1,4 @@
-import { parsePrice } from '@/app/dashboard/contracts/logic';
+import { parseNumberInput } from '@restomatch/types';
 
 /**
  * The supplier's answer, as pure functions (auth-02, auth-16): what changed,
@@ -17,13 +17,19 @@ export interface PortalLine {
 }
 
 /**
- * "12", "7.5", "7,5", "0" → number ≥ 0; anything else null.
- * TODO(G-13): switch to the shared number-input parser once it lands.
+ * A typed quantity: "12", "7.5", "7,5", "0,250" → number ≥ 0 (3 dp, no thousands
+ * grouping — "1,250" is ambiguous for a quantity and is refused); anything else null.
+ * TODO(G-13): switch to `parseDecimalInput` once it lands.
  */
 export function parseQty(raw: string): number | null {
-  const s = raw.trim().replace(',', '.');
-  if (!/^\d+(?:\.\d{1,3})?$/.test(s)) return null;
-  return Number(s);
+  const c = parseNumberInput(raw, { scale: 3, grouping: false });
+  return c.kind === 'ok' && c.value >= 0 ? c.value : null;
+}
+
+/** A typed unit price: "9.25", "9,25", "1,250" (thousands) → number > 0 (4 dp); anything else null. */
+export function parseUnitPrice(raw: string): number | null {
+  const c = parseNumberInput(raw, { scale: 4 });
+  return c.kind === 'ok' && c.value > 0 ? c.value : null;
 }
 
 /**
@@ -83,7 +89,7 @@ export function computeAnswer(
   const rows = lines.map((l): AnswerRow => {
     const qty = parseQty(qtyText[l.id] ?? '');
     const rawP = (priceText[l.id] ?? '').trim();
-    const price = rawP === '' ? null : parsePrice(rawP);
+    const price = rawP === '' ? null : parseUnitPrice(rawP);
     const qtyBad = qty === null;
     const priceBad = rawP !== '' && price === null;
     const qtyChanged = qty !== null && Math.round(qty * 1000) !== Math.round(l.qtyOrdered * 1000);
@@ -129,23 +135,63 @@ export function computeAnswer(
   };
 }
 
+export type AnswerIntent = 'as_ordered' | 'with_changes';
+
 export interface AnswerBody {
+  intent: AnswerIntent;
   lines: Array<{ poLineId: string; qtyAvailable: number | null; proposedUnitPrice: number | null }>;
   note: string | null;
 }
 
+export interface AnswerState {
+  lines: PortalLine[];
+  qtyText: Record<string, string>;
+  priceText: Record<string, string>;
+  note: string;
+}
+
+export interface BuiltAnswer {
+  /** What the ONE primary does. 'invalid' blocks (inline error + focus) — never a fallback to "as ordered". */
+  primary: 'invalid' | 'as_ordered' | 'with_changes';
+  /** The intent the primary sends. */
+  intent: AnswerIntent;
+  /** The primary's body: EVERY line, explicit quantities, the note. */
+  body: AnswerBody;
+  /** The "אישור כפי שהוזמן" text button's body (after the discard confirm): every line as ordered + the note. */
+  asOrderedBody: AnswerBody;
+  /** What the primary counts: changed lines + 1 for a note. */
+  count: number;
+  /** Changed lines only — what "as ordered" would discard (the note is always kept). */
+  discardCount: number;
+  diff: DiffItem[];
+  answer: Answer;
+}
+
 /**
- * The request body. `answer` carries EVERY line with an explicit quantity (the
- * server refuses a partial list) + the note. `asIs` sends no lines — the UI
- * only offers it with line edits on screen after the supplier explicitly agrees
- * to discard them — but the supplier's note is always carried.
+ * The ONE answer model (G-10): the primary, its label count, the "as ordered"
+ * text button and the discard confirm all read it. The server refuses a partial
+ * answer, so no body here ever has `lines: []`: "as ordered" sends every line at
+ * its ordered quantity with `intent: 'as_ordered'`.
  */
-export function answerBody(kind: 'answer' | 'asIs', a: Answer, note: string): AnswerBody {
-  if (kind === 'asIs') return { lines: [], note: note.trim() || null };
-  return {
-    lines: a.rows.map((r) => ({ poLineId: r.line.id, qtyAvailable: r.qty, proposedUnitPrice: r.price })),
-    note: note.trim() || null,
+export function buildAnswer(state: AnswerState): BuiltAnswer {
+  const answer = computeAnswer(state.lines, state.qtyText, state.priceText, state.note);
+  const note = state.note.trim() || null;
+  const primary: BuiltAnswer['primary'] = answer.invalid ? 'invalid' : answer.changeCount === 0 ? 'as_ordered' : 'with_changes';
+  const intent: AnswerIntent = primary === 'as_ordered' ? 'as_ordered' : 'with_changes';
+  const asOrderedBody: AnswerBody = {
+    intent: 'as_ordered',
+    lines: state.lines.map((l) => ({ poLineId: l.id, qtyAvailable: l.qtyOrdered, proposedUnitPrice: null })),
+    note,
   };
+  const body: AnswerBody =
+    intent === 'as_ordered'
+      ? asOrderedBody
+      : {
+          intent: 'with_changes',
+          lines: answer.rows.map((r) => ({ poLineId: r.line.id, qtyAvailable: r.qty, proposedUnitPrice: r.price })),
+          note,
+        };
+  return { primary, intent, body, asOrderedBody, count: answer.changeCount, discardCount: answer.lineChangeCount, diff: answer.diff, answer };
 }
 
 /** A recorded answer (supplier_responses.lines) → the same diff items, for "already answered". */
@@ -179,15 +225,6 @@ export function contactNumbers(raw: string | null | undefined): { tel: string; w
   else return null;
   if (intl.length < 11 || intl.length > 13) return null;
   return { tel: `+${intl}`, wa: intl };
-}
-
-/**
- * What the ONE primary does. An invalid field always blocks (inline error,
- * focus) — it never falls back to "confirm as is" (auth-02).
- */
-export function primaryAction(a: Answer): 'invalid' | 'asIs' | 'answer' {
-  if (a.invalid) return 'invalid';
-  return a.changeCount === 0 ? 'asIs' : 'answer';
 }
 
 type RecordedLine = { poLineId: string; qtyAvailable: number | null; proposedUnitPrice: number | null };

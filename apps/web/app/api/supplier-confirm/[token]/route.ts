@@ -3,7 +3,6 @@ import { hashSupplierToken } from '@restomatch/api';
 import { guardPublicRequest } from '@/lib/publicGuard';
 import { SUPPLIER_BODY_MAX_BYTES } from '@/lib/supplierConfirm/guard';
 import { supplierPortalSubmit, supplierPortalView } from '@/lib/supplierConfirm/data';
-import { incompleteAnswer } from './completeness';
 
 /**
  * Public supplier answer (wave-1 `supplierConfirm`). No session: the token in the
@@ -18,6 +17,7 @@ const LIMIT = { limit: 10, windowSec: 600, prefix: 'rl:supplier-confirm' };
 
 const Body = z
   .object({
+    intent: z.enum(['as_ordered', 'with_changes']),
     lines: z
       .array(
         z
@@ -49,26 +49,30 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
     key: (ip) => `${ip}:${hashSupplierToken(token)}`,
   });
   if (!g.ok) return g.response;
-  const parsed = g.data;
-  // A line-by-line answer must speak to EVERY line of the order with an
-  // explicit quantity (0 = out of stock): a partial list would silently read as
-  // "as ordered" for the lines it left out. `lines: []` stays the explicit
-  // "confirm as ordered" (the note, if any, is still carried).
-  if (parsed.lines.length > 0) {
-    const view = await supplierPortalView(token);
-    if (!view.ok) return view.error === 'EXPIRED' ? json(410, { ok: false, error: 'expired' }) : json(404, { ok: false, error: 'not_found' });
-    const missing = incompleteAnswer(view.view.lines.map((l) => l.id), parsed.lines);
-    if (missing) return json(400, { ok: false, error: missing });
-  }
-  const res = await supplierPortalSubmit(token, parsed);
+  // The service is the authority on the answer contract (G-10): every line once,
+  // an explicit intent that agrees with the lines. The route only maps codes.
+  const res = await supplierPortalSubmit(token, g.data);
   if (res.ok) return json(200, { ok: true, status: res.status });
   switch (res.error) {
     case 'NOT_FOUND':
       return json(404, { ok: false, error: 'not_found' });
     case 'EXPIRED':
       return json(410, { ok: false, error: 'expired' });
-    case 'ALREADY_ANSWERED':
-      return json(409, { ok: false, error: 'already_answered' });
+    case 'INCOMPLETE_ANSWER':
+      return json(422, { ok: false, error: 'incomplete_answer' });
+    case 'INTENT_MISMATCH':
+      return json(422, { ok: false, error: 'intent_mismatch' });
+    case 'ALREADY_ANSWERED': {
+      // The answer ON RECORD (read back from the DB, never echoed from this
+      // request), so the client can tell its own landed retry from someone else's.
+      const view = await supplierPortalView(token);
+      const r = view.ok ? view.view.response : null;
+      return json(409, {
+        ok: false,
+        error: 'already_answered',
+        recorded: r ? { status: r.status, submittedAt: r.submittedAt.toISOString(), lines: r.lines, note: r.note } : null,
+      });
+    }
     default:
       return json(400, { ok: false, error: 'invalid_lines' });
   }

@@ -25,7 +25,10 @@ export async function supplierPortalView(
   return view ? { ok: true, view } : { ok: false, error: 'NOT_FOUND' };
 }
 
-export async function supplierPortalSubmit(token: string, input: SupplierAnswerInput) {
+/** The portal's answer: unlike the service type, the intent is REQUIRED here (G-10). */
+export type PortalAnswerInput = SupplierAnswerInput & Required<Pick<SupplierAnswerInput, 'intent'>>;
+
+export async function supplierPortalSubmit(token: string, input: PortalAnswerInput) {
   const r = await resolveSupplierToken(authDb, token);
   if (!r.ok) return r;
   return withRestaurant(db, r.link.restaurantId, (tx) => submitSupplierAnswer(tx, r.link, input));

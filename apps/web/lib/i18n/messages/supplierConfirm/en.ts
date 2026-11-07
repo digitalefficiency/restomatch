@@ -39,6 +39,8 @@ export const en: Shape<typeof he> = {
       notFound: 'This link is not valid.',
       expired: 'This link has expired. Ask the restaurant for a new one.',
       rateLimited: 'Too many attempts. Try again in a few minutes.',
+      incomplete: 'A line is missing its quantity. Fill in a quantity for every line (0 = out of stock).',
+      intentMismatch: 'You marked changes. Send the answer with the changes, or discard them.',
       generic: 'Something went wrong. Please try again.',
     },
     invalidTitle: 'Link unavailable',

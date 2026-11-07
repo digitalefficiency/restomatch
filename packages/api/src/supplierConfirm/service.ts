@@ -283,12 +283,34 @@ export async function loadSupplierOrder(db: Database, link: ResolvedLink): Promi
   };
 }
 
+/**
+ * What the supplier says about the order as a whole (G-10, auth-02):
+ * `as_ordered` = every line arrives as ordered; `with_changes` = the lines carry
+ * the supplier's quantities (0 = out of stock) and/or prices.
+ */
+export type SupplierAnswerIntent = 'as_ordered' | 'with_changes';
+
 export interface SupplierAnswerInput {
+  /**
+   * The supplier's explicit intent. Required at every web boundary
+   * (`supplierPortalSubmit`, the public route).
+   * @deprecated Omitting it is kept only for older service callers: the intent
+   * is then inferred from the diff (any change ⇒ `with_changes`). The
+   * completeness rule applies either way.
+   */
+  intent?: SupplierAnswerIntent;
+  /** EVERY line of the order, exactly once. */
   lines: Array<{ poLineId: string; qtyAvailable?: number | null; proposedUnitPrice?: number | null }>;
   note?: string | null;
 }
 
-export type SubmitError = 'NOT_FOUND' | 'ALREADY_ANSWERED' | 'BAD_LINE' | 'BAD_VALUE';
+/**
+ * - `BAD_LINE`: a line of another order, or a line twice;
+ * - `BAD_VALUE`: a quantity or price out of range;
+ * - `INCOMPLETE_ANSWER`: an order line is missing, or `with_changes` leaves a quantity empty;
+ * - `INTENT_MISMATCH`: `as_ordered` with a changed line, or `with_changes` with no change and no note.
+ */
+export type SubmitError = 'NOT_FOUND' | 'ALREADY_ANSWERED' | 'BAD_LINE' | 'BAD_VALUE' | 'INCOMPLETE_ANSWER' | 'INTENT_MISMATCH';
 
 const MAX_QTY = 1_000_000;
 const MAX_PRICE = 10_000_000;
@@ -296,9 +318,16 @@ const round = (n: number, dp: number) => Math.round(n * 10 ** dp) / 10 ** dp;
 
 /**
  * Validate + store the supplier's answer. `db` = withRestaurant(link.restaurantId).
- * Every poLineId must belong to THIS order; quantities are 0…MAX, prices > 0.
- * A line equal to the order (same qty, same price) is dropped; no remaining
- * change ⇒ status 'confirmed'. Never touches purchase_orders / po_lines.
+ * The service is the authority on the answer contract (G-10); the route only
+ * maps codes:
+ *  - every line of THIS order exactly once (a foreign or repeated line is
+ *    `BAD_LINE`, a missing one `INCOMPLETE_ANSWER`); quantities 0…MAX, prices > 0;
+ *  - `with_changes`: every line states its quantity, and something differs
+ *    (or there is a note) — otherwise `INCOMPLETE_ANSWER` / `INTENT_MISMATCH`;
+ *  - `as_ordered`: a quantity is null or the ordered one, a price is null or
+ *    the order's — any difference is `INTENT_MISMATCH` (never silently dropped).
+ * Only differences are stored; `status` = any difference or a note ⇒ 'changes',
+ * otherwise 'confirmed'. Never touches purchase_orders / po_lines.
  */
 export async function submitSupplierAnswer(
   db: Database,
@@ -321,6 +350,7 @@ export async function submitSupplierAnswer(
 
   const seen = new Set<string>();
   const changes: SupplierResponseLine[] = [];
+  let qtyMissing = false;
   for (const l of input.lines) {
     const mine = byId.get(l.poLineId);
     if (!mine || seen.has(l.poLineId)) return { ok: false, error: 'BAD_LINE' };
@@ -331,6 +361,7 @@ export async function submitSupplierAnswer(
     if (price !== null && (!Number.isFinite(price) || price <= 0 || price > MAX_PRICE)) {
       return { ok: false, error: 'BAD_VALUE' };
     }
+    if (qty === null) qtyMissing = true;
     const qtyChanged = qty !== null && round(qty, 3) !== round(Number(mine.qty), 3);
     const priceChanged = price !== null && (mine.price == null || round(price, 4) !== round(Number(mine.price), 4));
     if (!qtyChanged && !priceChanged) continue;
@@ -340,7 +371,16 @@ export async function submitSupplierAnswer(
       proposedUnitPrice: priceChanged ? round(price!, 4) : null,
     });
   }
+  // A line left out would silently read as "as ordered" (auth-02).
+  if (seen.size !== byId.size) return { ok: false, error: 'INCOMPLETE_ANSWER' };
   const note = input.note?.trim() ? input.note.trim().slice(0, 1000) : null;
+  const intent: SupplierAnswerIntent = input.intent ?? (changes.length > 0 ? 'with_changes' : 'as_ordered');
+  if (intent === 'with_changes') {
+    if (qtyMissing) return { ok: false, error: 'INCOMPLETE_ANSWER' };
+    if (changes.length === 0 && !note) return { ok: false, error: 'INTENT_MISMATCH' };
+  } else if (changes.length > 0) {
+    return { ok: false, error: 'INTENT_MISMATCH' };
+  }
   const status = changes.length > 0 || note ? 'changes' : 'confirmed';
 
   const inserted = await db
