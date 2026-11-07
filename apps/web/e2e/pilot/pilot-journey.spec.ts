@@ -48,17 +48,17 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 /** Steps waiting on a named PR (flip to false when it is on the tested tree). */
 const WAITS = {
   /** W1-06 follow-up: client-side shrink of a phone photo before upload (6 MB JPEG). */
-  uploadShrink: 'W1-06 image shrink (6 MB phone photo) — not on main + #167',
+  uploadShrink: 'W1-06 image shrink (#210, 6 MB phone photo) — not on main yet',
   /** S2: manual invoice lines — the only way a non-demo tenant gets findings without OCR. */
   manualLines: "S2's manual invoice lines (#216) — without them a fresh tenant has no invoice lines, so no findings",
   /** W1-11: open order writes to the chef (route, nav entry, server: managerProcedure today). */
-  chefOrders: 'W1-11 chef order writes (route + nav + server) — not on main + #167',
+  chefOrders: 'W1-11 chef order writes (#207)',
 } as const;
 /**
  * Waiting PRs that are on the tested tree: list them in MERGED_ON_MAIN once they merge, or name them in
  * PILOT_ON_TREE (comma list) to run a lab built from their branch, e.g. PILOT_ON_TREE=w1-06.
  */
-const MERGED_ON_MAIN: readonly string[] = []; // add 'w1-06' / 's2' / 'w1-11' as they merge
+const MERGED_ON_MAIN: readonly string[] = ['w1-11']; // #207 in train A (4c887688); add 'w1-06' / 's2' as they merge
 const ON_TREE = new Set([...MERGED_ON_MAIN, ...(process.env.PILOT_ON_TREE ?? '').split(',').map((s) => s.trim().toLowerCase())]);
 /** W1-06's photo shrink (#210) → step 5b runs. */
 const UPLOAD_SHRINK_ON_TREE = ON_TREE.has('w1-06');
