@@ -3,7 +3,8 @@ import { createElement, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '../../../i18n/client';
-import type { Locale } from '../../../i18n/config';
+import type { AppLocale } from '../../../i18n/config';
+import { common as arCommon } from '../../../i18n/messages/receiverLangs/overlays/ar/common';
 import { he } from '../../../i18n/messages/common/he';
 import { en } from '../../../i18n/messages/common/en';
 import {
@@ -204,7 +205,7 @@ describe('speech', () => {
 
 // Loosely typed createElement: two @types/react majors are hoisted in the workspace (STATE.md).
 const h = createElement as unknown as (type: unknown, props?: Record<string, unknown> | null, ...children: unknown[]) => ReactElement;
-const render = (el: ReactElement, locale: Locale = 'he') => renderToStaticMarkup(h(I18nProvider, { locale }, el));
+const render = (el: ReactElement, locale: AppLocale = 'he') => renderToStaticMarkup(h(I18nProvider, { locale }, el));
 
 describe('ScanButton / MicButton render', () => {
   const noop = () => undefined;
@@ -241,6 +242,12 @@ describe('ScanButton / MicButton render', () => {
     expect(html).toContain(he.field.mic.retry);
     expect(onTranscript).not.toHaveBeenCalled();
     expect(html).not.toContain('₪');
+  });
+  it('receiver locales read their own overlay, not the Hebrew fallback', () => {
+    const html = render(createElement(ScanButton, { onCode: noop, initialMode: 'manual', initialNotice: 'denied' }), 'ar');
+    expect(html).toContain(arCommon.field.scan.button);
+    expect(html).toContain(arCommon.field.scan.denied);
+    expect(html).not.toContain(he.field.scan.button);
   });
   it('MicButton: typed fallback when unsupported', () => {
     const html = render(createElement(MicButton, { onTranscript: noop, initialMode: 'confirm', initialNotice: 'unsupported' }));

@@ -149,4 +149,37 @@ export const common: Shape<CommonReceiverSlice> = {
     listSep: ', ',
     listLast: ' และ',
   },
+  // W3-03a field components — machine translation, pending native review.
+  field: {
+    scan: {
+      button: 'สแกนบาร์โค้ด', // review
+      scanning: 'หันกล้องไปที่บาร์โค้ด', // review
+      cancel: 'ยกเลิก', // review
+      typeInstead: 'พิมพ์เอง', // review
+      manualLabel: 'หมายเลขบาร์โค้ด', // review
+      manualHint: 'ตัวเลขใต้แถบเส้น', // review
+      submit: 'ยืนยัน', // review
+      empty: 'กรุณาพิมพ์หมายเลขก่อน', // review
+      found: 'สแกนแล้ว: {code}', // review
+      unsupported: 'โทรศัพท์นี้สแกนบาร์โค้ดไม่ได้ พิมพ์หมายเลขแทนได้', // review
+      denied: 'ไม่ได้รับอนุญาตให้ใช้กล้อง พิมพ์หมายเลขแทนได้', // review
+      failed: 'สแกนไม่สำเร็จ พิมพ์หมายเลขแทนได้', // review
+    },
+    mic: {
+      button: 'ป้อนด้วยเสียง', // review
+      listening: 'กำลังฟัง… พูดได้เลย', // review
+      stop: 'หยุดบันทึก', // review
+      cancel: 'ยกเลิก', // review
+      confirmLabel: 'นี่คือสิ่งที่เราได้ยิน แก้ไขได้ก่อนยืนยัน', // review
+      typedLabel: 'พิมพ์ข้อความ', // review
+      confirm: 'ยืนยัน', // review
+      retry: 'บันทึกใหม่', // review
+      empty: 'กรุณาใส่ข้อความก่อนยืนยัน', // review
+      unsupported: 'โทรศัพท์นี้ไม่รองรับการป้อนด้วยเสียง พิมพ์แทนได้', // review
+      denied: 'ไม่ได้รับอนุญาตให้ใช้ไมโครโฟน พิมพ์แทนได้', // review
+      offline: 'ไม่มีการเชื่อมต่อ ป้อนด้วยเสียงไม่ได้ตอนนี้ พิมพ์แทนได้', // review
+      noSpeech: 'เราไม่ได้ยินอะไรเลย ลองอีกครั้งหรือพิมพ์แทน', // review
+      failed: 'ป้อนด้วยเสียงไม่สำเร็จ พิมพ์แทนได้', // review
+    },
+  },
 };

@@ -149,4 +149,37 @@ export const common: Shape<CommonReceiverSlice> = {
     listSep: ', ',
     listLast: ' ከምኡውን ',
   },
+  // W3-03a field components — machine translation, pending native review.
+  field: {
+    scan: {
+      button: 'ባርኮድ ስካን', // review
+      scanning: 'ካሜራ ናብ ባርኮድ ኣቕንዕዎ', // review
+      cancel: 'ሰርዝ', // review
+      typeInstead: 'ብኢድ ምጽሓፍ', // review
+      manualLabel: 'ቁጽሪ ባርኮድ', // review
+      manualHint: 'ኣብ ትሕቲ መስመራት ዘለዉ ቁጽርታት', // review
+      submit: 'ኣረጋግጽ', // review
+      empty: 'መጀመርታ ቁጽሪ ጽሓፉ', // review
+      found: 'ተስኪኑ: {code}', // review
+      unsupported: 'እዚ ስልኪ ባርኮድ ክስክን ኣይክእልን። ቁጽሪ ክትጽሕፉ ትኽእሉ።', // review
+      denied: 'ናይ ካሜራ ፍቓድ የለን። ቁጽሪ ክትጽሕፉ ትኽእሉ።', // review
+      failed: 'ስካን ኣይሰለጠን። ቁጽሪ ክትጽሕፉ ትኽእሉ።', // review
+    },
+    mic: {
+      button: 'ብድምጺ ምእታው', // review
+      listening: 'ንሰምዕ ኣለና… ሕጂ ተዛረቡ', // review
+      stop: 'ምቕዳሕ ደው ኣብል', // review
+      cancel: 'ሰርዝ', // review
+      confirmLabel: 'ዝሰማዕናዮ እዚ እዩ። ቅድሚ ምርግጋጽ ከተዐርዩ ትኽእሉ', // review
+      typedLabel: 'ጽሑፍ ጽሓፉ', // review
+      confirm: 'ኣረጋግጽ', // review
+      retry: 'እንደገና ቅዳሕ', // review
+      empty: 'ቅድሚ ምርግጋጽ ጽሑፍ የድሊ', // review
+      unsupported: 'እዚ ስልኪ ብድምጺ ምእታው ኣይድግፍን። ክትጽሕፉ ትኽእሉ።', // review
+      denied: 'ናይ ማይክሮፎን ፍቓድ የለን። ክትጽሕፉ ትኽእሉ።', // review
+      offline: 'ርክብ የለን፣ ብድምጺ ምእታው ሕጂ ኣይርከብን። ክትጽሕፉ ትኽእሉ።', // review
+      noSpeech: 'ዝኾነ ኣይሰማዕናን። እንደገና ፈትኑ ወይ ጽሓፉ።', // review
+      failed: 'ብድምጺ ምእታው ኣይሰለጠን። ክትጽሕፉ ትኽእሉ።', // review
+    },
+  },
 };
