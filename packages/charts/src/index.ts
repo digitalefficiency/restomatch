@@ -18,6 +18,8 @@ export {
   computeInvoiceLeak,
   computeLeakBreakdown,
   computeLeakHero,
+  computeMonthInvoiceLeaks,
+  type MonthInvoiceLeak,
   type LeakBreakdownInvoice,
   type LeakBreakdownLine,
   type LeakHero,
@@ -26,6 +28,9 @@ export {
 export {
   computeLeakReport,
   parseReportMonth,
+  readClosedLeakMonth,
+  type ClosedLeakMonth,
+  type ClosedLeakMonthCorrection,
   type LeakReport,
   type LeakReportPriceCreepRow,
   type LeakReportStatus,

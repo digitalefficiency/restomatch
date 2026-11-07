@@ -351,3 +351,33 @@ export async function computeInvoiceLeak(
     lines: lines.get(String(r.id)) ?? [],
   };
 }
+
+export interface MonthInvoiceLeak {
+  invoiceId: string;
+  /** This invoice's hero-leak contribution in integer agorot (capped at its total). */
+  leakAgorot: number;
+}
+
+/**
+ * H-07 (month close): the month's hero leak per invoice, in integer agorot —
+ * the SAME month CTE, LEAK_FILTER and per-invoice cap as computeLeakHero, so
+ * Σ leakAgorot = round(computeLeakHero().leakIls × 100) exactly. Only invoices
+ * with a leak are returned (absent = 0). Rounding happens on NUMERIC in SQL,
+ * never in float. Additive: no existing ₪ figure reads this.
+ */
+export async function computeMonthInvoiceLeaks(
+  db: Database,
+  restaurantId: string,
+  options: LeakHeroOptions = {},
+): Promise<MonthInvoiceLeak[]> {
+  const now = options.now ?? new Date();
+  const offset = options.monthOffset ?? 0;
+  const res = await db.execute(sql`
+    WITH ${monthInvoicesCte(restaurantId, now, offset)}
+    SELECT id, ROUND(LEAST(raw_leak, total) * 100)::bigint AS leak_agorot
+    FROM per
+    WHERE LEAST(raw_leak, total) > 0
+    ORDER BY id
+  `);
+  return rowsOf(res).map((r) => ({ invoiceId: String(r.id), leakAgorot: Number(r.leak_agorot) }));
+}
