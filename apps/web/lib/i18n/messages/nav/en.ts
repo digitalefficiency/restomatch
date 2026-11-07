@@ -55,6 +55,7 @@ export const en: Shape<typeof he> = {
     team: 'Team',
     integrations: 'Integrations',
     settings: 'Settings',
+    automations: 'Automations',
   },
   bar: {
     today: 'Today',

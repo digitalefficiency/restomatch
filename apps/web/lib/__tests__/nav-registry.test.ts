@@ -163,7 +163,7 @@ describe('ROUTE_ROLES generated from the registry', () => {
     Object.fromEntries(Object.entries(m).map(([k, v]) => [k, [...v].sort()]));
 
   it("equals today's map except the supplier ledger and the invoice page, which drop the receiver", () => {
-    const { ['/dashboard/suppliers/ledger']: ledger, ['/dashboard/invoices']: invoices, ['/dashboard/orders']: orders, ...rest } = ROUTE_ROLES;
+    const { ['/dashboard/suppliers/ledger']: ledger, ['/dashboard/invoices']: invoices, ['/dashboard/orders']: orders, ['/dashboard/settings/automations']: automations, ...rest } = ROUTE_ROLES;
     const {
       ['/dashboard/suppliers/ledger']: ledgerBefore,
       ['/dashboard/invoices']: invoicesBefore,
@@ -180,6 +180,8 @@ describe('ROUTE_ROLES generated from the registry', () => {
     // The one loosening, owner decision 31.10 (pilot): the chef orders freely.
     expect(ordersBefore).toEqual(['owner', 'manager']);
     expect(orders).toEqual(['owner', 'manager', 'chef']);
+    // AU-01 (new page, orchestrator 7.11): narrower than its /settings parent — no receiver, no chef.
+    expect(automations).toEqual(['owner', 'manager', 'bookkeeper']);
     // The printable leak report keeps inheriting /leaks (no silent bounce for the bookkeeper's button).
     expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
     expect(allowedRolesForPath('/dashboard/leaks/report')).toContain('bookkeeper');

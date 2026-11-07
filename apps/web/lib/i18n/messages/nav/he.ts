@@ -58,6 +58,7 @@ export const he = {
     team: 'צוות',
     integrations: 'חיבורים',
     settings: 'הגדרות',
+    automations: 'אוטומציות',
   },
   /** Bottom-bar labels: short, never truncated at 360 px. */
   bar: {

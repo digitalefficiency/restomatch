@@ -56,6 +56,7 @@ export const nav: Shape<typeof he> = {
     team: 'ทีม',
     integrations: 'การเชื่อมต่อ',
     settings: 'ตั้งค่า',
+    automations: 'ระบบอัตโนมัติ',
   },
   bar: {
     today: 'วันนี้',

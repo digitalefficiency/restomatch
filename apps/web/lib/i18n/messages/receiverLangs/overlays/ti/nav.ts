@@ -56,6 +56,7 @@ export const nav: Shape<typeof he> = {
     team: 'ጉጅለ',
     integrations: 'ምትእስሳራት',
     settings: 'ቅጥዕታት',
+    automations: 'ኣውቶሜሽን',
   },
   bar: {
     today: 'ሎሚ',
