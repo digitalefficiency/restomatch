@@ -81,7 +81,8 @@ export function taskRow(task: Task, t: T, locale: Locale, sideMoney: (agorot: nu
     case 'allocation_missing':
       return { ...base, label: t('needs.vat.label'), sub: t('needs.vat.sub', { count: n(task.count), days: n(d.daysLeft) }), verb: t('needs.vat.verb') };
     case 'payment_due':
-      return { ...base, label: t('needs.payRun.label'), sub: t('needs.payRun.sub', { count: n(task.count) }), verb: t('needs.payRun.verb') };
+      // To the agora, like the pay run it opens (home = page, IA rule 1).
+      return { ...base, decimals: 2, label: t('needs.payRun.label'), sub: t('needs.payRun.sub', { count: n(task.count) }), verb: t('needs.payRun.verb') };
     case 'delivery_due':
     case 'delivery_late':
       return {
