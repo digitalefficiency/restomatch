@@ -200,53 +200,63 @@ describe('0071 gr_lines count truth', () => {
     const backfill = /UPDATE "gr_lines" AS gl[\s\S]*?;/.exec(file)?.[0];
     expect(backfill, 'the backfill UPDATE is in 0071').toBeTruthy();
 
+    // Everything runs in ONE transaction that is always rolled back: the constraint
+    // swap and the full-table backfill never leave this test, pass or fail.
+    const ROLLBACK = new Error('rollback');
     const closedAt = new Date('2026-10-20T08:00:00Z');
-    const mk = async (status: 'completed' | 'partial' | 'pending' | 'rejected') => {
-      const [gr] = await db.insert(goodsReceipts).values({ restaurantId: A.restaurantId, status }).returning();
-      const [line] = await db.insert(grLines).values({ grId: gr!.id, qtyReceived: '2' }).returning();
-      // an explicit updated_at survives the house trigger (it only stamps unchanged values)
-      await sql`update goods_receipts set updated_at = ${closedAt} where id = ${gr!.id}`;
-      return { grId: gr!.id, lineId: line!.id };
-    };
-    const completed = await mk('completed');
-    const partial = await mk('partial');
-    const pending = await mk('pending');
-    const rejected = await mk('rejected');
-    const counted = await mk('completed');
-    // A legacy line that breaks 0032's NOT VALID check: stamping it would abort the batch.
-    const negative = await mk('completed');
-    await sql`alter table gr_lines drop constraint gr_lines_qty_received_nonneg`;
-    await sql`update gr_lines set qty_received = -1 where id = ${negative.lineId}`;
-    await sql`alter table gr_lines add constraint gr_lines_qty_received_nonneg check (qty_received >= 0) not valid`;
     const already = new Date('2026-10-21T09:30:00Z');
-    await db.update(grLines).set({ countedAt: already, countMethod: 'line' }).where(eq(grLines.id, counted.lineId));
+    type Line = { counted_at: Date | null; count_method: string | null; counted_by: string | null };
+    const seen: Record<string, Line> = {};
+    let secondCount = -1;
+    await expect(
+      sql.begin(async (tx) => {
+        const mk = async (status: string) => {
+          const [gr] = (await tx`insert into goods_receipts (restaurant_id, status) values (${A.restaurantId}, ${status}::gr_status) returning id`) as unknown as [{ id: string }];
+          const [line] = (await tx`insert into gr_lines (gr_id, qty_received) values (${gr.id}, 2) returning id`) as unknown as [{ id: string }];
+          // an explicit updated_at survives the house trigger (it only stamps unchanged values)
+          await tx`update goods_receipts set updated_at = ${closedAt} where id = ${gr.id}`;
+          return line.id;
+        };
+        const ids = {
+          completed: await mk('completed'),
+          partial: await mk('partial'),
+          pending: await mk('pending'),
+          rejected: await mk('rejected'),
+          counted: await mk('completed'),
+          // A legacy line that breaks 0032's NOT VALID check: stamping it would abort the batch.
+          negative: await mk('completed'),
+        };
+        await tx`alter table gr_lines drop constraint gr_lines_qty_received_nonneg`;
+        await tx`update gr_lines set qty_received = -1 where id = ${ids.negative}`;
+        await tx`alter table gr_lines add constraint gr_lines_qty_received_nonneg check (qty_received >= 0) not valid`;
+        await tx`update gr_lines set counted_at = ${already}, count_method = 'line' where id = ${ids.counted}`;
 
-    await sql.unsafe(backfill!);
-    const read = async (id: string) => (await db.select().from(grLines).where(eq(grLines.id, id)))[0]!;
-    for (const x of [completed, partial]) {
-      const l = await read(x.lineId);
-      expect(l.countedAt?.toISOString()).toBe(closedAt.toISOString());
-      expect(l.countMethod).toBe('legacy');
-      expect(l.countedBy).toBeNull();
+        await tx.unsafe(backfill!);
+        for (const [k, id] of Object.entries(ids)) {
+          const [row] = (await tx`select counted_at, count_method, counted_by from gr_lines where id = ${id}`) as unknown as [Line];
+          seen[k] = row;
+        }
+        secondCount = (await tx.unsafe(backfill!)).count;
+        throw ROLLBACK;
+      }),
+    ).rejects.toBe(ROLLBACK);
+
+    for (const k of ['completed', 'partial']) {
+      expect(seen[k]!.counted_at?.toISOString()).toBe(closedAt.toISOString());
+      expect(seen[k]!.count_method).toBe('legacy');
+      expect(seen[k]!.counted_by).toBeNull();
     }
-    for (const x of [pending, rejected]) {
-      const l = await read(x.lineId);
-      expect(l.countedAt).toBeNull();
-      expect(l.countMethod).toBeNull();
+    for (const k of ['pending', 'rejected', 'negative']) {
+      expect(seen[k]!.counted_at).toBeNull();
+      expect(seen[k]!.count_method).toBeNull();
     }
-    const skipped = await read(negative.lineId);
-    expect(skipped.countedAt).toBeNull();
-    expect(skipped.countMethod).toBeNull();
-    const kept = await read(counted.lineId);
-    expect(kept.countedAt?.toISOString()).toBe(already.toISOString());
-    expect(kept.countMethod).toBe('line');
+    expect(seen.counted!.counted_at?.toISOString()).toBe(already.toISOString());
+    expect(seen.counted!.count_method).toBe('line');
+    expect(secondCount).toBe(0); // idempotent: nothing left to stamp
 
-    const second = await sql.unsafe(backfill!);
-    expect(second.count).toBe(0); // idempotent: nothing left to stamp
-
-    for (const x of [completed, partial, pending, rejected, counted, negative]) await db.delete(goodsReceipts).where(eq(goodsReceipts.id, x.grId));
-    // Leave 0032's check VALIDATED again (the 0032 shape test asserts it).
-    await sql`alter table gr_lines validate constraint gr_lines_qty_received_nonneg`;
+    // The rollback restored 0032's check, still VALIDATED.
+    const [{ convalidated }] = (await sql`select convalidated from pg_constraint where conname = 'gr_lines_qty_received_nonneg'`) as unknown as [{ convalidated: boolean }];
+    expect(convalidated).toBe(true);
   });
 });
 
