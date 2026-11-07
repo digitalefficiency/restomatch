@@ -17,7 +17,7 @@ import { HeroMatch } from './(marketing)/_components/HeroMatch';
 import { HeroVideo } from './(marketing)/_components/HeroVideo';
 import { LazyLeadForm } from './(marketing)/_components/LazyLeadForm';
 import { leadAction } from './(marketing)/_components/leadAction';
-import { SAMPLE_LEAK_ILS, SAMPLE_PURCHASING_ILS } from './(marketing)/_components/sampleMonth';
+import { SAMPLE_LEAK_ILS, SAMPLE_LEAK_PCT, SAMPLE_PURCHASING_ILS } from './(marketing)/_components/sampleMonth';
 import { PromoVideoButton } from './(marketing)/_components/PromoVideoButton';
 import { ReceiverMorph } from './(marketing)/_components/ReceiverMorph';
 import { primaryCtaHref } from './(marketing)/_components/cta';
@@ -96,7 +96,10 @@ export default async function Home() {
   const proof = [
     {
       value: t('v2.proof.leakValue', { amount: ils(SAMPLE_LEAK_ILS) }),
-      label: t('v2.proof.leakLabel', { purchasing: ils(EXAMPLE_PURCHASING_ILS) }),
+      label: t('v2.proof.leakLabel', {
+        purchasing: ils(EXAMPLE_PURCHASING_ILS),
+        pct: `${formatNumber(SAMPLE_LEAK_PCT, locale, { maximumFractionDigits: 1 })}%`,
+      }),
       tone: 'text-danger',
     },
     {

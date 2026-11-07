@@ -25,9 +25,10 @@ import type { Locale } from '@/lib/i18n/config';
 import type { Translator } from '@/lib/i18n/translate';
 import type { he as landingHe } from '@/lib/i18n/messages/landing/he';
 import { formatIls } from '@/lib/money';
+import { formatNumber } from '@/lib/i18n/format';
 import { cn } from '@/lib/components/cn';
 import { RoiCalculator } from './RoiCalculator';
-import { SAMPLE_LEAK_ILS } from './sampleMonth';
+import { SAMPLE_LEAK_ILS, SAMPLE_LEAK_PCT, SAMPLE_PURCHASING_ILS } from './sampleMonth';
 
 /**
  * The landing page's DETAIL sections (Landing v1). Landing v2 keeps the home
@@ -119,7 +120,10 @@ export function ProblemSection({ t, locale }: { t: T; locale: Locale }) {
       </ul>
       <div className="rm-reveal mt-8 rounded-2xl border border-line bg-surface-2/60 px-6 py-5 text-center">
         <p className="text-base text-ink sm:text-lg">
-          {t('problem.mathA')}{' '}
+          {t('problem.mathA', {
+            purchasing: ils(SAMPLE_PURCHASING_ILS),
+            pct: `${formatNumber(SAMPLE_LEAK_PCT, locale, { maximumFractionDigits: 1 })}%`,
+          })}{' '}
           <span className="text-2xl font-extrabold tabular-nums text-danger drop-shadow-glow-danger">
             {ils(SAMPLE_LEAK_ILS)}
           </span>{' '}

@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  SAMPLE_AWAITING_CREDIT_ILS,
   SAMPLE_CAUGHT_BEFORE_PAYMENT_ILS,
   SAMPLE_GOOD_NEWS_ILS,
   SAMPLE_INVOICES_CHECKED,
@@ -10,8 +9,14 @@ import {
   SAMPLE_LEAK_ILS,
   SAMPLE_LEAK_PCT,
   SAMPLE_NEEDS,
+  SAMPLE_PAID_ILS,
   SAMPLE_PURCHASING_ILS,
+  SAMPLE_UNDECIDED_ILS,
+  SAMPLE_UNPAID_ILS,
 } from '../sampleMonth';
+import { PLAN_SEED } from '@restomatch/db';
+import { he as overviewHe } from '../../../../lib/i18n/messages/overview/he';
+import { PRODUCT_LABEL_KEYS } from '../../../showcase/dashboard/_components/productLabels';
 import { LEAD_FIELD_MAX, LEADS_RATE_LIMIT, monthlyAgorotOf, submitLead, type LeadCreateInput } from '../leadAction.core';
 import { planCtaHref, planDisplayOrder } from '../../pricing/pricing.logic';
 import { SAMPLE_CAUGHT_THIS_MONTH_ILS } from '../../../showcase/_components/ShowcaseEndCard';
@@ -21,29 +26,46 @@ const WEB = join(__dirname, '../../../..');
 const read = (p: string) => readFileSync(join(WEB, p), 'utf8');
 
 describe('W3-06 · one sample month across the public site', () => {
-  it('the leak is purchases × rate, and its parts sum to it to the agora', () => {
+  it('the leak is purchases × rate (₪2,250), and the payment-status parts sum to it to the agora', () => {
     expect(agorot(SAMPLE_LEAK_ILS)).toBe(Math.round(SAMPLE_PURCHASING_ILS * SAMPLE_LEAK_PCT));
-    expect(agorot(SAMPLE_CAUGHT_BEFORE_PAYMENT_ILS) + agorot(SAMPLE_AWAITING_CREDIT_ILS)).toBe(agorot(SAMPLE_LEAK_ILS));
-    expect(SAMPLE_AWAITING_CREDIT_ILS).toBeGreaterThan(0);
-    expect(SAMPLE_INVOICES_WITH_GAP).toBeLessThanOrEqual(SAMPLE_INVOICES_CHECKED);
+    expect(SAMPLE_LEAK_ILS).toBe(2_250);
+    expect(agorot(SAMPLE_UNPAID_ILS) + agorot(SAMPLE_PAID_ILS)).toBe(agorot(SAMPLE_LEAK_ILS));
+    expect([SAMPLE_UNPAID_ILS, SAMPLE_PAID_ILS]).toEqual([1_530, 720]);
+    expect([SAMPLE_INVOICES_CHECKED, SAMPLE_INVOICES_WITH_GAP]).toEqual([35, 13]);
   });
 
-  it('the North Star floor: the sample never claims more than 1.5%', () => {
+  it('the sample rate is the 1.5% example (never presented as a target)', () => {
     expect(SAMPLE_LEAK_PCT).toBe(1.5);
   });
 
-  it('Needs-you ₪ never exceeds the leak; approvals sit inside "caught before payment"', () => {
-    const approve = SAMPLE_NEEDS.find((n) => n.key === 'approve')!;
+  it('Needs-you rows sit inside their part: decide ≤ unpaid, credit ≤ paid', () => {
+    const decide = SAMPLE_NEEDS.find((n) => n.key === 'decide')!;
     const credit = SAMPLE_NEEDS.find((n) => n.key === 'credit')!;
-    expect(approve.amountIls!).toBeLessThanOrEqual(SAMPLE_CAUGHT_BEFORE_PAYMENT_ILS);
-    expect(credit.amountIls!).toBeLessThanOrEqual(SAMPLE_AWAITING_CREDIT_ILS);
-    expect(approve.tone).toBe('danger');
-    expect(SAMPLE_NEEDS.find((n) => n.key === 'pending')!.tone).toBe('neutral');
+    expect(decide.amountIls).toBe(910);
+    expect(decide.amountIls).toBeLessThanOrEqual(SAMPLE_UNPAID_ILS);
+    expect(credit.amountIls).toBeLessThanOrEqual(SAMPLE_PAID_ILS);
+    expect(decide.tone).toBe('danger');
   });
 
-  it('the showcase end card and good-news row quote the same "caught before payment"', () => {
+  it('good news quotes only decided money: caught − still to decide, and never the Pro price', () => {
+    expect(SAMPLE_GOOD_NEWS_ILS).toBe(SAMPLE_CAUGHT_BEFORE_PAYMENT_ILS - SAMPLE_UNDECIDED_ILS);
+    expect(SAMPLE_GOOD_NEWS_ILS).toBe(620);
+    expect(agorot(SAMPLE_GOOD_NEWS_ILS)).not.toBe(PLAN_SEED.pro.priceAgorotMonthly);
+  });
+
+  it('the end card quotes "caught before payment" = the unpaid part', () => {
     expect(SAMPLE_CAUGHT_THIS_MONTH_ILS).toBe(SAMPLE_CAUGHT_BEFORE_PAYMENT_ILS);
-    expect(SAMPLE_GOOD_NEWS_ILS).toBe(SAMPLE_CAUGHT_BEFORE_PAYMENT_ILS);
+    expect(SAMPLE_CAUGHT_BEFORE_PAYMENT_ILS).toBe(SAMPLE_UNPAID_ILS);
+  });
+
+  it('hero and Needs-you labels are the product message keys, not copies', () => {
+    const get = (key: string) => key.split('.').reduce<unknown>((o, k) => (o as Record<string, unknown>)?.[k], overviewHe);
+    for (const key of Object.values(PRODUCT_LABEL_KEYS)) expect(typeof get(key), key).toBe('string');
+    expect(get(PRODUCT_LABEL_KEYS.unpaid)).toBe('על חשבוניות שעוד לא שולמו');
+    expect(get(PRODUCT_LABEL_KEYS.paid)).toBe('על חשבוניות ששולמו');
+    expect(get(PRODUCT_LABEL_KEYS.split)).toBe('מתוכם');
+    const home = read('app/showcase/dashboard/_components/SampleOwnerHome.tsx');
+    expect(home).not.toMatch(/ממתין לזיכוי|על חשבוניות/);
   });
 
   it('landing, calculator and the problem math read the module, not literals', () => {
@@ -52,6 +74,15 @@ describe('W3-06 · one sample month across the public site', () => {
     expect(read('app/(marketing)/_components/RoiCalculator.tsx')).toMatch(/useState\(SAMPLE_PURCHASING_ILS\)/);
     expect(read('app/(marketing)/_components/RoiCalculator.tsx')).toMatch(/useState\(SAMPLE_LEAK_PCT\)/);
     expect(read('app/(marketing)/_components/detail-sections.tsx')).not.toMatch(/150_000/);
+  });
+
+  it('message files carry no sample literal (₪150,000 / 1.5%): they interpolate it', () => {
+    for (const ns of ['landing', 'marketing', 'showcase']) {
+      for (const lang of ['he', 'en']) {
+        const src = read(`lib/i18n/messages/${ns}/${lang}.ts`).replace(/\/\*[\s\S]*?\*\//g, '');
+        expect(src, `${ns}/${lang}`).not.toMatch(/150[,.]000|1\.5\s?%/);
+      }
+    }
   });
 });
 
