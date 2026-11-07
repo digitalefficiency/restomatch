@@ -34,6 +34,7 @@ import {
   normalizeSearch,
   searchPlaceholderKey,
 } from '../../app/dashboard/searchOptions';
+import { BOOKKEEPER_READ_ONLY_ROUTES } from '../roleLens/readOnly';
 
 const APP = join(__dirname, '..', '..', 'app');
 const DASH = join(APP, 'dashboard');
@@ -170,7 +171,15 @@ describe('ROUTE_ROLES generated from the registry', () => {
       ['/dashboard/orders']: ordersBefore,
       ...restBefore
     } = ROUTE_ROLES_BEFORE;
-    expect(sorted(rest)).toEqual(sorted(restBefore));
+    // Owner decision I3 (7.11, IA-03): the bookkeeper READS the 10 screens blocked to her.
+    // That is the only other delta: strip it, then the map must equal the old one exactly.
+    const noI3 = (m: Record<string, UserRole[]>) =>
+      Object.fromEntries(Object.entries(m).map(([k, v]) => [k, (BOOKKEEPER_READ_ONLY_ROUTES as readonly string[]).includes(k) ? v.filter((r) => r !== 'bookkeeper') : v]));
+    expect(sorted(noI3(rest))).toEqual(sorted(restBefore));
+    for (const p of BOOKKEEPER_READ_ONLY_ROUTES) {
+      expect(ROUTE_ROLES_BEFORE[p], p).not.toContain('bookkeeper');
+      expect(ROUTE_ROLES[p], p).toContain('bookkeeper');
+    }
     // The only deltas (owner decision 2026-10-25: the receiver sees no ₪) tighten, never loosen:
     // no supplier ledger (₪ totals) and no invoice page (unit prices, line totals, VAT ₪).
     expect(ledgerBefore).toContain('receiver');
@@ -179,7 +188,7 @@ describe('ROUTE_ROLES generated from the registry', () => {
     expect(invoices).toEqual(['owner', 'manager', 'bookkeeper']);
     // The one loosening, owner decision 31.10 (pilot): the chef orders freely.
     expect(ordersBefore).toEqual(['owner', 'manager']);
-    expect(orders).toEqual(['owner', 'manager', 'chef']);
+    expect(orders).toEqual(['owner', 'manager', 'chef', 'bookkeeper']); // + I3 read-only
     // The printable leak report keeps inheriting /leaks (no silent bounce for the bookkeeper's button).
     expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
     expect(allowedRolesForPath('/dashboard/leaks/report')).toContain('bookkeeper');
@@ -207,7 +216,10 @@ describe('ROUTE_ROLES generated from the registry', () => {
       const was = before(concrete) ?? ALL_ROLES;
       // Owner decision 31.10 (pilot): the chef opens orders (list, detail, new, capture).
       const ordersChef = (role: UserRole) => role === 'chef' && (concrete === '/dashboard/orders' || concrete.startsWith('/dashboard/orders/'));
-      for (const role of now) if (!ordersChef(role)) expect(was, `${role} on ${concrete}`).toContain(role);
+      // Owner decision I3 (7.11, IA-03): the bookkeeper reads the 10 screens, read-only.
+      const i3Read = (role: UserRole) =>
+        role === 'bookkeeper' && BOOKKEEPER_READ_ONLY_ROUTES.some((k) => concrete === k || concrete.startsWith(`${k}/`));
+      for (const role of now) if (!ordersChef(role) && !i3Read(role)) expect(was, `${role} on ${concrete}`).toContain(role);
     }
   });
 });
@@ -386,7 +398,8 @@ describe('matching, field routes, active item, crumbs, titles', () => {
     expect(canFollowPath(viewer('owner', { features: [] }), '/dashboard/inbox')).toBe(false);
     expect(canFollowPath(viewer('owner', { features: ['ingestEmail'] }), '/dashboard/inbox')).toBe(true);
     expect(canFollowPath(viewer('owner', { features: [] }), '/dashboard/approvals')).toBe(true);
-    expect(canOpenPath('bookkeeper', '/dashboard/suppliers')).toBe(false);
+    expect(canOpenPath('bookkeeper', '/dashboard/suppliers')).toBe(true); // I3: read-only
+    expect(canOpenPath('chef', '/dashboard/suppliers')).toBe(false);
     expect(canOpenPath('bookkeeper', '/dashboard/suppliers/ledger?m=2026-10')).toBe(true);
   });
 
@@ -418,8 +431,8 @@ describe('search "מסכים"', () => {
     expect(buildScreenOptions('אש', screens)[0]).toMatchObject({ kind: 'screen', id: 'approvals', href: '/dashboard/approvals' });
     expect(buildScreenOptions('כרט', screens).map((o) => o.id)).toEqual(['ledger']);
     expect(buildScreenOptions('ledger', screens).map((o) => o.id)).toEqual(['ledger']);
-    // Role-true: the bookkeeper has no orders screen to find.
-    expect(buildScreenOptions('הזמנ', screens)).toEqual([]);
+    // Role-true: since I3 the bookkeeper reads orders, so she finds the screen.
+    expect(buildScreenOptions('הזמנ', screens).map((o) => o.id)).toEqual(['orders']);
     expect(buildScreenOptions('   ', screens)).toEqual([]);
   });
 });
@@ -467,11 +480,12 @@ describe('Breadcrumbs: a crumb the role cannot open is plain text', () => {
       h(NavProvider, { value: role ? { ...viewer(role), branch: null } : null }, h(Breadcrumbs, { items, label: 'פירורי לחם' })),
     );
 
-  it('links for the owner, plain text for the bookkeeper and receiver', () => {
+  it('links for the owner (and the bookkeeper since I3), plain text for the chef and receiver', () => {
     expect(render('owner')).toContain('href="/dashboard/suppliers"');
-    expect(render('bookkeeper')).not.toContain('href="/dashboard/suppliers"');
+    expect(render('bookkeeper')).toContain('href="/dashboard/suppliers"');
+    expect(render('chef')).not.toContain('href="/dashboard/suppliers"');
     expect(render('receiver')).not.toContain('href="/dashboard/suppliers"');
-    expect(render('bookkeeper')).toContain('ספקים');
+    expect(render('chef')).toContain('ספקים');
   });
 
   it('a crumb to a flagged-off page is plain text', () => {
