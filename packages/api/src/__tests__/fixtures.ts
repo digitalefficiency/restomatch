@@ -1,4 +1,5 @@
 import {
+  wasteEntries,
   claimLetters,
   idempotencyKeys,
   paymentDeductions,
@@ -104,6 +105,8 @@ export async function resetDb(db: Database): Promise<void> {
   // inventory_count_lines → products is ON DELETE RESTRICT (0070): counts go first.
   await db.delete(inventoryCountLines);
   await db.delete(inventoryCounts);
+  // 0073 (H-04): waste blocks product and recipe deletes (NO ACTION) — clear it first.
+  await db.delete(wasteEntries);
   // recipe_items → products is ON DELETE RESTRICT (0057): recipes go first.
   await db.delete(recipeItems);
   await db.delete(recipes);

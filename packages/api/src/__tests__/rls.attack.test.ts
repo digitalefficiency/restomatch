@@ -11,6 +11,11 @@ import {
   catalogImports,
   claimLetters,
   consolidatedInvoiceLinks,
+  notificationSeen,
+  productCountUnits,
+  savedViews,
+  viewSubscriptions,
+  wasteEntries,
   createDb,
   discrepancies,
   emailInboxes,
@@ -1281,5 +1286,172 @@ describe('0072 (H-03) append-only tables under the RLS app role', () => {
     await ownerDb.delete(supplierBankAccounts);
     await ownerDb.delete(leakMonthCorrections);
     await ownerDb.delete(leakMonthSnapshots);
+  });
+});
+
+// ── 0073 (wave 3, H-04): the five new tenant tables. Add-only probes, one block per
+// table, same template as the 0071/0072 blocks: GUC=A sees only A; a cross-tenant
+// INSERT is refused; an UPDATE aimed at B's rows touches nothing. Parent rows (the
+// saved view) are seeded per tenant on the owner connection.
+
+describe('0073 (H-04) saved_views (raw RLS)', () => {
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await ownerDb.insert(savedViews).values({ restaurantId: t.restaurantId, page: 'invoices', name: 'מוכן לתשלום', scope: 'restaurant', roleDefault: 'bookkeeper' });
+    }
+  });
+  afterAll(async () => {
+    await ownerDb.delete(savedViews);
+  });
+
+  it('GUC=A sees only tenant-A rows', async () => {
+    const rows = await withRestaurant(appDb, A.restaurantId, (tx) => tx.select({ rid: savedViews.restaurantId }).from(savedViews));
+    expect(rows).toEqual([{ rid: A.restaurantId }]);
+  });
+
+  it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(savedViews).values({ restaurantId: B.restaurantId, page: 'invoices', name: 'forged', userId: A.ownerUserId }),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.update(savedViews).set({ name: 'hijacked' }).where(eq(savedViews.restaurantId, B.restaurantId)).returning({ id: savedViews.id }),
+    );
+    expect(updated).toHaveLength(0);
+  });
+});
+
+describe('0073 (H-04) view_subscriptions (raw RLS)', () => {
+  const views = new Map<string, string>();
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      const [v] = await ownerDb.insert(savedViews).values({ restaurantId: t.restaurantId, page: 'leaks', name: 'חוסמים', scope: 'restaurant' }).returning();
+      views.set(t.restaurantId, v!.id);
+      await ownerDb.insert(viewSubscriptions).values({ restaurantId: t.restaurantId, viewId: v!.id, userId: t.ownerUserId, cadence: 'weekly', weekday: 0 });
+    }
+  });
+  afterAll(async () => {
+    await ownerDb.delete(viewSubscriptions);
+    await ownerDb.delete(savedViews);
+  });
+
+  it('GUC=A sees only tenant-A rows', async () => {
+    const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.select({ rid: viewSubscriptions.restaurantId }).from(viewSubscriptions),
+    );
+    expect(rows).toEqual([{ rid: A.restaurantId }]);
+  });
+
+  it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(viewSubscriptions).values({ restaurantId: B.restaurantId, viewId: views.get(B.restaurantId)!, userId: A.ownerUserId, cadence: 'daily' }),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx
+        .update(viewSubscriptions)
+        .set({ userId: A.ownerUserId })
+        .where(eq(viewSubscriptions.restaurantId, B.restaurantId))
+        .returning({ id: viewSubscriptions.id }),
+    );
+    expect(updated).toHaveLength(0);
+  });
+});
+
+describe('0073 (H-04) product_count_units (raw RLS)', () => {
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await ownerDb.insert(productCountUnits).values({ restaurantId: t.restaurantId, productId: t.productId, unit: 'ארגז', baseQty: '12' });
+    }
+  });
+  afterAll(async () => {
+    await ownerDb.delete(productCountUnits);
+  });
+
+  it('GUC=A sees only tenant-A rows', async () => {
+    const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.select({ rid: productCountUnits.restaurantId }).from(productCountUnits),
+    );
+    expect(rows).toEqual([{ rid: A.restaurantId }]);
+  });
+
+  it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(productCountUnits).values({ restaurantId: B.restaurantId, productId: B.productId, unit: 'שק', baseQty: '25' }),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx
+        .update(productCountUnits)
+        .set({ baseQty: '1' })
+        .where(eq(productCountUnits.restaurantId, B.restaurantId))
+        .returning({ id: productCountUnits.id }),
+    );
+    expect(updated).toHaveLength(0);
+  });
+});
+
+describe('0073 (H-04) waste_entries (raw RLS)', () => {
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await ownerDb.insert(wasteEntries).values({ restaurantId: t.restaurantId, productId: t.productId, qty: '1', unit: 'ק״ג', reason: 'spoiled', valueAgorot: 1000 });
+    }
+  });
+  afterAll(async () => {
+    await ownerDb.delete(wasteEntries);
+  });
+
+  it('GUC=A sees only tenant-A rows', async () => {
+    const rows = await withRestaurant(appDb, A.restaurantId, (tx) => tx.select({ rid: wasteEntries.restaurantId }).from(wasteEntries));
+    expect(rows).toEqual([{ rid: A.restaurantId }]);
+  });
+
+  it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(wasteEntries).values({ restaurantId: B.restaurantId, productId: B.productId, qty: '1', unit: 'ק״ג', reason: 'other' }),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.update(wasteEntries).set({ valueAgorot: 0 }).where(eq(wasteEntries.restaurantId, B.restaurantId)).returning({ id: wasteEntries.id }),
+    );
+    expect(updated).toHaveLength(0);
+  });
+});
+
+describe('0073 (H-04) notification_seen (raw RLS)', () => {
+  beforeAll(async () => {
+    for (const t of [A, B]) {
+      await ownerDb.insert(notificationSeen).values({ restaurantId: t.restaurantId, userId: t.ownerUserId, itemKey: `invoice:${t.invoiceId}:decide` });
+    }
+  });
+  afterAll(async () => {
+    await ownerDb.delete(notificationSeen);
+  });
+
+  it('GUC=A sees only tenant-A rows', async () => {
+    const rows = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx.select({ rid: notificationSeen.restaurantId }).from(notificationSeen),
+    );
+    expect(rows).toEqual([{ rid: A.restaurantId }]);
+  });
+
+  it('blocks a cross-tenant INSERT and leaves B rows untouched by UPDATE', async () => {
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.insert(notificationSeen).values({ restaurantId: B.restaurantId, userId: B.ownerUserId, itemKey: 'forged' }),
+      ),
+    ).rejects.toThrow(/row-level security/);
+    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      tx
+        .update(notificationSeen)
+        .set({ dismissedAt: new Date() })
+        .where(eq(notificationSeen.restaurantId, B.restaurantId))
+        .returning({ id: notificationSeen.id }),
+    );
+    expect(updated).toHaveLength(0);
   });
 });
