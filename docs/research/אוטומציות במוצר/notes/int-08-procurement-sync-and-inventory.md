@@ -83,7 +83,7 @@ Compare the **Zestt document import**, which does the right thing. It resolves t
 | **C2** | **Upsert lines in place; never rewrite a received PO.** Reuse `importPurchaseOrder`'s rules (`importPo.ts:160-310`): key the lines by platform line id (`po_lines` has no external id column, so this needs a new column, H-04/H-03 schema batch, **human PR**). Until then, skip lines for any PO with a goods receipt. | Keeps `gr_lines.po_line_id`, which keeps QTY_SHORT/QTY_OVER (the wedge). | Interim: worker only. Durable: schema human-PR |
 | **C3** | **Our status wins after the dock.** Sync may move `draft → sent → confirmed` and set `cancelled`. It never moves a PO that has a receipt or a matched invoice. "closed" from the platform is stored as metadata and does not drive eligibility. | An invoice must still find its PO (G-04). | worker; G-04 consulted (matching-engine-guardian) |
 | **C4** | **Price list as expected price only.** Call `listProducts` into `supplier_catalog_items` through the existing price-list import path (int-06 §1), with "מה ישתנה" review (W3-10). It feeds `resolveExpectedPrice` (W2-06) and the order guardrail. It is never a contract unless the owner locks it (W2-12 `lockCurrentPrices`). | PRICE_HIGHER against a known list, without the owner uploading a sheet. | ocr-procurement-engineer; leak-economist signs the "list ≠ contract" label |
-| **C5** | **Import platform receipts as dock evidence, labelled.** Where the platform exposes received qty (Zester `partially_received`/`received`, MarketMan receiving), write a `goods_receipts` row with a source label "נקלט ב-MarketMan". Never overwrite a receipt made in our app. | The 3-way match runs for restaurants that receive in the other tool. Without it, those invoices are only PO-vs-invoice. | Needs a GR `source` column (schema human-PR, H-04). The engine is unchanged |
+| **C5** | **Import platform receipts as dock evidence, labelled.** Where the platform exposes received qty (Zester `partially_received`/`received`, MarketMan receiving), record it with a source label "נקלט ב-MarketMan". Never overwrite a receipt made in our app, and **never insert a second `goods_receipts` row for a PO that already has one**: the partial unique index `goods_receipts_po_unique` (`schema.ts:770-772`) blocks it, and a second GR would double the received qty in `buildMatchInput`. Either store the platform receipt elsewhere (e.g. a separate table read only when the PO has no GR), or put an index relaxation **plus** a `source='platform'` exclusion in `buildMatchInput` into the H-04 proposal, with G-04 and matching-engine-guardian sign-off. A test must prove the received qty is not doubled. | The 3-way match runs for restaurants that receive in the other tool. Without it, those invoices are only PO-vs-invoice. | Needs schema (human-PR, H-04). The engine is unchanged |
 | **C6** | **Schedule plus a health line.** Register `sync-platforms` per enabled connection (H-05 addendum, `cron.ts`, **human PR**). Write `sync_cursor`. Surface "N orders skipped: supplier not linked" in the W3-07a hub with one fix CTA. | Silent drops mean silent missing POs, so false UNORDERED. | Human PR for the scheduler; hub = W3-07a |
 | **C7** | **Credentials (Phase-6, human only).** Owner obtains the MarketMan Open API add-on, or a Zester **buyer** export. A human stores it (env or vault). Until then, offer the **document path** that already works: forward the PO PDF/email to the ingest address, and `importPo` handles it (today Zestt only; extend the parser to MarketMan PO PDFs). | Gives the coexistence value with zero credentials. | Docs + growth-pmm (pilot ops); parser = ocr-procurement-engineer |
 | **C8** | **Verify the contracts before first live call.** Replace the VERIFY shapes with real ones and record one sanitized fixture per platform. | Both adapters are guesses (§0.2). | Human obtains the docs; agent updates the adapter |
@@ -100,7 +100,7 @@ Compare the **Zestt document import**, which does the right thing. It resolves t
 
 **Scope of "today".** `origin/main` with train A merged, plus the open pilot PRs from the session's PR status file. #232/#224 (OCR recognises real consolidated invoices, train B), #211 (MISSING_ON_INVOICE leaves the leak, owner-approved 31.10) and #219 (no ₪ to receiver/chef on activity, receiving reads and owner aggregates) are **open, not merged**. They are marked "PR".
 
-**Legend.** Status: **live** = on for every tenant · **flag:x (P)** = flag x, in the pilot set · **flag:x (–)** = flag x, not in pilot · **stub** = code exists, no real effect · **planned** = wave-2/3/4 or AU id. Roles: O owner, M manager, C chef, R receiver, B bookkeeper. "₪" = money shown to that role. Route roles are from `apps/web/lib/nav/routes/*.ts`. Flags are from `packages/api/src/lib/features.ts:11-49`.
+**Legend.** Status: **live** = on for every tenant · **flag:x (P)** = flag x, in the pilot set · **flag:x (–)** = flag x, not in pilot · **stub** = code exists, no real effect · **dormant** = real, tested code that nothing triggers · **planned** = wave-2/3/4 or AU id. Roles: O owner, M manager, C chef, R receiver, B bookkeeper. "₪" = money shown to that role. Route roles are from `apps/web/lib/nav/routes/*.ts`. Flags are from `packages/api/src/lib/features.ts:11-49`.
 
 ### 3.1 Ordering
 
@@ -108,8 +108,8 @@ Compare the **Zestt document import**, which does the right thing. It resolves t
 |---|---|---|---|
 | Order list, 4-step wizard, PO detail, send by email/WhatsApp | O M C (route `orders.ts:10`; chef added 31.10) | **live**. WhatsApp send needs plan feature `whatsapp_alerts` | Chef sees ₪ on orders (owner rule allows). R has no route, but `orders.list`/`get` leak `totalEstimated` (int-05). Fix: W2-06 AC4 `redactPrices` |
 | Order capture from pasted/shared text | O M C | **flag:orderCapture (P)** | WhatsApp producer needs `ingestWhatsapp` (–), so that path is dead in the pilot (int-01) |
-| Zestt PO document import | O M | **live** (needs OCR key) | `orders.importPo` (`routers/orders.ts:694-730`) |
-| MarketMan/Zester sync | O M (preview) | **flag:integrations (–)**, **stub** (fixture preview; job never runs) | §1–§2; H-05 add., W3-07a hub |
+| Zestt PO document import | O M | **live** where real OCR is on (needs OCR key) | `orders.importPo` (`routers/orders.ts:694-730`). The safe, recommended path today |
+| MarketMan/Zester API sync | O M (preview) | **flag:integrations (–)**; built and unit-tested against guessed API shapes, **dormant** (no schedule, no way to connect an account, no credentials; UI is a fixture preview) | §1–§2; H-05 add., W3-07a hub |
 | Prices out to supplier on PO | O M C | **flag:orderPricesOut (–)** | — |
 | Supplier confirm link `/s/<token>` | O M | **flag:supplierConfirm (–)** | The answer never reaches the dock (int-02). G-10, W3-09 portal 2.0 |
 | Order reminders / supplier delays / daily expectations jobs | O M (email) | **live** (cron) | `daily-expectations` writes an unread audit row (int-05). AU-04, AU-11 cut-off drafts |
@@ -220,7 +220,7 @@ Compare the **Zestt document import**, which does the right thing. It resolves t
 | Accounting export (Hashavshevet / Priority / Rivhit), account mapping | O B | **flag:integrations (–)** + plan `accounting_export` | — |
 | Generic exports page | O B | **live** (plan-gated) | W2-14 honest exports, W3-05 month close |
 | POS sales file import | O M | **flag:integrations (–)** | File per upload. No API |
-| Procurement sync | O M | **stub** (§1) | §2 C1–C8 |
+| Procurement API sync | O M | **dormant**: built and unit-tested, not scheduled, no connect path, no credentials (§1) | §2 C1–C8 |
 
 ### 3.13 Multi-branch
 
@@ -242,7 +242,7 @@ Compare the **Zestt document import**, which does the right thing. It resolves t
 ## 4. Open questions for humans
 
 1. **MarketMan Open API for Israeli accounts.** Is it available, what does it cost (ext-06: $25–$99/month add-on), and does it expose POs, products and receipts? Phase-6, owner.
-2. **Zester buyer-side export.** ext-07 found the supplier API only. Ask Zester whether a restaurant can export its orders and receipts. If not, the document path (C7) is the coexistence route, and the `ZesterAdapter` API code should be marked as speculative in STATE.md.
+2. **Zester buyer-side export.** The public Zestt API ext-07 found is built for suppliers; it found no documented restaurant export. Ask Zester whether a restaurant can export its orders and receipts. If not, the document path (C7) is the coexistence route, and the `ZesterAdapter` API code should be marked as speculative in STATE.md.
 3. **Schema.** An external line id on `po_lines` and a source label on `goods_receipts` (C2, C5) go into H-04 schema batch B as a proposal. Human-authored.
 4. **Scheduler.** Register `sync-platforms` or delete the comment. `cron.ts` is a human PR (H-05 addendum). Until C1–C3 land, **do not register it**: §1.3 shows that switching it on corrupts the leak figure.
 5. **Chef and inventory ₪.** Count valuation and "actual food cost" are ₪ outside orders and recipes. The owner rule needs an explicit yes or no before `inventoryCount` reaches a chef in the pilot.
