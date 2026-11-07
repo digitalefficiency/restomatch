@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { he } from '../lib/i18n/messages/automations/he';
 import { en } from '../lib/i18n/messages/automations/en';
+import { he as cHe } from '../lib/i18n/messages/common/he';
 
 /**
  * AU-01 · /dashboard/settings/automations on the seeded demo tenant
@@ -10,7 +11,7 @@ import { en } from '../lib/i18n/messages/automations/en';
  *   - owner: one row per automation, a switch with a confirm naming who gets it;
  *     price alerts off → on round-trips; the receiver-brief row shows no ₪;
  *   - manager: the list, no switch;
- *   - receiver: the calm forbidden card, never the list;
+ *   - receiver: the shell forbidden page (403), never the list;
  *   - he 390 / 1440 and en 1440 render without horizontal scroll; axe clean.
  */
 const PASSWORD = process.env.DEMO_PASSWORD ?? 'RestoMatch-Demo-2026!';
@@ -112,10 +113,12 @@ test.describe('AU-01 automations page', () => {
     await expect(page.getByRole('switch')).toHaveCount(0);
   });
 
-  test('receiver gets the forbidden card, never the list', async ({ context, page }) => {
+  test('receiver gets the shell forbidden page (403), never the list', async ({ context, page }) => {
     await signIn(context, page, 'receiver');
-    await page.goto(PATH);
-    await expect(page.getByText(he.page.forbiddenTitle)).toBeVisible();
+    const res = await page.goto(PATH);
+    // The middleware rewrites a role-forbidden route to /dashboard/forbidden (nav registry roles).
+    expect(res?.status()).toBe(403);
+    await expect(page.getByText(cHe.shell.forbidden.eyebrow)).toBeVisible();
     await expect(page.locator('[data-automation]')).toHaveCount(0);
   });
 });
