@@ -6,9 +6,10 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { showcase } from '@/lib/i18n/messages/showcase';
 import { formatIls } from '@/lib/money';
 import { contactChannels, whatsappHref } from '@/lib/contact';
+import { SAMPLE_CAUGHT_BEFORE_PAYMENT_ILS } from '../../(marketing)/_components/sampleMonth';
 
-/** What the sample restaurant's caught-this-month tile shows (dashboard KPI "saved"). */
-export const SAMPLE_CAUGHT_THIS_MONTH_ILS = 12_340;
+/** The sample month's "caught before payment" (W3-06: the one figure set, `(marketing)/_components/sampleMonth.ts`). */
+export const SAMPLE_CAUGHT_THIS_MONTH_ILS = SAMPLE_CAUGHT_BEFORE_PAYMENT_ILS;
 
 export type EndCardKind = 'receiver' | 'dashboard' | 'invoices';
 

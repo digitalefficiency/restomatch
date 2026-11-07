@@ -16,6 +16,8 @@ import { MarketingShell } from './(marketing)/_components/MarketingShell';
 import { HeroMatch } from './(marketing)/_components/HeroMatch';
 import { HeroVideo } from './(marketing)/_components/HeroVideo';
 import { LazyLeadForm } from './(marketing)/_components/LazyLeadForm';
+import { leadAction } from './(marketing)/_components/leadAction';
+import { SAMPLE_LEAK_ILS, SAMPLE_PURCHASING_ILS } from './(marketing)/_components/sampleMonth';
 import { PromoVideoButton } from './(marketing)/_components/PromoVideoButton';
 import { ReceiverMorph } from './(marketing)/_components/ReceiverMorph';
 import { primaryCtaHref } from './(marketing)/_components/cta';
@@ -50,10 +52,8 @@ const MORPH_LINES = [
   { he: 'מוצרלה 3 ק״ג', en: 'Mozzarella · 3 kg' },
 ] as const;
 
-/** Worked example used by the proof block (same figures as the calculator default). */
-const EXAMPLE_PURCHASING_ILS = 150_000;
-/** An illustrative leak rate for the worked example — never presented as a target. */
-const EXAMPLE_LEAK_RATE = 0.015;
+/** Worked example used by the proof block: the ONE sample month (W3-06), same as the calculator default. */
+const EXAMPLE_PURCHASING_ILS = SAMPLE_PURCHASING_ILS;
 
 /**
  * Landing v2 — short and visual (owner: "efficient, not overloaded, invest in
@@ -95,7 +95,7 @@ export default async function Home() {
   ];
   const proof = [
     {
-      value: t('v2.proof.leakValue', { amount: ils(EXAMPLE_PURCHASING_ILS * EXAMPLE_LEAK_RATE) }),
+      value: t('v2.proof.leakValue', { amount: ils(SAMPLE_LEAK_ILS) }),
       label: t('v2.proof.leakLabel', { purchasing: ils(EXAMPLE_PURCHASING_ILS) }),
       tone: 'text-danger',
     },
@@ -429,7 +429,7 @@ export default async function Home() {
           </div>
           <div className="relative overflow-hidden rounded-3xl border border-line bg-surface p-6 shadow-card sm:p-8">
             <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px flow-stream" />
-            <LazyLeadForm loadingLabel={t('v2.cta.loading')} noscriptLabel={t('v2.cta.noscript')} />
+            <LazyLeadForm action={leadAction} />
           </div>
           <p className="mt-6 text-center text-sm text-muted">
             <ShieldCheck className="me-1.5 inline h-4 w-4 text-info" aria-hidden="true" />

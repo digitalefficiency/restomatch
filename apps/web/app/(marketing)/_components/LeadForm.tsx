@@ -1,47 +1,42 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { CheckCircle2, MessageCircle, PlayCircle } from 'lucide-react';
-import { TrpcProvider, trpc } from '@/lib/trpc/client';
 import { Button, Input } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { contactChannels, whatsappHref } from '@/lib/contact';
 import { readAttribution } from './Attribution';
-import {
-  buildLeadSource,
-  firstInvalidField,
-  formatIlPhone,
-  validateLead,
-  type LeadFieldErrors,
-} from './leadForm.logic';
+import { buildLeadSource, firstInvalidField, validateLead, type LeadFieldErrors } from './leadForm.logic';
+import { LEAD_IDLE, type LeadActionState } from './leadAction.core';
+
+/** The Server Action (`leadAction`), handed in by a server component. */
+export type LeadFormAction = (prev: LeadActionState, formData: FormData) => Promise<LeadActionState>;
 
 /**
- * Lead-capture form for the marketing site. Calls leads.create (public).
+ * Lead-capture form for the marketing site. W3-06: a progressively enhanced
+ * Server Action (`leadAction`) — it posts with JS off, and with JS on the same
+ * action runs without a reload. The action is the same front door as the
+ * tRPC route (origin check, the `leads` per-IP bucket, bounded fields) and
+ * calls the unchanged `leads.create` contract.
  * Includes a hidden honeypot field named `hp` — bots that fill it get a silent
- * { ok: true } with no insert (handled server-side); humans leave it empty.
- * Money is captured in shekels and converted to agorot for the contract.
+ * success with no insert (handled server-side); humans leave it empty.
  *
- * W1-12: the name stays required (router contract unchanged); the client also
- * requires a way back — a valid Israeli phone OR an e-mail (mkt-01). Errors sit
- * under their field and are tied to it with aria-describedby (mkt-09). The
- * success state says who gets back to whom and how, with a next step (mkt-07).
+ * W1-12: the name is required and so is a way back — a valid Israeli phone OR
+ * an e-mail (mkt-01), checked here AND again in the action. Errors sit under
+ * their field and are tied to it with aria-describedby (mkt-09). The success
+ * state says who gets back to whom and how, with a next step (mkt-07).
  * `source` carries the page, the placement, the plan and the UTM campaign (mkt-28).
  */
-/** Self-provided: the lead form loads lazily on public pages, which don't ship tRPC up front. */
-export function LeadForm({ cta = 'lead' }: { cta?: string }) {
-  return (
-    <TrpcProvider>
-      <LeadFormInner cta={cta} />
-    </TrpcProvider>
-  );
+export function LeadForm({ cta = 'lead', action }: { cta?: string; action: LeadFormAction }) {
+  return <LeadFormInner cta={cta} action={action} />;
 }
 
 const FIELD_IDS = { name: 'lead-name', phone: 'lead-phone', email: 'lead-email' } as const;
 
-function LeadFormInner({ cta }: { cta: string }) {
+function LeadFormInner({ cta, action }: { cta: string; action: LeadFormAction }) {
   const t = useT(marketing);
   const pathname = usePathname();
   // The exact opt-in wording shown to the visitor (in their language) — persisted
@@ -57,35 +52,33 @@ function LeadFormInner({ cta }: { cta: string }) {
   const [hp, setHp] = useState('');
   const [errors, setErrors] = useState<LeadFieldErrors>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [sent, setSent] = useState<{ name: string; phone: string; email: string } | null>(null);
   const successRef = useRef<HTMLHeadingElement>(null);
   const channels = contactChannels();
 
-  const create = trpc.leads.create.useMutation({
-    onSuccess: () => {
-      setSubmitError(null);
-    },
-    onError: (err) => {
-      // Server messages are Hebrew-only and technical; show a translated one.
-      const code = err.data?.code;
-      // The route's rate limiter answers 429 before tRPC runs, with a plain JSON
-      // body — no tRPC error shape, so only the raw response carries the status.
-      const status =
-        err.data?.httpStatus ??
-        (err.shape as { data?: { httpStatus?: number } } | undefined)?.data?.httpStatus ??
-        (err as { meta?: { response?: { status?: number } } }).meta?.response?.status;
-      if (code === 'TOO_MANY_REQUESTS' || status === 429) setSubmitError(t('lead.errorRate'));
-      else setSubmitError(t('lead.errorGeneric'));
-    },
-  });
+  const [state, formAction, isPending] = useActionState(action, LEAD_IDLE);
+  // Attribution lives in localStorage: read it after mount (the SSR value is the bare path).
+  const [source, setSource] = useState(() => buildLeadSource(pathname, cta, null));
+  useEffect(() => {
+    setSource(buildLeadSource(pathname, cta, readAttribution()));
+  }, [pathname, cta]);
+
+  // Server verdicts: field errors from the action, or a form-level message.
+  useEffect(() => {
+    if (state.status === 'invalid') setErrors(state.errors);
+    if (state.status === 'rate') setSubmitError(t('lead.errorRate'));
+    else if (state.status === 'error') setSubmitError(t('lead.errorGeneric'));
+    else setSubmitError(null);
+  }, [state, t]);
+
+  const sent = state.status === 'ok' ? state : null;
 
   // The submit button unmounts on success — move focus to the confirmation so
   // keyboard / screen-reader users aren't dropped at the top of the page.
   useEffect(() => {
-    if (create.isSuccess) successRef.current?.focus();
-  }, [create.isSuccess]);
+    if (sent) successRef.current?.focus();
+  }, [sent]);
 
-  if (create.isSuccess && sent) {
+  if (sent) {
     const wa = channels.whatsapp
       ? whatsappHref(channels.whatsapp.digits, t('lead.successWhatsappText', { name: sent.name }))
       : null;
@@ -145,37 +138,22 @@ function LeadFormInner({ cta }: { cta: string }) {
 
   return (
     <form
+      action={formAction}
       onSubmit={(e) => {
-        e.preventDefault();
+        // JS on: the client's rules first, so an invalid form never round-trips.
         setSubmitError(null);
         const found = validateLead({ name, phone, email });
         setErrors(found);
         const first = firstInvalidField(found);
         if (first) {
+          e.preventDefault();
           const el = document.getElementById(FIELD_IDS[first]);
           // Centre it so the sticky header never covers the field or its error.
           el?.scrollIntoView({ block: 'center' });
           el?.focus({ preventScroll: true });
-          return;
         }
-        const ils = Number(monthlyIls.replace(/[^\d.]/g, ''));
-        const monthlyProcurementAgorot =
-          Number.isFinite(ils) && ils > 0 ? Math.round(ils * 100) : undefined;
-        const cleanPhone = phone.trim() ? formatIlPhone(phone) : '';
-        const cleanEmail = email.trim();
-        setSent({ name: name.trim(), phone: cleanPhone, email: cleanEmail });
-        create.mutate({
-          name: name.trim(),
-          phone: cleanPhone || undefined,
-          email: cleanEmail || undefined,
-          restaurantName: restaurantName.trim() || undefined,
-          monthlyProcurementAgorot,
-          source: buildLeadSource(pathname, cta, readAttribution()),
-          marketingConsent,
-          consentText: marketingConsent ? MARKETING_CONSENT_TEXT : undefined,
-          hp: hp.trim() || undefined,
-        });
       }}
+      data-testid="lead-form"
       className="space-y-4"
       noValidate
     >
@@ -196,6 +174,7 @@ function LeadFormInner({ cta }: { cta: string }) {
           <Input
             className="h-12 text-base"
             id={FIELD_IDS.name}
+            name="name"
             required
             minLength={1}
             maxLength={200}
@@ -212,6 +191,7 @@ function LeadFormInner({ cta }: { cta: string }) {
           <Input
             className="h-12 text-base"
             id="lead-restaurant"
+            name="restaurantName"
             maxLength={200}
             value={restaurantName}
             onChange={(e) => setRestaurantName(e.target.value)}
@@ -237,6 +217,7 @@ function LeadFormInner({ cta }: { cta: string }) {
             <Input
               className="h-12 text-base rtl:text-right"
               id={FIELD_IDS.phone}
+              name="phone"
               type="tel"
               inputMode="tel"
               dir="ltr"
@@ -257,6 +238,7 @@ function LeadFormInner({ cta }: { cta: string }) {
             <Input
               className="h-12 text-base rtl:text-right"
               id={FIELD_IDS.email}
+              name="email"
               type="email"
               inputMode="email"
               dir="ltr"
@@ -283,6 +265,7 @@ function LeadFormInner({ cta }: { cta: string }) {
         <Input
           className="h-12 text-base"
           id="lead-procurement"
+          name="monthly"
           inputMode="numeric"
           value={monthlyIls}
           onChange={(e) => setMonthlyIls(e.target.value)}
@@ -290,6 +273,10 @@ function LeadFormInner({ cta }: { cta: string }) {
           aria-describedby="lead-procurement-hint"
         />
       </LeadField>
+
+      <input type="hidden" name="source" value={source} />
+      {/* The exact opt-in wording shown, stored only when the box is ticked. */}
+      <input type="hidden" name="consentText" value={MARKETING_CONSENT_TEXT} />
 
       {/* Honeypot — visually + a11y hidden. Bots fill it; humans never see it. */}
       <div aria-hidden="true" className="absolute h-0 w-0 overflow-hidden">
@@ -312,6 +299,7 @@ function LeadFormInner({ cta }: { cta: string }) {
       >
         <input
           id="lead-marketing-consent"
+          name="marketingConsent"
           type="checkbox"
           checked={marketingConsent}
           onChange={(e) => setMarketingConsent(e.target.checked)}
@@ -343,7 +331,7 @@ function LeadFormInner({ cta }: { cta: string }) {
         </div>
       ) : null}
 
-      <Button type="submit" className="h-12 w-full text-base" loading={create.isPending}>
+      <Button type="submit" className="h-12 w-full text-base" loading={isPending}>
         {t('lead.submit')}
       </Button>
       <p className="text-center text-xs text-muted">

@@ -216,8 +216,6 @@ export const en: Shape<typeof he> = {
     cta: {
       trust: 'Full isolation between restaurants · Two-factor sign-in · Designed for Amendment 13',
       trustLink: 'Security & privacy',
-      loading: 'Loading the form…',
-      noscript: 'Please enable JavaScript to send the form.',
     },
     video: {
       pause: 'Pause video',

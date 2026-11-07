@@ -144,6 +144,28 @@ export const en: Shape<typeof he> = {
       accounting_export: 'Accounting export',
     },
     unavailable: "We couldn't load the plans right now. Try refreshing, or talk to us.",
+    plusVat: '+ VAT',
+    compareTitle: 'Compare plans',
+    compareFeature: 'What’s included',
+    comparePrice: 'Price per month',
+    noLimit: 'Unlimited',
+    included: 'Included',
+    notIncluded: 'Not included',
+    roiTitle: 'What is it worth to you?',
+    roiSample: 'It starts from the sample restaurant ({purchasing} a month in purchases, a {pct} leak). Change the numbers to yours.',
+    faqTitle: 'Questions about price',
+    faq: {
+      vat: { q: 'Do prices include VAT?', a: 'No. VAT is added to every price on this page.' },
+      worth: {
+        q: 'How do we know it pays off?',
+        a: 'The calculator above shows how much of your purchasing RestoMatch has to catch to pay for itself. In the pilot you see the real number, in shekels, on your own invoices.',
+      },
+      accounting: {
+        q: 'Do we need to replace our accounting software?',
+        a: 'No. RestoMatch checks the invoices you already receive and, on plans with export, hands them to your bookkeeping.',
+      },
+      chain: { q: 'We have several branches. What fits?', a: 'The Chain plan is built for several branches under one account. Talk to us and we’ll quote by branch count.' },
+    },
   },
   about: {
     metaTitle: 'About · RestoMatch',

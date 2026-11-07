@@ -6,6 +6,7 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { formatIls } from '@/lib/money';
+import { SAMPLE_LEAK_PCT, SAMPLE_PURCHASING_ILS } from './sampleMonth';
 
 /**
  * Leak / ROI calculator — kept deliberately honest (docs/COSTS.md, GTM §5.2):
@@ -19,8 +20,8 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
   const t = useT(marketing);
   const locale = useLocale();
   const ids = { monthly: useId(), leak: useId() };
-  const [monthly, setMonthly] = useState(150_000);
-  const [leakPct, setLeakPct] = useState(1.5);
+  const [monthly, setMonthly] = useState(SAMPLE_PURCHASING_ILS);
+  const [leakPct, setLeakPct] = useState(SAMPLE_LEAK_PCT);
 
   const monthlyLeak = monthly * (leakPct / 100);
   const annualLeak = monthlyLeak * 12;
@@ -37,7 +38,7 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
             {t('roi.monthly')}
           </label>
           <div className="relative">
-            <span className="pointer-events-none absolute inset-y-0 start-3 flex items-center font-mono text-muted">
+            <span className="pointer-events-none absolute inset-y-0 start-3 flex items-center text-muted">
               ₪
             </span>
             <input
@@ -48,7 +49,7 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
               step={5000}
               value={monthly}
               onChange={(e) => setMonthly(Math.max(0, Number(e.target.value) || 0))}
-              className="w-full rounded-xl border border-line-strong bg-surface py-3 pe-3 ps-8 font-mono text-lg font-bold tabular-nums text-ink transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="w-full rounded-xl border border-line-strong bg-surface py-3 pe-3 ps-8 text-lg font-bold tabular-nums text-ink transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             />
           </div>
           <input
@@ -69,7 +70,7 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
             <label htmlFor={ids.leak} className="text-sm font-medium text-muted">
               {t('roi.leak')}
             </label>
-            <span className="font-mono text-sm font-bold tabular-nums text-primary">{pct(leakPct)}</span>
+            <span className="text-sm font-bold tabular-nums text-primary">{pct(leakPct)}</span>
           </div>
           <input
             id={ids.leak}
@@ -82,7 +83,7 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
             className="w-full cursor-pointer accent-primary"
             aria-valuetext={t('roi.leakValue', { pct: leakPct.toFixed(1) })}
           />
-          <div className="mt-1 flex justify-between font-mono text-xs tabular-nums text-muted">
+          <div className="mt-1 flex justify-between text-xs tabular-nums text-muted">
             <span>{pct(0.5)}</span>
             <span>{pct(5, 0)}</span>
           </div>
@@ -101,11 +102,11 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
             <TrendingDown className="h-5 w-5" aria-hidden="true" />
             <span className="text-sm font-semibold">{t('roi.monthlyLeak')}</span>
           </div>
-          <p className="mt-2 font-mono text-4xl font-extrabold tabular-nums tracking-tight text-danger drop-shadow-glow-danger">
+          <p className="mt-2 text-4xl font-extrabold tabular-nums tracking-tight text-danger drop-shadow-glow-danger">
             {formatIls(monthlyLeak, { locale })}
           </p>
           <p className="mt-1 text-sm text-muted">
-            <span className="font-mono font-semibold tabular-nums text-ink">{formatIls(annualLeak, { locale })}</span>{' '}
+            <span className="font-semibold tabular-nums text-ink">{formatIls(annualLeak, { locale })}</span>{' '}
             {t('roi.annualLeak')} · {t('roi.annualSub')}
           </p>
         </div>

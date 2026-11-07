@@ -27,6 +27,7 @@ import type { he as landingHe } from '@/lib/i18n/messages/landing/he';
 import { formatIls } from '@/lib/money';
 import { cn } from '@/lib/components/cn';
 import { RoiCalculator } from './RoiCalculator';
+import { SAMPLE_LEAK_ILS } from './sampleMonth';
 
 /**
  * The landing page's DETAIL sections (Landing v1). Landing v2 keeps the home
@@ -119,8 +120,8 @@ export function ProblemSection({ t, locale }: { t: T; locale: Locale }) {
       <div className="rm-reveal mt-8 rounded-2xl border border-line bg-surface-2/60 px-6 py-5 text-center">
         <p className="text-base text-ink sm:text-lg">
           {t('problem.mathA')}{' '}
-          <span className="font-mono text-2xl font-extrabold tabular-nums text-danger drop-shadow-glow-danger">
-            {ils(150_000 * 0.015)}
+          <span className="text-2xl font-extrabold tabular-nums text-danger drop-shadow-glow-danger">
+            {ils(SAMPLE_LEAK_ILS)}
           </span>{' '}
           {t('problem.mathB')}
         </p>
