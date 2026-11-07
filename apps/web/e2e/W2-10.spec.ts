@@ -109,12 +109,17 @@ test('credit form: empty, nothing pre-selected, no VAT default; ₪118.00 incl. 
   await expect(form.getByRole('button', { name: 'שמירה' })).toBeEnabled();
 });
 
-test('desk: ?tab= survives a reload; axe clean; ₪ left of the digits (he)', async ({ page }) => {
+test('desk: the WF-3 tab survives a reload; drafts only on click; axe clean; ₪ left of the digits (he)', async ({ page }) => {
   await page.goto('/dashboard/recovery');
-  await page.getByRole('radio', { name: /^הכל/ }).click();
-  await expect(page).toHaveURL(/tab=all/);
+  const tabs = page.getByTestId('recovery-tabs');
+  await tabs.getByRole('link', { name: /מה קרה/ }).click();
+  await expect(page).toHaveURL(/tab=history/);
   await page.reload();
-  await expect(page.getByRole('radio', { name: /^הכל/ })).toHaveAttribute('aria-checked', 'true');
+  await expect(tabs.getByRole('link', { name: /מה קרה/ })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByTestId('recovery-funnel')).toBeVisible();
+  // The reminder drafts open only on the warn row's click (owner decision 16).
+  await page.goto('/dashboard/recovery');
+  await expect(page.getByTestId('reminder-drafts')).toHaveCount(0);
   expect(await axeSerious(page)).toEqual([]);
   // RTL money: in he, "₪" renders to the LEFT of the first digit.
   const box = await page.getByTestId('recovery-outstanding').evaluate((el) => {

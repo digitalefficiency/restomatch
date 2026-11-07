@@ -4,6 +4,12 @@
  */
 export const he = {
   tracker: {
+    why: 'למה?',
+    view: { send: 'לשליחה', track: 'מעקב', history: 'מה קרה' },
+    sortLabel: 'מיון:',
+    sort: { rank: '₪ × ימי המתנה', amount: 'סכום', age: 'ימי המתנה' },
+    showMore: 'הציגו עוד · {shown} מתוך {total}',
+    viewEmpty: { send: 'אין בקשות זיכוי לשליחה.', track: 'אין בקשות זיכוי במעקב — הכל נסגר.', closed: 'עוד אין בקשות זיכוי סגורות.' },
     paged: 'מוצגות {shown} מתוך {total} בקשות זיכוי',
     loading: 'טוען את מעקב ₪ חוזר',
     errorTitle: 'מעקב ₪ חוזר לא זמין כרגע',
@@ -80,6 +86,7 @@ export const he = {
     note: 'בשקלים שלמים, מעוגלים כך שהחלקים מסתכמים בדיוק בסך שנדרש. הסכום המדויק מופיע במעבר עכבר.',
   },
   followUp: {
+    sendTo: 'שלחו ל-{count} ספקים',
     unsent: '{count} בקשות זיכוי עוד לא נשלחו · {amount}',
     unsentCta: 'לשליחת בקשות הזיכוי',
     waiting: '{count} בלי תשובה 7+ ימים · {amount}',
@@ -107,6 +114,8 @@ export const he = {
     claimed: 'פתחו מחדש',
   },
   actions: {
+    failedRow: 'הפעולה לא נשמרה בשורה הזו.',
+    retry: 'נסו שוב',
     letter_sent: 'סמנו שהמכתב נשלח',
     acknowledged: 'הספק אישר',
     credit: 'רשמו חשבונית זיכוי שהגיעה',

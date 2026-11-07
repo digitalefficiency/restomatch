@@ -25,7 +25,7 @@ export function ReminderDrafts({
   const t = useT(recovery);
   if (suppliers.length === 0) return null;
   return (
-    <Card padding="md" data-testid="reminder-drafts">
+    <Card padding="md" id="reminder-drafts" data-testid="reminder-drafts">
       <h2 className="flex items-center gap-2 text-sm font-bold text-ink">
         <BellRing className="h-4 w-4 text-warn" aria-hidden="true" />
         {t('reminder.title')}

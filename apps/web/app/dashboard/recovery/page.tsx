@@ -39,7 +39,10 @@ export default async function RecoveryPage({
   if (!flags.recovery) notFound();
   const sp = await searchParams;
   const tabParam = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab;
-  const initialTab = tabParam === 'all' || tabParam === 'closed' ? tabParam : 'todo';
+  // WF-3 (owner I5): לשליחה · מעקב · מה קרה. Old links (?tab=all|closed|todo) land on the nearest view.
+  const view: 'send' | 'track' | 'history' =
+    tabParam === 'send' ? 'send' : tabParam === 'history' || tabParam === 'closed' || tabParam === 'all' ? 'history' : 'track';
+  const remind = (Array.isArray(sp.remind) ? sp.remind[0] : sp.remind) === '1';
 
   const [t, locale] = await Promise.all([getT(recoveryNs), getLocale()]);
   const [{ summary, returnedThisMonth }, claims, suggestions] = await Promise.all([
@@ -59,6 +62,12 @@ export default async function RecoveryPage({
   const ageingTotal = Object.values(summary.ageing).reduce((s, v) => s + v, 0);
   const funnel = funnelOf(summary);
   const queues = followUps(claims, nowIso);
+  // "שלחו ל-6 ספקים": the requests to send go out per supplier (WF-3), so the button names suppliers.
+  const unsentSuppliers = new Set(claims.filter((c) => c.status === 'claimed' && c.outstandingAgorot > 0).map((c) => c.supplierId ?? c.supplierName)).size;
+  const tabCount = {
+    send: claims.filter((c) => c.status === 'claimed').length,
+    track: claims.filter((c) => !['claimed', 'recovered', 'written_off'].includes(c.status)).length,
+  };
 
   return (
     <div className="space-y-6">
@@ -120,29 +129,13 @@ export default async function RecoveryPage({
               </dl>
             </div>
 
-            <section className="mt-5 border-t border-line pt-4" aria-labelledby="funnel-title" data-testid="recovery-funnel">
-              <h2 id="funnel-title" className="text-sm font-bold text-ink">
-                {t('funnel.title')}
-              </h2>
-              <ol className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm" aria-label={t('funnel.stagesLabel')}>
-                {(['claimed', 'credited', 'returned'] as const).map((s, i) => (
-                  <li key={s} className="flex items-baseline gap-2">
-                    {i > 0 ? (
-                      <span aria-hidden="true" className="text-subtle" data-testid="funnel-arrow">
-                        {locale === 'he' ? '←' : '→'}
-                      </span>
-                    ) : null}
-                    <span className="text-muted">{t(`funnel.stage.${s}`)}</span>
-                    <span className="font-bold tabular-nums text-ink" data-testid={`stage-${s}`}>
-                      {whole(funnel.stages[s])}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-              <div
-                className="mt-3 flex h-3 w-full overflow-hidden rounded-full bg-surface-2"
-                role="img"
-                aria-label={t('funnel.sentence', {
+            {/* "למה?" — closed by default (owner 7.11): the funnel sentence behind the status line. */}
+            <details className="mt-3 text-sm" data-testid="recovery-why">
+              <summary className="inline-flex min-h-11 cursor-pointer items-center font-semibold text-primary underline-offset-2 hover:underline md:min-h-0">
+                {t('tracker.why')}
+              </summary>
+              <p className="mt-1 text-muted">
+                {t('funnel.sentence', {
                   claimed: whole(funnel.totalShekels),
                   returned: whole(funnel.shekels.returned),
                   credited: whole(funnel.shekels.credited),
@@ -150,40 +143,22 @@ export default async function RecoveryPage({
                   disputed: whole(funnel.shekels.disputed),
                   writtenOff: whole(funnel.shekels.writtenOff),
                 })}
-              >
-                {PART_ORDER.map((p) =>
-                  funnel.agorot[p] > 0 && funnel.totalAgorot > 0 ? (
-                    <span key={p} className={PART_BAR[p]} style={{ width: `${(funnel.agorot[p] / funnel.totalAgorot) * 100}%` }} />
-                  ) : null,
-                )}
-              </div>
-              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-5">
-                {PART_ORDER.map((p) => (
-                  <div key={p} className="flex items-baseline gap-2" data-testid="funnel-part" data-part={p}>
-                    <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${PART_BAR[p]}`} aria-hidden="true" />
-                    <dt className="text-muted">{t(`funnel.part.${p}`)}</dt>
-                    <dd className="ms-auto font-semibold tabular-nums text-ink sm:ms-0" title={exact(funnel.agorot[p])} data-shekels={funnel.shekels[p]}>
-                      {whole(funnel.shekels[p])}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-              <p className="mt-2 text-xs text-subtle">{t('funnel.note')}</p>
-            </section>
+              </p>
+            </details>
           </Card>
 
           {/* T2 — the two follow-up queues, each with its one action. */}
           {queues.unsent.count > 0 || queues.waiting.count > 0 ? (
             <div className="grid gap-3 md:grid-cols-2" data-testid="recovery-followups">
               {queues.unsent.count > 0 ? (
-                <Card padding="md" className="flex flex-wrap items-center justify-between gap-3 border-warn/40">
+                <Card padding="md" className="flex flex-wrap items-center justify-between gap-3">
                   <p
                     className="flex min-w-0 items-start gap-2 text-sm text-ink"
                     data-testid="recovery-followup-unsent"
                     data-agorot={queues.unsent.agorot}
                     data-count={queues.unsent.count}
                   >
-                    <Send className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden="true" />
+                    <Send className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
                     <span>
                       <strong>{t('followUp.unsent', { count: formatNumber(queues.unsent.count, locale), amount: exact(queues.unsent.agorot) })}</strong>
                     </span>
@@ -192,7 +167,7 @@ export default async function RecoveryPage({
                     href="/dashboard/leaks/claims"
                     className="inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-on-primary hover:brightness-90"
                   >
-                    {t('followUp.unsentCta')}
+                    {t('followUp.sendTo', { count: formatNumber(unsentSuppliers, locale) })}
                   </Link>
                 </Card>
               ) : null}
@@ -210,10 +185,9 @@ export default async function RecoveryPage({
                         {t('followUp.waiting', { count: formatNumber(queues.waiting.count, locale), amount: exact(queues.waiting.agorot) })}
                       </strong>
                     </p>
-                    <p className="ms-6 mt-0.5 text-xs text-muted">{t('followUp.reminderNote')}</p>
                   </div>
                   <Link
-                    href="/dashboard/leaks/claims#sent-letters-title"
+                    href="/dashboard/recovery?tab=track&remind=1#reminder-drafts"
                     className="inline-flex min-h-11 items-center rounded-xl border border-line-strong bg-surface px-4 text-sm font-semibold text-ink hover:border-primary/40"
                   >
                     {t('followUp.waitingCta')}
@@ -229,8 +203,85 @@ export default async function RecoveryPage({
               {t('tracker.paged', { shown: formatNumber(claims.length, locale), total: formatNumber(summary.claimCount, locale) })}
             </p>
           ) : null}
-          <TrackerClient claims={claims} suggestions={suggestions} nowIso={nowIso} initialTab={initialTab} sender={{ restaurant: restaurantName, signer }} />
+          <nav aria-label={t('tracker.claimsTitle')} className="flex gap-1 border-b border-line" data-testid="recovery-tabs">
+            {(['send', 'track', 'history'] as const).map((v) => (
+              <Link
+                key={v}
+                href={v === 'track' ? '/dashboard/recovery' : `/dashboard/recovery?tab=${v}`}
+                aria-current={view === v ? 'page' : undefined}
+                className={`-mb-px inline-flex min-h-11 items-center gap-2 border-b-2 px-3 text-sm font-semibold ${
+                  view === v ? 'border-primary text-ink' : 'border-transparent text-muted hover:text-ink'
+                }`}
+              >
+                {t(`tracker.view.${v}`)}
+                {v !== 'history' ? <span className="rounded-full bg-surface-2 px-2 text-xs tabular-nums">{formatNumber(tabCount[v], locale)}</span> : null}
+              </Link>
+            ))}
+          </nav>
 
+          {view !== 'history' ? (
+            <TrackerClient
+              claims={claims}
+              suggestions={suggestions}
+              nowIso={nowIso}
+              view={view}
+              remind={remind}
+              sender={{ restaurant: restaurantName, signer }}
+            />
+          ) : (
+          <>
+          <Card padding="lg">
+            <section className="" aria-labelledby="funnel-title" data-testid="recovery-funnel">
+                <h2 id="funnel-title" className="text-sm font-bold text-ink">
+                  {t('funnel.title')}
+                </h2>
+                <ol className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm" aria-label={t('funnel.stagesLabel')}>
+                  {(['claimed', 'credited', 'returned'] as const).map((s, i) => (
+                    <li key={s} className="flex items-baseline gap-2">
+                      {i > 0 ? (
+                        <span aria-hidden="true" className="text-subtle" data-testid="funnel-arrow">
+                          {locale === 'he' ? '←' : '→'}
+                        </span>
+                      ) : null}
+                      <span className="text-muted">{t(`funnel.stage.${s}`)}</span>
+                      <span className="font-bold tabular-nums text-ink" data-testid={`stage-${s}`}>
+                        {whole(funnel.stages[s])}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+                <div
+                  className="mt-3 flex h-3 w-full overflow-hidden rounded-full bg-surface-2"
+                  role="img"
+                  aria-label={t('funnel.sentence', {
+                    claimed: whole(funnel.totalShekels),
+                    returned: whole(funnel.shekels.returned),
+                    credited: whole(funnel.shekels.credited),
+                    open: whole(funnel.shekels.open),
+                    disputed: whole(funnel.shekels.disputed),
+                    writtenOff: whole(funnel.shekels.writtenOff),
+                  })}
+                >
+                  {PART_ORDER.map((p) =>
+                    funnel.agorot[p] > 0 && funnel.totalAgorot > 0 ? (
+                      <span key={p} className={PART_BAR[p]} style={{ width: `${(funnel.agorot[p] / funnel.totalAgorot) * 100}%` }} />
+                    ) : null,
+                  )}
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-5">
+                  {PART_ORDER.map((p) => (
+                    <div key={p} className="flex items-baseline gap-2" data-testid="funnel-part" data-part={p}>
+                      <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${PART_BAR[p]}`} aria-hidden="true" />
+                      <dt className="text-muted">{t(`funnel.part.${p}`)}</dt>
+                      <dd className="ms-auto font-semibold tabular-nums text-ink sm:ms-0" title={exact(funnel.agorot[p])} data-shekels={funnel.shekels[p]}>
+                        {whole(funnel.shekels[p])}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="mt-2 text-xs text-subtle">{t('funnel.note')}</p>
+              </section>
+          </Card>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.4fr] [&>*]:min-w-0">
             <Card padding="lg">
               <h2 className="text-sm font-bold text-ink">{t('tracker.ageingTitle')}</h2>
@@ -304,6 +355,9 @@ export default async function RecoveryPage({
               </ul>
             </Card>
           </div>
+          <TrackerClient claims={claims} suggestions={[]} nowIso={nowIso} view="closed" sender={{ restaurant: restaurantName, signer }} />
+          </>
+          )}
         </>
       )}
     </div>

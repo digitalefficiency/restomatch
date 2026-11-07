@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
@@ -50,7 +50,11 @@ const TONE: Record<Status, BadgeTone> = {
 };
 const WRITE_OFF_REASONS = ['refused', 'trivial', 'ourMistake', 'other'] as const;
 const RECOVERED_REASONS = ['offset', 'refund', 'other'] as const;
-type Tab = 'todo' | 'all' | 'closed';
+/** Which list this page shows (URL `?tab=`): to send · in tracking · closed (under "מה קרה"). */
+export type View = 'send' | 'track' | 'closed';
+type Sort = 'rank' | 'amount' | 'age';
+/** Rows shown before "הציגו עוד" (WF-3: ≥10 rows in the fold). */
+const PAGE_ROWS = 12;
 
 /**
  * The ₪-back claims list. No money state ever changes on a select's `change`:
@@ -60,16 +64,19 @@ type Tab = 'todo' | 'all' | 'closed';
  * with a reason sent as the transition note. Selected rows move in ONE call.
  */
 export function TrackerClient({
-  claims,
+  claims: serverClaims,
   suggestions,
   nowIso,
-  initialTab = 'todo',
+  view = 'track',
+  remind = false,
   sender = { restaurant: '', signer: '' },
 }: {
   claims: Claim[];
   suggestions: Suggestion[];
   nowIso: string;
-  initialTab?: Tab;
+  view?: View;
+  /** The reminder drafts open only after the owner pressed "הכינו תזכורות" (owner decision 16). */
+  remind?: boolean;
   /** Who signs a supplier reminder draft (the active restaurant + the signed-in person). */
   sender?: { restaurant: string; signer: string };
 }) {
@@ -77,19 +84,13 @@ export function TrackerClient({
   const ta = useT(approvals);
   const locale = useLocale();
   const router = useRouter();
-  const [tab, setTabState] = useState<Tab>(initialTab);
-  // URL state (?tab=): Back- and refresh-stable, without a server round-trip.
-  const setTab = (next: Tab) => {
-    setTabState(next);
-    try {
-      const url = new URL(window.location.href);
-      if (next === 'todo') url.searchParams.delete('tab');
-      else url.searchParams.set('tab', next);
-      window.history.replaceState(window.history.state, '', url);
-    } catch {
-      /* no URL API: the tab still switches */
-    }
-  };
+  // Rows are local state: a move updates its row in place (optimistic, then the server's answer),
+  // and a failed row shows its own error with "נסו שוב" — no page reload (chain-26).
+  const [claims, setClaims] = useState(serverClaims);
+  useEffect(() => setClaims(serverClaims), [serverClaims]);
+  const [rowErrors, setRowErrors] = useState<Record<string, () => void>>({});
+  const [sort, setSort] = useState<Sort>('rank');
+  const [shownRows, setShownRows] = useState(PAGE_ROWS);
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [creditFor, setCreditFor] = useState<string | null>(null); // supplier id
   // A suggested invoice credit line opens the same form, prefilled (the user still picks the claims).
@@ -130,16 +131,13 @@ export function TrackerClient({
   const statusOf = (c: Claim): Status => (deferred.pendingTo(c.id) as Status | null) ?? c.status;
   const byId = useMemo(() => new Map(claims.map((c) => [c.id, c])), [claims]);
 
-  const inTab = (c: Claim, which: Tab) => {
+  const inView = (c: Claim) => {
     const s = statusOf(c);
-    return which === 'all' ? true : which === 'closed' ? CLOSED.includes(s) : !CLOSED.includes(s);
+    if (view === 'closed') return CLOSED.includes(s);
+    if (view === 'send') return s === 'claimed';
+    return !CLOSED.includes(s) && s !== 'claimed';
   };
-  const shown = claims.filter((c) => inTab(c, tab));
-  const counts = { todo: 0, all: claims.length, closed: 0 };
-  for (const c of claims) {
-    if (inTab(c, 'closed')) counts.closed += 1;
-    else counts.todo += 1;
-  }
+  const shown = claims.filter(inView);
 
   const sumOf = (ids: string[]) => ids.reduce((s, id) => s + (byId.get(id)?.outstandingAgorot ?? 0), 0);
   /** The ₪ a closing confirm names: money back for "recovered", the remainder for a write-off. */
@@ -157,6 +155,22 @@ export function TrackerClient({
   const needsReason = (ids: string[], to: Move) =>
     ids.some((id) => byId.get(id)?.next.find((e) => e.to === to)?.requiresReason === true);
 
+  /** A failed move: the row says so in place, with "נסו שוב" that repeats exactly that move. */
+  const markFailed = (ids: string[], retry: () => void) =>
+    setRowErrors((prev) => {
+      const next = { ...prev };
+      for (const id of ids)
+        next[id] = () => {
+          setRowErrors((p) => {
+            const q = { ...p };
+            for (const x of ids) delete q[x];
+            return q;
+          });
+          retry();
+        };
+      return next;
+    });
+
   /** A reversible move: optimistic now, written after 10 s unless undone. */
   function moveLater(ids: string[], to: Move) {
     if (ids.length === 0) return;
@@ -171,7 +185,12 @@ export function TrackerClient({
         supplier: nameOfIds(ids),
       }),
       // Guarded: each claim must still be in the status this screen showed (CONFLICT otherwise).
-      run: () => transition.mutateAsync({ items: itemsOf(ids), to }),
+      run: async () => {
+        const moved = await transition.mutateAsync({ items: itemsOf(ids), to });
+        const next = new Map(moved.map((m) => [m.id, m.status]));
+        setClaims((rows) => rows.map((c) => (next.has(c.id) ? { ...c, status: next.get(c.id)! } : c)));
+      },
+      onFailed: () => markFailed(ids, () => moveLater(ids, to)),
     });
     setSelected(new Set());
   }
@@ -195,7 +214,9 @@ export function TrackerClient({
       return;
     }
     try {
-      await transition.mutateAsync({ items: itemsOf(confirm.ids), to: confirm.to, note });
+      const moved = await transition.mutateAsync({ items: itemsOf(confirm.ids), to: confirm.to, note });
+      const next = new Map(moved.map((m) => [m.id, m.status]));
+      setClaims((rows) => rows.map((c) => (next.has(c.id) ? { ...c, status: next.get(c.id)! } : c)));
       setMessage({ tone: 'ok', text: t('actions.saved') });
       setConfirm(null);
       setSelected(new Set());
@@ -243,6 +264,17 @@ export function TrackerClient({
       : cd.daysLeft === 0
         ? t('countdown.today', { date: formatDate(cd.dueIso, locale) })
         : t('countdown.left', { days: formatNumber(cd.daysLeft, locale), date: formatDate(cd.dueIso, locale) });
+
+  /** A row whose move failed: the error sits on the row, with one "נסו שוב". */
+  const rowError = (id: string) =>
+    rowErrors[id] ? (
+      <p role="alert" className="mt-1 flex items-center gap-2 text-xs text-danger" data-testid="row-error">
+        {t('actions.failedRow')}
+        <button type="button" className="min-h-11 font-semibold underline md:min-h-0" onClick={rowErrors[id]}>
+          {t('actions.retry')}
+        </button>
+      </p>
+    ) : null;
 
   const rowActions = (c: Claim, wide = false) => {
     const status = statusOf(c);
@@ -317,7 +349,14 @@ export function TrackerClient({
 
   // The desk order: suppliers ranked by owed ₪ × days overdue; rows follow their supplier.
   const groups = bySupplier(shown);
-  const ordered = groups.flatMap((g) => g.claims);
+  const ranked = groups.flatMap((g) => g.claims);
+  const ordered =
+    sort === 'amount'
+      ? [...shown].sort((a, b) => b.outstandingAgorot - a.outstandingAgorot || a.id.localeCompare(b.id))
+      : sort === 'age'
+        ? [...shown].sort((a, b) => b.ageDays - a.ageDays || a.id.localeCompare(b.id))
+        : ranked;
+  const visible = ordered.slice(0, shownRows);
   const overdueGroups = bySupplier(claims.filter((c) => c.daysOverdue > 0 && c.outstandingAgorot > 0 && !isPending(c.id)));
 
   return (
@@ -334,7 +373,7 @@ export function TrackerClient({
         </p>
       ) : null}
 
-      {overdueGroups.length > 0 ? (
+      {remind && overdueGroups.length > 0 ? (
         <ReminderDrafts
           sender={sender}
           suppliers={overdueGroups
@@ -349,37 +388,24 @@ export function TrackerClient({
             {t('tracker.claimsTitle')}
           </h2>
           <ExportButtons />
-          <div role="radiogroup" aria-label={t('tracker.claimsTitle')} className="flex gap-1 rounded-xl bg-surface-2 p-1 text-sm">
-            {(['todo', 'all', 'closed'] as const).map((f) => (
-              <button
-                key={f}
-                type="button"
-                role="radio"
-                aria-checked={tab === f}
-                tabIndex={tab === f ? 0 : -1}
-                onClick={() => setTab(f)}
-                onKeyDown={(e) => {
-                  const order = ['todo', 'all', 'closed'] as const;
-                  const i = order.indexOf(f);
-                  const go = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
-                  if (!go) return;
-                  e.preventDefault();
-                  const rtl = document.documentElement.dir === 'rtl';
-                  const step = (e.key === 'ArrowRight') !== rtl ? 1 : -1;
-                  const next = order[(i + step + order.length) % order.length]!;
-                  setTab(next);
-                  (e.currentTarget.parentElement?.querySelector(`[data-tab="${next}"]`) as HTMLElement | null)?.focus();
-                }}
-                data-tab={f}
-                className={cn(
-                  'min-h-11 rounded-lg px-3 font-semibold md:min-h-8',
-                  tab === f ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink',
-                )}
-              >
-                {t(`tracker.tab.${f}`)} · {formatNumber(counts[f], locale)}
-              </button>
-            ))}
-          </div>
+          <label className="flex items-center gap-2 text-sm text-muted">
+            {t('tracker.sortLabel')}
+            <select
+              className="min-h-11 rounded-lg border border-line bg-surface px-2 text-ink md:min-h-9"
+              value={sort}
+              onChange={(e) => {
+                setSort(e.target.value as Sort);
+                setShownRows(PAGE_ROWS);
+              }}
+              data-testid="recovery-sort"
+            >
+              {(['rank', 'amount', 'age'] as const).map((k) => (
+                <option key={k} value={k}>
+                  {t(`tracker.sort.${k}`)}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         {selectedIds.length > 0 ? (
@@ -410,7 +436,7 @@ export function TrackerClient({
 
         {shown.length === 0 ? (
           <p className="mt-4 rounded-xl border border-line bg-surface-2/50 px-4 py-6 text-center text-sm text-muted">
-            {t(`tracker.tabEmpty.${tab}`)}
+            {t(`tracker.viewEmpty.${view}`)}
           </p>
         ) : (
           <>
@@ -425,13 +451,13 @@ export function TrackerClient({
                     <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('tracker.colSupplier')}</th>
                     <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('tracker.colInvoice')}</th>
                     <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('tracker.colItem')}</th>
-                    <th scope="col" className="py-2 pe-3 text-right font-semibold">{t('tracker.colAmount')}</th>
-                    <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('tracker.colStatus')}</th>
+                    <th scope="col" className="py-2 pe-3 text-right font-semibold" aria-sort={sort === 'amount' ? 'descending' : 'none'}>{t('tracker.colAmount')}</th>
+                    <th scope="col" className="py-2 pe-3 text-start font-semibold" aria-sort={sort === 'age' ? 'descending' : 'none'}>{t('tracker.colStatus')}</th>
                     <th scope="col" className="py-2 text-end font-semibold">{t('tracker.colActions')}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {ordered.map((c) => (
+                  {visible.map((c) => (
                     <tr key={c.id} className="border-b border-line/60 align-top" data-testid="claim-row" data-status={statusOf(c)}>
                       <td className="py-2 pe-2">
                         <input
@@ -453,11 +479,25 @@ export function TrackerClient({
                       </td>
                       <td className="py-2 pe-3 text-right">{amountCell(c)}</td>
                       <td className="py-2 pe-3">{statusChips(c)}</td>
-                      <td className="py-2">{rowActions(c)}</td>
+                      <td className="py-2">
+                        {rowActions(c)}
+                        {rowError(c.id)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              {ordered.length > visible.length ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="mt-2 min-h-11 md:min-h-9"
+                  onClick={() => setShownRows((n) => n + PAGE_ROWS)}
+                  data-testid="recovery-show-more"
+                >
+                  {t('tracker.showMore', { shown: formatNumber(visible.length, locale), total: formatNumber(ordered.length, locale) })}
+                </Button>
+              ) : null}
             </div>
 
             {/* Phone: cards grouped by supplier, the outstanding ₪ at the line end. */}
@@ -497,7 +537,10 @@ export function TrackerClient({
                             <span>· {discrepancyLabel(ta, c.discrepancyType)}</span>
                             {statusChips(c)}
                           </div>
-                          <div className="ps-8">{rowActions(c, true)}</div>
+                          <div className="ps-8">
+                            {rowActions(c, true)}
+                            {rowError(c.id)}
+                          </div>
                         </li>
                       ))}
                     </ul>

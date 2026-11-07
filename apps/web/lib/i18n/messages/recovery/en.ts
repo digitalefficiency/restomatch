@@ -3,6 +3,12 @@ import type { he } from './he';
 
 export const en: Shape<typeof he> = {
   tracker: {
+    why: 'Why?',
+    view: { send: 'To send', track: 'Tracking', history: 'What happened' },
+    sortLabel: 'Sort:',
+    sort: { rank: '₪ × days waiting', amount: 'Amount', age: 'Days waiting' },
+    showMore: 'Show more · {shown} of {total}',
+    viewEmpty: { send: 'No credit requests to send.', track: 'No credit requests in tracking — all closed.', closed: 'No closed credit requests yet.' },
     paged: 'Showing {shown} of {total} claims',
     loading: 'Loading the ₪-back tracker',
     errorTitle: 'The ₪-back tracker is not available right now',
@@ -79,6 +85,7 @@ export const en: Shape<typeof he> = {
     note: 'Whole shekels, rounded so the parts add up exactly to the amount claimed. Hover for the exact amount.',
   },
   followUp: {
+    sendTo: 'Send to {count} suppliers',
     unsent: '{count} claims not yet sent to the supplier · {amount}',
     unsentCta: 'Send the claims',
     waiting: '{count} with no reply for 7+ days · {amount}',
@@ -106,6 +113,8 @@ export const en: Shape<typeof he> = {
     claimed: 'Re-open',
   },
   actions: {
+    failedRow: 'This row was not saved.',
+    retry: 'Try again',
     letter_sent: 'Mark letter sent',
     acknowledged: 'Supplier acknowledged',
     credit: 'Record a credit received',
