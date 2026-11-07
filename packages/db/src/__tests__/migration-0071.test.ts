@@ -477,12 +477,22 @@ describe('0071 fails fast on a lock instead of queueing', () => {
       .map((x) => x.trim())
       .filter(Boolean);
 
-  it('starts with lock_timeout and takes every ACCESS EXCLUSIVE lock up front, in one fixed order', () => {
-    const [first, second] = statements();
-    expect(first!.split('\n').filter((l) => !l.startsWith('--')).join('\n').trim()).toBe("SET LOCAL lock_timeout = '5s';");
-    expect(second).toBe(
-      'LOCK TABLE "gr_lines", "goods_receipts", "purchase_orders", "discrepancies", "recovery_claims", "product_aliases", "users" IN ACCESS EXCLUSIVE MODE;',
-    );
+  it('opens with set_config timeouts (not SET LOCAL) and takes every lock up front, parent-first, inside ONE DO block', () => {
+    const code = (x: string) => x.split('\n').filter((l) => !l.trim().startsWith('--')).join('\n').trim();
+    const [a, c, d, e] = statements().map(code);
+    expect(a).toBe("SELECT set_config('lock_timeout', '5s', true);");
+    expect(c).toBe("SELECT set_config('statement_timeout', '6s', true);");
+    expect(d!.startsWith('DO $$')).toBe(true);
+    expect(d!.match(/LOCK TABLE [^;]+;/g)).toEqual([
+      'LOCK TABLE "restaurants", "suppliers" IN SHARE ROW EXCLUSIVE MODE;',
+      // the app's order (startReceiving: purchase_orders → goods_receipts → gr_lines)
+      'LOCK TABLE "purchase_orders", "goods_receipts", "gr_lines" IN ACCESS EXCLUSIVE MODE;',
+      'LOCK TABLE "invoices" IN SHARE ROW EXCLUSIVE MODE;',
+      'LOCK TABLE "discrepancies", "recovery_claims", "product_aliases", "users" IN ACCESS EXCLUSIVE MODE;',
+    ]);
+    expect(e).toBe("SELECT set_config('statement_timeout', (SELECT reset_val FROM pg_settings WHERE name = 'statement_timeout'), true);");
+    // No other LOCK anywhere in the file, and nothing that needs a transaction block at top level.
+    expect(statements().filter((x) => /\bLOCK TABLE\b/i.test(code(x)))).toHaveLength(1);
   });
 
   it('a long reader on users → 55P03 within the timeout, nothing applied; once it ends, a re-run succeeds', async () => {
@@ -523,4 +533,45 @@ describe('0071 fails fast on a lock instead of queueing', () => {
     expect(stamped!.countMethod).toBe('legacy');
     await db.delete(goodsReceipts).where(eq(goodsReceipts.id, gr!.id));
   }, 30_000);
+
+  it('the whole lock phase is bounded at 6 s (statement_timeout): two staggered holders → 57014, nothing applied', async () => {
+    const run = () =>
+      sql.begin(async (tx) => {
+        for (const st of statements()) await tx.unsafe(st);
+      });
+    const blocker = postgres(url, { max: 2, prepare: false });
+    const releases: Array<() => void> = [];
+    const taken: Array<Promise<void>> = [];
+    const hold = (lockSql: string, ms: number) => {
+      let locked!: () => void;
+      taken.push(new Promise<void>((r) => (locked = r)));
+      let release!: () => void;
+      const done = new Promise<void>((r) => (release = r));
+      releases.push(release);
+      return blocker.begin(async (tx) => {
+        await tx.unsafe(lockSql);
+        locked();
+        await Promise.race([done, new Promise((r) => setTimeout(r, ms))]);
+      });
+    };
+    const h1 = hold('lock table restaurants in row exclusive mode', 4_000); // 4 s wait (< lock_timeout)…
+    const h2 = hold('select count(*) from users', 20_000); // …then a second wait: only the 6 s bound stops it
+    try {
+      await Promise.all(taken);
+      const t0 = Date.now();
+      await expectPgError(run(), '57014'); // query_canceled (statement timeout)
+      const took = Date.now() - t0;
+      expect(took).toBeGreaterThan(5_500);
+      expect(took).toBeLessThan(8_000);
+    } finally {
+      for (const r of releases) r();
+      await Promise.all([h1, h2]);
+      await blocker.end();
+    }
+    // The statement timeout was restored afterwards on the success path (checked by the re-run above),
+    // and a failed run leaves the session default untouched (transaction-local set_config).
+    const [{ statement_timeout }] = (await sql`show statement_timeout`) as unknown as [{ statement_timeout: string }];
+    expect(statement_timeout).toBe('0');
+  }, 30_000);
 });
+

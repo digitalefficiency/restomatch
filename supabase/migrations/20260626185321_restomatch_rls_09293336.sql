@@ -4,8 +4,9 @@
 -- Fail fast instead of queueing: this file takes ACCESS EXCLUSIVE on every tenant
 -- table (enable RLS / create policy) in one transaction. One long reader would make
 -- every read wait behind it. With a timeout it errors (55P03), applies nothing, and
--- is re-run once traffic is quiet.
-set local lock_timeout = '5s';
+-- is re-run once traffic is quiet. set_config(…, true), not SET LOCAL: the Supabase
+-- CLI runs the file as one pipeline with no BEGIN (no WARNING in the deploy log).
+select set_config('lock_timeout', '5s', true);
 
 -- 1. The non-owner tenant role. NOLOGIN and NO password in git: after the first
 --    deploy the owner runs  ALTER ROLE restomatch_app WITH LOGIN PASSWORD '…';
@@ -73,7 +74,12 @@ begin
     'price_baselines','approval_rules','audit_log','procurement_connections',
     'email_inboxes','supplier_integrations','notifications_outbox',
     -- 0071 (wave 2, G-03)
-    'idempotency_keys','claim_letters','payment_deductions'
+    'idempotency_keys','claim_letters','payment_deductions',
+    -- 0072 (wave 2, H-03)
+    'export_runs','export_run_invoices','consolidated_invoice_links',
+    'leak_month_snapshots','leak_month_corrections',
+    'supplier_bank_accounts','supplier_bank_account_changes',
+    'push_subscriptions','notification_prefs'
   ] loop
     if exists (
       select 1 from information_schema.columns
