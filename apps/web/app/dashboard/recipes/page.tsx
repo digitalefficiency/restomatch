@@ -38,7 +38,7 @@ export default async function RecipesPage() {
           <PeriodCard compact />
         </div>
       ) : null}
-      <RecipesHome initial={initial} canSetTarget={canSetTarget} />
+      <RecipesHome initial={initial} canSetTarget={canSetTarget} readOnly={active?.role === 'bookkeeper'} />
     </div>
   );
 }

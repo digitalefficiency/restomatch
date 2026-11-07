@@ -26,6 +26,7 @@ export const workbenchHe = {
   qtyAmbiguous: '״{raw}״: 1,250 או 1.25? כתבו עם נקודה עשרונית.',
   qtyInvalid: 'כמות לא תקינה',
   previewError: 'לא הצלחנו לחשב כרגע. המתכון עצמו לא השתנה.',
+  readOnly: 'צפייה בלבד: אפשר לראות את העלויות, בלי לשנות את המתכון.',
 };
 
 export const workbenchEn: Shape<typeof workbenchHe> = {
@@ -49,4 +50,5 @@ export const workbenchEn: Shape<typeof workbenchHe> = {
   qtyAmbiguous: '"{raw}": 1,250 or 1.25? Use a decimal point.',
   qtyInvalid: 'Invalid quantity',
   previewError: "We couldn't calculate right now. The recipe itself is unchanged.",
+  readOnly: 'View only: you can see the costs, not change the recipe.',
 };

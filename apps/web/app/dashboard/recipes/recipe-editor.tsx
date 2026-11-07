@@ -82,7 +82,8 @@ function fromDetail(d: Detail): Line[] {
   }));
 }
 
-export function RecipeEditor({ recipeId, startAsSub = false }: { recipeId?: string; startAsSub?: boolean }) {
+/** `readOnly` (owner decision I3, the bookkeeper): every input disabled, no save / trial / delete; the live numbers still show. */
+export function RecipeEditor({ recipeId, startAsSub = false, readOnly = false }: { recipeId?: string; startAsSub?: boolean; readOnly?: boolean }) {
   const t = useT(recipesNs);
   const tc = useT(components);
   const locale = useLocale();
@@ -175,7 +176,7 @@ export function RecipeEditor({ recipeId, startAsSub = false }: { recipeId?: stri
   }, [live, built.keys]);
 
   const submit = () => {
-    if (trial) return;
+    if (trial || readOnly) return;
     save.mutate({
       id: recipeId,
       name: name.trim(),
@@ -223,7 +224,7 @@ export function RecipeEditor({ recipeId, startAsSub = false }: { recipeId?: stri
         submit();
       }}
     >
-      <div className="space-y-6">
+      <fieldset disabled={readOnly} className="min-w-0 space-y-6">
         {priceAlert && alertsQ.data?.enabled ? (
           <div>
             <p className="mb-1 text-xs text-subtle">{t('alert.banner')}</p>
@@ -365,12 +366,16 @@ export function RecipeEditor({ recipeId, startAsSub = false }: { recipeId?: stri
           <Textarea id="r-notes" rows={3} maxLength={1000} value={notes} onChange={(e) => setNotes(e.target.value)} dir="auto" />
         </Field>
         <PhoneSummary isSub={isSub} live={live} saved={r} pending={preview.pending} />
-      </div>
+      </fieldset>
 
       <aside className="space-y-4 lg:sticky lg:top-36 lg:self-start">
         <Card flow className="space-y-3" data-testid="recipe-live">
           <LiveSummary isSub={isSub} live={live} saved={r} pending={preview.pending} error={preview.error} />
-          {trial ? (
+          {readOnly ? (
+            <p className="rounded-lg bg-surface-2 p-2 text-xs text-muted" data-testid="recipe-readonly">
+              {t('workbench.readOnly')}
+            </p>
+          ) : trial ? (
             <>
               <p className="rounded-lg bg-surface-2 p-2 text-xs text-muted" role="status">
                 {t('workbench.sandbox.on')}
