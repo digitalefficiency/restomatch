@@ -46,6 +46,7 @@ DoD-1..9 of the wave-2 README apply to any screen (WA-04's connect page, WA-11's
 
 | Pkg | Owns | Hands back after merge |
 |---|---|---|
+| WA-00ʰ | `apps/web/app/api/whatsapp/pilot/**` (route), `api/agent/pilot/**` (handler + tests); consumes Ask and owner/approvals/recovery read procedures, edits none | deleted by WA-05ʰ |
 | WA-01 | `api/agent/__tests__/golden/**` (cases), `api/agent/__tests__/sim/**` (simulator), `api/agent/__tests__/recorded/**` | golden set stays with test-sentinel |
 | WA-02 | `api/agent/{index,router,registry,redact,render,links,budget,prompt}.ts`, `api/agent/tools/**`; `ask/**` only as a W3-04b addendum line (`channel` option) | `agent/**` core → WA-07/08 add files only |
 | WA-03ʰ | `packages/db/src/schema.ts` (4 tables), one migration, `rls/0002` list, `rls.ts`, `rls.attack.test.ts` (add-only probes) | schema → H-lane owner |
@@ -67,7 +68,8 @@ DoD-1..9 of the wave-2 README apply to any screen (WA-04's connect page, WA-11's
 | Window | WA sessions (inside AU+WA ≤3) | Notes |
 |---|---|---|
 | now → | **WA-12ʰ** (human, no slot) | Meta verification, number, lawyer pack: weeks elapsed |
-| W-h 7.12 → 20.12 | ✱WA-01 (first free AU/WA slot) | fixtures + simulator need no WA-02 to be written |
+| W-h 7.12 → 20.12 | ✱WA-01 (first free AU/WA slot) · ✱WA-00ʰ draft (human author) | fixtures + simulator need no WA-02 to be written; WA-00ʰ only consumes `ask.ask` (no `ask/**` edit) |
+| 15.12 or 22.12 (deploy Tue) → 31.12 | WA-00ʰ live: RestoMatch owner on lab data, then the pilot owner read-only | the December "pull-only" pilot: no template, no outbox change, no schema |
 | W-i/W-j 5.1 → 30.1 | ✱WA-02 (Tue 5.1) · WA-03ʰ draft · WA-04 + WA-07 server · WA-06ʰ draft (after H-05 merges) · WA-05ʰ server half | **server only** after 17.1 |
 | 2.2 (deploy Tue) | WA-03ʰ merge 09:00 → WA-06ʰ + WA-02/04/07 server in the wave-4 train | backup + 2nd gate |
 | Feb 2027 | WA-05ʰ route, WA-04 web, ✱WA-08 (owner read-only E3 → decisions E4 a week later), ✱WA-11 | E3 ~mid-Feb |
@@ -84,6 +86,7 @@ H-05ʰ + H-05a + AU-04 + AU-12 ─→ WA-06ʰ ─→ WA-08
 ## 7. Package index
 | ID | One line | Owner agent | Effort | Phase | ʰ |
 |---|---|---|---|---|---|
+| [WA-00ʰ](WA-00.md) | December pull-only owner pilot: "בוקר" brief + Ask, read-only, env allow-list, in-window replies only; deleted by WA-05ʰ | web-feature-engineer + human | S–M | ≥7.12, live ≈22.12 | **yes** |
 | [WA-01](WA-01.md) | ≥80 Hebrew golden conversations (≥20 adversarial) + the WhatsApp simulator | test-sentinel | M | WA-A, ≥7.12 | no |
 | [WA-02](WA-02.md) | Read-only agent core on Ask: role tools, server redaction, Hebrew renderer, links after grounding, per-person budgets | web-feature-engineer | L | WA-B, 5.1 → deploy 2.2 | no |
 | [WA-03ʰ](WA-03.md) | Schema + RLS: bindings, conversations, staged actions, message log, sender resolver | tenant-security-warden + human | M | WA-C, merge Tue 2.2 | **yes** |
@@ -115,7 +118,8 @@ H-05ʰ + H-05a + AU-04 + AU-12 ─→ WA-06ʰ ─→ WA-08
 - **WD7 · Packaging:** in Pro and Chain; Basic gets alert templates only. Any plan change is an H-10-style human PR.
 - **WD8 · Model tier and budget:** a small tier of the latest Claude models for routing and simple reads, the top tier for complex requests; 30 turns/person/day inside the restaurant's 60-question, ≈$3/day Ask budget.
 - **WD9 · Retention:** text 30 days, media 90, traces 90, outbound log 13 months; ask the lawyer about Meta's "no storage" mode.
-- **WD10 · Voice notes:** not in v1.
+- **WD10 · December pull-only pilot (WA-00ʰ):** yes: owner-only and read-only, with a reply path beside the outbox that WA-05ʰ deletes; or wait for E3 in February.
+- **Defaults (not decisions):** voice notes are not in v1; WA-12ʰ starts this week.
 
 ## 10. Updates from the orchestrator
 (none yet)

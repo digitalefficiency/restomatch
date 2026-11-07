@@ -441,7 +441,7 @@ Meta webhook ─► [Ears] /api/whatsapp/agent  (new public route, WA-05ʰ)
 
 ### D.4 Inbound webhook (reuse, not a second pipe)
 - Reuse `verifyMetaSignature`, the `ingest/http.ts` guard order and the media fetcher ([code] `providers.ts:101-130`).
-- Extend `parseWhatsAppWebhook` to keep `interactive` (button and list replies), `button` (template quick replies), `statuses` (sent/delivered/read/failed) and `system` events. Today they are dropped ([code] `payloads.ts:139-160`). Voice notes stay out of v1 (WD10).
+- Extend `parseWhatsAppWebhook` to keep `interactive` (button and list replies), `button` (template quick replies), `statuses` (sent/delivered/read/failed) and `system` events. Today they are dropped ([code] `payloads.ts:139-160`). Voice notes stay out of v1 (default, §F.6).
 - **The tenant comes from the verified sender, not from the URL.** A single RestoMatch number serves all tenants (WD1). Today's per-restaurant intake tokens keep working unchanged.
 - Media from a bound receiver, manager or owner goes into the **existing** `processInboundMessage` with the binding's restaurant, so OCR, dedupe and the allow-list logic stay single-sourced.
 
@@ -613,7 +613,8 @@ Dates are proposals and move with the programme plan.
 - **WD7 · Packaging.** **Recommendation:** included in Pro and Chain (cost ≈ ₪14–21 per restaurant per month realistically); Basic gets alert templates only, with no conversational agent. Any plan change is an H-10-style human PR.
 - **WD8 · Model tier and budget.** **Recommendation:** a small tier of the latest Claude models for routing and simple reads, the top tier for complex requests; per-person 30 turns a day inside the restaurant's existing 60-question, ≈ $3/day Ask budget.
 - **WD9 · Retention and Meta storage.** **Recommendation:** the C.5 table (text 30 days, media 90 days, traces 90 days); ask the lawyer whether to use Meta's "no storage" mode.
-- **WD10 · Voice notes.** **Recommendation:** not in v1. Revisit after E4 with he-IL transcription and "transcript shown before any write".
+- **WD10 · December pull-only pilot (WA-00ʰ, added after the owner's 13:07Z addendum).** **Recommendation:** yes: the RestoMatch owner on lab data, then the pilot owner read-only (≈ 22.12–31.12); in-window replies only, no templates, no schema, an env allow-list; a human-authored reply path beside the outbox that WA-05ʰ deletes. Alternative: wait for E3 (Feb).
+- **Defaults (not decisions):** voice notes are not in v1 (revisit after E4 with he-IL transcription and "transcript shown before any write"); WA-12ʰ starts this week.
 
 ### F.7 Success metrics
 **Adoption and speed (measured by AU-07; baselines taken in the 2 weeks before E3):**
