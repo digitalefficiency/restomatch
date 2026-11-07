@@ -94,8 +94,14 @@ export function InvoiceCorrection({
   };
 
   const updateHeader = trpc.receiving.updateInvoiceHeader.useMutation({
-    onSuccess: () => {
+    onSuccess: (res) => {
       setHolderId(null);
+      // Cleared totals over lines are recomputed by the server: show them.
+      if (res.totals) {
+        setExcl(res.totals.totalExclVat ?? '');
+        setVat(res.totals.vatAmount ?? '');
+        setIncl(res.totals.totalInclVat ?? '');
+      }
       onOk(t('correction.savedHeader'));
     },
     onError: (e) => {
@@ -327,6 +333,8 @@ export function InvoiceCorrection({
                 variant="primary"
                 size="sm"
                 loading={runMatch.isPending}
+                // Not while the invoice is being read (the server refuses it too).
+                disabled={invoice.status === 'ocr_pending'}
                 onClick={() => runMatch.mutate({ invoiceId: invoice.id })}
               >
                 <Play className="h-4 w-4 ltr:-scale-x-100" /> {t('correction.rerun')}

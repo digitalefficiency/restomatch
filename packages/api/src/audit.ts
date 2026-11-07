@@ -63,9 +63,7 @@ export type AuditAction =
   | 'receiving.invoice_line_updated'
   | 'receiving.invoice_line_added'
   | 'receiving.invoice_line_deleted'
-  | 'receiving.invoice_retaken'
-  // A manager pinned an invoice's re-match to another order (match.runForInvoice poId)
-  | 'match.po_pinned';
+  | 'receiving.invoice_retaken';
 
 export interface AuditEntry {
   /** Tenant the action belongs to. On a tenant connection this must equal the GUC. */

@@ -25,7 +25,14 @@ import { OVERDUE_BOUNDARY_CASES, OVERDUE_BOUNDARY_NOW } from '../lib/claims';
 import { computeMonthlyReport, ensureMonthlyReport, monthlyReportEmail, monthlyReportWhatsApp, WHATSAPP_MAX } from '../reports/monthly';
 import { renderMonthlyReportPdf } from '../reports/pdf';
 import { sendMonthlyReports } from '../reports/send';
-import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { resetDb, seedTenant as seedTenantPending, type Tenant } from './fixtures';
+
+/** #216 F3: runForInvoice refuses a receipt still being counted — these re-matches stand on a counted, submitted one. */
+async function seedTenant(...args: Parameters<typeof seedTenantPending>): Promise<Tenant> {
+  const t = await seedTenantPending(...args);
+  await args[0].execute(sql`UPDATE goods_receipts SET status = 'completed' WHERE id = ${t.grId}`);
+  return t;
+}
 
 const db = createDb(testDbUrl());
 let T: Tenant;

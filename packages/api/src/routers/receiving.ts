@@ -716,15 +716,26 @@ export const receivingRouter = router({
         sameMoney(set.vatAmount, current.vatAmount) &&
         sameMoney(set.totalInclVat, current.totalInclVat)
       );
-      // Clearing the totals is not typing them: decided by the post-patch excl.
-      const exclAfter = set.totalExclVat !== undefined ? set.totalExclVat : current.totalExclVat;
+      // Clearing the totals is not typing them. Decided on the post-patch header:
+      // all three cleared → the header is OURS again (recomputed from the lines
+      // below); a subtotal cleared under a VAT / total → refused (half a header
+      // would read as a TOTAL_MISMATCH of the whole subtotal).
+      const after = (k: 'totalExclVat' | 'vatAmount' | 'totalInclVat') => (set[k] !== undefined ? set[k] : current[k]);
+      const exclAfter = after('totalExclVat');
+      const allCleared = exclAfter == null && after('vatAmount') == null && after('totalInclVat') == null;
+      // (only a subtotal that WAS there and is removed: a header read / typed with
+      // a total alone, its subtotal never known, stays as it is.)
+      if (totalsTyped && current.totalExclVat != null && exclAfter == null && !allCleared) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'הזינו גם סכום לפני מע״מ' });
+      }
       if (totalsTyped && exclAfter != null) {
         set.ocrPayload = withMarkers(set.ocrPayload ?? current.ocrPayload, { headerEntered: true, manualHeader: false });
-      } else if (totalsTyped && exclAfter == null) {
+      } else if (totalsTyped && allCleared) {
         // Cleared: there is no billed header any more — it is ours to compute
         // from the lines again (never a stale "typed" flag over nothing).
         set.ocrPayload = withMarkers(set.ocrPayload ?? current.ocrPayload, { headerEntered: false, manualHeader: true });
       }
+      const recomputeOurs = totalsTyped && allCleared;
       try {
         // Savepoint: procedures may already run inside a transaction (RLS), and
         // a unique violation aborts it — the holder lookup below would then
@@ -760,7 +771,22 @@ export const receivingRouter = router({
           { invoiceNumber: number, holderDate, holderInvoiceId: holder?.id ?? '' },
         );
       }
-      // Only the fields this edit touched, before and after.
+      // F2: a cleared header over lines is recomputed from them now — a Re-run
+      // must never compare the lines against an empty header (a whole-subtotal
+      // TOTAL_MISMATCH, and a leak capped at a ₪0 invoice total).
+      let totals: InvoiceTotals | null = null;
+      if (recomputeOurs) {
+        const [anyLine] = await ctx.db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, input.invoiceId)).limit(1);
+        if (anyLine) {
+          totals = await recomputeInvoiceTotals(ctx.db, restaurantId, {
+            id: input.invoiceId,
+            supplierId: current.supplierId,
+            ocrPayload: set.ocrPayload ?? current.ocrPayload,
+          });
+        }
+      }
+      // Only the fields this edit touched, before and after (the recomputed
+      // totals when the header became ours again).
       const touched = (['invoiceNumber', 'invoiceDate', 'totalExclVat', 'vatAmount', 'totalInclVat'] as const).filter(
         (k) => set[k] !== undefined,
       );
@@ -771,9 +797,9 @@ export const receivingRouter = router({
         entityType: 'invoice',
         entityId: input.invoiceId,
         before: Object.fromEntries(touched.map((k) => [k, current[k]])),
-        after: Object.fromEntries(touched.map((k) => [k, set[k]])),
+        after: { ...Object.fromEntries(touched.map((k) => [k, set[k]])), ...(totals ?? {}) },
       });
-      return { ok: true };
+      return { ok: true, totals };
     }),
 
   /**
@@ -1824,7 +1850,7 @@ function deletableLineIds(ocrPayload: OcrPayload | null, lineIds: string[]): str
  */
 function assertNotBeingRead(status: string): void {
   if (status === 'ocr_pending') {
-    throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'החשבונית עדיין נקראת — נסו שוב בעוד דקה' });
+    throw appError('PRECONDITION_FAILED', 'invoice.beingRead', 'החשבונית עדיין נקראת — נסו שוב בעוד דקה');
   }
 }
 

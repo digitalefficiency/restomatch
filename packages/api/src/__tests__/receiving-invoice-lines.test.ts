@@ -626,7 +626,7 @@ describe('#216 money review — round 2', () => {
       .returning({ id: invoiceLines.id });
     await db.update(invoices).set({ status: 'ocr_pending', ocrPayload: { provider: 'claude_vision', raw: { scanGrId: A.grId } } }).where(eq(invoices.id, failedId));
     const before = await header(failedId);
-    const reading = { code: 'PRECONDITION_FAILED', message: 'החשבונית עדיין נקראת — נסו שוב בעוד דקה' };
+    const reading = { code: 'PRECONDITION_FAILED', message: 'החשבונית עדיין נקראת — נסו שוב בעוד דקה', cause: { appCode: 'invoice.beingRead' } };
     await expect(
       as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 95, vatAmount: 17.1, totalInclVat: 112.1 } }),
     ).rejects.toMatchObject(reading);
@@ -643,16 +643,23 @@ describe('#216 money review — round 2', () => {
   });
 });
 
-/** Until some backend waits on a lock (the edit queued behind the submit) — no fixed sleep. */
-async function waitForLockWait(timeoutMs = 10_000) {
+/**
+ * Until some backend of this database is blocked BY the holder's backend
+ * (pg_blocking_pids) — no fixed sleep, and no unrelated lock wait counts.
+ */
+async function waitForBlockedBy(holderPid: number, timeoutMs = 10_000) {
   const until = Date.now() + timeoutMs;
   for (;;) {
-    const rows = (await db.execute(sql`select count(*)::int as n from pg_locks where not granted`)) as unknown as Array<{ n: number }>;
+    const rows = (await db.execute(
+      sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and ${holderPid}::int = any(pg_blocking_pids(pid))`,
+    )) as unknown as Array<{ n: number }>;
     if (rows[0]!.n > 0) return;
-    if (Date.now() > until) throw new Error('no backend waited on a lock');
+    if (Date.now() > until) throw new Error(`nothing waited on backend ${holderPid}`);
     await new Promise((r) => setTimeout(r, 20));
   }
 }
+const backendPid = async (tx: { execute: (q: ReturnType<typeof sql>) => Promise<unknown> }) =>
+  ((await tx.execute(sql`select pg_backend_pid()::int as pid`)) as unknown as Array<{ pid: number }>)[0]!.pid;
 
 describe('#216 money review — round 3', () => {
   const runTypes = async () =>
@@ -753,6 +760,7 @@ describe('#216 money review — round 3', () => {
       let edit: Promise<unknown> | undefined;
       let settled = false;
       await other.transaction(async (tx) => {
+        const holder = await backendPid(tx);
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`gr-close:${A.grId}`}))`); // submitReceipt holds it
         await tx.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
         edit = as('manager').receiving.addInvoiceLine({
@@ -760,7 +768,7 @@ describe('#216 money review — round 3', () => {
           line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
         });
         void edit.then(() => (settled = true), () => (settled = true));
-        await waitForLockWait();
+        await waitForBlockedBy(holder);
         expect(settled).toBe(false); // waits for the submit
       });
       expect(await edit).toMatchObject({ rematched: true });
@@ -883,29 +891,6 @@ describe('#216 round 4', () => {
   const stamp = (raw: Record<string, unknown>) =>
     db.update(invoices).set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', ...raw } } }).where(eq(invoices.id, failedId));
 
-  it("1: a manager's way out of a wrong stamp — runForInvoice({ poId }) matches that order (same supplier only), audited", async () => {
-    await db.update(poLines).set({ productId: A.productId }).where(eq(poLines.id, A.poLineId));
-    await stamp({ scanGrId: A.grId }); // stamped on the wrong receipt (one driver, two orders)
-    const [po2] = await db
-      .insert(purchaseOrders)
-      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, expectedDeliveryAt: new Date(), status: 'sent', source: 'manual' })
-      .returning();
-    await db.insert(poLines).values({ poId: po2!.id, productId: A.productId, rawDescription: 'עגבניות', qtyOrdered: '10', unit: 'kg', unitPriceExpected: '8.5' });
-    await db.insert(invoiceLines).values({ invoiceId: failedId, productId: A.productId, rawDescription: 'עגבניות', qtyBilled: '10', unit: 'kg', unitPriceBilled: '8.5', lineTotal: '85.00' });
-    // Another supplier's order is NOT_FOUND (and so is another tenant's).
-    const [other] = await db.insert(suppliers).values({ restaurantId: A.restaurantId, name: 'ספק אחר' }).returning();
-    const [poX] = await db
-      .insert(purchaseOrders)
-      .values({ restaurantId: A.restaurantId, supplierId: other!.id, expectedDeliveryAt: new Date(), status: 'sent', source: 'manual' })
-      .returning();
-    await expect(as('manager').match.runForInvoice({ invoiceId: failedId, poId: poX!.id })).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    const out = await as('manager').match.runForInvoice({ invoiceId: failedId, poId: po2!.id });
-    expect(out.matchRunId).not.toBeNull();
-    expect((await runs())[0]).toMatchObject({ poId: po2!.id });
-    const [audit] = await audits('match.po_pinned');
-    expect(audit).toMatchObject({ entityId: failedId, after: { poId: po2!.id } });
-  });
-
   it('3: a typed header, then cleared — the header is ours again (no invented TOTAL_MISMATCH)', async () => {
     await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 95, vatAmount: 17.1, totalInclVat: 112.1 } });
     await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: null, vatAmount: null, totalInclVat: null } });
@@ -924,11 +909,17 @@ describe('#216 round 4', () => {
   it('4: runForInvoice refuses an invoice being read again (ocr_pending) — no run', async () => {
     await db.insert(invoiceLines).values({ invoiceId: failedId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' });
     await db.update(invoices).set({ status: 'ocr_pending' }).where(eq(invoices.id, failedId));
-    await expect(as('manager').match.runForInvoice({ invoiceId: failedId })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    await expect(as('manager').match.runForInvoice({ invoiceId: failedId })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      cause: { appCode: 'invoice.beingRead' },
+    });
     expect(await runs()).toHaveLength(0);
   });
 
-  it('7: two hand lines mapped to ONE order line never list that order line twice (no double-counted ₪)', async () => {
+  // Not reachable today (addInvoiceLine refuses a second hand line on one order
+  // line): if it ever were, the engine would read the dropped same-PO hand line
+  // as unordered — this only guards the PO list.
+  it('7: picker pairing lists an order line once, even when two hand lines map to it', async () => {
     await db.update(poLines).set({ productId: A.productId }).where(eq(poLines.id, A.poLineId));
     const [h1, h2] = await db
       .insert(invoiceLines)
@@ -956,5 +947,77 @@ describe('#216 round 4', () => {
     expect(row!.total).toBe('19.90'); // as printed, not 2 × 11
   });
 });
+
+describe('#216 round 4 verdict', () => {
+  const runs = () => db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId));
+  const types = async () =>
+    (
+      await db.select({ type: discrepancies.type }).from(discrepancies).innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId)).where(eq(matchRuns.invoiceId, failedId))
+    ).map((t) => t.type);
+  const linkOrder = () => db.update(poLines).set({ productId: A.productId }).where(eq(poLines.id, A.poLineId));
+
+  it('F2: totals typed, then cleared — the header is recomputed from the lines at once; a Re-run shows the real leak, no TOTAL_MISMATCH', async () => {
+    await linkOrder(); // ordered 10 × 8.5, received 5 (the fixture)
+    await db.update(invoices).set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: A.grId } } }).where(eq(invoices.id, failedId));
+    await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { poLineId: A.poLineId, rawDescription: 'עגבניות', qtyBilled: 10, unit: 'kg', unitPriceBilled: 8.5 },
+    });
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 90, vatAmount: 16.2, totalInclVat: 106.2 } });
+    const cleared = await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: null, vatAmount: null, totalInclVat: null } });
+    expect(cleared.totals).toEqual({ totalExclVat: '85.00', vatAmount: '15.30', totalInclVat: '100.30' });
+    expect(await header(failedId)).toEqual({ excl: '85.00', vat: '15.30', incl: '100.30' });
+    const [audit] = (await audits('receiving.invoice_header_updated')).filter((a) => (a.after as { totalExclVat?: unknown }).totalExclVat === '85.00');
+    expect(audit).toBeDefined(); // the recomputed totals are in the audit
+    await as('manager').match.runForInvoice({ invoiceId: failedId });
+    expect(await types()).not.toContain('TOTAL_MISMATCH');
+    expect((await computeInvoiceLeak(db, A.restaurantId, failedId))!.leakIls).toBe(42.5); // 5 short × 8.5
+  });
+
+  it('LOW 6: clearing only the subtotal under a VAT / total is refused — nothing written', async () => {
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 90, vatAmount: 16.2, totalInclVat: 106.2 } });
+    await expect(as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: null } })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: 'הזינו גם סכום לפני מע״מ',
+    });
+    expect(await header(failedId)).toEqual({ excl: '90.00', vat: '16.20', incl: '106.20' });
+  });
+
+  it('F3: an unstamped invoice whose order is still being counted is refused (receiptOpen, no run); once submitted it matches clean', async () => {
+    await linkOrder();
+    // No scan stamp (an emailed copy): its order is found by discovery — and A's receipt is still counting.
+    await db.update(invoices).set({ source: 'email', ocrPayload: null, totalExclVat: '85.00', vatAmount: '15.30', totalInclVat: '100.30' }).where(eq(invoices.id, failedId));
+    await db.insert(invoiceLines).values({ invoiceId: failedId, productId: A.productId, rawDescription: 'עגבניות', qtyBilled: '10', unit: 'kg', unitPriceBilled: '8.5', lineTotal: '85.00' });
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    await expect(as('manager').match.runForInvoice({ invoiceId: failedId })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      cause: { appCode: 'invoice.receiptOpen' },
+    });
+    expect(await runs()).toHaveLength(0);
+    // Control: the count is in (10 received) and submitted → a clean run.
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, A.grLineId));
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
+    const out = await as('manager').match.runForInvoice({ invoiceId: failedId });
+    expect(out.matchRunId).not.toBeNull();
+    expect(await types()).toEqual([]);
+  });
+
+  it('LOW 2: runForInvoice takes the invoice row lock — a retake committing first (ocr_pending) is refused, no run', async () => {
+    await db.insert(invoiceLines).values({ invoiceId: failedId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' });
+    const other = createDb(testDbUrl());
+    let run: Promise<unknown> | undefined;
+    await other.transaction(async (tx) => {
+      const holder = await backendPid(tx);
+      await tx.select({ id: invoices.id }).from(invoices).where(eq(invoices.id, failedId)).for('no key update'); // the retake holds the row
+      run = as('manager').match.runForInvoice({ invoiceId: failedId });
+      run.catch(() => undefined);
+      await waitForBlockedBy(holder);
+      await tx.update(invoices).set({ status: 'ocr_pending' }).where(eq(invoices.id, failedId));
+    });
+    await expect(run!).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', cause: { appCode: 'invoice.beingRead' } });
+    expect(await runs()).toHaveLength(0);
+  });
+});
+
 
 

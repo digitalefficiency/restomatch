@@ -146,13 +146,15 @@ describe('#216 item 1: a hand line on an open receipt is held, then matched by t
   });
 });
 
-/** Until some backend waits on a lock — no fixed sleep (round 4). */
-async function waitForLockWait(timeoutMs = 10_000) {
+/** Until some backend of this database is blocked BY the holder (pg_blocking_pids) — no sleep, no unrelated waits. */
+async function waitForBlockedBy(holderPid: number, timeoutMs = 10_000) {
   const until = Date.now() + timeoutMs;
   for (;;) {
-    const rows = (await db.execute(sql`select count(*)::int as n from pg_locks where not granted`)) as unknown as Array<{ n: number }>;
+    const rows = (await db.execute(
+      sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and ${holderPid}::int = any(pg_blocking_pids(pid))`,
+    )) as unknown as Array<{ n: number }>;
     if (rows[0]!.n > 0) return;
-    if (Date.now() > until) throw new Error('no backend waited on a lock');
+    if (Date.now() > until) throw new Error(`nothing waited on backend ${holderPid}`);
     await new Promise((r) => setTimeout(r, 20));
   }
 }
@@ -181,9 +183,10 @@ describe('#216 round 3, K: a match job never writes a run over an invoice sent b
     const other = createDb(testDbUrl()); // the retake, holding the invoice row
     let job: ReturnType<typeof matchInvoiceForJob> | undefined;
     await other.transaction(async (tx) => {
+      const holder = ((await tx.execute(sql`select pg_backend_pid()::int as pid`)) as unknown as Array<{ pid: number }>)[0]!.pid;
       await tx.select({ id: invoices.id }).from(invoices).where(eq(invoices.id, inv!.id)).for('update');
       job = matchInvoiceForJob(db, { restaurantId, invoiceId: inv!.id, rematch: true, poId: po!.poId! });
-      await waitForLockWait(); // the job read the old status, built, and now waits on the row
+      await waitForBlockedBy(holder); // the job read the old status, built, and now waits on the row
       await tx.update(invoices).set({ status: 'ocr_pending' }).where(eq(invoices.id, inv!.id));
     });
     const out = await job!;
