@@ -168,7 +168,7 @@ describe('contracts.queue (W2-12)', () => {
     expect(q.alertCount).toBe(1);
     // Header = Σ of its visible billed cards (DoD-4).
     const billed = q.items.filter((i) => i.kind !== 'alert');
-    expect(billed.reduce((s, i) => s + (i.kind === 'alert' ? 0 : i.overAgorot), 0)).toBe(q.totalOverAgorot);
+    expect(billed.reduce((s, i) => s + ('overAgorot' in i ? i.overAgorot : 0), 0)).toBe(q.totalOverAgorot);
     // Ranked by ₪: ₪100.00 > ₪52.50 > ≈₪38.00/month.
     expect(q.items.map((i) => (i.kind === 'alert' ? `alert:${i.impact.monthlyAgorot}` : `${i.kind}:${i.overAgorot}`))).toEqual([
       'offset:10000',

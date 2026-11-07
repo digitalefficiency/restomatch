@@ -87,28 +87,40 @@ export function contractWriteErrorKey(err: unknown): 'duplicate' | 'range' | nul
 }
 
 /**
- * Parse a user-typed amount through the ONE shared number parser
- * (`parseNumberInput`, the same grammar as the server import): "1250", "12.5",
+ * LEGACY parser, kept byte-for-byte for G-10's supplier portal
+ * (`app/s/[token]/logic.ts` imports it and pins this behaviour): "1250", "12.5",
  * "1,250" → 1250, "1,234.50" → 1234.5, "12,5" → 12.5; ₪ and spaces ignored;
- * anything ambiguous ("1.250,5", "1e3") → null. Null also for ≤ 0 — a ₪0
- * contract would make every billed line a leak.
- *
- * TODO(G-13): switch to `parseDecimalInput` once it lands. Until then one guard
- * keeps the behaviour G-10's supplier portal pins (`app/s/[token]/logic.ts`
- * imports this): a comma followed by 4+ digits ("1,2345") is neither a
- * thousands group nor a 2-dp decimal, so it stays null.
+ * anything ambiguous ("1.250,5", "1,2345", "1e3") → null; ≤ 0 → null.
+ * The contracts screens no longer use it (they use `parseContractPrice`).
+ * Delete once G-10 has cut the import. TODO(G-13): parseDecimalInput.
  */
 export function parsePrice(raw: string): number | null {
-  const cell = parseNumberInput(raw, { scale: 4, grouping: true, negative: false });
-  if (cell.kind !== 'ok') return null;
-  if (/,\d{4,}$/.test(raw.replace(/[₪\s\u00a0]/g, ''))) return null;
+  const s = raw.replace(/[₪\s\u00a0]/g, '');
+  let norm: string | null = null;
+  if (/^\d+(?:\.\d+)?$/.test(s)) norm = s;
+  else if (/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(s)) norm = s.replace(/,/g, '');
+  else if (/^\d+,\d{1,2}$/.test(s)) norm = s.replace(',', '.');
+  if (norm === null) return null;
+  const n = Number(norm);
   // > 0 after the 4-dp rounding the API stores (0.00004 would be ₪0.0000).
-  return cell.scaled >= 1 ? cell.value : null;
+  return Number.isFinite(n) && Math.round(n * 10_000) >= 1 ? n : null;
+}
+
+/**
+ * A typed contract unit price through the ONE shared number parser
+ * (`parseNumberInput`, the server import's grammar), at the 4-dp NUMERIC(12,4)
+ * scale — a per-gram price like "0,0125" keeps its precision (MoneyInput rounds
+ * to agorot, which would move the leak baseline). Null when empty, invalid or
+ * ≤ 0. TODO(G-13): parseDecimalInput.
+ */
+export function parseContractPrice(raw: string): number | null {
+  const cell = parseNumberInput(raw, { scale: 4, grouping: true, negative: false });
+  return cell.kind === 'ok' && cell.scaled >= 1 ? cell.value : null;
 }
 
 /** "18" (percent, as typed) → 0.18 fraction; null outside (0, 500]. */
 export function percentToFraction(raw: string): number | null {
-  const n = parsePrice(raw);
+  const n = parseContractPrice(raw);
   if (n === null || n <= 0 || n > 500) return null;
   return Math.round(n * 100) / 10000;
 }

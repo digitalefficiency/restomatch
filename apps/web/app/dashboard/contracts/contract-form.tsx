@@ -10,7 +10,6 @@ import {
   Field,
   Input,
   Money,
-  MoneyInput,
   Select,
   displayName,
   friendlyError,
@@ -20,7 +19,7 @@ import { formatDate } from '@/lib/i18n/format';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { contracts as contractsNs } from '@/lib/i18n/messages/contracts';
 import { components } from '@/lib/i18n/messages/components';
-import { contractWriteErrorKey, matchesSearch, todayIso } from './logic';
+import { contractWriteErrorKey, matchesSearch, parseContractPrice, todayIso } from './logic';
 
 export interface SupplierOption {
   id: string;
@@ -30,7 +29,7 @@ export interface SupplierOption {
 
 /**
  * "Add contract price" form: supplier → product (own products first, from
- * contracts.productOptions, with a search box) → price (MoneyInput: text +
+ * contracts.productOptions, with a search box) → price (text +
  * inputMode=decimal), unit, valid from/to, note. W2-12: "what you pay today"
  * (contracts.priceContext) under the price, and "lock current prices as
  * contract" for the chosen supplier. With `fixedSupplierId` (the supplier
@@ -53,7 +52,7 @@ export function ContractForm({
 
   const [supplierId, setSupplierId] = useState(fixedSupplierId ?? '');
   const [productId, setProductId] = useState('');
-  const [priceAgorot, setPriceAgorot] = useState<number | null>(null);
+  const [price, setPrice] = useState('');
   const [productQuery, setProductQuery] = useState('');
   const [lockPreview, setLockPreview] = useState<{ count: number; monthlyAgorot: number; today: string } | null>(null);
   const [unit, setUnit] = useState('');
@@ -75,8 +74,7 @@ export function ContractForm({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    // TODO(G-13): parseDecimalInput; MoneyInput parses via the shared grammar to agorot.
-    const value = priceAgorot === null || priceAgorot <= 0 ? null : priceAgorot / 100;
+    const value = parseContractPrice(price);
     if (!supplierId || !productId || !validFrom) return setError(t('form.errors.required'));
     if (value === null) return setError(t('form.errors.price'));
     if (validTo && validTo < validFrom) return setError(t('form.errors.range'));
@@ -93,7 +91,7 @@ export function ContractForm({
       toast.success(t('form.created'));
       void utils.contracts.list.invalidate();
       setProductId('');
-      setPriceAgorot(null);
+      setPrice('');
       setUnit('');
       setNote('');
       onDone();
@@ -209,7 +207,17 @@ export function ContractForm({
             </Select>
           </Field>
           <Field label={t('form.price')} htmlFor="cf-price">
-            <MoneyInput id="cf-price" value={priceAgorot} onValueChange={setPriceAgorot} aria-describedby="cf-price-context" />
+            {/* Text + inputMode=decimal (never type=number); 4 dp kept for per-gram prices. */}
+            <Input
+              id="cf-price"
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
+              className="text-right"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              aria-describedby="cf-price-context"
+            />
             <p id="cf-price-context" className="mt-1 text-xs text-muted" data-testid="price-context">
               {!productId || !context.data ? null : context.data.lastPrice == null ? (
                 t('form.noHistory')

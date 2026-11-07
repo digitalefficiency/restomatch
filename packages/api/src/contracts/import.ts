@@ -9,7 +9,7 @@ import {
 } from '@restomatch/db';
 import type { ParsedTable } from '../catalog/parse';
 import { parsePriceCell } from '../lib/parseMoneyCell';
-import { contractInForce } from './core';
+import { contractInForce, contractPriceInUnit } from './core';
 
 /** Column mapping for a contract price-list upload. */
 export interface ContractColumnMapping {
@@ -360,7 +360,12 @@ export async function diffContractRows(
     }
     writable += 1;
     const own = contracts.filter((c) => c.productId === productId);
-    const current = contractInForce(own, validFrom!);
+    const inForce = contractInForce(own, validFrom!);
+    // Compare in the ROW's unit (rule 4): a ₪40/kg contract vs a ₪0.04/g row is no change.
+    const rowUnit = r.unit ?? p?.unit ?? null;
+    const currentInRowUnit =
+      inForce && rowUnit ? contractPriceInUnit({ ...inForce, unit: inForce.unit ?? p?.unit ?? null }, rowUnit) : null;
+    const current = inForce && currentInRowUnit !== null ? { contractPrice: currentInRowUnit } : null;
     const newUnits = Math.round(r.price! * 10_000);
     if (!current) {
       counts.new += 1;

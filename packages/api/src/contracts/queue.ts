@@ -128,7 +128,11 @@ export async function loadContractsQueue(
     for (const d of disc) if (d.invoiceLineId && !openDisc.has(d.invoiceLineId)) openDisc.set(d.invoiceLineId, d.id);
   }
 
-  const over: QueueOverItem[] = lines.slice(0, QUEUE_LINE_LIMIT).map((l) => {
+  // Rank by ₪ BEFORE capping, so the cards kept are the largest; the header is Σ of
+  // exactly the cards returned (DoD-4) and `truncated` says when more exist.
+  const ranked = [...lines].sort((a, b) => b.overAgorot - a.overAgorot);
+  if (ranked.length > QUEUE_LINE_LIMIT) truncated = true;
+  const over: QueueOverItem[] = ranked.slice(0, QUEUE_LINE_LIMIT).map((l) => {
     const invoiceStatus = status.get(l.invoiceId) ?? 'matched';
     const discrepancyId = openDisc.get(l.invoiceLineId) ?? null;
     return { ...l, kind: overActionFor(discrepancyId, invoiceStatus), discrepancyId, invoiceStatus, invoicePaid: invoiceStatus === 'paid' };

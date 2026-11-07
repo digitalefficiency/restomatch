@@ -467,7 +467,7 @@ export const contractsRouter = router({
       await assertProductOwned(ctx.db, input.productId, rid);
       const today = await restaurantToday(ctx.db, rid);
       const [existing] = await ctx.db
-        .select({ id: supplierContractPrices.id, contractPrice: supplierContractPrices.contractPrice })
+        .select({ id: supplierContractPrices.id, contractPrice: supplierContractPrices.contractPrice, unit: supplierContractPrices.unit })
         .from(supplierContractPrices)
         .where(
           and(
@@ -477,15 +477,8 @@ export const contractsRouter = router({
             eq(supplierContractPrices.validFrom, today),
           ),
         )
-        .limit(1)
-        .for('update');
-      if (existing) {
-        await ctx.db
-          .update(supplierContractPrices)
-          .set({ contractPrice: input.contractPrice.toFixed(4), ...(input.unit !== undefined ? { unit: input.unit || null } : {}) })
-          .where(and(eq(supplierContractPrices.id, existing.id), eq(supplierContractPrices.restaurantId, rid)));
-        return { id: existing.id, validFrom: today, created: false as const, previousPrice: Number(existing.contractPrice) };
-      }
+        .limit(1);
+      // One upsert on (supplier, product, valid_from): a double click updates, never a 500.
       const [row] = await ctx.db
         .insert(supplierContractPrices)
         .values({
@@ -499,8 +492,19 @@ export const contractsRouter = router({
           source: 'manual',
           createdBy: ctx.session.userId,
         })
-        .returning({ id: supplierContractPrices.id });
-      return { id: row!.id, validFrom: today, created: true as const, previousPrice: null };
+        .onConflictDoUpdate({
+          target: [supplierContractPrices.supplierId, supplierContractPrices.productId, supplierContractPrices.validFrom],
+          set: {
+            contractPrice: input.contractPrice.toFixed(4),
+            ...(input.unit !== undefined ? { unit: input.unit || null } : {}),
+          },
+        })
+        .returning({ id: supplierContractPrices.id, inserted: sql<boolean>`(xmax = 0)` });
+      if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'contract price not found' });
+      // Undo restores price AND unit of a row that already started today.
+      return row.inserted || !existing
+        ? { id: row.id, validFrom: today, created: true as const, previousPrice: null, previousUnit: null }
+        : { id: row.id, validFrom: today, created: false as const, previousPrice: Number(existing.contractPrice), previousUnit: existing.unit };
     }),
 
   /** Over-contract lines of one invoice (the invoice-view badge). */

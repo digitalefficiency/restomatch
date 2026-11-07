@@ -105,6 +105,18 @@ describe('contracts.importDiff (W2-12)', () => {
   });
 });
 
+describe('contracts.importDiff units (W2-12 review)', () => {
+  it('compares in the row unit: ₪9/kg contract vs ₪0.009/g row is "same", not a 99.9 % drop', async () => {
+    const d = await caller(A, 'manager').contracts.importDiff({
+      supplierId: A.supplierId,
+      file: { filename: 'g.csv', text: 'תיאור,יחידה,מחיר חוזה\nעגבניה A,גרם,0.009\n' },
+      mapping: { name: 'תיאור', unit: 'יחידה', price: 'מחיר חוזה' },
+      defaultValidFrom: '2026-11-08',
+    });
+    expect(d.rows[0]).toMatchObject({ chip: 'same', currentPrice: 0.009, newPrice: 0.009, deltaPct: 0 });
+  });
+});
+
 describe('contracts.importCommit excludeRowIds (W2-12)', () => {
   it('an excluded row is not written; "1,250" → 1250.0000; an unparseable cell is held out', async () => {
     const res = await caller(A, 'manager').contracts.importCommit({

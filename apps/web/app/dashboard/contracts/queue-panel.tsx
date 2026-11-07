@@ -195,7 +195,8 @@ function OverCard({ item, canManage }: { item: OverItem; canManage: boolean }) {
           onClick: async () => {
             try {
               if (res.created) await remove.mutateAsync({ id: res.id });
-              else if (res.previousPrice != null) await update.mutateAsync({ id: res.id, contractPrice: res.previousPrice });
+              else if (res.previousPrice != null)
+                await update.mutateAsync({ id: res.id, contractPrice: res.previousPrice, unit: res.previousUnit });
               toast.info(t('queue.over.undone'));
               refresh();
             } catch (err) {

@@ -6,6 +6,7 @@ import {
   approvalsDeepLink,
   daysUntil,
   matchesSearch,
+  parseContractPrice,
   parsePrice,
   waDraftLink,
   todayIso,
@@ -41,6 +42,16 @@ describe('contracts screen logic', () => {
     expect(approvalsDeepLink('abc-1')).toBe('/dashboard/approvals?invoice=abc-1');
     expect(waDraftLink('שלום ₪10', '050-1234567')).toBe(`https://wa.me/972501234567?text=${encodeURIComponent('שלום ₪10')}`);
     expect(waDraftLink('x', null)).toBe('https://wa.me/?text=x');
+  });
+
+  it('parseContractPrice: the shared parser at 4 dp (per-gram prices keep their precision)', () => {
+    expect(parseContractPrice('0,0125')).toBe(0.0125);
+    expect(parseContractPrice('1,250')).toBe(1250);
+    expect(parseContractPrice('12,5')).toBe(12.5);
+    expect(parseContractPrice('₪ 96.00')).toBe(96);
+    expect(parseContractPrice('0')).toBeNull();
+    expect(parseContractPrice('-3')).toBeNull();
+    expect(parseContractPrice('abc')).toBeNull();
   });
 
   it('expiry and search helpers', () => {

@@ -17,7 +17,6 @@ import {
   Input,
   LinkButton,
   Money,
-  MoneyInput,
   Select,
   Skeleton,
   displayName,
@@ -32,7 +31,7 @@ import { originalProps } from '@/lib/i18n/original';
 import { contracts as contractsNs } from '@/lib/i18n/messages/contracts';
 import { components } from '@/lib/i18n/messages/components';
 import { ContractForm, type SupplierOption } from './contract-form';
-import { EXPIRY_WARN_DAYS, contractStatus, contractWriteErrorKey, daysUntil, matchesSearch, todayIso } from './logic';
+import { EXPIRY_WARN_DAYS, contractStatus, contractWriteErrorKey, daysUntil, matchesSearch, parseContractPrice, todayIso } from './logic';
 
 type Row = inferRouterOutputs<AppRouter>['contracts']['list'][number];
 
@@ -74,9 +73,8 @@ export function ContractsPanel({
   const [editing, setEditing] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [confirming, setConfirming] = useState<Row | null>(null);
-  const [draft, setDraft] = useState<{ priceAgorot: number | null; price: number | null; unit: string; validFrom: string; validTo: string; note: string }>({
-    priceAgorot: null,
-    price: null,
+  const [draft, setDraft] = useState<{ price: string; unit: string; validFrom: string; validTo: string; note: string }>({
+    price: '',
     unit: '',
     validFrom: '',
     validTo: '',
@@ -101,8 +99,7 @@ export function ContractsPanel({
     setRowError(null);
     setEditing(r.id);
     setDraft({
-      price: Number(r.contractPrice),
-      priceAgorot: Math.round(Number(r.contractPrice) * 100),
+      price: String(Number(r.contractPrice)),
       unit: r.unit ?? '',
       validFrom: r.validFrom,
       validTo: r.validTo ?? '',
@@ -112,9 +109,8 @@ export function ContractsPanel({
 
   async function saveEdit(r: Row) {
     setRowError(null);
-    // TODO(G-13): MoneyInput parses to agorot; a 3–4 dp contract price keeps its stored value unless retyped.
-    const value = draft.price;
-    if (value === null || !(value > 0)) return setRowError(t('form.errors.price'));
+    const value = parseContractPrice(draft.price);
+    if (value === null) return setRowError(t('form.errors.price'));
     if (!draft.validFrom) return setRowError(t('form.errors.required'));
     if (draft.validTo && draft.validTo < draft.validFrom) return setRowError(t('form.errors.range'));
     try {
@@ -182,10 +178,14 @@ export function ContractsPanel({
     return (
       <div className="grid gap-2 sm:grid-cols-2">
         <Field label={t('form.price')} htmlFor={`edit-price-${r.id}`}>
-          <MoneyInput
+          <Input
             id={`edit-price-${r.id}`}
-            value={draft.priceAgorot}
-            onValueChange={(agorot) => setDraft({ ...draft, priceAgorot: agorot, price: agorot === null ? null : agorot / 100 })}
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
+            className="text-right"
+            value={draft.price}
+            onChange={(e) => setDraft({ ...draft, price: e.target.value })}
           />
         </Field>
         <Field label={t('form.unit')} htmlFor={`edit-unit-${r.id}`}>
