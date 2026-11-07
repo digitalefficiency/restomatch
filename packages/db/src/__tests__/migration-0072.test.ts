@@ -294,7 +294,7 @@ describe('0072 the ten new tenant tables', () => {
     for (const r of rows) expect(r.qual).toContain('app.current_restaurant_id()');
   });
 
-  it('push devices, notification prefs and settings carry own-user RESTRICTIVE policies', async () => {
+  it('push devices, notification prefs and settings carry own-user RESTRICTIVE policies (incl. DELETE)', async () => {
     const rows = (await sql`
       select c.relname, p.polname, p.polcmd,
              coalesce(pg_get_expr(p.polqual, p.polrelid), '') || ' ' || coalesce(pg_get_expr(p.polwithcheck, p.polrelid), '') as expr
@@ -302,10 +302,13 @@ describe('0072 the ten new tenant tables', () => {
       where not p.polpermissive and c.relname in ${sql(TABLES)} order by c.relname, p.polname
     `) as unknown as Array<{ relname: string; polname: string; polcmd: string; expr: string }>;
     expect(rows.map((r) => [r.relname, r.polname, r.polcmd])).toEqual([
+      ['notification_prefs', 'notification_prefs_own_delete', 'd'],
       ['notification_prefs', 'notification_prefs_own_insert', 'a'],
       ['notification_prefs', 'notification_prefs_own_update', 'w'],
+      ['notification_settings', 'notification_settings_own_delete', 'd'],
       ['notification_settings', 'notification_settings_own_insert', 'a'],
       ['notification_settings', 'notification_settings_own_update', 'w'],
+      ['push_subscriptions', 'push_subscriptions_own_delete', 'd'],
       ['push_subscriptions', 'push_subscriptions_own_insert', 'a'],
       ['push_subscriptions', 'push_subscriptions_own_select', 'r'],
       ['push_subscriptions', 'push_subscriptions_own_update', 'w'],
@@ -703,6 +706,29 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
         CHECK_VIOLATION,
       );
     }
+    // Value types too: nothing nested under an ALLOWED key, no ciphertext under holder_name.
+    const typed: Array<Record<string, unknown>> = [
+      { holder_name: { account_number: '123456789' } },
+      { holder_name: 'v1:kid:iv:ct:tag' },
+      { holder_name: ['123456789'] },
+      { bank_code: { n: '12' } },
+      { bank_code: 12 },
+      { branch_code: '3456789' },
+      { account_last4: 6789 },
+      { active: 'yes' },
+      { verified_by: { account_number: '123456789' } },
+      { verified_at: ['x'] },
+    ];
+    for (const leaked of typed) {
+      await expectPgError(
+        db.insert(supplierBankAccountChanges).values({ restaurantId: A.restaurantId, bankAccountId: a!.id, after: { ...masked, ...leaked } }),
+        CHECK_VIOLATION,
+      );
+      await expectPgError(
+        db.insert(supplierBankAccountChanges).values({ restaurantId: A.restaurantId, bankAccountId: a!.id, before: { ...masked, ...leaked }, after: masked }),
+        CHECK_VIOLATION,
+      );
+    }
     for (const bad of [{ ...masked, account_last4: '123456789' }, { ...masked, account_last4: 'abcd' }]) {
       await expectPgError(db.insert(supplierBankAccountChanges).values({ restaurantId: A.restaurantId, bankAccountId: a!.id, after: bad }), CHECK_VIOLATION);
     }
@@ -716,6 +742,9 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
     await db.delete(users).where(eq(users.id, u!.id));
     const [after] = await db.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.id, ch!.id));
     expect(after).toMatchObject({ changedBy: null, after: masked });
+    // The audit trigger is the only writer: SECURITY DEFINER with a pinned search_path.
+    const [fn] = (await sql`select prosecdef, proconfig from pg_proc where proname = 'restomatch_bank_account_audit'`) as unknown as Array<{ prosecdef: boolean; proconfig: string[] }>;
+    expect(fn).toMatchObject({ prosecdef: true, proconfig: ['search_path=pg_catalog, public'] });
     await dropAccounts(eq(supplierBankAccounts.id, a!.id));
     await dropAccounts(eq(supplierBankAccounts.id, ab!.id));
   });
@@ -797,6 +826,7 @@ describe('0072 push_subscriptions / WhatsApp consent / notification_prefs + sett
     await expectPgError(sql`update users set whatsapp_opt_in_source = 'admin' where id = ${userId}`, CHECK_VIOLATION); // admin cannot opt someone in
     await expectPgError(sql`update users set whatsapp_opt_in_at = null where id = ${userId}`, CHECK_VIOLATION); // opted in without a when
     await expectPgError(sql`update users set whatsapp_opt_in_source = null where id = ${userId}`, CHECK_VIOLATION); // nor a where
+    await expectPgError(sql`update users set whatsapp_opt_in_notice_version = null where id = ${userId}`, CHECK_VIOLATION); // nor which notice
     // An admin revoke is fine: opt_in false, source 'admin' = the last change.
     await db.update(users).set({ whatsappOptIn: false, whatsappOptInAt: new Date(), whatsappOptInSource: 'admin' }).where(eq(users.id, userId));
     await expectPgError(sql`update users set whatsapp_opt_in = true where id = ${userId}`, CHECK_VIOLATION);

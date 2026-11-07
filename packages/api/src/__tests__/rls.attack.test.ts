@@ -1185,15 +1185,15 @@ describe('0072 (H-03) supplier_bank_account_changes (raw RLS)', () => {
       withRestaurant(appDb, A.restaurantId, (tx) =>
         tx.insert(supplierBankAccountChanges).values({ restaurantId: B.restaurantId, bankAccountId: accts.get(B.restaurantId)!, after: { account_last4: '0000' } }),
       ),
-    ).rejects.toThrow(/row-level security/);
-    const updated = await withRestaurant(appDb, A.restaurantId, (tx) =>
-      tx
-        .update(supplierBankAccountChanges)
-        .set({ changedBy: null })
-        .where(eq(supplierBankAccountChanges.restaurantId, B.restaurantId))
-        .returning({ id: supplierBankAccountChanges.id }),
-    );
-    expect(updated).toHaveLength(0);
+    ).rejects.toThrow(/row-level security|permission denied/);
+    // The tenant role holds no UPDATE on the audit at all (rls.ts): refused outright.
+    await expect(
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        tx.update(supplierBankAccountChanges).set({ changedBy: null }).where(eq(supplierBankAccountChanges.restaurantId, B.restaurantId)),
+      ),
+    ).rejects.toThrow(/permission denied/);
+    const bRows = await ownerDb.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.restaurantId, B.restaurantId));
+    expect(bRows).toHaveLength(1);
   });
 });
 
@@ -1249,6 +1249,22 @@ describe('0072 (H-03) push_subscriptions (raw RLS)', () => {
     expect(touched).toHaveLength(0);
     await ownerDb.delete(pushSubscriptions).where(eq(pushSubscriptions.id, other!.id));
   });
+
+  it('a member DELETEs only their OWN rows: a targeted delete of a teammate\'s row is 0, an unqualified delete keeps them', async () => {
+    const [other] = await ownerDb.insert(pushSubscriptions).values({ restaurantId: A.restaurantId, userId: B.ownerUserId, endpoint: 'https://push.test/a-other-del', p256dh: 'k', auth: 'a' }).returning();
+    const targeted = await asMember(A.restaurantId, A.ownerUserId, (tx) =>
+      tx.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, B.ownerUserId)).returning({ id: pushSubscriptions.id }),
+    );
+    expect(targeted).toHaveLength(0);
+    await asMember(A.restaurantId, A.ownerUserId, (tx) => tx.delete(pushSubscriptions));
+    const left = await ownerDb.select({ id: pushSubscriptions.id }).from(pushSubscriptions).where(eq(pushSubscriptions.id, other!.id));
+    expect(left).toHaveLength(1);
+    // B's own row in B is untouched as well; A's own row was the only one removed.
+    const bLeft = await ownerDb.select({ id: pushSubscriptions.id }).from(pushSubscriptions).where(eq(pushSubscriptions.restaurantId, B.restaurantId));
+    expect(bLeft).toHaveLength(1);
+    await ownerDb.delete(pushSubscriptions).where(eq(pushSubscriptions.id, other!.id));
+    await ownerDb.insert(pushSubscriptions).values({ restaurantId: A.restaurantId, userId: A.ownerUserId, endpoint: `https://push.test/${A.restaurantId}`, p256dh: 'k', auth: 'a' });
+  });
 });
 
 describe('0072 (H-03) notification_prefs (raw RLS)', () => {
@@ -1293,6 +1309,22 @@ describe('0072 (H-03) notification_prefs (raw RLS)', () => {
         tx.update(notificationPrefs).set({ userId: B.ownerUserId }).where(eq(notificationPrefs.restaurantId, A.restaurantId)),
       ),
     ).rejects.toThrow(/row-level security/);
+  });
+
+  it('a member DELETEs only their OWN rows: a targeted delete of a teammate\'s row is 0, an unqualified delete keeps them', async () => {
+    const [other] = await ownerDb.insert(notificationPrefs).values({ restaurantId: A.restaurantId, userId: B.ownerUserId, channel: 'whatsapp', eventKind: 'opted_out' }).returning();
+    const targeted = await asMember(A.restaurantId, A.ownerUserId, (tx) =>
+      tx.delete(notificationPrefs).where(eq(notificationPrefs.userId, B.ownerUserId)).returning({ id: notificationPrefs.id }),
+    );
+    expect(targeted).toHaveLength(0);
+    await asMember(A.restaurantId, A.ownerUserId, (tx) => tx.delete(notificationPrefs));
+    const left = await ownerDb.select({ id: notificationPrefs.id }).from(notificationPrefs).where(eq(notificationPrefs.id, other!.id));
+    expect(left).toHaveLength(1);
+    // B's own row in B is untouched as well; A's own row was the only one removed.
+    const bLeft = await ownerDb.select({ id: notificationPrefs.id }).from(notificationPrefs).where(eq(notificationPrefs.restaurantId, B.restaurantId));
+    expect(bLeft).toHaveLength(1);
+    await ownerDb.delete(notificationPrefs).where(eq(notificationPrefs.id, other!.id));
+    await ownerDb.insert(notificationPrefs).values({ restaurantId: A.restaurantId, userId: A.ownerUserId, channel: 'email', eventKind: 'claim_overdue' });
   });
 });
 
@@ -1339,6 +1371,22 @@ describe('0072 (H-03) notification_settings (raw RLS)', () => {
       ),
     ).rejects.toThrow(/row-level security/);
   });
+
+  it('a member DELETEs only their OWN rows: a targeted delete of a teammate\'s row is 0, an unqualified delete keeps them', async () => {
+    const [other] = await ownerDb.insert(notificationSettings).values({ restaurantId: A.restaurantId, userId: B.ownerUserId }).returning();
+    const targeted = await asMember(A.restaurantId, A.ownerUserId, (tx) =>
+      tx.delete(notificationSettings).where(eq(notificationSettings.userId, B.ownerUserId)).returning({ id: notificationSettings.id }),
+    );
+    expect(targeted).toHaveLength(0);
+    await asMember(A.restaurantId, A.ownerUserId, (tx) => tx.delete(notificationSettings));
+    const left = await ownerDb.select({ id: notificationSettings.id }).from(notificationSettings).where(eq(notificationSettings.id, other!.id));
+    expect(left).toHaveLength(1);
+    // B's own row in B is untouched as well; A's own row was the only one removed.
+    const bLeft = await ownerDb.select({ id: notificationSettings.id }).from(notificationSettings).where(eq(notificationSettings.restaurantId, B.restaurantId));
+    expect(bLeft).toHaveLength(1);
+    await ownerDb.delete(notificationSettings).where(eq(notificationSettings.id, other!.id));
+    await ownerDb.insert(notificationSettings).values({ restaurantId: A.restaurantId, userId: A.ownerUserId });
+  });
 });
 
 describe('0072 (H-03) append-only tables under the RLS app role', () => {
@@ -1380,6 +1428,27 @@ describe('0072 (H-03) append-only tables under the RLS app role', () => {
     await ownerDb.delete(supplierBankAccounts);
     await ownerDb.delete(leakMonthCorrections);
     await ownerDb.delete(leakMonthSnapshots);
+  });
+
+  it('a forged bank audit row is refused: only the trigger writes the audit (even same-tenant, even with a real actor)', async () => {
+    const [acct] = await ownerDb
+      .insert(supplierBankAccounts)
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:ct', accountLast4: '6789' })
+      .returning();
+    await expect(
+      asMember(A.restaurantId, A.ownerUserId, (tx) =>
+        tx.insert(supplierBankAccountChanges).values({
+          restaurantId: A.restaurantId,
+          bankAccountId: acct!.id,
+          changedBy: B.ownerUserId, // another tenant's user
+          after: { bank_code: '99', branch_code: '999', account_last4: '0000', holder_name: 'forged' },
+        }),
+      ),
+    ).rejects.toThrow(/permission denied/);
+    const log = await ownerDb.select().from(supplierBankAccountChanges).where(eq(supplierBankAccountChanges.bankAccountId, acct!.id));
+    expect(log).toHaveLength(1); // only the insert trigger's row
+    await ownerDb.delete(supplierBankAccountChanges);
+    await ownerDb.delete(supplierBankAccounts);
   });
 
   it('a bank change made through the app is audited with the session user as changed_by', async () => {

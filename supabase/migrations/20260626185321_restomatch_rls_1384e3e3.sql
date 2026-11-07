@@ -851,6 +851,10 @@ grant usage on schema public to restomatch_app;
         if to_regclass('public.leak_month_snapshots') is not null then
           execute 'revoke insert, update, delete on leak_month_snapshots, leak_month_corrections from restomatch_app';
         end if;
+        -- 0072: the bank audit is written ONLY by its SECURITY DEFINER trigger.
+        if to_regclass('public.supplier_bank_account_changes') is not null then
+          execute 'revoke insert, update, delete on supplier_bank_account_changes from restomatch_app';
+        end if;
       end $$;
 
 -- 5. Storage (Supabase): the private invoice-scans bucket the app uploads to,

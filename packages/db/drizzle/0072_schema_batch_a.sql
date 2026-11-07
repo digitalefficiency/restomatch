@@ -58,15 +58,21 @@
 -- supplier_catalog_items (+effective_from)
 --                        the date a price-list row takes effect.
 -- push_subscriptions     a Web Push endpoint per user device (unique per restaurant);
---                        a member reads and writes only their own (RESTRICTIVE).
+--                        a member reads, changes and deletes only their own (RESTRICTIVE).
 -- users (+whatsapp_opt_in, _at, _source, _notice_version)
 --                        WhatsApp consent; _at/_source/_notice_version = the last
 --                        change. Opting in needs _at + _source (CHECK); an admin may
---                        only revoke. The tenant app role has no INSERT/UPDATE/DELETE
---                        on users (rls.ts): the only writer is the auth/owner connection.
--- notification_prefs     per user × channel × event kind: on/off (own rows only).
+--                        only revoke; opting in also needs _notice_version. The tenant
+--                        app role has no INSERT/UPDATE/DELETE on users (rls.ts): the only
+--                        writer is the auth/owner connection.
+-- notification_prefs     per user × channel × event kind: on/off.
 -- notification_settings  ONE row per (restaurant, user): quiet hours (23:00-06:00),
---                        Shabbat, holidays, daily cap (6, 1..50) (own rows only).
+--                        Shabbat, holidays, daily cap (6, 1..50).
+--                        prefs + settings: teammates in the restaurant can READ them (on
+--                        purpose: notify() runs as the acting member and must see the
+--                        recipients' opt-outs); only you can insert, change or delete
+--                        yours (RESTRICTIVE). Cross-user cleanup goes through the owner
+--                        connection.
 --
 -- Tenant safety: the 0057/0070/0071 pattern. Every new table carries restaurant_id
 -- NOT NULL, UNIQUE (id, restaurant_id), SAME-TENANT composite FKs to tenant tables,
@@ -104,9 +110,10 @@
 --     supplier_bank_accounts, leak_month_corrections, leak_month_snapshots,
 --     consolidated_invoice_links, export_run_invoices, export_runs;  -- their triggers go with them
 --   DROP FUNCTION public.restomatch_append_only(), public.restomatch_bank_account_guard(),
---     public.restomatch_bank_account_audit();                       -- after the triggers
+--     public.restomatch_bank_account_audit(),
+--     public.restomatch_bank_audit_masked(jsonb);                    -- after the tables/triggers
 --   ALTER TABLE goods_receipts DROP CONSTRAINT goods_receipts_id_restaurant_id_key;
---   (rls.ts: drop the leak_month_* revoke in the same revert.)
+--   (rls.ts: drop the leak_month_* and supplier_bank_account_changes revokes in the same revert.)
 --   ALTER TABLE invoices DROP CONSTRAINT invoices_paid_pair_check,
 --     DROP CONSTRAINT invoices_payment_requires_paid_check, DROP COLUMN paid_at,
 --     DROP COLUMN paid_amount, DROP COLUMN payment_method, DROP COLUMN payment_ref;
@@ -372,6 +379,26 @@ CREATE INDEX IF NOT EXISTS "supplier_bank_accounts_restaurant_idx" ON "supplier_
 CREATE INDEX IF NOT EXISTS "supplier_bank_accounts_verified_by_idx" ON "supplier_bank_accounts" USING btree ("verified_by");--> statement-breakpoint
 DROP TRIGGER IF EXISTS "supplier_bank_accounts_set_updated_at" ON "supplier_bank_accounts";--> statement-breakpoint
 CREATE TRIGGER "supplier_bank_accounts_set_updated_at" BEFORE UPDATE ON "supplier_bank_accounts" FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();--> statement-breakpoint
+-- The MASKED shape of one side of a bank audit row, by ALLOWLIST and by VALUE TYPE:
+-- an object whose keys are only the masked fields; bank/branch = short digit strings,
+-- last4 = a string of at most 4 digits, holder_name = a short string (never a
+-- ciphertext envelope) or null, active = a boolean, verified_by / verified_at = a
+-- string or null. So nothing nested, and no number or ciphertext, can ride along.
+CREATE OR REPLACE FUNCTION public.restomatch_bank_audit_masked(j jsonb) RETURNS boolean
+  LANGUAGE sql IMMUTABLE
+  SET search_path = pg_catalog, public
+  AS $$
+  SELECT jsonb_typeof(j) = 'object'
+    AND j - ARRAY['bank_code', 'branch_code', 'account_last4', 'holder_name', 'active', 'verified_by', 'verified_at'] = '{}'::jsonb
+    AND jsonb_typeof(coalesce(j -> 'bank_code', '"0"')) = 'string' AND (j ->> 'bank_code') ~ '^[0-9]{1,3}$' IS NOT FALSE
+    AND jsonb_typeof(coalesce(j -> 'branch_code', '"0"')) = 'string' AND (j ->> 'branch_code') ~ '^[0-9]{1,4}$' IS NOT FALSE
+    AND jsonb_typeof(coalesce(j -> 'account_last4', '"0"')) = 'string' AND (j ->> 'account_last4') ~ '^[0-9]{1,4}$' IS NOT FALSE
+    AND jsonb_typeof(coalesce(j -> 'holder_name', 'null')) IN ('string', 'null')
+    AND (j ->> 'holder_name') !~ '^v[0-9]+:' IS NOT FALSE AND length(coalesce(j ->> 'holder_name', '')) <= 200
+    AND jsonb_typeof(coalesce(j -> 'active', 'true')) = 'boolean'
+    AND jsonb_typeof(coalesce(j -> 'verified_by', 'null')) IN ('string', 'null') AND length(coalesce(j ->> 'verified_by', '')) <= 64
+    AND jsonb_typeof(coalesce(j -> 'verified_at', 'null')) IN ('string', 'null') AND length(coalesce(j ->> 'verified_at', '')) <= 64
+$$;--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "supplier_bank_account_changes" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "restaurant_id" uuid NOT NULL REFERENCES "restaurants"("id") ON DELETE cascade,
@@ -384,17 +411,11 @@ CREATE TABLE IF NOT EXISTS "supplier_bank_account_changes" (
   -- The audit outlives nothing it describes: its account cannot be deleted (NO ACTION).
   CONSTRAINT "supplier_bank_account_changes_account_same_tenant_fk" FOREIGN KEY ("bank_account_id", "restaurant_id")
     REFERENCES "public"."supplier_bank_accounts"("id", "restaurant_id") ON DELETE no action,
-  -- MASKED only, by ALLOWLIST: each side is an object whose keys are only the masked
-  -- fields below (nothing nested can smuggle a number in under another key), and
-  -- account_last4 is at most 4 digits. The account number / ciphertext can never appear.
+  -- MASKED only (restomatch_bank_audit_masked: key allowlist + value types). The
+  -- account number / ciphertext can never appear, not even nested under an allowed key.
   CONSTRAINT "supplier_bank_account_changes_masked_check" CHECK (
-    ("before" IS NULL OR (
-      jsonb_typeof("before") = 'object'
-      AND "before" - ARRAY['bank_code', 'branch_code', 'account_last4', 'holder_name', 'active', 'verified_by', 'verified_at'] = '{}'::jsonb
-      AND coalesce("before" ->> 'account_last4', '0') ~ '^[0-9]{1,4}$'))
-    AND jsonb_typeof("after") = 'object'
-    AND "after" - ARRAY['bank_code', 'branch_code', 'account_last4', 'holder_name', 'active', 'verified_by', 'verified_at'] = '{}'::jsonb
-    AND coalesce("after" ->> 'account_last4', '0') ~ '^[0-9]{1,4}$'
+    ("before" IS NULL OR public.restomatch_bank_audit_masked("before"))
+    AND public.restomatch_bank_audit_masked("after")
   )
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "supplier_bank_account_changes_account_idx" ON "supplier_bank_account_changes" USING btree ("bank_account_id", "restaurant_id");--> statement-breakpoint
@@ -426,8 +447,14 @@ CREATE TRIGGER "supplier_bank_accounts_immutable" BEFORE UPDATE ON "supplier_ban
 -- Every insert and every change writes the MASKED audit row itself (BEC fraud): the
 -- app cannot forget it, and changed_by is the session user (app.current_user_id(),
 -- NULL on the owner connection). An UPDATE that changes no masked field logs nothing.
+-- SECURITY DEFINER (owned by the table owner, pinned search_path): the trigger is the
+-- ONLY writer; rls.ts revokes INSERT/UPDATE/DELETE on the audit from the tenant role,
+-- so a forged audit row is refused. Remaining limit: changed_by comes from the
+-- app.current_user_id GUC, which the app's session middleware sets.
 CREATE OR REPLACE FUNCTION public.restomatch_bank_account_audit() RETURNS trigger
   LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public
   AS $$
 DECLARE
   b jsonb;
@@ -491,13 +518,14 @@ ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "whatsapp_opt_in_source" varchar(16
 -- The consent notice the user saw (e.g. '2026-11'); _at / _source / _notice_version
 -- describe the LAST change (opt in or revoke). Per-binding consent: WA-03's wa_bindings.
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "whatsapp_opt_in_notice_version" varchar(32);--> statement-breakpoint
--- Opting in needs its evidence (when + where), and an admin may only REVOKE.
+-- Opting in needs its evidence (when + where + which notice), and an admin may only REVOKE.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_whatsapp_consent_check') THEN
     ALTER TABLE "users" ADD CONSTRAINT "users_whatsapp_consent_check" CHECK (
       NOT "whatsapp_opt_in"
-      OR ("whatsapp_opt_in_at" IS NOT NULL AND "whatsapp_opt_in_source" IS NOT NULL AND "whatsapp_opt_in_source" <> 'admin'));
+      OR ("whatsapp_opt_in_at" IS NOT NULL AND "whatsapp_opt_in_source" IS NOT NULL
+          AND "whatsapp_opt_in_source" <> 'admin' AND "whatsapp_opt_in_notice_version" IS NOT NULL));
   END IF;
 END $$;--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "notification_prefs" (
@@ -577,9 +605,12 @@ CREATE POLICY "notification_prefs_tenant" ON "notification_prefs" USING ("restau
 ALTER TABLE "notification_settings" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "notification_settings_tenant" ON "notification_settings";--> statement-breakpoint
 CREATE POLICY "notification_settings_tenant" ON "notification_settings" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint
--- Own-user only (RESTRICTIVE, on top of the tenant policy): a member writes only their
--- own device / prefs / settings, and sees only their own push devices. The owner's
--- view of everyone's devices goes through the owner connection.
+-- Own-user only (RESTRICTIVE, on top of the tenant policy): a member inserts, changes
+-- and deletes only their own device / prefs / settings, and sees only their own push
+-- devices. prefs/settings stay READABLE tenant-wide on purpose (notify() runs as the
+-- acting member and must see recipients' opt-outs; a hidden row would read as the
+-- default and message someone who opted out). Cross-user cleanup (membership removal,
+-- push 410 Gone) and the owner's view of everyone's devices go through the owner connection.
 DROP POLICY IF EXISTS "push_subscriptions_own_select" ON "push_subscriptions";--> statement-breakpoint
 CREATE POLICY "push_subscriptions_own_select" ON "push_subscriptions" AS RESTRICTIVE FOR SELECT USING ("user_id" = app.current_user_id());--> statement-breakpoint
 DROP POLICY IF EXISTS "push_subscriptions_own_insert" ON "push_subscriptions";--> statement-breakpoint
@@ -593,4 +624,10 @@ CREATE POLICY "notification_prefs_own_update" ON "notification_prefs" AS RESTRIC
 DROP POLICY IF EXISTS "notification_settings_own_insert" ON "notification_settings";--> statement-breakpoint
 CREATE POLICY "notification_settings_own_insert" ON "notification_settings" AS RESTRICTIVE FOR INSERT WITH CHECK ("user_id" = app.current_user_id());--> statement-breakpoint
 DROP POLICY IF EXISTS "notification_settings_own_update" ON "notification_settings";--> statement-breakpoint
-CREATE POLICY "notification_settings_own_update" ON "notification_settings" AS RESTRICTIVE FOR UPDATE USING ("user_id" = app.current_user_id()) WITH CHECK ("user_id" = app.current_user_id());
+CREATE POLICY "notification_settings_own_update" ON "notification_settings" AS RESTRICTIVE FOR UPDATE USING ("user_id" = app.current_user_id()) WITH CHECK ("user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "push_subscriptions_own_delete" ON "push_subscriptions";--> statement-breakpoint
+CREATE POLICY "push_subscriptions_own_delete" ON "push_subscriptions" AS RESTRICTIVE FOR DELETE USING ("user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "notification_prefs_own_delete" ON "notification_prefs";--> statement-breakpoint
+CREATE POLICY "notification_prefs_own_delete" ON "notification_prefs" AS RESTRICTIVE FOR DELETE USING ("user_id" = app.current_user_id());--> statement-breakpoint
+DROP POLICY IF EXISTS "notification_settings_own_delete" ON "notification_settings";--> statement-breakpoint
+CREATE POLICY "notification_settings_own_delete" ON "notification_settings" AS RESTRICTIVE FOR DELETE USING ("user_id" = app.current_user_id());
