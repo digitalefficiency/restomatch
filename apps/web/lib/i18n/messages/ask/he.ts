@@ -71,7 +71,7 @@ export const he = {
     topSupplier: 'הספק שהכי דלף החודש: {supplier} — {leak} מתוך הוצאה של {spend}.',
     topSupplierNone: 'אין החודש דליפה אצל אף ספק.',
     // AU-06: what needs me. Supplier wording: "בקשת זיכוי" (glossary).
-    notLive: 'הנתון הזה עוד לא זמין כאן. בינתיים אפשר לבדוק במסך המקושר.',
+    notLive: 'הנתון הזה עוד לא זמין כאן.',
     dueDatesNotLive: 'מועדי תשלום עוד לא מחושבים במערכת.',
     recoveryOff: 'אין מספיק נתונים על זיכויים — הפעילו מעקב החזרים.',
     vatAtRiskOff: 'בדיקת מע״מ בסיכון כבויה.',

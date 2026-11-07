@@ -70,7 +70,7 @@ export const en: Shape<typeof he> = {
     topSupplier: 'The supplier that leaked most this month: {supplier} — {leak} out of {spend} spent.',
     topSupplierNone: 'No supplier has a leak this month.',
     // AU-06: what needs me.
-    notLive: 'This figure is not available here yet. Meanwhile, check the linked screen.',
+    notLive: 'This figure is not available here yet.',
     dueDatesNotLive: 'Payment due dates are not computed in the system yet.',
     recoveryOff: 'Not enough credit data — turn on the credit tracker.',
     vatAtRiskOff: 'The VAT-at-risk check is off.',
