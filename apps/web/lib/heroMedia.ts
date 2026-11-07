@@ -40,14 +40,18 @@ export const heroMedia = {
    * 9:16 phone loop (W3-06b). Phones (below `sm`) get only these files — never
    * the 16:9 loop too. null = phones show the legible HeroMatch mock.
    *
-   * SHIP GATE (conductor, 7.11): one figure set across the site. The first S10
-   * cut (hero-loop-9x16.*) shows "₪760 · 1.8%", a second month figure, so it
-   * must not ship. phoneLoop stays null until S10's re-render from
-   * sampleMonth.ts (₪2,250 · 1.5%, "ממתין להחלטה שלך" ₪910) lands and its files
-   * are added to APPROVED_PHONE_LOOP_FILES. If that isn't on #293 by Wed 11.11
-   * 12:00 IL, Thursday ships with null. A unit test enforces both.
+   * SHIP GATE (conductor, 7.11): one figure set across the site. S10's first
+   * cut showed "₪760 · 1.8%" and never shipped; the re-render from
+   * sampleMonth.ts (S10 @84532705: ₪2,250 · 1.5% · "ממתין להחלטה שלך" ₪910 ·
+   * בקשות זיכוי ₪720) reuses the same file names, so the gate pins file
+   * CONTENT: every file here must match a SHA-256 in APPROVED_PHONE_LOOP_FILES
+   * (unit test). Set to null to fall back to HeroMatch on phones.
    */
-  phoneLoop: null as null | { webm: string; mp4: string; poster: string },
+  phoneLoop: {
+    webm: '/media/hero-loop-9x16.webm',
+    mp4: '/media/hero-loop-9x16.mp4',
+    poster: '/media/hero-poster-9x16.jpg',
+  } as null | { webm: string; mp4: string; poster: string },
   /** English hero loop (same motion, English dashboard + callouts); Hebrew is the default above. */
   loopEn: {
     webm: '/media/hero-loop-en.webm',
@@ -60,11 +64,23 @@ export const heroMedia = {
 export type HeroMedia = typeof heroMedia;
 
 /**
- * Phone-loop files rendered from the ONE sample month (sampleMonth.ts) and
- * approved to ship. Empty until S10's re-render lands; the first cut
- * (hero-loop-9x16.*, ₪760 · 1.8%) is deliberately NOT here.
+ * Phone-loop renders approved to ship, by content (path → SHA-256 of the file
+ * under public/). Only renders of the ONE sample month (sampleMonth.ts) go
+ * here, after a frame check. A re-render with new bytes needs a new entry.
  */
-export const APPROVED_PHONE_LOOP_FILES: readonly string[] = [];
+export const APPROVED_PHONE_LOOP_FILES: Readonly<Record<string, string>> = {
+  // S10 @84532705 — frames checked at 2 s / 8 s / 11 s + poster: ₪2,250 · 1.5% · ₪910 · ₪720 only.
+  '/media/hero-loop-9x16.webm': 'bb92915b36d7085ea3d4a8d7a55345005a778a7617d39a272d341c2811b7201c',
+  '/media/hero-loop-9x16.mp4': '88dc84c95091048fa7f97fa6424961075a76a63c7045712c87d153c27b3c7b13',
+  '/media/hero-poster-9x16.jpg': 'a1f903849a393dceb26ce3ec936b9342a438fd4aadd0a5ceecd190cdbbd7530f',
+};
+
+/** SHA-256 of S10's first 9:16 cut (₪760 · 1.8%, a second figure set): never approvable. */
+export const REJECTED_PHONE_LOOP_SHA256: readonly string[] = [
+  '8a0632b620193cd3af01d51a5a75c9b49f85283e47f7f47fee8b7661932ac7d7',
+  '5b4cf5e2cfccb6422ecaf8aa3e198c013f72e81a216e3ff46e46bb411ed5a4ed',
+  '8c309485c7e610c4c8fb914394ec790e66e9ad1bac21753284c635e7c9f18bcf',
+];
 
 /** Below Tailwind's `sm` (640px): the phone cut. */
 export const PHONE_MEDIA = '(max-width: 639.98px)';
