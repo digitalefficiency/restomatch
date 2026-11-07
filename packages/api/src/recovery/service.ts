@@ -116,7 +116,11 @@ export function claimReleasableSql(restaurantId: string) {
           -- The system's never-claimable write-off (owner 31.10, MISSING_ON_INVOICE…)
           -- is no person's history either (round 9). SYSTEM_WRITE_OFF itself stays
           -- as it is: toReopen re-opens only an AUTO write-off.
-          OR (e.to_status = 'written_off' AND e.note = ${NEVER_CLAIMABLE_NOTE} AND e.actor_id IS NULL)
+          OR (e.to_status = 'written_off' AND e.note = ${NEVER_CLAIMABLE_NOTE} AND e.actor_id IS NULL
+              -- defence in depth (round 10): only on a finding of a never-claimable type
+              AND EXISTS (SELECT 1 FROM discrepancies dd
+                          WHERE dd.id = c.discrepancy_id AND dd.restaurant_id = ${restaurantId}
+                            AND dd.type IN (${NEVER_CLAIMABLE_SQL})))
         )
     ))`;
 }
@@ -138,19 +142,63 @@ function heldRunSql(restaurantId: string) {
   )`;
 }
 
-/** The claimable ₪ the tracker does not file while its invoice waits for a count (integer agorot). */
-export async function heldForCountTotals(db: Database, restaurantId: string): Promise<{ count: number; agorot: number }> {
-  const [row] = rowsOf(
-    await db.execute(sql`
-      SELECT count(*)::int AS n, COALESCE(SUM(round(abs(d.delta_amount) * 100)), 0)::bigint AS agorot
+/**
+ * The claims syncClaims would file — `WITH claimed …, cand …` (claim alias `c`
+ * over cand): each claimable, unclaimed finding with its share of the
+ * invoice's cap (total incl. VAT minus what is already claimed, in finding
+ * order). `held` picks the findings on runs their invoice is held to replace
+ * (heldRunSql) instead of the rest — so the tracker's "waiting for the count"
+ * figure is exactly what the sync would file once the hold ends (round 10).
+ */
+function claimCandidatesSql(restaurantId: string, held: boolean) {
+  return sql`
+    WITH claimed AS (
+      -- Agorot already claimed per invoice: new claims only get what is left of
+      -- the cap. A written-off claim that never received money holds none of it.
+      SELECT invoice_id, SUM(amount_agorot) AS agorot
+      FROM recovery_claims
+      WHERE restaurant_id = ${restaurantId} AND invoice_id IS NOT NULL
+        AND NOT (status = 'written_off' AND credited_agorot = 0)
+      GROUP BY invoice_id
+    ),
+    cand AS (
+      SELECT
+        d.id AS discrepancy_id,
+        i.id AS invoice_id,
+        i.supplier_id,
+        COALESCE(d.resolved_at, d.created_at) AS claimed_at,
+        round(abs(d.delta_amount) * 100)::bigint AS raw_agorot,
+        GREATEST(0, round(COALESCE(i.total_incl_vat, 0) * 100)::bigint - COALESCE(cl.agorot, 0)) AS cap_agorot,
+        SUM(round(abs(d.delta_amount) * 100)::bigint) OVER (
+          PARTITION BY i.id ORDER BY d.created_at, d.id
+        ) AS cum_agorot
       FROM discrepancies d
       JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
       JOIN invoices i ON i.id = mr.invoice_id AND i.restaurant_id = ${restaurantId}
+      LEFT JOIN claimed cl ON cl.invoice_id = i.id
       WHERE d.restaurant_id = ${restaurantId}
         AND d.delta_amount IS NOT NULL
         AND ${CLAIMABLE_FILTER}
         AND NOT EXISTS (SELECT 1 FROM recovery_claims rc WHERE rc.discrepancy_id = d.id)
-        AND ${heldRunSql(restaurantId)}`),
+        -- #216 round 8: not on a run its invoice is HELD to replace (held for a
+        -- receipt still being counted that this run is not on): the hold released
+        -- its bare claims, and a claim filed now would block the count's run.
+        -- The tracker shows these as "waiting for the count" (heldForCountTotals).
+        AND ${held ? sql`` : sql`NOT`} ${heldRunSql(restaurantId)}
+    )`;
+}
+
+/** A candidate's claim amount (agorot): its |Δ|, capped by what is left of the invoice's cap. */
+const CLAIM_AMOUNT_SQL = sql`LEAST(c.raw_agorot, GREATEST(0, c.cap_agorot - (c.cum_agorot - c.raw_agorot)))`;
+
+/** The claimable ₪ the tracker does not file while its invoice waits for a count (integer agorot). */
+export async function heldForCountTotals(db: Database, restaurantId: string): Promise<{ count: number; agorot: number }> {
+  const [row] = rowsOf(
+    await db.execute(sql`
+      ${claimCandidatesSql(restaurantId, true)}
+      SELECT count(*)::int AS n, COALESCE(SUM(${CLAIM_AMOUNT_SQL}), 0)::bigint AS agorot
+      FROM cand c
+      WHERE ${CLAIM_AMOUNT_SQL} > 0`),
   );
   return { count: Number(row?.n ?? 0), agorot: Number(row?.agorot ?? 0) };
 }
@@ -321,46 +369,13 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
   }
 
   const res = await db.execute(sql`
-    WITH claimed AS (
-      -- Agorot already claimed per invoice: new claims only get what is left of
-      -- the cap. A written-off claim that never received money holds none of it.
-      SELECT invoice_id, SUM(amount_agorot) AS agorot
-      FROM recovery_claims
-      WHERE restaurant_id = ${restaurantId} AND invoice_id IS NOT NULL
-        AND NOT (status = 'written_off' AND credited_agorot = 0)
-      GROUP BY invoice_id
-    ),
-    cand AS (
-      SELECT
-        d.id AS discrepancy_id,
-        i.id AS invoice_id,
-        i.supplier_id,
-        COALESCE(d.resolved_at, d.created_at) AS claimed_at,
-        round(abs(d.delta_amount) * 100)::bigint AS raw_agorot,
-        GREATEST(0, round(COALESCE(i.total_incl_vat, 0) * 100)::bigint - COALESCE(cl.agorot, 0)) AS cap_agorot,
-        SUM(round(abs(d.delta_amount) * 100)::bigint) OVER (
-          PARTITION BY i.id ORDER BY d.created_at, d.id
-        ) AS cum_agorot
-      FROM discrepancies d
-      JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
-      JOIN invoices i ON i.id = mr.invoice_id AND i.restaurant_id = ${restaurantId}
-      LEFT JOIN claimed cl ON cl.invoice_id = i.id
-      WHERE d.restaurant_id = ${restaurantId}
-        AND d.delta_amount IS NOT NULL
-        AND ${CLAIMABLE_FILTER}
-        AND NOT EXISTS (SELECT 1 FROM recovery_claims rc WHERE rc.discrepancy_id = d.id)
-        -- #216 round 8: not on a run its invoice is HELD to replace (held for a
-        -- receipt still being counted that this run is not on): the hold released
-        -- its bare claims, and a claim filed now would block the count's run.
-        -- The tracker shows these as "waiting for the count" (heldForCountTotals).
-        AND NOT ${heldRunSql(restaurantId)}
-    )
+    ${claimCandidatesSql(restaurantId, false)}
     INSERT INTO recovery_claims (restaurant_id, discrepancy_id, supplier_id, invoice_id, amount_agorot, claimed_at, created_by)
     SELECT ${restaurantId}, c.discrepancy_id, c.supplier_id, c.invoice_id,
-           LEAST(c.raw_agorot, GREATEST(0, c.cap_agorot - (c.cum_agorot - c.raw_agorot))),
+           ${CLAIM_AMOUNT_SQL},
            c.claimed_at, ${actorId ?? null}
     FROM cand c
-    WHERE LEAST(c.raw_agorot, GREATEST(0, c.cap_agorot - (c.cum_agorot - c.raw_agorot))) > 0
+    WHERE ${CLAIM_AMOUNT_SQL} > 0
     ON CONFLICT (discrepancy_id) DO NOTHING
     RETURNING id
   `);

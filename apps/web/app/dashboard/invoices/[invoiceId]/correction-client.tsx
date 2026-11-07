@@ -237,6 +237,10 @@ export function InvoiceCorrection({
   }
 
   // Held for an open receipt count (T4, neutral): no figure yet, never an alarm.
+  // Why the lines are locked: the add/delete rule, else why the pencil is hidden
+  // (an OCR-read invoice: lineEditLock — round 10). Being read has its own banner.
+  const lockNotice =
+    invoice.linesLockReason ?? (invoice.lineEditLock && invoice.lineEditLock !== 'being_read' ? invoice.lineEditLock : null);
   // On a reload, the server says so (getInvoice.awaitingCount).
   const held = rematch
     ? rematch.status === 'held'
@@ -307,13 +311,13 @@ export function InvoiceCorrection({
         </div>
       ) : null}
 
-      {canEdit && invoice.linesLockReason ? (
+      {canEdit && lockNotice ? (
         <div
           role="status"
           data-testid="invoice-lines-locked"
           className="rounded-md border-s-4 border-line bg-surface-2 px-3 py-2 text-sm text-ink"
         >
-          {t(`correction.linesLocked.${invoice.linesLockReason}`)}
+          {t(`correction.linesLocked.${lockNotice}`)}
         </div>
       ) : null}
 

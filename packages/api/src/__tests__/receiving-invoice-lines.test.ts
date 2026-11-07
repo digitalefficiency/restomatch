@@ -3,7 +3,7 @@ import { and, auditLog, creditNotes, createDb, discrepancies, eq, goodsReceipts,
 import { computeInvoiceLeak } from '@restomatch/charts';
 import { appRouter } from '../index';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
-import { NEVER_CLAIMABLE_NOTE, transitionClaim } from '../recovery/service';
+import { heldForCountTotals, NEVER_CLAIMABLE_NOTE, syncClaims, transitionClaim } from '../recovery/service';
 import { invoicesWaitingOnReceipt } from '../receiving/matchTriggers';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
@@ -1088,7 +1088,7 @@ describe('#216 round 8', () => {
       .set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: grId } } })
       .where(eq(invoices.id, failedId));
   /** A hand line + an earlier run with no receipt, one finding claimed (bare unless a person touched it). */
-  async function handLineWithClaimedRun() {
+  async function handLineWithClaimedRun(type: 'UNORDERED_ITEM' | 'MISSING_ON_INVOICE' = 'UNORDERED_ITEM') {
     const [line] = await db
       .insert(invoiceLines)
       .values({ invoiceId: failedId, rawDescription: 'מגבות נייר', qtyBilled: '1', unit: 'יח׳', unitPriceBilled: '15', lineTotal: '15.00' })
@@ -1099,13 +1099,19 @@ describe('#216 round 8', () => {
       .returning();
     const [d] = await db
       .insert(discrepancies)
-      .values({ matchRunId: run!.id, restaurantId: A.restaurantId, type: 'UNORDERED_ITEM', severity: 'warn', deltaAmount: '15.00', resolutionStatus: 'accepted' } as never)
+      .values({ matchRunId: run!.id, restaurantId: A.restaurantId, type, severity: 'warn', deltaAmount: '15.00', resolutionStatus: 'accepted' } as never)
       .returning();
     const [c] = await db
       .insert(recoveryClaims)
       .values({ restaurantId: A.restaurantId, discrepancyId: d!.id, supplierId: A.supplierId, invoiceId: failedId, amountAgorot: 1500 } as never)
       .returning();
     return { lineId: line!.id, runId: run!.id, claimId: c!.id };
+  }
+  async function systemNeverClaimableWriteOff(claimId: string) {
+    await db.update(recoveryClaims).set({ status: 'written_off', closedAt: new Date() } as never).where(eq(recoveryClaims.id, claimId));
+    await db.execute(sql`
+      INSERT INTO recovery_events (restaurant_id, claim_id, from_status, to_status, amount_agorot, actor_id, note)
+      VALUES (${A.restaurantId}, ${claimId}, 'claimed', 'written_off', 1500, NULL, ${NEVER_CLAIMABLE_NOTE})`);
   }
   const personWritesOff = (claimId: string) =>
     transitionClaim(db, A.restaurantId, { claimId, to: 'written_off', actorId: A.ownerUserId, note: 'not worth it' });
@@ -1180,12 +1186,9 @@ describe('#216 round 8', () => {
 
   it('round 9 item 1: a claim the SYSTEM wrote off as never-claimable is no history — the pencil works and Re-run runs', async () => {
     await stampOn(A.grId);
-    const { lineId, claimId } = await handLineWithClaimedRun();
+    const { lineId, claimId } = await handLineWithClaimedRun('MISSING_ON_INVOICE');
     // syncClaims' own never-claimable write-off (owner 31.10): no actor, its note.
-    await db.update(recoveryClaims).set({ status: 'written_off', closedAt: new Date() } as never).where(eq(recoveryClaims.id, claimId));
-    await db.execute(sql`
-      INSERT INTO recovery_events (restaurant_id, claim_id, from_status, to_status, amount_agorot, actor_id, note)
-      VALUES (${A.restaurantId}, ${claimId}, 'claimed', 'written_off', 1500, NULL, ${NEVER_CLAIMABLE_NOTE})`);
+    await systemNeverClaimableWriteOff(claimId);
     const page = await as('manager').receiving.getInvoice({ invoiceId: failedId });
     expect(page).toMatchObject({ linesLockReason: null, lineEditLock: null });
     expect((await as('manager').match.runForInvoice({ invoiceId: failedId })).matchRunId).not.toBeNull();
@@ -1203,6 +1206,36 @@ describe('#216 round 8', () => {
     expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).lineEditLock).toBe('claim');
     await db.update(invoices).set({ status: 'approved' }).where(eq(invoices.id, failedId));
     expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).lineEditLock).toBe('settled');
+  });
+
+  it('round 10 item 5: the never-claimable note on a CLAIMABLE finding is still history (only a never-claimable type is exempt)', async () => {
+    await stampOn(A.grId);
+    const { claimId } = await handLineWithClaimedRun('UNORDERED_ITEM');
+    await systemNeverClaimableWriteOff(claimId);
+    expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).lineEditLock).toBe('claim');
+    await expect(as('manager').match.runForInvoice({ invoiceId: failedId })).rejects.toMatchObject({ cause: { appCode: 'invoice.claimInProgress' } });
+  });
+
+  it('round 10 item 1: the held ₪ is exactly what the sync would file — capped by the invoice total (₪1,475: ₪1,250 + ₪1,000 → 147,500 agorot)', async () => {
+    await db
+      .update(invoices)
+      .set({ totalExclVat: '1250.00', vatAmount: '225.00', totalInclVat: '1475.00', ocrPayload: { provider: 'claude_vision', raw: { heldForReceipts: [A.grId] } } })
+      .where(eq(invoices.id, failedId));
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    const [run] = await db
+      .insert(matchRuns)
+      .values({ restaurantId: A.restaurantId, poId: A.poId, grId: null, invoiceId: failedId, overallStatus: 'blocked', totalDiscrepancyAmount: '2250.00' })
+      .returning();
+    for (const [type, delta] of [['QTY_SHORT', '1250.00'], ['PRICE_HIGHER', '1000.00']] as const) {
+      await db.insert(discrepancies).values({ matchRunId: run!.id, restaurantId: A.restaurantId, type, severity: 'block', deltaAmount: delta, resolutionStatus: 'accepted' } as never);
+    }
+    expect(await heldForCountTotals(db, A.restaurantId)).toEqual({ count: 2, agorot: 147_500 });
+    // …and once the hold ends, the sync files exactly that.
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
+    expect(await heldForCountTotals(db, A.restaurantId)).toEqual({ count: 0, agorot: 0 });
+    await syncClaims(db, A.restaurantId, A.ownerUserId);
+    const filed = await claims();
+    expect(filed.reduce((s, c) => s + Number(c.amountAgorot), 0)).toBe(147_500);
   });
 });
 

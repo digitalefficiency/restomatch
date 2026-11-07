@@ -174,6 +174,7 @@ describe('dock slip — status note', () => {
     }
     expect(receivingHe.dockSlip.heldClaim).not.toMatch(/ייקבעו|אחרי בדיקת/);
     expect(receivingEn.dockSlip.heldClaim).not.toMatch(/will be set|once|until/);
+    expect(th.dockSlip.heldClaim).not.toMatch(/ยังไม่/); // round 10: "not applied", never "not yet"
   });
   it('otherwise the spinner, then the calm "slow" note', () => {
     expect(slipNote(e({}), true, false)).toBe('computing');

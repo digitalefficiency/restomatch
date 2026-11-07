@@ -12,7 +12,7 @@ export const he = {
     title: 'מעקב ₪ חוזר',
     subtitle: 'כל פער שדרשת מהספק — ממכתב הדרישה ועד שהכסף חזר בפועל.',
     outstanding: 'עדיין חייבים לך',
-    heldForCount: '{amount} ממתינים לסגירת ספירה',
+    heldForCount: 'ממצאים בסך {amount} בחשבונית שממתינה לספירה — ייבדקו מחדש כשהספירה תיסגר',
     outstandingHint: 'פתוח ובמחלוקת · מתוך {claimed} שנדרשו ב-{count} דרישות',
     rate: 'שיעור זיכוי',
     rateHint: 'זוכה ÷ נדרש',

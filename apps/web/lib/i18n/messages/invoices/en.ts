@@ -38,6 +38,7 @@ export const en: Shape<typeof he> = {
       consolidated: 'A consolidated invoice is cross-matched against its delivery notes — no lines are added or deleted here.',
       credit_note: 'This invoice has a recorded credit note — its lines are locked.',
       claim: 'This invoice has a credit claim with history — its lines are locked, and the claim stays in the credits tracker.',
+      settled: 'This invoice was already approved or paid — its lines are locked.',
     },
     addLine: 'Add line',
     deleteLine: 'Delete line',
