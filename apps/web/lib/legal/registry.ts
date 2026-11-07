@@ -41,9 +41,19 @@ export const LEGAL_LINKS: readonly LegalLink[] = [
     label: { he: 'הצהרת נגישות', en: 'Accessibility statement' },
     kind: 'page',
   },
-  { id: 'privacy', href: '/privacy', label: { he: 'מדיניות פרטיות', en: 'Privacy policy' }, kind: 'page' },
+  {
+    id: 'privacy',
+    href: '/privacy',
+    label: { he: 'מדיניות פרטיות', en: 'Privacy policy' },
+    kind: 'page',
+  },
   { id: 'terms', href: '/terms', label: { he: 'תנאי שימוש', en: 'Terms of use' }, kind: 'page' },
-  { id: 'cookies', href: '/cookies', label: { he: 'מדיניות עוגיות', en: 'Cookie policy' }, kind: 'page' },
+  {
+    id: 'cookies',
+    href: '/cookies',
+    label: { he: 'מדיניות עוגיות', en: 'Cookie policy' },
+    kind: 'page',
+  },
   {
     id: 'cookieSettings',
     href: '/cookies#cookie-settings',

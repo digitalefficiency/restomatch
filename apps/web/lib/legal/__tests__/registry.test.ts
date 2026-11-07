@@ -5,14 +5,26 @@ import { isPublicPath } from '@/lib/publicPaths';
 import robots from '@/app/robots';
 import sitemap from '@/app/sitemap';
 import { MARKETING_ROUTES } from '@/app/(marketing)/_components/seo';
-import { LEGAL_LINKS, LEGAL_NAV_LABEL, LEGAL_PAGE_PATHS, SUPPORT_LINKS, legalHref } from '../registry';
+import {
+  LEGAL_LINKS,
+  LEGAL_NAV_LABEL,
+  LEGAL_PAGE_PATHS,
+  SUPPORT_LINKS,
+  legalHref,
+} from '../registry';
 
 /** G-11 · deep-fix class 15 fix #2: one ordered legal list, everything derives from it. */
 const pages = LEGAL_LINKS.filter((l) => l.kind !== 'action').map((l) => l.href.split('#')[0]!);
 
 describe('legal registry', () => {
   it('holds the fixed order every shell renders', () => {
-    expect(LEGAL_LINKS.map((l) => l.id)).toEqual(['accessibility', 'privacy', 'terms', 'cookies', 'cookieSettings']);
+    expect(LEGAL_LINKS.map((l) => l.id)).toEqual([
+      'accessibility',
+      'privacy',
+      'terms',
+      'cookies',
+      'cookieSettings',
+    ]);
     expect(LEGAL_LINKS.map((l) => l.href)).toEqual([
       '/accessibility',
       '/privacy',
@@ -70,5 +82,6 @@ describe('legal registry', () => {
     const src = readFileSync(fileURLToPath(new URL('../registry.ts', import.meta.url)), 'utf8');
     expect(src).not.toMatch(/^\s*import\s/m);
     expect(src).not.toMatch(/\brequire\(|\bimport\(/);
+    expect(src).not.toMatch(/\bfrom\s+['"]/);
   });
 });

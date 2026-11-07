@@ -30,7 +30,9 @@ export async function LegalShell({
   lastUpdated?: string;
   /**
    * Counsel sign-off (G-11; H-02 flips it). While `draft` (the default) the
-   * reviewer banner and the review tags render; `approved` drops both.
+   * reviewer banner and the header review tag render; `approved` drops them.
+   * Server components share no context: pass the SAME status to every
+   * `<LegalClause>` on the page, or its clause tags stay.
    */
   status?: LegalDocStatus;
   children: React.ReactNode;
@@ -51,7 +53,9 @@ export async function LegalShell({
           </div>
           <p className="text-muted">
             {t('legal.shell.bannerBeforeTag')}{' '}
-            <span className="whitespace-nowrap rounded bg-surface-2 px-1.5 py-0.5 text-xs text-gold">{tag}</span>{' '}
+            <span className="whitespace-nowrap rounded bg-surface-2 px-1.5 py-0.5 text-xs text-gold">
+              {tag}
+            </span>{' '}
             {t('legal.shell.bannerAfterTag')}
             {t.locale === 'en' ? <> {t('legal.shell.prevailingVersion')}</> : null}
           </p>
@@ -63,7 +67,9 @@ export async function LegalShell({
       {intro ? <p className="mt-4 text-lg leading-relaxed text-muted">{intro}</p> : null}
       {lastUpdated || draft ? (
         <p className="mt-3 text-xs text-muted">
-          {lastUpdated ? <span className="num">{t('legal.shell.lastUpdated', { date: lastUpdated })}</span> : null}
+          {lastUpdated ? (
+            <span className="num">{t('legal.shell.lastUpdated', { date: lastUpdated })}</span>
+          ) : null}
           {lastUpdated && draft ? ' · ' : null}
           {draft ? tag : null}
         </p>

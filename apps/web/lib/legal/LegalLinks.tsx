@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { LegalLinksPlain } from './LegalLinksPlain';
 import { LEGAL_LINKS } from './registry';
 
 /**
@@ -10,7 +11,8 @@ import { LEGAL_LINKS } from './registry';
  * - `inline-row`: a wrapping row with `·` separators (legal pages, sign-in,
  *   supplier portal, showcase, admin, error page, trust strip).
  * - `plain`: bare `<a>` + inline styles, for `global-error` (no providers, no
- *   component chunks, maybe no stylesheet).
+ *   component chunks, maybe no stylesheet). Lives in `LegalLinksPlain.tsx`, which
+ *   imports only the registry; `global-error` imports that file directly.
  *
  * `locale` is the BASE locale: anything but 'he' renders English, the same
  * fallback receiver locales (ar/ru/th/ti) get everywhere else.
@@ -44,48 +46,21 @@ export function LegalLinks({
 }) {
   const lang = locale === 'he' ? 'he' : 'en';
 
-  if (variant === 'plain') {
-    return (
-      <ul
-        data-legal-links="plain"
-        style={{
-          listStyle: 'none',
-          margin: 0,
-          padding: 0,
-          display: 'flex',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
-          gap: '0 0.25rem',
-          fontSize: '0.875rem',
-        }}
-        className={className}
-      >
-        {LEGAL_LINKS.map((l) => (
-          <li key={l.id}>
-            <a
-              href={l.href}
-              data-legal-id={l.id}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                minHeight: '44px',
-                padding: '0 0.5rem',
-                color: 'rgb(var(--c-muted, 74 93 83))',
-                textDecoration: 'underline',
-                textUnderlineOffset: '4px',
-              }}
-            >
-              {l.label[lang]}
-            </a>
-          </li>
-        ))}
-      </ul>
-    );
-  }
+  if (variant === 'plain') return <LegalLinksPlain locale={lang} className={className} />;
 
   const row = variant === 'inline-row';
   return (
-    <ul data-legal-links={variant} className={[ITEM[variant], row ? (align === 'start' ? 'justify-start' : 'justify-center') : '', 'text-sm', className].filter(Boolean).join(' ')}>
+    <ul
+      data-legal-links={variant}
+      className={[
+        ITEM[variant],
+        row ? (align === 'start' ? 'justify-start' : 'justify-center') : '',
+        'text-sm',
+        className,
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
       {LEGAL_LINKS.map((l, i) => (
         <li key={l.id} className={row ? 'inline-flex items-center gap-x-1' : undefined}>
           {row && i > 0 ? (
@@ -97,7 +72,7 @@ export function LegalLinks({
             href={l.href}
             data-legal-id={l.id}
             className={[
-              'touch-target inline-flex items-center rounded underline-offset-4',
+              'touch-target inline-flex min-h-11 items-center rounded underline-offset-4',
               row ? 'px-2 hover:underline' : '',
               LINK_TONE[tone],
               tone === 'primary' ? 'hover:underline' : '',

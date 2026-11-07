@@ -44,15 +44,24 @@ describe('required legal set', () => {
 
   it('variants change layout only: same ids in the same order', () => {
     const order = (variant: LegalLinksVariant) =>
-      [...renderToStaticMarkup(createElement(LegalLinks, { locale: 'he', variant })).matchAll(/data-legal-id="([^"]+)"/g)].map(
-        (m) => m[1],
-      );
+      [
+        ...renderToStaticMarkup(createElement(LegalLinks, { locale: 'he', variant })).matchAll(
+          /data-legal-id="([^"]+)"/g,
+        ),
+      ].map((m) => m[1]);
     expect(order('inline-row')).toEqual(order('footer-column'));
     expect(order('plain')).toEqual(order('footer-column'));
   });
 
+  it('LegalLinksPlain imports only the registry (global-error safety)', () => {
+    const src = readFileSync(`${web}lib/legal/LegalLinksPlain.tsx`, 'utf8');
+    expect([...src.matchAll(/from\s+['"]([^'"]+)['"]/g)].map((m) => m[1])).toEqual(['./registry']);
+  });
+
   it('global-error renders outside every provider, with retry and the legal links', () => {
-    const html = renderToStaticMarkup(createElement(GlobalError, { error: new Error('x'), reset: () => {} }));
+    const html = renderToStaticMarkup(
+      createElement(GlobalError, { error: new Error('x'), reset: () => {} }),
+    );
     expect(html).toContain('<html lang="he" dir="rtl"');
     expect(html).toContain('נסו שוב');
     for (const x of REQUIRED) expect(html).toContain(`href="/${x}"`);

@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { dirOf, localeFromCookieHeader } from '@/lib/i18n/config';
-import { LegalLinks } from '@/lib/legal/LegalLinks';
+import { LegalLinksPlain } from '@/lib/legal/LegalLinksPlain';
 import { LEGAL_NAV_LABEL } from '@/lib/legal/registry';
 import './globals.css';
 
@@ -37,8 +37,7 @@ export default function GlobalError({
           alignItems: 'center',
           justifyContent: 'center',
           padding: '4rem 1.5rem',
-          fontFamily:
-            'system-ui, -apple-system, "Segoe UI", Rubik, Arial, sans-serif',
+          fontFamily: 'system-ui, -apple-system, "Segoe UI", Rubik, Arial, sans-serif',
           color: '#0F1F17',
           background:
             'radial-gradient(ellipse 90% 55% at 50% -10%, rgba(6,107,74,0.05), transparent 60%), #F6F8F7',
@@ -70,7 +69,9 @@ export default function GlobalError({
                 'linear-gradient(90deg, rgba(184,15,42,0) 0%, #B80F2A 50%, rgba(184,15,42,0) 100%)',
             }}
           />
-          <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 0.5rem', color: '#0F1F17' }}>
+          <h1
+            style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 0.5rem', color: '#0F1F17' }}
+          >
             {en ? 'Something went wrong' : 'משהו השתבש'}
           </h1>
           <p style={{ fontSize: '0.875rem', color: '#4A5D53', margin: '0 0 1.5rem' }}>
@@ -102,14 +103,13 @@ export default function GlobalError({
               fontSize: '0.875rem',
               fontWeight: 600,
               padding: '0.625rem 1.25rem',
-              boxShadow:
-                '0 1px 2px rgba(15,31,23,0.06), 0 8px 24px -12px rgba(15,31,23,0.14)',
+              boxShadow: '0 1px 2px rgba(15,31,23,0.06), 0 8px 24px -12px rgba(15,31,23,0.14)',
             }}
           >
             {en ? 'Try again' : 'נסו שוב'}
           </button>
           <nav aria-label={LEGAL_NAV_LABEL[locale]} style={{ marginTop: '1.5rem' }}>
-            <LegalLinks locale={locale} variant="plain" />
+            <LegalLinksPlain locale={locale} />
           </nav>
         </div>
       </body>
