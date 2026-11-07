@@ -470,108 +470,122 @@ describe('0071 enum values', () => {
   });
 });
 
-describe('0071 fails fast on a lock instead of queueing', () => {
+describe('0071 locks: all-or-nothing NOWAIT loop, never waits while holding a lock, bounded at 6 s', () => {
   const statements = () =>
     readFileSync(join(migrationsDir(), '0071_schema_batch_0.sql'), 'utf8')
       .split('--> statement-breakpoint')
       .map((x) => x.trim())
       .filter(Boolean);
+  const run = (prelude?: string) =>
+    sql.begin(async (tx) => {
+      if (prelude) await tx.unsafe(prelude);
+      for (const st of statements()) await tx.unsafe(st);
+      return (await tx`show statement_timeout`) as unknown as [{ statement_timeout: string }];
+    });
 
-  it('opens with set_config timeouts (not SET LOCAL) and takes every lock up front, parent-first, inside ONE DO block', () => {
+  /** A second connection holding `lockSql` until released (or `ms` elapses). */
+  function holder(lockSql: string, ms = 30_000) {
+    const conn = postgres(url, { max: 1, prepare: false });
+    let release!: () => void;
+    const done = new Promise<void>((r) => (release = r));
+    let taken!: () => void;
+    const ready = new Promise<void>((r) => (taken = r));
+    const finished = conn
+      .begin(async (tx) => {
+        await tx.unsafe(lockSql);
+        taken();
+        await Promise.race([done, new Promise((r) => setTimeout(r, ms))]);
+      })
+      .finally(() => conn.end());
+    return { ready, release, finished };
+  }
+
+  it('opens with set_config timeouts (not SET LOCAL) and takes every lock up front, all-or-nothing NOWAIT, inside ONE DO block', () => {
     const code = (x: string) => x.split('\n').filter((l) => !l.trim().startsWith('--')).join('\n').trim();
-    const [a, c, d, e] = statements().map(code);
+    const [a, b, c, d, e] = statements().map(code);
     expect(a).toBe("SELECT set_config('lock_timeout', '5s', true);");
+    expect(b).toBe("SELECT set_config('restomatch.saved_statement_timeout', current_setting('statement_timeout'), true);");
     expect(c).toBe("SELECT set_config('statement_timeout', '6s', true);");
     expect(d!.startsWith('DO $$')).toBe(true);
+    expect(d).toMatch(/LOOP[\s\S]*EXIT;[\s\S]*EXCEPTION WHEN lock_not_available THEN[\s\S]*pg_sleep\(0\.05\)[\s\S]*END LOOP;/);
     expect(d!.match(/LOCK TABLE [^;]+;/g)).toEqual([
-      'LOCK TABLE "restaurants", "suppliers" IN SHARE ROW EXCLUSIVE MODE;',
-      // the app's order (startReceiving: purchase_orders → goods_receipts → gr_lines)
-      'LOCK TABLE "purchase_orders", "goods_receipts", "gr_lines" IN ACCESS EXCLUSIVE MODE;',
-      'LOCK TABLE "invoices" IN SHARE ROW EXCLUSIVE MODE;',
-      'LOCK TABLE "discrepancies", "recovery_claims", "product_aliases", "users" IN ACCESS EXCLUSIVE MODE;',
+      'LOCK TABLE "restaurants", "suppliers" IN SHARE ROW EXCLUSIVE MODE NOWAIT;',
+      'LOCK TABLE "purchase_orders", "goods_receipts", "gr_lines" IN ACCESS EXCLUSIVE MODE NOWAIT;',
+      'LOCK TABLE "invoices" IN SHARE ROW EXCLUSIVE MODE NOWAIT;',
+      'LOCK TABLE "discrepancies", "recovery_claims", "product_aliases", "users" IN ACCESS EXCLUSIVE MODE NOWAIT;',
     ]);
-    expect(e).toBe("SELECT set_config('statement_timeout', (SELECT reset_val FROM pg_settings WHERE name = 'statement_timeout'), true);");
-    // No other LOCK anywhere in the file, and nothing that needs a transaction block at top level.
+    expect(e).toBe(
+      "SELECT set_config('statement_timeout', coalesce(nullif(current_setting('restomatch.saved_statement_timeout', true), ''), (SELECT reset_val FROM pg_settings WHERE name = 'statement_timeout')), true);",
+    );
+    // No other LOCK anywhere in the file.
     expect(statements().filter((x) => /\bLOCK TABLE\b/i.test(code(x)))).toHaveLength(1);
   });
 
-  it('a long reader on users → 55P03 within the timeout, nothing applied; once it ends, a re-run succeeds', async () => {
+  it('restores statement_timeout EXACTLY to the caller value after the lock phase', async () => {
+    const [{ statement_timeout }] = await run("set local statement_timeout = '42s'");
+    expect(statement_timeout).toBe('42s');
+  });
+
+  it('a long reader on users → 57014 at ~6 s, nothing applied; once it ends, a re-run succeeds', async () => {
     // A closed receipt with a counted, unstamped line: the backfill's witness.
     const [gr] = await db.insert(goodsReceipts).values({ restaurantId: A.restaurantId, status: 'completed' }).returning();
     const [line] = await db.insert(grLines).values({ grId: gr!.id, qtyReceived: '3' }).returning();
-    const run = () =>
-      sql.begin(async (tx) => {
-        for (const st of statements()) await tx.unsafe(st);
-      });
-
-    const blocker = postgres(url, { max: 1, prepare: false });
-    let release!: () => void;
-    const held = new Promise<void>((r) => (release = r));
-    let locked!: () => void;
-    const lockTaken = new Promise<void>((r) => (locked = r));
-    const reader = blocker.begin(async (tx) => {
-      await tx`select count(*) from users`; // AccessShare on users, held until commit
-      locked();
-      await held;
-    });
+    const h = holder('select count(*) from users'); // AccessShare on users, held until released
     try {
-      await lockTaken;
+      await h.ready;
       const t0 = Date.now();
-      await expectPgError(run(), '55P03'); // lock_not_available
-      expect(Date.now() - t0).toBeLessThan(9_000);
+      await expectPgError(run(), '57014'); // the NOWAIT loop ran into the 6 s statement_timeout
+      const took = Date.now() - t0;
+      expect(took).toBeGreaterThan(5_500);
+      expect(took).toBeLessThan(8_000);
       const [after] = await db.select().from(grLines).where(eq(grLines.id, line!.id));
       expect(after!.countedAt).toBeNull(); // the whole transaction rolled back
     } finally {
-      release();
-      await reader;
-      await blocker.end();
+      h.release();
+      await h.finished;
     }
-
     await run(); // traffic is quiet: the same file applies (idempotent)
     const [stamped] = await db.select().from(grLines).where(eq(grLines.id, line!.id));
     expect(stamped!.countedAt).not.toBeNull();
     expect(stamped!.countMethod).toBe('legacy');
     await db.delete(goodsReceipts).where(eq(goodsReceipts.id, gr!.id));
+    const [{ statement_timeout }] = (await sql`show statement_timeout`) as unknown as [{ statement_timeout: string }];
+    expect(statement_timeout).toBe('0'); // a failed run leaves the session untouched (transaction-local)
   }, 30_000);
 
-  it('the whole lock phase is bounded at 6 s (statement_timeout): two staggered holders → 57014, nothing applied', async () => {
-    const run = () =>
-      sql.begin(async (tx) => {
-        for (const st of statements()) await tx.unsafe(st);
-      });
-    const blocker = postgres(url, { max: 2, prepare: false });
-    const releases: Array<() => void> = [];
-    const taken: Array<Promise<void>> = [];
-    const hold = (lockSql: string, ms: number) => {
-      let locked!: () => void;
-      taken.push(new Promise<void>((r) => (locked = r)));
-      let release!: () => void;
-      const done = new Promise<void>((r) => (release = r));
-      releases.push(release);
-      return blocker.begin(async (tx) => {
-        await tx.unsafe(lockSql);
-        locked();
-        await Promise.race([done, new Promise((r) => setTimeout(r, ms))]);
-      });
-    };
-    const h1 = hold('lock table restaurants in row exclusive mode', 4_000); // 4 s wait (< lock_timeout)…
-    const h2 = hold('select count(*) from users', 20_000); // …then a second wait: only the 6 s bound stops it
+  it('no deadlock with startReceipt order (goods_receipts, THEN purchase_orders FOR UPDATE): the app proceeds, then 0071 applies', async () => {
+    const app = postgres(url, { max: 1, prepare: false });
     try {
-      await Promise.all(taken);
+      let appMs = -1;
+      const appTx = app.begin(async (tx) => {
+        await tx`select count(*) from goods_receipts`; // step 1 of startReceipt
+        await new Promise((r) => setTimeout(r, 300)); // 0071 starts meanwhile and wants ACCESS EXCLUSIVE
+        const t = Date.now();
+        await tx`select id from purchase_orders for update`; // step 2: would deadlock with a waiting, lock-holding migration
+        appMs = Date.now() - t;
+      });
+      await new Promise((r) => setTimeout(r, 100));
       const t0 = Date.now();
-      await expectPgError(run(), '57014'); // query_canceled (statement timeout)
-      const took = Date.now() - t0;
-      expect(took).toBeGreaterThan(5_500);
-      expect(took).toBeLessThan(8_000);
+      const migration = run();
+      await appTx; // must not be a 40P01 victim
+      await migration; // and the migration then applies
+      expect(appMs).toBeGreaterThanOrEqual(0);
+      expect(appMs).toBeLessThan(1_000); // the migration held nothing while it waited
+      expect(Date.now() - t0).toBeLessThan(5_000);
     } finally {
-      for (const r of releases) r();
-      await Promise.all([h1, h2]);
-      await blocker.end();
+      await app.end();
     }
-    // The statement timeout was restored afterwards on the success path (checked by the re-run above),
-    // and a failed run leaves the session default untouched (transaction-local set_config).
-    const [{ statement_timeout }] = (await sql`show statement_timeout`) as unknown as [{ statement_timeout: string }];
-    expect(statement_timeout).toBe('0');
+  }, 30_000);
+
+  it('holders that let go within the 6 s bound only delay it: 0071 applies once both are free', async () => {
+    const h1 = holder('lock table restaurants in row exclusive mode', 1_000);
+    const h2 = holder('select count(*) from users', 2_000);
+    await Promise.all([h1.ready, h2.ready]);
+    const t0 = Date.now();
+    await run();
+    const took = Date.now() - t0;
+    expect(took).toBeGreaterThan(1_500);
+    expect(took).toBeLessThan(5_000);
+    await Promise.all([h1.finished, h2.finished]);
   }, 30_000);
 });
-

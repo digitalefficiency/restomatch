@@ -22,6 +22,11 @@ import { NEEDS_TRANSACTION_BLOCK, NOT_IN_PIPELINE, splitSqlStatements, stripSqlC
  *     statement is sent on its own, also without BEGIN, which is stricter: any
  *     statement that needs a transaction block (a top-level LOCK, SET LOCAL, …)
  *     fails exactly as on Supabase (25P01). Aborts on the first error.
+ *     It does NOT model cross-statement pipeline semantics: here each statement
+ *     commits on its own, so transaction-local settings (set_config(…, true)) and
+ *     per-file atomicity are not exercised. Those are covered by migration-0071's
+ *     lock tests on the drizzle path and by the static scan below; the real CLI
+ *     path (one pgconn ExecBatch, one Sync) was verified out of band (PR #237).
  * Then: drizzle sees the DB as fully migrated, the doctor reports no FAIL, the
  * RLS file is idempotent, and the storage block degrades to a WARNING instead
  * of failing the deploy when the role may not touch storage.objects.
