@@ -72,12 +72,23 @@
 -- Batch safety: no ALTER TYPE here, and nothing here uses 0071's new enum values
 -- ('event', 'skipped'): both migrations run in ONE migrator transaction.
 --
+-- Locks: the FIRST statement sets lock_timeout = 5s, and the SECOND takes every lock
+-- this file needs, ACCESS EXCLUSIVE, in one fixed (alphabetical) order, on the nine
+-- existing tables it alters or references. So no lock is upgraded mid-file, and a long
+-- reader makes the deploy fail fast (55P03) with nothing applied; re-run it when the
+-- reader is gone. There is no backfill: no row is read, and none is updated.
+--
+-- App coupling: schema.ts names the new columns of EXISTING tables in every Drizzle
+-- select/insert, so a build of main that carries this schema.ts fails against a DB
+-- without 0072. Promote a build only after 0072 is confirmed applied (PR runbook).
+--
 -- Additive only, idempotent (IF NOT EXISTS / guarded DO blocks); a second run is a
--- no-op. Rollback:
+-- no-op. Rollback = the ordered procedure in the PR body (app first, then this SQL,
+-- then the tracker rows, with the rls/0002 list reverted in the same revert):
 --   DROP TABLE notification_prefs, push_subscriptions, supplier_bank_account_changes,
 --     supplier_bank_accounts, leak_month_corrections, leak_month_snapshots,
---     consolidated_invoice_links, export_run_invoices, export_runs;
---   DROP FUNCTION public.restomatch_append_only();
+--     consolidated_invoice_links, export_run_invoices, export_runs;  -- their triggers go with them
+--   DROP FUNCTION public.restomatch_append_only();                  -- after the triggers
 --   ALTER TABLE goods_receipts DROP CONSTRAINT goods_receipts_id_restaurant_id_key;
 --   ALTER TABLE invoices DROP CONSTRAINT invoices_paid_pair_check,
 --     DROP CONSTRAINT invoices_payment_requires_paid_check, DROP COLUMN paid_at,
@@ -89,6 +100,12 @@
 --   ALTER TABLE supplier_catalog_items DROP COLUMN effective_from;
 --   ALTER TABLE users DROP COLUMN whatsapp_opt_in, DROP COLUMN whatsapp_opt_in_at,
 --     DROP COLUMN whatsapp_opt_in_source;
+--   DELETE FROM drizzle.__drizzle_migrations WHERE created_at = 1782500000000;
+--   DELETE FROM supabase_migrations.schema_migrations WHERE version IN ('20260626185320', '20260626185321');
+
+SET LOCAL lock_timeout = '5s';--> statement-breakpoint
+LOCK TABLE "goods_receipts", "invoice_lines", "invoices", "po_lines", "recovery_claims",
+  "restaurants", "supplier_catalog_items", "suppliers", "users" IN ACCESS EXCLUSIVE MODE;--> statement-breakpoint
 
 -- ── shared: append-only guard (frozen snapshots, corrections, bank audit) ─────
 -- BEFORE UPDATE OR DELETE. "Owner" = the table owner's connection (migrations, ops,

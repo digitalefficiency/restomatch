@@ -179,6 +179,56 @@ describe('0072 is registered', () => {
     expect(after).toEqual(before);
   });
 
+  it('takes lock_timeout + every ACCESS EXCLUSIVE lock up front: a long reader makes it fail fast, nothing applied, a re-run succeeds', async () => {
+    const stmts = readFileSync(join(migrationsDir(), '0072_schema_batch_a.sql'), 'utf8')
+      .split('--> statement-breakpoint')
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const code = (x: string) => x.split('\n').filter((l) => !l.trimStart().startsWith('--')).join('\n').trim();
+    expect(code(stmts[0]!)).toBe("SET LOCAL lock_timeout = '5s';");
+    expect(code(stmts[1]!)).toMatch(/^LOCK TABLE [\s\S]* IN ACCESS EXCLUSIVE MODE;$/);
+    const reader = postgres(url, { max: 1, prepare: false });
+    const runner = postgres(url, { max: 1, prepare: false });
+    try {
+      let release!: () => void;
+      const held = new Promise<void>((r) => (release = r));
+      let readerReady!: () => void;
+      const ready = new Promise<void>((r) => (readerReady = r));
+      const readerTx = reader.begin(async (tx) => {
+        await tx`select count(*) from invoices`; // ACCESS SHARE, held until commit
+        readerReady();
+        await held;
+      });
+      await ready;
+      const started = Date.now();
+      let err: unknown;
+      try {
+        await runner.begin(async (tx) => {
+          for (const st of stmts) await tx.unsafe(st);
+          throw new Error('should not get here');
+        });
+      } catch (e) {
+        err = e;
+      }
+      const waited = Date.now() - started;
+      expect(pgCode(err)).toBe('55P03'); // lock_not_available
+      expect(waited).toBeLessThan(15_000);
+      release();
+      await readerTx;
+      // Re-run once the reader is gone: every statement succeeds (rolled back here).
+      const ROLLBACK = new Error('rollback');
+      await expect(
+        runner.begin(async (tx) => {
+          for (const st of stmts) await tx.unsafe(st);
+          throw ROLLBACK;
+        }),
+      ).rejects.toBe(ROLLBACK);
+    } finally {
+      await reader.end();
+      await runner.end();
+    }
+  }, 30_000);
+
   it('uses no enum value that 0071 adds in the same migrator batch', () => {
     const file = readFileSync(join(migrationsDir(), '0072_schema_batch_a.sql'), 'utf8')
       .split('\n')
