@@ -35,12 +35,12 @@ const SEVERITIES: Severity[] = ['info', 'warn', 'block'];
 
 /**
  * The routing-time clauses of LEAK_FILTER (packages/charts/src/leak-views.ts),
- * restated independently: severity IN ('warn','block') AND type NOT IN
- * ('PRICE_LOWER','UNORDERED_ARRIVAL'). The third clause (a REJECTED duplicate)
+ * restated independently, as of train-B #211: severity IN ('warn','block') AND
+ * type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL','MISSING_ON_INVOICE'). The third clause (a REJECTED duplicate)
  * needs a decision, which a freshly routed row never has.
  */
 function leakFilterAtRouting(type: DiscrepancyType, severity: Severity): boolean {
-  return ['warn', 'block'].includes(severity) && !['PRICE_LOWER', 'UNORDERED_ARRIVAL'].includes(type);
+  return ['warn', 'block'].includes(severity) && !['PRICE_LOWER', 'UNORDERED_ARRIVAL', 'MISSING_ON_INVOICE'].includes(type);
 }
 
 // A run big enough that every cumulative rule would fire (₪950 on ₪1,000).
@@ -95,6 +95,13 @@ describe('non-leak rows are acknowledged with no ₪, before the cumulative rule
       matchRun: { totalDiscrepancyAmount: 6000, totalInvoiceAmount: 6000, poExists: false },
     });
     expect(d).toMatchObject({ ruleId: 'large-invoice-without-po', action: 'block', requiredRole: 'owner' });
+  });
+
+  it('MISSING_ON_INVOICE (decision 31.10) is acknowledged, never a ₪ queue', () => {
+    expect(evaluateApproval(ctx('MISSING_ON_INVOICE', 'warn'))).toMatchObject({
+      ruleId: 'non-leak-acknowledge',
+      requiredRole: null,
+    });
   });
 
   it('leak rows still reach the cumulative rules', () => {

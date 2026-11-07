@@ -109,13 +109,20 @@ export function resolveApprovalThresholds(
 
 /**
  * Does this row count in the leak? The routing-time part of the charts
- * LEAK_FILTER (packages/charts/src/leak-views.ts):
- *   severity IN ('warn','block') AND type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL')
+ * LEAK_FILTER (packages/charts/src/leak-views.ts) as of train-B #211:
+ *   severity IN ('warn','block') AND type NOT IN LEAK_EXCLUDED_TYPES
+ *   (PRICE_LOWER, UNORDERED_ARRIVAL, MISSING_ON_INVOICE — owner decision 31.10:
+ *   an ordered line the invoice never billed is not claimable and not leak).
+ * TODO(G-15, after #211 merges): import LEAK_EXCLUDED_TYPES from @restomatch/charts.
  * The filter's third clause (a duplicate the user REJECTED) is a decision,
  * not a routing input — a fresh row is never rejected. Parity is tested in
  * approvals-engine-routing.test.ts.
  */
-export const NON_LEAK_TYPES: ReadonlySet<DiscrepancyType> = new Set(['PRICE_LOWER', 'UNORDERED_ARRIVAL']);
+export const NON_LEAK_TYPES: ReadonlySet<DiscrepancyType> = new Set([
+  'PRICE_LOWER',
+  'UNORDERED_ARRIVAL',
+  'MISSING_ON_INVOICE',
+]);
 export function countsAsLeak(d: { type: DiscrepancyType; severity: Severity }): boolean {
   return (d.severity === 'warn' || d.severity === 'block') && !NON_LEAK_TYPES.has(d.type);
 }
