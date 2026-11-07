@@ -14,6 +14,18 @@ import { Explain, explainId } from '../Explain';
 const h = createElement as unknown as (type: unknown, props?: Record<string, unknown> | null, ...children: unknown[]) => ReactElement;
 const render = (el: ReactElement, locale: AppLocale = 'he') => renderToStaticMarkup(h(I18nProvider, { locale }, el));
 
+/** Text outside tags, by a character scan (no tag-stripping regex). */
+function textOf(html: string): string {
+  let out = '';
+  let inTag = false;
+  for (const ch of html) {
+    if (ch === '<') inTag = true;
+    else if (ch === '>') inTag = false;
+    else if (!inTag) out += ch;
+  }
+  return out;
+}
+
 function attr(html: string, tag: string, name: string): string[] {
   const re = new RegExp(`<${tag}\\b[^>]*\\s${name}="([^"]*)"`, 'g');
   return [...html.matchAll(re)].map((m) => m[1]!);
@@ -30,7 +42,7 @@ describe('<Explain> markup and a11y contract', () => {
 
   it('the name starts with the visible label, then the sr-only "about"; no aria-label / title', () => {
     const button = html.slice(html.indexOf('<button'), html.indexOf('</button>'));
-    expect(button.replace(/<[^>]+>/g, '')).toBe('למה? · ממתינות לשיוך');
+    expect(textOf(button)).toBe('למה? · ממתינות לשיוך');
     expect(button).toContain('<span class="sr-only"> · ממתינות לשיוך</span>');
     expect(button).not.toMatch(/aria-label|title=/);
     expect(button).toMatch(/<svg[^>]*aria-hidden="true"/);

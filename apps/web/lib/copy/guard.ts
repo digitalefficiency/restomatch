@@ -77,7 +77,11 @@ export function check(leaves: Leaf[], allow: AllowList, dupAllow: DupAllowList):
       if (m.words > a.words) failures.push({ rule: 'ratchet', id: m.id, detail: `grew to ${m.words} words (allowlisted at ${a.words}); shorten it` });
       continue;
     }
-    for (const b of m.breaks) failures.push({ rule: m.cls === 'explain' && !/^\d+ words|sentence/.test(b) ? 'explain' : 'cap', id: m.id, detail: b });
+    for (const b of m.breaks) {
+      // Length breaks ("N words > cap", sentence counts) are 'cap'; the rest of an explain body's breaks are 'explain'.
+      const isLength = /^\d+ words/.test(b) || b.includes('sentence');
+      failures.push({ rule: m.cls === 'explain' && !isLength ? 'explain' : 'cap', id: m.id, detail: b });
+    }
   }
   for (const g of duplicateGroups(measured)) {
     if (g.every((m) => dupAllow[m.id])) continue;
