@@ -17,14 +17,18 @@
 create schema if not exists app;
 
 -- Reads the active restaurant from the per-transaction GUC (NULL if unset).
-create or replace function app.current_restaurant_id() returns uuid
+-- search_path pinned (pg_temp LAST) and every name qualified: these run inside
+-- owner-run cascades and triggers too, where a planted pg_temp type must not resolve.
+create or replace function app.current_restaurant_id() returns pg_catalog.uuid
   language sql stable
-  as $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$;
+  set search_path = pg_catalog, pg_temp
+  as $$ select nullif(pg_catalog.current_setting('app.current_restaurant_id', true), '')::pg_catalog.uuid $$;
 
 -- Reads the acting user from the per-transaction GUC (NULL if unset).
-create or replace function app.current_user_id() returns uuid
+create or replace function app.current_user_id() returns pg_catalog.uuid
   language sql stable
-  as $$ select nullif(current_setting('app.current_user_id', true), '')::uuid $$;
+  set search_path = pg_catalog, pg_temp
+  as $$ select nullif(pg_catalog.current_setting('app.current_user_id', true), '')::pg_catalog.uuid $$;
 
 -- The root tenant table keys on `id` rather than `restaurant_id`.
 alter table restaurants enable row level security;

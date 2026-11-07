@@ -92,6 +92,8 @@ beforeAll(async () => {
   B = await seed('B', '000000722');
   const [u] = await db.insert(users).values({ email: `h03-${Date.now()}@0072.test` }).returning();
   userId = u!.id;
+  // A member of A (the bank audit refuses a verifier / actor from outside the restaurant).
+  await sql`insert into memberships (user_id, restaurant_id, role) values (${userId}, ${A.restaurantId}, 'manager')`;
 });
 afterAll(async () => {
   await cleanup(A);
@@ -337,7 +339,7 @@ describe('0072 the ten new tenant tables', () => {
     await db.insert(leakMonthCorrections).values({ restaurantId: t.restaurantId, snapshotId: snap!.id, deltaAgorot: 5, reason: 'late credit note' });
     const [acct] = await db
       .insert(supplierBankAccounts)
-      .values({ restaurantId: t.restaurantId, supplierId: t.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:kid:iv:ct:tag', accountLast4: '6789' })
+      .values({ restaurantId: t.restaurantId, supplierId: t.supplierId, bankCode: '12', branchCode: '345', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', accountLast4: '6789' })
       .returning();
     await db.insert(supplierBankAccountChanges).values({ restaurantId: t.restaurantId, bankAccountId: acct!.id, after: { account_last4: '6789' } });
     await db.insert(pushSubscriptions).values({ restaurantId: t.restaurantId, userId, endpoint: `https://push.test/${t.restaurantId}`, p256dh: 'k', auth: 'a' });
@@ -591,7 +593,7 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
     supplierId,
     bankCode: '12',
     branchCode: '345',
-    accountNumberEnc: 'v1:kid:iv:ct:tag',
+    accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB',
     accountLast4: '6789',
     ...over,
   });
@@ -614,15 +616,43 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
     await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId, { accountNumberEnc: '123456789' })), CHECK_VIOLATION);
     await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId, { accountNumberEnc: 'enc:123' })), CHECK_VIOLATION);
     // Only the FULL five-part envelope encryptField() writes: a short 'v1:<number>' is a clear number.
+    // W2-11 contract: unpadded base64url parts, iv = 16 chars (12 bytes), tag = 22 chars (16 bytes).
+    const iv = 'AAAAAAAAAAAAAAAA';
+    const tag = 'BBBBBBBBBBBBBBBBBBBBBB';
+    for (const enc of [
+      'v1:x:x:x:123456789012',
+      `v1:k1:${iv.slice(1)}:Y3Q:${tag}`,
+      `v1:k1:${iv}:Y3Q:${tag.slice(1)}`,
+      `v1:k1:${iv}:Y3Q:${tag}==`,
+      `v1:k1:${iv}:Y3+/:${tag}`,
+      `v1:k1:${iv}:Y3Q\n:${tag}`,
+      `v1:k\u0000:${iv}:Y3Q:${tag}`,
+      `v1:k1:${iv}:Y:${tag}`,
+    ]) {
+      await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId, { accountNumberEnc: enc })), CHECK_VIOLATION).catch(async (e) => {
+        // A NUL byte is refused by the driver/server before the CHECK; that is a refusal too.
+        if (!enc.includes('\u0000')) throw e;
+      });
+    }
     for (const enc of ['v1:123456789012', 'v1:kid:iv:ct', 'v1:kid:iv:ct:tag:extra', 'v1::iv:ct:tag', ' v1:kid:iv:ct:tag', 'V1:kid:iv:ct:tag']) {
       await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId, { accountNumberEnc: enc })), CHECK_VIOLATION);
     }
     // The holder is refused on the BASE table (the refusal names it), not only by the audit backstop.
-    for (const holder of ['v1:kid:iv:ct:tag', ' v1:kid:iv:ct:tag', 'V1:kid:iv:ct:tag', '\tv2:x', 'x'.repeat(201)]) {
+    for (const holder of [
+      'v1:kid:iv:ct:tag',
+      ' v1:kid:iv:ct:tag',
+      'V1:kid:iv:ct:tag',
+      '\tv2:x',
+      'x'.repeat(201),
+      '\u00a0v1:kid', // NBSP
+      '\u200bV1:kid', // zero-width space
+      '\ufeffv1:kid', // BOM
+      '\u2060\u3000v3:kid', // word joiner + ideographic space
+    ]) {
       let err: { code?: string; constraint_name?: string; table_name?: string } | undefined;
       try {
         await sql`insert into supplier_bank_accounts (restaurant_id, supplier_id, bank_code, branch_code, account_number_enc, account_last4, holder_name)
-          values (${A.restaurantId}, ${A.supplierId}, '12', '345', 'v1:kid:iv:ct:tag', '6789', ${holder})`;
+          values (${A.restaurantId}, ${A.supplierId}, '12', '345', 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', '6789', ${holder})`;
       } catch (e) {
         err = e as typeof err;
       }
@@ -643,6 +673,36 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
     await dropAccounts(eq(supplierBankAccounts.supplierId, A.supplierId));
   });
 
+  it('attribution: a named actor or a newly set verifier from outside the restaurant is refused; the owner connection writes anonymously', async () => {
+    const [outsider] = await db.insert(users).values({ email: `h03-out-${Date.now()}@0072.test` }).returning();
+    try {
+      // A verifier who is not a member of A, on insert and on update.
+      await expectPgError(db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId, { verifiedBy: outsider!.id })), '42501');
+      const [a] = await db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId)).returning();
+      await expectPgError(db.update(supplierBankAccounts).set({ verifiedBy: outsider!.id }).where(eq(supplierBankAccounts.id, a!.id)), '42501');
+      // A session actor who is not a member of A.
+      await expectPgError(
+        sql.begin(async (tx) => {
+          await tx`select set_config('app.current_user_id', ${outsider!.id}, true)`;
+          await tx`update supplier_bank_accounts set active = false where id = ${a!.id}`;
+        }),
+        '42501',
+      );
+      // A member of A as actor and as verifier: fine, and attributed.
+      await sql.begin(async (tx) => {
+        await tx`select set_config('app.current_user_id', ${userId}, true)`;
+        await tx`update supplier_bank_accounts set verified_by = ${userId}, verified_at = now() where id = ${a!.id}`;
+      });
+      // The owner connection (GUC unset) is allowed and anonymous.
+      await db.update(supplierBankAccounts).set({ active: false }).where(eq(supplierBankAccounts.id, a!.id));
+      const log = await changesOf(a!.id);
+      expect(log.map((r) => r.changedBy)).toEqual([null, userId, null]);
+      await dropAccounts(eq(supplierBankAccounts.id, a!.id));
+    } finally {
+      await db.delete(users).where(eq(users.id, outsider!.id));
+    }
+  });
+
   it('bank details are immutable: only active / verified_* / holder_name may change (a new account is a new row)', async () => {
     const [a] = await db.insert(supplierBankAccounts).values(acct(A.restaurantId, A.supplierId)).returning();
     for (const [c, v] of [
@@ -659,7 +719,7 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
       .set({ active: false, verifiedBy: userId, verifiedAt: new Date(), holderName: 'שם בעל החשבון' })
       .where(eq(supplierBankAccounts.id, a!.id));
     const [after] = await db.select().from(supplierBankAccounts).where(eq(supplierBankAccounts.id, a!.id));
-    expect(after).toMatchObject({ bankCode: '12', accountLast4: '6789', accountNumberEnc: 'v1:kid:iv:ct:tag', active: false, verifiedBy: userId });
+    expect(after).toMatchObject({ bankCode: '12', accountLast4: '6789', accountNumberEnc: 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', active: false, verifiedBy: userId });
     await dropAccounts(eq(supplierBankAccounts.id, a!.id));
   });
 
@@ -668,7 +728,7 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
     await sql.begin(async (tx) => {
       await tx`select set_config('app.current_user_id', ${userId}, true)`;
       const [r] = (await tx`insert into supplier_bank_accounts (restaurant_id, supplier_id, bank_code, branch_code, account_number_enc, account_last4)
-        values (${A.restaurantId}, ${A.supplierId}, '12', '345', 'v1:k:iv:ct:tag', '6789') returning id`) as unknown as [{ id: string }];
+        values (${A.restaurantId}, ${A.supplierId}, '12', '345', 'v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB', '6789') returning id`) as unknown as [{ id: string }];
       id = r.id;
     });
     let log = await changesOf(id);
@@ -679,7 +739,7 @@ describe('0072 supplier_bank_accounts + supplier_bank_account_changes', () => {
       before: null,
       after: { bank_code: '12', branch_code: '345', account_last4: '6789', holder_name: null, active: true, verified_by: null, verified_at: null },
     });
-    expect(JSON.stringify(log[0])).not.toContain('v1:k:iv:ct:tag'); // the ciphertext never reaches the audit
+    expect(JSON.stringify(log[0])).not.toContain('v1:k1:AAAAAAAAAAAAAAAA:Y3Q:BBBBBBBBBBBBBBBBBBBBBB'); // the ciphertext never reaches the audit
     await sql`update supplier_bank_accounts set updated_at = now() where id = ${id}`; // no masked field changed
     expect(await changesOf(id)).toHaveLength(1);
     await db.update(supplierBankAccounts).set({ active: false }).where(eq(supplierBankAccounts.id, id));
@@ -853,6 +913,9 @@ describe('0072 push_subscriptions / WhatsApp consent / notification_prefs + sett
     await expectPgError(sql`update users set whatsapp_opt_in_notice_version = null where id = ${userId}`, CHECK_VIOLATION); // nor which notice
     await expectPgError(sql`update users set whatsapp_opt_in_notice_version = '' where id = ${userId}`, CHECK_VIOLATION);
     await expectPgError(sql`update users set whatsapp_opt_in_notice_version = '   ' where id = ${userId}`, CHECK_VIOLATION);
+    for (const invisible of ['\t', '\n', '\u00a0', '\u200b\ufeff', ' \u3000 ']) {
+      await expectPgError(sql`update users set whatsapp_opt_in_notice_version = ${invisible} where id = ${userId}`, CHECK_VIOLATION);
+    }
     // An admin revoke is fine: opt_in false, source 'admin' = the last change.
     await db.update(users).set({ whatsappOptIn: false, whatsappOptInAt: new Date(), whatsappOptInSource: 'admin' }).where(eq(users.id, userId));
     await expectPgError(sql`update users set whatsapp_opt_in = true where id = ${userId}`, CHECK_VIOLATION);

@@ -530,6 +530,8 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
         if (auditP && (auditP.upd || auditP.del)) writable.push('audit_log(update/delete)');
         // 0072: the bank audit is written only by its SECURITY DEFINER trigger, frozen
         // months only by the owner connection (rls.ts revokes; absent before 0072).
+        const restaurantsP = priv.get('restaurants');
+        if (restaurantsP?.del) writable.push('restaurants(delete)');
         for (const t of ['supplier_bank_account_changes', 'leak_month_snapshots', 'leak_month_corrections']) {
           const p = priv.get(t);
           if (p && (p.ins || p.upd || p.del)) writable.push(t);
@@ -537,23 +539,31 @@ export async function runDoctor(url: string, opts: DoctorOptions = {}): Promise<
         add('app role', 'read-only tables', writable.length ? 'FAIL' : 'PASS',
           writable.length
             ? `${appRole} can write: ${writable.join(', ')} (tenant self-escalation / forged audit) — re-run provision-rls`
-            : 'plans/billing/users, bank audit and frozen months read-only, audit_log append-only');
-        // Every SECURITY DEFINER function in public/app runs as its owner: its search_path
-        // must be pinned with pg_temp LAST (else pg_temp types/relations shadow the real
-        // ones and run attacker code as the owner), and PUBLIC must not EXECUTE it.
-        const definers = (await tx`
-          select n.nspname || '.' || p.proname as f,
+            : 'plans/billing/users, bank audit and frozen months read-only, restaurants not deletable, audit_log append-only');
+        // Every plpgsql/sql function in public/app (not an extension's) can run as the table
+        // OWNER (triggers fire during owner-run cascades; SECURITY DEFINER always). Its
+        // search_path must be pinned with pg_temp LAST, else a planted pg_temp type /
+        // relation shadows the real one and runs attacker code as the owner. A SECURITY
+        // DEFINER function must also not be EXECUTE-able by PUBLIC.
+        const fns = (await tx`
+          select n.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' as f,
+                 p.prosecdef as definer,
                  coalesce((select c from unnest(p.proconfig) c where c like 'search_path=%' limit 1), '') as sp,
                  (p.proacl is null or exists (select 1 from aclexplode(p.proacl) a where a.grantee = 0 and a.privilege_type = 'EXECUTE')) as public_exec
-          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-          where p.prosecdef and n.nspname in ('public', 'app') order by 1`) as unknown as Array<{ f: string; sp: string; public_exec: boolean }>;
-        const unsafeDefiners = definers
-          .filter((d) => !/,\s*pg_temp\s*$/.test(d.sp) || d.public_exec)
-          .map((d) => `${d.f}${!/,\s*pg_temp\s*$/.test(d.sp) ? ` (search_path ${d.sp ? `'${d.sp.slice(12)}'` : 'unset'}: pg_temp must be listed LAST)` : ''}${d.public_exec ? ' (PUBLIC can EXECUTE)' : ''}`);
-        add('app role', 'SECURITY DEFINER hardening', unsafeDefiners.length ? 'FAIL' : 'PASS',
-          unsafeDefiners.length
-            ? `unsafe: ${unsafeDefiners.join('; ')}`
-            : `${definers.length} SECURITY DEFINER function(s): search_path ends with pg_temp, no PUBLIC EXECUTE`);
+          from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+          join pg_language l on l.oid = p.prolang
+          where n.nspname in ('public', 'app') and l.lanname in ('plpgsql', 'sql')
+            and not exists (select 1 from pg_depend d where d.classid = 'pg_proc'::regclass and d.objid = p.oid and d.deptype = 'e')
+          order by 1`) as unknown as Array<{ f: string; definer: boolean; sp: string; public_exec: boolean }>;
+        const pinned = (sp: string) => /^search_path=.*,\s*pg_temp\s*$/.test(sp);
+        const unsafeFns = fns
+          .filter((d) => !pinned(d.sp) || (d.definer && d.public_exec))
+          .map((d) => `${d.f}${!pinned(d.sp) ? ` (search_path ${d.sp ? `'${d.sp.slice(12)}'` : 'unset'}: pin it, pg_temp LAST)` : ''}${d.definer && d.public_exec ? ' (SECURITY DEFINER, PUBLIC can EXECUTE)' : ''}`);
+        add('app role', 'function search_path hardening', unsafeFns.length ? 'FAIL' : 'PASS',
+          unsafeFns.length
+            ? `unsafe: ${unsafeFns.join('; ')}`
+            : `${fns.length} plpgsql/sql function(s) in public/app: search_path ends with pg_temp; no SECURITY DEFINER is PUBLIC-executable`);
         const leakedOwnerOnly = OWNER_ONLY_TABLES.filter((t) => {
           const p = priv.get(t);
           return p && (p.sel || p.ins || p.upd || p.del);

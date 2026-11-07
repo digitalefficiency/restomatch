@@ -164,14 +164,18 @@ SELECT set_config('statement_timeout',
 -- UPDATE that only nulls those is let through inside a referential action (trigger
 -- depth > 1) or on the owner connection (DSR erasure); any other UPDATE raises.
 -- (A revoke in rls.ts would be the belt to this brace; proposed in the PR body.)
+-- It runs as the table OWNER inside cascades (restaurant delete → audit rows), so its
+-- search_path is pinned with pg_temp LAST and every type / catalog is qualified.
 CREATE OR REPLACE FUNCTION public.restomatch_append_only() RETURNS trigger
   LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
   AS $$
 DECLARE
-  is_owner boolean := pg_has_role(current_user, (SELECT relowner FROM pg_class WHERE oid = TG_RELID), 'MEMBER');
-  o jsonb;
-  n jsonb;
-  c text;
+  is_owner pg_catalog.bool := pg_catalog.pg_has_role(current_user,
+    (SELECT c.relowner FROM pg_catalog.pg_class c WHERE c.oid OPERATOR(pg_catalog.=) TG_RELID), 'MEMBER');
+  o pg_catalog.jsonb;
+  n pg_catalog.jsonb;
+  c pg_catalog.text;
 BEGIN
   IF TG_OP = 'DELETE' THEN
     IF is_owner THEN
@@ -180,23 +184,35 @@ BEGIN
     RAISE EXCEPTION '% is append-only: rows are never deleted', TG_TABLE_NAME
       USING ERRCODE = 'restrict_violation';
   END IF;
-  o := to_jsonb(OLD);
-  n := to_jsonb(NEW);
-  IF TG_NARGS > 0 AND (pg_trigger_depth() > 1 OR is_owner) THEN
+  o := pg_catalog.to_jsonb(OLD);
+  n := pg_catalog.to_jsonb(NEW);
+  IF TG_NARGS > 0 AND (pg_catalog.pg_trigger_depth() > 1 OR is_owner) THEN
     FOREACH c IN ARRAY TG_ARGV LOOP
-      IF n -> c = 'null'::jsonb THEN
+      IF n -> c OPERATOR(pg_catalog.=) 'null'::pg_catalog.jsonb THEN
         o := o - c;
         n := n - c;
       END IF;
     END LOOP;
   END IF;
-  IF o = n THEN
+  IF o OPERATOR(pg_catalog.=) n THEN
     RETURN NEW;
   END IF;
   RAISE EXCEPTION '% is append-only: rows are never updated', TG_TABLE_NAME
     USING ERRCODE = 'restrict_violation';
 END
 $$;--> statement-breakpoint
+-- 0031's set_updated_at(), unchanged in behaviour, re-created PINNED: it also fires as
+-- the owner (an ON DELETE SET NULL action is an owner-run UPDATE).
+CREATE OR REPLACE FUNCTION public.set_updated_at() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+BEGIN
+  IF NEW.updated_at IS NOT DISTINCT FROM OLD.updated_at THEN
+    NEW.updated_at := pg_catalog.now();
+  END IF;
+  RETURN NEW;
+END $$;--> statement-breakpoint
 
 -- ── invoices: payment facts ───────────────────────────────────────────────────
 ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "paid_at" timestamp with time zone;--> statement-breakpoint
@@ -368,13 +384,17 @@ CREATE TABLE IF NOT EXISTS "supplier_bank_accounts" (
   CONSTRAINT "supplier_bank_accounts_bank_code_check" CHECK ("bank_code" ~ '^[0-9]{2,3}$'),
   CONSTRAINT "supplier_bank_accounts_branch_code_check" CHECK ("branch_code" ~ '^[0-9]{3,4}$'),
   CONSTRAINT "supplier_bank_accounts_last4_check" CHECK ("account_last4" ~ '^[0-9]{1,4}$'),
-  -- A clear number is refused: only the full envelope encryptField() writes is stored,
-  -- 'v<n>:<kid>:<iv>:<ct>:<tag>' (five colon-separated parts, none empty).
-  CONSTRAINT "supplier_bank_accounts_enc_envelope_check" CHECK ("account_number_enc" ~ '^v[0-9]+:[^:]+:[^:]+:[^:]+:[^:]+$'),
-  -- The holder is a name, never a ciphertext envelope (any case, leading blanks). No
+  -- A clear number is refused: only the envelope encryptField() writes is stored (the
+  -- W2-11 contract): 'v<n>:<kid>:<iv>:<ct>:<tag>', every part unpadded base64url;
+  -- kid 1..64 chars, iv = 12 bytes (16 chars), ct >= 2 chars, tag = 16 bytes (22 chars).
+  CONSTRAINT "supplier_bank_accounts_enc_envelope_check" CHECK (
+    "account_number_enc" ~ '^v[0-9]{1,3}:[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{16}:[A-Za-z0-9_-]{2,}:[A-Za-z0-9_-]{22}$'),
+  -- The holder is a name, never a ciphertext envelope (any case, leading blanks incl.
+  -- Unicode spaces, zero-width characters and the BOM). No
   -- digit-run rule: a company name may carry its ח.פ. number.
   CONSTRAINT "supplier_bank_accounts_holder_name_check" CHECK (
-    "holder_name" IS NULL OR (length("holder_name") <= 200 AND "holder_name" !~* '^\s*v[0-9]+:'))
+    "holder_name" IS NULL OR (pg_catalog.length("holder_name") <= 200
+      AND "holder_name" !~* U&'^[[:space:][:cntrl:]\00A0\1680\180E\2000-\200D\2028\2029\202F\205F\2060\3000\FEFF]*v[0-9]+:'))
 );--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "supplier_bank_accounts_supplier_idx" ON "supplier_bank_accounts" USING btree ("supplier_id", "restaurant_id");--> statement-breakpoint
 -- One ACTIVE account per (restaurant, supplier): a change of account = a new row + the
@@ -401,7 +421,7 @@ CREATE OR REPLACE FUNCTION public.restomatch_bank_audit_masked(j pg_catalog.json
     AND pg_catalog.jsonb_typeof(coalesce(j -> 'branch_code', '"0"'::pg_catalog.jsonb)) = 'string' AND (j ->> 'branch_code') ~ '^[0-9]{1,4}$' IS NOT FALSE
     AND pg_catalog.jsonb_typeof(coalesce(j -> 'account_last4', '"0"'::pg_catalog.jsonb)) = 'string' AND (j ->> 'account_last4') ~ '^[0-9]{1,4}$' IS NOT FALSE
     AND pg_catalog.jsonb_typeof(coalesce(j -> 'holder_name', 'null'::pg_catalog.jsonb)) IN ('string', 'null')
-    AND (j ->> 'holder_name') !~* '^\s*v[0-9]+:' IS NOT FALSE AND pg_catalog.length(coalesce(j ->> 'holder_name', '')) <= 200
+    AND (j ->> 'holder_name') !~* U&'^[[:space:][:cntrl:]\00A0\1680\180E\2000-\200D\2028\2029\202F\205F\2060\3000\FEFF]*v[0-9]+:' IS NOT FALSE AND pg_catalog.length(coalesce(j ->> 'holder_name', '')) <= 200
     AND pg_catalog.jsonb_typeof(coalesce(j -> 'active', 'true'::pg_catalog.jsonb)) = 'boolean'
     AND pg_catalog.jsonb_typeof(coalesce(j -> 'verified_by', 'null'::pg_catalog.jsonb)) IN ('string', 'null') AND pg_catalog.length(coalesce(j ->> 'verified_by', '')) <= 64
     AND pg_catalog.jsonb_typeof(coalesce(j -> 'verified_at', 'null'::pg_catalog.jsonb)) IN ('string', 'null') AND pg_catalog.length(coalesce(j ->> 'verified_at', '')) <= 64
@@ -434,6 +454,7 @@ CREATE TRIGGER "supplier_bank_account_changes_append_only" BEFORE UPDATE OR DELE
 -- holder_name (and updated_at) may change. A different account is a new row.
 CREATE OR REPLACE FUNCTION public.restomatch_bank_account_guard() RETURNS trigger
   LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
   AS $$
 BEGIN
   IF NEW.restaurant_id IS DISTINCT FROM OLD.restaurant_id
@@ -467,10 +488,30 @@ CREATE OR REPLACE FUNCTION public.restomatch_bank_account_audit() RETURNS trigge
 DECLARE
   b pg_catalog.jsonb;
   a pg_catalog.jsonb;
+  -- Read the GUC directly (not via app.current_user_id()), so this definer does not
+  -- depend on any other function's pin.
+  actor pg_catalog.uuid := nullif(pg_catalog.current_setting('app.current_user_id', true), '')::pg_catalog.uuid;
 BEGIN
   -- Only ever as the trigger on supplier_bank_accounts (no temp-table or other-table reuse).
   IF TG_RELID IS DISTINCT FROM 'public.supplier_bank_accounts'::pg_catalog.regclass THEN
     RAISE EXCEPTION 'restomatch_bank_account_audit: wrong table' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  -- Attribution: a named actor, and a newly set verifier, must belong to this restaurant.
+  -- The owner connection (GUC unset) writes as actor NULL: anonymous by design.
+  IF actor IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM public.memberships m
+    WHERE m.user_id OPERATOR(pg_catalog.=) actor AND m.restaurant_id OPERATOR(pg_catalog.=) NEW.restaurant_id
+  ) THEN
+    RAISE EXCEPTION 'restomatch_bank_account_audit: the acting user is not a member of this restaurant'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF NEW.verified_by IS NOT NULL AND (TG_OP OPERATOR(pg_catalog.=) 'INSERT' OR NEW.verified_by IS DISTINCT FROM OLD.verified_by)
+     AND NOT EXISTS (
+       SELECT 1 FROM public.memberships m
+       WHERE m.user_id OPERATOR(pg_catalog.=) NEW.verified_by AND m.restaurant_id OPERATOR(pg_catalog.=) NEW.restaurant_id
+     ) THEN
+    RAISE EXCEPTION 'restomatch_bank_account_audit: verified_by is not a member of this restaurant'
+      USING ERRCODE = 'insufficient_privilege';
   END IF;
   a := pg_catalog.jsonb_build_object('bank_code', NEW.bank_code, 'branch_code', NEW.branch_code,
     'account_last4', NEW.account_last4, 'holder_name', NEW.holder_name, 'active', NEW.active,
@@ -484,7 +525,7 @@ BEGIN
     END IF;
   END IF;
   INSERT INTO public.supplier_bank_account_changes (restaurant_id, bank_account_id, changed_by, before, after)
-  VALUES (NEW.restaurant_id, NEW.id, app.current_user_id(), b, a);
+  VALUES (NEW.restaurant_id, NEW.id, actor, b, a);
   RETURN NULL;
 END
 $$;--> statement-breakpoint
@@ -550,7 +591,7 @@ BEGIN
     ALTER TABLE "users" ADD CONSTRAINT "users_whatsapp_consent_check" CHECK (
       NOT "whatsapp_opt_in"
       OR ("whatsapp_opt_in_at" IS NOT NULL AND "whatsapp_opt_in_source" IS NOT NULL
-          AND "whatsapp_opt_in_source" <> 'admin' AND pg_catalog.btrim(coalesce("whatsapp_opt_in_notice_version", '')) <> ''));
+          AND "whatsapp_opt_in_source" <> 'admin' AND coalesce("whatsapp_opt_in_notice_version", '') ~ U&'[^[:space:][:cntrl:]\00A0\1680\180E\2000-\200D\2028\2029\202F\205F\2060\3000\FEFF]'));
   END IF;
 END $$;--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "notification_prefs" (
@@ -594,12 +635,15 @@ CREATE TRIGGER "notification_settings_set_updated_at" BEFORE UPDATE ON "notifica
 
 -- ── RLS on the ten new tenant tables (also in rls/0002's list) ───────────────
 CREATE SCHEMA IF NOT EXISTS app;--> statement-breakpoint
-CREATE OR REPLACE FUNCTION app.current_restaurant_id() RETURNS uuid
+-- Same text as rls/0002 (which re-creates them after this file): pinned, qualified.
+CREATE OR REPLACE FUNCTION app.current_restaurant_id() RETURNS pg_catalog.uuid
   LANGUAGE sql STABLE
-  AS $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$;--> statement-breakpoint
-CREATE OR REPLACE FUNCTION app.current_user_id() RETURNS uuid
+  SET search_path = pg_catalog, pg_temp
+  AS $$ select nullif(pg_catalog.current_setting('app.current_restaurant_id', true), '')::pg_catalog.uuid $$;--> statement-breakpoint
+CREATE OR REPLACE FUNCTION app.current_user_id() RETURNS pg_catalog.uuid
   LANGUAGE sql STABLE
-  AS $$ select nullif(current_setting('app.current_user_id', true), '')::uuid $$;--> statement-breakpoint
+  SET search_path = pg_catalog, pg_temp
+  AS $$ select nullif(pg_catalog.current_setting('app.current_user_id', true), '')::pg_catalog.uuid $$;--> statement-breakpoint
 ALTER TABLE "export_runs" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP POLICY IF EXISTS "export_runs_tenant" ON "export_runs";--> statement-breakpoint
 CREATE POLICY "export_runs_tenant" ON "export_runs" USING ("restaurant_id" = app.current_restaurant_id());--> statement-breakpoint

@@ -70,28 +70,57 @@ describe('db:doctor', () => {
     expect((await runDoctor(url)).findings.find((f) => f.name === 'read-only tables')?.status).toBe('PASS');
   });
 
-  it('FAILs a SECURITY DEFINER function without pg_temp last in its search_path, or with PUBLIC EXECUTE', async () => {
-    const ok = (await runDoctor(url)).findings.find((f) => f.name === 'SECURITY DEFINER hardening');
+  it('FAILs any plpgsql/sql function in public/app without pg_temp last in its search_path, and a PUBLIC-executable SECURITY DEFINER', async () => {
+    const name = 'function search_path hardening';
+    const ok = (await runDoctor(url)).findings.find((f) => f.name === name);
     if (!ok) return; // no app role on this DB yet: the app-role section is skipped
     expect(ok.status).toBe('PASS');
-    const fn = 'public.restomatch_bank_account_audit()';
-    await sql.unsafe(`alter function ${fn} set search_path = pg_catalog, public`);
-    try {
-      const f = (await runDoctor(url)).findings.find((x) => x.name === 'SECURITY DEFINER hardening');
-      expect(f?.status).toBe('FAIL');
-      expect(f?.detail).toMatch(/restomatch_bank_account_audit .*pg_temp must be listed LAST/);
-    } finally {
-      await sql.unsafe(`alter function ${fn} set search_path = pg_catalog, public, pg_temp`);
+    // A SECURITY DEFINER without pg_temp last, and a plain trigger function (invoker) with no pin.
+    for (const [fn, restore] of [
+      ['public.restomatch_bank_account_audit()', 'pg_catalog, public, pg_temp'],
+      ['public.set_updated_at()', 'pg_catalog, pg_temp'],
+    ] as const) {
+      await sql.unsafe(`alter function ${fn} reset search_path`);
+      try {
+        const f = (await runDoctor(url)).findings.find((x) => x.name === name);
+        expect(f?.status, fn).toBe('FAIL');
+        expect(f?.detail).toContain(`${fn} (search_path unset: pin it, pg_temp LAST)`);
+      } finally {
+        await sql.unsafe(`alter function ${fn} set search_path = ${restore}`);
+      }
     }
+    // A search_path that does not END with pg_temp is not a pin.
+    await sql.unsafe(`alter function public.set_updated_at() set search_path = pg_temp, pg_catalog`);
+    try {
+      expect((await runDoctor(url)).findings.find((x) => x.name === name)?.status).toBe('FAIL');
+    } finally {
+      await sql.unsafe(`alter function public.set_updated_at() set search_path = pg_catalog, pg_temp`);
+    }
+    const fn = 'public.restomatch_bank_account_audit()';
     await sql.unsafe(`grant execute on function ${fn} to public`);
     try {
-      const f = (await runDoctor(url)).findings.find((x) => x.name === 'SECURITY DEFINER hardening');
+      const f = (await runDoctor(url)).findings.find((x) => x.name === name);
       expect(f?.status).toBe('FAIL');
-      expect(f?.detail).toMatch(/restomatch_bank_account_audit .*PUBLIC can EXECUTE/);
+      expect(f?.detail).toContain(`${fn} (SECURITY DEFINER, PUBLIC can EXECUTE)`);
     } finally {
       await sql.unsafe(`revoke execute on function ${fn} from public`);
     }
-    expect((await runDoctor(url)).findings.find((f) => f.name === 'SECURITY DEFINER hardening')?.status).toBe('PASS');
+    // Extension functions (pgvector's, in public) are not ours: never flagged.
+    expect((await runDoctor(url)).findings.find((f) => f.name === name)).toMatchObject({ status: 'PASS' });
+    expect((await runDoctor(url)).findings.find((f) => f.name === name)?.detail).not.toMatch(/vector/);
+  });
+
+  it('FAILs when the app role can DELETE restaurants (no owner-run cascade from the tenant role)', async () => {
+    const before = (await runDoctor(url)).findings.find((f) => f.name === 'read-only tables');
+    if (!before) return;
+    await sql.unsafe(`grant delete on restaurants to restomatch_app`);
+    try {
+      const f = (await runDoctor(url)).findings.find((x) => x.name === 'read-only tables');
+      expect(f?.status).toBe('FAIL');
+      expect(f?.detail).toContain('restaurants(delete)');
+    } finally {
+      await sql.unsafe(`revoke delete on restaurants from restomatch_app`);
+    }
   });
 
   it('redacts the password and prints a PASS/WARN/FAIL summary', async () => {
