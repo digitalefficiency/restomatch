@@ -34,7 +34,7 @@ export function PeriodCard({
   canEditSales = true,
 }: {
   compact?: boolean;
-  /** The chef (owner decision): the food cost % only — reads `periodPercent`, which carries no ₪ key. */
+  /** The chef (owner decision): the food cost % only — reads `foodCostPercent`, which carries no ₪ key. */
   percentOnly?: boolean;
   /** Food sales are a manager+ write (`setSales`, audited); the bookkeeper reads them. */
   canEditSales?: boolean;
@@ -48,10 +48,10 @@ function PercentCard({ compact }: { compact: boolean }) {
   const t = useT(inventoryNs);
   const tc = useT(components);
   const locale = useLocale();
-  const q = trpc.inventory.periodPercent.useQuery(undefined, { staleTime: 30_000 });
+  const q = trpc.inventory.foodCostPercent.useQuery(undefined, { staleTime: 30_000 });
   const p = q.data;
   return (
-    <Card padding="md" data-testid="food-cost-period">
+    <Card padding="md" data-testid="food-cost-percent">
       <h2 className="flex items-center gap-2 text-base font-semibold text-ink">
         <Calculator className="h-4 w-4 text-muted" aria-hidden="true" />
         {t('period.title')}

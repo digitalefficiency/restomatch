@@ -3,7 +3,9 @@ import {
   and,
   auditLog,
   inArray,
+  memberships,
   notificationsOutbox,
+  users,
   applyAuditImmutableRls,
   applyAuthCredentialTables,
   applyCoreTenantRls,
@@ -150,11 +152,11 @@ describe('inventory router: a foreign count id or product never reaches another 
   });
 
   // W2-07 (add-only): the audited denominator, the chef's hand-off and the %-only period.
-  it("setSales / submitForClose / periodPercent on A's counts from B → NOT_FOUND / notFound, and A is untouched", async () => {
+  it("setSales / submitForClose / foodCostPercent on A's counts from B → NOT_FOUND / notFound, and A is untouched", async () => {
     const [before] = await ownerDb.select().from(inventoryCounts).where(eq(inventoryCounts.id, aCount));
     await expect(callerFor(B, appDb).inventory.setSales({ countId: aCount, foodSalesExVat: '1.00' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(callerFor(B, appDb).inventory.submitForClose({ countId: aDraft })).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    expect(await callerFor(B, appDb).inventory.periodPercent({ closingId: aCount })).toEqual({ available: false, reason: 'notFound', showMoney: false });
+    expect(await callerFor(B, appDb).inventory.foodCostPercent({ closingId: aCount })).toEqual({ available: false, reason: 'notFound', showMoney: false });
     const [after] = await ownerDb.select().from(inventoryCounts).where(eq(inventoryCounts.id, aCount));
     expect(after!.foodSalesExVat).toBe(before!.foodSalesExVat);
     const audits = await ownerDb
@@ -164,5 +166,20 @@ describe('inventory router: a foreign count id or product never reaches another 
     expect(audits).toHaveLength(0);
     const notes = await ownerDb.select().from(notificationsOutbox).where(eq(notificationsOutbox.relatedEntityId, aDraft));
     expect(notes).toHaveLength(0);
+  });
+
+  it('through the tenant app role, the hand-off still reaches every owner/manager by address and names the sender (identities via adminDb, as team.list)', async () => {
+    const [chef] = await ownerDb.insert(users).values({ email: 'chef-rls@w207.test', name: 'שף בדיקה', emailVerified: new Date() }).returning();
+    const [mgr] = await ownerDb.insert(users).values({ email: 'manager-rls@w207.test', name: 'מנהלת', emailVerified: new Date() }).returning();
+    await ownerDb.insert(memberships).values([
+      { userId: chef!.id, restaurantId: A.restaurantId, role: 'chef' },
+      { userId: mgr!.id, restaurantId: A.restaurantId, role: 'manager' },
+    ]);
+    const asChef = appRouter.createCaller({ db: appDb, adminDb: ownerDb, session: { userId: chef!.id, restaurantId: A.restaurantId, role: 'chef' } } as AppContext);
+    const r = await asChef.inventory.submitForClose({ countId: aDraft });
+    expect(r.notified).toBe(2);
+    const notes = await ownerDb.select().from(notificationsOutbox).where(eq(notificationsOutbox.relatedEntityId, aDraft));
+    expect(notes.map((n) => n.target).sort()).toEqual(['manager-rls@w207.test', 'owner-RA@attack.test'].sort());
+    expect((await asChef.inventory.current())!.submittedBy).toBe('שף בדיקה');
   });
 });

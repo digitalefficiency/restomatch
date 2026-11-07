@@ -3,7 +3,7 @@ import { callerAs, count, freshLab, price, product, ymdAgo, type Lab } from './i
 
 /**
  * W2-07 · role = owner minus. The chef's JSON carries no ₪ key at all (current /
- * get / start / complete / history / periodPercent); the bookkeeper reads closed
+ * get / start / complete / history / foodCostPercent); the bookkeeper reads closed
  * counts, history, the period and the CSV, and writes nothing; discard is the
  * starter's or a manager+'s.
  */
@@ -23,7 +23,7 @@ beforeAll(async () => {
 });
 
 describe('no ₪ in the chef JSON', () => {
-  it('current / get / start / history / periodPercent carry no ₪ key', async () => {
+  it('current / get / start / history / foodCostPercent carry no ₪ key', async () => {
     const chef = callerAs(A, 'chef');
     const payloads = [
       await chef.inventory.current(),
@@ -31,12 +31,12 @@ describe('no ₪ in the chef JSON', () => {
       await chef.inventory.get({ countId: closed }),
       await chef.inventory.start(),
       await chef.inventory.history(),
-      await chef.inventory.periodPercent(),
+      await chef.inventory.foodCostPercent(),
     ];
     for (const p of payloads) expect(JSON.stringify(p)).not.toMatch(MONEY_KEYS);
     // …while the count itself still reads, and the % is there.
     expect((await chef.inventory.get({ countId: closed })).lines[0]).toMatchObject({ qty: '4.0000' });
-    expect(await chef.inventory.periodPercent()).toMatchObject({ available: true, showMoney: false });
+    expect(await chef.inventory.foodCostPercent()).toMatchObject({ available: true, showMoney: false });
     await expect(chef.inventory.period()).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 

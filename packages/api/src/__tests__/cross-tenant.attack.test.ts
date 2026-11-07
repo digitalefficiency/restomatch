@@ -393,7 +393,7 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // W2-07 (add-only; moves to coverage/W2-07.ts when W2-01's fragments are on the base):
   'inventory.setSales': "attack — inventory-rls.attack.test.ts: B setting sales on A's closed count → NOT_FOUND, A's sales untouched; inventory-sales.test.ts: manager+ only, audited",
   'inventory.submitForClose': "attack — inventory-rls.attack.test.ts: B submitting A's draft → NOT_FOUND, no audit row and no notification for A",
-  'inventory.periodPercent': "attack — inventory-rls.attack.test.ts: B asking for the % period of A's closed count → notFound; no ₪ key for any role",
+  'inventory.foodCostPercent': "attack — inventory-rls.attack.test.ts: B asking for the % period of A's closed count → notFound; no ₪ key for any role",
 };
 
 function listProcedurePaths(): string[] {

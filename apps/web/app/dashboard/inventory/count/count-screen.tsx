@@ -397,7 +397,11 @@ function CountForm({ draft, viewer, onDone }: { draft: Draft; viewer: CountViewe
     const names = ls.slice(0, 8).map((l) => (locale === 'en' && l.nameEn ? l.nameEn : l.name));
     return ls.length > 8 ? `${names.join(', ')} ${t('count.more', { count: ls.length - 8 })}` : names.join(', ');
   };
-  const today = todayIL();
+  // "Today" and the primary actions wait for hydration: the server's clock and render can't be trusted
+  // to match the phone's, and a tap before hydration would be lost (the lines render from server data).
+  const [today, setToday] = useState<string | null>(null);
+  useEffect(() => setToday(todayIL()), []);
+  const hydrated = today != null;
   const ilsText = (agorot: number) => moneyText(agorot / 100, 'tile', locale);
   const focusPrimary = () => document.getElementById('count-primary')?.focus();
   const headRef = useRef<HTMLDivElement>(null);
@@ -445,7 +449,9 @@ function CountForm({ draft, viewer, onDone }: { draft: Draft; viewer: CountViewe
             {t('count.back')}
           </LinkButton>
           <Button variant="secondary" size="sm" className="touch-target" onClick={() => setDateOpen(true)} data-testid="count-date-chip">
-            {t('count.dateChip', { date: draft.countDate === today ? t('count.todayDate', { date: dayText(draft.countDate, locale) }) : dayText(draft.countDate, locale) })}
+            {t('count.dateChip', {
+              date: draft.countDate === today ? t('count.todayDate', { date: dayText(draft.countDate, locale) }) : dayText(draft.countDate, locale),
+            })}
           </Button>
         </div>
         <h1 className="mt-1 text-xl font-bold text-ink">{t('title')}</h1>
@@ -768,7 +774,7 @@ function CountForm({ draft, viewer, onDone }: { draft: Draft; viewer: CountViewe
               </div>
             </div>
           ) : draft.canClose ? (
-            <Button id="count-primary" size="xl" className="touch-target" disabled={counted === 0} onClick={() => setConfirming(true)} data-testid="count-finish">
+            <Button id="count-primary" size="xl" className="touch-target" disabled={!hydrated || counted === 0} onClick={() => setConfirming(true)} data-testid="count-finish">
               {counted === 0 ? t('count.nothingCounted') : t('count.finish')}
             </Button>
           ) : (
@@ -776,7 +782,7 @@ function CountForm({ draft, viewer, onDone }: { draft: Draft; viewer: CountViewe
               id="count-primary"
               size="xl"
               className="touch-target"
-              disabled={counted === 0 || !!draft.submittedAt}
+              disabled={!hydrated || counted === 0 || !!draft.submittedAt}
               loading={submit.isPending}
               onClick={() => void handOff()}
               data-testid="count-submit"
@@ -797,7 +803,7 @@ function CountForm({ draft, viewer, onDone }: { draft: Draft; viewer: CountViewe
           <Button
             size="xl"
             loading={setDate.isPending}
-            disabled={!/^\d{4}-\d{2}-\d{2}$/.test(dateValue) || dateValue > today || dateValue === draft.countDate}
+            disabled={!today || !/^\d{4}-\d{2}-\d{2}$/.test(dateValue) || dateValue > today || dateValue === draft.countDate}
             onClick={() => setDate.mutate({ countId: draft.id, countDate: dateValue })}
           >
             {t('count.dateSave')}
@@ -807,7 +813,7 @@ function CountForm({ draft, viewer, onDone }: { draft: Draft; viewer: CountViewe
         <label className="block text-sm text-muted" htmlFor="count-date">
           {t('count.date')}
         </label>
-        <DateField id="count-date" className="mt-1 text-base" min="2000-01-01" max={today} value={dateValue} onValueChange={(v) => setDateValue(v ?? '')} />
+        <DateField id="count-date" className="mt-1 text-base" min="2000-01-01" max={today ?? undefined} value={dateValue} onValueChange={(v) => setDateValue(v ?? '')} />
       </Sheet>
 
       <ConfirmDialog

@@ -4,7 +4,7 @@ import { createServerCaller } from '@/lib/trpc/server';
 import { SectionHeader } from '@/lib/components';
 import { getT } from '@/lib/i18n/server';
 import { inventory as inventoryNs } from '@/lib/i18n/messages/inventory';
-import { InventoryHome, type InventoryRole } from './inventory-home';
+import { InventoryHome, type InventoryRole } from '../inventory-home';
 
 /**
  * Inventory counting → actual food cost (flag `inventoryCount`). Owner / manager /
