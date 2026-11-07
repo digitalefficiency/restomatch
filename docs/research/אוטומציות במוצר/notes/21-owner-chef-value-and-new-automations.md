@@ -83,6 +83,8 @@ Status words: **live**, **flag (P)** = on in the pilot, **flag (–)** = built b
 
 ### 2.1 At a glance
 
+> **Corrected by the briefs and `docs/ux/automation/README.md` §13 (2026-11-07).** Phases in the plan are B1/B2/C/D, not the ones below: AU-20 = B1 (PR a; PR b and the MarketMan layout after AU-02 → G-17); AU-21 = PR a in **B2**, PR b in C, PRs c and d in **D**; AU-23 and AU-25 = C (slip to D with wave 3); AU-26 = **D** (not "C+"). Where this note and the briefs/README §13.8 disagree, the briefs win.
+
 | Id | One line | Roles | Effort | Phase | HUMAN-PR? |
 |---|---|---|---|---|---|
 | **AU-20** | Coexistence by documents: forward MarketMan/Zestt POs (and Zestt delivery notes) to the ingest address; we match without retyping | owner, manager (receiver ₪-free) | M | B1 | no |
@@ -103,19 +105,19 @@ Status words: **live**, **flag (P)** = on in the pilot, **flag (–)** = built b
 - **Roles.** Owner, manager (forward and review). Receiver: ₪-free expected lines only.
 - **Trigger → action → human confirms.**
   - A PO PDF or e-mail lands at the ingest address.
-  - Zestt documents already go through `importPo` (live, needs the OCR key; i08 §1.3, §3.1). PR a extends the PO parser to **MarketMan PO PDFs** (C7). The layout is UNVERIFIED: 3 real samples are needed first.
+  - Zestt documents already go through `importPo` (live, needs the OCR key; i08 §1.3, §3.1). PR a extends the PO parser to **MarketMan PO PDFs** (C7). **[Corrected by AU-20.md / README §13.8:** the import is Zestt-only end to end (`importPo.ts:177, 241`; `orders.ts:697` `z.literal('zestt')`) and the intake pipeline turns every document into an invoice (`pipeline.ts:117-125`), so PR a makes the import **platform-aware** rather than "extending" a live path, and a routing step is needed.**]** The layout is UNVERIFIED: 3 real samples are needed first.
   - The import resolves the supplier and per-line SKU, checks printed totals, upserts lines in place, and refuses re-import once a receipt exists (`importPo.ts:186-198`).
   - A checksum failure → a `draft` PO, which is not eligible for matching.
   - The manager confirms a **new** supplier link (fixes the silent name adoption, 20 §B.5).
-  - PR b: Zestt digital delivery notes forwarded the same way become **expected quantities** for the dock: ₪-free, never pre-filled counts. The format is UNVERIFIED.
+  - PR b: Zestt digital delivery notes forwarded the same way become **expected quantities** for the dock: ₪-free, never pre-filled counts. The format is UNVERIFIED. **[Corrected by AU-20.md / README §13.1:** in the brief PR b = **sender routing** ("order source" senders go to the PO import). Delivery notes are **split out of AU-20** into a later Phase-D brief, after H-04 and ordered against AU-21 PR d.**]**
 - **Value (ASSUMPTIONS).**
   - *Hours-₪.* For a MarketMan/Zestt tenant the alternative is retyping orders. 14 orders/week × 2–4 min (ASSUMPTION), less ~0.25 min to forward ≈ **0.4–0.9 h/week manager**. 0.4–0.9 × 4.33 × ₪103 = **₪180–400/month**.
   - *Leak ₪, surfaced, not new.* Without POs only DUPLICATE, VAT, TOTAL and contract checks fire (i08 §2). Assume PO-dependent types (PRICE_HIGHER vs PO, QTY_SHORT/OVER, UNORDERED) are 40–70% of the leak and the tenant forwards 50–80% of POs (both ASSUMPTIONS).
   - ₪3,000 × 0.4–0.7 × 0.5–0.8 = **₪600–1,680/month of leak made visible**. It is the existing engine's figure on a larger base. It is an upper bound, because contract checks overlap. "Recovered" follows the A12 assumptions and is not recomputed here.
 - **Effort.** M (parser extension + forward route + labels + supplier confirm step).
 - **Dependencies.**
-  - `importPo` (live).
-  - AU-02 (Phase A) for the ingest path.
+  - `importPo` (live, Zestt-only; see the correction above).
+  - AU-02 (Phase A) for the ingest path. **[Corrected:** AU-02 cannot merge before G-17 (not started); it gates only PR b and the MarketMan layout, not PR a.**]**
   - G-09 #190 (built) for multi-page PDFs.
   - **#211 (open)**: MISSING_ON_INVOICE out of the leak.
   - **G-04 #188 (built, not merged)**: closed POs still discovered.
@@ -228,7 +230,7 @@ Status words: **live**, **flag (P)** = on in the pilot, **flag (–)** = built b
 - **Roles.** Chef and manager (₪ on orders allowed); owner (opt-in).
 - **Trigger → action → human confirms.**
   - The PO send text (wa.me / e-mail, W2-06) adds "מחיר מוסכם ₪X" per line.
-  - The price comes from `resolveExpectedPrice` restricted to **contract or owner-explicit** prices; never a list or invoice price.
+  - The price comes from `resolveExpectedPrice` restricted to **contract or owner-explicit** prices; never a list or invoice price. **[Corrected by AU-24.md §8 / README §13.6:** "owner-explicit" prices have no source on `main`, so the built option is **contract only**; and `orderPricesOut` is built but OFF in the pilot (`pilot-config.ts:26-37`), so it must be switched on for the opted-in tenant (AU-01 toggle or owner) as part of OD-C6.**]**
   - Lines without an agreed price show no price.
   - The sender still taps send. It is an opt-in per supplier by the owner, using the existing `orderPricesOut` flag (i08 §3.1).
 - **Value (ASSUMPTIONS).**
@@ -263,7 +265,7 @@ Status words: **live**, **flag (P)** = on in the pilot, **flag (–)** = built b
 - **Immutable files.** None.
 - **Owner rules.** Owner/bookkeeper only. The leak definition is unchanged; the % is a translation, not a second leak.
 
-#### AU-26 · Same-supplier pack-size hint (Phase C+, icp-keeper gate)
+#### AU-26 · Same-supplier pack-size hint (Phase C+, icp-keeper gate) [plan: Phase **D**, README §13.4]
 - **One line.** On an order draft (A16) or a price alert (A18): "אותו ספק: 5 ק״ג זול ב-9% לק״ג מ-2.5 ק״ג".
 - **Roles.** Chef (₪ on orders), owner.
 - **Trigger → action → human confirms.** The draft builder compares unit prices within **one supplier's** own price list, using unit conversion. The chef decides; the system never changes a quantity or pack.
@@ -315,7 +317,7 @@ Labelled **OD-C** so they never collide with AD1–AD14 (README §7.2) or IMPLEM
 | **OD-C3** | Switch the chef's area on in the pilot before W3-02 | **Yes for `recipes` + `dishPriceAlert`**, for one pilot tenant whose chef asks for it, after #219 merges. `inventoryCount` stays OFF | Closes LOSE gap 2 with built code. Recipes are already priced from the paid price | AU-01 (allow-list), W3-02 |
 | **OD-C4** | Chef and inventory ₪ (same question as i08 §4 Q5, 20 §B.6 #4) | **No ₪ to the chef on counts.** The chef sees quantities; valuation and "actual food cost" stay owner/manager | Keeps the rule "chef ₪ only on orders and recipes" literal | W2-07, W3-02 |
 | **OD-C5** | Recipe price basis | **Keep the last paid price** as the dish cost. Show the agreed price as a second, owner-visible column. Any switch to contract price is a ₪-semantics change (leak-economist + owner) | The paid price is the real cost; `cat` §G.2 #10 | W3-02 |
-| **OD-C6** | Agreed price on outgoing POs | **Opt-in per supplier, default OFF.** Contract or owner-explicit prices only | Evidence for claims, and no surprise commitments | AU-24 |
+| **OD-C6** | Agreed price on outgoing POs | **Opt-in per supplier, default OFF.** Contract or owner-explicit prices only. **[Corrected: the owner answers against the built option = contract prices only** (no owner-explicit price source on `main`, AU-24 §8), and a yes also switches `orderPricesOut` on for that tenant (OFF in the pilot).**]** | Evidence for claims, and no surprise commitments | AU-24 |
 | **OD-C7** | Food-cost % lite: crosses toward the LOSE·D "P&L / food cost" rows (M#12–13) | **Allow, narrowly:** one line in the monthly report, one typed sales number, purchases-based label, never a hero or tile, icp-keeper gate. **OWNER DECISION** | Argument for: it dramatises the leak in the owner's language (food-cost points) without POS, counts or inventory. Argument against: P&L drift. The narrow form keeps the GR wedge central | AU-25 |
 | **OD-C8** | What the negotiation pack may show a supplier | **Owner picks the sections. Default:** price history, agreed vs billed, claims and credits record. **Exclude** internal notes and staff names. Never system-sent | The record is the leverage; sharing stays a human act | AU-22 |
 | **OD-C9** | Same-supplier pack-size hints | **Allow in Phase C+** behind icp-keeper. Explicitly **not** `product_group_id` / cross-supplier | Within one supplier's own list it is unit arithmetic, not the locked network feature | AU-26 |
