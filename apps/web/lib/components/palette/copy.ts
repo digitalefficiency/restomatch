@@ -1,7 +1,8 @@
 /**
- * Palette copy (he / en). Kept beside the component until a `messages/palette`
- * namespace is granted; the shape matches a messages module so the move is
- * mechanical.
+ * Palette copy (he / en). TODO(W3-08): move to `messages/palette` (W3-08 owns
+ * `messages/index.ts`). The shape matches a messages module so the move is
+ * mechanical. Vocabulary per W2-13: "פער" for an undecided gap, "דליפה" only
+ * for the monthly leak.
  */
 export const paletteCopy = {
   he: {
