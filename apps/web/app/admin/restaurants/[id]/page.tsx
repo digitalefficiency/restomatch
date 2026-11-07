@@ -56,6 +56,12 @@ export default async function AdminRestaurantDetail({ params }: PageProps) {
         {restaurant.businessId ? `${t('detail.businessId')} ${restaurant.businessId} · ` : ''}
         {t('detail.created')} {formatDate(restaurant.createdAt, locale)}
       </p>
+      <Link
+        href={`/admin/automation?r=${restaurant.id}`}
+        className="mb-6 inline-block text-sm text-primary underline underline-offset-2 hover:text-ink"
+      >
+        {t('automation.open')}
+      </Link>
 
       <div className="grid gap-6 md:grid-cols-2">
         <section className="relative overflow-hidden rounded-xl border border-line bg-surface p-5 shadow-card">
