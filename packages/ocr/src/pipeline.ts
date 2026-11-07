@@ -36,12 +36,10 @@ export async function runOcrPipeline(
   // agreement either way).
   const singleProvider = options.documentAi === options.claude;
   const xopts = options.signal ? { signal: options.signal } : undefined;
-  const [documentAi, claude] = singleProvider
-    ? await options.claude.extract(image, xopts).then((r) => [r, r] as const)
-    : await Promise.all([
-        options.documentAi.extract(image, xopts),
-        options.claude.extract(image, xopts),
-      ]);
+  const [documentAi, claude] =
+    singleProvider
+      ? await options.claude.extract(image, xopts).then((r) => [r, r] as const)
+      : await Promise.all([options.documentAi.extract(image, xopts), options.claude.extract(image, xopts)]);
 
   const reconciledResult = reconcile(documentAi, claude);
   const { result: reconciledInvoice, conflicts } = reconciledResult;
@@ -134,9 +132,7 @@ async function enrichLine(
  * price there would be counted as a ₪ leak that never happened.
  */
 function hasLowConfidenceLines(invoice: { lines: ResolvedInvoiceLine[] }): boolean {
-  return invoice.lines.some(
-    (l) => l.confidence !== undefined && l.confidence < LINE_REVIEW_THRESHOLD,
-  );
+  return invoice.lines.some((l) => l.confidence !== undefined && l.confidence < LINE_REVIEW_THRESHOLD);
 }
 
 function hasUnresolvedLines(invoice: { lines: ResolvedInvoiceLine[] }): boolean {
