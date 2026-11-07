@@ -44,6 +44,7 @@ export const en: Shape<typeof he> = {
     deleteLineConfirm: 'Delete this line? The header totals are recalculated and the match runs again.',
     lineAdded: 'Line added.',
     lineDeleted: 'Line deleted.',
+    rematchBlocked: "The count's result was not applied — a credit claim on this invoice has history.",
     heldForCount: 'The count is still open — the match runs automatically when the count is closed.',
     rematchedNote: 'The match was re-run.',
     rematchLater: "The match didn't run this time — run it again with the button above.",

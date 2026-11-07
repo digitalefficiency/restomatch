@@ -352,6 +352,16 @@ export function InvoiceCorrection({
           </div>
         </div>
 
+        {invoice.rematchBlocked && !rematch && (
+          <p
+            data-testid="rematch-blocked"
+            role="status"
+            className="mb-4 rounded-lg border border-line bg-surface-2/50 px-4 py-3 text-sm text-muted"
+          >
+            {t('correction.rematchBlocked')}
+          </p>
+        )}
+
         {held && (
           <p
             data-testid="rematch-held"

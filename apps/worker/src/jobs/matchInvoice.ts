@@ -17,7 +17,7 @@ import {
   releaseClaimsForRematch,
   resolveApprovalThresholds,
 } from '@restomatch/api';
-import { and, desc, eq, invoices, matchRuns, restaurants, suppliers, type Database } from '@restomatch/db';
+import { and, desc, eq, invoices, matchRuns, restaurants, sql, suppliers, type Database } from '@restomatch/db';
 import { runMatch, type MatchOutput } from '@restomatch/matching';
 import { makeWorker, type WorkerJob } from '../queue';
 import { appBaseUrl } from '../lib/notifyHelpers';
@@ -173,8 +173,17 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
       try {
         await releaseClaimsForRematch(tx, restaurantId, invoiceId);
       } catch (err) {
-        if ((err as { code?: string }).code === 'CONFLICT') return 'claim_in_progress' as const;
-        throw err;
+        if ((err as { code?: string }).code !== 'CONFLICT') throw err;
+        // Say so on the invoice (round 8): the page and the dock slip show that
+        // the count's result was not applied — never a silent stale ₪.
+        await tx.execute(sql`
+          UPDATE invoices
+             SET ocr_payload = coalesce(ocr_payload, '{}'::jsonb) || jsonb_build_object('raw',
+                   (CASE WHEN jsonb_typeof(ocr_payload -> 'raw') = 'object' THEN ocr_payload -> 'raw' ELSE '{}'::jsonb END)
+                     || jsonb_build_object('rematchBlocked', jsonb_build_object(
+                          'grId', ${built.grId}::text, 'at', now(), 'reason', 'claim_in_progress')))
+           WHERE id = ${invoiceId} AND restaurant_id = ${restaurantId}`);
+        return 'claim_in_progress' as const;
       }
       prior = await loadPriorDecisions(tx, restaurantId, invoiceId);
       await tx

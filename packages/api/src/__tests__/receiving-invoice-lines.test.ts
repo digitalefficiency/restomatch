@@ -3,6 +3,8 @@ import { and, auditLog, creditNotes, createDb, discrepancies, eq, goodsReceipts,
 import { computeInvoiceLeak } from '@restomatch/charts';
 import { appRouter } from '../index';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
+import { transitionClaim } from '../recovery/service';
+import { invoicesWaitingOnReceipt } from '../receiving/matchTriggers';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
@@ -1072,6 +1074,108 @@ describe('#216 round 7', () => {
     await expect(as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { vatAmount: null } })).rejects.toMatchObject({
       cause: { appCode: 'invoice.partialHeaderClear' },
     });
+  });
+});
+
+describe('#216 round 8', () => {
+  const runs = () => db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId));
+  const raw = async () =>
+    ((await db.select({ p: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, failedId)))[0]!.p as { raw?: Record<string, unknown> } | null)?.raw ?? {};
+  const claims = () => db.select().from(recoveryClaims).where(eq(recoveryClaims.invoiceId, failedId));
+  const stampOn = (grId: string) =>
+    db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: grId } } })
+      .where(eq(invoices.id, failedId));
+  /** A hand line + an earlier run with no receipt, one finding claimed (bare unless a person touched it). */
+  async function handLineWithClaimedRun() {
+    const [line] = await db
+      .insert(invoiceLines)
+      .values({ invoiceId: failedId, rawDescription: 'מגבות נייר', qtyBilled: '1', unit: 'יח׳', unitPriceBilled: '15', lineTotal: '15.00' })
+      .returning();
+    const [run] = await db
+      .insert(matchRuns)
+      .values({ restaurantId: A.restaurantId, poId: A.poId, grId: null, invoiceId: failedId, overallStatus: 'blocked', totalDiscrepancyAmount: '15.00', runAt: new Date(Date.now() - 3_600_000) })
+      .returning();
+    const [d] = await db
+      .insert(discrepancies)
+      .values({ matchRunId: run!.id, restaurantId: A.restaurantId, type: 'UNORDERED_ITEM', severity: 'warn', deltaAmount: '15.00', resolutionStatus: 'accepted' } as never)
+      .returning();
+    const [c] = await db
+      .insert(recoveryClaims)
+      .values({ restaurantId: A.restaurantId, discrepancyId: d!.id, supplierId: A.supplierId, invoiceId: failedId, amountAgorot: 1500 } as never)
+      .returning();
+    return { lineId: line!.id, runId: run!.id, claimId: c!.id };
+  }
+  const personWritesOff = (claimId: string) =>
+    transitionClaim(db, A.restaurantId, { claimId, to: 'written_off', actorId: A.ownerUserId, note: 'not worth it' });
+
+  it('item 2: a claim a PERSON wrote off has history — Re-run is refused (claimInProgress) with copy that promises no unblock', async () => {
+    await stampOn(A.grId);
+    const { runId, claimId } = await handLineWithClaimedRun();
+    await personWritesOff(claimId);
+    const err = await as('manager').match.runForInvoice({ invoiceId: failedId }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: 'CONFLICT', cause: { appCode: 'invoice.claimInProgress' } });
+    expect((err as Error).message).toMatch(/locked; the claims stay in the tracker/);
+    expect((err as Error).message).not.toMatch(/before re-matching/);
+    expect((await runs()).map((r) => r.id)).toEqual([runId]);
+    expect((await claims()).map((c) => c.id)).toEqual([claimId]);
+  });
+
+  it('item 3: typing a subtotal while clearing the VAT in one save ({null,15.30,100.30} → {85,null,100.30}) is refused', async () => {
+    await db.update(invoices).set({ totalExclVat: null, vatAmount: '15.30', totalInclVat: '100.30' }).where(eq(invoices.id, failedId));
+    await expect(
+      as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 85, vatAmount: null } }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', cause: { appCode: 'invoice.partialHeaderClear' } });
+    expect(await header(failedId)).toEqual({ excl: null, vat: '15.30', incl: '100.30' });
+  });
+
+  it('item 4: held for receipt A, then re-matched on receipt B → the hold is gone; A\'s submit never takes it back', async () => {
+    // Receipt B: another order of this supplier, counted.
+    const [po2] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, expectedDeliveryAt: new Date(), status: 'sent', source: 'manual' })
+      .returning();
+    await db.insert(poLines).values({ poId: po2!.id, productId: A.productId, rawDescription: 'עגבניות', qtyOrdered: '10', unit: 'kg', unitPriceExpected: '8.5' });
+    const [grB] = await db.insert(goodsReceipts).values({ restaurantId: A.restaurantId, poId: po2!.id, status: 'completed', receivedAt: new Date() }).returning();
+    await db.insert(invoiceLines).values({ invoiceId: failedId, productId: A.productId, rawDescription: 'עגבניות', qtyBilled: '10', unit: 'kg', unitPriceBilled: '8.5', lineTotal: '85.00' });
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    // Held for A once; the scan is (now) known to be B's.
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: grB!.id, heldForReceipts: [A.grId] } } })
+      .where(eq(invoices.id, failedId));
+    const out = await as('manager').match.runForInvoice({ invoiceId: failedId });
+    expect(out.matchRunId).not.toBeNull();
+    expect((await runs())[0]).toMatchObject({ grId: grB!.id });
+    expect((await raw()).heldForReceipts).toBeUndefined();
+    expect(await invoicesWaitingOnReceipt(db, A.restaurantId, A.grId)).not.toContain(failedId);
+  });
+
+  it('item 5 + 6: one claim rule — a claim with history locks the pencil up front (open or closed receipt), nothing written', async () => {
+    await stampOn(A.grId);
+    const { lineId, claimId } = await handLineWithClaimedRun();
+    await personWritesOff(claimId); // the old line lock let this through; the re-match refused it
+    for (const status of ['pending', 'completed'] as const) {
+      await db.update(goodsReceipts).set({ status }).where(eq(goodsReceipts.id, A.grId));
+      await expect(as('manager').receiving.updateInvoiceLine({ lineId, patch: { qtyBilled: 2 } })).rejects.toMatchObject({
+        cause: { appCode: 'invoice.linesLocked' },
+      });
+    }
+    const [line] = await db.select({ qty: invoiceLines.qtyBilled }).from(invoiceLines).where(eq(invoiceLines.id, lineId));
+    expect(Number(line!.qty)).toBe(1);
+    expect((await raw()).heldForReceipts).toBeUndefined();
+    expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).linesLockReason).toBe('claim');
+  });
+
+  it('item 6: the pencil on a hand line, a BARE claim on the old run, the receipt open → the claim is released with the hold', async () => {
+    await stampOn(A.grId);
+    const { lineId } = await handLineWithClaimedRun();
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    const out = await as('manager').receiving.updateInvoiceLine({ lineId, patch: { qtyBilled: 2 } });
+    expect(out).toMatchObject({ rematched: false, rematchSkipped: 'receipt_open' });
+    expect(await claims()).toHaveLength(0); // released now — the receipt's job replaces that run
+    expect((await raw()).heldForReceipts).toEqual([A.grId]);
   });
 });
 

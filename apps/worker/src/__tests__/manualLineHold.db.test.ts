@@ -21,7 +21,7 @@ import {
   testDbUrl,
   users,
 } from '@restomatch/db';
-import { appRouter, type AppContext } from '@restomatch/api';
+import { appRouter, syncClaims, type AppContext } from '@restomatch/api';
 import { matchInvoiceForJob, type MatchInvoiceJob } from '../jobs/matchInvoice';
 import { markOcrFailed } from '../jobs/ocrInvoice';
 
@@ -398,5 +398,33 @@ describe('#216 round 7', () => {
     expect(out).toMatchObject({ skipped: 'claim_in_progress', persisted: null });
     expect((await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, inv))).map((r) => r.id)).toEqual([runId]);
     expect(await claimsOf(inv)).toHaveLength(1);
+    // Round 8 item 1b: never silent — recorded on the invoice; the page and the dock slip say so.
+    const [row] = await db.select({ payload: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, inv));
+    expect((row!.payload?.raw as Record<string, unknown>).rematchBlocked).toMatchObject({ grId, reason: 'claim_in_progress' });
+    expect((await as('owner').receiving.getInvoice({ invoiceId: inv })).rematchBlocked).toEqual({ reason: 'claim_in_progress' });
+    await db.update(restaurants).set({ settings: { features: { dockSlip: true } } as never }).where(eq(restaurants.id, restaurantId));
+    const slip = await as('owner').receiving.dockSlip({ grId, invoiceId: inv });
+    expect(slip).toMatchObject({ engine: { holdReason: 'claim_in_progress' } });
+  });
+
+  it('round 8 item 1 (P1): while held, the tracker sync never re-files the released claim on the OLD run → submit → the job matches clean, ₪0', async () => {
+    const inv = await emailInvoice();
+    await priorRunWithClaim(inv, { letterSent: false });
+    expect(await as('owner').match.runForInvoice({ invoiceId: inv })).toMatchObject({ status: 'held' });
+    expect(await claimsOf(inv)).toHaveLength(0);
+    // The ₪-back tracker opens (recovery.summary / list sync first): nothing re-filed on the run being replaced.
+    expect(await syncClaims(db, restaurantId, userId)).toBe(0);
+    expect(await claimsOf(inv)).toHaveLength(0);
+
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
+    await as('receiver').receiving.submitReceipt({ grId });
+    const job = enqueued.find((j) => j.invoiceId === inv);
+    const out = await matchInvoiceForJob(db, job!);
+    expect(out.skipped).toBeUndefined();
+    expect(out.result.totalDiscrepancyAmount).toBe(0);
+    const runs = await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, inv));
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ grId, overallStatus: 'clean', totalDiscrepancyAmount: '0.00' });
+    expect(await syncClaims(db, restaurantId, userId)).toBe(0); // nothing to claim on a clean run
   });
 });

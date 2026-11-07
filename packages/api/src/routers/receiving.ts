@@ -57,7 +57,7 @@ import { appError } from '../errors';
 import { recordAudit } from '../audit';
 import type { MemberSession } from '../context';
 import { matchRouter } from './match';
-import { lockRecovery, releaseClaimsForRematch } from '../recovery/service';
+import { invoiceHasClaimHistory, lockRecovery, releaseClaimsForRematch } from '../recovery/service';
 import { firstVatRate } from '../match/buildMatchInput';
 import { lineTotalAgorot } from '../orders/document/build';
 import { agorotToPlain, numericToAgorot } from '../integrations/accounting/common';
@@ -443,7 +443,7 @@ export const receivingRouter = router({
          * is held — rematchHoldReason): the slip says why at once instead of
          * waiting. null while a run may still land.
          */
-        holdReason: 'settled' | 'awaiting_review' | null;
+        holdReason: 'settled' | 'awaiting_review' | 'claim_in_progress' | null;
         totalIls: number;
         lines: Array<{
           discrepancyId: string;
@@ -484,8 +484,11 @@ export const receivingRouter = router({
               )
           : [];
         const ready = Number(runs) > 0;
-        let holdReason: 'settled' | 'awaiting_review' | null = null;
-        if (receiptClosed && !ready) {
+        let holdReason: 'settled' | 'awaiting_review' | 'claim_in_progress' | null = null;
+        if (receiptClosed && !ready && readRematchBlocked(inv.ocrPayload)?.grId === gr.grId) {
+          // The count's re-match was skipped: a claim with history locks the run (round 8).
+          holdReason = 'claim_in_progress';
+        } else if (receiptClosed && !ready) {
           const [{ any } = { any: 0 }] = await ctx.db
             .select({ any: count() })
             .from(matchRuns)
@@ -639,6 +642,9 @@ export const receivingRouter = router({
         })()),
         // A חשבונית ריכוז: cross-matched against its delivery notes, never re-matched to a PO.
         consolidated: readConsolidatedRaw(ocrPayload) !== null,
+        // The count's re-match was skipped (a claim with history locks the run,
+        // round 8): the page says the count's result was not applied.
+        rematchBlocked: readRematchBlocked(ocrPayload) ? { reason: 'claim_in_progress' as const } : null,
         // Held for a receipt still being counted, with no run yet (round 7): the
         // page shows "the match runs when the count is closed" on every load,
         // not only right after the Re-run that held it.
@@ -758,7 +764,9 @@ export const receivingRouter = router({
       // total one at a time — there is no subtotal for them to contradict (the
       // correction form clears a misread VAT that way).
       const clearedOne = (['totalExclVat', 'vatAmount', 'totalInclVat'] as const).some((k) => current[k] != null && after(k) == null);
-      if (totalsTyped && clearedOne && !allCleared && current.totalExclVat != null) {
+      // …unknown before AND after the save (typing a subtotal while clearing the
+      // VAT would read as a VAT_MISMATCH of the whole VAT — round 8).
+      if (totalsTyped && clearedOne && !allCleared && (current.totalExclVat != null || exclAfter != null)) {
         throw appError('BAD_REQUEST', 'invoice.partialHeaderClear', 'אפשר לנקות את סכומי החשבונית רק יחד — לפני מע״מ, מע״מ וסה״כ');
       }
       if (totalsTyped && exclAfter != null) {
@@ -1912,30 +1920,15 @@ async function linesLockReason(
     .where(and(eq(creditNotes.invoiceId, invoiceId), eq(creditNotes.restaurantId, restaurantId)))
     .limit(1);
   if (credit) return 'credit_note';
-  const [claim] = await db
-    .select({ id: recoveryClaims.id })
-    .from(recoveryClaims)
-    .where(
-      and(
-        eq(recoveryClaims.restaurantId, restaurantId),
-        eq(recoveryClaims.invoiceId, invoiceId),
-        or(
-          isNotNull(recoveryClaims.letterSentAt),
-          isNotNull(recoveryClaims.acknowledgedAt),
-          isNotNull(recoveryClaims.creditedAt),
-          sql`${recoveryClaims.creditedAgorot} > 0`,
-          sql`${recoveryClaims.status} not in ('claimed', 'written_off')`,
-        ),
-      ),
-    )
-    .limit(1);
-  return claim ? 'claim' : null;
+  // The same rule a re-match releases claims by (claimReleasableSql): a claim
+  // with any history locks the lines; a bare one goes with the re-match.
+  return (await invoiceHasClaimHistory(db, restaurantId, invoiceId)) ? 'claim' : null;
 }
 
 const LINES_LOCKED_MSG: Record<'consolidated' | 'credit_note' | 'claim' | 'settled' | 'decided', string> = {
   consolidated: 'חשבונית ריכוז מוצלבת מול תעודות המשלוח — אין בה עריכת שורות ידנית',
   credit_note: 'לחשבונית יש הודעת זיכוי רשומה — אי אפשר לשנות את שורותיה',
-  claim: 'יש לחשבונית דרישת זיכוי בתהליך — סגרו או מחקו אותה לפני שינוי השורות',
+  claim: 'יש לחשבונית דרישת זיכוי עם היסטוריה — השורות נעולות, והדרישה נשארת במעקב ההחזרים',
   settled: 'החשבונית כבר אושרה או שולמה — אי אפשר לשנות את שורותיה',
   decided: 'יש החלטות על הפערים של החשבונית — אי אפשר למחוק את השורה האחרונה',
 };
@@ -2316,7 +2309,15 @@ async function rematchAfterEdit(ctx: { db: Database; session: MemberSession }, i
     // its job matches it; a possible duplicate copy (J) waits for its review).
     // Bare claims on an earlier run go now (round 7): that run is replaced by
     // the job; a claim in progress refuses the hold visibly (claimInProgress).
-    await releaseClaimsForRematch(ctx.db, restaurantId, invoiceId);
+    // A claim with history (CONFLICT) keeps the edit and writes no hold — as a
+    // refused re-match does with the receipt closed ('refused', round 8).
+    try {
+      await releaseClaimsForRematch(ctx.db, restaurantId, invoiceId);
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'CONFLICT') throw err;
+      console.warn(`[receiving] hold after a manual line edit refused for invoice=${invoiceId} — a claim with history`, err);
+      return { rematched: false, rematchSkipped: 'refused' };
+    }
     return { rematched: false, rematchSkipped: await holdForReceipt(ctx.db, restaurantId, invoiceId, grId) };
   }
   try {
@@ -2331,6 +2332,13 @@ async function rematchAfterEdit(ctx: { db: Database; session: MemberSession }, i
     console.warn(`[receiving] re-match after a manual line edit was refused for invoice=${invoiceId}`, err);
     return { rematched: false, rematchSkipped: 'refused' };
   }
+}
+
+/** raw.rematchBlocked: the match job skipped a count's re-match (matchInvoice.ts, claim_in_progress). */
+function readRematchBlocked(ocrPayload: unknown): { grId: string | null } | null {
+  const raw = (ocrPayload as { raw?: Record<string, unknown> } | null | undefined)?.raw;
+  const b = raw && typeof raw === 'object' ? (raw.rematchBlocked as { grId?: unknown } | undefined) : undefined;
+  return b && typeof b === 'object' ? { grId: typeof b.grId === 'string' ? b.grId : null } : null;
 }
 
 const RECEIPT_OPEN_MSG = 'הקבלה פתוחה לספירה — אפשר לערוך את השורות אחרי שהספירה תיסגר';
