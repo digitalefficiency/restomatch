@@ -16,6 +16,7 @@ import { LetterActions } from './letter-actions';
 import { DeferredProvider } from '../../recovery/deferred';
 import { addDays, buildLetters, daysLeft, lettersFromServer, sumAgora, type LetterLine, type SupplierLetter } from './letters';
 import { lineMathText } from './why';
+import { letterLineText } from './letter-line';
 import { ALL_CLAIMS, ANSWER_DAYS } from '../../recovery/logic';
 
 const REASON_TYPES = [
@@ -105,7 +106,8 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
   const supplierOf = (l: { supplierName: string | null; supplierNameEn: string | null }) =>
     displayName(locale, l.supplierName, l.supplierNameEn) || '—';
 
-  const mathOf = (l: LetterLine) => lineMathText(l, locale);
+  // W2-10: the supplier's words (invoice as subject, the order named); the leak card keeps lineMathText.
+  const mathOf = (l: LetterLine) => letterLineText(l, locale) ?? lineMathText(l, locale);
   const reasonOf = (type: string) =>
     (REASON_TYPES as readonly string[]).includes(type)
       ? t(`claims.reason.${type as (typeof REASON_TYPES)[number]}`)

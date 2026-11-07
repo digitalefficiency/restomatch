@@ -375,3 +375,23 @@ describe('W2-10: letters from recovery.letters only', () => {
     expect(lettersFromServer([], []).letters).toEqual([]);
   });
 });
+
+describe('W2-10: the letter line in the supplier\'s words (owner 7.11)', () => {
+  it('names the order and keeps the invoice as the subject; never "חויבנו"', async () => {
+    const { letterLineText } = await import('../claims/letter-line');
+    const base = { type: 'PRICE_HIGHER', severity: 'warn', expected: 139, actual: 149, deltaAmount: 100, invoiceDate: '2026-10-12T00:00:00.000Z', amount: 100 };
+    const withPo = letterLineText({ ...base, poRef: 'PO-17' }, 'he')!;
+    expect(withPo).toContain('בחשבונית');
+    expect(withPo).toContain('בהזמנה');
+    expect(withPo).toContain('PO-17');
+    expect(withPo).toMatch(/= .*100\.00/);
+    expect(withPo).not.toMatch(/חויב|דריש/);
+    const noPo = letterLineText({ ...base, poRef: null }, 'he')!;
+    expect(noPo).toContain('חציון 90 יום');
+    expect(noPo).not.toContain('בהזמנה');
+  });
+  it('returns null when the engine left no basis', async () => {
+    const { letterLineText } = await import('../claims/letter-line');
+    expect(letterLineText({ type: 'DATE_ANOMALY', expected: null, actual: null, deltaAmount: null, invoiceDate: null, amount: 5 }, 'he')).toBeNull();
+  });
+});

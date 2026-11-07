@@ -191,6 +191,17 @@ export const en: Shape<typeof he> = {
     xlsx: 'Export Excel',
     failed: 'The export failed. Try again.',
   },
+  letter: {
+    line: '{body}{ref} = {amount}',
+    ref: ' (order {po}, {date})',
+    priceOrder: 'Invoice {qty} × {charged} · order {expected}',
+    priceUsual: 'Invoice {qty} × {charged} · usual price {expected} (90-day median)',
+    qty: 'Invoice {billed} · received {received} · × {price}',
+    qtyReceived: 'Ordered {ordered} · received {received} · × {price}',
+    vat: 'VAT on the invoice {charged} · calculated VAT {expected}',
+    total: 'Invoice total {charged} · sum of lines {expected}',
+    unordered: 'Invoice {qty} units not ordered',
+  },
   creditForm: {
     docLegend: 'Which document arrived?',
     doc: { invoice: 'Credit invoice', note: 'Credit note' },

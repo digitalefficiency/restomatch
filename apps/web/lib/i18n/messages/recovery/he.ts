@@ -192,6 +192,17 @@ export const he = {
     xlsx: 'ייצוא Excel',
     failed: 'הייצוא נכשל. נסו שוב.',
   },
+  letter: {
+    line: '{body}{ref} = {amount}',
+    ref: ' (הזמנה {po}, {date})',
+    priceOrder: 'בחשבונית {qty} × {charged} · בהזמנה {expected}',
+    priceUsual: 'בחשבונית {qty} × {charged} · מחיר רגיל {expected} (חציון 90 יום)',
+    qty: 'בחשבונית {billed} · התקבלו {received} · × {price}',
+    qtyReceived: 'בהזמנה {ordered} · התקבלו {received} · × {price}',
+    vat: 'מע״מ בחשבונית {charged} · מע״מ מחושב {expected}',
+    total: 'סה״כ בחשבונית {charged} · סכום השורות {expected}',
+    unordered: 'בחשבונית {qty} יח׳ שלא הוזמנו',
+  },
   creditForm: {
     docLegend: 'איזה מסמך הגיע?',
     doc: { invoice: 'חשבונית זיכוי', note: 'תעודת זיכוי' },

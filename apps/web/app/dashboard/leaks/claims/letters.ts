@@ -57,6 +57,8 @@ export interface LetterLine {
   deltaAmount: number | null;
   /** The ₪-back claim this line is (status `claimed`) — "mark as sent" moves it. */
   claimId: string | null;
+  /** The order the invoice matched (buyer / source ref) — the letter line names it (W2-10, copy-rtl-14). */
+  poRef?: string | null;
 }
 
 export interface SupplierLetter {
@@ -368,6 +370,7 @@ export interface ServerLetterLine {
   expected: number | null;
   actual: number | null;
   deltaAmount: number | null;
+  poRef?: string | null;
 }
 export interface ServerLetter {
   supplierId: string | null;
@@ -395,6 +398,7 @@ const fromServerLine = (l: ServerLetterLine): LetterLine => ({
   actual: l.actual,
   deltaAmount: l.deltaAmount,
   claimId: l.claimId,
+  poRef: l.poRef ?? null,
 });
 
 /**
