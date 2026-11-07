@@ -262,6 +262,7 @@ export {
 } from './priceAlerts/detect';
 export { priceAlertEmail } from './priceAlerts/email';
 export * as leakCheck from './leakCheck';
+export * as claimPortal from './claimPortal';
 export {
   confirmationLink,
   createSupplierLink,
