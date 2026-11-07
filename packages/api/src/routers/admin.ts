@@ -22,6 +22,7 @@ import { recordAudit } from '../audit';
 import { appError } from '../errors';
 import { usagePeriod } from '../entitlements';
 import { FEATURE_KEYS, featureEnabled, type FeatureKey } from '../lib/features';
+import { automationKpis as computeAutomationKpis, AUTOMATION_MAX_WEEKS } from '@restomatch/charts';
 
 const PlanKeyEnum = z.enum(['trial', 'basic', 'pro', 'chain']);
 const StatusEnum = z.enum(['trialing', 'active', 'past_due', 'canceled']);
@@ -481,5 +482,49 @@ export const adminRouter = router({
         JSON.stringify({ audit: 'admin.viewed', entityType: 'leads', userId: ctx.session.userId, count: rows.length }),
       );
       return rows;
+    }),
+  /**
+   * AU-07 · automation telemetry for one restaurant, per Israel week (read-only).
+   * The SQL lives in @restomatch/charts (automation.ts) and filters restaurant_id
+   * itself: this runs on the cross-tenant owner connection. flagsOn is computed
+   * here because FEATURE_KEYS / featureEnabled live in api (charts may not import
+   * api). A read of aggregates: no audit row, no write of any kind.
+   */
+  automationKpis: adminProcedure
+    .input(
+      z.object({
+        restaurantId: z.string().uuid(),
+        weeks: z.number().int().min(1).max(AUTOMATION_MAX_WEEKS).default(8),
+        rates: z
+          .object({
+            receiver: z.number().min(0).max(2000),
+            bookkeeper: z.number().min(0).max(2000),
+            manager: z.number().min(0).max(2000),
+            chef: z.number().min(0).max(2000),
+            owner: z.number().min(0).max(2000),
+          })
+          .partial()
+          .optional(),
+        bookkeeperFeeIls: z.number().min(0).max(100_000).optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const [r] = await ctx.db
+        .select({ id: restaurants.id, name: restaurants.name, settings: restaurants.settings })
+        .from(restaurants)
+        .where(eq(restaurants.id, input.restaurantId))
+        .limit(1);
+      if (!r) throw appError('NOT_FOUND', 'admin.notFound', 'restaurant not found');
+      const kpis = await computeAutomationKpis(ctx.db, r.id, {
+        weeks: input.weeks,
+        rates: input.rates,
+        bookkeeperFeeIls: input.bookkeeperFeeIls,
+      });
+      return {
+        ...kpis,
+        restaurantName: r.name,
+        flagsOn: FEATURE_KEYS.filter((k) => featureEnabled(r.settings, k)).length,
+        flagsTotal: FEATURE_KEYS.length,
+      };
     }),
 });
