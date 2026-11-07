@@ -47,7 +47,7 @@ import { appError } from '../errors';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
 import { claimableLines } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
-import { nullFields } from '../lib/staffMoney';
+import { QTY_DISCREPANCY_TYPES, nullFields, seesNoMoney, stripMoneyDeep } from '../lib/staffMoney';
 import { invoiceReaderProcedure, managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
 import { isFeatureOn } from '../lib/featureGate';
 import { dockPriceContext } from '../dockPriceContext/service';
@@ -508,6 +508,18 @@ export const receivingRouter = router({
         engine = { receiptClosed, ready, holdReason, totalIls, lines };
       }
 
+      // G-07 strip (pilot): the receiver sees the slip's quantities, never the
+      // engine ₪ (total, per-line amount, and the expected / actual of price-type
+      // findings). Same shape; the UI already hides them (showMoney=false).
+      if (seesNoMoney(ctx.session.role)) {
+        engine = {
+          ...stripMoneyDeep(engine),
+          lines: engine.lines.map((l) => ({
+            ...stripMoneyDeep(l),
+            ...(QTY_DISCREPANCY_TYPES.has(l.type) ? {} : { expected: null, actual: null }),
+          })),
+        };
+      }
       return {
         enabled: true as const,
         header: {

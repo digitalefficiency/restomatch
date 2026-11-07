@@ -59,3 +59,35 @@ export function stripShekelFigures(text: string): string {
     .replace(/\s{2,}/gu, ' ')
     .trim();
 }
+
+/** `…Ils`, `…Agorot`, and a bare `agorot` (the ledger's `{ count, agorot }`). */
+const MONEY_KEY = /(Ils|Agorot)$|^agorot$/;
+
+/**
+ * A deep copy of `value` with every `…Ils` / `…Agorot` / `agorot` key set to null, at any
+ * depth (arrays and nested objects included). Counts, ids, dates and statuses
+ * are kept. The declared type is kept on purpose (see `nullFields`).
+ */
+export function stripMoneyDeep<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((v) => stripMoneyDeep(v)) as T;
+  if (value && typeof value === 'object' && !(value instanceof Date)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = MONEY_KEY.test(k) ? null : stripMoneyDeep(v);
+    }
+    return out as T;
+  }
+  return value;
+}
+
+/**
+ * Discrepancy types whose expected / actual are QUANTITIES. For every other type
+ * (price, VAT, total, duplicate, date, unit) they are ₪ or not shown at the dock.
+ */
+export const QTY_DISCREPANCY_TYPES: ReadonlySet<string> = new Set([
+  'QTY_SHORT',
+  'QTY_OVER',
+  'MISSING_ON_INVOICE',
+  'UNORDERED_ITEM',
+  'UNORDERED_ARRIVAL',
+]);
