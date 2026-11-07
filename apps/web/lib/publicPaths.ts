@@ -29,6 +29,8 @@ export const PUBLIC_EXACT_PATHS = [
 export const PUBLIC_PREFIX_PATHS = [
   '/login',
   '/reset',
+  // W3-07b: invite join page (token-scoped; codes + limits in app/join/_lib/joinFlow.ts).
+  '/join',
   '/showcase',
   '/api/showcase',
   // Free leak check (S15 wave 1): the page 404s unless LEAK_CHECK_PUBLIC=1; each

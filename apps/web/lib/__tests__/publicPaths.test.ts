@@ -49,6 +49,12 @@ describe('isPublicPath (middleware allowlist)', () => {
     expect(isPublicPath('/api/leak-checks')).toBe(false);
   });
 
+  it('W3-07b: the invite join page is public; /welcome and look-alikes are not', () => {
+    expect(isPublicPath('/join/abcDEF123_-xyz')).toBe(true);
+    expect(isPublicPath('/joiner')).toBe(false);
+    expect(isPublicPath('/welcome')).toBe(false);
+  });
+
   it('prefix matching respects path boundaries', () => {
     expect(isPublicPath('/resetting-things')).toBe(false);
     expect(isPublicPath('/loginx')).toBe(false);
