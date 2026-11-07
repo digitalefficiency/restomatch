@@ -2,7 +2,8 @@
 
 import { TermsPicker } from './terms-picker';
 import { TimeField } from './time-field';
-import { businessIdProblem, termsProblem, termsStringOf, termsValueOf } from './terms';
+import { businessIdProblem, telHref, termsProblem, termsStringOf, termsValueOf } from './terms';
+import { waLink } from '@/lib/messageTemplates';
 import { useEffect, useMemo, useState } from 'react';
 import { WithOriginal } from '@/lib/i18n/original';
 import Link from 'next/link';
@@ -264,9 +265,28 @@ function SupplierRow({
             {supplier.businessId && (
               <span className="tabular-nums">{t('manager.businessId', { id: supplier.businessId })}</span>
             )}
-            {supplier.contactEmail && <span dir="ltr">{supplier.contactEmail}</span>}
+            {supplier.contactEmail && (
+              <a href={`mailto:${supplier.contactEmail}`} dir="ltr" className="underline-offset-2 hover:text-primary hover:underline">
+                {supplier.contactEmail}
+              </a>
+            )}
             {supplier.contactWhatsapp && (
-              <span className="tabular-nums">{t('manager.whatsapp', { phone: supplier.contactWhatsapp })}</span>
+              <span className="inline-flex items-center gap-2">
+                <a
+                  href={waLink(supplier.contactWhatsapp, '')}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline-offset-2 hover:text-primary hover:underline"
+                >
+                  {t('form.whatsapp')}{' '}
+                  <bdi dir="ltr" className="tabular-nums">
+                    {supplier.contactWhatsapp}
+                  </bdi>
+                </a>
+                <a href={telHref(supplier.contactWhatsapp)} className="underline-offset-2 hover:text-primary hover:underline">
+                  {t('overview.call')}
+                </a>
+              </span>
             )}
             {supplier.paymentTerms && (
               <span>
