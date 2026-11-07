@@ -185,6 +185,10 @@ test.describe('W2-12 queue (manager, he 390)', () => {
   test('no horizontal scroll; ₪ left of digits; adopt price + undo; dismiss + undo', async ({ page }) => {
     const sql = e2eSql();
     try {
+      // Rerunnable: drop rows an aborted earlier run adopted today (the demo's lists start in the past).
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
+      await sql`delete from supplier_contract_prices where valid_from = ${today}::date and source = 'manual'`;
+      await sql`update price_alerts set status = 'open', dismissed_at = null, dismissed_by = null`;
       const before = await sql`select count(*)::int n from supplier_contract_prices`;
       await as(page, MANAGER, 'he');
       await noHorizontalScroll(page);
@@ -198,7 +202,6 @@ test.describe('W2-12 queue (manager, he 390)', () => {
       await expect(page.getByText(he.queue.over.adopted).first()).toBeVisible();
       await expect.poll(async () => (await sql`select count(*)::int n from supplier_contract_prices`)[0]!.n).toBe(before[0]!.n + 1);
       const [row] = await sql`select valid_from::text d from supplier_contract_prices order by created_at desc limit 1`;
-      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
       expect(row!.d).toBe(today);
       await page.getByRole('button', { name: he.queue.over.undo }).click();
       await expect.poll(async () => (await sql`select count(*)::int n from supplier_contract_prices`)[0]!.n).toBe(before[0]!.n);
