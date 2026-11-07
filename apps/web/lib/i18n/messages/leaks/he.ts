@@ -9,6 +9,11 @@
 export const he = {
   loading: 'טוען',
   hub: {
+    drivers: {
+      label: 'מה הזיז את הדליפה',
+      other: 'אחר',
+      openTo: 'פירוק',
+    },
     tabsLabel: 'אזורי הדליפה',
     tabs: { overview: 'סקירה', breakdown: 'פירוק', proof: 'הוכחה', prices: 'מחירים שעלו', report: 'דוח' },
     title: 'דליפה',

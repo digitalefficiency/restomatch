@@ -4,6 +4,11 @@ import type { he } from './he';
 export const en: Shape<typeof he> = {
   loading: 'Loading',
   hub: {
+    drivers: {
+      label: 'What moved the leak',
+      other: 'Other',
+      openTo: 'Breakdown',
+    },
     tabsLabel: 'Leak sections',
     tabs: { overview: 'Overview', breakdown: 'Breakdown', proof: 'Proof', prices: 'Prices that rose', report: 'Report' },
     title: 'Leak',
