@@ -512,7 +512,7 @@ function CountForm({ draft, viewer, onDone }: { draft: Draft; viewer: CountViewe
       ) : null}
       {draft.submittedAt ? (
         <p className="mt-3 text-sm text-muted" data-testid="count-submitted">
-          {t('count.submittedNote', { name: draft.submittedBy ?? '—' })}
+          {t('count.submittedNote', { name: draft.submittedBy ?? t('home.teamMember') })}
         </p>
       ) : null}
       {lines.length === 0 ? <p className="mt-4 text-sm text-muted">{t('count.emptyList')}</p> : null}

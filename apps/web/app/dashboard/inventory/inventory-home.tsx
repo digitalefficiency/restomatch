@@ -75,7 +75,7 @@ export function InventoryHome({
               {draft?.submittedAt && closer ? (
                 <p className="mt-1 flex flex-wrap items-center gap-2 text-sm" data-testid="ready-to-close">
                   <Badge tone="warning-solid">{t('home.readyToClose', { counted: draft.progress.counted, lines: draft.progress.lines })}</Badge>
-                  {draft.submittedBy ? <span className="text-muted">{t('home.readyToCloseBy', { name: draft.submittedBy })}</span> : null}
+                  <span className="text-muted">{t('home.readyToCloseBy', { name: draft.submittedBy ?? t('home.teamMember') })}</span>
                 </p>
               ) : null}
             </div>

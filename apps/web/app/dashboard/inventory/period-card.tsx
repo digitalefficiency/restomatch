@@ -149,7 +149,7 @@ function MoneyPeriodCard({ compact, canEditSales }: { compact: boolean; canEditS
   };
   const salesBy = p.salesEntry ? (
     <p className="text-sm text-muted" data-testid="sales-by">
-      {t('period.salesBy', { name: p.salesEntry.by ?? '—', date: dayText(p.salesEntry.at.slice(0, 10), locale) })}
+      {t('period.salesBy', { name: p.salesEntry.by ?? t('home.teamMember'), date: dayText(p.salesEntry.at.slice(0, 10), locale) })}
     </p>
   ) : null;
   const salesForm = !canEditSales ? null : (

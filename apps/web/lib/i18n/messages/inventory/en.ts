@@ -13,6 +13,7 @@ export const en: Shape<typeof he> = {
     other: 'Other',
   },
   home: {
+    teamMember: 'A team member',
     start: 'Start a count',
     continue: 'Continue the count',
     startHint: 'About 15 minutes in the stockroom: count by fridge, freezer, produce, dry store and bar — everything saves as you go.',

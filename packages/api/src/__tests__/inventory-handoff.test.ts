@@ -47,4 +47,14 @@ describe('inventory.submitForClose', () => {
     const audits = await db.select().from(auditLog).where(and(eq(auditLog.entityId, draft), eq(auditLog.action, 'inventory.count_submitted')));
     expect(audits).toHaveLength(1);
   });
+
+  it("an unnamed member never shows as an e-mail: submittedBy is null (the UI says 'חבר/ת צוות'), no '@' in the chef's JSON", async () => {
+    const { users, eq: eq2 } = await import('@restomatch/db');
+    await db.update(users).set({ name: '' }).where(eq2(users.id, A.users.chef));
+    const v = await callerAs(A, 'chef').inventory.current();
+    expect(v!.submittedBy).toBeNull();
+    expect(JSON.stringify(v)).not.toContain('@');
+    const p = await callerAs(A, 'chef').inventory.foodCostPercent();
+    expect(JSON.stringify(p)).not.toContain('@');
+  });
 });

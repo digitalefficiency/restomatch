@@ -101,8 +101,10 @@ async function memberNames(ctx: { db: Database; adminDb?: Database }, restaurant
     .where(and(eq(memberships.restaurantId, restaurantId), inArray(memberships.userId, ids)));
   const ok = members.map((m) => m.userId);
   if (ok.length === 0) return new Map<string, string>();
-  const rows = await (ctx.adminDb ?? ctx.db).select({ id: users.id, name: users.name, email: users.email }).from(users).where(inArray(users.id, ok));
-  return new Map(rows.map((u) => [u.id, u.name?.trim() || u.email] as const));
+  // Names only — never a co-member's e-mail (any role, the chef and receiver included, reads these).
+  // An unnamed member resolves to nothing; the UI shows a neutral "חבר/ת צוות".
+  const rows = await (ctx.adminDb ?? ctx.db).select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ok));
+  return new Map(rows.filter((u) => !!u.name?.trim()).map((u) => [u.id, u.name!.trim()] as const));
 }
 
 /** The concrete e-mail addresses of this restaurant's owners and managers (memberships under RLS, identities as in `team.list`). */
