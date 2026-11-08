@@ -118,7 +118,7 @@ export const SampleNeedsCard: React.FC<{ u: number; width: number; locale: Local
         sub={fill(t.gaps, { count: SAMPLE.decide.count })}
         amount={SAMPLE.decide.amount}
         verb={t.decideVerb}
-        example={example ? `${t.example} · ${ilsText(104.8, locale, 2)}` : undefined}
+        example={example ? `${t.example} · ${ilsText(SAMPLE.example.amount, locale, 2)}` : undefined}
       />
       <NeedRow u={u} locale={locale} tone={T.warn} label={t.credit} sub={fill(t.gaps, { count: SAMPLE.credit.count })} amount={SAMPLE.credit.amount} verb={t.creditVerb} />
     </Card>

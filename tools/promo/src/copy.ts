@@ -41,6 +41,7 @@ export const SAMPLE = {
   decide: { amount: 910, count: 2 }, // T2 "ממתין להחלטה שלך" (inside the unpaid part)
   credit: { amount: 720, count: 3 }, // T2 credit requests to send (the paid part)
   goodNews: 620, // unpaid − undecided
+  example: { amount: 104.8 }, // the 9:16 needs row "לדוגמה: בירה מהחבית · ₪104.80" (inside decide)
 };
 
 /** Override demo numbers at render time (input prop `facts`) — e.g. after the seed changes. */
