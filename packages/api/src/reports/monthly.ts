@@ -1,4 +1,4 @@
-import { computeLeakReport } from '@restomatch/charts';
+import { LEAK_EXCLUDED_TYPES, computeLeakReport } from '@restomatch/charts';
 import { and, eq, isNull, monthlyReports, restaurants, sql, type Database } from '@restomatch/db';
 import { renderEmail, ilsSpan, type RenderedEmail } from '../notifications/templates';
 import { isFeatureOn } from '../lib/featureGate';
@@ -33,6 +33,7 @@ export type NextActionCode =
   | 'decideOpen'
   | 'sendClaims'
   | 'linkPending'
+  | 'answerQuestions'
   | 'talkToSupplier'
   | 'allClear';
 
@@ -64,6 +65,8 @@ export interface MonthlyReportData {
   invoiceCount: number;
   invoicesWithLeak: number;
   pendingLinkCount: number;
+  /** G-08: invoices held for a "זה אותו מוצר?" question (absent in older snapshots). */
+  awaitingQuestionCount?: number;
   topSuppliers: MonthlyReportSupplier[];
   topIssues: MonthlyReportIssue[];
   nextActions: NextAction[];
@@ -113,7 +116,7 @@ async function cappedIssues(db: Database, restaurantId: string, lo: string, hi: 
         AND COALESCE(i.invoice_date, i.created_at) >= ${lo}::timestamptz
         AND COALESCE(i.invoice_date, i.created_at) < ${hi}::timestamptz
         AND d.delta_amount IS NOT NULL
-        AND d.severity IN ('warn','block') AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL')
+        AND d.severity IN ('warn','block') AND d.type NOT IN (${sql.join(LEAK_EXCLUDED_TYPES.map((t) => sql`${t}`), sql`, `)})
     )
     SELECT type, COUNT(*) AS cnt, SUM(LEAST(raw, GREATEST(0, cap - (cum - raw)))) AS agorot
     FROM lines
@@ -194,6 +197,10 @@ export async function computeMonthlyReport(
   if (report.hero.pendingLinkCount > 0) {
     nextActions.push({ code: 'linkPending', params: { count: report.hero.pendingLinkCount } });
   }
+  // G-08: held invoices are in neither leak nor spend — say how many wait for an answer.
+  if (report.hero.awaitingQuestionCount > 0) {
+    nextActions.push({ code: 'answerQuestions', params: { count: report.hero.awaitingQuestionCount } });
+  }
   const loud = topSuppliers.find((s) => (s.leakPct ?? 0) >= SUPPLIER_ALERT_PCT);
   if (loud) {
     nextActions.push({
@@ -219,6 +226,7 @@ export async function computeMonthlyReport(
     invoiceCount: report.hero.invoiceCount,
     invoicesWithLeak: report.hero.invoicesWithLeak,
     pendingLinkCount: report.hero.pendingLinkCount,
+    awaitingQuestionCount: report.hero.awaitingQuestionCount,
     topSuppliers,
     topIssues,
     nextActions: nextActions.slice(0, 4),
@@ -341,6 +349,7 @@ const COPY = {
       decideOpen: (p: Params, f: Fmt) => `להחליט על ${p.count} פערים פתוחים (${f.ils(p.agorot ?? 0)})`,
       sendClaims: (p: Params, f: Fmt) => `לשלוח מכתבי דרישה על ${p.count} פערים (${f.ils(p.agorot ?? 0)})`,
       linkPending: (p: Params) => `לשייך ${p.count} חשבוניות ממתינות להזמנה`,
+      answerQuestions: (p: Params) => `לענות על "זה אותו מוצר?" — ${p.count} חשבוניות מחכות לשאלה`,
       talkToSupplier: (p: Params, f: Fmt) => `לשוחח עם ${p.supplier} — דליפה של ${f.pct(Number(p.pct))} מהרכש`,
       allClear: () => 'אין משימות פתוחות — כל הכבוד',
     },
@@ -367,6 +376,7 @@ const COPY = {
       decideOpen: (p: Params, f: Fmt) => `Decide on ${p.count} open discrepancies (${f.ils(p.agorot ?? 0)})`,
       sendClaims: (p: Params, f: Fmt) => `Send claim letters for ${p.count} discrepancies (${f.ils(p.agorot ?? 0)})`,
       linkPending: (p: Params) => `Link ${p.count} pending invoices to their orders`,
+      answerQuestions: (p: Params) => `Answer "Is this the same product?" — ${p.count} invoices are waiting for a question`,
       talkToSupplier: (p: Params, f: Fmt) => `Talk to ${p.supplierEn} — ${f.pct(Number(p.pct))} of spend leaked`,
       allClear: () => 'Nothing open — well done',
     },
