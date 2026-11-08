@@ -1,6 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
 import { he as lHe } from '../lib/i18n/messages/landing/he';
-import { en as lEn } from '../lib/i18n/messages/landing/en';
 
 /**
  * W3-06b · /product (split from /about) and the hero media gate.
@@ -84,14 +83,23 @@ test.describe('W3-06b · hero media gate', () => {
       await page.waitForLoadState('networkidle').catch(() => {});
       await expect(page.getByTestId('hero-phone-mock')).toBeVisible();
       expect(nineBySixteen).toEqual([]);
-      // English caption string exists (shown with the sm+ loop).
-      expect(lEn.v2.video.caption).toMatch(/fictional/);
     });
 
     test('a Hebrew phone gets the 9:16 cut, not the phone mock', async ({ page }) => {
+      const media: string[] = [];
+      page.on('request', (r) => {
+        if (r.url().includes('/media/')) media.push(new URL(r.url()).pathname);
+      });
       await open(page, '/');
+      await page.waitForLoadState('networkidle').catch(() => {});
       await expect(page.getByTestId('hero-phone-mock')).toHaveCount(0);
       await expect(page.getByTestId('hero-video-caption')).toBeVisible();
+      // R8: assert the wire, not the config — ≥1 9:16 fetch, and none of the 16:9 loops/posters.
+      expect(media.some((u) => u.includes('9x16')), media.join(', ')).toBe(true);
+      const sixteenByNine = media.filter(
+        (u) => /\/media\/hero-loop(-en)?\.(webm|mp4)$/.test(u) || /\/media\/hero-poster(-en)?(-\d+)?\.(jpg|webp)$/.test(u),
+      );
+      expect(sixteenByNine).toEqual([]);
     });
   });
 });
