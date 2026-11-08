@@ -23,6 +23,13 @@ type MatchResult = inferRouterOutputs<AppRouter>['match']['runForInvoice'];
 /** Agorot ↔ the procedure's ₪ number (the receiving procedures take shekels). */
 const toAgorot = (v: string | number | null | undefined) => (v == null || v === '' ? null : Math.round(Number(v) * 100));
 const fromAgorot = (a: number | null) => (a == null ? null : a / 100);
+/** #216's new-line inputs are plain strings: '' → null, else a finite number. */
+function num(raw: string): number | null {
+  const v = raw.trim();
+  if (v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
 function dateInput(d: Date | string | null): string {
   if (!d) return '';
@@ -91,10 +98,12 @@ export function InvoiceCorrection({
   });
 
   // Saving re-matches automatically (approvals-44): no separate "rerun" step.
-  const onOk = (msg: string) => {
+  // `serverMatched`: the save already re-matched (or held) on the server (#216's
+  // line paths) — refresh only, never a second run.
+  const onOk = (msg: string, serverMatched = false) => {
     setSaved(msg);
     setError(null);
-    if (canRematch && !consolidated) runMatch.mutate({ invoiceId: invoice.id });
+    if (!serverMatched && canRematch && !consolidated) runMatch.mutate({ invoiceId: invoice.id });
     else router.refresh();
   };
   const onErr = (e: Parameters<typeof localizeServerError>[0] & { message: string }) => {
@@ -124,9 +133,9 @@ export function InvoiceCorrection({
       setHolderId(null);
       // Cleared totals over lines are recomputed by the server: show them.
       if (res.totals) {
-        setExcl(res.totals.totalExclVat ?? '');
-        setVat(res.totals.vatAmount ?? '');
-        setIncl(res.totals.totalInclVat ?? '');
+        setExcl(toAgorot(res.totals.totalExclVat));
+        setVat(toAgorot(res.totals.vatAmount));
+        setIncl(toAgorot(res.totals.totalInclVat));
       }
       onOk(t('correction.savedHeader'));
     },
@@ -167,9 +176,9 @@ export function InvoiceCorrection({
     // Only a header the server computes follows the lines; a printed or typed
     // header is the billed figure and stays as it is on screen.
     if (res.headerRecomputed && res.totals) {
-      setExcl(res.totals.totalExclVat ?? '');
-      setVat(res.totals.vatAmount ?? '');
-      setIncl(res.totals.totalInclVat ?? '');
+      setExcl(toAgorot(res.totals.totalExclVat));
+      setVat(toAgorot(res.totals.vatAmount));
+      setIncl(toAgorot(res.totals.totalInclVat));
     }
     // Held for the receipt's count / nothing left to match / refused (re-run by hand).
     const note =
@@ -182,7 +191,7 @@ export function InvoiceCorrection({
         : res.rematchSkipped === 'awaiting_review'
           ? t('correction.rematchAwaitingReview')
           : t('correction.rematchLater');
-    onOk(note ? `${msg} ${note}` : msg);
+    onOk(note ? `${msg} ${note}` : msg, true);
   };
   const addLine = trpc.receiving.addInvoiceLine.useMutation({
     onSuccess: (res) => {
