@@ -1,0 +1,1328 @@
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { and, auditLog, creditNotes, createDb, discrepancies, eq, goodsReceipts, grLines, invoiceLines, invoices, matchRuns, poLines, productAliases, products, purchaseOrders, recoveryClaims, restaurants, sql, suppliers, testDbUrl } from '@restomatch/db';
+import { computeInvoiceLeak } from '@restomatch/charts';
+import { appRouter } from '../index';
+import { buildMatchInputForInvoice } from '../match/buildMatchInput';
+import { heldForCountTotals, NEVER_CLAIMABLE_NOTE, syncClaims, transitionClaim } from '../recovery/service';
+import { invoicesWaitingOnReceipt } from '../receiving/matchTriggers';
+import type { AppContext, Session } from '../context';
+import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
+
+/**
+ * B8 — when OCR fails the invoice page says "הזינו את השורות ידנית": the manager
+ * adds / deletes lines by hand. The header totals follow the lines to the agora
+ * (integer agorot, NUMERIC strings in the DB), the invoice is re-matched, and
+ * every invoice edit leaves one audit row with before / after.
+ */
+const db = createDb(testDbUrl());
+let A: Tenant;
+let failedId: string;
+
+const as = (role: Session['role']) =>
+  appRouter.createCaller({ db, session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role } } as AppContext);
+const audits = (action: string) => db.select().from(auditLog).where(and(eq(auditLog.restaurantId, A.restaurantId), eq(auditLog.action, action)));
+const header = async (id: string) =>
+  (await db.select({ excl: invoices.totalExclVat, vat: invoices.vatAmount, incl: invoices.totalInclVat }).from(invoices).where(eq(invoices.id, id)))[0]!;
+
+beforeEach(async () => {
+  await resetDb(db);
+  await seedPlans(db);
+  A = await seedTenant(db, 'ML');
+  await db.update(restaurants).set({ vatRate: '0.18' }).where(eq(restaurants.id, A.restaurantId));
+  // The delivery was counted (receipt closed): a re-match after an edit is allowed
+  // (an OPEN receipt holds it — M-2, tested on its own below).
+  await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
+  // A scan the OCR could not read: 'parsed', confidence 0, no lines, no totals.
+  const [inv] = await db
+    .insert(invoices)
+    .values({
+      restaurantId: A.restaurantId,
+      supplierId: A.supplierId,
+      status: 'parsed',
+      source: 'photo',
+      rawImageUrl: 'https://example.com/failed.jpg',
+      ocrConfidence: '0',
+      ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed' } },
+    })
+    .returning();
+  failedId = inv!.id;
+});
+afterAll(() => resetDb(db));
+
+describe('manual invoice lines (B8)', () => {
+  it('adding lines recomputes the header to the agora and re-matches the invoice', async () => {
+    // 2.5 × 12.345 = 30.8625 → 30.86 (half-up); 3 × 9.99 = 29.97.
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'עגבניות', qtyBilled: 2.5, unit: 'kg', unitPriceBilled: 12.345, productId: A.productId },
+    });
+    expect(a.totals).toEqual({ totalExclVat: '30.86', vatAmount: '5.55', totalInclVat: '36.41' }); // 30.86 × 18% = 5.5548
+    expect(a.rematched).toBe(true);
+    const [line] = await db.select().from(invoiceLines).where(eq(invoiceLines.id, a.lineId));
+    expect(line).toMatchObject({ qtyBilled: '2.500', unitPriceBilled: '12.3450', lineTotal: '30.86' });
+
+    const b = await as('owner').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'מלפפונים', qtyBilled: 3, unit: 'kg', unitPriceBilled: 9.99 },
+    });
+    // 60.83 × 18% = 10.9494 → 10.95.
+    expect(b.totals).toEqual({ totalExclVat: '60.83', vatAmount: '10.95', totalInclVat: '71.78' });
+    expect(await header(failedId)).toEqual({ excl: '60.83', vat: '10.95', incl: '71.78' });
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId))).toHaveLength(1);
+  });
+
+  it('deleting a line recomputes the totals and re-matches', async () => {
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'עגבניות', qtyBilled: 2, unit: 'kg', unitPriceBilled: 10 },
+    });
+    await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'בצל', qtyBilled: 1, unit: 'kg', unitPriceBilled: 5.5 },
+    });
+    const [runBefore] = await db.select({ id: matchRuns.id }).from(matchRuns).where(eq(matchRuns.invoiceId, failedId));
+    const del = await as('manager').receiving.deleteInvoiceLine({ lineId: a.lineId });
+    expect(del.totals).toEqual({ totalExclVat: '5.50', vatAmount: '0.99', totalInclVat: '6.49' });
+    expect(del.rematched).toBe(true);
+    const runs = await db.select({ id: matchRuns.id }).from(matchRuns).where(eq(matchRuns.invoiceId, failedId));
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.id).not.toBe(runBefore!.id); // a fresh run
+    expect(await db.select().from(invoiceLines).where(eq(invoiceLines.id, a.lineId))).toHaveLength(0);
+  });
+
+  it('the supplier VAT rate wins over the restaurant default', async () => {
+    const { suppliers } = await import('@restomatch/db');
+    await db.update(suppliers).set({ vatRate: '0' }).where(eq(suppliers.id, A.supplierId)); // e.g. VAT-exempt produce
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'פירות', qtyBilled: 1, unit: 'kg', unitPriceBilled: 7.3 },
+    });
+    expect(a.totals).toEqual({ totalExclVat: '7.30', vatAmount: '0.00', totalInclVat: '7.30' });
+  });
+
+  it('a receiver cannot add or delete lines (no ₪ for the receiver)', async () => {
+    await expect(
+      as('receiver').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'x', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1 } }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(as('receiver').receiving.deleteInvoiceLine({ lineId: A.invoiceLineId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('a read invoice (matched) is corrected with updateInvoiceLine, not by adding/deleting lines', async () => {
+    await expect(
+      as('manager').receiving.addInvoiceLine({ invoiceId: A.invoiceId, line: { rawDescription: 'x', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1 } }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    await expect(as('manager').receiving.deleteInvoiceLine({ lineId: A.invoiceLineId })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    expect(await db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, A.invoiceId))).toHaveLength(1);
+  });
+
+  it('each of the four invoice edits writes ONE audit row with before and after', async () => {
+    const added = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'עגבניות', qtyBilled: 2, unit: 'kg', unitPriceBilled: 10 },
+    });
+    await as('manager').receiving.updateInvoiceLine({ lineId: added.lineId, patch: { unitPriceBilled: 11 } });
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { invoiceNumber: 'MAN-1' } });
+    await as('manager').receiving.deleteInvoiceLine({ lineId: added.lineId });
+
+    const [add] = await audits('receiving.invoice_line_added');
+    expect(add).toMatchObject({ entityType: 'invoice_line', entityId: added.lineId, userId: A.ownerUserId });
+    expect(add!.before).toEqual({ invoiceId: failedId, totals: { totalExclVat: null, vatAmount: null, totalInclVat: null } });
+    expect(add!.after).toMatchObject({ invoiceId: failedId, line: { lineTotal: '20.00' }, totals: { totalExclVat: '20.00' } });
+
+    const [upd] = await audits('receiving.invoice_line_updated');
+    // A hand line's total follows qty × price (round 3, D) — recorded too.
+    expect(upd!.before).toEqual({ invoiceId: failedId, unitPriceBilled: '10.0000', lineTotal: '20.00' });
+    expect(upd!.after).toEqual({ invoiceId: failedId, unitPriceBilled: '11', lineTotal: '22.00' });
+
+    const [hdr] = await audits('receiving.invoice_header_updated');
+    expect(hdr).toMatchObject({ entityType: 'invoice', entityId: failedId });
+    expect(hdr!.before).toEqual({ invoiceNumber: null });
+    expect(hdr!.after).toEqual({ invoiceNumber: 'MAN-1' });
+
+    const [del] = await audits('receiving.invoice_line_deleted');
+    expect(del!.before).toMatchObject({ invoiceId: failedId, line: { rawDescription: 'עגבניות' } });
+    expect(del!.after).toEqual({ invoiceId: failedId, totals: { totalExclVat: '0.00', vatAmount: '0.00', totalInclVat: '0.00' } });
+
+    for (const a of ['receiving.invoice_line_added', 'receiving.invoice_line_updated', 'receiving.invoice_header_updated', 'receiving.invoice_line_deleted']) {
+      expect(await audits(a)).toHaveLength(1);
+    }
+  });
+
+  it('a held-for-review read stays editable line by line after the re-match; an approved invoice is locked', async () => {
+    await db.update(invoices).set({ ocrPayload: { provider: 'reconciled', raw: { confidence: 0.4 } } }).where(eq(invoices.id, failedId));
+    await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'עגבניות', qtyBilled: 1, unit: 'kg', unitPriceBilled: 4 },
+    });
+    const [after] = await db.select({ status: invoices.status, raw: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, failedId));
+    expect(after!.status).not.toBe('parsed'); // re-matched
+    expect(after!.raw?.raw).toMatchObject({ confidence: 0.4, manualLines: true }); // the read kept, the marker added
+    await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'בצל', qtyBilled: 1, unit: 'kg', unitPriceBilled: 2 },
+    });
+    expect((await header(failedId)).excl).toBe('6.00');
+
+    await db.update(invoices).set({ status: 'approved' }).where(eq(invoices.id, failedId));
+    await expect(
+      as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'x', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1 } }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    expect((await header(failedId)).excl).toBe('6.00');
+  });
+
+  it('getInvoice tells the page whether lines can be added by hand (one rule with the API)', async () => {
+    expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).linesEditable).toBe(true);
+    expect((await as('manager').receiving.getInvoice({ invoiceId: A.invoiceId })).linesEditable).toBe(false); // read + matched
+  });
+
+  describe('a hand line pairs with its order line (S16: no false "not ordered" + "not billed")', () => {
+    let oilLineId = '';
+    const runFindings = (type: string) =>
+      db
+        .select({ id: discrepancies.id, productId: discrepancies.productId, delta: discrepancies.deltaAmount })
+        .from(discrepancies)
+        .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+        .where(and(eq(matchRuns.invoiceId, failedId), eq(discrepancies.type, type as never)));
+
+    async function oilOrder() {
+      const [oil] = await db
+        .insert(products)
+        .values({ restaurantId: A.restaurantId, canonicalName: 'שמן זית 18 ליטר' })
+        .returning();
+      const [pl] = await db
+        .insert(poLines)
+        .values({
+          poId: A.poId,
+          productId: oil!.id,
+          rawDescription: 'שמן זית 18 ליטר',
+          qtyOrdered: '1',
+          unit: 'יח׳',
+          unitPriceExpected: '1250',
+        })
+        .returning();
+      oilLineId = pl!.id;
+      // The failed scan was taken on A's receipt (registerInvoice stamps it).
+      await db
+        .update(invoices)
+        .set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: A.grId } } })
+        .where(eq(invoices.id, failedId));
+      return oil!.id;
+    }
+    const findingsOf = (lineId: string) =>
+      db
+        .select({ type: discrepancies.type, delta: discrepancies.deltaAmount })
+        .from(discrepancies)
+        .innerJoin(invoiceLines, eq(invoiceLines.id, discrepancies.invoiceLineId))
+        .where(eq(invoiceLines.id, lineId));
+
+    it('S16 repro: oil 1 × 1,250 ordered, hand line 1 × 1,320 → a 70.00 price gap, not 1,320 + 1,250', async () => {
+      const oilId = await oilOrder();
+      const picker = (await as('manager').receiving.getInvoice({ invoiceId: failedId })).orderLines;
+      expect(picker.find((l) => l.id === oilLineId)).toMatchObject({ name: 'שמן זית 18 ליטר', qtyOrdered: '1.000', unitPriceExpected: '1250.0000' });
+      // Typed by hand: extra space and gershayim noise still match.
+      const res = await as('manager').receiving.addInvoiceLine({
+        invoiceId: failedId,
+        line: { rawDescription: 'שמן  זית 18 ליטר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 1320 },
+      });
+      const [line] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, res.lineId));
+      expect(line!.productId).toBe(oilId);
+      const f = await findingsOf(res.lineId);
+      expect(f.map((x) => x.type)).not.toContain('UNORDERED_ITEM');
+      expect(f.find((x) => x.type === 'PRICE_HIGHER')?.delta).toBe('70.00');
+      const missingOil = await db
+        .select({ id: discrepancies.id })
+        .from(discrepancies)
+        .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+        .where(and(eq(matchRuns.invoiceId, failedId), eq(discrepancies.type, 'MISSING_ON_INVOICE'), eq(discrepancies.productId, oilId)));
+      expect(missingOil).toHaveLength(0);
+    });
+
+    it('no matching order line, or two of them → no product guessed', async () => {
+      await oilOrder();
+      const other = await as('manager').receiving.addInvoiceLine({
+        invoiceId: failedId,
+        line: { rawDescription: 'קמח לבן', qtyBilled: 1, unit: 'kg', unitPriceBilled: 5 },
+      });
+      const [o] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, other.lineId));
+      expect(o!.productId).toBeNull();
+
+      const [dup] = await db.insert(products).values({ restaurantId: A.restaurantId, canonicalName: 'שמן זית 18 ליטר (2)' }).returning();
+      await db.insert(poLines).values({ poId: A.poId, productId: dup!.id, rawDescription: 'שמן זית 18 ליטר', qtyOrdered: '1', unit: 'יח׳', unitPriceExpected: '1250' });
+      const amb = await as('manager').receiving.addInvoiceLine({
+        invoiceId: failedId,
+        line: { rawDescription: 'שמן זית 18 ליטר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 1250 },
+      });
+      const [a] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, amb.lineId));
+      expect(a!.productId).toBeNull();
+    });
+
+    it('picked from the order (poLineId) at a higher price → exactly one PRICE gap of 70 and no UNORDERED / MISSING for it', async () => {
+      const oilId = await oilOrder();
+      const res = await as('manager').receiving.addInvoiceLine({
+        invoiceId: failedId,
+        line: { poLineId: oilLineId, rawDescription: 'שמן', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 1320 },
+      });
+      const [line] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, res.lineId));
+      expect(line!.productId).toBe(oilId);
+      const gaps = (await runFindings('PRICE_HIGHER')).filter((d) => d.productId === oilId);
+      expect(gaps.map((g) => g.delta)).toEqual(['70.00']);
+      expect((await runFindings('UNORDERED_ITEM')).filter((d) => d.productId === oilId || d.productId === null)).toHaveLength(0);
+      expect((await runFindings('MISSING_ON_INVOICE')).filter((d) => d.productId === oilId)).toHaveLength(0);
+    });
+
+    it('a free-text line the catalogue knows (this supplier\'s alias) links to that product', async () => {
+      await oilOrder();
+      const [flour] = await db.insert(products).values({ restaurantId: A.restaurantId, canonicalName: 'קמח לבן 25 ק״ג' }).returning();
+      await db.insert(productAliases).values({ productId: flour!.id, supplierId: A.supplierId, supplierNameRaw: 'קמח לחם' });
+      const res = await as('manager').receiving.addInvoiceLine({
+        invoiceId: failedId,
+        line: { rawDescription: 'קמח לחם', qtyBilled: 1, unit: 'שק', unitPriceBilled: 90 },
+      });
+      const [line] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, res.lineId));
+      expect(line!.productId).toBe(flour!.id);
+    });
+
+    it('an unrelated free-text line stays unordered (no product guessed)', async () => {
+      await oilOrder();
+      const res = await as('manager').receiving.addInvoiceLine({
+        invoiceId: failedId,
+        line: { rawDescription: 'מגבות נייר', qtyBilled: 2, unit: 'יח׳', unitPriceBilled: 15 },
+      });
+      const [line] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, res.lineId));
+      expect(line!.productId).toBeNull();
+      const unordered = await db
+        .select({ id: discrepancies.id })
+        .from(discrepancies)
+        .where(and(eq(discrepancies.invoiceLineId, res.lineId), eq(discrepancies.type, 'UNORDERED_ITEM')));
+      expect(unordered).toHaveLength(1);
+    });
+
+    it('a foreign productId, or an order line of another order, is NOT_FOUND — nothing added', async () => {
+      await oilOrder();
+      const before = (await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, failedId))).length;
+      const B = await seedTenant(db, 'MLB');
+      await expect(
+        as('manager').receiving.addInvoiceLine({
+          invoiceId: failedId,
+          line: { rawDescription: 'x', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1, productId: B.productId },
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(
+        as('manager').receiving.addInvoiceLine({
+          invoiceId: failedId,
+          line: { rawDescription: 'x', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1, poLineId: B.poLineId },
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      expect((await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, failedId))).length).toBe(before);
+    });
+
+    it('a receiver gets no order-line picker (no ₪ for the receiver)', async () => {
+      await oilOrder();
+      expect((await as('receiver').receiving.getInvoice({ invoiceId: failedId })).orderLines).toEqual([]);
+    });
+  });
+});
+
+describe('#216 money review', () => {
+  const stampOn = (grId: string) =>
+    db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: grId } } })
+      .where(eq(invoices.id, failedId));
+
+  it('C-1: an invoice typed exactly as ordered and received → computeInvoiceLeak = 0', async () => {
+    // #5: an order line with no product / SKU can't pair — not offered, and refused if sent.
+    await stampOn(A.grId);
+    expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).orderLines.map((l) => l.id)).not.toContain(A.poLineId);
+    await expect(
+      as('manager').receiving.addInvoiceLine({
+        invoiceId: failedId,
+        line: { poLineId: A.poLineId, rawDescription: 'עגבניות', qtyBilled: 10, unit: 'kg', unitPriceBilled: 8.5 },
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    // A's order: tomatoes 10 × 8.5 (link it to its product so a hand line can pair) — received 10.
+    await db.update(poLines).set({ productId: A.productId }).where(eq(poLines.id, A.poLineId));
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, A.grLineId));
+    await stampOn(A.grId);
+    await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { poLineId: A.poLineId, rawDescription: 'עגבניות', qtyBilled: 10, unit: 'kg', unitPriceBilled: 8.5 },
+    });
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId))).toHaveLength(1);
+    const leak = await computeInvoiceLeak(db, A.restaurantId, failedId);
+    expect(leak).not.toBeNull();
+    expect(leak!.totalInclVat).toBe(100.3); // 85.00 + 18% = 100.30
+    expect(leak!.leakIls).toBe(0);
+  });
+
+  it('M-2: while the receipt is still being counted, an edit does not re-match (held for the count)', async () => {
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    await stampOn(A.grId);
+    const r = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'עגבניות', qtyBilled: 10, unit: 'kg', unitPriceBilled: 8.5 },
+    });
+    expect(r).toMatchObject({ rematched: false, rematchSkipped: 'receipt_open' });
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId))).toHaveLength(0);
+    const [row] = await db.select({ p: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, failedId));
+    expect((row!.p?.raw as { heldForReceipts?: string[] }).heldForReceipts).toEqual([A.grId]);
+  });
+
+  it('H-2: deleting the LAST line drops the old run (no stale findings on a ₪0 invoice) and goes back to parsed', async () => {
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId))).toHaveLength(1);
+    const d = await as('manager').receiving.deleteInvoiceLine({ lineId: a.lineId });
+    expect(d).toMatchObject({ rematched: false, rematchSkipped: 'no_lines', totals: { totalExclVat: '0.00' } });
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId))).toHaveLength(0);
+    const [row] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, failedId));
+    expect(row!.status).toBe('parsed');
+  });
+
+  it('M-1: a PRINTED header is kept (a hand line never rewrites it); only hand-added lines may be deleted', async () => {
+    // A held-for-review read with a printed header 135 / 24.30 / 159.30 and one read line.
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'reconciled', raw: { confidence: 0.4 } }, totalExclVat: '135.00', vatAmount: '24.30', totalInclVat: '159.30' })
+      .where(eq(invoices.id, failedId));
+    const [read] = await db
+      .insert(invoiceLines)
+      .values({ invoiceId: failedId, rawDescription: 'נקרא', qtyBilled: '1', unit: 'kg', unitPriceBilled: '95', lineTotal: '95.00' })
+      .returning();
+    const added = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'הוספה ידנית', qtyBilled: 1, unit: 'kg', unitPriceBilled: 40 },
+    });
+    expect(added.totals).toEqual({ totalExclVat: '135.00', vatAmount: '24.30', totalInclVat: '159.30' });
+    expect(await header(failedId)).toEqual({ excl: '135.00', vat: '24.30', incl: '159.30' });
+    await expect(as('manager').receiving.deleteInvoiceLine({ lineId: read!.id })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    await as('manager').receiving.deleteInvoiceLine({ lineId: added.lineId }); // a hand-added line may go
+    expect(await header(failedId)).toEqual({ excl: '135.00', vat: '24.30', incl: '159.30' });
+  });
+
+  it('#9: our own header uses the ENGINE\'s VAT rule (one invoice rate), so it never trips VAT_MISMATCH against itself', async () => {
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'פירות', qtyBilled: 1, unit: 'kg', unitPriceBilled: 100 },
+    });
+    await db.update(invoiceLines).set({ vatRate: '0' }).where(eq(invoiceLines.id, a.lineId)); // VAT-exempt produce
+    const b = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'שמן', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 50 },
+    });
+    // 150.00 × 18% = 27.00 (per-line rates in the engine are a human-PR proposal).
+    expect(b.totals).toEqual({ totalExclVat: '150.00', vatAmount: '27.00', totalInclVat: '177.00' });
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId))).toHaveLength(1); // a run, not a vacuous pass
+    const vat = await db
+      .select({ id: discrepancies.id })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(and(eq(matchRuns.invoiceId, failedId), eq(discrepancies.type, 'VAT_MISMATCH')));
+    expect(vat).toHaveLength(0);
+  });
+
+  it('LOW: VAT precedence is the engine\'s — the ORDER\'s 0% wins over the restaurant\'s 18%', async () => {
+    await db.update(purchaseOrders).set({ vatRate: '0' }).where(eq(purchaseOrders.id, A.poId));
+    await stampOn(A.grId);
+    const r = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'פירות', qtyBilled: 2, unit: 'kg', unitPriceBilled: 42.5 },
+    });
+    expect(r.totals).toEqual({ totalExclVat: '85.00', vatAmount: '0.00', totalInclVat: '85.00' });
+    const vat = await db
+      .select({ id: discrepancies.id })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(and(eq(matchRuns.invoiceId, failedId), eq(discrepancies.type, 'VAT_MISMATCH')));
+    expect(vat).toHaveLength(0);
+  });
+
+  it('LOW: half-up on the decimal (1.0005 → 1.001); a qty that rounds to 0 and a total past NUMERIC(12,2) are BAD_REQUEST', async () => {
+    const r = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'x', qtyBilled: 1.0005, unit: 'kg', unitPriceBilled: 2.00005 },
+    });
+    const [line] = await db.select().from(invoiceLines).where(eq(invoiceLines.id, r.lineId));
+    expect(line).toMatchObject({ qtyBilled: '1.001', unitPriceBilled: '2.0001' });
+    await expect(
+      as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'x', qtyBilled: 0.0004, unit: 'kg', unitPriceBilled: 1 } }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'x', qtyBilled: 1_000_000, unit: 'kg', unitPriceBilled: 10_000_000 } }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('M-3: a claim in progress (letter sent) blocks the edit BEFORE any write', async () => {
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 2, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    const [d] = await db
+      .select({ id: discrepancies.id })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(eq(matchRuns.invoiceId, failedId))
+      .limit(1);
+    await db.insert(recoveryClaims).values({
+      restaurantId: A.restaurantId,
+      discrepancyId: d!.id,
+      supplierId: A.supplierId,
+      invoiceId: failedId,
+      status: 'claimed',
+      amountAgorot: 3000,
+      letterSentAt: new Date(),
+    });
+    const lines = async () => (await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, failedId))).length;
+    await expect(
+      as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'y', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1 } }),
+    ).rejects.toMatchObject({ code: 'CONFLICT', cause: { appCode: 'invoice.linesLocked' } });
+    await expect(as('manager').receiving.deleteInvoiceLine({ lineId: a.lineId })).rejects.toMatchObject({
+      code: 'CONFLICT',
+      cause: { appCode: 'invoice.linesLocked' },
+    });
+    // #10: the page is told, before anyone tries.
+    expect(await as('manager').receiving.getInvoice({ invoiceId: failedId })).toMatchObject({ linesEditable: false, linesLockReason: 'claim', deletableLineIds: [] });
+    expect(await lines()).toBe(1);
+  });
+
+  it('M-3: a credit note recorded on a line blocks the edit (it would cascade away)', async () => {
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 2, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    await db.insert(creditNotes).values({
+      restaurantId: A.restaurantId,
+      supplierId: A.supplierId,
+      amountAgorot: 1500,
+      issuedOn: '2026-10-31',
+      source: 'invoice_line',
+      invoiceLineId: a.lineId,
+      invoiceId: failedId,
+    });
+    await expect(as('manager').receiving.deleteInvoiceLine({ lineId: a.lineId })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      cause: { appCode: 'invoice.linesLocked' },
+    });
+    expect(await db.select().from(creditNotes).where(eq(creditNotes.invoiceLineId, a.lineId))).toHaveLength(1);
+    expect(await as('manager').receiving.getInvoice({ invoiceId: failedId })).toMatchObject({ linesEditable: false, linesLockReason: 'credit_note' });
+  });
+});
+
+describe('#216 money review — round 2', () => {
+  const stampOn = (grId: string) =>
+    db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: grId } } })
+      .where(eq(invoices.id, failedId));
+  const typesOf = async () =>
+    (
+      await db
+        .select({ type: discrepancies.type })
+        .from(discrepancies)
+        .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+        .where(eq(matchRuns.invoiceId, failedId))
+    ).map((r) => r.type);
+
+  it('#2: a header the owner TYPED is kept when a line is added — the gap shows as TOTAL_MISMATCH', async () => {
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 95, vatAmount: 17.1, totalInclVat: 112.1 } });
+    const r = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'עגבניות', qtyBilled: 10, unit: 'kg', unitPriceBilled: 8.5 },
+    });
+    expect(r.headerRecomputed).toBe(false);
+    expect(await header(failedId)).toEqual({ excl: '95.00', vat: '17.10', incl: '112.10' });
+    expect(await typesOf()).toContain('TOTAL_MISMATCH');
+  });
+
+  it('#3: fixing a hand line (pencil) recomputes its total and our header, and re-matches → leak 0', async () => {
+    await db.update(poLines).set({ productId: A.productId }).where(eq(poLines.id, A.poLineId));
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, A.grLineId));
+    await stampOn(A.grId);
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { poLineId: A.poLineId, rawDescription: 'עגבניות', qtyBilled: 10, unit: 'kg', unitPriceBilled: 9 }, // typo: 9
+    });
+    expect(await typesOf()).toContain('PRICE_HIGHER');
+    const fix = await as('manager').receiving.updateInvoiceLine({ lineId: a.lineId, patch: { unitPriceBilled: 8.5 } });
+    expect(fix).toMatchObject({ headerRecomputed: true, rematched: true, totals: { totalExclVat: '85.00', vatAmount: '15.30', totalInclVat: '100.30' } });
+    const [line] = await db.select({ lineTotal: invoiceLines.lineTotal }).from(invoiceLines).where(eq(invoiceLines.id, a.lineId));
+    expect(line!.lineTotal).toBe('85.00');
+    expect(await typesOf()).not.toContain('TOTAL_MISMATCH');
+    expect((await computeInvoiceLeak(db, A.restaurantId, failedId))!.leakIls).toBe(0);
+  });
+
+  it('#6: one hand line per order line — a second pick of the same line is refused; the picker marks it billed', async () => {
+    await db.update(poLines).set({ productId: A.productId }).where(eq(poLines.id, A.poLineId));
+    await stampOn(A.grId);
+    await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { poLineId: A.poLineId, rawDescription: 'עגבניות', qtyBilled: 4, unit: 'kg', unitPriceBilled: 8.5 },
+    });
+    await expect(
+      as('manager').receiving.addInvoiceLine({
+        invoiceId: failedId,
+        line: { poLineId: A.poLineId, rawDescription: 'עגבניות', qtyBilled: 6, unit: 'kg', unitPriceBilled: 8.5 },
+      }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    const picker = (await as('manager').receiving.getInvoice({ invoiceId: failedId })).orderLines;
+    expect(picker.find((l) => l.id === A.poLineId)?.billed).toBe(true);
+  });
+
+  it('#7: on a READ invoice with no printed header, a hand line never makes the printed lines deletable', async () => {
+    await db.update(invoices).set({ ocrPayload: { provider: 'reconciled', raw: { confidence: 0.4 } } }).where(eq(invoices.id, failedId));
+    const [read] = await db
+      .insert(invoiceLines)
+      .values({ invoiceId: failedId, rawDescription: 'נקרא', qtyBilled: '1', unit: 'kg', unitPriceBilled: '10', lineTotal: '10.00' })
+      .returning();
+    const added = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'ידני', qtyBilled: 1, unit: 'kg', unitPriceBilled: 5 },
+    });
+    await expect(as('manager').receiving.deleteInvoiceLine({ lineId: read!.id })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    const page = await as('manager').receiving.getInvoice({ invoiceId: failedId });
+    expect(page.deletableLineIds).toEqual([added.lineId]);
+  });
+
+  it('#8: deleting the LAST line while the receipt is being counted still drops the old run', async () => {
+    await stampOn(A.grId);
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId))).toHaveLength(1);
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    const d = await as('manager').receiving.deleteInvoiceLine({ lineId: a.lineId });
+    expect(d).toMatchObject({ rematched: false, rematchSkipped: 'no_lines' });
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId))).toHaveLength(0);
+  });
+
+  it('#12: a consolidated invoice takes no hand lines (server-side, not only the page)', async () => {
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'reconciled', raw: { kind: 'consolidated', deliveryNotes: [] } } })
+      .where(eq(invoices.id, failedId));
+    await expect(
+      as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'x', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1 } }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', cause: { appCode: 'invoice.linesLocked' } });
+    expect(await as('manager').receiving.getInvoice({ invoiceId: failedId })).toMatchObject({ linesEditable: false, linesLockReason: 'consolidated' });
+  });
+
+  it('#13 (round 6): "הרץ התאמה מחדש" while the receipt is still being counted HOLDS the invoice for it (no run, no throw)', async () => {
+    await stampOn(A.grId);
+    await db.insert(invoiceLines).values({ invoiceId: failedId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' });
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    expect(await as('manager').match.runForInvoice({ invoiceId: failedId })).toMatchObject({ matchRunId: null, status: 'held', held: 'receipt_open' });
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId))).toHaveLength(0);
+    const [row] = await db.select({ status: invoices.status, payload: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, failedId));
+    expect(row!.status).toBe('parsed'); // round 7: not "checked" before its run (export / pending list)
+    expect((row!.payload as { raw: Record<string, unknown> }).raw).toMatchObject({ heldForReceipts: [A.grId], scanGrId: A.grId });
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
+    expect((await as('manager').match.runForInvoice({ invoiceId: failedId })).matchRunId).not.toBeNull();
+  });
+  it('addendum (#224): an invoice still being read takes no header or line edit — nothing written, the read lands clean', async () => {
+    const [line] = await db
+      .insert(invoiceLines)
+      .values({ invoiceId: failedId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' })
+      .returning({ id: invoiceLines.id });
+    await db.update(invoices).set({ status: 'ocr_pending', ocrPayload: { provider: 'claude_vision', raw: { scanGrId: A.grId } } }).where(eq(invoices.id, failedId));
+    const before = await header(failedId);
+    const reading = { code: 'PRECONDITION_FAILED', message: 'החשבונית עדיין נקראת — נסו שוב בעוד דקה', cause: { appCode: 'invoice.beingRead' } };
+    await expect(
+      as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 95, vatAmount: 17.1, totalInclVat: 112.1 } }),
+    ).rejects.toMatchObject(reading);
+    await expect(as('manager').receiving.updateInvoiceLine({ lineId: line!.id, patch: { qtyBilled: 2 } })).rejects.toMatchObject(reading);
+    await expect(
+      as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'y', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1 } }),
+    ).rejects.toMatchObject(reading);
+    await expect(as('manager').receiving.deleteInvoiceLine({ lineId: line!.id })).rejects.toMatchObject(reading);
+    expect(await header(failedId)).toEqual(before);
+    const [row] = await db.select({ payload: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, failedId));
+    expect(row!.payload?.raw).toEqual({ scanGrId: A.grId }); // no headerEntered left for the read to inherit
+    const [l] = await db.select({ qty: invoiceLines.qtyBilled }).from(invoiceLines).where(eq(invoiceLines.id, line!.id));
+    expect(Number(l!.qty)).toBe(1);
+  });
+});
+
+/**
+ * Until some backend of this database is blocked BY the holder's backend
+ * (pg_blocking_pids) — no fixed sleep, and no unrelated lock wait counts.
+ */
+async function waitForBlockedBy(holderPid: number, timeoutMs = 10_000) {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const rows = (await db.execute(
+      sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and ${holderPid}::int = any(pg_blocking_pids(pid))`,
+    )) as unknown as Array<{ n: number }>;
+    if (rows[0]!.n > 0) return;
+    if (Date.now() > until) throw new Error(`nothing waited on backend ${holderPid}`);
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+const backendPid = async (tx: { execute: (q: ReturnType<typeof sql>) => Promise<unknown> }) =>
+  ((await tx.execute(sql`select pg_backend_pid()::int as pid`)) as unknown as Array<{ pid: number }>)[0]!.pid;
+
+describe('#216 money review — round 3', () => {
+  const runTypes = async () =>
+    (
+      await db
+        .select({ type: discrepancies.type })
+        .from(discrepancies)
+        .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+        .where(eq(matchRuns.invoiceId, failedId))
+    ).map((r) => r.type);
+  const runs = () => db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId));
+  const linkOrder = async () => {
+    await db.update(poLines).set({ productId: A.productId }).where(eq(poLines.id, A.poLineId));
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, A.grLineId));
+  };
+  const stamp = (raw: Record<string, unknown>) =>
+    db.update(invoices).set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', ...raw } } }).where(eq(invoices.id, failedId));
+
+  it('D: the pencil on a HAND line under a typed header recomputes its total and re-matches (no stale TOTAL_MISMATCH)', async () => {
+    await linkOrder();
+    await stamp({ scanGrId: A.grId });
+    // The printed totals, typed: 85.00 + 18% = 100.30.
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 85, vatAmount: 15.3, totalInclVat: 100.3 } });
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { poLineId: A.poLineId, rawDescription: 'עגבניות', qtyBilled: 9, unit: 'kg', unitPriceBilled: 8.5 },
+    });
+    expect(a.headerRecomputed).toBe(false);
+    expect(await runTypes()).toContain('TOTAL_MISMATCH'); // 76.50 vs the printed 85.00
+    const u = await as('manager').receiving.updateInvoiceLine({ lineId: a.lineId, patch: { qtyBilled: 10 } });
+    expect(u).toMatchObject({ headerRecomputed: false, rematched: true });
+    const [line] = await db.select({ total: invoiceLines.lineTotal }).from(invoiceLines).where(eq(invoiceLines.id, a.lineId));
+    expect(line!.total).toBe('85.00');
+    expect(await header(failedId)).toEqual({ excl: '85.00', vat: '15.30', incl: '100.30' }); // the typed header kept
+    expect(await runTypes()).not.toContain('TOTAL_MISMATCH');
+  });
+
+  it('E: the pencil respects money history — approved / paid, a credit note — refused before any write', async () => {
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 2, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    const qty = async () => (await db.select({ q: invoiceLines.qtyBilled }).from(invoiceLines).where(eq(invoiceLines.id, a.lineId)))[0]!.q;
+    for (const status of ['approved', 'paid'] as const) {
+      await db.update(invoices).set({ status }).where(eq(invoices.id, failedId));
+      await expect(as('manager').receiving.updateInvoiceLine({ lineId: a.lineId, patch: { qtyBilled: 3 } })).rejects.toMatchObject({
+        code: 'PRECONDITION_FAILED',
+        cause: { appCode: 'invoice.linesLocked' },
+      });
+    }
+    await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, failedId));
+    await db.insert(creditNotes).values({
+      restaurantId: A.restaurantId,
+      supplierId: A.supplierId,
+      amountAgorot: 1500,
+      issuedOn: '2026-10-31',
+      source: 'invoice_line',
+      invoiceLineId: a.lineId,
+      invoiceId: failedId,
+    });
+    await expect(as('manager').receiving.updateInvoiceLine({ lineId: a.lineId, patch: { qtyBilled: 3 } })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      cause: { appCode: 'invoice.linesLocked' },
+    });
+    expect(Number(await qty())).toBe(2);
+    expect(await header(failedId)).toEqual({ excl: '30.00', vat: '5.40', incl: '35.40' });
+  });
+
+  it('F: the LAST line is not deleted while a finding of its run is decided (a rejected one would come back)', async () => {
+    await linkOrder();
+    await stamp({ scanGrId: A.grId });
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { poLineId: A.poLineId, rawDescription: 'עגבניות', qtyBilled: 10, unit: 'kg', unitPriceBilled: 9 },
+    });
+    const [d] = await db
+      .select({ id: discrepancies.id })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(eq(matchRuns.invoiceId, failedId))
+      .limit(1);
+    expect(d).toBeDefined();
+    await db.update(discrepancies).set({ resolutionStatus: 'rejected' }).where(eq(discrepancies.id, d!.id));
+    await expect(as('manager').receiving.deleteInvoiceLine({ lineId: a.lineId })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      cause: { appCode: 'invoice.linesLocked' },
+    });
+    expect(await runs()).toHaveLength(1);
+    const [kept] = await db.select({ status: discrepancies.resolutionStatus }).from(discrepancies).where(eq(discrepancies.id, d!.id));
+    expect(kept!.status).toBe('rejected');
+  });
+
+  it('G: the receipt hold is decided under the receipt lock — a hand line saved during a submit is matched, never stranded', async () => {
+    const other = createDb(testDbUrl());
+    try {
+      await stamp({ scanGrId: A.grId });
+      await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+      let edit: Promise<unknown> | undefined;
+      let settled = false;
+      await other.transaction(async (tx) => {
+        const holder = await backendPid(tx);
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`gr-close:${A.grId}`}))`); // submitReceipt holds it
+        await tx.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
+        edit = as('manager').receiving.addInvoiceLine({
+          invoiceId: failedId,
+          line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
+        });
+        void edit.then(() => (settled = true), () => (settled = true));
+        await waitForBlockedBy(holder);
+        expect(settled).toBe(false); // waits for the submit
+      });
+      expect(await edit).toMatchObject({ rematched: true });
+      expect(await runs()).toHaveLength(1);
+    } finally {
+      // the second connection closes with the test process (as matchTriggers' own)
+    }
+  });
+
+  it('H: after the count, a hand line re-matches against the counted order — not a same-day second order', async () => {
+    await linkOrder();
+    await stamp({ scanGrId: A.grId });
+    // A second order from the same supplier, received too, dated right on the invoice.
+    const [po2] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, expectedDeliveryAt: new Date(), status: 'sent', source: 'manual' })
+      .returning();
+    await db.insert(poLines).values({ poId: po2!.id, productId: A.productId, rawDescription: 'עגבניות', qtyOrdered: '10', unit: 'kg', unitPriceExpected: '8.5' });
+    await db.insert(goodsReceipts).values({ restaurantId: A.restaurantId, poId: po2!.id, status: 'completed', receivedAt: new Date() });
+    await db.update(purchaseOrders).set({ expectedDeliveryAt: new Date(Date.now() - 2 * 86_400_000) }).where(eq(purchaseOrders.id, A.poId));
+    await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { poLineId: A.poLineId, rawDescription: 'עגבניות', qtyBilled: 10, unit: 'kg', unitPriceBilled: 8.5 },
+    });
+    const [run] = await runs();
+    expect(run).toMatchObject({ poId: A.poId, grId: A.grId });
+  });
+
+  it('I: two order lines of one product — each hand line pairs with the line it was picked from', async () => {
+    await linkOrder();
+    await stamp({ scanGrId: A.grId });
+    const [pl2] = await db
+      .insert(poLines)
+      .values({ poId: A.poId, productId: A.productId, rawDescription: 'עגבניות שרי', qtyOrdered: '5', unit: 'kg', unitPriceExpected: '8.5' })
+      .returning();
+    await db.insert(grLines).values({ grId: A.grId, poLineId: pl2!.id, qtyReceived: '5', qtyRejected: '0' });
+    // Picked in the other order than the PO lists them.
+    await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { poLineId: pl2!.id, rawDescription: 'עגבניות שרי', qtyBilled: 5, unit: 'kg', unitPriceBilled: 8.5 },
+    });
+    await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { poLineId: A.poLineId, rawDescription: 'עגבניות', qtyBilled: 10, unit: 'kg', unitPriceBilled: 8.5 },
+    });
+    expect(await runs()).toHaveLength(1);
+    expect(await runTypes()).toEqual([]);
+    expect((await computeInvoiceLeak(db, A.restaurantId, failedId))!.leakIls).toBe(0);
+  });
+
+  it('J: a possible duplicate copy given a hand line stays held for its review (never "matched" and forgotten)', async () => {
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    await stamp({ scanGrId: A.grId, duplicateOf: { invoiceId: A.invoiceId, invoiceNumber: 'INV-ML-1' } });
+    const r = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    expect(r).toMatchObject({ rematched: false, rematchSkipped: 'awaiting_review' }); // round 4: the page says it waits for review
+    const [row] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, failedId));
+    expect(row!.status).toBe('parsed');
+  });
+
+  it('L: the receipt hold honours a photo held for ONE receipt (heldForReceipts, no stamp)', async () => {
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    await stamp({ heldForReceipts: [A.grId] });
+    const r = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    expect(r).toMatchObject({ rematched: false, rematchSkipped: 'receipt_open' });
+    expect(await runs()).toHaveLength(0);
+    expect(await as('manager').match.runForInvoice({ invoiceId: failedId })).toMatchObject({ status: 'held', held: 'receipt_open' });
+    expect(await runs()).toHaveLength(0);
+  });
+
+  it('L: a receipt reopened after it was counted refuses the edit (its run stands on that count) — nothing written', async () => {
+    await stamp({ scanGrId: A.grId });
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    expect(await runs()).toHaveLength(1); // matched against the counted receipt
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId)); // reopened
+    await expect(
+      as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'y', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1 } }),
+    ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', cause: { appCode: 'invoice.receiptOpen' } });
+    expect((await db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, failedId))).map((l) => l.id)).toEqual([a.lineId]);
+  });
+
+  it('L: clearing the header totals is not typing them — the next hand line recomputes the header', async () => {
+    await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: null, vatAmount: null, totalInclVat: null } });
+    const b = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'סבון', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 5 },
+    });
+    expect(b.headerRecomputed).toBe(true);
+    expect(await header(failedId)).toEqual({ excl: '20.00', vat: '3.60', incl: '23.60' });
+  });
+
+  it("L: our header settles on the run's order VAT (the order's 0%), so it never trips VAT_MISMATCH", async () => {
+    await linkOrder();
+    await db.update(purchaseOrders).set({ vatRate: '0' }).where(eq(purchaseOrders.id, A.poId));
+    // No stamp: the order is found by the match, after the header was first computed at 18%.
+    const r = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'עגבניות', productId: A.productId, qtyBilled: 10, unit: 'kg', unitPriceBilled: 8.5 },
+    });
+    expect(r.rematched).toBe(true);
+    expect((await runs())[0]).toMatchObject({ poId: A.poId });
+    expect(await header(failedId)).toEqual({ excl: '85.00', vat: '0.00', incl: '85.00' });
+    expect(await runTypes()).not.toContain('VAT_MISMATCH');
+  });
+});
+
+describe('#216 round 4', () => {
+  const runs = () => db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId));
+  const stamp = (raw: Record<string, unknown>) =>
+    db.update(invoices).set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', ...raw } } }).where(eq(invoices.id, failedId));
+
+  it('3: a typed header, then cleared — the header is ours again (no invented TOTAL_MISMATCH)', async () => {
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 95, vatAmount: 17.1, totalInclVat: 112.1 } });
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: null, vatAmount: null, totalInclVat: null } });
+    const r = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 2, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    expect(r.headerRecomputed).toBe(true);
+    expect(await header(failedId)).toEqual({ excl: '30.00', vat: '5.40', incl: '35.40' });
+    const types = (
+      await db.select({ type: discrepancies.type }).from(discrepancies).innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId)).where(eq(matchRuns.invoiceId, failedId))
+    ).map((t) => t.type);
+    expect(types).not.toContain('TOTAL_MISMATCH');
+  });
+
+  it('4: runForInvoice refuses an invoice being read again (ocr_pending) — no run', async () => {
+    await db.insert(invoiceLines).values({ invoiceId: failedId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' });
+    await db.update(invoices).set({ status: 'ocr_pending' }).where(eq(invoices.id, failedId));
+    await expect(as('manager').match.runForInvoice({ invoiceId: failedId })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      cause: { appCode: 'invoice.beingRead' },
+    });
+    expect(await runs()).toHaveLength(0);
+  });
+
+  // Not reachable today (addInvoiceLine refuses a second hand line on one order
+  // line): if it ever were, the engine would read the dropped same-PO hand line
+  // as unordered — this only guards the PO list.
+  it('7: picker pairing lists an order line once, even when two hand lines map to it', async () => {
+    await db.update(poLines).set({ productId: A.productId }).where(eq(poLines.id, A.poLineId));
+    const [h1, h2] = await db
+      .insert(invoiceLines)
+      .values([
+        { invoiceId: failedId, productId: A.productId, rawDescription: 'עגבניות', qtyBilled: '5', unit: 'kg', unitPriceBilled: '8.5', lineTotal: '42.50' },
+        { invoiceId: failedId, productId: A.productId, rawDescription: 'עגבניות', qtyBilled: '5', unit: 'kg', unitPriceBilled: '8.5', lineTotal: '42.50' },
+      ])
+      .returning();
+    await stamp({ scanGrId: A.grId, manualLines: true, manualLineIds: [h1!.id, h2!.id], manualLinePoLines: { [h1!.id]: A.poLineId, [h2!.id]: A.poLineId } });
+    const built = await buildMatchInputForInvoice(db, A.restaurantId, failedId, { pinnedPoId: A.poId, strictPin: true });
+    const ids = built!.input.poLines.map((p) => p.id);
+    expect(ids.filter((id) => id === A.poLineId)).toHaveLength(1);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('nit: the pencil never recomputes a PRINTED line (evidence), even under our header', async () => {
+    await db.update(invoices).set({ ocrPayload: { provider: 'reconciled', raw: { confidence: 0.4 } } }).where(eq(invoices.id, failedId));
+    const [printed] = await db
+      .insert(invoiceLines)
+      .values({ invoiceId: failedId, rawDescription: 'נקרא', qtyBilled: '2', unit: 'kg', unitPriceBilled: '10', lineTotal: '19.90' })
+      .returning();
+    await as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'ידני', qtyBilled: 1, unit: 'kg', unitPriceBilled: 5 } }); // our header now
+    await as('manager').receiving.updateInvoiceLine({ lineId: printed!.id, patch: { unitPriceBilled: 11 } });
+    const [row] = await db.select({ total: invoiceLines.lineTotal }).from(invoiceLines).where(eq(invoiceLines.id, printed!.id));
+    expect(row!.total).toBe('19.90'); // as printed, not 2 × 11
+  });
+});
+
+describe('#216 round 6, item 2: one lock order everywhere — invoice row → recovery → gr-close', () => {
+  const stamped = () =>
+    db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: A.grId } } })
+      .where(eq(invoices.id, failedId));
+  /**
+   * A sibling (a hand line on another invoice of this restaurant, a claim
+   * transition) holds recovery:<restaurant> and then wants gr-close:<receipt>.
+   * The call under test must queue on recovery FIRST — had it taken gr-close
+   * first, the two would wait on each other and Postgres would abort one (40P01).
+   */
+  async function siblingParksBetweenRecoveryAndGrClose(start: () => Promise<unknown>) {
+    const other = createDb(testDbUrl());
+    let call: Promise<unknown> | undefined;
+    await other.transaction(async (tx) => {
+      const holder = await backendPid(tx);
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'recovery:' + A.restaurantId}))`);
+      call = start();
+      call.catch(() => undefined);
+      await waitForBlockedBy(holder); // the call waits on recovery — holding no gr-close
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`gr-close:${A.grId}`}))`); // never waits on the call
+    });
+    return call!;
+  }
+
+  it('Re-run: a sibling parked between recovery and gr-close never deadlocks it (no 40P01) — the run lands on the receipt', async () => {
+    await stamped();
+    await db.insert(invoiceLines).values({ invoiceId: failedId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' });
+    const out = await siblingParksBetweenRecoveryAndGrClose(() => as('manager').match.runForInvoice({ invoiceId: failedId }));
+    expect(out).toMatchObject({ matchRunId: expect.any(String) });
+    const [run] = await db.select({ grId: matchRuns.grId }).from(matchRuns).where(eq(matchRuns.invoiceId, failedId));
+    expect(run).toEqual({ grId: A.grId });
+  });
+
+  it('edit path: a hand line re-matched under the same sibling never deadlocks either (no 40P01)', async () => {
+    await stamped();
+    const out = await siblingParksBetweenRecoveryAndGrClose(() =>
+      as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 } }),
+    );
+    expect(out).toMatchObject({ rematched: true });
+  });
+
+  it('round 7 (item 6): the pencil on a hand line re-matched under the same sibling never deadlocks (no 40P01)', async () => {
+    await stamped();
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    const out = await siblingParksBetweenRecoveryAndGrClose(() =>
+      as('manager').receiving.updateInvoiceLine({ lineId: a.lineId, patch: { qtyBilled: 2 } }),
+    );
+    expect(out).toMatchObject({ rematched: true });
+  });
+});
+
+describe('#216 round 7', () => {
+  const runs = () => db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId));
+  const raw = async () =>
+    ((await db.select({ p: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, failedId)))[0]!.p as { raw?: Record<string, unknown> } | null)?.raw ?? {};
+  const stamped = () =>
+    db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: A.grId } } })
+      .where(eq(invoices.id, failedId));
+
+  it('item 2 + 4: a held invoice with no run stays unchecked (parsed: pending list, editable, not exported) and the page knows it waits for the count', async () => {
+    await stamped();
+    await db
+      .update(invoices)
+      .set({ invoiceNumber: 'HELD-7', invoiceDate: new Date(), totalExclVat: '1.00', vatAmount: '0.18', totalInclVat: '1.18' })
+      .where(eq(invoices.id, failedId));
+    await db.insert(invoiceLines).values({ invoiceId: failedId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' });
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    expect(await as('manager').match.runForInvoice({ invoiceId: failedId })).toMatchObject({ status: 'held' });
+
+    const page = await as('manager').receiving.getInvoice({ invoiceId: failedId });
+    expect(page).toMatchObject({ status: 'parsed', awaitingCount: true, linesEditable: true });
+    expect((await as('manager').receiving.pendingInvoices()).map((i) => i.id)).toContain(failedId);
+    const day = new Date().toISOString().slice(0, 10);
+    const csv = await as('owner').exports.invoicesCsv({ from: day, to: day });
+    expect(csv.content).not.toContain('HELD-7');
+
+    // The count closes (a run would follow from the job): no longer waiting.
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
+    expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).awaitingCount).toBe(false);
+  });
+
+  it('item 3: a run persisted on the receipt it was held for ends the hold (no re-claim, no permanent pin)', async () => {
+    await stamped();
+    await db.insert(invoiceLines).values({ invoiceId: failedId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' });
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    await as('manager').match.runForInvoice({ invoiceId: failedId });
+    expect((await raw()).heldForReceipts).toEqual([A.grId]);
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
+    const out = await as('manager').match.runForInvoice({ invoiceId: failedId });
+    expect(out.matchRunId).not.toBeNull();
+    expect((await raw()).heldForReceipts).toBeUndefined();
+    expect((await raw()).scanGrId).toBe(A.grId); // the stamp stays
+  });
+
+  it('item 6 (P3): matched on a counted receipt, then the receipt is reopened → Re-run refuses (receiptOpen), no hold written, the run unchanged', async () => {
+    await stamped();
+    await as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 } });
+    const before = (await runs()).map((r) => r.id);
+    expect(before).toHaveLength(1);
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId)); // reopened
+    await expect(as('manager').match.runForInvoice({ invoiceId: failedId })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      cause: { appCode: 'invoice.receiptOpen' },
+    });
+    expect((await raw()).heldForReceipts).toBeUndefined();
+    expect((await runs()).map((r) => r.id)).toEqual(before);
+  });
+
+  it('item 7: a read whose subtotal is unknown (total-only) may clear its VAT alone; with a subtotal it is still refused', async () => {
+    await db.update(invoices).set({ totalExclVat: null, vatAmount: '15.30', totalInclVat: '100.30' }).where(eq(invoices.id, failedId));
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { vatAmount: null } });
+    expect(await header(failedId)).toEqual({ excl: null, vat: null, incl: '100.30' });
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 85, vatAmount: 15.3, totalInclVat: 100.3 } });
+    await expect(as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { vatAmount: null } })).rejects.toMatchObject({
+      cause: { appCode: 'invoice.partialHeaderClear' },
+    });
+  });
+});
+
+describe('#216 round 8', () => {
+  const runs = () => db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId));
+  const raw = async () =>
+    ((await db.select({ p: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, failedId)))[0]!.p as { raw?: Record<string, unknown> } | null)?.raw ?? {};
+  const claims = () => db.select().from(recoveryClaims).where(eq(recoveryClaims.invoiceId, failedId));
+  const stampOn = (grId: string) =>
+    db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: grId } } })
+      .where(eq(invoices.id, failedId));
+  /** A hand line + an earlier run with no receipt, one finding claimed (bare unless a person touched it). */
+  async function handLineWithClaimedRun(type: 'UNORDERED_ITEM' | 'MISSING_ON_INVOICE' = 'UNORDERED_ITEM') {
+    const [line] = await db
+      .insert(invoiceLines)
+      .values({ invoiceId: failedId, rawDescription: 'מגבות נייר', qtyBilled: '1', unit: 'יח׳', unitPriceBilled: '15', lineTotal: '15.00' })
+      .returning();
+    const [run] = await db
+      .insert(matchRuns)
+      .values({ restaurantId: A.restaurantId, poId: A.poId, grId: null, invoiceId: failedId, overallStatus: 'blocked', totalDiscrepancyAmount: '15.00', runAt: new Date(Date.now() - 3_600_000) })
+      .returning();
+    const [d] = await db
+      .insert(discrepancies)
+      .values({ matchRunId: run!.id, restaurantId: A.restaurantId, type, severity: 'warn', deltaAmount: '15.00', resolutionStatus: 'accepted' } as never)
+      .returning();
+    const [c] = await db
+      .insert(recoveryClaims)
+      .values({ restaurantId: A.restaurantId, discrepancyId: d!.id, supplierId: A.supplierId, invoiceId: failedId, amountAgorot: 1500 } as never)
+      .returning();
+    return { lineId: line!.id, runId: run!.id, claimId: c!.id };
+  }
+  async function systemNeverClaimableWriteOff(claimId: string) {
+    await db.update(recoveryClaims).set({ status: 'written_off', closedAt: new Date() } as never).where(eq(recoveryClaims.id, claimId));
+    await db.execute(sql`
+      INSERT INTO recovery_events (restaurant_id, claim_id, from_status, to_status, amount_agorot, actor_id, note)
+      VALUES (${A.restaurantId}, ${claimId}, 'claimed', 'written_off', 1500, NULL, ${NEVER_CLAIMABLE_NOTE})`);
+  }
+  const personWritesOff = (claimId: string) =>
+    transitionClaim(db, A.restaurantId, { claimId, to: 'written_off', actorId: A.ownerUserId, note: 'not worth it' });
+
+  it('item 2: a claim a PERSON wrote off has history — Re-run is refused (claimInProgress) with copy that promises no unblock', async () => {
+    await stampOn(A.grId);
+    const { runId, claimId } = await handLineWithClaimedRun();
+    await personWritesOff(claimId);
+    const err = await as('manager').match.runForInvoice({ invoiceId: failedId }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: 'CONFLICT', cause: { appCode: 'invoice.claimInProgress' } });
+    expect((err as Error).message).toMatch(/locked; the claims stay in the tracker/);
+    expect((err as Error).message).not.toMatch(/before re-matching/);
+    expect((await runs()).map((r) => r.id)).toEqual([runId]);
+    expect((await claims()).map((c) => c.id)).toEqual([claimId]);
+  });
+
+  it('item 3: typing a subtotal while clearing the VAT in one save ({null,15.30,100.30} → {85,null,100.30}) is refused', async () => {
+    await db.update(invoices).set({ totalExclVat: null, vatAmount: '15.30', totalInclVat: '100.30' }).where(eq(invoices.id, failedId));
+    await expect(
+      as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 85, vatAmount: null } }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST', cause: { appCode: 'invoice.partialHeaderClear' } });
+    expect(await header(failedId)).toEqual({ excl: null, vat: '15.30', incl: '100.30' });
+  });
+
+  it('item 4: held for receipt A, then re-matched on receipt B → the hold is gone; A\'s submit never takes it back', async () => {
+    // Receipt B: another order of this supplier, counted.
+    const [po2] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, expectedDeliveryAt: new Date(), status: 'sent', source: 'manual' })
+      .returning();
+    await db.insert(poLines).values({ poId: po2!.id, productId: A.productId, rawDescription: 'עגבניות', qtyOrdered: '10', unit: 'kg', unitPriceExpected: '8.5' });
+    const [grB] = await db.insert(goodsReceipts).values({ restaurantId: A.restaurantId, poId: po2!.id, status: 'completed', receivedAt: new Date() }).returning();
+    await db.insert(invoiceLines).values({ invoiceId: failedId, productId: A.productId, rawDescription: 'עגבניות', qtyBilled: '10', unit: 'kg', unitPriceBilled: '8.5', lineTotal: '85.00' });
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    // Held for A once; the scan is (now) known to be B's.
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: grB!.id, heldForReceipts: [A.grId] } } })
+      .where(eq(invoices.id, failedId));
+    const out = await as('manager').match.runForInvoice({ invoiceId: failedId });
+    expect(out.matchRunId).not.toBeNull();
+    expect((await runs())[0]).toMatchObject({ grId: grB!.id });
+    expect((await raw()).heldForReceipts).toBeUndefined();
+    expect(await invoicesWaitingOnReceipt(db, A.restaurantId, A.grId)).not.toContain(failedId);
+  });
+
+  it('item 5 + 6: one claim rule — a claim with history locks the pencil up front (open or closed receipt), nothing written', async () => {
+    await stampOn(A.grId);
+    const { lineId, claimId } = await handLineWithClaimedRun();
+    await personWritesOff(claimId); // the old line lock let this through; the re-match refused it
+    for (const status of ['pending', 'completed'] as const) {
+      await db.update(goodsReceipts).set({ status }).where(eq(goodsReceipts.id, A.grId));
+      await expect(as('manager').receiving.updateInvoiceLine({ lineId, patch: { qtyBilled: 2 } })).rejects.toMatchObject({
+        cause: { appCode: 'invoice.linesLocked' },
+      });
+    }
+    const [line] = await db.select({ qty: invoiceLines.qtyBilled }).from(invoiceLines).where(eq(invoiceLines.id, lineId));
+    expect(Number(line!.qty)).toBe(1);
+    expect((await raw()).heldForReceipts).toBeUndefined();
+    expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).linesLockReason).toBe('claim');
+  });
+
+  it('item 6: the pencil on a hand line, a BARE claim on the old run, the receipt open → the claim is released with the hold', async () => {
+    await stampOn(A.grId);
+    const { lineId } = await handLineWithClaimedRun();
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    const out = await as('manager').receiving.updateInvoiceLine({ lineId, patch: { qtyBilled: 2 } });
+    expect(out).toMatchObject({ rematched: false, rematchSkipped: 'receipt_open' });
+    expect(await claims()).toHaveLength(0); // released now — the receipt's job replaces that run
+    expect((await raw()).heldForReceipts).toEqual([A.grId]);
+  });
+
+  it('round 9 item 1: a claim the SYSTEM wrote off as never-claimable is no history — the pencil works and Re-run runs', async () => {
+    await stampOn(A.grId);
+    const { lineId, claimId } = await handLineWithClaimedRun('MISSING_ON_INVOICE');
+    // syncClaims' own never-claimable write-off (owner 31.10): no actor, its note.
+    await systemNeverClaimableWriteOff(claimId);
+    const page = await as('manager').receiving.getInvoice({ invoiceId: failedId });
+    expect(page).toMatchObject({ linesLockReason: null, lineEditLock: null });
+    expect((await as('manager').match.runForInvoice({ invoiceId: failedId })).matchRunId).not.toBeNull();
+    expect(await claims()).toHaveLength(0); // released with the re-match
+    const out = await as('manager').receiving.updateInvoiceLine({ lineId, patch: { qtyBilled: 2 } });
+    expect(out).toMatchObject({ ok: true, rematched: true });
+  });
+
+  it('round 9 item 4: the pencil is offered only where the server takes it — lineEditLock on every status updateInvoiceLine accepts', async () => {
+    await stampOn(A.grId);
+    const { claimId } = await handLineWithClaimedRun();
+    await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, failedId)); // a read invoice: no add/delete, pencil only
+    expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).lineEditLock).toBeNull();
+    await personWritesOff(claimId);
+    expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).lineEditLock).toBe('claim');
+    await db.update(invoices).set({ status: 'approved' }).where(eq(invoices.id, failedId));
+    expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).lineEditLock).toBe('settled');
+  });
+
+  it('round 10 item 5: the never-claimable note on a CLAIMABLE finding is still history (only a never-claimable type is exempt)', async () => {
+    await stampOn(A.grId);
+    const { claimId } = await handLineWithClaimedRun('UNORDERED_ITEM');
+    await systemNeverClaimableWriteOff(claimId);
+    expect((await as('manager').receiving.getInvoice({ invoiceId: failedId })).lineEditLock).toBe('claim');
+    await expect(as('manager').match.runForInvoice({ invoiceId: failedId })).rejects.toMatchObject({ cause: { appCode: 'invoice.claimInProgress' } });
+  });
+
+  it('round 10 item 1: the held ₪ is exactly what the sync would file — capped by the invoice total (₪1,475: ₪1,250 + ₪1,000 → 147,500 agorot)', async () => {
+    await db
+      .update(invoices)
+      .set({ totalExclVat: '1250.00', vatAmount: '225.00', totalInclVat: '1475.00', ocrPayload: { provider: 'claude_vision', raw: { heldForReceipts: [A.grId] } } })
+      .where(eq(invoices.id, failedId));
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    const [run] = await db
+      .insert(matchRuns)
+      .values({ restaurantId: A.restaurantId, poId: A.poId, grId: null, invoiceId: failedId, overallStatus: 'blocked', totalDiscrepancyAmount: '2250.00' })
+      .returning();
+    for (const [type, delta] of [['QTY_SHORT', '1250.00'], ['PRICE_HIGHER', '1000.00']] as const) {
+      await db.insert(discrepancies).values({ matchRunId: run!.id, restaurantId: A.restaurantId, type, severity: 'block', deltaAmount: delta, resolutionStatus: 'accepted' } as never);
+    }
+    expect(await heldForCountTotals(db, A.restaurantId)).toEqual({ count: 2, agorot: 147_500 });
+    // …and once the hold ends, the sync files exactly that.
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
+    expect(await heldForCountTotals(db, A.restaurantId)).toEqual({ count: 0, agorot: 0 });
+    await syncClaims(db, A.restaurantId, A.ownerUserId);
+    const filed = await claims();
+    expect(filed.reduce((s, c) => s + Number(c.amountAgorot), 0)).toBe(147_500);
+  });
+});
+
+describe('#216 round 4 verdict', () => {
+  const runs = () => db.select().from(matchRuns).where(eq(matchRuns.invoiceId, failedId));
+  const types = async () =>
+    (
+      await db.select({ type: discrepancies.type }).from(discrepancies).innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId)).where(eq(matchRuns.invoiceId, failedId))
+    ).map((t) => t.type);
+  const linkOrder = () => db.update(poLines).set({ productId: A.productId }).where(eq(poLines.id, A.poLineId));
+
+  it('F2: totals typed, then cleared — the header is recomputed from the lines at once; a Re-run shows the real leak, no TOTAL_MISMATCH', async () => {
+    await linkOrder(); // ordered 10 × 8.5, received 5 (the fixture)
+    await db.update(invoices).set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: A.grId } } }).where(eq(invoices.id, failedId));
+    await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { poLineId: A.poLineId, rawDescription: 'עגבניות', qtyBilled: 10, unit: 'kg', unitPriceBilled: 8.5 },
+    });
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 90, vatAmount: 16.2, totalInclVat: 106.2 } });
+    const cleared = await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: null, vatAmount: null, totalInclVat: null } });
+    expect(cleared.totals).toEqual({ totalExclVat: '85.00', vatAmount: '15.30', totalInclVat: '100.30' });
+    expect(await header(failedId)).toEqual({ excl: '85.00', vat: '15.30', incl: '100.30' });
+    const [audit] = (await audits('receiving.invoice_header_updated')).filter((a) => (a.after as { totalExclVat?: unknown }).totalExclVat === '85.00');
+    expect(audit).toBeDefined(); // the recomputed totals are in the audit
+    await as('manager').match.runForInvoice({ invoiceId: failedId });
+    expect(await types()).not.toContain('TOTAL_MISMATCH');
+    expect((await computeInvoiceLeak(db, A.restaurantId, failedId))!.leakIls).toBe(42.5); // 5 short × 8.5
+  });
+
+  it('LOW 6: clearing only the subtotal under a VAT / total is refused (appCode invoice.partialHeaderClear) — nothing written', async () => {
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 90, vatAmount: 16.2, totalInclVat: 106.2 } });
+    await expect(as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: null } })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      cause: { appCode: 'invoice.partialHeaderClear' },
+    });
+    expect(await header(failedId)).toEqual({ excl: '90.00', vat: '16.20', incl: '106.20' });
+  });
+
+  it('round 6 LOW: clearing ONLY the VAT (or only the total) is refused too — nothing written', async () => {
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: 90, vatAmount: 16.2, totalInclVat: 106.2 } });
+    await expect(as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { vatAmount: null } })).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      cause: { appCode: 'invoice.partialHeaderClear' },
+    });
+    await expect(as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalInclVat: null } })).rejects.toMatchObject({
+      cause: { appCode: 'invoice.partialHeaderClear' },
+    });
+    expect(await header(failedId)).toEqual({ excl: '90.00', vat: '16.20', incl: '106.20' });
+    // All three together is a clear (the header is ours again).
+    await as('manager').receiving.updateInvoiceHeader({ invoiceId: failedId, patch: { totalExclVat: null, vatAmount: null, totalInclVat: null } });
+    expect(await header(failedId)).toEqual({ excl: null, vat: null, incl: null });
+  });
+
+  it('F3 (round 6): an unstamped invoice whose order is still being counted is HELD for that receipt (no run); once counted it matches clean', async () => {
+    await linkOrder();
+    // No scan stamp (an emailed copy): its order is found by discovery — and A's receipt is still counting.
+    await db.update(invoices).set({ source: 'email', ocrPayload: null, totalExclVat: '85.00', vatAmount: '15.30', totalInclVat: '100.30' }).where(eq(invoices.id, failedId));
+    await db.insert(invoiceLines).values({ invoiceId: failedId, productId: A.productId, rawDescription: 'עגבניות', qtyBilled: '10', unit: 'kg', unitPriceBilled: '8.5', lineTotal: '85.00' });
+    await db.update(goodsReceipts).set({ status: 'pending' }).where(eq(goodsReceipts.id, A.grId));
+    expect(await as('manager').match.runForInvoice({ invoiceId: failedId })).toMatchObject({ status: 'held', held: 'receipt_open', poMatched: true });
+    expect(await runs()).toHaveLength(0);
+    const [row] = await db.select({ payload: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, failedId));
+    expect((row!.payload as { raw: Record<string, unknown> }).raw).toEqual({ heldForReceipts: [A.grId] });
+    // Control: the count is in (10 received) and submitted → a clean run.
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, A.grLineId));
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
+    const out = await as('manager').match.runForInvoice({ invoiceId: failedId });
+    expect(out.matchRunId).not.toBeNull();
+    expect(await types()).toEqual([]);
+  });
+
+  it('LOW 2: runForInvoice takes the invoice row lock — a retake committing first (ocr_pending) is refused, no run', async () => {
+    await db.insert(invoiceLines).values({ invoiceId: failedId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' });
+    const other = createDb(testDbUrl());
+    let run: Promise<unknown> | undefined;
+    await other.transaction(async (tx) => {
+      const holder = await backendPid(tx);
+      await tx.select({ id: invoices.id }).from(invoices).where(eq(invoices.id, failedId)).for('no key update'); // the retake holds the row
+      run = as('manager').match.runForInvoice({ invoiceId: failedId });
+      run.catch(() => undefined);
+      await waitForBlockedBy(holder);
+      await tx.update(invoices).set({ status: 'ocr_pending' }).where(eq(invoices.id, failedId));
+    });
+    await expect(run!).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', cause: { appCode: 'invoice.beingRead' } });
+    expect(await runs()).toHaveLength(0);
+  });
+});
+
+
+

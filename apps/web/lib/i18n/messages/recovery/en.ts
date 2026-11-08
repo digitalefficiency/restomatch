@@ -11,6 +11,7 @@ export const en: Shape<typeof he> = {
     title: '₪-back tracker',
     subtitle: 'Every discrepancy you claimed from a supplier — from the claim letter until the money is actually back.',
     outstanding: 'Still owed to you',
+    heldForCount: '{amount} in findings on an invoice waiting for a count — re-checked when the count closes',
     outstandingHint: 'Open and disputed · of {claimed} claimed in {count} claims',
     rate: 'Credit rate',
     rateHint: 'credited ÷ claimed',

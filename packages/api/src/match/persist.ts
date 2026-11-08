@@ -10,12 +10,14 @@ import {
   ne,
   or,
   matchRuns,
+  sql,
   suppliers,
   type Database,
   type UserRole,
 } from '@restomatch/db';
 import { isLeakType } from '@restomatch/charts';
 import type { MatchInput, MatchOutput } from '@restomatch/matching';
+import { HELD_FOR_RECEIPTS_KEY } from '@restomatch/charts';
 import { evaluateApproval, type ApprovalContext } from '../approvals/engine';
 import { buildRules } from '../approvals/engine';
 import { logActivity } from '../activity';
@@ -429,6 +431,20 @@ export async function persistMatchRun(
   // are people's (payment) decisions. Re-matching a paid invoice used to reset it
   // to `matched`, so its leak reappeared as "caught before payment".
   const finalInvoiceStatus = result.status === 'blocked' ? 'disputed' : 'matched';
+  // A run on a receipt ends any hold (raw.heldForReceipts): the receipt it
+  // waited for, or another one a manager re-matched it on (round 8) — else a
+  // later close of the held receipt takes the invoice back, and a photo held
+  // for one receipt stays strictly pinned to it (scanOwnerReceipt). A
+  // receipt-less run keeps the hold. Any run clears a recorded blocked re-match.
+  await db.execute(sql`
+    UPDATE invoices
+       SET ocr_payload = ocr_payload #- '{raw,rematchBlocked}'::text[]
+                                     #- (CASE WHEN ${args.grId}::uuid IS NOT NULL
+                                              THEN ${`{raw,${HELD_FOR_RECEIPTS_KEY}}`}::text[]
+                                              ELSE '{raw,__none__}'::text[] END)
+     WHERE id = ${args.invoiceId} AND restaurant_id = ${args.restaurantId}
+       AND (ocr_payload -> 'raw' ? 'rematchBlocked'
+            OR (${args.grId}::uuid IS NOT NULL AND ocr_payload -> 'raw' ? ${HELD_FOR_RECEIPTS_KEY}::text))`);
   await db
     .update(invoices)
     .set({ status: finalInvoiceStatus })

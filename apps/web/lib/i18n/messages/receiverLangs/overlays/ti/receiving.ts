@@ -205,6 +205,7 @@ export const receiving: Shape<typeof he> = {
     afterClose: 'መጠን ₪ ምቕባል ምስ ተዓጽወ ይውሰን — ናይ ምንጽጻር ሲስተም ምስ ብሓቂ ዝተቘጽረ የነጻጽሮ።', // review
     slow: 'ሕሳብ ካብ ልሙድ ንላዕሊ ግዜ ይወስድ ኣሎ። ብዝሒ ኣብዚ ኣሎ፤ ₪ ደሓር ክመጽእ እዩ።', // review
     heldReview: 'መጠናት ድሕሪ ምርመራ ፋቱራ ክውሰኑ እዮም።', // review
+    heldClaim: 'ውጽኢት ቆጸራ ኣብዚ ፋቱራ ኣይተተግበረን፡ ታሪኽ ዘለዎ ሕቶ ክረዲት ኣለዎ፣ ኣብ ምክትታል ምምላስ ይጸንሕ።', // review
     heldSettled: 'እዚ ፋቱራ ድሮ ጸዲቑ — መጠናቱ ኣብ ገጽ ምጽዳቕ ኣሎ።', // review
     refresh: 'ኣሐድሱ',
     copy: 'ጽሑፍ ቅዳሕ',

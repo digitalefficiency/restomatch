@@ -39,6 +39,11 @@ export const APP_ERROR_CODES = [
   'growth.referralInvalid',
   'growth.referralSelf',
   'growth.referralAlreadyRedeemed',
+  'invoice.linesLocked',
+  'invoice.receiptOpen',
+  'invoice.beingRead',
+  'invoice.partialHeaderClear',
+  'invoice.claimInProgress',
 ] as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];

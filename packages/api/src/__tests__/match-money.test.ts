@@ -11,13 +11,24 @@ import {
   priceHistory,
   purchaseOrders,
   testDbUrl,
+  sql,
 } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext } from '../context';
 import { normalizeInvoiceNumber } from '../match/buildMatchInput';
 import { backfillPriceHistory, writePriceHistoryForInvoice } from '../match/priceHistory';
 import { decisionStillApplies, matchActivitySummary, matchAlert, pairPriorDecisions, type PriorDecision } from '../match/persist';
-import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
+import { resetDb, seedPlans, seedTenant as seedTenantPending, type Tenant } from './fixtures';
+
+/**
+ * #216 F3: match.runForInvoice refuses a receipt still being counted. These
+ * re-matches stand on a COUNTED receipt (the fixture's 5 received): submitted.
+ */
+async function seedTenant(...args: Parameters<typeof seedTenantPending>): Promise<Tenant> {
+  const t = await seedTenantPending(...args);
+  await args[0].execute(sql`UPDATE goods_receipts SET status = 'completed' WHERE id = ${t.grId}`);
+  return t;
+}
 
 /**
  * S3 money-engine: the price_history writer (M1), its backfill, and

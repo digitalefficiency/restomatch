@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
-import { CheckCircle2, FileText, Pencil, Play, X } from 'lucide-react';
+import { CheckCircle2, FileText, Pencil, Play, Plus, Trash2, X } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import { Badge, Button, Card, Field, Input, type BadgeTone } from '@/lib/components';
 import { formatIls } from '@/lib/money';
@@ -70,6 +70,13 @@ export function InvoiceCorrection({
   const [vat, setVat] = useState(invoice.vatAmount != null ? String(invoice.vatAmount) : '');
   const [incl, setIncl] = useState(invoice.totalInclVat != null ? String(invoice.totalInclVat) : '');
 
+  // B8: hand-entered lines (an invoice the OCR could not read / held for review).
+  const linesEditable = canEdit && !consolidated && invoice.linesEditable;
+  /** poLineId: the order line this hand line bills ('' = a line that was not ordered). */
+  const emptyNew = { poLineId: '', rawDescription: '', qtyBilled: '', unit: '', unitPriceBilled: '' };
+  const orderLines = invoice.orderLines;
+  const [nl, setNl] = useState(emptyNew);
+
   // Line editing
   const [editingLine, setEditingLine] = useState<string | null>(null);
   const [ld, setLd] = useState({ rawDescription: '', qtyBilled: '', unit: '', unitPriceBilled: '', lineTotal: '' });
@@ -79,14 +86,22 @@ export function InvoiceCorrection({
     setError(null);
     router.refresh();
   };
-  const onErr = (e: { message: string }) => {
-    setError(locale === 'en' ? t('correction.failed') : e.message || t('correction.failed'));
+  const onErr = (e: Parameters<typeof localizeServerError>[0] & { message: string }) => {
+    // A known domain code (e.g. invoice.linesLocked) reads in the UI language.
+    const known = localizeServerError(e, locale, '');
+    setError(known || (locale === 'en' ? t('correction.failed') : e.message || t('correction.failed')));
     setSaved(null);
   };
 
   const updateHeader = trpc.receiving.updateInvoiceHeader.useMutation({
-    onSuccess: () => {
+    onSuccess: (res) => {
       setHolderId(null);
+      // Cleared totals over lines are recomputed by the server: show them.
+      if (res.totals) {
+        setExcl(res.totals.totalExclVat ?? '');
+        setVat(res.totals.vatAmount ?? '');
+        setIncl(res.totals.totalInclVat ?? '');
+      }
       onOk(t('correction.savedHeader'));
     },
     onError: (e) => {
@@ -103,12 +118,74 @@ export function InvoiceCorrection({
     },
   });
   const updateLine = trpc.receiving.updateInvoiceLine.useMutation({
-    onSuccess: () => {
+    onSuccess: (res) => {
       setEditingLine(null);
-      onOk(t('correction.savedLine'));
+      // A hand line (or our header) was re-matched / held: say so, as add / delete do.
+      if (res.headerRecomputed || 'rematched' in res) afterManual(t('correction.savedLine'), { rematched: false, ...res });
+      else onOk(t('correction.savedLine'));
     },
     onError: onErr,
   });
+  // The server re-matches after a hand edit; a refused re-match keeps the edit.
+  // The header totals were recomputed from the lines: the header drafts follow
+  // them (a later "save details" must never write back the stale figures).
+  const afterManual = (
+    msg: string,
+    res: {
+      rematched: boolean;
+      rematchSkipped?: 'receipt_open' | 'no_lines' | 'refused' | 'awaiting_review';
+      headerRecomputed: boolean;
+      totals: { totalExclVat: string | null; vatAmount: string | null; totalInclVat: string | null } | null;
+    },
+  ) => {
+    // Only a header the server computes follows the lines; a printed or typed
+    // header is the billed figure and stays as it is on screen.
+    if (res.headerRecomputed && res.totals) {
+      setExcl(res.totals.totalExclVat ?? '');
+      setVat(res.totals.vatAmount ?? '');
+      setIncl(res.totals.totalInclVat ?? '');
+    }
+    // Held for the receipt's count / nothing left to match / refused (re-run by hand).
+    const note =
+      res.rematched
+        ? t('correction.rematchedNote')
+        : res.rematchSkipped === 'no_lines'
+          ? ''
+        : res.rematchSkipped === 'receipt_open'
+          ? t('correction.heldForCount')
+        : res.rematchSkipped === 'awaiting_review'
+          ? t('correction.rematchAwaitingReview')
+          : t('correction.rematchLater');
+    onOk(note ? `${msg} ${note}` : msg);
+  };
+  const addLine = trpc.receiving.addInvoiceLine.useMutation({
+    onSuccess: (res) => {
+      setNl(emptyNew);
+      afterManual(t('correction.lineAdded'), res);
+    },
+    onError: onErr,
+  });
+  const deleteLine = trpc.receiving.deleteInvoiceLine.useMutation({
+    onSuccess: (res) => afterManual(t('correction.lineDeleted'), res),
+    onError: onErr,
+  });
+  const newQty = num(nl.qtyBilled);
+  const newPrice = num(nl.unitPriceBilled);
+  const newLineReady = !!nl.rawDescription.trim() && !!nl.unit.trim() && newQty != null && newQty > 0 && newPrice != null && newPrice >= 0;
+  function saveNewLine() {
+    if (!newLineReady) return;
+    addLine.mutate({
+      invoiceId: invoice.id,
+      line: {
+        rawDescription: nl.rawDescription.trim(),
+        qtyBilled: newQty!,
+        unit: nl.unit.trim(),
+        unitPriceBilled: newPrice!,
+        ...(nl.poLineId ? { poLineId: nl.poLineId } : {}),
+      },
+    });
+  }
+
   const runMatch = trpc.match.runForInvoice.useMutation({
     onSuccess: (res) => {
       setRematch(res);
@@ -159,7 +236,20 @@ export function InvoiceCorrection({
     });
   }
 
-  const st: { label: string; tone: BadgeTone } | null = rematch
+  // Held for an open receipt count (T4, neutral): no figure yet, never an alarm.
+  // Why the lines are locked: the add/delete rule, else why the pencil is hidden
+  // (an OCR-read invoice: lineEditLock — round 10). Being read has its own banner.
+  const lockNotice =
+    invoice.linesLockReason ?? (invoice.lineEditLock && invoice.lineEditLock !== 'being_read' ? invoice.lineEditLock : null);
+  // On a reload, the server says so (getInvoice.awaitingCount).
+  const held = rematch
+    ? rematch.status === 'held'
+      ? rematch.held ?? 'receipt_open'
+      : null
+    : invoice.awaitingCount
+      ? 'receipt_open'
+      : null;
+  const st: { label: string; tone: BadgeTone } | null = rematch && !held
     ? STATUS_TONE[rematch.status]
       ? {
           label: t(`status.${rematch.status as 'clean' | 'minor' | 'major' | 'blocked'}`),
@@ -221,6 +311,16 @@ export function InvoiceCorrection({
         </div>
       ) : null}
 
+      {canEdit && lockNotice ? (
+        <div
+          role="status"
+          data-testid="invoice-lines-locked"
+          className="rounded-md border-s-4 border-line bg-surface-2 px-3 py-2 text-sm text-ink"
+        >
+          {t(`correction.linesLocked.${lockNotice}`)}
+        </div>
+      ) : null}
+
       {/* Header */}
       <Card flow elevated padding="lg">
         <div className="mb-4 flex items-center justify-between gap-3">
@@ -246,6 +346,8 @@ export function InvoiceCorrection({
                 variant="primary"
                 size="sm"
                 loading={runMatch.isPending}
+                // Not while the invoice is being read (the server refuses it too).
+                disabled={invoice.status === 'ocr_pending'}
                 onClick={() => runMatch.mutate({ invoiceId: invoice.id })}
               >
                 <Play className="h-4 w-4 ltr:-scale-x-100" /> {t('correction.rerun')}
@@ -253,6 +355,26 @@ export function InvoiceCorrection({
             )}
           </div>
         </div>
+
+        {invoice.rematchBlocked && !rematch && (
+          <p
+            data-testid="rematch-blocked"
+            role="status"
+            className="mb-4 rounded-lg border border-line bg-surface-2/50 px-4 py-3 text-sm text-muted"
+          >
+            {t('correction.rematchBlocked')}
+          </p>
+        )}
+
+        {held && (
+          <p
+            data-testid="rematch-held"
+            role="status"
+            className="mb-4 rounded-lg border border-line bg-surface-2/50 px-4 py-3 text-sm text-muted"
+          >
+            {held === 'awaiting_review' ? t('correction.rematchAwaitingReview') : t('correction.heldForCount')}
+          </p>
+        )}
 
         {st && (
           <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-surface-2/50 px-4 py-3">
@@ -369,9 +491,29 @@ export function InvoiceCorrection({
                           </Button>
                         </div>
                       ) : (
-                        <Button size="sm" variant="ghost" title={t('correction.edit')} aria-label={t('correction.edit')} onClick={() => startLine(l)}>
-                          <Pencil className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          {/* No dead pencil: hidden while the server would refuse it (getInvoice.lineEditLock). */}
+                          {!invoice.lineEditLock && (
+                            <Button size="sm" variant="ghost" title={t('correction.edit')} aria-label={t('correction.edit')} data-testid="edit-invoice-line" onClick={() => startLine(l)}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {linesEditable && invoice.deletableLineIds.includes(l.id) && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              data-testid="delete-invoice-line"
+                              title={t('correction.deleteLine')}
+                              aria-label={t('correction.deleteLine')}
+                              loading={deleteLine.isPending && deleteLine.variables?.lineId === l.id}
+                              onClick={() => {
+                                if (window.confirm(t('correction.deleteLineConfirm'))) deleteLine.mutate({ lineId: l.id });
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4 text-danger" />
+                            </Button>
+                          )}
+                        </div>
                       )}
                     </td>
                   )}
@@ -381,7 +523,77 @@ export function InvoiceCorrection({
             {invoice.lines.length === 0 && (
               <tr>
                 <td colSpan={canEdit ? 6 : 5} className="px-4 py-6 text-center text-subtle">
-                  {t('correction.noLines')}
+                  {linesEditable ? t('correction.noLinesAddBelow') : t('correction.noLines')}
+                </td>
+              </tr>
+            )}
+            {linesEditable && (
+              <tr data-testid="add-invoice-line-row" className="bg-surface-2/40">
+                <td className="px-4 py-3">
+                  {/* The receipt's ordered lines first: picking one links the hand
+                      line to its order line (product / SKU), so a price
+                      difference reads as a price gap, never "not ordered". */}
+                  {orderLines.length > 0 && (
+                    <select
+                      aria-label={t('correction.pickOrderLine')}
+                      data-testid="pick-order-line"
+                      className="mb-2 w-full rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink"
+                      value={nl.poLineId}
+                      onChange={(e) => {
+                        const ol = orderLines.find((o) => o.id === e.target.value);
+                        setNl(
+                          ol
+                            ? { ...nl, poLineId: ol.id, rawDescription: ol.rawDescription || ol.name, unit: ol.unit }
+                            : { ...nl, poLineId: '' },
+                        );
+                      }}
+                    >
+                      <option value="">{t('correction.notOrderedLine')}</option>
+                      {orderLines.map((ol) => (
+                        // One hand line per order line: an order line already billed by
+                        // hand is shown, not offered (update that line's quantity).
+                        <option key={ol.id} value={ol.id} disabled={ol.billed}>
+                          {t('correction.orderLineOption', {
+                            name: ol.name,
+                            qty: formatNumber(Number(ol.qtyOrdered), locale, { maximumFractionDigits: 3 }),
+                            unit: unit(ol.unit),
+                            price: ol.unitPriceExpected != null ? money(Number(ol.unitPriceExpected)) : '—',
+                          })}
+                          {ol.billed ? ` · ${t('correction.orderLineBilled')}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <Input
+                    aria-label={t('correction.colDescription')}
+                    placeholder={t('correction.newLineDescription')}
+                    value={nl.rawDescription}
+                    maxLength={400}
+                    onChange={(e) => setNl({ ...nl, rawDescription: e.target.value })}
+                  />
+                </td>
+                <td className="px-4 py-3">
+                  <Input aria-label={t('correction.colQty')} type="number" inputMode="decimal" step="any" min="0" value={nl.qtyBilled} onChange={(e) => setNl({ ...nl, qtyBilled: e.target.value })} />
+                </td>
+                <td className="px-4 py-3">
+                  <Input aria-label={t('correction.colUnit')} placeholder={t('correction.newLineUnit')} value={nl.unit} maxLength={32} onChange={(e) => setNl({ ...nl, unit: e.target.value })} />
+                </td>
+                <td className="px-4 py-3">
+                  <Input aria-label={t('correction.colUnitPrice')} type="number" inputMode="decimal" step="any" min="0" value={nl.unitPriceBilled} onChange={(e) => setNl({ ...nl, unitPriceBilled: e.target.value })} />
+                </td>
+                {/* The line total is computed on the server (qty × price, to the agora). */}
+                <td className="px-4 py-3 text-xs text-subtle">{t('correction.newLineTotalAuto')}</td>
+                <td className="px-4 py-3">
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    data-testid="add-invoice-line"
+                    loading={addLine.isPending}
+                    disabled={!newLineReady}
+                    onClick={saveNewLine}
+                  >
+                    <Plus className="h-4 w-4" /> {t('correction.addLine')}
+                  </Button>
                 </td>
               </tr>
             )}

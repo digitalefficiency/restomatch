@@ -6,6 +6,7 @@ import {
   goodsReceipts,
   invoiceLines,
   invoices,
+  matchRuns,
   poLines,
   products,
   purchaseOrders,
@@ -200,6 +201,9 @@ describe('M8 — registerInvoice double-tap', () => {
 
   it('two CONCURRENT registrations of the same scan create exactly one invoice', async () => {
     const grId = await receiptId();
+    // A receipt with no invoice yet (the fixture's is matched against it, and a
+    // receipt that has one resumes it — receiving-one-invoice.test.ts).
+    await db.delete(matchRuns).where(eq(matchRuns.restaurantId, A.restaurantId));
     const caller = callerFor(A, 'receiver');
     const input = { grId, imageUrl: 'https://example.com/scan-1.jpg', supplierId: A.supplierId };
     const [a, b] = await Promise.all([
