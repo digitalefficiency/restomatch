@@ -13,6 +13,7 @@ import { homeCaller } from './home/caller';
 import { FinanceHome } from './home/finance';
 import { forcedFailures } from './home/section';
 import { ChefHome, ReceiverHome } from './home/staff';
+import { HomeQuestions } from './home/questions';
 
 /**
  * /dashboard renders by role ("Today", W1-05). The role is resolved BEFORE any
@@ -43,6 +44,9 @@ export default async function DashboardPage({
     <SectionHeader level={1} title={t(`homeTitle.${role}`)} subtitle={t(`homeSubtitle.${role}`)} />
   );
 
+  // G-08: the "זה אותו מוצר?" line for those who can answer it (owner, manager, chef).
+  const questionsLine = <HomeQuestions caller={caller} role={role} locale={locale} />;
+
   if (role === 'receiver') {
     return (
       <div data-home="receiver">
@@ -55,6 +59,7 @@ export default async function DashboardPage({
     return (
       <div data-home="chef">
         {header}
+        {questionsLine}
         <ChefHome caller={homeCaller(caller, 'chef')} t={t} locale={locale} fail={fail} />
       </div>
     );
@@ -65,6 +70,7 @@ export default async function DashboardPage({
     <div data-home={role}>
       {/* Finance homes: the strip is the answer — no subtitle line pushing it down. */}
       <div className="[&>div]:mb-4 [&_p]:hidden">{header}</div>
+      {questionsLine}
       <FinanceHome
         caller={caller}
         role={role}

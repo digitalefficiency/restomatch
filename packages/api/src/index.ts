@@ -201,6 +201,18 @@ export {
   type CommitResult,
   type AmbiguousRow,
 } from './catalog/commit';
+// G-08 kill switch: release invoices held for order questions (admin + worker script).
+export { releaseOrderQuestionHolds } from './routers/mapping';
+// G-08: the shared "open question" rules (mapping router, match job, OCR job).
+export {
+  applyLearnedCharges,
+  invoiceQuestionCount,
+  linkPinPoIdOf,
+  orderQuestionCount,
+  pruneAnsweredReasons,
+  releaseQuestionHolds,
+  type ChargeKey,
+} from './catalog/linkQuestions';
 export {
   checkRateLimit,
   refundRateLimit,
@@ -235,7 +247,7 @@ export {
   type DeliveryState,
   type DeliveryStateInput,
 } from './lib/deliveryState';
-export { FEATURE_KEYS, featureEnabled, type FeatureKey } from './lib/features';
+export { DEFAULT_ON_FEATURES, FEATURE_KEYS, featureEnabled, type FeatureKey } from './lib/features';
 export { assertFeature } from './lib/featureGate';
 export {
   contractInForce,

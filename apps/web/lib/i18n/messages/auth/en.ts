@@ -186,6 +186,8 @@ export const en: Shape<typeof he> = {
     invoiceBeingRead: 'This invoice is still being read. Try again in a minute.',
     invoiceReceiptOpen: "The goods receipt for this invoice is still being counted. The match runs when the count is closed, and you can edit the lines after that.",
     invoiceLinesLocked: "This invoice's lines can't be changed: it was approved or paid, it has a credit claim with history or a recorded credit note, its findings were already decided, or it is a consolidated invoice.",
+    invoiceUnlinkedLines: 'This invoice has {count} lines not linked to a product yet. Answer "Is this the same product?" in mapping first, then re-run the match.',
+    orderUnlinkedLines: 'The order for this invoice has {count} lines not linked to a product yet. Answer "Is this the same product?" in mapping first, then re-run the match.',
     invoiceNumberTaken: 'Invoice number {invoiceNumber} is already on another invoice from this supplier (dated {holderDate}). Check the number — or open the existing invoice.',
     generic: 'The action failed. Please try again.',
   },

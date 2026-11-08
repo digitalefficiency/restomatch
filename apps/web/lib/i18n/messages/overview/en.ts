@@ -43,6 +43,8 @@ export const en: Shape<typeof he> = {
     drillPending: 'See the invoices waiting for a link',
     howCalc: 'How we got this',
     more: 'More actions',
+    awaitingQuestion: '{count} invoices ({amount}) are waiting for a question: is this the same product? They will be checked after the answer and are counted in neither the leak nor the spend.',
+    awaitingQuestionCta: 'To the questions',
     pending: '{count} invoices ({amount}) are waiting to be linked to an order — probably consolidated invoices. They are counted in neither the leak nor the spend.',
     awaitingCount: '{count} invoices ({amount}) are waiting for their goods receipt to be counted — they are checked once the receipt is closed.',
     clean: 'No leak this month — {count} invoices checked and they agree with their orders and goods receipts.',

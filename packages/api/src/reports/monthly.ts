@@ -33,6 +33,7 @@ export type NextActionCode =
   | 'decideOpen'
   | 'sendClaims'
   | 'linkPending'
+  | 'answerQuestions'
   | 'talkToSupplier'
   | 'allClear';
 
@@ -64,6 +65,8 @@ export interface MonthlyReportData {
   invoiceCount: number;
   invoicesWithLeak: number;
   pendingLinkCount: number;
+  /** G-08: invoices held for a "זה אותו מוצר?" question (absent in older snapshots). */
+  awaitingQuestionCount?: number;
   topSuppliers: MonthlyReportSupplier[];
   topIssues: MonthlyReportIssue[];
   nextActions: NextAction[];
@@ -194,6 +197,10 @@ export async function computeMonthlyReport(
   if (report.hero.pendingLinkCount > 0) {
     nextActions.push({ code: 'linkPending', params: { count: report.hero.pendingLinkCount } });
   }
+  // G-08: held invoices are in neither leak nor spend — say how many wait for an answer.
+  if (report.hero.awaitingQuestionCount > 0) {
+    nextActions.push({ code: 'answerQuestions', params: { count: report.hero.awaitingQuestionCount } });
+  }
   const loud = topSuppliers.find((s) => (s.leakPct ?? 0) >= SUPPLIER_ALERT_PCT);
   if (loud) {
     nextActions.push({
@@ -219,6 +226,7 @@ export async function computeMonthlyReport(
     invoiceCount: report.hero.invoiceCount,
     invoicesWithLeak: report.hero.invoicesWithLeak,
     pendingLinkCount: report.hero.pendingLinkCount,
+    awaitingQuestionCount: report.hero.awaitingQuestionCount,
     topSuppliers,
     topIssues,
     nextActions: nextActions.slice(0, 4),
@@ -341,6 +349,7 @@ const COPY = {
       decideOpen: (p: Params, f: Fmt) => `להחליט על ${p.count} פערים פתוחים (${f.ils(p.agorot ?? 0)})`,
       sendClaims: (p: Params, f: Fmt) => `לשלוח מכתבי דרישה על ${p.count} פערים (${f.ils(p.agorot ?? 0)})`,
       linkPending: (p: Params) => `לשייך ${p.count} חשבוניות ממתינות להזמנה`,
+      answerQuestions: (p: Params) => `לענות על "זה אותו מוצר?" — ${p.count} חשבוניות מחכות לשאלה`,
       talkToSupplier: (p: Params, f: Fmt) => `לשוחח עם ${p.supplier} — דליפה של ${f.pct(Number(p.pct))} מהרכש`,
       allClear: () => 'אין משימות פתוחות — כל הכבוד',
     },
@@ -367,6 +376,7 @@ const COPY = {
       decideOpen: (p: Params, f: Fmt) => `Decide on ${p.count} open discrepancies (${f.ils(p.agorot ?? 0)})`,
       sendClaims: (p: Params, f: Fmt) => `Send claim letters for ${p.count} discrepancies (${f.ils(p.agorot ?? 0)})`,
       linkPending: (p: Params) => `Link ${p.count} pending invoices to their orders`,
+      answerQuestions: (p: Params) => `Answer "Is this the same product?" — ${p.count} invoices are waiting for a question`,
       talkToSupplier: (p: Params, f: Fmt) => `Talk to ${p.supplierEn} — ${f.pct(Number(p.pct))} of spend leaked`,
       allClear: () => 'Nothing open — well done',
     },

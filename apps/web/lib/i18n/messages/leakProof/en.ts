@@ -16,6 +16,8 @@ export const en: Shape<typeof he> = {
   pendingTitle: 'Not counted — waiting calmly',
   pending: '{count} invoices, {amount} (consolidated / not yet linked to an order). Their amount is not in the checked spend (or the %) until they are linked; a finding on them still counts in the number.',
   pendingNone: 'No invoices are waiting for an order link.',
+  awaitingQuestion: '{count} invoices ({amount}) are waiting for a question: is this the same product? They are checked after the answer.',
+  awaitingQuestionCta: 'To the questions',
   topTitle: 'The 5 biggest catches',
   topHint: "By each invoice's leak, never more than the invoice total",
   invoice: 'Invoice {number}',

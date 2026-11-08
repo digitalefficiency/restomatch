@@ -1,14 +1,15 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { lockRecovery, releaseClaimsForRematch } from '../recovery/service';
-import { and, desc, eq, goodsReceipts, invoiceLines, invoices, matchRuns, restaurants } from '@restomatch/db';
+import { and, desc, eq, goodsReceipts, invoiceLines, invoices, matchRuns, restaurants, sql } from '@restomatch/db';
 import { holdForReceipt, receiptStillOpen, scanOwnerReceipt } from '../receiving/matchTriggers';
-import { appError } from '../errors';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
 import { managerProcedure, router } from '../trpc';
 import { assertInvoiceOwned } from '../tenant';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 import { readConsolidatedRaw } from '../match/consolidated';
+import { appError } from '../errors';
+import { invoiceQuestionCount, linkPinPoIdOf, orderQuestionCount } from '../catalog/linkQuestions';
 import { loadPriorDecisions, persistMatchRun } from '../match/persist';
 import { buildRules, resolveApprovalThresholds } from '../approvals/engine';
 
@@ -63,6 +64,15 @@ export const matchRouter = router({
         });
       }
 
+      // G-08 hold: an unlinked line is an open "זה אותו מוצר?" question — the engine
+      // pairs only by product / SKU and would report a false MISSING + UNORDERED pair.
+      const open = await invoiceQuestionCount(ctx.db, restaurantId, input.invoiceId);
+      if (open > 0) {
+        throw appError('PRECONDITION_FAILED', 'invoice.unlinkedLines', 'Invoice lines are not linked to a product yet.', {
+          count: open,
+        });
+      }
+
       // Nothing to match: say so before any order / receipt check.
       const [anyLine] = await ctx.db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, input.invoiceId)).limit(1);
       if (!anyLine) {
@@ -97,9 +107,21 @@ export const matchRouter = router({
       // job poId does) — never a same-day second order found by discovery.
       // (A manager's own order pin is wave 2 — PR #216 body.)
       const built = await buildMatchInputForInvoice(ctx.db, restaurantId, input.invoiceId, {
-        pinnedPoId: scanPoId ?? priorRun?.poId ?? null,
+        // G-08 round 11: a run-less invoice (a question hold / its release) keeps its order pin.
+        pinnedPoId: scanPoId ?? priorRun?.poId ?? linkPinPoIdOf(kind?.ocrPayload),
         strictPin: scanPoId != null,
       });
+      // G-08 hold (rounds 3/8): a match — first or re-match — against an order that
+      // still has name-only questions would report a false MISSING + UNORDERED pair:
+      // the same rule as the match-invoice job (shared helper).
+      if (built && built.poId) {
+        const orderOpen = await orderQuestionCount(ctx.db, restaurantId, built.poId);
+        if (orderOpen > 0) {
+          throw appError('PRECONDITION_FAILED', 'order.unlinkedLines', 'Order lines are not linked to a product yet.', {
+            count: orderOpen,
+          });
+        }
+      }
       // F3 / round 6: the receipt the match lands on (the scan's, or one found
       // by discovery for an unstamped emailed invoice) must not still be
       // counting — every line would read "received 0" (a whole-invoice leak).
@@ -169,6 +191,15 @@ export const matchRouter = router({
         rules,
         priorDecisions,
       );
+      // G-08 hold: a matched invoice no longer waits for an order — drop a stale marker;
+      // and (round 10) its order pin follows THIS run's order (none → no pin).
+      await ctx.db.execute(sql`
+        update invoices
+           set ocr_payload = (coalesce(ocr_payload, '{}'::jsonb) - 'heldPoId' - 'linkPinPoId')
+             || ${built.poId ? sql`jsonb_build_object('linkPinPoId', ${built.poId}::text)` : sql`'{}'::jsonb`}
+         where id = ${input.invoiceId}::uuid and restaurant_id = ${restaurantId}
+           and (ocr_payload ? 'heldPoId' or ocr_payload ? 'linkPinPoId')
+      `);
 
       return {
         matchRunId: persisted.matchRunId,
