@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createDb, eq, invoiceLines, invoices, matchRuns, restaurants, suppliers, testDbUrl } from '@restomatch/db';
+import { createDb, eq, invoiceLines, invoices, matchRuns, productAliases, products, restaurants, suppliers, testDbUrl } from '@restomatch/db';
 import { appRouter, buildMatchInputForInvoice } from '@restomatch/api';
 import { queueSql } from '@restomatch/queue';
 import type { InvoiceOcrResult } from '@restomatch/types';
@@ -135,6 +135,16 @@ describe('processOcrInvoice persistence (DB)', () => {
   const saved = { ...process.env };
   let rid = '';
   let supplierId = '';
+  let tomatoId = '';
+  /**
+   * G-08 (#200): a read line no exact key links is an open "זה אותו מוצר?" question
+   * and adds the 'unlinked' review reason. These tests are about the document /
+   * ח.פ. / consolidated reasons, so the line ('עגבניות') is linked by a person's
+   * alias for the supplier the invoice is read under — the reason arrays below
+   * stay exact (no 'unlinked' to filter out). null = an invoice with no supplier.
+   */
+  const linkTomatoes = (forSupplier: string | null) =>
+    db.insert(productAliases).values({ productId: tomatoId, supplierId: forSupplier, supplierNameRaw: 'עגבניות', confidence: '1.000' });
 
   async function newInvoice(opts: { supplier?: boolean } = {}) {
     const [inv] = await db
@@ -171,6 +181,11 @@ describe('processOcrInvoice persistence (DB)', () => {
     process.env.OCR_REAL_RESTAURANT_IDS = rid;
     const [s] = await db.insert(suppliers).values({ restaurantId: rid, name: 'ספק ירקות' }).returning();
     supplierId = s!.id;
+    // Not 'עגבניות' itself: the one-copy test counts that text in raw.
+    const [p] = await db.insert(products).values({ restaurantId: rid, canonicalName: 'עגבנייה' }).returning();
+    tomatoId = p!.id;
+    await linkTomatoes(supplierId);
+    await linkTomatoes(null);
   });
   afterEach(async () => {
     await qsql`DELETE FROM job_queue WHERE restaurant_id = ${rid}`;
@@ -274,6 +289,7 @@ describe('processOcrInvoice persistence (DB)', () => {
       // A VALID ח.פ. (599999992 passes the check digit), so a cross-tenant read
       // would really flag a mismatch — the test is not vacuous.
       const [s2] = await db.insert(suppliers).values({ restaurantId: other!.id, name: 'x', businessId: '599999992' }).returning();
+      await linkTomatoes(s2!.id); // the read line is not a question under that supplier id either (G-08)
       h.result = { ...base, supplier: { name: 'x', businessId: '511111114' } };
       // An invoice of OUR tenant pointing at the other tenant's supplier id (a corrupt row).
       const [inv] = await db
