@@ -958,6 +958,10 @@ describe('#216 round 6, item 2: one lock order everywhere — invoice row → re
       .set({ ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: A.grId } } })
       .where(eq(invoices.id, failedId));
   /**
+   * The lines here carry A's product: since G-08 (#200) a product-less line is an
+   * open question and the match is refused before any lock is taken — these tests
+   * must reach the locks (lockRecovery, then the receipt's gr-close).
+   *
    * A sibling (a hand line on another invoice of this restaurant, a claim
    * transition) holds recovery:<restaurant> and then wants gr-close:<receipt>.
    * The call under test must queue on recovery FIRST — had it taken gr-close
@@ -979,7 +983,7 @@ describe('#216 round 6, item 2: one lock order everywhere — invoice row → re
 
   it('Re-run: a sibling parked between recovery and gr-close never deadlocks it (no 40P01) — the run lands on the receipt', async () => {
     await stamped();
-    await db.insert(invoiceLines).values({ invoiceId: failedId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' });
+    await db.insert(invoiceLines).values({ invoiceId: failedId, productId: A.productId, rawDescription: 'x', qtyBilled: '1', unit: 'kg', unitPriceBilled: '1', lineTotal: '1.00' });
     const out = await siblingParksBetweenRecoveryAndGrClose(() => as('manager').match.runForInvoice({ invoiceId: failedId }));
     expect(out).toMatchObject({ matchRunId: expect.any(String) });
     const [run] = await db.select({ grId: matchRuns.grId }).from(matchRuns).where(eq(matchRuns.invoiceId, failedId));
@@ -989,7 +993,7 @@ describe('#216 round 6, item 2: one lock order everywhere — invoice row → re
   it('edit path: a hand line re-matched under the same sibling never deadlocks either (no 40P01)', async () => {
     await stamped();
     const out = await siblingParksBetweenRecoveryAndGrClose(() =>
-      as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 } }),
+      as('manager').receiving.addInvoiceLine({ invoiceId: failedId, line: { rawDescription: 'מגבות נייר', productId: A.productId, qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 } }),
     );
     expect(out).toMatchObject({ rematched: true });
   });
@@ -998,8 +1002,9 @@ describe('#216 round 6, item 2: one lock order everywhere — invoice row → re
     await stamped();
     const a = await as('manager').receiving.addInvoiceLine({
       invoiceId: failedId,
-      line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
+      line: { rawDescription: 'מגבות נייר', productId: A.productId, qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
     });
+    expect(a).toMatchObject({ rematched: true }); // the setup's own run: the pencil below re-matches, never a first refusal
     const out = await siblingParksBetweenRecoveryAndGrClose(() =>
       as('manager').receiving.updateInvoiceLine({ lineId: a.lineId, patch: { qtyBilled: 2 } }),
     );
