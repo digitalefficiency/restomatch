@@ -13,17 +13,21 @@ const focus = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:rin
  * G-08 · "N מוצרים מחכים לשאלה: זה אותו מוצר?" — when the link policy is unsure
  * it asks a person instead of guessing, and the question must be seen. A calm
  * T2 line: one CTA to the mapper, a warn rail and no alarm, no ₪. Hidden at 0.
+ * `spacing` places it: under the page title on the chef's home (the default),
+ * under the "מחכה לך" ₪ rows on the finance homes (never above the T1 hero).
  */
 export function QuestionsLine({
   count,
   locale,
   label,
   cta,
+  spacing = 'mb-4',
 }: {
   count: number;
   locale: Locale;
   label: (count: string) => string;
   cta: string;
+  spacing?: string;
 }) {
   if (count <= 0) return null;
   return (
@@ -31,7 +35,8 @@ export function QuestionsLine({
       href="/dashboard/catalog/mapping"
       data-testid="home-link-questions"
       className={cn(
-        'relative mb-4 flex min-h-[48px] items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3 ps-5 shadow-card hover:border-primary/40',
+        spacing,
+        'relative flex min-h-[48px] items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3 ps-5 shadow-card hover:border-primary/40',
         'before:absolute before:inset-y-3 before:start-1.5 before:w-1 before:rounded-full before:bg-warn',
         focus,
       )}
@@ -61,10 +66,12 @@ export async function HomeQuestions({
   caller,
   role,
   locale,
+  spacing,
 }: {
   caller: { mapping: { questionCount: () => Promise<{ count: number }> } };
   role: UserRole;
   locale: Locale;
+  spacing?: string;
 }) {
   if (!QUESTION_ROLES.includes(role)) return null;
   const [count, t] = await Promise.all([
@@ -80,6 +87,7 @@ export async function HomeQuestions({
       locale={locale}
       label={(n) => t('mapping.pendingQuestions', { count: n })}
       cta={t('mapping.answerCta')}
+      spacing={spacing}
     />
   );
 }

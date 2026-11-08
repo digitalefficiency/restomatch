@@ -78,8 +78,11 @@ interface Ctx extends Translators {
  * compact T1 hero, then context. Desktop: a 12-column grid (main 8, rail 4),
  * the strip across the top. Phone: the hero, then the stack of ≤3 rows.
  * Every card streams and fails on its own.
+ *
+ * `questions` (G-08 "זה אותו מוצר?", a count with no ₪) goes right under the
+ * strip: above the T1 hero it pushed the first ₪ row under a 375×667 fold.
  */
-export function FinanceHome(ctx: Ctx) {
+export function FinanceHome({ questions, ...ctx }: Ctx & { questions?: React.ReactNode }) {
   const { role, fail, t, tv, view } = ctx;
   const canDrill = canSeeRoute(role, '/dashboard/leaks');
   return (
@@ -88,6 +91,7 @@ export function FinanceHome(ctx: Ctx) {
         <HomeSection name="needs" fallback={<NeedsSkeleton rows={4} />} forceFail={fail.has('needs')}>
           <Needs {...ctx} />
         </HomeSection>
+        {questions}
       </div>
 
       {/* Main column; below lg its children join the page's single column (hero first). */}

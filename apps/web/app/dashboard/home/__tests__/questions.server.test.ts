@@ -64,6 +64,21 @@ describe('G-08 home question line', () => {
     expect(html).not.toContain('/dashboard/catalog/mapping');
   });
 
+  it('finance homes place it under the ₪ strip (mt-2), the chef under the title (mb-4)', async () => {
+    const finance = (React.createElement as (...a: unknown[]) => React.ReactElement)(HomeQuestions, {
+      caller: callerWith(3),
+      role: 'owner',
+      locale: 'he',
+      spacing: 'mt-2',
+    });
+    const cls = (html: string) => /data-testid="home-link-questions"[^>]*class="([^"]*)"|class="([^"]*)"[^>]*data-testid="home-link-questions"/.exec(html);
+    const owner = cls(await render(finance));
+    expect(owner?.[1] ?? owner?.[2]).toMatch(/(^| )mt-2( |$)/);
+    expect(owner?.[1] ?? owner?.[2]).not.toMatch(/(^| )mb-4( |$)/);
+    const chef = cls(await render(element(callerWith(3), 'chef')));
+    expect(chef?.[1] ?? chef?.[2]).toMatch(/(^| )mb-4( |$)/);
+  });
+
   it('owner and manager get the same line; receiver and bookkeeper never ask', async () => {
     for (const role of ['owner', 'manager'] as const) {
       expect(await render(element(callerWith(2), role))).toContain('href="/dashboard/catalog/mapping"');
