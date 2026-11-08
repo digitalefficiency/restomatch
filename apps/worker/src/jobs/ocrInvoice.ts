@@ -17,7 +17,7 @@ import {
   type CatalogMatcherFn,
   type OcrProvider,
 } from '@restomatch/ocr';
-import { enqueueMatchInvoice } from '@restomatch/queue';
+import { enqueueMatchInvoice, ocrJobDeadlineMs, TERMINAL_JOB_ERROR } from '@restomatch/queue';
 import type { InvoiceOcrResult, OcrInvoiceJob } from '@restomatch/types';
 import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
@@ -98,6 +98,30 @@ export async function ocrModeFor(
   return 'disabled';
 }
 
+/** Thrown when a read outlives its per-job deadline — retryable (message says "timed out"). */
+export class OcrDeadlineError extends Error {
+  constructor(ms: number) {
+    super(`OCR read timed out after ${ms}ms (per-job deadline)`);
+    this.name = 'OcrDeadlineError';
+  }
+}
+
+/** `p`, or an OcrDeadlineError after `ms`. */
+export async function withOcrDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new OcrDeadlineError(ms)), ms);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** First 8 characters of an id, for logs. */
 const short = (id: string) => id.slice(0, 8);
 
@@ -158,8 +182,10 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
   // before its transaction commits the row.
   const invoice = await findJobInvoice(db, job.data.restaurantId, job.data.invoiceId);
   if (!invoice) {
+    // Terminal: a retry reads the same rows (the ocr-sweep retries a commit-race
+    // refusal once, on its own — ocrSweep.ts NOT_FOUND_REFUSAL).
     throw new Error(
-      `[ocr-invoice] invoice=${job.data.invoiceId} not found in restaurant=${job.data.restaurantId} — refusing to process`,
+      `${TERMINAL_JOB_ERROR}[ocr-invoice] invoice=${job.data.invoiceId} not found in restaurant=${job.data.restaurantId} — refusing to process`,
     );
   }
 
@@ -217,7 +243,9 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
   }
 
   try {
-    if (mode === 'claude' || mode === 'mock') {
+    // Metered once per scan: the retry of a transient failure (attempt 2) is the
+    // same scan, not a second one.
+    if ((mode === 'claude' || mode === 'mock') && (job.attemptsMade ?? 0) === 0) {
       // Authoritative usage metering — counts the scan and enforces the plan's
       // monthly OCR cap here at the worker (race-safe), so the limit can't be
       // bypassed by enqueuing jobs directly. No-op for restaurants without a
@@ -257,11 +285,18 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
       .limit(1);
     const reviewThreshold = restaurant[0]?.settings?.ocrReviewThreshold;
 
-    const result = await runOcrPipeline(imageUrl, {
-      ...providers,
-      catalogMatcher: matcher,
-      ...(reviewThreshold !== undefined ? { reviewThreshold } : {}),
-    });
+    // A per-job deadline (review #10): the read must end before the invocation's
+    // headroom does. Hitting it is a retryable timeout (attempt 2 in a later run),
+    // never an in-job retry. The provider call itself is not cancelled (the
+    // ClaudeVision API takes no signal yet — S14): its result is just not waited for.
+    const result = await withOcrDeadline(
+      runOcrPipeline(imageUrl, {
+        ...providers,
+        catalogMatcher: matcher,
+        ...(reviewThreshold !== undefined ? { reviewThreshold } : {}),
+      }),
+      ocrJobDeadlineMs(),
+    );
 
     const r = result.reconciled;
     // The receipt this photo was taken on — so a receipt submit claims exactly
@@ -367,13 +402,20 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
     // EN-3: a failed OCR used to leave the invoice in 'ocr_pending' forever
     // (the receiver's wizard spun until it gave up). On the FINAL attempt
     // move it to a terminal, reviewable state the UI can show.
+    // A terminal failure (classifyOcrError) is final at once: a retry is a
+    // second paid call that fails the same way.
     const raw = job as { attemptsMade?: number; opts?: { attempts?: number } };
-    if ((raw.attemptsMade ?? 0) + 1 >= (raw.opts?.attempts ?? 1)) {
-      await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, err).catch((e) =>
+    const kind = classifyOcrError(err);
+    const final = kind.retryable === false || (raw.attemptsMade ?? 0) + 1 >= (raw.opts?.attempts ?? 1);
+    if (final) {
+      await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, err, kind.reason).catch((e) =>
         console.error(`[ocr-invoice] could not mark invoice=${job.data.invoiceId} failed`, e),
       );
     }
-    outcome = `failed=${err instanceof Error ? err.name : 'error'}`;
+    outcome = `failed=${err instanceof Error ? err.name : 'error'} class=${kind.retryable ? 'retryable' : 'terminal'}${final ? '' : ' retry=1'}`;
+    if (!kind.retryable && err instanceof Error && !err.message.startsWith(TERMINAL_JOB_ERROR)) {
+      err.message = `${TERMINAL_JOB_ERROR}${err.message}`;
+    }
     throw err;
   } finally {
     logLine();
@@ -478,7 +520,43 @@ export async function writeOcrHeader(
  * not on the real-OCR allowlist — nothing was read or metered) and
  * 'scan_url_refused' (the row's URL is not one of our signed scan URLs).
  */
-export type OcrFailureReason = 'quota_exceeded' | 'extraction_failed' | 'ocr_disabled' | 'scan_url_refused';
+export type OcrFailureReason =
+  | 'quota_exceeded'
+  | 'extraction_failed'
+  | 'ocr_disabled'
+  | 'scan_url_refused'
+  | 'unsupported_format'
+  | 'stalled';
+
+/**
+ * Retry or not (ocr-invoice has 2 attempts — packages/queue MAX_ATTEMPTS).
+ *
+ * Retryable — transient, the same scan may read next time: HTTP 429 / 5xx /
+ * 529 (overloaded) from Anthropic or the scan fetch, timeouts and dropped
+ * connections, and an answer that did not parse (no JSON / schema mismatch).
+ *
+ * Terminal — a retry fails the same way and costs another call: quota exceeded,
+ * an unsupported or unreadable format (Anthropic 400 on the document, 4xx on the
+ * scan fetch — an expired / missing signed URL), and anything unrecognised
+ * (spend-safe default). The tenant guard and ocr_disabled never reach here (the
+ * guard throws terminal before the read; disabled returns without a call).
+ */
+export function classifyOcrError(err: unknown): { retryable: boolean; reason?: OcrFailureReason } {
+  const e = (err ?? {}) as { name?: string; message?: string; status?: number; code?: string; cause?: unknown };
+  const name = e.name ?? '';
+  const msg = e.message ?? String(err ?? '');
+  if (name === 'QuotaExceededError') return { retryable: false, reason: 'quota_exceeded' };
+  const status = typeof e.status === 'number' ? e.status : Number(/\((\d{3})\)/.exec(msg)?.[1] ?? NaN);
+  if (status === 429 || status >= 500) return { retryable: true };
+  if (/timed? ?out|timeout/i.test(msg) || /Timeout|AbortError/.test(name)) return { retryable: true };
+  if (name === 'APIConnectionError' || /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|fetch failed|socket hang up/i.test(`${msg} ${e.code ?? ''}`)) {
+    return { retryable: true };
+  }
+  if (name === 'ZodError' || name === 'SyntaxError' || /no JSON object found|Unexpected token|JSON/i.test(msg)) return { retryable: true };
+  if (status >= 400 && status < 500) return { retryable: false, reason: 'unsupported_format' };
+  if (/unsupported|media.?type|could not process image|invalid image/i.test(msg)) return { retryable: false, reason: 'unsupported_format' };
+  return { retryable: false, reason: 'extraction_failed' };
+}
 
 export async function markOcrFailed(
   db: Database,
