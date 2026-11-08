@@ -117,7 +117,6 @@ export const en: Shape<typeof he> = {
       base: 'of {amount} before VAT',
       completeness: '{checked} invoices checked · {withGap} with a gap',
       inCheck: '{count} invoices still being checked',
-      primary: 'Decisions before payment',
     },
     needs: {
       zero: 'Nothing needs you right now.',

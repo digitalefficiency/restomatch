@@ -120,7 +120,6 @@ export const he = {
       base: 'מתוך {amount} לפני מע״מ',
       completeness: '{checked} חשבוניות נבדקו · {withGap} עם פער',
       inCheck: '{count} חשבוניות עוד בבדיקה',
-      primary: 'להחלטות לפני תשלום',
     },
     needs: {
       zero: 'אין כרגע משהו שמחכה לך.',

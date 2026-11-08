@@ -75,6 +75,8 @@ test.describe('W3-06 · showcase', () => {
     await expect(page.getByTestId('leak-hero')).toHaveAttribute('data-state', 'leak');
     await expect(page.getByTestId('needs-you')).toBeVisible();
     await expect(page.getByTestId('sample-good-news')).toBeVisible();
+    // M11: the sample is a picture of the product, not a door into mock pages that don't reconcile.
+    await expect(page.getByTestId('sample-owner-home').locator('a')).toHaveCount(0);
   });
 });
 

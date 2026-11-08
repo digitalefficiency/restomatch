@@ -27,7 +27,9 @@ import {
  * home — the real `LeakHero` (T1) and `NeedsYou` (T2) components with the
  * product's own labels, fed from the one static sample month, plus a neutral
  * T4 "still being checked" note and one calm T3 line that quotes only decided
- * money. Labelled "דוגמה".
+ * money. Labelled "דוגמה". Static on purpose (W3-06 review M11): the mock
+ * pages behind the showcase don't reconcile to this month, so nothing here
+ * links into them — no amount, part, row or CTA is a link.
  */
 export function SampleOwnerHome() {
   const t = useT(showcase);
@@ -46,7 +48,6 @@ export function SampleOwnerHome() {
           value: ils(n.amountIls),
           sub: o(K.decideSub, { count: num(n.count) }),
           verb: o(K.decideVerb),
-          href: '/showcase/approvals',
         }
       : {
           key: n.key,
@@ -55,7 +56,6 @@ export function SampleOwnerHome() {
           value: ils(n.amountIls),
           sub: t('dashboard.needs.credit.sub', { count: num(n.count) }),
           verb: t('dashboard.needs.credit.verb'),
-          href: '/showcase/dashboard/invoices',
         },
   );
 
@@ -73,24 +73,21 @@ export function SampleOwnerHome() {
         eyebrow={t('dashboard.hero.eyebrow')}
         label={t('dashboard.hero.label')}
         amount={ils(SAMPLE_LEAK_ILS)}
-        amountHref="/showcase/dashboard/invoices"
         pctLine={t('dashboard.hero.pct', {
           pct: `${formatNumber(SAMPLE_LEAK_PCT, locale, { maximumFractionDigits: 1 })}%`,
         })}
         baseLine={t('dashboard.hero.base', { amount: ils(SAMPLE_PURCHASING_ILS) })}
         splitLabel={o(K.split)}
         parts={[
-          { label: o(K.unpaid), value: ils(SAMPLE_UNPAID_ILS), href: '/showcase/approvals', testId: 'sample-part-unpaid' },
-          { label: o(K.paid), value: ils(SAMPLE_PAID_ILS), href: '/showcase/dashboard/invoices', testId: 'sample-part-paid' },
+          { label: o(K.unpaid), value: ils(SAMPLE_UNPAID_ILS), testId: 'sample-part-unpaid' },
+          { label: o(K.paid), value: ils(SAMPLE_PAID_ILS), testId: 'sample-part-paid' },
         ]}
         completeness={{
           text: t('dashboard.hero.completeness', {
             checked: num(SAMPLE_INVOICES_CHECKED),
             withGap: num(SAMPLE_INVOICES_WITH_GAP),
           }),
-          href: '/showcase/dashboard/invoices',
         }}
-        primary={{ label: t('dashboard.hero.primary'), href: '/showcase/approvals', testId: 'sample-hero-primary' }}
       />
       {/* T4: still being checked — neutral, never a task. */}
       <p className="text-sm text-muted" data-testid="sample-in-check">

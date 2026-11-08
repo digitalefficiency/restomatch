@@ -85,6 +85,14 @@ describe('W3-06 · one sample month across the public site', () => {
     expect(home).not.toMatch(/ממתין לזיכוי|על חשבוניות/);
   });
 
+  it('the sample owner home is static: no amount, part, row or CTA links into the mocks (M11)', () => {
+    const home = read('app/showcase/dashboard/_components/SampleOwnerHome.tsx');
+    expect(home).not.toMatch(/href|amountHref|primary=/);
+    expect(home).toMatch(/t\('dashboard\.sample'\)/);
+    // NeedsYou renders a plain row (no <Link>) when a row has no href.
+    expect(read('app/dashboard/home/needs-you.tsx')).toMatch(/href\?: string/);
+  });
+
   it('landing, calculator and the problem math read the module, not literals', () => {
     expect(read('app/page.tsx')).toMatch(/SAMPLE_LEAK_ILS/);
     expect(read('app/page.tsx')).not.toMatch(/EXAMPLE_LEAK_RATE|150_000/);
