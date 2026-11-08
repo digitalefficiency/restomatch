@@ -175,12 +175,18 @@ for (const locale of LOCALES) {
       test.use(vp);
       for (const path of PUBLIC_PAGES) {
         test(`${locale} ${vpName} ${path}`, async ({ page }) => {
-          // Marketing sections use a CSS scroll-driven reveal (`.rm-reveal`, opacity 0→1
-          // as they enter the viewport). A card straddling the fold is scanned mid-fade,
-          // so axe blends its colours with the page and reports a false contrast fail
-          // (/product, en desktop). Scan the at-rest state, which reduced motion shows.
-          await page.emulateMedia({ reducedMotion: 'reduce' });
           await open(page, locale, path);
+          // Two CSS fades would be scanned mid-frame and blended by axe into false contrast
+          // fails: the scroll-driven reveal (`.rm-reveal` / `.rm-step`, opacity 0→1 at the
+          // fold — /product en desktop) and HeroMatch's he↔en label cross-fade (`.rm-morph-*`,
+          // a 7 s loop — / en). Pin ONLY those to a rest frame (reveal shown, morph on the
+          // Hebrew label). No reduced-motion emulation: the page is swept with motion on and
+          // the HeroVideo pause control (WCAG 2.2.2) stays in the scan (conductor R6).
+          await page.addStyleTag({
+            content:
+              '.rm-reveal, .rm-step { animation: none !important; opacity: 1 !important; transform: none !important; }' +
+              ' .rm-morph-he, .rm-morph-en { animation: none !important; }',
+          });
           expect(await axeViolations(page), `${path} axe`).toEqual([]);
         });
       }
