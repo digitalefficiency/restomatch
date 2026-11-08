@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { and, eq, memberships, restaurants, type RestaurantSettings } from '@restomatch/db';
+import { and, eq, memberships, restaurants, sql, type RestaurantSettings } from '@restomatch/db';
 import { recordAudit } from '../audit';
-import { memberProcedure, ownerProcedure, router } from '../trpc';
+import { financeProcedure, managerProcedure, memberProcedure, ownerProcedure, router } from '../trpc';
 import { hasNoControlChars, NO_CONTROL_CHARS_MESSAGE } from '../lib/text';
 
 /**
@@ -85,6 +85,52 @@ function pruneUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
     if (v !== undefined) out[k] = v;
   }
   return out as Partial<T>;
+}
+
+/**
+ * The letterhead of the supplier credit-request letters (דרישת זיכוי):
+ * restaurants.settings.letterhead (JSONB, no migration), every field optional.
+ * An empty string clears a field.
+ */
+const textField = (max: number) => z.string().trim().max(max).refine(hasNoControlChars, NO_CONTROL_CHARS_MESSAGE);
+export const LetterheadInput = z
+  .object({
+    legalName: textField(200).optional(),
+    /** ח״פ / עוסק מורשה: 9 digits. */
+    businessId: z
+      .string()
+      .trim()
+      .refine((v) => v === '' || /^\d{9}$/.test(v), 'businessId must be 9 digits')
+      .optional(),
+    address: textField(300).optional(),
+    /** An Israeli number: 0X… or +972…, 9–10 digits once spaces / dashes are dropped. */
+    phone: z
+      .string()
+      .trim()
+      .max(32)
+      .refine((v) => v === '' || /^(?:\+972|0)\d{8,9}$/.test(v.replace(/[\s-]/g, '')), 'invalid phone number')
+      .optional(),
+    email: z
+      .string()
+      .trim()
+      .max(200)
+      .refine((v) => v === '' || z.string().email().safeParse(v).success, 'invalid email')
+      .optional(),
+  })
+  .strict();
+export const LETTERHEAD_FIELDS = ['legalName', 'businessId', 'address', 'phone', 'email'] as const;
+export type Letterhead = Partial<Record<(typeof LETTERHEAD_FIELDS)[number], string>>;
+
+/** The stored letterhead, defensively (only non-empty strings of the known fields). */
+export function letterheadOf(settings: unknown): Letterhead {
+  const raw = (settings as { letterhead?: unknown } | null | undefined)?.letterhead;
+  const out: Letterhead = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const k of LETTERHEAD_FIELDS) {
+    const v = (raw as Record<string, unknown>)[k];
+    if (typeof v === 'string' && v.trim()) out[k] = v.trim();
+  }
+  return out;
 }
 
 export const settingsRouter = router({
@@ -182,6 +228,55 @@ export const settingsRouter = router({
       vatRate: updated?.vatRate != null ? Number(updated.vatRate) : 0.17,
       timezone: updated?.timezone ?? 'Asia/Jerusalem',
     };
+  }),
+
+  /** The credit-letter letterhead (finance roles: the claims letters render it). */
+  letterhead: financeProcedure.query(async ({ ctx }): Promise<Letterhead> => {
+    const [row] = await ctx.db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, ctx.session.restaurantId))
+      .limit(1);
+    return letterheadOf(row?.settings);
+  }),
+
+  /**
+   * Owner / manager sets the letterhead. MERGES with jsonb `||` in one UPDATE —
+   * settings keeps every other key (features, tolerances…) and the letterhead keeps
+   * the fields not sent; an empty string clears that field. Audited.
+   */
+  updateLetterhead: managerProcedure.input(LetterheadInput).mutation(async ({ ctx, input }): Promise<Letterhead> => {
+    const patch: Record<string, string | null> = {};
+    for (const k of LETTERHEAD_FIELDS) {
+      const v = input[k];
+      if (v !== undefined) patch[k] = v === '' ? null : v;
+    }
+    const [before] = await ctx.db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, ctx.session.restaurantId))
+      .limit(1);
+    const res = await ctx.db.execute(sql`
+      UPDATE restaurants
+      SET settings = COALESCE(settings, '{}'::jsonb)
+            || jsonb_build_object('letterhead',
+                 jsonb_strip_nulls(COALESCE(settings -> 'letterhead', '{}'::jsonb) || ${JSON.stringify(patch)}::jsonb)),
+          updated_at = now()
+      WHERE id = ${ctx.session.restaurantId}
+      RETURNING settings
+    `);
+    const rows = (res as unknown as { rows?: Array<{ settings: unknown }> }).rows ?? (res as unknown as Array<{ settings: unknown }>);
+    const after = letterheadOf(rows[0]?.settings);
+    await recordAudit(ctx.db, {
+      restaurantId: ctx.session.restaurantId,
+      userId: ctx.session.userId,
+      action: 'settings.letterhead_updated',
+      entityType: 'restaurant',
+      entityId: ctx.session.restaurantId,
+      before: letterheadOf(before?.settings),
+      after,
+    });
+    return after;
   }),
 
   /**
