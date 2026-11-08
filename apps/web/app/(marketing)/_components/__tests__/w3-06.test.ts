@@ -123,10 +123,12 @@ describe('W3-06 · pricing', () => {
     expect(planDisplayOrder(['trial', 'basic'], undefined)).toEqual(['trial', 'basic']);
   });
 
-  it('phone order lives in the DOM, md+ restores the ladder; compare icons are named images (Q6/Q7)', () => {
+  it('two lists, each in its own visual order — never CSS reordering; compare icons are named images (Q6/R2/Q7)', () => {
     const page = read('app/(marketing)/pricing/page.tsx');
-    expect(page).toMatch(/cards\.map\(\(plan\)/);
-    expect(page).not.toMatch(/style=\{\{ order|md:!order-none/);
+    // Phone list (recommended first) is md:hidden; the ladder is hidden below md.
+    expect(page).toMatch(/className="grid grid-cols-1 gap-6 md:hidden"[^>]*>\s*\{phoneCards\.map\(\(plan\) => renderCard\(plan, \(id\) => `m-\$\{id\}`\)\)\}/);
+    expect(page).toMatch(/className="hidden gap-6 md:grid[^"]*"[^>]*>\s*\{plans\.map\(\(plan\) => renderCard\(plan, \(id\) => id\)\)\}/);
+    expect(page).not.toMatch(/style=\{\{ order|md:!order-none|md:order-|order-first/);
     expect(page).toMatch(/<Check role="img"/);
     expect(page).toMatch(/<Minus role="img"/);
   });
