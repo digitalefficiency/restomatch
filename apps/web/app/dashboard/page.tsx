@@ -13,6 +13,7 @@ import { homeCaller } from './home/caller';
 import { FinanceHome } from './home/finance';
 import { forcedFailures } from './home/section';
 import { ChefHome, ReceiverHome } from './home/staff';
+import { HomeQuestions } from './home/questions';
 
 /**
  * /dashboard renders by role ("Today", W1-05). The role is resolved BEFORE any
@@ -43,6 +44,10 @@ export default async function DashboardPage({
     <SectionHeader level={1} title={t(`homeTitle.${role}`)} subtitle={t(`homeSubtitle.${role}`)} />
   );
 
+  // G-08: the "זה אותו מוצר?" line for those who can answer it (owner, manager, chef):
+  // under the title on the chef's home; the finance homes put it under the ₪ strip.
+  const questionsLine = <HomeQuestions caller={caller} role={role} locale={locale} />;
+
   if (role === 'receiver') {
     return (
       <div data-home="receiver">
@@ -55,6 +60,7 @@ export default async function DashboardPage({
     return (
       <div data-home="chef">
         {header}
+        {questionsLine}
         <ChefHome caller={homeCaller(caller, 'chef')} t={t} locale={locale} fail={fail} />
       </div>
     );
@@ -66,6 +72,8 @@ export default async function DashboardPage({
       {/* Finance homes: the strip is the answer — no subtitle line pushing it down. */}
       <div className="[&>div]:mb-4 [&_p]:hidden">{header}</div>
       <FinanceHome
+        // The question line sits under the ₪ strip, never above the T1 hero (W1-05 375×667 fold).
+        questions={<HomeQuestions caller={caller} role={role} locale={locale} spacing="mt-2" />}
         caller={caller}
         role={role}
         restaurantId={active.restaurantId}
