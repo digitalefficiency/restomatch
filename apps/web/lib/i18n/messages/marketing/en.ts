@@ -197,7 +197,7 @@ export const en: Shape<typeof he> = {
       'Where we are today: the site partially conforms to that target. Some pages still have gaps, listed below. We are fixing them and update this statement with every change.',
     scopeTitle: 'What this statement covers',
     scopeBody:
-      'The marketing site (home, pricing, about and the leak check), the product demo, the sign-in screens, the restaurant app and the supplier portal.',
+      'The marketing site (home, product, pricing, about and the leak check), the product demo, the sign-in screens, the restaurant app and the supplier portal.',
     auditTitle: 'How we tested',
     auditDate: 'Date of the latest review: {date}.',
     auditWho:

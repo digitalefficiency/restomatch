@@ -25,7 +25,7 @@ type Locale = 'he' | 'en';
 const LOCALES: Locale[] = ['he', 'en'];
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 
-const PUBLIC_PAGES = ['/', '/login'];
+const PUBLIC_PAGES = ['/', '/product', '/login'];
 const DASHBOARD_PAGES = [
   '/dashboard',
   '/dashboard/leaks',
@@ -175,6 +175,11 @@ for (const locale of LOCALES) {
       test.use(vp);
       for (const path of PUBLIC_PAGES) {
         test(`${locale} ${vpName} ${path}`, async ({ page }) => {
+          // Marketing sections use a CSS scroll-driven reveal (`.rm-reveal`, opacity 0→1
+          // as they enter the viewport). A card straddling the fold is scanned mid-fade,
+          // so axe blends its colours with the page and reports a false contrast fail
+          // (/product, en desktop). Scan the at-rest state, which reduced motion shows.
+          await page.emulateMedia({ reducedMotion: 'reduce' });
           await open(page, locale, path);
           expect(await axeViolations(page), `${path} axe`).toEqual([]);
         });
