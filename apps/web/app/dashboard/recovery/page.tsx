@@ -71,6 +71,17 @@ export default async function RecoveryPage({
         }
       />
 
+      {/* T4 — findings whose invoice waits for a count to close: not claimed yet, never an alarm. */}
+      {summary.heldForCount.count > 0 && (
+        <p
+          role="status"
+          data-testid="recovery-held-for-count"
+          className="rounded-lg border border-line bg-surface-2/50 px-4 py-3 text-sm text-muted"
+        >
+          {t('tracker.heldForCount', { amount: exact(summary.heldForCount.agorot) })}
+        </p>
+      )}
+
       {summary.claimCount === 0 ? (
         <EmptyState
           icon={<HandCoins className="h-6 w-6" />}

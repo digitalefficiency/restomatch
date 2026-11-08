@@ -12,6 +12,17 @@ import {
   type MonthlyReportData,
 } from './monthly';
 import type { ReportLocale } from './money';
+import { localDateKeyInTz } from '../lib/time';
+
+/**
+ * The footer's generation date, as the restaurant's (Israeli) calendar day.
+ * Not `toISOString().slice(0, 10)`: that is the UTC day, so a report downloaded
+ * 00:00–02:00 (03:00 in summer) was stamped YESTERDAY — on the 1st, a December
+ * report dated 30 November.
+ */
+export function reportFooterDate(generatedAt: string, tz = 'Asia/Jerusalem'): string {
+  return localDateKeyInTz(new Date(generatedAt), tz);
+}
 
 /**
  * Server-side PDF of the monthly report — pdf-lib + an embedded subset font.
@@ -175,7 +186,7 @@ export async function renderMonthlyReportPdf(
   rule(ctx, M + 18);
   ctx.y = M;
   draw(ctx, c.footer, { size: 9, color: C.muted });
-  draw(ctx, new Date(data.generatedAt).toISOString().slice(0, 10), { size: 9, color: C.muted, at: 'end' });
+  draw(ctx, reportFooterDate(data.generatedAt), { size: 9, color: C.muted, at: 'end' });
 
   return doc.save({ useObjectStreams: true });
 }
