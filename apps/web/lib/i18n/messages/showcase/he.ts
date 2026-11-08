@@ -116,7 +116,7 @@ export const he = {
     hero: {
       eyebrow: 'דוגמה · דליפה שזוהתה · אוקטובר',
       label: 'דליפה החודש',
-      pct: '{pct} מהקניות שנבדקו',
+      pct: '{pct} מרכש החודש שנבדק',
       base: 'מתוך {amount} לפני מע״מ',
       completeness: '{checked} חשבוניות נבדקו · {withGap} עם פער',
       inCheck: '{count} חשבוניות עוד בבדיקה',

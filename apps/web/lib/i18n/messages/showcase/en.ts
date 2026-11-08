@@ -113,7 +113,7 @@ export const en: Shape<typeof he> = {
     hero: {
       eyebrow: 'Sample · leak found · October',
       label: 'Leak this month',
-      pct: '{pct} of purchases checked',
+      pct: "{pct} of this month's purchasing checked",
       base: 'of {amount} before VAT',
       completeness: '{checked} invoices checked · {withGap} with a gap',
       inCheck: '{count} invoices still being checked',
