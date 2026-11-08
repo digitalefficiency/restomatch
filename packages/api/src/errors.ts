@@ -20,6 +20,7 @@ export const APP_ERROR_CODES = [
   'team.userNotFound',
   'team.inviteWrongEmail',
   'onboarding.accountGone',
+  'signup_closed',
   'settings.invalidTimezone',
   'settings.noChanges',
   'dsr.soleOwner',
