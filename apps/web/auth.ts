@@ -26,6 +26,7 @@ import { LOCALE_COOKIE, resolveLocale, type Locale } from './lib/i18n/config';
 import { LoginRateLimited } from './lib/loginRateLimited';
 import { authorizeCredentials, getSessionSecurityState } from './lib/passwords';
 import { SIGNOUT_COOKIE, issuedBeforeSignOut, signOutCookieOptions } from './lib/signOutTombstone';
+import { bypassesSecondFactor } from './lib/secondFactorGate';
 import { consumeTwoFactorTicket } from './lib/totp';
 import { clearLoginFailures, enforceLoginLimit, enforceMagicLinkLimit, refundLoginIp, trustedProxyHops } from './lib/rateLimit';
 import {
@@ -59,6 +60,12 @@ interface AppJwt {
   loginAt?: number;
   /** 2FA enrolled + second factor still pending (Epic C session gate). */
   twoFactorPending?: boolean;
+  /**
+   * The enrolment (user_credentials.totp_enabled_at, epoch ms) whose second
+   * factor this session passed, stamped when a server-verified 2FA ticket is
+   * consumed. Absent on a token that never did — see lib/secondFactorGate.
+   */
+  mfaFor?: number;
   [key: string]: unknown;
 }
 
@@ -237,6 +244,9 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         if (typeof ticket === 'string' && ticket) {
           if (await consumeTwoFactorTicket(t.userId, ticket)) {
             t.twoFactorPending = false;
+            const enrolment = (await getSessionSecurityState(t.userId)).twoFactorEnabledAt;
+            if (enrolment === null) delete t.mfaFor;
+            else t.mfaFor = enrolment;
           }
         }
       }
@@ -258,6 +268,8 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         const sec = await getSessionSecurityState(signInId);
         t.ver = sec.tokenVersion;
         t.twoFactorPending = (u.twoFactorPending ?? false) || sec.twoFactorEnabled;
+        // A fresh sign-in has not passed a second factor yet (in this session).
+        delete t.mfaFor;
       }
       if (!t.userId) return t;
 
@@ -287,6 +299,21 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         // re-planted by a response that was in flight during sign-out must not
         // bring the session back (lib/signOutTombstone).
         if (issuedBeforeSignOut(t.loginAt, await readSignOutTombstone())) {
+          return {} as AppJwt;
+        }
+        // A token issued before the account enrolled 2FA (or before its current
+        // re-enrolment) was never pending and never passed THIS second factor:
+        // revoke it (same path as a token_version
+        // mismatch — edge middleware, tRPC 401 and RSC all handle the empty
+        // token), so the cross-tenant admin console and every other surface
+        // require a session that proved the second factor.
+        if (
+          bypassesSecondFactor({
+            twoFactorEnabledAt: sec.twoFactorEnabledAt,
+            twoFactorPending: t.twoFactorPending,
+            mfaFor: t.mfaFor,
+          })
+        ) {
           return {} as AppJwt;
         }
       }
