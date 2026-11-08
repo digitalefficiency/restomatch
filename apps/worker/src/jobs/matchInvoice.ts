@@ -237,6 +237,11 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
     //   - never persist a run over an unlinked (question) line of an invoice held
     //     for questions — first match or re-match: the prior run and its
     //     decisions stay until the question is answered (round 6 HIGH);
+    //   - the same for a HAND-ENTERED invoice (#216: raw.ocrFailed / manualLines):
+    //     a hand line typed with no product never went through the OCR link hold,
+    //     yet it is the same question — match.runForInvoice refuses it
+    //     (invoice.unlinkedLines), so this job must not persist a run over it
+    //     either (one rule whether the receipt was open or closed when it was typed);
     //   - the invoice was put back on hold meanwhile ('parsed' with a question
     //     reason — a re-hold, or an order hold set while this job waited on the
     //     lock) → skip. This is THE race guard: the checks above ran before the
@@ -253,12 +258,14 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
            and not (coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text)) as unlinked,
              (coalesce(i.ocr_payload ? 'linkReleasedAt', false)
                or coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS}) as link_held,
+             (coalesce(i.ocr_payload -> 'raw' -> 'ocrFailed' = 'true'::jsonb, false)
+               or coalesce(i.ocr_payload -> 'raw' -> 'manualLines' = 'true'::jsonb, false)) as hand_entered,
              coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS} as question_reason
         from invoices i where i.id = ${invoiceId}::uuid and i.restaurant_id = ${restaurantId}
        for no key update
-    `)) as unknown as Array<{ status: string; has_run: boolean; unlinked: boolean; link_held: boolean; question_reason: boolean }>;
+    `)) as unknown as Array<{ status: string; has_run: boolean; unlinked: boolean; link_held: boolean; hand_entered: boolean; question_reason: boolean }>;
     if (!race || race.status === 'ocr_pending') return 'ocr_pending' as const;
-    if (race.link_held && race.unlinked) return 'awaiting_review' as const;
+    if ((race.link_held || race.hand_entered) && race.unlinked) return 'awaiting_review' as const;
     if (race.status === 'parsed' && race.question_reason) return 'awaiting_review' as const;
     if (priorRun && !race.has_run) return 'awaiting_review' as const;
     let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;

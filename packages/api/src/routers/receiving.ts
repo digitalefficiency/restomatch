@@ -70,6 +70,7 @@ import { invoiceReaderProcedure, managerProcedure, memberProcedure, receiverProc
 import { isFeatureOn } from '../lib/featureGate';
 import { dockPriceContext } from '../dockPriceContext/service';
 import { readConsolidatedRaw } from '../match/consolidated';
+import { invoiceQuestionCount } from '../catalog/linkQuestions';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 /** R5: undated open POs this recent still show in the receiving inbox. */
@@ -506,6 +507,12 @@ export const receivingRouter = router({
             .from(matchRuns)
             .where(and(eq(matchRuns.invoiceId, inv.id), eq(matchRuns.restaurantId, restaurantId)));
           holdReason = rematchHoldReason(inv, Number(any) > 0, gr.grId);
+          // G-08 × #216: the job persists no run over an unlinked line of a
+          // hand-entered invoice (matchInvoice.ts race guard) — it waits for the
+          // mapper's answer; say so now, as for any other held re-match.
+          if (holdReason === null && isHandEntered(inv.ocrPayload) && (await invoiceQuestionCount(ctx.db, restaurantId, inv.id)) > 0) {
+            holdReason = 'awaiting_review';
+          }
         }
         const leak = ready ? await computeInvoiceLeak(ctx.db, restaurantId, inv.id) : null;
         const claim = leak ? claimableLines(leak) : [];

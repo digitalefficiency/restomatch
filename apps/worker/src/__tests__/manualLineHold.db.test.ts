@@ -432,3 +432,97 @@ describe('#216 round 7', () => {
     expect((await as('owner').recovery.summary()).summary.heldForCount).toEqual({ count: 0, agorot: 0 });
   });
 });
+
+describe('G-08 × #216: a hand line with no product is an open question on BOTH match paths', () => {
+  const runsOf = (id: string) => db.select().from(matchRuns).where(eq(matchRuns.invoiceId, id));
+  const findingsOf = async (id: string) =>
+    (
+      await db
+        .select({ type: discrepancies.type, delta: discrepancies.deltaAmount })
+        .from(discrepancies)
+        .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+        .where(and(eq(matchRuns.invoiceId, id), eq(matchRuns.restaurantId, restaurantId)))
+    ).map((f) => `${f.type}:${f.delta}`);
+
+  it('typed while counting → submit → the REAL job persists no run (awaiting_review), Re-run refuses the same lines, the slip says so; answered → both paths match it alike', async () => {
+    const reg = await as('receiver').receiving.registerInvoice({ grId, imageUrl: 'https://example.com/scans/towels.jpg', supplierId });
+    const inv = reg.invoiceId;
+    await db
+      .update(invoices)
+      .set({ status: 'parsed', ocrConfidence: '0', ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: grId } } })
+      .where(eq(invoices.id, inv));
+    // The oil line picked from the order, and a free-text line no catalogue key knows.
+    const oil = await as('owner').receiving.addInvoiceLine({
+      invoiceId: inv,
+      line: { rawDescription: 'שמן זית 1 ליטר', qtyBilled: 10, unit: 'ליטר', unitPriceBilled: 125, poLineId },
+    });
+    const towels = await as('owner').receiving.addInvoiceLine({
+      invoiceId: inv,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    expect([oil.rematchSkipped, towels.rematchSkipped]).toEqual(['receipt_open', 'receipt_open']);
+    const [line] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, towels.lineId));
+    expect(line!.productId).toBeNull();
+
+    // The count lands "= order" and is submitted: the job the submit enqueues…
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
+    await as('receiver').receiving.submitReceipt({ grId });
+    const job = enqueued.find((j) => j.invoiceId === inv);
+    expect(job).toBeDefined();
+    // …never reads the question line as UNORDERED (a false ₪15 leak): no run.
+    expect(await matchInvoiceForJob(db, job!)).toMatchObject({ skipped: 'awaiting_review', persisted: null });
+    expect(await runsOf(inv)).toHaveLength(0);
+    // The manual path on the SAME lines: refused alike.
+    await expect(as('owner').match.runForInvoice({ invoiceId: inv })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      cause: { appCode: 'invoice.unlinkedLines' },
+    });
+    expect(await runsOf(inv)).toHaveLength(0);
+    // The dock slip, one rule with the job: it waits for review, never "a run is coming".
+    await db.update(restaurants).set({ settings: { features: { dockSlip: true } } as never }).where(eq(restaurants.id, restaurantId));
+    expect(await as('owner').receiving.dockSlip({ grId, invoiceId: inv })).toMatchObject({ engine: { ready: false, holdReason: 'awaiting_review' } });
+
+    // Answered in the mapper (a product this order does not carry). The mapper's
+    // re-match job (rematch, no poId) and the manual Re-run now agree.
+    const [towelProduct] = await db.insert(products).values({ restaurantId, canonicalName: 'מגבות נייר' }).returning();
+    await db.update(invoiceLines).set({ productId: towelProduct!.id }).where(eq(invoiceLines.id, towels.lineId));
+    const answered = await matchInvoiceForJob(db, { restaurantId, invoiceId: inv, rematch: true });
+    expect(answered.skipped).toBeUndefined();
+    expect(answered.persisted).not.toBeNull();
+    const byJob = await findingsOf(inv);
+    expect(byJob).toEqual(['UNORDERED_ITEM:15.00']); // the oil line pairs (10 × 125 = the order), the towels are not ordered
+    expect((await runsOf(inv))[0]).toMatchObject({ grId });
+    expect((await as('owner').match.runForInvoice({ invoiceId: inv })).matchRunId).not.toBeNull();
+    expect(await findingsOf(inv)).toEqual(byJob);
+  });
+
+  it('the guard is the hand-entered marker, not the receipt state: typed on a CLOSED receipt the re-match is refused, a later job persists nothing either', async () => {
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, grId));
+    const reg = await as('receiver').receiving.registerInvoice({ grId, imageUrl: 'https://example.com/scans/towels2.jpg', supplierId });
+    const inv = reg.invoiceId;
+    await db
+      .update(invoices)
+      .set({ status: 'parsed', ocrConfidence: '0', ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: grId } } })
+      .where(eq(invoices.id, inv));
+    const oil = await as('owner').receiving.addInvoiceLine({
+      invoiceId: inv,
+      line: { rawDescription: 'שמן זית 1 ליטר', qtyBilled: 10, unit: 'ליטר', unitPriceBilled: 132, poLineId },
+    });
+    expect(oil.rematched).toBe(true); // the picked line alone: a run (PRICE_HIGHER 70)
+    const [run] = await runsOf(inv);
+    const towels = await as('owner').receiving.addInvoiceLine({
+      invoiceId: inv,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    expect(towels).toMatchObject({ rematched: false, rematchSkipped: 'refused' });
+    // A receipt re-submit's job (rematch, the counted order) keeps the run that stands — no run over the question.
+    const [gr] = await db.select({ poId: goodsReceipts.poId }).from(goodsReceipts).where(eq(goodsReceipts.id, grId));
+    expect(await matchInvoiceForJob(db, { restaurantId, invoiceId: inv, rematch: true, poId: gr!.poId! })).toMatchObject({
+      skipped: 'awaiting_review',
+      persisted: null,
+    });
+    expect((await runsOf(inv)).map((r) => r.id)).toEqual([run!.id]);
+    expect(await findingsOf(inv)).toEqual(['PRICE_HIGHER:70.00']);
+  });
+});
