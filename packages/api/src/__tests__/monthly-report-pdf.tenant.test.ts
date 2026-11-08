@@ -2,7 +2,8 @@ import { createDb, eq, restaurants, testDbUrl } from '@restomatch/db';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppContext } from '../context';
 import { appRouter } from '../index';
-import { israelMonth, resetDb, seedTenant, type Tenant } from './fixtures';
+import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { restaurantMonthKey } from './helpers/il-day';
 
 /**
  * monthlyReport.pdf renders the CALLER's restaurant only. The cross-tenant
@@ -31,10 +32,9 @@ let B: Tenant;
 const callerFor = (t: Tenant) =>
   appRouter.createCaller({ db, session: { userId: t.ownerUserId, restaurantId: t.restaurantId, role: 'owner' } } as AppContext);
 
-const thisMonth = () => {
-  const now = new Date();
-  return israelMonth(now);
-};
+// The restaurant's month — the one seedTenant's invoice is dated in — so the PDF
+// under test is never an empty month on the 1st after local midnight.
+const thisMonth = () => restaurantMonthKey();
 
 beforeAll(async () => {
   await resetDb(db);

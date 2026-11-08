@@ -42,6 +42,7 @@ import {
   type SubscriptionOverrides,
 } from '@restomatch/db';
 import { atLocalTimeInTz } from '../lib/time';
+import { restaurantTodayAt } from './helpers/il-day';
 
 /** 'YYYY-MM' of the ISRAEL calendar month of `now` (what "this month" means to the app). */
 export function israelMonth(now: Date = new Date()): string {
@@ -227,7 +228,9 @@ export async function seedTenant(db: Database, tag: string): Promise<Tenant> {
     .returning();
   if (!productAlias) throw new Error('seed: productAlias');
 
-  const today = israelToday(11);
+  // 11:00 on the restaurant's (Israeli) day — the day receiving.todayExpectations
+  // reads — never the runner's local day (see helpers/il-day.ts).
+  const today = restaurantTodayAt(11);
   const [po] = await db
     .insert(purchaseOrders)
     .values({
@@ -244,6 +247,9 @@ export async function seedTenant(db: Database, tag: string): Promise<Tenant> {
     .insert(poLines)
     .values({
       poId: po.id,
+      // G-08: an order line carries its product — a name-only line is an open
+      // "זה אותו מוצר?" question that (rightly) holds a first match.
+      productId: product.id,
       rawDescription: `עגבניות ${tag}`,
       qtyOrdered: '10',
       unit: 'kg',

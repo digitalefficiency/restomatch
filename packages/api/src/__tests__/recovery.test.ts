@@ -25,7 +25,15 @@ import { OVERDUE_BOUNDARY_CASES, OVERDUE_BOUNDARY_NOW } from '../lib/claims';
 import { computeMonthlyReport, ensureMonthlyReport, monthlyReportEmail, monthlyReportWhatsApp, WHATSAPP_MAX } from '../reports/monthly';
 import { renderMonthlyReportPdf } from '../reports/pdf';
 import { sendMonthlyReports } from '../reports/send';
-import { israelMonth, resetDb, seedTenant, type Tenant } from './fixtures';
+import { resetDb, seedTenant as seedTenantPending, type Tenant } from './fixtures';
+import { restaurantDaysAgo, restaurantMonthKey } from './helpers/il-day';
+
+/** #216 F3: runForInvoice refuses a receipt still being counted — these re-matches stand on a counted, submitted one. */
+async function seedTenant(...args: Parameters<typeof seedTenantPending>): Promise<Tenant> {
+  const t = await seedTenantPending(...args);
+  await args[0].execute(sql`UPDATE goods_receipts SET status = 'completed' WHERE id = ${t.grId}`);
+  return t;
+}
 
 const db = createDb(testDbUrl());
 let T: Tenant;
@@ -296,7 +304,9 @@ describe('claims', () => {
 describe('overdue reminders (outbox)', () => {
   it('a claim is overdue after a WEEK (owner 31.10): 6 days → no reminder, 8 days → chased', async () => {
     await syncClaims(db, T.restaurantId);
-    const at = (days: number) => new Date(Date.now() - days * 86_400_000);
+    // Calendar days in the restaurant's zone — the unit the overdue rule counts —
+    // not N × 24 h, which is a calendar day short after the autumn DST change.
+    const at = (days: number) => restaurantDaysAgo(days);
     await db.update(recoveryClaims).set({ status: 'letter_sent', letterSentAt: at(6) }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
     expect((await enqueueRecoveryReminders(db, { restaurantId: T.restaurantId })).claims).toBe(0);
     await db.update(recoveryClaims).set({ letterSentAt: at(8) }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
@@ -357,7 +367,9 @@ describe('overdue reminders (outbox)', () => {
 });
 
 describe('monthly report', () => {
-  const month = () => israelMonth();
+  // The restaurant's month (the hero's), not the runner's: seedTenant dates its
+  // invoice on the restaurant's day.
+  const month = () => restaurantMonthKey();
 
   it('agrees with the hero and renders email (he/en), WhatsApp and a PDF', async () => {
     const data = await computeMonthlyReport(db, T.restaurantId, month());
@@ -535,8 +547,7 @@ describe('refuter regressions', () => {
   });
 
   it('preview and PDF show the frozen snapshot once the month was generated', async () => {
-    const d = new Date();
-    const month = israelMonth(d);
+    const month = restaurantMonthKey();
     const frozen = await ensureMonthlyReport(db, T.restaurantId, month);
     await db
       .update(monthlyReports)
@@ -548,8 +559,7 @@ describe('refuter regressions', () => {
   });
 
   it('WhatsApp truncation keeps the report link', async () => {
-    const d = new Date();
-    const data = await computeMonthlyReport(db, T.restaurantId, israelMonth(d));
+    const data = await computeMonthlyReport(db, T.restaurantId, restaurantMonthKey());
     data.topSuppliers = [{ name: 'א'.repeat(900), nameEn: null, leakAgorot: 100, leakPct: 0.02 }];
     const url = 'https://app.test/dashboard/reports/monthly?month=2026-09';
     const text = monthlyReportWhatsApp(data, { reportUrl: url });
@@ -592,8 +602,7 @@ describe('money cross-QA (S3) regressions', () => {
       .values({ matchRunId: T.matchRunId, restaurantId: T.restaurantId, type: 'DUPLICATE_INVOICE', severity: 'block', deltaAmount: '117.00', resolutionStatus: 'accepted' })
       .returning();
     try {
-      const d = new Date();
-      const month = israelMonth(d);
+      const month = restaurantMonthKey();
       const data = await computeMonthlyReport(db, T.restaurantId, month);
       const hero = await computeLeakHero(db, T.restaurantId);
       expect(data.claimedAgorot).toBe(Math.round(hero.recoveredIls * 100));
