@@ -26,7 +26,7 @@ import { computeMonthlyReport, ensureMonthlyReport, monthlyReportEmail, monthlyR
 import { renderMonthlyReportPdf } from '../reports/pdf';
 import { sendMonthlyReports } from '../reports/send';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
-import { restaurantMonthKey } from './helpers/il-day';
+import { restaurantDaysAgo, restaurantMonthKey } from './helpers/il-day';
 
 const db = createDb(testDbUrl());
 let T: Tenant;
@@ -297,7 +297,9 @@ describe('claims', () => {
 describe('overdue reminders (outbox)', () => {
   it('a claim is overdue after a WEEK (owner 31.10): 6 days → no reminder, 8 days → chased', async () => {
     await syncClaims(db, T.restaurantId);
-    const at = (days: number) => new Date(Date.now() - days * 86_400_000);
+    // Calendar days in the restaurant's zone — the unit the overdue rule counts —
+    // not N × 24 h, which is a calendar day short after the autumn DST change.
+    const at = (days: number) => restaurantDaysAgo(days);
     await db.update(recoveryClaims).set({ status: 'letter_sent', letterSentAt: at(6) }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
     expect((await enqueueRecoveryReminders(db, { restaurantId: T.restaurantId })).claims).toBe(0);
     await db.update(recoveryClaims).set({ letterSentAt: at(8) }).where(eq(recoveryClaims.restaurantId, T.restaurantId));

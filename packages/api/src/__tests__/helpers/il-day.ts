@@ -35,6 +35,23 @@ export function restaurantTodayAt(
 }
 
 /**
+ * `now` moved back `days` CALENDAR days in the restaurant's zone, at the same
+ * local wall-clock time — "N days ago" for a rule that counts calendar days
+ * (e.g. a claim is overdue after more than OVERDUE_DAYS calendar days).
+ *
+ * Never `Date.now() - days * 86_400_000`: across a DST change a local day is 23 h
+ * or 25 h long. For a week after the autumn change, "8 × 24 h ago" seen at
+ * 23:00–24:00 is only 7 calendar days back, so a calendar-day rule correctly
+ * says "not yet" and the test fails on the clock, not on the code.
+ */
+export function restaurantDaysAgo(
+  days: number,
+  opts: { tz?: string; now?: Date } = {},
+): Date {
+  return addCalendarDaysInTz(opts.now ?? new Date(), -days, opts.tz ?? RESTAURANT_TZ);
+}
+
+/**
  * 'YYYY-MM-DD' of the restaurant's today (or `dayOffset` calendar days away) —
  * the calendar day a period filter (`from`/`to`, read in the restaurant's zone)
  * must name to contain a row dated with `restaurantTodayAt`. Never
