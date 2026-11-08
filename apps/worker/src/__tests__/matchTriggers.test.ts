@@ -8,6 +8,7 @@ import {
   invoices,
   matchRuns,
   poLines,
+  products,
   purchaseOrders,
   restaurants,
   suppliers,
@@ -17,6 +18,7 @@ import {
 import { lockReceipt } from '@restomatch/api';
 import { ocrAutoMatchDecision, ocrMayAutoMatch } from '../jobs/ocrInvoice';
 import { matchInvoiceForJob } from '../jobs/matchInvoice';
+import { ilDateKey, startOfIlDay } from '../lib/notifyHelpers';
 
 const db = createDb(testDbUrl());
 const other = createDb(testDbUrl()); // a second connection: the "submit in flight"
@@ -24,6 +26,8 @@ let restaurantId = '';
 let supplierId = '';
 let poId = '';
 let grId = '';
+// G-08: lines carry a product (an order's name-only line is an open question that holds a first match).
+let productId = '';
 
 async function cleanup() {
   if (!restaurantId) return;
@@ -37,6 +41,7 @@ async function cleanup() {
   const pos = await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.restaurantId, restaurantId));
   for (const p of pos) await db.delete(poLines).where(eq(poLines.poId, p.id));
   await db.delete(purchaseOrders).where(eq(purchaseOrders.restaurantId, restaurantId));
+  await db.delete(products).where(eq(products.restaurantId, restaurantId));
   await db.delete(suppliers).where(eq(suppliers.restaurantId, restaurantId));
   await db.delete(restaurants).where(eq(restaurants.id, restaurantId));
 }
@@ -47,6 +52,8 @@ beforeEach(async () => {
   restaurantId = r!.id;
   const [s] = await db.insert(suppliers).values({ restaurantId, name: 'HaSharon' }).returning();
   supplierId = s!.id;
+  const [prod] = await db.insert(products).values({ restaurantId, supplierId, canonicalName: 'עגבניה', defaultUnit: 'kg' }).returning();
+  productId = prod!.id;
   const [po] = await db
     .insert(purchaseOrders)
     .values({ restaurantId, supplierId, expectedDeliveryAt: new Date(), status: 'sent', source: 'manual' })
@@ -54,7 +61,7 @@ beforeEach(async () => {
   poId = po!.id;
   const [pl] = await db
     .insert(poLines)
-    .values({ poId, rawDescription: 'עגבניה', qtyOrdered: '10', unit: 'kg', unitPriceExpected: '8' })
+    .values({ poId, productId, rawDescription: 'עגבניה', qtyOrdered: '10', unit: 'kg', unitPriceExpected: '8' })
     .returning();
   const [gr] = await db.insert(goodsReceipts).values({ restaurantId, poId, status: 'pending' }).returning();
   grId = gr!.id;
@@ -166,6 +173,7 @@ async function heldScan() {
   const [inv] = await db.insert(invoices).values({ restaurantId, supplierId, status: 'matched', source: 'photo' }).returning();
   await db.insert(invoiceLines).values({
     invoiceId: inv!.id,
+    productId,
     rawDescription: 'עגבניה',
     qtyBilled: '10',
     unit: 'kg',
@@ -205,15 +213,25 @@ describe('match job: the payload is not a trust boundary (verifier MAJOR, defenc
 
 describe('sibling PO (verifier MINOR 1 + 2): PO1 counted this morning, PO2 being counted now', () => {
   async function siblingSetup() {
-    const morning = new Date();
-    morning.setHours(Math.max(0, morning.getHours() - 3));
+    // "This morning" on the restaurant's (Israeli) day: 3 h ago, never before its
+    // local midnight. Not the runner's setHours (UTC on CI): between local midnight
+    // and 02:00/03:00 that put PO1 on YESTERDAY's Israeli day, a day further from the
+    // scan than PO2, so the matcher's day ranking alone picked PO2 and the pin /
+    // tie-break these tests exist for went unexercised (a pass that could not fail).
+    const now = new Date();
+    const morning = new Date(Math.max(startOfIlDay(now).getTime(), now.getTime() - 3 * 3600_000));
+    const [po2] = await db
+      .select({ at: purchaseOrders.expectedDeliveryAt })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.id, poId));
+    expect(ilDateKey(morning)).toBe(ilDateKey(po2!.at!)); // the premise: same Israeli day as PO2
     const [po1] = await db
       .insert(purchaseOrders)
       .values({ restaurantId, supplierId, expectedDeliveryAt: morning, status: 'sent', source: 'manual' })
       .returning();
     const [pl1] = await db
       .insert(poLines)
-      .values({ poId: po1!.id, rawDescription: 'עגבניה', qtyOrdered: '10', unit: 'kg', unitPriceExpected: '8' })
+      .values({ poId: po1!.id, productId, rawDescription: 'עגבניה', qtyOrdered: '10', unit: 'kg', unitPriceExpected: '8' })
       .returning();
     const [gr1] = await db.insert(goodsReceipts).values({ restaurantId, poId: po1!.id, status: 'completed' }).returning();
     await db.insert(grLines).values({ grId: gr1!.id, poLineId: pl1!.id, qtyReceived: '10' });
