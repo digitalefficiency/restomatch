@@ -18,6 +18,7 @@ import {
 import { lockReceipt } from '@restomatch/api';
 import { ocrAutoMatchDecision, ocrMayAutoMatch } from '../jobs/ocrInvoice';
 import { matchInvoiceForJob } from '../jobs/matchInvoice';
+import { ilDateKey, startOfIlDay } from '../lib/notifyHelpers';
 
 const db = createDb(testDbUrl());
 const other = createDb(testDbUrl()); // a second connection: the "submit in flight"
@@ -212,8 +213,18 @@ describe('match job: the payload is not a trust boundary (verifier MAJOR, defenc
 
 describe('sibling PO (verifier MINOR 1 + 2): PO1 counted this morning, PO2 being counted now', () => {
   async function siblingSetup() {
-    const morning = new Date();
-    morning.setHours(Math.max(0, morning.getHours() - 3));
+    // "This morning" on the restaurant's (Israeli) day: 3 h ago, never before its
+    // local midnight. Not the runner's setHours (UTC on CI): between local midnight
+    // and 02:00/03:00 that put PO1 on YESTERDAY's Israeli day, a day further from the
+    // scan than PO2, so the matcher's day ranking alone picked PO2 and the pin /
+    // tie-break these tests exist for went unexercised (a pass that could not fail).
+    const now = new Date();
+    const morning = new Date(Math.max(startOfIlDay(now).getTime(), now.getTime() - 3 * 3600_000));
+    const [po2] = await db
+      .select({ at: purchaseOrders.expectedDeliveryAt })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.id, poId));
+    expect(ilDateKey(morning)).toBe(ilDateKey(po2!.at!)); // the premise: same Israeli day as PO2
     const [po1] = await db
       .insert(purchaseOrders)
       .values({ restaurantId, supplierId, expectedDeliveryAt: morning, status: 'sent', source: 'manual' })

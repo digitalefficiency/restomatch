@@ -31,10 +31,10 @@ import {
 import { runMatch, type MatchInput } from '@restomatch/matching';
 import { runOcrPipeline, StubOcrProvider } from '@restomatch/ocr';
 import type { InvoiceOcrResult } from '@restomatch/types';
-import { israelToday } from './fixtures';
 import { appRouter } from '../index';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 import type { AppContext } from '../context';
+import { restaurantTodayAt } from './helpers/il-day';
 
 const TEST_DB_URL =
   testDbUrl();
@@ -103,7 +103,7 @@ describe('E2E — full receiving flow', () => {
     });
 
     // ── PO scheduled for today
-    const today = israelToday(8);
+    const today = restaurantTodayAt(8);
     const [po] = await db
       .insert(purchaseOrders)
       .values({
@@ -288,7 +288,7 @@ describe('E2E — full receiving flow', () => {
         defaultUnit: 'ק״ג',
       })
       .returning();
-    const today = israelToday(8);
+    const today = restaurantTodayAt(8);
     const [po] = await db
       .insert(purchaseOrders)
       .values({
