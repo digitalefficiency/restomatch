@@ -5,12 +5,12 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { CheckCircle2, MessageCircle, PlayCircle } from 'lucide-react';
 import { Button, Input } from '@/lib/components';
-import { useT } from '@/lib/i18n/client';
+import { useLocale, useT } from '@/lib/i18n/client';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { contactChannels, whatsappHref } from '@/lib/contact';
 import { readAttribution } from './Attribution';
 import { buildLeadSource, firstInvalidField, validateLead, type LeadFieldErrors } from './leadForm.logic';
-import { LEAD_IDLE, type LeadActionState } from './leadAction.core';
+import { LEAD_IDLE, leadFormPermalink, type LeadActionState } from './leadAction.core';
 
 /** The Server Action (`leadAction`), handed in by a server component. */
 export type LeadFormAction = (prev: LeadActionState, formData: FormData) => Promise<LeadActionState>;
@@ -43,7 +43,10 @@ function LeadFormInner({ cta, action }: { cta: string; action: LeadFormAction })
   // server-side as evidence of an informed marketing consent (E.7, Communications
   // Law §30A).
   const MARKETING_CONSENT_TEXT = t('lead.consentText');
-  const [state, formAction, isPending] = useActionState(action, LEAD_IDLE);
+  // The permalink is where a JS-off POST lands: the landing's #lead anchor,
+  // so the verdict (errors or the success card) is in view, not at the top.
+  const locale = useLocale();
+  const [state, formAction, isPending] = useActionState(action, LEAD_IDLE, leadFormPermalink(locale));
   // JS off: a refused POST re-renders this form on the server, so the action's
   // verdict and what was typed must seed the initial state (effects never run).
   const back = state.status === 'invalid' ? state.values : null;
@@ -51,8 +54,8 @@ function LeadFormInner({ cta, action }: { cta: string; action: LeadFormAction })
   const [phone, setPhone] = useState(back?.phone ?? '');
   const [email, setEmail] = useState(back?.email ?? '');
   const [restaurantName, setRestaurantName] = useState(back?.restaurantName ?? '');
-  const [monthlyIls, setMonthlyIls] = useState('');
-  const [marketingConsent, setMarketingConsent] = useState(false);
+  const [monthlyIls, setMonthlyIls] = useState(back?.monthly ?? '');
+  const [marketingConsent, setMarketingConsent] = useState(back?.marketingConsent ?? false);
   const [hp, setHp] = useState('');
   const [errors, setErrors] = useState<LeadFieldErrors>(() => (state.status === 'invalid' ? state.errors : {}));
   const [submitError, setSubmitError] = useState<string | null>(() =>

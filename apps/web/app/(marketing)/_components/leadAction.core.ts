@@ -38,11 +38,21 @@ const MAX_AGOROT = 1_000_000_000_000;
 export type LeadActionState =
   | { status: 'idle' }
   | { status: 'ok'; name: string; phone: string; email: string }
-  | { status: 'invalid'; errors: LeadFieldErrors; values: { name: string; phone: string; email: string; restaurantName: string } }
+  | {
+      status: 'invalid';
+      errors: LeadFieldErrors;
+      /** Everything the visitor typed or ticked, so a JS-off retry keeps it. */
+      values: { name: string; phone: string; email: string; restaurantName: string; monthly: string; marketingConsent: boolean };
+    }
   | { status: 'rate' }
   | { status: 'error' };
 
 export const LEAD_IDLE: LeadActionState = { status: 'idle' };
+
+/** Where a JS-off form POST lands (useActionState's permalink): the form's own anchor on the landing. */
+export function leadFormPermalink(locale: string): string {
+  return locale === 'en' ? '/?lang=en#lead' : '/#lead';
+}
 
 export interface LeadCreateInput {
   name: string;
@@ -92,7 +102,9 @@ export async function submitLead(fd: FormData, deps: LeadActionDeps): Promise<Le
   if (Object.keys(errors).length > 0) {
     // Echo back only the bounded, already-typed fields so a JS-off retry keeps them.
     const restaurantName = field(fd, 'restaurantName', LEAD_FIELD_MAX.restaurantName);
-    return { status: 'invalid', errors, values: { name, phone: phoneRaw, email, restaurantName } };
+    const monthly = field(fd, 'monthly', LEAD_FIELD_MAX.monthly);
+    const marketingConsent = field(fd, 'marketingConsent', 8) === 'on';
+    return { status: 'invalid', errors, values: { name, phone: phoneRaw, email, restaurantName, monthly, marketingConsent } };
   }
 
   const phone = phoneRaw ? formatIlPhone(phoneRaw) : '';

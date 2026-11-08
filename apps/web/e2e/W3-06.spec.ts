@@ -97,4 +97,16 @@ test.describe('W3-06 · lead form without JavaScript', () => {
     expect(await form.locator('input[type="hidden"][name^="$ACTION_"]').count()).toBeGreaterThan(0);
     await expect(form.locator('input[name="source"]')).toHaveValue('/|lead');
   });
+
+  // Q2: opened at "/" with no hash, a JS-off POST must land where the verdict
+  // is — the form's anchor — not at the top of the page. The permalink is what
+  // the browser navigates to; asserting it here is the turbopack-proof half
+  // (the POST itself is checked on a production build by the release smoke).
+  test('posts to the #lead permalink even when the page was opened without a hash', async ({ page }) => {
+    await open(page, '/');
+    const form = page.getByTestId('lead-form');
+    await expect(form).toBeVisible();
+    expect(new URL((await form.getAttribute('action')) ?? '', page.url()).hash).toBe('#lead');
+    await expect(form).toHaveAttribute('action', /^\/(\?lang=en)?#lead$/);
+  });
 });

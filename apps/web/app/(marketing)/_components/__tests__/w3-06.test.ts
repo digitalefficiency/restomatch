@@ -17,7 +17,7 @@ import {
 import { PLAN_SEED } from '@restomatch/db';
 import { he as overviewHe } from '../../../../lib/i18n/messages/overview/he';
 import { PRODUCT_LABEL_KEYS } from '../../../showcase/dashboard/_components/productLabels';
-import { LEAD_FIELD_MAX, LEADS_RATE_LIMIT, monthlyAgorotOf, submitLead, type LeadCreateInput } from '../leadAction.core';
+import { LEAD_FIELD_MAX, LEADS_RATE_LIMIT, leadFormPermalink, monthlyAgorotOf, submitLead, type LeadCreateInput } from '../leadAction.core';
 import { planCtaHref, planDisplayOrder } from '../../pricing/pricing.logic';
 import { SAMPLE_CAUGHT_THIS_MONTH_ILS } from '../../../showcase/_components/ShowcaseEndCard';
 import { PROBLEM_C1_YEAR_ILS } from '../detail-sections';
@@ -198,7 +198,12 @@ describe('W3-06 · the lead Server Action (same front door as the tRPC route)', 
     expect(await submitLead(fd({ name: 'רק שם' }), d)).toEqual({
       status: 'invalid',
       errors: { contact: 'errorContact' },
-      values: { name: 'רק שם', phone: '', email: '', restaurantName: '' },
+      values: { name: 'רק שם', phone: '', email: '', restaurantName: '', monthly: '', marketingConsent: false },
+    });
+    // Q2: a JS-off retry keeps the purchasing and the opt-in too.
+    expect(await submitLead(fd({ name: 'א', monthly: '120,000', marketingConsent: 'on' }), d)).toMatchObject({
+      status: 'invalid',
+      values: { monthly: '120,000', marketingConsent: true },
     });
     expect(await submitLead(fd({ name: '', email: 'x@y.co' }), d)).toMatchObject({ status: 'invalid', errors: { name: 'errorName' } });
     expect(await submitLead(fd({ name: 'א', phone: '12' }), d)).toMatchObject({ status: 'invalid', errors: { phone: 'errorPhone' } });
@@ -238,6 +243,12 @@ describe('W3-06 · the lead Server Action (same front door as the tRPC route)', 
     const d = deps();
     await submitLead(fd({ name: 'בוט', email: 'b@o.t', consentText: 'x', hp: 'filled' }), d);
     expect(d.create.mock.calls[0]![0]).toMatchObject({ marketingConsent: false, consentText: undefined, hp: 'filled' });
+  });
+
+  it('a JS-off POST lands on the form\'s own anchor (Q2)', () => {
+    expect(leadFormPermalink('he')).toBe('/#lead');
+    expect(leadFormPermalink('en')).toBe('/?lang=en#lead');
+    expect(read('app/(marketing)/_components/LeadForm.tsx')).toMatch(/useActionState\(action, LEAD_IDLE, leadFormPermalink\(locale\)\)/);
   });
 
   it('a failing insert is a generic error, never a leak of the message', async () => {
