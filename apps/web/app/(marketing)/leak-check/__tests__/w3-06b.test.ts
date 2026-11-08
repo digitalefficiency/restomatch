@@ -72,10 +72,20 @@ describe('W3-06b · a11y: focus after ✕ and DOM order (conductor Q9 / Q6)', ()
     expect(form).toMatch(/ref=\{pickerRef\}/);
   });
 
-  it('the upload card comes first in the DOM (phone order) — no CSS-only reordering', () => {
+  it('the upload card comes first in the DOM and on screen at every width — no CSS reordering', () => {
     const page = readFileSync(join(__dirname, '../page.tsx'), 'utf8');
-    expect(page).not.toMatch(/order-first/);
+    expect(page).not.toMatch(/(^|[\s":])order-(first|last|none|\d)/); // no CSS reordering at any width (conductor R2)
     expect(page.indexOf('<LeakCheckForm />')).toBeLessThan(page.indexOf('<h1'));
     expect(page.indexOf("t('page.unavailable')")).toBeLessThan(page.indexOf('<h1'));
+  });
+});
+
+describe('W3-06b · ₪ on the leak-check result is never mono (conductor M8)', () => {
+  it('the per-row and total ₪ cells keep tabular-nums without font-mono', () => {
+    const page = readFileSync(join(__dirname, '../result/page.tsx'), 'utf8');
+    for (const line of page.split('\n').filter((l) => /text-danger/.test(l) && /tabular-nums/.test(l))) {
+      expect(line).not.toMatch(/(^|[\s"])font-mono/);
+    }
+    expect(page).toMatch(/tabular-nums/);
   });
 });

@@ -35,15 +35,15 @@ export default async function LeakCheckPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
-      <div className="grid gap-10 lg:grid-cols-[1fr_1.1fr] lg:items-start">
-        {/* The upload card is first in the DOM = the phone reading order (W3-06b · mkt-14, WCAG 1.3.2/2.4.3);
-            from lg the pitch takes the start column via lg:order-*. */}
+      <div className="grid gap-10 lg:grid-cols-[1.1fr_1fr] lg:items-start">
+        {/* The upload card is first in the DOM and on screen at every width (W3-06b · mkt-14, WCAG 1.3.2/2.4.3):
+            phone = stacked on top, desktop = the start column. No CSS reordering, so DOM order = visual order. */}
         {available ? (
-          <div className="lg:order-2">
+          <div>
             <LeakCheckForm />
           </div>
         ) : (
-          <div className="rounded-3xl border border-line bg-surface p-8 text-center shadow-card lg:order-2">
+          <div className="rounded-3xl border border-line bg-surface p-8 text-center shadow-card">
             <p className="text-base text-muted">{t('page.unavailable')}</p>
             <Link
               href="/#lead"
@@ -53,7 +53,7 @@ export default async function LeakCheckPage() {
             </Link>
           </div>
         )}
-        <div className="lg:order-1">
+        <div>
           <p className="mb-3 text-xs font-semibold uppercase text-gold ltr:font-mono ltr:tracking-[0.2em] rtl:text-sm">
             {t('page.eyebrow')}
           </p>
