@@ -121,3 +121,14 @@ describe('Q3 · HeroVideo replaces its <source>s on a re-run (locale switch)', (
     expect(out).toHaveLength(2);
   });
 });
+
+describe('M8 · HeroMatch (the en-phone hero) never sets ₪ in mono', () => {
+  it('no font-mono class within 3 lines before a formatIls() call', () => {
+    const src = readFileSync(join(__dirname, '../HeroMatch.tsx'), 'utf8').split('\n');
+    const offenders = src
+      .map((line, i) => ({ line: i + 1, hit: /formatIls\(/.test(line) && src.slice(Math.max(0, i - 3), i + 1).some((l) => /\bfont-mono\b/.test(l)) }))
+      .filter((x) => x.hit)
+      .map((x) => x.line);
+    expect(offenders).toEqual([]);
+  });
+});
