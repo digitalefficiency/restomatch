@@ -187,7 +187,7 @@ export const en: Shape<typeof he> = {
       leakValue: '{amount} a month',
       leakLabel: 'For example: a {pct} leak on {purchasing} purchasing (before VAT)',
       breakevenValue: '{pct}',
-      breakevenLabel: 'of purchasing — what the Pro plan ({price} + VAT) has to catch to pay for itself',
+      breakevenLabel: 'of {purchasing} purchasing — what the Pro plan ({price} + VAT) has to catch to pay for itself',
       checksValue: '12',
       checksLabel: 'automatic checks on every invoice: price, quantity, units, VAT, duplicates and more',
       note: 'An example, not a promise: your real number shows up after two weeks of scanning.',

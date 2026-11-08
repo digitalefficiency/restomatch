@@ -46,6 +46,8 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
           <label htmlFor={ids.monthly} className="mb-1.5 block text-sm font-medium text-muted">
             {t('roi.monthly')}
           </label>
+          {/* No dir="ltr": the field follows the page direction, so ps-8 leaves room for the ₪ on the
+              start side and the digits sit right beside it (a digit run renders LTR anyway). R3. */}
           <div className="relative">
             <span className="pointer-events-none absolute inset-y-0 start-3 flex items-center text-muted">
               ₪
@@ -54,7 +56,6 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
               id={ids.monthly}
               type="text"
               inputMode="decimal"
-              dir="ltr"
               autoComplete="off"
               value={monthlyRaw}
               onChange={(e) => onMonthly(e.target.value)}
@@ -149,11 +150,13 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
               <p className="mt-2 text-sm leading-relaxed text-ink">
                 {t('roi.breakevenBody', { price: formatIls(proPriceIls, { locale }), pct: breakeven })}
               </p>
-              <p className="mt-1 text-sm leading-relaxed text-muted">
-                {roi.pays
-                  ? t('roi.breakevenRatio', { ratio: pct(roi.coveredPct, 0) })
-                  : t('roi.breakevenOver')}
-              </p>
+              {roi.showCovered ? (
+                <p className="mt-1 text-sm leading-relaxed text-muted" data-testid="roi-ratio">
+                  {t('roi.breakevenRatio', { ratio: pct(roi.coveredPct, 0) })}
+                </p>
+              ) : !roi.pays ? (
+                <p className="mt-1 text-sm leading-relaxed text-muted">{t('roi.breakevenOver')}</p>
+              ) : null}
             </div>
           </>
         )}

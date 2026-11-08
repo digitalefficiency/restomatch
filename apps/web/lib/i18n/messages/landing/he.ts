@@ -193,7 +193,7 @@ export const he = {
       leakValue: '{amount} בחודש',
       leakLabel: 'לדוגמה: דליפה של {pct} מרכש של {purchasing} (לפני מע״מ)',
       breakevenValue: '{pct}',
-      breakevenLabel: 'מהרכש — זה מה שמסלול מקצועי ({price} + מע״מ) צריך לתפוס כדי להחזיר את עצמו',
+      breakevenLabel: 'מרכש של {purchasing} — זה מה שמסלול מקצועי ({price} + מע״מ) צריך לתפוס כדי להחזיר את עצמו',
       checksValue: '12',
       checksLabel: 'בדיקות אוטומטיות על כל חשבונית: מחיר, כמות, יחידות, מע״מ, כפילויות ועוד',
       note: 'דוגמה, לא הבטחה: המספר האמיתי שלכם יופיע אחרי שבועיים של סריקה.',

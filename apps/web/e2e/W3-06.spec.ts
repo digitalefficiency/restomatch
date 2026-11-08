@@ -57,6 +57,10 @@ test.describe('W3-06 · pricing', () => {
         .map((c) => c.dataset.testid),
     );
     expect(ladder[0]).toBe('plan-trial');
+    // Q6/R2: at md+ the DOM is the ladder too (the phone list is display:none).
+    await expect(page.getByTestId('pricing-phone-list')).toBeHidden();
+    const ladderDom = await page.locator('[data-testid^="plan-"]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.testid));
+    expect(ladderDom).toEqual(ladder);
     // Q7: the compare table's check / dash are named images.
     for (const icon of await page.getByTestId('pricing-compare').locator('svg[aria-label]').all()) {
       await expect(icon).toHaveAttribute('role', 'img');
@@ -68,14 +72,16 @@ test.describe('W3-06 · pricing', () => {
     const ctx = await browser.newContext(PHONE);
     const page = await ctx.newPage();
     await open(page, '/pricing');
+    // Only the phone list is rendered (the ladder is display:none, out of the a11y tree).
+    await expect(page.getByTestId('pricing-ladder')).toBeHidden();
     const order = await page.evaluate(() =>
-      [...document.querySelectorAll<HTMLElement>('[data-testid^="plan-"]')]
+      [...document.querySelectorAll<HTMLElement>('[data-testid^="m-plan-"]')]
         .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)
         .map((c) => c.dataset.testid),
     );
-    expect(order[0]).toBe('plan-pro');
+    expect(order[0]).toBe('m-plan-pro');
     // Q6: the DOM (reading + tab order) matches what the phone shows.
-    const dom = await page.locator('[data-testid^="plan-"]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.testid));
+    const dom = await page.locator('[data-testid^="m-plan-"]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.testid));
     expect(dom).toEqual(order);
     await expect(page.getByTestId('pricing-compare')).toBeHidden();
     await ctx.close();
