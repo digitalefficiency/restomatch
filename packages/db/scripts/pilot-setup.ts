@@ -90,6 +90,8 @@ export const PILOT_FEATURE_KEYS = [
   'supplierLeakCard',
   'supplierLedger',
   'inventoryCount',
+  // G-08: default ON (a pilot config may set it false — the order-question kill switch).
+  'orderQuestions',
 ] as const;
 export type PilotFeatureKey = (typeof PILOT_FEATURE_KEYS)[number];
 

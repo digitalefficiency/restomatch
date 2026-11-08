@@ -79,15 +79,17 @@ async function main() {
   }
 
   // 2) Outbox: a queued email row must reach the provider (sink) and flip to 'sent'.
+  //    The target must NOT be on a reserved TLD (.invalid/.test/…): the dispatcher
+  //    refuses those as undeliverable. The local sink captures the send either way.
   const before = SINK && existsSync(SINK) ? readFileSync(SINK, 'utf8').split('\n').filter(Boolean).length : 0;
   const [row] = await d
     .insert(notificationsOutbox)
-    .values({ restaurantId: r.id, channel: 'email', target: 'qa-sink@example.invalid', subject: 'QA outbox', body: 'outbox smoke' })
+    .values({ restaurantId: r.id, channel: 'email', target: 'qa-sink@smoke.restomatch.co.il', subject: 'QA outbox', body: 'outbox smoke' })
     .returning({ id: notificationsOutbox.id });
   await runJob('outbox-dispatch', {});
   const [after] = await d.select({ status: notificationsOutbox.status, err: notificationsOutbox.lastError }).from(notificationsOutbox).where(eq(notificationsOutbox.id, row!.id));
   const sunk = SINK && existsSync(SINK) ? readFileSync(SINK, 'utf8').split('\n').filter(Boolean).slice(before) : [];
-  const delivered = sunk.some((l) => (JSON.parse(l) as { to?: string }).to === 'qa-sink@example.invalid');
+  const delivered = sunk.some((l) => (JSON.parse(l) as { to?: string }).to === 'qa-sink@smoke.restomatch.co.il');
   outcomes.push({ step: 'outbox email → sink → sent', ok: after?.status === 'sent' && delivered, detail: `status=${after?.status} sink=${delivered} ${after?.err ?? ''}`, ms: 0 });
 
   // 3) OCR (stub providers) → chained match-invoice → match_run.

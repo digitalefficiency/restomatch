@@ -150,6 +150,17 @@ describe('admin.setFeatures — per-tenant flags without SQL', () => {
     expect(r!.settings).toEqual({});
   });
 
+  it('G-08 orderQuestions is default-ON: nothing stored → effective true (defaultOn lists it); false → off', async () => {
+    const c = adminCaller(adminUserId);
+    const shown = await c.admin.setFeatures({ restaurantId: T.restaurantId, features: { contracts: true } });
+    expect(shown.features.stored.orderQuestions).toBeUndefined();
+    expect(shown.features.effective.orderQuestions).toBe(true);
+    expect(shown.features.defaultOn).toContain('orderQuestions');
+    const off = await c.admin.setFeatures({ restaurantId: T.restaurantId, features: { orderQuestions: false } });
+    expect(off.features.effective.orderQuestions).toBe(false);
+    expect(off.features.stored.orderQuestions).toBe(false);
+  });
+
   it('accepts every FEATURE_KEY', async () => {
     const all = Object.fromEntries(FEATURE_KEYS.map((k) => [k, true]));
     const res = await adminCaller(adminUserId).admin.setFeatures({ restaurantId: T.restaurantId, features: all });
