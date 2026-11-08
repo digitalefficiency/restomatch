@@ -1,5 +1,5 @@
 import postgres from 'postgres';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   backoffMs,
   claimJob,
@@ -11,6 +11,13 @@ import {
   OCR_INVOICE_QUEUE,
   failJob,
   failedJobs,
+  isTerminalJobError,
+  OCR_JOB_HEADROOM_DEFAULT_MS,
+  OCR_JOB_HEADROOM_MAX_MS,
+  OCR_JOB_HEADROOM_MIN_MS,
+  ocrJobDeadlineMs,
+  ocrJobHeadroomMs,
+  TERMINAL_JOB_ERROR,
   insertJob,
   pruneJobs,
   queueCounts,
@@ -180,6 +187,7 @@ describe('producer payloads reach the worker unchanged', () => {
       const job = await claimJob<typeof payload>(sql, OCR_INVOICE_QUEUE, 'w-test');
       expect(job?.payload).toEqual(payload); // job.data.grId reaches ocrAutoMatchDecision
       expect(job?.restaurantId).toBe(r!.id);
+      expect(job?.maxAttempts).toBe(2); // OCR-A: one retry of a transient failure, never more
       // A scan with no receipt (e-mail / WhatsApp ingest) has no grId and matches at once.
       const { grId: _omit, ...noReceipt } = payload;
       expect(await enqueueOcrInvoice(noReceipt)).toBe(true);
@@ -216,5 +224,47 @@ describe('concurrency: 50 jobs, 2 workers', () => {
     expect(seen).toHaveLength(50);
     expect(new Set(seen).size).toBe(50);
     expect(await queueCounts(sql, Q)).toMatchObject({ done: 50, active: 0, waiting: 0 });
+  });
+});
+
+describe('OCR-A PR-OCR-3: terminal errors and OCR headroom', () => {
+  it('a terminal error is dead-lettered at once, even with attempts left', async () => {
+    await insertJob(sql, Q, {}, { maxAttempts: 2 });
+    const first = await claimJob(sql, Q, 'w1');
+    expect(await failJob(sql, first!, `${TERMINAL_JOB_ERROR}quota exceeded`, 'w1')).toBe('failed');
+    const [row] = await sql<Array<{ status: string; attempts: number }>>`SELECT status, attempts FROM job_queue WHERE id = ${first!.id}`;
+    expect(row).toEqual({ status: 'failed', attempts: 1 });
+    expect(isTerminalJobError('[terminal] x')).toBe(true);
+    expect(isTerminalJobError('boom [terminal]')).toBe(false);
+  });
+
+  it('OCR_JOB_HEADROOM_MS: default 120 s; a number overrides; garbage falls back to the default', () => {
+    expect(OCR_JOB_HEADROOM_DEFAULT_MS).toBe(120_000);
+    expect(ocrJobHeadroomMs({})).toBe(120_000);
+    expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: ' 90000 ' })).toBe(90_000);
+    for (const bad of ['', 'abc', '-5', 'Infinity']) expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: bad })).toBe(120_000);
+  });
+
+  it('OCR_JOB_HEADROOM_MS is clamped below the cron claim window (one warning); the job deadline keeps a persistence margin', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(OCR_JOB_HEADROOM_MAX_MS).toBe(200_000);
+    expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: '300000' })).toBe(200_000);
+    expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: '999999' })).toBe(200_000);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+    expect(ocrJobDeadlineMs({})).toBe(100_000); // 120 s headroom − 20 s to persist
+  });
+
+  it('OCR_JOB_HEADROOM_MS is clamped UP to 60 s (one warning): the job deadline is never shorter than a read', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(OCR_JOB_HEADROOM_MIN_MS).toBe(60_000);
+    expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: '0' })).toBe(60_000);
+    expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: '30000' })).toBe(60_000);
+    expect(ocrJobHeadroomMs({ OCR_JOB_HEADROOM_MS: '60000' })).toBe(60_000);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+    // 40 s, not the old 10 s floor (a 10 s deadline cut every read off: paid twice).
+    expect(ocrJobDeadlineMs({ OCR_JOB_HEADROOM_MS: '0' })).toBe(40_000);
+    expect(ocrJobDeadlineMs({ OCR_JOB_HEADROOM_MS: '30000' })).toBe(40_000);
   });
 });

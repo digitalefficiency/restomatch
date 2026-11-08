@@ -1,4 +1,3 @@
-import { Suspense as ReactSuspense } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { originalProps } from '@/lib/i18n/original';
@@ -30,7 +29,7 @@ import {
   TopCrumbs,
 } from './nav';
 import { DashboardSearch } from './search';
-import { WorkerStatusBanner } from './worker-status';
+import { WorkerStatusBanner, readWorkerStatus } from './worker-status';
 import { TrpcProvider } from '@/lib/trpc/client';
 import { enabledFeatures } from '@/lib/ingest/features';
 import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
@@ -40,9 +39,6 @@ import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
  * `scroll-padding` (the bottom bar sets `data-rm-bar="off"` on <html> on field
  * routes and while the on-screen keyboard is open).
  */
-// Cast like the context providers: two @types/react copies (see lib/i18n/client.tsx).
-const Suspense = ReactSuspense as unknown as React.ComponentType<{ fallback: React.ReactNode; children: React.ReactNode }>;
-
 const CHROME_VARS =
   ':root{--rm-header-h:56px;--rm-bottomnav-h:calc(64px + env(safe-area-inset-bottom))}' +
   ':root[data-rm-bar=off]{--rm-bottomnav-h:0px}' +
@@ -66,6 +62,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
   const userId = session.user.id;
   const sessionRole = (session.user as { role?: string | null }).role ?? null;
+  // The heartbeat read runs beside stages 1 and 2, so it adds no sequential stage
+  // (perf-states-02). It is capped at HEARTBEAT_READ_DEADLINE_MS, and the banner
+  // paints with the shell instead of streaming in above the page.
+  const workerStatus = readWorkerStatus();
 
   const caller = await createServerCaller();
   // Stage 1: the membership check, plus everything that needs no membership.
@@ -164,7 +164,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     receiverLangsOn ? <PersistingLanguagePicker className={placement} /> : <LocaleSwitcher className={placement} />;
 
   return (
-    <TrpcProvider>
+    <TrpcProvider identity={{ id: userId, email, restaurantId: session.user.restaurantId ?? null }}>
       <ToastProvider>
         <NavProvider value={{ ...viewer, branch: multiBranch ? active.restaurantName : null }}>
           <style>{CHROME_VARS}</style>
@@ -228,10 +228,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
               className="pb-[calc(var(--rm-bottomnav-h)+var(--consent-h,0px)+1.5rem)] focus:outline-none lg:ps-[var(--rm-sidebar-w)] lg:pb-[calc(var(--consent-h,0px)+2rem)]"
             >
               <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-                {/* The heartbeat read never holds the page (perf-states-02). */}
-                <Suspense fallback={null}>
-                  <WorkerStatusBanner />
-                </Suspense>
+                <WorkerStatusBanner status={workerStatus} />
                 <LocaleSync />
                 {/* Always mounted: it only touches an EXISTING receiver queue, so a sign-out from a branch
                     without receiverPwa still wipes photos queued on another branch. */}

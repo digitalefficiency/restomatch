@@ -140,7 +140,8 @@ test.describe('phone conversion basics', () => {
 
   test('sticky CTA sits above the cookie banner', async ({ page }) => {
     await open(page, '/', { consent: false });
-    const banner = page.getByRole('dialog', { name: mHe.cookie.label });
+    // W1-01 (2ac9674c) made the banner a non-modal region, never a dialog (W1-01.spec pins both).
+    const banner = page.getByRole('region', { name: mHe.cookie.label });
     await expect(banner).toBeVisible();
     await page.mouse.wheel(0, 1400);
     const sticky = page.getByTestId('sticky-cta');
@@ -267,13 +268,28 @@ test.describe('showcase chrome', () => {
     await main.getByRole('button', { name: s.scan.useDemo }).click();
     await main.getByRole('button', { name: s.scan.process }).click();
     await main.getByRole('button', { name: s.recon.continueAdjust }).click({ timeout: 30_000 });
-    // Settle every line that needs a check (one "= order / = invoice" choice per line), then save.
-    const missing = main.getByRole('button', { name: s.adjust.missing });
-    const lines = await missing.count();
-    for (let i = 0; i < lines; i++) {
-      await missing.nth(i).locator('xpath=..').getByRole('button', { name: /^= / }).first().click();
+    // W1-06 Delivery Check (168a4531, 8a17f501): every line is confirmed by hand — "Arrived" on a
+    // plain line; a line that needs a check gets "As ordered" (or "Did not arrive" when nothing
+    // was ordered: a count never comes from the invoice) and "Done". Then the receipt closes.
+    await expect(page.getByTestId('delivery-check')).toBeVisible();
+    const lines = page.getByTestId('count-line');
+    const n = await lines.count();
+    expect(n, 'the demo delivery has lines to check').toBeGreaterThan(0);
+    for (let i = 0; i < n; i++) {
+      const line = lines.nth(i);
+      if (await line.getByTestId('count-arrived').count()) {
+        await line.getByTestId('count-arrived').click();
+      } else {
+        const asOrdered = line.getByTestId('chip-as-ordered');
+        await ((await asOrdered.count()) ? asOrdered : line.getByTestId('chip-missing')).click();
+        await line.getByTestId('count-done').click();
+      }
+      await expect(line).toHaveAttribute('data-resolved', 'true');
     }
-    await main.getByRole('button', { name: s.adjust.closeAndSave }).click();
+    const close = page.getByTestId('close-receipt');
+    await expect(close).toBeEnabled();
+    await expect(close).toContainText(`${n}/${n}`);
+    await close.click();
     const card = page.getByTestId('showcase-end-card');
     await expect(card).toBeVisible();
     await expect(card.getByRole('link', { name: sEn.endCard.ctaPilot })).toHaveAttribute(

@@ -55,6 +55,8 @@ export default async function MonthlyReportPage({
         return t(`next.${a.code}`, { count: formatNumber(Number(p.count), locale), amount: ils(Number(p.agorot)) });
       case 'linkPending':
         return t('next.linkPending', { count: formatNumber(Number(p.count), locale) });
+      case 'answerQuestions':
+        return t('next.answerQuestions', { count: formatNumber(Number(p.count), locale) });
       case 'talkToSupplier':
         return t('next.talkToSupplier', {
           supplier: String(locale === 'en' ? p.supplierEn : p.supplier),

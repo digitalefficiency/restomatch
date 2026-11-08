@@ -21,13 +21,12 @@ updates:
           - minor
           - patch
     ignore:
-      # Majors of core framework/runtime deps are coordinated manually (they
-      # need code changes); security updates still come through regardless.
-      - dependency-name: next
-        update-types: [version-update:semver-major]
-      - dependency-name: react
-        update-types: [version-update:semver-major]
-      - dependency-name: react-dom
+      # Pilot freeze (ציקטי, 8.11.2026): NO major version bumps for ANY npm
+      # dependency — the wildcard covers every workspace package, including the
+      # apps/mobile tree (it is in the root pnpm workspace, no separate lockfile).
+      # Majors need code changes and are coordinated by hand. `ignore` applies to
+      # version updates only: Dependabot SECURITY updates still come through.
+      - dependency-name: "*"
         update-types: [version-update:semver-major]
 
   # GitHub Actions — keep the SHA-pinned actions current (Dependabot updates both
