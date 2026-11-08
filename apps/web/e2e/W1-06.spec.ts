@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { expect, test, type Page, type Route } from '@playwright/test';
 import { DEMO_RESTAURANT_NAME, OWNER_STATE } from './env';
-import { e2eSql } from './helpers';
+import { collectPageErrors, e2eSql } from './helpers';
 
 /**
  * W1-06 · Delivery Check v1 and never losing field work — the receiver, on a
@@ -225,6 +225,27 @@ test.beforeEach(async ({ page }) => {
     { name: 'rm_cookie_consent', value: 'necessary', url },
   ]);
   await page.context().addCookies(receiverCookies);
+});
+
+test('a PO due outside today (after midnight in the restaurant tz) opens with no NOT_FOUND; its receipt resumes after a reload', async ({ page }) => {
+  // orders-received.spec failed between 23:00 and 24:00 Israel time: a PO due in an hour
+  // was not in today's list, so the page probed getReceipt({poId}) and the reported
+  // NOT_FOUND reached the browser console. Two days out is outside "today" at any hour.
+  const po = await freshPo('outside-today', { lines: 2 });
+  const sql = e2eSql();
+  try {
+    await sql`update purchase_orders set expected_delivery_at = now() + interval '2 days' where id = ${po.poId}`;
+  } finally {
+    await sql.end();
+  }
+  const errors = collectPageErrors(page);
+  await openPo(page, po.poId);
+  await page.getByTestId('scan-no-invoice').click();
+  await expect(page.getByTestId('delivery-check')).toBeVisible({ timeout: 30_000 });
+  // The receipt now exists: a reload finds it through the order's own receipt status.
+  await openPo(page, po.poId);
+  await expect(page.getByTestId('delivery-check')).toBeVisible({ timeout: 30_000 });
+  expect(errors, errors.join('\n')).toEqual([]);
 });
 
 test('invoice 10 = order 10, 8 arrived: recorded as qty_received 8 in ≤4 taps; no signed URL kept as evidence', async ({ page }) => {
