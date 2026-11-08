@@ -41,6 +41,24 @@ import {
   type FeatureKey,
   type SubscriptionOverrides,
 } from '@restomatch/db';
+import { atLocalTimeInTz } from '../lib/time';
+
+/** 'YYYY-MM' of the ISRAEL calendar month of `now` (what "this month" means to the app). */
+export function israelMonth(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' }).format(now).slice(0, 7);
+}
+
+/**
+ * `hour`:00 on TODAY'S ISRAEL calendar day (Asia/Jerusalem — the zone the app
+ * computes "today" / "this month" in). `new Date().setHours(h)` used the
+ * process's zone (UTC in CI): between 22:00 and 24:00 UTC that is yesterday in
+ * Israel, and on the last day of a month last month — seeded rows fell out of
+ * "today" / "this month" and ~47 api tests went red every night.
+ */
+export function israelToday(hour: number, now: Date = new Date()): Date {
+  // The app's own DST-safe wall-clock helper (lib/time): correct on the DST days too.
+  return atLocalTimeInTz(now, 'Asia/Jerusalem', hour, 0);
+}
 
 /** A fully-populated tenant graph for isolation/attack tests. */
 export interface Tenant {
@@ -209,8 +227,7 @@ export async function seedTenant(db: Database, tag: string): Promise<Tenant> {
     .returning();
   if (!productAlias) throw new Error('seed: productAlias');
 
-  const today = new Date();
-  today.setHours(11, 0, 0, 0);
+  const today = israelToday(11);
   const [po] = await db
     .insert(purchaseOrders)
     .values({

@@ -27,9 +27,10 @@ async function setFlag(tenant: Tenant, on: boolean) {
     .where(eq(restaurants.id, tenant.restaurantId));
 }
 
+// This Israel month so far: the seed (fixtures.ts israelToday) dates its invoice
+// on the Israel day, and the export reads days in Asia/Jerusalem.
 const PERIOD = (() => {
-  const d = new Date();
-  const iso = d.toISOString().slice(0, 10);
+  const iso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   return { from: `${iso.slice(0, 8)}01`, to: iso };
 })();
 

@@ -2,7 +2,7 @@ import { createDb, eq, restaurants, testDbUrl } from '@restomatch/db';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppContext } from '../context';
 import { appRouter } from '../index';
-import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { israelMonth, resetDb, seedTenant, type Tenant } from './fixtures';
 
 /**
  * monthlyReport.pdf renders the CALLER's restaurant only. The cross-tenant
@@ -33,7 +33,7 @@ const callerFor = (t: Tenant) =>
 
 const thisMonth = () => {
   const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  return israelMonth(now);
 };
 
 beforeAll(async () => {

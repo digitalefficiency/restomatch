@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   and,
   createDb,
@@ -17,7 +17,7 @@ import { ClaudeTranslator, CompositeTranslator, type MessagesClientLike } from '
 import { appRouter } from '../index';
 import type { AppContext } from '../context';
 import { __setReceivingTranslator, fillEnglishNames } from '../receiving/english';
-import { buildDevOcrStub, devOcrStubEnabled, stubVatRate } from '../receiving/devOcrStub';
+import { buildDevOcrStub, devOcrStubEnabled, localDay, stubVatRate } from '../receiving/devOcrStub';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 const db = createDb(testDbUrl());
@@ -274,6 +274,26 @@ describe('local-demo OCR stub', () => {
     await db.update(suppliers).set({ vatRate: null }).where(eq(suppliers.id, A.supplierId));
     const std = await buildDevOcrStub(db, A.restaurantId, A.grId);
     expect(std!.totals.vat).toBeCloseTo(Math.round((std!.totals.subtotal ?? 0) * 18) / 100, 2);
+  });
+
+  it("localDay is the restaurant's calendar day, not the UTC one (the 22–24 UTC night window)", () => {
+    expect(localDay(new Date('2026-10-31T21:59:00Z'), 'Asia/Jerusalem')).toBe('2026-10-31');
+    expect(localDay(new Date('2026-10-31T22:06:00Z'), 'Asia/Jerusalem')).toBe('2026-11-01');
+    // No zone on the row, or a zone Intl does not know: Asia/Jerusalem, never a throw.
+    expect(localDay(new Date('2026-10-31T22:06:00Z'), null)).toBe('2026-11-01');
+    expect(localDay(new Date('2026-10-31T22:06:00Z'), 'Not/AZone')).toBe('2026-11-01');
+  });
+
+  it("the stub invoice is dated on the restaurant's local day (a revert to the UTC day fails here at any hour)", async () => {
+    await addPoLines(A.poId, ['חזה עוף']);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-10-31T22:30:00Z')); // 00:30 on 1.11 in Israel
+      const stub = await buildDevOcrStub(db, A.restaurantId, A.grId);
+      expect(stub!.invoiceDate).toBe('2026-11-01');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('refuses a foreign receipt', async () => {
