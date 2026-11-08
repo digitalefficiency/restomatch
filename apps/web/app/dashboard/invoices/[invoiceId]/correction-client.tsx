@@ -260,7 +260,7 @@ export function InvoiceCorrection({
             <span className="text-sm text-muted">
               {t('correction.leak')}{' '}
               <bdi dir="ltr" className="font-mono font-semibold text-ink">
-                {money(rematch!.totalDiscrepancyAmount)}
+                {money(rematch!.leakIls)}
               </bdi>
             </span>
             <span className="text-sm text-muted">

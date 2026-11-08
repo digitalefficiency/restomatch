@@ -1,9 +1,18 @@
 import { z } from 'zod';
-import { computeLeakBreakdown, computeLeakHero, scanAwaitingCountSql, type LeakBreakdownInvoice } from '@restomatch/charts';
+import {
+  LEAK_EXCLUDED_TYPES,
+  computeLeakBreakdown,
+  computeLeakHero,
+  scanAwaitingCountSql,
+  type LeakBreakdownInvoice,
+} from '@restomatch/charts';
 import { eq, restaurants, sql, type Database } from '@restomatch/db';
 import { NEVER_CLAIMABLE_TYPES, claimableLines, sumClaims, type VatBasis } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
 import { financeProcedure, router } from '../trpc';
+
+/** The charts leak exclusion list (LEAK_EXCLUDED_TYPES) as SQL values. */
+const LEAK_EXCLUDED_SQL = sql.join(LEAK_EXCLUDED_TYPES.map((t) => sql`${t}`), sql`, `);
 
 /** Never a credit to ask for: the never-claimable types (owner 31.10) + a duplicate copy (held, not claimed). */
 const NOT_A_CREDIT_SQL = sql.join(
@@ -188,7 +197,7 @@ export const payRunRouter = router({
                  JOIN discrepancies d ON d.match_run_id = mr2.id AND d.restaurant_id = ${rid}
                  WHERE mr2.invoice_id = i.id AND mr2.restaurant_id = ${rid}
                    AND d.severity IN ('warn','block') AND d.resolution_status IN ('open','escalated')
-                   AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL') AND ABS(d.delta_amount) > 0
+                   AND d.type NOT IN (${LEAK_EXCLUDED_SQL}) AND ABS(d.delta_amount) > 0
                ) AS has_open,
                -- …and accepted real findings still ask for a credit (Σ |Δ|, capped at the
                -- invoice total like the hero's per-invoice cap), never "can pay".

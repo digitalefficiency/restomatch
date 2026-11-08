@@ -13,7 +13,10 @@ import { buildRules, resolveApprovalThresholds } from '../approvals/engine';
 export interface RunForInvoiceResult {
   matchRunId: string | null;
   status: MatchStatus;
+  /** Engine total (every finding) — the raw number. */
   totalDiscrepancyAmount: number;
+  /** The hero's leak rule for this run — what the correction screen shows as "דליפה". */
+  leakIls: number;
   discrepancyCount: number;
   poMatched: boolean;
 }
@@ -65,6 +68,7 @@ export const matchRouter = router({
           matchRunId: null,
           status: 'clean',
           totalDiscrepancyAmount: 0,
+          leakIls: 0,
           discrepancyCount: 0,
           poMatched: false,
         };
@@ -102,6 +106,7 @@ export const matchRouter = router({
         matchRunId: persisted.matchRunId,
         status: result.status,
         totalDiscrepancyAmount: result.totalDiscrepancyAmount,
+        leakIls: persisted.leakIls,
         discrepancyCount: persisted.discrepancyCount,
         poMatched: built.poId != null,
       };

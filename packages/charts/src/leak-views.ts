@@ -11,7 +11,7 @@ type SQL = ReturnType<typeof sql>;
  * Same definitions as the hero, so the default view (this month, no filters)
  * returns the hero's numbers exactly (tested):
  *  • leak = Σ|delta| of the lines LEAK_FILTER counts (warn/block, excluding
- *    PRICE_LOWER, UNORDERED_ARRIVAL and rejected duplicates), capped per
+ *    LEAK_EXCLUDED_TYPES and rejected duplicates), capped per
  *    invoice at the invoice total;
  *  • spend = Σ total_excl_vat of CHECKED invoices (matched, not pending a PO
  *    link, not a live duplicate copy);
@@ -124,15 +124,31 @@ const uuidList = (ids: string[]) => sql.join(ids.map((id) => sql`${id}::uuid`), 
 const textList = (vals: string[]) => sql.join(vals.map((v) => sql`${v}`), sql`, `);
 
 /**
+ * Discrepancy types that never count as leak — the ONE list behind LEAK_FILTER and
+ * every TS twin (the match feed's summary, the pay run, the monthly report by type):
+ *  • PRICE_LOWER        an under-charge;
+ *  • UNORDERED_ARRIVAL  waiting for a PO link (pending, calm);
+ *  • MISSING_ON_INVOICE an ordered line the invoice never billed — owner-approved
+ *    31.10 ("להוציא את 'חסר בחשבונית' ממספר הדליפה" → "כן"): a review item with no
+ *    ₪ in the leak.
+ */
+export const LEAK_EXCLUDED_TYPES = ['PRICE_LOWER', 'UNORDERED_ARRIVAL', 'MISSING_ON_INVOICE'] as const;
+const LEAK_EXCLUDED = new Set<string>(LEAK_EXCLUDED_TYPES);
+/** Whether a discrepancy type can count as leak at all (severity / duplicate rules aside). */
+export function isLeakType(type: string): boolean {
+  return !LEAK_EXCLUDED.has(type);
+}
+
+/**
  * Does a discrepancy line (alias `d`) count toward the leak? warn/block only;
- * never PRICE_LOWER (an under-charge) or UNORDERED_ARRIVAL (waiting for a PO
- * link); and never a DUPLICATE_INVOICE a bookkeeper rejected — "not a
+ * never a LEAK_EXCLUDED_TYPES type (an under-charge, waiting for a PO link, or
+ * an ordered line never billed); and never a DUPLICATE_INVOICE a bookkeeper rejected — "not a
  * duplicate" means no money was at risk. (Other rejected findings stay in: the
  * money did leak, the team chose not to claim it — the report's "waived".)
  * The single definition for the hero, views, report and chain.
  */
 export const LEAK_FILTER: SQL = sql`d.severity IN ('warn','block')
-  AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL')
+  AND d.type NOT IN (${textList([...LEAK_EXCLUDED_TYPES])})
   AND NOT (d.type = 'DUPLICATE_INVOICE' AND d.resolution_status = 'rejected')`;
 
 /**
