@@ -1,4 +1,6 @@
 import { checkInvoice } from './checks';
+import { classifyConsolidation } from './consolidation';
+import type { ExtractionMeta } from './providers/claudeVision';
 import type { InvoiceExtractionV2 } from './providers/invoiceSchema';
 import { reconcile } from './reconciler';
 import {
@@ -33,10 +35,11 @@ export async function runOcrPipeline(
   // added cost and latency but no information (the reconciler sees full
   // agreement either way).
   const singleProvider = options.documentAi === options.claude;
+  const xopts = options.signal ? { signal: options.signal } : undefined;
   const [documentAi, claude] =
     singleProvider
-      ? await options.claude.extract(image).then((r) => [r, r] as const)
-      : await Promise.all([options.documentAi.extract(image), options.claude.extract(image)]);
+      ? await options.claude.extract(image, xopts).then((r) => [r, r] as const)
+      : await Promise.all([options.documentAi.extract(image, xopts), options.claude.extract(image, xopts)]);
 
   const reconciledResult = reconcile(documentAi, claude);
   const { result: reconciledInvoice, conflicts } = reconciledResult;
@@ -57,6 +60,10 @@ export async function runOcrPipeline(
     ]),
   });
   if (v2.totals?.vatRate !== undefined) reconciledInvoice.totals.vatRate = v2.totals.vatRate;
+  const { consolidation, basis, billingPeriod } = classifyConsolidation(reconciledInvoice);
+  reconciledInvoice.consolidation = consolidation;
+  reconciledInvoice.consolidationBasis = basis;
+  if (billingPeriod) reconciledInvoice.billingPeriod = billingPeriod;
   const checks = checkInvoice(reconciledInvoice, {
     expectedSupplierBusinessId: options.expectedSupplierBusinessId,
   });
@@ -85,6 +92,7 @@ export async function runOcrPipeline(
     hasLowConfidenceLines(reconciledInvoice) ||
     (matcherWasUsed && hasUnresolvedLines(reconciledInvoice));
 
+  const meta = (claude as { meta?: ExtractionMeta }).meta;
   return {
     primary: claude,
     reconciled: reconciledInvoice,
@@ -93,6 +101,7 @@ export async function runOcrPipeline(
     needsHumanReview,
     conflicts,
     checks,
+    ...(meta ? { meta } : {}),
   };
 }
 

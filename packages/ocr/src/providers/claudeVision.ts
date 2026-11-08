@@ -15,7 +15,7 @@
  */
 
 import { OcrExtractionError, type OcrUsage } from '../errors';
-import type { ImageSource, OcrProvider } from '../types';
+import type { ImageSource, OcrExtractOptions, OcrProvider } from '../types';
 import {
   joinTextBlocks,
   mustFetchBytes,
@@ -54,6 +54,11 @@ export interface ClaudeVisionConfig {
   effort?: OcrEffort;
   /** Request timeout in ms. Falls back to OCR_CLAUDE_TIMEOUT_MS, then DEFAULT_OCR_TIMEOUT_MS. */
   timeoutMs?: number;
+  /**
+   * SDK client retries. Default OCR_MAX_RETRIES (1); the worker passes 0 because
+   * its job queue already retries.
+   */
+  maxRetries?: number;
   /** Called with the API usage of each call (benchmark cost accounting). */
   onUsage?: (usage: { input_tokens?: number; output_tokens?: number }) => void;
 }
@@ -91,7 +96,7 @@ export const SYSTEM_PROMPT = `אתה מומחה לקריאת מסמכי ספקי
   "invoiceNumber": string,
   "invoiceDate": "YYYY-MM-DD",
   "allocationNumber": string | null,
-  "deliveryNotes": [{ "number": string, "date": "YYYY-MM-DD"? }],
+  "deliveryNotes": [{ "number": string, "date": "YYYY-MM-DD"?, "totalExclVat": number? }],
   "periodStart": "YYYY-MM-DD" | null,
   "periodEnd": "YYYY-MM-DD" | null,
   "lines": [{ "sku": string?, "rawDescription": string, "rawDescriptionEn": string, "lineKind": "item" | "deposit" | "delivery_fee", "qty": number, "unit": string, "unitPrice": number, "lineDiscountPct": number?, "lineTotal": number, "vatRate": number?, "confidence": number? }],
@@ -103,7 +108,7 @@ export const SYSTEM_PROMPT = `אתה מומחה לקריאת מסמכי ספקי
 }
 
 סוג המסמך ("documentKind"):
-- "חשבונית מס" = tax_invoice; "חשבונית מס קבלה" = tax_invoice_receipt; "חשבונית זיכוי" / "זיכוי" = credit_note; "תעודת משלוח" = delivery_note; "חשבונית מרכזת" (מרכזת כמה תעודות משלוח) = consolidated; "קבלה" = receipt; "הצעת מחיר" = quote; אחרת other.
+- "חשבונית מס" = tax_invoice; "חשבונית מס קבלה" = tax_invoice_receipt; "חשבונית זיכוי" / "זיכוי" = credit_note; "תעודת משלוח" = delivery_note; "חשבונית מרכזת" / "חשבונית ריכוז" / "ריכוז תעודות משלוח" / חשבונית שמפרטת רשימה של כמה מספרי ת.מ. = consolidated; "קבלה" = receipt; "הצעת מחיר" = quote; אחרת other.
 
 צדדים:
 - "supplier" = מי שהנפיק את המסמך (בכותרת, ליד ח.פ./ע.מ.). "businessId" = מספר ח.פ./ע.מ. של הספק כפי שמודפס, ספרות בלבד.
@@ -111,7 +116,11 @@ export const SYSTEM_PROMPT = `אתה מומחה לקריאת מסמכי ספקי
 - "contacts" = כל איש קשר מודפס: מנהל אזור / סוכן / מנהל תיק לקוח / נהג — role בעברית, name וטלפון אם מופיע. "phone" ברמת supplier = הטלפון הראשי של הספק.
 - "allocationNumber" = "מספר הקצאה" אם מופיע, ספרות בלבד.
 
-חשבונית מרכזת: "deliveryNotes" = כל תעודות המשלוח שהיא מרכזת (מספר ותאריך); "periodStart"/"periodEnd" = התקופה המודפסת. במסמך אחר — רשימה ריקה ו-null.
+תעודות משלוח ותקופה:
+- "deliveryNotes" = כל מספר תעודת משלוח (ת.מ.) שמודפס במסמך, פעם אחת כל אחד: "number" ספרות בלבד, "date" אם מודפס לצידו, "totalExclVat" = סכום התעודה לפני מע״מ אם מודפס לצידה. אין ת.מ. — רשימה ריקה.
+- "periodStart"/"periodEnd" = תקופת החיוב המודפסת ("לתקופה 01/10–31/10", "חודש אוקטובר") — רק אם מודפסת; אחרת null.
+- "consolidated" רק כשהמסמך בבירור מרכזת: כותרת מרכזת/ריכוז, או רשימה של שתי ת.מ. ומעלה. חשבונית רגילה שמציינת ת.מ. אחת ("לפי ת.מ. 1234") — נשארת tax_invoice, ואת הת.מ. רשום ב-"deliveryNotes". בספק — tax_invoice.
+- במרכזת שמפרטת רק תעודות (בלי מוצרים) — "lines" ריקה; במרכזת שמפרטת מוצרים מסוכמים לחודש — שורה לכל מוצר כרגיל.
 
 שורות:
 - שורה אחת לכל שורת פריט מודפסת, בסדר המודפס. "sku" = המק״ט של הספק כפי שמודפס; אם אין — השמט.
@@ -148,18 +157,22 @@ export class ClaudeVision implements OcrProvider {
     return EFFORTS.includes(e as OcrEffort) ? (e as OcrEffort) : DEFAULT_OCR_EFFORT;
   }
 
-  async extract(image: ImageSource): Promise<ClaudeInvoiceExtraction> {
+  async extract(image: ImageSource, opts: OcrExtractOptions = {}): Promise<ClaudeInvoiceExtraction> {
+    const { signal } = opts;
+    const aborted = () => new OcrExtractionError('aborted', 'the caller cancelled the read');
+    if (signal?.aborted) throw aborted();
     // LAZY import: keeps the package typecheck/test green when the SDK isn't
     // fetched in the sandbox. Typed loosely (any) on purpose (SDK 0.69).
     const { default: Anthropic } = (await import('@anthropic-ai/sdk')) as { default: any };
     const client = new Anthropic({
       apiKey: this.config.apiKey,
       timeout: this.config.timeoutMs ?? ocrTimeoutMs(),
-      maxRetries: OCR_MAX_RETRIES,
+      maxRetries: this.config.maxRetries ?? OCR_MAX_RETRIES,
     });
 
     const fetchBytes = this.config.fetchBytes ?? mustFetchBytes(image);
     const payload = await resolveImage(image, fetchBytes);
+    if (signal?.aborted) throw aborted();
 
     const model = this.model;
     const effort = this.effort;
@@ -168,7 +181,7 @@ export class ClaudeVision implements OcrProvider {
     // Opus 5.5 always thinks and effort is its only control; thinking blocks in
     // the answer are skipped by joinTextBlocks. Effort is ALWAYS sent — Opus
     // 5.5 would otherwise default to medium.
-    const response = await client.messages.create({
+    const request = {
       model,
       max_tokens: this.config.maxTokens ?? DEFAULT_MAX_TOKENS,
       output_config: { effort },
@@ -182,7 +195,16 @@ export class ClaudeVision implements OcrProvider {
           ],
         },
       ],
-    });
+    };
+    // The SDK's APIUserAbortError is unwrapped into OcrExtractionError('aborted');
+    // request options are only passed when there is a signal (unchanged call otherwise).
+    let response: any;
+    try {
+      response = signal ? await client.messages.create(request, { signal }) : await client.messages.create(request);
+    } catch (err) {
+      if (signal?.aborted || (err as { name?: string } | null)?.name === 'APIUserAbortError') throw aborted();
+      throw err;
+    }
     const elapsedMs = Date.now() - t0;
     this.config.onUsage?.(response.usage ?? {});
     const usage: OcrUsage = {
