@@ -20,6 +20,7 @@ import { PRODUCT_LABEL_KEYS } from '../../../showcase/dashboard/_components/prod
 import { LEAD_FIELD_MAX, LEADS_RATE_LIMIT, monthlyAgorotOf, submitLead, type LeadCreateInput } from '../leadAction.core';
 import { planCtaHref, planDisplayOrder } from '../../pricing/pricing.logic';
 import { SAMPLE_CAUGHT_THIS_MONTH_ILS } from '../../../showcase/_components/ShowcaseEndCard';
+import { PROBLEM_C1_YEAR_ILS } from '../detail-sections';
 
 const agorot = (ils: number) => Math.round(ils * 100);
 const WEB = join(__dirname, '../../../..');
@@ -266,5 +267,16 @@ describe('W3-06 · review: one vocabulary on the public site', () => {
       expect(read(f), f).not.toMatch(/נחסכ|דרשנו|דריש/);
     }
     expect(read('lib/i18n/messages/showcase/en.ts')).not.toMatch(/\{amount\} saved/);
+  });
+
+  it('public copy carries no ₪ literal: amounts are placeholders formatted by formatIls (M7)', () => {
+    for (const f of PUBLIC_MESSAGES) {
+      const src = read(f).replace(/\/\*[\s\S]*?\*\//g, '');
+      expect(src, f).not.toMatch(/₪\s?\d|\d\s?₪/);
+    }
+    expect(PROBLEM_C1_YEAR_ILS).toBe(3_900); // ₪2.50/kg × 30 kg × 52 weeks
+    const sections = read('app/(marketing)/_components/detail-sections.tsx');
+    expect(sections).toMatch(/t\('problem\.c1Amount', \{ amount: ils\(PROBLEM_C1_YEAR_ILS\) \}\)/);
+    expect(sections).toMatch(/t\('features\.approvals\.r3', \{ from: ils\(/);
   });
 });
