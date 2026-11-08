@@ -21,6 +21,7 @@
  * SEC-1, a human PR on the immutable `leads.ts` / `route.ts`.
  */
 import type { RateLimitOptions } from '@restomatch/api';
+import { parseNumberInput } from '@restomatch/types';
 import { formatIlPhone, validateLead, type LeadFieldErrors } from './leadForm.logic';
 
 /** Mirrors `PER_PROCEDURE_LIMITS['leads.create']` in the (immutable) tRPC route. */
@@ -89,10 +90,10 @@ function field(fd: FormData, key: string, max: number): string {
 
 /** ₪ typed by a visitor ("120,000", "₪ 80 000") → integer agorot, or undefined. */
 export function monthlyAgorotOf(raw: string): number | undefined {
-  const ils = Number(raw.replace(/[^\d.]/g, ''));
-  if (!Number.isFinite(ils) || ils <= 0) return undefined;
-  const agorot = Math.round(ils * 100);
-  return agorot > MAX_AGOROT ? undefined : agorot;
+  // The one input parser (never a hand-stripped comma): exact agorot or nothing.
+  const cell = parseNumberInput(raw, { scale: 2 });
+  if (cell.kind !== 'ok' || cell.scaled <= 0) return undefined;
+  return cell.scaled > MAX_AGOROT ? undefined : cell.scaled;
 }
 
 export async function submitLead(fd: FormData, deps: LeadActionDeps): Promise<LeadActionState> {
