@@ -47,6 +47,22 @@ describe('W3-06 · one sample month across the public site', () => {
     expect(decide.tone).toBe('danger');
   });
 
+  it('the loop\'s named example (draft beer ₪104.80) is one of the decide row\'s gaps (M5)', () => {
+    const decide = SAMPLE_NEEDS[0];
+    expect(decide.key).toBe('decide');
+    expect(decide.example).toEqual({ label: { he: 'בירה מהחבית', en: 'Draft beer keg' }, amountIls: 104.8 });
+    expect(agorot(decide.example.amountIls)).toBe(10_480);
+    expect(decide.example.amountIls).toBeLessThanOrEqual(decide.amountIls);
+    expect(decide.count).toBeGreaterThan(1); // an example among several, never the whole row
+  });
+
+  it('the OG share card quotes the sample month through formatIls, no literal (M6)', () => {
+    const og = read('app/og/[file]/route.tsx');
+    expect(og).toMatch(/plainIls\(SAMPLE_CAUGHT_BEFORE_PAYMENT_ILS, lang\)/);
+    expect(og).toMatch(/formatIls\(/);
+    expect(og).not.toMatch(/412|₪\s?\d/);
+  });
+
   it('good news quotes only decided money: caught − still to decide, and never the Pro price', () => {
     expect(SAMPLE_GOOD_NEWS_ILS).toBe(SAMPLE_CAUGHT_BEFORE_PAYMENT_ILS - SAMPLE_UNDECIDED_ILS);
     expect(SAMPLE_GOOD_NEWS_ILS).toBe(620);

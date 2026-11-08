@@ -50,7 +50,17 @@ export const SAMPLE_INVOICES_IN_CHECK = 7;
  * paid invoices (the paid part).
  */
 export const SAMPLE_NEEDS = [
-  { key: 'decide', tone: 'danger', amountIls: 910, count: 2 },
+  {
+    key: 'decide',
+    tone: 'danger',
+    amountIls: 910,
+    count: 2,
+    /**
+     * The one line item the 9:16 loop names under this row ("לדוגמה: בירה
+     * מהחבית · ₪104.80"): one of the two gaps, so it sits inside the ₪910.
+     */
+    example: { label: { he: 'בירה מהחבית', en: 'Draft beer keg' }, amountIls: 104.8 },
+  },
   { key: 'credit', tone: 'warn', amountIls: 720, count: 3 },
 ] as const;
 
