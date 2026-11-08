@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createDb, eq, recoveryClaims, recoveryEvents, restaurants, testDbUrl } from '@restomatch/db';
-import { transitionClaim } from '../recovery/service';
+import { createDb, creditNotes, eq, invoiceLines, invoices, recoveryClaims, recoveryEvents, restaurants, testDbUrl } from '@restomatch/db';
+import { recordCreditNote, transitionClaim } from '../recovery/service';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -23,6 +23,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await db.delete(recoveryEvents).where(eq(recoveryEvents.restaurantId, T.restaurantId));
+  await db.delete(creditNotes).where(eq(creditNotes.restaurantId, T.restaurantId));
   await db.delete(recoveryClaims).where(eq(recoveryClaims.restaurantId, T.restaurantId));
   const [c] = await db
     .insert(recoveryClaims)
@@ -90,5 +91,22 @@ describe('recovery hardening (H-06 review → W3-11)', () => {
     const last = (await events()).at(-1)!;
     expect(last.toStatus).toBe('disputed');
     expect(last.createdAt.getTime()).toBe(later.getTime());
+  });
+
+  it("a credit line on an undated invoice gets the restaurant's calendar day, not the UTC one", async () => {
+    // 31.10 22:30Z = 1.11 00:30 in Israel: the credit note is dated 1.11 (November), not 31.10.
+    await db
+      .update(restaurants)
+      .set({ timezone: 'Asia/Jerusalem' })
+      .where(eq(restaurants.id, T.restaurantId));
+    await db
+      .update(invoices)
+      .set({ invoiceDate: null, createdAt: new Date('2026-10-31T22:30:00Z') })
+      .where(eq(invoices.id, T.invoiceId));
+    await db.update(invoiceLines).set({ lineTotal: '-5.00' }).where(eq(invoiceLines.id, T.invoiceLineId));
+    const out = await recordCreditNote(db, T.restaurantId, { claimIds: [claimId], invoiceLineId: T.invoiceLineId });
+    const [note] = await db.select().from(creditNotes).where(eq(creditNotes.id, out.creditNoteId));
+    expect(note!.issuedOn).toBe('2026-11-01');
+    expect(note!.amountAgorot).toBe(500);
   });
 });

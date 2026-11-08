@@ -795,7 +795,12 @@ export async function recordCreditNote(
   if (input.invoiceLineId) {
     const res = await db.execute(sql`
       SELECT i.id AS invoice_id, i.supplier_id, i.invoice_number,
-             to_char(COALESCE(i.invoice_date, i.created_at), 'YYYY-MM-DD') AS issued_on,
+             -- The restaurant's calendar day, never the session's (UTC on Supabase): an undated
+             -- invoice created 00:00–02:00 IL must not get yesterday's (or last month's) issued_on.
+             -- invoice_date is stored at 00:00Z, so it keeps its date in Israel.
+             to_char(COALESCE(i.invoice_date, i.created_at) AT TIME ZONE
+               (SELECT COALESCE(timezone, 'Asia/Jerusalem') FROM restaurants WHERE id = ${restaurantId}),
+               'YYYY-MM-DD') AS issued_on,
              il.line_total, round(abs(il.line_total) * 100)::bigint AS amount_agorot
       FROM invoice_lines il
       JOIN invoices i ON i.id = il.invoice_id AND i.restaurant_id = ${restaurantId}

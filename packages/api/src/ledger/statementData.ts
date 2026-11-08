@@ -30,7 +30,11 @@ export async function reconcileSupplierStatement(
 
   const [invoiceRows, notes, coverage, claims] = await Promise.all([
     db.execute(sql`
-      SELECT id, invoice_number, to_char(invoice_date, 'YYYY-MM-DD') AS invoice_date,
+      SELECT id, invoice_number,
+             -- The restaurant's calendar day (invoice_date is stored at 00:00Z; created_at is a real instant).
+             to_char(COALESCE(invoice_date, created_at) AT TIME ZONE
+               (SELECT COALESCE(timezone, 'Asia/Jerusalem') FROM restaurants WHERE id = ${restaurantId}::uuid),
+               'YYYY-MM-DD') AS invoice_date,
              status::text AS status, total_incl_vat::text AS total_incl_vat
       FROM invoices
       WHERE restaurant_id = ${restaurantId}::uuid AND supplier_id = ${supplierId}::uuid
