@@ -5,6 +5,7 @@ import { getT } from '@/lib/i18n/server';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { primaryCtaHref } from '../_components/cta';
 import { alternatesFor, metadataBase, socialFor } from '../_components/seo';
+import { AboutHashForward } from './AboutHashForward';
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getT(marketing);
@@ -29,6 +30,7 @@ export default async function AboutPage() {
   // features, calculator, trust) moved to /product, unchanged in substance.
   return (
     <>
+      <AboutHashForward />
       <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6 sm:py-20">
         <div className="mb-12">
           <div className="mb-4 h-0.5 w-12 rounded-full flow-stream" aria-hidden="true" />
