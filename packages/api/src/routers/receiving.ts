@@ -47,6 +47,7 @@ import { appError } from '../errors';
 import { endOfDayInTz, startOfDayInTz } from '../lib/time';
 import { claimableLines } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
+import { QTY_DISCREPANCY_TYPES, nullFields, seesNoMoney, stripMoneyDeep } from '../lib/staffMoney';
 import { invoiceReaderProcedure, managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
 import { isFeatureOn } from '../lib/featureGate';
 import { dockPriceContext } from '../dockPriceContext/service';
@@ -271,6 +272,16 @@ export const receivingRouter = router({
         .from(restaurants)
         .where(eq(restaurants.id, ctx.session.restaurantId))
         .limit(1);
+      // G-07 strip (pilot): the receiver sees no ₪ — no PO estimate, no expected
+      // prices. The chef keeps them (orders). The wizard's price check only
+      // compares when both prices are present, so it degrades to qty checks.
+      if (ctx.session.role === 'receiver') {
+        return {
+          ...nullFields(po, ['totalEstimated']),
+          lines: lines.map((l) => nullFields(l, ['unitPriceExpected'])),
+          features: { dockSlip: featureEnabled(rest?.settings, 'dockSlip') },
+        };
+      }
       return { ...po, lines, features: { dockSlip: featureEnabled(rest?.settings, 'dockSlip') } };
     }),
 
@@ -497,6 +508,18 @@ export const receivingRouter = router({
         engine = { receiptClosed, ready, holdReason, totalIls, lines };
       }
 
+      // G-07 strip (pilot): the receiver sees the slip's quantities, never the
+      // engine ₪ (total, per-line amount, and the expected / actual of price-type
+      // findings). Same shape; the UI already hides them (showMoney=false).
+      if (seesNoMoney(ctx.session.role)) {
+        engine = {
+          ...stripMoneyDeep(engine),
+          lines: engine.lines.map((l) => ({
+            ...stripMoneyDeep(l),
+            ...(QTY_DISCREPANCY_TYPES.has(l.type) ? {} : { expected: null, actual: null }),
+          })),
+        };
+      }
       return {
         enabled: true as const,
         header: {
@@ -580,7 +603,20 @@ export const receivingRouter = router({
 
       // EN-3: the worker marks a final OCR failure in ocr_payload.raw; expose
       // only the flag + reason (never the raw extraction payload).
-      const { ocrPayload, ...invoiceFields } = invoice;
+      const { ocrPayload, ...rawInvoiceFields } = invoice;
+      // G-07 strip (pilot): the receiver polls this during the Delivery Check
+      // but sees no ₪ — header totals, line totals and billed unit prices are
+      // nulled. `priceRead` (every role) keeps the wizard's "was a price read
+      // on this line?" signal, so a read line isn't mistaken for an unread one.
+      const isReceiver = ctx.session.role === 'receiver';
+      const invoiceFields = isReceiver
+        ? nullFields(rawInvoiceFields, ['totalExclVat', 'vatAmount', 'totalInclVat'])
+        : rawInvoiceFields;
+      const flagged = lines.map((l) => {
+        const price = l.unitPriceBilled == null ? null : Number(l.unitPriceBilled);
+        return { ...l, priceRead: price !== null && Number.isFinite(price) && price !== 0 };
+      });
+      const outLines = isReceiver ? flagged.map((l) => nullFields(l, ['unitPriceBilled', 'lineTotal'])) : flagged;
       const failure = (ocrPayload?.raw ?? null) as { ocrFailed?: boolean; reason?: string } | null;
       return {
         ...invoiceFields,
@@ -597,7 +633,7 @@ export const receivingRouter = router({
         })(),
         supplierName: supplier?.name ?? null,
         supplierNameEn: supplier?.nameEn ?? null,
-        lines,
+        lines: outLines,
       };
     }),
 
