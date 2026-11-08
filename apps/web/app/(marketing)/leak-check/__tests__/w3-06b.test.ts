@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_FILES, STAGES, addFiles, isPreviewable, removeFileAt, stageNumber } from '../leakCheckForm.logic';
+import { MAX_FILES, STAGES, addFiles, focusAfterRemove, isPreviewable, removeFileAt, stageNumber } from '../leakCheckForm.logic';
 
 const f = (name: string, size = 1, lastModified = 1) => ({ name, size, lastModified });
 
@@ -55,5 +55,27 @@ describe('W3-06b · a missing note amount never prints ₪0 (G-16 money-swallow)
   it('the result page has no `amountAgorot ?? 0` left', () => {
     const page = readFileSync(join(__dirname, '../result/page.tsx'), 'utf8');
     expect(page).not.toMatch(/amountAgorot\s*\?\?\s*0/);
+  });
+});
+
+describe('W3-06b · a11y: focus after ✕ and DOM order (conductor Q9 / Q6)', () => {
+  it('moves focus to the ✕ that slid into place, else the previous one, else the picker', () => {
+    expect(focusAfterRemove(0, 3)).toBe(0); // [a,b,c] − a → b's ✕ is now #0
+    expect(focusAfterRemove(1, 3)).toBe(1);
+    expect(focusAfterRemove(2, 3)).toBe(1); // last removed → previous
+    expect(focusAfterRemove(0, 1)).toBe(-1); // list empty → the file picker
+  });
+
+  it('the form wires the focus target instead of dropping focus to <body>', () => {
+    const form = readFileSync(join(__dirname, '../LeakCheckForm.tsx'), 'utf8');
+    expect(form).toMatch(/focusAfterRemove\(i, files\.length\)/);
+    expect(form).toMatch(/ref=\{pickerRef\}/);
+  });
+
+  it('the upload card comes first in the DOM (phone order) — no CSS-only reordering', () => {
+    const page = readFileSync(join(__dirname, '../page.tsx'), 'utf8');
+    expect(page).not.toMatch(/order-first/);
+    expect(page.indexOf('<LeakCheckForm />')).toBeLessThan(page.indexOf('<h1'));
+    expect(page.indexOf("t('page.unavailable')")).toBeLessThan(page.indexOf('<h1'));
   });
 });

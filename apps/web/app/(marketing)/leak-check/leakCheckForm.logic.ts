@@ -47,3 +47,14 @@ export function removeFileAt<T>(current: readonly T[], index: number): T[] {
 export function isPreviewable(type: string): boolean {
   return /^image\/(jpeg|png|webp)$/.test(type);
 }
+
+/**
+ * Where focus goes after the ✕ at `removed` is pressed in a list that had
+ * `lengthBefore` files (WCAG 2.4.3 — never drop focus to <body>): the ✕ that
+ * slid into the same slot, else the previous one, else -1 = the file picker.
+ */
+export function focusAfterRemove(removed: number, lengthBefore: number): number {
+  const remaining = lengthBefore - 1;
+  if (remaining <= 0) return -1;
+  return Math.min(removed, remaining - 1);
+}

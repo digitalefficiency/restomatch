@@ -36,7 +36,24 @@ export default async function LeakCheckPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
       <div className="grid gap-10 lg:grid-cols-[1fr_1.1fr] lg:items-start">
-        <div>
+        {/* The upload card is first in the DOM = the phone reading order (W3-06b · mkt-14, WCAG 1.3.2/2.4.3);
+            from lg the pitch takes the start column via lg:order-*. */}
+        {available ? (
+          <div className="lg:order-2">
+            <LeakCheckForm />
+          </div>
+        ) : (
+          <div className="rounded-3xl border border-line bg-surface p-8 text-center shadow-card lg:order-2">
+            <p className="text-base text-muted">{t('page.unavailable')}</p>
+            <Link
+              href="/#lead"
+              className="mt-6 inline-flex items-center justify-center rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-on-primary shadow-glow-primary hover:brightness-110"
+            >
+              {t('page.unavailableCta')}
+            </Link>
+          </div>
+        )}
+        <div className="lg:order-1">
           <p className="mb-3 text-xs font-semibold uppercase text-gold ltr:font-mono ltr:tracking-[0.2em] rtl:text-sm">
             {t('page.eyebrow')}
           </p>
@@ -68,22 +85,6 @@ export default async function LeakCheckPage() {
           </div>
         </div>
 
-        {/* Phone: the upload card comes first (W3-06b · mkt-14); desktop keeps the pitch on the start side. */}
-        {available ? (
-          <div className="order-first lg:order-none">
-            <LeakCheckForm />
-          </div>
-        ) : (
-          <div className="order-first rounded-3xl border border-line bg-surface p-8 text-center shadow-card lg:order-none">
-            <p className="text-base text-muted">{t('page.unavailable')}</p>
-            <Link
-              href="/#lead"
-              className="mt-6 inline-flex items-center justify-center rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-on-primary shadow-glow-primary hover:brightness-110"
-            >
-              {t('page.unavailableCta')}
-            </Link>
-          </div>
-        )}
       </div>
     </div>
   );

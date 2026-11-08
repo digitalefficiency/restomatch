@@ -6,7 +6,7 @@ import { FileText, FileUp, Loader2, ShieldCheck, X } from 'lucide-react';
 import { Field, Input } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { leakCheck } from '@/lib/i18n/messages/leakCheck';
-import { MAX_FILES, STAGES, addFiles, isPreviewable, removeFileAt, stageNumber, type Stage } from './leakCheckForm.logic';
+import { MAX_FILES, STAGES, addFiles, focusAfterRemove, isPreviewable, removeFileAt, stageNumber, type Stage } from './leakCheckForm.logic';
 
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 /** Photos are downscaled in the browser so 10 phone shots fit one ~4 MB request. */
@@ -72,6 +72,17 @@ const ERROR_KEYS = {
 export function LeakCheckForm() {
   const t = useT(leakCheck);
   const [files, setFiles] = useState<File[]>([]);
+  // W3-06b · after a ✕ the removed button is gone; move focus to the next ✕ (or the picker), never <body>.
+  const pickerRef = useRef<HTMLInputElement>(null);
+  const thumbsRef = useRef<HTMLUListElement>(null);
+  const pendingFocus = useRef<number | null>(null);
+  useEffect(() => {
+    const target = pendingFocus.current;
+    if (target === null) return;
+    pendingFocus.current = null;
+    const next = target >= 0 ? thumbsRef.current?.querySelector<HTMLButtonElement>(`[data-remove-index="${target}"]`) : null;
+    (next ?? pickerRef.current)?.focus();
+  }, [files]);
   const [priceList, setPriceList] = useState<File | null>(null);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -139,6 +150,7 @@ export function LeakCheckForm() {
           <FileUp className="h-5 w-5" aria-hidden="true" />
           {files.length > 0 ? t('form.selected', { n: files.length }) : t('form.choose')}
           <input
+            ref={pickerRef}
             id="lc-invoices"
             type="file"
             multiple
@@ -155,7 +167,7 @@ export function LeakCheckForm() {
           />
         </label>
         {files.length > 0 ? (
-          <ul className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5" data-testid="lc-thumbs">
+          <ul ref={thumbsRef} className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5" data-testid="lc-thumbs">
             {files.map((f, i) => (
               <li key={`${f.name}:${f.size}:${f.lastModified}`} className="relative aspect-square overflow-hidden rounded-xl border border-line bg-surface-2">
                 {isPreviewable(f.type) ? (
@@ -169,7 +181,11 @@ export function LeakCheckForm() {
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => setFiles((cur) => removeFileAt(cur, i))}
+                  data-remove-index={i}
+                  onClick={() => {
+                    pendingFocus.current = focusAfterRemove(i, files.length);
+                    setFiles((cur) => removeFileAt(cur, i));
+                  }}
                   aria-label={t('form.remove', { name: f.name })}
                   className="touch-target absolute end-1 top-1 inline-flex h-8 w-8 items-center justify-center rounded-full bg-ink/80 text-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
