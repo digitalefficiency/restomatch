@@ -260,16 +260,22 @@ export function capKey(row: { restaurantId: string; target: string }): string {
 export const DEMO_EMAIL_DOMAIN_FOR_SENDING = 'kfar-hazeitim.test';
 
 /**
+ * Reserved top-level domains (RFC 2606 / 6761): no mail to them can ever be
+ * delivered (.test, .local, .example, .invalid, localhost).
+ */
+const RESERVED_TLD_RE = /(^|\.)(test|local|example|invalid|localhost)$/i;
+
+/**
  * An address no real provider should ever be handed: the demo tenant's domain
- * or any reserved .test TLD (RFC 2606). Each one is a bounce, and bounces burn
- * the Resend quota.
+ * or any reserved TLD. Each one is a bounce, and bounces burn the Resend quota.
+ * On 7.11 a demo recovery reminder was rejected, retried five times and parked.
  */
 export function isUndeliverableAddress(address: string): boolean {
   const a = address.trim().toLowerCase();
   const at = a.lastIndexOf('@');
   if (at < 0) return false;
   const domain = a.slice(at + 1).replace(/\.$/, '');
-  return domain === DEMO_EMAIL_DOMAIN_FOR_SENDING || domain === 'test' || domain.endsWith('.test');
+  return domain === DEMO_EMAIL_DOMAIN_FOR_SENDING || RESERVED_TLD_RE.test(domain);
 }
 
 /**
