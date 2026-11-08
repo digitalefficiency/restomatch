@@ -41,6 +41,7 @@ import {
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { restaurantMonthKey } from './helpers/il-day';
 
 /**
  * CROSS-TENANT ATTACK SUITE
@@ -726,10 +727,13 @@ describe('list/aggregate isolation (A must not see B)', () => {
 
   it('owner.leakReport aggregates A-scoped data only', async () => {
     const caller = callerFor(A);
-    const now = new Date();
-    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    // The restaurant's (Israeli) month — the one seedTenant dates its invoices in.
+    // The runner's getMonth() (UTC on CI) is last month on the 1st after local
+    // midnight: an empty report, so the B checks below would pass vacuously.
+    const month = restaurantMonthKey();
     const report = await caller.owner.leakReport({ month });
     const json = JSON.stringify(report);
+    expect(report.bySupplier.some((r) => r.supplierId === A.supplierId)).toBe(true); // not an empty month
     expect(json).not.toContain(B.supplierName);
     expect(report.bySupplier.every((r) => r.supplierId !== B.supplierId)).toBe(true);
   });
@@ -2199,9 +2203,10 @@ describe('recovery + monthly report (A → B)', () => {
   });
 
   it('monthlyReport.preview / pdf aggregate A-scoped data only', async () => {
-    const now = new Date();
-    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    // The restaurant's (Israeli) month — see owner.leakReport above.
+    const month = restaurantMonthKey();
     const p = await callerFor(A).monthlyReport.preview({ month, locale: 'he' });
+    expect(p.data.leakAgorot).toBeGreaterThan(0); // A's own month is not empty
     const json = JSON.stringify(p);
     expect(json).not.toContain(B.supplierName);
     expect(p.data.restaurantName).toBe('Resto A');
