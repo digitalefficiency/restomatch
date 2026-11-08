@@ -9,8 +9,12 @@ import { LEADS_RATE_LIMIT, submitLead, type LeadActionState } from './leadAction
 
 /**
  * W3-06 · the lead form as a progressively enhanced Server Action (works with
- * JS off). Same front door as `POST /api/trpc/leads.create`: origin check, the
- * `leads` per-IP bucket, bounded fields, then the immutable `leads.create`.
+ * JS off). The same guards as `POST /api/trpc/leads.create` — origin check,
+ * the `leads` per-IP bucket, bounded fields — then the immutable
+ * `leads.create`. Its extra validation is NOT the security boundary for leads: the public tRPC door
+ * (`POST /api/trpc/leads.create`) still accepts what the router's own
+ * contract allows (no name + phone-or-e-mail rule there). Closing that is
+ * SEC-1, a human PR on the immutable `leads.ts` / `route.ts`.
  */
 export async function leadAction(_prev: LeadActionState, formData: FormData): Promise<LeadActionState> {
   const h = await headers();

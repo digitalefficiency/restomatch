@@ -2,7 +2,8 @@
  * W3-06 · the lead form's Server Action, as pure logic (no Next, no DB) so the
  * unit tests drive it with fakes. `leadAction.ts` wires the real deps.
  *
- * The action is the SAME front door as the tRPC route for `leads.create`:
+ * The action shares the tRPC route's guards for `leads.create` (and is the
+ * stricter of the two doors):
  *   1. Origin must be this deployment (same check as the route's CSRF guard;
  *      Next.js also compares a Server Action's Origin with Host);
  *   2. the per-IP limit in the SAME bucket as the route
@@ -13,6 +14,11 @@
  *      again server-side (name + a valid IL phone or e-mail);
  *   4. the unchanged, immutable `leads.create` contract does the insert
  *      (honeypot included: a filled `hp` is a silent success with no row).
+ *
+ * Step 3's re-validation is NOT the security boundary for leads: the public tRPC door
+ * (`POST /api/trpc/leads.create`) still accepts what the router's own
+ * contract allows (no name + phone-or-e-mail rule there). Closing that is
+ * SEC-1, a human PR on the immutable `leads.ts` / `route.ts`.
  */
 import type { RateLimitOptions } from '@restomatch/api';
 import { formatIlPhone, validateLead, type LeadFieldErrors } from './leadForm.logic';

@@ -19,6 +19,9 @@
  *   3. The response page shows the success card (data-testid="lead-success").
  *   4. With JS off, a name-only submit is refused server-side: no success card,
  *      the contact error is shown (the action re-validates; it doesn't trust the client).
+ *      This checks the FORM's door only — not the security boundary: the public
+ *      tRPC leads.create door keeps the router's weaker contract until SEC-1
+ *      (a human PR on the immutable leads.ts / route.ts).
  *   5. Phone hero (390 px, JS on): when the 9:16 loop is deployed (#293), the
  *      phone requests ONLY 9:16 hero media — never the 16:9 loop or poster.
  *      Skipped (not failed) when the deployment has no 9:16 cut yet.

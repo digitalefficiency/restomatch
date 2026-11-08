@@ -18,7 +18,7 @@ export type LeadFormAction = (prev: LeadActionState, formData: FormData) => Prom
 /**
  * Lead-capture form for the marketing site. W3-06: a progressively enhanced
  * Server Action (`leadAction`) — it posts with JS off, and with JS on the same
- * action runs without a reload. The action is the same front door as the
+ * action runs without a reload. The action shares the guards of the
  * tRPC route (origin check, the `leads` per-IP bucket, bounded fields) and
  * calls the unchanged `leads.create` contract.
  * Includes a hidden honeypot field named `hp` — bots that fill it get a silent

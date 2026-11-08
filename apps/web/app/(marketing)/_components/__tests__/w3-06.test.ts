@@ -149,7 +149,7 @@ describe('W3-06 · pricing', () => {
   });
 });
 
-describe('W3-06 · the lead Server Action (same front door as the tRPC route)', () => {
+describe('W3-06 · the lead Server Action (shares the tRPC route guards; not the boundary — SEC-1)', () => {
   const fd = (fields: Record<string, string>) => {
     const f = new FormData();
     for (const [k, v] of Object.entries(fields)) f.set(k, v);
