@@ -8,6 +8,7 @@ import { invoicesWaitingOnReceipt } from '../receiving/matchTriggers';
 import { invoiceQuestionCount } from '../catalog/linkQuestions';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
+import { restaurantDateKey } from './helpers/il-day';
 
 /**
  * B8 — when OCR fails the invoice page says "הזינו את השורות ידנית": the manager
@@ -1066,7 +1067,9 @@ describe('#216 round 7', () => {
     const page = await as('manager').receiving.getInvoice({ invoiceId: failedId });
     expect(page).toMatchObject({ status: 'parsed', awaitingCount: true, linesEditable: true });
     expect((await as('manager').receiving.pendingInvoices()).map((i) => i.id)).toContain(failedId);
-    const day = new Date().toISOString().slice(0, 10);
+    // The restaurant's (Israeli) day — exports read from/to in the restaurant's zone. The UTC
+    // day is yesterday 00:00–02:00 IL, which would make the not.toContain below vacuous.
+    const day = restaurantDateKey();
     const csv = await as('owner').exports.invoicesCsv({ from: day, to: day });
     expect(csv.content).not.toContain('HELD-7');
 
