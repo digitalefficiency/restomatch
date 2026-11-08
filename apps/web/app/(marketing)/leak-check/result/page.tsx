@@ -155,7 +155,7 @@ export default async function LeakCheckResultPage({ searchParams }: { searchPara
                         {inv(f.invoiceIndex)?.fileName}
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-5 py-3 text-end font-mono font-semibold tabular-nums text-danger">
+                    <td className="whitespace-nowrap px-5 py-3 text-end font-semibold tabular-nums text-danger">
                       {ils(f.amountAgorot)}
                     </td>
                   </tr>
@@ -168,7 +168,7 @@ export default async function LeakCheckResultPage({ searchParams }: { searchPara
                   Σ
                 </td>
                 <td className="hidden sm:table-cell" />
-                <td className="whitespace-nowrap px-5 py-3 text-end font-mono font-extrabold tabular-nums text-danger">
+                <td className="whitespace-nowrap px-5 py-3 text-end font-extrabold tabular-nums text-danger">
                   {ils(leak)}
                 </td>
               </tr>
