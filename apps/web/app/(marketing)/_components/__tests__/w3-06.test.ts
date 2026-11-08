@@ -123,6 +123,14 @@ describe('W3-06 · pricing', () => {
     expect(planDisplayOrder(['trial', 'basic'], undefined)).toEqual(['trial', 'basic']);
   });
 
+  it('phone order lives in the DOM, md+ restores the ladder; compare icons are named images (Q6/Q7)', () => {
+    const page = read('app/(marketing)/pricing/page.tsx');
+    expect(page).toMatch(/cards\.map\(\(plan\)/);
+    expect(page).not.toMatch(/style=\{\{ order|md:!order-none/);
+    expect(page).toMatch(/<Check role="img"/);
+    expect(page).toMatch(/<Minus role="img"/);
+  });
+
   it('every paid price says "+ מע״מ", renders through <Money>, and no price is mono', () => {
     const page = read('app/(marketing)/pricing/page.tsx');
     expect(page).toMatch(/<Money agorot=\{plan\.priceAgorotMonthly\}/);

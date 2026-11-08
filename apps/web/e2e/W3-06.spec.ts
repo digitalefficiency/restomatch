@@ -50,6 +50,17 @@ test.describe('W3-06 · pricing', () => {
     await expect(page.getByTestId('pricing-faq')).toBeVisible();
     await expect(page.getByTestId('pricing-roi')).toBeVisible();
     await expect(page.getByTestId('cta-pro')).toHaveAttribute('href', '/?plan=pro#lead');
+    // md+: the ladder reads from the start edge (RTL: right to left), trial first.
+    const ladder = await page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('[data-testid^="plan-"]')]
+        .sort((x, y) => y.getBoundingClientRect().right - x.getBoundingClientRect().right)
+        .map((c) => c.dataset.testid),
+    );
+    expect(ladder[0]).toBe('plan-trial');
+    // Q7: the compare table's check / dash are named images.
+    for (const icon of await page.getByTestId('pricing-compare').locator('svg[aria-label]').all()) {
+      await expect(icon).toHaveAttribute('role', 'img');
+    }
     expect(await axeSerious(page)).toEqual([]);
   });
 
@@ -63,6 +74,9 @@ test.describe('W3-06 · pricing', () => {
         .map((c) => c.dataset.testid),
     );
     expect(order[0]).toBe('plan-pro');
+    // Q6: the DOM (reading + tab order) matches what the phone shows.
+    const dom = await page.locator('[data-testid^="plan-"]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.testid));
+    expect(dom).toEqual(order);
     await expect(page.getByTestId('pricing-compare')).toBeHidden();
     await ctx.close();
   });

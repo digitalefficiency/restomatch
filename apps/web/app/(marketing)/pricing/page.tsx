@@ -28,6 +28,9 @@ type FeatureKey = 'integrations' | 'whatsapp_alerts' | 'advanced_analytics' | 'a
 const PLAN_KEYS: readonly string[] = ['trial', 'basic', 'pro', 'chain'];
 const FEATURE_KEYS: readonly string[] = ['integrations', 'whatsapp_alerts', 'advanced_analytics', 'accounting_export'];
 
+/** md+ ladder position (static class names so Tailwind keeps them). */
+const MD_ORDER = ['md:order-1', 'md:order-2', 'md:order-3', 'md:order-4', 'md:order-5', 'md:order-6'] as const;
+
 export default async function PricingPage() {
   const t = await getT(marketing);
   const locale = await getLocale();
@@ -45,8 +48,12 @@ export default async function PricingPage() {
   // The "pro" tier reads as the recommended default for a single growing venue.
   const highlightKey = plans.some((p) => p.key === 'pro') ? 'pro' : plans[1]?.key;
   const proIls = (plans.find((p) => p.key === 'pro') ?? PLAN_SEED_LIST.find((p) => p.key === 'pro'))!.priceAgorotMonthly / 100;
-  // Phone: the recommended plan is first (preselected); md+ keeps the ladder order.
+  // Phone: the recommended plan is first (preselected) — in the DOM, so reading
+  // and tab order match what is seen (WCAG 1.3.2 / 2.4.3); md+ restores the
+  // ladder visually with md:order-*.
   const phoneOrder = planDisplayOrder(plans.map((p) => p.key), highlightKey);
+  const ladderIndex = new Map(plans.map((p, i) => [p.key, i]));
+  const cards = phoneOrder.map((k) => plans.find((p) => p.key === k)!);
 
   const limitLabel = (value: number | null, one: string, many: string) =>
     value === null
@@ -62,7 +69,7 @@ export default async function PricingPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
-        {plans.map((plan) => {
+        {cards.map((plan) => {
           const key = (PLAN_KEYS.includes(plan.key) ? plan.key : 'basic') as PlanKey;
           const isHighlight = plan.key === highlightKey;
           const isFree = plan.priceAgorotMonthly === 0;
@@ -70,9 +77,10 @@ export default async function PricingPage() {
             <div
               key={plan.key}
               data-testid={`plan-${plan.key}`}
-              style={{ order: phoneOrder.indexOf(plan.key) }}
               className={
-                'relative flex flex-col rounded-3xl p-6 md:!order-none ' +
+                'relative flex flex-col rounded-3xl p-6 ' +
+                (MD_ORDER[ladderIndex.get(plan.key)!] ?? 'md:order-last') +
+                ' ' +
                 (isHighlight
                   ? 'border-2 border-primary/60 bg-surface shadow-glow-primary'
                   : 'border border-line bg-surface shadow-card')
@@ -204,9 +212,9 @@ export default async function PricingPage() {
                   {plans.map((plan) => (
                     <td key={plan.key} className="px-4 py-3 text-center">
                       {plan.features.includes(f) ? (
-                        <Check className="mx-auto h-4 w-4 text-primary" aria-label={t('pricing.included')} />
+                        <Check role="img" className="mx-auto h-4 w-4 text-primary" aria-label={t('pricing.included')} />
                       ) : (
-                        <Minus className="mx-auto h-4 w-4 text-subtle" aria-label={t('pricing.notIncluded')} />
+                        <Minus role="img" className="mx-auto h-4 w-4 text-subtle" aria-label={t('pricing.notIncluded')} />
                       )}
                     </td>
                   ))}
