@@ -82,7 +82,7 @@ export const en: Shape<typeof he> = {
     errorWhatsapp: 'You can also message us on WhatsApp',
   },
   roi: {
-    monthly: 'Monthly supplier purchasing',
+    monthly: 'Monthly supplier purchasing (before VAT)',
     leak: 'Estimated leak rate',
     leakValue: '{pct} percent',
     leakHint:
@@ -91,10 +91,13 @@ export const en: Shape<typeof he> = {
     annualLeak: 'per year',
     annualSub: 'Money paid to suppliers for nothing in return — by your own estimate.',
     breakevenTitle: 'When does RestoMatch pay for itself?',
-    breakevenBody: 'The Pro plan ({price}/month) pays for itself if it catches {pct} of your purchasing.',
+    breakevenBody: 'The Pro plan ({price} + VAT a month) pays for itself if it catches {pct} of your purchasing.',
     breakevenRatio: "That's just {ratio} of the leak you estimated.",
     breakevenOver: "At this estimate the leak is below the subscription price — you may already run a tight ship, and we'll tell you so honestly.",
     srSummary: 'Estimated leak: {month} a month, {year} a year.',
+    sampleBadge: 'Example',
+    sample: "{purchasing} of purchasing a month and a {pct} leak — the sample restaurant's numbers, not yours.",
+    prompt: 'Enter your monthly supplier purchasing to see a leak estimate.',
     disclaimer: "Illustrative calculator only. We don't promise savings — your real number shows up after two weeks of scanning.",
   },
   cookie: {
@@ -152,7 +155,6 @@ export const en: Shape<typeof he> = {
     included: 'Included',
     notIncluded: 'Not included',
     roiTitle: 'What is it worth to you?',
-    roiSample: 'It starts from the sample restaurant ({purchasing} a month in purchases, a {pct} leak). Change the numbers to yours.',
     faqTitle: 'Questions about price',
     faq: {
       vat: { q: 'Do prices include VAT?', a: 'No. VAT is added to every price on this page.' },

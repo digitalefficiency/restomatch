@@ -7,11 +7,9 @@ import { getLocale, getT } from '@/lib/i18n/server';
 import { formatNumber } from '@/lib/i18n/format';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { Money } from '@/lib/components/money/Money';
-import { formatIls } from '@/lib/money';
 import { ChainPricingSection } from '@/lib/growth/ChainPricingSection';
 import { alternatesFor, metadataBase, socialFor } from '../_components/seo';
 import { RoiCalculator } from '../_components/RoiCalculator';
-import { SAMPLE_LEAK_PCT, SAMPLE_PURCHASING_ILS } from '../_components/sampleMonth';
 import { planCtaHref, planDisplayOrder } from './pricing.logic';
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -221,13 +219,9 @@ export default async function PricingPage() {
 
       {/* The ROI calculator, defaults = the one sample month ("דוגמה"), Pro price from the same plan source. */}
       <section aria-labelledby="roi-title" className="mt-16 rounded-3xl border border-line bg-surface p-6 shadow-card sm:p-8" data-testid="pricing-roi">
-        <h2 id="roi-title" className="text-xl font-bold text-ink">
+        <h2 id="roi-title" className="mb-6 text-xl font-bold text-ink">
           {t('pricing.roiTitle')}
         </h2>
-        <p className="mb-6 mt-1 text-sm text-muted">{t('pricing.roiSample', {
-            purchasing: formatIls(SAMPLE_PURCHASING_ILS, { locale }),
-            pct: `${formatNumber(SAMPLE_LEAK_PCT, locale, { maximumFractionDigits: 1 })}%`,
-          })}</p>
         <RoiCalculator proPriceIls={proIls} />
       </section>
 

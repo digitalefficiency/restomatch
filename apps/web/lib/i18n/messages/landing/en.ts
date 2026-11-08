@@ -133,7 +133,7 @@ export const en: Shape<typeof he> = {
   roi: {
     eyebrow: 'Calculator',
     title: "What's it worth to you?",
-    lead: "Enter your monthly purchasing and estimate your own leak rate. It's your estimate — not ours.",
+    lead: 'We started from the sample restaurant — change it to your purchasing and your own estimate.',
   },
   trust: {
     eyebrow: 'Security & privacy',
