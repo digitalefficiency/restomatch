@@ -20,6 +20,7 @@ export const APP_ERROR_CODES = [
   'team.userNotFound',
   'team.inviteWrongEmail',
   'onboarding.accountGone',
+  'signup_closed',
   'settings.invalidTimezone',
   'settings.noChanges',
   'dsr.soleOwner',
@@ -33,11 +34,19 @@ export const APP_ERROR_CODES = [
   'auth.forbidden',
   'input.invalid',
   'invoice.numberTaken',
+  // G-08 hold: a manual re-match while an invoice line is still a question.
+  'invoice.unlinkedLines',
+  'order.unlinkedLines',
   'FEATURE_DISABLED',
   'leakCheck.invalidLink',
   'growth.referralInvalid',
   'growth.referralSelf',
   'growth.referralAlreadyRedeemed',
+  'invoice.linesLocked',
+  'invoice.receiptOpen',
+  'invoice.beingRead',
+  'invoice.partialHeaderClear',
+  'invoice.claimInProgress',
   // AU-01: the owner tried to switch a flag that is admin-only (not on OWNER_TOGGLEABLE).
   'automations.notOwnerToggleable',
 ] as const;

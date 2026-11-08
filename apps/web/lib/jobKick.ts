@@ -1,7 +1,7 @@
 import 'server-only';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { after } from 'next/server';
-import { setEnqueueListener } from '@restomatch/queue';
+import { ocrJobHeadroomMs, setEnqueueListener } from '@restomatch/queue';
 
 /**
  * The immediate kick (serverless jobs, no worker process): when a request
@@ -56,11 +56,28 @@ export const JOB_HEADROOM_MS = 45_000;
  */
 const ABSORB_MIN_MS = 10_000;
 
+/**
+ * A route without withKickBudget runs on the platform default maxDuration
+ * (300 s on Vercel with Fluid compute — the tRPC route): its invocation ends
+ * this long after the request began.
+ */
+export const PLATFORM_MAX_DURATION_MS = 300_000;
+
+/**
+ * When the invocation a kick started at `t` is cut off: the declared route end
+ * (withKickBudget), else the platform default. An ocr-invoice job is kicked —
+ * and claimed by the run — only while OCR_JOB_HEADROOM_MS is left before it.
+ */
+export function kickInvocationEnd(t: number): number {
+  return routeBudgets.getStore()?.endsAt ?? t + PLATFORM_MAX_DURATION_MS;
+}
+
 type Schedule = (task: () => Promise<void>) => void;
 type Runner = (opts: {
   budgetMs: number;
   queues: string[];
   onJob?: (running: boolean) => void;
+  endsAt?: number;
 }) => Promise<{ ran: number; stoppedBy: string }>;
 
 /** One live kick per queue per process; a second enqueue meanwhile asks it to look again (unless it is busy). */
@@ -120,6 +137,10 @@ export function kickQueue(
   const t = now();
   const deadline = kickClaimDeadline(t);
   if (deadline <= t) return false; // no room left in this invocation — the cron route runs it
+  const endsAt = kickInvocationEnd(t);
+  // A Claude read needs OCR_JOB_HEADROOM_MS before the function is cut off (the
+  // 60 s ingest webhooks never have it): leave it to /api/cron/jobs, within a minute.
+  if (queue === 'ocr-invoice' && endsAt - t < ocrJobHeadroomMs()) return false;
   const live = active.get(queue);
   if (live && !live.busy && live.deadline - t >= ABSORB_MIN_MS) {
     live.again = true;
@@ -137,6 +158,7 @@ export function kickQueue(
           const r = await runQueuedJobs({
             budgetMs: left,
             queues: [queue],
+            endsAt,
             onJob: (running) => {
               state.busy = running;
             },
