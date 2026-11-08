@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CloudOff, Download, Loader2, UploadCloud } from 'lucide-react';
 import { claimOfflineChip } from '@/lib/net/offlineChipOwner';
+import { useOnline } from '@/lib/net/online';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { ingest } from '@/lib/i18n/messages/ingest';
@@ -53,7 +54,9 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
   const tr = useT(receivingDelivery);
   const locale = useLocale();
   const upload = useQueuedPhotoUpload();
-  const [online, setOnline] = useState(true);
+  // Connectivity from the shell's probe-backed store, not the window events:
+  // a dead Wi-Fi / captive portal keeps navigator.onLine true and fires none.
+  const online = useOnline();
   const [queued, setQueued] = useState(0);
   const [others, setOthers] = useState(0);
   const [syncingShown, setSyncingShown] = useState(false);
@@ -125,11 +128,11 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
   const names = [...new Set(attributed.map((a) => a.capturedByName ?? tr('pwa.someoneElse')))].join(', ');
 
   // This chip (offline + queued-photo count) is the one offline indicator on
-  // receiving routes; the shell's generic chip yields while it is mounted.
-  useEffect(() => claimOfflineChip(), []);
+  // receiving routes: it claims the spot only while it shows "no connection",
+  // so the shell's generic chip yields exactly then (one chip, never zero).
+  useEffect(() => (online ? undefined : claimOfflineChip()), [online]);
 
   useEffect(() => {
-    setOnline(navigator.onLine);
     const standalone =
       window.matchMedia?.('(display-mode: standalone)').matches ||
       new URLSearchParams(window.location.search).get('source') === 'pwa' ||
@@ -142,25 +145,20 @@ export function ReceiverPwa({ restaurantId, userId }: { restaurantId: string; us
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/receiver-sw.js', { scope: '/dashboard/receiving' }).catch(() => null);
     }
-    const onOnline = () => {
-      setOnline(true);
-      void sync();
-    };
-    const onOffline = () => setOnline(false);
+    // Back online (browser event): start a sync. The chip itself follows useOnline().
+    const onOnline = () => void sync();
     const onQueue = () => void refreshCount();
     const onInstall = (e: Event) => {
       e.preventDefault();
       setInstallEvent(e as BeforeInstallPromptEvent);
     };
     window.addEventListener('online', onOnline);
-    window.addEventListener('offline', onOffline);
     window.addEventListener(QUEUE_EVENT, onQueue);
     window.addEventListener('beforeinstallprompt', onInstall);
     void refreshCount().then(() => sync());
     const timer = window.setInterval(() => void sync(), 60_000);
     return () => {
       window.removeEventListener('online', onOnline);
-      window.removeEventListener('offline', onOffline);
       window.removeEventListener(QUEUE_EVENT, onQueue);
       window.removeEventListener('beforeinstallprompt', onInstall);
       window.clearInterval(timer);
