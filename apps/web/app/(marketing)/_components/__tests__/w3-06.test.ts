@@ -104,6 +104,15 @@ describe('W3-06 · pricing', () => {
     expect(page).toMatch(/pricing\.plusVat/);
     expect(page).not.toMatch(/(?<!ltr:)font-mono/); // the English-only eyebrow may stay mono
     expect(page).not.toMatch(/Intl\.NumberFormat/);
+    // M8: the landing's proof strip and plan teaser show ₪ in the body face too.
+    expect(read('app/page.tsx')).not.toMatch(/(?<!ltr:)font-mono/);
+  });
+
+  it('M9: every plan price and sample figure is labelled ex-VAT, including the JSON-LD', () => {
+    expect(read('app/page.tsx')).toMatch(/valueAddedTaxIncluded: false/);
+    const he = read('lib/i18n/messages/landing/he.ts');
+    expect(he).toMatch(/leakLabel: '[^']*\(לפני מע״מ\)'/);
+    expect(he).toMatch(/breakevenLabel: '[^']*\(\{price\} \+ מע״מ\)/);
   });
 });
 

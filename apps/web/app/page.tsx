@@ -136,6 +136,15 @@ export default async function Home() {
         lowPrice: 0,
         highPrice: PLAN_SEED.chain.priceAgorotMonthly / 100,
         offerCount: 4,
+        // Plan prices are quoted before VAT ("+ מע״מ" on every price).
+        priceSpecification: {
+          '@type': 'UnitPriceSpecification',
+          priceCurrency: 'ILS',
+          minPrice: 0,
+          maxPrice: PLAN_SEED.chain.priceAgorotMonthly / 100,
+          unitText: 'MONTH',
+          valueAddedTaxIncluded: false,
+        },
       },
     },
     {
@@ -341,7 +350,7 @@ export default async function Home() {
               >
                 <p
                   className={cn(
-                    'font-mono text-3xl font-extrabold tabular-nums tracking-tight sm:text-4xl',
+                    'text-3xl font-extrabold tabular-nums tracking-tight sm:text-4xl',
                     p.tone,
                   )}
                 >
@@ -395,7 +404,7 @@ export default async function Home() {
               <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px flow-stream" />
               <p className="text-sm font-semibold text-gold">{t('pricing.fromLabel').trim()}</p>
               <p className="mt-2 flex items-baseline gap-1.5">
-                <span className="font-mono text-4xl font-extrabold tabular-nums text-ink">
+                <span className="text-4xl font-extrabold tabular-nums text-ink">
                   {ils(basicIls)}
                 </span>
                 <span className="text-sm text-muted">{t('pricing.perMonth')}</span>
