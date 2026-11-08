@@ -40,7 +40,10 @@ export async function findOverdue(
   const res = await db.execute(sql`
     SELECT c.id, c.supplier_id, COALESCE(s.name, '—') AS supplier_name, s.name_en AS supplier_name_en,
            GREATEST(0, c.amount_agorot - c.credited_agorot) AS outstanding,
-           floor(extract(epoch FROM (${now.toISOString()}::timestamptz - COALESCE(c.letter_sent_at, c.claimed_at))) / 86400)::int AS waiting
+           -- Whole calendar days in the restaurant's zone: the SAME basis as the overdue gate
+           -- (overdueSql), the tracker's age_days and the web countdown — never 24h blocks.
+           ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date
+             - (COALESCE(c.letter_sent_at, c.claimed_at) AT TIME ZONE tz.tz)::date)::int AS waiting
     FROM recovery_claims c
     CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) tz
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
@@ -51,8 +54,11 @@ export async function findOverdue(
       AND ${overdueSql(now, sql`tz.tz`)}
       -- Owner 31.10: a never-claimable type is not owed — never chased.
       AND NOT ${NEVER_CLAIMABLE_TYPE_SQL}
+      -- Re-chase every REMIND_EVERY_DAYS calendar days (restaurant zone), not 168h instants:
+      -- a run that starts a minute earlier than last week's (or a DST week) must not slip a day.
       AND (c.last_reminder_at IS NULL
-           OR c.last_reminder_at < ${now.toISOString()}::timestamptz - make_interval(days => ${REMIND_EVERY_DAYS}))
+           OR ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date
+               - (c.last_reminder_at AT TIME ZONE tz.tz)::date) >= ${REMIND_EVERY_DAYS})
     ORDER BY waiting DESC
   `);
   const rows = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
