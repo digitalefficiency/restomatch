@@ -82,7 +82,7 @@ export const en: Shape<typeof he> = {
     errorWhatsapp: 'You can also message us on WhatsApp',
   },
   roi: {
-    monthly: 'Monthly supplier purchasing',
+    monthly: 'Monthly supplier purchasing (before VAT)',
     leak: 'Estimated leak rate',
     leakValue: '{pct} percent',
     leakHint:
@@ -91,10 +91,13 @@ export const en: Shape<typeof he> = {
     annualLeak: 'per year',
     annualSub: 'Money paid to suppliers for nothing in return — by your own estimate.',
     breakevenTitle: 'When does RestoMatch pay for itself?',
-    breakevenBody: 'The Pro plan ({price}/month) pays for itself if it catches {pct} of your purchasing.',
+    breakevenBody: 'The Pro plan ({price} + VAT a month) pays for itself if it catches {pct} of your purchasing.',
     breakevenRatio: "That's just {ratio} of the leak you estimated.",
     breakevenOver: "At this estimate the leak is below the subscription price — you may already run a tight ship, and we'll tell you so honestly.",
     srSummary: 'Estimated leak: {month} a month, {year} a year.',
+    sampleBadge: 'Example',
+    sample: "{purchasing} of purchasing a month and a {pct} leak — the sample restaurant's numbers, not yours.",
+    prompt: 'Enter your monthly supplier purchasing to see a leak estimate.',
     disclaimer: "Illustrative calculator only. We don't promise savings — your real number shows up after two weeks of scanning.",
   },
   cookie: {
@@ -144,6 +147,27 @@ export const en: Shape<typeof he> = {
       accounting_export: 'Accounting export',
     },
     unavailable: "We couldn't load the plans right now. Try refreshing, or talk to us.",
+    plusVat: '+ VAT',
+    compareTitle: 'Compare plans',
+    compareFeature: 'What’s included',
+    comparePrice: 'Price per month',
+    noLimit: 'Unlimited',
+    included: 'Included',
+    notIncluded: 'Not included',
+    roiTitle: 'What is it worth to you?',
+    faqTitle: 'Questions about price',
+    faq: {
+      vat: { q: 'Do prices include VAT?', a: 'No. VAT is added to every price on this page.' },
+      worth: {
+        q: 'How do we know it pays off?',
+        a: 'The calculator above shows how much of your purchasing RestoMatch has to catch to pay for itself. In the pilot you see the real number, in shekels, on your own invoices.',
+      },
+      accounting: {
+        q: 'Do we need to replace our accounting software?',
+        a: 'No. RestoMatch checks the invoices you already receive and, on plans with export, hands them to your bookkeeping.',
+      },
+      chain: { q: 'We have several branches. What fits?', a: 'The Chain plan is built for several branches under one account. Talk to us and we’ll quote by branch count.' },
+    },
   },
   product: {
     metaTitle: 'Product · RestoMatch',

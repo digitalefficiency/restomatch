@@ -37,7 +37,7 @@ export const en: Shape<typeof he> = {
     whatsappText: "Hi, I saw the RestoMatch demo and I'd like to send an invoice for a check.",
     receiver: '{amount} caught on this delivery — before payment.',
     receiverClean: 'This delivery matches the order — and RestoMatch checks every one like it.',
-    dashboard: '{amount} caught this month at the sample restaurant — before payment.',
+    dashboard: '{amount} caught before payment this month at the sample restaurant — {pending} of it waits for your decision.',
     invoices: '{amount} caught on these invoices — before payment.',
   },
 
@@ -109,11 +109,20 @@ export const en: Shape<typeof he> = {
     eyebrow: 'Control center',
     title: 'Owner dashboard',
     lead: 'A live picture of the restaurant — where money is leaking, which suppliers are accurate, and what needs your call right now.',
-    kpi: {
-      leak: 'Potential leak this month',
-      saved: 'Saved so far',
-      pending: 'Awaiting approval',
+    sample: 'Sample · a fictional restaurant, illustrative figures',
+    hero: {
+      eyebrow: 'Sample · leak found · October',
+      label: 'Leak this month',
+      pct: '{pct} of purchases checked',
+      base: 'of {amount} before VAT',
+      completeness: '{checked} invoices checked · {withGap} with a gap',
+      inCheck: '{count} invoices still being checked',
     },
+    needs: {
+      zero: 'Nothing needs you right now.',
+      credit: { label: 'Credit requests to send', sub: '{count} gaps', verb: 'Send the letter' },
+    },
+    goodNews: '{amount} already approved for offset at payment',
     heatmap: {
       title: 'Leak detective',
       subtitle: 'Latest price vs. historical average, by supplier and product',
@@ -136,7 +145,7 @@ export const en: Shape<typeof he> = {
       scanned: 'Scanned today',
       withIssues: 'With variances',
       withIssuesSub: '{pct}% of invoices',
-      saved: 'Saved by checking',
+      saved: 'Caught by checking',
       savedSub: 'Gaps your team caught before approving',
       action: 'Needs action',
       actionSub: 'Waiting on your decision',
@@ -156,7 +165,7 @@ export const en: Shape<typeof he> = {
       clean: 'Clean',
       billed: 'Billed',
       approved: 'Approved',
-      saved: '{amount} saved',
+      saved: '{amount} caught',
     },
   },
 
@@ -169,7 +178,7 @@ export const en: Shape<typeof he> = {
     tiles: {
       billed: 'Invoiced (excl. VAT)',
       approved: 'Approved by staff (excl. VAT)',
-      saved: 'Savings recorded (excl. VAT)',
+      saved: 'Gaps recorded (excl. VAT)',
     },
     compareCard: {
       title: 'Compare order ↔ invoice',
@@ -277,7 +286,7 @@ export const en: Shape<typeof he> = {
       whatsapp: 'Open WhatsApp',
       call: 'Call now',
       priceList: 'Request updated price list',
-      dispute: 'Open a dispute',
+      dispute: 'Open a clarification',
     },
     status: {
       stable: 'Reliable',
@@ -291,7 +300,7 @@ export const en: Shape<typeof he> = {
       varianceSub: 'Above order prices',
       spend: 'Spend this month',
       spendSub: '{delta}% vs. last month',
-      disputes: 'Open disputes',
+      disputes: 'Checking with supplier',
       disputesSub: '{flagged}/{total} invoices flagged',
     },
     prices: {
@@ -310,7 +319,7 @@ export const en: Shape<typeof he> = {
     activity: {
       title: 'Activity',
       subtitle: 'Everything that happened with this supplier',
-      saved: '{amount} saved',
+      saved: '{amount} caught',
       blocked: '{amount} on hold',
     },
   },
