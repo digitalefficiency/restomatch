@@ -182,7 +182,7 @@ const EN: Record<string, string> = {
   'מבצע לקראת חג': 'Holiday promotion',
   'פער מחיר > 10%': 'Price variance over 10%',
   'המחיר שחויב חרג מסף החסימה המוגדר': 'The billed price exceeded the configured blocking threshold',
-  'דרשנו הסבר מאבי הירקן': 'We asked Avi the greengrocer for an explanation',
+  'ביקשנו הבהרה מאבי הירקן': 'We asked Avi the greengrocer for clarification',
   'פער מחיר 2-10%': 'Price variance 2–10%',
   'פער בינוני — דרושה סקירה של מנהל משמרת': 'Moderate variance — needs a shift manager review',
   'פערים < 2%': 'Variances under 2%',

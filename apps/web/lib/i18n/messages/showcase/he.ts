@@ -169,7 +169,7 @@ export const he = {
       clean: 'תקין',
       billed: 'חויב',
       approved: 'אושר',
-      saved: '{amount} נחסכו',
+      saved: '{amount} נתפסו',
     },
   },
 
@@ -323,7 +323,7 @@ export const he = {
     activity: {
       title: 'פעילות',
       subtitle: 'כל מה שקרה מול הספק',
-      saved: '{amount} נחסכו',
+      saved: '{amount} נתפסו',
       blocked: '{amount} בהמתנה',
     },
   },

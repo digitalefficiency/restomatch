@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -222,5 +222,24 @@ describe('W3-06 · the lead Server Action (same front door as the tRPC route)', 
     f.set('name', new Blob(['x']), 'x.txt');
     f.set('email', 'a@b.co');
     expect(await submitLead(f, deps())).toMatchObject({ status: 'invalid', errors: { name: 'errorName' } });
+  });
+});
+
+/** Every .ts/.tsx source under a web-relative dir (tests excluded). */
+const sourcesUnder = (dir: string): string[] =>
+  (readdirSync(join(WEB, dir), { recursive: true }) as string[])
+    .filter((f) => /\.tsx?$/.test(f) && !/__tests__|\.test\./.test(f))
+    .map((f) => join(dir, f));
+
+const PUBLIC_MESSAGES = ['landing', 'marketing', 'showcase'].flatMap((ns) =>
+  ['he', 'en'].map((l) => `lib/i18n/messages/${ns}/${l}.ts`),
+);
+
+describe('W3-06 · review: one vocabulary on the public site', () => {
+  it('no "saved"/"demand" wording in showcase, landing or marketing copy and mocks (M10)', () => {
+    for (const f of [...PUBLIC_MESSAGES, ...sourcesUnder('app/showcase')]) {
+      expect(read(f), f).not.toMatch(/נחסכ|דרשנו|דריש/);
+    }
+    expect(read('lib/i18n/messages/showcase/en.ts')).not.toMatch(/\{amount\} saved/);
   });
 });

@@ -166,7 +166,7 @@ export const en: Shape<typeof he> = {
       clean: 'Clean',
       billed: 'Billed',
       approved: 'Approved',
-      saved: '{amount} saved',
+      saved: '{amount} caught',
     },
   },
 
@@ -320,7 +320,7 @@ export const en: Shape<typeof he> = {
     activity: {
       title: 'Activity',
       subtitle: 'Everything that happened with this supplier',
-      saved: '{amount} saved',
+      saved: '{amount} caught',
       blocked: '{amount} on hold',
     },
   },
