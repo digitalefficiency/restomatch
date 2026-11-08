@@ -7,7 +7,7 @@ import { auth } from '@/auth';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { landing } from '@/lib/i18n/messages/landing';
 import { formatNumber } from '@/lib/i18n/format';
-import { PHONE_MEDIA, heroLoopFor, heroMedia, promoVideoFor } from '@/lib/heroMedia';
+import { PHONE_MEDIA, heroLoopFor, heroMedia, phoneLoopFor, promoVideoFor } from '@/lib/heroMedia';
 import { formatIls } from '@/lib/money';
 import { landingFlag } from '@/lib/landingFlags';
 import { cn } from '@/lib/components/cn';
@@ -72,6 +72,8 @@ export default async function Home() {
   const locale = await getLocale();
   const heroLoop = heroLoopFor(locale);
   const promoSrc = promoVideoFor(locale);
+  // Q1: the 9:16 cut is Hebrew-only; English phones get the localized HeroMatch.
+  const phoneLoop = phoneLoopFor(locale);
   const ctaHref = primaryCtaHref();
   const ils = (n: number) => formatIls(n, { locale });
   const basicIls = PLAN_SEED.basic.priceAgorotMonthly / 100;
@@ -151,11 +153,11 @@ export default async function Home() {
           media="(min-width: 640px)"
         />
       ) : null}
-      {heroMedia.available && heroMedia.phoneLoop ? (
+      {heroMedia.available && phoneLoop ? (
         <link
           rel="preload"
           as="image"
-          href={heroMedia.phoneLoop.poster}
+          href={phoneLoop.poster}
           fetchPriority="high"
           media={PHONE_MEDIA}
         />
@@ -232,28 +234,33 @@ export default async function Home() {
           {heroMedia.available ? (
             <>
               {/* W3-06b: no 9:16 loop yet → phones get the legible product mock; the video is sm+. */}
-              {heroMedia.phoneLoop ? null : (
+              {phoneLoop ? null : (
                 <div className="sm:hidden" data-testid="hero-phone-mock">
                   <HeroMatch />
                 </div>
               )}
               <div
-                className={heroMedia.phoneLoop ? undefined : 'hidden sm:block'}
+                className={phoneLoop ? undefined : 'hidden sm:block'}
                 data-testid="hero-video-wrap"
               >
                 <HeroVideo
+                  key={locale}
                   webm={heroLoop.webm}
                   mp4={heroLoop.mp4}
                   poster={heroLoop.poster}
                   posterSrcSet={heroLoop.posterSrcSet}
                   posterSizes={heroMedia.posterSizes}
-                  label={t('hero.watchTitle')}
+                  label={t('v2.video.alt')}
                   pauseLabel={t('v2.video.pause')}
                   playLabel={t('v2.video.play')}
-                  minWidth={heroMedia.phoneLoop ? undefined : '(min-width: 640px)'}
-                  phone={heroMedia.phoneLoop}
+                  minWidth={phoneLoop ? undefined : '(min-width: 640px)'}
+                  phone={phoneLoop}
                   fallback={<HeroMatch />}
                 />
+                {/* M12: the loop is a sample, never a customer's numbers. */}
+                <p className="mt-2 text-center text-xs text-muted" data-testid="hero-video-caption">
+                  {t('v2.video.caption')}
+                </p>
               </div>
             </>
           ) : (

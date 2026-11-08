@@ -11,6 +11,7 @@ import {
   phoneLoopFor,
   promoVideoFor,
   referencedMediaPaths,
+  replaceVideoSources,
 } from '@/lib/heroMedia';
 
 const sha256Of = (publicPath: string) =>
@@ -80,5 +81,43 @@ describe('W3-06b · the phone gets the 9:16 loop, never both', () => {
 
   it('the phone breakpoint sits just under Tailwind sm (640px)', () => {
     expect(PHONE_MEDIA).toBe('(max-width: 639.98px)');
+  });
+});
+
+describe('Q3 · HeroVideo replaces its <source>s on a re-run (locale switch)', () => {
+  /** A minimal <video> stand-in: enough DOM for replaceVideoSources in a node test. */
+  function fakeVideo() {
+    const children: Array<{ src: string; type: string; remove: () => void }> = [];
+    const video = {
+      children,
+      ownerDocument: {
+        createElement: () => {
+          const el = {
+            src: '',
+            type: '',
+            remove: () => children.splice(children.indexOf(el), 1),
+          };
+          return el;
+        },
+      },
+      appendChild: (el: (typeof children)[number]) => (children.push(el), el),
+      querySelectorAll: () => [...children],
+    };
+    return video as unknown as HTMLVideoElement & { children: typeof children };
+  }
+
+  it('the second attach leaves only the new locale\'s sources, in order', () => {
+    const v = fakeVideo();
+    replaceVideoSources(v, [
+      ['/media/hero-loop.webm', 'video/webm'],
+      ['/media/hero-loop.mp4', 'video/mp4'],
+    ]);
+    const out = replaceVideoSources(v, [
+      ['/media/hero-loop-en.webm', 'video/webm'],
+      ['/media/hero-loop-en.mp4', 'video/mp4'],
+    ]);
+    const kids = (v as unknown as { children: Array<{ src: string }> }).children;
+    expect(kids.map((c) => c.src)).toEqual(['/media/hero-loop-en.webm', '/media/hero-loop-en.mp4']);
+    expect(out).toHaveLength(2);
   });
 });

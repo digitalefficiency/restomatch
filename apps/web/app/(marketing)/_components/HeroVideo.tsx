@@ -2,7 +2,7 @@
 
 import { Pause, Play } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { PHONE_MEDIA, loopSourcesFor } from '@/lib/heroMedia';
+import { PHONE_MEDIA, loopSourcesFor, replaceVideoSources } from '@/lib/heroMedia';
 
 /**
  * Hero product loop (used when heroMedia.available).
@@ -60,25 +60,25 @@ export function HeroVideo({
   const [shown, setShown] = useState(false);
   const [failed, setFailed] = useState(false);
 
+  // Primitive deps (Q3): a re-render with an equal-but-new `phone` object must not re-attach.
+  const phoneWebm = phone?.webm ?? null;
+  const phoneMp4 = phone?.mp4 ?? null;
+
   useEffect(() => {
     const v = ref.current;
     if (!v || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     if (minWidth && !window.matchMedia(minWidth).matches) return;
     const attach = () => {
-      const chosen = loopSourcesFor(window.matchMedia(PHONE_MEDIA).matches, { webm, mp4 }, phone);
-      const pairs = [
+      const phonePair = phoneWebm && phoneMp4 ? { webm: phoneWebm, mp4: phoneMp4 } : null;
+      const chosen = loopSourcesFor(window.matchMedia(PHONE_MEDIA).matches, { webm, mp4 }, phonePair);
+      // Q3: REPLACE the sources — a re-run (locale switch → router.refresh) must
+      // never leave the old locale's <source> first in line.
+      const sources = replaceVideoSources(v, [
         [chosen.webm, 'video/webm'],
         [chosen.mp4, 'video/mp4'],
-      ] as const;
-      pairs.forEach(([src, type], i) => {
-        const s = document.createElement('source');
-        s.src = src;
-        s.type = type;
-        // The last source failing means nothing can play: show the fallback.
-        if (i === pairs.length - 1)
-          s.addEventListener('error', () => setFailed(true), { once: true });
-        v.appendChild(s);
-      });
+      ]);
+      // The last source failing means nothing can play: show the fallback.
+      sources[sources.length - 1]?.addEventListener('error', () => setFailed(true), { once: true });
       v.load();
       setStarted(true);
       void v.play().catch(() => undefined);
@@ -86,7 +86,7 @@ export function HeroVideo({
     if (document.readyState === 'complete') attach();
     else window.addEventListener('load', attach, { once: true });
     return () => window.removeEventListener('load', attach);
-  }, [webm, mp4, minWidth, phone]);
+  }, [webm, mp4, minWidth, phoneWebm, phoneMp4]);
 
   if (failed && fallback) return <>{fallback}</>;
 

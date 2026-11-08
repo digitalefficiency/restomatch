@@ -157,3 +157,22 @@ export function promoVideoFor(locale: Locale): PromoFilm | null {
   const films = heroMedia.promoVideo;
   return films?.[locale] ?? films?.he ?? null;
 }
+
+/**
+ * Replace every <source> child of `video` with `pairs` (src, type), in order,
+ * and return the new elements. Idempotent, so an effect that re-runs (locale
+ * switch → router.refresh) never stacks a stale source ahead of the new one.
+ */
+export function replaceVideoSources(
+  video: Pick<HTMLVideoElement, 'querySelectorAll' | 'appendChild' | 'ownerDocument'>,
+  pairs: ReadonlyArray<readonly [src: string, type: string]>,
+): HTMLSourceElement[] {
+  video.querySelectorAll('source').forEach((s) => s.remove());
+  return pairs.map(([src, type]) => {
+    const s = video.ownerDocument.createElement('source');
+    s.src = src;
+    s.type = type;
+    video.appendChild(s);
+    return s;
+  });
+}
