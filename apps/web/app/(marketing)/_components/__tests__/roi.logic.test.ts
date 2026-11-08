@@ -14,15 +14,41 @@ describe('W3-06 review M3/M4 · ROI calculator math (integer agorot)', () => {
     expect(r).toMatchObject({ kind: 'ok', monthlyLeakIls: SAMPLE_LEAK_ILS, annualLeakIls: SAMPLE_LEAK_ILS * 12 });
   });
 
-  it('rounds half-up in agorot, not through a float (₪30,500 × 0.7% → ₪214)', () => {
+  it('rounds half-up in agorot, not through a float (₪30,500 × 0.7% → ₪214); annual = 12 × the shown monthly', () => {
     expect(30_500 * (0.7 / 100)).toBeLessThan(213.5); // the old float formula rounded this to ₪213
-    expect(computeRoi('30,500', 0.7, PRO)).toMatchObject({ kind: 'ok', monthlyLeakIls: 214, annualLeakIls: 2_562 });
+    expect(computeRoi('30,500', 0.7, PRO)).toMatchObject({ kind: 'ok', monthlyLeakIls: 214, annualLeakIls: 2_568 });
     expect(divHalfUp(5, 2)).toBe(3);
     expect(divHalfUp(4, 3)).toBe(1);
   });
 
-  it.each(['', '0', '-5', '-150000', 'abc', 'NaN', 'Infinity', '1e8', '   '])('"%s" → a neutral prompt, never ₪0', (raw) => {
+  it.each(['', '0', '-5', '-150000', 'abc', 'NaN', 'Infinity', '1e8', '   ', '1', '15', '20'])('"%s" → a neutral prompt, never ₪0', (raw) => {
     expect(computeRoi(raw, SAMPLE_LEAK_PCT, PRO)).toEqual({ kind: 'prompt' });
+  });
+
+  it('annual always reconciles with the displayed monthly', () => {
+    for (const raw of ['30500', '41234', '150000', '987654']) {
+      const r = computeRoi(raw, 1.3, PRO);
+      if (r.kind !== 'ok') throw new Error(raw);
+      expect(r.annualLeakIls).toBe(r.monthlyLeakIls * 12);
+    }
+  });
+
+  it('"רק X% מהדליפה" only when 0.5 ≤ X < 99.5 — never a "100%" or "0%" ratio', () => {
+    const at = (raw: string) => {
+      const r = computeRoi(raw, 1.5, PRO);
+      if (r.kind !== 'ok') throw new Error(raw);
+      return r;
+    };
+    expect(PRO).toBe(59_000); // the edges below assume the ₪590 Pro price
+    // leak ₪591 → X = 99.83 → would read "100%": hidden (pays, so no "over" line either)
+    expect(at('39400')).toMatchObject({ pays: true, showCovered: false });
+    // leak ₪594 → X = 99.33 → "99%": shown
+    expect(at('39600')).toMatchObject({ pays: true, showCovered: true, coveredPct: 99 });
+    // leak ₪117,900 → X = 0.50 → shown; leak ₪118,500 → X = 0.498 → would read "0%": hidden
+    expect(at('7860000')).toMatchObject({ showCovered: true });
+    expect(at('7900000')).toMatchObject({ pays: true, showCovered: false });
+    // below the plan price → no ratio, the "over" line instead
+    expect(at('30000')).toMatchObject({ pays: false, showCovered: false });
   });
 
   it('a non-finite or zero leak rate is a prompt too', () => {

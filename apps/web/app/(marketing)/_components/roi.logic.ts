@@ -9,7 +9,11 @@
  *
  * An empty, zero, negative or unreadable amount is NOT a ₪0 leak: the result
  * is `{ kind: 'prompt' }` and the card shows a neutral prompt instead of a
- * danger-styled ₪0 / 0%.
+ * danger-styled ₪0 / 0%. The same holds while the visitor is still typing a
+ * tiny amount ('1', '15', '20'): a leak that rounds to ₪0 is a prompt, too.
+ *
+ * The annual line is 12 × the DISPLAYED monthly figure, so the two numbers on
+ * screen always reconcile (₪214 → ₪2,568, never a separately rounded ₪2,562).
  */
 import { parseNumberInput } from '@restomatch/types';
 
@@ -43,8 +47,13 @@ export type RoiResult =
       breakevenBelowFloor: boolean;
       /** The leak exceeds the plan price. */
       pays: boolean;
-      /** Plan price as a whole % of the estimated leak (only meaningful when `pays`). */
+      /** Plan price as a % of the estimated leak (only meaningful when `pays`). */
       coveredPct: number;
+      /**
+       * Show "רק X% מהדליפה" only when it reads honestly: 0.5 ≤ X < 99.5, i.e. it
+       * never rounds to "0%" (huge purchasing) or "100%" (leak ≈ the plan price).
+       */
+      showCovered: boolean;
     };
 
 /**
@@ -57,15 +66,20 @@ export function computeRoi(raw: string, leakPct: number, proAgorot: number): Roi
   if (monthlyAgorot === null || !Number.isFinite(leakPct) || leakPct <= 0) return { kind: 'prompt' };
   const leakTenths = Math.round(leakPct * 10); // 1.5% → 15 tenths of a percent
   const leakAgorot = divHalfUp(monthlyAgorot * leakTenths, 1000);
+  const monthlyLeakIls = divHalfUp(leakAgorot, 100);
+  if (monthlyLeakIls === 0) return { kind: 'prompt' };
   const breakevenHundredths = divHalfUp(proAgorot * 10_000, monthlyAgorot);
+  const pays = leakAgorot > proAgorot;
   return {
     kind: 'ok',
     monthlyAgorot,
-    monthlyLeakIls: divHalfUp(leakAgorot, 100),
-    annualLeakIls: divHalfUp(leakAgorot * 12, 100),
+    monthlyLeakIls,
+    annualLeakIls: monthlyLeakIls * 12,
     breakevenHundredths,
     breakevenBelowFloor: breakevenHundredths < 1,
-    pays: leakAgorot > proAgorot,
-    coveredPct: leakAgorot > 0 ? divHalfUp(proAgorot * 100, leakAgorot) : 0,
+    pays,
+    coveredPct: divHalfUp(proAgorot * 100, leakAgorot),
+    // Exact integer form of 0.5 ≤ 100·pro/leak < 99.5.
+    showCovered: pays && 200 * proAgorot >= leakAgorot && 200 * proAgorot < 199 * leakAgorot,
   };
 }

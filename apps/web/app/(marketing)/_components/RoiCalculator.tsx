@@ -149,11 +149,13 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
               <p className="mt-2 text-sm leading-relaxed text-ink">
                 {t('roi.breakevenBody', { price: formatIls(proPriceIls, { locale }), pct: breakeven })}
               </p>
-              <p className="mt-1 text-sm leading-relaxed text-muted">
-                {roi.pays
-                  ? t('roi.breakevenRatio', { ratio: pct(roi.coveredPct, 0) })
-                  : t('roi.breakevenOver')}
-              </p>
+              {roi.showCovered ? (
+                <p className="mt-1 text-sm leading-relaxed text-muted" data-testid="roi-ratio">
+                  {t('roi.breakevenRatio', { ratio: pct(roi.coveredPct, 0) })}
+                </p>
+              ) : !roi.pays ? (
+                <p className="mt-1 text-sm leading-relaxed text-muted">{t('roi.breakevenOver')}</p>
+              ) : null}
             </div>
           </>
         )}
