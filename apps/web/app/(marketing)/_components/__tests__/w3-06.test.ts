@@ -146,6 +146,9 @@ describe('W3-06 · pricing', () => {
     const he = read('lib/i18n/messages/landing/he.ts');
     expect(he).toMatch(/leakLabel: '[^']*\(לפני מע״מ\)'/);
     expect(he).toMatch(/breakevenLabel: '[^']*\(\{price\} \+ מע״מ\)/);
+    // M9: the break-even names its base — the same sample purchasing as the leak line.
+    expect(he).toMatch(/breakevenLabel: 'מרכש של \{purchasing\} — /);
+    expect(read('app/page.tsx')).toMatch(/breakevenLabel', \{ purchasing: ils\(EXAMPLE_PURCHASING_ILS\)/);
   });
 });
 

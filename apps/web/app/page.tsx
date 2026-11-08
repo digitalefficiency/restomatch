@@ -106,7 +106,7 @@ export default async function Home() {
       value: t('v2.proof.breakevenValue', {
         pct: `${formatNumber(breakevenPct, locale, { maximumFractionDigits: 2 })}%`,
       }),
-      label: t('v2.proof.breakevenLabel', { price: ils(proIls) }),
+      label: t('v2.proof.breakevenLabel', { purchasing: ils(EXAMPLE_PURCHASING_ILS), price: ils(proIls) }),
       tone: 'text-gold',
     },
     { value: t('v2.proof.checksValue'), label: t('v2.proof.checksLabel'), tone: 'text-primary' },
