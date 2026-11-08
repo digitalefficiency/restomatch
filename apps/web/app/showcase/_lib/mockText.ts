@@ -18,7 +18,7 @@ const EN: Record<string, string> = {
   'גולדסטאר אושר במחיר ההזמנה · תוויות מבצע ללא עלות': 'Goldstar approved at the order price · promo labels at no charge',
   'פטרוזיליה': 'Parsley',
   'הוזמן ולא סופק — לא חויב.': 'Ordered but not delivered — not billed.',
-  'נחסך בעקבות תיקון כמות פלפל אדום': 'Saved by correcting the red pepper quantity',
+  'נתפס בעקבות תיקון כמות פלפל אדום': 'Caught by correcting the red pepper quantity',
   'דנה תפסה כמות חסרה בסלמון ומחיר גבוה בדניס': 'Dana caught short salmon and an over-priced sea bream',
   'INV-3344 נסגרה': 'INV-3344 closed',
   // ── Suppliers ────────────────────────────────────────────────────────────

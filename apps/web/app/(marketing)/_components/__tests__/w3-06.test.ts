@@ -291,9 +291,12 @@ const PUBLIC_MESSAGES = ['landing', 'marketing', 'showcase'].flatMap((ns) =>
 describe('W3-06 · review: one vocabulary on the public site', () => {
   it('no "saved"/"demand" wording in showcase, landing or marketing copy and mocks (M10)', () => {
     for (const f of [...PUBLIC_MESSAGES, ...sourcesUnder('app/showcase')]) {
-      expect(read(f), f).not.toMatch(/נחסכ|דרשנו|דריש/);
+      // [כך]: the final-kaf form (נחסך) too, not only נחסכו.
+      expect(read(f), f).not.toMatch(/נחס[כך]|דרשנו|דריש/);
     }
     expect(read('lib/i18n/messages/showcase/en.ts')).not.toMatch(/\{amount\} saved/);
+    // The EN translations of the Hebrew mock strings say "caught", never "saved".
+    expect(read('app/showcase/_lib/mockText.ts')).not.toMatch(/\bsaved\b/i);
   });
 
   it('public copy carries no ₪ literal: amounts are placeholders formatted by formatIls (M7)', () => {
