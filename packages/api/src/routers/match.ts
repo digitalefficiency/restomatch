@@ -1,22 +1,31 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { releaseClaimsForRematch } from '../recovery/service';
+import { lockRecovery, releaseClaimsForRematch } from '../recovery/service';
 import { rebindDecidedClaims } from '../approvals/rebind'; // W2-04 rebind
-import { and, desc, eq, invoices, matchRuns, restaurants } from '@restomatch/db';
+import { and, desc, eq, goodsReceipts, invoiceLines, invoices, matchRuns, restaurants, sql } from '@restomatch/db';
+import { holdForReceipt, receiptStillOpen, scanOwnerReceipt } from '../receiving/matchTriggers';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
 import { managerProcedure, router } from '../trpc';
 import { assertInvoiceOwned } from '../tenant';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 import { readConsolidatedRaw } from '../match/consolidated';
+import { appError } from '../errors';
+import { invoiceQuestionCount, linkPinPoIdOf, orderQuestionCount } from '../catalog/linkQuestions';
 import { loadPriorDecisions, persistMatchRun } from '../match/persist';
 import { buildRules, resolveApprovalThresholds } from '../approvals/engine';
 
 export interface RunForInvoiceResult {
   matchRunId: string | null;
-  status: MatchStatus;
+  /** 'held': not matched now — waiting for its receipt's count (see `held`). */
+  status: MatchStatus | 'held';
+  /** Engine total (every finding) — the raw number. */
   totalDiscrepancyAmount: number;
+  /** The hero's leak rule for this run — what the correction screen shows as "דליפה". */
+  leakIls: number;
   discrepancyCount: number;
   poMatched: boolean;
+  /** Why it was held: its receipt is still being counted, or (a possible duplicate) it waits for review. */
+  held?: 'receipt_open' | 'awaiting_review';
 }
 
 /**
@@ -38,17 +47,54 @@ export const matchRouter = router({
       // A consolidated invoice (חשבונית ריכוז) has no PO of its own: a PO match would
       // only mark the whole invoice UNORDERED_ARRIVAL. It is cross-matched against
       // its delivery notes on the invoice page (read-only) instead.
+      // Row-locked, and never while the invoice is being read again (a retake):
+      // the same rule as the match job's persist step.
       const [kind] = await ctx.db
-        .select({ ocrPayload: invoices.ocrPayload })
+        .select({ ocrPayload: invoices.ocrPayload, source: invoices.source, status: invoices.status })
         .from(invoices)
         .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, restaurantId)))
-        .limit(1);
+        .limit(1)
+        .for('no key update'); // not FOR UPDATE: a tracker sync's claim FK check (KEY SHARE) must pass, or it deadlocks on the recovery lock
+      if (kind?.status === 'ocr_pending') {
+        throw appError('PRECONDITION_FAILED', 'invoice.beingRead', 'החשבונית עדיין נקראת — נסו שוב בעוד דקה');
+      }
       if (readConsolidatedRaw(kind?.ocrPayload)) {
         throw new TRPCError({
           code: 'PRECONDITION_FAILED',
           message: 'A consolidated invoice is cross-matched against its delivery notes, not re-matched to a PO.',
         });
       }
+
+      // G-08 hold: an unlinked line is an open "זה אותו מוצר?" question — the engine
+      // pairs only by product / SKU and would report a false MISSING + UNORDERED pair.
+      const open = await invoiceQuestionCount(ctx.db, restaurantId, input.invoiceId);
+      if (open > 0) {
+        throw appError('PRECONDITION_FAILED', 'invoice.unlinkedLines', 'Invoice lines are not linked to a product yet.', {
+          count: open,
+        });
+      }
+
+      // Nothing to match: say so before any order / receipt check.
+      const [anyLine] = await ctx.db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, input.invoiceId)).limit(1);
+      if (!anyLine) {
+        return { matchRunId: null, status: 'clean', totalDiscrepancyAmount: 0, leakIls: 0, discrepancyCount: 0, poMatched: false };
+      }
+
+      // S2 receipt hold — the scan's receipt (the stamp, else a photo held for
+      // ONE receipt) is the order the receiver counted: the match is pinned to
+      // it; whether it is still being counted is decided below, on the receipt
+      // the match actually lands on.
+      const scanGrId = scanOwnerReceipt(kind?.ocrPayload, kind?.source);
+      let scanPoId: string | null = null;
+      if (scanGrId) {
+        const [gr] = await ctx.db
+          .select({ poId: goodsReceipts.poId })
+          .from(goodsReceipts)
+          .where(and(eq(goodsReceipts.id, scanGrId), eq(goodsReceipts.restaurantId, restaurantId)))
+          .limit(1);
+        scanPoId = gr?.poId ?? null;
+      }
+      // end S2 receipt hold
 
       // A re-match checks against the PO the invoice was already matched to, even
       // once that PO is received/closed (discovery only looks at open POs).
@@ -58,14 +104,62 @@ export const matchRouter = router({
         .where(and(eq(matchRuns.invoiceId, input.invoiceId), eq(matchRuns.restaurantId, restaurantId)))
         .orderBy(desc(matchRuns.runAt))
         .limit(1);
+      // H: the order the receiver counted for this scan wins (as the worker's
+      // job poId does) — never a same-day second order found by discovery.
+      // (A manager's own order pin is wave 2 — PR #216 body.)
       const built = await buildMatchInputForInvoice(ctx.db, restaurantId, input.invoiceId, {
-        pinnedPoId: priorRun?.poId ?? null,
+        // G-08 round 11: a run-less invoice (a question hold / its release) keeps its order pin.
+        pinnedPoId: scanPoId ?? priorRun?.poId ?? linkPinPoIdOf(kind?.ocrPayload),
+        strictPin: scanPoId != null,
       });
+      // G-08 hold (rounds 3/8): a match — first or re-match — against an order that
+      // still has name-only questions would report a false MISSING + UNORDERED pair:
+      // the same rule as the match-invoice job (shared helper).
+      if (built && built.poId) {
+        const orderOpen = await orderQuestionCount(ctx.db, restaurantId, built.poId);
+        if (orderOpen > 0) {
+          throw appError('PRECONDITION_FAILED', 'order.unlinkedLines', 'Order lines are not linked to a product yet.', {
+            count: orderOpen,
+          });
+        }
+      }
+      // F3 / round 6: the receipt the match lands on (the scan's, or one found
+      // by discovery for an unstamped emailed invoice) must not still be
+      // counting — every line would read "received 0" (a whole-invoice leak).
+      // Then the invoice is HELD for it (not refused): the receipt's submit
+      // claims it and matches it once the count is in.
+      // Lock order, everywhere: the invoice row (above) → recovery → gr-close
+      // (a sibling invoice's edit takes recovery before gr-close too).
+      const landedGrId = built?.grId ?? scanGrId;
+      if (landedGrId) {
+        await lockRecovery(ctx.db, restaurantId);
+        if (await receiptStillOpen(ctx.db, restaurantId, landedGrId)) {
+          // A run already stands on this receipt's earlier count (a receipt
+          // reopened for a follow-up delivery): a hold would leave that stale
+          // run's ₪ showing — refuse instead (as a hand edit does).
+          const [counted] = await ctx.db
+            .select({ id: matchRuns.id })
+            .from(matchRuns)
+            .where(and(eq(matchRuns.invoiceId, input.invoiceId), eq(matchRuns.restaurantId, restaurantId), eq(matchRuns.grId, landedGrId)))
+            .limit(1);
+          if (counted) {
+            throw appError('PRECONDITION_FAILED', 'invoice.receiptOpen', 'הקבלה פתוחה לספירה — אפשר להריץ את ההתאמה אחרי שהספירה תיסגר');
+          }
+          // Its earlier run (none, or one with no receipt) is replaced by the
+          // receipt's job: bare claims on it go now, and a claim in progress
+          // refuses the Re-run visibly (invoice.claimInProgress) — the job would
+          // otherwise fail on the claim's FK and leave the stale ₪ (round 7).
+          await releaseClaimsForRematch(ctx.db, restaurantId, input.invoiceId);
+          const held = await holdForReceipt(ctx.db, restaurantId, input.invoiceId, landedGrId);
+          return { matchRunId: null, status: 'held', totalDiscrepancyAmount: 0, leakIls: 0, discrepancyCount: 0, poMatched: built?.poId != null, held };
+        }
+      }
       if (!built) {
         return {
           matchRunId: null,
           status: 'clean',
           totalDiscrepancyAmount: 0,
+          leakIls: 0,
           discrepancyCount: 0,
           poMatched: false,
         };
@@ -101,11 +195,21 @@ export const matchRouter = router({
       // W2-04 rebind: the claims released above come back for the re-applied
       // accepted decisions, under their ORIGINAL decider (shared with the worker).
       await rebindDecidedClaims(ctx.db, restaurantId, persisted.matchRunId);
+      // G-08 hold: a matched invoice no longer waits for an order — drop a stale marker;
+      // and (round 10) its order pin follows THIS run's order (none → no pin).
+      await ctx.db.execute(sql`
+        update invoices
+           set ocr_payload = (coalesce(ocr_payload, '{}'::jsonb) - 'heldPoId' - 'linkPinPoId')
+             || ${built.poId ? sql`jsonb_build_object('linkPinPoId', ${built.poId}::text)` : sql`'{}'::jsonb`}
+         where id = ${input.invoiceId}::uuid and restaurant_id = ${restaurantId}
+           and (ocr_payload ? 'heldPoId' or ocr_payload ? 'linkPinPoId')
+      `);
 
       return {
         matchRunId: persisted.matchRunId,
         status: result.status,
         totalDiscrepancyAmount: result.totalDiscrepancyAmount,
+        leakIls: persisted.leakIls,
         discrepancyCount: persisted.discrepancyCount,
         poMatched: built.poId != null,
       };

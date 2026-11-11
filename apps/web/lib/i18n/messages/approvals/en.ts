@@ -238,7 +238,7 @@ export const en: Shape<typeof he> = {
       explain: 'This invoice number was already received from the same supplier — risk of paying twice.',
     },
     DATE_ANOMALY: {
-      label: 'Unusual date',
+      label: 'Unexpected date',
       explain: 'The invoice date is more than a week away from the expected delivery.',
     },
     VAT_MISMATCH: {

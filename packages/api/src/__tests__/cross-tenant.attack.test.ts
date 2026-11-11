@@ -19,6 +19,7 @@ import {
   invoiceLines,
   invoices,
   memberships,
+  notificationsOutbox,
   poLines,
   priceAlertThresholds,
   priceAlerts,
@@ -126,6 +127,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'exports.invoicesCsv': 'isolation',
   'exports.uniform1000': 'isolation',
   'onboarding.myMemberships': 'isolation',
+  'onboarding.signupStatus':
+    'userScopedProcedure read of the CALLER\'s own users row only (keyed to ctx.session.userId, no client input) — returns one boolean (may this caller create a restaurant), no tenant data.',
   'onboarding.createRestaurant':
     'creates a brand-new tenant; takes no entity ids and reads nothing tenant-scoped',
   // Chain / branches (S8). Exercised on the RLS-enforced app role in
@@ -171,6 +174,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'receiving.registerInvoice': 'attack',
   'receiving.updateInvoiceHeader': 'attack',
   'receiving.updateInvoiceLine': 'attack',
+  'receiving.addInvoiceLine': 'attack',
+  'receiving.deleteInvoiceLine': 'attack',
   'receiving.pendingInvoices': 'isolation',
   // S2 "Receiver in English": writes ONLY display columns, but still takes a
   // client-supplied poId / invoiceId — a foreign id must be NOT_FOUND and B's
@@ -185,11 +190,17 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'admin.setOverrides': 'admin-denial',
   'admin.setMemberRole': 'admin-denial',
   'admin.listLeads': 'admin-denial',
+  'admin.setFeatures': 'admin-denial',
+  'admin.twoFactorStatus':
+    'authedProcedure read of the CALLER\'s own user_credentials.totp_enabled_at only (keyed to ctx.session.userId, no client input) — returns one boolean, no tenant data; lets /admin show the enrol-2FA prompt without a refused admin call.',
   // Phase 5+6 additions
   'settings.get': 'isolation',
   'settings.update': 'isolation',
   'settings.profile': 'isolation',
   'settings.updateProfile': 'isolation',
+  // W1-08 pilot: the credit-letter letterhead (letterhead.test.ts covers the isolation).
+  'settings.letterhead': 'isolation',
+  'settings.updateLetterhead': 'isolation',
   'search.global': 'isolation',
   // Phase-2 supplier-centric surface (suppliers / catalog / orders / on-demand match).
   // Every procedure that takes a client-supplied supplierId / productId / poId /
@@ -221,6 +232,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'orders.updateOrderLine': 'attack',
   'orders.deleteOrderLine': 'attack',
   'orders.placeOrder': 'attack',
+  // Pilot W1-11: read-only send state of a PO; client poId → assertPoOwned (attack test below).
+  'orders.sendStatus': 'attack',
   // guardrail now calls assertSupplierOwned (wave 3b): a foreign supplierId is
   // rejected with NOT_FOUND before any baseline is read. Defense-in-depth on
   // top of the restaurant-scoped baseline query (which already excluded B's
@@ -264,6 +277,17 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'mapping.unmapped': 'isolation',
   'mapping.searchProducts': 'isolation',
   'mapping.confirm': 'attack',
+  // G-08: the open "זה אותו מוצר?" count for the home line — a restaurant-scoped
+  // count, no ₪. See catalog-mapping.attack.test.ts.
+  // G-08: the chef-allowed answer — links a name question ONLY to one of its own
+  // server-computed suggestions; foreign supplier/product → NOT_FOUND.
+  'mapping.answerLink': 'attack — catalog-mapping.attack.test.ts: B supplier/product NOT_FOUND, non-suggested product FORBIDDEN, receiver FORBIDDEN, chef OK, no ₪',
+  'mapping.questionCount': 'isolation — catalog-mapping.attack.test.ts: counts only the caller restaurant name-keyed questions; B never counted for A',
+  // G-08 charge (review M-2): owner/manager mark an unlinked invoice-line key "שורת חיוב — לא מוצר".
+  'mapping.markCharge': 'attack — catalog-link-hold.test.ts: B supplier NOT_FOUND, A lines of another supplier untouched, chef / receiver FORBIDDEN, no ₪',
+  'mapping.chargeSample': 'attack — catalog-link-hold.test.ts: a B supplier → NOT_FOUND; chef → FORBIDDEN; one A invoice line of the key only',
+  'mapping.chargeKeys': 'isolation — catalog-link-hold.test.ts: lists only the caller restaurant learned keys (B never listed for A); chef FORBIDDEN; no ₪',
+  'mapping.removeChargeKey': 'attack — catalog-link-hold.test.ts: a B supplier → NOT_FOUND; chef → FORBIDDEN; returns only A lines of that key on unpaid invoices; audited',
   // Canonical product management (rename / recategorize / exclusivity / delete).
   'products.update': 'attack',
   'products.list': 'isolation',
@@ -340,6 +364,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'ingest.inbox': 'isolation',
   'ingest.approveDocument': 'attack',
   'ingest.rejectDocument': 'attack',
+  // PILOT (W2-02, train B, add-only): invoices waiting for a person to complete their lines.
+  'invoices.needsLines': "isolation — invoices-needs-lines.test.ts: A's list holds only A's invoices (B's unread or held invoice never listed, B's own list empty of A); receiver/chef FORBIDDEN",
   // Growth (wave 1, S15 — flag `growth`). pricing is a pure public quote over
   // the plan catalog (no tenant data, no ids); the referral procedures are
   // tenant-scoped — see the growth.* block at the end of this file.
@@ -1051,6 +1077,10 @@ describe('orders router: foreign id attacks + list isolation (A → B)', () => {
     expect(afterRow?.sentAt ?? null).toEqual(beforeRow?.sentAt ?? null);
   });
 
+  it('orders.sendStatus rejects a foreign poId (no B send state read)', async () => {
+    await expect(callerFor(A).orders.sendStatus({ poId: B.poId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
   it('suppliers.ledger rejects a foreign supplierId; ledgerGrid lists only own suppliers (flag on)', async () => {
     const [prev] = await db
       .select({ settings: restaurants.settings })
@@ -1213,6 +1243,55 @@ describe('match router + receiving detail reads: foreign id attacks (A → B)', 
       .where(eq(invoiceLines.id, B.invoiceLineId));
     expect(row?.qtyBilled).toBe('10.000'); // B's seeded line, untouched
     expect(row?.unitPriceBilled).toBe('10.0000');
+  });
+
+  // B8 manual entry. B's invoice is made editable ('parsed') first, so the only
+  // thing standing between A and B's invoice is the tenant check.
+  it('receiving.addInvoiceLine rejects a foreign invoiceId — no line, B untouched', async () => {
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, B.invoiceId));
+    try {
+      await expect(
+        callerFor(A).receiving.addInvoiceLine({
+          invoiceId: B.invoiceId,
+          line: { rawDescription: 'attack', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1 },
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      const lines = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, B.invoiceId));
+      expect(lines).toHaveLength(1);
+      const [inv] = await db.select({ total: invoices.totalInclVat }).from(invoices).where(eq(invoices.id, B.invoiceId));
+      expect(inv?.total).toBe('117.00');
+    } finally {
+      await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, B.invoiceId));
+    }
+  });
+
+  it("receiving.addInvoiceLine on A's own invoice rejects B's productId", async () => {
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, A.invoiceId));
+    try {
+      await expect(
+        callerFor(A).receiving.addInvoiceLine({
+          invoiceId: A.invoiceId,
+          line: { rawDescription: 'attack', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1, productId: B.productId },
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      const lines = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, A.invoiceId));
+      expect(lines).toHaveLength(1);
+    } finally {
+      await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, A.invoiceId));
+    }
+  });
+
+  it('receiving.deleteInvoiceLine rejects a foreign lineId — B keeps its line', async () => {
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, B.invoiceId));
+    try {
+      await expect(callerFor(A).receiving.deleteInvoiceLine({ lineId: B.invoiceLineId })).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+      const [row] = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.id, B.invoiceLineId));
+      expect(row?.id).toBe(B.invoiceLineId);
+    } finally {
+      await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, B.invoiceId));
+    }
   });
 });
 
@@ -1391,6 +1470,16 @@ describe('platform-admin procedures reject a non-admin tenant user', () => {
   it('admin.listLeads → FORBIDDEN', async () => {
     await expect(callerFor(A).admin.listLeads()).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
+  it('admin.setFeatures → FORBIDDEN (and B\'s flags are untouched)', async () => {
+    await expect(
+      callerFor(A).admin.setFeatures({ restaurantId: B.restaurantId, features: { contracts: true } }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    const [b] = await db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, B.restaurantId));
+    expect((b!.settings as { features?: { contracts?: boolean } }).features?.contracts).not.toBe(true);
+  });
 });
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -1462,7 +1551,12 @@ describe('role denial: managerProcedure writes reject member-tier callers', () =
         .where(eq(catalogImports.restaurantId, A.restaurantId));
       expect(afterA).toHaveLength(beforeA.length);
     });
+  }
 
+  // Owner decision 31.10 (pilot, train A): the chef orders for its own restaurant
+  // freely, so orders.placeOrder is denied to the receiver only. The chef stays
+  // denied on suppliers.update and catalog.commitImport (the loop above).
+  for (const role of ['receiver'] as const) {
     it(`orders.placeOrder → FORBIDDEN for ${role} and never mutates A's PO`, async () => {
       const [before] = await db
         .select({ status: purchaseOrders.status, sentAt: purchaseOrders.sentAt })
@@ -1479,6 +1573,73 @@ describe('role denial: managerProcedure writes reject member-tier callers', () =
       expect(after?.sentAt ?? null).toEqual(before?.sentAt ?? null);
     });
   }
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Pilot (owner decision 31.10): the chef orders its own restaurant freely — and
+ * only its own. A chef placing a record-only order on its own PO succeeds; a chef
+ * holding B's poId or supplierId is rejected and nothing is written.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+describe('chef orders: own restaurant only', () => {
+  it("chef orders.placeOrder (channel none) on its own draft succeeds — recorded, no outbox row", async () => {
+    const chef = callerWithRole(A, 'chef');
+    const { poId } = await chef.orders.createDraft({
+      supplierId: A.supplierId,
+      lines: [{ rawDescription: 'chef-line', qty: 2, unit: 'kg', unitPriceExpected: 5 }],
+    });
+    await expect(chef.orders.placeOrder({ poId, channel: 'none' })).resolves.toMatchObject({ ok: true, sentChannel: null });
+    const [row] = await db
+      .select({ status: purchaseOrders.status, sentChannel: purchaseOrders.sentChannel })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.id, poId));
+    expect(row).toEqual({ status: 'sent', sentChannel: null });
+    const queued = await db
+      .select({ id: notificationsOutbox.id })
+      .from(notificationsOutbox)
+      .where(eq(notificationsOutbox.relatedEntityId, poId));
+    expect(queued).toHaveLength(0);
+  });
+
+  it("chef orders.placeOrder with B's poId → NOT_FOUND; B's PO and outbox untouched", async () => {
+    const [before] = await db
+      .select({ status: purchaseOrders.status, sentAt: purchaseOrders.sentAt, sentChannel: purchaseOrders.sentChannel })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.id, B.poId));
+    const outboxBefore = await db
+      .select({ id: notificationsOutbox.id })
+      .from(notificationsOutbox)
+      .where(eq(notificationsOutbox.restaurantId, B.restaurantId));
+    for (const channel of ['none', 'email'] as const) {
+      await expect(callerWithRole(A, 'chef').orders.placeOrder({ poId: B.poId, channel })).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+    }
+    const [after] = await db
+      .select({ status: purchaseOrders.status, sentAt: purchaseOrders.sentAt, sentChannel: purchaseOrders.sentChannel })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.id, B.poId));
+    expect(after).toEqual(before);
+    const outboxAfter = await db
+      .select({ id: notificationsOutbox.id })
+      .from(notificationsOutbox)
+      .where(eq(notificationsOutbox.restaurantId, B.restaurantId));
+    expect(outboxAfter).toHaveLength(outboxBefore.length);
+  });
+
+  it("chef orders.createDraft with B's supplierId → NOT_FOUND; no PO written for A or B", async () => {
+    const count = async (restaurantId: string) =>
+      (await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.restaurantId, restaurantId))).length;
+    const [a0, b0] = [await count(A.restaurantId), await count(B.restaurantId)];
+    await expect(
+      callerWithRole(A, 'chef').orders.createDraft({
+        supplierId: B.supplierId,
+        lines: [{ rawDescription: 'x', qty: 1, unit: 'kg' }],
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(await count(A.restaurantId)).toBe(a0);
+    expect(await count(B.restaurantId)).toBe(b0);
+  });
 });
 
 /* ──────────────────────────────────────────────────────────────────────────

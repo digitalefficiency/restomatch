@@ -28,10 +28,10 @@ import {
 import { LEAK_FILTER, notZeroShortTwin, type LeakBreakdownInvoice } from '@restomatch/charts';
 import { authedProcedure, financeProcedure, memberProcedure, router } from '../trpc';
 import { canActOn, expandVisibleRoles } from '../lib/roles';
-import { claimableLines, sumClaims, type VatBasis } from '../lib/claims';
+import { claimableLines, isNeverClaimable, sumClaims, type VatBasis } from '../lib/claims';
 import { formatIlsAgorot } from '../reports/money';
 import { DECISION_COPY } from '../notifications/templates';
-import { materializeClaims, NEVER_CLAIMABLE_TYPES } from '../recovery/service';
+import { materializeClaims } from '../recovery/service';
 import { awaitingDecision, type AwaitingRouting } from '../approvals/awaiting';
 import {
   bulkRefusals,
@@ -114,12 +114,10 @@ export const DECIDED_CONFLICT_PREFIX = 'approvals.decided:';
  * fails it is a check ("סמנו כנבדק"), never "דרוש ₪X" — the UI keys its verbs on
  * this, and queueSummary splits "להחלטה (₪)" from "לבדיקה (ללא ₪)".
  */
-// ONE never-claimable set (owner decision 31.10), shared with the claims side.
-const NEVER_CLAIMABLE = new Set<string>(NEVER_CLAIMABLE_TYPES);
 export function isClaimableRow(r: { type: string; severity: string; deltaAmount: string | null }): boolean {
   return (
     (r.severity === 'warn' || r.severity === 'block') &&
-    !NEVER_CLAIMABLE.has(r.type) &&
+    !isNeverClaimable(r.type) &&
     Math.abs(Number(r.deltaAmount ?? 0)) > 0
   );
 }

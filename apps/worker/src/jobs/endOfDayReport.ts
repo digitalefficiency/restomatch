@@ -3,7 +3,7 @@
  *
  * Summarizes the day's money picture, led by OPEN CREDITS — the claimable ₪ of
  * the gaps still awaiting a decision (`awaitingDecision`, G-12a) — plus what
- * was caught today and how many items await a decision. Quiet days (no open
+ * was caught today (endOfDayFigures) and how many items await a decision. Quiet days (no open
  * credits and nothing caught) are skipped to avoid inbox noise.
  *
  * Detection only: it reads discrepancies and enqueues notifications; delivery
@@ -16,7 +16,8 @@ import {
   formatIlsAgorot,
   recipientsForRestaurant,
 } from '@restomatch/api';
-import { and, count, discrepancies, eq, gte, restaurants, sql } from '@restomatch/db';
+import { LEAK_FILTER } from '@restomatch/charts';
+import { eq, restaurants, sql, type Database } from '@restomatch/db';
 import { approvalsGoLink } from './matchInvoice';
 import { makeWorker, type WorkerJob } from '../queue';
 import { appBaseUrl, formatIlsAmount, formatIlDate, startOfIlDay } from '../lib/notifyHelpers';
@@ -27,6 +28,44 @@ export interface EndOfDayReportJob {
   restaurantId?: string;
   /** Optional override for "today" (tests). */
   forDate?: string;
+}
+
+/**
+ * The digest's ₪ (money review G), per invoice then summed, each invoice capped at
+ * its total incl. VAT like the hero:
+ *  • open credits — the claimable rule on findings still open/escalated: warn/block,
+ *    a leak type (LEAK_FILTER; every never-claimable type is outside it, so a
+ *    MISSING_ON_INVOICE or an under-charge is never "money to get back"), |Δ| > 0;
+ *  • caught today — the hero's LEAK_FILTER on today's findings, same cap.
+ * An info line never counts.
+ */
+export async function endOfDayFigures(
+  db: Database,
+  restaurantId: string,
+  startToday: Date,
+): Promise<{ openCount: number; openIls: number; todayCount: number; todayIls: number }> {
+  const agg = async (where: ReturnType<typeof sql>) => {
+    const res = await db.execute(sql`
+      SELECT COALESCE(SUM(x.n), 0)::int AS cnt, COALESCE(SUM(x.capped), 0) AS total
+      FROM (
+        SELECT COUNT(*) AS n,
+               LEAST(SUM(ABS(d.delta_amount)), GREATEST(COALESCE(i.total_incl_vat, SUM(ABS(d.delta_amount))), 0)) AS capped
+        FROM discrepancies d
+        JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
+        LEFT JOIN invoices i ON i.id = mr.invoice_id AND i.restaurant_id = ${restaurantId}
+        WHERE d.restaurant_id = ${restaurantId}
+          AND ${LEAK_FILTER}
+          AND ABS(d.delta_amount) > 0
+          AND ${where}
+        GROUP BY mr.invoice_id, i.total_incl_vat
+      ) x
+    `);
+    const rows = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
+    return { cnt: Number(rows[0]?.cnt ?? 0), total: Math.round(Number(rows[0]?.total ?? 0) * 100) / 100 };
+  };
+  const open = await agg(sql`d.resolution_status IN ('open', 'escalated')`);
+  const today = await agg(sql`d.created_at >= ${startToday.toISOString()}::timestamptz`);
+  return { openCount: open.cnt, openIls: open.total, todayCount: today.cnt, todayIls: today.total };
 }
 
 export function startEndOfDayReportWorker() {
@@ -59,23 +98,9 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
       { session: { restaurantId: restaurant.id, role: 'owner' } },
       { scope: 'all' },
     );
-
-    // What was flagged today.
-    const [todayAgg] = await db
-      .select({
-        cnt: count(discrepancies.id),
-        total: sql<string>`coalesce(sum(abs(${discrepancies.deltaAmount})), 0)`,
-      })
-      .from(discrepancies)
-      .where(
-        and(
-          eq(discrepancies.restaurantId, restaurant.id),
-          gte(discrepancies.createdAt, startToday),
-        ),
-      );
-
+    // Caught today: the hero's LEAK_FILTER, capped per invoice (money review G).
+    const { todayCount, todayIls } = await endOfDayFigures(db, restaurant.id, startToday);
     const openCount = awaiting.toDecide.count;
-    const todayCount = Number(todayAgg?.cnt ?? 0);
 
     // Quiet day → skip (no open credits, nothing caught today).
     if (awaiting.count === 0 && todayCount === 0) {
@@ -94,7 +119,7 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
       openCreditsCount: openCount,
       openCreditsIls: formatIlsAgorot(Math.round((awaiting.ils?.excl ?? 0) * 100), { maximumFractionDigits: 0 }),
       todayCaughtCount: todayCount,
-      todayCaughtIls: formatIlsAmount(Number(todayAgg?.total ?? 0)),
+      todayCaughtIls: formatIlsAmount(todayIls),
       pendingApprovals: awaiting.count,
       approvalsUrl: approvalsGoLink(restaurant.id, null, appBaseUrl()),
     });

@@ -115,8 +115,8 @@ describe('match-invoice re-match keeps claims honest (W2-04 §8)', () => {
     await db.execute(sql`UPDATE recovery_claims SET letter_sent_at = now() WHERE invoice_id = ${inv!.invoice_id}::uuid`);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const out = await matchInvoiceForJob(db, { restaurantId, invoiceId: inv!.invoice_id, rematch: true });
-    expect(out).toMatchObject({ persisted: null, skipped: 'claims_in_progress' });
-    expect(warn.mock.calls.filter((c) => String(c[0]).includes('re-match skipped'))).toHaveLength(1);
+    expect(out).toMatchObject({ persisted: null, skipped: 'claim_in_progress' });
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('keeps its run'))).toHaveLength(1);
     warn.mockRestore();
     const [still] = (await db.execute(sql`SELECT count(*)::int AS n FROM match_runs WHERE id = ${inv!.run_id}::uuid`)) as unknown as Array<{ n: number }>;
     expect(still!.n).toBe(1);
