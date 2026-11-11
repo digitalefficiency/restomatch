@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from '@playwright/test';
 import { SCREENS, SLACK, TYPE_BUDGET, VIEWPORT, type CopyScreen } from '../lib/copy/screens';
 import { DEMO_RESTAURANT_NAME } from './env';
 import { e2eSql, loginViaMagicLink } from './helpers';
@@ -44,11 +44,32 @@ test.afterAll(async () => {
   }
 });
 
-async function open(page: Page, s: CopyScreen) {
-  await page.setViewportSize(VIEWPORT[s.vp]);
-  if (s.role !== 'anon') await loginViaMagicLink(page, EMAIL[s.role]!, s.route);
+// One magic-link sign-in per role for the whole run, cached on disk: Playwright restarts the worker
+// after a failing test, and the auth rate limit allows only a few magic links per minute.
+const STATE_DIR = 'test-results/.auth';
+async function stateFor(browser: Browser, role: string): Promise<string> {
+  const file = `${STATE_DIR}/w2-16-${role}.json`;
+  if (!existsSync(file)) {
+    mkdirSync(STATE_DIR, { recursive: true });
+    const ctx = await browser.newContext({ baseURL: test.info().project.use.baseURL });
+    const p = await ctx.newPage();
+    await loginViaMagicLink(p, EMAIL[role]!);
+    await ctx.storageState({ path: file });
+    await ctx.close();
+  }
+  return file;
+}
+
+async function open(browser: Browser, s: CopyScreen): Promise<Page> {
+  const ctx = await browser.newContext({
+    baseURL: test.info().project.use.baseURL,
+    viewport: VIEWPORT[s.vp],
+    ...(s.role === 'anon' ? {} : { storageState: await stateFor(browser, s.role) }),
+  });
+  const page = await ctx.newPage();
   await page.goto(s.route);
   await page.waitForLoadState('networkidle');
+  return page;
 }
 
 async function axeSerious(page: Page): Promise<string[]> {
@@ -61,8 +82,8 @@ async function axeSerious(page: Page): Promise<string[]> {
 }
 
 for (const s of SCREENS) {
-  test(`copy budget · ${s.id} (${s.role}, ${s.vp})`, async ({ page }) => {
-    await open(page, s);
+  test(`copy budget · ${s.id} (${s.role}, ${s.vp})`, async ({ browser }) => {
+    const page = await open(browser, s);
     const m = await measureCopy(page);
     const budget = TYPE_BUDGET[s.type];
     const firstBudget = s.type === 'dashboard' && s.vp === 'phone' ? budget.phoneFirst! : budget.first;
@@ -78,9 +99,9 @@ for (const s of SCREENS) {
   });
 }
 
-test('fold contract + axe with folds open (one real screen)', async ({ page }) => {
+test('fold contract + axe with folds open (one real screen)', async ({ browser }) => {
   const s = SCREENS.find((x) => x.id === 'owner-home')!;
-  await open(page, s);
+  const page = await open(browser, s);
   expect(await axeSerious(page)).toEqual([]);
   const toggles = page.locator('[data-explain-toggle]');
   for (let i = 0; i < (await toggles.count()); i++) if (await toggles.nth(i).isVisible()) await toggles.nth(i).click();
