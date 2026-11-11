@@ -10,7 +10,7 @@ import { he as inventory } from '../i18n/messages/inventory/he';
 import { he as suppliers } from '../i18n/messages/suppliers/he';
 
 /**
- * Owner terminology (31.10): מרכזת · פער · דרישת זיכוי · קבלת סחורה, and
+ * Owner terminology (31.10; 7.11: בקשת זיכוי): מרכזת · פער · בקשת זיכוי · קבלת סחורה, and
  * "עלות מזון רצויה" — never "יעד". Every string VALUE of these pilot-screen
  * namespaces is checked (keys may keep their old English names).
  */
@@ -21,7 +21,7 @@ const NAMESPACES = { approvals, components, leakProof, consolidated, accounting,
 const OFF = [
   { re: /ריכוז/, use: 'מרכזת' },
   { re: /חריג(ה|ות)(?![א-ת])/, use: 'פער' },
-  { re: /תביע/, use: 'דרישת זיכוי' },
+  { re: /תביע/, use: 'בקשת זיכוי' },
   { re: /יעד/, use: 'עלות מזון רצויה' },
 ];
 
