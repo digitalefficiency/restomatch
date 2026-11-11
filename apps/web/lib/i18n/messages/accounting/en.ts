@@ -52,7 +52,7 @@ export const en: Shape<typeof he> = {
     steps: {
       unchecked: { title: 'Invoices not checked yet', body: 'This month’s invoices still being read or not yet matched to an order and delivery note.', verb: 'Check invoices' },
       gaps: { title: 'Discrepancies awaiting a decision', body: 'The same figure as “Waiting for your decision” on the home page.', verb: 'Decide discrepancies' },
-      claims: { title: 'Credit claims not sent', body: 'Credits you decided to claim that have not been sent to the supplier.', verb: 'Send claims' },
+      claims: { title: 'Credit requests not sent', body: 'Credits you decided to request that have not been sent to the supplier.', verb: 'Send requests' },
       consolidated: { title: 'Consolidated invoices waiting', body: 'Consolidated invoices waiting for their delivery notes. This is normal, not a fault.', verb: 'Open the consolidated invoice' },
       deliveryNotes: { title: 'Delivery notes with no invoice', body: 'Goods received this month that no invoice covers yet (before VAT).', verb: 'Open the supplier ledger' },
       vat: { title: 'VAT at risk', body: 'Invoices without a valid allocation number — their VAT cannot be deducted.', verb: 'Open VAT at risk' },
