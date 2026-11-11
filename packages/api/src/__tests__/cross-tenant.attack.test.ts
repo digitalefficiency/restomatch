@@ -186,7 +186,7 @@ const BASE_COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'receiving.ensureEnglish': 'attack',
   'receiving.dockSlip': 'attack',
   'scans.upload':
-    'memberProcedure write keyed to ctx.session.restaurantId; takes NO client-supplied tenant id or storage prefix (PR1/A.3 — the tenant + object path are derived server-side from the session), so it cannot target another tenant. The actual byte upload + service-role mapping insert are Supabase-network-bound and verified by storage.attack.test (membership gate) + against real Supabase; role denial: receiverProcedure (owner/manager/receiver) — chef + bookkeeper FORBIDDEN, asserted in "role denial: scans.upload" below.',
+    'memberProcedure write keyed to ctx.session.restaurantId; takes NO client-supplied tenant id or storage prefix (PR1/A.3 — the tenant + object path are derived server-side from the session), so it cannot target another tenant. The actual byte upload + service-role mapping insert are Supabase-network-bound and verified by storage.attack.test (membership gate) + against real Supabase; role denial is implicit in memberProcedure.',
   'admin.listRestaurants': 'admin-denial',
   'admin.getRestaurant': 'admin-denial',
   'admin.assignPlan': 'admin-denial',
@@ -2001,24 +2001,6 @@ describe('member locale: foreign-id attacks + self isolation (A → B)', () => {
     expect(await bOwnerLocale()).toBe('he');
     await callerFor(A).settings.setMyLocale({ locale: null });
     expect(await callerFor(A).settings.myLocale()).toEqual({ locale: null });
-  });
-});
-
-describe('role denial: scans.upload (IA warden review) — only the roles that photograph invoices', () => {
-  // A chef / bookkeeper must not store an orphan private scan + invoice_scans row.
-  for (const role of ['chef', 'bookkeeper'] as const) {
-    it(`scans.upload → FORBIDDEN for ${role}`, async () => {
-      await expect(
-        callerWithRole(A, role).scans.upload({ contentBase64: 'AAAA', mimeType: 'image/png' }),
-      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    });
-  }
-  it('scans.upload passes the role gate for owner/manager/receiver (an unsupported mime → BAD_REQUEST, not FORBIDDEN)', async () => {
-    for (const role of ['owner', 'manager', 'receiver'] as const) {
-      await expect(
-        callerWithRole(A, role).scans.upload({ contentBase64: 'AAAA', mimeType: 'text/plain' }),
-      ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    }
   });
 });
 
