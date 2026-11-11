@@ -96,7 +96,7 @@ describe('W3-06 · one sample month across the public site', () => {
   it('landing, calculator and the problem math read the module, not literals', () => {
     expect(read('app/page.tsx')).toMatch(/SAMPLE_LEAK_ILS/);
     expect(read('app/page.tsx')).not.toMatch(/EXAMPLE_LEAK_RATE|150_000/);
-    expect(read('app/(marketing)/_components/RoiCalculator.tsx')).toMatch(/useState\(String\(SAMPLE_PURCHASING_ILS\)\)/);
+    expect(read('app/(marketing)/_components/RoiCalculator.tsx')).toMatch(/useState\(\(\) => grouped\(SAMPLE_PURCHASING_ILS\)\)/);
     expect(read('app/(marketing)/_components/RoiCalculator.tsx')).toMatch(/useState\(SAMPLE_LEAK_PCT\)/);
     expect(read('app/(marketing)/_components/detail-sections.tsx')).not.toMatch(/150_000/);
   });
