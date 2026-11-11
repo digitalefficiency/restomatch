@@ -55,6 +55,7 @@ export function RegisterClient({
   rows,
   counts,
   lines = null,
+  intake = false,
   monthOffset,
   fellBack = false,
   locale,
@@ -64,6 +65,8 @@ export function RegisterClient({
   counts: Record<Exclude<Tab, 'lines'>, number> | null;
   /** invoices.needsLines for ?view=lines; null when that read failed. */
   lines?: LinesView | null;
+  /** An intake channel (ingestWhatsapp / ingestEmail) is on: only then the 'נכנסות' tab and its inbox CTA. */
+  intake?: boolean;
   monthOffset: number;
   /** The first days of a month opened the previous month because this one is still empty. */
   fellBack?: boolean;
@@ -72,7 +75,9 @@ export function RegisterClient({
 }) {
   const router = useRouter();
   const viewParam = useTableUrlValue('view');
-  const view: Tab = (TABS as string[]).includes(viewParam ?? '') ? (viewParam as Tab) : 'review';
+  const tabsShown = intake ? TABS : TABS.filter((v) => v !== 'intake');
+  // ?view=intake with intake off falls back to the default tab — never a dead end.
+  const view: Tab = (tabsShown as string[]).includes(viewParam ?? '') ? (viewParam as Tab) : 'review';
   const columns = useMemo(() => registerColumns(t, locale), [t, locale]);
   const visible = useMemo(() => (rows ?? []).filter((r) => inTab(r, view)), [rows, view]);
   const totals = visibleTotals(visible);
@@ -122,7 +127,7 @@ export function RegisterClient({
 
   const tabs = (
     <ViewTabs
-      views={TABS.map((v) => ({
+      views={tabsShown.map((v) => ({
         id: v,
         label: t.tabs[v],
         count: v === 'lines' ? (lines?.count ?? 0) : counts[v],
@@ -190,7 +195,7 @@ export function RegisterClient({
     );
   }
 
-  if (view === 'intake') {
+  if (view === 'intake' && intake) {
     return (
       <div className="space-y-4" data-testid="invoice-register">
         {tabs}

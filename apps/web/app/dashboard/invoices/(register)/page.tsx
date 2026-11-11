@@ -8,6 +8,7 @@ import { RegisterClient, type RegisterPageCopy } from './register-client';
 import type { InvoiceStateKey, RegisterRow } from './columns';
 import { pickRegisterMonth } from './month';
 import { auth } from '@/auth';
+import { enabledFeatures } from '@/lib/ingest/features';
 import { formatDate } from '@/lib/i18n/format';
 import { holdReasonKeys } from '../hold-reasons';
 import type { LinesView } from './register-client';
@@ -95,6 +96,10 @@ export default async function InvoicesRegisterPage({
   };
 
   const readOnly = session?.user?.role === 'bookkeeper';
+  // B4: the 'נכנסות' tab and its inbox CTA exist only when an intake channel is on —
+  // with ingestWhatsapp and ingestEmail off, /dashboard/inbox is a 404 (a dead end).
+  const features = await enabledFeatures(session?.user?.restaurantId);
+  const intakeOn = features.includes('ingestWhatsapp') || features.includes('ingestEmail');
   const dd = (d: Date | string | null) =>
     d ? formatDate(new Date(d), locale, { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.') : null;
   const lines: LinesView | null = linesRes.ok
@@ -139,7 +144,7 @@ export default async function InvoicesRegisterPage({
   return (
     <div>
       <SectionHeader level={1} title={t('register.title')} subtitle={t('register.subtitle')} />
-      <RegisterClient rows={rows} counts={data?.counts ?? null} lines={lines} monthOffset={monthOffset} fellBack={fellBack} locale={locale} copy={copy} />
+      <RegisterClient rows={rows} counts={data?.counts ?? null} lines={lines} intake={intakeOn} monthOffset={monthOffset} fellBack={fellBack} locale={locale} copy={copy} />
     </div>
   );
 }
