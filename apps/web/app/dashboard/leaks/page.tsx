@@ -80,9 +80,9 @@ export default async function LeaksPage({
     return (
       <div>
         <SectionHeader level={1} title={t('hub.title')} subtitle={t('hub.subtitle')} />
-        {tabs}
         <div className="flex flex-col">
-          <div className="order-last sm:order-first">{leakLinks}</div>
+          {/* Phone: the T1 leak first (W1-08); the tabs and links follow it. */}
+          <div className="order-last sm:order-first">{tabs}{leakLinks}</div>
           {explorer}
         </div>
         <OverContractCard variant="compact" />
@@ -98,9 +98,9 @@ export default async function LeaksPage({
     return (
       <div>
         <SectionHeader level={1} title={t('hub.title')} subtitle={t('hub.subtitle')} />
-        {tabs}
         <div className="flex flex-col">
-          <div className="order-last sm:order-first">{leakLinks}</div>
+          {/* Phone: the T1 leak first (W1-08); the tabs and links follow it. */}
+          <div className="order-last sm:order-first">{tabs}{leakLinks}</div>
           {explorer}
         </div>
         <OverContractCard variant="compact" />
@@ -128,9 +128,9 @@ export default async function LeaksPage({
   return (
     <div>
       <SectionHeader level={1} title={t('hub.title')} subtitle={t('hub.subtitle')} />
-        {tabs}
       <div className="flex flex-col">
-        <div className="order-last sm:order-first">{leakLinks}</div>
+        {/* Phone: the T1 leak first (W1-08); the tabs and links follow it. */}
+        <div className="order-last sm:order-first">{tabs}{leakLinks}</div>
         {explorer}
       </div>
       {/* Wave-1: lines billed above contract (renders nothing when off / none). */}

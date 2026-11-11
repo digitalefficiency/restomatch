@@ -21,13 +21,16 @@ describe('DrillLink (the drill contract)', () => {
     expect(attr(html, 'data-drill-total')).toBe('29600');
   });
 
-  it('accessible name: scope + the same ₪ + the row count (he/en, plurals)', () => {
-    const he = attr(render({ href: '/x', totalAgorot: 29600, label: 'נתפס לפני תשלום', rows: 4 }), 'aria-label');
-    expect(he).toBe(`נתפס לפני תשלום ${formatIls(296, { locale: 'he' })} — פתחו 4 שורות`);
-    expect(attr(render({ href: '/x', totalAgorot: 29600, label: 'L', rows: 1 }), 'aria-label')).toMatch(/פתחו שורה אחת$/);
-    const en = attr(render({ href: '/x', totalAgorot: 46354, label: 'Paid, to claim', rows: 9, context: 'line' }, 'en'), 'aria-label');
-    expect(en).toBe(`Paid, to claim ${formatIls(463.54, { locale: 'en', maximumFractionDigits: 2 })} — open 9 rows`);
-    expect(attr(render({ href: '/x', totalAgorot: 100, label: 'L' }), 'aria-label')).toMatch(/פתחו את הפירוט$/);
+  it('accessible name: the visible figure first, then scope + the same ₪ + the row count (WCAG 2.5.3; he/en, plurals)', () => {
+    const sr = (html: string) => html.match(/<span class="sr-only">([^<]*)<\/span>/)?.[1];
+    const he = render({ href: '/x', totalAgorot: 29600, label: 'נתפס לפני תשלום', rows: 4 });
+    expect(he).not.toContain('aria-label');
+    expect(he).toMatch(/^<a [^>]*>x<span class="sr-only">/); // the visible content starts the name
+    expect(sr(he)).toBe(` — נתפס לפני תשלום ${formatIls(296, { locale: 'he' })} — פתחו 4 שורות`);
+    expect(sr(render({ href: '/x', totalAgorot: 29600, label: 'L', rows: 1 }))).toMatch(/פתחו שורה אחת$/);
+    const en = sr(render({ href: '/x', totalAgorot: 46354, label: 'Paid, to claim', rows: 9, context: 'line' }, 'en'));
+    expect(en).toBe(` — Paid, to claim ${formatIls(463.54, { locale: 'en', maximumFractionDigits: 2 })} — open 9 rows`);
+    expect(sr(render({ href: '/x', totalAgorot: 100, label: 'L' }))).toMatch(/פתחו את הפירוט$/);
   });
 
   it('rejects non-integer agorot (a shekel float is a bug, not a door)', () => {

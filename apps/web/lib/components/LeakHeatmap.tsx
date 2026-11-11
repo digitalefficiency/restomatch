@@ -76,7 +76,7 @@ export function LeakHeatmap({
           return (
             <li key={key} className="list-none">
               {c.href ? (
-                <a href={c.href} className={cls} aria-label={name} {...drillAttrs(Math.round(c.monthExcessIls * 100))} data-testid="heatmap-tile">
+                <a href={c.href} className={cls} {...drillAttrs(Math.round(c.monthExcessIls * 100))} data-testid="heatmap-tile">
                   {body}
                 </a>
               ) : (

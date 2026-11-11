@@ -74,8 +74,10 @@ test('the old period grammar answers a 308 to p / from / to, keeping other param
   const l2 = new URL(r2.headers()['location']!, 'http://x');
   expect([l2.searchParams.get('p'), l2.searchParams.get('from'), l2.searchParams.get('to')]).toEqual(['custom', '2026-02-01', '2026-02-28']);
 
-  const r3 = await page.request.get('/dashboard/leaks/proof?m=0', { maxRedirects: 0 });
-  expect(r3.status()).toBe(308);
+  // proof/ has a loading.tsx, so the page streams (200) and redirects on the client: the old
+  // URL still resolves and lands on the new grammar.
+  await page.goto('/dashboard/leaks/proof?m=-1');
+  await expect(page).toHaveURL(/\/dashboard\/leaks\/proof\?p=last_month$/);
   // The new grammar renders without a redirect.
   const ok = await page.request.get('/dashboard/leaks/breakdown?p=last_month', { maxRedirects: 0 });
   expect(ok.status()).toBe(200);
