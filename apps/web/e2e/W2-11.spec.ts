@@ -99,16 +99,20 @@ async function signIn(context: BrowserContext, page: Page, email: string): Promi
   expect(res.status(), `password sign-in for ${email}`).toBeLessThan(400);
 }
 
-test('the receiver gets no supplier ledger: the page and the procedure are refused', async ({ browser }) => {
+test('the receiver gets no supplier ₪: no ledger page, no overview, and the ledger grid carries no ₪', async ({ browser }) => {
   const context = await browser.newContext();
   const page = await context.newPage();
   await signIn(context, page, 'receiver@kfar-hazeitim.test');
-  const res = await page.request.get(`/api/trpc/suppliers.ledgerGrid?input=${encodeURIComponent(JSON.stringify({ json: { months: 6 } }))}`);
-  expect(res.status()).toBe(403);
   const overview = await page.request.get(
     `/api/trpc/suppliers.overview?input=${encodeURIComponent(JSON.stringify({ json: { supplierId: suppliers[0]!.id } }))}`,
   );
   expect(overview.status()).toBe(403);
+  // G-07 #219: the receiver may read the grid's counts and statuses, never its ₪.
+  const grid = await page.request.get(`/api/trpc/suppliers.ledgerGrid?input=${encodeURIComponent(JSON.stringify({ json: { months: 6 } }))}`);
+  if (grid.status() === 200) {
+    const text = JSON.stringify(await grid.json());
+    expect(text).not.toMatch(/"[A-Za-z]*Agorot":[1-9]/);
+  }
   const nav = await page.goto('/dashboard/suppliers/ledger');
   expect(/\/dashboard$/.test(page.url()) || nav?.status() === 403).toBe(true);
   await context.close();

@@ -60,7 +60,9 @@ export function LeakCardBody({
             <p className="mt-2 text-xs tabular-nums text-subtle">{windowText}</p>
           </div>
         </section>
-        <Scorecard sc={sc} gated={card.scorecardGated} unavailable={card.scorecardUnavailable} locale={locale} t={t} />
+        {!print ? (
+          <Scorecard sc={sc} gated={card.scorecardGated} unavailable={card.scorecardUnavailable} locale={locale} t={t} />
+        ) : null}
       </div>
     );
   }
@@ -92,10 +94,17 @@ export function LeakCardBody({
       </section>
 
       {/* T2 — what's still open, with one CTA */}
-      {card.openAgorot > 0 && (
-        <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-danger/8 p-4">
+      {/* I6 (owner 7.11): the printed card carries the gap lines and the request ₪ only. */}
+      {print && card.letterAgorot != null && card.letterAgorot > 0 ? (
+        <section data-testid="supplier-card-request" className="flex flex-wrap items-center gap-3 rounded-2xl border border-line p-4">
+          <span className="text-sm font-semibold text-muted">{t('leakCard.request')}</span>
+          <span className="rm-print-accent text-xl font-bold tabular-nums text-ink">{ils(card.letterAgorot, locale)}</span>
+        </section>
+      ) : null}
+      {!print && card.openAgorot > 0 && (
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line p-4">
           <div className="flex flex-wrap items-center gap-3">
-            <Badge tone="danger-solid">{tl('claims.openForClaim')}</Badge>
+            <Badge tone="neutral">{tl('claims.openForClaim')}</Badge>
             <span className="rm-print-accent text-xl font-bold tabular-nums text-ink">
               {ils(card.openAgorot, locale)}
             </span>
@@ -181,7 +190,9 @@ export function LeakCardBody({
         </section>
       </div>
 
-      <Scorecard sc={sc} gated={card.scorecardGated} unavailable={card.scorecardUnavailable} locale={locale} t={t} />
+      {!print ? (
+        <Scorecard sc={sc} gated={card.scorecardGated} unavailable={card.scorecardUnavailable} locale={locale} t={t} />
+      ) : null}
     </div>
   );
 }

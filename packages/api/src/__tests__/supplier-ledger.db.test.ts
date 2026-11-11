@@ -108,10 +108,7 @@ describe('suppliers.ledger', () => {
     await expect(callerFor(A).suppliers.ledger({ supplierId: B.supplierId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(callerFor(A, 'chef').suppliers.ledger({ supplierId: A.supplierId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(callerFor(A, 'chef').suppliers.ledgerGrid()).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    // W2-11 (owner decision): the receiver gets no supplier ledger ₪.
-    await expect(callerFor(A, 'receiver').suppliers.ledger({ supplierId: A.supplierId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    await expect(callerFor(A, 'receiver').suppliers.ledgerGrid()).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    for (const role of ['manager', 'bookkeeper'] as const) {
+    for (const role of ['manager', 'receiver', 'bookkeeper'] as const) {
       await expect(callerFor(A, role).suppliers.ledger({ supplierId: A.supplierId })).resolves.toBeTruthy();
     }
   });

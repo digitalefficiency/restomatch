@@ -2,12 +2,13 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { and, asc, eq, suppliers, type Database, type Supplier } from '@restomatch/db';
 import { OrderSchedule } from '@restomatch/types';
-import { financeProcedure, managerProcedure, memberProcedure, router } from '../trpc';
+import { financeProcedure, invoiceReaderProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
 import { computeLedgerGrid, computeSupplierLedger } from '../ledger';
 import { computeSupplierOverview, computeSupplierTable } from '../ledger/overview';
 import { canonicalPaymentTerms, normalizeIsraeliPhone } from '../ledger/supplierFields';
+import { seesNoMoney, stripMoneyDeep } from '../lib/staffMoney';
 
 /**
  * Supplier setup (Phase-2). The CRUD surface for the suppliers a restaurant
@@ -162,24 +163,28 @@ export const suppliersRouter = router({
    * Supplier ledger by month (כרטסת ספק, flag `supplierLedger`): delivery notes
    * vs regular / consolidated invoices per restaurant calendar month, with the
    * engine's leak, credits asked, paid and open balance, and a drill-down of
-   * which invoice covers each delivery note. Finance roles only (owner,
-   * manager, bookkeeper): the receiver and the chef get no supplier ledger ₪
-   * (owner decision; W2-11).
+   * which invoice covers each delivery note. Invoice readers (not the chef);
+   * the receiver gets counts and statuses with every ₪ stripped (G-07 #219).
    */
-  ledger: financeProcedure
+  ledger: invoiceReaderProcedure
     .input(z.object({ supplierId: z.string().uuid(), months: z.number().int().min(1).max(24).default(6) }))
     .query(async ({ ctx, input }) => {
       await assertFeatureOn(ctx.db, ctx.session.restaurantId, 'supplierLedger');
       await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
-      return computeSupplierLedger(ctx.db, ctx.session.restaurantId, input.supplierId, input.months);
+      const ledger = await computeSupplierLedger(ctx.db, ctx.session.restaurantId, input.supplierId, input.months);
+      // G-07 strip (pilot): the receiver (an invoice reader) gets the counts and
+      // statuses, every …Agorot null. The chef can't call this (no invoice reader).
+      return seesNoMoney(ctx.session.role) ? stripMoneyDeep(ledger) : ledger;
     }),
 
   /** Every supplier × month of the ledger (the all-suppliers grid + bookkeeper CSV). */
-  ledgerGrid: financeProcedure
+  ledgerGrid: invoiceReaderProcedure
     .input(z.object({ months: z.number().int().min(1).max(24).default(6) }).optional())
     .query(async ({ ctx, input }) => {
       await assertFeatureOn(ctx.db, ctx.session.restaurantId, 'supplierLedger');
-      return computeLedgerGrid(ctx.db, ctx.session.restaurantId, input?.months ?? 6);
+      const grid = await computeLedgerGrid(ctx.db, ctx.session.restaurantId, input?.months ?? 6);
+      // G-07 strip (pilot): as `ledger` — no ₪ for the receiver.
+      return seesNoMoney(ctx.session.role) ? stripMoneyDeep(grid) : grid;
     }),
 
   /**

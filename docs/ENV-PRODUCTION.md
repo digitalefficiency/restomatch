@@ -33,11 +33,11 @@
 | `OCR_CLAUDE_EFFORT` | effort level | — | optional effort setting for the Claude reader (`packages/ocr` claudeVision) |
 | `OCR_CLAUDE_TIMEOUT_MS` | milliseconds | — | per-call timeout of the Claude reader (arrives with the OCR pilot PR #174) |
 | `OCR_JOB_HEADROOM_MS` | milliseconds | — | time kept free inside a job run for the OCR call (arrives with an OCR pilot PR) |
-| `OCR_REAL_RESTAURANT_IDS` | restaurant ids, comma-separated | ✅ pilot | the ONLY restaurants whose invoices go to real (paid) Claude OCR; everyone else gets the stub (arrives with #171) |
+| `OCR_REAL_RESTAURANT_IDS` | restaurant ids, comma-separated | ✅ pilot | the ONLY restaurants whose invoices go to real (paid) Claude OCR. Every other restaurant gets **no OCR**: the invoice is marked OCR-failed (`ocr_disabled`) and the receiver types it by hand. Only demo-tenant receiving scans get the stub (`ocrModeFor`, `apps/worker/src/jobs/ocrInvoice.ts`) |
 | `SHOWCASE_REAL_OCR` | `1` | — | lets the public showcase use real OCR — **must be absent in Production** (list below) |
 | `SIGNUP_OPEN` / `SIGNUP_ALLOWLIST` | `1` / e-mail domains or addresses | — | public sign-up gate. `SIGNUP_OPEN` **must be absent in Production**; the allowlist is the pilot's way in |
 | `NOTIFY_SHABBAT_WINDOW` | window spec | — | **global**: holds staff alerts during Shabbat (arrives with #173) |
-| `SENTRY_DSN` | sentry.io | — | optional; needs `pnpm add @sentry/nextjs` |
+| `SENTRY_DSN` | sentry.io | — | optional; the web app ships `@sentry/node`. **Leave unset** until the sub-processor list, `/privacy` and the DPA name Sentry |
 
 ## Worker (`fly secrets set -a restomatch-worker ...`)
 
