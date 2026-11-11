@@ -1,10 +1,11 @@
 import 'server-only';
 import { isEmailConfigured, sendEmail } from '@/lib/email';
 
-/** The sign-in code e-mail (W3-07b slice b). Plain and short; the code is the subject too. */
+/** The sign-in code e-mail (W3-07b slice b). Plain and short. */
 export function loginCodeEmail(input: { code: string; locale: string }) {
   const he = input.locale !== 'en';
-  const subject = he ? `קוד הכניסה שלכם: ${input.code}` : `Your sign-in code: ${input.code}`;
+  // The code stays out of the subject, so it never shows on a lock-screen preview.
+  const subject = he ? 'קוד הכניסה שלכם ל-RestoMatch' : 'Your RestoMatch sign-in code';
   const lead = he ? 'זה הקוד לכניסה ל-RestoMatch:' : 'Here is your RestoMatch sign-in code:';
   const tail = he
     ? 'הקוד תקף ל-10 דקות. לא ניסיתם להיכנס? אפשר להתעלם מהמייל, והחשבון נשאר מוגן.'

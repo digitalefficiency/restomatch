@@ -1,4 +1,5 @@
 import { headers } from 'next/headers';
+import { after } from 'next/server';
 import { AuthError } from 'next-auth';
 import { clientIpFromHeaders } from '@restomatch/api';
 import Link from 'next/link';
@@ -175,8 +176,13 @@ export default async function LoginPage({ searchParams }: PageProps) {
     ]);
     if (!perMailbox.allowed || !perIp.allowed) redirect(back('EmailSignin', redirectTo, lockedEmail));
     await writeHint({ email, fails: 0, sentAt: Date.now(), next: redirectTo });
-    const issued = await issueLoginCode(email);
-    if (issued) await deliverLoginCode({ to: issued.email, code: issued.code, locale: await getLocale() });
+    // Issue + send AFTER the response: a known and an unknown address answer
+    // in the same time (no account enumeration by timing, warden review).
+    const locale = await getLocale();
+    after(async () => {
+      const issued = await issueLoginCode(email);
+      if (issued) await deliverLoginCode({ to: issued.email, code: issued.code, locale });
+    });
     redirect('/login/code');
   }
 
