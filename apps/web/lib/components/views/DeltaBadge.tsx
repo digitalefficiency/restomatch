@@ -1,6 +1,6 @@
 'use client';
 
-import { Minus, TrendingDown, TrendingUp } from 'lucide-react';
+import { Minus, Triangle, TrendingDown, TrendingUp } from 'lucide-react';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber, formatPercent } from '@/lib/i18n/format';
 import { views } from '@/lib/i18n/messages/views';
@@ -97,7 +97,16 @@ export function DeltaBadge({
       title={vs}
     >
       <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      <span aria-hidden="true">{flat ? '' : up ? '▲' : '▼'}</span>
+      {/* G11: the ▲/▼ mark is drawn, never typed. No UI face (Heebo, Plex) has U+25B2/U+25BC,
+          so a text glyph was painted by a system font. Never mirrored (R1). */}
+      {flat ? null : (
+        <Triangle
+          data-delta-mark={up ? 'up' : 'down'}
+          className={cn('h-2 w-2 shrink-0 fill-current', !up && 'rotate-180')}
+          strokeWidth={0}
+          aria-hidden="true"
+        />
+      )}
       <span>{text}</span>
       {showAmount && !flat && pct ? (
         <span className="tabular-nums" data-delta-signed>
