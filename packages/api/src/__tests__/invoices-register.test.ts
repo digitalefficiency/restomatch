@@ -16,6 +16,7 @@ import { appRouter } from '../index';
 import { invoiceStatesForMonth } from '../invoices';
 import { REGISTER_TABS, TAB_STATES, tabOfState } from '../routers/invoices';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
+import { restaurantTodayAt } from './helpers/il-day';
 
 /**
  * W2-02 register: tabs read G-05's canonical state (no derivation of our own),
@@ -43,7 +44,8 @@ beforeEach(async () => {
   B = await seedTenant(ownerDb, 'RB');
   // The register reads the Israel-time month of "now"; the fixture's UTC-day date can
   // fall in the previous Israel month just after midnight on the 1st. Date both invoices now.
-  for (const t of [A, B]) await ownerDb.update(invoices).set({ invoiceDate: new Date() }).where(eq(invoices.id, t.invoiceId));
+  // Noon on the restaurant's today (#295 il-day): never the runner's clock.
+  for (const t of [A, B]) await ownerDb.update(invoices).set({ invoiceDate: restaurantTodayAt(12) }).where(eq(invoices.id, t.invoiceId));
 });
 afterAll(async () => {
   await resetDb(ownerDb);
