@@ -4,6 +4,7 @@ import { getT } from '@/lib/i18n/server';
 import { common } from '@/lib/i18n/messages/common';
 import { Card } from '@/lib/components';
 import { NotFoundActions } from '@/lib/net/NotFoundActions';
+import { WhereIs } from '@/lib/components/notifications/WhereIs';
 
 /**
  * In-shell 404 (W1-04, perf-states-09 / ia-nav-07): a `notFound()` anywhere
@@ -24,6 +25,8 @@ export default async function DashboardNotFound() {
           </h1>
           <p className="mt-1.5 text-base text-muted">{t('shell.notFound.body')}</p>
         </div>
+        {/* W2-08: another branch's record says where it lives, with "פתחו שם". */}
+        <WhereIs />
         <NotFoundActions role={role} />
       </Card>
     </section>

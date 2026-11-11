@@ -796,7 +796,9 @@ function PriceCheck({
           </tbody>
         </table>
       </div>
-      <p className="mt-1 text-xs text-subtle">{t('import.check.sampleNote')}</p>
+      {check.committable > check.rows.length ? (
+        <p className="mt-1 text-xs text-subtle">{t('import.check.sampleNote')}</p>
+      ) : null}
       {check.heldCount > 0 && (
         <HeldList held={check.held} count={check.heldCount} className="mt-3" />
       )}

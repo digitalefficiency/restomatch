@@ -229,7 +229,9 @@ test.describe('lab page (platform admins)', () => {
     for (const r of report) {
       expect(r.dir, r.text ?? '').toBeNull();
       expect(r.ok, `₪ left of the digits: ${r.text}`).toBe(true);
-      expect(r.font).toMatch(/Heebo/);
+      // The UI face draws every ₪ (DS2 β, D2: IBM Plex Sans Hebrew), never a mono face (N2, D3).
+      expect(r.font).toMatch(/^"?IBM Plex Sans Hebrew/);
+      expect(r.font).not.toMatch(/Mono/);
       expect(r.numeric).toContain('tabular-nums');
     }
   });

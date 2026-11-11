@@ -1,12 +1,13 @@
 'use client';
 
-import { useState } from 'react';
-import { SlidersHorizontal, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Pencil, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import {
   Badge,
   Button,
   Card,
+  ConfirmDialog,
   EmptyState,
   Field,
   Input,
@@ -16,6 +17,7 @@ import {
   friendlyError,
   useToast,
 } from '@/lib/components';
+import { formatIls } from '@/lib/money';
 import { formatNumber, formatPercent } from '@/lib/i18n/format';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { originalProps } from '@/lib/i18n/original';
@@ -28,6 +30,10 @@ import { percentToFraction } from './logic';
  * Price-alert threshold rules: scope (supplier and/or category, or the
  * restaurant default when both are empty), rise threshold %, window days,
  * enabled. Saving a scope that already has a rule replaces it (server upsert).
+ * W2-12: % and days are text fields (inputMode, the shared parser), "עריכה"
+ * loads a rule into the form, a live preview counts the alerts the rule would
+ * have opened in 90 days (read-only `previewThreshold`), and the act-now ₪
+ * floor is shown read-only.
  */
 export function ThresholdsPanel({ suppliers, canManage }: { suppliers: SupplierOption[]; canManage: boolean }) {
   const t = useT(contractsNs);
@@ -46,8 +52,21 @@ export function ThresholdsPanel({ suppliers, canManage }: { suppliers: SupplierO
   const [windowDays, setWindowDays] = useState('');
   const [enabled, setEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
 
   const defaults = data.data?.defaults;
+  const previewFraction = percentToFraction(pct || (defaults ? String(defaults.thresholdPct * 100) : ''));
+  const previewDays = Number(windowDays || defaults?.windowDays || 0);
+  const [debounced, setDebounced] = useState<{ fraction: number; days: number } | null>(null);
+  useEffect(() => {
+    const ok = previewFraction !== null && previewFraction <= 5 && Number.isInteger(previewDays) && previewDays >= 7 && previewDays <= 120;
+    const id = setTimeout(() => setDebounced(ok ? { fraction: previewFraction!, days: previewDays } : null), 300);
+    return () => clearTimeout(id);
+  }, [previewFraction, previewDays]);
+  const preview = trpc.priceAlerts.previewThreshold.useQuery(
+    { supplierId: supplierId || null, category: category || null, thresholdPct: debounced?.fraction ?? 0.1, windowDays: debounced?.days ?? 21 },
+    { enabled: canManage && debounced !== null },
+  );
   const supplierLabel = (id: string | null, fallback: string | null) => {
     const s = suppliers.find((x) => x.id === id);
     return s ? displayName(s.name, s.nameEn, locale).primary : (fallback ?? '');
@@ -77,10 +96,19 @@ export function ThresholdsPanel({ suppliers, canManage }: { suppliers: SupplierO
     }
   }
 
+  function edit(r: { supplierId: string | null; category: string | null; thresholdPct: number; windowDays: number; enabled: boolean }) {
+    setSupplierId(r.supplierId ?? '');
+    setCategory(r.category ?? '');
+    setPct(formatNumber(Math.round(r.thresholdPct * 10_000) / 100, 'en', { maximumFractionDigits: 2 }));
+    setWindowDays(String(r.windowDays));
+    setEnabled(r.enabled);
+    document.getElementById('th-pct')?.focus();
+  }
+
   async function del(id: string) {
-    if (!window.confirm(t('thresholds.confirmDelete'))) return;
     try {
       await remove.mutateAsync({ id });
+      setConfirming(null);
       toast.success(t('thresholds.deleted'));
       void utils.priceAlerts.thresholds.invalidate();
     } catch (err) {
@@ -115,6 +143,14 @@ export function ThresholdsPanel({ suppliers, canManage }: { suppliers: SupplierO
           })}
         </p>
       ) : null}
+      {data.data.t2 ? (
+        <p className="text-sm text-muted" data-testid="t2-floor">
+          {t('thresholds.floor', {
+            pct: formatPercent(data.data.t2.minPct, locale, 0),
+            amount: formatIls(data.data.t2.floorIls, { locale }),
+          })}
+        </p>
+      ) : null}
 
       {rules.length === 0 ? (
         <EmptyState
@@ -123,14 +159,14 @@ export function ThresholdsPanel({ suppliers, canManage }: { suppliers: SupplierO
           description={t('thresholds.emptyBody')}
         />
       ) : (
-        <Card elevated padding="none" flow className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-sm">
+        <Card elevated padding="none" flow>
+          <table className="w-full text-sm">
             <caption className="sr-only">{t('thresholds.caption')}</caption>
-            <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wider text-subtle">
+            <thead className="border-b border-line bg-surface-2 text-xs text-subtle">
               <tr>
                 <th scope="col" className="p-3 text-start font-semibold">{t('thresholds.colScope')}</th>
-                <th scope="col" className="p-3 text-start font-semibold">{t('thresholds.colThreshold')}</th>
-                <th scope="col" className="p-3 text-start font-semibold">{t('thresholds.colWindow')}</th>
+                <th scope="col" className="p-3 text-right font-semibold">{t('thresholds.colThreshold')}</th>
+                <th scope="col" className="p-3 text-right font-semibold">{t('thresholds.colWindow')}</th>
                 <th scope="col" className="p-3 text-start font-semibold">{t('thresholds.colEnabled')}</th>
                 {canManage ? (
                   <th scope="col" className="p-3 text-start font-semibold">
@@ -156,10 +192,8 @@ export function ThresholdsPanel({ suppliers, canManage }: { suppliers: SupplierO
                         </div>
                       )}
                     </td>
-                    <td className="p-3 font-mono tabular-nums text-ink">
-                      <bdi dir="ltr">+{formatPercent(r.thresholdPct, locale, 1)}</bdi>
-                    </td>
-                    <td className="p-3 tabular-nums text-muted">
+                    <td className="num p-3 text-right text-ink">{formatPercent(r.thresholdPct, locale, 1)}</td>
+                    <td className="num p-3 text-right text-muted">
                       {t('thresholds.days', { count: formatNumber(r.windowDays, locale) })}
                     </td>
                     <td className="p-3">
@@ -169,16 +203,21 @@ export function ThresholdsPanel({ suppliers, canManage }: { suppliers: SupplierO
                     </td>
                     {canManage ? (
                       <td className="p-3">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          title={t('thresholds.delete')}
-                          aria-label={t('thresholds.delete')}
-                          disabled={remove.isPending}
-                          onClick={() => del(r.id)}
-                        >
-                          <Trash2 className="h-4 w-4" aria-hidden="true" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button size="md" variant="ghost" title={t('thresholds.edit')} aria-label={t('thresholds.edit')} onClick={() => edit(r)}>
+                            <Pencil className="h-4 w-4" aria-hidden="true" />
+                          </Button>
+                          <Button
+                            size="md"
+                            variant="ghost"
+                            title={t('thresholds.delete')}
+                            aria-label={t('thresholds.delete')}
+                            disabled={remove.isPending}
+                            onClick={() => setConfirming(r.id)}
+                          >
+                            <Trash2 className="h-4 w-4" aria-hidden="true" />
+                          </Button>
+                        </div>
                       </td>
                     ) : null}
                   </tr>
@@ -216,14 +255,12 @@ export function ThresholdsPanel({ suppliers, canManage }: { suppliers: SupplierO
                 </Select>
               </Field>
               <Field label={t('thresholds.threshold')} htmlFor="th-pct">
+                {/* TODO(G-13): parseDecimalInput — percentToFraction uses the shared parser today. */}
                 <Input
                   id="th-pct"
-                  type="number"
+                  type="text"
                   inputMode="decimal"
-                  step="any"
-                  min="0.1"
-                  max="500"
-                  dir="ltr"
+                  autoComplete="off"
                   value={pct}
                   placeholder={defaults ? formatNumber(defaults.thresholdPct * 100, locale) : ''}
                   onChange={(e) => setPct(e.target.value)}
@@ -232,22 +269,22 @@ export function ThresholdsPanel({ suppliers, canManage }: { suppliers: SupplierO
               <Field label={t('thresholds.window')} htmlFor="th-window">
                 <Input
                   id="th-window"
-                  type="number"
+                  type="text"
                   inputMode="numeric"
-                  step="1"
-                  min="7"
-                  max="120"
-                  dir="ltr"
+                  autoComplete="off"
                   value={windowDays}
                   placeholder={defaults ? String(defaults.windowDays) : ''}
                   onChange={(e) => setWindowDays(e.target.value)}
                 />
               </Field>
             </div>
-            <label className="mt-3 inline-flex cursor-pointer items-center gap-2 text-sm text-muted">
+            <p className="mt-3 text-sm text-ink" aria-live="polite" data-testid="threshold-preview">
+              {debounced === null ? null : preview.isFetching && !preview.data ? t('thresholds.previewLoading') : preview.data ? t('thresholds.preview', { count: preview.data.count }) : null}
+            </p>
+            <label className="mt-3 inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm text-muted">
               <input
                 type="checkbox"
-                className="h-4 w-4 rounded border-line bg-surface-2 accent-primary"
+                className="h-5 w-5 rounded border-line bg-surface-2 accent-primary"
                 checked={enabled}
                 onChange={(e) => setEnabled(e.target.checked)}
               />
@@ -259,7 +296,7 @@ export function ThresholdsPanel({ suppliers, canManage }: { suppliers: SupplierO
               </p>
             ) : null}
             <div className="mt-4">
-              <Button type="submit" variant="primary" size="sm" loading={save.isPending}>
+              <Button type="submit" variant="primary" loading={save.isPending}>
                 {t('thresholds.submit')}
               </Button>
             </div>
@@ -268,6 +305,17 @@ export function ThresholdsPanel({ suppliers, canManage }: { suppliers: SupplierO
       ) : (
         <p className="text-xs text-subtle">{t('readOnly')}</p>
       )}
+      <ConfirmDialog
+        open={confirming !== null}
+        title={t('thresholds.confirmDelete')}
+        body={t('thresholds.confirmDeleteBody')}
+        confirmLabel={t('thresholds.delete')}
+        cancelLabel={t('thresholds.cancel')}
+        loading={remove.isPending}
+        onConfirm={() => confirming && void del(confirming)}
+        onClose={() => setConfirming(null)}
+      />
     </div>
   );
 }
+

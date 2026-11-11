@@ -16,10 +16,14 @@ export {
   approvalNeededEmail,
   weeklyLeakReportEmail,
   endOfDayReportEmail,
+  invoiceOcrFailedEmail,
+  taskNoticeEmail,
+  DECISION_COPY,
   type RenderedEmail,
   type EmailLocale,
   type EmailLayout,
 } from './templates';
+export { EMAIL_COPY, fill as fillEmailCopy, type EmailCopy, type CopyShape } from './copy';
 export {
   recipientsForRestaurant,
   MANAGER_ROLES,

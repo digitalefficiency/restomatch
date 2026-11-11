@@ -6,7 +6,7 @@ import {
   costRecipes,
   formatScaled,
   netMenuPrice,
-  parseScaled,
+  parseNumericScaled,
   RecipeCycleError,
   roundHalfUp,
   simulatePriceChange,
@@ -71,13 +71,13 @@ function costOne(r: CostRecipe, p: Map<string, ProductPrice>, all: CostRecipe[] 
 
 describe('scaled decimals + half-up rounding', () => {
   it('parses NUMERIC strings exactly and rounds half-up beyond the scale', () => {
-    expect(parseScaled('38.9000', 4)).toBe(389000n);
-    expect(parseScaled('12', 4)).toBe(120000n);
-    expect(parseScaled('0.00005', 4)).toBe(1n); // half-up
-    expect(parseScaled('0.00004', 4)).toBe(0n);
-    expect(parseScaled('5.25', 2)).toBe(525n);
-    expect(() => parseScaled('1e3', 4)).toThrow(RangeError);
-    expect(() => parseScaled('abc', 4)).toThrow(RangeError);
+    expect(parseNumericScaled('38.9000', 4)).toBe(389000n);
+    expect(parseNumericScaled('12', 4)).toBe(120000n);
+    expect(parseNumericScaled('0.00005', 4)).toBe(1n); // half-up
+    expect(parseNumericScaled('0.00004', 4)).toBe(0n);
+    expect(parseNumericScaled('5.25', 2)).toBe(525n);
+    expect(() => parseNumericScaled('1e3', 4)).toThrow(RangeError);
+    expect(() => parseNumericScaled('abc', 4)).toThrow(RangeError);
   });
 
   it('rounds exact halves UP, not to even', () => {
@@ -96,9 +96,9 @@ describe('scaled decimals + half-up rounding', () => {
     expect(twice >= -d && twice < d).toBe(true);
   });
 
-  property('formatScaled ∘ parseScaled is the identity', 2, (rnd) => {
+  property('formatScaled ∘ parseNumericScaled is the identity', 2, (rnd) => {
     const v = BigInt(int(rnd, 0, 1e12));
-    expect(parseScaled(formatScaled(v, 4), 4)).toBe(v);
+    expect(parseNumericScaled(formatScaled(v, 4), 4)).toBe(v);
   });
 });
 

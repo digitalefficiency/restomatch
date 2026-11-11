@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
   and,
+  auditLog,
   count,
   desc,
   eq,
@@ -10,12 +11,13 @@ import {
   restaurants,
   users,
 } from '@restomatch/db';
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { canonicalizeEmail } from '../email';
-import { recordAudit } from '../audit';
+import { recordAudit, type AuditAction } from '../audit';
 import { appError } from '../errors';
 import type { MemberContext } from '../context';
-import { managerProcedure, ownerProcedure, router, userScopedProcedure } from '../trpc';
+import { financeProcedure, managerProcedure, ownerProcedure, router, userScopedProcedure } from '../trpc';
 
 /** Invite link validity. */
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -47,6 +49,39 @@ function isUniqueViolation(err: unknown): boolean {
   return code === '23505' || causeCode === '23505';
 }
 
+/**
+ * W2-14: G-05 pre-adds this to the `AuditAction` union; cast until it is on main.
+ * TODO(W2-14 rebase): drop the cast once G-05 merges.
+ */
+const OWNERSHIP_TRANSFERRED = 'team.ownership_transferred' as AuditAction;
+
+/**
+ * Who last changed this member's role (latest `team.member_role_changed` audit
+ * row), so a stale staged change can say "‹name› changed it" instead of a bare
+ * error. The name lives in `users` (owner connection).
+ */
+async function lastRoleChanger(ctx: MemberContext, memberId: string): Promise<string | null> {
+  const [row] = await ctx.db
+    .select({ by: auditLog.userId })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.restaurantId, ctx.session.restaurantId),
+        inArray(auditLog.action, ['team.member_role_changed', OWNERSHIP_TRANSFERRED]),
+        eq(auditLog.entityId, memberId),
+      ),
+    )
+    .orderBy(desc(auditLog.at))
+    .limit(1);
+  if (!row?.by) return null;
+  const [u] = await (ctx.adminDb ?? ctx.db)
+    .select({ name: users.name, email: users.email })
+    .from(users)
+    .where(eq(users.id, row.by))
+    .limit(1);
+  return u ? u.name || u.email : null;
+}
+
 /** Number of owners on the caller's restaurant (runs in the member tx). */
 async function ownerCount(ctx: MemberContext): Promise<number> {
   const rows = await ctx.db
@@ -63,8 +98,10 @@ export const teamRouter = router({
    * Members (memberships ⋈ users) + pending invites for the caller's restaurant.
    * Owner + manager: a manager sees the roster (and may set a member's app
    * language via setMemberLocale) but every roster WRITE stays owner-only.
+   * Bookkeeper (owner decision I3, read-only): names and roles only — no
+   * e-mails, no languages, no pending invites; every write stays FORBIDDEN.
    */
-  list: managerProcedure.query(async ({ ctx }) => {
+  list: financeProcedure.query(async ({ ctx }) => {
     const adminDb = ctx.adminDb ?? ctx.db;
     // Memberships are visible under the tenant RLS policy.
     const memberRows = await ctx.db
@@ -96,6 +133,21 @@ export const teamRouter = router({
       preferredLocale: asLocale(m.preferredLocale),
       createdAt: m.createdAt,
     }));
+
+    if (ctx.session.role === 'bookkeeper') {
+      return {
+        members: members.map((m) => ({ ...m, email: '', preferredLocale: null })),
+        invites: [] as Array<{
+          id: string;
+          email: string;
+          role: (typeof members)[number]['role'];
+          invitedByUserId: string | null;
+          preferredLocale: string | null;
+          expiresAt: Date;
+          createdAt: Date;
+        }>,
+      };
+    }
 
     const invites = await ctx.db
       .select({
@@ -295,7 +347,19 @@ export const teamRouter = router({
 
   /** Change a member's single role. Blocks demoting the last owner. */
   updateMemberRole: ownerProcedure
-    .input(z.object({ userId: z.string().uuid(), role: roleSchema }))
+    .input(
+      z.object({
+        userId: z.string().uuid(),
+        role: roleSchema,
+        /**
+         * The role the UI staged the change FROM. When given and the member's
+         * role is no longer that (someone else changed it meanwhile), the change
+         * is refused with CONFLICT naming who changed it (W2-14 guarded
+         * transition). Optional so older callers keep working.
+         */
+        expectedRole: roleSchema.optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const current = await ctx.db
         .select({ role: memberships.role, preferredLocale: memberships.preferredLocale })
@@ -308,6 +372,15 @@ export const teamRouter = router({
         );
       if (current.length === 0) {
         throw appError('NOT_FOUND', 'team.memberNotFound', 'החבר לא נמצא.');
+      }
+      if (input.expectedRole && !current.some((r) => r.role === input.expectedRole)) {
+        const by = await lastRoleChanger(ctx, input.userId);
+        throw new TRPCError({
+          code: 'CONFLICT',
+          message: by
+            ? `התפקיד כבר שונה ע״י ${by}. רעננו ונסו שוב.`
+            : 'התפקיד כבר שונה. רעננו ונסו שוב.',
+        });
       }
       const wasOwner = current.some((r) => r.role === 'owner');
       if (wasOwner && input.role !== 'owner' && (await ownerCount(ctx)) <= 1) {
@@ -338,6 +411,68 @@ export const teamRouter = router({
         entityId: input.userId,
         before: { roles: current.map((r) => r.role) },
         after: { role: input.role },
+      });
+      return { ok: true };
+    }),
+
+  /**
+   * Hand the restaurant to another active member (W2-14). Owner only. The target
+   * becomes owner and the caller takes `myNewRole` (or stays owner when
+   * `myNewRole` is 'owner'). Atomic: the member procedure runs in one tenant
+   * transaction, so both role rows and the audit row commit together. A target
+   * from another restaurant has no membership here and gets NOT_FOUND.
+   */
+  transferOwnership: ownerProcedure
+    .input(
+      z.object({
+        toUserId: z.string().uuid(),
+        myNewRole: z.enum(['owner', 'manager', 'bookkeeper']),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const me = ctx.session.userId;
+      if (input.toUserId === me) {
+        throw appError('BAD_REQUEST', 'input.invalid', 'אי אפשר להעביר בעלות לעצמכם.');
+      }
+      const scope = (userId: string) =>
+        and(eq(memberships.restaurantId, ctx.session.restaurantId), eq(memberships.userId, userId));
+      const target = await ctx.db
+        .select({ role: memberships.role, preferredLocale: memberships.preferredLocale })
+        .from(memberships)
+        .where(scope(input.toUserId));
+      if (target.length === 0) {
+        throw appError('NOT_FOUND', 'team.memberNotFound', 'החבר לא נמצא.');
+      }
+      const mine = await ctx.db
+        .select({ preferredLocale: memberships.preferredLocale })
+        .from(memberships)
+        .where(scope(me));
+
+      const setRole = async (
+        userId: string,
+        role: 'owner' | 'manager' | 'bookkeeper',
+        preferredLocale: string | null,
+      ) => {
+        await ctx.db.delete(memberships).where(scope(userId));
+        await ctx.db.insert(memberships).values({
+          userId,
+          restaurantId: ctx.session.restaurantId,
+          role,
+          preferredLocale,
+        });
+      };
+      await setRole(input.toUserId, 'owner', target.find((r) => r.preferredLocale)?.preferredLocale ?? null);
+      if (input.myNewRole !== 'owner') {
+        await setRole(me, input.myNewRole, mine.find((r) => r.preferredLocale)?.preferredLocale ?? null);
+      }
+      await recordAudit(ctx.db, {
+        restaurantId: ctx.session.restaurantId,
+        userId: me,
+        action: OWNERSHIP_TRANSFERRED,
+        entityType: 'user',
+        entityId: input.toUserId,
+        before: { to: { roles: target.map((r) => r.role) }, from: { role: 'owner' } },
+        after: { to: { role: 'owner' }, from: { role: input.myNewRole } },
       });
       return { ok: true };
     }),

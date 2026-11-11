@@ -1,0 +1,153 @@
+/* @tokens:start — GENERATED from packages/ui-tokens; do not edit by hand.
+   Regenerate: pnpm --filter @restomatch/ui-tokens tokens:css */
+:root {
+  --c-bg: 246 248 247; /* #F6F8F7 */
+  --c-surface: 255 255 255; /* #FFFFFF */
+  --c-surface-2: 238 243 240; /* #EEF3F0 */
+  --c-line: 211 221 215; /* #D3DDD7 */
+  --c-line-strong: 122 139 130; /* #7A8B82 */
+  --c-ink: 15 31 23; /* #0F1F17 */
+  --c-muted: 74 93 83; /* #4A5D53 */
+  --c-subtle: 90 106 98; /* #5A6A62 */
+  --c-primary: 6 107 74; /* #066B4A */
+  --c-on-primary: 255 255 255; /* #FFFFFF */
+  --c-gold: 117 92 0; /* #755C00 */
+  --c-danger: 184 15 42; /* #B80F2A */
+  --c-warn: 166 61 0; /* #A63D00 */
+  --c-info: 26 91 199; /* #1A5BC7 */
+  --c-surface-sunken: 238 243 240; /* #EEF3F0 */
+  --c-line-field: 102 117 109; /* #66756D */
+  --c-on-bold: 255 255 255; /* #FFFFFF */
+  --c-neutral: 74 93 83; /* #4A5D53 */
+  --c-focus: 26 91 199; /* #1A5BC7 */
+  --c-primary-bold: 6 107 74; /* #066B4A */
+  --c-primary-bold-hover: 5 88 61; /* #05583D */
+  --c-primary-subtle: 231 243 237; /* #E7F3ED */
+  --c-primary-subtle-hover: 211 234 223; /* #D3EADF */
+  --c-primary-border-subtle: 169 211 192; /* #A9D3C0 */
+  --c-danger-bold: 184 15 42; /* #B80F2A */
+  --c-danger-bold-hover: 153 12 35; /* #990C23 */
+  --c-danger-subtle: 252 236 239; /* #FCECEF */
+  --c-danger-subtle-hover: 248 218 223; /* #F8DADF */
+  --c-danger-border-subtle: 237 179 189; /* #EDB3BD */
+  --c-warn-bold: 166 61 0; /* #A63D00 */
+  --c-warn-bold-hover: 137 50 0; /* #893200 */
+  --c-warn-subtle: 253 240 231; /* #FDF0E7 */
+  --c-warn-subtle-hover: 249 224 207; /* #F9E0CF */
+  --c-warn-border-subtle: 235 191 159; /* #EBBF9F */
+  --c-gold-bold: 117 92 0; /* #755C00 */
+  --c-gold-bold-hover: 95 74 0; /* #5F4A00 */
+  --c-gold-subtle: 248 242 221; /* #F8F2DD */
+  --c-gold-subtle-hover: 239 230 195; /* #EFE6C3 */
+  --c-gold-border-subtle: 217 199 137; /* #D9C789 */
+  --c-info-bold: 26 91 199; /* #1A5BC7 */
+  --c-info-bold-hover: 21 75 166; /* #154BA6 */
+  --c-info-subtle: 235 242 253; /* #EBF2FD */
+  --c-info-subtle-hover: 217 230 251; /* #D9E6FB */
+  --c-info-border-subtle: 177 202 241; /* #B1CAF1 */
+  --c-neutral-bold: 74 93 83; /* #4A5D53 */
+  --c-neutral-bold-hover: 59 75 67; /* #3B4B43 */
+  --c-neutral-subtle: 238 243 240; /* #EEF3F0 */
+  --c-neutral-subtle-hover: 226 234 229; /* #E2EAE5 */
+  --c-neutral-border-subtle: 211 221 215; /* #D3DDD7 */
+  --c-viz-1: 6 107 74; /* #066B4A */
+  --c-viz-2: 26 91 199; /* #1A5BC7 */
+  --c-viz-3: 117 92 0; /* #755C00 */
+  --c-viz-4: 138 79 191; /* #8A4FBF */
+  --c-viz-5: 0 131 143; /* #00838F */
+  --c-viz-6: 166 61 0; /* #A63D00 */
+  --c-creep-1: 253 240 231; /* #FDF0E7 */
+  --c-on-creep-1: 15 31 23; /* #0F1F17 */
+  --c-creep-2: 244 205 176; /* #F4CDB0 */
+  --c-on-creep-2: 15 31 23; /* #0F1F17 */
+  --c-creep-3: 232 166 122; /* #E8A67A */
+  --c-on-creep-3: 15 31 23; /* #0F1F17 */
+  --c-creep-4: 180 83 26; /* #B4531A */
+  --c-on-creep-4: 255 255 255; /* #FFFFFF */
+  --c-creep-5: 122 45 0; /* #7A2D00 */
+  --c-on-creep-5: 255 255 255; /* #FFFFFF */
+  --scrim: rgba(15,31,23,.48);
+  --dur-micro: 100ms;
+  --dur-short: 150ms;
+  --dur-medium: 240ms;
+  --dur-long: 400ms;
+  --ease-standard: cubic-bezier(0.2,0,0.38,0.9);
+  --ease-enter: cubic-bezier(0,0,0.38,0.9);
+  --ease-exit: cubic-bezier(0.2,0,1,0.9);
+  --shadow-e0: none;
+  --shadow-e1: 0 1px 2px rgba(15,31,23,0.06), 0 8px 24px -12px rgba(15,31,23,0.12);
+  --shadow-e2: 0 8px 16px -4px rgba(15,31,23,.16), 0 0 1px rgba(15,31,23,.24);
+  --shadow-e3: 0 20px 24px -8px rgba(15,31,23,.22), 0 0 1px rgba(15,31,23,.24);
+  --radius-control: 0.5rem;
+  --radius-card: 0.75rem;
+  --radius-overlay: 1rem;
+  --radius-pill: 9999px;
+  --z-content: 0;
+  --z-sticky-header: 10;
+  --z-action-bar: 30;
+  --z-top-bar: 40;
+  --z-bottom-bar: 40;
+  --z-consent: 45;
+  --z-scrim: 50;
+  --z-sheet: 51;
+  --z-snackbar: 60;
+  --z-skip-link: 70;
+  --container-app: 1600px;
+  --container-form: 720px;
+  --container-prose: 70ch;
+  --container-marketing: 1280px;
+  --container-auth: 440px;
+  --focus-width: 2px;
+  --focus-offset: 2px;
+  --fs-caption: 0.75rem;
+  --lh-caption: 1rem;
+  --fs-metric-hero: 2.5rem;
+  --lh-metric-hero: 2.75rem;
+  --row-h: 48px;
+  --control-h: 40px;
+  --cell-inline: 16px;
+}
+@media (min-width: 768px) {
+  :root {
+    --fs-metric-hero: 3.5rem;
+    --lh-metric-hero: 3.75rem;
+  }
+}
+[data-density='compact'] {
+  --row-h: 32px;
+  --control-h: 32px;
+  --cell-inline: 12px;
+}
+[data-density='default'] {
+  --row-h: 48px;
+  --control-h: 40px;
+  --cell-inline: 16px;
+}
+[data-density='touch'] {
+  --row-h: 56px;
+  --control-h: 48px;
+  --cell-inline: 16px;
+}
+/* Touch is the floor on coarse pointers, whatever density a region asks for. */
+@media (pointer: coarse) {
+  :root, [data-density] {
+    --row-h: 56px;
+    --control-h: 48px;
+  }
+}
+/* Field mode (lens-mobile-field §3.6): bigger floor, stronger borders, 3 px focus. */
+[data-mode='field'] {
+  --fs-caption: 0.875rem;
+  --lh-caption: 1.25rem;
+  --c-line-strong: 102 117 109;
+  --focus-width: 3px;
+  --control-h: 48px;
+}
+@media (prefers-contrast: more) {
+  :root {
+    --c-muted: 15 31 23;
+    --c-subtle: 15 31 23;
+    --c-line-strong: 15 31 23;
+  }
+}
+/* @tokens:end */

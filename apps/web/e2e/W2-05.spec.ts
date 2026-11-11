@@ -1,0 +1,401 @@
+import { expect, test, type Page, type Route } from '@playwright/test';
+import { DEMO_RESTAURANT_NAME } from './env';
+import { e2eSql } from './helpers';
+
+/**
+ * One count line by its EXACT item name: the shared e2e restaurant also holds
+ * look-alike products ("אורז יסמין" vs "אורז יסמין W110" from other specs), so a
+ * substring `hasText` filter can match two lines. The ✓ button's aria-label is exact.
+ */
+function countLine(page: Page, name: string) {
+  return page
+    .getByTestId('count-line')
+    .filter({ has: page.getByRole('button', { name: `הגיע כמו בהזמנה — ${name}`, exact: true }) });
+}
+
+/**
+ * W2-05 slice A · the field outbox and the offline shell — the receiver on a
+ * 390 px phone (dev server, its own e2e DB). Slices B/C add their scenarios
+ * (resume, capture, walk-in, exceptions, desk view) to this file.
+ */
+
+const RECEIVER = 'receiver@kfar-hazeitim.test';
+test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+
+let receiverCookies: Awaited<ReturnType<import('@playwright/test').BrowserContext['cookies']>> = [];
+test.beforeAll(async ({ browser }) => {
+  const ctx = await browser.newContext({ baseURL: test.info().project.use.baseURL });
+  const page = await ctx.newPage();
+  await page.goto('/login');
+  await page.locator('form:has(#password) [name=email]').fill(RECEIVER);
+  await page.locator('#password').fill(process.env.DEMO_PASSWORD ?? 'RestoMatch-Demo-2026!');
+  await page.locator('form:has(#password) button[type=submit]').click();
+  await page.waitForURL(/\/dashboard/, { timeout: 60_000 });
+  receiverCookies = await ctx.cookies();
+  await ctx.close();
+});
+
+test.beforeEach(async ({ page }) => {
+  const url = test.info().project.use.baseURL!;
+  // Hebrew UI (the seeded receiver defaults to en), consent bar answered.
+  await page.context().addCookies([
+    { name: 'rm_locale', value: 'he', url },
+    { name: 'rm_cookie_consent', value: 'necessary', url },
+  ]);
+  await page.context().addCookies(receiverCookies);
+  // A reload with unsent counts asks first (beforeunload): the receiver says "leave".
+  page.on('dialog', (d) => void d.accept());
+});
+
+interface Po {
+  poId: string;
+  supplierName: string;
+  lines: Array<{ poLineId: string; productId: string; name: string }>;
+}
+
+async function freshPo(tag: string, n: number): Promise<Po> {
+  const sql = e2eSql();
+  try {
+    const [r] = await sql<{ id: string }[]>`select id from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
+    const [sup] = await sql<{ id: string; name: string }[]>`select id, name from suppliers where restaurant_id = ${r!.id} order by name limit 1`;
+    const prods = await sql<{ id: string; name: string }[]>`
+      select id, canonical_name as name from products
+      where restaurant_id = ${r!.id} and canonical_name ~ '[א-ת]' order by canonical_name limit ${n}`;
+    if (prods.length < n) throw new Error(`the e2e seed has only ${prods.length} Hebrew products`);
+    const [po] = await sql<{ id: string }[]>`
+      insert into purchase_orders (restaurant_id, supplier_id, expected_delivery_at, status, source, notes)
+      values (${r!.id}, ${sup!.id}, now() + interval '1 hour', 'sent', 'manual', ${`e2e-w205-${tag}`}) returning id`;
+    const lines: Po['lines'] = [];
+    for (const p of prods) {
+      const [pl] = await sql<{ id: string }[]>`
+        insert into po_lines (po_id, product_id, raw_description, qty_ordered, unit, unit_price_expected)
+        values (${po!.id}, ${p.id}, ${p.name}, 5, 'יח׳', 10) returning id`;
+      lines.push({ poLineId: pl!.id, productId: p.id, name: p.name });
+    }
+    return { poId: po!.id, supplierName: sup!.name, lines };
+  } finally {
+    await sql.end();
+  }
+}
+
+async function countedRows(poId: string): Promise<number> {
+  const sql = e2eSql();
+  try {
+    const [c] = await sql<{ n: number }[]>`
+      select count(*)::int as n from gr_lines gl join goods_receipts g on g.id = gl.gr_id
+      where g.po_id = ${poId} and gl.qty_received > 0`;
+    return c!.n;
+  } finally {
+    await sql.end();
+  }
+}
+
+/** The field outbox's items on this device (IndexedDB "restomatch-outbox"). */
+async function outboxKinds(page: Page): Promise<string[]> {
+  return page.evaluate(
+    () =>
+      new Promise<string[]>((resolve) => {
+        const req = indexedDB.open('restomatch-outbox');
+        req.onupgradeneeded = () => req.transaction?.abort();
+        req.onerror = () => resolve([]);
+        req.onsuccess = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains('items')) return resolve([]);
+          const r = db.transaction('items').objectStore('items').getAll();
+          r.onsuccess = () => {
+            resolve((r.result as Array<{ kind: string }>).map((i) => i.kind));
+            db.close();
+          };
+        };
+      }),
+  );
+}
+
+/** grLineIds the server acknowledged through markGrLine (batched or not). */
+function ackedMarks(page: Page): string[] {
+  const ids: string[] = [];
+  page.on('requestfinished', async (req) => {
+    if (!req.url().includes('receiving.markGrLine')) return;
+    const res = await req.response();
+    if (!res || res.status() !== 200) return;
+    const body = req.postDataJSON() as Record<string, { json?: { grLineId?: string } }> | { json?: { grLineId?: string } } | null;
+    if (!body) return;
+    const entries = 'json' in body ? [body] : Object.values(body);
+    for (const e of entries) if (e?.json?.grLineId) ids.push(e.json.grLineId);
+  });
+  return ids;
+}
+
+test('airplane mode: a 12-line count survives a reload and syncs exactly once — from the board, after leaving the screen', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(240_000);
+  const po = await freshPo('airplane', 12);
+  const acked = ackedMarks(page);
+  const path = `/dashboard/receiving/${po.poId}`;
+
+  // Online, the board keeps today's open deliveries readable offline (the read snapshot).
+  await page.goto('/dashboard/receiving');
+  await page.waitForLoadState('networkidle');
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          async (p) => Boolean(await (await caches.open('rm-receiver-snapshot-v1')).match(p)),
+          path,
+        ),
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+
+  await page.goto(path);
+  await page.waitForLoadState('networkidle');
+  await page.getByTestId('scan-no-invoice').tap();
+  await expect(page.getByTestId('delivery-check')).toBeVisible();
+
+  await context.setOffline(true);
+  for (const l of po.lines) {
+    await countLine(page, l.name).getByTestId('count-arrived').tap();
+  }
+  for (const l of po.lines) {
+    await expect(countLine(page, l.name).getByTestId('line-save-state')).toHaveAttribute(
+      'data-state',
+      'queued',
+      { timeout: 15_000 },
+    );
+  }
+  // Every unsent row is in the ONE outbox (IndexedDB), not only in the screen's memory.
+  await expect.poll(async () => (await outboxKinds(page)).filter((k) => k === 'grLine').length).toBe(12);
+  expect(await countedRows(po.poId)).toBe(0);
+
+  // A reload with zero bars: the page comes from the snapshot, never the bare offline page.
+  await page.reload();
+  await expect(page.locator('body')).not.toContainText('You are offline');
+  await expect(page.locator('body')).toContainText(po.supplierName, { timeout: 30_000 });
+  expect((await outboxKinds(page)).filter((k) => k === 'grLine')).toHaveLength(12);
+
+  // Back online, on the board (the count screen is gone): the shell's drainer sends every line, once.
+  await context.setOffline(false);
+  await page.goto('/dashboard/receiving');
+  await page.waitForLoadState('networkidle');
+  await expect.poll(() => countedRows(po.poId), { timeout: 60_000 }).toBe(12);
+  await expect.poll(async () => (await outboxKinds(page)).length, { timeout: 30_000 }).toBe(0);
+  const perLine = new Map<string, number>();
+  for (const id of acked) perLine.set(id, (perLine.get(id) ?? 0) + 1);
+  expect(perLine.size).toBe(12);
+  expect([...perLine.values()].every((n) => n === 1)).toBe(true);
+  // Nothing replays them later: the W1-06 copy left the device with the ack.
+  expect(
+    await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('rm-rcv-lines:') && localStorage.getItem(k) !== '[]')),
+  ).toEqual([]);
+});
+
+test('the outbox chip opens per-item status; only whoever saved an item may delete it', async ({ page, context }) => {
+  test.setTimeout(120_000);
+  const po = await freshPo('chip', 3);
+  await page.goto(`/dashboard/receiving/${po.poId}`);
+  await page.waitForLoadState('networkidle');
+  await page.getByTestId('scan-no-invoice').tap();
+  await expect(page.getByTestId('delivery-check')).toBeVisible();
+  await context.setOffline(true);
+  await countLine(page, po.lines[0]!.name).getByTestId('count-arrived').tap();
+  await expect.poll(async () => (await outboxKinds(page)).length).toBe(1);
+  await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+  await page.getByTestId('pwa-outbox-open').tap();
+  const list = page.getByTestId('pwa-outbox-list');
+  await expect(list.getByTestId('pwa-outbox-item')).toHaveCount(1);
+  await expect(list.getByTestId('pwa-outbox-item')).toHaveAttribute('data-kind', 'grLine');
+  await expect(list).toContainText('שורה שנספרה');
+  await expect(list.getByTestId('pwa-outbox-delete')).toBeVisible(); // mine
+});
+
+/** Is there a read snapshot for this page on the device? */
+async function snapshotHas(page: Page, path: string): Promise<boolean> {
+  return page.evaluate(async (p) => {
+    if (!(await caches.keys()).includes('rm-receiver-snapshot-v1')) return false;
+    return Boolean(await (await caches.open('rm-receiver-snapshot-v1')).match(p));
+  }, path);
+}
+
+async function snapshotOfToday(page: Page, path: string) {
+  await page.goto('/dashboard/receiving');
+  await page.waitForLoadState('networkidle');
+  await expect.poll(() => snapshotHas(page, path), { timeout: 30_000 }).toBe(true);
+}
+
+test('security: the receiver\'s snapshot holds no ₪; sign-out purges it', async ({ page }) => {
+  test.setTimeout(120_000);
+  const po = await freshPo('snap-signout', 2);
+  const path = `/dashboard/receiving/${po.poId}`;
+  await snapshotOfToday(page, path);
+  // Exactly what is cached: the rendered board + PO pages (HTML and their RSC data) — for a receiver, no ₪ and no price fields.
+  const cached = await page.evaluate(async (p) => {
+    const c = await caches.open('rm-receiver-snapshot-v1');
+    return Promise.all(['/dashboard/receiving', p].map(async (k) => (await (await c.match(k))!.text())));
+  }, path);
+  for (const html of cached) {
+    expect(html).not.toContain('₪');
+    expect(html).not.toMatch(/unitPriceExpected\\?"\s*:\s*\\?"?\d/);
+    expect(html).not.toMatch(/totalEstimated\\?"\s*:\s*\\?"?\d/);
+  }
+
+  await page.locator('form[data-rm-logout]').first().evaluate((f: HTMLFormElement) => f.requestSubmit());
+  // Signed out (the app lands on its public home): the receiver's snapshot is gone from the device.
+  await page.waitForURL((u) => !u.pathname.startsWith('/dashboard'), { timeout: 30_000 });
+  expect(await page.evaluate(async () => (await caches.keys()).includes('rm-receiver-snapshot-v1'))).toBe(false);
+});
+
+test('security: another user signing in on the same phone (no sign-out) never sees the previous snapshot', async ({ page, context }) => {
+  test.setTimeout(150_000);
+  const po = await freshPo('snap-switch', 2);
+  const path = `/dashboard/receiving/${po.poId}`;
+  await snapshotOfToday(page, path);
+
+  // The receiver's session just ends (no sign-out form): the manager signs in on the same device.
+  await context.clearCookies();
+  const url = test.info().project.use.baseURL!;
+  await context.addCookies([
+    { name: 'rm_locale', value: 'he', url },
+    { name: 'rm_cookie_consent', value: 'necessary', url },
+  ]);
+  await page.goto('/login');
+  await page.locator('form:has(#password) [name=email]').fill('manager@kfar-hazeitim.test');
+  await page.locator('#password').fill(process.env.DEMO_PASSWORD ?? 'RestoMatch-Demo-2026!');
+  await page.locator('form:has(#password) button[type=submit]').click();
+  await page.waitForURL(/\/dashboard/, { timeout: 60_000 });
+  // The first signed-in screen wipes it — before the manager ever opens receiving.
+  await expect
+    .poll(() => page.evaluate(async () => (await caches.keys()).includes('rm-receiver-snapshot-v1')), { timeout: 20_000 })
+    .toBe(false);
+});
+
+const TINY_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+test('resume on ANOTHER phone: the same receipt lands on review — no re-shoot, no second invoice or OCR job', async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(180_000);
+  const po = await freshPo('resume', 2);
+  let invoiceId = '';
+  await page.route('**/api/trpc/receiving.registerInvoice**', async (route: Route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as Array<{ result?: { data?: { json?: Record<string, unknown> } } }>;
+    const json = body[0]?.result?.data?.json;
+    if (json) {
+      invoiceId = String(json.invoiceId);
+      json.ocrQueued = true; // the e2e server has no worker: the test plays it
+    }
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.goto(`/dashboard/receiving/${po.poId}`);
+  await page.waitForLoadState('networkidle');
+  await page.getByTestId('scan-input').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
+  await expect(page.getByTestId('scan-process')).toBeEnabled({ timeout: 60_000 });
+  await page.getByTestId('scan-process').tap();
+  await expect.poll(() => invoiceId, { timeout: 30_000 }).not.toBe('');
+  // The test is the OCR worker: the invoice is read.
+  const sql = e2eSql();
+  try {
+    for (const l of po.lines) {
+      await sql`insert into invoice_lines (invoice_id, product_id, raw_description, qty_billed, unit, unit_price_billed, line_total, ocr_confidence_line)
+                values (${invoiceId}, ${l.productId}, ${l.name}, 6, 'יח׳', 10, 60, 0.97)`;
+    }
+    await sql`update invoices set status = 'parsed', ocr_confidence = 0.96, invoice_number = ${`W25-${invoiceId.slice(0, 6)}`}, total_incl_vat = 141.6 where id = ${invoiceId}`;
+  } finally {
+    await sql.end();
+  }
+
+  // A second phone: same receiver, no local draft, nothing on that device.
+  const other = await browser.newContext({
+    baseURL: test.info().project.use.baseURL,
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  const url = test.info().project.use.baseURL!;
+  await other.addCookies([
+    { name: 'rm_locale', value: 'he', url },
+    { name: 'rm_cookie_consent', value: 'necessary', url },
+    ...receiverCookies,
+  ]);
+  const phone2 = await other.newPage();
+  const registers: string[] = [];
+  phone2.on('request', (r) => {
+    if (r.url().includes('receiving.registerInvoice') || r.url().includes('scans.upload')) registers.push(r.url());
+  });
+  await phone2.goto(`/dashboard/receiving/${po.poId}`);
+  await phone2.waitForLoadState('networkidle');
+  // It resumes the count WITH the invoice already read (the billed quantities are there).
+  await expect(phone2.getByTestId('delivery-check')).toBeVisible({ timeout: 60_000 });
+  // Billed ≠ ordered (6 vs 5): the billed quantity is shown only when it differs.
+  await expect(phone2.getByTestId('delivery-check')).toContainText('חויב 6');
+  await expect(phone2.getByTestId('scan-input')).toHaveCount(0);
+  expect(registers).toEqual([]);
+
+  const sql2 = e2eSql();
+  try {
+    const [inv] = await sql2<{ n: number }[]>`
+      select count(*)::int as n from invoices i
+      where i.restaurant_id = (select restaurant_id from purchase_orders where id = ${po.poId}) and i.created_at > now() - interval '10 minutes'
+        and i.invoice_number = ${`W25-${invoiceId.slice(0, 6)}`}`;
+    expect(inv!.n).toBe(1);
+    const jobs = await sql2<{ n: number }[]>`
+      select count(*)::int as n from job_queue where queue = 'ocr-invoice' and payload->>'invoiceId' = ${invoiceId}`;
+    expect(jobs[0]!.n).toBeLessThanOrEqual(1);
+  } finally {
+    await sql2.end();
+  }
+  await other.close();
+});
+
+test('airplane mode: the receipt CLOSES with no signal, waits on the phone, and syncs from the board as ONE close after its counts', async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(240_000);
+  const po = await freshPo('offline-close', 3);
+  const path = `/dashboard/receiving/${po.poId}`;
+  await page.goto('/dashboard/receiving');
+  await page.waitForLoadState('networkidle');
+  await expect.poll(() => snapshotHas(page, path), { timeout: 30_000 }).toBe(true);
+  await page.goto(path);
+  await page.waitForLoadState('networkidle');
+  await page.getByTestId('scan-no-invoice').tap();
+  await expect(page.getByTestId('delivery-check')).toBeVisible();
+
+  await context.setOffline(true);
+  for (const l of po.lines) {
+    await countLine(page, l.name).getByTestId('count-arrived').tap();
+  }
+  await page.getByTestId('close-receipt').tap();
+  await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('close-queued')).toBeVisible();
+  await expect.poll(async () => (await outboxKinds(page)).sort()).toEqual(['grLine', 'grLine', 'grLine', 'submitReceipt']);
+
+  // Back online, on the board: the counts go, then the close — once.
+  await context.setOffline(false);
+  await page.goto('/dashboard/receiving');
+  await page.waitForLoadState('networkidle');
+  const sql = e2eSql();
+  try {
+    await expect
+      .poll(
+        async () => (await sql<{ status: string }[]>`select status from goods_receipts where po_id = ${po.poId}`)[0]?.status,
+        { timeout: 60_000 },
+      )
+      .toBe('completed');
+    await expect.poll(async () => (await outboxKinds(page)).length, { timeout: 30_000 }).toBe(0);
+    const closes = await sql<{ n: number }[]>`
+      select count(*)::int as n from audit_log a join goods_receipts g on g.id = a.entity_id
+      where g.po_id = ${po.poId} and a.action = 'goods_receipt.closed'`;
+    expect(closes[0]!.n).toBe(1);
+    expect(await countedRows(po.poId)).toBe(3);
+  } finally {
+    await sql.end();
+  }
+});
