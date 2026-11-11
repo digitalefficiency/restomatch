@@ -3,6 +3,9 @@ import {
   activityEvents,
   auditLog,
   createDb,
+  ingestChannels,
+  ingestDocuments,
+  ingestMessages,
   discrepancies,
   eq,
   invoices,
@@ -391,6 +394,99 @@ describe('automationKpis · tenant isolation', () => {
     expect(wk.funnelAgorot.decided).toBe(0);
     expect(wk.decisionsResolved).toBe(0);
     expect(wk.automationRuns).toEqual({});
+  });
+});
+
+describe('automationKpis · tenant isolation (every table read)', () => {
+  /** B gets rows in every table AU-07 reads; A must not see one of them. */
+  async function seedForeign(b: Awaited<ReturnType<typeof tenant>>) {
+    const [ch] = await db
+      .insert(ingestChannels)
+      .values({ restaurantId: b.rid, kind: 'email', tokenHash: `h-${b.rid}`, tokenHint: 'xxxx' })
+      .returning();
+    const [msg] = await db
+      .insert(ingestMessages)
+      .values({
+        restaurantId: b.rid,
+        channelId: ch!.id,
+        kind: 'email',
+        provider: 'test',
+        providerMessageId: `m-${b.rid}`,
+        sender: 'supplier@b.test',
+        senderAllowed: true,
+        status: 'accepted',
+      })
+      .returning();
+    await db.insert(ingestDocuments).values({ restaurantId: b.rid, messageId: msg!.id, status: 'registered', createdAt: MON });
+
+    const inv = await b.invoice({ createdAt: at(MON, -24 * 30) }); // earlier than A's data
+    const run = await b.matchRun(inv, MON);
+    const d = await b.finding(run, { status: 'open', createdAt: at(NOW, -48) });
+    await db.insert(notificationsOutbox).values([
+      { restaurantId: b.rid, channel: 'whatsapp', target: 't', body: 'x', status: 'sent', sentAt: MON, payload: { externalId: 'wamid.B' }, dedupeKey: 'bmatch:1', createdAt: MON },
+      { restaurantId: b.rid, channel: 'whatsapp', target: 't', body: 'x', status: 'sent', sentAt: MON, payload: { externalId: 'wa-mock-B' }, dedupeKey: 'bmatch:2', createdAt: MON },
+    ]);
+    const [c] = await db
+      .insert(recoveryClaims)
+      .values({
+        restaurantId: b.rid,
+        discrepancyId: d,
+        invoiceId: inv,
+        status: 'recovered',
+        amountAgorot: 99_999,
+        creditedAgorot: 88_888,
+        claimedAt: MON,
+        letterSentAt: MON,
+        creditedAt: MON,
+        recoveredAt: MON,
+      })
+      .returning();
+    await db.insert(recoveryEvents).values({ restaurantId: b.rid, claimId: c!.id, toStatus: 'recovered', actorId: b.userId, createdAt: at(MON, 1) });
+    await db.insert(activityEvents).values({ restaurantId: b.rid, eventType: 'sync_completed', title: 't', metadata: { automationId: 'A7' }, createdAt: MON });
+    return { inv, claimId: c!.id };
+  }
+
+  it('B in ingest_documents, outbox, claims (all stamps), open findings, activity_events: A reads none of it', async () => {
+    const a = await tenant('Iso A');
+    const b = await tenant('Iso B');
+    const aInv = await a.invoice({ createdAt: MON });
+    await seedForeign(b);
+    const k = await automationKpis(db, a.rid, { weeks: 1, now: NOW });
+    const wk = current(k);
+    expect(wk.inboxDocs).toBe(0);
+    expect(wk.alerts).toEqual([]);
+    expect(wk.funnelAgorot).toEqual({ found: 0, decided: 0, claimed: 0, sent: 0, credited: 0, recovered: 0 });
+    expect(wk.cohortAgorot).toEqual({ claimed: 0, sent: 0, credited: 0, recovered: 0 });
+    expect(wk.automationRuns).toEqual({});
+    expect(wk.zeroTouchDenominator).toBe(0);
+    expect(k.openDecisionsOver24h).toBe(0);
+    const [row] = await db.select({ createdAt: invoices.createdAt }).from(invoices).where(eq(invoices.id, aInv));
+    expect(k.dataSince).toBe(row!.createdAt.toISOString());
+  });
+
+  it("acted-within-48h never counts B's decisions, even when A's alert points at B's invoice and claim", async () => {
+    const a = await tenant('Acted A');
+    const b = await tenant('Acted B');
+    const { inv: bInv, claimId: bClaim } = await seedForeign(b);
+    const sentAt = at(MON, 0.5);
+    // A's alert names B's ids (a corrupted or hostile payload).
+    await db.insert(notificationsOutbox).values([
+      { restaurantId: a.rid, channel: 'whatsapp', target: 't', body: 'x', status: 'sent', sentAt, payload: { invoiceId: bInv, externalId: 'wamid.A1' }, dedupeKey: 'ax:1', createdAt: MON },
+      { restaurantId: a.rid, channel: 'whatsapp', target: 't', body: 'x', status: 'sent', sentAt, dedupeKey: 'ay:1', relatedEntityType: 'invoice', relatedEntityId: bInv, createdAt: MON },
+      { restaurantId: a.rid, channel: 'whatsapp', target: 't', body: 'x', status: 'sent', sentAt, dedupeKey: 'az:1', relatedEntityType: 'recovery_claim', relatedEntityId: bClaim, createdAt: MON },
+    ]);
+    // B acts on its own invoice and claim within 48 h: a human decision, an audit row, a recovery event.
+    const bRun = await b.matchRun(bInv, at(sentAt, 1));
+    await b.finding(bRun, { status: 'accepted', resolvedAt: at(sentAt, 2), human: true });
+    await db.insert(auditLog).values({ restaurantId: b.rid, userId: b.userId, action: 'x', entityType: 'invoice', entityId: bInv, at: at(sentAt, 3) });
+    await db.insert(recoveryEvents).values({ restaurantId: b.rid, claimId: bClaim, toStatus: 'credited', actorId: b.userId, createdAt: at(sentAt, 4) });
+
+    const wk = current(await automationKpis(db, a.rid, { weeks: 1, now: NOW }));
+    expect(wk.alerts.map((x) => [x.event, x.sent, x.actedWithin48h]).sort()).toEqual([
+      ['ax', 1, 0],
+      ['ay', 1, 0],
+      ['az', 1, 0],
+    ]);
   });
 });
 

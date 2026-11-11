@@ -102,10 +102,11 @@ describe('admin.automationKpis · read', () => {
     const json = JSON.stringify(res);
     for (const id of [B.restaurantId, B.invoiceId, B.matchRunId, B.supplierId]) expect(json).not.toContain(id);
     // Same numbers as when B does not exist at all.
-    const aOnly = res.weeks.map((w) => [w.docsIn, w.funnelAgorot.found, w.zeroTouchDenominator]);
+    const pick = (r: typeof res) => ({ weeks: r.weeks, open: r.openDecisionsOver24h, since: r.dataSince, ledger: r.timeLedger });
+    const aOnly = pick(res);
     await db.delete(restaurants).where(eq(restaurants.id, B.restaurantId));
     const again = await caller(adminUserId).admin.automationKpis({ restaurantId: A.restaurantId, weeks: 12 });
-    expect(again.weeks.map((w) => [w.docsIn, w.funnelAgorot.found, w.zeroTouchDenominator])).toEqual(aOnly);
+    expect(pick(again)).toEqual(aOnly);
   });
 
   it('writes nothing — not even an audit row', async () => {
