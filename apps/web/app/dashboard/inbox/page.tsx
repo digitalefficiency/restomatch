@@ -79,6 +79,7 @@ export default async function InboxPage({
               repeatsInvoiceId: d.repeatsInvoiceId ?? null,
               invoiceTotal: d.invoiceTotal ?? null,
               invoiceSupplier: d.invoiceSupplier ?? null,
+              relatedInvoiceId: d.relatedInvoiceId ?? null,
             })),
           }),
         )}

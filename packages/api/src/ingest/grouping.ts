@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { featureEnabled } from '../lib/features';
 import { and, asc, eq, ingestDocuments, ingestMessages, sql, type Database } from '@restomatch/db';
 import { composeDocument, MAX_DOCUMENT_PAGES } from '../documents/compose';
+import type { DocumentStorage } from '../documents/storage';
 import { extOf, scanIdOf, signObjectRef, storedImageValue } from '../documents/objectRef';
 import { setInvoiceImage, upsertInvoiceScan } from '../documents/intake';
 import { reopenGeneration } from '../documents/reocr';
@@ -196,6 +197,7 @@ export async function objectForPages(
   restaurantId: string,
   pageIds: string[],
   paths: string[],
+  storage?: DocumentStorage | null,
 ): Promise<{ storagePath: string; pageCount: number; mimeType: string }> {
   if (paths.length === 1) return { storagePath: paths[0]!, pageCount: 1, mimeType: mimeOfRef(paths[0]!) };
   // Named by the ORDERED page ids: a different set or order is a different object.
@@ -205,7 +207,7 @@ export async function objectForPages(
     clientDocumentId: `ingest:${setHash}`,
     pageObjects: paths,
     deletePages: false,
-  });
+  }, storage === undefined ? {} : { storage });
   return { storagePath: composed.storagePath, pageCount: composed.pageCount, mimeType: 'application/pdf' };
 }
 
@@ -216,9 +218,9 @@ export async function objectForPages(
  */
 export async function recomposeInvoice(
   tx: Database,
-  args: { restaurantId: string; invoiceId: string; supplierId: string | null; pages: PageRow[] },
+  args: { restaurantId: string; invoiceId: string; supplierId: string | null; pages: PageRow[]; storage?: DocumentStorage | null },
 ): Promise<{ storagePath: string; pageCount: number; job: { restaurantId: string; invoiceId: string; supplierId: string | null; imageUrl: string; dedupeKey: string } }> {
-  const obj = await objectForPages(args.restaurantId, args.pages.map((p) => p.id), args.pages.map((p) => p.storagePath));
+  const obj = await objectForPages(args.restaurantId, args.pages.map((p) => p.id), args.pages.map((p) => p.storagePath), args.storage);
   const imageUrl = await signObjectRef(args.restaurantId, obj.storagePath);
   if (!imageUrl) throw new Error('could not sign the composed document');
   await setInvoiceImage(tx, args.restaurantId, args.invoiceId, storedImageValue(args.restaurantId, obj.storagePath));

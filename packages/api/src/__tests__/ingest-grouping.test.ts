@@ -1355,11 +1355,29 @@ describe('round 6 · HIGH: the window-close match is settle-aware', () => {
     expect(await ocr(p2, { ...ACME, invoiceNumber: null })).toMatchObject({ absorbed: true, mergedInto: p1 });
   });
 
-  it('the re-scheduling is bounded: at the cap the page is matched alone', async () => {
+  it('round 7: at the cap, a sibling still ALIVE (recent / queued read) → skip, never page 1 alone', async () => {
     const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('r6c-1')]), at(0)));
     await writeOcr(p1, { ...ACME, invoiceNumber: 'A-602' });
-    await invoiceOf(await send(ch.wa, wa([jpegBytes('r6c-2')]), at(5))); // never read
-    expect(await gate(p1, at(40), WINDOW_MAX_ATTEMPTS)).toBe('match');
+    await invoiceOf(await send(ch.wa, wa([jpegBytes('r6c-2')]), at(5))); // still being read (just touched)
+    expect(await gate(p1, new Date(), WINDOW_MAX_ATTEMPTS)).toBe('skip');
+    expect(await ownerDb.select().from(matchRuns).where(eq(matchRuns.invoiceId, p1))).toHaveLength(0);
+  });
+
+  it('round 7: at the cap, a STALE sibling (no live job, untouched > 1 h) → page 1 is matched alone', async () => {
+    const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('r6d-1')]), at(0)));
+    await writeOcr(p1, { ...ACME, invoiceNumber: 'A-604' });
+    const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('r6d-2')]), at(5)));
+    await ownerDb.update(invoices).set({ updatedAt: new Date(Date.now() - 2 * 60 * 60_000) }).where(eq(invoices.id, p2));
+    await ownerDb.execute(sql`delete from job_queue where payload->>'invoiceId' = ${p2}`);
+    expect(await gate(p1, new Date(), WINDOW_MAX_ATTEMPTS)).toBe('match');
+  });
+
+  it('round 7: the window job of an invoice that is itself being re-read → skip (its read settles)', async () => {
+    const [p1, p2] = await pages(2, 'r7r');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-605' });
+    expect((await ocr(p2!, NOHEAD)).absorbed).toBe(true); // p1 is now ocr_pending (composed re-read)
+    expect(await settle(p1!)).toMatchObject({ hold: true, holdReason: 'reocr' });
+    expect(await gate(p1!, new Date())).toBe('skip');
   });
 
   it('a lone page whose window has closed is matched at once', async () => {
@@ -1434,27 +1452,6 @@ describe('round 6 · MED: distinct reasons + a real "attach" recourse', () => {
     expect(s).toMatchObject({ absorbed: false, flagged: [{ invoiceId: p2, reason: 'page_merge_blocked' }] });
   });
 
-  it('ingest.attachToPrevious: a page_not_merged page is attached to the invoice before it (one document); tenant- and role-scoped', async () => {
-    const [p1, p2] = await pages(2, 'r6t');
-    await ocr(p1!, { ...ACME, invoiceNumber: null });
-    expect(await ocr(p2!, { ...ACME, invoiceNumber: 'A-631' })).toMatchObject({ flagged: [{ invoiceId: p2, reason: 'page_not_merged' }] });
-    const [d2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, p2!));
-    const other = await seedTenant(ownerDb, 'Z6');
-    await ownerDb
-      .update(restaurants)
-      .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true, multiPage: true } } as never })
-      .where(eq(restaurants.id, other.restaurantId));
-    await expect(
-      callerOf({ restaurantId: other.restaurantId, userId: other.ownerUserId }, 'owner').ingest.attachToPrevious({ documentId: d2!.id }),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    await expect(
-      callerOf({ restaurantId: A.restaurantId, userId: A.ownerUserId }, 'receiver').ingest.attachToPrevious({ documentId: d2!.id }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    expect(await ownerDb.select().from(invoices).where(eq(invoices.id, p2!))).toHaveLength(1); // untouched by the refusals
-    const res = await callerOf({ restaurantId: A.restaurantId, userId: A.ownerUserId }, 'owner').ingest.attachToPrevious({ documentId: d2!.id });
-    expect(res).toMatchObject({ invoiceId: p1, pageCount: 2 });
-    expect(await ownerDb.select().from(invoices).where(eq(invoices.id, p2!))).toHaveLength(0);
-  });
 });
 
 describe('round 6 · MED: page questions are counted, visible and reversible', () => {
@@ -1495,5 +1492,41 @@ describe('round 6 · MED: page questions are counted, visible and reversible', (
     await run('delete_duplicate');
     expect(await ownerDb.select().from(invoices).where(eq(invoices.id, copy!))).toHaveLength(0);
     expect(await ownerDb.select().from(invoices).where(eq(invoices.id, keep!))).toHaveLength(1);
+  });
+});
+
+describe('round 7 · R3: a transient storage failure never releases both halves', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+    delayedCalls = [];
+  });
+
+  it('page reads that FAIL (not missing) keep both pages held and unflagged; the last attempt asks a person', async () => {
+    const [p1, p2] = await pages(2, 'r7t');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-711' });
+    await writeOcr(p2!, NOHEAD);
+    const real = localDocumentStorage();
+    const flaky = { ...real, read: async () => Promise.reject(new Error('storage 503')) };
+    const run = (finalAttempt: boolean) =>
+      withRestaurant(appDb, A.restaurantId, (tx) =>
+        settleDocumentPages(
+          tx,
+          { restaurantId: A.restaurantId, invoiceId: p2!, now: new Date('2027-01-01T00:00:00Z'), finalAttempt },
+          {
+            storage: flaky,
+            enqueueOcr: async () => {},
+            enqueueMatch: async (j) => void matchCalls.push(j.invoiceId),
+            enqueueDelayedMatch: async (j, runAt) => void delayedCalls.push({ invoiceId: j.invoiceId, runAt }),
+          },
+        ),
+      );
+    const s = await run(false);
+    expect(s).toMatchObject({ hold: true, holdReason: 'merge_retry', flagged: [] });
+    expect(matchCalls).toEqual([]); // neither half released
+    expect(delayedCalls.map((d) => d.invoiceId)).toEqual([p1]); // a settle-aware retry is scheduled
+    expect((await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, p2!)))[0]!.error).toBeNull();
+    const last = await run(true);
+    expect(last.flagged).toEqual([{ invoiceId: p2, reason: 'page_merge_blocked' }]);
   });
 });

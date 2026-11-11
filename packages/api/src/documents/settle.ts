@@ -1,3 +1,4 @@
+import type { DocumentStorage } from './storage';
 import {
   and,
   asc,
@@ -74,7 +75,9 @@ export interface SettleResult {
   /** Don't match this invoice now: a sibling is pending, or it is being re-OCR'd. */
   hold: boolean;
   /** Why it is held (round 6: the window-close job reschedules only on 'sibling_pending' / 'window_open'). */
-  holdReason?: 'window_open' | 'sibling_pending' | 'reocr' | 'duplicate';
+  holdReason?: 'window_open' | 'sibling_pending' | 'reocr' | 'duplicate' | 'merge_retry';
+  /** The siblings still being read (holdReason 'sibling_pending'). */
+  pendingSiblings?: string[];
   /** This invoice was merged into `mergedInto` and no longer exists. */
   absorbed: boolean;
   mergedInto?: string;
@@ -87,6 +90,8 @@ export interface SettleDeps {
   enqueueMatch?: (job: { restaurantId: string; invoiceId: string }) => Promise<unknown>;
   /** A match that runs when the cluster window closes (a lone page held for page 2). */
   enqueueDelayedMatch?: (job: { restaurantId: string; invoiceId: string }, runAt: Date) => Promise<unknown>;
+  /** The page storage the merge reads (tests inject a failing one). */
+  storage?: DocumentStorage | null;
 }
 
 /** The match job of a held lone page, run when its cluster window closes (idempotent). */
@@ -96,6 +101,33 @@ function defaultDelayedMatch(job: { restaurantId: string; invoiceId: string }, r
     { ...job, g09Window: true, g09Attempt: attempt },
     { dedupeKey: attempt === 0 ? `g09-window-${job.invoiceId}` : `g09-window-${job.invoiceId}-${attempt}`, runAt, maxAttempts: 3 },
   );
+}
+
+/** A sibling read that can still land: a queued / active OCR job, or the row touched within the hour. */
+async function anySiblingAlive(db: Database, restaurantId: string, ids: string[], now: Date): Promise<boolean> {
+  if (ids.length === 0) return false;
+  const since = new Date(now.getTime() - 60 * 60_000).toISOString();
+  const idList = sql.join(ids.map((id) => sql`${id}`), sql`, `);
+  const recent = (await db.execute(sql`
+    select 1 from ${invoices} i
+     where i.restaurant_id = ${restaurantId} and i.id in (${idList}) and i.status = 'ocr_pending'
+       and coalesce(i.updated_at, i.created_at) >= ${since}::timestamptz
+     limit 1`)) as unknown as unknown[];
+  if (recent.length > 0) return true;
+  // A queued / active read (the queue table; a role without access to it — the
+  // tenant app role — cannot see jobs, so only the row's age decides there).
+  try {
+    const jobs = await db.transaction(async (sp) =>
+      (await (sp as unknown as Database).execute(sql`
+        select 1 from job_queue j
+         where j.queue = 'ocr-invoice' and j.payload ->> 'restaurantId' = ${restaurantId}
+           and j.payload ->> 'invoiceId' in (${idList}) and j.status in ('queued', 'active')
+         limit 1`)) as unknown as unknown[],
+    );
+    return jobs.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /** Round 6: a window-close job waits this long for a sibling still being read, at most this often. */
@@ -119,12 +151,20 @@ export async function windowCloseGate(
   const attempt = args.attempt ?? 0;
   const res = await settleDocumentPages(
     db,
-    { restaurantId: args.restaurantId, invoiceId: args.invoiceId, now },
+    // The last attempt: a transient merge failure is a person's question now (never released unflagged).
+    { restaurantId: args.restaurantId, invoiceId: args.invoiceId, now, finalAttempt: attempt >= WINDOW_MAX_ATTEMPTS },
     { ...deps, enqueueDelayedMatch: async () => {} },
   );
   if (res.absorbed || res.holdReason === 'reocr' || res.holdReason === 'duplicate') return 'skip';
-  if (res.hold && (res.holdReason === 'sibling_pending' || res.holdReason === 'window_open')) {
-    if (attempt + 1 > WINDOW_MAX_ATTEMPTS) return 'match'; // the cap: matched alone (a later page is a question)
+  if (res.hold && (res.holdReason === 'sibling_pending' || res.holdReason === 'window_open' || res.holdReason === 'merge_retry')) {
+    if (attempt + 1 > WINDOW_MAX_ATTEMPTS) {
+      // Round 7: at the cap, a sibling that is still ALIVE (a queued / active
+      // read, or touched within the hour) finishes the cluster itself — its
+      // settle releases page 1. Only a stale / dead-lettered sibling lets page 1
+      // be matched alone (that sibling becomes a question when it lands).
+      if (res.pendingSiblings && (await anySiblingAlive(db, args.restaurantId, res.pendingSiblings, now))) return 'skip';
+      return 'match';
+    }
     const job = { restaurantId: args.restaurantId, invoiceId: args.invoiceId };
     await (deps.reschedule ?? defaultDelayedMatch)(job, new Date(now.getTime() + WINDOW_RETRY_MS), attempt + 1);
     return 'rescheduled';
@@ -570,7 +610,7 @@ interface ClusterRow {
  */
 export async function settleDocumentPages(
   db: Database,
-  args: { restaurantId: string; invoiceId: string; now?: Date },
+  args: { restaurantId: string; invoiceId: string; now?: Date; finalAttempt?: boolean },
   deps: SettleDeps = {},
 ): Promise<SettleResult> {
   const { restaurantId, invoiceId } = args;
@@ -608,6 +648,16 @@ export async function settleDocumentPages(
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${`ingest-group:${restaurantId}:${mine.channelId}:${mine.sender}`}))`,
     );
+
+    // Round 7: THIS invoice is being (re-)read — its read's own settle decides.
+    const [self] = await tx
+      .select({ status: invoices.status })
+      .from(invoices)
+      .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
+      .limit(1);
+    if (self?.status === 'ocr_pending') {
+      return { result: { ...NOTHING, hold: true, holdReason: 'reocr' as const }, ocr: [], match: [], superseded: null };
+    }
 
     // Round 6: the composed re-read of a MERGED document failed for good. The
     // pages' own reads were cleared by the merge, so the whole document's ₪ is
@@ -818,7 +868,8 @@ export async function settleDocumentPages(
     // A sibling still being read: decide later (its OCR — or its terminal
     // failure, or the sweep backstop — settles the cluster).
     if (members.some((m) => m.invoiceId !== invoiceId && m.status === 'ocr_pending')) {
-      return { result: { ...NOTHING, hold: true, holdReason: 'sibling_pending' as const }, ocr: [], match: [], superseded: null };
+      const pendingSiblings = members.filter((m) => m.invoiceId !== invoiceId && m.status === 'ocr_pending').map((m) => m.invoiceId);
+      return { result: { ...NOTHING, hold: true, holdReason: 'sibling_pending' as const, pendingSiblings }, ocr: [], match: [], superseded: null };
     }
 
     const first = members[0]!;
@@ -848,6 +899,8 @@ export async function settleDocumentPages(
     const ocr: OcrJobToEnqueue[] = [];
     let merged = false;
     let superseded: { from: string; to: string } | null = null;
+    /** Round 7: a TRANSIENT merge failure (storage / signing): the cluster stays held, unflagged, and is retried. */
+    let retryMerge = false;
     if (merging.length > 0) {
       // Page 1's current object (from its mapping row: always a full path with
       // its extension), to clean up a superseded composed PDF after commit.
@@ -897,7 +950,7 @@ export async function settleDocumentPages(
               if (!retired.ok) throw new PermanentMergeError(`page ${id} could not be retired: ${retired.reason}`);
             }
             const pages: PageRow[] = await invoicePageRows(sp, restaurantId, first.invoiceId);
-            return recomposeInvoice(sp, { restaurantId, invoiceId: first.invoiceId, supplierId: first.supplierId, pages });
+            return recomposeInvoice(sp, { restaurantId, invoiceId: first.invoiceId, supplierId: first.supplierId, pages, ...(deps.storage !== undefined ? { storage: deps.storage } : {}) });
           });
           ocr.push(done.job);
           merged = true;
@@ -907,7 +960,13 @@ export async function settleDocumentPages(
           const permanent = err instanceof PermanentMergeError || err instanceof TRPCError;
           if (!permanent && tries < 2) continue;
           console.warn(`[documents] merge into invoice=${first.invoiceId} failed (${permanent ? 'permanent' : 'transient'})`, err);
-          // Retries exhausted or permanent: a person decides (never released unflagged).
+          if (!permanent && !args.finalAttempt) {
+            // Round 7: never release both halves on a transient error — keep the
+            // pages held (unflagged) and retry through the settle-aware window job.
+            retryMerge = true;
+            break;
+          }
+          // Permanent, or the last retry: a person decides (never released unflagged).
           for (const page of merging) flagged.push({ invoiceId: page.invoiceId, reason: 'page_merge_blocked' });
           merging = [];
           break;
@@ -942,9 +1001,13 @@ export async function settleDocumentPages(
     // their match now (a plain match job is idempotent). The current invoice is
     // matched by its own OCR job.
     const match: string[] = [];
+    const retrying = new Set(retryMerge ? [first.invoiceId, ...merging.map((m) => m.invoiceId)] : []);
     const settledIds = members
       .map((m) => m.invoiceId)
-      .filter((id) => id !== invoiceId && !(merged && (id === first.invoiceId || merging.some((m) => m.invoiceId === id))));
+      .filter(
+        (id) =>
+          id !== invoiceId && !retrying.has(id) && !(merged && (id === first.invoiceId || merging.some((m) => m.invoiceId === id))),
+      );
     if (settledIds.length > 0) {
       const runs = await tx
         .select({ invoiceId: matchRuns.invoiceId })
@@ -960,6 +1023,15 @@ export async function settleDocumentPages(
     // A re-shot duplicate is never auto-matched: it waits for a person.
     const currentIsDuplicate =
       flagOf.get(invoiceId) === 'page_duplicate' || flagged.some((f) => f.invoiceId === invoiceId && f.reason === 'page_duplicate');
+    if (retrying.has(invoiceId)) {
+      return {
+        result: { ...NOTHING, hold: true, holdReason: 'merge_retry' as const, flagged },
+        ocr,
+        match,
+        superseded,
+        delayed: { invoiceId: first.invoiceId, runAt: new Date(now.getTime() + WINDOW_RETRY_MS), retry: true },
+      };
+    }
     const result: SettleResult = {
       hold: (merged && first.invoiceId === invoiceId) || currentIsDuplicate,
       ...(merged && first.invoiceId === invoiceId ? { holdReason: 'reocr' as const } : currentIsDuplicate ? { holdReason: 'duplicate' as const } : {}),
@@ -967,7 +1039,13 @@ export async function settleDocumentPages(
       ...(absorbed || (merged && first.invoiceId === invoiceId) ? { mergedInto: first.invoiceId } : {}),
       flagged,
     };
-    return { result, ocr, match, superseded };
+    return {
+      result,
+      ocr,
+      match,
+      superseded,
+      ...(retryMerge ? { delayed: { invoiceId: first.invoiceId, runAt: new Date(now.getTime() + WINDOW_RETRY_MS), retry: true } } : {}),
+    };
   });
   // Lock order vs a concurrent claim / decision can deadlock (40P01): Postgres
   // aborts one side; retry the settle (it is idempotent) at most twice.
@@ -983,10 +1061,18 @@ export async function settleDocumentPages(
   }
 
   await (deps.enqueueOcr ?? enqueueIngestJobs)(outcome.ocr);
-  const delayed = (outcome as { delayed?: { invoiceId: string; runAt: Date } }).delayed;
+  const delayed = (outcome as { delayed?: { invoiceId: string; runAt: Date; retry?: boolean } }).delayed;
   if (delayed) {
     try {
-      await (deps.enqueueDelayedMatch ?? defaultDelayedMatch)({ restaurantId, invoiceId: delayed.invoiceId }, delayed.runAt);
+      const job = { restaurantId, invoiceId: delayed.invoiceId };
+      if (delayed.retry && !deps.enqueueDelayedMatch) {
+        // A transient merge failure: retried by the settle-aware window job (its own key per minute).
+        await enqueue(
+          MATCH_INVOICE_QUEUE,
+          { ...job, g09Window: true, g09Attempt: 1 },
+          { dedupeKey: `g09-retry-${job.invoiceId}-${Math.floor(delayed.runAt.getTime() / 60_000)}`, runAt: delayed.runAt, maxAttempts: 3 },
+        );
+      } else await (deps.enqueueDelayedMatch ?? defaultDelayedMatch)(job, delayed.runAt);
     } catch (err) {
       console.warn(`[documents] failed to enqueue the delayed match for invoice=${delayed.invoiceId}`, err);
     }

@@ -21,6 +21,7 @@ import {
   EmptyState,
   Money,
   Input,
+  LinkButton,
   Select,
   cn,
   useToast,
@@ -58,6 +59,8 @@ export interface InboxMessage {
     /** G-09: what is at stake on a page question — the page invoice's ₪ (shekels, string) and supplier. */
     invoiceTotal?: string | null;
     invoiceSupplier?: string | null;
+    /** G-09: the invoice right before this page from the same sender (for "בדקו את שתיהן יחד"). */
+    relatedInvoiceId?: string | null;
   }>;
   /** orderCapture: a forwarded WhatsApp order (text) and the draft PO captured from it. */
   order?: { poId: string | null; poStatus: string | null } | null;
@@ -126,8 +129,6 @@ const REFUSALS = [
   'decided',
   'linked',
   'multi_page',
-  'not_attachable',
-  'no_previous_invoice',
   'too_large',
   'too_many_pages',
   'reocr_not_enabled',
@@ -142,8 +143,8 @@ const PAGE_QUESTIONS: readonly string[] = [
   'page_merge_blocked',
   'page_too_large',
 ];
-/** Page questions a person can answer by attaching the page to the invoice before it. */
-const ATTACHABLE: readonly string[] = ['page_not_merged', 'page_other_invoice', 'page_other_supplier'];
+/** Page questions whose honest next step is to look at both invoices together. */
+const COMPARE: readonly string[] = ['page_not_merged', 'page_merge_blocked', 'page_too_large'];
 const shekels = (v: string | null | undefined) => {
   const n = v == null ? NaN : Number(v);
   return Number.isFinite(n) ? n : undefined;
@@ -167,7 +168,6 @@ export function InboxClient(props: Props) {
   const approve = trpc.ingest.approveDocument.useMutation();
   const reject = trpc.ingest.rejectDocument.useMutation();
   const resolvePage = trpc.ingest.resolvePageFlag.useMutation();
-  const attachPage = trpc.ingest.attachToPrevious.useMutation();
   /** The possible duplicate a person is about to mark as a separate invoice (confirm first). */
   const [confirmSep, setConfirmSep] = useState<InboxMessage['documents'][number] | null>(null);
   const [supplierFor, setSupplierFor] = useState<Record<string, string>>({});
@@ -455,23 +455,20 @@ export function InboxClient(props: Props) {
                                 >
                                   {t('inbox.pageDeleteDuplicate')}
                                 </Button>
-                              ) : ATTACHABLE.includes(d.error) ? (
-                                <Button
+                              ) : COMPARE.includes(d.error) && d.relatedInvoiceId ? (
+                                <LinkButton
+                                  href={`/dashboard/inbox/compare?a=${d.invoiceId}&b=${d.relatedInvoiceId}`}
                                   size="sm"
                                   variant="primary"
                                   className="min-h-11"
-                                  disabled={attachPage.isPending}
-                                  onClick={() =>
-                                    act(() => attachPage.mutateAsync({ documentId: d.id }), t('inbox.pageAttached'))
-                                  }
                                 >
-                                  {t('inbox.pageAttach')}
-                                </Button>
+                                  {t('inbox.pageCompare')}
+                                </LinkButton>
                               ) : null}
                               {d.error !== 'page_unreadable' ? (
                                 <Button
                                   size="sm"
-                                  variant={d.error === 'page_merge_blocked' || d.error === 'page_too_large' ? 'primary' : 'secondary'}
+                                  variant={COMPARE.includes(d.error) && d.relatedInvoiceId ? 'secondary' : d.error === 'page_duplicate' ? 'secondary' : 'primary'}
                                   className="min-h-11"
                                   disabled={resolvePage.isPending}
                                   onClick={() =>

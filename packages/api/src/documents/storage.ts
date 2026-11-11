@@ -16,7 +16,7 @@ import { extOf, scanIdOf } from './objectRef';
  * Injectable so tests can count reads and fail writes.
  */
 export interface DocumentStorage {
-  /** The bytes, or null when the object does not exist. */
+  /** The bytes, or null when the object does not exist; THROWS when the read failed (round 7). */
   read(restaurantId: string, path: string): Promise<Uint8Array | null>;
   /** Write once (no overwrite; an existing object is left as is). Throws on failure. */
   write(restaurantId: string, path: string, bytes: Uint8Array, mimeType: string): Promise<void>;
@@ -71,7 +71,14 @@ export function bucketDocumentStorage(): DocumentStorage | null {
   return {
     async read(_restaurantId, path) {
       const { data, error } = await bucket().download(path);
-      if (error || !data) return null;
+      // Round 7: MISSING (404 / "not found") is null; any other failure is
+      // thrown — a transient storage error must never read as a lost page.
+      if (error) {
+        const status = String((error as { statusCode?: unknown; status?: unknown }).statusCode ?? (error as { status?: unknown }).status ?? '');
+        if (status === '404' || /not.?found/i.test(error.message ?? '')) return null;
+        throw new Error(`storage read failed: ${error.message}`);
+      }
+      if (!data) return null;
       return new Uint8Array(await data.arrayBuffer());
     },
     async write(_restaurantId, path, bytes, mimeType) {

@@ -525,7 +525,7 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
           ocrConfidence: result.confidence.toString(),
           status: holdForHuman ? 'parsed' : 'matched',
         },
-        { onlyPending: true },
+        { onlyPending: true, onlyImage: invoice.rawImageUrl ?? null },
       );
       if (header.written === false) return header;
       await tx.delete(invoiceLines).where(eq(invoiceLines.invoiceId, job.data.invoiceId));
@@ -839,7 +839,7 @@ export async function writeOcrHeader(
   db: Database,
   ids: { restaurantId: string; invoiceId: string; supplierId: string | null },
   header: InvoiceHeader,
-  opts: { onlyPending?: boolean } = {},
+  opts: { onlyPending?: boolean; onlyImage?: string | null } = {},
 ): Promise<{ duplicateOf?: string | null; written?: false }> {
   // onlyPending: write only while the invoice still waits for its read
   // (`written: false` when another read got there first).
@@ -847,6 +847,11 @@ export async function writeOcrHeader(
     eq(invoices.id, ids.invoiceId),
     eq(invoices.restaurantId, ids.restaurantId),
     ...(opts.onlyPending ? [eq(invoices.status, 'ocr_pending')] : []),
+    // G-09 (round 7): compare-and-set on the object this read fetched — a read
+    // of page 1's old image never lands on the row once it was recomposed.
+    ...(opts.onlyImage !== undefined
+      ? [opts.onlyImage === null ? sql`${invoices.rawImageUrl} is null` : eq(invoices.rawImageUrl, opts.onlyImage)]
+      : []),
   );
   // Blank → NULL: the prompt allows '' for an unreadable number, and '' is a
   // value to the unique index (a second blank collides); NULLs never do.
