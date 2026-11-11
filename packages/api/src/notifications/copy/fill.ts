@@ -11,12 +11,18 @@ export const PDI = '⁩';
 const RTL_LETTER = /[֐-ࣿיִ-﷿ﹰ-﻿]/;
 const LTR_LETTER = /[A-Za-zÀ-ɏͰ-ϿЀ-ԯ฀-๿ሀ-᎟]/;
 const LETTERS_ONLY = /^[\p{L}\p{M}]+$/u;
+const EDGE_LETTERS = /^[\p{L}\p{M}].*[\p{L}\p{M}]$/su;
 const PLURAL_START = /\{\s*(\w+)\s*,\s*plural\s*,/g;
 
 /** Same predicate as the web runtime: other-direction letters mixed with anything but letters. */
 export function needsIsolation(value: string, rtl: boolean): boolean {
   if (value.includes(FSI)) return false;
-  return (rtl ? LTR_LETTER : RTL_LETTER).test(value) && !LETTERS_ONLY.test(value);
+  // A literal slot re-injected for a later fill (`t(key, { seconds: '{seconds}' })`, filled by a
+  // client countdown) is not text: isolating it would wrap whatever is spliced into it later.
+  if (/^\{\w+\}$/.test(value)) return false;
+  if (!(rtl ? LTR_LETTER : RTL_LETTER).test(value) || LETTERS_ONLY.test(value)) return false;
+  // Same rule as the web runtime: only a non-letter edge can reorder (UAX #9 N1).
+  return !EDGE_LETTERS.test(value);
 }
 
 export function escapeHtml(s: string): string {
