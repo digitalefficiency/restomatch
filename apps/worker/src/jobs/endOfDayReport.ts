@@ -3,14 +3,15 @@
  *
  * Summarizes the day's money picture, led by OPEN CREDITS — the claimable ₪ of
  * the gaps still awaiting a decision (`awaitingDecision`, G-12a) — plus what
- * was caught today (endOfDayFigures) and how many items await a decision. Quiet days (no open
- * credits and nothing caught) are skipped to avoid inbox noise.
+ * was caught today (endOfDayFigures) and how many items await a decision. Quiet days (no
+ * claimable ₪ open and nothing caught today) are skipped to avoid inbox noise: review-only and
+ * pending-link-only days are quiet (their rows carry no ₪ yet), so a digest never says "0 ₪".
  *
  * Detection only: it reads discrepancies and enqueues notifications; delivery
  * happens through outbox-dispatch.
  */
 import {
-  awaitingDecision,
+  awaitingDecisionDetail,
   enqueueNotification,
   endOfDayReportEmail,
   formatIlsAgorot,
@@ -20,7 +21,7 @@ import { LEAK_FILTER } from '@restomatch/charts';
 import { and, eq, notificationsOutbox, restaurants, sql, type Database } from '@restomatch/db';
 import { approvalsGoLink } from './matchInvoice';
 import { makeWorker, type WorkerJob } from '../queue';
-import { appBaseUrl, formatIlsAmount, formatIlDate, ilDateKey, startOfIlDay } from '../lib/notifyHelpers';
+import { appBaseUrl, formatIlDate, ilDateKey, startOfIlDay } from '../lib/notifyHelpers';
 import { jobDb } from '../db';
 
 export interface EndOfDayReportJob {
@@ -116,12 +117,19 @@ export function legacyEodKey(restaurantId: string, startOfReportDay: Date, email
 }
 
 /**
+ * A digest ₪ figure: whole shekels, but agorot under ₪1 — a ₪0.40 gap never reads "0 ₪".
+ */
+export function digestIls(agorot: number): string {
+  return formatIlsAgorot(agorot, { maximumFractionDigits: agorot < 100 ? 2 : 0 });
+}
+
+/**
  * The open-credits ₪ of the digest, per VAT basis (never summed): before VAT,
  * a duplicate invoice's incl.-VAT claim, a VAT amount. Null when all are zero (never "₪0").
  */
 export function openCreditsFigure(ils: { excl: number; incl: number; vat: number } | null): string | null {
   const ag = (v: number | undefined) => Math.round((v ?? 0) * 100);
-  const f = (a: number) => formatIlsAgorot(a, { maximumFractionDigits: 0 });
+  const f = digestIls;
   const parts: string[] = [];
   if (ag(ils?.excl) > 0) parts.push(f(ag(ils?.excl)));
   if (ag(ils?.incl) > 0) parts.push(`${f(ag(ils?.incl))} כולל מע״מ (חשבוניות כפולות)`);
@@ -149,7 +157,7 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
     // Open credits = THE "awaiting decision" figure (G-12a): the same rows and
     // ₪ (the letters' claims rule, before VAT) as the queue tiles, home and the
     // nav badge — never a raw Σ|Δ|. Restaurant-wide (scope 'all', owner view).
-    const awaiting = await awaitingDecision(
+    const { summary: awaiting, claims } = await awaitingDecisionDetail(
       db,
       { session: { restaurantId: restaurant.id, role: 'owner' } },
       { scope: 'all' },
@@ -157,15 +165,18 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
     // Caught today: the hero's LEAK_FILTER, capped per invoice (money review G).
     const { todayCount, todayIls } = await endOfDayFigures(db, restaurant.id, startToday, endOfDay);
     // Credits are claimable ₪; rows on invoices still waiting for an order link
-    // have no ₪ yet (R4-2): with no ₪ there is no credit count, only the
-    // pending-link line — never '(₪0)'.
+    // have no ₪ yet (R4-2): they are the pending-link line, never a credit.
     const openFigure = openCreditsFigure(awaiting.ils);
-    const openCount = openFigure != null ? awaiting.toDecide.count : 0;
-    // TODO(W2-04): exclude pending-link rows from the count when an invoice mix has both (needs a row-level flag in awaitingDecision).
+    // '(N)' beside the ₪ = the rows that carry it: awaitingDecision's claimable
+    // lines, the same rows its ₪ is summed from (Train C r6, M-2).
+    const openCount = openFigure != null ? claims.filter((c) => Math.round(c.amountIls * 100) > 0).length : 0;
+    // "Caught today" is a ₪ row: no ₪, no row (never '0 ₪ (0)').
+    const caughtAgorot = Math.round(todayIls * 100);
+    const caughtCount = caughtAgorot > 0 ? todayCount : 0;
 
-    // Quiet day → skip (no open credits, nothing caught today). Review-only rows
-    // (no ₪) never make a digest on their own (Train C B2).
-    if (awaiting.toDecide.count === 0 && todayCount === 0) {
+    // Quiet day → skip: no claimable ₪ open and nothing caught today. Review-only
+    // (Train C B2) and pending-link-only days are quiet: no ₪ to name yet.
+    if (openFigure == null && caughtCount === 0) {
       skipped += 1;
       continue;
     }
@@ -182,8 +193,8 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
       // Each VAT basis as its own labelled figure, never summed (warden MEDIUM-1, Train C B2).
       openCreditsIls: openFigure,
       pendingLinkCount: awaiting.pendingLink.count,
-      todayCaughtCount: todayCount,
-      todayCaughtIls: formatIlsAmount(todayIls),
+      todayCaughtCount: caughtCount,
+      todayCaughtIls: digestIls(caughtAgorot),
       pendingApprovals: awaiting.count,
       approvalsUrl: approvalsGoLink(restaurant.id, null, appBaseUrl()),
     });

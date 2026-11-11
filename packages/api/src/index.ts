@@ -438,7 +438,7 @@ export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunC
 export { SKIPPED_NO_PROVIDER, providerConfigured, supplierMessageState, type SupplierMessageState } from './notifications/delivery';
 export * from './briefs';
 export * from './notifications/sendWindow';
-export { awaitingDecision, type AwaitingDecision } from './approvals/awaiting';
+export { awaitingDecision, awaitingDecisionDetail, type AwaitingDecision } from './approvals/awaiting';
 export { notify, notifyEffect, resolveAudience, type Address, type Audience } from './notifications/notify';
 export { KIND_ROLES as WHERE_IS_KIND_ROLES, WHERE_IS_KINDS, type WhereIsKind } from './tasks/whereIs';
 export { rebindDecidedClaims } from './approvals/rebind'; // W2-04 (orchestrator-approved line)
