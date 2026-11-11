@@ -99,6 +99,8 @@ export const en = {
     heading: 'End-of-day summary · {date}',
     intro: 'What is open and what was found today:',
     openLabel: 'Open credits',
+    subjectNoAmount: 'Daily summary · {count, plural, =0 {no open credits} one {# open credit} other {# open credits}}',
+    pendingLinkLabel: 'Waiting for an order link',
     caughtLabel: 'Discrepancies found today',
     pendingLabel: 'Waiting for a decision',
     topLabel: 'Supplier with the most credits',

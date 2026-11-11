@@ -472,13 +472,17 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
   // feature (whatsapp_alerts) — gate it on entitlements. Push is always on.
   // A re-match after the count replaces a run whose people were already told;
   // only a first match notifies (the approvals queue shows the fresh numbers).
-  if (!replaced && persisted.rolesNeedingNotification.length > 0) {
+  // ₪ = what this invoice can actually claim (the letters' rule), never the
+  // engine's raw Σ|Δ|; formatted once by the server money util. The link is
+  // the branch-aware go-link to this invoice's approval page (W2-04).
+  // TODO(W2-04): count and ₪ per recipient role (a manager sees manager-routed rows); today the owner's whole-invoice view.
+  const alert =
+    !replaced && persisted.rolesNeedingNotification.length > 0 ? await invoiceAlert(db, restaurantId, invoiceId) : null;
+  // Nothing open / decidable on this invoice (auto-approved or info only): send NOTHING —
+  // no push, no billed WhatsApp, no e-mail saying "0 פערים" (R4-1).
+  if (alert && alert.count > 0) {
     const ent = await getEntitlements(db, restaurantId);
     const whatsappAllowed = ent.active && ent.features.includes('whatsapp_alerts');
-    // ₪ = what this invoice can actually claim (the letters' rule), never the
-    // engine's raw Σ|Δ|; formatted once by the server money util. The link is
-    // the branch-aware go-link to this invoice's approval page (W2-04).
-    const alert = await invoiceAlert(db, restaurantId, invoiceId);
     const link = approvalsGoLink(restaurantId, invoiceId);
     const summary = approvalSummary(alert.count, alert.figure, link, { pendingLink: alert.pendingLink });
     for (const role of persisted.rolesNeedingNotification) {

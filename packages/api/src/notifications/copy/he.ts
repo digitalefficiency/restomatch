@@ -109,6 +109,10 @@ export const he = {
     heading: 'סיכום סוף יום · {date}',
     intro: 'מה פתוח לטיפול ומה נמצא היום:',
     openLabel: 'זיכויים פתוחים',
+    /** No ₪ to name (W2-04, Train C R4-2): never '(₪0)'. */
+    subjectNoAmount: 'סיכום יומי · {count, plural, =0 {אין זיכויים פתוחים} one {זיכוי פתוח אחד} two {שני זיכויים פתוחים} other {# זיכויים פתוחים}}',
+    /** Invoices whose claimable rows wait for an order link: not open credits yet, no ₪. */
+    pendingLinkLabel: 'ממתינות לקישור להזמנה',
     caughtLabel: 'פערים שנמצאו היום',
     pendingLabel: 'ממתינים להחלטה',
     topLabel: 'הספק עם הכי הרבה זיכויים',
