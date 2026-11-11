@@ -7,6 +7,11 @@ describe('isPublicPath (middleware allowlist)', () => {
     (p) => expect(isPublicPath(p)).toBe(true),
   );
 
+  it('W3-06b: /product is public, a path under it is not', () => {
+    expect(isPublicPath('/product')).toBe(true);
+    expect(isPublicPath('/product/x')).toBe(false);
+  });
+
   it.each(['/twitter-image', '/og/he.png', '/og/en.png', '/robots.txt', '/sitemap.xml', '/icon.svg'])(
     'SEO/social asset %s is public (crawlers have no session)',
     (p) => expect(isPublicPath(p)).toBe(true),

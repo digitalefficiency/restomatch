@@ -14,6 +14,8 @@ export const PUBLIC_EXACT_PATHS = [
   '/',
   '/pricing',
   '/about',
+  // W3-06b (orchestrator-granted): the product page split from About.
+  '/product',
   '/privacy',
   '/terms',
   '/cookies',

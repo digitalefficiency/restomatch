@@ -25,9 +25,11 @@ import type { Locale } from '@/lib/i18n/config';
 import type { Translator } from '@/lib/i18n/translate';
 import type { he as landingHe } from '@/lib/i18n/messages/landing/he';
 import { formatIls } from '@/lib/money';
+import { formatNumber } from '@/lib/i18n/format';
 import { cn } from '@/lib/components/cn';
 import { LegalLinks } from '@/lib/legal/LegalLinks';
 import { RoiCalculator } from './RoiCalculator';
+import { SAMPLE_LEAK_ILS, SAMPLE_LEAK_PCT, SAMPLE_PURCHASING_ILS } from './sampleMonth';
 
 /**
  * The landing page's DETAIL sections (Landing v1). Landing v2 keeps the home
@@ -84,12 +86,33 @@ export function FactsStrip({ t }: { t: T }) {
   );
 }
 
+/**
+ * The illustrative ₪ in the problem cards and the approval rules. The copy
+ * carries placeholders only; every ₪ is formatted here through formatIls().
+ * c1: ₪2.50/kg more on 30 kg a week, 52 weeks = ₪3,900 a year.
+ */
+export const PROBLEM_EXAMPLE_ILS = {
+  perKg: 2.5,
+  kgPerWeek: 30,
+  delivery: 178,
+  invoice: 159,
+} as const;
+export const PROBLEM_C1_YEAR_ILS =
+  (Math.round(PROBLEM_EXAMPLE_ILS.perKg * 100) * PROBLEM_EXAMPLE_ILS.kgPerWeek * 52) / 100;
+/** The default approval rules shown on the features card (packages/api approvals defaults). */
+export const APPROVAL_EXAMPLE_ILS = { bigInvoice: 5_000, gapFrom: 50, gapTo: 300 } as const;
+
 export function ProblemSection({ t, locale }: { t: T; locale: Locale }) {
   const ils = (n: number) => formatIls(n, { locale });
   const problems = [
-    { icon: TrendingUp, title: t('problem.c1Title'), body: t('problem.c1Body'), amount: t('problem.c1Amount') },
-    { icon: PackageX, title: t('problem.c2Title'), body: t('problem.c2Body'), amount: t('problem.c2Amount') },
-    { icon: CircleSlash, title: t('problem.c3Title'), body: t('problem.c3Body'), amount: t('problem.c3Amount') },
+    {
+      icon: TrendingUp,
+      title: t('problem.c1Title'),
+      body: t('problem.c1Body', { perKg: formatIls(PROBLEM_EXAMPLE_ILS.perKg, { locale, maximumFractionDigits: 2 }) }),
+      amount: t('problem.c1Amount', { amount: ils(PROBLEM_C1_YEAR_ILS) }),
+    },
+    { icon: PackageX, title: t('problem.c2Title'), body: t('problem.c2Body'), amount: t('problem.c2Amount', { amount: ils(PROBLEM_EXAMPLE_ILS.delivery) }) },
+    { icon: CircleSlash, title: t('problem.c3Title'), body: t('problem.c3Body'), amount: t('problem.c3Amount', { amount: ils(PROBLEM_EXAMPLE_ILS.invoice) }) },
     { icon: Copy, title: t('problem.c4Title'), body: t('problem.c4Body'), amount: t('problem.c4Amount') },
   ];
   return (
@@ -119,9 +142,12 @@ export function ProblemSection({ t, locale }: { t: T; locale: Locale }) {
       </ul>
       <div className="rm-reveal mt-8 rounded-2xl border border-line bg-surface-2/60 px-6 py-5 text-center">
         <p className="text-base text-ink sm:text-lg">
-          {t('problem.mathA')}{' '}
-          <span className="font-mono text-2xl font-extrabold tabular-nums text-danger drop-shadow-glow-danger">
-            {ils(150_000 * 0.015)}
+          {t('problem.mathA', {
+            purchasing: ils(SAMPLE_PURCHASING_ILS),
+            pct: `${formatNumber(SAMPLE_LEAK_PCT, locale, { maximumFractionDigits: 1 })}%`,
+          })}{' '}
+          <span className="text-2xl font-extrabold tabular-nums text-danger drop-shadow-glow-danger">
+            {ils(SAMPLE_LEAK_ILS)}
           </span>{' '}
           {t('problem.mathB')}
         </p>
@@ -133,6 +159,7 @@ export function ProblemSection({ t, locale }: { t: T; locale: Locale }) {
 }
 
 export function FeaturesSection({ t }: { t: T }) {
+  const ils = (n: number) => formatIls(n, { locale: t.locale });
   return (
     <section id="features" className="scroll-mt-24 mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-24" aria-labelledby="features-title">
       <div className="rm-reveal mx-auto mb-12 max-w-2xl text-center">
@@ -204,8 +231,8 @@ export function FeaturesSection({ t }: { t: T }) {
             {(
               [
                 { rule: t('features.approvals.r1'), out: t('features.approvals.o1'), tone: 'text-danger' },
-                { rule: t('features.approvals.r2'), out: t('features.approvals.o2'), tone: 'text-danger' },
-                { rule: t('features.approvals.r3'), out: t('features.approvals.o3'), tone: 'text-warn' },
+                { rule: t('features.approvals.r2', { amount: ils(APPROVAL_EXAMPLE_ILS.bigInvoice) }), out: t('features.approvals.o2'), tone: 'text-danger' },
+                { rule: t('features.approvals.r3', { from: ils(APPROVAL_EXAMPLE_ILS.gapFrom), to: ils(APPROVAL_EXAMPLE_ILS.gapTo) }), out: t('features.approvals.o3'), tone: 'text-warn' },
                 { rule: t('features.approvals.r4'), out: t('features.approvals.o4'), tone: 'text-primary' },
               ] as const
             ).map((r) => (
