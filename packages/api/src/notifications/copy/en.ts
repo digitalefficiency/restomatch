@@ -97,6 +97,16 @@ export const en = {
     clean: 'No open credits.',
     cta: 'Go to approvals',
   },
+  matchSummary: {
+    gaps: '{count, plural, one {# discrepancy} other {# discrepancies}}',
+    toReview: '{count, plural, one {# discrepancy to review} other {# discrepancies to review}}',
+    inGaps: '{amount} in discrepancies',
+    pendingLink: 'waiting to be linked to an order',
+    noPo: 'no order linked',
+    matches: 'matches the order and the goods receipt',
+    alert: '{gaps}, {amount} in discrepancies in total',
+    alertReview: 'to review',
+  },
   invoiceOcrFailed: {
     subject: 'We couldn’t read an invoice',
     subjectSupplier: 'We couldn’t read the invoice from {supplier}',

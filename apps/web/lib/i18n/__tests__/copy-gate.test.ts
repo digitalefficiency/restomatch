@@ -49,23 +49,6 @@ const ALLOW: Array<{ where: string; rule: RuleId; reason: string; text?: string 
   // receiver-langs.test pins placeholder parity. W2-05 can drop both keys from the overlays, then here.
   { where: 'components:activity.discrepancies', rule: 'count-without-plural', reason: 'W2-05 receiver overlays' },
   { where: 'components:activity.toReview', rule: 'count-without-plural', reason: 'W2-05 receiver overlays' },
-  // matchActivitySummary().detail (persist.ts): pinned byte-identical by match-money.test.ts and no
-  // longer persisted since W2-13 (the feed row is v2 metadata). Its text dies with the function.
-  ...(
-    [
-      ['retired-term', 'חריגה אחת'],
-      ['retired-term', '{x} חריגות'],
-      ['retired-term', 'חריגה אחת לבדיקה'],
-      ['retired-term', '{x} חריגות לבדיקה'],
-      ['retired-term', 'הפסד פוטנציאלי ₪{x}'],
-      ['sign-next-to-placeholder', 'הפסד פוטנציאלי ₪{x}'],
-    ] as const
-  ).map(([rule, text]) => ({
-    where: 'file:packages/api/src/match/persist.ts',
-    rule,
-    text,
-    reason: 'matchActivitySummary().detail is pinned by match-money.test.ts and not persisted',
-  })),
   // Quotes around a placeholder: pinned verbatim by e2e/W1-04.spec.ts:172 (W1-04's spec).
   { where: 'common:shell.forbidden.title', rule: 'sign-next-to-placeholder', reason: 'pinned by e2e/W1-04.spec.ts:172' },
   { where: 'file:packages/api/src/notifications/copy/he.ts', rule: 'masculine-imperative', reason: 'the same three DECISION_COPY values (W2-04)' },

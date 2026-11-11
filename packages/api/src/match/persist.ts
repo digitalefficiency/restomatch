@@ -25,6 +25,14 @@ import { buildRules } from '../approvals/engine';
 import { logActivity } from '../activity';
 import { canActOn } from '../lib/roles';
 import { writePriceHistoryForInvoice } from './priceHistory';
+import { EMAIL_COPY, fill } from '../notifications/copy';
+import { formatIlsAgorot } from '../reports/money';
+
+/** Hebrew match/alert copy (EMAIL_COPY.he.matchSummary): plurals with the dual, ₪ only from the formatter. */
+const MS = EMAIL_COPY.he.matchSummary;
+const say = (template: string, vars: Record<string, string | number> = {}) => fill(template, vars, { locale: 'he' });
+/** ₪ at 0 dp through the server money formatter (G-13 moneyText once it lands; AU-07). */
+const ilsText = (shekels: number) => formatIlsAgorot(Math.round(shekels * 100));
 
 export interface PersistMatchArgs {
   restaurantId: string;
@@ -316,14 +324,14 @@ export function matchActivitySummary(
   // Worded from the actual findings: the PO state first, then the loss, then
   // anything left to check — "matches" only when there was a PO and nothing is open.
   const parts: string[] = [];
-  if (!poMatched) parts.push(pendingLink ? 'ממתינה לשיוך להזמנה' : 'ללא הזמנה מקושרת');
+  if (!poMatched) parts.push(pendingLink ? MS.pendingLink : MS.noPo);
   if (leaking.length > 0) {
-    parts.push(leaking.length === 1 ? 'חריגה אחת' : `${leaking.length} חריגות`);
-    parts.push(`הפסד פוטנציאלי ₪${Math.round(leakIls).toLocaleString('he-IL')}`);
+    parts.push(say(MS.gaps, { count: leaking.length }));
+    parts.push(say(MS.inGaps, { amount: ilsText(leakIls) }));
   } else if (reviewCount > 0) {
-    parts.push(reviewCount === 1 ? 'חריגה אחת לבדיקה' : `${reviewCount} חריגות לבדיקה`);
+    parts.push(say(MS.toReview, { count: reviewCount }));
   } else if (poMatched) {
-    parts.push('תואמת להזמנה ולקבלה');
+    parts.push(MS.matches);
   }
   return { detail: parts.join(' · '), leakCount: leaking.length, leakIls, pendingLink, poMatched, reviewCount };
 }
@@ -339,13 +347,12 @@ export function matchAlert(s: { leakCount: number; leakIls: number; reviewCount:
   atRiskIls: string | null;
 } {
   if (s.leakCount > 0) {
-    const ils = `₪${Math.round(s.leakIls).toLocaleString('he-IL')}`;
-    const n = s.leakCount === 1 ? 'פער אחד' : `${s.leakCount} פערים`;
-    const review = s.reviewCount > 0 ? ` · ${s.reviewCount} לבדיקה` : '';
-    return { summary: `${n}, סה"כ הפסד פוטנציאלי ${ils}${review}`, count: s.leakCount, atRiskIls: ils };
+    const ils = ilsText(s.leakIls);
+    const review = s.reviewCount > 0 ? ` · ${say(MS.toReview, { count: s.reviewCount })}` : '';
+    return { summary: say(MS.alert, { gaps: say(MS.gaps, { count: s.leakCount }), amount: ils }) + review, count: s.leakCount, atRiskIls: ils };
   }
-  if (s.reviewCount > 0) return { summary: `${s.reviewCount} לבדיקה`, count: s.reviewCount, atRiskIls: null };
-  return { summary: s.pendingLink ? 'ממתינה לשיוך להזמנה' : 'לבדיקה', count: 0, atRiskIls: null };
+  if (s.reviewCount > 0) return { summary: say(MS.toReview, { count: s.reviewCount }), count: s.reviewCount, atRiskIls: null };
+  return { summary: s.pendingLink ? MS.pendingLink : MS.alertReview, count: 0, atRiskIls: null };
 }
 
 export interface PersistMatchResult {

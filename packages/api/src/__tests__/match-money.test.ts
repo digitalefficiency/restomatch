@@ -20,6 +20,10 @@ import { normalizeInvoiceNumber } from '../match/buildMatchInput';
 import { backfillPriceHistory, writePriceHistoryForInvoice } from '../match/priceHistory';
 import { decisionStillApplies, matchActivitySummary, matchAlert, pairPriorDecisions, type PriorDecision } from '../match/persist';
 import { resetDb, seedPlans, seedTenant as seedTenantPending, type Tenant } from './fixtures';
+import { formatIlsAgorot } from '../reports/money';
+
+/** W2-13 / AU-07: the summary and alert ₪ come from the server money formatter (exact, from integer agorot). */
+const ILS = (agorot: number) => formatIlsAgorot(agorot);
 
 /**
  * #216 F3: match.runForInvoice refuses a receipt still being counted. These
@@ -513,7 +517,7 @@ describe('the feed tells the hero’s story (matchActivitySummary)', () => {
 
   it('a clean match is calm — never "0 חריגות · ₪0"', () => {
     expect(matchActivitySummary([], 117, { poMatched: true })).toEqual({
-      detail: 'תואמת להזמנה ולקבלה',
+      detail: 'תואמת להזמנה ולקבלת הסחורה',
       leakCount: 0,
       leakIls: 0,
       pendingLink: false,
@@ -522,13 +526,13 @@ describe('the feed tells the hero’s story (matchActivitySummary)', () => {
     });
     // Inside-tolerance info + an AUTO-ACCEPTED under-charge: nothing leaked, nothing open.
     expect(matchActivitySummary([f('QTY_SHORT', 'info', 4), f('PRICE_LOWER', 'warn', 12, 'accepted')], 117, { poMatched: true }).detail).toBe(
-      'תואמת להזמנה ולקבלה',
+      'תואמת להזמנה ולקבלת הסחורה',
     );
   });
 
   it('"matches" only with a PO and nothing open; an open non-loss finding reads "to review"', () => {
-    expect(matchActivitySummary([f('PRICE_LOWER', 'warn', 12)], 117, { poMatched: true }).detail).toBe('חריגה אחת לבדיקה');
-    expect(matchActivitySummary([f('DATE_ANOMALY', 'warn', 0), f('PRICE_LOWER', 'warn', 3)], 117, { poMatched: true }).detail).toBe('2 חריגות לבדיקה');
+    expect(matchActivitySummary([f('PRICE_LOWER', 'warn', 12)], 117, { poMatched: true }).detail).toBe('פער אחד לבדיקה');
+    expect(matchActivitySummary([f('DATE_ANOMALY', 'warn', 0), f('PRICE_LOWER', 'warn', 3)], 117, { poMatched: true }).detail).toBe('שני פערים לבדיקה');
     // No PO and nothing pending (the no-PO finding was decided): say so, never "matches".
     expect(matchActivitySummary([f('UNORDERED_ARRIVAL', 'block', 117, 'accepted')], 117, { poMatched: false }).detail).toBe('ללא הזמנה מקושרת');
   });
@@ -545,19 +549,19 @@ describe('the feed tells the hero’s story (matchActivitySummary)', () => {
     expect(s).toEqual({ detail: 'ממתינה לשיוך להזמנה', leakCount: 0, leakIls: 0, pendingLink: true, poMatched: false, reviewCount: 0 });
     // …but a no-PO invoice whose duplicate / VAT / total finding counts as leak says so.
     expect(matchActivitySummary([f('UNORDERED_ARRIVAL', 'block', 1273), f('VAT_MISMATCH', 'warn', 12.6)], 1273, { poMatched: false }).detail).toBe(
-      'ממתינה לשיוך להזמנה · חריגה אחת · הפסד פוטנציאלי ₪13',
+      `ממתינה לשיוך להזמנה · פער אחד · ${ILS(1300)} בפערים`,
     );
   });
 
   it('singular / plural, grouped ₪, capped at the invoice total like the hero', () => {
-    expect(matchActivitySummary([f('PRICE_HIGHER', 'block', 104.8)], 2787.92).detail).toBe('חריגה אחת · הפסד פוטנציאלי ₪105');
+    expect(matchActivitySummary([f('PRICE_HIGHER', 'block', 104.8)], 2787.92).detail).toBe(`פער אחד · ${ILS(10500)} בפערים`);
     const two = matchActivitySummary([f('DUPLICATE_INVOICE', 'block', 1180), f('PRICE_HIGHER', 'block', 400)], 1180);
     expect(two).toMatchObject({ leakCount: 2, leakIls: 1180 });
-    expect(two.detail).toBe('2 חריגות · הפסד פוטנציאלי ₪1,180');
+    expect(two.detail).toBe(`שני פערים · ${ILS(118000)} בפערים`);
   });
 
   it('a duplicate rejected as "not a duplicate" is not a loss', () => {
-    expect(matchActivitySummary([f('DUPLICATE_INVOICE', 'block', 118, 'rejected')], 118).detail).toBe('תואמת להזמנה ולקבלה');
+    expect(matchActivitySummary([f('DUPLICATE_INVOICE', 'block', 118, 'rejected')], 118).detail).toBe('תואמת להזמנה ולקבלת הסחורה');
   });
 
   it('persisted: an invoice with no PO reads "pending", with no loss figure', async () => {
@@ -580,18 +584,18 @@ describe('match alerts (push / WhatsApp / approval email) use the hero leak rule
   it('a MISSING_ON_INVOICE line and an info line are never in the alert ₪', () => {
     const s = matchActivitySummary([f('MISSING_ON_INVOICE', 'block', 640), f('QTY_SHORT', 'info', 50), f('PRICE_HIGHER', 'warn', 104.8)], 5000);
     const a = matchAlert(s);
-    expect(a.summary).toBe('פער אחד, סה"כ הפסד פוטנציאלי ₪105 · 1 לבדיקה');
-    expect(a).toMatchObject({ count: 1, atRiskIls: '₪105' });
+    expect(a.summary).toBe(`פער אחד, סה״כ ${ILS(10500)} בפערים · פער אחד לבדיקה`);
+    expect(a).toMatchObject({ count: 1, atRiskIls: `${ILS(10500)}` });
   });
 
   it('plural, capped at the invoice total like the hero', () => {
     const a = matchAlert(matchActivitySummary([f('DUPLICATE_INVOICE', 'block', 1180), f('PRICE_HIGHER', 'block', 400)], 1180));
-    expect(a).toEqual({ summary: '2 פערים, סה"כ הפסד פוטנציאלי ₪1,180', count: 2, atRiskIls: '₪1,180' });
+    expect(a).toEqual({ summary: `שני פערים, סה״כ ${ILS(118000)} בפערים`, count: 2, atRiskIls: `${ILS(118000)}` });
   });
 
   it('a review-only match reads "N לבדיקה" with no ₪', () => {
     const a = matchAlert(matchActivitySummary([f('MISSING_ON_INVOICE', 'block', 640), f('PRICE_LOWER', 'warn', 12)], 5000));
-    expect(a).toEqual({ summary: '2 לבדיקה', count: 2, atRiskIls: null });
+    expect(a).toEqual({ summary: 'שני פערים לבדיקה', count: 2, atRiskIls: null });
     expect(a.summary).not.toContain('₪');
   });
 
