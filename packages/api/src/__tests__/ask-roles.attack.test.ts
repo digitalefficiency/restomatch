@@ -102,3 +102,19 @@ describe('role table (ask/roles.ts)', () => {
     expect(stripIls([{ aIls: 1, b: { cPrice: 2, d: 3 } }])).toEqual([{ b: { d: 3 } }]);
   });
 });
+
+describe('fails closed on a missing role (warden review, add-only)', () => {
+  it('runTool, canUseTool and redactForRole give nothing to a caller that forgets the role', async () => {
+    for (const t of TOOL_DEFINITIONS) {
+      expect(canUseTool(t.name, undefined)).toBe(false);
+      await expect(runTool(t.name, {}, { db, restaurantId: A.restaurantId })).rejects.toBeInstanceOf(AskToolForbidden);
+    }
+    const out: ToolOutput = { data: { aIls: 5, n: 1 }, links: [], figures: { ils: [5], pct: [], count: [1] } };
+    expect(redactForRole(out, undefined)).toEqual({ data: { n: 1 }, links: [], figures: { ils: [], pct: [], count: [1] } });
+  });
+
+  it('the offline path uses the same table: runAsk without a role refuses an ops intent', async () => {
+    const { runAsk } = await import('../ask');
+    await expect(runAsk(db, A.restaurantId, 'מי חייב לי זיכויים?', 'he')).rejects.toBeInstanceOf(AskToolForbidden);
+  });
+});

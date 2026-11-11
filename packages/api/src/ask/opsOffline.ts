@@ -7,7 +7,7 @@
 import type { UserRole } from '@restomatch/db';
 import type { Database } from '@restomatch/db';
 import { runOpsTool, type OpsToolName } from './opsTools';
-import { redactForRole } from './roles';
+import { AskToolForbidden, canUseTool, redactForRole } from './roles';
 import type { ScreenLink } from './tools';
 
 export const OPS_INTENTS = ['waitingForMe', 'intakeStuck', 'whoOwesMe', 'toPayThisWeek', 'vatAtRisk'] as const;
@@ -52,7 +52,10 @@ export async function opsOfflineAnswer(
   locale: 'he' | 'en',
   role: UserRole | undefined,
 ): Promise<{ intent: OpsIntent; facts: Record<string, unknown>; links: ScreenLink[] }> {
-  const r = await runOpsTool(OPS_INTENT_TOOL[intent], {}, { db, restaurantId, role, now, locale });
+  const tool = OPS_INTENT_TOOL[intent];
+  // Same role table as the online leg (fails closed on a missing role).
+  if (!canUseTool(tool, role)) throw new AskToolForbidden(tool, role);
+  const r = await runOpsTool(tool, {}, { db, restaurantId, role, now, locale });
   const out = redactForRole({ data: r.data, links: r.links, figures: { ils: [], pct: [], count: [] } }, role);
   return { intent, facts: out.data as Record<string, unknown>, links: out.links };
 }

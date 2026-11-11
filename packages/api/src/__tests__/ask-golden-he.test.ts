@@ -128,6 +128,17 @@ describe('golden set (he, offline, no key)', () => {
     expect(JSON.stringify(r)).not.toContain(B.supplierId);
   });
 
+  it('cross-tenant through the router: who-owes and VAT answers never carry tenant B rows (warden review)', async () => {
+    for (const question of ['מי חייב לי זיכויים?', 'כמה מע״מ בסיכון?']) {
+      const r = await caller(A).ask.ask({ question, locale: 'he' });
+      const blob = JSON.stringify(r);
+      expect(blob, question).not.toContain(B.invoiceId);
+      expect(blob, question).not.toContain(B.supplierId);
+      expect(blob, question).not.toContain(B.supplierName);
+      expect(blob, question).not.toContain('90000');
+    }
+  });
+
   it('the manager gets the same answers', async () => {
     const r = await caller(A, 'manager').ask.ask({ question: 'מי חייב לי זיכויים?', locale: 'he' });
     expect(r.facts).toMatchObject(OWED);

@@ -70,6 +70,7 @@ export async function runAsk(
   else if (!(await reserveQuestion(db, restaurantId, now))) reason = 'budget';
   else counted = true;
 
+  let online: { result: AskResult; tools: string[] } | null = null;
   if (client && reason === null) {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(now);
     try {
@@ -77,16 +78,18 @@ export async function runAsk(
       await addClaudeSpend(db, restaurantId, { claudeCalls: r.calls, inputTokens: r.inputTokens, outputTokens: r.outputTokens }, now);
       const g = groundAnswer(r.answer, r.links, r.figures);
       const linkSet = new Set(g.citations.map((c) => c.href));
-      await recordAnswered(db, restaurantId, opts.userId, { intent: null, tools: r.toolsUsed, mode: 'online', grounded: g.grounded });
-      return {
-        mode: 'claude',
-        answer: g.answer,
-        citations: g.citations,
-        grounded: g.grounded,
-        intent: null,
-        facts: {},
-        links: r.links.filter((l) => linkSet.has(l.href)),
-        reason: null,
+      online = {
+        result: {
+          mode: 'claude',
+          answer: g.answer,
+          citations: g.citations,
+          grounded: g.grounded,
+          intent: null,
+          facts: {},
+          links: r.links.filter((l) => linkSet.has(l.href)),
+          reason: null,
+        },
+        tools: r.toolsUsed,
       };
     } catch (err) {
       // A failed leg was still billed: count what it spent.
@@ -95,6 +98,16 @@ export async function runAsk(
       console.warn('[ask] Claude leg failed — offline answer:', err instanceof Error ? err.message : 'error');
       reason = 'error';
     }
+  }
+  if (online) {
+    // Outside the try: a failed audit insert must surface, not fall back offline inside an aborted tx.
+    await recordAnswered(db, restaurantId, opts.userId, {
+      intent: null,
+      tools: online.tools,
+      mode: 'online',
+      grounded: online.result.grounded,
+    });
+    return online.result;
   }
 
   const off = await offlineAnswer(db, restaurantId, question, now, locale, role);

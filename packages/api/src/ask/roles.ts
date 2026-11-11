@@ -38,14 +38,14 @@ export function canViewMoney(role: UserRole | undefined): boolean {
 }
 
 /**
- * May `role` run `tool`? An unknown tool name is never allowed. `undefined`
- * role = an internal caller that predates the role table (tests of the leak
- * tools); the router always passes the session role.
+ * May `role` run `tool`? Fails closed: an unknown tool or a missing role is
+ * never allowed (a caller that forgets the role — e.g. a future WhatsApp entry
+ * point — gets nothing, not everything).
  */
 export function canUseTool(tool: string, role: UserRole | undefined): boolean {
   const allowed = (TOOL_ROLES as Record<string, readonly UserRole[] | undefined>)[tool];
-  if (!allowed) return false;
-  return role === undefined || allowed.includes(role);
+  if (!allowed || role === undefined) return false;
+  return allowed.includes(role);
 }
 
 /** The error a refused tool returns to the loop (an is_error tool_result, not a throw to the user). */
@@ -71,8 +71,8 @@ export function stripIls<T>(value: T): T {
   return value;
 }
 
-/** A tool's output as `role` may see it: unchanged for money roles, ₪-free otherwise. */
+/** A tool's output as `role` may see it: unchanged for money roles, ₪-free otherwise (incl. a missing role). */
 export function redactForRole(output: ToolOutput, role: UserRole | undefined): ToolOutput {
-  if (role === undefined || canViewMoney(role)) return output;
+  if (canViewMoney(role)) return output;
   return { data: stripIls(output.data), links: output.links, figures: { ...output.figures, ils: [] } };
 }
