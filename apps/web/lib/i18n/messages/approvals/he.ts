@@ -163,7 +163,7 @@ export const he = {
     },
     MISSING_ON_INVOICE: {
       label: 'שורת הזמנה לא חויבה',
-      explain: 'ייתכן שיחויב בחשבונית אחרת.',
+      explain: 'פריט שהוזמן לא מופיע בחשבונית — ייתכן שיגיע בחשבונית אחרת.',
     },
     UNIT_MISMATCH: {
       label: 'אי-התאמת יחידות',

@@ -117,7 +117,6 @@ export const he = {
     reminder: {
       cta: 'הכינו תזכורת לספק',
       note: 'שום דבר לא נשלח לספק בלי לחיצה שלכם.',
-      text: 'שלום {supplier}, תזכורת קטנה מ{restaurant} לגבי בקשת הזיכוי ששלחנו ב-{date} ({count} שורות, בסך {amount}). אפשר לעדכן מתי תצא חשבונית הזיכוי? תודה, {signer}',
     },
     openForClaim: 'פתוח לבקשת זיכוי',
     openSupplierLetter: 'פתחו בקשת זיכוי · {amount}',
@@ -274,7 +273,7 @@ export const he = {
     expected: 'צפוי {expected}',
     sourcePo: 'בהזמנה {expected} ({po}, {date})',
     expectedP90: 'מעל המחיר הרגיל של הספק (90 יום): {expected}',
-    sourceP90: 'מעל המחיר הרגיל של הספק (90 יום): {expected}',
+    sourceP90: 'לפי המחיר הרגיל של הספק (90 יום)',
     /** The full p90 sentence, for the in-place "למה?" fold (W2-16). */
     p90Why: 'גבוה מ-90% מהמחירים של הספק ב-90 הימים האחרונים',
     equals: 'פער {amount}',

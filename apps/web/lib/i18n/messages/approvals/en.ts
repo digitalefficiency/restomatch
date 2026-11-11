@@ -160,7 +160,7 @@ export const en: Shape<typeof he> = {
     },
     MISSING_ON_INVOICE: {
       label: 'Ordered line not billed',
-      explain: 'It may be billed on another invoice.',
+      explain: 'An ordered item is missing from the invoice — it may arrive on another invoice.',
     },
     UNIT_MISMATCH: {
       label: 'Unit mismatch',

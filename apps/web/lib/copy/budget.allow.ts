@@ -268,7 +268,6 @@ export const COPY_ALLOW: AllowList = {
   'leaks:claims.notTracked': { words: 14, reason: 'baseline', owner: 'W2-09' },
   'leaks:claims.note': { words: 23, reason: 'baseline', owner: 'W2-09' },
   'leaks:claims.reminder.note': { words: 13, reason: 'baseline', owner: 'W2-09' },
-  'leaks:claims.reminder.text': { words: 20, reason: 'baseline', owner: 'W2-09' },
   'leaks:claims.sectionBeforePayment': { words: 6, reason: 'baseline', owner: 'W2-09' },
   'leaks:claims.sectionForCredit': { words: 10, reason: 'baseline', owner: 'W2-09' },
   'leaks:claims.sentTitle': { words: 4, reason: 'baseline', owner: 'W2-09' },

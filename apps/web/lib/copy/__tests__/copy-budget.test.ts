@@ -70,6 +70,12 @@ describe('failure rules fire (one fixture each)', () => {
     const t = 'שום דבר לא נשלח לספק בלי לחיצה';
     expect(rulesOf([L('orders', 'a', t), L('recovery', 'b', `${t}.`)])).toEqual(['duplicate']);
   });
+  it('duplicate of an explain key: a warning to adopt the key, not a failure (§5.3 rule 4)', () => {
+    const t = 'שום דבר לא נשלח לספק בלי לחיצה שלכם.';
+    const leaves = [L('explain', 'noSendWithoutTap', t), L('leaks', 'claims.reminder.note', t)];
+    expect(rulesOf(leaves)).toEqual([]);
+    expect(warnings(check(leaves, {}, {}).measured, {}).adoptExplain).toEqual(['explain:noSendWithoutTap = leaks:claims.reminder.note']);
+  });
   it('ratchet: an allowlisted string that grew', () => {
     const allow: AllowList = { 'orders:detail.hint': { words: 13, reason: 'baseline', owner: 'W2-06' } };
     const long = 'אחת שתיים שלוש ארבע חמש שש שבע שמונה תשע עשר אחת עשרה שתים';
@@ -98,7 +104,7 @@ describe('the real catalogs', () => {
     // The warn table (never fails): delete stale entries; near-duplicates are concept-merge candidates.
     console.info(
       `[copy-guard] leaves ${measured.length} · allowlisted ${Object.keys(COPY_ALLOW).length} · dup-allowlisted ${Object.keys(COPY_DUP_ALLOW).length}` +
-        ` · stale ${w.stale.length} · near-duplicates ${w.near.length} · number-before-words ${w.numberFirst.length}` +
+        ` · stale ${w.stale.length} · near-duplicates ${w.near.length} · number-before-words ${w.numberFirst.length} · adopt-explain ${w.adoptExplain.length}` +
         (w.stale.length ? `\n  stale (delete): ${w.stale.slice(0, 20).join(', ')}` : '') +
         (w.near.length ? `\n  near (top 10): ${w.near.slice(0, 10).map((n) => `${n.a} ~ ${n.b} (${n.jaccard})`).join(' | ')}` : ''),
     );

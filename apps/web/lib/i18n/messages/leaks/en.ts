@@ -111,7 +111,6 @@ export const en: Shape<typeof he> = {
     reminder: {
       cta: 'Draft a reminder to the supplier',
       note: 'Nothing reaches the supplier until you press send.',
-      text: 'Hello {supplier}, a short reminder from {restaurant} about the credit request we sent on {date} ({count} lines, totalling {amount}). Could you let us know when the credit invoice will be issued? Thank you, {signer}',
     },
     openForClaim: 'Open for a credit request',
     openSupplierLetter: 'Open the credit request · {amount}',
@@ -267,7 +266,7 @@ export const en: Shape<typeof he> = {
     expected: 'expected {expected}',
     sourcePo: 'ordered at {expected} ({po}, {date})',
     expectedP90: "above the supplier's usual price (90 days): {expected}",
-    sourceP90: "above the supplier's usual price (90 days): {expected}",
+    sourceP90: "per the supplier's usual price (90 days)",
     p90Why: "higher than 90% of this supplier's prices in the last 90 days",
     equals: 'difference {amount}',
     qtyOver: 'on the invoice {billed} {unit}, received {received}',
