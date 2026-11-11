@@ -3,6 +3,17 @@ import { DEMO_RESTAURANT_NAME } from './env';
 import { e2eSql } from './helpers';
 
 /**
+ * One count line by its EXACT item name: the shared e2e restaurant also holds
+ * look-alike products ("אורז יסמין" vs "אורז יסמין W110" from other specs), so a
+ * substring `hasText` filter can match two lines. The ✓ button's aria-label is exact.
+ */
+function countLine(page: Page, name: string) {
+  return page
+    .getByTestId('count-line')
+    .filter({ has: page.getByRole('button', { name: `הגיע כמו בהזמנה — ${name}`, exact: true }) });
+}
+
+/**
  * W2-05 slice A · the field outbox and the offline shell — the receiver on a
  * 390 px phone (dev server, its own e2e DB). Slices B/C add their scenarios
  * (resume, capture, walk-in, exceptions, desk view) to this file.
@@ -145,10 +156,10 @@ test('airplane mode: a 12-line count survives a reload and syncs exactly once �
 
   await context.setOffline(true);
   for (const l of po.lines) {
-    await page.getByTestId('count-line').filter({ hasText: l.name }).getByTestId('count-arrived').tap();
+    await countLine(page, l.name).getByTestId('count-arrived').tap();
   }
   for (const l of po.lines) {
-    await expect(page.getByTestId('count-line').filter({ hasText: l.name }).getByTestId('line-save-state')).toHaveAttribute(
+    await expect(countLine(page, l.name).getByTestId('line-save-state')).toHaveAttribute(
       'data-state',
       'queued',
       { timeout: 15_000 },
@@ -188,7 +199,7 @@ test('the outbox chip opens per-item status; only whoever saved an item may dele
   await page.getByTestId('scan-no-invoice').tap();
   await expect(page.getByTestId('delivery-check')).toBeVisible();
   await context.setOffline(true);
-  await page.getByTestId('count-line').filter({ hasText: po.lines[0]!.name }).getByTestId('count-arrived').tap();
+  await countLine(page, po.lines[0]!.name).getByTestId('count-arrived').tap();
   await expect.poll(async () => (await outboxKinds(page)).length).toBe(1);
   await page.evaluate(() => window.dispatchEvent(new Event('offline')));
   await page.getByTestId('pwa-outbox-open').tap();
