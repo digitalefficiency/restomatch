@@ -7,6 +7,7 @@ import { formatIls } from '@/lib/money';
 import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { recovery } from '@/lib/i18n/messages/recovery';
+import { leaks } from '@/lib/i18n/messages/leaks';
 import { Card } from '@/lib/components';
 
 /**
@@ -42,6 +43,7 @@ export function ReminderDrafts({
 
 function ReminderRow({ supplierId, name, sender }: { supplierId: string; name: string; sender: { restaurant: string; signer: string } }) {
   const t = useT(recovery);
+  const tl = useT(leaks);
   const locale = useLocale();
   const [why, setWhy] = useState(false);
   const draft = trpc.recovery.reminderDraft.useQuery({ supplierId }, { staleTime: 60_000 });
@@ -49,7 +51,8 @@ function ReminderRow({ supplierId, name, sender }: { supplierId: string; name: s
   if (!d || d.count === 0) return null;
   const amount = formatIls(d.outstandingAgorot / 100, { locale, maximumFractionDigits: 2 });
   const count = formatNumber(d.count, locale);
-  const body = t('reminder.body', {
+  // The ONE supplier reminder text (same as the letters page's reminder draft).
+  const body = tl('claims.reminder.text', {
     supplier: name,
     restaurant: sender.restaurant,
     date: d.oldestSentAt ? formatDate(d.oldestSentAt, locale) : '—',
