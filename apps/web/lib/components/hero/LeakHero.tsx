@@ -285,7 +285,8 @@ export function LeakHero(p: LeakHeroProps) {
 
         {hasParts ? (
           <div
-            className="grid min-w-0 grid-cols-2 gap-2"
+            // The "⋯" menu sits in the top end corner: the tiles start below it (no overlapping tap targets).
+            className={cn('grid min-w-0 grid-cols-2 gap-2', (p.more?.items.length ?? 0) > 0 && 'lg:mt-8')}
             role="group"
             aria-label={p.splitLabel}
           >
