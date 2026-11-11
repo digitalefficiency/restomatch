@@ -20,7 +20,7 @@ export const en: Shape<typeof he> = {
   notInLeak: 'not part of the leak',
   capBadge: 'Capped at the invoice total',
   caught: 'can still be stopped before payment',
-  inLetter: 'The letter holds only gaps approved for a claim and not yet sent.',
+  inLetter: 'The letter holds only gaps approved for a credit request and not yet sent.',
   noSendWithoutTap: 'Nothing reaches the supplier until you press send.',
   amountAfterClose: 'The amount is set once the goods receipt is closed.',
   viewOnly: 'View only',
