@@ -17,6 +17,8 @@ import {
   productAliases,
   products,
   purchaseOrders,
+  recoveryClaims,
+  recoveryEvents,
   restaurants,
   suppliers,
   users,
@@ -33,6 +35,9 @@ const db = createDb(TEST_DB_URL);
 async function resetDb() {
   await db.delete(notificationsOutbox);
   await db.delete(auditLog);
+  // W2-10a: approve makes the claim at the decision — claims block discrepancy deletes, clear them first.
+  await db.delete(recoveryEvents);
+  await db.delete(recoveryClaims);
   await db.delete(discrepancies);
   await db.delete(matchRuns);
   await db.delete(invoiceLines);
