@@ -3,7 +3,14 @@ import type { Locale } from '../i18n/config';
 import { ALL_ROLES, ROUTE_ROLES } from '../roles';
 import { READ_ONLY_ROUTES } from './readOnly';
 
-export { BOOKKEEPER_READ_ONLY_ROUTES, I3_PENDING_SERVER_READ, I3_READY, READ_ONLY_ROUTES } from './readOnly';
+export {
+  BOOKKEEPER_READ_ONLY_ROUTES,
+  I3_PENDING_SERVER_READ,
+  I3_PENDING_UI,
+  I3_READY,
+  I3_WRITE_ONLY_SUBPATHS,
+  READ_ONLY_ROUTES,
+} from './readOnly';
 
 /**
  * IA-03 — visible role lenses (IA-SPEC rule 3, §6.1; owner decision I3, 7.11).

@@ -1,7 +1,7 @@
 import type { UserRole } from '@restomatch/db';
 
 /**
- * The forbidden (25 before I3, 21 since) role → route pairs (lens-ia-nav ia-nav-07 probe: every one
+ * The forbidden (25 before I3, 22 since) role → route pairs (lens-ia-nav ia-nav-07 probe: every one
  * used to bounce silently to /dashboard). Shared by the unit test (middleware
  * rule) and the W1-04 e2e spec (the real in-shell 403 page).
  */
@@ -18,9 +18,10 @@ export const FORBIDDEN_PAIRS: ReadonlyArray<readonly [UserRole, string]> = [
   ['receiver', '/dashboard/recipes'],
   // Owner decision: the receiver sees no ₪ — the invoice page shows prices, line totals and VAT ₪.
   ['receiver', '/dashboard/invoices/00000000-0000-4000-8000-000000000000'],
-  // Owner decision I3 (7.11, IA-03): the bookkeeper READS orders, receiving, suppliers and
-  // catalog, so those four pairs left this list. Team and recipes stay forbidden until their
-  // server reads admit her (I3_PENDING_SERVER_READ).
+  // Owner decision I3 (7.11, IA-03): the bookkeeper READS orders, suppliers and catalog, so
+  // those three pairs left this list. Team and recipes stay forbidden until their server reads
+  // admit her (I3_PENDING_SERVER_READ); receiving until its wizard has a read-only mode (I3_PENDING_UI).
+  ['bookkeeper', '/dashboard/receiving'],
   ['bookkeeper', '/dashboard/team'],
   ['bookkeeper', '/dashboard/recipes'],
   ['bookkeeper', '/dashboard/chain'],

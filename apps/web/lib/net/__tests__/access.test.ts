@@ -5,9 +5,9 @@ import { I3_READY } from '@/lib/roleLens/readOnly';
 import { FORBIDDEN_PAIRS } from './forbiddenPairs';
 
 describe('forbiddenRewrite (middleware role gate → in-shell 403, ia-nav-07)', () => {
-  it('rewrites all 21 probed role/route pairs to the forbidden page, keeping the original URL in `from`', () => {
-    // 25 probed pairs, minus the 4 bookkeeper pairs owner decision I3 (7.11) opened read-only.
-    expect(FORBIDDEN_PAIRS).toHaveLength(21);
+  it('rewrites all 22 probed role/route pairs to the forbidden page, keeping the original URL in `from`', () => {
+    // 25 probed pairs, minus the 3 bookkeeper pairs owner decision I3 (7.11) opened read-only.
+    expect(FORBIDDEN_PAIRS).toHaveLength(22);
     for (const [role, path] of FORBIDDEN_PAIRS) {
       const to = forbiddenRewrite(path, '?sev=block', role);
       expect(to, `${role} → ${path}`).not.toBeNull();

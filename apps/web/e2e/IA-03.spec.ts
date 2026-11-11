@@ -27,10 +27,16 @@ test.describe('IA-03 role lenses', () => {
 
   test('bookkeeper opens the I3 read-only screens (no 403)', async ({ page }) => {
     await loginViaMagicLink(page, 'bookkeeper@kfar-hazeitim.test');
-    for (const path of ['/dashboard/orders', '/dashboard/suppliers', '/dashboard/catalog', '/dashboard/receiving']) {
+    for (const path of ['/dashboard/orders', '/dashboard/suppliers', '/dashboard/catalog', '/dashboard/products']) {
       const res = await page.goto(path);
       expect(res?.status(), path).toBe(200);
       await expect(page.getByTestId('forbidden-page'), path).toHaveCount(0);
+    }
+    // Write surfaces stay closed: the new-order wizard, the catalog import, and receiving
+    // (its wizard uploads scans; I3_PENDING_UI) answer 403.
+    for (const path of ['/dashboard/orders/new', '/dashboard/catalog/import', '/dashboard/receiving']) {
+      const res = await page.goto(path);
+      expect(res?.status(), path).toBe(403);
     }
   });
 

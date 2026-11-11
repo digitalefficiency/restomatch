@@ -34,7 +34,7 @@ import {
   normalizeSearch,
   searchPlaceholderKey,
 } from '../../app/dashboard/searchOptions';
-import { I3_READY } from '../roleLens/readOnly';
+import { I3_READY, I3_WRITE_ONLY_SUBPATHS } from '../roleLens/readOnly';
 
 const APP = join(__dirname, '..', '..', 'app');
 const DASH = join(APP, 'dashboard');
@@ -177,7 +177,10 @@ describe('ROUTE_ROLES generated from the registry', () => {
     // That is the only other delta: strip it, then the map must equal the old one exactly.
     const noI3 = (m: Record<string, UserRole[]>) =>
       Object.fromEntries(Object.entries(m).map(([k, v]) => [k, (I3_READY as readonly string[]).includes(k) ? v.filter((r) => r !== 'bookkeeper') : v]));
-    expect(sorted(noI3(rest))).toEqual(sorted(restBefore));
+    // I3 also pins the write-only sub-pages (new order, catalog import) to their inherited pre-I3 roles.
+    const pinned = Object.fromEntries(Object.entries(rest).filter(([k]) => !I3_WRITE_ONLY_SUBPATHS.includes(k)));
+    expect(sorted(noI3(pinned))).toEqual(sorted(restBefore));
+    for (const p of I3_WRITE_ONLY_SUBPATHS) expect(ROUTE_ROLES[p], p).not.toContain('bookkeeper');
     for (const p of I3_READY) {
       expect(ROUTE_ROLES_BEFORE[p], p).not.toContain('bookkeeper');
       expect(ROUTE_ROLES[p], p).toContain('bookkeeper');

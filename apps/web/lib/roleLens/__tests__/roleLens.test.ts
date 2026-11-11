@@ -5,6 +5,8 @@ import { ALL_ROLES, ROUTE_ROLES } from '../../roles';
 import {
   BOOKKEEPER_READ_ONLY_ROUTES,
   I3_PENDING_SERVER_READ,
+  I3_PENDING_UI,
+  I3_WRITE_ONLY_SUBPATHS,
   I3_READY,
   READ_ONLY_ROUTES,
   accessFrom,
@@ -73,15 +75,30 @@ describe('I3: the bookkeeper reads the 10 screens blocked to her', () => {
     expect(BOOKKEEPER_READ_ONLY_ROUTES).toHaveLength(10);
   });
   it('the server-ready ones (and their sub-paths) are `read` for her', () => {
-    expect(I3_READY).toEqual(['/dashboard/orders', '/dashboard/receiving', '/dashboard/suppliers', '/dashboard/catalog', '/dashboard/products']);
+    expect(I3_READY).toEqual(['/dashboard/orders', '/dashboard/suppliers', '/dashboard/catalog', '/dashboard/products']);
     for (const p of I3_READY) {
       expect(routeAccess('bookkeeper', p), p).toBe('read');
       expect(routeAccess('bookkeeper', `${p}/x`), `${p}/x`).toBe('read');
     }
   });
   it('the 5 whose server reads reject her stay `none` until their owner ships a read procedure', () => {
-    expect([...I3_READY, ...I3_PENDING_SERVER_READ].sort()).toEqual([...BOOKKEEPER_READ_ONLY_ROUTES].sort());
+    expect([...I3_READY, ...I3_PENDING_SERVER_READ, ...I3_PENDING_UI].sort()).toEqual([...BOOKKEEPER_READ_ONLY_ROUTES].sort());
     for (const p of I3_PENDING_SERVER_READ) expect(routeAccess('bookkeeper', p), p).toBe('none');
+  });
+  it('receiving stays closed to her until the wizard has a read-only mode (scan upload)', () => {
+    expect(I3_PENDING_UI).toEqual(['/dashboard/receiving']);
+    expect(routeAccess('bookkeeper', '/dashboard/receiving')).toBe('none');
+    expect(routeAccess('bookkeeper', '/dashboard/receiving/abc')).toBe('none');
+  });
+  it('the write-only sub-pages keep their pre-I3 gate: never the bookkeeper, unchanged for the rest', () => {
+    for (const p of I3_WRITE_ONLY_SUBPATHS) {
+      expect(routeAccess('bookkeeper', p), p).toBe('none');
+      expect(routeAccess('bookkeeper', `${p}/x`), p).toBe('none');
+      expect(routeAccess('owner', p), p).toBe('edit');
+      expect(routeAccess('manager', p), p).toBe('edit');
+    }
+    expect(routeAccess('chef', '/dashboard/orders/new')).toBe('edit');
+    expect(routeAccess('bookkeeper', '/dashboard/orders/abc')).toBe('read');
   });
   it('stays `read` after the registry union line adds her to the gate', () => {
     const unioned = { ...ROUTE_ROLES, '/dashboard/orders': [...(ROUTE_ROLES['/dashboard/orders'] ?? []), 'bookkeeper' as const] };
