@@ -89,7 +89,7 @@ export const en: Shape<typeof he> = {
       queued: 'Closed on the phone · it sends by itself when the connection is back',
       summary: '{lines} lines · {exceptions} gaps',
       noExceptions: '{lines} lines · everything as ordered',
-      amountPending: 'The amount to claim is set after the check',
+      amountPending: 'The amount for the credit request is set after the check',
       viewInvoice: 'View the invoice',
       next: 'Next delivery: {supplier}',
       nextAt: 'Next delivery: {supplier} · {time}',
