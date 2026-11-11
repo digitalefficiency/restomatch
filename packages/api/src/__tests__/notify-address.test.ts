@@ -10,6 +10,8 @@ import {
   type Address,
 } from '../notifications/address';
 import {
+  absoluteUrl,
+  appBaseUrl,
   canSeeMoney,
   defaultRender,
   isQuietAt,
@@ -128,7 +130,7 @@ describe('₪ redaction by role (interim for G-07 canViewPrices)', () => {
     expect(redactVars(vars, ['amountIls'], true)).toEqual(vars);
   });
 
-  it('the interim OCR-failure copy carries no ₪ and stays short', () => {
+  it('the OCR-failure notice is W2-13\'s branded template: html + absolute link, no ₪', () => {
     for (const locale of ['he', 'en'] as const) {
       for (const audience of ['uploader', 'managers']) {
         const r = defaultRender({
@@ -137,11 +139,34 @@ describe('₪ redaction by role (interim for G-07 canViewPrices)', () => {
           locale,
           role: 'receiver',
           vars: { audience, reason: 'extraction_failed', fileName: 'a.jpg', supplierName: 'ספק' },
+          deepLink: '/dashboard/receiving',
           canSeeMoney: false,
         })!;
         expect(r.body).not.toMatch(/₪|\d+\.\d{2}/);
-        expect(r.body.length).toBeLessThan(200);
+        expect(r.html).toMatch(/<html|<table|<div/i);
+        expect(r.html).toContain(`${appBaseUrl()}/dashboard/receiving`);
+        expect(r.body).toContain(`${appBaseUrl()}/dashboard/receiving`);
+        // The supplier is shown to the managers only.
+        expect(r.subject!.includes('ספק')).toBe(audience === 'managers');
       }
     }
+    const wa = defaultRender({
+      template: 'invoiceOcrFailed',
+      channel: 'whatsapp',
+      locale: 'he',
+      role: 'manager',
+      vars: { audience: 'managers', reason: 'quota_exceeded' },
+      deepLink: '/dashboard/invoices/x',
+      canSeeMoney: true,
+    })!;
+    expect(wa.html).toBeUndefined();
+    expect(wa.body).toContain('מכסת הקריאה החודשית נוצלה');
+  });
+
+  it('absoluteUrl: relative paths get the app origin; absolute links pass through', () => {
+    const env = { APP_BASE_URL: 'https://app.test/' } as NodeJS.ProcessEnv;
+    expect(absoluteUrl('/dashboard/x', env)).toBe('https://app.test/dashboard/x');
+    expect(absoluteUrl('https://other.test/y', env)).toBe('https://other.test/y');
+    expect(absoluteUrl(undefined, env)).toBeUndefined();
   });
 });

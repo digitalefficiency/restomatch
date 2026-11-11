@@ -108,6 +108,14 @@ describe('OCR failure hand-off (G-06)', () => {
     expect(uploader.body).not.toMatch(/₪|1,?180/);
     expect(byUser.get(u.manager!)!.body).toContain('ירקות הכרם');
     expect(byUser.get(u.manager!)!.body).toContain('gr-1.jpg');
+    // W2-13's branded template with an absolute link per audience (payload.__html is what the dispatcher sends).
+    const html = (r: (typeof rows)[number]) => (r.payload as Record<string, unknown>).__html as string;
+    for (const who of [u.owner!, u.manager!]) {
+      expect(html(byUser.get(who)!)).toMatch(new RegExp(`https?://[^"]+/dashboard/invoices/${id}`));
+    }
+    expect(html(uploader)).toMatch(/https?:\/\/[^"]+\/dashboard\/receiving/);
+    expect(html(uploader)).not.toContain(`/dashboard/invoices/${id}`);
+    expect((uploader.payload as Record<string, unknown>).deepLink).toBe('/dashboard/receiving');
     expect(rows.some((r) => r.restaurantId === otherId)).toBe(false);
   });
 

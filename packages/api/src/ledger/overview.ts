@@ -1,7 +1,9 @@
-import { computeLeakGrouped, type LeakGroupRow, type ViewSpec } from '@restomatch/charts';
+import { computeLeakGrouped, computeLeakSummary, computeLeakTrend, type LeakGroupRow, type ViewSpec } from '@restomatch/charts';
 import { and, asc, eq, restaurants, sql, suppliers, type Database } from '@restomatch/db';
 import type { OrderSchedule } from '@restomatch/types';
 import { deriveExpectedDelivery } from '../lib/deriveDelivery';
+import { addCalendarDaysInTz, atLocalTimeInTz, startOfDayInTz } from '../lib/time';
+import { DISCREPANCY_DECIDABLE } from '../lifecycle/predicates';
 
 /**
  * W2-11 · the supplier page "what now, in ₪" and the owner's vendor table.
@@ -30,8 +32,11 @@ export function supplierLeakWindow(now: Date): { from: string; to: string } {
 
 const toAgorot = (ils: number): number => Math.round(ils * 100);
 
-/** Leak still open or escalated (not waived, claimed or resolved) — the leak card's "open" figure. */
-const OPEN_STATUSES = ['open', 'escalated'] as const;
+/**
+ * Leak still open or escalated (not waived, claimed or resolved) — the leak
+ * card's "open" figure. The lifecycle's decidable set (lifecycle/predicates.ts).
+ */
+const OPEN_STATUSES = DISCREPANCY_DECIDABLE;
 
 function byKey(rows: LeakGroupRow[]): Map<string, LeakGroupRow> {
   return new Map(rows.map((r) => [r.key, r]));
@@ -78,6 +83,69 @@ export function orderRhythm(
   };
 }
 
+export interface NextDelivery {
+  /** UTC instant at the START of the local delivery day. */
+  at: string;
+  /** 'HH:MM' when known (the delivery schedule of that weekday). */
+  time: string | null;
+  /** Where it comes from: an open order, the order schedule, or the saved delivery days. */
+  source: 'order' | 'schedule' | 'days';
+}
+
+/** The next saved delivery day (info-only delivery schedule), today included while its time is ahead. */
+export function nextDeliveryDay(deliverySchedule: DeliveryScheduleLike, now: Date, tz: string): NextDelivery | null {
+  if (!deliverySchedule) return null;
+  for (let i = 0; i < 8; i++) {
+    const day = addCalendarDaysInTz(startOfDayInTz(now, tz), i, tz);
+    const key = DAY_KEYS[localWeekday(day, tz)];
+    const time = key ? deliverySchedule[key]?.[0] : undefined;
+    if (!key || !deliverySchedule[key]?.length) continue;
+    if (i === 0 && time) {
+      const [h, m] = time.split(':').map(Number);
+      if (atLocalTimeInTz(now, tz, h ?? 0, m ?? 0).getTime() < now.getTime()) continue;
+    }
+    return { at: day.toISOString(), time: time ?? null, source: 'days' };
+  }
+  return null;
+}
+
+/**
+ * The next delivery: the earliest open order due today or later, else the
+ * order schedule's next delivery, else the next saved delivery day.
+ */
+export function nextDelivery(
+  openOrderAt: Date | null,
+  rhythm: OrderRhythm | null,
+  deliverySchedule: DeliveryScheduleLike,
+  now: Date,
+  tz: string,
+): NextDelivery | null {
+  const timeOn = (at: Date): string | null => {
+    const key = DAY_KEYS[localWeekday(at, tz)];
+    return key ? (deliverySchedule?.[key]?.[0] ?? null) : null;
+  };
+  if (openOrderAt) {
+    const day = startOfDayInTz(openOrderAt, tz);
+    return { at: day.toISOString(), time: timeOn(day), source: 'order' };
+  }
+  if (rhythm) return { at: rhythm.deliveryAt, time: rhythm.deliveryTime, source: 'schedule' };
+  return nextDeliveryDay(deliverySchedule, now, tz);
+}
+
+/** Earliest open order (sent / confirmed / partly received) due today or later, per supplier. */
+async function openOrdersDue(db: Database, restaurantId: string, now: Date, tz: string, supplierId?: string): Promise<Map<string, Date>> {
+  const from = startOfDayInTz(now, tz).toISOString();
+  const res = await db.execute(sql`
+    SELECT po.supplier_id AS sid, MIN(po.expected_delivery_at) AS at
+    FROM purchase_orders po
+    WHERE po.restaurant_id = ${restaurantId}
+      AND po.status IN ('sent', 'confirmed', 'partial')
+      AND po.expected_delivery_at >= ${from}::timestamptz
+      ${supplierId ? sql`AND po.supplier_id = ${supplierId}` : sql``}
+    GROUP BY 1`);
+  return new Map(rowsOf(res).map((r) => [String(r.sid), new Date(r.at as string)]));
+}
+
 async function restaurantTz(db: Database, restaurantId: string): Promise<string> {
   const [r] = await db.select({ tz: restaurants.timezone }).from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1);
   return r?.tz ?? DEFAULT_TZ;
@@ -96,7 +164,13 @@ export interface SupplierOverview {
   openAgorot: number;
   openCount: number;
   rhythm: OrderRhythm | null;
-  /** Invoiced before VAT, per restaurant month, oldest first (6 months, current included). */
+  /** The next delivery (open order → order schedule → saved delivery days). */
+  nextDelivery: NextDelivery | null;
+  /**
+   * Checked spend before VAT, per restaurant month, oldest first (6 months,
+   * current included) — the leak views' spend definition (computeLeakTrend), so
+   * it matches home and the leak hub.
+   */
   spend: { month: string; agorot: number }[];
   /** The last 5 invoices, newest first. */
   lastInvoices: { id: string; invoiceNumber: string | null; at: string; totalAgorot: number | null; status: string }[];
@@ -121,7 +195,7 @@ export async function computeSupplierOverview(
   now = new Date(),
 ): Promise<SupplierOverview> {
   const window = supplierLeakWindow(now);
-  const [leak, open, tz, sup, spendRes, lastRes] = await Promise.all([
+  const [leak, open, tz, sup, trend, lastRes] = await Promise.all([
     computeLeakGrouped(db, restaurantId, leakSpec(window, [supplierId]), 'supplier'),
     computeLeakGrouped(db, restaurantId, leakSpec(window, [supplierId], true), 'supplier'),
     restaurantTz(db, restaurantId),
@@ -130,14 +204,13 @@ export async function computeSupplierOverview(
       .from(suppliers)
       .where(and(eq(suppliers.id, supplierId), eq(suppliers.restaurantId, restaurantId)))
       .limit(1),
-    db.execute(sql`
-      SELECT to_char(date_trunc('month', COALESCE(i.invoice_date, i.created_at) AT TIME ZONE r.timezone), 'YYYY-MM') AS m,
-             COALESCE(SUM(i.total_excl_vat), 0) AS total
-      FROM invoices i JOIN restaurants r ON r.id = i.restaurant_id
-      WHERE i.restaurant_id = ${restaurantId} AND i.supplier_id = ${supplierId}
-        AND COALESCE(i.invoice_date, i.created_at) AT TIME ZONE r.timezone
-            >= date_trunc('month', ${now.toISOString()}::timestamptz AT TIME ZONE r.timezone) - interval '5 months'
-      GROUP BY 1`),
+    computeLeakTrend(db, restaurantId, {
+      period: 'custom',
+      from: `${lastMonths(now, DEFAULT_TZ, 6)[0]}-01`,
+      to: israelYmd(now),
+      filters: { supplierIds: [supplierId] },
+      now,
+    }),
     db.execute(sql`
       SELECT i.id, i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS at, i.total_incl_vat, i.status
       FROM invoices i
@@ -148,7 +221,13 @@ export async function computeSupplierOverview(
   const l = leak.find((r) => r.key === supplierId);
   const o = open.find((r) => r.key === supplierId);
   const s = sup[0];
-  const spendBy = new Map(rowsOf(spendRes).map((r) => [String(r.m), toAgorot(Number(r.total))]));
+  const spendBy = new Map<string, number>();
+  for (const p of trend.points) {
+    const key = monthKey(new Date(p.bucketStart), tz);
+    spendBy.set(key, (spendBy.get(key) ?? 0) + toAgorot(p.spendIls));
+  }
+  const rhythm = orderRhythm(s?.orderSchedule ?? null, (s?.deliverySchedule as DeliveryScheduleLike) ?? null, now, tz);
+  const due = await openOrdersDue(db, restaurantId, now, tz, supplierId);
   return {
     supplierId,
     window,
@@ -156,7 +235,8 @@ export async function computeSupplierOverview(
     leakCount: l?.count ?? 0,
     openAgorot: toAgorot(o?.leakIls ?? 0),
     openCount: o?.count ?? 0,
-    rhythm: orderRhythm(s?.orderSchedule ?? null, (s?.deliverySchedule as DeliveryScheduleLike) ?? null, now, tz),
+    rhythm,
+    nextDelivery: nextDelivery(due.get(supplierId) ?? null, rhythm, (s?.deliverySchedule as DeliveryScheduleLike) ?? null, now, tz),
     spend: lastMonths(now, tz, 6).map((month) => ({ month, agorot: spendBy.get(month) ?? 0 })),
     lastInvoices: rowsOf(lastRes).map((r) => ({
       id: String(r.id),
@@ -166,6 +246,10 @@ export async function computeSupplierOverview(
       status: String(r.status),
     })),
   };
+}
+
+function monthKey(at: Date, tz: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit' }).format(at).slice(0, 7);
 }
 
 /** 'YYYY-MM' keys of the last `n` months on the restaurant clock, oldest first. */
@@ -187,14 +271,19 @@ export interface SupplierTableRow {
   name: string;
   nameEn: string | null;
   active: boolean;
-  /** Invoiced before VAT this restaurant month. */
+  /**
+   * Checked spend before VAT this restaurant month — computeLeakSummary's spend
+   * (no invoice awaiting its delivery-note link, no live duplicate copy), the
+   * same definition as the home and leak-hub spend.
+   */
   monthSpendAgorot: number;
   /** 90-day leak (same figure as the supplier page header). */
   leakAgorot: number;
   /** Open / escalated part of the 90-day leak. */
   openAgorot: number;
-  /** Start of the next delivery day (UTC ISO), from the order schedule. */
+  /** Start of the next delivery day (UTC ISO): open order → order schedule → saved delivery days. */
   nextDeliveryAt: string | null;
+  nextDeliveryTime: string | null;
   paymentTerms: string | null;
   contactWhatsapp: string | null;
 }
@@ -216,7 +305,7 @@ export async function computeSupplierTable(
 ): Promise<SupplierTable> {
   const now = opts.now ?? new Date();
   const window = supplierLeakWindow(now);
-  const [list, leak, open, tz, spendRes] = await Promise.all([
+  const [list, leak, open, tz] = await Promise.all([
     db
       .select({
         id: suppliers.id,
@@ -224,6 +313,7 @@ export async function computeSupplierTable(
         nameEn: suppliers.nameEn,
         active: suppliers.active,
         orderSchedule: suppliers.orderSchedule,
+        deliverySchedule: suppliers.deliverySchedule,
         paymentTerms: suppliers.paymentTerms,
         contactWhatsapp: suppliers.contactWhatsapp,
       })
@@ -237,18 +327,31 @@ export async function computeSupplierTable(
     computeLeakGrouped(db, restaurantId, leakSpec(window), 'supplier', 'off', 1000),
     computeLeakGrouped(db, restaurantId, leakSpec(window, undefined, true), 'supplier', 'off', 1000),
     restaurantTz(db, restaurantId),
-    db.execute(sql`
-      SELECT i.supplier_id AS sid, COALESCE(SUM(i.total_excl_vat), 0) AS total
-      FROM invoices i JOIN restaurants r ON r.id = i.restaurant_id
-      WHERE i.restaurant_id = ${restaurantId} AND i.supplier_id IS NOT NULL
-        AND date_trunc('month', COALESCE(i.invoice_date, i.created_at) AT TIME ZONE r.timezone)
-            = date_trunc('month', ${now.toISOString()}::timestamptz AT TIME ZONE r.timezone)
-      GROUP BY 1`),
+  ]);
+  // Spend per supplier with the leak views' own definition (one summary per
+  // supplier, in parallel, on the server).
+  const [spends, due] = await Promise.all([
+    Promise.all(
+      list.map((s) =>
+        computeLeakSummary(db, restaurantId, { period: 'this_month', filters: { supplierIds: [s.id] }, now }).then(
+          (h) => [s.id, toAgorot(h.spendIls)] as const,
+        ),
+      ),
+    ),
+    openOrdersDue(db, restaurantId, now, tz),
   ]);
   const leakBy = byKey(leak);
   const openBy = byKey(open);
-  const spendBy = new Map(rowsOf(spendRes).map((r) => [String(r.sid), toAgorot(Number(r.total))]));
-  const rows: SupplierTableRow[] = list.map((s) => ({
+  const spendBy = new Map(spends);
+  const rows: SupplierTableRow[] = list.map((s) => {
+    const next = nextDelivery(
+      due.get(s.id) ?? null,
+      orderRhythm(s.orderSchedule, null, now, tz),
+      (s.deliverySchedule as DeliveryScheduleLike) ?? null,
+      now,
+      tz,
+    );
+    return {
     supplierId: s.id,
     name: s.name,
     nameEn: s.nameEn,
@@ -256,10 +359,12 @@ export async function computeSupplierTable(
     monthSpendAgorot: spendBy.get(s.id) ?? 0,
     leakAgorot: toAgorot(leakBy.get(s.id)?.leakIls ?? 0),
     openAgorot: toAgorot(openBy.get(s.id)?.leakIls ?? 0),
-    nextDeliveryAt: orderRhythm(s.orderSchedule, null, now, tz)?.deliveryAt ?? null,
+    nextDeliveryAt: next?.at ?? null,
+    nextDeliveryTime: next?.time ?? null,
     paymentTerms: s.paymentTerms,
     contactWhatsapp: s.contactWhatsapp,
-  }));
+    };
+  });
   rows.sort((a, b) => b.leakAgorot - a.leakAgorot || a.name.localeCompare(b.name, 'he'));
   const totals = rows.reduce(
     (t, r) => ({

@@ -99,7 +99,6 @@ describe('registry (pure)', () => {
         'orderReminders',
         'supplierDelays',
         'eveningDigest',
-        'receiverBrief',
         'matchAlerts',
         'recoveryBookkeeper',
         'chaseAcknowledged',
@@ -125,13 +124,26 @@ describe('registry (pure)', () => {
     }
   });
 
-  it('the receiver brief carries no ₪, and no receiver row carries ₪; chef rows only on orders', () => {
-    const brief = AUTOMATIONS.find((a) => a.key === 'receiverBrief')!;
-    expect(brief.carriesIls).toBe(false);
+  it('no receiver row carries ₪; chef rows only on orders (A5 reaches the chef)', () => {
+    expect(AUTOMATIONS.find((a) => a.key === 'orderReminders')!.audience).toContain('chef');
     for (const a of AUTOMATIONS) {
       if (a.audience.includes('receiver')) expect(a.carriesIls).toBe(false);
       if (a.audience.includes('chef')) expect(a.key).toMatch(/^order/);
     }
+  });
+
+  it('Train C (C3): the registry only offers switches a job honours', () => {
+    // receiverBrief has no sender yet → no row; its option key stays readable.
+    expect(AUTOMATIONS.map((a) => a.key)).not.toContain('receiverBrief');
+    expect(automationOption({}, 'receiverBrief')).toBe(true);
+    // endOfDayReport / supplierDelays do not read their option yet → "always", no switch.
+    for (const k of ['eveningDigest', 'supplierDelays']) {
+      expect(AUTOMATIONS.find((a) => a.key === k)!.control).toEqual({ kind: 'always' });
+    }
+    // orderReminders honours its option (briefOptionOn) and dedupes on au:A5:.
+    const a5 = AUTOMATIONS.find((a) => a.key === 'orderReminders')!;
+    expect(a5.control).toMatchObject({ kind: 'option', option: 'orderReminders' });
+    expect(a5.outboxMatch).toEqual({ kind: 'prefix', prefix: 'au:A5:' });
   });
 
   it('chaseAcknowledged and recoveryBookkeeper default on (AD5, AD6)', () => {
@@ -194,10 +206,10 @@ describe('automations.setEnabled', () => {
   });
 
   it('stores an option under settings.automations', async () => {
-    await caller(A).automations.setEnabled({ key: 'eveningDigest', on: false, clientMutationId: randomUUID() });
+    await caller(A).automations.setEnabled({ key: 'orderReminders', on: false, clientMutationId: randomUUID() });
     const s = await settingsOf(A);
-    expect(s.automations).toEqual({ eveningDigest: false });
-    expect(automationOption(s, 'eveningDigest')).toBe(false);
+    expect(s.automations).toEqual({ orderReminders: false });
+    expect(automationOption(s, 'orderReminders')).toBe(false);
     expect(s.features).toBeUndefined();
   });
 
@@ -242,8 +254,8 @@ describe('automations.list', () => {
       { dedupeKey: `eod-report:${A.restaurantId}:2026-11-04:c@x`, createdAt: '2026-11-04T17:00:02Z' },
       { dedupeKey: `eod-report:${A.restaurantId}:2026-10-31:a@x`, createdAt: '2026-10-31T17:00:00Z' },
       // order reminder (2 suppliers, same day = 1 run) and late truck rows on their own rows
-      { dedupeKey: `supplier:${randomUUID()}:order-reminder:2026-11-03:a@x`, createdAt: '2026-11-03T07:00:00Z' },
-      { dedupeKey: `supplier:${randomUUID()}:order-reminder:2026-11-03:a@x`, createdAt: '2026-11-03T07:00:00Z' },
+      { dedupeKey: `au:A5:${A.restaurantId}:${randomUUID()}:${randomUUID()}:2026-11-03`, createdAt: '2026-11-03T07:00:00Z' },
+      { dedupeKey: `au:A5:${A.restaurantId}:${randomUUID()}:${randomUUID()}:2026-11-03`, createdAt: '2026-11-03T07:00:00Z' },
       { dedupeKey: `po:${randomUUID()}:late:d1:a@x`, createdAt: '2026-11-02T08:00:00Z' },
       // a PO "placed" send is counted on neither row
       { dedupeKey: `po:${randomUUID()}:placed`, createdAt: '2026-11-02T09:00:00Z' },
@@ -262,7 +274,7 @@ describe('automations.list', () => {
     // never ran → lastRunAt null (UI: "עוד לא רץ"), not a fake 0 date
     expect(rows.priceAlerts).toMatchObject({ lastRunAt: null, countThisWeek: 0, measured: true });
     // no reliable matcher → "עוד לא נמדד"
-    expect(rows.receiverBrief).toMatchObject({ measured: false, lastRunAt: null, countThisWeek: null });
+    expect(rows.recoveryBookkeeper).toMatchObject({ measured: false, lastRunAt: null, countThisWeek: null });
   });
 
   it('flag rows follow featureEnabled; options default on; orderCapture is blocked without WhatsApp ingest', async () => {
@@ -274,7 +286,8 @@ describe('automations.list', () => {
     const by = Object.fromEntries(rows.map((r) => [r.key, r]));
     expect(by.priceAlerts).toMatchObject({ on: true, controllable: true, kind: 'flag' });
     expect(by.recovery).toMatchObject({ on: false, controllable: true });
-    expect(by.eveningDigest).toMatchObject({ on: true, controllable: true, kind: 'option' });
+    expect(by.orderReminders).toMatchObject({ on: true, controllable: true, kind: 'option' });
+    expect(by.eveningDigest).toMatchObject({ on: true, controllable: false, kind: 'always', controlKey: null });
     expect(by.orderCapture).toMatchObject({ on: false, controllable: false, blockedBy: 'ingestWhatsapp' });
   });
 
