@@ -38,10 +38,12 @@ describe('search.global — roles, orders and recipes (W3-04)', () => {
   });
 
   it('owner finds orders by supplier name and recipes by name, own tenant only', async () => {
-    const byName = await callerFor(A, 'owner').search.global({ q: A.supplierName });
-    expect(byName.orders.map((o) => o.id)).toContain(A.poId);
-    expect(byName.orders.map((o) => o.id)).not.toContain(B.poId);
-    expect(byName.orders.every((o) => o.supplierName === A.supplierName)).toBe(true);
+    // 'ספק' matches BOTH tenants' suppliers ('ספק A' / 'ספק B'): A must still get only its own POs.
+    const shared = await callerFor(A, 'owner').search.global({ q: 'ספק' });
+    expect(shared.orders.map((o) => o.id)).toContain(A.poId);
+    expect(shared.orders.map((o) => o.id)).not.toContain(B.poId);
+    expect(shared.orders.every((o) => o.supplierName === A.supplierName)).toBe(true);
+    expect(shared.suppliers.map((s) => s.id)).not.toContain(B.supplierId);
 
     const rec = await callerFor(A, 'owner').search.global({ q: 'שקשוקה' });
     expect(rec.recipes.map((r) => r.name)).toEqual(['שקשוקה A']);
@@ -72,12 +74,21 @@ describe('search.global — roles, orders and recipes (W3-04)', () => {
   });
 
   it('no result row carries a ₪ field, for any role', async () => {
+    // One query per kind-bearing word, so order AND recipe rows are both inspected.
+    let inspected = 0;
     for (const role of Object.keys(SEARCH_KINDS) as Session['role'][]) {
-      const out = await callerFor(A, role).search.global({ q: A.supplierName });
-      for (const rows of Object.values(out)) {
-        for (const row of rows)
-          expect(Object.keys(row).filter((k) => MONEY_KEYS.test(k))).toEqual([]);
+      for (const q of [A.supplierName, 'שקשוקה']) {
+        const out = await callerFor(A, role).search.global({ q });
+        for (const rows of Object.values(out)) {
+          for (const row of rows) {
+            inspected += 1;
+            expect(Object.keys(row).filter((k) => MONEY_KEYS.test(k))).toEqual([]);
+          }
+        }
       }
     }
+    const owner = await callerFor(A, 'owner').search.global({ q: 'שקשוקה' });
+    expect(owner.recipes.length).toBeGreaterThan(0);
+    expect(inspected).toBeGreaterThan(0);
   });
 });

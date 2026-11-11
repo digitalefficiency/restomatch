@@ -119,7 +119,11 @@ export const searchRouter = router({
                 expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
               })
               .from(purchaseOrders)
-              .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
+              .innerJoin(
+                suppliers,
+                // Supplier of the same restaurant only (purchase_orders.supplier_id is not tenant-composite).
+                and(eq(suppliers.id, purchaseOrders.supplierId), eq(suppliers.restaurantId, rid)),
+              )
               .where(
                 and(
                   eq(purchaseOrders.restaurantId, rid),
