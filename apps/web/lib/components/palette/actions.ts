@@ -26,7 +26,7 @@ export function defaultActions(c: PaletteCopy): PaletteAction[] {
       id: 'claims',
       label: c.actions.claims,
       href: '/dashboard/recovery',
-      keywords: ['זיכוי', 'claim', 'credit'],
+      keywords: ['זיכוי', 'בקשה', 'דרישה', 'דרישות', 'claim', 'credit', 'request'],
       money: true,
     },
     {

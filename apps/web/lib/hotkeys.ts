@@ -36,7 +36,7 @@ const GO: ReadonlyArray<[letter: string, href: string, he: string, en: string]> 
   ['A', '/dashboard/approvals', 'אישורים', 'Approvals'],
   ['I', '/dashboard/invoices', 'חשבוניות', 'Invoices'],
   ['L', '/dashboard/leaks', 'דליפה', 'Leak'],
-  ['C', '/dashboard/recovery', 'דרישות זיכוי', 'Credit claims'],
+  ['C', '/dashboard/recovery', 'בקשות זיכוי', 'Credit requests'],
   ['S', '/dashboard/suppliers', 'ספקים', 'Suppliers'],
   ['O', '/dashboard/orders', 'הזמנות', 'Orders'],
   ['R', '/dashboard/receiving', 'קבלת סחורה', 'Receiving'],

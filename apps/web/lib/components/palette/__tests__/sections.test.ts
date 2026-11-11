@@ -165,3 +165,13 @@ describe('frecency', () => {
     expect(() => saveRecents(throwing, list)).not.toThrow();
   });
 });
+
+describe('owner decision 7.11: "בקשות זיכוי"', () => {
+  it('labels the claims action with the new word and still finds it by the old one', () => {
+    const acts = defaultActions(paletteCopy.he);
+    expect(acts.find((a) => a.id === 'claims')?.label).toBe('בקשות זיכוי לשליחה');
+    const found = (q: string) => flatItems(buildPaletteSections(base(`>${q}`))).map((i) => i.id);
+    expect(found('דרישה')).toContain('claims');
+    expect(found('בקשות')).toContain('claims');
+  });
+});
