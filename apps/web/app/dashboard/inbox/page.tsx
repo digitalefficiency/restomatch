@@ -92,6 +92,7 @@ export default async function InboxPage({
               invoiceId: d.invoiceId,
               stored: d.stored,
               ocr: d.ocr ?? null,
+              docTypeSuggestion: d.docTypeSuggestion,
             })),
           }),
         )}
