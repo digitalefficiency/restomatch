@@ -4,13 +4,13 @@ import type { he } from './he';
 export const en: Shape<typeof he> = {
   page: {
     title: 'Automations',
-    subtitle: 'What runs for you, when and for whom. Every change is logged.',
-    readOnly: 'Only the owner can switch these on or off. You can see their state.',
+    subtitle: 'What runs for you, when and for whom, and every change is logged.',
+    readOnly: 'Only the owner can switch these on or off.',
     forbiddenTitle: 'The ‘Automations’ screen is not open to your role',
     forbiddenAllowed: 'This screen is available to: {roles}.',
     back: 'Back to settings',
     adminTitle: 'Automations (read-only)',
-    adminHint: 'What the owner sees. Flags change only in the features panel.',
+    adminHint: 'What the owner sees, and flags change only in the features panel.',
   },
   row: {
     what: 'What it does',
@@ -94,7 +94,7 @@ export const en: Shape<typeof he> = {
     },
     chaseAcknowledged: {
       name: 'Gentle reminder to a supplier who agreed',
-      what: 'A supplier agreed to a credit request but has not sent the credit invoice: a reminder draft is ready, you send it.',
+      what: 'Supplier agreed to a credit request, no credit invoice yet: draft ready.',
       when: 'Every day at 08:30',
     },
     orderCapture: {
