@@ -91,7 +91,7 @@ export const en: Shape<typeof he> = {
     unsentCta: 'Send the claims',
     waiting: '{count} with no reply for {days}+ days · {amount}',
     waitingCta: 'Draft reminders to suppliers',
-    reminderNote: 'The automatic reminder reaches you only. For the supplier you get a draft, sent only when you click.',
+    reminderNote: 'Nothing reaches the supplier until you press send.',
   },
   countdown: {
     left: '{days} days left · by {date}',
