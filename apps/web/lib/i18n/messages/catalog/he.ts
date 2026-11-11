@@ -200,7 +200,7 @@ export const he = {
     viewSupplier: 'לכרטיס הספק',
     another: 'ייבוא נוסף',
     readFailed: 'קריאת הקובץ נכשלה.',
-    tooBig: 'הקובץ גדול מדי. פצלו אותו או שמרו כ-CSV.',
+    tooBig: 'הקובץ גדול מ-9MB. פצלו אותו או שמרו כ-CSV.',
     unsupportedType: 'סוג קובץ לא נתמך. העלו ‎.xlsx או ‎.csv.',
     errors: {
       TOO_LARGE: 'הקובץ גדול מדי. פצלו אותו או שמרו כ-CSV.',

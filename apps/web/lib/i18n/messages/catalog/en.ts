@@ -199,7 +199,7 @@ export const en: Shape<typeof he> = {
     viewSupplier: 'Open supplier',
     another: 'Import another',
     readFailed: 'Couldn’t read the file.',
-    tooBig: 'The file is too large. Split it or save it as CSV.',
+    tooBig: 'The file is larger than 9 MB. Split it or save it as CSV.',
     unsupportedType: 'Unsupported file type. Upload .xlsx or .csv.',
     errors: {
       TOO_LARGE: 'The file is too large. Split it or save it as CSV.',
