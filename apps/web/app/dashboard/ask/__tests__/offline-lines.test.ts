@@ -13,7 +13,7 @@ vi.mock('next/link', () => ({ default: () => null }));
 // module needs React in scope to load (nothing is rendered here).
 let offlineLines: typeof import('../ask-client').offlineLines;
 beforeAll(async () => {
-  (globalThis as { React?: typeof React }).React = React;
+  (globalThis as unknown as { React?: typeof React }).React = React;
   ({ offlineLines } = await import('../ask-client'));
 });
 
