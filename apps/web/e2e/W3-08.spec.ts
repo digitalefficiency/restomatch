@@ -71,7 +71,10 @@ test('three tabs, the number once, the month kept', async ({ page }) => {
   await expect(page.getByTestId('report-email-frame')).toBeVisible();
   await expect(page.getByTestId('report-whatsapp')).toBeVisible();
   await expect(page.getByTestId('report-copy-me')).toBeDisabled();
-  expect(errors).toEqual([]);
+  // The e-mail preview is an iframe with sandbox="" (no scripts, by design). Anything the dev
+  // server injects into frames is blocked there and logged; that block is the sandbox working.
+  const SANDBOX_BLOCK = /Blocked script execution in 'about:srcdoc' because the document's frame is sandboxed/;
+  expect(errors.filter((e) => !SANDBOX_BLOCK.test(e))).toEqual([]);
 });
 
 test('the old digest page answers 308 to the sent tab', async ({ page }) => {
