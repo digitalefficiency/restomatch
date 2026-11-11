@@ -4,7 +4,7 @@
  */
 export const he = {
   title: 'ספקים',
-  subtitle: 'הקמת ספקים, פרטי קשר ותנאי תשלום — והדירוג שמראה אצל מי הכי הרבה פערים.',
+  subtitle: 'ספקים, פרטי קשר ותנאי תשלום, והדירוג שמראה אצל מי הכי הרבה פערים.',
   tabs: {
     label: 'תצוגת ספקים',
     manage: 'ניהול ספקים',
@@ -171,6 +171,7 @@ export const he = {
     open: 'פתוח לבקשת זיכוי',
     openLines: '{count} שורות שטרם טופלו',
     claimsCta: 'למכתבי בקשת הזיכוי',
+    orderWord: 'הזמנה',
     request: 'בקשת זיכוי',
     scorecard: 'כרטיס ספק — 90 יום',
     noScorecard: 'כרטיס הספק זמין בחבילה המתקדמת.',
@@ -249,8 +250,9 @@ export const he = {
     rhythmTitle: 'קצב הזמנות',
     rhythm: 'הזמנה עד {cutoff} (בעוד {left}) · משלוח {delivery}',
     rhythmNone: 'לא הוגדר לוח הזמנות לספק הזה.',
+    nextDelivery: 'משלוח הבא: {delivery}',
     rhythmSet: 'להגדרת ימים ושעות',
-    spendTitle: 'רכש ב-6 החודשים האחרונים (לפני מע״מ)',
+    spendTitle: 'רכש שנבדק ב-6 החודשים האחרונים (לפני מע״מ)',
     spendAria: 'רכש חודשי מהספק, מ-{from} עד {to}: {values}.',
     lastInvoicesTitle: '5 החשבוניות האחרונות',
     noInvoices: 'עוד לא התקבלו חשבוניות מהספק הזה.',
@@ -262,15 +264,15 @@ export const he = {
     caption: 'טבלת ספקים',
     tab: 'טבלת ספקים',
     supplier: 'ספק',
-    monthSpend: 'רכש החודש',
+    monthSpend: 'רכש שנבדק החודש',
     leak: 'דליפה (90 יום)',
-    open: 'פתוח לדרישה',
+    open: 'פתוח לבקשה',
     nextDelivery: 'משלוח הבא',
     terms: 'תנאי תשלום',
     totals: 'סה״כ',
     inactive: 'לא פעיל',
     none: '—',
-    summary: 'רכש החודש {spend} · דליפה 90 יום {leak} · פתוח לדרישה {open}',
+    summary: 'רכש שנבדק החודש {spend} (לפני מע״מ, כמו במסך הבית) · דליפה 90 יום {leak} · פתוח לבקשה {open}',
   },
   terms: {
     label: 'תנאי תשלום',
@@ -297,6 +299,6 @@ export const he = {
   },
   bizId: {
     bizLength: 'ח״פ צריך 9 ספרות',
-    bizCheck: 'ח״פ לא תקין — בדקו את הספרות',
+    bizCheck: 'ח״פ לא תקין, בדקו את הספרות',
   },
 };

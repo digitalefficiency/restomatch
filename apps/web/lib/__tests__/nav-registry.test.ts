@@ -211,14 +211,14 @@ describe('ROUTE_ROLES generated from the registry', () => {
     expect([...(chainMatrix ?? [])].sort()).toEqual(['bookkeeper', 'owner']);
     // AU-01 (new page, orchestrator 7.11): narrower than its /settings parent — no receiver, no chef.
     expect(automations).toEqual(['owner', 'manager', 'bookkeeper']);
+    // AU-06, owner decision I3: the bookkeeper reads Ask (read-only tools; never receiver or chef).
+    expect(askBefore).toEqual(['owner', 'manager']);
+    expect(ask).toEqual(['owner', 'manager', 'bookkeeper']);
     // Owner decision I3 (7.11): the bookkeeper reads "דוח החודש" (W3-08); receiver and chef still never.
     for (const p of REPORTS) {
       expect(ROUTE_ROLES_BEFORE[p]).toEqual(['owner', 'manager']);
       expect(ROUTE_ROLES[p]).toEqual(['owner', 'manager', 'bookkeeper']);
     }
-    // AU-06, owner decision I3: the bookkeeper reads Ask (read-only tools; never receiver or chef).
-    expect(askBefore).toEqual(['owner', 'manager']);
-    expect(ask).toEqual(['owner', 'manager', 'bookkeeper']);
     // The printable leak report keeps inheriting /leaks (no silent bounce for the bookkeeper's button).
     expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
     expect(allowedRolesForPath('/dashboard/leaks/report')).toContain('bookkeeper');

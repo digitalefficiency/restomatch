@@ -18,6 +18,7 @@ export interface VendorRow {
   leakAgorot: number;
   openAgorot: number;
   nextDeliveryAt: string | null;
+  nextDeliveryTime?: string | null;
   paymentTerms: string | null;
 }
 
@@ -74,7 +75,10 @@ export function VendorTable({ rows, totals }: { rows: VendorRow[]; totals: Vendo
       kind: 'date',
       sortable: true,
       value: (r) => (r.nextDeliveryAt ? new Date(r.nextDeliveryAt).getTime() : null),
-      cell: (r) => (r.nextDeliveryAt ? day.format(new Date(r.nextDeliveryAt)) : t('table.none')),
+      cell: (r) =>
+        r.nextDeliveryAt
+          ? `${day.format(new Date(r.nextDeliveryAt))}${r.nextDeliveryTime ? ` ${r.nextDeliveryTime}` : ''}`
+          : t('table.none'),
       exportValue: (r) => r.nextDeliveryAt?.slice(0, 10) ?? '',
     },
     {
