@@ -272,12 +272,15 @@ describe('consolidated.proposal — isolation (RLS app role)', () => {
     });
     try {
       const p = await caller(A).consolidated.proposal({ invoiceId: later!.id });
-      expect(p!.findings.filter((f) => f.countsAsLeak).map((f) => [f.type, f.deltaAmount, f.deliveryNoteNumber, f.alreadyBilledOn?.invoiceNumber])).toEqual([
-        ['QTY_OVER', 36, '9001', 'A-M-1'],
+      // G-04 §9 (owner 1.11): a T2 review item naming A's earlier ריכוז, never a leak finding.
+      expect(p!.reviewItems!.map((r) => [r.flag, r.amountIls, r.noteNumber, r.otherInvoice?.invoiceNumber])).toEqual([
+        ['note_billed_twice', 36, '9001', 'A-M-1'],
       ]);
-      // The earlier ריכוז keeps its own finding only.
+      expect(p!.findings.some((f) => f.countsAsLeak && f.alreadyBilledOn)).toBe(false);
+      // The earlier ריכוז is not flagged.
       const first = await caller(A).consolidated.proposal({ invoiceId: itemizedId });
       expect(first!.findings.every((f) => f.alreadyBilledOn === null)).toBe(true);
+      expect(first!.reviewItems!.some((r) => r.flag === 'note_billed_twice')).toBe(false);
     } finally {
       await ownerDb.delete(invoices).where(eq(invoices.id, later!.id));
     }

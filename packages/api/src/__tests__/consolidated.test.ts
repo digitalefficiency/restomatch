@@ -341,12 +341,16 @@ describe('buildConsolidatedProposal — #95 review (P1)', () => {
         [b.id, '9002'],
       ]),
     });
-    expect(p.findings.map((f) => [f.type, f.deltaAmount, f.deliveryNoteNumber, f.alreadyBilledOn?.invoiceNumber, f.countsAsLeak])).toEqual([
-      ['QTY_OVER', 20, '9002', 'BR-R-24100', true],
+    // G-04 §9 (owner 1.11): billed twice is a T2 REVIEW item with its whole amount here,
+    // naming that invoice — never a leak finding or a claim (README §13).
+    expect(p.reviewItems!.map((r) => [r.flag, r.tier, r.amountIls, r.noteNumber, r.otherInvoice?.invoiceNumber, r.blocksMatched])).toEqual([
+      ['note_billed_twice', 'T2', 20, '9002', 'BR-R-24100', true],
     ]);
-    expect(p.totals.leakIls).toBe(20);
-    expect(p.deliveryNotes.find((n) => n.number === '9002')).toMatchObject({ deltaIls: 20, alreadyBilledOn: { invoiceNumber: 'BR-R-24100' } });
-    expect(p.status).toBe('differences');
+    expect(p.findings.filter((f) => f.countsAsLeak)).toEqual([]);
+    expect(p.totals.leakIls).toBe(0);
+    expect(p.claim).toEqual({ exclIls: 0, inclIls: 0 });
+    expect(p.deliveryNotes.find((n) => n.number === '9002')).toMatchObject({ deltaIls: 0, alreadyBilledOn: { invoiceNumber: 'BR-R-24100' } });
+    expect(p.status).toBe('differences'); // a T2 item never reads "תואמת"
   });
 
   it('an invoice dated in the first days of a month without a stated period may bill the month before', () => {
@@ -472,16 +476,18 @@ describe('buildConsolidatedProposal — #95 verification (P3)', () => {
   };
 
   it('(6) billed twice only flags a note the invoice itself bills — never its PO value', () => {
-    expect(twice({ billIt: false }).findings.some((f) => f.alreadyBilledOn)).toBe(false);
-    expect(twice({ billIt: true }).findings.filter((f) => f.alreadyBilledOn).map((f) => f.deltaAmount)).toEqual([20]);
+    const billedTwice = (p: ReturnType<typeof twice>) => p.reviewItems!.filter((r) => r.flag === 'note_billed_twice');
+    expect(billedTwice(twice({ billIt: false }))).toEqual([]);
+    expect(billedTwice(twice({ billIt: true })).map((r) => r.amountIls)).toEqual([20]);
   });
 
   it('(3) a held duplicate claims the whole invoice once — no billed-twice lines on top; its basis is incl. VAT', () => {
     const p = twice({ billIt: true, duplicate: true });
-    expect(p.findings.some((f) => f.alreadyBilledOn)).toBe(false);
+    expect(p.reviewItems!.some((r) => r.flag === 'note_billed_twice')).toBe(false);
     const dup = p.findings.find((f) => f.type === 'DUPLICATE_INVOICE')!;
     expect(dup).toMatchObject({ basis: 'incl', countsAsLeak: true });
-    expect(twice({ billIt: true }).findings.find((f) => f.alreadyBilledOn)!.basis).toBe('excl');
+    // Without the duplicate the billed-twice note is a T2 review item and claims nothing (§9).
+    expect(twice({ billIt: true }).claim).toEqual({ exclIls: 0, inclIls: 0 });
   });
 
   it('(4) a note RANGE on a month line is pooled, not the first note', () => {

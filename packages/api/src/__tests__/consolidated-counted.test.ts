@@ -14,6 +14,7 @@ import {
 } from '@restomatch/db';
 import { claimSplit, consolidatedProposal, deliveryNoteNumberIn as reexported, readConsolidatedRaw } from '../match/consolidated';
 import { deliveryNoteNumberIn, deliveryNoteNumberSql, normalizeDeliveryNoteNumber } from '../match/receiptTruth';
+import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -104,14 +105,15 @@ async function setup(T: Tenant) {
     number: string,
     status: 'pending' | 'partial' | 'completed',
     lines: Array<{ productId: string; qty: string }>,
+    at: Date = D0,
   ) => {
     const [po] = await db
       .insert(purchaseOrders)
-      .values({ restaurantId: T.restaurantId, supplierId: s!.id, expectedDeliveryAt: D0, status: 'closed', source: 'platform' })
+      .values({ restaurantId: T.restaurantId, supplierId: s!.id, expectedDeliveryAt: at, status: 'closed', source: 'platform' })
       .returning();
     const [gr] = await db
       .insert(goodsReceipts)
-      .values({ restaurantId: T.restaurantId, poId: po!.id, receivedAt: D0, status, notes: `ת.מ. ${number}` })
+      .values({ restaurantId: T.restaurantId, poId: po!.id, receivedAt: at, status, notes: `ת.מ. ${number}` })
       .returning();
     for (const l of lines) {
       const [pl] = await db
@@ -122,7 +124,11 @@ async function setup(T: Tenant) {
     }
     return gr!.id;
   };
-  const consolidated = async (lines: Array<{ d: string; qty: number; price: number }>, listed: string[]) => {
+  const consolidated = async (
+    lines: Array<{ d: string; qty: number; price: number }>,
+    listed: string[],
+    opts: { number?: string; createdAt?: Date; extra?: Record<string, unknown> } = {},
+  ) => {
     const exclAg = lines.reduce((a, l) => a + Math.round(l.qty * l.price * 100), 0);
     const vatAg = Math.round(exclAg * 0.18);
     const [inv] = await db
@@ -130,7 +136,8 @@ async function setup(T: Tenant) {
       .values({
         restaurantId: T.restaurantId,
         supplierId: s!.id,
-        invoiceNumber: `R-${listed.join('-')}`,
+        invoiceNumber: opts.number ?? `R-${listed.join('-')}`,
+        ...(opts.createdAt ? { createdAt: opts.createdAt } : {}),
         invoiceDate: new Date('2026-06-30T09:00:00Z'),
         totalExclVat: (exclAg / 100).toFixed(2),
         vatAmount: (vatAg / 100).toFixed(2),
@@ -140,6 +147,7 @@ async function setup(T: Tenant) {
         ocrPayload: {
           provider: 'reconciled',
           raw: { kind: 'consolidated', periodStart: '2026-06-01', periodEnd: '2026-06-30', deliveryNotes: listed.map((number) => ({ number })) },
+          ...opts.extra,
         } as (typeof invoices.$inferInsert)['ocrPayload'],
       })
       .returning();
@@ -156,11 +164,11 @@ async function setup(T: Tenant) {
     }
     return inv!.id;
   };
-  return { milk, cream, note, consolidated };
+  return { supplierId: s!.id, milk, cream, note, consolidated };
 }
 
 describe('consolidatedProposal reads only closed receipts and counted lines', () => {
-  it('a closed note is cross-matched; a pending note and a missing one are pending (no claim ₪); an uncounted line is not "received 0"', async () => {
+  it('a closed note is cross-matched; a pending note is "not received yet", a note with no receipt is note_not_in_system (neither claimed); an uncounted line is not "received 0"', async () => {
     const T = await seedTenant(db, 'A');
     const { milk, cream, note, consolidated } = await setup(T);
     // 7701: closed, 4 kg milk counted; the cream line was never touched (0/0).
@@ -184,22 +192,25 @@ describe('consolidatedProposal reads only closed receipts and counted lines', ()
     expect(leak.map((f) => [f.type, f.deliveryNoteNumber, f.deltaAmount])).toEqual([['PRICE_HIGHER', '7701', 2]]);
     expect(p.claim).toEqual({ exclIls: 2, inclIls: 0 });
     expect(p.totals.leakIls).toBe(2);
-    // The two not-received notes: pending, never claimed.
-    expect(p.pendingNotes).toEqual([
-      { number: '7702', billedIls: 51 },
-      { number: '7703', billedIls: 42.5 },
-    ]);
+    // 7702 (a receipt still being counted): T4 pending, never claimed.
+    expect(p.pendingNotes).toEqual([{ number: '7702', billedIls: 51 }]);
     const pending = p.findings.filter((f) => f.notReceivedYet);
     expect(pending.length).toBeGreaterThan(0);
-    expect(pending.every((f) => !f.countsAsLeak)).toBe(true);
-    expect(new Set(pending.map((f) => f.deliveryNoteNumber))).toEqual(new Set(['7702', '7703']));
-    expect(pending.every((f) => f.productId === milk)).toBe(true);
+    expect(pending.every((f) => !f.countsAsLeak && f.deliveryNoteNumber === '7702' && f.productId === milk)).toBe(true);
+    // 7703 (no receipt in RestoMatch at all): §9 note_not_in_system — warn, blocks "תואמת", never claimed.
+    expect(p.reviewItems).toEqual([
+      { flag: 'note_not_in_system', tier: 'warn', noteNumber: '7703', amountIls: 42.5, otherInvoice: null, blocksMatched: true },
+    ]);
+    const missing = p.findings.filter((f) => f.noteNotInSystem);
+    expect(missing.length).toBeGreaterThan(0);
+    expect(missing.every((f) => !f.countsAsLeak && f.deliveryNoteNumber === '7703')).toBe(true);
   });
 
   it('a ריכוז billing its closed note at the PO price plus a not-yet-received note reads "matched", never a false alarm', async () => {
     const T = await seedTenant(db, 'A');
     const { milk, note, consolidated } = await setup(T);
     await note('7701', 'partial', [{ productId: milk, qty: '4' }]);
+    await note('7702', 'pending', [{ productId: milk, qty: '0' }]); // the truck is at the door
     const inv = await consolidated(
       [
         { d: 'ת.מ. 7701 · חלב', qty: 4, price: 8.5 },
@@ -211,6 +222,7 @@ describe('consolidatedProposal reads only closed receipts and counted lines', ()
     expect(p.findings.filter((f) => f.countsAsLeak)).toEqual([]);
     expect(p.claim).toEqual({ exclIls: 0, inclIls: 0 });
     expect(p.pendingNotes).toEqual([{ number: '7702', billedIls: 51 }]);
+    expect(p.reviewItems).toEqual([]);
     expect(p.status).toBe('matched');
   });
 
@@ -234,5 +246,99 @@ describe('consolidatedProposal reads only closed receipts and counted lines', ()
     expect(p.findings.filter((f) => f.countsAsLeak).map((f) => [f.type, f.deliveryNoteNumber, f.deltaAmount])).toEqual([
       ['QTY_OVER', '7702', 34],
     ]);
+  });
+});
+
+// ── G-04 §9 (owner decision 1.11): three consolidated flags — review items, never leak. ──
+describe('§9 consolidated flags', () => {
+  const items = (p: Awaited<ReturnType<typeof consolidatedProposal>>, flag: string) => p!.reviewItems!.filter((r) => r.flag === flag);
+
+  it('note_other_month: a listed note received outside the stated period is flagged (warn), ₪ as context only; an in-period note is not', async () => {
+    const T = await seedTenant(db, 'A');
+    const { milk, note, consolidated } = await setup(T);
+    await note('7801', 'completed', [{ productId: milk, qty: '4' }]); // 10.6: in the period
+    await note('7802', 'completed', [{ productId: milk, qty: '4' }], new Date('2026-07-05T09:00:00Z')); // 5.7: 5 days out
+    const inv = await consolidated(
+      [
+        { d: 'ת.מ. 7801 · חלב', qty: 4, price: 8.5 },
+        { d: 'ת.מ. 7802 · חלב', qty: 4, price: 8.5 },
+      ],
+      ['7801', '7802'],
+    );
+    const p = (await consolidatedProposal(db, T.restaurantId, inv))!;
+    expect(items(p, 'note_other_month')).toEqual([
+      { flag: 'note_other_month', tier: 'warn', noteNumber: '7802', amountIls: 34, otherInvoice: null, receivedOn: '2026-07-05', daysOutside: 5, blocksMatched: false },
+    ]);
+    // Context only: no leak, no claim, and it does not block "תואמת".
+    expect(p.totals.leakIls).toBe(0);
+    expect(p.claim).toEqual({ exclIls: 0, inclIls: 0 });
+    expect(p.status).toBe('matched');
+  });
+
+  it('note_other_month at the Asia/Jerusalem midnight edge: 00:30 on 1.7 is one day out (T4); 23:30 on 30.6 is inside', async () => {
+    const T = await seedTenant(db, 'A');
+    const { milk, note, consolidated } = await setup(T);
+    await note('7811', 'completed', [{ productId: milk, qty: '1' }], new Date('2026-06-30T20:30:00Z')); // 23:30 IL, 30.6
+    await note('7812', 'completed', [{ productId: milk, qty: '1' }], new Date('2026-06-30T21:30:00Z')); // 00:30 IL, 1.7
+    const inv = await consolidated(
+      [
+        { d: 'ת.מ. 7811 · חלב', qty: 1, price: 8.5 },
+        { d: 'ת.מ. 7812 · חלב', qty: 1, price: 8.5 },
+      ],
+      ['7811', '7812'],
+    );
+    const p = (await consolidatedProposal(db, T.restaurantId, inv))!;
+    expect(items(p, 'note_other_month').map((r) => [r.noteNumber, r.tier, r.receivedOn, r.daysOutside])).toEqual([['7812', 'T4', '2026-07-01', 1]]);
+  });
+
+  it('note_not_in_system: a note listed with no receipt blocks "תואמת" (₪ unknown when no line bills it); a note with a receipt is not flagged', async () => {
+    const T = await seedTenant(db, 'A');
+    const { milk, note, consolidated } = await setup(T);
+    await note('7821', 'completed', [{ productId: milk, qty: '4' }]);
+    const inv = await consolidated([{ d: 'ת.מ. 7821 · חלב', qty: 4, price: 8.5 }], ['7821', '007822']); // 7822: listed in the header only
+    const p = (await consolidatedProposal(db, T.restaurantId, inv))!;
+    expect(items(p, 'note_not_in_system')).toEqual([
+      { flag: 'note_not_in_system', tier: 'warn', noteNumber: '7822', amountIls: null, otherInvoice: null, blocksMatched: true },
+    ]);
+    expect(p.totals.leakIls).toBe(0);
+    expect(p.status).toBe('differences'); // blocked, though nothing differs in ₪
+  });
+
+  it('note_billed_twice: a month-total line (no note number) billed again by a later ריכוז of the same supplier and period → T2 with the overlapping ₪, never leak; the earlier one is not flagged', async () => {
+    const T = await seedTenant(db, 'A');
+    const { milk, note, consolidated } = await setup(T);
+    await note('7831', 'completed', [{ productId: milk, qty: '20' }]);
+    const month = [{ d: 'חלב · סה״כ חודש יוני', qty: 20, price: 8.5 }];
+    const first = await consolidated(month, [], { number: 'R-JUN-A', createdAt: new Date('2026-07-01T08:00:00Z') });
+    const second = await consolidated(month, [], { number: 'R-JUN-B', createdAt: new Date('2026-07-02T08:00:00Z') });
+    const p2 = (await consolidatedProposal(db, T.restaurantId, second))!;
+    expect(items(p2, 'note_billed_twice')).toEqual([
+      { flag: 'note_billed_twice', tier: 'T2', noteNumber: null, amountIls: 170, otherInvoice: { invoiceId: first, invoiceNumber: 'R-JUN-A' }, blocksMatched: true },
+    ]);
+    expect(p2.claim.exclIls + p2.claim.inclIls).toBe(0); // the overlap is never claimed through the leak
+    expect(items((await consolidatedProposal(db, T.restaurantId, first))!, 'note_billed_twice')).toEqual([]);
+  });
+
+  it('note_billed_twice negative: a later ריכוז of the same period billing a DIFFERENT month total is not a duplicate', async () => {
+    const T = await seedTenant(db, 'A');
+    const { milk, note, consolidated } = await setup(T);
+    await note('7841', 'completed', [{ productId: milk, qty: '20' }]);
+    await consolidated([{ d: 'חלב · סה״כ חודש יוני', qty: 20, price: 8.5 }], [], { number: 'R-JUN-A', createdAt: new Date('2026-07-01T08:00:00Z') });
+    const second = await consolidated([{ d: 'חלב · תוספת', qty: 3, price: 8.5 }], [], { number: 'R-JUN-B', createdAt: new Date('2026-07-02T08:00:00Z') });
+    expect(items((await consolidatedProposal(db, T.restaurantId, second))!, 'note_billed_twice')).toEqual([]);
+  });
+
+  it('a ח.פ.-mismatch consolidated invoice stays out of single-PO matching', async () => {
+    const T = await seedTenant(db, 'A');
+    const { supplierId, milk, consolidated } = await setup(T);
+    // An open PO of the supplier right in the invoice's window would attract it if it were single-PO matched.
+    const [po] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId: T.restaurantId, supplierId, expectedDeliveryAt: new Date('2026-06-30T09:00:00Z'), status: 'sent', source: 'manual' })
+      .returning();
+    await db.insert(poLines).values({ poId: po!.id, productId: milk, rawDescription: 'x', qtyOrdered: '4', unit: 'kg', unitPriceExpected: '8.5' });
+    const inv = await consolidated([{ d: 'חלב', qty: 4, price: 8.5 }], [], { number: 'R-BIZ', extra: { reviewReasons: ['supplier_id_mismatch'] } });
+    expect(await buildMatchInputForInvoice(db, T.restaurantId, inv)).toBeNull();
+    expect(await buildMatchInputForInvoice(db, T.restaurantId, inv, { pinnedPoId: po!.id })).toBeNull();
   });
 });

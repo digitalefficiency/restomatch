@@ -27,6 +27,7 @@ import {
 import { claimableLines, sumClaims, vatBasisOf, type VatBasis } from '../lib/claims';
 import { addCalendarDaysInTz, startOfDayInTz } from '../lib/time';
 import { buildMatchInputForInvoice } from './buildMatchInput';
+import { localDateKey } from '../contracts/core';
 import {
   closedReceiptSql,
   countedLineSql,
@@ -161,6 +162,38 @@ export interface ProposalFinding {
    * yet" — T4 pending, never a claimable shortfall (countsAsLeak is false).
    */
   notReceivedYet?: boolean;
+  /** The line names a note with no receipt in RestoMatch at all (§9 note_not_in_system): reviewed, never claimed. */
+  noteNotInSystem?: boolean;
+}
+
+/**
+ * G-04 §9 (owner decision 1.11): review flags on a consolidated invoice. Review items on
+ * the proposal, never a DiscrepancyType; their ₪ is context and never sums into the leak.
+ */
+export type ConsolidatedFlag = 'note_other_month' | 'note_not_in_system' | 'note_billed_twice';
+
+/** The panel copy for each flag (he); W2-02 renders it. */
+export const CONSOLIDATED_FLAG_COPY: Record<ConsolidatedFlag, string> = {
+  note_other_month: 'תעודת משלוח מחודש אחר',
+  note_not_in_system: 'תעודה שלא נקלטה במערכת',
+  note_billed_twice: 'אפשר שחויב פעמיים',
+};
+
+export interface ConsolidatedReviewItem {
+  flag: ConsolidatedFlag;
+  /** T2 act-now (billed twice) · warn · T4 neutral (a one-day gap at the period edge). */
+  tier: 'T2' | 'warn' | 'T4';
+  /** The delivery note, or null for a month-total line (no note number). */
+  noteNumber: string | null;
+  /** Context ₪ at line precision (2 dp), never leak: the note's value, the ₪ billed on it, or the overlap. */
+  amountIls: number | null;
+  /** note_billed_twice: the other invoice that already bills it. */
+  otherInvoice: OtherInvoice | null;
+  /** note_other_month: the receipt's Israel day (YYYY-MM-DD) and how many days it lies outside the period. */
+  receivedOn?: string;
+  daysOutside?: number;
+  /** The invoice cannot read "תואמת" while this item stands. */
+  blocksMatched: boolean;
 }
 
 export interface ConsolidatedProposal {
@@ -189,6 +222,8 @@ export interface ConsolidatedProposal {
    * (not received, or still being counted): pending, never a leak. Σ billed before VAT.
    */
   pendingNotes?: Array<{ number: string; billedIls: number }>;
+  /** G-04 §9 review items (other month · not in the system · billed twice). */
+  reviewItems?: ConsolidatedReviewItem[];
   /** matched = nothing counts as leak; differences = something does; no_delivery_notes = nothing to cross-match. */
   status: 'matched' | 'differences' | 'no_delivery_notes';
 }
@@ -335,6 +370,12 @@ export function buildConsolidatedProposal(args: {
    * received yet, or still being counted): those lines are pending, never a leak.
    */
   pendingNoteNumbers?: ReadonlySet<string>;
+  /** Note numbers the invoice lists or its lines name that have NO receipt in RestoMatch at all (§9). */
+  missingNoteNumbers?: ReadonlySet<string>;
+  /** §9 note_other_month: listed notes whose closed receipt's Israel day lies outside the stated period. */
+  otherMonthNotes?: ReadonlyArray<{ number: string; receivedOn: string; daysOutside: number }>;
+  /** §9 note_billed_twice for month-total lines: overlap with an earlier consolidated invoice of the same period. */
+  monthTotalOverlaps?: ReadonlyArray<{ otherInvoice: OtherInvoice; amountIls: number }>;
   /** Display names for invoice-only products (not on any delivery note). */
   productNames?: Map<string, { name: string | null; nameEn: string | null }>;
 }): ConsolidatedProposal {
@@ -351,9 +392,10 @@ export function buildConsolidatedProposal(args: {
   const noteProducts = new Set(notes.flatMap((n) => (n.number ? n.lines.map((l) => `${n.number}|${productKey(l)}`) : [])));
   const pendingNumbers = args.pendingNoteNumbers ?? new Set<string>();
   /** The note a line names when that note has no closed receipt yet (else null). */
+  const missingNumbers = args.missingNoteNumbers ?? new Set<string>();
   const pendingNoteOf = (il: InvoiceLineInput) => {
     const n = lineNotes.get(il.id);
-    return n && !noteNumbers.has(n) && pendingNumbers.has(n) ? n : null;
+    return n && !noteNumbers.has(n) && (pendingNumbers.has(n) || missingNumbers.has(n)) ? n : null;
   };
   const bucketOfLine = (il: InvoiceLineInput) => {
     const pending = pendingNoteOf(il);
@@ -557,6 +599,8 @@ export function buildConsolidatedProposal(args: {
   // note, naming the other invoice; the note's own line findings are folded into it.
   const twiceNotes = new Map(notes.filter((n) => n.number && n.alreadyBilledOn).map((n) => [n.number!, n]));
   type TwiceFinding = Discrepancy & { alreadyBilledOn: OtherInvoice; noteNumber: string };
+  // §9 (owner 1.11): billed twice is a T2 REVIEW item ("אפשר שחויב פעמיים · ₪X"),
+  // never a leak finding or a claim — it enters the leak only via a human engine PR.
   const twiceFindings: TwiceFinding[] = [];
   for (const [number, n] of twiceNotes) {
     const itemizedAg = [...lineGroups.entries()]
@@ -598,8 +642,10 @@ export function buildConsolidatedProposal(args: {
   // are not ALSO billed twice, line by line — one problem, one amount.
   const heldDuplicate = engineFindings.some((d) => d.type === 'DUPLICATE_INVOICE' && countsAsLeak(d));
   const isPending = (d: Discrepancy) => !!d.invoiceLineId && pendingLineIds.has(d.invoiceLineId);
-  const findings: ProposalFinding[] = [...engineFindings, ...pooledFindings, ...(heldDuplicate ? [] : twiceFindings)].map((d) => {
+  const isMissing = (d: Discrepancy) => !!d.invoiceLineId && missingNumbers.has(noteOfInvoiceLine.get(d.invoiceLineId) ?? '');
+  const findings: ProposalFinding[] = [...engineFindings, ...pooledFindings].map((d) => {
     const pending = isPending(d);
+    const missing = pending && isMissing(d);
     // The engine saw a pending line without its product (so it could not pair it); restore it.
     const productId = d.productId ?? (pending ? (lineById.get(d.invoiceLineId!)?.productId ?? null) : null);
     const deliveryNoteNumber = (d as Partial<TwiceFinding>).noteNumber ?? noteOf(d) ?? null;
@@ -621,7 +667,7 @@ export function buildConsolidatedProposal(args: {
     // Not received yet is pending (T4), never a leak or a claim.
     countsAsLeak: !pending && countsAsLeak(d) && (!heldDuplicate || d.type === 'DUPLICATE_INVOICE'),
     key: [d.type, deliveryNoteNumber ?? POOL, productId ?? '', d.poLineId ?? '', d.invoiceLineId ?? ''].join('|'),
-    ...(pending ? { notReceivedYet: true } : {}),
+    ...(missing ? { noteNotInSystem: true } : pending ? { notReceivedYet: true } : {}),
     };
   });
 
@@ -734,6 +780,48 @@ export function buildConsolidatedProposal(args: {
     pendingAg.set(n, (pendingAg.get(n) ?? 0) + ag(l.lineTotal));
   }
   const pendingTotalAg = [...pendingAg.values()].reduce((a, b) => a + b, 0);
+
+  // ── §9 review items. ──
+  const valueOfNote = new Map(deliveryNotes.filter((n) => n.number).map((n) => [n.number!, n.receivedValueIls]));
+  const reviewItems: ConsolidatedReviewItem[] = [
+    ...[...missingNumbers].sort().map((number) => ({
+      flag: 'note_not_in_system' as const,
+      tier: 'warn' as const,
+      noteNumber: number,
+      amountIls: pendingAg.has(number) ? ils(pendingAg.get(number)!) : null,
+      otherInvoice: null,
+      blocksMatched: true,
+    })),
+    ...(args.otherMonthNotes ?? []).map((o) => ({
+      flag: 'note_other_month' as const,
+      tier: o.daysOutside <= 1 ? ('T4' as const) : ('warn' as const),
+      noteNumber: o.number,
+      amountIls: valueOfNote.get(o.number) ?? null,
+      otherInvoice: null,
+      receivedOn: o.receivedOn,
+      daysOutside: o.daysOutside,
+      blocksMatched: false,
+    })),
+    ...(heldDuplicate ? [] : twiceFindings).map((t) => ({
+      flag: 'note_billed_twice' as const,
+      tier: 'T2' as const,
+      noteNumber: t.noteNumber,
+      amountIls: t.deltaAmount,
+      otherInvoice: t.alreadyBilledOn,
+      blocksMatched: true,
+    })),
+    ...(args.monthTotalOverlaps ?? [])
+      .filter((m) => m.amountIls > 0)
+      .map((m) => ({
+        flag: 'note_billed_twice' as const,
+        tier: 'T2' as const,
+        noteNumber: null,
+        amountIls: m.amountIls,
+        otherInvoice: m.otherInvoice,
+        blocksMatched: true,
+      })),
+  ];
+  const blocked = reviewItems.some((r) => r.blocksMatched);
   const claim = claimSplit(findings, args.base.invoice.totalInclVat);
   const leakAg = ag(claim.totalIls);
 
@@ -747,7 +835,8 @@ export function buildConsolidatedProposal(args: {
     products: productRows,
     findings,
     claim: { exclIls: claim.exclIls, inclIls: claim.inclIls },
-    pendingNotes: [...pendingAg].map(([number, a]) => ({ number, billedIls: ils(a) })),
+    pendingNotes: [...pendingAg].filter(([number]) => !missingNumbers.has(number)).map(([number, a]) => ({ number, billedIls: ils(a) })),
+    reviewItems,
     totals: {
       deliveryNotesIls: ils(deliveryNotesAg),
       invoiceSubtotalIls: ils(subtotalAg),
@@ -758,7 +847,11 @@ export function buildConsolidatedProposal(args: {
     // Never "matched" while the invoice bills more than the notes are worth at PO prices.
     // What a not-yet-received note bills is pending, not "billed above the notes".
     status:
-      notes.length === 0 ? 'no_delivery_notes' : leakAg > 0 || subtotalAg - pendingTotalAg > deliveryNotesAg ? 'differences' : 'matched',
+      notes.length === 0
+        ? 'no_delivery_notes'
+        : leakAg > 0 || blocked || subtotalAg - pendingTotalAg > deliveryNotesAg
+          ? 'differences'
+          : 'matched',
   };
 }
 
@@ -1037,20 +1130,21 @@ async function loadDeliveryNotes(
 }
 
 /**
- * Of these delivery-note numbers, the ones a CLOSED goods receipt of the supplier
- * carries in [from, to). A number an invoice line names that no closed receipt
- * carries is "not received yet" (pending) — never "received 0".
+ * Every goods receipt of the supplier in [from, to) that carries one of these
+ * delivery-note numbers, with its status and date — the facts §9 and the pending
+ * rule read: no receipt at all (note_not_in_system), only open ones (not received
+ * yet), or a closed one (cross-matched; note_other_month when outside the period).
  */
-async function closedNoteNumbers(
+async function noteReceipts(
   db: Database,
   restaurantId: string,
   supplierId: string,
   numbers: string[],
   scope: { from: Date; to: Date },
-): Promise<Set<string>> {
-  if (numbers.length === 0) return new Set();
+): Promise<Array<{ number: string; closed: boolean; status: string; receivedAt: Date }>> {
+  if (numbers.length === 0) return [];
   const rows = await db
-    .selectDistinct({ number: noteNumberSql })
+    .select({ number: noteNumberSql, closed: closedReceiptSql(), status: goodsReceipts.status, receivedAt: goodsReceipts.receivedAt })
     .from(goodsReceipts)
     .innerJoin(
       purchaseOrders,
@@ -1063,11 +1157,15 @@ async function closedNoteNumbers(
         inArray(noteNumberSql, numbers),
         sql`${goodsReceipts.receivedAt} >= ${scope.from.toISOString()}::timestamptz`,
         sql`${goodsReceipts.receivedAt} < ${scope.to.toISOString()}::timestamptz`,
-        closedReceiptSql(),
       ),
     );
-  return new Set(rows.map((r) => r.number).filter((n): n is string => !!n));
+  return rows
+    .filter((r): r is typeof r & { number: string } => !!r.number)
+    .map((r) => ({ number: r.number, closed: !!r.closed, status: r.status, receivedAt: r.receivedAt }));
 }
+
+/** Whole days between two local dates 'YYYY-MM-DD' (b − a). */
+const dayDiff = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 
 /** The consolidated invoices of a supplier (payload kind 'consolidated'), with what they list. */
 async function consolidatedInvoicesOf(db: Database, restaurantId: string, supplierId: string, tz: string) {
@@ -1162,7 +1260,13 @@ export async function consolidatedProposal(
 
   // Which delivery note each invoice line bills (`ת.מ. <n>` / `DN <n>` in its description).
   const lineRows = await db
-    .select({ id: invoiceLines.id, d: invoiceLines.rawDescription, dEn: invoiceLines.rawDescriptionEn })
+    .select({
+      id: invoiceLines.id,
+      d: invoiceLines.rawDescription,
+      dEn: invoiceLines.rawDescriptionEn,
+      productId: invoiceLines.productId,
+      lineTotal: invoiceLines.lineTotal,
+    })
     .from(invoiceLines)
     .where(eq(invoiceLines.invoiceId, invoiceId));
   const invoiceLineNotes = new Map<string, string>();
@@ -1170,15 +1274,81 @@ export async function consolidatedProposal(
     const n = deliveryNoteNumberIn(l.d) ?? deliveryNoteNumberIn(l.dEn);
     if (n) invoiceLineNotes.set(l.id, n);
   }
-  // Notes the lines name that no closed receipt carries anywhere near the invoice's
-  // periods: not received yet (or still being counted) — those lines are pending.
+  // §9 + the pending rule, from ONE lookup of the receipts carrying any note the
+  // invoice lists or its lines name (numbering wraps: ±NUMBER_MATCH_DAYS around its periods):
+  // - no receipt at all → note_not_in_system (warn, blocks "תואמת"; its lines are never claimed);
+  // - only open receipts → not received yet (T4 pending; never claimed);
+  // - a closed one → cross-matched; note_other_month when its Israel day is outside the stated period.
   const named = [...new Set(invoiceLineNotes.values())];
+  const listed = [...new Set([...raw.deliveryNoteNumbers, ...named])];
   const periods = candidatePeriods(at, raw, tz);
-  const closedNamed = await closedNoteNumbers(db, restaurantId, inv.supplierId, named, {
-    from: addCalendarDaysInTz(new Date(Math.min(...periods.map((p) => p.start.getTime()))), -LISTED_NOTE_SLACK_DAYS, tz),
-    to: addCalendarDaysInTz(new Date(Math.max(...periods.map((p) => p.end.getTime()))), LISTED_NOTE_SLACK_DAYS, tz),
+  const receipts = await noteReceipts(db, restaurantId, inv.supplierId, listed, {
+    from: addCalendarDaysInTz(new Date(Math.min(...periods.map((p) => p.start.getTime()))), -NUMBER_MATCH_DAYS, tz),
+    to: addCalendarDaysInTz(new Date(Math.max(...periods.map((p) => p.end.getTime()))), NUMBER_MATCH_DAYS, tz),
   });
-  const pendingNoteNumbers = new Set(named.filter((n) => !closedNamed.has(n)));
+  const missingNoteNumbers = new Set<string>();
+  const pendingNoteNumbers = new Set<string>();
+  const otherMonthNotes: Array<{ number: string; receivedOn: string; daysOutside: number }> = [];
+  for (const n of listed) {
+    const mine = receipts.filter((r) => r.number === n);
+    if (mine.length === 0) {
+      missingNoteNumbers.add(n);
+      continue;
+    }
+    const closed = mine.filter((r) => r.closed);
+    if (closed.length === 0) {
+      if (mine.some((r) => r.status === 'pending')) pendingNoteNumbers.add(n);
+      continue;
+    }
+    if (raw.periodStart && raw.periodEnd) {
+      // The closed receipt nearest the stated period decides (Israel days).
+      const outside = closed
+        .map((r) => {
+          const day = localDateKey(r.receivedAt, tz);
+          const d = day < raw.periodStart! ? dayDiff(day, raw.periodStart!) : day > raw.periodEnd! ? dayDiff(raw.periodEnd!, day) : 0;
+          return { day, d };
+        })
+        .sort((x, y) => x.d - y.d)[0]!;
+      if (outside.d > 0) otherMonthNotes.push({ number: n, receivedOn: outside.day, daysOutside: outside.d });
+    }
+  }
+
+  // §9 note_billed_twice for MONTH-TOTAL lines (no note number): an earlier active
+  // consolidated invoice of this supplier for the same period billing the same line
+  // (same product — or the same text when unmapped — and the same total, to the agora).
+  const lineKey = (l: { productId: string | null; d: string | null }) =>
+    l.productId ? `p:${l.productId}` : `t:${(l.d ?? '').trim().replace(/\s+/g, ' ')}`;
+  const myPeriod = periodOfInvoice(at, raw, tz);
+  const myMonthLines = lineRows.filter((l) => !invoiceLineNotes.has(l.id));
+  const samePeriodEarlier = others.filter(
+    (o) =>
+      o.active &&
+      +o.period.start === +myPeriod.start &&
+      +o.period.end === +myPeriod.end &&
+      (o.createdAt < inv.createdAt || (+o.createdAt === +inv.createdAt && o.id < invoiceId)),
+  );
+  const monthTotalOverlaps: Array<{ otherInvoice: OtherInvoice; amountIls: number }> = [];
+  if (myMonthLines.length > 0 && samePeriodEarlier.length > 0) {
+    const otherLines = await db
+      .select({ invoiceId: invoiceLines.invoiceId, d: invoiceLines.rawDescription, dEn: invoiceLines.rawDescriptionEn, productId: invoiceLines.productId, lineTotal: invoiceLines.lineTotal })
+      .from(invoiceLines)
+      .where(inArray(invoiceLines.invoiceId, samePeriodEarlier.map((o) => o.id)));
+    for (const o of samePeriodEarlier) {
+      const pool = otherLines
+        .filter((l) => l.invoiceId === o.id && !deliveryNoteNumberIn(l.d) && !deliveryNoteNumberIn(l.dEn))
+        .map((l) => ({ key: lineKey(l), ag: Math.round(Number(l.lineTotal) * 100) }));
+      let overlapAg = 0;
+      for (const l of myMonthLines) {
+        const ag = Math.round(Number(l.lineTotal) * 100);
+        const i = pool.findIndex((x) => x.key === lineKey(l) && x.ag === ag);
+        if (i >= 0) {
+          overlapAg += ag;
+          pool.splice(i, 1);
+        }
+      }
+      if (overlapAg > 0) monthTotalOverlaps.push({ otherInvoice: { invoiceId: o.id, invoiceNumber: o.number }, amountIls: overlapAg / 100 });
+    }
+  }
 
   // Names for products billed but on no delivery note.
   const invoiceProductIds = [
@@ -1203,6 +1373,9 @@ export async function consolidatedProposal(
       notes,
       invoiceLineNotes,
       pendingNoteNumbers,
+      missingNoteNumbers,
+      otherMonthNotes,
+      monthTotalOverlaps,
       productNames,
     });
 
