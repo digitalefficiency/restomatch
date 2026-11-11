@@ -146,7 +146,7 @@ function Group({ id, title, items, t, locale }: { id: string; title: string; ite
       <h2 id={`board-${id}`} className="mb-2 text-sm font-bold text-ink">
         {title} <span className="font-normal text-muted">({formatNumber(items.length, locale)})</span>
       </h2>
-      <ul className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+      <ul className="grid grid-cols-1 gap-2 lg:grid-cols-2" data-record="">
         {items.map((item) => (
           <li key={item.poId}>
             <TruckRow item={item} t={t} locale={locale} />

@@ -795,6 +795,7 @@ function ApprovalsListInner({
                 onKeyDown={onListKey}
                 ref={listRef}
                 data-testid="approvals-list"
+                data-record=""
               >
                 {groupByInvoice(items.filter((d) => !hidden.has(d.id))).map((g) => (
                   <li key={g.key} className="space-y-2">

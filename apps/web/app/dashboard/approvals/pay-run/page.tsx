@@ -360,6 +360,7 @@ export default async function PayRunPage({
                 key={r.invoiceId}
                 className="rounded-xl border border-line bg-surface p-3"
                 data-testid="payrun-invoice"
+                data-record=""
                 data-status={r.selectable ? 'pay' : 'hold'}
               >
                 <div className="flex items-start justify-between gap-2">

@@ -4,6 +4,15 @@
  * may not grow past and the package that adopts them. Adoption = shorten/fold the string and delete
  * your line. COPY_DUP_ALLOW: keys that hold the same ≥6-word text today; merge them into one
  * `explain.<concept>` (or one key) and delete the lines. Never add a line by hand.
+ *
+ * Exceptions to "only shrinks" (the one train-C re-baseline, 11.11, staging f8d7d960): these 10
+ * entries were recorded higher than before, each for an owner-decided wording, not padding:
+ *   ask:answers.claimIntro 6→9, claimNone 6→7 — "תביעה" → "בקשת זיכוי" (owner terms, 7.11)
+ *   ask:answers.leakTotal 9→10, leakTotalNoPct 7→8, unknown 25→27 — same term sweep in ask (G-12)
+ *   inventory:subtitle 16→18 — train-C W2-07 count screen (monthly cadence wording)
+ *   overview:hero.calc 16→21 — names all three exclusions now that MISSING_ON_INVOICE is out of the leak
+ *   recovery:tracker.errorBody 11→12, tracker.subtitle 10→11 — glossary "בקשות זיכוי" (train C)
+ *   suppliers:form.deliveryTitle 5→6 — "שעת הגעה אחרונה" (no "יעד"; Batch P)
  */
 import type { AllowList, DupAllowList } from './guard';
 
