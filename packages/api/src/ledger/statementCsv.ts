@@ -1,4 +1,4 @@
-import { decimalToScaled } from '../orders/document/build';
+import { detectDecimalStyle, parseNumberInput } from '@restomatch/types';
 import type { StatementLine, StatementLineKind } from './statement';
 
 /**
@@ -57,41 +57,15 @@ function splitRow(line: string, sep: string): string[] {
 }
 
 /**
- * "1,234.50" · "₪ 1234.5" · "(80.00)" · "80.00-" → signed agorot; null when unreadable.
- * `decimalComma` (a European-format file: "1.234,50") reads dots as thousands and the
- * comma as the decimal point. Without it, a value like "12.500" (three decimals) is
- * ambiguous between ₪12.50 and ₪12,500 and is refused rather than guessed.
+ * A statement money cell → signed agorot; null when empty or unreadable. Parsing is the shared
+ * parseNumberInput (AGENTS.md: every imported number, never hand-stripped commas): exact,
+ * locale-aware, and it refuses to guess. "12.500" (three decimals) is refused, never read as
+ * ₪12.50 or ₪12,500. `decimalComma` is the file's style (a "1.234,50" file).
  */
 export function parseStatementAmount(raw: string | undefined, decimalComma = false): number | null {
-  if (raw == null) return null;
-  let s = raw.replace(/[₪\s\u200e\u200f]/g, '').replace(/ש["״]?ח/g, '');
-  if (!s) return null;
-  let neg = false;
-  if (/^\(.*\)$/.test(s)) {
-    neg = true;
-    s = s.slice(1, -1);
-  }
-  if (s.endsWith('-')) {
-    neg = !neg;
-    s = s.slice(0, -1);
-  }
-  if (s.startsWith('-')) {
-    neg = !neg;
-    s = s.slice(1);
-  }
-  if (decimalComma) {
-    s = s.replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.');
-  } else {
-    if (/^\d+\.\d{3}$/.test(s)) return null;
-    s = s.replace(/,(?=\d{3}(\D|$))/g, '');
-  }
-  const v = decimalToScaled(s, 2);
-  if (v === null) return null;
-  return neg ? -v : v;
+  const cell = parseNumberInput(raw, { scale: 2, grouping: true, negative: true, decimal: decimalComma ? 'comma' : 'auto' });
+  return cell.kind === 'ok' ? cell.scaled : null;
 }
-
-/** A value that can only be read in the European format ("1.234,50" · "12,50"). */
-const EUROPEAN_VALUE = /^-?\(?\d{1,3}(\.\d{3})+,\d{1,2}\)?-?$|^-?\(?\d+,\d{1,2}\)?-?$/;
 
 /** dd/mm/yyyy · dd.mm.yy · yyyy-mm-dd → YYYY-MM-DD; null when unreadable. */
 export function parseStatementDate(raw: string | undefined): string | null {
@@ -188,9 +162,9 @@ export function parseStatementCsv(text: string): ParsedStatement {
 
   const body = rows.slice(headerRow + 1).filter((r) => r.trim()).map((r) => splitRow(r, sep));
   const moneyIdx = (['debit', 'credit', 'amount'] as const).map((c) => cols.get(c)).filter((v): v is number => v != null);
-  // European format when the file is ';'-separated or any money cell can only be read that way.
+  // The file's decimal style from its own money cells (the shared detector); a ';' file is comma-decimal.
   const decimalComma =
-    sep === ';' || body.some((cells) => moneyIdx.some((idx) => EUROPEAN_VALUE.test((cells[idx] ?? '').replace(/[₪\s]/g, ''))));
+    sep === ';' || detectDecimalStyle(body.flatMap((cells) => moneyIdx.map((idx) => cells[idx]))) === 'comma';
   const directionalColumns = cols.has('debit') || cols.has('credit');
 
   for (let i = headerRow + 1; i < rows.length && lines.length < MAX_STATEMENT_LINES; i++) {
