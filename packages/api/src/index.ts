@@ -426,3 +426,4 @@ export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunC
 export { SKIPPED_NO_PROVIDER, providerConfigured, supplierMessageState, type SupplierMessageState } from './notifications/delivery';
 export * from './notifications/sendWindow';
 export { awaitingDecision, type AwaitingDecision } from './approvals/awaiting';
+export { notify, notifyEffect, resolveAudience, type Address, type Audience } from './notifications/notify';
