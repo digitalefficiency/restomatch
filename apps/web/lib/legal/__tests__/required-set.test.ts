@@ -53,6 +53,13 @@ describe('required legal set', () => {
     expect(order('plain')).toEqual(order('footer-column'));
   });
 
+  it('no variant renders a separator glyph (a wrapped line must never start with one)', () => {
+    for (const variant of VARIANTS) {
+      const html = renderToStaticMarkup(createElement(LegalLinks, { locale: 'he', variant }));
+      expect(html, variant).not.toMatch(/[·•|]/);
+    }
+  });
+
   it('LegalLinksPlain imports only the registry (global-error safety)', () => {
     const src = readFileSync(`${web}lib/legal/LegalLinksPlain.tsx`, 'utf8');
     expect([...src.matchAll(/from\s+['"]([^'"]+)['"]/g)].map((m) => m[1])).toEqual(['./registry']);
