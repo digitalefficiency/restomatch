@@ -830,7 +830,7 @@ test.describe('pilot · truthful send state · chef orders', () => {
       await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
       const items = page.getByTestId('catalog-item');
       await expect(items.first()).toBeVisible({ timeout: 30_000 });
-      await items.nth(0).tap();
+      await addItem(page, items.nth(0)); // W2-06: the line starts with an empty qty; the helper types it
       await page.getByTestId('cart-primary').tap(); // review → the server draft
       await page.locator('#ord-channel').selectOption('none');
       await expect(page.locator('#ord-channel option[value="none"]')).toHaveText(MSG.he.wizard.channelNone);

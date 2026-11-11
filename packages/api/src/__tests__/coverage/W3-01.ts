@@ -1,6 +1,7 @@
-// W3-01 COVERAGE fragment (docs/ux/wave3/W3-01.md). Typed structurally until the W2-01 loader
-// (`./index`, CoverageFragment) is on main; the shape is the same Record<procedure, claim>.
-const coverage: Record<string, string> = {
+// W3-01 COVERAGE fragment (docs/ux/wave3/W3-01.md).
+import type { CoverageFragment } from './index';
+
+const coverage: CoverageFragment = {
   'chain.matrix':
     'isolation — chain.attack.test.ts: per-branch withRestaurant (RLS); scope all/<id>/g:<group> limited to the caller-owned (or bookkeeper) memberships on the active account; B/M/X never in the payload; id or group outside → NOT_FOUND; forged session → FORBIDDEN',
   'chain.branchPeek':

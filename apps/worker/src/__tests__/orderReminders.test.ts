@@ -136,7 +136,8 @@ describe('A5 order-reminder truth (DB)', () => {
       'owner@example.test',
     ]);
     for (const o of out) {
-      expect(o.body).toContain('יש טיוטה שלא נשלחה לתנובה · השליחה עד 16:00');
+      expect(o.body).toContain('יש טיוטת הזמנה מ-תנובה שעדיין לא נשלחה. טיוטה היא עדיין לא הזמנה.');
+      expect(o.body).toContain('מועד אחרון להזמנה היום: 16:00');
       expect(o.body).toContain(`https://app.example.test/dashboard/orders/${draft}`);
       expect(`${o.body}${o.html}`).not.toContain('₪');
       expect(o.automation).toBe('A5');

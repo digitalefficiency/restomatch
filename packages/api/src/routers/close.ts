@@ -1,9 +1,11 @@
 import { z } from 'zod';
-import { eq, restaurants, sql, type Database } from '@restomatch/db';
+import { and, eq, inArray, invoices, restaurants, sql, type Database } from '@restomatch/db';
+import { invoiceStatesForMonth } from '../invoices/state';
 import { featureEnabled } from '../lib/features';
 import { zonedMidnight } from '../ledger/months';
-import { deliveryNoteCoverage } from '../match/consolidated';
+import { deliveryNoteCoverage, readConsolidatedRaw } from '../match/consolidated';
 import { financeProcedure, router } from '../trpc';
+import { tabOfState } from './invoices';
 
 /**
  * Month close checklist (W3-05a).
@@ -13,14 +15,16 @@ import { financeProcedure, router } from '../trpc';
  * procedures: gaps awaiting decision = `approvals.queueSummary`, unsent claims
  * = recovery `followUps()`, VAT at risk = `owner.vatAtRisk`. Read-only.
  *
+ * Invoice steps read the W2-02 register's own partition (G-05 canonical state →
+ * `tabOfState`), so a step's count is exactly what its register link opens:
+ * "unchecked" = the register's `awaiting` tab (in OCR, or no match run yet).
+ *
  * Every query is scoped by `restaurant_id` (DoD-8; COVERAGE `close.checklist`).
  */
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
-/** An invoice still waiting for its check (OCR not done, or parsed and never matched). */
-const UNCHECKED = ['ocr_pending', 'parsed'] as const;
-/** A consolidated invoice past review covers its notes; before that it is pending (T4). */
-const SETTLED = ['matched', 'approved', 'paid'] as const;
+/** The register's month offset limit (`invoices.list` accepts -24..0). */
+const MAX_BACK = 24;
 
 export interface CloseFigure {
   count: number;
@@ -32,7 +36,9 @@ export interface CloseChecklist {
   /** 'YYYY-MM' on the restaurant's wall clock. */
   month: string;
   timezone: string;
-  /** Invoices of the month not yet checked (consolidated ones excluded: they are step 4). Incl. VAT. */
+  /** The register's `?month=` for this month (0 = current, -1 = previous, …). */
+  monthOffset: number;
+  /** The register's `awaiting` tab for the month (in OCR, or not matched yet). Incl. VAT. */
   unchecked: CloseFigure;
   /** Consolidated invoices (חשבוניות ריכוז) of the month not yet settled. Incl. VAT. Always T4. */
   consolidated: CloseFigure & { firstInvoiceId: string | null };
@@ -57,38 +63,43 @@ export function monthWindow(month: string, tz: string): { start: Date; end: Date
 }
 
 /** NULL-safe: an ordinary invoice has no `kind`, and NOT NULL would drop it from both steps. */
-const isConsolidated = sql`COALESCE((ocr_payload->'raw'->>'kind') = 'consolidated', false)`;
-const inList = (xs: readonly string[]) => sql.join(xs.map((x) => sql`${x}`), sql`, `);
+/** Register month offset of 'YYYY-MM' against `now` on the wall clock of `tz`, clamped to the register's range. */
+export function monthOffsetOf(month: string, tz: string, now = new Date()): number {
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit' }).formatToParts(now).map((x) => [x.type, x.value]),
+  );
+  const off = y * 12 + m - (Number(p.year) * 12 + Number(p.month));
+  return Math.max(-MAX_BACK, Math.min(0, off));
+}
 
-async function invoiceFigures(db: Database, restaurantId: string, start: Date, end: Date) {
-  const rows = (await db.execute(sql`
-    SELECT
-      count(*) FILTER (WHERE NOT ${isConsolidated} AND status::text IN (${inList(UNCHECKED)}))::int AS unchecked_count,
-      COALESCE(sum(round(COALESCE(total_incl_vat, 0) * 100))
-        FILTER (WHERE NOT ${isConsolidated} AND status::text IN (${inList(UNCHECKED)})), 0)::bigint AS unchecked_agorot,
-      count(*) FILTER (WHERE ${isConsolidated} AND status::text NOT IN (${inList(SETTLED)}))::int AS cons_count,
-      COALESCE(sum(round(COALESCE(total_incl_vat, 0) * 100))
-        FILTER (WHERE ${isConsolidated} AND status::text NOT IN (${inList(SETTLED)})), 0)::bigint AS cons_agorot,
-      (array_agg(id ORDER BY COALESCE(invoice_date, created_at), id)
-        FILTER (WHERE ${isConsolidated} AND status::text NOT IN (${inList(SETTLED)})))[1] AS cons_first
-    FROM invoices
-    WHERE restaurant_id = ${restaurantId}::uuid
-      AND COALESCE(invoice_date, created_at) >= ${start.toISOString()}::timestamptz
-      AND COALESCE(invoice_date, created_at) < ${end.toISOString()}::timestamptz
-  `)) as unknown as Array<{
-    unchecked_count: number;
-    unchecked_agorot: string | number;
-    cons_count: number;
-    cons_agorot: string | number;
-    cons_first: string | null;
-  }>;
-  const r = rows[0];
+async function invoiceFigures(db: Database, restaurantId: string, monthOffset: number, now: Date) {
+  const states = await invoiceStatesForMonth(db, restaurantId, { monthOffset, now });
+  const agorot = (ils: number) => Math.round(ils * 100);
+  const unchecked = states.filter((s) => tabOfState(s.state) === 'awaiting');
+  // Consolidated (חשבונית מרכזת) and not yet in the register's matched/paid tabs → pending (T4).
+  const open = states.filter((s) => tabOfState(s.state) !== 'matched' && tabOfState(s.state) !== 'paid');
+  const payloads = open.length
+    ? await db
+        .select({ id: invoices.id, payload: invoices.ocrPayload, at: sql<string>`COALESCE(${invoices.invoiceDate}, ${invoices.createdAt})` })
+        .from(invoices)
+        .where(and(eq(invoices.restaurantId, restaurantId), inArray(invoices.id, open.map((s) => s.invoiceId))))
+    : [];
+  const consolidatedIds = payloads
+    .filter((r) => readConsolidatedRaw(r.payload) !== null)
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)) || a.id.localeCompare(b.id))
+    .map((r) => r.id);
+  const consSet = new Set(consolidatedIds);
+  const cons = open.filter((s) => consSet.has(s.invoiceId));
   return {
-    unchecked: { count: Number(r?.unchecked_count ?? 0), amountIls: Number(r?.unchecked_agorot ?? 0) / 100 },
+    unchecked: {
+      count: unchecked.length,
+      amountIls: unchecked.reduce((t, s) => t + agorot(s.totalInclVat), 0) / 100,
+    },
     consolidated: {
-      count: Number(r?.cons_count ?? 0),
-      amountIls: Number(r?.cons_agorot ?? 0) / 100,
-      firstInvoiceId: r?.cons_first ?? null,
+      count: cons.length,
+      amountIls: cons.reduce((t, s) => t + agorot(s.totalInclVat), 0) / 100,
+      firstInvoiceId: consolidatedIds[0] ?? null,
     },
   };
 }
@@ -124,10 +135,12 @@ export const closeRouter = router({
       const rid = ctx.session.restaurantId;
       const { tz, settings } = await settingsOf(ctx.db, rid);
       const { start, end } = monthWindow(input.month, tz);
+      const now = new Date();
+      const monthOffset = monthOffsetOf(input.month, tz, now);
       const [inv, notes] = await Promise.all([
-        invoiceFigures(ctx.db, rid, start, end),
+        invoiceFigures(ctx.db, rid, monthOffset, now),
         featureEnabled(settings, 'supplierLedger') ? uncoveredNotes(ctx.db, rid, start, end) : Promise.resolve(null),
       ]);
-      return { month: input.month, timezone: tz, ...inv, deliveryNotes: notes };
+      return { month: input.month, timezone: tz, monthOffset, ...inv, deliveryNotes: notes };
     }),
 });
