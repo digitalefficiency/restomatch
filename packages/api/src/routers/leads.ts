@@ -29,6 +29,17 @@ const LeadInput = z.object({
   consentText: z.string().trim().max(2000).optional(),
   /** Honeypot: must stay empty. A non-empty value silently no-ops. */
   hp: z.string().max(200).optional(),
+}).superRefine((input, ctx) => {
+  // SEC-1 (W3-06 review): a lead must be reachable — phone OR email, the same
+  // rule the landing form enforces (validateLead → errorContact). A tripped
+  // honeypot is exempt so the bot still gets the silent `{ ok: true }` and
+  // can't tell a drop from a save.
+  if (input.hp && input.hp.trim().length > 0) return;
+  const hasPhone = (input.phone ?? '').length > 0;
+  const hasEmail = (input.email ?? '').length > 0;
+  if (!hasPhone && !hasEmail) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['phone'], message: 'phone or email is required' });
+  }
 });
 
 export const leadsRouter = router({
