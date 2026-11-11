@@ -345,7 +345,7 @@ const COPY = {
     cta: 'פתיחת הדוח המלא',
     footer: 'RestoMatch · מוקד הבקרה של הכסף',
     action: {
-      chaseOverdue: (p: Params, f: Fmt) => `להכין תזכורת ל-${p.count} בקשות זיכוי בלי תשובה 7+ ימים (${f.ils(p.agorot ?? 0)})`,
+      chaseOverdue: (p: Params, f: Fmt) => `תזכורת ל־${p.count} בקשות זיכוי בלי תשובה 7+ ימים (${f.ils(p.agorot ?? 0)})`,
       decideOpen: (p: Params, f: Fmt) => `להחליט על ${p.count} פערים פתוחים (${f.ils(p.agorot ?? 0)})`,
       sendClaims: (p: Params, f: Fmt) => `לשלוח מכתבי בקשת זיכוי על ${p.count} פערים (${f.ils(p.agorot ?? 0)})`,
       linkPending: (p: Params) => `לשייך ${p.count} חשבוניות ממתינות להזמנה`,
@@ -372,7 +372,7 @@ const COPY = {
     cta: 'Open the full report',
     footer: 'RestoMatch · Command center for your money',
     action: {
-      chaseOverdue: (p: Params, f: Fmt) => `Send a reminder for ${p.count} credit requests with no reply for 7+ days (${f.ils(p.agorot ?? 0)})`,
+      chaseOverdue: (p: Params, f: Fmt) => `Send a reminder: ${p.count} credit requests with no reply for 7+ days (${f.ils(p.agorot ?? 0)})`,
       decideOpen: (p: Params, f: Fmt) => `Decide on ${p.count} open discrepancies (${f.ils(p.agorot ?? 0)})`,
       sendClaims: (p: Params, f: Fmt) => `Send credit-request letters for ${p.count} discrepancies (${f.ils(p.agorot ?? 0)})`,
       linkPending: (p: Params) => `Link ${p.count} pending invoices to their orders`,

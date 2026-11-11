@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { TRPCError } from '@trpc/server';
-import { AlertTriangle, ClipboardCheck, Network, PartyPopper, Radar, Scale, ShieldCheck, Undo2 } from 'lucide-react';
+import { AlertTriangle, ClipboardCheck, Network, PartyPopper, Radar, Scale, ShieldCheck, Triangle, Undo2 } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -418,8 +418,10 @@ export default async function ChainPage({
                               <span className="block text-xs text-subtle">{t('dashboard.ranking.thinBase')}</span>
                             </span>
                           ) : (
-                            <span className={b.leakDeltaIls > 0 ? 'text-danger' : 'text-primary'}>
-                              {b.leakDeltaIls > 0 ? '▲' : '▼'} {ils(Math.abs(b.leakDeltaIls))}
+                            <span className={cn('inline-flex items-center gap-1', b.leakDeltaIls > 0 ? 'text-danger' : 'text-primary')}>
+                              {/* G11: the ▲/▼ mark is drawn (no UI face has U+25B2/25BC), never mirrored. */}
+                              <Triangle className={cn('h-2 w-2 shrink-0 fill-current', b.leakDeltaIls < 0 && 'rotate-180')} strokeWidth={0} aria-hidden="true" />
+                              {ils(Math.abs(b.leakDeltaIls))}
                             </span>
                           )
                         )}
