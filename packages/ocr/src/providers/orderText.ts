@@ -12,6 +12,7 @@
 
 import { z } from 'zod';
 import { joinTextBlocks, parseJsonFromText } from './_anthropic';
+import { DEFAULT_OCR_MODEL } from './claudeVision';
 
 /** Hard cap on the order text we parse (a WhatsApp order is a few hundred bytes). */
 export const ORDER_TEXT_MAX_CHARS = 8000;
@@ -208,7 +209,7 @@ export class ClaudeOrderTextParser implements OrderTextParser {
     const { default: Anthropic } = (await import('@anthropic-ai/sdk')) as { default: any };
     const client = new Anthropic({ apiKey: this.config.apiKey });
     const response = await client.messages.create({
-      model: this.config.model ?? process.env.OCR_CLAUDE_MODEL ?? 'claude-opus-4-8',
+      model: this.config.model ?? process.env.OCR_CLAUDE_MODEL ?? DEFAULT_OCR_MODEL,
       max_tokens: this.config.maxTokens ?? 4000,
       system: SYSTEM_PROMPT,
       messages: [

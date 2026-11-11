@@ -7,6 +7,7 @@ import { components } from '@/lib/i18n/messages/components';
 import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { formatIls } from '@/lib/money';
+import { formatPercent } from '@/lib/i18n/format';
 import { SupplierTabBar } from './tab-bar';
 import { getWave1Access } from '../../contracts/access';
 
@@ -87,6 +88,13 @@ export default async function SupplierDetailLayout({
               {supplier.active ? t('detail.active') : t('detail.inactive')}
             </Badge>
             {supplier.sourcePlatform && <Badge tone="info">{supplier.sourcePlatform}</Badge>}
+            <Badge tone="neutral">
+              <span className="tabular-nums" data-testid="supplier-vat">
+                {supplier.vatRate === null
+                  ? t('detail.vatDefault')
+                  : t('detail.vat', { rate: formatPercent(Number(supplier.vatRate), locale, 2) })}
+              </span>
+            </Badge>
           </div>
           {name.secondary ? (
             <p className="mt-1 text-sm text-subtle" lang="he">

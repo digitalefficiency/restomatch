@@ -7,6 +7,7 @@ import {
   invoiceLines,
   invoices,
   matchRuns,
+  poLines,
   products,
   purchaseOrders,
   restaurants,
@@ -24,7 +25,7 @@ import {
 import { sql } from '@restomatch/db';
 import { LEAK_FILTER } from '../leak-views';
 import { computeLeakReport } from '../leak-report';
-import { computeLeakSummary, computeLeakTrend } from '../leak-views';
+import { computeLeakGrouped, computeLeakSummary, computeLeakTrend } from '../leak-views';
 import { computeBranchSnapshot } from '../chain';
 
 const db = createDb(testDbUrl());
@@ -533,6 +534,9 @@ describe('every surface sums to the hero (mutation guards: trend, chain supplier
         { type: 'QTY_SHORT', severity: 'warn', delta: '20', status: 'rejected' }, // waived: still leak
         { type: 'PRICE_LOWER', severity: 'warn', delta: '7' }, // under-charge: not leak
         { type: 'QTY_OVER', severity: 'info', delta: '3' }, // inside tolerance: not leak
+        // Owner 31.10: "להוציא את 'חסר בחשבונית' ממספר הדליפה" — an ordered line never billed
+        // is a review item, never ₪ in the leak (hero, explorer, supplier card, chain, report).
+        { type: 'MISSING_ON_INVOICE', severity: 'block', delta: '64' },
       ],
     });
     await t.invoice({ date: THIS_MONTH, exclVat: '300', inclVat: '354', matched: false }); // pending: neither
@@ -585,6 +589,16 @@ describe('every surface sums to the hero (mutation guards: trend, chain supplier
     expect([snap.leakIls, snap.spendIls]).toEqual([LEAK, SPEND]);
     expect(snap.suppliers.reduce((a, x) => a + x.spendIls, 0)).toBe(SPEND);
     expect(snap.suppliers.reduce((a, x) => a + x.leakIls, 0)).toBe(LEAK);
+  });
+
+  it('explorer + supplier card: Σ grouped-by-supplier and by-type leak = the hero; MISSING_ON_INVOICE has no ₪ row', async () => {
+    const { restaurantId } = await mixedMonth();
+    const spec = { period: 'this_month' as const, now: NOW };
+    const bySupplier = await computeLeakGrouped(db, restaurantId, spec, 'supplier');
+    expect(bySupplier.reduce((a, x) => a + x.leakIls, 0)).toBe(LEAK);
+    const byType = await computeLeakGrouped(db, restaurantId, spec, 'type');
+    expect(byType.map((r) => r.key)).not.toContain('MISSING_ON_INVOICE');
+    expect((await computeLeakSummary(db, restaurantId, spec)).leakIls).toBe(LEAK);
   });
 
   it('report: supplier spend and by-type leak = the hero', async () => {
@@ -678,6 +692,7 @@ describe('every surface sums to the hero (mutation guards: trend, chain supplier
         'QTY_OVER:open:false',
         'QTY_SHORT:rejected:true',
         'UNORDERED_ARRIVAL:open:false',
+        'MISSING_ON_INVOICE:open:false',
       ].sort(),
     );
     const counted = rows.flatMap((r) => r.lines).filter((l) => l.countsAsLeak).reduce((a, l) => a + l.deltaAmount, 0);
@@ -761,5 +776,73 @@ describe('a receiving scan waiting for its count (#94) is not "waiting to be lin
       awaitingCountCount: 0,
       awaitingCountIls: 0,
     });
+  });
+});
+
+describe('G-08: an invoice held for a "זה אותו מוצר?" question', () => {
+  it('is its own bucket — in neither leak, spend nor "waiting to be linked to an order"', async () => {
+    const { restaurantId, invoice } = await setup();
+    await invoice({ date: THIS_MONTH, exclVat: '1000', inclVat: '1180', d: [] });
+    const consolidated = await invoice({ date: THIS_MONTH, exclVat: '2000', inclVat: '2360', matched: false });
+    const held = await invoice({ date: THIS_MONTH, exclVat: '500', inclVat: '590', matched: false });
+    await db
+      .update(invoices)
+      .set({ status: 'parsed', ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinked'] } } as never })
+      .where(eq(invoices.id, held));
+    // …and its line really is unlinked (the flag is LIVE — round 3).
+    await db.update(invoiceLines).set({ productId: null }).where(eq(invoiceLines.invoiceId, held));
+
+    const hero = await computeLeakHero(db, restaurantId, { now: NOW });
+    expect(hero).toMatchObject({
+      spendIls: 1000,
+      pendingLinkCount: 1,
+      pendingLinkIls: 2360,
+      awaitingQuestionCount: 1,
+      awaitingQuestionIls: 590,
+    });
+    expect(await computeLeakSummary(db, restaurantId, { period: 'this_month', now: NOW })).toEqual(hero);
+    const rows = await computeLeakBreakdown(db, restaurantId, { now: NOW });
+    expect(rows.filter((r) => r.pendingLink).map((r) => r.invoiceId)).toEqual([consolidated]);
+    expect(rows.map((r) => r.invoiceId)).not.toContain(held);
+
+    // An order question ('unlinkedPo') counts the same; a low-confidence hold does not.
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['confidence'] } } as never })
+      .where(eq(invoices.id, held));
+    expect(await computeLeakHero(db, restaurantId, { now: NOW })).toMatchObject({ awaitingQuestionCount: 0, pendingLinkCount: 2 });
+    // 'unlinkedPo' counts while the order it waits for has an unlinked, name-only, non-blank line.
+    const [{ supplierId }] = (await db.select({ supplierId: invoices.supplierId }).from(invoices).where(eq(invoices.id, held))) as [
+      { supplierId: string },
+    ];
+    const [po] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId, supplierId, status: 'sent', source: 'manual', expectedDeliveryAt: THIS_MONTH })
+      .returning({ id: purchaseOrders.id });
+    const [pl] = await db
+      .insert(poLines)
+      .values({ poId: po!.id, productId: null, rawDescription: 'בצל סגול', qtyOrdered: '1', unit: 'ק״ג', unitPriceExpected: '5' })
+      .returning({ id: poLines.id });
+    const [prod] = await db.select({ id: products.id }).from(products).where(eq(products.restaurantId, restaurantId));
+    const [line] = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, held));
+    await db.update(invoiceLines).set({ productId: prod!.id }).where(eq(invoiceLines.id, line!.id));
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinkedPo'] }, heldPoId: po!.id } as never })
+      .where(eq(invoices.id, held));
+    expect(await computeLeakHero(db, restaurantId, { now: NOW })).toMatchObject({ awaitingQuestionCount: 1, pendingLinkCount: 1 });
+
+    // LIVE (round 3): once the order line is answered, the stale reason no longer counts —
+    // the invoice is "waiting" like any other held invoice, never "waiting for a question".
+    await db.update(poLines).set({ productId: prod!.id }).where(eq(poLines.id, pl!.id));
+    expect(await computeLeakHero(db, restaurantId, { now: NOW })).toMatchObject({ awaitingQuestionCount: 0 });
+
+    // …and a charge line ("שורת חיוב — לא מוצר") is never a question.
+    await db.update(invoiceLines).set({ productId: null }).where(eq(invoiceLines.id, line!.id));
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['unlinked'] }, chargeLineIds: [line!.id] } as never })
+      .where(eq(invoices.id, held));
+    expect(await computeLeakHero(db, restaurantId, { now: NOW })).toMatchObject({ awaitingQuestionCount: 0 });
   });
 });
