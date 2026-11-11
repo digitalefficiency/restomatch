@@ -24,7 +24,7 @@ import {
 } from '@/lib/components';
 import { ViewToolbar, parseView, rangeLabel } from '@/lib/components/views';
 import { SwitchBranchButton } from './switch-button';
-import { wholeShekelRows } from './display';
+import { chainSparkline, wholeShekelRows } from './display';
 
 type Overview = Awaited<ReturnType<Awaited<ReturnType<typeof createServerCaller>>['chain']['overview']>>;
 type Alerts = Awaited<ReturnType<Awaited<ReturnType<typeof createServerCaller>>['chain']['alerts']>>;
@@ -130,9 +130,8 @@ export default async function ChainPage({
   const { totals } = data;
   const worst = data.branches.find((b) => b.restaurantId === data.worstBranchId) ?? null;
   const nameOf = new Map(data.branches.map((b) => [b.restaurantId, b.name]));
-  const chainSpark = data.months.map((m) =>
-    data.heatmap.reduce((acc, row) => acc + (row.cells.find((c) => c.month === m)?.leakIls ?? 0), 0),
-  );
+  // A missing month cell makes the sparkline unavailable (no sparkline), never ₪0 (G-16).
+  const chainSpark = chainSparkline(data.months, data.heatmap) ?? undefined;
   const noData = totals.spendIls === 0 && totals.leakIls === 0;
   const compared = data.compare !== 'off';
   // No % against a comparison period with almost no data (totals.thinBase): calm, never a false alarm.
