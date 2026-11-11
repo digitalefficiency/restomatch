@@ -1,0 +1,528 @@
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  and,
+  createDb,
+  discrepancies,
+  eq,
+  goodsReceipts,
+  grLines,
+  invoiceLines,
+  invoices,
+  matchRuns,
+  memberships,
+  poLines,
+  productAliases,
+  products,
+  purchaseOrders,
+  recoveryClaims,
+  restaurants,
+  sql,
+  suppliers,
+  testDbUrl,
+  users,
+} from '@restomatch/db';
+import { appRouter, syncClaims, type AppContext } from '@restomatch/api';
+import { matchInvoiceForJob, type MatchInvoiceJob } from '../jobs/matchInvoice';
+import { markOcrFailed } from '../jobs/ocrInvoice';
+
+const enqueued: MatchInvoiceJob[] = [];
+vi.mock('@restomatch/queue', async (orig) => ({
+  ...(await orig<typeof import('@restomatch/queue')>()),
+  enqueueOcrInvoice: async () => true,
+  enqueueMatchInvoice: async (job: MatchInvoiceJob) => {
+    enqueued.push(job);
+    return true;
+  },
+}));
+
+/**
+ * #216 round 2, item 1 — END TO END. A hand line typed while the receipt is
+ * still being counted must not be matched against an empty count (every line
+ * "short"), and must not be lost either: it is HELD for the receipt
+ * (raw.heldForReceipts) and submitReceipt's re-match — the REAL worker job —
+ * matches it once the count is in.
+ */
+const db = createDb(testDbUrl());
+let restaurantId = '';
+let userId = '';
+let poLineId = '';
+let grId = '';
+let grLineId = '';
+let supplierId = '';
+let productId = '';
+
+async function cleanup() {
+  if (!restaurantId) return;
+  await db.delete(recoveryClaims).where(eq(recoveryClaims.restaurantId, restaurantId));
+  await db.delete(matchRuns).where(eq(matchRuns.restaurantId, restaurantId));
+  for (const i of await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.restaurantId, restaurantId)))
+    await db.delete(invoiceLines).where(eq(invoiceLines.invoiceId, i.id));
+  await db.delete(invoices).where(eq(invoices.restaurantId, restaurantId));
+  for (const g of await db.select({ id: goodsReceipts.id }).from(goodsReceipts).where(eq(goodsReceipts.restaurantId, restaurantId)))
+    await db.delete(grLines).where(eq(grLines.grId, g.id));
+  await db.delete(goodsReceipts).where(eq(goodsReceipts.restaurantId, restaurantId));
+  for (const p of await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.restaurantId, restaurantId)))
+    await db.delete(poLines).where(eq(poLines.poId, p.id));
+  await db.delete(purchaseOrders).where(eq(purchaseOrders.restaurantId, restaurantId));
+  await db.delete(productAliases).where(eq(productAliases.supplierId, supplierId));
+  await db.delete(products).where(eq(products.restaurantId, restaurantId));
+  await db.delete(suppliers).where(eq(suppliers.restaurantId, restaurantId));
+  await db.delete(memberships).where(eq(memberships.restaurantId, restaurantId));
+  await db.delete(restaurants).where(eq(restaurants.id, restaurantId));
+  if (userId) await db.delete(users).where(eq(users.id, userId));
+}
+
+beforeEach(async () => {
+  await cleanup();
+  enqueued.length = 0;
+  const [r] = await db.insert(restaurants).values({ name: 'Manual-line hold test', vatRate: '0.18' }).returning();
+  restaurantId = r!.id;
+  const [u] = await db
+    .insert(users)
+    .values({ email: `hold-${restaurantId.slice(0, 8)}@test.local`, name: 'Owner', emailVerified: new Date() })
+    .returning();
+  userId = u!.id;
+  await db.insert(memberships).values({ userId, restaurantId, role: 'owner' });
+  const [s] = await db.insert(suppliers).values({ restaurantId, name: 'ספק שמן', vatRate: '0.18' }).returning();
+  supplierId = s!.id;
+  const [p] = await db
+    .insert(products)
+    .values({ restaurantId, canonicalName: 'שמן זית', category: 'שמנים', defaultUnit: 'ליטר' })
+    .returning();
+  productId = p!.id;
+  const [po] = await db
+    .insert(purchaseOrders)
+    .values({ restaurantId, supplierId, expectedDeliveryAt: new Date(), status: 'sent', source: 'manual' })
+    .returning();
+  const [pl] = await db
+    .insert(poLines)
+    .values({ poId: po!.id, productId: p!.id, rawDescription: 'שמן זית 1 ליטר', qtyOrdered: '10', unit: 'ליטר', unitPriceExpected: '125' })
+    .returning();
+  poLineId = pl!.id;
+  const [gr] = await db.insert(goodsReceipts).values({ restaurantId, poId: po!.id, receivedBy: userId, status: 'pending' }).returning();
+  grId = gr!.id;
+  const [gl] = await db.insert(grLines).values({ grId, poLineId, productId: p!.id, qtyReceived: '0' }).returning();
+  grLineId = gl!.id;
+});
+
+afterAll(cleanup);
+
+const as = (role: 'owner' | 'receiver') =>
+  appRouter.createCaller({ db, session: { userId, restaurantId, role } } as unknown as AppContext);
+
+describe('#216 item 1: a hand line on an open receipt is held, then matched by the real submit → match job', () => {
+  it('addInvoiceLine while counting → held (no run); submitReceipt → matchInvoiceForJob → PRICE_HIGHER', async () => {
+    const reg = await as('receiver').receiving.registerInvoice({ grId, imageUrl: 'https://example.com/scans/oil.jpg', supplierId });
+    // The read failed (the worker's terminal state), the receipt stamp kept.
+    await db
+      .update(invoices)
+      .set({ status: 'parsed', ocrConfidence: '0', ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: grId } } })
+      .where(eq(invoices.id, reg.invoiceId));
+
+    // Billed 132 vs ordered 125 — typed by hand while the receipt is still open.
+    const added = await as('owner').receiving.addInvoiceLine({
+      invoiceId: reg.invoiceId,
+      line: { rawDescription: 'שמן זית 1 ליטר', qtyBilled: 10, unit: 'ליטר', unitPriceBilled: 132, poLineId },
+    });
+    expect(added.rematched).toBe(false);
+    expect(added.rematchSkipped).toBe('receipt_open');
+    const [held] = await db.select().from(invoices).where(eq(invoices.id, reg.invoiceId));
+    expect(held!.status).toBe('parsed'); // round 7: not "checked" until its run lands (out of the export)
+    expect((held!.ocrPayload?.raw as { heldForReceipts?: string[] }).heldForReceipts).toEqual([grId]);
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, reg.invoiceId))).toHaveLength(0);
+
+    // The count lands "= order" and the receipt is submitted.
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
+    await as('receiver').receiving.submitReceipt({ grId });
+    const job = enqueued.find((j) => j.invoiceId === reg.invoiceId);
+    expect(job).toBeDefined();
+
+    // The REAL worker job matches it against the count.
+    const out = await matchInvoiceForJob(db, job!);
+    expect(out.skipped).toBeUndefined();
+    expect(out.persisted).not.toBeNull();
+    const found = await db
+      .select({ type: discrepancies.type, delta: discrepancies.deltaAmount })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(and(eq(matchRuns.invoiceId, reg.invoiceId), eq(matchRuns.restaurantId, restaurantId)));
+    // Exactly the overcharge: 10 × (132 − 125) = 70.00 — nothing read off an empty count.
+    expect(found.map((f) => f.type)).toEqual(['PRICE_HIGHER']);
+    expect(found[0]!.delta).toBe('70.00');
+  });
+});
+
+/** Until some backend of this database is blocked BY the holder (pg_blocking_pids) — no sleep, no unrelated waits. */
+async function waitForBlockedBy(holderPid: number, timeoutMs = 10_000) {
+  const until = Date.now() + timeoutMs;
+  for (;;) {
+    const rows = (await db.execute(
+      sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and ${holderPid}::int = any(pg_blocking_pids(pid))`,
+    )) as unknown as Array<{ n: number }>;
+    if (rows[0]!.n > 0) return;
+    if (Date.now() > until) throw new Error(`nothing waited on backend ${holderPid}`);
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
+describe('#216 round 3, K: a match job never writes a run over an invoice sent back to OCR (retake) mid-job', () => {
+  it('the persist step re-checks the status under the invoice row lock', async () => {
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, grId));
+    const [po] = await db.select({ poId: goodsReceipts.poId }).from(goodsReceipts).where(eq(goodsReceipts.id, grId));
+    const [inv] = await db
+      .insert(invoices)
+      .values({
+        restaurantId,
+        supplierId,
+        status: 'matched',
+        source: 'photo',
+        rawImageUrl: 'https://example.com/scans/k.jpg',
+        totalExclVat: '1320.00',
+        vatAmount: '237.60',
+        totalInclVat: '1557.60',
+        ocrPayload: { provider: 'claude_vision', raw: { scanGrId: grId } },
+      })
+      .returning();
+    await db.insert(invoiceLines).values({ invoiceId: inv!.id, rawDescription: 'שמן זית 1 ליטר', qtyBilled: '10', unit: 'ליטר', unitPriceBilled: '132', lineTotal: '1320.00' });
+
+    const other = createDb(testDbUrl()); // the retake, holding the invoice row
+    let job: ReturnType<typeof matchInvoiceForJob> | undefined;
+    await other.transaction(async (tx) => {
+      const holder = ((await tx.execute(sql`select pg_backend_pid()::int as pid`)) as unknown as Array<{ pid: number }>)[0]!.pid;
+      await tx.select({ id: invoices.id }).from(invoices).where(eq(invoices.id, inv!.id)).for('update');
+      job = matchInvoiceForJob(db, { restaurantId, invoiceId: inv!.id, rematch: true, poId: po!.poId! });
+      await waitForBlockedBy(holder); // the job read the old status, built, and now waits on the row
+      await tx.update(invoices).set({ status: 'ocr_pending' }).where(eq(invoices.id, inv!.id));
+    });
+    const out = await job!;
+    expect(out.skipped).toBe('ocr_pending');
+    expect(out.persisted).toBeNull();
+    expect(await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, inv!.id))).toHaveLength(0);
+  });
+});
+
+describe('#216 round 4, item 2: the submit job matches the COUNTED order strictly', () => {
+  it('a same-day second order (received, nearer) never takes the job — a run on the job\'s PO, not po_rejected', async () => {
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, grId));
+    const [gr] = await db.select({ poId: goodsReceipts.poId }).from(goodsReceipts).where(eq(goodsReceipts.id, grId));
+    await db.update(purchaseOrders).set({ expectedDeliveryAt: new Date(Date.now() - 2 * 86_400_000) }).where(eq(purchaseOrders.id, gr!.poId!));
+    const [po2] = await db
+      .insert(purchaseOrders)
+      .values({ restaurantId, supplierId, expectedDeliveryAt: new Date(), status: 'sent', source: 'manual' })
+      .returning();
+    await db.insert(poLines).values({ poId: po2!.id, rawDescription: 'שמן זית 1 ליטר', qtyOrdered: '10', unit: 'ליטר', unitPriceExpected: '125' });
+    await db.insert(goodsReceipts).values({ restaurantId, poId: po2!.id, status: 'completed', receivedAt: new Date() });
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId, supplierId, status: 'matched', source: 'photo', rawImageUrl: 'https://example.com/scans/two.jpg', ocrPayload: { provider: 'claude_vision', raw: { scanGrId: grId } } })
+      .returning();
+    await db.insert(invoiceLines).values({ invoiceId: inv!.id, rawDescription: 'שמן זית 1 ליטר', qtyBilled: '10', unit: 'ליטר', unitPriceBilled: '132', lineTotal: '1320.00' });
+    const out = await matchInvoiceForJob(db, { restaurantId, invoiceId: inv!.id, rematch: true, poId: gr!.poId! });
+    expect(out.skipped).toBeUndefined();
+    const [run] = await db.select({ poId: matchRuns.poId }).from(matchRuns).where(eq(matchRuns.invoiceId, inv!.id));
+    expect(run).toMatchObject({ poId: gr!.poId });
+  });
+});
+
+describe('#216 HARD GATE (train A): a failed read keeps its receipt — the REAL markOcrFailed', () => {
+  it('register → markOcrFailed → the picker still has the order; a re-scan retakes the SAME invoice (ocr_pending)', async () => {
+    const reg = await as('receiver').receiving.registerInvoice({ grId, imageUrl: 'https://example.com/scans/blurry.jpg', supplierId });
+    expect(reg.alreadyExisted).toBe(false);
+    // The worker's own terminal failure (train A #171: merges into raw, keeps the stamp).
+    await markOcrFailed(db, restaurantId, reg.invoiceId, new Error('extraction failed'));
+    const [failed] = await db.select().from(invoices).where(eq(invoices.id, reg.invoiceId));
+    expect(failed!.status).toBe('parsed');
+    expect(failed!.ocrPayload?.raw).toMatchObject({ ocrFailed: true, scanGrId: grId });
+    // The receipt is still known: the hand-entry picker offers the order's lines.
+    const page = await as('owner').receiving.getInvoice({ invoiceId: reg.invoiceId });
+    expect(page.orderLines.map((l) => l.id)).toContain(poLineId);
+    // The receiver photographs it again: the SAME invoice, read again.
+    const again = await as('receiver').receiving.registerInvoice({ grId, imageUrl: 'https://example.com/scans/sharp.jpg', supplierId });
+    expect(again).toMatchObject({ invoiceId: reg.invoiceId, alreadyExisted: false });
+    const [retaken] = await db.select().from(invoices).where(eq(invoices.id, reg.invoiceId));
+    expect(retaken).toMatchObject({ status: 'ocr_pending', rawImageUrl: 'https://example.com/scans/sharp.jpg' });
+    expect(retaken!.ocrPayload?.raw).toMatchObject({ scanGrId: grId });
+    expect(await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.restaurantId, restaurantId))).toHaveLength(1);
+  });
+});
+
+describe('#216 round 6, items 1+3: an invoice whose receipt is still being counted is HELD, then matched by the real submit', () => {
+  /** An emailed invoice (no scan stamp, no OCR markers): its order + receipt are found by discovery. */
+  async function emailInvoice(status: 'parsed' | 'matched' = 'parsed') {
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId, supplierId, status, source: 'email', totalExclVat: '1250.00', vatAmount: '225.00', totalInclVat: '1475.00' })
+      .returning();
+    await db.insert(invoiceLines).values({ invoiceId: inv!.id, productId, rawDescription: 'שמן זית 1 ליטר', qtyBilled: '10', unit: 'ליטר', unitPriceBilled: '125', lineTotal: '1250.00' });
+    return inv!.id;
+  }
+  const runsOf = (id: string) => db.select().from(matchRuns).where(eq(matchRuns.invoiceId, id));
+  const typesOf = async (id: string) =>
+    (
+      await db.select({ type: discrepancies.type }).from(discrepancies).innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId)).where(eq(matchRuns.invoiceId, id))
+    ).map((r) => r.type);
+  async function submitAndRunJob(invoiceId: string) {
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId)); // counted = ordered
+    await as('receiver').receiving.submitReceipt({ grId });
+    const job = enqueued.find((j) => j.invoiceId === invoiceId);
+    expect(job).toBeDefined(); // the submit claimed the held invoice
+    const out = await matchInvoiceForJob(db, job!);
+    expect(out.skipped).toBeUndefined();
+    expect(out.persisted).not.toBeNull();
+    // Round 7 item 3: the run on the receipt it waited for ends the hold.
+    const [after] = await db.select({ status: invoices.status, payload: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, invoiceId));
+    expect(after!.status).toBe('matched');
+    expect((after!.payload?.raw as Record<string, unknown> | undefined)?.heldForReceipts).toBeUndefined();
+  }
+
+  it('email + parsed + open receipt → Re-run holds it (no run) → submitReceipt enqueues it → the job matches it clean on the receipt', async () => {
+    const inv = await emailInvoice('parsed');
+    expect(await as('owner').match.runForInvoice({ invoiceId: inv })).toMatchObject({ matchRunId: null, status: 'held', held: 'receipt_open' });
+    expect(await runsOf(inv)).toHaveLength(0);
+    const [held] = await db.select().from(invoices).where(eq(invoices.id, inv));
+    expect(held!.status).toBe('parsed'); // round 7: stays unchecked (export, pending list) until the run
+    expect(held!.ocrPayload?.raw).toEqual({ heldForReceipts: [grId] });
+
+    await submitAndRunJob(inv);
+    const [run] = await runsOf(inv);
+    expect(run).toMatchObject({ grId, overallStatus: 'clean' });
+    expect(await typesOf(inv)).toEqual([]);
+  });
+
+  it('email + a prior run with NO receipt (grId null) → held → submitReceipt → re-matched on the receipt', async () => {
+    const inv = await emailInvoice('matched');
+    const [gr] = await db.select({ poId: goodsReceipts.poId }).from(goodsReceipts).where(eq(goodsReceipts.id, grId));
+    // Matched before the delivery was being counted: a run on the order, no receipt.
+    await db.insert(matchRuns).values({ restaurantId, poId: gr!.poId, grId: null, invoiceId: inv, overallStatus: 'blocked', totalDiscrepancyAmount: '1250.00', runAt: new Date(Date.now() - 3_600_000) });
+    expect(await as('owner').match.runForInvoice({ invoiceId: inv })).toMatchObject({ status: 'held', held: 'receipt_open' });
+    expect((await runsOf(inv)).map((r) => r.grId)).toEqual([null]); // the old run is untouched until the count
+
+    await submitAndRunJob(inv);
+    const runs = await runsOf(inv);
+    expect(runs).toHaveLength(1); // replaced, not stacked
+    expect(runs[0]).toMatchObject({ grId, overallStatus: 'clean' });
+    expect(await typesOf(inv)).toEqual([]);
+  });
+
+  it('edit path: a hand line on an UNSTAMPED invoice whose discovered receipt is open → held (heldForReceipts), never orphaned', async () => {
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId, supplierId, status: 'parsed', source: 'email', ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed' } } })
+      .returning();
+    // This supplier's name for the product (the catalogue links the free-text line to it).
+    await db.insert(productAliases).values({ productId, supplierId, supplierNameRaw: 'שמן זית 1 ליטר' });
+    const added = await as('owner').receiving.addInvoiceLine({
+      invoiceId: inv!.id,
+      // Free text: an unstamped invoice has no order the picker could offer yet.
+      line: { rawDescription: 'שמן זית 1 ליטר', qtyBilled: 10, unit: 'ליטר', unitPriceBilled: 125 },
+    });
+    expect(added).toMatchObject({ rematched: false, rematchSkipped: 'receipt_open' });
+    const [held] = await db.select().from(invoices).where(eq(invoices.id, inv!.id));
+    expect(held!.status).toBe('parsed');
+    expect((held!.ocrPayload?.raw as { heldForReceipts?: string[] }).heldForReceipts).toEqual([grId]);
+    expect(await runsOf(inv!.id)).toHaveLength(0);
+
+    await submitAndRunJob(inv!.id);
+    const [run] = await runsOf(inv!.id);
+    expect(run).toMatchObject({ grId });
+    expect(await typesOf(inv!.id)).toEqual([]);
+  });
+});
+
+describe('#216 round 7', () => {
+  async function emailInvoice() {
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId, supplierId, status: 'matched', source: 'email', totalExclVat: '1250.00', vatAmount: '225.00', totalInclVat: '1475.00' })
+      .returning();
+    await db.insert(invoiceLines).values({ invoiceId: inv!.id, productId, rawDescription: 'שמן זית 1 ליטר', qtyBilled: '10', unit: 'ליטר', unitPriceBilled: '125', lineTotal: '1250.00' });
+    return inv!.id;
+  }
+  /** A run from before the count (no receipt): the whole invoice "missing", with a claim on it. */
+  async function priorRunWithClaim(inv: string, claim: { letterSent: boolean }) {
+    const [gr] = await db.select({ poId: goodsReceipts.poId }).from(goodsReceipts).where(eq(goodsReceipts.id, grId));
+    const [run] = await db
+      .insert(matchRuns)
+      .values({ restaurantId, poId: gr!.poId, grId: null, invoiceId: inv, overallStatus: 'blocked', totalDiscrepancyAmount: '1250.00', runAt: new Date(Date.now() - 3_600_000) })
+      .returning();
+    const [d] = await db
+      .insert(discrepancies)
+      .values({ matchRunId: run!.id, restaurantId, type: 'QTY_SHORT', severity: 'block', deltaAmount: '1250.00', resolutionStatus: 'accepted' } as never)
+      .returning();
+    const [c] = await db
+      .insert(recoveryClaims)
+      .values({ restaurantId, discrepancyId: d!.id, supplierId, invoiceId: inv, amountAgorot: 125_000, ...(claim.letterSent ? { status: 'letter_sent', letterSentAt: new Date() } : {}) } as never)
+      .returning();
+    return { runId: run!.id, claimId: c!.id };
+  }
+  const claimsOf = (inv: string) => db.select().from(recoveryClaims).where(eq(recoveryClaims.invoiceId, inv));
+
+  it('item 1: a prior run carrying a bare claim → Re-run holds it (claim released) → submit → the job matches it clean on the receipt', async () => {
+    const inv = await emailInvoice();
+    await priorRunWithClaim(inv, { letterSent: false });
+    expect(await as('owner').match.runForInvoice({ invoiceId: inv })).toMatchObject({ status: 'held', held: 'receipt_open' });
+    expect(await claimsOf(inv)).toHaveLength(0); // bare claim released with the hold
+
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
+    await as('receiver').receiving.submitReceipt({ grId });
+    const job = enqueued.find((j) => j.invoiceId === inv);
+    expect(job).toBeDefined();
+    const out = await matchInvoiceForJob(db, job!);
+    expect(out.skipped).toBeUndefined(); // no FK 23503 on the claim
+    const runs = await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, inv));
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ grId, overallStatus: 'clean' });
+  });
+
+  it('item 1 (variant B): a claim whose letter was sent refuses the Re-run visibly (invoice.claimInProgress) — no hold, the run and claim stand', async () => {
+    const inv = await emailInvoice();
+    const { runId, claimId } = await priorRunWithClaim(inv, { letterSent: true });
+    await expect(as('owner').match.runForInvoice({ invoiceId: inv })).rejects.toMatchObject({ code: 'CONFLICT', cause: { appCode: 'invoice.claimInProgress' } });
+    const [row] = await db.select({ payload: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, inv));
+    expect((row!.payload?.raw as Record<string, unknown> | undefined)?.heldForReceipts).toBeUndefined();
+    expect((await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, inv))).map((r) => r.id)).toEqual([runId]);
+    expect((await claimsOf(inv)).map((c) => c.id)).toEqual([claimId]);
+  });
+
+  it('item 1 (job side): a held invoice whose run gained a claim in progress → the job skips (claim_in_progress), never throws on the claim FK', async () => {
+    const inv = await emailInvoice();
+    const { runId } = await priorRunWithClaim(inv, { letterSent: true });
+    await db.update(invoices).set({ ocrPayload: { raw: { heldForReceipts: [grId] } } as never }).where(eq(invoices.id, inv));
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
+    await as('receiver').receiving.submitReceipt({ grId });
+    const job = enqueued.find((j) => j.invoiceId === inv);
+    expect(job).toBeDefined();
+    const out = await matchInvoiceForJob(db, job!);
+    expect(out).toMatchObject({ skipped: 'claim_in_progress', persisted: null });
+    expect((await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, inv))).map((r) => r.id)).toEqual([runId]);
+    expect(await claimsOf(inv)).toHaveLength(1);
+    // Round 8 item 1b: never silent — recorded on the invoice; the page and the dock slip say so.
+    const [row] = await db.select({ payload: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, inv));
+    expect((row!.payload?.raw as Record<string, unknown>).rematchBlocked).toMatchObject({ grId, reason: 'claim_in_progress' });
+    expect((await as('owner').receiving.getInvoice({ invoiceId: inv })).rematchBlocked).toEqual({ reason: 'claim_in_progress' });
+    await db.update(restaurants).set({ settings: { features: { dockSlip: true } } as never }).where(eq(restaurants.id, restaurantId));
+    const slip = await as('owner').receiving.dockSlip({ grId, invoiceId: inv });
+    expect(slip).toMatchObject({ engine: { holdReason: 'claim_in_progress' } });
+  });
+
+  it('round 8 item 1 (P1): while held, the tracker sync never re-files the released claim on the OLD run → submit → the job matches clean, ₪0', async () => {
+    const inv = await emailInvoice();
+    await priorRunWithClaim(inv, { letterSent: false });
+    expect(await as('owner').match.runForInvoice({ invoiceId: inv })).toMatchObject({ status: 'held' });
+    expect(await claimsOf(inv)).toHaveLength(0);
+    // The ₪-back tracker opens (recovery.summary / list sync first): nothing re-filed on the run being replaced.
+    expect(await syncClaims(db, restaurantId, userId)).toBe(0);
+    expect(await claimsOf(inv)).toHaveLength(0);
+    // Round 9 item 2: …but never hidden either — the tracker shows it as waiting for the count (T4).
+    await db.update(restaurants).set({ settings: { features: { recovery: true } } as never }).where(eq(restaurants.id, restaurantId));
+    expect((await as('owner').recovery.summary()).summary.heldForCount).toEqual({ count: 1, agorot: 125_000 });
+
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
+    await as('receiver').receiving.submitReceipt({ grId });
+    const job = enqueued.find((j) => j.invoiceId === inv);
+    const out = await matchInvoiceForJob(db, job!);
+    expect(out.skipped).toBeUndefined();
+    expect(out.result.totalDiscrepancyAmount).toBe(0);
+    const runs = await db.select().from(matchRuns).where(eq(matchRuns.invoiceId, inv));
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ grId, overallStatus: 'clean', totalDiscrepancyAmount: '0.00' });
+    expect(await syncClaims(db, restaurantId, userId)).toBe(0); // nothing to claim on a clean run
+    expect((await as('owner').recovery.summary()).summary.heldForCount).toEqual({ count: 0, agorot: 0 });
+  });
+});
+
+describe('G-08 × #216: a hand line with no product is an open question on BOTH match paths', () => {
+  const runsOf = (id: string) => db.select().from(matchRuns).where(eq(matchRuns.invoiceId, id));
+  const findingsOf = async (id: string) =>
+    (
+      await db
+        .select({ type: discrepancies.type, delta: discrepancies.deltaAmount })
+        .from(discrepancies)
+        .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+        .where(and(eq(matchRuns.invoiceId, id), eq(matchRuns.restaurantId, restaurantId)))
+    ).map((f) => `${f.type}:${f.delta}`);
+
+  it('typed while counting → submit → the REAL job persists no run (awaiting_review), Re-run refuses the same lines, the slip says so; answered → both paths match it alike', async () => {
+    const reg = await as('receiver').receiving.registerInvoice({ grId, imageUrl: 'https://example.com/scans/towels.jpg', supplierId });
+    const inv = reg.invoiceId;
+    await db
+      .update(invoices)
+      .set({ status: 'parsed', ocrConfidence: '0', ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: grId } } })
+      .where(eq(invoices.id, inv));
+    // The oil line picked from the order, and a free-text line no catalogue key knows.
+    const oil = await as('owner').receiving.addInvoiceLine({
+      invoiceId: inv,
+      line: { rawDescription: 'שמן זית 1 ליטר', qtyBilled: 10, unit: 'ליטר', unitPriceBilled: 125, poLineId },
+    });
+    const towels = await as('owner').receiving.addInvoiceLine({
+      invoiceId: inv,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    expect([oil.rematchSkipped, towels.rematchSkipped]).toEqual(['receipt_open', 'receipt_open']);
+    const [line] = await db.select({ productId: invoiceLines.productId }).from(invoiceLines).where(eq(invoiceLines.id, towels.lineId));
+    expect(line!.productId).toBeNull();
+
+    // The count lands "= order" and is submitted: the job the submit enqueues…
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
+    await as('receiver').receiving.submitReceipt({ grId });
+    const job = enqueued.find((j) => j.invoiceId === inv);
+    expect(job).toBeDefined();
+    // …never reads the question line as UNORDERED (a false ₪15 leak): no run.
+    expect(await matchInvoiceForJob(db, job!)).toMatchObject({ skipped: 'awaiting_review', persisted: null });
+    expect(await runsOf(inv)).toHaveLength(0);
+    // The manual path on the SAME lines: refused alike.
+    await expect(as('owner').match.runForInvoice({ invoiceId: inv })).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      cause: { appCode: 'invoice.unlinkedLines' },
+    });
+    expect(await runsOf(inv)).toHaveLength(0);
+    // The dock slip, one rule with the job: it waits for review, never "a run is coming".
+    await db.update(restaurants).set({ settings: { features: { dockSlip: true } } as never }).where(eq(restaurants.id, restaurantId));
+    expect(await as('owner').receiving.dockSlip({ grId, invoiceId: inv })).toMatchObject({ engine: { ready: false, holdReason: 'awaiting_review' } });
+
+    // Answered in the mapper (a product this order does not carry). The mapper's
+    // re-match job (rematch, no poId) and the manual Re-run now agree.
+    const [towelProduct] = await db.insert(products).values({ restaurantId, canonicalName: 'מגבות נייר' }).returning();
+    await db.update(invoiceLines).set({ productId: towelProduct!.id }).where(eq(invoiceLines.id, towels.lineId));
+    const answered = await matchInvoiceForJob(db, { restaurantId, invoiceId: inv, rematch: true });
+    expect(answered.skipped).toBeUndefined();
+    expect(answered.persisted).not.toBeNull();
+    const byJob = await findingsOf(inv);
+    expect(byJob).toEqual(['UNORDERED_ITEM:15.00']); // the oil line pairs (10 × 125 = the order), the towels are not ordered
+    expect((await runsOf(inv))[0]).toMatchObject({ grId });
+    expect((await as('owner').match.runForInvoice({ invoiceId: inv })).matchRunId).not.toBeNull();
+    expect(await findingsOf(inv)).toEqual(byJob);
+  });
+
+  it('the guard is the hand-entered marker, not the receipt state: typed on a CLOSED receipt the re-match is refused, a later job persists nothing either', async () => {
+    await db.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, grLineId));
+    await db.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, grId));
+    const reg = await as('receiver').receiving.registerInvoice({ grId, imageUrl: 'https://example.com/scans/towels2.jpg', supplierId });
+    const inv = reg.invoiceId;
+    await db
+      .update(invoices)
+      .set({ status: 'parsed', ocrConfidence: '0', ocrPayload: { provider: 'claude_vision', raw: { ocrFailed: true, reason: 'extraction_failed', scanGrId: grId } } })
+      .where(eq(invoices.id, inv));
+    const oil = await as('owner').receiving.addInvoiceLine({
+      invoiceId: inv,
+      line: { rawDescription: 'שמן זית 1 ליטר', qtyBilled: 10, unit: 'ליטר', unitPriceBilled: 132, poLineId },
+    });
+    expect(oil.rematched).toBe(true); // the picked line alone: a run (PRICE_HIGHER 70)
+    const [run] = await runsOf(inv);
+    const towels = await as('owner').receiving.addInvoiceLine({
+      invoiceId: inv,
+      line: { rawDescription: 'מגבות נייר', qtyBilled: 1, unit: 'יח׳', unitPriceBilled: 15 },
+    });
+    expect(towels).toMatchObject({ rematched: false, rematchSkipped: 'refused' });
+    // A receipt re-submit's job (rematch, the counted order) keeps the run that stands — no run over the question.
+    const [gr] = await db.select({ poId: goodsReceipts.poId }).from(goodsReceipts).where(eq(goodsReceipts.id, grId));
+    expect(await matchInvoiceForJob(db, { restaurantId, invoiceId: inv, rematch: true, poId: gr!.poId! })).toMatchObject({
+      skipped: 'awaiting_review',
+      persisted: null,
+    });
+    expect((await runsOf(inv)).map((r) => r.id)).toEqual([run!.id]);
+    expect(await findingsOf(inv)).toEqual(['PRICE_HIGHER:70.00']);
+  });
+});

@@ -105,6 +105,8 @@ function heroData(h: LeakHero) {
     invoiceCount: h.invoiceCount,
     invoicesWithLeak: h.invoicesWithLeak,
     pendingLinkCount: h.pendingLinkCount,
+    // G-08: held for a "זה אותו מוצר?" question — in neither leak nor spend.
+    awaitingQuestionCount: h.awaitingQuestionCount,
   };
 }
 
