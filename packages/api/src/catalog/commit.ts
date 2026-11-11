@@ -8,28 +8,25 @@ import {
   type Database,
 } from '@restomatch/db';
 import {
+  MAX_SUGGESTIONS,
+  REVIEW_FLOOR,
+  decideLink,
+  isExactKey,
   matchProductTopN,
+  rankSuggestions,
   recordConfirmedMatch,
   type EmbeddingProvider,
+  type ReviewReason as LinkReviewReason,
 } from '@restomatch/catalog';
 import { areConvertible } from '@restomatch/matching';
 import { sameUnit } from '../lib/unitPrice';
 import type { CatalogRow } from './parse';
 
-/**
- * Confidence at/above which a row auto-links to an existing product — and only
- * when its unit and pack also fit. Anything less is a suggestion for a person.
+/*
+ * G-08: the thresholds (auto ≥ 0.95 with a fitting unit/pack, review floor 0.6,
+ * 1.000 reserved for a person) live in ONE place — `decideLink` in
+ * `@restomatch/catalog` (linkPolicy.ts), shared with OCR and order capture.
  */
-const AUTO_LINK = 0.95;
-/**
- * Interim provenance: an alias at confidence 1.000 means a PERSON linked it
- * (mapping.confirm, the import review, a catalog edit). A machine link — an
- * automatic match, or a product made from this very row — is stored just below,
- * so a guess is never saved as certainty.
- */
-const MACHINE_MAX_CONFIDENCE = 0.999;
-/** Floor below which we create a new product instead of linking. */
-const REVIEW_FLOOR = 0.6;
 
 export interface CommitArgs {
   restaurantId: string;
@@ -38,7 +35,8 @@ export interface CommitArgs {
 }
 
 /** Why a suggested link needs a person ("בדיקה"). */
-export type ReviewReason = 'MEDIUM_CONFIDENCE' | 'UNIT_MISMATCH' | 'PACK_MISMATCH';
+export type ReviewReason = Exclude<LinkReviewReason, 'UNKNOWN_UNIT'>;
+type FitReason = 'UNIT_MISMATCH' | 'PACK_MISMATCH';
 
 /**
  * A price-list row saved WITHOUT a product link: the matcher found a candidate
@@ -59,6 +57,8 @@ export interface AmbiguousRow {
   confidence: number;
   matchedBy: string;
   reasons: ReviewReason[];
+  /** G-08: the top ≤3 candidates (best first) for the person to pick from; the first is `productId`. */
+  suggestions: Array<{ productId: string; canonicalName: string; confidence: number; matchedBy: string }>;
 }
 
 /** Write progress to the import row every this many rows (background imports). */
@@ -131,8 +131,8 @@ export async function commitCatalogRows(
     // 2. Resolve the canonical product.
     let productId: string | null = existing?.productId ?? null;
     let createdNewProduct = false;
-    /** The matcher's confidence for an automatic link (learned as-is, never rounded up to 1). */
-    let linkConfidence: number | null = null;
+    /** An automatic link proven by an exact key: the only machine link that learns an alias. */
+    let exactKeyLink = false;
     let pendingReview: Omit<AmbiguousRow, 'itemId'> | null = null;
     let embedding: number[] | null = null;
     if (!productId) {
@@ -157,22 +157,26 @@ export async function commitCatalogRows(
               embedding,
               ...(row.barcodeEan ? { barcode: row.barcodeEan } : {}),
             },
-            1,
+            MAX_SUGGESTIONS,
           )
         : [];
-      const top = candidates[0];
-      const reasons: ReviewReason[] = [];
+      // G-08: ONE link policy. Unit/pack is checked against the best candidate.
+      const top = rankSuggestions(candidates)[0];
       let productUnit: string | null = null;
+      let fitReasons: FitReason[] = [];
       if (top && top.confidence >= REVIEW_FLOOR) {
-        if (top.confidence < AUTO_LINK) reasons.push('MEDIUM_CONFIDENCE');
         const fit = await unitPackFit(db, restaurantId, supplierId, top.productId, row);
         productUnit = fit.productUnit;
-        reasons.push(...fit.reasons);
+        fitReasons = fit.reasons;
       }
-      if (top && top.confidence >= REVIEW_FLOOR && reasons.length === 0) {
-        productId = top.productId;
-        linkConfidence = top.confidence;
-      } else if (top && top.confidence >= REVIEW_FLOOR) {
+      const decision = decideLink(candidates, {
+        unitPack: fitReasons.length > 0 ? 'mismatch' : 'match',
+        mismatch: fitReasons,
+      });
+      if (decision.decision === 'auto' && top) {
+        productId = decision.productId;
+        exactKeyLink = isExactKey(top);
+      } else if (decision.decision === 'review' && top) {
         // Suggest, never link: the row is saved unlinked (productId null) and
         // no alias is learned until a person accepts (catalog-01).
         pendingReview = {
@@ -184,7 +188,14 @@ export async function commitCatalogRows(
           productUnit,
           confidence: top.confidence,
           matchedBy: top.matchedBy,
-          reasons,
+          // Import always knows the row's unit fit, so UNKNOWN_UNIT never arises here.
+          reasons: decision.reasons.filter((r): r is ReviewReason => r !== 'UNKNOWN_UNIT'),
+          suggestions: decision.suggestions.map((c) => ({
+            productId: c.productId,
+            canonicalName: c.canonicalName,
+            confidence: c.confidence,
+            matchedBy: c.matchedBy,
+          })),
         };
       } else {
         const [p] = await db
@@ -243,19 +254,19 @@ export async function commitCatalogRows(
     if (pendingReview) ambiguous.push({ itemId, ...pendingReview });
 
     // 4. Learn the supplier-name → product alias for future invoice OCR — only
-    //    for a product made from this very row or an automatic link, at a
-    //    machine confidence (< 1.000, which is reserved for a person). An
-    //    existing link was already learned when it was made; a suggestion
-    //    learns nothing until accepted.
-    if (productId && (createdNewProduct || linkConfidence != null)) {
+    //    for a product made from this very row or an EXACT-KEY automatic link
+    //    (machine provenance, 0.999 interim; 1.000 is reserved for a person).
+    //    A name-similarity auto-link (embedding/fuzzy ≥ 0.95, unit fits) links
+    //    this price-list row but learns NO confirmed alias (G-08): a guess must
+    //    never auto-resolve every future invoice line. An existing link was
+    //    already learned when it was made; a suggestion learns nothing until accepted.
+    if (productId && (createdNewProduct || exactKeyLink)) {
       await recordConfirmedMatch(db, {
         productId,
         rawName: row.supplierNameRaw,
         supplierId,
         supplierSku: row.supplierSku,
-        confidence: createdNewProduct
-          ? MACHINE_MAX_CONFIDENCE
-          : Math.min(MACHINE_MAX_CONFIDENCE, Math.floor(linkConfidence! * 1000) / 1000),
+        provenance: createdNewProduct ? 'newProduct' : 'exactKey',
       });
     }
 
@@ -285,14 +296,14 @@ async function unitPackFit(
   supplierId: string,
   productId: string,
   row: CatalogRow,
-): Promise<{ productUnit: string | null; reasons: ReviewReason[] }> {
+): Promise<{ productUnit: string | null; reasons: FitReason[] }> {
   const [p] = await db
     .select({ defaultUnit: products.defaultUnit })
     .from(products)
     .where(and(eq(products.id, productId), eq(products.restaurantId, restaurantId)))
     .limit(1);
   const productUnit = p?.defaultUnit ?? null;
-  const reasons: ReviewReason[] = [];
+  const reasons: FitReason[] = [];
   if (
     row.unit &&
     productUnit &&

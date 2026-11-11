@@ -4,6 +4,8 @@ import type { he } from './delivery.he';
 export const en: Shape<typeof he> = {
   delivery: {
     scan: {
+      registerFailed: 'The invoice was not saved — take the photo again',
+      registerRetry: 'Try saving again',
       upload: 'Upload a file / PDF',
       uploaded: 'Invoice uploaded',
       uploading: 'Uploading the invoice · {seconds} s',
@@ -14,6 +16,7 @@ export const en: Shape<typeof he> = {
       useAnyway: 'Use this photo anyway',
     },
     processing: {
+      ocrDisabled: 'Automatic reading is off for this account — continue against the order',
       uploaded: 'Invoice received',
       reading: 'Reading the invoice lines',
       compare: 'Comparing with the order',

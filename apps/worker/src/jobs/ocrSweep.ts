@@ -35,13 +35,15 @@
  *     a receipt-less photo scan while its supplier has a receipt being counted
  *     (ocrInvoice.ts, ocrAutoMatchDecision); that receipt's submit matches it.
  *
- * Without ANTHROPIC_API_KEY a retry could only fail (the original job may have
- * carried dev stub results), so the sweep does nothing.
+ * Only tenants on real OCR (ocrInvoice.ts ocrModeFor → 'claude': ANTHROPIC_API_KEY
+ * set AND the restaurant in OCR_REAL_RESTAURANT_IDS) are swept. Anyone else's
+ * retry could only be refused ('disabled') or re-stub the demo, so with nobody
+ * listed the sweep does nothing.
  */
-import { signObjectRef, toObjectRef } from '@restomatch/api';
 import type { Sql } from '@restomatch/queue';
 import { insertJob } from '@restomatch/queue';
 import { makeWorker, workerSql, type WorkerJob } from '../queue';
+import { claudeOcrRestaurantIds, rowScanUrl } from './ocrInvoice';
 
 export type OcrSweepJob = { now?: string };
 
@@ -69,34 +71,63 @@ export const G09_HOLD_MAX_MS = 30 * 60_000;
 /** G-09: path-form scans are signed at sweep time, so they have no URL expiry; look back a day. */
 export const G09_PATH_MAX_AGE_MS = 24 * 60 * 60_000;
 
-export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepResult> {
+/**
+ * `restaurantIds` = the tenants on real OCR (claudeOcrRestaurantIds); others are
+ * never re-enqueued. Defaults to the environment's list (empty = nothing swept).
+ */
+export async function runOcrSweep(
+  sql: Sql,
+  now = new Date(),
+  restaurantIds: Iterable<string> = claudeOcrRestaurantIds(),
+): Promise<OcrSweepResult> {
+  const only = [...restaurantIds].map((id) => id.toLowerCase());
+  if (only.length === 0) return { requeued: [], raced: [] };
   const staleBefore = new Date(now.getTime() - OCR_SWEEP_STALE_AFTER_MS);
   const notBefore = new Date(now.getTime() - OCR_SWEEP_MAX_AGE_MS);
+  // A scan is pending since it was registered — or since its latest RETAKE
+  // (registerInvoice: same invoice, new photo, back to ocr_pending; audited
+  // 'receiving.invoice_retaken'). Only jobs from that moment on are "on record":
+  // the first read's finished job says nothing about the retake's.
   const stale = await sql<
-    Array<{ id: string; restaurant_id: string; supplier_id: string | null; raw_image_url: string; gr_id: string | null }>
+    Array<{ id: string; restaurant_id: string; supplier_id: string | null; raw_image_url: string; gr_id: string | null; retaken_at: Date | null }>
   >`
-    SELECT i.id, i.restaurant_id, i.supplier_id, i.raw_image_url,
+    SELECT s.id, s.restaurant_id, s.supplier_id, s.raw_image_url, s.retaken_at,
            -- the receipt the scan was taken on, from its original (refused) job
            (SELECT j.payload->>'grId' FROM job_queue j
-             WHERE j.queue = 'ocr-invoice' AND j.payload->>'invoiceId' = i.id::text
-               AND j.payload->>'restaurantId' = i.restaurant_id::text AND j.payload->>'grId' IS NOT NULL
+             WHERE j.queue = 'ocr-invoice' AND j.payload->>'invoiceId' = s.id::text
+               AND j.payload->>'restaurantId' = s.restaurant_id::text AND j.payload->>'grId' IS NOT NULL
              ORDER BY j.id LIMIT 1) AS gr_id
-      FROM invoices i
-     WHERE i.status = 'ocr_pending'
-       AND i.raw_image_url ~* '^https?://'
-       AND i.created_at < ${staleBefore}
-       AND i.created_at >= ${notBefore}
+      FROM (
+        SELECT i.id, i.restaurant_id, i.supplier_id, i.raw_image_url, i.created_at, r.retaken_at,
+               greatest(i.created_at, coalesce(r.retaken_at, i.created_at)) AS pending_since
+          FROM invoices i
+          LEFT JOIN LATERAL (
+            SELECT max(a.at) AS retaken_at FROM audit_log a
+             WHERE a.entity_id = i.id AND a.restaurant_id = i.restaurant_id
+               AND a.action = 'receiving.invoice_retaken'
+          ) r ON true
+         WHERE i.status = 'ocr_pending'
+           -- ONE text parameter, split in SQL: postgres.js serialises sql.array()
+           -- as a bare string on a connection that has not loaded its types yet
+           -- (the first query of a fresh serverless / pooler connection) →
+           -- "malformed array literal". The ids are validated UUIDs (no commas).
+           AND i.restaurant_id::text = ANY(string_to_array(${only.join(',')}, ','))
+           AND i.raw_image_url ~* '^https?://'
+      ) s
+     WHERE s.pending_since < ${staleBefore}
+       AND s.pending_since >= ${notBefore}
        AND NOT EXISTS (
          SELECT 1 FROM job_queue j
-          WHERE j.queue = 'ocr-invoice' AND j.payload->>'invoiceId' = i.id::text
+          WHERE j.queue = 'ocr-invoice' AND j.payload->>'invoiceId' = s.id::text
+            AND j.created_at >= s.pending_since - interval '5 seconds'
             -- the ORIGINAL job's commit-race refusal never ran: not "on record"
             AND NOT (
               j.status = 'failed'
-              AND j.dedupe_key IS DISTINCT FROM ('ocr-sweep-' || i.id::text)
+              AND NOT starts_with(coalesce(j.dedupe_key, ''), 'ocr-sweep-' || s.id::text)
               AND coalesce(j.last_error, '') ~ ${NOT_FOUND_REFUSAL_PG}
             )
        )
-     ORDER BY i.created_at
+     ORDER BY s.pending_since
      LIMIT ${OCR_SWEEP_BATCH}`;
 
   const result: OcrSweepResult = { requeued: [], raced: [] };
@@ -111,7 +142,8 @@ export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepR
         imageUrl: inv.raw_image_url,
         ...(inv.gr_id ? { grId: inv.gr_id } : {}),
       },
-      { restaurantId: inv.restaurant_id, dedupeKey: `ocr-sweep-${inv.id}` },
+      // One sweep retry per read: a retake's read gets its own key.
+      { restaurantId: inv.restaurant_id, dedupeKey: inv.retaken_at ? `ocr-sweep-${inv.id}-r${new Date(inv.retaken_at).getTime()}` : `ocr-sweep-${inv.id}` },
     );
     (inserted ? result.requeued : result.raced).push(inv.id);
   }
@@ -134,6 +166,7 @@ export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepR
      WHERE i.status = 'ocr_pending'
        AND i.raw_image_url !~* '^[a-z][a-z0-9+.-]*:'
        AND split_part(i.raw_image_url, '/', 1) = i.restaurant_id::text
+       AND i.restaurant_id::text = ANY(string_to_array(${only.join(',')}, ','))
        AND i.updated_at < ${staleBefore}
        AND i.updated_at >= ${pathSince}
     ) x
@@ -151,9 +184,9 @@ export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepR
      ORDER BY x.updated_at
      LIMIT ${OCR_SWEEP_BATCH}`;
   for (const inv of pathStale) {
-    const ref = toObjectRef(inv.raw_image_url, inv.restaurant_id);
-    const imageUrl = ref ? await signObjectRef(inv.restaurant_id, ref) : null;
-    if (!imageUrl) {
+    // The SAME exact tenant-path allowlist as the OCR job (S13 rowScanUrl).
+    const imageUrl = await rowScanUrl(inv.restaurant_id, inv.raw_image_url).catch(() => null);
+    if (!imageUrl || /^[a-z][a-z0-9+.-]*:/i.test(inv.raw_image_url)) {
       // Not this tenant's object, or storage unavailable: never enqueue a foreign path.
       console.warn(`[ocr-sweep] G-09: could not sign the scan of invoice=${inv.id}; not re-enqueued`);
       continue;
@@ -180,6 +213,7 @@ export async function runOcrSweep(sql: Sql, now = new Date()): Promise<OcrSweepR
     SELECT i.id, i.restaurant_id
       FROM invoices i
      WHERE i.status = 'matched'
+       AND i.restaurant_id::text = ANY(string_to_array(${only.join(',')}, ','))
        AND coalesce(i.updated_at, i.created_at) < ${holdBefore}
        AND coalesce(i.updated_at, i.created_at) >= ${pathSince}
        AND EXISTS (SELECT 1 FROM ingest_documents d
@@ -229,8 +263,9 @@ export function startOcrSweepWorker() {
 
 /** The ocr-sweep job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
 export async function processOcrSweep(job: WorkerJob<OcrSweepJob>) {
-  if (!process.env.ANTHROPIC_API_KEY) return { skipped: 'ANTHROPIC_API_KEY unset — retries could only fail' };
-  const result = await runOcrSweep(workerSql(), job.data.now ? new Date(job.data.now) : new Date());
+  const only = claudeOcrRestaurantIds();
+  if (only.size === 0) return { skipped: 'no tenant on real OCR (ANTHROPIC_API_KEY + OCR_REAL_RESTAURANT_IDS)' };
+  const result = await runOcrSweep(workerSql(), job.data.now ? new Date(job.data.now) : new Date(), only);
   if (result.requeued.length) console.log(`[ocr-sweep] ${JSON.stringify(result)}`);
   return result;
 }

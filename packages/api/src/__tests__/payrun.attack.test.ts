@@ -168,6 +168,33 @@ describe('payRun.month', () => {
     }
   });
 
+  it('G-08: an invoice OCR held for a person with no question open reads "לבדיקה" (T4), never "waiting to be linked"; the bookkeeper gets no mapper CTA', async () => {
+    const [held] = await ownerDb
+      .insert(invoices)
+      .values({
+        restaurantId: A.restaurantId,
+        supplierId: A.supplierId,
+        invoiceNumber: 'INV-PA-REVIEW',
+        invoiceDate: new Date(),
+        totalExclVat: '40.00',
+        vatAmount: '7.20',
+        totalInclVat: '47.20',
+        status: 'parsed',
+        source: 'photo',
+        ocrPayload: { provider: 'reconciled', raw: { reviewReasons: ['confidence'] } } as never,
+      })
+      .returning();
+    try {
+      const r = await asA().payRun.month();
+      const row = r.suppliers.flatMap((x) => x.invoices).find((i) => i.invoiceId === held!.id)!;
+      expect(row).toMatchObject({ status: 'hold', awaitingReview: true, awaitingQuestion: false, pendingLink: false });
+      expect(r.canAnswer).toBe(true);
+      expect((await asA('bookkeeper').payRun.month()).canAnswer).toBe(false);
+    } finally {
+      await ownerDb.delete(invoices).where(eq(invoices.id, held!.id));
+    }
+  });
+
   it('an unmatched consolidated invoice is listed as "waiting to be linked" (T4), outside pay / hold ₪', async () => {
     const [extra] = await ownerDb
       .insert(invoices)
@@ -253,6 +280,48 @@ describe('payRun.month', () => {
           SELECT mr.id FROM match_runs mr JOIN invoices i ON i.id = mr.invoice_id WHERE i.invoice_number LIKE 'PAID-WIN-%')`);
       await ownerDb.execute(sql`DELETE FROM match_runs WHERE invoice_id IN (SELECT id FROM invoices WHERE invoice_number LIKE 'PAID-WIN-%')`);
       await ownerDb.execute(sql`DELETE FROM invoices WHERE invoice_number LIKE 'PAID-WIN-%'`);
+    }
+  });
+
+  it('past the window: an accepted MISSING_ON_INVOICE is never a credit to ask for (owner 31.10 — NEVER_CLAIMABLE_TYPES)', async () => {
+    await ownerDb.execute(sql`
+      WITH inv AS (
+        INSERT INTO invoices (restaurant_id, supplier_id, invoice_number, invoice_date, total_excl_vat, vat_amount, total_incl_vat, status, source)
+        SELECT ${A.restaurantId}, ${A.supplierId}, 'PAID-WIN3-' || g, now(), 5000, 850, 5850, 'paid', 'photo'
+        FROM generate_series(1, 205) g
+        RETURNING id
+      ), mr AS (
+        INSERT INTO match_runs (restaurant_id, po_id, gr_id, invoice_id, overall_status, total_discrepancy_amount)
+        SELECT ${A.restaurantId}, ${A.poId}, ${A.grId}, inv.id, 'major', 1000 FROM inv
+        RETURNING id
+      )
+      INSERT INTO discrepancies (match_run_id, restaurant_id, type, severity, delta_amount, requires_role, resolution_status)
+      SELECT mr.id, ${A.restaurantId}, 'PRICE_HIGHER', 'warn', 1000, 'manager', 'resolved' FROM mr
+    `);
+    await ownerDb.execute(sql`
+      WITH inv AS (
+        INSERT INTO invoices (restaurant_id, supplier_id, invoice_number, invoice_date, total_excl_vat, vat_amount, total_incl_vat, status, source)
+        VALUES (${A.restaurantId}, ${A.supplierId}, 'EDGE-MOI', now(), 256.41, 43.59, 300, 'matched', 'photo')
+        RETURNING id
+      ), mr AS (
+        INSERT INTO match_runs (restaurant_id, po_id, gr_id, invoice_id, overall_status, total_discrepancy_amount)
+        SELECT ${A.restaurantId}, ${A.poId}, ${A.grId}, inv.id, 'major', 200 FROM inv
+        RETURNING id
+      )
+      INSERT INTO discrepancies (match_run_id, restaurant_id, type, severity, delta_amount, requires_role, resolution_status)
+      SELECT mr.id, ${A.restaurantId}, 'MISSING_ON_INVOICE', 'warn', -200, 'manager', 'accepted' FROM mr
+    `);
+    try {
+      const r = await asA().payRun.month();
+      const moi = r.suppliers.flatMap((x) => x.invoices).find((i) => i.invoiceNumber === 'EDGE-MOI')!;
+      expect(moi).toMatchObject({ status: 'pay', creditIls: 0 });
+    } finally {
+      await ownerDb.execute(sql`
+        DELETE FROM discrepancies WHERE match_run_id IN (
+          SELECT mr.id FROM match_runs mr JOIN invoices i ON i.id = mr.invoice_id
+          WHERE i.invoice_number LIKE 'PAID-WIN3-%' OR i.invoice_number = 'EDGE-MOI')`);
+      await ownerDb.execute(sql`DELETE FROM match_runs WHERE invoice_id IN (SELECT id FROM invoices WHERE invoice_number LIKE 'PAID-WIN3-%' OR invoice_number = 'EDGE-MOI')`);
+      await ownerDb.execute(sql`DELETE FROM invoices WHERE invoice_number LIKE 'PAID-WIN3-%' OR invoice_number = 'EDGE-MOI'`);
     }
   });
 

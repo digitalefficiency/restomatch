@@ -47,7 +47,22 @@ export const FEATURE_KEYS = [
   'inventoryCount',
   // G-09: multi-page documents from the same supplier. Strict opt-in: `all` does NOT turn it on.
   'multiPage',
+  // G-08: name-only ORDER lines are "זה אותו מוצר?" questions (they hold the match).
+  // DEFAULT ON — the kill switch: settings.features.orderQuestions = false (admin;
+  // it also releases the invoices already held), or FEATURES_OFF=orderQuestions
+  // (redeploy, then `pnpm --filter @restomatch/worker run release-order-holds`).
+  // Invoice-line questions and charge lines stay on. Notes:
+  //   - FEATURES_OFF=all kills it too: name-only order lines are then as on main
+  //     before G-08 (a first match can read them MISSING + UNORDERED);
+  //   - the charts read FEATURES_OFF at boot (on Vercel an env change redeploys anyway);
+  //   - turning it back ON does not re-hold invoices matched while it was OFF;
+  //   - a re-hold also hides the run's other open findings until the answer
+  //     (by design — the answer re-matches).
+  'orderQuestions',
 ] as const;
+
+/** Keys that are ON unless a restaurant sets them false (or FEATURES_OFF kills them). */
+export const DEFAULT_ON_FEATURES: readonly FeatureKey[] = ['orderQuestions'];
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
@@ -55,7 +70,7 @@ interface FeatureSettings {
   features?: Partial<Record<FeatureKey | 'all', boolean>>;
 }
 
-function killed(key: FeatureKey, env: NodeJS.ProcessEnv): boolean {
+export function killed(key: FeatureKey, env: NodeJS.ProcessEnv = process.env): boolean {
   const off = env.FEATURES_OFF?.split(',').map((s) => s.trim()).filter(Boolean) ?? [];
   return off.includes('all') || off.includes(key);
 }
@@ -68,6 +83,7 @@ export function featureEnabled(
 ): boolean {
   if (killed(key, env)) return false;
   const features = (settings as FeatureSettings | null | undefined)?.features;
+  if (DEFAULT_ON_FEATURES.includes(key)) return features?.[key] !== false;
   if (!features) return false;
   return features[key] === true || (features.all === true && features[key] !== false);
 }

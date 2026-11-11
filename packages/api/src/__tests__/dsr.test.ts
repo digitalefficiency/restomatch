@@ -152,6 +152,8 @@ describe('dsr.eraseLead (admin only)', () => {
       .insert(users)
       .values({ email: 'admin@dsr.test', emailVerified: new Date(), isPlatformAdmin: true })
       .returning();
+    // The admin console requires an enrolled authenticator (adminProcedure TOTP gate).
+    await db.insert(userCredentials).values({ userId: admin!.id, totpSecretEnc: 'ciphertext', totpEnabledAt: new Date() });
     const [lead] = await db
       .insert(leads)
       .values({ name: 'ליד למחיקה', email: 'lead@dsr.test', source: 'landing' })
@@ -163,6 +165,27 @@ describe('dsr.eraseLead (admin only)', () => {
 
     const audit = await db.select().from(dsrRequests).where(eq(dsrRequests.subjectId, lead!.id));
     expect(audit.some((r) => r.action === 'erase')).toBe(true);
+  });
+
+  it('refuses a platform admin without TOTP (admin_requires_2fa) and erases nothing', async () => {
+    const [admin] = await db
+      .insert(users)
+      .values({ email: 'admin-no2fa@dsr.test', emailVerified: new Date(), isPlatformAdmin: true })
+      .returning();
+    const [lead] = await db
+      .insert(leads)
+      .values({ name: 'ליד שנשאר', email: 'kept@dsr.test', source: 'landing' })
+      .returning();
+
+    const err = await userCaller(admin!.id)
+      .dsr.eraseLead({ leadId: lead!.id })
+      .then(
+        () => null,
+        (e: unknown) => e as { code?: string; cause?: { appCode?: string } },
+      );
+    expect(err).toMatchObject({ code: 'FORBIDDEN' });
+    expect(err!.cause?.appCode).toBe('admin_requires_2fa');
+    expect(await db.select().from(leads).where(eq(leads.id, lead!.id))).toHaveLength(1);
   });
 
   it('forbids a non-admin from erasing a lead', async () => {

@@ -159,7 +159,7 @@ afterAll(async () => {
 
 describe('G-09 sweep', () => {
   it('U-1: a path-form ocr_pending invoice whose job was lost is retried, signed at sweep time', async () => {
-    const res = await runOcrSweep(sql, NOW);
+    const res = await runOcrSweep(sql, NOW, rids);
     expect(mine(res.requeued).sort()).toEqual([ids.lost, ids.reocr, ids.returned].sort());
     // Same object, next generation: the old job does not block the retry.
     expect((await jobs('ocr-invoice', ids.returned!)).map((j) => j.dedupe_key)).toEqual([
@@ -181,7 +181,7 @@ describe('G-09 sweep', () => {
   });
 
   it('HIGH-2 + M-1: a held page past the cap is released once, WHATEVER the switch says; young, non-ingest, duplicate and slow-sibling pages are not', async () => {
-    const res = await runOcrSweep(sql, NOW);
+    const res = await runOcrSweep(sql, NOW, rids);
     expect(mine(res.released)).toEqual([]); // already released by the first sweep
     for (const k of ['held', 'heldSwitchOff', 'heldStuckSibling']) {
       expect((await jobs('match-invoice', ids[k]!)).map((j) => j.dedupe_key)).toEqual([`g09-release-${ids[k]}`]);
