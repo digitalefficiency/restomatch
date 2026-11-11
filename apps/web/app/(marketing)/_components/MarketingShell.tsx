@@ -13,7 +13,7 @@ import { leakCheckPublic, primaryCtaHref, whatsappLink } from './cta';
 
 const NAV_BASE = [
   { href: '/#how', key: 'shell.nav.how' },
-  { href: '/about#features', key: 'shell.nav.features' },
+  { href: '/product#features', key: 'shell.nav.features' },
   { href: '/pricing', key: 'shell.nav.pricing' },
   { href: '/showcase', key: 'shell.nav.demo' },
   { href: '/about', key: 'shell.nav.about' },
@@ -139,7 +139,7 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
                 <Link href="/#how" className="touch-target inline-flex items-center text-muted hover:text-ink">
                   {t('shell.nav.how')}
                 </Link>
-                <Link href="/about#features" className="touch-target inline-flex items-center text-muted hover:text-ink">
+                <Link href="/product#features" className="touch-target inline-flex items-center text-muted hover:text-ink">
                   {t('shell.nav.features')}
                 </Link>
                 <Link href="/pricing" className="touch-target inline-flex items-center text-muted hover:text-ink">
