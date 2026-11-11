@@ -165,11 +165,20 @@ describe('ROUTE_ROLES generated from the registry', () => {
     Object.fromEntries(Object.entries(m).map(([k, v]) => [k, [...v].sort()]));
 
   it("equals today's map except the supplier ledger and the invoice page, which drop the receiver", () => {
-    const { ['/dashboard/suppliers/ledger']: ledger, ['/dashboard/invoices']: invoices, ['/dashboard/orders']: orders, ...rest } = ROUTE_ROLES;
+    const {
+      ['/dashboard/suppliers/ledger']: ledger,
+      ['/dashboard/invoices']: invoices,
+      ['/dashboard/orders']: orders,
+      ['/dashboard/suppliers']: suppliersHub,
+      ['/dashboard/inventory']: inventory,
+      ...rest
+    } = ROUTE_ROLES;
     const {
       ['/dashboard/suppliers/ledger']: ledgerBefore,
       ['/dashboard/invoices']: invoicesBefore,
       ['/dashboard/orders']: ordersBefore,
+      ['/dashboard/suppliers']: suppliersHubBefore,
+      ['/dashboard/inventory']: inventoryBefore,
       ...restBefore
     } = ROUTE_ROLES_BEFORE;
     expect(sorted(rest)).toEqual(sorted(restBefore));
@@ -182,6 +191,12 @@ describe('ROUTE_ROLES generated from the registry', () => {
     // The one loosening, owner decision 31.10 (pilot): the chef orders freely.
     expect(ordersBefore).toEqual(['owner', 'manager']);
     expect(orders).toEqual(['owner', 'manager', 'chef']);
+    // Owner decision (7.11, the bookkeeper reads everything): the suppliers hub opens to them, read-only.
+    expect(suppliersHubBefore).toEqual(['owner', 'manager']);
+    expect(suppliersHub).toEqual(['owner', 'manager', 'bookkeeper']);
+    // Same decision: inventory, read-only for the bookkeeper (W2-07 serves the read tier).
+    expect(inventoryBefore).toEqual(['owner', 'manager', 'chef']);
+    expect(inventory).toEqual(['owner', 'manager', 'chef', 'bookkeeper']);
     // The printable leak report keeps inheriting /leaks (no silent bounce for the bookkeeper's button).
     expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
     expect(allowedRolesForPath('/dashboard/leaks/report')).toContain('bookkeeper');
@@ -209,7 +224,11 @@ describe('ROUTE_ROLES generated from the registry', () => {
       const was = before(concrete) ?? ALL_ROLES;
       // Owner decision 31.10 (pilot): the chef opens orders (list, detail, new, capture).
       const ordersChef = (role: UserRole) => role === 'chef' && (concrete === '/dashboard/orders' || concrete.startsWith('/dashboard/orders/'));
-      for (const role of now) if (!ordersChef(role)) expect(was, `${role} on ${concrete}`).toContain(role);
+      // Owner decision 7.11 (the bookkeeper reads everything): the suppliers hub and its pages, read-only.
+      const suppliersBookkeeper = (role: UserRole) =>
+        role === 'bookkeeper' &&
+        ['/dashboard/suppliers', '/dashboard/inventory'].some((p) => concrete === p || concrete.startsWith(`${p}/`));
+      for (const role of now) if (!ordersChef(role) && !suppliersBookkeeper(role)) expect(was, `${role} on ${concrete}`).toContain(role);
     }
   });
 });
@@ -406,7 +425,9 @@ describe('matching, field routes, active item, crumbs, titles', () => {
     expect(canFollowPath(viewer('owner', { features: [] }), '/dashboard/inbox')).toBe(false);
     expect(canFollowPath(viewer('owner', { features: ['ingestEmail'] }), '/dashboard/inbox')).toBe(true);
     expect(canFollowPath(viewer('owner', { features: [] }), '/dashboard/approvals')).toBe(true);
-    expect(canOpenPath('bookkeeper', '/dashboard/suppliers')).toBe(false);
+    // Owner decision 7.11: the bookkeeper reads the suppliers hub; the receiver still cannot.
+    expect(canOpenPath('bookkeeper', '/dashboard/suppliers')).toBe(true);
+    expect(canOpenPath('receiver', '/dashboard/suppliers')).toBe(false);
     expect(canOpenPath('bookkeeper', '/dashboard/suppliers/ledger?m=2026-10')).toBe(true);
   });
 
@@ -487,11 +508,11 @@ describe('Breadcrumbs: a crumb the role cannot open is plain text', () => {
       h(NavProvider, { value: role ? { ...viewer(role), branch: null } : null }, h(Breadcrumbs, { items, label: 'פירורי לחם' })),
     );
 
-  it('links for the owner, plain text for the bookkeeper and receiver', () => {
+  it('links for the owner and the bookkeeper (decision 7.11), plain text for the receiver', () => {
     expect(render('owner')).toContain('href="/dashboard/suppliers"');
-    expect(render('bookkeeper')).not.toContain('href="/dashboard/suppliers"');
+    expect(render('bookkeeper')).toContain('href="/dashboard/suppliers"');
     expect(render('receiver')).not.toContain('href="/dashboard/suppliers"');
-    expect(render('bookkeeper')).toContain('ספקים');
+    expect(render('receiver')).toContain('ספקים');
   });
 
   it('a crumb to a flagged-off page is plain text', () => {
@@ -507,5 +528,28 @@ describe('Breadcrumbs: a crumb the role cannot open is plain text', () => {
 
   it('outside the dashboard (no viewer) links stay as given', () => {
     expect(render(null)).toContain('href="/dashboard/suppliers"');
+  });
+});
+
+describe('nav badges (W2-08)', () => {
+  it('every badge key resolves to a known source and a registered, linkable entry', async () => {
+    const { BADGE_KEYS } = await import('../nav/types');
+    const { DEFAULT_ROUTE_BADGES, badgeFor, routeBadgeMap } = await import('../nav/badges');
+    for (const key of Object.keys(DEFAULT_ROUTE_BADGES)) expect(routeByKey(key), key).toBeDefined();
+    const map = routeBadgeMap();
+    for (const [routeKey, badge] of Object.entries(map)) {
+      expect(BADGE_KEYS).toContain(badge);
+      expect(routeByKey(routeKey)!.nav, routeKey).toBe('item');
+    }
+    // One entry per source: a queue's badge shows in exactly one place.
+    expect(new Set(Object.values(map)).size).toBe(Object.values(map).length);
+    expect([...new Set(Object.values(map))].sort()).toEqual([...BADGE_KEYS].sort());
+    // The unowned route files decided "no badge" explicitly.
+    for (const r of REGISTRY) {
+      if (['ask', 'branches', 'catalog', 'chain', 'products', 'recipes', 'reports'].some((seg) => r.path.startsWith(`/dashboard/${seg}`))) {
+        expect(r.badge, r.key).toBeNull();
+        expect(badgeFor(r)).toBeNull();
+      }
+    }
   });
 });

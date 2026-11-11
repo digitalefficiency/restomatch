@@ -1,5 +1,7 @@
+import React, { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { daySpan, heroDelta, leakHeroState, leakSplit, showsPct } from '..';
+import { HERO_CTA_CLASS, LeakHero, daySpan, heroCtaVariant, heroDelta, leakHeroState, leakSplit, showsPct } from '..';
 
 const base = { leakIls: 0, spendIls: 0, leakPct: null, invoiceCount: 0, matchedInvoiceCount: 0, pendingLinkCount: 0 };
 
@@ -66,4 +68,26 @@ describe('leakSplit — the hero parts always add up to the hero', () => {
 describe('leakHeroState — scans waiting for their count are not "no data"', () => {
   it('only awaiting-count scans → pendingOnly (no "צלמו חשבונית" CTA)', () =>
     expect(leakHeroState({ ...base, invoiceCount: 3, awaitingCountCount: 3 })).toBe('pendingOnly'));
+});
+
+describe('hero CTA — secondary on every state, never red (D9)', () => {
+  const states = ['noData', 'clean', 'leak', 'pendingOnly'] as const;
+  it.each(states)('%s → secondary, no danger token', (state) => {
+    const v = heroCtaVariant(state);
+    expect(v).toBe('secondary');
+    expect(HERO_CTA_CLASS[v]).not.toMatch(/danger/);
+  });
+  it.each(states)('%s → the rendered CTA carries the secondary class, not bg-danger', (state) => {
+    (globalThis as { React?: unknown }).React = React;
+    const html = renderToStaticMarkup(
+      createElement(LeakHero, {
+        state, eyebrow: '', label: 'דליפה', amount: '₪760',
+        noData: state === 'noData' ? { title: '—', hint: '', cta: null } : null,
+        primary: { label: 'פירוט', href: '/dashboard/leaks', testId: 'hero-primary' },
+      }),
+    );
+    const cta = html.match(/<a[^>]*data-testid="hero-primary"[^>]*>/)?.[0] ?? '';
+    expect(cta).toContain('bg-surface');
+    expect(cta).not.toMatch(/bg-danger/);
+  });
 });

@@ -7,7 +7,9 @@ export const routes: RouteDef[] = [
     path: '/dashboard/inventory',
     group: 'kitchen',
     rank: 20,
-    roles: ['owner', 'manager', 'chef'],
+    // Owner decision (orchestrator, 7.11): the bookkeeper reads everything — read-only
+    // here (W2-07 gives it a server read tier; counting writes stay chef/manager).
+    roles: ['owner', 'manager', 'chef', 'bookkeeper'],
     features: ['inventoryCount'],
     nav: 'item',
     bar: { chef: { slot: 2, label: 'count' } },
