@@ -192,6 +192,10 @@ export function chainMismatch(chain: ChainIdentity, page: PageHeader): 'page_oth
   if (chain.businessId && p.businessId && chain.businessId !== p.businessId) return 'page_other_supplier';
   if (!(chain.businessId && p.businessId) && chain.name && p.name && !namesAgree(chain.name, p.name)) return 'page_other_supplier';
   if (chain.number && p.number && chain.number !== p.number) return 'page_other_invoice';
+  // Round 5: a name that only CONTAINS the other ('כהן' in 'כהן ירקות') is not
+  // evidence of the same supplier; without an equal ח.פ. a person decides.
+  const bizEqual = Boolean(chain.businessId && p.businessId && chain.businessId === p.businessId);
+  if (!bizEqual && chain.name && p.name && chain.name !== p.name) return 'page_not_merged';
   // Round 5: a page bringing an invoice NUMBER the chain lacks may be a second
   // invoice of the same supplier (whatever its ח.פ. / name say): a person.
   if (p.number && !chain.number) return 'page_not_merged';
@@ -259,6 +263,22 @@ export function similarText(a: string | null | undefined, b: string | null | und
   return both / (ta.size + tb.size - both) >= 0.4;
 }
 
+/** The digit runs in a line text (delivery-note numbers, dates, sizes), in order. */
+function digitRuns(v: string | null | undefined): string[] {
+  return (v ?? '').normalize('NFKC').match(/\d+/g) ?? [];
+}
+
+/**
+ * Two line texts name the same item AND carry no conflicting digits (round 5):
+ * 'ת.מ. 4411' and 'ת.מ. 4412', or the same item on two dates, are different
+ * lines however similar the words. A side without digits does not conflict.
+ */
+export function sameLineText(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!similarText(a, b)) return false;
+  const [da, db] = [digitRuns(a), digitRuns(b)];
+  return da.length === 0 || db.length === 0 || da.join(' ') === db.join(' ');
+}
+
 function matchCount(
   a: PagePrint['lines'],
   b: PagePrint['lines'],
@@ -296,7 +316,7 @@ export function overlaps(a: PagePrint | undefined, b: PagePrint | undefined): bo
   if (totalsEqual(a, b)) return true;
   const small = Math.min(a.lines.length, b.lines.length);
   if (small === 0) return false;
-  const m = matchCount(a.lines, b.lines, (x, y) => num(x.qty) === num(y.qty) && similarText(x.description, y.description));
+  const m = matchCount(a.lines, b.lines, (x, y) => num(x.qty) === num(y.qty) && sameLineText(x.description, y.description));
   return m / small >= 0.5;
 }
 
@@ -316,7 +336,7 @@ export function exactCopy(a: PagePrint | undefined, b: PagePrint | undefined, op
   }
   const m = matchCount(a.lines, b.lines, (x, y) => {
     const [tx, ty] = [num(x.total), num(y.total)];
-    return num(x.qty) === num(y.qty) && similarText(x.description, y.description) && tx !== null && ty !== null && Math.abs(tx - ty) <= 0.1;
+    return num(x.qty) === num(y.qty) && sameLineText(x.description, y.description) && tx !== null && ty !== null && Math.abs(tx - ty) <= 0.1;
   });
   return m === a.lines.length;
 }

@@ -63,7 +63,7 @@ export const en: Shape<typeof he> = {
     page_other_invoice: 'Is this page from another invoice? It was kept as a separate invoice',
     page_duplicate: 'Looks like a re-shot photo of a page we already have',
     page_unreadable: 'We could not read this page. It was kept as a separate invoice and is checked on its own. If it belongs to an invoice, take its photo again',
-    page_not_merged: 'This page was kept as a separate invoice and is checked on its own, because it was not clear it belongs to the invoice before it. If it does, open that invoice and attach it',
+    page_not_merged: 'This page was kept as a separate invoice and is checked on its own, because it was not clear it belongs to the invoice before it. If it does, review both together before approving payment',
     page_separate: 'Marked as a separate invoice',
     unknown: 'Unknown error',
   },

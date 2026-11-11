@@ -1288,3 +1288,35 @@ describe('round 5 · DB: HIGH money findings', () => {
     expect((r!.ocrPayload as { raw?: { duplicateOf?: { invoiceId?: string } } }).raw?.duplicateOf?.invoiceId).toBe(keep);
   });
 });
+
+describe('round 5 · decidePages (pure): MED findings', () => {
+  const notes = (n: string, date: string): LineIn[] => [
+    { qty: '1', total: '120.00', desc: `ת.מ. ${n} מיום ${date}` },
+    { qty: '1', total: '95.00', desc: `ת.מ. ${Number(n) + 1} מיום ${date}` },
+  ];
+
+  it('MED digit-blind: two consolidated pages listing DIFFERENT delivery notes are not a copy, and not an overlap', () => {
+    const p1 = H('p1', { ...TNUVA, number: 'R-7', lines: notes('4411', '01/11') });
+    const p2 = H('p2', { lines: notes('4511', '08/11') });
+    expect(verdict([p1, p2])).toEqual({ merged: ['p2'], flagged: [] }); // a continuation page, not a duplicate
+  });
+
+  it('MED digit-aware: the same delivery notes again IS an exact copy (held duplicate)', () => {
+    const p1 = H('p1', { ...TNUVA, number: 'R-7', lines: notes('4411', '01/11') });
+    const p2 = H('p2', { lines: notes('4411', '01/11') });
+    expect(verdict([p1, p2]).flagged).toEqual([{ invoiceId: 'p2', reason: 'page_duplicate', repeats: 'p1' }]);
+  });
+
+  it('MED name substring: a number-less page whose name only CONTAINS page 1\'s name (no equal ח.פ.) is a question, never merged', () => {
+    const v = verdict([
+      H('p1', { supplierName: 'כהן ירקות', number: 'A-1', lines: L5 }),
+      H('p2', { supplierName: 'כהן', lines: OTHERL }),
+    ]);
+    expect(v).toEqual({ merged: [], flagged: [{ invoiceId: 'p2', reason: 'page_not_merged' }] });
+  });
+
+  it('control: the same name exactly still continues the document', () => {
+    const v = verdict([H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { supplierName: 'תנובה בע"מ', lines: OTHERL })]);
+    expect(v.merged).toEqual(['p2']);
+  });
+});
