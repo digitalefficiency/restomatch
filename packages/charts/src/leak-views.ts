@@ -1,3 +1,4 @@
+import { AWAITING_QUESTION_SQL } from './awaiting-question';
 import { sql, type Database } from '@restomatch/db';
 import { scanAwaitingCountSql } from './awaiting-count';
 import type { LeakHero } from './leak-hero';
@@ -11,7 +12,7 @@ type SQL = ReturnType<typeof sql>;
  * Same definitions as the hero, so the default view (this month, no filters)
  * returns the hero's numbers exactly (tested):
  *  • leak = Σ|delta| of the lines LEAK_FILTER counts (warn/block, excluding
- *    PRICE_LOWER, UNORDERED_ARRIVAL and rejected duplicates), capped per
+ *    LEAK_EXCLUDED_TYPES and rejected duplicates), capped per
  *    invoice at the invoice total;
  *  • spend = Σ total_excl_vat of CHECKED invoices (matched, not pending a PO
  *    link, not a live duplicate copy);
@@ -135,15 +136,31 @@ const uuidList = (ids: string[]) => sql.join(ids.map((id) => sql`${id}::uuid`), 
 const textList = (vals: string[]) => sql.join(vals.map((v) => sql`${v}`), sql`, `);
 
 /**
+ * Discrepancy types that never count as leak — the ONE list behind LEAK_FILTER and
+ * every TS twin (the match feed's summary, the pay run, the monthly report by type):
+ *  • PRICE_LOWER        an under-charge;
+ *  • UNORDERED_ARRIVAL  waiting for a PO link (pending, calm);
+ *  • MISSING_ON_INVOICE an ordered line the invoice never billed — owner-approved
+ *    31.10 ("להוציא את 'חסר בחשבונית' ממספר הדליפה" → "כן"): a review item with no
+ *    ₪ in the leak.
+ */
+export const LEAK_EXCLUDED_TYPES = ['PRICE_LOWER', 'UNORDERED_ARRIVAL', 'MISSING_ON_INVOICE'] as const;
+const LEAK_EXCLUDED = new Set<string>(LEAK_EXCLUDED_TYPES);
+/** Whether a discrepancy type can count as leak at all (severity / duplicate rules aside). */
+export function isLeakType(type: string): boolean {
+  return !LEAK_EXCLUDED.has(type);
+}
+
+/**
  * Does a discrepancy line (alias `d`) count toward the leak? warn/block only;
- * never PRICE_LOWER (an under-charge) or UNORDERED_ARRIVAL (waiting for a PO
- * link); and never a DUPLICATE_INVOICE a bookkeeper rejected — "not a
+ * never a LEAK_EXCLUDED_TYPES type (an under-charge, waiting for a PO link, or
+ * an ordered line never billed); and never a DUPLICATE_INVOICE a bookkeeper rejected — "not a
  * duplicate" means no money was at risk. (Other rejected findings stay in: the
  * money did leak, the team chose not to claim it — the report's "waived".)
  * The single definition for the hero, views, report and chain.
  */
 export const LEAK_FILTER: SQL = sql`d.severity IN ('warn','block')
-  AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL')
+  AND d.type NOT IN (${textList([...LEAK_EXCLUDED_TYPES])})
   AND NOT (d.type = 'DUPLICATE_INVOICE' AND d.resolution_status = 'rejected')`;
 
 /**
@@ -216,7 +233,10 @@ function invoicesCte(restaurantId: string, f: ViewFilters | undefined): SQL {
     inv AS (
       SELECT i.id, i.supplier_id, i.status, i.total_excl_vat, i.total_incl_vat,
              COALESCE(i.invoice_date, i.created_at) AS at,
-             ${scanAwaitingCountSql(restaurantId, sql`i`)} AS counting
+             ${scanAwaitingCountSql(restaurantId, sql`i`)} AS counting,
+             -- G-08: held for a "זה אותו מוצר?" question (no run yet) — in neither
+             -- leak, spend nor "waiting to be linked to an order".
+             ${AWAITING_QUESTION_SQL} AS question
       FROM invoices i, b
       WHERE i.restaurant_id = ${restaurantId}
         AND COALESCE(i.invoice_date, i.created_at) >= b.lo
@@ -238,11 +258,12 @@ function invoicesCte(restaurantId: string, f: ViewFilters | undefined): SQL {
           AS pending_link,
         -- A receiving scan held for its count (#94) — same rule as the hero (leak-hero.ts).
         (NOT bool_or(mr.id IS NOT NULL)) AND inv.counting AS awaiting_count,
+        (NOT bool_or(mr.id IS NOT NULL)) AND inv.question AS awaiting_question,
         COALESCE(bool_or(${LIVE_DUPLICATE}), false) AND ${originalChecked(restaurantId, sql`inv.id`)} AS dup_copy
       FROM inv
       LEFT JOIN match_runs mr ON mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId}
       LEFT JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
-      GROUP BY inv.id, inv.supplier_id, inv.status, inv.at, inv.total_incl_vat, inv.total_excl_vat, inv.counting
+      GROUP BY inv.id, inv.supplier_id, inv.status, inv.at, inv.total_incl_vat, inv.total_excl_vat, inv.counting, inv.question
     )`;
 }
 
@@ -265,10 +286,12 @@ export async function computeLeakSummary(
       COALESCE(SUM(LEAST(raw_leak, total)) FILTER (WHERE status <> 'paid'), 0) AS caught,
       COALESCE(SUM(LEAST(raw_recovered, LEAST(raw_leak, total))), 0) AS recovered,
       COUNT(*) FILTER (WHERE raw_leak > 0) AS with_leak,
-      COUNT(*) FILTER (WHERE pending_link AND NOT awaiting_count) AS pending_count,
-      COALESCE(SUM(total) FILTER (WHERE pending_link AND NOT awaiting_count), 0) AS pending_amount,
+      COUNT(*) FILTER (WHERE pending_link AND NOT awaiting_count AND NOT awaiting_question) AS pending_count,
+      COALESCE(SUM(total) FILTER (WHERE pending_link AND NOT awaiting_count AND NOT awaiting_question), 0) AS pending_amount,
       COUNT(*) FILTER (WHERE awaiting_count) AS awaiting_count,
-      COALESCE(SUM(total) FILTER (WHERE awaiting_count), 0) AS awaiting_amount
+      COALESCE(SUM(total) FILTER (WHERE awaiting_count), 0) AS awaiting_amount,
+      COUNT(*) FILTER (WHERE awaiting_question AND NOT awaiting_count) AS question_count,
+      COALESCE(SUM(total) FILTER (WHERE awaiting_question AND NOT awaiting_count), 0) AS question_amount
     FROM per
   `);
   const r = rowsOf(res)[0] ?? {};
@@ -289,6 +312,8 @@ export async function computeLeakSummary(
     pendingLinkIls: ils(r.pending_amount),
     awaitingCountCount: n(r.awaiting_count),
     awaitingCountIls: ils(r.awaiting_amount),
+    awaitingQuestionCount: n(r.question_count),
+    awaitingQuestionIls: ils(r.question_amount),
   };
 }
 
