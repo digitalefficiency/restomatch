@@ -50,10 +50,13 @@ export function canViewMoney(role: UserRole): boolean {
   return role === 'owner' || role === 'manager' || role === 'bookkeeper';
 }
 
+/** Any detail key that could carry ₪ (denylist widened per the 11.11 warden note). */
+export const MONEY_KEY = /agorot|ils|amount|sum|price|cost/i;
+
 /** Strip every ₪ from a task (server-side, for roles without money.view). */
 export function redactTask(t: Task): Task {
   const detail = t.detail
-    ? Object.fromEntries(Object.entries(t.detail).filter(([k]) => !/agorot|ils/i.test(k)))
+    ? Object.fromEntries(Object.entries(t.detail).filter(([k]) => !MONEY_KEY.test(k)))
     : undefined;
   return { ...t, ilsAgorot: null, ...(detail ? { detail } : {}) };
 }

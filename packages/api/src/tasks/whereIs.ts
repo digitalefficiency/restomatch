@@ -1,3 +1,4 @@
+import type { UserRole } from '@restomatch/db';
 import { and, eq, inventoryCounts, invoices, memberships, purchaseOrders, recoveryClaims, restaurants, suppliers, withRestaurant, type Database } from '@restomatch/db';
 
 /**
@@ -19,6 +20,19 @@ const TABLES = {
   claim: recoveryClaims,
   count: inventoryCounts,
 } as const;
+
+/**
+ * Who may open each kind's page — mirrors the web route registry (pinned by
+ * apps/web whereis-roles.test.ts). A membership whose role can't open the page
+ * is not searched: no existence hint inside a branch either (warden, 11.11).
+ */
+export const KIND_ROLES: Record<WhereIsKind, readonly UserRole[]> = {
+  invoice: ['owner', 'manager', 'bookkeeper'],
+  po: ['owner', 'manager', 'chef'],
+  supplier: ['owner', 'manager', 'bookkeeper'],
+  claim: ['owner', 'manager', 'bookkeeper'],
+  count: ['owner', 'manager', 'chef', 'bookkeeper'],
+};
 
 export function pathFor(kind: WhereIsKind, id: string): string {
   switch (kind) {
@@ -45,12 +59,15 @@ export async function whereIs(
   deps: { scoped: typeof withRestaurant } = { scoped: withRestaurant },
 ): Promise<WhereIsResult> {
   const mine = await db
-    .select({ restaurantId: memberships.restaurantId, name: restaurants.name })
+    .select({ restaurantId: memberships.restaurantId, name: restaurants.name, role: memberships.role })
     .from(memberships)
     .innerJoin(restaurants, eq(memberships.restaurantId, restaurants.id))
     .where(eq(memberships.userId, userId));
   const table = TABLES[kind];
-  const ordered = [...mine].sort((a, b) => a.restaurantId.localeCompare(b.restaurantId));
+  // One lookup per branch (a user may hold two roles in one branch), only where a role may open the page.
+  const allowed = new Map<string, string>();
+  for (const m of mine) if (KIND_ROLES[kind].includes(m.role)) allowed.set(m.restaurantId, m.name);
+  const ordered = [...allowed].map(([restaurantId, name]) => ({ restaurantId, name })).sort((a, b) => a.restaurantId.localeCompare(b.restaurantId));
   for (const m of ordered) {
     if (m.restaurantId === activeRestaurantId) continue;
     const hit = await deps.scoped(db, m.restaurantId, (tx) =>

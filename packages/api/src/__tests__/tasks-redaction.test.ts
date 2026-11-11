@@ -32,3 +32,15 @@ describe('tasks redaction (decision 6: no purchase or leak ₪ for staff)', () =
     expect(r.count).toBe(3);
   });
 });
+
+describe('redactTask — the money-key pattern (warden 11.11)', () => {
+  it('strips agorot/ils/amount/sum/price/cost keys, keeps counts (total/received/late)', () => {
+    const t = redactTask({
+      type: 'delivery_due', entityId: 'x', title: 'x', ilsAgorot: 500, count: 1, blocking: 0, tier: 'T4', tone: 'neutral',
+      due: null, ageDays: null, verb: 'x', deepLink: '/x', scope: 'mine',
+      detail: { total: 3, received: 1, late: 0, amountIls: 5, sumAgorot: 1, unitPrice: 2, cost: 9 },
+    });
+    expect(t.ilsAgorot).toBeNull();
+    expect(t.detail).toEqual({ total: 3, received: 1, late: 0 });
+  });
+});
