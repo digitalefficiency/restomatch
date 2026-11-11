@@ -53,18 +53,51 @@ export const InvoiceLineV2 = InvoiceOcrLine.extend({
 });
 export type InvoiceLineV2 = z.infer<typeof InvoiceLineV2>;
 
+const LOCAL_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const localDate = z
+  .string()
+  .optional()
+  .transform((v) => (v && LOCAL_DATE.test(v.trim()) ? v.trim() : undefined))
+  .catch(undefined);
+
+/**
+ * One ת.מ. reference. The number is kept as digits only ("ת.מ. 7781" / 7781 →
+ * "7781") — the consolidated matcher only accepts digit strings — and an item
+ * the model garbled is dropped alone, never the whole list.
+ */
+export const DeliveryNoteRef = z.object({
+  number: z.union([z.string(), z.number()]).transform((v) => String(v).replace(/\D/g, '')),
+  date: localDate,
+  /** The note's amount before VAT, when the מרכזת prints one per note. */
+  totalExclVat: z.number().finite().optional().catch(undefined),
+});
+export type DeliveryNoteRef = z.infer<typeof DeliveryNoteRef>;
+
+/** Keep the parseable, non-empty, de-duplicated notes; drop the rest one by one. */
+export function cleanDeliveryNotes(raw: unknown): DeliveryNoteRef[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const seen = new Set<string>();
+  const out: DeliveryNoteRef[] = [];
+  for (const item of raw) {
+    const r = DeliveryNoteRef.safeParse(item);
+    if (!r.success || r.data.number === '' || seen.has(r.data.number)) continue;
+    seen.add(r.data.number);
+    out.push(r.data);
+  }
+  return out;
+}
+
 export const InvoiceExtractionV2 = InvoiceOcrResult.extend({
   documentKind: z.enum(DOCUMENT_KINDS).optional().catch('other'),
   buyer: z
     .object({ name: trimmedOrUndefined, businessId: trimmedOrUndefined })
     .optional()
     .catch(undefined),
-  deliveryNotes: z
-    .array(z.object({ number: z.string(), date: z.string().optional() }))
-    .optional()
-    .catch(undefined),
-  periodStart: z.string().optional().catch(undefined),
-  periodEnd: z.string().optional().catch(undefined),
+  /** Delivery notes (ת.מ.) the document lists — a מרכזת lists many, a regular invoice may cite one. */
+  deliveryNotes: z.array(DeliveryNoteRef).optional().catch(undefined),
+  /** Billing period of a מרכזת (YYYY-MM-DD, as printed); anything else → absent. */
+  periodStart: localDate,
+  periodEnd: localDate,
   /** Invoice-level discount in ₪ (before VAT), when printed. */
   invoiceDiscount: amount,
   continuesOnAnotherPage: flag,

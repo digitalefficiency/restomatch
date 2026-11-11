@@ -19,7 +19,8 @@
     "seed:inventory-demo": "tsx scripts/seed-inventory-demo.ts",
     "seed:contracts-demo": "tsx scripts/seed-wave1-contracts-demo.ts",
     "reseed:demo": "tsx scripts/reseed-demo.ts",
-    "check:demo": "tsx scripts/check-demo.ts"
+    "check:demo": "tsx scripts/check-demo.ts",
+    "release-order-holds": "tsx scripts/release-order-holds.ts"
   },
   "dependencies": {
     "@restomatch/api": "workspace:*",
