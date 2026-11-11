@@ -11,7 +11,7 @@ import Link from 'next/link';
 import { History, Keyboard } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import { formatIls } from '@/lib/money';
-import { formatDateTime, formatNumber } from '@/lib/i18n/format';
+import { formatDate, formatDateTime, formatNumber } from '@/lib/i18n/format';
 import type { he as approvalsHe } from '@/lib/i18n/messages/approvals/he';
 import type { MessageKey, Translator } from '@/lib/i18n/translate';
 import { Button, Textarea, cn } from '@/lib/components';
@@ -111,6 +111,7 @@ export interface EvidenceRow extends DeskRow {
   orderedUnit: string | null;
   qtyReceived: string | null;
   poRef: string | null;
+  poDate?: Date | string | null;
   expectedValue: string | null;
   actualValue: string | null;
   invoiceStatus?: string | null;
@@ -135,7 +136,13 @@ export function EvidenceBody({
   const qty = (v: string | null, unit: string | null) =>
     v == null ? '—' : `${formatNumber(Number(v), locale, { maximumFractionDigits: 3 })}${unit ? ` ${unit}` : ''}`;
   const facts: Array<[string, string]> = [
-    [t('desk.evidenceOrder'), [qty(d.qtyOrdered, d.orderedUnit), d.poRef].filter((x) => x && x !== '—').join(' · ') || '—'],
+    [
+      t('desk.evidenceOrder'),
+      // The order by its date (lab 11.11): never a raw code like "PO-F4841845".
+      [qty(d.qtyOrdered, d.orderedUnit), d.poDate ? t('desk.evidenceOrderOf', { date: formatDate(d.poDate, locale, { day: '2-digit', month: '2-digit' }) }) : null]
+        .filter((x) => x && x !== '—')
+        .join(' · ') || '—',
+    ],
     [t('desk.evidenceReceipt'), qty(d.qtyReceived, d.orderedUnit ?? d.billedUnit)],
     [t('desk.evidenceInvoice'), qty(d.qtyBilled, d.billedUnit)],
   ];

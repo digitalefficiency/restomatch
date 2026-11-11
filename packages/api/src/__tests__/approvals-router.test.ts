@@ -644,7 +644,7 @@ describe('approval e-mail names the decisions', () => {
     const { html, text } = approvalNeededEmail({ supplierName: 'שטיינברג', discrepancyCount: 1, atRiskIls: '₪104.80' });
     expect(text).toContain(DECISION_COPY.he.reject);
     // Owner decision 7.11: partner wording, the ₪ slot stripped cleanly (no dangling '·').
-    expect(text).toContain(`בקשת זיכוי / ${DECISION_COPY.he.reject}`);
+    expect(text).toContain(`בקשת זיכוי או ${DECISION_COPY.he.reject}`);
     expect(text).not.toMatch(/דרשו|דרוש מהספק|מהספק|\{amount\}/);
     expect(html).toContain(DECISION_COPY.he.reject);
   });

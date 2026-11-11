@@ -228,19 +228,15 @@ export interface WhyFacts {
   poId?: string | null;
   poRef?: string | null;
   poDate?: Date | string | null;
+  supplierName?: string | null;
+  supplierNameEn?: string | null;
 }
 
 export const SEP: WhySegment = { text: ' · ' };
 
-/** "PO-7781" or the first 8 of the id (the dock slip's fallback). */
-export function poLabel(poRef: string | null | undefined, poId: string | null | undefined): string | null {
-  if (poRef) return poRef;
-  return poId ? `PO-${poId.slice(0, 8).toUpperCase()}` : null;
-}
-
 /**
  * The one-line "why" (approvals-06), in every density:
- *   "₪575.00 × 2 חבית במקום ₪522.60 (הזמנה PO-…, 14.10) = ₪104.80 · +10.0% · סף ±2% או ₪5".
+ *   "₪575.00 × 2 חבית במקום ₪522.60 (הזמנה מ־<ספק>, 14.10) = ₪104.80 · +10.0% · סף ±2% או ₪5".
  * Groups are separated by SEP; a type with no shown values falls back to its
  * plain-language explanation.
  */
@@ -266,16 +262,17 @@ export function whyLine(t: T, d: WhyFacts): WhySegment[][] {
     const formula = billed
       ? fill(t(isP90 ? 'why.priceP90' : 'why.price'), { actual: ils(act), qty: billed, unit, expected: ils(exp) })
       : fill(t(isP90 ? 'why.priceP90NoQty' : 'why.priceNoQty'), { actual: ils(act), expected: ils(exp) });
-    const po = poLabel(d.poRef, d.poId);
+    // The order by who and when (lab 11.11): never a raw code like "PO-F4841845" in a sentence.
+    const supplier = displayName(locale, d.supplierName ?? null, d.supplierNameEn ?? null);
+    const poDay = d.poDate ? formatDate(d.poDate, locale, { day: '2-digit', month: '2-digit' }) : null;
     const source = isP90
       ? [{ text: ' ' }, { text: t('why.sourceP90') }]
-      : po
+      : d.poId || d.poRef
         ? [
             { text: ' ' },
-            ...fill(t('why.sourcePo'), {
-              po,
-              date: d.poDate ? formatDate(d.poDate, locale, { day: '2-digit', month: '2-digit' }) : '—',
-            }),
+            ...(supplier
+              ? fill(t('why.sourcePo'), { supplier, date: poDay ?? '—' })
+              : fill(t('why.sourcePoNoSupplier'), { date: poDay ?? '—' })),
           ]
         : [];
     groups.push([...formula, ...source, ...(equals.length ? [{ text: ' ' }, ...equals] : [])]);

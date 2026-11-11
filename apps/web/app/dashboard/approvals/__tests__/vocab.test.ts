@@ -196,22 +196,27 @@ describe('whyLine (approvals-06)', () => {
     billedUnit: 'חבית',
     poRef: 'PO-7781',
     poDate: new Date('2026-10-14T08:00:00Z'),
+    supplierName: 'מבשלת הגליל',
+    supplierNameEn: 'Galilee Brewery',
   };
   const ils = (v: number, locale: 'he' | 'en') => formatIls(v, { locale, maximumFractionDigits: 2 });
 
   it('price: billed × qty instead of the order price, = the ₪, the %, the threshold', () => {
     expect(whyText(whyLine(en, fact))).toBe(
-      '₪575.00 × 2 keg instead of ₪522.60 (order PO-7781, 14/10) = ₪104.80 · +10.0% · threshold price ±2% or ₪5',
+      '₪575.00 × 2 keg instead of ₪522.60 (Galilee Brewery order, 14/10) = ₪104.80 · +10.0% · threshold price ±2% or ₪5',
     );
     const text = whyText(whyLine(he, fact));
-    expect(text).toContain(`${ils(575, 'he')} × 2 חבית במקום ${ils(522.6, 'he')} (הזמנה PO-7781, 14.10) = ${ils(104.8, 'he')}`);
+    expect(text).toContain(`${ils(575, 'he')} × 2 חבית במקום ${ils(522.6, 'he')} (הזמנה מ־מבשלת הגליל, 14.10) = ${ils(104.8, 'he')}`);
+    // Lab 11.11: the order reads by supplier + date, never a raw code inside a sentence.
+    expect(text).not.toMatch(/PO-/);
+    expect(whyText(whyLine(he, { ...fact, supplierName: null, supplierNameEn: null }))).toContain('(הזמנה מ־14.10)');
     expect(text).toContain('+10.0%');
     expect(text).toContain('סף');
   });
 
   it('every number, ₪ and token is an isolated segment (never a bare bidi run)', () => {
     const segs = whyLine(he, fact).flat();
-    for (const value of [ils(575, 'he'), '2', 'חבית', ils(522.6, 'he'), 'PO-7781', ils(104.8, 'he')]) {
+    for (const value of [ils(575, 'he'), '2', 'חבית', ils(522.6, 'he'), 'מבשלת הגליל', ils(104.8, 'he')]) {
       expect(segs.find((s) => s.text === value), value).toMatchObject({ num: true });
     }
   });

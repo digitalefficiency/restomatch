@@ -129,6 +129,7 @@ const ALLOW: ReadonlyArray<{ file: string; count: number; owner: string }> = [
   { file: 'match/consolidated.ts', count: 1, owner: 'G-04' },
   { file: 'receiving/matchTriggers.ts', count: 1, owner: 'W2-05' },
   { file: 'recovery/service.ts', count: 1, owner: 'W2-10' },
+  { file: 'approvals/rebind.ts', count: 1, owner: 'W2-04' },
   { file: 'routers/approvals.ts', count: 2, owner: 'W2-04' },
   { file: 'routers/payRun.ts', count: 6, owner: 'W2-03' },
   { file: 'routers/receiving.ts', count: 1, owner: 'W2-05' },
