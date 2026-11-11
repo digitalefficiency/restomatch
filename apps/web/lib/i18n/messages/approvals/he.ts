@@ -147,6 +147,7 @@ export const he = {
     fixInvoice: 'פתחו חשבונית',
     more: 'פעולות נוספות',
     waiting: 'ממתין {age}',
+    age: '{count, plural, =1 {יום אחד} =2 {יומיים} other {# ימים}}',
     waitingToday: 'ממתין מהיום',
     due: 'לתשלום עד {date}',
     overdue: 'מועד התשלום עבר ({date})',

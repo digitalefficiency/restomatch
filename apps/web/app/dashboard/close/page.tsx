@@ -10,6 +10,7 @@ import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { accounting } from '@/lib/i18n/messages/accounting';
 import { followUps } from '../recovery/logic';
 import { loadDecide, loadRecoveryClaims, loadVatAtRisk } from '../home/data';
+import { VatAtRiskCard } from '../vat-at-risk';
 import { buildSteps, currentMonth, progress, resolveMonth, shiftMonth, type StepKey, type StepState } from './steps';
 
 /** Owner and bookkeeper close the month; the manager reads it. Receiver and chef see no purchase ₪ (§7). */
@@ -175,6 +176,18 @@ export default async function ClosePage({ searchParams }: { searchParams: Promis
           );
         })}
       </ol>
+
+      {/* AU-08: step 6's card — the allocation-number request / reminder hand-off (flag vatAtRisk; null when off). */}
+      {vat && vat.currentThresholdIls != null ? (
+        <div id="vat-at-risk" className="mt-6 scroll-mt-24 [&>section]:mt-0">
+          <VatAtRiskCard
+            rows={vat.rows}
+            total={vat.totalVatAtRisk ?? 0}
+            thresholdIls={vat.currentThresholdIls}
+            restaurantName={active.restaurantName}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

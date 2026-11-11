@@ -8,6 +8,7 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
 import { formatIls } from '@/lib/money';
 import { termsValueOf } from './terms';
+import { deliveryDayLabel } from './delivery-label';
 
 export interface VendorRow {
   supplierId: string;
@@ -38,12 +39,6 @@ export function VendorTable({ rows, totals }: { rows: VendorRow[]; totals: Vendo
   const t = useT(suppliersNs);
   const locale = useLocale();
   const router = useRouter();
-  const day = new Intl.DateTimeFormat(locale === 'he' ? 'he-IL' : 'en-GB', {
-    timeZone: 'Asia/Jerusalem',
-    weekday: 'short',
-    day: '2-digit',
-    month: '2-digit',
-  });
   const termsLabel = (raw: string | null) => {
     const v = termsValueOf(raw);
     if (v.choice === 'none') return t('table.none');
@@ -77,7 +72,7 @@ export function VendorTable({ rows, totals }: { rows: VendorRow[]; totals: Vendo
       value: (r) => (r.nextDeliveryAt ? new Date(r.nextDeliveryAt).getTime() : null),
       cell: (r) =>
         r.nextDeliveryAt
-          ? `${day.format(new Date(r.nextDeliveryAt))}${r.nextDeliveryTime ? ` ${r.nextDeliveryTime}` : ''}`
+          ? `${deliveryDayLabel(r.nextDeliveryAt, locale)}${r.nextDeliveryTime ? ` ${r.nextDeliveryTime}` : ''}`
           : t('table.none'),
       exportValue: (r) => r.nextDeliveryAt?.slice(0, 10) ?? '',
     },

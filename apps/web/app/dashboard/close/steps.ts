@@ -84,7 +84,8 @@ export function hrefOf(key: StepKey, s: Pick<CloseSources, 'consolidated' | 'mon
     case 'deliveryNotes':
       return LEDGER_HREF;
     case 'vat':
-      return null;
+      // AU-08: the VAT-at-risk card (request / reminder hand-off) is mounted below the checklist.
+      return '#vat-at-risk';
     case 'exports':
       return '/dashboard/exports';
   }
