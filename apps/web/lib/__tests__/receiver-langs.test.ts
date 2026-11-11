@@ -71,6 +71,8 @@ const RECEIVER: Array<{ ns: { name: string; he: MessageTree; extra?: unknown }; 
       'shell.screens',
       'shell.listSep',
       'shell.listLast',
+      // W3-03a field components (ScanButton / MicButton) — the receiver uses them at the dock.
+      'field',
       'actions',
       'states',
     ],
