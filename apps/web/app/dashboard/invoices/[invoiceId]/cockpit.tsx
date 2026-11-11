@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
-import { ArrowLeft, ArrowRight, Pencil, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, FileX, Pencil, X } from 'lucide-react';
 import type { Locale } from '@/lib/i18n/config';
 import { formatNumber } from '@/lib/i18n/format';
 import { formatIls } from '@/lib/money';
@@ -277,7 +277,14 @@ export function Cockpit({
     </ul>
   );
 
-  const viewer = (
+  // No stored document: one calm line, never an empty box that takes a third of the screen.
+  const noDoc = (
+    <p data-testid="cockpit-no-doc" className="flex items-center gap-2 rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-muted">
+      <FileX className="h-4 w-4 shrink-0" aria-hidden="true" />
+      {t.viewer.noDoc}
+    </p>
+  );
+  const viewer = !scan ? noDoc : (
     <InvoiceScanViewer
       src={scan?.src ?? null}
       mimeType={scan?.mimeType ?? null}
@@ -320,8 +327,17 @@ export function Cockpit({
     </div>
   );
 
+  // The sticky "decide" FAB sits above the bottom nav / consent bar: reserve its height (min-h-12)
+  // plus that offset below the content, so it never covers the last gap note at the bottom.
+  const fab = showMoney && openFindings.length > 0 && !editing;
   return (
-    <div className="pb-24">
+    <div
+      className={
+        fab
+          ? 'pb-[calc(var(--rm-bottomnav-h,0px)+var(--consent-h,0px)+env(safe-area-inset-bottom)+0.75rem+3rem+1rem)]'
+          : 'pb-24'
+      }
+    >
       <nav aria-label={t.back} className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
         <Link href={t.fromHref} className={cn('inline-flex items-center gap-1 font-semibold text-primary', FOCUS)} data-testid="cockpit-back">
           <BackIcon className="h-4 w-4" aria-hidden="true" />
@@ -355,6 +371,12 @@ export function Cockpit({
       ) : wide ? (
         <div className="grid grid-cols-[44fr_56fr] gap-4">
           {viewer}
+          {linesPane}
+        </div>
+      ) : !scan ? (
+        // Phone, no document: nothing to switch to — the one-line note, then the lines.
+        <div className="space-y-3">
+          {noDoc}
           {linesPane}
         </div>
       ) : (
