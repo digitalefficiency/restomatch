@@ -359,9 +359,44 @@ describe('chain.matrix (W3-01)', () => {
 
 /* ── W3-01b · chain.byBranch (add-only) ───────────────────────────────────── */
 describe('chain.byBranch (W3-01b)', () => {
-  it('approvals per branch equal each branch’s own approvals.queueSummary; A + A2 only', async () => {
+  let bkId: string;
+  const prevSettings = new Map<string, unknown>();
+  const KINDS = ['approvals', 'payRun'] as const;
+  const others = [() => B.restaurantId, () => M.restaurantId, () => X.restaurantId];
+
+  beforeAll(async () => {
+    const [u] = await ownerDb
+      .insert(users)
+      .values({ email: 'bookkeeper-w301b@attack.test', name: 'Bookkeeper W3-01b', emailVerified: new Date() })
+      .returning();
+    bkId = u!.id;
+    await ownerDb.insert(memberships).values([
+      { userId: bkId, restaurantId: A.restaurantId, role: 'bookkeeper' },
+      { userId: bkId, restaurantId: A2.restaurantId, role: 'bookkeeper' },
+      { userId: bkId, restaurantId: X.restaurantId, role: 'bookkeeper' },
+    ]);
+  });
+
+  afterAll(async () => {
+    for (const [id, settings] of prevSettings) {
+      await ownerDb.update(restaurants).set({ settings: settings as never }).where(eq(restaurants.id, id));
+    }
+  });
+
+  async function payRunOn(t: Tenant) {
+    const [r] = await ownerDb.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, t.restaurantId));
+    if (!prevSettings.has(t.restaurantId)) prevSettings.set(t.restaurantId, r?.settings ?? {});
+    const s = (r?.settings ?? {}) as { features?: Record<string, unknown> };
+    await ownerDb
+      .update(restaurants)
+      .set({ settings: { ...s, features: { ...(s.features ?? {}), payRun: true } } as never })
+      .where(eq(restaurants.id, t.restaurantId));
+  }
+
+  it('approvals per branch equal each branch’s own approvals.queueSummary; A + A2 only, every row ok', async () => {
     const r = await asA().chain.byBranch({ kind: 'approvals' });
     expect(r.rows.map((x) => x.restaurantId).sort()).toEqual([A.restaurantId, A2.restaurantId].sort());
+    expect(r.rows.every((x) => x.status === 'ok')).toBe(true);
     for (const t of [A, A2]) {
       const own = await caller(A.ownerUserId, t.restaurantId).approvals.queueSummary();
       const row = r.rows.find((x) => x.restaurantId === t.restaurantId);
@@ -373,23 +408,65 @@ describe('chain.byBranch (W3-01b)', () => {
     }
     const sumAg = r.rows.reduce((s, x) => s + (x.status === 'ok' ? Math.round((x.approvals?.toDecideIls ?? 0) * 100) : 0), 0);
     expect(Math.round((r.totals.approvals?.toDecideIls ?? -1) * 100)).toBe(sumAg);
-    for (const other of [B.restaurantId, M.restaurantId, X.restaurantId]) expect(JSON.stringify(r)).not.toContain(other);
+    for (const o of others) expect(JSON.stringify(r)).not.toContain(o());
   });
 
-  it('payRun per branch: flag off ⇒ enabled false and no ₪ total (never a fake ₪0)', async () => {
+  it('payRun per branch: flag off ⇒ enabled false and no ₪ total (never a fake ₪0); B/M/X never in the payload', async () => {
     const r = await asA().chain.byBranch({ kind: 'payRun' });
-    expect(r.rows.every((x) => x.status === 'ok' && x.payRun !== null)).toBe(true);
-    if (r.rows.every((x) => x.status === 'ok' && x.payRun?.enabled === false)) expect(r.totals.payRun).toBeNull();
+    expect(r.rows.every((x) => x.status === 'ok' && x.payRun?.enabled === false)).toBe(true);
+    expect(r.totals.payRun).toBeNull();
+    for (const o of others) expect(JSON.stringify(r)).not.toContain(o());
   });
 
-  it('scope outside the memberships → NOT_FOUND; manager / forged session → FORBIDDEN', async () => {
-    for (const bad of [B.restaurantId, M.restaurantId, X.restaurantId, randomUUID(), `g:${randomUUID()}`]) {
-      await expect(asA().chain.byBranch({ kind: 'approvals', scope: bad })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  it('payRun ₪: flag on for A, A2 and B ⇒ each row = that branch’s own payRun.month totals, Σ excludes B', async () => {
+    for (const t of [A, A2, B]) await payRunOn(t);
+    const r = await asA().chain.byBranch({ kind: 'payRun' });
+    expect(r.rows.map((x) => x.restaurantId).sort()).toEqual([A.restaurantId, A2.restaurantId].sort());
+    let sumAg = 0;
+    for (const t of [A, A2]) {
+      const own = await caller(A.ownerUserId, t.restaurantId).payRun.month();
+      expect(own.enabled).toBe(true);
+      const row = r.rows.find((x) => x.restaurantId === t.restaurantId);
+      expect(row?.status).toBe('ok');
+      if (row?.status !== 'ok' || !row.payRun) throw new Error('missing payRun row');
+      expect(row.payRun.enabled).toBe(true);
+      expect(row.payRun.invoices).toBe(own.totals.invoices);
+      for (const k of ['payIls', 'holdIls', 'claimIls', 'creditIls', 'linkIls'] as const) {
+        expect(Math.round(row.payRun[k] * 100), `${t.restaurantId} ${k}`).toBe(Math.round(own.totals[k] * 100));
+      }
+      sumAg += Math.round(row.payRun.holdIls * 100);
     }
-    const one = await asA().chain.byBranch({ kind: 'approvals', scope: A2.restaurantId });
-    expect(one.rows.map((x) => x.restaurantId)).toEqual([A2.restaurantId]);
-    await expect(caller(A.ownerUserId, M.restaurantId, 'owner').chain.byBranch({ kind: 'approvals' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    await expect(caller(A.ownerUserId, B.restaurantId, 'owner').chain.byBranch({ kind: 'payRun' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(Math.round((r.totals.payRun?.holdIls ?? -1) * 100)).toBe(sumAg);
+    const bOwn = await caller(B.ownerUserId, B.restaurantId).payRun.month();
+    expect(bOwn.enabled).toBe(true);
+    for (const o of others) expect(JSON.stringify(r)).not.toContain(o());
+  });
+
+  it('bookkeeper (read-only lens): A + A2 only for both kinds; on X sees X alone; a forged owner role keeps the bookkeeper lens', async () => {
+    for (const kind of KINDS) {
+      const r = await caller(bkId, A.restaurantId, 'bookkeeper').chain.byBranch({ kind });
+      expect(r.lens).toBe('bookkeeper');
+      expect(r.rows.map((x) => x.restaurantId).sort()).toEqual([A.restaurantId, A2.restaurantId].sort());
+      for (const o of others) expect(JSON.stringify(r)).not.toContain(o());
+      const onX = await caller(bkId, X.restaurantId, 'bookkeeper').chain.byBranch({ kind });
+      expect(onX.rows.map((x) => x.restaurantId)).toEqual([X.restaurantId]);
+      expect(JSON.stringify(onX)).not.toContain(A.restaurantId);
+      const forged = await caller(bkId, A.restaurantId, 'owner').chain.byBranch({ kind });
+      expect(forged.lens).toBe('bookkeeper');
+    }
+  });
+
+  it('scope outside the memberships → NOT_FOUND; manager / forged session → FORBIDDEN, for both kinds', async () => {
+    for (const kind of KINDS) {
+      for (const bad of [B.restaurantId, M.restaurantId, X.restaurantId, randomUUID(), `g:${randomUUID()}`]) {
+        await expect(asA().chain.byBranch({ kind, scope: bad })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      }
+      const one = await asA().chain.byBranch({ kind, scope: A2.restaurantId });
+      expect(one.rows.map((x) => x.restaurantId)).toEqual([A2.restaurantId]);
+      for (const active of [M.restaurantId, B.restaurantId]) {
+        await expect(caller(A.ownerUserId, active, 'owner').chain.byBranch({ kind })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      }
+    }
   });
 
   it('rejects an unknown kind or month offset', async () => {
