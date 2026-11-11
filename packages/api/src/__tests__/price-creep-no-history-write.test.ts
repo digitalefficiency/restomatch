@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { auditLog, count, createDb, eq, notificationsOutbox, priceBaselines, priceHistory, restaurants, testDbUrl, type RestaurantSettings } from '@restomatch/db';
+import { auditLog, count, createDb, eq, notificationsOutbox, priceBaselines, priceHistory, restaurants, supplierContractPrices, testDbUrl, type RestaurantSettings } from '@restomatch/db';
 import { listDiffSection } from '../priceAlerts/priceListDiff';
 import { digestOptions } from '../priceAlerts/options';
 import { mailMoney } from '../priceAlerts/money';
@@ -82,5 +82,41 @@ describe('a full sweep with an import diff record', () => {
     expect((await runPriceAlertSweep(db, A.restaurantId, { now: new Date(now.getTime() + 86_400_000), notify: true })).enqueued).toBe(0);
     const off = { priceCreepDigest: true, contractExpiry: true, priceListDiff: false };
     expect((await runPriceAlertSweep(db, A.restaurantId, { now, notify: true, digestOptions: off })).enqueued).toBe(0);
+  });
+
+  it("tenant isolation: A's digest never carries B's import, contract or supplier, and never reaches B's members", async () => {
+    const now = new Date('2026-11-16T05:00:00Z');
+    const B = await seedTenant(db, 'B');
+    const on = { priceCreepDigest: true, contractExpiry: true, priceListDiff: true };
+    // B: an import diff record and a contract ending soon — both must stay in B.
+    await db.insert(auditLog).values({
+      restaurantId: B.restaurantId,
+      action: 'catalog.import_committed',
+      entityType: 'catalog_import',
+      at: new Date('2026-11-15T10:00:00Z'),
+      after: { supplierId: B.supplierId, priceChanges: [{ name: 'סוכר', oldListPrice: '4', newListPrice: '5' }] } as never,
+    });
+    await db.insert(supplierContractPrices).values({ restaurantId: B.restaurantId, supplierId: B.supplierId, productId: B.productId, contractPrice: '6.0000', validFrom: '2026-01-01', validTo: '2026-11-30' });
+    // A: its own contract ending soon, so A has a mail to send.
+    await db.insert(supplierContractPrices).values({ restaurantId: A.restaurantId, supplierId: A.supplierId, productId: A.productId, contractPrice: '6.0000', validFrom: '2026-01-01', validTo: '2026-11-30' });
+    // A record that names B's supplier from inside A must not resolve (supplier lookup is A-scoped).
+    await db.insert(auditLog).values({
+      restaurantId: A.restaurantId,
+      action: 'catalog.import_committed',
+      entityType: 'catalog_import',
+      at: new Date('2026-11-15T10:00:00Z'),
+      after: { supplierId: B.supplierId, priceChanges: [{ name: 'סוכר', oldListPrice: '4', newListPrice: '5' }] } as never,
+    });
+
+    expect((await runPriceAlertSweep(db, A.restaurantId, { now, notify: true, digestOptions: on })).enqueued).toBe(1);
+    const [mail] = await digestMail(A);
+    expect(P(mail!.body)).toContain(A.supplierName);
+    expect(P(mail!.body)).not.toContain(B.supplierName);
+    expect(P(mail!.body)).not.toContain('סוכר');
+    expect(mail!.target).toBe('owner-A@attack.test');
+    expect(await digestMail(B)).toHaveLength(0);
+    // B's "once" marks are untouched by A's sweep.
+    const bAudit = await db.select().from(auditLog).where(eq(auditLog.restaurantId, B.restaurantId));
+    expect(bAudit.filter((r) => r.action.startsWith('prices.'))).toHaveLength(0);
   });
 });
