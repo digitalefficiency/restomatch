@@ -292,9 +292,9 @@ test('resume on ANOTHER phone: the same receipt lands on review — no re-shoot,
   try {
     for (const l of po.lines) {
       await sql`insert into invoice_lines (invoice_id, product_id, raw_description, qty_billed, unit, unit_price_billed, line_total, ocr_confidence_line)
-                values (${invoiceId}, ${l.productId}, ${l.name}, 5, 'יח׳', 10, 50, 0.97)`;
+                values (${invoiceId}, ${l.productId}, ${l.name}, 6, 'יח׳', 10, 60, 0.97)`;
     }
-    await sql`update invoices set status = 'parsed', ocr_confidence = 0.96, invoice_number = ${`W25-${invoiceId.slice(0, 6)}`}, total_incl_vat = 118 where id = ${invoiceId}`;
+    await sql`update invoices set status = 'parsed', ocr_confidence = 0.96, invoice_number = ${`W25-${invoiceId.slice(0, 6)}`}, total_incl_vat = 141.6 where id = ${invoiceId}`;
   } finally {
     await sql.end();
   }
@@ -321,7 +321,8 @@ test('resume on ANOTHER phone: the same receipt lands on review — no re-shoot,
   await phone2.waitForLoadState('networkidle');
   // It resumes the count WITH the invoice already read (the billed quantities are there).
   await expect(phone2.getByTestId('delivery-check')).toBeVisible({ timeout: 60_000 });
-  await expect(phone2.getByTestId('delivery-check')).toContainText('חויב 5');
+  // Billed ≠ ordered (6 vs 5): the billed quantity is shown only when it differs.
+  await expect(phone2.getByTestId('delivery-check')).toContainText('חויב 6');
   await expect(phone2.getByTestId('scan-input')).toHaveCount(0);
   expect(registers).toEqual([]);
 
