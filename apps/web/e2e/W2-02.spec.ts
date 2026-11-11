@@ -168,12 +168,19 @@ test('cockpit: three-way lines, decide CTA with ₪ left of the digit, [ ] stepp
   await page.context().close();
 });
 
-test('cockpit on a phone: מסמך | שורות, line cards, no sideways scroll (he 390)', async ({ browser }) => {
+test('cockpit on a phone: line cards, מסמך | שורות when there is a document, no sideways scroll (he 390)', async ({ browser }) => {
   const page = await signedIn(browser, 'bookkeeper', 'he', { width: 390, height: 844 });
   const id = await invoiceIdInState('open');
   await page.goto(`/dashboard/invoices/${id}`);
-  await expect(page.getByRole('radiogroup').or(page.getByRole('group')).first()).toBeVisible();
   await expect(page.getByTestId('cockpit-line-cards')).toBeVisible();
+  // A stored document → the מסמך | שורות switch; none (the e2e lab stores no scans) → one calm line, no switch.
+  const hasDoc = (await page.getByTestId('cockpit-no-doc').count()) === 0;
+  if (hasDoc) await expect(page.getByRole('radiogroup').or(page.getByRole('group')).first()).toBeVisible();
+  else {
+    await expect(page.getByTestId('cockpit-no-doc')).toBeVisible();
+    const box = await page.getByTestId('cockpit-no-doc').boundingBox();
+    expect(box!.height).toBeLessThan(64); // one line, not a third of the screen
+  }
   const scrollW = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(scrollW).toBeLessThanOrEqual(391);
   expect(await axe(page)).toEqual([]);
