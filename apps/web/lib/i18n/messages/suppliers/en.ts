@@ -20,6 +20,7 @@ export const en: Shape<typeof he> = {
     trend: { up: 'Improving', down: 'Worsening', flat: 'Stable' },
   },
   manager: {
+    view: 'View',
     loading: 'Loading suppliers…',
     count: '{count} suppliers',
     countActive: '{active} active of {count}',

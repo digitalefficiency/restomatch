@@ -9,6 +9,8 @@ import { SupplierLedgerTab } from './tab-ledger';
 import { SupplierOverviewTab } from './tab-overview';
 import { resolveSupplierTab } from './tab-model';
 import { getWave1Access } from '../../contracts/access';
+import { auth } from '@/auth';
+import { canEditSupplier } from './read-only';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +34,8 @@ export default async function SupplierDetailPage({
   const caller = await createServerCaller();
   const initial = await caller.suppliers.get({ supplierId: id });
   const tab = resolveSupplierTab(rawTab, { ledger: initial.ledgerEnabled });
+  // Writes are managerProcedure: any other role reads the values, no edit form (IA warden #274).
+  const canEdit = canEditSupplier(((await auth())?.user as { role?: string } | undefined)?.role);
 
   switch (tab) {
     case 'overview':
@@ -67,9 +71,9 @@ export default async function SupplierDetailPage({
     default:
       return (
         <div className="space-y-8">
-          <SupplierDetailsTab supplierId={id} initial={initial} />
+          <SupplierDetailsTab supplierId={id} initial={initial} canEdit={canEdit} />
           <section id="days-and-times" className="scroll-mt-24">
-            <SupplierScheduleTab supplierId={id} initial={initial} />
+            <SupplierScheduleTab supplierId={id} initial={initial} canEdit={canEdit} />
           </section>
         </div>
       );

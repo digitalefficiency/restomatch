@@ -21,6 +21,7 @@ export const he = {
     trend: { up: 'משתפר', down: 'מדרדר', flat: 'יציב' },
   },
   manager: {
+    view: 'צפייה',
     loading: 'טוען ספקים…',
     count: '{count} ספקים',
     countActive: '{active} פעילים מתוך {count}',
