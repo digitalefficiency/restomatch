@@ -410,6 +410,13 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'inventory.amendLine': "attack — inventory-must-haves.test.ts: B amending A's closed count → NOT_FOUND; owner-only",
   'inventory.exportCsv': "attack — inventory-must-haves.test.ts: B exporting A's count → NOT_FOUND; lists only the caller's lines",
   'inventory.period': "attack — inventory-rls.attack.test.ts: B asking for the period of A's closed count → notFound; inventory-router.test.ts: A's purchases exclude B's ₪99,999 invoice on the same day; B's period is noCounts",
+  // W2-08 task spine (add-only; mirrors coverage/W2-08.ts, which #180's fragment loader will read).
+  'tasks.mine':
+    "isolation — tasks-mine.test.ts: A sees only A tasks (B's blocking ₪ never in A's payload); a role argument other than the session's is refused, never widened",
+  'nav.badges':
+    'isolation — nav-badges.test.ts: A badges never include B queues; receiver/chef badges carry counts only (tasks-redaction.test.ts: no ₪ on the wire)',
+  'nav.whereIs':
+    "attack — nav-whereis.attack.test.ts: a non-member asking for B's invoice/po/supplier/claim/count gets the random-uuid answer; only branches where the role may open the page are searched, one withRestaurant each; removed membership → not found; bad id/kind → BAD_REQUEST",
 };
 
 function listProcedurePaths(): string[] {
