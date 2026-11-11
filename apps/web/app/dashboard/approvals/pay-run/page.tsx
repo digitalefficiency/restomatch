@@ -19,6 +19,8 @@ type Row = ListResult['rows'][number];
 type Hold = Row['holds'][number];
 
 const BUCKETS = ['overdue', 'this_week', 'next_week', 'later', 'unknown'] as const;
+/** T4 holds: nothing to decide yet (a PO link, the count, a G-08 question, an OCR review). */
+const CALM_HOLDS = new Set<string>(['pending_link', 'awaiting_count', 'awaiting_question', 'awaiting_review']);
 
 /**
  * Emphasis tiers (AGENTS.md): payable is calm (T3); a decision / duplicate / missing
@@ -27,7 +29,7 @@ const BUCKETS = ['overdue', 'this_week', 'next_week', 'later', 'unknown'] as con
  */
 function toneOf(r: Row): BadgeTone {
   if (r.selectable) return r.creditIls > 0 ? 'gold' : 'accent';
-  const calm = r.holds.every((h) => h.kind === 'pending_link' || h.kind === 'awaiting_count');
+  const calm = r.holds.every((h) => CALM_HOLDS.has(h.kind));
   return calm ? 'neutral' : 'warning-solid';
 }
 
@@ -93,6 +95,10 @@ export default async function PayRunPage({
         return t('holdReason.pendingLink');
       case 'awaiting_count':
         return t('holdReason.awaitingCount');
+      case 'awaiting_question':
+        return t('status.holdQuestion');
+      case 'awaiting_review':
+        return t('status.holdReview');
       case 'missing_allocation':
         return t('holdReason.missingAllocation', { vat: ils(h.vatIls) });
       case 'note_billed_twice':
@@ -163,6 +169,21 @@ export default async function PayRunPage({
     const decision = r.holds.find(
       (h): h is Extract<Hold, { kind: 'decision' }> => h.kind === 'decision',
     );
+    // G-08: a product question goes to the mapper (roles that may answer); an OCR review opens the invoice.
+    if (r.holds.some((h) => h.kind === 'awaiting_question') && data.canAnswer) {
+      return (
+        <LinkButton href="/dashboard/catalog/mapping" size="sm" variant="secondary" className="touch-target">
+          {t('table.toQuestions')}
+        </LinkButton>
+      );
+    }
+    if (r.holds.some((h) => h.kind === 'awaiting_review')) {
+      return (
+        <LinkButton href={`/dashboard/invoices/${r.invoiceId}`} size="sm" variant="secondary" className="touch-target">
+          {t('table.openInvoice')}
+        </LinkButton>
+      );
+    }
     return decision?.canAct ? (
       <LinkButton
         href={`/dashboard/approvals?invoice=${r.invoiceId}`}

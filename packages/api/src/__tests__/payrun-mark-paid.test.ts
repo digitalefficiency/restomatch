@@ -125,6 +125,11 @@ describe('holdReasonsOf', () => {
     expect(holdReasonsOf({ ...BASE, noteBilledTwiceIls: 0 })).toEqual([]);
   });
 
+  it('G-08 question / OCR review holds are calm, never a decision', () => {
+    expect(holdReasonsOf({ ...BASE, status: 'hold', awaitingQuestion: true }).map((h) => h.kind)).toEqual(['awaiting_question']);
+    expect(holdReasonsOf({ ...BASE, status: 'hold', awaitingReview: true }).map((h) => h.kind)).toEqual(['awaiting_review']);
+  });
+
   it('pending link / awaiting count are calm holds, never a decision', () => {
     expect(
       holdReasonsOf({ ...BASE, status: 'hold', pendingLink: true }).map((h) => h.kind),

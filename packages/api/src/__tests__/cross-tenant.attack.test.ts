@@ -123,6 +123,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'exports.invoicesCsv': 'isolation',
   'exports.uniform1000': 'isolation',
   'onboarding.myMemberships': 'isolation',
+  'onboarding.signupStatus':
+    'userScopedProcedure read of the CALLER\'s own users row only (keyed to ctx.session.userId, no client input) — returns one boolean (may this caller create a restaurant), no tenant data.',
   'onboarding.createRestaurant':
     'creates a brand-new tenant; takes no entity ids and reads nothing tenant-scoped',
   // Chain / branches (S8). Exercised on the RLS-enforced app role in
@@ -151,6 +153,15 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'payRun.enabled': 'isolation — payrun.attack.test.ts: reads only the caller restaurant flag; receiver/chef FORBIDDEN',
   'payRun.month':
     'isolation — payrun.attack.test.ts: only the caller restaurant invoices (B never in the payload); receiver/chef FORBIDDEN; flag off ⇒ nothing listed; ₪ = the credit letters to the agora',
+  // W2-03 (add-only): the due-date desk + guarded mark-paid / reminder.
+  'payRun.list':
+    "isolation — payrun.attack.test.ts: A's list never contains B's invoice, supplier or findings; receiver/chef FORBIDDEN",
+  'payRun.markPaid':
+    "attack — payrun.attack.test.ts: A marking B's invoiceId (alone or mixed) → NOT_FOUND with the flag on or off, B untouched",
+  'payRun.unmarkPaid':
+    "attack — payrun.attack.test.ts: A unmarking B's invoiceId → NOT_FOUND with the flag on or off, B untouched; a reason is required",
+  'payRun.remind':
+    "attack — payrun.attack.test.ts: A reminding on B's invoiceId → NOT_FOUND; receiver/chef FORBIDDEN; nothing sent until G-06",
   'owner.leakReport': 'isolation',
   'owner.leakSummary': 'isolation',
   'owner.leakGrouped': 'isolation',
@@ -168,6 +179,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'receiving.registerInvoice': 'attack',
   'receiving.updateInvoiceHeader': 'attack',
   'receiving.updateInvoiceLine': 'attack',
+  'receiving.addInvoiceLine': 'attack',
+  'receiving.deleteInvoiceLine': 'attack',
   'receiving.pendingInvoices': 'isolation',
   // S2 "Receiver in English": writes ONLY display columns, but still takes a
   // client-supplied poId / invoiceId — a foreign id must be NOT_FOUND and B's
@@ -190,6 +203,9 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'settings.update': 'isolation',
   'settings.profile': 'isolation',
   'settings.updateProfile': 'isolation',
+  // W1-08 pilot: the credit-letter letterhead (letterhead.test.ts covers the isolation).
+  'settings.letterhead': 'isolation',
+  'settings.updateLetterhead': 'isolation',
   'search.global': 'isolation',
   // Phase-2 supplier-centric surface (suppliers / catalog / orders / on-demand match).
   // Every procedure that takes a client-supplied supplierId / productId / poId /
@@ -266,6 +282,17 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'mapping.unmapped': 'isolation',
   'mapping.searchProducts': 'isolation',
   'mapping.confirm': 'attack',
+  // G-08: the open "זה אותו מוצר?" count for the home line — a restaurant-scoped
+  // count, no ₪. See catalog-mapping.attack.test.ts.
+  // G-08: the chef-allowed answer — links a name question ONLY to one of its own
+  // server-computed suggestions; foreign supplier/product → NOT_FOUND.
+  'mapping.answerLink': 'attack — catalog-mapping.attack.test.ts: B supplier/product NOT_FOUND, non-suggested product FORBIDDEN, receiver FORBIDDEN, chef OK, no ₪',
+  'mapping.questionCount': 'isolation — catalog-mapping.attack.test.ts: counts only the caller restaurant name-keyed questions; B never counted for A',
+  // G-08 charge (review M-2): owner/manager mark an unlinked invoice-line key "שורת חיוב — לא מוצר".
+  'mapping.markCharge': 'attack — catalog-link-hold.test.ts: B supplier NOT_FOUND, A lines of another supplier untouched, chef / receiver FORBIDDEN, no ₪',
+  'mapping.chargeSample': 'attack — catalog-link-hold.test.ts: a B supplier → NOT_FOUND; chef → FORBIDDEN; one A invoice line of the key only',
+  'mapping.chargeKeys': 'isolation — catalog-link-hold.test.ts: lists only the caller restaurant learned keys (B never listed for A); chef FORBIDDEN; no ₪',
+  'mapping.removeChargeKey': 'attack — catalog-link-hold.test.ts: a B supplier → NOT_FOUND; chef → FORBIDDEN; returns only A lines of that key on unpaid invoices; audited',
   // Canonical product management (rename / recategorize / exclusivity / delete).
   'products.update': 'attack',
   'products.list': 'isolation',
@@ -342,6 +369,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'ingest.inbox': 'isolation',
   'ingest.approveDocument': 'attack',
   'ingest.rejectDocument': 'attack',
+  // PILOT (W2-02, train B, add-only): invoices waiting for a person to complete their lines.
+  'invoices.needsLines': "isolation — invoices-needs-lines.test.ts: A's list holds only A's invoices (B's unread or held invoice never listed, B's own list empty of A); receiver/chef FORBIDDEN",
   // Growth (wave 1, S15 — flag `growth`). pricing is a pure public quote over
   // the plan catalog (no tenant data, no ids); the referral procedures are
   // tenant-scoped — see the growth.* block at the end of this file.
@@ -1219,6 +1248,55 @@ describe('match router + receiving detail reads: foreign id attacks (A → B)', 
       .where(eq(invoiceLines.id, B.invoiceLineId));
     expect(row?.qtyBilled).toBe('10.000'); // B's seeded line, untouched
     expect(row?.unitPriceBilled).toBe('10.0000');
+  });
+
+  // B8 manual entry. B's invoice is made editable ('parsed') first, so the only
+  // thing standing between A and B's invoice is the tenant check.
+  it('receiving.addInvoiceLine rejects a foreign invoiceId — no line, B untouched', async () => {
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, B.invoiceId));
+    try {
+      await expect(
+        callerFor(A).receiving.addInvoiceLine({
+          invoiceId: B.invoiceId,
+          line: { rawDescription: 'attack', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1 },
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      const lines = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, B.invoiceId));
+      expect(lines).toHaveLength(1);
+      const [inv] = await db.select({ total: invoices.totalInclVat }).from(invoices).where(eq(invoices.id, B.invoiceId));
+      expect(inv?.total).toBe('117.00');
+    } finally {
+      await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, B.invoiceId));
+    }
+  });
+
+  it("receiving.addInvoiceLine on A's own invoice rejects B's productId", async () => {
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, A.invoiceId));
+    try {
+      await expect(
+        callerFor(A).receiving.addInvoiceLine({
+          invoiceId: A.invoiceId,
+          line: { rawDescription: 'attack', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1, productId: B.productId },
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      const lines = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, A.invoiceId));
+      expect(lines).toHaveLength(1);
+    } finally {
+      await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, A.invoiceId));
+    }
+  });
+
+  it('receiving.deleteInvoiceLine rejects a foreign lineId — B keeps its line', async () => {
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, B.invoiceId));
+    try {
+      await expect(callerFor(A).receiving.deleteInvoiceLine({ lineId: B.invoiceLineId })).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+      const [row] = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.id, B.invoiceLineId));
+      expect(row?.id).toBe(B.invoiceLineId);
+    } finally {
+      await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, B.invoiceId));
+    }
   });
 });
 
