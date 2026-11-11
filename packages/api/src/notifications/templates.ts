@@ -361,6 +361,8 @@ export function approvalNeededEmail(args: {
   approvalsUrl?: string;
   /** Deep link to this invoice's decision (W2-04). Preferred over `approvalsUrl` for the CTA. */
   invoiceUrl?: string;
+  /** No ₪ yet: the invoice waits for its order link (W2-04, Train C B1) — its own wording. */
+  pendingLink?: boolean;
   locale?: EmailLocale;
 }): RenderedEmail {
   const l = loc(args.locale);
@@ -374,13 +376,14 @@ export function approvalNeededEmail(args: {
     approve: d.approve.replace(/\s*·?\s*\{amount\}\s*/, ' ').trim(), // W2-04: 'בקשת זיכוי · {amount}' → 'בקשת זיכוי'
     reject: d.reject,
   };
-  const subject = txt(l, amount ? c.subject : c.reviewSubject, vars);
-  const found = amount ? c.found : c.reviewFound;
+  const pending = !amount && args.pendingLink === true;
+  const subject = txt(l, amount ? c.subject : pending ? c.pendingSubject : c.reviewSubject, vars);
+  const found = amount ? c.found : pending ? c.pendingFound : c.reviewFound;
   const amountLine = amount ? (args.claimableIls ? c.claimable : c.atRisk) : null;
   const html = renderEmail({
     locale: l,
     accent: COLORS.danger,
-    preview: txt(l, amount ? c.preview : c.reviewPreview, vars),
+    preview: txt(l, amount ? c.preview : pending ? c.pendingPreview : c.reviewPreview, vars),
     heading: c.heading,
     bodyHtml: `
       ${callout(

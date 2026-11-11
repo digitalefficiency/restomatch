@@ -115,6 +115,20 @@ export function legacyEodKey(restaurantId: string, startOfReportDay: Date, email
   return `eod-report:${restaurantId}:${startOfReportDay.toISOString().slice(0, 10)}:${email}`;
 }
 
+/**
+ * The open-credits ₪ of the digest, per VAT basis (never summed): before VAT,
+ * a duplicate invoice's incl.-VAT claim, a VAT amount. "₪0" only when all are zero.
+ */
+export function openCreditsFigure(ils: { excl: number; incl: number; vat: number } | null): string {
+  const ag = (v: number | undefined) => Math.round((v ?? 0) * 100);
+  const f = (a: number) => formatIlsAgorot(a, { maximumFractionDigits: 0 });
+  const parts: string[] = [];
+  if (ag(ils?.excl) > 0) parts.push(f(ag(ils?.excl)));
+  if (ag(ils?.incl) > 0) parts.push(`${f(ag(ils?.incl))} כולל מע״מ (חשבוניות כפולות)`);
+  if (ag(ils?.vat) > 0) parts.push(`${f(ag(ils?.vat))} מע״מ (הפרשי מע״מ)`);
+  return parts.length ? parts.join(' + ') : f(0);
+}
+
 /** The end-of-day-report job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
 export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
   const url = process.env.DATABASE_URL;
@@ -144,8 +158,9 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
     const { todayCount, todayIls } = await endOfDayFigures(db, restaurant.id, startToday, endOfDay);
     const openCount = awaiting.toDecide.count;
 
-    // Quiet day → skip (no open credits, nothing caught today).
-    if (awaiting.count === 0 && todayCount === 0) {
+    // Quiet day → skip (no open credits, nothing caught today). Review-only rows
+    // (no ₪) never make a digest on their own (Train C B2).
+    if (awaiting.toDecide.count === 0 && todayCount === 0) {
       skipped += 1;
       continue;
     }
@@ -159,12 +174,8 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
     const email = endOfDayReportEmail({
       dateLabel: formatIlDate(startToday).split(',')[0]?.trim() ?? todayKey,
       openCreditsCount: openCount,
-      // Before VAT; a duplicate invoice's incl.-VAT claim is named on its own (warden MEDIUM-1).
-      openCreditsIls:
-        formatIlsAgorot(Math.round((awaiting.ils?.excl ?? 0) * 100), { maximumFractionDigits: 0 }) +
-        ((awaiting.ils?.incl ?? 0) > 0
-          ? ` + ${formatIlsAgorot(Math.round((awaiting.ils?.incl ?? 0) * 100), { maximumFractionDigits: 0 })} כולל מע״מ (חשבוניות כפולות)`
-          : ''),
+      // Each VAT basis as its own labelled figure, never summed (warden MEDIUM-1, Train C B2).
+      openCreditsIls: openCreditsFigure(awaiting.ils),
       todayCaughtCount: todayCount,
       todayCaughtIls: formatIlsAmount(todayIls),
       pendingApprovals: awaiting.count,
