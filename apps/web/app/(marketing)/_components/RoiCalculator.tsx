@@ -24,7 +24,9 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
   const t = useT(marketing);
   const locale = useLocale();
   const ids = { monthly: useId(), leak: useId() };
-  const [monthlyRaw, setMonthlyRaw] = useState(String(SAMPLE_PURCHASING_ILS));
+  // Shown grouped ("150,000", he-IL / en numerals) — parseNumberInput reads the grouping back exactly.
+  const grouped = (n: number) => formatNumber(n, locale, { maximumFractionDigits: 0 });
+  const [monthlyRaw, setMonthlyRaw] = useState(() => grouped(SAMPLE_PURCHASING_ILS));
   const [leakPct, setLeakPct] = useState(SAMPLE_LEAK_PCT);
 
   const roi = computeRoi(monthlyRaw, leakPct, Math.round(proPriceIls * 100));
@@ -70,7 +72,7 @@ export function RoiCalculator({ proPriceIls }: { proPriceIls: number }) {
             max={700_000}
             step={5_000}
             value={sliderIls}
-            onChange={(e) => setMonthlyRaw(e.target.value)}
+            onChange={(e) => setMonthlyRaw(grouped(Number(e.target.value)))}
             className="mt-3 w-full cursor-pointer accent-primary"
           />
         </div>

@@ -93,3 +93,16 @@ describe('W3-06 review M2 · the calculator labels the sample on every page', ()
     expect(he).toMatch(/\(\{price\} \+ מע״מ/);
   });
 });
+
+describe('W3-06 lab · the purchasing default is shown grouped (150,000), and grouping parses back exactly', () => {
+  it('reads he-IL/en grouping back to the same agorot', () => {
+    expect(monthlyAgorotFromInput('150,000')).toBe(15_000_000);
+    expect(monthlyAgorotFromInput('150000')).toBe(15_000_000);
+  });
+  it('the calculator seeds and slides through the shared number formatter, never String(n)', () => {
+    const src = readFileSync(join(__dirname, '../RoiCalculator.tsx'), 'utf8');
+    expect(src).toMatch(/useState\(\(\) => grouped\(SAMPLE_PURCHASING_ILS\)\)/);
+    expect(src).not.toMatch(/useState\(String\(SAMPLE_PURCHASING_ILS\)\)/);
+    expect(src).toMatch(/setMonthlyRaw\(grouped\(Number\(e\.target\.value\)\)\)/);
+  });
+});
