@@ -127,10 +127,10 @@ export const he = {
     noInvoiceNumber: 'ללא מספר',
   },
   worker: {
-    title: 'מנוע העיבוד לא זמין כרגע.',
-    body: 'חשבוניות שתעלו יישמרו ויעברו OCR והתאמה ברגע שהוא יחזור.',
+    title: 'העיבוד מתעכב.',
+    body: 'חשבוניות שתעלו יישמרו ויעובדו אחר כך.',
     lastBeat: 'פעימה אחרונה לפני {minutes} דק׳.',
-    ownerNotified: 'הבעלים קיבל התראה.',
+    ownerNotified: 'אין צורך לפעול.',
   },
   loading: 'טוען',
   /** W2-08: nav badges, the bell and the cross-branch 404. */

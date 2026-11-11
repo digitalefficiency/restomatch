@@ -2,7 +2,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { and, eq, inArray, invoices, restaurants, suppliers, type Database, type UserRole } from '@restomatch/db';
 import { featureEnabled } from '../lib/features';
-import { memberProcedure, router } from '../trpc';
+import { bookkeeperProcedure, financeProcedure, router } from '../trpc';
 import {
   allocationRequestDraft,
   priorAllocationEvents,
@@ -31,16 +31,11 @@ export const ALLOCATION_WRITE_ROLES: ReadonlyArray<UserRole> = ['owner', 'bookke
 /** Who may read the case (VAT ₪ included). */
 export const ALLOCATION_READ_ROLES: ReadonlyArray<UserRole> = ['owner', 'manager', 'bookkeeper'];
 
-function roles(allowed: ReadonlyArray<UserRole>) {
-  return memberProcedure.use(({ ctx, next }) => {
-    if (!allowed.includes(ctx.session.role)) {
-      throw new TRPCError({ code: 'FORBIDDEN', message: `Required role: ${allowed.join('|')}, got: ${ctx.session.role}` });
-    }
-    return next();
-  });
-}
-const readProcedure = roles(ALLOCATION_READ_ROLES);
-const writeProcedure = roles(ALLOCATION_WRITE_ROLES);
+// The shared role procedures (G-07 capabilities walk): reads = financeProcedure
+// (owner, manager, bookkeeper = ALLOCATION_READ_ROLES), writes = bookkeeperProcedure
+// (owner, bookkeeper = ALLOCATION_WRITE_ROLES). vat-allocation.attack.test.ts pins both sets.
+const readProcedure = financeProcedure;
+const writeProcedure = bookkeeperProcedure;
 
 async function flagOn(db: Database, restaurantId: string): Promise<boolean> {
   const [r] = await db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1);

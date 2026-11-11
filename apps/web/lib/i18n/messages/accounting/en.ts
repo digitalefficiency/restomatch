@@ -44,12 +44,12 @@ export const en: Shape<typeof he> = {
   note: 'Every checked invoice is included: “matched”, “disputed” (flagged in the status column), “approved” and “paid”. Invoices still in OCR, and consolidated invoices waiting for their delivery notes, are left out, as is a copy flagged as a duplicate invoice (unless the flag was rejected as “not a duplicate”). Dates follow Israel time.',
   close: {
     title: 'Month close',
-    subtitle: 'What is still open before you close the month and hand it to the accountant. Each step opens the queue where its number lives.',
+    subtitle: 'What is still open before you close the month for the accountant',
     monthLabel: 'Month',
     prevMonth: 'Previous month',
     nextMonth: 'Next month',
     progress: '{done} of {total} steps closed',
-    allDone: 'Nothing to close — every step is clean.',
+    allDone: 'No steps left to act on',
     openNow: 'Everything open now, not only this month',
     state: {
       done: 'Closed',
@@ -60,13 +60,13 @@ export const en: Shape<typeof he> = {
     count: '{count} items',
     notTracked: 'Not recorded yet',
     steps: {
-      unchecked: { title: 'Invoices not checked yet', body: 'This month’s invoices still being read or not yet matched to an order and delivery note.', verb: 'Check invoices' },
+      unchecked: { title: 'Invoices not checked yet', body: 'This month’s invoices still being read or waiting to be linked to an order', verb: 'Check invoices' },
       gaps: { title: 'Discrepancies awaiting a decision', body: 'The same figure as “Waiting for your decision” on the home page.', verb: 'Decide discrepancies' },
       claims: { title: 'Credit requests not sent', body: 'Credits you decided to request that have not been sent to the supplier.', verb: 'Send requests' },
-      consolidated: { title: 'Consolidated invoices waiting', body: 'Consolidated invoices waiting for their delivery notes. This is normal, not a fault.', verb: 'Open the consolidated invoice' },
+      consolidated: { title: 'Consolidated invoices waiting', body: 'Consolidated invoices waiting for their delivery notes, which is normal', verb: 'Open the consolidated invoice' },
       deliveryNotes: { title: 'Delivery notes with no invoice', body: 'Goods received this month that no invoice covers yet (before VAT).', verb: 'Open the supplier ledger' },
-      vat: { title: 'VAT at risk', body: 'Invoices without a valid allocation number — their VAT cannot be deducted.', verb: 'Open VAT at risk' },
-      exports: { title: 'Accounting export', body: 'Download the file for the accountant. Automatic ticking of the export comes later.', verb: 'Export' },
+      vat: { title: 'VAT at risk', body: 'Invoices without a valid allocation number, so their VAT is not deductible', verb: 'Open VAT at risk' },
+      exports: { title: 'Accounting export', body: 'Download the file for the accountant; automatic ticking comes later', verb: 'Export' },
     },
   },
 };

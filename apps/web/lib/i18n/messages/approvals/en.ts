@@ -7,9 +7,9 @@ export const en: Shape<typeof he> = {
     title: 'All handled ✓',
     description: 'Nothing is waiting for your decision.',
     clearTitle: 'All handled ✓',
-    clearDescription: 'No open discrepancies in this restaurant. New ones appear here as soon as receipts and invoices show them.',
-    othersWaiting: 'Nothing waiting for you · {count} waiting for the {role} ({amount})',
-    othersWaitingMany: 'Nothing waiting for you · {count} waiting for others ({amount})',
+    clearDescription: 'New discrepancies will show up here.',
+    othersWaiting: 'Nothing is waiting for you.',
+    othersWaitingMany: 'Nothing is waiting for you.',
   },
   summary: {
     inQueue: 'Waiting for you',
@@ -26,7 +26,7 @@ export const en: Shape<typeof he> = {
     title: 'Waiting for others',
     line: '{count} · {amount}',
     role: '{role}: {count} ({amount})',
-    readOnly: 'Read-only — their decision.',
+    readOnly: 'View only',
   },
   roles: {
     owner: 'owner',
@@ -114,14 +114,14 @@ export const en: Shape<typeof he> = {
     action: 'Undo',
     done: '{verb} · {amount}',
     undone: 'Decision undone · back in the queue',
-    failed: "Can't undo: the window passed or someone else acted.",
+    failed: "It can no longer be undone.",
     announce: '{verb} · {what} · {count} left',
   },
   errorPage: {
     title: "The approvals queue didn't load",
     titlePayRun: "The pay run didn't load",
     bodyPayRun: 'Something went wrong loading the pay run. No payment was marked.',
-    body: 'Something went wrong loading the discrepancies. No decision was lost.',
+    body: 'No decision was lost.',
     retry: 'Try again',
     home: 'Go to home',
   },
@@ -140,11 +140,11 @@ export const en: Shape<typeof he> = {
   types: {
     PRICE_HIGHER: {
       label: 'Price above expected',
-      explain: 'The supplier charged a higher unit price than the order or the historical price.',
+      explain: 'Unit price above the order or past prices.',
     },
     PRICE_LOWER: {
       label: 'Price below expected',
-      explain: 'The supplier charged less than expected — not a leak, just for your information.',
+      explain: 'Billed less than expected. Not counted in the leak.',
     },
     QTY_SHORT: {
       label: 'Short delivery',
@@ -164,7 +164,7 @@ export const en: Shape<typeof he> = {
     },
     UNIT_MISMATCH: {
       label: 'Unit mismatch',
-      explain: 'The invoice unit differs from the order unit and cannot be converted.',
+      explain: 'Unit differs from the order, no conversion.',
     },
     UNORDERED_ARRIVAL: {
       label: 'Waiting for a PO link',
@@ -173,15 +173,15 @@ export const en: Shape<typeof he> = {
     },
     DUPLICATE_INVOICE: {
       label: 'Duplicate invoice',
-      explain: 'This invoice number was already received from the same supplier — risk of paying twice.',
+      explain: 'This invoice number was already received from this supplier.',
     },
     DATE_ANOMALY: {
       label: 'Unexpected date',
-      explain: 'The invoice date is more than a week away from the expected delivery.',
+      explain: 'The invoice date is far from the delivery date.',
     },
     VAT_MISMATCH: {
       label: 'VAT mismatch',
-      explain: 'The VAT amount does not match the VAT rate applied to the pre-VAT total.',
+      explain: 'The VAT amount doesn\'t match the rate.',
     },
     TOTAL_MISMATCH: {
       label: 'Total does not match lines',
@@ -192,14 +192,14 @@ export const en: Shape<typeof he> = {
     price: 'price ±{pct} or {amount}',
     qty: 'quantity ±{pct} or {units} units',
     duplicate: 'invoice number unique per supplier',
-    date: '±{days} days from the expected delivery',
+    date: '±{days} days',
     poRequired: 'every invoice needs a purchase order',
     unit: 'unit must match between the order and the invoice',
     billedOverReceived: 'billed quantity exceeds the received quantity',
     missingLine: 'every order line must appear on the invoice',
     unorderedLine: 'every invoice line must match an order line',
     total: '±{amount}',
-    vat: '{rate} VAT on the subtotal, ±{amount}',
+    vat: '{rate} VAT, ±{amount}',
     p90: 'above the historical 90th percentile ({amount})',
   },
   rules: {
