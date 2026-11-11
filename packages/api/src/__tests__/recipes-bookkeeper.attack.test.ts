@@ -14,6 +14,7 @@ const db = createDb(testDbUrl());
 let A: Tenant;
 let B: Tenant;
 let prodA: string;
+let prodB: string;
 let dishA: string;
 let dishB: string;
 
@@ -38,6 +39,7 @@ beforeAll(async () => {
   const [pa] = await db.insert(products).values({ restaurantId: A.restaurantId, canonicalName: 'בצל', defaultUnit: 'ק״ג' }).returning();
   const [pb] = await db.insert(products).values({ restaurantId: B.restaurantId, canonicalName: 'בצל', defaultUnit: 'ק״ג' }).returning();
   prodA = pa!.id;
+  prodB = pb!.id;
   await db.insert(priceHistory).values({ restaurantId: A.restaurantId, productId: prodA, supplierId: A.supplierId, observedAt: new Date(Date.now() - 86_400_000), unitPrice: '5.0000' });
   dishA = (await caller(A, 'chef').recipes.save({ name: 'מרק A', menuPriceAgorot: 3000, items: [{ productId: prodA, quantity: '200', unit: 'גרם', wastePct: 0 }] })).id;
   dishB = (await caller(B, 'chef').recipes.save({ name: 'מרק B', menuPriceAgorot: 3000, items: [{ productId: pb!.id, quantity: '1', unit: 'ק״ג', wastePct: 0 }] })).id;
@@ -63,10 +65,18 @@ describe('recipes.* — the bookkeeper reads, never writes (owner decision I3)',
     await expect(bk.recipes.preview({ name: 'x', items: [{ productId: prodA, quantity: '1', unit: 'ק״ג', wastePct: 0 }] })).resolves.toMatchObject({ portionCostAgorot: 500 });
   });
 
-  it("her reads stay tenant-scoped: B's recipe is NOT_FOUND, B's dishes never listed", async () => {
+  it("her reads stay tenant-scoped: B's recipe / product is NOT_FOUND, B's rows never listed", async () => {
     const bk = caller(A, 'bookkeeper');
     await expect(bk.recipes.get({ id: dishB })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     expect((await bk.recipes.list()).recipes.some((r) => r.id === dishB)).toBe(false);
+    await expect(bk.recipes.impact({ productId: prodB, changePct: 10 })).rejects.toMatchObject({ code: 'NOT_FOUND', message: 'recipes.productNotFound' });
+    const found = await bk.recipes.searchProducts({ search: 'בצל' });
+    expect(found.map((p) => p.id)).toEqual([prodA]);
+    const changes = await bk.recipes.changes();
+    expect(changes.rows.map((r) => r.recipeId)).not.toContain(dishB);
+    const alerts = await bk.recipes.priceAlerts();
+    expect(JSON.stringify(alerts)).not.toContain(dishB);
+    expect((await bk.recipes.subRecipes()).length).toBe(0);
   });
 
   it('every write is FORBIDDEN and changes no row (own and foreign ids)', async () => {
