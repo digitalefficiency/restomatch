@@ -137,6 +137,8 @@ export async function offlineAnswer(
           count: c.count,
           duplicateInclVatIls: c.duplicateInclVatIls,
           vatIls: c.vatIls,
+          // Lines on another VAT basis (duplicates incl. VAT, VAT amounts): not in totalIls/count.
+          otherBasisCount: c.otherBasisCount,
           items: c.lines.slice(0, 5).map((l) => ({
             supplier: l.supplier,
             item: l.item,

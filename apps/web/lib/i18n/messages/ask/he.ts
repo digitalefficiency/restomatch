@@ -57,6 +57,7 @@ export const he = {
     priceItem: '{product} אצל {supplier}: {before} ← {after} ({pct}), עלות עודפת {excess}',
     claimNone: 'אין כרגע פערים פתוחים לבקשת זיכוי. מצוין.',
     claimIntro: 'אפשר לבקש זיכוי על {total} (לפני מע״מ) ב-{count} פערים. הגדולים:',
+    claimOther: 'בנוסף: חשבוניות כפולות {incl} (כולל מע״מ), מע״מ {vat} — בנפרד, לא מצטברים.',
     claimItem: '{supplier} · {item} ({type}): {amount}',
     topSupplier: 'הספק שהכי דלף החודש: {supplier} — {leak} מתוך הוצאה של {spend}.',
     topSupplierNone: 'אין החודש דליפה אצל אף ספק.',

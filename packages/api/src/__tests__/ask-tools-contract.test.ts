@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { createDb, discrepancies, matchRuns, testDbUrl } from '@restomatch/db';
+import { createDb, discrepancies, eq, matchRuns, testDbUrl } from '@restomatch/db';
 import { awaitingDecision } from '../approvals/awaiting';
+import { offlineAnswer } from '../ask/offline';
 import { plainLabel } from '../ask/periods';
 import { runTool, TOOL_DEFINITIONS } from '../ask/tools';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -146,5 +147,19 @@ describe('Ask tools contract', () => {
     expect(d.duplicateInclVatIls).toBe(a.ils!.incl);
     expect(d.vatIls).toBe(a.ils!.vat);
     expect(d.duplicateInclVatIls).toBeGreaterThan(0);
+  });
+
+  it('offline "what to claim": a duplicate-only restaurant (incl. VAT) still has something to claim', async () => {
+    // Only claimable row: a duplicate invoice — its ₪ is incl. VAT, so it is NOT in the before-VAT
+    // count/total. The web shows "nothing to claim" only when no basis has a line (leak-economist 11.11).
+    const t = await seedTenant(db, 'dup-only');
+    await db
+      .update(discrepancies)
+      .set({ type: 'DUPLICATE_INVOICE', deltaAmount: '80.00', requiresRole: 'bookkeeper' })
+      .where(eq(discrepancies.id, t.discrepancyId));
+    const off = await offlineAnswer(db, t.restaurantId, 'על מה כדאי לבקש זיכוי השבוע?', NOW, 'he');
+    expect(off.intent).toBe('claimWeek');
+    expect(off.facts).toMatchObject({ count: 0, totalIls: 0, otherBasisCount: 1, vatIls: 0 });
+    expect(Number(off.facts.duplicateInclVatIls)).toBeGreaterThan(0);
   });
 });
