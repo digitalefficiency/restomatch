@@ -239,6 +239,18 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // test below). The settings pair takes no entity id and reads/writes only
   // ctx.session.restaurantId's own restaurants row.
   'orders.documentPreview': 'attack',
+  // W2-06 (Orders 2): each new procedure, with the suite that proves it.
+  'orders.orderGuide': "attack — orders-w2-06.attack.test.ts: A asking for B's supplier guide → NOT_FOUND, B untouched",
+  'orders.supplierBoard': "isolation — orders-w2-06.attack.test.ts: A's board lists only A's suppliers, never B's POs or drafts",
+  'orders.openDraft': "attack — orders-w2-06.attack.test.ts: A opening a draft for B's supplier → NOT_FOUND",
+  'orders.saveDraft': "attack — orders-w2-06.attack.test.ts: B's supplierId, draftId or productId → NOT_FOUND, nothing written for A or B",
+  'orders.prepareManualSend': "attack — orders-w2-06.attack.test.ts: B's poId → NOT_FOUND, no text of B's order",
+  'orders.markSentManually': "attack — orders-w2-06.attack.test.ts: B's poId → NOT_FOUND, B's draft stays a draft",
+  'orders.addOrderLine': "attack — orders-w2-06.attack.test.ts: B's poId or B's productId → NOT_FOUND, no line written",
+  'orders.sendMany': "attack — orders-w2-06.attack.test.ts: B's poId in the batch → NOT_FOUND, nothing sent or queued",
+  'orders.viewCounts': "isolation — orders-views.test.ts: A's view counts never include B's orders",
+  'orders.threeWay': "attack — orders-three-way.test.ts: A asking for B's PO 3-way view → NOT_FOUND",
+  'orders.amendSent': "attack — orders-w2-06.attack.test.ts: B's poId or productId → NOT_FOUND, no amendment text",
   // supplierLedger (flag): ledger takes a client supplierId → assertSupplierOwned;
   // ledgerGrid lists only the caller's suppliers (both tests below).
   'suppliers.ledger': 'attack',
