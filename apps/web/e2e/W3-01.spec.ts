@@ -77,6 +77,8 @@ test.afterAll(async () => {
 });
 
 test('W3-01 · the chain matrix: total row, T4 empty branch, scope chips, ≤2-click drill with 0 reloads', async ({ page, context }) => {
+  // next dev compiles the invoice route on first open: the drill step needs more than the default budget.
+  test.setTimeout(180_000);
   const errors = collectPageErrors(page);
   await signIn(context, page, DEMO_OWNER_EMAIL);
 
@@ -122,7 +124,7 @@ test('W3-01 · the chain matrix: total row, T4 empty branch, scope chips, ≤2-c
     if (box && (page.viewportSize()?.width ?? 0) >= 1024) expect(Math.round(box.width)).toBe(520);
     await expect(page.getByTestId('matrix-peek-invoices')).toBeVisible();
     await page.getByTestId('matrix-peek-open').first().click(); // click 2: the invoice
-    await expect(page).toHaveURL(/\/dashboard\/invoices\/[0-9a-f-]{36}/);
+    await expect(page).toHaveURL(/\/dashboard\/invoices\/[0-9a-f-]{36}/, { timeout: 120_000 });
     await expectSameDocument(page);
   });
 
