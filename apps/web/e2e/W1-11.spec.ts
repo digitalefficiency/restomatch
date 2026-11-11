@@ -716,8 +716,10 @@ test.describe('pilot · truthful send state · chef orders', () => {
         returning id`;
       await sql`insert into po_lines (po_id, raw_description, qty_ordered, unit, unit_price_expected)
                 values (${po!.id}, 'W1-11 pilot עגבניות', 4, 'ק״ג', 12)`;
-      await sql`insert into notifications_outbox (restaurant_id, channel, target, subject, body, status, last_error, related_entity_type, related_entity_id)
-                values (${restaurantId}, 'email', 'orders@supplier.test', 'הזמנה', 'הזמנה חדשה', ${status}, ${lastError}, 'purchase_order', ${po!.id})`;
+      // The order message as placeOrder writes it: its dedupe key is what the order screens read
+      // (other mail about the PO, e.g. the supplier-delays late chase, shares the entity fields).
+      await sql`insert into notifications_outbox (restaurant_id, channel, target, subject, body, status, last_error, related_entity_type, related_entity_id, dedupe_key)
+                values (${restaurantId}, 'email', 'orders@supplier.test', 'הזמנה', 'הזמנה חדשה', ${status}, ${lastError}, 'purchase_order', ${po!.id}, ${`po:${po!.id}:placed`})`;
       return po!.id;
     } finally {
       await sql.end();
