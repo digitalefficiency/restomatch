@@ -111,6 +111,7 @@ export function ReceivingWizard({
   tolerance,
   showMoney = false,
   receiverName = null,
+  readOnly = false,
 }: {
   po: PoForClient;
   restaurantId: string | null;
@@ -130,6 +131,12 @@ export function ReceivingWizard({
   showMoney?: boolean;
   /** Who is receiving (the signed-in person) — shown on the confirmation. */
   receiverName?: string | null;
+  /**
+   * View only (IA-03: routeAccess(role, path) === 'read'). Every line, count and
+   * invoice comparison stays visible; no photo, no receipt is started, no mark is
+   * saved, no close, no dock slip. Default false: nothing changes for callers.
+   */
+  readOnly?: boolean;
 }) {
   const t = useT(receiving);
   const td = useT(receivingDelivery);
@@ -608,9 +615,10 @@ export function ReceivingWizard({
   /** No invoice (or OCR failed / still reading): straight to the count, against the order (RCV-14/15). */
   async function buildFromPoOnly(knownGrId: string | null) {
     try {
-      const activeGrId = await ensureReceipt(knownGrId ?? grId);
-      const receipt = await loadReceipt(activeGrId);
-      noteVersion(activeGrId, receipt.updatedAt);
+      // Read-only never starts a receipt: the order alone (plus its receipt's counts, if one exists).
+      const activeGrId = readOnly ? (knownGrId ?? grId) : await ensureReceipt(knownGrId ?? grId);
+      const receipt = activeGrId ? await loadReceipt(activeGrId) : null;
+      if (activeGrId && receipt) noteVersion(activeGrId, receipt.updatedAt);
       const adapted = adaptReconciliation({
         po: {
           id: po.id,
@@ -621,7 +629,7 @@ export function ReceivingWizard({
           totalEstimated: po.totalEstimated,
         },
         poLines: localizePoLines(poLines, localNamesRef.current),
-        receiptLines: localizeReceiptLines(receipt.lines, localNamesRef.current),
+        receiptLines: localizeReceiptLines(receipt?.lines ?? [], localNamesRef.current),
         invoiceLines: [],
         invoiceMeta: null,
         labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
@@ -647,6 +655,15 @@ export function ReceivingWizard({
       setStep('SCAN_INVOICE');
     }
   }
+
+  // Read-only has no scan step: show the order (and any receipt counts) instead, once.
+  const readOnlyBuiltRef = useRef(false);
+  useEffect(() => {
+    if (!readOnly || step !== 'SCAN_INVOICE' || readOnlyBuiltRef.current) return;
+    readOnlyBuiltRef.current = true;
+    void buildFromPoOnly(grId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, step]);
 
   // Reopened mid-receipt (reload, a call, the tab was evicted): resume the count
   // with every saved mark — never restart at the scan step (RCV-02).
@@ -707,6 +724,7 @@ export function ReceivingWizard({
   }, [step]);
 
   function updateMark(key: string, patch: Partial<LineMark>) {
+    if (readOnly) return; // view only: nothing is marked or saved
     const existing = marksRef.current[key];
     // Nothing changes while the receipt is closing (it would be saved after the close).
     if (!existing || submittingRef.current) return;
@@ -776,7 +794,7 @@ export function ReceivingWizard({
 
   /** Close the receipt: every line is already saved (or flushed now); then submitReceipt re-matches. */
   async function submit() {
-    if (!grId || !result) return;
+    if (readOnly || !grId || !result) return;
     // Double-tap on "close receipt" must not submit twice.
     if (submittingRef.current) return;
     submittingRef.current = true;
@@ -935,7 +953,7 @@ export function ReceivingWizard({
         </>
       ) : null}
 
-      {step === 'SCAN_INVOICE' && registerRetry ? (
+      {step === 'SCAN_INVOICE' && registerRetry && !readOnly ? (
         <div role="alert" dir={dir} className="mb-4 space-y-3 rounded-2xl border border-warn/60 bg-surface p-4" data-testid="register-failed">
           <p className="text-base font-semibold text-ink">{td('delivery.scan.registerFailed')}</p>
           <button
@@ -949,7 +967,7 @@ export function ReceivingWizard({
           </button>
         </div>
       ) : null}
-      {step === 'SCAN_INVOICE' ? (
+      {step === 'SCAN_INVOICE' && !readOnly ? (
         <InvoiceScan
           supplierName={supplierLabel}
           image={image}
@@ -994,6 +1012,7 @@ export function ReceivingWizard({
         <Reconciliation
           result={result}
           showMoney={showMoney}
+          readOnly={readOnly}
           lineExtra={dockPriceLineExtra}
           onContinueAdjust={() => setStep('ADJUST_QUANTITIES')}
           onRetake={() => {
@@ -1006,7 +1025,7 @@ export function ReceivingWizard({
           }}
         >
           {/* Dock dispute slip (flag dockSlip): quantities on the review, before the count. */}
-          {dockSlipOn && grId && slipNeeded ? (
+          {dockSlipOn && grId && slipNeeded && !readOnly ? (
             <div className="mt-4" dir={dir}>
               {showSlip ? (
                 <DockSlip
@@ -1036,7 +1055,7 @@ export function ReceivingWizard({
 
       {step === 'ADJUST_QUANTITIES' && result ? (
         <>
-          {heldRows.length > 0 ? (
+          {heldRows.length > 0 && !readOnly ? (
             <HeldCounts
               rows={heldRows}
               result={result}
@@ -1049,7 +1068,7 @@ export function ReceivingWizard({
               locale={locale}
             />
           ) : null}
-          {result.invoiceMeta.noInvoice && !invoiceId && !image ? (
+          {result.invoiceMeta.noInvoice && !invoiceId && !image && !readOnly ? (
             // The invoice can still be photographed: marks are kept (count first, invoice in parallel — RCV-05).
             <div className="mb-3 flex justify-end" dir={dir}>
               <button
@@ -1067,6 +1086,7 @@ export function ReceivingWizard({
             result={result}
             marks={marks}
             onUpdateMark={updateMark}
+            readOnly={readOnly}
             onSubmit={() => void submit()}
             onBack={result.invoiceMeta.noInvoice ? undefined : () => setStep('RECONCILIATION_REVIEW')}
             eyebrow={supplierLabel}
