@@ -93,13 +93,13 @@ export default async function SupplierDetailLayout({
             <p className="text-xs text-subtle">{t('overview.leakLabel')}</p>
             {overview ? (
               <>
-                <Money agorot={overview.leakAgorot} context="hero" locale={locale} className="text-3xl font-extrabold" />
+                <Money agorot={overview.leakAgorot} context="hero" decimals={2} locale={locale} className="text-3xl font-extrabold" />
                 {overview.leakAgorot > 0 && supplier.leakCardEnabled ? (
                   <Link
                     href={`/dashboard/suppliers/${id}?tab=overview#leak-card`}
                     className="block text-xs font-semibold text-primary underline-offset-2 hover:underline"
                   >
-                    {t('overview.leakHow', { amount: formatIls(overview.leakAgorot / 100, { locale }) })}
+                    {t('overview.leakHow', { amount: formatIls(overview.leakAgorot / 100, { locale, maximumFractionDigits: 2 }) })}
                   </Link>
                 ) : null}
               </>

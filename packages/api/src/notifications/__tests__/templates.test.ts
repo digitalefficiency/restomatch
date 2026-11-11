@@ -75,6 +75,22 @@ describe('email templates', () => {
     expect(html).toContain('12:00');
   });
 
+  it('orderNotPlacedEmail with an unsent draft says a draft is not an order and links the draft (AU-04 A5)', () => {
+    const m = orderNotPlacedEmail({
+      supplierName: 'שופרסל',
+      orderDayLabel: 'יום ראשון',
+      cutoffLabel: '12:00',
+      ordersUrl: 'https://app/new',
+      draftUrl: 'https://app/orders/po-1',
+    });
+    expect(m.subject).toBe('טיוטת הזמנה מ-שופרסל עדיין לא נשלחה');
+    expect(m.text).toContain('טיוטה היא עדיין לא הזמנה');
+    expect(m.text).toContain('פתיחת הטיוטה: https://app/orders/po-1');
+    expect(m.html).toContain('https://app/orders/po-1');
+    expect(m.html + m.text).not.toContain('https://app/new');
+    expect(m.html).toContain('12:00');
+  });
+
   it('approvalNeededEmail surfaces the count and at-risk amount', () => {
     const { subject, html } = approvalNeededEmail({
       supplierName: 'תנובה',

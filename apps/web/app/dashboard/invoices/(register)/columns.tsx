@@ -16,6 +16,8 @@ export interface RegisterRow {
   state: InvoiceStateKey;
   tab: 'review' | 'awaiting' | 'matched' | 'held' | 'paid';
   hasAllocation: boolean;
+  allocationNumber: string | null;
+  allocationRequired: boolean;
   consolidated: boolean;
 }
 
@@ -56,7 +58,10 @@ export interface RegisterCopy {
   col: { date: string; supplier: string; number: string; total: string; due: string; gap: string; status: string; allocation: string };
   state: Record<InvoiceStateKey, string>;
   allocationYes: string;
+  /** Required (above the VAT threshold) and missing. */
   allocationNo: string;
+  /** Not required for this invoice (screen-reader text for '—'). */
+  allocationNa: string;
   consolidated: string;
 }
 
@@ -119,14 +124,20 @@ export function registerColumns(t: RegisterCopy, locale: Locale): ColumnDef<Regi
       header: t.col.allocation,
       kind: 'status',
       hideable: true,
-      value: (r) => (r.hasAllocation ? 1 : 0),
-      cell: (r) => (
-        <span>
-          <span aria-hidden="true">{r.hasAllocation ? '✓' : '✗'}</span>
-          <span className="sr-only">{r.hasAllocation ? t.allocationYes : t.allocationNo}</span>
-        </span>
-      ),
-      exportValue: (r) => (r.hasAllocation ? t.allocationYes : t.allocationNo),
+      // Missing-and-required first when sorted ascending; never a bare glyph.
+      value: (r) => (r.hasAllocation ? 2 : r.allocationRequired ? 0 : 1),
+      cell: (r) =>
+        r.hasAllocation ? (
+          <bdi className="num text-sm text-ink">{r.allocationNumber}</bdi>
+        ) : r.allocationRequired ? (
+          <StatusChip tone="warn" emphasis="subtle" icon={null} label={t.allocationNo} />
+        ) : (
+          <span className="text-muted">
+            <span aria-hidden="true">—</span>
+            <span className="sr-only">{t.allocationNa}</span>
+          </span>
+        ),
+      exportValue: (r) => (r.hasAllocation ? (r.allocationNumber ?? t.allocationYes) : r.allocationRequired ? t.allocationNo : t.allocationNa),
     },
   ];
 }

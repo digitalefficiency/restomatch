@@ -14,6 +14,7 @@ import { assertSupplierOwned } from '../tenant';
 import { appError } from '../errors';
 import { HELD_FOR_RECEIPTS_KEY } from '@restomatch/charts';
 import { CLAIM_ANSWER_DAYS, NEVER_CLAIMABLE_TYPES } from '../lib/claims';
+import { REMIND_EVERY_CALENDAR_DAYS, awaitingChaseSql, pastAnswerWindowSql } from './overdue';
 import {
   AWAITING_SUPPLIER,
   CREDITABLE,
@@ -73,8 +74,8 @@ export const NEVER_CLAIMABLE_TYPE_SQL = sql`d.type IN (${NEVER_CLAIMABLE_SQL})`;
  * days) all use this one rule, so they can never be a day apart.
  */
 export function overdueSql(now: Date, tz: SQL): SQL {
-  return sql`((${now.toISOString()}::timestamptz AT TIME ZONE ${tz})::date
-    - (COALESCE(c.letter_sent_at, c.claimed_at) AT TIME ZONE ${tz})::date) > ${OVERDUE_DAYS}`;
+  // AU-03: the boundary lives in recovery/overdue.ts (TS + SQL twins of one rule).
+  return pastAnswerWindowSql(now, tz);
 }
 
 /** Event note of the narrow never-claimable write-off (owner 31.10). */
@@ -488,7 +489,7 @@ export interface RecoveryClaimListRow extends RecoveryClaimRow {
 /** Waiting on the supplier this many days after the letter (or the claim) ⇒ overdue (owner 31.10: a week). */
 export const OVERDUE_DAYS = CLAIM_ANSWER_DAYS;
 /** Do not chase the same claim more often than this. */
-export const REMIND_EVERY_DAYS = 7;
+export const REMIND_EVERY_DAYS = REMIND_EVERY_CALENDAR_DAYS;
 /** Upper bound for one page of the claims LIST (totals never truncate — see computeRecoverySummary). */
 export const MAX_CLAIMS = 5000;
 
@@ -756,6 +757,30 @@ async function loadOwnedClaims(db: Database, restaurantId: string, ids: string[]
   return rows;
 }
 
+/**
+ * H-06 security review: the instant a transition is recorded at. A caller-supplied
+ * `at` is ignored: the transition is stamped now(), but never earlier than the
+ * claim's last event, so the event history stays ordered and a back-dated move can't
+ * slip under a later one. Ordering wins over the clock on purpose: if an older write
+ * left a future-dated event, the next stamp takes that instant rather than land before it.
+ */
+export async function clampTransitionAt(
+  db: Database,
+  restaurantId: string,
+  claimId: string,
+  now: Date = new Date(),
+): Promise<Date> {
+  const wanted = now;
+  const [last] = rowsOf(
+    await db.execute(sql`
+      SELECT max(created_at) AS at FROM recovery_events
+      WHERE claim_id = ${claimId}::uuid AND restaurant_id = ${restaurantId}::uuid
+    `),
+  );
+  const floor = last?.at ? new Date(last.at as string | Date) : null;
+  return floor && floor.getTime() > wanted.getTime() ? floor : wanted;
+}
+
 /** Move one claim along the lifecycle (not into `credited` — see recordCreditNote). */
 export async function transitionClaim(
   db: Database,
@@ -770,11 +795,17 @@ export async function transitionClaim(
   if (!canTransition(claim.status, input.to)) {
     throw new TRPCError({ code: 'CONFLICT', message: `cannot move a claim from ${claim.status} to ${input.to}` });
   }
-  const at = input.at ?? new Date();
+  // input.at is not trusted: a back-dated (or future) instant is clamped to now().
+  const at = await clampTransitionAt(db, restaurantId, claim.id);
   const stamp = stampFor(input.to);
   const patch: Partial<typeof recoveryClaims.$inferInsert> = { status: input.to };
   if (stamp) patch[stamp] = at;
   if (input.to === 'claimed') patch.closedAt = null;
+  // H-06 security review: a re-opened request is a new request. Re-stamping
+  // letter_sent_at gives H-06's supplier-link verifier the instant to reject links
+  // issued before the re-open (that check lands with H-06; nothing enforces it yet),
+  // and the 7-day answer clock restarts from the re-open.
+  if (claim.status === 'written_off' && input.to === 'claimed') patch.letterSentAt = at;
   if (claim.status === 'written_off' && input.to === 'claimed' && claim.creditedAgorot === 0) {
     // A re-open takes a share of the invoice cap again: re-cap it like the
     // system re-open does (another claim may hold the freed share by now).
@@ -1023,7 +1054,12 @@ export async function recordCreditNote(
   if (input.invoiceLineId) {
     const res = await db.execute(sql`
       SELECT i.id AS invoice_id, i.supplier_id, i.invoice_number,
-             to_char(COALESCE(i.invoice_date, i.created_at), 'YYYY-MM-DD') AS issued_on,
+             -- The restaurant's calendar day, never the session's (UTC on Supabase): an undated
+             -- invoice created 00:00–02:00 IL must not get yesterday's (or last month's) issued_on.
+             -- invoice_date is stored at 00:00Z, so it keeps its date in Israel.
+             to_char(COALESCE(i.invoice_date, i.created_at) AT TIME ZONE
+               (SELECT COALESCE(timezone, 'Asia/Jerusalem') FROM restaurants WHERE id = ${restaurantId}),
+               'YYYY-MM-DD') AS issued_on,
              il.line_total, round(abs(il.line_total) * 100)::bigint AS amount_agorot
       FROM invoice_lines il
       JOIN invoices i ON i.id = il.invoice_id AND i.restaurant_id = ${restaurantId}

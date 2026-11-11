@@ -33,6 +33,7 @@ function everyEmail(): Array<[string, RenderedEmail]> {
       [`invite:${locale}`, inviteEmail({ url: 'u', restaurantName: 'כפר הזיתים', roleLabel: 'r', inviterName: 'Dana', locale })],
       [`delay:${locale}`, supplierDelayEmail({ supplierName: 'Coca-Cola Ltd.', expectedAtLabel: '20.6', daysLate: 2, lineCount: 1, poUrl: 'u', locale })],
       [`order:${locale}`, orderNotPlacedEmail({ supplierName: 'תנובה', orderDayLabel: 'א׳', cutoffLabel: '12:00', ordersUrl: 'u', locale })],
+      [`order-draft:${locale}`, orderNotPlacedEmail({ supplierName: 'Coca-Cola Ltd.', orderDayLabel: 'א׳', cutoffLabel: '12:00', draftUrl: 'u', locale })],
       [`approval:${locale}`, approvalNeededEmail({ supplierName: 'תנובה', discrepancyCount: 3, atRiskIls: '‏1,240 ₪', approvalsUrl: 'u', locale })],
       [`weekly:${locale}`, weeklyLeakReportEmail({ weekLabel: '13.6–19.6', savedIls: '‏3,500 ₪', leakedIls: '‏820 ₪', topSupplier: 'תנובה', locale })],
       [`eod:${locale}`, endOfDayReportEmail({ dateLabel: '21.6', openCreditsCount: 0, openCreditsIls: '‏0 ₪', todayCaughtCount: 1, todayCaughtIls: '‏120 ₪', locale })],

@@ -362,10 +362,7 @@ export const adminRouter = router({
         .where(eq(restaurants.id, input.restaurantId))
         .limit(1);
       if (!r?.billingAccountId) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'restaurant has no subscription — assign a plan first',
-        });
+        throw appError('BAD_REQUEST', 'admin.noSubscription', 'restaurant has no subscription — assign a plan first');
       }
       const overrides = {
         ...(input.overrides.limits

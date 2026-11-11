@@ -60,6 +60,12 @@ export const en = {
     cutoff: 'Order cut-off today: {cutoff}',
     body: 'To catch the delivery window, you can create the order now.',
     cta: 'Create the order',
+    draftSubject: 'Draft order for {supplier} not sent yet',
+    draftPreview: 'A draft is not an order yet. The order from {supplier} has not been sent.',
+    draftHeading: 'Unsent draft: order from {supplier}',
+    draftCallout: 'There is a draft order for {supplier} that has not been sent yet. A draft is not an order yet.',
+    draftBody: 'To catch the delivery window, you can send it now.',
+    draftCta: 'Open the draft',
   },
   approvalNeeded: {
     subject: 'Decision needed: {count, plural, one {# discrepancy} other {# discrepancies}} on an invoice from {supplier}',

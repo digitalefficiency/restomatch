@@ -7,10 +7,14 @@ import { createServerCaller } from '@/lib/trpc/server';
 import { RegisterClient, type RegisterPageCopy } from './register-client';
 import type { InvoiceStateKey, RegisterRow } from './columns';
 import { pickRegisterMonth } from './month';
+import { auth } from '@/auth';
+import { formatDate } from '@/lib/i18n/format';
+import { holdReasonKeys } from '../hold-reasons';
+import type { LinesView } from './register-client';
 
 export const dynamic = 'force-dynamic';
 
-const TABS = ['review', 'awaiting', 'matched', 'held', 'paid', 'noAllocation', 'intake'] as const;
+const TABS = ['review', 'lines', 'awaiting', 'matched', 'held', 'paid', 'noAllocation', 'intake'] as const;
 const STATES: InvoiceStateKey[] = [
   'in_ocr',
   'awaiting_count',
@@ -34,7 +38,13 @@ export default async function InvoicesRegisterPage({
   searchParams: Promise<{ month?: string }>;
 }) {
   const { month } = await searchParams;
-  const [caller, t, locale] = await Promise.all([createServerCaller(), getT(invoicesNs), getLocale()]);
+  const [caller, t, locale, session] = await Promise.all([createServerCaller(), getT(invoicesNs), getLocale(), auth()]);
+  // ?view=lines (train-C B2): the invoices waiting for a person — a failed or empty read, or a
+  // held one — from invoices.needsLines (not month-scoped). Its own error state; never "none".
+  const linesRes = await caller.invoices.needsLines().then(
+    (v) => ({ ok: true as const, v }),
+    () => ({ ok: false as const }),
+  );
 
   let data: Awaited<ReturnType<typeof caller.invoices.list>> | null = null;
   let monthOffset = pickRegisterMonth({ param: month, now: new Date(), currentMonthCount: 1 }).monthOffset;
@@ -69,6 +79,7 @@ export default async function InvoicesRegisterPage({
     state: Object.fromEntries(STATES.map((s) => [s, t(`state.${s}`)])) as RegisterPageCopy['state'],
     allocationYes: t('register.allocationYes'),
     allocationNo: t('register.allocationNo'),
+    allocationNa: t('register.allocationNa'),
     consolidated: t('register.consolidated'),
     open: t('register.open'),
     intakeHint: t('register.intakeHint'),
@@ -83,6 +94,30 @@ export default async function InvoicesRegisterPage({
     peekGap: t('register.peekGap'),
   };
 
+  const readOnly = session?.user?.role === 'bookkeeper';
+  const dd = (d: Date | string | null) =>
+    d ? formatDate(new Date(d), locale, { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.') : null;
+  const lines: LinesView | null = linesRes.ok
+    ? {
+        count: linesRes.v.count,
+        rows: linesRes.v.rows.map((r) => {
+          const held = r.reason === 'held';
+          return {
+            id: r.id,
+            supplier: (locale === 'en' && r.supplierNameEn ? r.supplierNameEn : r.supplierName) ?? t('needsLines.noSupplier'),
+            meta: [dd(r.invoiceDate), r.invoiceNumber ?? t('needsLines.noNumber')].filter(Boolean).join(' · '),
+            held,
+            reason: held ? null : t(`needsLines.reason.${r.reason}`),
+            chips: holdReasonKeys(r.reviewReasons).map((k) => t(`needsLines.held.${k}`)),
+            open: t(readOnly ? 'needsLines.openReadOnly' : held ? 'needsLines.openHeld' : 'needsLines.open'),
+          };
+        }),
+        empty: t('needsLines.empty'),
+        emptyBody: t('needsLines.emptyBody'),
+        caption: t('needsLines.caption'),
+      }
+    : null;
+
   const rows: RegisterRow[] | null = data
     ? data.rows.map((r) => ({
         id: r.id,
@@ -95,6 +130,8 @@ export default async function InvoicesRegisterPage({
         state: r.state,
         tab: r.tab,
         hasAllocation: r.hasAllocation,
+        allocationNumber: r.allocationNumber,
+        allocationRequired: r.allocationRequired,
         consolidated: r.consolidated,
       }))
     : null;
@@ -102,7 +139,7 @@ export default async function InvoicesRegisterPage({
   return (
     <div>
       <SectionHeader level={1} title={t('register.title')} subtitle={t('register.subtitle')} />
-      <RegisterClient rows={rows} counts={data?.counts ?? null} monthOffset={monthOffset} fellBack={fellBack} locale={locale} copy={copy} />
+      <RegisterClient rows={rows} counts={data?.counts ?? null} lines={lines} monthOffset={monthOffset} fellBack={fellBack} locale={locale} copy={copy} />
     </div>
   );
 }

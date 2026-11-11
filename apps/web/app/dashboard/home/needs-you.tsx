@@ -6,8 +6,12 @@ import { Money } from '@/lib/components/money';
 import type { TaskRow } from '@/lib/components/notifications/rows';
 
 export type NeedTone = TaskRow['tone'];
-/** A "מחכה לך" row: the task spine's row (₪ in agorot via <Money>, or a count). */
-export type NeedRow = TaskRow;
+/**
+ * A "מחכה לך" row: the task spine's row (₪ in agorot via <Money>, or a count).
+ * `href` omitted = a static row (the public sample home, W3-06 M11) — rendered
+ * as a plain box with no link into the product.
+ */
+export type NeedRow = Omit<TaskRow, 'href'> & { href?: string };
 
 const rail: Record<NeedTone, string> = {
   danger: 'before:bg-danger',
@@ -84,19 +88,35 @@ export function NeedsYou({
 }
 
 function NeedLink({ row }: { row: NeedRow }) {
-  const tid = (suffix = '') => `needs-${row.key}${suffix}`;
-  return (
+  const box = cn(
+    'relative flex min-h-16 items-center justify-between gap-3 overflow-hidden rounded-xl border border-line bg-surface py-2 pe-3 ps-4 shadow-card',
+    // T2 row-tone rail (3 px) on the start edge.
+    "before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:content-['']",
+    rail[row.tone],
+  );
+  return row.href ? (
     <Link
       href={row.href}
-      data-testid={tid()}
+      data-testid={`needs-${row.key}`}
       className={cn(
-        'relative flex min-h-16 items-center justify-between gap-3 overflow-hidden rounded-xl border border-line bg-surface py-2 pe-3 ps-4 shadow-card transition-colors hover:border-primary/40',
-        // T2 row-tone rail (3 px) on the start edge.
-        "before:absolute before:inset-y-0 before:start-0 before:w-[3px] before:content-['']",
-        rail[row.tone],
+        box,
+        'transition-colors hover:border-primary/40',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2',
       )}
     >
+      <NeedBody row={row} />
+    </Link>
+  ) : (
+    <div data-testid={`needs-${row.key}`} className={box}>
+      <NeedBody row={row} />
+    </div>
+  );
+}
+
+function NeedBody({ row }: { row: NeedRow }) {
+  const tid = (suffix = '') => `needs-${row.key}${suffix}`;
+  return (
+    <>
       <span className="min-w-0">
         <span className="block truncate text-xs font-semibold text-muted">{row.label}</span>
         <span className="block text-2xl font-bold leading-7 tabular-nums text-ink" data-testid={tid('-value')}>
@@ -126,6 +146,6 @@ function NeedLink({ row }: { row: NeedRow }) {
         {row.verb}
         <ArrowLeft className="h-3.5 w-3.5 ltr:-scale-x-100" aria-hidden="true" />
       </span>
-    </Link>
+    </>
   );
 }

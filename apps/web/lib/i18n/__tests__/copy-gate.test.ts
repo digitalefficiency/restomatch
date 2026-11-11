@@ -10,6 +10,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ALL_NAMESPACES } from '../messages';
 import type { MessageTree } from '../translate';
+import { GLOSSARY } from '../glossary';
 import { leaves, lint, lintServerFiles, type Finding, type Lang, type Row, type RuleId } from './copyGate';
 
 const REPO = resolve(__dirname, '../../../../..');
@@ -154,5 +155,90 @@ describe('copy gate: the report', () => {
       const hit = rows.some((r) => covers(a, r.where, r.text) && r.findings.some((f) => f.rule === a.rule));
       expect(hit, `${a.where} ${a.rule}`).toBe(true);
     }
+  });
+});
+
+/* ── C2 guard (Train C): the retired claims term never comes back ─────────────────────────────
+ * Owner decision 7.11: suppliers are daily partners, so the claim is "בקשת זיכוי", never "דרישה".
+ * Unlike the warn table above, this FAILS on the creditClaim concept's retired words in EVERY Hebrew
+ * namespace and in the server copy the gate scans, whoever owns the string.
+ *
+ *   CLAIMS_ALLOW   — a deliberate use: exact `where` + exact text + a reason. Stale entries fail.
+ *   CLAIMS_PENDING — known offenders already routed to their owner in the Train-C fix round. They are
+ *                    tolerated (not failed) so another lane's fix never turns this red; when a pending
+ *                    string is gone it is reported for removal. Never add a new offender here: fix it.
+ */
+/**
+ * The C2 scan is wider than the warn table's SERVER_SCAN: every server message (tRPC routers'
+ * TRPCError text, report COPY functions as template literals, worker jobs) and every web
+ * string literal outside the i18n namespaces (which the namespace walk already covers).
+ */
+const CLAIMS_SCAN = ['packages/api/src', 'apps/worker/src', 'apps/web/lib', 'apps/web/app'];
+const CLAIMS_SKIP = ['file:apps/web/lib/i18n/'];
+
+const CLAIMS_TERMS = GLOSSARY.find((g) => g.concept === 'creditClaim')!.retireHe as readonly string[];
+
+const CLAIMS_ALLOW: Array<{ where: string; text?: string; contains?: string; reason: string }> = [
+  // The Ask system prompt names the retired words to forbid them ("Never call it תביעה, דרישה …").
+  { where: 'file:packages/api/src/ask/claude.ts', contains: 'Never call it "תביעה", "דרישה"', reason: 'prompt forbids the word' },
+  // Search keywords / aliases: people still type the old word; it is matched, never shown.
+  { where: 'file:apps/web/lib/components/palette/actions.ts', text: 'דרישה', reason: 'search keyword' },
+  { where: 'file:apps/web/lib/components/palette/actions.ts', text: 'דרישות', reason: 'search keyword' },
+  { where: 'file:apps/web/lib/nav/routes/leaks.ts', text: 'דרישה', reason: 'search alias (7.11)' },
+];
+
+const CLAIMS_PENDING: Array<{ where: string; owner: string }> = [
+  // W2-09 (leaks/he.ts, leakProof/he.ts) — fixing in the Train-C round
+  { where: 'leaks:', owner: 'W2-09' },
+  { where: 'leakProof:', owner: 'W2-09' },
+  // Reported to the orchestrator for routing (found by this guard)
+  { where: 'approvals:', owner: 'W2-04' },
+];
+
+describe('C2 guard: "בקשת זיכוי", never the retired claims term (owner 7.11)', () => {
+  const termRe = (term: string) => new RegExp(`(?:^|[^\u05D0-\u05EA])[והבלמשכ]{0,3}${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
+  const RES = CLAIMS_TERMS.map((t) => ({ term: t, re: termRe(t) }));
+  const hits = (text: string) => RES.filter((r) => r.re.test(text)).map((r) => r.term);
+
+  const rows: Array<{ where: string; text: string; terms: string[] }> = [
+    ...ALL_NAMESPACES.flatMap((ns) =>
+      leaves(ns.he as MessageTree).map(([key, text]) => ({ where: `${ns.name}:${key}`, text, terms: hits(text) })),
+    ),
+    ...lintServerFiles(REPO, CLAIMS_SCAN)
+      .filter((r) => !CLAIMS_SKIP.some((p) => r.where.startsWith(p)))
+      .map((r) => ({ where: r.where, text: r.text, terms: hits(r.text) })),
+  ].filter((r) => r.terms.length > 0);
+
+  const allowed = (r: { where: string; text: string }) =>
+    CLAIMS_ALLOW.some(
+      (a) =>
+        (r.where === a.where || r.where.startsWith(`${a.where}:`)) &&
+        (a.text !== undefined ? r.text === a.text : a.contains !== undefined && r.text.includes(a.contains)),
+    );
+  const pending = (r: { where: string }) => CLAIMS_PENDING.find((p) => r.where === p.where || r.where.startsWith(p.where.endsWith(':') ? p.where : `${p.where}:`));
+
+  it('fires on every retired form (fixtures)', () => {
+    for (const t of ['יש עליה דרישת זיכוי', 'שתי דרישות זיכוי', 'אפשר לדרוש זיכוי', 'הוסיפו לדרישת זיכוי', 'אושר לדרישה', 'מכתב זיכוי לספק', 'לשלוח מכתבי דרישה על {x} פערים', 'לתזכר {x} דרישות זיכוי באיחור', 'הדרישה נשלחה']) {
+      expect(hits(t), t).not.toEqual([]);
+    }
+    for (const t of ['בקשת זיכוי', 'הוסיפו לבקשת זיכוי', 'מכתב בקשת זיכוי', 'חשבונית זיכוי', 'תעודת זיכוי']) {
+      expect(hits(t), t).toEqual([]);
+    }
+  });
+
+  it('no Hebrew copy or server copy carries the retired claims term (outside the precise allow / routed pending lists)', () => {
+    const offenders = rows.filter((r) => !allowed(r) && !pending(r)).map((r) => `${r.where} [${r.terms.join(', ')}] ← ${r.text}`);
+    expect(offenders).toEqual([]);
+  });
+
+  it('reports the routed offenders still open, and pending entries already fixed (warn)', () => {
+    const open = rows.filter((r) => !allowed(r) && pending(r)).map((r) => `${pending(r)!.owner}: ${r.where} ← ${r.text}`);
+    const fixed = CLAIMS_PENDING.filter((p) => !rows.some((r) => pending(r) === p)).map((p) => `${p.owner}: ${p.where}`);
+    console.log(`\nC2 GUARD (claims term)\nopen (${open.length}):\n  ${open.join('\n  ')}\nfixed, remove from CLAIMS_PENDING (${fixed.length}):\n  ${fixed.join('\n  ')}\n`);
+    expect(true).toBe(true);
+  });
+
+  it('every CLAIMS_ALLOW entry is still needed', () => {
+    for (const a of CLAIMS_ALLOW) expect(rows.some((r) => allowed(r) && r.where.startsWith(a.where)), a.where).toBe(true);
   });
 });

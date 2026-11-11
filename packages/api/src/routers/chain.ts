@@ -40,6 +40,7 @@ import { featureEnabled } from '../lib/features';
 import { isFeatureOn } from '../lib/featureGate';
 import { computeRecoverySummary } from '../recovery/service';
 import { computeQueueSummary } from './approvals';
+import { computePayRunMonth } from './payRun';
 import { authedProcedure, router } from '../trpc';
 import { hasNoControlChars, NO_CONTROL_CHARS_MESSAGE } from '../lib/text';
 
@@ -562,6 +563,84 @@ async function matrixExtras(tx: Database, restaurantId: string): Promise<MatrixE
 
 const ScopeInput = z.string().max(64).optional();
 
+/* ── W3-01b · the "סניף" column: approvals and pay run per branch ─────────── */
+
+export const BY_BRANCH_KINDS = ['approvals', 'payRun'] as const;
+export type ByBranchKind = (typeof BY_BRANCH_KINDS)[number];
+
+export interface BranchApprovals {
+  count: number;
+  blockers: number;
+  toDecideCount: number;
+  toDecideIls: number;
+}
+export interface BranchPayRun {
+  /** The branch has the pay run off: no numbers (never a fake ₪0). */
+  enabled: boolean;
+  invoices: number;
+  payIls: number;
+  holdIls: number;
+  claimIls: number;
+  creditIls: number;
+  linkIls: number;
+}
+
+export type ByBranchRow =
+  | { status: 'ok'; restaurantId: string; name: string; isActive: boolean; approvals: BranchApprovals | null; payRun: BranchPayRun | null }
+  | { status: 'error'; restaurantId: string; name: string; isActive: boolean };
+
+export interface ByBranchTotals {
+  approvals: BranchApprovals | null;
+  payRun: Omit<BranchPayRun, 'enabled'> | null;
+  partial: boolean;
+}
+
+/** Pure: Σ of the OK rows in integer agorot (counts as integers). */
+export function byBranchTotals(rows: ByBranchRow[], kind: ByBranchKind): ByBranchTotals {
+  const oks = rows.filter((r): r is Extract<ByBranchRow, { status: 'ok' }> => r.status === 'ok');
+  const partial = oks.length < rows.length;
+  if (kind === 'approvals') {
+    const a = { count: 0, blockers: 0, toDecideCount: 0, toDecideAg: 0 };
+    for (const r of oks) {
+      if (!r.approvals) continue;
+      a.count += r.approvals.count;
+      a.blockers += r.approvals.blockers;
+      a.toDecideCount += r.approvals.toDecideCount;
+      a.toDecideAg += toAg(r.approvals.toDecideIls);
+    }
+    return {
+      approvals: { count: a.count, blockers: a.blockers, toDecideCount: a.toDecideCount, toDecideIls: a.toDecideAg / 100 },
+      payRun: null,
+      partial,
+    };
+  }
+  const on = oks.filter((r) => r.payRun?.enabled);
+  if (on.length === 0) return { approvals: null, payRun: null, partial };
+  const t = { invoices: 0, pay: 0, hold: 0, claim: 0, credit: 0, link: 0 };
+  for (const r of on) {
+    const p = r.payRun!;
+    t.invoices += p.invoices;
+    t.pay += toAg(p.payIls);
+    t.hold += toAg(p.holdIls);
+    t.claim += toAg(p.claimIls);
+    t.credit += toAg(p.creditIls);
+    t.link += toAg(p.linkIls);
+  }
+  return {
+    approvals: null,
+    payRun: {
+      invoices: t.invoices,
+      payIls: t.pay / 100,
+      holdIls: t.hold / 100,
+      claimIls: t.claim / 100,
+      creditIls: t.credit / 100,
+      linkIls: t.link / 100,
+    },
+    partial,
+  };
+}
+
+
 export const chainRouter = router({
   /**
    * W3-01 roll-up matrix: one row per branch in the requested scope, each
@@ -649,6 +728,65 @@ export const chainRouter = router({
             })),
         };
       });
+    }),
+
+  /**
+   * W3-01b: the "סניף" column for approvals and the pay run. One row per branch
+   * in the scope, each read in its own `inBranch` (RLS) with the same function
+   * the single-branch screen uses (computeQueueSummary with the caller's own
+   * lens / computePayRunMonth), so a branch row equals that branch's own screen.
+   * Read-only; owner or bookkeeper; writes stay in each row's own restaurant.
+   */
+  byBranch: authedProcedure
+    .input(
+      z.object({
+        kind: z.enum(BY_BRANCH_KINDS),
+        scope: ScopeInput,
+        monthOffset: z.union([z.literal(0), z.literal(-1)]).default(0),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const rows = await myMembershipRows(ctx.db, ctx.session.userId);
+      const scope = parseBranchScope(input.scope);
+      const ms = resolveMatrixScope(rows, ctx.session.restaurantId, scope);
+      const gate = await gateFor(ctx, { active: ms.active, branches: ms.pool });
+      if (!gate.chainEnabled) throw chainRequired(gate.entitlements.planKey);
+      const branches = ms.branches.slice(0, MAX_CHAIN_BRANCHES);
+      const out = await mapLimit(branches, BRANCH_CONCURRENCY, async (b): Promise<ByBranchRow> => {
+        const base = { restaurantId: b.restaurantId, name: b.name, isActive: b.restaurantId === ms.active.restaurantId };
+        try {
+          return await inBranch(ctx.db, ctx.session.userId, b.restaurantId, async (tx): Promise<ByBranchRow> => {
+            if (input.kind === 'approvals') {
+              const q = await computeQueueSummary(tx, b.restaurantId, ms.lens);
+              return {
+                status: 'ok',
+                ...base,
+                approvals: { count: q.count, blockers: q.blockers, toDecideCount: q.toDecide.count, toDecideIls: q.toDecide.amountIls },
+                payRun: null,
+              };
+            }
+            const p = await computePayRunMonth(tx, b.restaurantId, input.monthOffset, ms.lens);
+            return {
+              status: 'ok',
+              ...base,
+              approvals: null,
+              payRun: {
+                enabled: p.enabled,
+                invoices: p.totals.invoices,
+                payIls: p.totals.payIls,
+                holdIls: p.totals.holdIls,
+                claimIls: p.totals.claimIls,
+                creditIls: p.totals.creditIls,
+                linkIls: p.totals.linkIls,
+              },
+            };
+          });
+        } catch (err) {
+          console.error('[chain.byBranch] branch failed', b.restaurantId, err instanceof Error ? err.message : 'unknown');
+          return { status: 'error', ...base };
+        }
+      });
+      return { kind: input.kind, scope, lens: ms.lens, rows: out, totals: byBranchTotals(out, input.kind) };
     }),
 
   /** The owner's branches on this billing account + what the plan allows. */

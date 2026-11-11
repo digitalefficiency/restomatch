@@ -20,6 +20,8 @@
  * is never a DiscrepancyType, a claim or leak ₪.
  */
 
+import { INVOICE_PAST_INTAKE } from '../lifecycle/predicates';
+
 export type PreflightKind =
   | 'possible_duplicate'
   | 'confirmed_copy'
@@ -111,7 +113,7 @@ export const UNUSUAL_FACTOR = 2;
 export const UNUSUAL_LOOKBACK = 12;
 export const UNUSUAL_MIN_SAMPLES = 3;
 
-const CHECKED = new Set(['matched', 'disputed', 'approved', 'paid']);
+const CHECKED: ReadonlySet<string> = new Set(INVOICE_PAST_INTAKE);
 const isPaid = (i: PreflightInvoice) => i.status === 'paid' || i.paidAt != null;
 
 /** NUMERIC string (shekels) → integer agorot, half-up at the agora. Null/garbage → 0. */
