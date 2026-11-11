@@ -35,6 +35,8 @@ export function cappedCount(count: number, locale: Locale): string {
 export interface BadgeWords {
   items: (count: string) => string;
   atRisk: (amount: string) => string;
+  /** Claims: the recovery page's "זיכויים פתוחים" figure. */
+  owed: (amount: string) => string;
   blocking: string;
 }
 
@@ -42,7 +44,10 @@ export interface BadgeWords {
 export function badgeAria(label: string, b: NavBadgeValue | undefined, locale: Locale, w: BadgeWords): string {
   if (!b || b.count <= 0) return label;
   const parts = [label, w.items(cappedCount(b.count, locale))];
-  if (b.ilsAgorot !== null && b.ilsAgorot > 0) parts.push(w.atRisk(formatIls(b.ilsAgorot / 100, { locale })));
+  if (b.ilsAgorot !== null && b.ilsAgorot > 0) {
+    const amount = formatIls(b.ilsAgorot / 100, { locale });
+    parts.push(b.money === 'owed' ? w.owed(amount) : w.atRisk(amount));
+  }
   if (b.block) parts.push(w.blocking);
   return parts.join(', ');
 }

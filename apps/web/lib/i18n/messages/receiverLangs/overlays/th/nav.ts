@@ -134,6 +134,7 @@ export const nav: Shape<typeof he> = {
   badge: {
     items: '{count} รายการ',
     atRisk: '{amount} มีความเสี่ยง',
+    owed: '{amount} เครดิตที่ค้างอยู่',
     blocking: 'ระงับการชำระเงิน',
   },
   bell: {

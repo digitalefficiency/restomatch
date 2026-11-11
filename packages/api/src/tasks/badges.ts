@@ -17,6 +17,11 @@ export interface NavBadge {
   block: boolean;
   /** Neutral only (e.g. a price alert below materiality). */
   tone: 'danger' | 'warn' | 'neutral';
+  /**
+   * What the ₪ means, so the UI names it: 'atRisk' (the sum of the tasks) or
+   * 'owed' (claims: the recovery page's own "זיכויים פתוחים" figure — train C review).
+   */
+  money?: 'atRisk' | 'owed';
 }
 
 /** Which badge a task type adds into. `waiting_on_others` adds into none: it is not mine. */

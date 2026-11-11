@@ -134,6 +134,7 @@ export const en: Shape<typeof he> = {
   badge: {
     items: '{count} items',
     atRisk: '{amount} at risk',
+    owed: '{amount} open credits',
     blocking: 'blocking payment',
   },
   bell: {

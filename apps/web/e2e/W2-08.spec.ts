@@ -122,6 +122,45 @@ test.describe('owner: one figure on the home row, the badge and the bell', () =>
     await context.close();
   });
 
+  test('a failed-OCR photo invoice is reachable from the home row and from the bell (?view=lines)', async ({ browser, baseURL }) => {
+    const NUMBER = 'E2E-W208-OCRFAIL';
+    const sql = e2eSql();
+    try {
+      await sql`delete from invoices where invoice_number = ${NUMBER}`;
+      await sql`insert into invoices (restaurant_id, invoice_number, invoice_date, status, source, ocr_payload)
+                select id, ${NUMBER}, now(), 'parsed', 'photo', ${sql.json({ raw: { ocrFailed: true } })}
+                from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
+    } finally {
+      await sql.end();
+    }
+    try {
+      const { context, page } = await asRole(browser, 'owner', DESKTOP, baseURL!);
+      await page.goto('/dashboard');
+      // Home row: it may sit under "עוד N" (owner home shows 3 rows).
+      const more = page.getByTestId('needs-you-more');
+      if (await more.count()) await more.locator('summary').click();
+      const row = page.getByTestId('needs-invoiceLines').first();
+      await expect(row).toBeVisible({ timeout: 20_000 });
+      expect(await row.getAttribute('href')).toBe('/dashboard/invoices?view=lines');
+      await row.click();
+      await expect(page).toHaveURL(/\/dashboard\/invoices\?view=lines/);
+      await expect(page.getByText(NUMBER).first()).toBeVisible({ timeout: 20_000 });
+
+      // The bell: the same task, the same list.
+      await page.goto('/dashboard');
+      await page.getByTestId('bell-trigger').click();
+      const item = page.getByTestId('bell-panel').getByTestId('bell-item-doc_review');
+      await expect(item).toBeVisible();
+      await item.click();
+      await expect(page).toHaveURL(/\/dashboard\/invoices\?view=lines/);
+      await expect(page.getByText(NUMBER).first()).toBeVisible({ timeout: 20_000 });
+      await context.close();
+    } finally {
+      const clean = e2eSql();
+      await clean`delete from invoices where invoice_number = ${NUMBER}`.finally(() => clean.end());
+    }
+  });
+
   test('the cross-branch 404 offers "פתחו שם" to the owner of both branches', async ({ browser, baseURL }) => {
     const sql = e2eSql();
     let invoiceId = '';

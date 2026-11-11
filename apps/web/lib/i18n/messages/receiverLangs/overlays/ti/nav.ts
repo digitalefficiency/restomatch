@@ -134,6 +134,7 @@ export const nav: Shape<typeof he> = {
   badge: {
     items: '{count} ኣቕሓታት',
     atRisk: '{amount} ኣብ ሓደጋ',
+    owed: '{amount} ክፉት ክረዲት',
     blocking: 'ክፍሊት የዕግት',
   },
   bell: {
