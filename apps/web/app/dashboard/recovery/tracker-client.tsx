@@ -11,6 +11,7 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { recovery } from '@/lib/i18n/messages/recovery';
 import { approvals } from '@/lib/i18n/messages/approvals';
 import { Badge, Button, Card, ConfirmDialog, Field, Input, cn, type BadgeTone } from '@/lib/components';
+import { localDay } from '@/lib/components/views/labels';
 import { discrepancyLabel, displayName } from '../approvals/vocab';
 import { parseIlsInput } from './parseIls';
 import { UndoBar, useDeferredCommit } from './deferred';
@@ -782,7 +783,8 @@ function CreditForm({
   const [vat, setVat] = useState<'incl' | 'excl' | null>(line ? 'excl' : null);
   // Owner 7.11: which document arrived — the supplier's credit invoice, or a credit note (kept on the note).
   const [docKind, setDocKind] = useState<'invoice' | 'note' | null>(line ? 'invoice' : null);
-  const [date, setDate] = useState(line?.invoiceDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10));
+  // Today on the Israeli calendar, not the UTC day (yesterday between local midnight and 02:00/03:00).
+  const [date, setDate] = useState(line?.invoiceDate?.slice(0, 10) ?? localDay(new Date()));
   const [error, setError] = useState<string | null>(null);
   // TODO(G-13): parseDecimalInput(raw, 'ils') once it lands; "1,250" = ₪1,250.00 either way.
   const typed = line ? line.amountAgorot : parseIlsInput(amount);

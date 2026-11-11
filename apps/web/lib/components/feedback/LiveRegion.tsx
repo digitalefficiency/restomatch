@@ -37,8 +37,14 @@ export function AnnouncerProvider({ children }: { children: React.ReactNode }) {
 
   // A message belongs to the page it was announced on: clear both regions on
   // navigation, so an old error is not still sitting in role="alert" later.
+  // Mounting is not a navigation: this effect runs after the children's, so on
+  // the first run it would cancel a toast fired from a mount effect (the
+  // branch-switch notice after its full reload) before it is ever read out.
   const pathname = usePathname();
+  const announcedOn = useRef(pathname);
   useEffect(() => {
+    if (announcedOn.current === pathname) return;
+    announcedOn.current = pathname;
     cancelAnimationFrame(frame.current);
     setPolite('');
     setAssertive('');

@@ -22,7 +22,8 @@ import {
 } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
-import { materializeClaims, NEVER_CLAIMABLE_TYPES, syncClaims } from '../recovery/service';
+import { materializeClaims, syncClaims } from '../recovery/service';
+import { NEVER_CLAIMABLE_TYPES } from '../lib/claims';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 const db = createDb(testDbUrl());
