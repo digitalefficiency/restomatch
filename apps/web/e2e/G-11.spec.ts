@@ -13,7 +13,10 @@ import { DEMO_RESTAURANT_NAME } from './env';
  *
  * G_11_SHOTS=1 also writes the DoD-1 screens to e2e/__screenshots__/G-11/.
  */
-const AXE_SOURCE = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
+const AXE_SOURCE = readFileSync(
+  createRequire(import.meta.url).resolve('axe-core/axe.min.js'),
+  'utf8',
+);
 const SHOTS = process.env.G_11_SHOTS ? 'e2e/__screenshots__/G-11' : null;
 const ORDER = LEGAL_LINKS.map((l) => l.id);
 const PASSWORD = process.env.DEMO_PASSWORD ?? 'RestoMatch-Demo-2026!';
@@ -46,9 +49,15 @@ async function open(page: Page, path: string, locale: Locale = 'he') {
  * in order, so read them per `[data-legal-links]` group.
  */
 async function legalGroups(page: Page): Promise<string[][]> {
-  return page.locator('[data-legal-links]').evaluateAll((uls) =>
-    uls.map((ul) => [...ul.querySelectorAll('[data-legal-id]')].map((a) => a.getAttribute('data-legal-id') ?? '')),
-  );
+  return page
+    .locator('[data-legal-links]')
+    .evaluateAll((uls) =>
+      uls.map((ul) =>
+        [...ul.querySelectorAll('[data-legal-id]')].map(
+          (a) => a.getAttribute('data-legal-id') ?? '',
+        ),
+      ),
+    );
 }
 
 async function expectLegalOrder(page: Page) {
@@ -60,9 +69,28 @@ async function expectLegalOrder(page: Page) {
 async function axeSerious(page: Page, include: string) {
   await page.addScriptTag({ content: AXE_SOURCE });
   return page.evaluate(async (sel) => {
-    const axe = (window as unknown as { axe: { run: (c: unknown, o: unknown) => Promise<{ violations: { id: string; impact: string }[] }> } }).axe;
-    const r = await axe.run({ include: [sel] }, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'] } });
-    return r.violations.filter((v) => v.impact === 'critical' || v.impact === 'serious').map((v) => v.id);
+    const axe = (
+      window as unknown as {
+        axe: {
+          run: (
+            c: unknown,
+            o: unknown,
+          ) => Promise<{ violations: { id: string; impact: string }[] }>;
+        };
+      }
+    ).axe;
+    const r = await axe.run(
+      { include: [sel] },
+      {
+        runOnly: {
+          type: 'tag',
+          values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'],
+        },
+      },
+    );
+    return r.violations
+      .filter((v) => v.impact === 'critical' || v.impact === 'serious')
+      .map((v) => v.id);
   }, include);
 }
 
@@ -75,7 +103,9 @@ async function shot(page: Page, name: string) {
 async function supplierToken(expired: boolean): Promise<string> {
   const sql = e2eSql();
   try {
-    const [r] = await sql<{ id: string }[]>`select id from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
+    const [r] = await sql<
+      { id: string }[]
+    >`select id from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
     await sql`update restaurants set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{features,supplierConfirm}', 'true'::jsonb, true) where id = ${r!.id}`;
     const [po] = await sql<{ id: string }[]>`
       select po.id from purchase_orders po
@@ -120,7 +150,11 @@ test.describe('G-11 legal links: same links, same order, every shell', () => {
   }
 
   test('supplier portal /s/<valid|expired|unknown>', async ({ page }) => {
-    for (const token of [await supplierToken(false), await supplierToken(true), 'g11-unknown-token']) {
+    for (const token of [
+      await supplierToken(false),
+      await supplierToken(true),
+      'g11-unknown-token',
+    ]) {
       await open(page, `/s/${token}`);
       await expectLegalOrder(page);
     }
@@ -145,7 +179,6 @@ test.describe('G-11 legal links: same links, same order, every shell', () => {
     await expectLegalOrder(page);
   });
 
-
   test.fixme('dashboard + settings footer (awaiting W2-08 footer)', async () => {});
   test.fixme('/scans/<id> footer (awaiting W2-02)', async () => {});
 });
@@ -165,13 +198,50 @@ test.describe('G-11 statement reachable (WCAG 3.2.6, reg. 35)', () => {
     expect(body).toMatch(/^Allow: \/accessibility$/m);
   });
 
-  test('auth footer is axe-clean and every link is a ≥44px target on a phone', async ({ browser }) => {
-    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  test('auth footer is axe-clean and every link is a ≥44px target on a phone', async ({
+    browser,
+  }) => {
+    const ctx = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      hasTouch: true,
+      isMobile: true,
+    });
     const page = await ctx.newPage();
     await open(page, '/login');
     expect(await axeSerious(page, 'footer')).toEqual([]);
-    for (const box of await page.locator('footer [data-legal-id]').evaluateAll((as) => as.map((a) => a.getBoundingClientRect().height)))
+    for (const box of await page
+      .locator('footer [data-legal-id]')
+      .evaluateAll((as) => as.map((a) => a.getBoundingClientRect().height)))
       expect(box).toBeGreaterThanOrEqual(44);
+    await ctx.close();
+  });
+});
+
+test.describe('G-11 layout (train-C lab findings)', () => {
+  test('marketing footer: the legal column is spaced like its sibling columns (1440)', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await open(page, '/');
+    const footer = page.locator('[data-site-footer]');
+    const legal = await footer.locator('[data-legal-id]').first().boundingBox();
+    const sibling = await footer.locator('nav').first().locator('a').first().boundingBox();
+    expect(legal && sibling).toBeTruthy();
+    expect(Math.abs(legal!.height - sibling!.height)).toBeLessThanOrEqual(1);
+  });
+
+  test('phone sign-in footer: no separator glyph starts a wrapped line (390)', async ({
+    browser,
+  }) => {
+    const ctx = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      hasTouch: true,
+      isMobile: true,
+    });
+    const page = await ctx.newPage();
+    await open(page, '/login');
+    const text = await page.locator('footer [data-legal-links]').innerText();
+    expect(text).not.toMatch(/[·•|]/);
     await ctx.close();
   });
 });

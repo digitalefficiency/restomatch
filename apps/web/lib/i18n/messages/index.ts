@@ -31,6 +31,7 @@ import { receiving } from './receiving';
 import { receivingDelivery } from './receiving/delivery';
 import { leakProof } from './leakProof';
 import { recovery } from './recovery';
+import { reports } from './reports';
 import { receiverLangs } from './receiverLangs';
 import { ask } from './ask';
 import { recipes } from './recipes';
@@ -76,6 +77,7 @@ export const ALL_NAMESPACES = [
   receivingDelivery,
   leakProof,
   recovery,
+  reports,
   receiverLangs,
   ask,
   recipes,

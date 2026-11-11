@@ -13,8 +13,21 @@ import { ask as askNs } from '@/lib/i18n/messages/ask';
 import type { Translator } from '@/lib/i18n/translate';
 import type { Locale } from '@/lib/i18n/config';
 import { formatIls } from '@/lib/money';
+import { opsLines } from './ops-lines';
 
-const SUGGESTIONS = ['leakChange', 'priceRaise', 'claimWeek', 'leakTotal', 'topSupplier'] as const;
+const SUGGESTIONS = [
+  'leakChange',
+  'priceRaise',
+  'claimWeek',
+  'leakTotal',
+  'topSupplier',
+  // AU-06: what needs me
+  'waitingForMe',
+  'intakeStuck',
+  'whoOwesMe',
+  'toPayThisWeek',
+  'vatAtRisk',
+] as const;
 
 type T = Translator<typeof askNs.he>;
 type Turn = { id: number; question: string; result: AskResult | null; error: false | 'generic' | 'rateLimited' };
@@ -91,6 +104,12 @@ export function offlineLines(r: AskResult, t: T, locale: Locale): string[] {
       return f.supplier
         ? [t('answers.topSupplier', { supplier: f.supplier, leak: ils(f.leakIls), spend: ils(f.spendIls) })]
         : [t('answers.topSupplierNone')];
+    case 'waitingForMe':
+    case 'intakeStuck':
+    case 'whoOwesMe':
+    case 'toPayThisWeek':
+    case 'vatAtRisk':
+      return opsLines(r.intent, f, t, locale);
     default:
       return [t('answers.unknown')];
   }

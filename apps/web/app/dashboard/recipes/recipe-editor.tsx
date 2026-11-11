@@ -226,10 +226,7 @@ export function RecipeEditor({ recipeId, startAsSub = false, readOnly = false }:
     >
       <fieldset disabled={readOnly} className="min-w-0 space-y-6">
         {priceAlert && alertsQ.data?.enabled ? (
-          <div>
-            <p className="mb-1 text-xs text-subtle">{t('alert.banner')}</p>
-            <PriceAlertLine alert={priceAlert} targetBp={alertsQ.data.targetBp} />
-          </div>
+          <PriceAlertLine alert={priceAlert} targetBp={alertsQ.data.targetBp} />
         ) : null}
         <Card className="grid gap-4 sm:grid-cols-2">
           <Field label={t('editor.name')} htmlFor="r-name">

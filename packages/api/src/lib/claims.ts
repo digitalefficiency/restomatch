@@ -1,4 +1,5 @@
 import type { LeakBreakdownInvoice, LeakBreakdownLine } from '@restomatch/charts';
+import { DISCREPANCY_CLAIMABLE, DISCREPANCY_CLAIMED, DISCREPANCY_DECIDABLE } from '../lifecycle/predicates';
 
 /**
  * The claimable-line rule (₪) shared by the supplier credit letters
@@ -19,10 +20,10 @@ import type { LeakBreakdownInvoice, LeakBreakdownLine } from '@restomatch/charts
  * Decided "ask the supplier" statuses. Owner decision 7.11 (M5): 'resolved' counts as decided,
  * exactly like 'accepted' — the same rule recovery (CLAIMABLE_FILTER) and the charts use.
  */
-export const CLAIMABLE_DECIDED_STATUSES = ['accepted', 'resolved'] as const;
-/** Statuses still waiting for a decision — never put on a supplier letter (decision 18). */
-export const UNDECIDED_STATUSES = ['open', 'escalated'] as const;
-export const CLAIMABLE_STATUSES = [...UNDECIDED_STATUSES, ...CLAIMABLE_DECIDED_STATUSES] as const;
+export const CLAIMABLE_DECIDED_STATUSES = DISCREPANCY_CLAIMED;
+/** Statuses still waiting for a decision — never put on a supplier letter (decision 18). G-05 predicate. */
+export const UNDECIDED_STATUSES = DISCREPANCY_DECIDABLE;
+export const CLAIMABLE_STATUSES = DISCREPANCY_CLAIMABLE;
 /** Only real findings are ever asked back. */
 export const CLAIM_SEVERITIES = ['warn', 'block'] as const;
 const CLAIMABLE = new Set<string>(CLAIMABLE_STATUSES);
