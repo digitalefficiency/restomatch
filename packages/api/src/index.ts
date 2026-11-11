@@ -369,6 +369,7 @@ export {
   lockRecovery,
   releaseClaimsForRematch,
   OVERDUE_DAYS,
+  materializeClaims, type MaterializeClaimsInput,
   type RecoveryClaimRow,
   type RecoverySummary,
   type RecoverySupplierRow,

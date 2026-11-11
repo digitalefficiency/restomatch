@@ -150,7 +150,7 @@ function heldRunSql(restaurantId: string) {
  * (heldRunSql) instead of the rest — so the tracker's "waiting for the count"
  * figure is exactly what the sync would file once the hold ends (round 10).
  */
-function claimCandidatesSql(restaurantId: string, held: boolean) {
+function claimCandidatesSql(restaurantId: string, held: boolean, scope: { inScope: SQL; actorId: string | null } = { inScope: sql`TRUE`, actorId: null }) {
   return sql`
     WITH claimed AS (
       -- Agorot already claimed per invoice: new claims only get what is left of
@@ -167,6 +167,9 @@ function claimCandidatesSql(restaurantId: string, held: boolean) {
         i.id AS invoice_id,
         i.supplier_id,
         COALESCE(d.resolved_at, d.created_at) AS claimed_at,
+        -- The decider owns the claim: the explicit actor (materializeClaims),
+        -- else whoever decided the discrepancy — never whoever ran the sync.
+        COALESCE(${scope.actorId}::uuid, d.resolved_by) AS created_by,
         round(abs(d.delta_amount) * 100)::bigint AS raw_agorot,
         GREATEST(0, round(COALESCE(i.total_incl_vat, 0) * 100)::bigint - COALESCE(cl.agorot, 0)) AS cap_agorot,
         SUM(round(abs(d.delta_amount) * 100)::bigint) OVER (
@@ -185,6 +188,7 @@ function claimCandidatesSql(restaurantId: string, held: boolean) {
         -- its bare claims, and a claim filed now would block the count's run.
         -- The tracker shows these as "waiting for the count" (heldForCountTotals).
         AND ${held ? sql`` : sql`NOT`} ${heldRunSql(restaurantId)}
+        AND ${scope.inScope}
     )`;
 }
 
@@ -247,9 +251,13 @@ async function reopenRoom(db: Database, restaurantId: string, claimId: string, i
 }
 
 /**
- * Bring claims in line with the team's current decisions, then create the
- * missing ones (idempotent: one claim per discrepancy). Returns how many were
- * created. Runs under a per-restaurant advisory lock (its own transaction, or
+ * Restaurant-wide catch-up for jobs and scripts (reminders, the monthly
+ * report, demo seeds): bring claims in line with the team's current decisions,
+ * then create the missing ones (idempotent: one claim per discrepancy).
+ * Returns how many were created. NOT for read paths (W2-10a): a GET writes
+ * nothing, and a decision calls `materializeClaims` for its own discrepancies.
+ * New claims belong to the decider (`d.resolved_by`) unless `actorId` is
+ * given, and are dated at the decision (`d.resolved_at`). Runs under a per-restaurant advisory lock (its own transaction, or
  * a savepoint inside the caller's).
  *  1. A discrepancy that is no longer accepted (rejected / re-opened): its
  *     claim, if no money moved yet (claimed / letter_sent), is written off by
@@ -264,11 +272,46 @@ export async function syncClaims(db: Database, restaurantId: string, actorId?: s
   return db.transaction(async (rawTx) => {
     const tx = rawTx as unknown as Database;
     await lockRecovery(tx, restaurantId);
-    return syncClaimsLocked(tx, restaurantId, actorId);
+    return syncClaimsLocked(tx, restaurantId, { discrepancyIds: null, actorId: actorId ?? null });
   });
 }
 
-async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: string | null): Promise<number> {
+export interface MaterializeClaimsInput {
+  restaurantId: string;
+  /** The discrepancies just decided (any decision: accept creates, reject / re-open writes off). */
+  discrepancyIds: string[];
+  /** The decider: `created_by` of the new claims and the actor of their "claimed" event. */
+  actorId: string;
+}
+
+/**
+ * Claims at DECISION time (W2-10a, deep-fix class 6). Call it inside the
+ * decision's transaction, right after the discrepancy row is updated: the new
+ * claim carries the decider as `created_by` and the decision time
+ * (`resolved_at`) as `claimed_at`. Idempotent per discrepancy (one claim each;
+ * a second call creates nothing). Only the named discrepancies are touched:
+ * a rejected / re-opened one writes off its untouched claim, a re-accepted
+ * one re-opens a system write-off — the same rules as `syncClaims`, scoped.
+ * Serialised per restaurant (advisory xact lock, held to the caller's commit).
+ * Returns how many claims were created.
+ */
+export async function materializeClaims(tx: Database, input: MaterializeClaimsInput): Promise<number> {
+  const ids = [...new Set(input.discrepancyIds)];
+  if (ids.length === 0) return 0;
+  await lockRecovery(tx, input.restaurantId);
+  return syncClaimsLocked(tx, input.restaurantId, { discrepancyIds: ids, actorId: input.actorId });
+}
+
+async function syncClaimsLocked(
+  db: Database,
+  restaurantId: string,
+  opts: { discrepancyIds: string[] | null; actorId: string | null },
+): Promise<number> {
+  const { actorId } = opts;
+  const inScope =
+    opts.discrepancyIds == null
+      ? sql`TRUE`
+      : sql`d.id IN (${sql.join(opts.discrepancyIds.map((id) => sql`${id}::uuid`), sql`, `)})`;
   const autoClosed = rowsOf(
     await db.execute(sql`
       WITH gone AS (
@@ -278,6 +321,7 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
         WHERE c.restaurant_id = ${restaurantId}
           AND c.status IN ('claimed', 'letter_sent')
           AND NOT (${ACCEPTED_FILTER})
+          AND ${inScope}
         ORDER BY c.id
         FOR UPDATE OF c
       )
@@ -300,6 +344,7 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
         WHERE c.restaurant_id = ${restaurantId}
           AND c.status = 'claimed' AND c.letter_sent_at IS NULL AND c.credited_agorot = 0
           AND ${NEVER_CLAIMABLE_TYPE_SQL}
+          AND ${inScope}
           AND NOT EXISTS (
             SELECT 1 FROM recovery_events e
             WHERE e.claim_id = c.id AND e.restaurant_id = ${restaurantId}
@@ -333,6 +378,7 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
         AND c.status = 'written_off' AND c.credited_agorot = 0
         AND d.delta_amount IS NOT NULL
         AND ${CLAIMABLE_FILTER}
+        AND ${inScope}
       ORDER BY c.claimed_at, c.id
       FOR UPDATE OF c
     `),
@@ -369,11 +415,11 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
   }
 
   const res = await db.execute(sql`
-    ${claimCandidatesSql(restaurantId, false)}
+    ${claimCandidatesSql(restaurantId, false, { inScope, actorId })}
     INSERT INTO recovery_claims (restaurant_id, discrepancy_id, supplier_id, invoice_id, amount_agorot, claimed_at, created_by)
     SELECT ${restaurantId}, c.discrepancy_id, c.supplier_id, c.invoice_id,
            ${CLAIM_AMOUNT_SQL},
-           c.claimed_at, ${actorId ?? null}
+           c.claimed_at, c.created_by
     FROM cand c
     WHERE ${CLAIM_AMOUNT_SQL} > 0
     ON CONFLICT (discrepancy_id) DO NOTHING
@@ -383,7 +429,7 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
   if (created.length > 0) {
     await db.execute(sql`
       INSERT INTO recovery_events (restaurant_id, claim_id, from_status, to_status, amount_agorot, actor_id)
-      SELECT restaurant_id, id, NULL, 'claimed', amount_agorot, ${actorId ?? null}
+      SELECT restaurant_id, id, NULL, 'claimed', amount_agorot, created_by
       FROM recovery_claims
       WHERE restaurant_id = ${restaurantId}
         AND id IN (${sql.join(created.map((r) => sql`${String(r.id)}::uuid`), sql`, `)})
