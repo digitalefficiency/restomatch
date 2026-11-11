@@ -190,12 +190,10 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
                           );
                         })}
                         {drivers.otherAgorot !== 0 ? (
-                          <li className="inline-flex min-h-8 items-center rounded-full px-2.5 text-xs text-muted ring-1 ring-line">
-                            <bdi className="tabular-nums">
-                              {drivers.otherAgorot > 0 ? '+' : '−'}
-                              {whole(Math.abs(drivers.otherAgorot) / 100)}
-                            </bdi>{' '}
-                            {tl('hub.drivers.other')}
+                          // inline-flex drops whitespace-only text between children: the gap is the space (lab: '−74 ₪אחר').
+                          <li className="inline-flex min-h-8 items-center gap-1 rounded-full px-2.5 text-xs text-muted ring-1 ring-line" data-testid="leak-drivers-other">
+                            <bdi className="tabular-nums">{`${drivers.otherAgorot > 0 ? '+' : '−'}${whole(Math.abs(drivers.otherAgorot) / 100)}`}</bdi>
+                            <span>{tl('hub.drivers.other')}</span>
                           </li>
                         ) : null}
                       </ul>

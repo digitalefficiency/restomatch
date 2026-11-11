@@ -15,7 +15,7 @@ export const he = {
       openTo: 'פירוק',
     },
     tabsLabel: 'אזורי הדליפה',
-    tabs: { overview: 'סקירה', breakdown: 'פירוק', proof: 'הוכחה', prices: 'מחירים שעלו', report: 'דוח' },
+    tabs: { overview: 'סקירה', breakdown: 'פירוק', proof: 'הוכחה', prices: 'מחירים שעלו', report: 'דוח להדפסה' },
     title: 'דליפה',
     subtitle: 'דליפה = כסף שחויבתם מעבר להזמנה ולמה שהתקבל, בחשבוניות שנבדקו, לפני מע״מ.',
     loadingLabel: 'טוען את נתוני הדליפה',
@@ -99,9 +99,9 @@ export const he = {
     // W2-09c
     backHub: 'לדליפה',
     groupUnpaid: 'עוד לא שולם — לקזז לפני תשלום · {amount}',
-    groupPaid: 'שולם — לדרישת זיכוי · {amount}',
+    groupPaid: 'שולם — לבקשת זיכוי · {amount}',
     decideN: 'החליטו על {count, plural, one {פער אחד} other {# פערים}} · {amount}',
-    toClaim: 'לדרישת הזיכוי',
+    toClaim: 'לבקשת הזיכוי',
     history: {
       toggle: 'היסטוריה',
       loading: 'טוען היסטוריה',
