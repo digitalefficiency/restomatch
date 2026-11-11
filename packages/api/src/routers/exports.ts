@@ -18,6 +18,7 @@ import {
 } from '@restomatch/db';
 import { alias } from 'drizzle-orm/pg-core';
 import { bookkeeperProcedure, requireFeature, router } from '../trpc';
+import { discrepancyDecidableSql } from '../lifecycle/predicates';
 
 /** Bookkeeping exports require the accounting_export plan feature. */
 const exportProcedure = bookkeeperProcedure.use(requireFeature('accounting_export'));
@@ -278,7 +279,8 @@ export async function openGapByInvoice(
     .where(
       and(
         eq(discrepancies.restaurantId, restaurantId),
-        inArray(discrepancies.resolutionStatus, ['open', 'escalated']),
+        // Undecided gaps (open/escalated): the lifecycle predicate, not a literal.
+        discrepancyDecidableSql(discrepancies.resolutionStatus),
       ),
     )
     .groupBy(latest.invoiceId);
