@@ -214,6 +214,21 @@ describe('AU-03 · 08:30 digest (DB)', () => {
     expect(at[unrelated]).toBeNull();
   });
 
+  it('quiet hours / Shabbat (sendWindow): the digest row is a staff alert, held on Shabbat 08:30, open on a weekday', async () => {
+    const { isStaffAlert, staffAlertWindow } = await import('../notifications/sendWindow');
+    await addClaim(db, T, { status: 'letter_sent', letterSentAt: old, claimedAt: old });
+    const sat = new Date('2026-11-14T06:30:00Z'); // Sat 14.11 08:30 IL
+    await enqueueRecoveryReminders(db, { restaurantId: T.restaurantId, now: sat });
+    const rows = await outbox();
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) expect(isStaffAlert(r), r.dedupeKey ?? '').toBe(true);
+    const held = staffAlertWindow(sat);
+    expect(held).toMatchObject({ open: false, reason: 'shabbat' });
+    // Released at the end of Shabbat (Sat 19:00 IL = 17:00Z in November), never at 08:30 on Saturday.
+    expect((held as { nextAllowedAt: Date }).nextAllowedAt.toISOString()).toBe('2026-11-14T17:00:00.000Z');
+    expect(staffAlertWindow(new Date('2026-11-16T06:30:00Z'))).toEqual({ open: true }); // Mon 08:30 IL
+  });
+
   it('recovery flag off → no digest', async () => {
     await setSettings(db, T, { features: {} });
     await addClaim(db, T, { status: 'letter_sent', letterSentAt: old, claimedAt: old });
