@@ -1,5 +1,4 @@
 import { eq, notificationsOutbox, sql, type Database } from '@restomatch/db';
-import { SKIPPED_NO_PROVIDER } from './delivery';
 import type { NotificationPayload } from './types';
 
 /**
@@ -99,6 +98,14 @@ export async function markSent(db: Database, outboxId: string, externalId?: stri
  * `failed` + `skipped_no_provider` (or another skip reason), never `sent`.
  * Only from `queued`/`sending`, so it can never downgrade a sent row.
  */
+/**
+ * Same value as delivery.ts `SKIPPED_NO_PROVIDER`. Not imported from there:
+ * delivery → factory → resend → email → outbox would be an import cycle
+ * ("Class extends value undefined" when email.ts loads first). The equality is
+ * pinned in outbox-honest.db.test.ts.
+ */
+const SKIPPED_NO_PROVIDER = 'skipped_no_provider';
+
 export async function markSkippedNoProvider(
   db: Database,
   outboxId: string,
