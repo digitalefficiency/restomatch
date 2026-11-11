@@ -12,6 +12,7 @@ export const en: Shape<typeof he> = {
     labDesk: 'Desk lab',
     labDeskRow: 'Row',
     approvals: 'Approvals',
+    approvalInvoice: 'Invoice decision',
     payRun: 'Pay run',
     inbox: 'Incoming invoices',
     invoices: 'Invoices',

@@ -40,11 +40,6 @@ const OWN_FILES = [
  * `where` is `ns:key` for namespace leaves or `file:<path>` for server literals.
  */
 const ALLOW: Array<{ where: string; rule: RuleId; reason: string; text?: string }> = [
-  // DECISION_COPY.he.{approve,reject,escalate}: masculine singular, pinned by W2-04's
-  // approvals-router.test.ts. W2-04's work item; the values are not changed here.
-  { where: 'emails:decision.approve', rule: 'masculine-imperative', reason: 'W2-04 (pinned by approvals-router.test.ts)' },
-  { where: 'emails:decision.reject', rule: 'masculine-imperative', reason: 'W2-04 (pinned by approvals-router.test.ts)' },
-  { where: 'emails:decision.escalate', rule: 'masculine-imperative', reason: 'W2-04 (pinned by approvals-router.test.ts)' },
   // Unused since W2-13 (the feed renders feed.discrepancies / feed.toReview, ICU plurals). Kept with a
   // plain {count} because W2-05's receiver overlays (CompleteOverlays<typeof he>) carry `{count}` and
   // receiver-langs.test pins placeholder parity. W2-05 can drop both keys from the overlays, then here.
@@ -52,7 +47,6 @@ const ALLOW: Array<{ where: string; rule: RuleId; reason: string; text?: string 
   { where: 'components:activity.toReview', rule: 'count-without-plural', reason: 'W2-05 receiver overlays' },
   // Quotes around a placeholder: pinned verbatim by e2e/W1-04.spec.ts:172 (W1-04's spec).
   { where: 'common:shell.forbidden.title', rule: 'sign-next-to-placeholder', reason: 'pinned by e2e/W1-04.spec.ts:172' },
-  { where: 'file:packages/api/src/notifications/copy/he.ts', rule: 'masculine-imperative', reason: 'the same three DECISION_COPY values (W2-04)' },
 ];
 
 const covers = (a: (typeof ALLOW)[number], where: string, text: string) =>
@@ -192,8 +186,6 @@ const CLAIMS_ALLOW: Array<{ where: string; text?: string; contains?: string; rea
 ];
 
 const CLAIMS_PENDING: Array<{ where: string; owner: string }> = [
-  // Reported to the orchestrator for routing (found by this guard)
-  { where: 'approvals:', owner: 'W2-04' },
 ];
 
 describe('C2 guard: "בקשת זיכוי", never the retired claims term (owner 7.11)', () => {
