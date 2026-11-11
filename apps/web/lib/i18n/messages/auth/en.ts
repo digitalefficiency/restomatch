@@ -21,7 +21,7 @@ export const en: Shape<typeof he> = {
     errors: {
       verification: 'This link has expired or was already used. Please try again.',
       credentials: 'Wrong email or password.',
-      rate: 'Too many attempts. Wait a moment and try again.',
+      rate: 'Too many attempts. Please try again later.',
       emailSignin: 'We could not send a sign-in link. There may have been too many requests — try again in a few minutes.',
       generic: 'Something went wrong signing in. Please try again.',
     },
