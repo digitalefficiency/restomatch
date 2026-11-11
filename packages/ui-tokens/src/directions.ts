@@ -15,7 +15,7 @@ export type DirectionId = 'A';
  * change. Phase 3 (train γ/δ) makes the direction's row heights and cell
  * padding live in the shared primitives. Bump this one number to move on.
  */
-export const DS2_PHASE: 1 | 2 | 3 = 1;
+export const DS2_PHASE: 1 | 2 | 3 = 2;
 
 export interface Direction {
   id: DirectionId;

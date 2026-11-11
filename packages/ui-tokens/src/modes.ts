@@ -98,10 +98,13 @@ export function v2Blocks(): VarBlock[] {
   const root: Record<string, string> = {};
   for (const [name, hex] of Object.entries(colorVarsV2())) root[`--c-${name}`] = hexChannels(hex);
   Object.assign(root, {
+    '--font-ui-faces': activeFonts.uiFaces,
     '--font-ui': activeFonts.ui,
     '--font-num': activeFonts.num,
     '--font-id': activeFonts.id,
     '--font-display': activeFonts.display,
+    // D11: the family token W3-08's `.report-display` reads (report cover + print header only, never ₪).
+    '--font-report-display': 'var(--font-display)',
     '--font-features-ui': activeFonts.featuresUi,
     '--font-features-num': activeFonts.featuresNum,
   });
