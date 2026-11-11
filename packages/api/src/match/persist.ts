@@ -10,11 +10,14 @@ import {
   ne,
   or,
   matchRuns,
+  sql,
   suppliers,
   type Database,
   type UserRole,
 } from '@restomatch/db';
+import { isLeakType } from '@restomatch/charts';
 import type { MatchInput, MatchOutput } from '@restomatch/matching';
+import { HELD_FOR_RECEIPTS_KEY } from '@restomatch/charts';
 import { evaluateApproval, type ApprovalContext } from '../approvals/engine';
 import { buildRules } from '../approvals/engine';
 import { logActivity } from '../activity';
@@ -236,8 +239,9 @@ export async function loadPriorDecisions(
 /**
  * The feed's story for a match, on the SAME rule as the dashboard hero
  * (packages/charts LEAK_FILTER + per-invoice cap): leak = Σ|delta| of warn/block
- * findings, not PRICE_LOWER (an under-charge), not UNORDERED_ARRIVAL (no PO yet
- * — "pending", calm) and not a duplicate a person rejected; capped at the
+ * findings of a leak type (charts LEAK_EXCLUDED_TYPES: not an under-charge, not
+ * UNORDERED_ARRIVAL — no PO yet, "pending", calm — not MISSING_ON_INVOICE) and not
+ * a duplicate a person rejected; capped at the
  * invoice total. So a no-PO invoice reads "ממתינה לשיוך להזמנה", not "הפסד
  * פוטנציאלי ₪1,273" while the hero calls it pending; a clean match reads "תואמת
  * להזמנה ולקבלה", never "0 חריגות · ₪0". Shared by persistMatchRun and the seed.
@@ -254,8 +258,7 @@ export function matchActivitySummary(
   const leaking = findings.filter(
     (f) =>
       (f.severity === 'warn' || f.severity === 'block') &&
-      f.type !== 'PRICE_LOWER' &&
-      f.type !== 'UNORDERED_ARRIVAL' &&
+      isLeakType(f.type) &&
       !(f.type === 'DUPLICATE_INVOICE' && f.resolutionStatus === 'rejected') &&
       Math.abs(f.deltaAmount) > 0,
   );
@@ -286,12 +289,37 @@ export function matchActivitySummary(
   return { detail: parts.join(' · '), leakCount: leaking.length, leakIls, pendingLink, poMatched, reviewCount };
 }
 
+/**
+ * The decision alert (push / WhatsApp / the approval email): the hero's leak rule
+ * (matchActivitySummary), never the engine total — a MISSING_ON_INVOICE or an info
+ * line is never ₪ at risk. A review-only match names no ₪.
+ */
+export function matchAlert(s: { leakCount: number; leakIls: number; reviewCount: number; pendingLink: boolean }): {
+  summary: string;
+  count: number;
+  atRiskIls: string | null;
+} {
+  if (s.leakCount > 0) {
+    const ils = `₪${Math.round(s.leakIls).toLocaleString('he-IL')}`;
+    const n = s.leakCount === 1 ? 'פער אחד' : `${s.leakCount} פערים`;
+    const review = s.reviewCount > 0 ? ` · ${s.reviewCount} לבדיקה` : '';
+    return { summary: `${n}, סה"כ הפסד פוטנציאלי ${ils}${review}`, count: s.leakCount, atRiskIls: ils };
+  }
+  if (s.reviewCount > 0) return { summary: `${s.reviewCount} לבדיקה`, count: s.reviewCount, atRiskIls: null };
+  return { summary: s.pendingLink ? 'ממתינה לשיוך להזמנה' : 'לבדיקה', count: 0, atRiskIls: null };
+}
+
 export interface PersistMatchResult {
   matchRunId: string;
   /** Roles that an open (non-auto-approved) discrepancy routed to — the worker
    *  notifies these; the interactive router ignores them. */
   rolesNeedingNotification: UserRole[];
   discrepancyCount: number;
+  /** The hero's leak rule for this run (matchActivitySummary) — what alerts and screens tell. */
+  leakIls: number;
+  leakCount: number;
+  reviewCount: number;
+  pendingLink: boolean;
 }
 
 /**
@@ -403,6 +431,20 @@ export async function persistMatchRun(
   // are people's (payment) decisions. Re-matching a paid invoice used to reset it
   // to `matched`, so its leak reappeared as "caught before payment".
   const finalInvoiceStatus = result.status === 'blocked' ? 'disputed' : 'matched';
+  // A run on a receipt ends any hold (raw.heldForReceipts): the receipt it
+  // waited for, or another one a manager re-matched it on (round 8) — else a
+  // later close of the held receipt takes the invoice back, and a photo held
+  // for one receipt stays strictly pinned to it (scanOwnerReceipt). A
+  // receipt-less run keeps the hold. Any run clears a recorded blocked re-match.
+  await db.execute(sql`
+    UPDATE invoices
+       SET ocr_payload = ocr_payload #- '{raw,rematchBlocked}'::text[]
+                                     #- (CASE WHEN ${args.grId}::uuid IS NOT NULL
+                                              THEN ${`{raw,${HELD_FOR_RECEIPTS_KEY}}`}::text[]
+                                              ELSE '{raw,__none__}'::text[] END)
+     WHERE id = ${args.invoiceId} AND restaurant_id = ${args.restaurantId}
+       AND (ocr_payload -> 'raw' ? 'rematchBlocked'
+            OR (${args.grId}::uuid IS NOT NULL AND ocr_payload -> 'raw' ? ${HELD_FOR_RECEIPTS_KEY}::text))`);
   await db
     .update(invoices)
     .set({ status: finalInvoiceStatus })
@@ -462,5 +504,9 @@ export async function persistMatchRun(
     matchRunId: matchRun.id,
     rolesNeedingNotification: [...rolesNeedingNotification],
     discrepancyCount: result.discrepancies.length,
+    leakIls: feed.leakIls,
+    leakCount: feed.leakCount,
+    reviewCount: feed.reviewCount,
+    pendingLink: feed.pendingLink,
   };
 }
