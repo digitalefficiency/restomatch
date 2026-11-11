@@ -983,7 +983,7 @@ async function notifyOwnersOfEscalation(
     const subject = `${DECISION_COPY.he.escalated}: פער ${supplier}${amount ? ` · ${amount}` : ''}`;
     const body = [
       `${DECISION_COPY.he.escalated} — ${supplier}${row.invoiceNumber ? ` · ${row.invoiceNumber}` : ''}`,
-      amount ? `סכום לדרישת זיכוי: ${amount}` : 'פער לבדיקה (ללא ₪)',
+      amount ? `סכום לבקשת זיכוי: ${amount}` : 'פער לבדיקה (ללא ₪)',
       note ? `הערה: ${note}` : null,
       `לפתיחת הפער: ${link}`,
     ]

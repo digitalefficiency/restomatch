@@ -336,10 +336,10 @@ export function orderNotPlacedEmail(args: {
  */
 export const DECISION_COPY = {
   he: {
-    approve: 'דרשו {amount} מהספק',
+    approve: 'בקשת זיכוי · {amount}',
     reject: 'שלמו כפי שחויב',
     escalate: 'העבירו לבעלים',
-    approved: 'נדרש מהספק',
+    approved: 'נוסף לבקשת הזיכוי',
     rejected: 'שולם כפי שחויב',
     escalated: 'הועבר לבעלים',
     reopened: 'ההחלטה בוטלה',
@@ -347,10 +347,10 @@ export const DECISION_COPY = {
     reviewed: 'סומן כנבדק',
   },
   en: {
-    approve: 'Claim {amount} back',
+    approve: 'Request {amount} credit',
     reject: 'Pay as billed',
     escalate: 'Send to owner',
-    approved: 'Claimed from supplier',
+    approved: 'Added to credit request',
     rejected: 'Paid as billed',
     escalated: 'Sent to owner',
     reopened: 'Decision undone',
@@ -376,10 +376,10 @@ export function approvalNeededEmail(args: {
          סכום בסיכון: ${ilsSpan(args.atRiskIls, 'danger')}`,
         'danger',
       )}
-      <p style="margin:10px 0 0">לכל פער שתי אפשרויות: <strong>«${DECISION_COPY.he.approve.replace(' {amount}', '')}»</strong> או <strong>«${DECISION_COPY.he.reject}»</strong>.</p>`,
+      <p style="margin:10px 0 0">לכל פער שתי אפשרויות: <strong>«${DECISION_COPY.he.approve.replace(/\s*·?\s*\{amount\}/, '')}»</strong> או <strong>«${DECISION_COPY.he.reject}»</strong>.</p>`,
     cta: args.approvalsUrl ? { label: 'מעבר לתור האישורים', url: args.approvalsUrl } : undefined,
   });
-  const text = `דרושה החלטה — ${args.supplierName}\n\n${args.discrepancyCount} פערים, סכום בסיכון ${args.atRiskIls}.\n${DECISION_COPY.he.approve.replace(' {amount}', '')} / ${DECISION_COPY.he.reject}${args.approvalsUrl ? `\n\nתור האישורים: ${args.approvalsUrl}` : ''}`;
+  const text = `דרושה החלטה — ${args.supplierName}\n\n${args.discrepancyCount} פערים, סכום בסיכון ${args.atRiskIls}.\n${DECISION_COPY.he.approve.replace(/\s*·?\s*\{amount\}/, '')} / ${DECISION_COPY.he.reject}${args.approvalsUrl ? `\n\nתור האישורים: ${args.approvalsUrl}` : ''}`;
   return { subject, html, text };
 }
 

@@ -126,10 +126,10 @@ describe('decision verbs name what happens to the money (approvals-01, functiona
     const [ap, rj] = decisionActions('PRICE_HIGHER');
     expect(ap).toMatchObject({ kind: 'approve', procedure: 'approve' });
     expect(rj).toMatchObject({ kind: 'reject', procedure: 'reject' });
-    expect(he(ap!.label as never, { amount: '₪104.80' })).toBe('דרשו ₪104.80 מהספק');
+    expect(he(ap!.label as never, { amount: '₪104.80' })).toBe('בקשת זיכוי · ₪104.80');
     expect(he(rj!.label as never)).toBe('שלמו כפי שחויב');
     expect(he('decision.escalate')).toBe('העבירו לבעלים');
-    expect(en(ap!.label as never, { amount: '₪104.80' })).toBe('Claim ₪104.80 back');
+    expect(en(ap!.label as never, { amount: '₪104.80' })).toBe('Request ₪104.80 credit');
     expect(en(rj!.label as never)).toBe('Pay as billed');
   });
 
@@ -147,7 +147,7 @@ describe('decision verbs name what happens to the money (approvals-01, functiona
       for (const a of decisionActions(type)) {
         if (a.kind === 'link') continue;
         const text = he(a.label as never, { amount: '₪1' });
-        if (a.procedure === 'reject') expect(text, type).not.toMatch(/דרוש/);
+        if (a.procedure === 'reject') expect(text, type).not.toMatch(/דרוש|בקשת זיכוי/);
         if (a.procedure === 'approve') expect(text, type).not.toMatch(/^שלם/);
       }
     }
@@ -268,7 +268,7 @@ describe('verbs keyed by type AND claimability (deep-fix)', () => {
     const [ap, rj] = decisionActions('DUPLICATE_INVOICE', true);
     expect(ap).toMatchObject({ kind: 'approve', withAmount: false, done: 'decision.duplicateHeld' });
     expect(he(ap!.label as never)).toBe('אל תשלמו את העותק');
-    expect(he(ap!.label as never)).not.toMatch(/דרוש/);
+    expect(he(ap!.label as never)).not.toMatch(/דרוש|בקשת זיכוי/);
     expect(he((ap as { done: string }).done as never)).toBe(DECISION_COPY.he.duplicateHeld);
     expect(en('decision.duplicateHeld')).toBe(DECISION_COPY.en.duplicateHeld);
     expect(he(rj!.label as never)).toBe('שלמו · זו לא כפולה');

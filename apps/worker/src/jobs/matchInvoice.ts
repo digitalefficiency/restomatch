@@ -248,12 +248,12 @@ export async function invoiceClaim(
   return { agorot, pendingLink: inv.pendingLink };
 }
 
-/** Push / WhatsApp body: "N פערים · ₪X לדרישת זיכוי" + the link. No baked ₪ template string. */
+/** Push / WhatsApp body: "N פערים · ₪X לבקשת זיכוי" + the link. No baked ₪ template string. */
 export function approvalSummary(count: number, claimAgorot: number, link: string): string {
   const gaps = count === 1 ? 'פער אחד' : `${count} פערים`;
   const money =
     claimAgorot > 0
-      ? ` · ${formatIlsAgorot(claimAgorot, { maximumFractionDigits: 2 })} לדרישת זיכוי`
+      ? ` · ${formatIlsAgorot(claimAgorot, { maximumFractionDigits: 2 })} לבקשת זיכוי`
       : '';
   return `${gaps} בחשבונית${money}\n${link}`;
 }
@@ -349,7 +349,7 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
             ? formatIlsAgorot(claimAgorot, { maximumFractionDigits: 2 })
             : pendingLink
               ? 'ממתין לקישור להזמנה'
-              : 'ללא סכום לדרישה',
+              : 'ללא סכום לבקשת זיכוי',
         approvalsUrl: link,
       });
       for (const r of recipients) {

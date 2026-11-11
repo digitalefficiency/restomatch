@@ -116,7 +116,7 @@ export const DECISION_RESULT: Record<DecisionProcedure, 'accepted' | 'rejected' 
 };
 
 export type DecisionAction =
-  /** approve(): "דרוש ₪X מהספק" (or the duplicate twin "אל תשלם את העותק"). */
+  /** approve(): "בקשת זיכוי · ₪X" (or the duplicate twin "אל תשלם את העותק"). */
   | { kind: 'approve'; procedure: 'approve'; label: MessageKey<Tree>; done: MessageKey<Tree>; withAmount: boolean }
   /** reject(): "שלם כפי שחויב" — opens the reason chips. */
   | { kind: 'reject'; procedure: 'reject'; label: MessageKey<Tree>; done: MessageKey<Tree> }
@@ -132,17 +132,17 @@ export type DecisionAction =
  *  • UNORDERED_ARRIVAL: only "שייך להזמנה" — nothing to decide until it is linked;
  *  • PRICE_LOWER, MISSING_ON_INVOICE: only "סמן כנבדק" — no money to claim;
  *  • DUPLICATE_INVOICE: "אל תשלם את העותק" / "שלם · זו לא כפולה";
- *  • everything else: "דרוש ₪X מהספק" / "שלם כפי שחויב".
+ *  • everything else: "בקשת זיכוי · ₪X" / "שלמו כפי שחויב".
  */
 export function decisionActions(type: string, claimable = true): DecisionAction[] {
   if (type === 'UNORDERED_ARRIVAL') return [{ kind: 'link', label: 'decision.link' }];
-  // No ₪ to claim (info severity, ₪0, PRICE_LOWER — packages/api isClaimableRow): a check, never "דרוש ₪X".
+  // No ₪ to claim (info severity, ₪0, PRICE_LOWER — packages/api isClaimableRow): a check, never "בקשת זיכוי · ₪X".
   if (type === 'PRICE_LOWER' || type === 'MISSING_ON_INVOICE' || !claimable) {
     return [{ kind: 'review', procedure: 'reject', label: 'decision.reviewed', done: 'decision.reviewedDone' }];
   }
   if (type === 'DUPLICATE_INVOICE') {
     return [
-      // Accepting a duplicate HOLDS the copy; it is never "דרוש ₪X" nor "נדרש מהספק".
+      // Accepting a duplicate HOLDS the copy; it is never "בקשת זיכוי · ₪X" nor "נוסף לבקשת הזיכוי".
       { kind: 'approve', procedure: 'approve', label: 'decision.duplicateApprove', done: 'decision.duplicateHeld', withAmount: false },
       { kind: 'reject', procedure: 'reject', label: 'decision.duplicateReject', done: 'decision.rejected' },
     ];

@@ -161,7 +161,7 @@ test.describe('phone 390×844', () => {
     await expect(first).toContainText('בירה מהחבית');
     const approve = first.getByTestId('decide-approve');
     const reject = first.getByTestId('decide-reject');
-    await expect(approve).toHaveText(/דרשו .*104\.80.* מהספק/);
+    await expect(approve).toHaveText(/בקשת זיכוי · .*104\.80/);
     await expect(reject).toHaveText('שלמו כפי שחויב');
     const a = (await approve.boundingBox())!;
     const r = (await reject.boundingBox())!;
@@ -201,8 +201,8 @@ test.describe('phone 390×844', () => {
     await expect(fxCard(page, 'בירה מהחבית')).toHaveCount(0);
     // Focus moved to the next card's primary, not to <body>.
     await expect(page.locator(':focus')).toHaveAttribute('data-testid', 'decide-approve');
-    await expect(page.getByTestId('approvals-announcer')).toContainText('נדרש מהספק');
-    await expect(page.getByTestId('approvals-undo')).toContainText('נדרש מהספק');
+    await expect(page.getByTestId('approvals-announcer')).toContainText('נוסף לבקשת הזיכוי');
+    await expect(page.getByTestId('approvals-undo')).toContainText('נוסף לבקשת הזיכוי');
     await expect.poll(() => dbStatus(fx.priceId)).toBe('accepted');
     await expect(page.getByTestId('approvals-summary-line').locator('bdi').first()).toHaveText(String(before - 1));
 
