@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { OWNER_STATE } from './env';
 import { collectPageErrors, loginViaMagicLink } from './helpers';
+import { he as accountingHe } from '../lib/i18n/messages/accounting/he';
 
 /**
  * W2-14 · admin trust: visible rules, guarded roles, honest export.
@@ -14,7 +15,10 @@ import { collectPageErrors, loginViaMagicLink } from './helpers';
  *     gold button.
  *   - Integrations: the bookkeeper edits account cards (owner decision §7).
  *   - axe (WCAG 2.2 AA): 0 critical/serious, he + en.
- * The lab seed is dated 2026-10-25, so the browser clock is pinned to it.
+ * The lab seed is dated 2026-10-25. Only the exports test (whose default range
+ * is "this month") pins the browser clock to it; the other screens render no
+ * clock-dependent value, so pinning there only caused hydration mismatches
+ * against the real-dated dev server.
  * W2_14_SHOTS=1 writes the DoD screens to e2e/__screenshots__/W2-14/.
  */
 test.use({ storageState: OWNER_STATE });
@@ -24,13 +28,13 @@ const WCAG_AA = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 const SHOTS = process.env.W2_14_SHOTS ? 'e2e/__screenshots__/W2-14' : null;
 const SEED_NOW = new Date('2026-10-25T09:40:00Z');
 
-async function prepare(page: Page, locale: 'he' | 'en', width: number) {
+async function prepare(page: Page, locale: 'he' | 'en', width: number, opts: { pinClock?: boolean } = {}) {
   const url = test.info().project.use.baseURL ?? 'http://localhost:3100';
   await page.context().addCookies([
     { name: 'rm_locale', value: locale, url },
     { name: 'rm_cookie_consent', value: 'necessary', url },
   ]);
-  await page.clock.setFixedTime(SEED_NOW);
+  if (opts.pinClock) await page.clock.setFixedTime(SEED_NOW);
   await page.setViewportSize({ width, height: width < 500 ? 844 : 900 });
 }
 
@@ -180,7 +184,7 @@ test('team: a role change is staged, Cancel reverts, owner promotion confirms, o
 
 test('exports: the summary says what the file will contain; one primary, no gold', async ({ page }) => {
   const errors = collectPageErrors(page);
-  await prepare(page, 'he', 1440);
+  await prepare(page, 'he', 1440, { pinClock: true });
   await page.goto('/dashboard/exports');
   const summary = page.getByTestId('export-summary');
   await expect(summary).toContainText(/חשבוניות|אין חשבוניות/);
@@ -188,17 +192,18 @@ test('exports: the summary says what the file will contain; one primary, no gold
   if (await firstMoney.count()) {
     expect(await shekelIsLeftOfDigits(firstMoney)).toBe(true);
   }
-  await expect(page.getByText('כולל חשבוניות עם פער פתוח')).toBeVisible();
+  // The honest subtitle, read from the catalog so copy edits don't break the spec.
+  await expect(page.getByText(accountingHe.subtitle)).toBeVisible();
   await expect(page.locator("button.bg-gold-bold")).toHaveCount(0);
   await shot(page, 'exports-he-1440');
   expect(await seriousAxe(page)).toEqual([]);
 
-  await prepare(page, 'he', 390);
+  await prepare(page, 'he', 390, { pinClock: true });
   await page.goto('/dashboard/exports');
   await expect(page.getByTestId('export-summary')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await shot(page, 'exports-he-390');
-  await prepare(page, 'en', 1440);
+  await prepare(page, 'en', 1440, { pinClock: true });
   await page.goto('/dashboard/exports');
   await expect(page.getByTestId('export-summary')).toContainText(/invoices/);
   await shot(page, 'exports-en-1440');
