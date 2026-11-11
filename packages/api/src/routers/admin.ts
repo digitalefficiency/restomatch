@@ -31,7 +31,12 @@ const PlanKeyEnum = z.enum(['trial', 'basic', 'pro', 'chain']);
  * console, confirmed with a reason). Trimmed, 3–500 chars; stored in the audit
  * row's `after.reason` so the trail says WHY, not only what.
  */
-export const AdminReason = z.string().trim().min(3).max(500);
+export const AdminReason = z
+  .string()
+  // Control characters and bidi overrides/isolates could make a Hebrew audit
+  // line read differently from what was stored; drop them before validating.
+  .transform((v) => v.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, ' ').trim())
+  .pipe(z.string().min(3).max(500));
 
 /**
  * The reason is OPTIONAL in the input type and REQUIRED at runtime. Typing it
@@ -367,29 +372,37 @@ export const adminRouter = router({
           : {}),
         ...(input.overrides.features ? { features: input.overrides.features } : {}),
       };
-      // Capture the prior overrides for the audit before-image (RETURNING would
-      // give the post-update value).
-      const [prior] = await ctx.db
-        .select({ overrides: subscriptions.overrides })
-        .from(subscriptions)
-        .where(eq(subscriptions.billingAccountId, r.billingAccountId))
-        .limit(1);
-      if (!prior) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'subscription not found' });
-      }
-      await ctx.db
-        .update(subscriptions)
-        .set({ overrides, updatedAt: new Date() })
-        .where(eq(subscriptions.billingAccountId, r.billingAccountId));
+      const billingAccountId = r.billingAccountId;
+      // One transaction: the write and its audit row land together or not at
+      // all (an unaudited admin write is not allowed).
+      await ctx.db.transaction(async (tx) => {
+        // Capture the prior overrides for the audit before-image (RETURNING would
+        // give the post-update value).
+        const [prior] = await tx
+          .select({ overrides: subscriptions.overrides })
+          .from(subscriptions)
+          .where(eq(subscriptions.billingAccountId, billingAccountId))
+          .for('update')
+          .limit(1);
+        if (!prior) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'subscription not found' });
+        }
+        await tx
+          .update(subscriptions)
+          .set({ overrides, updatedAt: new Date() })
+          .where(eq(subscriptions.billingAccountId, billingAccountId));
 
-      await recordAudit(ctx.db, {
-        restaurantId: input.restaurantId,
-        userId: ctx.session.userId,
-        action: 'admin.overrides_set',
-        entityType: 'restaurant',
-        entityId: input.restaurantId,
-        before: prior.overrides,
-        after: { ...overrides, reason },
+        // before/after keep the same shape ({ overrides }); the reason sits beside
+        // it, never inside the stored overrides.
+        await recordAudit(tx, {
+          restaurantId: input.restaurantId,
+          userId: ctx.session.userId,
+          action: 'admin.overrides_set',
+          entityType: 'restaurant',
+          entityId: input.restaurantId,
+          before: { overrides: prior.overrides },
+          after: { overrides, reason },
+        });
       });
       return { ok: true as const };
     }),

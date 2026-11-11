@@ -92,10 +92,20 @@ describe('admin writes require a reason (W3-07a)', () => {
     });
     const rows = await auditRows('admin.overrides_set');
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.after).toMatchObject({ features: ['accounting_export'], reason: 'ייצוא לרואה החשבון' });
+    expect(rows[0]!.after).toEqual({ overrides: { features: ['accounting_export'] }, reason: 'ייצוא לרואה החשבון' });
     // The reason is audit-only: it never lands in the stored overrides.
     const ent = await getEntitlements(db, T.restaurantId);
     expect(ent.features).toContain('accounting_export');
+  });
+
+  it('control and bidi-override characters are dropped before the length check', async () => {
+    const c = adminCaller(adminUserId);
+    await expect(
+      c.admin.assignPlan({ restaurantId: T.restaurantId, planKey: 'pro', reason: '\u202e\u202d\n\t' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await c.admin.assignPlan({ restaurantId: T.restaurantId, planKey: 'pro', reason: 'שדרוג\u202e לפיילוט' });
+    const rows = await auditRows('admin.plan_assigned');
+    expect((rows[0]!.after as { reason: string }).reason).toBe('שדרוג  לפיילוט');
   });
 
   it('setMemberRole requires a reason and records it', async () => {
