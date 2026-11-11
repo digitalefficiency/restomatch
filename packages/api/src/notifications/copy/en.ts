@@ -124,10 +124,10 @@ export const en = {
     cta: 'View details',
   },
   decision: {
-    approve: 'Claim {amount} back',
+    approve: 'Request {amount} credit',
     reject: 'Pay as billed',
     escalate: 'Send to owner',
-    approved: 'Claimed from supplier',
+    approved: 'Added to credit request',
     rejected: 'Paid as billed',
     escalated: 'Sent to owner',
     reopened: 'Decision undone',

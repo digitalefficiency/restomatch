@@ -134,10 +134,10 @@ export const he = {
   },
   /** The approval decision vocabulary (W1-07). Values pinned by W2-04's approvals-router test. */
   decision: {
-    approve: 'דרוש {amount} מהספק',
-    reject: 'שלם כפי שחויב',
-    escalate: 'העבר לבעלים',
-    approved: 'נדרש מהספק',
+    approve: 'בקשת זיכוי · {amount}',
+    reject: 'שלמו כפי שחויב',
+    escalate: 'העבירו לבעלים',
+    approved: 'נוסף לבקשת הזיכוי',
     rejected: 'שולם כפי שחויב',
     escalated: 'הועבר לבעלים',
     reopened: 'ההחלטה בוטלה',

@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { lockRecovery, releaseClaimsForRematch } from '../recovery/service';
+import { rebindDecidedClaims } from '../approvals/rebind'; // W2-04 rebind
 import { and, desc, eq, goodsReceipts, invoiceLines, invoices, matchRuns, restaurants, sql } from '@restomatch/db';
 import { holdForReceipt, receiptStillOpen, scanOwnerReceipt } from '../receiving/matchTriggers';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
@@ -207,6 +208,9 @@ export const matchRouter = router({
         rules,
         priorDecisions,
       );
+      // W2-04 rebind: the claims released above come back for the re-applied
+      // accepted decisions, under their ORIGINAL decider (shared with the worker).
+      await rebindDecidedClaims(ctx.db, restaurantId, persisted.matchRunId);
       // G-08 hold: a matched invoice no longer waits for an order — drop a stale marker;
       // and (round 10) its order pin follows THIS run's order (none → no pin).
       await ctx.db.execute(sql`

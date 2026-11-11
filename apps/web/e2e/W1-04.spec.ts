@@ -314,8 +314,8 @@ test.describe('connectivity and session layer (perf-states-08, -15)', () => {
     const page = await context.newPage();
     await signIn(context, page, DEMO_OWNER_EMAIL);
     await page.goto(`/dashboard/go?r=${mainId}&to=/dashboard/approvals`);
-    // W1-07 (ea31655f): the approve CTA names the claim — "דרוש {amount} מהספק".
-    const approve = page.getByRole('button', { name: /^דרוש .+ מהספק$/ }).first();
+    // W1-07 (ea31655f): the approve CTA names the claim — owner decision 7.11: "בקשת זיכוי · {amount}".
+    const approve = page.getByRole('button', { name: /^בקשת זיכוי · .+$/ }).first();
     await expect(approve).toBeVisible();
     // Requests that reached the server (an offline attempt fails in the browser).
     let approveCalls = 0;

@@ -13,6 +13,7 @@ export const nav: Shape<typeof he> = {
     labDesk: 'ቤት ፈተነ ሰንጠረዥ',
     labDeskRow: 'መስመር',
     approvals: 'ምጽዳቕ',
+    approvalInvoice: 'ውሳነ ፋክቱር',
     payRun: 'ዙርያ ክፍሊት',
     inbox: 'ዝኣተዉ ፋቱራታት',
     invoices: 'ፋቱራታት',
