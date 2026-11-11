@@ -51,6 +51,7 @@ export const he = {
     markedSent: 'סומן כנשלח',
     undo: 'ביטול',
     addContact: 'הוסיפו טלפון או מייל לספק',
+    byEmail: 'או במייל',
     copyOnly: 'אין לספק טלפון או מייל — העתיקו את הנוסח ושלחו בעצמכם.',
   },
   field: {

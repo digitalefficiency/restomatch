@@ -111,7 +111,8 @@ describe('AU-08 vat.* attack', () => {
   it('manager reads but may not write (ALLOCATION_WRITE_ROLES default); bookkeeper writes', async () => {
     const m = vatAs(A, 'manager');
     expect((await m.invoiceCase({ invoiceId: aInvoice }))!.canWrite).toBe(false);
-    expect(await m.requestDraft({ supplierId: A.supplierId })).not.toBeNull();
+    expect(await m.requestDraft({ supplierId: A.supplierId })).toMatchObject({ canWrite: false });
+    expect(await vatAs(A, 'bookkeeper').requestDraft({ supplierId: A.supplierId })).toMatchObject({ canWrite: true });
     await expect(
       m.setAllocationNumber({ invoiceId: aInvoice, allocationNumber: '123456789', source: 'typed', clientMutationId: cmid() }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
