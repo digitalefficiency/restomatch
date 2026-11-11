@@ -11,6 +11,8 @@ import {
   type RecoveryStatus,
 } from '@restomatch/db';
 import { assertSupplierOwned } from '../tenant';
+import { appError } from '../errors';
+import { HELD_FOR_RECEIPTS_KEY } from '@restomatch/charts';
 import { CLAIM_ANSWER_DAYS, NEVER_CLAIMABLE_TYPES } from '../lib/claims';
 import {
   AWAITING_SUPPLIER,
@@ -82,7 +84,7 @@ export const AUTO_WRITE_OFF_NOTE = 'auto: discrepancy no longer accepted';
  * Serialises claim bookkeeping per restaurant (syncClaims, re-match release):
  * held to the end of the caller's transaction.
  */
-async function lockRecovery(db: Database, restaurantId: string): Promise<void> {
+export async function lockRecovery(db: Database, restaurantId: string): Promise<void> {
   await db.execute(sql`select pg_advisory_xact_lock(hashtext(${'recovery:' + restaurantId}))`);
 }
 
@@ -91,6 +93,137 @@ async function lockRecovery(db: Database, restaurantId: string): Promise<void> {
  * carries their id, so typing the note by hand does not make it "system").
  */
 const SYSTEM_WRITE_OFF = sql`(e.to_status = 'written_off' AND e.note = ${AUTO_WRITE_OFF_NOTE} AND e.actor_id IS NULL)`;
+
+/**
+ * THE rule for "this claim carries no money history" (claim alias `c`): no
+ * money, no letter / acknowledgement / credit ever, and no event beyond
+ * "claimed" and system write-offs / re-opens — a claim that went letter_sent →
+ * written_off → claimed still has history. A re-match may release (delete) such
+ * a claim; any other claim locks the invoice's match and its lines. One
+ * predicate for releaseClaimsForRematch and the invoice page's line lock
+ * (invoiceHasClaimHistory), so the two never disagree.
+ */
+export function claimReleasableSql(restaurantId: string) {
+  return sql`(c.credited_agorot = 0
+    AND c.letter_sent_at IS NULL AND c.acknowledged_at IS NULL AND c.credited_at IS NULL
+    AND c.status IN ('claimed', 'written_off')
+    AND NOT EXISTS (
+      SELECT 1 FROM recovery_events e
+      WHERE e.claim_id = c.id AND e.restaurant_id = ${restaurantId}
+        AND NOT (
+          (e.to_status = 'claimed' AND (e.from_status IS NULL OR e.actor_id IS NULL))
+          OR ${SYSTEM_WRITE_OFF}
+          -- The system's never-claimable write-off (owner 31.10, MISSING_ON_INVOICE…)
+          -- is no person's history either (round 9). SYSTEM_WRITE_OFF itself stays
+          -- as it is: toReopen re-opens only an AUTO write-off.
+          OR (e.to_status = 'written_off' AND e.note = ${NEVER_CLAIMABLE_NOTE} AND e.actor_id IS NULL
+              -- defence in depth (round 10): only on a finding of a never-claimable type
+              AND EXISTS (SELECT 1 FROM discrepancies dd
+                          WHERE dd.id = c.discrepancy_id AND dd.restaurant_id = ${restaurantId}
+                            AND dd.type IN (${NEVER_CLAIMABLE_SQL})))
+        )
+    ))`;
+}
+
+/**
+ * A finding's run is one its invoice is HELD to replace: the invoice waits for a
+ * receipt still being counted that this run is not on (aliases `i` invoices,
+ * `mr` match_runs). syncClaims files no claim there (the hold released them; the
+ * count's run follows), and the tracker shows such findings as "waiting for the
+ * count" (heldForCountTotals) — one predicate for both.
+ */
+function heldRunSql(restaurantId: string) {
+  return sql`EXISTS (
+    SELECT 1 FROM goods_receipts hg
+    WHERE hg.restaurant_id = ${restaurantId}
+      AND hg.status = 'pending'
+      AND (i.ocr_payload -> 'raw' -> ${sql.raw(`'${HELD_FOR_RECEIPTS_KEY}'`)}) @> jsonb_build_array(hg.id::text)
+      AND mr.gr_id IS DISTINCT FROM hg.id
+  )`;
+}
+
+/**
+ * The claims syncClaims would file — `WITH claimed …, cand …` (claim alias `c`
+ * over cand): each claimable, unclaimed finding with its share of the
+ * invoice's cap (total incl. VAT minus what is already claimed, in finding
+ * order). `held` picks the findings on runs their invoice is held to replace
+ * (heldRunSql) instead of the rest — so the tracker's "waiting for the count"
+ * figure is exactly what the sync would file once the hold ends (round 10).
+ */
+function claimCandidatesSql(restaurantId: string, held: boolean) {
+  return sql`
+    WITH claimed AS (
+      -- Agorot already claimed per invoice: new claims only get what is left of
+      -- the cap. A written-off claim that never received money holds none of it.
+      SELECT invoice_id, SUM(amount_agorot) AS agorot
+      FROM recovery_claims
+      WHERE restaurant_id = ${restaurantId} AND invoice_id IS NOT NULL
+        AND NOT (status = 'written_off' AND credited_agorot = 0)
+      GROUP BY invoice_id
+    ),
+    cand AS (
+      SELECT
+        d.id AS discrepancy_id,
+        i.id AS invoice_id,
+        i.supplier_id,
+        COALESCE(d.resolved_at, d.created_at) AS claimed_at,
+        round(abs(d.delta_amount) * 100)::bigint AS raw_agorot,
+        GREATEST(0, round(COALESCE(i.total_incl_vat, 0) * 100)::bigint - COALESCE(cl.agorot, 0)) AS cap_agorot,
+        SUM(round(abs(d.delta_amount) * 100)::bigint) OVER (
+          PARTITION BY i.id ORDER BY d.created_at, d.id
+        ) AS cum_agorot
+      FROM discrepancies d
+      JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
+      JOIN invoices i ON i.id = mr.invoice_id AND i.restaurant_id = ${restaurantId}
+      LEFT JOIN claimed cl ON cl.invoice_id = i.id
+      WHERE d.restaurant_id = ${restaurantId}
+        AND d.delta_amount IS NOT NULL
+        AND ${CLAIMABLE_FILTER}
+        AND NOT EXISTS (SELECT 1 FROM recovery_claims rc WHERE rc.discrepancy_id = d.id)
+        -- #216 round 8: not on a run its invoice is HELD to replace (held for a
+        -- receipt still being counted that this run is not on): the hold released
+        -- its bare claims, and a claim filed now would block the count's run.
+        -- The tracker shows these as "waiting for the count" (heldForCountTotals).
+        AND ${held ? sql`` : sql`NOT`} ${heldRunSql(restaurantId)}
+    )`;
+}
+
+/** A candidate's claim amount (agorot): its |Δ|, capped by what is left of the invoice's cap. */
+const CLAIM_AMOUNT_SQL = sql`LEAST(c.raw_agorot, GREATEST(0, c.cap_agorot - (c.cum_agorot - c.raw_agorot)))`;
+
+/** The claimable ₪ the tracker does not file while its invoice waits for a count (integer agorot). */
+export async function heldForCountTotals(db: Database, restaurantId: string): Promise<{ count: number; agorot: number }> {
+  const [row] = rowsOf(
+    await db.execute(sql`
+      ${claimCandidatesSql(restaurantId, true)}
+      SELECT count(*)::int AS n, COALESCE(SUM(${CLAIM_AMOUNT_SQL}), 0)::bigint AS agorot
+      FROM cand c
+      WHERE ${CLAIM_AMOUNT_SQL} > 0`),
+  );
+  return { count: Number(row?.n ?? 0), agorot: Number(row?.agorot ?? 0) };
+}
+
+/** The claims a re-match of this invoice would touch: on its runs' findings, or filed against it. */
+function invoiceClaimsSql(restaurantId: string, invoiceId: string) {
+  return sql`c.restaurant_id = ${restaurantId} AND (
+      c.invoice_id = ${invoiceId}
+      OR EXISTS (
+        SELECT 1 FROM discrepancies d
+        JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
+        WHERE d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId} AND mr.invoice_id = ${invoiceId}
+      ))`;
+}
+
+/** True when a claim on this invoice carries money history (claimReleasableSql is false). */
+export async function invoiceHasClaimHistory(db: Database, restaurantId: string, invoiceId: string): Promise<boolean> {
+  const rows = rowsOf(
+    await db.execute(sql`
+      SELECT 1 FROM recovery_claims c
+      WHERE ${invoiceClaimsSql(restaurantId, invoiceId)} AND NOT ${claimReleasableSql(restaurantId)}
+      LIMIT 1`),
+  );
+  return rows.length > 0;
+}
 
 /**
  * What a re-opened claim may hold: what is left of its invoice's cap after the
@@ -236,41 +369,13 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
   }
 
   const res = await db.execute(sql`
-    WITH claimed AS (
-      -- Agorot already claimed per invoice: new claims only get what is left of
-      -- the cap. A written-off claim that never received money holds none of it.
-      SELECT invoice_id, SUM(amount_agorot) AS agorot
-      FROM recovery_claims
-      WHERE restaurant_id = ${restaurantId} AND invoice_id IS NOT NULL
-        AND NOT (status = 'written_off' AND credited_agorot = 0)
-      GROUP BY invoice_id
-    ),
-    cand AS (
-      SELECT
-        d.id AS discrepancy_id,
-        i.id AS invoice_id,
-        i.supplier_id,
-        COALESCE(d.resolved_at, d.created_at) AS claimed_at,
-        round(abs(d.delta_amount) * 100)::bigint AS raw_agorot,
-        GREATEST(0, round(COALESCE(i.total_incl_vat, 0) * 100)::bigint - COALESCE(cl.agorot, 0)) AS cap_agorot,
-        SUM(round(abs(d.delta_amount) * 100)::bigint) OVER (
-          PARTITION BY i.id ORDER BY d.created_at, d.id
-        ) AS cum_agorot
-      FROM discrepancies d
-      JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
-      JOIN invoices i ON i.id = mr.invoice_id AND i.restaurant_id = ${restaurantId}
-      LEFT JOIN claimed cl ON cl.invoice_id = i.id
-      WHERE d.restaurant_id = ${restaurantId}
-        AND d.delta_amount IS NOT NULL
-        AND ${CLAIMABLE_FILTER}
-        AND NOT EXISTS (SELECT 1 FROM recovery_claims rc WHERE rc.discrepancy_id = d.id)
-    )
+    ${claimCandidatesSql(restaurantId, false)}
     INSERT INTO recovery_claims (restaurant_id, discrepancy_id, supplier_id, invoice_id, amount_agorot, claimed_at, created_by)
     SELECT ${restaurantId}, c.discrepancy_id, c.supplier_id, c.invoice_id,
-           LEAST(c.raw_agorot, GREATEST(0, c.cap_agorot - (c.cum_agorot - c.raw_agorot))),
+           ${CLAIM_AMOUNT_SQL},
            c.claimed_at, ${actorId ?? null}
     FROM cand c
-    WHERE LEAST(c.raw_agorot, GREATEST(0, c.cap_agorot - (c.cum_agorot - c.raw_agorot))) > 0
+    WHERE ${CLAIM_AMOUNT_SQL} > 0
     ON CONFLICT (discrepancy_id) DO NOTHING
     RETURNING id
   `);
@@ -906,23 +1011,10 @@ export async function lockClaims(db: Database, restaurantId: string, claimIds: s
  */
 export async function releaseClaimsForRematch(db: Database, restaurantId: string, invoiceId: string): Promise<number> {
   await lockRecovery(db, restaurantId);
-  // Releasable = no money, no letter / acknowledgement / credit ever, and no
-  // event beyond "claimed" and system write-offs/re-opens: a claim that went
-  // letter_sent → written_off → claimed still has history and blocks.
+  // Releasable: claimReleasableSql — the one rule (the line lock uses it too).
   const claims = rowsOf(
     await db.execute(sql`
-      SELECT c.id,
-        (c.credited_agorot = 0
-          AND c.letter_sent_at IS NULL AND c.acknowledged_at IS NULL AND c.credited_at IS NULL
-          AND c.status IN ('claimed', 'written_off')
-          AND NOT EXISTS (
-            SELECT 1 FROM recovery_events e
-            WHERE e.claim_id = c.id AND e.restaurant_id = ${restaurantId}
-              AND NOT (
-                (e.to_status = 'claimed' AND (e.from_status IS NULL OR e.actor_id IS NULL))
-                OR ${SYSTEM_WRITE_OFF}
-              )
-          )) AS releasable
+      SELECT c.id, ${claimReleasableSql(restaurantId)} AS releasable
       FROM recovery_claims c
       JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
       JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
@@ -933,10 +1025,12 @@ export async function releaseClaimsForRematch(db: Database, restaurantId: string
   );
   const blocked = claims.filter((r) => r.releasable !== true);
   if (blocked.length > 0) {
-    throw new TRPCError({
-      code: 'CONFLICT',
-      message: `this invoice has ${blocked.length} credit claim(s) in progress (₪-back tracker) — finish or write them off before re-matching`,
-    });
+    throw appError(
+      'CONFLICT',
+      'invoice.claimInProgress',
+      `this invoice has ${blocked.length} credit claim(s) with history (₪-back tracker) — its match is locked; the claims stay in the tracker`,
+      { count: blocked.length },
+    );
   }
   if (claims.length === 0) return 0;
   await db
