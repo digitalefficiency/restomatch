@@ -48,6 +48,21 @@ async function requestCount(): Promise<number> {
   }
 }
 
+/**
+ * The e2e DB keeps the magic-link throttle (3 per mailbox per 15 min, lib/rateLimit.ts) across
+ * tests; this spec signs the bookkeeper in more than 3 times, so it clears that counter first —
+ * the same fixture step helpers.ts takes for the `login:%` keys.
+ */
+async function signIn(page: Page, email: string) {
+  const sql = e2eSql();
+  try {
+    await sql`delete from rate_limit_counters where key like ${'magiclink:%'}`;
+  } finally {
+    await sql.end();
+  }
+  await loginViaMagicLink(page, email);
+}
+
 async function setLocale(page: Page, locale: 'he' | 'en') {
   const url = test.info().project.use.baseURL ?? 'http://localhost:3100';
   await page.context().addCookies([
@@ -118,7 +133,7 @@ test.describe('AU-08 · VAT card chase', () => {
   test('bookkeeper: stage line, prefilled wa.me, mark-sent with undo, then recorded once', async ({ page }) => {
     test.setTimeout(120_000);
     await setLocale(page, 'he');
-    await loginViaMagicLink(page, 'bookkeeper@kfar-hazeitim.test');
+    await signIn(page, 'bookkeeper@kfar-hazeitim.test');
     const { block } = await openSupplierBlock(page);
 
     await expect(block.getByTestId('vat-request-stage')).toHaveText('טרם נשלחה בקשה');
@@ -150,7 +165,7 @@ test.describe('AU-08 · VAT card chase', () => {
 
   test('manager: sees the draft, never the mark button', async ({ page }) => {
     await setLocale(page, 'he');
-    await loginViaMagicLink(page, 'manager@kfar-hazeitim.test');
+    await signIn(page, 'manager@kfar-hazeitim.test');
     const { block } = await openSupplierBlock(page);
     await expect(block.getByTestId('vat-request-wa')).toBeVisible();
     await expect(block.getByTestId('vat-request-mark')).toHaveCount(0);
@@ -159,7 +174,7 @@ test.describe('AU-08 · VAT card chase', () => {
   for (const locale of ['he', 'en'] as const) {
     test(`axe: the open VAT card has no serious/critical issue (${locale})`, async ({ page }) => {
       await setLocale(page, locale);
-      await loginViaMagicLink(page, 'bookkeeper@kfar-hazeitim.test');
+      await signIn(page, 'bookkeeper@kfar-hazeitim.test');
       await openSupplierBlock(page);
       expect(await axeSerious(page, '[data-testid="vat-at-risk-card"]')).toEqual([]);
     });
@@ -169,7 +184,7 @@ test.describe('AU-08 · VAT card chase', () => {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, locale: 'he-IL' });
     const page = await context.newPage();
     await setLocale(page, 'he');
-    await loginViaMagicLink(page, 'bookkeeper@kfar-hazeitim.test');
+    await signIn(page, 'bookkeeper@kfar-hazeitim.test');
     const { card } = await openSupplierBlock(page);
     const box = await card.boundingBox();
     expect(box!.width).toBeLessThanOrEqual(390);
