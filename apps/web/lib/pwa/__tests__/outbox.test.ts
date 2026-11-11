@@ -388,3 +388,18 @@ describe('hasSendable (no network when nothing can go)', () => {
     expect(hasSendable(await store.list(), 10)).toBe(false); // no sender on this page
   });
 });
+
+describe("a group's closer goes last", () => {
+  afterEach(() => resetOutboxKinds());
+
+  it('a close queued BEFORE a late mirror write of a count is still sent after it', async () => {
+    const calls: string[] = [];
+    registerOutboxKind('grLine', { ...GR_LINE_KIND, send: async (p) => void calls.push(p.grLineId) });
+    registerOutboxKind('submitReceipt', { ...SUBMIT_RECEIPT_KIND, send: async () => void calls.push('submit') });
+    const store = memoryOutboxStore();
+    await enqueue(store, 'submitReceipt', { grId: 'gr-1', clientMutationId: 'm1' }, A, { now: 1 });
+    await enqueue(store, 'grLine', line('l1', 1), A, { now: 2 }); // the mirror landed later
+    await drainOutbox(store, { scope: A, lock: freeLock, isOnline: () => true });
+    expect(calls).toEqual(['l1', 'submit']);
+  });
+});

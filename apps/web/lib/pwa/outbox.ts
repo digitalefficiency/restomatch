@@ -74,6 +74,8 @@ export interface OutboxKindDef<P = unknown> {
   group?: (payload: P) => string | null;
   /** Default: `classifyFailure` (network / auth / retryable / permanent). */
   classify?: (err: unknown) => FailureKind;
+  /** A group's closer (e.g. `submitReceipt`): always sent after every other item of its group, whatever its age. */
+  last?: boolean;
 }
 
 export interface OutboxScope {
@@ -364,6 +366,9 @@ export async function drainOutbox(store: OutboxStore, opts: DrainOptions): Promi
     const g = i.group ?? i.key;
     groups.set(g, [...(groups.get(g) ?? []), i]);
   }
+  // A closer goes after its group's other items even if it was written first (a mirror write may land later).
+  const isLast = (i: OutboxItem) => Boolean(getOutboxKind(i.kind)?.last);
+  for (const [g, list] of groups) groups.set(g, [...list.filter((i) => !isLast(i)), ...list.filter(isLast)]);
 
   let stop = false;
   for (const groupItems of groups.values()) {
