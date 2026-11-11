@@ -69,7 +69,7 @@ export const GLOSSARY = [
     he: 'חשבונית זיכוי',
     en: 'Credit note',
     define: 'המסמך שהספק מוציא כשהוא מזכה אתכם.',
-    retireHe: ['תעודת זיכוי'],
+    retireHe: [], // "תעודת זיכוי" is its own concept (owner 7.11)
     retireEn: [],
     allow: [],
   },
@@ -130,8 +130,10 @@ export const GLOSSARY = [
   },
   {
     concept: 'funnel',
-    he: 'נמצא · נדרש · זוכה · הוחזר · פתוח · במחלוקת · ויתור',
-    en: 'Found · Claimed · Credited · Returned · Outstanding · Disputed · Written off',
+    // Owner 7.11: "הוחלט לבקש {claimed}: קוזזו/הוחזרו {returned}, זוכו {credited}, ממתינים {open},
+    // בבירור מול הספק {disputed}, נסגרו בלי זיכוי {writtenOff}".
+    he: 'נמצא · הוחלט לבקש · קוזז/הוחזר · זוכה · ממתין · בבירור מול הספק · נסגר בלי זיכוי',
+    en: 'Found · Requested · Offset/Returned · Credited · Waiting · In review with supplier · Closed without credit',
     define: 'הדרך של כל פער: מהרגע שנמצא ועד שהכסף חזר.',
     retireHe: ['חזר בפועל', 'התקבל זיכוי', 'נדרש בחזרה'],
     retireEn: [],
@@ -148,18 +150,20 @@ export const GLOSSARY = [
   },
   {
     concept: 'creditClaim',
-    he: 'דרישת זיכוי',
-    en: 'Credit claim',
-    define: 'הבקשה לספק להחזיר את מה שחויב ביתר.',
-    retireHe: ['תביעה', 'תביעות', 'לתבוע', 'בקשת זיכוי', 'לבקש זיכוי'],
+    // Owner 7.11 (supersedes "דרישת זיכוי"): suppliers are daily partners, so we ask, we don't demand.
+    // Our letter is "מכתב בקשת זיכוי"; the supplier's document is "חשבונית זיכוי"; "תעודת זיכוי" is its own concept.
+    he: 'בקשת זיכוי',
+    en: 'Credit request',
+    define: 'הבקשה לספק לזכות אתכם על מה שחויב ביתר.',
+    retireHe: ['דרישת זיכוי', 'דרישות זיכוי', 'לדרוש זיכוי', 'תביעה', 'תביעות', 'לתבוע', 'מכתב זיכוי', 'מכתבי זיכוי'],
     retireEn: [],
     allow: [],
   },
   {
     concept: 'overdueClaim',
-    he: 'דרישת זיכוי באיחור',
-    en: 'Overdue claim',
-    define: 'דרישת זיכוי שלא נענתה תוך 7 ימים.',
+    he: 'בקשה בלי תשובה 7+ ימים',
+    en: 'No answer for 7+ days',
+    define: 'בקשת זיכוי שלא נענתה תוך 7 ימים.',
     retireHe: ['מעל 14 יום'],
     retireEn: ['over 14 days'],
     allow: [],

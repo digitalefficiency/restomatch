@@ -7,7 +7,7 @@
  * House style: plural address ("ביקשתם", "פתחו"), noun-form buttons, no emoji,
  * no slash forms, no ₪/%/quote marks typed next to a placeholder (₪ values arrive
  * already formatted), plurals in ICU form with the Hebrew dual.
- * Glossary: פער · דרישת זיכוי · קבלת סחורה · מרכזת. An undecided ₪ is never "הפסד" or "חיסכון".
+ * Glossary: פער · בקשת זיכוי · קבלת סחורה · מרכזת. An undecided ₪ is never "הפסד" or "חיסכון".
  */
 export const he = {
   frame: {
@@ -71,10 +71,14 @@ export const he = {
   approvalNeeded: {
     subject: 'דרושה החלטה: {count, plural, one {פער אחד} two {שני פערים} other {# פערים}} בחשבונית מ-{supplier}',
     preview: '{count, plural, one {פער אחד} two {שני פערים} other {# פערים}} בסך {amount} ממתינים להחלטה.',
+    /** Review-only match (no ₪ by the leak rule): names no amount. */
+    reviewSubject: 'דרושה החלטה: {count, plural, one {פער אחד} two {שני פערים} other {# פערים}} לבדיקה בחשבונית מ-{supplier}',
+    reviewPreview: '{count, plural, one {פער אחד ממתין} two {שני פערים ממתינים} other {# פערים ממתינים}} לבדיקה.',
+    reviewFound: '{count, plural, one {פער אחד} two {שני פערים} other {# פערים}} לבדיקה בחשבונית מ-{supplier}.',
     heading: 'דרושה החלטה על חשבונית',
     found: 'נמצאו {count, plural, one {פער אחד} two {שני פערים} other {# פערים}} בחשבונית מ-{supplier}.',
     atRisk: 'סכום בפערים: {amount}',
-    claimable: 'אפשר לדרוש מהספק: {amount}',
+    claimable: 'אפשר לבקש זיכוי: {amount}',
     choices: 'לכל פער שתי אפשרויות: {approve} או {reject}.',
     cta: 'לתור האישורים',
     ctaInvoice: 'להחלטה על החשבונית',
@@ -93,7 +97,7 @@ export const he = {
     preview: '{count, plural, one {זיכוי פתוח אחד} two {שני זיכויים פתוחים} other {# זיכויים פתוחים}} בסך {amount} · {caught, plural, one {פער אחד נמצא} two {שני פערים נמצאו} other {# פערים נמצאו}} היום.',
     heading: 'סיכום סוף יום · {date}',
     intro: 'מה פתוח לטיפול ומה נמצא היום:',
-    openLabel: 'זיכויים פתוחים לגבייה',
+    openLabel: 'זיכויים פתוחים',
     caughtLabel: 'פערים שנמצאו היום',
     pendingLabel: 'ממתינים להחלטה',
     topLabel: 'הספק עם הכי הרבה זיכויים',

@@ -344,9 +344,10 @@ export const DECISION_COPY = {
 export function approvalNeededEmail(args: {
   supplierName: string;
   discrepancyCount: number;
-  atRiskIls: string; // formatted ₪
-  /** Formatted ₪ the owner can claim back (W2-04: Σ claimableLines). Replaces the at-risk line. */
-  claimableIls?: string;
+  /** Formatted ₪ by the hero's leak rule; null for a review-only match (no ₪ named). */
+  atRiskIls: string | null;
+  /** Formatted ₪ the owner can request back (W2-04: Σ claimableLines). Replaces the at-risk line. */
+  claimableIls?: string | null;
   approvalsUrl?: string;
   /** Deep link to this invoice's decision (W2-04). Preferred over `approvalsUrl` for the CTA. */
   invoiceUrl?: string;
@@ -355,24 +356,27 @@ export function approvalNeededEmail(args: {
   const l = loc(args.locale);
   const c = copyOf(l).approvalNeeded;
   const d = DECISION_COPY[l];
-  const amount = args.claimableIls ?? args.atRiskIls;
+  const amount = args.claimableIls ?? args.atRiskIls ?? null;
   const vars = {
     supplier: args.supplierName,
     count: args.discrepancyCount,
-    amount,
+    amount: amount ?? '',
     approve: d.approve.replace(/\s*\{amount\}\s*/, ' ').trim(),
     reject: d.reject,
   };
-  const amountHtml = ilsSpan(amount, 'danger');
+  const subject = txt(l, amount ? c.subject : c.reviewSubject, vars);
+  const found = amount ? c.found : c.reviewFound;
+  const amountLine = amount ? (args.claimableIls ? c.claimable : c.atRisk) : null;
   const html = renderEmail({
     locale: l,
     accent: COLORS.danger,
-    preview: txt(l, c.preview, vars),
+    preview: txt(l, amount ? c.preview : c.reviewPreview, vars),
     heading: c.heading,
     bodyHtml: `
       ${callout(
-        `${htm(l, c.found, vars, ['supplier'])}<br>
-         ${htm(l, args.claimableIls ? c.claimable : c.atRisk, { amount: amountHtml }, [], ['amount'])}`,
+        `${htm(l, found, vars, ['supplier'])}${
+          amountLine ? `<br>\n         ${htm(l, amountLine, { amount: ilsSpan(amount!, 'danger') }, [], ['amount'])}` : ''
+        }`,
         'danger',
         l,
       )}
@@ -385,14 +389,14 @@ export function approvalNeededEmail(args: {
   });
   const link = args.invoiceUrl ?? args.approvalsUrl;
   const text = lines(
-    txt(l, c.subject, vars),
+    subject,
     '',
-    txt(l, c.found, vars),
-    txt(l, args.claimableIls ? c.claimable : c.atRisk, vars),
+    txt(l, found, vars),
+    amountLine && txt(l, amountLine, vars),
     txt(l, c.choices, vars),
     link && `\n${args.invoiceUrl ? c.ctaInvoice : c.cta}: ${link}`,
   );
-  return { subject: txt(l, c.subject, vars), html, text };
+  return { subject, html, text };
 }
 
 /* ─────────────────────── weekly digest ──────────────────────────── */
