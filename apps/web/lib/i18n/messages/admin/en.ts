@@ -38,7 +38,7 @@ export const en: Shape<typeof he> = {
     implicit: '(implicit)',
     trialEnds: 'Trial until {date}',
     empty: 'No restaurants yet',
-    emptyHint: 'A restaurant is created when a new user completes onboarding (/onboarding).',
+    emptyHint: 'A restaurant is created when onboarding ends.',
   },
   detail: {
     back: 'All restaurants',
@@ -49,7 +49,7 @@ export const en: Shape<typeof he> = {
     overrides: 'Overrides',
     businessId: 'Company no.',
     created: 'Created',
-    noSubscription: 'No subscription — implicit trial (all features, low volume). Assign a plan to start metering usage.',
+    noSubscription: 'No subscription — implicit trial. Assign a plan to meter usage.',
     members: 'Users ({count})',
     noMembers: 'This restaurant has no users.',
     notFound: 'Restaurant not found.',
@@ -89,7 +89,7 @@ export const en: Shape<typeof he> = {
     cta: 'Turn on two-step verification in Settings',
   },
   overrides: {
-    label: 'Overrides — an empty number = the plan default',
+    label: 'Overrides · empty = plan default',
     invoices: 'Invoices/month',
     restaurants: 'Restaurants',
     seats: 'Seats/restaurant',
@@ -104,7 +104,7 @@ export const en: Shape<typeof he> = {
     },
   },
   roles: {
-    lastOwner: 'You can’t demote the last owner — promote another owner first.',
+    lastOwner: 'You can’t demote the last owner. Promote another owner first.',
     roleFor: 'Role for {email}',
   },
   leads: {

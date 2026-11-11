@@ -26,6 +26,7 @@ export const APP_ERROR_CODES = [
   'dsr.soleOwner',
   'admin.lastOwner',
   'admin.notFound',
+  'admin.noSubscription',
   'admin_requires_2fa',
   'subscription.inactive',
   'quota.exceeded',

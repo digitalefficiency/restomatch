@@ -157,7 +157,7 @@ export function ProductEditor({
                 dir="ltr"
               />
             </Field>
-            <Field label={t('form.supplier')} htmlFor="pr-supplier" hint={t('form.supplierHint')}>
+            <Field label={t('form.supplier')} htmlFor="pr-supplier">
               <Select
                 id="pr-supplier"
                 value={form.supplierId}

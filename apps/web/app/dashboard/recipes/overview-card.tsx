@@ -66,7 +66,6 @@ export async function RecipesOverviewCard() {
                   ? t('overviewCard.count', { count: formatNumber(hurt.length, locale) })
                   : t('overviewCard.none')}
             </p>
-            {hurt.length ? <p className="text-xs text-subtle">{t('overviewCard.subtitle')}</p> : null}
             {alertsUnavailable ? (
               <p className="text-xs text-subtle" role="status" data-testid="recipes-alerts-unavailable">
                 {t('workbench.alertsUnavailable')}
