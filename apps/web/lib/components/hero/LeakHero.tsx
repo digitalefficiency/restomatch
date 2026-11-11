@@ -240,7 +240,7 @@ export function LeakHero(p: LeakHeroProps) {
                         href={p.completeness.href}
                         data-testid="leak-hero-completeness"
                         className={cn(
-                          'inline-flex min-h-8 items-center rounded-lg text-sm text-muted hover:text-ink hover:underline',
+                          'inline-flex min-h-11 items-center rounded-lg text-sm text-muted hover:text-ink hover:underline sm:min-h-8 [@media(pointer:coarse)]:min-h-11',
                           linkFocus,
                         )}
                       >
@@ -257,7 +257,7 @@ export function LeakHero(p: LeakHeroProps) {
                       href={p.tertiary.href}
                       data-testid={p.tertiary.testId}
                       className={cn(
-                        'inline-flex min-h-8 items-center rounded-lg text-sm font-semibold text-primary hover:underline',
+                        'inline-flex min-h-11 items-center rounded-lg text-sm font-semibold text-primary hover:underline sm:min-h-8 [@media(pointer:coarse)]:min-h-11',
                         linkFocus,
                       )}
                     >
@@ -271,7 +271,7 @@ export function LeakHero(p: LeakHeroProps) {
                   <summary
                     className={cn(
                       // 44 px tap height on phone (a11y phone suite), 32 px from sm up.
-                      'inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-lg text-sm font-semibold text-primary hover:underline sm:min-h-8 [&::-webkit-details-marker]:hidden',
+                      'inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-lg text-sm font-semibold text-primary hover:underline sm:min-h-8 [@media(pointer:coarse)]:min-h-11 [&::-webkit-details-marker]:hidden',
                       linkFocus,
                     )}
                   >
