@@ -11,6 +11,8 @@ import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
 import { SuppliersList } from './list';
 import { SuppliersTabs } from './tabs';
 import { SupplierManager } from './manager';
+import { VendorTable } from './vendor-table';
+import { auth } from '@/auth';
 
 const PAGE = 9;
 
@@ -44,11 +46,20 @@ export default async function SuppliersPage({
     else throw err;
   }
 
+  // W2-11 · the owner's vendor table — finance roles only (suppliers.table refuses the rest).
+  const table = await caller.suppliers.table({ includeInactive: true }).catch(() => null);
+  const role = ((await auth())?.user as { role?: string } | undefined)?.role;
+  const defaultTab = table && role === 'owner' ? 'table' : 'manage';
+  const initialTab =
+    view === 'scores' ? 'scores' : view === 'manage' ? 'manage' : view === 'table' && table ? 'table' : defaultTab;
+
   return (
     <div>
       <SectionHeader level={1} title={t('title')} subtitle={t('subtitle')} />
       <SuppliersTabs
-        initialTab={view === 'scores' ? 'scores' : 'manage'}
+        initialTab={initialTab}
+        defaultTab={defaultTab}
+        table={table ? <VendorTable rows={table.rows} totals={table.totals} /> : undefined}
         management={<SupplierManager />}
         scorecards={scorecardsNode}
       />

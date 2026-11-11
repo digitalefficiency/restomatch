@@ -60,7 +60,9 @@ export function LeakCardBody({
             <p className="mt-2 text-xs tabular-nums text-subtle">{windowText}</p>
           </div>
         </section>
-        <Scorecard sc={sc} gated={card.scorecardGated} locale={locale} t={t} />
+        {!print ? (
+          <Scorecard sc={sc} gated={card.scorecardGated} unavailable={card.scorecardUnavailable} locale={locale} t={t} />
+        ) : null}
       </div>
     );
   }
@@ -92,10 +94,17 @@ export function LeakCardBody({
       </section>
 
       {/* T2 — what's still open, with one CTA */}
-      {card.openAgorot > 0 && (
-        <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-danger/8 p-4">
+      {/* I6 (owner 7.11): the printed card carries the gap lines and the request ₪ only. */}
+      {print && card.letterAgorot != null && card.letterAgorot > 0 ? (
+        <section data-testid="supplier-card-request" className="flex flex-wrap items-center gap-3 rounded-2xl border border-line p-4">
+          <span className="text-sm font-semibold text-muted">{t('leakCard.request')}</span>
+          <span className="rm-print-accent text-xl font-bold tabular-nums text-ink">{ils(card.letterAgorot, locale)}</span>
+        </section>
+      ) : null}
+      {!print && card.openAgorot > 0 && (
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line p-4">
           <div className="flex flex-wrap items-center gap-3">
-            <Badge tone="danger-solid">{tl('claims.openForClaim')}</Badge>
+            <Badge tone="neutral">{tl('claims.openForClaim')}</Badge>
             <span className="rm-print-accent text-xl font-bold tabular-nums text-ink">
               {ils(card.openAgorot, locale)}
             </span>
@@ -103,10 +112,15 @@ export function LeakCardBody({
               {t('leakCard.openLines', { count: formatNumber(card.openCount, locale) })}
             </span>
           </div>
+          {!print && card.letterAgorot === null ? (
+            <span className="text-xs text-muted" data-testid="supplier-letter-unavailable">
+              {t('overview.unavailable')}
+            </span>
+          ) : null}
           {!print && (
             <LinkButton href={`/dashboard/leaks/claims?sup=${supplierId}`} size="sm" data-testid="supplier-claims-cta">
               {/* The ₪ the letter it opens prints — never the 90-day open total. */}
-              {card.letterAgorot > 0
+              {card.letterAgorot != null && card.letterAgorot > 0
                 ? tl('claims.openSupplierLetter', { amount: ils(card.letterAgorot, locale) })
                 : tl('claims.openSupplierLetterPlain')}
             </LinkButton>
@@ -176,7 +190,9 @@ export function LeakCardBody({
         </section>
       </div>
 
-      <Scorecard sc={sc} gated={card.scorecardGated} locale={locale} t={t} />
+      {!print ? (
+        <Scorecard sc={sc} gated={card.scorecardGated} unavailable={card.scorecardUnavailable} locale={locale} t={t} />
+      ) : null}
     </div>
   );
 }
@@ -184,15 +200,17 @@ export function LeakCardBody({
 function Scorecard({
   sc,
   gated,
+  unavailable = false,
   locale,
   t,
 }: {
   sc: SupplierLeakCard['scorecard'];
   gated: boolean;
+  unavailable?: boolean;
   locale: Locale;
   t: Translator<typeof suppliersHe>;
 }) {
-  if (!sc && !gated) return null; // no match runs with this supplier yet
+  if (!sc && !gated && !unavailable) return null; // no match runs with this supplier yet
   return (
     <section aria-labelledby="leak-scorecard" className="border-t border-line pt-4">
       <h2 id="leak-scorecard" className="mb-2 text-sm font-bold text-ink">{t('leakCard.scorecard')}</h2>
@@ -203,6 +221,10 @@ function Scorecard({
           <Stat label={t('leakCard.priceDelta')} value={formatPercent(sc.avgPriceDeltaPct, locale)} />
           <Stat label={t('leakCard.duplicates')} value={formatNumber(sc.duplicateInvoicesCount, locale)} />
         </dl>
+      ) : unavailable ? (
+        <p className="text-sm text-muted" data-testid="supplier-scorecard-unavailable">
+          {t('overview.unavailable')}
+        </p>
       ) : (
         <p className="text-sm text-subtle">{t('leakCard.noScorecard')}</p>
       )}
