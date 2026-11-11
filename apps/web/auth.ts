@@ -30,7 +30,7 @@ import { SIGNOUT_COOKIE, issuedBeforeSignOut, signOutCookieOptions } from './lib
 import { bypassesSecondFactor } from './lib/secondFactorGate';
 import { consumeTwoFactorTicket } from './lib/totp';
 import { verifyLoginCode } from './app/login/_lib/loginCode';
-import { passkeyAllowedFor, passkeysEnabled } from './app/(auth)/_lib/passkeys';
+import { passkeySignInAllowed, passkeysEnabled, relyingParty } from './app/(auth)/_lib/passkeys';
 import { clearLoginFailures, enforceLoginLimit, enforceMagicLinkLimit, refundLoginIp, trustedProxyHops } from './lib/rateLimit';
 import {
   SESSION_TTL_LONG_SEC,
@@ -250,7 +250,7 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
       sendVerificationRequest: sendMagicLink,
     }),
     // W3-07b slice b: passkeys for owner + bookkeeper, OFF unless PASSKEYS_ENABLED=1.
-    ...(passkeysEnabled() ? [Passkey({})] : []),
+    ...(passkeysEnabled() ? [Passkey({ relayingParty: relyingParty()! })] : []),
   ],
   events: {
     // Every signOut() — the dashboard / onboarding / 2FA-cancel buttons and "log
@@ -266,7 +266,16 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
   callbacks: {
     // Passkeys (register AND sign-in) only for an owner / bookkeeper account.
     async signIn({ user, account }) {
-      if (account?.provider === 'passkey') return passkeyAllowedFor(user?.id);
+      if (account?.provider === 'passkey') {
+        return passkeySignInAllowed({
+          userId: user?.id,
+          credentialId: account.providerAccountId,
+          liveSession: async () => {
+            const s = await auth();
+            return s?.user ? { id: s.user.id, twoFactorPending: s.user.twoFactorPending } : null;
+          },
+        });
+      }
       return true;
     },
     async jwt({ token, user, trigger, session }) {

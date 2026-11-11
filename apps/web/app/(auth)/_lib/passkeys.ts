@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, eq, inArray, memberships } from '@restomatch/db';
+import { and, authenticators, eq, inArray, memberships } from '@restomatch/db';
 import { authDb } from '@/lib/authDb';
 
 /**
@@ -14,8 +14,20 @@ import { authDb } from '@/lib/authDb';
  */
 export const PASSKEY_ROLES = ['owner', 'bookkeeper'] as const;
 
+/** ON only with PASSKEYS_ENABLED=1 AND a valid AUTH_URL (the WebAuthn relying party is pinned to it). */
 export function passkeysEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.PASSKEYS_ENABLED === '1';
+  return env.PASSKEYS_ENABLED === '1' && relyingParty(env) !== null;
+}
+
+/** RP id + origin from AUTH_URL — never from the Host / X-Forwarded-Host header (warden review). */
+export function relyingParty(env: NodeJS.ProcessEnv = process.env): { id: string; origin: string; name: string } | null {
+  try {
+    const url = new URL(env.AUTH_URL ?? '');
+    if (url.protocol !== 'https:' && url.hostname !== 'localhost') return null;
+    return { id: url.hostname, origin: url.origin, name: 'RestoMatch' };
+  } catch {
+    return null;
+  }
 }
 
 export async function passkeyAllowedFor(userId: string | undefined | null): Promise<boolean> {
@@ -26,4 +38,31 @@ export async function passkeyAllowedFor(userId: string | undefined | null): Prom
     .where(and(eq(memberships.userId, userId), inArray(memberships.role, [...PASSKEY_ROLES])))
     .limit(1);
   return Boolean(row);
+}
+
+/**
+ * The auth.ts signIn callback for provider 'passkey' (warden review, HIGH).
+ * Auth.js decides "register" from a session cookie it only DECODES — it never
+ * runs our jwt() checks (token_version, sign-out tombstone, expiry, 2FA). So:
+ *  - sign-in with a credential already stored for this user → role gate only;
+ *  - anything else is a register, and needs a LIVE full session (read through
+ *    our own auth(), which runs those checks) for the SAME user, past 2FA.
+ * An anonymous register has no user id and fails the role gate.
+ */
+export async function passkeySignInAllowed(input: {
+  userId: string | undefined | null;
+  credentialId: string | undefined | null;
+  liveSession: () => Promise<{ id?: string | null; twoFactorPending?: boolean } | null>;
+}): Promise<boolean> {
+  const { userId, credentialId } = input;
+  if (!userId || !credentialId) return false;
+  if (!(await passkeyAllowedFor(userId))) return false;
+  const [known] = await authDb
+    .select({ userId: authenticators.userId })
+    .from(authenticators)
+    .where(eq(authenticators.credentialID, credentialId))
+    .limit(1);
+  if (known) return known.userId === userId;
+  const live = await input.liveSession();
+  return Boolean(live?.id) && live!.id === userId && live!.twoFactorPending === false;
 }
