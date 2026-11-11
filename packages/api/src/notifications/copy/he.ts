@@ -71,6 +71,10 @@ export const he = {
   approvalNeeded: {
     subject: 'דרושה החלטה: {count, plural, one {פער אחד} two {שני פערים} other {# פערים}} בחשבונית מ-{supplier}',
     preview: '{count, plural, one {פער אחד} two {שני פערים} other {# פערים}} בסך {amount} ממתינים להחלטה.',
+    /** Review-only match (no ₪ by the leak rule): names no amount. */
+    reviewSubject: 'דרושה החלטה: {count, plural, one {פער אחד} two {שני פערים} other {# פערים}} לבדיקה בחשבונית מ-{supplier}',
+    reviewPreview: '{count, plural, one {פער אחד ממתין} two {שני פערים ממתינים} other {# פערים ממתינים}} לבדיקה.',
+    reviewFound: '{count, plural, one {פער אחד} two {שני פערים} other {# פערים}} לבדיקה בחשבונית מ-{supplier}.',
     heading: 'דרושה החלטה על חשבונית',
     found: 'נמצאו {count, plural, one {פער אחד} two {שני פערים} other {# פערים}} בחשבונית מ-{supplier}.',
     atRisk: 'סכום בפערים: {amount}',

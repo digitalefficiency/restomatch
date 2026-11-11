@@ -105,6 +105,7 @@ test.afterAll(async () => {
   const sql = e2eSql();
   try {
     await sql`grant select on invitations to restomatch_app`.catch(() => {});
+    await sql`grant select on purchase_orders to restomatch_app`.catch(() => {});
     if (secondId) await sql`delete from restaurants where id = ${secondId}`;
     if (strangerId) await sql`delete from restaurants where id = ${strangerId}`;
     if (billingId) {
@@ -216,12 +217,12 @@ test.describe('in-shell not-found and error (perf-states-09)', () => {
       await expect(page.getByRole('heading', { level: 1 })).toHaveText('לא הצלחנו לטעון את הדף');
       await expectShell(page);
       expect(await axe(page), 'axe on the in-shell error').toEqual([]);
-      await sql`grant select on invitations to restomatch_app`;
+      await sql`grant select on purchase_orders to restomatch_app`;
       await page.getByTestId('dashboard-error-retry').click();
       await expect(page.getByTestId('dashboard-error')).toHaveCount(0);
       expect(new URL(page.url()).pathname).toBe('/dashboard/receiving');
     } finally {
-      await sql`grant select on invitations to restomatch_app`;
+      await sql`grant select on purchase_orders to restomatch_app`;
       await sql.end();
       await context.close();
     }

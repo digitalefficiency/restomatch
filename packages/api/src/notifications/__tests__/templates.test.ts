@@ -85,6 +85,17 @@ describe('email templates', () => {
     expect(html).toContain('₪1,240');
   });
 
+  it('approvalNeededEmail for a review-only match names no ₪ (money review E)', () => {
+    const { subject, html, text } = approvalNeededEmail({ supplierName: 'תנובה', discrepancyCount: 2, atRiskIls: null });
+    // W2-13: ICU plural with the Hebrew dual ("2 פערים" → "שני פערים").
+    expect(subject).toContain('שני פערים');
+    expect(html).toContain('לבדיקה');
+    for (const s of [subject, html, text]) {
+      expect(s).not.toContain('₪');
+      expect(s).not.toContain('סכום בסיכון');
+    }
+  });
+
   it('weeklyLeakReportEmail shows saved and leaked figures', () => {
     const { html } = weeklyLeakReportEmail({
       weekLabel: '13–19 ביוני',

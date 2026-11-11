@@ -173,6 +173,7 @@ export { EMAIL_COPY, type EmailCopy } from './notifications/copy';
 export { logActivity, type ActivityEventInput, type ActivityEventType } from './activity';
 export { buildMatchInputForInvoice, type BuiltMatchInput } from './match/buildMatchInput';
 export {
+  heldForReceipts,
   invoicesWaitingOnReceipt,
   lockReceipt,
   readScanGrId,
@@ -185,7 +186,7 @@ export {
   withScanGrId,
 } from './receiving/matchTriggers';
 export { backfillPriceHistory, writePriceHistoryForInvoice } from './match/priceHistory';
-export { loadPriorDecisions, matchActivitySummary, persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
+export { loadPriorDecisions, matchActivitySummary, matchAlert, persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
 export {
   parseCatalogFile,
   autoDetectMapping,
@@ -201,8 +202,21 @@ export {
   type CommitResult,
   type AmbiguousRow,
 } from './catalog/commit';
+// G-08 kill switch: release invoices held for order questions (admin + worker script).
+export { releaseOrderQuestionHolds } from './routers/mapping';
+// G-08: the shared "open question" rules (mapping router, match job, OCR job).
+export {
+  applyLearnedCharges,
+  invoiceQuestionCount,
+  linkPinPoIdOf,
+  orderQuestionCount,
+  pruneAnsweredReasons,
+  releaseQuestionHolds,
+  type ChargeKey,
+} from './catalog/linkQuestions';
 export {
   checkRateLimit,
+  refundRateLimit,
   resetRateLimit,
   MemoryRateLimitStore,
   RateLimitError,
@@ -234,7 +248,7 @@ export {
   type DeliveryState,
   type DeliveryStateInput,
 } from './lib/deliveryState';
-export { FEATURE_KEYS, featureEnabled, type FeatureKey } from './lib/features';
+export { DEFAULT_ON_FEATURES, FEATURE_KEYS, featureEnabled, type FeatureKey } from './lib/features';
 export { assertFeature } from './lib/featureGate';
 export {
   contractInForce,
@@ -303,6 +317,8 @@ export {
   type FillEnglishResult,
 } from './receiving/english';
 export { devOcrStubEnabled, buildDevOcrStub } from './receiving/devOcrStub';
+export { isAllowedScanUrl } from './lib/scanUrls';
+export { signedUrlForStoragePath } from './ingest/store';
 export {
   localScanStorageEnabled,
   readLocalScan,
@@ -351,6 +367,8 @@ export {
   transitionClaim,
   recordCreditNote,
   creditLineSuggestions,
+  lockRecovery,
+  releaseClaimsForRematch,
   OVERDUE_DAYS,
   type RecoveryClaimRow,
   type RecoverySummary,
@@ -392,6 +410,19 @@ export {
 export { NOT_BILLING_OWNER } from './routers/chain';
 
 export * from './ledger';
-export { CLAIMABLE_STATUSES, claimableLines, sumClaims, vatBasisOf, type ClaimLine, type VatBasis } from './lib/claims';
+export {
+  CLAIMABLE_STATUSES,
+  CLAIM_ANSWER_DAYS,
+  OVERDUE_BOUNDARY_CASES,
+  OVERDUE_BOUNDARY_NOW,
+  NEVER_CLAIMABLE_TYPES,
+  claimableLines,
+  isNeverClaimable,
+  sumClaims,
+  vatBasisOf,
+  type ClaimLine,
+  type VatBasis,
+} from './lib/claims';
 export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunClaim } from './routers/payRun';
 export { SKIPPED_NO_PROVIDER, providerConfigured, supplierMessageState, type SupplierMessageState } from './notifications/delivery';
+export * from './notifications/sendWindow';

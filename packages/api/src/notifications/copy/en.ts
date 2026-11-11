@@ -64,6 +64,9 @@ export const en = {
   approvalNeeded: {
     subject: 'Decision needed: {count, plural, one {# discrepancy} other {# discrepancies}} on an invoice from {supplier}',
     preview: '{count, plural, one {# discrepancy} other {# discrepancies}} worth {amount} waiting for a decision.',
+    reviewSubject: 'Decision needed: {count, plural, one {# discrepancy} other {# discrepancies}} to review on an invoice from {supplier}',
+    reviewPreview: '{count, plural, one {# discrepancy is} other {# discrepancies are}} waiting for review.',
+    reviewFound: '{count, plural, one {# discrepancy} other {# discrepancies}} to review on an invoice from {supplier}.',
     heading: 'An invoice needs a decision',
     found: 'We found {count, plural, one {# discrepancy} other {# discrepancies}} on an invoice from {supplier}.',
     atRisk: 'Amount in discrepancies: {amount}',
