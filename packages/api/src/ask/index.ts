@@ -3,16 +3,19 @@
  * (or on any Claude failure) the deterministic offline engine. Always records
  * one question in assistant_usage (no text stored).
  */
-import type { Database } from '@restomatch/db';
+import type { Database, UserRole } from '@restomatch/db';
+import { recordAudit, type AuditAction } from '../audit';
 import { TRPCError } from '@trpc/server';
 import { addClaudeSpend, allowAskBurst, recordUsage, reserveQuestion } from './budget';
 import { anthropicAskClient, AskRunError, runClaude, type AskClientLike } from './claude';
 import { groundAnswer, type Citation } from './grounding';
 import { offlineAnswer, type CannedIntent } from './offline';
+import { isOpsIntent, OPS_INTENT_TOOL } from './opsOffline';
 import { localDay, restaurantTimezone } from './periods';
 import type { ScreenLink } from './tools';
 
 export type AskMode = 'claude' | 'offline';
+export type AskChannel = 'web' | 'whatsapp';
 export type OfflineReason = 'noKey' | 'budget' | 'error';
 
 export interface AskResult {
@@ -45,8 +48,16 @@ export async function runAsk(
   restaurantId: string,
   question: string,
   locale: 'he' | 'en',
-  opts: { now?: Date; env?: NodeJS.ProcessEnv } = {},
+  opts: {
+    now?: Date;
+    env?: NodeJS.ProcessEnv;
+    role?: UserRole;
+    userId?: string | null;
+    /** Where the question came from (WA-02 passes 'whatsapp'). No behaviour change yet. */
+    channel?: AskChannel;
+  } = {},
 ): Promise<AskResult> {
+  const role = opts.role;
   const now = opts.now ?? new Date();
   const client = askClient(opts.env ?? process.env);
   // Burst limit on every path (offline answers run DB aggregates too).
@@ -60,22 +71,26 @@ export async function runAsk(
   else if (!(await reserveQuestion(db, restaurantId, now))) reason = 'budget';
   else counted = true;
 
+  let online: { result: AskResult; tools: string[] } | null = null;
   if (client && reason === null) {
     const today = localDay(now, await restaurantTimezone(db, restaurantId));
     try {
-      const r = await runClaude(client, question, locale, { db, restaurantId, now, locale }, today);
+      const r = await runClaude(client, question, locale, { db, restaurantId, now, locale, role }, today);
       await addClaudeSpend(db, restaurantId, { claudeCalls: r.calls, inputTokens: r.inputTokens, outputTokens: r.outputTokens }, now);
       const g = groundAnswer(r.answer, r.links, r.figures, { periods: r.periods, comparisons: r.comparisons, locale });
       const linkSet = new Set(g.citations.map((c) => c.href));
-      return {
-        mode: 'claude',
-        answer: g.answer,
-        citations: g.citations,
-        grounded: g.grounded,
-        intent: null,
-        facts: {},
-        links: r.links.filter((l) => linkSet.has(l.href)),
-        reason: null,
+      online = {
+        result: {
+          mode: 'claude',
+          answer: g.answer,
+          citations: g.citations,
+          grounded: g.grounded,
+          intent: null,
+          facts: {},
+          links: r.links.filter((l) => linkSet.has(l.href)),
+          reason: null,
+        },
+        tools: r.toolsUsed,
       };
     } catch (err) {
       // A failed leg was still billed: count what it spent.
@@ -85,9 +100,25 @@ export async function runAsk(
       reason = 'error';
     }
   }
+  if (online) {
+    // Outside the try: a failed audit insert must surface, not fall back offline inside an aborted tx.
+    await recordAnswered(db, restaurantId, opts.userId, {
+      intent: null,
+      tools: online.tools,
+      mode: 'online',
+      grounded: online.result.grounded,
+    });
+    return online.result;
+  }
 
-  const off = await offlineAnswer(db, restaurantId, question, now, locale);
+  const off = await offlineAnswer(db, restaurantId, question, now, locale, role);
   if (!counted) await recordUsage(db, restaurantId, { claudeCalls: 0, inputTokens: 0, outputTokens: 0 }, now);
+  await recordAnswered(db, restaurantId, opts.userId, {
+    intent: off.intent,
+    tools: off.intent && isOpsIntent(off.intent) ? [OPS_INTENT_TOOL[off.intent]] : [],
+    mode: 'offline',
+    grounded: true,
+  });
   return {
     mode: 'offline',
     answer: null,
@@ -98,6 +129,28 @@ export async function runAsk(
     links: off.links,
     reason,
   };
+}
+
+/** INTERIM(G-05): G-05 adds 'ask.answered' to AuditAction in its sweep; then drop the cast. */
+const ASK_ANSWERED = 'ask.answered' as unknown as AuditAction;
+
+/**
+ * KPI hook (AU-06 → AU-07): one audit_log row per answered question. Never the
+ * question text, never a ₪ figure — only which intent/tools answered and how.
+ */
+async function recordAnswered(
+  db: Database,
+  restaurantId: string,
+  userId: string | null | undefined,
+  after: { intent: CannedIntent | null; tools: string[]; mode: 'online' | 'offline'; grounded: boolean },
+): Promise<void> {
+  await recordAudit(db, {
+    restaurantId,
+    userId: userId ?? null,
+    action: ASK_ANSWERED,
+    entityType: 'ask',
+    after: { automationId: 'A11', ...after, tools: [...new Set(after.tools)] },
+  });
 }
 
 export { AskRunError } from './claude';
@@ -111,8 +164,21 @@ export {
   __resetAskBurst,
   type AskBurstLimiter,
 } from './budget';
-export { askSystemPrompt, ASK_MODEL, type AskClientLike } from './claude';
+export {
+  askSystemPrompt,
+  ASK_MODEL,
+  AnswerSchema as ASK_ANSWER_SCHEMA,
+  ANSWER_JSON_SCHEMA as ASK_ANSWER_JSON_SCHEMA,
+  runAskLoop,
+  type AskClientLike,
+  type AskLoopOptions,
+  type ClaudeAnswer,
+  type ClaudeRunResult,
+} from './claude';
 export { groundAnswer, figuresIn, periodRefusal, PERIOD_REFUSAL, type PeriodGuard } from './grounding';
 export { clip, monthKey, runTool, TOOL_DEFINITIONS } from './tools';
 export { alignedWindows, comparisonLabel, fairlyComparable, monthPeriod, spanLabel, type Period } from './periods';
 export { leakComparison, type LeakComparison } from './compare';
+export { OPS_TOOL_NAMES, type OpsToolName } from './opsTools';
+export { OPS_INTENTS, type OpsIntent } from './opsOffline';
+export { TOOL_ROLES, canUseTool, redactForRole } from './roles';

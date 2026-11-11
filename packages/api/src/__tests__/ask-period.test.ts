@@ -166,7 +166,7 @@ describe('periods on real data', () => {
       .set({ timezone: 'America/New_York' })
       .where(eq(restaurants.id, t.restaurantId));
     const now = at('2026-11-01T02:00:00Z');
-    const out = await runTool('leak_hero', {}, { db, restaurantId: t.restaurantId, now });
+    const out = await runTool('leak_hero', {}, { db, restaurantId: t.restaurantId, now, role: 'owner' });
     expect((out.data as { period: unknown }).period).toEqual({
       from: '2026-10-01',
       through: '2026-10-31',
@@ -261,7 +261,7 @@ describe('lab invariant: the fair delta on 25.10', () => {
       deltaIls: -14.35,
     });
     expect(plainLabel(String(off.facts.prevSpanLabel))).toBe('1–25 בספט׳');
-    const tool = await runTool('leak_change', {}, { db, restaurantId: rid, now, locale: 'he' });
+    const tool = await runTool('leak_change', {}, { db, restaurantId: rid, now, locale: 'he', role: 'owner' });
     expect(tool.data).toMatchObject({
       leakIls: 759.54,
       prevLeakIls: 773.89,
