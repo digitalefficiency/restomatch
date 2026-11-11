@@ -72,9 +72,11 @@ export function offlineLines(r: AskResult, t: T, locale: Locale): string[] {
     }
     case 'claimWeek': {
       const items = (f.items ?? []) as Facts[];
-      if (!f.count) return [t('answers.claimNone')];
+      // Nothing to claim only when NO basis has a line (a duplicate incl. VAT is still a claim).
+      if (!f.count && !f.otherBasisCount) return [t('answers.claimNone')];
       return [
-        t('answers.claimIntro', { total: ils(f.totalIls), count: f.count }),
+        ...(f.count ? [t('answers.claimIntro', { total: ils(f.totalIls), count: f.count })] : []),
+        ...(f.otherBasisCount ? [t('answers.claimOther', { incl: ils(f.duplicateInclVatIls), vat: ils(f.vatIls) })] : []),
         ...items.map((c) =>
           t('answers.claimItem', {
             supplier: c.supplier ?? '—',

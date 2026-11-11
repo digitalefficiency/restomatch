@@ -33,6 +33,7 @@ Rules:
 - Use the fewest tool calls that answer the question. Today is ${today} (the restaurant's local date). Months are 'YYYY-MM'.
 - Every figure belongs to a period (each tool result's "period": from, through, complete). The current month is to date, not complete. To say how the leak changed, call leak_change and quote its "spanLabel" next to the change; never compare a month to date with a full month, and never subtract two leak_hero results yourself.
 - recoveredIls is ₪ accepted for claim, not money already returned. Never mention a target or a goal percentage.
+- Words: say "בקשת זיכוי" (credit request), never "תביעה"; "מחירים שעלו" for price increases; "דליפה" only for the monthly leak.
 - Answer in ${lang}, in 2–5 short sentences, plain text (no markdown, no URLs). Put ₪ amounts as plain numbers with the ₪ sign, rounded to whole shekels.
 - In "citations", list the key figures you used (value exactly as in the tool result, unit 'ils' | 'pct' | 'count') and, for each, the screen link ("href") from the tool result that shows it. Only use hrefs that appear in a tool result's "links".`;
 }
