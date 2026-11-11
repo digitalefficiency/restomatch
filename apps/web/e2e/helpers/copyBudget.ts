@@ -3,7 +3,8 @@ import type { Page } from '@playwright/test';
 /**
  * The copy word metric in the browser (MECHANISM §5.1; same regex as lib/copy/words.ts and the
  * auditors' capture.cjs). Visible text nodes inside `main`, folds closed. Excluded: .sr-only,
- * [aria-hidden=true], [hidden], tbody, [data-record] (data rows/cards), [data-copy-exempt].
+ * [aria-hidden=true], [hidden], [data-copy-exempt], and data (tbody/tr/li, ARIA rows and list items,
+ * article cards, [data-record]/[data-row]) so the count does not depend on seed rows or spec order.
  */
 export interface CopyMeasure {
   /** Words whose text box starts above innerHeight at load. */
@@ -22,7 +23,10 @@ export async function measureCopy(page: Page): Promise<CopyMeasure> {
   return page.evaluate(() => {
     const WORD = /[A-Za-zא-ת][A-Za-zא-ת'"׳״\-]*/g;
     const count = (s: string) => (s.match(WORD) ?? []).length;
-    const EXCLUDE = '.sr-only, [aria-hidden="true"], [hidden], tbody, [data-record], [data-copy-exempt], script, style, noscript, template';
+    // Data, not copy: rows, list items and cards depend on the seed and on rows earlier specs left
+    // behind, so they never count (the budget measures the page's own chrome + explanations).
+    const DATA = 'tbody, tr, li, [role="row"], [role="listitem"], [role="gridcell"], article, [data-record], [data-row]';
+    const EXCLUDE = `.sr-only, [aria-hidden="true"], [hidden], [data-copy-exempt], script, style, noscript, template, ${DATA}`;
     const BLOCK = 'p, li, h1, h2, h3, h4, h5, h6, dd, dt, label, figcaption, blockquote, td, th, div, span';
     const main = document.querySelector('main') ?? document.body;
     let first = 0;
