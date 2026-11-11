@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   and,
@@ -150,6 +153,30 @@ describe('approval alert = the ?invoice= queue (Train C B1)', () => {
   });
 });
 
+describe('R4-1: nothing open on the invoice → no alert at all', () => {
+  it('only an auto-approved row and the ₪0 twin: invoiceAlert counts 0, as the queue does', async () => {
+    const t = await tenant(`r41-${Date.now()}`);
+    const id = await invoiceWith(t, [
+      { type: 'PRICE_HIGHER', severity: 'warn', delta: '10.00', status: 'accepted' },
+      { type: 'QTY_SHORT', severity: 'warn', delta: '0' },
+    ]);
+    const a = await invoiceAlert(db, t.restaurantId, id);
+    expect(a.count).toBe(0);
+    expect(await queueCount(t, id)).toBe(0);
+    expect(a.figure).toBeNull();
+  });
+
+  it('the push / WhatsApp / e-mail block runs only when the alert counts > 0 (never "0 פערים")', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const src = readFileSync(join(here, '..', 'jobs', 'matchInvoice.ts'), 'utf8');
+    const gate = src.indexOf('if (alert && alert.count > 0) {');
+    expect(gate).toBeGreaterThan(0);
+    for (const send of ['push.send(', 'whatsapp.send(', 'approvalNeededEmail(']) {
+      expect(src.indexOf(send), send).toBeGreaterThan(gate);
+    }
+  });
+});
+
 describe('end-of-day digest (Train C B2)', () => {
   const eod = (restaurantId: string) =>
     processEndOfDayReport({ id: `eod-${restaurantId}`, name: 'end-of-day-report', data: { restaurantId }, attemptsMade: 0, opts: { attempts: 1 } });
@@ -179,10 +206,31 @@ describe('end-of-day digest (Train C B2)', () => {
     expect(rows[0]!.subject).not.toContain(formatIlsAgorot(0, { maximumFractionDigits: 0 }));
   });
 
-  it('openCreditsFigure: each VAT basis on its own, ₪0 only when all are zero', () => {
+  it('openCreditsFigure: each VAT basis on its own, null (never ₪0) when all are zero', () => {
     const f = (a: number) => formatIlsAgorot(a, { maximumFractionDigits: 0 });
     expect(openCreditsFigure({ excl: 100, incl: 0, vat: 0 })).toBe(f(10_000));
     expect(openCreditsFigure({ excl: 0, incl: 1170, vat: 50 })).toBe(`${f(117_000)} כולל מע״מ (חשבוניות כפולות) + ${f(5000)} מע״מ (הפרשי מע״מ)`);
-    expect(openCreditsFigure(null)).toBe(f(0));
+    expect(openCreditsFigure(null)).toBeNull();
+    expect(openCreditsFigure({ excl: 0, incl: 0, vat: 0 })).toBeNull();
+  });
+
+  it('R4-2: claimables only on invoices waiting for an order link → no ₪0 anywhere, a pending-link count instead', async () => {
+    process.env.DATABASE_URL = testDbUrl();
+    const t = await tenant(`r42-${Date.now()}`);
+    await invoiceWith(t, [
+      { type: 'UNORDERED_ARRIVAL', severity: 'warn', delta: '1180.00' },
+      { type: 'PRICE_HIGHER', severity: 'warn', delta: '25.00' },
+    ]);
+    await eod(t.restaurantId);
+    const rows = await digests(t.restaurantId);
+    expect(rows.length).toBeGreaterThan(0);
+    const zero = formatIlsAgorot(0, { maximumFractionDigits: 0 });
+    for (const r of rows) {
+      for (const s of [r.subject ?? '', r.body, r.html ?? '']) {
+        expect(s).not.toContain(zero);
+        expect(s).not.toMatch(/\(\s*‏?0\s*‏?₪\s*\)|\(₪0\)/);
+      }
+      expect(r.body).toContain('ממתינות לקישור להזמנה');
+    }
   });
 });

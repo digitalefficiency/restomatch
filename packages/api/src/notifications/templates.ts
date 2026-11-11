@@ -461,10 +461,13 @@ function statRow(label: string, valueHtml: string, locale: EmailLocale = 'he'): 
 export function endOfDayReportEmail(args: {
   dateLabel: string; // e.g. "21.6.2026"
   openCreditsCount: number; // open/escalated discrepancies awaiting recovery
-  openCreditsIls: string; // formatted ₪ owed back / at risk
+  /** Formatted ₪ owed back; null when there is no ₪ to name (never '(₪0)', W2-04 R4-2). */
+  openCreditsIls: string | null;
   todayCaughtCount: number; // discrepancies detected today
   todayCaughtIls: string; // formatted ₪ flagged today
   pendingApprovals?: number; // items waiting for a manager decision
+  /** Invoices whose claimable rows still wait for an order link: a count, never ₪ (W2-04 R4-2). */
+  pendingLinkCount?: number;
   topSupplier?: string; // supplier with the most open credits
   approvalsUrl?: string;
   locale?: EmailLocale;
@@ -474,12 +477,16 @@ export function endOfDayReportEmail(args: {
   const nf = new Intl.NumberFormat(l === 'en' ? 'en-GB' : 'he-IL');
   const vars = {
     count: args.openCreditsCount,
-    amount: args.openCreditsIls,
+    amount: args.openCreditsIls ?? '',
     caught: args.todayCaughtCount,
     date: args.dateLabel,
   };
+  const pendingLink = args.pendingLinkCount ?? 0;
   const rows = [
-    statRow(c.openLabel, `${ilsSpan(args.openCreditsIls, 'danger')} · ${nf.format(args.openCreditsCount)}`, l),
+    args.openCreditsIls != null
+      ? statRow(c.openLabel, `${ilsSpan(args.openCreditsIls, 'danger')} · ${nf.format(args.openCreditsCount)}`, l)
+      : '',
+    pendingLink > 0 ? statRow(c.pendingLinkLabel, `<strong>${nf.format(pendingLink)}</strong>`, l) : '',
     statRow(c.caughtLabel, `${ilsSpan(args.todayCaughtIls, 'gold')} · ${nf.format(args.todayCaughtCount)}`, l),
     args.pendingApprovals != null
       ? statRow(c.pendingLabel, `<strong>${nf.format(args.pendingApprovals)}</strong>`, l)
@@ -490,7 +497,7 @@ export function endOfDayReportEmail(args: {
   const html = renderEmail({
     locale: l,
     accent: args.openCreditsCount > 0 ? COLORS.danger : COLORS.gold,
-    preview: txt(l, c.preview, vars),
+    preview: txt(l, args.openCreditsIls != null ? c.preview : c.subjectNoAmount, vars),
     heading: txt(l, c.heading, vars),
     bodyHtml: `
       <p style="margin:0 0 8px">${htm(l, c.intro)}</p>
@@ -506,13 +513,15 @@ export function endOfDayReportEmail(args: {
   const text = lines(
     txt(l, c.heading, vars),
     '',
-    `${c.openLabel}: ${txt(l, '{amount}', { amount: args.openCreditsIls })} (${nf.format(args.openCreditsCount)})`,
+    args.openCreditsIls != null &&
+      `${c.openLabel}: ${txt(l, '{amount}', { amount: args.openCreditsIls })} (${nf.format(args.openCreditsCount)})`,
+    pendingLink > 0 && `${c.pendingLinkLabel}: ${nf.format(pendingLink)}`,
     `${c.caughtLabel}: ${txt(l, '{amount}', { amount: args.todayCaughtIls })} (${nf.format(args.todayCaughtCount)})`,
     args.pendingApprovals != null && `${c.pendingLabel}: ${nf.format(args.pendingApprovals)}`,
     args.topSupplier && `${c.topLabel}: ${txt(l, '{s}', { s: args.topSupplier })}`,
     args.approvalsUrl && `\n${c.cta}: ${args.approvalsUrl}`,
   );
-  return { subject: txt(l, c.subject, vars), html, text };
+  return { subject: txt(l, args.openCreditsIls != null ? c.subject : c.subjectNoAmount, vars), html, text };
 }
 
 /* ─────────────────────── invoice could not be read (G-06) ───────── */

@@ -117,16 +117,16 @@ export function legacyEodKey(restaurantId: string, startOfReportDay: Date, email
 
 /**
  * The open-credits ₪ of the digest, per VAT basis (never summed): before VAT,
- * a duplicate invoice's incl.-VAT claim, a VAT amount. "₪0" only when all are zero.
+ * a duplicate invoice's incl.-VAT claim, a VAT amount. Null when all are zero (never "₪0").
  */
-export function openCreditsFigure(ils: { excl: number; incl: number; vat: number } | null): string {
+export function openCreditsFigure(ils: { excl: number; incl: number; vat: number } | null): string | null {
   const ag = (v: number | undefined) => Math.round((v ?? 0) * 100);
   const f = (a: number) => formatIlsAgorot(a, { maximumFractionDigits: 0 });
   const parts: string[] = [];
   if (ag(ils?.excl) > 0) parts.push(f(ag(ils?.excl)));
   if (ag(ils?.incl) > 0) parts.push(`${f(ag(ils?.incl))} כולל מע״מ (חשבוניות כפולות)`);
   if (ag(ils?.vat) > 0) parts.push(`${f(ag(ils?.vat))} מע״מ (הפרשי מע״מ)`);
-  return parts.length ? parts.join(' + ') : f(0);
+  return parts.length ? parts.join(' + ') : null;
 }
 
 /** The end-of-day-report job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
@@ -156,7 +156,12 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
     );
     // Caught today: the hero's LEAK_FILTER, capped per invoice (money review G).
     const { todayCount, todayIls } = await endOfDayFigures(db, restaurant.id, startToday, endOfDay);
-    const openCount = awaiting.toDecide.count;
+    // Credits are claimable ₪; rows on invoices still waiting for an order link
+    // have no ₪ yet (R4-2): with no ₪ there is no credit count, only the
+    // pending-link line — never '(₪0)'.
+    const openFigure = openCreditsFigure(awaiting.ils);
+    const openCount = openFigure != null ? awaiting.toDecide.count : 0;
+    // TODO(W2-04): exclude pending-link rows from the count when an invoice mix has both (needs a row-level flag in awaitingDecision).
 
     // Quiet day → skip (no open credits, nothing caught today). Review-only rows
     // (no ₪) never make a digest on their own (Train C B2).
@@ -175,7 +180,8 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
       dateLabel: formatIlDate(startToday).split(',')[0]?.trim() ?? todayKey,
       openCreditsCount: openCount,
       // Each VAT basis as its own labelled figure, never summed (warden MEDIUM-1, Train C B2).
-      openCreditsIls: openCreditsFigure(awaiting.ils),
+      openCreditsIls: openFigure,
+      pendingLinkCount: awaiting.pendingLink.count,
       todayCaughtCount: todayCount,
       todayCaughtIls: formatIlsAmount(todayIls),
       pendingApprovals: awaiting.count,
