@@ -463,6 +463,8 @@ export function holdReasonsOf(h: HoldInputs): HoldReason[] {
 }
 
 export interface PayRunRow extends PayRunInvoice {
+  /** The invoice's DB status — the client sends it back as `expectedStatus` (stale ⇒ CONFLICT). */
+  invoiceStatus: string;
   supplierKey: string;
   supplierName: string | null;
   supplierNameEn: string | null;
@@ -567,6 +569,9 @@ async function assertOwnInvoices(
   const found = new Map(rowsOf(res).map((r) => [String(r.id), String(r.status)]));
   if (found.size !== uniq.length)
     throw new TRPCError({ code: 'NOT_FOUND', message: 'payRun.invoiceNotFound' });
+  // Same gate as list / month: the pay run must be on for this restaurant (checked after
+  // ownership, so a foreign id never learns anything from the flag).
+  if (!(await flagOn(db, rid))) throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'payRun.disabled' });
   return found;
 }
 
@@ -794,6 +799,7 @@ export const payRunRouter = router({
         });
         return {
           ...inv,
+          invoiceStatus: String(row.inv_status ?? ''),
           supplierKey: row.supplier_id == null ? '' : String(row.supplier_id),
           supplierName: row.supplier_name == null ? null : String(row.supplier_name),
           supplierNameEn: row.supplier_name_en == null ? null : String(row.supplier_name_en),
