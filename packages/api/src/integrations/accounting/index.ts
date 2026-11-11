@@ -1,7 +1,8 @@
 import { hashavshevetFile } from './hashavshevet';
 import { priorityFile } from './priority';
 import { rivhitFile } from './rivhit';
-import type { AccountingConfig, AccountingFile, AccountingFormat, AccountingInvoice } from './types';
+import { supplierAccountOrNull } from './common';
+import type { AccountingConfig, AccountingFile, AccountingFormat, AccountingInvoice, RenderedFile } from './types';
 
 export * from './types';
 export { numericToAgorot, agorotToPlain } from './common';
@@ -12,7 +13,7 @@ export { RIVHIT_HEADERS } from './rivhit';
 
 const RENDERERS: Record<
   AccountingFormat,
-  (inv: AccountingInvoice[], cfg: AccountingConfig, period: { from: string; to: string }) => AccountingFile
+  (inv: AccountingInvoice[], cfg: AccountingConfig, period: { from: string; to: string }) => RenderedFile
 > = {
   hashavshevet: hashavshevetFile,
   priority: priorityFile,
@@ -25,5 +26,7 @@ export function renderAccountingFile(
   cfg: AccountingConfig,
   period: { from: string; to: string },
 ): AccountingFile {
-  return RENDERERS[format](invoices, cfg, period);
+  // Only invoices whose supplier has a real card code are written (no invented codes).
+  const mapped = invoices.filter((inv) => supplierAccountOrNull(inv, cfg) !== null);
+  return { ...RENDERERS[format](mapped, cfg, period), unmappedCount: invoices.length - mapped.length };
 }

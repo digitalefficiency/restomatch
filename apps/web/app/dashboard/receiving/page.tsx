@@ -55,7 +55,17 @@ export default async function ReceivingPage({
   return (
     <div>
       {features.includes('receiverPwa') && session?.user?.restaurantId && session.user.id ? (
-        <ReceiverPwa restaurantId={session.user.restaurantId} userId={session.user.id} />
+        <ReceiverPwa
+          restaurantId={session.user.restaurantId}
+          userId={session.user.id}
+          // Offline shell (W2-05): the board and every still-open delivery stay readable with zero bars.
+          snapshotPaths={[
+            '/dashboard/receiving',
+            ...expectations
+              .filter((r) => r.receiptStatus === null || r.receiptStatus === 'pending')
+              .map((r) => `/dashboard/receiving/${r.poId}`),
+          ]}
+        />
       ) : null}
       <SectionHeader level={1} title={t('inbox.title')} subtitle={t('inbox.subtitle')} />
 

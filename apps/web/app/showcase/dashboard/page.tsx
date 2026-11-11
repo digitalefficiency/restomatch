@@ -7,15 +7,10 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock,
-  FileCheck2,
   ShieldAlert,
-  TrendingDown,
-  TrendingUp,
-  Wallet,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useLocale, useT } from '@/lib/i18n/client';
-import { formatNumber } from '@/lib/i18n/format';
 import { formatIls } from '@/lib/money';
 import { showcase } from '@/lib/i18n/messages/showcase';
 import { mockText } from '../_lib/mockText';
@@ -23,43 +18,7 @@ import { supplierProfiles } from './suppliers/[supplierId]/_mock';
 import { dayMemo, invoiceAudits } from './invoices/_mock';
 import { MOCK_SUPPLIERS } from '../receiver/_mock';
 import { SAMPLE_CAUGHT_THIS_MONTH_ILS, ShowcaseEndCard } from '../_components/ShowcaseEndCard';
-
-interface Kpi {
-  id: 'leak' | 'saved' | 'pending';
-  value: number;
-  /** ₪ amount — rendered through formatIls() (never a literal ₪ prefix). */
-  money?: boolean;
-  suffix?: string;
-  delta: number;
-  tone: 'warn' | 'good' | 'neutral';
-  icon: React.ReactNode;
-}
-
-const KPIS: Kpi[] = [
-  {
-    id: 'leak',
-    value: 4820,
-    money: true,
-    delta: 12,
-    tone: 'warn',
-    icon: <AlertCircle className="w-5 h-5" />,
-  },
-  {
-    id: 'saved',
-    value: SAMPLE_CAUGHT_THIS_MONTH_ILS,
-    money: true,
-    delta: 34,
-    tone: 'good',
-    icon: <Wallet className="w-5 h-5" />,
-  },
-  {
-    id: 'pending',
-    value: 7,
-    delta: -2,
-    tone: 'neutral',
-    icon: <FileCheck2 className="w-5 h-5" />,
-  },
-];
+import { SampleOwnerHome } from './_components/SampleOwnerHome';
 
 interface HeatCell {
   /** Current price vs the supplier's own 60-day average (0.21 = +21%). */
@@ -198,7 +157,7 @@ export default function DashboardShowcase() {
       </div>
 
       <div className="section-block">
-        <KpiRow />
+        <SampleOwnerHome />
       </div>
 
       <div className="section-block grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -213,118 +172,6 @@ export default function DashboardShowcase() {
       </div>
       <ShowcaseEndCard kind="dashboard" amountIls={SAMPLE_CAUGHT_THIS_MONTH_ILS} />
     </main>
-  );
-}
-
-function KpiRow() {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      {KPIS.map((k) => (
-        <KpiCard key={k.id} kpi={k} />
-      ))}
-    </div>
-  );
-}
-
-
-function KpiCard({ kpi }: { kpi: Kpi }) {
-  const t = useT(showcase);
-  const locale = useLocale();
-  const cardRef = useRef<HTMLDivElement>(null);
-  const numberRef = useRef<HTMLSpanElement>(null);
-
-  useGSAP(
-    () => {
-      if (!numberRef.current) return;
-      // Reduced motion: no count-up — the server-rendered text is already the final value.
-      return whenMotionOk(() => {
-        const obj = { value: 0 };
-        gsap.to(obj, {
-          value: kpi.value,
-          duration: 1.6,
-          ease: 'power2.out',
-          onUpdate: () => {
-            if (numberRef.current) {
-              numberRef.current.textContent = kpi.money
-                ? formatIls(Math.round(obj.value), { locale })
-                : formatNumber(Math.round(obj.value), locale);
-            }
-          },
-        });
-      });
-    },
-    { scope: cardRef },
-  );
-
-  const tones = {
-    good: {
-      icon: 'text-gold bg-gold/12 ring-gold/25',
-      glow: 'glow-gold-blob',
-      number: 'text-gold',
-    },
-    warn: {
-      icon: 'text-danger bg-danger/12 ring-danger/25',
-      glow: 'glow-danger-blob',
-      number: 'text-danger',
-    },
-    neutral: {
-      icon: 'text-primary bg-primary/12 ring-primary/25',
-      glow: 'glow-primary-blob',
-      number: 'text-ink',
-    },
-  } as const;
-  const tone = tones[kpi.tone];
-
-  const deltaPositive = kpi.delta >= 0;
-  // good metric: up = green; warn metric (loss): up = danger; neutral (queue): up = danger.
-  const deltaColor =
-    kpi.tone === 'good'
-      ? 'text-primary'
-      : kpi.tone === 'warn'
-        ? 'text-danger'
-        : deltaPositive
-          ? 'text-danger'
-          : 'text-primary';
-
-  return (
-    <div
-      ref={cardRef}
-      className="relative rounded-2xl border border-line bg-surface p-6 overflow-hidden shadow-card"
-    >
-      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px flow-stream" />
-      <div className="flex items-start justify-between mb-4">
-        <div
-          className={`w-10 h-10 rounded-xl flex items-center justify-center ring-1 ${tone.icon}`}
-        >
-          {kpi.icon}
-        </div>
-        <div className={`flex items-center gap-1 text-xs font-semibold ${deltaColor}`}>
-          {deltaPositive ? (
-            <TrendingUp className="w-3 h-3" />
-          ) : (
-            <TrendingDown className="w-3 h-3" />
-          )}
-          <span className="font-mono tabular-nums">
-            {kpi.delta > 0 ? '+' : ''}
-            {kpi.delta}%
-          </span>
-        </div>
-      </div>
-
-      <div className="text-xs ltr:uppercase ltr:tracking-wider text-muted font-semibold mb-2">
-        {t(`dashboard.kpi.${kpi.id}`)}
-      </div>
-      <div className="font-mono text-3xl font-extrabold tabular-nums tracking-tight flex items-baseline gap-1">
-        <span ref={numberRef} className={tone.number}>
-          {kpi.money ? formatIls(kpi.value, { locale }) : formatNumber(kpi.value, locale)}
-        </span>
-        {kpi.suffix ? <span className={`text-2xl ${tone.number} opacity-70`}>{kpi.suffix}</span> : null}
-      </div>
-
-      <div
-        className={`pointer-events-none absolute -bottom-12 -start-12 w-48 h-48 rounded-full blur-2xl opacity-70 ${tone.glow}`}
-      />
-    </div>
   );
 }
 

@@ -131,5 +131,5 @@ export const en: Shape<typeof he> = {
     product: 'Product',
   },
   range: '{from} – {to}',
-  filteredNote: 'This view is filtered — the numbers cover the filter only.',
+  filteredNote: 'Showing the filtered view',
 };
