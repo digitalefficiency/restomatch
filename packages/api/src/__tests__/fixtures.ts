@@ -1,4 +1,8 @@
 import {
+  wasteEntries,
+  paymentInvoices,
+  payments,
+  supplierStatements,
   claimLetters,
   idempotencyKeys,
   paymentDeductions,
@@ -48,6 +52,25 @@ import {
   type FeatureKey,
   type SubscriptionOverrides,
 } from '@restomatch/db';
+import { atLocalTimeInTz } from '../lib/time';
+import { restaurantTodayAt } from './helpers/il-day';
+
+/** 'YYYY-MM' of the ISRAEL calendar month of `now` (what "this month" means to the app). */
+export function israelMonth(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' }).format(now).slice(0, 7);
+}
+
+/**
+ * `hour`:00 on TODAY'S ISRAEL calendar day (Asia/Jerusalem — the zone the app
+ * computes "today" / "this month" in). `new Date().setHours(h)` used the
+ * process's zone (UTC in CI): between 22:00 and 24:00 UTC that is yesterday in
+ * Israel, and on the last day of a month last month — seeded rows fell out of
+ * "today" / "this month" and ~47 api tests went red every night.
+ */
+export function israelToday(hour: number, now: Date = new Date()): Date {
+  // The app's own DST-safe wall-clock helper (lib/time): correct on the DST days too.
+  return atLocalTimeInTz(now, 'Asia/Jerusalem', hour, 0);
+}
 
 /** A fully-populated tenant graph for isolation/attack tests. */
 export interface Tenant {
@@ -86,6 +109,11 @@ export async function resetDb(db: Database): Promise<void> {
   await db.delete(supplierBankAccountChanges);
   await db.delete(supplierBankAccounts);
   await db.delete(notificationSettings);
+  // 0073 addendum (H-04 / W3-11): payments block invoice + supplier deletes and
+  // statements block supplier deletes (NO ACTION) — clear them before both.
+  await db.delete(paymentInvoices);
+  await db.delete(payments);
+  await db.delete(supplierStatements);
   // Wave 1 (S12): claims block discrepancy deletes (0048, NO ACTION) — clear them first.
   await db.delete(recoveryEvents);
   await db.delete(recoveryClaims);
@@ -106,6 +134,8 @@ export async function resetDb(db: Database): Promise<void> {
   // inventory_count_lines → products is ON DELETE RESTRICT (0070): counts go first.
   await db.delete(inventoryCountLines);
   await db.delete(inventoryCounts);
+  // 0073 (H-04): waste blocks product and recipe deletes (NO ACTION) — clear it first.
+  await db.delete(wasteEntries);
   // recipe_items → products is ON DELETE RESTRICT (0057): recipes go first.
   await db.delete(recipeItems);
   await db.delete(recipes);
@@ -227,8 +257,9 @@ export async function seedTenant(db: Database, tag: string): Promise<Tenant> {
     .returning();
   if (!productAlias) throw new Error('seed: productAlias');
 
-  const today = new Date();
-  today.setHours(11, 0, 0, 0);
+  // 11:00 on the restaurant's (Israeli) day — the day receiving.todayExpectations
+  // reads — never the runner's local day (see helpers/il-day.ts).
+  const today = restaurantTodayAt(11);
   const [po] = await db
     .insert(purchaseOrders)
     .values({
@@ -245,6 +276,9 @@ export async function seedTenant(db: Database, tag: string): Promise<Tenant> {
     .insert(poLines)
     .values({
       poId: po.id,
+      // G-08: an order line carries its product — a name-only line is an open
+      // "זה אותו מוצר?" question that (rightly) holds a first match.
+      productId: product.id,
       rawDescription: `עגבניות ${tag}`,
       qtyOrdered: '10',
       unit: 'kg',

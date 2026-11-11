@@ -483,6 +483,12 @@ export const suppliers = pgTable(
     minOrderIls: numeric('min_order_ils', { precision: 12, scale: 2 }),
     /** Delivery fee, shekels (0072, H-03; CHECK >= 0). NULL = none known. */
     deliveryFeeIls: numeric('delivery_fee_ils', { precision: 12, scale: 2 }),
+    /**
+     * 'per_delivery' (a tax invoice with each delivery) | 'consolidated' (delivery
+     * notes, one monthly invoice) (0073, H-04; CHECK in 0073). NULL = unknown (the
+     * capture chip's default). Never backfilled.
+     */
+    billingMode: varchar('billing_mode', { length: 16 }).$type<SupplierBillingMode>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -496,6 +502,9 @@ export const suppliers = pgTable(
     ),
   ],
 );
+
+export const SUPPLIER_BILLING_MODES = ['per_delivery', 'consolidated'] as const;
+export type SupplierBillingMode = (typeof SUPPLIER_BILLING_MODES)[number];
 
 export type DeliverySchedule = Partial<
   Record<'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat', string[]>
@@ -571,6 +580,8 @@ export const products = pgTable(
     category: text('category'),
     defaultUnit: varchar('default_unit', { length: 32 }),
     barcodeEan: varchar('barcode_ean', { length: 32 }),
+    /** Shelf / walk order on a stock count (0073, H-04). NULL = name order. */
+    countSort: integer('count_sort'),
     embedding: vector('embedding', { dimensions: 1536 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -748,16 +759,23 @@ export const purchaseOrders = pgTable(
     kind: varchar('kind', { length: 16 }).$type<PoKind>().notNull().default('standard'),
     /** The order number as printed / sent to the supplier (0071, G-03). */
     poNumber: varchar('po_number', { length: 64 }),
+    /** The first time the supplier opened the order link (0073, H-04). */
+    openedAt: timestamp('opened_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('po_restaurant_delivery_idx').on(t.restaurantId, t.expectedDeliveryAt),
     index('po_supplier_idx').on(t.supplierId),
+    // 0073 (H-04 / W3-04 audit): backs the same-tenant composite FK (supplier_id, restaurant_id).
+    index('purchase_orders_supplier_restaurant_idx').on(t.supplierId, t.restaurantId),
     // I5 (0029): a platform order id is unique per restaurant, not globally.
     uniqueIndex('po_restaurant_source_ref_unique').on(t.restaurantId, t.sourcePlatform, t.sourceRef),
   ],
 );
+
+export const PO_LINE_REVISION_SOURCES = ['supplier_confirm', 'manual'] as const;
+export type PoLineRevisionSource = (typeof PO_LINE_REVISION_SOURCES)[number];
 
 export const poLines = pgTable(
   'po_lines',
@@ -783,9 +801,21 @@ export const poLines = pgTable(
     notes: text('notes'),
     /** Printed line order, 1-based (0072, H-03; CHECK >= 1). NULL on lines before 0072. */
     lineNo: integer('line_no'),
+    /**
+     * The accepted REVISED expectation (0073, H-04): the supplier's change or a
+     * manual one. qtyOrdered / unitPriceExpected stay the original for audit.
+     * revisedAt is set exactly when a revised value is, and revisionSource with it
+     * (po_lines_revised_pair_check). Shekels, like unitPriceExpected.
+     */
+    qtyRevised: numeric('qty_revised', { precision: 12, scale: 3 }),
+    unitPriceRevised: numeric('unit_price_revised', { precision: 12, scale: 4 }),
+    revisedAt: timestamp('revised_at', { withTimezone: true }),
+    revisedBy: uuid('revised_by').references(() => users.id, { onDelete: 'set null' }),
+    revisionSource: varchar('revision_source', { length: 16 }).$type<PoLineRevisionSource>(),
   },
   (t) => [
     index('po_lines_po_idx').on(t.poId),
+    index('po_lines_revised_by_idx').on(t.revisedBy),
     index('po_lines_product_idx').on(t.productId),
     index('po_lines_po_line_no_idx').on(t.poId, t.lineNo),
   ],
@@ -1220,6 +1250,13 @@ export const priceBaselines = pgTable(
  * mirrors the columns. Money is integer agorot (menuPriceAgorot).
  * ────────────────────────────────────────────────────────────────────────── */
 
+/** The 14 allergen keys a recipe card may carry (recipes_allergens_check in 0073). */
+export const RECIPE_ALLERGENS = [
+  'gluten', 'crustaceans', 'eggs', 'fish', 'peanuts', 'soy', 'milk',
+  'tree_nuts', 'celery', 'mustard', 'sesame', 'sulphites', 'lupin', 'molluscs',
+] as const;
+export type RecipeAllergen = (typeof RECIPE_ALLERGENS)[number];
+
 export const recipes = pgTable(
   'recipes',
   {
@@ -1239,6 +1276,11 @@ export const recipes = pgTable(
     menuPriceIncludesVat: boolean('menu_price_includes_vat').notNull().default(true),
     active: boolean('active').notNull().default(true),
     notes: text('notes'),
+    /** Kitchen card (0073, H-04): method, plating, a storage photo key (never a URL), allergen keys. */
+    method: text('method'),
+    plating: text('plating'),
+    photoKey: text('photo_key'),
+    allergens: text('allergens').array().$type<RecipeAllergen[]>().notNull().default(sql`'{}'::text[]`),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1289,7 +1331,10 @@ export const inventoryCounts = pgTable(
       .references(() => restaurants.id, { onDelete: 'cascade' }),
     /** Local calendar date of the count (YYYY-MM-DD). */
     countDate: date('count_date', { mode: 'string' }).notNull(),
-    /** 'draft' | 'completed' (CHECK in 0070; one draft per restaurant). */
+    /**
+     * 'draft' | 'submitted' | 'completed' (CHECK in 0070, widened in 0073 / H-04;
+     * one OPEN — draft or submitted — count per restaurant).
+     */
     status: varchar('status', { length: 16 }).notNull().default('draft'),
     countedBy: uuid('counted_by').references(() => users.id, { onDelete: 'set null' }),
     notes: text('notes'),
@@ -1298,11 +1343,18 @@ export const inventoryCounts = pgTable(
     /** Snapshot at completion: Σ priced line values, integer agorot. */
     totalValueAgorot: bigint('total_value_agorot', { mode: 'number' }),
     completedAt: timestamp('completed_at', { withTimezone: true }),
+    /** Handed to a closer by the counter (0073, H-04; set whenever status = 'submitted'). */
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    submittedBy: uuid('submitted_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex('inventory_counts_one_draft_idx').on(t.restaurantId).where(sql`${t.status} = 'draft'`),
+    uniqueIndex('inventory_counts_one_open_idx')
+      .on(t.restaurantId)
+      .where(sql`${t.status} IN ('draft', 'submitted')`),
+    index('inventory_counts_submitted_by_idx').on(t.submittedBy),
     index('inventory_counts_restaurant_date_idx').on(t.restaurantId, t.countDate),
     index('inventory_counts_counted_by_idx').on(t.countedBy),
   ],
@@ -1315,6 +1367,12 @@ export interface InventoryPriceSource {
   invoiceNumber: string | null;
   invoiceDate: string | null;
   supplierName: string | null;
+}
+
+/** One part of a multi-unit count entry ("2 ארגזים" of "2 ארגזים + 5 יח׳"). */
+export interface InventoryQtyPart {
+  unit: string;
+  qty: number;
 }
 
 /** One product on a count. qty NULL = not counted yet; unit_cost/value_agorot/price_source = completion snapshot. */
@@ -1336,6 +1394,8 @@ export const inventoryCountLines = pgTable(
     valueAgorot: bigint('value_agorot', { mode: 'number' }),
     /** Where the snapshot price came from (frozen at completion). */
     priceSource: jsonb('price_source').$type<InventoryPriceSource | null>(),
+    /** How qty was entered, e.g. 2 cases + 5 units (0073, H-04). Evidence only: qty stays the total. */
+    qtyParts: jsonb('qty_parts').$type<InventoryQtyPart[] | null>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1501,6 +1561,9 @@ export const ingestMessages = pgTable(
   ],
 );
 
+export const INGEST_DOC_TYPES = ['invoice', 'credit_note', 'delivery_note', 'statement', 'other'] as const;
+export type IngestDocType = (typeof INGEST_DOC_TYPES)[number];
+
 export const ingestDocuments = pgTable(
   'ingest_documents',
   {
@@ -1518,11 +1581,14 @@ export const ingestDocuments = pgTable(
     // Composite same-tenant FK (invoice_id, restaurant_id) → invoices — migration 0050.
     invoiceId: uuid('invoice_id'),
     status: varchar('status', { length: 16 }).$type<IngestDocumentStatus>().notNull(),
+    /** What the file is (0073 addendum 1, W3-11; CHECK in 0073). NULL = not yet classified. */
+    docType: varchar('doc_type', { length: 16 }).$type<IngestDocType>(),
     error: text('error'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    unique('ingest_documents_id_restaurant_id_key').on(t.id, t.restaurantId),
     index('ingest_documents_message_idx').on(t.messageId, t.restaurantId),
     index('ingest_documents_restaurant_sha_idx').on(t.restaurantId, t.sha256),
   ],
@@ -2653,6 +2719,8 @@ export const consolidatedInvoiceLinks = pgTable(
     unique('consolidated_invoice_links_invoice_gr_key').on(t.invoiceId, t.goodsReceiptId),
     index('consolidated_invoice_links_invoice_idx').on(t.invoiceId, t.restaurantId),
     index('consolidated_invoice_links_gr_idx').on(t.goodsReceiptId, t.restaurantId),
+    // 0073 (H-04 / W3-11): a receipt sits under at most one consolidated invoice.
+    uniqueIndex('consolidated_invoice_links_gr_unique').on(t.goodsReceiptId),
     index('consolidated_invoice_links_linked_by_idx').on(t.linkedBy),
     index('consolidated_invoice_links_restaurant_idx').on(t.restaurantId, t.linkedAt),
   ],
@@ -2866,3 +2934,263 @@ export type SupplierBankAccountChange = typeof supplierBankAccountChanges.$infer
 export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;
 export type NotificationPref = typeof notificationPrefs.$inferSelect;
 export type NotificationSetting = typeof notificationSettings.$inferSelect;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Schema batch B (wave 3, H-04, migration 0073): server-side saved views +
+ * subscriptions, count units, waste log, bell "seen" state. All five are tenant
+ * tables: restaurant_id NOT NULL, UNIQUE (id, restaurant_id), RLS
+ * `<table>_tenant` (0073 + rls/0002). The same-tenant composite FKs and CHECKs
+ * live in 0073's SQL; Drizzle mirrors the columns.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const SAVED_VIEW_SCOPES = ['personal', 'restaurant'] as const;
+export type SavedViewScope = (typeof SAVED_VIEW_SCOPES)[number];
+
+/** A server-side table view: personal (userId set) or the whole team's, maybe a role's default. */
+export const savedViews = pgTable(
+  'saved_views',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    page: varchar('page', { length: 64 }).notNull(),
+    name: varchar('name', { length: 80 }).notNull(),
+    query: jsonb('query').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    scope: varchar('scope', { length: 16 }).$type<SavedViewScope>().notNull().default('personal'),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    roleDefault: varchar('role_default', { length: 16 }).$type<(typeof userRole.enumValues)[number]>(),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('saved_views_id_restaurant_id_key').on(t.id, t.restaurantId),
+    index('saved_views_restaurant_page_idx').on(t.restaurantId, t.page),
+    index('saved_views_user_idx').on(t.userId),
+    index('saved_views_created_by_idx').on(t.createdBy),
+    uniqueIndex('saved_views_role_default_unique')
+      .on(t.restaurantId, t.page, t.roleDefault)
+      .where(sql`${t.roleDefault} IS NOT NULL`),
+  ],
+);
+
+export const VIEW_SUBSCRIPTION_CADENCES = ['daily', 'weekly', 'monthly'] as const;
+export type ViewSubscriptionCadence = (typeof VIEW_SUBSCRIPTION_CADENCES)[number];
+
+/** A member receives a saved view on a cadence (H-05 delivers). weekday 0 = Sunday. */
+export const viewSubscriptions = pgTable(
+  'view_subscriptions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FK in 0073: (view_id, restaurant_id) → saved_views, cascade.
+    viewId: uuid('view_id').notNull(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    cadence: varchar('cadence', { length: 16 }).$type<ViewSubscriptionCadence>().notNull(),
+    sendHour: smallint('send_hour').notNull().default(7),
+    weekday: smallint('weekday'),
+    monthDay: smallint('month_day'),
+    channel: varchar('channel', { length: 16 }).$type<NotificationPrefChannel>().notNull().default('email'),
+    active: boolean('active').notNull().default(true),
+    lastSentAt: timestamp('last_sent_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('view_subscriptions_id_restaurant_id_key').on(t.id, t.restaurantId),
+    unique('view_subscriptions_view_user_channel_key').on(t.viewId, t.userId, t.channel),
+    index('view_subscriptions_view_idx').on(t.viewId, t.restaurantId),
+    index('view_subscriptions_user_idx').on(t.userId),
+    index('view_subscriptions_restaurant_idx').on(t.restaurantId),
+  ],
+);
+
+/** A unit a product is counted in, and how many of the count line's unit it holds. */
+export const productCountUnits = pgTable(
+  'product_count_units',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FK in 0073: (product_id, restaurant_id) → products, cascade.
+    productId: uuid('product_id').notNull(),
+    unit: varchar('unit', { length: 32 }).notNull(),
+    baseQty: numeric('base_qty', { precision: 12, scale: 4 }).notNull(),
+    sortOrder: smallint('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('product_count_units_id_restaurant_id_key').on(t.id, t.restaurantId),
+    unique('product_count_units_product_unit_key').on(t.productId, t.unit),
+    index('product_count_units_product_idx').on(t.productId, t.restaurantId),
+    index('product_count_units_restaurant_idx').on(t.restaurantId),
+  ],
+);
+
+export const WASTE_REASONS = [
+  'spoiled', 'expired', 'prep_error', 'dropped', 'returned', 'overproduction', 'staff_meal', 'other',
+] as const;
+export type WasteReason = (typeof WASTE_REASONS)[number];
+
+/** One thrown-away product or prepared recipe (exactly one), with its ₪ snapshot. */
+export const wasteEntries = pgTable(
+  'waste_entries',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FKs in 0073 (NO ACTION); exactly one of the two is set.
+    productId: uuid('product_id'),
+    recipeId: uuid('recipe_id'),
+    qty: numeric('qty', { precision: 12, scale: 4 }).notNull(),
+    unit: varchar('unit', { length: 32 }).notNull(),
+    reason: varchar('reason', { length: 24 }).$type<WasteReason>().notNull(),
+    note: text('note'),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+    /** ₪ ex-VAT per `unit` at entry; NULL = no known price. */
+    unitCost: numeric('unit_cost', { precision: 12, scale: 4 }),
+    /** Integer agorot snapshot at entry. */
+    valueAgorot: bigint('value_agorot', { mode: 'number' }),
+    recordedBy: uuid('recorded_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('waste_entries_id_restaurant_id_key').on(t.id, t.restaurantId),
+    index('waste_entries_product_idx').on(t.productId, t.restaurantId),
+    index('waste_entries_recipe_idx').on(t.recipeId, t.restaurantId),
+    index('waste_entries_restaurant_occurred_idx').on(t.restaurantId, t.occurredAt),
+    index('waste_entries_recorded_by_idx').on(t.recordedBy),
+  ],
+);
+
+/** A member has seen (maybe dismissed) one bell item, by its stable item key. */
+export const notificationSeen = pgTable(
+  'notification_seen',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    itemKey: varchar('item_key', { length: 160 }).notNull(),
+    seenAt: timestamp('seen_at', { withTimezone: true }).notNull().defaultNow(),
+    dismissedAt: timestamp('dismissed_at', { withTimezone: true }),
+  },
+  (t) => [
+    unique('notification_seen_id_restaurant_id_key').on(t.id, t.restaurantId),
+    unique('notification_seen_user_item_key').on(t.restaurantId, t.userId, t.itemKey),
+    index('notification_seen_user_idx').on(t.userId),
+  ],
+);
+
+export type SavedView = typeof savedViews.$inferSelect;
+export type ViewSubscription = typeof viewSubscriptions.$inferSelect;
+export type ProductCountUnit = typeof productCountUnits.$inferSelect;
+export type WasteEntry = typeof wasteEntries.$inferSelect;
+export type NotificationSeenRow = typeof notificationSeen.$inferSelect;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 0073 addendum 1 (W3-11, document intelligence): supplier statements and
+ * payments. Tenant tables (RLS `<table>_tenant`, rls/0002). Money in integer
+ * agorot. A payment is money paid out: never a credit note, never a short-pay
+ * (those are 0071's payment_deductions).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const SUPPLIER_STATEMENT_SOURCES = ['upload', 'email', 'whatsapp', 'manual'] as const;
+export type SupplierStatementSource = (typeof SUPPLIER_STATEMENT_SOURCES)[number];
+
+/** A supplier's account statement (כרטסת) for a period; balances are signed agorot. */
+export const supplierStatements = pgTable(
+  'supplier_statements',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FKs in 0073 (NO ACTION): supplier, ingest document.
+    supplierId: uuid('supplier_id').notNull(),
+    periodStart: date('period_start', { mode: 'string' }).notNull(),
+    periodEnd: date('period_end', { mode: 'string' }).notNull(),
+    /** Supplier's view: positive = we owe the supplier, negative = a credit in our favour. */
+    openingBalanceAgorot: bigint('opening_balance_agorot', { mode: 'number' }),
+    closingBalanceAgorot: bigint('closing_balance_agorot', { mode: 'number' }),
+    source: varchar('source', { length: 16 }).$type<SupplierStatementSource>().notNull(),
+    ingestDocumentId: uuid('ingest_document_id'),
+    storagePath: text('storage_path'),
+    uploadedBy: uuid('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
+    uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('supplier_statements_id_restaurant_id_key').on(t.id, t.restaurantId),
+    index('supplier_statements_supplier_period_idx').on(t.supplierId, t.restaurantId, t.periodStart),
+    index('supplier_statements_document_idx').on(t.ingestDocumentId, t.restaurantId),
+    index('supplier_statements_uploaded_by_idx').on(t.uploadedBy),
+    index('supplier_statements_restaurant_idx').on(t.restaurantId, t.periodStart),
+  ],
+);
+
+/** Money actually paid to a supplier (agorot > 0). method uses 0072's PAYMENT_METHODS. */
+export const payments = pgTable(
+  'payments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FK in 0073 (NO ACTION).
+    supplierId: uuid('supplier_id').notNull(),
+    paidOn: date('paid_on', { mode: 'string' }).notNull(),
+    amountAgorot: bigint('amount_agorot', { mode: 'number' }).notNull(),
+    method: varchar('method', { length: 16 }).$type<PaymentMethod>().notNull(),
+    reference: text('reference'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('payments_id_restaurant_id_key').on(t.id, t.restaurantId),
+    index('payments_supplier_idx').on(t.supplierId, t.restaurantId, t.paidOn),
+    index('payments_created_by_idx').on(t.createdBy),
+    index('payments_restaurant_idx').on(t.restaurantId, t.paidOn),
+  ],
+);
+
+/** Which invoices one payment settles, with the allocated agorot. */
+export const paymentInvoices = pgTable(
+  'payment_invoices',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    // Composite same-tenant FKs in 0073: payment → cascade, invoice → NO ACTION.
+    paymentId: uuid('payment_id').notNull(),
+    invoiceId: uuid('invoice_id').notNull(),
+    amountAgorot: bigint('amount_agorot', { mode: 'number' }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('payment_invoices_id_restaurant_id_key').on(t.id, t.restaurantId),
+    unique('payment_invoices_payment_invoice_key').on(t.paymentId, t.invoiceId),
+    index('payment_invoices_payment_idx').on(t.paymentId, t.restaurantId),
+    index('payment_invoices_invoice_idx').on(t.invoiceId, t.restaurantId),
+    index('payment_invoices_restaurant_idx').on(t.restaurantId),
+  ],
+);
+
+export type SupplierStatement = typeof supplierStatements.$inferSelect;
+export type Payment = typeof payments.$inferSelect;
+export type PaymentInvoice = typeof paymentInvoices.$inferSelect;

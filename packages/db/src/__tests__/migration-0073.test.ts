@@ -1,0 +1,766 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import postgres from 'postgres';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  createDb,
+  supplierBankAccounts,
+  consolidatedInvoiceLinks,
+  goodsReceipts,
+  invoices,
+  paymentDeductions,
+  paymentInvoices,
+  payments,
+  supplierStatements,
+  eq,
+  inventoryCountLines,
+  inventoryCounts,
+  notificationSeen,
+  poLines,
+  productCountUnits,
+  products,
+  purchaseOrders,
+  recipes,
+  restaurants,
+  savedViews,
+  suppliers,
+  users,
+  viewSubscriptions,
+  wasteEntries,
+} from '../index';
+import { migrationsDir } from '../migrations';
+import { testDbUrl } from '../test-env';
+
+/**
+ * Migration-shape test for 0073_schema_batch_b (wave 3, H-04): every new column and
+ * table exists with its type, default and CHECK; the five new tenant tables carry
+ * restaurant_id NOT NULL + RLS + the `<table>_tenant` policy; the composite
+ * same-tenant FKs refuse a cross-tenant reference; deletes cascade / block as
+ * documented; the count status widens to 'submitted' with one OPEN count per
+ * restaurant; the po_lines revised pair holds; the file is pipeline-safe.
+ */
+const url = testDbUrl();
+const sql = postgres(url, { max: 1, prepare: false });
+const db = createDb(url);
+const FILE = '0073_schema_batch_b.sql';
+
+interface T {
+  restaurantId: string;
+  supplierId: string;
+  productId: string;
+  recipeId: string;
+  poId: string;
+}
+let A: T;
+let B: T;
+let userId: string;
+
+async function seed(tag: string, businessId: string): Promise<T> {
+  const [r] = await db.insert(restaurants).values({ name: `0073 ${tag}`, businessId }).returning();
+  const restaurantId = r!.id;
+  const [s] = await db.insert(suppliers).values({ restaurantId, name: `0073 supplier ${tag}` }).returning();
+  const [p] = await db.insert(products).values({ restaurantId, canonicalName: `0073 product ${tag}` }).returning();
+  const [rc] = await db.insert(recipes).values({ restaurantId, name: `0073 recipe ${tag}` }).returning();
+  const [po] = await db.insert(purchaseOrders).values({ restaurantId, supplierId: s!.id }).returning();
+  return { restaurantId, supplierId: s!.id, productId: p!.id, recipeId: rc!.id, poId: po!.id };
+}
+
+async function cleanup(t: T) {
+  await db.delete(restaurants).where(eq(restaurants.id, t.restaurantId));
+}
+
+beforeAll(async () => {
+  A = await seed('A', '000000731');
+  B = await seed('B', '000000732');
+  const [u] = await db.insert(users).values({ email: `h04-${Date.now()}@0073.test` }).returning();
+  userId = u!.id;
+});
+afterAll(async () => {
+  await cleanup(A);
+  await cleanup(B);
+  await db.delete(users).where(eq(users.id, userId));
+  await sql.end();
+});
+
+type Col = { table_name: string; column_name: string; data_type: string; udt_name: string; is_nullable: string; column_default: string | null };
+async function col(table: string, column: string): Promise<Col | undefined> {
+  const rows = (await sql`
+    select table_name, column_name, data_type, udt_name, is_nullable, column_default
+    from information_schema.columns
+    where table_schema = 'public' and table_name = ${table} and column_name = ${column}
+  `) as unknown as Col[];
+  return rows[0];
+}
+async function checkDef(name: string): Promise<string | undefined> {
+  const rows = (await sql`select pg_get_constraintdef(oid) as def from pg_constraint where conname = ${name}`) as unknown as Array<{ def: string }>;
+  return rows[0]?.def;
+}
+async function indexDef(name: string): Promise<string | undefined> {
+  const rows = (await sql`select indexdef from pg_indexes where schemaname = 'public' and indexname = ${name}`) as unknown as Array<{ indexdef: string }>;
+  return rows[0]?.indexdef;
+}
+const pgCode = (e: unknown) => (e as { code?: string; cause?: { code?: string } }).cause?.code ?? (e as { code?: string }).code;
+async function expectPgError(p: Promise<unknown>, code: string) {
+  let err: unknown;
+  try {
+    await p;
+  } catch (e) {
+    err = e;
+  }
+  expect(err, `expected Postgres error ${code}`).toBeDefined();
+  expect(pgCode(err)).toBe(code);
+}
+const CHECK_VIOLATION = '23514';
+const FK_VIOLATION = '23503';
+const UNIQUE_VIOLATION = '23505';
+
+const TABLES = [
+  'notification_seen',
+  'payment_invoices',
+  'payments',
+  'product_count_units',
+  'saved_views',
+  'supplier_statements',
+  'view_subscriptions',
+  'waste_entries',
+];
+const statements = () =>
+  readFileSync(join(migrationsDir(), FILE), 'utf8')
+    .split('--> statement-breakpoint')
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+describe('0073 is registered', () => {
+  it('is in the journal right after 0072, idx 73, with a later `when`', () => {
+    const j = JSON.parse(readFileSync(join(migrationsDir(), 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ idx: number; tag: string; when: number }>;
+    };
+    const i = j.entries.findIndex((e) => e.tag === '0073_schema_batch_b');
+    expect(i).toBeGreaterThan(0);
+    expect(j.entries[i]!.idx).toBe(73);
+    expect(j.entries[i - 1]!.tag).toBe('0072_schema_batch_a');
+    expect(j.entries[i]!.when).toBeGreaterThan(1782500000000);
+  });
+
+  it('is idempotent: re-running every statement on the migrated DB changes nothing and raises nothing', async () => {
+    const stmts = statements();
+    const shape = async (q: typeof sql) =>
+      (await q`
+        select (select count(*) from pg_constraint c join pg_namespace n on n.oid = c.connamespace where n.nspname = 'public')::int as cons,
+               (select count(*) from pg_indexes where schemaname = 'public')::int as idx,
+               (select count(*) from pg_trigger where not tgisinternal)::int as trg,
+               (select count(*) from pg_policy)::int as pol,
+               (select count(*) from information_schema.columns where table_schema = 'public')::int as cols`) as unknown as [
+        { cons: number; idx: number; trg: number; pol: number; cols: number },
+      ];
+    const ROLLBACK = new Error('rollback');
+    let before: unknown;
+    let after: unknown;
+    await expect(
+      sql.begin(async (tx) => {
+        before = (await shape(tx as unknown as typeof sql))[0];
+        for (const st of stmts) await tx.unsafe(st);
+        after = (await shape(tx as unknown as typeof sql))[0];
+        throw ROLLBACK;
+      }),
+    ).rejects.toBe(ROLLBACK);
+    expect(after).toEqual(before);
+  });
+
+  it('takes lock_timeout + every lock up front, parent-first: a long reader makes it fail fast, nothing applied, a re-run succeeds', async () => {
+    const stmts = statements();
+    const code = (x: string) => x.split('\n').filter((l) => !l.trimStart().startsWith('--')).join('\n').trim();
+    expect(code(stmts[0]!)).toMatch(/set_config\('lock_timeout', '5s', true\)[\s\S]*set_config\('statement_timeout', '6s', true\)/);
+    const lockPhase = code(stmts[1]!);
+    expect(lockPhase).toMatch(/^DO \$\$\s*BEGIN\s*LOOP\s*BEGIN\s*LOCK TABLE "restaurants" IN SHARE ROW EXCLUSIVE MODE NOWAIT;/);
+    expect(lockPhase).toMatch(/EXCEPTION WHEN lock_not_available THEN\s*PERFORM pg_sleep\(0\.05\);/);
+    // Every LOCK is NOWAIT (nothing is held while waiting); parent-first, users last (0071/0072 order).
+    const locks = lockPhase.match(/LOCK TABLE [^;]+;/g) ?? [];
+    expect(locks).toHaveLength(7);
+    for (const l of locks) expect(l).toMatch(/NOWAIT;$/);
+    const order = ['"restaurants"', '"suppliers"', '"supplier_bank_accounts"', '"products"', '"purchase_orders"', '"po_lines"', '"recipes"', '"inventory_counts"', '"inventory_count_lines"', '"invoices"', '"consolidated_invoice_links"', '"ingest_documents"', '"users"'];
+    const pos = order.map((t) => lockPhase.indexOf(t));
+    expect(pos.every((p) => p >= 0)).toBe(true);
+    expect([...pos].sort((a, b) => a - b)).toEqual(pos);
+    expect(code(stmts[2]!)).toMatch(/set_config\('statement_timeout',[\s\S]*current_setting\('restomatch.prev_statement_timeout', true\)/);
+    // No other LOCK anywhere after the prelude: nothing waits or upgrades mid-file.
+    expect(stmts.slice(2).some((s) => /\bLOCK TABLE\b/i.test(code(s)))).toBe(false);
+    const reader = postgres(url, { max: 1, prepare: false });
+    const runner = postgres(url, { max: 1, prepare: false });
+    try {
+      let release!: () => void;
+      const held = new Promise<void>((r) => (release = r));
+      let readerReady!: () => void;
+      const ready = new Promise<void>((r) => (readerReady = r));
+      const readerTx = reader.begin(async (tx) => {
+        await tx`select count(*) from recipes`; // ACCESS SHARE, held until commit
+        readerReady();
+        await held;
+      });
+      await ready;
+      const started = Date.now();
+      let err: unknown;
+      try {
+        await runner.begin(async (tx) => {
+          for (const st of stmts) await tx.unsafe(st);
+          throw new Error('should not get here');
+        });
+      } catch (e) {
+        err = e;
+      }
+      const waited = Date.now() - started;
+      expect(pgCode(err)).toBe('57014'); // the NOWAIT loop retries until the 6s statement_timeout
+      expect(waited).toBeLessThan(15_000);
+      release();
+      await readerTx;
+      const ROLLBACK = new Error('rollback');
+      await expect(
+        runner.begin(async (tx) => {
+          for (const st of stmts) await tx.unsafe(st);
+          throw ROLLBACK;
+        }),
+      ).rejects.toBe(ROLLBACK);
+    } finally {
+      await reader.end();
+      await runner.end();
+    }
+  }, 30_000);
+
+  it('needs no transaction block: no top-level LOCK / SET LOCAL / SAVEPOINT / BEGIN / COMMIT (the Supabase CLI sends no BEGIN)', () => {
+    const file = readFileSync(join(migrationsDir(), FILE), 'utf8');
+    const top = file
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('--'))
+      .join('\n')
+      .replace(/\$\$[\s\S]*?\$\$/g, '$$$$');
+    expect(top).not.toMatch(/^\s*LOCK\s+TABLE/im);
+    expect(top).not.toMatch(/\bSET\s+LOCAL\b/i);
+    expect(top).not.toMatch(/\bSAVEPOINT\b/i);
+    expect(top).not.toMatch(/^\s*(BEGIN|COMMIT|START TRANSACTION)\s*;/im);
+  });
+
+  it('applies statement by statement with no BEGIN (autocommit, as the CLI applier): nothing raises 25P01, a re-run is a no-op', async () => {
+    const bare = postgres(url, { max: 1, prepare: false });
+    try {
+      for (const st of statements()) await bare.unsafe(st);
+      await expect(bare.unsafe('LOCK TABLE "users" IN ACCESS EXCLUSIVE MODE')).rejects.toMatchObject({ code: '25P01' });
+    } finally {
+      await bare.end();
+    }
+  });
+
+  it('has no ALTER TYPE, no 0071 enum value, no backfill (no UPDATE / INSERT / DELETE of rows) and no outbox CHECK', () => {
+    const file = readFileSync(join(migrationsDir(), FILE), 'utf8')
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('--'))
+      .join('\n');
+    expect(file).not.toMatch(/ALTER TYPE/i);
+    expect(file).not.toMatch(/'event'|'skipped'/);
+    expect(file).not.toMatch(/^\s*(UPDATE|INSERT INTO|DELETE FROM)\b/im);
+    expect(file).not.toMatch(/notifications_outbox/);
+  });
+});
+
+describe('0073 the five new tenant tables', () => {
+  it('carry a NOT NULL restaurant_id', async () => {
+    for (const t of TABLES) expect((await col(t, 'restaurant_id'))?.is_nullable, t).toBe('NO');
+  });
+
+  it('enable row security with exactly one permissive policy, the per-restaurant `<table>_tenant`', async () => {
+    const rows = (await sql`
+      select c.relname, c.relrowsecurity, p.polname, pg_get_expr(p.polqual, p.polrelid) as qual
+      from pg_class c left join pg_policy p on p.polrelid = c.oid and p.polpermissive
+      where c.relname in ${sql(TABLES)} order by c.relname
+    `) as unknown as Array<{ relname: string; relrowsecurity: boolean; polname: string; qual: string }>;
+    expect(rows.map((r) => [r.relname, r.relrowsecurity, r.polname])).toEqual(TABLES.map((t) => [t, true, `${t}_tenant`]));
+    for (const r of rows) expect(r.qual).toContain('app.current_restaurant_id()');
+  });
+
+  it('personal views, subscriptions and "seen" marks carry own-user RESTRICTIVE policies (the 0072 pattern)', async () => {
+    const rows = (await sql`
+      select c.relname, p.polname, p.polcmd, pg_get_expr(coalesce(p.polqual, p.polwithcheck), p.polrelid) as expr
+      from pg_policy p join pg_class c on c.oid = p.polrelid
+      where not p.polpermissive and c.relname in ${sql(TABLES)} order by c.relname, p.polname
+    `) as unknown as Array<{ relname: string; polname: string; polcmd: string; expr: string }>;
+    expect(rows.map((r) => `${r.relname}:${r.polname}:${r.polcmd}`)).toEqual([
+      'notification_seen:notification_seen_own_delete:d',
+      'notification_seen:notification_seen_own_insert:a',
+      'notification_seen:notification_seen_own_select:r',
+      'notification_seen:notification_seen_own_update:w',
+      'saved_views:saved_views_own_delete:d',
+      'saved_views:saved_views_own_insert:a',
+      'saved_views:saved_views_own_select:r',
+      'saved_views:saved_views_own_update:w',
+      'view_subscriptions:view_subscriptions_own_delete:d',
+      'view_subscriptions:view_subscriptions_own_insert:a',
+      'view_subscriptions:view_subscriptions_own_update:w',
+    ]);
+    for (const r of rows) expect(r.expr).toContain('app.current_user_id()');
+    for (const r of rows.filter((x) => x.relname === 'saved_views')) expect(r.expr).toContain("'restaurant'");
+  });
+
+  it('are in the rls/0002 table list', () => {
+    const rls = readFileSync(join(migrationsDir(), 'rls', '0002_core_tenant_rls.sql'), 'utf8');
+    for (const t of TABLES) expect(rls).toContain(`'${t}'`);
+  });
+
+  it('have UNIQUE (id, restaurant_id) for same-tenant composite FKs', async () => {
+    for (const t of TABLES) expect(await checkDef(`${t}_id_restaurant_id_key`), t).toBe('UNIQUE (id, restaurant_id)');
+  });
+
+  it('cascade away with their restaurant (NO ACTION FKs are checked at statement end)', async () => {
+    const t = await seed('cascade', '000000733');
+    const [v] = await db.insert(savedViews).values({ restaurantId: t.restaurantId, page: 'invoices', name: 'מוכן לתשלום', scope: 'restaurant', roleDefault: 'bookkeeper' }).returning();
+    await db.insert(viewSubscriptions).values({ restaurantId: t.restaurantId, viewId: v!.id, userId, cadence: 'weekly', weekday: 0 });
+    await db.insert(productCountUnits).values({ restaurantId: t.restaurantId, productId: t.productId, unit: 'ארגז', baseQty: '12' });
+    await db.insert(wasteEntries).values({ restaurantId: t.restaurantId, productId: t.productId, qty: '2', unit: 'ק״ג', reason: 'spoiled' });
+    await db.insert(wasteEntries).values({ restaurantId: t.restaurantId, recipeId: t.recipeId, qty: '1', unit: 'מנה', reason: 'returned' });
+    await db.insert(notificationSeen).values({ restaurantId: t.restaurantId, userId, itemKey: 'invoice:x:decide' });
+    await db.insert(supplierStatements).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, periodStart: '2026-11-01', periodEnd: '2026-11-30', source: 'upload' });
+    const [inv] = await db.insert(invoices).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, source: 'manual' }).returning();
+    const [pay] = await db.insert(payments).values({ restaurantId: t.restaurantId, supplierId: t.supplierId, paidOn: '2026-12-01', amountAgorot: 100, method: 'bank_transfer' }).returning();
+    await db.insert(paymentInvoices).values({ restaurantId: t.restaurantId, paymentId: pay!.id, invoiceId: inv!.id, amountAgorot: 100 });
+    await db.delete(restaurants).where(eq(restaurants.id, t.restaurantId));
+    for (const tbl of TABLES) {
+      const [{ n }] = (await sql`select count(*)::int as n from ${sql(tbl)} where restaurant_id = ${t.restaurantId}`) as unknown as [{ n: number }];
+      expect(n, tbl).toBe(0);
+    }
+  });
+});
+
+describe('0073 saved_views + view_subscriptions', () => {
+  it('has the documented columns and defaults', async () => {
+    expect(await col('saved_views', 'query')).toMatchObject({ data_type: 'jsonb', is_nullable: 'NO' });
+    expect((await col('saved_views', 'scope'))?.column_default).toContain("'personal'");
+    expect(await col('saved_views', 'user_id')).toMatchObject({ udt_name: 'uuid', is_nullable: 'YES' });
+    expect((await col('view_subscriptions', 'send_hour'))?.column_default).toBe('7');
+    expect((await col('view_subscriptions', 'channel'))?.column_default).toContain("'email'");
+    expect(await indexDef('saved_views_role_default_unique')).toMatch(/UNIQUE INDEX[\s\S]*\(restaurant_id, page, role_default\) WHERE \(role_default IS NOT NULL\)/);
+  });
+
+  it('a personal view has a member and no role default; a team view has no member; one default per page × role', async () => {
+    const r = A.restaurantId;
+    const [mine] = await db.insert(savedViews).values({ restaurantId: r, page: 'invoices', name: 'שלי', userId }).returning();
+    expect(mine!.scope).toBe('personal');
+    await expectPgError(db.insert(savedViews).values({ restaurantId: r, page: 'invoices', name: 'x', scope: 'personal' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(savedViews).values({ restaurantId: r, page: 'invoices', name: 'x', scope: 'restaurant', userId }), CHECK_VIOLATION);
+    await expectPgError(db.insert(savedViews).values({ restaurantId: r, page: 'invoices', name: 'x', userId, roleDefault: 'bookkeeper' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(savedViews).values({ restaurantId: r, page: 'invoices', name: 'x', scope: 'restaurant', roleDefault: 'admin' as never }), CHECK_VIOLATION);
+    await expectPgError(db.insert(savedViews).values({ restaurantId: r, page: ' ', name: 'x', userId }), CHECK_VIOLATION);
+    await expectPgError(db.insert(savedViews).values({ restaurantId: r, page: 'invoices', name: 'x', userId, query: [] as never }), CHECK_VIOLATION);
+    await db.insert(savedViews).values({ restaurantId: r, page: 'invoices', name: 'מוכן לתשלום', scope: 'restaurant', roleDefault: 'bookkeeper' });
+    await expectPgError(
+      db.insert(savedViews).values({ restaurantId: r, page: 'invoices', name: 'אחר', scope: 'restaurant', roleDefault: 'bookkeeper' }),
+      UNIQUE_VIOLATION,
+    );
+    // Another restaurant may have its own default for the same page × role.
+    await db.insert(savedViews).values({ restaurantId: B.restaurantId, page: 'invoices', name: 'מוכן לתשלום', scope: 'restaurant', roleDefault: 'bookkeeper' });
+    // A personal view goes with its member.
+    const [u2] = await db.insert(users).values({ email: `h04-gone-${Date.now()}@0073.test` }).returning();
+    const [gone] = await db.insert(savedViews).values({ restaurantId: r, page: 'invoices', name: 'זמני', userId: u2!.id }).returning();
+    await db.delete(users).where(eq(users.id, u2!.id));
+    expect(await db.select().from(savedViews).where(eq(savedViews.id, gone!.id))).toHaveLength(0);
+    await db.delete(savedViews).where(eq(savedViews.restaurantId, r));
+    await db.delete(savedViews).where(eq(savedViews.restaurantId, B.restaurantId));
+  });
+
+  it('a subscription CHECKs cadence / hour / weekday / month day / channel, is unique per view × member × channel, refuses another tenant’s view, goes with its view', async () => {
+    const [v] = await db.insert(savedViews).values({ restaurantId: A.restaurantId, page: 'leaks', name: 'חוסמים', scope: 'restaurant' }).returning();
+    const [vb] = await db.insert(savedViews).values({ restaurantId: B.restaurantId, page: 'leaks', name: 'B', scope: 'restaurant' }).returning();
+    const base = { restaurantId: A.restaurantId, viewId: v!.id, userId };
+    const [weekly] = await db.insert(viewSubscriptions).values({ ...base, cadence: 'weekly', weekday: 0 }).returning();
+    expect(weekly).toMatchObject({ sendHour: 7, channel: 'email', active: true, lastSentAt: null });
+    await expectPgError(db.insert(viewSubscriptions).values({ ...base, cadence: 'weekly', weekday: 0 }), UNIQUE_VIOLATION);
+    await expectPgError(db.insert(viewSubscriptions).values({ ...base, cadence: 'hourly' as never, channel: 'push' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(viewSubscriptions).values({ ...base, cadence: 'daily', sendHour: 24, channel: 'push' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(viewSubscriptions).values({ ...base, cadence: 'weekly', channel: 'push' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(viewSubscriptions).values({ ...base, cadence: 'weekly', weekday: 7, channel: 'push' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(viewSubscriptions).values({ ...base, cadence: 'daily', weekday: 1, channel: 'push' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(viewSubscriptions).values({ ...base, cadence: 'monthly', channel: 'push' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(viewSubscriptions).values({ ...base, cadence: 'monthly', monthDay: 29, channel: 'push' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(viewSubscriptions).values({ ...base, cadence: 'daily', channel: 'sms' as never }), CHECK_VIOLATION);
+    await db.insert(viewSubscriptions).values({ ...base, cadence: 'monthly', monthDay: 1, channel: 'whatsapp' });
+    await expectPgError(db.insert(viewSubscriptions).values({ ...base, viewId: vb!.id, cadence: 'daily', channel: 'push' }), FK_VIOLATION);
+    await db.delete(savedViews).where(eq(savedViews.id, v!.id));
+    expect(await db.select().from(viewSubscriptions).where(eq(viewSubscriptions.viewId, v!.id))).toHaveLength(0);
+    await db.delete(savedViews).where(eq(savedViews.id, vb!.id));
+  });
+});
+
+describe('0073 counting: walk order, count units, multi-unit entry, submitted', () => {
+  it('products.count_sort is a nullable int; count lines gain qty_parts (a jsonb array or NULL)', async () => {
+    expect(await col('products', 'count_sort')).toMatchObject({ data_type: 'integer', is_nullable: 'YES', column_default: null });
+    expect(await col('inventory_count_lines', 'qty_parts')).toMatchObject({ data_type: 'jsonb', is_nullable: 'YES' });
+    const [c] = await db.insert(inventoryCounts).values({ restaurantId: A.restaurantId, countDate: '2026-12-20' }).returning();
+    const parts = [
+      { unit: 'ארגז', qty: 2 },
+      { unit: 'יח׳', qty: 5 },
+    ];
+    const [l] = await db
+      .insert(inventoryCountLines)
+      .values({ restaurantId: A.restaurantId, countId: c!.id, productId: A.productId, unit: 'יח׳', qty: '29', qtyParts: parts })
+      .returning();
+    expect(l!.qtyParts).toEqual(parts);
+    await expectPgError(sql`update inventory_count_lines set qty_parts = '{"unit":"x"}'::jsonb where id = ${l!.id}`, CHECK_VIOLATION);
+    await db.delete(inventoryCounts).where(eq(inventoryCounts.id, c!.id));
+  });
+
+  it('a count unit is unique per product, base_qty > 0, refuses another tenant’s product, goes with its product', async () => {
+    await db.insert(productCountUnits).values({ restaurantId: A.restaurantId, productId: A.productId, unit: 'ארגז', baseQty: '12' });
+    await expectPgError(db.insert(productCountUnits).values({ restaurantId: A.restaurantId, productId: A.productId, unit: 'ארגז', baseQty: '6' }), UNIQUE_VIOLATION);
+    await expectPgError(db.insert(productCountUnits).values({ restaurantId: A.restaurantId, productId: A.productId, unit: 'שק', baseQty: '0' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(productCountUnits).values({ restaurantId: A.restaurantId, productId: A.productId, unit: ' ', baseQty: '1' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(productCountUnits).values({ restaurantId: A.restaurantId, productId: B.productId, unit: 'ארגז', baseQty: '12' }), FK_VIOLATION);
+    const [p] = await db.insert(products).values({ restaurantId: A.restaurantId, canonicalName: '0073 temp product' }).returning();
+    await db.insert(productCountUnits).values({ restaurantId: A.restaurantId, productId: p!.id, unit: 'ארגז', baseQty: '12' });
+    await db.delete(products).where(eq(products.id, p!.id));
+    expect(await db.select().from(productCountUnits).where(eq(productCountUnits.productId, p!.id))).toHaveLength(0);
+    await db.delete(productCountUnits).where(eq(productCountUnits.restaurantId, A.restaurantId));
+  });
+
+  it('status accepts draft | submitted | completed; submitted needs submitted_at; one OPEN count per restaurant; 0070 completion CHECK unchanged', async () => {
+    expect(await checkDef('inventory_counts_status_check')).toMatch(/'draft'.*'submitted'.*'completed'/);
+    expect(await indexDef('inventory_counts_one_open_idx')).toMatch(/UNIQUE INDEX[\s\S]*\(restaurant_id\) WHERE[\s\S]*'draft'[\s\S]*'submitted'/);
+    expect(await indexDef('inventory_counts_one_draft_idx')).toBeDefined();
+    const r = A.restaurantId;
+    const [c] = await db.insert(inventoryCounts).values({ restaurantId: r, countDate: '2026-12-21' }).returning();
+    await expectPgError(db.update(inventoryCounts).set({ status: 'submitted' }).where(eq(inventoryCounts.id, c!.id)), CHECK_VIOLATION);
+    await db.update(inventoryCounts).set({ status: 'submitted', submittedAt: new Date(), submittedBy: userId }).where(eq(inventoryCounts.id, c!.id));
+    // A submitted count still blocks a second draft.
+    await expectPgError(db.insert(inventoryCounts).values({ restaurantId: r, countDate: '2026-12-22' }), UNIQUE_VIOLATION);
+    await expectPgError(db.update(inventoryCounts).set({ status: 'closed' }).where(eq(inventoryCounts.id, c!.id)), CHECK_VIOLATION);
+    // Completing still needs completed_at + the total (0070); submitted_at stays as evidence.
+    await expectPgError(db.update(inventoryCounts).set({ status: 'completed' }).where(eq(inventoryCounts.id, c!.id)), CHECK_VIOLATION);
+    await db.update(inventoryCounts).set({ status: 'completed', completedAt: new Date(), totalValueAgorot: 0 }).where(eq(inventoryCounts.id, c!.id));
+    await db.insert(inventoryCounts).values({ restaurantId: r, countDate: '2026-12-22' });
+    await db.delete(inventoryCounts).where(eq(inventoryCounts.restaurantId, r));
+  });
+});
+
+describe('0073 waste_entries', () => {
+  it('has the documented money columns (shekels unit_cost numeric(12,4), agorot bigint value)', async () => {
+    expect(await col('waste_entries', 'unit_cost')).toMatchObject({ data_type: 'numeric', is_nullable: 'YES' });
+    expect(await col('waste_entries', 'value_agorot')).toMatchObject({ data_type: 'bigint', is_nullable: 'YES' });
+    expect(await col('waste_entries', 'occurred_at')).toMatchObject({ data_type: 'timestamp with time zone', is_nullable: 'NO' });
+  });
+
+  it('is about exactly one product or recipe, qty > 0, a known reason; refuses another tenant’s subject; blocks deleting its subject', async () => {
+    const r = A.restaurantId;
+    await expectPgError(db.insert(wasteEntries).values({ restaurantId: r, qty: '1', unit: 'ק״ג', reason: 'spoiled' }), CHECK_VIOLATION);
+    await expectPgError(
+      db.insert(wasteEntries).values({ restaurantId: r, productId: A.productId, recipeId: A.recipeId, qty: '1', unit: 'ק״ג', reason: 'spoiled' }),
+      CHECK_VIOLATION,
+    );
+    await expectPgError(db.insert(wasteEntries).values({ restaurantId: r, productId: A.productId, qty: '0', unit: 'ק״ג', reason: 'spoiled' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(wasteEntries).values({ restaurantId: r, productId: A.productId, qty: '1', unit: 'ק״ג', reason: 'stolen' as never }), CHECK_VIOLATION);
+    await expectPgError(
+      db.insert(wasteEntries).values({ restaurantId: r, productId: A.productId, qty: '1', unit: 'ק״ג', reason: 'spoiled', valueAgorot: -1 }),
+      CHECK_VIOLATION,
+    );
+    await expectPgError(db.insert(wasteEntries).values({ restaurantId: r, productId: B.productId, qty: '1', unit: 'ק״ג', reason: 'spoiled' }), FK_VIOLATION);
+    await expectPgError(db.insert(wasteEntries).values({ restaurantId: r, recipeId: B.recipeId, qty: '1', unit: 'מנה', reason: 'returned' }), FK_VIOLATION);
+    const [w] = await db
+      .insert(wasteEntries)
+      .values({ restaurantId: r, productId: A.productId, qty: '1.5', unit: 'ק״ג', reason: 'expired', unitCost: '42.5000', valueAgorot: 6375, recordedBy: userId })
+      .returning();
+    expect(w).toMatchObject({ qty: '1.5000', unitCost: '42.5000', valueAgorot: 6375 });
+    await db.insert(wasteEntries).values({ restaurantId: r, recipeId: A.recipeId, qty: '1', unit: 'מנה', reason: 'returned' });
+    await expectPgError(db.delete(products).where(eq(products.id, A.productId)), FK_VIOLATION);
+    await expectPgError(db.delete(recipes).where(eq(recipes.id, A.recipeId)), FK_VIOLATION);
+    const before = w!.updatedAt;
+    const [w2] = await db.update(wasteEntries).set({ note: 'נפל מהמדף' }).where(eq(wasteEntries.id, w!.id)).returning();
+    expect(w2!.updatedAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    await db.delete(wasteEntries).where(eq(wasteEntries.restaurantId, r));
+  });
+});
+
+describe('0073 recipes kitchen card', () => {
+  it('method / plating text, photo_key a key (not a URL), allergens text[] default {} from the 14 keys', async () => {
+    expect(await col('recipes', 'method')).toMatchObject({ data_type: 'text', is_nullable: 'YES' });
+    expect(await col('recipes', 'plating')).toMatchObject({ data_type: 'text', is_nullable: 'YES' });
+    expect(await col('recipes', 'allergens')).toMatchObject({ data_type: 'ARRAY', udt_name: '_text', is_nullable: 'NO' });
+    const [r] = await db.select().from(recipes).where(eq(recipes.id, A.recipeId));
+    expect(r!.allergens).toEqual([]);
+    const [u] = await db
+      .update(recipes)
+      .set({ method: 'לערבב', plating: 'צלחת לבנה', photoKey: `${A.restaurantId}/recipes/1.jpg`, allergens: ['gluten', 'sesame'] })
+      .where(eq(recipes.id, A.recipeId))
+      .returning();
+    expect(u!.allergens).toEqual(['gluten', 'sesame']);
+    await expectPgError(db.update(recipes).set({ allergens: ['gluten', 'msg'] as never }).where(eq(recipes.id, A.recipeId)), CHECK_VIOLATION);
+    await expectPgError(db.update(recipes).set({ photoKey: 'https://evil.test/x.jpg' }).where(eq(recipes.id, A.recipeId)), CHECK_VIOLATION);
+    await expectPgError(db.update(recipes).set({ photoKey: ' ' }).where(eq(recipes.id, A.recipeId)), CHECK_VIOLATION);
+  });
+});
+
+describe('0073 suppliers.billing_mode / purchase_orders.opened_at / po_lines revised', () => {
+  it('billing_mode is a nullable CHECKed varchar, not backfilled', async () => {
+    expect(await col('suppliers', 'billing_mode')).toMatchObject({ data_type: 'character varying', is_nullable: 'YES', column_default: null });
+    const [s] = await db.select().from(suppliers).where(eq(suppliers.id, A.supplierId));
+    expect(s!.billingMode).toBeNull();
+    await db.update(suppliers).set({ billingMode: 'consolidated' }).where(eq(suppliers.id, A.supplierId));
+    await expectPgError(db.update(suppliers).set({ billingMode: 'monthly' as never }).where(eq(suppliers.id, A.supplierId)), CHECK_VIOLATION);
+  });
+
+  it('opened_at is a nullable timestamptz', async () => {
+    expect(await col('purchase_orders', 'opened_at')).toMatchObject({ data_type: 'timestamp with time zone', is_nullable: 'YES', column_default: null });
+  });
+
+  it('revised columns: nullable, >= 0, revised_at exactly with a revised value and a source; the original stays', async () => {
+    expect(await col('po_lines', 'qty_revised')).toMatchObject({ data_type: 'numeric', is_nullable: 'YES' });
+    expect(await col('po_lines', 'unit_price_revised')).toMatchObject({ data_type: 'numeric', is_nullable: 'YES' });
+    const [l] = await db.insert(poLines).values({ poId: A.poId, qtyOrdered: '10', unit: 'ק״ג', unitPriceExpected: '20.0000' }).returning();
+    expect(l).toMatchObject({ qtyRevised: null, unitPriceRevised: null, revisedAt: null, revisionSource: null });
+    const at = new Date();
+    await expectPgError(db.update(poLines).set({ qtyRevised: '8' }).where(eq(poLines.id, l!.id)), CHECK_VIOLATION);
+    await expectPgError(db.update(poLines).set({ qtyRevised: '8', revisedAt: at }).where(eq(poLines.id, l!.id)), CHECK_VIOLATION);
+    await expectPgError(db.update(poLines).set({ revisedAt: at, revisionSource: 'manual' }).where(eq(poLines.id, l!.id)), CHECK_VIOLATION);
+    await expectPgError(db.update(poLines).set({ qtyRevised: '-1', revisedAt: at, revisionSource: 'manual' }).where(eq(poLines.id, l!.id)), CHECK_VIOLATION);
+    await expectPgError(db.update(poLines).set({ qtyRevised: '8', revisedAt: at, revisionSource: 'phone' as never }).where(eq(poLines.id, l!.id)), CHECK_VIOLATION);
+    const [r] = await db
+      .update(poLines)
+      .set({ qtyRevised: '0', unitPriceRevised: '21.5000', revisedAt: at, revisedBy: userId, revisionSource: 'supplier_confirm' })
+      .where(eq(poLines.id, l!.id))
+      .returning();
+    expect(r).toMatchObject({ qtyOrdered: '10.000', unitPriceExpected: '20.0000', qtyRevised: '0.000', unitPriceRevised: '21.5000' });
+    await db.delete(poLines).where(eq(poLines.id, l!.id));
+  });
+});
+
+describe('0073 notification_seen', () => {
+  it('one row per restaurant × member × item key; non-empty key; goes with the member', async () => {
+    const [u2] = await db.insert(users).values({ email: `h04-seen-${Date.now()}@0073.test` }).returning();
+    const [s] = await db.insert(notificationSeen).values({ restaurantId: A.restaurantId, userId: u2!.id, itemKey: 'invoice:1:decide' }).returning();
+    expect(s!.dismissedAt).toBeNull();
+    expect(s!.seenAt).toBeInstanceOf(Date);
+    await expectPgError(db.insert(notificationSeen).values({ restaurantId: A.restaurantId, userId: u2!.id, itemKey: 'invoice:1:decide' }), UNIQUE_VIOLATION);
+    await expectPgError(db.insert(notificationSeen).values({ restaurantId: A.restaurantId, userId: u2!.id, itemKey: ' ' }), CHECK_VIOLATION);
+    await db.insert(notificationSeen).values({ restaurantId: B.restaurantId, userId: u2!.id, itemKey: 'invoice:1:decide' });
+    await db.delete(users).where(eq(users.id, u2!.id));
+    expect(await db.select().from(notificationSeen).where(eq(notificationSeen.userId, u2!.id))).toHaveLength(0);
+  });
+});
+
+describe('H-04 part 2: the PENDING outbox role-target CHECK (deploys 19.1, after H-05)', () => {
+  const PENDING = join(migrationsDir(), 'pending', 'outbox_no_role_target.sql');
+
+  it('is NOT in the journal and NOT in supabase/migrations (so neither drizzle nor the integration applies it before H-05)', () => {
+    const j = readFileSync(join(migrationsDir(), 'meta', '_journal.json'), 'utf8');
+    expect(j).not.toMatch(/outbox_no_role_target/);
+    const supa = join(migrationsDir(), '..', '..', '..', 'supabase', 'migrations');
+    const files = readdirSync(supa);
+    expect(files.filter((f) => /outbox_no_role_target/.test(f))).toEqual([]);
+    expect(readFileSync(join(migrationsDir(), FILE), 'utf8')).not.toMatch(/no_role_target/);
+  });
+
+  it('is pipeline-safe, and (applied in a rolled-back transaction) refuses a new role: row but keeps old ones (NOT VALID)', async () => {
+    const stmts = readFileSync(PENDING, 'utf8').split('--> statement-breakpoint').map((x) => x.trim()).filter(Boolean);
+    const top = readFileSync(PENDING, 'utf8')
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('--'))
+      .join('\n')
+      .replace(/\$\$[\s\S]*?\$\$/g, '$$$$');
+    expect(top).not.toMatch(/^\s*LOCK\s+TABLE/im);
+    expect(top).not.toMatch(/\bSET\s+LOCAL\b/i);
+    const ROLLBACK = new Error('rollback');
+    await expect(
+      sql.begin(async (tx) => {
+        await tx`insert into notifications_outbox (restaurant_id, channel, target, body) values (${A.restaurantId}, 'email', 'role:owner', 'old')`;
+        for (const st of stmts) await tx.unsafe(st);
+        for (const st of stmts) await tx.unsafe(st); // idempotent
+        const [{ v }] = (await tx`select convalidated as v from pg_constraint where conname = 'notifications_outbox_no_role_target_check'`) as unknown as [
+          { v: boolean },
+        ];
+        expect(v).toBe(false);
+        await tx`insert into notifications_outbox (restaurant_id, channel, target, body) values (${A.restaurantId}, 'email', 'owner@a.test', 'ok')`;
+        await tx`savepoint s`;
+        await expect(
+          tx`insert into notifications_outbox (restaurant_id, channel, target, body) values (${A.restaurantId}, 'push', 'role:manager', 'new')`,
+        ).rejects.toMatchObject({ code: CHECK_VIOLATION });
+        await tx`rollback to savepoint s`;
+        throw ROLLBACK;
+      }),
+    ).rejects.toBe(ROLLBACK);
+    expect(await checkDef('notifications_outbox_no_role_target_check')).toBeUndefined();
+  });
+});
+
+describe('0073 addendum 1 (W3-11): doc_type, supplier_statements, payments + payment_invoices', () => {
+  async function ingestDoc(restaurantId: string): Promise<string> {
+    const hash = (restaurantId.replace(/-/g, '') + restaurantId.replace(/-/g, '')).slice(0, 64);
+    const [ch] = (await sql`
+      insert into ingest_channels (restaurant_id, kind, token_hash, token_hint)
+      values (${restaurantId}, 'email', ${hash}, 'hint') returning id`) as unknown as [{ id: string }];
+    const [m] = (await sql`
+      insert into ingest_messages (restaurant_id, channel_id, kind, provider, provider_message_id, sender, sender_allowed, status)
+      values (${restaurantId}, ${ch.id}, 'email', 'test', ${'m-' + restaurantId}, 'a@b.test', true, 'accepted') returning id`) as unknown as [{ id: string }];
+    const [d] = (await sql`
+      insert into ingest_documents (restaurant_id, message_id, status) values (${restaurantId}, ${m.id}, 'registered') returning id`) as unknown as [{ id: string }];
+    return d.id;
+  }
+
+  it('ingest_documents.doc_type is a nullable CHECKed varchar (not backfilled); ingest_documents gains UNIQUE (id, restaurant_id)', async () => {
+    expect(await col('ingest_documents', 'doc_type')).toMatchObject({ data_type: 'character varying', is_nullable: 'YES', column_default: null });
+    expect(await checkDef('ingest_documents_id_restaurant_id_key')).toBe('UNIQUE (id, restaurant_id)');
+    const d = await ingestDoc(A.restaurantId);
+    const [{ doc_type }] = (await sql`select doc_type from ingest_documents where id = ${d}`) as unknown as [{ doc_type: string | null }];
+    expect(doc_type).toBeNull();
+    await sql`update ingest_documents set doc_type = 'statement' where id = ${d}`;
+    await expectPgError(sql`update ingest_documents set doc_type = 'receipt' where id = ${d}`, CHECK_VIOLATION);
+  });
+
+  it('a statement: period end >= start, a known source, a storage key (not a URL), signed balances; refuses another tenant’s supplier or document; blocks deleting its supplier', async () => {
+    const r = A.restaurantId;
+    const base = { restaurantId: r, supplierId: A.supplierId, periodStart: '2026-11-01', periodEnd: '2026-11-30', source: 'upload' as const };
+    const [st] = await db.insert(supplierStatements).values({ ...base, openingBalanceAgorot: -5000, closingBalanceAgorot: 123456, storagePath: `${r}/statements/1.pdf`, uploadedBy: userId }).returning();
+    expect(st).toMatchObject({ openingBalanceAgorot: -5000, closingBalanceAgorot: 123456 });
+    await expectPgError(db.insert(supplierStatements).values({ ...base, periodEnd: '2026-10-31' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(supplierStatements).values({ ...base, source: 'fax' as never }), CHECK_VIOLATION);
+    await expectPgError(db.insert(supplierStatements).values({ ...base, storagePath: 'https://x.test/a.pdf' }), CHECK_VIOLATION);
+    await expectPgError(db.insert(supplierStatements).values({ ...base, supplierId: B.supplierId }), FK_VIOLATION);
+    const docB = await ingestDoc(B.restaurantId);
+    await expectPgError(db.insert(supplierStatements).values({ ...base, ingestDocumentId: docB }), FK_VIOLATION);
+    await expectPgError(db.delete(suppliers).where(eq(suppliers.id, A.supplierId)), FK_VIOLATION);
+    await db.delete(supplierStatements).where(eq(supplierStatements.restaurantId, r));
+  });
+
+  it('a payment: amount > 0 agorot, a known method; allocated once per invoice, > 0; refuses cross-tenant invoices; blocks deleting a paid invoice; allocations go with the payment; separate from payment_deductions', async () => {
+    const r = A.restaurantId;
+    const [inv] = await db.insert(invoices).values({ restaurantId: r, supplierId: A.supplierId, source: 'manual' }).returning();
+    const [invB] = await db.insert(invoices).values({ restaurantId: B.restaurantId, supplierId: B.supplierId, source: 'manual' }).returning();
+    const base = { restaurantId: r, supplierId: A.supplierId, paidOn: '2026-12-01', method: 'bank_transfer' as const };
+    await expectPgError(db.insert(payments).values({ ...base, amountAgorot: 0 }), CHECK_VIOLATION);
+    await expectPgError(db.insert(payments).values({ ...base, amountAgorot: 100, method: 'bitcoin' as never }), CHECK_VIOLATION);
+    await expectPgError(db.insert(payments).values({ ...base, supplierId: B.supplierId, amountAgorot: 100 }), FK_VIOLATION);
+    const [pay] = await db.insert(payments).values({ ...base, amountAgorot: 250000, reference: 'העברה 4471', createdBy: userId }).returning();
+    await db.insert(paymentInvoices).values({ restaurantId: r, paymentId: pay!.id, invoiceId: inv!.id, amountAgorot: 250000 });
+    await expectPgError(db.insert(paymentInvoices).values({ restaurantId: r, paymentId: pay!.id, invoiceId: inv!.id, amountAgorot: 1 }), UNIQUE_VIOLATION);
+    await expectPgError(db.insert(paymentInvoices).values({ restaurantId: r, paymentId: pay!.id, invoiceId: invB!.id, amountAgorot: 1 }), FK_VIOLATION);
+    await expectPgError(db.delete(invoices).where(eq(invoices.id, inv!.id)), FK_VIOLATION);
+    const [inv2] = await db.insert(invoices).values({ restaurantId: r, supplierId: A.supplierId, source: 'manual' }).returning();
+    await expectPgError(db.insert(paymentInvoices).values({ restaurantId: r, paymentId: pay!.id, invoiceId: inv2!.id, amountAgorot: 0 }), CHECK_VIOLATION);
+    await db.delete(payments).where(eq(payments.id, pay!.id));
+    expect(await db.select().from(paymentInvoices).where(eq(paymentInvoices.paymentId, pay!.id))).toHaveLength(0);
+    // A payment never writes a deduction (a credit note is never a short-pay).
+    expect(await db.select().from(paymentDeductions).where(eq(paymentDeductions.restaurantId, r))).toHaveLength(0);
+    await db.delete(invoices).where(eq(invoices.id, inv!.id));
+    await db.delete(invoices).where(eq(invoices.id, inv2!.id));
+    await db.delete(invoices).where(eq(invoices.id, invB!.id));
+  });
+});
+
+describe('0073 W3-11 decisions: one consolidated invoice per receipt; statement balance sign', () => {
+  it('a second consolidated link for the same goods receipt is refused (a double charge is flagged, never split)', async () => {
+    expect(await indexDef('consolidated_invoice_links_gr_unique')).toMatch(/UNIQUE INDEX[\s\S]*\(goods_receipt_id\)/);
+    const r = A.restaurantId;
+    const [gr] = await db.insert(goodsReceipts).values({ restaurantId: r, poId: A.poId }).returning();
+    const [inv1] = await db.insert(invoices).values({ restaurantId: r, supplierId: A.supplierId, source: 'manual' }).returning();
+    const [inv2] = await db.insert(invoices).values({ restaurantId: r, supplierId: A.supplierId, source: 'manual' }).returning();
+    await db.insert(consolidatedInvoiceLinks).values({ restaurantId: r, invoiceId: inv1!.id, goodsReceiptId: gr!.id, source: 'manual' });
+    await expectPgError(
+      db.insert(consolidatedInvoiceLinks).values({ restaurantId: r, invoiceId: inv2!.id, goodsReceiptId: gr!.id, source: 'proposal_accept' }),
+      UNIQUE_VIOLATION,
+    );
+    const [{ d }] = (await sql`select obj_description('consolidated_invoice_links'::regclass, 'pg_class') as d`) as unknown as [{ d: string }];
+    expect(d).toMatch(/at most ONE consolidated invoice/);
+    await db.delete(consolidatedInvoiceLinks).where(eq(consolidatedInvoiceLinks.goodsReceiptId, gr!.id));
+    await db.delete(invoices).where(eq(invoices.id, inv1!.id));
+    await db.delete(invoices).where(eq(invoices.id, inv2!.id));
+    await db.delete(goodsReceipts).where(eq(goodsReceipts.id, gr!.id));
+  });
+
+  it('statement balances are documented in the supplier’s view (positive = we owe) and carry no sign CHECK', async () => {
+    for (const c of ['opening_balance_agorot', 'closing_balance_agorot']) {
+      const [{ d }] = (await sql`
+        select col_description('supplier_statements'::regclass, a.attnum) as d
+        from pg_attribute a where a.attrelid = 'supplier_statements'::regclass and a.attname = ${c}`) as unknown as [{ d: string }];
+      expect(d, c).toMatch(/positive = we owe the supplier, negative = a credit in our favour/);
+    }
+    const rows = (await sql`
+      select pg_get_constraintdef(oid) as def from pg_constraint
+      where conrelid = 'supplier_statements'::regclass and contype = 'c'`) as unknown as Array<{ def: string }>;
+    expect(rows.some((r) => /balance_agorot/.test(r.def))).toBe(false);
+  });
+});
+
+describe('0073 hygiene (H-03 sign-off): holder_name NFKC envelope test; consent needs a visible character', () => {
+  const ENC = 'v1:k1:AAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBB:Y3Q';
+  const acct = (holderName: string) => ({
+    restaurantId: A.restaurantId,
+    supplierId: A.supplierId,
+    bankCode: '12',
+    branchCode: '345',
+    accountNumberEnc: ENC,
+    accountLast4: '6789',
+    holderName,
+    active: false,
+  });
+  // Each of these hides a ciphertext envelope behind something invisible or a fold.
+  const BAD = [
+    'ｖ１：abc', // fullwidth, folds to v1: under NFKC
+    '\u{E0001}v1:abc', // TAG
+    '\u{E0100}v1:abc', // VS17
+    '⠀v1:abc', // Braille blank
+    '￹v1:abc', // interlinear annotation anchor
+    'ㅤv1:abc', // Hangul filler (glibc: alnum)
+    'ᅟv1:abc',
+    'ᅠv1:abc',
+    'ﾠv1:abc',
+    ' ​v2:abc', // the old list still holds
+  ];
+  const GOOD = ['ירקות השרון בע"מ', 'Galilee Dairies Ltd 514123456', 'v1 trading', 'V8 Foods'];
+
+  it('the base CHECK refuses every hidden envelope and keeps real names', async () => {
+    for (const h of BAD) await expectPgError(db.insert(supplierBankAccounts).values(acct(h)), CHECK_VIOLATION);
+    for (const h of GOOD) {
+      const [row] = await db.insert(supplierBankAccounts).values(acct(h)).returning();
+      expect(row!.holderName).toBe(h);
+    }
+    expect(await checkDef('supplier_bank_accounts_holder_name_check')).toMatch(/normalize/);
+  });
+
+  it('restomatch_bank_audit_masked() applies the same NFKC test and stays pinned (search_path ends in pg_temp)', async () => {
+    for (const h of BAD) {
+      const [{ ok }] = (await sql`select public.restomatch_bank_audit_masked(${sql.json({ holder_name: h })}::jsonb) as ok`) as unknown as [{ ok: boolean }];
+      expect(ok, JSON.stringify(h)).toBe(false);
+    }
+    for (const h of GOOD) {
+      const [{ ok }] = (await sql`select public.restomatch_bank_audit_masked(${sql.json({ holder_name: h })}::jsonb) as ok`) as unknown as [{ ok: boolean }];
+      expect(ok, h).toBe(true);
+    }
+    const [{ cfg, secdef }] = (await sql`
+      select array_to_string(p.proconfig, ',') as cfg, p.prosecdef as secdef from pg_proc p
+      where p.oid = 'public.restomatch_bank_audit_masked(jsonb)'::regprocedure`) as unknown as [{ cfg: string; secdef: boolean }];
+    expect(cfg).toMatch(/search_path=.*pg_temp$/);
+    expect(secdef).toBe(false);
+  });
+
+  it('the consent CHECK needs a visible character in the notice version (U+3164 alone is refused)', async () => {
+    const [u] = await db.insert(users).values({ email: `h04-consent-${Date.now()}@0073.test` }).returning();
+    const optIn = (v: string) =>
+      db.update(users).set({ whatsappOptIn: true, whatsappOptInAt: new Date(), whatsappOptInSource: 'settings', whatsappOptInNoticeVersion: v }).where(eq(users.id, u!.id));
+    for (const v of ['ㅤ', 'ᅟᅠ', 'ﾠ', ' ', '​']) await expectPgError(optIn(v), CHECK_VIOLATION);
+    for (const v of ['2026-11', 'v3', 'גרסה']) await optIn(v);
+    await db.delete(users).where(eq(users.id, u!.id));
+  });
+});
+
+describe('0073 W3-04 audit: a purchase order\u2019s supplier belongs to the same restaurant', () => {
+  it('has the validated composite FK (supplier_id, restaurant_id) → suppliers(id, restaurant_id), indexed', async () => {
+    const [c] = (await sql`
+      select pg_get_constraintdef(oid) as def, convalidated from pg_constraint where conname = 'purchase_orders_supplier_same_tenant_fk'`) as unknown as [
+      { def: string; convalidated: boolean },
+    ];
+    expect(c.def).toMatch(/FOREIGN KEY \(supplier_id, restaurant_id\) REFERENCES suppliers\(id, restaurant_id\) ON DELETE RESTRICT/);
+    expect(c.convalidated).toBe(true);
+    expect(await indexDef('purchase_orders_supplier_restaurant_idx')).toMatch(/\(supplier_id, restaurant_id\)/);
+  });
+
+  it('refuses a PO (insert or update) pointing at another restaurant\u2019s supplier; same-tenant still works', async () => {
+    await expectPgError(db.insert(purchaseOrders).values({ restaurantId: A.restaurantId, supplierId: B.supplierId }), FK_VIOLATION);
+    await expectPgError(db.update(purchaseOrders).set({ supplierId: B.supplierId }).where(eq(purchaseOrders.id, A.poId)), FK_VIOLATION);
+    const [po] = await db.insert(purchaseOrders).values({ restaurantId: A.restaurantId, supplierId: A.supplierId }).returning();
+    expect(po!.supplierId).toBe(A.supplierId);
+    await db.delete(purchaseOrders).where(eq(purchaseOrders.id, po!.id));
+  });
+});

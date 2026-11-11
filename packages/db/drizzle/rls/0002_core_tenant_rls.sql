@@ -64,7 +64,12 @@ begin
     'export_runs','export_run_invoices','consolidated_invoice_links',
     'leak_month_snapshots','leak_month_corrections',
     'supplier_bank_accounts','supplier_bank_account_changes',
-    'push_subscriptions','notification_prefs','notification_settings'
+    'push_subscriptions','notification_prefs','notification_settings',
+    -- 0073 (wave 3, H-04)
+    'saved_views','view_subscriptions','product_count_units','waste_entries',
+    'notification_seen',
+    -- 0073 addendum 1 (W3-11)
+    'supplier_statements','payments','payment_invoices'
   ] loop
     if exists (
       select 1 from information_schema.columns
