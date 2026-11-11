@@ -127,6 +127,18 @@ describe('OCR failure hand-off (G-06)', () => {
     expect(await outbox()).toHaveLength(0);
   });
 
+  it('a foreign invoice id (another tenant) is neither changed nor announced', async () => {
+    const [inv] = await db
+      .insert(invoices)
+      .values({ restaurantId: otherId, status: 'ocr_pending', source: 'photo', rawImageUrl: 'https://x.test/b.jpg' })
+      .returning();
+    const res = await failAndHandOff(db, restaurantId, inv!.id, new Error('x'), 3);
+    expect(res.updated).toBe(false);
+    const [row] = await db.select().from(invoices).where(eq(invoices.id, inv!.id));
+    expect(row!.status).toBe('ocr_pending');
+    expect(await outbox()).toHaveLength(0);
+  });
+
   it('only the final attempt hands off; a non-final attempt does nothing', () => {
     expect(finalAttempt({ attemptsMade: 0, opts: { attempts: 3 } })).toBeNull();
     expect(finalAttempt({ attemptsMade: 1, opts: { attempts: 3 } })).toBeNull();

@@ -7,7 +7,7 @@
  *   verified addresses (recipients.ts `resolveAudience`); `role:` targets do not
  *   compile (address.ts) and throw INVALID_TARGET at runtime;
  * - writes ONE outbox row per (user, channel) with
- *   `dedupeKey = ${event}:${entity.id}:${userId}:${channel}`, so a replay
+ *   `dedupeKey = ${event}:${restaurantId}:${entity.id}:${userId}:${channel}`, so a replay
  *   enqueues nothing, and `payload.{userId, event}`;
  * - applies the owner's alert rules now: quiet 23:00–06:00 and on Shabbat, at
  *   most 6 per person per day (the 7th+ move to the next slot, `payload.digest`);
@@ -217,8 +217,19 @@ export interface NotifyResult {
 
 export const DEFAULT_CHANNELS: readonly AddressChannel[] = ['email', 'whatsapp'];
 
-export function notifyDedupeKey(event: string, entityId: string, userId: string, channel: AddressChannel): string {
-  return `${event}:${entityId}:${userId}:${channel}`;
+/**
+ * The outbox dedupe index is GLOBAL, so the key carries the restaurant: a user
+ * who belongs to two restaurants can never have one tenant's notice suppressed
+ * by (or deduped onto) the other's row (tenant-security-warden, #199).
+ */
+export function notifyDedupeKey(
+  event: string,
+  restaurantId: string,
+  entityId: string,
+  userId: string,
+  channel: AddressChannel,
+): string {
+  return `${event}:${restaurantId}:${entityId}:${userId}:${channel}`;
 }
 
 async function sentTodayCount(
@@ -291,7 +302,7 @@ export async function notify(tx: Database, input: NotifyInput): Promise<NotifyRe
           payload,
           relatedEntityType: input.entity.type,
           relatedEntityId: input.entity.id,
-          dedupeKey: notifyDedupeKey(input.event, input.entity.id, m.userId, channel),
+          dedupeKey: notifyDedupeKey(input.event, input.restaurantId, input.entity.id, m.userId, channel),
         });
         if (deduped) {
           result.deduped += 1;
