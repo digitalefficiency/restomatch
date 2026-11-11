@@ -40,8 +40,14 @@ export default async function RecoveryPage({
   const sp = await searchParams;
   const tabParam = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab;
   // WF-3 (owner I5): לשליחה · מעקב · מה קרה. Old links (?tab=all|closed|todo) land on the nearest view.
-  const view: 'send' | 'track' | 'history' =
-    tabParam === 'send' ? 'send' : tabParam === 'history' || tabParam === 'closed' || tabParam === 'all' ? 'history' : 'track';
+  const asked: 'send' | 'track' | 'history' | null =
+    tabParam === 'send'
+      ? 'send'
+      : tabParam === 'history' || tabParam === 'closed' || tabParam === 'all'
+        ? 'history'
+        : tabParam === 'track' || tabParam === 'todo'
+          ? 'track'
+          : null;
   const remind = (Array.isArray(sp.remind) ? sp.remind[0] : sp.remind) === '1';
   const pParam = Array.isArray(sp.p) ? sp.p[0] : sp.p;
   const period: Period = (PERIODS as readonly string[]).includes(pParam ?? '') ? (pParam as Period) : 'all';
@@ -75,6 +81,10 @@ export default async function RecoveryPage({
     send: claims.filter((c) => c.status === 'claimed').length,
     track: claims.filter((c) => !['claimed', 'recovered', 'written_off'].includes(c.status)).length,
   };
+  // No tab asked: "מעקב" — unless nothing is out with suppliers yet and requests wait to be sent,
+  // then "לשליחה" (never land the owner on an empty list while there is something to do).
+  const defaultView: 'send' | 'track' = tabCount.track === 0 && tabCount.send > 0 ? 'send' : 'track';
+  const view = asked ?? defaultView;
 
   return (
     <div className="space-y-6">
@@ -225,7 +235,7 @@ export default async function RecoveryPage({
             <span className="text-muted">{t('period.label')}</span>
             {PERIODS.map((p) => {
               const q = new URLSearchParams();
-              if (view !== 'track') q.set('tab', view);
+              if (view !== defaultView) q.set('tab', view);
               if (p !== 'all') q.set('p', p);
               const qs = q.toString();
               return (
@@ -247,7 +257,7 @@ export default async function RecoveryPage({
             {(['send', 'track', 'history'] as const).map((v) => (
               <Link
                 key={v}
-                href={`/dashboard/recovery${v === 'track' ? (period === 'all' ? '' : `?p=${period}`) : `?tab=${v}${period === 'all' ? '' : `&p=${period}`}`}`}
+                href={`/dashboard/recovery${v === defaultView ? (period === 'all' ? '' : `?p=${period}`) : `?tab=${v}${period === 'all' ? '' : `&p=${period}`}`}`}
                 aria-current={view === v ? 'page' : undefined}
                 className={`-mb-px inline-flex min-h-11 items-center gap-2 border-b-2 px-3 text-sm font-semibold ${
                   view === v ? 'border-primary text-ink' : 'border-transparent text-muted hover:text-ink'

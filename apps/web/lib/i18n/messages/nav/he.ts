@@ -38,6 +38,7 @@ export const he = {
     ordersNew: 'הזמנה חדשה',
     ordersCapture: 'הזמנה מוואטסאפ',
     orderDetail: 'הזמנה',
+    recoverySupplierSheet: 'דף לספק',
     receiving: 'קבלת סחורה',
     receivingPo: 'קבלת משלוח',
     catalog: 'קטלוג',

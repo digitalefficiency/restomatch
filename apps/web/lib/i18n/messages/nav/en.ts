@@ -35,6 +35,7 @@ export const en: Shape<typeof he> = {
     ordersNew: 'New order',
     ordersCapture: 'Order from WhatsApp',
     orderDetail: 'Order',
+    recoverySupplierSheet: 'Supplier sheet',
     receiving: 'Receiving',
     receivingPo: 'Receive delivery',
     catalog: 'Catalog',

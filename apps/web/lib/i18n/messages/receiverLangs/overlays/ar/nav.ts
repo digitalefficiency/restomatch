@@ -37,6 +37,7 @@ export const nav: Shape<typeof he> = {
     ordersNew: 'طلبية جديدة',
     ordersCapture: 'طلبية من واتساب',
     orderDetail: 'طلبية',
+    recoverySupplierSheet: 'صفحة المورّد',
     receiving: 'استلام البضاعة',
     receivingPo: 'استلام شحنة',
     catalog: 'الكتالوج',

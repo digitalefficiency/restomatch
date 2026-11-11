@@ -37,6 +37,7 @@ export const nav: Shape<typeof he> = {
     ordersNew: 'ሓድሽ ትእዛዝ',
     ordersCapture: 'ትእዛዝ ካብ WhatsApp',
     orderDetail: 'ትእዛዝ',
+    recoverySupplierSheet: 'ገጽ ኣቕራቢ',
     receiving: 'ምቕባል ኣቕሓ',
     receivingPo: 'ምቕባል ጽዕነት',
     catalog: 'ካታሎግ',
