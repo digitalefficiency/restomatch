@@ -78,6 +78,8 @@ export interface PreflightInvoice {
   duplicateOf: { invoiceId: string | null; basis: string | null } | null;
   /** W2-03 already holds this row as a DUPLICATE_INVOICE copy (or a G-04 note_billed_twice pair). */
   heldAsDuplicate: boolean;
+  /** G-05 INVOICE_CHECKED: a match has actually run on the invoice (lifecycle/predicates.ts). */
+  checked: boolean;
 }
 
 export interface BankChange {
@@ -111,7 +113,6 @@ export const UNUSUAL_FACTOR = 2;
 export const UNUSUAL_LOOKBACK = 12;
 export const UNUSUAL_MIN_SAMPLES = 3;
 
-const CHECKED = new Set(['matched', 'disputed', 'approved', 'paid']);
 const isPaid = (i: PreflightInvoice) => i.status === 'paid' || i.paidAt != null;
 
 /** NUMERIC string (shekels) → integer agorot, half-up at the agora. Null/garbage → 0. */
@@ -253,7 +254,7 @@ export function preflightFlags(facts: PreflightFacts): Map<string, PreflightFlag
     // 4 · unusual_amount (soft): > 2× the median of the last 12 checked invoices (≥ 3 samples).
     if (inv.supplierId && inv.totalAgorot > 0) {
       const samples = peers
-        .filter((p) => CHECKED.has(p.status) && p.totalAgorot > 0 && p.duplicateOf == null)
+        .filter((p) => p.checked && p.totalAgorot > 0 && p.duplicateOf == null)
         .sort((a, b) => Date.parse(b.invoiceDate) - Date.parse(a.invoiceDate))
         .slice(0, UNUSUAL_LOOKBACK)
         .map((p) => p.totalAgorot);
