@@ -2,8 +2,8 @@
  * The e2e copy budget per screen (MECHANISM §5.2/§5.4; W2-16 §5.4). `baseline` = today's measurement
  * with the §5.1 metric (folds closed, he, demo seed DEMO_TODAY=2026-10-25). Data (rows, list items,
  * cards) never counts, so a screen's number is its own copy and does not depend on spec order.
- * Re-baselined once on train-C staging (841cdba9, lab :3416, 11.11), identical in isolation and
- * after W2-04 + W2-08. Every adopting
+ * Re-baselined on train-C staging (841cdba9, 11.11; r4 on 45431599 after narrowing the data rule to
+ * tbody, ARIA data rows and [data-record]/[data-row]); identical in isolation and after W2-04 + W2-08. Every adopting
  * PR lowers its screen's baseline; once a baseline reaches the type budget, set `baseline: 'type'`.
  */
 export type ScreenType = 'phone' | 'dashboard' | 'detail';
@@ -50,18 +50,18 @@ export const SCREENS: CopyScreen[] = [
   { id: 'login', route: '/login', role: 'anon', vp: 'phone', type: 'phone', baseline: { first: 25, page: 25, blocks: 0 }, adopter: 'W2-16b' },
   { id: 'orders-new', route: '/dashboard/orders/new', role: 'chef', vp: 'phone', type: 'phone', baseline: { first: 17, page: 17, blocks: 0 }, adopter: 'W2-06' },
   // Dashboard — 1440×900
-  { id: 'owner-home', route: '/dashboard', role: 'owner', vp: 'desktop', type: 'dashboard', baseline: { first: 65, page: 65, blocks: 1 }, note: 'home cards are data now (W2-08 task spine); only hero copy + headings count', adopter: 'W2-08' },
-  { id: 'approvals', route: '/dashboard/approvals', role: 'owner', vp: 'desktop', type: 'dashboard', baseline: { first: 48, page: 48, blocks: 0 }, note: 'approval cards are data (W2-04 desk); page copy only', adopter: 'W2-04' },
-  { id: 'leaks', route: '/dashboard/leaks', role: 'owner', vp: 'desktop', type: 'dashboard', baseline: { first: 87, page: 154, blocks: 2 }, note: 'finding rows excluded; hub copy + heatmap legend count', adopter: 'W2-09' },
-  { id: 'claims', route: '/dashboard/recovery', role: 'owner', vp: 'desktop', type: 'dashboard', baseline: { first: 69, page: 85, blocks: 0 }, adopter: 'W2-10' },
-  { id: 'suppliers', route: '/dashboard/suppliers', role: 'owner', vp: 'desktop', type: 'dashboard', baseline: { first: 34, page: 36, blocks: 0 }, adopter: 'W2-11' },
+  { id: 'owner-home', route: '/dashboard', role: 'owner', vp: 'desktop', type: 'dashboard', baseline: { first: 70, page: 70, blocks: 1 }, note: 'r4: headings + static lists count again; needs-you task lists are [data-record]', adopter: 'W2-08' },
+  { id: 'approvals', route: '/dashboard/approvals', role: 'owner', vp: 'desktop', type: 'dashboard', baseline: { first: 110, page: 110, blocks: 0 }, note: 'r4: column headers + static copy count; approval cards are [data-record] (W2-04 list)', adopter: 'W2-04' },
+  { id: 'leaks', route: '/dashboard/leaks', role: 'owner', vp: 'desktop', type: 'dashboard', baseline: { first: 178, page: 289, blocks: 2 }, note: 'r4: headers + static lists count; driver chips are [data-record]', adopter: 'W2-09' },
+  { id: 'claims', route: '/dashboard/recovery', role: 'owner', vp: 'desktop', type: 'dashboard', baseline: { first: 79, page: 159, blocks: 0 }, note: 'r4: table headers count; claim cards/rows are data', adopter: 'W2-10' },
+  { id: 'suppliers', route: '/dashboard/suppliers', role: 'owner', vp: 'desktop', type: 'dashboard', baseline: { first: 46, page: 50, blocks: 0 }, note: 'r4: column headers count again', adopter: 'W2-11' },
   { id: 'bookkeeper-home', route: '/dashboard', role: 'bookkeeper', vp: 'desktop', type: 'dashboard', baseline: { first: 4, page: 4, blocks: 0 }, adopter: 'W2-08' },
-  { id: 'pay-run', route: '/dashboard/approvals/pay-run', role: 'bookkeeper', vp: 'desktop', type: 'dashboard', baseline: { first: 44, page: 67, blocks: 1 }, adopter: 'W2-03' },
+  { id: 'pay-run', route: '/dashboard/approvals/pay-run', role: 'bookkeeper', vp: 'desktop', type: 'dashboard', baseline: { first: 66, page: 89, blocks: 1 }, note: 'r4: table headers count; invoice cards/rows are data', adopter: 'W2-03' },
   { id: 'manager-home-phone', route: '/dashboard', role: 'manager', vp: 'phone', type: 'dashboard', baseline: { first: 6, page: 6, blocks: 0 }, adopter: 'W2-08' },
   // Detail — 1440×900
-  { id: 'leak-proof', route: '/dashboard/leaks/proof', role: 'owner', vp: 'desktop', type: 'detail', baseline: { first: 48, page: 153, blocks: 4 }, note: 'proof rows excluded; rules and method copy count (W2-09 adopts)', adopter: 'W2-09' },
-  { id: 'settings', route: '/dashboard/settings', role: 'owner', vp: 'desktop', type: 'detail', baseline: { first: 94, page: 393, blocks: 3 }, note: 'grew 347→393 on the old metric with train C (W2-14 visible rules, guarded roles, account cards); still over the detail budget', adopter: 'W2-14' },
-  { id: 'exports', route: '/dashboard/exports', role: 'owner', vp: 'desktop', type: 'detail', baseline: { first: 88, page: 128, blocks: 2 }, note: 'export history rows excluded', adopter: 'W2-14' },
+  { id: 'leak-proof', route: '/dashboard/leaks/proof', role: 'owner', vp: 'desktop', type: 'detail', baseline: { first: 55, page: 160, blocks: 4 }, note: 'r4: method/rules lists count; per-invoice proof list is [data-record]', adopter: 'W2-09' },
+  { id: 'settings', route: '/dashboard/settings', role: 'owner', vp: 'desktop', type: 'detail', baseline: { first: 94, page: 467, blocks: 3 }, note: 'grew with train C (W2-14 rules, roles, account cards); r4: headers and rule lists count', adopter: 'W2-14' },
+  { id: 'exports', route: '/dashboard/exports', role: 'owner', vp: 'desktop', type: 'detail', baseline: { first: 100, page: 143, blocks: 2 }, note: 'r4: headers + static lists count; export history is data', adopter: 'W2-14' },
 ];
 
 /** Relative-time strings ("לפני 3 דקות") drift; the ratchet absorbs this many words. */

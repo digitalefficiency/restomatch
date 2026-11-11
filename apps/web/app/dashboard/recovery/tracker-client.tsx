@@ -502,7 +502,7 @@ export function TrackerClient({
             </div>
 
             {/* Phone: cards grouped by supplier, the outstanding ₪ at the line end. */}
-            <div className="mt-3 space-y-4 md:hidden" data-testid="recovery-claim-cards">
+            <div className="mt-3 space-y-4 md:hidden" data-testid="recovery-claim-cards" data-record="">
               {groups.map((g) => {
                 const first = g.claims[0]!;
                 return (

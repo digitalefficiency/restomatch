@@ -60,7 +60,7 @@ export function NeedsYou({
         </p>
       ) : (
         <>
-          <ul className="grid grid-cols-1 gap-2">
+          <ul className="grid grid-cols-1 gap-2" data-record="">
             {shown.map((row) => (
               <li key={row.key} data-needs-row={row.key}>
                 <NeedLink row={row} />
@@ -72,7 +72,7 @@ export function NeedsYou({
               <summary className="flex min-h-12 cursor-pointer list-none items-center justify-center rounded-xl text-sm font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [&::-webkit-details-marker]:hidden">
                 {moreLabel(rest.length)}
               </summary>
-              <ul className="mt-2 grid grid-cols-1 gap-2">
+              <ul className="mt-2 grid grid-cols-1 gap-2" data-record="">
                 {rest.map((row) => (
                   <li key={row.key} data-needs-row={row.key}>
                     <NeedLink row={row} />

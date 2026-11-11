@@ -117,3 +117,20 @@ test('fold contract + axe with folds open (one real screen)', async ({ browser }
     expect(await t.getAttribute('aria-expanded')).toBe(before);
   }
 });
+
+test('measureCopy: headers and static lists count; record rows never do', async ({ page }) => {
+  await page.setContent(`<main>
+    <h1>כותרת העמוד</h1>
+    <ul><li>הסבר קבוע אחד</li><li>הסבר קבוע שני</li></ul>
+    <ol><li>שלב ראשון</li></ol>
+    <table><thead><tr><th>ספק</th><th>סכום</th></tr></thead>
+      <tbody><tr><td>שורת נתונים שלא נספרת</td></tr></tbody></table>
+    <div role="table"><div role="row"><span role="columnheader">עמודה</span></div>
+      <div role="row"><span role="gridcell">תא נתונים</span></div></div>
+    <ul data-record><li>כרטיס רשומה שלא נספר</li></ul>
+    <article data-row>שורה מסומנת</article>
+  </main>`);
+  const m = await measureCopy(page);
+  // כותרת העמוד (2) + 2×הסבר קבוע (3+3) + שלב ראשון (2) + ספק, סכום (2) + עמודה (1) = 13
+  expect(m.page).toBe(13);
+});
