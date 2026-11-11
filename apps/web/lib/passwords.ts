@@ -252,6 +252,8 @@ export async function authorizeCredentials(input: {
 export interface SessionSecurityState {
   tokenVersion: number;
   twoFactorEnabled: boolean;
+  /** user_credentials.totp_enabled_at as epoch ms (identifies the CURRENT enrolment), or null. */
+  twoFactorEnabledAt: number | null;
 }
 
 /** Whether the user already has a password set (drives set vs. change UI). */
@@ -277,6 +279,7 @@ export async function getSessionSecurityState(userId: string): Promise<SessionSe
   return {
     tokenVersion: row?.tokenVersion ?? 0,
     twoFactorEnabled: row?.totpEnabledAt != null,
+    twoFactorEnabledAt: row?.totpEnabledAt != null ? new Date(row.totpEnabledAt).getTime() : null,
   };
 }
 

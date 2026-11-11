@@ -1,0 +1,46 @@
+{
+  "restaurant": {
+    "name": "RestoMatch QA (פנימי)",
+    "businessId": "516111119",
+    "vatRate": 0.18,
+    "timezone": "Asia/Jerusalem"
+  },
+  "features": {
+    "contracts": true,
+    "recovery": true,
+    "orderCapture": true,
+    "dockSlip": true,
+    "receiverPwa": true,
+    "leakProof": true,
+    "supplierLeakCard": true,
+    "supplierLedger": true,
+    "monthlyReport": true,
+    "monthlyDigestPreview": true
+  },
+  "members": [
+    { "email": "qa-owner@example.invalid", "name": "QA Owner", "role": "owner" },
+    { "email": "qa-manager@example.invalid", "name": "QA Manager", "role": "manager" },
+    { "email": "qa-receiver@example.invalid", "name": "QA Receiver", "role": "receiver", "locale": "en" }
+  ],
+  "suppliers": [
+    {
+      "name": "QA ירקות",
+      "businessId": "301000022",
+      "vatRate": 0,
+      "orderSchedule": {
+        "windows": [{ "orderDays": [0, 2, 4], "cutoff": "14:00", "fulfillment": { "kind": "lead_days", "leadDays": 1 } }]
+      }
+    },
+    {
+      "name": "QA חלב",
+      "vatRate": 0.18,
+      "orderSchedule": {
+        "windows": [{ "orderDays": [1, 3], "cutoff": "12:00", "fulfillment": { "kind": "lead_days", "leadDays": 1 } }]
+      }
+    }
+  ],
+  "products": [
+    { "name": "עגבניה", "category": "ירקות", "unit": "ק״ג", "supplier": "QA ירקות" },
+    { "name": "חלב 3%", "category": "מוצרי חלב", "unit": "ליטר", "supplier": "QA חלב" }
+  ]
+}
