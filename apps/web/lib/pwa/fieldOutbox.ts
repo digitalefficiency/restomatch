@@ -55,7 +55,7 @@ export interface SlipSharedPayload {
   clientMutationId: string;
 }
 
-export type FieldKindIdentity<P> = Pick<OutboxKindDef<P>, 'idempotencyKey' | 'group'>;
+export type FieldKindIdentity<P> = Pick<OutboxKindDef<P>, 'idempotencyKey' | 'group' | 'last'>;
 
 /** One receipt's work goes in order: its counts, then its close, then its slip. */
 export const receiptGroup = (grId: string) => `gr:${grId}`;
@@ -64,9 +64,10 @@ export const GR_LINE_KIND: FieldKindIdentity<GrLinePayload> = {
   idempotencyKey: (p) => p.grLineId,
   group: (p) => (p.stamp ? receiptGroup(p.stamp.grId) : null),
 };
-export const SUBMIT_RECEIPT_KIND: FieldKindIdentity<SubmitReceiptPayload> = {
+export const SUBMIT_RECEIPT_KIND: FieldKindIdentity<SubmitReceiptPayload> & { last: true } = {
   idempotencyKey: (p) => p.grId,
   group: (p) => receiptGroup(p.grId),
+  last: true,
 };
 export const PHOTO_KIND: FieldKindIdentity<QueuedPhoto> = {
   idempotencyKey: (p) => p.clientUploadId,
