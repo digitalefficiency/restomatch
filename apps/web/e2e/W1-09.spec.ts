@@ -28,24 +28,41 @@ async function seedQueuedPhoto(page: Page, id: string) {
   await page.evaluate(
     (clientUploadId) =>
       new Promise<void>((resolve, reject) => {
-        const req = indexedDB.open('restomatch-receiver', 1);
-        req.onupgradeneeded = () => req.result.createObjectStore('photos', { keyPath: 'clientUploadId' });
+        // W2-05: the photo queue lives in the field outbox (key photo:<clientUploadId>).
+        const req = indexedDB.open('restomatch-outbox', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('items', { keyPath: 'key' });
         req.onerror = () => reject(req.error);
         req.onsuccess = () => {
           const db = req.result;
-          const t = db.transaction('photos', 'readwrite');
-          t.objectStore('photos').put({
-            clientUploadId,
+          const t = db.transaction('items', 'readwrite');
+          const createdAt = Date.now();
+          t.objectStore('items').put({
+            key: `photo:${clientUploadId}`,
+            kind: 'photo',
+            group: null,
+            payload: {
+              clientUploadId,
+              restaurantId: 'r',
+              userId: 'u',
+              poId: 'p',
+              supplierId: 's',
+              supplierName: 'ספק',
+              mimeType: 'image/jpeg',
+              blob: new Blob(['x'], { type: 'image/jpeg' }),
+              createdAt,
+              attempts: 0,
+              lastError: null,
+            },
             restaurantId: 'r',
             userId: 'u',
-            poId: 'p',
-            supplierId: 's',
-            supplierName: 'ספק',
-            mimeType: 'image/jpeg',
-            blob: new Blob(['x'], { type: 'image/jpeg' }),
-            createdAt: Date.now(),
+            capturedByName: null,
+            createdAt,
+            revision: 1,
             attempts: 0,
+            nextAttemptAt: createdAt,
             lastError: null,
+            status: 'pending',
+            warnedAt: null,
           });
           t.oncomplete = () => {
             db.close();
@@ -62,14 +79,20 @@ async function queuedIds(page: Page): Promise<string[]> {
   return page.evaluate(
     () =>
       new Promise<string[]>((resolve, reject) => {
-        const req = indexedDB.open('restomatch-receiver', 1);
+        const req = indexedDB.open('restomatch-outbox', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('items', { keyPath: 'key' });
         req.onerror = () => reject(req.error);
         req.onsuccess = () => {
           const db = req.result;
-          const r = db.transaction('photos', 'readonly').objectStore('photos').getAllKeys();
+          const r = db.transaction('items', 'readonly').objectStore('items').getAllKeys();
           r.onsuccess = () => {
             db.close();
-            resolve(r.result.map(String));
+            resolve(
+              r.result
+                .map(String)
+                .filter((k) => k.startsWith('photo:'))
+                .map((k) => k.slice('photo:'.length)),
+            );
           };
         };
       }),
