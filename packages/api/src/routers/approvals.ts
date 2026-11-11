@@ -27,7 +27,7 @@ import { LEAK_FILTER, notZeroShortTwin, type LeakBreakdownInvoice } from '@resto
 import { authedProcedure, financeProcedure, memberProcedure, router } from '../trpc';
 import { logActivity } from '../activity';
 import { canActOn, expandVisibleRoles } from '../lib/roles';
-import { claimableLines, sumClaims, type VatBasis } from '../lib/claims';
+import { claimableLines, isNeverClaimable, sumClaims, type VatBasis } from '../lib/claims';
 import { formatIlsAgorot } from '../reports/money';
 import { DECISION_COPY } from '../notifications/templates';
 
@@ -94,11 +94,10 @@ export const DECIDED_CONFLICT_PREFIX = 'approvals.decided:';
  * fails it is a check ("סמנו כנבדק"), never "דרוש ₪X" — the UI keys its verbs on
  * this, and queueSummary splits "להחלטה (₪)" from "לבדיקה (ללא ₪)".
  */
-const NEVER_CLAIMABLE = new Set(['PRICE_LOWER', 'UNORDERED_ARRIVAL', 'MISSING_ON_INVOICE']);
 export function isClaimableRow(r: { type: string; severity: string; deltaAmount: string | null }): boolean {
   return (
     (r.severity === 'warn' || r.severity === 'block') &&
-    !NEVER_CLAIMABLE.has(r.type) &&
+    !isNeverClaimable(r.type) &&
     Math.abs(Number(r.deltaAmount ?? 0)) > 0
   );
 }
