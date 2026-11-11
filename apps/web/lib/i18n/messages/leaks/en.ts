@@ -4,6 +4,13 @@ import type { he } from './he';
 export const en: Shape<typeof he> = {
   loading: 'Loading',
   hub: {
+    drivers: {
+      label: 'What moved the leak',
+      other: 'Other',
+      openTo: 'Breakdown',
+    },
+    tabsLabel: 'Leak sections',
+    tabs: { overview: 'Overview', breakdown: 'Breakdown', proof: 'Proof', prices: 'Prices that rose', report: 'Report' },
     title: 'Leak',
     subtitle: 'Leak = money you were billed beyond the order and what arrived, in checked invoices, before VAT.',
     loadingLabel: 'Loading the leak figures',
@@ -83,6 +90,22 @@ export const en: Shape<typeof he> = {
     colStatus: 'Status',
     colAmount: 'Amount',
     decide: 'To the approvals queue',
+    // W2-09c
+    backHub: 'To the leak',
+    groupUnpaid: 'Not paid yet — offset before payment · {amount}',
+    groupPaid: 'Paid — for a credit request · {amount}',
+    decideN: 'Decide {count, plural, one {1 gap} other {# gaps}} · {amount}',
+    toClaim: 'To the credit request',
+    history: {
+      toggle: 'History',
+      loading: 'Loading history',
+      empty: 'No decisions on this line yet',
+      error: "History didn't load · try again",
+      retry: 'Try again',
+      verb: { created: 'Found', approved: 'Approved', rejected: 'Rejected', escalated: 'Sent for a decision', other: 'Updated' },
+      role: { owner: 'Owner', manager: 'Manager', bookkeeper: 'Bookkeeper', receiver: 'Receiver', chef: 'Chef' },
+      system: 'System',
+    },
   },
   claims: {
     reminder: {
@@ -184,6 +207,10 @@ export const en: Shape<typeof he> = {
     openMonth: 'Open month · still updating · as of {date}',
     closedMonth: 'Month ended',
     print: 'Print / save as PDF',
+    exportXlsx: 'Download for Excel',
+    exportCsv: 'Download as CSV',
+    csv: { type: 'By gap type', supplier: 'By supplier', creep: 'Prices that rose' },
+    exportFailed: "The download didn't work · try again",
     prevMonth: 'Previous month',
     nextMonth: 'Next month',
     roleOnly: 'The monthly report is available to owners and managers. Ask the restaurant owner for access.',

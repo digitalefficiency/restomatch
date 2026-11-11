@@ -9,6 +9,13 @@
 export const he = {
   loading: 'טוען',
   hub: {
+    drivers: {
+      label: 'מה הזיז את הדליפה',
+      other: 'אחר',
+      openTo: 'פירוק',
+    },
+    tabsLabel: 'אזורי הדליפה',
+    tabs: { overview: 'סקירה', breakdown: 'פירוק', proof: 'הוכחה', prices: 'מחירים שעלו', report: 'דוח' },
     title: 'דליפה',
     subtitle: 'דליפה = כסף שחויבתם מעבר להזמנה ולמה שהתקבל, בחשבוניות שנבדקו, לפני מע״מ.',
     loadingLabel: 'טוען את נתוני הדליפה',
@@ -89,6 +96,22 @@ export const he = {
     colStatus: 'סטטוס',
     colAmount: 'סכום',
     decide: 'לתור האישורים',
+    // W2-09c
+    backHub: 'לדליפה',
+    groupUnpaid: 'עוד לא שולם — לקזז לפני תשלום · {amount}',
+    groupPaid: 'שולם — לדרישת זיכוי · {amount}',
+    decideN: 'החליטו על {count, plural, one {פער אחד} other {# פערים}} · {amount}',
+    toClaim: 'לדרישת הזיכוי',
+    history: {
+      toggle: 'היסטוריה',
+      loading: 'טוען היסטוריה',
+      empty: 'עוד אין החלטות על השורה',
+      error: 'ההיסטוריה לא נטענה · נסו שוב',
+      retry: 'נסו שוב',
+      verb: { created: 'נמצא', approved: 'אושר', rejected: 'נדחה', escalated: 'הועבר להחלטה', other: 'עודכן' },
+      role: { owner: 'בעלים', manager: 'מנהל', bookkeeper: 'הנהלת חשבונות', receiver: 'מקבל סחורה', chef: 'שף' },
+      system: 'המערכת',
+    },
   },
   claims: {
     reminder: {
@@ -190,6 +213,10 @@ export const he = {
     openMonth: 'חודש פתוח · מתעדכן · נכון ל-{date}',
     closedMonth: 'חודש שהסתיים',
     print: 'הדפס / שמור כ-PDF',
+    exportXlsx: 'הורדה לאקסל',
+    exportCsv: 'הורדה כ-CSV',
+    csv: { type: 'לפי סוג פער', supplier: 'לפי ספק', creep: 'מחירים שעלו' },
+    exportFailed: 'ההורדה לא הצליחה · נסו שוב',
     prevMonth: 'חודש קודם',
     nextMonth: 'חודש הבא',
     roleOnly: 'הדוח החודשי זמין לבעלים ולמנהלים. אפשר לבקש גישה מבעלי המסעדה.',

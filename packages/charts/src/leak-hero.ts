@@ -198,6 +198,55 @@ export interface LeakBreakdownLine {
   /** The invoice line the finding is on; null for invoice-level findings (DUPLICATE_INVOICE, TOTAL_MISMATCH, VAT_MISMATCH…). */
   invoiceLineId: string | null;
   productId: string | null;
+  // ── W2-09c evidence (additive and OPTIONAL — other packages build these objects; display only — the leak ₪ is deltaAmount, never recomputed here) ──
+  /** The engine's stored tolerance string (packages/matching), e.g. "price: ±2% or ₪5". */
+  toleranceUsed?: string | null;
+  /** The invoice line's billed quantity, unit and unit price (null for invoice-level findings). */
+  qtyBilled?: number | null;
+  unit?: string | null;
+  unitPriceBilled?: number | null;
+  /** The PO line's agreed unit price (the 'po' basis) and unit; the engine normalizes billed qty/price to this unit. */
+  unitPriceExpected?: number | null;
+  poUnit?: string | null;
+  /** The order behind the finding: the PO line's order, else the match run's. */
+  poId?: string | null;
+  /** The supplier's PO number: null until G-03 adds `purchase_orders.po_number` (display falls back to the id). */
+  poNumber?: string | null;
+  /** The delivery-note number (ת״מ): null here; G-03 adds the column, and packages/api parses `receiptNote` until then. */
+  deliveryNoteNumber?: string | null;
+  /** The goods receipt's free-text notes (where the ת.מ. number is written today). */
+  receiptNote?: string | null;
+  /** Where the expected value comes from. 'contract' arrives with W2-12 contract prices. */
+  expectedSource?: LeakExpectedSource | null;
+  /** When that basis was set: the PO's date for 'po', the receipt's for 'receipt' (ISO), else null. */
+  expectedAsOf?: string | null;
+}
+
+export type LeakExpectedSource = 'po' | 'contract' | 'p90' | 'receipt' | 'invoiceTotal' | 'vat';
+
+/** The engine's p90 tolerance prefix (packages/matching evaluateBaseline). */
+const P90_PREFIX = 'actual exceeds historical p90';
+
+/** The basis of a finding's expected value, from its type and stored tolerance (no engine import). */
+export function expectedSourceOf(type: string, toleranceUsed: string | null): LeakExpectedSource | null {
+  if ((toleranceUsed ?? '').startsWith(P90_PREFIX)) return 'p90';
+  switch (type) {
+    case 'PRICE_HIGHER':
+    case 'PRICE_LOWER':
+    case 'QTY_SHORT':
+    case 'MISSING_ON_INVOICE':
+    case 'UNORDERED_ITEM':
+    case 'UNIT_MISMATCH':
+      return 'po';
+    case 'QTY_OVER':
+      return 'receipt';
+    case 'TOTAL_MISMATCH':
+      return 'invoiceTotal';
+    case 'VAT_MISMATCH':
+      return 'vat';
+    default:
+      return null;
+  }
 }
 
 export interface LeakBreakdownInvoice {
@@ -207,6 +256,8 @@ export interface LeakBreakdownInvoice {
   status: string;
   supplierName: string | null;
   supplierNameEn: string | null;
+  /** W2-09c (optional, additive): the supplier, for the claims link of a paid invoice. */
+  supplierId?: string | null;
   totalInclVat: number;
   /** This invoice's contribution to the hero leak (capped at its total). */
   leakIls: number;
@@ -239,7 +290,7 @@ export async function computeLeakBreakdown(
       per.id, per.status, per.total, LEAST(per.raw_leak, per.total) AS leak,
       per.pending_link AND NOT per.awaiting_count AND NOT per.awaiting_question AS pending_link,
       i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS invoice_date,
-      s.name AS supplier_name, s.name_en AS supplier_name_en
+      s.name AS supplier_name, s.name_en AS supplier_name_en, i.supplier_id
     FROM per
     JOIN invoices i ON i.id = per.id
     LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${restaurantId}
@@ -265,6 +316,7 @@ export async function computeLeakBreakdown(
     status: String(r.status),
     supplierName: (r.supplier_name as string | null) ?? null,
     supplierNameEn: (r.supplier_name_en as string | null) ?? null,
+    supplierId: r.supplier_id == null ? null : String(r.supplier_id),
     totalInclVat: ils(r.total),
     leakIls: ils(r.leak),
     pendingLink: Boolean(r.pending_link),
@@ -285,11 +337,18 @@ async function breakdownLines(
       d.expected_value, d.actual_value, d.po_line_id, d.invoice_line_id, d.product_id,
       (${counts}) AS counts,
       p.canonical_name AS product_name, p.name_en AS product_name_en,
-      il.raw_description AS line_desc, il.raw_description_en AS line_desc_en
+      il.raw_description AS line_desc, il.raw_description_en AS line_desc_en,
+      d.tolerance_used, il.qty_billed, COALESCE(il.unit, pl.unit) AS unit, il.unit_price_billed,
+      pl.unit_price_expected, pl.unit AS po_unit, po.id AS po_id, po.created_at AS po_at,
+      gr.notes AS receipt_note, gr.received_at AS gr_at
     FROM discrepancies d
     JOIN match_runs mr ON mr.id = d.match_run_id AND mr.restaurant_id = ${restaurantId}
     LEFT JOIN products p ON p.id = d.product_id AND p.restaurant_id = ${restaurantId}
     LEFT JOIN invoice_lines il ON il.id = d.invoice_line_id
+    LEFT JOIN po_lines pl ON pl.id = d.po_line_id
+    LEFT JOIN purchase_orders po ON po.id = COALESCE(pl.po_id, mr.po_id) AND po.restaurant_id = ${restaurantId}
+    LEFT JOIN gr_lines grl ON grl.id = d.gr_line_id
+    LEFT JOIN goods_receipts gr ON gr.id = COALESCE(grl.gr_id, mr.gr_id) AND gr.restaurant_id = ${restaurantId}
     WHERE d.restaurant_id = ${restaurantId}
       AND mr.invoice_id IN (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
     ORDER BY ABS(d.delta_amount) DESC
@@ -314,6 +373,7 @@ async function breakdownLines(
       poLineId: (l.po_line_id as string | null) ?? null,
       invoiceLineId: l.invoice_line_id == null ? null : String(l.invoice_line_id),
       productId: (l.product_id as string | null) ?? null,
+      ...evidenceOf(l),
     });
     linesByInvoice.set(key, list);
   }
@@ -387,7 +447,7 @@ export async function computeInvoicesLeak(
       SELECT
         per.id, per.status, per.total, per.leak, per.pending_link,
         i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS invoice_date,
-        s.name AS supplier_name, s.name_en AS supplier_name_en
+        s.name AS supplier_name, s.name_en AS supplier_name_en, i.supplier_id
       FROM per
       JOIN invoices i ON i.id = per.id
       LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${restaurantId}
@@ -413,10 +473,35 @@ function invoiceOf(r: Row, lines: Map<string, LeakBreakdownLine[]>): LeakBreakdo
     status: String(r.status),
     supplierName: (r.supplier_name as string | null) ?? null,
     supplierNameEn: (r.supplier_name_en as string | null) ?? null,
+    supplierId: r.supplier_id == null ? null : String(r.supplier_id),
     totalInclVat: ils(r.total),
     leakIls: ils(r.leak),
     pendingLink: Boolean(r.pending_link),
     lines: lines.get(String(r.id)) ?? [],
+  };
+}
+
+const numOrNull = (v: unknown): number | null => (v == null ? null : Number(v));
+
+/** The W2-09c evidence fields of one breakdown row (raw facts; packages/api verifies the math). */
+function evidenceOf(l: Row) {
+  const type = String(l.type);
+  const toleranceUsed = (l.tolerance_used as string | null) ?? null;
+  const expectedSource = expectedSourceOf(type, toleranceUsed);
+  const asOf = expectedSource === 'po' ? l.po_at : expectedSource === 'receipt' ? l.gr_at : null;
+  return {
+    toleranceUsed,
+    qtyBilled: numOrNull(l.qty_billed),
+    unit: (l.unit as string | null) ?? null,
+    unitPriceBilled: numOrNull(l.unit_price_billed),
+    unitPriceExpected: numOrNull(l.unit_price_expected),
+    poUnit: (l.po_unit as string | null) ?? null,
+    poId: l.po_id == null ? null : String(l.po_id),
+    poNumber: null,
+    deliveryNoteNumber: null,
+    receiptNote: (l.receipt_note as string | null) ?? null,
+    expectedSource,
+    expectedAsOf: asOf == null ? null : iso(asOf),
   };
 }
 
