@@ -97,7 +97,7 @@ export default async function ChainPage({
   if (!data) {
     return (
       <div>
-        <SectionHeader level={1} title={t('dashboard.title')} subtitle={t('dashboard.subtitle')} />
+        <SectionHeader level={1} title={t('dashboard.title')} />
         {blocked === 'entitlement' ? (
           <EntitlementUpsell feature="chain" title={t('dashboard.upsell')} />
         ) : (
@@ -157,7 +157,6 @@ export default async function ChainPage({
         title={t('dashboard.title')}
         subtitle={
           <>
-            {t('dashboard.subtitle')}{' '}
             <span className="text-subtle">{t('dashboard.scopeNote', { count: formatNumber(data.branches.length, locale) })}</span>{' '}
             <Link href="/dashboard/branches" className="font-semibold text-primary hover:text-ink" data-testid="chain-manage-branches">
               {t('switcher.manageLink')}
@@ -313,7 +312,9 @@ export default async function ChainPage({
                       <span className="font-bold" {...originalProps(alerts.focus.name)}>{alerts.focus.name}</span>
                       <span className="text-muted">
                         {' · '}
-                        {t('dashboard.alerts.body', { leak: ils(alerts.focus.leakIls), pct: pct(alerts.focus.leakPct) })}
+                        {alerts.focus.leakPct === null
+                          ? t('dashboard.alerts.bodyNoSpend', { leak: ils(alerts.focus.leakIls) })
+                          : t('dashboard.alerts.body', { leak: ils(alerts.focus.leakIls), pct: pct(alerts.focus.leakPct) })}
                       </span>
                     </p>
                     {alerts.focus.topDriver ? (
@@ -360,12 +361,12 @@ export default async function ChainPage({
       ) : null}
 
       {noData ? (
-        <EmptyState className="mt-8" title={t('dashboard.empty.title')} description={t('dashboard.empty.body')} />
+        <EmptyState className="mt-8" title={t('dashboard.empty.title')} />
       ) : null}
 
       {/* Ranking table. */}
       <section className="mt-10">
-        <SectionHeader title={t('dashboard.ranking.title')} subtitle={t('dashboard.ranking.subtitle')} />
+        <SectionHeader title={t('dashboard.ranking.title')} />
         <Card padding="none" className="overflow-x-auto">
           <table className="w-full sm:min-w-[44rem] text-sm" data-testid="chain-ranking">
             <thead>
@@ -411,9 +412,10 @@ export default async function ChainPage({
                           <span className="text-subtle">{t('dashboard.ranking.flat')}</span>
                         ) : (
                           b.thinBase ? (
-                            <span className="text-muted" title={t('dashboard.ranking.thinBase')} data-delta="thin">
+                            <span className="text-muted" data-delta="thin">
                               {b.leakDeltaIls > 0 ? '+' : '−'}
                               {ils(Math.abs(b.leakDeltaIls))}
+                              <span className="block text-xs text-subtle">{t('dashboard.ranking.thinBase')}</span>
                             </span>
                           ) : (
                             <span className={cn('inline-flex items-center gap-1', b.leakDeltaIls > 0 ? 'text-danger' : 'text-primary')}>
@@ -588,7 +590,7 @@ export default async function ChainPage({
 
       {/* Top suppliers across branches. */}
       <section className="mt-10">
-        <SectionHeader title={t('dashboard.suppliers.title')} subtitle={t('dashboard.suppliers.subtitle')} />
+        <SectionHeader title={t('dashboard.suppliers.title')} />
         {data.topSuppliers.length === 0 ? (
           <EmptyState icon={<Undo2 className="h-6 w-6" />} title={t('dashboard.suppliers.empty')} />
         ) : (
