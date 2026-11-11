@@ -18,7 +18,6 @@ import { renderEmail, ilsSpan, type RenderedEmail } from '../notifications/templ
 import type { ReportLocale } from '../reports/money';
 import { chaseMoney, ddMM } from './chase';
 import { creditSuggestions } from './creditSuggest';
-import { AWAITING_SUPPLIER } from './lifecycle';
 import { CHASE_DEFAULTS, awaitingChaseSql, chaseKindOf, rechaseDueSql, type ChaseKind, type ChaseOptions } from './overdue';
 import { OVERDUE_DAYS, syncClaims } from './service';
 
@@ -348,12 +347,9 @@ export async function supplierReminderDraft(
     CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) tz
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
     WHERE c.restaurant_id = ${restaurantId} AND c.supplier_id = ${supplierId}
-      AND c.status IN (${sql.join(AWAITING_SUPPLIER.map((st) => sql`${st}`), sql`, `)})
-      AND c.amount_agorot > c.credited_agorot
-      -- The ONE overdue rule (findOverdue, the tracker badge, the web countdown): calendar days, restaurant zone.
-      AND ${overdueSql(now, sql`tz.tz`)}
-      -- Owner 31.10: a never-claimable type is not owed — never chased (as findOverdue).
-      AND NOT ${NEVER_CLAIMABLE_TYPE_SQL}
+      -- The ONE chase predicate (recovery/overdue.ts) findOverdue uses: awaiting statuses, ₪ still
+      -- owed, never a never-claimable type, more than CLAIM_ANSWER_DAYS calendar days in the zone.
+      AND ${awaitingChaseSql(now, sql`tz.tz`)}
     ORDER BY waiting DESC, c.id
   `);
   const rows = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
