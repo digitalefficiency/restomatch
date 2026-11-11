@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
@@ -21,6 +21,7 @@ import { Peek } from '@/lib/components/desk/Peek';
 import { deskKeyOf, isTypingTarget, moveIndex } from '@/lib/components/desk/keys';
 import { useMediaQuery } from '@/lib/components/desk/useMediaQuery';
 import { DeadlineChip } from '@/lib/components/money';
+import { daysUntil } from '@/lib/components/money/format';
 import { BULK_CAP_AGOROT, bulkSelection, groupByInvoice, newClientMutationId } from './groups';
 import {
   EscalateSheet,
@@ -88,7 +89,24 @@ interface UndoState {
   failed?: boolean;
 }
 
-export function ApprovalsList({
+/**
+ * "Today" for this render (#418): the server passes its clock, so the deadline
+ * day count in the server HTML and on hydration come from one instant (never a
+ * render near Israel midnight or a cached page hydrated later).
+ */
+const NowCtx = createContext<number | null>(null);
+// The repo's React types need the Provider cast (as lib/components/feedback/LiveRegion.tsx).
+const NowProvider = NowCtx.Provider as unknown as React.ComponentType<{ value: number | null; children: React.ReactNode }>;
+
+export function ApprovalsList(props: React.ComponentProps<typeof ApprovalsListInner>) {
+  return (
+    <NowProvider value={props.nowMs ?? null}>
+      <ApprovalsListInner {...props} />
+    </NowProvider>
+  );
+}
+
+function ApprovalsListInner({
   initial,
   initialSummary,
   filters = {},
@@ -110,6 +128,8 @@ export function ApprovalsList({
   viewerRole?: string | null;
   /** `/dashboard/approvals/[invoiceId]`: one card at a time, the 50/50 pair pinned to the thumb. */
   landing?: boolean;
+  /** The server's clock for this render (#418): server HTML and hydration count days from ONE instant. */
+  nowMs?: number;
 }) {
   const compact = density === 'compact';
   const t = useT(approvals);
@@ -948,10 +968,11 @@ function DecisionCard({
     });
   }
 
+  const nowMs = useContext(NowCtx);
+  const today = nowMs != null ? new Date(nowMs) : undefined;
   const due = d.invoiceDueDate ? new Date(d.invoiceDueDate) : null;
-  const dueDays = due
-    ? Math.floor((startOfDay(due).getTime() - startOfDay(new Date()).getTime()) / 86_400_000)
-    : null;
+  // Israel calendar days from the render's ONE clock (#418), like the chip itself.
+  const dueDays = due ? daysUntil(due, today) : null;
 
   return (
     <Card
@@ -1022,7 +1043,7 @@ function DecisionCard({
               <Clock className="h-3.5 w-3.5" aria-hidden="true" />
               {waitingText(t, d.createdAt, locale)}
             </span>
-            {due && dueDays != null ? <DeadlineChip due={due} /> : null}
+            {due && dueDays != null ? <DeadlineChip due={due} today={today} /> : null}
           </p>
         </div>
 
@@ -1553,11 +1574,6 @@ function itemName(locale: 'he' | 'en', d: QueueItem): string {
   );
 }
 
-function startOfDay(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
 const add = (s: ReadonlySet<string>, id: string) => new Set(s).add(id);
 const remove = (s: ReadonlySet<string>, id: string) => {
   const n = new Set(s);

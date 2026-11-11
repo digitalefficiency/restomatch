@@ -47,6 +47,8 @@ export default async function ApprovalInvoicePage({ params }: { params: Promise<
         filtered
         filteredNote={t('desk.landingDone')}
         viewerRole={viewerRole}
+        // #418: the server's clock for this render — the deadline days hydrate unchanged.
+        nowMs={Date.now()}
         landing
       />
     </div>

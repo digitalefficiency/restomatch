@@ -146,6 +146,8 @@ async function ApprovalsContent({ searchParams }: { searchParams: SearchParams }
         filteredNote={tv('filteredNote')}
         density={view.density}
         viewerRole={viewerRole}
+        // #418: the server's clock for this render — the deadline days hydrate unchanged.
+        nowMs={Date.now()}
       />
     </div>
   );
