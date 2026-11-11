@@ -24,3 +24,29 @@ describe('LeakHeatmap', () => {
     }
   });
 });
+
+describe('LeakHeatmap — RTL, tokens and reachable tiles (W2-09c)', () => {
+  const render = (items: Parameters<typeof LeakHeatmap>[0]['items']) =>
+    renderToStaticMarkup(createElement(LeakHeatmap, { items, locale: 'he' }));
+
+  it('no dir="ltr", no font-mono, no hex colour on the tiles', () => {
+    const html = render([cell(0.3)]);
+    expect(html).not.toContain('dir="ltr"');
+    expect(html).not.toContain('font-mono');
+    expect(html).not.toMatch(/#[0-9A-Fa-f]{6}|rgb\(\d/);
+    expect(html).toMatch(/bg-creep-[1-5]/);
+  });
+
+  it('every tile has a full-sentence name (not title= only)', () => {
+    const html = render([cell(0.3)]);
+    expect(html).not.toContain('title=');
+    expect(html).toMatch(/aria-label="Draft beer keg 30L · Steinberg Beverages: \+/);
+  });
+
+  it('with href a tile is a link (a door) stamped with the drill contract in agorot', () => {
+    const html = render([{ ...cell(0.3), href: '/dashboard/leaks#creep-1' }]);
+    expect(html).toMatch(/<a href="\/dashboard\/leaks#creep-1"/);
+    expect(html).toContain('data-drill=""');
+    expect(html).toContain('data-drill-total="11000"');
+  });
+});

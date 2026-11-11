@@ -139,10 +139,10 @@ for (const locale of ['he', 'en'] as const) {
     await page.reload();
     await expect(page.locator('main input[inputmode="decimal"][id^="qty-"]').nth(0)).toHaveValue('2.5');
 
-    await page.getByRole('button', { name: locale === 'he' ? 'סיים ספירה' : 'Finish count' }).click();
+    await page.getByRole('button', { name: locale === 'he' ? 'סיום ספירה' : 'Finish count' }).click();
     // Blank ≠ zero: the uncounted items are listed and closing needs an explicit OK.
     await expect(page.getByTestId('uncounted-list')).toBeVisible();
-    const confirm = page.getByRole('button', { name: locale === 'he' ? 'כן, סיים' : 'Yes, finish' });
+    const confirm = page.getByRole('button', { name: locale === 'he' ? 'כן, לסגור' : 'Yes, finish' });
     await expect(confirm).toBeDisabled();
     await page.getByTestId('uncounted-list').getByRole('checkbox').check();
     await confirm.click();

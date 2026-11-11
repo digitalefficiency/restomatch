@@ -9,6 +9,41 @@ import type { HomeCaller } from './caller';
 import { HomeSection } from './section';
 import { BoardSkeleton, CardSkeleton } from './skeletons';
 import { ReceivingBoard } from './receiving-board';
+import { NeedsYou } from './needs-you';
+import { NeedsSkeleton } from './skeletons';
+import { taskRow } from '@/lib/components/notifications/rows';
+import type { Task } from '@/lib/components/notifications/model';
+
+/**
+ * Staff "מחכה לך" (W2-08): the same task spine, counts only — the server sends
+ * no ₪ for receiver/chef (tasks.mine nulls it), and this strip renders none.
+ * One home per number: a task whose figure already has its own block on this
+ * home (`homed`: the chef's count tile) is not repeated; with nothing left the
+ * strip renders nothing (the blocks below say the rest).
+ */
+export function StaffNeeds({ load, homed = [], t, locale, fail }: { load: () => Promise<{ tasks: Task[]; failed: string[] }>; homed?: readonly Task['type'][]; t: T; locale: Locale; fail: Set<string> }) {
+  return (
+    <HomeSection name="needs" fallback={<NeedsSkeleton rows={2} />} forceFail={fail.has('needs')}>
+      <StaffNeedsBody load={load} homed={homed} t={t} locale={locale} />
+    </HomeSection>
+  );
+}
+
+async function StaffNeedsBody({ load, homed, t, locale }: { load: () => Promise<{ tasks: Task[]; failed: string[] }>; homed: readonly Task['type'][]; t: T; locale: Locale }) {
+  const { tasks, failed } = await load();
+  const rows = tasks
+    .filter((x) => x.scope === 'mine' && !homed.includes(x.type))
+    .map((x) => taskRow({ ...x, ilsAgorot: null }, t, locale, () => ''))
+    .filter((r): r is NonNullable<typeof r> => r !== null)
+    .map((r) => ({ ...r, agorot: null, notes: undefined }));
+  if (failed.length > 0 && rows.length === 0) throw new Error(`[home] task sources failed: ${failed.join(',')}`);
+  if (rows.length === 0) return null;
+  return (
+    <div className="mb-4 [&_#needs-you-title]:lg:sr-only">
+      <NeedsYou title={t('needs.title')} rows={rows} zero={t('needs.staffZero')} moreLabel={(c) => t('needs.more', { count: formatNumber(c, locale) })} />
+    </div>
+  );
+}
 
 type T = Translator<typeof overviewHe>;
 const focus = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2';

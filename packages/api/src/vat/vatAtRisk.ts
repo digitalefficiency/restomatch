@@ -1,5 +1,6 @@
 import { sql, type Database } from '@restomatch/db';
 import { mulIls, quantizeIls, sumIls } from '@restomatch/matching';
+import { loadCaseState, type AllocationStage } from './caseState';
 
 /**
  * VAT at risk (flag `vatAtRisk`) — Israel Invoices reform ("חשבוניות ישראל").
@@ -74,6 +75,13 @@ export interface VatAtRiskRow {
   allocationNumber: string | null;
   deductionDeadline: string;
   daysLeft: number;
+  // ── AU-08 case state (additive; read from audit rows + corrected copies) ──
+  /** Latest `vat.allocation_requested` (ISO), or null. */
+  requestedAt: string | null;
+  requestCount: number;
+  /** A corrected duplicate copy of this invoice carrying a well-formed number. */
+  suggestedNumber: { value: string; fromInvoiceId: string } | null;
+  stage: AllocationStage;
 }
 
 export interface VatAtRiskResult {
@@ -165,8 +173,14 @@ export async function vatAtRisk(
       allocationNumber: r.allocation_number?.trim() ? r.allocation_number.trim() : null,
       deductionDeadline: deadline,
       daysLeft,
+      requestedAt: null,
+      requestCount: 0,
+      suggestedNumber: null,
+      stage: 'new',
     });
   }
+  const cases = await loadCaseState(db, restaurantId, out, today);
+  for (const row of out) Object.assign(row, cases.get(row.invoiceId));
   // Most urgent first: the window closing soonest.
   out.sort((a, b) => a.daysLeft - b.daysLeft || b.vatAtRisk - a.vatAtRisk);
   return {

@@ -12,7 +12,7 @@ import { leakProof as leakProofNs } from '@/lib/i18n/messages/leakProof';
 import { homeCaller } from './home/caller';
 import { FinanceHome } from './home/finance';
 import { forcedFailures } from './home/section';
-import { ChefHome, ReceiverHome } from './home/staff';
+import { ChefHome, ReceiverHome, StaffNeeds } from './home/staff';
 import { HomeQuestions } from './home/questions';
 
 /**
@@ -52,6 +52,7 @@ export default async function DashboardPage({
     return (
       <div data-home="receiver">
         {header}
+        {/* The receiving board IS the receiver's "מחכה לך" (one home per number): no strip above it. */}
         <ReceiverHome caller={homeCaller(caller, 'receiver')} t={t} locale={locale} fail={fail} />
       </div>
     );
@@ -60,6 +61,7 @@ export default async function DashboardPage({
     return (
       <div data-home="chef">
         {header}
+        <StaffNeeds load={() => caller.tasks.mine()} homed={['close_step']} t={t} locale={locale} fail={fail} />
         {questionsLine}
         <ChefHome caller={homeCaller(caller, 'chef')} t={t} locale={locale} fail={fail} />
       </div>

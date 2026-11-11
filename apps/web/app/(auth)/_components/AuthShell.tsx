@@ -6,6 +6,7 @@ import { LanguagePicker } from '@/lib/i18n/LanguagePicker';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { auth as authMessages } from '@/lib/i18n/messages/auth';
 import { getT } from '@/lib/i18n/server';
+import { LegalLinks } from '@/lib/legal/LegalLinks';
 import type { MessageKey } from '@/lib/i18n/translate';
 
 const WIDTH = { md: 'max-w-md', lg: 'max-w-lg', xl: 'max-w-xl' } as const;
@@ -76,18 +77,8 @@ export async function AuthShell({
       </main>
 
       <footer className="px-4 pb-6 pt-2">
-        <nav aria-label={t('shell.footerLabel')} className="flex flex-wrap items-center justify-center gap-x-1 text-sm text-muted">
-          <Link href="/accessibility" className="inline-flex min-h-11 items-center px-2 hover:text-ink hover:underline">
-            {t('shell.accessibility')}
-          </Link>
-          <span aria-hidden="true">·</span>
-          <Link href="/privacy" className="inline-flex min-h-11 items-center px-2 hover:text-ink hover:underline">
-            {t('shell.privacy')}
-          </Link>
-          <span aria-hidden="true">·</span>
-          <Link href="/terms" className="inline-flex min-h-11 items-center px-2 hover:text-ink hover:underline">
-            {t('shell.terms')}
-          </Link>
+        <nav aria-label={t('shell.footerLabel')} className="text-muted">
+          <LegalLinks locale={t.locale} variant="inline-row" />
         </nav>
       </footer>
     </div>

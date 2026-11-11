@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ArrowLeft, FileWarning } from 'lucide-react';
 import { createServerCaller } from '@/lib/trpc/server';
-import { Badge, Card, EmptyState, SectionHeader, displayName } from '@/lib/components';
+import { Badge, Card, EmptyState, Money, SectionHeader, displayName } from '@/lib/components';
 import { formatIls } from '@/lib/money';
 import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { getLocale, getT } from '@/lib/i18n/server';
@@ -36,8 +36,9 @@ export async function OverContractCard({ variant = 'full' }: { variant?: 'full' 
   if (!data) return null;
   if (variant === 'compact' && data.lines.length === 0) return null;
   const [t, locale] = await Promise.all([getT(contractsNs), getLocale()]);
-  const money = (ils: number) => formatIls(ils, { locale, maximumFractionDigits: 2 });
-  const total = formatIls(data.totalOverAgorot / 100, { locale, maximumFractionDigits: 2 });
+  const money = (ils: number) => formatIls(ils, { locale, maximumFractionDigits: 4 });
+  // W2-12: every ₪ is a <Money> (₪ left of the digits in he; no dir=ltr, no mono).
+  const total = <Money agorot={data.totalOverAgorot} context="tile" decimals={2} state="atRisk" locale={locale} />;
   const lines = [...data.lines].sort((a, b) => b.overAgorot - a.overAgorot);
 
   if (variant === 'compact') {
@@ -56,9 +57,7 @@ export async function OverContractCard({ variant = 'full' }: { variant?: 'full' 
           </div>
           <div className="shrink-0 text-end">
             <p className="text-xs text-subtle">{t('over.total')}</p>
-            <p className="font-mono text-2xl font-bold tabular-nums text-warn">
-              <bdi dir="ltr">{total}</bdi>
-            </p>
+            <p className="text-2xl font-bold">{total}</p>
           </div>
         </div>
         <ul className="mt-3 space-y-1.5 text-sm">
@@ -71,17 +70,15 @@ export async function OverContractCard({ variant = 'full' }: { variant?: 'full' 
                   {displayName(l.supplierName, l.supplierNameEn, locale).primary}
                 </span>
               </span>
-              <Badge
-                tone="warning"
-                className="font-mono tabular-nums"
-              >
+              <Badge tone="warning">
                 <span
                   title={t('over.badgeTitle', {
                     contract: money(l.contractUnitPrice),
                     billed: money(l.billedUnitPrice),
                   })}
                 >
-                  <bdi dir="ltr">+{formatIls(l.overAgorot / 100, { locale, maximumFractionDigits: 2 })}</bdi>
+                  {/* "₪10.00 מעל החוזה" — a word, never a concatenated "+" (H-01 adds signDisplay). */}
+                  <Money agorot={l.overAgorot} context="line" locale={locale} /> {t('over.badge')}
                 </span>
               </Badge>
             </li>
@@ -89,8 +86,8 @@ export async function OverContractCard({ variant = 'full' }: { variant?: 'full' 
         </ul>
         <div className="mt-3">
           <Link
-            href="/dashboard/contracts?tab=contracts"
-            className="inline-flex items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            href="/dashboard/contracts?tab=queue"
+            className="inline-flex min-h-11 items-center gap-1 rounded-lg text-sm font-semibold text-primary transition-colors hover:text-ink"
           >
             {t('over.leaksLink')}
             <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
@@ -109,9 +106,7 @@ export async function OverContractCard({ variant = 'full' }: { variant?: 'full' 
         action={
           <div className="text-end">
             <p className="text-xs text-subtle">{t('over.total')}</p>
-            <p className="font-mono text-2xl font-bold tabular-nums text-warn">
-              <bdi dir="ltr">{total}</bdi>
-            </p>
+            <p className="text-2xl font-bold">{total}</p>
             <p className="text-xs text-subtle">
               {t('over.lines', { count: formatNumber(data.lineCount ?? lines.length, locale) })}
             </p>
@@ -127,28 +122,25 @@ export async function OverContractCard({ variant = 'full' }: { variant?: 'full' 
         />
       ) : (
         <Card elevated padding="none" flow className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full text-sm">
             <caption className="sr-only">{t('over.caption')}</caption>
-            <thead className="border-b border-line bg-surface-2 text-xs uppercase tracking-wider text-subtle">
+            <thead className="border-b border-line bg-surface-2 text-xs text-subtle">
               <tr>
                 <th scope="col" className="p-3 text-start font-semibold">{t('over.colInvoice')}</th>
                 <th scope="col" className="p-3 text-start font-semibold">{t('over.colDate')}</th>
                 <th scope="col" className="p-3 text-start font-semibold">{t('over.colSupplier')}</th>
                 <th scope="col" className="p-3 text-start font-semibold">{t('over.colProduct')}</th>
-                <th scope="col" className="p-3 text-start font-semibold">{t('over.colQty')}</th>
-                <th scope="col" className="p-3 text-start font-semibold">{t('over.colContract')}</th>
-                <th scope="col" className="p-3 text-start font-semibold">{t('over.colBilled')}</th>
-                <th scope="col" className="p-3 text-start font-semibold">{t('over.colOver')}</th>
+                <th scope="col" className="p-3 text-right font-semibold">{t('over.colQty')}</th>
+                <th scope="col" className="p-3 text-right font-semibold">{t('over.colContract')}</th>
+                <th scope="col" className="p-3 text-right font-semibold">{t('over.colBilled')}</th>
+                <th scope="col" className="p-3 text-right font-semibold">{t('over.colOver')}</th>
               </tr>
             </thead>
             <tbody>
               {shown.map((l) => (
                 <tr key={l.invoiceLineId} className="border-t border-line transition-colors hover:bg-surface-2/60">
                   <td className="p-3">
-                    <Link
-                      href={`/dashboard/invoices/${l.invoiceId}`}
-                      className="font-mono text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
-                    >
+                    <Link href={`/dashboard/invoices/${l.invoiceId}`} className="text-primary hover:underline">
                       {l.invoiceNumber ?? t('over.noNumber')}
                     </Link>
                   </td>
@@ -159,17 +151,17 @@ export async function OverContractCard({ variant = 'full' }: { variant?: 'full' 
                   <td className="p-3 font-medium text-ink">
                     {displayName(l.productName, l.productNameEn, locale).primary}
                   </td>
-                  <td className="p-3 font-mono tabular-nums text-muted">
-                    <bdi dir="ltr">{formatNumber(l.qty, locale, { maximumFractionDigits: 3 })}</bdi>
+                  <td className="num p-3 text-right text-muted">
+                    {formatNumber(l.qty, locale, { maximumFractionDigits: 3 })} {l.unit}
                   </td>
-                  <td className="p-3 font-mono tabular-nums text-muted">
-                    <bdi dir="ltr">{money(l.contractUnitPrice)}</bdi>
+                  <td className="p-3 text-right text-muted">
+                    <Money value={l.contractUnitPrice} context="unit" locale={locale} />
                   </td>
-                  <td className="p-3 font-mono tabular-nums text-ink">
-                    <bdi dir="ltr">{money(l.billedUnitPrice)}</bdi>
+                  <td className="p-3 text-right text-ink">
+                    <Money value={l.billedUnitPrice} context="unit" locale={locale} />
                   </td>
-                  <td className="p-3 font-mono font-semibold tabular-nums text-warn">
-                    <bdi dir="ltr">+{formatIls(l.overAgorot / 100, { locale, maximumFractionDigits: 2 })}</bdi>
+                  <td className="p-3 text-right font-semibold">
+                    <Money agorot={l.overAgorot} context="line" locale={locale} />
                   </td>
                 </tr>
               ))}
