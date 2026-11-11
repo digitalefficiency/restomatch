@@ -36,6 +36,6 @@ export const en: Shape<typeof he> = {
   restLink: 'Full breakdown',
   topSum: 'All {count} invoices: {amount} = the number',
   rulesTitle: 'What counts and what does not',
-  rules: 'Warn- and block-level findings count. Not counted: findings inside the tolerance bands, "Price below expected" (the supplier charged less) and "Waiting for a PO link". "Item not on the order" does count. Invoices not yet linked to an order are left out of the checked spend. On each invoice the leak is capped at the invoice total.',
+  rules: 'Warn- and block-level findings count. Not counted: findings inside the tolerance bands, "Price below expected" (the supplier charged less), "Ordered line not billed" (nothing was paid for it) and "Waiting for a PO link". "Item not on the order" does count. Invoices not yet linked to an order are left out of the checked spend. On each invoice the leak is capped at the invoice total.',
   footer: 'Every amount here is the same amount as in the control room, to the agora. No new number is computed here.',
 };
