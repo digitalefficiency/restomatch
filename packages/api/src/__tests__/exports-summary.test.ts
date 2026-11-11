@@ -1,7 +1,7 @@
 /**
  * W2-14 exports.summary: what the export will contain, before the download.
  * Counts, ₪ total, open gaps and ₪ in dispute (latest match run only), and the
- * CSV's localised status + "₪ במחלוקת" columns.
+ * CSV's localised status + "₪ בבירור מול ספקים" columns.
  */
 import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -82,7 +82,7 @@ describe('exports.summary (W2-14)', () => {
   it('the CSV keeps the raw status and adds the localised status and ₪ in dispute', async () => {
     const csv = await callerFor('bookkeeper').exports.invoicesCsv(PERIOD);
     const [header, row] = csv.content.split('\n');
-    expect(header).toContain('סטטוס,מצב,₪ במחלוקת');
+    expect(header).toContain('סטטוס,מצב,₪ בבירור מול ספקים');
     expect(row).toContain('disputed,פער פתוח,112.34');
   });
 

@@ -178,7 +178,7 @@ function adminConn(ctx: { adminDb?: Database; db: Database }): Database {
 }
 
 /**
- * The letterhead of the supplier credit-request letters (דרישת זיכוי):
+ * The letterhead of the supplier credit-request letters (בקשת זיכוי):
  * restaurants.settings.letterhead (JSONB, no migration), every field optional.
  * An empty string clears a field.
  */
