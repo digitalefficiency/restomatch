@@ -121,4 +121,22 @@ describe('receiving.dockSlip under RLS', () => {
       await ownerDb.update(goodsReceipts).set({ receivedBy: A.ownerUserId }).where(eq(goodsReceipts.id, A.grId));
     }
   });
+
+  // ADD-ONLY (G-07 pilot, train B): the receiver sees no ₪ — on the app role,
+  // with the slip ready (₪100 for the owner above). Nothing above is changed.
+  it('the receiver gets the slip without ₪: totalIls and every amountIls null, price-type expected/actual null', async () => {
+    const owner = await asA().receiving.dockSlip({ grId: A.grId, invoiceId: A.invoiceId });
+    const recv = await caller(A.ownerUserId, A.restaurantId, 'receiver').receiving.dockSlip({
+      grId: A.grId,
+      invoiceId: A.invoiceId,
+    });
+    if (!owner.enabled || !recv.enabled) throw new Error('flag off');
+    expect(owner.engine.totalIls).toBe(100);
+    expect(recv.engine.ready).toBe(true);
+    expect(recv.engine.totalIls).toBeNull();
+    expect(recv.engine.lines.map((l) => [l.discrepancyId, l.type, l.amountIls, l.expected, l.actual])).toEqual([
+      [A.discrepancyId, 'PRICE_HIGHER', null, null, null],
+    ]);
+    expect(JSON.stringify(recv)).not.toContain(B.invoiceId);
+  });
 });
