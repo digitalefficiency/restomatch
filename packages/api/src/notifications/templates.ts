@@ -38,7 +38,7 @@ export interface RenderedEmail {
 }
 
 const COLORS = {
-  bg: '#0b0e14', // outer canvas (dark frame)
+  bg: '#f1f5f9', // outer canvas — light (owner decision 2026-10-24: the whole product is light)
   card: '#ffffff',
   ink: '#0f172a', // near-black slate
   muted: '#64748b',
@@ -104,7 +104,7 @@ export function renderEmail(layout: EmailLayout): string {
     <tr><td align="center">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" dir="${dir}"
              style="max-width:560px;background:${COLORS.card};border-radius:16px;overflow:hidden;
-                    box-shadow:0 8px 28px rgba(0,0,0,.28)">
+                    border:1px solid ${COLORS.line};box-shadow:0 4px 16px rgba(15,23,42,.06)">
         <tr><td style="padding:22px 28px 0">
           <span style="font-size:18px;font-weight:800;color:${COLORS.ink}">RestoMatch</span>
           <span style="font-size:13px;color:${COLORS.muted}">· ${escapeHtml(copy.frame.tagline)}</span>

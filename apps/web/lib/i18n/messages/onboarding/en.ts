@@ -3,7 +3,7 @@ import type { he } from './he';
 
 export const en: Shape<typeof he> = {
   title: 'Welcome to RestoMatch',
-  subtitle: 'First, let’s create your restaurant. You’ll join it automatically as the owner.',
+  subtitle: 'We’ll create your restaurant, with you as the owner.',
   yourName: 'Your name',
   yourNamePlaceholder: 'Dana Cohen',
   yourNameHint: 'This is how your name appears on invites you send to your team.',

@@ -175,6 +175,7 @@ export const he = {
     whatsapp: 'פתיחה בוואטסאפ',
     mail: 'פתיחה במייל',
     subject: 'תזכורת: בקשת זיכוי · {count} שורות · {amount}',
+    body: 'שלום {supplier}, תזכורת קטנה מ{restaurant} לגבי בקשת הזיכוי ששלחנו ב-{date} ({count} שורות, בסך {amount}). אפשר לעדכן מתי תצא חשבונית הזיכוי? תודה, {signer}',
   },
   peek: {
     claimed: 'נדרש',

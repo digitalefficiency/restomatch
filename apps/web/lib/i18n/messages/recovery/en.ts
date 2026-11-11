@@ -174,6 +174,7 @@ export const en: Shape<typeof he> = {
     whatsapp: 'Open in WhatsApp',
     mail: 'Open in email',
     subject: 'Reminder: credit request · {count} lines · {amount}',
+    body: 'Hello {supplier}, a small reminder from {restaurant} about the credit request we sent on {date} ({count} lines, {amount}). Could you let us know when the credit invoice will be issued? Thank you, {signer}',
   },
   peek: {
     claimed: 'Claimed',
