@@ -20,6 +20,7 @@ import {
 import { exportRecovery } from '../recovery/export';
 import { buildClaimLetters, sendLetter, unsendLetter } from '../recovery/letters';
 import { supplierReminderDraft } from '../recovery/reminders';
+import { proposeCreditAllocation } from '../recovery/allocation';
 import { financeProcedure, memberProcedure } from '../trpc';
 import { router } from '../trpc';
 
@@ -214,6 +215,39 @@ export const recoveryRouter = router({
   export: recoveryProcedure
     .input(z.object({ format: z.enum(['csv', 'xlsx']), status: status.optional(), supplierId: z.string().uuid().optional() }))
     .query(({ ctx, input }) => exportRecovery(ctx.db, ctx.session.restaurantId, input)),
+
+  /**
+   * W3-11 · "שיוך זיכוי": which open credit requests of the supplier a credit note of
+   * this amount (before VAT) answers. Read only; "אשר שיוך" = recordCreditNote with the ids.
+   */
+  suggestAllocation: recoveryProcedure
+    .input(
+      z
+        .object({
+          supplierId: z.string().uuid(),
+          /** Legacy: the amount BEFORE VAT. The desk sends `printedAgorot` + `vat` instead. */
+          amountAgorot: z.number().int().positive().max(100_000_000_00).optional(),
+          /** The amount exactly as printed on the credit note, and how it was printed. */
+          printedAgorot: z.number().int().positive().max(100_000_000_00).optional(),
+          vat: z.enum(['incl', 'excl']).optional(),
+        })
+        .refine((v) => (v.printedAgorot == null) === (v.vat == null), {
+          message: 'a printed amount needs its VAT mode (incl. or excl.)',
+        })
+        .refine((v) => (v.amountAgorot == null) !== (v.printedAgorot == null), {
+          message: 'send amountAgorot or printedAgorot (with vat), exactly one',
+        }),
+    )
+    .query(async ({ ctx, input }) => {
+      // The same before-VAT conversion recordCreditNote books (#197: the supplier's rate,
+      // integer agorot, half-up), so "אשר שיוך" allocates exactly what was suggested.
+      let amountAgorot = input.amountAgorot;
+      if (input.printedAgorot != null && input.vat) {
+        const rateBp = await creditVatRateBp(ctx.db, ctx.session.restaurantId, input.supplierId);
+        amountAgorot = exclVatAgorot(input.printedAgorot, input.vat, rateBp);
+      }
+      return proposeCreditAllocation(ctx.db, ctx.session.restaurantId, { supplierId: input.supplierId, amountAgorot: amountAgorot! });
+    }),
 
   creditLineSuggestions: recoveryProcedure
     .input(z.object({ supplierId: z.string().uuid().optional() }).optional())

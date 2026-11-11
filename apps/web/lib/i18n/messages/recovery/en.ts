@@ -301,4 +301,18 @@ export const en: Shape<typeof he> = {
     note: 'Sending itself only goes through the notification queue, with a person\'s approval. This preview sends nothing.',
     frozen: 'This is the report as it was sent',
   },
+  allocation: {
+    suggest: 'Suggest a match',
+    confirm: 'Confirm match',
+    hint: 'Enter the credit note amount and press "Suggest a match". We will tick the credit requests it most likely closes.',
+    basis: {
+      exact_single: 'The amount matches one credit request exactly',
+      exact_invoice: "The amount matches all of one invoice's gaps",
+      exact_subset: 'The amount matches several credit requests exactly',
+      oldest_first: 'No exact match. Ticked from the oldest request on',
+      none: 'This supplier has no open credit requests',
+    },
+    remainder: '{amount} of the credit note is not matched to a request',
+    failed: 'We could not suggest a match. You can tick the requests yourself.',
+  },
 };

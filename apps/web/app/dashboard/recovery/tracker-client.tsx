@@ -617,6 +617,7 @@ export function TrackerClient({
                   <CreditForm
                     key={`${g.supplierId}:${creditLine?.invoiceLineId ?? 'manual'}`}
                     supplier={g.name}
+                    supplierId={g.supplierId}
                     claims={g.claims}
                     line={creditLine && creditLine.supplierId === g.supplierId ? creditLine : null}
                     busy={credit.isPending}
@@ -744,6 +745,7 @@ export function TrackerClient({
 
 function CreditForm({
   supplier,
+  supplierId,
   claims,
   line,
   busy,
@@ -751,6 +753,7 @@ function CreditForm({
   onCancel,
 }: {
   supplier: string;
+  supplierId: string;
   claims: Claim[];
   /** A suggested invoice credit line: amount / number / date come from the invoice. */
   line: Suggestion | null;
@@ -792,13 +795,56 @@ function CreditForm({
   const rateBp = claims[0]?.vatRateBp ?? 1800;
   const typedExcl = typed != null && vat ? previewExclAgorot(typed, vat, rateBp) : null;
   const diff = typedExcl == null ? null : typedExcl - owed;
-  const toggle = (id: string) =>
+  // W3-11 · "שיוך זיכוי": the server proposes which requests the note answers; the user confirms.
+  const utils = trpc.useUtils();
+  const [basis, setBasis] = useState<Out['suggestAllocation']['suggestion']['basis'] | null>(null);
+  const [remainder, setRemainder] = useState(0);
+  const [suggesting, setSuggesting] = useState(false);
+  async function suggest() {
+    // The claims are before VAT. The server converts the amount as printed with #197's rule
+    // (the supplier's rate, integer agorot, half-up): the same figure recordCreditNote books.
+    if (!line && (typed == null || typed <= 0)) {
+      setError(t('creditForm.invalidAmount'));
+      return;
+    }
+    if (!line && !vat) {
+      setError(t('creditForm.vatRequired'));
+      return;
+    }
+    setSuggesting(true);
+    setError(null);
+    try {
+      const r = await utils.recovery.suggestAllocation.fetch(
+        line ? { supplierId, amountAgorot: line.amountAgorot } : { supplierId, printedAgorot: typed!, vat: vat! },
+      );
+      const known = new Set(claims.map((c) => c.id));
+      const ids = r.suggestion.allocations.map((a) => a.id);
+      const shown = ids.filter((id) => known.has(id));
+      setSelected(new Set(shown));
+      if (shown.length !== ids.length) {
+        // A suggested request is not on this screen: never present a partial match as exact.
+        setBasis(null);
+        setError(t('allocation.failed'));
+      } else {
+        setBasis(r.suggestion.basis);
+        setRemainder(r.suggestion.remainderAgorot);
+      }
+    } catch {
+      setError(t('allocation.failed'));
+    } finally {
+      setSuggesting(false);
+    }
+  }
+  const toggle = (id: string) => {
+    // A hand-edited selection is no longer the suggestion.
+    setBasis(null);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+  };
   const canSubmit = chosen.length > 0 && (line != null || (vat != null && typed != null && docKind != null));
   return (
     <form
@@ -892,6 +938,7 @@ function CreditForm({
           onChange={(e) => {
             setAmount(e.target.value);
             setError(null);
+            setBasis(null);
           }}
           readOnly={!!line}
           data-testid="credit-amount"
@@ -913,6 +960,7 @@ function CreditForm({
                 onClick={() => {
                   setVat(v);
                   setError(null);
+                  setBasis(null);
                 }}
                 className={cn(
                   'min-h-11 rounded-full border px-3 text-sm md:min-h-9',
@@ -933,9 +981,16 @@ function CreditForm({
           <span className="ms-2 font-semibold text-warn">{t('creditForm.diff', { amount: ils(Math.abs(diff)) })}</span>
         )}
       </p>
-      <div className="flex gap-2 sm:col-span-3">
+      <p className="text-xs text-muted sm:col-span-3" data-testid="allocation-basis" aria-live="polite">
+        {basis ? t(`allocation.basis.${basis}`) : t('allocation.hint')}
+        {basis && remainder > 0 ? ` · ${t('allocation.remainder', { amount: ils(remainder) })}` : ''}
+      </p>
+      <div className="flex flex-wrap gap-2 sm:col-span-3">
+        <Button type="button" size="sm" variant="secondary" loading={suggesting} onClick={() => void suggest()}>
+          {t('allocation.suggest')}
+        </Button>
         <Button type="submit" size="sm" variant="gold" loading={busy} disabled={!canSubmit}>
-          {t('creditForm.submit')}
+          {basis ? t('allocation.confirm') : t('creditForm.submit')}
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
           {t('creditForm.cancel')}
