@@ -160,7 +160,7 @@ export const he = {
       contracts: 'חוזים ומחירים',
       recipes: 'עלות מנה',
       inventory: 'ספירת מלאי',
-      exports: 'סגירת חודש וייצוא',
+      exports: 'ייצוא להנהלת חשבונות',
       integrations: 'חיבורים',
       team: 'צוות',
       settings: 'הגדרות',

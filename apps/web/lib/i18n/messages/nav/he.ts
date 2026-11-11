@@ -29,7 +29,7 @@ export const he = {
     ledger: 'כרטסת ספקים',
     supplierDetail: 'ספק',
     supplierLeakCard: 'כרטיס דליפה לספק',
-    exports: 'סגירת חודש וייצוא',
+    exports: 'ייצוא להנהלת חשבונות',
     reports: 'דוחות',
     monthlyReport: 'הדוח החודשי',
     digest: 'תצוגת המייל החודשי',
@@ -58,6 +58,7 @@ export const he = {
     team: 'צוות',
     integrations: 'חיבורים',
     settings: 'הגדרות',
+    close: 'סגירת חודש',
   },
   /** Bottom-bar labels: short, never truncated at 360 px. */
   bar: {

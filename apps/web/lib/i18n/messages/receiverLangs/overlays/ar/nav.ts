@@ -28,6 +28,7 @@ export const nav: Shape<typeof he> = {
     supplierDetail: 'مورد',
     supplierLeakCard: 'بطاقة خسائر المورد',
     exports: 'إغلاق الشهر والتصدير',
+    close: 'إغلاق الشهر', // review
     reports: 'التقارير',
     monthlyReport: 'التقرير الشهري',
     digest: 'معاينة البريد الشهري',

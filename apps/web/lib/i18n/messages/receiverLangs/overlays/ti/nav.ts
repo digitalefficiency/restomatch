@@ -28,6 +28,7 @@ export const nav: Shape<typeof he> = {
     supplierDetail: 'ኣቕራቢ',
     supplierLeakCard: 'ካርድ ብኽነት ኣቕራቢ',
     exports: 'ምዕጻው ወርሒ ከምኡ’ውን ምውጻእ',
+    close: 'ምዕጻው ወርሒ', // review
     reports: 'ጸብጻባት',
     monthlyReport: 'ወርሓዊ ጸብጻብ',
     digest: 'ቅድመ-ርእይቶ ወርሓዊ ኢመይል',

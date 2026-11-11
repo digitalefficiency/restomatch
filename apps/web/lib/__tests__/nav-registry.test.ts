@@ -154,6 +154,7 @@ const ROUTE_ROLES_BEFORE: Record<string, UserRole[]> = {
   '/dashboard/recipes': ['owner', 'manager', 'chef'],
   '/dashboard/inventory': ['owner', 'manager', 'chef'],
   '/dashboard/exports': ['owner', 'bookkeeper'],
+  '/dashboard/close': ['owner', 'manager', 'bookkeeper'],
   '/dashboard/integrations': ['owner', 'manager', 'bookkeeper'],
   '/dashboard/invoices': ['owner', 'manager', 'receiver', 'bookkeeper'],
   '/dashboard/team': ['owner', 'manager'],

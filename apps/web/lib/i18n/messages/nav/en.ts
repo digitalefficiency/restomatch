@@ -26,7 +26,7 @@ export const en: Shape<typeof he> = {
     ledger: 'Supplier ledger',
     supplierDetail: 'Supplier',
     supplierLeakCard: 'Supplier leak card',
-    exports: 'Close & export',
+    exports: 'Accounting export',
     reports: 'Reports',
     monthlyReport: 'Monthly report',
     digest: 'Monthly email preview',
@@ -55,6 +55,7 @@ export const en: Shape<typeof he> = {
     team: 'Team',
     integrations: 'Integrations',
     settings: 'Settings',
+    close: 'Month close',
   },
   bar: {
     today: 'Today',
