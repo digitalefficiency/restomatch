@@ -5,7 +5,9 @@ import { SectionHeader } from '@/lib/components';
 import { getT } from '@/lib/i18n/server';
 import { ingest } from '@/lib/i18n/messages/ingest';
 import { createServerCaller } from '@/lib/trpc/server';
+import Link from 'next/link';
 import { InboxClient, type InboxMessage } from './inbox-client';
+import { IntakeSettings } from './intake-settings-client';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,9 +19,9 @@ export const dynamic = 'force-dynamic';
 export default async function InboxPage({
   searchParams,
 }: {
-  searchParams: Promise<{ filter?: string }>;
+  searchParams: Promise<{ filter?: string; view?: string }>;
 }) {
-  const { filter: rawFilter } = await searchParams;
+  const { filter: rawFilter, view } = await searchParams;
   const filter = rawFilter === 'needs_review' || rawFilter === 'errors' ? rawFilter : 'all';
   const caller = await createServerCaller();
   const session = await auth();
@@ -30,30 +32,43 @@ export default async function InboxPage({
     if (err instanceof TRPCError && (err.code === 'FORBIDDEN' || err.code === 'NOT_FOUND')) notFound();
     throw err;
   }
-  const [messages, senders, suppliers, t] = await Promise.all([
+  const role = session?.user?.role ?? null;
+  if (view === 'settings') {
+    // W2-02 (approvals-35): intake addresses + approved senders, off the queue. W2-14's settings link here.
+    const [senders, suppliers, t] = await Promise.all([caller.ingest.senders(), caller.suppliers.list().catch(() => []), getT(ingest)]);
+    const kinds = (['whatsapp', 'email'] as const).filter((k) => overview.features[k]);
+    return (
+      <div>
+        <Link href="/dashboard/inbox" className="mb-2 inline-flex min-h-11 items-center text-sm font-semibold text-primary">
+          {t('intakeSettings.back')}
+        </Link>
+        <SectionHeader level={1} title={t('intakeSettings.title')} subtitle={t('intakeSettings.subtitle')} />
+        <IntakeSettings
+          canManage={role === 'owner' || role === 'manager'}
+          kinds={[...kinds]}
+          channels={overview.channels.map((c) => ({ kind: c.kind, tokenHint: c.tokenHint, phoneNumberId: c.phoneNumberId }))}
+          senders={senders.map((s) => ({ id: s.id, kind: s.kind, sender: s.sender, label: s.label, supplierName: s.supplierName ?? null }))}
+          suppliers={suppliers.map((s) => ({ id: s.id, name: s.name, nameEn: s.nameEn ?? null }))}
+        />
+      </div>
+    );
+  }
+  const [messages, suppliers, t] = await Promise.all([
     caller.ingest.inbox({ filter, limit: 50 }),
-    caller.ingest.senders(),
+    // The supplier picker is a convenience: without it a document still goes to OCR unassigned.
     caller.suppliers.list().catch(() => []),
     getT(ingest),
   ]);
-  const role = session?.user?.role ?? null;
 
   return (
     <div>
-      <SectionHeader title={t('inbox.title')} subtitle={t('inbox.subtitle')} />
+      <SectionHeader level={1} title={t('inbox.title')} subtitle={t('inbox.subtitle')} />
       <InboxClient
         filter={filter}
-        canManage={role === 'owner' || role === 'manager'}
+        // G-07 intake.approve: owner, manager and bookkeeper approve intake (functional-flows-07).
+        canManage={role === 'owner' || role === 'manager' || role === 'bookkeeper'}
         features={overview.features}
         needsReview={overview.needsReview}
-        channels={overview.channels.map((c) => ({ kind: c.kind, tokenHint: c.tokenHint, phoneNumberId: c.phoneNumberId }))}
-        senders={senders.map((s) => ({
-          id: s.id,
-          kind: s.kind,
-          sender: s.sender,
-          label: s.label,
-          supplierName: s.supplierName ?? null,
-        }))}
         suppliers={suppliers.map((s) => ({ id: s.id, name: s.name, nameEn: s.nameEn ?? null }))}
         messages={messages.map(
           (m): InboxMessage => ({
@@ -76,6 +91,7 @@ export default async function InboxPage({
               error: d.error,
               invoiceId: d.invoiceId,
               stored: d.stored,
+              ocr: d.ocr ?? null,
             })),
           }),
         )}

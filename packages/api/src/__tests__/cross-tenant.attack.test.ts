@@ -400,6 +400,12 @@ const BASE_COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'ingest.rejectDocument': 'attack',
   // PILOT (W2-02, train B, add-only): invoices waiting for a person to complete their lines.
   'invoices.needsLines': "isolation — invoices-needs-lines.test.ts: A's list holds only A's invoices (B's unread or held invoice never listed, B's own list empty of A); receiver/chef FORBIDDEN",
+  // W2-02 (add-only): invoice register, cockpit and intake preview / bulk.
+  'invoices.list': "isolation — invoices-register.test.ts: A's register lists only A's invoices, never B's; receiver/chef FORBIDDEN",
+  'invoices.counts': "isolation — invoices-register.test.ts: A's tab counts equal A's own list counts, B's invoices never counted",
+  'invoices.detail': "attack — invoices-detail.test.ts: A asking for B's invoice id → NOT_FOUND; receiver gets no ₪, chef FORBIDDEN",
+  'ingest.documentPreview': "attack — ingest.attack.test.ts: A previewing B's document id → NOT_FOUND and no URL; receiver/chef FORBIDDEN",
+  'ingest.bulkApprove': "attack — ingest.attack.test.ts: a batch holding B's document id → NOT_FOUND, nothing of A or B registered",
   // Growth (wave 1, S15 — flag `growth`). pricing is a pure public quote over
   // the plan catalog (no tenant data, no ids); the referral procedures are
   // tenant-scoped — see the growth.* block at the end of this file.
