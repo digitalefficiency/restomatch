@@ -38,7 +38,6 @@ const MEMBER_MUTATION_ALLOW: Record<string, string> = {
   'receiverLangs.setMyLocale': 'self-service: the caller’s own receiving language',
   'receiverLangs.localNames':
     'read-shaped mutation (translates names on demand, cached); feature-gated, invoice reads re-checked against INVOICE_READER_ROLES inside',
-  'scans.upload': 'every member may photograph a delivery document (receiver dock, chef walk-in); no ₪ returned',
   'approvals.approve': 'deciderProcedure (owner|manager|bookkeeper) + ensureCanAct → ACT_ON; adopts can("discrepancy.decide") in W2-04',
   'approvals.reject': 'deciderProcedure + ensureCanAct (ACT_ON); W2-04',
   'approvals.escalate': 'deciderProcedure + ensureCanAct (ACT_ON); W2-04',
