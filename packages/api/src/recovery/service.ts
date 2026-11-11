@@ -14,6 +14,7 @@ import { assertSupplierOwned } from '../tenant';
 import { appError } from '../errors';
 import { HELD_FOR_RECEIPTS_KEY } from '@restomatch/charts';
 import { CLAIM_ANSWER_DAYS, NEVER_CLAIMABLE_TYPES } from '../lib/claims';
+import { REMIND_EVERY_CALENDAR_DAYS, awaitingChaseSql, pastAnswerWindowSql } from './overdue';
 import {
   AWAITING_SUPPLIER,
   CREDITABLE,
@@ -73,8 +74,8 @@ export const NEVER_CLAIMABLE_TYPE_SQL = sql`d.type IN (${NEVER_CLAIMABLE_SQL})`;
  * days) all use this one rule, so they can never be a day apart.
  */
 export function overdueSql(now: Date, tz: SQL): SQL {
-  return sql`((${now.toISOString()}::timestamptz AT TIME ZONE ${tz})::date
-    - (COALESCE(c.letter_sent_at, c.claimed_at) AT TIME ZONE ${tz})::date) > ${OVERDUE_DAYS}`;
+  // AU-03: the boundary lives in recovery/overdue.ts (TS + SQL twins of one rule).
+  return pastAnswerWindowSql(now, tz);
 }
 
 /** Event note of the narrow never-claimable write-off (owner 31.10). */
@@ -488,7 +489,7 @@ export interface RecoveryClaimListRow extends RecoveryClaimRow {
 /** Waiting on the supplier this many days after the letter (or the claim) ⇒ overdue (owner 31.10: a week). */
 export const OVERDUE_DAYS = CLAIM_ANSWER_DAYS;
 /** Do not chase the same claim more often than this. */
-export const REMIND_EVERY_DAYS = 7;
+export const REMIND_EVERY_DAYS = REMIND_EVERY_CALENDAR_DAYS;
 /** Upper bound for one page of the claims LIST (totals never truncate — see computeRecoverySummary). */
 export const MAX_CLAIMS = 5000;
 
