@@ -26,7 +26,7 @@ export const en = {
     holdPending: 'Open discrepancies awaiting a decision: {amount}',
     link: '{count} invoices waiting to be linked to an order ({amount} incl. VAT) — not counted as pay or hold.',
     credit: 'Credits to ask for',
-    creditHint: 'From discrepancies you accepted to claim · each amount shows its basis',
+    creditHint: 'From discrepancies you approved for a credit request · each amount shows its basis',
   },
   table: {
     invoice: 'Invoice',

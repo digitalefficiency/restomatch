@@ -119,10 +119,10 @@ export const en: Shape<typeof he> = {
     noInvoiceNumber: 'No number',
   },
   worker: {
-    title: 'The processing engine is unavailable right now.',
-    body: 'Invoices you upload are saved and will be OCR’d and matched as soon as it’s back.',
+    title: 'Processing is delayed.',
+    body: 'Invoices you upload are saved and processed later.',
     lastBeat: 'Last heartbeat {minutes} min ago.',
-    ownerNotified: 'The owner has been notified.',
+    ownerNotified: 'No action needed.',
   },
   loading: 'Loading',
 };
