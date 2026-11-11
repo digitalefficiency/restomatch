@@ -1,12 +1,12 @@
-import { briefCopy } from './copy';
+import { orderNotPlacedEmail } from '../notifications/templates';
 import { trimBase } from './links';
-import { briefHtml } from './render';
 import type { BriefContext, BriefMessage } from './types';
 
 /**
  * A5 · the 09:00 order reminder, truthful: a DRAFT is not an order. When the
  * supplier has an unsent draft the message links that draft; otherwise the
  * new-order wizard with the supplier picked. No ₪ (the chef is a recipient).
+ * Rendered by W2-13's `orderNotPlacedEmail` (the one reviewed design).
  */
 export interface OrderReminderInput extends BriefContext {
   ilDate: string;
@@ -26,20 +26,19 @@ export function newOrderPath(supplierId: string): string {
 }
 
 export function orderReminderBrief(input: OrderReminderInput): BriefMessage {
-  const locale = input.locale ?? 'he';
-  const c = briefCopy(locale).orderReminder;
-  const cutoff = input.cutoffLabel?.trim() || null;
+  const cutoff = input.cutoffLabel?.trim() || undefined;
   const draft = Boolean(input.draftPoId);
   const to = draft ? `/dashboard/orders/${encodeURIComponent(input.draftPoId!)}` : newOrderPath(input.supplierId);
   // Direct links, as today (brief AC 4: `orderReminderUrl` unchanged; the wizard
   // link is pinned by orderReminders.test.ts). The go-link swap is W2-04's sweep.
   const deepLink = `${trimBase(input.baseUrl)}${to}`;
-  const subject = draft ? c.draftSubject(input.supplierName) : c.noOrderSubject(input.supplierName);
-  const line = draft
-    ? c.draftLine(input.supplierName, cutoff)
-    : c.noOrderLine(input.supplierName, input.orderDayLabel, cutoff);
-  const cta = draft ? c.draftCta : c.noOrderCta;
-  const text = `${line}\n\n${cta}: ${deepLink}`;
-  const html = briefHtml({ locale, preview: line, heading: subject, lines: [{ text: line }], cta: { label: cta, url: deepLink } });
-  return { subject, text, html, deepLink, dedupeSuffix: `${input.supplierId}:${input.ilDate}`, automationId: 'A5' };
+  // ONE design: W2-13's reviewed template (bidi isolation, plurals, copy parity).
+  const mail = orderNotPlacedEmail({
+    supplierName: input.supplierName,
+    orderDayLabel: input.orderDayLabel,
+    cutoffLabel: cutoff,
+    ...(draft ? { draftUrl: deepLink } : { ordersUrl: deepLink }),
+    locale: input.locale ?? 'he',
+  });
+  return { ...mail, deepLink, dedupeSuffix: `${input.supplierId}:${input.ilDate}`, automationId: 'A5' };
 }

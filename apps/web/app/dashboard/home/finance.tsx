@@ -161,11 +161,11 @@ async function Hero(ctx: Ctx) {
     else {
       const prevSpan = daySpan(previous.monthStart, previous.monthEnd);
       const pctText = d.pct == null ? '' : ` (${formatNumber(d.pct, locale, { style: 'percent', maximumFractionDigits: 0, signDisplay: 'exceptZero' })})`;
-      const arrow = d.direction === 'up' ? '▲' : d.direction === 'down' ? '▼' : '';
       delta = {
         direction: d.direction,
         word: d.direction === 'up' ? t('hero.delta.up') : d.direction === 'down' ? t('hero.delta.down') : t('hero.delta.same'),
-        text: `${arrow} ${d.direction === 'same' ? '' : ils(d.amountIls)}${pctText} ${t('hero.delta.vs', { range: spanLabel(t, locale, prevSpan.from, prevSpan.to) })}`.replace(/\s+/g, ' ').trim(),
+        // G11: no typed ▲/▼ (no UI face has U+25B2/25BC); LeakHero draws the trend icon + word.
+        text: `${d.direction === 'same' ? '' : ils(d.amountIls)}${pctText} ${t('hero.delta.vs', { range: spanLabel(t, locale, prevSpan.from, prevSpan.to) })}`.replace(/\s+/g, ' ').trim(),
       };
     }
   }

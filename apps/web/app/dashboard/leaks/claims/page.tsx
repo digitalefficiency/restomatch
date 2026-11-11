@@ -393,7 +393,7 @@ export default async function ClaimsPage({ searchParams }: { searchParams: Promi
                             // Owner decision §8.16: a DRAFT reminder to the supplier, sent only by the user's own click.
                             <a
                               href={`https://wa.me/?text=${encodeURIComponent(
-                                t('claims.reminder.text', {
+                                tr('reminder.body', {
                                   supplier: supplierOf(s),
                                   restaurant,
                                   date: formatDate(s.sentAt, locale),
