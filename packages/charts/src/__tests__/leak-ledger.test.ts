@@ -195,6 +195,22 @@ describe('leak ledger · the money-state partition [G-14]', () => {
     expect(last.states.undecided).toBe(4400);
   });
 
+  it('is tenant-scoped: another restaurant’s discrepancies, claims and ₪ never enter the partition', async () => {
+    const a = await setup();
+    const b = await setup();
+    await a.invoice({ inclVat: '1000.00', d: [{ type: 'PRICE_HIGHER', delta: '10.00' }] });
+    const bInv = await b.invoice({
+      inclVat: '1000.00',
+      d: [{ type: 'QTY_SHORT', delta: '99.00', status: 'accepted', claim: { status: 'claimed', amountAgorot: 9900 } }],
+    });
+    const rows = await computeLeakLedger(db, a.rid, SPEC);
+    expect(rows.map((r) => r.invoiceId)).not.toContain(bInv.invoiceId);
+    expect(rows.some((r) => bInv.ids.includes(r.discrepancyId) || r.claimId != null)).toBe(false);
+    const p = await computeLeakPartition(db, a.rid, SPEC);
+    expect(p).toMatchObject({ totalAgorot: 1000, heroAgorot: 1000, driftAgorot: 0 });
+    expect((await computeLeakPartition(db, b.rid, SPEC)).states.to_offset).toBe(9900);
+  });
+
   it('the canary scenarios, persisted: ₪32.00 and ₪5.63 to the agora', async () => {
     // Hand-computed numbers of packages/matching leak-canary (read-only use; files untouched).
     const { rid, invoice } = await setup();
