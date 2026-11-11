@@ -1,8 +1,6 @@
 import 'server-only';
 import { createServerCaller } from '@/lib/trpc/server';
 import { leakCardWindow, topLeakLines, topTypes, toAgorot, type TopLeakLine } from './leak-card-logic';
-import { buildLetters, letterAgorotFor } from '../../leaks/claims/letters';
-import { ALL_CLAIMS } from '../../recovery/logic';
 import { entitlementCauseOf } from '@/lib/components/entitlement';
 import { settle } from './leak-card-reads';
 
@@ -78,16 +76,13 @@ export async function loadSupplierLeakCard(supplierId: string, now = new Date())
   };
 }
 
-/** The supplier's letter total, built exactly like /dashboard/leaks/claims builds it. */
+/**
+ * The supplier's credit-request letter total — exactly the letter the click
+ * opens (W2-10's recovery.letters: built from that supplier's claimed claims),
+ * so the card CTA and the printed card ₪ equal the letters page (B1 ₪ trust).
+ * No catch: a failed read is "unavailable" upstream (G-16), never ₪0.
+ */
 async function letterTotal(caller: Caller, supplierId: string): Promise<number> {
-  const [month, flags, supplier] = await Promise.all([
-    caller.owner.leakBreakdown({ monthOffset: 0, limit: 200 }),
-    caller.recovery.flags(),
-    caller.suppliers.get({ supplierId }),
-  ]);
-  // No catch: a failed claims read would drop the claims already sent and
-  // overstate the letter. It fails the whole letter read instead (G-16).
-  const tracked = flags.recovery ? await caller.recovery.list({ supplierId, limit: ALL_CLAIMS }) : [];
-  const { letters } = buildLetters({ month, tracked });
-  return letterAgorotFor(letters, { id: supplierId, name: supplier.name });
+  const letters = await caller.recovery.letters({ supplierId });
+  return letters.find((l) => l.supplierId === supplierId)?.totalAgorot ?? 0;
 }

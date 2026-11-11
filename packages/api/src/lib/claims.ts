@@ -1,4 +1,5 @@
 import type { LeakBreakdownInvoice, LeakBreakdownLine } from '@restomatch/charts';
+import { DISCREPANCY_DECIDABLE } from '../lifecycle/predicates';
 
 /**
  * The claimable-line rule (₪) shared by the supplier credit letters
@@ -20,8 +21,8 @@ import type { LeakBreakdownInvoice, LeakBreakdownLine } from '@restomatch/charts
  * exactly like 'accepted' — the same rule recovery (CLAIMABLE_FILTER) and the charts use.
  */
 export const CLAIMABLE_DECIDED_STATUSES = ['accepted', 'resolved'] as const;
-/** Statuses still waiting for a decision — never put on a supplier letter (decision 18). */
-export const UNDECIDED_STATUSES = ['open', 'escalated'] as const;
+/** Statuses still waiting for a decision — never put on a supplier letter (decision 18). G-05 predicate. */
+export const UNDECIDED_STATUSES = DISCREPANCY_DECIDABLE;
 export const CLAIMABLE_STATUSES = [...UNDECIDED_STATUSES, ...CLAIMABLE_DECIDED_STATUSES] as const;
 /** Only real findings are ever asked back. */
 export const CLAIM_SEVERITIES = ['warn', 'block'] as const;

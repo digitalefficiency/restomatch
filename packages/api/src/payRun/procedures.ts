@@ -16,6 +16,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { eq, restaurants, sql, type Database } from '@restomatch/db';
 import { featureEnabled } from '../lib/features';
+import { DISCREPANCY_DECIDABLE, INVOICE_PAY_RUN_CANDIDATE, statusInSql } from '../lifecycle/predicates';
 import { localDateKeyInTz } from '../lib/time';
 import { financeProcedure } from '../trpc';
 import { PREFLIGHT_KINDS, checkPreflightClear, parseAgorot, type AcknowledgedFlags, type PreflightKind } from './preflight';
@@ -178,12 +179,12 @@ export function makePreflightProcedures(opts: { bank?: BankChangeSource; now?: (
                    SELECT 1 FROM match_runs mr
                    JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${rid}
                    WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${rid}
-                     AND d.severity IN ('warn', 'block') AND d.resolution_status IN ('open', 'escalated')
+                     AND d.severity IN ('warn', 'block') AND ${statusInSql(sql`d.resolution_status`, DISCREPANCY_DECIDABLE)}
                      AND ABS(d.delta_amount) > 0
                  ) AS undecided
           FROM invoices i
           WHERE i.restaurant_id = ${rid} AND i.supplier_id = ${input.supplierId}
-            AND (i.id IN (${ids}) OR (i.status NOT IN ('paid', 'ocr_pending')))
+            AND (i.id IN (${ids}) OR ${statusInSql(sql`i.status`, INVOICE_PAY_RUN_CANDIDATE)})
           ORDER BY COALESCE(i.invoice_date, i.created_at), i.invoice_number
         `);
         const rows = rowsOf(invRes);

@@ -83,7 +83,7 @@ export const en = {
     heldHint: '{count} invoices · {dispute} under review with the supplier',
     credit: 'Credits to offset before paying',
     creditHint: 'From gaps you decided to ask a credit for',
-    zeroCredit: 'No credits to ask for — no gap was asked back from a supplier this month',
+    zeroCredit: 'No credits to ask for: no gap was asked back from a supplier this month',
   },
   bucket: {
     overdue: 'Overdue',
@@ -146,8 +146,19 @@ export const en = {
   },
   errorPage: {
     title: "The pay run didn't load",
-    body: 'Nothing was paid or changed. Try again; if it repeats, contact us.',
+    body: 'Nothing was paid or changed, try again',
     retry: 'Try again',
     back: 'Back to approvals',
+  },
+  holdShort: {
+    decision: 'Waiting for {who}',
+    decisionMeta: '{days} days',
+    duplicate: 'Duplicate copy',
+    pendingLink: 'Waiting to be linked',
+    awaitingCount: 'Waiting for the count',
+    awaitingQuestion: 'Open question',
+    awaitingReview: 'To review',
+    missingAllocation: 'No allocation number',
+    noteBilledTwice: 'May be billed twice',
   },
 };

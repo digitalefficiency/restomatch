@@ -1,12 +1,12 @@
 import Link from 'next/link';
-import { Badge, Card, LinkButton, Sparkline } from '@/lib/components';
+import { Badge, Card, LinkButton } from '@/lib/components';
 import { Money } from '@/lib/components/money';
 import { createServerCaller } from '@/lib/trpc/server';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
 import { formatIls } from '@/lib/money';
 import { loadLeakCardOnce, loadSupplierOverview } from './overview-data';
-import { rhythmParts } from './rhythm';
+import { deliveryText, rhythmParts } from './rhythm';
 
 /**
  * W2-11 · "what do I do with this supplier now, in ₪". The leak ₪ itself lives
@@ -54,6 +54,8 @@ export async function SupplierOverviewTab({ supplierId, leakCard }: { supplierId
   cards.sort((a, b) => b.agorot - a.agorot);
 
   const rhythm = overview?.rhythm ? rhythmParts(overview.rhythm, locale) : null;
+  // No order schedule: still name the next delivery (an open order or a saved delivery day).
+  const next = !rhythm && overview?.nextDelivery ? deliveryText(overview.nextDelivery, locale) : null;
   const spend = overview?.spend ?? [];
   const spendAria =
     spend.length > 1
@@ -104,6 +106,10 @@ export async function SupplierOverviewTab({ supplierId, leakCard }: { supplierId
           <p className="text-base text-ink tabular-nums" data-testid="order-rhythm">
             {t('overview.rhythm', rhythm)}
           </p>
+        ) : next ? (
+          <p className="text-base text-ink tabular-nums" data-testid="next-delivery">
+            {t('overview.nextDelivery', { delivery: next })}
+          </p>
         ) : (
           <p className="text-sm text-muted">
             {t('overview.rhythmNone')}{' '}
@@ -118,7 +124,7 @@ export async function SupplierOverviewTab({ supplierId, leakCard }: { supplierId
         <Card padding="md" className="space-y-2">
           <h2 className="text-sm font-semibold text-muted">{t('overview.spendTitle')}</h2>
           {overview ? (
-            <Sparkline data={spend.map((s) => s.agorot / 100)} label={spendAria} tone="muted" className="h-10 w-full" />
+            <SpendBars spend={spend} locale={locale} label={spendAria} />
           ) : (
             <p className="text-sm text-muted">{t('overview.unavailable')}</p>
           )}
@@ -149,5 +155,28 @@ export async function SupplierOverviewTab({ supplierId, leakCard }: { supplierId
         </Card>
       </div>
     </div>
+  );
+}
+
+/**
+ * Six months of checked spend as labelled bars: each month with its ₪ (0 dp),
+ * oldest first in reading order. A real axis, not a bare line (lab finding).
+ */
+function SpendBars({ spend, locale, label }: { spend: { month: string; agorot: number }[]; locale: 'he' | 'en'; label?: string }) {
+  const max = Math.max(1, ...spend.map((s) => s.agorot));
+  const monthName = (m: string) =>
+    new Intl.DateTimeFormat(locale === 'he' ? 'he-IL' : 'en-GB', { month: 'short', timeZone: 'UTC' }).format(new Date(`${m}-01T00:00:00Z`));
+  return (
+    <figure aria-label={label} className="m-0">
+      <ol className="grid grid-cols-6 items-end gap-2" data-testid="spend-bars">
+        {spend.map((s) => (
+          <li key={s.month} className="flex flex-col items-center gap-1">
+            <span className="text-[11px] text-ink tabular-nums">{formatIls(s.agorot / 100, { locale })}</span>
+            <span aria-hidden="true" className="block w-full rounded-t bg-primary/60" style={{ height: `${Math.max(2, Math.round((s.agorot / max) * 64))}px` }} />
+            <span className="text-[11px] text-muted">{monthName(s.month)}</span>
+          </li>
+        ))}
+      </ol>
+    </figure>
   );
 }
