@@ -1,6 +1,6 @@
 import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, eq, invoiceLines, invoices, priceHistory, restaurants } from '@restomatch/db';
+import { createDb, eq, invoiceLines, invoices, poLines, priceHistory, restaurants } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -70,6 +70,27 @@ describe('H-11 slice c · receiver and chef get no ₪ (A own ids; B ids rejecte
         observedAt: new Date(anchor - daysBefore * 24 * 60 * 60 * 1000),
       })) as never,
     );
+    // Real rows for the no-₪ pins, so they are not proven on empty lists:
+    // a pending (parsed) invoice with ₪ totals, and an order line with an SKU but no product (→ mapping.unmapped).
+    await db.insert(invoices).values({
+      restaurantId: A.restaurantId,
+      supplierId: A.supplierId,
+      invoiceNumber: 'INV-A-PENDING',
+      invoiceDate: inv!.invoiceDate,
+      totalExclVat: '250.00',
+      vatAmount: '45.00',
+      totalInclVat: '295.00',
+      status: 'parsed',
+      source: 'photo',
+    } as never);
+    await db.insert(poLines).values({
+      poId: A.poId,
+      supplierSku: 'H11C-SKU-1',
+      rawDescription: 'מלפפון H11C',
+      qtyOrdered: '3',
+      unit: 'ק״ג',
+      unitPriceExpected: '7.5000',
+    } as never);
   });
   afterAll(async () => {
     await resetDb(db);
@@ -122,15 +143,36 @@ describe('H-11 slice c · receiver and chef get no ₪ (A own ids; B ids rejecte
     expect(await callerFor(A, 'receiver').consolidated.coverage({ ...range, supplierId: B.supplierId })).toEqual([]);
   });
 
-  it('pins: reads with no ₪ today carry no ₪ value for receiver and chef', async () => {
+  it('pins: reads with no ₪ today carry no ₪ value for receiver and chef (on non-empty results)', async () => {
     for (const role of STAFF) {
       const c = callerFor(A, role);
-      expect(moneyValuedKeys(await c.receiving.todayExpectations()), `${role} todayExpectations`).toEqual([]);
-      expect(moneyValuedKeys(await c.receiving.pendingInvoices()), `${role} pendingInvoices`).toEqual([]);
-      expect(moneyValuedKeys(await c.search.global({ q: 'tomato' })), `${role} search.global`).toEqual([]);
-      expect(moneyValuedKeys(await c.products.list(), ['total']), `${role} products.list`).toEqual([]);
-      expect(moneyValuedKeys(await c.mapping.unmapped()), `${role} mapping.unmapped`).toEqual([]);
-      expect(moneyValuedKeys(await c.mapping.searchProducts({ q: 'tomato' })), `${role} mapping.searchProducts`).toEqual([]);
+      const today = await c.receiving.todayExpectations();
+      const pending = await c.receiving.pendingInvoices();
+      const search = await c.search.global({ q: 'עגבניה' });
+      const searchInvoice = await c.search.global({ q: 'INV-A' });
+      const products = await c.products.list();
+      const unmapped = await c.mapping.unmapped();
+      const productSearch = await c.mapping.searchProducts({ q: 'עגבניה' });
+      // Non-vacuous: every read returns at least one row.
+      expect(today.length, `${role} todayExpectations rows`).toBeGreaterThan(0);
+      expect(pending.length, `${role} pendingInvoices rows`).toBeGreaterThan(0);
+      expect(JSON.stringify(search), `${role} search finds the product`).toContain('עגבניה');
+      expect(JSON.stringify(searchInvoice), `${role} search finds the invoice`).toContain('INV-A');
+      expect(products.rows.length, `${role} products rows`).toBeGreaterThan(0);
+      // The chef only gets G-08 name questions ("זה אותו מוצר?"), not SKU rows, so only the receiver's list is seeded.
+      if (role === 'receiver') expect(unmapped.length, `${role} unmapped rows`).toBeGreaterThan(0);
+      expect(productSearch.length, `${role} product search rows`).toBeGreaterThan(0);
+      for (const [name, value, allow] of [
+        ['todayExpectations', today, []],
+        ['pendingInvoices', pending, []],
+        ['search.global (product)', search, []],
+        ['search.global (invoice)', searchInvoice, []],
+        ['products.list', products, ['total']],
+        ['mapping.unmapped', unmapped, []],
+        ['mapping.searchProducts', productSearch, []],
+      ] as const) {
+        expect(moneyValuedKeys(value, allow), `${role} ${name}`).toEqual([]);
+      }
     }
   });
 });
