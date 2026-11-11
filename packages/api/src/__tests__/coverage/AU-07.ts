@@ -1,11 +1,14 @@
+import type { CoverageFragment } from './index';
+
 /**
  * AU-07 COVERAGE fragment. One new procedure, `admin.automationKpis`: an
- * adminProcedure read (platform admin + TOTP), so it is 'admin-denial' like
- * every admin.* entry. Its cross-tenant scope (reads only input.restaurantId on
- * the owner connection), NOT_FOUND, zero writes and the admin_requires_2fa
- * refusal are pinned in admin-automation-kpis.test.ts.
+ * adminProcedure read (platform admin + TOTP) on the cross-tenant owner
+ * connection, scoped to input.restaurantId in every subquery. Pinned in
+ * admin-automation-kpis.test.ts (access, scope, NOT_FOUND, one admin.viewed
+ * row) and charts automation.test.ts (every table read ignores a foreign tenant).
  */
-const fragment: Readonly<Record<string, string>> = {
-  'admin.automationKpis': 'admin-denial',
+const coverage: CoverageFragment = {
+  'admin.automationKpis':
+    "attack — admin-automation-kpis.test.ts: owner and admin without TOTP → FORBIDDEN; unknown id → NOT_FOUND; A's whole result is identical before and after B is deleted",
 };
-export default fragment;
+export default coverage;
