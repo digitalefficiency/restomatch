@@ -68,9 +68,15 @@ import { featureEnabled } from '../lib/features';
 import { QTY_DISCREPANCY_TYPES, nullFields, seesNoMoney, stripMoneyDeep } from '../lib/staffMoney';
 import { invoiceReaderProcedure, managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
 import { isFeatureOn } from '../lib/featureGate';
-import { dockPriceContext } from '../dockPriceContext/service';
+import { dockPriceContext, type DockPriceContextLine } from '../dockPriceContext/service';
 import { readConsolidatedRaw } from '../match/consolidated';
 import { invoiceQuestionCount } from '../catalog/linkQuestions';
+
+/** A dock price line as priceContext returns it: the prices are null for staff roles (H-11). */
+type DockPriceContextView = Omit<DockPriceContextLine, 'billedUnitPrice' | 'usualUnitPrice'> & {
+  billedUnitPrice: number | null;
+  usualUnitPrice: number | null;
+};
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 /** R5: undated open POs this recent still show in the receiving inbox. */
@@ -1801,8 +1807,12 @@ export const receivingRouter = router({
     .input(z.object({ invoiceId: z.string().uuid().optional() }))
     .query(async ({ ctx, input }) => {
       const enabled = await isFeatureOn(ctx.db, ctx.session.restaurantId, 'dockPriceContext');
-      if (!enabled || !input.invoiceId) return { enabled, lines: [] };
-      return { enabled, lines: await dockPriceContext(ctx.db, ctx.session.restaurantId, input.invoiceId) };
+      if (!enabled || !input.invoiceId) return { enabled, lines: [] as DockPriceContextView[] };
+      const lines: DockPriceContextView[] = await dockPriceContext(ctx.db, ctx.session.restaurantId, input.invoiceId);
+      // H-11 strip (slice c): the receiver keeps the non-₪ signal ("מחיר גבוה
+      // מהרגיל": priceHigher, %, samples), never the prices themselves.
+      if (!seesNoMoney(ctx.session.role)) return { enabled, lines };
+      return { enabled, lines: lines.map((l) => ({ ...l, billedUnitPrice: null, usualUnitPrice: null })) };
     }),
 });
 

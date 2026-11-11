@@ -14,3 +14,13 @@
 | `contracts.orderPrices` (chef tier) | The chef gets contract prices for ordering: inside the orders exemption. The receiver is FORBIDDEN already. | None. |
 
 **Attack suite:** slice c adds one appended block (add-only) for priceContext, the queueSummary nulls and myQueue. Each immutable change goes back to the owner as one Hebrew line through the orchestrator.
+
+## Built (11.11, full mode)
+| Procedure | Receiver | Chef |
+|---|---|---|
+| `receiving.priceContext` | `billedUnitPrice`, `usualUnitPrice` → null; keeps `priceHigher`, `pctVsUsual` (a %), `samples`. The dock hint says "מחיר גבוה מהרגיל" with no ₪, only when the % is positive. | FORBIDDEN (as before: not an invoice reader) |
+| `approvals.myQueue`, `approvals.queueSummary` | FORBIDDEN (no ₪, not ₪0). No receiver/chef screen calls them: the approvals route and `loadDecide` are finance-only. | FORBIDDEN |
+| `consolidated.coverage` | `receivedValueIls` → null, typed `number \| null`; the state and numbers stay. | FORBIDDEN (as before) |
+| todayExpectations · pendingInvoices · search.global · products.list · mapping.unmapped/searchProducts | No ₪; pinned by test | same |
+
+**Tests:** new `__tests__/money-strip-c.attack.test.ts`. It fails 3/4 against main's routers (the pins pass on both) and passes 4/4 with the change. Full `@restomatch/api`: 125 files, 1940 tests. The web i18n test passes, 49/49. No immutable file is touched: the attack block is a new file, so `cross-tenant.attack.test.ts` is unchanged. tenant-security-warden review: no blockers; its two SHOULDs are applied.
