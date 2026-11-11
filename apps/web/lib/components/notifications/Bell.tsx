@@ -41,7 +41,7 @@ export function Bell({ className, activity = false }: { className?: string; /** 
   const [open, setOpen] = useState(false);
   const [seen, setSeen] = useState<Set<string>>(() => new Set());
   const trigger = useRef<HTMLButtonElement>(null);
-  const q = trpc.tasks.mine.useQuery(undefined, { staleTime: 30_000, refetchInterval: 60_000, refetchOnWindowFocus: true, retry: 1 });
+  const q = trpc.tasks.mine.useQuery(undefined, { staleTime: 30_000, refetchInterval: 120_000, refetchOnWindowFocus: true, retry: 1 });
   const tasks: Task[] = useMemo(() => q.data?.tasks ?? [], [q.data]);
   const feed = trpc.activity.feed.useQuery({ limit: 8 }, { enabled: activity && open, staleTime: 30_000 });
 

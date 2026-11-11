@@ -61,17 +61,26 @@ export function FinanceHome({ questions, ...ctx }: Ctx & { questions?: React.Rea
   const { role, fail } = ctx;
   if (role === 'owner') {
     return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-4" data-home-blocks="owner">
-        <HomeSection name="hero" fallback={<HeroSkeleton />} forceFail={fail.has('hero')}>
-          <Hero {...ctx} />
-        </HomeSection>
-        <HomeSection name="needs" fallback={<NeedsSkeleton rows={3} />} forceFail={fail.has('needs')}>
-          <Needs {...ctx} max={3} />
-        </HomeSection>
-        {questions}
-        <HomeSection name="returned" fallback={<CardSkeleton className="h-14" />} forceFail={fail.has('returned')}>
-          <GoodNews {...ctx} />
-        </HomeSection>
+      // Desktop (train C review): two columns so the page is not a half-empty strip at 1440 —
+      // the hero (+ good news under it) on the start side, the tasks beside it. Phone: one column,
+      // hero → tasks → good news (grid auto-flow; the tasks span both desktop rows).
+      <div className="mx-auto grid w-full max-w-6xl gap-4 lg:grid-cols-12 lg:items-start" data-home-blocks="owner">
+        <div className="lg:col-span-7">
+          <HomeSection name="hero" fallback={<HeroSkeleton />} forceFail={fail.has('hero')}>
+            <Hero {...ctx} />
+          </HomeSection>
+        </div>
+        <div className="flex flex-col gap-4 lg:col-span-5 lg:row-span-2">
+          <HomeSection name="needs" fallback={<NeedsSkeleton rows={3} />} forceFail={fail.has('needs')}>
+            <Needs {...ctx} max={3} />
+          </HomeSection>
+          {questions}
+        </div>
+        <div className="lg:col-span-7">
+          <HomeSection name="returned" fallback={<CardSkeleton className="h-14" />} forceFail={fail.has('returned')}>
+            <GoodNews {...ctx} />
+          </HomeSection>
+        </div>
       </div>
     );
   }
@@ -183,8 +192,7 @@ async function Hero(ctx: Ctx) {
           testId: 'hero-why',
           children: (
             <>
-              {current.spendIls > 0 ? <p data-testid="hero-why-base">{t('needs.whyBase', { spend: ils(current.spendIls) })}</p> : null}
-              {state === 'leak' ? <p data-testid="hero-why-split">{t('needs.whySplit', { unpaid: ils(split.unpaidIls), paid: ils(split.paidIls) })}</p> : null}
+              {/* The base and the paid/unpaid split are on the hero itself (train C review); WHY keeps the rest. */}
               {current.pendingLinkCount > 0 ? (
                 <p data-testid="hero-pending-link">{t('hero.pending', { count: n(current.pendingLinkCount), amount: ils(current.pendingLinkIls) })}</p>
               ) : null}
@@ -226,6 +234,18 @@ async function Hero(ctx: Ctx) {
       // The number itself is the link (IA rule 7: no "לחשבוניות שמאחורי ₪760" button).
       amountHref={canDrill ? drillHref : undefined}
       pctLine={pct}
+      // What the % is of: the checked spend (train C review: "2.4% … מתוך ₪21,606").
+      baseLine={current.spendIls > 0 && (state === 'leak' || state === 'clean') ? t('hero.spendBase', { spend: ils(current.spendIls) }) : null}
+      splitLabel={t('hero.split')}
+      parts={
+        state === 'leak'
+          ? [
+              // By payment status, so the parts add up to the hero (leakSplit).
+              { label: t('hero.unpaid'), value: ils(split.unpaidIls), href: canDrill ? drillHref : undefined, testId: 'hero-unpaid' },
+              { label: t('hero.paid'), value: ils(split.paidIls), href: canDrill ? '/dashboard/leaks/claims' : undefined, testId: 'hero-paid' },
+            ]
+          : undefined
+      }
       thinNote={!pct && current.matchedInvoiceCount > 0 ? t('hero.thinBase', { count: n(current.matchedInvoiceCount) }) : null}
       delta={delta}
       completeness={
