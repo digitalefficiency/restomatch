@@ -50,6 +50,7 @@ export const en: Shape<typeof he> = {
     markedSent: 'Marked as sent',
     undo: 'Undo',
     addContact: 'Add a phone or e-mail for this supplier',
+    byEmail: 'Or by e-mail',
     copyOnly: 'This supplier has no phone or e-mail — copy the text and send it yourself.',
   },
   field: {

@@ -122,12 +122,13 @@ export const vatRouter = router({
   /** The pre-addressed request for one supplier (AC 3). Null when the flag is off. */
   requestDraft: readProcedure
     .input(z.object({ supplierId: z.string().uuid() }))
-    .query(async ({ ctx, input }): Promise<AllocationRequestDraft | null> => {
+    .query(async ({ ctx, input }): Promise<(AllocationRequestDraft & { canWrite: boolean }) | null> => {
       const rid = ctx.session.restaurantId;
       if (!(await flagOn(ctx.db, rid))) return null;
       const draft = await allocationRequestDraft(ctx.db, rid, input.supplierId);
       if (!draft) throw notFound();
-      return draft;
+      // The card shows "סמנו כנשלח" only to the roles markRequested accepts.
+      return { ...draft, canWrite: ALLOCATION_WRITE_ROLES.includes(ctx.session.role) };
     }),
 
   /**
