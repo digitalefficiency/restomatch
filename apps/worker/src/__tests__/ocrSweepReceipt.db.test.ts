@@ -27,6 +27,7 @@ import { startJobListener, workerSql } from '../queue';
 import { startMatchInvoiceWorker } from '../jobs/matchInvoice';
 import { startOcrInvoiceWorker } from '../jobs/ocrInvoice';
 import { runOcrSweep } from '../jobs/ocrSweep';
+import { startOfIlDay } from '../lib/notifyHelpers';
 
 /**
  * The OCR sweep (wave 1) × "hold the match until the receipt is counted" (#94),
@@ -56,7 +57,13 @@ let stopListen: () => Promise<void> = async () => {};
 const caller = () =>
   appRouter.createCaller({ db, session: { userId: receiverId, restaurantId, role: 'receiver' } } as never);
 
-/** A fresh HaKerem PO due `hoursAgo` ago, with the lines of the supplier's latest PO (× qtyFactor). */
+/**
+ * A fresh HaKerem PO due `hoursAgo` before 12:00 on the restaurant's (Israeli)
+ * day, with the lines of the supplier's latest PO (× qtyFactor). Anchored to the
+ * Israeli midday, not `Date.now()`: between local midnight and 03:00 "3 h ago"
+ * is YESTERDAY, so the "same-day sibling" these tests rely on would sit on
+ * another day and the matcher (which pairs by local day) would pick differently.
+ */
 async function freshPo(hoursAgo: number, qtyFactor = 1): Promise<string> {
   const [src] = await db
     .select({ id: purchaseOrders.id })
@@ -70,7 +77,7 @@ async function freshPo(hoursAgo: number, qtyFactor = 1): Promise<string> {
     .values({
       restaurantId,
       supplierId: hakerem,
-      expectedDeliveryAt: new Date(Date.now() - hoursAgo * 3600_000),
+      expectedDeliveryAt: new Date(startOfIlDay(new Date()).getTime() + (12 - hoursAgo) * 3600_000),
       status: 'sent',
       source: 'manual',
       notes: 'ocr-sweep × receipt test',
@@ -134,7 +141,7 @@ const payRun = () =>
     .createCaller({ db, session: { userId: ownerId, restaurantId, role: 'owner' } } as never)
     .payRun.month();
 
-/** PO1 counted + submitted 3 h ago (half the quantities), PO2 being counted now — same supplier, same day. */
+/** PO1 (due 09:00) counted + submitted (half the quantities), PO2 (due 12:00) being counted now — same supplier, same Israeli day. */
 async function siblings() {
   const po1 = await freshPo(3, 0.5);
   const gr1 = (await caller().receiving.startReceipt({ poId: po1 })).receiptId;

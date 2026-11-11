@@ -47,8 +47,7 @@ import {
   loadSuppliers,
   loadToday,
   loadTrend,
-  loadVatAtRisk,
-} from './data';
+  loadVatAtRisk, loadNeedsLines } from './data';
 import { NeedsYou, type NeedRow, type NeedTone } from './needs-you';
 import { HomeSection, Suspense } from './section';
 import { CardSkeleton, HeroSkeleton, NeedsSkeleton } from './skeletons';
@@ -79,8 +78,11 @@ interface Ctx extends Translators {
  * compact T1 hero, then context. Desktop: a 12-column grid (main 8, rail 4),
  * the strip across the top. Phone: the hero, then the stack of ≤3 rows.
  * Every card streams and fails on its own.
+ *
+ * `questions` (G-08 "זה אותו מוצר?", a count with no ₪) goes right under the
+ * strip: above the T1 hero it pushed the first ₪ row under a 375×667 fold.
  */
-export function FinanceHome(ctx: Ctx) {
+export function FinanceHome({ questions, ...ctx }: Ctx & { questions?: React.ReactNode }) {
   const { role, fail, t, tv, view } = ctx;
   const canDrill = canSeeRoute(role, '/dashboard/leaks');
   return (
@@ -89,6 +91,7 @@ export function FinanceHome(ctx: Ctx) {
         <HomeSection name="needs" fallback={<NeedsSkeleton rows={4} />} forceFail={fail.has('needs')}>
           <Needs {...ctx} />
         </HomeSection>
+        {questions}
       </div>
 
       {/* Main column; below lg its children join the page's single column (hero first). */}
@@ -218,8 +221,10 @@ async function Needs(ctx: Ctx) {
     vat: role === 'owner' || role === 'bookkeeper',
     payRun: role === 'owner' || role === 'bookkeeper',
     ops: role === 'manager',
+    // PILOT (W2-02): an unread photo invoice needs a person to complete its lines.
+    lines: role === 'owner' || role === 'manager',
   };
-  const [queue, recovery, vat, payRun, today, count, suppliers] = await Promise.all([
+  const [queue, recovery, vat, payRun, today, count, suppliers, lines] = await Promise.all([
     settle(loadDecide()),
     wants.claims ? settle(loadRecoveryClaims()) : null,
     wants.vat ? settle(loadVatAtRisk(restaurantId, role)) : null,
@@ -227,8 +232,9 @@ async function Needs(ctx: Ctx) {
     wants.ops ? settle(loadToday()) : null,
     wants.ops ? settle(loadOpenCount()) : null,
     wants.ops ? settle(loadSuppliers()) : null,
+    wants.lines ? settle(loadNeedsLines()) : null,
   ]);
-  const sources: Settled<unknown>[] = [queue, recovery, vat, payRun, today, count, suppliers].filter((x) => x !== null) as Settled<unknown>[];
+  const sources: Settled<unknown>[] = [queue, recovery, vat, payRun, today, count, suppliers, lines].filter((x) => x !== null) as Settled<unknown>[];
   const rows: NeedRow[] = [];
 
   // The decision queue is this card's core: if it can't be read, the card fails
@@ -329,6 +335,17 @@ async function Needs(ctx: Ctx) {
       href: '/dashboard/inventory/count',
     });
   }
+  if (lines?.ok && lines.value.count > 0) {
+    rows.push({
+      key: 'invoiceLines',
+      // Only held-for-review invoices (T4) → neutral; any failed / unread read → warn.
+      tone: lines.value.rows.every((r) => r.reason === 'held') ? 'neutral' : 'warn',
+      label: t('needs.invoiceLines.label'),
+      value: t('needs.invoiceLinesValue', { count: lines.value.count }),
+      verb: t('needs.invoiceLines.verb'),
+      href: '/dashboard/invoices',
+    });
+  }
   if (role === 'bookkeeper') {
     // PLACEHOLDER (W1-05): exports keep no log yet, so there is no real "last export" date.
     rows.push({
@@ -388,6 +405,7 @@ async function Hero(ctx: Ctx) {
   const ils = (v: number) => formatIls(v, { locale });
   const n = (v: number) => formatNumber(v, locale);
   const state = leakHeroState(current);
+  const onlyQuestions = current.pendingLinkCount === 0 && (current.awaitingCountCount ?? 0) === 0 && (current.awaitingQuestionCount ?? 0) > 0;
   const split = leakSplit(current);
 
   const drillQuery = serializeView({ ...DEFAULT_VIEW, period: view.period, from: view.from, to: view.to, filters: view.filters }).toString();
@@ -456,9 +474,15 @@ async function Hero(ctx: Ctx) {
           cta: canSeeRoute(role, '/dashboard/receiving') ? { label: t('hero.noData.cta'), href: '/dashboard/receiving', testId: 'hero-nodata-cta' } : null,
         }}
         primary={
-          canDrill && (state === 'leak' || state === 'pendingOnly')
-            ? { label: state === 'leak' ? t('hero.drill', { amount: ils(current.leakIls) }) : t('hero.drillPending'), href: drillHref, testId: 'hero-drill' }
-            : null
+          // G-08 (round 3 LOW): "pending" made only of question holds drills to the
+          // questions (the leaks list has nothing to show for them).
+          state === 'pendingOnly' && onlyQuestions
+            ? canSeeRoute(role, '/dashboard/catalog/mapping')
+              ? { label: t('hero.awaitingQuestionCta'), href: '/dashboard/catalog/mapping', testId: 'hero-drill' }
+              : null
+            : canDrill && (state === 'leak' || state === 'pendingOnly')
+              ? { label: state === 'leak' ? t('hero.drill', { amount: ils(current.leakIls) }) : t('hero.drillPending'), href: drillHref, testId: 'hero-drill' }
+              : null
         }
         tertiary={canProve ? { label: t('hero.howCalc'), href: '/dashboard/leaks/proof', testId: 'hero-proof' } : null}
         calcNote={t('hero.calc')}
@@ -481,11 +505,19 @@ async function HeroNotes({ role, view, t, locale }: Ctx) {
   );
   const ils = (v: number) => formatIls(v, { locale });
   const n = (v: number) => formatNumber(v, locale);
-  if (current.pendingLinkCount === 0 && current.awaitingCountCount === 0) return null;
+  if (current.pendingLinkCount === 0 && current.awaitingCountCount === 0 && current.awaitingQuestionCount === 0) return null;
   return (
     <div className="space-y-2">
       {current.pendingLinkCount > 0 ? (
         <Notice testId="hero-pending-link" text={t('hero.pending', { count: n(current.pendingLinkCount), amount: ils(current.pendingLinkIls) })} />
+      ) : null}
+      {current.awaitingQuestionCount > 0 ? (
+        <Notice
+          testId="hero-awaiting-question"
+          text={t('hero.awaitingQuestion', { count: n(current.awaitingQuestionCount), amount: ils(current.awaitingQuestionIls) })}
+          // G-08: the mapper only for a role that may answer (never the bookkeeper).
+          cta={canSeeRoute(role, '/dashboard/catalog/mapping') ? { href: '/dashboard/catalog/mapping', label: t('hero.awaitingQuestionCta') } : undefined}
+        />
       ) : null}
       {current.awaitingCountCount > 0 ? (
         <Notice testId="hero-awaiting-count" text={t('hero.awaitingCount', { count: n(current.awaitingCountCount), amount: ils(current.awaitingCountIls) })} />
@@ -494,12 +526,22 @@ async function HeroNotes({ role, view, t, locale }: Ctx) {
   );
 }
 
-function Notice({ text, testId }: { text: string; testId?: string }) {
+function Notice({ text, testId, cta }: { text: string; testId?: string; cta?: { href: string; label: string } }) {
   // T4: pending is neutral, never an alarm.
   return (
     <p data-testid={testId} className="flex items-start gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-sm text-muted">
       <Hourglass className="mt-0.5 h-4 w-4 shrink-0 text-muted" aria-hidden="true" />
-      {text}
+      <span className="min-w-0">
+        {text}
+        {cta ? (
+          <>
+            {' '}
+            <Link href={cta.href} className="font-semibold text-primary underline-offset-2 hover:underline">
+              {cta.label}
+            </Link>
+          </>
+        ) : null}
+      </span>
     </p>
   );
 }

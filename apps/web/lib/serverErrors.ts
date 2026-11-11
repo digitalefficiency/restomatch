@@ -23,6 +23,8 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'team.userNotFound': 'userNotFound',
   'team.inviteWrongEmail': 'inviteWrongEmail',
   'onboarding.accountGone': 'accountGone',
+  // /onboarding shows its own invitation-only note; this is the generic fallback.
+  signup_closed: 'forbidden',
   'settings.invalidTimezone': 'invalidTimezone',
   'settings.noChanges': 'noChanges',
   'dsr.soleOwner': 'soleOwner',
@@ -38,6 +40,13 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'auth.forbidden': 'forbidden',
   'input.invalid': 'invalidInput',
   'invoice.numberTaken': 'invoiceNumberTaken',
+  'invoice.linesLocked': 'invoiceLinesLocked',
+  'invoice.receiptOpen': 'invoiceReceiptOpen',
+  'invoice.beingRead': 'invoiceBeingRead',
+  'invoice.partialHeaderClear': 'invoicePartialHeaderClear',
+  'invoice.claimInProgress': 'invoiceClaimInProgress',
+  'invoice.unlinkedLines': 'invoiceUnlinkedLines',
+  'order.unlinkedLines': 'orderUnlinkedLines',
   // Wave-1 (S15) codes: generic fallbacks here; the owning screens (growth /
   // leakCheck namespaces) show their own specific copy.
   FEATURE_DISABLED: 'forbidden',

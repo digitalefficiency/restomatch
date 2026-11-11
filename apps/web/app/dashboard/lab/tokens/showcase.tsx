@@ -93,8 +93,13 @@ function Swatch({ name, hex, on }: { name: string; hex: string; on: string }) {
       </div>
       <div className="space-y-0.5 px-2 py-1.5">
         <p className="truncate text-caption font-semibold text-ink">{name}</p>
+        {/* Hex and contrast on their own lines: on one line they sat right at the wrap point at
+            390 px, so different Chromium builds broke them differently (W1-01 baseline, CI). */}
         <p className="num text-caption text-muted">
-          <bdi dir="ltr">{hex}</bdi> · {lab('contrast', { ratio: contrastRatio(on, hex).toFixed(2) })}
+          <bdi dir="ltr" className="block">
+            {hex}
+          </bdi>
+          <span className="block">{lab('contrast', { ratio: contrastRatio(on, hex).toFixed(2) })}</span>
         </p>
       </div>
     </div>
@@ -371,7 +376,8 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
       </Section>
 
       <Section id="lab-feedback" title={lab('feedback')}>
-        <div className="flex flex-wrap gap-2">
+        {/* One button per row on phones: three wrapping buttons sat at the wrap point at 390 px. */}
+        <div className="flex flex-col items-start gap-2 sm:flex-row sm:flex-wrap sm:items-center">
           <Button variant="secondary" onClick={() => toast.success(lab('toastSaved'))}>
             {lab('showToast')}
           </Button>
