@@ -1,11 +1,11 @@
 import Link from 'next/link';
 import { Badge, Card, LinkButton } from '@/lib/components';
-import { Money } from '@/lib/components/money';
 import { createServerCaller } from '@/lib/trpc/server';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
 import { formatIls } from '@/lib/money';
 import { loadLeakCardOnce, loadSupplierOverview } from './overview-data';
+import { ServerMoney } from './server-money';
 import { deliveryText, rhythmParts } from './rhythm';
 
 /**
@@ -82,7 +82,7 @@ export async function SupplierOverviewTab({ supplierId, leakCard }: { supplierId
                   <Badge tone={c.tone === 'danger' ? 'danger-solid' : 'warning-solid'} className="self-start">
                     {c.label}
                   </Badge>
-                  <Money agorot={c.agorot} context="tile" locale={locale} className="text-2xl font-bold" />
+                  <ServerMoney agorot={c.agorot} decimals={0} locale={locale} unavailableText={t('overview.unavailable')} className="text-metric-lg text-2xl font-bold" />
                   {c.count != null ? (
                     <span className="text-xs text-subtle">
                       {c.count === 1 ? t('overview.lineOne') : t('overview.lines', { count: c.count })}
@@ -147,7 +147,7 @@ export async function SupplierOverviewTab({ supplierId, leakCard }: { supplierId
                       {new Intl.DateTimeFormat(locale === 'he' ? 'he-IL' : 'en-GB', { timeZone: 'Asia/Jerusalem', day: '2-digit', month: '2-digit' }).format(new Date(inv.at))}
                     </span>
                   </Link>
-                  <Money value={inv.totalAgorot == null ? null : inv.totalAgorot / 100} context="line" locale={locale} />
+                  <ServerMoney agorot={inv.totalAgorot} decimals={2} locale={locale} unavailableText={t('overview.unavailable')} />
                 </li>
               ))}
             </ul>
