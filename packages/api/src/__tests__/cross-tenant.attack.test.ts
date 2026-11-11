@@ -429,7 +429,7 @@ function listProcedurePaths(): string[] {
 }
 
 /** Base entries at the W2-01 split. The base may grow (human PR); it may never shrink. */
-const BASE_COVERAGE_FLOOR = 201;
+const BASE_COVERAGE_FLOOR = 216;
 
 describe('coverage completeness', () => {
   it('every registered procedure is declared in COVERAGE', () => {
