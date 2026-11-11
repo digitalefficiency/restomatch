@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Bell as BellIcon, X } from 'lucide-react';
 import { cn } from '@/lib/components/cn';
@@ -163,7 +163,8 @@ export function Bell({ className, activity = false }: { className?: string; /** 
 /** Desktop panel: a native modal <dialog> (focus trapped inside, returned on close), 360 px under the bell. */
 function BellPanel({ open, onClose, title, closeLabel, children }: { open: boolean; onClose: () => void; title: string; closeLabel: string; children: React.ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const titleId = useId();
+  // One bell per page: a constant id, independent of the tree position (train-C B6).
+  const titleId = 'rm-bell-panel-title';
   useEffect(() => {
     const d = ref.current;
     if (!d || typeof d.showModal !== 'function') return;
