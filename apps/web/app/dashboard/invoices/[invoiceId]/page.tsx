@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { FileWarning } from 'lucide-react';
-import { Badge, SectionHeader } from '@/lib/components';
+import { Badge, LinkButton, SectionHeader } from '@/lib/components';
 import { formatDate } from '@/lib/i18n/format';
 import { vat } from '@/lib/i18n/messages/vat';
 import { enabledFeatures } from '@/lib/ingest/features';
@@ -70,6 +70,9 @@ export default async function InvoiceCorrectionPage({
     ? ((await caller.invoices.needsLines().catch(() => null))?.rows.find((r) => r.id === invoiceId && r.reviewReasons.length > 0) ?? null)
     : null;
 
+  // G-09 (round 6): a page of this invoice still waits for a decision in the inbox — held, act now (T2).
+  const pageQuestion = finance ? await caller.ingest.pageQuestionOf({ invoiceId }).catch(() => null) : null;
+
   return (
     <div>
       <SectionHeader
@@ -77,6 +80,19 @@ export default async function InvoiceCorrectionPage({
         title={t('correction.title')}
         subtitle={t('correction.subtitle')}
       />
+      {pageQuestion ? (
+        <div
+          role="note"
+          data-testid="invoice-page-question"
+          className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-warn/40 bg-surface p-4 shadow-card"
+        >
+          <Badge tone={pageQuestion.flag === 'page_duplicate' ? 'danger-solid' : 'warning-solid'}>{t('pageQuestion.badge')}</Badge>
+          <p className="min-w-0 flex-1 text-sm text-ink">{t('pageQuestion.body')}</p>
+          <LinkButton href="/dashboard/inbox?filter=errors" size="sm" variant="primary" className="touch-target">
+            {t('pageQuestion.cta')}
+          </LinkButton>
+        </div>
+      ) : null}
       {held ? (
         <div
           role="note"

@@ -6,7 +6,7 @@ export { toObjectRef, signObjectRef } from './objectRef';
 export { attachAsPage, splitDocument } from './attach';
 export { composedPathFor } from './compose';
 export { createIntakeInvoice } from './intake';
-export { settleDocumentPages, pageMismatch, decidePages, samePage, PAGE_FLAGS, type PageFlag, type SettleResult } from './settle';
+export { settleDocumentPages, windowCloseGate, WINDOW_MAX_ATTEMPTS, pageMismatch, decidePages, samePage, PAGE_FLAGS, type PageFlag, type SettleResult } from './settle';
 export { multiPageEnabled } from '../ingest/grouping';
 export { PAGE_ABSORBED_ACTION } from './reocr';
 export { STORE_OBJECT_PATH } from './objectRef';

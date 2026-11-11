@@ -40,7 +40,25 @@ export async function resolvePageFlag(
       .limit(1)
       .for('update');
     if (!doc || !doc.invoiceId) throw documentNotFound();
-    const flag = doc.error as PageFlag | null;
+    let flag = doc.error as PageFlag | null;
+    // Round 6: "separate" on a possible duplicate is reversible — a page a
+    // person separated while it was page_duplicate can still be deleted.
+    if (flag === (PAGE_SEPARATE as string) && action === 'delete_duplicate' && doc.invoiceId) {
+      const [was] = await tx
+        .select({ before: auditLog.before })
+        .from(auditLog)
+        .where(
+          and(
+            eq(auditLog.restaurantId, restaurantId),
+            eq(auditLog.entityType, 'invoice'),
+            eq(auditLog.entityId, doc.invoiceId),
+            eq(auditLog.action, PAGE_SEPARATED_ACTION),
+          ),
+        )
+        .orderBy(sql`${auditLog.at} desc`)
+        .limit(1);
+      if ((was?.before as { flag?: string } | null)?.flag === 'page_duplicate') flag = 'page_duplicate';
+    }
     if (!flag || !(PAGE_FLAGS as readonly string[]).includes(flag)) {
       throw new TRPCError({ code: 'CONFLICT', message: 'not_flagged' });
     }

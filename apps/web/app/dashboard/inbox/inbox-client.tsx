@@ -19,6 +19,7 @@ import {
   Card,
   ConfirmDialog,
   EmptyState,
+  Money,
   Input,
   Select,
   cn,
@@ -54,6 +55,9 @@ export interface InboxMessage {
     stored: boolean;
     /** G-09: the invoice a page_duplicate repeats (when known). */
     repeatsInvoiceId?: string | null;
+    /** G-09: what is at stake on a page question — the page invoice's ₪ (shekels, string) and supplier. */
+    invoiceTotal?: string | null;
+    invoiceSupplier?: string | null;
   }>;
   /** orderCapture: a forwarded WhatsApp order (text) and the draft PO captured from it. */
   order?: { poId: string | null; poStatus: string | null } | null;
@@ -109,10 +113,25 @@ const KNOWN_ERRORS = [
   'page_duplicate',
   'page_unreadable',
   'page_not_merged',
+  'page_merge_blocked',
+  'page_too_large',
   'page_separate',
 ] as const;
 /** Named refusals of ingest.resolvePageFlag, shown as copy. */
-const REFUSALS = ['not_flagged', 'not_a_duplicate', 'approved_or_paid', 'has_claim', 'decided', 'linked', 'multi_page'] as const;
+const REFUSALS = [
+  'not_flagged',
+  'not_a_duplicate',
+  'approved_or_paid',
+  'has_claim',
+  'decided',
+  'linked',
+  'multi_page',
+  'not_attachable',
+  'no_previous_invoice',
+  'too_large',
+  'too_many_pages',
+  'reocr_not_enabled',
+] as const;
 /** Flags that still ask a person something (page_separate is already answered). */
 const PAGE_QUESTIONS: readonly string[] = [
   'page_other_supplier',
@@ -120,7 +139,15 @@ const PAGE_QUESTIONS: readonly string[] = [
   'page_duplicate',
   'page_unreadable',
   'page_not_merged',
+  'page_merge_blocked',
+  'page_too_large',
 ];
+/** Page questions a person can answer by attaching the page to the invoice before it. */
+const ATTACHABLE: readonly string[] = ['page_not_merged', 'page_other_invoice', 'page_other_supplier'];
+const shekels = (v: string | null | undefined) => {
+  const n = v == null ? NaN : Number(v);
+  return Number.isFinite(n) ? n : undefined;
+};
 
 function KindIcon({ kind, className }: { kind: Kind; className?: string }) {
   return kind === 'whatsapp' ? (
@@ -140,6 +167,9 @@ export function InboxClient(props: Props) {
   const approve = trpc.ingest.approveDocument.useMutation();
   const reject = trpc.ingest.rejectDocument.useMutation();
   const resolvePage = trpc.ingest.resolvePageFlag.useMutation();
+  const attachPage = trpc.ingest.attachToPrevious.useMutation();
+  /** The possible duplicate a person is about to mark as a separate invoice (confirm first). */
+  const [confirmSep, setConfirmSep] = useState<InboxMessage['documents'][number] | null>(null);
   const [supplierFor, setSupplierFor] = useState<Record<string, string>>({});
   /** The document whose duplicate invoice is about to be deleted (confirm first). */
   const [confirmDup, setConfirmDup] = useState<InboxMessage['documents'][number] | null>(null);
@@ -157,9 +187,10 @@ export function InboxClient(props: Props) {
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       // A named refusal reads as a sentence, never as a raw code.
+      // A named refusal reads as a sentence; anything else is never a raw (English) server message.
       const message = (REFUSALS as readonly string[]).includes(code)
         ? t(`refusals.${code as (typeof REFUSALS)[number]}`)
-        : code;
+        : t('errors.unknown');
       toast.error(t('inbox.actionFailed', { message }));
     }
   }
@@ -298,11 +329,21 @@ export function InboxClient(props: Props) {
                               })}
                             </span>
                           ) : null}
-                          <Badge tone={DOC_TONE[d.status]}>{t(`documentStatus.${d.status}`)}</Badge>
-                          {d.error === 'page_duplicate' ? (
-                            // T2: a possible double payment is an act-now item, never calm.
-                            <Badge tone="danger-solid">{t('inbox.possibleDuplicate')}</Badge>
-                          ) : null}
+                          {d.error && PAGE_QUESTIONS.includes(d.error) ? (
+                            // T2: an open page question is an act-now item — solid badge + ₪.
+                            <>
+                              <Badge tone={d.error === 'page_duplicate' ? 'danger-solid' : 'warning-solid'}>
+                                {d.error === 'page_duplicate' ? t('inbox.possibleDuplicate') : t('inbox.pageQuestion')}
+                              </Badge>
+                              {shekels(d.invoiceTotal) !== undefined ? (
+                                <span className="text-sm font-semibold text-ink">
+                                  <Money value={shekels(d.invoiceTotal)!} context="line" />
+                                </span>
+                              ) : null}
+                            </>
+                          ) : (
+                            <Badge tone={DOC_TONE[d.status]}>{t(`documentStatus.${d.status}`)}</Badge>
+                          )}
                           {d.error ? (
                             <span
                               className={cn(
@@ -403,29 +444,47 @@ export function InboxClient(props: Props) {
                           ) : null}
                           {props.canManage && d.invoiceId && d.error && PAGE_QUESTIONS.includes(d.error) ? (
                             <>
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                className="min-h-11"
-                                disabled={resolvePage.isPending}
-                                onClick={() =>
-                                  act(
-                                    () => resolvePage.mutateAsync({ documentId: d.id, action: 'separate' }),
-                                    t('inbox.pageSeparated'),
-                                  )
-                                }
-                              >
-                                {t('inbox.pageSeparate')}
-                              </Button>
+                              {/* ONE primary action per question (T2). */}
                               {d.error === 'page_duplicate' ? (
                                 <Button
                                   size="sm"
-                                  variant="secondary"
+                                  variant="primary"
                                   className="min-h-11"
                                   disabled={resolvePage.isPending}
                                   onClick={() => setConfirmDup(d)}
                                 >
                                   {t('inbox.pageDeleteDuplicate')}
+                                </Button>
+                              ) : ATTACHABLE.includes(d.error) ? (
+                                <Button
+                                  size="sm"
+                                  variant="primary"
+                                  className="min-h-11"
+                                  disabled={attachPage.isPending}
+                                  onClick={() =>
+                                    act(() => attachPage.mutateAsync({ documentId: d.id }), t('inbox.pageAttached'))
+                                  }
+                                >
+                                  {t('inbox.pageAttach')}
+                                </Button>
+                              ) : null}
+                              {d.error !== 'page_unreadable' ? (
+                                <Button
+                                  size="sm"
+                                  variant={d.error === 'page_merge_blocked' || d.error === 'page_too_large' ? 'primary' : 'secondary'}
+                                  className="min-h-11"
+                                  disabled={resolvePage.isPending}
+                                  onClick={() =>
+                                    // A possible double payment is released only after a confirm (reversible).
+                                    d.error === 'page_duplicate'
+                                      ? setConfirmSep(d)
+                                      : act(
+                                          () => resolvePage.mutateAsync({ documentId: d.id, action: 'separate' }),
+                                          t('inbox.pageSeparated'),
+                                        )
+                                  }
+                                >
+                                  {t('inbox.pageSeparate')}
                                 </Button>
                               ) : null}
                             </>
@@ -457,7 +516,8 @@ export function InboxClient(props: Props) {
             ) : null}
           </>
         }
-        party={confirmDup?.filename ?? undefined}
+        amount={shekels(confirmDup?.invoiceTotal)}
+        party={confirmDup?.invoiceSupplier ?? undefined}
         confirmLabel={t('inbox.pageDeleteDuplicate')}
         cancelLabel={t('inbox.keep')}
         danger
@@ -467,6 +527,36 @@ export function InboxClient(props: Props) {
           const d = confirmDup;
           setConfirmDup(null);
           if (d) void act(() => resolvePage.mutateAsync({ documentId: d.id, action: 'delete_duplicate' }), t('inbox.pageDuplicateDeleted'));
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmSep !== null}
+        title={t('inbox.pageSeparateConfirmTitle')}
+        body={
+          <>
+            <span>{t('inbox.pageSeparateConfirmBody')}</span>
+            {confirmSep?.repeatsInvoiceId ? (
+              <Link
+                href={`/dashboard/invoices/${confirmSep.repeatsInvoiceId}`}
+                className="mt-2 block font-semibold text-primary hover:underline"
+              >
+                {t('inbox.pageDeleteConfirmRepeats')}
+              </Link>
+            ) : null}
+          </>
+        }
+        amount={shekels(confirmSep?.invoiceTotal)}
+        party={confirmSep?.invoiceSupplier ?? undefined}
+        confirmLabel={t('inbox.pageSeparate')}
+        cancelLabel={t('inbox.keep')}
+        danger
+        loading={resolvePage.isPending}
+        onClose={() => setConfirmSep(null)}
+        onConfirm={() => {
+          const d = confirmSep;
+          setConfirmSep(null);
+          if (d) void act(() => resolvePage.mutateAsync({ documentId: d.id, action: 'separate' }), t('inbox.pageSeparated'));
         }}
       />
 

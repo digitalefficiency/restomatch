@@ -11,6 +11,7 @@ import { eq, restaurants, sql, type Database } from '@restomatch/db';
 import { NEVER_CLAIMABLE_TYPES, claimableLines, sumClaims, type VatBasis } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
 import { financeProcedure, router } from '../trpc';
+import { PAGE_FLAGS } from '../documents/settle';
 
 /** The charts leak exclusion list (LEAK_EXCLUDED_TYPES) as SQL values. */
 const LEAK_EXCLUDED_SQL = sql.join(LEAK_EXCLUDED_TYPES.map((t) => sql`${t}`), sql`, `);
@@ -70,6 +71,8 @@ export interface PayRunInvoice {
   awaitingReview: boolean;
   /** A (non-waived) duplicate copy: held — "don't pay this copy", never a credit to ask for. */
   duplicate: boolean;
+  /** G-09: a page of this invoice still waits for a person's decision in the inbox — held ("עמוד פתוח"). */
+  openPageQuestion: boolean;
   /** The claimable ₪ of the duplicate finding(s) (= the copy's total incl. VAT); not in pending / credit. */
   duplicateIls: number;
   totalInclVat: number;
@@ -247,7 +250,11 @@ export const payRunRouter = router({
                -- …a receiving scan the OCR held for its receipt's count (#94, same rule as the hero).
                ${scanAwaitingCountSql(rid, sql`i`)} AS counting,
                -- G-08: held for a "זה אותו מוצר?" question (same rule as the hero).
-               ${AWAITING_QUESTION_SQL} AS question
+               ${AWAITING_QUESTION_SQL} AS question,
+               -- G-09: a page question is open in the inbox (never "pay" while a page is undecided).
+               EXISTS (SELECT 1 FROM ingest_documents gd
+                        WHERE gd.invoice_id = i.id AND gd.restaurant_id = ${rid} AND gd.status = 'registered'
+                          AND gd.error IN (${sql.join(PAGE_FLAGS.map((f) => sql`${f}`), sql`, `)})) AS open_page
         FROM invoices i
         LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${rid}
         WHERE i.restaurant_id = ${rid}
@@ -290,6 +297,8 @@ export const payRunRouter = router({
           !awaitingReview &&
           ((b?.pendingLink ?? false) || row.matched !== true || (!b && row.has_ua === true));
         if (pendingLink || awaitingCount || awaitingQuestion || awaitingReview) s.status = 'hold';
+        const openPageQuestion = row.open_page === true;
+        if (openPageQuestion) s.status = 'hold';
         const inv: PayRunInvoice = {
           invoiceId: id,
           invoiceNumber: row.invoice_number == null ? null : String(row.invoice_number),
@@ -300,6 +309,7 @@ export const payRunRouter = router({
           awaitingQuestion,
           awaitingReview,
           duplicate: s.duplicate,
+          openPageQuestion,
           duplicateIls: s.duplicateIls,
           totalInclVat: Number(row.total_incl),
           totalExclVat: Number(row.total_excl),

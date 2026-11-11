@@ -28,9 +28,11 @@ import {
 } from '@restomatch/ingest';
 import { appError } from '../errors';
 import { featureEnabled } from '../lib/features';
-import { enqueueIngestJobs, INGEST_FEATURE, messageStatus, registerIngestedDocument } from '../ingest/pipeline';
+import { enqueueIngestJobs, INGEST_FEATURE, messageStatus, registerIngestedDocument, registerReviewGroup } from '../ingest/pipeline';
+import { multiPageEnabled } from '../ingest/grouping';
 import { PAGE_FLAGS } from '../documents/settle';
 import { resolvePageFlag } from '../documents/resolve';
+import { attachAsPage } from '../documents/attach';
 import { assertSupplierOwned } from '../tenant';
 import { captureSourceRef } from '../orders/captureOrder';
 import { financeProcedure, managerProcedure, router } from '../trpc';
@@ -117,12 +119,41 @@ export const ingestRouter = router({
       .where(
         and(eq(ingestDocuments.restaurantId, ctx.session.restaurantId), eq(ingestDocuments.status, 'needs_review')),
       );
+    // G-09 (round 6): open page questions need a person too (page_separate is answered).
+    const pageQuestions = await ctx.db
+      .select({ id: ingestDocuments.id })
+      .from(ingestDocuments)
+      .where(
+        and(
+          eq(ingestDocuments.restaurantId, ctx.session.restaurantId),
+          eq(ingestDocuments.status, 'registered'),
+          inArray(ingestDocuments.error, [...PAGE_FLAGS]),
+        ),
+      );
     return {
       features: flags,
       emailDomain: process.env.INGEST_EMAIL_DOMAIN || null,
       channels,
-      needsReview: pending.length,
+      needsReview: pending.length + pageQuestions.length,
+      pageQuestions: pageQuestions.length,
     };
+  }),
+
+  /** G-09 (round 6): the open page question on one invoice (null when none) — the invoice page shows it as held. */
+  pageQuestionOf: financeProcedure.input(z.object({ invoiceId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const [row] = await ctx.db
+      .select({ documentId: ingestDocuments.id, flag: ingestDocuments.error })
+      .from(ingestDocuments)
+      .where(
+        and(
+          eq(ingestDocuments.restaurantId, ctx.session.restaurantId),
+          eq(ingestDocuments.invoiceId, input.invoiceId),
+          eq(ingestDocuments.status, 'registered'),
+          inArray(ingestDocuments.error, [...PAGE_FLAGS]),
+        ),
+      )
+      .limit(1);
+    return row ? { documentId: row.documentId, flag: row.flag as string } : null;
   }),
 
   /** New secret for a channel; the old one stops working at once. Plaintext returned ONCE. */
@@ -295,6 +326,12 @@ export const ingestRouter = router({
               // G-09: the invoice a page_duplicate repeats, when the OCR recorded it.
               repeatsInvoiceId: sql<string | null>`(select coalesce(i.ocr_payload -> 'raw' -> 'pageRepeats' ->> 'invoiceId', i.ocr_payload -> 'raw' -> 'duplicateOf' ->> 'invoiceId')
                 from ${invoices} i where i.id = ${ingestDocuments.invoiceId} and i.restaurant_id = ${ingestDocuments.restaurantId})`,
+              // G-09 (round 6): what is at stake on a page question — the page invoice's ₪ and supplier.
+              invoiceTotal: sql<string | null>`(select coalesce(i.total_incl_vat, i.total_excl_vat)::text
+                from ${invoices} i where i.id = ${ingestDocuments.invoiceId} and i.restaurant_id = ${ingestDocuments.restaurantId})`,
+              invoiceSupplier: sql<string | null>`(select coalesce(s.name, i.ocr_payload -> 'raw' -> 'reconciled' -> 'supplier' ->> 'name')
+                from ${invoices} i left join ${suppliers} s on s.id = i.supplier_id and s.restaurant_id = i.restaurant_id
+                where i.id = "ingest_documents"."invoice_id" and i.restaurant_id = "ingest_documents"."restaurant_id")`,
             })
             .from(ingestDocuments)
             .where(and(eq(ingestDocuments.restaurantId, rid), inArray(ingestDocuments.messageId, ids)))
@@ -346,6 +383,26 @@ export const ingestRouter = router({
       // Over-quota documents are metadata only — nothing to read; ask the sender to resend.
       if (!doc.storagePath) throw appError('BAD_REQUEST', 'input.invalid', 'אין קובץ שמור למסמך זה');
       const supplierId = input.supplierId ?? doc.supplierId ?? null;
+      // G-09 (round 6): with multi-page on, approving a page approves its whole
+      // review group (the same sender's pages within the window), so a 2-page
+      // invoice from an unknown number is never approved — and split — page by page.
+      const [rest] = await ctx.db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, rid)).limit(1);
+      if (multiPageEnabled(rest?.settings)) {
+        const group = await registerReviewGroup(ctx.db, { restaurantId: rid, documentId: doc.id, kind: doc.kind, supplierId, userId: ctx.session.userId });
+        if (input.allowSender) {
+          await ctx.db
+            .insert(ingestSenders)
+            .values({ restaurantId: rid, kind: doc.kind, sender: doc.sender, supplierId, createdBy: ctx.session.userId })
+            .onConflictDoNothing();
+        }
+        const msgs = await ctx.db
+          .selectDistinct({ messageId: ingestDocuments.messageId })
+          .from(ingestDocuments)
+          .where(and(eq(ingestDocuments.restaurantId, rid), inArray(ingestDocuments.id, group.documentIds)));
+        for (const m of msgs) await refreshMessageStatus(ctx.db, rid, m.messageId);
+        await enqueueIngestJobs(group.jobs);
+        return { invoiceId: group.invoiceIds[0] ?? null, invoiceIds: group.invoiceIds };
+      }
       const reg = await registerIngestedDocument(ctx.db, {
         restaurantId: rid,
         documentId: doc.id,
@@ -363,7 +420,7 @@ export const ingestRouter = router({
       await refreshMessageStatus(ctx.db, rid, doc.messageId);
       // Same as receiving.registerInvoice: enqueued from inside the member tx.
       await enqueueIngestJobs(reg.job ? [reg.job] : []);
-      return { invoiceId: reg.invoiceId };
+      return { invoiceId: reg.invoiceId, invoiceIds: [reg.invoiceId] };
     }),
 
   /**
@@ -386,6 +443,49 @@ export const ingestRouter = router({
       await refreshMessageStatus(ctx.db, rid, doc.messageId);
       return res;
     }),
+
+  /**
+   * G-09 (round 6): "צירוף לחשבונית הקודמת" — a flagged page that IS part of
+   * the invoice right before it (same channel + sender, earlier or equal
+   * receive time) is attached as its last page: one document, re-read once.
+   * Every refusal of attachAsPage applies (page 1 decided / claimed / linked,
+   * multi-page off). Foreign ids → NOT_FOUND.
+   */
+  attachToPrevious: managerProcedure.input(z.object({ documentId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const rid = ctx.session.restaurantId;
+    const doc = await ownDocument(ctx.db, rid, input.documentId);
+    await requireIngest(ctx.db, rid, doc.kind);
+    const [me] = await ctx.db
+      .select({ invoiceId: ingestDocuments.invoiceId, error: ingestDocuments.error, channelId: ingestMessages.channelId, receivedAt: ingestMessages.receivedAt })
+      .from(ingestDocuments)
+      .innerJoin(ingestMessages, and(eq(ingestMessages.id, ingestDocuments.messageId), eq(ingestMessages.restaurantId, ingestDocuments.restaurantId)))
+      .where(and(eq(ingestDocuments.id, doc.id), eq(ingestDocuments.restaurantId, rid)))
+      .limit(1);
+    if (!me?.invoiceId || !me.error || !(PAGE_FLAGS as readonly string[]).includes(me.error) || me.error === 'page_duplicate') {
+      throw new TRPCError({ code: 'CONFLICT', message: 'not_attachable' });
+    }
+    const [prev] = await ctx.db
+      .select({ invoiceId: ingestDocuments.invoiceId })
+      .from(ingestDocuments)
+      .innerJoin(ingestMessages, and(eq(ingestMessages.id, ingestDocuments.messageId), eq(ingestMessages.restaurantId, ingestDocuments.restaurantId)))
+      .where(
+        and(
+          eq(ingestDocuments.restaurantId, rid),
+          eq(ingestDocuments.status, 'registered'),
+          eq(ingestMessages.channelId, me.channelId),
+          eq(ingestMessages.sender, doc.sender),
+          sql`${ingestDocuments.invoiceId} is not null and ${ingestDocuments.invoiceId} <> ${me.invoiceId}`,
+          sql`${ingestMessages.receivedAt} <= ${me.receivedAt.toISOString()}::timestamptz`,
+          sql`${ingestMessages.receivedAt} >= ${new Date(me.receivedAt.getTime() - 24 * 60 * 60_000).toISOString()}::timestamptz`,
+        ),
+      )
+      .orderBy(desc(ingestMessages.receivedAt), desc(ingestDocuments.createdAt))
+      .limit(1);
+    if (!prev?.invoiceId) throw new TRPCError({ code: 'CONFLICT', message: 'no_previous_invoice' });
+    const res = await attachAsPage(ctx.db, { restaurantId: rid, invoiceId: prev.invoiceId, documentId: me.invoiceId, userId: ctx.session.userId });
+    await refreshMessageStatus(ctx.db, rid, doc.messageId);
+    return { invoiceId: res.invoiceId, pageCount: res.pageCount };
+  }),
 
   rejectDocument: managerProcedure.input(z.object({ documentId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const rid = ctx.session.restaurantId;

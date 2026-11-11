@@ -21,6 +21,7 @@ import {
   recordUsage,
   releaseClaimsForRematch,
   resolveApprovalThresholds,
+  windowCloseGate,
 } from '@restomatch/api';
 import { and, desc, eq, invoices, matchRuns, restaurants, sql, suppliers, type Database } from '@restomatch/db';
 import { runMatch, type MatchOutput } from '@restomatch/matching';
@@ -49,6 +50,9 @@ export interface MatchInvoiceJob {
    * order. Still subject to the assembler's same-supplier / ±window checks.
    */
   poId?: string;
+  /** G-09: the window-close match of a held lone page (settle-aware, see windowCloseGate). */
+  g09Window?: boolean;
+  g09Attempt?: number;
 }
 
 const CLEAN: MatchOutput = { status: 'clean', totalDiscrepancyAmount: 0, discrepancies: [] };
@@ -342,6 +346,17 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
     );
   }
 
+  // G-09 window — a held lone page's window-close match re-settles its cluster
+  // first: a sibling still being read re-schedules it (bounded), so page 1 gets
+  // no run that would block the merge (api/documents/settle.ts windowCloseGate).
+  if (job.data.g09Window) {
+    const gate = await windowCloseGate(db, { restaurantId, invoiceId, attempt: job.data.g09Attempt ?? 0 });
+    if (gate !== 'match') {
+      console.log(`[match-invoice] invoice=${invoiceId} — G-09 window: ${gate}`);
+      return CLEAN;
+    }
+  }
+  // end G-09 window
   const { result, persisted, replaced, skipped } = await matchInvoiceForJob(db, job.data);
   if (!persisted) {
     console.log(`[match-invoice] invoice=${invoiceId} — nothing to do (${skipped})`);

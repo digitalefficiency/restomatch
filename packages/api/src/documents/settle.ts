@@ -48,13 +48,19 @@ export type PageFlag =
   | 'page_other_invoice'
   | 'page_duplicate'
   | 'page_unreadable'
-  | 'page_not_merged';
+  | 'page_not_merged'
+  /** Round 6: it belongs, but page 1 is approved / claimed / linked, or the merge failed. */
+  | 'page_merge_blocked'
+  /** Round 6: it belongs, but the document would exceed the page / size limit. */
+  | 'page_too_large';
 export const PAGE_FLAGS: readonly PageFlag[] = [
   'page_other_supplier',
   'page_other_invoice',
   'page_duplicate',
   'page_unreadable',
   'page_not_merged',
+  'page_merge_blocked',
+  'page_too_large',
 ];
 
 /** A flagged page; `repeats` = the in-cluster chain page a page_duplicate repeats. */
@@ -67,6 +73,8 @@ export interface PageFlagged {
 export interface SettleResult {
   /** Don't match this invoice now: a sibling is pending, or it is being re-OCR'd. */
   hold: boolean;
+  /** Why it is held (round 6: the window-close job reschedules only on 'sibling_pending' / 'window_open'). */
+  holdReason?: 'window_open' | 'sibling_pending' | 'reocr' | 'duplicate';
   /** This invoice was merged into `mergedInto` and no longer exists. */
   absorbed: boolean;
   mergedInto?: string;
@@ -82,8 +90,46 @@ export interface SettleDeps {
 }
 
 /** The match job of a held lone page, run when its cluster window closes (idempotent). */
-function defaultDelayedMatch(job: { restaurantId: string; invoiceId: string }, runAt: Date): Promise<unknown> {
-  return enqueue(MATCH_INVOICE_QUEUE, job, { dedupeKey: `g09-window-${job.invoiceId}`, runAt, maxAttempts: 3 });
+function defaultDelayedMatch(job: { restaurantId: string; invoiceId: string }, runAt: Date, attempt = 0): Promise<unknown> {
+  return enqueue(
+    MATCH_INVOICE_QUEUE,
+    { ...job, g09Window: true, g09Attempt: attempt },
+    { dedupeKey: attempt === 0 ? `g09-window-${job.invoiceId}` : `g09-window-${job.invoiceId}-${attempt}`, runAt, maxAttempts: 3 },
+  );
+}
+
+/** Round 6: a window-close job waits this long for a sibling still being read, at most this often. */
+export const WINDOW_RETRY_MS = 2 * 60_000;
+export const WINDOW_MAX_ATTEMPTS = 15; // 15 × 2 min = the 30-minute hold cap
+
+/**
+ * Round 6 · the window-close match of a held lone page is SETTLE-AWARE: before
+ * matching, the cluster is settled again. A page still being read (a late page
+ * 2, a retried read, a queued burst) re-schedules the job — bounded by
+ * WINDOW_MAX_ATTEMPTS — so page 1 never gets a run (a goods-receipt link) that
+ * would block the merge. 'match' = go ahead; 'skip' = page 1 is being re-read
+ * (its own OCR job matches it), was absorbed, or is a held duplicate.
+ */
+export async function windowCloseGate(
+  db: Database,
+  args: { restaurantId: string; invoiceId: string; attempt?: number; now?: Date },
+  deps: SettleDeps & { reschedule?: (job: { restaurantId: string; invoiceId: string }, runAt: Date, attempt: number) => Promise<unknown> } = {},
+): Promise<'match' | 'skip' | 'rescheduled'> {
+  const now = args.now ?? new Date();
+  const attempt = args.attempt ?? 0;
+  const res = await settleDocumentPages(
+    db,
+    { restaurantId: args.restaurantId, invoiceId: args.invoiceId, now },
+    { ...deps, enqueueDelayedMatch: async () => {} },
+  );
+  if (res.absorbed || res.holdReason === 'reocr' || res.holdReason === 'duplicate') return 'skip';
+  if (res.hold && (res.holdReason === 'sibling_pending' || res.holdReason === 'window_open')) {
+    if (attempt + 1 > WINDOW_MAX_ATTEMPTS) return 'match'; // the cap: matched alone (a later page is a question)
+    const job = { restaurantId: args.restaurantId, invoiceId: args.invoiceId };
+    await (deps.reschedule ?? defaultDelayedMatch)(job, new Date(now.getTime() + WINDOW_RETRY_MS), attempt + 1);
+    return 'rescheduled';
+  }
+  return 'match';
 }
 
 export interface PageHeader {
@@ -563,6 +609,36 @@ export async function settleDocumentPages(
       sql`select pg_advisory_xact_lock(hashtext(${`ingest-group:${restaurantId}:${mine.channelId}:${mine.sender}`}))`,
     );
 
+    // Round 6: the composed re-read of a MERGED document failed for good. The
+    // pages' own reads were cleared by the merge, so the whole document's ₪ is
+    // out of the leak: never silent — every page row asks "unreadable".
+    const [failedComposed] = (await tx.execute(sql`
+      select 1 as hit from ${invoices} i
+       where i.id = ${invoiceId} and i.restaurant_id = ${restaurantId}
+         and i.status <> 'ocr_pending'
+         and coalesce((i.ocr_payload -> 'raw' ->> 'ocrFailed')::boolean, false)
+         and exists (select 1 from ${auditLog} a
+                      where a.entity_type = 'invoice' and a.entity_id = i.id and a.restaurant_id = i.restaurant_id
+                        and a.action = ${PAGES_RECOMPOSED_ACTION})`)) as unknown as Array<{ hit: number }>;
+    if (failedComposed) {
+      await tx
+        .update(ingestDocuments)
+        .set({ error: 'page_unreadable', updatedAt: new Date() })
+        .where(
+          and(
+            eq(ingestDocuments.restaurantId, restaurantId),
+            eq(ingestDocuments.invoiceId, invoiceId),
+            sql`${ingestDocuments.error} is null`,
+          ),
+        );
+      return {
+        result: { ...NOTHING, flagged: [{ invoiceId, reason: 'page_unreadable' as const }] },
+        ocr: [],
+        match: [],
+        superseded: null,
+      };
+    }
+
     const span = minutes * MAX_DOCUMENT_PAGES * 60_000;
     const rows: ClusterRow[] = (
       await tx
@@ -638,7 +714,7 @@ export async function settleDocumentPages(
           .limit(1);
         if (inv?.status === 'matched') {
           return {
-            result: { ...NOTHING, hold: true },
+            result: { ...NOTHING, hold: true, holdReason: 'window_open' as const },
             ocr: [],
             match: [],
             superseded: null,
@@ -742,7 +818,7 @@ export async function settleDocumentPages(
     // A sibling still being read: decide later (its OCR — or its terminal
     // failure, or the sweep backstop — settles the cluster).
     if (members.some((m) => m.invoiceId !== invoiceId && m.status === 'ocr_pending')) {
-      return { result: { ...NOTHING, hold: true }, ocr: [], match: [], superseded: null };
+      return { result: { ...NOTHING, hold: true, holdReason: 'sibling_pending' as const }, ocr: [], match: [], superseded: null };
     }
 
     const first = members[0]!;
@@ -756,7 +832,7 @@ export async function settleDocumentPages(
       const firstBlocked = await retireBlocker(tx, restaurantId, first.invoiceId);
       for (const page of decision.merge) {
         if (firstBlocked || (await retireBlocker(tx, restaurantId, page.invoiceId))) {
-          flagged.push({ invoiceId: page.invoiceId, reason: 'page_not_merged' });
+          flagged.push({ invoiceId: page.invoiceId, reason: 'page_merge_blocked' });
         } else merging.push(page);
       }
       // The composed PDF must fit the attachment limit; otherwise nothing merges.
@@ -764,7 +840,7 @@ export async function settleDocumentPages(
       const bytes = cluster.filter((r) => mergingIds.has(r.invoiceId)).reduce((n, r) => n + (r.sizeBytes ?? 0), 0);
       const pageCount = cluster.filter((r) => mergingIds.has(r.invoiceId)).length;
       if (merging.length > 0 && (bytes > INGEST_LIMITS.attachmentBytes || pageCount > MAX_DOCUMENT_PAGES)) {
-        for (const page of merging) flagged.push({ invoiceId: page.invoiceId, reason: 'page_not_merged' });
+        for (const page of merging) flagged.push({ invoiceId: page.invoiceId, reason: 'page_too_large' });
         merging = [];
       }
     }
@@ -832,7 +908,7 @@ export async function settleDocumentPages(
           if (!permanent && tries < 2) continue;
           console.warn(`[documents] merge into invoice=${first.invoiceId} failed (${permanent ? 'permanent' : 'transient'})`, err);
           // Retries exhausted or permanent: a person decides (never released unflagged).
-          for (const page of merging) flagged.push({ invoiceId: page.invoiceId, reason: 'page_not_merged' });
+          for (const page of merging) flagged.push({ invoiceId: page.invoiceId, reason: 'page_merge_blocked' });
           merging = [];
           break;
         }
@@ -886,6 +962,7 @@ export async function settleDocumentPages(
       flagOf.get(invoiceId) === 'page_duplicate' || flagged.some((f) => f.invoiceId === invoiceId && f.reason === 'page_duplicate');
     const result: SettleResult = {
       hold: (merged && first.invoiceId === invoiceId) || currentIsDuplicate,
+      ...(merged && first.invoiceId === invoiceId ? { holdReason: 'reocr' as const } : currentIsDuplicate ? { holdReason: 'duplicate' as const } : {}),
       absorbed,
       ...(absorbed || (merged && first.invoiceId === invoiceId) ? { mergedInto: first.invoiceId } : {}),
       flagged,

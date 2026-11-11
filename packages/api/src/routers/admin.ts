@@ -23,6 +23,7 @@ import { appError } from '../errors';
 import { usagePeriod } from '../entitlements';
 import { DEFAULT_ON_FEATURES, FEATURE_KEYS, featureEnabled, type FeatureKey } from '../lib/features';
 import { releaseOrderQuestionHolds } from './mapping';
+import { multiPageEnabled } from '../ingest/grouping';
 
 const PlanKeyEnum = z.enum(['trial', 'basic', 'pro', 'chain']);
 const StatusEnum = z.enum(['trialing', 'active', 'past_due', 'canceled']);
@@ -69,7 +70,8 @@ function featureState(settings: unknown) {
     all: stored.all === true,
     /** On unless stored false (G-08 orderQuestions) — what an unticked, never-saved box means. */
     defaultOn: [...DEFAULT_ON_FEATURES] as string[],
-    effective: Object.fromEntries(FEATURE_KEYS.map((k) => [k, featureEnabled(settings, k)])) as Record<
+    // G-09: multiPage is strict (features.all never turns it on; env kill switches) — show what is really in effect.
+    effective: Object.fromEntries(FEATURE_KEYS.map((k) => [k, k === 'multiPage' ? multiPageEnabled(settings) : featureEnabled(settings, k)])) as Record<
       FeatureKey,
       boolean
     >,

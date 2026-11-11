@@ -77,10 +77,13 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
     awaitingQuestion: boolean;
     awaitingReview: boolean;
     duplicate: boolean;
+    openPageQuestion?: boolean;
     creditIls: number;
   }) =>
     inv.status === 'claim'
       ? t('status.claim', { amount: ils(inv.creditIls) })
+      : inv.status === 'hold' && inv.openPageQuestion
+        ? t('status.holdPage')
       : inv.status === 'hold' && inv.duplicate
         ? t('status.holdDuplicate')
         : inv.status === 'hold' && inv.awaitingCount
@@ -282,12 +285,17 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
                             {t('table.toQuestions')}
                           </LinkButton>
                         ) : null}
-                        {inv.status === 'hold' && inv.awaitingReview ? (
+                        {inv.status === 'hold' && inv.openPageQuestion ? (
+                          <LinkButton href="/dashboard/inbox?filter=errors" size="sm" variant="primary" className="touch-target">
+                            {t('table.toInbox')}
+                          </LinkButton>
+                        ) : null}
+                        {inv.status === 'hold' && inv.awaitingReview && !inv.openPageQuestion ? (
                           <LinkButton href={`/dashboard/invoices/${inv.invoiceId}`} size="sm" variant="secondary" className="touch-target">
                             {t('table.openInvoice')}
                           </LinkButton>
                         ) : null}
-                        {inv.status === 'hold' && !inv.pendingLink && !inv.awaitingCount && !inv.awaitingQuestion && !inv.awaitingReview ? (
+                        {inv.status === 'hold' && !inv.openPageQuestion && !inv.pendingLink && !inv.awaitingCount && !inv.awaitingQuestion && !inv.awaitingReview ? (
                           <LinkButton href="/dashboard/approvals" size="sm" variant="primary" className="touch-target">
                             {t('table.toApprovals')}
                           </LinkButton>
