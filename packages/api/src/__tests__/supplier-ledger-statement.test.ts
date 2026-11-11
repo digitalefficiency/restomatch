@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeDocNumber, reconcileStatement, type OurInvoice, type StatementLine } from '../ledger/statement';
-import { kindFromType, parseStatementAmount, parseStatementCsv, parseStatementDate } from '../ledger/statementCsv';
+import { kindFromType, MAX_SKIPPED_ROWS, parseStatementAmount, parseStatementCsv, parseStatementDate } from '../ledger/statementCsv';
 
 const inv = (id: string, number: string, agorot: number, extra: Partial<OurInvoice> = {}): OurInvoice => ({
   id,
@@ -144,8 +144,16 @@ describe('parseStatementCsv', () => {
     expect(parseStatementAmount('x')).toBeNull();
     expect(parseStatementDate('31/02/2026')).toBeNull();
     expect(parseStatementDate('7.11.26')).toBe('2026-11-07');
+    expect(parseStatementDate('31/12/9999')).toBeNull();
+    expect(parseStatementDate('1999-12-31')).toBeNull();
     expect(kindFromType('חשבונית זיכוי')).toBe('credit');
     expect(kindFromType("צ'ק 1234")).toBe('payment');
     expect(kindFromType('משהו')).toBeNull();
+  });
+
+  it('caps the skipped-row list', () => {
+    const rows = Array.from({ length: 1_000 }, () => '01/10/2026,הערה,,abc,');
+    const p = parseStatementCsv(['תאריך,סוג,אסמכתא,חובה,זכות', ...rows].join('\n'));
+    expect(p.skipped).toHaveLength(MAX_SKIPPED_ROWS);
   });
 });

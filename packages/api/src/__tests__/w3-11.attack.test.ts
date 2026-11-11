@@ -31,8 +31,8 @@ let B: Tenant;
 let claimA: string;
 let claimB: string;
 
-function caller(t: Tenant, role: Session['role'] = 'owner') {
-  const ctx: AppContext = { db: appDb, session: { userId: t.ownerUserId, restaurantId: t.restaurantId, role } };
+function caller(t: Tenant, role: Session['role'] = 'owner', db: Database = appDb) {
+  const ctx: AppContext = { db, session: { userId: t.ownerUserId, restaurantId: t.restaurantId, role } };
   return appRouter.createCaller(ctx);
 }
 
@@ -125,3 +125,56 @@ describe('suppliers.reconcileStatement (W3-11)', () => {
     }
   });
 });
+
+/**
+ * The same attacks on the OWNER connection (no RLS): these pin the tRPC layer's own
+ * restaurant filters, so deleting one can't hide behind RLS and stay green.
+ */
+describe('W3-11 app-layer isolation (owner connection, RLS bypassed)', () => {
+  const asOwnerDb = () => caller(A, 'owner', ownerDb);
+
+  it("suggestAllocation: B's supplier → NOT_FOUND; A's candidates never contain B's claim", async () => {
+    await expect(asOwnerDb().recovery.suggestAllocation({ supplierId: B.supplierId, amountAgorot: 4_500 })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+    const out = await asOwnerDb().recovery.suggestAllocation({ supplierId: A.supplierId, amountAgorot: 4_500 });
+    expect(out.candidates.map((c) => c.id)).toEqual([claimA]);
+  });
+
+  it("reconcileStatement: B's acknowledged claim, invoice and credit note never reach A's figures", async () => {
+    await ownerDb.update(recoveryClaims).set({ status: 'acknowledged' }).where(eq(recoveryClaims.id, claimB));
+    try {
+      await expect(
+        asOwnerDb().suppliers.reconcileStatement({ supplierId: B.supplierId, csv: csv('10/10/2026,חשבונית מס,B-2002,236.00,') }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      const out = await asOwnerDb().suppliers.reconcileStatement({
+        supplierId: A.supplierId,
+        csv: csv('10/10/2026,חשבונית מס,A-1001,118.00,', '10/10/2026,חשבונית מס,B-2002,236.00,', '10/10/2026,חשבונית זיכוי,777,,59.00'),
+      });
+      expect(out.matched).toEqual({ invoices: 1, credits: 0 });
+      expect(out.totals).toEqual({ invoicedAgorot: 35_400, creditedAgorot: 5_900, paidAgorot: 0, otherLines: 0 });
+      // B's acknowledged 4_500 must not appear as A's "supplier agreed, credit missing".
+      expect(out.flags.filter((f) => f.kind === 'credit_missing')).toEqual([]);
+      expect(out.flags.some((f) => f.invoiceId === B.invoiceId)).toBe(false);
+    } finally {
+      await ownerDb.update(recoveryClaims).set({ status: 'claimed' }).where(eq(recoveryClaims.id, claimB));
+    }
+  });
+});
+
+describe('W3-11 feature flags', () => {
+  it('recovery off → suggestAllocation FORBIDDEN; supplierLedger off → reconcileStatement FORBIDDEN', async () => {
+    await ownerDb.update(restaurants).set({ settings: { features: {} } as never }).where(eq(restaurants.id, A.restaurantId));
+    try {
+      await expect(caller(A).recovery.suggestAllocation({ supplierId: A.supplierId, amountAgorot: 1 })).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+      });
+      await expect(
+        caller(A).suppliers.reconcileStatement({ supplierId: A.supplierId, csv: csv('10/10/2026,חשבונית מס,A-1001,1.00,') }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    } finally {
+      await ownerDb.update(restaurants).set({ settings: { features: { all: true } } as never }).where(eq(restaurants.id, A.restaurantId));
+    }
+  });
+});
+

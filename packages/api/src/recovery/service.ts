@@ -689,9 +689,10 @@ async function loadOwnedClaims(db: Database, restaurantId: string, ids: string[]
 
 /**
  * H-06 security review: the instant a transition is recorded at. A caller-supplied
- * `at` is clamped to now() (a back-dated or future `at` is never trusted), and never
- * earlier than the claim's last event, so the event history stays ordered and a
- * back-dated move can't slip under a later one (or under a supplier link's issue time).
+ * `at` is ignored: the transition is stamped now(), but never earlier than the
+ * claim's last event, so the event history stays ordered and a back-dated move can't
+ * slip under a later one. Ordering wins over the clock on purpose: if an older write
+ * left a future-dated event, the next stamp takes that instant rather than land before it.
  */
 export async function clampTransitionAt(
   db: Database,
@@ -731,8 +732,9 @@ export async function transitionClaim(
   if (stamp) patch[stamp] = at;
   if (input.to === 'claimed') patch.closedAt = null;
   // H-06 security review: a re-opened request is a new request. Re-stamping
-  // letter_sent_at makes every supplier link issued before the re-open stale, so an
-  // old link can't act on it (and the 7-day answer clock restarts from the re-open).
+  // letter_sent_at gives H-06's supplier-link verifier the instant to reject links
+  // issued before the re-open (that check lands with H-06; nothing enforces it yet),
+  // and the 7-day answer clock restarts from the re-open.
   if (claim.status === 'written_off' && input.to === 'claimed') patch.letterSentAt = at;
   if (claim.status === 'written_off' && input.to === 'claimed' && claim.creditedAgorot === 0) {
     // A re-open takes a share of the invoice cap again: re-cap it like the

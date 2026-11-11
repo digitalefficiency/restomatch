@@ -10,6 +10,8 @@ import type { StatementLine, StatementLineKind } from './statement';
  */
 
 export const MAX_STATEMENT_LINES = 2000;
+/** Unreadable rows reported back (the rest are counted, not listed). */
+export const MAX_SKIPPED_ROWS = 200;
 /** ~2000 lines of a wide export. */
 export const MAX_STATEMENT_CSV_CHARS = 400_000;
 
@@ -90,7 +92,12 @@ export function parseStatementDate(raw: string | undefined): string | null {
   return iso(y, +m[2]!, +m[1]!);
 }
 
+/** Statement years we accept; anything else is a typo (and 9999 would overflow the window SQL). */
+const MIN_YEAR = 2000;
+const MAX_YEAR = 2100;
+
 function iso(y: number, mo: number, d: number): string | null {
+  if (y < MIN_YEAR || y > MAX_YEAR) return null;
   if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
   const dt = new Date(Date.UTC(y, mo - 1, d));
   if (dt.getUTCMonth() !== mo - 1) return null;
@@ -141,7 +148,7 @@ export function parseStatementCsv(text: string): ParsedStatement {
     else if (cols.has('amount')) signed = parseStatementAmount(cell('amount'));
     if (signed === null) {
       const anyText = [cell('debit'), cell('credit'), cell('amount')].some((v) => v && v.trim());
-      skipped.push({ row, reason: anyText ? 'bad_amount' : 'no_amount' });
+      if (skipped.length < MAX_SKIPPED_ROWS) skipped.push({ row, reason: anyText ? 'bad_amount' : 'no_amount' });
       continue;
     }
     if (signed === 0) continue;
