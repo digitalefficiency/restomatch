@@ -48,6 +48,10 @@ export const APP_ERROR_CODES = [
   'invoice.beingRead',
   'invoice.partialHeaderClear',
   'invoice.claimInProgress',
+  // G-05 lifecycle kernel: a stale or concurrent move (params: currentStatus,
+  // actorName, at, machine, event, entityId) and a refused precondition (params: reason).
+  'lifecycle.conflict',
+  'lifecycle.refused',
 ] as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];

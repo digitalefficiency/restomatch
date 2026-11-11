@@ -189,6 +189,8 @@ export const en: Shape<typeof he> = {
     invoiceUnlinkedLines: 'This invoice has {count} lines not linked to a product yet. Answer "Is this the same product?" in mapping first, then re-run the match.',
     orderUnlinkedLines: 'The order for this invoice has {count} lines not linked to a product yet. Answer "Is this the same product?" in mapping first, then re-run the match.',
     invoiceNumberTaken: 'Invoice number {invoiceNumber} is already on another invoice from this supplier (dated {holderDate}). Check the number — or open the existing invoice.',
+    lifecycleConflict: 'Someone already updated this item in the meantime. Refresh to see its current state.',
+    lifecycleRefused: 'This action is not possible in the item’s current state.',
     generic: 'The action failed. Please try again.',
   },
 };
