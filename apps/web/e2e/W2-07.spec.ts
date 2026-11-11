@@ -74,6 +74,15 @@ async function signIn(browser: Browser, email: string, locale: 'he' | 'en', use 
     { name: 'rm_cookie_consent', value: 'necessary', url },
   ]);
   const page = await ctx.newPage();
+  // In suite order this is the manager's 4th magic link inside 15 minutes (W2-04 → W2-06 → here ×2),
+  // and lib/rateLimit.ts allows 3 per mailbox: clear that counter first, as AU-08 does (fixture
+  // step only; the limit itself is unchanged).
+  const sql = e2eSql();
+  try {
+    await sql`delete from rate_limit_counters where key like ${'magiclink:%'}`;
+  } finally {
+    await sql.end();
+  }
   await loginViaMagicLink(page, email, '/dashboard');
   return page;
 }

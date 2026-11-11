@@ -1,8 +1,11 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { SCREENS, SLACK, TYPE_BUDGET, VIEWPORT, type CopyScreen } from '../lib/copy/screens';
-import { DEMO_RESTAURANT_NAME } from './env';
+import { DEMO_RESTAURANT_NAME, E2E_DATABASE_URL } from './env';
 import { e2eSql, loginViaMagicLink } from './helpers';
 import { foldContract, measureCopy } from './helpers/copyBudget';
 
@@ -20,8 +23,18 @@ const EMAIL: Record<string, string> = {
   receiver: 'receiver@kfar-hazeitim.test',
 };
 const HEARTBEAT = 'e2e-w2-16';
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 test.beforeAll(async () => {
+  // Measure the same data alone and in suite order: W2-12 (earlier in the run) adds the contracts demo
+  // (seed-wave1-contracts-demo.ts: additive + idempotent) and leaves it, which lights the
+  // 'מעל החוזה' card on /dashboard/leaks. Seed it here too, so the baselines always include it —
+  // the pilot runs with `contracts` ON, so this is the page the owner sees.
+  execFileSync('pnpm', ['--filter', '@restomatch/worker', 'exec', 'tsx', 'scripts/seed-wave1-contracts-demo.ts'], {
+    cwd: path.join(HERE, '..', '..', '..'),
+    env: { ...process.env, DATABASE_URL: E2E_DATABASE_URL },
+    stdio: 'pipe',
+  });
   const sql = e2eSql();
   try {
     const [r] = await sql<{ id: string }[]>`select id from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
@@ -53,6 +66,14 @@ async function stateFor(browser: Browser, role: string): Promise<string> {
     mkdirSync(STATE_DIR, { recursive: true });
     const ctx = await browser.newContext({ baseURL: test.info().project.use.baseURL });
     const p = await ctx.newPage();
+    // Earlier specs in the run (W2-04, W2-06, W2-07) spend this mailbox's 3 magic links per 15 min
+    // (lib/rateLimit.ts): clear that counter first, as AU-08 does. The limit itself is unchanged.
+    const sql = e2eSql();
+    try {
+      await sql`delete from rate_limit_counters where key like ${'magiclink:%'}`;
+    } finally {
+      await sql.end();
+    }
     await loginViaMagicLink(p, EMAIL[role]!);
     await ctx.storageState({ path: file });
     await ctx.close();

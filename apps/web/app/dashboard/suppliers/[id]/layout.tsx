@@ -93,7 +93,7 @@ export default async function SupplierDetailLayout({
             <p className="text-xs text-subtle">{t('overview.leakLabel')}</p>
             {overview ? (
               <>
-                <ServerMoney agorot={overview.leakAgorot} decimals={2} locale={locale} unavailableText={t('overview.unavailable')} className="text-metric-hero text-3xl font-extrabold" />
+                <ServerMoney agorot={overview.leakAgorot} decimals={2} locale={locale} unavailableText={t('overview.unavailable')} className="text-metric-hero text-3xl font-extrabold" hero />
                 {overview.leakAgorot > 0 && supplier.leakCardEnabled ? (
                   <Link
                     href={`/dashboard/suppliers/${id}?tab=overview#leak-card`}
