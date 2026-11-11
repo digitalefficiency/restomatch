@@ -89,13 +89,15 @@ test('letters: preview → wa.me href → undo leaves claimed → confirm gives 
 
 test('credit form: empty, nothing pre-selected, no VAT default; ₪118.00 incl. on a ₪100.00 claim shows ✓', async ({ page }) => {
   await page.goto('/dashboard/recovery');
-  const open = page.getByRole('button', { name: /^רשמו זיכוי/ }).first();
+  // Owner 7.11 wording: "רשמו חשבונית זיכוי שהגיעה" (the supplier's document), per supplier.
+  const open = page.getByRole('button', { name: /^רשמו (חשבונית|תעודת) זיכוי/ }).first();
   await open.click();
   const form = page.getByTestId('credit-form').first();
   await expect(form).toBeVisible();
   await expect(form.getByTestId('credit-amount')).toHaveValue('');
   await expect(form.locator('input[type="checkbox"]:checked')).toHaveCount(0);
   await expect(form.getByTestId('credit-vat').getByRole('radio', { checked: true })).toHaveCount(0);
+  await expect(form.getByTestId('credit-doc').getByRole('radio', { checked: true })).toHaveCount(0);
   await expect(form.getByRole('button', { name: 'שמירה' })).toBeDisabled();
   // Pick the first claim; type its owed ₪ × 1.18 (incl.) → ✓ at 0.
   const first = form.locator('label').filter({ has: page.locator('input[type="checkbox"]') }).first();
@@ -105,6 +107,7 @@ test('credit form: empty, nothing pre-selected, no VAT default; ₪118.00 incl. 
   const incl = (Math.round((owedAgorot * 118) / 100) / 100).toFixed(2);
   await form.getByTestId('credit-amount').fill(incl);
   await form.getByTestId('credit-vat').getByRole('radio', { name: 'כולל מע״מ' }).click();
+  await form.getByTestId('credit-doc').getByRole('radio', { name: 'חשבונית זיכוי' }).click();
   await expect(form.getByTestId('credit-remainder')).toContainText('✓');
   await expect(form.getByRole('button', { name: 'שמירה' })).toBeEnabled();
 });
@@ -144,7 +147,8 @@ test('desk: the WF-3 tab survives a reload; drafts only on click; axe clean; ₪
 test.describe('phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
   test('recovery: claim cards render grouped by supplier, no horizontal overflow', async ({ page }) => {
-    await page.goto('/dashboard/recovery');
+    // The "to send" tab: the seed's claims are all still unsent (the default "track" tab may be empty).
+    await page.goto('/dashboard/recovery?tab=send');
     await expect(page.getByTestId('recovery-claim-cards')).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(1);

@@ -156,7 +156,7 @@ export const en: Shape<typeof he> = {
       UNIT_MISMATCH: 'The unit on the invoice differs from the order.',
       UNORDERED_ARRIVAL: 'Goods arrived without an order.',
       DUPLICATE_INVOICE: 'This invoice arrived twice — it is a duplicate.',
-      DATE_ANOMALY: 'The invoice date is unusual.',
+      DATE_ANOMALY: 'Please check the invoice date.',
       VAT_MISMATCH: 'The VAT on the invoice differs from the VAT on its subtotal.',
       TOTAL_MISMATCH: 'The invoice total differs from the sum of its lines.',
     },

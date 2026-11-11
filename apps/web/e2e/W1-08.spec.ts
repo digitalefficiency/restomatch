@@ -139,7 +139,8 @@ test('claims: "mark as sent" waits 10 s with undo, then moves the claims in one 
   const supplier = (await letter.locator('p[id$="-to"]').innerText()).split(':').pop()!.replace(/לשליחה|To send/g, '').trim();
   const calls: string[] = [];
   page.on('request', (r) => {
-    if (r.url().includes('recovery.transition')) calls.push(r.url());
+    // W2-10: a letter is sent through the guarded recovery.sendLetter (it moves all its claims at once).
+    if (r.url().includes('recovery.transition') || r.url().includes('recovery.sendLetter')) calls.push(r.url());
   });
 
   // Undo: nothing is written.
