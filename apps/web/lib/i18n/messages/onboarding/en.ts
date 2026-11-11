@@ -13,6 +13,15 @@ export const en: Shape<typeof he> = {
   optional: '(optional)',
   businessIdHint: '9–12 digits. Dashes are fine.',
   submit: 'Create restaurant and continue',
+  pending: {
+    title: 'An invite is waiting for you',
+    subtitle: 'You were invited to an existing team. Join it instead of creating a new restaurant.',
+    row: '{restaurant} · {role}',
+    by: 'Invited by: {inviter}',
+    join: 'Join the team',
+    failed: "We couldn't add you. The invite may have been revoked or expired. Ask for a new one.",
+    orCreate: 'Or: a new restaurant of your own',
+  },
   invitedNote: 'Invited to an existing team? Open the invite link from your email instead of creating a new restaurant.',
   signOut: 'Sign out',
   closed: {

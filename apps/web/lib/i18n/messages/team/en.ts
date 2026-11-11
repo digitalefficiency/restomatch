@@ -4,6 +4,7 @@ import type { he } from './he';
 export const en: Shape<typeof he> = {
   title: 'Team',
   subtitle: 'Invite staff, set roles and app language, and manage access to the restaurant.',
+  readOnlyNote: 'View only: team names and roles. Invites and changes are made by the owner.',
   managerNote: 'As a manager you can see the team and set each member’s app language. Invites and roles are managed by the owner.',
   invite: {
     title: 'Invite a team member',
@@ -19,7 +20,17 @@ export const en: Shape<typeof he> = {
     resendFailed: 'Re-sending failed.',
     revokeFailed: 'Revoking the invite failed.',
     copyLink: 'Copy link',
-    copyLinkTitle: 'Copy the invite link (no email provider configured)',
+    roleSeesTitle: 'What this role sees:',
+    roleSees: {
+      owner: 'Everything, including ₪, approvals, payments and the team.',
+      manager: 'Shift tasks, invoices and approvals; no team management.',
+      bookkeeper: 'Reads everything, edits the bookkeeping codes, exports.',
+      receiver: 'Receiving goods and photographing delivery notes. No ₪.',
+      chef: 'Orders and recipes, including their prices. No ₪ elsewhere.',
+    },
+    copyLinkTitle: 'Copy the invite link',
+    whatsapp: 'Send on WhatsApp',
+    whatsappText: "You're invited to join the {restaurant} team on RestoMatch. Join here: {url}",
     rateLimited: 'Too many invites sent in the last hour. Please try again later.',
     copied: 'Copied',
   },

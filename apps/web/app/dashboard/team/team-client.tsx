@@ -5,7 +5,7 @@ import { originalProps } from '@/lib/i18n/original';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import type { UserRole } from '@restomatch/db';
-import { CheckCircle2, Copy, Info, RefreshCw, Trash2, UserPlus, XCircle } from 'lucide-react';
+import { CheckCircle2, Copy, Info, MessageCircle, RefreshCw, Trash2, UserPlus, XCircle } from 'lucide-react';
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Field, Input, useToast } from '@/lib/components';
 import type { Locale } from '@/lib/i18n/config';
 import { useLocale, useT } from '@/lib/i18n/client';
@@ -24,7 +24,7 @@ import {
 import { needsRoleConfirm } from './role-change';
 
 type TeamData = inferRouterOutputs<AppRouter>['team']['list'];
-type ActionResult = { ok: boolean; message: string; devLink?: string };
+type ActionResult = { ok: boolean; message: string; shareLink?: string; shareText?: string };
 /** '' = no preference (follow the device / Hebrew default). */
 type LocaleChoice = '' | Locale;
 
@@ -63,11 +63,14 @@ export function TeamClient({
   initial,
   currentUserId,
   canManage,
+  readOnly = false,
 }: {
   initial: TeamData;
   currentUserId: string;
   /** Owner: invites + roles + removal. Manager: read-only roster + language. */
   canManage: boolean;
+  /** Bookkeeper: names and roles only, no controls at all. */
+  readOnly?: boolean;
 }) {
   const t = useT(team);
   const locale = useLocale();
@@ -211,19 +214,31 @@ export function TeamClient({
             <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
           )}
           <span className="text-sm font-medium">{status.message}</span>
-          {status.devLink ? (
-            <button
-              type="button"
-              onClick={() => {
-                void navigator.clipboard?.writeText(status.devLink!);
-                setCopied(true);
-              }}
-              className="inline-flex items-center gap-1 text-xs text-muted hover:text-ink"
-              title={t('invite.copyLinkTitle')}
-            >
-              <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-              {copied ? t('invite.copied') : t('invite.copyLink')}
-            </button>
+          {status.shareLink ? (
+            <span className="inline-flex flex-wrap items-center gap-2" data-testid="invite-share">
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(status.shareLink!);
+                  setCopied(true);
+                }}
+                className="inline-flex min-h-11 items-center gap-1 rounded-lg px-2 text-sm text-ink hover:bg-surface-2"
+                title={t('invite.copyLinkTitle')}
+              >
+                <Copy className="h-4 w-4" aria-hidden="true" />
+                {copied ? t('invite.copied') : t('invite.copyLink')}
+              </button>
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(status.shareText ?? status.shareLink)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-11 items-center gap-1 rounded-lg px-2 text-sm text-ink hover:bg-surface-2"
+                data-testid="invite-whatsapp"
+              >
+                <MessageCircle className="h-4 w-4" aria-hidden="true" />
+                {t('invite.whatsapp')}
+              </a>
+            </span>
           ) : null}
         </Card>
       ) : null}
@@ -278,11 +293,15 @@ export function TeamClient({
               {t('invite.submit')}
             </Button>
           </form>
+          {/* W3-07b placeholder: "מה התפקיד רואה" — swaps to IA's roleLens (apps/web/lib/roleLens) once it lands. */}
+          <p className="mt-4 text-sm text-muted" data-testid="role-sees">
+            <span className="font-medium text-ink">{t('invite.roleSeesTitle')}</span> {t(`invite.roleSees.${role}`)}
+          </p>
         </Card>
       ) : (
         <Card padding="md" className="flex items-center gap-3 border-line text-sm text-muted">
           <Info className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-          {t('managerNote')}
+          {readOnly ? t('readOnlyNote') : t('managerNote')}
         </Card>
       )}
 
@@ -296,7 +315,7 @@ export function TeamClient({
               <li key={m.userId} className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
                   <p className="truncate font-medium text-ink">
-                    <bdi {...originalProps(m.name)}>{m.name || m.email}</bdi>
+                    <bdi {...originalProps(m.name)}>{m.name || m.email || '—'}</bdi>
                     {m.userId === currentUserId ? (
                       <span className="ms-1 text-xs text-subtle">{t('members.you')}</span>
                     ) : null}
@@ -306,6 +325,7 @@ export function TeamClient({
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  {readOnly ? null : (
                   <select
                     aria-label={t('members.languageFor', { email: m.email })}
                     value={m.preferredLocale ?? ''}
@@ -327,6 +347,7 @@ export function TeamClient({
                       </option>
                     ))}
                   </select>
+                  )}
                   {canManage ? (
                     <>
                       <select

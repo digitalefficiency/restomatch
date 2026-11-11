@@ -11,7 +11,9 @@ export default async function TeamPage() {
   // language (nav + middleware ROUTE_ROLES agree; this is the final guard).
   const session = await auth();
   const role = session?.user?.role;
-  if (role !== 'owner' && role !== 'manager') redirect('/dashboard');
+  // The bookkeeper reads the roster (names + roles, owner decision I3); the
+  // route opens for her through the IA role lens, this page stays read-only.
+  if (role !== 'owner' && role !== 'manager' && role !== 'bookkeeper') redirect('/dashboard');
 
   const caller = await createServerCaller();
   const data = await caller.team.list();
@@ -20,7 +22,7 @@ export default async function TeamPage() {
   return (
     <div>
       <SectionHeader level={1} title={t('title')} subtitle={t('subtitle')} />
-      <TeamClient initial={data} currentUserId={session!.user.id} canManage={role === 'owner'} />
+      <TeamClient initial={data} currentUserId={session!.user.id} canManage={role === 'owner'} readOnly={role === 'bookkeeper'} />
     </div>
   );
 }
