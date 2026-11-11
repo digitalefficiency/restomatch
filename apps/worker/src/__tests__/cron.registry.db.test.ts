@@ -31,6 +31,7 @@ interface Expected {
 const EXPECTED: Expected[] = [
   { id: 'baselines-02', queue: 'baselines', repeat: { pattern: '0 2 * * *', tz: TZ }, slot: { at: '2026-11-01T00:00:00.000Z', label: '2026-11-01T02:00' } },
   { id: 'retention-0330', queue: 'retention', repeat: { pattern: '30 3 * * *', tz: TZ }, slot: { at: '2026-11-01T01:30:00.000Z', label: '2026-11-01T03:30' } },
+  { id: 'leak-month-close-0415', queue: 'leak-month-close', repeat: { pattern: '15 4 * * *', tz: TZ }, slot: { at: '2026-11-01T02:15:00.000Z', label: '2026-11-01T04:15' } },
   { id: 'daily-expectations-06', queue: 'daily-expectations', repeat: { pattern: '0 6 * * *', tz: TZ }, slot: { at: '2026-11-01T04:00:00.000Z', label: '2026-11-01T06:00' } },
   { id: 'health-digest-0645', queue: 'health-digest', repeat: { pattern: '45 6 * * *', tz: TZ }, slot: { at: '2026-11-01T04:45:00.000Z', label: '2026-11-01T06:45' } },
   { id: 'price-alerts-07', queue: 'price-alerts', repeat: { pattern: '0 7 * * *', tz: TZ }, slot: { at: '2026-11-01T05:00:00.000Z', label: '2026-11-01T07:00' } },

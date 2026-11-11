@@ -255,3 +255,81 @@ export async function computeLeakReport(
     capAdjustmentIls: Math.max(0, Math.round((typeSum - hero.leakIls) * 100) / 100),
   };
 }
+
+export interface ClosedLeakMonthCorrection {
+  id: string;
+  /** Signed change in agorot (+ = more leak than frozen). */
+  deltaAgorot: number;
+  reason: string;
+  entityType: string | null;
+  entityId: string | null;
+  /** When the late change was recorded (ISO): the date on the correction line. */
+  createdAt: string;
+}
+
+export interface ClosedLeakMonth {
+  /** First day of the month, 'YYYY-MM-01'. */
+  month: string;
+  snapshotId: string;
+  version: number;
+  /** When the month was frozen (ISO). */
+  closedAt: string;
+  /** The frozen figure: what the month said when it closed. Never restated. */
+  frozenLeakAgorot: number;
+  /** Late changes since the close, oldest first, each with its own date. */
+  corrections: ClosedLeakMonthCorrection[];
+  /** Σ corrections (agorot): shown as its own dated line, never folded into the frozen figure. */
+  correctionsAgorot: number;
+  payload: Record<string, unknown>;
+}
+
+const ymd = (v: unknown): string =>
+  v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
+
+/**
+ * H-07: a closed month as the report and the "סגור · לא ישתנה" pill read it:
+ * the latest snapshot version's frozen leak plus its dated correction lines.
+ * Null when the month is not closed (no snapshot). `month` is 'YYYY-MM'.
+ */
+export async function readClosedLeakMonth(
+  db: Database,
+  restaurantId: string,
+  month: string,
+): Promise<ClosedLeakMonth | null> {
+  const { year, month: m } = parseReportMonth(month);
+  const first = `${year}-${String(m).padStart(2, '0')}-01`;
+  const snapRows = await db.execute(sql`
+    SELECT id, month, version, computed_at, leak_agorot, payload
+    FROM leak_month_snapshots
+    WHERE restaurant_id = ${restaurantId} AND month = ${first}::date
+    ORDER BY version DESC
+    LIMIT 1
+  `);
+  const [s] = (Array.isArray(snapRows) ? snapRows : ((snapRows as { rows?: Record<string, unknown>[] }).rows ?? [])) as Record<string, unknown>[];
+  if (!s) return null;
+  const corrRows = await db.execute(sql`
+    SELECT id, delta_agorot, reason, entity_type, entity_id, created_at
+    FROM leak_month_corrections
+    WHERE restaurant_id = ${restaurantId} AND snapshot_id = ${String(s.id)}::uuid
+    ORDER BY created_at, id
+  `);
+  const list = (Array.isArray(corrRows) ? corrRows : ((corrRows as { rows?: Record<string, unknown>[] }).rows ?? [])) as Record<string, unknown>[];
+  const corrections = list.map((c) => ({
+    id: String(c.id),
+    deltaAgorot: Number(c.delta_agorot),
+    reason: String(c.reason),
+    entityType: (c.entity_type as string | null) ?? null,
+    entityId: c.entity_id == null ? null : String(c.entity_id),
+    createdAt: c.created_at instanceof Date ? c.created_at.toISOString() : new Date(String(c.created_at)).toISOString(),
+  }));
+  return {
+    month: ymd(s.month),
+    snapshotId: String(s.id),
+    version: Number(s.version),
+    closedAt: s.computed_at instanceof Date ? s.computed_at.toISOString() : new Date(String(s.computed_at)).toISOString(),
+    frozenLeakAgorot: Number(s.leak_agorot),
+    corrections,
+    correctionsAgorot: corrections.reduce((a, c) => a + c.deltaAgorot, 0),
+    payload: (s.payload as Record<string, unknown>) ?? {},
+  };
+}

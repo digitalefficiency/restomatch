@@ -4,6 +4,7 @@ import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
 import {
   claimHistory,
   computeRecoverySummary,
+  heldForCountTotals,
   creditLineSuggestions,
   listClaims,
   lockClaims,
@@ -49,11 +50,14 @@ export const recoveryRouter = router({
   summary: recoveryProcedure.query(async ({ ctx }) => {
     await syncClaims(ctx.db, ctx.session.restaurantId, ctx.session.userId);
     const now = new Date();
-    const [claims, returned] = await Promise.all([
+    const [claims, returned, heldForCount] = await Promise.all([
       listClaims(ctx.db, ctx.session.restaurantId, { now, limit: null }),
       returnedInMonth(ctx.db, ctx.session.restaurantId, { now }),
+      // #216 round 9: findings of a run its invoice waits to replace (a count
+      // still open) — not filed as claims; shown as "waiting for the count".
+      heldForCountTotals(ctx.db, ctx.session.restaurantId),
     ]);
-    return { summary: summarize(claims), returnedThisMonth: returned };
+    return { summary: { ...summarize(claims), heldForCount }, returnedThisMonth: returned };
   }),
 
   /** One page of claims; `limit` (default 200, at most MAX_CLAIMS) lets a screen that sums them ask for all. */

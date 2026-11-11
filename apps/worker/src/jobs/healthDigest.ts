@@ -59,6 +59,8 @@ export const DIGEST_QUEUES = [
   'price-alerts',
   'recovery-reminders',
   'monthly-report',
+  // H-07ʰ: the monthly leak close (a failed close must show up in the digest).
+  'leak-month-close',
 ] as const;
 
 export const OCR_STALE_AFTER_MS = 30 * 60_000;

@@ -6,7 +6,8 @@ export {
   type ComputeSupplierScorecardsOptions,
 } from './suppliers';
 // The leak engine's shared rules, re-exported so inventory purchases (S17) reuse them verbatim.
-export { LEAK_FILTER, LIVE_DUPLICATE } from './leak-views';
+export { LEAK_EXCLUDED_TYPES, LEAK_FILTER, LIVE_DUPLICATE, isLeakType } from './leak-views';
+export { AWAITING_QUESTION_SQL } from './awaiting-question';
 export { computeBaselines, type BaselineRow, type ComputeBaselinesOptions } from './baselines';
 export {
   HELD_FOR_RECEIPTS_KEY,
@@ -18,6 +19,8 @@ export {
   computeInvoiceLeak,
   computeLeakBreakdown,
   computeLeakHero,
+  computeMonthInvoiceLeaks,
+  type MonthInvoiceLeak,
   type LeakBreakdownInvoice,
   type LeakBreakdownLine,
   type LeakHero,
@@ -26,6 +29,9 @@ export {
 export {
   computeLeakReport,
   parseReportMonth,
+  readClosedLeakMonth,
+  type ClosedLeakMonth,
+  type ClosedLeakMonthCorrection,
   type LeakReport,
   type LeakReportPriceCreepRow,
   type LeakReportStatus,

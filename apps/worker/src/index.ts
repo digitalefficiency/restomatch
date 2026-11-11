@@ -21,6 +21,7 @@ import { startEndOfDayReportWorker } from './jobs/endOfDayReport';
 import { startMonthlyReportWorker } from './jobs/monthlyReport';
 import { startRecoveryRemindersWorker } from './jobs/recoveryReminders';
 import { startHealthDigestWorker } from './jobs/healthDigest';
+import { startLeakMonthCloseWorker } from './jobs/leakMonthClose';
 import { startMatchInvoiceWorker } from './jobs/matchInvoice';
 import { startOcrInvoiceWorker } from './jobs/ocrInvoice';
 import { startOcrSweepWorker } from './jobs/ocrSweep';
@@ -71,6 +72,7 @@ const workers = [
   startMonthlyReportWorker(),
   startHealthDigestWorker(),
   startOcrSweepWorker(),
+  startLeakMonthCloseWorker(),
 ];
 
 console.log(`[worker] started ${workers.length} workers`);

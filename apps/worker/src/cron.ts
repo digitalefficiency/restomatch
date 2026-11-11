@@ -18,6 +18,9 @@
  *                          "one number" report (flag `monthlyReport`, wave 1)
  *   • ocr-sweep          — every 5 minutes: re-enqueue invoices stuck in
  *                          ocr_pending (once each)
+ *   • leak-month-close   — every day at 04:15 IL: freeze each closed month's leak
+ *                          (a month closes on the 5th; first run catches up) and
+ *                          record later changes as dated corrections (H-07ʰ)
  */
 import { makeQueue } from './queue';
 import type { BaselinesJob } from './jobs/baselines';
@@ -26,6 +29,7 @@ import type { EndOfDayReportJob } from './jobs/endOfDayReport';
 import type { MonthlyReportJob } from './jobs/monthlyReport';
 import type { RecoveryRemindersJob } from './jobs/recoveryReminders';
 import type { HealthDigestJob } from './jobs/healthDigest';
+import type { LeakMonthCloseJob } from './jobs/leakMonthClose';
 import type { OcrSweepJob } from './jobs/ocrSweep';
 import type { OrderRemindersJob } from './jobs/orderReminders';
 import type { OutboxDispatchJob } from './jobs/outboxDispatch';
@@ -45,6 +49,7 @@ const recoveryRemindersQueue = makeQueue<RecoveryRemindersJob>('recovery-reminde
 const monthlyReportQueue = makeQueue<MonthlyReportJob>('monthly-report');
 const healthDigestQueue = makeQueue<HealthDigestJob>('health-digest');
 const ocrSweepQueue = makeQueue<OcrSweepJob>('ocr-sweep');
+const leakMonthCloseQueue = makeQueue<LeakMonthCloseJob>('leak-month-close');
 
 const TZ = 'Asia/Jerusalem';
 
@@ -131,6 +136,14 @@ export async function registerCronSchedules(): Promise<void> {
     { name: 'ocr-sweep', data: {} },
   );
 
+  // H-07ʰ: the monthly leak close — every day 04:15 IL. Snapshots only months whose
+  // 5th has passed (catch-up on the first run); other days only record corrections.
+  await leakMonthCloseQueue.upsertJobScheduler(
+    'leak-month-close-0415',
+    { pattern: '15 4 * * *', tz: TZ },
+    { name: 'leak-month-close', data: {} },
+  );
+
   // Retention purge — every day 03:30 IL. Opt-in via RETENTION_CRON_ENABLED; even
   // when scheduled it dry-runs unless RETENTION_PURGE_ENABLED=1 (see retention.ts).
   if (RETENTION_CRON_ENABLED) {
@@ -144,7 +157,7 @@ export async function registerCronSchedules(): Promise<void> {
   console.log(
     '[cron] registered: daily-expectations(06:00), baselines(02:00), outbox-dispatch(60s), ' +
       'order-reminders(09:00), supplier-delays(10:00), end-of-day-report(19:00), price-alerts(07:00), ' +
-      'recovery-reminders(08:30), monthly-report(1st 07:45), health-digest(06:45), ocr-sweep(5m)' +
+      'recovery-reminders(08:30), monthly-report(1st 07:45), health-digest(06:45), ocr-sweep(5m), leak-month-close(04:15)' +
       (RETENTION_CRON_ENABLED ? ', retention(03:30)' : ''),
   );
 }
@@ -162,4 +175,5 @@ export async function unregisterCronSchedules(): Promise<void> {
   await priceAlertsQueue.removeJobScheduler('price-alerts-07');
   await recoveryRemindersQueue.removeJobScheduler('recovery-reminders-0830');
   await monthlyReportQueue.removeJobScheduler('monthly-report-1st-0745');
+  await leakMonthCloseQueue.removeJobScheduler('leak-month-close-0415');
 }

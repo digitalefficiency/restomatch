@@ -4,6 +4,7 @@ import { processDailyExpectations } from './jobs/dailyExpectations';
 import { processEndOfDayReport } from './jobs/endOfDayReport';
 import { processHealthDigest } from './jobs/healthDigest';
 import { processImportCatalog } from './jobs/importCatalog';
+import { processLeakMonthClose } from './jobs/leakMonthClose';
 import { processMatchInvoice } from './jobs/matchInvoice';
 import { processMonthlyReport } from './jobs/monthlyReport';
 import { processOcrInvoice } from './jobs/ocrInvoice';
@@ -46,6 +47,7 @@ export const JOB_HANDLERS: Readonly<Record<string, JobProcessor>> = {
   'monthly-report': processMonthlyReport,
   'health-digest': processHealthDigest,
   'ocr-sweep': processOcrSweep,
+  'leak-month-close': processLeakMonthClose,
 };
 
 export const HANDLED_QUEUES: readonly string[] = Object.keys(JOB_HANDLERS);

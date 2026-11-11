@@ -22,3 +22,13 @@ describe('featureEnabled', () => {
     expect(featureEnabled(on, 'recovery', { FEATURES_OFF: 'aiAssistant,contracts' })).toBe(true);
   });
 });
+
+describe('G-08 orderQuestions: a default-ON key', () => {
+  it('on with no settings, off only when set false or killed', () => {
+    expect(featureEnabled(null, 'orderQuestions', {})).toBe(true);
+    expect(featureEnabled({ features: {} }, 'orderQuestions', {})).toBe(true);
+    expect(featureEnabled({ features: { orderQuestions: false } }, 'orderQuestions', {})).toBe(false);
+    expect(featureEnabled({ features: { orderQuestions: true } }, 'orderQuestions', { FEATURES_OFF: 'orderQuestions' })).toBe(false);
+    expect(featureEnabled(null, 'orderQuestions', { FEATURES_OFF: 'all' })).toBe(false);
+  });
+});
