@@ -1,12 +1,14 @@
 // G11 (DS2 VERDICT §5): ▲/▼ are drawn as icons, never typed. No UI face has
 // U+25B2/U+25BC, so a typed mark was painted by a system font.
 import '../../__tests__/reactGlobal';
-import { createElement as h, type ReactElement } from 'react';
+import { createElement, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { I18nProvider } from '../../../i18n/client';
 import { DeltaBadge } from '../DeltaBadge';
 
+// Loosely typed createElement: two @types/react majors are hoisted in the workspace (STATE.md).
+const h = createElement as unknown as (type: unknown, props?: Record<string, unknown> | null, ...children: unknown[]) => ReactElement;
 const render = (el: ReactElement) => renderToStaticMarkup(h(I18nProvider, { locale: 'he' }, el));
 
 describe('DeltaBadge mark (G11)', () => {
