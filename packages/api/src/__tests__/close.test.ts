@@ -106,12 +106,16 @@ describe('close.checklist (DB)', () => {
     await note(B, '2026-09-10', '9');
     expect((await callerFor(A).close.checklist({ month: MONTH })).deliveryNotes).toBeNull();
 
-    await db
-      .update(restaurants)
-      .set({ settings: { features: { supplierLedger: true } } as never })
-      .where(eq(restaurants.id, A.restaurantId));
+    // Both tenants on: B's uncovered note (9 × ₪8.50) must never reach A's figure.
+    for (const t of [A, B]) {
+      await db
+        .update(restaurants)
+        .set({ settings: { features: { supplierLedger: true } } as never })
+        .where(eq(restaurants.id, t.restaurantId));
+    }
     const r = await callerFor(A).close.checklist({ month: MONTH });
     expect(r.deliveryNotes).toEqual({ count: 1, amountIls: 34 });
+    expect((await callerFor(B).close.checklist({ month: MONTH })).deliveryNotes).toEqual({ count: 1, amountIls: 76.5 });
   });
 
   it('an empty month is all zeros (the page shows it calm, never as an alarm)', async () => {
