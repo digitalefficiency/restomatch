@@ -1,12 +1,21 @@
 import { z } from 'zod';
 import { activityEvents, and, desc, eq, inArray, lt, users, type UserRole } from '@restomatch/db';
 import { hasCap } from '../lib/capabilities';
+import { NO_MONEY_ROLES, hasShekel, stripShekelFigures } from '../lib/staffMoney';
 import { memberProcedure, router } from '../trpc';
 
 /**
- * Event kinds whose `detail` carries purchase / leak ₪ (match/persist.ts
- * invoice_matched; approvals approve → formatted ₪, reject → free-text reason).
+ * Receiver and chef see no ₪ in the activity feed (owner rule: the receiver
+ * never sees ₪; the chef sees ₪ only on orders and recipes). The data-tier
+ * backstop: their homes don't mount the feed, but tRPC is callable directly.
+ * G-07: the gate is the `money.view` capability (CAP); the rule itself is the
+ * pilot's (#219): allow-listed metadata, detail null, ₪ in every spelling cut.
+ * `NO_MONEY_ROLES` stays exported for the pilot's callers; it equals the roles
+ * without `money.view` (pinned in activity-scope.test.ts).
  */
+export { NO_MONEY_ROLES };
+
+/** Event kinds whose `detail` carries purchase / leak ₪. */
 export const MONEY_BEARING_EVENT_TYPES: ReadonlySet<string> = new Set([
   'invoice_matched',
   'discrepancy_approved',
@@ -16,28 +25,44 @@ export const MONEY_BEARING_EVENT_TYPES: ReadonlySet<string> = new Set([
 /** Metadata keys that carry ₪ (potentialLossIls, leakIls, savingsIls, amountIls, …). */
 export const MONEY_METADATA_KEY = /(Ils|Agorot)$|amount|savings|total|price/i;
 
-const SHEKEL = '₪';
-/** A ₪ figure in either order ("₪1,234.50", "1,234.50 ₪"), incl. bidi marks + a sign. */
-const SHEKEL_FIGURE = /[‎‏⁦-⁩]*[-−+]?\s*₪\s*[-−]?[\d.,]+|[-−]?[\d.,]+\s*₪/g;
+/**
+ * The ONLY metadata keys a receiver / chef receives: the money-free keys the
+ * writers produce (match/persist.ts, approvals approve/reject, the demo seeds).
+ * Everything else is dropped, including free text such as `reason` ("הספק חייב
+ * 45 שקל"), so a new money key or a new free-text field can't leak by default.
+ */
+export const STAFF_METADATA_KEYS: ReadonlySet<string> = new Set([
+  'invoiceId',
+  'invoiceNumber',
+  'supplierName',
+  'supplierNameEn',
+  'discrepancyId',
+  'discrepancyType',
+  'discrepancyCount',
+  'leakCount',
+  'reviewCount',
+  'pendingLink',
+  'poMatched',
+  'status',
+  'duplicateKey',
+  'reasonCode',
+  'role',
+  'consolidated',
+  'kind',
+  'v',
+  'rows',
+  'count',
+]);
 
-function stripShekelFigures(text: string): string {
-  return text.replace(SHEKEL_FIGURE, '').replaceAll(SHEKEL, '').replace(/\s{2,}/g, ' ').trim();
-}
-
-function redactMetadata(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.filter((v) => !(typeof v === 'string' && v.includes(SHEKEL))).map(redactMetadata);
+function redactMetadata(meta: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(meta ?? {})) {
+    if (!STAFF_METADATA_KEYS.has(k) || MONEY_METADATA_KEY.test(k)) continue;
+    // Primitives only: a nested object or array could carry anything.
+    if (v === null || typeof v === 'number' || typeof v === 'boolean') out[k] = v;
+    else if (typeof v === 'string' && !hasShekel(v)) out[k] = v;
   }
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if (MONEY_METADATA_KEY.test(k)) continue;
-      if (typeof v === 'string' && v.includes(SHEKEL)) continue;
-      out[k] = redactMetadata(v);
-    }
-    return out;
-  }
-  return value;
+  return out;
 }
 
 interface FeedRow {
@@ -52,23 +77,19 @@ interface FeedRow {
 }
 
 /**
- * G-07 (ia-nav-01, data tier — interim before H-11): roles without
- * `money.view` (receiver, chef) get the feed with no ₪: `detail` nulled for
- * money-bearing kinds (and wherever it carries ₪), ₪ metadata keys dropped,
- * and no string containing ₪ left in the row. Roles with `money.view` get the
- * row untouched (same reference).
+ * Receiver / chef: `detail` is always null (legacy v1 rows put ₪ in the free
+ * text, which the web's legacy parser re-renders), metadata keeps only the
+ * allow-listed money-free keys, and ₪ figures (₪, ש"ח, ש״ח, ש”ח, ש''ח, שח, שקל,
+ * ILS, NIS, with the adjacent digits) are cut from the title. Owner, manager
+ * and bookkeeper get the row untouched (same reference).
  */
 export function redactActivityForRole<T extends FeedRow>(role: UserRole, row: T): T {
   if (hasCap(role, 'money.view')) return row;
-  const detail =
-    row.detail == null || MONEY_BEARING_EVENT_TYPES.has(row.eventType) || row.detail.includes(SHEKEL)
-      ? null
-      : row.detail;
   return {
     ...row,
-    title: row.title.includes(SHEKEL) ? stripShekelFigures(row.title) : row.title,
-    detail,
-    metadata: redactMetadata(row.metadata ?? {}) as Record<string, unknown>,
+    title: hasShekel(row.title) ? stripShekelFigures(row.title) : row.title,
+    detail: null,
+    metadata: redactMetadata(row.metadata),
   };
 }
 
@@ -81,7 +102,7 @@ export const activityRouter = router({
    * it are returned — pass the createdAt of the last row of the previous page to
    * load the next page.
    *
-   * Receiver / chef (no `money.view`) get ₪-free rows: redactActivityForRole.
+   * Receiver / chef get ₪-free rows (redactActivityForRole); same shape.
    * Every row carries `actorId` + `actorName` (null for system events or a
    * deleted user) for the actor chip; names are visible to every role that
    * sees the row.

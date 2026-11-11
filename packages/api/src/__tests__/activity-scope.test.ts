@@ -1,12 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { activityEvents, createDb, eq, testDbUrl, users, type UserRole } from '@restomatch/db';
 import { appRouter } from '../index';
+import { CAP } from '../lib/capabilities';
+import { NO_MONEY_ROLES } from '../routers/activity';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
  * G-07 (ia-nav-01, interim before H-11): activity.feed carries no ₪ for roles
  * without `money.view` (receiver, chef); owner / manager / bookkeeper unchanged.
+ * The redaction rule is the pilot's (#219, activity-redaction.pilot.test.ts):
+ * detail null, allow-listed primitive metadata, ₪ figures cut from titles.
  * The three money-bearing events mirror what the writers persist today:
  * match/persist.ts (invoice_matched), approvals approve / reject.
  */
@@ -104,6 +108,12 @@ afterAll(async () => {
 });
 
 describe('activity.feed — money scope by role (G-07)', () => {
+  it('NO_MONEY_ROLES (pilot) equals the roles without money.view (CAP)', () => {
+    const all: UserRole[] = ['owner', 'manager', 'bookkeeper', 'receiver', 'chef'];
+    const withoutMoney = all.filter((r) => !(CAP['money.view'] as ReadonlyArray<UserRole>).includes(r));
+    expect([...NO_MONEY_ROLES].sort()).toEqual(withoutMoney.sort());
+  });
+
   it('owner / manager / bookkeeper get the full rows, deep-equal to each other and to the stored rows', async () => {
     const owner = await caller(A, 'owner').activity.feed();
     expect(owner).toHaveLength(4);
@@ -127,7 +137,7 @@ describe('activity.feed — money scope by role (G-07)', () => {
   });
 
   for (const role of ['receiver', 'chef'] as const) {
-    it(`${role}: no ₪ anywhere, no ₪ keys, detail null on money-bearing kinds`, async () => {
+    it(`${role}: no ₪ anywhere, no ₪ keys, detail null, allow-listed metadata only`, async () => {
       const rows = await caller(A, role).activity.feed();
       expect(rows).toHaveLength(4);
       expect(JSON.stringify(rows)).not.toContain('₪');
@@ -155,9 +165,11 @@ describe('activity.feed — money scope by role (G-07)', () => {
       expect(rows.find((r) => r.eventType === 'discrepancy_rejected')?.metadata).toEqual({
         discrepancyId: A.discrepancyId,
         reasonCode: 'other',
-        nested: { note: 'בסדר' },
       });
-      expect(rows.find((r) => r.eventType === 'invoice_received')?.detail).toBe(A.supplierName);
+      // #219 rule: detail is null on EVERY row (legacy free text can carry ₪);
+      // nested objects and non-allow-listed keys (`reason`, `type`) are dropped.
+      for (const r of rows) expect(r.detail, r.eventType).toBeNull();
+      expect(rows.find((r) => r.eventType === 'invoice_received')?.metadata).toEqual({ invoiceId: A.invoiceId });
       expect(rows.map((r) => r.title)).toEqual([
         'חשבונית התקבלה',
         'פער נדחה',

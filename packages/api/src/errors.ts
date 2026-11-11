@@ -20,11 +20,13 @@ export const APP_ERROR_CODES = [
   'team.userNotFound',
   'team.inviteWrongEmail',
   'onboarding.accountGone',
+  'signup_closed',
   'settings.invalidTimezone',
   'settings.noChanges',
   'dsr.soleOwner',
   'admin.lastOwner',
   'admin.notFound',
+  'admin_requires_2fa',
   'subscription.inactive',
   'quota.exceeded',
   'entitlement.required',
@@ -33,11 +35,19 @@ export const APP_ERROR_CODES = [
   'capability.required',
   'input.invalid',
   'invoice.numberTaken',
+  // G-08 hold: a manual re-match while an invoice line is still a question.
+  'invoice.unlinkedLines',
+  'order.unlinkedLines',
   'FEATURE_DISABLED',
   'leakCheck.invalidLink',
   'growth.referralInvalid',
   'growth.referralSelf',
   'growth.referralAlreadyRedeemed',
+  'invoice.linesLocked',
+  'invoice.receiptOpen',
+  'invoice.beingRead',
+  'invoice.partialHeaderClear',
+  'invoice.claimInProgress',
 ] as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];
