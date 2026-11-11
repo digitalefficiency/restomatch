@@ -55,6 +55,10 @@ export function DockSlip({
   const q = trpc.receiving.dockSlip.useQuery(
     { grId, invoiceId },
     {
+      // Always the server's state on mount (W1-04 made the app default 30 s): the
+      // review's copy (receipt still open) must not stand in for the slip on the
+      // Confirmed screen — it said "after the close" and never polled for the ₪.
+      staleTime: 0,
       // Poll only while the receipt is closed and its re-match is on the way.
       refetchInterval: (query) => {
         const d = query.state.data;
@@ -224,7 +228,13 @@ export function DockSlip({
         </p>
       ) : note === 'held' ? (
         <p className="mt-2 text-sm text-muted" data-testid="dock-slip-held">
-          {t(data.engine.holdReason === 'settled' ? 'dockSlip.heldSettled' : 'dockSlip.heldReview')}
+          {t(
+            data.engine.holdReason === 'settled'
+              ? 'dockSlip.heldSettled'
+              : data.engine.holdReason === 'claim_in_progress'
+                ? 'dockSlip.heldClaim'
+                : 'dockSlip.heldReview',
+          )}
         </p>
       ) : note === 'computing' ? (
         <p className="mt-2 flex items-center gap-2 text-sm text-muted" data-testid="dock-slip-computing">

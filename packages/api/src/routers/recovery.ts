@@ -4,6 +4,7 @@ import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
 import {
   claimHistory,
   computeRecoverySummary,
+  heldForCountTotals,
   creditLineSuggestions,
   listClaims,
   lockClaims,
@@ -11,7 +12,6 @@ import {
   recordCreditNote,
   returnedInMonth,
   summarize,
-  syncClaims,
   transitionClaim,
 } from '../recovery/service';
 import { financeProcedure, memberProcedure } from '../trpc';
@@ -45,15 +45,21 @@ export const recoveryRouter = router({
     return { recovery, monthlyReport, monthlyDigestPreview, leakProof };
   }),
 
-  /** Totals, ageing, per-supplier recovery rate + this month's returned ₪. Materialises new claims first. */
+  /**
+   * Totals, ageing, per-supplier recovery rate + this month's returned ₪.
+   * A read writes nothing: claims are created at decision time
+   * (`materializeClaims`, W2-10a), never by whoever opens the screen.
+   */
   summary: recoveryProcedure.query(async ({ ctx }) => {
-    await syncClaims(ctx.db, ctx.session.restaurantId, ctx.session.userId);
     const now = new Date();
-    const [claims, returned] = await Promise.all([
+    const [claims, returned, heldForCount] = await Promise.all([
       listClaims(ctx.db, ctx.session.restaurantId, { now, limit: null }),
       returnedInMonth(ctx.db, ctx.session.restaurantId, { now }),
+      // #216 round 9: findings of a run its invoice waits to replace (a count
+      // still open) — not filed as claims; shown as "waiting for the count".
+      heldForCountTotals(ctx.db, ctx.session.restaurantId),
     ]);
-    return { summary: summarize(claims), returnedThisMonth: returned };
+    return { summary: { ...summarize(claims), heldForCount }, returnedThisMonth: returned };
   }),
 
   /** One page of claims; `limit` (default 200, at most MAX_CLAIMS) lets a screen that sums them ask for all. */
@@ -67,8 +73,8 @@ export const recoveryRouter = router({
         })
         .optional(),
     )
-    .query(async ({ ctx, input }) => {
-      await syncClaims(ctx.db, ctx.session.restaurantId, ctx.session.userId);
+    .query(({ ctx, input }) => {
+      // Read-only (W2-10a): no claim is materialised here.
       return listClaims(ctx.db, ctx.session.restaurantId, {
         status: input?.status,
         supplierId: input?.supplierId,

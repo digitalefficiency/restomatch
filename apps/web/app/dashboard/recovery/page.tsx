@@ -9,7 +9,7 @@ import { recovery as recoveryNs } from '@/lib/i18n/messages/recovery';
 import { Card, EmptyState, SectionHeader } from '@/lib/components';
 import { displayName } from '../approvals/vocab';
 import { TrackerClient } from './tracker-client';
-import { ALL_CLAIMS, followUps, funnelOf, type FunnelPart } from './logic';
+import { ALL_CLAIMS, ANSWER_DAYS, followUps, funnelOf, type FunnelPart } from './logic';
 
 const PART_ORDER: FunnelPart[] = ['returned', 'credited', 'open', 'disputed', 'writtenOff'];
 const PART_BAR: Record<FunnelPart, string> = {
@@ -70,6 +70,17 @@ export default async function RecoveryPage({
           </Link>
         }
       />
+
+      {/* T4 — findings whose invoice waits for a count to close: not claimed yet, never an alarm. */}
+      {summary.heldForCount.count > 0 && (
+        <p
+          role="status"
+          data-testid="recovery-held-for-count"
+          className="rounded-lg border border-line bg-surface-2/50 px-4 py-3 text-sm text-muted"
+        >
+          {t('tracker.heldForCount', { amount: exact(summary.heldForCount.agorot) })}
+        </p>
+      )}
 
       {summary.claimCount === 0 ? (
         <EmptyState
@@ -201,7 +212,7 @@ export default async function RecoveryPage({
                     >
                       <Mail className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden="true" />
                       <strong>
-                        {t('followUp.waiting', { count: formatNumber(queues.waiting.count, locale), amount: exact(queues.waiting.agorot) })}
+                        {t('followUp.waiting', { count: formatNumber(queues.waiting.count, locale), amount: exact(queues.waiting.agorot), days: formatNumber(ANSWER_DAYS, locale) })}
                       </strong>
                     </p>
                     <p className="ms-6 mt-0.5 text-xs text-muted">{t('followUp.reminderNote')}</p>

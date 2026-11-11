@@ -20,11 +20,20 @@ import { computeLeakHero } from '@restomatch/charts';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { enqueueRecoveryReminders } from '../recovery/reminders';
-import { AUTO_WRITE_OFF_NOTE, listClaims, MAX_CLAIMS, syncClaims } from '../recovery/service';
+import { AUTO_WRITE_OFF_NOTE, listClaims, materializeClaims, MAX_CLAIMS, NEVER_CLAIMABLE_NOTE, OVERDUE_DAYS, syncClaims } from '../recovery/service';
+import { OVERDUE_BOUNDARY_CASES, OVERDUE_BOUNDARY_NOW } from '../lib/claims';
 import { computeMonthlyReport, ensureMonthlyReport, monthlyReportEmail, monthlyReportWhatsApp, WHATSAPP_MAX } from '../reports/monthly';
 import { renderMonthlyReportPdf } from '../reports/pdf';
 import { sendMonthlyReports } from '../reports/send';
-import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { resetDb, seedTenant as seedTenantPending, type Tenant } from './fixtures';
+import { restaurantDaysAgo, restaurantMonthKey } from './helpers/il-day';
+
+/** #216 F3: runForInvoice refuses a receipt still being counted — these re-matches stand on a counted, submitted one. */
+async function seedTenant(...args: Parameters<typeof seedTenantPending>): Promise<Tenant> {
+  const t = await seedTenantPending(...args);
+  await args[0].execute(sql`UPDATE goods_receipts SET status = 'completed' WHERE id = ${t.grId}`);
+  return t;
+}
 
 const db = createDb(testDbUrl());
 let T: Tenant;
@@ -41,6 +50,19 @@ async function dropDiscrepancies(where: ReturnType<typeof eq>) {
     await db.delete(recoveryClaims).where(eq(recoveryClaims.discrepancyId, id));
     await db.delete(discrepancies).where(eq(discrepancies.id, id));
   }
+}
+
+/**
+ * W2-10a: a read no longer creates claims — the decision does. Tests that
+ * start from "an accepted leak has its claim" take that decision step here
+ * (what approve does inside its transaction), instead of relying on a GET.
+ */
+async function claimsAtDecision(...extraIds: string[]) {
+  await materializeClaims(db, {
+    restaurantId: T.restaurantId,
+    discrepancyIds: [T.discrepancyId, ...extraIds],
+    actorId: T.ownerUserId,
+  });
 }
 
 async function setFlags(features: Record<string, boolean>) {
@@ -67,6 +89,28 @@ beforeEach(async () => {
 afterAll(async () => {
   await resetDb(db);
 });
+
+async function moiDiscrepancy(): Promise<string> {
+  const [m] = await db
+    .insert(discrepancies)
+    .values({ matchRunId: T.matchRunId, restaurantId: T.restaurantId, type: 'MISSING_ON_INVOICE', severity: 'block', deltaAmount: '40.00', resolutionStatus: 'accepted' })
+    .returning({ id: discrepancies.id });
+  return m!.id;
+}
+async function moiClaim(discrepancyId: string, over: Partial<typeof recoveryClaims.$inferInsert>): Promise<string> {
+  const [c] = await db
+    .insert(recoveryClaims)
+    .values({ restaurantId: T.restaurantId, discrepancyId, supplierId: T.supplierId, invoiceId: T.invoiceId, amountAgorot: 1700, status: 'claimed', ...over })
+    .returning({ id: recoveryClaims.id });
+  return c!.id;
+}
+/** Removes a test MISSING_ON_INVOICE discrepancy with its claims and events. */
+async function dropMoi(discrepancyId: string): Promise<void> {
+  const held = await db.select({ id: recoveryClaims.id }).from(recoveryClaims).where(eq(recoveryClaims.discrepancyId, discrepancyId));
+  for (const h of held) await db.delete(recoveryEvents).where(eq(recoveryEvents.claimId, h.id));
+  await db.delete(recoveryClaims).where(eq(recoveryClaims.discrepancyId, discrepancyId));
+  await db.delete(discrepancies).where(eq(discrepancies.id, discrepancyId));
+}
 
 describe('feature flag', () => {
   it('refuses every recovery/report procedure with FEATURE_DISABLED when the flag is off', async () => {
@@ -132,7 +176,60 @@ describe('claims', () => {
     expect(await syncClaims(db, T.restaurantId)).toBe(0);
   });
 
+  it('never claims an accepted MISSING_ON_INVOICE (owner 31.10)', async () => {
+    await db.update(discrepancies).set({ resolutionStatus: 'open' }).where(eq(discrepancies.id, T.discrepancyId));
+    const m = await moiDiscrepancy();
+    try {
+      expect(await syncClaims(db, T.restaurantId)).toBe(0);
+      expect(await db.select().from(recoveryClaims).where(eq(recoveryClaims.discrepancyId, m))).toHaveLength(0);
+    } finally {
+      await dropMoi(m);
+    }
+  });
+
+  it('writes off a never-claimable claim ONLY while untouched: claimed, no letter, no money, no person', async () => {
+    await db.update(discrepancies).set({ resolutionStatus: 'open' }).where(eq(discrepancies.id, T.discrepancyId));
+    const m = await moiDiscrepancy();
+    try {
+      const old = await moiClaim(m, {});
+      await syncClaims(db, T.restaurantId);
+      const [after] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.id, old));
+      expect(after!.status).toBe('written_off');
+      const events = await db.select().from(recoveryEvents).where(eq(recoveryEvents.claimId, old));
+      expect(events.map((e) => e.note)).toContain(NEVER_CLAIMABLE_NOTE);
+    } finally {
+      await dropMoi(m);
+    }
+  });
+
+  it('leaves every later-state never-claimable claim to the owner: letter_sent, letter_sent + credited, a person’s re-open', async () => {
+    await db.update(discrepancies).set({ resolutionStatus: 'open' }).where(eq(discrepancies.id, T.discrepancyId));
+    const cases = [
+      { name: 'letter_sent', claim: { status: 'letter_sent' as const, letterSentAt: new Date() } },
+      { name: 'letter_sent + credited', claim: { status: 'letter_sent' as const, letterSentAt: new Date(), creditedAgorot: 500 } },
+      { name: 're-opened by a person', claim: {}, reopenedBy: T.ownerUserId },
+    ];
+    for (const k of cases) {
+      const m = await moiDiscrepancy();
+      try {
+        const id = await moiClaim(m, k.claim);
+        if (k.reopenedBy) {
+          await db.insert(recoveryEvents).values([
+            { restaurantId: T.restaurantId, claimId: id, fromStatus: 'claimed', toStatus: 'written_off', amountAgorot: 1700, actorId: k.reopenedBy },
+            { restaurantId: T.restaurantId, claimId: id, fromStatus: 'written_off', toStatus: 'claimed', amountAgorot: 1700, actorId: k.reopenedBy },
+          ]);
+        }
+        await syncClaims(db, T.restaurantId);
+        const [after] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.id, id));
+        expect(after!.status, k.name).toBe(k.claim.status ?? 'claimed');
+      } finally {
+        await dropMoi(m);
+      }
+    }
+  });
+
   it('each claim names its discrepancy, and list takes a limit up to MAX_CLAIMS (W1-08 letters pair on the id)', async () => {
+    await claimsAtDecision();
     const c = caller();
     const claims = await c.recovery.list();
     expect(claims.length).toBeGreaterThan(0);
@@ -143,6 +240,7 @@ describe('claims', () => {
   });
 
   it('walks claimed → letter sent → acknowledged → credited (credit note) → recovered', async () => {
+    await claimsAtDecision();
     const c = caller();
     const { summary } = await c.recovery.summary();
     expect(summary.claimedAgorot).toBe(10000);
@@ -181,6 +279,7 @@ describe('claims', () => {
   });
 
   it('matches a later invoice credit line: amount/number/date come from the invoice, used once', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     const [inv] = await db
@@ -210,6 +309,7 @@ describe('claims', () => {
   });
 
   it('refuses a positive line as a credit note and a claim of another supplier', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     await expect(c.recovery.recordCreditNote({ claimIds: [claim!.id], invoiceLineId: T.invoiceLineId })).rejects.toMatchObject({
@@ -219,7 +319,52 @@ describe('claims', () => {
 });
 
 describe('overdue reminders (outbox)', () => {
-  it('chases claims waiting > 14 days once a week, one deduped email per manager per day', async () => {
+  it('a claim is overdue after a WEEK (owner 31.10): 6 days → no reminder, 8 days → chased', async () => {
+    await syncClaims(db, T.restaurantId);
+    // Calendar days in the restaurant's zone — the unit the overdue rule counts —
+    // not N × 24 h, which is a calendar day short after the autumn DST change.
+    const at = (days: number) => restaurantDaysAgo(days);
+    await db.update(recoveryClaims).set({ status: 'letter_sent', letterSentAt: at(6) }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
+    expect((await enqueueRecoveryReminders(db, { restaurantId: T.restaurantId })).claims).toBe(0);
+    await db.update(recoveryClaims).set({ letterSentAt: at(8) }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
+    expect((await enqueueRecoveryReminders(db, { restaurantId: T.restaurantId })).claims).toBe(1);
+    const [c] = await listClaims(db, T.restaurantId, {});
+    expect(c!.overdue).toBe(true);
+    await db.delete(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, T.restaurantId));
+  });
+
+  it('an acknowledged MISSING_ON_INVOICE claim stays open but is never chased (not owed)', async () => {
+    await db.update(discrepancies).set({ resolutionStatus: 'open' }).where(eq(discrepancies.id, T.discrepancyId));
+    const m = await moiDiscrepancy();
+    try {
+      const id = await moiClaim(m, { status: 'acknowledged', letterSentAt: new Date(Date.now() - 30 * 86_400_000), acknowledgedAt: new Date() });
+      expect((await enqueueRecoveryReminders(db, { restaurantId: T.restaurantId })).claims).toBe(0);
+      const rows = await listClaims(db, T.restaurantId, {});
+      expect(rows.find((r) => r.id === id)!.overdue).toBe(false);
+      expect((await db.select().from(recoveryClaims).where(eq(recoveryClaims.id, id)))[0]!.status).toBe('acknowledged');
+    } finally {
+      await dropMoi(m);
+    }
+  });
+
+  it('the overdue boundary is calendar days in the restaurant’s zone — the SAME cases the web countdown passes', async () => {
+    await syncClaims(db, T.restaurantId);
+    const now = new Date(OVERDUE_BOUNDARY_NOW);
+    for (const k of OVERDUE_BOUNDARY_CASES) {
+      await db
+        .update(recoveryClaims)
+        .set({ status: 'letter_sent', letterSentAt: new Date(k.letterSentAt), lastReminderAt: null })
+        .where(eq(recoveryClaims.restaurantId, T.restaurantId));
+      const [row] = await listClaims(db, T.restaurantId, { now });
+      expect(row!.overdue, k.why).toBe(k.overdue);
+      const sent = await enqueueRecoveryReminders(db, { restaurantId: T.restaurantId, now });
+      expect(sent.claims, k.why).toBe(k.overdue ? 1 : 0);
+      await db.update(recoveryClaims).set({ lastReminderAt: null }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
+      await db.delete(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, T.restaurantId));
+    }
+  });
+
+  it('chases claims waiting > a week, then once a week, one deduped email per manager per day', async () => {
     await syncClaims(db, T.restaurantId);
     const old = new Date(Date.now() - 20 * 86_400_000);
     await db.update(recoveryClaims).set({ status: 'letter_sent', letterSentAt: old }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
@@ -239,10 +384,9 @@ describe('overdue reminders (outbox)', () => {
 });
 
 describe('monthly report', () => {
-  const month = () => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  };
+  // The restaurant's month (the hero's), not the runner's: seedTenant dates its
+  // invoice on the restaurant's day.
+  const month = () => restaurantMonthKey();
 
   it('agrees with the hero and renders email (he/en), WhatsApp and a PDF', async () => {
     const data = await computeMonthlyReport(db, T.restaurantId, month());
@@ -369,6 +513,7 @@ describe('refuter regressions', () => {
   });
 
   it('parallel credit notes on one claim never over-credit (row lock)', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     const results = await Promise.allSettled(
@@ -388,6 +533,7 @@ describe('refuter regressions', () => {
   });
 
   it('a partly credited claim can be topped up; recovering short books the shortfall as written off', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     await c.recovery.recordCreditNote({ claimIds: [claim!.id], supplierId: T.supplierId, amountAgorot: 6000, issuedOn: '2026-10-10' });
@@ -401,6 +547,7 @@ describe('refuter regressions', () => {
   });
 
   it('re-using a credit line is a CONFLICT, not a 500', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     const [inv] = await db
@@ -420,8 +567,7 @@ describe('refuter regressions', () => {
   });
 
   it('preview and PDF show the frozen snapshot once the month was generated', async () => {
-    const d = new Date();
-    const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const month = restaurantMonthKey();
     const frozen = await ensureMonthlyReport(db, T.restaurantId, month);
     await db
       .update(monthlyReports)
@@ -433,8 +579,7 @@ describe('refuter regressions', () => {
   });
 
   it('WhatsApp truncation keeps the report link', async () => {
-    const d = new Date();
-    const data = await computeMonthlyReport(db, T.restaurantId, `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    const data = await computeMonthlyReport(db, T.restaurantId, restaurantMonthKey());
     data.topSuppliers = [{ name: 'א'.repeat(900), nameEn: null, leakAgorot: 100, leakPct: 0.02 }];
     const url = 'https://app.test/dashboard/reports/monthly?month=2026-09';
     const text = monthlyReportWhatsApp(data, { reportUrl: url });
@@ -449,6 +594,7 @@ describe('bulk transitions', () => {
       .insert(discrepancies)
       .values({ matchRunId: T.matchRunId, restaurantId: T.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '5.00', resolutionStatus: 'accepted' })
       .returning();
+    await claimsAtDecision(extra!.id);
     try {
       const list = await caller().recovery.list();
       const [a, b] = list.map((x) => x.id);
@@ -477,8 +623,7 @@ describe('money cross-QA (S3) regressions', () => {
       .values({ matchRunId: T.matchRunId, restaurantId: T.restaurantId, type: 'DUPLICATE_INVOICE', severity: 'block', deltaAmount: '117.00', resolutionStatus: 'accepted' })
       .returning();
     try {
-      const d = new Date();
-      const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const month = restaurantMonthKey();
       const data = await computeMonthlyReport(db, T.restaurantId, month);
       const hero = await computeLeakHero(db, T.restaurantId);
       expect(data.claimedAgorot).toBe(Math.round(hero.recoveredIls * 100));
@@ -533,6 +678,7 @@ describe('money cross-QA (S3) regressions', () => {
   });
 
   it('MEDIUM 5: a credit-note number is recorded once per supplier; an idempotency key replays', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     const key = randomUUID();
@@ -552,6 +698,7 @@ describe('money cross-QA (S3) regressions', () => {
       .insert(discrepancies)
       .values({ matchRunId: T.matchRunId, restaurantId: T.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '10.00', resolutionStatus: 'accepted' })
       .returning();
+    await claimsAtDecision(extra!.id);
     try {
       const c = caller();
       const claims = await c.recovery.list();
@@ -576,14 +723,16 @@ describe('money cross-QA (S3) regressions', () => {
     expect(again.data.leakAgorot).toBe(1);
   });
 
-  it('LOW: the overdue badge and the reminder job agree at the 14-day boundary', async () => {
+  it('LOW: the overdue badge and the reminder job agree at the OVERDUE_DAYS (a week) boundary — calendar days', async () => {
     await syncClaims(db, T.restaurantId);
     const now = new Date('2026-10-30T09:00:00Z');
-    const justOver = new Date(now.getTime() - 14 * 86_400_000 - 60_000);
+    // Owner 31.10: overdue once more than OVERDUE_DAYS calendar days (restaurant zone) have passed —
+    // a week and a minute is still day 7, the day after is day 8.
+    const justOver = new Date(now.getTime() - (OVERDUE_DAYS + 1) * 86_400_000);
     await db.update(recoveryClaims).set({ status: 'letter_sent', letterSentAt: justOver, lastReminderAt: null }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
     const [row] = await listClaims(db, T.restaurantId, { now });
     expect(row!.overdue).toBe(true);
-    const almost = new Date(now.getTime() - 14 * 86_400_000 + 60_000);
+    const almost = new Date(now.getTime() - OVERDUE_DAYS * 86_400_000 + 60_000);
     await db.update(recoveryClaims).set({ letterSentAt: almost }).where(eq(recoveryClaims.restaurantId, T.restaurantId));
     const [row2] = await listClaims(db, T.restaurantId, { now });
     expect(row2!.overdue).toBe(false);

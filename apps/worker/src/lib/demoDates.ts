@@ -33,3 +33,29 @@ export function ymdMinusDays(ymd: string, days: number): string {
 export function demoContractFrom(env: NodeJS.ProcessEnv = process.env, now: Date = new Date()): string {
   return ymdMinusDays(demoTodayYmd(env, now), CONTRACT_LEAD_DAYS);
 }
+
+/**
+ * 12:00 on the Israel wall clock of `today` (YYYY-MM-DD) as a UTC instant — the
+ * "now" every hero / month figure of the demo check is computed at, so the check
+ * describes the seeded DEMO_TODAY and not the real date. DST-correct per date
+ * (25.10.2026 is the day IDT ends: 12:00 IL = 10:00Z, not 09:00Z).
+ */
+export function demoNow(today: string, tz = 'Asia/Jerusalem'): Date {
+  const [y, m, d] = today.split('-').map(Number) as [number, number, number];
+  const guess = Date.UTC(y, m - 1, d, 12);
+  const wall = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+      .formatToParts(new Date(guess))
+      .map((p) => [p.type, p.value]),
+  );
+  const asUtc = Date.UTC(+wall.year!, +wall.month! - 1, +wall.day!, +wall.hour!, +wall.minute!);
+  return new Date(guess - (asUtc - guess));
+}
