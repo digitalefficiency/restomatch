@@ -11,6 +11,24 @@ import { publicProcedure, router } from '../trpc';
  * enforceRateLimit via trpcRequestTargets('leads.create', …)) for defense in
  * depth — AppContext carries no IP, so the limit lives at the edge, not here.
  */
+/**
+ * Israeli phone rule — the same normaliser + regex as the landing form's
+ * `normalizeIlPhone` / `isValidIlPhone` (leadForm.logic.ts). Mobile 05x/07x
+ * (10 digits) or landline 02/03/04/08/09 (9 digits); +972 / 00972 / 972 are
+ * folded to a leading 0 and spaces, dashes, dots and brackets are ignored.
+ */
+function normalizeIlPhone(raw: string): string {
+  let d = raw.replace(/[\s\-().]/g, '');
+  if (d.startsWith('+972')) d = `0${d.slice(4)}`;
+  else if (d.startsWith('00972')) d = `0${d.slice(5)}`;
+  else if (d.startsWith('972') && d.length >= 11) d = `0${d.slice(3)}`;
+  return d;
+}
+function isValidIlPhone(raw: string): boolean {
+  const d = normalizeIlPhone(raw);
+  return /^0(5\d|7\d)\d{7}$/.test(d) || /^0[2-489]\d{7}$/.test(d);
+}
+
 const LeadInput = z.object({
   name: z.string().trim().min(1).max(200),
   phone: z.string().trim().max(32).optional(),
@@ -30,14 +48,19 @@ const LeadInput = z.object({
   /** Honeypot: must stay empty. A non-empty value silently no-ops. */
   hp: z.string().max(200).optional(),
 }).superRefine((input, ctx) => {
-  // SEC-1 (W3-06 review): a lead must be reachable — phone OR email, the same
-  // rule the landing form enforces (validateLead → errorContact). A tripped
-  // honeypot is exempt so the bot still gets the silent `{ ok: true }` and
-  // can't tell a drop from a save.
+  // SEC-1 (W3-06 review): a lead must be reachable, validated exactly as the
+  // landing form does (apps/web/(marketing)/_components/leadForm.logic.ts →
+  // validateLead): a phone, when given, must be a valid Israeli number; an
+  // email, when given, must be valid (zod .email() above); and at least one of
+  // them is required. A tripped honeypot is exempt so the bot still gets the
+  // silent `{ ok: true }` and can't tell a drop from a save.
   if (input.hp && input.hp.trim().length > 0) return;
-  const hasPhone = (input.phone ?? '').length > 0;
-  const hasEmail = (input.email ?? '').length > 0;
-  if (!hasPhone && !hasEmail) {
+  const phone = input.phone ?? '';
+  const email = input.email ?? '';
+  if (phone.length > 0 && !isValidIlPhone(phone)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['phone'], message: 'invalid Israeli phone number' });
+  }
+  if (phone.length === 0 && email.length === 0) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['phone'], message: 'phone or email is required' });
   }
 });
