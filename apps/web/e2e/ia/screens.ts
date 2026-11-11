@@ -59,37 +59,37 @@ const BASE: DensityScreen[] = [
 ];
 
 /**
- * The ratchet allowance: the first lab measurement (7.11, demo seed, next dev, he, folds
- * closed, the lab-only worker banner removed; IA-01 report mode). Re-measure on main@B. Only metrics over budget are listed; `{}` = within budget.
+ * The ratchet allowance: re-measured on main@B (3d64808d, train B, 11.11; demo seed, next dev, he, folds
+ * closed, the lab-only worker banner removed; IA-01 report mode). Only metrics over budget are listed; `{}` = within budget.
  * Lower a number when your package adopts the budget; never raise one.
  */
 export const BASELINE_0711: Record<string, Allowance> = {
-  'home-owner-desk': { blocks: 11, numbers: 53, words: 218, pageWords: 286 },
-  'home-owner-phone': { blocks: 6, numbers: 25, words: 98, pageWords: 279 },
-  'approvals-owner-desk': { primaryPerFold: 3, numbersPerRow: 14, t2PerRow: 2 },
+  'home-owner-desk': { blocks: 11, numbers: 52, words: 228, pageWords: 289 },
+  'home-owner-phone': { blocks: 6, numbers: 24, words: 96, pageWords: 282 },
+  'approvals-owner-desk': { primaryPerFold: 3, numbersPerRow: 8, t2PerRow: 2 },
   'recovery-owner-desk': { primaryPerFold: 4, minRowsDesk: 7 },
-  'invoice-owner-desk': { blocks: 7 },
+  'invoice-owner-desk': { numbersPerRow: 6 },
   'supplier-owner-desk': {},
   'leak-proof-owner-desk': {},
   'monthly-report-owner-desk': { t2: 4, t2PerRow: 1 },
   'settings-owner-desk': { primaryPerFold: 2 },
   'integrations-owner-desk': {},
   'team-owner-desk': {},
-  'home-manager-desk': { blocks: 8, numbers: 48, t2: 4, words: 198 },
-  'home-manager-phone': { numbers: 21, t2: 4, words: 84 },
-  'approvals-manager-phone': { numbersPerRow: 12 },
+  'home-manager-desk': { blocks: 8, numbers: 52, t2: 4, words: 209 },
+  'home-manager-phone': { numbers: 20, t2: 4, words: 82 },
+  'approvals-manager-phone': { numbersPerRow: 13 },
   'order-manager-desk': { blocks: 4 },
   'count-manager-phone': {},
-  'home-bookkeeper-desk': { blocks: 7, numbers: 48, words: 192 },
+  'home-bookkeeper-desk': { blocks: 7, numbers: 50, words: 190 },
   'home-bookkeeper-phone': { numbers: 18, words: 78 },
-  'pay-run-bookkeeper-desk': { primaryPerFold: 2, numbersPerRow: 7, minRowsDesk: 4 },
+  'pay-run-bookkeeper-desk': { primaryPerFold: 2, numbersPerRow: 7, minRowsDesk: 5 },
   'inbox-bookkeeper-desk': { minRowsDesk: 2 },
-  'ledger-bookkeeper-desk': { t2: 19, t2PerRow: 4 },
+  'ledger-bookkeeper-desk': { t2: 21, t2PerRow: 4 },
   'exports-bookkeeper-desk': { primaryPerFold: 2 },
   'home-chef-desk': {},
   'home-chef-phone': {},
   'home-receiver-desk': { blocks: 8 },
-  'home-receiver-phone': { blocks: 6, numbers: 15, t2: 3, words: 50 },
+  'home-receiver-phone': { blocks: 5, numbers: 16, words: 48 },
   'receiving-receiver-phone': {},
   'dock-receiver-phone': {},
 };
