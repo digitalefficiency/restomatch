@@ -12,7 +12,7 @@ import {
   users,
   type UserRole,
 } from '@restomatch/db';
-import { nextDaySlot, notify, notifyDedupeKey, type RenderFn } from '../notifications/notify';
+import { nextDaySlot, notify, notifyDedupeKey, notifyInvoiceOcrFailed, type RenderFn } from '../notifications/notify';
 import { recipientsForRestaurant, resolveAudience } from '../notifications/recipients';
 import { sendMonthlyReports } from '../reports/send';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -89,6 +89,70 @@ describe('resolveAudience / recipientsForRestaurant', () => {
   });
 });
 
+describe('cross-tenant (tenant-security-warden, #199)', () => {
+  it('a user who is manager in A and receiver in B resolves per restaurant', async () => {
+    const u = ids.mgrA!;
+    await db.insert(memberships).values({ userId: u, restaurantId: B.restaurantId, role: 'receiver' });
+    const inA = await resolveAudience(db, A.restaurantId, { userIds: [u] });
+    expect(inA).toHaveLength(1);
+    expect(inA[0]).toMatchObject({ role: 'manager', locale: 'en' });
+    const bManagers = await resolveAudience(db, B.restaurantId, { roles: ['manager'] });
+    expect(bManagers.map((m) => m.userId)).not.toContain(u);
+    const res = await notify(db, {
+      restaurantId: A.restaurantId,
+      event: 'test.event',
+      template: 't',
+      entity: { type: 'invoice', id: A.invoiceId },
+      render,
+      now: WEEKDAY,
+      audience: { userIds: [u] },
+    });
+    expect(res.enqueued).toBe(1);
+    expect(await rowsOf(B.restaurantId)).toHaveLength(0);
+    // The same entity id in B for the same user is NOT deduped onto A's row.
+    const resB = await notify(db, {
+      restaurantId: B.restaurantId,
+      event: 'test.event',
+      template: 't',
+      entity: { type: 'invoice', id: A.invoiceId },
+      render,
+      now: WEEKDAY,
+      audience: { userIds: [u] },
+    });
+    expect(resB).toMatchObject({ enqueued: 1, deduped: 0 });
+    const [rowB] = await rowsOf(B.restaurantId);
+    expect(rowB!.restaurantId).toBe(B.restaurantId);
+  });
+
+  it('a role audience and recipientsForRestaurant never include another tenant', async () => {
+    const bIds = new Set([B.ownerUserId, ids.mgrB!]);
+    const a = await resolveAudience(db, A.restaurantId, { roles: ['owner', 'manager'] });
+    expect(a.some((m) => bIds.has(m.userId))).toBe(false);
+    const emails = (await recipientsForRestaurant(db, A.restaurantId)).map((r) => r.email);
+    expect(emails).not.toContain('mgrB@notify.test');
+    expect(emails).not.toContain('owner-B@attack.test');
+  });
+
+  it('notifyInvoiceOcrFailed: a foreign invoice enqueues nothing; a foreign uploader is not reached', async () => {
+    const foreign = await notifyInvoiceOcrFailed(db, { restaurantId: A.restaurantId, invoiceId: B.invoiceId, reason: 'extraction_failed', now: WEEKDAY });
+    expect(foreign.enqueued).toBe(0);
+    expect(await rowsOf(A.restaurantId)).toHaveLength(0);
+    expect(await rowsOf(B.restaurantId)).toHaveLength(0);
+
+    const own = await notifyInvoiceOcrFailed(db, {
+      restaurantId: A.restaurantId,
+      invoiceId: A.invoiceId,
+      reason: 'extraction_failed',
+      uploaderId: ids.mgrB!,
+      now: WEEKDAY,
+    });
+    expect(own.enqueued).toBe(3); // A's owner + two managers
+    const users = (await rowsOf(A.restaurantId)).map((r) => (r.payload as Record<string, unknown>).userId);
+    expect(users).not.toContain(ids.mgrB);
+    expect(await rowsOf(B.restaurantId)).toHaveLength(0);
+  });
+});
+
 describe('notify()', () => {
   const base = () => ({
     restaurantId: A.restaurantId,
@@ -112,7 +176,7 @@ describe('notify()', () => {
       expect(r.sentAt).toBeNull();
       const p = r.payload as Record<string, unknown>;
       expect(p.event).toBe('test.event');
-      expect(r.dedupeKey).toBe(notifyDedupeKey('test.event', A.invoiceId, p.userId as string, 'email'));
+      expect(r.dedupeKey).toBe(notifyDedupeKey('test.event', A.restaurantId, A.invoiceId, p.userId as string, 'email'));
     }
   });
 
