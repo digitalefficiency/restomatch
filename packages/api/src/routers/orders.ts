@@ -26,7 +26,7 @@ import { latestReceiptStatusSql } from '../lib/deliveryState';
 import { resolveTolerances } from '@restomatch/matching';
 import { ClaudePoParser, ORDER_TEXT_MAX_CHARS, orderTextParserFromEnv } from '@restomatch/ocr';
 import { ZesttAdapter } from '@restomatch/procurement';
-import { managerProcedure, memberProcedure, requireFeature, router } from '../trpc';
+import { chefProcedure, managerProcedure, memberProcedure, requireFeature, router } from '../trpc';
 import { orderPriceKey } from '../contracts/orderPrices';
 import { resolveExpectedPrice, type ExpectedPrice } from '../orders/expectedPrice';
 import { forRole, orderWriteProcedure } from '../orders/access';
@@ -43,7 +43,7 @@ import { captureOrderDraft } from '../orders/captureOrder';
 import { appError } from '../errors';
 import { estimateTotal, qty3, recomputePoTotal } from '../orders/totals';
 import { DEDUPE_INDEX_PREDICATE } from '../notifications/outbox';
-import { supplierMessageState, type SupplierMessageState } from '../notifications/delivery';
+import { SKIPPED_NO_PROVIDER, supplierMessageState, type SupplierMessageState } from '../notifications/delivery';
 import { deriveExpectedDelivery, type DerivedDelivery } from '../lib/deriveDelivery';
 import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
 import {
@@ -466,7 +466,7 @@ async function placeOrderImpl(
         status: 'queued',
         relatedEntityType: 'purchase_order',
         relatedEntityId: input.poId,
-        dedupeKey: `po:${input.poId}:placed`,
+        dedupeKey: orderMessageKey(input.poId),
       })
       .onConflictDoNothing({ target: notificationsOutbox.dedupeKey, where: DEDUPE_INDEX_PREDICATE });
     sentChannel = input.channel;
@@ -488,6 +488,29 @@ async function assertProductsOwned(db: Database, restaurantId: string, ids: stri
     .from(products)
     .where(and(eq(products.restaurantId, restaurantId), inArray(products.id, uniq)));
   if (rows.length !== uniq.length) throw new TRPCError({ code: 'NOT_FOUND', message: 'product not found' });
+}
+
+/**
+ * The outbox dedupe key of a PO's order message (placeOrder). Other rows point at the
+ * same PO (e.g. the supplier-delays late chase to the owner/manager), so readers of
+ * "what happened to the order message" must match on this key, never on the entity alone.
+ */
+export function orderMessageKey(poId: string): string {
+  return `po:${poId}:placed`;
+}
+
+export type SendState = 'queued' | 'sent' | 'failed' | 'skipped' | 'none';
+
+/** The send state of a PO from its latest outbox row (orders.sendStatus). Pure. */
+export function sendStateOf(
+  poStatus: string,
+  msg: { status: string; lastError: string | null } | null,
+): SendState {
+  if (poStatus === 'draft' || !msg) return 'none';
+  if (msg.status === 'sent') return 'sent';
+  if (msg.lastError === SKIPPED_NO_PROVIDER) return 'skipped';
+  if (msg.status === 'failed' || msg.status === 'cancelled') return 'failed';
+  return 'queued';
 }
 
 export const ordersRouter = router({
@@ -542,10 +565,11 @@ export const ordersRouter = router({
           expectedDeliveryAt: purchaseOrders.expectedDeliveryAt,
           totalEstimated: purchaseOrders.totalEstimated,
           sentAt: purchaseOrders.sentAt,
+          /** null on a placed PO = recorded only ("ללא שליחה"): the list must not read "sent". */
+          sentChannel: purchaseOrders.sentChannel,
           createdAt: purchaseOrders.createdAt,
           lineCount: count(poLines.id),
           receiptStatus: receipt,
-          sentChannel: purchaseOrders.sentChannel,
           /** The supplier's latest answer (§5.6): 'confirmed' | 'changes' | null (no answer yet). */
           supplierAnswer: sql<string | null>`(select r.status from supplier_responses r
             where r.po_id = ${purchaseOrders.id} and r.restaurant_id = ${restaurantId}
@@ -623,6 +647,9 @@ export const ordersRouter = router({
             eq(notificationsOutbox.restaurantId, restaurantId),
             eq(notificationsOutbox.relatedEntityType, 'purchase_order'),
             eq(notificationsOutbox.relatedEntityId, input.poId),
+            // The order message itself — not other mail about this PO (the supplier-delays
+            // late chase to the owner/manager uses the same entity fields).
+            eq(notificationsOutbox.dedupeKey, orderMessageKey(input.poId)),
           ),
         )
         .orderBy(desc(notificationsOutbox.createdAt))
@@ -638,7 +665,7 @@ export const ordersRouter = router({
       });
     }),
 
-  createDraft: managerProcedure
+  createDraft: chefProcedure
     .input(
       z.object({
         supplierId: z.string().uuid(),
@@ -907,7 +934,7 @@ export const ordersRouter = router({
    * the supplier and catalog lines matched. `needs_supplier` asks the owner to
    * pick one (pass it back as supplierId). Confirm = placeOrder {channel:'none'}.
    */
-  captureFromText: managerProcedure
+  captureFromText: chefProcedure
     .input(
       z.object({
         text: z.string().trim().min(1).max(ORDER_TEXT_MAX_CHARS),
@@ -934,7 +961,7 @@ export const ordersRouter = router({
       });
     }),
 
-  cancelOrder: managerProcedure
+  cancelOrder: chefProcedure
     .input(z.object({ poId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
@@ -972,7 +999,7 @@ export const ordersRouter = router({
    * are checked through the parent PO. A sent order's lines are frozen (it has
    * already gone to the supplier).
    */
-  updateOrderLine: managerProcedure
+  updateOrderLine: chefProcedure
     .input(
       z.object({
         lineId: z.string().uuid(),
@@ -1022,7 +1049,7 @@ export const ordersRouter = router({
     }),
 
   /** Remove a line from a DRAFT order. */
-  deleteOrderLine: managerProcedure
+  deleteOrderLine: chefProcedure
     .input(z.object({ lineId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;
@@ -1045,9 +1072,63 @@ export const ordersRouter = router({
     }),
 
   /** Place a draft PO: transition draft → sent, enqueue an order document to the outbox. */
-  placeOrder: managerProcedure
+  placeOrder: chefProcedure
     .input(z.object({ poId: z.string().uuid(), channel: z.enum(['email', 'whatsapp', 'none']) }))
     .mutation(({ ctx, input }) => placeOrderImpl(ctx, input)),
+
+  /**
+   * Pilot (W1-11): what really happened to a placed order's message — never "sent"
+   * on faith. The channel the PO went out on and the latest outbox row for it:
+   *   queued  — waiting for the dispatcher (queued / sending);
+   *   sent    — the provider accepted it (`sentAt`);
+   *   failed  — failed or cancelled after retries;
+   *   skipped — no provider configured (outboxDispatch's skipped_no_provider);
+   *   none    — recorded only ("ללא שליחה"), or still a draft: no message exists.
+   * `final` tells the PO page to stop polling. Read-only, tenant-scoped (NOT_FOUND
+   * for another restaurant's PO, as orders.get).
+   */
+  sendStatus: memberProcedure
+    .input(z.object({ poId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const restaurantId = ctx.session.restaurantId;
+      await assertPoOwned(ctx.db, input.poId, restaurantId);
+      const [po] = await ctx.db
+        .select({ status: purchaseOrders.status, sentChannel: purchaseOrders.sentChannel, placedAt: purchaseOrders.sentAt })
+        .from(purchaseOrders)
+        .where(and(eq(purchaseOrders.id, input.poId), eq(purchaseOrders.restaurantId, restaurantId)))
+        .limit(1);
+      if (!po) throw new TRPCError({ code: 'NOT_FOUND', message: 'purchase order not found' });
+      const [msg] = await ctx.db
+        .select({
+          status: notificationsOutbox.status,
+          lastError: notificationsOutbox.lastError,
+          channel: notificationsOutbox.channel,
+          sentAt: notificationsOutbox.sentAt,
+        })
+        .from(notificationsOutbox)
+        .where(
+          and(
+            eq(notificationsOutbox.restaurantId, restaurantId),
+            eq(notificationsOutbox.relatedEntityType, 'purchase_order'),
+            eq(notificationsOutbox.relatedEntityId, input.poId),
+            // The order message itself — not other mail about this PO (the supplier-delays
+            // late chase to the owner/manager uses the same entity fields).
+            eq(notificationsOutbox.dedupeKey, orderMessageKey(input.poId)),
+          ),
+        )
+        .orderBy(desc(notificationsOutbox.createdAt))
+        .limit(1);
+      const state = sendStateOf(po.status, msg ?? null);
+      const channel = msg && msg.channel !== 'push' ? msg.channel : po.sentChannel === 'email' || po.sentChannel === 'whatsapp' ? po.sentChannel : null;
+      return {
+        state,
+        channel,
+        poStatus: po.status,
+        placedAt: po.placedAt ? po.placedAt.toISOString() : null,
+        sentAt: state === 'sent' && msg?.sentAt ? msg.sentAt.toISOString() : null,
+        final: state !== 'queued',
+      };
+    }),
 
   /** Order-document settings (flag `orderPricesOut`). `enabled` false → the UI hides the controls. */
   documentSettings: memberProcedure.query(async ({ ctx }) => {
@@ -1079,7 +1160,7 @@ export const ordersRouter = router({
     }),
 
   /** What the supplier receives for this PO: email text, WhatsApp text and the PDF (base64). */
-  documentPreview: managerProcedure
+  documentPreview: chefProcedure
     .input(z.object({ poId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       const restaurantId = ctx.session.restaurantId;

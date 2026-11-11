@@ -257,7 +257,7 @@ The planning docs the briefs cite live outside the repo, so the kit ships verbat
 - `ref/DEEP-FIX.he.md`: the 15 bug classes, each with its systemic fix and carrier packages (e.g. class 14 at 701-752, class 15 at 754-799).
 - `ref/GAP-PACKAGES.md`: Part A gap packages, Part B scope amendments, the overlap ledger (e.g. G-02 at 31-41).
 - `ref/MASTER-PLAN.he.md`: windows, dependencies, quality gates per wave (§4) and merge order (§5).
-- `ref/copylab/{lab.mjs,lab-output.txt}`: W2-13's bidi lab I. `lab.mjs` hard-codes local paths; read `lab-output.txt` and don't re-run it.
+- `ref/copylab/lab-output.txt`: W2-13's bidi lab I output. Read it; the generating script is not in the repo (it hard-coded local paths).
 
 Findings and evidence stay in `docs/ux/review/area-*.md` and `lens-*.md` (`grep -n '<id>'`, then ±40 lines). Nothing in `ref/` is binding over AGENTS.md, §7 above or your brief.
 
@@ -269,7 +269,7 @@ Findings and evidence stay in `docs/ux/review/area-*.md` and `lens-*.md` (`grep 
   - W1-08 follow-up: the noData CTA goes to a route every tenant has.
   - W1-04 follow-up: one offline chip on receiving routes.
   - Read the merged code, not the wave-1 PR bodies.
-- **Side menu: owner-approved.** The spec is `docs/ux/sidebar/SPEC.md` (read its top box first) and the prototype is `docs/ux/sidebar/PROTOTYPE.html`. W1-03 builds it at the start of wave 2 on the nav registry.
+- **Side menu: owner-approved.** The spec is `docs/ux/sidebar/SPEC.md` (read its top box first) and the clickable prototype is kept out of the tree (a design file, not product code): `git show 6fe38589:docs/ux/sidebar/PROTOTYPE.html > /tmp/sidebar-prototype.html` and open it locally. W1-03 builds it at the start of wave 2 on the nav registry.
 - **Design elevation (new track, UI wave 2):** the owner wants a more advanced design pass over the side menu and the main screens. It runs as a separate design track (competing bold directions, judged, then the owner picks). Packages build on today's tokens and must not hard-code anything that would block a token-level re-theme.
 - **Owner decisions of 31.10 (evening) — these were open, now decided:**
   1. **The chef sees ₪ in recipes:** plate cost, menu price and margin. (Elsewhere the chef sees ₪ only on the orders screens, also decided 31.10; the receiver sees no ₪ anywhere.) G-07 models both as chef capabilities; H-11's server strip exempts them; W2-07 drops the chef's %-only rule in recipes.
@@ -289,3 +289,27 @@ Findings and evidence stay in `docs/ux/review/area-*.md` and `lens-*.md` (`grep 
 - **Review depth follows risk:**
   - ₪ math, tenant/role, auth, money limits or any immutable-adjacent file get the two-lens review plus a verifier.
   - Copy-only or style-only changes get one lens.
+
+## 13. Updates from the orchestrator, 1.11 (binding; they override anything above that differs)
+- **Owner decisions of 31.10 (late evening), consolidated invoices and payment terms:**
+  1. **Real consolidated-invoice (חשבונית מרכזת) detection lands BEFORE the pilot, in train B.** That means OCR document kind, billing period and delivery-note list (S14), plus their persistence (S13 #224: `raw.kind`, `periodStart`/`periodEnd`, `deliveryNotes[].number`; a consolidated invoice is never single-PO matched; an unknown supplier goes to review; a ח.פ. mismatch is flagged). Wave-2 packages build on those fields; don't re-detect.
+  2. **Payment terms go ALL in wave 2:**
+     - **Structured terms per supplier:** W2-11's terms picker writes canonical strings ("מזומן", "שוטף", "שוטף+N") into the existing `suppliers.payment_terms` column. No schema change.
+     - **A computed due date:** W2-03 `lib/dueDate.ts` `computeDueDate`; the pay run buckets by due date.
+     - **OCR of the printed terms and due date:** the new package **G-17** (ocr-procurement-engineer); values persist in `ocr_payload.raw.printedTerms` / `printedDueDate`.
+     - **The new flag "תנאים קצרים מהמוסכם":** G-17 `termsCheck` + W2-03 renders it. It is a **warn** chip in the pay run, with both dates. The pay run sorts by the **agreed** due date.
+  3. **Three new consolidated flags (G-04 addendum, below):**
+     - a delivery note from another month;
+     - a listed note that isn't in the system;
+     - a note billed twice, including month-total lines and two consolidated invoices for the same supplier and month.
+- **None of these adds a `DiscrepancyType`.** The 12-type union and the engine are immutable. The terms flag carries no ₪. "Billed twice" shows its ₪ as a T2 review item ("אפשר שחויב פעמיים") in the consolidated panel and as a pay-run hold. It enters the leak figure only through a human-authored engine PR. If you think one is needed, write the proposal in your PR body.
+- **Train state:**
+  - train A merges Tue 3.11 09:00 IL;
+  - train B merges Wed 4.11 08:00 IL;
+  - the pilot freeze runs 06.11–10.11;
+  - the first wave-2 integration comes after 10.11.
+  G-17 and the G-04 addendum start after train B is on `main`.
+- **Month start (found 1.11):**
+  - Every "this month" figure starts the month at or near ₪0: the hero, the leak hub, the monthly report and the supplier ledger. Until the first counted invoice of the month is matched, the owner sees an almost empty home on the 1st of every month.
+  - Wave-2 rule for W2-09 (leak hub) and the home hero: when the current Israel month has no counted leak yet, show the empty month honestly. Next to it, show the previous month's figure as context, e.g. "החודש עוד ריק · חודש שעבר ₪X", with a link to it. Never silently swap months. The hero keeps one definition (`owner.leakHero`).
+  - Tests that read "this month" use the seeded month (`apps/web/e2e/seededMonth.ts`, #178) or the Israel-day fixtures (`israelToday`/`israelMonth`, #227). Never the UTC day.

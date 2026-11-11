@@ -14,6 +14,7 @@ import {
   sql,
   type Database,
 } from '@restomatch/db';
+import { isLeakType } from '@restomatch/charts';
 import {
   runMatch,
   unitConversionFactor,
@@ -195,9 +196,7 @@ export function countsAsLeak(
   const above = d.expected == null || d.actual == null || d.actual > d.expected;
   return (
     (d.severity === 'warn' || d.severity === 'block') &&
-    d.type !== 'PRICE_LOWER' &&
-    d.type !== 'UNORDERED_ARRIVAL' &&
-    d.type !== 'MISSING_ON_INVOICE' &&
+    isLeakType(d.type) &&
     ((d.type !== 'TOTAL_MISMATCH' && d.type !== 'VAT_MISMATCH') || above) &&
     d.deltaAmount > 0
   );

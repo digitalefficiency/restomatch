@@ -1,18 +1,17 @@
 import type { Session } from '../context';
-import { managerProcedure } from '../trpc';
+import { chefProcedure } from '../trpc';
 
 /**
  * Orders role tiers (W2-06, deep-fix class 13).
  *
- * Interim until G-07's capabilities merge: the brief says to build the order
- * writes at manager tier first and leave the chef path behind G-07's
- * `order.draft`/`order.send` caps. Train A (W1-11) moves the existing writes to
- * `chefProcedure`; when it (or G-07) is on this branch's base, the swap is
- * this ONE line: `orderWriteProcedure = chefProcedure` (or `capProcedure('order.draft')`).
+ * Owner 31.10: the chef orders freely (sees, creates, edits, sends and cancels
+ * the restaurant's orders, no approval). Train A (W1-11) moved the existing
+ * order writes to `chefProcedure`; W2-06's writes use the same tier. G-07 swap:
+ * this ONE line becomes `capProcedure('order.draft')`.
  */
-export const orderWriteProcedure = managerProcedure;
+export const orderWriteProcedure = chefProcedure;
 /** The roles {@link orderWriteProcedure} admits — the role-matrix test reads this. */
-export const ORDER_WRITE_ROLES: ReadonlyArray<Session['role']> = ['owner', 'manager'];
+export const ORDER_WRITE_ROLES: ReadonlyArray<Session['role']> = ['owner', 'manager', 'chef'];
 
 /**
  * Who sees ₪ on the orders screens [owner 31.10]: owner, manager, chef and the

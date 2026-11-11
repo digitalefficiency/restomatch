@@ -31,7 +31,7 @@ export default async function OrderCapturePage({
   const initialText = [title, text].filter((s): s is string => typeof s === 'string' && s.trim() !== '').join('\n').slice(0, 8000);
   // A WhatsApp share never 404s (orders-17): a role that cannot create orders
   // gets an in-shell T4 page that keeps the text and forwards it to the manager.
-  if (role !== 'owner' && role !== 'manager') {
+  if (role !== 'owner' && role !== 'manager' && role !== 'chef') {
     const to = await getT(ordersNs);
     return (
       <FieldMode className="mx-auto max-w-3xl">

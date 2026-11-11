@@ -1,105 +1,157 @@
 import { testDbUrl } from '@restomatch/db';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, eq, purchaseOrders, suppliers } from '@restomatch/db';
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { createDb, eq, poLines, purchaseOrders, restaurants, supplierContractPrices } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
-import { ORDER_WRITE_ROLES, PRICE_KEY } from '../orders/access';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 /**
- * W2-06 role × procedure matrix for the new orders procedures (extends W1-11's).
- * Writes: ORDER_WRITE_ROLES (owner, manager; + chef when train A / G-07 is on the
- * base — owner 31.10: the chef orders freely). Receiver: FORBIDDEN on writes and
- * the guide; reads carry no ₪. Bookkeeper: read-only, with ₪.
+ * Owner decision 31.10 (pilot, train A): the chef orders for their own restaurant
+ * freely — creates, edits, sends and cancels, no manager approval, and sees prices
+ * and totals on the orders screens. Document settings and PO import stay owner /
+ * manager; the receiver writes nothing; the bookkeeper reads only.
  */
 const db = createDb(testDbUrl());
 let A: Tenant;
-const ROLES: Session['role'][] = ['owner', 'manager', 'chef', 'receiver', 'bookkeeper'];
-const callerFor = (role: Session['role']) =>
-  appRouter.createCaller({ db, session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role } } as AppContext);
 
-/** Every key path in a payload that looks like ₪. */
-function priceKeys(v: unknown, path = '$'): string[] {
-  if (Array.isArray(v)) return v.flatMap((x, i) => priceKeys(x, `${path}[${i}]`));
-  if (v === null || typeof v !== 'object' || v instanceof Date) return [];
-  return Object.entries(v as Record<string, unknown>).flatMap(([k, x]) =>
-    PRICE_KEY.test(k) ? [`${path}.${k}`] : priceKeys(x, `${path}.${k}`),
-  );
+type Role = NonNullable<Session['role']>;
+const ROLES: Role[] = ['owner', 'manager', 'chef', 'receiver', 'bookkeeper'];
+const WRITERS: Role[] = ['owner', 'manager', 'chef'];
+const MANAGERS: Role[] = ['owner', 'manager'];
+
+function callerFor(role: Role) {
+  const session: Session = { userId: A.ownerUserId, restaurantId: A.restaurantId, role };
+  const ctx: AppContext = { db, session };
+  return appRouter.createCaller(ctx);
 }
 
-describe('orders W2-06 role matrix', () => {
-  beforeAll(async () => {
+const LINE = { rawDescription: 'עגבניות', qty: 4, unit: 'ק״ג', unitPriceExpected: 6.5 };
+
+/** A fresh draft (made by the owner) with one line. */
+async function draft() {
+  const { poId } = await callerFor('owner').orders.createDraft({ supplierId: A.supplierId, lines: [LINE, { ...LINE, rawDescription: 'מלפפונים' }] });
+  const [line] = await db.select({ id: poLines.id }).from(poLines).where(eq(poLines.poId, poId)).limit(1);
+  return { poId, lineId: line!.id };
+}
+
+/** Every order write, each from a fresh draft. Returns the call's outcome. */
+const WRITES: Record<string, (role: Role) => Promise<unknown>> = {
+  createDraft: (role) => callerFor(role).orders.createDraft({ supplierId: A.supplierId, lines: [LINE] }),
+  captureFromText: (role) => callerFor(role).orders.captureFromText({ text: `הזמנה ל${A.supplierName}:\n3 ק״ג עגבניות`, supplierId: A.supplierId }),
+  updateOrderLine: async (role) => {
+    const { lineId } = await draft();
+    return callerFor(role).orders.updateOrderLine({ lineId, patch: { qtyOrdered: 7 } });
+  },
+  deleteOrderLine: async (role) => {
+    const { lineId } = await draft();
+    return callerFor(role).orders.deleteOrderLine({ lineId });
+  },
+  cancelOrder: async (role) => {
+    const { poId } = await draft();
+    return callerFor(role).orders.cancelOrder({ poId });
+  },
+  placeOrder: async (role) => {
+    const { poId } = await draft();
+    return callerFor(role).orders.placeOrder({ poId, channel: 'none' });
+  },
+  documentPreview: async (role) => {
+    const { poId } = await draft();
+    return callerFor(role).orders.documentPreview({ poId });
+  },
+};
+
+describe('orders · role × procedure (chef orders freely)', () => {
+  beforeEach(async () => {
     await resetDb(db);
     A = await seedTenant(db, 'A');
-    await db.update(suppliers).set({ contactWhatsapp: '0525551234' }).where(eq(suppliers.id, A.supplierId));
+    await db
+      .update(restaurants)
+      .set({ settings: { features: { orderCapture: true, orderPricesOut: true } } as never })
+      .where(eq(restaurants.id, A.restaurantId));
   });
   afterAll(async () => {
     await resetDb(db);
   });
 
-  for (const role of ROLES) {
-    const writes = ORDER_WRITE_ROLES.includes(role);
-    it(`${role}: order writes ${writes ? 'allowed' : 'FORBIDDEN'}`, async () => {
-      const c = callerFor(role);
-      const calls = [
-        () => c.orders.orderGuide({ supplierId: A.supplierId }),
-        () => c.orders.openDraft({ supplierId: A.supplierId }),
-        // owner/manager share one user here, so save onto that user's open draft.
-        async () => {
-          const open = writes ? await c.orders.openDraft({ supplierId: A.supplierId }) : null;
-          return c.orders.saveDraft({
-            draftId: open?.draftId ?? null,
-            version: open?.version ?? null,
-            supplierId: A.supplierId,
-            lines: [{ rawDescription: `x-${role}`, qty: 1, unit: 'kg' }],
-            clientMutationId: `matrix-${role}`,
-          });
-        },
-      ];
-      for (const call of calls) {
-        if (writes) await expect(call()).resolves.toBeDefined();
-        else await expect(call()).rejects.toMatchObject({ code: 'FORBIDDEN' });
-      }
-      // These need a draft id; FORBIDDEN must come before any lookup.
-      if (!writes) {
-        const poId = A.poId;
-        await expect(c.orders.markSentManually({ poId, clientMutationId: 'matrix-0001' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
-        await expect(c.orders.prepareManualSend({ poId })).rejects.toMatchObject({ code: 'FORBIDDEN' });
-        await expect(c.orders.addOrderLine({ poId, line: { rawDescription: 'x', qty: 1, unit: 'kg' } })).rejects.toMatchObject({ code: 'FORBIDDEN' });
-        await expect(c.orders.sendMany({ items: [{ poId, expectedStatus: 'draft' }], channel: 'none' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
-        await expect(c.orders.amendSent({ poId, changes: [{ qtyDelta: 1, unit: 'kg', rawDescription: 'x' }] })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  for (const [name, call] of Object.entries(WRITES)) {
+    it(`${name}: owner / manager / chef allowed; receiver and bookkeeper FORBIDDEN`, async () => {
+      for (const role of ROLES) {
+        const run = call(role);
+        if (WRITERS.includes(role)) await expect(run, `${name} as ${role}`).resolves.toBeDefined();
+        else await expect(run, `${name} as ${role}`).rejects.toMatchObject({ code: 'FORBIDDEN' });
       }
     });
   }
 
-  it('the chef sees prices on the orders screens [owner 31.10]; the receiver sees no ₪ key anywhere', async () => {
-    for (const role of ['owner', 'manager', 'chef', 'bookkeeper'] as const) {
-      const list = await callerFor(role).orders.list();
-      expect(priceKeys(list).length, role).toBeGreaterThan(0);
-    }
-    const r = callerFor('receiver');
-    const payloads = [await r.orders.list(), await r.orders.get({ poId: A.poId }), await r.orders.supplierBoard()];
-    for (const p of payloads) expect(priceKeys(p)).toEqual([]);
+  it('the chef places a record-only order end to end, and sees its prices and total', async () => {
+    const chef = callerFor('chef');
+    const { poId } = await chef.orders.createDraft({ supplierId: A.supplierId, lines: [LINE] });
+    await expect(chef.orders.placeOrder({ poId, channel: 'none' })).resolves.toMatchObject({ ok: true, sentChannel: null });
+    const got = await chef.orders.get({ poId });
+    expect(got.po).toMatchObject({ status: 'sent', sentChannel: null, totalEstimated: '26.00' });
+    expect(got.lines[0]).toMatchObject({ unitPriceExpected: '6.5000' });
+    const listed = await chef.orders.list();
+    expect(listed.find((o) => o.id === poId)).toMatchObject({ totalEstimated: '26.00', sentChannel: null });
+    await expect(chef.orders.sendStatus({ poId })).resolves.toMatchObject({ state: 'none', final: true });
   });
 
-  it('the receiver never drafts (owner 31.10): createDraft / captureFromText / saveDraft → FORBIDDEN, nothing written', async () => {
-    const r = callerFor('receiver');
-    const before = await db.select().from(purchaseOrders).where(eq(purchaseOrders.restaurantId, A.restaurantId));
-    await expect(
-      r.orders.createDraft({ supplierId: A.supplierId, lines: [{ rawDescription: 'x', qty: 1, unit: 'kg' }] }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    await expect(r.orders.captureFromText({ text: '2 ק״ג עגבניות' } as never)).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    await expect(
-      r.orders.saveDraft({ supplierId: A.supplierId, lines: [{ rawDescription: 'x', qty: 1, unit: 'kg' }], clientMutationId: 'rcv-00001' }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    const after = await db.select().from(purchaseOrders).where(eq(purchaseOrders.restaurantId, A.restaurantId));
+  it('a receiver write leaves nothing behind', async () => {
+    const before = await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.restaurantId, A.restaurantId));
+    await expect(callerFor('receiver').orders.createDraft({ supplierId: A.supplierId, lines: [LINE] })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    const after = await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.restaurantId, A.restaurantId));
     expect(after).toHaveLength(before.length);
   });
 
-  it('the board is readable by every member', async () => {
+  it('the bookkeeper reads: list, get, sendStatus, documentSettings', async () => {
+    const { poId } = await draft();
+    const bk = callerFor('bookkeeper');
+    await expect(bk.orders.list()).resolves.toBeInstanceOf(Array);
+    await expect(bk.orders.get({ poId })).resolves.toMatchObject({ po: { id: poId } });
+    await expect(bk.orders.sendStatus({ poId })).resolves.toMatchObject({ state: 'none' });
+    await expect(bk.orders.documentSettings()).resolves.toMatchObject({ enabled: true });
+  });
+
+  it('document settings: owner / manager only', async () => {
     for (const role of ROLES) {
-      const b = await callerFor(role).orders.supplierBoard();
-      expect(b.rows.map((x) => x.supplierId)).toContain(A.supplierId);
+      const run = callerFor(role).orders.setDocumentSettings({ showPrices: false });
+      if (MANAGERS.includes(role)) await expect(run, role).resolves.toEqual({ showPrices: false });
+      else await expect(run, role).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+  });
+
+  it('contracts.orderPrices: the chef reorders at CONTRACT prices; receiver / bookkeeper FORBIDDEN; a foreign supplier NOT_FOUND', async () => {
+    await db
+      .update(restaurants)
+      .set({ settings: { features: { orderCapture: true, orderPricesOut: true, contracts: true } } as never })
+      .where(eq(restaurants.id, A.restaurantId));
+    await db.insert(supplierContractPrices).values({
+      restaurantId: A.restaurantId,
+      supplierId: A.supplierId,
+      productId: A.productId,
+      contractPrice: '40',
+      validFrom: '2020-01-01',
+      validTo: null,
+      unit: 'kg',
+    });
+    const items = [{ productId: A.productId, unit: 'kg' }];
+    // A chef's "הזמן שוב" gets the contract price, never the list price (a PO at list price would mask an over-contract invoice).
+    await expect(callerFor('chef').contracts.orderPrices({ supplierId: A.supplierId, items })).resolves.toEqual({
+      enabled: true,
+      prices: [{ productId: A.productId, unit: 'kg', contractPrice: 40 }],
+    });
+    for (const role of ['receiver', 'bookkeeper'] as const) {
+      await expect(callerFor(role).contracts.orderPrices({ supplierId: A.supplierId, items }), role).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+    const B = await seedTenant(db, 'B');
+    await expect(callerFor('chef').contracts.orderPrices({ supplierId: B.supplierId, items })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('PO import: owner / manager only (the role gate comes before the OCR gate)', async () => {
+    for (const role of ['chef', 'receiver', 'bookkeeper'] as const) {
+      await expect(
+        callerFor(role).orders.importPo({ platform: 'zestt', file: { filename: 'po.pdf', base64: 'JVBERi0=' } }),
+        role,
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
     }
   });
 });

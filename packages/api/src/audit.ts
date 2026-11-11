@@ -35,6 +35,9 @@ export type AuditAction =
   | 'admin.plan_assigned'
   | 'admin.overrides_set'
   | 'admin.role_set'
+  | 'admin.features'
+  // A platform admin read a tenant's data (cross-tenant console reads)
+  | 'admin.viewed'
   // Team & membership (tenant connection)
   | 'team.member_invited'
   | 'team.invite_resent'
@@ -44,6 +47,7 @@ export type AuditAction =
   | 'team.member_removed'
   | 'team.member_locale_changed'
   | 'settings.my_locale_changed'
+  | 'settings.letterhead_updated'
   // Approvals (already emitted by the approvals router)
   | 'discrepancy.approved'
   | 'discrepancy.rejected'
@@ -54,7 +58,13 @@ export type AuditAction =
   // Inventory counts (inventory router, flag inventoryCount)
   | 'inventory.count_closed'
   | 'inventory.count_discarded'
-  | 'inventory.line_amended';
+  | 'inventory.line_amended'
+  // Invoice edits (receiving router): OCR corrections and hand-entered lines
+  | 'receiving.invoice_header_updated'
+  | 'receiving.invoice_line_updated'
+  | 'receiving.invoice_line_added'
+  | 'receiving.invoice_line_deleted'
+  | 'receiving.invoice_retaken';
 
 export interface AuditEntry {
   /** Tenant the action belongs to. On a tenant connection this must equal the GUC. */

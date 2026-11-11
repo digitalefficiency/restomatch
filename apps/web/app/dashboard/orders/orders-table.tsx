@@ -2,13 +2,13 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Archive, Ban, CheckCheck, ChevronRight, FilePen, PackageCheck, PackageMinus, Repeat, Send } from 'lucide-react';
+import { AlertTriangle, Archive, Ban, CheckCheck, ChevronRight, ClipboardCheck, FilePen, PackageCheck, PackageMinus, Repeat, Send } from 'lucide-react';
 import { Badge, Card, displayName, type BadgeTone } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { formatIls } from '@/lib/money';
-import { deliveryStatusOf, ltrIsolate, poRefOf, type DisplayOrderStatus, type ReceiptStatus } from './order-logic';
+import { deliveryStatusOf, ltrIsolate, poRefOf, sendStateOfRow, type DisplayOrderStatus, type ReceiptStatus, type SendState } from './order-logic';
 import { RowMenu } from './row-menu';
 
 export type OrderStatus = 'draft' | 'sent' | 'confirmed' | 'partial' | 'closed' | 'cancelled';
@@ -21,6 +21,9 @@ export interface OrderRow {
   status: OrderStatus;
   /** Latest goods receipt of the PO (orders.list); drives "received" / "partially received". */
   receiptStatus?: ReceiptStatus;
+  /** When it was placed here; with no `sentChannel` = recorded only (no message to the supplier). */
+  sentAt?: Date | string | null;
+  sentChannel?: string | null;
   createdAt: Date | string;
   expectedDeliveryAt: Date | string | null;
   lineCount: number;
@@ -44,6 +47,8 @@ export const STATUS_TONE: Record<DisplayOrderStatus, BadgeTone> = {
   partial: 'warning',
   closed: 'neutral',
   cancelled: 'neutral',
+  recorded: 'neutral',
+  unsent: 'warning',
 };
 
 const STATUS_ICON: Record<DisplayOrderStatus, typeof Send> = {
@@ -54,18 +59,23 @@ const STATUS_ICON: Record<DisplayOrderStatus, typeof Send> = {
   received: PackageCheck,
   closed: Archive,
   cancelled: Ban,
+  recorded: ClipboardCheck,
+  unsent: AlertTriangle,
 };
 
 export function OrderStatusBadge({
   status,
   receiptStatus,
   sentManually = false,
+  send,
 }: {
   status: OrderStatus;
   receiptStatus?: ReceiptStatus;
   sentManually?: boolean;
+  /** orders.sendStatus (detail) or the row's channel (list): never "sent" for a message that didn't go. */
+  send?: SendState | null;
 }) {
-  const shown = deliveryStatusOf(status, receiptStatus);
+  const shown = deliveryStatusOf(status, receiptStatus, send);
   const t = useT(ordersNs);
   const Icon = STATUS_ICON[shown] ?? FilePen;
   return (
@@ -184,7 +194,7 @@ export function OrdersTable({
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  <OrderStatusBadge status={o.status} receiptStatus={o.receiptStatus} sentManually={o.sentManually} />
+                  <OrderStatusBadge status={o.status} receiptStatus={o.receiptStatus} sentManually={o.sentManually} send={sendStateOfRow(o)} />
                   {author(o) ? <span className="ms-2 text-xs text-muted">{author(o)}</span> : null}
                 </td>
                 <td className="px-4 py-3 text-muted" data-testid="order-answer">{answer(o) ?? '—'}</td>
@@ -231,7 +241,7 @@ export function OrdersTable({
                   >
                     {hideSupplier ? date(o.createdAt) : supplier(o)}
                   </Link>
-                  <OrderStatusBadge status={o.status} receiptStatus={o.receiptStatus} sentManually={o.sentManually} />
+                  <OrderStatusBadge status={o.status} receiptStatus={o.receiptStatus} sentManually={o.sentManually} send={sendStateOfRow(o)} />
                 </div>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
                   <bdi dir="ltr" className="font-mono text-xs" data-testid="order-ref">

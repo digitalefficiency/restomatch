@@ -175,6 +175,9 @@ describe('resolveExpectedPrice — the precedence table', () => {
   });
 
   it('parity: createDraft and captureOrderDraft price an unpriced line exactly like resolveExpectedPrice', async () => {
+    // The fixture's own PO (sent today, ₪8.5, with its product since G-08) would be the
+    // latest priced line at "now": unlink it so this test's PO is the one that counts.
+    await db.update(poLines).set({ productId: null }).where(eq(poLines.poId, A.poId));
     await listPrice('12.0000', T0);
     await pastPo('10.5000', T1);
     const expected = await resolve(new Date());

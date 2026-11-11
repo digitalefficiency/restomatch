@@ -6,12 +6,12 @@ import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { ORDER_VIEWS } from '../orders/views';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { restaurantTodayAt } from './helpers/il-day';
 
 /** W2-06 §5.6 — queue views: each tab's count equals the rows it lists; tenant-isolated. */
 const db = createDb(testDbUrl());
 let A: Tenant;
 let B: Tenant;
-const DAY = 86_400_000;
 const callerFor = (t: Tenant, role: Session['role'] = 'manager') =>
   appRouter.createCaller({ db, session: { userId: t.ownerUserId, restaurantId: t.restaurantId, role } } as AppContext);
 
@@ -23,7 +23,8 @@ async function po(t: Tenant, status: 'draft' | 'sent' | 'cancelled', inDays: num
       supplierId: t.supplierId,
       status,
       source: 'manual',
-      expectedDeliveryAt: inDays === null ? null : new Date(Date.now() + inDays * DAY),
+      // The restaurant's calendar day (never the runner clock): noon, N days from today.
+      expectedDeliveryAt: inDays === null ? null : restaurantTodayAt(12, { dayOffset: inDays }),
     })
     .returning({ id: purchaseOrders.id });
   return row!.id;

@@ -59,6 +59,7 @@ import {
 import { DecimalInput } from '../decimal-input';
 import { FieldMode } from '../field-mode';
 import { UNDO_MS, UndoCountdown } from '../undo-bar';
+import { LiveSendStatus } from '../send-status';
 import { InlineDocument } from '../supplier-document';
 import { openWhatsappNow } from '../w2-logic';
 import { GuidePanel } from './steps/guide-panel';
@@ -1508,17 +1509,17 @@ export function NewOrderWizard({
 
         {step === 'SENT' && sent && (
           <Card elevated flow className="text-center">
-            <CheckCircle2 className="mx-auto h-10 w-10 text-primary" aria-hidden="true" />
-            <p className="mt-3 text-lg font-semibold text-ink" role="status">
-              {sent.channel === 'none'
-                ? t('wizard.markedTitle')
-                : sent.channel === 'manual'
-                  ? t('w2.manual.done')
-                  : t('wizard.sentTitle', {
-                    supplier: sent.supplier,
-                    channel: t(`detail.channelNames.${sent.channel}`),
-                  })}
-            </p>
+            {sent.channel === 'manual' ? (
+              <>
+                <CheckCircle2 className="mx-auto h-10 w-10 text-primary" aria-hidden="true" />
+                <p className="mt-3 text-lg font-semibold text-ink" role="status">
+                  {t('w2.manual.done')}
+                </p>
+              </>
+            ) : (
+              /* What really happened (orders.sendStatus) — never "sent" on faith. */
+              <LiveSendStatus poId={sent.poId} pickedChannel={sent.channel} variant="hero" />
+            )}
             <p className="mt-1 text-sm text-muted">
               {sent.channel === 'none' || sent.channel === 'manual'
                 ? sent.channel === 'none'

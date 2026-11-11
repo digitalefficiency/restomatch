@@ -144,6 +144,8 @@ const ROUTE_ROLES_BEFORE: Record<string, UserRole[]> = {
   '/dashboard/suppliers': ['owner', 'manager'],
   '/dashboard/suppliers/ledger': ['owner', 'manager', 'receiver', 'bookkeeper'],
   '/dashboard/catalog': ['owner', 'manager'],
+  // G-08 (orchestrator 31.10): the chef answers "זה אותו מוצר?" on the mapper only.
+  '/dashboard/catalog/mapping': ['owner', 'manager', 'chef'],
   '/dashboard/products': ['owner', 'manager'],
   '/dashboard/orders': ['owner', 'manager'],
   // W2-06 (orchestrator-approved exception): the share target's forward page, every role.
@@ -165,10 +167,11 @@ describe('ROUTE_ROLES generated from the registry', () => {
     Object.fromEntries(Object.entries(m).map(([k, v]) => [k, [...v].sort()]));
 
   it("equals today's map except the supplier ledger and the invoice page, which drop the receiver", () => {
-    const { ['/dashboard/suppliers/ledger']: ledger, ['/dashboard/invoices']: invoices, ...rest } = ROUTE_ROLES;
+    const { ['/dashboard/suppliers/ledger']: ledger, ['/dashboard/invoices']: invoices, ['/dashboard/orders']: orders, ...rest } = ROUTE_ROLES;
     const {
       ['/dashboard/suppliers/ledger']: ledgerBefore,
       ['/dashboard/invoices']: invoicesBefore,
+      ['/dashboard/orders']: ordersBefore,
       ...restBefore
     } = ROUTE_ROLES_BEFORE;
     expect(sorted(rest)).toEqual(sorted(restBefore));
@@ -178,6 +181,9 @@ describe('ROUTE_ROLES generated from the registry', () => {
     expect(ledger).toEqual(['owner', 'manager', 'bookkeeper']);
     expect(invoicesBefore).toContain('receiver');
     expect(invoices).toEqual(['owner', 'manager', 'bookkeeper']);
+    // The one loosening, owner decision 31.10 (pilot): the chef orders freely.
+    expect(ordersBefore).toEqual(['owner', 'manager']);
+    expect(orders).toEqual(['owner', 'manager', 'chef']);
     // The printable leak report keeps inheriting /leaks (no silent bounce for the bookkeeper's button).
     expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
     expect(allowedRolesForPath('/dashboard/leaks/report')).toContain('bookkeeper');
@@ -203,7 +209,9 @@ describe('ROUTE_ROLES generated from the registry', () => {
       const concrete = page.replace(/\[[^\]]+\]/g, 'x');
       const now = allowedRolesForPath(concrete) ?? ALL_ROLES;
       const was = before(concrete) ?? ALL_ROLES;
-      for (const role of now) expect(was, `${role} on ${concrete}`).toContain(role);
+      // Owner decision 31.10 (pilot): the chef opens orders (list, detail, new, capture).
+      const ordersChef = (role: UserRole) => role === 'chef' && (concrete === '/dashboard/orders' || concrete.startsWith('/dashboard/orders/'));
+      for (const role of now) if (!ordersChef(role)) expect(was, `${role} on ${concrete}`).toContain(role);
     }
   });
 });
@@ -221,6 +229,15 @@ describe('nav per role', () => {
     }
   });
 
+  /**
+   * Named exceptions: a page a role reaches from a home line, not from nav. Each
+   * entry must be backed by a test that proves that home link
+   * (G-08: app/dashboard/home/__tests__/questions.server.test.ts).
+   */
+  const REACHED_FROM_HOME: ReadonlyArray<{ role: UserRole; route: string; via: string }> = [
+    { role: 'chef', route: 'catalogMapping', via: 'home question line' },
+  ];
+
   it('every allowed non-detail page is reachable in ≤ 2 interactions, per role', () => {
     for (const role of ALL_ROLES) {
       for (const showChain of role === 'owner' ? [false, true] : [false]) {
@@ -236,9 +253,18 @@ describe('nav per role', () => {
             // by roles that cannot open its parent (the receiver's "העבירו למנהל" page).
             !(d.key === 'ordersCapture' && !canOpen(role, REGISTRY.find((p) => p.key === 'orders')!)),
         );
-        expect(allowed.filter((d) => !reach.has(d.key)).map((d) => d.path), `${role} chain=${showChain}`).toEqual([]);
+        const viaHome = new Set(REACHED_FROM_HOME.filter((x) => x.role === role).map((x) => x.route));
+        expect(
+          allowed.filter((d) => !reach.has(d.key) && !viaHome.has(d.key)).map((d) => d.path),
+          `${role} chain=${showChain}`,
+        ).toEqual([]);
       }
     }
+  });
+
+  it('the home-line exceptions stay narrow: catalogMapping is still nav-reachable for owner and manager', () => {
+    expect(REACHED_FROM_HOME).toEqual([{ role: 'chef', route: 'catalogMapping', via: 'home question line' }]);
+    for (const role of ['owner', 'manager'] as const) expect(reachableKeys(viewer(role)).has('catalogMapping')).toBe(true);
   });
 
   it('pay run, supplier ledger and integrations are in nav for the right roles', () => {
@@ -276,7 +302,7 @@ describe('bottom bars', () => {
 
   it('per-role sets (slot order, start → end)', () => {
     expect(bar(viewer('receiver'))).toEqual(['home:today', 'receiving:receipts']);
-    expect(bar(viewer('chef'))).toEqual(['home:today', 'inventory:count', 'recipes:dishes']);
+    expect(bar(viewer('chef'))).toEqual(['home:today', 'inventory:count', 'recipes:dishes', 'orders:orders']); // pilot 31.10: the chef orders
     expect(bar(viewer('manager'))).toEqual(['home:today', 'orders:orders', 'receiving:receive', 'approvals:approvals']);
     expect(bar(viewer('owner'))).toEqual(['home:home', 'approvals:approvals', 'leaks:leak', 'orders:orders']);
     expect(bar(viewer('bookkeeper'))).toEqual(['home:home', 'approvals:approvals', 'payRun:payments', 'inbox:invoices']);
