@@ -24,6 +24,8 @@ yarn-error.log*
 *.swo
 
 coverage
+# W2-01: COVERAGE manifest fragments are source, not test-coverage output.
+!packages/api/src/__tests__/coverage/
 .tsbuildinfo
 *.tsbuildinfo
 
