@@ -52,6 +52,8 @@ export const APP_ERROR_CODES = [
   // actorName, at, machine, event, entityId) and a refused precondition (params: reason).
   'lifecycle.conflict',
   'lifecycle.refused',
+  // AU-01: the owner tried to switch a flag that is admin-only (not on OWNER_TOGGLEABLE).
+  'automations.notOwnerToggleable',
 ] as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];

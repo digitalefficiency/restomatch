@@ -58,6 +58,7 @@ export const nav: Shape<typeof he> = {
     team: 'الفريق',
     integrations: 'الربط',
     settings: 'الإعدادات',
+    automations: 'الأتمتة',
   },
   bar: {
     today: 'اليوم',

@@ -175,6 +175,7 @@ describe('ROUTE_ROLES generated from the registry', () => {
       ['/dashboard/suppliers']: suppliersHub,
       ['/dashboard/inventory']: inventory,
       ['/dashboard/chain/matrix']: chainMatrix,
+      ['/dashboard/settings/automations']: automations,
       ...rest
     } = ROUTE_ROLES;
     const {
@@ -204,6 +205,8 @@ describe('ROUTE_ROLES generated from the registry', () => {
     // W3-01 (decision 7, granted 7.11): the chain's bookkeeper reads the branch matrix, read-only.
     expect(ROUTE_ROLES_BEFORE['/dashboard/chain/matrix']).toBeUndefined();
     expect([...(chainMatrix ?? [])].sort()).toEqual(['bookkeeper', 'owner']);
+    // AU-01 (new page, orchestrator 7.11): narrower than its /settings parent — no receiver, no chef.
+    expect(automations).toEqual(['owner', 'manager', 'bookkeeper']);
     // The printable leak report keeps inheriting /leaks (no silent bounce for the bookkeeper's button).
     expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
     expect(allowedRolesForPath('/dashboard/leaks/report')).toContain('bookkeeper');

@@ -57,6 +57,8 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   // G-05: owning screens may show who changed it and when (appParams); this is the generic copy.
   'lifecycle.conflict': 'lifecycleConflict',
   'lifecycle.refused': 'lifecycleRefused',
+  // AU-01: the automations page only offers allow-listed switches.
+  'automations.notOwnerToggleable': 'forbidden',
 };
 
 /**

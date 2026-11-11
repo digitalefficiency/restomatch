@@ -60,6 +60,7 @@ export const he = {
     integrations: 'חיבורים',
     settings: 'הגדרות',
     close: 'סגירת חודש',
+    automations: 'אוטומציות',
   },
   /** Bottom-bar labels: short, never truncated at 360 px. */
   bar: {
