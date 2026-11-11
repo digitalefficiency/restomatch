@@ -342,3 +342,34 @@ describe('§9 consolidated flags', () => {
     expect(await buildMatchInputForInvoice(db, T.restaurantId, inv, { pinnedPoId: po!.id })).toBeNull();
   });
 });
+
+// Tenant isolation of the §9 lookups on the RLS-BYPASSING service connection (the worker's):
+// the explicit restaurant scoping is all that stands between two tenants here.
+describe('§9 flags never read another tenant (service connection)', () => {
+  it("B's identical month-total ריכוז for the same period never flags A's as billed twice", async () => {
+    const A = await seedTenant(db, 'A');
+    const B = await seedTenant(db, 'B');
+    const a = await setup(A);
+    const b = await setup(B);
+    await b.note('7891', 'completed', [{ productId: b.milk, qty: '20' }]);
+    await a.note('7891', 'completed', [{ productId: a.milk, qty: '20' }]);
+    const month = [{ d: 'חלב · סה״כ חודש יוני', qty: 20, price: 8.5 }];
+    await b.consolidated(month, [], { number: 'R-JUN-B1', createdAt: new Date('2026-07-01T08:00:00Z') });
+    const mine = await a.consolidated(month, [], { number: 'R-JUN-A1', createdAt: new Date('2026-07-02T08:00:00Z') });
+    const p = (await consolidatedProposal(db, A.restaurantId, mine))!;
+    expect(p.reviewItems!.filter((r) => r.flag === 'note_billed_twice')).toEqual([]);
+  });
+
+  it("B's receipt carrying A's note number never hides A's note_not_in_system", async () => {
+    const A = await seedTenant(db, 'A');
+    const B = await seedTenant(db, 'B');
+    const a = await setup(A);
+    const b = await setup(B);
+    await b.note('7901', 'completed', [{ productId: b.milk, qty: '4' }]);
+    await a.note('7900', 'completed', [{ productId: a.milk, qty: '4' }]);
+    const mine = await a.consolidated([{ d: 'ת.מ. 7900 · חלב', qty: 4, price: 8.5 }], ['7900', '7901'], { number: 'R-A-7901' });
+    const p = (await consolidatedProposal(db, A.restaurantId, mine))!;
+    expect(p.reviewItems!.filter((r) => r.flag === 'note_not_in_system').map((r) => r.noteNumber)).toEqual(['7901']);
+    expect(p.deliveryNotes.every((n) => n.number !== '7901')).toBe(true);
+  });
+});
