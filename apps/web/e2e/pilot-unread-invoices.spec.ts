@@ -43,17 +43,18 @@ test('an unread photo invoice shows on home; the row opens the invoice register;
     const page = await signedIn(browser, 'owner');
     const errors = collectPageErrors(page);
     await page.goto('/dashboard');
-    await expect(page.locator('a[href="/dashboard/invoices"]').filter({ hasText: 'חשבוניות שממתינות לכם' })).toBeVisible();
-    // W2-02 (#217) took over /dashboard/invoices: the home row opens the register.
-    await page.locator('a[href="/dashboard/invoices"]').filter({ hasText: 'חשבוניות שממתינות לכם' }).click();
-    await expect(page).toHaveURL(/\/dashboard\/invoices(\?.*)?$/);
+    // Train-C B2: the home row opens the register's lines view (invoices.needsLines), not the review tab.
+    const more = page.getByTestId('needs-you-more');
+    if (await more.count()) await more.locator('summary').click();
+    const homeRow = page.locator('a[href="/dashboard/invoices?view=lines"]').filter({ hasText: 'חשבוניות שממתינות לכם' });
+    await expect(homeRow).toBeVisible();
+    await homeRow.click();
+    await expect(page).toHaveURL(/\/dashboard\/invoices\?view=lines$/);
     await expect(page.getByTestId('invoice-register').first()).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
-    // Train-C B2: the register's 'lines' view lists it with its reason, and opens it.
-    await page.goto('/dashboard/invoices?view=lines');
+    // The lines view lists it with its reason, and opens it.
     const lineRow = page.getByTestId('register-lines-row').filter({ hasText: number });
     await expect(lineRow).toContainText('הקריאה נכשלה');
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
     await lineRow.click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/invoices/${id!}`));
     expect(errors).toEqual([]);

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { DEMO_RESTAURANT_NAME } from './env';
-import { e2eSql, loginViaMagicLink } from './helpers';
+import { e2eSql } from './helpers';
 
 /**
  * W2-08 · The task spine: "מחכה לך" on every home, nav badges, the bell and the
@@ -50,7 +50,13 @@ test.afterAll(async () => {
   }
 });
 
-/** One magic-link login per role per run (the sign-in rate limit), then reused as storage state. */
+/**
+ * One password sign-in per role per run, reused as storage state. Not the magic
+ * link: waiting on the link file flaked under load ("did not appear within 30s");
+ * the credentials callback is synchronous and successes are refunded by the
+ * login rate limit (train C round 2, F4c).
+ */
+const PASSWORD = process.env.DEMO_PASSWORD ?? 'RestoMatch-Demo-2026!';
 const states = new Map<string, Awaited<ReturnType<import('@playwright/test').BrowserContext['storageState']>>>();
 
 async function asRole(browser: Browser, role: string, opts: Parameters<Browser['newContext']>[0], baseURL: string, locale: 'he' | 'en' = 'he') {
@@ -63,7 +69,14 @@ async function asRole(browser: Browser, role: string, opts: Parameters<Browser['
   await context.addCookies(cookies);
   const page = await context.newPage();
   if (!saved) {
-    await loginViaMagicLink(page, email(role));
+    const csrf = (await (await page.request.get('/api/auth/csrf')).json()) as { csrfToken: string };
+    const res = await page.request.post('/api/auth/callback/credentials', {
+      form: { email: email(role), password: PASSWORD, rememberMe: 'false', csrfToken: csrf.csrfToken, callbackUrl: '/dashboard' },
+      maxRedirects: 0,
+    });
+    expect(res.status(), `${role} sign-in`).toBeLessThan(400);
+    // A session cookie, not a bounce back to /login.
+    expect((await context.cookies()).some((c) => /session-token/.test(c.name)), `${role} session cookie`).toBe(true);
     states.set(role, await context.storageState());
   }
   return { context, page };
@@ -86,17 +99,21 @@ test.describe('owner: one figure on the home row, the badge and the bell', () =>
     await page.goto('/dashboard');
     const row = page.getByTestId('needs-decide');
     await expect(row).toBeVisible();
-    // The lab seed alone gives ₪296 · 2 blocking; on a shared e2e DB other specs add rows (CI: ₪724).
-    // What this test pins is that the SAME figure shows on the row, the badge and the bell.
+    // No literal: the seed and the other specs move the queue (lab ₪296, staging ₪520 · 5 blocking).
+    // The row must equal approvals.queueSummary, and the badge and the bell must repeat the row.
     const amount = digits(await page.getByTestId('needs-decide-value').innerText());
-    expect(Number(amount)).toBeGreaterThan(0);
-    await expect(page.getByTestId('needs-decide-sub')).toContainText(/\d+ חוסמים תשלום/);
+    // The source of truth: the approvals queue the task is built from (train C round 2, F4b).
+    const res = await page.request.get(`/api/trpc/approvals.queueSummary?input=${encodeURIComponent(JSON.stringify({ json: {} }))}`);
+    const summary = ((await res.json()) as { result: { data: { json: { count: number; blockers: number; toDecide: { amountIls: number } } } } }).result.data.json;
+    expect(summary.count).toBeGreaterThan(0);
+    expect(amount).toBe(String(Math.round(summary.toDecide.amountIls)));
+    await expect(page.getByTestId('needs-decide-sub')).toContainText(`${summary.blockers} חוסמים תשלום`);
 
     const link = page.locator('aside a[href="/dashboard/approvals"], nav a[href="/dashboard/approvals"]').first();
     // The badge words are the link's description (aria-describedby → a hidden span), not its name.
     // Same count as the home row (the lab seed alone: 4; another spec's parity rows add info rows, never ₪).
     const rowCount = Number(/(\d+)\s*פערים/.exec(((await page.getByTestId('needs-decide-sub').innerText()) ?? '').replace(BIDI, ''))?.[1]);
-    expect(rowCount).toBeGreaterThanOrEqual(4);
+    expect(rowCount).toBe(summary.count);
     await expect(link.locator('[data-nav-badge]')).toBeVisible({ timeout: 20_000 });
     const descId = (await link.getAttribute('aria-describedby')) ?? 'none';
     const desc = (await page.locator(`[id="${descId}"]`).first().textContent()) ?? '';
