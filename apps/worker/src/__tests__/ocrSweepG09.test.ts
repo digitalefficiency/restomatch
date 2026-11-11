@@ -127,6 +127,16 @@ beforeAll(async () => {
   const never = await invoice(NEVER, 'heldNever', { status: 'matched', age: 40, url: `${NEVER}/scan-h1-0000000c.jpg` });
   await ingestPage(NEVER, never);
   await invoice(A, 'notIngested', { status: 'matched', age: 40, url: `${A}/scan-h1-00000004.jpg` });
+  // Round 8: a held page whose own window chain FINISHED (skipped) is still released.
+  const fin = await invoice(A, 'heldFinishedWindow', { status: 'matched', age: 40, url: `${A}/scan-h1-0000000d.jpg` });
+  await ingestPage(A, fin, { sender: '9799' });
+  await insertJob(sql, 'match-invoice', { restaurantId: A, invoiceId: fin, g09Window: true }, { restaurantId: A, dedupeKey: `g09-window-${fin}` });
+  await sql`update job_queue set status = 'done' where dedupe_key = ${`g09-window-${fin}`}`;
+  // Round 8 (M12): a composed re-read that stall recovery marked failed (never settled).
+  const stalled = await invoice(A, 'stalledComposed', { status: 'parsed', age: 20, url: `${A}/scan-h1-0000000e.pdf`, pages: 2 });
+  await db.update(invoices).set({ ocrPayload: { raw: { ocrFailed: true, reason: 'stalled' } } as never }).where(eq(invoices.id, stalled));
+  await db.insert(auditLog).values({ restaurantId: A, action: 'document.reopened_for_ocr', entityType: 'invoice', entityId: stalled });
+  await ingestPage(A, stalled, { sender: '9798' });
   // A re-shot duplicate is never released (it waits for a person).
   const dup = await invoice(A, 'heldDuplicate', { status: 'matched', age: 40, url: `${A}/scan-h1-00000005.jpg` });
   await ingestPage(A, dup, { sender: '9726', error: 'page_duplicate' });
@@ -189,9 +199,16 @@ describe('G-09 sweep', () => {
   it('HIGH-2 + M-1: a held page past the cap is released once, WHATEVER the switch says; young, non-ingest, duplicate and slow-sibling pages are not', async () => {
     const res = await runOcrSweep(sql, NOW, rids);
     expect(mine(res.released)).toEqual([]); // already released by the first sweep
+    const hour = Math.floor(NOW.getTime() / 3_600_000);
     for (const k of ['held', 'heldSwitchOff', 'heldStuckSibling']) {
-      expect((await jobs('match-invoice', ids[k]!)).map((j) => j.dedupe_key)).toEqual([`g09-release-${ids[k]}`]);
+      expect((await jobs('match-invoice', ids[k]!)).map((j) => j.dedupe_key)).toEqual([`g09-release-${ids[k]}-${hour}`]);
     }
+    // round 8: a finished window chain does not block the backstop release
+    expect((await jobs('match-invoice', ids.heldFinishedWindow!)).map((j) => j.dedupe_key)).toContain(`g09-release-${ids.heldFinishedWindow}-${hour}`);
+    // round 8 (M12): the stalled composed read is sent through the settle-aware gate (→ page_unreadable)
+    const [st] = await jobs('match-invoice', ids.stalledComposed!);
+    expect(st).toMatchObject({ dedupe_key: `g09-unsettled-${ids.stalledComposed}-${hour}` });
+    expect(st!.payload).toMatchObject({ g09Window: true });
     for (const k of ['heldYoung', 'notIngested', 'heldDuplicate', 'heldSlowSibling', 'heldLiveSibling', 'heldNever']) {
       expect(await jobs('match-invoice', ids[k]!)).toHaveLength(0);
     }

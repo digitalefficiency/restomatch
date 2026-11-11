@@ -36,7 +36,7 @@ import {
 } from '@restomatch/db';
 import { StubIngestProvider, type InboundMessage } from '@restomatch/ingest';
 import { processInboundMessage, registerReviewGroup, type ResolvedChannel } from '../ingest/pipeline';
-import { decidePages, settleDocumentPages, windowCloseGate, WINDOW_MAX_ATTEMPTS, WINDOW_RETRY_MS, type PageHeader, type SettleResult } from '../documents/settle';
+import { decidePages, settleDocumentPages, windowCloseGate, WINDOW_MAX_ATTEMPTS, WINDOW_RETRY_MS, WINDOW_LONG_RETRY_MS, WINDOW_CEILING_ATTEMPTS, type PageHeader, type SettleResult } from '../documents/settle';
 import { resolvePageFlag } from '../documents/resolve';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
@@ -1356,12 +1356,27 @@ describe('round 6 · HIGH: the window-close match is settle-aware', () => {
     expect(await ocr(p2, { ...ACME, invoiceNumber: null })).toMatchObject({ absorbed: true, mergedInto: p1 });
   });
 
-  it('round 7: at the cap, a sibling still ALIVE (recent / queued read) → skip, never page 1 alone', async () => {
+  it('round 8: at the cap, a sibling still ALIVE → re-checked later (longer backoff), never page 1 alone; the ceiling ends it', async () => {
     const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('r6c-1')]), at(0)));
     await writeOcr(p1, { ...ACME, invoiceNumber: 'A-602' });
     await invoiceOf(await send(ch.wa, wa([jpegBytes('r6c-2')]), at(5))); // still being read (just touched)
-    expect(await gate(p1, new Date(), WINDOW_MAX_ATTEMPTS)).toBe('skip');
+    const resched: Array<{ runAt: Date; attempt: number }> = [];
+    const now = new Date();
+    expect(await gate(p1, now, WINDOW_MAX_ATTEMPTS, resched)).toBe('rescheduled'); // nothing is ever left un-queued
+    expect(resched).toEqual([{ runAt: new Date(now.getTime() + WINDOW_LONG_RETRY_MS), attempt: WINDOW_MAX_ATTEMPTS + 1 }]);
     expect(await ownerDb.select().from(matchRuns).where(eq(matchRuns.invoiceId, p1))).toHaveLength(0);
+    expect(await gate(p1, now, WINDOW_CEILING_ATTEMPTS)).toBe('match'); // the hard ceiling
+  });
+
+  it('round 8: the window job never auto-matches an invoice the OCR held for a person', async () => {
+    const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('r8h-1')]), at(0)));
+    await writeOcr(p1, { ...ACME, invoiceNumber: 'A-606', status: 'parsed' });
+    await ownerDb
+      .update(invoices)
+      .set({ ocrPayload: sql`jsonb_set(coalesce(${invoices.ocrPayload}, '{}'::jsonb), '{raw,reviewReasons}', '["supplier_id_mismatch"]'::jsonb, true)` })
+      .where(eq(invoices.id, p1));
+    expect(await gate(p1, at(11))).toBe('skip');
+    expect(await gate(p1, at(11), WINDOW_CEILING_ATTEMPTS)).toBe('skip');
   });
 
   it('round 7: at the cap, a STALE sibling (no live job, untouched > 1 h) → page 1 is matched alone', async () => {
@@ -1414,8 +1429,8 @@ describe('round 6 · MED: a failed composed re-read is never silent', () => {
   });
 });
 
-describe('round 6 · MED: inbox approval approves the whole review group', () => {
-  it("approving page 1 of an unknown sender's 2-photo invoice registers BOTH pages (never split page by page)", async () => {
+describe('round 8 · M3/M7: inbox approval is per page (own supplier); page 1 waits for a page still in review', () => {
+  it("approving page 1 of an unknown sender's 2 photos registers ONLY page 1; it waits; page 2 approved → merges", async () => {
     const stranger = '972508888888';
     const m1 = await send(ch.wa, wa([pngBytes('r6a-1')], { from: stranger }), at(0));
     const m2 = await send(ch.wa, wa([pngBytes('r6a-2')], { from: stranger }), at(2));
@@ -1425,13 +1440,13 @@ describe('round 6 · MED: inbox approval approves the whole review group', () =>
       db: ownerDb,
       session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' },
     } as AppContext);
-    const res = await caller.ingest.approveDocument({ documentId: d1!.id, supplierId: A.supplierId });
-    expect(res.invoiceIds).toHaveLength(2);
-    const [r2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.id, d2!.id));
-    expect(r2!.status).toBe('registered');
-    // page 1 read first: it waits for page 2 (still being read), then page 2 merges
-    expect(await ocr(res.invoiceIds[0]!, ACME)).toMatchObject({ hold: true, holdReason: 'sibling_pending' });
-    expect(await ocr(res.invoiceIds[1]!, { ...ACME, invoiceNumber: null })).toMatchObject({ absorbed: true });
+    const r1 = await caller.ingest.approveDocument({ documentId: d1!.id, supplierId: A.supplierId });
+    expect(r1.invoiceIds).toHaveLength(1);
+    expect((await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.id, d2!.id)))[0]!.status).toBe('needs_review');
+    // page 1 read: a same-sender page in its window still waits for approval → held, never matched alone
+    expect(await ocr(r1.invoiceId!, ACME)).toMatchObject({ hold: true, holdReason: 'sibling_pending', pendingReview: true });
+    const r2 = await caller.ingest.approveDocument({ documentId: d2!.id, supplierId: A.supplierId });
+    expect(await ocr(r2.invoiceId!, { ...ACME, invoiceNumber: null })).toMatchObject({ absorbed: true, mergedInto: r1.invoiceId });
   });
 });
 
@@ -1622,7 +1637,7 @@ describe('round 7 · R6–R9', () => {
     expect(await ocr(p2!, NOHEAD)).toMatchObject({ absorbed: false, flagged: [{ invoiceId: p2, reason: 'page_merge_blocked' }] });
   });
 
-  it("R9: approving one page of a group never stamps the approver's supplier on the pages not looked at", async () => {
+  it('R9 (round 8): approving one page never registers — or stamps a supplier on — a page nobody looked at', async () => {
     const stranger = '972507777777';
     const m1 = await send(ch.wa, wa([pngBytes('r7g-1')], { from: stranger }), at(0));
     const m2 = await send(ch.wa, wa([pngBytes('r7g-2')], { from: stranger }), at(2));
@@ -1630,10 +1645,10 @@ describe('round 7 · R6–R9', () => {
     const [d2] = await docsOf((m2 as { messageId: string }).messageId);
     const res = await owner().ingest.approveDocument({ documentId: d1!.id, supplierId: A.supplierId });
     const [r2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.id, d2!.id));
-    const rows = await ownerDb.select().from(invoices).where(sql`${invoices.id} in (${sql.join(res.invoiceIds.map((i) => sql`${i}`), sql`, `)})`);
-    expect(rows.find((r) => r.id !== res.invoiceIds[0])?.supplierId ?? null).toBeNull();
-    expect(rows.find((r) => r.id === res.invoiceIds[0])?.supplierId).toBe(A.supplierId);
-    expect(r2!.status).toBe('registered');
+    expect(r2!.status).toBe('needs_review'); // approved later, with ITS supplier
+    expect(r2!.invoiceId).toBeNull();
+    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, res.invoiceId!));
+    expect(inv!.supplierId).toBe(A.supplierId);
   });
 });
 
@@ -1651,5 +1666,49 @@ describe('round 7 · R11: every recomposition path keeps the failed-re-read guar
       await writeOcr(id, { failed: true });
       expect((await settle(id)).flagged).toEqual([{ invoiceId: id, reason: 'page_unreadable' }]);
     }
+  });
+});
+
+describe('round 8 · P1: page 1 is the chain page settle recorded (never a "newest earlier row" guess)', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+  const owner = () =>
+    appRouter.createCaller({
+      db: ownerDb,
+      session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' },
+    } as AppContext);
+  const related = async (invoiceId: string) => {
+    const inbox = await owner().ingest.inbox({ filter: 'errors' });
+    return inbox.flatMap((m) => m.documents).find((d) => d.invoiceId === invoiceId)?.relatedInvoiceId ?? null;
+  };
+
+  it('ONE message with 3 photos [p1 no number, p2 A-777, p3]: p1 is held; both flagged pages point at p1', async () => {
+    const m = await send(ch.wa, wa([jpegBytes('r8o-1'), jpegBytes('r8o-2'), jpegBytes('r8o-3')]), at(0));
+    const [d1, d2, d3] = await docsOf((m as { messageId: string }).messageId);
+    const [p1, p2, p3] = [d1!.invoiceId!, d2!.invoiceId!, d3!.invoiceId!];
+    await writeOcr(p1, { ...ACME, invoiceNumber: null });
+    await writeOcr(p2, { ...ACME, invoiceNumber: 'A-777' });
+    await writeOcr(p3, NOHEAD);
+    const s = await settle(p3);
+    expect(s.flagged.map((f) => [f.invoiceId, f.reason])).toEqual([
+      [p2, 'page_not_merged'],
+      [p3, 'page_not_merged'],
+    ]);
+    expect(await owner().ingest.pageQuestionOf({ invoiceId: p1 })).toMatchObject({ flag: 'page_belongs' });
+    expect(await related(p2)).toBe(p1);
+    expect(await related(p3)).toBe(p1);
+  });
+
+  it('interleaved [p1 ACME A-100, p2 OTHER supplier, p3 ACME]: p3 points at p1, never at the other supplier', async () => {
+    const [p1, p2, p3] = await pages(3, 'r8i');
+    await writeOcr(p1!, { ...ACME, invoiceNumber: 'A-801' });
+    await writeOcr(p2!, OTHER);
+    await writeOcr(p3!, { ...ACME, invoiceNumber: 'A 801' });
+    const s = await settle(p3!);
+    expect(s.flagged.find((f) => f.invoiceId === p3)?.reason).toBe('page_not_merged');
+    expect(await related(p3!)).toBe(p1);
+    expect(await owner().ingest.pageQuestionOf({ invoiceId: p1! })).toMatchObject({ flag: 'page_belongs' });
   });
 });

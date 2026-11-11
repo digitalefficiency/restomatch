@@ -28,8 +28,7 @@ import {
 } from '@restomatch/ingest';
 import { appError } from '../errors';
 import { featureEnabled } from '../lib/features';
-import { enqueueIngestJobs, INGEST_FEATURE, messageStatus, registerIngestedDocument, registerReviewGroup } from '../ingest/pipeline';
-import { multiPageEnabled } from '../ingest/grouping';
+import { enqueueIngestJobs, INGEST_FEATURE, messageStatus, registerIngestedDocument } from '../ingest/pipeline';
 import { PAGE_FLAGS } from '../documents/settle';
 import { openFlagSql, openPageQuestionSql } from '../documents/questions';
 import { resolvePageFlag } from '../documents/resolve';
@@ -327,16 +326,9 @@ export const ingestRouter = router({
               // G-09: the invoice a page_duplicate repeats, when the OCR recorded it.
               repeatsInvoiceId: sql<string | null>`(select coalesce(i.ocr_payload -> 'raw' -> 'pageRepeats' ->> 'invoiceId', i.ocr_payload -> 'raw' -> 'duplicateOf' ->> 'invoiceId')
                 from ${invoices} i where i.id = ${ingestDocuments.invoiceId} and i.restaurant_id = ${ingestDocuments.restaurantId})`,
-              // G-09 (round 7): the invoice right before this page (same channel + sender) — "בדקו את שתיהן יחד".
-              relatedInvoiceId: sql<string | null>`(select d2.invoice_id::text
-                from ${ingestDocuments} d2
-                join ${ingestMessages} m2 on m2.id = d2.message_id and m2.restaurant_id = d2.restaurant_id
-                join ${ingestMessages} m1 on m1.id = "ingest_documents"."message_id" and m1.restaurant_id = "ingest_documents"."restaurant_id"
-                where d2.restaurant_id = "ingest_documents"."restaurant_id" and d2.status = 'registered'
-                  and d2.invoice_id is not null and d2.invoice_id <> "ingest_documents"."invoice_id"
-                  and m2.channel_id = m1.channel_id and m2.sender = m1.sender
-                  and m2.received_at <= m1.received_at and m2.received_at >= m1.received_at - interval '24 hours'
-                order by m2.received_at desc, d2.created_at desc limit 1)`,
+              // G-09 (round 8): the chain's page 1 settle recorded for this page (raw.pageOf) — "בדקו את שתיהן יחד".
+              relatedInvoiceId: sql<string | null>`(select i.ocr_payload -> 'raw' -> 'pageOf' ->> 'invoiceId'
+                from ${invoices} i where i.id = "ingest_documents"."invoice_id" and i.restaurant_id = "ingest_documents"."restaurant_id")`,
               // G-09 (round 6): what is at stake on a page question — the page invoice's ₪ and supplier.
               invoiceTotal: sql<string | null>`(select coalesce(i.total_incl_vat, i.total_excl_vat)::text
                 from ${invoices} i where i.id = ${ingestDocuments.invoiceId} and i.restaurant_id = ${ingestDocuments.restaurantId})`,
@@ -394,26 +386,9 @@ export const ingestRouter = router({
       // Over-quota documents are metadata only — nothing to read; ask the sender to resend.
       if (!doc.storagePath) throw appError('BAD_REQUEST', 'input.invalid', 'אין קובץ שמור למסמך זה');
       const supplierId = input.supplierId ?? doc.supplierId ?? null;
-      // G-09 (round 6): with multi-page on, approving a page approves its whole
-      // review group (the same sender's pages within the window), so a 2-page
-      // invoice from an unknown number is never approved — and split — page by page.
-      const [rest] = await ctx.db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, rid)).limit(1);
-      if (multiPageEnabled(rest?.settings)) {
-        const group = await registerReviewGroup(ctx.db, { restaurantId: rid, documentId: doc.id, kind: doc.kind, supplierId, userId: ctx.session.userId });
-        if (input.allowSender) {
-          await ctx.db
-            .insert(ingestSenders)
-            .values({ restaurantId: rid, kind: doc.kind, sender: doc.sender, supplierId, createdBy: ctx.session.userId })
-            .onConflictDoNothing();
-        }
-        const msgs = await ctx.db
-          .selectDistinct({ messageId: ingestDocuments.messageId })
-          .from(ingestDocuments)
-          .where(and(eq(ingestDocuments.restaurantId, rid), inArray(ingestDocuments.id, group.documentIds)));
-        for (const m of msgs) await refreshMessageStatus(ctx.db, rid, m.messageId);
-        await enqueueIngestJobs(group.jobs);
-        return { invoiceId: group.invoiceIds[0] ?? null, invoiceIds: group.invoiceIds };
-      }
+      // G-09 (round 8): each page is approved on its own, with its own supplier
+      // (never registered or stamped unseen). With multi-page on, a page approved
+      // first waits in settle for a same-sender page still in review (pendingReview).
       const reg = await registerIngestedDocument(ctx.db, {
         restaurantId: rid,
         documentId: doc.id,

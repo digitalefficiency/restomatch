@@ -606,7 +606,9 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
       // because the cluster could not be settled; the settle-aware window job
       // retries it (bounded) in two minutes.
       const [rs] = await db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, job.data.restaurantId)).limit(1);
-      if (multiPageEnabled(rs?.settings)) {
+      // Round 8: only when this read would itself have matched — an invoice the
+      // OCR held for a person is never auto-matched by a retry.
+      if (multiPageEnabled(rs?.settings) && !needsHumanReview) {
         const runAt = new Date(Date.now() + 2 * 60_000);
         await enqueue(
           MATCH_INVOICE_QUEUE,

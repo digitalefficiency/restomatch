@@ -54,6 +54,9 @@ export type PageFlag =
   | 'page_merge_blocked'
   /** Round 6: it belongs, but the document would exceed the page / size limit. */
   | 'page_too_large';
+/** Flags whose page probably BELONGS to the chain's page 1 (that page 1 waits too). */
+export const PAGE_ONE_FLAGS: readonly PageFlag[] = ['page_not_merged', 'page_merge_blocked', 'page_too_large'];
+
 export const PAGE_FLAGS: readonly PageFlag[] = [
   'page_other_supplier',
   'page_other_invoice',
@@ -78,6 +81,8 @@ export interface SettleResult {
   holdReason?: 'window_open' | 'sibling_pending' | 'reocr' | 'duplicate' | 'merge_retry';
   /** The siblings still being read (holdReason 'sibling_pending'). */
   pendingSiblings?: string[];
+  /** Round 8: a same-sender page in the window still waits for a person's approval in the inbox. */
+  pendingReview?: boolean;
   /** This invoice was merged into `mergedInto` and no longer exists. */
   absorbed: boolean;
   mergedInto?: string;
@@ -99,8 +104,25 @@ function defaultDelayedMatch(job: { restaurantId: string; invoiceId: string }, r
   return enqueue(
     MATCH_INVOICE_QUEUE,
     { ...job, g09Window: true, g09Attempt: attempt },
-    { dedupeKey: attempt === 0 ? `g09-window-${job.invoiceId}` : `g09-window-${job.invoiceId}-${attempt}`, runAt, maxAttempts: 3 },
+    // Round 8: every reschedule has its OWN key (attempt + minute) — a later
+    // chain (a merge retry) never collides with a finished one.
+    {
+      dedupeKey: attempt === 0 ? `g09-window-${job.invoiceId}` : `g09-window-${job.invoiceId}-${attempt}-${Math.floor(runAt.getTime() / 60_000)}`,
+      runAt,
+      maxAttempts: 3,
+    },
   );
+}
+
+/** Round 8: what a plain first match may run on — read ('matched') and not held for a person. */
+async function autoMatchable(db: Database, restaurantId: string, invoiceId: string): Promise<boolean> {
+  const rows = (await db.execute(sql`
+    select 1 from ${invoices} i
+     where i.id = ${invoiceId} and i.restaurant_id = ${restaurantId} and i.status = 'matched'
+       and not coalesce(jsonb_typeof(i.ocr_payload -> 'raw' -> 'reviewReasons') = 'array'
+                        and jsonb_array_length(i.ocr_payload -> 'raw' -> 'reviewReasons') > 0, false)
+     limit 1`)) as unknown as unknown[];
+  return rows.length > 0;
 }
 
 /** A sibling read that can still land: a queued / active OCR job, or the row touched within the hour. */
@@ -133,6 +155,9 @@ async function anySiblingAlive(db: Database, restaurantId: string, ids: string[]
 /** Round 6: a window-close job waits this long for a sibling still being read, at most this often. */
 export const WINDOW_RETRY_MS = 2 * 60_000;
 export const WINDOW_MAX_ATTEMPTS = 15; // 15 × 2 min = the 30-minute hold cap
+/** Round 8: past the cap, a still-alive sibling is re-checked every 10 min, up to ~3 h more. */
+export const WINDOW_LONG_RETRY_MS = 10 * 60_000;
+export const WINDOW_CEILING_ATTEMPTS = WINDOW_MAX_ATTEMPTS + 18;
 
 /**
  * Round 6 · the window-close match of a held lone page is SETTLE-AWARE: before
@@ -162,14 +187,29 @@ export async function windowCloseGate(
       // read, or touched within the hour) finishes the cluster itself — its
       // settle releases page 1. Only a stale / dead-lettered sibling lets page 1
       // be matched alone (that sibling becomes a question when it lands).
-      if (res.pendingSiblings && (await anySiblingAlive(db, args.restaurantId, res.pendingSiblings, now))) return 'skip';
-      return 'match';
+      // Round 8: never end the chain with nothing queued — keep checking, with a
+      // longer backoff, up to a hard ceiling (then page 1 is matched alone and a
+      // late page becomes a question when it lands).
+      const alive =
+        res.holdReason === 'merge_retry' ||
+        res.pendingReview === true ||
+        (res.pendingSiblings ? await anySiblingAlive(db, args.restaurantId, res.pendingSiblings, now) : false);
+      if (alive && attempt < WINDOW_CEILING_ATTEMPTS) {
+        await (deps.reschedule ?? defaultDelayedMatch)(
+          { restaurantId: args.restaurantId, invoiceId: args.invoiceId },
+          new Date(now.getTime() + WINDOW_LONG_RETRY_MS),
+          attempt + 1,
+        );
+        return 'rescheduled';
+      }
+      return (await autoMatchable(db, args.restaurantId, args.invoiceId)) ? 'match' : 'skip';
     }
     const job = { restaurantId: args.restaurantId, invoiceId: args.invoiceId };
     await (deps.reschedule ?? defaultDelayedMatch)(job, new Date(now.getTime() + WINDOW_RETRY_MS), attempt + 1);
     return 'rescheduled';
   }
-  return 'match';
+  // Round 8: never auto-match an invoice the OCR held for a person (parsed / review reasons).
+  return (await autoMatchable(db, args.restaurantId, args.invoiceId)) ? 'match' : 'skip';
 }
 
 export interface PageHeader {
@@ -755,6 +795,28 @@ export async function settleDocumentPages(
     }
     const cluster = clusters.find((c) => c.some((r) => r.invoiceId === invoiceId)) ?? [];
     const memberIds = [...new Set(cluster.map((r) => r.invoiceId))];
+    // Round 8: a same-sender page inside this cluster's window still waits for a
+    // person's approval (an unknown sender's pages are approved one by one, each
+    // with its own supplier): it is a sibling still to come — hold, never split.
+    if (cluster[0]) {
+      const from = cluster[0].receivedAt;
+      const until = new Date(from.getTime() + minutes * 60_000);
+      const [waiting] = (await tx.execute(sql`
+        select 1 as hit from ${ingestDocuments} d
+          join ${ingestMessages} m on m.id = d.message_id and m.restaurant_id = d.restaurant_id
+         where d.restaurant_id = ${restaurantId} and d.status = 'needs_review'
+           and m.channel_id = ${mine.channelId} and m.sender = ${mine.sender}
+           and m.received_at between ${from.toISOString()}::timestamptz and ${until.toISOString()}::timestamptz
+         limit 1`)) as unknown as Array<{ hit: number }>;
+      if (waiting) {
+        return {
+          result: { ...NOTHING, hold: true, holdReason: 'sibling_pending' as const, pendingSiblings: [], pendingReview: true },
+          ocr: [],
+          match: [],
+          superseded: null,
+        };
+      }
+    }
     if (memberIds.length < 2) {
       // A LONE page while its cluster window is still open: page 2 may still be
       // on its way. Matching now would put a run (often a goods-receipt link) on
@@ -999,6 +1061,16 @@ export async function settleDocumentPages(
           update ${invoices}
           set ocr_payload = coalesce(ocr_payload, '{}'::jsonb) || jsonb_build_object('raw',
                 coalesce(ocr_payload -> 'raw', '{}'::jsonb) || jsonb_build_object('pageRepeats', jsonb_build_object('invoiceId', ${f.repeats}::text)))
+          where id = ${f.invoiceId} and restaurant_id = ${restaurantId}`);
+      }
+      // Round 8: the chain's page 1 a page that probably belongs to it points at
+      // — the hold, the compare link and pageQuestionOf all read THIS (never a
+      // "newest earlier row" guess, wrong for one-message or interleaved pages).
+      if (set.length > 0 && PAGE_ONE_FLAGS.includes(f.reason) && f.invoiceId !== first.invoiceId) {
+        await tx.execute(sql`
+          update ${invoices}
+          set ocr_payload = coalesce(ocr_payload, '{}'::jsonb) || jsonb_build_object('raw',
+                coalesce(ocr_payload -> 'raw', '{}'::jsonb) || jsonb_build_object('pageOf', jsonb_build_object('invoiceId', ${first.invoiceId}::text)))
           where id = ${f.invoiceId} and restaurant_id = ${restaurantId}`);
       }
     }

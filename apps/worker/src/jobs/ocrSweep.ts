@@ -243,8 +243,12 @@ export async function runOcrSweep(
                              WHERE jq.queue = 'ocr-invoice' AND jq.payload->>'invoiceId' = i2.id::text
                                AND jq.status IN ('queued', 'active'))))
        AND NOT EXISTS (SELECT 1 FROM match_runs m WHERE m.invoice_id = i.id AND m.restaurant_id = i.restaurant_id)
+       -- Round 8: a FINISHED G-09 window / release / retry job is no match on
+       -- record (its chain may have skipped); only a live job or any other
+       -- match job blocks the release.
        AND NOT EXISTS (SELECT 1 FROM job_queue j
-                        WHERE j.queue = 'match-invoice' AND j.payload->>'invoiceId' = i.id::text)
+                        WHERE j.queue = 'match-invoice' AND j.payload->>'invoiceId' = i.id::text
+                          AND (j.status IN ('queued', 'active') OR coalesce(j.dedupe_key, '') NOT LIKE 'g09-%'))
      ORDER BY i.created_at
      LIMIT ${OCR_SWEEP_BATCH}`;
   result.released = [];
@@ -256,7 +260,35 @@ export async function runOcrSweep(
       // (skip), a transient merge failure becomes a person's question, and only
       // then is the page matched alone (api/documents/settle.ts windowCloseGate).
       { restaurantId: inv.restaurant_id, invoiceId: inv.id, g09Window: true, g09Attempt: WINDOW_MAX_ATTEMPTS },
-      { restaurantId: inv.restaurant_id, dedupeKey: `g09-release-${inv.id}`, maxAttempts: 3 },
+      // one release per hour at most (the gate may re-check a still-alive sibling)
+      { restaurantId: inv.restaurant_id, dedupeKey: `g09-release-${inv.id}-${Math.floor(now.getTime() / 3_600_000)}`, maxAttempts: 3 },
+    );
+    if (inserted) result.released.push(inv.id);
+  }
+
+  // Round 8 (M12): a G-09 re-read that ended outside settle (stall recovery
+  // dead-letters the job and marks the invoice failed, never settling) still
+  // reaches the failed-re-read guard: settle-aware job, last attempt.
+  const unsettled = await sql<Array<{ id: string; restaurant_id: string }>>`
+    SELECT i.id, i.restaurant_id
+      FROM invoices i
+     WHERE i.restaurant_id::text = ANY(string_to_array(${only.join(',')}, ','))
+       AND i.status <> 'ocr_pending'
+       AND coalesce((i.ocr_payload -> 'raw' ->> 'ocrFailed')::boolean, false)
+       AND coalesce(i.updated_at, i.created_at) >= ${pathSince}
+       AND EXISTS (SELECT 1 FROM audit_log a
+                    WHERE a.entity_type = 'invoice' AND a.entity_id = i.id AND a.restaurant_id = i.restaurant_id
+                      AND a.action IN ('document.pages_recomposed', 'document.reopened_for_ocr', 'document.split_from'))
+       AND EXISTS (SELECT 1 FROM ingest_documents d
+                    WHERE d.invoice_id = i.id AND d.restaurant_id = i.restaurant_id AND d.status = 'registered' AND d.error IS NULL)
+     ORDER BY i.updated_at
+     LIMIT ${OCR_SWEEP_BATCH}`;
+  for (const inv of unsettled) {
+    const inserted = await insertJob(
+      sql,
+      'match-invoice',
+      { restaurantId: inv.restaurant_id, invoiceId: inv.id, g09Window: true, g09Attempt: WINDOW_MAX_ATTEMPTS },
+      { restaurantId: inv.restaurant_id, dedupeKey: `g09-unsettled-${inv.id}-${Math.floor(now.getTime() / 3_600_000)}`, maxAttempts: 3 },
     );
     if (inserted) result.released.push(inv.id);
   }
