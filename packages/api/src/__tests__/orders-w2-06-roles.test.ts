@@ -96,6 +96,18 @@ describe('orders W2-06 role matrix', () => {
     expect(after).toHaveLength(before.length);
   });
 
+  it('the receiver gets no baseline ₪ from the order guardrail (FORBIDDEN before any read)', async () => {
+    const lines = [{ productId: A.productId, unitPriceExpected: 9 }];
+    await expect(callerFor('receiver').orders.guardrail({ supplierId: A.supplierId, lines })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+    for (const role of ORDER_WRITE_ROLES) {
+      // Writers pass the role gate (they may still meet the plan gate, never a role FORBIDDEN).
+      const r = await callerFor(role).orders.guardrail({ supplierId: A.supplierId, lines }).catch((e: { message?: string }) => e);
+      expect(String((r as { message?: string }).message ?? ''), String(role)).not.toMatch(/^(FORBIDDEN|אין הרשאה)/);
+    }
+  });
+
   it('the board is readable by every member', async () => {
     for (const role of ROLES) {
       const b = await callerFor(role).orders.supplierBoard();
