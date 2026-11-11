@@ -11,7 +11,7 @@ import { accounting } from '@/lib/i18n/messages/accounting';
 import { followUps } from '../recovery/logic';
 import { loadDecide, loadRecoveryClaims, loadVatAtRisk } from '../home/data';
 import { VatAtRiskCard } from '../vat-at-risk';
-import { buildSteps, currentMonth, progress, resolveMonth, shiftMonth, type StepKey, type StepState } from './steps';
+import { buildSteps, currentMonth, MAX_MONTHS_BACK, progress, resolveMonth, shiftMonth, type StepKey, type StepState } from './steps';
 
 /** Owner and bookkeeper close the month; the manager reads it. Receiver and chef see no purchase ₪ (§7). */
 const CLOSE_ROLES = new Set(['owner', 'manager', 'bookkeeper']);
@@ -80,6 +80,7 @@ export default async function ClosePage({ searchParams }: { searchParams: Promis
   const prev = shiftMonth(month, -1);
   const next = shiftMonth(month, 1);
   const hasNext = next <= currentMonth(now);
+  const hasPrev = prev >= shiftMonth(currentMonth(now), -MAX_MONTHS_BACK);
   const n = (v: number) => formatNumber(v, locale);
 
   return (
@@ -88,15 +89,19 @@ export default async function ClosePage({ searchParams }: { searchParams: Promis
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <nav aria-label={t('close.monthLabel')} className="flex items-center gap-1">
-          <Link
-            href={`/dashboard/close?month=${prev}`}
-            aria-label={t('close.prevMonth')}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-surface text-ink hover:bg-surface-2"
-          >
-            {/* RTL: "previous" points right. */}
-            <ChevronRight className="h-5 w-5 rtl:block ltr:hidden" aria-hidden />
-            <ChevronLeft className="h-5 w-5 rtl:hidden ltr:block" aria-hidden />
-          </Link>
+          {hasPrev ? (
+            <Link
+              href={`/dashboard/close?month=${prev}`}
+              aria-label={t('close.prevMonth')}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-surface text-ink hover:bg-surface-2"
+            >
+              {/* RTL: "previous" points right. */}
+              <ChevronRight className="h-5 w-5 rtl:block ltr:hidden" aria-hidden />
+              <ChevronLeft className="h-5 w-5 rtl:hidden ltr:block" aria-hidden />
+            </Link>
+          ) : (
+            <span className="h-10 w-10" aria-hidden />
+          )}
           <h2 className="min-w-40 text-center text-lg font-bold text-ink" data-testid="close-month">
             {monthName}
           </h2>

@@ -1,3 +1,4 @@
+import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { and, eq, inArray, invoices, restaurants, sql, type Database } from '@restomatch/db';
 import { invoiceStatesForMonth } from '../invoices/state';
@@ -16,8 +17,10 @@ import { tabOfState } from './invoices';
  * = recovery `followUps()`, VAT at risk = `owner.vatAtRisk`. Read-only.
  *
  * Invoice steps read the W2-02 register's own partition (G-05 canonical state →
- * `tabOfState`), so a step's count is exactly what its register link opens:
- * "unchecked" = the register's `awaiting` tab (in OCR, or no match run yet).
+ * `tabOfState`): "unchecked" = the register's `awaiting` tab (in OCR, or no match
+ * run yet) WITHOUT consolidated invoices, which are step 4 (T4 pending, never a
+ * T2 alarm, and never the same ₪ twice). The register's awaiting tab therefore
+ * shows step 1 + step 4's awaiting rows (asserted in close.test).
  *
  * Every query is scoped by `restaurant_id` (DoD-8; COVERAGE `close.checklist`).
  */
@@ -38,7 +41,7 @@ export interface CloseChecklist {
   timezone: string;
   /** The register's `?month=` for this month (0 = current, -1 = previous, …). */
   monthOffset: number;
-  /** The register's `awaiting` tab for the month (in OCR, or not matched yet). Incl. VAT. */
+  /** The register's `awaiting` tab for the month minus consolidated invoices (step 4). Incl. VAT. */
   unchecked: CloseFigure;
   /** Consolidated invoices (חשבוניות ריכוז) of the month not yet settled. Incl. VAT. Always T4. */
   consolidated: CloseFigure & { firstInvoiceId: string | null };
@@ -62,21 +65,18 @@ export function monthWindow(month: string, tz: string): { start: Date; end: Date
   return { start: zonedMidnight(y, m, 1, tz), end: zonedMidnight(next[0]!, next[1]!, 1, tz) };
 }
 
-/** NULL-safe: an ordinary invoice has no `kind`, and NOT NULL would drop it from both steps. */
-/** Register month offset of 'YYYY-MM' against `now` on the wall clock of `tz`, clamped to the register's range. */
+/** Register month offset of 'YYYY-MM' against `now` on the wall clock of `tz` (unclamped: 0 = current, -1 = previous). */
 export function monthOffsetOf(month: string, tz: string, now = new Date()): number {
   const [y, m] = month.split('-').map(Number) as [number, number];
   const p = Object.fromEntries(
     new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit' }).formatToParts(now).map((x) => [x.type, x.value]),
   );
-  const off = y * 12 + m - (Number(p.year) * 12 + Number(p.month));
-  return Math.max(-MAX_BACK, Math.min(0, off));
+  return y * 12 + m - (Number(p.year) * 12 + Number(p.month));
 }
 
 async function invoiceFigures(db: Database, restaurantId: string, monthOffset: number, now: Date) {
   const states = await invoiceStatesForMonth(db, restaurantId, { monthOffset, now });
   const agorot = (ils: number) => Math.round(ils * 100);
-  const unchecked = states.filter((s) => tabOfState(s.state) === 'awaiting');
   // Consolidated (חשבונית מרכזת) and not yet in the register's matched/paid tabs → pending (T4).
   const open = states.filter((s) => tabOfState(s.state) !== 'matched' && tabOfState(s.state) !== 'paid');
   const payloads = open.length
@@ -91,6 +91,7 @@ async function invoiceFigures(db: Database, restaurantId: string, monthOffset: n
     .map((r) => r.id);
   const consSet = new Set(consolidatedIds);
   const cons = open.filter((s) => consSet.has(s.invoiceId));
+  const unchecked = states.filter((s) => tabOfState(s.state) === 'awaiting' && !consSet.has(s.invoiceId));
   return {
     unchecked: {
       count: unchecked.length,
@@ -137,6 +138,10 @@ export const closeRouter = router({
       const { start, end } = monthWindow(input.month, tz);
       const now = new Date();
       const monthOffset = monthOffsetOf(input.month, tz, now);
+      // Never return another month's ₪ under the requested label: out of the register's range is an error.
+      if (monthOffset > 0 || monthOffset < -MAX_BACK) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: `month out of range (last ${MAX_BACK} months, no future)` });
+      }
       const [inv, notes] = await Promise.all([
         invoiceFigures(ctx.db, rid, monthOffset, now),
         featureEnabled(settings, 'supplierLedger') ? uncoveredNotes(ctx.db, rid, start, end) : Promise.resolve(null),
