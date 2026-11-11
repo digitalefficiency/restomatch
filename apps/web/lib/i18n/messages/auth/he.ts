@@ -158,6 +158,20 @@ export const he = {
     otherAccount: 'כניסה עם חשבון אחר',
   },
   /** W3-07b: /join/<token> — joining a team from an invite link. */
+  /** W3-07b slice b: sign in with a 6-digit e-mail code. */
+  codeLogin: {
+    button: 'שלחו לי קוד במייל',
+    title: 'הקוד בדרך',
+    sentTo: 'אם {email} רשומה אצלנו, שלחנו אליה קוד בן 6 ספרות. הוא תקף ל-10 דקות.',
+    codeLabel: 'הקוד מהמייל',
+    submit: 'כניסה',
+    resend: 'שליחת קוד חדש',
+    useOther: 'כניסה בדרך אחרת',
+    errors: {
+      wrongCode: 'הקוד לא תואם או שפג תוקפו. בדקו את המייל האחרון, או שלחו קוד חדש.',
+      rate: 'יותר מדי ניסיונות. נסו שוב בעוד כמה דקות.',
+    },
+  },
   join: {
     title: 'הצטרפות לצוות',
     invitedTo: 'הוזמנתם להצטרף ל-{restaurant}',

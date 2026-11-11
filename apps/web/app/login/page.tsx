@@ -1,16 +1,22 @@
+import { headers } from 'next/headers';
 import { AuthError } from 'next-auth';
+import { clientIpFromHeaders } from '@restomatch/api';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth, signIn, signOut } from '@/auth';
 import { Field, Input, LinkButton } from '@/lib/components';
 import { auth as authMessages } from '@/lib/i18n/messages/auth';
-import { getT } from '@/lib/i18n/server';
+import { getLocale, getT } from '@/lib/i18n/server';
+import { enforceMagicLinkLimit, enforceRateLimit, trustedProxyHops } from '@/lib/rateLimit';
 import { loginErrorCode } from '@/lib/loginRateLimited';
 import { twoFactorEnabledForEmail } from '@/lib/passwords';
 import { safeRelativePath } from '@/lib/safeRedirect';
 import { AuthShell, authTitle } from '../(auth)/_components/AuthShell';
 import { Notice } from '../(auth)/_components/Notice';
 import { PasswordInput } from '../(auth)/_components/PasswordInput';
+import { RememberMe } from '../(auth)/_components/RememberMe';
+import { issueLoginCode } from './_lib/loginCode';
+import { deliverLoginCode } from './_lib/codeEmail';
 import { OutsideSubmitButton } from '../(auth)/_components/OutsideSubmitButton';
 import { SubmitButton } from '../(auth)/_components/SubmitButton';
 import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
@@ -155,6 +161,25 @@ export default async function LoginPage({ searchParams }: PageProps) {
     redirect('/login/check-email');
   }
 
+  // W3-07b slice b: a 6-digit code instead of a link (same e-mail field). The
+  // send is throttled per mailbox (the magic-link limiter) and per IP; the
+  // screen after it is the same whether or not the address exists.
+  async function codeLoginAction(formData: FormData) {
+    'use server';
+    const email = String(formData.get('email') ?? '').trim();
+    if (!email) redirect(back('EmailMissing', redirectTo, lockedEmail));
+    const ip = clientIpFromHeaders(await headers(), { trustedProxyHops: trustedProxyHops() });
+    const [perMailbox, perIp] = await Promise.all([
+      enforceMagicLinkLimit(email),
+      enforceRateLimit(ip, { limit: 10, windowSec: 15 * 60, prefix: 'login-code-ip' }),
+    ]);
+    if (!perMailbox.allowed || !perIp.allowed) redirect(back('EmailSignin', redirectTo, lockedEmail));
+    await writeHint({ email, fails: 0, sentAt: Date.now(), next: redirectTo });
+    const issued = await issueLoginCode(email);
+    if (issued) await deliverLoginCode({ to: issued.email, code: issued.code, locale: await getLocale() });
+    redirect('/login/code');
+  }
+
   async function switchUserAction() {
     'use server';
     await clearHint();
@@ -267,10 +292,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
             aria-describedby={wrongPassword ? 'login-error' : undefined}
           />
         </div>
-        <label className="flex min-h-11 items-center gap-3 text-sm text-ink">
-          <input type="checkbox" name="rememberMe" className="h-5 w-5 accent-primary" />
-          {t('login.rememberMe')}
-        </label>
+        <RememberMe label={t('login.rememberMe')} />
         <SubmitButton className="min-h-12 w-full text-base">
           {t('login.submit')}
         </SubmitButton>
@@ -293,6 +315,16 @@ export default async function LoginPage({ searchParams }: PageProps) {
         className="min-h-12 w-full text-base"
       >
         {t('login.magicSubmit')}
+      </OutsideSubmitButton>
+      <OutsideSubmitButton
+        form="login-form"
+        variant="ghost"
+        formAction={codeLoginAction}
+        formNoValidate
+        className="mt-2 min-h-12 w-full text-base"
+        data-testid="login-code-button"
+      >
+        {t('codeLogin.button')}
       </OutsideSubmitButton>
 
       <p className="mt-6 text-center text-sm text-muted">

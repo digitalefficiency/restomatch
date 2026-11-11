@@ -1,7 +1,7 @@
 import { readFile, unlink } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import { DEMO_RESTAURANT_NAME, MAGIC_LINK_FILE, OWNER_STATE } from './env';
-import { e2eSql } from './helpers';
+import { e2eSql, ensurePasswordUser } from './helpers';
 
 /**
  * W3-07b · invite → /join/<token> → e-mail code → own password → /welcome →
@@ -11,6 +11,20 @@ import { e2eSql } from './helpers';
  */
 const JOIN_CODE_FILE = MAGIC_LINK_FILE.replace('magic-link', 'join-code');
 const PASSWORD = 'W3-07b e2e password 2026';
+
+async function readCodeFile(file: string, email: string): Promise<string> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    try {
+      const parsed = JSON.parse(await readFile(file, 'utf8')) as { to: string; code: string };
+      if (parsed.to === email) return parsed.code;
+    } catch {
+      // not written yet
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`code for ${email} did not appear in ${file}`);
+}
 
 async function readJoinCode(email: string): Promise<string> {
   const deadline = Date.now() + 30_000;
@@ -97,5 +111,38 @@ test.describe('W3-07b join', () => {
     const page = await (await browser.newContext({ storageState: undefined })).newPage();
     await page.goto('/join/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
     await expect(page.getByTestId('join-state')).toHaveAttribute('data-state', 'notFound');
+  });
+});
+
+test.describe('W3-07b slice b: sign in with an e-mail code', () => {
+  test('e-mail → 6-digit code → signed in; a wrong code is refused calmly', async ({ browser }) => {
+    const email = `w307b-code-${Date.now()}@login.e2e.test`;
+    await ensurePasswordUser({ email, password: 'W3-07b code-login 2026' });
+    const sql = e2eSql();
+    await sql`delete from rate_limit_counters`;
+    await sql.end();
+    const file = MAGIC_LINK_FILE.replace('magic-link', 'login-code');
+    await unlink(file).catch(() => {});
+
+    const ctx = await browser.newContext({ storageState: undefined, locale: 'he-IL' });
+    const base = test.info().project.use.baseURL!;
+    await ctx.addCookies([
+      { name: 'rm_cookie_consent', value: 'necessary', url: base },
+      { name: 'rm_locale', value: 'he', url: base },
+    ]);
+    const page = await ctx.newPage();
+    await page.goto('/login');
+    await page.locator('input[name="email"]').first().fill(email);
+    await page.getByTestId('login-code-button').click();
+    await page.waitForURL(/\/login\/code/);
+    await expect(page.getByTestId('login-code-sent')).toBeVisible();
+
+    const code = await readCodeFile(file, email);
+    const wrong = code === '000000' ? '111111' : '000000';
+    await page.locator('#login-code').fill(wrong);
+    await page.waitForURL(/e=wrongCode/);
+    await page.locator('#login-code').fill(code);
+    await page.waitForURL(/\/dashboard/, { timeout: 60_000 });
+    await ctx.close();
   });
 });

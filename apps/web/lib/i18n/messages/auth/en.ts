@@ -150,6 +150,19 @@ export const en: Shape<typeof he> = {
     signIn: 'Sign in',
     otherAccount: 'Sign in with another account',
   },
+  codeLogin: {
+    button: 'E-mail me a code',
+    title: 'Your code is on its way',
+    sentTo: "If {email} is registered with us, we sent it a 6-digit code. It's valid for 10 minutes.",
+    codeLabel: 'Code from the e-mail',
+    submit: 'Sign in',
+    resend: 'Send a new code',
+    useOther: 'Sign in another way',
+    errors: {
+      wrongCode: "That code doesn't match or has expired. Check the latest e-mail, or send a new code.",
+      rate: 'Too many attempts. Try again in a few minutes.',
+    },
+  },
   join: {
     title: 'Join the team',
     invitedTo: "You're invited to join {restaurant}",

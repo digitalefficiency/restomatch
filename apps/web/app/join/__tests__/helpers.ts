@@ -84,5 +84,10 @@ export async function cleanup(): Promise<void> {
     }
     await ownerDb.delete(restaurants).where(inArray(restaurants.id, createdRestaurants));
   }
-  if (createdUsers.length) await ownerDb.delete(users).where(inArray(users.id, [...new Set(createdUsers)]));
+  if (createdUsers.length) {
+    const ids = [...new Set(createdUsers)];
+    const ident = ids.flatMap((id) => [`login:${id}`, `login-fail:${id}`]);
+    await ownerDb.delete(verificationTokens).where(inArray(verificationTokens.identifier, ident));
+    await ownerDb.delete(users).where(inArray(users.id, ids));
+  }
 }

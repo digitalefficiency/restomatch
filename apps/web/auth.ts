@@ -28,6 +28,7 @@ import { authorizeCredentials, getSessionSecurityState } from './lib/passwords';
 import { SIGNOUT_COOKIE, issuedBeforeSignOut, signOutCookieOptions } from './lib/signOutTombstone';
 import { bypassesSecondFactor } from './lib/secondFactorGate';
 import { consumeTwoFactorTicket } from './lib/totp';
+import { verifyLoginCode } from './app/login/_lib/loginCode';
 import { clearLoginFailures, enforceLoginLimit, enforceMagicLinkLimit, refundLoginIp, trustedProxyHops } from './lib/rateLimit';
 import {
   SESSION_TTL_LONG_SEC,
@@ -204,6 +205,36 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
           rememberMe,
           twoFactorPending: result.twoFactorPending,
         } as unknown as { id: string };
+      },
+    }),
+    // W3-07b slice b: sign in with a 6-digit e-mail code (app/login/_lib/loginCode).
+    // The SAME per-email + per-IP login limiter as passwords runs here, inside
+    // authorize(), so a script POSTing to /api/auth/callback/email-code cannot
+    // skip it; the durable 5-try ceiling lives in verifyLoginCode. The 2FA gate
+    // still applies: jwt() reads twoFactorEnabled for every sign-in.
+    Credentials({
+      id: 'email-code',
+      name: 'email-code',
+      credentials: { email: {}, code: {}, rememberMe: {} },
+      authorize: async (creds) => {
+        const email = typeof creds?.email === 'string' ? creds.email : '';
+        const code = typeof creds?.code === 'string' ? creds.code : '';
+        if (!email || !code) return null;
+        const ip = clientIpFromHeaders(await headers(), { trustedProxyHops: trustedProxyHops() });
+        const rl = await enforceLoginLimit(email, ip);
+        if (!rl.allowed) return null;
+        const res = await verifyLoginCode(email, code);
+        if (!res.ok) return null;
+        const [u] = await authDb
+          .select({ id: users.id, email: users.email, name: users.name })
+          .from(users)
+          .where(eq(users.id, res.userId))
+          .limit(1);
+        if (!u) return null;
+        await clearLoginFailures(email);
+        const rememberMe =
+          creds?.rememberMe === true || creds?.rememberMe === 'true' || creds?.rememberMe === 'on';
+        return { id: u.id, email: u.email, name: u.name, rememberMe } as unknown as { id: string };
       },
     }),
     Nodemailer({
