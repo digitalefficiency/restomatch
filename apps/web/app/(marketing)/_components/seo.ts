@@ -13,7 +13,7 @@ export function siteUrl(): string {
 export const SITE_URL = siteUrl();
 
 /** Public marketing pages that are not legal documents. */
-export const SITE_PAGE_ROUTES = ['/', '/pricing', '/about', '/showcase'] as const;
+export const SITE_PAGE_ROUTES = ['/', '/pricing', '/about', '/product', '/showcase'] as const;
 
 /**
  * Public marketing routes (sitemap + hreflang + robots `allow`). The legal pages
