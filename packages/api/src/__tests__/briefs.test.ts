@@ -150,8 +150,9 @@ describe('A5 order reminder', () => {
 
   it('a pending draft → "a draft is not an order" + the draft link', () => {
     const m = orderReminderBrief({ ...base, draftPoId: 'po-9' });
-    expect(m.subject).toBe('יש טיוטה שלא נשלחה לירקות השרון');
-    expect(m.text).toContain('יש טיוטה שלא נשלחה לירקות השרון · השליחה עד 16:00');
+    expect(m.subject).toBe('טיוטת הזמנה מ-ירקות השרון עדיין לא נשלחה');
+    expect(m.text).toContain('יש טיוטת הזמנה מ-ירקות השרון שעדיין לא נשלחה. טיוטה היא עדיין לא הזמנה. מועד אחרון להזמנה היום: 16:00.');
+    expect(m.text).toContain(`פתיחת הטיוטה: ${BASE}/dashboard/orders/po-9`);
     expect(m.deepLink).toBe(`${BASE}/dashboard/orders/po-9`);
     expect(m.dedupeSuffix).toBe('s-1:2026-10-25');
   });
@@ -159,7 +160,9 @@ describe('A5 order reminder', () => {
   it('no draft → the wizard with ?supplierId=', () => {
     const m = orderReminderBrief(base);
     expect(m.deepLink).toBe(`${BASE}/dashboard/orders/new?supplierId=s-1`);
-    expect(m.text).toContain('היום (יום ראשון) יום הזמנה קבוע לירקות השרון');
+    expect(m.subject).toBe('לא בוצעה הזמנה מ-ירקות השרון');
+    expect(m.text).toContain('היום יום ראשון הוא יום הזמנה קבוע מ-ירקות השרון');
+    expect(m.text).toContain(`יצירת הזמנה: ${BASE}/dashboard/orders/new?supplierId=s-1`);
   });
 });
 

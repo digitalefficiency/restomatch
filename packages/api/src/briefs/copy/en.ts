@@ -23,14 +23,6 @@ export const en: BriefCopy = {
     intake: (n, h) => `Documents waiting for review: ${n} · oldest ${hours(h)}`,
     open: 'Open',
   },
-  orderReminder: {
-    draftSubject: (s) => `An unsent draft for ${s}`,
-    draftLine: (s, c) => `There is an unsent draft for ${s}${c ? ` · send by ${c}` : ''}. A draft is not an order yet.`,
-    draftCta: 'Open the draft',
-    noOrderSubject: (s) => `Reminder: order from ${s}`,
-    noOrderLine: (s, d, c) => `Today (${d}) is a regular order day for ${s}, and no order has been sent yet${c ? ` · send by ${c}` : ''}.`,
-    noOrderCta: 'Create the order',
-  },
   lateTruck: {
     managerSubject: (s) => `The delivery from ${s} has not arrived`,
     managerLine: (s, ref, d, late, l) =>

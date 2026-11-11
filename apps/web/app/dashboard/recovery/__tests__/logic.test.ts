@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CLAIM_ANSWER_DAYS, OVERDUE_BOUNDARY_CASES, OVERDUE_BOUNDARY_NOW } from '@restomatch/api';
+import { CLAIM_ANSWER_DAYS, isAwaitingChase, OVERDUE_BOUNDARY_CASES, OVERDUE_BOUNDARY_NOW } from '@restomatch/api';
 import {
   ANSWER_DAYS,
   CONFIRMED_MOVES,
@@ -8,6 +8,7 @@ import {
   confirmAgorot,
   countdownOf,
   followUps,
+  isAwaitingChaseWeb,
   funnelOf,
   hamiltonShekels,
   menuMoves,
@@ -142,21 +143,29 @@ describe('follow-up queues (the banner split)', () => {
     expect(q.unsent).toEqual({ count: 1, agorot: 1000 });
     expect(q.waiting).toEqual({ count: 1, agorot: 2000 });
   });
-  it('"waiting" is the sent list’s rule: letter_sent only, late by the supplier’s LATEST send', () => {
+  it('AU-03: "waiting" is per claim (the 08:30 digest rule) — a fresh letter never hides older waiting claims', () => {
     const q = followUps(
       [
-        // Acknowledged = the supplier answered — not waiting, even when old.
+        // Acknowledged = answered: not in the "no reply" queue (the digest's own section) …
         { status: 'acknowledged', outstandingAgorot: 1000, letterSentAt: '2026-09-01T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z', supplierName: 'A' },
-        // Supplier B: one old send, then a fresh one → the letter is NOT late (the sent list shows "N days left").
+        // Supplier B: one old send waits even though a fresh one went out since.
         { status: 'letter_sent', outstandingAgorot: 2000, letterSentAt: '2026-10-01T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z', supplierName: 'B' },
         { status: 'letter_sent', outstandingAgorot: 3000, letterSentAt: '2026-10-24T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z', supplierName: 'B' },
-        // Supplier C: late → both its claims wait.
         { status: 'letter_sent', outstandingAgorot: 400, letterSentAt: '2026-10-01T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z', supplierName: 'C' },
-        { status: 'letter_sent', outstandingAgorot: 500, letterSentAt: '2026-10-02T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z', supplierName: 'C' },
+        // A never-claimable type is not owed — never waiting.
+        { status: 'letter_sent', outstandingAgorot: 700, letterSentAt: '2026-10-01T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z', discrepancyType: 'MISSING_ON_INVOICE' },
       ],
       '2026-10-25T10:00:00.000Z',
     );
-    expect(q.waiting).toEqual({ count: 2, agorot: 900 });
+    expect(q.waiting).toEqual({ count: 2, agorot: 2400 });
+    // … unless a caller opts in.
+    expect(
+      followUps(
+        [{ status: 'acknowledged', outstandingAgorot: 1000, letterSentAt: '2026-09-01T00:00:00Z', claimedAt: '2026-09-01T00:00:00Z' }],
+        '2026-10-25T10:00:00.000Z',
+        { chaseAcknowledged: true },
+      ).waiting.count,
+    ).toBe(1);
   });
   it('waiting starts after a week (owner 31.10): 6 days → not yet, 8 days → waiting', () => {
     const now = '2026-10-25T10:00:00.000Z';
@@ -238,5 +247,35 @@ describe('period filter (acceptance 11, interim until W2-09b)', () => {
     expect(inPeriod(c('2026-09-20T08:00:00Z'), month)).toBe(false);
     const d90 = periodWindow('d90', now)!;
     expect(d90.to - d90.from).toBe(90);
+  });
+});
+
+describe('AU-03 · isAwaitingChaseWeb ≡ @restomatch/api isAwaitingChase (one predicate)', () => {
+  const OLD = '2026-10-10T08:00:00.000Z';
+  const cases: Array<{ why: string; c: Parameters<typeof isAwaitingChaseWeb>[0]; opts?: { chaseAcknowledged?: boolean } }> = [
+    ...OVERDUE_BOUNDARY_CASES.flatMap((k) => [
+      { why: `letter: ${k.why}`, c: { status: 'letter_sent', outstandingAgorot: 100, letterSentAt: k.letterSentAt, claimedAt: '2026-09-01T00:00:00Z' } },
+      { why: `no letter: ${k.why}`, c: { status: 'claimed', outstandingAgorot: 100, letterSentAt: null, claimedAt: k.letterSentAt } },
+    ]),
+    { why: 'acknowledged on', c: { status: 'acknowledged', outstandingAgorot: 100, letterSentAt: OLD, claimedAt: OLD } },
+    { why: 'acknowledged off', c: { status: 'acknowledged', outstandingAgorot: 100, letterSentAt: OLD, claimedAt: OLD }, opts: { chaseAcknowledged: false } },
+    { why: 'nothing outstanding', c: { status: 'letter_sent', outstandingAgorot: 0, letterSentAt: OLD, claimedAt: OLD } },
+    { why: 'credited', c: { status: 'credited', outstandingAgorot: 100, letterSentAt: OLD, claimedAt: OLD } },
+    { why: 'disputed', c: { status: 'disputed', outstandingAgorot: 100, letterSentAt: OLD, claimedAt: OLD } },
+    { why: 'written_off', c: { status: 'written_off', outstandingAgorot: 100, letterSentAt: OLD, claimedAt: OLD } },
+    { why: 'MISSING_ON_INVOICE', c: { status: 'letter_sent', outstandingAgorot: 100, letterSentAt: OLD, claimedAt: OLD, discrepancyType: 'MISSING_ON_INVOICE' } },
+    { why: 'PRICE_LOWER', c: { status: 'acknowledged', outstandingAgorot: 100, letterSentAt: OLD, claimedAt: OLD, discrepancyType: 'PRICE_LOWER' } },
+    { why: 'UNORDERED_ARRIVAL', c: { status: 'claimed', outstandingAgorot: 100, letterSentAt: null, claimedAt: OLD, discrepancyType: 'UNORDERED_ARRIVAL' } },
+    { why: 'PRICE_HIGHER', c: { status: 'letter_sent', outstandingAgorot: 100, letterSentAt: OLD, claimedAt: OLD, discrepancyType: 'PRICE_HIGHER' } },
+  ];
+  for (const k of cases) {
+    it(k.why, () => {
+      expect(isAwaitingChaseWeb(k.c, OVERDUE_BOUNDARY_NOW, k.opts)).toBe(isAwaitingChase(k.c, OVERDUE_BOUNDARY_NOW, k.opts));
+    });
+  }
+  it('the boundary cases give the shared expected answer', () => {
+    for (const k of OVERDUE_BOUNDARY_CASES) {
+      expect(isAwaitingChaseWeb({ status: 'letter_sent', outstandingAgorot: 1, letterSentAt: k.letterSentAt, claimedAt: k.letterSentAt }, OVERDUE_BOUNDARY_NOW), k.why).toBe(k.overdue);
+    }
   });
 });
