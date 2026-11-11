@@ -23,12 +23,14 @@ export interface HeroFigures {
   pendingLinkCount: number;
   /** Receiving scans waiting for their receipt's count (not "no data": they will be checked). */
   awaitingCountCount?: number;
+  /** G-08: invoices held for a "זה אותו מוצר?" question (they will be checked after the answer). */
+  awaitingQuestionCount?: number;
 }
 
 export function leakHeroState(h: HeroFigures): LeakHeroState {
   if (h.leakIls > 0) return 'leak';
   if (h.matchedInvoiceCount > 0) return 'clean';
-  if (h.pendingLinkCount > 0 || (h.awaitingCountCount ?? 0) > 0) return 'pendingOnly';
+  if (h.pendingLinkCount > 0 || (h.awaitingCountCount ?? 0) > 0 || (h.awaitingQuestionCount ?? 0) > 0) return 'pendingOnly';
   return 'noData';
 }
 

@@ -65,6 +65,8 @@ async function linked(tag: string): Promise<Tenant & { managerId: string; bookke
   await ownerDb.update(purchaseOrders).set({ expectedDeliveryAt: D0 }).where(eq(purchaseOrders.id, T.poId));
   await ownerDb.update(poLines).set({ productId: T.productId, unitPriceExpected: '9.5' }).where(eq(poLines.id, T.poLineId));
   await ownerDb.update(grLines).set({ qtyReceived: '10' }).where(eq(grLines.id, T.grLineId));
+  // #216 F3: the receipt was counted (10) and submitted — runForInvoice refuses one still being counted.
+  await ownerDb.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, T.grId));
   await ownerDb
     .update(invoices)
     .set({ invoiceDate: D0, vatAmount: '18.00', totalInclVat: '118.00', source: 'photo' })
@@ -104,6 +106,8 @@ async function receive(T: Tenant, poId: string, poLineId: string) {
     .values({ restaurantId: T.restaurantId, poId, receivedBy: T.ownerUserId, status: 'pending' })
     .returning();
   await ownerDb.insert(grLines).values({ grId: gr!.id, poLineId, qtyReceived: '10', qtyRejected: '0' });
+  // #216 F3: counted and submitted (runForInvoice refuses a receipt still being counted).
+  await ownerDb.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, gr!.id));
 }
 describe('re-match PO pin', () => {
   it('a1: date corrected inside the local-day window but >7×24h from the pinned PO → no crash', async () => {
@@ -225,6 +229,8 @@ describe('a received PO outranks an undelivered closer one', () => {
     await ownerDb.update(purchaseOrders).set({ expectedDeliveryAt: D0 }).where(eq(purchaseOrders.id, T.poId));
     await ownerDb.update(poLines).set({ productId: T.productId, unitPriceExpected: '10' }).where(eq(poLines.id, T.poLineId));
     await ownerDb.update(grLines).set({ qtyReceived: received }).where(eq(grLines.id, T.grLineId));
+    // #216 F3: counted and submitted (runForInvoice refuses a receipt still being counted).
+    await ownerDb.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, T.grId));
     await ownerDb
       .update(invoices)
       .set({ invoiceDate: new Date(D0.getTime() + 2 * DAY), vatAmount: '18.00', totalInclVat: '118.00', source: 'photo' })

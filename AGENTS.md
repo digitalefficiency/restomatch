@@ -47,7 +47,11 @@ the governing files. An agent that needs one changed proposes it and stops.
 - `packages/matching/src/__tests__/leak-canary.test.ts` + `packages/matching/src/__tests__/fixtures.ts`
   — the numbers-canary and its builders.
 - The shared `formatIls()` money-format util + the agorot↔display boundary (frozen once it exists).
-- `packages/db/drizzle/rls/0001_invoice_scans_rls.sql`, `0002_core_tenant_rls.sql`, and
+- `packages/types/src/number-input.ts` (`parseNumberInput` / `parseDecimalInput` — the one input parser) and
+  `packages/types/src/money/**` (`moneyText`, `MONEY_DECIMALS`, `formatIlsPlain`, `visualOrder`), plus
+  `packages/api/src/reports/{bidi,money}.ts` (the server twins).
+- `packages/db/drizzle/rls/0001_invoice_scans_rls.sql`, `0002_core_tenant_rls.sql`, `0003_audit_immutable.sql`
+  (the append-only audit log — owner decision 7.11), and
   `packages/db/src/rls.ts` (`applyCoreTenantRls` / `ensureRlsAppRole` — the tenant trust boundary).
 - `packages/db/drizzle/0000..0008_*.sql` + `packages/db/drizzle/meta/` (applied migration history — new
   migrations only), `packages/db/src/schema.ts`, and `packages/db/drizzle.config.ts` (a schema edit
@@ -74,6 +78,9 @@ the governing files. An agent that needs one changed proposes it and stops.
   **explicit half-up rounding rule** at the `price × qty → lineTotal` step. Format only at display.
 - **Display:** all ₪ rendering goes through the single `formatIls()` util — never re-implement
   `Intl.NumberFormat('he-IL', …)` inline.
+- **Input:** every typed or imported number goes through `parseDecimalInput(raw, kind)` → exact integer
+  agorot / price units / milli / basis points, or `ambiguous` with a reason. Never strip commas by hand.
+- **Non-JSX ₪** (e-mail, WhatsApp, PDF, reports): `moneyText(x, { context })` — the context is required.
 - **Leak figure:** `totalDiscrepancyAmount = Σ |deltaAmount|`. The canary asserts it integer-exact
   (`Math.round(total*100) === EXPECTED_LEAK_AGOROT`) plus the discrepancy type-set.
 
@@ -114,7 +121,7 @@ Two universal gates wrap every maker: **`test-sentinel`** (always) and **`tenant
 | `tenant-security-warden` | Defend RLS/tenant isolation; nothing ships that weakens them | Read-only audit; delegates fixes; owns `__tests__/*attack*` |
 | `web-feature-engineer` | Dashboard/marketing/admin features (tRPC↔UI); **consumes** charts SQL, never edits it | `apps/web`, `packages/api` (routers, except immutable `leads.ts`), `packages/billing` |
 | `rtl-design-steward` | Guard the dark RTL design + own the **visual** ₪ rendering (className/token) | `packages/ui-tokens`, web styles, `tailwind.config.ts` |
-| `money-format-marshal` | Own the **`formatIls()` util** + agorot↔display boundary + VAT formatting contract | the money-format util layer only |
+| `money-format-marshal` | Own the `formatIls()` util + the agorot↔display boundary **in both directions** (`parseDecimalInput`, `moneyText`, `visualOrder`) + VAT formatting | the money-format util layer: `apps/web/lib/money.ts`, `packages/types/src/number-input.ts`, `packages/types/src/money/**`, `packages/api/src/reports/{bidi,money}.ts` |
 | `test-sentinel` | Keep the suite green, grow coverage, own attack suites + the leak-canary fixtures | all `__tests__`, vitest/e2e config |
 | `growth-pmm-engineer` | Hebrew landing, lead funnel, pilot ops, GTM artifacts, `computeFitScore` impl | `apps/web/(marketing)`, leads flow, pilot docs, `packages/types` fit-score |
 
