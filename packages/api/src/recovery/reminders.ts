@@ -217,11 +217,12 @@ export interface SupplierReminderDraft {
 
 /**
  * Owner decision 16: an overdue reminder to a SUPPLIER is a per-supplier DRAFT
- * ("תזכורת לספק · 3 דרישות · ₪451.00") that the web opens in wa.me / mailto
- * only on a click. This only reads: nothing is queued, sent or stamped. The
- * overdue rule is the tracker's (OVERDUE_DAYS after the letter, or the claim
- * when no letter went out) — never a hard-coded day count. A foreign or
- * unknown supplier is NOT_FOUND.
+ * that the web opens in wa.me / mailto only on a click. This only reads:
+ * nothing is queued, sent or stamped. The overdue rule is findOverdue's exactly
+ * (overdueSql: more than OVERDUE_DAYS calendar days in the restaurant's zone
+ * since the letter, or the claim; never a never-claimable type), so a draft
+ * never chases a claim the reminder job would not — only the re-chase cadence
+ * (last_reminder_at) is the job's own. A foreign or unknown supplier is NOT_FOUND.
  */
 export async function supplierReminderDraft(
   db: Database,
@@ -237,12 +238,19 @@ export async function supplierReminderDraft(
   const res = await db.execute(sql`
     SELECT c.id, GREATEST(0, c.amount_agorot - c.credited_agorot) AS outstanding,
            COALESCE(c.letter_sent_at, c.claimed_at) AS sent_at,
-           floor(extract(epoch FROM (${now.toISOString()}::timestamptz - COALESCE(c.letter_sent_at, c.claimed_at))) / 86400)::int AS waiting
+           -- Whole calendar days in the restaurant's zone — findOverdue's basis, never 24h blocks.
+           ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date
+             - (COALESCE(c.letter_sent_at, c.claimed_at) AT TIME ZONE tz.tz)::date)::int AS waiting
     FROM recovery_claims c
+    CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) tz
+    JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
     WHERE c.restaurant_id = ${restaurantId} AND c.supplier_id = ${supplierId}
       AND c.status IN (${sql.join(AWAITING_SUPPLIER.map((st) => sql`${st}`), sql`, `)})
       AND c.amount_agorot > c.credited_agorot
-      AND COALESCE(c.letter_sent_at, c.claimed_at) < ${now.toISOString()}::timestamptz - make_interval(days => ${OVERDUE_DAYS})
+      -- The ONE overdue rule (findOverdue, the tracker badge, the web countdown): calendar days, restaurant zone.
+      AND ${overdueSql(now, sql`tz.tz`)}
+      -- Owner 31.10: a never-claimable type is not owed — never chased (as findOverdue).
+      AND NOT ${NEVER_CLAIMABLE_TYPE_SQL}
     ORDER BY waiting DESC, c.id
   `);
   const rows = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
