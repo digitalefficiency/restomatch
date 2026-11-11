@@ -16,6 +16,8 @@
  *    invoice to human review. Never invents a ₪ value it can't derive.
  */
 
+import { cleanDeliveryNotes } from './invoiceSchema';
+
 const LOW_CONFIDENCE = 0.2;
 
 export function stripNulls(value: unknown): unknown {
@@ -104,6 +106,7 @@ export function normalizeExtraction(raw: unknown): unknown {
   else if (Array.isArray(inv.lines)) {
     inv.lines = inv.lines.map(repairLine).filter((l): l is Record<string, unknown> => l !== undefined);
   }
+  if (inv.deliveryNotes !== undefined) inv.deliveryNotes = cleanDeliveryNotes(inv.deliveryNotes);
   if (inv.totals === undefined) inv.totals = {};
   else if (typeof inv.totals === 'object' && !Array.isArray(inv.totals)) {
     // Printed VAT rate in percent (18) → fraction, like the line vatRate.
