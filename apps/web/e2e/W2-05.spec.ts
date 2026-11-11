@@ -370,7 +370,7 @@ test('airplane mode: the receipt CLOSES with no signal, waits on the phone, and 
 
   await context.setOffline(true);
   for (const l of po.lines) {
-    await page.getByTestId('count-line').filter({ hasText: l.name }).getByTestId('count-arrived').tap();
+    await countLine(page, l.name).getByTestId('count-arrived').tap();
   }
   await page.getByTestId('close-receipt').tap();
   await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 15_000 });
