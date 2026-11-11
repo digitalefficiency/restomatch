@@ -1,7 +1,7 @@
-// W2-08 COVERAGE fragment (W2-01 format). `CoverageFragment` (./index) is not on
-// this base yet (#180): at the rebase onto rw2-α this becomes
-// `import type { CoverageFragment } from './index'` with no other change.
-const coverage: Record<string, string> = {
+// W2-08 COVERAGE fragment (W2-01 format): the task spine's procedures.
+import type { CoverageFragment } from './index';
+
+const coverage: CoverageFragment = {
   'tasks.mine':
     "isolation — tasks-mine.test.ts: A sees only A tasks (B's blocking ₪ never in A's payload); a role argument other than the session's is refused, never widened",
   'nav.badges':
