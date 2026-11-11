@@ -64,13 +64,13 @@ describe('EMAIL_COPY (W2-13)', () => {
     for (const [name, e] of everyEmail()) expect(EMOJI.test(e.subject), name).toBe(false);
   });
 
-  it('no Hebrew string opens with a masculine-singular imperative (except the pinned DECISION_COPY verbs, W2-04)', () => {
+  it('no Hebrew string opens with a masculine-singular imperative (the decision verbs too, since owner decision 7.11)', () => {
     const masc = /^(בחר|לחץ|הזן|שלח|פתח|שמור|אשר|דחה|העבר|שלם|דרוש|הוסף|צלם|בדוק|נסה|התחבר|עבור)(?![א-ת])/;
-    const pinned = new Set(['decision.approve', 'decision.reject', 'decision.escalate']);
+    const pinned = new Set<string>();
     for (const [k, v] of leaves(EMAIL_COPY.he as unknown as Tree)) {
       if (!pinned.has(k)) expect(masc.test(v), k).toBe(false);
     }
-    expect(DECISION_COPY.he.approve).toBe('דרוש {amount} מהספק'); // unchanged (W2-04 pins it)
+    expect(DECISION_COPY.he.approve).toBe('בקשת זיכוי · {amount}'); // owner decision 7.11 (W2-04 pins it)
   });
 
   it.each([
@@ -140,7 +140,8 @@ describe('EMAIL_COPY (W2-13)', () => {
     expect(e.html).toContain('‏700 ₪');
     expect(e.html).not.toContain('‏900 ₪');
     expect(e.html).toContain('https://app/dashboard/go?to=x');
-    expect(e.html).toContain('דרוש מהספק'); // the queue verb, without the amount placeholder
+    expect(e.html).toContain('בקשת זיכוי'); // the queue verb, without the amount placeholder
+    expect(e.html).not.toMatch(/\{amount\}|זיכוי ·/);
     expect(e.text).not.toContain('{amount}');
   });
 
