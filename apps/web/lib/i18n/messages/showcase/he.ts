@@ -40,7 +40,7 @@ export const he = {
     whatsappText: 'היי, ראיתי את הדמו של RestoMatch ואשמח לשלוח חשבונית לבדיקה.',
     receiver: '{amount} נתפסו במשלוח הזה — לפני תשלום.',
     receiverClean: 'המשלוח הזה תואם להזמנה — ו-RestoMatch בודקת כל משלוח כזה.',
-    dashboard: '{amount} נתפסו החודש במסעדה לדוגמה — לפני תשלום.',
+    dashboard: '{amount} נתפסו לפני תשלום החודש במסעדה לדוגמה — {pending} מהם מחכים להחלטה שלך.',
     invoices: '{amount} נתפסו בחשבוניות האלה — לפני תשלום.',
   },
 
@@ -112,11 +112,20 @@ export const he = {
     eyebrow: 'מרכז השליטה',
     title: 'לוח הבעלים',
     lead: 'תמונת מצב חיה של המסעדה — איפה כסף בורח, איזה ספק מדויק, ומה מחכה להחלטה שלכם עכשיו.',
-    kpi: {
-      leak: 'דליפה פוטנציאלית החודש',
-      saved: 'נחסך עד כה',
-      pending: 'ממתינות לאישור',
+    sample: 'דוגמה · מסעדה בדויה, מספרים להמחשה',
+    hero: {
+      eyebrow: 'דוגמה · דליפה שזוהתה · אוקטובר',
+      label: 'דליפה החודש',
+      pct: '{pct} מרכש החודש שנבדק',
+      base: 'מתוך {amount} לפני מע״מ',
+      completeness: '{checked} חשבוניות נבדקו · {withGap} עם פער',
+      inCheck: '{count} חשבוניות עוד בבדיקה',
     },
+    needs: {
+      zero: 'אין כרגע משהו שמחכה לך.',
+      credit: { label: 'בקשות זיכוי לשליחה', sub: '{count} פערים', verb: 'שליחת המכתב' },
+    },
+    goodNews: '{amount} כבר אושרו לקיזוז בתשלום',
     heatmap: {
       title: 'בלש הדליפות',
       subtitle: 'המחיר האחרון מול הממוצע ההיסטורי, לפי ספק ומוצר',
@@ -139,7 +148,7 @@ export const he = {
       scanned: 'נסרקו היום',
       withIssues: 'עם פערים',
       withIssuesSub: '{pct}% מהחשבוניות',
-      saved: 'נחסך בזכות הבדיקה',
+      saved: 'נתפס בבדיקה',
       savedSub: 'פערים שהצוות תפס לפני האישור',
       action: 'דורש פעולה',
       actionSub: 'ממתינות להחלטה שלכם',
@@ -159,7 +168,7 @@ export const he = {
       clean: 'תקין',
       billed: 'חויב',
       approved: 'אושר',
-      saved: '{amount} נחסכו',
+      saved: '{amount} נתפסו',
     },
   },
 
@@ -172,7 +181,7 @@ export const he = {
     tiles: {
       billed: 'חויב בחשבונית (לפני מע״מ)',
       approved: 'אושר ע״י הצוות (לפני מע״מ)',
-      saved: 'חיסכון שתועד (לפני מע״מ)',
+      saved: 'פערים שתועדו (לפני מע״מ)',
     },
     compareCard: {
       title: 'השוואת הזמנה ↔ חשבונית',
@@ -313,7 +322,7 @@ export const he = {
     activity: {
       title: 'פעילות',
       subtitle: 'כל מה שקרה מול הספק',
-      saved: '{amount} נחסכו',
+      saved: '{amount} נתפסו',
       blocked: '{amount} בהמתנה',
     },
   },
