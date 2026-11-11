@@ -168,7 +168,7 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
                   <>
                     <DeltaBadge current={cur.leakIls} previous={prevOf('leakIls')} compare={view.compare} thinBase={thinBase} vs={vs} showAmount />
                     {drivers && drivers.drivers.length > 0 ? (
-                      <ul className="mt-2 flex flex-wrap gap-1.5" aria-label={tl('hub.drivers.label')} data-testid="leak-drivers">
+                      <ul className="mt-2 flex flex-wrap gap-2 sm:gap-1.5" aria-label={tl('hub.drivers.label')} data-testid="leak-drivers">
                         {drivers.drivers.map((d) => {
                           const name = labelOf(d.key, d.label, d.labelEn);
                           const sign = d.deltaAgorot > 0 ? '+' : '−';
@@ -180,7 +180,7 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
                                 totalAgorot={d.currentAgorot}
                                 label={`${name} ${amount}`}
                                 className={cn(
-                                  'inline-flex min-h-8 items-center gap-1 rounded-full px-2.5 text-xs font-semibold ring-1',
+                                  'inline-flex min-h-11 items-center gap-1 rounded-full px-3 text-xs font-semibold ring-1 sm:min-h-8 sm:px-2.5',
                                   d.deltaAgorot > 0 ? 'bg-danger/10 text-danger ring-danger/30' : 'bg-primary/10 text-primary ring-primary/30',
                                 )}
                               >
@@ -190,12 +190,10 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
                           );
                         })}
                         {drivers.otherAgorot !== 0 ? (
-                          <li className="inline-flex min-h-8 items-center rounded-full px-2.5 text-xs text-muted ring-1 ring-line">
-                            <bdi className="tabular-nums">
-                              {drivers.otherAgorot > 0 ? '+' : '−'}
-                              {whole(Math.abs(drivers.otherAgorot) / 100)}
-                            </bdi>{' '}
-                            {tl('hub.drivers.other')}
+                          // inline-flex drops whitespace-only text between children: the gap is the space (lab: '−74 ₪אחר').
+                          <li className="inline-flex min-h-11 items-center gap-1 rounded-full px-3 text-xs text-muted ring-1 ring-line sm:min-h-8 sm:px-2.5" data-testid="leak-drivers-other">
+                            <bdi className="tabular-nums">{`${drivers.otherAgorot > 0 ? '+' : '−'}${whole(Math.abs(drivers.otherAgorot) / 100)}`}</bdi>
+                            <span>{tl('hub.drivers.other')}</span>
                           </li>
                         ) : null}
                       </ul>
