@@ -3,6 +3,7 @@ import { buildSteps, defaultMonth, progress, resolveMonth, shiftMonth, STEP_ORDE
 
 const zero = { count: 0, amountIls: 0 };
 const clean: CloseSources = {
+  monthOffset: -1,
   unchecked: zero,
   consolidated: { ...zero, firstInvoiceId: null },
   deliveryNotes: zero,
@@ -21,15 +22,15 @@ describe('close checklist steps', () => {
     const steps = buildSteps(clean);
     expect(steps.filter((s) => s.key !== 'exports').every((s) => s.state === 'done')).toBe(true);
     expect(steps.some((s) => s.primary)).toBe(false);
-    expect(progress(steps)).toEqual({ done: 6, total: 6 });
+    expect(progress(steps)).toEqual({ done: 6, total: 7, open: 0 }); // the header counts every step shown
   });
 
   it('no data source (flag off / failed read) is T4 "off", never todo', () => {
     const steps = buildSteps({ ...clean, deliveryNotes: null, gaps: null, claims: null, vat: null });
     for (const k of ['deliveryNotes', 'gaps', 'claims', 'vat'] as const) {
-      expect(steps.find((s) => s.key === k)).toMatchObject({ state: 'off', count: null, amountIls: null, primary: false });
+      expect(steps.find((s) => s.key === k)).toMatchObject({ state: 'off', count: null, amountIls: null, primary: false, href: null });
     }
-    expect(progress(steps)).toEqual({ done: 2, total: 2 }); // unchecked + consolidated
+    expect(progress(steps)).toEqual({ done: 2, total: 7, open: 0 }); // unchecked + consolidated
   });
 
   it('consolidated invoices waiting are T4 pending, never todo, and never take the primary CTA', () => {
@@ -54,18 +55,18 @@ describe('close checklist steps', () => {
     const steps = buildSteps({ ...clean, claims: { count: 1, amountIls: 40 }, vat: { count: 3, amountIls: 900 } });
     expect(steps.filter((s) => s.primary).map((s) => s.key)).toEqual(['claims']);
     expect(steps.filter((s) => s.state === 'todo').map((s) => s.key)).toEqual(['claims', 'vat']);
-    expect(progress(steps)).toEqual({ done: 4, total: 6 });
+    expect(progress(steps)).toEqual({ done: 4, total: 7, open: 2 });
   });
 
-  it('each step links to the queue where its number lives', () => {
+  it('each step links to the queue where its number lives (VAT has no screen: no button)', () => {
     const href = Object.fromEntries(buildSteps(clean).map((s) => [s.key, s.href]));
     expect(href).toEqual({
-      unchecked: '/dashboard/inbox?filter=needs_review',
+      unchecked: '/dashboard/invoices?month=-1&view=awaiting',
       gaps: '/dashboard/approvals',
       claims: '/dashboard/recovery',
       consolidated: '/dashboard/suppliers/ledger',
       deliveryNotes: '/dashboard/suppliers/ledger',
-      vat: '/dashboard',
+      vat: null,
       exports: '/dashboard/exports',
     });
   });
