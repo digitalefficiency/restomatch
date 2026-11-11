@@ -1,7 +1,8 @@
 import type { MetadataRoute } from 'next';
 import { siteUrl } from './(marketing)/_components/seo';
 
-// Read APP_URL per request: the production domain is right without a rebuild.
+// Read APP_URL per request: no code change per domain (on Vercel an env change
+// still takes a redeploy to reach the running deployment).
 export const dynamic = 'force-dynamic';
 
 /** Marketing + demo are crawlable; the app, auth and API surfaces are not. */

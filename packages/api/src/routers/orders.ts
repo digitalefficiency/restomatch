@@ -319,6 +319,15 @@ const OPEN_PO_STATUSES = ['sent', 'confirmed', 'partial'] as const;
  */
 const PO_LINE_ORDER = [sql`${poLines.rawDescription} ASC NULLS LAST`, asc(poLines.id)] as const;
 
+/**
+ * The outbox dedupe key of a PO's order message (placeOrder). Other rows point at the
+ * same PO (e.g. the supplier-delays late chase to the owner/manager), so readers of
+ * "what happened to the order message" must match on this key, never on the entity alone.
+ */
+export function orderMessageKey(poId: string): string {
+  return `po:${poId}:placed`;
+}
+
 export type SendState = 'queued' | 'sent' | 'failed' | 'skipped' | 'none';
 
 /** The send state of a PO from its latest outbox row (orders.sendStatus). Pure. */
@@ -457,6 +466,9 @@ export const ordersRouter = router({
             eq(notificationsOutbox.restaurantId, restaurantId),
             eq(notificationsOutbox.relatedEntityType, 'purchase_order'),
             eq(notificationsOutbox.relatedEntityId, input.poId),
+            // The order message itself — not other mail about this PO (the supplier-delays
+            // late chase to the owner/manager uses the same entity fields).
+            eq(notificationsOutbox.dedupeKey, orderMessageKey(input.poId)),
           ),
         )
         .orderBy(desc(notificationsOutbox.createdAt))
@@ -1024,7 +1036,7 @@ export const ordersRouter = router({
             status: 'queued',
             relatedEntityType: 'purchase_order',
             relatedEntityId: input.poId,
-            dedupeKey: `po:${input.poId}:placed`,
+            dedupeKey: orderMessageKey(input.poId),
           })
           .onConflictDoNothing({ target: notificationsOutbox.dedupeKey, where: DEDUPE_INDEX_PREDICATE });
         sentChannel = input.channel;
@@ -1072,6 +1084,9 @@ export const ordersRouter = router({
             eq(notificationsOutbox.restaurantId, restaurantId),
             eq(notificationsOutbox.relatedEntityType, 'purchase_order'),
             eq(notificationsOutbox.relatedEntityId, input.poId),
+            // The order message itself — not other mail about this PO (the supplier-delays
+            // late chase to the owner/manager uses the same entity fields).
+            eq(notificationsOutbox.dedupeKey, orderMessageKey(input.poId)),
           ),
         )
         .orderBy(desc(notificationsOutbox.createdAt))

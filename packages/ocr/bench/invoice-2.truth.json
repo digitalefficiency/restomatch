@@ -1,0 +1,46 @@
+{
+  "documentKind": "consolidated",
+  "consolidation": "consolidated",
+  "supplier": {
+    "name": "מאפיית הגליל בע\"מ",
+    "businessId": "514381276"
+  },
+  "invoiceNumber": "7731",
+  "invoiceDate": "2026-10-31",
+  "allocationNumber": null,
+  "periodStart": "2026-10-01",
+  "periodEnd": "2026-10-31",
+  "deliveryNotes": [
+    {
+      "number": "30512",
+      "date": "2026-10-03",
+      "totalExclVat": 412.5
+    },
+    {
+      "number": "30587",
+      "date": "2026-10-08",
+      "totalExclVat": 388.0
+    },
+    {
+      "number": "30644",
+      "date": "2026-10-15",
+      "totalExclVat": 455.2
+    },
+    {
+      "number": "30702",
+      "date": "2026-10-22",
+      "totalExclVat": 401.3
+    },
+    {
+      "number": "30771",
+      "date": "2026-10-29",
+      "totalExclVat": 420.0
+    }
+  ],
+  "lines": [],
+  "totals": {
+    "subtotal": 2077.0,
+    "vat": 373.86,
+    "total": 2450.86
+  }
+}
