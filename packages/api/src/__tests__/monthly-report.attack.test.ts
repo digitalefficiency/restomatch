@@ -48,6 +48,10 @@ describe('monthlyReport.breakdown: tenant scope', () => {
     expect(b.hero.leakIls).toBe(0);
     // The check above can fail: A does have rows of its own.
     expect(a.bySupplier.map((s) => s.supplierId)).toEqual(a.bySupplier.map(() => A.supplierId));
+    // …and A really has data, so an implementation that returned nothing for everyone fails here.
+    expect(a.bySupplier.length).toBeGreaterThan(0);
+    expect(a.bySupplier.map((s) => s.supplierId)).toContain(A.supplierId);
+    expect(a.hero.leakIls).toBeGreaterThan(0);
   });
 
   it('takes no restaurant id: a smuggled field is stripped, the session decides', async () => {

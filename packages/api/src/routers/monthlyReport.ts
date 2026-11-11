@@ -12,7 +12,9 @@ import { financeProcedure, router } from '../trpc';
  * will be sent, the WhatsApp text — and download the PDF. Finance roles: owner,
  * manager and the bookkeeper, who reads every month report read-only (owner
  * decision I3, 7.11; W3-08). Receiver and chef never (it lists supplier spend).
- * Read-only.
+ * No report data is written here, with one caveat: for a month without a frozen
+ * snapshot, computeMonthlyReport runs syncClaims (recovery flag on), the same
+ * claim sync recovery.summary/list already trigger for these roles.
  */
 const reportProcedure = financeProcedure.use(async ({ ctx, next }) => {
   await assertFeatureOn(ctx.db, ctx.session.restaurantId, 'monthlyReport');
