@@ -119,6 +119,8 @@ describe('claim at decision', () => {
 
   it('match.runForInvoice after an approve: the claim is rebound to the ORIGINAL decider, 0 claims lost (W2-04 rebind)', async () => {
     const owner = callerAs(db, T, 'owner');
+    // The count is in: an open (pending) receipt refuses a Re-run over its own run (main, invoice.receiptOpen).
+    await db.execute(sql`UPDATE goods_receipts SET status = 'completed' WHERE restaurant_id = ${T.restaurantId}`);
     await owner.match.runForInvoice({ invoiceId: T.invoiceId });
     const rows = (await db.execute(sql`
       SELECT d.id FROM discrepancies d JOIN match_runs mr ON mr.id = d.match_run_id
