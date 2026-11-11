@@ -20,8 +20,13 @@ export const PASSKEY_ROLES = ['owner', 'bookkeeper'] as const;
  * makes the app REFUSE TO START (assertPasskeysConfig, called from auth.ts).
  */
 export const PASSKEY_BLOCKERS: readonly string[] = [
-  'M3: password reset / "log out everywhere" must delete authenticators + passkey accounts',
-  'M4: /passkeys list + remove, step-up before register, "new passkey added" e-mail',
+  // Each entry names the attack test that must pass before it may be removed.
+  'M3: password reset / "log out everywhere" delete authenticators + passkey accounts — test: register, reset password (or bump token_version), passkey sign-in refused',
+  'M4: /passkeys list + remove (requireFullSession), step-up before register (loginAt ≤ 5 min or password/code), "new passkey added" e-mail — test: register without step-up refused; removed credential cannot sign in',
+  'L1: stateless challenge cookie (replay window) — test: a replayed register/authenticate response is refused',
+  'L2: every passkey sign-in/register gets the 30-day session, ignoring remember-me — test: passkey session follows the remember-me window',
+  'L3: attack tests mock the auth.ts wiring — test: an integration test drives /api/auth/webauthn-options + callback',
+  'L4: DSR erasure leaves authenticators rows — test: erasure deletes the user\'s authenticators',
 ];
 
 /** ON only with PASSKEYS_ENABLED=1, a valid AUTH_URL, and no open blockers. */

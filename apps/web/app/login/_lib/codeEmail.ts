@@ -12,37 +12,37 @@ const COPY: Record<string, { subject: string; lead: string; tail: string; dir: '
   he: {
     subject: 'קוד הכניסה שלכם ל-RestoMatch',
     lead: 'זה הקוד לכניסה ל-RestoMatch:',
-    tail: 'הקוד תקף ל-10 דקות. לא ביקשתם קוד? אל תמסרו אותו לאיש. אם מגיעים אליכם קודים שלא ביקשתם, היכנסו עם הסיסמה ופנו לבעלי המסעדה.',
+    tail: 'הקוד תקף ל-10 דקות. לא ביקשתם קוד? אל תמסרו אותו לאיש, ואל תזינו אותו בשום מקום. אם ממשיכים להגיע קודים שלא ביקשתם, ספרו לבעלי המסעדה.',
     dir: 'rtl',
   },
   en: {
     subject: 'Your RestoMatch sign-in code',
     lead: 'Here is your RestoMatch sign-in code:',
-    tail: "The code is valid for 10 minutes. Didn't ask for it? Don't share it with anyone. If codes you didn't request keep arriving, sign in with your password and tell the restaurant owner.",
+    tail: "The code is valid for 10 minutes. Didn't ask for it? Don't share it or type it in anywhere. If codes you didn't request keep arriving, tell the restaurant owner.",
     dir: 'ltr',
   },
   ar: {
     subject: 'رمز الدخول إلى RestoMatch',
     lead: 'هذا رمز الدخول إلى RestoMatch:',
-    tail: 'الرمز صالح لمدة 10 دقائق. لم تطلب رمزًا؟ لا تشاركه مع أحد. إذا استمرت رموز لم تطلبها بالوصول، سجّل الدخول بكلمة المرور وأبلغ صاحب المطعم.',
+    tail: 'الرمز صالح لمدة 10 دقائق. لم تطلب رمزًا؟ لا تشاركه ولا تُدخله في أي مكان. إذا استمرت رموز لم تطلبها بالوصول، أبلغ صاحب المطعم.',
     dir: 'rtl',
   },
   ru: {
     subject: 'Ваш код входа в RestoMatch',
     lead: 'Ваш код для входа в RestoMatch:',
-    tail: 'Код действует 10 минут. Не запрашивали код? Никому его не сообщайте. Если такие коды приходят снова, войдите с паролем и сообщите владельцу ресторана.',
+    tail: 'Код действует 10 минут. Не запрашивали код? Никому его не сообщайте и нигде не вводите. Если такие коды приходят снова, сообщите владельцу ресторана.',
     dir: 'ltr',
   },
   th: {
     subject: 'รหัสเข้าสู่ระบบ RestoMatch ของคุณ',
     lead: 'นี่คือรหัสเข้าสู่ระบบ RestoMatch ของคุณ:',
-    tail: 'รหัสใช้ได้ 10 นาที หากคุณไม่ได้ขอรหัส อย่าบอกรหัสนี้กับใคร หากยังได้รับรหัสที่ไม่ได้ขอ ให้เข้าสู่ระบบด้วยรหัสผ่านและแจ้งเจ้าของร้าน',
+    tail: 'รหัสใช้ได้ 10 นาที หากคุณไม่ได้ขอรหัส อย่าบอกหรือกรอกรหัสนี้ที่ใด หากยังได้รับรหัสที่ไม่ได้ขอ ให้แจ้งเจ้าของร้าน',
     dir: 'ltr',
   },
   ti: {
     subject: 'ናይ RestoMatch መእተዊ ኮድካ',
     lead: 'እዚ ናይ RestoMatch መእተዊ ኮድካ እዩ:',
-    tail: 'እቲ ኮድ ን10 ደቒቕ ይሰርሕ። ኮድ ኣይሓተትካን? ንማንም ኣይትሃቦ። ዘይሓተትካዮ ኮድታት እንተ ቐጺሎም መጺኦም፡ ብፓስዎርድ እቶ እሞ ንወናኒ ቤት መግቢ ሓብር።',
+    tail: 'እቲ ኮድ ን10 ደቒቕ ይሰርሕ። ኮድ ኣይሓተትካን? ንማንም ኣይትሃቦ፡ ኣብ ዝኾነ ቦታ ድማ ኣይተእትዎ። ዘይሓተትካዮ ኮድታት እንተ ቐጺሎም መጺኦም፡ ንወናኒ ቤት መግቢ ሓብር።',
     dir: 'ltr',
   },
 };

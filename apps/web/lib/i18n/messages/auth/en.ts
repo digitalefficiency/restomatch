@@ -171,6 +171,7 @@ export const en: Shape<typeof he> = {
     resent: 'We sent a new code. Use the code from the latest e-mail.',
     useOther: 'Sign in another way',
     errors: {
+      sendRate: 'We already sent a few codes. Use the code from the latest e-mail, or wait a few minutes and send again.',
       wrongCode: "That code doesn't match or has expired. Check the latest e-mail, or send a new code.",
       rate: 'Too many attempts. Code sign-in is locked for now. Sign in with your password or an e-mail link, or try again later.',
     },

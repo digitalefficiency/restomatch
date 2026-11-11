@@ -24,10 +24,13 @@ export const generateMetadata = () => authTitle('shell.titles.checkEmail');
  * Credentials provider (auth.ts): limiter + durable ceilings there. A locked
  * or throttled attempt says so, without inviting a new code (M5).
  */
-export default async function LoginCodePage({ searchParams }: { searchParams: Promise<{ e?: string; resent?: string }> }) {
-  const [{ e, resent }, t, hint] = await Promise.all([searchParams, getT(authMessages), readHint()]);
+export default async function LoginCodePage({ searchParams }: { searchParams: Promise<{ e?: string; resent?: string; r?: string }> }) {
+  const [{ e, resent, r }, t, hint] = await Promise.all([searchParams, getT(authMessages), readHint()]);
   if (!hint) redirect('/login');
+  // ?e=rate: code sign-in is locked (field off). ?e=sendRate: only a NEW code
+  // is throttled — the latest code still works (review N3).
   const locked = e === 'rate';
+  const sendThrottled = e === 'sendRate';
 
   async function verifyAction(formData: FormData) {
     'use server';
@@ -42,7 +45,10 @@ export default async function LoginCodePage({ searchParams }: { searchParams: Pr
         redirect: false,
       });
     } catch (err) {
-      if (err instanceof AuthError) redirect(`/login/code?e=${codeLoginErrorCode(err)}`);
+      if (err instanceof AuthError) {
+        const keep = formData.get('rememberMe') === 'on' ? '&r=1' : '';
+        redirect(`/login/code?e=${codeLoginErrorCode(err)}${keep}`);
+      }
       throw err;
     }
     await clearHint();
@@ -56,7 +62,7 @@ export default async function LoginCodePage({ searchParams }: { searchParams: Pr
     if (!h) redirect('/login');
     // UX countdown only (cookie); the real limits are inside requestLoginCode.
     if (resendWaitSec(h.sentAt) > 0) redirect('/login/code');
-    if (!(await requestLoginCode(h.email))) redirect('/login/code?e=rate');
+    if (!(await requestLoginCode(h.email))) redirect('/login/code?e=sendRate');
     await writeHint({ ...h, sentAt: Date.now() });
     redirect('/login/code?resent=1');
   }
@@ -80,16 +86,21 @@ export default async function LoginCodePage({ searchParams }: { searchParams: Pr
       ) : null}
       {e ? (
         <Notice tone="error" id="login-code-error" className="mb-4">
-          {locked ? t('codeLogin.errors.rate') : t('codeLogin.errors.wrongCode')}
+          {locked
+            ? t('codeLogin.errors.rate')
+            : sendThrottled
+              ? t('codeLogin.errors.sendRate')
+              : t('codeLogin.errors.wrongCode')}
         </Notice>
       ) : null}
       <LoginCodeForm
         action={verifyAction}
         error={Boolean(e)}
         disabled={locked}
+        remember={r === '1'}
         labels={{ code: t('codeLogin.codeLabel'), submit: t('codeLogin.submit'), rememberMe: t('login.rememberMe') }}
       />
-      {locked ? null : (
+      {locked || sendThrottled ? null : (
         <form action={resendAction} className="mt-3">
           <SubmitButton variant="ghost" className="min-h-11 w-full text-sm" data-testid="login-code-resend">
             {t('codeLogin.resend')}

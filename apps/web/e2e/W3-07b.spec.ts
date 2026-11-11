@@ -186,3 +186,32 @@ test.describe('W3-07b slice b: code sign-in lockout (M5)', () => {
     await ctx.close();
   });
 });
+
+test.describe('W3-07b slice b: /login/code copy in en + a receiver language (M6/M7)', () => {
+  for (const [lang, sentence] of [
+    ['en', 'If this address is registered with us, we sent it a 6-digit code:'],
+    ['ru', 'Если этот адрес у нас зарегистрирован, мы отправили на него 6-значный код:'],
+  ] as const) {
+    test(`${lang}: the sent-to sentence is whole and in ${lang}`, async ({ browser }) => {
+      const email = `w307b-${lang}-${Date.now()}@login.e2e.test`;
+      await ensurePasswordUser({ email, password: 'W3-07b code-lang 2026' });
+      const sql = e2eSql();
+      await sql`delete from rate_limit_counters`;
+      await sql.end();
+      const ctx = await browser.newContext({ storageState: undefined });
+      const base = test.info().project.use.baseURL!;
+      await ctx.addCookies([
+        { name: 'rm_cookie_consent', value: 'necessary', url: base },
+        { name: 'rm_locale', value: lang, url: base },
+      ]);
+      const page = await ctx.newPage();
+      await page.goto('/login');
+      await page.locator('input[name="email"]').first().fill(email);
+      await page.getByTestId('login-code-button').click();
+      await page.waitForURL(/\/login\/code/);
+      await expect(page.getByTestId('login-code-sent')).toHaveText(sentence);
+      await ctx.close();
+    });
+  }
+});
+

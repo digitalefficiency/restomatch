@@ -29,8 +29,7 @@ import { authorizeCredentials, getSessionSecurityState } from './lib/passwords';
 import { SIGNOUT_COOKIE, issuedBeforeSignOut, signOutCookieOptions } from './lib/signOutTombstone';
 import { bypassesSecondFactor } from './lib/secondFactorGate';
 import { consumeTwoFactorTicket } from './lib/totp';
-import { clearLoginCodeLock, verifyLoginCode } from './app/login/_lib/loginCode';
-import { LoginCodeLocked } from './app/login/_lib/codeErrors';
+import { liftLoginCodeLock, verifyLoginCode } from './app/login/_lib/loginCode';
 import {
   assertPasskeysConfig,
   passkeyGetUserInfo,
@@ -203,8 +202,9 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         if (!result) return null;
         // Correct password: only FAILED attempts count toward the per-account limit.
         await clearLoginFailures(email);
-        // A password sign-in also re-opens a locked code sign-in (W3-07b M1).
-        await clearLoginCodeLock(result.id);
+        // A password sign-in lifts an active code-sign-in day lock by a small
+        // budget, keeping the history (W3-07b N2).
+        await liftLoginCodeLock(result.email);
         // Give back this attempt's per-IP unit: only failures count per network
         // (owner decision 31.10; staff share one restaurant Wi-Fi).
         await refundLoginIp(ip, attemptAt);
@@ -240,8 +240,10 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         if (!rl.allowed) throw new LoginRateLimited();
         const res = await verifyLoginCode(email, code);
         if (!res.ok) {
-          // Locked: say so (M5) — a wrong or expired code stays the uniform null.
-          if (res.reason === 'locked') throw new LoginCodeLocked();
+          // Locked: the SAME code as the limiter (review N1 — no lock-state
+          // oracle; any address locks at the same attempt). A wrong or expired
+          // code stays the uniform null.
+          if (res.reason === 'locked') throw new LoginRateLimited();
           return null;
         }
         const [u] = await authDb
@@ -317,8 +319,8 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         }
       }
 
-      // A magic-link sign-in re-opens a locked code sign-in (W3-07b M1).
-      if (signInId && account?.provider === 'nodemailer') await clearLoginCodeLock(signInId);
+      // A magic-link sign-in lifts an active code-sign-in day lock (W3-07b N2).
+      if (signInId && account?.provider === 'nodemailer' && user?.email) await liftLoginCodeLock(user.email);
 
       if (signInId) {
         t.userId = signInId;

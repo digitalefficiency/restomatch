@@ -14,18 +14,21 @@ export function LoginCodeForm({
   action,
   error,
   disabled,
+  remember,
   labels,
 }: {
   action: (formData: FormData) => Promise<void>;
   error: boolean;
   disabled: boolean;
+  /** The user ticked "remember me" before a failed attempt — keep it ticked. */
+  remember: boolean;
   labels: { code: string; submit: string; rememberMe: string };
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const sent = useRef(false);
   return (
     <form ref={formRef} action={action} className="space-y-4" data-testid="login-code-form">
-      <RememberMe label={labels.rememberMe} />
+      <RememberMe label={labels.rememberMe} defaultChecked={remember} />
       <Field label={labels.code} htmlFor="login-code">
         <Input
           id="login-code"

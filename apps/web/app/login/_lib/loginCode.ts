@@ -13,31 +13,31 @@ import { normalizeLoginEmail } from '@/lib/passwords';
  * (`DELETE … WHERE token = HMAC RETURNING`), so two concurrent verifies can
  * never both sign in.
  *
- * Guessing ceilings, all durable rows reserved BEFORE the check (they hold when
- * the rate-limit store fails open, and under concurrent guesses):
- *  - ≤ 5 wrong codes per rolling 10 minutes (`login-fail:<id>`);
- *  - ≤ 20 wrong codes per rolling 24 h (`login-fail24:<id>`). At the daily cap
- *    code sign-in is OFF for the account — no new code is issued and none is
- *    accepted — until a password or magic-link sign-in succeeds
- *    (`clearLoginCodeLock`, called from auth.ts), or the 24 h pass.
- *    Security review M1: with 5/10 min alone, a code every 10 minutes gave 720
- *    guesses a day.
+ * Guessing ceilings. All are durable rows, keyed on HMAC(normalized e-mail) —
+ * NOT the user id — and one attempt is reserved on EVERY verify before any
+ * early return. So a real account and an unknown address lock at the same
+ * attempt with the same answer (security review N1: no account / lock-state
+ * oracle), and the ceilings hold when the rate-limit store fails open:
+ *  - ≤ 5 wrong codes per rolling 10 minutes;
+ *  - ≤ 20 per rolling 24 h, plus LIFT_BUDGET more for each time the owner
+ *    lifted the lock by signing in with a password or magic link
+ *    (`liftLoginCodeLock`). A lift adds a small budget; it never erases the
+ *    history (review N2: the victim's own sign-ins must not refill an
+ *    attacker's budget);
+ *  - ≤ 60 per rolling 7 days, cleared ONLY by a correct code.
+ * At a ceiling no code is issued and none is accepted.
  *
- * Only an EXISTING account gets a code, but the page answers the same either
- * way, and the verify path runs the same queries for an unknown address (no
- * account oracle by timing). The verify runs inside the `email-code`
- * Credentials authorize() in auth.ts, which also applies the login limiter.
+ * Only an existing account gets a code; the page answers the same either way.
+ * The verify runs inside the `email-code` Credentials authorize() in auth.ts,
+ * which also applies the login limiter and maps "locked" to the limiter's code.
  */
 export const LOGIN_CODE_TTL_MS = 10 * 60 * 1000;
 export const LOGIN_CODE_MAX_ATTEMPTS = 5;
 export const LOGIN_CODE_DAILY_MAX = 20;
+export const LOGIN_CODE_LIFT_BUDGET = 5;
+export const LOGIN_CODE_WEEKLY_MAX = 60;
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** A stand-in id so an unknown address runs the same queries (never a real user). */
-const NOBODY = '00000000-0000-4000-8000-000000000000';
-
-const codeId = (userId: string) => `login:${userId}`;
-const failId = (userId: string) => `login-fail:${userId}`;
-const fail24Id = (userId: string) => `login-fail24:${userId}`;
+const WEEK_MS = 7 * DAY_MS;
 
 function hmacKey(): string {
   const key = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
@@ -45,9 +45,21 @@ function hmacKey(): string {
   return key;
 }
 
+/** The counter key for an address: never the user id, never the raw address. */
+export function loginCodeKey(rawEmail: string): string {
+  const email = normalizeLoginEmail(rawEmail) || String(rawEmail ?? '').trim().toLowerCase();
+  return createHmac('sha256', hmacKey()).update(`login-key:${email}`).digest('hex').slice(0, 40);
+}
+
 export function loginCodeDigest(userId: string, code: string): string {
   return createHmac('sha256', hmacKey()).update(`login:${userId}:${code}`).digest('hex');
 }
+
+const codeId = (userId: string) => `login:${userId}`;
+const winId = (k: string) => `lc-w:${k}`;
+const dayId = (k: string) => `lc-d:${k}`;
+const weekId = (k: string) => `lc-7:${k}`;
+const liftId = (k: string) => `lc-lift:${k}`;
 
 async function userIdFor(rawEmail: string): Promise<{ id: string; email: string } | null> {
   const email = normalizeLoginEmail(rawEmail);
@@ -64,9 +76,33 @@ async function liveCount(identifier: string, now: number): Promise<number> {
   return Number(r?.c ?? 0);
 }
 
-/** Has this account hit the daily cap (code sign-in off)? */
-export async function loginCodeLocked(userId: string, now = Date.now()): Promise<boolean> {
-  return (await liveCount(fail24Id(userId), now)) >= LOGIN_CODE_DAILY_MAX;
+interface Counts {
+  win: number;
+  day: number;
+  week: number;
+  lifts: number;
+}
+
+async function countsFor(k: string, now: number): Promise<Counts> {
+  const [win, day, week, lifts] = await Promise.all([
+    liveCount(winId(k), now),
+    liveCount(dayId(k), now),
+    liveCount(weekId(k), now),
+    liveCount(liftId(k), now),
+  ]);
+  return { win, day, week, lifts };
+}
+
+/** At or over a ceiling (`inclusive` = the count already includes this attempt). */
+function overCap(c: Counts, inclusive: boolean): boolean {
+  const dayCap = LOGIN_CODE_DAILY_MAX + LOGIN_CODE_LIFT_BUDGET * c.lifts;
+  if (inclusive) return c.win > LOGIN_CODE_MAX_ATTEMPTS || c.day > dayCap || c.week > LOGIN_CODE_WEEKLY_MAX;
+  return c.win >= LOGIN_CODE_MAX_ATTEMPTS || c.day >= dayCap || c.week >= LOGIN_CODE_WEEKLY_MAX;
+}
+
+/** Is code sign-in locked for this address (any ceiling reached)? */
+export async function loginCodeLocked(rawEmail: string, now = Date.now()): Promise<boolean> {
+  return overCap(await countsFor(loginCodeKey(rawEmail), now), false);
 }
 
 /**
@@ -74,9 +110,8 @@ export async function loginCodeLocked(userId: string, now = Date.now()): Promise
  * null. The caller shows the same "check your e-mail" screen either way.
  */
 export async function issueLoginCode(rawEmail: string, now = Date.now()): Promise<{ code: string; email: string } | null> {
-  const u = await userIdFor(rawEmail);
-  if (!u) return null;
-  if (await loginCodeLocked(u.id, now)) return null;
+  const [u, locked] = await Promise.all([userIdFor(rawEmail), loginCodeLocked(rawEmail, now)]);
+  if (!u || locked) return null;
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
   await authDb.transaction(async (tx) => {
     await tx.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(u.id)));
@@ -89,62 +124,59 @@ export async function issueLoginCode(rawEmail: string, now = Date.now()): Promis
   return { code, email: u.email };
 }
 
-export type VerifyLoginCode =
-  | { ok: true; userId: string }
-  | { ok: false; reason: 'noCode' | 'wrongCode' | 'locked' };
+export type VerifyLoginCode = { ok: true; userId: string } | { ok: false; reason: 'wrongCode' | 'locked' };
 
-/** Check a code for an address. Spends the code atomically on success. */
+/**
+ * Check a code for an address. Every call reserves one attempt FIRST — for a
+ * real account, an unknown address, or no live code alike — then answers.
+ * "No such account" and "no live code" are both a plain `wrongCode`.
+ */
 export async function verifyLoginCode(rawEmail: string, rawCode: string, now = Date.now()): Promise<VerifyLoginCode> {
-  const u = await userIdFor(rawEmail);
-  const id = u?.id ?? NOBODY;
-
-  // Same queries whether or not the account exists (timing).
-  const [daily, [stored]] = await Promise.all([
-    liveCount(fail24Id(id), now),
-    authDb
-      .select({ token: verificationTokens.token })
-      .from(verificationTokens)
-      .where(and(eq(verificationTokens.identifier, codeId(id)), gt(verificationTokens.expires, new Date(now))))
-      .limit(1),
-  ]);
-  if (!u) return { ok: false, reason: 'noCode' };
-  if (daily >= LOGIN_CODE_DAILY_MAX) return { ok: false, reason: 'locked' };
-  if (!stored) return { ok: false, reason: 'noCode' };
-
-  // Reserve the attempt in both windows, then count.
+  const k = loginCodeKey(rawEmail);
   await authDb.insert(verificationTokens).values([
-    { identifier: failId(u.id), token: randomUUID(), expires: new Date(now + LOGIN_CODE_TTL_MS) },
-    { identifier: fail24Id(u.id), token: randomUUID(), expires: new Date(now + DAY_MS) },
+    { identifier: winId(k), token: randomUUID(), expires: new Date(now + LOGIN_CODE_TTL_MS) },
+    { identifier: dayId(k), token: randomUUID(), expires: new Date(now + DAY_MS) },
+    { identifier: weekId(k), token: randomUUID(), expires: new Date(now + WEEK_MS) },
   ]);
-  const [inWindow, inDay] = await Promise.all([liveCount(failId(u.id), now), liveCount(fail24Id(u.id), now)]);
-  if (inWindow > LOGIN_CODE_MAX_ATTEMPTS || inDay > LOGIN_CODE_DAILY_MAX) {
-    await authDb.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(u.id)));
+  const [c, u] = await Promise.all([countsFor(k, now), userIdFor(rawEmail)]);
+  if (overCap(c, true)) {
+    if (u) await authDb.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(u.id)));
     return { ok: false, reason: 'locked' };
   }
 
   const code = String(rawCode ?? '').replace(/\D/g, '');
-  if (code.length !== 6) return { ok: false, reason: 'wrongCode' };
-  // Atomic use: the row is deleted only if the HMAC matches, in one statement.
+  // Same statement shape for an unknown address (it just matches nothing).
+  const uid = u?.id ?? '00000000-0000-4000-8000-000000000000';
   const used = await authDb
     .delete(verificationTokens)
     .where(
       and(
-        eq(verificationTokens.identifier, codeId(u.id)),
-        eq(verificationTokens.token, loginCodeDigest(u.id, code)),
+        eq(verificationTokens.identifier, codeId(uid)),
+        eq(verificationTokens.token, loginCodeDigest(uid, code.length === 6 ? code : 'x')),
         gt(verificationTokens.expires, new Date(now)),
       ),
     )
     .returning({ identifier: verificationTokens.identifier });
-  if (used.length === 0) return { ok: false, reason: 'wrongCode' };
+  if (!u || used.length === 0) return { ok: false, reason: 'wrongCode' };
 
-  // Success: this attempt was not a failure — clear the window and the day.
-  await authDb.delete(verificationTokens).where(inArray(verificationTokens.identifier, [failId(u.id), fail24Id(u.id)]));
+  // A correct code — the only thing that clears every ceiling (incl. 7 days).
+  await authDb
+    .delete(verificationTokens)
+    .where(inArray(verificationTokens.identifier, [winId(k), dayId(k), weekId(k), liftId(k)]));
   // A code proves the mailbox, like a magic link: mark the address verified.
   await authDb.update(users).set({ emailVerified: new Date(now) }).where(eq(users.id, u.id));
   return { ok: true, userId: u.id };
 }
 
-/** A password or magic-link sign-in re-opens code sign-in (clears both failure windows). */
-export async function clearLoginCodeLock(userId: string): Promise<void> {
-  await authDb.delete(verificationTokens).where(inArray(verificationTokens.identifier, [failId(userId), fail24Id(userId)]));
+/**
+ * A password or magic-link sign-in LIFTS an active 24 h lock by adding a small
+ * budget (one marker = LIFT_BUDGET more tries today). It keeps the history, and
+ * it never lifts the 7-day ceiling — only a correct code does (review N2).
+ */
+export async function liftLoginCodeLock(rawEmail: string, now = Date.now()): Promise<void> {
+  const k = loginCodeKey(rawEmail);
+  const c = await countsFor(k, now);
+  const dayCap = LOGIN_CODE_DAILY_MAX + LOGIN_CODE_LIFT_BUDGET * c.lifts;
+  if (c.day < dayCap) return; // not locked by the day cap: nothing to lift
+  await authDb.insert(verificationTokens).values({ identifier: liftId(k), token: randomUUID(), expires: new Date(now + DAY_MS) });
 }
