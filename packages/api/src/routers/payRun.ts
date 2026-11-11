@@ -16,6 +16,7 @@ import {
   discrepancyDecidableSql,
   duplicateHoldingSql,
   invoiceCheckedSql,
+  statusInSql,
 } from '../lifecycle/predicates';
 import {
   computeDueDate,
@@ -153,11 +154,7 @@ export interface PayRunResult {
 const OPEN = new Set<string>(DISCREPANCY_DECIDABLE);
 /** A duplicate finding that still holds the copy (G-05 DUPLICATE_HOLDING). */
 const CLAIMABLE_DUP = new Set<string>(DUPLICATE_HOLDING);
-/** Decided "ask the supplier" statuses as SQL values (lib/claims, the one claims rule). */
-const DECIDED_SQL = sql.join(
-  CLAIMABLE_DECIDED_STATUSES.map((t) => sql`${t}`),
-  sql`, `,
-);
+
 const ag = (v: number) => Math.round(v * 100);
 const ils = (a: number) => a / 100;
 const EMPTY_TOTALS = { invoices: 0, payIls: 0, holdIls: 0, claimIls: 0, creditIls: 0, pendingIls: 0, linkIls: 0, linkCount: 0 };
@@ -237,7 +234,7 @@ function unpaidInvoicesSql(rid: string, window: { start: string; end: string } |
                  FROM match_runs mr3
                  JOIN discrepancies d ON d.match_run_id = mr3.id AND d.restaurant_id = ${rid}
                  WHERE mr3.invoice_id = i.id AND mr3.restaurant_id = ${rid}
-                   AND d.severity IN ('warn','block') AND d.resolution_status::text IN (${DECIDED_SQL})
+                   AND d.severity IN ('warn','block') AND ${statusInSql(sql`d.resolution_status`, CLAIMABLE_DECIDED_STATUSES)}
                    AND d.type NOT IN (${NOT_A_CREDIT_SQL}) AND ABS(d.delta_amount) > 0
                ) AS accepted_ils,
                -- …a non-waived duplicate copy is held ("don't pay this copy"); its ₪ is the copy's total.
