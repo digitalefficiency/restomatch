@@ -217,7 +217,7 @@ export const en: Shape<typeof he> = {
       perUnit: 'per {unit}',
       mathLabel: 'The math',
       offset: 'Offset before payment',
-      claim: 'Add to credit claim',
+      claim: 'Add to the credit request',
       request: 'Ask the supplier for the contract price',
       requestHint: 'Opens a WhatsApp draft with this line only. Nothing is sent until you tap send.',
       paid: 'Paid',
