@@ -6,6 +6,8 @@ import type { he } from '../../../receiving/delivery.he';
 export const receivingDelivery: Shape<typeof he> = {
   delivery: {
     scan: {
+      registerFailed: 'ไม่ได้บันทึกใบแจ้งหนี้ — ถ่ายรูปใหม่',
+      registerRetry: 'ลองบันทึกอีกครั้ง',
       upload: 'อัปโหลดไฟล์ / PDF',
       uploaded: 'อัปโหลดใบแจ้งหนี้แล้ว',
       uploading: 'กำลังอัปโหลดใบแจ้งหนี้ · {seconds} วินาที',
@@ -16,6 +18,7 @@ export const receivingDelivery: Shape<typeof he> = {
       useAnyway: 'ใช้รูปนี้ต่อไป',
     },
     processing: {
+      ocrDisabled: 'การอ่านอัตโนมัติไม่ได้เปิดใช้ในบัญชีนี้ — ทำต่อโดยเทียบกับใบสั่งซื้อ',
       uploaded: 'ได้รับใบแจ้งหนี้แล้ว',
       reading: 'กำลังอ่านรายการในใบแจ้งหนี้',
       compare: 'กำลังเทียบกับใบสั่งซื้อ',

@@ -17,6 +17,7 @@
  * receiver could not send uploads with the next signed-in user of the same
  * branch, attributed to whoever took it ("צולם על ידי", decision 22 default).
  */
+import { ScanPrepError } from '../scanPrep';
 import { FIELD_DB_NAMES, ensurePhotosMigrated, outboxPhotoStore } from './fieldOutbox';
 import { idbOutboxStore } from './outbox';
 
@@ -126,6 +127,8 @@ export function classifyFailure(
 ): FailureKind {
   if (!online) return 'network';
   if (err instanceof ScopeChangedError || err instanceof SessionGoneError) return 'auth';
+  // The photo itself can't be made uploadable (too big / undecodable): retrying never helps.
+  if (err instanceof ScanPrepError) return 'permanent';
   const status = httpStatusOf(err);
   const code = trpcCodeOf(err);
   if (status === 401 || code === 'UNAUTHORIZED') return 'auth';
