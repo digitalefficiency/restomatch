@@ -228,7 +228,15 @@ export type { NavBadges };
  */
 function NavBadge({ value, dot = false }: { value?: NavBadgeValue; dot?: boolean }) {
   const locale = useLocale();
+  const t = useT(nav);
   if (!value || value.count <= 0) return null;
+  // A hover label for sighted users (the words also reach AT via BadgeSr): what the number IS.
+  const title = badgeAria('', value, locale, {
+    items: (count) => t('badge.items', { count }),
+    atRisk: (amount) => t('badge.atRisk', { amount }),
+    owed: (amount) => t('badge.owed', { amount }),
+    blocking: t('badge.blocking'),
+  }).replace(/^,\s*/, '');
   if (dot) {
     return (
       <span
@@ -241,6 +249,7 @@ function NavBadge({ value, dot = false }: { value?: NavBadgeValue; dot?: boolean
   return (
     <span
       aria-hidden="true"
+      title={title}
       data-nav-badge={value.block ? 'block' : value.tone}
       className={cn(
         'ms-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold tabular-nums',
@@ -269,6 +278,7 @@ function BadgeSr({ id, label, value }: { id: string; label: string; value?: NavB
   const full = badgeAria(label, value, locale, {
     items: (count) => t('badge.items', { count }),
     atRisk: (amount) => t('badge.atRisk', { amount }),
+    owed: (amount) => t('badge.owed', { amount }),
     blocking: t('badge.blocking'),
   });
   return (

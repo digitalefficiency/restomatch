@@ -133,6 +133,7 @@ export const nav: Shape<typeof he> = {
   badge: {
     items: '{count} шт.',
     atRisk: '{amount} под риском',
+    owed: '{amount} открытые кредиты',
     blocking: 'блокирует оплату',
   },
   bell: {
