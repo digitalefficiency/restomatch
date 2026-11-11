@@ -179,9 +179,6 @@ const CLAIMS_ALLOW: Array<{ where: string; text: string; reason: string }> = [];
 const CLAIMS_PENDING: Array<{ where: string; owner: string }> = [
   // W2-02 (invoices/he.ts) — fixing in the Train-C round
   { where: 'invoices:', owner: 'W2-02' },
-  // W2-09 (leaks/he.ts, leakProof/he.ts) — fixing in the Train-C round
-  { where: 'leaks:', owner: 'W2-09' },
-  { where: 'leakProof:', owner: 'W2-09' },
   // W2-11 (suppliers/he.ts) — fixing in the Train-C round
   { where: 'suppliers:', owner: 'W2-11' },
   // Reported to the orchestrator for routing (found by this guard)
