@@ -4,7 +4,7 @@
  */
 export const he = {
   spinner: { loading: 'טוען' },
-  loadMore: { label: 'טען עוד' },
+  loadMore: { label: 'טעינת עוד' },
   breadcrumbs: { label: 'פירורי לחם' },
   toast: {
     region: 'הודעות',
