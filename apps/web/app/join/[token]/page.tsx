@@ -7,7 +7,7 @@ import { labelForRole } from '@/lib/roles';
 import { AuthShell, authTitle } from '../../(auth)/_components/AuthShell';
 import { Notice } from '../../(auth)/_components/Notice';
 import { SubmitButton } from '../../(auth)/_components/SubmitButton';
-import { invitedAccountHasPassword, loadInvite } from '../_lib/joinFlow';
+import { invitedAccountExists, loadInvite } from '../_lib/joinFlow';
 import { sendJoinCodeAction } from '../actions';
 import { joinAcceptPath } from '../paths';
 import { JoinCodeForm } from './JoinCodeForm';
@@ -57,7 +57,7 @@ export default async function JoinPage({ params, searchParams }: PageProps) {
     );
   }
 
-  const [session, hasPassword] = await Promise.all([auth(), invitedAccountHasPassword(token)]);
+  const [session, hasPassword] = await Promise.all([auth(), invitedAccountExists(token)]);
   const signedInAs = session?.user?.id ? (session.user.email ?? '') : null;
   const step = sp.step === 'code' ? 'code' : 'start';
   const errorKey = (ERROR_KEYS as readonly string[]).includes(sp.e ?? '') ? (sp.e as JoinErrorKey) : null;
