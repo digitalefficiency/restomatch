@@ -4,7 +4,17 @@ import type { he } from './he';
 export const en: Shape<typeof he> = {
   title: 'Accounting exports',
   subtitle:
-    'Export approved invoices to structured files — CSV for spreadsheets, or the Israeli “uniform file” (1000) for direct upload to bookkeeping software.',
+    'Every checked invoice — including invoices with an open gap (flagged in the file). CSV for spreadsheets, or the Israeli “uniform file” (1000) for bookkeeping software.',
+  summary: {
+    label: 'What the file will contain',
+    loading: 'Counting the invoices in this range…',
+    invoices: '{count} invoices',
+    withGap: '{count} with an open gap',
+    inDispute: 'in dispute',
+    none: 'No checked invoices in this range.',
+    disputedNote: 'Invoices with an open gap are included and flagged in the “status” and “₪ in dispute” columns — don’t post them as fully payable before the decision.',
+    undated: '{count} without a date will be left out',
+  },
   range: 'Date range',
   from: 'From',
   to: 'To',

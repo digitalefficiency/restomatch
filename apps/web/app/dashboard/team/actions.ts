@@ -149,6 +149,8 @@ export async function revokeInvite(input: { id: string }): Promise<ActionResult>
 export async function updateMemberRole(input: {
   userId: string;
   role: UserRole;
+  /** The role the change was staged from; a stale one → CONFLICT. */
+  expectedRole?: UserRole;
 }): Promise<ActionResult> {
   try {
     const caller = await createServerCaller();
@@ -156,6 +158,16 @@ export async function updateMemberRole(input: {
     revalidatePath('/dashboard/team');
     return { ok: true, message: (await getT(team))('members.roleUpdated') };
   } catch (e) {
+    // Stale staged change: the server message names who changed it (Hebrew).
+    const code = (e as { code?: string }).code;
+    if (code === 'CONFLICT') {
+      revalidatePath('/dashboard/team');
+      const locale = await getLocale();
+      return {
+        ok: false,
+        message: locale === 'he' && e instanceof Error ? e.message : (await getT(team))('members.roleConflict'),
+      };
+    }
     return fail(e, 'members.roleFailed');
   }
 }
@@ -184,5 +196,20 @@ export async function setMemberLocale(input: {
     return { ok: true, message: (await getT(team))('members.localeUpdated', { email: input.email }) };
   } catch (e) {
     return fail(e, 'members.localeFailed');
+  }
+}
+
+/** Hand the restaurant to another member (W2-14). Owner only; audited server-side. */
+export async function transferOwnership(input: {
+  toUserId: string;
+  myNewRole: 'owner' | 'manager' | 'bookkeeper';
+}): Promise<ActionResult> {
+  try {
+    const caller = await createServerCaller();
+    await caller.team.transferOwnership(input);
+    revalidatePath('/dashboard/team');
+    return { ok: true, message: (await getT(team))('transfer.done') };
+  } catch (e) {
+    return fail(e, 'transfer.failed');
   }
 }
