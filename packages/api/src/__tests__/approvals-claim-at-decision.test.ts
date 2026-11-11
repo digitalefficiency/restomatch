@@ -108,13 +108,16 @@ describe('claim at decision', () => {
     expect((await counts()).claims).toBe(1);
   });
 
-  it('undo inside the window removes the bare claim; re-deciding creates exactly one fresh claim', async () => {
+  it('undo inside the window writes the claim off; re-deciding brings the SAME claim back (one per finding)', async () => {
     await callerAs(db, T, 'manager').approvals.approve({ discrepancyId: T.discrepancyId });
     await callerAs(db, T, 'manager').approvals.reopen({ discrepancyId: T.discrepancyId });
-    // Bare (no letter, no money): deleted with the undo, not left as a write-off (warden LOW-2).
-    expect((await counts()).claims).toBe(0);
+    // W2-10's model (recovery-decision-parity): written off in the undo's own step.
+    const [off] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.discrepancyId, T.discrepancyId));
+    expect(off!.status).toBe('written_off');
     await callerAs(db, T, 'manager').approvals.approve({ discrepancyId: T.discrepancyId });
-    expect((await counts()).claims).toBe(1);
+    const again = await db.select().from(recoveryClaims).where(eq(recoveryClaims.discrepancyId, T.discrepancyId));
+    expect(again).toHaveLength(1);
+    expect(again[0]!).toMatchObject({ id: off!.id, status: 'claimed' });
   });
 
   it('match.runForInvoice after an approve: the claim is rebound to the ORIGINAL decider, 0 claims lost (W2-04 rebind)', async () => {

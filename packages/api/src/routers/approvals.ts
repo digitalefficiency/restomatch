@@ -32,6 +32,7 @@ import { claimableLines, isNeverClaimable, type VatBasis } from '../lib/claims';
 import { formatIlsAgorot } from '../reports/money';
 import { DECISION_COPY } from '../notifications/templates';
 import { materializeClaims } from '../recovery/service';
+import { DISCREPANCY_DECIDABLE } from '../lifecycle/predicates';
 import { awaitingDecision, type AwaitingRouting } from '../approvals/awaiting';
 import {
   bulkRefusals,
@@ -73,7 +74,7 @@ function assertDecider(role: UserRole): void {
 }
 
 /** Only these rows are still a decision; every write is conditioned on it (approvals-11). */
-const OPEN_STATUSES = ['open', 'escalated'] as const;
+const OPEN_STATUSES = DISCREPANCY_DECIDABLE; // open | escalated — the lifecycle predicate (G-05)
 
 /**
  * Undo window for `reopen`. The client shows a 10 s undo toast; the server
@@ -1052,27 +1053,9 @@ async function reopenOne(tx: Database, ctx: Ctx, discrepancyId: string) {
     before: { status: decided, undoes: last.id },
     after: { status: priorStatus, requiresRole: updated.requiresRole, role: ctx.session.role },
   });
-  // The decision's claim goes with it. A BARE claim (no money, no letter, only
-  // its own "claimed" / system events — the releaseClaimsForRematch rule) is
-  // deleted, so a later re-accept creates a fresh claim under the person who
-  // decides then, with a fresh overdue clock. Anything with history is
-  // written off by materializeClaims as before.
-  await tx.execute(sql`
-    WITH bare AS (
-      SELECT c.id FROM recovery_claims c
-      WHERE c.restaurant_id = ${rid} AND c.discrepancy_id = ${discrepancyId}::uuid
-        AND c.status = 'claimed' AND c.credited_agorot = 0
-        AND c.letter_sent_at IS NULL AND c.acknowledged_at IS NULL AND c.credited_at IS NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM recovery_events e
-          WHERE e.claim_id = c.id AND e.restaurant_id = ${rid}
-            AND NOT (e.to_status = 'claimed' AND (e.from_status IS NULL OR e.actor_id IS NULL))
-        )
-    ), gone AS (
-      DELETE FROM recovery_events e USING bare WHERE e.claim_id = bare.id AND e.restaurant_id = ${rid}
-    )
-    DELETE FROM recovery_claims c USING bare WHERE c.id = bare.id AND c.restaurant_id = ${rid}
-  `);
+  // The decision's claim goes with it: materializeClaims writes the untouched
+  // claim off in this step (W2-10's one-claim-per-finding model); a re-accept
+  // brings the same claim back, never a duplicate.
   await materializeClaims(tx, { restaurantId: rid, discrepancyIds: [discrepancyId], actorId: ctx.session.userId });
   if (decided === 'escalated') {
     // The owners were told about a hand-off that no longer exists: cancel the

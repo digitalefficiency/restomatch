@@ -126,18 +126,17 @@ describe('LOW fixes', () => {
     expect(errors.some((e) => /deadlock/i.test(String(e.message)))).toBe(false);
   });
 
-  it('LOW-2: undo deletes the bare claim; a re-accept by someone else creates it under THEM with a fresh clock', async () => {
+  it('LOW-2 (W2-10 model): undo writes the claim off; a re-accept by someone else revives the same claim, never a duplicate', async () => {
     const { matchRunId } = await addInvoice(db, T, 'undo');
     const id = await addGap(db, T, matchRunId, { deltaAmount: '40.00' });
     await callerAs(db, T, 'manager').approvals.approve({ discrepancyId: id });
     const [first] = await claimsOf([id]);
     await callerAs(db, T, 'manager').approvals.reopen({ discrepancyId: id });
-    expect(await claimsOf([id])).toHaveLength(0);
+    expect((await claimsOf([id]))[0]!.status).toBe('written_off');
     await callerAs(db, T, 'owner').approvals.approve({ discrepancyId: id });
-    const [again] = await claimsOf([id]);
-    expect(again!.createdBy).toBe(T.ownerUserId);
-    expect(again!.id).not.toBe(first!.id);
-    expect(again!.claimedAt.getTime()).toBeGreaterThanOrEqual(first!.claimedAt.getTime());
+    const again = await claimsOf([id]);
+    expect(again).toHaveLength(1);
+    expect(again[0]!).toMatchObject({ id: first!.id, status: 'claimed', amountAgorot: 4000 });
   });
 
   it("LOW-6: undoing an escalation cancels that escalation's queued owner e-mails", async () => {
