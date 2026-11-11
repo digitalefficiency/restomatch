@@ -153,6 +153,15 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'payRun.enabled': 'isolation — payrun.attack.test.ts: reads only the caller restaurant flag; receiver/chef FORBIDDEN',
   'payRun.month':
     'isolation — payrun.attack.test.ts: only the caller restaurant invoices (B never in the payload); receiver/chef FORBIDDEN; flag off ⇒ nothing listed; ₪ = the credit letters to the agora',
+  // W2-03 (add-only): the due-date desk + guarded mark-paid / reminder.
+  'payRun.list':
+    "isolation — payrun.attack.test.ts: A's list never contains B's invoice, supplier or findings; receiver/chef FORBIDDEN",
+  'payRun.markPaid':
+    "attack — payrun.attack.test.ts: A marking B's invoiceId (alone or mixed) → NOT_FOUND with the flag on or off, B untouched",
+  'payRun.unmarkPaid':
+    "attack — payrun.attack.test.ts: A unmarking B's invoiceId → NOT_FOUND with the flag on or off, B untouched; a reason is required",
+  'payRun.remind':
+    "attack — payrun.attack.test.ts: A reminding on B's invoiceId → NOT_FOUND; receiver/chef FORBIDDEN; nothing sent until G-06",
   'owner.leakReport': 'isolation',
   'owner.leakSummary': 'isolation',
   'owner.leakGrouped': 'isolation',
