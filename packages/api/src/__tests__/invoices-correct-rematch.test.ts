@@ -5,6 +5,7 @@ import {
   createDb,
   ensureRlsAppRole,
   eq,
+  goodsReceipts,
   matchRuns,
   testDbUrl,
   type Database,
@@ -33,6 +34,9 @@ beforeAll(async () => {
   await seedPlans(ownerDb);
   A = await seedTenant(ownerDb, 'CA');
   B = await seedTenant(ownerDb, 'CB');
+  // Train B: a re-match waits while its receipt is still being counted
+  // (invoice.receiptOpen). The seeded receipt is counted and submitted.
+  for (const t of [A, B]) await ownerDb.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, t.grId));
 });
 afterAll(async () => {
   await resetDb(ownerDb);
