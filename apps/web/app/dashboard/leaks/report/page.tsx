@@ -121,7 +121,7 @@ export default async function LeakReportPage({
   const supplierSpendTotal = sumAgora(report.bySupplier.map((r) => r.spendIls));
   const state = leakStateOf(hero);
   const found = sumAgora([status.stillOpenIls, status.claimedIls, status.waivedIls]);
-  const checkedCount = Math.max(0, hero.invoiceCount - hero.pendingLinkCount - hero.awaitingCountCount);
+  const checkedCount = Math.max(0, hero.invoiceCount - hero.pendingLinkCount - hero.awaitingCountCount - hero.awaitingQuestionCount);
   // "טופל" lines count as approved-to-claim but no letter claims them: say so, in ₪.
   const resolved = (tracked ? approvedNotClaimed(lines, tracked) : []).map(({ invoice, line }) => ({
     amount: Math.abs(line.deltaAmount),
@@ -257,6 +257,14 @@ export default async function LeakReportPage({
           {hero.pendingLinkCount > 0 ? (
             <p className="rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-muted">
               {t('report.pending', { count: num(hero.pendingLinkCount), amount: ils(hero.pendingLinkIls) })}
+            </p>
+          ) : null}
+          {hero.awaitingQuestionCount > 0 ? (
+            <p data-testid="report-awaiting-question" className="rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-muted">
+              {t('report.awaitingQuestion', { count: num(hero.awaitingQuestionCount), amount: ils(hero.awaitingQuestionIls) })}{' '}
+              <Link href="/dashboard/catalog/mapping" className="font-semibold text-primary underline-offset-2 hover:underline">
+                {t('report.awaitingQuestionCta')}
+              </Link>
             </p>
           ) : null}
         </section>
