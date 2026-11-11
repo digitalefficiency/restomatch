@@ -175,7 +175,9 @@ test.describe('phone 390×844', () => {
     await expect(page.getByTestId('approvals-filters-toggle')).toBeVisible();
     await expect(page.locator('#approvals-filters')).toBeHidden();
     // Why-line in the card: billed × qty instead of the order price.
-    await expect(first.getByTestId('why-line')).toContainText('PO-W107');
+    // The order by supplier + date (lab 11.11), never its raw code inside the sentence.
+    await expect(first.getByTestId('why-line')).toContainText('(הזמנה מ־');
+    await expect(first.getByTestId('why-line')).not.toContainText('PO-W107');
     // he-IL ₪: the glyph is LEFT of the first digit.
     const amount = first.getByTestId('card-amount');
     const pos = await amount.evaluate((el) => {
