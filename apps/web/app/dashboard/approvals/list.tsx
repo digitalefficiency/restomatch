@@ -577,16 +577,24 @@ export function ApprovalsList({
                   sticky={landing}
                   select={
                     landing || d.canAct === false ? null : (
-                      <input
-                        type="checkbox"
-                        className="h-5 w-5 shrink-0 accent-[var(--c-primary)]"
-                        checked={selected.has(d.id)}
-                        disabled={d.severity === 'block'}
-                        title={d.severity === 'block' ? t('desk.batchBlock') : undefined}
-                        aria-label={t('desk.select', { name: itemName(locale, d) || discrepancyLabel(t, d.type) })}
-                        onChange={() => toggle(d.id)}
-                        data-testid="card-select"
-                      />
+                      // The label is the 44×44 touch target; -m-3 keeps the 20 px box's layout.
+                      <label
+                        className={cn(
+                          '-m-3 inline-flex h-11 w-11 shrink-0 items-center justify-center',
+                          d.severity === 'block' ? 'cursor-not-allowed' : 'cursor-pointer',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-5 w-5 shrink-0 accent-[var(--c-primary)]"
+                          checked={selected.has(d.id)}
+                          disabled={d.severity === 'block'}
+                          title={d.severity === 'block' ? t('desk.batchBlock') : undefined}
+                          aria-label={t('desk.select', { name: itemName(locale, d) || discrepancyLabel(t, d.type) })}
+                          onChange={() => toggle(d.id)}
+                          data-testid="card-select"
+                        />
+                      </label>
                     )
                   }
                   footer={
