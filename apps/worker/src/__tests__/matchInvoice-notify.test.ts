@@ -32,4 +32,18 @@ describe('match-invoice notification copy', () => {
       expect(src).not.toMatch(/₪\$\{/);
     }
   });
+
+  it('ONE alert path per matched invoice: persist (shared with match.runForInvoice) sends nothing, matchInvoice notifies once', () => {
+    const api = join(here, '..', '..', '..', '..', 'packages', 'api', 'src');
+    for (const f of [join(api, 'match', 'persist.ts'), join(api, 'routers', 'match.ts')]) {
+      const src = readFileSync(f, 'utf8');
+      expect(src).not.toMatch(/enqueueNotification\(|\.send\(|createPushNotifier|createWhatsAppNotifier|createEmailNotifier/);
+    }
+    const job = readFileSync(join(here, '..', 'jobs', 'matchInvoice.ts'), 'utf8');
+    // matchAlert stays a pure copy helper; this job does not also send its body.
+    expect(job).not.toMatch(/matchAlert\(/);
+    expect(job.match(/push\.send\(/g)).toHaveLength(1);
+    expect(job.match(/whatsapp\.send\(/g)).toHaveLength(1);
+    expect(job.match(/approvalNeededEmail\(/g)).toHaveLength(1);
+  });
 });
