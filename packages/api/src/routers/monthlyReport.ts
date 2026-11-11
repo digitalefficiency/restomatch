@@ -3,21 +3,26 @@ import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
 import { recipientsForRestaurant } from '../notifications/recipients';
 import { loadMonthlyReport, monthlyReportEmail, monthlyReportWhatsApp, previousMonthKey } from '../reports/monthly';
 import { renderMonthlyReportPdf } from '../reports/pdf';
-import { managerProcedure, router } from '../trpc';
+import { computeLeakReport } from '@restomatch/charts';
+import { financeProcedure, router } from '../trpc';
 
 /**
  * Monthly "one number" report (flag `monthlyReport`): preview this month's (or
  * any past month's — the frozen snapshot once the worker sent it) report in the dashboard — the data, the email exactly as it
- * will be sent, the WhatsApp text — and download the PDF. Owner/manager only
- * (it lists supplier spend), like owner.leakReport. Read-only.
+ * will be sent, the WhatsApp text — and download the PDF. Finance roles: owner,
+ * manager and the bookkeeper, who reads every month report read-only (owner
+ * decision I3, 7.11; W3-08). Receiver and chef never (it lists supplier spend).
+ * No report data is written here, with one caveat: for a month without a frozen
+ * snapshot, computeMonthlyReport runs syncClaims (recovery flag on), the same
+ * claim sync recovery.summary/list already trigger for these roles.
  */
-const reportProcedure = managerProcedure.use(async ({ ctx, next }) => {
+const reportProcedure = financeProcedure.use(async ({ ctx, next }) => {
   await assertFeatureOn(ctx.db, ctx.session.restaurantId, 'monthlyReport');
   return next();
 });
 
 /** In-app preview of the monthly email (flag `monthlyDigestPreview`) — independent of `monthlyReport`. */
-const digestProcedure = managerProcedure.use(async ({ ctx, next }) => {
+const digestProcedure = financeProcedure.use(async ({ ctx, next }) => {
   await assertFeatureOn(ctx.db, ctx.session.restaurantId, 'monthlyDigestPreview');
   return next();
 });
@@ -58,6 +63,17 @@ export const monthlyReportRouter = router({
         base64: Buffer.from(bytes).toString('base64'),
       };
     }),
+
+  /**
+   * "לפי ספק וסוג" of "דוח החודש" (W3-08): the month's live breakdown by
+   * supplier and by discrepancy type, the same computeLeakReport behind
+   * owner.leakReport, behind this router's finance gate so the bookkeeper can
+   * read it (I3). Caller-scoped: no id input, the session's restaurant only.
+   */
+  breakdown: reportProcedure.input(z.object({ month: monthInput })).query(async ({ ctx, input }) => {
+    const r = await computeLeakReport(ctx.db, ctx.session.restaurantId, input.month);
+    return { month: r.month, hero: r.hero, byType: r.byType, bySupplier: r.bySupplier, capAdjustmentIls: r.capAdjustmentIls };
+  }),
 
   /**
    * The monthly email as the owner would receive it — this month so far by
