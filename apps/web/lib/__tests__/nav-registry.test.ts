@@ -174,6 +174,7 @@ describe('ROUTE_ROLES generated from the registry', () => {
       ['/dashboard/orders']: orders,
       ['/dashboard/suppliers']: suppliersHub,
       ['/dashboard/inventory']: inventory,
+      ['/dashboard/chain/matrix']: chainMatrix,
       ...rest
     } = ROUTE_ROLES;
     const {
@@ -200,6 +201,9 @@ describe('ROUTE_ROLES generated from the registry', () => {
     // Same decision: inventory, read-only for the bookkeeper (W2-07 serves the read tier).
     expect(inventoryBefore).toEqual(['owner', 'manager', 'chef']);
     expect(inventory).toEqual(['owner', 'manager', 'chef', 'bookkeeper']);
+    // W3-01 (decision 7, granted 7.11): the chain's bookkeeper reads the branch matrix, read-only.
+    expect(ROUTE_ROLES_BEFORE['/dashboard/chain/matrix']).toBeUndefined();
+    expect([...(chainMatrix ?? [])].sort()).toEqual(['bookkeeper', 'owner']);
     // The printable leak report keeps inheriting /leaks (no silent bounce for the bookkeeper's button).
     expect(ROUTE_ROLES['/dashboard/leaks/report']).toBeUndefined();
     expect(allowedRolesForPath('/dashboard/leaks/report')).toContain('bookkeeper');
@@ -231,7 +235,9 @@ describe('ROUTE_ROLES generated from the registry', () => {
       const suppliersBookkeeper = (role: UserRole) =>
         role === 'bookkeeper' &&
         ['/dashboard/suppliers', '/dashboard/inventory'].some((p) => concrete === p || concrete.startsWith(`${p}/`));
-      for (const role of now) if (!ordersChef(role) && !suppliersBookkeeper(role)) expect(was, `${role} on ${concrete}`).toContain(role);
+      // W3-01 (decision 7): the bookkeeper reads the chain matrix (read-only; chain.matrix re-checks per branch).
+      const matrixBookkeeper = (role: UserRole) => role === 'bookkeeper' && concrete === '/dashboard/chain/matrix';
+      for (const role of now) if (!ordersChef(role) && !suppliersBookkeeper(role) && !matrixBookkeeper(role)) expect(was, `${role} on ${concrete}`).toContain(role);
     }
   });
 });

@@ -5,12 +5,16 @@ import {
   aggregateChain,
   computeBranchPriceLines,
   computeBranchSnapshot,
+  computeLeakBreakdown,
   computeLeakGrouped,
   computeLeakSummary,
   computePriceDisparities,
   VIEW_COMPARES,
   VIEW_PERIODS,
+  type BranchMonthPoint,
+  type BranchSnapshot,
   type ChainOverview,
+  type ChainTotals,
   type PriceDisparityRow,
 } from '@restomatch/charts';
 import {
@@ -33,6 +37,9 @@ import { recordAudit } from '../audit';
 import type { AuthedContext } from '../context';
 import { getEntitlements, type Entitlements } from '../entitlements';
 import { featureEnabled } from '../lib/features';
+import { isFeatureOn } from '../lib/featureGate';
+import { computeRecoverySummary } from '../recovery/service';
+import { computeQueueSummary } from './approvals';
 import { authedProcedure, router } from '../trpc';
 import { hasNoControlChars, NO_CONTROL_CHARS_MESSAGE } from '../lib/text';
 
@@ -305,7 +312,345 @@ export function pickAlertFocus(branches: ChainAlertBranch[]): { focus: ChainAler
   return { focus: top && top.leakIls >= ALERT_MIN_LEAK_ILS ? top : null, branches: ranked };
 }
 
+
+/* ── W3-01 · branch scope + the roll-up matrix ─────────────────────────────── */
+
+/**
+ * The URL scope `b=all|<restaurantId>|g:<group>`. Group = billing account (no
+ * group table, PROGRAMME-PLAN §5.3). Anything that does not parse is `all`:
+ * a broken link widens nothing — the server still limits it to the caller's
+ * own memberships.
+ */
+export type BranchScope =
+  | { kind: 'all' }
+  | { kind: 'branch'; restaurantId: string }
+  | { kind: 'group'; billingAccountId: string };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function parseBranchScope(raw: unknown): BranchScope {
+  if (typeof raw !== 'string') return { kind: 'all' };
+  const v = raw.trim();
+  if (UUID.test(v)) return { kind: 'branch', restaurantId: v.toLowerCase() };
+  if (v.startsWith('g:') && UUID.test(v.slice(2))) return { kind: 'group', billingAccountId: v.slice(2).toLowerCase() };
+  return { kind: 'all' };
+}
+
+/** Roles that may READ the chain matrix. Writes (rename / add branch) stay owner-only. */
+export const MATRIX_READ_ROLES: ReadonlyArray<UserRole> = ['owner', 'bookkeeper'];
+
+export interface MatrixScope {
+  active: MembershipRow;
+  /** The caller's role on the active branch; every listed branch has the same role. */
+  lens: UserRole;
+  /** Every branch the lens reaches on the active billing account (the "כל הסניפים" set). */
+  pool: MembershipRow[];
+  /** The branches the requested scope selects (a subset of `pool`). */
+  branches: MembershipRow[];
+}
+
+/**
+ * The matrix rule, pure. The active branch must be an owner or bookkeeper
+ * membership (decision 7: the bookkeeper reads everything, read-only). The pool
+ * is every membership of THAT same role on the same non-null billing account
+ * (else just the active branch). An id or group the pool does not hold →
+ * NOT_FOUND, the same answer for "exists but not yours" and "does not exist".
+ */
+export function resolveMatrixScope(
+  rows: MembershipRow[],
+  activeRestaurantId: string | null,
+  scope: BranchScope,
+): MatrixScope {
+  // A user may hold several roles on one branch (PK user+restaurant+role): owner wins, then bookkeeper.
+  const active = MATRIX_READ_ROLES.map((role) =>
+    rows.find((r) => r.restaurantId === activeRestaurantId && r.role === role),
+  ).find((r) => r !== undefined);
+  if (!active) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'chain matrix is owner / bookkeeper only' });
+  }
+  const pool = active.billingAccountId
+    ? rows.filter((r) => r.role === active.role && r.billingAccountId === active.billingAccountId)
+    : [active];
+  pool.sort((a, b) => a.name.localeCompare(b.name, 'he'));
+  let branches = pool;
+  if (scope.kind === 'branch') {
+    branches = pool.filter((r) => r.restaurantId === scope.restaurantId);
+  } else if (scope.kind === 'group' && scope.billingAccountId !== active.billingAccountId) {
+    branches = [];
+  }
+  if (branches.length === 0) throw new TRPCError({ code: 'NOT_FOUND', message: 'branch not found' });
+  return { active, lens: active.role, pool, branches };
+}
+
+/** T4 no data · pending (only invoices waiting to link) · T3 clean · leak. */
+export type MatrixCellState = 'no_data' | 'pending' | 'clean' | 'leak';
+
+export function matrixCellState(s: Pick<BranchSnapshot, 'invoiceCount' | 'pendingLinkCount' | 'leakIls' | 'spendIls'>): MatrixCellState {
+  if (s.leakIls > 0) return 'leak';
+  if (s.invoiceCount > 0 && s.spendIls > 0) return 'clean';
+  if (s.pendingLinkCount > 0) return 'pending';
+  return 'no_data';
+}
+
+/** Checked ÷ (checked + waiting to link); null with no invoices at all (never a fake 100%). */
+export function completenessOf(invoiceCount: number, pendingLinkCount: number): number | null {
+  const all = invoiceCount + pendingLinkCount;
+  return all > 0 ? invoiceCount / all : null;
+}
+
+/** The per-branch numbers the matrix adds next to the snapshot (all from existing readers). */
+export interface MatrixExtras {
+  /** ₪ awaiting a decision (approvals.queueSummary, owner lens: the whole branch queue). */
+  awaitingIls: number;
+  awaitingCount: number;
+  /** Open credit requests ₪ (recovery outstanding); null when the branch has `recovery` off. */
+  openCreditIls: number | null;
+  /** ₪ actually back (recovery `recovered`); null when the branch has `recovery` off. */
+  recoveredIls: number | null;
+}
+
+export type MatrixInput =
+  | { ok: true; snapshot: BranchSnapshot; extras: MatrixExtras }
+  | { ok: false; restaurantId: string; name: string };
+
+export interface MatrixBranchOk {
+  status: 'ok';
+  restaurantId: string;
+  name: string;
+  isActive: boolean;
+  state: MatrixCellState;
+  /** 1 = the most leak ₪ among the OK branches. */
+  rank: number;
+  leakIls: number;
+  spendIls: number;
+  leakPct: number | null;
+  leakDeltaIls: number | null;
+  thinBase: boolean;
+  caughtBeforePaymentIls: number;
+  claimedIls: number;
+  awaitingIls: number;
+  awaitingCount: number;
+  openCreditIls: number | null;
+  recoveredIls: number | null;
+  invoiceCount: number;
+  pendingLinkCount: number;
+  completeness: number | null;
+  /** Sparkline / heatmap, oldest → newest. */
+  trend: BranchMonthPoint[];
+}
+
+export interface MatrixBranchError {
+  status: 'error';
+  restaurantId: string;
+  name: string;
+  isActive: boolean;
+}
+
+export type MatrixBranch = MatrixBranchOk | MatrixBranchError;
+
+export interface MatrixTotals extends ChainTotals {
+  awaitingIls: number;
+  awaitingCount: number;
+  /** null when no OK branch has `recovery` on. */
+  openCreditIls: number | null;
+  recoveredIls: number | null;
+  invoiceCount: number;
+  pendingLinkCount: number;
+  completeness: number | null;
+  /** At least one branch failed: the total covers the OK branches only. */
+  partial: boolean;
+}
+
+export interface ChainMatrix {
+  periodStart: string | null;
+  periodEnd: string | null;
+  /** Oldest → newest. */
+  months: string[];
+  totals: MatrixTotals;
+  branches: MatrixBranch[];
+  worstBranchId: string | null;
+}
+
+const toAg = (v: number): number => Math.round(v * 100);
+
+/**
+ * Pure: the matrix from per-branch results the caller computed under each
+ * branch's RLS. The ₪ total row IS `aggregateChain` over the OK snapshots (the
+ * same sum as chain.overview and its KPIs); the added columns are summed in
+ * integer agorot. Rows keep `inputs` order (the caller sorts by name).
+ */
+export function buildMatrix(inputs: MatrixInput[], activeRestaurantId: string): ChainMatrix {
+  const oks = inputs.filter((i): i is Extract<MatrixInput, { ok: true }> => i.ok);
+  const agg = aggregateChain(oks.map((o) => o.snapshot), { topSuppliers: 0 });
+  const rowById = new Map(agg.branches.map((b) => [b.restaurantId, b]));
+  let awaiting = 0;
+  let awaitingCount = 0;
+  let open: number | null = null;
+  let recovered: number | null = null;
+  let invoiceCount = 0;
+  let pendingLinkCount = 0;
+  const branches: MatrixBranch[] = inputs.map((i) => {
+    const restaurantId = i.ok ? i.snapshot.restaurantId : i.restaurantId;
+    const isActive = restaurantId === activeRestaurantId;
+    if (!i.ok) return { status: 'error', restaurantId, name: i.name, isActive };
+    const row = rowById.get(restaurantId)!;
+    const x = i.extras;
+    awaiting += toAg(x.awaitingIls);
+    awaitingCount += x.awaitingCount;
+    if (x.openCreditIls !== null) open = (open ?? 0) + toAg(x.openCreditIls);
+    if (x.recoveredIls !== null) recovered = (recovered ?? 0) + toAg(x.recoveredIls);
+    invoiceCount += row.invoiceCount;
+    pendingLinkCount += row.pendingLinkCount;
+    return {
+      status: 'ok',
+      restaurantId,
+      name: row.name,
+      isActive,
+      state: matrixCellState(row),
+      rank: row.rank,
+      leakIls: row.leakIls,
+      spendIls: row.spendIls,
+      leakPct: row.leakPct,
+      leakDeltaIls: row.leakDeltaIls,
+      thinBase: row.thinBase,
+      caughtBeforePaymentIls: row.caughtBeforePaymentIls,
+      claimedIls: row.claimedIls,
+      awaitingIls: x.awaitingIls,
+      awaitingCount: x.awaitingCount,
+      openCreditIls: x.openCreditIls,
+      recoveredIls: x.recoveredIls,
+      invoiceCount: row.invoiceCount,
+      pendingLinkCount: row.pendingLinkCount,
+      completeness: completenessOf(row.invoiceCount, row.pendingLinkCount),
+      trend: row.trend,
+    };
+  });
+  return {
+    periodStart: agg.periodStart,
+    periodEnd: agg.periodEnd,
+    months: agg.months,
+    totals: {
+      ...agg.totals,
+      awaitingIls: awaiting / 100,
+      awaitingCount,
+      openCreditIls: open === null ? null : open / 100,
+      recoveredIls: recovered === null ? null : recovered / 100,
+      invoiceCount,
+      pendingLinkCount,
+      completeness: completenessOf(invoiceCount, pendingLinkCount),
+      partial: oks.length < inputs.length,
+    },
+    branches,
+    worstBranchId: agg.worstBranchId,
+  };
+}
+
+/** Per-branch extras, inside that branch's own `inBranch` transaction. */
+async function matrixExtras(tx: Database, restaurantId: string): Promise<MatrixExtras> {
+  // Owner lens: the whole branch queue, the same rows and ₪ as the approvals tile.
+  const queue = await computeQueueSummary(tx, restaurantId, 'owner');
+  const recoveryOn = await isFeatureOn(tx, restaurantId, 'recovery');
+  // Read-only: listClaims never materialises claims (the recovery screen's syncClaims does).
+  const rec = recoveryOn ? await computeRecoverySummary(tx, restaurantId) : null;
+  return {
+    awaitingIls: queue.toDecide.amountIls,
+    awaitingCount: queue.toDecide.count,
+    openCreditIls: rec ? rec.outstandingAgorot / 100 : null,
+    recoveredIls: rec ? rec.recoveredAgorot / 100 : null,
+  };
+}
+
+const ScopeInput = z.string().max(64).optional();
+
 export const chainRouter = router({
+  /**
+   * W3-01 roll-up matrix: one row per branch in the requested scope, each
+   * computed in its own `inBranch` (RLS) with the existing readers; a branch
+   * that throws becomes an error row, never a failed page. Owner or bookkeeper
+   * (read-only); same plan gate as `overview`.
+   */
+  matrix: authedProcedure
+    .input(
+      z
+        .object({
+          view: ChainViewInput.optional(),
+          compare: z.enum(VIEW_COMPARES).default('off'),
+          scope: ScopeInput,
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }): Promise<ChainMatrix & { scope: BranchScope; lens: UserRole; truncated: boolean; compare: string; pool: ChainBranch[] }> => {
+      const rows = await myMembershipRows(ctx.db, ctx.session.userId);
+      const scope = parseBranchScope(input?.scope);
+      const ms = resolveMatrixScope(rows, ctx.session.restaurantId, scope);
+      const gate = await gateFor(ctx, { active: ms.active, branches: ms.pool });
+      if (!gate.chainEnabled) throw chainRequired(gate.entitlements.planKey);
+
+      const spec = input?.view ?? { period: 'this_month' as const };
+      const compare = input?.compare ?? 'off';
+      const branches = ms.branches.slice(0, MAX_CHAIN_BRANCHES);
+      const results = await mapLimit(branches, BRANCH_CONCURRENCY, async (b): Promise<MatrixInput> => {
+        try {
+          return await inBranch(ctx.db, ctx.session.userId, b.restaurantId, async (tx) => {
+            const snapshot = await computeBranchSnapshot(tx, b.restaurantId, b.name, { spec, compare, trendMonths: 6 });
+            return { ok: true as const, snapshot, extras: await matrixExtras(tx, b.restaurantId) };
+          });
+        } catch (err) {
+          console.error('[chain.matrix] branch failed', b.restaurantId, err instanceof Error ? err.message : 'unknown');
+          return { ok: false, restaurantId: b.restaurantId, name: b.name };
+        }
+      });
+      return {
+        ...buildMatrix(results, ms.active.restaurantId),
+        scope,
+        lens: ms.lens,
+        truncated: ms.branches.length > MAX_CHAIN_BRANCHES,
+        compare,
+        pool: ms.pool.map((b) => ({ restaurantId: b.restaurantId, name: b.name, isActive: b.restaurantId === ms.active.restaurantId })),
+      };
+    }),
+
+  /**
+   * The 520 px branch peek: one branch's top suppliers and biggest invoices of
+   * the period, after the same membership check as the matrix.
+   */
+  branchPeek: authedProcedure
+    .input(z.object({ restaurantId: z.string().uuid(), view: ChainViewInput.optional() }))
+    .query(async ({ ctx, input }) => {
+      const rows = await myMembershipRows(ctx.db, ctx.session.userId);
+      const ms = resolveMatrixScope(rows, ctx.session.restaurantId, { kind: 'branch', restaurantId: input.restaurantId.toLowerCase() });
+      const gate = await gateFor(ctx, { active: ms.active, branches: ms.pool });
+      if (!gate.chainEnabled) throw chainRequired(gate.entitlements.planKey);
+      const b = ms.branches[0]!;
+      const spec = input.view ?? { period: 'this_month' as const };
+      return inBranch(ctx.db, ctx.session.userId, b.restaurantId, async (tx) => {
+        const snapshot = await computeBranchSnapshot(tx, b.restaurantId, b.name, { spec, trendMonths: 1 });
+        const invoices = await computeLeakBreakdown(tx, b.restaurantId, { view: spec, limit: 3 });
+        return {
+          restaurantId: b.restaurantId,
+          name: b.name,
+          state: matrixCellState(snapshot),
+          leakIls: snapshot.leakIls,
+          spendIls: snapshot.spendIls,
+          leakPct: snapshot.leakPct,
+          topSuppliers: [...snapshot.suppliers]
+            .filter((s) => s.leakIls > 0)
+            .sort((x, y) => y.leakIls - x.leakIls)
+            .slice(0, 5),
+          biggestInvoices: invoices
+            .filter((i) => i.leakIls > 0)
+            .map((i) => ({
+              invoiceId: i.invoiceId,
+              invoiceNumber: i.invoiceNumber,
+              invoiceDate: i.invoiceDate,
+              supplierName: i.supplierName,
+              supplierNameEn: i.supplierNameEn,
+              leakIls: i.leakIls,
+            })),
+        };
+      });
+    }),
+
   /** The owner's branches on this billing account + what the plan allows. */
   branches: authedProcedure.query(async ({ ctx }): Promise<ChainBranchesResult> => {
     const scope = await resolveScope(ctx);

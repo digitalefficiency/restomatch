@@ -14,4 +14,18 @@ export const routes: RouteDef[] = [
     badge: null,
     aliases: ['רשת', 'סניפים', 'chain', 'branches'],
   },
+  {
+    // W3-01 roll-up matrix: every branch side by side, one click from the chain
+    // page. The owner, and the chain's bookkeeper read-only (decision 7: the
+    // bookkeeper reads everything). The chain router re-checks the membership
+    // per branch.
+    key: 'chainMatrix',
+    path: '/dashboard/chain/matrix',
+    group: 'chain',
+    parent: 'chain',
+    roles: ['owner', 'bookkeeper'],
+    chain: 'only',
+    nav: 'linked',
+    aliases: ['כל הסניפים', 'מטריצת סניפים', 'matrix'],
+  },
 ];
