@@ -6,6 +6,8 @@ import type { he } from '../../../receiving/delivery.he';
 export const receivingDelivery: Shape<typeof he> = {
   delivery: {
     scan: {
+      registerFailed: 'እቲ ፋቱራ ኣይተዓቀበን — ደጊምኩም ስኣሉ',
+      registerRetry: 'ደጊምኩም ንምዕቃብ ፈትኑ',
       upload: 'ፋይል / PDF ስደዱ',
       uploaded: 'ፋክቱራ ተሰዲዱ',
       uploading: 'ፋክቱራ ይስደድ ኣሎ · {seconds} ካልኢት',
@@ -16,6 +18,7 @@ export const receivingDelivery: Shape<typeof he> = {
       useAnyway: 'ነዚ ስእሊ ብዝኾነ ተጠቐሙ',
     },
     processing: {
+      ocrDisabled: 'ኣውቶማቲክ ንባብ ኣብዚ ሕሳብ ኣይሰርሕን እዩ — ምስ ትእዛዝ ቀጽሉ',
       uploaded: 'ፋክቱራ ተቐቢልና',
       reading: 'መስመራት ፋክቱራ ነንብብ ኣለና',
       compare: 'ምስ ትእዛዝ ነወዳድር ኣለና',

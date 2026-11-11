@@ -70,7 +70,8 @@ async function setLocale(page: Page, locale: Locale) {
 async function heroLeak(page: Page): Promise<string> {
   await page.goto('/dashboard');
   const hero = page.locator('section[aria-labelledby="leak-hero-label"]');
-  return (await hero.locator('p.font-mono').first().innerText()).trim();
+  // W1-05 (b73e4f35): the hero ₪ is a plain <bdi> under data-testid="leak-hero-amount" (never mono).
+  return (await hero.getByTestId('leak-hero-amount').first().innerText()).trim();
 }
 
 /** The status badge of this PO's row: the table row on desktop, the card on phone. */

@@ -1,7 +1,41 @@
 export * from './types';
 export { StubOcrProvider, FixtureRoutingOcrProvider } from './providers/stub';
 export { GoogleDocumentAi, type GoogleDocumentAiConfig } from './providers/documentAi';
-export { ClaudeVision, type ClaudeVisionConfig } from './providers/claudeVision';
+export {
+  ClaudeVision,
+  DEFAULT_OCR_MODEL,
+  DEFAULT_OCR_EFFORT,
+  DEFAULT_OCR_TIMEOUT_MS,
+  OCR_MAX_RETRIES,
+  ocrTimeoutMs,
+  type ClaudeVisionConfig,
+  type ClaudeInvoiceExtraction,
+  type ExtractionMeta,
+  type OcrEffort,
+} from './providers/claudeVision';
+export {
+  InvoiceExtractionV2,
+  InvoiceLineV2,
+  DOCUMENT_KINDS,
+  LINE_KINDS,
+  DeliveryNoteRef,
+  cleanDeliveryNotes,
+  type DocumentKind,
+  type LineKind,
+} from './providers/invoiceSchema';
+export { OcrExtractionError, isOcrExtractionError, type OcrFailureCode, type OcrUsage } from './errors';
+export {
+  checkInvoice,
+  isValidIsraeliBusinessId,
+  normalizeBusinessId,
+  lineProductAgorot,
+  toAgorot,
+  REVIEW_SCORE,
+  type CheckableInvoice,
+  type OcrCheckIssue,
+  type OcrCheckReason,
+  type OcrChecks,
+} from './checks';
 export {
   ClaudePoParser,
   StubPoParser,
@@ -10,6 +44,17 @@ export {
   type PoExtraction,
   type PlatformId,
 } from './providers/claudePoVision';
+export {
+  classifyConsolidation,
+  billingPeriodOf,
+  consolidatedRawOf,
+  type BillingPeriod,
+  type Consolidation,
+  type ConsolidationBasis,
+  type ConsolidationInput,
+  type ConsolidationResult,
+  type ConsolidatedRawFields,
+} from './consolidation';
 export { reconcile, type ReconcileResult } from './reconciler';
 export { runOcrPipeline } from './pipeline';
 export {
