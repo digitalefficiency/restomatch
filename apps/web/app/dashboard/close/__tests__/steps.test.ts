@@ -92,6 +92,8 @@ describe('close month', () => {
     expect(resolveMonth('2026-12', now)).toBe('2026-11');
     expect(resolveMonth('2026-13', now)).toBe('2026-11');
     expect(resolveMonth('x', now)).toBe('2026-11');
+    expect(resolveMonth('2024-11', now)).toBe('2024-11'); // 24 back: the register's limit
+    expect(resolveMonth('2024-10', now)).toBe('2026-11'); // older: the API would reject it
   });
 
   it('steps across the year boundary', () => {

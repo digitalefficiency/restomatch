@@ -105,7 +105,7 @@ describe('close.checklist (DB)', () => {
     expect(reg.counts.awaiting).toBe(r.unchecked.count);
   });
 
-  it('pending consolidated invoices: their own T4 step (still in the register’s awaiting tab); settled ones drop out', async () => {
+  it('pending consolidated invoices are their own T4 step, never also counted as unchecked (T2); settled ones drop out', async () => {
     const first = await invoice(A, { day: '2026-09-02', incl: '1000.00', status: 'parsed', consolidated: true });
     await invoice(A, { day: '2026-09-20', incl: '250.50', status: 'ocr_pending', consolidated: true });
     await invoice(A, { day: '2026-09-21', incl: '400.00', status: 'approved', consolidated: true });
@@ -113,8 +113,11 @@ describe('close.checklist (DB)', () => {
 
     const r = await callerFor(A).close.checklist({ month: MONTH });
     expect(r.consolidated).toEqual({ count: 2, amountIls: 1250.5, firstInvoiceId: first });
-    // Step 1 is the register's awaiting tab, which holds these two as well (count = its link).
-    expect(r.unchecked.count).toBe(2);
+    // Never the same ₪ twice, and a T4 invoice never raised as a T2 alarm.
+    expect(r.unchecked).toEqual({ count: 0, amountIls: 0 });
+    // The register's awaiting tab (step 1's link) shows step 1 plus step 4's two awaiting rows.
+    const reg = await callerFor(A).invoices.list({ monthOffset: r.monthOffset });
+    expect(reg.counts.awaiting).toBe(r.unchecked.count + 2);
   });
 
   it('delivery notes no invoice covers: null while the ledger flag is off, else the reused coverage rule', async () => {
@@ -147,6 +150,19 @@ describe('close.checklist (DB)', () => {
 
   it('rejects a malformed month', async () => {
     await expect(callerFor(A).close.checklist({ month: '2026-13' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  it('rejects a month outside the register range instead of returning another month under its label', async () => {
+    const now = new Date();
+    const ym = (back: number) => {
+      const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 15));
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    };
+    await expect(callerFor(A).close.checklist({ month: ym(-2) })).rejects.toMatchObject({ code: 'BAD_REQUEST' }); // future
+    await expect(callerFor(A).close.checklist({ month: ym(30) })).rejects.toMatchObject({ code: 'BAD_REQUEST' }); // > 24 back
+    const ok = await callerFor(A).close.checklist({ month: ym(24) });
+    expect(ok.month).toBe(ym(24));
+    expect(ok.monthOffset).toBe(-24);
   });
 });
 
