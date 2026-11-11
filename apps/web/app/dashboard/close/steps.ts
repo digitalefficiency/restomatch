@@ -37,7 +37,9 @@ export interface Figure {
 }
 
 export interface CloseSources {
-  /** `close.checklist`. */
+  /** `close.checklist`: the register month (`?month=`) the invoice steps link to. */
+  monthOffset: number;
+  /** `close.checklist`: the register's awaiting tab for the month. */
   unchecked: Figure;
   consolidated: Figure & { firstInvoiceId: string | null };
   deliveryNotes: Figure | null;
@@ -54,7 +56,8 @@ export interface Step {
   state: StepState;
   count: number | null;
   amountIls: number | null;
-  href: string;
+  /** The queue where the number lives; null = no button (state `off`, or the number has no screen). */
+  href: string | null;
   /** The single primary CTA of the page. */
   primary: boolean;
   /** The figure is all open items now, not only the month. */
@@ -63,11 +66,15 @@ export interface Step {
 
 export const LEDGER_HREF = '/dashboard/suppliers/ledger';
 
-/** Where each number lives. The unchecked-invoices link is an interim until W2-02's register. */
-export function hrefOf(key: StepKey, s: Pick<CloseSources, 'consolidated'>): string {
+/**
+ * Where each number lives. Step 1 opens the W2-02 register's awaiting tab for the same
+ * month, so the step's count is exactly what the link shows. VAT at risk has no screen
+ * of its own (the home card is gone, W2-08): no button.
+ */
+export function hrefOf(key: StepKey, s: Pick<CloseSources, 'consolidated' | 'monthOffset'>): string | null {
   switch (key) {
     case 'unchecked':
-      return '/dashboard/inbox?filter=needs_review'; // TODO(W2-02): the invoice register's unchecked view
+      return `/dashboard/invoices?month=${s.monthOffset}&view=awaiting`;
     case 'gaps':
       return '/dashboard/approvals';
     case 'claims':
@@ -77,7 +84,7 @@ export function hrefOf(key: StepKey, s: Pick<CloseSources, 'consolidated'>): str
     case 'deliveryNotes':
       return LEDGER_HREF;
     case 'vat':
-      return '/dashboard'; // the home's VAT-at-risk card
+      return null;
     case 'exports':
       return '/dashboard/exports';
   }
@@ -102,17 +109,23 @@ export function buildSteps(s: CloseSources): Step[] {
       state,
       count: f ? f.count : null,
       amountIls: f ? f.amountIls : null,
-      href: hrefOf(key, s),
+      href: state === 'off' ? null : hrefOf(key, s),
       primary,
       openNow: OPEN_NOW.has(key),
     };
   });
 }
 
-/** Done out of the actionable steps (pending / off steps never count against the close). */
-export function progress(steps: readonly Step[]): { done: number; total: number } {
-  const counted = steps.filter((st) => st.state === 'done' || st.state === 'todo');
-  return { done: counted.filter((st) => st.state === 'done').length, total: counted.length };
+/**
+ * Done out of every step shown (the header must match the list). `open` = steps left to
+ * act on; when it is 0 the page says so instead (pending / off steps never block the close).
+ */
+export function progress(steps: readonly Step[]): { done: number; total: number; open: number } {
+  return {
+    done: steps.filter((st) => st.state === 'done').length,
+    total: steps.length,
+    open: steps.filter((st) => st.state === 'todo').length,
+  };
 }
 
 const MONTH_RE = /^(\d{4})-(0[1-9]|1[0-2])$/;
