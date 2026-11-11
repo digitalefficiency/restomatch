@@ -22,7 +22,7 @@ import {
 } from './actions';
 
 type TeamData = inferRouterOutputs<AppRouter>['team']['list'];
-type ActionResult = { ok: boolean; message: string; shareLink?: string; shareText?: string };
+type ActionResult = { ok: boolean; message: string; shareLink?: string; shareText?: string; shareQr?: string };
 /** '' = no preference (follow the device / Hebrew default). */
 type LocaleChoice = '' | Locale;
 
@@ -119,6 +119,18 @@ export function TeamClient({
                 <MessageCircle className="h-4 w-4" aria-hidden="true" />
                 {t('invite.whatsapp')}
               </a>
+              {status.shareQr ? (
+                // The worker scans the join link straight off the owner's screen.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={status.shareQr}
+                  alt={t('invite.qrAlt')}
+                  width={96}
+                  height={96}
+                  className="rounded-lg border border-line bg-white p-1"
+                  data-testid="invite-qr"
+                />
+              ) : null}
             </span>
           ) : null}
         </Card>

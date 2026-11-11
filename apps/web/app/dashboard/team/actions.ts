@@ -1,5 +1,6 @@
 'use server';
 
+import QRCode from 'qrcode';
 import { revalidatePath } from 'next/cache';
 import type { UserRole } from '@restomatch/db';
 import { auth } from '@/auth';
@@ -26,6 +27,8 @@ interface ActionResult {
   shareLink?: string;
   /** Ready-to-send WhatsApp text (restaurant + link). */
   shareText?: string;
+  /** The join link as a QR (PNG data URL) — the worker scans it on the owner's screen. */
+  shareQr?: string;
 }
 
 /**
@@ -119,6 +122,7 @@ export async function inviteMember(input: {
       message: t('invite.sent', { email: res.email }),
       shareLink: url,
       shareText: t('invite.whatsappText', { restaurant: res.restaurantName, url }),
+      shareQr: await QRCode.toDataURL(url, { margin: 1, width: 192 }),
     };
   } catch (e) {
     return fail(e, 'invite.failed');
@@ -140,6 +144,7 @@ export async function resendInvite(input: { id: string }): Promise<ActionResult>
       message: t('invite.resent', { email: res.email }),
       shareLink: url,
       shareText: t('invite.whatsappText', { restaurant: res.restaurantName, url }),
+      shareQr: await QRCode.toDataURL(url, { margin: 1, width: 192 }),
     };
   } catch (e) {
     return fail(e, 'invite.resendFailed');

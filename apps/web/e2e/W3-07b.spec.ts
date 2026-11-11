@@ -48,6 +48,7 @@ async function inviteFromTeamScreen(page: Page, email: string): Promise<string> 
   await page.getByRole('button', { name: 'שליחת הזמנה' }).click();
   const wa = page.getByTestId('invite-whatsapp');
   await expect(wa).toBeVisible();
+  await expect(page.getByTestId('invite-qr')).toHaveAttribute('src', /^data:image\/png;base64,/);
   const href = (await wa.getAttribute('href')) ?? '';
   const text = decodeURIComponent(href.replace(/^https:\/\/wa\.me\/\?text=/, ''));
   const link = /https?:\/\/\S+\/join\/[A-Za-z0-9_-]+(\?\S*)?/.exec(text)?.[0];
