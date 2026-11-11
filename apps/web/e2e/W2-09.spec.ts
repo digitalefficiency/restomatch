@@ -138,6 +138,17 @@ test('he: the ₪ sits left of the first digit (bbox), and nothing scrolls sidew
     return { shekel: at(text.indexOf('₪')), digit: at(text.search(/\d/)) };
   });
   expect(sides.shekel, '₪ is left of the first digit').toBeLessThan(sides.digit);
+
+  // The drivers' "אחר" remainder: the amount and the word never touch (lab: '−74 ₪אחר').
+  await page.goto(`/dashboard/leaks${q}`);
+  const other = page.getByTestId('leak-drivers-other');
+  if (await other.count()) {
+    const gap = await other.evaluate((el) => {
+      const [a, b] = [el.querySelector('bdi')!, el.querySelector('span')!].map((n) => n.getBoundingClientRect());
+      return Math.max(b!.left - a!.right, a!.left - b!.right);
+    });
+    expect(gap, 'space between the remainder amount and "אחר"').toBeGreaterThanOrEqual(2);
+  }
 });
 
 const AXE_SOURCE = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');

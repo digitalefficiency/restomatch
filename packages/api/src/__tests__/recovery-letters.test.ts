@@ -138,11 +138,13 @@ describe('send / unsend', () => {
     expect([...again!.claimIds].sort()).toEqual([...l!.claimIds].sort());
     // Second unsend: they are claimed now → CONFLICT (stale screen).
     await expect(caller().recovery.unsendLetter({ claimIds: l!.claimIds })).rejects.toMatchObject({ code: 'CONFLICT' });
-    // Too late: sent 11 minutes ago.
-    const sentAt = new Date(Date.now() - (UNSEND_WINDOW_MINUTES + 1) * 60_000);
-    await db.transaction((tx) => sendLetter(tx as never, T.restaurantId, { supplierId: T.supplierId, claimIds: l!.claimIds, channel: 'print', actorId: T.ownerUserId, at: sentAt }));
+    // Too late: the unsend comes 11 minutes after the send. (Simulated by moving unsend's clock
+    // forward, not by back-dating the send: a transition is never stamped before the claim's
+    // last event — recovery/service.ts clampTransitionAt, H-06 review.)
+    await db.transaction((tx) => sendLetter(tx as never, T.restaurantId, { supplierId: T.supplierId, claimIds: l!.claimIds, channel: 'print', actorId: T.ownerUserId }));
+    const later = new Date(Date.now() + (UNSEND_WINDOW_MINUTES + 1) * 60_000);
     await expect(
-      db.transaction((tx) => unsendLetter(tx as never, T.restaurantId, { claimIds: l!.claimIds, actorId: T.ownerUserId })),
+      db.transaction((tx) => unsendLetter(tx as never, T.restaurantId, { claimIds: l!.claimIds, actorId: T.ownerUserId, now: later })),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 });

@@ -166,4 +166,16 @@ export const he = {
     subtitle: 'מאיפה חשבוניות נכנסות לתיבה, ומי נשלח לפענוח בלי בדיקה.',
     back: 'חזרה לתיבה',
   },
+  /** W3-11 · suggested document type (chip on the inbox row). */
+  docType: {
+    label: 'סוג מסמך',
+    guess: 'נראה כמו',
+    credit_note: 'חשבונית זיכוי',
+    statement: 'כרטסת',
+    consolidated: 'חשבונית מרכזת',
+    delivery_note: 'תעודת משלוח',
+    invoice: 'חשבונית',
+    toRecovery: 'לשיוך לבקשות זיכוי',
+    toStatement: 'להתאמת כרטסת',
+  },
 } as const;
