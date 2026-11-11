@@ -96,7 +96,7 @@ export const he = {
       queued: 'נסגר בטלפון · יישלח לבד כשיחזור החיבור',
       summary: '{lines} שורות · {exceptions} פערים',
       noExceptions: '{lines} שורות · הכל כמו בהזמנה',
-      amountPending: 'הסכום לדרישת זיכוי ייקבע אחרי הבדיקה',
+      amountPending: 'הסכום לבקשת זיכוי ייקבע אחרי הבדיקה',
       viewInvoice: 'צפו בחשבונית',
       next: 'המשלוח הבא: {supplier}',
       nextAt: 'המשלוח הבא: {supplier} · {time}',

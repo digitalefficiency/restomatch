@@ -8,7 +8,8 @@ import { LEGAL_LINKS } from './registry';
  *
  * Server- AND client-safe: no hooks, no context, no `next/navigation`.
  * - `footer-column`: a vertical list for a footer column (marketing).
- * - `inline-row`: a wrapping row with `·` separators (legal pages, sign-in,
+ * - `inline-row`: a wrapping row, spaced by gap/padding with NO separator glyphs,
+ *   so a wrapped line never starts with a stray `·` (legal pages, sign-in,
  *   supplier portal, showcase, admin, error page, trust strip).
  * - `plain`: bare `<a>` + inline styles, for `global-error` (no providers, no
  *   component chunks, maybe no stylesheet). Lives in `LegalLinksPlain.tsx`, which
@@ -21,7 +22,7 @@ export type LegalLinksVariant = 'footer-column' | 'inline-row' | 'plain';
 
 const ITEM: Record<Exclude<LegalLinksVariant, 'plain'>, string> = {
   'footer-column': 'flex flex-col gap-2',
-  'inline-row': 'flex flex-wrap items-center gap-x-1',
+  'inline-row': 'flex flex-wrap items-center gap-x-2',
 };
 
 const LINK_TONE = {
@@ -61,19 +62,16 @@ export function LegalLinks({
         .filter(Boolean)
         .join(' ')}
     >
-      {LEGAL_LINKS.map((l, i) => (
-        <li key={l.id} className={row ? 'inline-flex items-center gap-x-1' : undefined}>
-          {row && i > 0 ? (
-            <span aria-hidden="true" className="text-subtle">
-              ·
-            </span>
-          ) : null}
+      {LEGAL_LINKS.map((l) => (
+        <li key={l.id} className={row ? 'inline-flex items-center' : undefined}>
           <Link
             href={l.href}
             data-legal-id={l.id}
             className={[
-              'touch-target inline-flex min-h-11 items-center rounded underline-offset-4',
-              row ? 'px-2 hover:underline' : '',
+              'touch-target inline-flex items-center rounded underline-offset-4',
+              // A row stands alone (sign-in, admin, error…): 44 px on every device.
+              // The footer column matches its sibling columns (touch-target only).
+              row ? 'min-h-11 px-2 hover:underline' : '',
               LINK_TONE[tone],
               tone === 'primary' ? 'hover:underline' : '',
             ]
