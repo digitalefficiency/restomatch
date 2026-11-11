@@ -10,7 +10,10 @@
  *
  *  • `scope: 'mine'`  — the rows the caller decides: routed to a role the caller
  *    may act on (`canActOn`, routed rows only). For the owner this is today's
- *    `approvals.queueSummary` "mine" set, byte for byte.
+ *    `approvals.queueSummary` "mine" set, byte for byte. An UNROUTED row (no
+ *    `requiresRole`) is in no one's "mine" — exactly as in queueSummary — and is
+ *    reported under `scope: 'all'` as `byRole` 'unrouted'. Never compare a "mine"
+ *    count with an "all" count: they are different scopes by design.
  *  • `scope: 'all'`   — every open row the caller may READ (owner / manager /
  *    bookkeeper read all routings; receiver / chef read none). `byRole` then says
  *    who it waits on ("ממתין לבעלים · 4 · ₪296.00"), so a bookkeeper with an empty
@@ -37,6 +40,13 @@
  *
  * Known limit (same as queueSummary until W2-13): rows of a superseded match run that
  * were never decided still count.
+ *
+ * For readers (leak-economist sign-off, 11.11): label `ils.excl` as the ₪ to ask back
+ * BEFORE VAT ("₪ לבקשת זיכוי (לפני מע״מ)"), never as a bare "₪ awaiting"; show
+ * `ils.incl` / `ils.vat` beside it, never added to it; show `pendingLink` only as
+ * invoices waiting for a PO link, never as leak or claim. Until W2-13 scopes rows to
+ * the latest match run, don't present the ₪ as exact to the agora on a screen that
+ * also lists superseded runs.
  *
  * Interims (one line each to swap):
  *  • INTERIM(W2-09a): `invoicesLeak` loops `computeInvoiceLeak`; swap to the batch
@@ -67,7 +77,10 @@ import { isClaimableRow } from '../routers/approvals';
 
 export type AwaitingScope = 'mine' | 'all';
 
-/** Who a row waits on: its routed role, or `'unrouted'` (owner / manager decide it). */
+/**
+ * Who a row waits on: its routed role, or `'unrouted'` (no `requiresRole`: owner or
+ * manager may decide it, but it is in neither one's "mine" — see the header).
+ */
 export type AwaitingRouting = UserRole | 'unrouted';
 
 export interface AwaitingFilters {
