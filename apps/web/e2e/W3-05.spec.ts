@@ -20,6 +20,7 @@ const HREF: Record<string, RegExp> = {
   claims: /^\/dashboard\/recovery$/,
   consolidated: /^\/dashboard\/(invoices\/[0-9a-f-]{36}|suppliers\/ledger)$/,
   deliveryNotes: /^\/dashboard\/suppliers\/ledger$/,
+  vat: /^#vat-at-risk$/,
   exports: /^\/dashboard\/exports$/,
 };
 
@@ -45,10 +46,10 @@ test.describe('W3-05a month close', () => {
     const states = Object.fromEntries(
       await steps.evaluateAll((els) => els.map((e) => [e.getAttribute('data-step'), e.getAttribute('data-state')])),
     ) as Record<string, string>;
-    // A step that is off, or has no screen of its own (VAT), renders no button; every other step links to its queue.
+    // A step that is off renders no button; every other step links to its queue (VAT → the card below the list).
     for (const key of ORDER) {
       const link = page.getByTestId(`close-link-${key}`);
-      if (states[key] === 'off' || key === 'vat') {
+      if (states[key] === 'off') {
         await expect(link, key).toHaveCount(0);
         continue;
       }
