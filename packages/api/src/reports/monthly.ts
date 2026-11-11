@@ -345,9 +345,9 @@ const COPY = {
     cta: 'פתיחת הדוח המלא',
     footer: 'RestoMatch · מוקד הבקרה של הכסף',
     action: {
-      chaseOverdue: (p: Params, f: Fmt) => `לתזכר ${p.count} דרישות זיכוי באיחור (${f.ils(p.agorot ?? 0)})`,
+      chaseOverdue: (p: Params, f: Fmt) => `לתזכר ${p.count} בקשות זיכוי באיחור (${f.ils(p.agorot ?? 0)})`,
       decideOpen: (p: Params, f: Fmt) => `להחליט על ${p.count} פערים פתוחים (${f.ils(p.agorot ?? 0)})`,
-      sendClaims: (p: Params, f: Fmt) => `לשלוח מכתבי דרישה על ${p.count} פערים (${f.ils(p.agorot ?? 0)})`,
+      sendClaims: (p: Params, f: Fmt) => `לשלוח בקשות זיכוי על ${p.count} פערים (${f.ils(p.agorot ?? 0)})`,
       linkPending: (p: Params) => `לשייך ${p.count} חשבוניות ממתינות להזמנה`,
       answerQuestions: (p: Params) => `לענות על "זה אותו מוצר?" — ${p.count} חשבוניות מחכות לשאלה`,
       talkToSupplier: (p: Params, f: Fmt) => `לשוחח עם ${p.supplier} — דליפה של ${f.pct(Number(p.pct))} מהרכש`,
@@ -374,7 +374,7 @@ const COPY = {
     action: {
       chaseOverdue: (p: Params, f: Fmt) => `Chase ${p.count} overdue credit requests (${f.ils(p.agorot ?? 0)})`,
       decideOpen: (p: Params, f: Fmt) => `Decide on ${p.count} open discrepancies (${f.ils(p.agorot ?? 0)})`,
-      sendClaims: (p: Params, f: Fmt) => `Send claim letters for ${p.count} discrepancies (${f.ils(p.agorot ?? 0)})`,
+      sendClaims: (p: Params, f: Fmt) => `Send credit requests for ${p.count} discrepancies (${f.ils(p.agorot ?? 0)})`,
       linkPending: (p: Params) => `Link ${p.count} pending invoices to their orders`,
       answerQuestions: (p: Params) => `Answer "Is this the same product?" — ${p.count} invoices are waiting for a question`,
       talkToSupplier: (p: Params, f: Fmt) => `Talk to ${p.supplierEn} — ${f.pct(Number(p.pct))} of spend leaked`,
