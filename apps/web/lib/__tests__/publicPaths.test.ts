@@ -61,4 +61,15 @@ describe('isPublicPath (middleware allowlist)', () => {
     expect(looksLikeStaticAsset('/scans/id.with.dots/')).toBe(false);
     expect(isPublicPath('/scans/a.b')).toBe(true); // by design: last segment has an extension-like suffix
   });
+
+  // G-11: the four mandatory legal documents are public (no session, no redirect);
+  // near-misses and traversal through them are not. Add-only: no new entry.
+  it.each(['/accessibility', '/privacy', '/terms', '/cookies'])('legal document %s is public', (p) =>
+    expect(isPublicPath(p)).toBe(true),
+  );
+
+  it.each(['/cookies-x', '/accessibility/../dashboard', '/accessibility/x', '/terms/admin'])(
+    '%s is not public (exact match, no prefix)',
+    (p) => expect(isPublicPath(p)).toBe(false),
+  );
 });

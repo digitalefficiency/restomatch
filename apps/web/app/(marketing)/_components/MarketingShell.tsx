@@ -4,6 +4,7 @@ import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { marketing } from '@/lib/i18n/messages/marketing';
 import { getT } from '@/lib/i18n/server';
 import { contactChannels } from '@/lib/contact';
+import { LegalLinks } from '@/lib/legal/LegalLinks';
 import { AnchorScrollFix } from './AnchorScrollFix';
 import { Attribution } from './Attribution';
 import { MobileMenu } from './MobileMenu';
@@ -200,18 +201,7 @@ export async function MarketingShell({ children }: { children: React.ReactNode }
                 <span className="mb-1 text-xs font-semibold uppercase text-muted ltr:font-mono ltr:tracking-[0.18em]">
                   {t('shell.footerLegal')}
                 </span>
-                <Link href="/privacy" className="touch-target inline-flex items-center text-muted hover:text-ink">
-                  {t('shell.privacy')}
-                </Link>
-                <Link href="/terms" className="touch-target inline-flex items-center text-muted hover:text-ink">
-                  {t('shell.terms')}
-                </Link>
-                <Link href="/cookies" className="touch-target inline-flex items-center text-muted hover:text-ink">
-                  {t('shell.cookies')}
-                </Link>
-                <Link href="/accessibility" className="touch-target inline-flex items-center text-muted hover:text-ink">
-                  {t('shell.accessibility')}
-                </Link>
+                <LegalLinks locale={t.locale} variant="footer-column" />
               </nav>
             </div>
           </div>

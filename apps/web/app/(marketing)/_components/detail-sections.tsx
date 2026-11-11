@@ -26,6 +26,7 @@ import type { Translator } from '@/lib/i18n/translate';
 import type { he as landingHe } from '@/lib/i18n/messages/landing/he';
 import { formatIls } from '@/lib/money';
 import { cn } from '@/lib/components/cn';
+import { LegalLinks } from '@/lib/legal/LegalLinks';
 import { RoiCalculator } from './RoiCalculator';
 
 /**
@@ -309,20 +310,10 @@ export function TrustSection({ t }: { t: T }) {
             </li>
           ))}
         </ul>
-        <p className="mt-8 text-center text-sm text-muted">
-          {t('trust.links')}{' '}
-          <Link href="/privacy" className="font-medium text-primary underline-offset-4 hover:underline">
-            {t('trust.privacy')}
-          </Link>
-          {' · '}
-          <Link href="/terms" className="font-medium text-primary underline-offset-4 hover:underline">
-            {t('trust.terms')}
-          </Link>
-          {' · '}
-          <Link href="/cookies" className="font-medium text-primary underline-offset-4 hover:underline">
-            {t('trust.cookies')}
-          </Link>
-        </p>
+        <nav aria-labelledby="trust-links" className="mt-8 flex flex-wrap items-center justify-center gap-x-1 text-sm text-muted">
+          <span id="trust-links">{t('trust.links')}</span>
+          <LegalLinks locale={t.locale} variant="inline-row" tone="primary" />
+        </nav>
       </div>
     </section>
 

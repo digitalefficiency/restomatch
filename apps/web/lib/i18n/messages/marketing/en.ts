@@ -176,7 +176,7 @@ export const en: Shape<typeof he> = {
   a11y: {
     metaTitle: 'Accessibility statement · RestoMatch',
     metaDescription:
-      "RestoMatch's accessibility statement: conformance with IS 5568 and WCAG 2.2, how we tested, known gaps, and who to contact about accessibility.",
+      "RestoMatch's accessibility statement: conformance with IS 5568 at level AA (WCAG 2.0 AA) and our WCAG 2.2 AA target, how we tested, known gaps, and who to contact about accessibility.",
     eyebrow: 'Accessibility',
     title: 'Accessibility statement',
     updated: 'Last updated: {date}',
@@ -186,7 +186,8 @@ export const en: Shape<typeof he> = {
     companyId: 'Company no. {id}',
     operatorPlaceholder: '[Legal company name]',
     levelTitle: 'Conformance level',
-    levelBody: 'Our target: Israeli Standard IS 5568 at level AA, and WCAG 2.2 at level AA.',
+    levelBody:
+      'The level the regulations require: Israeli Standard IS 5568 at level AA, which is based on WCAG 2.0 at level AA. Our target is higher: WCAG 2.2 at level AA. We use no accessibility overlay widget; accessibility is built into the code itself.',
     levelStatus:
       'Where we are today: the site partially conforms to that target. Some pages still have gaps, listed below. We are fixing them and update this statement with every change.',
     scopeTitle: 'What this statement covers',
