@@ -165,4 +165,15 @@ export const en: Shape<typeof he> = {
     subtitle: 'Where invoices come in from, and who goes straight to reading.',
     back: 'Back to the inbox',
   },
+  docType: {
+    label: 'Document type',
+    guess: 'Looks like',
+    credit_note: 'Credit note',
+    statement: 'Statement',
+    consolidated: 'Consolidated invoice',
+    delivery_note: 'Delivery note',
+    invoice: 'Invoice',
+    toRecovery: 'Match to credit requests',
+    toStatement: 'Check the statement',
+  },
 };
