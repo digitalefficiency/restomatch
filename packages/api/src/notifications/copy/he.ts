@@ -82,6 +82,10 @@ export const he = {
     reviewSubject: 'דרושה החלטה: {count, plural, one {פער אחד} two {שני פערים} other {# פערים}} לבדיקה בחשבונית מ-{supplier}',
     reviewPreview: '{count, plural, one {פער אחד ממתין} two {שני פערים ממתינים} other {# פערים ממתינים}} לבדיקה.',
     reviewFound: '{count, plural, one {פער אחד} two {שני פערים} other {# פערים}} לבדיקה בחשבונית מ-{supplier}.',
+    /** The invoice still waits for its order link: no ₪ to claim yet (W2-04, Train C B1). */
+    pendingSubject: 'ממתינה לקישור להזמנה: {count, plural, one {פער אחד} two {שני פערים} other {# פערים}} בחשבונית מ-{supplier}',
+    pendingPreview: 'החשבונית ממתינה לקישור להזמנה, ואז יתברר הסכום לבקשת זיכוי.',
+    pendingFound: '{count, plural, one {פער אחד} two {שני פערים} other {# פערים}} בחשבונית מ-{supplier}, שממתינה לקישור להזמנה.',
     heading: 'דרושה החלטה על חשבונית',
     found: 'נמצאו {count, plural, one {פער אחד} two {שני פערים} other {# פערים}} בחשבונית מ-{supplier}.',
     atRisk: 'סכום בפערים: {amount}',
