@@ -398,7 +398,7 @@ export function Cockpit({
       )}
       {/* One primary action: while editing, saving is the action — the sticky "decide" CTA
           would float over the edit rows (axe target-size). */}
-      {showMoney && openFindings.length > 0 && !editing ? (
+      {fab ? (
         <div className="sticky bottom-[calc(var(--rm-bottomnav-h,0px)+var(--consent-h,0px)+env(safe-area-inset-bottom)+0.75rem)] z-10 mt-4 flex justify-center">
           <Link
             href={`/dashboard/approvals?invoice=${d.id}`}

@@ -8,7 +8,6 @@ import type { Locale } from '@/lib/i18n/config';
 import { formatIls } from '@/lib/money';
 import { cn } from '@/lib/components/cn';
 import { Banner, StatusChip } from '@/lib/components/feedback';
-import { EmptyState } from '@/lib/components';
 import { DataTable, ViewTabs, updateTableUrl, useTableUrlValue } from '@/lib/components/table';
 import { registerColumns, visibleTotals, ddmmyyyy, type RegisterCopy, type RegisterRow } from './columns';
 
@@ -149,7 +148,10 @@ export function RegisterClient({
             }
           />
         ) : lines.rows.length === 0 ? (
-          <EmptyState title={lines.empty} description={lines.emptyBody} />
+          <div className="rounded-2xl border border-line bg-surface p-5 text-center shadow-card" data-testid="register-lines-empty">
+            <p className="font-semibold text-ink">{lines.empty}</p>
+            <p className="mt-1 text-sm text-muted">{lines.emptyBody}</p>
+          </div>
         ) : (
           <ul className="space-y-2" aria-label={lines.caption} data-testid="register-lines">
             {lines.rows.map((r) => (
