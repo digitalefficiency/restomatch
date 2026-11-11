@@ -27,6 +27,7 @@ import {
   notificationsOutbox,
   sql,
   suppliers,
+  users,
   type Database,
   type UserRole,
 } from '@restomatch/db';
@@ -39,6 +40,7 @@ import {
   staffAlertWindow,
 } from './sendWindow';
 import { enqueueNotification } from './outbox';
+import { invoiceOcrFailedEmail } from './templates';
 import { MANAGER_ROLES, resolveAudience, type Audience, type AudienceMember } from './recipients';
 
 export type { Address, AddressChannel } from './address';
@@ -139,35 +141,66 @@ export type RenderFn = (input: RenderInput) => Rendered | null;
 
 const s = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
-/**
- * PLACEHOLDER copy until W2-13's `invoiceOcrFailed` template lands (short,
- * he/en, no ₪). Swap `defaultRender` for the W2-13 renderer in one line.
- */
-export const INTERIM_TEMPLATES: Record<string, (i: RenderInput) => Rendered> = {
-  invoiceOcrFailed: (i) => {
-    const supplier = s(i.vars.supplierName);
-    const file = s(i.vars.fileName);
-    const quota = i.vars.reason === 'quota_exceeded';
-    const forUploader = i.vars.audience === 'uploader';
-    if (i.locale === 'en') {
-      const subject = 'We could not read an invoice';
-      const body = forUploader
-        ? `We could not read the invoice you uploaded${file ? ` (${file})` : ''}. A manager was told; you can carry on with the order.`
-        : `Invoice read failed${supplier ? `: ${supplier}` : ''}${file ? ` (${file})` : ''}. ${quota ? 'The monthly reading quota is used up. ' : ''}It waits for a manual check.`;
-      return { subject, body };
-    }
-    const subject = 'לא הצלחנו לקרוא חשבונית';
-    const body = forUploader
-      ? `לא הצלחנו לקרוא את החשבונית שהעליתם${file ? ` (${file})` : ''}. המנהל קיבל הודעה, ואפשר להמשיך מול ההזמנה.`
-      : `קריאת חשבונית נכשלה${supplier ? `: ${supplier}` : ''}${file ? ` (${file})` : ''}. ${quota ? 'מכסת הקריאה החודשית נוצלה. ' : ''}החשבונית ממתינה לבדיקה ידנית.`;
-    return { subject, body };
+/** The app's public origin for links in notices (same precedence as the worker's appBaseUrl). */
+export function appBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  return (env.APP_BASE_URL ?? env.AUTH_URL ?? 'https://app.restomatch.co.il').replace(/\/+$/, '');
+}
+
+/** An absolute link for a stored deep-link path; undefined when there is none. */
+export function absoluteUrl(path: string | undefined, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (!path) return undefined;
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${appBaseUrl(env)}${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
+/** A short, human reason for a failed read (no codes in a notice). */
+export const OCR_REASON_TEXT: Record<'he' | 'en', Record<string, string>> = {
+  he: {
+    quota_exceeded: 'מכסת הקריאה החודשית נוצלה',
+    unreadable: 'הצילום לא קריא',
+    unsupported_format: 'סוג הקובץ לא נתמך',
+    stalled: 'הקריאה נתקעה',
+    provider_config: 'תקלה בשירות הקריאה',
+    extraction_failed: 'לא הצלחנו לחלץ את הנתונים',
+  },
+  en: {
+    quota_exceeded: 'the monthly reading quota is used up',
+    unreadable: 'the photo is not readable',
+    unsupported_format: 'the file type is not supported',
+    stalled: 'the read got stuck',
+    provider_config: 'a problem with the reading service',
+    extraction_failed: 'we could not extract the data',
   },
 };
 
+export function ocrReasonText(reason: unknown, locale: 'he' | 'en'): string | null {
+  return typeof reason === 'string' ? (OCR_REASON_TEXT[locale][reason] ?? OCR_REASON_TEXT[locale].extraction_failed!) : null;
+}
+
+/**
+ * The renderers notify() knows. `invoiceOcrFailed` is W2-13's branded
+ * template (HTML + the 'לחשבונית' CTA) with an ABSOLUTE link; the e-mail row
+ * carries html (stored as payload.__html by the outbox), WhatsApp gets the
+ * plain-text version. No ₪ in either.
+ */
 export const defaultRender: RenderFn = (i) => {
-  const t = INTERIM_TEMPLATES[i.template];
-  if (!t) throw new Error(`notify: no template "${i.template}" (inject render until W2-13)`);
-  return t(i);
+  if (i.template === 'invoiceOcrFailed') {
+    const audience = i.vars.audience === 'managers' ? 'managers' : 'uploader';
+    const email = invoiceOcrFailedEmail({
+      audience,
+      supplierName: s(i.vars.supplierName),
+      fileName: s(i.vars.fileName),
+      uploaderName: s(i.vars.uploaderName),
+      reason: ocrReasonText(i.vars.reason, i.locale),
+      showSupplier: audience === 'managers',
+      url: absoluteUrl(i.deepLink),
+      locale: i.locale,
+    });
+    return i.channel === 'email'
+      ? { subject: email.subject, body: email.text, html: email.html }
+      : { body: email.text };
+  }
+  throw new Error(`notify: no template "${i.template}" (inject a render)`);
 };
 
 /* ── notify() ── */
@@ -183,7 +216,8 @@ export interface NotifyInput {
   moneyVars?: readonly string[];
   /** Which money capability applies (the chef sees ₪ on orders and recipes only). */
   moneyScope?: PriceScope;
-  deepLink?: string;
+  /** A path (stored in payload.deepLink), or one per recipient role. Rendered absolute. */
+  deepLink?: string | ((role: UserRole) => string);
   entity: { type: string; id: string };
   /** Channels to try; each needs a matching verified address. Default: e-mail + WhatsApp. */
   channels?: readonly AddressChannel[];
@@ -267,6 +301,7 @@ export async function notify(tx: Database, input: NotifyInput): Promise<NotifyRe
   for (const m of members) {
     const money = canSeeMoney(m.role, input.moneyScope);
     const vars = redactVars(input.vars ?? {}, input.moneyVars ?? [], money);
+    const deepLink = typeof input.deepLink === 'function' ? input.deepLink(m.role) : input.deepLink;
     for (const address of addressesFor(m, channels)) {
       const channel = address.channel;
       try {
@@ -276,7 +311,7 @@ export async function notify(tx: Database, input: NotifyInput): Promise<NotifyRe
           locale: m.locale,
           role: m.role,
           vars,
-          deepLink: input.deepLink,
+          deepLink,
           canSeeMoney: money,
         });
         if (!rendered) continue;
@@ -289,7 +324,7 @@ export async function notify(tx: Database, input: NotifyInput): Promise<NotifyRe
           event: input.event,
           template: input.template,
           locale: m.locale,
-          ...(input.deepLink ? { deepLink: input.deepLink } : {}),
+          ...(deepLink ? { deepLink } : {}),
           ...(plan.digest ? { digest: true } : {}),
         };
         const { id, deduped } = await enqueueNotification(tx, {
@@ -359,14 +394,17 @@ export async function notifyInvoiceOcrFailed(
       rawImageUrl: invoices.rawImageUrl,
       rawPdfUrl: invoices.rawPdfUrl,
       supplierName: suppliers.name,
+      uploaderName: users.name,
     })
     .from(invoices)
     .leftJoin(suppliers, eq(suppliers.id, invoices.supplierId))
+    .leftJoin(users, eq(users.id, invoices.createdBy))
     .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, input.restaurantId)))
     .limit(1);
   const total: NotifyResult = { enqueued: 0, deduped: 0, failed: 0, rows: [] };
   if (!inv) return total;
   const fileName = fileNameOf(inv.rawPdfUrl ?? inv.rawImageUrl);
+  const invoiceLink = `/dashboard/invoices/${input.invoiceId}`;
   const base = {
     restaurantId: input.restaurantId,
     event: 'invoice.ocr_failed',
@@ -390,7 +428,8 @@ export async function notifyInvoiceOcrFailed(
         ...base,
         audience: { userIds: [uploaderId] },
         vars: { audience: 'uploader', reason: input.reason, fileName },
-        deepLink: '/dashboard/receiving',
+        // A receiver (or chef) has no invoice screen: back to receiving. Finance roles open the invoice.
+        deepLink: (role) => (role === 'receiver' || role === 'chef' ? '/dashboard/receiving' : invoiceLink),
       }),
     );
   }
@@ -399,8 +438,8 @@ export async function notifyInvoiceOcrFailed(
     await notify(tx, {
       ...base,
       audience: { roles: MANAGER_ROLES },
-      vars: { audience: 'managers', reason: input.reason, fileName, supplierName: inv.supplierName },
-      deepLink: `/dashboard/invoices/${input.invoiceId}`,
+      vars: { audience: 'managers', reason: input.reason, fileName, supplierName: inv.supplierName, uploaderName: inv.uploaderName },
+      deepLink: invoiceLink,
     }),
   );
   return total;
