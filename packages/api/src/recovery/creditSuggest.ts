@@ -1,6 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { sql, type Database } from '@restomatch/db';
-import { NEVER_CLAIMABLE_TYPES } from '../lib/claims';
+import { NEVER_CLAIMABLE_TYPES, vatBasisOf } from '../lib/claims';
 import { allocateCredit } from './lifecycle';
 import { creditLineSuggestions, recordCreditNote, type CreditLineSuggestion } from './service';
 
@@ -15,7 +15,11 @@ import { creditLineSuggestions, recordCreditNote, type CreditLineSuggestion } fr
  * `recordCreditNote` with exactly the claims the human selected.
  *
  * Amounts are on the hero basis (before VAT): `creditLineSuggestions` gives
- * abs(line_total) before VAT and claims are before VAT — never grossed up.
+ * abs(line_total) before VAT, so only claims measured before VAT
+ * (`vatBasisOf(type) === 'excl'`) are proposed or confirmable here. A
+ * DUPLICATE_INVOICE claim (incl. VAT) or a VAT_MISMATCH claim (a VAT amount)
+ * is never netted against a before-VAT credit line: it goes to the manual
+ * credit form, where the basis is chosen and labelled. Never grossed up.
  * W2-10 AC 8 still holds: the MANUAL credit form starts with nothing ticked;
  * only this dialog, born from a specific credit line, carries a proposal.
  */
@@ -127,7 +131,9 @@ async function openClaimsFor(db: Database, restaurantId: string, supplierIds: st
       AND d.type NOT IN (${sql.join(NEVER_CLAIMABLE_TYPES.map((t) => sql`${t}`), sql`, `)})
     ORDER BY c.claimed_at ASC, c.id
   `);
-  return rowsOf(res).map((r) => ({
+  return rowsOf(res)
+    .filter((r) => vatBasisOf(String(r.discrepancy_type)) === 'excl')
+    .map((r) => ({
     id: String(r.id),
     supplierId: String(r.supplier_id),
     status: String(r.status),
@@ -173,14 +179,20 @@ export async function confirmCreditSuggestion(db: Database, restaurantId: string
   const line = rowsOf(lineRes)[0];
   if (!line) throw new TRPCError({ code: 'NOT_FOUND', message: 'invoice line not found' });
   const claimRes = await db.execute(sql`
-    SELECT id, supplier_id FROM recovery_claims
-    WHERE restaurant_id = ${restaurantId}
-      AND id IN (${sql.join(claimIds.map((id) => sql`${id}`), sql`, `)})
+    SELECT c.id, c.supplier_id, d.type AS discrepancy_type
+    FROM recovery_claims c
+    JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
+    WHERE c.restaurant_id = ${restaurantId}
+      AND c.id IN (${sql.join(claimIds.map((id) => sql`${id}`), sql`, `)})
   `);
   const owned = rowsOf(claimRes);
   if (owned.length !== claimIds.length) throw new TRPCError({ code: 'NOT_FOUND', message: 'claim not found' });
   if (owned.some((c) => String(c.supplier_id) !== String(line.supplier_id))) {
     throw new TRPCError({ code: 'BAD_REQUEST', message: 'supplier_mismatch' });
+  }
+  // A before-VAT credit line never closes a claim measured incl. VAT or in VAT (leak-economist 11.11).
+  if (owned.some((c) => vatBasisOf(String(c.discrepancy_type)) !== 'excl')) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'basis_mismatch' });
   }
   // TODO(G-05): recordAudit 'recovery.credit_suggestion_confirmed' {automationId:'A12'} once the AuditAction exists.
   return recordCreditNote(db, restaurantId, {

@@ -149,7 +149,12 @@ describe('recovery.creditSuggestions / confirmCreditSuggestion (DB)', () => {
     const aClaim = await addClaim(db, A, { status: 'letter_sent', claimedAt: new Date('2026-10-01T08:00:00Z') });
     const aLine = await addCreditLine(db, A, { agorot: 1_000, date: '2026-10-20', number: 'CR-A-4' });
 
-    expect((await caller(A).recovery.creditSuggestions()).some((s) => s.invoiceLineId === bLine)).toBe(false);
+    const aList = await caller(A).recovery.creditSuggestions();
+    expect(aList.some((s) => s.invoiceLineId === bLine)).toBe(false);
+    for (const sg of aList) {
+      expect(sg.proposal.some((p) => p.claimId === bClaim)).toBe(false);
+      expect(sg.openClaims.some((c) => c.claimId === bClaim)).toBe(false);
+    }
     await expect(caller(A).recovery.confirmCreditSuggestion({ invoiceLineId: bLine, claimIds: [aClaim] })).rejects.toMatchObject({
       code: 'NOT_FOUND',
     });
@@ -157,9 +162,28 @@ describe('recovery.creditSuggestions / confirmCreditSuggestion (DB)', () => {
       code: 'NOT_FOUND',
     });
     expect(await db.select().from(creditNotes).where(eq(creditNotes.restaurantId, B.restaurantId))).toHaveLength(0);
+    expect(await db.select().from(creditNotes).where(eq(creditNotes.restaurantId, A.restaurantId))).toHaveLength(0);
     const [b] = await db.select().from(recoveryClaims).where(eq(recoveryClaims.id, bClaim));
     expect(b!.status).toBe('letter_sent');
     expect(b!.creditedAgorot).toBe(0);
+  });
+
+  it('a before-VAT credit line never proposes or closes an incl-VAT (duplicate) or VAT-only claim', async () => {
+    const dup = await addClaim(db, A, { status: 'letter_sent', claimedAt: new Date('2026-10-01T08:00:00Z'), amountAgorot: 11_700, type: 'DUPLICATE_INVOICE' });
+    const vat = await addClaim(db, A, { status: 'letter_sent', claimedAt: new Date('2026-10-02T08:00:00Z'), amountAgorot: 1_700, type: 'VAT_MISMATCH' });
+    const net = await addClaim(db, A, { status: 'letter_sent', claimedAt: new Date('2026-10-03T08:00:00Z'), amountAgorot: 2_000 });
+    const lineId = await addCreditLine(db, A, { agorot: 5_000, date: '2026-10-04', number: 'CR-A-6' });
+    const s = (await caller(A).recovery.creditSuggestions()).find((x) => x.invoiceLineId === lineId)!;
+    expect(s.proposal).toEqual([{ claimId: net, agorot: 2_000 }]);
+    expect(s.remainderAgorot).toBe(3_000);
+    expect(s.openClaims.map((c) => c.claimId)).toEqual([net]);
+    for (const id of [dup, vat]) {
+      await expect(caller(A).recovery.confirmCreditSuggestion({ invoiceLineId: lineId, claimIds: [id] })).rejects.toMatchObject({
+        code: 'BAD_REQUEST',
+        message: 'basis_mismatch',
+      });
+    }
+    expect(await db.select().from(creditNotes).where(eq(creditNotes.restaurantId, A.restaurantId))).toHaveLength(0);
   });
 
   it('receiver and chef → FORBIDDEN; flag off → FEATURE_DISABLED', async () => {
