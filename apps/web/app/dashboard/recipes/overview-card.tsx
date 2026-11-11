@@ -8,6 +8,7 @@ import { recipes as recipesNs } from '@/lib/i18n/messages/recipes';
 import { originalProps } from '@/lib/i18n/original';
 import { ils, ilsDelta, pct } from './recipe-ui';
 import { PriceAlertLine } from './price-alert';
+import { fetched, overviewCardState } from './overview-state';
 
 const TOP = 3;
 
@@ -19,20 +20,31 @@ const TOP = 3;
  */
 export async function RecipesOverviewCard() {
   const caller = await createServerCaller();
-  const { enabled } = await caller.recipes.enabled().catch(() => ({ enabled: false }));
-  if (!enabled) return null;
-  const changes = await caller.recipes.changes().catch((err: unknown) => {
-    // The card is optional — never break the overview — but don't hide real bugs either.
-    console.error('[recipes-overview-card] recipes.changes failed', err);
-    return null;
-  });
-  if (!changes) return null;
-  const [t, locale, alertsRes] = await Promise.all([
-    getT(recipesNs),
-    getLocale(),
+  // G-16 (money-swallow): a failed query is SAID, never shown as "no change" / "no alerts".
+  // enabled() first: with the flag off the other two are FORBIDDEN by design, not an error to log.
+  const enabled = await fetched(caller.recipes.enabled(), 'recipes.enabled');
+  if (!enabled.ok || !enabled.data.enabled) return null;
+  const [changesRes, alertsFetched] = await Promise.all([
+    fetched(caller.recipes.changes(), 'recipes.changes'),
     // Flag `dishPriceAlert`: with it off this is { enabled: false } and the card is unchanged.
-    caller.recipes.priceAlerts().catch(() => null),
+    fetched(caller.recipes.priceAlerts(), 'recipes.priceAlerts'),
   ]);
+  const state = overviewCardState(enabled, changesRes, alertsFetched);
+  if (state.kind === 'hidden') return null;
+  const [t, locale] = await Promise.all([getT(recipesNs), getLocale()]);
+  if (state.kind === 'unavailable') {
+    return (
+      <Card className="mt-8" data-testid="recipes-overview-card">
+        <h2 className="text-base font-semibold text-ink">{t('overviewCard.title')}</h2>
+        <p className="mt-1 text-sm text-muted" role="status" data-testid="recipes-overview-unavailable">
+          {t('workbench.overviewUnavailable')}
+        </p>
+      </Card>
+    );
+  }
+  const changes = state.changes;
+  const alertsRes = state.alerts === 'unavailable' ? null : state.alerts;
+  const alertsUnavailable = state.alerts === 'unavailable';
   const alertById = new Map((alertsRes?.enabled ? alertsRes.alerts : []).map((a) => [a.recipeId, a] as const));
   // Dishes on the menu only (an archived dish is not "hurting" anyone).
   const hurt = changes.rows.filter((r) => r.active && !r.isSubRecipe && r.costDeltaAgorot > 0);
@@ -55,6 +67,11 @@ export async function RecipesOverviewCard() {
                   : t('overviewCard.none')}
             </p>
             {hurt.length ? <p className="text-xs text-subtle">{t('overviewCard.subtitle')}</p> : null}
+            {alertsUnavailable ? (
+              <p className="text-xs text-subtle" role="status" data-testid="recipes-alerts-unavailable">
+                {t('workbench.alertsUnavailable')}
+              </p>
+            ) : null}
           </div>
         </div>
         <Link

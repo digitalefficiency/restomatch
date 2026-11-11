@@ -35,7 +35,8 @@ import { PriceAlertLine } from './price-alert';
 type ListOutput = inferRouterOutputs<AppRouter>['recipes']['list'];
 type Tab = 'dishes' | 'changes' | 'impact' | 'import' | 'pos';
 
-export function RecipesHome({ initial, canSetTarget }: { initial: ListOutput; canSetTarget: boolean }) {
+/** `readOnly` (owner decision I3: the bookkeeper reads, never writes): no new / import entry points. */
+export function RecipesHome({ initial, canSetTarget, readOnly = false }: { initial: ListOutput; canSetTarget: boolean; readOnly?: boolean }) {
   const t = useT(recipesNs);
   const [tab, setTab] = useState<Tab>('dishes');
   const list = trpc.recipes.list.useQuery(undefined, { initialData: initial });
@@ -45,7 +46,7 @@ export function RecipesHome({ initial, canSetTarget }: { initial: ListOutput; ca
   const showPos = !!posProbe.data && posProbe.data.reason !== 'integrationsOff';
   // Dish price alerts (flag `dishPriceAlert`): `enabled: false` ⇒ nothing changes.
   const alertsQ = trpc.recipes.priceAlerts.useQuery(undefined, { staleTime: 60_000 });
-  const tabs: Tab[] = showPos ? ['dishes', 'changes', 'impact', 'pos', 'import'] : ['dishes', 'changes', 'impact', 'import'];
+  const tabs: Tab[] = [...(showPos ? (['dishes', 'changes', 'impact', 'pos'] as const) : (['dishes', 'changes', 'impact'] as const)), ...(readOnly ? [] : (['import'] as const))];
 
   return (
     <div className="space-y-6">
@@ -71,10 +72,10 @@ export function RecipesHome({ initial, canSetTarget }: { initial: ListOutput; ca
         ))}
       </div>
       <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-        {tab === 'dishes' ? <DishesTab data={data} alerts={alertsQ.data?.enabled ? alertsQ.data : null} /> : null}
+        {tab === 'dishes' ? <DishesTab readOnly={readOnly} data={data} alerts={alertsQ.data?.enabled ? alertsQ.data : null} /> : null}
         {tab === 'changes' ? <ChangesTab /> : null}
         {tab === 'impact' ? <ImpactTab /> : null}
-        {tab === 'import' ? <ImportTab onDone={() => setTab('dishes')} /> : null}
+        {tab === 'import' && !readOnly ? <ImportTab onDone={() => setTab('dishes')} /> : null}
         {tab === 'pos' && showPos ? <PosTab targetBp={data.targetBp} /> : null}
       </div>
     </div>
@@ -137,24 +138,21 @@ function TargetBar({ targetBp, canSetTarget }: { targetBp: number; canSetTarget:
   );
 }
 
+/**
+ * IA-02 (W3-02): two tiles, not four. "מנות מעל הרצוי" always; "חסר מחיר" only
+ * when > 0. The dish count and the unweighted menu average left the tile row
+ * (the target is shown once, in the TargetBar above).
+ */
 function Summary({ data }: { data: ListOutput }) {
   const t = useT(recipesNs);
   const locale = useLocale();
   const dishes = data.recipes.filter((r) => !r.isSubRecipe && r.active);
-  const priced = dishes.filter((r) => r.foodCostBp != null);
-  const avg = priced.length ? Math.round(priced.reduce((a, r) => a + r.foodCostBp!, 0) / priced.length) : null;
   const above = dishes.filter((r) => r.light === 'red' || r.light === 'amber').length;
   const incomplete = data.recipes.filter((r) => !r.complete).length;
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-      <StatCard label={t('summary.dishes')} value={formatNumber(dishes.length, locale)} />
-      <StatCard
-        label={t('summary.avgFoodCost')}
-        value={pct(avg, locale)}
-        tone={avg == null ? 'neutral' : avg <= data.targetBp ? 'primary' : 'warn'}
-      />
+    <div className="grid grid-cols-2 gap-3 md:max-w-xl" data-testid="recipes-summary">
       <StatCard label={t('summary.aboveTarget')} value={formatNumber(above, locale)} tone={above ? 'danger' : 'neutral'} />
-      <StatCard label={t('summary.incomplete')} value={formatNumber(incomplete, locale)} tone={incomplete ? 'warn' : 'neutral'} />
+      {incomplete ? <StatCard label={t('summary.incomplete')} value={formatNumber(incomplete, locale)} tone="warn" /> : null}
     </div>
   );
 }
@@ -206,7 +204,9 @@ function Arrow({ from, to }: { from: string; to: string }) {
 function DishesTab({
   data,
   alerts,
+  readOnly = false,
 }: {
+  readOnly?: boolean;
   data: ListOutput;
   alerts: { targetBp: number; alerts: Array<import('./price-alert').DishPriceAlert> } | null;
 }) {
@@ -225,6 +225,8 @@ function DishesTab({
           <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" aria-hidden="true" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('list.search')} aria-label={t('list.search')} className="ps-9" />
         </div>
+        {readOnly ? null : (
+          <>
         <LinkButton href="/dashboard/recipes/new" size="sm" className="touch-target">
           <Plus className="h-4 w-4" aria-hidden="true" />
           {t('list.newDish')}
@@ -233,6 +235,8 @@ function DishesTab({
           <Plus className="h-4 w-4" aria-hidden="true" />
           {t('list.newSub')}
         </LinkButton>
+          </>
+        )}
       </div>
 
       {dishes.length === 0 ? (
