@@ -48,3 +48,12 @@ describe('W2-11 · the order-rhythm line (Asia/Jerusalem, 24 h)', () => {
     expect(formatLeft(59, 'en')).toBe('0:59');
   });
 });
+
+describe('W2-11 · deterministic delivery-day label (no ICU hydration mismatch)', () => {
+  it('builds the same string from numeric parts on any runtime', async () => {
+    const { deliveryDayLabel } = await import('../delivery-label');
+    // Wed 11.11.2026, local midnight Asia/Jerusalem = 10.11 22:00Z.
+    expect(deliveryDayLabel('2026-11-10T22:00:00.000Z', 'en')).toBe('Wed 11/11');
+    expect(deliveryDayLabel('2026-11-10T22:00:00.000Z', 'he')).toBe('ד׳ 11/11');
+  });
+});
