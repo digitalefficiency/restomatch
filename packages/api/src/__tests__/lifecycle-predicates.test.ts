@@ -152,7 +152,6 @@ describe('predicates', () => {
 const ALLOW: ReadonlyArray<{ file: string; count: number; owner: string; reason?: string }> = [
   { file: 'exports/period.ts', count: 1, owner: 'W2-14' },
   { file: 'ledger/coverage.ts', count: 1, owner: 'W2-11' },
-  { file: 'lib/claims.ts', count: 1, owner: 'W2-03' },
   { file: 'match/consolidated.ts', count: 1, owner: 'G-04' },
   { file: 'receiving/matchTriggers.ts', count: 1, owner: 'W2-05' },
   { file: 'recovery/service.ts', count: 1, owner: 'W2-10' },
