@@ -255,6 +255,15 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
     //   ONE row lock, FOR NO KEY UPDATE (round 7, #216 and G-08): still serialises
     //   edits / re-holds / re-matches / retakes of this invoice, but lets a claim's
     //   FK (KEY SHARE) through — a plain FOR UPDATE deadlocks with the claims-tracker sync.
+    //   The lock is taken in its OWN statement first: under READ COMMITTED a
+    //   statement that waits for a row lock keeps the snapshot it started with, so
+    //   its has_run subquery would miss a run a match.runForInvoice committed while
+    //   this job waited. The flags below are read by a NEW statement — a fresh
+    //   snapshot that sees everything committed before the lock was granted.
+    await tx.execute(sql`
+      select 1 from invoices where id = ${invoiceId}::uuid and restaurant_id = ${restaurantId}
+       for no key update
+    `);
     const [race] = (await tx.execute(sql`
       select i.status,
              exists (select 1 from match_runs mr where mr.invoice_id = i.id and mr.restaurant_id = i.restaurant_id) as has_run,
@@ -272,6 +281,12 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
     if ((race.link_held || race.hand_entered) && race.unlinked) return 'awaiting_review' as const;
     if (race.status === 'parsed' && race.question_reason) return 'awaiting_review' as const;
     if (priorRun && !race.has_run) return 'awaiting_review' as const;
+    // The other direction: no run at the start, one now — a match.runForInvoice
+    // (manager Re-run) committed after this job's prior-run read. Its run stands;
+    // persisting this one too would be a SECOND run for the invoice (match_runs has
+    // no unique key on invoice_id): the leak counted twice, every finding twice in
+    // approvals, and a notification for the duplicate. Skip like any already-matched job.
+    if (!priorRun && race.has_run) return 'already_matched' as const;
     let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;
     if (priorRun) {
       // Claims on the run being replaced (round 7): bare ones go, a claim in
