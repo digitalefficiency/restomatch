@@ -60,7 +60,8 @@ describe('email templates', () => {
       poUrl: 'https://app/po/1',
     });
     expect(subject).toContain('תנובה');
-    expect(html).toContain('2 ימים');
+    // W2-13: ICU plural with the Hebrew dual ("2 ימים" → "יומיים").
+    expect(html).toContain('באיחור של יומיים');
     expect(text).toContain('תנובה');
   });
 
@@ -86,7 +87,8 @@ describe('email templates', () => {
 
   it('approvalNeededEmail for a review-only match names no ₪ (money review E)', () => {
     const { subject, html, text } = approvalNeededEmail({ supplierName: 'תנובה', discrepancyCount: 2, atRiskIls: null });
-    expect(subject).toContain('2');
+    // W2-13: ICU plural with the Hebrew dual ("2 פערים" → "שני פערים").
+    expect(subject).toContain('שני פערים');
     expect(html).toContain('לבדיקה');
     for (const s of [subject, html, text]) {
       expect(s).not.toContain('₪');
@@ -167,7 +169,10 @@ describe('auth email templates — English (client-ready S4)', () => {
 
   it('Hebrew invite preview is escaped exactly once', () => {
     const e = inviteEmail({ url: 'u', restaurantName: 'R', roleLabel: 'r', inviterName: 'A&B' });
-    expect(e.html).toContain('A&amp;B הזמין/ה אותך');
+    // W2-13: plural address, no slash form ("A&B הזמין/ה אותך" → "קיבלתם הזמנה מ-A&B").
+    // "A&B" is Latin + a neutral, so the runtime isolates it (FSI…PDI); compare without the marks.
+    expect(e.html.replace(/[\u2066-\u2069]/g, '')).toContain('קיבלתם הזמנה מ-A&amp;B');
+    expect(e.html).not.toContain('/ה');
     expect(e.html).not.toContain('&amp;amp;');
     expect(e.html).toContain('dir="rtl"');
   });

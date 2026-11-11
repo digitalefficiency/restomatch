@@ -61,7 +61,16 @@ export interface Namespace<T extends MessageTree = MessageTree> {
   readonly extra?: Overlays<T>;
 }
 
-export type Translator<T extends MessageTree> = ((key: MessageKey<T>, vars?: MessageVars) => string) & {
+/** Per-call options. `raw` lists var names spliced verbatim (no bidi isolation): file names, CSV keys. */
+export interface TranslateOptions {
+  readonly raw?: readonly string[];
+}
+
+export type Translator<T extends MessageTree> = ((
+  key: MessageKey<T>,
+  vars?: MessageVars,
+  opts?: TranslateOptions,
+) => string) & {
   /** Base (he/en) locale — what formatters and non-receiver code expect. */
   readonly locale: Locale;
   /** The rendered locale, including receiver locales. */
@@ -141,12 +150,64 @@ function resolvePlurals(template: string, vars: MessageVars, intlLocale: string)
   return out + template.slice(from);
 }
 
-export function interpolate(template: string, vars?: MessageVars, intlLocale = 'he-IL'): string {
+/* ── Bidi isolation (copy-rtl-13) ─────────────────────────────────────────────
+ * A value spliced into a sentence of the other direction scrambles it: in a
+ * Hebrew sentence "בהזמנה מ-{supplier}." with "Coca-Cola Ltd." renders the
+ * period on the wrong side and pulls the quote marks apart (Lab I). The fix is
+ * an FSI…PDI isolate (U+2068/U+2069) around the value, so the browser lays it
+ * out as one unit.
+ *
+ * Direction-aware default: a value is isolated only when it can actually
+ * reorder, i.e. it holds a letter of the OTHER direction (Latin in he/ar,
+ * Hebrew/Arabic in en/ru/th/ti) together with anything that is not a letter
+ * (a space, digit, period, hyphen, quote). Pure numerals, formatted ₪/%
+ * strings, same-script text and a single other-script word pass through
+ * untouched, so every existing string renders byte-identical.
+ */
+export const FSI = '\u2068';
+export const PDI = '\u2069';
+const RTL_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+const LTR_LETTER = /[A-Za-z\u00C0-\u024F\u0370-\u03FF\u0400-\u052F\u0E00-\u0E7F\u1200-\u139F]/;
+const LETTERS_ONLY = /^[\p{L}\p{M}]+$/u;
+const RTL_LOCALES = /^(he|iw|ar|fa|ur|yi)\b/i;
+
+/** True when `intlLocale` renders right-to-left. */
+export function isRtlLocale(intlLocale: string): boolean {
+  return RTL_LOCALES.test(intlLocale);
+}
+
+/** Would `value`, spliced into a sentence of `rtl` direction, need an isolate? */
+export function needsIsolation(value: string, rtl: boolean): boolean {
+  if (value.includes(FSI)) return false; // already isolated by the caller
+  const opposite = rtl ? LTR_LETTER : RTL_LETTER;
+  return opposite.test(value) && !LETTERS_ONLY.test(value);
+}
+
+/** Wrap in FSI…PDI when needed (see `needsIsolation`). */
+export function isolate(value: string, rtl: boolean): string {
+  return needsIsolation(value, rtl) ? FSI + value + PDI : value;
+}
+
+/** Remove FSI/LRI/RLI/PDI marks: for tests and plain-text exports that must not carry them. */
+export function stripIsolates(s: string): string {
+  return s.replace(/[\u2066-\u2069]/g, '');
+}
+
+export function interpolate(
+  template: string,
+  vars?: MessageVars,
+  intlLocale = 'he-IL',
+  opts?: TranslateOptions,
+): string {
   if (!vars) return template;
   const withPlurals = template.includes('plural') ? resolvePlurals(template, vars, intlLocale) : template;
-  return withPlurals.replace(/\{(\w+)\}/g, (match, name: string) =>
-    Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : match,
-  );
+  const rtl = isRtlLocale(intlLocale);
+  const raw = opts?.raw;
+  return withPlurals.replace(/\{(\w+)\}/g, (match, name: string) => {
+    if (!Object.prototype.hasOwnProperty.call(vars, name)) return match;
+    const value = String(vars[name]);
+    return raw?.includes(name) ? value : isolate(value, rtl);
+  });
 }
 
 export function createTranslator<T extends MessageTree>(locale: AppLocale, ns: Namespace<T>): Translator<T> {
@@ -162,13 +223,13 @@ export function createTranslator<T extends MessageTree>(locale: AppLocale, ns: N
             [ns.en as MessageTree, ns[DEFAULT_LOCALE]];
   // Plural categories follow the RENDERED language (ru has few/many, he has a dual).
   const pluralLocale = locale === 'he' ? 'he-IL' : locale === 'en' ? 'en-GB' : locale;
-  const t = (key: MessageKey<T>, vars?: MessageVars): string => {
+  const t = (key: MessageKey<T>, vars?: MessageVars, opts?: TranslateOptions): string => {
     let raw: string | undefined;
     for (const tree of chain) {
       raw = lookup(tree, key);
       if (raw !== undefined) break;
     }
-    return interpolate(raw ?? key, vars, pluralLocale);
+    return interpolate(raw ?? key, vars, pluralLocale, opts);
   };
   return Object.assign(t, { locale: baseLocaleOf(locale), appLocale: locale });
 }
