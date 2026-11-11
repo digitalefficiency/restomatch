@@ -62,10 +62,10 @@ describe('PrintButton (W2-15 one print rule)', () => {
     expect(css).toContain('html[data-print-scope="xmatch"] [data-print-root="xmatch"]');
   });
 
-  it('mono safety net: Heebo right after JetBrains Mono (globals var + ui-tokens stack)', async () => {
+  it('font-mono reads the UI face (DS2 β, D3: no mono face, Plex has the ₪ glyph)', async () => {
     const css = readFileSync(fileURLToPath(new URL('../../../app/globals.css', import.meta.url)), 'utf8');
-    expect(css).toMatch(/--font-mono:\s*'JetBrains Mono',\s*'Heebo';/);
-    const { typography } = await import('@restomatch/ui-tokens');
-    expect(typography.fontFamily.mono.startsWith('"JetBrains Mono", "Heebo"')).toBe(true);
+    expect(css).toMatch(/--font-mono:\s*var\(--font-id\);/);
+    const { activeFonts } = await import('@restomatch/ui-tokens');
+    expect(activeFonts.id).toBe('var(--font-ui)');
   });
 });
