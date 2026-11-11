@@ -26,13 +26,3 @@ export function priceUnitsTimesQtyToAgorot(priceUnits: number, qty: number): num
   return Number(divRoundHalfAway(BigInt(priceUnits) * qtyToMilli(qty), 100n * 1000n));
 }
 
-/** Hebrew/English product-name key: lowercase, no punctuation or geresh, single spaces. */
-export function nameKey(raw: string): string {
-  return raw
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/[֑-ׇ]/g, '') // niqqud / cantillation
-    .replace(/["'`.,;:()\[\]{}\-_/\\|*+׳״]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}

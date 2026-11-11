@@ -1,4 +1,4 @@
-import { nameKey } from './rounding';
+import { normalizeLinkName } from '@restomatch/catalog';
 
 /**
  * W3-10 · one "לקשר" queue. Today three places ask the owner to link a supplier
@@ -16,7 +16,7 @@ export interface LinkSuggestion {
   confidence: number;
 }
 
-export interface LinkCandidate {
+export interface LinkQueueCandidate {
   source: LinkSource;
   supplierId: string;
   supplierSku: string | null;
@@ -50,11 +50,11 @@ export interface LinkQueueSummary {
 const SOURCE_ORDER: LinkSource[] = ['sku_line', 'no_sku_line', 'import_suggestion'];
 
 export function linkKey(supplierId: string, supplierSku: string | null, nameRaw: string): string {
-  const sku = supplierSku?.trim().toLowerCase();
-  return sku ? `${supplierId}|sku:${sku}` : `${supplierId}|name:${nameKey(nameRaw)}`;
+  const sku = supplierSku?.trim(); // exact after trim, as commit.ts matches SKUs
+  return sku ? `${supplierId}|sku:${sku}` : `${supplierId}|name:${normalizeLinkName(nameRaw)}`;
 }
 
-export function buildLinkQueue(candidates: LinkCandidate[]): LinkQueueRow[] {
+export function buildLinkQueue(candidates: LinkQueueCandidate[]): LinkQueueRow[] {
   const rows = new Map<string, LinkQueueRow>();
   for (const c of candidates) {
     if (!Number.isInteger(c.unmappedAgorot) || c.unmappedAgorot < 0) {

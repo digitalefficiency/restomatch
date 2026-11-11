@@ -1,4 +1,5 @@
-import { nameKey, priceUnitsTimesQtyToAgorot } from './rounding';
+import { normalizeLinkName } from '@restomatch/catalog';
+import { priceUnitsTimesQtyToAgorot } from './rounding';
 
 /**
  * W3-10 · "מה ישתנה" — the preview step of one "ייבוא מחירון", computed before
@@ -64,12 +65,13 @@ const ORDER: Record<DiffKind, number> = { up: 0, down: 1, unclear: 2, missing: 3
 
 function skuKey(sku: string | null): string | null {
   const s = sku?.trim();
-  return s ? `sku:${s.toLowerCase()}` : null;
+  return s ? `sku:${s}` : null; // exact after trim, as commit.ts matches SKUs
 }
 
 /**
  * Builds the preview. Matching: by SKU when the incoming row has one, else by
- * normalised name. A current active row the file does not mention becomes
+ * `normalizeLinkName` (G-08's one name key; SQL twin `normNameSql`). A current
+ * active row the file does not mention becomes
  * `missing` (suggested for disabling — never disabled automatically).
  */
 export function buildImportDiff(current: CurrentCatalogRow[], incoming: IncomingCatalogRow[]): ImportDiff {
@@ -78,7 +80,7 @@ export function buildImportDiff(current: CurrentCatalogRow[], incoming: Incoming
   for (const c of current) {
     const k = skuKey(c.supplierSku);
     if (k && !bySku.has(k)) bySku.set(k, c);
-    const n = nameKey(c.name);
+    const n = normalizeLinkName(c.name);
     if (n && !byName.has(n)) byName.set(n, c);
   }
 
@@ -87,7 +89,7 @@ export function buildImportDiff(current: CurrentCatalogRow[], incoming: Incoming
   const lines: DiffLine[] = [];
 
   for (const row of incoming) {
-    const nk = nameKey(row.name);
+    const nk = normalizeLinkName(row.name);
     const key = skuKey(row.supplierSku) ?? (nk ? `name:${nk}` : null);
     const base = {
       rowNumber: row.rowNumber,

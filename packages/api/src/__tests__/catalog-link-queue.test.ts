@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { buildLinkQueue, linkKey, summarizeLinkQueue, type LinkCandidate } from '../catalog/linkQueue';
+import { buildLinkQueue, linkKey, summarizeLinkQueue, type LinkQueueCandidate } from '../catalog/linkQueue';
 
-const c = (o: Partial<LinkCandidate>): LinkCandidate => ({
+const c = (o: Partial<LinkQueueCandidate>): LinkQueueCandidate => ({
   source: 'no_sku_line',
   supplierId: 's1',
   supplierSku: null,
@@ -16,9 +16,9 @@ describe('W3-10 one "לקשר" queue', () => {
   it('merges SKU lines, no-SKU lines and import suggestions for the same item', () => {
     const rows = buildLinkQueue([
       c({ source: 'sku_line', supplierSku: 'T-1', nameRaw: 'עגבניה', unmappedAgorot: 30000, lineCount: 3 }),
-      c({ source: 'import_suggestion', supplierSku: ' t-1 ', nameRaw: 'עגבניה שרי', suggestion: { productId: 'p1', confidence: 0.8 }, lastSeenAt: '2026-10-25T08:00:00.000Z' }),
+      c({ source: 'import_suggestion', supplierSku: ' T-1 ', nameRaw: 'עגבניה שרי', suggestion: { productId: 'p1', confidence: 0.8 }, lastSeenAt: '2026-10-25T08:00:00.000Z' }),
       c({ source: 'no_sku_line', nameRaw: 'בצל  יבש', unmappedAgorot: 50000, lineCount: 2, suggestion: { productId: 'p2', confidence: 0.4 } }),
-      c({ source: 'no_sku_line', nameRaw: 'בצל יבש.', unmappedAgorot: 1, suggestion: { productId: 'p3', confidence: 0.6 } }),
+      c({ source: 'no_sku_line', nameRaw: 'בצל\u00A0יבש', unmappedAgorot: 1, suggestion: { productId: 'p3', confidence: 0.6 } }),
     ]);
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
@@ -28,7 +28,7 @@ describe('W3-10 one "לקשר" queue', () => {
       suggestion: { productId: 'p3', confidence: 0.6 },
     });
     expect(rows[1]).toMatchObject({
-      key: 's1|sku:t-1',
+      key: 's1|sku:T-1',
       sources: ['sku_line', 'import_suggestion'],
       unmappedAgorot: 30000,
       lineCount: 4,
@@ -46,6 +46,10 @@ describe('W3-10 one "לקשר" queue', () => {
       c({ supplierId: 'd', nameRaw: 'z', unmappedAgorot: 900 }),
     ]);
     expect(rows.map((r) => r.supplierId)).toEqual(['d', 'c', 'b', 'a']);
+  });
+
+  it('SKUs differing only in case stay two rows (commit.ts matches SKUs exactly)', () => {
+    expect(buildLinkQueue([c({ supplierSku: 'T-1' }), c({ supplierSku: 't-1' })])).toHaveLength(2);
   });
 
   it('rejects non-integer or negative agorot (₪ is integer at this boundary)', () => {

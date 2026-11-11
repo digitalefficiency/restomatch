@@ -37,7 +37,7 @@ describe('W3-10 buildImportDiff ("מה ישתנה")', () => {
     const d = buildImportDiff(current, [
       { rowNumber: 2, supplierSku: 'T-1', name: 'עגבניה', priceUnits: 55000 }, // +₪0.50 × 120 = ₪60
       { rowNumber: 3, supplierSku: 'C-2', name: 'מלפפון', priceUnits: 37500 }, // −₪0.25 × 80 = −₪20
-      { rowNumber: 4, supplierSku: null, name: 'בצל  יבש.', priceUnits: 30000 }, // same, by name
+      { rowNumber: 4, supplierSku: null, name: ' בצל  יבש ', priceUnits: 30000 }, // same, by normalizeLinkName
       { rowNumber: 5, supplierSku: 'N-1', name: 'שום', priceUnits: 90000 }, // new
       { rowNumber: 6, supplierSku: 'Q-1', name: 'כוסברה', priceUnits: null }, // unclear price
       { rowNumber: 7, supplierSku: 'T-1', name: 'עגבניה', priceUnits: 56000 }, // duplicate
@@ -71,7 +71,7 @@ describe('W3-10 buildImportDiff ("מה ישתנה")', () => {
   });
 
   it('a row with no name and no SKU is unclear, never matched', () => {
-    const d = buildImportDiff(current, [{ rowNumber: 9, supplierSku: '  ', name: ' . ', priceUnits: 100 }]);
+    const d = buildImportDiff(current, [{ rowNumber: 9, supplierSku: '  ', name: '   ', priceUnits: 100 }]);
     expect(d.lines[0]).toMatchObject({ kind: 'unclear', unclearReason: 'NO_NAME', currentId: null });
   });
 
