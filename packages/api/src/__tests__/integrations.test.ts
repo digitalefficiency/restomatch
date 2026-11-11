@@ -5,6 +5,7 @@ import { createDb, eq, invoices, posSales, procurementConnections, restaurants, 
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
+import { restaurantDateKey } from './helpers/il-day';
 
 /**
  * Wave-1 integrations router (flag `integrations`). Functional checks plus the
@@ -27,9 +28,11 @@ async function setFlag(tenant: Tenant, on: boolean) {
     .where(eq(restaurants.id, tenant.restaurantId));
 }
 
+// The restaurant's month-to-date: exports read `from`/`to` as calendar days in
+// the restaurant's zone, and seedTenant dates its invoice on the restaurant's
+// today — so the period is the restaurant's day too, not the UTC day.
 const PERIOD = (() => {
-  const d = new Date();
-  const iso = d.toISOString().slice(0, 10);
+  const iso = restaurantDateKey();
   return { from: `${iso.slice(0, 8)}01`, to: iso };
 })();
 
