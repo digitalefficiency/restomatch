@@ -45,6 +45,8 @@ export const APP_ERROR_CODES = [
   'invoice.linesLocked',
   'invoice.receiptOpen',
   'invoice.beingRead',
+  // G-09: a decision while a page of the invoice still waits in the inbox.
+  'invoice.pageQuestionOpen',
   'invoice.partialHeaderClear',
   'invoice.claimInProgress',
 ] as const;

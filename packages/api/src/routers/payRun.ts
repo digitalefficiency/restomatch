@@ -11,7 +11,7 @@ import { eq, restaurants, sql, type Database } from '@restomatch/db';
 import { NEVER_CLAIMABLE_TYPES, claimableLines, sumClaims, type VatBasis } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
 import { financeProcedure, router } from '../trpc';
-import { PAGE_FLAGS } from '../documents/settle';
+import { openPageQuestionSql } from '../documents/questions';
 
 /** The charts leak exclusion list (LEAK_EXCLUDED_TYPES) as SQL values. */
 const LEAK_EXCLUDED_SQL = sql.join(LEAK_EXCLUDED_TYPES.map((t) => sql`${t}`), sql`, `);
@@ -252,9 +252,7 @@ export const payRunRouter = router({
                -- G-08: held for a "זה אותו מוצר?" question (same rule as the hero).
                ${AWAITING_QUESTION_SQL} AS question,
                -- G-09: a page question is open in the inbox (never "pay" while a page is undecided).
-               EXISTS (SELECT 1 FROM ingest_documents gd
-                        WHERE gd.invoice_id = i.id AND gd.restaurant_id = ${rid} AND gd.status = 'registered'
-                          AND gd.error IN (${sql.join(PAGE_FLAGS.map((f) => sql`${f}`), sql`, `)})) AS open_page
+               ${openPageQuestionSql(rid, sql`i.id`)} AS open_page
         FROM invoices i
         LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${rid}
         WHERE i.restaurant_id = ${rid}

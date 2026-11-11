@@ -31,6 +31,7 @@ import { featureEnabled } from '../lib/features';
 import { enqueueIngestJobs, INGEST_FEATURE, messageStatus, registerIngestedDocument, registerReviewGroup } from '../ingest/pipeline';
 import { multiPageEnabled } from '../ingest/grouping';
 import { PAGE_FLAGS } from '../documents/settle';
+import { openPageQuestionSql } from '../documents/questions';
 import { resolvePageFlag } from '../documents/resolve';
 import { assertSupplierOwned } from '../tenant';
 import { captureSourceRef } from '../orders/captureOrder';
@@ -152,7 +153,13 @@ export const ingestRouter = router({
         ),
       )
       .limit(1);
-    return row ? { documentId: row.documentId, flag: row.flag as string } : null;
+    if (row) return { documentId: row.documentId, flag: row.flag as string };
+    // Round 7: page 1 of a page that probably belongs to it waits too.
+    const [one] = (await ctx.db.execute(sql`
+      select 1 as hit from ${invoices} i
+       where i.id = ${input.invoiceId} and i.restaurant_id = ${ctx.session.restaurantId}
+         and ${openPageQuestionSql(ctx.session.restaurantId, sql`i.id`)}`)) as unknown as Array<{ hit: number }>;
+    return one ? { documentId: null, flag: 'page_belongs' } : null;
   }),
 
   /** New secret for a channel; the old one stops working at once. Plaintext returned ONCE. */

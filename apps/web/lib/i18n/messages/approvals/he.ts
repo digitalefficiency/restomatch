@@ -80,6 +80,9 @@ export const he = {
     cancel: 'ביטול',
   },
   card: {
+    pageQuestion: 'עמוד פתוח',
+    pageQuestionBody: 'עמוד של החשבונית הזאת מחכה להחלטה בתיבת הקליטה. החליטו עליו לפני שמחליטים כאן.',
+    pageQuestionCta: 'להחלטה בתיבת הקליטה',
     invoice: 'חשבונית {number}',
     fixInvoice: 'פתח חשבונית',
     more: 'פעולות נוספות',

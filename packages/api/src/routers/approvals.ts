@@ -21,10 +21,13 @@ import {
   sql,
   suppliers,
   users,
+  type Database,
   type UserRole,
 } from '@restomatch/db';
 import { LEAK_FILTER, notZeroShortTwin, type LeakBreakdownInvoice } from '@restomatch/charts';
 import { authedProcedure, financeProcedure, memberProcedure, router } from '../trpc';
+import { appError } from '../errors';
+import { openPageQuestionSql } from '../documents/questions';
 import { logActivity } from '../activity';
 import { canActOn, expandVisibleRoles } from '../lib/roles';
 import { claimableLines, isNeverClaimable, sumClaims, type VatBasis } from '../lib/claims';
@@ -122,6 +125,21 @@ const ApprovalQueueItemSchema = z.object({
   invoiceId: z.string().uuid().nullable(),
 });
 export type ApprovalQueueItem = z.infer<typeof ApprovalQueueItemSchema>;
+
+/**
+ * G-09 (round 7): no decision on a discrepancy whose invoice has an open page
+ * question — the page may change the invoice (a named refusal; the UI links to
+ * the inbox).
+ */
+async function refuseWhilePageQuestion(db: Database, rid: string, discrepancyId: string): Promise<void> {
+  const rows = (await db.execute(sql`
+    SELECT 1 FROM discrepancies d
+      JOIN match_runs r ON r.id = d.match_run_id AND r.restaurant_id = d.restaurant_id
+     WHERE d.id = ${discrepancyId} AND d.restaurant_id = ${rid}
+       AND ${openPageQuestionSql(rid, sql`r.invoice_id`)}
+     LIMIT 1`)) as unknown as unknown[];
+  if (rows.length > 0) throw appError('CONFLICT', 'invoice.pageQuestionOpen', 'עמוד של החשבונית מחכה להחלטה בתיבת הקליטה');
+}
 
 /** View filters shared by myQueue and queueSummary (all optional, all enumerated). */
 const QueueFilters = {
@@ -241,6 +259,8 @@ export const approvalsRouter = router({
           qtyReceived: grLines.qtyReceived,
           poId: purchaseOrders.id,
           poRef: purchaseOrders.sourceRef,
+          // G-09 (round 7): a page of this invoice (or a page that belongs to it) waits for a decision in the inbox.
+          pageQuestion: sql<boolean>`${openPageQuestionSql(rid, sql`${matchRuns.invoiceId}`)}`,
           poDate: sql<Date | null>`COALESCE(${purchaseOrders.sentAt}, ${purchaseOrders.createdAt})`.mapWith(
             (v: unknown) => (v == null ? null : new Date(String(v))),
           ),
@@ -320,6 +340,7 @@ export const approvalsRouter = router({
         deltaAmount: discrepancies.deltaAmount,
         createdAt: discrepancies.createdAt,
         invoiceId: matchRuns.invoiceId,
+        pageQuestion: sql<boolean>`${openPageQuestionSql(rid, sql`${matchRuns.invoiceId}`)}`,
       })
       .from(discrepancies)
       .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
@@ -366,6 +387,8 @@ export const approvalsRouter = router({
       vatIls,
       toDecide: { count: decide.length, amountIls: claimableIls },
       toReview: { count: mine.length - decide.length },
+      /** G-09 (round 7): the viewer's rows held by an open page question (decide in the inbox first). */
+      pageHeld: { count: mine.filter((r) => r.pageQuestion === true).length },
       others: {
         count: showOthers ? others.length : 0,
         amountIls: othersTotal / 100,
@@ -378,6 +401,7 @@ export const approvalsRouter = router({
     .input(z.object({ discrepancyId: z.string().uuid(), note: z.string().max(500).optional() }))
     .mutation(async ({ ctx, input }) => {
       const before = await ensureCanAct(ctx, input.discrepancyId);
+      await refuseWhilePageQuestion(ctx.db, ctx.session.restaurantId, input.discrepancyId);
       const [updated] = await ctx.db
         .update(discrepancies)
         .set({
@@ -429,6 +453,7 @@ export const approvalsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const before = await ensureCanAct(ctx, input.discrepancyId);
+      await refuseWhilePageQuestion(ctx.db, ctx.session.restaurantId, input.discrepancyId);
       const [updated] = await ctx.db
         .update(discrepancies)
         .set({

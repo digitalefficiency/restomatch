@@ -1530,3 +1530,37 @@ describe('round 7 · R3: a transient storage failure never releases both halves'
     expect(last.flagged).toEqual([{ invoiceId: p2, reason: 'page_merge_blocked' }]);
   });
 });
+
+describe('round 7 · R4: an open page question holds approvals (its invoice and page 1)', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+  const owner = () =>
+    appRouter.createCaller({
+      db: ownerDb,
+      session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' },
+    } as AppContext);
+
+  it("page 1's discrepancy is marked and approve/reject are refused while page 2 is page_merge_blocked", async () => {
+    const [p1, p2] = await pages(2, 'r7a');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-721' });
+    // page 1 already matched against its goods receipt → page 2 cannot join (merge blocked)
+    const [run] = await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p1!, grId: A.grId, overallStatus: 'minor' }).returning();
+    const [gap] = await ownerDb
+      .insert(discrepancies)
+      .values({ matchRunId: run!.id, restaurantId: A.restaurantId, type: 'PRICE_HIGHER', severity: 'warn', requiresRole: 'manager', deltaAmount: '12.00' })
+      .returning();
+    expect(await ocr(p2!, NOHEAD)).toMatchObject({ flagged: [{ invoiceId: p2, reason: 'page_merge_blocked' }] }); // page 1 has a run
+    const rows = await owner().approvals.myQueue();
+    expect(rows.find((r) => r.id === gap!.id)?.pageQuestion).toBe(true);
+    expect((await owner().approvals.queueSummary()).pageHeld.count).toBeGreaterThanOrEqual(1);
+    await expect(owner().approvals.approve({ discrepancyId: gap!.id })).rejects.toMatchObject({ code: 'CONFLICT' });
+    await expect(owner().approvals.reject({ discrepancyId: gap!.id, reason: 'x' })).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(await owner().ingest.pageQuestionOf({ invoiceId: p1! })).toMatchObject({ flag: 'page_belongs' });
+    // the person decides the page ("separate") → the hold lifts
+    const [d2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, p2!));
+    await owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'separate' });
+    await expect(owner().approvals.approve({ discrepancyId: gap!.id })).resolves.toBeTruthy();
+  });
+});
