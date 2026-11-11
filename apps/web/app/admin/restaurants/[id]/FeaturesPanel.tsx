@@ -7,11 +7,14 @@ import { Button } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { admin } from '@/lib/i18n/messages/admin';
 import { localizeServerError } from '@/lib/serverErrors';
+import { releaseNotice } from './releaseNotice';
 
 /** What admin.getRestaurant reports for one tenant's wave-1 flags. */
 export interface FeatureState {
   stored: Record<string, boolean | undefined>;
   all: boolean;
+  /** Keys that are on unless stored false (G-08 orderQuestions). */
+  defaultOn?: string[];
   effective: Record<string, boolean>;
   killed: string[];
 }
@@ -33,7 +36,7 @@ const PILOT_DEFAULTS = [
 /** On for this tenant before any kill-switch — what a ticked box means. */
 function storedOn(state: FeatureState, key: string): boolean {
   const v = state.stored[key];
-  return v === true || (state.all && v !== false);
+  return v === true || ((state.all || (state.defaultOn ?? []).includes(key)) && v !== false);
 }
 
 export function FeaturesPanel({ restaurantId, state }: { restaurantId: string; state: FeatureState }) {
@@ -134,6 +137,12 @@ export function FeaturesPanel({ restaurantId, state }: { restaurantId: string; s
           <span className="text-xs text-danger">{localizeServerError(save.error, locale, t('generic'))}</span>
         ) : null}
         {save.isSuccess ? <span className="text-xs text-primary">{t('features.saved')}</span> : null}
+        {/* G-08 kill switch: the save stuck, but releasing the held invoices did not (or not all) — the ops fallback. */}
+        {save.data && 'release' in save.data && releaseNotice(save.data.release, restaurantId) ? (
+          <span className="text-xs text-danger" dir="ltr">
+            {releaseNotice(save.data.release, restaurantId)}
+          </span>
+        ) : null}
       </div>
     </section>
   );

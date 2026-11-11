@@ -15,6 +15,10 @@ import { Notice } from '../(auth)/_components/Notice';
 
 export const generateMetadata = () => authTitle('shell.titles.onboarding');
 
+/** Who to contact while sign-up is by invitation only (pilot brief). */
+const CONTACT_PHONE = '054-3544245';
+const CONTACT_EMAIL = 'info@digitalefficiency.co.il';
+
 /** Where to land after onboarding: the validated `callbackUrl` (e.g. a leak-check claim), never a loop back here. */
 function landing(callbackUrl: string | undefined): string {
   const next = safeRelativePath(callbackUrl);
@@ -46,6 +50,8 @@ export default async function OnboardingPage({
 
   const [t, locale, invites] = await Promise.all([getT(onboarding), getLocale(), pendingInvitesFor(session.user.id)]);
   const lang = locale === 'en' ? 'en' : 'he';
+  // Closed sign-up (pilot): no form for a caller who may not create a restaurant.
+  const { open } = await caller.onboarding.signupStatus();
 
   async function logout() {
     'use server';
@@ -91,12 +97,30 @@ export default async function OnboardingPage({
               </li>
             ))}
           </ul>
-          <h2 className="mt-8 text-lg font-bold text-ink">{t('pending.orCreate')}</h2>
+          {open ? <h2 className="mt-8 text-lg font-bold text-ink">{t('pending.orCreate')}</h2> : null}
         </section>
       ) : null}
-      {invites.length > 0 ? null : <h1 className="mb-2 text-2xl font-bold text-ink">{t('title')}</h1>}
-      <p className="mb-6 text-sm text-muted">{t('subtitle')}</p>
-      <OnboardingForm next={next} initialName={session.user.name ?? ''} />
+      {open ? (
+        <>
+          {invites.length > 0 ? null : <h1 className="mb-2 text-2xl font-bold text-ink">{t('title')}</h1>}
+          <p className="mb-6 text-sm text-muted">{t('subtitle')}</p>
+          <OnboardingForm next={next} initialName={session.user.name ?? ''} />
+        </>
+      ) : invites.length > 0 ? null : (
+        <>
+          <h1 className="mb-2 text-2xl font-bold text-ink">{t('closed.title')}</h1>
+          <p className="text-base leading-relaxed text-ink">
+            {t('closed.body')} {t('closed.contactName')} ·{' '}
+            <a href={`tel:${CONTACT_PHONE.replace(/-/g, '')}`} className="font-medium text-primary underline" dir="ltr">
+              {CONTACT_PHONE}
+            </a>{' '}
+            ·{' '}
+            <a href={`mailto:${CONTACT_EMAIL}`} className="font-medium text-primary underline" dir="ltr">
+              {CONTACT_EMAIL}
+            </a>
+          </p>
+        </>
+      )}
       <p className="mt-6 text-sm leading-relaxed text-muted">{t('invitedNote')}</p>
     </AuthShell>
   );

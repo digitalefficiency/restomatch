@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { notifyEnqueued, setEnqueueListener } from '@restomatch/queue';
-import { __resetJobKicks, JOB_HEADROOM_MS, KICK_BUDGET_MS, kickQueue, registerJobKick, withKickBudget } from '../jobKick';
+import {
+  __resetJobKicks,
+  JOB_HEADROOM_MS,
+  KICK_BUDGET_MS,
+  kickInvocationEnd,
+  kickQueue,
+  PLATFORM_MAX_DURATION_MS,
+  registerJobKick,
+  withKickBudget,
+} from '../jobKick';
 
 /**
  * The after() kick (serverless jobs). Outside a request scope Next's after()
@@ -110,8 +119,10 @@ describe('the kick fits inside the invocation (after() time counts toward maxDur
     expect(run.mock.calls[0]![0].budgetMs).toBe(KICK_BUDGET_MS - 20_000);
   });
 
-  it('a 60 s ingest webhook: 3 scans of 30 s, response at 3 s — claims one, ends before 60 s, the rest stay queued', async () => {
+  it('a 60 s ingest webhook: 3 jobs of 30 s, response at 3 s — claims one, ends before 60 s, the rest stay queued', async () => {
     // The reviewer's probe: with a fixed 50 s claim budget this ran 2 jobs and ended at 63 s (killed mid-job).
+    // (OCR itself is no longer kicked from a 60 s route — OCR_JOB_HEADROOM_MS, below; the budget
+    // mechanics are the same for every kicked queue.)
     const clock = { t: 0 };
     const now = () => clock.t;
     const tasks: Array<() => Promise<void>> = [];
@@ -121,7 +132,7 @@ describe('the kick fits inside the invocation (after() time counts toward maxDur
       60,
       async () => {
         clock.t = 3_000; // parsed, stored, enqueued
-        expect(kickQueue('ocr-invoice', (t) => void tasks.push(t), async () => run, now)).toBe(true);
+        expect(kickQueue('import-catalog', (t) => void tasks.push(t), async () => run, now)).toBe(true);
       },
       now,
     );
@@ -153,15 +164,15 @@ describe('the kick fits inside the invocation (after() time counts toward maxDur
     const schedule = (t: () => Promise<void>) => void tasks.push(t);
     const runner = async () => fakeRun(clock, { left: 0 }, 0);
     // An ingest kick (claims until 15 s) is live …
-    await withKickBudget(60, async () => void kickQueue('ocr-invoice', schedule, runner, now), now);
+    await withKickBudget(60, async () => void kickQueue('import-catalog', schedule, runner, now), now);
     expect(tasks).toHaveLength(1);
     // … a photo upload at 1 s is absorbed (14 s of claims left) …
     clock.t = 1_000;
-    expect(kickQueue('ocr-invoice', schedule, runner, now)).toBe(true);
+    expect(kickQueue('import-catalog', schedule, runner, now)).toBe(true);
     expect(tasks).toHaveLength(1);
     // … one at 8 s is not (7 s left): it gets its own 50 s kick.
     clock.t = 8_000;
-    expect(kickQueue('ocr-invoice', schedule, runner, now)).toBe(true);
+    expect(kickQueue('import-catalog', schedule, runner, now)).toBe(true);
     expect(tasks).toHaveLength(2);
   });
 
@@ -210,5 +221,75 @@ describe('the kick fits inside the invocation (after() time counts toward maxDur
     await first; // job-1 ends at 90 s, past its kick's 50 s: nothing left behind
     expect(ran).toEqual(['job-2', 'job-1']);
     expect(queued).toEqual([]);
+  });
+});
+
+describe('OCR_JOB_HEADROOM_MS: an OCR read is kicked only with room to finish (OCR-A PR-OCR-3)', () => {
+  it('a route on the platform default (300 s): OCR is kicked, and the run is told when the invocation ends', async () => {
+    const clock = { t: 1_000 };
+    const now = () => clock.t;
+    const tasks: Array<() => Promise<void>> = [];
+    const run = vi.fn(async (_o: { budgetMs: number; queues: string[]; endsAt?: number }) => ({ ran: 0, stoppedBy: 'empty' }));
+    expect(kickQueue('ocr-invoice', (t) => void tasks.push(t), async () => run, now)).toBe(true);
+    await tasks[0]!();
+    expect(run.mock.calls[0]![0].endsAt).toBe(1_000 + PLATFORM_MAX_DURATION_MS);
+  });
+
+  it('a 60 s ingest webhook never kicks OCR (60 s < 120 s headroom): the cron route reads it within a minute', async () => {
+    const schedule = vi.fn();
+    const now = () => 0;
+    await withKickBudget(
+      60,
+      async () => {
+        expect(kickQueue('ocr-invoice', schedule, async () => vi.fn(), now)).toBe(false);
+        // Other kicked queues still are (match / catalog import are short).
+        expect(kickQueue('match-invoice', schedule, async () => vi.fn(), now)).toBe(true);
+      },
+      now,
+    );
+    expect(schedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('the headroom is configurable down to 60 s (OCR_JOB_HEADROOM_MIN_MS): a lower value acts as 60 s', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubEnv('OCR_JOB_HEADROOM_MS', '30000');
+    const clock = { t: 0 };
+    const now = () => clock.t;
+    const schedule = vi.fn();
+    await withKickBudget(
+      90,
+      async () => {
+        // 90 s left ≥ 60 s: kicked (the 120 s default would not kick a 90 s route).
+        expect(kickQueue('ocr-invoice', schedule, async () => vi.fn(), now)).toBe(true);
+        // 59 s left: an unclamped 30 s headroom would kick; the 60 s floor does not.
+        clock.t = 31_000;
+        expect(kickQueue('ocr-invoice', schedule, async () => vi.fn(), now)).toBe(false);
+      },
+      now,
+    );
+    expect(schedule).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it('late in a 300 s invocation (under 120 s left) OCR is not kicked; with room it is', async () => {
+    const clock = { t: 0 };
+    const now = () => clock.t;
+    const schedule = vi.fn();
+    await withKickBudget(
+      300,
+      async () => {
+        clock.t = 200_000; // 100 s before the cut-off: a read may not finish
+        expect(kickQueue('ocr-invoice', schedule, async () => vi.fn(), now)).toBe(false);
+        clock.t = 150_000; // 150 s left: fits
+        expect(kickQueue('ocr-invoice', schedule, async () => vi.fn(), now)).toBe(true);
+      },
+      now,
+    );
+    expect(schedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('kickInvocationEnd: the declared route end, else request time + the platform default', async () => {
+    expect(kickInvocationEnd(5)).toBe(5 + PLATFORM_MAX_DURATION_MS);
+    await withKickBudget(60, async () => expect(kickInvocationEnd(1_000)).toBe(60_000), () => 0);
   });
 });

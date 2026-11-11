@@ -29,6 +29,8 @@ export default async function TermsPage() {
   const t = await getT(marketing);
   return (
     <LegalShell title={t('legal.terms.title')} intro={t('legal.terms.intro')}>
+      <LegalClause>{t('legal.terms.pilotNote')}</LegalClause>
+
       <LegalSection heading={t('legal.terms.s1.heading')}>
         <LegalClause>{t('legal.terms.s1.c1')}</LegalClause>
         <LegalClause>{t('legal.terms.s1.c2')}</LegalClause>
