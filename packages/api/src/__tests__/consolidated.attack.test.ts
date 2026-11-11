@@ -276,7 +276,11 @@ describe('consolidated.proposal — isolation (RLS app role)', () => {
       expect(p!.reviewItems!.map((r) => [r.flag, r.amountIls, r.noteNumber, r.otherInvoice?.invoiceNumber])).toEqual([
         ['note_billed_twice', 36, '9001', 'A-M-1'],
       ]);
-      expect(p!.findings.some((f) => f.countsAsLeak && f.alreadyBilledOn)).toBe(false);
+      // …and it is ABSENT from the findings and from the leak / claim totals (the new negative).
+      expect(p!.findings.some((f) => f.alreadyBilledOn)).toBe(false);
+      expect(p!.findings.some((f) => f.countsAsLeak && f.deliveryNoteNumber === '9001')).toBe(false);
+      expect(p!.totals.leakIls).toBe(0);
+      expect(p!.claim).toEqual({ exclIls: 0, inclIls: 0 });
       // The earlier ריכוז is not flagged.
       const first = await caller(A).consolidated.proposal({ invoiceId: itemizedId });
       expect(first!.findings.every((f) => f.alreadyBilledOn === null)).toBe(true);
