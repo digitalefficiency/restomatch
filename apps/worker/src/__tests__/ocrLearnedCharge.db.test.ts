@@ -1,0 +1,154 @@
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createDb, eq, invoiceLines, invoices, restaurants, suppliers, testDbUrl } from '@restomatch/db';
+import type { InvoiceOcrResult } from '@restomatch/types';
+import { applyLearnedCharges } from '@restomatch/api';
+
+/**
+ * G-08 review round 3 (MEDIUM "charge answers aren't learned"): a line a person
+ * answered "שורת חיוב — לא מוצר" last week is pre-marked a charge line by the
+ * OCR job this week — no question, no hold, and the match is chained.
+ */
+const enqueued: unknown[] = [];
+vi.mock('@restomatch/queue', async (orig) => {
+  const real = await orig<typeof import('@restomatch/queue')>();
+  return { ...real, enqueueMatchInvoice: async (p: unknown) => (enqueued.push(p), true) };
+});
+const { processOcrInvoice } = await import('../jobs/ocrInvoice');
+
+const db = createDb(testDbUrl());
+let restaurantId = '';
+let supplierId = '';
+
+async function cleanup() {
+  if (!restaurantId) return;
+  await db.delete(restaurants).where(eq(restaurants.id, restaurantId));
+}
+beforeEach(async () => {
+  await cleanup();
+  enqueued.length = 0;
+  const [r] = await db.insert(restaurants).values({ name: 'G-08 learned charge' }).returning();
+  restaurantId = r!.id;
+  const [s] = await db.insert(suppliers).values({ restaurantId, name: 'מחלבה' }).returning();
+  supplierId = s!.id;
+  // Last week's answer, learned (mapping.markCharge).
+  await db
+    .update(restaurants)
+    .set({ settings: { chargeKeys: [{ supplierId, sku: null, nameKey: 'פיקדון ארגזים', rawName: 'פיקדון ארגזים', minAgorot: 1000, maxAgorot: 1000, by: null, at: '2026-10-24T08:00:00Z' }] } as never })
+    .where(eq(restaurants.id, restaurantId));
+});
+afterAll(cleanup);
+
+const scan = (lines: InvoiceOcrResult['lines']): InvoiceOcrResult =>
+  ({
+    supplier: { name: 'מחלבה' },
+    invoiceNumber: 'W2-1',
+    invoiceDate: '2026-10-31',
+    lines,
+    totals: { subtotal: 10, vat: 0, total: 10 },
+  }) as InvoiceOcrResult;
+
+async function runOcr(result: InvoiceOcrResult) {
+  const [inv] = await db
+    .insert(invoices)
+    .values({ restaurantId, supplierId, status: 'ocr_pending', source: 'photo' })
+    .returning({ id: invoices.id });
+  await processOcrInvoice({
+    id: 'j1',
+    name: 'ocr-invoice',
+    attemptsMade: 0,
+    opts: { attempts: 1 },
+    data: { restaurantId, invoiceId: inv!.id, supplierId, imageUrl: 'stub', mockProviders: { docAi: result, claude: result } },
+  });
+  return inv!.id;
+}
+
+describe('OCR pre-marks a learned charge key (round 3)', () => {
+  it("week 2's deposit line → a charge line, the invoice is not held, and the match is chained", async () => {
+    const id = await runOcr(scan([{ rawDescription: 'פיקדון  ארגזים', qty: 1, unit: 'יח׳', unitPrice: 10, lineTotal: 10 }]));
+    const [row] = await db.select({ status: invoices.status, p: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, id));
+    const [line] = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, id));
+    expect(row!.status).toBe('matched');
+    expect((row!.p as unknown as { chargeLineIds: string[] }).chargeLineIds).toEqual([line!.id]);
+    expect(enqueued).toHaveLength(1);
+  });
+
+  it('a line of another name is still a question (held)', async () => {
+    const id = await runOcr(scan([{ rawDescription: 'פיקדון בקבוקים', qty: 1, unit: 'יח׳', unitPrice: 10, lineTotal: 10 }]));
+    const [row] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, id));
+    expect(row!.status).toBe('parsed');
+    expect(enqueued).toHaveLength(0);
+  });
+});
+
+describe('R7 LOW-11: a blank מק״ט is no SKU', () => {
+  it("an OCR line printed with sku '  ' is stored without a SKU and still pre-marked by the name key", async () => {
+    const id = await runOcr(
+      scan([{ rawDescription: 'פיקדון ארגזים', sku: '  ', qty: 1, unit: 'יח׳', unitPrice: 10, lineTotal: 10 } as InvoiceOcrResult['lines'][number]]),
+    );
+    const [line] = await db.select({ id: invoiceLines.id, sku: invoiceLines.supplierSku }).from(invoiceLines).where(eq(invoiceLines.invoiceId, id));
+    expect(line!.sku).toBeNull();
+    const [row] = await db.select({ status: invoices.status, p: invoices.ocrPayload }).from(invoices).where(eq(invoices.id, id));
+    expect((row!.p as unknown as { chargeLineIds: string[] }).chargeLineIds).toEqual([line!.id]);
+    expect(row!.status).toBe('matched');
+  });
+
+  it("a key learned with sku '' (before the fix) matches a line without a SKU", async () => {
+    await db
+      .update(restaurants)
+      .set({ settings: { chargeKeys: [{ supplierId, sku: '', nameKey: 'פיקדון ארגזים', rawName: 'פיקדון ארגזים', minAgorot: 1000, maxAgorot: 1000, by: null, at: '2026-10-24T08:00:00Z' }] } as never })
+      .where(eq(restaurants.id, restaurantId));
+    const id = await runOcr(scan([{ rawDescription: 'פיקדון ארגזים', qty: 1, unit: 'יח׳', unitPrice: 10, lineTotal: 10 }]));
+    const [row] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, id));
+    expect(row!.status).toBe('matched');
+  });
+});
+
+
+describe("R10: a 'checks' hold for a deposit line only (train B #232) is released by the learned charge", () => {
+  async function checksHeld(checkReasons: string[], reviewReasons: string[] = ['checks', 'unlinked']) {
+    const [inv] = await db
+      .insert(invoices)
+      .values({
+        restaurantId,
+        supplierId,
+        status: 'parsed',
+        source: 'photo',
+        invoiceDate: new Date(),
+        totalExclVat: '10.00',
+        vatAmount: '0',
+        totalInclVat: '10.00',
+        ocrPayload: {
+          provider: 'reconciled',
+          raw: {
+            reviewReasons,
+            checks: { passed: false, reasons: checkReasons },
+            reconciled: { lines: [{ rawDescription: 'פיקדון ארגזים', lineKind: 'deposit', qty: 1, lineTotal: 10 }] },
+          },
+        } as never,
+      })
+      .returning({ id: invoices.id });
+    await db.insert(invoiceLines).values({ invoiceId: inv!.id, productId: null, rawDescription: 'פיקדון ארגזים', qtyBilled: '1', unit: 'יח׳', unitPriceBilled: '10', lineTotal: '10' });
+    return inv!.id;
+  }
+
+  it("checks.reasons ⊆ {deposit_or_fee_line} + the deposit line pre-marked → released, matched", async () => {
+    const id = await checksHeld(['deposit_or_fee_line']);
+    expect(await applyLearnedCharges(db, restaurantId, id)).toEqual({ charged: 1, released: true });
+    const [row] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, id));
+    expect(row!.status).toBe('matched');
+  });
+
+  it('any other check reason still needs a person → not released', async () => {
+    const id = await checksHeld(['deposit_or_fee_line', 'vat_mismatch']);
+    expect(await applyLearnedCharges(db, restaurantId, id)).toEqual({ charged: 1, released: false });
+    const [row] = await db.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, id));
+    expect(row!.status).toBe('parsed');
+  });
+
+  it("round 11 (#224 shape): reviewReasons also carry 'deposit_or_fee_line' itself → still released", async () => {
+    const id = await checksHeld(['deposit_or_fee_line'], ['checks', 'unlinked', 'deposit_or_fee_line']);
+    expect(await applyLearnedCharges(db, restaurantId, id)).toEqual({ charged: 1, released: true });
+    const neg = await checksHeld(['deposit_or_fee_line', 'vat_mismatch'], ['checks', 'unlinked', 'deposit_or_fee_line', 'vat_mismatch']);
+    expect(await applyLearnedCharges(db, restaurantId, neg)).toEqual({ charged: 1, released: false });
+  });
+});
