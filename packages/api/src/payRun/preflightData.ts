@@ -8,13 +8,13 @@
  * On main today:
  *  • "paid" = `status = 'paid'` (H-03 adds `invoices.paid_at`; `paidAt` stays null until then:
  *    such a supplier counts as paid before, and the bank rule uses the 90-day window);
- *  • the candidates are the unpaid CHECKED invoices (G-05 INVOICE_CHECKED: a match has run), as W2-03's pay run;
+ *  • the candidates are the unpaid invoices past OCR (W2-03's INVOICE_CHECKED replaces this on merge);
  *  • bank changes come from a BankChangeSource. Until H-03's `supplier_bank_account_changes`
  *    and W2-11's form exist there are none, so `bank_changed` cannot fire yet. The rule itself is
  *    always on (AD12) and is tested pure.
  */
 import { sql, type Database } from '@restomatch/db';
-import { duplicateHoldingSql, invoiceCheckedSql } from '../lifecycle/predicates';
+import { DUPLICATE_HOLDING, INVOICE_PAY_RUN_CANDIDATE, statusInSql } from '../lifecycle/predicates';
 import {
   parseAgorot,
   preflightFlags,
@@ -71,8 +71,7 @@ export async function readPreflightFacts(
     WITH cand AS (
       SELECT c.id FROM invoices c
       WHERE c.restaurant_id = ${rid}
-        AND c.status <> 'paid'
-        AND ${invoiceCheckedSql(sql`c.id`, rid)}
+        AND ${statusInSql(sql`c.status`, INVOICE_PAY_RUN_CANDIDATE)}
         ${idFilter}
     ),
     sup AS (
@@ -85,12 +84,11 @@ export async function readPreflightFacts(
            i.ocr_payload -> 'duplicateOf' ->> 'basis' AS dup_of_basis,
            (i.ocr_payload -> 'duplicateOf') IS NOT NULL AND jsonb_typeof(i.ocr_payload -> 'duplicateOf') = 'object' AS has_dup_of,
            (i.id IN (SELECT id FROM cand)) AS is_candidate,
-           ${invoiceCheckedSql(sql`i.id`, rid)} AS checked,
            EXISTS (
              SELECT 1 FROM match_runs mr
              JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${rid}
              WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${rid}
-               AND d.type = 'DUPLICATE_INVOICE' AND ${duplicateHoldingSql(sql`d.resolution_status`)}
+               AND d.type = 'DUPLICATE_INVOICE' AND ${statusInSql(sql`d.resolution_status`, DUPLICATE_HOLDING)}
            ) AS held_dup
     FROM invoices i
     LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${rid}
@@ -114,7 +112,6 @@ export async function readPreflightFacts(
       paidAt: null, // H-03 `paid_at`
       duplicateOf: r.has_dup_of === true ? { invoiceId: str(r.dup_of_id), basis: str(r.dup_of_basis) } : null,
       heldAsDuplicate: r.held_dup === true,
-      checked: r.checked === true,
     };
     history.push(inv);
     if (r.is_candidate === true) candidates.push(inv);

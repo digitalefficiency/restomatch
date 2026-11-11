@@ -8,7 +8,6 @@ import {
   ensureRlsAppRole,
   eq,
   invoices,
-  matchRuns,
   notificationsOutbox,
   restaurants,
   sql,
@@ -72,7 +71,7 @@ function countingDb(db: Database): { db: Database; count: () => number } {
   return { db: wrapped, count: () => n };
 }
 
-async function addInvoice(t: Tenant, p: Partial<typeof invoices.$inferInsert>, checked = true) {
+async function addInvoice(t: Tenant, p: Partial<typeof invoices.$inferInsert>) {
   const [row] = await ownerDb
     .insert(invoices)
     .values({
@@ -87,16 +86,8 @@ async function addInvoice(t: Tenant, p: Partial<typeof invoices.$inferInsert>, c
       ...p,
     })
     .returning();
-  // G-05 INVOICE_CHECKED: a pay-run candidate is an invoice a match ran on.
-  if (checked) {
-    await ownerDb.insert(matchRuns).values({ restaurantId: t.restaurantId, invoiceId: row!.id, overallStatus: 'clean' });
-  }
   return row!;
 }
-const dropInvoice = async (id: string) => {
-  await ownerDb.delete(matchRuns).where(eq(matchRuns.invoiceId, id));
-  await ownerDb.delete(invoices).where(eq(invoices.id, id));
-};
 
 beforeAll(async () => {
   await applyCoreTenantRls(TEST_DB_URL);
@@ -149,19 +140,8 @@ describe('payRun.preflight (read)', () => {
     // Hebrew reason text rides along.
     const twinFlag = res.invoices.find((i) => i.invoiceId === twin.id)!.flags.find((f) => f.kind === 'possible_duplicate')!;
     expect(twinFlag.text.he).toMatch(/^ייתכן כפל: דומה ל-/);
-    await dropInvoice(copy.id);
-    await dropInvoice(twin.id);
-  });
-
-  it('an invoice no match ran on (G-05 INVOICE_CHECKED) is never a candidate, and the guard refuses it', async () => {
-    const raw = await addInvoice(A, { invoiceNumber: 'FA-RAW', totalInclVat: '999.00' }, false);
-    try {
-      const res = await caller(A).payRun.preflight();
-      expect(res.invoices.map((i) => i.invoiceId)).not.toContain(raw.id);
-      await expect(guard(A.restaurantId, [raw.id], [], { now: NOW })).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    } finally {
-      await dropInvoice(raw.id);
-    }
+    await ownerDb.delete(invoices).where(eq(invoices.id, copy.id));
+    await ownerDb.delete(invoices).where(eq(invoices.id, twin.id));
   });
 
   it('receiver and chef → FORBIDDEN', async () => {
@@ -179,8 +159,7 @@ describe('payRun.preflight (read)', () => {
       status: 'matched' as const,
       source: 'photo' as const,
     }));
-    const bulk = await ownerDb.insert(invoices).values(values).returning({ id: invoices.id });
-    await ownerDb.insert(matchRuns).values(bulk.map((b) => ({ restaurantId: A.restaurantId, invoiceId: b.id, overallStatus: 'clean' as const })));
+    await ownerDb.insert(invoices).values(values);
     const auditBefore = (await ownerDb.select({ n: sql<number>`count(*)::int` }).from(auditLog))[0]!.n;
     const stampBefore = (await ownerDb.execute(sql`SELECT max(updated_at)::text AS m FROM invoices`)) as unknown as { m: string }[] | { rows: { m: string }[] };
 
@@ -202,7 +181,6 @@ describe('payRun.preflight (read)', () => {
     expect(auditAfter).toBe(auditBefore);
     const stampAfter = (await ownerDb.execute(sql`SELECT max(updated_at)::text AS m FROM invoices`)) as unknown as typeof stampBefore;
     expect(stampAfter).toEqual(stampBefore);
-    await ownerDb.execute(sql`DELETE FROM match_runs WHERE invoice_id IN (SELECT id FROM invoices WHERE invoice_number LIKE 'BULK-%')`);
     await ownerDb.execute(sql`DELETE FROM invoices WHERE invoice_number LIKE 'BULK-%'`);
   });
 });
@@ -295,7 +273,7 @@ describe('payRun.remittanceText', () => {
       expect(held.some((l) => l.includes(A.invoiceNumber))).toBe(true);
       for (const l of held) expect(l).not.toMatch(/₪|\d+[.,]\d{2}/);
     } finally {
-      await dropInvoice(extra.id);
+      await ownerDb.delete(invoices).where(eq(invoices.id, extra.id));
     }
   });
 

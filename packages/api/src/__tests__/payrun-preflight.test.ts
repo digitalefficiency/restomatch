@@ -31,7 +31,6 @@ function inv(p: Partial<PreflightInvoice> = {}): PreflightInvoice {
     paidAt: null,
     duplicateOf: null,
     heldAsDuplicate: false,
-    checked: true,
     ...p,
   };
 }
@@ -161,11 +160,6 @@ describe('unusual_amount (soft)', () => {
   it('exactly 2× is not unusual', () => {
     const a = inv({ totalAgorot: 610_000 });
     expect(kinds(facts([a], hist(3, 305_000)), a.id)).not.toContain('unusual_amount');
-  });
-  it('only CHECKED invoices (a match ran) are samples', () => {
-    const a = inv({ totalAgorot: 732_000 });
-    const unchecked = hist(3, 305_000).map((h) => ({ ...h, checked: false }));
-    expect(kinds(facts([a], unchecked), a.id)).not.toContain('unusual_amount');
   });
   it('only the last 12 count', () => {
     const old = Array.from({ length: 5 }, () => inv({ status: 'paid', totalAgorot: 10_000_000, invoiceDate: '2025-01-01T10:00:00Z' }));
