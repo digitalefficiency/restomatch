@@ -220,6 +220,8 @@ export const en: Shape<typeof he> = {
     video: {
       pause: 'Pause video',
       play: 'Play video',
+      caption: 'Example · a fictional restaurant, illustrative numbers',
+      alt: 'Example: the RestoMatch home screen for a fictional restaurant — the month\'s leak in shekels, what awaits your decision and the credit requests to suppliers',
     },
   },
   faq: {

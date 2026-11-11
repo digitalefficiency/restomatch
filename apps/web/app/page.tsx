@@ -1,14 +1,13 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { preload } from 'react-dom';
 import { Camera, Check, GitCompareArrows, Languages, PlayCircle, ShieldCheck } from 'lucide-react';
 import { PLAN_SEED } from '@restomatch/db';
 import { auth } from '@/auth';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { landing } from '@/lib/i18n/messages/landing';
 import { formatNumber } from '@/lib/i18n/format';
-import { heroLoopFor, heroMedia, promoVideoFor } from '@/lib/heroMedia';
+import { PHONE_MEDIA, heroLoopFor, heroMedia, phoneLoopFor, promoVideoFor } from '@/lib/heroMedia';
 import { formatIls } from '@/lib/money';
 import { landingFlag } from '@/lib/landingFlags';
 import { cn } from '@/lib/components/cn';
@@ -72,16 +71,9 @@ export default async function Home() {
   const t = await getT(landing);
   const locale = await getLocale();
   const heroLoop = heroLoopFor(locale);
-  // The hero poster is the LCP: fetch it first, ahead of scripts and fonts.
-  if (heroMedia.available) {
-    preload(heroLoop.poster, {
-      as: 'image',
-      fetchPriority: 'high',
-      imageSrcSet: heroLoop.posterSrcSet,
-      imageSizes: heroMedia.posterSizes,
-    });
-  }
   const promoSrc = promoVideoFor(locale);
+  // Q1: the 9:16 cut is Hebrew-only; English phones get the localized HeroMatch.
+  const phoneLoop = phoneLoopFor(locale);
   const ctaHref = primaryCtaHref();
   const ils = (n: number) => formatIls(n, { locale });
   const basicIls = PLAN_SEED.basic.priceAgorotMonthly / 100;
@@ -160,6 +152,28 @@ export default async function Home() {
 
   return (
     <MarketingShell>
+      {/* The hero poster is the LCP: fetch it first. One poster per viewport (W3-06b):
+          phones never fetch the 16:9 one, desktops never the 9:16 one. React hoists these to <head>. */}
+      {heroMedia.available ? (
+        <link
+          rel="preload"
+          as="image"
+          href={heroLoop.poster}
+          imageSrcSet={heroLoop.posterSrcSet}
+          imageSizes={heroMedia.posterSizes}
+          fetchPriority="high"
+          media="(min-width: 640px)"
+        />
+      ) : null}
+      {heroMedia.available && phoneLoop ? (
+        <link
+          rel="preload"
+          as="image"
+          href={phoneLoop.poster}
+          fetchPriority="high"
+          media={PHONE_MEDIA}
+        />
+      ) : null}
       <link rel="canonical" href={locale === 'en' ? `${SITE_URL}/?lang=en` : `${SITE_URL}/`} />
       <link rel="alternate" hrefLang="he" href={`${SITE_URL}/`} />
       <link rel="alternate" hrefLang="en" href={`${SITE_URL}/?lang=en`} />
@@ -230,16 +244,37 @@ export default async function Home() {
             </ul>
           </div>
           {heroMedia.available ? (
-            <HeroVideo
-              webm={heroLoop.webm}
-              mp4={heroLoop.mp4}
-              poster={heroLoop.poster}
-              posterSrcSet={heroLoop.posterSrcSet}
-              posterSizes={heroMedia.posterSizes}
-              label={t('hero.watchTitle')}
-              pauseLabel={t('v2.video.pause')}
-              playLabel={t('v2.video.play')}
-            />
+            <>
+              {/* W3-06b: no 9:16 loop yet → phones get the legible product mock; the video is sm+. */}
+              {phoneLoop ? null : (
+                <div className="sm:hidden" data-testid="hero-phone-mock">
+                  <HeroMatch />
+                </div>
+              )}
+              <div
+                className={phoneLoop ? undefined : 'hidden sm:block'}
+                data-testid="hero-video-wrap"
+              >
+                <HeroVideo
+                  key={locale}
+                  webm={heroLoop.webm}
+                  mp4={heroLoop.mp4}
+                  poster={heroLoop.poster}
+                  posterSrcSet={heroLoop.posterSrcSet}
+                  posterSizes={heroMedia.posterSizes}
+                  label={t('v2.video.alt')}
+                  pauseLabel={t('v2.video.pause')}
+                  playLabel={t('v2.video.play')}
+                  minWidth={phoneLoop ? undefined : '(min-width: 640px)'}
+                  phone={phoneLoop}
+                  fallback={<HeroMatch />}
+                />
+                {/* M12: the loop is a sample, never a customer's numbers. */}
+                <p className="mt-2 text-center text-xs text-muted" data-testid="hero-video-caption">
+                  {t('v2.video.caption')}
+                </p>
+              </div>
+            </>
           ) : (
             <HeroMatch />
           )}
@@ -319,7 +354,11 @@ export default async function Home() {
               lines={MORPH_LINES}
               originalLabel={t('v2.receiver.original')}
               englishLabel={t('v2.receiver.english')}
-              labels={{ pause: t('visual.pause'), play: t('visual.play'), replay: t('visual.replay') }}
+              labels={{
+                pause: t('visual.pause'),
+                play: t('visual.play'),
+                replay: t('visual.replay'),
+              }}
             />
           </div>
         </div>
@@ -331,7 +370,10 @@ export default async function Home() {
       {landingFlag('landingCompare') && <LandingCompare />}
 
       {/* ───────────── 4 · PROOF — the honest math (PLAN_SEED + formatIls) ───────────── */}
-      <section className="rm-defer border-y border-line bg-surface/30" aria-labelledby="proof-title">
+      <section
+        className="rm-defer border-y border-line bg-surface/30"
+        aria-labelledby="proof-title"
+      >
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
           <div className="mx-auto mb-10 max-w-2xl text-center">
             <Eyebrow tone="gold">{t('v2.proof.eyebrow')}</Eyebrow>
@@ -367,7 +409,7 @@ export default async function Home() {
           </p>
           <p className="mt-4 text-center">
             <Link
-              href="/about#roi"
+              href="/product#roi"
               className="touch-target inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
             >
               {t('v2.proof.more')}
@@ -378,7 +420,10 @@ export default async function Home() {
       </section>
 
       {/* ───────────── 5 · PRICING TEASER ───────────── */}
-      <section className="rm-defer mx-auto max-w-6xl px-4 py-20 sm:px-6" aria-labelledby="pricing-title">
+      <section
+        className="rm-defer mx-auto max-w-6xl px-4 py-20 sm:px-6"
+        aria-labelledby="pricing-title"
+      >
         <div className="rm-reveal grid items-center gap-10 lg:grid-cols-[1fr_1.2fr]">
           <div>
             <Eyebrow tone="gold">{t('pricing.eyebrow')}</Eyebrow>
@@ -446,7 +491,7 @@ export default async function Home() {
           <p className="mt-6 text-center text-sm text-muted">
             <ShieldCheck className="me-1.5 inline h-4 w-4 text-info" aria-hidden="true" />
             {t('v2.cta.trust')} ·{' '}
-            <Link href="/about#trust" className="font-semibold text-primary hover:underline">
+            <Link href="/product#trust" className="font-semibold text-primary hover:underline">
               {t('v2.cta.trustLink')}
             </Link>
           </p>
