@@ -9,15 +9,17 @@ import {
   restaurants,
   testDbUrl,
   userCredentials,
+  invoices,
   users,
   type RestaurantSettings,
 } from '@restomatch/db';
-import { router } from '../trpc';
+import { appRouter } from '../index';
+import { restaurantDateKey } from './helpers/il-day';
 import type { AppContext, Session } from '../context';
 import { FEATURE_KEYS, OWNER_TOGGLEABLE, featureEnabled } from '../lib/features';
 import { AUTOMATIONS, AUTOMATION_OPTION_KEYS } from '../automations/registry';
 import { automationOption } from '../automations/options';
-import { automationsRouter, israelWeekStart, listAutomations } from '../routers/automations';
+import { israelWeekStart, listAutomations } from '../routers/automations';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -28,7 +30,8 @@ import { resetDb, seedTenant, type Tenant } from './fixtures';
  */
 
 const db = createDb(testDbUrl());
-const testRouter = router({ automations: automationsRouter });
+// Registered in appRouter (orchestrator-granted); owner.vatAtRisk is needed for the AD1 gate test.
+const testRouter = appRouter;
 
 let A: Tenant;
 
@@ -303,7 +306,37 @@ describe('automations.listForAdmin', () => {
 });
 
 describe('owner.vatAtRisk receiver narrowing (AD1 gate for vatAtRisk in the pilot defaults)', () => {
-  // Enabled once #219 is on main: a receiver calling owner.vatAtRisk with the flag on
-  // gets null for totalVatAtRisk, currentThresholdIls and every row ₪.
-  it.todo('receiver gets null ₪ from owner.vatAtRisk (waits for #219 on main)');
+  // #219 (G-07 pilot strip) is on main: with the flag on, a receiver (an invoice reader)
+  // gets the count but null for totalVatAtRisk, currentThresholdIls and every row ₪.
+  it('receiver gets null ₪ from owner.vatAtRisk; the owner still gets the amounts', async () => {
+    await db
+      .update(restaurants)
+      .set({ settings: { features: { vatAtRisk: true } } as RestaurantSettings })
+      .where(eq(restaurants.id, A.restaurantId));
+    const day = restaurantDateKey({ dayOffset: -3 });
+    await db.insert(invoices).values({
+      restaurantId: A.restaurantId,
+      supplierId: A.supplierId,
+      invoiceNumber: `AU01-VAT-${randomUUID().slice(0, 8)}`,
+      invoiceDate: new Date(`${day}T10:00:00+02:00`),
+      totalExclVat: '12000.00',
+      vatAmount: '2160.00',
+      allocationNumber: null,
+      status: 'parsed',
+      source: 'photo',
+    });
+    const owner = await caller(A).owner.vatAtRisk({ period: 'all' });
+    expect(owner.count).toBeGreaterThan(0);
+    expect(owner.totalVatAtRisk).not.toBeNull();
+
+    const recv = await caller(A, 'receiver').owner.vatAtRisk({ period: 'all' });
+    expect(recv.count).toBe(owner.count);
+    expect(recv.totalVatAtRisk).toBeNull();
+    expect(recv.currentThresholdIls).toBeNull();
+    for (const r of recv.rows) {
+      expect(r.totalExclVat).toBeNull();
+      expect(r.vatAtRisk).toBeNull();
+      expect(r.thresholdIls).toBeNull();
+    }
+  });
 });
