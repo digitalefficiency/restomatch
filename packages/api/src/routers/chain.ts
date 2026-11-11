@@ -765,7 +765,7 @@ export const chainRouter = router({
                 payRun: null,
               };
             }
-            const p = await computePayRunMonth(tx, b.restaurantId, input.monthOffset);
+            const p = await computePayRunMonth(tx, b.restaurantId, input.monthOffset, ms.lens);
             return {
               status: 'ok',
               ...base,

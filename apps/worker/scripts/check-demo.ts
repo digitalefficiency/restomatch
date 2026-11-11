@@ -11,6 +11,7 @@ import { computeLeakHero } from '@restomatch/charts';
 import { createDb, DEMO_MAIN_BUSINESS_ID, findDemoTenants } from '@restomatch/db';
 import postgres from 'postgres';
 import { DEMO_EXTRA_STEPS } from '../src/lib/demoExtras';
+import { demoNow } from '../src/lib/demoDates';
 
 /**
  * The one deliberate discrepancy across the demo's consolidated invoices (seed-demo's
@@ -41,13 +42,15 @@ export async function checkDemo(url: string, today: string): Promise<DemoCheck> 
     if (rids.length !== 3) problems.push(`expected 3 demo restaurants (main + Haifa + Jerusalem), found ${rids.length}`);
 
     // 1. The hero: the North Star band.
-    const h = await computeLeakHero(createDb(url), main.id);
+    // At DEMO_TODAY (not the real clock): a lab seeded for 25.10 checked in November
+    // used to read "hero leak 0.00%" — the month it looked at was empty.
+    const now = demoNow(today);
+    const h = await computeLeakHero(createDb(url), main.id, { now });
     facts.push(`hero: ₪${Math.round(h.leakIls)} of ₪${Math.round(h.spendIls)} (${((h.leakPct ?? 0) * 100).toFixed(1)}%)`);
     if (!((h.leakPct ?? 0) >= 0.015 && (h.leakPct ?? 0) <= 0.03)) problems.push(`hero leak ${((h.leakPct ?? 0) * 100).toFixed(2)}% is outside the 1.5–3% demo band`);
 
     // 1b. Month compares (last month vs the month before): both months fully seeded,
     //     comparable spend and a believable leak — a thin base reads as "+2,926%".
-    const now = new Date(`${today}T12:00:00+03:00`);
     const prev = await computeLeakHero(createDb(url), main.id, { now, monthOffset: -1 });
     const prev2 = await computeLeakHero(createDb(url), main.id, { now, monthOffset: -2 });
     facts.push(`last month ₪${Math.round(prev.leakIls)} of ₪${Math.round(prev.spendIls)} (${((prev.leakPct ?? 0) * 100).toFixed(1)}%) · month before ₪${Math.round(prev2.leakIls)} of ₪${Math.round(prev2.spendIls)} (${((prev2.leakPct ?? 0) * 100).toFixed(1)}%)`);

@@ -1,9 +1,19 @@
 import { z } from 'zod';
-import { computeLeakBreakdown, computeLeakHero, scanAwaitingCountSql, type LeakBreakdownInvoice } from '@restomatch/charts';
-import { eq, restaurants, sql, type Database } from '@restomatch/db';
+import {
+  AWAITING_QUESTION_SQL,
+  LEAK_EXCLUDED_TYPES,
+  computeLeakBreakdown,
+  computeLeakHero,
+  scanAwaitingCountSql,
+  type LeakBreakdownInvoice,
+} from '@restomatch/charts';
+import { eq, restaurants, sql, type Database, type UserRole } from '@restomatch/db';
 import { NEVER_CLAIMABLE_TYPES, claimableLines, sumClaims, type VatBasis } from '../lib/claims';
 import { featureEnabled } from '../lib/features';
 import { financeProcedure, router } from '../trpc';
+
+/** The charts leak exclusion list (LEAK_EXCLUDED_TYPES) as SQL values. */
+const LEAK_EXCLUDED_SQL = sql.join(LEAK_EXCLUDED_TYPES.map((t) => sql`${t}`), sql`, `);
 
 /** Never a credit to ask for: the never-claimable types (owner 31.10) + a duplicate copy (held, not claimed). */
 const NOT_A_CREDIT_SQL = sql.join(
@@ -54,6 +64,10 @@ export interface PayRunInvoice {
    * is in — bound to its order already, so never "waiting to be linked".
    */
   awaitingCount: boolean;
+  /** G-08: held for a "זה אותו מוצר?" question (no run yet) — T4, answered in the mapper. */
+  awaitingQuestion: boolean;
+  /** G-08 (round 3): held by OCR for a person ("לבדיקה", T4) with no question open — open the invoice. */
+  awaitingReview: boolean;
   /** A (non-waived) duplicate copy: held — "don't pay this copy", never a credit to ask for. */
   duplicate: boolean;
   /** The claimable ₪ of the duplicate finding(s) (= the copy's total incl. VAT); not in pending / credit. */
@@ -86,6 +100,8 @@ export interface PayRunSupplier {
 }
 
 export interface PayRunResult {
+  /** G-08: may this role answer questions in the mapper? (never the bookkeeper) */
+  canAnswer: boolean;
   enabled: boolean;
   monthStart: string | null;
   monthEnd: string | null;
@@ -166,7 +182,7 @@ export const payRunRouter = router({
   month: financeProcedure
     .input(z.object({ monthOffset: z.union([z.literal(0), z.literal(-1)]).default(0) }).optional())
     .query(({ ctx, input }): Promise<PayRunResult> =>
-      computePayRunMonth(ctx.db, ctx.session.restaurantId, input?.monthOffset ?? 0),
+      computePayRunMonth(ctx.db, ctx.session.restaurantId, input?.monthOffset ?? 0, ctx.session.role),
     ),
 });
 
@@ -174,11 +190,16 @@ export const payRunRouter = router({
  * The body of `payRun.month`, exported so the chain's per-branch view (W3-01b)
  * reads each branch's pay run from the very same rows and rules. MUST run
  * inside that restaurant's own RLS transaction (financeProcedure / chain
- * `inBranch`).
+ * `inBranch`); `role` is the caller's role in THAT restaurant.
  */
-export async function computePayRunMonth(db: Database, rid: string, monthOffset: 0 | -1 = 0): Promise<PayRunResult> {
+export async function computePayRunMonth(
+  db: Database,
+  rid: string,
+  monthOffset: 0 | -1 = 0,
+  role: UserRole = 'owner',
+): Promise<PayRunResult> {
   if (!(await flagOn(db, rid))) {
-    return { enabled: false, monthStart: null, monthEnd: null, suppliers: [], totals: EMPTY_TOTALS };
+    return { enabled: false, monthStart: null, monthEnd: null, suppliers: [], totals: EMPTY_TOTALS, canAnswer: false };
   }
   const hero = await computeLeakHero(db, rid, { monthOffset });
   const breakdown = await computeLeakBreakdown(db, rid, { monthOffset, limit: 200 });
@@ -187,7 +208,11 @@ export async function computePayRunMonth(db: Database, rid: string, monthOffset:
   // The month's invoices not marked paid (matched, or read but waiting for a PO link) — same
   // date rule as the hero.
   const res = await db.execute(sql`
-    SELECT i.id, i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS at,
+    SELECT i.id, i.invoice_number, i.status AS inv_status, COALESCE(i.invoice_date, i.created_at) AS at,
+           -- G-08: OCR held it for a person (review reasons), not a consolidated invoice waiting for its link.
+           (jsonb_typeof(i.ocr_payload -> 'raw' -> 'reviewReasons') = 'array'
+             AND jsonb_array_length(i.ocr_payload -> 'raw' -> 'reviewReasons') > 0
+             AND COALESCE(i.ocr_payload -> 'raw' ->> 'kind', '') <> 'consolidated') AS review_held,
            COALESCE(i.total_incl_vat, 0) AS total_incl, COALESCE(i.total_excl_vat, 0) AS total_excl,
            i.supplier_id, s.name AS supplier_name, s.name_en AS supplier_name_en,
            -- Safety net for an invoice past the breakdown's 200-row window: any open
@@ -197,7 +222,7 @@ export async function computePayRunMonth(db: Database, rid: string, monthOffset:
              JOIN discrepancies d ON d.match_run_id = mr2.id AND d.restaurant_id = ${rid}
              WHERE mr2.invoice_id = i.id AND mr2.restaurant_id = ${rid}
                AND d.severity IN ('warn','block') AND d.resolution_status IN ('open','escalated')
-               AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL') AND ABS(d.delta_amount) > 0
+               AND d.type NOT IN (${LEAK_EXCLUDED_SQL}) AND ABS(d.delta_amount) > 0
            ) AS has_open,
            -- …and accepted real findings still ask for a credit (Σ |Δ|, capped at the
            -- invoice total like the hero's per-invoice cap), never "can pay".
@@ -234,7 +259,9 @@ export async function computePayRunMonth(db: Database, rid: string, monthOffset:
            ) AS has_ua,
            EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${rid}) AS matched,
            -- …a receiving scan the OCR held for its receipt's count (#94, same rule as the hero).
-           ${scanAwaitingCountSql(rid, sql`i`)} AS counting
+           ${scanAwaitingCountSql(rid, sql`i`)} AS counting,
+           -- G-08: held for a "זה אותו מוצר?" question (same rule as the hero).
+           ${AWAITING_QUESTION_SQL} AS question
     FROM invoices i
     LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${rid}
     WHERE i.restaurant_id = ${rid}
@@ -266,9 +293,17 @@ export async function computePayRunMonth(db: Database, rid: string, monthOffset:
     }
     // Waiting for the count (#94): no run yet, but bound to its order — held, not T4.
     const awaitingCount = row.matched !== true && row.counting === true;
+    // G-08: a question to answer, not "waiting to be linked to an order".
+    const awaitingQuestion = !awaitingCount && row.matched !== true && row.question === true;
+    // …and held for a person with no question open (confidence / lowLines): "לבדיקה".
+    const awaitingReview =
+      !awaitingCount && !awaitingQuestion && row.matched !== true && row.inv_status === 'parsed' && row.review_held === true && row.has_dup !== true;
     const pendingLink =
-      !awaitingCount && ((b?.pendingLink ?? false) || row.matched !== true || (!b && row.has_ua === true));
-    if (pendingLink || awaitingCount) s.status = 'hold';
+      !awaitingCount &&
+      !awaitingQuestion &&
+      !awaitingReview &&
+      ((b?.pendingLink ?? false) || row.matched !== true || (!b && row.has_ua === true));
+    if (pendingLink || awaitingCount || awaitingQuestion || awaitingReview) s.status = 'hold';
     const inv: PayRunInvoice = {
       invoiceId: id,
       invoiceNumber: row.invoice_number == null ? null : String(row.invoice_number),
@@ -276,6 +311,8 @@ export async function computePayRunMonth(db: Database, rid: string, monthOffset:
       status: s.status,
       pendingLink,
       awaitingCount,
+      awaitingQuestion,
+      awaitingReview,
       duplicate: s.duplicate,
       duplicateIls: s.duplicateIls,
       totalInclVat: Number(row.total_incl),
@@ -335,6 +372,8 @@ export async function computePayRunMonth(db: Database, rid: string, monthOffset:
   );
   return {
     enabled: true,
+    // G-08: may this role answer questions in the mapper? (never the bookkeeper)
+    canAnswer: role !== 'bookkeeper',
     monthStart: hero.monthStart,
     monthEnd: hero.monthEnd,
     suppliers,

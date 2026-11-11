@@ -83,7 +83,7 @@ export const he = {
     pct: 'מההוצאה',
     spend: 'הוצאה שנבדקה',
     invoices: 'חשבוניות עם דליפה',
-    caught: 'נתפס לפני תשלום',
+    caught: 'זוהו לפני אישור התשלום',
   },
   explorer: {
     title: 'פילוח הדליפה',

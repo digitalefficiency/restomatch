@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 // Process-local limiter store for the test (no external store) — set before the import
@@ -12,7 +12,19 @@ beforeAll(async () => {
 });
 
 let n = 0;
-const limit = (max = 100) => ({ limit: max, windowSec: 3600, prefix: `pg-test-${++n}` });
+// Two hazards of fixed 1-hour windows, both seen as night-time reds:
+//  - a test whose calls straddle an hour boundary (22:59:59 → 23:00:00) lands
+//    them in two windows and the expected 429 never comes → each limiter pins
+//    the clock it buckets by, as rateLimitPostgres.test.ts does (#151);
+//  - with a database configured the counters are rate_limit_counters rows that
+//    outlive the run: a second run within the same hour started from the first
+//    run's counts (pg-test-1 … were the same keys every run) → a per-run prefix.
+// No assertion changed.
+const RUN = `${process.pid}-${Date.now().toString(36)}`;
+const limit = (max = 100) => {
+  const t = Date.now();
+  return { limit: max, windowSec: 3600, prefix: `pg-test-${RUN}-${++n}`, now: () => t };
+};
 
 function post(body: BodyInit | null, headers: Record<string, string> = {}, method = 'POST') {
   return new Request('http://localhost:3000/api/public/x', {
@@ -139,6 +151,21 @@ describe('guardPublicRequest', () => {
     expect((await guard.guardPublicRequest(post('{}'), opts('t2'))).ok).toBe(true);
     const again = await guard.guardPublicRequest(post('{}'), opts('t1'));
     expect(!again.ok && again.response.status).toBe(429);
+  });
+
+  it('a burst that straddles an hour boundary is still counted in one window (pinned limiter clock)', async () => {
+    const boundary = Date.parse('2026-10-31T23:00:00.000Z');
+    const clock = vi.spyOn(Date, 'now');
+    try {
+      clock.mockReturnValue(boundary - 1); // 22:59:59.999
+      const rl = limit(1); // the helper pins the limiter to THIS instant
+      expect((await guard.guardPublicRequest(post('{}'), { rateLimit: rl })).ok).toBe(true);
+      clock.mockReturnValue(boundary + 1); // the real clock is now in the next hour's window
+      const again = await guard.guardPublicRequest(post('{}'), { rateLimit: rl });
+      expect(!again.ok && again.response.status).toBe(429); // still the same window: counted
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("bodyType 'text' returns the raw string unparsed (webhook signatures)", async () => {
