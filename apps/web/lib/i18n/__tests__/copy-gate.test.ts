@@ -186,7 +186,6 @@ const CLAIMS_PENDING: Array<{ where: string; owner: string }> = [
   { where: 'suppliers:', owner: 'W2-11' },
   // Reported to the orchestrator for routing (found by this guard)
   { where: 'approvals:', owner: 'W2-04' },
-  { where: 'receivingDelivery:', owner: 'W2-05' },
   { where: 'catalog:', owner: 'catalog owner (G-08/W3-10) — routed by the orchestrator' },
   { where: 'auth:', owner: 'auth owner (W1-09/G-11) — routed by the orchestrator' },
   { where: 'file:packages/api/src/reports/monthly.ts', owner: 'W2-16b' },
