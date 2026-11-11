@@ -4,11 +4,30 @@ import { StubOcrProvider } from '../providers/stub';
 import { runOcrPipeline } from '../pipeline';
 import type { CatalogMatcherFn, ProductCandidate } from '../types';
 import {
-  AGREEMENT_PERFECT,
+  AGREEMENT_PERFECT as AGREEMENT_PERFECT_RAW,
   HEBREW_OCR_NOISE,
   MISSING_LINE_IN_CLAUDE,
   SINGLE_DISAGREEMENT,
 } from './fixtures';
+
+/**
+ * The shared fixture prints ח״פ 301234561, which fails the Israeli check digit,
+ * so the PR-OCR-2 gate (rightly) sends it to review. These pipeline tests are
+ * about reconciliation and thresholds, so they use the same invoice with a
+ * valid ח״פ (301234563). fixtures.ts itself is left untouched.
+ */
+const VALID_SUPPLIER_ID = '301234563';
+const AGREEMENT_PERFECT: typeof AGREEMENT_PERFECT_RAW = {
+  docAi: { ...AGREEMENT_PERFECT_RAW.docAi, supplier: { ...AGREEMENT_PERFECT_RAW.docAi.supplier, businessId: VALID_SUPPLIER_ID } },
+  claude: { ...AGREEMENT_PERFECT_RAW.claude, supplier: { ...AGREEMENT_PERFECT_RAW.claude.supplier, businessId: VALID_SUPPLIER_ID } },
+};
+
+it('the raw shared fixture is flagged for its invalid ח״פ', async () => {
+  const p = new StubOcrProvider('claude_vision', AGREEMENT_PERFECT_RAW.claude);
+  const r = await runOcrPipeline('x', { documentAi: p, claude: p });
+  expect(r.checks.reasons).toEqual(['supplier_id_invalid']);
+  expect(r.needsHumanReview).toBe(true);
+});
 
 function makeProviders(fixture: typeof AGREEMENT_PERFECT) {
   return {
@@ -51,14 +70,16 @@ describe('runOcrPipeline — catalog integration', () => {
   const tomatoMatch: ProductCandidate = {
     productId: 'tomato-uuid',
     canonicalName: 'עגבניה שרי',
-    confidence: 0.97,
+    // G-08: a person's alias (1.000) — an exact key the default decider links.
+    confidence: 1,
     matchedBy: 'alias',
   };
   const cucumberMatch: ProductCandidate = {
     productId: 'cucumber-uuid',
     canonicalName: 'מלפפון חממה',
-    confidence: 0.95,
-    matchedBy: 'embedding',
+    // G-08: an exact supplier SKU (catalog-item branch, 0.999).
+    confidence: 0.999,
+    matchedBy: 'sku',
   };
 
   it('attaches product candidates from catalog matcher', async () => {
@@ -93,6 +114,66 @@ describe('runOcrPipeline — catalog integration', () => {
 
     expect(result.reconciled.lines[0]?.productId).toBeNull();
     expect(result.reconciled.lines[0]?.productCandidates).toHaveLength(1);
+  });
+
+  describe('G-08 link policy', () => {
+    const run = (cands: ProductCandidate[], decideLink?: Parameters<typeof runOcrPipeline>[1]['decideLink']) =>
+      runOcrPipeline('test-image', {
+        ...makeProviders(AGREEMENT_PERFECT),
+        catalogMatcher: async () => cands,
+        ...(decideLink ? { decideLink } : {}),
+      });
+    const c = (confidence: number, matchedBy: ProductCandidate['matchedBy']): ProductCandidate => ({
+      productId: 'p1',
+      canonicalName: 'מוצר',
+      confidence,
+      matchedBy,
+    });
+
+    it('a 0.97 fuzzy candidate with no decider → productId null (review), candidate kept', async () => {
+      const r = await run([c(0.97, 'fuzzy')]);
+      expect(r.reconciled.lines[0]?.productId).toBeNull();
+      expect(r.reconciled.lines[0]?.productCandidates).toHaveLength(1);
+    });
+
+    it('a ≥0.95 embedding or a 0.97 (legacy/guessed) alias is not an exact key → null', async () => {
+      expect((await run([c(0.99, 'embedding')])).reconciled.lines[0]?.productId).toBeNull();
+      expect((await run([c(0.97, 'alias')])).reconciled.lines[0]?.productId).toBeNull();
+      expect((await run([c(0.9, 'sku')])).reconciled.lines[0]?.productId).toBeNull();
+    });
+
+    it('a guess provenance is never linked, even at 1.0', async () => {
+      const r = await run([{ ...c(1, 'sku'), provenance: 'guess' } as ProductCandidate]);
+      expect(r.reconciled.lines[0]?.productId).toBeNull();
+    });
+
+    it('sku / barcode / a 1.000 alias → linked', async () => {
+      expect((await run([c(0.999, 'sku')])).reconciled.lines[0]?.productId).toBe('p1');
+      expect((await run([c(1, 'barcode')])).reconciled.lines[0]?.productId).toBe('p1');
+      expect((await run([c(1, 'alias')])).reconciled.lines[0]?.productId).toBe('p1');
+    });
+
+    it('CRITICAL-1: a review line (candidates, no product) holds the invoice: needsHumanReview, reason unlinked', async () => {
+      const r = await run([c(0.8, 'fuzzy')]);
+      expect(r.reconciled.lines.every((l) => l.productId === null && l.productCandidates.length === 1)).toBe(true);
+      expect(r.needsHumanReview).toBe(true);
+      expect(r.reviewReasons).toContain('unlinked');
+      expect(r.unlinkedLines).toBe(r.reconciled.lines.length);
+      // Every line linked by an exact key → no 'unlinked' hold.
+      const linked = await run([c(0.999, 'sku')]);
+      expect(linked.reviewReasons).not.toContain('unlinked');
+      expect(linked.unlinkedLines).toBe(0);
+    });
+
+    it('with an injected decider, its decision is used (called with unitPack unknown)', async () => {
+      const decider = vi.fn(() => ({ decision: 'auto' as const, productId: 'decided' }));
+      const r = await run([c(0.61, 'fuzzy')], decider);
+      expect(r.reconciled.lines[0]?.productId).toBe('decided');
+      expect(decider).toHaveBeenCalledWith([c(0.61, 'fuzzy')], { unitPack: 'unknown' });
+
+      const reviewer = vi.fn(() => ({ decision: 'review' as const, productId: null }));
+      expect((await run([c(1, 'sku')], reviewer)).reconciled.lines[0]?.productId).toBeNull();
+    });
   });
 
   it('no catalog matcher → lines have null productId and empty candidates', async () => {
@@ -183,7 +264,8 @@ describe('runOcrPipeline — M11 single provider in both slots', () => {
     });
     expect(spy).toHaveBeenCalledTimes(1);
     expect(result.conflicts).toHaveLength(0);
-    expect(result.confidence).toBe(1);
+    // PR-OCR-2: no longer a fake 1.0 — the model's own confidence, capped by the gate.
+    expect(result.confidence).toBe(AGREEMENT_PERFECT.claude.confidence);
   });
 
   it('still calls both when they are distinct providers', async () => {
@@ -224,7 +306,6 @@ describe('runOcrPipeline — unreadable lines (EN-3)', () => {
     };
     const p = new StubOcrProvider('claude_vision', claude);
     const result = await runOcrPipeline('test-image', { documentAi: p, claude: p });
-    expect(result.confidence).toBe(1);
     expect(result.needsHumanReview).toBe(true);
   });
 

@@ -25,13 +25,19 @@ import {
   gte,
   invoices,
   notificationsOutbox,
-  restaurants,
   sql,
   suppliers,
   type Database,
   type UserRole,
 } from '@restomatch/db';
 import { addressToTarget, type Address, type AddressChannel } from './address';
+import {
+  localDay,
+  nextDayAllowedAt,
+  SEND_WINDOW_TZ,
+  STAFF_ALERT_DAILY_CAP,
+  staffAlertWindow,
+} from './sendWindow';
 import { enqueueNotification } from './outbox';
 import { MANAGER_ROLES, resolveAudience, type Audience, type AudienceMember } from './recipients';
 
@@ -39,137 +45,36 @@ export type { Address, AddressChannel } from './address';
 export type { Audience, AudienceMember } from './recipients';
 export { resolveAudience } from './recipients';
 
-/* ── Owner alert rules (binding owner decision; H-05 may refine with holidays) ── */
+/* ── Owner alert rules: ONE implementation, sendWindow.ts (#173, on main) ──
+ * Quiet 23:00–06:00, Shabbat Fri 15:00 → Sat 19:00 (NOTIFY_SHABBAT_WINDOW
+ * overrides), at most STAFF_ALERT_DAILY_CAP per person per day, in
+ * Asia/Jerusalem. notify() schedules with the same functions the dispatcher
+ * and the inline notifiers use, so the rule cannot drift. The `tz` parameters
+ * below are kept for call-site compatibility; sendWindow is Israel-only. */
 
-export const ALERT_TZ_FALLBACK = 'Asia/Jerusalem';
-/** Quiet every night, local time: [23:00, 06:00). */
-export const QUIET_HOURS = { startHour: 23, endHour: 6 } as const;
-/** Shabbat window, local time: Friday 15:00 → Saturday 21:00 (dow: 0 = Sunday). */
-export const SHABBAT_WINDOW = { startDow: 5, startHour: 15, endDow: 6, endHour: 21 } as const;
+export const ALERT_TZ_FALLBACK = SEND_WINDOW_TZ;
 /** At most this many alerts per person per channel per local day; the rest go to the digest. */
-export const MAX_ALERTS_PER_DAY = 6;
+export const MAX_ALERTS_PER_DAY = STAFF_ALERT_DAILY_CAP;
 
-interface LocalParts {
-  year: number;
-  month: number;
-  day: number;
-  dow: number;
-  hour: number;
-  minute: number;
+/** Is `at` inside quiet hours or Shabbat? */
+export function isQuietAt(at: Date, _tz: string = ALERT_TZ_FALLBACK): boolean {
+  return !staffAlertWindow(at).open;
 }
 
-const fmtCache = new Map<string, Intl.DateTimeFormat>();
-function formatter(tz: string): Intl.DateTimeFormat {
-  let f = fmtCache.get(tz);
-  if (!f) {
-    f = new Intl.DateTimeFormat('en-US', {
-      timeZone: tz,
-      hourCycle: 'h23',
-      year: 'numeric',
-      month: 'numeric',
-      day: 'numeric',
-      weekday: 'short',
-      hour: 'numeric',
-      minute: 'numeric',
-    });
-    fmtCache.set(tz, f);
-  }
-  return f;
+/** The first allowed instant at or after `at` (itself when open). */
+export function nextAllowedAt(at: Date, _tz: string = ALERT_TZ_FALLBACK): Date {
+  const d = staffAlertWindow(at);
+  return d.open ? at : d.nextAllowedAt;
 }
 
-const DOW: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-
-function safeTz(tz: string | null | undefined): string {
-  if (!tz) return ALERT_TZ_FALLBACK;
-  try {
-    formatter(tz);
-    return tz;
-  } catch {
-    return ALERT_TZ_FALLBACK;
-  }
+/** Local midnight (Israel) of the day containing `at`, as a UTC instant. */
+export function localDayStart(at: Date, _tz: string = ALERT_TZ_FALLBACK): Date {
+  return localDay(at).start;
 }
 
-export function localParts(at: Date, tz: string): LocalParts {
-  const p: Record<string, string> = {};
-  for (const x of formatter(safeTz(tz)).formatToParts(at)) p[x.type] = x.value;
-  return {
-    year: Number(p.year),
-    month: Number(p.month),
-    day: Number(p.day),
-    dow: DOW[p.weekday ?? 'Sun'] ?? 0,
-    hour: Number(p.hour),
-    minute: Number(p.minute),
-  };
-}
-
-/** The UTC instant of a local wall-clock time in `tz` (DST-correct to the minute). */
-export function zonedTime(tz: string, y: number, mo: number, d: number, h = 0, mi = 0): Date {
-  const target = Date.UTC(y, mo - 1, d, h, mi);
-  let guess = target;
-  for (let i = 0; i < 3; i++) {
-    const p = localParts(new Date(guess), tz);
-    const seen = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute);
-    if (seen === target) break;
-    guess += target - seen;
-  }
-  return new Date(guess);
-}
-
-function inShabbat(p: LocalParts): boolean {
-  const m = p.hour * 60 + p.minute;
-  if (p.dow === SHABBAT_WINDOW.startDow) return m >= SHABBAT_WINDOW.startHour * 60;
-  if (p.dow === SHABBAT_WINDOW.endDow) return m < SHABBAT_WINDOW.endHour * 60;
-  return false;
-}
-
-function inNight(p: LocalParts): boolean {
-  return p.hour >= QUIET_HOURS.startHour || p.hour < QUIET_HOURS.endHour;
-}
-
-/** Is `at` inside quiet hours or Shabbat (restaurant tz)? */
-export function isQuietAt(at: Date, tz: string = ALERT_TZ_FALLBACK): boolean {
-  const p = localParts(at, tz);
-  return inNight(p) || inShabbat(p);
-}
-
-function addDays(p: LocalParts, n: number): { y: number; m: number; d: number } {
-  const t = new Date(Date.UTC(p.year, p.month - 1, p.day + n));
-  return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() };
-}
-
-/** The first allowed minute at or after `at` (itself when not quiet). */
-export function nextAllowedAt(at: Date, tz: string = ALERT_TZ_FALLBACK): Date {
-  const zone = safeTz(tz);
-  let t = at;
-  for (let i = 0; i < 6; i++) {
-    const p = localParts(t, zone);
-    if (inShabbat(p)) {
-      const end = p.dow === SHABBAT_WINDOW.endDow ? addDays(p, 0) : addDays(p, 1);
-      t = zonedTime(zone, end.y, end.m, end.d, SHABBAT_WINDOW.endHour, 0);
-      continue;
-    }
-    if (inNight(p)) {
-      const morning = p.hour >= QUIET_HOURS.startHour ? addDays(p, 1) : addDays(p, 0);
-      t = zonedTime(zone, morning.y, morning.m, morning.d, QUIET_HOURS.endHour, 0);
-      continue;
-    }
-    return t;
-  }
-  return t;
-}
-
-/** Local midnight (restaurant tz) of the day containing `at`, as a UTC instant. */
-export function localDayStart(at: Date, tz: string = ALERT_TZ_FALLBACK): Date {
-  const zone = safeTz(tz);
-  const p = localParts(at, zone);
-  return zonedTime(zone, p.year, p.month, p.day, 0, 0);
-}
-
-/** The next digest slot for an over-cap alert: the first allowed minute of the next local day. */
-export function nextDaySlot(at: Date, tz: string = ALERT_TZ_FALLBACK): Date {
-  const zone = safeTz(tz);
-  const n = addDays(localParts(at, zone), 1);
-  return nextAllowedAt(zonedTime(zone, n.y, n.m, n.d, 0, 0), zone);
+/** The next digest slot for an over-cap alert: the next day's 06:00, past Shabbat. */
+export function nextDaySlot(at: Date, _tz: string = ALERT_TZ_FALLBACK): Date {
+  return nextDayAllowedAt(at);
 }
 
 /**
@@ -284,7 +189,7 @@ export interface NotifyInput {
   channels?: readonly AddressChannel[];
   render?: RenderFn;
   now?: Date;
-  /** Restaurant tz; read from `restaurants.timezone` when omitted. */
+  /** Kept for compatibility; the send window is Asia/Jerusalem (sendWindow.ts). */
   timezone?: string;
   /**
    * Extra keys stored on each row's `payload` as given (e.g. `invoiceId`, so an
@@ -316,15 +221,6 @@ export function notifyDedupeKey(event: string, entityId: string, userId: string,
   return `${event}:${entityId}:${userId}:${channel}`;
 }
 
-async function restaurantTz(tx: Database, restaurantId: string): Promise<string> {
-  const [r] = await tx
-    .select({ tz: restaurants.timezone })
-    .from(restaurants)
-    .where(eq(restaurants.id, restaurantId))
-    .limit(1);
-  return safeTz(r?.tz);
-}
-
 async function sentTodayCount(
   tx: Database,
   restaurantId: string,
@@ -354,7 +250,7 @@ export async function notify(tx: Database, input: NotifyInput): Promise<NotifyRe
 
   const members = await resolveAudience(tx, input.restaurantId, input.audience);
   if (members.length === 0) return result;
-  const tz = input.timezone ? safeTz(input.timezone) : await restaurantTz(tx, input.restaurantId);
+  const tz = input.timezone ?? ALERT_TZ_FALLBACK;
   const dayStart = localDayStart(now, tz);
 
   for (const m of members) {

@@ -6,6 +6,11 @@
  * notifications must be enqueued with a REAL recipient address. These helpers
  * turn a restaurant + a set of roles into the concrete, verified email
  * addresses of its members.
+ *
+ * Undeliverable addresses (the demo tenant's domain, any reserved TLD) are left
+ * out in production and whenever a real email provider is configured: each one
+ * would bounce and burn the Resend quota (100/day on the free tier). Otherwise
+ * nothing is sent anyway, so local runs and tests still see every member.
  */
 import {
   and,
@@ -19,8 +24,13 @@ import {
   type UserRole,
 } from '@restomatch/db';
 import { emailAddress, verifiedPhone, type Address } from './address';
+import { isResendConfigured, type NotifierFactoryEnv } from './factory';
+import { isUndeliverableAddress } from './sendWindow';
 
 type SQL = ReturnType<typeof eq>;
+
+/** Re-exported: the one implementation lives in sendWindow.ts. */
+export { isUndeliverableAddress };
 
 export interface Recipient {
   userId: string;
@@ -41,14 +51,25 @@ export async function recipientsForRestaurant(
   db: Database,
   restaurantId: string,
   roles: UserRole[] = MANAGER_ROLES,
+  env: NotifierFactoryEnv = process.env as NotifierFactoryEnv,
 ): Promise<Recipient[]> {
   if (roles.length === 0) return [];
 
   const rows = await memberRows(db, restaurantId, inArray(memberships.role, roles));
 
+  // Production, or a real provider configured: a reserved-TLD address would
+  // only bounce. Dev and test without a provider keep every member.
+  const dropUndeliverable = shouldDropUndeliverable(env);
   const byEmail = new Map<string, Recipient>();
   for (const r of rows) {
     if (!r.email) continue;
+    if (dropUndeliverable && isUndeliverableAddress(r.email)) {
+      // Domain only: never the mailbox.
+      console.info(
+        `[recipients] skipped undeliverable address @${r.email.split('@').pop()} (restaurant ${restaurantId.slice(0, 8)})`,
+      );
+      continue;
+    }
     if (!byEmail.has(r.email)) {
       byEmail.set(r.email, {
         userId: r.userId,
@@ -59,6 +80,11 @@ export async function recipientsForRestaurant(
     }
   }
   return [...byEmail.values()];
+}
+
+/** Production, or a real provider configured: a reserved-TLD address would only bounce. */
+function shouldDropUndeliverable(env: NotifierFactoryEnv): boolean {
+  return (env as NotifierFactoryEnv & { NODE_ENV?: string }).NODE_ENV === 'production' || isResendConfigured(env);
 }
 
 /**
@@ -120,6 +146,7 @@ export async function resolveAudience(
   db: Database,
   restaurantId: string,
   audience: Audience,
+  env: NotifierFactoryEnv = process.env as NotifierFactoryEnv,
 ): Promise<AudienceMember[]> {
   let filter: SQL | undefined;
   if ('roles' in audience) {
@@ -148,12 +175,14 @@ export async function resolveAudience(
   }
 
   const rows = await memberRows(db, restaurantId, filter);
+  const dropUndeliverable = shouldDropUndeliverable(env);
   const out = new Map<string, AudienceMember>();
   for (const r of rows) {
     if (out.has(r.userId)) continue;
     const addresses: Address[] = [];
     const email = emailAddress(r.email);
-    if (email) addresses.push(email);
+    // Same rule as recipientsForRestaurant: never hand a provider a bounce.
+    if (email && !(dropUndeliverable && isUndeliverableAddress(email.value))) addresses.push(email);
     const phone = verifiedPhone(r.phone, phoneVerifiedAtOf(r));
     if (phone) addresses.push(phone);
     out.set(r.userId, {

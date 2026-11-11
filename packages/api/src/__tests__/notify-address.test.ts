@@ -82,9 +82,9 @@ describe('owner alert rules: quiet hours, Shabbat, 6 a day (fixed clocks)', () =
     expect(nextAllowedAt(at('2026-11-04T03:59:00Z'), TZ).toISOString()).toBe('2026-11-04T04:00:00.000Z');
   });
 
-  it('Fri 16:00 → Sat 21:00; Fri 23:30 too; Sat 22:00 is allowed', () => {
-    expect(nextAllowedAt(at('2026-11-06T14:00:00Z'), TZ).toISOString()).toBe('2026-11-07T19:00:00.000Z');
-    expect(nextAllowedAt(at('2026-11-06T21:30:00Z'), TZ).toISOString()).toBe('2026-11-07T19:00:00.000Z');
+  it('Fri 16:00 → Sat 19:00 (sendWindow, #173); Fri 23:30 too; Sat 20:00 is allowed', () => {
+    expect(nextAllowedAt(at('2026-11-06T14:00:00Z'), TZ).toISOString()).toBe('2026-11-07T17:00:00.000Z');
+    expect(nextAllowedAt(at('2026-11-06T21:30:00Z'), TZ).toISOString()).toBe('2026-11-07T17:00:00.000Z');
     expect(isQuietAt(at('2026-11-07T20:00:00Z'), TZ)).toBe(false);
   });
 
@@ -102,7 +102,7 @@ describe('owner alert rules: quiet hours, Shabbat, 6 a day (fixed clocks)', () =
     });
     // On a Friday the next slot is after Shabbat.
     expect(planSchedule({ now: at('2026-11-06T08:00:00Z'), tz: TZ, sentToday: 6 }).scheduledAt?.toISOString()).toBe(
-      '2026-11-07T19:00:00.000Z',
+      '2026-11-07T17:00:00.000Z',
     );
   });
 

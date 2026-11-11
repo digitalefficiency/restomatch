@@ -132,5 +132,7 @@ describe('OCR failure hand-off (G-06)', () => {
     expect(finalAttempt({ attemptsMade: 1, opts: { attempts: 3 } })).toBeNull();
     expect(finalAttempt({ attemptsMade: 2, opts: { attempts: 3 } })).toBe(3);
     expect(finalAttempt({})).toBe(1);
+    // A terminal error (classifyOcrError retryable=false) is final at once: no second paid call.
+    expect(finalAttempt({ attemptsMade: 0, opts: { attempts: 3 } }, false)).toBe(1);
   });
 });
