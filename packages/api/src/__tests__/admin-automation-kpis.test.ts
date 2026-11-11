@@ -6,7 +6,7 @@ import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resolveAppError } from '../errors';
 import { NEVER_CLAIMABLE_TYPES } from '../lib/claims';
-import { FEATURE_KEYS } from '../lib/features';
+import { DEFAULT_ON_FEATURES, FEATURE_KEYS, featureEnabled } from '../lib/features';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
 /**
@@ -115,18 +115,18 @@ describe('admin.automationKpis · read', () => {
   });
 
   it('flagsOn counts the tenant flags with FEATURES_OFF applied (computed in the procedure)', async () => {
-    const on = FEATURE_KEYS.slice(0, 3);
-    await db
-      .update(restaurants)
-      .set({ settings: { features: Object.fromEntries(on.map((k) => [k, true])) } as never })
-      .where(eq(restaurants.id, A.restaurantId));
+    const on = FEATURE_KEYS.filter((k) => !DEFAULT_ON_FEATURES.includes(k)).slice(0, 3);
+    const settings = { features: Object.fromEntries(on.map((k) => [k, true])) };
+    await db.update(restaurants).set({ settings: settings as never }).where(eq(restaurants.id, A.restaurantId));
+    const expected = FEATURE_KEYS.filter((k) => featureEnabled(settings, k)).length;
+    expect(expected).toBe(DEFAULT_ON_FEATURES.length + 3);
     const res = await caller(adminUserId).admin.automationKpis({ restaurantId: A.restaurantId });
-    expect(res.flagsOn).toBe(3);
+    expect(res.flagsOn).toBe(expected);
     expect(res.flagsTotal).toBe(FEATURE_KEYS.length);
 
     process.env.FEATURES_OFF = on[0];
     try {
-      expect((await caller(adminUserId).admin.automationKpis({ restaurantId: A.restaurantId })).flagsOn).toBe(2);
+      expect((await caller(adminUserId).admin.automationKpis({ restaurantId: A.restaurantId })).flagsOn).toBe(expected - 1);
     } finally {
       delete process.env.FEATURES_OFF;
     }

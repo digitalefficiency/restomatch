@@ -24,9 +24,11 @@ import { isReceiverLocale } from '@/lib/i18n/config';
 import type { UploadedScan } from '@/lib/supabase/client';
 import { ingest } from '@/lib/i18n/messages/ingest';
 import { requestReauth } from '@/lib/net/reauth';
+import { blobToBase64, ensureUploadable } from '@/lib/scanPrep';
 import { isSessionExpired } from '@/lib/pwa/authGate';
 import { SYNCED_EVENT, enqueuePhoto, idbAvailable, isNetworkError, isTransientFailure, type SyncedPhotoDetail } from '@/lib/pwa/offlineQueue';
 import { adaptReconciliation, keepAdjusted, markFromCount, type PoLineRow, type ReceiptLineRow } from './_adapters';
+import { failedReadNotice, onRegisterError, type OcrNotice } from './_capture';
 import { fromGrLine } from './_count';
 import { withoutStamp, type GrLinePayload, type RowStamp } from '@/lib/pwa/lineOutbox';
 import { localizeInvoiceLines, localizePoLines, localizeReceiptLines, type LocalNames } from './_localize';
@@ -56,19 +58,6 @@ const BACKGROUND_POLL_MS = 10 * 60_000;
 /** After this long reading, offer "continue with the order" (perf-states-11, NN/g 10 s). */
 export const STILL_READING_AFTER_MS = 10_000;
 
-/** Why the review was built without (fresh) invoice lines. */
-type OcrNotice = null | 'reading' | 'failed' | 'quota' | 'ready';
-
-/** Encode a File to base64 (chunked to avoid call-stack limits on large files). */
-async function fileToBase64(file: File): Promise<string> {
-  const buf = new Uint8Array(await file.arrayBuffer());
-  let binary = '';
-  const CHUNK = 0x8000;
-  for (let i = 0; i < buf.length; i += CHUNK) {
-    binary += String.fromCharCode(...buf.subarray(i, i + CHUNK));
-  }
-  return btoa(binary);
-}
 
 interface PoForClient {
   id: string;
@@ -172,6 +161,8 @@ export function ReceivingWizard({
   const [leaveAsk, setLeaveAsk] = useState<LeaveTarget | null>(null);
   const [next, setNext] = useState<{ poId: string; label: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The scan whose invoice could not be registered — retried with one tap. */
+  const [registerRetry, setRegisterRetry] = useState<CapturedImage | null>(null);
   /** Bumped on retake / skip / unmount — cancels any in-flight poll. */
   const pollTokenRef = useRef(0);
   const skipWaitRef = useRef(false);
@@ -317,7 +308,11 @@ export function ReceivingWizard({
    * The browser sends only bytes — never a restaurant id or a storage prefix.
    */
   const authedUpload = useCallback(
-    async (file: File, clientUploadId: string): Promise<UploadedScan> => {
+    async (picked: File, clientUploadId: string): Promise<UploadedScan> => {
+      // Never send (or queue) more than Vercel's request body takes, nor a file the
+      // browser can't decode: shrink first, or fail HERE with the scan step's
+      // message — before any request (pilot: no photo may fail at the back door).
+      const file = await ensureUploadable(picked);
       // S13 receiverPwa: offline (or the network drops mid-upload) → keep the
       // photo in IndexedDB under the SAME clientUploadId; the PWA shell uploads
       // it when back online (idempotent, M8). An empty publicUrl = queued.
@@ -338,7 +333,7 @@ export function ReceivingWizard({
       };
       const canQueue = offlineQueue && Boolean(restaurantId) && Boolean(userId) && idbAvailable();
       if (canQueue && !navigator.onLine) return queue();
-      const contentBase64 = await fileToBase64(file);
+      const contentBase64 = await blobToBase64(file);
       let r;
       try {
         r = await uploadScan.mutateAsync({
@@ -381,6 +376,7 @@ export function ReceivingWizard({
       capturingRef.current = true;
       setImage(captured);
       setError(null);
+      setRegisterRetry(null);
 
       // Without an uploaded URL we cannot register/OCR.
       if (!captured.publicUrl) {
@@ -411,10 +407,12 @@ export function ReceivingWizard({
         }
 
         await pollAndShow(activeGrId, reg.invoiceId);
-      } catch (err) {
-        setError(errorText(err, t, locale));
-        // Degrade gracefully to receiving against the order.
-        await buildFromPoOnly(grId);
+      } catch {
+        // Not saved: say so, with one-tap retry of the same scan — never a silent
+        // count with no invoice (the receiver can still choose "no invoice now").
+        const failed = onRegisterError(captured);
+        setRegisterRetry(failed.retry);
+        setStep(failed.step);
       } finally {
         capturingRef.current = false;
       }
@@ -437,7 +435,7 @@ export function ReceivingWizard({
     if (outcome === 'ready' && invoice) {
       await showInvoice(activeGrId, id);
     } else if (outcome === 'failed') {
-      setOcrNotice(invoice?.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
+      setOcrNotice(failedReadNotice(invoice?.ocrFailureReason));
       await buildFromPoOnly(activeGrId);
     } else {
       // Timed out (or the receiver chose not to wait): count against the order
@@ -493,7 +491,7 @@ export function ReceivingWizard({
     });
     if (pollTokenRef.current !== token || submittingRef.current) return;
     if (outcome === 'ready') setOcrNotice('ready');
-    else if (outcome === 'failed') setOcrNotice(invoice?.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
+    else if (outcome === 'failed') setOcrNotice(failedReadNotice(invoice?.ocrFailureReason));
   }
 
   /** Manual refresh from the count / review ("still reading" / "ready" banner). */
@@ -504,7 +502,7 @@ export function ReceivingWizard({
       const inv = await utils.receiving.getInvoice.fetch({ invoiceId });
       // Closed, retaken or unmounted while the request was in flight.
       if (pollTokenRef.current !== token || submittingRef.current) return;
-      if (inv.ocrFailed) setOcrNotice(inv.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
+      if (inv.ocrFailed) setOcrNotice(failedReadNotice(inv.ocrFailureReason));
       else if (inv.status !== 'ocr_pending') await showInvoice(grId, invoiceId);
     } catch (err) {
       setError(errorText(err, t, locale));
@@ -664,7 +662,7 @@ export function ReceivingWizard({
             await showInvoice(existingReceipt.id, knownInvoice, 'ADJUST_QUANTITIES');
             return;
           }
-          setOcrNotice(inv.ocrFailed ? (inv.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed') : 'reading');
+          setOcrNotice(inv.ocrFailed ? (failedReadNotice(inv.ocrFailureReason)) : 'reading');
           if (!inv.ocrFailed) {
             const token = ++pollTokenRef.current;
             watchInBackground(knownInvoice, token).catch(() => null);
@@ -868,6 +866,20 @@ export function ReceivingWizard({
         </>
       ) : null}
 
+      {step === 'SCAN_INVOICE' && registerRetry ? (
+        <div role="alert" dir={dir} className="mb-4 space-y-3 rounded-2xl border border-warn/60 bg-surface p-4" data-testid="register-failed">
+          <p className="text-base font-semibold text-ink">{td('delivery.scan.registerFailed')}</p>
+          <button
+            type="button"
+            onClick={() => void onCapture(registerRetry)}
+            className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-primary bg-surface px-4 text-base font-semibold text-primary"
+            data-testid="register-retry"
+          >
+            <RefreshCw className="h-5 w-5" aria-hidden="true" />
+            {td('delivery.scan.registerRetry')}
+          </button>
+        </div>
+      ) : null}
       {step === 'SCAN_INVOICE' ? (
         <InvoiceScan
           supplierName={supplierLabel}
@@ -893,7 +905,7 @@ export function ReceivingWizard({
       ) : null}
 
       {ocrNotice && counting ? (
-        <OcrNoticeBanner notice={ocrNotice} t={t} dir={dir} onRefresh={() => void refreshInvoice()} />
+        <OcrNoticeBanner notice={ocrNotice} t={t} td={td} dir={dir} onRefresh={() => void refreshInvoice()} />
       ) : null}
 
       {duplicateNumber && counting ? (
@@ -1104,11 +1116,13 @@ function LeaveSheet({
 function OcrNoticeBanner({
   notice,
   t,
+  td,
   dir,
   onRefresh,
 }: {
   notice: Exclude<OcrNotice, null>;
   t: Translator<typeof receiving.he>;
+  td: Translator<typeof receivingDelivery.he>;
   dir: 'rtl' | 'ltr';
   onRefresh: () => void;
 }) {
@@ -1119,7 +1133,9 @@ function OcrNoticeBanner({
         ? t('steps.processing.readyLater')
         : notice === 'quota'
           ? t('errors.ocrQuota')
-          : t('errors.ocrFailed');
+          : notice === 'disabled'
+            ? td('delivery.processing.ocrDisabled') // calm: this account doesn't read invoices — not an error
+            : t('errors.ocrFailed');
   const canRefresh = notice === 'reading' || notice === 'ready';
   return (
     <div

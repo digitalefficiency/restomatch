@@ -21,7 +21,8 @@ import { adminProcedure, authedProcedure, router } from '../trpc';
 import { recordAudit } from '../audit';
 import { appError } from '../errors';
 import { usagePeriod } from '../entitlements';
-import { FEATURE_KEYS, featureEnabled, type FeatureKey } from '../lib/features';
+import { DEFAULT_ON_FEATURES, FEATURE_KEYS, featureEnabled, type FeatureKey } from '../lib/features';
+import { releaseOrderQuestionHolds } from './mapping';
 import { automationKpis as computeAutomationKpis, AUTOMATION_MAX_WEEKS } from '@restomatch/charts';
 
 const PlanKeyEnum = z.enum(['trial', 'basic', 'pro', 'chain']);
@@ -67,6 +68,8 @@ function featureState(settings: unknown) {
   return {
     stored,
     all: stored.all === true,
+    /** On unless stored false (G-08 orderQuestions) — what an unticked, never-saved box means. */
+    defaultOn: [...DEFAULT_ON_FEATURES] as string[],
     effective: Object.fromEntries(FEATURE_KEYS.map((k) => [k, featureEnabled(settings, k)])) as Record<
       FeatureKey,
       boolean
@@ -371,12 +374,15 @@ export const adminRouter = router({
   setFeatures: adminProcedure
     .input(z.object({ restaurantId: z.string().uuid(), features: FeaturePatchSchema }))
     .mutation(async ({ ctx, input }) => {
-      return ctx.db.transaction(async (tx) => {
+      let orderQuestionsOff = false;
+      const out = await ctx.db.transaction(async (tx) => {
         const [r] = await tx
           .select({ id: restaurants.id, settings: restaurants.settings })
           .from(restaurants)
           .where(eq(restaurants.id, input.restaurantId))
-          .for('update')
+          // NO KEY UPDATE (as train B's other settings writers): a queue / claim
+          // insert's FK KEY SHARE on this row is not blocked behind an admin save.
+          .for('no key update')
           .limit(1);
         if (!r) throw appError('NOT_FOUND', 'admin.notFound', 'restaurant not found');
         const before = storedFeatures(r.settings);
@@ -390,6 +396,7 @@ export const adminRouter = router({
           .where(eq(restaurants.id, r.id))
           .returning({ settings: restaurants.settings });
         const after = storedFeatures(updated?.settings);
+        orderQuestionsOff = !featureEnabled(updated?.settings, 'orderQuestions');
 
         await recordAudit(tx, {
           restaurantId: r.id,
@@ -402,6 +409,23 @@ export const adminRouter = router({
         });
         return { features: featureState(updated?.settings) };
       });
+      // G-08 kill switch: while order questions are OFF, every save releases and
+      // re-matches the invoices still waiting for them (after the commit, so the job
+      // reads the new flag). Idempotent, so a save is also the retry (round 10).
+      if (!orderQuestionsOff) return out;
+      try {
+        const r = await releaseOrderQuestionHolds(ctx.db, input.restaurantId);
+        return { ...out, release: { ok: true as const, released: r.released, requeued: r.requeued, failed: r.failed } };
+      } catch (err) {
+        console.error(`[admin.setFeatures] order-question release failed for restaurant=${input.restaurantId}`, err);
+        return {
+          ...out,
+          release: {
+            ok: false as const,
+            error: `saved; release failed — run release-order-holds --restaurant ${input.restaurantId}`,
+          },
+        };
+      }
     }),
 
   /** Change a member's role within a restaurant. */

@@ -10,7 +10,7 @@ import { computeLeakHero } from '../leak-hero';
  * AC 5 (money truth): the funnel's "found" IS the hero's leak, to the agora, on
  * the canary scenarios and on a seeded month. One leak definition: AU-07 never
  * re-derives or subtracts anything; MISSING_ON_INVOICE leaves the leak only
- * through LEAK_FILTER itself (#211), and whatever it does moves both sides equally.
+ * through LEAK_FILTER itself (#211 LEAK_EXCLUDED_TYPES), so it adds ₪0 to both sides.
  */
 
 const db = createDb(testDbUrl());
@@ -100,7 +100,7 @@ describe('AU-07 parity: Σ found = owner.leakHero, exactly, in agorot', () => {
     expect(windowFound).toBe(heroAgorot);
   });
 
-  it('a seeded month: caps, info/PRICE_LOWER/UNORDERED out, a rejected duplicate out; MISSING_ON_INVOICE moves both sides equally', async () => {
+  it('a seeded month: caps, info/PRICE_LOWER/UNORDERED out, a rejected duplicate out; MISSING_ON_INVOICE adds ₪0 to both', async () => {
     const s = await seed();
     await s.invoice('2026-10-05T08:00:00Z', '100.00', [
       { type: 'PRICE_HIGHER', severity: 'block', delta: '80.00' },
@@ -121,8 +121,9 @@ describe('AU-07 parity: Σ found = owner.leakHero, exactly, in agorot', () => {
     const after = await sides(s.rid);
     expect(after.weeklyFound).toBe(after.heroAgorot);
     expect(after.windowFound).toBe(after.heroAgorot);
-    // One definition: whatever LEAK_FILTER does with MISSING_ON_INVOICE (₪0 once #211 is on main), both sides move together.
-    expect(after.weeklyFound - before.weeklyFound).toBe(after.heroAgorot - before.heroAgorot);
+    // One definition (#211, LEAK_EXCLUDED_TYPES): MISSING_ON_INVOICE adds ₪0 to both sides.
+    expect(after.weeklyFound - before.weeklyFound).toBe(0);
+    expect(after.heroAgorot - before.heroAgorot).toBe(0);
   });
 
   it('claimed = Σ recovery_claims.amount_agorot; the claimable share never includes PRICE_LOWER, UNORDERED_ARRIVAL or MISSING_ON_INVOICE', async () => {
