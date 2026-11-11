@@ -159,16 +159,19 @@ function resolvePlurals(template: string, vars: MessageVars, intlLocale: string)
  *
  * Direction-aware default: a value is isolated only when it can actually
  * reorder, i.e. it holds a letter of the OTHER direction (Latin in he/ar,
- * Hebrew/Arabic in en/ru/th/ti) together with anything that is not a letter
- * (a space, digit, period, hyphen, quote). Pure numerals, formatted ₪/%
- * strings, same-script text and a single other-script word pass through
- * untouched, so every existing string renders byte-identical.
+ * Hebrew/Arabic in en/ru/th/ti) AND starts or ends with something that is not
+ * a letter (a trailing period, a leading quote, a number at the edge). Inner
+ * neutrals between letters of one run (an e-mail address, "Coca Cola") take
+ * that run's direction and cannot reorder. Pure numerals, formatted ₪/%
+ * strings, same-script text, single words and literal {slot} values pass
+ * through untouched, so existing strings and their e2e pins stay byte-identical.
  */
 export const FSI = '\u2068';
 export const PDI = '\u2069';
 const RTL_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
 const LTR_LETTER = /[A-Za-z\u00C0-\u024F\u0370-\u03FF\u0400-\u052F\u0E00-\u0E7F\u1200-\u139F]/;
 const LETTERS_ONLY = /^[\p{L}\p{M}]+$/u;
+const EDGE_LETTERS = /^[\p{L}\p{M}].*[\p{L}\p{M}]$/su;
 const RTL_LOCALES = /^(he|iw|ar|fa|ur|yi)\b/i;
 
 /** True when `intlLocale` renders right-to-left. */
@@ -179,8 +182,15 @@ export function isRtlLocale(intlLocale: string): boolean {
 /** Would `value`, spliced into a sentence of `rtl` direction, need an isolate? */
 export function needsIsolation(value: string, rtl: boolean): boolean {
   if (value.includes(FSI)) return false; // already isolated by the caller
+  // A literal slot re-injected for a later fill (`t(key, { seconds: '{seconds}' })`, filled by a
+  // client countdown) is not text: isolating it would wrap whatever is spliced into it later.
+  if (/^\{\w+\}$/.test(value)) return false;
   const opposite = rtl ? LTR_LETTER : RTL_LETTER;
-  return opposite.test(value) && !LETTERS_ONLY.test(value);
+  if (!opposite.test(value) || LETTERS_ONLY.test(value)) return false;
+  // Neutrals BETWEEN letters of one run ("someone-else@x.test", "Coca Cola") resolve to that run's
+  // direction (UAX #9 N1), so they cannot reorder. Only an edge that is not a letter can: a trailing
+  // period, a leading quote, a number at either end ("Coca-Cola Ltd.", '"Acme"', "Tnuva 24").
+  return !EDGE_LETTERS.test(value);
 }
 
 /** Wrap in FSI…PDI when needed (see `needsIsolation`). */
