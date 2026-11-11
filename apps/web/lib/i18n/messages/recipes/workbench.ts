@@ -27,6 +27,8 @@ export const workbenchHe = {
   qtyInvalid: 'כמות לא תקינה',
   previewError: 'לא הצלחנו לחשב כרגע. המתכון עצמו לא השתנה.',
   readOnly: 'צפייה בלבד: אפשר לראות את העלויות, בלי לשנות את המתכון.',
+  overviewUnavailable: 'שינויי עלות המנות לא זמינים כרגע. נסו לרענן בעוד רגע.',
+  alertsUnavailable: 'התראות המחיר לא זמינות כרגע.',
 };
 
 export const workbenchEn: Shape<typeof workbenchHe> = {
@@ -51,4 +53,6 @@ export const workbenchEn: Shape<typeof workbenchHe> = {
   qtyInvalid: 'Invalid quantity',
   previewError: "We couldn't calculate right now. The recipe itself is unchanged.",
   readOnly: 'View only: you can see the costs, not change the recipe.',
+  overviewUnavailable: 'Dish cost changes are unavailable right now. Try refreshing in a moment.',
+  alertsUnavailable: 'Price alerts are unavailable right now.',
 };
