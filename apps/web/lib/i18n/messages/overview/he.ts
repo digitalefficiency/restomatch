@@ -49,6 +49,8 @@ export const he = {
     howCalc: 'איך חישבנו?',
     more: 'עוד פעולות',
     pending: '{count} חשבוניות ({amount}) ממתינות לשיוך להזמנה — כנראה חשבוניות מרכזות. הן לא נספרות בדליפה ולא בהוצאה.',
+    awaitingQuestion: '{count} חשבוניות ({amount}) מחכות לשאלה: זה אותו מוצר? הן ייבדקו אחרי התשובה, ולא נספרות בדליפה ולא בהוצאה.',
+    awaitingQuestionCta: 'לשאלות',
     awaitingCount: '{count} חשבוניות ({amount}) ממתינות לספירת קבלת הסחורה — הן ייבדקו כשהקבלה תיסגר.',
     clean: 'אין דליפה החודש — {count} חשבוניות נבדקו ונמצאו תואמות להזמנות ולקבלות.',
     calc: 'פערים בחומרה בינונית ומעלה, מוגבל לסכום כל חשבונית. לא כולל מחיר נמוך מהמצופה וחשבוניות ללא הזמנה.',
@@ -96,6 +98,8 @@ export const he = {
     countValue: '{counted}/{lines}',
     cutoffs: { label: 'הזמנות שנסגרות היום', sub: 'הבא: {supplier} ב־{time}', verb: 'להזמנה' },
     cutoffsValue: '{count} ספקים',
+    invoiceLines: { label: 'חשבוניות שממתינות לכם', verb: 'לבדיקה' },
+    invoiceLinesValue: '{count, plural, one {חשבונית אחת} other {# חשבוניות}}',
     exportLast: { label: 'ייצוא אחרון להנהלת החשבונות', value: 'עדיין לא נרשם', verb: 'לייצוא' },
     // W2-08 task spine.
     leakLink: 'דליפה החודש',

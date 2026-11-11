@@ -250,3 +250,32 @@ export function orderTasks(suppliers: readonly SupplierWithSchedule[], now: Date
     },
   ];
 }
+
+/** PILOT (train B, W2-02 interim): `invoices.needsLines` — invoices waiting for a person to complete their lines. */
+export interface NeedsLinesLike {
+  count: number;
+  rows: readonly { reason: string }[];
+}
+
+export function invoiceLineTasks(r: NeedsLinesLike | null, today: string): Task[] {
+  if (!r || r.count <= 0) return [];
+  // Only held-for-review invoices (T4) → neutral; any failed / unread read → warn (main's home rule).
+  const onlyHeld = r.rows.every((x) => x.reason === 'held');
+  return [
+    {
+      type: 'doc_review',
+      entityId: 'invoices:needsLines',
+      title: 'invoiceLines',
+      ilsAgorot: null,
+      count: r.count,
+      blocking: 0,
+      tier: onlyHeld ? 'T4' : 'T2',
+      tone: onlyHeld ? 'neutral' : 'warn',
+      due: today,
+      ageDays: null,
+      verb: 'review',
+      deepLink: '/dashboard/invoices',
+      scope: 'mine',
+    },
+  ];
+}

@@ -85,7 +85,7 @@ export const en: Shape<typeof he> = {
     pct: 'of spend',
     spend: 'Checked spend',
     invoices: 'Invoices with a leak',
-    caught: 'Caught before payment',
+    caught: 'Identified before payment approval',
   },
   explorer: {
     title: 'Leak breakdown',

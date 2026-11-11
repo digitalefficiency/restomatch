@@ -53,8 +53,11 @@ const focus = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:rin
  * Everything else has one home elsewhere: activity → the bell, price creep →
  * /leaks#prices, VAT → a task row (owner: only within 30 days of its deadline),
  * dish costs → recipes. Every block streams and fails on its own.
+ *
+ * `questions` (G-08 "זה אותו מוצר?", a count with no ₪) goes right under the
+ * task strip, never above the T1 hero (375×667 fold).
  */
-export function FinanceHome(ctx: Ctx) {
+export function FinanceHome({ questions, ...ctx }: Ctx & { questions?: React.ReactNode }) {
   const { role, fail } = ctx;
   if (role === 'owner') {
     return (
@@ -65,6 +68,7 @@ export function FinanceHome(ctx: Ctx) {
         <HomeSection name="needs" fallback={<NeedsSkeleton rows={3} />} forceFail={fail.has('needs')}>
           <Needs {...ctx} max={3} />
         </HomeSection>
+        {questions}
         <HomeSection name="returned" fallback={<CardSkeleton className="h-14" />} forceFail={fail.has('returned')}>
           <GoodNews {...ctx} />
         </HomeSection>
@@ -76,6 +80,7 @@ export function FinanceHome(ctx: Ctx) {
       <HomeSection name="needs" fallback={<NeedsSkeleton rows={4} />} forceFail={fail.has('needs')}>
         <Needs {...ctx} max={5} />
       </HomeSection>
+      {questions}
       {role === 'manager' ? (
         <HomeSection name="leakLink" fallback={<CardSkeleton className="h-12" />} forceFail={fail.has('leakLink')}>
           <LeakLinkRow {...ctx} />
@@ -182,6 +187,20 @@ async function Hero(ctx: Ctx) {
               {state === 'leak' ? <p data-testid="hero-why-split">{t('needs.whySplit', { unpaid: ils(split.unpaidIls), paid: ils(split.paidIls) })}</p> : null}
               {current.pendingLinkCount > 0 ? (
                 <p data-testid="hero-pending-link">{t('hero.pending', { count: n(current.pendingLinkCount), amount: ils(current.pendingLinkIls) })}</p>
+              ) : null}
+              {(current.awaitingQuestionCount ?? 0) > 0 ? (
+                <p data-testid="hero-awaiting-question">
+                  {t('hero.awaitingQuestion', { count: n(current.awaitingQuestionCount!), amount: ils(current.awaitingQuestionIls ?? 0) })}
+                  {/* G-08: the mapper only for a role that may answer (never the bookkeeper). */}
+                  {canSeeRoute(role, '/dashboard/catalog/mapping') ? (
+                    <>
+                      {' '}
+                      <Link href="/dashboard/catalog/mapping" className={cn('font-semibold text-primary hover:underline', focus)}>
+                        {t('hero.awaitingQuestionCta')}
+                      </Link>
+                    </>
+                  ) : null}
+                </p>
               ) : null}
               {(current.awaitingCountCount ?? 0) > 0 ? (
                 <p data-testid="hero-awaiting-count">{t('hero.awaitingCount', { count: n(current.awaitingCountCount!), amount: ils(current.awaitingCountIls ?? 0) })}</p>

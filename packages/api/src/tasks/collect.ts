@@ -5,6 +5,7 @@ import { isFeatureOn } from '../lib/featureGate';
 import { MAX_CLAIMS } from '../recovery/service';
 import { approvalsRouter } from '../routers/approvals';
 import { inventoryRouter } from '../routers/inventory';
+import { invoicesRouter } from '../routers/invoices';
 import { ownerRouter } from '../routers/owner';
 import { payRunRouter } from '../routers/payRun';
 import { receivingRouter } from '../routers/receiving';
@@ -16,6 +17,7 @@ import {
   countTasks,
   decisionTasks,
   deliveryTasks,
+  invoiceLineTasks,
   orderTasks,
   payRunTasks,
   vatTasks,
@@ -25,7 +27,7 @@ import type { Task, TasksResult } from './types';
 /** Owner decision I1: the owner sees VAT at risk as a task only this close to its deadline. */
 export const VAT_OWNER_WINDOW_DAYS = 30;
 
-export type SourceKey = 'decision' | 'orders' | 'claims' | 'vat' | 'payRun' | 'deliveries' | 'count';
+export type SourceKey = 'decision' | 'orders' | 'claims' | 'vat' | 'payRun' | 'deliveries' | 'count' | 'invoiceLines';
 
 /**
  * Which sources each role's spine reads (G-07 `VISIBLE_TO` replaces this map
@@ -33,8 +35,8 @@ export type SourceKey = 'decision' | 'orders' | 'claims' | 'vat' | 'payRun' | 'd
  * no approvals, no claims (page.tsx keeps the same invariant for the homes).
  */
 export const SOURCES_BY_ROLE: Record<UserRole, readonly SourceKey[]> = {
-  owner: ['decision', 'claims', 'vat', 'payRun'],
-  manager: ['decision', 'orders', 'claims', 'deliveries', 'count'],
+  owner: ['decision', 'invoiceLines', 'claims', 'vat', 'payRun'],
+  manager: ['decision', 'orders', 'invoiceLines', 'claims', 'deliveries', 'count'],
   bookkeeper: ['decision', 'vat', 'payRun'],
   receiver: ['deliveries'],
   chef: ['orders', 'count'],
@@ -86,6 +88,8 @@ export async function collectTasks(ctx: MemberContext, opts: { now?: Date; only?
     },
     payRun: async () => payRunTasks(await payRunRouter.createCaller(sub).month()),
     deliveries: async () => deliveryTasks(await receivingRouter.createCaller(sub).todayExpectations({ includeLate: true }), now, today),
+    // PILOT (train B): an unread photo invoice needs a person to complete its lines (owner + manager).
+    invoiceLines: async () => invoiceLineTasks(await invoicesRouter.createCaller(sub).needsLines(), today),
     count: async () => ((await on('inventoryCount')) ? countTasks(await inventoryRouter.createCaller(sub).current(), today) : []),
   };
 

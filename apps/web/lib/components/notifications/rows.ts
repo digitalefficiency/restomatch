@@ -44,6 +44,7 @@ const ROW_KEY: Partial<Record<Task['type'], string>> = {
   delivery_late: 'deliveries',
   close_step: 'count',
   order_due: 'cutoffs',
+  doc_review: 'invoiceLines',
 };
 
 /**
@@ -101,6 +102,14 @@ export function taskRow(task: Task, t: T, locale: Locale, sideMoney: (agorot: nu
         countText: t('needs.countValue', { counted: n(d.counted), lines: n(d.lines) }),
         sub: t('needs.count.sub', { counted: n(d.counted), lines: n(d.lines) }),
         verb: t('needs.count.verb'),
+      };
+    case 'doc_review':
+      return {
+        ...base,
+        agorot: null,
+        label: t('needs.invoiceLines.label'),
+        countText: t('needs.invoiceLinesValue', { count: task.count }),
+        verb: t('needs.invoiceLines.verb'),
       };
     case 'order_due':
       return {
