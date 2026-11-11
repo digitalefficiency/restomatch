@@ -133,7 +133,7 @@ function TargetBar({ targetBp, canSetTarget }: { targetBp: number; canSetTarget:
           {t('target.edit')}
         </Button>
       ) : null}
-      <span className="text-xs text-subtle">{canSetTarget ? t('target.hint') : t('target.readOnly')}</span>
+      <span className="text-xs text-subtle">{t('target.hint')}</span>
     </Card>
   );
 }
@@ -413,7 +413,6 @@ function ImpactTab() {
     <div className="space-y-4">
       <div>
         <h2 className="text-lg font-semibold text-ink">{t('impact.title')}</h2>
-        <p className="text-sm text-muted">{t('impact.subtitle')}</p>
       </div>
       <Card padding="sm">
         <form

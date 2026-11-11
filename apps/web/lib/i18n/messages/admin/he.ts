@@ -39,7 +39,7 @@ export const he = {
     implicit: '(משתמע)',
     trialEnds: 'ניסיון עד {date}',
     empty: 'אין מסעדות עדיין',
-    emptyHint: 'מסעדה נוצרת כשמשתמש חדש מסיים את שלב ההצטרפות (/onboarding).',
+    emptyHint: 'מסעדה נוצרת בסיום ההצטרפות.',
   },
   detail: {
     back: 'כל המסעדות',
@@ -50,7 +50,7 @@ export const he = {
     overrides: 'הרחבות',
     businessId: 'ח״פ',
     created: 'נוצרה',
-    noSubscription: 'ללא מנוי — ניסיון משתמע (פיצ׳רים מלאים, נפח נמוך). שייכו תוכנית כדי להתחיל למדוד שימוש.',
+    noSubscription: 'ללא מנוי — ניסיון משתמע. שייכו תוכנית למדידת שימוש.',
     members: 'משתמשים ({count})',
     noMembers: 'אין משתמשים במסעדה הזו.',
     notFound: 'המסעדה לא נמצאה.',
@@ -90,7 +90,7 @@ export const he = {
     cta: 'להפעלת אימות דו־שלבי בהגדרות',
   },
   overrides: {
-    label: 'הרחבות (override) — מספר ריק = ברירת מחדל של התוכנית',
+    label: 'הרחבות · ריק = ברירת מחדל',
     invoices: 'חשבוניות/חודש',
     restaurants: 'מסעדות',
     seats: 'מושבים/מסעדה',

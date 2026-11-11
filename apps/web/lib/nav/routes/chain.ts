@@ -26,6 +26,8 @@ export const routes: RouteDef[] = [
     roles: ['owner', 'bookkeeper'],
     chain: 'only',
     nav: 'linked',
+    // #251: every /dashboard/chain* route declares its badge; the matrix has none.
+    badge: null,
     aliases: ['כל הסניפים', 'מטריצת סניפים', 'matrix'],
   },
 ];

@@ -49,6 +49,7 @@ function ReminderRow({ supplierId, name, sender }: { supplierId: string; name: s
   if (!d || d.count === 0) return null;
   const amount = formatIls(d.outstandingAgorot / 100, { locale, maximumFractionDigits: 2 });
   const count = formatNumber(d.count, locale);
+  // The ONE supplier reminder text (same as the letters page's reminder draft).
   const body = t('reminder.body', {
     supplier: name,
     restaurant: sender.restaurant,
