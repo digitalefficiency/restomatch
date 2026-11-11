@@ -1,5 +1,7 @@
 import type { InvoiceOcrLine, InvoiceOcrResult, NormalizedPurchaseOrder } from '@restomatch/types';
 import type { OcrChecks } from './checks';
+import type { ExtractionMeta } from './providers/claudeVision';
+import type { BillingPeriod, Consolidation, ConsolidationBasis } from './consolidation';
 import type { DocumentKind, InvoiceExtractionV2, LineKind } from './providers/invoiceSchema';
 
 export type OcrProviderId = 'document_ai' | 'claude_vision';
@@ -16,7 +18,8 @@ export interface PoDocumentParser {
 
 export interface OcrProvider {
   readonly id: OcrProviderId;
-  extract(image: ImageSource): Promise<InvoiceOcrResult>;
+  /** `signal` cancels the in-flight read (ClaudeVision → OcrExtractionError 'aborted'). */
+  extract(image: ImageSource, opts?: OcrExtractOptions): Promise<InvoiceOcrResult>;
 }
 
 export interface OcrConflict {
@@ -32,6 +35,8 @@ export interface ProductCandidate {
   canonicalName: string;
   confidence: number;
   matchedBy: 'sku' | 'alias' | 'barcode' | 'embedding' | 'fuzzy';
+  /** G-08: where a stored link came from (catalog aliasProvenance); absent for plain name matches. */
+  provenance?: 'human' | 'exactKey' | 'newProduct' | 'guess' | 'legacy';
 }
 
 export interface ResolvedInvoiceLine extends InvoiceOcrLine {
@@ -61,6 +66,12 @@ export interface ResolvedInvoice extends Omit<InvoiceOcrResult, 'lines' | 'total
   invoiceDiscount?: number;
   continuesOnAnotherPage?: boolean;
   handwrittenCorrection?: boolean;
+  /** Consolidated invoice (חשבונית מרכזת)? Set by the pipeline (./consolidation), conservative. */
+  consolidation?: Consolidation;
+  /** Why it was called consolidated ('none' when regular). */
+  consolidationBasis?: ConsolidationBasis;
+  /** The printed billing period, when both ends are printed. */
+  billingPeriod?: BillingPeriod;
 }
 
 export interface OcrPipelineResult {
@@ -75,6 +86,8 @@ export interface OcrPipelineResult {
   conflicts: OcrConflict[];
   /** Arithmetic gate + ח״פ + document flags (./checks). Any reason ⇒ needsHumanReview. */
   checks: OcrChecks;
+  /** The Claude call's model / effort / tokens / duration (for the cost log); absent for stub reads. */
+  meta?: ExtractionMeta;
 }
 
 export type CatalogMatcherFn = (line: InvoiceOcrLine) => Promise<ProductCandidate[]>;
@@ -87,6 +100,12 @@ export interface OcrPipelineOptions {
   reviewThreshold?: number;
   /** The supplier's ח״פ on file; a different printed one adds 'supplier_id_mismatch'. */
   expectedSupplierBusinessId?: string | null;
+  /** Cancels the provider reads (e.g. the worker's per-job deadline). */
+  signal?: AbortSignal;
+}
+
+export interface OcrExtractOptions {
+  signal?: AbortSignal;
 }
 
 export const DEFAULT_REVIEW_THRESHOLD = 0.85;

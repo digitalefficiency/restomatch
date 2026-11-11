@@ -41,6 +41,7 @@ import {
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { diffCoverage, loadFragments, mergeCoverage } from './coverage/index';
 
 /**
  * CROSS-TENANT ATTACK SUITE
@@ -52,7 +53,13 @@ import { resetDb, seedTenant, type Tenant } from './fixtures';
  *
  * COVERAGE is enforced: a tRPC procedure that is not declared in COVERAGE
  * fails this suite. When you add a procedure, add an attack or isolation test
- * here and declare it — that is the price of admission.
+ * and declare it — that is the price of admission.
+ *
+ * COVERAGE = BASE_COVERAGE (below, human-owned) merged with the per-package
+ * fragments in ./coverage/<package-id>.ts. A package adds its procedures in its
+ * own fragment and its attack test in its own *.attack.test.ts — never here.
+ * mergeCoverage() rejects a fragment that re-declares a base key. See
+ * ./coverage/README.md.
  */
 
 const TEST_DB_URL =
@@ -103,7 +110,7 @@ afterAll(async () => {
  * 'isolation' → has a list/aggregate isolation test below
  * other       → explicit justification for why no test is required
  * ────────────────────────────────────────────────────────────────────────── */
-const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
+const BASE_COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // S14 wave 1 — receiver languages + AI assistant (flag-gated).
   'receiverLangs.status': 'isolation',
   'receiverLangs.localNames': 'attack',
@@ -123,6 +130,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'exports.invoicesCsv': 'isolation',
   'exports.uniform1000': 'isolation',
   'onboarding.myMemberships': 'isolation',
+  'onboarding.signupStatus':
+    'userScopedProcedure read of the CALLER\'s own users row only (keyed to ctx.session.userId, no client input) — returns one boolean (may this caller create a restaurant), no tenant data.',
   'onboarding.createRestaurant':
     'creates a brand-new tenant; takes no entity ids and reads nothing tenant-scoped',
   // Chain / branches (S8). Exercised on the RLS-enforced app role in
@@ -168,6 +177,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'receiving.registerInvoice': 'attack',
   'receiving.updateInvoiceHeader': 'attack',
   'receiving.updateInvoiceLine': 'attack',
+  'receiving.addInvoiceLine': 'attack',
+  'receiving.deleteInvoiceLine': 'attack',
   'receiving.pendingInvoices': 'isolation',
   // S2 "Receiver in English": writes ONLY display columns, but still takes a
   // client-supplied poId / invoiceId — a foreign id must be NOT_FOUND and B's
@@ -190,6 +201,9 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'settings.update': 'isolation',
   'settings.profile': 'isolation',
   'settings.updateProfile': 'isolation',
+  // W1-08 pilot: the credit-letter letterhead (letterhead.test.ts covers the isolation).
+  'settings.letterhead': 'isolation',
+  'settings.updateLetterhead': 'isolation',
   'search.global': 'isolation',
   // Phase-2 supplier-centric surface (suppliers / catalog / orders / on-demand match).
   // Every procedure that takes a client-supplied supplierId / productId / poId /
@@ -266,6 +280,17 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'mapping.unmapped': 'isolation',
   'mapping.searchProducts': 'isolation',
   'mapping.confirm': 'attack',
+  // G-08: the open "זה אותו מוצר?" count for the home line — a restaurant-scoped
+  // count, no ₪. See catalog-mapping.attack.test.ts.
+  // G-08: the chef-allowed answer — links a name question ONLY to one of its own
+  // server-computed suggestions; foreign supplier/product → NOT_FOUND.
+  'mapping.answerLink': 'attack — catalog-mapping.attack.test.ts: B supplier/product NOT_FOUND, non-suggested product FORBIDDEN, receiver FORBIDDEN, chef OK, no ₪',
+  'mapping.questionCount': 'isolation — catalog-mapping.attack.test.ts: counts only the caller restaurant name-keyed questions; B never counted for A',
+  // G-08 charge (review M-2): owner/manager mark an unlinked invoice-line key "שורת חיוב — לא מוצר".
+  'mapping.markCharge': 'attack — catalog-link-hold.test.ts: B supplier NOT_FOUND, A lines of another supplier untouched, chef / receiver FORBIDDEN, no ₪',
+  'mapping.chargeSample': 'attack — catalog-link-hold.test.ts: a B supplier → NOT_FOUND; chef → FORBIDDEN; one A invoice line of the key only',
+  'mapping.chargeKeys': 'isolation — catalog-link-hold.test.ts: lists only the caller restaurant learned keys (B never listed for A); chef FORBIDDEN; no ₪',
+  'mapping.removeChargeKey': 'attack — catalog-link-hold.test.ts: a B supplier → NOT_FOUND; chef → FORBIDDEN; returns only A lines of that key on unpaid invoices; audited',
   // Canonical product management (rename / recategorize / exclusivity / delete).
   'products.update': 'attack',
   'products.list': 'isolation',
@@ -342,6 +367,8 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'ingest.inbox': 'isolation',
   'ingest.approveDocument': 'attack',
   'ingest.rejectDocument': 'attack',
+  // PILOT (W2-02, train B, add-only): invoices waiting for a person to complete their lines.
+  'invoices.needsLines': "isolation — invoices-needs-lines.test.ts: A's list holds only A's invoices (B's unread or held invoice never listed, B's own list empty of A); receiver/chef FORBIDDEN",
   // Growth (wave 1, S15 — flag `growth`). pricing is a pure public quote over
   // the plan catalog (no tenant data, no ids); the referral procedures are
   // tenant-scoped — see the growth.* block at the end of this file.
@@ -392,17 +419,32 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'inventory.period': "attack — inventory-rls.attack.test.ts: B asking for the period of A's closed count → notFound; inventory-router.test.ts: A's purchases exclude B's ₪99,999 invoice on the same day; B's period is noCounts",
 };
 
+// Never a plain spread: mergeCoverage throws if a fragment re-declares (and so could downgrade) a base key.
+const COVERAGE = mergeCoverage(BASE_COVERAGE, loadFragments());
+
 function listProcedurePaths(): string[] {
   const def = (appRouter as { _def: { procedures?: Record<string, unknown> } })._def;
   if (!def.procedures) throw new Error('appRouter._def.procedures missing — tRPC internals changed');
   return Object.keys(def.procedures).sort();
 }
 
+/** Base entries at the W2-01 split. The base may grow (human PR); it may never shrink. */
+const BASE_COVERAGE_FLOOR = 216;
+
 describe('coverage completeness', () => {
   it('every registered procedure is declared in COVERAGE', () => {
     const registered = listProcedurePaths();
     const declared = Object.keys(COVERAGE).sort();
-    expect(registered).toEqual(declared);
+    const { missing, stale } = diffCoverage(registered, declared);
+    expect(
+      registered,
+      `COVERAGE out of sync — MISSING (registered, undeclared): ${JSON.stringify(missing)}; ` +
+        `STALE (declared, not registered): ${JSON.stringify(stale)}. Declare new procedures in coverage/<package-id>.ts.`,
+    ).toEqual(declared);
+  });
+
+  it('BASE_COVERAGE never shrinks (ratchet)', () => {
+    expect(Object.keys(BASE_COVERAGE).length).toBeGreaterThanOrEqual(BASE_COVERAGE_FLOOR);
   });
 });
 
@@ -1219,6 +1261,55 @@ describe('match router + receiving detail reads: foreign id attacks (A → B)', 
       .where(eq(invoiceLines.id, B.invoiceLineId));
     expect(row?.qtyBilled).toBe('10.000'); // B's seeded line, untouched
     expect(row?.unitPriceBilled).toBe('10.0000');
+  });
+
+  // B8 manual entry. B's invoice is made editable ('parsed') first, so the only
+  // thing standing between A and B's invoice is the tenant check.
+  it('receiving.addInvoiceLine rejects a foreign invoiceId — no line, B untouched', async () => {
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, B.invoiceId));
+    try {
+      await expect(
+        callerFor(A).receiving.addInvoiceLine({
+          invoiceId: B.invoiceId,
+          line: { rawDescription: 'attack', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1 },
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      const lines = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, B.invoiceId));
+      expect(lines).toHaveLength(1);
+      const [inv] = await db.select({ total: invoices.totalInclVat }).from(invoices).where(eq(invoices.id, B.invoiceId));
+      expect(inv?.total).toBe('117.00');
+    } finally {
+      await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, B.invoiceId));
+    }
+  });
+
+  it("receiving.addInvoiceLine on A's own invoice rejects B's productId", async () => {
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, A.invoiceId));
+    try {
+      await expect(
+        callerFor(A).receiving.addInvoiceLine({
+          invoiceId: A.invoiceId,
+          line: { rawDescription: 'attack', qtyBilled: 1, unit: 'kg', unitPriceBilled: 1, productId: B.productId },
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      const lines = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, A.invoiceId));
+      expect(lines).toHaveLength(1);
+    } finally {
+      await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, A.invoiceId));
+    }
+  });
+
+  it('receiving.deleteInvoiceLine rejects a foreign lineId — B keeps its line', async () => {
+    await db.update(invoices).set({ status: 'parsed' }).where(eq(invoices.id, B.invoiceId));
+    try {
+      await expect(callerFor(A).receiving.deleteInvoiceLine({ lineId: B.invoiceLineId })).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+      const [row] = await db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.id, B.invoiceLineId));
+      expect(row?.id).toBe(B.invoiceLineId);
+    } finally {
+      await db.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, B.invoiceId));
+    }
   });
 });
 
