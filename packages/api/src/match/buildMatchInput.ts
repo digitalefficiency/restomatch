@@ -348,7 +348,9 @@ export async function buildMatchInputForInvoice(
         .from(purchaseOrders)
         .where(and(eq(purchaseOrders.id, options.pinnedPoId), eq(purchaseOrders.restaurantId, restaurantId)))
         .limit(1);
-      if (pinned?.status === 'draft' && pinned.supplierId === inv.supplierId) pinSkipped = 'po_draft';
+      if (pinned?.status === 'draft' && pinned.supplierId === inv.supplierId && inWindow(pinned.expectedDeliveryAt)) {
+        pinSkipped = 'po_draft';
+      }
       if (
         pinned &&
         isPoPinnable(pinned.status) &&
@@ -376,6 +378,12 @@ export async function buildMatchInputForInvoice(
           eq(purchaseOrders.restaurantId, restaurantId),
           eq(purchaseOrders.supplierId, inv.supplierId),
           inArray(purchaseOrders.status, [...ELIGIBLE_PO_STATUSES]),
+          // A CLOSED PO is discovered only while no other invoice's run uses it (the Zester
+          // case: synced closed before its invoice). A closed PO another invoice already
+          // matched is done: a second invoice for it — a re-bill under a new number — must
+          // stay UNORDERED_ARRIVAL, never pair "clean" with goods already billed. (A pin
+          // keeps its own closed PO: that run is this invoice's.)
+          sql`(${purchaseOrders.status} <> 'closed' OR NOT EXISTS (SELECT 1 FROM match_runs mr WHERE mr.po_id = "purchase_orders"."id" AND mr.restaurant_id = ${restaurantId} AND mr.invoice_id IS DISTINCT FROM ${invoiceId}))`,
           // A null expected_delivery_at shouldn't exclude a candidate (it may
           // still be the right PO); treat null as "passes the bound".
           or(isNull(purchaseOrders.expectedDeliveryAt), gte(purchaseOrders.expectedDeliveryAt, lo)),

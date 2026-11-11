@@ -23,6 +23,7 @@ import {
   type InvoiceLineInput,
   type MatchInput,
   type PoLineInput,
+  toAgorot,
 } from '@restomatch/matching';
 import { claimableLines, sumClaims, vatBasisOf, type VatBasis } from '../lib/claims';
 import { addCalendarDaysInTz, startOfDayInTz } from '../lib/time';
@@ -1336,10 +1337,10 @@ export async function consolidatedProposal(
     for (const o of samePeriodEarlier) {
       const pool = otherLines
         .filter((l) => l.invoiceId === o.id && !deliveryNoteNumberIn(l.d) && !deliveryNoteNumberIn(l.dEn))
-        .map((l) => ({ key: lineKey(l), ag: Math.round(Number(l.lineTotal) * 100) }));
+        .map((l) => ({ key: lineKey(l), ag: toAgorot(Number(l.lineTotal)) }));
       let overlapAg = 0;
       for (const l of myMonthLines) {
-        const ag = Math.round(Number(l.lineTotal) * 100);
+        const ag = toAgorot(Number(l.lineTotal));
         const i = pool.findIndex((x) => x.key === lineKey(l) && x.ag === ag);
         if (i >= 0) {
           overlapAg += ag;

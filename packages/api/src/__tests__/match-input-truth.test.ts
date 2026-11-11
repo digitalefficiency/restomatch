@@ -321,6 +321,16 @@ describe('draft POs never enter the match; a confirmed one does', () => {
     expect(built.poId).toBeNull();
     expect(built.pinSkipped).toBeUndefined();
   });
+
+  it('a draft pin OUTSIDE the date window is dropped like any out-of-window pin — no pinSkipped reason', async () => {
+    const T = await seedTenant(db, 'A');
+    const s = await supplierOf(T);
+    const o = await order(T, s, { status: 'draft', at: new Date(D0.getTime() - 30 * DAY), count: () => ({ qtyReceived: '10' }) });
+    const inv = await invoiceFor(T, s, [o.lines[0]!.productId]);
+    const { built } = await engine(T, inv, o.poId);
+    expect(built.poId).toBeNull();
+    expect(built.pinSkipped).toBeUndefined();
+  });
 });
 
 describe('closed POs still match (the Zester case)', () => {
@@ -333,6 +343,22 @@ describe('closed POs still match (the Zester case)', () => {
     expect(built.poId).toBe(o.poId);
     expect(result.discrepancies.map((d) => d.type)).not.toContain('UNORDERED_ARRIVAL');
     expect(qtyAg(result.discrepancies)).toBe(2400);
+  });
+
+  it('a closed PO another invoice already matched is NOT rediscovered: a re-bill under a new number stays UNORDERED_ARRIVAL', async () => {
+    const T = await seedTenant(db, 'A');
+    const s = await supplierOf(T);
+    const o = await order(T, s, { status: 'closed', gr: 'completed', count: () => ({ qtyReceived: '10' }) });
+    const first = await invoiceFor(T, s, [o.lines[0]!.productId], { source: 'platform' });
+    expect((await build(T, first))!.poId).toBe(o.poId); // the Zester case: its own invoice still finds it
+    await db.insert(matchRuns).values({ restaurantId: T.restaurantId, poId: o.poId, grId: o.grId, invoiceId: first, overallStatus: 'clean', totalDiscrepancyAmount: '0' });
+    // The same delivery billed again under a new number, 2 days later.
+    const rebill = await invoiceFor(T, s, [o.lines[0]!.productId], { source: 'email', at: new Date(D0.getTime() + 2 * DAY) });
+    const { built, result } = await engine(T, rebill);
+    expect(built.poId).toBeNull();
+    expect(result.discrepancies.map((d) => d.type)).toContain('UNORDERED_ARRIVAL');
+    // …while the first invoice's own re-match still pins its closed PO.
+    expect((await build(T, first, o.poId))!.poId).toBe(o.poId);
   });
 
   it('photo: a closed, received PO beats a closer undelivered one (received first)', async () => {
