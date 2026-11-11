@@ -80,6 +80,10 @@ describe('suppliers.table', () => {
     expect(t.totals.leakAgorot).toBe(t.rows.reduce((s, r) => s + r.leakAgorot, 0));
     expect(t.totals.monthSpendAgorot).toBe(t.rows.reduce((s, r) => s + r.monthSpendAgorot, 0));
     expect(t.totals.openAgorot).toBe(t.rows.reduce((s, r) => s + r.openAgorot, 0));
+    // The month's spend is the leak views' own spend definition (home / leak hub).
+    const { computeLeakSummary } = await import('@restomatch/charts');
+    const hero = await computeLeakSummary(db, A.restaurantId, { period: 'this_month', filters: { supplierIds: [A.supplierId] } });
+    expect(row?.monthSpendAgorot).toBe(Math.round(hero.spendIls * 100));
     // Sorted by the 90-day leak, biggest first.
     const leaks = t.rows.map((r) => r.leakAgorot);
     expect(leaks).toEqual([...leaks].sort((a, b) => b - a));

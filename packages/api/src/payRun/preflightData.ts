@@ -14,6 +14,7 @@
  *    always on (AD12) and is tested pure.
  */
 import { sql, type Database } from '@restomatch/db';
+import { DUPLICATE_HOLDING, INVOICE_PAY_RUN_CANDIDATE, statusInSql } from '../lifecycle/predicates';
 import {
   parseAgorot,
   preflightFlags,
@@ -70,7 +71,7 @@ export async function readPreflightFacts(
     WITH cand AS (
       SELECT c.id FROM invoices c
       WHERE c.restaurant_id = ${rid}
-        AND c.status NOT IN ('paid', 'ocr_pending')
+        AND ${statusInSql(sql`c.status`, INVOICE_PAY_RUN_CANDIDATE)}
         ${idFilter}
     ),
     sup AS (
@@ -87,7 +88,7 @@ export async function readPreflightFacts(
              SELECT 1 FROM match_runs mr
              JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${rid}
              WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${rid}
-               AND d.type = 'DUPLICATE_INVOICE' AND d.resolution_status IN ('open', 'escalated', 'accepted')
+               AND d.type = 'DUPLICATE_INVOICE' AND ${statusInSql(sql`d.resolution_status`, DUPLICATE_HOLDING)}
            ) AS held_dup
     FROM invoices i
     LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${rid}

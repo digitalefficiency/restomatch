@@ -85,6 +85,10 @@ export function check(leaves: Leaf[], allow: AllowList, dupAllow: DupAllowList):
   }
   for (const g of duplicateGroups(measured)) {
     if (g.every((m) => dupAllow[m.id])) continue;
+    // MECHANISM §5.3 rule 4: fail only when no key of the group is in `explain`. A group with an
+    // explain key is a screen that still holds its own copy of the shared wording (Batch P "merge:"
+    // rows); `warnings().adoptExplain` lists them so the owner switches the screen to the key.
+    if (g.some((m) => m.cls === 'explain' && m.ns === 'explain')) continue;
     failures.push({
       rule: 'duplicate',
       id: g.map((m) => m.id).join(' = '),
@@ -130,8 +134,12 @@ export function warnings(measured: Measured[], allow: AllowList) {
   });
   near.sort((p, q) => q.jaccard - p.jaccard);
 
+  const adoptExplain = duplicateGroups(measured)
+    .filter((g) => g.some((m) => m.ns === 'explain'))
+    .map((g) => g.map((m) => m.id).join(' = '));
+
   const numberFirst = measured.filter((m) => m.cls !== 'exempt' && /^[א-ת]+ \{(count|n)\}/.test(m.text)).map((m) => m.id);
-  return { stale, near, numberFirst };
+  return { stale, near, numberFirst, adoptExplain };
 }
 
 /** The baseline the `copy:baseline` script writes: one entry per leaf over its cap, one per duplicate. */

@@ -15,12 +15,11 @@ import { collectPageErrors, loginViaMagicLink } from './helpers';
 const MONTH = '2026-10';
 const ORDER = ['unchecked', 'gaps', 'claims', 'consolidated', 'deliveryNotes', 'vat', 'exports'];
 const HREF: Record<string, RegExp> = {
-  unchecked: /^\/dashboard\/inbox\?filter=needs_review$/,
+  unchecked: /^\/dashboard\/invoices\?month=-?\d+&view=awaiting$/,
   gaps: /^\/dashboard\/approvals$/,
   claims: /^\/dashboard\/recovery$/,
   consolidated: /^\/dashboard\/(invoices\/[0-9a-f-]{36}|suppliers\/ledger)$/,
   deliveryNotes: /^\/dashboard\/suppliers\/ledger$/,
-  vat: /^\/dashboard$/,
   exports: /^\/dashboard\/exports$/,
 };
 
@@ -43,13 +42,20 @@ test.describe('W3-05a month close', () => {
     await expect(steps).toHaveCount(7);
     expect(await steps.evaluateAll((els) => els.map((e) => e.getAttribute('data-step')))).toEqual(ORDER);
 
-    for (const key of ORDER) {
-      const href = await page.getByTestId(`close-link-${key}`).getAttribute('href');
-      expect(href, key).toMatch(HREF[key]!);
-    }
     const states = Object.fromEntries(
       await steps.evaluateAll((els) => els.map((e) => [e.getAttribute('data-step'), e.getAttribute('data-state')])),
     ) as Record<string, string>;
+    // A step that is off, or has no screen of its own (VAT), renders no button; every other step links to its queue.
+    for (const key of ORDER) {
+      const link = page.getByTestId(`close-link-${key}`);
+      if (states[key] === 'off' || key === 'vat') {
+        await expect(link, key).toHaveCount(0);
+        continue;
+      }
+      expect(await link.getAttribute('href'), key).toMatch(HREF[key]!);
+    }
+    // The header counts every step shown (7), or says nothing is left to act on.
+    await expect(page.getByTestId('close-progress')).toHaveText(/מתוך 7|אין שלבים פתוחים/);
     expect(['pending', 'done']).toContain(states.consolidated);
     expect(states.exports).toBe('pending');
 
