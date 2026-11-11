@@ -21,7 +21,15 @@ import {
   invoiceRematchLockedSql,
   INVOICE_REMATCH_LOCKED,
   isInvoiceRematchLocked,
+  CONSOLIDATED_COVERS_NOTES,
+  DISCREPANCY_CLAIMABLE,
+  DISCREPANCY_CLAIMED,
+  INVOICE_INTAKE,
+  INVOICE_PAST_INTAKE,
+  INVOICE_PAY_RUN_CANDIDATE,
+  INVOICE_REREADABLE,
   recoveryMachine,
+  statusInSql,
   type Machine,
 } from '../lifecycle';
 import { RECOVERY_TRANSITIONS } from '../recovery/lifecycle';
@@ -98,6 +106,25 @@ describe('predicates', () => {
     expect(isInvoiceRematchLocked('disputed')).toBe(false);
   });
 
+  it('named sets for the train-C migrations partition the enums as documented', () => {
+    expect([...DISCREPANCY_CLAIMABLE].sort()).toEqual(['accepted', 'escalated', 'open', 'resolved']);
+    expect([...DISCREPANCY_CLAIMED]).toEqual(['accepted', 'resolved']);
+    // Intake + past intake = every invoice status, disjoint.
+    expect([...INVOICE_INTAKE, ...INVOICE_PAST_INTAKE].sort()).toEqual([...invoiceStatus.enumValues].sort());
+    // Pay-run candidates = everything except paid and ocr_pending.
+    expect([...INVOICE_PAY_RUN_CANDIDATE].sort()).toEqual(invoiceStatus.enumValues.filter((s) => s !== 'paid' && s !== 'ocr_pending').sort());
+    // The reocr edge never leaves a status a re-read may not replace.
+    for (const s of invoiceMachine.edges.reocr.from) expect(INVOICE_REREADABLE).toContain(s);
+    expect([...CONSOLIDATED_COVERS_NOTES]).toEqual(['matched', 'approved', 'paid']);
+  });
+
+  it('statusInSql filters by a named set', async () => {
+    const rows = (await ownerDb.execute(sql`
+      SELECT ${statusInSql(sql`i.status`, INVOICE_PAST_INTAKE)} AS past, ${statusInSql(sql`i.status`, INVOICE_INTAKE)} AS intake
+      FROM invoices i WHERE i.id = ${A.invoiceId}::uuid`)) as unknown as Array<{ past: boolean; intake: boolean }>;
+    expect(rows[0]).toEqual({ past: true, intake: false }); // the seeded invoice is `matched`
+  });
+
   it('INVOICE_CHECKED is EXISTS(match_runs), never status = matched — two separate predicates', async () => {
     // The seeded invoice is `matched` WITH a match run.
     expect(await flags(A.invoiceId)).toEqual({ locked: false, checked: true });
@@ -122,7 +149,7 @@ describe('predicates', () => {
  * count must match exactly). `packages/charts/**` is allow-listed wholesale
  * until G-14 and is outside this scan.
  */
-const ALLOW: ReadonlyArray<{ file: string; count: number; owner: string }> = [
+const ALLOW: ReadonlyArray<{ file: string; count: number; owner: string; reason?: string }> = [
   { file: 'exports/period.ts', count: 1, owner: 'W2-14' },
   { file: 'ledger/coverage.ts', count: 1, owner: 'W2-11' },
   { file: 'lib/claims.ts', count: 1, owner: 'W2-03' },
@@ -131,7 +158,16 @@ const ALLOW: ReadonlyArray<{ file: string; count: number; owner: string }> = [
   { file: 'recovery/service.ts', count: 1, owner: 'W2-10' },
   { file: 'routers/approvals.ts', count: 2, owner: 'W2-04' },
   { file: 'routers/payRun.ts', count: 6, owner: 'W2-03' },
-  { file: 'routers/receiving.ts', count: 1, owner: 'W2-05' },
+  {
+    file: 'routers/receiving.ts',
+    count: 2,
+    owner: 'W2-05',
+    // Train B (#300, on main 3d64808d) added the re-read guard
+    // `inArray(invoices.status, ['parsed', 'matched', 'disputed'])` beside the
+    // existing intake list `['ocr_pending', 'parsed']`. Both migrate to
+    // lifecycle/predicates.ts with W2-05; recounted at train-C staging 11.11.
+    reason: 'train-B #300 re-read guard + intake list',
+  },
 ];
 
 const STATUS_VALUES = [...new Set([...invoiceStatus.enumValues, ...resolutionStatus.enumValues])];

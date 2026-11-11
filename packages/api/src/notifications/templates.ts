@@ -7,7 +7,7 @@
  *
  *   • magicLinkEmail        — passwordless login link
  *   • supplierDelayEmail    — a placed PO is past its expected delivery
- *   • orderNotPlacedEmail   — today is an order-day but no PO was placed
+ *   • orderNotPlacedEmail   — today is an order-day but no PO was SENT (an unsent draft is linked)
  *   • approvalNeededEmail    — a discrepancy needs a manager decision
  *   • weeklyLeakReportEmail — the Sunday "found in discrepancies / still open" digest
  *   • endOfDayReportEmail   — the evening open-credits digest
@@ -290,32 +290,42 @@ export function orderNotPlacedEmail(args: {
   orderDayLabel: string; // e.g. "יום ראשון"
   cutoffLabel?: string; // e.g. "12:00"
   ordersUrl?: string;
+  /**
+   * AU-04 A5: the supplier's newest unsent draft. When set, the mail says a draft is
+   * not an order and links that draft (`ordersUrl` is ignored).
+   */
+  draftUrl?: string;
   locale?: EmailLocale;
 }): RenderedEmail {
   const l = loc(args.locale);
   const c = copyOf(l).orderNotPlaced;
   const vars = { supplier: args.supplierName, day: args.orderDayLabel, cutoff: args.cutoffLabel ?? '' };
+  const draft = Boolean(args.draftUrl);
+  const k = draft
+    ? { subject: c.draftSubject, preview: c.draftPreview, heading: c.draftHeading, callout: c.draftCallout, body: c.draftBody, cta: c.draftCta }
+    : { subject: c.subject, preview: c.preview, heading: c.heading, callout: c.callout, body: c.body, cta: c.cta };
+  const url = draft ? args.draftUrl : args.ordersUrl;
   const html = renderEmail({
     locale: l,
     accent: COLORS.gold,
-    preview: txt(l, c.preview, vars),
-    heading: txt(l, c.heading, vars),
+    preview: txt(l, k.preview, vars),
+    heading: txt(l, k.heading, vars),
     bodyHtml: `
       ${callout(
-        `${htm(l, c.callout, vars, ['day', 'supplier'])}${args.cutoffLabel ? `<br>${htm(l, c.cutoff, vars, ['cutoff'])}` : ''}`,
+        `${htm(l, k.callout, vars, ['day', 'supplier'])}${args.cutoffLabel ? `<br>${htm(l, c.cutoff, vars, ['cutoff'])}` : ''}`,
         'gold',
         l,
       )}
-      <p style="margin:10px 0 0">${htm(l, c.body)}</p>`,
-    cta: args.ordersUrl ? { label: c.cta, url: args.ordersUrl } : undefined,
+      <p style="margin:10px 0 0">${htm(l, k.body)}</p>`,
+    cta: url ? { label: k.cta, url } : undefined,
   });
   const text = lines(
-    txt(l, c.heading, vars),
+    txt(l, k.heading, vars),
     '',
-    txt(l, c.callout, vars) + (args.cutoffLabel ? ` ${txt(l, c.cutoff, vars)}.` : ''),
-    args.ordersUrl && `\n${c.cta}: ${args.ordersUrl}`,
+    txt(l, k.callout, vars) + (args.cutoffLabel ? ` ${txt(l, c.cutoff, vars)}.` : ''),
+    url && `\n${k.cta}: ${url}`,
   );
-  return { subject: txt(l, c.subject, vars), html, text };
+  return { subject: txt(l, k.subject, vars), html, text };
 }
 
 /* ─────────────────────── approval needed ─────────────────────────── */

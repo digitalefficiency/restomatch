@@ -27,14 +27,6 @@ export const he: BriefCopy = {
     intake: (n, h) => `מסמכים ממתינים לבדיקה: ${n} · הוותיק ${hours(h)}`,
     open: 'פתיחה',
   },
-  orderReminder: {
-    draftSubject: (s) => `יש טיוטה שלא נשלחה ל${s}`,
-    draftLine: (s, c) => `יש טיוטה שלא נשלחה ל${s}${c ? ` · השליחה עד ${c}` : ''}. טיוטה היא עדיין לא הזמנה.`,
-    draftCta: 'לטיוטה',
-    noOrderSubject: (s) => `תזכורת: הזמנה ל${s}`,
-    noOrderLine: (s, d, c) => `היום (${d}) יום הזמנה קבוע ל${s}, ועדיין לא נשלחה הזמנה${c ? ` · השליחה עד ${c}` : ''}.`,
-    noOrderCta: 'יצירת הזמנה',
-  },
   lateTruck: {
     managerSubject: (s) => `המשלוח מ${s} עדיין לא הגיע`,
     managerLine: (s, ref, d, late, l) =>

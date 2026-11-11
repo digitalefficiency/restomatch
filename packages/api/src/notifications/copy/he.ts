@@ -67,6 +67,13 @@ export const he = {
     cutoff: 'מועד אחרון להזמנה היום: {cutoff}',
     body: 'כדי לא לפספס את חלון האספקה, אפשר ליצור את ההזמנה עכשיו.',
     cta: 'יצירת הזמנה',
+    /** AU-04 A5: the supplier has an unsent draft. A draft is not an order. */
+    draftSubject: 'טיוטת הזמנה מ-{supplier} עדיין לא נשלחה',
+    draftPreview: 'טיוטה היא עדיין לא הזמנה. ההזמנה מ-{supplier} לא נשלחה.',
+    draftHeading: 'טיוטה שלא נשלחה: הזמנה מ-{supplier}',
+    draftCallout: 'יש טיוטת הזמנה מ-{supplier} שעדיין לא נשלחה. טיוטה היא עדיין לא הזמנה.',
+    draftBody: 'כדי לא לפספס את חלון האספקה, אפשר לשלוח אותה עכשיו.',
+    draftCta: 'פתיחת הטיוטה',
   },
   approvalNeeded: {
     subject: 'דרושה החלטה: {count, plural, one {פער אחד} two {שני פערים} other {# פערים}} בחשבונית מ-{supplier}',

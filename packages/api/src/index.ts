@@ -383,6 +383,10 @@ export {
 } from './recovery/service';
 export { RECOVERY_TRANSITIONS, canTransition, allocateCredit, ageingBucket } from './recovery/lifecycle';
 export { enqueueRecoveryReminders, recoveryReminderEmail } from './recovery/reminders';
+// AU-03 (A12): the one chase predicate, the pre-addressed reminder draft, credit suggestions.
+export { isAwaitingChase, awaitingChaseSql, CHASE_STATUSES, CHASE_DEFAULTS, type ChaseClaim } from './recovery/overdue';
+export { supplierReminderDraft, waPhoneE164, type SupplierReminderDraftText } from './recovery/chase';
+export { creditSuggestions, confirmCreditSuggestion, proposeCreditAllocations, type CreditSuggestion } from './recovery/creditSuggest';
 export {
   computeMonthlyReport,
   ensureMonthlyReport,
