@@ -152,7 +152,7 @@ export const en: Shape<typeof he> = {
   },
   passkeys: {
     title: 'Passkey',
-    intro: 'Sign in with your fingerprint, face or device PIN, no password. The passkey stays on your device.',
+    intro: 'Sign in with your fingerprint, face or device PIN, no password. The passkey is kept on your device or in your password manager, not with us.',
     notForRole: 'Passkeys are available to owners and bookkeepers. You can keep signing in with e-mail and password.',
     count: '{count, plural, =0 {No passkey on this account yet.} one {One passkey on this account.} other {# passkeys on this account.}}',
     add: 'Add a passkey on this device',
@@ -163,14 +163,16 @@ export const en: Shape<typeof he> = {
   codeLogin: {
     button: 'E-mail me a code',
     title: 'Your code is on its way',
-    sentTo: "If {email} is registered with us, we sent it a 6-digit code. It's valid for 10 minutes.",
+    sentTo: 'If this address is registered with us, we sent it a 6-digit code:',
+    validFor: 'The code is valid for 10 minutes.',
     codeLabel: 'Code from the e-mail',
     submit: 'Sign in',
     resend: 'Send a new code',
+    resent: 'We sent a new code. Use the code from the latest e-mail.',
     useOther: 'Sign in another way',
     errors: {
       wrongCode: "That code doesn't match or has expired. Check the latest e-mail, or send a new code.",
-      rate: 'Too many attempts. Try again in a few minutes.',
+      rate: 'Too many attempts. Code sign-in is locked for now. Sign in with your password or an e-mail link, or try again later.',
     },
   },
   join: {

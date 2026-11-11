@@ -1,7 +1,15 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { authenticators, eq, memberships } from '@restomatch/db';
 import { cleanup, makeRestaurant, makeUser, ownerDb, uniqueEmail } from '../../../join/__tests__/helpers';
-import { passkeyAllowedFor, passkeySignInAllowed, passkeysEnabled, relyingParty } from '../passkeys';
+import {
+  PASSKEY_BLOCKERS,
+  assertPasskeysConfig,
+  passkeyAllowedFor,
+  passkeyGetUserInfo,
+  passkeySignInAllowed,
+  passkeysEnabled,
+  relyingParty,
+} from '../passkeys';
 
 /** W3-07b passkeys: OFF by default; owner + bookkeeper only; register needs a live full session. Add-only (warden). */
 afterAll(async () => {
@@ -13,13 +21,27 @@ const env = (v: Record<string, string>) => v as unknown as NodeJS.ProcessEnv;
 const URL_OK = { AUTH_URL: 'https://app.restomatch.example' };
 
 describe('passkeys flag + relying party', () => {
-  it('is ON only for PASSKEYS_ENABLED="1" with a valid AUTH_URL', () => {
-    expect(passkeysEnabled(env({ ...URL_OK }))).toBe(false);
-    expect(passkeysEnabled(env({ ...URL_OK, PASSKEYS_ENABLED: 'true' }))).toBe(false);
-    expect(passkeysEnabled(env({ ...URL_OK, PASSKEYS_ENABLED: '0' }))).toBe(false);
-    expect(passkeysEnabled(env({ PASSKEYS_ENABLED: '1' }))).toBe(false); // no AUTH_URL
-    expect(passkeysEnabled(env({ PASSKEYS_ENABLED: '1', AUTH_URL: 'http://evil.example' }))).toBe(false);
-    expect(passkeysEnabled(env({ ...URL_OK, PASSKEYS_ENABLED: '1' }))).toBe(true);
+  it('is ON only for PASSKEYS_ENABLED="1" with a valid AUTH_URL and no open blockers', () => {
+    const none: string[] = [];
+    expect(passkeysEnabled(env({ ...URL_OK }), none)).toBe(false);
+    expect(passkeysEnabled(env({ ...URL_OK, PASSKEYS_ENABLED: 'true' }), none)).toBe(false);
+    expect(passkeysEnabled(env({ ...URL_OK, PASSKEYS_ENABLED: '0' }), none)).toBe(false);
+    expect(passkeysEnabled(env({ PASSKEYS_ENABLED: '1' }), none)).toBe(false); // no AUTH_URL
+    expect(passkeysEnabled(env({ PASSKEYS_ENABLED: '1', AUTH_URL: 'http://evil.example' }), none)).toBe(false);
+    expect(passkeysEnabled(env({ ...URL_OK, PASSKEYS_ENABLED: '1' }), none)).toBe(true);
+  });
+
+  it('M3/M4 guard: with blockers open, the flag stays OFF and asking for it refuses to start', () => {
+    expect(PASSKEY_BLOCKERS.length).toBeGreaterThan(0);
+    expect(passkeysEnabled(env({ ...URL_OK, PASSKEYS_ENABLED: '1' }))).toBe(false);
+    expect(() => assertPasskeysConfig(env({ ...URL_OK, PASSKEYS_ENABLED: '1' }))).toThrow(/refused/);
+    expect(() => assertPasskeysConfig(env({ ...URL_OK }))).not.toThrow(); // flag off: boots
+    expect(() => assertPasskeysConfig(env({ PASSKEYS_ENABLED: '1' }), [])).toThrow(/AUTH_URL/);
+    expect(() => assertPasskeysConfig(env({ ...URL_OK, PASSKEYS_ENABLED: '1' }), [])).not.toThrow();
+  });
+
+  it('M2: getUserInfo never looks up an e-mail from the request (no enumeration)', async () => {
+    expect(await passkeyGetUserInfo()).toBeNull();
   });
   it('pins the RP id and origin to AUTH_URL, never to a request header', () => {
     expect(relyingParty(env(URL_OK))).toEqual({

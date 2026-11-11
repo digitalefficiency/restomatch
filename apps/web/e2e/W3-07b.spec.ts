@@ -136,7 +136,9 @@ test.describe('W3-07b slice b: sign in with an e-mail code', () => {
     await page.locator('input[name="email"]').first().fill(email);
     await page.getByTestId('login-code-button').click();
     await page.waitForURL(/\/login\/code/);
-    await expect(page.getByTestId('login-code-sent')).toBeVisible();
+    // M6: a whole sentence (no empty placeholder), with the masked address on its own line
+    await expect(page.getByTestId('login-code-sent')).toHaveText('אם הכתובת הזו רשומה אצלנו, שלחנו אליה קוד בן 6 ספרות:');
+    await expect(page.getByTestId('login-code-email')).toHaveText(/^w\S*•••@login\.e2e\.test$/);
 
     const code = await readCodeFile(file, email);
     const wrong = code === '000000' ? '111111' : '000000';
@@ -144,6 +146,43 @@ test.describe('W3-07b slice b: sign in with an e-mail code', () => {
     await page.waitForURL(/e=wrongCode/);
     await page.locator('#login-code').fill(code);
     await page.waitForURL(/\/dashboard/, { timeout: 60_000 });
+    await ctx.close();
+  });
+});
+
+test.describe('W3-07b slice b: code sign-in lockout (M5)', () => {
+  test('after too many wrong codes the page says "locked", disables the field and offers no new code', async ({ browser }) => {
+    const email = `w307b-lock-${Date.now()}@login.e2e.test`;
+    await ensurePasswordUser({ email, password: 'W3-07b code-lock 2026' });
+    const sql = e2eSql();
+    await sql`delete from rate_limit_counters`;
+    await sql.end();
+    const file = MAGIC_LINK_FILE.replace('magic-link', 'login-code');
+    await unlink(file).catch(() => {});
+
+    const ctx = await browser.newContext({ storageState: undefined, locale: 'he-IL' });
+    const base = test.info().project.use.baseURL!;
+    await ctx.addCookies([
+      { name: 'rm_cookie_consent', value: 'necessary', url: base },
+      { name: 'rm_locale', value: 'he', url: base },
+    ]);
+    const page = await ctx.newPage();
+    await page.goto('/login');
+    await page.locator('input[name="email"]').first().fill(email);
+    await page.getByTestId('login-code-button').click();
+    await page.waitForURL(/\/login\/code/);
+    const code = await readCodeFile(file, email);
+    const wrong = code === '000000' ? '111111' : '000000';
+    for (let i = 0; i < 6; i += 1) {
+      if (await page.locator('#login-code').isDisabled()) break;
+      await page.locator('#login-code').fill('');
+      await Promise.all([page.waitForEvent('framenavigated'), page.locator('#login-code').fill(wrong)]);
+      await page.waitForLoadState('networkidle');
+    }
+    await expect(page).toHaveURL(/e=rate/);
+    await expect(page.locator('#login-code-error')).toContainText('נעולה');
+    await expect(page.locator('#login-code')).toBeDisabled();
+    await expect(page.getByTestId('login-code-resend')).toHaveCount(0);
     await ctx.close();
   });
 });

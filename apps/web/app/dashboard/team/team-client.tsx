@@ -125,8 +125,8 @@ export function TeamClient({
                 <img
                   src={status.shareQr}
                   alt={t('invite.qrAlt')}
-                  width={96}
-                  height={96}
+                  width={160}
+                  height={160}
                   className="rounded-lg border border-line bg-white p-1"
                   data-testid="invite-qr"
                 />

@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 import { Field, Input } from '@/lib/components';
 import { PasswordInput } from '../../(auth)/_components/PasswordInput';
+import { RememberMe } from '../../(auth)/_components/RememberMe';
 import { SubmitButton } from '../../(auth)/_components/SubmitButton';
 import { MIN_PASSWORD_LENGTH } from '@/lib/passwordPolicy';
 import { completeJoinAction } from '../actions';
@@ -22,23 +23,20 @@ export interface JoinCodeFormLabels {
 /**
  * Name + password + the 6-digit code. The code field is `one-time-code` (iOS /
  * Android offer it from the e-mail) and the form submits itself once all six
- * digits are in and the other fields are filled. "Remember me" is pre-checked
- * only when the app runs installed (standalone display mode) — a shared
- * browser on a kitchen tablet stays unchecked.
+ * digits are in and the other fields are filled. "Remember me" starts unchecked
+ * (shared receiving tablets) and sits above the code field, so the auto-submit
+ * never skips it (WCAG 3.2.2).
  */
 export function JoinCodeForm({ token, labels, error }: { token: string; labels: JoinCodeFormLabels; error?: string }) {
   const formRef = useRef<HTMLFormElement>(null);
-  const [standalone, setStandalone] = useState(false);
   const submitted = useRef(false);
 
-  useEffect(() => {
-    setStandalone(typeof window !== 'undefined' && window.matchMedia?.('(display-mode: standalone)').matches === true);
-  }, []);
 
   function onCodeInput(e: React.FormEvent<HTMLInputElement>) {
     const el = e.currentTarget;
     const digits = el.value.replace(/\D/g, '').slice(0, 6);
     if (digits !== el.value) el.value = digits;
+    if (digits.length < 6) submitted.current = false;
     const form = formRef.current;
     if (digits.length === 6 && form && !submitted.current && form.checkValidity()) {
       submitted.current = true;
@@ -72,6 +70,7 @@ export function JoinCodeForm({ token, labels, error }: { token: string; labels: 
           {labels.passwordHint}
         </p>
       </div>
+      <RememberMe label={labels.rememberMe} />
       <Field label={labels.code} htmlFor="join-code">
         <Input
           id="join-code"
@@ -88,16 +87,6 @@ export function JoinCodeForm({ token, labels, error }: { token: string; labels: 
           aria-describedby={error ? 'join-error' : undefined}
         />
       </Field>
-      <label className="flex min-h-11 items-center gap-3 text-sm text-ink">
-        <input
-          type="checkbox"
-          name="rememberMe"
-          className="h-5 w-5 accent-primary"
-          checked={standalone}
-          onChange={(e) => setStandalone(e.currentTarget.checked)}
-        />
-        {labels.rememberMe}
-      </label>
       <SubmitButton className="min-h-12 w-full text-base">{labels.submit}</SubmitButton>
     </form>
   );

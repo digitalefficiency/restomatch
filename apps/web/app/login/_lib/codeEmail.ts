@@ -1,20 +1,64 @@
 import 'server-only';
 import { isEmailConfigured, sendEmail } from '@/lib/email';
 
-/** The sign-in code e-mail (W3-07b slice b). Plain and short. */
+/**
+ * The sign-in code e-mail (W3-07b slice b), in the page language (he/en and
+ * the receiver languages ar/ru/th/ti — security review M7). Plain and short.
+ * The code stays out of the subject (lock-screen previews). The tail no longer
+ * promises "your account stays safe": repeated unrequested codes mean someone
+ * is trying the address, so it says what to do (M1).
+ */
+const COPY: Record<string, { subject: string; lead: string; tail: string; dir: 'rtl' | 'ltr' }> = {
+  he: {
+    subject: 'קוד הכניסה שלכם ל-RestoMatch',
+    lead: 'זה הקוד לכניסה ל-RestoMatch:',
+    tail: 'הקוד תקף ל-10 דקות. לא ביקשתם קוד? אל תמסרו אותו לאיש. אם מגיעים אליכם קודים שלא ביקשתם, היכנסו עם הסיסמה ופנו לבעלי המסעדה.',
+    dir: 'rtl',
+  },
+  en: {
+    subject: 'Your RestoMatch sign-in code',
+    lead: 'Here is your RestoMatch sign-in code:',
+    tail: "The code is valid for 10 minutes. Didn't ask for it? Don't share it with anyone. If codes you didn't request keep arriving, sign in with your password and tell the restaurant owner.",
+    dir: 'ltr',
+  },
+  ar: {
+    subject: 'رمز الدخول إلى RestoMatch',
+    lead: 'هذا رمز الدخول إلى RestoMatch:',
+    tail: 'الرمز صالح لمدة 10 دقائق. لم تطلب رمزًا؟ لا تشاركه مع أحد. إذا استمرت رموز لم تطلبها بالوصول، سجّل الدخول بكلمة المرور وأبلغ صاحب المطعم.',
+    dir: 'rtl',
+  },
+  ru: {
+    subject: 'Ваш код входа в RestoMatch',
+    lead: 'Ваш код для входа в RestoMatch:',
+    tail: 'Код действует 10 минут. Не запрашивали код? Никому его не сообщайте. Если такие коды приходят снова, войдите с паролем и сообщите владельцу ресторана.',
+    dir: 'ltr',
+  },
+  th: {
+    subject: 'รหัสเข้าสู่ระบบ RestoMatch ของคุณ',
+    lead: 'นี่คือรหัสเข้าสู่ระบบ RestoMatch ของคุณ:',
+    tail: 'รหัสใช้ได้ 10 นาที หากคุณไม่ได้ขอรหัส อย่าบอกรหัสนี้กับใคร หากยังได้รับรหัสที่ไม่ได้ขอ ให้เข้าสู่ระบบด้วยรหัสผ่านและแจ้งเจ้าของร้าน',
+    dir: 'ltr',
+  },
+  ti: {
+    subject: 'ናይ RestoMatch መእተዊ ኮድካ',
+    lead: 'እዚ ናይ RestoMatch መእተዊ ኮድካ እዩ:',
+    tail: 'እቲ ኮድ ን10 ደቒቕ ይሰርሕ። ኮድ ኣይሓተትካን? ንማንም ኣይትሃቦ። ዘይሓተትካዮ ኮድታት እንተ ቐጺሎም መጺኦም፡ ብፓስዎርድ እቶ እሞ ንወናኒ ቤት መግቢ ሓብር።',
+    dir: 'ltr',
+  },
+};
+
+function esc(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+}
+
 export function loginCodeEmail(input: { code: string; locale: string }) {
-  const he = input.locale !== 'en';
-  // The code stays out of the subject, so it never shows on a lock-screen preview.
-  const subject = he ? 'קוד הכניסה שלכם ל-RestoMatch' : 'Your RestoMatch sign-in code';
-  const lead = he ? 'זה הקוד לכניסה ל-RestoMatch:' : 'Here is your RestoMatch sign-in code:';
-  const tail = he
-    ? 'הקוד תקף ל-10 דקות. לא ניסיתם להיכנס? אפשר להתעלם מהמייל, והחשבון נשאר מוגן.'
-    : "The code is valid for 10 minutes. Didn't try to sign in? Ignore this e-mail; your account stays safe.";
-  const html = `<div dir="${he ? 'rtl' : 'ltr'}" style="font-family:Arial,sans-serif;font-size:16px;color:#1a1d21">
-<p>${lead}</p>
-<p style="font-size:28px;font-weight:700;letter-spacing:6px" dir="ltr">${input.code.replace(/\D/g, '')}</p>
-<p style="color:#4a5058">${tail}</p></div>`;
-  return { subject, html, text: `${lead}\n\n${input.code}\n\n${tail}` };
+  const c = COPY[input.locale] ?? COPY.he!;
+  const code = input.code.replace(/\D/g, '');
+  const html = `<div dir="${c.dir}" style="font-family:Arial,sans-serif;font-size:16px;color:#1a1d21">
+<p>${esc(c.lead)}</p>
+<p style="font-size:28px;font-weight:700;letter-spacing:6px" dir="ltr">${esc(code)}</p>
+<p style="color:#4a5058">${esc(c.tail)}</p></div>`;
+  return { subject: c.subject, html, text: `${c.lead}\n\n${code}\n\n${c.tail}` };
 }
 
 /** Without a provider (dev, lab, e2e) it writes the code beside MAGIC_LINK_FILE; production never logs it. */

@@ -8,8 +8,11 @@ import { twoFactorEnabledForEmail } from '@/lib/passwords';
 import { safeRelativePath } from '@/lib/safeRedirect';
 import { AuthShell, authTitle } from '../../(auth)/_components/AuthShell';
 import { Notice } from '../../(auth)/_components/Notice';
-import { clearHint, readHint } from '../hint';
-import { maskEmail } from '../hintCodec';
+import { SubmitButton } from '../../(auth)/_components/SubmitButton';
+import { codeLoginErrorCode } from '../_lib/codeErrors';
+import { requestLoginCode } from '../_lib/sendLoginCode';
+import { clearHint, readHint, writeHint } from '../hint';
+import { maskEmail, resendWaitSec } from '../hintCodec';
 import { LoginCodeForm } from './LoginCodeForm';
 
 export const dynamic = 'force-dynamic';
@@ -18,11 +21,13 @@ export const generateMetadata = () => authTitle('shell.titles.checkEmail');
 /**
  * W3-07b slice b: enter the 6-digit sign-in code. The address comes from the
  * httpOnly sign-in hint (never the URL). Verification runs in the `email-code`
- * Credentials provider (auth.ts) — limiter + durable 5-try ceiling there.
+ * Credentials provider (auth.ts): limiter + durable ceilings there. A locked
+ * or throttled attempt says so, without inviting a new code (M5).
  */
-export default async function LoginCodePage({ searchParams }: { searchParams: Promise<{ e?: string }> }) {
-  const [{ e }, t, hint] = await Promise.all([searchParams, getT(authMessages), readHint()]);
+export default async function LoginCodePage({ searchParams }: { searchParams: Promise<{ e?: string; resent?: string }> }) {
+  const [{ e, resent }, t, hint] = await Promise.all([searchParams, getT(authMessages), readHint()]);
   if (!hint) redirect('/login');
+  const locked = e === 'rate';
 
   async function verifyAction(formData: FormData) {
     'use server';
@@ -37,7 +42,7 @@ export default async function LoginCodePage({ searchParams }: { searchParams: Pr
         redirect: false,
       });
     } catch (err) {
-      if (err instanceof AuthError) redirect('/login/code?e=wrongCode');
+      if (err instanceof AuthError) redirect(`/login/code?e=${codeLoginErrorCode(err)}`);
       throw err;
     }
     await clearHint();
@@ -45,25 +50,54 @@ export default async function LoginCodePage({ searchParams }: { searchParams: Pr
     redirect(next);
   }
 
+  async function resendAction() {
+    'use server';
+    const h = await readHint();
+    if (!h) redirect('/login');
+    // UX countdown only (cookie); the real limits are inside requestLoginCode.
+    if (resendWaitSec(h.sentAt) > 0) redirect('/login/code');
+    if (!(await requestLoginCode(h.email))) redirect('/login/code?e=rate');
+    await writeHint({ ...h, sentAt: Date.now() });
+    redirect('/login/code?resent=1');
+  }
+
   return (
     <AuthShell>
       <h1 className="mb-2 text-2xl font-bold text-ink">{t('codeLogin.title')}</h1>
-      <p className="mb-6 text-base text-ink" data-testid="login-code-sent">
-        {t('codeLogin.sentTo', { email: '' })}
-        <bdi dir="ltr">{maskEmail(hint.email)}</bdi>
+      <p className="text-base text-ink" data-testid="login-code-sent">
+        {t('codeLogin.sentTo')}
       </p>
-      {e === 'wrongCode' ? (
+      <p className="mb-2 text-base font-semibold text-ink">
+        <bdi dir="ltr" data-testid="login-code-email">
+          {maskEmail(hint.email)}
+        </bdi>
+      </p>
+      <p className="mb-6 text-sm text-muted">{t('codeLogin.validFor')}</p>
+      {resent && !e ? (
+        <Notice tone="success" className="mb-4">
+          {t('codeLogin.resent')}
+        </Notice>
+      ) : null}
+      {e ? (
         <Notice tone="error" id="login-code-error" className="mb-4">
-          {t('codeLogin.errors.wrongCode')}
+          {locked ? t('codeLogin.errors.rate') : t('codeLogin.errors.wrongCode')}
         </Notice>
       ) : null}
       <LoginCodeForm
         action={verifyAction}
-        error={e === 'wrongCode'}
+        error={Boolean(e)}
+        disabled={locked}
         labels={{ code: t('codeLogin.codeLabel'), submit: t('codeLogin.submit'), rememberMe: t('login.rememberMe') }}
       />
+      {locked ? null : (
+        <form action={resendAction} className="mt-3">
+          <SubmitButton variant="ghost" className="min-h-11 w-full text-sm" data-testid="login-code-resend">
+            {t('codeLogin.resend')}
+          </SubmitButton>
+        </form>
+      )}
       <p className="mt-6 text-center text-sm">
-        <Link href="/login" className="font-medium text-primary hover:underline">
+        <Link href="/login" className="inline-flex min-h-11 items-center font-medium text-primary hover:underline">
           {t('codeLogin.useOther')}
         </Link>
       </p>

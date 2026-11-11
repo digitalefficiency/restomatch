@@ -122,7 +122,7 @@ export async function inviteMember(input: {
       message: t('invite.sent', { email: res.email }),
       shareLink: url,
       shareText: t('invite.whatsappText', { restaurant: res.restaurantName, url }),
-      shareQr: await QRCode.toDataURL(url, { margin: 1, width: 192 }),
+      shareQr: await QRCode.toDataURL(url, { margin: 1, width: 320 }),
     };
   } catch (e) {
     return fail(e, 'invite.failed');
@@ -144,7 +144,7 @@ export async function resendInvite(input: { id: string }): Promise<ActionResult>
       message: t('invite.resent', { email: res.email }),
       shareLink: url,
       shareText: t('invite.whatsappText', { restaurant: res.restaurantName, url }),
-      shareQr: await QRCode.toDataURL(url, { margin: 1, width: 192 }),
+      shareQr: await QRCode.toDataURL(url, { margin: 1, width: 320 }),
     };
   } catch (e) {
     return fail(e, 'invite.resendFailed');

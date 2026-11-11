@@ -2,7 +2,7 @@ import type { Shape } from '../../../../translate';
 import type { he } from '../../../auth/he';
 
 /** auth — ti overlay (Tigrinya). */
-export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 'signin'>> = {
+export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 'signin' | 'codeLogin' | 'passkeys'>> = {
   login: {
     title: 'ናብ RestoMatch እተዉ',
     subtitle: 'ብመሕለፊ ቃልኩም እተዉ፡ ወይ ብኢመይል ናይ ምእታው ሊንክ ተቐበሉ።',
@@ -56,5 +56,30 @@ export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 
     switchUser: 'ብካልእ ተጠቃሚ እተዉ',
     newHere: 'ኣብ RestoMatch ሓድሽ ዲኹም? ብሊንክ ኢመይል ዝግበር ቀዳማይ ምእታው ሕሳብ ይኸፍት።',
     demo: 'ዲሞ ርኣዩ',
+  },
+  codeLogin: {
+    button: 'ኮድ ብኢመይል ስደደለይ',
+    title: 'እቲ ኮድ ኣብ መገዲ እዩ',
+    sentTo: 'እዚ ኣድራሻ ኣብኣና እንተ ተመዝጊቡ፡ 6 ኣሃዝ ዘለዎ ኮድ ሰዲድናሉ ኣለና:',
+    validFor: 'እቲ ኮድ ን10 ደቒቕ ይሰርሕ።',
+    codeLabel: 'ካብ ኢመይል ዝመጸ ኮድ',
+    submit: 'እቶ',
+    resend: 'ሓድሽ ኮድ ስደድ',
+    resent: 'ሓድሽ ኮድ ሰዲድና ኣለና። ነቲ ካብ ናይ መወዳእታ ኢመይል ዝመጸ ኮድ ተጠቐም።',
+    useOther: 'ብኻልእ መንገዲ እቶ',
+    errors: {
+      wrongCode: 'እቲ ኮድ ኣይሰማማዕን ወይ ግዜኡ ሓሊፉ። ናይ መወዳእታ ኢመይል ርአ፡ ወይ ሓድሽ ኮድ ስደድ።',
+      rate: 'ብዙሕ ፈተነታት። ብኮድ ምእታው ንግዚኡ ተዓጽዩ ኣሎ። ብፓስዎርድ ወይ ብኢመይል ሊንክ እቶ፡ ወይ ደሓር ፈትን።',
+    },
+  },
+  passkeys: {
+    title: 'መእተዊ ቁልፊ',
+    intro: 'ብኣሻራ ኣጻብዕ፡ ብገጽ ወይ ብኮድ መሳርሒ እቶ፡ ብዘይ ፓስዎርድ። እቲ ቁልፊ ኣብ መሳርሒኻ ወይ ኣብ ናይ ፓስዎርድ ኣመሓዳሪኻ ይዕቀብ፡ ኣብኣና ኣይኮነን።',
+    notForRole: 'መእተዊ ቁልፍታት ንወነንትን ንሒሳብ ሓለውትን ጥራይ እዮም። ብኢመይልን ፓስዎርድን ምእታው ክትቅጽል ትኽእል ኢኻ።',
+    count: '{count, plural, =0 {ኣብዚ ሕሳብ ገና መእተዊ ቁልፊ የለን።} other {ኣብዚ ሕሳብ ዘሎ መእተዊ ቁልፍታት: #}}',
+    add: 'ኣብዚ መሳርሒ መእተዊ ቁልፊ ወስኽ',
+    signIn: 'ብመእተዊ ቁልፊ እቶ',
+    failed: 'ነቲ መእተዊ ቁልፊ ክንጥቀመሉ ኣይከኣልናን። ደጊምካ ፈትን፡ ወይ ብኢመይልን ፓስዎርድን እቶ።',
+    back: 'ናብቲ ኣፕ ተመለስ',
   },
 };

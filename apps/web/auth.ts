@@ -29,8 +29,15 @@ import { authorizeCredentials, getSessionSecurityState } from './lib/passwords';
 import { SIGNOUT_COOKIE, issuedBeforeSignOut, signOutCookieOptions } from './lib/signOutTombstone';
 import { bypassesSecondFactor } from './lib/secondFactorGate';
 import { consumeTwoFactorTicket } from './lib/totp';
-import { verifyLoginCode } from './app/login/_lib/loginCode';
-import { passkeySignInAllowed, passkeysEnabled, relyingParty } from './app/(auth)/_lib/passkeys';
+import { clearLoginCodeLock, verifyLoginCode } from './app/login/_lib/loginCode';
+import { LoginCodeLocked } from './app/login/_lib/codeErrors';
+import {
+  assertPasskeysConfig,
+  passkeyGetUserInfo,
+  passkeySignInAllowed,
+  passkeysEnabled,
+  relyingParty,
+} from './app/(auth)/_lib/passkeys';
 import { clearLoginFailures, enforceLoginLimit, enforceMagicLinkLimit, refundLoginIp, trustedProxyHops } from './lib/rateLimit';
 import {
   SESSION_TTL_LONG_SEC,
@@ -147,6 +154,9 @@ async function sendMagicLink({
   await sendEmail({ to: identifier, subject, html, text });
 }
 
+// Passkeys: refuse to start if PASSKEYS_ENABLED=1 while blockers are open.
+assertPasskeysConfig();
+
 export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
   ...authConfig,
   adapter,
@@ -193,6 +203,8 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         if (!result) return null;
         // Correct password: only FAILED attempts count toward the per-account limit.
         await clearLoginFailures(email);
+        // A password sign-in also re-opens a locked code sign-in (W3-07b M1).
+        await clearLoginCodeLock(result.id);
         // Give back this attempt's per-IP unit: only failures count per network
         // (owner decision 31.10; staff share one restaurant Wi-Fi).
         await refundLoginIp(ip, attemptAt);
@@ -225,9 +237,13 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         if (!email || !code) return null;
         const ip = clientIpFromHeaders(await headers(), { trustedProxyHops: trustedProxyHops() });
         const rl = await enforceLoginLimit(email, ip);
-        if (!rl.allowed) return null;
+        if (!rl.allowed) throw new LoginRateLimited();
         const res = await verifyLoginCode(email, code);
-        if (!res.ok) return null;
+        if (!res.ok) {
+          // Locked: say so (M5) — a wrong or expired code stays the uniform null.
+          if (res.reason === 'locked') throw new LoginCodeLocked();
+          return null;
+        }
         const [u] = await authDb
           .select({ id: users.id, email: users.email, name: users.name })
           .from(users)
@@ -250,7 +266,7 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
       sendVerificationRequest: sendMagicLink,
     }),
     // W3-07b slice b: passkeys for owner + bookkeeper, OFF unless PASSKEYS_ENABLED=1.
-    ...(passkeysEnabled() ? [Passkey({ relayingParty: relyingParty()! })] : []),
+    ...(passkeysEnabled() ? [Passkey({ relayingParty: relyingParty()!, getUserInfo: passkeyGetUserInfo })] : []),
   ],
   events: {
     // Every signOut() — the dashboard / onboarding / 2FA-cancel buttons and "log
@@ -278,7 +294,7 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
       }
       return true;
     },
-    async jwt({ token, user, trigger, session }) {
+    async jwt({ token, user, account, trigger, session }) {
       const t = token as AppJwt;
       const now = Date.now();
       const signInId = user?.id;
@@ -300,6 +316,9 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
           }
         }
       }
+
+      // A magic-link sign-in re-opens a locked code sign-in (W3-07b M1).
+      if (signInId && account?.provider === 'nodemailer') await clearLoginCodeLock(signInId);
 
       if (signInId) {
         t.userId = signInId;

@@ -1,14 +1,10 @@
-import { headers } from 'next/headers';
-import { after } from 'next/server';
 import { AuthError } from 'next-auth';
-import { clientIpFromHeaders } from '@restomatch/api';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { auth, signIn, signOut } from '@/auth';
 import { Field, Input, LinkButton } from '@/lib/components';
 import { auth as authMessages } from '@/lib/i18n/messages/auth';
-import { getLocale, getT } from '@/lib/i18n/server';
-import { enforceMagicLinkLimit, enforceRateLimit, trustedProxyHops } from '@/lib/rateLimit';
+import { getT } from '@/lib/i18n/server';
 import { loginErrorCode } from '@/lib/loginRateLimited';
 import { twoFactorEnabledForEmail } from '@/lib/passwords';
 import { safeRelativePath } from '@/lib/safeRedirect';
@@ -16,10 +12,9 @@ import { AuthShell, authTitle } from '../(auth)/_components/AuthShell';
 import { Notice } from '../(auth)/_components/Notice';
 import { PasswordInput } from '../(auth)/_components/PasswordInput';
 import { RememberMe } from '../(auth)/_components/RememberMe';
+import { requestLoginCode } from './_lib/sendLoginCode';
 import { PasskeyButton } from '../(auth)/_components/PasskeyButton';
 import { passkeysEnabled } from '../(auth)/_lib/passkeys';
-import { issueLoginCode } from './_lib/loginCode';
-import { deliverLoginCode } from './_lib/codeEmail';
 import { OutsideSubmitButton } from '../(auth)/_components/OutsideSubmitButton';
 import { SubmitButton } from '../(auth)/_components/SubmitButton';
 import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
@@ -171,20 +166,8 @@ export default async function LoginPage({ searchParams }: PageProps) {
     'use server';
     const email = String(formData.get('email') ?? '').trim();
     if (!email) redirect(back('EmailMissing', redirectTo, lockedEmail));
-    const ip = clientIpFromHeaders(await headers(), { trustedProxyHops: trustedProxyHops() });
-    const [perMailbox, perIp] = await Promise.all([
-      enforceMagicLinkLimit(email),
-      enforceRateLimit(ip, { limit: 10, windowSec: 15 * 60, prefix: 'login-code-ip' }),
-    ]);
-    if (!perMailbox.allowed || !perIp.allowed) redirect(back('EmailSignin', redirectTo, lockedEmail));
+    if (!(await requestLoginCode(email))) redirect(back('EmailSignin', redirectTo, lockedEmail));
     await writeHint({ email, fails: 0, sentAt: Date.now(), next: redirectTo });
-    // Issue + send AFTER the response: a known and an unknown address answer
-    // in the same time (no account enumeration by timing, warden review).
-    const locale = await getLocale();
-    after(async () => {
-      const issued = await issueLoginCode(email);
-      if (issued) await deliverLoginCode({ to: issued.email, code: issued.code, locale });
-    });
     redirect('/login/code');
   }
 

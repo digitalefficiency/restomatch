@@ -14,9 +14,45 @@ import { authDb } from '@/lib/authDb';
  */
 export const PASSKEY_ROLES = ['owner', 'bookkeeper'] as const;
 
-/** ON only with PASSKEYS_ENABLED=1 AND a valid AUTH_URL (the WebAuthn relying party is pinned to it). */
-export function passkeysEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.PASSKEYS_ENABLED === '1' && relyingParty(env) !== null;
+/**
+ * Open items that must land before passkeys may be switched on (security
+ * review of #309, M3/M4). While this list is not empty, PASSKEYS_ENABLED=1
+ * makes the app REFUSE TO START (assertPasskeysConfig, called from auth.ts).
+ */
+export const PASSKEY_BLOCKERS: readonly string[] = [
+  'M3: password reset / "log out everywhere" must delete authenticators + passkey accounts',
+  'M4: /passkeys list + remove, step-up before register, "new passkey added" e-mail',
+];
+
+/** ON only with PASSKEYS_ENABLED=1, a valid AUTH_URL, and no open blockers. */
+export function passkeysEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+  blockers: readonly string[] = PASSKEY_BLOCKERS,
+): boolean {
+  return env.PASSKEYS_ENABLED === '1' && relyingParty(env) !== null && blockers.length === 0;
+}
+
+/** Boot guard: asking for passkeys while blockers are open (or AUTH_URL is bad) stops the app. */
+export function assertPasskeysConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  blockers: readonly string[] = PASSKEY_BLOCKERS,
+): void {
+  if (env.PASSKEYS_ENABLED !== '1') return;
+  if (blockers.length > 0) {
+    throw new Error(`[passkeys] PASSKEYS_ENABLED=1 refused — open blockers:\n- ${blockers.join('\n- ')}`);
+  }
+  if (relyingParty(env) === null) throw new Error('[passkeys] PASSKEYS_ENABLED=1 needs an https AUTH_URL');
+}
+
+/**
+ * Passkey getUserInfo (security review M2). Auth.js calls it only WITHOUT a
+ * session; the default reads `?email=` and returns that account's credential
+ * ids to anyone — an account-enumeration oracle. Ours ignores the request
+ * entirely: anonymous visitors get discoverable-credential sign-in only, and
+ * registration needs a session (Auth.js then uses the session user instead).
+ */
+export async function passkeyGetUserInfo(): Promise<null> {
+  return null;
 }
 
 /** RP id + origin from AUTH_URL — never from the Host / X-Forwarded-Host header (warden review). */

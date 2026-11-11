@@ -54,7 +54,7 @@ const RECEIVER: Array<{ ns: { name: string; he: MessageTree; extra?: unknown }; 
   { ns: nav as never },
   { ns: components as never },
   { ns: receiverLangs as never },
-  { ns: auth as never, roots: ['login', 'checkEmail', 'twoFactor', 'signin'] },
+  { ns: auth as never, roots: ['login', 'checkEmail', 'twoFactor', 'signin', 'codeLogin', 'passkeys'] },
   // The receiver's home (W1-05): the deliveries board and its h1/subtitle.
   { ns: overview as never, roots: ['board', 'homeTitle.receiver', 'homeSubtitle.receiver'] },
   // Shell resilience (W1-04): offline chip, re-auth sheet, 403/404/error pages inside the shell.
