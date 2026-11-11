@@ -73,6 +73,7 @@ import {
   type LeakBreakdownLine,
 } from '@restomatch/charts';
 import { claimableLines, type VatBasis } from '../lib/claims';
+import { discrepancyDecidableSql } from '../lifecycle/predicates';
 import { canActOn } from '../lib/roles';
 import { isClaimableRow } from '../routers/approvals';
 
@@ -124,7 +125,6 @@ export interface AwaitingContext {
   session: { restaurantId: string; role: UserRole };
 }
 
-const OPEN_STATUSES = ['open', 'escalated'] as const;
 const ROUTING_ORDER: ReadonlyArray<AwaitingRouting> = [
   'owner',
   'manager',
@@ -216,7 +216,8 @@ export async function awaitingDecisionDetail(
     .where(
       and(
         eq(discrepancies.restaurantId, rid),
-        inArray(discrepancies.resolutionStatus, [...OPEN_STATUSES]),
+        // Still waiting for a decision (open / escalated): the G-05 lifecycle predicate.
+        discrepancyDecidableSql(discrepancies.resolutionStatus),
         notZeroShortTwin(),
         f?.types?.length ? inArray(discrepancies.type, [...f.types]) : undefined,
         f?.severities?.length ? inArray(discrepancies.severity, [...f.severities]) : undefined,
