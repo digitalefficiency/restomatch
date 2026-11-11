@@ -248,7 +248,10 @@ export default async function ChainMatrixPage({ searchParams }: { searchParams: 
                   </td>
                   <td className={cellCls}>
                     <DrillLink href={peekHref(b.restaurantId)} className="hover:text-primary" data-testid="matrix-leak">
-                      {ils(leakRow.get(b.restaurantId) ?? 0)}
+                      {(() => {
+                        const v = leakRow.get(b.restaurantId);
+                        return v === undefined ? <span className="text-subtle">—</span> : ils(v);
+                      })()}
                     </DrillLink>
                   </td>
                   <td className={cellCls}>{pct(b.leakPct)}</td>

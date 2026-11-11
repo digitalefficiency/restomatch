@@ -601,101 +601,9 @@ export const payRunRouter = router({
 
   month: financeProcedure
     .input(z.object({ monthOffset: z.union([z.literal(0), z.literal(-1)]).default(0) }).optional())
-    .query(async ({ ctx, input }): Promise<PayRunResult> => {
-      const rid = ctx.session.restaurantId;
-      if (!(await flagOn(ctx.db, rid))) {
-        return {
-          enabled: false,
-          monthStart: null,
-          monthEnd: null,
-          suppliers: [],
-          totals: EMPTY_TOTALS,
-          canAnswer: false,
-        };
-      }
-      const monthOffset = input?.monthOffset ?? 0;
-      const hero = await computeLeakHero(ctx.db, rid, { monthOffset });
-      const breakdown = await computeLeakBreakdown(ctx.db, rid, { monthOffset, limit: 200 });
-      const byInvoice = new Map(breakdown.map((b) => [b.invoiceId, b]));
-
-      // The month's invoices not marked paid (matched, or read but waiting for a PO link) — same
-      // date rule as the hero.
-      const res = await ctx.db.execute(
-        unpaidInvoicesSql(rid, { start: hero.monthStart, end: hero.monthEnd }),
-      );
-
-      const groups = new Map<string, PayRunSupplier & { a: Record<string, number> }>();
-      for (const row of rowsOf(res)) {
-        const id = String(row.id);
-        const inv = invoiceOfRow(row, byInvoice.get(id) ?? null);
-        const key = row.supplier_id == null ? '' : String(row.supplier_id);
-        let g = groups.get(key);
-        if (!g) {
-          g = {
-            key,
-            supplierName: row.supplier_name == null ? null : String(row.supplier_name),
-            supplierNameEn: row.supplier_name_en == null ? null : String(row.supplier_name_en),
-            invoices: [],
-            payIls: 0,
-            holdIls: 0,
-            claimIls: 0,
-            creditIls: 0,
-            pendingIls: 0,
-            linkIls: 0,
-            a: { pay: 0, hold: 0, claim: 0, credit: 0, pending: 0, link: 0 },
-          };
-          groups.set(key, g);
-        }
-        g.invoices.push(inv);
-        // Waiting for a PO link is T4: its total is reported on its own, never as pay or hold ₪.
-        if (inv.pendingLink && !inv.duplicate) g.a.link! += ag(inv.totalInclVat);
-        else g.a[inv.status]! += ag(inv.totalInclVat);
-        g.a.credit! += ag(inv.creditIls);
-        g.a.pending! += ag(inv.pendingIls);
-      }
-
-      const t = { pay: 0, hold: 0, claim: 0, credit: 0, pending: 0, link: 0, invoices: 0, linkCount: 0 };
-      const suppliers: PayRunSupplier[] = [...groups.values()].map(({ a, ...g }) => {
-        for (const k of ['pay', 'hold', 'claim', 'credit', 'pending', 'link'] as const) t[k] += a[k]!;
-        t.invoices += g.invoices.length;
-        t.linkCount += g.invoices.filter((i) => i.pendingLink && !i.duplicate).length;
-        return {
-          ...g,
-          payIls: ils(a.pay!),
-          holdIls: ils(a.hold!),
-          claimIls: ils(a.claim!),
-          creditIls: ils(a.credit!),
-          pendingIls: ils(a.pending!),
-          linkIls: ils(a.link!),
-        };
-      });
-      // Suppliers needing action first (held ₪, then credits), then the payable ones.
-      suppliers.sort(
-        (x, y) =>
-          y.holdIls - x.holdIls ||
-          y.creditIls - x.creditIls ||
-          y.payIls - x.payIls ||
-          (x.supplierName ?? '').localeCompare(y.supplierName ?? '', 'he'),
-      );
-      return {
-        enabled: true,
-        // G-08: may this role answer questions in the mapper? (never the bookkeeper)
-        canAnswer: ctx.session.role !== 'bookkeeper',
-        monthStart: hero.monthStart,
-        monthEnd: hero.monthEnd,
-        suppliers,
-        totals: {
-          invoices: t.invoices,
-          payIls: ils(t.pay),
-          holdIls: ils(t.hold),
-          claimIls: ils(t.claim),
-          creditIls: ils(t.credit),
-          pendingIls: ils(t.pending),
-          linkIls: ils(t.link),
-          linkCount: t.linkCount,
-        },
-      };
-    }),
+    .query(({ ctx, input }): Promise<PayRunResult> =>
+      computePayRunMonth(ctx.db, ctx.session.restaurantId, input?.monthOffset ?? 0, ctx.session.role),
+    ),
   /**
    * W2-03 · the due-date desk. ALL unpaid checked invoices (not an invoice-month window),
    * each with its due date (lib/dueDate: human > agreed > printed), its bucket
@@ -903,3 +811,108 @@ export const payRunRouter = router({
     throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'payRun.markPaidAwaitsH03' });
   }),
 });
+
+/**
+ * The body of `payRun.month`, exported so the chain's per-branch view (W3-01b)
+ * reads each branch's pay run from the very same rows and rules. MUST run
+ * inside that restaurant's own RLS transaction (financeProcedure / chain
+ * `inBranch`); `role` is the caller's role in THAT restaurant.
+ */
+export async function computePayRunMonth(
+  db: Database,
+  rid: string,
+  monthOffset: 0 | -1 = 0,
+  role: UserRole = 'owner',
+): Promise<PayRunResult> {
+  if (!(await flagOn(db, rid))) {
+    return {
+      enabled: false,
+      monthStart: null,
+      monthEnd: null,
+      suppliers: [],
+      totals: EMPTY_TOTALS,
+      canAnswer: false,
+    };
+  }
+  const hero = await computeLeakHero(db, rid, { monthOffset });
+  const breakdown = await computeLeakBreakdown(db, rid, { monthOffset, limit: 200 });
+  const byInvoice = new Map(breakdown.map((b) => [b.invoiceId, b]));
+
+  // The month's invoices not marked paid (matched, or read but waiting for a PO link) — same
+  // date rule as the hero.
+  const res = await db.execute(
+    unpaidInvoicesSql(rid, { start: hero.monthStart, end: hero.monthEnd }),
+  );
+
+  const groups = new Map<string, PayRunSupplier & { a: Record<string, number> }>();
+  for (const row of rowsOf(res)) {
+    const id = String(row.id);
+    const inv = invoiceOfRow(row, byInvoice.get(id) ?? null);
+    const key = row.supplier_id == null ? '' : String(row.supplier_id);
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        key,
+        supplierName: row.supplier_name == null ? null : String(row.supplier_name),
+        supplierNameEn: row.supplier_name_en == null ? null : String(row.supplier_name_en),
+        invoices: [],
+        payIls: 0,
+        holdIls: 0,
+        claimIls: 0,
+        creditIls: 0,
+        pendingIls: 0,
+        linkIls: 0,
+        a: { pay: 0, hold: 0, claim: 0, credit: 0, pending: 0, link: 0 },
+      };
+      groups.set(key, g);
+    }
+    g.invoices.push(inv);
+    // Waiting for a PO link is T4: its total is reported on its own, never as pay or hold ₪.
+    if (inv.pendingLink && !inv.duplicate) g.a.link! += ag(inv.totalInclVat);
+    else g.a[inv.status]! += ag(inv.totalInclVat);
+    g.a.credit! += ag(inv.creditIls);
+    g.a.pending! += ag(inv.pendingIls);
+  }
+
+  const t = { pay: 0, hold: 0, claim: 0, credit: 0, pending: 0, link: 0, invoices: 0, linkCount: 0 };
+  const suppliers: PayRunSupplier[] = [...groups.values()].map(({ a, ...g }) => {
+    for (const k of ['pay', 'hold', 'claim', 'credit', 'pending', 'link'] as const) t[k] += a[k]!;
+    t.invoices += g.invoices.length;
+    t.linkCount += g.invoices.filter((i) => i.pendingLink && !i.duplicate).length;
+    return {
+      ...g,
+      payIls: ils(a.pay!),
+      holdIls: ils(a.hold!),
+      claimIls: ils(a.claim!),
+      creditIls: ils(a.credit!),
+      pendingIls: ils(a.pending!),
+      linkIls: ils(a.link!),
+    };
+  });
+  // Suppliers needing action first (held ₪, then credits), then the payable ones.
+  suppliers.sort(
+    (x, y) =>
+      y.holdIls - x.holdIls ||
+      y.creditIls - x.creditIls ||
+      y.payIls - x.payIls ||
+      (x.supplierName ?? '').localeCompare(y.supplierName ?? '', 'he'),
+  );
+  return {
+    enabled: true,
+    // G-08: may this role answer questions in the mapper? (never the bookkeeper)
+    canAnswer: role !== 'bookkeeper',
+    monthStart: hero.monthStart,
+    monthEnd: hero.monthEnd,
+    suppliers,
+    totals: {
+      invoices: t.invoices,
+      payIls: ils(t.pay),
+      holdIls: ils(t.hold),
+      claimIls: ils(t.claim),
+      creditIls: ils(t.credit),
+      pendingIls: ils(t.pending),
+      linkIls: ils(t.link),
+      linkCount: t.linkCount,
+    },
+  };
+}
