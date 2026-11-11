@@ -158,7 +158,9 @@ export function LeakCardBody({
               const inv = l.invoiceNumber ? t('leakCard.invoice', { number: l.invoiceNumber }) : t('leakCard.invoiceNoNumber');
               // The line's verified basis, so the supplier can check it (SUP-02, W2-09c): the one
               // shared why formatter — "חויב ₪149.00 × 10 ק״ג · בהזמנה ₪139.00 (PO-…, 14.10) · פער ₪100.00".
-              const math = l.evidence ? whySegments(l.evidence.facts, leakWhyLabels(t.appLocale)) : null;
+              // No order number: name it by its date ("הזמנה, 14.10"), never a raw id ("PO-186CCE6E").
+              const facts = l.evidence ? (l.evidence.facts.poRef ? l.evidence.facts : { ...l.evidence.facts, poRef: t('leakCard.orderWord') }) : null;
+              const math = facts ? whySegments(facts, leakWhyLabels(t.appLocale)) : null;
               return (
                 <li key={l.discrepancyId} className="flex items-start justify-between gap-3 py-2" data-testid="supplier-leak-line">
                   <div className="min-w-0">
