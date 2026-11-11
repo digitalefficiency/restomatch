@@ -292,6 +292,41 @@ test.describe('phone 390', () => {
   });
 });
 
+/**
+ * #418 regression guard: the desk hydrates without a server/client mismatch when
+ * the browser is in another time zone than the server (dates render in Israel
+ * time; `useMediaQuery` hydrates from its server snapshot), on every desk route.
+ */
+for (const timezoneId of ['Asia/Jerusalem', 'America/New_York']) {
+  for (const [label, viewport] of [['1440', { width: 1440, height: 900 }], ['390', PHONE]] as const) {
+    test.describe(`no hydration mismatch · ${timezoneId} · ${label}`, () => {
+      test.use({ timezoneId, viewport });
+      test('queue, ?invoice=, ?sel= and the [invoiceId] landing hydrate cleanly (he + en)', async ({ page }) => {
+        const errors: string[] = [];
+        page.on('console', (m) => {
+          if (m.type() === 'error' && /hydrat|#418|#423|#425|did not match/i.test(m.text())) errors.push(m.text());
+        });
+        page.on('pageerror', (e) => {
+          if (/hydrat|#418|#423|#425|did not match/i.test(String(e))) errors.push(String(e));
+        });
+        for (const locale of ['he', 'en'] as const) {
+          await setLocale(page, locale);
+          for (const route of [
+            '/dashboard/approvals',
+            `/dashboard/approvals?invoice=${fx.inv.a}`,
+            `/dashboard/approvals?sel=${fx.a[0]}`,
+            `/dashboard/approvals/${fx.inv.a}`,
+          ]) {
+            await page.goto(route);
+            await expect(page.getByTestId('approval-card').first()).toBeVisible();
+          }
+        }
+        expect(errors).toEqual([]);
+      });
+    });
+  }
+}
+
 test.describe('manager: escalation sheet → an outbox row per owner', () => {
   test.use({ storageState: { cookies: [], origins: [] }, viewport: { width: 1440, height: 900 } });
   test('note chips, then a queued e-mail with ₪ and the go-link; the escalator keeps the row', async ({ page }) => {
