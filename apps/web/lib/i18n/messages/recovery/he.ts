@@ -9,7 +9,7 @@ export const he = {
     sortLabel: 'מיון:',
     sort: { rank: '₪ × ימי המתנה', amount: 'סכום', age: 'ימי המתנה' },
     showMore: 'הציגו עוד · {shown} מתוך {total}',
-    viewEmpty: { send: 'אין בקשות זיכוי לשליחה.', track: 'אין בקשות זיכוי במעקב — הכל נסגר.', closed: 'עוד אין בקשות זיכוי סגורות.' },
+    viewEmpty: { send: 'אין בקשות זיכוי לשליחה.', track: 'אין בקשות זיכוי פתוחות במעקב.', closed: 'עוד אין בקשות זיכוי סגורות.' },
     paged: 'מוצגות {shown} מתוך {total} בקשות זיכוי',
     loading: 'טוען את מעקב ₪ חוזר',
     errorTitle: 'מעקב ₪ חוזר לא זמין כרגע',
@@ -83,7 +83,7 @@ export const he = {
       writtenOff: 'נסגר בלי זיכוי',
     },
     sentence:
-      'הוחלט לבקש {claimed}: חזרו {returned}, זוכו וטרם קוזזו {credited}, פתוחים {open}, בבירור מול הספק {disputed}, נסגרו בלי זיכוי {writtenOff}.',
+      'הוחלט לבקש {claimed}: חזרו {returned}, זוכו וטרם קוזזו {credited}, פתוחים {open}, בבירור {disputed}, נסגרו בלי זיכוי {writtenOff}.',
     note: 'בשקלים שלמים, מעוגלים כך שהחלקים מסתכמים בדיוק בסך שנדרש. הסכום המדויק מופיע במעבר עכבר.',
   },
   followUp: {
@@ -115,7 +115,7 @@ export const he = {
     claimed: 'פתחו מחדש',
   },
   actions: {
-    failedRow: 'הפעולה לא נשמרה בשורה הזו.',
+    failedRow: 'הפעולה לא נשמרה',
     retry: 'נסו שוב',
     letter_sent: 'סמנו שהמכתב נשלח',
     acknowledged: 'הספק אישר',
@@ -168,14 +168,13 @@ export const he = {
   },
   reminder: {
     title: 'תזכורות לספקים',
-    hint: 'טיוטה בלבד. נפתחת בוואטסאפ או במייל רק כשלוחצים.',
+    hint: 'טיוטה בלבד: נפתחת בוואטסאפ או במייל רק בלחיצה.',
     line: 'תזכורת לספק {supplier} · {count} שורות',
     why: 'למה?',
-    whyText: 'עבר שבוע בלי חשבונית זיכוי. הוותיקה מחכה {days} ימים.',
+    whyText: 'עבר שבוע בלי חשבונית זיכוי, והוותיקה מחכה {days} ימים.',
     whatsapp: 'פתיחה בוואטסאפ',
     mail: 'פתיחה במייל',
     subject: 'תזכורת: בקשת זיכוי · {count} שורות · {amount}',
-    body: 'שלום {supplier}, תזכורת קטנה מ{restaurant} לגבי בקשת הזיכוי ששלחנו ב-{date} ({count} שורות, בסך {amount}). אפשר לעדכן מתי תצא חשבונית הזיכוי? תודה, {signer}',
   },
   peek: {
     claimed: 'נדרש',
@@ -191,7 +190,7 @@ export const he = {
   exportMenu: {
     csv: 'ייצוא CSV',
     xlsx: 'ייצוא Excel',
-    failed: 'הייצוא נכשל. נסו שוב.',
+    failed: 'הייצוא נכשל, נסו שוב.',
   },
   letter: {
     line: '{body}{ref} = {amount}',
