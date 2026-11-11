@@ -512,7 +512,7 @@ export const adminRouter = router({
    * The SQL lives in @restomatch/charts (automation.ts) and filters restaurant_id
    * itself: this runs on the cross-tenant owner connection. flagsOn is computed
    * here because FEATURE_KEYS / featureEnabled live in api (charts may not import
-   * api). A read of aggregates: no audit row, no write of any kind.
+   * api). A read of aggregates: its only write is one 'admin.viewed' audit row (conductor F1, 11.11).
    */
   automationKpis: adminProcedure
     .input(
@@ -539,6 +539,15 @@ export const adminRouter = router({
         .where(eq(restaurants.id, input.restaurantId))
         .limit(1);
       if (!r) throw appError('NOT_FOUND', 'admin.notFound', 'restaurant not found');
+      // A platform admin reading a tenant's ₪ funnel leaves a trace, like getRestaurant (conductor F1, 11.11).
+      await recordAudit(ctx.db, {
+        restaurantId: r.id,
+        userId: ctx.session.userId,
+        action: 'admin.viewed',
+        entityType: 'restaurant',
+        entityId: r.id,
+        after: { view: 'automationKpis', restaurantId: r.id, weeks: input.weeks },
+      });
       const kpis = await computeAutomationKpis(ctx.db, r.id, {
         weeks: input.weeks,
         rates: input.rates,

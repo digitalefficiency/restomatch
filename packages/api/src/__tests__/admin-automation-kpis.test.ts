@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { TRPCError } from '@trpc/server';
-import { createDb, eq, restaurants, sql, testDbUrl, userCredentials, users } from '@restomatch/db';
+import { and, auditLog, createDb, eq, restaurants, sql, testDbUrl, userCredentials, users } from '@restomatch/db';
 import { AUTOMATION_NEVER_CLAIMABLE } from '@restomatch/charts';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
@@ -12,7 +12,7 @@ import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 /**
  * AU-07 · admin.automationKpis — a cross-tenant admin READ. It must stay inside
  * input.restaurantId (adminProcedure runs without the tenant RLS scope), refuse
- * non-admins and admins without TOTP, write nothing, and keep hours-₪ apart
+ * non-admins and admins without TOTP, write only one 'admin.viewed' audit row, and keep hours-₪ apart
  * from the ₪ funnel.
  */
 
@@ -109,10 +109,28 @@ describe('admin.automationKpis · read', () => {
     expect(pick(again)).toEqual(aOnly);
   });
 
-  it('writes nothing — not even an audit row', async () => {
+  it("writes exactly one 'admin.viewed' audit row per call, nothing else (conductor F1)", async () => {
     const before = await tableCounts();
     await caller(adminUserId).admin.automationKpis({ restaurantId: A.restaurantId, weeks: 8 });
-    expect(await tableCounts()).toEqual(before);
+    const after = await tableCounts();
+    expect(after).toEqual({ ...before, audit_log: before.audit_log! + 1 });
+    const rows = await db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.restaurantId, A.restaurantId), eq(auditLog.action, 'admin.viewed')));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      userId: adminUserId,
+      entityType: 'restaurant',
+      entityId: A.restaurantId,
+      after: { view: 'automationKpis', restaurantId: A.restaurantId, weeks: 8 },
+    });
+    // A refused or unknown-id call leaves no row.
+    await caller(A.ownerUserId).admin.automationKpis({ restaurantId: A.restaurantId }).catch(() => null);
+    await caller(adminUserId)
+      .admin.automationKpis({ restaurantId: '00000000-0000-4000-8000-000000000000' })
+      .catch(() => null);
+    expect((await tableCounts()).audit_log).toBe(before.audit_log! + 1);
   });
 
   it('flagsOn counts the tenant flags with FEATURES_OFF applied (computed in the procedure)', async () => {
