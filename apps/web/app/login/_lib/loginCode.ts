@@ -24,8 +24,11 @@ import { normalizeLoginEmail } from '@/lib/passwords';
  *    (`liftLoginCodeLock`). A lift adds a small budget; it never erases the
  *    history (review N2: the victim's own sign-ins must not refill an
  *    attacker's budget);
- *  - ≤ 60 per rolling 7 days, cleared ONLY by a correct code.
- * At a ceiling no code is issued and none is accepted.
+ *  - ≤ 60 per rolling 7 days, plus LIFT_BUDGET more for each owner sign-in
+ *    that lifted it (at most one week lift per 24 h); a correct code clears it.
+ * At a ceiling no code is issued and none is accepted — and a refused attempt
+ * inserts NOTHING (review round 4: POSTing verifies at an already-locked
+ * address must not extend the lock; ghost and real alike, so N1 still holds).
  *
  * Only an existing account gets a code; the page answers the same either way.
  * The verify runs inside the `email-code` Credentials authorize() in auth.ts,
@@ -60,6 +63,9 @@ const winId = (k: string) => `lc-w:${k}`;
 const dayId = (k: string) => `lc-d:${k}`;
 const weekId = (k: string) => `lc-7:${k}`;
 const liftId = (k: string) => `lc-lift:${k}`;
+const weekLiftId = (k: string) => `lc-7lift:${k}`;
+/** Gate: one week lift per 24 h. */
+const weekLiftGateId = (k: string) => `lc-7lift-d:${k}`;
 
 async function userIdFor(rawEmail: string): Promise<{ id: string; email: string } | null> {
   const email = normalizeLoginEmail(rawEmail);
@@ -81,23 +87,27 @@ interface Counts {
   day: number;
   week: number;
   lifts: number;
+  weekLifts: number;
 }
 
 async function countsFor(k: string, now: number): Promise<Counts> {
-  const [win, day, week, lifts] = await Promise.all([
+  const [win, day, week, lifts, weekLifts] = await Promise.all([
     liveCount(winId(k), now),
     liveCount(dayId(k), now),
     liveCount(weekId(k), now),
     liveCount(liftId(k), now),
+    liveCount(weekLiftId(k), now),
   ]);
-  return { win, day, week, lifts };
+  return { win, day, week, lifts, weekLifts };
 }
+
+const dayCapOf = (c: Counts) => LOGIN_CODE_DAILY_MAX + LOGIN_CODE_LIFT_BUDGET * c.lifts;
+const weekCapOf = (c: Counts) => LOGIN_CODE_WEEKLY_MAX + LOGIN_CODE_LIFT_BUDGET * c.weekLifts;
 
 /** At or over a ceiling (`inclusive` = the count already includes this attempt). */
 function overCap(c: Counts, inclusive: boolean): boolean {
-  const dayCap = LOGIN_CODE_DAILY_MAX + LOGIN_CODE_LIFT_BUDGET * c.lifts;
-  if (inclusive) return c.win > LOGIN_CODE_MAX_ATTEMPTS || c.day > dayCap || c.week > LOGIN_CODE_WEEKLY_MAX;
-  return c.win >= LOGIN_CODE_MAX_ATTEMPTS || c.day >= dayCap || c.week >= LOGIN_CODE_WEEKLY_MAX;
+  if (inclusive) return c.win > LOGIN_CODE_MAX_ATTEMPTS || c.day > dayCapOf(c) || c.week > weekCapOf(c);
+  return c.win >= LOGIN_CODE_MAX_ATTEMPTS || c.day >= dayCapOf(c) || c.week >= weekCapOf(c);
 }
 
 /** Is code sign-in locked for this address (any ceiling reached)? */
@@ -133,12 +143,20 @@ export type VerifyLoginCode = { ok: true; userId: string } | { ok: false; reason
  */
 export async function verifyLoginCode(rawEmail: string, rawCode: string, now = Date.now()): Promise<VerifyLoginCode> {
   const k = loginCodeKey(rawEmail);
+  // Already at a ceiling: refuse WITHOUT reserving (a refused POST never extends
+  // the lock). Same statements for a real account and an unknown address.
+  const [pre, u0] = await Promise.all([countsFor(k, now), userIdFor(rawEmail)]);
+  if (overCap(pre, false)) {
+    if (u0) await authDb.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(u0.id)));
+    return { ok: false, reason: 'locked' };
+  }
   await authDb.insert(verificationTokens).values([
     { identifier: winId(k), token: randomUUID(), expires: new Date(now + LOGIN_CODE_TTL_MS) },
     { identifier: dayId(k), token: randomUUID(), expires: new Date(now + DAY_MS) },
     { identifier: weekId(k), token: randomUUID(), expires: new Date(now + WEEK_MS) },
   ]);
-  const [c, u] = await Promise.all([countsFor(k, now), userIdFor(rawEmail)]);
+  const c = await countsFor(k, now);
+  const u = u0;
   if (overCap(c, true)) {
     if (u) await authDb.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(u.id)));
     return { ok: false, reason: 'locked' };
@@ -162,21 +180,32 @@ export async function verifyLoginCode(rawEmail: string, rawCode: string, now = D
   // A correct code — the only thing that clears every ceiling (incl. 7 days).
   await authDb
     .delete(verificationTokens)
-    .where(inArray(verificationTokens.identifier, [winId(k), dayId(k), weekId(k), liftId(k)]));
+    .where(
+      inArray(verificationTokens.identifier, [winId(k), dayId(k), weekId(k), liftId(k), weekLiftId(k), weekLiftGateId(k)]),
+    );
   // A code proves the mailbox, like a magic link: mark the address verified.
   await authDb.update(users).set({ emailVerified: new Date(now) }).where(eq(users.id, u.id));
   return { ok: true, userId: u.id };
 }
 
 /**
- * A password or magic-link sign-in LIFTS an active 24 h lock by adding a small
- * budget (one marker = LIFT_BUDGET more tries today). It keeps the history, and
- * it never lifts the 7-day ceiling — only a correct code does (review N2).
+ * A password or magic-link sign-in LIFTS an active lock by adding a small
+ * budget (LIFT_BUDGET more tries); it keeps the history (review N2):
+ *  - the 24 h ceiling: one lift marker per sign-in that finds it reached;
+ *  - the 7-day ceiling: at most ONE lift per 24 h (round 4), so an owner who
+ *    signs in can use code sign-in again within days, never weeks, while an
+ *    attacker gains at most LIFT_BUDGET tries per day from the owner's sign-ins.
  */
 export async function liftLoginCodeLock(rawEmail: string, now = Date.now()): Promise<void> {
   const k = loginCodeKey(rawEmail);
   const c = await countsFor(k, now);
-  const dayCap = LOGIN_CODE_DAILY_MAX + LOGIN_CODE_LIFT_BUDGET * c.lifts;
-  if (c.day < dayCap) return; // not locked by the day cap: nothing to lift
-  await authDb.insert(verificationTokens).values({ identifier: liftId(k), token: randomUUID(), expires: new Date(now + DAY_MS) });
+  const rows: { identifier: string; token: string; expires: Date }[] = [];
+  if (c.day >= dayCapOf(c)) rows.push({ identifier: liftId(k), token: randomUUID(), expires: new Date(now + DAY_MS) });
+  if (c.week >= weekCapOf(c) && (await liveCount(weekLiftGateId(k), now)) === 0) {
+    rows.push(
+      { identifier: weekLiftId(k), token: randomUUID(), expires: new Date(now + WEEK_MS) },
+      { identifier: weekLiftGateId(k), token: randomUUID(), expires: new Date(now + DAY_MS) },
+    );
+  }
+  if (rows.length) await authDb.insert(verificationTokens).values(rows);
 }

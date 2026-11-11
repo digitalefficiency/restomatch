@@ -33,6 +33,12 @@ describe('passkeys flag + relying party', () => {
 
   it('M3/M4 guard: with blockers open, the flag stays OFF and asking for it refuses to start', () => {
     expect(PASSKEY_BLOCKERS.length).toBeGreaterThan(0);
+    // Each named blocker is still listed, with the test that must pass before it goes.
+    for (const id of ['M3', 'M4', 'L1', 'L2', 'L3', 'L4']) {
+      const entry = PASSKEY_BLOCKERS.find((b) => b.startsWith(`${id}:`));
+      expect(entry, `blocker ${id}`).toBeDefined();
+      expect(entry).toMatch(/— test: \S/);
+    }
     expect(passkeysEnabled(env({ ...URL_OK, PASSKEYS_ENABLED: '1' }))).toBe(false);
     expect(() => assertPasskeysConfig(env({ ...URL_OK, PASSKEYS_ENABLED: '1' }))).toThrow(/refused/);
     expect(() => assertPasskeysConfig(env({ ...URL_OK }))).not.toThrow(); // flag off: boots

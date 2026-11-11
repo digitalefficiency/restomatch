@@ -166,20 +166,79 @@ describe('M1 / N2: day and week ceilings', () => {
     expect(await verifyLoginCode(email, good, now)).toEqual({ ok: true, userId: uid });
   });
 
-  it(`the ${LOGIN_CODE_WEEKLY_MAX}/7 days cap is not lifted by sign-ins, only by a correct code`, async () => {
-    const email = track(uniqueEmail('week'));
-    await makeUser(email);
-    let now = Date.now();
+  /** Fill the 7-day cap: WEEKLY_MAX / DAILY_MAX days of DAILY_MAX wrong codes; returns the next day's clock. */
+  async function burnWeek(email: string, start: number): Promise<number> {
+    let now = start;
     const perDay = LOGIN_CODE_DAILY_MAX / LOGIN_CODE_MAX_ATTEMPTS;
     for (let day = 0; day < LOGIN_CODE_WEEKLY_MAX / LOGIN_CODE_DAILY_MAX; day += 1) {
       now = await burnWindows(email, perDay, now);
       now += 25 * HOUR; // next day
     }
+    return now;
+  }
+
+  it(`the ${LOGIN_CODE_WEEKLY_MAX}/7 days cap: a sign-in lifts it by a small budget, at most once a day`, async () => {
+    const email = track(uniqueEmail('week'));
+    const uid = await makeUser(email);
+    let now = await burnWeek(email, Date.now());
     expect(await loginCodeLocked(email, now)).toBe(true); // the week, not the day
+    expect(await issueLoginCode(email, now)).toBeNull();
+    // round 4: the owner signs in with a password → code sign-in works again, within the budget
+    await liftLoginCodeLock(email, now);
+    expect(await loginCodeLocked(email, now)).toBe(false);
+    const code = await codeFor(email, now);
+    for (let i = 0; i < LOGIN_CODE_LIFT_BUDGET; i += 1) {
+      expect(await verifyLoginCode(email, wrongFor(code), now)).toMatchObject({ reason: 'wrongCode' });
+      if ((i + 1) % LOGIN_CODE_MAX_ATTEMPTS === 0) now += LOGIN_CODE_TTL_MS + 1000;
+    }
+    expect(await loginCodeLocked(email, now)).toBe(true);
+    // a second sign-in the same day grants nothing more
     await liftLoginCodeLock(email, now);
     expect(await loginCodeLocked(email, now)).toBe(true);
-    expect(await issueLoginCode(email, now)).toBeNull();
-    expect(await loginCodeLocked(email, now + 8 * 24 * HOUR)).toBe(false);
+    // the next day it lifts again, and the owner's correct code signs in and clears everything
+    now += 25 * HOUR;
+    await liftLoginCodeLock(email, now);
+    expect(await loginCodeLocked(email, now)).toBe(false);
+    const good = await codeFor(email, now);
+    expect(await verifyLoginCode(email, good, now)).toEqual({ ok: true, userId: uid });
+    expect(await loginCodeLocked(email, now)).toBe(false);
+  });
+
+  it('round 4: refused verifies at a locked address insert nothing — 61+ POSTs over days never extend the lock', async () => {
+    for (const kind of ['real', 'ghost'] as const) {
+      const email = track(uniqueEmail(`renew-${kind}`));
+      if (kind === 'real') await makeUser(email);
+      const start = Date.now();
+      // fill the week (a ghost has no code, so it guesses blind — the counters are the same)
+      let now = start;
+      for (let i = 0; i < LOGIN_CODE_WEEKLY_MAX; i += 1) {
+        expect(await verifyLoginCode(email, '000000', now)).toMatchObject({ ok: false });
+        if ((i + 1) % LOGIN_CODE_MAX_ATTEMPTS === 0) now += LOGIN_CODE_TTL_MS + 1000;
+        if ((i + 1) % LOGIN_CODE_DAILY_MAX === 0) now += 25 * HOUR;
+      }
+      expect(await loginCodeLocked(email, now)).toBe(true);
+      const before = await ownerDb
+        .select()
+        .from(verificationTokens)
+        .where(like(verificationTokens.identifier, `lc-%:${loginCodeKey(email)}`));
+      // the attacker keeps POSTing ~10 refused verifies a day for the rest of the week
+      let refused = 0;
+      for (let day = 0; day < 4; day += 1) {
+        for (let i = 0; i < 10; i += 1) {
+          expect(await verifyLoginCode(email, '123456', now)).toEqual({ ok: false, reason: 'locked' });
+          refused += 1;
+        }
+        now += 24 * HOUR;
+      }
+      expect(refused).toBeGreaterThan(LOGIN_CODE_WEEKLY_MAX / 2);
+      const after = await ownerDb
+        .select()
+        .from(verificationTokens)
+        .where(like(verificationTokens.identifier, `lc-%:${loginCodeKey(email)}`));
+      expect(after.length).toBe(before.length); // not one row added
+      // the lock ends on its own once the first day's markers age out — not extended
+      expect(await loginCodeLocked(email, start + 7 * 24 * HOUR + HOUR)).toBe(false);
+    }
   });
 });
 

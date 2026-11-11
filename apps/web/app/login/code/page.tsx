@@ -8,7 +8,6 @@ import { twoFactorEnabledForEmail } from '@/lib/passwords';
 import { safeRelativePath } from '@/lib/safeRedirect';
 import { AuthShell, authTitle } from '../../(auth)/_components/AuthShell';
 import { Notice } from '../../(auth)/_components/Notice';
-import { SubmitButton } from '../../(auth)/_components/SubmitButton';
 import { codeLoginErrorCode } from '../_lib/codeErrors';
 import { requestLoginCode } from '../_lib/sendLoginCode';
 import { clearHint, readHint, writeHint } from '../hint';
@@ -24,8 +23,8 @@ export const generateMetadata = () => authTitle('shell.titles.checkEmail');
  * Credentials provider (auth.ts): limiter + durable ceilings there. A locked
  * or throttled attempt says so, without inviting a new code (M5).
  */
-export default async function LoginCodePage({ searchParams }: { searchParams: Promise<{ e?: string; resent?: string; r?: string }> }) {
-  const [{ e, resent, r }, t, hint] = await Promise.all([searchParams, getT(authMessages), readHint()]);
+export default async function LoginCodePage({ searchParams }: { searchParams: Promise<{ e?: string; resent?: string }> }) {
+  const [{ e, resent }, t, hint] = await Promise.all([searchParams, getT(authMessages), readHint()]);
   if (!hint) redirect('/login');
   // ?e=rate: code sign-in is locked (field off). ?e=sendRate: only a NEW code
   // is throttled — the latest code still works (review N3).
@@ -46,8 +45,9 @@ export default async function LoginCodePage({ searchParams }: { searchParams: Pr
       });
     } catch (err) {
       if (err instanceof AuthError) {
-        const keep = formData.get('rememberMe') === 'on' ? '&r=1' : '';
-        redirect(`/login/code?e=${codeLoginErrorCode(err)}${keep}`);
+        // Keep the user's own tick in the httpOnly hint (never the URL).
+        await writeHint({ ...h, remember: formData.get('rememberMe') === 'on' });
+        redirect(`/login/code?e=${codeLoginErrorCode(err)}`);
       }
       throw err;
     }
@@ -56,10 +56,12 @@ export default async function LoginCodePage({ searchParams }: { searchParams: Pr
     redirect(next);
   }
 
-  async function resendAction() {
+  async function resendAction(formData: FormData) {
     'use server';
-    const h = await readHint();
-    if (!h) redirect('/login');
+    const found = await readHint();
+    if (!found) redirect('/login');
+    const h = { ...found, remember: formData.get('rememberMe') === 'on' };
+    await writeHint(h);
     // UX countdown only (cookie); the real limits are inside requestLoginCode.
     if (resendWaitSec(h.sentAt) > 0) redirect('/login/code');
     if (!(await requestLoginCode(h.email))) redirect('/login/code?e=sendRate');
@@ -95,18 +97,19 @@ export default async function LoginCodePage({ searchParams }: { searchParams: Pr
       ) : null}
       <LoginCodeForm
         action={verifyAction}
-        error={Boolean(e)}
+        // sendRate is a notice about NEW codes, not a fault in the field.
+        error={Boolean(e) && !sendThrottled}
         disabled={locked}
-        remember={r === '1'}
-        labels={{ code: t('codeLogin.codeLabel'), submit: t('codeLogin.submit'), rememberMe: t('login.rememberMe') }}
+        remember={hint.remember === true}
+        // Resend lives in the same form so the "remember me" tick travels with it.
+        resendAction={locked || sendThrottled ? undefined : resendAction}
+        labels={{
+          code: t('codeLogin.codeLabel'),
+          submit: t('codeLogin.submit'),
+          rememberMe: t('login.rememberMe'),
+          resend: t('codeLogin.resend'),
+        }}
       />
-      {locked || sendThrottled ? null : (
-        <form action={resendAction} className="mt-3">
-          <SubmitButton variant="ghost" className="min-h-11 w-full text-sm" data-testid="login-code-resend">
-            {t('codeLogin.resend')}
-          </SubmitButton>
-        </form>
-      )}
       <p className="mt-6 text-center text-sm">
         <Link href="/login" className="inline-flex min-h-11 items-center font-medium text-primary hover:underline">
           {t('codeLogin.useOther')}

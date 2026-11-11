@@ -15,14 +15,17 @@ export function LoginCodeForm({
   error,
   disabled,
   remember,
+  resendAction,
   labels,
 }: {
   action: (formData: FormData) => Promise<void>;
   error: boolean;
   disabled: boolean;
-  /** The user ticked "remember me" before a failed attempt — keep it ticked. */
+  /** The user ticked "remember me" before (kept in the httpOnly hint) — keep it ticked. */
   remember: boolean;
-  labels: { code: string; submit: string; rememberMe: string };
+  /** Send a new code (same form, so the "remember me" tick is posted too); absent when locked or throttled. */
+  resendAction?: (formData: FormData) => Promise<void>;
+  labels: { code: string; submit: string; rememberMe: string; resend: string };
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const sent = useRef(false);
@@ -60,6 +63,17 @@ export function LoginCodeForm({
       <SubmitButton className="min-h-12 w-full text-base" disabled={disabled}>
         {labels.submit}
       </SubmitButton>
+      {resendAction ? (
+        <SubmitButton
+          variant="ghost"
+          formAction={resendAction}
+          formNoValidate
+          className="min-h-11 w-full text-sm"
+          data-testid="login-code-resend"
+        >
+          {labels.resend}
+        </SubmitButton>
+      ) : null}
     </form>
   );
 }
