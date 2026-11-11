@@ -112,8 +112,6 @@ afterAll(async () => {
  * other       → explicit justification for why no test is required
  * ────────────────────────────────────────────────────────────────────────── */
 const BASE_COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
-  // W3-05a month close: aggregates only, no id input; tenant B's rows are seeded and never counted.
-  'close.checklist': 'isolation (close.test.ts: every case seeds tenant B and asserts A only)',
   // S14 wave 1 — receiver languages + AI assistant (flag-gated).
   'receiverLangs.status': 'isolation',
   'receiverLangs.localNames': 'attack',
