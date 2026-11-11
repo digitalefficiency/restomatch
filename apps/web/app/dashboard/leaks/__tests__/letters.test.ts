@@ -345,6 +345,31 @@ describe('a ₪0 line says why only when the engine proves it', () => {
   });
 });
 
+describe('the letterhead block (W1-08 pilot)', () => {
+  it('renders every filled field; the ח״פ falls back to the profile', async () => {
+    const { letterheadBlock } = await import('../claims/letterhead');
+    const b = letterheadBlock({ legalName: 'כפר הזיתים בע״מ', address: 'הנמל 1, חיפה', phone: '04-8123456', email: 'a@b.co.il' }, '514778123');
+    expect(b).toEqual({
+      legalName: 'כפר הזיתים בע״מ',
+      businessId: '514778123',
+      address: 'הנמל 1, חיפה',
+      phone: '04-8123456',
+      email: 'a@b.co.il',
+      empty: false,
+    });
+    expect(letterheadBlock({ businessId: '511111111' }, '514778123').businessId).toBe('511111111');
+  });
+  it('empty letterhead → `empty` (the prompt), never blocks: the profile ח״פ still shows', async () => {
+    const { letterheadBlock, canEditLetterhead } = await import('../claims/letterhead');
+    expect(letterheadBlock({}, '514778123')).toMatchObject({ empty: true, businessId: '514778123', legalName: null });
+    expect(letterheadBlock(null, null)).toMatchObject({ empty: true, businessId: null });
+    expect(letterheadBlock({ legalName: '  ' }, null).empty).toBe(true);
+    expect(canEditLetterhead('owner')).toBe(true);
+    expect(canEditLetterhead('manager')).toBe(true);
+    expect(canEditLetterhead('bookkeeper')).toBe(false);
+  });
+});
+
 describe('owner decision 31.10: MISSING_ON_INVOICE is never claimed', () => {
   it('an accepted MISSING_ON_INVOICE line never reaches a letter — nor the "decide" count', () => {
     const inv = invoice({

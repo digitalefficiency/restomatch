@@ -1,6 +1,8 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
+  AWAITING_QUESTION_SQL,
+  LEAK_EXCLUDED_TYPES,
   computeLeakBreakdown,
   computeLeakHero,
   scanAwaitingCountSql,
@@ -29,6 +31,12 @@ function shiftDay(day: string, n: number): string {
   return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
 }
 import { financeProcedure, router } from '../trpc';
+
+/** The charts leak exclusion list (LEAK_EXCLUDED_TYPES) as SQL values. */
+const LEAK_EXCLUDED_SQL = sql.join(
+  LEAK_EXCLUDED_TYPES.map((t) => sql`${t}`),
+  sql`, `,
+);
 
 /** Never a credit to ask for: the never-claimable types (owner 31.10) + a duplicate copy (held, not claimed). */
 const NOT_A_CREDIT_SQL = sql.join(
@@ -79,6 +87,10 @@ export interface PayRunInvoice {
    * is in — bound to its order already, so never "waiting to be linked".
    */
   awaitingCount: boolean;
+  /** G-08: held for a "זה אותו מוצר?" question (no run yet) — T4, answered in the mapper. */
+  awaitingQuestion: boolean;
+  /** G-08 (round 3): held by OCR for a person ("לבדיקה", T4) with no question open — open the invoice. */
+  awaitingReview: boolean;
   /** A (non-waived) duplicate copy: held — "don't pay this copy", never a credit to ask for. */
   duplicate: boolean;
   /** The claimable ₪ of the duplicate finding(s) (= the copy's total incl. VAT); not in pending / credit. */
@@ -111,6 +123,8 @@ export interface PayRunSupplier {
 }
 
 export interface PayRunResult {
+  /** G-08: may this role answer questions in the mapper? (never the bookkeeper) */
+  canAnswer: boolean;
   enabled: boolean;
   monthStart: string | null;
   monthEnd: string | null;
@@ -186,7 +200,11 @@ function unpaidInvoicesSql(rid: string, window: { start: string; end: string } |
           AND COALESCE(i.invoice_date, i.created_at) < ${window.end}::timestamptz`
     : sql``;
   return sql`
-        SELECT i.id, i.invoice_number, COALESCE(i.invoice_date, i.created_at) AS at,
+        SELECT i.id, i.invoice_number, i.status AS inv_status, COALESCE(i.invoice_date, i.created_at) AS at,
+               -- G-08: OCR held it for a person (review reasons), not a consolidated invoice waiting for its link.
+               (jsonb_typeof(i.ocr_payload -> 'raw' -> 'reviewReasons') = 'array'
+                 AND jsonb_array_length(i.ocr_payload -> 'raw' -> 'reviewReasons') > 0
+                 AND COALESCE(i.ocr_payload -> 'raw' ->> 'kind', '') <> 'consolidated') AS review_held,
                COALESCE(i.total_incl_vat, 0) AS total_incl, COALESCE(i.total_excl_vat, 0) AS total_excl,
                i.supplier_id, s.name AS supplier_name, s.name_en AS supplier_name_en,
                -- Safety net for an invoice past the breakdown's 200-row window: any open
@@ -196,7 +214,7 @@ function unpaidInvoicesSql(rid: string, window: { start: string; end: string } |
                  JOIN discrepancies d ON d.match_run_id = mr2.id AND d.restaurant_id = ${rid}
                  WHERE mr2.invoice_id = i.id AND mr2.restaurant_id = ${rid}
                    AND d.severity IN ('warn','block') AND d.resolution_status IN ('open','escalated')
-                   AND d.type NOT IN ('PRICE_LOWER','UNORDERED_ARRIVAL') AND ABS(d.delta_amount) > 0
+                   AND d.type NOT IN (${LEAK_EXCLUDED_SQL}) AND ABS(d.delta_amount) > 0
                ) AS has_open,
                -- …and accepted real findings still ask for a credit (Σ |Δ|, capped at the
                -- invoice total like the hero's per-invoice cap), never "can pay".
@@ -234,6 +252,8 @@ function unpaidInvoicesSql(rid: string, window: { start: string; end: string } |
                EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${rid}) AS matched,
                -- …a receiving scan the OCR held for its receipt's count (#94, same rule as the hero).
                ${scanAwaitingCountSql(rid, sql`i`)} AS counting,
+               -- G-08: held for a "זה אותו מוצר?" question (same rule as the hero).
+               ${AWAITING_QUESTION_SQL} AS question,
                -- W2-03: due-date inputs (agreed terms, human due date, G-17 printed values).
                s.payment_terms, i.due_date,
                i.ocr_payload -> 'raw' ->> 'printedDueDate' AS printed_due_date,
@@ -283,10 +303,22 @@ function invoiceOfRow(row: Row, b: LeakBreakdownInvoice | null): PayRunInvoice {
   }
   // Waiting for the count (#94): no run yet, but bound to its order — held, not T4.
   const awaitingCount = row.matched !== true && row.counting === true;
+  // G-08: a question to answer, not "waiting to be linked to an order".
+  const awaitingQuestion = !awaitingCount && row.matched !== true && row.question === true;
+  // …and held for a person with no question open (confidence / lowLines): "לבדיקה".
+  const awaitingReview =
+    !awaitingCount &&
+    !awaitingQuestion &&
+    row.matched !== true &&
+    row.inv_status === 'parsed' &&
+    row.review_held === true &&
+    row.has_dup !== true;
   const pendingLink =
     !awaitingCount &&
+    !awaitingQuestion &&
+    !awaitingReview &&
     ((b?.pendingLink ?? false) || row.matched !== true || (!b && row.has_ua === true));
-  if (pendingLink || awaitingCount) s.status = 'hold';
+  if (pendingLink || awaitingCount || awaitingQuestion || awaitingReview) s.status = 'hold';
   return {
     invoiceId: String(row.id),
     invoiceNumber: row.invoice_number == null ? null : String(row.invoice_number),
@@ -294,6 +326,8 @@ function invoiceOfRow(row: Row, b: LeakBreakdownInvoice | null): PayRunInvoice {
     status: s.status,
     pendingLink,
     awaitingCount,
+    awaitingQuestion,
+    awaitingReview,
     duplicate: s.duplicate,
     duplicateIls: s.duplicateIls,
     totalInclVat: Number(row.total_incl),
@@ -374,6 +408,10 @@ export type HoldReason =
   | { kind: 'duplicate'; ils: number }
   | { kind: 'pending_link' }
   | { kind: 'awaiting_count' }
+  /** G-08: a "זה אותו מוצר?" question to answer first (T4). */
+  | { kind: 'awaiting_question' }
+  /** G-08: held by OCR for a person, "לבדיקה" (T4). */
+  | { kind: 'awaiting_review' }
   | { kind: 'missing_allocation'; vatIls: number }
   /** G-04 consolidated flag: the same delivery note billed twice; ₪ = the overlap. */
   | { kind: 'note_billed_twice'; ils: number };
@@ -382,6 +420,8 @@ export interface HoldInputs {
   status: PayRunStatus;
   pendingLink: boolean;
   awaitingCount: boolean;
+  awaitingQuestion?: boolean;
+  awaitingReview?: boolean;
   duplicate: boolean;
   duplicateIls: number;
   pendingIls: number;
@@ -401,10 +441,12 @@ export function holdReasonsOf(h: HoldInputs): HoldReason[] {
   if (h.duplicate) out.push({ kind: 'duplicate', ils: h.duplicateIls });
   if (h.pendingLink) out.push({ kind: 'pending_link' });
   if (h.awaitingCount) out.push({ kind: 'awaiting_count' });
+  if (h.awaitingQuestion) out.push({ kind: 'awaiting_question' });
+  if (h.awaitingReview) out.push({ kind: 'awaiting_review' });
   if (h.noteBilledTwiceIls != null && h.noteBilledTwiceIls > 0) {
     out.push({ kind: 'note_billed_twice', ils: h.noteBilledTwiceIls });
   }
-  if (h.status === 'hold' && !h.duplicate && !h.pendingLink && !h.awaitingCount) {
+  if (h.status === 'hold' && !h.duplicate && !h.pendingLink && !h.awaitingCount && !h.awaitingQuestion && !h.awaitingReview) {
     out.push({
       kind: 'decision',
       waitingFor: h.openRole,
@@ -463,6 +505,8 @@ export interface PayRunListResult {
   };
   /** The server flag; the UI shows "סמן כשולם" only when on. */
   markPaidEnabled: boolean;
+  /** G-08: may this role answer questions in the mapper? (never the bookkeeper) */
+  canAnswer: boolean;
 }
 
 const BUCKETS: DueBucket[] = ['overdue', 'this_week', 'next_week', 'later', 'unknown'];
@@ -561,6 +605,7 @@ export const payRunRouter = router({
           monthEnd: null,
           suppliers: [],
           totals: EMPTY_TOTALS,
+          canAnswer: false,
         };
       }
       const monthOffset = input?.monthOffset ?? 0;
@@ -629,6 +674,8 @@ export const payRunRouter = router({
       );
       return {
         enabled: true,
+        // G-08: may this role answer questions in the mapper? (never the bookkeeper)
+        canAnswer: ctx.session.role !== 'bookkeeper',
         monthStart: hero.monthStart,
         monthEnd: hero.monthEnd,
         suppliers,
@@ -684,6 +731,7 @@ export const payRunRouter = router({
           creditIls: 0,
         },
         markPaidEnabled: markPaidEnabled(),
+        canAnswer: ctx.session.role !== 'bookkeeper',
       };
       if (!(await flagOn(ctx.db, rid))) return base;
 
@@ -731,6 +779,8 @@ export const payRunRouter = router({
           status: inv.status,
           pendingLink: inv.pendingLink,
           awaitingCount: inv.awaitingCount,
+          awaitingQuestion: inv.awaitingQuestion,
+          awaitingReview: inv.awaitingReview,
           duplicate: inv.duplicate,
           duplicateIls: inv.duplicateIls,
           pendingIls: inv.pendingIls,
