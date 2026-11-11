@@ -92,6 +92,12 @@ export type InboundOutcome =
  * signed URL; `extraDocumentIds` are further pages of the same document (all
  * rows point at the one invoice); `pageCount` lands in `invoice_scans`.
  */
+/** G-09: the restaurant's multi-page switch (strict, with the kill switches). */
+async function restaurantMultiPage(tx: Database, restaurantId: string): Promise<boolean> {
+  const [r] = await tx.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, restaurantId)).limit(1);
+  return multiPageEnabled(r?.settings);
+}
+
 export async function registerIngestedDocument(
   tx: Database,
   args: {
@@ -133,7 +139,9 @@ export async function registerIngestedDocument(
     invoiceId = await createIntakeInvoice(tx, {
       restaurantId: args.restaurantId,
       supplierId: args.supplierId,
-      rawImageUrl: storedImageValue(args.restaurantId, ref),
+      // Switch OFF: the signed URL, exactly as before G-09 (zero change).
+      // Switch ON: the stable object path, signed at OCR / sweep time.
+      rawImageUrl: (await restaurantMultiPage(tx, args.restaurantId)) ? storedImageValue(args.restaurantId, ref) : imageUrl,
       source: args.kind === 'whatsapp' ? 'whatsapp' : 'email',
       createdBy: args.userId,
     });

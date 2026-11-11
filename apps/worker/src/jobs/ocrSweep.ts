@@ -202,8 +202,8 @@ export async function runOcrSweep(
 
   // Held pages: an ingested page, read ('matched'), never matched and with no
   // match job, waited G09_HOLD_MAX_MS for a sibling that never settled (a lost
-  // job, a crash, or the switch turned OFF meanwhile — so this does NOT depend
-  // on features.multiPage: switch-off is the rollback). Release it: a plain
+  // job, a crash, or the switch turned OFF meanwhile — so it does not need the
+  // switch ON, only that it was ever set: switch-off is the rollback). Release it: a plain
   // match job is idempotent and the engine skips an invoice that already has a
   // run. Never a re-shot duplicate (it waits for a person), and not while a
   // sibling page of the same sender is merely slow (still ocr_pending).
@@ -214,6 +214,10 @@ export async function runOcrSweep(
       FROM invoices i
      WHERE i.status = 'matched'
        AND i.restaurant_id::text = ANY(string_to_array(${only.join(',')}, ','))
+       -- only where the switch was EVER set (on, or turned off since: the
+       -- rollback); a restaurant that never had multi-page is untouched
+       AND EXISTS (SELECT 1 FROM restaurants r
+                    WHERE r.id = i.restaurant_id AND coalesce(r.settings -> 'features', '{}'::jsonb) ? 'multiPage')
        AND coalesce(i.updated_at, i.created_at) < ${holdBefore}
        AND coalesce(i.updated_at, i.created_at) >= ${pathSince}
        AND EXISTS (SELECT 1 FROM ingest_documents d

@@ -39,10 +39,11 @@ async function jobs(queue: string, invoiceId: string) {
     SELECT dedupe_key, payload FROM job_queue WHERE queue = ${queue} AND payload->>'invoiceId' = ${invoiceId} ORDER BY id`;
 }
 
-async function restaurant(name: string, multiPage: boolean) {
+/** multiPage: true = on, false = turned OFF (the key is set), null = never had the switch. */
+async function restaurant(name: string, multiPage: boolean | null) {
   const [r] = await db
     .insert(restaurants)
-    .values({ name, settings: { features: multiPage ? { multiPage: true } : {} } as never })
+    .values({ name, settings: { features: multiPage === null ? {} : { multiPage } } as never })
     .returning({ id: restaurants.id });
   rids.push(r!.id);
   return r!.id;
@@ -95,11 +96,13 @@ async function ingestPage(rid: string, invoiceId: string, opts: { sender?: strin
 let A = '';
 let B = '';
 let OFF = '';
+let NEVER = '';
 
 beforeAll(async () => {
   A = await restaurant('G-09 sweep A', true);
   B = await restaurant('G-09 sweep B', true);
   OFF = await restaurant('G-09 sweep switch off', false);
+  NEVER = await restaurant('G-09 sweep never multi-page', null);
   // U-1: path-form scans.
   await invoice(A, 'lost', { status: 'ocr_pending', age: 15, url: `${A}/scan-a1b2-0000beef.jpg` });
   const queued = await invoice(A, 'queued', { status: 'ocr_pending', age: 15, url: `${A}/scan-a1b2-0000cafe.jpg` });
@@ -120,6 +123,9 @@ beforeAll(async () => {
   await ingestPage(A, young);
   const off = await invoice(OFF, 'heldSwitchOff', { status: 'matched', age: 40, url: `${OFF}/scan-h1-00000003.jpg` });
   await ingestPage(OFF, off);
+  // Switch-OFF = zero change: a restaurant that never had multi-page is untouched.
+  const never = await invoice(NEVER, 'heldNever', { status: 'matched', age: 40, url: `${NEVER}/scan-h1-0000000c.jpg` });
+  await ingestPage(NEVER, never);
   await invoice(A, 'notIngested', { status: 'matched', age: 40, url: `${A}/scan-h1-00000004.jpg` });
   // A re-shot duplicate is never released (it waits for a person).
   const dup = await invoice(A, 'heldDuplicate', { status: 'matched', age: 40, url: `${A}/scan-h1-00000005.jpg` });
@@ -186,7 +192,7 @@ describe('G-09 sweep', () => {
     for (const k of ['held', 'heldSwitchOff', 'heldStuckSibling']) {
       expect((await jobs('match-invoice', ids[k]!)).map((j) => j.dedupe_key)).toEqual([`g09-release-${ids[k]}`]);
     }
-    for (const k of ['heldYoung', 'notIngested', 'heldDuplicate', 'heldSlowSibling', 'heldLiveSibling']) {
+    for (const k of ['heldYoung', 'notIngested', 'heldDuplicate', 'heldSlowSibling', 'heldLiveSibling', 'heldNever']) {
       expect(await jobs('match-invoice', ids[k]!)).toHaveLength(0);
     }
     expect(mine(res.requeued)).toEqual([]); // idempotent
