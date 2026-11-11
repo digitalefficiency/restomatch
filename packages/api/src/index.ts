@@ -42,6 +42,7 @@ import { navRouter } from './routers/nav';
 import { pushRouter } from './routers/push';
 import { closeRouter } from './routers/close';
 import { automationsRouter } from './routers/automations';
+import { vatRouter } from './routers/vat';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -86,6 +87,7 @@ export const appRouter = router({
   push: pushRouter,
   close: closeRouter,
   automations: automationsRouter,
+  vat: vatRouter,
 });
 
 export type AppRouter = typeof appRouter;
