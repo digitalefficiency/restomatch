@@ -270,7 +270,8 @@ export function LeakHero(p: LeakHeroProps) {
                 <details className="group mt-1" data-testid={p.why.testId ?? 'leak-hero-why'}>
                   <summary
                     className={cn(
-                      'inline-flex min-h-8 cursor-pointer list-none items-center gap-1 rounded-lg text-sm font-semibold text-primary hover:underline [&::-webkit-details-marker]:hidden',
+                      // 44 px tap height on phone (a11y phone suite), 32 px from sm up.
+                      'inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-lg text-sm font-semibold text-primary hover:underline sm:min-h-8 [&::-webkit-details-marker]:hidden',
                       linkFocus,
                     )}
                   >
