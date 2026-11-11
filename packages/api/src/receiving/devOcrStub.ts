@@ -11,6 +11,10 @@
  */
 import { and, asc, eq, goodsReceipts, poLines, restaurants, suppliers, purchaseOrders, type Database } from '@restomatch/db';
 import type { InvoiceOcrResult } from '@restomatch/types';
+import { localDateKeyInTz } from '../lib/time';
+
+/** restaurants.timezone default (schema) — the zone the matcher reads days in. */
+const DEFAULT_TZ = 'Asia/Jerusalem';
 
 export function devOcrStubEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.NODE_ENV === 'production') return false;
@@ -19,6 +23,17 @@ export function devOcrStubEnabled(env: NodeJS.ProcessEnv = process.env): boolean
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** 'YYYY-MM-DD' of `at` in the IANA zone `tz` (falls back to Asia/Jerusalem). */
+export function localDay(at: Date, tz: string | null | undefined): string {
+  const fmt = (zone: string) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
+  try {
+    return fmt(tz || 'Asia/Jerusalem');
+  } catch {
+    return fmt('Asia/Jerusalem');
+  }
+}
 
 /** First configured rate (numeric string) wins — PO, supplier, restaurant — else 18%. */
 export function stubVatRate(...rates: Array<string | null | undefined>): number {
@@ -31,11 +46,16 @@ export function stubVatRate(...rates: Array<string | null | undefined>): number 
  * realistic deviations so the reconciliation screen has something to show:
  * line 1 billed ~8% above the agreed price, line 2 billed one unit more than
  * ordered. Returns null when the receipt has no PO lines.
+ *
+ * Also the worker's demo-tenant OCR (apps/worker ocrInvoice.ts, mode 'stub'),
+ * which passes `invoicePrefix: 'DEMO-'`. Only ever for the demo identity: it
+ * fabricates lines, so a real tenant must never get it.
  */
 export async function buildDevOcrStub(
   db: Database,
   restaurantId: string,
   grId: string,
+  opts: { invoicePrefix?: string } = {},
 ): Promise<InvoiceOcrResult | null> {
   const [gr] = await db
     .select({
@@ -44,6 +64,7 @@ export async function buildDevOcrStub(
       poVat: purchaseOrders.vatRate,
       supplierVat: suppliers.vatRate,
       restaurantVat: restaurants.vatRate,
+      timezone: restaurants.timezone,
     })
     .from(goodsReceipts)
     .innerJoin(purchaseOrders, eq(purchaseOrders.id, goodsReceipts.poId))
@@ -90,8 +111,13 @@ export async function buildDevOcrStub(
   const vat = round2(subtotal * vatRate);
   return {
     supplier: { name: gr.supplierName },
-    invoiceNumber: `DEV-${Date.now().toString(36).toUpperCase()}`,
-    invoiceDate: new Date().toISOString().slice(0, 10),
+    invoiceNumber: `${opts.invoicePrefix ?? 'DEV-'}${Date.now().toString(36).toUpperCase()}`,
+    // The invoice is dated on the RESTAURANT'S calendar day, as a printed
+    // Israeli invoice is — not the UTC day, which is the restaurant's YESTERDAY
+    // every night 00:00–02:00 (03:00 in summer). The matcher pairs POs by local
+    // day (buildMatchInput pickNearest), so a UTC date made a demo scan at 00:30
+    // pair with yesterday's sibling PO instead of the receipt being counted.
+    invoiceDate: localDateKeyInTz(new Date(), gr.timezone ?? DEFAULT_TZ),
     allocationNumber: null,
     lines,
     totals: { subtotal, vat, total: round2(subtotal + vat) },

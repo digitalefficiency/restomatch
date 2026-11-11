@@ -19,8 +19,15 @@ export async function registerNode(): Promise<void> {
 
   // Server-side Sentry (no-op without SENTRY_DSN; enabling needs the SDK —
   // docs/MONITORING.md). Every event goes through the PII scrubber.
+  // The SDK is imported HERE by its literal name so Next's file tracing ships
+  // @sentry/node in the Vercel bundle; the package's own opaque import() is
+  // invisible to tracing and would end in "sdk-missing" once a DSN is set.
   const { initSentryFromEnv } = await import('@restomatch/observability');
-  await initSentryFromEnv({ service: 'web' });
+  await initSentryFromEnv({
+    service: 'web',
+    loadSdk: async () =>
+      (await import('@sentry/node')) as unknown as import('@restomatch/observability/sentry').SentrySdk,
+  });
 
 
   // S14: the assistant's burst limit goes through the app's enforceRateLimit.
