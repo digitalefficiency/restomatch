@@ -150,6 +150,16 @@ export const en: Shape<typeof he> = {
     signIn: 'Sign in',
     otherAccount: 'Sign in with another account',
   },
+  passkeys: {
+    title: 'Passkey',
+    intro: 'Sign in with your fingerprint, face or device PIN, no password. The passkey stays on your device.',
+    notForRole: 'Passkeys are available to owners and bookkeepers. You can keep signing in with e-mail and password.',
+    count: '{count, plural, =0 {No passkey on this account yet.} one {One passkey on this account.} other {# passkeys on this account.}}',
+    add: 'Add a passkey on this device',
+    signIn: 'Sign in with a passkey',
+    failed: "We couldn't use the passkey. Try again, or sign in with e-mail and password.",
+    back: 'Back to the app',
+  },
   codeLogin: {
     button: 'E-mail me a code',
     title: 'Your code is on its way',

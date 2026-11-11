@@ -159,6 +159,17 @@ export const he = {
   },
   /** W3-07b: /join/<token> — joining a team from an invite link. */
   /** W3-07b slice b: sign in with a 6-digit e-mail code. */
+  /** W3-07b: passkeys (owner + bookkeeper, behind PASSKEYS_ENABLED). */
+  passkeys: {
+    title: 'מפתח גישה',
+    intro: 'כניסה עם טביעת אצבע, זיהוי פנים או קוד המכשיר, בלי סיסמה. מפתח הגישה נשמר רק במכשיר שלכם.',
+    notForRole: 'מפתחות גישה זמינים לבעלים ולהנהלת החשבונות. אפשר להמשיך להיכנס עם מייל וסיסמה.',
+    count: '{count, plural, =0 {עדיין אין מפתח גישה בחשבון.} one {יש מפתח גישה אחד בחשבון.} other {יש # מפתחות גישה בחשבון.}}',
+    add: 'הוספת מפתח גישה למכשיר הזה',
+    signIn: 'כניסה עם מפתח גישה',
+    failed: 'לא הצלחנו להשתמש במפתח הגישה. נסו שוב, או היכנסו עם מייל וסיסמה.',
+    back: 'חזרה למערכת',
+  },
   codeLogin: {
     button: 'שלחו לי קוד במייל',
     title: 'הקוד בדרך',

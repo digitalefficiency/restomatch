@@ -3,6 +3,7 @@ import { cookies, headers } from 'next/headers';
 import NextAuth, { type DefaultSession } from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import Nodemailer from 'next-auth/providers/nodemailer';
+import Passkey from 'next-auth/providers/passkey';
 import { clientIpFromHeaders } from '@restomatch/api';
 import {
   accounts,
@@ -29,6 +30,7 @@ import { SIGNOUT_COOKIE, issuedBeforeSignOut, signOutCookieOptions } from './lib
 import { bypassesSecondFactor } from './lib/secondFactorGate';
 import { consumeTwoFactorTicket } from './lib/totp';
 import { verifyLoginCode } from './app/login/_lib/loginCode';
+import { passkeyAllowedFor, passkeysEnabled } from './app/(auth)/_lib/passkeys';
 import { clearLoginFailures, enforceLoginLimit, enforceMagicLinkLimit, refundLoginIp, trustedProxyHops } from './lib/rateLimit';
 import {
   SESSION_TTL_LONG_SEC,
@@ -159,6 +161,7 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
   // the cookie lifetime ceiling.
   useSecureCookies,
   cookies: authCookieConfig(useSecureCookies),
+  ...(passkeysEnabled() ? { experimental: { enableWebAuthn: true } } : {}),
   providers: [
     // Password (argon2id) — PRIMARY. Lives ONLY here (node runtime): argon2 must
     // never enter the edge bundle (auth.config.ts / middleware stay
@@ -246,6 +249,8 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
       },
       sendVerificationRequest: sendMagicLink,
     }),
+    // W3-07b slice b: passkeys for owner + bookkeeper, OFF unless PASSKEYS_ENABLED=1.
+    ...(passkeysEnabled() ? [Passkey({})] : []),
   ],
   events: {
     // Every signOut() — the dashboard / onboarding / 2FA-cancel buttons and "log
@@ -259,6 +264,11 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
     },
   },
   callbacks: {
+    // Passkeys (register AND sign-in) only for an owner / bookkeeper account.
+    async signIn({ user, account }) {
+      if (account?.provider === 'passkey') return passkeyAllowedFor(user?.id);
+      return true;
+    },
     async jwt({ token, user, trigger, session }) {
       const t = token as AppJwt;
       const now = Date.now();

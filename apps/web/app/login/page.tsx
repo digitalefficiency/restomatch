@@ -16,6 +16,8 @@ import { AuthShell, authTitle } from '../(auth)/_components/AuthShell';
 import { Notice } from '../(auth)/_components/Notice';
 import { PasswordInput } from '../(auth)/_components/PasswordInput';
 import { RememberMe } from '../(auth)/_components/RememberMe';
+import { PasskeyButton } from '../(auth)/_components/PasskeyButton';
+import { passkeysEnabled } from '../(auth)/_lib/passkeys';
 import { issueLoginCode } from './_lib/loginCode';
 import { deliverLoginCode } from './_lib/codeEmail';
 import { OutsideSubmitButton } from '../(auth)/_components/OutsideSubmitButton';
@@ -332,6 +334,12 @@ export default async function LoginPage({ searchParams }: PageProps) {
       >
         {t('codeLogin.button')}
       </OutsideSubmitButton>
+
+      {passkeysEnabled() ? (
+        <div className="mt-2">
+          <PasskeyButton mode="signin" label={t('passkeys.signIn')} failedLabel={t('passkeys.failed')} callbackUrl={redirectTo} />
+        </div>
+      ) : null}
 
       <p className="mt-6 text-center text-sm text-muted">
         {t('signin.newHere')}{' '}
