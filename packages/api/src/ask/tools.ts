@@ -83,9 +83,20 @@ function nm(locale: AskLocale, en: string | null | undefined, ...he: Array<strin
 }
 const pct = (n: number | null) => (n == null ? null : Math.round(n * 1000) / 10);
 
+/**
+ * The hero's month as 'YYYY-MM' in the restaurant's own calendar. `monthStart`
+ * is the UTC instant of local midnight on the 1st (in Israel 21:00Z or 22:00Z
+ * the day before), so slicing it named the previous month (and in January the
+ * previous year). The midpoint of [monthStart, monthEnd) is mid-month, far from
+ * any tz offset, so its UTC date names the right month for any restaurant tz.
+ */
+export function heroMonthKey(h: Pick<LeakHero, 'monthStart' | 'monthEnd'>): string {
+  return new Date((Date.parse(h.monthStart) + Date.parse(h.monthEnd)) / 2).toISOString().slice(0, 7);
+}
+
 function heroData(h: LeakHero) {
   return {
-    month: h.monthStart.slice(0, 7),
+    month: heroMonthKey(h),
     leakIls: r2(h.leakIls),
     spendIls: r2(h.spendIls),
     leakPctOfSpend: pct(h.leakPct),
