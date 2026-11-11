@@ -364,22 +364,33 @@ export async function invoiceClaim(
   db: Database,
   restaurantId: string,
   invoiceId: string,
-): Promise<{ agorot: number; pendingLink: boolean }> {
+): Promise<{ agorot: number; inclAgorot: number; pendingLink: boolean }> {
   const inv = await computeInvoiceLeak(db, restaurantId, invoiceId);
-  if (!inv) return { agorot: 0, pendingLink: false };
-  const agorot = claimableLines(inv)
-    .filter((c) => c.basis === 'excl')
-    .reduce((n, c) => n + Math.round(c.amount * 100), 0);
-  return { agorot, pendingLink: inv.pendingLink };
+  if (!inv) return { agorot: 0, inclAgorot: 0, pendingLink: false };
+  const lines = claimableLines(inv);
+  const sum = (basis: string) =>
+    lines.filter((c) => c.basis === basis).reduce((n, c) => n + Math.round(c.amount * 100), 0);
+  // The duplicate's claim is on the incl.-VAT basis: named on its own, never added in.
+  return { agorot: sum('excl'), inclAgorot: sum('incl'), pendingLink: inv.pendingLink };
+}
+
+/**
+ * The ₪ an approval names: the before-VAT claim, and a duplicate invoice's
+ * incl.-VAT claim as its own labelled figure (warden MEDIUM-1: a duplicate is
+ * never "no amount"). Null when there is nothing to claim.
+ */
+export function claimFigure(exclAgorot: number, inclAgorot: number): string | null {
+  const parts: string[] = [];
+  if (exclAgorot > 0) parts.push(formatIlsAgorot(exclAgorot, { maximumFractionDigits: 2 }));
+  if (inclAgorot > 0) parts.push(`${formatIlsAgorot(inclAgorot, { maximumFractionDigits: 2 })} כולל מע״מ (חשבונית כפולה)`);
+  return parts.length ? parts.join(' + ') : null;
 }
 
 /** Push / WhatsApp body: "N פערים · ₪X לבקשת זיכוי" + the link. No baked ₪ template string. */
-export function approvalSummary(count: number, claimAgorot: number, link: string): string {
+export function approvalSummary(count: number, claimAgorot: number, link: string, inclAgorot = 0): string {
   const gaps = count === 1 ? 'פער אחד' : `${count} פערים`;
-  const money =
-    claimAgorot > 0
-      ? ` · ${formatIlsAgorot(claimAgorot, { maximumFractionDigits: 2 })} לבקשת זיכוי`
-      : '';
+  const figure = claimFigure(claimAgorot, inclAgorot);
+  const money = figure ? ` · ${figure} לבקשת זיכוי` : '';
   return `${gaps} בחשבונית${money}\n${link}`;
 }
 
@@ -420,9 +431,10 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
     // ₪ = what this invoice can actually claim (the letters' rule), never the
     // engine's raw Σ|Δ|; formatted once by the server money util. The link is
     // the branch-aware go-link to this invoice's approval page (W2-04).
-    const { agorot: claimAgorot, pendingLink } = await invoiceClaim(db, restaurantId, invoiceId);
+    const { agorot: claimAgorot, inclAgorot, pendingLink } = await invoiceClaim(db, restaurantId, invoiceId);
     const link = approvalsGoLink(restaurantId, invoiceId);
-    const summary = approvalSummary(result.discrepancies.length, claimAgorot, link);
+    const summary = approvalSummary(result.discrepancies.length, claimAgorot, link, inclAgorot);
+    const figure = claimFigure(claimAgorot, inclAgorot);
     for (const role of persisted.rolesNeedingNotification) {
       if (whatsappAllowed) {
         await whatsapp.send(db, {
@@ -470,8 +482,8 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
         discrepancyCount: result.discrepancies.length,
         // ₪ only when there is ₪ to claim; never "₪0.00 בסיכון".
         atRiskIls:
-          claimAgorot > 0
-            ? formatIlsAgorot(claimAgorot, { maximumFractionDigits: 2 })
+          figure != null
+            ? figure
             : pendingLink
               ? 'ממתין לקישור להזמנה'
               : 'ללא סכום לבקשת זיכוי',

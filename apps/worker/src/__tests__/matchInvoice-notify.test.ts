@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { formatIlsAgorot } from '@restomatch/api';
-import { approvalSummary, approvalsGoLink } from '../jobs/matchInvoice';
+import { approvalSummary, approvalsGoLink, claimFigure } from '../jobs/matchInvoice';
 
 /**
  * W2-04 §5.7 + §5.12 (approvals-12, ia-nav-09): every approval notification
@@ -23,6 +23,16 @@ describe('match-invoice notification copy', () => {
     expect(body).toContain(formatIlsAgorot(10_480, { maximumFractionDigits: 2 }));
     expect(body).toContain(link);
     expect(approvalSummary(1, 0, link)).not.toMatch(/₪/);
+  });
+
+  it('a duplicate invoice is never "no amount": its incl.-VAT claim is named on its own (warden MEDIUM-1)', () => {
+    const incl = formatIlsAgorot(117_000, { maximumFractionDigits: 2 });
+    expect(claimFigure(0, 117_000)).toBe(`${incl} כולל מע״מ (חשבונית כפולה)`);
+    expect(claimFigure(10_480, 117_000)).toBe(`${formatIlsAgorot(10_480, { maximumFractionDigits: 2 })} + ${incl} כולל מע״מ (חשבונית כפולה)`);
+    expect(claimFigure(0, 0)).toBeNull();
+    const body = approvalSummary(1, 0, 'https://app.test/x', 117_000);
+    expect(body).toContain(incl);
+    expect(body).toContain('לבקשת זיכוי');
   });
 
   it('no "הפסד פוטנציאלי", no "חריגות", no "דליפה" and no baked ₪${…} in the approval producers', () => {

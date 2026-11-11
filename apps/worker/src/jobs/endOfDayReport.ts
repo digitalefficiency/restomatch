@@ -117,7 +117,12 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
     const email = endOfDayReportEmail({
       dateLabel: formatIlDate(startToday).split(',')[0]?.trim() ?? todayKey,
       openCreditsCount: openCount,
-      openCreditsIls: formatIlsAgorot(Math.round((awaiting.ils?.excl ?? 0) * 100), { maximumFractionDigits: 0 }),
+      // Before VAT; a duplicate invoice's incl.-VAT claim is named on its own (warden MEDIUM-1).
+      openCreditsIls:
+        formatIlsAgorot(Math.round((awaiting.ils?.excl ?? 0) * 100), { maximumFractionDigits: 0 }) +
+        ((awaiting.ils?.incl ?? 0) > 0
+          ? ` + ${formatIlsAgorot(Math.round((awaiting.ils?.incl ?? 0) * 100), { maximumFractionDigits: 0 })} כולל מע״מ (חשבוניות כפולות)`
+          : ''),
       todayCaughtCount: todayCount,
       todayCaughtIls: formatIlsAmount(todayIls),
       pendingApprovals: awaiting.count,
