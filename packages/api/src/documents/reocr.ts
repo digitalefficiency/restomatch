@@ -77,8 +77,7 @@ export async function reopenForOcr(tx: Database, restaurantId: string, invoiceId
     action: REOPENED_FOR_OCR_ACTION,
     entityType: 'invoice',
     entityId: invoiceId,
-    // Round 7: the number is cleared with the read (the re-read sets it again);
-    // kept here so nothing is lost.
+    // The number before the re-read (round 7: kept for the audit; released only on a terminal failure).
     before: { invoiceNumber: prev?.invoiceNumber ?? null } as never,
   });
   await tx.delete(matchRuns).where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
@@ -88,7 +87,10 @@ export async function reopenForOcr(tx: Database, restaurantId: string, invoiceId
   await tx.delete(invoiceLines).where(eq(invoiceLines.invoiceId, invoiceId));
   await tx
     .update(invoices)
-    .set({ totalExclVat: null, vatAmount: null, totalInclVat: null, invoiceNumber: null, updatedAt: new Date() })
+    // Round 8: the number stays RESERVED through the re-read (a copy read in the
+    // meantime is the duplicate, never the full document); a terminal failure of
+    // the composed read releases it (settle's failed-re-read guard).
+    .set({ totalExclVat: null, vatAmount: null, totalInclVat: null, updatedAt: new Date() })
     .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)));
   return true;
 }

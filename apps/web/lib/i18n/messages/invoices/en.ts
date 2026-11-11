@@ -78,8 +78,8 @@ export const en: Shape<typeof he> = {
   },
   pageQuestion: {
     badge: 'Open page',
-    body: 'A page of this invoice waits for a decision in the inbox. Do not approve it for payment before deciding.',
-    cta: 'Decide in the inbox',
+    body: 'A page of this invoice, or one that may belong to it, waits for a decision. Do not approve it for payment before deciding.',
+    cta: 'Decide on the page',
   },
   needsLines: {
     title: 'Invoices waiting for you',

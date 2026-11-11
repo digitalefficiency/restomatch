@@ -717,6 +717,12 @@ export async function settleDocumentPages(
                         -- round 7: EVERY G-09 re-read (merged, re-opened by attach/split, or split off)
                         and a.action in (${PAGES_RECOMPOSED_ACTION}, ${REOPENED_FOR_OCR_ACTION}, ${SPLIT_FROM_ACTION}))`)) as unknown as Array<{ hit: number }>;
     if (failedComposed) {
+      // Round 8: the read is gone, so is its claim on the number — a re-send of
+      // the document is never blocked as its duplicate (the number is in the audit).
+      await tx
+        .update(invoices)
+        .set({ invoiceNumber: null, updatedAt: new Date() })
+        .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)));
       await tx
         .update(ingestDocuments)
         .set({ error: 'page_unreadable', updatedAt: new Date() })

@@ -38,7 +38,7 @@ export const en = {
     action: 'Action',
     pending: 'Awaiting a decision: {amount}',
     toApprovals: 'To the approvals queue',
-    toInbox: 'Decide in the inbox',
+    toInbox: 'Decide on the page',
     toQuestions: 'To the questions',
     openInvoice: 'Open the invoice',
   },

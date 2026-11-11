@@ -41,7 +41,7 @@ export const he = {
     action: 'פעולה',
     pending: 'ממתין להחלטה: {amount}',
     toApprovals: 'לתור האישורים',
-    toInbox: 'להחלטה בתיבת הקליטה',
+    toInbox: 'להחלטה על העמוד',
     toQuestions: 'לשאלות',
     openInvoice: 'פתיחת החשבונית',
   },

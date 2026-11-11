@@ -136,28 +136,33 @@ export async function registerIngestedDocument(
   if (existing) {
     invoiceId = existing.id;
   } else {
+    const multiPage = await restaurantMultiPage(tx, args.restaurantId);
     invoiceId = await createIntakeInvoice(tx, {
       restaurantId: args.restaurantId,
       supplierId: args.supplierId,
       // Switch OFF: the signed URL, exactly as before G-09 (zero change).
       // Switch ON: the stable object path, signed at OCR / sweep time.
-      rawImageUrl: (await restaurantMultiPage(tx, args.restaurantId)) ? storedImageValue(args.restaurantId, ref) : imageUrl,
+      rawImageUrl: multiPage ? storedImageValue(args.restaurantId, ref) : imageUrl,
       source: args.kind === 'whatsapp' ? 'whatsapp' : 'email',
       createdBy: args.userId,
     });
-    await upsertInvoiceScan(tx, {
-      restaurantId: args.restaurantId,
-      invoiceId,
-      storagePath: ref,
-      mimeType: mimeOfRef(ref),
-      pageCount,
-    });
+    // Round 8 (L4): with the switch OFF, intake is byte-for-byte as before G-09 —
+    // no mapping row, no G-09 OCR dedupe key.
+    if (multiPage) {
+      await upsertInvoiceScan(tx, {
+        restaurantId: args.restaurantId,
+        invoiceId,
+        storagePath: ref,
+        mimeType: mimeOfRef(ref),
+        pageCount,
+      });
+    }
     job = {
       restaurantId: args.restaurantId,
       invoiceId,
       supplierId: args.supplierId,
       imageUrl,
-      dedupeKey: ocrDedupeKey(invoiceId, ref),
+      ...(multiPage ? { dedupeKey: ocrDedupeKey(invoiceId, ref) } : {}),
     };
   }
   // Only a document still awaiting review can be registered (approve/reject race).

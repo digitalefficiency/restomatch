@@ -3,7 +3,7 @@ import { and, auditLog, discrepancies, eq, ingestDocuments, invoices, matchRuns,
 import { enqueueMatchInvoice } from '@restomatch/queue';
 import { DocumentError, documentNotFound } from './errors';
 import { PAGES_RECOMPOSED_ACTION, retireInvoice } from './reocr';
-import { PAGE_FLAGS, type PageFlag } from './settle';
+import { PAGE_FLAGS, PAGE_ONE_FLAGS, type PageFlag } from './settle';
 
 /**
  * G-09 · the inbox's recourse for a flagged page (owner/manager).
@@ -15,7 +15,10 @@ import { PAGE_FLAGS, type PageFlag } from './settle';
  *    invoice is retired behind every refusal guard (claim, decision, approval,
  *    credit note, goods receipt, price history); the scan object is kept.
  */
-export type PageFlagAction = 'separate' | 'delete_duplicate' | 'close_unreadable';
+export type PageFlagAction = 'separate' | 'delete_duplicate' | 'close_unreadable' | 'checked_together';
+
+/** Round 8: a person compared the page with its page 1 and will handle them together (answered; nothing merged or split). */
+export const PAGE_CHECKED_TOGETHER = 'page_checked_together';
 
 /** Round 7: a person closed an unreadable page as not read (answered; the invoice is untouched). */
 export const PAGE_UNREADABLE_CLOSED = 'page_unreadable_closed';
@@ -166,6 +169,24 @@ export async function resolvePageFlag(
           .where(and(eq(invoices.id, o.id), eq(invoices.restaurantId, restaurantId)));
       }
       return { invoiceId: null, match: false, released };
+    }
+
+    if (action === 'checked_together') {
+      if (!(PAGE_ONE_FLAGS as readonly string[]).includes(flag)) throw new TRPCError({ code: 'CONFLICT', message: 'not_comparable' });
+      await tx
+        .update(ingestDocuments)
+        .set({ error: PAGE_CHECKED_TOGETHER, updatedAt: new Date() })
+        .where(and(eq(ingestDocuments.restaurantId, restaurantId), eq(ingestDocuments.invoiceId, invoiceId), eq(ingestDocuments.error, flag)));
+      await tx.insert(auditLog).values({
+        restaurantId,
+        userId: args.userId,
+        action: 'document.page_checked_together',
+        entityType: 'invoice',
+        entityId: invoiceId,
+        before: { flag } as never,
+        after: { flag: PAGE_CHECKED_TOGETHER } as never,
+      });
+      return { invoiceId, match: false, released: [] as string[] };
     }
 
     if (action === 'close_unreadable') {

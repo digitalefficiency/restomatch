@@ -88,7 +88,7 @@ export default async function InvoiceCorrectionPage({
         >
           <Badge tone={pageQuestion.flag === 'page_duplicate' ? 'danger-solid' : 'warning-solid'}>{t('pageQuestion.badge')}</Badge>
           <p className="min-w-0 flex-1 text-sm text-ink">{t('pageQuestion.body')}</p>
-          <LinkButton href="/dashboard/inbox?filter=errors" size="sm" variant="primary" className="touch-target">
+          <LinkButton href={`/dashboard/inbox/compare?invoice=${invoiceId}`} size="sm" variant="primary" className="touch-target">
             {t('pageQuestion.cta')}
           </LinkButton>
         </div>

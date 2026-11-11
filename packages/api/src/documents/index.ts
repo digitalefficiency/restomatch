@@ -3,7 +3,8 @@ export * from './types';
 export { DocumentError, isDocumentError } from './errors';
 export { composeDocument, MAX_DOCUMENT_PAGES } from './compose';
 export { toObjectRef, signObjectRef } from './objectRef';
-export { attachAsPage, splitDocument } from './attach';
+// Round 8 (L1): attachAsPage is test-only now (no router uses it) — not part of the package surface.
+export { splitDocument } from './attach';
 export { composedPathFor } from './compose';
 export { createIntakeInvoice } from './intake';
 export { settleDocumentPages, windowCloseGate, WINDOW_MAX_ATTEMPTS, pageMismatch, decidePages, samePage, PAGE_FLAGS, type PageFlag, type SettleResult } from './settle';

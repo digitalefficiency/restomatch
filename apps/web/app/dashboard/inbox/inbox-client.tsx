@@ -192,10 +192,13 @@ export function InboxClient(props: Props) {
     } catch (err) {
       const code = err instanceof Error ? err.message : '';
       // A named refusal reads as a sentence, never as a raw code.
-      // A named refusal reads as a sentence; anything else is never a raw (English) server message.
+      // A named refusal reads as a sentence; a server sentence in Hebrew (main's
+      // appError copy, e.g. "המסמך כבר טופל") is shown as is; a raw English code never.
       const message = (REFUSALS as readonly string[]).includes(code)
         ? t(`refusals.${code as (typeof REFUSALS)[number]}`)
-        : t('errors.unknown');
+        : /[\u0590-\u05FF]/.test(code)
+          ? code
+          : t('errors.unknown');
       toast.error(t('inbox.actionFailed', { message }));
     }
   }
@@ -462,7 +465,7 @@ export function InboxClient(props: Props) {
                                 </Button>
                               ) : COMPARE.includes(d.error) && d.relatedInvoiceId ? (
                                 <LinkButton
-                                  href={`/dashboard/inbox/compare?a=${d.invoiceId}&b=${d.relatedInvoiceId}`}
+                                  href={`/dashboard/inbox/compare?invoice=${d.invoiceId}`}
                                   size="sm"
                                   variant="primary"
                                   className="min-h-11"

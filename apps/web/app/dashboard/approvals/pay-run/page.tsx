@@ -286,7 +286,7 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
                           </LinkButton>
                         ) : null}
                         {inv.status === 'hold' && inv.openPageQuestion ? (
-                          <LinkButton href="/dashboard/inbox?filter=errors" size="sm" variant="primary" className="touch-target">
+                          <LinkButton href={`/dashboard/inbox/compare?invoice=${inv.invoiceId}`} size="sm" variant="primary" className="touch-target">
                             {t('table.toInbox')}
                           </LinkButton>
                         ) : null}

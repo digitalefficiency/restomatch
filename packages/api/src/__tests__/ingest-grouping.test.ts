@@ -1617,12 +1617,16 @@ describe('round 7 · R6–R9', () => {
     expect((await owner().ingest.overview()).pageQuestions).toBe(before + 1);
   });
 
-  it('R7: re-opening page 1 for the composed read clears its number (kept in the audit)', async () => {
+  it('R7/M11 (round 8): the number stays reserved through the re-read; only a terminal failure releases it (audit keeps it)', async () => {
     const [p1, p2] = await pages(2, 'r7o');
     await ocr(p1!, { ...ACME, invoiceNumber: 'A-733' });
     expect((await ocr(p2!, NOHEAD)).absorbed).toBe(true);
-    const [one] = await ownerDb.select().from(invoices).where(eq(invoices.id, p1!));
-    expect(one!.invoiceNumber).toBeNull();
+    const [during] = await ownerDb.select().from(invoices).where(eq(invoices.id, p1!));
+    expect(during!.invoiceNumber).toBe('A-733'); // a copy read meanwhile collides with THIS (it is the duplicate)
+    await ownerDb.update(invoices).set({ status: 'parsed', ocrPayload: { raw: { ocrFailed: true } } as never }).where(eq(invoices.id, p1!));
+    expect((await settle(p1!)).flagged).toEqual([{ invoiceId: p1, reason: 'page_unreadable' }]);
+    const [after] = await ownerDb.select().from(invoices).where(eq(invoices.id, p1!));
+    expect(after!.invoiceNumber).toBeNull();
     const audit = await ownerDb.select().from(auditLog).where(eq(auditLog.entityId, p1!));
     expect(audit.find((a) => a.action === 'document.reopened_for_ocr')?.before).toMatchObject({ invoiceNumber: 'A-733' });
   });
@@ -1710,5 +1714,62 @@ describe('round 8 · P1: page 1 is the chain page settle recorded (never a "newe
     expect(s.flagged.find((f) => f.invoiceId === p3)?.reason).toBe('page_not_merged');
     expect(await related(p3!)).toBe(p1);
     expect(await owner().ingest.pageQuestionOf({ invoiceId: p1! })).toMatchObject({ flag: 'page_belongs' });
+  });
+});
+
+describe('round 8 · M16/M9: a truthful "checked together" answer, available with intake OFF', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+  const owner = () =>
+    appRouter.createCaller({
+      db: ownerDb,
+      session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' },
+    } as AppContext);
+
+  it('flag (page 1 linked) → intake switched OFF → "checked together" → page 1 approvable, no "separate" claimed', async () => {
+    const [p1, p2] = await pages(2, 'r8t');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-811' });
+    const [run] = await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p1!, grId: A.grId, overallStatus: 'minor' }).returning();
+    const [gap] = await ownerDb
+      .insert(discrepancies)
+      .values({ matchRunId: run!.id, restaurantId: A.restaurantId, type: 'PRICE_HIGHER', severity: 'warn', requiresRole: 'manager', deltaAmount: '9.00' })
+      .returning();
+    expect((await ocr(p2!, NOHEAD)).flagged).toEqual([{ invoiceId: p2, reason: 'page_merge_blocked' }]);
+    expect(await owner().ingest.pageQuestionOf({ invoiceId: p1! })).toMatchObject({ flag: 'page_belongs', pageInvoiceId: p2, otherInvoiceId: p1 });
+    const [rest] = await ownerDb.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, A.restaurantId));
+    const saved = rest!.settings;
+    try {
+      await ownerDb
+        .update(restaurants)
+        .set({ settings: { ...(saved as object), features: { ...((saved as { features?: object }).features ?? {}), ingestWhatsapp: false, ingestEmail: false } } as never })
+        .where(eq(restaurants.id, A.restaurantId));
+      const [d2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, p2!));
+      await owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'checked_together' });
+      expect((await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.id, d2!.id)))[0]!.error).toBe('page_checked_together');
+      expect(await owner().ingest.pageQuestionOf({ invoiceId: p1! })).toBeNull();
+      await expect(owner().approvals.approve({ discrepancyId: gap!.id })).resolves.toBeTruthy();
+    } finally {
+      await ownerDb.update(restaurants).set({ settings: saved as never }).where(eq(restaurants.id, A.restaurantId));
+    }
+  });
+});
+
+describe('round 8 · L4: switch OFF intake is as before G-09', () => {
+  it('no invoice_scans mapping row and no G-09 OCR dedupe key while multiPage is off', async () => {
+    const [rest] = await ownerDb.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, A.restaurantId));
+    const saved = rest!.settings as { features?: Record<string, unknown> };
+    try {
+      await ownerDb
+        .update(restaurants)
+        .set({ settings: { ...saved, features: { ...(saved.features ?? {}), multiPage: false } } as never })
+        .where(eq(restaurants.id, A.restaurantId));
+      const id = await invoiceOf(await send(ch.wa, wa([jpegBytes('r8-off')]), at(0)));
+      expect(await ownerDb.select().from(invoiceScans).where(eq(invoiceScans.invoiceId, id))).toHaveLength(0);
+      expect((await ocrJobs(id)).map((j) => j.dedupe_key)).toEqual([null]);
+    } finally {
+      await ownerDb.update(restaurants).set({ settings: saved as never }).where(eq(restaurants.id, A.restaurantId));
+    }
   });
 });

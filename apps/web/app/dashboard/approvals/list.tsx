@@ -674,7 +674,7 @@ function DecisionCard({
           <div role="note" data-testid="dq-page-question" className="flex flex-wrap items-center gap-3 rounded-xl border border-warn/40 bg-surface-2 p-3">
             <Badge tone="warning-solid">{t('card.pageQuestion')}</Badge>
             <p className="min-w-0 flex-1 text-sm text-ink">{t('card.pageQuestionBody')}</p>
-            <LinkButton href="/dashboard/inbox?filter=errors" size="sm" variant="primary" className="touch-target">
+            <LinkButton href={`/dashboard/inbox/compare?invoice=${d.invoiceId}`} size="sm" variant="primary" className="touch-target">
               {t('card.pageQuestionCta')}
             </LinkButton>
           </div>
