@@ -209,7 +209,8 @@ test('recovery: "the money came back" names the ₪ credited (never ₪0) and, o
       returning id, amount_agorot, credited_agorot`;
     const credited = Number(c!.credited_agorot) / 100;
     const letGo = (Number(c!.amount_agorot) - Number(c!.credited_agorot)) / 100;
-    await page.goto('/dashboard/recovery?tab=all');
+    // W2-10 (owner I5): credited requests sit under "מעקב", the default view.
+    await page.goto('/dashboard/recovery');
     const row = page.locator('[data-testid="claim-row"][data-status="credited"]').first();
     await row.getByRole('button', { name: /אשרו שהכסף חזר/ }).click();
     const dialog = page.getByRole('alertdialog');
@@ -291,20 +292,22 @@ test('report: like-for-like compare, the money partition adds up', async ({ page
 });
 
 test('recovery: the funnel adds up; no select writes money; a write-off needs a confirm naming ₪ + supplier', async ({ page }) => {
-  await page.goto('/dashboard/recovery');
+  // W2-10 (owner I5): the funnel lives under "מה קרה"; the rows under "מעקב".
+  await page.goto('/dashboard/recovery?tab=history');
   const parts = await page.getByTestId('funnel-part').locator('dd').evaluateAll((els) => els.map((e) => Number(e.getAttribute('data-shekels'))));
   const claimed = Number((await page.getByTestId('stage-claimed').innerText()).replace(/[^\d]/g, ''));
   expect(parts.reduce((a, b) => a + b, 0)).toBe(claimed);
+  await page.goto('/dashboard/recovery');
   await expect(page.getByTestId('recovery-claims').locator('select')).toHaveCount(0);
 
   const row = page.getByTestId('claim-row').filter({ has: page.getByRole('button', { name: /פעולות נוספות/ }) }).first();
   await row.getByRole('button', { name: /פעולות נוספות/ }).click();
-  const writeOff = page.getByRole('menuitem', { name: /ויתור/ });
+  const writeOff = page.getByRole('menuitem', { name: /סגירה בלי זיכוי/ });
   if (await writeOff.count()) {
     await writeOff.click();
     const dialog = page.getByRole('alertdialog');
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText(/לוותר על .*₪.* מול /);
+    await expect(dialog).toContainText(/לסגור בלי זיכוי .*₪.* מול /);
     await expect(dialog.getByRole('radio', { name: 'הספק סירב' })).toBeVisible();
     await dialog.getByRole('button', { name: 'חזרה' }).click();
     await expect(dialog).toBeHidden();

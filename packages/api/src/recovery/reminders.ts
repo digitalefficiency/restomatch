@@ -1,3 +1,4 @@
+import { TRPCError } from '@trpc/server';
 import {
   and,
   eq,
@@ -6,6 +7,7 @@ import {
   recoveryClaims,
   restaurants,
   sql,
+  suppliers,
   type Database,
 } from '@restomatch/db';
 import { isFeatureOn } from '../lib/featureGate';
@@ -96,8 +98,8 @@ export function recoveryReminderEmail(args: {
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const name = (s: OverdueSupplier) => (en && s.supplierNameEn ? s.supplierNameEn : s.supplierName);
   const subject = en
-    ? `${count} credit requests are overdue (${ils(total)})`
-    : `${count} דרישות זיכוי באיחור (${ils(total)})`;
+    ? `${ils(total)} in open credits — no reply for ${OVERDUE_DAYS}+ days`
+    : `${ils(total)} בזיכויים פתוחים — בלי תשובה ${OVERDUE_DAYS}+ ימים`;
   const items = args.suppliers
     .map((s) =>
       en
@@ -109,13 +111,13 @@ export function recoveryReminderEmail(args: {
     locale,
     accent: '#dc2626',
     preview: subject,
-    heading: en ? 'Suppliers still owe you money' : 'ספקים עדיין חייבים לך כסף',
+    heading: en ? `${ils(total)} in open credits — no reply for ${OVERDUE_DAYS}+ days` : `${ils(total)} בזיכויים פתוחים — בלי תשובה ${OVERDUE_DAYS}+ ימים`,
     bodyHtml: `<p style="margin:0 0 8px">${
       en
-        ? `No credit note has arrived for more than ${OVERDUE_DAYS} days. A short call usually closes it:`
-        : `לא התקבלה תעודת זיכוי כבר יותר מ-${OVERDUE_DAYS} ימים. שיחה קצרה בדרך כלל סוגרת את זה:`
+        ? `${count} credit requests have had no credit invoice for ${OVERDUE_DAYS}+ days. A short call usually settles it:`
+        : `${count} בקשות זיכוי בלי חשבונית זיכוי כבר ${OVERDUE_DAYS}+ ימים. שיחה קצרה בדרך כלל מסדרת את זה:`
     }</p><ul style="margin:6px 0 10px">${items}</ul>`,
-    cta: args.trackerUrl ? { label: en ? 'Open the ₪-back tracker' : 'פתיחת מעקב ה-₪ החוזר', url: args.trackerUrl } : undefined,
+    cta: args.trackerUrl ? { label: en ? 'Open the credit requests' : 'לבקשות הזיכוי', url: args.trackerUrl } : undefined,
   });
   const text = [
     subject,
@@ -196,4 +198,64 @@ export async function enqueueRecoveryReminders(
     }
   }
   return { restaurants: processed, emails, claims, failed };
+}
+
+export interface SupplierReminderDraft {
+  supplierId: string;
+  supplierName: string;
+  supplierNameEn: string | null;
+  /** Where the click may hand off to (wa.me / mailto); null = no contact on file. */
+  whatsapp: string | null;
+  email: string | null;
+  count: number;
+  outstandingAgorot: number;
+  oldestDays: number;
+  /** When the oldest overdue request went out (the letter, else the claim): the reminder's "ששלחנו ב-{date}". */
+  oldestSentAt: string | null;
+  claimIds: string[];
+}
+
+/**
+ * Owner decision 16: an overdue reminder to a SUPPLIER is a per-supplier DRAFT
+ * ("תזכורת לספק · 3 דרישות · ₪451.00") that the web opens in wa.me / mailto
+ * only on a click. This only reads: nothing is queued, sent or stamped. The
+ * overdue rule is the tracker's (OVERDUE_DAYS after the letter, or the claim
+ * when no letter went out) — never a hard-coded day count. A foreign or
+ * unknown supplier is NOT_FOUND.
+ */
+export async function supplierReminderDraft(
+  db: Database,
+  restaurantId: string,
+  supplierId: string,
+  now: Date = new Date(),
+): Promise<SupplierReminderDraft> {
+  const [s] = await db
+    .select({ id: suppliers.id, name: suppliers.name, nameEn: suppliers.nameEn, email: suppliers.contactEmail, whatsapp: suppliers.contactWhatsapp })
+    .from(suppliers)
+    .where(and(eq(suppliers.id, supplierId), eq(suppliers.restaurantId, restaurantId)));
+  if (!s) throw new TRPCError({ code: 'NOT_FOUND', message: 'supplier not found' });
+  const res = await db.execute(sql`
+    SELECT c.id, GREATEST(0, c.amount_agorot - c.credited_agorot) AS outstanding,
+           COALESCE(c.letter_sent_at, c.claimed_at) AS sent_at,
+           floor(extract(epoch FROM (${now.toISOString()}::timestamptz - COALESCE(c.letter_sent_at, c.claimed_at))) / 86400)::int AS waiting
+    FROM recovery_claims c
+    WHERE c.restaurant_id = ${restaurantId} AND c.supplier_id = ${supplierId}
+      AND c.status IN (${sql.join(AWAITING_SUPPLIER.map((st) => sql`${st}`), sql`, `)})
+      AND c.amount_agorot > c.credited_agorot
+      AND COALESCE(c.letter_sent_at, c.claimed_at) < ${now.toISOString()}::timestamptz - make_interval(days => ${OVERDUE_DAYS})
+    ORDER BY waiting DESC, c.id
+  `);
+  const rows = (Array.isArray(res) ? res : ((res as { rows?: unknown[] }).rows ?? [])) as Array<Record<string, unknown>>;
+  return {
+    supplierId: s.id,
+    supplierName: s.name,
+    supplierNameEn: s.nameEn ?? null,
+    whatsapp: s.whatsapp?.trim() || null,
+    email: s.email?.trim() || null,
+    count: rows.length,
+    outstandingAgorot: rows.reduce((a, r) => a + Number(r.outstanding), 0),
+    oldestDays: rows.length ? Number(rows[0]!.waiting) : 0,
+    oldestSentAt: rows.length ? new Date(rows[0]!.sent_at as string | Date).toISOString() : null,
+    claimIds: rows.map((r) => String(r.id)),
+  };
 }

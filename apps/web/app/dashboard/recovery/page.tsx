@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { FileCheck2, HandCoins, Mail, Send } from 'lucide-react';
+import { auth } from '@/auth';
+import { activeMembershipOf } from '@/lib/activeRestaurant';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
 import { formatNumber, formatPercent } from '@/lib/i18n/format';
@@ -9,7 +11,7 @@ import { recovery as recoveryNs } from '@/lib/i18n/messages/recovery';
 import { Card, EmptyState, SectionHeader } from '@/lib/components';
 import { displayName } from '../approvals/vocab';
 import { TrackerClient } from './tracker-client';
-import { ALL_CLAIMS, ANSWER_DAYS, followUps, funnelOf, type FunnelPart } from './logic';
+import { ALL_CLAIMS, ANSWER_DAYS, PERIODS, followUps, funnelOf, inPeriod, periodWindow, type FunnelPart, type Period } from './logic';
 
 const PART_ORDER: FunnelPart[] = ['returned', 'credited', 'open', 'disputed', 'writtenOff'];
 const PART_BAR: Record<FunnelPart, string> = {
@@ -37,15 +39,29 @@ export default async function RecoveryPage({
   if (!flags.recovery) notFound();
   const sp = await searchParams;
   const tabParam = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab;
-  const initialTab = tabParam === 'all' || tabParam === 'closed' ? tabParam : 'todo';
+  // WF-3 (owner I5): לשליחה · מעקב · מה קרה. Old links (?tab=all|closed|todo) land on the nearest view.
+  const view: 'send' | 'track' | 'history' =
+    tabParam === 'send' ? 'send' : tabParam === 'history' || tabParam === 'closed' || tabParam === 'all' ? 'history' : 'track';
+  const remind = (Array.isArray(sp.remind) ? sp.remind[0] : sp.remind) === '1';
+  const pParam = Array.isArray(sp.p) ? sp.p[0] : sp.p;
+  const period: Period = (PERIODS as readonly string[]).includes(pParam ?? '') ? (pParam as Period) : 'all';
 
   const [t, locale] = await Promise.all([getT(recoveryNs), getLocale()]);
-  const [{ summary, returnedThisMonth }, claims, suggestions] = await Promise.all([
+  const [{ summary, returnedThisMonth: returnedNow }, allClaims, suggestions, returnedLast] = await Promise.all([
     caller.recovery.summary(),
     // Every claim: the banner, tab counts and cards sum them (never a 200-row first page).
     caller.recovery.list({ limit: ALL_CLAIMS }),
     caller.recovery.creditLineSuggestions(),
+    period === 'last' ? caller.recovery.returnedThisMonth({ monthOffset: -1 }) : Promise.resolve(null),
   ]);
+  // The period filter (acceptance 11): claimed, credited or recovered inside the window.
+  const win = periodWindow(period, new Date().toISOString());
+  const claims = allClaims.filter((c) => inPeriod(c, win));
+  const returnedThisMonth = returnedLast ?? returnedNow;
+  // The reminder draft is signed like the letters: the ACTIVE restaurant and the signed-in person.
+  const [session, memberships, profile] = await Promise.all([auth(), caller.onboarding.myMemberships(), caller.settings.profile()]);
+  const restaurantName = activeMembershipOf(memberships, session?.user?.restaurantId)?.restaurantName ?? profile.name ?? '';
+  const signer = session?.user?.name?.trim() || restaurantName;
   const nowIso = new Date().toISOString();
   const exact = (agorot: number) => formatIls(agorot / 100, { locale, maximumFractionDigits: 2 });
   const whole = (shekels: number) => formatIls(shekels, { locale, maximumFractionDigits: 0 });
@@ -53,6 +69,12 @@ export default async function RecoveryPage({
   const ageingTotal = Object.values(summary.ageing).reduce((s, v) => s + v, 0);
   const funnel = funnelOf(summary);
   const queues = followUps(claims, nowIso);
+  // "שלחו ל-6 ספקים": the requests to send go out per supplier (WF-3), so the button names suppliers.
+  const unsentSuppliers = new Set(claims.filter((c) => c.status === 'claimed' && c.outstandingAgorot > 0).map((c) => c.supplierId ?? c.supplierName)).size;
+  const tabCount = {
+    send: claims.filter((c) => c.status === 'claimed').length,
+    track: claims.filter((c) => !['claimed', 'recovered', 'written_off'].includes(c.status)).length,
+  };
 
   return (
     <div className="space-y-6">
@@ -125,29 +147,13 @@ export default async function RecoveryPage({
               </dl>
             </div>
 
-            <section className="mt-5 border-t border-line pt-4" aria-labelledby="funnel-title" data-testid="recovery-funnel">
-              <h2 id="funnel-title" className="text-sm font-bold text-ink">
-                {t('funnel.title')}
-              </h2>
-              <ol className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm" aria-label={t('funnel.stagesLabel')}>
-                {(['claimed', 'credited', 'returned'] as const).map((s, i) => (
-                  <li key={s} className="flex items-baseline gap-2">
-                    {i > 0 ? (
-                      <span aria-hidden="true" className="text-subtle" data-testid="funnel-arrow">
-                        {locale === 'he' ? '←' : '→'}
-                      </span>
-                    ) : null}
-                    <span className="text-muted">{t(`funnel.stage.${s}`)}</span>
-                    <span className="font-bold tabular-nums text-ink" data-testid={`stage-${s}`}>
-                      {whole(funnel.stages[s])}
-                    </span>
-                  </li>
-                ))}
-              </ol>
-              <div
-                className="mt-3 flex h-3 w-full overflow-hidden rounded-full bg-surface-2"
-                role="img"
-                aria-label={t('funnel.sentence', {
+            {/* "למה?" — closed by default (owner 7.11): the funnel sentence behind the status line. */}
+            <details className="mt-3 text-sm" data-testid="recovery-why">
+              <summary className="inline-flex min-h-11 cursor-pointer items-center font-semibold text-primary underline-offset-2 hover:underline md:min-h-0">
+                {t('tracker.why')}
+              </summary>
+              <p className="mt-1 text-muted">
+                {t('funnel.sentence', {
                   claimed: whole(funnel.totalShekels),
                   returned: whole(funnel.shekels.returned),
                   credited: whole(funnel.shekels.credited),
@@ -155,40 +161,22 @@ export default async function RecoveryPage({
                   disputed: whole(funnel.shekels.disputed),
                   writtenOff: whole(funnel.shekels.writtenOff),
                 })}
-              >
-                {PART_ORDER.map((p) =>
-                  funnel.agorot[p] > 0 && funnel.totalAgorot > 0 ? (
-                    <span key={p} className={PART_BAR[p]} style={{ width: `${(funnel.agorot[p] / funnel.totalAgorot) * 100}%` }} />
-                  ) : null,
-                )}
-              </div>
-              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-5">
-                {PART_ORDER.map((p) => (
-                  <div key={p} className="flex items-baseline gap-2" data-testid="funnel-part" data-part={p}>
-                    <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${PART_BAR[p]}`} aria-hidden="true" />
-                    <dt className="text-muted">{t(`funnel.part.${p}`)}</dt>
-                    <dd className="ms-auto font-semibold tabular-nums text-ink sm:ms-0" title={exact(funnel.agorot[p])} data-shekels={funnel.shekels[p]}>
-                      {whole(funnel.shekels[p])}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-              <p className="mt-2 text-xs text-subtle">{t('funnel.note')}</p>
-            </section>
+              </p>
+            </details>
           </Card>
 
           {/* T2 — the two follow-up queues, each with its one action. */}
           {queues.unsent.count > 0 || queues.waiting.count > 0 ? (
             <div className="grid gap-3 md:grid-cols-2" data-testid="recovery-followups">
               {queues.unsent.count > 0 ? (
-                <Card padding="md" className="flex flex-wrap items-center justify-between gap-3 border-warn/40">
+                <Card padding="md" className="flex flex-wrap items-center justify-between gap-3">
                   <p
                     className="flex min-w-0 items-start gap-2 text-sm text-ink"
                     data-testid="recovery-followup-unsent"
                     data-agorot={queues.unsent.agorot}
                     data-count={queues.unsent.count}
                   >
-                    <Send className="mt-0.5 h-4 w-4 shrink-0 text-warn" aria-hidden="true" />
+                    <Send className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
                     <span>
                       <strong>{t('followUp.unsent', { count: formatNumber(queues.unsent.count, locale), amount: exact(queues.unsent.agorot) })}</strong>
                     </span>
@@ -197,7 +185,7 @@ export default async function RecoveryPage({
                     href="/dashboard/leaks/claims"
                     className="inline-flex min-h-11 items-center rounded-xl bg-primary px-4 text-sm font-semibold text-on-primary hover:brightness-90"
                   >
-                    {t('followUp.unsentCta')}
+                    {t('followUp.sendTo', { count: formatNumber(unsentSuppliers, locale) })}
                   </Link>
                 </Card>
               ) : null}
@@ -215,10 +203,9 @@ export default async function RecoveryPage({
                         {t('followUp.waiting', { count: formatNumber(queues.waiting.count, locale), amount: exact(queues.waiting.agorot), days: formatNumber(ANSWER_DAYS, locale) })}
                       </strong>
                     </p>
-                    <p className="ms-6 mt-0.5 text-xs text-muted">{t('followUp.reminderNote')}</p>
                   </div>
                   <Link
-                    href="/dashboard/leaks/claims#sent-letters-title"
+                    href="/dashboard/recovery?tab=track&remind=1#reminder-drafts"
                     className="inline-flex min-h-11 items-center rounded-xl border border-line-strong bg-surface px-4 text-sm font-semibold text-ink hover:border-primary/40"
                   >
                     {t('followUp.waitingCta')}
@@ -228,8 +215,113 @@ export default async function RecoveryPage({
             </div>
           ) : null}
 
-          <TrackerClient claims={claims} suggestions={suggestions} nowIso={nowIso} initialTab={initialTab} />
+          {claims.length < summary.claimCount ? (
+            // chain-27: never a silent cut — the tiles count everything, the list says what it shows.
+            <p className="text-sm text-muted" role="status" data-testid="recovery-paged">
+              {t('tracker.paged', { shown: formatNumber(claims.length, locale), total: formatNumber(summary.claimCount, locale) })}
+            </p>
+          ) : null}
+          <nav aria-label={t('period.label')} className="flex flex-wrap items-center gap-2 text-sm" data-testid="recovery-period">
+            <span className="text-muted">{t('period.label')}</span>
+            {PERIODS.map((p) => {
+              const q = new URLSearchParams();
+              if (view !== 'track') q.set('tab', view);
+              if (p !== 'all') q.set('p', p);
+              const qs = q.toString();
+              return (
+                <Link
+                  key={p}
+                  href={`/dashboard/recovery${qs ? `?${qs}` : ''}`}
+                  aria-current={period === p ? 'true' : undefined}
+                  className={`inline-flex min-h-11 items-center rounded-full border px-3 md:min-h-8 ${
+                    period === p ? 'border-primary bg-primary/10 font-semibold text-ink' : 'border-line text-muted hover:text-ink'
+                  }`}
+                >
+                  {t(`period.${p}`)}
+                </Link>
+              );
+            })}
+          </nav>
 
+          <nav aria-label={t('tracker.claimsTitle')} className="flex gap-1 border-b border-line" data-testid="recovery-tabs">
+            {(['send', 'track', 'history'] as const).map((v) => (
+              <Link
+                key={v}
+                href={`/dashboard/recovery${v === 'track' ? (period === 'all' ? '' : `?p=${period}`) : `?tab=${v}${period === 'all' ? '' : `&p=${period}`}`}`}
+                aria-current={view === v ? 'page' : undefined}
+                className={`-mb-px inline-flex min-h-11 items-center gap-2 border-b-2 px-3 text-sm font-semibold ${
+                  view === v ? 'border-primary text-ink' : 'border-transparent text-muted hover:text-ink'
+                }`}
+              >
+                {t(`tracker.view.${v}`)}
+                {v !== 'history' ? <span className="rounded-full bg-surface-2 px-2 text-xs tabular-nums">{formatNumber(tabCount[v], locale)}</span> : null}
+              </Link>
+            ))}
+          </nav>
+
+          {view !== 'history' ? (
+            <TrackerClient
+              claims={claims}
+              suggestions={suggestions}
+              nowIso={nowIso}
+              view={view}
+              remind={remind}
+              sender={{ restaurant: restaurantName, signer }}
+            />
+          ) : (
+          <>
+          <Card padding="lg">
+            <section className="" aria-labelledby="funnel-title" data-testid="recovery-funnel">
+                <h2 id="funnel-title" className="text-sm font-bold text-ink">
+                  {t('funnel.title')}
+                </h2>
+                <ol className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm" aria-label={t('funnel.stagesLabel')}>
+                  {(['claimed', 'credited', 'returned'] as const).map((s, i) => (
+                    <li key={s} className="flex items-baseline gap-2">
+                      {i > 0 ? (
+                        <span aria-hidden="true" className="text-subtle" data-testid="funnel-arrow">
+                          {locale === 'he' ? '←' : '→'}
+                        </span>
+                      ) : null}
+                      <span className="text-muted">{t(`funnel.stage.${s}`)}</span>
+                      <span className="font-bold tabular-nums text-ink" data-testid={`stage-${s}`}>
+                        {whole(funnel.stages[s])}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+                <div
+                  className="mt-3 flex h-3 w-full overflow-hidden rounded-full bg-surface-2"
+                  role="img"
+                  aria-label={t('funnel.sentence', {
+                    claimed: whole(funnel.totalShekels),
+                    returned: whole(funnel.shekels.returned),
+                    credited: whole(funnel.shekels.credited),
+                    open: whole(funnel.shekels.open),
+                    disputed: whole(funnel.shekels.disputed),
+                    writtenOff: whole(funnel.shekels.writtenOff),
+                  })}
+                >
+                  {PART_ORDER.map((p) =>
+                    funnel.agorot[p] > 0 && funnel.totalAgorot > 0 ? (
+                      <span key={p} className={PART_BAR[p]} style={{ width: `${(funnel.agorot[p] / funnel.totalAgorot) * 100}%` }} />
+                    ) : null,
+                  )}
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-5">
+                  {PART_ORDER.map((p) => (
+                    <div key={p} className="flex items-baseline gap-2" data-testid="funnel-part" data-part={p}>
+                      <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${PART_BAR[p]}`} aria-hidden="true" />
+                      <dt className="text-muted">{t(`funnel.part.${p}`)}</dt>
+                      <dd className="ms-auto font-semibold tabular-nums text-ink sm:ms-0" title={exact(funnel.agorot[p])} data-shekels={funnel.shekels[p]}>
+                        {whole(funnel.shekels[p])}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="mt-2 text-xs text-subtle">{t('funnel.note')}</p>
+              </section>
+          </Card>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1.4fr] [&>*]:min-w-0">
             <Card padding="lg">
               <h2 className="text-sm font-bold text-ink">{t('tracker.ageingTitle')}</h2>
@@ -274,7 +366,14 @@ export default async function RecoveryPage({
                 <tbody>
                   {summary.bySupplier.map((s) => (
                     <tr key={s.supplierId ?? '—'} className="border-b border-line/60">
-                      <td className="py-2 pe-3 text-ink">{displayName(locale, s.supplierName, s.supplierNameEn) || '—'}</td>
+                      <td className="py-2 pe-3 text-ink">
+                        {displayName(locale, s.supplierName, s.supplierNameEn) || '—'}
+                        {s.supplierId ? (
+                          <Link href={`/dashboard/recovery/sheet/${s.supplierId}`} className="ms-2 text-xs font-semibold text-primary hover:underline">
+                            {t('sheet.open')}
+                          </Link>
+                        ) : null}
+                      </td>
                       <td className="py-2 pe-3 text-right font-semibold tabular-nums text-ink">{exact(s.outstandingAgorot)}</td>
                       <td className="py-2 pe-3 text-right tabular-nums text-muted">{exact(s.claimedAgorot)}</td>
                       <td className="py-2 pe-3 text-right tabular-nums text-primary">{exact(s.creditedAgorot)}</td>
@@ -303,6 +402,9 @@ export default async function RecoveryPage({
               </ul>
             </Card>
           </div>
+          <TrackerClient claims={claims} suggestions={[]} nowIso={nowIso} view="closed" sender={{ restaurant: restaurantName, signer }} />
+          </>
+          )}
         </>
       )}
     </div>

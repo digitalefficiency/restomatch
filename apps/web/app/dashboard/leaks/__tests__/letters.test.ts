@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { LeakBreakdownInvoice, LeakBreakdownLine } from '@restomatch/charts';
 import { activeMembershipOf } from '@/lib/activeRestaurant';
 import { formatIls } from '@/lib/money';
-import { approvedNotClaimed, buildLetters, daysLeft, letterAgorotFor, lineMath, sumAgora, type TrackedClaim } from '../claims/letters';
+import { approvedNotClaimed, buildLetters, daysLeft, letterAgorotFor, lettersFromServer, lineMath, sumAgora, type ServerLetter, type TrackedClaim } from '../claims/letters';
 import { lineMathText } from '../claims/why';
 import { leakStateOf, zeroNoteOf } from '../states';
 
@@ -200,10 +200,10 @@ describe('the ₪ basis of a line (expected vs charged)', () => {
     });
     const he = (v: number) => formatIls(v, { locale: 'he', maximumFractionDigits: 2 });
     expect(lineMathText({ type: 'PRICE_HIGHER', expected: 139, actual: 149, deltaAmount: 100 }, 'he')).toBe(
-      `חויב 10 × ${he(149)} · מחיר צפוי ${he(139)}`,
+      `בחשבונית 10 × ${he(149)} · מחיר צפוי ${he(139)}`,
     );
     expect(lineMathText({ type: 'PRICE_HIGHER', expected: 89, actual: 96, deltaAmount: 52.5 }, 'en')).toBe(
-      'Billed 7.5 × ₪96.00 · expected price ₪89.00',
+      'On the invoice 7.5 × ₪96.00 · expected price ₪89.00',
     );
     expect(lineMathText({ type: 'PRICE_HIGHER', expected: 139, actual: 149, deltaAmount: 100 }, 'he')).not.toContain('בהזמנה');
   });
@@ -335,6 +335,75 @@ describe('a ₪0 line says why only when the engine proves it', () => {
   it('the billed-short note never claims "not billed"', async () => {
     const { he } = await import('@/lib/i18n/messages/leaks/he');
     expect(he.breakdown.noMoneyShort).not.toMatch(/לא חויבתם/);
+  });
+});
+
+describe('W2-10: letters from recovery.letters only', () => {
+  const line = (claimId: string, amountAgorot: number): ServerLetter['beforePayment'][number] => ({
+    claimId,
+    discrepancyId: `d-${claimId}`,
+    invoiceId: 'i1',
+    invoiceNumber: 'INV-1',
+    invoiceDate: '2026-10-10T00:00:00.000Z',
+    type: 'PRICE_HIGHER',
+    severity: 'warn',
+    productName: 'עגבניות',
+    productNameEn: null,
+    lineDescription: null,
+    lineDescriptionEn: null,
+    amountAgorot,
+    basis: 'excl',
+    expected: 10,
+    actual: 12,
+    deltaAmount: 20,
+  });
+  it('keeps the two sections, sums to the agora and never adds a line the server did not send', () => {
+    const server: ServerLetter[] = [
+      { supplierId: 's1', supplierName: 'ספק', supplierNameEn: null, beforePayment: [line('c1', 3333)], forCredit: [line('c2', 1)], claimIds: ['c1', 'c2'] },
+    ];
+    const { letters } = lettersFromServer(server, []);
+    expect(letters).toHaveLength(1);
+    const [l] = letters;
+    expect(l!.beforePayment.map((x) => x.claimId)).toEqual(['c1']);
+    expect(l!.forCredit.map((x) => x.claimId)).toEqual(['c2']);
+    expect(l!.beforePaymentTotal).toBe(33.33);
+    expect(l!.forCreditTotal).toBe(0.01);
+    expect(Math.round(l!.total * 100)).toBe(3334);
+    expect(l!.claimIds).toEqual(['c1', 'c2']);
+  });
+  it('an empty server answer is no letter — undecided month lines are never letters (decision 18)', () => {
+    expect(lettersFromServer([], []).letters).toEqual([]);
+  });
+});
+
+describe('W2-10: the letter line in the supplier\'s words (owner 7.11)', () => {
+  it('names the order and keeps the invoice as the subject; never "חויבנו"', async () => {
+    const { letterLineText } = await import('../claims/letter-line');
+    const base = { type: 'PRICE_HIGHER', severity: 'warn', expected: 139, actual: 149, deltaAmount: 100, invoiceDate: '2026-10-12T00:00:00.000Z', amount: 100 };
+    const withPo = letterLineText({ ...base, poRef: 'PO-17' }, 'he')!;
+    expect(withPo).toContain('בחשבונית');
+    expect(withPo).toContain('בהזמנה');
+    expect(withPo).toContain('PO-17');
+    expect(withPo).toMatch(/= .*100\.00/);
+    expect(withPo).not.toMatch(/חויב|דריש/);
+    const noPo = letterLineText({ ...base, poRef: null }, 'he')!;
+    expect(noPo).toContain('חציון 90 יום');
+    expect(noPo).not.toContain('בהזמנה');
+  });
+  it('returns null when the engine left no basis', async () => {
+    const { letterLineText } = await import('../claims/letter-line');
+    expect(letterLineText({ type: 'DATE_ANOMALY', expected: null, actual: null, deltaAmount: null, invoiceDate: null, amount: 5 }, 'he')).toBeNull();
+  });
+});
+
+describe('glossary §2 rule 2: supplier text keeps the invoice as the subject', () => {
+  it('no claims.math.* or claims.reason.* string says "חויב" / "We were billed"', async () => {
+    const { leaks } = await import('@/lib/i18n/messages/leaks');
+    for (const [loc, msgs] of [['he', leaks.he], ['en', leaks.en]] as Array<[string, { claims: { math: Record<string, string>; reason: Record<string, string> } }]>) {
+      for (const [k, v] of Object.entries({ ...msgs.claims.math, ...msgs.claims.reason })) {
+        expect(v, `${loc} ${k}`).not.toMatch(/חויב|We were billed/);
+      }
+    }
   });
 });
 
