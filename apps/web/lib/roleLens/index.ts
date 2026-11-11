@@ -78,9 +78,24 @@ export const SCREEN_CLASS: Readonly<Record<string, ScreenClass>> = {
   lab: 'admin',
 };
 
-/** The class of a `/dashboard/...` path (by its first segment). */
+/**
+ * Sub-paths whose class differs from their first segment (longest prefix wins).
+ * `/dashboard/catalog/mapping` is the G-08 "זה אותו מוצר?" product question queue: the chef
+ * answers it in a no-₪ mode (mapper.tsx `chef`), so it is not a ₪ screen like the rest of catalog.
+ */
+export const SCREEN_CLASS_PATH: Readonly<Record<string, ScreenClass>> = {
+  '/dashboard/catalog/mapping': 'quantities',
+};
+
+/** The class of a `/dashboard/...` path: a sub-path override, else its first segment. */
 export function screenClassOf(path: string): ScreenClass {
-  const seg = path.replace(/^\/dashboard\/?/, '').split(/[/?#]/)[0] ?? '';
+  const clean = path.split(/[?#]/)[0] ?? path;
+  let best: string | null = null;
+  for (const key of Object.keys(SCREEN_CLASS_PATH)) {
+    if ((clean === key || clean.startsWith(`${key}/`)) && (!best || key.length > best.length)) best = key;
+  }
+  if (best) return SCREEN_CLASS_PATH[best]!;
+  const seg = clean.replace(/^\/dashboard\/?/, '').split('/')[0] ?? '';
   return SCREEN_CLASS[seg] ?? 'admin';
 }
 

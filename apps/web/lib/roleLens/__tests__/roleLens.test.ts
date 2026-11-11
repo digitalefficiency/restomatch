@@ -45,6 +45,11 @@ describe('screen classes', () => {
     expect(screenClassOf('/dashboard/leaks/breakdown?x=1')).toBe('money');
     expect(screenClassOf('/dashboard/orders/abc')).toBe('orders');
     expect(screenClassOf('/dashboard/receiving/abc')).toBe('quantities');
+    // G-08 product questions: the chef answers them without ₪ (train B); the rest of catalog stays ₪.
+    expect(screenClassOf('/dashboard/catalog/mapping')).toBe('quantities');
+    expect(screenClassOf('/dashboard/catalog/mapping?sku=1')).toBe('quantities');
+    expect(screenClassOf('/dashboard/catalog')).toBe('money');
+    expect(screenClassOf('/dashboard/catalog/mappingX')).toBe('money');
   });
 });
 
