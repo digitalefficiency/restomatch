@@ -8,9 +8,12 @@ import { e2eSql } from './helpers';
  * substring `hasText` filter can match two lines. The ✓ button's aria-label is exact.
  */
 function countLine(page: Page, name: string) {
-  return page
-    .getByTestId('count-line')
-    .filter({ has: page.getByRole('button', { name: `הגיע כמו בהזמנה — ${name}`, exact: true }) });
+  // The label may wrap a mixed-direction name in bidi isolates (U+2066–U+2069): match the
+  // whole label, isolates allowed around the name, nothing else.
+  const iso = '[\\u2066-\\u2069]*';
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const label = new RegExp(`^הגיע כמו בהזמנה — ${iso}${escaped}${iso}$`);
+  return page.getByTestId('count-line').filter({ has: page.getByRole('button', { name: label }) });
 }
 
 /**
