@@ -1973,3 +1973,10 @@ describe('0073 (H-04) own-user DELETE: a member never deletes a teammate’s row
     await ownerDb.delete(notificationSeen).where(eq(notificationSeen.id, other!.id));
   });
 });
+
+describe('0073 (H-04) purchase_orders → suppliers is same-tenant (composite FK, W3-04 audit)', () => {
+  it('even the owner connection (RLS bypassed) cannot create or move a PO onto another restaurant\u2019s supplier', async () => {
+    await expect(ownerDb.insert(purchaseOrders).values({ restaurantId: A.restaurantId, supplierId: B.supplierId })).rejects.toThrow(/foreign key/);
+    await expect(ownerDb.update(purchaseOrders).set({ supplierId: B.supplierId }).where(eq(purchaseOrders.id, A.poId))).rejects.toThrow(/foreign key/);
+  });
+});

@@ -767,6 +767,8 @@ export const purchaseOrders = pgTable(
   (t) => [
     index('po_restaurant_delivery_idx').on(t.restaurantId, t.expectedDeliveryAt),
     index('po_supplier_idx').on(t.supplierId),
+    // 0073 (H-04 / W3-04 audit): backs the same-tenant composite FK (supplier_id, restaurant_id).
+    index('purchase_orders_supplier_restaurant_idx').on(t.supplierId, t.restaurantId),
     // I5 (0029): a platform order id is unique per restaurant, not globally.
     uniqueIndex('po_restaurant_source_ref_unique').on(t.restaurantId, t.sourcePlatform, t.sourceRef),
   ],

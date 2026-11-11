@@ -744,3 +744,23 @@ describe('0073 hygiene (H-03 sign-off): holder_name NFKC envelope test; consent 
     await db.delete(users).where(eq(users.id, u!.id));
   });
 });
+
+describe('0073 W3-04 audit: a purchase order\u2019s supplier belongs to the same restaurant', () => {
+  it('has the validated composite FK (supplier_id, restaurant_id) → suppliers(id, restaurant_id), indexed', async () => {
+    const [c] = (await sql`
+      select pg_get_constraintdef(oid) as def, convalidated from pg_constraint where conname = 'purchase_orders_supplier_same_tenant_fk'`) as unknown as [
+      { def: string; convalidated: boolean },
+    ];
+    expect(c.def).toMatch(/FOREIGN KEY \(supplier_id, restaurant_id\) REFERENCES suppliers\(id, restaurant_id\) ON DELETE RESTRICT/);
+    expect(c.convalidated).toBe(true);
+    expect(await indexDef('purchase_orders_supplier_restaurant_idx')).toMatch(/\(supplier_id, restaurant_id\)/);
+  });
+
+  it('refuses a PO (insert or update) pointing at another restaurant\u2019s supplier; same-tenant still works', async () => {
+    await expectPgError(db.insert(purchaseOrders).values({ restaurantId: A.restaurantId, supplierId: B.supplierId }), FK_VIOLATION);
+    await expectPgError(db.update(purchaseOrders).set({ supplierId: B.supplierId }).where(eq(purchaseOrders.id, A.poId)), FK_VIOLATION);
+    const [po] = await db.insert(purchaseOrders).values({ restaurantId: A.restaurantId, supplierId: A.supplierId }).returning();
+    expect(po!.supplierId).toBe(A.supplierId);
+    await db.delete(purchaseOrders).where(eq(purchaseOrders.id, po!.id));
+  });
+});

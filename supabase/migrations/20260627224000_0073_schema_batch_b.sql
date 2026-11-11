@@ -86,6 +86,9 @@
 -- users_whatsapp_consent_check
 --                        the notice version needs a VISIBLE character [0-9A-Za-zא-ת]
 --                        (U+3164 alone passed [[:alnum:]]).
+-- purchase_orders (+purchase_orders_supplier_same_tenant_fk; W3-04 warden audit)
+--                        (supplier_id, restaurant_id) → suppliers(id, restaurant_id):
+--                        a PO can never point at another restaurant's supplier.
 -- consolidated_invoice_links (+UNIQUE goods_receipt_id; W3-11 decision)
 --                        a goods receipt sits under at most ONE consolidated invoice. A
 --                        second invoice listing it is a double charge: flagged by the
@@ -138,6 +141,8 @@
 --   DROP TRIGGER supplier_statements_set_updated_at ON supplier_statements;  -- and payments_set_updated_at
 --   Restore 0072's holder_name CHECK, restomatch_bank_audit_masked() and consent CHECK
 --     text (CREATE OR REPLACE the function from 0072; drop + re-add the two CHECKs).
+--   ALTER TABLE purchase_orders DROP CONSTRAINT purchase_orders_supplier_same_tenant_fk;
+--   DROP INDEX purchase_orders_supplier_restaurant_idx;
 --   DROP INDEX consolidated_invoice_links_gr_unique;
 --   DROP TABLE payment_invoices, payments, supplier_statements;
 --   ALTER TABLE ingest_documents DROP COLUMN doc_type,
@@ -357,6 +362,26 @@ ALTER TABLE "recipes" ADD COLUMN IF NOT EXISTS "allergens" text[] DEFAULT '{}'::
 ALTER TABLE "suppliers" ADD COLUMN IF NOT EXISTS "billing_mode" varchar(16)
   CONSTRAINT "suppliers_billing_mode_check" CHECK ("billing_mode" IN ('per_delivery', 'consolidated'));--> statement-breakpoint
 ALTER TABLE "purchase_orders" ADD COLUMN IF NOT EXISTS "opened_at" timestamp with time zone;--> statement-breakpoint
+-- W3-04 warden audit: a PO's supplier must belong to the PO's restaurant (the 0057
+-- recipes pattern). Composite FK added NOT VALID, then VALIDATEd (both under the lock
+-- phase above; VALIDATE scans purchase_orders once). The pre-deploy guard must be 0:
+-- a violating row makes VALIDATE fail and the whole file applies nothing. The old
+-- single-column purchase_orders_supplier_id_suppliers_id_fk stays (additive).
+CREATE INDEX IF NOT EXISTS "purchase_orders_supplier_restaurant_idx" ON "purchase_orders" USING btree ("supplier_id", "restaurant_id");--> statement-breakpoint
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint WHERE conname = 'purchase_orders_supplier_same_tenant_fk') THEN
+    ALTER TABLE "purchase_orders" ADD CONSTRAINT "purchase_orders_supplier_same_tenant_fk"
+      FOREIGN KEY ("supplier_id", "restaurant_id") REFERENCES "public"."suppliers"("id", "restaurant_id")
+      ON DELETE RESTRICT NOT VALID;
+  END IF;
+END $$;--> statement-breakpoint
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_constraint WHERE conname = 'purchase_orders_supplier_same_tenant_fk' AND NOT convalidated) THEN
+    ALTER TABLE "purchase_orders" VALIDATE CONSTRAINT "purchase_orders_supplier_same_tenant_fk";
+  END IF;
+END $$;--> statement-breakpoint
 ALTER TABLE "po_lines" ADD COLUMN IF NOT EXISTS "qty_revised" numeric(12, 3)
   CONSTRAINT "po_lines_qty_revised_nonneg_check" CHECK ("qty_revised" >= 0);--> statement-breakpoint
 ALTER TABLE "po_lines" ADD COLUMN IF NOT EXISTS "unit_price_revised" numeric(12, 4)
@@ -588,5 +613,5 @@ DROP POLICY IF EXISTS "notification_seen_own_delete" ON "notification_seen";--> 
 CREATE POLICY "notification_seen_own_delete" ON "notification_seen" AS RESTRICTIVE FOR DELETE USING ("user_id" = app.current_user_id());
 
 insert into drizzle.__drizzle_migrations (hash, created_at)
-select '384daa8960636340c6efdb046e0b12fed71ef1a067ce54388af3e2842fe693c5', 1782600000000
+select 'b1bdc0b9cf27e842ba8c759aa8f02079fc4d47ed510b9e561a08a4fb615659d8', 1782600000000
 where not exists (select 1 from drizzle.__drizzle_migrations where created_at = 1782600000000);
