@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { badgeAria, cappedCount, readSeen, taskSig, toRouteBadges, unseenCount, writeSeen } from '../model';
 
-const words = { items: (c: string) => `${c} פריטים`, atRisk: (a: string) => `${a} בסיכון`, blocking: 'חוסם תשלום' };
+const words = { items: (c: string) => `${c} פריטים`, atRisk: (a: string) => `${a} בסיכון`, owed: (a: string) => `${a} זיכויים פתוחים`, blocking: 'חוסם תשלום' };
 const t = (entityId: string, count = 1, ilsAgorot: number | null = 100, scope: 'mine' | 'others' = 'mine') => ({ entityId, count, ilsAgorot, scope });
 
 describe('bell seen-state (W2-08 §5.4)', () => {
@@ -34,6 +34,10 @@ describe('nav badge aria and caps (W2-08 §5.3)', () => {
   it('a count-only badge (staff) has no ₪; hidden at 0 = the bare label', () => {
     expect(badgeAria('קבלה', { count: 2, ilsAgorot: null, block: false, tone: 'neutral' }, 'he', words)).toBe('קבלה, 2 פריטים');
     expect(badgeAria('קבלה', { count: 0, ilsAgorot: null, block: false, tone: 'neutral' }, 'he', words)).toBe('קבלה');
+    // Claims name their ₪ as the recovery page does ("זיכויים פתוחים"), never "בסיכון".
+    const claims = badgeAria('זיכויים', { count: 3, ilsAgorot: 142_300, block: false, tone: 'neutral', money: 'owed' }, 'he', words);
+    expect(claims).toContain('זיכויים פתוחים');
+    expect(claims).not.toContain('בסיכון');
   });
   it('caps at 99+', () => {
     expect(cappedCount(150, 'en')).toBe('99+');

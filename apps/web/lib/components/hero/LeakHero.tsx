@@ -240,7 +240,7 @@ export function LeakHero(p: LeakHeroProps) {
                         href={p.completeness.href}
                         data-testid="leak-hero-completeness"
                         className={cn(
-                          'inline-flex min-h-8 items-center rounded-lg text-sm text-muted hover:text-ink hover:underline',
+                          'inline-flex min-h-11 items-center rounded-lg text-sm text-muted hover:text-ink hover:underline sm:min-h-8 [@media(pointer:coarse)]:min-h-11',
                           linkFocus,
                         )}
                       >
@@ -257,7 +257,7 @@ export function LeakHero(p: LeakHeroProps) {
                       href={p.tertiary.href}
                       data-testid={p.tertiary.testId}
                       className={cn(
-                        'inline-flex min-h-8 items-center rounded-lg text-sm font-semibold text-primary hover:underline',
+                        'inline-flex min-h-11 items-center rounded-lg text-sm font-semibold text-primary hover:underline sm:min-h-8 [@media(pointer:coarse)]:min-h-11',
                         linkFocus,
                       )}
                     >
@@ -270,7 +270,8 @@ export function LeakHero(p: LeakHeroProps) {
                 <details className="group mt-1" data-testid={p.why.testId ?? 'leak-hero-why'}>
                   <summary
                     className={cn(
-                      'inline-flex min-h-8 cursor-pointer list-none items-center gap-1 rounded-lg text-sm font-semibold text-primary hover:underline [&::-webkit-details-marker]:hidden',
+                      // 44 px tap height on phone (a11y phone suite), 32 px from sm up.
+                      'inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-lg text-sm font-semibold text-primary hover:underline sm:min-h-8 [@media(pointer:coarse)]:min-h-11 [&::-webkit-details-marker]:hidden',
                       linkFocus,
                     )}
                   >
@@ -285,7 +286,8 @@ export function LeakHero(p: LeakHeroProps) {
 
         {hasParts ? (
           <div
-            className="grid min-w-0 grid-cols-2 gap-2"
+            // The "⋯" menu sits in the top end corner: the tiles start below it (no overlapping tap targets).
+            className={cn('grid min-w-0 grid-cols-2 gap-2', (p.more?.items.length ?? 0) > 0 && 'lg:mt-8')}
             role="group"
             aria-label={p.splitLabel}
           >

@@ -137,6 +137,7 @@ export const he = {
   badge: {
     items: '{count} פריטים',
     atRisk: '{amount} בסיכון',
+    owed: '{amount} זיכויים פתוחים',
     blocking: 'חוסם תשלום',
   },
   bell: {

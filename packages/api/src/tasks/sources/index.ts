@@ -274,7 +274,7 @@ export function invoiceLineTasks(r: NeedsLinesLike | null, today: string): Task[
       due: today,
       ageDays: null,
       verb: 'review',
-      deepLink: '/dashboard/invoices',
+      deepLink: '/dashboard/invoices?view=lines',
       scope: 'mine',
     },
   ];

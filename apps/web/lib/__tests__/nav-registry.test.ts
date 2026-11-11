@@ -577,10 +577,10 @@ describe('nav badges (W2-08)', () => {
     // One entry per source: a queue's badge shows in exactly one place.
     expect(new Set(Object.values(map)).size).toBe(Object.values(map).length);
     expect([...new Set(Object.values(map))].sort()).toEqual([...BADGE_KEYS].sort());
-    // The unowned route files decided "no badge" explicitly.
+    // The unowned route files carry no badge (null, or absent on routes added later — e.g. W3-01's chainMatrix).
     for (const r of REGISTRY) {
       if (['ask', 'branches', 'catalog', 'chain', 'products', 'recipes', 'reports'].some((seg) => r.path.startsWith(`/dashboard/${seg}`))) {
-        expect(r.badge, r.key).toBeNull();
+        expect(r.badge ?? null, r.key).toBeNull();
         expect(badgeFor(r)).toBeNull();
       }
     }
