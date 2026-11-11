@@ -46,3 +46,9 @@ export function rhythmParts(r: RhythmLike, locale: string): { cutoff: string; le
     delivery: r.deliveryTime ? `${dayName(d.weekday, locale)} ${r.deliveryTime}` : dayName(d.weekday, locale),
   };
 }
+
+/** "ג׳ 09:30" / "Tue 09:30" for a next delivery (start of the local delivery day + its saved time). */
+export function deliveryText(d: { at: string; time: string | null }, locale: string, tz = 'Asia/Jerusalem'): string {
+  const day = parts(d.at, tz);
+  return d.time ? `${dayName(day.weekday, locale)} ${d.time}` : dayName(day.weekday, locale);
+}
