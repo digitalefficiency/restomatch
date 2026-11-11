@@ -8,8 +8,16 @@ import {
   scanAwaitingCountSql,
   type LeakBreakdownInvoice,
 } from '@restomatch/charts';
-import { eq, restaurants, sql, type Database, type UserRole } from '@restomatch/db';
-import { NEVER_CLAIMABLE_TYPES, claimableLines, sumClaims, type VatBasis } from '../lib/claims';
+import { eq, invoiceStatus, restaurants, sql, type Database, type UserRole } from '@restomatch/db';
+import { CLAIMABLE_DECIDED_STATUSES, NEVER_CLAIMABLE_TYPES, claimableLines, sumClaims, type VatBasis } from '../lib/claims';
+import {
+  DISCREPANCY_DECIDABLE,
+  DUPLICATE_HOLDING,
+  discrepancyDecidableSql,
+  duplicateHoldingSql,
+  invoiceCheckedSql,
+  statusInSql,
+} from '../lifecycle/predicates';
 import {
   computeDueDate,
   dueBucket,
@@ -142,8 +150,11 @@ export interface PayRunResult {
   };
 }
 
-const OPEN = new Set(['open', 'escalated']);
-const CLAIMABLE_DUP = new Set(['open', 'escalated', 'accepted']);
+/** Waits for a decision (G-05 DISCREPANCY_DECIDABLE). */
+const OPEN = new Set<string>(DISCREPANCY_DECIDABLE);
+/** A duplicate finding that still holds the copy (G-05 DUPLICATE_HOLDING). */
+const CLAIMABLE_DUP = new Set<string>(DUPLICATE_HOLDING);
+
 const ag = (v: number) => Math.round(v * 100);
 const ils = (a: number) => a / 100;
 const EMPTY_TOTALS = { invoices: 0, payIls: 0, holdIls: 0, claimIls: 0, creditIls: 0, pendingIls: 0, linkIls: 0, linkCount: 0 };
@@ -213,7 +224,7 @@ function unpaidInvoicesSql(rid: string, window: { start: string; end: string } |
                  SELECT 1 FROM match_runs mr2
                  JOIN discrepancies d ON d.match_run_id = mr2.id AND d.restaurant_id = ${rid}
                  WHERE mr2.invoice_id = i.id AND mr2.restaurant_id = ${rid}
-                   AND d.severity IN ('warn','block') AND d.resolution_status IN ('open','escalated')
+                   AND d.severity IN ('warn','block') AND ${discrepancyDecidableSql(sql`d.resolution_status`)}
                    AND d.type NOT IN (${LEAK_EXCLUDED_SQL}) AND ABS(d.delta_amount) > 0
                ) AS has_open,
                -- …and accepted real findings still ask for a credit (Σ |Δ|, capped at the
@@ -223,7 +234,7 @@ function unpaidInvoicesSql(rid: string, window: { start: string; end: string } |
                  FROM match_runs mr3
                  JOIN discrepancies d ON d.match_run_id = mr3.id AND d.restaurant_id = ${rid}
                  WHERE mr3.invoice_id = i.id AND mr3.restaurant_id = ${rid}
-                   AND d.severity IN ('warn','block') AND d.resolution_status IN ('accepted','resolved')
+                   AND d.severity IN ('warn','block') AND ${statusInSql(sql`d.resolution_status`, CLAIMABLE_DECIDED_STATUSES)}
                    AND d.type NOT IN (${NOT_A_CREDIT_SQL}) AND ABS(d.delta_amount) > 0
                ) AS accepted_ils,
                -- …a non-waived duplicate copy is held ("don't pay this copy"); its ₪ is the copy's total.
@@ -233,23 +244,23 @@ function unpaidInvoicesSql(rid: string, window: { start: string; end: string } |
                  JOIN discrepancies d ON d.match_run_id = mr4.id AND d.restaurant_id = ${rid}
                  WHERE mr4.invoice_id = i.id AND mr4.restaurant_id = ${rid}
                    AND d.type = 'DUPLICATE_INVOICE' AND d.severity IN ('warn','block')
-                   AND d.resolution_status IN ('open','escalated','accepted')
+                   AND ${duplicateHoldingSql(sql`d.resolution_status`)}
                ) AS dup_ils,
                EXISTS (
                  SELECT 1 FROM match_runs mr5
                  JOIN discrepancies d ON d.match_run_id = mr5.id AND d.restaurant_id = ${rid}
                  WHERE mr5.invoice_id = i.id AND mr5.restaurant_id = ${rid}
                    AND d.type = 'DUPLICATE_INVOICE' AND d.severity IN ('warn','block')
-                   AND d.resolution_status IN ('open','escalated','accepted')
+                   AND ${duplicateHoldingSql(sql`d.resolution_status`)}
                ) AS has_dup,
                -- …and an open unordered arrival means the invoice still waits for its PO link.
                EXISTS (
                  SELECT 1 FROM match_runs mr6
                  JOIN discrepancies d ON d.match_run_id = mr6.id AND d.restaurant_id = ${rid}
                  WHERE mr6.invoice_id = i.id AND mr6.restaurant_id = ${rid}
-                   AND d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')
+                   AND d.type = 'UNORDERED_ARRIVAL' AND ${discrepancyDecidableSql(sql`d.resolution_status`)}
                ) AS has_ua,
-               EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = i.id AND mr.restaurant_id = ${rid}) AS matched,
+               ${invoiceCheckedSql(sql`i.id`, rid)} AS matched,
                -- …a receiving scan the OCR held for its receipt's count (#94, same rule as the hero).
                ${scanAwaitingCountSql(rid, sql`i`)} AS counting,
                -- G-08: held for a "זה אותו מוצר?" question (same rule as the hero).
@@ -263,7 +274,7 @@ function unpaidInvoicesSql(rid: string, window: { start: string; end: string } |
                  SELECT d.requires_role::text FROM match_runs mr7
                  JOIN discrepancies d ON d.match_run_id = mr7.id AND d.restaurant_id = ${rid}
                  WHERE mr7.invoice_id = i.id AND mr7.restaurant_id = ${rid}
-                   AND d.severity IN ('warn','block') AND d.resolution_status IN ('open','escalated')
+                   AND d.severity IN ('warn','block') AND ${discrepancyDecidableSql(sql`d.resolution_status`)}
                    AND ABS(COALESCE(d.delta_amount, 0)) > 0
                  ORDER BY d.created_at, d.id LIMIT 1
                ) AS open_role,
@@ -271,7 +282,7 @@ function unpaidInvoicesSql(rid: string, window: { start: string; end: string } |
                  SELECT MIN(d.created_at) FROM match_runs mr8
                  JOIN discrepancies d ON d.match_run_id = mr8.id AND d.restaurant_id = ${rid}
                  WHERE mr8.invoice_id = i.id AND mr8.restaurant_id = ${rid}
-                   AND d.severity IN ('warn','block') AND d.resolution_status IN ('open','escalated')
+                   AND d.severity IN ('warn','block') AND ${discrepancyDecidableSql(sql`d.resolution_status`)}
                    AND ABS(COALESCE(d.delta_amount, 0)) > 0
                ) AS open_since
         FROM invoices i
@@ -529,7 +540,7 @@ export function sortByDue(a: PayRunRow, b: PayRunRow): number {
 const ITEM = z.object({
   invoiceId: z.string().uuid(),
   /** The status the client saw; a stale one is a CONFLICT (G-05 `expectedFrom`). */
-  expectedStatus: z.enum(['ocr_pending', 'parsed', 'matched', 'disputed', 'approved', 'paid']),
+  expectedStatus: z.enum(invoiceStatus.enumValues),
 });
 const MARK_PAID_INPUT = z.object({
   items: z.array(ITEM).min(1).max(200),

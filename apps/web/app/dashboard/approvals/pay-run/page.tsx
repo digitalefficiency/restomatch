@@ -113,6 +113,29 @@ export default async function PayRunPage({
         return r.status;
     }
   };
+  /** The short pill label; the full sentence (holdText) is its tooltip and screen-reader text. */
+  const holdShort = (h: Hold): string => {
+    switch (h.kind) {
+      case 'decision':
+        return t('holdShort.decision', { who: who(h.waitingFor) });
+      case 'duplicate':
+        return t('holdShort.duplicate');
+      case 'pending_link':
+        return t('holdShort.pendingLink');
+      case 'awaiting_count':
+        return t('holdShort.awaitingCount');
+      case 'awaiting_question':
+        return t('holdShort.awaitingQuestion');
+      case 'awaiting_review':
+        return t('holdShort.awaitingReview');
+      case 'missing_allocation':
+        return t('holdShort.missingAllocation');
+      case 'note_billed_twice':
+        return t('holdShort.noteBilledTwice');
+      default:
+        return '';
+    }
+  };
   const statusText = (r: Row) =>
     r.selectable
       ? r.creditIls > 0
@@ -146,7 +169,9 @@ export default async function PayRunPage({
   const dueCell = (r: Row) => (
     <div className="flex flex-col items-start gap-1">
       {r.dueDate ? (
-        <DeadlineChip due={r.dueDate} today={today} />
+        <span className="whitespace-nowrap">
+          <DeadlineChip due={r.dueDate} today={today} />
+        </span>
       ) : r.supplierKey ? (
         <Link
           href={`/dashboard/suppliers/${r.supplierKey}`}
@@ -383,7 +408,19 @@ export default async function PayRunPage({
                     </span>
                   </h2>
                   <div className="overflow-x-auto rounded-xl border border-line">
-                    <table className="w-full text-sm">
+                    {/* One fixed column grid for every bucket, so the tables line up. */}
+                    <table className="w-full min-w-[68rem] table-fixed text-sm">
+                      <colgroup>
+                        <col className="w-10" />
+                        <col className="w-[13%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-16" />
+                        <col className="w-56" />
+                        <col className="w-28" />
+                        <col className="w-28" />
+                        <col />
+                        <col className="w-28" />
+                      </colgroup>
                       <thead className="bg-surface-2 text-xs text-muted">
                         <tr>
                           <th scope="col" className="w-10 px-3 py-2">
@@ -459,12 +496,24 @@ export default async function PayRunPage({
                             </td>
                             <td className="px-3 py-2" data-testid="payrun-status">
                               {r.holds.length ? (
-                                <ul className="space-y-1">
+                                <ul className="flex flex-wrap gap-1">
                                   {r.holds.map((h, i) => (
-                                    <li key={i}>
+                                    <li
+                                      key={i}
+                                      title={holdText(h, r)}
+                                      className="whitespace-nowrap"
+                                    >
                                       <Badge tone={i === 0 ? toneOf(r) : 'neutral'}>
-                                        {holdText(h, r)}
+                                        <span aria-hidden="true">{holdShort(h)}</span>
+                                        <span className="sr-only">{holdText(h, r)}</span>
                                       </Badge>
+                                      {h.kind === 'decision' ? (
+                                        <span className="ms-1 text-xs text-muted">
+                                          {t('holdShort.decisionMeta', {
+                                            days: formatNumber(h.days, locale),
+                                          })}
+                                        </span>
+                                      ) : null}
                                     </li>
                                   ))}
                                 </ul>

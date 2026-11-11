@@ -64,6 +64,7 @@ export default async function ClosePage({ searchParams }: { searchParams: Promis
   ]);
   const unsent = claims ? followUps(claims, now.toISOString()).unsent : null;
   const steps = buildSteps({
+    monthOffset: checklist.monthOffset,
     unchecked: checklist.unchecked,
     consolidated: checklist.consolidated,
     deliveryNotes: checklist.deliveryNotes,
@@ -71,7 +72,7 @@ export default async function ClosePage({ searchParams }: { searchParams: Promis
     claims: unsent ? { count: unsent.count, amountIls: unsent.agorot / 100 } : null,
     vat: vat ? { count: vat.count, amountIls: vat.totalVatAtRisk } : null,
   });
-  const { done, total } = progress(steps);
+  const { done, total, open } = progress(steps);
 
   const [y, m] = month.split('-').map(Number) as [number, number];
   const monthName = formatDate(new Date(Date.UTC(y, m - 1, 15)), locale, { month: 'long', year: 'numeric', timeZone: 'UTC' });
@@ -112,7 +113,7 @@ export default async function ClosePage({ searchParams }: { searchParams: Promis
           )}
         </nav>
         <p className="text-sm font-semibold text-muted tabular-nums" data-testid="close-progress">
-          {total > 0 && done === total ? t('close.allDone') : t('close.progress', { done: n(done), total: n(total) })}
+          {open === 0 ? t('close.allDone') : t('close.progress', { done: n(done), total: n(total) })}
         </p>
       </div>
 
@@ -157,17 +158,19 @@ export default async function ClosePage({ searchParams }: { searchParams: Promis
                   </>
                 )}
               </div>
-              <div className="w-full shrink-0 sm:w-auto">
-                <LinkButton
-                  href={st.href}
-                  variant={st.primary ? 'primary' : 'secondary'}
-                  size="sm"
-                  className="min-h-11 w-full sm:w-auto"
-                  data-testid={`close-link-${st.key}`}
-                >
-                  {t(`${copyKey}.verb`)}
-                </LinkButton>
-              </div>
+              {st.href ? (
+                <div className="w-full shrink-0 sm:w-auto">
+                  <LinkButton
+                    href={st.href}
+                    variant={st.primary ? 'primary' : 'secondary'}
+                    size="sm"
+                    className="min-h-11 w-full sm:w-auto"
+                    data-testid={`close-link-${st.key}`}
+                  >
+                    {t(`${copyKey}.verb`)}
+                  </LinkButton>
+                </div>
+              ) : null}
             </li>
           );
         })}

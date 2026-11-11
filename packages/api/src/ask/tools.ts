@@ -22,20 +22,42 @@ import {
 } from '@restomatch/charts';
 import type { Database } from '@restomatch/db';
 import { z } from 'zod';
+import type { UserRole } from '@restomatch/db';
 import { awaitingDecisionDetail, type AwaitingClaim } from '../approvals/awaiting';
 import { claimableLines } from '../lib/claims';
 import { leakComparison } from './compare';
+import { isOpsTool, OPS_TOOL_DEFINITIONS, runOpsTool, type OpsToolName } from './opsTools';
 import { monthKey, monthPeriod, restaurantTimezone, type Period } from './periods';
+import { AskToolForbidden, canUseTool, redactForRole } from './roles';
 
 export { monthKey } from './periods';
 
-export type ToolName = 'leak_hero' | 'leak_report' | 'leak_breakdown' | 'leak_change' | 'claimable_lines';
+export type ToolName =
+  | 'leak_hero'
+  | 'leak_report'
+  | 'leak_breakdown'
+  | 'leak_change'
+  | 'claimable_lines'
+  // AU-06: what needs me
+  | OpsToolName;
 
 /** A screen the answer may link to (validated allow-list, built only here). */
 export interface ScreenLink {
   href: string;
   /** Stable label key; the web renders it in the user's language. */
-  screen: 'overview' | 'leaks' | 'report' | 'breakdown' | 'claims' | 'invoice' | 'supplier';
+  screen:
+    | 'overview'
+    | 'leaks'
+    | 'report'
+    | 'breakdown'
+    | 'claims'
+    | 'invoice'
+    | 'supplier'
+    // AU-06 operational answers
+    | 'approvals'
+    | 'inbox'
+    | 'recovery'
+    | 'payRun';
 }
 
 /** The figures in a tool result, by unit (from the field name: …Ils/…Price → ₪, …Pct → %). */
@@ -263,6 +285,8 @@ export const TOOL_DEFINITIONS = [
     input_schema: { type: 'object', properties: {}, additionalProperties: false },
     strict: true,
   },
+  // AU-06: what needs me (waiting, stuck, owed, to pay, VAT at risk).
+  ...OPS_TOOL_DEFINITIONS,
 ] as const;
 
 export interface ToolContext {
@@ -271,11 +295,40 @@ export interface ToolContext {
   now?: Date;
   /** Language of the answer (names are given in it). */
   locale?: AskLocale;
+  /** The session role (AU-06 role table). The router always passes it. */
+  role?: UserRole;
 }
 
-/** Execute one tool. Throws on invalid input (the loop returns it as an is_error tool_result). */
+/**
+ * Execute one tool, through the role table (roles.ts): a tool the role may not
+ * use throws AskToolForbidden (the loop returns it as an is_error tool_result),
+ * and ₪ fields are stripped for a role without money view.
+ */
 export async function runTool(name: string, rawInput: unknown, ctx: ToolContext): Promise<ToolOutput> {
+  if (!canUseTool(name, ctx.role)) {
+    if (!(name in TOOL_ROLES_PROBE)) throw new Error(`unknown tool: ${name}`);
+    throw new AskToolForbidden(name, ctx.role);
+  }
+  return redactForRole(await runToolUnchecked(name, rawInput, ctx), ctx.role);
+}
+
+const TOOL_ROLES_PROBE: Record<string, true> = Object.fromEntries(TOOL_DEFINITIONS.map((t) => [t.name, true as const]));
+
+/** Throws on invalid input (the loop returns it as an is_error tool_result). */
+async function runToolUnchecked(name: string, rawInput: unknown, ctx: ToolContext): Promise<ToolOutput> {
   const now = ctx.now ?? new Date();
+  if (isOpsTool(name)) {
+    const r = await runOpsTool(name, rawInput, {
+      db: ctx.db,
+      restaurantId: ctx.restaurantId,
+      role: ctx.role,
+      now,
+      locale: ctx.locale ?? 'en',
+    });
+    // Same period contract as the leak tools ({from, through, complete}); none when unavailable.
+    const period = r.data.available ? r.data.period : undefined;
+    return { data: r.data, links: r.links, figures: figuresOf(r.data), ...(period ? { period } : {}) };
+  }
   const tz = await restaurantTimezone(ctx.db, ctx.restaurantId);
   switch (name as ToolName) {
     case 'leak_hero': {
