@@ -1184,8 +1184,12 @@ export const ordersRouter = router({
       };
     }),
 
-  /** Order-time leak guardrail preview (advanced_analytics). */
-  guardrail: memberProcedure
+  /**
+   * Order-time leak guardrail preview (advanced_analytics). It returns baseline ₪
+   * (p50/p90) for the wizard's review, so it sits at the order-write tier: the
+   * receiver (no ₪, never drafts) gets FORBIDDEN.
+   */
+  guardrail: orderWriteProcedure
     .use(requireFeature('advanced_analytics'))
     .input(
       z.object({
