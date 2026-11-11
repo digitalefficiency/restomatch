@@ -1,9 +1,7 @@
-/**
- * AU-03 COVERAGE fragment (W2-01 mechanism, #180). Until #180 merges the
- * cross-tenant suite does not read fragments; the completeness red that waits
- * on #180 is expected (KICKOFF-0711 §1.6).
- */
-const coverage: Readonly<Record<string, string>> = {
+import type { CoverageFragment } from './index';
+
+/** AU-03 (A12) COVERAGE fragment: the credit-suggestion procedures (see ./README.md). */
+const coverage: CoverageFragment = {
   'recovery.creditSuggestions':
     "isolation — recovery-credit-suggest.test.ts: A's suggestions never contain B's credit line; receiver/chef FORBIDDEN; flag off FEATURE_DISABLED; read-only (no credit note, no status change)",
   'recovery.confirmCreditSuggestion':
