@@ -6,7 +6,8 @@ import { OWNER_STATE } from './env';
 import { loginViaMagicLink } from './helpers';
 
 /**
- * W2-13 copy system: the activity feed renders from v2 metadata (grouped per invoice,
+ * W2-13 copy system: the activity feed (owner: in the bell panel since W2-08 I1 moved
+ * "מה קרה" off the home) renders from v2 metadata (grouped per invoice,
  * linked, relative time, he + en), the receiver home shows no ₪, and the bidi isolation
  * keeps a Latin supplier name contiguous in a Hebrew sentence (Lab I).
  */
@@ -24,6 +25,14 @@ async function asRole(browser: Browser, email: string, opts: Parameters<Browser[
   return { context, page };
 }
 
+/** The owner's activity feed lives in the bell panel (W2-08 I1). Opens it and returns the feed section. */
+async function openFeed(page: Page) {
+  await page.getByTestId('bell-trigger').click();
+  const feed = page.getByTestId('bell-activity');
+  await expect(feed).toBeVisible();
+  return feed;
+}
+
 async function axeSerious(page: Page, selector: string) {
   await page.addScriptTag({ content: AXE });
   return page.evaluate(async (sel) => {
@@ -37,7 +46,7 @@ async function axeSerious(page: Page, selector: string) {
   }, selector);
 }
 
-test.describe('owner home feed (W2-13)', () => {
+test.describe('owner activity feed, bell panel (W2-13)', () => {
   for (const [label, opts] of [
     ['he 1440', DESKTOP],
     ['he 390', PHONE],
@@ -46,8 +55,7 @@ test.describe('owner home feed (W2-13)', () => {
       const { context, page } = await asRole(browser, 'owner@kfar-hazeitim.test', opts, baseURL!);
       try {
         await page.goto('/dashboard');
-        const feed = page.getByTestId('home-activity');
-        await expect(feed).toBeVisible();
+        const feed = await openFeed(page);
         const rows = feed.locator('li');
         await expect(rows.first()).toBeVisible();
         const n = await rows.count();
@@ -69,7 +77,7 @@ test.describe('owner home feed (W2-13)', () => {
         expect(new Set(numbers).size).toBe(numbers.length);
         const text = await feed.innerText();
         expect(text).not.toMatch(/חריג|הפסד|חיסכון|ריכוז/);
-        expect(await axeSerious(page, '[data-testid="home-activity"]')).toEqual([]);
+        expect(await axeSerious(page, '[data-testid="bell-activity"]')).toEqual([]);
       } finally {
         await context.close();
       }
@@ -81,14 +89,14 @@ test.describe('owner home feed (W2-13)', () => {
     try {
       await page.goto('/dashboard?lang=en');
       await expect(page.locator('html')).toHaveAttribute('lang', 'en');
-      const feed = page.getByTestId('home-activity');
+      const feed = await openFeed(page);
       const links = feed.getByRole('link');
       await expect(links.first()).toBeVisible();
       for (const title of await links.allInnerTexts()) {
         expect(title.replace(/[⁦-⁩]/g, '')).toMatch(/^(Consolidated invoice|Invoice) \S+ (matched|received)$/);
       }
       expect(await feed.innerText()).not.toMatch(/הותאמה|התקבלה|חריג|הפסד/);
-      expect(await axeSerious(page, '[data-testid="home-activity"]')).toEqual([]);
+      expect(await axeSerious(page, '[data-testid="bell-activity"]')).toEqual([]);
     } finally {
       await context.close();
     }
