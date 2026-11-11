@@ -1009,6 +1009,47 @@ html[lang='ti'] .font-sans {
   }
 }
 
+/* The one print rule (W2-15). lib/components/PrintButton sets html[data-printing]
+   (+ data-print-scope) and marks the matching [data-print-root=<scope>] with
+   data-print-active, then clears all of it on afterprint. A4, a white sheet,
+   tokens only. The xmatch block above stays as an alias until W2-02, W2-09 and
+   W2-10 move to the shared PrintButton; it goes in W2-15's final PR. */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  html[data-printing],
+  html[data-printing] body {
+    background: rgb(var(--c-surface)) !important;
+    background-image: none !important;
+  }
+  html[data-printing][data-print-scope] body * {
+    visibility: hidden;
+  }
+  html[data-printing][data-print-scope] [data-print-active],
+  html[data-printing][data-print-scope] [data-print-active] * {
+    visibility: visible;
+  }
+  html[data-printing][data-print-scope] [data-print-active] {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    margin: 0;
+    max-width: none;
+    color: rgb(var(--c-ink));
+    background: rgb(var(--c-surface));
+    border: 0;
+    box-shadow: none;
+  }
+  html[data-printing] [data-print-active] section {
+    break-inside: avoid;
+  }
+  html[data-printing] [data-print-button] {
+    display: none;
+  }
+}
+
 /* ───────────── W1-01 design-system foundation v2 (tokens: app/tokens.css) ───────────── */
 
 @layer base {

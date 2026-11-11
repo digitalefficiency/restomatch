@@ -10,9 +10,9 @@ export const he = {
     title: 'הכל מטופל ✓',
     description: 'אין פערים שמחכים להחלטה שלך.',
     clearTitle: 'הכל מטופל ✓',
-    clearDescription: 'אין פערים פתוחים במסעדה. פערים חדשים יופיעו כאן ברגע שיזוהו בקבלות ובחשבוניות.',
-    othersWaiting: 'אין פערים שמחכים לך · {count} ממתינים ל{role} ({amount})',
-    othersWaitingMany: 'אין פערים שמחכים לך · {count} ממתינים לאחרים ({amount})',
+    clearDescription: 'פערים חדשים יופיעו כאן.',
+    othersWaiting: 'אין פערים שמחכים לכם.',
+    othersWaitingMany: 'אין פערים שמחכים לכם.',
   },
   summary: {
     inQueue: 'מחכים לך',
@@ -29,7 +29,7 @@ export const he = {
     title: 'ממתין לאחרים',
     line: '{count} · {amount}',
     role: '{role}: {count} ({amount})',
-    readOnly: 'לקריאה בלבד — ההחלטה שלהם.',
+    readOnly: 'צפייה בלבד',
   },
   roles: {
     owner: 'בעלים',
@@ -93,7 +93,7 @@ export const he = {
     routing: 'ניתוב',
     error: 'ההחלטה לא נשמרה. נסו שוב.',
     retry: 'נסו שוב',
-    forbidden: 'אין לך הרשאה להחליט על הפער הזה.',
+    forbidden: 'אין הרשאה להחליט על הפער הזה.',
     decidedBy: 'כבר הוחלט ע״י {who} · {time} · {status}',
     decidedBySelf: 'כבר החלטת על הפער הזה · {time} · {status}',
     someone: 'משתמש אחר',
@@ -117,14 +117,14 @@ export const he = {
     action: 'בטל',
     done: '{verb} · {amount}',
     undone: 'ההחלטה בוטלה · הפער חזר לתור',
-    failed: 'אי אפשר לבטל: עבר הזמן או שמישהו אחר כבר פעל.',
+    failed: 'כבר אי אפשר לבטל.',
     announce: '{verb} · {what} · נותרו {count}',
   },
   errorPage: {
     title: 'תור האישורים לא נטען',
     titlePayRun: 'ריצת התשלומים לא נטענה',
     bodyPayRun: 'משהו השתבש בטעינת ריצת התשלומים. שום תשלום לא סומן.',
-    body: 'משהו השתבש בטעינת הפערים. שום החלטה לא אבדה.',
+    body: 'שום החלטה לא אבדה.',
     retry: 'נסו שוב',
     home: 'לדף הבית',
   },
@@ -143,11 +143,11 @@ export const he = {
   types: {
     PRICE_HIGHER: {
       label: 'מחיר גבוה מהמצופה',
-      explain: 'הספק חייב מחיר ליחידה גבוה מהמחיר בהזמנה או מהמחיר ההיסטורי.',
+      explain: 'מחיר ליחידה גבוה מההזמנה או ממחירי העבר.',
     },
     PRICE_LOWER: {
       label: 'מחיר נמוך מהמצופה',
-      explain: 'הספק חייב פחות מהמצופה — לא דליפה, רק לידיעה.',
+      explain: 'חויב פחות מהמצופה. לא נספר בדליפה.',
     },
     QTY_SHORT: {
       label: 'חסר בכמות שהתקבלה',
@@ -167,7 +167,7 @@ export const he = {
     },
     UNIT_MISMATCH: {
       label: 'אי-התאמת יחידות',
-      explain: 'יחידת המידה בחשבונית שונה מזו שבהזמנה ואין המרה ביניהן.',
+      explain: 'יחידה שונה מההזמנה, בלי המרה.',
     },
     UNORDERED_ARRIVAL: {
       label: 'ממתינה לשיוך להזמנה',
@@ -176,15 +176,15 @@ export const he = {
     },
     DUPLICATE_INVOICE: {
       label: 'חשבונית כפולה',
-      explain: 'מספר החשבונית כבר נקלט מאותו ספק — סכנה לתשלום כפול.',
+      explain: 'מספר החשבונית כבר נקלט מהספק הזה.',
     },
     DATE_ANOMALY: {
       label: 'תאריך לא צפוי',
-      explain: 'תאריך החשבונית רחוק ביותר משבוע ממועד האספקה הצפוי.',
+      explain: 'תאריך החשבונית רחוק ממועד האספקה.',
     },
     VAT_MISMATCH: {
       label: 'אי-התאמת מע״מ',
-      explain: 'סכום המע״מ אינו תואם את שיעור המע״מ על הסכום לפני מע״מ.',
+      explain: 'סכום המע״מ לא תואם לשיעור.',
     },
     TOTAL_MISMATCH: {
       label: 'סה״כ לא תואם לשורות',
@@ -195,14 +195,14 @@ export const he = {
     price: '±{pct} מהמחיר או {amount}',
     qty: '±{pct} מהכמות או {units} יחידות',
     duplicate: 'מספר חשבונית ייחודי לכל ספק',
-    date: '±{days} ימים ממועד האספקה הצפוי',
+    date: '±{days} ימים',
     poRequired: 'לכל חשבונית חייבת להיות הזמנה',
     unit: 'יחידת המידה חייבת להתאים בין ההזמנה לחשבונית',
     billedOverReceived: 'הכמות שחויבה עולה על הכמות שהתקבלה',
     missingLine: 'כל שורת הזמנה חייבת להופיע בחשבונית',
     unorderedLine: 'כל שורת חשבונית חייבת להתאים לשורת הזמנה',
     total: '±{amount}',
-    vat: 'מע״מ {rate} על הסכום לפני מע״מ, ±{amount}',
+    vat: 'מע״מ {rate}, ±{amount}',
     p90: 'מעל אחוזון 90 ההיסטורי ({amount})',
   },
   rules: {
