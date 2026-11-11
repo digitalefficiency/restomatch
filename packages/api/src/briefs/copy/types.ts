@@ -18,14 +18,6 @@ export interface BriefCopy {
     intake: (count: number, oldestHours: number) => string;
     open: string;
   };
-  orderReminder: {
-    draftSubject: (supplier: string) => string;
-    draftLine: (supplier: string, cutoff: string | null) => string;
-    draftCta: string;
-    noOrderSubject: (supplier: string) => string;
-    noOrderLine: (supplier: string, dayLabel: string, cutoff: string | null) => string;
-    noOrderCta: string;
-  };
   lateTruck: {
     managerSubject: (supplier: string) => string;
     managerLine: (supplier: string, poRef: string, plannedDate: string, daysLate: number, lines: number) => string;
