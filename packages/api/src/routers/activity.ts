@@ -89,6 +89,8 @@ export function redactActivityForRole<T extends FeedRow>(role: UserRole, row: T)
     ...row,
     title: hasShekel(row.title) ? stripShekelFigures(row.title) : row.title,
     detail: null,
+    // users.name is self-chosen free text; keep the feed ₪-free end to end.
+    ...(row.actorName && hasShekel(row.actorName) ? { actorName: stripShekelFigures(row.actorName) } : {}),
     metadata: redactMetadata(row.metadata),
   };
 }

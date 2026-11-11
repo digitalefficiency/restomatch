@@ -49,7 +49,7 @@ export const ACT_ON: Readonly<Record<UserRole, ReadonlyArray<Routing>>> = {
 
 /** May `role` read an item routed to `requiredRole` (null = unrouted)? */
 export function canSee(role: UserRole, requiredRole: UserRole | null): boolean {
-  return VISIBLE_TO[role].includes(requiredRole ?? 'unrouted');
+  return (VISIBLE_TO[role] ?? []).includes(requiredRole ?? 'unrouted');
 }
 
 /**
@@ -80,5 +80,6 @@ export function expandVisibleRoles(role: UserRole): UserRole[] {
  * Signature frozen (match/persist.ts decision carry-over).
  */
 export function canActOn(role: UserRole, requiredRole: UserRole | null): boolean {
-  return ACT_ON[role].includes(requiredRole ?? 'unrouted');
+  // A role added to the enum before this table: decides nothing (fail closed, no throw).
+  return (ACT_ON[role] ?? []).includes(requiredRole ?? 'unrouted');
 }

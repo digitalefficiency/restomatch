@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { UserRole } from '@restomatch/db';
+import { userRole, type UserRole } from '@restomatch/db';
 import {
   ACT_ON,
   ROUTINGS,
@@ -31,6 +31,22 @@ function legacyCanActOn(role: UserRole, requiredRole: UserRole | null): boolean 
 
 const REQUIRED: Array<UserRole | null> = [...USER_ROLES, null];
 const ctxOf = (role: UserRole, userId = 'me') => ({ session: { role, userId } });
+
+describe('role tables cover the user_role enum', () => {
+  it('USER_ROLES, ACT_ON and VISIBLE_TO have exactly the DB enum values', () => {
+    const enumValues = [...userRole.enumValues].sort();
+    expect([...USER_ROLES].sort()).toEqual(enumValues);
+    expect(Object.keys(ACT_ON).sort()).toEqual(enumValues);
+    expect(Object.keys(VISIBLE_TO).sort()).toEqual(enumValues);
+  });
+
+  it('an unknown role decides and sees nothing (no throw)', () => {
+    const ghost = 'ghost' as UserRole;
+    expect(canActOn(ghost, null)).toBe(false);
+    expect(canActOn(ghost, 'owner')).toBe(false);
+    expect(canSee(ghost, null)).toBe(false);
+  });
+});
 
 describe('ACT_ON — who decides (byte-identical to wave 1)', () => {
   it('canActOn equals legacyCanActOn on all 5 × 6 role × requiredRole pairs', () => {

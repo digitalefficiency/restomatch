@@ -192,6 +192,21 @@ describe('activity.feed — money scope by role (G-07)', () => {
     }
   });
 
+  it('a ₪ in a self-chosen display name is cut for receiver / chef, kept for the owner', async () => {
+    await db.update(users).set({ name: 'דנה ₪1,200' }).where(eq(users.id, A.ownerUserId));
+    try {
+      const own = await caller(A, 'owner').activity.feed();
+      expect(own.find((r) => r.eventType === 'discrepancy_approved')?.actorName).toBe('דנה ₪1,200');
+      for (const role of ['receiver', 'chef'] as const) {
+        const rows = await caller(A, role).activity.feed();
+        expect(JSON.stringify(rows), role).not.toContain('₪');
+        expect(rows.find((r) => r.eventType === 'discrepancy_approved')?.actorName, role).toBe('דנה');
+      }
+    } finally {
+      await db.update(users).set({ name: 'דנה כהן' }).where(eq(users.id, A.ownerUserId));
+    }
+  });
+
   it('A ≠ B: each tenant reads only its own events, for every role', async () => {
     for (const role of ['owner', 'manager', 'bookkeeper', 'receiver', 'chef'] as const) {
       const a = await caller(A, role).activity.feed();

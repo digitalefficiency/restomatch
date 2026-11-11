@@ -56,6 +56,14 @@ describe('procedure walk', () => {
     expect(missing).toEqual([]);
   });
 
+  it('every procedure with meta.cap sits at member level or above (can() needs a membership-checked role)', () => {
+    const belowMember = new Set(['public', 'authed', 'userScoped']);
+    const bad = procedures()
+      .filter(([, p]) => p._def.meta?.cap && (!p._def.meta.tier || belowMember.has(p._def.meta.tier)))
+      .map(([path, p]) => `${path} (${p._def.meta?.tier ?? 'no tier'})`);
+    expect(bad).toEqual([]);
+  });
+
   it('public procedures are exactly the allow-list', () => {
     const pub = procedures()
       .filter(([, p]) => p._def.meta?.tier === 'public')
