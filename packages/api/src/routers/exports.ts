@@ -72,7 +72,7 @@ export const exportsRouter = router({
         { header: 'סה״כ עם מע״מ', value: (r) => r.totalInclVat },
         { header: 'סטטוס', value: (r) => r.status },
         { header: 'מצב', value: (r) => STATUS_HE[r.status] ?? r.status },
-        { header: '₪ במחלוקת', value: (r) => gaps.get(r.id) ?? '0.00' },
+        { header: '₪ בבירור מול ספקים', value: (r) => gaps.get(r.id) ?? '0.00' },
         { header: 'אמינות OCR', value: (r) => r.ocrConfidence },
       ]);
       return {

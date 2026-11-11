@@ -9,7 +9,7 @@ import { trpc } from '@/lib/trpc/client';
 
 /**
  * What the export of this range will contain, BEFORE the download (W2-14,
- * admin-04): "412 חשבוניות · ₪184,220 · 3 עם פער פתוח · ₪412 במחלוקת". The ₪
+ * admin-04): "412 חשבוניות · ₪184,220 · 3 עם פער פתוח · ₪412 בבירור מול הספק". The ₪
  * figures are 2-dp shekel strings from `exports.summary` (summed in Postgres).
  */
 export function ExportSummary({ from, to }: { from: string; to: string }) {
