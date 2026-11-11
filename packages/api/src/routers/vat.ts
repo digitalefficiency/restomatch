@@ -150,8 +150,12 @@ export const vatRouter = router({
       if (!(await flagOn(ctx.db, rid))) return null;
       const [prior] = await priorAllocationEvents(ctx.db, rid, VAT_ALLOCATION_SET, input.clientMutationId);
       if (prior) {
+        // A replay is only a replay of the SAME action: a reused id aimed at another invoice is a client bug.
+        if (prior.invoiceId !== input.invoiceId) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'clientMutationId already used for another invoice' });
+        }
         const after = prior.after as { allocationNumber?: string } | null;
-        return { invoiceId: prior.invoiceId ?? input.invoiceId, allocationNumber: after?.allocationNumber ?? '', replayed: true };
+        return { invoiceId: prior.invoiceId, allocationNumber: after?.allocationNumber ?? '', replayed: true };
       }
       const value = normaliseAllocationNumber(input.allocationNumber);
       if (!value) {
@@ -203,12 +207,15 @@ export const vatRouter = router({
       if (!(await flagOn(ctx.db, rid))) return null;
       const prior = await priorAllocationEvents(ctx.db, rid, VAT_ALLOCATION_REQUESTED, input.clientMutationId);
       if (prior.length) {
-        return {
-          supplierId: input.supplierId,
-          invoiceIds: prior.map((p) => p.invoiceId).filter((x): x is string => !!x),
-          requestedAt: prior[0]!.at.toISOString(),
-          replayed: true,
-        };
+        // Report what was recorded, and refuse a reused id for a different supplier or invoice set.
+        const recordedSupplier = (prior[0]!.after as { supplierId?: string } | null)?.supplierId ?? null;
+        const recordedIds = prior.map((p) => p.invoiceId).filter((x): x is string => !!x);
+        const sameSet =
+          new Set(input.invoiceIds).size === recordedIds.length && recordedIds.every((id) => input.invoiceIds.includes(id));
+        if (recordedSupplier !== input.supplierId || !sameSet) {
+          throw new TRPCError({ code: 'CONFLICT', message: 'clientMutationId already used for another request' });
+        }
+        return { supplierId: recordedSupplier, invoiceIds: recordedIds, requestedAt: prior[0]!.at.toISOString(), replayed: true };
       }
       const [sup] = await ctx.db
         .select({ id: suppliers.id })
