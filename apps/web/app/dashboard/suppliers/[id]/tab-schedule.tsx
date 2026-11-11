@@ -1,6 +1,7 @@
 'use client';
 
 import { TimeField } from '../time-field';
+import { SupplierScheduleReadOnly } from './read-only-view';
 import { useState } from 'react';
 import type { OrderSchedule, OrderWindow } from '@restomatch/types';
 import { CalendarClock, Plus, Trash2 } from 'lucide-react';
@@ -79,7 +80,16 @@ function formToSchedule(rows: WindowForm[]): OrderSchedule | null {
  * can actually be persisted (it used to fall back to the empty state, leaving
  * the old schedule in the database).
  */
-export function SupplierScheduleTab({ supplierId, initial }: { supplierId: string; initial?: SupplierWithFlags }) {
+export function SupplierScheduleTab({
+  supplierId,
+  initial,
+  canEdit = true,
+}: {
+  supplierId: string;
+  initial?: SupplierWithFlags;
+  /** False for roles that can't write suppliers (the bookkeeper): the schedule read-only, no form. */
+  canEdit?: boolean;
+}) {
   const t = useT(suppliersNs);
   const tc = useT(components);
   const toast = useToast();
@@ -105,6 +115,7 @@ export function SupplierScheduleTab({ supplierId, initial }: { supplierId: strin
   }
   const s = supplier.data;
   if (!s) return null;
+  if (!canEdit) return <SupplierScheduleReadOnly s={s} />;
 
   // Hydrate the editable rows from the saved schedule once.
   const current = rows ?? scheduleToForm(s.orderSchedule);

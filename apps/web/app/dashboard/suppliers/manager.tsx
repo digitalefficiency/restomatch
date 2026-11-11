@@ -64,7 +64,8 @@ interface Supplier {
 }
 
 /** Supplier setup CRUD — list, filter, create, soft-deactivate. */
-export function SupplierManager() {
+/** `canEdit` false (roles that can't write suppliers): no add / deactivate controls — the server refuses them anyway. */
+export function SupplierManager({ canEdit = true }: { canEdit?: boolean } = {}) {
   const t = useT(suppliersNs);
   const tc = useT(components);
   const toast = useToast();
@@ -146,7 +147,7 @@ export function SupplierManager() {
               />
             </div>
           ) : null}
-          {!creating && (
+          {canEdit && !creating && (
             <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
               <Plus className="h-4 w-4" aria-hidden="true" /> {t('manager.add')}
             </Button>
@@ -179,9 +180,11 @@ export function SupplierManager() {
           title={t('manager.emptyTitle')}
           description={t('manager.emptyBody')}
           action={
-            <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-              <Plus className="h-4 w-4" aria-hidden="true" /> {t('manager.add')}
-            </Button>
+            canEdit ? (
+              <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+                <Plus className="h-4 w-4" aria-hidden="true" /> {t('manager.add')}
+              </Button>
+            ) : undefined
           }
         />
       ) : visible.length === 0 && suppliers.length > 0 ? (
@@ -192,6 +195,7 @@ export function SupplierManager() {
             <li key={s.id}>
               <SupplierRow
                 supplier={s}
+                canEdit={canEdit}
                 onToggleActive={() => {
                   setTogglingId(s.id);
                   setActive.mutate({ supplierId: s.id, active: !s.active });
@@ -225,10 +229,12 @@ export function SupplierManager() {
 function SupplierRow({
   supplier,
   onToggleActive,
+  canEdit = true,
   toggling,
 }: {
   supplier: Supplier;
   onToggleActive: () => void;
+  canEdit?: boolean;
   toggling: boolean;
 }) {
   const t = useT(suppliersNs);
@@ -317,12 +323,15 @@ function SupplierRow({
             href={`/dashboard/suppliers/${supplier.id}`}
             className="inline-flex items-center gap-2 rounded-xl border border-line bg-surface-2 px-3 py-1.5 text-xs font-semibold text-ink transition-all hover:border-primary/40 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
           >
-            <Pencil className="h-3.5 w-3.5" aria-hidden="true" /> {t('manager.edit')}
+            {canEdit ? <Pencil className="h-3.5 w-3.5" aria-hidden="true" /> : null}{' '}
+            {canEdit ? t('manager.edit') : t('manager.view')}
           </Link>
-          <Button variant="ghost" size="sm" loading={toggling} onClick={onToggleActive}>
-            <Power className="h-3.5 w-3.5" aria-hidden="true" />
-            {supplier.active ? t('manager.deactivate') : t('manager.activate')}
-          </Button>
+          {canEdit ? (
+            <Button variant="ghost" size="sm" loading={toggling} onClick={onToggleActive}>
+              <Power className="h-3.5 w-3.5" aria-hidden="true" />
+              {supplier.active ? t('manager.deactivate') : t('manager.activate')}
+            </Button>
+          ) : null}
         </div>
       </div>
     </Card>

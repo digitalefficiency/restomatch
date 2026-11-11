@@ -12,6 +12,7 @@ import { SuppliersList } from './list';
 import { SuppliersTabs } from './tabs';
 import { SupplierManager } from './manager';
 import { VendorTable } from './vendor-table';
+import { canEditSupplier } from './[id]/read-only';
 import { auth } from '@/auth';
 
 const PAGE = 9;
@@ -60,7 +61,7 @@ export default async function SuppliersPage({
         initialTab={initialTab}
         defaultTab={defaultTab}
         table={table ? <VendorTable rows={table.rows} totals={table.totals} /> : undefined}
-        management={<SupplierManager />}
+        management={<SupplierManager canEdit={canEditSupplier(role)} />}
         scorecards={scorecardsNode}
       />
     </div>
