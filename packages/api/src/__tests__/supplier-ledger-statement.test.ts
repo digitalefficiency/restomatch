@@ -40,6 +40,7 @@ describe('reconcileStatement (W3-11 כרטסת)', () => {
       ],
       creditNotes: [{ id: 'cn1', number: '555', issuedOn: '2026-10-15', amountAgorot: 2_000 }],
       agreedOpenAgorot: 0,
+      checkPayments: true,
     });
     const by = (k: string) => r.flags.filter((f) => f.kind === k);
     expect(by('invoice_never_got')).toMatchObject([{ number: '1002', amountAgorot: 50_000 }]);
@@ -60,6 +61,7 @@ describe('reconcileStatement (W3-11 כרטסת)', () => {
       lines: [line('invoice', '1001', 118_000), line('payment', null, 112_100), line('credit', '9', 5_900)],
       invoices: [inv('i1', '1001', 118_000, { paid: true })],
       creditNotes: [{ id: 'cn9', number: '9', issuedOn: '2026-10-10', amountAgorot: 5_000 }],
+      checkPayments: true,
     });
     expect(r.matched.credits).toBe(1);
     expect(r.flags).toEqual([expect.objectContaining({ kind: 'payment_unapplied', amountAgorot: 5_900 })]);
@@ -87,6 +89,11 @@ describe('reconcileStatement (W3-11 כרטסת)', () => {
     expect(reconcileStatement({ ...base, lines: [line('credit', 'c', 4_720)] }).flags.map((f) => f.kind)).toEqual([
       'credit_unrecorded',
     ]);
+    // A small unrelated credit can't be the ₪40 agreement: both are flagged.
+    expect(reconcileStatement({ ...base, lines: [line('credit', 'c', 300)] }).flags.map((f) => f.kind)).toEqual([
+      'credit_unrecorded',
+      'credit_missing',
+    ]);
   });
 
   it('ignores our credit notes outside the statement period; unknown receiving never flags', () => {
@@ -96,6 +103,35 @@ describe('reconcileStatement (W3-11 כרטסת)', () => {
       creditNotes: [{ id: 'old', number: '1', issuedOn: '2026-08-01', amountAgorot: 500 }],
     });
     expect(r.flags).toEqual([]);
+  });
+
+  it('flags an invoice billed twice on the statement', () => {
+    const r = reconcileStatement({
+      lines: [line('invoice', '1001', 118_000), line('invoice', '1001', 118_000)],
+      invoices: [inv('i1', '1001', 118_000)],
+      creditNotes: [],
+    });
+    expect(r.flags).toEqual([expect.objectContaining({ kind: 'invoice_duplicate', number: '1001', amountAgorot: 118_000, invoiceId: 'i1' })]);
+    expect(r.matched.invoices).toBe(1);
+  });
+
+  it('never compares a missing total as ₪0, and skips invoices still being read', () => {
+    const r = reconcileStatement({
+      lines: [line('invoice', '1', 100_000), line('invoice', '2', 50_000)],
+      invoices: [inv('a', '1', 0, { inclVatAgorot: null }), inv('b', '2', 1, { pending: true, hasDeliveryNote: false })],
+      creditNotes: [],
+    });
+    expect(r.flags).toEqual([]);
+    expect(r.matched.invoices).toBe(2);
+  });
+
+  it('holds payment_unapplied unless payments are checked (paying net of a credit is no alarm)', () => {
+    const args = {
+      lines: [line('invoice', '1001', 100_000), line('payment', null, 90_000), line('credit', '9', 10_000)],
+      invoices: [inv('i1', '1001', 100_000, { paid: true })],
+      creditNotes: [],
+    };
+    expect(reconcileStatement(args).flags.map((f) => f.kind)).toEqual(['credit_unrecorded']);
   });
 
   it('normalizes document numbers', () => {
@@ -137,6 +173,38 @@ describe('parseStatementCsv', () => {
     expect(parseStatementCsv('a,b\n1,2').headerFound).toBe(false);
   });
 
+  it('finds the header under a title line and guesses the separator from it', () => {
+    const p = parseStatementCsv('כרטסת ספק תנובה, אוקטובר 2026\nתאריך;סוג;אסמכתא;חובה;זכות\n01.10.2026;חשבונית מס;55;1.234,50;');
+    expect(p.headerFound).toBe(true);
+    expect(p.lines).toEqual([{ row: 3, date: '2026-10-01', kind: 'invoice', number: '55', amountAgorot: 123_450 }]);
+  });
+
+  it('reads the European format and refuses an ambiguous three-decimal value', () => {
+    expect(parseStatementAmount('12.500', true)).toBe(1_250_000);
+    expect(parseStatementAmount('1,5', true)).toBe(150);
+    expect(parseStatementAmount('12.500')).toBeNull();
+    const p = parseStatementCsv('Date,Type,Number,Amount\n2026-10-01,Invoice,7,"12,50"');
+    expect(p.lines.map((l) => l.amountAgorot)).toEqual([1_250]);
+  });
+
+  it('decides kinds by the column a line sits in', () => {
+    const csv = [
+      'תאריך,סוג מסמך,אסמכתא,חובה,זכות',
+      '01/10/2026 00:00,חשבונית מס קבלה,10,100.00,',
+      '01/10/2026 00:00,חשבונית מס קבלה,10,,100.00',
+      '02/10/2026,ביטול קבלה,11,50.00,',
+      '03/10/2026,ביטול חשבונית,12,,70.00',
+      '04/10/2026,חשבונית מס,13,,20.00',
+    ].join('\n');
+    expect(parseStatementCsv(csv).lines.map((l) => [l.kind, l.date])).toEqual([
+      ['invoice', '2026-10-01'],
+      ['payment', '2026-10-01'],
+      ['other', '2026-10-02'],
+      ['other', '2026-10-03'],
+      ['other', '2026-10-04'],
+    ]);
+  });
+
   it('parses amounts, dates and kinds', () => {
     expect(parseStatementAmount('1,234.56')).toBe(123_456);
     expect(parseStatementAmount('80.00-')).toBe(-8_000);
@@ -148,6 +216,9 @@ describe('parseStatementCsv', () => {
     expect(parseStatementDate('1999-12-31')).toBeNull();
     expect(kindFromType('חשבונית זיכוי')).toBe('credit');
     expect(kindFromType("צ'ק 1234")).toBe('payment');
+    expect(kindFromType('חשבונית מס קבלה')).toBe('invoice_receipt');
+    expect(kindFromType('ביטול קבלה')).toBe('other');
+    expect(parseStatementDate('2026-10-01T00:00:00Z')).toBe('2026-10-01');
     expect(kindFromType('משהו')).toBeNull();
   });
 

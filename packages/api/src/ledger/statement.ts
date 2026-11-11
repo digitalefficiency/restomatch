@@ -34,10 +34,13 @@ export interface OurInvoice {
   number: string | null;
   /** YYYY-MM-DD or null. */
   date: string | null;
-  inclVatAgorot: number;
+  /** null when the invoice has no total yet (never compared as ₪0). */
+  inclVatAgorot: number | null;
   /** A goods receipt (ת״מ) covers it; null = unknown (the restaurant does not receive here). */
   hasDeliveryNote: boolean | null;
   paid: boolean;
+  /** Still being read (OCR): it arrived, but its numbers are not checked yet. */
+  pending?: boolean;
 }
 
 export interface OurCreditNote {
@@ -56,6 +59,8 @@ export type StatementFlagKind =
   | 'billed_not_received'
   /** Same invoice number, different amount (beyond the rounding allowance). T2. */
   | 'amount_mismatch'
+  /** The same invoice appears on the statement more than once: a double charge. T2. */
+  | 'invoice_duplicate'
   /** We recorded a credit note (or the supplier agreed to credit) and the statement does not show it. T2. */
   | 'credit_missing'
   /** The statement shows a credit we have not recorded: good news, record it. T3. */
@@ -83,6 +88,12 @@ export interface StatementInput {
   creditNotes: readonly OurCreditNote[];
   /** Σ open agorot of credit requests the supplier acknowledged ("הספק אישר"), before VAT. */
   agreedOpenAgorot?: number;
+  /**
+   * Check payments (`payment_unapplied`). Off until real payment records exist (H-04's
+   * `payments` + `payment_invoices`, 0073): the interim "marked paid" rule raises a false
+   * alarm whenever we pay an invoice net of a credit note, and credits are never netted.
+   */
+  checkPayments?: boolean;
 }
 
 export interface StatementResult {
@@ -128,6 +139,7 @@ export function reconcileStatement(input: StatementInput): StatementResult {
     if (k && !invByNumber.has(k)) invByNumber.set(k, inv);
   }
   const usedNotes = new Set<string>();
+  const seenInvoices = new Set<string>();
   const noteByNumber = new Map<string, OurCreditNote>();
   for (const n of input.creditNotes) {
     const k = normalizeDocNumber(n.number);
@@ -153,8 +165,14 @@ export function reconcileStatement(input: StatementInput): StatementResult {
       flags.push({ kind: 'invoice_never_got', ...base, amountAgorot: l.amountAgorot });
       continue;
     }
+    if (seenInvoices.has(ours.id)) {
+      flags.push({ kind: 'invoice_duplicate', ...base, amountAgorot: l.amountAgorot, invoiceId: ours.id });
+      continue;
+    }
+    seenInvoices.add(ours.id);
     matched.invoices += 1;
-    if (!within(l.amountAgorot, ours.inclVatAgorot)) {
+    if (ours.pending) continue;
+    if (ours.inclVatAgorot != null && !within(l.amountAgorot, ours.inclVatAgorot)) {
       const diff = l.amountAgorot - ours.inclVatAgorot;
       flags.push({ kind: 'amount_mismatch', ...base, amountAgorot: Math.abs(diff), diffAgorot: diff, invoiceId: ours.id });
     }
@@ -202,9 +220,11 @@ export function reconcileStatement(input: StatementInput): StatementResult {
   }
   // The supplier agreed to credit, and no unexplained credit line could be it.
   const agreed = input.agreedOpenAgorot ?? 0;
-  // An unrecorded credit line on the statement may be that very credit: recording it
-  // settles the question, so we flag the agreement only when no such line exists.
-  if (agreed > 0 && !flags.some((f) => f.kind === 'credit_unrecorded')) {
+  // Unrecorded credit lines on the statement may be that very credit: recording them settles
+  // the question, so the agreement is flagged only when they can't cover it (they are incl.
+  // VAT, the agreement is before VAT: compare against the agreement at 0% VAT, the lowest).
+  const unrecorded = flags.filter((f) => f.kind === 'credit_unrecorded').reduce((t, f) => t + f.amountAgorot, 0);
+  if (agreed > 0 && unrecorded + STATEMENT_TOLERANCE_AGOROT < agreed) {
     flags.push({ kind: 'credit_missing', row: null, number: null, date: null, amountAgorot: agreed });
   }
 
@@ -214,8 +234,8 @@ export function reconcileStatement(input: StatementInput): StatementResult {
   );
   const paidOurs = input.invoices
     .filter((i) => i.paid && onStatement.has(normalizeDocNumber(i.number) ?? ''))
-    .reduce((s, i) => s + i.inclVatAgorot, 0);
-  if (paidOurs - totals.paidAgorot > STATEMENT_TOLERANCE_AGOROT) {
+    .reduce((s, i) => s + (i.inclVatAgorot ?? 0), 0);
+  if (input.checkPayments && paidOurs - totals.paidAgorot > STATEMENT_TOLERANCE_AGOROT) {
     flags.push({
       kind: 'payment_unapplied',
       row: null,

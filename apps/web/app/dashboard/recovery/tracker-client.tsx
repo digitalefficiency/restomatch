@@ -679,22 +679,33 @@ function CreditForm({
     try {
       const r = await utils.recovery.suggestAllocation.fetch({ supplierId, amountAgorot: agorot });
       const known = new Set(claims.map((c) => c.id));
-      setSelected(new Set(r.suggestion.allocations.map((a) => a.id).filter((id) => known.has(id))));
-      setBasis(r.suggestion.basis);
-      setRemainder(r.suggestion.remainderAgorot);
+      const ids = r.suggestion.allocations.map((a) => a.id);
+      const shown = ids.filter((id) => known.has(id));
+      setSelected(new Set(shown));
+      if (shown.length !== ids.length) {
+        // A suggested request is not on this screen: never present a partial match as exact.
+        setBasis(null);
+        setError(t('allocation.failed'));
+      } else {
+        setBasis(r.suggestion.basis);
+        setRemainder(r.suggestion.remainderAgorot);
+      }
     } catch {
       setError(t('allocation.failed'));
     } finally {
       setSuggesting(false);
     }
   }
-  const toggle = (id: string) =>
+  const toggle = (id: string) => {
+    // A hand-edited selection is no longer the suggestion.
+    setBasis(null);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+  };
   return (
     <form
       className="mt-3 grid gap-3 rounded-xl border border-line bg-surface-2/60 p-3 sm:grid-cols-3"

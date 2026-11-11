@@ -38,7 +38,6 @@ export async function reconcileSupplierStatement(
              status::text AS status, total_incl_vat::text AS total_incl_vat
       FROM invoices
       WHERE restaurant_id = ${restaurantId}::uuid AND supplier_id = ${supplierId}::uuid
-        AND status <> 'ocr_pending'
         AND COALESCE(invoice_date, created_at) >= ${from.toISOString()}::timestamptz
         AND COALESCE(invoice_date, created_at) < ${to.toISOString()}::timestamptz
       ORDER BY invoice_date NULLS LAST
@@ -75,9 +74,10 @@ export async function reconcileSupplierStatement(
     id: String(r.id),
     number: r.invoice_number ?? null,
     date: r.invoice_date ?? null,
-    inclVatAgorot: decimalToScaled(r.total_incl_vat, 2) ?? 0,
+    inclVatAgorot: decimalToScaled(r.total_incl_vat, 2),
     hasDeliveryNote: receives ? covered.has(String(r.id)) : null,
     paid: r.status === 'paid',
+    pending: r.status === 'ocr_pending',
   }));
   const agreedOpenAgorot = claims
     .filter((c) => c.supplierId === supplierId && c.status === 'acknowledged')

@@ -288,7 +288,7 @@ export function InboxClient(props: Props) {
                                 </Link>
                               ) : d.docTypeSuggestion.type === 'statement' ? (
                                 <Link
-                                  href="/dashboard/suppliers/ledger/statement"
+                                  href="/dashboard/suppliers/ledger#statement"
                                   className="text-xs font-semibold text-primary hover:underline"
                                 >
                                   {t('docType.toStatement')}

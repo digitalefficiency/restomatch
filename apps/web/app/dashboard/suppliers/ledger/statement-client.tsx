@@ -20,6 +20,7 @@ const TONE: Record<FlagKind, BadgeTone> = {
   invoice_never_got: 'warning',
   billed_not_received: 'warning',
   amount_mismatch: 'warning',
+  invoice_duplicate: 'warning',
   credit_missing: 'warning',
   credit_unrecorded: 'gold',
   payment_unapplied: 'warning',
@@ -60,7 +61,16 @@ export function StatementClient({
           }}
         >
           <Field label={t('statement.supplier')}>
-            <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} required>
+            <Select
+              value={supplierId}
+              onChange={(e) => {
+                setSupplierId(e.target.value);
+                // Another supplier's result must never stay on screen under this one's name.
+                run.reset();
+                setError(null);
+              }}
+              required
+            >
               <option value="" disabled>
                 {t('statement.pickSupplier')}
               </option>
