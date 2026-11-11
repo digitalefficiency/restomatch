@@ -112,8 +112,6 @@ afterAll(async () => {
  * other       → explicit justification for why no test is required
  * ────────────────────────────────────────────────────────────────────────── */
 const BASE_COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
-  // W3-05a month close: aggregates only, no id input; tenant B's rows are seeded and never counted.
-  'close.checklist': 'isolation (close.test.ts: every case seeds tenant B and asserts A only)',
   // S14 wave 1 — receiver languages + AI assistant (flag-gated).
   'receiverLangs.status': 'isolation',
   'receiverLangs.localNames': 'attack',
@@ -163,15 +161,6 @@ const BASE_COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'payRun.enabled': 'isolation — payrun.attack.test.ts: reads only the caller restaurant flag; receiver/chef FORBIDDEN',
   'payRun.month':
     'isolation — payrun.attack.test.ts: only the caller restaurant invoices (B never in the payload); receiver/chef FORBIDDEN; flag off ⇒ nothing listed; ₪ = the credit letters to the agora',
-  // W2-03 (add-only): the due-date desk + guarded mark-paid / reminder.
-  'payRun.list':
-    "isolation — payrun.attack.test.ts: A's list never contains B's invoice, supplier or findings; receiver/chef FORBIDDEN",
-  'payRun.markPaid':
-    "attack — payrun.attack.test.ts: A marking B's invoiceId (alone or mixed) → NOT_FOUND with the flag on or off, B untouched",
-  'payRun.unmarkPaid':
-    "attack — payrun.attack.test.ts: A unmarking B's invoiceId → NOT_FOUND with the flag on or off, B untouched; a reason is required",
-  'payRun.remind':
-    "attack — payrun.attack.test.ts: A reminding on B's invoiceId → NOT_FOUND; receiver/chef FORBIDDEN; nothing sent until G-06",
   'owner.leakReport': 'isolation',
   'owner.leakSummary': 'isolation',
   'owner.leakGrouped': 'isolation',
@@ -197,9 +186,6 @@ const BASE_COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // po_lines / invoice_lines / products must stay untranslated.
   'receiving.ensureEnglish': 'attack',
   'receiving.dockSlip': 'attack',
-  // W2-05: reads one PO's receipt + linked invoice; a foreign poId is NOT_FOUND
-  // (attack — receiving-resume.test.ts: "another restaurant's PO is NOT_FOUND").
-  'receiving.resumeState': 'attack',
   'scans.upload':
     'memberProcedure write keyed to ctx.session.restaurantId; takes NO client-supplied tenant id or storage prefix (PR1/A.3 — the tenant + object path are derived server-side from the session), so it cannot target another tenant. The actual byte upload + service-role mapping insert are Supabase-network-bound and verified by storage.attack.test (membership gate) + against real Supabase; role denial is implicit in memberProcedure.',
   'admin.listRestaurants': 'admin-denial',
@@ -261,18 +247,6 @@ const BASE_COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // test below). The settings pair takes no entity id and reads/writes only
   // ctx.session.restaurantId's own restaurants row.
   'orders.documentPreview': 'attack',
-  // W2-06 (Orders 2): each new procedure, with the suite that proves it.
-  'orders.orderGuide': "attack — orders-w2-06.attack.test.ts: A asking for B's supplier guide → NOT_FOUND, B untouched",
-  'orders.supplierBoard': "isolation — orders-w2-06.attack.test.ts: A's board lists only A's suppliers, never B's POs or drafts",
-  'orders.openDraft': "attack — orders-w2-06.attack.test.ts: A opening a draft for B's supplier → NOT_FOUND",
-  'orders.saveDraft': "attack — orders-w2-06.attack.test.ts: B's supplierId, draftId or productId → NOT_FOUND, nothing written for A or B",
-  'orders.prepareManualSend': "attack — orders-w2-06.attack.test.ts: B's poId → NOT_FOUND, no text of B's order",
-  'orders.markSentManually': "attack — orders-w2-06.attack.test.ts: B's poId → NOT_FOUND, B's draft stays a draft",
-  'orders.addOrderLine': "attack — orders-w2-06.attack.test.ts: B's poId or B's productId → NOT_FOUND, no line written",
-  'orders.sendMany': "attack — orders-w2-06.attack.test.ts: B's poId in the batch → NOT_FOUND, nothing sent or queued",
-  'orders.viewCounts': "isolation — orders-views.test.ts: A's view counts never include B's orders",
-  'orders.threeWay': "attack — orders-three-way.test.ts: A asking for B's PO 3-way view → NOT_FOUND",
-  'orders.amendSent': "attack — orders-w2-06.attack.test.ts: B's poId or productId → NOT_FOUND, no amendment text",
   // supplierLedger (flag): ledger takes a client supplierId → assertSupplierOwned;
   // ledgerGrid lists only the caller's suppliers (both tests below).
   'suppliers.ledger': 'attack',
@@ -379,12 +353,6 @@ const BASE_COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'recovery.recordCreditNote': 'attack',
   'recovery.creditLineSuggestions': 'isolation',
   'recovery.returnedThisMonth': 'isolation',
-  // W2-10 (added with the procedures; move to coverage/W2-10.ts once W2-01's loader merges).
-  'recovery.letters': 'isolation — recovery-letters.attack.test.ts: a foreign supplierId returns no letter; letters hold only the caller restaurant claims',
-  'recovery.sendLetter': 'attack — recovery-letters.attack.test.ts: a foreign supplierId or claimId is NOT_FOUND and no claim of either tenant moves',
-  'recovery.unsendLetter': 'attack — recovery-letters.attack.test.ts: a foreign claimId is NOT_FOUND and the foreign claim stays letter_sent',
-  'recovery.reminderDraft': 'attack — recovery-letters.attack.test.ts: a foreign supplierId is NOT_FOUND (no name, contact or ₪ leaks)',
-  'recovery.export': 'isolation — recovery-letters.attack.test.ts: the export of tenant A never contains a tenant B claim id or supplier',
   'monthlyReport.preview': 'isolation',
   'monthlyReport.pdf': 'isolation',
   // S13 invoice ingestion (WhatsApp / e-mail). Reads are restaurant-scoped;
@@ -450,13 +418,6 @@ const BASE_COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'inventory.amendLine': "attack — inventory-must-haves.test.ts: B amending A's closed count → NOT_FOUND; owner-only",
   'inventory.exportCsv': "attack — inventory-must-haves.test.ts: B exporting A's count → NOT_FOUND; lists only the caller's lines",
   'inventory.period': "attack — inventory-rls.attack.test.ts: B asking for the period of A's closed count → notFound; inventory-router.test.ts: A's purchases exclude B's ₪99,999 invoice on the same day; B's period is noCounts",
-  // W2-08 task spine (add-only; mirrors coverage/W2-08.ts, which #180's fragment loader will read).
-  'tasks.mine':
-    "isolation — tasks-mine.test.ts: A sees only A tasks (B's blocking ₪ never in A's payload); a role argument other than the session's is refused, never widened",
-  'nav.badges':
-    'isolation — nav-badges.test.ts: A badges never include B queues; receiver/chef badges carry counts only (tasks-redaction.test.ts: no ₪ on the wire)',
-  'nav.whereIs':
-    "attack — nav-whereis.attack.test.ts: a non-member asking for B's invoice/po/supplier/claim/count gets the random-uuid answer; only branches where the role may open the page are searched, one withRestaurant each; removed membership → not found; bad id/kind → BAD_REQUEST",
 };
 
 // Never a plain spread: mergeCoverage throws if a fragment re-declares (and so could downgrade) a base key.
