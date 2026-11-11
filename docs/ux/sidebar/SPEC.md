@@ -2,12 +2,14 @@
 
 > **Status:** the owner approved this design on 31.10.2026 for implementation in wave 2 (owner: W1-03, on top of the wave-1 nav registry). The owner also wants a **more advanced design pass in UI wave 2**; build this version first and keep the tokens and structure open to that pass.
 >
+> **Prototype:** the clickable HTML prototype is a design file, not product code, so it is kept out of the tree (CodeQL scans every HTML/JS file). Get it from history: `git show 6fe38589:docs/ux/sidebar/PROTOTYPE.html > /tmp/sidebar-prototype.html`, then open it in a browser. This spec wins wherever they differ.
+>
 > **Corrections that override the prototype where they differ (decisions as of 31.10):**
 > - `/dashboard/leaks` is the monthly **"דליפה"** hub (W1-08 + W1-03 follow-up 7118ea3). Price creep is the `#prices` section inside it and keeps the words "מחירים שעלו" there. Do not show a separate "מחירים שעלו" nav item.
 > - **Bulk approve (≤ ₪200 per invoice, never blocking rows)** and **one-tap WhatsApp approve (≤ ₪500)** stay OFF in the UI until the server enforces both caps (W2-04 `approvals.decideMany` + one server-side cap constant). Show the disabled state with its reason, as the W1-02 BatchBar does.
 > - **Alerts:** the bell is in-app only until a WhatsApp/push provider exists. Quiet hours (23:00–06:00), Shabbat and 6/day are enforced by the dispatcher (PR #173); the bell copy must not promise channels that do not exist yet.
 > - **Chef ordering (owner, 31.10 later — supersedes the earlier "hide it" line):** the chef sees, creates, edits, sends and cancels orders of their own restaurant **with no manager approval**, and **sees prices and order totals on the orders screens only** (everywhere else the chef still sees no ₪). The base lands before the pilot in train A (W1-11: route, nav entry, server tier `chefProcedure` on order writes; order-document settings stay manager/owner). Show the chef's הזמנות item as in the role table below.
-> - **No ₪ for chef/receiver** (except the chef's orders screens, above) includes search, palette records, bell and badges (W1-03 follow-up made search screens-only for them).
+> - **No ₪ for chef/receiver** (except the chef's orders screens, above, and the chef's recipes — plate cost, menu price, margin — owner 31.10) includes search, palette records, bell and badges (W1-03 follow-up made search screens-only for them).
 > - Demo numbers in the prototype (₪760, ₪296, ₪451, branches) are demo data; real badges read the same server sources as the screens (approvals.queueSummary for the approvals badge — one data source for badge, queue and bell).
 
 # W1-03 desktop side menu: implementation spec (final)

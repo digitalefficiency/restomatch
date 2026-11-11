@@ -7,7 +7,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import superjson from 'superjson';
 import type { AppRouter } from '@restomatch/api';
-import { ShellResilience } from '@/lib/net/ShellResilience';
+import { ShellResilience, type Identity } from '@/lib/net/ShellResilience';
 import { createAppQueryClient, onRouteChange } from './queryClient';
 
 export const trpc = createTRPCReact<AppRouter>();
@@ -17,7 +17,14 @@ function wantsShellLayer(pathname: string | null): boolean {
   return !!pathname && (pathname.startsWith('/dashboard') || pathname.startsWith('/admin') || pathname.startsWith('/onboarding'));
 }
 
-export function TrpcProvider({ children }: { children: React.ReactNode }) {
+export function TrpcProvider({
+  children,
+  identity,
+}: {
+  children: React.ReactNode;
+  /** Whose page this is (the dashboard layout's session), for the re-auth sheet. */
+  identity?: Identity;
+}) {
   const pathname = usePathname();
   const [queryClient] = useState(createAppQueryClient);
   // Each landed client navigation: a revisited list uses its fresh server rows.
@@ -37,7 +44,7 @@ export function TrpcProvider({ children }: { children: React.ReactNode }) {
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
         {children}
-        {wantsShellLayer(pathname) ? <ShellResilience /> : null}
+        {wantsShellLayer(pathname) ? <ShellResilience identity={identity} /> : null}
       </QueryClientProvider>
     </trpc.Provider>
   );
