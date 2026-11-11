@@ -32,6 +32,7 @@ export const APP_ERROR_CODES = [
   'entitlement.required',
   'auth.unauthorized',
   'auth.forbidden',
+  'capability.required',
   'input.invalid',
   'invoice.numberTaken',
   // G-08 hold: a manual re-match while an invoice line is still a question.
