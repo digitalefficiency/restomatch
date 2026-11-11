@@ -139,9 +139,10 @@ test('fold contract + axe with folds open (one real screen)', async ({ browser }
   }
 });
 
-test('measureCopy: headers and static lists count; record rows never do', async ({ page }) => {
+test('measureCopy: headers, static lists and new paragraphs count; record rows never do', async ({ page }) => {
   await page.setContent(`<main>
     <h1>כותרת העמוד</h1>
+    <p>פסקה חדשה וארוכה בכרום של המסך שמסבירה בפירוט רב דבר שהמשתמש כבר יודע היטב</p>
     <ul><li>הסבר קבוע אחד</li><li>הסבר קבוע שני</li></ul>
     <ol><li>שלב ראשון</li></ol>
     <table><thead><tr><th>ספק</th><th>סכום</th></tr></thead>
@@ -150,8 +151,12 @@ test('measureCopy: headers and static lists count; record rows never do', async 
       <div role="row"><span role="gridcell">תא נתונים</span></div></div>
     <ul data-record><li>כרטיס רשומה שלא נספר</li></ul>
     <article data-row>שורה מסומנת</article>
+    <fieldset><ul data-record><li>ספק מהנתונים</li></ul><ul><li>מחיר גבוה מהמצופה</li></ul></fieldset>
+    <section data-record><h2>באיחור</h2><ul><li>משאית ראשונה</li></ul></section>
   </main>`);
   const m = await measureCopy(page);
-  // כותרת העמוד (2) + 2×הסבר קבוע (3+3) + שלב ראשון (2) + ספק, סכום (2) + עמודה (1) = 13
-  expect(m.page).toBe(13);
+  // כותרת העמוד (2) + the new paragraph (14) + 2×הסבר קבוע (3+3) + שלב ראשון (2) + ספק, סכום (2) + עמודה (1)
+  // + the static filter option 'מחיר גבוה מהמצופה' (3) = 30; the data option list and the record group count 0.
+  expect(m.page).toBe(30);
+  expect(m.blocks.map((b) => b.words)).toEqual([14]);
 });
