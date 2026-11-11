@@ -36,7 +36,9 @@ const draft = (items: { productId?: string; subRecipeId?: string; quantity: stri
 async function counts() {
   const [r] = await db.select({ n: sql<number>`count(*)::int` }).from(recipes);
   const [i] = await db.select({ n: sql<number>`count(*)::int` }).from(recipeItems);
-  return { recipes: r!.n, items: i!.n };
+  const [p] = await db.select({ n: sql<number>`count(*)::int` }).from(products);
+  const [h] = await db.select({ n: sql<number>`count(*)::int` }).from(priceHistory);
+  return { recipes: r!.n, items: i!.n, products: p!.n, priceHistory: h!.n };
 }
 
 beforeAll(async () => {
@@ -104,7 +106,7 @@ describe('recipes.preview — cross-tenant', () => {
     });
   });
 
-  it('never writes: recipes and recipe_items are unchanged after previews (new and existing id)', async () => {
+  it('never writes: recipes, recipe_items, products and price_history are unchanged after previews (new and existing id)', async () => {
     const before = await counts();
     await caller(A).recipes.preview(draft([{ productId: prodA, quantity: '1', unit: 'ק״ג' }]));
     await caller(A).recipes.preview({ ...draft([{ productId: prodA, quantity: '3', unit: 'ק״ג' }], dishA), name: 'שם אחר' });

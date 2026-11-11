@@ -138,8 +138,6 @@ async function crossRoute(label, home, target) {
 /** Every route with a loading.tsx today (keep in sync — see the header). */
 const LOADING_BOUNDARIES = [
   '/dashboard/approvals',
-  // W2-03: the pay run's own loading boundary.
-  '/dashboard/approvals/pay-run',
   '/dashboard/exports',
   '/dashboard/receiving',
   '/dashboard/settings',
