@@ -201,6 +201,9 @@ export default async function InvoiceCockpitPage({
         scan={scan ? { src: scan.signedUrl, mimeType: scan.mimeType } : null}
         showMoney={finance}
         canRematch={canRematch && !detail.consolidated}
+        // Open in edit mode while there is nothing to decide yet: still being read, or no lines
+        // (a failed read that a person has already completed opens on the lines, like #222's list).
+        startEditing={invoice.status === 'ocr_pending' || invoice.lines.length === 0}
         aside={
           <>
             {held ? (

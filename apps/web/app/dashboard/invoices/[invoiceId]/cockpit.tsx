@@ -76,6 +76,7 @@ export function Cockpit({
   canRematch,
   aside,
   editor,
+  startEditing = false,
 }: {
   detail: Detail;
   title: string;
@@ -90,11 +91,13 @@ export function Cockpit({
   canRematch: boolean;
   aside: React.ReactNode;
   editor: React.ReactNode;
+  /** Open in edit mode: the read failed, is still running, or found no lines — adding lines IS the job here (#216). */
+  startEditing?: boolean;
 }) {
   const router = useRouter();
   const wide = useMediaQuery('(min-width: 1024px)');
   const [pane, setPane] = useState<'doc' | 'lines'>('lines');
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(startEditing);
   const ils = (agorot: number | null) => (agorot == null ? null : formatIls(agorot / 100, { maximumFractionDigits: 2, locale }));
   const price = (v: number | null) => (v == null ? null : formatIls(v, { maximumFractionDigits: 2, locale }));
   const qty = (v: number | null) => (v == null ? null : formatNumber(v, locale, { maximumFractionDigits: 3 }));
@@ -371,7 +374,9 @@ export function Cockpit({
           {pane === 'doc' ? viewer : linesPane}
         </div>
       )}
-      {showMoney && openFindings.length > 0 ? (
+      {/* One primary action: while editing, saving is the action — the sticky "decide" CTA
+          would float over the edit rows (axe target-size). */}
+      {showMoney && openFindings.length > 0 && !editing ? (
         <div className="sticky bottom-[calc(var(--rm-bottomnav-h,0px)+var(--consent-h,0px)+env(safe-area-inset-bottom)+0.75rem)] z-10 mt-4 flex justify-center">
           <Link
             href={`/dashboard/approvals?invoice=${d.id}`}
