@@ -63,7 +63,13 @@ const textOf = (html: string, testId: string) => {
   const start = html.lastIndexOf('<', i);
   const tag = /^<(\w+)/.exec(html.slice(start))![1]!;
   const end = html.indexOf(`</${tag}>`, i);
-  return html.slice(start, end).replace(/<[^>]+>/g, '').replace(/[‎‏⁦-⁩]/g, '');
+  // Strip tags until none is left (one pass can rebuild a tag from the pieces around one it removed).
+  let text = html.slice(start, end);
+  for (let prev = ''; prev !== text; ) {
+    prev = text;
+    text = text.replace(/<[^<>]*>/g, '');
+  }
+  return text.replace(/[<>]/g, '').replace(/[‎‏⁦-⁩]/g, '');
 };
 
 describe('ConsolidatedPanel · G-04 §9 review items', () => {
