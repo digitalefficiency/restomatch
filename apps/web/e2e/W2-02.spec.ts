@@ -72,6 +72,16 @@ async function shekelLeftOfDigit(page: Page, selector: string): Promise<boolean>
   });
 }
 
+/** Open the cockpit's edit mode; re-click only if a click landed before hydration (state unchanged). */
+async function openEditMode(page: Page): Promise<void> {
+  const toggle = page.getByTestId('cockpit-edit-toggle');
+  if ((await toggle.getAttribute('aria-pressed')) === 'true') return;
+  await expect(async () => {
+    if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true', { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+}
+
 async function invoiceIdInState(where: 'open' | 'any'): Promise<string> {
   const sql = e2eSql();
   try {
@@ -174,7 +184,7 @@ test('edit mode: saving re-matches automatically and shows ₪ before → after 
   const page = await signedIn(browser, 'owner', 'en');
   const id = await invoiceIdInState('any');
   await page.goto(`/dashboard/invoices/${id}`);
-  await page.getByTestId('cockpit-edit-toggle').click();
+  await openEditMode(page);
   await expect(page.locator('input[type=number], input[type=date]')).toHaveCount(0);
   await page.getByRole('button', { name: /save details/i }).click();
   await expect(page.getByTestId('rematch-before-after')).toBeVisible({ timeout: 15_000 });
