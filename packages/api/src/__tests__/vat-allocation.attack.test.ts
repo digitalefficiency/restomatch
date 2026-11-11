@@ -131,6 +131,47 @@ describe('AU-08 vat.* attack', () => {
     expect(r).toEqual({ invoiceId: bInvoice, allocationNumber: '987654321', replayed: false });
   });
 
+  it('a reused clientMutationId for a different invoice / request is a CONFLICT, never a false replay', async () => {
+    const a = vatAs(A);
+    const other = await atRiskInvoice(A);
+    const id = cmid();
+    await a.setAllocationNumber({ invoiceId: aInvoice, allocationNumber: '123456789', source: 'typed', clientMutationId: id });
+    await expect(
+      a.setAllocationNumber({ invoiceId: other, allocationNumber: '123456789', source: 'typed', clientMutationId: id }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+    const [o] = await db.select({ a: invoices.allocationNumber }).from(invoices).where(eq(invoices.id, other));
+    expect(o!.a).toBeNull();
+
+    const rid = cmid();
+    const first = await a.markRequested({ supplierId: A.supplierId, invoiceIds: [other], channel: 'copy', clientMutationId: rid });
+    expect(first).toMatchObject({ replayed: false });
+    const again = await a.markRequested({ supplierId: A.supplierId, invoiceIds: [other], channel: 'copy', clientMutationId: rid });
+    expect(again).toMatchObject({ supplierId: A.supplierId, invoiceIds: [other], replayed: true });
+    await expect(
+      a.markRequested({ supplierId: A.supplierId, invoiceIds: [other, aInvoice], channel: 'copy', clientMutationId: rid }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it("B's corrected copy pointing at A's invoice never becomes A's suggestion", async () => {
+    await db.insert(invoices).values({
+      restaurantId: B.restaurantId,
+      supplierId: B.supplierId,
+      invoiceNumber: null,
+      invoiceDate: new Date(`${day}T10:00:00+03:00`),
+      totalExclVat: '6000.00',
+      vatAmount: '1080.00',
+      allocationNumber: '555666777',
+      status: 'parsed',
+      source: 'photo',
+      ocrPayload: { raw: { duplicateOf: { invoiceId: aInvoice, invoiceNumber: 'X' } } } as never,
+    });
+    const ic = await vatAs(A).invoiceCase({ invoiceId: aInvoice });
+    expect(ic!.row!.suggestedNumber).toBeNull();
+    await expect(
+      vatAs(A).setAllocationNumber({ invoiceId: aInvoice, allocationNumber: '555666777', source: 'corrected_copy', clientMutationId: cmid() }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
   it('no notifications_outbox row targets a supplier after any vat.* call', async () => {
     const a = vatAs(A);
     await db.update(suppliers).set({ contactWhatsapp: '054-1234567', contactEmail: 'orders@supplier.co.il' }).where(eq(suppliers.id, A.supplierId));
