@@ -65,6 +65,12 @@ export async function assertPreflightClear(
 ): Promise<Map<string, PreflightKind[]>> {
   const { settings, tz } = await settingsOf(db, restaurantId);
   const pre = await runPreflight(db, restaurantId, { invoiceIds, tz, bank: opts.bank, now: opts.now });
+  // Fail closed: an id the pre-flight cannot see (foreign, already paid, still in OCR, or a caller
+  // that forgot the tenant transaction) is refused, never treated as "no flags".
+  const seen = new Set(pre.candidates.map((c) => c.id));
+  if (invoiceIds.some((id) => !seen.has(id))) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'invoice not found' });
+  }
   const verdict = checkPreflightClear(pre.flags, invoiceIds, acknowledged, {
     softChecks: preflightSoftChecksOn(settings),
   });

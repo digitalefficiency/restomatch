@@ -122,7 +122,11 @@ export async function readPreflightFacts(
   let confirmedChangeIds = new Set<string>();
   if (supplierIds.length > 0 && bank !== noBankChanges) {
     const b = await bank.read(db, rid, supplierIds);
-    changes = b.changes;
+    // Only the last 4 digits ever leave this layer, whatever the source passes in.
+    changes = b.changes.map((c) => {
+      const last4 = (c.accountLast4 ?? '').replace(/\D/g, '').slice(-4);
+      return { ...c, accountLast4: /^\d{4}$/.test(last4) ? last4 : null };
+    });
     confirmedChangeIds = b.confirmedChangeIds;
     queries += 1;
   }

@@ -221,9 +221,30 @@ describe('the markPaid guard (assertPreflightClear)', () => {
     expect(ack.get(A.invoiceId)).toEqual(['first_payment']);
   });
 
-  it('a foreign invoice id is invisible to the guard (RLS), never a B flag', async () => {
-    const ack = await guard(A.restaurantId, [B.invoiceId], [], { now: NOW });
-    expect(ack.size).toBe(0);
+  it('fails closed: a foreign id, or a call without the tenant transaction → NOT_FOUND', async () => {
+    await expect(guard(A.restaurantId, [B.invoiceId], [], { now: NOW })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(
+      guard(A.restaurantId, [A.invoiceId, B.invoiceId], [{ invoiceId: A.invoiceId, kinds: ['first_payment'] }], { now: NOW }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    // No GUC → RLS hides every row → refused, never "clear".
+    await expect(
+      assertPreflightClear(appDb, A.restaurantId, [A.invoiceId], [{ invoiceId: A.invoiceId, kinds: ['first_payment'] }], { now: NOW }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('bank account numbers are cut to last4 whatever the source passes', async () => {
+    const leaky: BankChangeSource = {
+      async read(_db, _rid, supplierIds) {
+        return {
+          changes: [{ id: 'chg-x', supplierId: supplierIds[0]!, changedAt: '2026-12-03T09:00:00Z', accountLast4: '12-345-678904821' }],
+          confirmedChangeIds: new Set(),
+        };
+      },
+    };
+    const pre = await withRestaurant(appDb, A.restaurantId, (tx) => runPreflight(tx, A.restaurantId, { bank: leaky, now: NOW }));
+    const f = pre.flags.get(A.invoiceId)!.find((x) => x.kind === 'bank_changed')!;
+    expect(f.vars.accountLast4).toBe('4821');
+    expect(JSON.stringify([...pre.flags.values()])).not.toContain('678904821');
   });
 });
 
@@ -266,5 +287,14 @@ describe('payRun.remittanceText', () => {
     await expect(
       caller(A, 'receiver').payRun.remittanceText({ supplierId: A.supplierId, invoiceIds: [A.invoiceId] }),
     ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      caller(A, 'chef').payRun.remittanceText({ supplierId: A.supplierId, invoiceIds: [A.invoiceId] }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    // A mixed A+B batch → NOT_FOUND, with the same message as a random uuid (no oracle).
+    const mixed = caller(A).payRun.remittanceText({ supplierId: A.supplierId, invoiceIds: [A.invoiceId, B.invoiceId] });
+    await expect(mixed).rejects.toMatchObject({ code: 'NOT_FOUND', message: 'invoice not found' });
+    await expect(
+      caller(A).payRun.remittanceText({ supplierId: A.supplierId, invoiceIds: ['00000000-0000-4000-8000-000000000999'] }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND', message: 'invoice not found' });
   });
 });
