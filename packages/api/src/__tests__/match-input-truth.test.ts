@@ -203,26 +203,38 @@ describe('receipt truth: only counted lines of closed receipts reach the engine'
     const o = await order(T, s, { n: 12, gr: 'pending' });
     const inv = await invoiceFor(T, s, o.lines.map((l) => l.productId));
     const caller = ownerCaller(T);
+    // Every match run of the invoice and its findings (none while the receipt is open).
     const snapshot = async () => {
-      const [run] = await db
+      const runs = await db
         .select({ id: matchRuns.id, total: matchRuns.totalDiscrepancyAmount, status: matchRuns.overallStatus, poId: matchRuns.poId })
         .from(matchRuns)
         .where(eq(matchRuns.invoiceId, inv));
-      const ds = await db
-        .select({ type: discrepancies.type, delta: discrepancies.deltaAmount })
-        .from(discrepancies)
-        .where(eq(discrepancies.matchRunId, run!.id));
-      return { total: run!.total, status: run!.status, poId: run!.poId, findings: ds.map((d) => `${d.type}|${d.delta}`).sort() };
+      const out = [];
+      for (const run of runs) {
+        const ds = await db
+          .select({ type: discrepancies.type, delta: discrepancies.deltaAmount })
+          .from(discrepancies)
+          .where(eq(discrepancies.matchRunId, run.id));
+        out.push({ total: run.total, status: run.status, poId: run.poId, findings: ds.map((d) => `${d.type}|${d.delta}`).sort() });
+      }
+      return out;
     };
-    await caller.match.runForInvoice({ invoiceId: inv });
+    // The open receipt holds the invoice (#216 F3: it finds the receipt through the
+    // input's grId, which stays "the PO's latest receipt, any status"): no run, no ₪.
+    const first = await caller.match.runForInvoice({ invoiceId: inv });
+    expect(first).toMatchObject({ status: 'held', matchRunId: null, leakIls: 0 });
     const before = await snapshot();
+    expect(before).toEqual([]);
 
     // The receiver autosaves 5 lines (3 of 10 each — a would-be ₪84 shortfall per line).
     for (const l of o.lines.slice(0, 5)) {
       await db.update(grLines).set({ qtyReceived: '3' }).where(eq(grLines.id, l.grLineId!));
     }
-    expect((await build(T, inv))!.input.grLines).toHaveLength(0);
-    await caller.match.runForInvoice({ invoiceId: inv });
+    const built = (await build(T, inv))!;
+    expect(built.input.grLines).toHaveLength(0);
+    expect(built.grId).toBe(o.grId); // the open receipt is still the one the invoice pairs with
+    const again = await caller.match.runForInvoice({ invoiceId: inv });
+    expect(again).toMatchObject({ status: 'held', matchRunId: null, leakIls: 0 });
     expect(await snapshot()).toEqual(before);
   });
 
