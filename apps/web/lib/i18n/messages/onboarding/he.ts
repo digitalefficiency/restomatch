@@ -4,7 +4,7 @@
  */
 export const he = {
   title: 'ברוכים הבאים ל-RestoMatch',
-  subtitle: 'תחילה — ניצור את המסעדה שלכם. תיכנסו אוטומטית כבעלים.',
+  subtitle: 'ניצור את המסעדה, ואתם תהיו הבעלים.',
   yourName: 'השם שלך',
   yourNamePlaceholder: 'דנה כהן',
   yourNameHint: 'כך יופיע השם בהזמנות שתשלחו לצוות.',
@@ -12,7 +12,7 @@ export const he = {
   namePlaceholder: 'לדוגמה: ביסטרו הנמל',
   businessId: 'ח״פ / עוסק מורשה',
   optional: '(לא חובה)',
-  businessIdHint: '9–12 ספרות. אפשר להקליד גם עם מקפים.',
+  businessIdHint: '9–12 ספרות, אפשר עם מקפים.',
   submit: 'יצירת מסעדה והמשך',
   pending: {
     title: 'מחכה לכם הזמנה',

@@ -23,13 +23,6 @@ type MatchResult = inferRouterOutputs<AppRouter>['match']['runForInvoice'];
 /** Agorot ↔ the procedure's ₪ number (the receiving procedures take shekels). */
 const toAgorot = (v: string | number | null | undefined) => (v == null || v === '' ? null : Math.round(Number(v) * 100));
 const fromAgorot = (a: number | null) => (a == null ? null : a / 100);
-/** #216's new-line inputs are plain strings: '' → null, else a finite number. */
-function num(raw: string): number | null {
-  const v = raw.trim();
-  if (v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
 
 function dateInput(d: Date | string | null): string {
   if (!d) return '';
@@ -83,7 +76,14 @@ export function InvoiceCorrection({
   // B8: hand-entered lines (an invoice the OCR could not read / held for review).
   const linesEditable = canEdit && !consolidated && invoice.linesEditable;
   /** poLineId: the order line this hand line bills ('' = a line that was not ordered). */
-  const emptyNew = { poLineId: '', rawDescription: '', qtyBilled: '', unit: '', unitPriceBilled: '' };
+  // #216's new line: quantity and unit price as numbers (unit prices keep 4 decimals, NUMERIC(12,4)); no type=number.
+  const emptyNew: { poLineId: string; rawDescription: string; qtyBilled: number | null; unit: string; unitPriceBilled: number | null } = {
+    poLineId: '',
+    rawDescription: '',
+    qtyBilled: null,
+    unit: '',
+    unitPriceBilled: null,
+  };
   const orderLines = invoice.orderLines;
   const [nl, setNl] = useState(emptyNew);
 
@@ -204,8 +204,8 @@ export function InvoiceCorrection({
     onSuccess: (res) => afterManual(t('correction.lineDeleted'), res),
     onError: onErr,
   });
-  const newQty = num(nl.qtyBilled);
-  const newPrice = num(nl.unitPriceBilled);
+  const newQty = nl.qtyBilled;
+  const newPrice = nl.unitPriceBilled;
   const newLineReady = !!nl.rawDescription.trim() && !!nl.unit.trim() && newQty != null && newQty > 0 && newPrice != null && newPrice >= 0;
   function saveNewLine() {
     if (!newLineReady) return;
@@ -251,7 +251,7 @@ export function InvoiceCorrection({
       rawDescription: l.rawDescription,
       qtyBilled: Number(l.qtyBilled),
       unit: l.unit,
-      unitPriceBilled: toAgorot(l.unitPriceBilled),
+      unitPriceBilled: l.unitPriceBilled == null ? null : Number(l.unitPriceBilled),
       lineTotal: toAgorot(l.lineTotal),
     });
     setError(null);
@@ -259,7 +259,7 @@ export function InvoiceCorrection({
 
   function saveLine(l: Line) {
     const qty = ld.qtyBilled;
-    const price = fromAgorot(ld.unitPriceBilled);
+    const price = ld.unitPriceBilled;
     const total = fromAgorot(ld.lineTotal);
     updateLine.mutate({
       lineId: l.id,
@@ -530,9 +530,10 @@ export function InvoiceCorrection({
                   <td className="px-4 py-3 text-muted">
                     {editing ? <Input aria-label={t('correction.colUnit')} value={ld.unit} onChange={(e) => setLd({ ...ld, unit: e.target.value })} /> : unit(l.unit)}
                   </td>
+                  {/* A unit price keeps 4 decimals (NUMERIC(12,4)): never rounded to the agora here. */}
                   <td className="px-4 py-3 text-right tabular-nums text-ink">
                     {editing ? (
-                      <MoneyInput aria-label={t('correction.colUnitPrice')} value={ld.unitPriceBilled} onValueChange={(v) => setLd({ ...ld, unitPriceBilled: v })} />
+                      <QuantityInput aria-label={t('correction.colUnitPrice')} maxDecimals={4} value={ld.unitPriceBilled} onValueChange={(v) => setLd({ ...ld, unitPriceBilled: v })} />
                     ) : (
                       <bdi>{money(Number(l.unitPriceBilled))}</bdi>
                     )}
@@ -638,13 +639,13 @@ export function InvoiceCorrection({
                   />
                 </td>
                 <td className="px-4 py-3">
-                  <Input aria-label={t('correction.colQty')} type="number" inputMode="decimal" step="any" min="0" value={nl.qtyBilled} onChange={(e) => setNl({ ...nl, qtyBilled: e.target.value })} />
+                  <QuantityInput aria-label={t('correction.colQty')} value={nl.qtyBilled} onValueChange={(v) => setNl({ ...nl, qtyBilled: v })} />
                 </td>
                 <td className="px-4 py-3">
-                  <Input aria-label={t('correction.colUnit')} placeholder={t('correction.newLineUnit')} value={nl.unit} maxLength={32} onChange={(e) => setNl({ ...nl, unit: e.target.value })} />
+                  <Input aria-label={t('correction.colUnit')} placeholder={t('correction.newLineUnit')} value={nl.unit} maxLength={32} className="min-w-20" onChange={(e) => setNl({ ...nl, unit: e.target.value })} />
                 </td>
                 <td className="px-4 py-3">
-                  <Input aria-label={t('correction.colUnitPrice')} type="number" inputMode="decimal" step="any" min="0" value={nl.unitPriceBilled} onChange={(e) => setNl({ ...nl, unitPriceBilled: e.target.value })} />
+                  <QuantityInput aria-label={t('correction.colUnitPrice')} maxDecimals={4} value={nl.unitPriceBilled} onValueChange={(v) => setNl({ ...nl, unitPriceBilled: v })} />
                 </td>
                 {/* The line total is computed on the server (qty × price, to the agora). */}
                 <td className="px-4 py-3 text-xs text-subtle">{t('correction.newLineTotalAuto')}</td>

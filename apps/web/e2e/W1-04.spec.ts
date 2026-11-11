@@ -142,7 +142,7 @@ test.describe('forbidden routes render the in-shell 403 page (ia-nav-07)', () =>
     });
   }
 
-  test('names the screen and roles, prefills a WhatsApp/e-mail request, and opens it in a branch that allows it', async ({ browser }) => {
+  test('names the screen and roles, offers the role\'s next step, and opens it in a branch that allows it', async ({ browser }) => {
     const context = await browser.newContext();
     const page = await context.newPage();
     await signIn(context, page, 'chef@kfar-hazeitim.test');
@@ -152,15 +152,28 @@ test.describe('forbidden routes render the in-shell 403 page (ia-nav-07)', () =>
     expect(res?.status()).toBe(403);
     await expect(page.getByRole('heading', { level: 1 })).toContainText('ריצת תשלומים');
     await expect(page.getByTestId('forbidden-roles')).toHaveText('המסך זמין ל: בעלים, מנהל/ת וחשב/ת.');
-    const wa = await page.getByTestId('forbidden-whatsapp').getAttribute('href');
-    expect(decodeURIComponent(wa ?? '')).toContain('/dashboard/approvals/pay-run');
-    expect(await page.getByTestId('forbidden-email').getAttribute('href')).toMatch(/^mailto:\?subject=/);
+    // IA-03 (rule 3): the chef can never get a ₪ screen, so no access request; her own next step instead.
+    await expect(page.getByTestId('forbidden-request')).toHaveCount(0);
+    await expect(page.getByTestId('forbidden-next-step')).toHaveAttribute('href', '/dashboard/orders');
     expect(await axe(page), 'axe on the 403 page (he)').toEqual([]);
 
     await page.getByTestId('forbidden-open-in').click();
     await page.waitForURL((u) => u.pathname === '/dashboard/approvals/pay-run');
     await expect(page.getByTestId('forbidden-page')).toHaveCount(0);
     await expect(page.getByTestId('branch-switcher')).toContainText(SECOND_BRANCH);
+    await context.close();
+  });
+
+  test('prefills a WhatsApp/e-mail request where the role could be given the screen (IA-03)', async ({ browser }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await signIn(context, page, 'manager@kfar-hazeitim.test');
+    const res = await page.goto('/dashboard/exports');
+    expect(res?.status()).toBe(403);
+    const wa = await page.getByTestId('forbidden-whatsapp').getAttribute('href');
+    expect(decodeURIComponent(wa ?? '')).toContain('/dashboard/exports');
+    expect(await page.getByTestId('forbidden-email').getAttribute('href')).toMatch(/^mailto:\?subject=/);
+    await expect(page.getByTestId('forbidden-next-step')).toHaveAttribute('href', '/dashboard/approvals');
     await context.close();
   });
 
