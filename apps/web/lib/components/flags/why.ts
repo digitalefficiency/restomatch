@@ -33,6 +33,9 @@ export interface WhyFacts {
   poId?: string | null;
   poRef?: string | null;
   poDate?: Date | string | null;
+  /** inline: the order reads by supplier + date when the template takes {supplier} (W2-04, lab 11.11). */
+  supplierName?: string | null;
+  supplierNameEn?: string | null;
   /** The invoice's leak was capped at its total: add "מוגבל לסכום החשבונית". */
   capped?: boolean;
   /** The basis could not be verified: show only the "unavailable" text. */
@@ -54,6 +57,8 @@ export interface WhyTemplates {
   priceP90NoQty: string;
   /** inline: '(הזמנה {po}, {date})' · ledger: 'בהזמנה {po} ({date})' */
   sourcePo: string;
+  /** inline, when the order's supplier is unknown and sourcePo takes {supplier}: '(הזמנה מ־{date})'. */
+  sourcePoNoSupplier?: string;
   sourceP90: string;
   /** inline: '= {amount}' · ledger: 'הפרש {amount}' */
   equals: string;
@@ -130,6 +135,12 @@ export function whySegments(d: WhyFacts, labels: WhyLabels): WhySegment[][] {
   const po = poLabel(d.poRef, d.poId);
   const poDate = d.poDate ? formatDate(d.poDate, locale, { day: '2-digit', month: '2-digit' }) : '—';
   const equals = delta != null ? fill(tp.equals, { amount: ils(delta) }) : [];
+  // inline: a {supplier} template names the order by who + when, never by its raw code.
+  const supplier = locale === 'en' && d.supplierNameEn?.trim() ? d.supplierNameEn : (d.supplierName ?? '');
+  const inlineSource = () =>
+    tp.sourcePo.includes('{supplier}') && !supplier && tp.sourcePoNoSupplier
+      ? fill(tp.sourcePoNoSupplier, { date: poDate })
+      : fill(tp.sourcePo, { po: po ?? '', supplier, date: poDate });
   const groups: WhySegment[][] = [];
   const isPrice = (d.type === 'PRICE_HIGHER' || d.type === 'PRICE_LOWER') && exp != null && act != null;
   const isQty = (d.type === 'QTY_OVER' || d.type === 'QTY_SHORT') && exp != null && act != null;
@@ -163,7 +174,7 @@ export function whySegments(d: WhyFacts, labels: WhyLabels): WhySegment[][] {
       const source = p90
         ? [{ text: ' ' }, { text: tp.sourceP90 }]
         : po
-          ? [{ text: ' ' }, ...fill(tp.sourcePo, { po, date: poDate })]
+          ? [{ text: ' ' }, ...inlineSource()]
           : [];
       groups.push([...formula, ...source, ...(equals.length ? [{ text: ' ' }, ...equals] : [])]);
       if (exp! > 0) {

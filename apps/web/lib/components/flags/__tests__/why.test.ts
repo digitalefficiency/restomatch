@@ -17,6 +17,7 @@ function approvalsLabels(locale: 'he' | 'en'): WhyLabels {
       priceP90: t('why.priceP90'),
       priceP90NoQty: t('why.priceP90NoQty'),
       sourcePo: t('why.sourcePo'),
+      sourcePoNoSupplier: t('why.sourcePoNoSupplier'),
       sourceP90: t('why.sourceP90'),
       equals: t('why.equals'),
       qtyOver: t('why.qtyOver'),
@@ -73,6 +74,10 @@ describe('whySegments (flags/why.ts)', () => {
       // p90 basis and the no-quantity form too
       const p90 = { ...price, toleranceUsed: 'actual exceeds historical p90 of ₪139.00', qtyBilled: null };
       expect(whySegments(p90, approvalsLabels(locale))).toEqual(whyLine(t, p90 as ApprovalsFacts));
+      // the order by supplier + date (W2-04, lab 11.11)
+      const named = { ...price, supplierName: 'מבשלת הגליל', supplierNameEn: 'Galilee Brewery' };
+      expect(whySegments(named, approvalsLabels(locale))).toEqual(whyLine(t, named as ApprovalsFacts));
+      expect(whyText(whySegments(named, approvalsLabels(locale)))).not.toMatch(/PO-/);
     }
   });
 

@@ -126,10 +126,10 @@ describe('decision verbs name what happens to the money (approvals-01, functiona
     const [ap, rj] = decisionActions('PRICE_HIGHER');
     expect(ap).toMatchObject({ kind: 'approve', procedure: 'approve' });
     expect(rj).toMatchObject({ kind: 'reject', procedure: 'reject' });
-    expect(he(ap!.label as never, { amount: '₪104.80' })).toBe('דרוש ₪104.80 מהספק');
-    expect(he(rj!.label as never)).toBe('שלם כפי שחויב');
-    expect(he('decision.escalate')).toBe('העבר לבעלים');
-    expect(en(ap!.label as never, { amount: '₪104.80' })).toBe('Claim ₪104.80 back');
+    expect(he(ap!.label as never, { amount: '₪104.80' })).toBe('בקשת זיכוי · ₪104.80');
+    expect(he(rj!.label as never)).toBe('שלמו כפי שחויב');
+    expect(he('decision.escalate')).toBe('העבירו לבעלים');
+    expect(en(ap!.label as never, { amount: '₪104.80' })).toBe('Request ₪104.80 credit');
     expect(en(rj!.label as never)).toBe('Pay as billed');
   });
 
@@ -147,7 +147,7 @@ describe('decision verbs name what happens to the money (approvals-01, functiona
       for (const a of decisionActions(type)) {
         if (a.kind === 'link') continue;
         const text = he(a.label as never, { amount: '₪1' });
-        if (a.procedure === 'reject') expect(text, type).not.toMatch(/דרוש/);
+        if (a.procedure === 'reject') expect(text, type).not.toMatch(/דרוש|בקשת זיכוי/);
         if (a.procedure === 'approve') expect(text, type).not.toMatch(/^שלם/);
       }
     }
@@ -196,22 +196,27 @@ describe('whyLine (approvals-06)', () => {
     billedUnit: 'חבית',
     poRef: 'PO-7781',
     poDate: new Date('2026-10-14T08:00:00Z'),
+    supplierName: 'מבשלת הגליל',
+    supplierNameEn: 'Galilee Brewery',
   };
   const ils = (v: number, locale: 'he' | 'en') => formatIls(v, { locale, maximumFractionDigits: 2 });
 
   it('price: billed × qty instead of the order price, = the ₪, the %, the threshold', () => {
     expect(whyText(whyLine(en, fact))).toBe(
-      '₪575.00 × 2 keg instead of ₪522.60 (order PO-7781, 14/10) = ₪104.80 · +10.0% · threshold price ±2% or ₪5',
+      '₪575.00 × 2 keg instead of ₪522.60 (Galilee Brewery order, 14/10) = ₪104.80 · +10.0% · threshold price ±2% or ₪5',
     );
     const text = whyText(whyLine(he, fact));
-    expect(text).toContain(`${ils(575, 'he')} × 2 חבית במקום ${ils(522.6, 'he')} (הזמנה PO-7781, 14.10) = ${ils(104.8, 'he')}`);
+    expect(text).toContain(`${ils(575, 'he')} × 2 חבית במקום ${ils(522.6, 'he')} (הזמנה מ־מבשלת הגליל, 14.10) = ${ils(104.8, 'he')}`);
+    // Lab 11.11: the order reads by supplier + date, never a raw code inside a sentence.
+    expect(text).not.toMatch(/PO-/);
+    expect(whyText(whyLine(he, { ...fact, supplierName: null, supplierNameEn: null }))).toContain('(הזמנה מ־14.10)');
     expect(text).toContain('+10.0%');
     expect(text).toContain('סף');
   });
 
   it('every number, ₪ and token is an isolated segment (never a bare bidi run)', () => {
     const segs = whyLine(he, fact).flat();
-    for (const value of [ils(575, 'he'), '2', 'חבית', ils(522.6, 'he'), 'PO-7781', ils(104.8, 'he')]) {
+    for (const value of [ils(575, 'he'), '2', 'חבית', ils(522.6, 'he'), 'מבשלת הגליל', ils(104.8, 'he')]) {
       expect(segs.find((s) => s.text === value), value).toMatchObject({ num: true });
     }
   });
@@ -268,7 +273,7 @@ describe('verbs keyed by type AND claimability (deep-fix)', () => {
     const [ap, rj] = decisionActions('DUPLICATE_INVOICE', true);
     expect(ap).toMatchObject({ kind: 'approve', withAmount: false, done: 'decision.duplicateHeld' });
     expect(he(ap!.label as never)).toBe('אל תשלמו את העותק');
-    expect(he(ap!.label as never)).not.toMatch(/דרוש/);
+    expect(he(ap!.label as never)).not.toMatch(/דרוש|בקשת זיכוי/);
     expect(he((ap as { done: string }).done as never)).toBe(DECISION_COPY.he.duplicateHeld);
     expect(en('decision.duplicateHeld')).toBe(DECISION_COPY.en.duplicateHeld);
     expect(he(rj!.label as never)).toBe('שלמו · זו לא כפולה');

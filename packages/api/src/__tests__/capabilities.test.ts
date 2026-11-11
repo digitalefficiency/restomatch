@@ -43,6 +43,8 @@ const MEMBER_MUTATION_ALLOW: Record<string, string> = {
   'approvals.reject': 'deciderProcedure + ensureCanAct (ACT_ON); W2-04',
   'approvals.escalate': 'deciderProcedure + ensureCanAct (ACT_ON); W2-04',
   'approvals.reopen': 'deciderProcedure + ensureCanAct (ACT_ON); W2-04',
+  'approvals.decideMany': 'per-row assertCanAct (ACT_ON) for every item, all-or-nothing, server ₪ caps (bulkPolicy); W2-04',
+  'approvals.reopenMany': 'per-row assertCanAct (ACT_ON) for every item, all-or-nothing; W2-04',
 };
 
 describe('procedure walk', () => {

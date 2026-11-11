@@ -13,6 +13,7 @@ export const nav: Shape<typeof he> = {
     labDesk: 'Лаборатория таблиц',
     labDeskRow: 'Строка',
     approvals: 'Согласования',
+    approvalInvoice: 'Решение по счёту',
     payRun: 'Платёжный прогон',
     inbox: 'Входящие счета',
     invoices: 'Счета',

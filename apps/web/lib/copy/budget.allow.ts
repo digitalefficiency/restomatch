@@ -101,10 +101,7 @@ export const COPY_ALLOW: AllowList = {
   'payRun:subtitle': { words: 15, reason: 'baseline', owner: 'W2-03' },
   // ── W2-04 (13) ──
   'approvals:card.error': { words: 5, reason: 'baseline', owner: 'W2-04' },
-  'approvals:empty.clearDescription': { words: 12, reason: 'baseline', owner: 'W2-04' },
-  'approvals:errorPage.body': { words: 8, reason: 'baseline', owner: 'W2-04' },
   'approvals:errorPage.bodyPayRun': { words: 9, reason: 'baseline', owner: 'W2-04' },
-  'approvals:others.readOnly': { words: 4, reason: 'baseline', owner: 'W2-04' },
   'approvals:rules.cumulative-large': { words: 5, reason: 'baseline', owner: 'W2-04' },
   'approvals:rules.cumulative-medium': { words: 5, reason: 'baseline', owner: 'W2-04' },
   'approvals:rules.duplicate-invoice': { words: 9, reason: 'baseline', owner: 'W2-04' },
