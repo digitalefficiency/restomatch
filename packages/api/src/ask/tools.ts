@@ -12,10 +12,18 @@
  * are data, never instructions (see claude.ts) and the answer's links are
  * re-validated against `links` produced here (grounding.ts).
  */
-import { computeLeakBreakdown, computeLeakHero, computeLeakReport, type LeakHero, type LeakReport } from '@restomatch/charts';
+import {
+  computeLeakBreakdown,
+  computeLeakHero,
+  computeLeakReport,
+  type LeakBreakdownInvoice,
+  type LeakHero,
+  type LeakReport,
+} from '@restomatch/charts';
 import type { Database } from '@restomatch/db';
 import { z } from 'zod';
 import { awaitingDecisionDetail, type AwaitingClaim } from '../approvals/awaiting';
+import { claimableLines } from '../lib/claims';
 import { leakComparison } from './compare';
 import { monthKey, monthPeriod, restaurantTimezone, type Period } from './periods';
 
@@ -85,6 +93,8 @@ function heroData(h: LeakHero) {
     invoiceCount: h.invoiceCount,
     invoicesWithLeak: h.invoicesWithLeak,
     pendingLinkCount: h.pendingLinkCount,
+    // G-08: held for a "זה אותו מוצר?" question — in neither leak nor spend.
+    awaitingQuestionCount: h.awaitingQuestionCount,
   };
 }
 
@@ -125,7 +135,7 @@ export function reportData(r: LeakReport, locale: AskLocale = 'en') {
  * VAT basis, never added together: `totalIls` is before VAT; a duplicate's ₪
  * (incl. VAT) and VAT amounts are reported apart.
  */
-export function claimableData(claims: readonly AwaitingClaim[], locale: AskLocale = 'en') {
+export function claimableFromAwaiting(claims: readonly AwaitingClaim[], locale: AskLocale = 'en') {
   const agorot = { excl: 0, incl: 0, vat: 0 };
   for (const c of claims) agorot[c.basis] += Math.round(c.amountIls * 100);
   const lines = claims.map((c) => ({
@@ -147,10 +157,33 @@ export function claimableData(claims: readonly AwaitingClaim[], locale: AskLocal
   };
 }
 
+/**
+ * What can still be claimed, biggest first: the claims letters' rule (claimableLines —
+ * never-claimable types out, paid/pending-link invoices out, capped at the invoice's
+ * leak), narrowed to lines still open or escalated.
+ */
+export function claimableData(invoices: LeakBreakdownInvoice[], locale: AskLocale = 'en') {
+  const lines = invoices.flatMap((inv) =>
+    claimableLines(inv)
+      .filter(({ line: l }) => l.resolutionStatus === 'open' || l.resolutionStatus === 'escalated')
+      .map(({ line: l, amount }) => ({
+        invoiceId: inv.invoiceId,
+        invoiceNumber: clip(inv.invoiceNumber, 30),
+        supplier: nm(locale, inv.supplierNameEn, inv.supplierName),
+        type: l.type,
+        item: nm(locale, l.productNameEn ?? l.lineDescriptionEn, l.productName, l.lineDescription),
+        amountIls: r2(amount),
+      }))
+      .filter((l) => l.amountIls >= 0.01),
+  );
+  lines.sort((a, b) => b.amountIls - a.amountIls);
+  return { totalIls: r2(lines.reduce((s, l) => s + l.amountIls, 0)), count: lines.length, lines: lines.slice(0, 15) };
+}
+
 /** Open claimable lines for Ask: the whole restaurant (Ask is manager tier, which reads every routing with ₪). */
 export async function claimableFor(db: Database, restaurantId: string, locale: AskLocale) {
   const { claims } = await awaitingDecisionDetail(db, { session: { restaurantId, role: 'manager' } }, { scope: 'all' });
-  return claimableData(claims, locale);
+  return claimableFromAwaiting(claims, locale);
 }
 
 export function figuresOf(value: unknown, key = '', out: Figures = { ils: [], pct: [], count: [] }): Figures {
