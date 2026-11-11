@@ -8,7 +8,8 @@
  * Implements the 6 default rules from plan §7. Restaurant-specific
  * overrides are applied on top of the defaults when present.
  *
- * G-15: a row the leak does not count (LEAK_FILTER, packages/charts) is
+ * G-15: a row the leak does not count (LEAK_FILTER, packages/charts) —
+ * except MISSING_ON_INVOICE, which stays open for a person — is
  * acknowledged with no ₪ (`non-leak-acknowledge`) before the cumulative
  * rules — no owner queue entry, no "דרוש ₪X", for a row that is not
  * claimable. `evaluatePayApproval` is the pay-approval rule (decision 9).
@@ -124,6 +125,17 @@ export function countsAsLeak(d: { type: DiscrepancyType; severity: Severity }): 
   return (d.severity === 'warn' || d.severity === 'block') && !NON_LEAK_TYPES.has(d.type);
 }
 
+/**
+ * Is this row acknowledged by the system with no ₪ (`non-leak-acknowledge`)?
+ * Every non-leak row EXCEPT MISSING_ON_INVOICE: an ordered line the invoice
+ * never billed is out of the leak (decision 31.10) but stays OPEN for a person
+ * — receiving, the order-question undo (R8) and recovery claims decide it. The
+ * approvals UI already shows it as "לבדיקה, ללא ₪" (isClaimableRow).
+ */
+export function routesToAcknowledge(d: { type: DiscrepancyType; severity: Severity }): boolean {
+  return !countsAsLeak(d) && d.type !== 'MISSING_ON_INVOICE';
+}
+
 function discrepancyPct(ctx: ApprovalContext): number {
   return ctx.matchRun.totalInvoiceAmount > 0
     ? ctx.matchRun.totalDiscrepancyAmount / ctx.matchRun.totalInvoiceAmount
@@ -170,12 +182,12 @@ export function buildRules(t: Required<ApprovalThresholds> = DEFAULT_APPROVAL_TH
     },
     {
       // Below every control (duplicate, no-PO, unordered, severity-block),
-      // above the cumulative ₪ rules: a non-leak row never inherits the
-      // invoice's cumulative ₪ and never waits in a ₪ queue.
+      // above the cumulative ₪ rules: an acknowledged non-leak row never
+      // inherits the invoice's cumulative ₪ and never waits in a ₪ queue.
       id: 'non-leak-acknowledge',
       name: 'פער ללא ₪ לדליפה — נרשם לידיעה',
       priority: 75,
-      predicate: (ctx) => !countsAsLeak(ctx.discrepancy),
+      predicate: (ctx) => routesToAcknowledge(ctx.discrepancy),
       decision: { requiredRole: null, action: 'auto_approve' },
     },
     {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildRules,
   countsAsLeak,
+  routesToAcknowledge,
   DEFAULT_PAY_APPROVAL_THRESHOLDS,
   evaluateApproval,
   evaluatePayApproval,
@@ -67,7 +68,9 @@ describe('non-leak rows are acknowledged with no ₪, before the cumulative rule
     for (const severity of SEVERITIES) {
       it(`${type}/${severity} on a ₪950 run`, () => {
         const d = evaluateApproval(ctx(type, severity));
-        if (leakFilterAtRouting(type, severity)) {
+        if (leakFilterAtRouting(type, severity) || type === 'MISSING_ON_INVOICE') {
+          // Leak rows, and MISSING_ON_INVOICE (out of the leak but decided by
+          // a person), keep main's routing.
           expect(d.ruleId).not.toBe('non-leak-acknowledge');
           return;
         }
@@ -97,11 +100,19 @@ describe('non-leak rows are acknowledged with no ₪, before the cumulative rule
     expect(d).toMatchObject({ ruleId: 'large-invoice-without-po', action: 'block', requiredRole: 'owner' });
   });
 
-  it('MISSING_ON_INVOICE (decision 31.10) is acknowledged, never a ₪ queue', () => {
-    expect(evaluateApproval(ctx('MISSING_ON_INVOICE', 'warn'))).toMatchObject({
-      ruleId: 'non-leak-acknowledge',
-      requiredRole: null,
-    });
+  it('MISSING_ON_INVOICE is out of the leak but stays OPEN for a person (routed as on main)', () => {
+    expect(countsAsLeak({ type: 'MISSING_ON_INVOICE', severity: 'warn' })).toBe(false);
+    expect(routesToAcknowledge({ type: 'MISSING_ON_INVOICE', severity: 'warn' })).toBe(false);
+    const d = evaluateApproval(ctx('MISSING_ON_INVOICE', 'warn'));
+    expect(d.ruleId).toBe('cumulative-large');
+    expect(d.action).toBe('queue_review'); // persist → status 'open': approve/reject still work
+    // the same on a small run: the manager gets it, never an auto-accept
+    expect(
+      evaluateApproval({
+        discrepancy: { type: 'MISSING_ON_INVOICE', severity: 'warn', deltaAmount: 5 },
+        matchRun: { totalDiscrepancyAmount: 5, totalInvoiceAmount: 10_000, poExists: true },
+      }).action,
+    ).not.toBe('auto_approve');
   });
 
   it('leak rows still reach the cumulative rules', () => {
