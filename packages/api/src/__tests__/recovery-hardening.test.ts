@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createDb, creditNotes, eq, invoiceLines, invoices, recoveryClaims, recoveryEvents, restaurants, suppliers, testDbUrl } from '@restomatch/db';
+import { createDb, creditNotes, discrepancies, eq, invoiceLines, invoices, recoveryClaims, recoveryEvents, restaurants, suppliers, testDbUrl } from '@restomatch/db';
 import { recordCreditNote, transitionClaim } from '../recovery/service';
 import { appRouter } from '../index';
 import type { AppContext } from '../context';
@@ -137,6 +137,22 @@ describe('recovery hardening (H-06 review → W3-11)', () => {
     await expect(caller.recovery.suggestAllocation({ supplierId: T.supplierId, printedAgorot: 1_180 })).rejects.toMatchObject({
       code: 'BAD_REQUEST',
     });
+  });
+
+  it('never proposes a claim that is not measured before VAT (a duplicate invoice is incl. VAT)', async () => {
+    const [d] = await db.select({ type: discrepancies.type }).from(discrepancies).where(eq(discrepancies.id, T.discrepancyId));
+    await db.update(discrepancies).set({ type: 'DUPLICATE_INVOICE' }).where(eq(discrepancies.id, T.discrepancyId));
+    try {
+      const caller = appRouter.createCaller({
+        db,
+        session: { userId: T.ownerUserId, restaurantId: T.restaurantId, role: 'owner' },
+      } as AppContext);
+      const out = await caller.recovery.suggestAllocation({ supplierId: T.supplierId, amountAgorot: 1_000 });
+      expect(out.candidates).toEqual([]);
+      expect(out.suggestion).toMatchObject({ basis: 'none', allocations: [], remainderAgorot: 1_000 });
+    } finally {
+      await db.update(discrepancies).set({ type: d!.type }).where(eq(discrepancies.id, T.discrepancyId));
+    }
   });
 });
 

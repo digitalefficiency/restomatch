@@ -87,7 +87,7 @@ export const he = {
     heldHint: '{count} חשבוניות · {dispute} בבירור מול הספק',
     credit: 'זיכויים לקזז לפני תשלום',
     creditHint: 'מפערים שהוחלט לבקש עליהם זיכוי',
-    zeroCredit: 'אין זיכויים לבקש — אף פער לא נדרש מהספק החודש',
+    zeroCredit: 'אין זיכויים לבקש: אף פער לא נדרש מהספק החודש',
   },
   bucket: {
     overdue: 'באיחור',
@@ -150,8 +150,19 @@ export const he = {
   },
   errorPage: {
     title: 'ריצת התשלומים לא נטענה',
-    body: 'לא שילמנו ולא שינינו דבר. נסו שוב, ואם זה חוזר — פנו אלינו.',
+    body: 'דבר לא שולם ולא שונה, נסו שוב',
     retry: 'נסו שוב',
     back: 'חזרה לאישורים',
+  },
+  holdShort: {
+    decision: 'ממתין ל{who}',
+    decisionMeta: '{days} ימים',
+    duplicate: 'עותק כפול',
+    pendingLink: 'ממתינה לשיוך',
+    awaitingCount: 'ממתינה לספירה',
+    awaitingQuestion: 'שאלה פתוחה',
+    awaitingReview: 'לבדיקה',
+    missingAllocation: 'חסר מספר הקצאה',
+    noteBilledTwice: 'אפשר שחויב פעמיים',
   },
 };

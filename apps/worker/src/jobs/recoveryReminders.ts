@@ -1,7 +1,11 @@
 /**
- * recovery-reminders — 08:30 IL daily (flag `recovery`): chase claims a
- * supplier has not credited 14+ days after the letter. Detection only — the
- * emails go through the outbox (enqueueRecoveryReminders) and outbox-dispatch.
+ * recovery-reminders — 08:30 IL daily (flag `recovery`, AU-03 / A12): one digest
+ * per owner / manager (+ bookkeeper, opt-in) of credit requests with no credit
+ * invoice MORE than CLAIM_ANSWER_DAYS (7) whole Israel days after the letter (or
+ * the claim) — the one predicate of packages/api recovery/overdue.ts. Detection
+ * only: the e-mails go through the outbox (enqueueRecoveryReminders) and
+ * outbox-dispatch; nothing is ever sent to a supplier (each line links to a
+ * click-only draft).
  */
 import { enqueueRecoveryReminders } from '@restomatch/api';
 import { jobDb } from '../db';

@@ -8,7 +8,7 @@ export const en: Shape<typeof he> = {
     sortLabel: 'Sort:',
     sort: { rank: '₪ × days waiting', amount: 'Amount', age: 'Days waiting' },
     showMore: 'Show more · {shown} of {total}',
-    viewEmpty: { send: 'No credit requests to send.', track: 'No credit requests in tracking — all closed.', closed: 'No closed credit requests yet.' },
+    viewEmpty: { send: 'No credit requests to send.', track: 'No open credit requests in tracking.', closed: 'No closed credit requests yet.' },
     paged: 'Showing {shown} of {total} claims',
     loading: 'Loading the ₪-back tracker',
     errorTitle: 'The ₪-back tracker is not available right now',
@@ -82,7 +82,7 @@ export const en: Shape<typeof he> = {
       writtenOff: 'Closed without credit',
     },
     sentence:
-      'Decided to request {claimed}: {returned} back, {credited} credited and not yet offset, {open} open, {disputed} in review with the supplier, {writtenOff} closed without credit.',
+      'Decided to request {claimed}: {returned} back, {credited} credited and not yet offset, {open} open, {disputed} in review, {writtenOff} closed without credit.',
     note: 'Whole shekels, rounded so the parts add up exactly to the amount claimed. Hover for the exact amount.',
   },
   followUp: {
@@ -91,7 +91,7 @@ export const en: Shape<typeof he> = {
     unsentCta: 'Send the claims',
     waiting: '{count} with no reply for {days}+ days · {amount}',
     waitingCta: 'Draft reminders to suppliers',
-    reminderNote: 'The automatic reminder reaches you only. For the supplier you get a draft, sent only when you click.',
+    reminderNote: 'Nothing reaches the supplier until you press send.',
   },
   countdown: {
     left: '{days} days left · by {date}',
@@ -114,7 +114,7 @@ export const en: Shape<typeof he> = {
     claimed: 'Re-open',
   },
   actions: {
-    failedRow: 'This row was not saved.',
+    failedRow: 'Not saved',
     retry: 'Try again',
     letter_sent: 'Mark letter sent',
     acknowledged: 'Supplier acknowledged',
@@ -167,10 +167,10 @@ export const en: Shape<typeof he> = {
   },
   reminder: {
     title: 'Supplier reminders',
-    hint: 'Drafts only. They open in WhatsApp or email only when you click.',
+    hint: 'Drafts only: they open in WhatsApp or email on your click.',
     line: 'Reminder to {supplier} · {count} claims',
     why: 'Why?',
-    whyText: 'A week passed with no credit note. The oldest has waited {days} days.',
+    whyText: 'A week passed with no credit invoice, and the oldest has waited {days} days.',
     whatsapp: 'Open in WhatsApp',
     mail: 'Open in email',
     subject: 'Reminder: credit request · {count} lines · {amount}',

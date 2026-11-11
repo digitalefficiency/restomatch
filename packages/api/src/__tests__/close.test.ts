@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { createDb, eq, goodsReceipts, grLines, invoices, poLines, purchaseOrders, restaurants, testDbUrl } from '@restomatch/db';
+import { createDb, eq, goodsReceipts, grLines, invoices, matchRuns, poLines, purchaseOrders, restaurants, testDbUrl } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { monthWindow } from '../routers/close';
@@ -26,6 +26,8 @@ async function invoice(
   t: Tenant,
   v: { day: string; incl: string | null; status: 'ocr_pending' | 'parsed' | 'matched' | 'approved'; consolidated?: boolean },
 ) {
+  // 'matched'/'approved' fixtures get a real, clean match run: "checked" is EXISTS(match_runs)
+  // (lifecycle INVOICE_CHECKED), never the status column.
   const [row] = await db
     .insert(invoices)
     .values({
@@ -39,6 +41,16 @@ async function invoice(
       ...(v.consolidated ? { ocrPayload: { raw: { kind: 'consolidated' } } as never } : {}),
     })
     .returning({ id: invoices.id });
+  if (v.status === 'matched' || v.status === 'approved') {
+    await db.insert(matchRuns).values({
+      restaurantId: t.restaurantId,
+      poId: t.poId,
+      grId: t.grId,
+      invoiceId: row!.id,
+      overallStatus: 'clean',
+      totalDiscrepancyAmount: '0.00',
+    });
+  }
   return row!.id;
 }
 
@@ -77,20 +89,23 @@ afterAll(async () => {
 });
 
 describe('close.checklist (DB)', () => {
-  it('counts the month’s unchecked invoices incl. VAT, agora-exact; checked and other months stay out', async () => {
+  it('unchecked = the register’s awaiting tab for the month, incl. VAT, agora-exact; checked and other months stay out', async () => {
     await invoice(A, { day: '2026-09-03', incl: '117.10', status: 'ocr_pending' });
     await invoice(A, { day: '2026-09-30', incl: '0.20', status: 'parsed' });
     await invoice(A, { day: '2026-09-12', incl: null, status: 'ocr_pending' }); // not read yet: counted, ₪0
-    await invoice(A, { day: '2026-09-15', incl: '999.00', status: 'matched' });
+    await invoice(A, { day: '2026-09-15', incl: '999.00', status: 'matched' }); // has a match run → checked
     await invoice(A, { day: '2026-10-01', incl: '50.00', status: 'parsed' }); // October (Israel time)
     await invoice(B, { day: '2026-09-05', incl: '777.00', status: 'parsed' }); // other tenant
 
     const r = await callerFor(A, 'bookkeeper').close.checklist({ month: MONTH });
     expect(r.month).toBe(MONTH);
     expect(r.unchecked).toEqual({ count: 3, amountIls: 117.3 });
+    // One home per number: the same figure as the register's awaiting tab at the step's link.
+    const reg = await callerFor(A, 'bookkeeper').invoices.list({ monthOffset: r.monthOffset });
+    expect(reg.counts.awaiting).toBe(r.unchecked.count);
   });
 
-  it('pending consolidated invoices are their own step (never double-counted as unchecked); settled ones drop out', async () => {
+  it('pending consolidated invoices: their own T4 step (still in the register’s awaiting tab); settled ones drop out', async () => {
     const first = await invoice(A, { day: '2026-09-02', incl: '1000.00', status: 'parsed', consolidated: true });
     await invoice(A, { day: '2026-09-20', incl: '250.50', status: 'ocr_pending', consolidated: true });
     await invoice(A, { day: '2026-09-21', incl: '400.00', status: 'approved', consolidated: true });
@@ -98,7 +113,8 @@ describe('close.checklist (DB)', () => {
 
     const r = await callerFor(A).close.checklist({ month: MONTH });
     expect(r.consolidated).toEqual({ count: 2, amountIls: 1250.5, firstInvoiceId: first });
-    expect(r.unchecked.count).toBe(0);
+    // Step 1 is the register's awaiting tab, which holds these two as well (count = its link).
+    expect(r.unchecked.count).toBe(2);
   });
 
   it('delivery notes no invoice covers: null while the ledger flag is off, else the reused coverage rule', async () => {

@@ -9,7 +9,7 @@ import { he as cHe } from '../lib/i18n/messages/common/he';
  * AU-01 · /dashboard/settings/automations on the seeded demo tenant
  * (features.all → every flag row is on).
  *   - owner: one row per automation, a switch with a confirm naming who gets it;
- *     price alerts off → on round-trips; the receiver-brief row shows no ₪;
+ *     price alerts off → on round-trips; the order-reminders row shows no ₪; no receiverBrief row (no sender yet);
  *   - manager: the list, no switch;
  *   - receiver: the shell forbidden page (403), never the list;
  *   - he 390 / 1440 and en 1440 render without horizontal scroll; axe clean.
@@ -60,17 +60,23 @@ async function noHorizontalScroll(page: Page) {
 }
 
 test.describe('AU-01 automations page', () => {
-  test('owner: rows, confirm, toggle off and on again; receiver brief has no ₪', async ({ context, page }) => {
+  test('owner: rows, confirm, toggle off and on again; order reminders row has no ₪', async ({ context, page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await signIn(context, page, 'owner');
     await page.goto(PATH);
     await expect(page.getByRole('heading', { name: he.page.title })).toBeVisible();
-    for (const key of ['priceAlerts', 'recovery', 'monthlyReport', 'eveningDigest', 'receiverBrief', 'matchAlerts']) {
+    for (const key of ['priceAlerts', 'recovery', 'monthlyReport', 'eveningDigest', 'orderReminders', 'matchAlerts']) {
       await expect(page.locator(`[data-automation=${key}]`)).toBeVisible();
     }
-    const brief = page.locator('[data-automation=receiverBrief]');
-    await expect(brief).toContainText(he.row.noIls);
-    expect(await brief.innerText()).not.toMatch(/₪/);
+    // Train C (C3): no receiverBrief row until a job sends it; jobs that ignore their
+    // option show "תמיד פעיל" with no switch.
+    await expect(page.locator('[data-automation=receiverBrief]')).toHaveCount(0);
+    const eod = page.locator('[data-automation=eveningDigest]');
+    await expect(eod).toContainText(he.row.always);
+    await expect(eod.getByRole('switch')).toHaveCount(0);
+    const a5 = page.locator('[data-automation=orderReminders]');
+    await expect(a5).toContainText(he.row.noIls);
+    expect(await a5.innerText()).not.toMatch(/₪/);
 
     const row = page.locator('[data-automation=priceAlerts]');
     const sw = row.getByRole('switch');

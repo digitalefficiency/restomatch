@@ -47,7 +47,7 @@ describe('Ask tools contract', () => {
     const out = await runTool(
       name,
       {},
-      { db, restaurantId: A.restaurantId, now: NOW, locale: 'he' },
+      { db, restaurantId: A.restaurantId, now: NOW, locale: 'he', role: 'owner' },
     );
     const period = (out.data as { period?: unknown }).period;
     expect(period).toEqual({ from: '2026-10-01', through: '2026-10-25', complete: false });
@@ -60,7 +60,7 @@ describe('Ask tools contract', () => {
     const closed = await runTool(
       name,
       { month: '2026-09' },
-      { db, restaurantId: A.restaurantId, now: NOW, locale: 'he' },
+      { db, restaurantId: A.restaurantId, now: NOW, locale: 'he', role: 'owner' },
     );
     if (name !== 'leak_change') {
       expect((closed.data as { period: unknown }).period).toEqual({
@@ -80,7 +80,7 @@ describe('Ask tools contract', () => {
     const out = await runTool(
       'leak_change',
       {},
-      { db, restaurantId: A.restaurantId, now: NOW, locale: 'he' },
+      { db, restaurantId: A.restaurantId, now: NOW, locale: 'he', role: 'owner' },
     );
     expect(out.data).toMatchObject({
       period: { from: '2026-10-01', through: '2026-10-25', complete: false },
@@ -102,7 +102,7 @@ describe('Ask tools contract', () => {
       const out = await runTool(
         t.name,
         {},
-        { db, restaurantId: A.restaurantId, now: NOW, locale: 'he' },
+        { db, restaurantId: A.restaurantId, now: NOW, locale: 'he', role: 'owner' },
       );
       expect(
         keysOf(out.data).filter((k) => /target|goal/i.test(k)),
@@ -135,7 +135,7 @@ describe('Ask tools contract', () => {
     const out = await runTool(
       'claimable_lines',
       {},
-      { db, restaurantId: A.restaurantId, now: NOW, locale: 'he' },
+      { db, restaurantId: A.restaurantId, now: NOW, locale: 'he', role: 'owner' },
     );
     const a = await awaitingDecision(
       db,

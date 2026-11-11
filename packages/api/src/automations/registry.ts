@@ -115,14 +115,18 @@ export const AUTOMATIONS: ReadonlyArray<AutomationDef> = [
     key: 'orderReminders',
     control: { kind: 'option', option: 'orderReminders', default: true },
     slot: '09:00',
-    audience: ['owner', 'manager'],
+    // The job e-mails the chef too (ORDER_REMINDER_ROLES; the chef orders directly).
+    audience: ['owner', 'manager', 'chef'],
     carriesIls: false,
-    outboxMatch: { kind: 'like', like: 'supplier:%:order-reminder:%' },
+    // AU-04: the job dedupes on `au:A5:<rid>:<userId>:<sid>:<day>`.
+    outboxMatch: { kind: 'prefix', prefix: 'au:A5:' },
   },
   {
     id: 'A6',
     key: 'supplierDelays',
-    control: { kind: 'option', option: 'supplierDelays', default: true },
+    // Train C (C3): supplierDelays.ts does not read the option yet, so no switch is
+    // offered ("תמיד פעיל"). Flip back to the option once the job honours it.
+    control: { kind: 'always' },
     slot: '10:00',
     audience: ['owner', 'manager'],
     carriesIls: false,
@@ -131,21 +135,16 @@ export const AUTOMATIONS: ReadonlyArray<AutomationDef> = [
   {
     id: 'A7',
     key: 'eveningDigest',
-    control: { kind: 'option', option: 'eveningDigest', default: true },
+    // Train C (C3): endOfDayReport.ts does not read the option yet — "תמיד פעיל", no switch.
+    control: { kind: 'always' },
     slot: '19:00',
     audience: ['owner', 'manager'],
     carriesIls: true,
     outboxMatch: { kind: 'prefix', prefix: 'eod-report:' },
   },
-  {
-    id: 'A4',
-    key: 'receiverBrief',
-    control: { kind: 'option', option: 'receiverBrief', default: true },
-    slot: '06:00',
-    audience: ['receiver'],
-    carriesIls: false,
-    outboxMatch: { kind: 'none' },
-  },
+  // Train C (C3): receiverBrief (A4) is hidden until a job sends receiverMorningBrief;
+  // its option key stays in AUTOMATION_OPTION_KEYS so briefs/options.ts keeps resolving.
+
   {
     id: 'A1',
     key: 'matchAlerts',
