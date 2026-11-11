@@ -139,7 +139,7 @@ export const en: Shape<typeof he> = {
     notPayer: 'Only the billing account owner opens new branches.',
     limitReached: 'You’ve reached your plan’s branch limit. Upgrade to add a branch.',
     upsell: 'Opening more branches is part of the Chain plan',
-    noBilling: 'On the Chain plan: more branches, all on one screen.',
+    noBilling: 'To open another branch, this branch needs a billing account. Upgrade to the Chain plan.',
     ownerOnly: 'Only owners can manage branches.',
   },
   matrix: {
@@ -192,7 +192,7 @@ export const en: Shape<typeof he> = {
     notFound: 'Branch not found, or you do not have access to it.',
     notPayer: 'Only the billing account owner opens new branches.',
     forbidden: 'You are not allowed to do that.',
-    limit: 'You’ve reached your plan’s branch limit. Upgrade to add a branch.',
+    limit: 'You have reached the branch limit of your plan.',
     nameInvalid: 'The branch name must be 2–120 characters.',
   },
 };

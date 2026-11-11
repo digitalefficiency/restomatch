@@ -24,6 +24,7 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { formatDate } from '@/lib/i18n/format';
 import { components } from '@/lib/i18n/messages/components';
 import { products as productsNs } from '@/lib/i18n/messages/products';
+import { explain as explainNs } from '@/lib/i18n/messages/explain';
 import { formatIls } from '@/lib/money';
 import { productPatch, type ProductFormState } from '../product-logic';
 import { startRouteProgress } from '@/lib/components/routeProgressState';
@@ -42,6 +43,7 @@ export function ProductEditor({
   canEdit: boolean;
 }) {
   const t = useT(productsNs);
+  const te = useT(explainNs);
   const tc = useT(components);
   const locale = useLocale();
   const toast = useToast();
@@ -120,7 +122,7 @@ export function ProductEditor({
                 lang="he"
               />
             </Field>
-            <Field label={t('form.nameEn')} htmlFor="pr-name-en" hint={t('form.nameEnHint')}>
+            <Field label={t('form.nameEn')} htmlFor="pr-name-en" hint={te('englishName')}>
               <Input
                 id="pr-name-en"
                 value={form.nameEn}

@@ -39,7 +39,6 @@ export const he = {
     title: 'פרטי מוצר',
     name: 'שם המוצר בעברית',
     nameEn: 'שם באנגלית',
-    nameEnHint: 'מוצג לצוות שעובד באנגלית. ההתאמות והייצוא נשארים על השם העברי.',
     nameEnPlaceholder: 'Cherry tomatoes',
     category: 'קטגוריה',
     unit: 'יחידת ברירת מחדל',

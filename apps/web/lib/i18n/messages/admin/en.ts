@@ -104,7 +104,7 @@ export const en: Shape<typeof he> = {
     },
   },
   roles: {
-    lastOwner: 'You can’t demote the last owner. Promote another owner first.',
+    lastOwner: 'You can’t demote the last owner — promote another owner first.',
     roleFor: 'Role for {email}',
   },
   leads: {

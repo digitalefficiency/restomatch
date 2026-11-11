@@ -38,7 +38,6 @@ export const en: Shape<typeof he> = {
     title: 'Product details',
     name: 'Product name in Hebrew',
     nameEn: 'English name',
-    nameEnHint: 'Shown to staff who work in English. Matching and exports stay on the Hebrew name.',
     nameEnPlaceholder: 'Cherry tomatoes',
     category: 'Category',
     unit: 'Default unit',
