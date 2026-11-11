@@ -54,8 +54,10 @@ describe('reminder day counts are Israel calendar days', () => {
       const sent = new Date(`2026-11-10T${hhmmUtc}:00Z`); // any time of 10.11 IL
       await claim({ letterSentAt: sent, claimedAt: sent });
       const out = await findOverdue(db, T.restaurantId, new Date('2026-11-18T06:30:00Z'));
+      // Every send time of 10.11 IL is 8 calendar days old at the 18.11 08:30 run.
+      expect(out.suppliers.map((x) => x.oldestDays), hhmmUtc).toEqual([8]);
       const email = recoveryReminderEmail({ suppliers: out.suppliers });
-      expect(email.html, hhmmUtc).toContain('8 ימים');
+      expect(email.html, hhmmUtc).not.toContain('7 ימים</li>');
       expect(email.html, hhmmUtc).not.toContain('· 7 ימים');
     }
   });
@@ -67,18 +69,18 @@ describe('weekly re-chase counts calendar days, not 168h', () => {
   it('168h minus a minute later (run started earlier in its minute) is still due', async () => {
     await claim({ letterSentAt: letter, claimedAt: letter, lastReminderAt: new Date('2026-11-10T06:30:30Z') });
     const out = await findOverdue(db, T.restaurantId, new Date('2026-11-17T06:29:30Z'));
-    expect(out.claimIds).toHaveLength(1);
+    expect(out.dueClaimIds).toHaveLength(1);
   });
 
   it('6 calendar days later is not due', async () => {
     await claim({ letterSentAt: letter, claimedAt: letter, lastReminderAt: new Date('2026-11-10T06:30:00Z') });
-    expect((await findOverdue(db, T.restaurantId, new Date('2026-11-16T06:30:00Z'))).claimIds).toHaveLength(0);
+    expect((await findOverdue(db, T.restaurantId, new Date('2026-11-16T06:30:00Z'))).dueClaimIds).toHaveLength(0);
   });
 
   it('the spring-forward week (167h between two 08:30 IL runs) is still due', async () => {
     // Israel DST starts Fri 27.3.2026 02:00 → 03:00. 08:30 IL = 06:30Z on 24.3, 05:30Z on 31.3.
     const old = new Date('2026-03-01T08:00:00Z');
     await claim({ letterSentAt: old, claimedAt: old, lastReminderAt: new Date('2026-03-24T06:30:00Z') });
-    expect((await findOverdue(db, T.restaurantId, new Date('2026-03-31T05:30:00Z'))).claimIds).toHaveLength(1);
+    expect((await findOverdue(db, T.restaurantId, new Date('2026-03-31T05:30:00Z'))).dueClaimIds).toHaveLength(1);
   });
 });

@@ -34,6 +34,7 @@ const PUBLIC_ALLOW: Record<string, string> = {
  */
 const MEMBER_MUTATION_ALLOW: Record<string, string> = {
   'settings.setMyLocale': 'self-service: the caller’s own UI locale',
+  'settings.setMyPhone': 'self-service: the caller’s own phone (users row by session userId), no ₪',
   'receiverLangs.setMyLocale': 'self-service: the caller’s own receiving language',
   'receiverLangs.localNames':
     'read-shaped mutation (translates names on demand, cached); feature-gated, invoice reads re-checked against INVOICE_READER_ROLES inside',
