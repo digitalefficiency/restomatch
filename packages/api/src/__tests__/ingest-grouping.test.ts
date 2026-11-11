@@ -42,6 +42,7 @@ import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { toObjectRef } from '../documents/objectRef';
 import { localDocumentStorage } from '../documents/storage';
+import { splitDocument } from '../documents/attach';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 import { jpegBytes, pngBytes } from './documentTestKit';
 
@@ -1562,5 +1563,93 @@ describe('round 7 · R4: an open page question holds approvals (its invoice and 
     const [d2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, p2!));
     await owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'separate' });
     await expect(owner().approvals.approve({ discrepancyId: gap!.id })).resolves.toBeTruthy();
+  });
+});
+
+describe('round 7 · R6–R9', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+  const owner = () =>
+    appRouter.createCaller({
+      db: ownerDb,
+      session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' },
+    } as AppContext);
+
+  it('R6: an unreadable page has a way out ("close as unread"), and stops asking once its invoice got lines', async () => {
+    const [p1, p2] = await pages(2, 'r7u');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-731' });
+    expect((await ocr(p2!, { failed: true })).flagged).toEqual([{ invoiceId: p2, reason: 'page_unreadable' }]);
+    expect(await owner().ingest.pageQuestionOf({ invoiceId: p2! })).toMatchObject({ flag: 'page_unreadable' });
+    // a person types its lines → answered (no dead end), without a write
+    await ownerDb.insert(invoiceLines).values({ invoiceId: p2!, rawDescription: 'הוקלד ידנית', qtyBilled: '1', unit: 'unit', unitPriceBilled: '10.0000', lineTotal: '10.00' });
+    expect(await owner().ingest.pageQuestionOf({ invoiceId: p2! })).toBeNull();
+    // …and the explicit close works too
+    await ownerDb.delete(invoiceLines).where(eq(invoiceLines.invoiceId, p2!));
+    const [d2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, p2!));
+    await owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'close_unreadable' });
+    expect(await owner().ingest.pageQuestionOf({ invoiceId: p2! })).toBeNull();
+  });
+
+  it('R6: a merged document whose rows are all flagged counts as ONE question', async () => {
+    const [p1, p2] = await pages(2, 'r7n');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-732' });
+    expect((await ocr(p2!, NOHEAD)).absorbed).toBe(true);
+    const before = (await owner().ingest.overview()).pageQuestions;
+    await writeOcr(p1!, { failed: true });
+    expect((await settle(p1!)).flagged).toEqual([{ invoiceId: p1, reason: 'page_unreadable' }]); // 2 rows flagged
+    expect((await owner().ingest.overview()).pageQuestions).toBe(before + 1);
+  });
+
+  it('R7: re-opening page 1 for the composed read clears its number (kept in the audit)', async () => {
+    const [p1, p2] = await pages(2, 'r7o');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-733' });
+    expect((await ocr(p2!, NOHEAD)).absorbed).toBe(true);
+    const [one] = await ownerDb.select().from(invoices).where(eq(invoices.id, p1!));
+    expect(one!.invoiceNumber).toBeNull();
+    const audit = await ownerDb.select().from(auditLog).where(eq(auditLog.entityId, p1!));
+    expect(audit.find((a) => a.action === 'document.reopened_for_ocr')?.before).toMatchObject({ invoiceNumber: 'A-733' });
+  });
+
+  it("R8: page 1 a person corrected (hand lines / typed header) is never read away → page_merge_blocked", async () => {
+    const [p1, p2] = await pages(2, 'r7c');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-734' });
+    await ownerDb
+      .update(invoices)
+      .set({ ocrPayload: sql`jsonb_set(coalesce(${invoices.ocrPayload}, '{}'::jsonb), '{raw,headerEntered}', 'true'::jsonb, true)` })
+      .where(eq(invoices.id, p1!));
+    expect(await ocr(p2!, NOHEAD)).toMatchObject({ absorbed: false, flagged: [{ invoiceId: p2, reason: 'page_merge_blocked' }] });
+  });
+
+  it("R9: approving one page of a group never stamps the approver's supplier on the pages not looked at", async () => {
+    const stranger = '972507777777';
+    const m1 = await send(ch.wa, wa([pngBytes('r7g-1')], { from: stranger }), at(0));
+    const m2 = await send(ch.wa, wa([pngBytes('r7g-2')], { from: stranger }), at(2));
+    const [d1] = await docsOf((m1 as { messageId: string }).messageId);
+    const [d2] = await docsOf((m2 as { messageId: string }).messageId);
+    const res = await owner().ingest.approveDocument({ documentId: d1!.id, supplierId: A.supplierId });
+    const [r2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.id, d2!.id));
+    const rows = await ownerDb.select().from(invoices).where(sql`${invoices.id} in (${sql.join(res.invoiceIds.map((i) => sql`${i}`), sql`, `)})`);
+    expect(rows.find((r) => r.id !== res.invoiceIds[0])?.supplierId ?? null).toBeNull();
+    expect(rows.find((r) => r.id === res.invoiceIds[0])?.supplierId).toBe(A.supplierId);
+    expect(r2!.status).toBe('registered');
+  });
+});
+
+describe('round 7 · R11: every recomposition path keeps the failed-re-read guard', () => {
+  it('splitDocument: a split-off part (and the re-opened original) whose read fails terminally is page_unreadable, never silent', async () => {
+    const [p1, p2] = await pages(2, 'r7s');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-741' });
+    expect((await ocr(p2!, NOHEAD)).absorbed).toBe(true);
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-741' }); // the composed read landed
+    const split = await withRestaurant(appDb, A.restaurantId, (tx) =>
+      splitDocument(tx, { restaurantId: A.restaurantId, invoiceId: p1!, pages: [[0], [1]] }, { enqueue: async () => {} }),
+    );
+    expect(split.invoiceIds).toHaveLength(2);
+    for (const id of split.invoiceIds) {
+      await writeOcr(id, { failed: true });
+      expect((await settle(id)).flagged).toEqual([{ invoiceId: id, reason: 'page_unreadable' }]);
+    }
   });
 });

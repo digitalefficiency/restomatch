@@ -17,6 +17,8 @@ export type DocumentFailureReason =
   | 'no_pages'
   /** attach/split: the invoice has a decided פער (a human decision). */
   | 'decided'
+  /** Round 7: a person corrected it (hand lines, typed header, corrected line). */
+  | 'corrected'
   /** attach/split: the invoice has a credit claim. */
   | 'has_claim'
   /** attach/split: the invoice is approved or paid. */

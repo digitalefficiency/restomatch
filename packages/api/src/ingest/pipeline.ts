@@ -203,7 +203,9 @@ export async function registerReviewGroup(
       documentId: page.id,
       storagePath: page.storagePath,
       kind: args.kind,
-      supplierId: args.supplierId,
+      // Round 7: the supplier a person confirmed applies to the page they looked
+      // at; the group's other pages get none (OCR reads theirs) — never stamped unseen.
+      supplierId: page.id === args.documentId ? args.supplierId : null,
       userId: args.userId,
       pageCount: isPageMime(page.mimeType) ? 1 : null,
     });

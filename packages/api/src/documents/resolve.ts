@@ -15,7 +15,10 @@ import { PAGE_FLAGS, type PageFlag } from './settle';
  *    invoice is retired behind every refusal guard (claim, decision, approval,
  *    credit note, goods receipt, price history); the scan object is kept.
  */
-export type PageFlagAction = 'separate' | 'delete_duplicate';
+export type PageFlagAction = 'separate' | 'delete_duplicate' | 'close_unreadable';
+
+/** Round 7: a person closed an unreadable page as not read (answered; the invoice is untouched). */
+export const PAGE_UNREADABLE_CLOSED = 'page_unreadable_closed';
 
 /** Set after a person decided a flagged page is its own invoice. Not a question any more. */
 export const PAGE_SEPARATE = 'page_separate';
@@ -163,6 +166,24 @@ export async function resolvePageFlag(
           .where(and(eq(invoices.id, o.id), eq(invoices.restaurantId, restaurantId)));
       }
       return { invoiceId: null, match: false, released };
+    }
+
+    if (action === 'close_unreadable') {
+      if (flag !== 'page_unreadable') throw new TRPCError({ code: 'CONFLICT', message: 'not_unreadable' });
+      await tx
+        .update(ingestDocuments)
+        .set({ error: PAGE_UNREADABLE_CLOSED, updatedAt: new Date() })
+        .where(and(eq(ingestDocuments.restaurantId, restaurantId), eq(ingestDocuments.invoiceId, invoiceId), eq(ingestDocuments.error, 'page_unreadable')));
+      await tx.insert(auditLog).values({
+        restaurantId,
+        userId: args.userId,
+        action: 'document.page_unreadable_closed',
+        entityType: 'invoice',
+        entityId: invoiceId,
+        before: { flag } as never,
+        after: { flag: PAGE_UNREADABLE_CLOSED } as never,
+      });
+      return { invoiceId, match: false, released: [] as string[] };
     }
 
     // separate: every row of this invoice carries the decision.

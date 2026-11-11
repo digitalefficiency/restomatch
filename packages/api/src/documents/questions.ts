@@ -14,13 +14,26 @@ const PAGE_ONE_FLAGS = ['page_not_merged', 'page_merge_blocked', 'page_too_large
  *    page_merge_blocked / page_too_large page from the same channel + sender.
  * Shared by the approvals queue, the pay run and ingest.pageQuestionOf.
  */
-export function openPageQuestionSql(rid: string, invoiceId: SQL): SQL {
+/**
+ * Round 7: a flagged page row `alias` that still asks something. An unreadable
+ * page whose invoice since got lines (typed by hand, or a later read) or a run
+ * is answered — never a dead end.
+ */
+export function openFlagSql(alias: string): SQL {
   const all = sql.join(PAGE_FLAGS.map((f) => sql`${f}`), sql`, `);
+  const a = sql.raw(alias);
+  return sql`(${a}.status = 'registered' AND ${a}.error IN (${all})
+    AND NOT (${a}.error = 'page_unreadable' AND (
+      EXISTS (SELECT 1 FROM invoice_lines l WHERE l.invoice_id = ${a}.invoice_id)
+      OR EXISTS (SELECT 1 FROM match_runs mr WHERE mr.invoice_id = ${a}.invoice_id AND mr.restaurant_id = ${a}.restaurant_id))))`;
+}
+
+export function openPageQuestionSql(rid: string, invoiceId: SQL): SQL {
   const one = sql.join(PAGE_ONE_FLAGS.map((f) => sql`${f}`), sql`, `);
   return sql`(
     EXISTS (SELECT 1 FROM ingest_documents q
              WHERE q.restaurant_id = ${rid} AND q.invoice_id = ${invoiceId}
-               AND q.status = 'registered' AND q.error IN (${all}))
+               AND ${openFlagSql('q')})
     OR EXISTS (
       SELECT 1 FROM ingest_documents q
         JOIN ingest_messages qm ON qm.id = q.message_id AND qm.restaurant_id = q.restaurant_id

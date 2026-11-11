@@ -31,7 +31,7 @@ import { featureEnabled } from '../lib/features';
 import { enqueueIngestJobs, INGEST_FEATURE, messageStatus, registerIngestedDocument, registerReviewGroup } from '../ingest/pipeline';
 import { multiPageEnabled } from '../ingest/grouping';
 import { PAGE_FLAGS } from '../documents/settle';
-import { openPageQuestionSql } from '../documents/questions';
+import { openFlagSql, openPageQuestionSql } from '../documents/questions';
 import { resolvePageFlag } from '../documents/resolve';
 import { assertSupplierOwned } from '../tenant';
 import { captureSourceRef } from '../orders/captureOrder';
@@ -120,16 +120,10 @@ export const ingestRouter = router({
         and(eq(ingestDocuments.restaurantId, ctx.session.restaurantId), eq(ingestDocuments.status, 'needs_review')),
       );
     // G-09 (round 6): open page questions need a person too (page_separate is answered).
-    const pageQuestions = await ctx.db
-      .select({ id: ingestDocuments.id })
-      .from(ingestDocuments)
-      .where(
-        and(
-          eq(ingestDocuments.restaurantId, ctx.session.restaurantId),
-          eq(ingestDocuments.status, 'registered'),
-          inArray(ingestDocuments.error, [...PAGE_FLAGS]),
-        ),
-      );
+    // Round 7: one question per INVOICE (a merged document's rows count once), open ones only.
+    const pageQuestions = (await ctx.db.execute(sql`
+      select distinct d.invoice_id from ${ingestDocuments} d
+       where d.restaurant_id = ${ctx.session.restaurantId} and ${openFlagSql('d')}`)) as unknown as unknown[];
     return {
       features: flags,
       emailDomain: process.env.INGEST_EMAIL_DOMAIN || null,
@@ -148,8 +142,7 @@ export const ingestRouter = router({
         and(
           eq(ingestDocuments.restaurantId, ctx.session.restaurantId),
           eq(ingestDocuments.invoiceId, input.invoiceId),
-          eq(ingestDocuments.status, 'registered'),
-          inArray(ingestDocuments.error, [...PAGE_FLAGS]),
+          sql`${openFlagSql('"ingest_documents"')}`,
         ),
       )
       .limit(1);
@@ -329,6 +322,8 @@ export const ingestRouter = router({
               error: ingestDocuments.error,
               invoiceId: ingestDocuments.invoiceId,
               storagePath: ingestDocuments.storagePath,
+              // Round 7: does this page still ask something (an unreadable page whose invoice got lines does not)?
+              questionOpen: sql<boolean>`${openFlagSql('"ingest_documents"')}`,
               // G-09: the invoice a page_duplicate repeats, when the OCR recorded it.
               repeatsInvoiceId: sql<string | null>`(select coalesce(i.ocr_payload -> 'raw' -> 'pageRepeats' ->> 'invoiceId', i.ocr_payload -> 'raw' -> 'duplicateOf' ->> 'invoiceId')
                 from ${invoices} i where i.id = ${ingestDocuments.invoiceId} and i.restaurant_id = ${ingestDocuments.restaurantId})`,
@@ -445,7 +440,7 @@ export const ingestRouter = router({
    * re-shot copy behind every refusal guard. Foreign ids → NOT_FOUND.
    */
   resolvePageFlag: managerProcedure
-    .input(z.object({ documentId: z.string().uuid(), action: z.enum(['separate', 'delete_duplicate']) }))
+    .input(z.object({ documentId: z.string().uuid(), action: z.enum(['separate', 'delete_duplicate', 'close_unreadable']) }))
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
       const doc = await ownDocument(ctx.db, rid, input.documentId);

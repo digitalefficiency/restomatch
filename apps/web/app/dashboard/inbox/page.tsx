@@ -80,6 +80,7 @@ export default async function InboxPage({
               invoiceTotal: d.invoiceTotal ?? null,
               invoiceSupplier: d.invoiceSupplier ?? null,
               relatedInvoiceId: d.relatedInvoiceId ?? null,
+              questionOpen: d.questionOpen ?? true,
             })),
           }),
         )}

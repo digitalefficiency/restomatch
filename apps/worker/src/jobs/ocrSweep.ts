@@ -40,6 +40,7 @@
  * retry could only be refused ('disabled') or re-stub the demo, so with nobody
  * listed the sweep does nothing.
  */
+import { WINDOW_MAX_ATTEMPTS } from '@restomatch/api';
 import type { Sql } from '@restomatch/queue';
 import { insertJob } from '@restomatch/queue';
 import { makeWorker, workerSql, type WorkerJob } from '../queue';
@@ -251,7 +252,10 @@ export async function runOcrSweep(
     const inserted = await insertJob(
       sql,
       'match-invoice',
-      { restaurantId: inv.restaurant_id, invoiceId: inv.id },
+      // Round 7: settle-aware, as the LAST attempt — a live sibling still wins
+      // (skip), a transient merge failure becomes a person's question, and only
+      // then is the page matched alone (api/documents/settle.ts windowCloseGate).
+      { restaurantId: inv.restaurant_id, invoiceId: inv.id, g09Window: true, g09Attempt: WINDOW_MAX_ATTEMPTS },
       { restaurantId: inv.restaurant_id, dedupeKey: `g09-release-${inv.id}`, maxAttempts: 3 },
     );
     if (inserted) result.released.push(inv.id);

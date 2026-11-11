@@ -6,7 +6,7 @@ import { invoicePageRows, isPageMime, multiPageEnabled, recomposeInvoice, type P
 import { MAX_DOCUMENT_PAGES } from './compose';
 import { DocumentError, documentNotFound } from './errors';
 import { createIntakeInvoice } from './intake';
-import { reopenForOcr, retireBlocker, retireInvoice } from './reocr';
+import { SPLIT_FROM_ACTION, reopenForOcr, retireBlocker, retireInvoice } from './reocr';
 import { storedImageValue } from './objectRef';
 import type { AttachAsPageInput, AttachAsPageResult, SplitDocumentInput, SplitDocumentResult } from './types';
 
@@ -195,6 +195,16 @@ export async function splitDocument(db: Database, input: SplitDocumentInput, dep
           .update(ingestDocuments)
           .set({ invoiceId: target, updatedAt: new Date() })
           .where(and(eq(ingestDocuments.restaurantId, restaurantId), inArray(ingestDocuments.id, groupRows.map((r) => r.id))));
+        // Round 7: a part split off a read document is a G-09 re-read too (its
+        // pages' reads were cleared) — the failed-re-read guard sees it.
+        await tx.insert(auditLog).values({
+          restaurantId,
+          userId: null,
+          action: SPLIT_FROM_ACTION,
+          entityType: 'invoice',
+          entityId: target,
+          before: { from: invoiceId } as never,
+        });
       }
       await setPageOrder(tx, restaurantId, groupRows);
       const r = await recomposeInvoice(tx, { restaurantId, invoiceId: target, supplierId: orig.supplierId, pages: groupRows });

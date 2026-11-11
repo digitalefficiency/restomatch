@@ -61,6 +61,8 @@ export interface InboxMessage {
     invoiceSupplier?: string | null;
     /** G-09: the invoice right before this page from the same sender (for "בדקו את שתיהן יחד"). */
     relatedInvoiceId?: string | null;
+    /** G-09 (round 7): the page still asks something (an unreadable page whose invoice got lines does not). */
+    questionOpen?: boolean;
   }>;
   /** orderCapture: a forwarded WhatsApp order (text) and the draft PO captured from it. */
   order?: { poId: string | null; poStatus: string | null } | null;
@@ -119,6 +121,7 @@ const KNOWN_ERRORS = [
   'page_merge_blocked',
   'page_too_large',
   'page_separate',
+  'page_unreadable_closed',
 ] as const;
 /** Named refusals of ingest.resolvePageFlag, shown as copy. */
 const REFUSALS = [
@@ -132,6 +135,8 @@ const REFUSALS = [
   'too_large',
   'too_many_pages',
   'reocr_not_enabled',
+  'corrected',
+  'not_unreadable',
 ] as const;
 /** Flags that still ask a person something (page_separate is already answered). */
 const PAGE_QUESTIONS: readonly string[] = [
@@ -329,7 +334,7 @@ export function InboxClient(props: Props) {
                               })}
                             </span>
                           ) : null}
-                          {d.error && PAGE_QUESTIONS.includes(d.error) ? (
+                          {d.error && PAGE_QUESTIONS.includes(d.error) && d.questionOpen !== false ? (
                             // T2: an open page question is an act-now item — solid badge + ₪.
                             <>
                               <Badge tone={d.error === 'page_duplicate' ? 'danger-solid' : 'warning-solid'}>
@@ -442,7 +447,7 @@ export function InboxClient(props: Props) {
                               </Button>
                             </>
                           ) : null}
-                          {props.canManage && d.invoiceId && d.error && PAGE_QUESTIONS.includes(d.error) ? (
+                          {props.canManage && d.invoiceId && d.error && PAGE_QUESTIONS.includes(d.error) && d.questionOpen !== false ? (
                             <>
                               {/* ONE primary action per question (T2). */}
                               {d.error === 'page_duplicate' ? (
@@ -464,6 +469,22 @@ export function InboxClient(props: Props) {
                                 >
                                   {t('inbox.pageCompare')}
                                 </LinkButton>
+                              ) : null}
+                              {d.error === 'page_unreadable' ? (
+                                <Button
+                                  size="sm"
+                                  variant="primary"
+                                  className="min-h-11"
+                                  disabled={resolvePage.isPending}
+                                  onClick={() =>
+                                    act(
+                                      () => resolvePage.mutateAsync({ documentId: d.id, action: 'close_unreadable' }),
+                                      t('inbox.pageClosedUnreadable'),
+                                    )
+                                  }
+                                >
+                                  {t('inbox.pageCloseUnreadable')}
+                                </Button>
                               ) : null}
                               {d.error !== 'page_unreadable' ? (
                                 <Button

@@ -8,6 +8,7 @@ import {
   receiptState,
   scanReceiptToStamp,
   settleDocumentPages,
+  multiPageEnabled,
   withScanGrId,
 } from '@restomatch/api';
 import { decideLink, matchProductTopN, MockEmbeddingProvider, type EmbeddingProvider } from '@restomatch/catalog'; // G-08 link
@@ -22,7 +23,7 @@ import {
   type CatalogMatcherFn,
   type OcrProvider,
 } from '@restomatch/ocr';
-import { enqueueMatchInvoice, ocrJobDeadlineMs, TERMINAL_JOB_ERROR } from '@restomatch/queue';
+import { enqueue, enqueueMatchInvoice, MATCH_INVOICE_QUEUE, ocrJobDeadlineMs, TERMINAL_JOB_ERROR } from '@restomatch/queue';
 import type { InvoiceOcrResult, OcrInvoiceJob } from '@restomatch/types';
 import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
@@ -601,6 +602,19 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
       }
     } catch (err) {
       console.warn(`[ocr-invoice] G-09 settle failed for invoice=${job.data.invoiceId}`, err);
+      // Round 7: fail CLOSED where multi-page is on — never match a page alone
+      // because the cluster could not be settled; the settle-aware window job
+      // retries it (bounded) in two minutes.
+      const [rs] = await db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, job.data.restaurantId)).limit(1);
+      if (multiPageEnabled(rs?.settings)) {
+        const runAt = new Date(Date.now() + 2 * 60_000);
+        await enqueue(
+          MATCH_INVOICE_QUEUE,
+          { restaurantId: job.data.restaurantId, invoiceId: job.data.invoiceId, g09Window: true, g09Attempt: 1 },
+          { dedupeKey: `g09-settle-retry-${job.data.invoiceId}-${Math.floor(runAt.getTime() / 60_000)}`, runAt, maxAttempts: 3 },
+        ).catch((e) => console.warn(`[ocr-invoice] G-09 settle retry not enqueued for invoice=${job.data.invoiceId}`, e));
+        return { invoiceId: job.data.invoiceId, confidence: result.confidence, needsHumanReview, conflicts: result.conflicts.length, lines: r.lines.length, settled: null };
+      }
     }
     // end G-09 settle
 

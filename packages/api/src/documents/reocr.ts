@@ -29,6 +29,8 @@ export const PAGE_ABSORBED_ACTION = 'document.page_absorbed';
 /** Page 1 re-opened for a composed re-OCR (its single-page print is kept on the row). */
 export const PAGES_RECOMPOSED_ACTION = 'document.pages_recomposed';
 /** Every re-open for OCR: their count is the generation in the OCR dedupe key. */
+/** Round 7: an invoice split off a read document (attach.ts splitDocument). */
+export const SPLIT_FROM_ACTION = 'document.split_from';
 export const REOPENED_FOR_OCR_ACTION = 'document.reopened_for_ocr';
 
 /**
@@ -52,6 +54,11 @@ export async function reopenGeneration(tx: Database, restaurantId: string, invoi
  * already has a run, which would leave stale gaps (a false leak).
  */
 export async function reopenForOcr(tx: Database, restaurantId: string, invoiceId: string): Promise<boolean> {
+  const [prev] = await tx
+    .select({ invoiceNumber: invoices.invoiceNumber })
+    .from(invoices)
+    .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
+    .limit(1);
   const moved = await tx
     .update(invoices)
     .set({ status: 'ocr_pending', updatedAt: new Date() })
@@ -70,6 +77,9 @@ export async function reopenForOcr(tx: Database, restaurantId: string, invoiceId
     action: REOPENED_FOR_OCR_ACTION,
     entityType: 'invoice',
     entityId: invoiceId,
+    // Round 7: the number is cleared with the read (the re-read sets it again);
+    // kept here so nothing is lost.
+    before: { invoiceNumber: prev?.invoiceNumber ?? null } as never,
   });
   await tx.delete(matchRuns).where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
   // The re-OCR rewrites every line and the totals. Clear them now, so a failed
@@ -78,7 +88,7 @@ export async function reopenForOcr(tx: Database, restaurantId: string, invoiceId
   await tx.delete(invoiceLines).where(eq(invoiceLines.invoiceId, invoiceId));
   await tx
     .update(invoices)
-    .set({ totalExclVat: null, vatAmount: null, totalInclVat: null, updatedAt: new Date() })
+    .set({ totalExclVat: null, vatAmount: null, totalInclVat: null, invoiceNumber: null, updatedAt: new Date() })
     .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)));
   return true;
 }
@@ -126,6 +136,18 @@ export async function retireBlocker(
     .where(and(eq(priceHistory.restaurantId, restaurantId), eq(priceHistory.sourceInvoiceId, invoiceId)))
     .limit(1);
   if (price) return 'linked';
+  // Round 7: a person's work is never read away — hand lines, a typed header,
+  // a corrected line or a header edit block the merge (page_merge_blocked).
+  const [corrected] = (await tx.execute(sql`
+    select 1 as hit from ${invoices} i
+     where i.id = ${invoiceId} and i.restaurant_id = ${restaurantId}
+       and (coalesce(i.ocr_payload -> 'raw' ->> 'manualLines', 'false') = 'true'
+            or coalesce(i.ocr_payload -> 'raw' ->> 'headerEntered', 'false') = 'true'
+            or coalesce(i.ocr_payload -> 'raw' ->> 'linesCorrected', 'false') = 'true'
+            or exists (select 1 from ${auditLog} a
+                        where a.restaurant_id = i.restaurant_id and a.entity_id = i.id
+                          and a.action = 'receiving.invoice_header_updated'))`)) as unknown as Array<{ hit: number }>;
+  if (corrected) return 'corrected';
   return null;
 }
 

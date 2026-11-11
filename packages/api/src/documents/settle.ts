@@ -25,7 +25,7 @@ import { MAX_DOCUMENT_PAGES } from './compose';
 import { normalizeInvoiceNumber as canonicalInvoiceNumber } from '../match/buildMatchInput';
 import { objectRefMatchValues, tenantPath } from './objectRef';
 import { defaultDocumentStorage } from './storage';
-import { PAGES_RECOMPOSED_ACTION, reopenForOcr, retireBlocker, retireInvoice } from './reocr';
+import { PAGES_RECOMPOSED_ACTION, REOPENED_FOR_OCR_ACTION, SPLIT_FROM_ACTION, reopenForOcr, retireBlocker, retireInvoice } from './reocr';
 
 /**
  * G-09 · the same-supplier guard (owner decision 31.10: "multi-page invoices
@@ -658,6 +658,11 @@ export async function settleDocumentPages(
     if (self?.status === 'ocr_pending') {
       return { result: { ...NOTHING, hold: true, holdReason: 'reocr' as const }, ocr: [], match: [], superseded: null };
     }
+    // Round 7: a later read that produced lines answers an earlier "unreadable".
+    await tx.execute(sql`
+      update ${ingestDocuments} set error = null, updated_at = now()
+       where restaurant_id = ${restaurantId} and invoice_id = ${invoiceId} and error = 'page_unreadable'
+         and exists (select 1 from ${invoiceLines} l where l.invoice_id = ${invoiceId})`);
 
     // Round 6: the composed re-read of a MERGED document failed for good. The
     // pages' own reads were cleared by the merge, so the whole document's ₪ is
@@ -669,7 +674,8 @@ export async function settleDocumentPages(
          and coalesce((i.ocr_payload -> 'raw' ->> 'ocrFailed')::boolean, false)
          and exists (select 1 from ${auditLog} a
                       where a.entity_type = 'invoice' and a.entity_id = i.id and a.restaurant_id = i.restaurant_id
-                        and a.action = ${PAGES_RECOMPOSED_ACTION})`)) as unknown as Array<{ hit: number }>;
+                        -- round 7: EVERY G-09 re-read (merged, re-opened by attach/split, or split off)
+                        and a.action in (${PAGES_RECOMPOSED_ACTION}, ${REOPENED_FOR_OCR_ACTION}, ${SPLIT_FROM_ACTION}))`)) as unknown as Array<{ hit: number }>;
     if (failedComposed) {
       await tx
         .update(ingestDocuments)
