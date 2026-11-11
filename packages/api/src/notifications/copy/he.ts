@@ -105,6 +105,17 @@ export const he = {
     clean: 'אין זיכויים פתוחים.',
     cta: 'לתור האישורים',
   },
+  /** The match summary and decision alert (persist.ts matchActivitySummary / matchAlert; push, WhatsApp, e-mail). */
+  matchSummary: {
+    gaps: '{count, plural, one {פער אחד} two {שני פערים} other {# פערים}}',
+    toReview: '{count, plural, one {פער אחד לבדיקה} two {שני פערים לבדיקה} other {# פערים לבדיקה}}',
+    inGaps: '{amount} בפערים',
+    pendingLink: 'ממתינה לשיוך להזמנה',
+    noPo: 'ללא הזמנה מקושרת',
+    matches: 'תואמת להזמנה ולקבלת הסחורה',
+    alert: '{gaps}, סה״כ {amount} בפערים',
+    alertReview: 'לבדיקה',
+  },
   invoiceOcrFailed: {
     subject: 'לא הצלחנו לקרוא חשבונית',
     subjectSupplier: 'לא הצלחנו לקרוא את החשבונית מ-{supplier}',
