@@ -13,6 +13,7 @@ export const nav: Shape<typeof he> = {
     labDesk: 'Лаборатория таблиц',
     labDeskRow: 'Строка',
     approvals: 'Согласования',
+    approvalInvoice: 'Решение по счёту',
     payRun: 'Платёжный прогон',
     inbox: 'Входящие счета',
     invoices: 'Счета',
@@ -133,6 +134,7 @@ export const nav: Shape<typeof he> = {
   badge: {
     items: '{count} шт.',
     atRisk: '{amount} под риском',
+    owed: '{amount} открытые кредиты',
     blocking: 'блокирует оплату',
   },
   bell: {

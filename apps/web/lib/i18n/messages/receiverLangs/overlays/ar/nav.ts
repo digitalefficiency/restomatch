@@ -13,6 +13,7 @@ export const nav: Shape<typeof he> = {
     labDesk: 'مختبر الجداول',
     labDeskRow: 'صف',
     approvals: 'الموافقات',
+    approvalInvoice: 'قرار الفاتورة',
     payRun: 'دفعة المدفوعات',
     inbox: 'الفواتير الواردة',
     invoices: 'الفواتير',
@@ -133,6 +134,7 @@ export const nav: Shape<typeof he> = {
   badge: {
     items: '{count} عناصر',
     atRisk: '{amount} معرّض للخطر',
+    owed: '{amount} أرصدة دائنة مفتوحة',
     blocking: 'يوقف الدفع',
   },
   bell: {

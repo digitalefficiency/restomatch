@@ -282,6 +282,7 @@ export {
 } from './priceAlerts/detect';
 export { priceAlertEmail } from './priceAlerts/email';
 export * as leakCheck from './leakCheck';
+export * as claimPortal from './claimPortal';
 export {
   confirmationLink,
   createSupplierLink,
@@ -440,3 +441,4 @@ export * from './notifications/sendWindow';
 export { awaitingDecision, type AwaitingDecision } from './approvals/awaiting';
 export { notify, notifyEffect, resolveAudience, type Address, type Audience } from './notifications/notify';
 export { KIND_ROLES as WHERE_IS_KIND_ROLES, WHERE_IS_KINDS, type WhereIsKind } from './tasks/whereIs';
+export { rebindDecidedClaims } from './approvals/rebind'; // W2-04 (orchestrator-approved line)

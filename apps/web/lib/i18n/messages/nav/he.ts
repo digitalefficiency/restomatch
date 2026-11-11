@@ -15,6 +15,7 @@ export const he = {
     labDesk: 'מעבדת טבלאות',
     labDeskRow: 'שורה',
     approvals: 'אישורים',
+    approvalInvoice: 'החלטה על חשבונית',
     payRun: 'ריצת תשלומים',
     inbox: 'חשבוניות נכנסות',
     invoices: 'חשבוניות',
@@ -137,6 +138,7 @@ export const he = {
   badge: {
     items: '{count} פריטים',
     atRisk: '{amount} בסיכון',
+    owed: '{amount} זיכויים פתוחים',
     blocking: 'חוסם תשלום',
   },
   bell: {

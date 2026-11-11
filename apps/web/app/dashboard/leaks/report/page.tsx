@@ -56,7 +56,7 @@ function monthsBetween(from: string, to: string): number {
  * running is compared with the same day-span of the comparison month
  * (owner.leakSummary's aligned compare, "1–25 באוק׳ מול 1–25 בספט׳"); a month
  * that ended, full against full. The money story is one partition that adds up
- * to the agora: ממתין להחלטה + אושר לדרישה + ויתרנו = נמצא.
+ * to the agora: ממתין להחלטה + אושר לבקשת זיכוי + ויתרנו = נמצא.
  */
 export default async function LeakReportPage({
   searchParams,

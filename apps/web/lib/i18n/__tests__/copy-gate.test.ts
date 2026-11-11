@@ -40,11 +40,6 @@ const OWN_FILES = [
  * `where` is `ns:key` for namespace leaves or `file:<path>` for server literals.
  */
 const ALLOW: Array<{ where: string; rule: RuleId; reason: string; text?: string }> = [
-  // DECISION_COPY.he.{approve,reject,escalate}: masculine singular, pinned by W2-04's
-  // approvals-router.test.ts. W2-04's work item; the values are not changed here.
-  { where: 'emails:decision.approve', rule: 'masculine-imperative', reason: 'W2-04 (pinned by approvals-router.test.ts)' },
-  { where: 'emails:decision.reject', rule: 'masculine-imperative', reason: 'W2-04 (pinned by approvals-router.test.ts)' },
-  { where: 'emails:decision.escalate', rule: 'masculine-imperative', reason: 'W2-04 (pinned by approvals-router.test.ts)' },
   // Unused since W2-13 (the feed renders feed.discrepancies / feed.toReview, ICU plurals). Kept with a
   // plain {count} because W2-05's receiver overlays (CompleteOverlays<typeof he>) carry `{count}` and
   // receiver-langs.test pins placeholder parity. W2-05 can drop both keys from the overlays, then here.
@@ -52,7 +47,6 @@ const ALLOW: Array<{ where: string; rule: RuleId; reason: string; text?: string 
   { where: 'components:activity.toReview', rule: 'count-without-plural', reason: 'W2-05 receiver overlays' },
   // Quotes around a placeholder: pinned verbatim by e2e/W1-04.spec.ts:172 (W1-04's spec).
   { where: 'common:shell.forbidden.title', rule: 'sign-next-to-placeholder', reason: 'pinned by e2e/W1-04.spec.ts:172' },
-  { where: 'file:packages/api/src/notifications/copy/he.ts', rule: 'masculine-imperative', reason: 'the same three DECISION_COPY values (W2-04)' },
 ];
 
 const covers = (a: (typeof ALLOW)[number], where: string, text: string) =>
@@ -172,21 +166,26 @@ describe('copy gate: the report', () => {
  *                    tolerated (not failed) so another lane's fix never turns this red; when a pending
  *                    string is gone it is reported for removal. Never add a new offender here: fix it.
  */
+/**
+ * The C2 scan is wider than the warn table's SERVER_SCAN: every server message (tRPC routers'
+ * TRPCError text, report COPY functions as template literals, worker jobs) and every web
+ * string literal outside the i18n namespaces (which the namespace walk already covers).
+ */
+const CLAIMS_SCAN = ['packages/api/src', 'apps/worker/src', 'apps/web/lib', 'apps/web/app'];
+const CLAIMS_SKIP = ['file:apps/web/lib/i18n/'];
+
 const CLAIMS_TERMS = GLOSSARY.find((g) => g.concept === 'creditClaim')!.retireHe as readonly string[];
 
-const CLAIMS_ALLOW: Array<{ where: string; text: string; reason: string }> = [];
+const CLAIMS_ALLOW: Array<{ where: string; text?: string; contains?: string; reason: string }> = [
+  // The Ask system prompt names the retired words to forbid them ("Never call it תביעה, דרישה …").
+  { where: 'file:packages/api/src/ask/claude.ts', contains: 'Never call it "תביעה", "דרישה"', reason: 'prompt forbids the word' },
+  // Search keywords / aliases: people still type the old word; it is matched, never shown.
+  { where: 'file:apps/web/lib/components/palette/actions.ts', text: 'דרישה', reason: 'search keyword' },
+  { where: 'file:apps/web/lib/components/palette/actions.ts', text: 'דרישות', reason: 'search keyword' },
+  { where: 'file:apps/web/lib/nav/routes/leaks.ts', text: 'דרישה', reason: 'search alias (7.11)' },
+];
 
 const CLAIMS_PENDING: Array<{ where: string; owner: string }> = [
-  // W2-02 (invoices/he.ts) — fixing in the Train-C round
-  { where: 'invoices:', owner: 'W2-02' },
-  // W2-09 (leaks/he.ts, leakProof/he.ts) — fixing in the Train-C round
-  { where: 'leaks:', owner: 'W2-09' },
-  { where: 'leakProof:', owner: 'W2-09' },
-  // W2-11 (suppliers/he.ts) — fixing in the Train-C round
-  { where: 'suppliers:', owner: 'W2-11' },
-  // Reported to the orchestrator for routing (found by this guard)
-  { where: 'approvals:', owner: 'W2-04' },
-  { where: 'file:packages/api/src/reports/monthly.ts', owner: 'W2-16b' },
 ];
 
 describe('C2 guard: "בקשת זיכוי", never the retired claims term (owner 7.11)', () => {
@@ -198,14 +197,21 @@ describe('C2 guard: "בקשת זיכוי", never the retired claims term (owner 
     ...ALL_NAMESPACES.flatMap((ns) =>
       leaves(ns.he as MessageTree).map(([key, text]) => ({ where: `${ns.name}:${key}`, text, terms: hits(text) })),
     ),
-    ...lintServerFiles(REPO, SERVER_SCAN).map((r) => ({ where: r.where, text: r.text, terms: hits(r.text) })),
+    ...lintServerFiles(REPO, CLAIMS_SCAN)
+      .filter((r) => !CLAIMS_SKIP.some((p) => r.where.startsWith(p)))
+      .map((r) => ({ where: r.where, text: r.text, terms: hits(r.text) })),
   ].filter((r) => r.terms.length > 0);
 
-  const allowed = (r: { where: string; text: string }) => CLAIMS_ALLOW.some((a) => (r.where === a.where || r.where.startsWith(`${a.where}:`)) && r.text === a.text);
+  const allowed = (r: { where: string; text: string }) =>
+    CLAIMS_ALLOW.some(
+      (a) =>
+        (r.where === a.where || r.where.startsWith(`${a.where}:`)) &&
+        (a.text !== undefined ? r.text === a.text : a.contains !== undefined && r.text.includes(a.contains)),
+    );
   const pending = (r: { where: string }) => CLAIMS_PENDING.find((p) => r.where === p.where || r.where.startsWith(p.where.endsWith(':') ? p.where : `${p.where}:`));
 
   it('fires on every retired form (fixtures)', () => {
-    for (const t of ['יש עליה דרישת זיכוי', 'שתי דרישות זיכוי', 'אפשר לדרוש זיכוי', 'הוסיפו לדרישת זיכוי', 'אושר לדרישה', 'מכתב זיכוי לספק']) {
+    for (const t of ['יש עליה דרישת זיכוי', 'שתי דרישות זיכוי', 'אפשר לדרוש זיכוי', 'הוסיפו לדרישת זיכוי', 'אושר לדרישה', 'מכתב זיכוי לספק', 'לשלוח מכתבי דרישה על {x} פערים', 'לתזכר {x} דרישות זיכוי באיחור', 'הדרישה נשלחה']) {
       expect(hits(t), t).not.toEqual([]);
     }
     for (const t of ['בקשת זיכוי', 'הוסיפו לבקשת זיכוי', 'מכתב בקשת זיכוי', 'חשבונית זיכוי', 'תעודת זיכוי']) {

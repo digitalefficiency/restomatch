@@ -97,7 +97,7 @@ export default async function SupplierDetailLayout({
                 {overview.leakAgorot > 0 && supplier.leakCardEnabled ? (
                   <Link
                     href={`/dashboard/suppliers/${id}?tab=overview#leak-card`}
-                    className="block text-xs font-semibold text-primary underline-offset-2 hover:underline"
+                    className="inline-flex min-h-11 items-center text-xs font-semibold text-primary underline-offset-2 hover:underline [@media(pointer:fine)]:min-h-6"
                   >
                     {t('overview.leakHow', { amount: formatIls(overview.leakAgorot / 100, { locale, maximumFractionDigits: 2 }) })}
                   </Link>

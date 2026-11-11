@@ -371,7 +371,7 @@ export function approvalNeededEmail(args: {
     supplier: args.supplierName,
     count: args.discrepancyCount,
     amount: amount ?? '',
-    approve: d.approve.replace(/\s*\{amount\}\s*/, ' ').trim(),
+    approve: d.approve.replace(/\s*·?\s*\{amount\}\s*/, ' ').trim(), // W2-04: 'בקשת זיכוי · {amount}' → 'בקשת זיכוי'
     reject: d.reject,
   };
   const subject = txt(l, amount ? c.subject : c.reviewSubject, vars);

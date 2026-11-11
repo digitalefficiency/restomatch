@@ -14,7 +14,7 @@ describe('invoiceLineTasks — invoices.needsLines on the spine', () => {
   });
   it('only held invoices → neutral T4 (never a false alarm)', () => {
     const [t] = invoiceLineTasks({ count: 2, rows: [{ reason: 'held' }, { reason: 'held' }] }, '2026-11-11');
-    expect(t).toMatchObject({ type: 'doc_review', count: 2, tone: 'neutral', tier: 'T4', ilsAgorot: null, deepLink: '/dashboard/invoices', scope: 'mine' });
+    expect(t).toMatchObject({ type: 'doc_review', count: 2, tone: 'neutral', tier: 'T4', ilsAgorot: null, deepLink: '/dashboard/invoices?view=lines', scope: 'mine' });
   });
   it('an unread / failed photo invoice → warn T2, count only (no ₪)', () => {
     const [t] = invoiceLineTasks({ count: 2, rows: [{ reason: 'held' }, { reason: 'ocr_failed' }] }, '2026-11-11');

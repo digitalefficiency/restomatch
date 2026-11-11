@@ -10,7 +10,7 @@
  * entries where a retired term is deliberate, each with a reason in a comment.
  *
  * Owner terminology (binding, 31.10) wins over older spec wording:
- * חשבונית מרכזת · פער · דרישת זיכוי · קבלת סחורה · דליפה (the monthly leak
+ * חשבונית מרכזת · פער · בקשת זיכוי (7.11) · קבלת סחורה · דליפה (the monthly leak
  * only) · "מחירים שעלו" (price creep). No "יעד"/1.5% target language. An
  * undecided ₪ is never "הפסד" or "חיסכון".
  */
@@ -155,7 +155,7 @@ export const GLOSSARY = [
     he: 'בקשת זיכוי',
     en: 'Credit request',
     define: 'הבקשה לספק לזכות אתכם על מה שחויב ביתר.',
-    retireHe: ['דרישת זיכוי', 'דרישות זיכוי', 'לדרוש זיכוי', 'לדרישת', 'לדרישה', 'תביעה', 'תביעות', 'לתבוע', 'מכתב זיכוי', 'מכתבי זיכוי'],
+    retireHe: ['דרישת זיכוי', 'דרישות זיכוי', 'לדרוש זיכוי', 'דרישה', 'דרישות', 'דרישת', 'לדרוש', 'תביעה', 'תביעות', 'לתבוע', 'מכתב זיכוי', 'מכתבי זיכוי'],
     retireEn: [],
     allow: [],
   },

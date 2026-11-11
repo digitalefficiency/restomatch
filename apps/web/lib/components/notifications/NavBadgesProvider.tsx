@@ -20,7 +20,7 @@ const ROUTE_MAP = routeBadgeMap();
 export function NavBadgesProvider({ children }: { children: React.ReactNode }) {
   const q = trpc.nav.badges.useQuery(undefined, {
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: 120_000, // two queries per tab → 120 s each (train C review); focus still refreshes
     refetchOnWindowFocus: true,
     retry: 1,
   });

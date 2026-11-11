@@ -387,7 +387,14 @@ describe('matching, field routes, active item, crumbs, titles', () => {
     expect(matchRoute('/dashboard/suppliers/abc/leak-card')?.key).toBe('supplierLeakCard');
     expect(matchRoute('/dashboard/')?.key).toBe('home');
     // An unregistered sub-path falls back to its nearest registered ancestor.
-    expect(matchRoute('/dashboard/approvals/whatever/deeper')?.key).toBe('approvals');
+    // (W2-04, for W2-08: approvals/<x> is now the registered invoice landing, so
+    // the deep fallback is pinned through the static pay-run child instead, and
+    // the landing itself is pinned — static `pay-run` still beats `[invoiceId]`.)
+    expect(matchRoute('/dashboard/approvals/pay-run/whatever/deeper')?.key).toBe('payRun');
+    expect(matchRoute('/dashboard/approvals/pay-run')?.key).toBe('payRun');
+    expect(matchRoute('/dashboard/approvals/6c0e1f2a-0000-4000-8000-000000000001')?.key).toBe('approvalInvoice');
+    expect(matchRoute('/dashboard/approvals/6c0e1f2a-0000-4000-8000-000000000001/deeper')?.key).toBe('approvalInvoice');
+    expect(matchRoute('/dashboard/approvals')?.key).toBe('approvals');
   });
 
   it('field routes hide the bottom bar', () => {
@@ -577,10 +584,10 @@ describe('nav badges (W2-08)', () => {
     // One entry per source: a queue's badge shows in exactly one place.
     expect(new Set(Object.values(map)).size).toBe(Object.values(map).length);
     expect([...new Set(Object.values(map))].sort()).toEqual([...BADGE_KEYS].sort());
-    // The unowned route files decided "no badge" explicitly.
+    // The unowned route files carry no badge (null, or absent on routes added later — e.g. W3-01's chainMatrix).
     for (const r of REGISTRY) {
       if (['ask', 'branches', 'catalog', 'chain', 'products', 'recipes', 'reports'].some((seg) => r.path.startsWith(`/dashboard/${seg}`))) {
-        expect(r.badge, r.key).toBeNull();
+        expect(r.badge ?? null, r.key).toBeNull();
         expect(badgeFor(r)).toBeNull();
       }
     }

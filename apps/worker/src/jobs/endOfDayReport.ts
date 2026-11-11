@@ -1,20 +1,24 @@
 /**
  * end-of-day-report — 19:00 IL digest emailed to each restaurant's managers.
  *
- * Summarizes the day's money picture, led by OPEN CREDITS — claimable findings
- * still `open`/`escalated` (endOfDayFigures) — plus what was caught today and how many items await a decision. Quiet days (no open
+ * Summarizes the day's money picture, led by OPEN CREDITS — the claimable ₪ of
+ * the gaps still awaiting a decision (`awaitingDecision`, G-12a) — plus what
+ * was caught today (endOfDayFigures) and how many items await a decision. Quiet days (no open
  * credits and nothing caught) are skipped to avoid inbox noise.
  *
  * Detection only: it reads discrepancies and enqueues notifications; delivery
  * happens through outbox-dispatch.
  */
 import {
+  awaitingDecision,
   enqueueNotification,
   endOfDayReportEmail,
+  formatIlsAgorot,
   recipientsForRestaurant,
 } from '@restomatch/api';
 import { LEAK_FILTER } from '@restomatch/charts';
-import { and, count, discrepancies, eq, notificationsOutbox, restaurants, sql, type Database } from '@restomatch/db';
+import { and, eq, notificationsOutbox, restaurants, sql, type Database } from '@restomatch/db';
+import { approvalsGoLink } from './matchInvoice';
 import { makeWorker, type WorkerJob } from '../queue';
 import { appBaseUrl, formatIlsAmount, formatIlDate, ilDateKey, startOfIlDay } from '../lib/notifyHelpers';
 import { jobDb } from '../db';
@@ -128,24 +132,23 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
   let skipped = 0;
 
   for (const restaurant of restaurantRows) {
-    const { openCount, openIls, todayCount, todayIls } = await endOfDayFigures(db, restaurant.id, startToday, endOfDay);
+    // Open credits = THE "awaiting decision" figure (G-12a): the same rows and
+    // ₪ (the letters' claims rule, before VAT) as the queue tiles, home and the
+    // nav badge — never a raw Σ|Δ|. Restaurant-wide (scope 'all', owner view).
+    const awaiting = await awaitingDecision(
+      db,
+      { session: { restaurantId: restaurant.id, role: 'owner' } },
+      { scope: 'all' },
+    );
+    // Caught today: the hero's LEAK_FILTER, capped per invoice (money review G).
+    const { todayCount, todayIls } = await endOfDayFigures(db, restaurant.id, startToday, endOfDay);
+    const openCount = awaiting.toDecide.count;
 
     // Quiet day → skip (no open credits, nothing caught today).
-    if (openCount === 0 && todayCount === 0) {
+    if (awaiting.count === 0 && todayCount === 0) {
       skipped += 1;
       continue;
     }
-
-    // Items awaiting a manager decision (subset of open).
-    const [pendingAgg] = await db
-      .select({ cnt: count(discrepancies.id) })
-      .from(discrepancies)
-      .where(
-        and(
-          eq(discrepancies.restaurantId, restaurant.id),
-          eq(discrepancies.resolutionStatus, 'open'),
-        ),
-      );
 
     const recipients = await recipientsForRestaurant(db, restaurant.id);
     if (recipients.length === 0) {
@@ -156,11 +159,16 @@ export async function processEndOfDayReport(job: WorkerJob<EndOfDayReportJob>) {
     const email = endOfDayReportEmail({
       dateLabel: formatIlDate(startToday).split(',')[0]?.trim() ?? todayKey,
       openCreditsCount: openCount,
-      openCreditsIls: formatIlsAmount(openIls),
+      // Before VAT; a duplicate invoice's incl.-VAT claim is named on its own (warden MEDIUM-1).
+      openCreditsIls:
+        formatIlsAgorot(Math.round((awaiting.ils?.excl ?? 0) * 100), { maximumFractionDigits: 0 }) +
+        ((awaiting.ils?.incl ?? 0) > 0
+          ? ` + ${formatIlsAgorot(Math.round((awaiting.ils?.incl ?? 0) * 100), { maximumFractionDigits: 0 })} כולל מע״מ (חשבוניות כפולות)`
+          : ''),
       todayCaughtCount: todayCount,
       todayCaughtIls: formatIlsAmount(todayIls),
-      pendingApprovals: Number(pendingAgg?.cnt ?? 0),
-      approvalsUrl: `${appBaseUrl()}/dashboard/approvals`,
+      pendingApprovals: awaiting.count,
+      approvalsUrl: approvalsGoLink(restaurant.id, null, appBaseUrl()),
     });
 
     const legacyRows = await db

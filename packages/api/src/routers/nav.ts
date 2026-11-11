@@ -5,6 +5,7 @@ import { foldBadges } from '../tasks/badges';
 import { collectTasks } from '../tasks/collect';
 import { WHERE_IS_KINDS, whereIs } from '../tasks/whereIs';
 import { priceAlertsRouter } from './priceAlerts';
+import { recoveryRouter } from './recovery';
 
 /**
  * Navigation helpers (W2-08).
@@ -17,16 +18,29 @@ export const navRouter = router({
   badges: memberProcedure.query(async ({ ctx }) => {
     const { tasks, failed } = await collectTasks(ctx);
     const finance = ['owner', 'manager', 'bookkeeper'].includes(ctx.session.role);
+    const rid = ctx.session.restaurantId;
+    const sub = { db: ctx.db, adminDb: ctx.adminDb, session: { ...ctx.session } };
     let priceAlerts = 0;
-    if (finance && (await isFeatureOn(ctx.db, ctx.session.restaurantId, 'priceAlerts'))) {
-      const sub = { db: ctx.db, adminDb: ctx.adminDb, session: { ...ctx.session } };
-      priceAlerts = await priceAlertsRouter
-        .createCaller(sub)
-        .openCount()
-        .then((r) => r.count)
-        .catch(() => 0);
+    if (finance && (await isFeatureOn(ctx.db, rid, 'priceAlerts'))) {
+      // A failed read is reported (never a silent 0 — G-16).
+      try {
+        priceAlerts = (await priceAlertsRouter.createCaller(sub).openCount()).count;
+      } catch {
+        failed.push('priceAlerts');
+      }
     }
-    return { badges: foldBadges(tasks, { priceAlerts }), failed };
+    const badges = foldBadges(tasks, { priceAlerts });
+    // The claims badge shows the ₪ of the page it opens (recovery hero "זיכויים פתוחים"),
+    // not the sum of its tasks — one figure per destination (train C review).
+    if (finance && badges.claims && (await isFeatureOn(ctx.db, rid, 'recovery'))) {
+      try {
+        const owed = (await recoveryRouter.createCaller(sub).summary()).summary.outstandingAgorot;
+        badges.claims = { ...badges.claims, ilsAgorot: owed > 0 ? owed : null, money: 'owed' };
+      } catch {
+        failed.push('claimsOwed');
+      }
+    }
+    return { badges, failed };
   }),
 
   whereIs: userScopedProcedure

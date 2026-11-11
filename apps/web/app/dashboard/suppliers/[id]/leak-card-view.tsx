@@ -88,7 +88,7 @@ export function LeakCardBody({
           </p>
         </div>
         {!print && (
-          <Link href={explorerHref} className="rounded text-sm font-semibold text-primary underline underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+          <Link href={explorerHref} className="inline-flex min-h-11 items-center rounded text-sm font-semibold text-primary underline underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 [@media(pointer:fine)]:min-h-6">
             {t('leakCard.explorer')}
           </Link>
         )}

@@ -243,7 +243,7 @@ export default async function RecoveryPage({
                   key={p}
                   href={`/dashboard/recovery${qs ? `?${qs}` : ''}`}
                   aria-current={period === p ? 'true' : undefined}
-                  className={`inline-flex min-h-11 items-center rounded-full border px-3 md:min-h-8 ${
+                  className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border px-3 md:min-h-8 md:min-w-0 ${
                     period === p ? 'border-primary bg-primary/10 font-semibold text-ink' : 'border-line text-muted hover:text-ink'
                   }`}
                 >

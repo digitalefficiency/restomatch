@@ -81,13 +81,16 @@ async function axeSerious(page: Page) {
 const digits = (s: string) => s.replace(BIDI, '').replace(/[^\d.]/g, '');
 
 test.describe('owner: one figure on the home row, the badge and the bell', () => {
-  test('the decision queue · ₪296 · 2 blocking, the same everywhere', async ({ browser, baseURL }) => {
+  test('the decision queue: one ₪ figure and its blockers, the same on the row, the badge and the bell', async ({ browser, baseURL }) => {
     const { context, page } = await asRole(browser, 'owner', DESKTOP, baseURL!);
     await page.goto('/dashboard');
     const row = page.getByTestId('needs-decide');
     await expect(row).toBeVisible();
-    expect(digits(await page.getByTestId('needs-decide-value').innerText())).toBe('296');
-    await expect(page.getByTestId('needs-decide-sub')).toContainText('2 חוסמים תשלום');
+    // The lab seed alone gives ₪296 · 2 blocking; on a shared e2e DB other specs add rows (CI: ₪724).
+    // What this test pins is that the SAME figure shows on the row, the badge and the bell.
+    const amount = digits(await page.getByTestId('needs-decide-value').innerText());
+    expect(Number(amount)).toBeGreaterThan(0);
+    await expect(page.getByTestId('needs-decide-sub')).toContainText(/\d+ חוסמים תשלום/);
 
     const link = page.locator('aside a[href="/dashboard/approvals"], nav a[href="/dashboard/approvals"]').first();
     // The badge words are the link's description (aria-describedby → a hidden span), not its name.
@@ -99,7 +102,7 @@ test.describe('owner: one figure on the home row, the badge and the bell', () =>
     const desc = (await page.locator(`[id="${descId}"]`).first().textContent()) ?? '';
     expect(`${descId} | ${desc}`).toContain(`${rowCount} פריטים`);
     const aria = ((await page.locator(`[id="${await link.getAttribute('aria-describedby')}"]`).first().textContent()) ?? '').replace(BIDI, '');
-    expect(aria).toMatch(/296/);
+    expect(aria.replace(/[^\d]/g, '')).toContain(amount.replace('.', ''));
     expect(aria).toContain('חוסם תשלום');
     await expect(link.locator('[data-nav-badge="block"]')).toBeVisible();
     // Badges are not tab stops: nothing inside the link is focusable on its own.
@@ -116,10 +119,49 @@ test.describe('owner: one figure on the home row, the badge and the bell', () =>
     await expect(page.getByTestId('bell-trigger')).toBeFocused();
     await page.getByTestId('bell-trigger').click();
     const item = panel.getByTestId('bell-item-decision');
-    expect(digits(await item.innerText())).toContain('296');
+    expect(digits(await item.innerText())).toContain(amount);
     await item.click();
     await expect(page).toHaveURL(/\/dashboard\/approvals/);
     await context.close();
+  });
+
+  test('a failed-OCR photo invoice is reachable from the home row and from the bell (?view=lines)', async ({ browser, baseURL }) => {
+    const NUMBER = 'E2E-W208-OCRFAIL';
+    const sql = e2eSql();
+    try {
+      await sql`delete from invoices where invoice_number = ${NUMBER}`;
+      await sql`insert into invoices (restaurant_id, invoice_number, invoice_date, status, source, ocr_payload)
+                select id, ${NUMBER}, now(), 'parsed', 'photo', ${sql.json({ raw: { ocrFailed: true } })}
+                from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
+    } finally {
+      await sql.end();
+    }
+    try {
+      const { context, page } = await asRole(browser, 'owner', DESKTOP, baseURL!);
+      await page.goto('/dashboard');
+      // Home row: it may sit under "עוד N" (owner home shows 3 rows).
+      const more = page.getByTestId('needs-you-more');
+      if (await more.count()) await more.locator('summary').click();
+      const row = page.getByTestId('needs-invoiceLines').first();
+      await expect(row).toBeVisible({ timeout: 20_000 });
+      expect(await row.getAttribute('href')).toBe('/dashboard/invoices?view=lines');
+      await row.click();
+      await expect(page).toHaveURL(/\/dashboard\/invoices\?view=lines/);
+      await expect(page.getByText(NUMBER).first()).toBeVisible({ timeout: 20_000 });
+
+      // The bell: the same task, the same list.
+      await page.goto('/dashboard');
+      await page.getByTestId('bell-trigger').click();
+      const item = page.getByTestId('bell-panel').getByTestId('bell-item-doc_review');
+      await expect(item).toBeVisible();
+      await item.click();
+      await expect(page).toHaveURL(/\/dashboard\/invoices\?view=lines/);
+      await expect(page.getByText(NUMBER).first()).toBeVisible({ timeout: 20_000 });
+      await context.close();
+    } finally {
+      const clean = e2eSql();
+      await clean`delete from invoices where invoice_number = ${NUMBER}`.finally(() => clean.end());
+    }
   });
 
   test('the cross-branch 404 offers "פתחו שם" to the owner of both branches', async ({ browser, baseURL }) => {

@@ -273,7 +273,7 @@ function authored(): RecordInput[] {
         actor: 'נועה ברק',
         role: 'owner',
         action: 'דחתה את מחיר העגבניות',
-        detail: 'דרשנו הסבר מאבי הירקן',
+        detail: 'ביקשנו הבהרה מאבי הירקן',
       },
     ],
   },
