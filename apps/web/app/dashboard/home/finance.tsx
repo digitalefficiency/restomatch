@@ -215,7 +215,7 @@ async function Hero(ctx: Ctx) {
               ) : null}
               <p>{t('hero.calc')}</p>
               {canProve || canDrill ? (
-                <Link href={canProve ? '/dashboard/leaks/proof' : drillHref} data-testid="hero-proof" className={cn('inline-flex min-h-8 items-center font-semibold text-primary hover:underline', focus)}>
+                <Link href={canProve ? '/dashboard/leaks/proof' : drillHref} data-testid="hero-proof" className={cn('inline-flex min-h-11 items-center font-semibold text-primary hover:underline sm:min-h-8', focus)}>
                   {t('needs.whyProof')}
                 </Link>
               ) : null}
