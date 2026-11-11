@@ -148,7 +148,7 @@ export const en: Shape<typeof he> = {
   },
   matrix: {
     title: 'All branches',
-    subtitle: 'One row per branch. The total row equals the chain numbers.',
+    subtitle: 'One row per branch, with a total row that equals the chain numbers.',
     open: 'All branches in a matrix',
     back: 'Back to the chain overview',
     scopeLabel: 'Showing',
@@ -166,14 +166,14 @@ export const en: Shape<typeof he> = {
       months: 'By month',
     },
     total: 'Chain total',
-    partial: 'Some branches did not load. The total covers only the branches that did.',
+    partial: 'Some branches did not load, so the total covers only the ones that did.',
     state: {
       no_data: 'No data',
       pending: 'Waiting to link',
       clean: 'Clean',
       leak: 'Has gaps',
     },
-    branchError: 'We could not load the numbers for {name}. Try refreshing in a moment.',
+    branchError: 'The numbers for {name} did not load, so try refreshing in a moment.',
     recoveryOff: 'Off',
     peek: {
       title: 'Quick look · {name}',
