@@ -49,6 +49,9 @@ export const PUBLIC_PREFIX_PATHS = [
   // Wave-1 supplier portal (flag `supplierConfirm`): token-scoped, rate-limited, no session.
   '/s',
   '/api/supplier-confirm',
+  // H-06ʰ supplier reply link for a "מכתב בקשת זיכוי" (page under '/s/c'): a signed
+  // 72 h token, guardPublicRequest per IP and per token hash, CLAIM_PORTAL_SECRET-gated.
+  '/api/claims',
   '/_next',
 ] as const;
 
