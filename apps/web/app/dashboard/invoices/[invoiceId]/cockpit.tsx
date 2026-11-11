@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
-import { ArrowLeft, ArrowRight, Pencil, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, FileX, Pencil, X } from 'lucide-react';
 import type { Locale } from '@/lib/i18n/config';
 import { formatNumber } from '@/lib/i18n/format';
 import { formatIls } from '@/lib/money';
@@ -76,6 +76,7 @@ export function Cockpit({
   canRematch,
   aside,
   editor,
+  startEditing = false,
 }: {
   detail: Detail;
   title: string;
@@ -90,11 +91,13 @@ export function Cockpit({
   canRematch: boolean;
   aside: React.ReactNode;
   editor: React.ReactNode;
+  /** Open in edit mode: the read failed, is still running, or found no lines — adding lines IS the job here (#216). */
+  startEditing?: boolean;
 }) {
   const router = useRouter();
   const wide = useMediaQuery('(min-width: 1024px)');
   const [pane, setPane] = useState<'doc' | 'lines'>('lines');
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(startEditing);
   const ils = (agorot: number | null) => (agorot == null ? null : formatIls(agorot / 100, { maximumFractionDigits: 2, locale }));
   const price = (v: number | null) => (v == null ? null : formatIls(v, { maximumFractionDigits: 2, locale }));
   const qty = (v: number | null) => (v == null ? null : formatNumber(v, locale, { maximumFractionDigits: 3 }));
@@ -277,7 +280,14 @@ export function Cockpit({
     </ul>
   );
 
-  const viewer = (
+  // No stored document: one calm line, never an empty box that takes a third of the screen.
+  const noDoc = (
+    <p data-testid="cockpit-no-doc" className="flex items-center gap-2 rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-muted">
+      <FileX className="h-4 w-4 shrink-0" aria-hidden="true" />
+      {t.viewer.noDoc}
+    </p>
+  );
+  const viewer = !scan ? noDoc : (
     <InvoiceScanViewer
       src={scan?.src ?? null}
       mimeType={scan?.mimeType ?? null}
@@ -320,8 +330,17 @@ export function Cockpit({
     </div>
   );
 
+  // The sticky "decide" FAB sits above the bottom nav / consent bar: reserve its height (min-h-12)
+  // plus that offset below the content, so it never covers the last gap note at the bottom.
+  const fab = showMoney && openFindings.length > 0 && !editing;
   return (
-    <div className="pb-24">
+    <div
+      className={
+        fab
+          ? 'pb-[calc(var(--rm-bottomnav-h,0px)+var(--consent-h,0px)+env(safe-area-inset-bottom)+0.75rem+3rem+1rem)]'
+          : 'pb-24'
+      }
+    >
       <nav aria-label={t.back} className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
         <Link href={t.fromHref} className={cn('inline-flex items-center gap-1 font-semibold text-primary', FOCUS)} data-testid="cockpit-back">
           <BackIcon className="h-4 w-4" aria-hidden="true" />
@@ -357,6 +376,12 @@ export function Cockpit({
           {viewer}
           {linesPane}
         </div>
+      ) : !scan ? (
+        // Phone, no document: nothing to switch to — the one-line note, then the lines.
+        <div className="space-y-3">
+          {noDoc}
+          {linesPane}
+        </div>
       ) : (
         <div className="space-y-3">
           <SegmentedControl
@@ -371,7 +396,9 @@ export function Cockpit({
           {pane === 'doc' ? viewer : linesPane}
         </div>
       )}
-      {showMoney && openFindings.length > 0 ? (
+      {/* One primary action: while editing, saving is the action — the sticky "decide" CTA
+          would float over the edit rows (axe target-size). */}
+      {fab ? (
         <div className="sticky bottom-[calc(var(--rm-bottomnav-h,0px)+var(--consent-h,0px)+env(safe-area-inset-bottom)+0.75rem)] z-10 mt-4 flex justify-center">
           <Link
             href={`/dashboard/approvals?invoice=${d.id}`}

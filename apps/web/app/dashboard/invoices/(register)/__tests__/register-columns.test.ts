@@ -10,11 +10,12 @@ const copy: RegisterCopy = {
   },
   allocationYes: 'y',
   allocationNo: 'n',
+  allocationNa: 'na',
   consolidated: 'c',
 };
 const row = (over: Partial<RegisterRow>): RegisterRow => ({
   id: 'x', invoiceNumber: 'MF-1', invoiceDate: '2026-10-05T10:00:00Z', dueDate: null, supplierName: 'ספק',
-  totalInclVatAgorot: 11700, gapAgorot: 0, state: 'clean', tab: 'matched', hasAllocation: true, consolidated: false, ...over,
+  totalInclVatAgorot: 11700, gapAgorot: 0, state: 'clean', tab: 'matched', hasAllocation: true, allocationNumber: '123456789', allocationRequired: true, consolidated: false, ...over,
 });
 
 describe('register columns (W2-02)', () => {
@@ -32,6 +33,16 @@ describe('register columns (W2-02)', () => {
     expect(gap.value!(row({ state: 'awaiting_link', tab: 'awaiting' }))).toBeNull();
     expect(gap.cell!(row({ state: 'in_ocr', tab: 'awaiting' }))).toBe('pending');
     expect(gap.value!(row({ state: 'flagged_open', tab: 'review', gapAgorot: 4250 }))).toBe(4250);
+  });
+  it('allocation: the number, a "missing" chip when required, "—" when not — never a bare glyph', () => {
+    const a = cols.find((c) => c.id === 'allocation')!;
+    expect(a.exportValue!(row({}))).toBe('123456789');
+    expect(a.exportValue!(row({ hasAllocation: false, allocationNumber: null, allocationRequired: true }))).toBe('n');
+    expect(a.exportValue!(row({ hasAllocation: false, allocationNumber: null, allocationRequired: false }))).toBe('na');
+    // Sorted ascending, a required-and-missing number comes first.
+    expect(a.value!(row({ hasAllocation: false, allocationNumber: null, allocationRequired: true }))).toBeLessThan(
+      a.value!(row({ hasAllocation: false, allocationNumber: null, allocationRequired: false })) as number,
+    );
   });
   it('totals = Σ visible rows', () => {
     const rows = [row({ id: 'a', totalInclVatAgorot: 100, gapAgorot: 5 }), row({ id: 'b', totalInclVatAgorot: 250, gapAgorot: 0 })];

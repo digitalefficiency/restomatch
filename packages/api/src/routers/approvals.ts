@@ -30,6 +30,7 @@ import { canActOn, expandVisibleRoles } from '../lib/roles';
 import { claimableLines, isNeverClaimable, sumClaims, type VatBasis } from '../lib/claims';
 import { formatIlsAgorot } from '../reports/money';
 import { DECISION_COPY } from '../notifications/templates';
+import { materializeClaims } from '../recovery/service';
 
 const ResolutionEnum = z.enum(['accepted', 'rejected', 'escalated']);
 
@@ -327,6 +328,14 @@ export const approvalsRouter = router({
         .where(checkedRow(ctx.session.restaurantId, input.discrepancyId, before))
         .returning();
       if (!updated) throw await decidedConflict(ctx, input.discrepancyId);
+      // W2-10a: the claim is made AT the decision, in this transaction, by the decider —
+      // whatever the recovery flag (the letters / supplier card read recovery_claims). A
+      // never-claimable type or an info row makes none (materializeClaims' own rule).
+      await materializeClaims(ctx.db, {
+        restaurantId: ctx.session.restaurantId,
+        discrepancyIds: [input.discrepancyId],
+        actorId: ctx.session.userId,
+      });
 
       await ctx.db.insert(auditLog).values({
         restaurantId: ctx.session.restaurantId,
@@ -508,6 +517,9 @@ export const approvalsRouter = router({
         )
         .returning();
       if (!updated) throw new TRPCError({ code: 'CONFLICT', message: 'nothing to undo' });
+      // W2-10a: undoing an approve takes its untouched claim back (system write-off, no
+      // money moved yet) in the same transaction — the letter loses the line at once.
+      await materializeClaims(ctx.db, { restaurantId: rid, discrepancyIds: [input.discrepancyId], actorId: ctx.session.userId });
 
       await ctx.db.insert(auditLog).values({
         restaurantId: rid,
