@@ -79,7 +79,14 @@ export function statusOf(input: { frozen: boolean; generatedAt: string }, now: D
 /* ─────────────────────────── next steps ─────────────────────────── */
 
 /** The snapshot's next-action codes (packages/api/src/reports/monthly.ts NextActionCode). */
-export type NextCode = 'chaseOverdue' | 'decideOpen' | 'sendClaims' | 'linkPending' | 'talkToSupplier' | 'allClear';
+export type NextCode =
+  | 'chaseOverdue'
+  | 'decideOpen'
+  | 'sendClaims'
+  | 'linkPending'
+  | 'answerQuestions'
+  | 'talkToSupplier'
+  | 'allClear';
 
 export interface NextStep {
   code: NextCode;
@@ -126,6 +133,10 @@ export function nextSteps(
         break;
       case 'linkPending':
         out.push({ code: 'linkPending', tier: 'T2', agorot: null, count, href: breakdown });
+        break;
+      case 'answerQuestions':
+        // G-08: invoices held on "is this the same product?" — answered on the mapping screen.
+        out.push({ code: 'answerQuestions', tier: 'T2', agorot: null, count, href: '/dashboard/catalog/mapping' });
         break;
       case 'talkToSupplier': {
         const he = String(p.supplier ?? '');

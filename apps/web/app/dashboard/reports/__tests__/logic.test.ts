@@ -93,6 +93,10 @@ describe('next steps', () => {
       ['linkPending', 'T2', null, 2, '/dashboard/leaks/breakdown?m=-1'],
     ]);
   });
+  it('G-08: held invoices ask "is this the same product?" on the mapping screen', () => {
+    const [q] = nextSteps([{ code: 'answerQuestions', params: { count: 3 } }], ctx);
+    expect(q).toMatchObject({ code: 'answerQuestions', tier: 'T2', agorot: null, count: 3, href: '/dashboard/catalog/mapping' });
+  });
   it('links the supplier step to that supplier when the breakdown names it', () => {
     const [a] = nextSteps([{ code: 'talkToSupplier', params: { supplier: 'תנובה', supplierEn: 'Tnuva', pct: 0.021 } }], ctx);
     expect(a).toMatchObject({ tier: 'T2', href: '/dashboard/suppliers/s-1', supplier: { he: 'תנובה', en: 'Tnuva' }, pct: 0.021 });

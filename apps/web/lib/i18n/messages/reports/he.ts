@@ -59,6 +59,8 @@ export const he = {
     sendClaimsCta: 'שליחת המכתב',
     linkPending: '{count} חשבוניות ממתינות לשיוך להזמנה',
     linkPendingCta: 'לשיוך',
+    answerQuestions: '{count} חשבוניות מחכות לתשובה: "זה אותו מוצר?"',
+    answerQuestionsCta: 'לענות',
     talkToSupplier: 'אצל {supplier} הפערים הם {pct} מהרכש',
     talkToSupplierCta: 'לכרטיס הספק',
     allClear: 'אין צעדים פתוחים החודש',

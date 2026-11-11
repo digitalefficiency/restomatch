@@ -56,6 +56,8 @@ export const en: Shape<typeof he> = {
     sendClaimsCta: 'Send the letter',
     linkPending: '{count} invoices are waiting to be linked to an order',
     linkPendingCta: 'Link them',
+    answerQuestions: '{count} invoices are waiting for an answer: "Is this the same product?"',
+    answerQuestionsCta: 'Answer',
     talkToSupplier: 'At {supplier} the gaps are {pct} of spend',
     talkToSupplierCta: 'Supplier card',
     allClear: 'No open steps this month',
