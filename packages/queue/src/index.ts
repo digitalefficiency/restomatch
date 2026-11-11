@@ -55,8 +55,71 @@ export async function withDeadline<T>(p: Promise<T>, ms: number, onTimeout: () =
   }
 }
 
-/** Per-queue defaults: match-invoice is cheap and idempotent, so it retries. */
-const MAX_ATTEMPTS: Record<string, number> = { 'match-invoice': 3 };
+/**
+ * Per-queue defaults: match-invoice is cheap and idempotent, so it retries.
+ * ocr-invoice gets ONE retry: each attempt is a paid Claude read, so only a
+ * transient failure (429, 5xx, timeout, unparsable answer) is retried; a
+ * terminal one is dead-lettered at once (TERMINAL_JOB_ERROR, apps/worker
+ * ocrInvoice.ts classifyOcrError).
+ */
+export const MAX_ATTEMPTS: Readonly<Record<string, number>> = { 'match-invoice': 3, 'ocr-invoice': 2 };
+
+/** Default for OCR_JOB_HEADROOM_MS: a Claude read takes ≈ 10–40 s, its retry path more. */
+export const OCR_JOB_HEADROOM_DEFAULT_MS = 120_000;
+
+/**
+ * The time an ocr-invoice job must have left in its invocation before it is
+ * claimed (OCR_JOB_HEADROOM_MS, ms; default 120 s). A read cut off by the
+ * function's maxDuration stalls, is retried, and can be dead-lettered — after
+ * being paid for. Used by the serverless runner and the after() kick.
+ */
+export function ocrJobHeadroomMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.OCR_JOB_HEADROOM_MS?.trim();
+  if (!raw) return OCR_JOB_HEADROOM_DEFAULT_MS;
+  const n = Number(raw);
+  if (!(Number.isFinite(n) && n >= 0)) return OCR_JOB_HEADROOM_DEFAULT_MS;
+  // Clamped below the cron route's claim window (240 s, apps/web/lib/cronJobs.ts)
+  // minus a margin: a headroom at or above it would never claim an OCR job at all.
+  if (n > OCR_JOB_HEADROOM_MAX_MS) {
+    if (!warnedHeadroom) {
+      warnedHeadroom = true;
+      console.warn(`[queue] OCR_JOB_HEADROOM_MS=${Math.floor(n)} is above ${OCR_JOB_HEADROOM_MAX_MS} — clamped`);
+    }
+    return OCR_JOB_HEADROOM_MAX_MS;
+  }
+  // …and clamped up to a floor: below ~60 s the job deadline (headroom − the
+  // persistence margin) is shorter than a typical read, so every read would time
+  // out, be retried, time out again — paid twice for nothing.
+  if (n < OCR_JOB_HEADROOM_MIN_MS) {
+    if (!warnedHeadroomLow) {
+      warnedHeadroomLow = true;
+      console.warn(`[queue] OCR_JOB_HEADROOM_MS=${Math.floor(n)} is below ${OCR_JOB_HEADROOM_MIN_MS} — clamped`);
+    }
+    return OCR_JOB_HEADROOM_MIN_MS;
+  }
+  return Math.floor(n);
+}
+
+/** The largest OCR_JOB_HEADROOM_MS honoured: the cron claim window (240 s) minus a 40 s margin. */
+export const OCR_JOB_HEADROOM_MAX_MS = 200_000;
+/** The smallest OCR_JOB_HEADROOM_MS honoured: a 40 s job deadline (60 s − the 20 s persistence margin). */
+export const OCR_JOB_HEADROOM_MIN_MS = 60_000;
+let warnedHeadroom = false;
+let warnedHeadroomLow = false;
+
+/** Time kept for persisting a read (header + lines + match enqueue) after the provider returns. */
+export const OCR_PERSIST_MARGIN_MS = 20_000;
+
+/**
+ * The provider deadline of one OCR job: the headroom it was claimed with, minus
+ * the persistence margin. A job is claimed only with this headroom left, so a
+ * read that hits the deadline still leaves time to record a retryable failure —
+ * never a function cut off mid-read (stall → paid twice).
+ */
+export function ocrJobDeadlineMs(env: NodeJS.ProcessEnv = process.env): number {
+  // ≥ 40 s: the headroom is clamped to at least OCR_JOB_HEADROOM_MIN_MS.
+  return ocrJobHeadroomMs(env) - OCR_PERSIST_MARGIN_MS;
+}
 
 /**
  * Insert a job with a hard deadline. Returns false when no queue database is
