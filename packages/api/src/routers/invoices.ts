@@ -24,6 +24,8 @@ import { can, financeProcedure, invoiceReaderProcedure, router } from '../trpc';
 import { canViewPrices } from '../lib/capabilities';
 import { readDuplicateOf } from '../lib/invoiceDedupe';
 import { readConsolidatedRaw } from '../match/consolidated';
+import { localDateKeyInTz } from '../lib/time';
+import { allocationThreshold } from '../vat/vatAtRisk';
 import {
   INVOICE_STATES,
   invoiceStateOf,
@@ -99,7 +101,19 @@ export interface RegisterRow {
   state: InvoiceState;
   tab: StateTab;
   hasAllocation: boolean;
+  /** The allocation number as stored (shown in the register), or null. */
+  allocationNumber: string | null;
+  /** The invoice is above the allocation threshold for its date (VAT rule): a missing number is a real gap. */
+  allocationRequired: boolean;
   consolidated: boolean;
+}
+
+/** Israel calendar day of an invoice date (the VAT threshold is by invoice date). */
+const IL_TZ = 'Asia/Jerusalem';
+export function allocationRequiredFor(invoiceDate: Date | string | null, totalExclVat: string | number | null): boolean {
+  if (!invoiceDate || totalExclVat == null) return false;
+  const threshold = allocationThreshold(localDateKeyInTz(new Date(invoiceDate), IL_TZ));
+  return threshold != null && Number(totalExclVat) > threshold;
 }
 
 async function registerRows(
@@ -120,6 +134,7 @@ async function registerRows(
       supplierId: invoices.supplierId,
       supplierName: suppliers.name,
       allocationNumber: invoices.allocationNumber,
+      totalExclVat: invoices.totalExclVat,
       ocrPayload: invoices.ocrPayload,
     })
     .from(invoices)
@@ -140,6 +155,8 @@ async function registerRows(
       state: s.state,
       tab: tabOfState(s.state),
       hasAllocation: hasAllocation(m.allocationNumber),
+      allocationNumber: hasAllocation(m.allocationNumber) ? m.allocationNumber!.trim() : null,
+      allocationRequired: allocationRequiredFor(m.invoiceDate, m.totalExclVat),
       consolidated: readConsolidatedRaw(m.ocrPayload) !== null,
     };
   });
