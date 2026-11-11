@@ -302,7 +302,7 @@ export const he = {
   /** W3-11 · supplier statement (כרטסת) reconciliation. */
   statement: {
     title: 'התאמת כרטסת ספק',
-    subtitle: 'הדביקו את הכרטסת שהספק שלח (CSV או העתקה מאקסל). נשווה כל שורה לחשבוניות, לחשבוניות הזיכוי ולתשלומים שאצלנו.',
+    subtitle: 'הדביקו את הכרטסת מהספק, ונשווה כל שורה למה שאצלנו.',
     supplier: 'ספק',
     pickSupplier: 'בחרו ספק',
     paste: 'שורות הכרטסת',
@@ -314,11 +314,11 @@ export const he = {
     period: 'תקופה: {from} עד {to}',
     totals: 'בכרטסת: חשבוניות {invoiced} · זיכויים {credited} · תשלומים {paid}',
     matched: '{invoices} חשבוניות ו-{credits} זיכויים תואמים',
-    clean: 'הכרטסת תואמת. לא מצאנו פערים.',
+    clean: 'הכרטסת תואמת, בלי פערים.',
     flagsTitle: '{count} דברים לבדוק',
     row: 'שורה {row}',
     ours: 'אצלנו',
-    stored: 'הכרטסת לא נשמרת. ההשוואה נעשית עכשיו בלבד.',
+    stored: 'הכרטסת לא נשמרת, וההשוואה נעשית עכשיו בלבד.',
     flag: {
       invoice_never_got: 'חשבונית שלא הגיעה אלינו',
       billed_not_received: 'חויבה בלי תעודת קבלה',
@@ -332,8 +332,8 @@ export const he = {
       invoice_never_got: 'נבקש מהספק עותק של החשבונית.',
       billed_not_received: 'בדקו מול המחסן אם הסחורה הגיעה.',
       amount_mismatch: 'הפרש של {amount} מול החשבונית שאצלנו.',
-      invoice_duplicate: 'אותה חשבונית מופיעה שוב בכרטסת. נבקש מהספק לבדוק.',
-      credit_missing: 'נבקש מהספק לעדכן את חשבונית הזיכוי בכרטסת. הסכום כאן לפני מע״מ.',
+      invoice_duplicate: 'אותה חשבונית מופיעה פעמיים בכרטסת, כדאי לבקש מהספק לבדוק.',
+      credit_missing: 'נבקש מהספק לעדכן את חשבונית הזיכוי (הסכום לפני מע״מ).',
       credit_unrecorded: 'חדשות טובות: רשמו את חשבונית הזיכוי במעקב.',
       payment_unapplied: 'סימנו כשולם יותר ממה שהכרטסת מראה.',
     },
