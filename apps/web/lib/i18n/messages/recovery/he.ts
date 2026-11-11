@@ -92,7 +92,7 @@ export const he = {
     unsentCta: 'לשליחת בקשות הזיכוי',
     waiting: '{count} בלי תשובה {days}+ ימים · {amount}',
     waitingCta: 'להכנת תזכורות לספקים',
-    reminderNote: 'התזכורת האוטומטית מגיעה אליכם בלבד. לספק מכינים טיוטה, והיא נשלחת רק בלחיצה שלכם.',
+    reminderNote: 'שום דבר לא נשלח לספק בלי לחיצה שלכם.',
   },
   countdown: {
     left: 'נותרו {days} ימים · עד {date}',

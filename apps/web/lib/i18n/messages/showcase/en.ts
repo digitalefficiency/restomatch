@@ -317,15 +317,15 @@ export const en: Shape<typeof he> = {
 
   deliveries: {
     title: 'Delivery tracking',
-    lead: "Set a cutoff time for each supplier. If the goods haven't arrived by then, you get an alert with next steps.",
+    lead: "Set an arrival time for each supplier. If the goods haven't arrived by then, you get an alert with next steps.",
     lateOne: '1 late delivery',
     lateMany: '{count} late deliveries',
-    lateBody: 'Goods that were due have passed their cutoff — action needed.',
+    lateBody: 'Goods that were due have passed their arrival time — action needed.',
     meta: 'Rep: {agent} · {phone} · ordered {ordered} · due {expected}',
     yesterdayAt: 'yesterday {time}',
     todayAt: 'today {time}',
     today: 'today',
-    cutoff: 'Cutoff',
+    cutoff: 'Arrival time',
     notArrived: 'Not here by {time}. Next steps:',
     call: 'Call the rep',
     whatsappTo: 'WhatsApp to:',

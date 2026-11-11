@@ -87,14 +87,15 @@ describe('ask: feature flag + roles', () => {
     }
   });
 
-  it('owner/manager only: receiver, chef and bookkeeper are FORBIDDEN', async () => {
+  it('owner/manager/bookkeeper only (AU-06): receiver and chef are FORBIDDEN', async () => {
     __setAskClient(null);
-    for (const role of ['receiver', 'chef', 'bookkeeper'] as const) {
+    for (const role of ['receiver', 'chef'] as const) {
       await expect(caller(A, role).ask.ask({ question: 'how much leaked?', locale: 'en' })).rejects.toMatchObject({
         code: 'FORBIDDEN',
       });
     }
     await expect(caller(A, 'manager').ask.ask({ question: 'how much leaked?', locale: 'en' })).resolves.toBeTruthy();
+    await expect(caller(A, 'bookkeeper').ask.ask({ question: 'how much leaked?', locale: 'en' })).resolves.toBeTruthy();
   });
 });
 
@@ -157,7 +158,19 @@ describe('ask: Claude leg (mocked)', () => {
     expect(b.thinking).toBeUndefined();
     expect(b.tool_choice).toEqual({ type: 'auto' });
     expect(b.tools.map((t: { name: string }) => t.name).sort()).toEqual(
-      ['claimable_lines', 'leak_breakdown', 'leak_change', 'leak_hero', 'leak_report'],
+      [
+        'claimable_lines',
+        'intake_stuck',
+        'leak_breakdown',
+        'leak_change',
+        'leak_hero',
+        'leak_report',
+        // AU-06: what needs me
+        'to_pay_this_week',
+        'vat_at_risk',
+        'waiting_for_me',
+        'who_owes_me',
+      ],
     );
     expect(b.tools.every((t: { strict?: boolean }) => t.strict === true)).toBe(true);
     // The second call carries the tool_result for the session restaurant.
@@ -588,5 +601,78 @@ describe('ask: periods are fair (G-12b)', () => {
     expect(p).toContain('leak_change');
     expect(p).toContain('spanLabel');
     expect(p).not.toMatch(/1\.5\s*%/);
+  });
+});
+
+describe('ask: AU-06 what-needs-me tools (add-only)', () => {
+  it('grounding marks an invented ₪ as ungrounded for a new tool (who_owes_me)', async () => {
+    const { client } = fakeClaude((_b, call) =>
+      call === 0
+        ? toolUse('who_owes_me')
+        : final({
+            answer: 'ספק A חייב לך ₪999 על בקשות זיכוי.',
+            citations: [{ label: 'חייב', value: 999, unit: 'ils', href: '/dashboard/recovery' }],
+          }),
+    );
+    __setAskClient(client);
+    const r = await caller(A).ask.ask({ question: 'מי חייב לי זיכויים?', locale: 'he' });
+    expect(r.mode).toBe('claude');
+    expect(r.grounded).toBe(false);
+  });
+
+  it('runAsk receives the session role: a refused tool returns a tool error to the loop, never data', async () => {
+    const { client, bodies } = fakeClaude((_b, call) =>
+      call === 0 ? toolUse('who_owes_me') : final({ answer: 'אין לי את הנתון הזה.', citations: [] }),
+    );
+    __setAskClient(client);
+    const { runAsk } = await import('../ask');
+    await runAsk(db, A.restaurantId, 'מי חייב לי?', 'he', { role: 'receiver' });
+    const toolResult = bodies[1]!.messages.at(-1).content[0];
+    expect(toolResult).toMatchObject({ type: 'tool_result', is_error: true });
+    expect(String(toolResult.content)).toMatch(/^FORBIDDEN/);
+  });
+
+  it('the old chips keep their intents next to the new ones', () => {
+    expect(classifyQuestion('מה כדאי לתבוע השבוע?')).toBe('claimWeek');
+    expect(classifyQuestion('מי חייב לי זיכויים?')).toBe('whoOwesMe');
+    expect(classifyQuestion('כמה מע״מ בסיכון?')).toBe('vatAtRisk');
+  });
+});
+
+describe('ask: runAskLoop export + channel (AU-06 for WA-02, add-only)', () => {
+  it("the web path is unchanged: channel 'web' (default) and 'whatsapp' send the same request and answer alike", async () => {
+    const script = (_b: Body, call: number) =>
+      call === 0
+        ? toolUse('leak_hero')
+        : final({ answer: 'This month ₪100 leaked.', citations: [{ label: 'Leak', value: 100, unit: 'ils', href: '/dashboard' }] });
+    const { runAsk } = await import('../ask');
+    const a = fakeClaude(script);
+    __setAskClient(a.client);
+    const webDefault = await runAsk(db, A.restaurantId, 'How much leaked?', 'en', { role: 'owner' });
+    __resetAskBurst();
+    const b = fakeClaude(script);
+    __setAskClient(b.client);
+    const wa = await runAsk(db, A.restaurantId, 'How much leaked?', 'en', { role: 'owner', channel: 'whatsapp' });
+    expect(wa).toEqual(webDefault);
+    expect(b.bodies).toEqual(a.bodies);
+    expect(a.bodies[0]!.system).toBe(b.bodies[0]!.system);
+  });
+
+  it('runAskLoop runs a caller-owned tool set and runner with the same answer schema', async () => {
+    const { runAskLoop, ASK_ANSWER_SCHEMA } = await import('../ask');
+    const { client, bodies } = fakeClaude((_b, call) =>
+      call === 0 ? toolUse('only_tool') : final({ answer: 'ok ₪5', citations: [{ label: 'x', value: 5, unit: 'ils', href: '/x' }] }),
+    );
+    const r = await runAskLoop(client, {
+      system: 'SYS',
+      tools: [{ name: 'only_tool', input_schema: { type: 'object', properties: {} }, strict: true }],
+      runTool: async () => ({ data: { aIls: 5 }, links: [{ screen: 'overview', href: '/x' }], figures: { ils: [5], pct: [], count: [] } }),
+      messages: [{ role: 'user', content: 'q' }],
+    });
+    expect(bodies[0]!.system).toBe('SYS');
+    expect(bodies[0]!.tools.map((t: { name: string }) => t.name)).toEqual(['only_tool']);
+    expect(r.figures.ils).toEqual([5]);
+    expect(r.toolsUsed).toEqual(['only_tool']);
+    expect(ASK_ANSWER_SCHEMA.parse(r.answer)).toEqual(r.answer);
   });
 });
