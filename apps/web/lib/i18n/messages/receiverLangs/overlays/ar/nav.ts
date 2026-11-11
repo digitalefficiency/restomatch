@@ -17,6 +17,7 @@ export const nav: Shape<typeof he> = {
     inbox: 'الفواتير الواردة',
     invoices: 'الفواتير',
     invoiceDetail: 'فاتورة',
+    inboxCompare: 'مقارنة الفواتير',
     leaks: 'الخسائر',
     leaksBreakdown: 'تفصيل الخسائر',
     leaksProof: 'إثبات الخسائر',

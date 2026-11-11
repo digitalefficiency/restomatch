@@ -16,6 +16,7 @@ export const en: Shape<typeof he> = {
     inbox: 'Incoming invoices',
     invoices: 'Invoices',
     invoiceDetail: 'Invoice',
+    inboxCompare: 'Compare invoices',
     leaks: 'Leak',
     leaksBreakdown: 'Leak breakdown',
     leaksProof: 'Leak proof',
