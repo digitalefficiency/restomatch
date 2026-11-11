@@ -41,7 +41,8 @@ describe('frozen mobile app: no ₪ maths of its own', () => {
   it('the owner sees the T4 card that opens the web dashboard', () => {
     const home = files.find((f) => f.path.endsWith('owner/index.tsx'))!.text;
     expect(home).toContain('הנתונים המלאים באתר');
-    expect(home).toContain('פתחו באפליקציה');
+    // It opens the WEBSITE (Linking.openURL), so the CTA says so (leak-economist, 11.11).
+    expect(home).toContain('פתחו באתר');
     expect(home).toMatch(/\/dashboard/);
   });
 });

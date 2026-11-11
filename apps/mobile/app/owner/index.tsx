@@ -66,7 +66,7 @@ export function WebCard() {
       onPress={() => void Linking.openURL(webDashboardUrl())}
     >
       <Text style={styles.webTitle}>הנתונים המלאים באתר</Text>
-      <Text style={styles.webAction}>פתחו באפליקציה ←</Text>
+      <Text style={styles.webAction}>פתחו באתר ←</Text>
     </Pressable>
   );
 }
