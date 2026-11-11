@@ -784,6 +784,31 @@ describe('#216 money review — round 3', () => {
     expect(kept!.status).toBe('rejected');
   });
 
+  it('F (G-15): a SYSTEM auto-accept (accepted, no resolved_at) is not a decision — the last line still goes; a person\'s accept still locks', async () => {
+    await linkOrder();
+    await stamp({ scanGrId: A.grId });
+    const a = await as('manager').receiving.addInvoiceLine({
+      invoiceId: failedId,
+      line: { poLineId: A.poLineId, rawDescription: 'עגבניות', qtyBilled: 10, unit: 'kg', unitPriceBilled: 9 },
+    });
+    const [d] = await db
+      .select({ id: discrepancies.id })
+      .from(discrepancies)
+      .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+      .where(eq(matchRuns.invoiceId, failedId))
+      .limit(1);
+    expect(d).toBeDefined();
+    // A person's accept stamps resolved_at → locked.
+    await db.update(discrepancies).set({ resolutionStatus: 'accepted', resolvedAt: new Date() }).where(eq(discrepancies.id, d!.id));
+    await expect(as('manager').receiving.deleteInvoiceLine({ lineId: a.lineId })).rejects.toMatchObject({
+      cause: { appCode: 'invoice.linesLocked' },
+    });
+    // The routing engine's auto-accept (non-leak-acknowledge / minor-info) leaves resolved_at null → not locked.
+    await db.update(discrepancies).set({ resolutionStatus: 'accepted', resolvedAt: null }).where(eq(discrepancies.id, d!.id));
+    await as('manager').receiving.deleteInvoiceLine({ lineId: a.lineId });
+    expect(await runs()).toHaveLength(0);
+  });
+
   it('G: the receipt hold is decided under the receipt lock — a hand line saved during a submit is matched, never stranded', async () => {
     const other = createDb(testDbUrl());
     try {
