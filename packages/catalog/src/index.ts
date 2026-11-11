@@ -14,3 +14,28 @@ export {
   type RecordConfirmedMatchParams,
   type RecordConfirmedMatchResult,
 } from './learning';
+export {
+  AUTO_LINK_MIN,
+  REVIEW_FLOOR,
+  HUMAN_CONFIDENCE,
+  MACHINE_MAX_CONFIDENCE,
+  GUESS_MAX_CONFIDENCE,
+  MAX_SUGGESTIONS,
+  decideLink,
+  isExactKey,
+  normalizeLinkName,
+  LINK_WS_CLASS,
+  rankSuggestions,
+  aliasProvenance,
+  provenanceConfidence,
+  type LinkProvenance,
+  type ConfirmedProvenance,
+  type LinkMatchedBy,
+  type LinkCandidate,
+  type ReviewReason,
+  type UnitPackFit,
+  type LinkRow,
+  type LinkDecisionKind,
+  type LinkDecision,
+} from './linkPolicy';
+export { normNameSql } from './normName';
