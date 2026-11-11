@@ -139,7 +139,7 @@ export async function SupplierOverviewTab({ supplierId, leakCard }: { supplierId
             <ul className="divide-y divide-line">
               {overview.lastInvoices.map((inv) => (
                 <li key={inv.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                  <Link href={`/dashboard/invoices/${inv.id}`} className="flex min-w-0 items-baseline gap-3 text-ink hover:underline">
+                  <Link href={`/dashboard/invoices/${inv.id}`} className="flex min-h-11 min-w-0 items-center gap-3 text-ink hover:underline [@media(pointer:fine)]:min-h-6">
                     <span className="truncate">
                       {inv.invoiceNumber ? t('overview.invoiceNo', { number: inv.invoiceNumber }) : t('overview.invoiceNoNumber')}
                     </span>
