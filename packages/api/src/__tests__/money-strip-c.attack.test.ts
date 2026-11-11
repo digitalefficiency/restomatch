@@ -148,16 +148,19 @@ describe('H-11 slice c · receiver and chef get no ₪ (A own ids; B ids rejecte
       const c = callerFor(A, role);
       const today = await c.receiving.todayExpectations();
       const pending = await c.receiving.pendingInvoices();
+      // W3-04: the receiver finds no records at all; the chef finds orders and recipes only.
       const search = await c.search.global({ q: 'עגבניה' });
       const searchInvoice = await c.search.global({ q: 'INV-A' });
+      const searchOrders = await c.search.global({ q: A.supplierName });
       const products = await c.products.list();
       const unmapped = await c.mapping.unmapped();
       const productSearch = await c.mapping.searchProducts({ q: 'עגבניה' });
       // Non-vacuous: every read returns at least one row.
       expect(today.length, `${role} todayExpectations rows`).toBeGreaterThan(0);
       expect(pending.length, `${role} pendingInvoices rows`).toBeGreaterThan(0);
-      expect(JSON.stringify(search), `${role} search finds the product`).toContain('עגבניה');
-      expect(JSON.stringify(searchInvoice), `${role} search finds the invoice`).toContain('INV-A');
+      // Non-vacuous search: the chef's order search returns the seeded PO; the receiver's is empty by design (W3-04).
+      if (role === 'chef') expect(searchOrders.orders.length, `${role} order search rows`).toBeGreaterThan(0);
+      else expect(searchOrders, `${role} search returns nothing`).toEqual({ suppliers: [], products: [], invoices: [], orders: [], recipes: [] });
       expect(products.rows.length, `${role} products rows`).toBeGreaterThan(0);
       // The chef only gets G-08 name questions ("זה אותו מוצר?"), not SKU rows, so only the receiver's list is seeded.
       if (role === 'receiver') expect(unmapped.length, `${role} unmapped rows`).toBeGreaterThan(0);
@@ -167,6 +170,7 @@ describe('H-11 slice c · receiver and chef get no ₪ (A own ids; B ids rejecte
         ['pendingInvoices', pending, []],
         ['search.global (product)', search, []],
         ['search.global (invoice)', searchInvoice, []],
+        ['search.global (orders)', searchOrders, []],
         ['products.list', products, ['total']],
         ['mapping.unmapped', unmapped, []],
         ['mapping.searchProducts', productSearch, []],
