@@ -11,6 +11,7 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { recovery } from '@/lib/i18n/messages/recovery';
 import { approvals } from '@/lib/i18n/messages/approvals';
 import { Badge, Button, Card, ConfirmDialog, Field, Input, cn, type BadgeTone } from '@/lib/components';
+import { localDay } from '@/lib/components/views/labels';
 import { discrepancyLabel, displayName } from '../approvals/vocab';
 import { parseIlsInput } from './parseIls';
 import { UndoBar, useDeferredCommit } from './deferred';
@@ -659,7 +660,8 @@ function CreditForm({
   const owed = chosen.reduce((sum, c) => sum + c.outstandingAgorot, 0);
   const [number, setNumber] = useState(line?.invoiceNumber ?? '');
   const [amount, setAmount] = useState(((line?.amountAgorot ?? owed) / 100).toFixed(2));
-  const [date, setDate] = useState(line?.invoiceDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10));
+  // Today on the Israeli calendar, not the UTC day (yesterday between local midnight and 02:00/03:00).
+  const [date, setDate] = useState(line?.invoiceDate?.slice(0, 10) ?? localDay(new Date()));
   const [error, setError] = useState<string | null>(null);
   // W3-11 · "שיוך זיכוי": the server proposes which requests the note answers; the user confirms.
   const utils = trpc.useUtils();
