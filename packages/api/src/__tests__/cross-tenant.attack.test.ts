@@ -41,6 +41,7 @@ import {
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { diffCoverage, loadFragments, mergeCoverage } from './coverage/index';
 
 /**
  * CROSS-TENANT ATTACK SUITE
@@ -52,7 +53,13 @@ import { resetDb, seedTenant, type Tenant } from './fixtures';
  *
  * COVERAGE is enforced: a tRPC procedure that is not declared in COVERAGE
  * fails this suite. When you add a procedure, add an attack or isolation test
- * here and declare it — that is the price of admission.
+ * and declare it — that is the price of admission.
+ *
+ * COVERAGE = BASE_COVERAGE (below, human-owned) merged with the per-package
+ * fragments in ./coverage/<package-id>.ts. A package adds its procedures in its
+ * own fragment and its attack test in its own *.attack.test.ts — never here.
+ * mergeCoverage() rejects a fragment that re-declares a base key. See
+ * ./coverage/README.md.
  */
 
 const TEST_DB_URL =
@@ -103,7 +110,7 @@ afterAll(async () => {
  * 'isolation' → has a list/aggregate isolation test below
  * other       → explicit justification for why no test is required
  * ────────────────────────────────────────────────────────────────────────── */
-const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
+const BASE_COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // S14 wave 1 — receiver languages + AI assistant (flag-gated).
   'receiverLangs.status': 'isolation',
   'receiverLangs.localNames': 'attack',
@@ -153,15 +160,6 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'payRun.enabled': 'isolation — payrun.attack.test.ts: reads only the caller restaurant flag; receiver/chef FORBIDDEN',
   'payRun.month':
     'isolation — payrun.attack.test.ts: only the caller restaurant invoices (B never in the payload); receiver/chef FORBIDDEN; flag off ⇒ nothing listed; ₪ = the credit letters to the agora',
-  // W2-03 (add-only): the due-date desk + guarded mark-paid / reminder.
-  'payRun.list':
-    "isolation — payrun.attack.test.ts: A's list never contains B's invoice, supplier or findings; receiver/chef FORBIDDEN",
-  'payRun.markPaid':
-    "attack — payrun.attack.test.ts: A marking B's invoiceId (alone or mixed) → NOT_FOUND with the flag on or off, B untouched",
-  'payRun.unmarkPaid':
-    "attack — payrun.attack.test.ts: A unmarking B's invoiceId → NOT_FOUND with the flag on or off, B untouched; a reason is required",
-  'payRun.remind':
-    "attack — payrun.attack.test.ts: A reminding on B's invoiceId → NOT_FOUND; receiver/chef FORBIDDEN; nothing sent until G-06",
   'owner.leakReport': 'isolation',
   'owner.leakSummary': 'isolation',
   'owner.leakGrouped': 'isolation',
@@ -421,17 +419,32 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'inventory.period': "attack — inventory-rls.attack.test.ts: B asking for the period of A's closed count → notFound; inventory-router.test.ts: A's purchases exclude B's ₪99,999 invoice on the same day; B's period is noCounts",
 };
 
+// Never a plain spread: mergeCoverage throws if a fragment re-declares (and so could downgrade) a base key.
+const COVERAGE = mergeCoverage(BASE_COVERAGE, loadFragments());
+
 function listProcedurePaths(): string[] {
   const def = (appRouter as { _def: { procedures?: Record<string, unknown> } })._def;
   if (!def.procedures) throw new Error('appRouter._def.procedures missing — tRPC internals changed');
   return Object.keys(def.procedures).sort();
 }
 
+/** Base entries at the W2-01 split. The base may grow (human PR); it may never shrink. */
+const BASE_COVERAGE_FLOOR = 216;
+
 describe('coverage completeness', () => {
   it('every registered procedure is declared in COVERAGE', () => {
     const registered = listProcedurePaths();
     const declared = Object.keys(COVERAGE).sort();
-    expect(registered).toEqual(declared);
+    const { missing, stale } = diffCoverage(registered, declared);
+    expect(
+      registered,
+      `COVERAGE out of sync — MISSING (registered, undeclared): ${JSON.stringify(missing)}; ` +
+        `STALE (declared, not registered): ${JSON.stringify(stale)}. Declare new procedures in coverage/<package-id>.ts.`,
+    ).toEqual(declared);
+  });
+
+  it('BASE_COVERAGE never shrinks (ratchet)', () => {
+    expect(Object.keys(BASE_COVERAGE).length).toBeGreaterThanOrEqual(BASE_COVERAGE_FLOOR);
   });
 });
 

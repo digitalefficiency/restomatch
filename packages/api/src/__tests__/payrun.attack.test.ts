@@ -510,6 +510,67 @@ describe('payRun.list (W2-03)', () => {
     await expect(asA('bookkeeper').payRun.remind({ invoiceId: A.invoiceId })).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED' });
   });
 
+  it('a never-seen invoice id is indistinguishable from a foreign one (same code + message)', async () => {
+    const ghost = '00000000-0000-4000-8000-00000000abcd';
+    const errOf = (p: Promise<unknown>) =>
+      p.then(
+        () => null,
+        (e: { code?: string; message?: string }) => ({ code: e.code, message: e.message }),
+      );
+    const mp = (invoiceId: string, n: string) =>
+      asA().payRun.markPaid({
+        items: [{ invoiceId, expectedStatus: 'matched' }],
+        paidOn: '2026-10-25',
+        method: 'cash',
+        clientMutationId: `cmid-ghost-${n}`,
+      });
+    expect(await errOf(mp(ghost, '01'))).toEqual(await errOf(mp(B.invoiceId, '02')));
+    expect(await errOf(asA().payRun.remind({ invoiceId: ghost }))).toEqual(
+      await errOf(asA().payRun.remind({ invoiceId: B.invoiceId })),
+    );
+    expect(await errOf(mp(ghost, '03'))).toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('unmarkPaid with a mixed [A, B] batch → NOT_FOUND for the whole batch', async () => {
+    const items = [
+      { invoiceId: A.invoiceId, expectedStatus: 'paid' as const },
+      { invoiceId: B.invoiceId, expectedStatus: 'paid' as const },
+    ];
+    await expect(
+      asA().payRun.unmarkPaid({ items, reason: 'נרשם בטעות', clientMutationId: 'cmid-mixed-un1' }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it("list({monthOffset}) with B's invoice inside the same window never returns it", async () => {
+    // Both tenants' invoices in September; NOW = 25.10 ⇒ monthOffset -1 = September.
+    const sep = new Date('2026-09-15T08:00:00Z');
+    const [a0] = await ownerDb.select({ d: invoices.invoiceDate }).from(invoices).where(eq(invoices.id, A.invoiceId));
+    const [b0] = await ownerDb.select({ d: invoices.invoiceDate }).from(invoices).where(eq(invoices.id, B.invoiceId));
+    await ownerDb.update(invoices).set({ invoiceDate: sep }).where(eq(invoices.id, A.invoiceId));
+    await ownerDb.update(invoices).set({ invoiceDate: sep }).where(eq(invoices.id, B.invoiceId));
+    try {
+      for (const monthOffset of [0, -1] as const) {
+        const r = await asA().payRun.list({ now: NOW, monthOffset });
+        const json = JSON.stringify(r);
+        for (const leak of [B.invoiceId, B.discrepancyId, B.supplierName]) expect(json).not.toContain(leak);
+        expect(r.rows.map((x) => x.invoiceId)).toEqual(monthOffset === -1 ? [A.invoiceId] : []);
+      }
+    } finally {
+      await ownerDb.update(invoices).set({ invoiceDate: a0!.d }).where(eq(invoices.id, A.invoiceId));
+      await ownerDb.update(invoices).set({ invoiceDate: b0!.d }).where(eq(invoices.id, B.invoiceId));
+    }
+  });
+
+  it('remind on an own invoice with the restaurant pay run OFF → PRECONDITION_FAILED; a foreign id still NOT_FOUND', async () => {
+    await setFlag(A, false);
+    try {
+      await expect(asA().payRun.remind({ invoiceId: A.invoiceId })).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+      await expect(asA().payRun.remind({ invoiceId: B.invoiceId })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    } finally {
+      await setFlag(A, true);
+    }
+  });
+
   it('unmarkPaid requires a reason (owner I7) — BAD_REQUEST without one, before any lookup', async () => {
     const items = [{ invoiceId: A.invoiceId, expectedStatus: 'paid' as const }];
     await expect(asA().payRun.unmarkPaid({ items, clientMutationId: 'cmid-noreason-1' } as never)).rejects.toMatchObject({

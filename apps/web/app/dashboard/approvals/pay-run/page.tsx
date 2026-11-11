@@ -10,6 +10,7 @@ import { Badge, EmptyState, LinkButton, SectionHeader, cn, type BadgeTone } from
 import { DeadlineChip, MetricTile, Money } from '@/lib/components/money';
 import { displayName } from '../vocab';
 import { PayRunExport } from './export-button';
+import { PayRunSelection, RowCheck } from './selection';
 import { localMonth, localYmd } from './dates';
 
 type ListResult = Awaited<
@@ -20,7 +21,12 @@ type Hold = Row['holds'][number];
 
 const BUCKETS = ['overdue', 'this_week', 'next_week', 'later', 'unknown'] as const;
 /** T4 holds: nothing to decide yet (a PO link, the count, a G-08 question, an OCR review). */
-const CALM_HOLDS = new Set<string>(['pending_link', 'awaiting_count', 'awaiting_question', 'awaiting_review']);
+const CALM_HOLDS = new Set<string>([
+  'pending_link',
+  'awaiting_count',
+  'awaiting_question',
+  'awaiting_review',
+]);
 
 /**
  * Emphasis tiers (AGENTS.md): payable is calm (T3); a decision / duplicate / missing
@@ -172,14 +178,24 @@ export default async function PayRunPage({
     // G-08: a product question goes to the mapper (roles that may answer); an OCR review opens the invoice.
     if (r.holds.some((h) => h.kind === 'awaiting_question') && data.canAnswer) {
       return (
-        <LinkButton href="/dashboard/catalog/mapping" size="sm" variant="secondary" className="touch-target">
+        <LinkButton
+          href="/dashboard/catalog/mapping"
+          size="sm"
+          variant="secondary"
+          className="touch-target"
+        >
           {t('table.toQuestions')}
         </LinkButton>
       );
     }
     if (r.holds.some((h) => h.kind === 'awaiting_review')) {
       return (
-        <LinkButton href={`/dashboard/invoices/${r.invoiceId}`} size="sm" variant="secondary" className="touch-target">
+        <LinkButton
+          href={`/dashboard/invoices/${r.invoiceId}`}
+          size="sm"
+          variant="secondary"
+          className="touch-target"
+        >
           {t('table.openInvoice')}
         </LinkButton>
       );
@@ -295,7 +311,23 @@ export default async function PayRunPage({
           title={t('empty', { month: month || '—' })}
         />
       ) : (
-        <>
+        <PayRunSelection
+          rows={data.rows
+            .filter((r) => r.selectable)
+            .map((r, i) => ({
+              invoiceId: r.invoiceId,
+              invoiceNumber: r.invoiceNumber,
+              invoiceStatus: r.invoiceStatus,
+              agorot: Math.round(r.totalInclVat * 100),
+              csv: csvRows[data.rows.indexOf(r)] ?? csvRows[i]!,
+            }))}
+          markPaidEnabled={data.markPaidEnabled}
+          today={data.today}
+          csvColumns={csvColumns}
+          csvFile={t('csv.file', {
+            month: data.monthStart ? localMonth(data.monthStart) : data.today,
+          })}
+        >
           {/* Phone: held rows first, then the payable list. */}
           <div className="mt-6 space-y-3 sm:hidden" data-testid="payrun-phone">
             {[...held, ...data.rows.filter((r) => r.selectable)].map((r) => (
@@ -354,6 +386,9 @@ export default async function PayRunPage({
                     <table className="w-full text-sm">
                       <thead className="bg-surface-2 text-xs text-muted">
                         <tr>
+                          <th scope="col" className="w-10 px-3 py-2">
+                            <span className="sr-only">{t('batch.exportSel')}</span>
+                          </th>
                           <th scope="col" className="px-3 py-2 text-start font-semibold">
                             {t('col.supplier')}
                           </th>
@@ -388,6 +423,14 @@ export default async function PayRunPage({
                             data-status={r.selectable ? 'pay' : 'hold'}
                             className="align-top"
                           >
+                            <td className="px-3 py-2">
+                              {r.selectable ? (
+                                <RowCheck
+                                  id={r.invoiceId}
+                                  label={t('batch.select', { invoice: r.invoiceNumber ?? '—' })}
+                                />
+                              ) : null}
+                            </td>
                             <td
                               className="px-3 py-2 font-semibold text-ink"
                               {...originalProps(supplierLabel(r))}
@@ -439,7 +482,7 @@ export default async function PayRunPage({
               );
             })}
           </div>
-        </>
+        </PayRunSelection>
       )}
       <p className="mt-6 text-xs text-subtle">{t('note')}</p>
     </div>
