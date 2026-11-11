@@ -77,7 +77,7 @@ export const en: Shape<typeof he> = {
     session: {
       title: 'Your session expired',
       body: 'Sign in again — your work is saved.',
-      notSent: 'Not sent · sign in and try again.',
+      notSent: 'Not sent · your session expired. Sign in and try again.',
       email: 'Email',
       password: 'Password',
       submit: 'Sign in',
