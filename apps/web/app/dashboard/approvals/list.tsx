@@ -8,7 +8,6 @@ import { CheckCircle2, Clock, FileText, MoreHorizontal, Send, Undo2 } from 'luci
 import { trpc } from '@/lib/trpc/client';
 import { formatIls } from '@/lib/money';
 import { formatDateTime, formatNumber } from '@/lib/i18n/format';
-import { intlLocaleOf } from '@/lib/i18n/config';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { approvals } from '@/lib/i18n/messages/approvals';
 import type { he as approvalsHe } from '@/lib/i18n/messages/approvals/he';
@@ -35,6 +34,7 @@ import {
 } from './desk';
 import {
   ageDays,
+  ageLabel,
   amountLabelKey,
   canEscalate,
   decisionActions,
@@ -133,6 +133,8 @@ function ApprovalsListInner({
 }) {
   const compact = density === 'compact';
   const t = useT(approvals);
+  const nowCtx = useContext(NowCtx);
+  const renderNow = nowCtx != null ? new Date(nowCtx) : undefined;
   const locale = useLocale();
   const utils = trpc.useUtils();
 
@@ -728,7 +730,7 @@ function ApprovalsListInner({
               label={t('summary.oldest')}
               value={
                 summary.oldestAt
-                  ? (ageText(summary.oldestAt, locale) ?? t('card.waitingToday'))
+                  ? (ageText(t, summary.oldestAt, renderNow) ?? t('card.waitingToday'))
                   : '—'
               }
               testId="summary-oldest"
@@ -1041,7 +1043,7 @@ function DecisionCard({
               className="inline-flex items-center gap-1"
             >
               <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-              {waitingText(t, d.createdAt, locale)}
+              {waitingText(t, d.createdAt, today)}
             </span>
             {due && dueDays != null ? <DeadlineChip due={due} today={today} /> : null}
           </p>
@@ -1523,19 +1525,18 @@ function Template({ text, values }: { text: string; values: Record<string, strin
   return <>{parts}</>;
 }
 
-/** "4 ימים" / "יומיים" (Intl unit plurals); null on the first day. */
-function ageText(from: Date | string, locale: 'he' | 'en'): string | null {
-  const days = ageDays(from);
-  if (days === 0) return null;
-  return new Intl.NumberFormat(intlLocaleOf(locale), {
-    style: 'unit',
-    unit: 'day',
-    unitDisplay: 'long',
-  }).format(days);
+/**
+ * "4 ימים" / "יומיים" / "יום אחד" from i18n plural keys (#418): never Intl unit
+ * formatting, whose Hebrew word order differs between ICU versions (Node "1 יום"
+ * vs Chromium "יום 1") and broke hydration. Null on the first day. `now` is the
+ * render's ONE clock (the server's), so server HTML and hydration agree.
+ */
+function ageText(t: T, from: Date | string, now?: Date): string | null {
+  return ageLabel(t, ageDays(from, now));
 }
 
-function waitingText(t: T, from: Date | string, locale: 'he' | 'en'): string {
-  const age = ageText(from, locale);
+function waitingText(t: T, from: Date | string, now?: Date): string {
+  const age = ageText(t, from, now);
   return age ? t('card.waiting', { age }) : t('card.waitingToday');
 }
 
