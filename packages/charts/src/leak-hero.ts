@@ -67,7 +67,7 @@ export interface LeakHeroOptions {
  * Shared CTEs: month bounds in the restaurant tz + the month's invoices.
  * Defines `r` (tz), `b` (lo, hi), `inv` and `per` — one row per invoice of the
  * month with: id, status, total (incl. VAT), total_excl, matched, raw_leak,
- * raw_recovered, pending_link, awaiting_count, dup_copy. The hero leak of an
+ * raw_recovered, pending_link, awaiting_count, awaiting_question (G-08), dup_copy. The hero leak of an
  * invoice is `LEAST(raw_leak, total)`. Use as `WITH ${monthInvoicesCte(…)} …`.
  * Exported (W2-09a) for G-05/G-12/W2-03; the ₪ definition is unchanged.
  */
