@@ -98,8 +98,8 @@ export const he = {
     decide: 'לתור האישורים',
     // W2-09c
     backHub: 'לדליפה',
-    groupUnpaid: 'עוד לא שולם — לקזז לפני תשלום · {amount}',
-    groupPaid: 'שולם — לבקשת זיכוי · {amount}',
+    groupUnpaid: 'עוד לא שולם, לקזז לפני תשלום · {amount}',
+    groupPaid: 'שולם, לבקשת זיכוי · {amount}',
     decideN: 'החליטו על {count, plural, one {פער אחד} other {# פערים}} · {amount}',
     toClaim: 'לבקשת הזיכוי',
     history: {
@@ -273,7 +273,6 @@ export const he = {
     priceP90NoQty: 'בחשבונית {actual} ליחידה',
     expected: 'צפוי {expected}',
     sourcePo: 'בהזמנה {expected} ({po}, {date})',
-    expectedP90: 'מעל המחיר הרגיל של הספק (90 יום): {expected}',
     sourceP90: 'מעל המחיר הרגיל של הספק (90 יום): {expected}',
     /** The full p90 sentence, for the in-place "למה?" fold (W2-16). */
     p90Why: 'גבוה מ-90% מהמחירים של הספק ב-90 הימים האחרונים',

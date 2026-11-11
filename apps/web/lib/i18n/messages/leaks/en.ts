@@ -266,7 +266,6 @@ export const en: Shape<typeof he> = {
     priceP90NoQty: 'on the invoice {actual} per unit',
     expected: 'expected {expected}',
     sourcePo: 'ordered at {expected} ({po}, {date})',
-    expectedP90: "above the supplier's usual price (90 days): {expected}",
     sourceP90: "above the supplier's usual price (90 days): {expected}",
     p90Why: "higher than 90% of this supplier's prices in the last 90 days",
     equals: 'difference {amount}',

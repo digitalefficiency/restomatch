@@ -23,7 +23,6 @@ export function leakWhyLabels(locale: AppLocale): WhyLabels {
       priceP90NoQty: t('why.priceP90NoQty'),
       expected: t('why.expected'),
       sourcePo: t('why.sourcePo'),
-      expectedP90: t('why.expectedP90'),
       sourceP90: t('why.sourceP90'),
       equals: t('why.equals'),
       qtyOver: t('why.qtyOver'),
