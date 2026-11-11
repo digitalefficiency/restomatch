@@ -9,6 +9,7 @@ import { addClaudeSpend, allowAskBurst, recordUsage, reserveQuestion } from './b
 import { anthropicAskClient, AskRunError, runClaude, type AskClientLike } from './claude';
 import { groundAnswer, type Citation } from './grounding';
 import { offlineAnswer, type CannedIntent } from './offline';
+import { localDay, restaurantTimezone } from './periods';
 import type { ScreenLink } from './tools';
 
 export type AskMode = 'claude' | 'offline';
@@ -60,11 +61,11 @@ export async function runAsk(
   else counted = true;
 
   if (client && reason === null) {
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(now);
+    const today = localDay(now, await restaurantTimezone(db, restaurantId));
     try {
       const r = await runClaude(client, question, locale, { db, restaurantId, now, locale }, today);
       await addClaudeSpend(db, restaurantId, { claudeCalls: r.calls, inputTokens: r.inputTokens, outputTokens: r.outputTokens }, now);
-      const g = groundAnswer(r.answer, r.links, r.figures);
+      const g = groundAnswer(r.answer, r.links, r.figures, { periods: r.periods, comparisons: r.comparisons, locale });
       const linkSet = new Set(g.citations.map((c) => c.href));
       return {
         mode: 'claude',
@@ -111,5 +112,7 @@ export {
   type AskBurstLimiter,
 } from './budget';
 export { askSystemPrompt, ASK_MODEL, type AskClientLike } from './claude';
-export { groundAnswer, figuresIn } from './grounding';
+export { groundAnswer, figuresIn, periodRefusal, PERIOD_REFUSAL, type PeriodGuard } from './grounding';
 export { clip, monthKey, runTool, TOOL_DEFINITIONS } from './tools';
+export { alignedWindows, comparisonLabel, fairlyComparable, monthPeriod, spanLabel, type Period } from './periods';
+export { leakComparison, type LeakComparison } from './compare';
