@@ -168,7 +168,7 @@ export const en: Shape<typeof he> = {
     rememberMe: 'Keep me signed in on this device',
     submit: 'Join',
     signedInJoin: 'Join as {email}',
-    hasPasswordBody: 'This address already has an account. Sign in with your password and you will join right away.',
+    hasPasswordBody: 'This address already has an account. Sign in (password or e-mail link) to join right away.',
     hasPasswordCta: 'Sign in and join',
     errors: {
       policy: 'The password needs at least 10 characters.',

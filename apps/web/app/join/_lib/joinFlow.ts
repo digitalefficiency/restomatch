@@ -7,11 +7,9 @@ import {
   gt,
   invitations,
   inArray,
-  isNotNull,
   or,
   sql,
   restaurants,
-  userCredentials,
   users,
   verificationTokens,
   type UserRole,
@@ -43,10 +41,19 @@ import { normalizeLoginEmail, setUserPassword } from '@/lib/passwords';
  */
 
 export const JOIN_CODE_TTL_MS = 10 * 60 * 1000;
-/** Wrong codes allowed per rolling 10-minute window (per invite). */
+/** Wrong codes allowed per rolling 10-minute window, per invited ADDRESS. */
 export const JOIN_CODE_MAX_ATTEMPTS = 5;
-/** Wrong codes allowed over the token's whole life; then the inviter must resend (rotates the token). */
+/**
+ * Wrong codes allowed per invited ADDRESS per rolling 7 days (an invite's life).
+ * Keyed on the address, not the invitation or its token, so a resend, a
+ * revoke + re-invite, or a second restaurant inviting the same mailbox never
+ * resets it (security review B5).
+ */
 export const JOIN_CODE_MAX_TOTAL_ATTEMPTS = 20;
+export const JOIN_CODE_TOTAL_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/** Codes sent per invited address: 3 per 15 minutes, 10 per 24 hours (durable, B5). */
+export const JOIN_CODE_SENDS_PER_15_MIN = 3;
+export const JOIN_CODE_SENDS_PER_DAY = 10;
 
 export type InviteState = 'valid' | 'expired' | 'used' | 'notFound';
 
@@ -153,26 +160,26 @@ function canonicalEmailSql() {
     else regexp_replace(split_part(lower(${users.email}), '@', 1), '[+].*$', '') || '@' || split_part(lower(${users.email}), '@', 2) end)`;
 }
 
-/** Any account for this address (or a canonical alias of it) that already has a password. */
-async function passwordAccountExists(email: string): Promise<boolean> {
+/**
+ * Is there ANY account for this address or a canonical alias of it — with or
+ * without a password (magic-link-only users included)? Then the invitee signs
+ * in instead: a join code only ever creates a NEW account and never sets a
+ * password on an existing row (security review B5: a code is not proof enough
+ * to take over an account that already exists).
+ */
+async function accountExists(email: string): Promise<boolean> {
   const [u] = await authDb
     .select({ id: users.id })
     .from(users)
-    .innerJoin(userCredentials, eq(userCredentials.userId, users.id))
-    .where(
-      or(
-        eq(users.email, normalizeLoginEmail(email)),
-        and(isNotNull(userCredentials.passwordHash), eq(canonicalEmailSql(), canonicalizeEmail(email))),
-      ),
-    )
+    .where(or(eq(users.email, normalizeLoginEmail(email)), eq(canonicalEmailSql(), canonicalizeEmail(email))))
     .limit(1);
   return Boolean(u);
 }
 
-/** Does the invited address already have a password? Then it signs in instead of joining by code. */
-export async function invitedAccountHasPassword(token: string): Promise<boolean> {
+/** Does the invited address already have an account? Then it signs in instead of joining by code. */
+export async function invitedAccountExists(token: string): Promise<boolean> {
   const row = await inviteRowByToken(token);
-  return row ? passwordAccountExists(row.email) : false;
+  return row ? accountExists(row.email) : false;
 }
 
 /* ── the e-mail code ─────────────────────────────────────────────────────── */
@@ -192,13 +199,24 @@ export function generateCode(): string {
   return String(randomInt(0, 1_000_000)).padStart(6, '0');
 }
 
+/**
+ * The durable-ceiling key for an invited address: HMAC-SHA256 of the canonical
+ * address (never the invitation id or token hash, never the raw address), so
+ * every invite to the same mailbox — and every alias of it — shares one budget.
+ */
+export function joinAddressKey(email: string): string {
+  return createHmac('sha256', hmacKey()).update(`join-addr:${canonicalizeEmail(email)}`).digest('hex').slice(0, 40);
+}
+
 const codeId = (invId: string) => `join:${invId}`;
-const windowFailId = (invId: string) => `join-fail:${invId}`;
-const totalFailId = (inv: Pick<InviteRow, 'id' | 'tokenHash'>) => `join-failtotal:${inv.id}:${inv.tokenHash.slice(0, 16)}`;
+const windowFailId = (addr: string) => `join-fail:${addr}`;
+const totalFailId = (addr: string) => `join-failtotal:${addr}`;
+const sendId = (addr: string) => `join-send:${addr}`;
+const sendDayId = (addr: string) => `join-send-d:${addr}`;
 
 export type IssueResult =
   | { ok: true; code: string; email: string; locale: 'he' | 'en' | null }
-  | { ok: false; reason: Exclude<InviteState, 'valid'> | 'hasPassword' };
+  | { ok: false; reason: Exclude<InviteState, 'valid'> | 'hasPassword' | 'rate' };
 
 /**
  * Mint a fresh code for a valid invite (any earlier code dies). The CALLER sends
@@ -208,7 +226,15 @@ export async function issueJoinCode(token: string, now = Date.now()): Promise<Is
   const row = await inviteRowByToken(token);
   const state = stateOf(row, now);
   if (!row || state !== 'valid') return { ok: false, reason: state === 'valid' ? 'notFound' : state };
-  if (await invitedAccountHasPassword(token)) return { ok: false, reason: 'hasPassword' };
+  if (await accountExists(row.email)) return { ok: false, reason: 'hasPassword' };
+  // Per-address send cap (durable; reserve, then count — holds when the limiter fails open).
+  const addr = joinAddressKey(row.email);
+  await authDb.insert(verificationTokens).values([
+    { identifier: sendId(addr), token: randomUUID(), expires: new Date(now + 15 * 60 * 1000) },
+    { identifier: sendDayId(addr), token: randomUUID(), expires: new Date(now + 24 * 60 * 60 * 1000) },
+  ]);
+  const [sent15, sentDay] = await Promise.all([countLive(sendId(addr), now), countLive(sendDayId(addr), now)]);
+  if (sent15 > JOIN_CODE_SENDS_PER_15_MIN || sentDay > JOIN_CODE_SENDS_PER_DAY) return { ok: false, reason: 'rate' };
   const code = generateCode();
   await authDb.transaction(async (tx) => {
     await tx.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(row.id)));
@@ -280,11 +306,13 @@ export async function completeJoin(
   if (!stored) return { ok: false, reason: 'noCode' };
 
   // Reserve the attempt first, then count (concurrent guesses can't overshoot).
+  // Keyed on the ADDRESS: resend / revoke + re-invite cannot reset it (B5).
+  const addr = joinAddressKey(row.email);
   await authDb.insert(verificationTokens).values([
-    { identifier: windowFailId(row.id), token: randomUUID(), expires: new Date(now + JOIN_CODE_TTL_MS) },
-    { identifier: totalFailId(row), token: randomUUID(), expires: row.expiresAt },
+    { identifier: windowFailId(addr), token: randomUUID(), expires: new Date(now + JOIN_CODE_TTL_MS) },
+    { identifier: totalFailId(addr), token: randomUUID(), expires: new Date(now + JOIN_CODE_TOTAL_WINDOW_MS) },
   ]);
-  const [inWindow, total] = await Promise.all([countLive(windowFailId(row.id), now), countLive(totalFailId(row), now)]);
+  const [inWindow, total] = await Promise.all([countLive(windowFailId(addr), now), countLive(totalFailId(addr), now)]);
   if (inWindow > JOIN_CODE_MAX_ATTEMPTS || total > JOIN_CODE_MAX_TOTAL_ATTEMPTS) {
     // Too many guesses: the current code dies too, so a lucky late guess can't land.
     await authDb.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(row.id)));
@@ -296,40 +324,26 @@ export async function completeJoin(
   const match = expected.length === given.length && timingSafeEqual(expected, given);
   if (!match) return { ok: false, reason: 'wrongCode' };
 
+  // B5: ANY existing account for the address (or a canonical alias) — with or
+  // without a password — signs in instead. A code never touches an existing
+  // row: no password set, no name or emailVerified written.
   const email = normalizeLoginEmail(row.email);
-  const [existing] = await authDb
-    .select({ id: users.id, name: users.name, hasPassword: userCredentials.passwordHash })
-    .from(users)
-    .leftJoin(userCredentials, eq(userCredentials.userId, users.id))
-    .where(eq(users.email, email))
-    .limit(1);
-  // An account that already has a password (or a canonical alias that has one)
-  // is never overwritten or duplicated by a code.
-  if (existing?.hasPassword || (await passwordAccountExists(row.email))) return { ok: false, reason: 'hasPassword' };
+  if (await accountExists(row.email)) return { ok: false, reason: 'hasPassword' };
 
-  let userId = existing?.id;
-  if (userId) {
-    await authDb
-      .update(users)
-      .set({ emailVerified: new Date(now), ...(existing?.name?.trim() ? {} : { name }), updatedAt: new Date(now) })
-      .where(eq(users.id, userId));
-  } else {
-    const [created] = await authDb
-      .insert(users)
-      .values({ email, name, emailVerified: new Date(now) })
-      .onConflictDoNothing()
-      .returning({ id: users.id });
-    userId = created?.id;
-    if (!userId) {
-      // Lost a race with a parallel completion — that one wins; this one re-checks.
-      return { ok: false, reason: 'hasPassword' };
-    }
-  }
-  await setUserPassword(userId, input.password);
+  // Only a brand-new row is ever given a password. A parallel insert of the
+  // same address loses here and is sent to sign in.
+  const [created] = await authDb
+    .insert(users)
+    .values({ email, name, emailVerified: new Date(now) })
+    .onConflictDoNothing()
+    .returning({ id: users.id });
+  if (!created?.id) return { ok: false, reason: 'hasPassword' };
+  await setUserPassword(created.id, input.password);
 
-  // The code is spent; window markers go too (the lifetime ones stay, harmless).
+  // The code is spent; the window markers go too. The 7-day address markers
+  // stay (an address that has joined no longer gets codes at all).
   await authDb
     .delete(verificationTokens)
-    .where(inArray(verificationTokens.identifier, [codeId(row.id), windowFailId(row.id)]));
+    .where(inArray(verificationTokens.identifier, [codeId(row.id), windowFailId(addr)]));
   return { ok: true, email };
 }

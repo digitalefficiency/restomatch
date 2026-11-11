@@ -41,7 +41,7 @@ export async function sendJoinCodeAction(formData: FormData): Promise<void> {
   if (!perInvite.allowed || !perIp.allowed) back(token, { step: 'code', e: 'rate' });
 
   const res = await issueJoinCode(token);
-  if (!res.ok) back(token, res.reason === 'hasPassword' ? {} : { e: res.reason });
+  if (!res.ok) back(token, res.reason === 'hasPassword' ? {} : res.reason === 'rate' ? { step: 'code', e: 'rate' } : { e: res.reason });
   const invite = await loadInvite(token);
   await deliverJoinCode({ to: res.email, code: res.code, restaurantName: invite.restaurantName, locale: res.locale ?? 'he' });
   back(token, { step: 'code', sent: '1' });
