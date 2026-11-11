@@ -30,6 +30,8 @@ export { LoadMore } from './LoadMore';
 export { ToastProvider, useToast, useAnnounce } from './Toast';
 export type { ToastApi, ToastKind, ToastOptions, ToastAction } from './Toast';
 export { Breadcrumbs } from './Breadcrumbs';
+export { Explain, ExplainToggle, ExplainPanel, useDisclosure, explainId } from './Explain';
+export type { ExplainLabel } from './Explain';
 export { friendlyError, trpcErrorCode } from './errors';
 export { displayName } from './displayName';
 export { createSingleFlight, useSingleFlight } from './singleFlight';
