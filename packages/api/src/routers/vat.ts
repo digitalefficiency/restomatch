@@ -66,6 +66,10 @@ export interface MarkRequestedResult {
 }
 
 export interface InvoiceCase {
+  /** The number stored on the invoice (as read or typed), whether or not the invoice is at risk. */
+  allocationNumber: string | null;
+  /** Format state of `allocationNumber` — never more than the 9-digit check. */
+  numberState: 'missing' | 'invalid' | 'valid';
   /** The at-risk row with its case state, or null when the invoice is not at risk (any more). */
   row: VatAtRiskRow | null;
   /** Days since the latest request (for "נשלחה בקשה לפני N ימים"), or null. */
@@ -82,11 +86,12 @@ export const vatRouter = router({
       const rid = ctx.session.restaurantId;
       if (!(await flagOn(ctx.db, rid))) return null;
       const [inv] = await ctx.db
-        .select({ id: invoices.id, supplierId: invoices.supplierId })
+        .select({ id: invoices.id, supplierId: invoices.supplierId, allocationNumber: invoices.allocationNumber })
         .from(invoices)
         .where(and(eq(invoices.id, input.invoiceId), eq(invoices.restaurantId, rid)))
         .limit(1);
       if (!inv) throw notFound();
+      const stored = inv.allocationNumber?.trim() || null;
       const res = await vatAtRisk(ctx.db, rid, 'all', { invoiceId: inv.id });
       const row = res.rows[0] ?? null;
       const [sup] = inv.supplierId
@@ -97,6 +102,8 @@ export const vatRouter = router({
             .limit(1)
         : [];
       return {
+        allocationNumber: stored,
+        numberState: !stored ? 'missing' : normaliseAllocationNumber(stored) ? 'valid' : 'invalid',
         row,
         daysSinceRequest: row ? daysSinceRequest(row.requestedAt, israelDay(new Date())) : null,
         ita: {
