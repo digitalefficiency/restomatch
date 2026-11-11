@@ -15,6 +15,7 @@
  */
 
 import type { UserRole } from '@restomatch/db';
+import { LEAK_EXCLUDED_TYPES } from '@restomatch/charts';
 
 export type ApprovalAction = 'auto_approve' | 'queue_review' | 'block' | 'notify';
 
@@ -109,20 +110,16 @@ export function resolveApprovalThresholds(
 
 /**
  * Does this row count in the leak? The routing-time part of the charts
- * LEAK_FILTER (packages/charts/src/leak-views.ts) as of train-B #211:
+ * LEAK_FILTER (packages/charts/src/leak-views.ts):
  *   severity IN ('warn','block') AND type NOT IN LEAK_EXCLUDED_TYPES
  *   (PRICE_LOWER, UNORDERED_ARRIVAL, MISSING_ON_INVOICE — owner decision 31.10:
  *   an ordered line the invoice never billed is not claimable and not leak).
- * TODO(G-15, after #211 merges): import LEAK_EXCLUDED_TYPES from @restomatch/charts.
+ * The excluded list is imported from charts: one source of truth.
  * The filter's third clause (a duplicate the user REJECTED) is a decision,
  * not a routing input — a fresh row is never rejected. Parity is tested in
  * approvals-engine-routing.test.ts.
  */
-export const NON_LEAK_TYPES: ReadonlySet<DiscrepancyType> = new Set([
-  'PRICE_LOWER',
-  'UNORDERED_ARRIVAL',
-  'MISSING_ON_INVOICE',
-]);
+export const NON_LEAK_TYPES: ReadonlySet<DiscrepancyType> = new Set<DiscrepancyType>(LEAK_EXCLUDED_TYPES);
 export function countsAsLeak(d: { type: DiscrepancyType; severity: Severity }): boolean {
   return (d.severity === 'warn' || d.severity === 'block') && !NON_LEAK_TYPES.has(d.type);
 }
@@ -256,14 +253,15 @@ export function decisionMessage(decision: ApprovalDecision): string {
 /* ──────────────────────────────────────────────────────────────────────────
  * Pay-approval rule (owner decision 9 / G-15)
  *
- * "Over ₪N, or a new supplier → the owner approves for payment." Pure; the
+ * "₪N and above, or a new supplier → the owner approves for payment" (owner
+ * wording 7.11: "₪5,000 ומעלה" — supersedes GAP-PACKAGES' "over ₪N"). Pure; the
  * thresholds are READ from `restaurants.settings.approvalThresholds`
  * (`payApprovalOverAmount`, `newSupplierInvoiceCount`) — no write path is
  * added here. W2-03's `approve_for_payment` calls it.
  * ────────────────────────────────────────────────────────────────────────── */
 
 export interface PayApprovalThresholds {
-  /** Invoice total incl. VAT strictly above this (₪) → owner approves for payment. */
+  /** Invoice total incl. VAT at or above this (₪) → owner approves for payment. */
   payApprovalOverAmount: number;
   /** A supplier with fewer than this many prior invoices is "new" → owner. */
   newSupplierInvoiceCount: number;
@@ -300,8 +298,8 @@ export function evaluatePayApproval(
   t: PayApprovalThresholds = DEFAULT_PAY_APPROVAL_THRESHOLDS,
 ): PayApprovalDecision {
   const reasons: PayApprovalReason[] = [];
-  // Compared in agorot so ₪5,000.00 is not "over" ₪5,000.
-  if (Math.round(invoice.totalInclVat * 100) > Math.round(t.payApprovalOverAmount * 100)) reasons.push('over_amount');
+  // Compared in agorot: ₪5,000.00 itself needs the owner, ₪4,999.99 does not.
+  if (Math.round(invoice.totalInclVat * 100) >= Math.round(t.payApprovalOverAmount * 100)) reasons.push('over_amount');
   if (invoice.supplierPriorInvoices < t.newSupplierInvoiceCount) reasons.push('new_supplier');
   const requiresOwner = reasons.length > 0;
   return { requiresOwner, requiredRole: requiresOwner ? 'owner' : null, reasons };

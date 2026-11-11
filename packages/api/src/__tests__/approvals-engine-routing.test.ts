@@ -117,16 +117,16 @@ describe('non-leak rows are acknowledged with no ₪, before the cumulative rule
 describe('pay-approval rule (decision 9)', () => {
   const t = DEFAULT_PAY_APPROVAL_THRESHOLDS;
 
-  it('known supplier, at or under ₪N → no owner approval', () => {
-    expect(evaluatePayApproval({ totalInclVat: 5000, supplierPriorInvoices: 3 }, t)).toEqual({
+  it('known supplier, under ₪N by one agora → no owner approval', () => {
+    expect(evaluatePayApproval({ totalInclVat: 4999.99, supplierPriorInvoices: 3 }, t)).toEqual({
       requiresOwner: false,
       requiredRole: null,
       reasons: [],
     });
   });
 
-  it('over ₪N by one agora → owner', () => {
-    expect(evaluatePayApproval({ totalInclVat: 5000.01, supplierPriorInvoices: 3 }, t)).toMatchObject({
+  it('exactly ₪N → owner (owner 7.11: "₪5,000 ומעלה")', () => {
+    expect(evaluatePayApproval({ totalInclVat: 5000, supplierPriorInvoices: 3 }, t)).toMatchObject({
       requiresOwner: true,
       requiredRole: 'owner',
       reasons: ['over_amount'],
