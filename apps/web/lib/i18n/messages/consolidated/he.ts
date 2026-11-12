@@ -23,6 +23,7 @@ export const he = {
     askIncl: 'נא לזכות {amount} (כולל מע״מ).',
     askBoth: 'נא לזכות {excl} + מע״מ, ועוד {incl} (כולל מע״מ).',
     inclVat: '(כולל מע״מ)',
+    capped: '(מוגבל לסך החשבונית)',
   },
   finding: {
     duplicate: 'חשבונית כפולה',

@@ -12,6 +12,7 @@ import type { he as consolidatedHe } from '@/lib/i18n/messages/consolidated/he';
 import { formatIls } from '@/lib/money';
 import { translateUnit } from '@restomatch/translate/units';
 import { PrintButton } from '../../leaks/claims/print-button';
+import { letterAskCapped } from '@/lib/consolidatedLetter';
 
 type T = Translator<typeof consolidatedHe>;
 
@@ -105,6 +106,8 @@ export function ConsolidatedPanel({
       : inclAsk > 0
         ? t('letter.askIncl', { amount: ils(inclAsk) })
         : t('letter.ask', { amount: ils(exclAsk) });
+  // Capped at the invoice total: say so, so the items need not add up to the ask.
+  const askCapped = letterAskCapped(leaking, proposal.claim);
   const signed = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${ils(Math.abs(v))}`;
 
   return (
@@ -129,7 +132,10 @@ export function ConsolidatedPanel({
               </li>
             ))}
           </ul>
-          <p className="pt-2 font-semibold">{letterAsk}</p>
+          <p className="pt-2 font-semibold">
+            {letterAsk}
+            {askCapped ? ` ${t('letter.capped')}` : ''}
+          </p>
         </div>
       ) : null}
 
