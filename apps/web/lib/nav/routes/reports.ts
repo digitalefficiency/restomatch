@@ -8,6 +8,7 @@ export const routes: RouteDef[] = [
     group: 'leaks',
     roles: ['owner', 'manager'],
     nav: 'hidden',
+    badge: null,
     gateOnly: true,
   },
   {
@@ -19,6 +20,7 @@ export const routes: RouteDef[] = [
     roles: ['owner', 'manager'],
     features: ['monthlyReport'],
     nav: 'item',
+    badge: null,
     aliases: ['דוח חודשי', 'דוחות', 'monthly', 'report'],
   },
   {
@@ -28,5 +30,6 @@ export const routes: RouteDef[] = [
     parent: 'monthlyReport',
     roles: ['owner', 'manager'],
     nav: 'linked',
+    badge: null,
   },
 ];

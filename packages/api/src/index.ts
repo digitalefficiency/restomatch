@@ -426,3 +426,4 @@ export {
 export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunClaim } from './routers/payRun';
 export { SKIPPED_NO_PROVIDER, providerConfigured, supplierMessageState, type SupplierMessageState } from './notifications/delivery';
 export * from './notifications/sendWindow';
+export { KIND_ROLES as WHERE_IS_KIND_ROLES, WHERE_IS_KINDS, type WhereIsKind } from './tasks/whereIs';

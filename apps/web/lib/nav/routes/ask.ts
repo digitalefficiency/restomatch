@@ -10,6 +10,7 @@ export const routes: RouteDef[] = [
     roles: ['owner', 'manager'],
     features: ['aiAssistant'],
     nav: 'item',
+    badge: null,
     aliases: ['שאלו', 'שאלה', 'ask', 'ai'],
   },
 ];

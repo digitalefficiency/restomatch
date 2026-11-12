@@ -125,4 +125,25 @@ export const en: Shape<typeof he> = {
     ownerNotified: 'The owner has been notified.',
   },
   loading: 'Loading',
+  /** W2-08: nav badges, the bell and the cross-branch 404. */
+  badge: {
+    items: '{count} items',
+    atRisk: '{amount} at risk',
+    blocking: 'blocking payment',
+  },
+  bell: {
+    activity: 'What happened',
+    label: 'Waiting for you',
+    unseen: '{count} new',
+    title: 'Waiting for you',
+    empty: 'All handled on your side ✓',
+    close: 'Close',
+    all: 'Go to home',
+    failed: 'Did not load · try again',
+    retry: 'Try again',
+  },
+  whereIs: {
+    belongs: 'This record belongs to {branch}',
+    open: 'Open it there',
+  },
 };

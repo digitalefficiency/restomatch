@@ -23,7 +23,7 @@ export const he = {
     leaksBreakdown: 'פירוק הדליפה',
     leaksProof: 'הוכחת הדליפה',
     leaksReport: 'דוח דליפות להדפסה',
-    claims: 'דרישות זיכוי',
+    claims: 'בקשות זיכוי',
     recovery: 'מעקב זיכויים',
     suppliers: 'ספקים',
     ledger: 'כרטסת ספקים',
@@ -129,4 +129,25 @@ export const he = {
     ownerNotified: 'הבעלים קיבל התראה.',
   },
   loading: 'טוען',
+  /** W2-08: nav badges, the bell and the cross-branch 404. */
+  badge: {
+    items: '{count} פריטים',
+    atRisk: '{amount} בסיכון',
+    blocking: 'חוסם תשלום',
+  },
+  bell: {
+    activity: 'מה קרה',
+    label: 'מחכה לך',
+    unseen: '{count} חדשים',
+    title: 'מחכה לך',
+    empty: 'אצלך הכול מטופל ✓',
+    close: 'סגירה',
+    all: 'לדף הבית',
+    failed: 'לא נטען · נסו שוב',
+    retry: 'נסו שוב',
+  },
+  whereIs: {
+    belongs: 'הרשומה שייכת ל{branch}',
+    open: 'פתחו שם',
+  },
 };
