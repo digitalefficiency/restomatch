@@ -1,7 +1,10 @@
 import {
   and,
+  asc,
   catalogImports,
   eq,
+  isNull,
+  sql,
   products,
   suppliers,
   supplierCatalogItems,
@@ -13,6 +16,8 @@ import {
   decideLink,
   isExactKey,
   matchProductTopN,
+  normNameSql,
+  normalizeLinkName,
   rankSuggestions,
   recordConfirmedMatch,
   type EmbeddingProvider,
@@ -112,10 +117,16 @@ export async function commitCatalogRows(
   const ambiguous: AmbiguousRow[] = [];
 
   for (const row of rows) {
-    // 1. Existing catalog item for this supplier? (by SKU when present, else name)
+    // 1. Existing catalog item for this supplier? By SKU when present, else by
+    // G-08's one name key (normalizeLinkName / its SQL twin normNameSql) on a
+    // no-SKU row — the same key W3-10's "מה ישתנה" preview matches on, so the
+    // preview and the commit agree row for row (W3-10b). The oldest row wins.
     const existingFilter = row.supplierSku
       ? eq(supplierCatalogItems.supplierSku, row.supplierSku)
-      : eq(supplierCatalogItems.supplierNameRaw, row.supplierNameRaw);
+      : and(
+          isNull(supplierCatalogItems.supplierSku),
+          sql`${normNameSql(supplierCatalogItems.supplierNameRaw)} = ${normalizeLinkName(row.supplierNameRaw)}`,
+        );
     const [existing] = await db
       .select({ id: supplierCatalogItems.id, productId: supplierCatalogItems.productId })
       .from(supplierCatalogItems)
@@ -126,6 +137,7 @@ export async function commitCatalogRows(
           existingFilter,
         ),
       )
+      .orderBy(asc(supplierCatalogItems.createdAt))
       .limit(1);
 
     // 2. Resolve the canonical product.

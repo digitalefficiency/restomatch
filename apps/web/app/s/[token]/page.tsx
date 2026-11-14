@@ -43,6 +43,7 @@ export default async function SupplierPortalPage({ params }: { params: Promise<{
   const res = await supplierPortalView(token);
   if (!res.ok) {
     if (res.error === 'NOT_FOUND') notFound();
+    if (res.error === 'CLOSED') return <Shell title={t('portal.closedTitle')} body={t('portal.errors.closed')} />;
     return <Shell title={t('portal.inactiveTitle')} body={t('portal.errors.expired')} />;
   }
   const v = res.view;
@@ -131,7 +132,7 @@ export default async function SupplierPortalPage({ params }: { params: Promise<{
       ) : (
         <>
           {contactBar}
-          <SupplierAnswerForm token={token} poNumber={v.poNumber} lines={lines} />
+          <SupplierAnswerForm token={token} poNumber={v.poNumber} lines={lines} linesVersion={v.linesVersion} limits={v.limits} />
         </>
       )}
       <p className="mt-10 text-center text-sm text-muted">{t('portal.poweredBy')}</p>

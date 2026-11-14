@@ -26,12 +26,14 @@ export const APP_ERROR_CODES = [
   'dsr.soleOwner',
   'admin.lastOwner',
   'admin.notFound',
+  'admin.noSubscription',
   'admin_requires_2fa',
   'subscription.inactive',
   'quota.exceeded',
   'entitlement.required',
   'auth.unauthorized',
   'auth.forbidden',
+  'capability.required',
   'input.invalid',
   'invoice.numberTaken',
   // G-08 hold: a manual re-match while an invoice line is still a question.
@@ -49,6 +51,12 @@ export const APP_ERROR_CODES = [
   'invoice.pageQuestionOpen',
   'invoice.partialHeaderClear',
   'invoice.claimInProgress',
+  // G-05 lifecycle kernel: a stale or concurrent move (params: currentStatus,
+  // actorName, at, machine, event, entityId) and a refused precondition (params: reason).
+  'lifecycle.conflict',
+  'lifecycle.refused',
+  // AU-01: the owner tried to switch a flag that is admin-only (not on OWNER_TOGGLEABLE).
+  'automations.notOwnerToggleable',
 ] as const;
 
 export type AppErrorCode = (typeof APP_ERROR_CODES)[number];

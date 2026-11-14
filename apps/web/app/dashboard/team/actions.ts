@@ -13,13 +13,19 @@ import { team } from '@/lib/i18n/messages/team';
 import { getLocale, getT } from '@/lib/i18n/server';
 import type { MessageKey } from '@/lib/i18n/translate';
 import { labelForRole } from '@/lib/roles';
+import { isPublicPath } from '@/lib/publicPaths';
 import { localizeServerError } from '@/lib/serverErrors';
 
 interface ActionResult {
   ok: boolean;
   message: string;
-  /** In dev/preview (no email provider) we surface the link so it's testable. */
-  devLink?: string;
+  /**
+   * W3-07b: the `/join/<token>` link, so the owner can also send it by WhatsApp
+   * or copy it (the e-mail goes out either way). Only the inviting owner sees it.
+   */
+  shareLink?: string;
+  /** Ready-to-send WhatsApp text (restaurant + link). */
+  shareText?: string;
 }
 
 /**
@@ -41,15 +47,18 @@ function baseUrl(): string {
 }
 
 /**
- * The invite link routes through /login so an unauthenticated invitee signs in
- * (magic link) first, then NextAuth redirects to the accept page WITH the token
- * intact in callbackUrl (middleware's redirect would otherwise drop the query).
- * An English invitee also gets `lang=en`, so the login page (and the magic-link
- * email it sends) is already in English.
+ * W3-07b: the invite link is the public `/join/<token>` page (restaurant, role,
+ * inviter, then an e-mail code and the invitee's own password). An English
+ * invitee also gets `lang=en`, so the page and the code e-mail are in English.
  */
 function inviteLink(rawToken: string, email: string, locale: Locale | null): string {
-  const callbackUrl = `/invite/accept?token=${encodeURIComponent(rawToken)}`;
-  const params = new URLSearchParams({ callbackUrl, email });
+  if (isPublicPath('/join/x')) {
+    const qs = locale ? `?lang=${locale}` : '';
+    return `${baseUrl()}/join/${encodeURIComponent(rawToken)}${qs}`;
+  }
+  // Interim until the '/join' publicPaths line is in (orchestrator): the
+  // signed-in accept route through /login, as before W3-07b.
+  const params = new URLSearchParams({ callbackUrl: `/invite/accept?token=${encodeURIComponent(rawToken)}`, email });
   if (locale) params.set('lang', locale);
   return `${baseUrl()}/login?${params.toString()}`;
 }
@@ -108,7 +117,8 @@ export async function inviteMember(input: {
     return {
       ok: true,
       message: t('invite.sent', { email: res.email }),
-      devLink: isEmailConfigured() ? undefined : url,
+      shareLink: url,
+      shareText: t('invite.whatsappText', { restaurant: res.restaurantName, url }),
     };
   } catch (e) {
     return fail(e, 'invite.failed');
@@ -128,7 +138,8 @@ export async function resendInvite(input: { id: string }): Promise<ActionResult>
     return {
       ok: true,
       message: t('invite.resent', { email: res.email }),
-      devLink: isEmailConfigured() ? undefined : url,
+      shareLink: url,
+      shareText: t('invite.whatsappText', { restaurant: res.restaurantName, url }),
     };
   } catch (e) {
     return fail(e, 'invite.resendFailed');
@@ -149,6 +160,8 @@ export async function revokeInvite(input: { id: string }): Promise<ActionResult>
 export async function updateMemberRole(input: {
   userId: string;
   role: UserRole;
+  /** The role the change was staged from; a stale one → CONFLICT. */
+  expectedRole?: UserRole;
 }): Promise<ActionResult> {
   try {
     const caller = await createServerCaller();
@@ -156,6 +169,16 @@ export async function updateMemberRole(input: {
     revalidatePath('/dashboard/team');
     return { ok: true, message: (await getT(team))('members.roleUpdated') };
   } catch (e) {
+    // Stale staged change: the server message names who changed it (Hebrew).
+    const code = (e as { code?: string }).code;
+    if (code === 'CONFLICT') {
+      revalidatePath('/dashboard/team');
+      const locale = await getLocale();
+      return {
+        ok: false,
+        message: locale === 'he' && e instanceof Error ? e.message : (await getT(team))('members.roleConflict'),
+      };
+    }
     return fail(e, 'members.roleFailed');
   }
 }
@@ -184,5 +207,20 @@ export async function setMemberLocale(input: {
     return { ok: true, message: (await getT(team))('members.localeUpdated', { email: input.email }) };
   } catch (e) {
     return fail(e, 'members.localeFailed');
+  }
+}
+
+/** Hand the restaurant to another member (W2-14). Owner only; audited server-side. */
+export async function transferOwnership(input: {
+  toUserId: string;
+  myNewRole: 'owner' | 'manager' | 'bookkeeper';
+}): Promise<ActionResult> {
+  try {
+    const caller = await createServerCaller();
+    await caller.team.transferOwnership(input);
+    revalidatePath('/dashboard/team');
+    return { ok: true, message: (await getT(team))('transfer.done') };
+  } catch (e) {
+    return fail(e, 'transfer.failed');
   }
 }

@@ -30,6 +30,7 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'dsr.soleOwner': 'soleOwner',
   'admin.lastOwner': 'adminLastOwner',
   'admin.notFound': 'notFound',
+  'admin.noSubscription': 'adminNoSubscription',
   // /admin shows its own enrol-2FA prompt; this is the generic fallback.
   admin_requires_2fa: 'forbidden',
   'subscription.inactive': 'subscriptionInactive',
@@ -37,6 +38,7 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'entitlement.required': 'entitlementRequired',
   'auth.unauthorized': 'unauthorized',
   'auth.forbidden': 'forbidden',
+  'capability.required': 'forbidden',
   'input.invalid': 'invalidInput',
   'invoice.numberTaken': 'invoiceNumberTaken',
   'invoice.linesLocked': 'invoiceLinesLocked',
@@ -54,6 +56,11 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'growth.referralInvalid': 'invalidInput',
   'growth.referralSelf': 'invalidInput',
   'growth.referralAlreadyRedeemed': 'invalidInput',
+  // G-05: owning screens may show who changed it and when (appParams); this is the generic copy.
+  'lifecycle.conflict': 'lifecycleConflict',
+  'lifecycle.refused': 'lifecycleRefused',
+  // AU-01: the automations page only offers allow-listed switches.
+  'automations.notOwnerToggleable': 'forbidden',
 };
 
 /**

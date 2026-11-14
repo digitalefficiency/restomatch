@@ -11,6 +11,7 @@ import { common } from '@/lib/i18n/messages/common';
 import { originalProps } from '@/lib/i18n/original';
 import { forbiddenFrom, forbiddenOutcome, screenKeyForPath } from '@/lib/net/access';
 import { ALL_ROLES, allowedRolesForPath, labelForRole } from '@/lib/roles';
+import { forbiddenModelFor } from '@/lib/roleLens';
 import { createServerCaller } from '@/lib/trpc/server';
 import { SwitchBranchButton } from '../chain/switch-button';
 
@@ -59,6 +60,11 @@ export default async function ForbiddenPage({
   const sessionRole = (session.user.role ?? null) as UserRole | null;
   const outcome = notMember ? 'forbidden' : forbiddenOutcome(allowed, role, sessionRole);
   if (outcome === 'redirect' && fromPath !== '/dashboard/forbidden') redirect(from);
+
+  // IA-03 (rule 3): the role's own next step, and an access request only for a screen
+  // this role could ever be given (never ₪ screens for the receiver or the chef).
+  const lens = role && !notMember ? forbiddenModelFor(role, fromPath) : null;
+  const offerRequest = !lens || lens.offerAccessRequest;
 
   const screen = t(`shell.screens.${screenKeyForPath(fromPath)}`);
   const roles = joinList(
@@ -146,34 +152,41 @@ export default async function ForbiddenPage({
           </div>
         ) : null}
 
-        <div className="space-y-2">
-          <h2 className="text-base font-bold text-ink">{t('shell.forbidden.requestTitle')}</h2>
-          <p className="text-sm text-muted">{t('shell.forbidden.requestBody')}</p>
-          <div className="flex flex-wrap gap-2 pt-1">
-            <a
-              href={whatsapp}
-              target="_blank"
-              rel="noopener noreferrer"
-              data-testid="forbidden-whatsapp"
-              className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-line-strong bg-surface px-4 text-sm font-semibold text-ink hover:border-primary/40 hover:text-primary"
-            >
-              <MessageCircle className="h-4 w-4" aria-hidden="true" />
-              {t('shell.forbidden.whatsapp')}
-            </a>
-            <a
-              href={mail}
-              data-testid="forbidden-email"
-              className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-line-strong bg-surface px-4 text-sm font-semibold text-ink hover:border-primary/40 hover:text-primary"
-            >
-              <Mail className="h-4 w-4" aria-hidden="true" />
-              {t('shell.forbidden.email')}
-            </a>
+        {offerRequest ? (
+          <div className="space-y-2" data-testid="forbidden-request">
+            <h2 className="text-base font-bold text-ink">{t('shell.forbidden.requestTitle')}</h2>
+            <p className="text-sm text-muted">{t('shell.forbidden.requestBody')}</p>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <a
+                href={whatsapp}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="forbidden-whatsapp"
+                className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-line-strong bg-surface px-4 text-sm font-semibold text-ink hover:border-primary/40 hover:text-primary"
+              >
+                <MessageCircle className="h-4 w-4" aria-hidden="true" />
+                {t('shell.forbidden.whatsapp')}
+              </a>
+              <a
+                href={mail}
+                data-testid="forbidden-email"
+                className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-line-strong bg-surface px-4 text-sm font-semibold text-ink hover:border-primary/40 hover:text-primary"
+              >
+                <Mail className="h-4 w-4" aria-hidden="true" />
+                {t('shell.forbidden.email')}
+              </a>
+            </div>
           </div>
-        </div>
+        ) : null}
 
         <div className="border-t border-line pt-4">
-          <LinkButton href="/dashboard" variant="secondary" className="min-h-[44px]">
-            {t('shell.forbidden.home')}
+          <LinkButton
+            href={lens?.nextStep.href ?? '/dashboard'}
+            variant="secondary"
+            className="min-h-[44px]"
+            data-testid="forbidden-next-step"
+          >
+            {lens ? lens.nextStep.label[locale] : t('shell.forbidden.home')}
           </LinkButton>
         </div>
       </Card>
