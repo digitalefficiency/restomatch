@@ -45,6 +45,8 @@ export const FEATURE_KEYS = [
   'supplierLedger',
   // S17: inventory counting (ספירת מלאי) → actual food cost per period.
   'inventoryCount',
+  // G-09: multi-page documents from the same supplier. Strict opt-in: `all` does NOT turn it on.
+  'multiPage',
   // G-08: name-only ORDER lines are "זה אותו מוצר?" questions (they hold the match).
   // DEFAULT ON — the kill switch: settings.features.orderQuestions = false (admin;
   // it also releases the invoices already held), or FEATURES_OFF=orderQuestions

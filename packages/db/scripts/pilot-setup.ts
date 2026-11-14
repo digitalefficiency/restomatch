@@ -92,6 +92,8 @@ export const PILOT_FEATURE_KEYS = [
   'inventoryCount',
   // G-08: default ON (a pilot config may set it false — the order-question kill switch).
   'orderQuestions',
+  // G-09: multi-page documents — strict opt-in, only after its re-review is signed off.
+  'multiPage',
 ] as const;
 export type PilotFeatureKey = (typeof PILOT_FEATURE_KEYS)[number];
 

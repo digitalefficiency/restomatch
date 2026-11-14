@@ -436,6 +436,7 @@ export {
 } from './lib/claims';
 export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunClaim } from './routers/payRun';
 export { SKIPPED_NO_PROVIDER, providerConfigured, supplierMessageState, type SupplierMessageState } from './notifications/delivery';
+export { settleDocumentPages, windowCloseGate, WINDOW_MAX_ATTEMPTS, multiPageEnabled, signObjectRef, toObjectRef } from './documents';
 export * from './briefs';
 export * from './notifications/sendWindow';
 export { awaitingDecision, awaitingDecisionDetail, type AwaitingDecision } from './approvals/awaiting';

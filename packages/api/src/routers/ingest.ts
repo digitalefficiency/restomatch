@@ -6,6 +6,7 @@ import {
   desc,
   eq,
   inArray,
+  or,
   purchaseOrders,
   ingestChannels,
   ingestDocuments,
@@ -30,6 +31,9 @@ import {
 import { appError } from '../errors';
 import { featureEnabled } from '../lib/features';
 import { enqueueIngestJobs, INGEST_FEATURE, messageStatus, registerIngestedDocument } from '../ingest/pipeline';
+import { PAGE_FLAGS, PAGE_ONE_FLAGS } from '../documents/settle';
+import { openFlagSql, openPageQuestionSql, pageOfIncludesSql } from '../documents/questions';
+import { resolvePageFlag } from '../documents/resolve';
 import { assertSupplierOwned } from '../tenant';
 import { captureSourceRef } from '../orders/captureOrder';
 import { can, financeProcedure, managerProcedure, router } from '../trpc';
@@ -62,6 +66,38 @@ async function requireIngest(db: Database, restaurantId: string, kind?: IngestKi
 }
 
 /** A document of THIS restaurant (else NOT_FOUND — never reveal a foreign id). */
+interface QuestionRow {
+  document_id: string;
+  flag: string;
+  page_invoice_id: string;
+  page_of: string | null;
+  repeats: string | null;
+}
+/** One open page question, from either of its invoices (round 8). */
+function questionOf(r: QuestionRow, asPageOne: boolean) {
+  return {
+    documentId: r.document_id,
+    /** 'page_belongs' when asked from page 1 (the page itself carries the real flag in `pageFlag`). */
+    flag: asPageOne ? 'page_belongs' : r.flag,
+    pageFlag: r.flag,
+    pageInvoiceId: r.page_invoice_id,
+    /** The invoice the page belongs to (page 1, settle's record) or repeats (a duplicate). */
+    otherInvoiceId: r.page_of ?? r.repeats ?? null,
+  };
+}
+
+/**
+ * Round 10 (P4/Q4): the invoice the compared one is already "included in" (a previous
+ * "checked together" answer) — the compare page says so and offers it as the payable one.
+ */
+async function withIncluded(db: Database, rid: string, q: ReturnType<typeof questionOf>) {
+  if (!q.otherInvoiceId) return { ...q, otherIncludedIn: null as string | null };
+  const [r] = (await db.execute(sql`
+    select ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' as inc
+      from ${invoices} where id = ${q.otherInvoiceId} and restaurant_id = ${rid}`)) as unknown as Array<{ inc: string | null }>;
+  return { ...q, otherIncludedIn: r?.inc ?? null };
+}
+
 async function ownDocument(db: Database, restaurantId: string, documentId: string) {
   const [doc] = await db
     .select({
@@ -167,12 +203,47 @@ export const ingestRouter = router({
       .where(
         and(eq(ingestDocuments.restaurantId, ctx.session.restaurantId), eq(ingestDocuments.status, 'needs_review')),
       );
+    // G-09 (round 6): open page questions need a person too (page_separate is answered).
+    // Round 7: one question per INVOICE (a merged document's rows count once), open ones only.
+    const pageQuestions = (await ctx.db.execute(sql`
+      select distinct d.invoice_id from ${ingestDocuments} d
+       where d.restaurant_id = ${ctx.session.restaurantId} and ${openFlagSql('d')}`)) as unknown as unknown[];
     return {
       features: flags,
       emailDomain: process.env.INGEST_EMAIL_DOMAIN || null,
       channels,
-      needsReview: pending.length,
+      needsReview: pending.length + pageQuestions.length,
+      pageQuestions: pageQuestions.length,
     };
+  }),
+
+  /** G-09 (round 6): the open page question on one invoice (null when none) — the invoice page shows it as held. */
+  pageQuestionOf: financeProcedure.input(z.object({ invoiceId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const rid = ctx.session.restaurantId;
+    // Round 8: the whole question — the flagged page, its invoice and the invoice it
+    // belongs to / repeats — so the invoice page, approvals and the pay run can
+    // open it from any invoice id. (Not gated on intake: answering is not intake.)
+    const own = (await ctx.db.execute(sql`
+      select d.id as document_id, d.error as flag, d.invoice_id::text as page_invoice_id,
+             i.ocr_payload -> 'raw' -> 'pageOf' ->> 'invoiceId' as page_of,
+             coalesce(i.ocr_payload -> 'raw' -> 'pageRepeats' ->> 'invoiceId', i.ocr_payload -> 'raw' -> 'duplicateOf' ->> 'invoiceId') as repeats
+        from ${ingestDocuments} d
+        join ${invoices} i on i.id = d.invoice_id and i.restaurant_id = d.restaurant_id
+       where d.restaurant_id = ${rid} and d.invoice_id = ${input.invoiceId} and ${openFlagSql('d')}
+       limit 1`)) as unknown as QuestionRow[];
+    if (own[0]) return withIncluded(ctx.db, rid, questionOf(own[0], false));
+    // Round 7/8: page 1 of a page that probably belongs to it (raw.pageOf) waits too.
+    const one = (await ctx.db.execute(sql`
+      select d.id as document_id, d.error as flag, d.invoice_id::text as page_invoice_id,
+             -- round 10 (P9): from ANY head, the page is compared with its LIKELIEST head
+             -- (the answer covers the whole question, so it is given where it is truthful)
+             coalesce(i.ocr_payload -> 'raw' -> 'pageOf' ->> 'invoiceId', ${input.invoiceId}::text) as page_of, null::text as repeats
+        from ${ingestDocuments} d
+        join ${invoices} i on i.id = d.invoice_id and i.restaurant_id = d.restaurant_id
+       where d.restaurant_id = ${rid} and ${openFlagSql('d')} and d.error in (${sql.join(PAGE_ONE_FLAGS.map((f) => sql`${f}`), sql`, `)})
+         and ${pageOfIncludesSql('i', sql`${input.invoiceId}`)}
+       limit 1`)) as unknown as QuestionRow[];
+    return one[0] ? withIncluded(ctx.db, rid, questionOf(one[0], true)) : null;
   }),
 
   /** New secret for a channel; the old one stops working at once. Plaintext returned ONCE. */
@@ -304,7 +375,13 @@ export const ingestRouter = router({
         input.filter === 'needs_review'
           ? inArray(ingestMessages.status, ['needs_review'])
           : input.filter === 'errors'
-            ? inArray(ingestMessages.status, ['failed', 'rejected'])
+            ? // G-09: a message with a flagged page (the inbox's one question) is an error too.
+              or(
+                inArray(ingestMessages.status, ['failed', 'rejected']),
+                sql`exists (select 1 from ${ingestDocuments} d where d.message_id = ${ingestMessages.id}
+                      and d.restaurant_id = ${ingestMessages.restaurantId}
+                      and d.error in (${sql.join(PAGE_FLAGS.map((f) => sql`${f}`), sql`, `)}))`,
+              )
             : undefined;
       const messages = await ctx.db
         .select({
@@ -336,6 +413,20 @@ export const ingestRouter = router({
               error: ingestDocuments.error,
               invoiceId: ingestDocuments.invoiceId,
               storagePath: ingestDocuments.storagePath,
+              // Round 7: does this page still ask something (an unreadable page whose invoice got lines does not)?
+              questionOpen: sql<boolean>`${openFlagSql('"ingest_documents"')}`,
+              // G-09: the invoice a page_duplicate repeats, when the OCR recorded it.
+              repeatsInvoiceId: sql<string | null>`(select coalesce(i.ocr_payload -> 'raw' -> 'pageRepeats' ->> 'invoiceId', i.ocr_payload -> 'raw' -> 'duplicateOf' ->> 'invoiceId')
+                from ${invoices} i where i.id = ${ingestDocuments.invoiceId} and i.restaurant_id = ${ingestDocuments.restaurantId})`,
+              // G-09 (round 8): the chain's page 1 settle recorded for this page (raw.pageOf) — "בדקו את שתיהן יחד".
+              relatedInvoiceId: sql<string | null>`(select i.ocr_payload -> 'raw' -> 'pageOf' ->> 'invoiceId'
+                from ${invoices} i where i.id = "ingest_documents"."invoice_id" and i.restaurant_id = "ingest_documents"."restaurant_id")`,
+              // G-09 (round 6): what is at stake on a page question — the page invoice's ₪ and supplier.
+              invoiceTotal: sql<string | null>`(select coalesce(i.total_incl_vat, i.total_excl_vat)::text
+                from ${invoices} i where i.id = ${ingestDocuments.invoiceId} and i.restaurant_id = ${ingestDocuments.restaurantId})`,
+              invoiceSupplier: sql<string | null>`(select coalesce(s.name, i.ocr_payload -> 'raw' -> 'reconciled' -> 'supplier' ->> 'name')
+                from ${invoices} i left join ${suppliers} s on s.id = i.supplier_id and s.restaurant_id = i.restaurant_id
+                where i.id = "ingest_documents"."invoice_id" and i.restaurant_id = "ingest_documents"."restaurant_id")`,
             })
             .from(ingestDocuments)
             .where(and(eq(ingestDocuments.restaurantId, rid), inArray(ingestDocuments.messageId, ids)))
@@ -416,7 +507,40 @@ export const ingestRouter = router({
     .mutation(async ({ ctx, input }) => {
       const out = await approveOne(ctx.db, ctx.session.restaurantId, ctx.session.userId, input);
       await enqueueIngestJobs(out.job ? [out.job] : []);
-      return { invoiceId: out.invoiceId };
+      // G-09 (round 8): one page per approval — never a page nobody looked at.
+      return { invoiceId: out.invoiceId, invoiceIds: [out.invoiceId] };
+    }),
+
+  /**
+   * G-09: the one action on a flagged page (owner/manager). `separate` — it is
+   * its own invoice (sticky; audited; matched); `delete_duplicate` — retire a
+   * re-shot copy behind every refusal guard. Foreign ids → NOT_FOUND.
+   */
+  resolvePageFlag: managerProcedure
+    .input(
+      z.object({
+        documentId: z.string().uuid(),
+        action: z.enum(['separate', 'delete_duplicate', 'close_unreadable', 'checked_together', 'undo_checked_together']),
+        /** Round 9 (N4): checked_together — the invoice that carries the total and is paid. */
+        payableInvoiceId: z.string().uuid().optional(),
+        withInvoiceId: z.string().uuid().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      const doc = await ownDocument(ctx.db, rid, input.documentId);
+      // Round 8 (M9): answering a page question is not intake — it works with the
+      // channel switched off (a rollback must never strand a hold).
+      const res = await resolvePageFlag(ctx.db, {
+        restaurantId: rid,
+        documentId: doc.id,
+        action: input.action,
+        userId: ctx.session.userId,
+        ...(input.payableInvoiceId ? { payableInvoiceId: input.payableInvoiceId } : {}),
+        ...(input.withInvoiceId ? { withInvoiceId: input.withInvoiceId } : {}),
+      });
+      await refreshMessageStatus(ctx.db, rid, doc.messageId);
+      return res;
     }),
 
   /**

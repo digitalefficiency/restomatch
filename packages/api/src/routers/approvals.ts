@@ -27,6 +27,8 @@ import {
 } from '@restomatch/db';
 import { LEAK_FILTER, notZeroShortTwin, type LeakBreakdownInvoice } from '@restomatch/charts';
 import { authedProcedure, financeProcedure, memberProcedure, router } from '../trpc';
+import { appError } from '../errors';
+import { openPageQuestionSql } from '../documents/questions';
 import { canActOn, expandVisibleRoles } from '../lib/roles';
 import { claimableLines, isNeverClaimable, type VatBasis } from '../lib/claims';
 import { formatIlsAgorot } from '../reports/money';
@@ -143,6 +145,21 @@ const ApprovalQueueItemSchema = z.object({
   invoiceId: z.string().uuid().nullable(),
 });
 export type ApprovalQueueItem = z.infer<typeof ApprovalQueueItemSchema>;
+
+/**
+ * G-09 (round 7): no decision on a discrepancy whose invoice has an open page
+ * question — the page may change the invoice (a named refusal; the UI links to
+ * the inbox).
+ */
+async function refuseWhilePageQuestion(db: Database, rid: string, discrepancyId: string): Promise<void> {
+  const rows = (await db.execute(sql`
+    SELECT 1 FROM discrepancies d
+      JOIN match_runs r ON r.id = d.match_run_id AND r.restaurant_id = d.restaurant_id
+     WHERE d.id = ${discrepancyId} AND d.restaurant_id = ${rid}
+       AND ${openPageQuestionSql(rid, sql`r.invoice_id`)}
+     LIMIT 1`)) as unknown as unknown[];
+  if (rows.length > 0) throw appError('CONFLICT', 'invoice.pageQuestionOpen', 'עמוד של החשבונית מחכה להחלטה בתיבת הקליטה');
+}
 
 /** View filters shared by myQueue and queueSummary (all optional, all enumerated). */
 const QueueFilters = {
@@ -281,6 +298,8 @@ export const approvalsRouter = router({
           qtyReceived: grLines.qtyReceived,
           poId: purchaseOrders.id,
           poRef: purchaseOrders.sourceRef,
+          // G-09 (round 7): a page of this invoice (or a page that belongs to it) waits for a decision in the inbox.
+          pageQuestion: sql<boolean>`${openPageQuestionSql(rid, sql`${matchRuns.invoiceId}`)}`,
           poDate: sql<Date | null>`COALESCE(${purchaseOrders.sentAt}, ${purchaseOrders.createdAt})`.mapWith(
             (v: unknown) => (v == null ? null : new Date(String(v))),
           ),
@@ -761,6 +780,9 @@ async function decide(
   const rid = ctx.session.restaurantId;
   const tctx = { ...ctx, db: tx };
   if (opts.expectedStatus && row.status !== opts.expectedStatus) throw await decidedConflict(tctx, row.id);
+  // G-09: never decide (approve / reject — desk, quick or bulk) a finding on an invoice
+  // whose page still waits for a person in the inbox; escalating it is fine.
+  if (opts.decision !== 'escalated') await refuseWhilePageQuestion(tx, rid, row.id);
   const now = new Date();
   const set =
     opts.decision === 'escalated'
@@ -1277,6 +1299,16 @@ export async function computeQueueSummary(
     showOthers ? awaitingDecision(db, { session }, { scope: 'all', filters }) : null,
   ]);
   const claimableIls = mine.ils?.excl ?? 0;
+  // G-09 (round 7): the viewer's open rows held by an open page question (decide in the inbox first).
+  const visible = expandVisibleRoles(role);
+  const [held] = (await db.execute(sql`
+    select count(*)::int as n
+      from ${discrepancies} d
+      join ${matchRuns} mr on mr.id = d.match_run_id and mr.restaurant_id = d.restaurant_id
+     where d.restaurant_id = ${rid}
+       and d.resolution_status in (${sql.join(OPEN_STATUSES.map((st) => sql`${st}`), sql`, `)})
+       and d.requires_role in (${sql.join(visible.map((r) => sql`${r}`), sql`, `)})
+       and ${openPageQuestionSql(rid, sql`mr.invoice_id`)}`)) as unknown as Array<{ n: number }>;
   // Others lane: the routings I do not decide (incl. unrouted), before-VAT ₪
   // like the tile. A lane is exactly one stored routing, so mine ∪ others = all.
   const lanes = (all?.byRole ?? []).filter((l) => l.role === 'unrouted' || !canActOn(role, l.role));
@@ -1290,6 +1322,7 @@ export async function computeQueueSummary(
     vatIls: mine.ils?.vat ?? 0,
     toDecide: { count: mine.toDecide.count, amountIls: claimableIls },
     toReview: { count: mine.reviewOnly.count },
+    pageHeld: { count: Number(held?.n ?? 0) },
     others: {
       count: lanes.reduce((n, l) => n + l.count, 0),
       amountIls: lanes.reduce((n, l) => n + laneAgorot(l), 0) / 100,

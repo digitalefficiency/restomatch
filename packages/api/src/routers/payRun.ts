@@ -39,6 +39,7 @@ function shiftDay(day: string, n: number): string {
   return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
 }
 import { financeProcedure, router } from '../trpc';
+import { openPageQuestionSql } from '../documents/questions';
 
 /** The charts leak exclusion list (LEAK_EXCLUDED_TYPES) as SQL values. */
 const LEAK_EXCLUDED_SQL = sql.join(
@@ -101,6 +102,10 @@ export interface PayRunInvoice {
   awaitingReview: boolean;
   /** A (non-waived) duplicate copy: held — "don't pay this copy", never a credit to ask for. */
   duplicate: boolean;
+  /** G-09: a page of this invoice still waits for a person's decision in the inbox — held ("עמוד פתוח"). */
+  openPageQuestion: boolean;
+  /** G-09 (round 9): checked as ONE invoice with this one, which carries the total — held, calmly (T4: "נכללת בחשבונית …"). */
+  paidWith: string | null;
   /** The claimable ₪ of the duplicate finding(s) (= the copy's total incl. VAT); not in pending / credit. */
   duplicateIls: number;
   totalInclVat: number;
@@ -265,6 +270,15 @@ function unpaidInvoicesSql(rid: string, window: { start: string; end: string } |
                ${scanAwaitingCountSql(rid, sql`i`)} AS counting,
                -- G-08: held for a "זה אותו מוצר?" question (same rule as the hero).
                ${AWAITING_QUESTION_SQL} AS question,
+               -- G-09: a page question is open in the inbox (never "pay" while a page is undecided).
+               ${openPageQuestionSql(rid, sql`i.id`)} AS open_page,
+               -- G-09 (round 9): checked as one invoice with another that carries the total.
+               i.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' AS paid_with,
+               -- round 10 (P6): the carrier still exists and is itself payable (not included elsewhere)
+               EXISTS (SELECT 1 FROM invoices c
+                        WHERE c.restaurant_id = ${rid}
+                          AND c.id::text = i.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId'
+                          AND (c.ocr_payload -> 'raw' -> 'paidWith') IS NULL) AS carrier_ok,
                -- W2-03: due-date inputs (agreed terms, human due date, G-17 printed values).
                s.payment_terms, i.due_date,
                i.ocr_payload -> 'raw' ->> 'printedDueDate' AS printed_due_date,
@@ -330,6 +344,14 @@ function invoiceOfRow(row: Row, b: LeakBreakdownInvoice | null): PayRunInvoice {
     !awaitingReview &&
     ((b?.pendingLink ?? false) || row.matched !== true || (!b && row.has_ua === true));
   if (pendingLink || awaitingCount || awaitingQuestion || awaitingReview) s.status = 'hold';
+  // G-09: a page question is open in the inbox — never "pay" while a page is undecided.
+  const openPageQuestion = row.open_page === true;
+  if (openPageQuestion) s.status = 'hold';
+  // Round 9 (N4): its ₪ is inside the invoice that carries the document total — never paid on
+  // its own. Round 10 (P6): a carrier that is gone or itself "included" is an open question, never T4.
+  const brokenCarrier = row.paid_with != null && row.carrier_ok !== true;
+  const paidWith = row.paid_with == null || brokenCarrier ? null : String(row.paid_with);
+  if (row.paid_with != null) s.status = 'hold';
   return {
     invoiceId: String(row.id),
     invoiceNumber: row.invoice_number == null ? null : String(row.invoice_number),
@@ -340,6 +362,8 @@ function invoiceOfRow(row: Row, b: LeakBreakdownInvoice | null): PayRunInvoice {
     awaitingQuestion,
     awaitingReview,
     duplicate: s.duplicate,
+    openPageQuestion: openPageQuestion || brokenCarrier,
+    paidWith,
     duplicateIls: s.duplicateIls,
     totalInclVat: Number(row.total_incl),
     totalExclVat: Number(row.total_excl),
@@ -425,7 +449,11 @@ export type HoldReason =
   | { kind: 'awaiting_review' }
   | { kind: 'missing_allocation'; vatIls: number }
   /** G-04 consolidated flag: the same delivery note billed twice; ₪ = the overlap. */
-  | { kind: 'note_billed_twice'; ils: number };
+  | { kind: 'note_billed_twice'; ils: number }
+  /** G-09: a page of this invoice waits for a person in the inbox (T2 — answer it first). */
+  | { kind: 'page_question' }
+  /** G-09 (round 9): checked as ONE invoice with `invoiceId`, which carries the total (T4 — never summed). */
+  | { kind: 'included_in'; invoiceId: string };
 
 export interface HoldInputs {
   status: PayRunStatus;
@@ -444,11 +472,18 @@ export interface HoldInputs {
   missingAllocationVatIls: number | null;
   /** G-04 `note_billed_twice` overlap ₪ (null until G-04's addendum is on the base). */
   noteBilledTwiceIls: number | null;
+  /** G-09: an open page question (or a carrier that is gone). */
+  openPageQuestion?: boolean;
+  /** G-09 (round 9): included in this invoice (its ₪ is counted there). */
+  paidWith?: string | null;
 }
 
 /** Pure: the hold reasons of one unpaid row (empty = payable). */
 export function holdReasonsOf(h: HoldInputs): HoldReason[] {
   const out: HoldReason[] = [];
+  // G-09: included in another invoice — the only reason shown (its ₪ is paid there).
+  if (h.paidWith) return [{ kind: 'included_in', invoiceId: h.paidWith }];
+  if (h.openPageQuestion) out.push({ kind: 'page_question' });
   if (h.duplicate) out.push({ kind: 'duplicate', ils: h.duplicateIls });
   if (h.pendingLink) out.push({ kind: 'pending_link' });
   if (h.awaitingCount) out.push({ kind: 'awaiting_count' });
@@ -457,7 +492,7 @@ export function holdReasonsOf(h: HoldInputs): HoldReason[] {
   if (h.noteBilledTwiceIls != null && h.noteBilledTwiceIls > 0) {
     out.push({ kind: 'note_billed_twice', ils: h.noteBilledTwiceIls });
   }
-  if (h.status === 'hold' && !h.duplicate && !h.pendingLink && !h.awaitingCount && !h.awaitingQuestion && !h.awaitingReview) {
+  if (h.status === 'hold' && !h.openPageQuestion && !h.duplicate && !h.pendingLink && !h.awaitingCount && !h.awaitingQuestion && !h.awaitingReview) {
     out.push({
       kind: 'decision',
       waitingFor: h.openRole,
@@ -715,6 +750,8 @@ export const payRunRouter = router({
           missingAllocationVatIls: vatByInvoice.get(inv.invoiceId) ?? null,
           // TODO(G-04 addendum): read the consolidated proposal's `note_billed_twice` overlap ₪.
           noteBilledTwiceIls: null,
+          openPageQuestion: inv.openPageQuestion,
+          paidWith: inv.paidWith,
         });
         return {
           ...inv,
@@ -745,9 +782,11 @@ export const payRunRouter = router({
       let heldCount = 0;
       for (const r of rows) {
         buckets[r.bucket].count += 1;
-        buckets[r.bucket].ils += ag(r.totalInclVat);
+        if (!r.paidWith) buckets[r.bucket].ils += ag(r.totalInclVat); // included ₪ is counted at its carrier
         a.credit += ag(r.creditIls);
-        if (r.selectable) {
+        if (r.paidWith) {
+          // G-09 (round 9): included in another invoice — listed, its ₪ counted once at the carrier.
+        } else if (r.selectable) {
           a.payable += ag(r.totalInclVat);
           payableCount += 1;
         } else {
@@ -879,7 +918,10 @@ export async function computePayRunMonth(
     }
     g.invoices.push(inv);
     // Waiting for a PO link is T4: its total is reported on its own, never as pay or hold ₪.
-    if (inv.pendingLink && !inv.duplicate) g.a.link! += ag(inv.totalInclVat);
+    // Round 9 (N4): "included in" another invoice — its ₪ is inside that invoice's total, counted once there.
+    if (inv.paidWith) {
+      /* T4: listed, never summed */
+    } else if (inv.pendingLink && !inv.duplicate) g.a.link! += ag(inv.totalInclVat);
     else g.a[inv.status]! += ag(inv.totalInclVat);
     g.a.credit! += ag(inv.creditIls);
     g.a.pending! += ag(inv.pendingIls);
@@ -889,7 +931,8 @@ export async function computePayRunMonth(
   const suppliers: PayRunSupplier[] = [...groups.values()].map(({ a, ...g }) => {
     for (const k of ['pay', 'hold', 'claim', 'credit', 'pending', 'link'] as const) t[k] += a[k]!;
     t.invoices += g.invoices.length;
-    t.linkCount += g.invoices.filter((i) => i.pendingLink && !i.duplicate).length;
+    // Round 10 (Q3): an invoice included in another is not "waiting for a link" (its ₪ is not summed).
+    t.linkCount += g.invoices.filter((i) => i.pendingLink && !i.duplicate && !i.paidWith).length;
     return {
       ...g,
       payIls: ils(a.pay!),

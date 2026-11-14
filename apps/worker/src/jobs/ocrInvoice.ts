@@ -8,6 +8,8 @@ import {
   signedUrlForStoragePath,
   receiptState,
   scanReceiptToStamp,
+  settleDocumentPages,
+  multiPageEnabled,
   withScanGrId,
 } from '@restomatch/api';
 import { decideLink, matchProductTopN, MockEmbeddingProvider, type EmbeddingProvider } from '@restomatch/catalog'; // G-08 link
@@ -22,7 +24,7 @@ import {
   type CatalogMatcherFn,
   type OcrProvider,
 } from '@restomatch/ocr';
-import { enqueueMatchInvoice, ocrJobDeadlineMs, TERMINAL_JOB_ERROR } from '@restomatch/queue';
+import { enqueue, enqueueMatchInvoice, MATCH_INVOICE_QUEUE, ocrJobDeadlineMs, TERMINAL_JOB_ERROR } from '@restomatch/queue';
 import type { InvoiceOcrResult, OcrInvoiceJob } from '@restomatch/types';
 import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
@@ -525,7 +527,7 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
           ocrConfidence: result.confidence.toString(),
           status: holdForHuman ? 'parsed' : 'matched',
         },
-        { onlyPending: true },
+        { onlyPending: true, onlyImage: invoice.rawImageUrl ?? null },
       );
       if (header.written === false) return header;
       await tx.delete(invoiceLines).where(eq(invoiceLines.invoiceId, job.data.invoiceId));
@@ -582,6 +584,43 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
       `lines=${r.lines.length} needsReview=${needsHumanReview}` +
       (duplicateOf !== undefined ? ` duplicateOf=${duplicateOf ? short(duplicateOf) : 'unknown'}` : '');
 
+    // G-09 settle — multi-page documents from the same supplier (api/documents/settle.ts).
+    // Pages of one document are OCR'd alone; this merges a page into page 1 ONLY
+    // when supplier + invoice number agree, else flags it. Hold the match while a
+    // sibling page is still being read; an absorbed page no longer exists. No-op
+    // unless the restaurant's `features.multiPage` is on. Never fails the job.
+    try {
+      const settled = await settleDocumentPages(db, { restaurantId: job.data.restaurantId, invoiceId: job.data.invoiceId });
+      if (settled.hold || settled.absorbed) {
+        return {
+          invoiceId: job.data.invoiceId,
+          confidence: result.confidence,
+          needsHumanReview,
+          conflicts: result.conflicts.length,
+          lines: r.lines.length,
+          settled,
+        };
+      }
+    } catch (err) {
+      console.warn(`[ocr-invoice] G-09 settle failed for invoice=${job.data.invoiceId}`, err);
+      // Round 7: fail CLOSED where multi-page is on — never match a page alone
+      // because the cluster could not be settled; the settle-aware window job
+      // retries it (bounded) in two minutes.
+      const [rs] = await db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, job.data.restaurantId)).limit(1);
+      // Round 8: only when this read would itself have matched — an invoice the
+      // OCR held for a person is never auto-matched by a retry.
+      if (multiPageEnabled(rs?.settings) && !needsHumanReview) {
+        const runAt = new Date(Date.now() + 2 * 60_000);
+        await enqueue(
+          MATCH_INVOICE_QUEUE,
+          { restaurantId: job.data.restaurantId, invoiceId: job.data.invoiceId, g09Window: true, g09Attempt: 1 },
+          { dedupeKey: `g09-settle-retry-${job.data.invoiceId}-${Math.floor(runAt.getTime() / 60_000)}`, runAt, maxAttempts: 3 },
+        ).catch((e) => console.warn(`[ocr-invoice] G-09 settle retry not enqueued for invoice=${job.data.invoiceId}`, e));
+        return { invoiceId: job.data.invoiceId, confidence: result.confidence, needsHumanReview, conflicts: result.conflicts.length, lines: r.lines.length, settled: null };
+      }
+    }
+    // end G-09 settle
+
     // Chain into the 3-way PO↔invoice match when OCR is confident enough to
     // auto-proceed. Low-confidence (parsed / needs-review) invoices wait for a
     // human to confirm product matches first (match.runForInvoice on demand).
@@ -633,6 +672,13 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
       await failAndHandOff(db, job.data.restaurantId, job.data.invoiceId, err, attempt, kind.reason).catch((e) =>
         console.error(`[ocr-invoice] could not mark invoice=${job.data.invoiceId} failed`, e),
       );
+      // G-09 release — a terminal failure settles the page's cluster too: the
+      // failed page is flagged page_unreadable (never a continuation) and the
+      // siblings held for it are released to the match. Never masks `err`.
+      await settleDocumentPages(db, { restaurantId: job.data.restaurantId, invoiceId: job.data.invoiceId }).catch((e) =>
+        console.warn(`[ocr-invoice] G-09 release failed for invoice=${job.data.invoiceId}`, e),
+      );
+      // end G-09 release
     }
     outcome = `failed=${err instanceof Error ? err.name : 'error'}${isOcrExtractionError(err) ? ` code=${err.code}` : ''} class=${kind.retryable ? 'retryable' : 'terminal'}${final ? '' : ' retry=1'}`;
     if (!kind.retryable && err instanceof Error && !err.message.startsWith(TERMINAL_JOB_ERROR)) {
@@ -812,7 +858,7 @@ export async function writeOcrHeader(
   db: Database,
   ids: { restaurantId: string; invoiceId: string; supplierId: string | null },
   header: InvoiceHeader,
-  opts: { onlyPending?: boolean } = {},
+  opts: { onlyPending?: boolean; onlyImage?: string | null } = {},
 ): Promise<{ duplicateOf?: string | null; written?: false }> {
   // onlyPending: write only while the invoice still waits for its read
   // (`written: false` when another read got there first).
@@ -820,6 +866,11 @@ export async function writeOcrHeader(
     eq(invoices.id, ids.invoiceId),
     eq(invoices.restaurantId, ids.restaurantId),
     ...(opts.onlyPending ? [eq(invoices.status, 'ocr_pending')] : []),
+    // G-09 (round 7): compare-and-set on the object this read fetched — a read
+    // of page 1's old image never lands on the row once it was recomposed.
+    ...(opts.onlyImage !== undefined
+      ? [opts.onlyImage === null ? sql`${invoices.rawImageUrl} is null` : eq(invoices.rawImageUrl, opts.onlyImage)]
+      : []),
   );
   // Blank → NULL: the prompt allows '' for an unreadable number, and '' is a
   // value to the unique index (a second blank collides); NULLs never do.

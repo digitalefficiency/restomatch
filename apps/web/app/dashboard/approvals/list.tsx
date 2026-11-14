@@ -12,7 +12,7 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { approvals } from '@/lib/i18n/messages/approvals';
 import type { he as approvalsHe } from '@/lib/i18n/messages/approvals/he';
 import type { MessageKey, Translator } from '@/lib/i18n/translate';
-import { Badge, Card, LoadMore, Textarea, cn, type BadgeTone } from '@/lib/components';
+import { Badge, Card, LinkButton, LoadMore, Textarea, cn, type BadgeTone } from '@/lib/components';
 import { WhyLine } from '@/lib/components/flags';
 import { BatchBar } from '@/lib/components/table/BatchBar';
 import { useTableUrlState } from '@/lib/components/table/useTableUrlState';
@@ -1079,6 +1079,16 @@ function DecisionCard({
           </div>
         ) : null}
 
+        {(d as { pageQuestion?: boolean }).pageQuestion ? (
+          // G-09 (round 7): a page of this invoice waits in the inbox — no decision until it is answered.
+          <div role="note" data-testid="dq-page-question" className="flex flex-wrap items-center gap-3 rounded-xl border border-warn/40 bg-surface-2 p-3">
+            <Badge tone="warning-solid">{t('card.pageQuestion')}</Badge>
+            <p className="min-w-0 flex-1 text-sm text-ink">{t('card.pageQuestionBody')}</p>
+            <LinkButton href={`/dashboard/inbox/compare?invoice=${d.invoiceId}`} size="sm" variant="primary" className="touch-target">
+              {t('card.pageQuestionCta')}
+            </LinkButton>
+          </div>
+        ) : (
         <Actions
           d={d}
           t={t}
@@ -1093,6 +1103,7 @@ function DecisionCard({
           describedBy={sumId}
           sticky={sticky}
         />
+        )}
         {footer}
       </div>
     </Card>

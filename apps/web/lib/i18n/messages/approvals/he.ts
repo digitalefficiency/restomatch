@@ -143,6 +143,9 @@ export const he = {
     cancel: 'ביטול',
   },
   card: {
+    pageQuestion: 'עמוד פתוח',
+    pageQuestionBody: 'עמוד של החשבונית הזאת עדיין פתוח בתיבת הקליטה, החליטו עליו קודם',
+    pageQuestionCta: 'להחלטה על העמוד',
     invoice: 'חשבונית {number}',
     fixInvoice: 'פתחו חשבונית',
     more: 'פעולות נוספות',

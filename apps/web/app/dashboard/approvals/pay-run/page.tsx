@@ -26,6 +26,8 @@ const CALM_HOLDS = new Set<string>([
   'awaiting_count',
   'awaiting_question',
   'awaiting_review',
+  // G-09 (round 9): included in another invoice that carries the total — nothing to decide.
+  'included_in',
 ]);
 
 /**
@@ -109,6 +111,10 @@ export default async function PayRunPage({
         return t('holdReason.missingAllocation', { vat: ils(h.vatIls) });
       case 'note_billed_twice':
         return t('holdReason.noteBilledTwice', { amount: ils(h.ils) });
+      case 'page_question':
+        return t('holdReason.pageQuestion');
+      case 'included_in':
+        return t('holdReason.includedIn');
       default:
         return r.status;
     }
@@ -132,6 +138,10 @@ export default async function PayRunPage({
         return t('holdShort.missingAllocation');
       case 'note_billed_twice':
         return t('holdShort.noteBilledTwice');
+      case 'page_question':
+        return t('holdShort.pageQuestion');
+      case 'included_in':
+        return t('holdShort.includedIn');
       default:
         return '';
     }
@@ -200,6 +210,22 @@ export default async function PayRunPage({
     const decision = r.holds.find(
       (h): h is Extract<Hold, { kind: 'decision' }> => h.kind === 'decision',
     );
+    // G-09: an open page question is answered first (T2); an included invoice links to the one that is paid.
+    const included = r.holds.find((h): h is Extract<Hold, { kind: 'included_in' }> => h.kind === 'included_in');
+    if (included) {
+      return (
+        <LinkButton href={`/dashboard/invoices/${included.invoiceId}`} size="sm" variant="secondary" className="touch-target">
+          {t('table.openCarrier')}
+        </LinkButton>
+      );
+    }
+    if (r.holds.some((h) => h.kind === 'page_question')) {
+      return (
+        <LinkButton href={`/dashboard/inbox/compare?invoice=${r.invoiceId}`} size="sm" variant="primary" className="touch-target">
+          {t('table.toInbox')}
+        </LinkButton>
+      );
+    }
     // G-08: a product question goes to the mapper (roles that may answer); an OCR review opens the invoice.
     if (r.holds.some((h) => h.kind === 'awaiting_question') && data.canAnswer) {
       return (

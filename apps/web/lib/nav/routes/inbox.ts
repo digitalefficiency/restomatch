@@ -15,4 +15,12 @@ export const routes: RouteDef[] = [
     nav: 'item',
     aliases: ['תיבת חשבוניות', 'נכנסות', 'inbox'],
   },
+  {
+    // G-09: a page question's two invoices side by side ("בדקו את שתיהן יחד"); opened from an inbox row.
+    key: 'inboxCompare',
+    path: '/dashboard/inbox/compare',
+    group: 'money',
+    parent: 'inbox',
+    nav: 'detail',
+  },
 ];

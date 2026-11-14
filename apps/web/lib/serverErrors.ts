@@ -44,6 +44,7 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'invoice.linesLocked': 'invoiceLinesLocked',
   'invoice.receiptOpen': 'invoiceReceiptOpen',
   'invoice.beingRead': 'invoiceBeingRead',
+  'invoice.pageQuestionOpen': 'invoicePageQuestionOpen',
   'invoice.partialHeaderClear': 'invoicePartialHeaderClear',
   'invoice.claimInProgress': 'invoiceClaimInProgress',
   'invoice.unlinkedLines': 'invoiceUnlinkedLines',

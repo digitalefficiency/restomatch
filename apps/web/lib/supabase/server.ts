@@ -82,6 +82,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Ids minted by scans.upload (`scan-<base36>-<hex>`); nothing else is signed directly. */
 const SCAN_ID = /^scan-[a-z0-9]+-[a-f0-9]+$/;
 const SCAN_BUCKET = 'invoice-scans';
+/** A bare object file under the tenant prefix: `scan-…` plus an extension, no sub-folders. */
+const SCAN_FILE = /^scan-[a-z0-9]+-[a-f0-9]+\.[a-z0-9]{1,5}$/;
 /** extFromMime() in packages/api/src/lib/supabaseStorage.ts, most common first. */
 const SCAN_EXTS = ['jpg', 'pdf', 'png', 'webp'] as const;
 const SIGNED_PATH = /\/storage\/v1\/object\/sign\/([^/?#]+)\/([^?#]+)/;
@@ -123,6 +125,11 @@ export async function resolveScan(
   if (UUID.test(id)) {
     const url = await getInvoiceImageUrl(id);
     if (!url) return null;
+    // G-09: new rows may keep the bare storage path `<restaurantId>/<scanId>.<ext>`.
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) {
+      const rest = url.startsWith(`${restaurantId}/`) ? url.slice(restaurantId.length + 1) : '';
+      return SCAN_FILE.test(rest) ? signTenantPath(SCAN_BUCKET, url, restaurantId) : null;
+    }
     const local = scanIdFromLocalUrl(url);
     if (local) {
       scanId = local;

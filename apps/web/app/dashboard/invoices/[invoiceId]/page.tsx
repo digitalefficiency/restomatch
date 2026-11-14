@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 import { FileWarning } from 'lucide-react';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
-import { Badge } from '@/lib/components';
+import { Badge, LinkButton } from '@/lib/components';
 import { Banner, StatusChip } from '@/lib/components/feedback';
 import { formatDate } from '@/lib/i18n/format';
 import { vat } from '@/lib/i18n/messages/vat';
@@ -176,6 +176,9 @@ export default async function InvoiceCockpitPage({
     resolution: Object.fromEntries([...statuses].map((s) => [s, resolutionLabel(ta, s)])),
   };
 
+  // G-09 (round 6): a page of this invoice still waits for a decision in the inbox — held, act now (T2).
+  const pageQuestion = finance ? await caller.ingest.pageQuestionOf({ invoiceId }).catch(() => null) : null;
+
   return (
     <div>
       {partialError ? (
@@ -189,6 +192,20 @@ export default async function InvoiceCockpitPage({
             </a>
           }
         />
+      ) : null}
+      {pageQuestion ? (
+        // G-09: a page of this invoice waits for a person in the inbox — held until answered.
+        <div
+          role="note"
+          data-testid="invoice-page-question"
+          className="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-warn/40 bg-surface p-4 shadow-card"
+        >
+          <Badge tone={pageQuestion.flag === 'page_duplicate' ? 'danger-solid' : 'warning-solid'}>{t('pageQuestion.badge')}</Badge>
+          <p className="min-w-0 flex-1 text-sm text-ink">{t('pageQuestion.body')}</p>
+          <LinkButton href={`/dashboard/inbox/compare?invoice=${invoiceId}`} size="sm" variant="primary" className="touch-target">
+            {t('pageQuestion.cta')}
+          </LinkButton>
+        </div>
       ) : null}
       <Cockpit
         detail={JSON.parse(JSON.stringify(detail))}
