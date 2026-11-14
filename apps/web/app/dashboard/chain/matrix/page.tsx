@@ -12,7 +12,7 @@ import { Badge, Card, EmptyState, EntitlementUpsell, SectionHeader, cn, entitlem
 import { ViewToolbar, parseView, rangeLabel } from '@/lib/components/views';
 import { SwitchBranchButton } from '../switch-button';
 import { wholeShekelRows } from '../display';
-import { DrillLink } from './drill';
+import { DrillLink } from '@/lib/components/drill';
 
 /**
  * W3-01 · "כל הסניפים": the roll-up matrix. One row per branch in the URL
@@ -147,7 +147,7 @@ export default async function ChainMatrixPage({ searchParams }: { searchParams: 
           href: hrefWith(sp, { b: b.restaurantId, peek: null }),
           on: data.scope.kind === 'branch' && data.scope.restaurantId === b.restaurantId,
         }))].map((c) => (
-          <DrillLink
+          <Link scroll={false}
             key={c.key}
             href={c.href}
             aria-current={c.on ? 'true' : undefined}
@@ -157,7 +157,7 @@ export default async function ChainMatrixPage({ searchParams }: { searchParams: 
             )}
           >
             {c.label}
-          </DrillLink>
+          </Link>
         ))}
       </nav>
 
@@ -225,21 +225,21 @@ export default async function ChainMatrixPage({ searchParams }: { searchParams: 
                   data-branch={b.restaurantId}
                 >
                   <th scope="row" className="max-w-[16rem] whitespace-normal break-words px-3 py-2 text-start font-semibold text-ink">
-                    <DrillLink href={peekHref(b.restaurantId)} className="hover:text-primary" {...originalProps(b.name)}>
+                    <Link scroll={false} href={peekHref(b.restaurantId)} className="hover:text-primary" {...originalProps(b.name)}>
                       {b.name}
-                    </DrillLink>
+                    </Link>
                   </th>
                   {newestFirst.map((m) => {
                     const c = b.trend.find((p) => p.month === m);
                     return (
                       <td key={m} className="px-0.5 py-1">
-                        <DrillLink
+                        <Link scroll={false}
                           href={peekHref(b.restaurantId)}
                           title={c ? `${monthLabel(m, locale)} · ${ils(c.leakIls)}` : monthLabel(m, locale)}
                           className={cn('block rounded px-1 py-1 text-center text-xs tabular-nums', heatClass(c?.leakPct ?? null, c?.leakIls ?? 0))}
                         >
                           {c && c.leakPct !== null ? formatPercent(c.leakPct, locale, 1) : '—'}
-                        </DrillLink>
+                        </Link>
                       </td>
                     );
                   })}
@@ -247,19 +247,35 @@ export default async function ChainMatrixPage({ searchParams }: { searchParams: 
                     <Badge tone={STATE_TONE[b.state]}>{t(`matrix.state.${b.state}`)}</Badge>
                   </td>
                   <td className={cellCls}>
-                    <DrillLink href={peekHref(b.restaurantId)} className="hover:text-primary" data-testid="matrix-leak">
-                      {(() => {
-                        const v = leakRow.get(b.restaurantId);
-                        return v === undefined ? <span className="text-subtle">—</span> : ils(v);
-                      })()}
-                    </DrillLink>
+                    {(() => {
+                      const v = leakRow.get(b.restaurantId);
+                      // A missing row is "—", never a ₪0 door (G-16).
+                      if (v === undefined) return <span className="text-subtle" data-testid="matrix-leak">—</span>;
+                      return (
+                        <DrillLink
+                          href={peekHref(b.restaurantId)}
+                          totalAgorot={Math.round(v * 100)}
+                          label={`${t('matrix.cols.leak')} · ${b.name}`}
+                          context="hero"
+                          className="hover:text-primary"
+                        >
+                          <span data-testid="matrix-leak">{ils(v)}</span>
+                        </DrillLink>
+                      );
+                    })()}
                   </td>
                   <td className={cellCls}>{pct(b.leakPct)}</td>
                   {compared ? (
                     <td className={cellCls}>{b.leakDeltaIls === null ? '—' : ils(b.leakDeltaIls)}</td>
                   ) : null}
                   <td className={cellCls}>
-                    <DrillLink href={peekHref(b.restaurantId)} className="hover:text-primary">
+                    <DrillLink
+                      href={peekHref(b.restaurantId)}
+                      totalAgorot={Math.round(b.awaitingIls * 100)}
+                      label={`${t('matrix.cols.awaiting')} · ${b.name}`}
+                      context="line"
+                      className="hover:text-primary"
+                    >
                       {ils(b.awaitingIls)}
                     </DrillLink>
                   </td>
@@ -283,9 +299,9 @@ export default async function ChainMatrixPage({ searchParams }: { searchParams: 
             <h2 className="text-base font-bold text-ink" {...originalProps(peek.name)}>
               {t('matrix.peek.title', { name: peek.name })}
             </h2>
-            <DrillLink href={hrefWith(sp, { peek: null })} aria-label={t('matrix.peek.close')} className="rounded p-1 text-muted hover:text-ink">
+            <Link scroll={false} href={hrefWith(sp, { peek: null })} aria-label={t('matrix.peek.close')} className="rounded p-1 text-muted hover:text-ink">
               <X className="h-4 w-4" aria-hidden="true" />
-            </DrillLink>
+            </Link>
           </div>
           <p className="mb-4 text-sm text-muted">
             <span className="font-mono font-semibold tabular-nums text-ink">{ils(peek.leakIls)}</span> · {pct(peek.leakPct)}
@@ -304,9 +320,9 @@ export default async function ChainMatrixPage({ searchParams }: { searchParams: 
                   <span className="flex shrink-0 items-center gap-3">
                     <span className="font-mono tabular-nums text-ink">{ils(inv.leakIls)}</span>
                     {peek.restaurantId === activeId ? (
-                      <DrillLink href={`/dashboard/invoices/${inv.invoiceId}`} className="font-semibold text-primary hover:text-ink" data-testid="matrix-peek-open">
+                      <Link scroll={false} href={`/dashboard/invoices/${inv.invoiceId}`} className="font-semibold text-primary hover:text-ink" data-testid="matrix-peek-open">
                         {t('matrix.peek.openInvoice')}
-                      </DrillLink>
+                      </Link>
                     ) : null}
                   </span>
                 </li>
