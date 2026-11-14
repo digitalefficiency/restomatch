@@ -1,6 +1,7 @@
 import {
   and,
   asc,
+  auditLog,
   catalogImports,
   eq,
   isNull,
@@ -26,6 +27,7 @@ import {
 import { areConvertible } from '@restomatch/matching';
 import { sameUnit } from '../lib/unitPrice';
 import type { CatalogRow } from './parse';
+import { toPriceUnits } from '../lib/parseMoneyCell';
 
 /*
  * G-08: the thresholds (auto ≥ 0.95 with a fitting unit/pack, review floor 0.6,
@@ -37,6 +39,21 @@ export interface CommitArgs {
   restaurantId: string;
   supplierId: string;
   sourceImportId?: string | null;
+  /** Who committed (inline tRPC import); null for the background worker. Stamped on the audit row. */
+  userId?: string | null;
+}
+
+/** W3-10 · the audit action AU-13's priceListDiff reads (one row per committed import). */
+export const IMPORT_COMMITTED_AUDIT_ACTION = 'catalog.import_committed';
+
+/** One list-price change in a committed import (NUMERIC strings, as stored). */
+export interface ImportPriceChange {
+  productId: string | null;
+  name: string;
+  sku: string | null;
+  oldListPrice: string;
+  newListPrice: string;
+  unit: string | null;
 }
 
 /** Why a suggested link needs a person ("בדיקה"). */
@@ -74,6 +91,8 @@ export interface CommitResult {
   updated: number;
   createdProducts: number;
   ambiguous: AmbiguousRow[];
+  /** Existing rows whose list price changed (also written to the audit row). */
+  priceChanges: ImportPriceChange[];
 }
 
 /**
@@ -115,6 +134,7 @@ export async function commitCatalogRows(
   let updated = 0;
   let createdProducts = 0;
   const ambiguous: AmbiguousRow[] = [];
+  const priceChanges: ImportPriceChange[] = [];
 
   for (const row of rows) {
     // 1. Existing catalog item for this supplier? By SKU when present, else by
@@ -128,7 +148,12 @@ export async function commitCatalogRows(
           sql`${normNameSql(supplierCatalogItems.supplierNameRaw)} = ${normalizeLinkName(row.supplierNameRaw)}`,
         );
     const [existing] = await db
-      .select({ id: supplierCatalogItems.id, productId: supplierCatalogItems.productId })
+      .select({
+        id: supplierCatalogItems.id,
+        productId: supplierCatalogItems.productId,
+        listPrice: supplierCatalogItems.listPrice,
+        unit: supplierCatalogItems.unit,
+      })
       .from(supplierCatalogItems)
       .where(
         and(
@@ -254,6 +279,22 @@ export async function commitCatalogRows(
         .where(eq(supplierCatalogItems.id, existing.id));
       itemId = existing.id;
       updated += 1;
+      // W3-10 · a list-price change, compared in integer price units (1/100 agorot).
+      const newListPrice = itemValues.listPrice;
+      if (
+        existing.listPrice != null &&
+        newListPrice != null &&
+        toPriceUnits(Number(existing.listPrice)) !== toPriceUnits(Number(newListPrice))
+      ) {
+        priceChanges.push({
+          productId,
+          name: row.supplierNameRaw,
+          sku: row.supplierSku,
+          oldListPrice: existing.listPrice,
+          newListPrice,
+          unit: row.unit ?? existing.unit ?? null,
+        });
+      }
     } else {
       const [ins] = await db
         .insert(supplierCatalogItems)
@@ -293,7 +334,19 @@ export async function commitCatalogRows(
     }
   }
 
-  return { created, updated, createdProducts, ambiguous };
+  // W3-10 · one audit row per committed import: the record AU-13's priceListDiff
+  // reads ({ supplierId, priceChanges }) and the trail a revert works from.
+  // Append-only (audit_log is immutable); written even when no price moved.
+  await db.insert(auditLog).values({
+    restaurantId,
+    userId: args.userId ?? null,
+    action: IMPORT_COMMITTED_AUDIT_ACTION,
+    entityType: 'catalog_import',
+    entityId: args.sourceImportId ?? null,
+    after: { supplierId, created, updated, createdProducts, priceChanges },
+  });
+
+  return { created, updated, createdProducts, ambiguous, priceChanges };
 }
 
 /**
