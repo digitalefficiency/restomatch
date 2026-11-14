@@ -28,6 +28,7 @@ import {
 import { LEAK_FILTER, notZeroShortTwin, type LeakBreakdownInvoice } from '@restomatch/charts';
 import { authedProcedure, financeProcedure, memberProcedure, router } from '../trpc';
 import { canActOn, expandVisibleRoles } from '../lib/roles';
+import { seesNoMoney } from '../lib/staffMoney';
 import { claimableLines, isNeverClaimable, type VatBasis } from '../lib/claims';
 import { formatIlsAgorot } from '../reports/money';
 import { DECISION_COPY } from '../notifications/templates';
@@ -195,6 +196,18 @@ function afterRow(restaurantId: string, afterId: string) {
   )`;
 }
 
+/**
+ * H-11 strip (slice c): the decision queue carries ₪ (deltaAmount, expected /
+ * actual values, the tiles' claimable ₪). The engine never routes a row to the
+ * receiver or the chef and no screen of theirs reads the queue, so the queue
+ * reads are FORBIDDEN for them (no ₪, not ₪0). Checked before any read.
+ */
+function assertQueueMoney(role: Parameters<typeof seesNoMoney>[0]): void {
+  if (seesNoMoney(role)) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'No decision queue for this role' });
+  }
+}
+
 export const approvalsRouter = router({
   /**
    * Items waiting for my role to decide.
@@ -231,6 +244,7 @@ export const approvalsRouter = router({
         .optional(),
     )
     .query(async ({ ctx, input }) => {
+      assertQueueMoney(ctx.session.role); // H-11 strip
       const limit = input?.limit ?? 50;
       const cursorDate = input?.cursor ? new Date(input.cursor) : null;
       const scope = input?.scope ?? 'mine';
@@ -357,7 +371,10 @@ export const approvalsRouter = router({
    */
   queueSummary: memberProcedure
     .input(z.object(QueueFilters).optional())
-    .query(({ ctx, input }) => computeQueueSummary(ctx.db, ctx.session.restaurantId, ctx.session.role, input)),
+    .query(({ ctx, input }) => {
+      assertQueueMoney(ctx.session.role); // H-11 strip
+      return computeQueueSummary(ctx.db, ctx.session.restaurantId, ctx.session.role, input);
+    }),
 
   /**
    * Approve one row: the decision, its audit row, the claim (W2-10a
