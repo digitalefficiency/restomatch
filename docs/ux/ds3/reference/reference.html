@@ -2735,7 +2735,12 @@ body{ margin:0 }
   var navItem = function (k) { var r = null; NAV.forEach(function (g) { g.items.forEach(function (x) { if (x.k === k) r = x; }); }); return r; };
   var navGroup = function (k) { var r = null; NAV.forEach(function (g) { g.items.forEach(function (x) { if (x.k === k) r = g; }); }); return r; };
   var groupById = function (id) { return NAV.filter(function (g) { return g.id === id; })[0]; };
-  var plain = function (t) { return String(t).replace(/<[^>]+>/g, ''); };
+  /* the text of a marked-up label: the characters outside the tags, read one by one (no pattern on tags) */
+  var plain = function (t) {
+    var s = String(t), out = '', inTag = false;
+    for (var i = 0; i < s.length; i++) { var c = s.charAt(i); if (c === '<') inTag = true; else if (c === '>') inTag = false; else if (!inTag) out += c; }
+    return out;
+  };
   var ils0 = function (v) { return '<span class="money"><span class="cur">₪</span><span>' + Math.round(v).toLocaleString('en-US') + '</span></span>'; };
   var mi = function (n, flip) { return '<span class="mn-i">' + icon(n, flip ? 'flip' : '') + '</span>'; };
   var joinHe = function (a) { return a.length > 1 ? a.slice(0, -1).join(', ') + ' ו' + a[a.length - 1] : a[0] || ''; };

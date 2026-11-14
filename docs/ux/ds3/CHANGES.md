@@ -9,6 +9,10 @@ The reference's check scripts only. They keep their working copies and screensho
 (ignored by git) instead of the system's temporary folder, which the repository's code scanning flags as unsafe.
 No package is affected; refresh only if you run the checks.
 
+The reference's script (`reference/src/script.js` and its copy inside `reference.html`): the helper that reads
+the text of a marked-up label no longer strips tags with a pattern, which the code scanning flags; it reads the
+characters outside the tags one by one. Behaviour is the same (139 of 139 checks at 1440, 11 of 11 at 390).
+
 ## 14.11.2026 · second correction
 
 From an independent review of this folder against the reference, today's code and the open pull requests.
