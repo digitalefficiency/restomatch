@@ -463,7 +463,8 @@ export function endOfDayReportEmail(args: {
   openCreditsCount: number; // open/escalated discrepancies awaiting recovery
   /** Formatted ₪ owed back; null when there is no ₪ to name (never '(₪0)', W2-04 R4-2). */
   openCreditsIls: string | null;
-  todayCaughtCount: number; // discrepancies detected today
+  /** Discrepancies detected today; 0 → no caught-today row at all (never a ₪0 figure, Train C r6). */
+  todayCaughtCount: number;
   todayCaughtIls: string; // formatted ₪ flagged today
   pendingApprovals?: number; // items waiting for a manager decision
   /** Invoices whose claimable rows still wait for an order link: a count, never ₪ (W2-04 R4-2). */
@@ -482,12 +483,22 @@ export function endOfDayReportEmail(args: {
     date: args.dateLabel,
   };
   const pendingLink = args.pendingLinkCount ?? 0;
+  const caught = args.todayCaughtCount > 0;
+  // No ₪ open but rows still waiting for an order link: not a clean day (T4 neutral) —
+  // no gold, no "nothing open" subject or line; the pending-link row says what waits.
+  const waitingSubject = `${txt(l, c.heading, vars)} · ${c.pendingLinkLabel}: ${nf.format(pendingLink)}`;
+  const subject =
+    args.openCreditsIls != null
+      ? txt(l, c.subject, vars)
+      : pendingLink > 0
+        ? waitingSubject
+        : txt(l, c.subjectNoAmount, vars);
   const rows = [
     args.openCreditsIls != null
       ? statRow(c.openLabel, `${ilsSpan(args.openCreditsIls, 'danger')} · ${nf.format(args.openCreditsCount)}`, l)
       : '',
     pendingLink > 0 ? statRow(c.pendingLinkLabel, `<strong>${nf.format(pendingLink)}</strong>`, l) : '',
-    statRow(c.caughtLabel, `${ilsSpan(args.todayCaughtIls, 'gold')} · ${nf.format(args.todayCaughtCount)}`, l),
+    caught ? statRow(c.caughtLabel, `${ilsSpan(args.todayCaughtIls, 'gold')} · ${nf.format(args.todayCaughtCount)}`, l) : '',
     args.pendingApprovals != null
       ? statRow(c.pendingLabel, `<strong>${nf.format(args.pendingApprovals)}</strong>`, l)
       : '',
@@ -496,8 +507,9 @@ export function endOfDayReportEmail(args: {
 
   const html = renderEmail({
     locale: l,
-    accent: args.openCreditsCount > 0 ? COLORS.danger : COLORS.gold,
-    preview: txt(l, args.openCreditsIls != null ? c.preview : c.subjectNoAmount, vars),
+    accent: args.openCreditsCount > 0 ? COLORS.danger : pendingLink > 0 ? COLORS.muted : COLORS.gold,
+    // The preview names today's catch only when there is one (never "0 found today").
+    preview: args.openCreditsIls != null ? txt(l, caught ? c.preview : c.subject, vars) : subject,
     heading: txt(l, c.heading, vars),
     bodyHtml: `
       <p style="margin:0 0 8px">${htm(l, c.intro)}</p>
@@ -505,7 +517,9 @@ export function endOfDayReportEmail(args: {
       ${
         args.openCreditsCount > 0
           ? `<p style="margin:12px 0 0;color:${COLORS.muted};font-size:13px">${htm(l, c.openNote)}</p>`
-          : `<p style="margin:12px 0 0;color:${COLORS.gold};font-weight:700">${htm(l, c.clean)}</p>`
+          : pendingLink > 0
+            ? ''
+            : `<p style="margin:12px 0 0;color:${COLORS.gold};font-weight:700">${htm(l, c.clean)}</p>`
       }`,
     cta: args.approvalsUrl ? { label: c.cta, url: args.approvalsUrl } : undefined,
   });
@@ -516,12 +530,12 @@ export function endOfDayReportEmail(args: {
     args.openCreditsIls != null &&
       `${c.openLabel}: ${txt(l, '{amount}', { amount: args.openCreditsIls })} (${nf.format(args.openCreditsCount)})`,
     pendingLink > 0 && `${c.pendingLinkLabel}: ${nf.format(pendingLink)}`,
-    `${c.caughtLabel}: ${txt(l, '{amount}', { amount: args.todayCaughtIls })} (${nf.format(args.todayCaughtCount)})`,
+    caught && `${c.caughtLabel}: ${txt(l, '{amount}', { amount: args.todayCaughtIls })} (${nf.format(args.todayCaughtCount)})`,
     args.pendingApprovals != null && `${c.pendingLabel}: ${nf.format(args.pendingApprovals)}`,
     args.topSupplier && `${c.topLabel}: ${txt(l, '{s}', { s: args.topSupplier })}`,
     args.approvalsUrl && `\n${c.cta}: ${args.approvalsUrl}`,
   );
-  return { subject: txt(l, args.openCreditsIls != null ? c.subject : c.subjectNoAmount, vars), html, text };
+  return { subject, html, text };
 }
 
 /* ─────────────────────── invoice could not be read (G-06) ───────── */

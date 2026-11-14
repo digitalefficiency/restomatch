@@ -19,6 +19,7 @@ import {
 import { appRouter, approvalNeededEmail, formatIlsAgorot, type AppContext } from '@restomatch/api';
 import { approvalSummary, invoiceAlert } from '../jobs/matchInvoice';
 import { openCreditsFigure, processEndOfDayReport } from '../jobs/endOfDayReport';
+import { startOfIlDay } from '../lib/notifyHelpers';
 
 /**
  * Train C B1 / B2 (pilot-UX HIGH + money M1). The approval alert (push, WhatsApp,
@@ -178,8 +179,16 @@ describe('R4-1: nothing open on the invoice → no alert at all', () => {
 });
 
 describe('end-of-day digest (Train C B2)', () => {
+  // The 19:00 run of TODAY (Israel), whatever the wall clock: rows inserted now are "caught
+  // today" even when the suite runs in the 00:00–06:00 catch-up window (which reports yesterday).
   const eod = (restaurantId: string) =>
-    processEndOfDayReport({ id: `eod-${restaurantId}`, name: 'end-of-day-report', data: { restaurantId }, attemptsMade: 0, opts: { attempts: 1 } });
+    processEndOfDayReport({
+      id: `eod-${restaurantId}`,
+      name: 'end-of-day-report',
+      data: { restaurantId, forDate: new Date(startOfIlDay(new Date()).getTime() + 19 * 3600_000).toISOString() },
+      attemptsMade: 0,
+      opts: { attempts: 1 },
+    });
   const digests = (restaurantId: string) =>
     db
       .select()
@@ -226,11 +235,132 @@ describe('end-of-day digest (Train C B2)', () => {
     expect(rows.length).toBeGreaterThan(0);
     const zero = formatIlsAgorot(0, { maximumFractionDigits: 0 });
     for (const r of rows) {
-      for (const s of [r.subject ?? '', r.body, r.html ?? '']) {
+      for (const s of [r.subject ?? '', r.body, (r.payload as { __html?: string } | null)?.__html ?? '']) {
         expect(s).not.toContain(zero);
         expect(s).not.toMatch(/\(\s*‏?0\s*‏?₪\s*\)|\(₪0\)/);
       }
       expect(r.body).toContain('ממתינות לקישור להזמנה');
+    }
+  });
+});
+
+describe('R6 (M-2): the 19:00 digest never prints ₪0 and its count matches its ₪', () => {
+  // Today's 19:00 run in Israel, whatever the wall clock (see the B2 helper above).
+  const eod = (restaurantId: string) =>
+    processEndOfDayReport({
+      id: `eod-r6-${restaurantId}`,
+      name: 'end-of-day-report',
+      data: { restaurantId, forDate: new Date(startOfIlDay(new Date()).getTime() + 19 * 3600_000).toISOString() },
+      attemptsMade: 0,
+      opts: { attempts: 1 },
+    });
+  const digests = (restaurantId: string) =>
+    db
+      .select()
+      .from(notificationsOutbox)
+      .where(and(eq(notificationsOutbox.restaurantId, restaurantId), eq(notificationsOutbox.relatedEntityType, 'restaurant')));
+  const htmlOf = (r: { payload: unknown }) => (r.payload as { __html?: string } | null)?.__html ?? '';
+  /** Move an invoice's findings to yesterday (Israel): nothing on it is "caught today". */
+  const yesterday = async (invoiceId: string) => {
+    const [mr] = await db.select({ id: matchRuns.id }).from(matchRuns).where(eq(matchRuns.invoiceId, invoiceId));
+    await db
+      .update(discrepancies)
+      .set({ createdAt: new Date(startOfIlDay(new Date()).getTime() - 3600_000) })
+      .where(eq(discrepancies.matchRunId, mr!.id));
+  };
+  const f0 = (agorot: number) => formatIlsAgorot(agorot, { maximumFractionDigits: 0 });
+  const PENDING_LINK = [
+    { type: 'UNORDERED_ARRIVAL' as const, severity: 'warn' as const, delta: '1180.00' },
+    { type: 'PRICE_HIGHER' as const, severity: 'warn' as const, delta: '25.00' },
+  ];
+  const noZero = (s: string) => {
+    expect(s).not.toContain(f0(0));
+    expect(s).not.toMatch(/(?<![\d,.])0[\s\u200f]*₪|₪[\s\u200f]*0(?![\d,.])/);
+  };
+  const GOLD_RULE = 'width:44px;background:#b45309';
+
+  beforeAll(() => {
+    process.env.DATABASE_URL = testDbUrl();
+  });
+
+  it('pending-link only, found yesterday → NO digest (a quiet day, like review-only), the skip is counted', async () => {
+    const t = await tenant(`r6q-${Date.now()}`);
+    await yesterday(await invoiceWith(t, PENDING_LINK));
+    const res = await eod(t.restaurantId);
+    expect(await digests(t.restaurantId)).toHaveLength(0);
+    expect(res).toMatchObject({ sent: 0, skipped: 1 });
+  });
+
+  it('pending-link only, found today → a digest with no ₪0, no "nothing open" subject and no gold clean line', async () => {
+    const t = await tenant(`r6p-${Date.now()}`);
+    await invoiceWith(t, PENDING_LINK);
+    await eod(t.restaurantId);
+    const rows = await digests(t.restaurantId);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      const html = htmlOf(r);
+      for (const s of [r.subject ?? '', r.body, html]) {
+        noZero(s);
+        expect(s).not.toContain('אין זיכויים פתוחים');
+      }
+      expect(html).not.toContain(GOLD_RULE);
+      expect(r.subject).toContain('ממתינות לקישור להזמנה');
+      expect(r.body).toContain('ממתינות לקישור להזמנה: 1');
+      expect(r.body).toContain('פערים שנמצאו היום'); // the ₪25 caught today is real
+      expect(r.body).not.toContain('זיכויים פתוחים:'); // no ₪ → no open-credits row
+    }
+  });
+
+  it('mixed priced + pending-link → the count beside the ₪ is 1 (the priced row), plus the pending-link line', async () => {
+    const t = await tenant(`r6m-${Date.now()}`);
+    await invoiceWith(t, [{ type: 'PRICE_HIGHER', severity: 'warn', delta: '40.00' }]);
+    await invoiceWith(t, PENDING_LINK);
+    await eod(t.restaurantId);
+    const rows = await digests(t.restaurantId);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      const html = htmlOf(r);
+      expect(r.subject).toContain('זיכוי פתוח אחד');
+      expect(r.subject).toContain(f0(4000));
+      expect(r.subject).not.toMatch(/שני זיכויים|# זיכויים/);
+      expect(r.body).toContain(`זיכויים פתוחים: ${f0(4000)} (1)`);
+      expect(r.body).toContain('ממתינות לקישור להזמנה: 1');
+      expect(html).toContain('זיכוי פתוח אחד'); // the preview line
+      expect(html).not.toContain('שני זיכויים');
+      for (const s of [r.subject ?? '', r.body, html]) noZero(s);
+    }
+  });
+
+  it('nothing caught today but open credits → a digest without the caught-today row (html + text), no ₪0', async () => {
+    const t = await tenant(`r6o-${Date.now()}`);
+    await yesterday(await invoiceWith(t, [{ type: 'PRICE_HIGHER', severity: 'warn', delta: '40.00' }]));
+    await eod(t.restaurantId);
+    const rows = await digests(t.restaurantId);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      const html = htmlOf(r);
+      expect(r.subject).toContain(f0(4000));
+      expect(r.body).toContain(`זיכויים פתוחים: ${f0(4000)} (1)`);
+      for (const s of [r.body, html]) {
+        expect(s).not.toContain('פערים שנמצאו היום');
+        expect(s).not.toMatch(/(?<!\d)0 פערים/);
+      }
+      for (const s of [r.subject ?? '', r.body, html]) noZero(s);
+    }
+  });
+
+  it('a gap under ₪1 shows its agorot (open credit and caught today), never "0 ₪"', async () => {
+    const t = await tenant(`r6s-${Date.now()}`);
+    await invoiceWith(t, [{ type: 'PRICE_HIGHER', severity: 'warn', delta: '0.40' }]);
+    await eod(t.restaurantId);
+    const rows = await digests(t.restaurantId);
+    expect(rows.length).toBeGreaterThan(0);
+    const cents = formatIlsAgorot(40, { maximumFractionDigits: 2 });
+    for (const r of rows) {
+      expect(r.subject).toContain(cents);
+      expect(r.body).toContain(`זיכויים פתוחים: ${cents} (1)`);
+      expect(r.body).toContain(`פערים שנמצאו היום: ${cents} (1)`);
+      for (const s of [r.subject ?? '', r.body, htmlOf(r)]) noZero(s);
     }
   });
 });

@@ -288,8 +288,12 @@ test.describe('owner home', () => {
       expect(Math.abs(sum - amount(await hero.getByTestId('leak-hero-amount').innerText())), 'unpaid + paid = hero ₪').toBeLessThanOrEqual(1);
     }
     const rows = page.locator('[data-testid="needs-you"] [data-needs-row] a');
+    // The rows stream in after the hero (inside a Suspense boundary that is still hidden for a few
+    // hundred ms): wait until they are on screen before measuring them.
+    await expect(rows.first()).toBeVisible();
     expect(await rows.count()).toBeGreaterThan(0);
     for (const a of await rows.all()) {
+      await expect(a).toBeVisible();
       const box = (await a.boundingBox())!;
       expect(box.height, 'Needs-you row target').toBeGreaterThanOrEqual(48);
     }

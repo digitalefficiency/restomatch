@@ -49,7 +49,7 @@ export function LeakHeatmap({
 
   return (
     <div>
-      <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+      <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4" data-record="">
         {shown.map((c, i) => {
           const { bg, text, step } = creepStep(creepIntensity(c.deltaPct));
           const name = `${c.productName} · ${c.supplierName}: +${pct(c.deltaPct)} · ${fmtIls(c.monthExcessIls)}`;
@@ -98,7 +98,7 @@ export function LeakHeatmap({
           </span>
           <span>{l.severe}</span>
         </div>
-        {hidden > 0 ? <span>{l.more.replace('{count}', String(hidden))}</span> : null}
+        {hidden > 0 ? <span data-record="">{l.more.replace('{count}', String(hidden))}</span> : null}
       </div>
     </div>
   );

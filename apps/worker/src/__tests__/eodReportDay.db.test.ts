@@ -55,8 +55,13 @@ describe('end-of-day report dedupe on the Israel day (DB)', () => {
     const [u] = await sql<{ id: string }[]>`insert into users (email, name) values (${email}, 'owner') returning id`;
     uid = u!.id;
     await sql`insert into memberships (user_id, restaurant_id, role) values (${uid}, ${rid}, 'owner')`;
+    // On a matched invoice, so the open finding carries claimable ₪ (an open credit):
+    // a finding with no ₪ makes a quiet day once nothing is caught (Train C r6).
+    const [inv] = await sql<{ id: string }[]>`
+      insert into invoices (restaurant_id, total_incl_vat, status, source)
+      values (${rid}, '100.00', 'matched', 'photo') returning id`;
     const [m] = await sql<{ id: string }[]>`
-      insert into match_runs (restaurant_id, overall_status) values (${rid}, 'minor') returning id`;
+      insert into match_runs (restaurant_id, invoice_id, overall_status) values (${rid}, ${inv!.id}, 'minor') returning id`;
     // One open finding caught on Thursday afternoon, so no day is "quiet".
     await sql`insert into discrepancies (match_run_id, restaurant_id, type, severity, delta_amount, created_at)
               values (${m!.id}, ${rid}, 'PRICE_HIGHER', 'warn', '12.50', '2026-11-12T10:00:00Z')`;

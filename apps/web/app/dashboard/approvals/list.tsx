@@ -1459,7 +1459,7 @@ function OthersLane({
       </summary>
       <ul className="space-y-1 pb-2 text-muted">
         {others.byRole.map((r) => (
-          <li key={r.role}>
+          <li key={r.role} data-record="">
             {t('others.role', {
               role: roleName(r.role),
               count: formatNumber(r.count, locale),
