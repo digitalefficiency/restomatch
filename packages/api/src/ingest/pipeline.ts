@@ -464,7 +464,9 @@ export async function processInboundMessage(
             kind: channel.kind,
             supplierId,
             userId: null,
-            pageCount: mime === 'application/pdf' ? await pdfPageCount(bytes) : 1,
+            // Round 11 (L5): the page count only feeds G-09's mapping — with the switch OFF
+            // the PDF is never parsed here (the OFF path equals main).
+            pageCount: mime === 'application/pdf' ? ((await restaurantMultiPage(tx, channel.restaurantId)) ? await pdfPageCount(bytes) : null) : 1,
           });
           if (reg.job) jobs.push(reg.job);
           docs.push({ id: docId, status: 'registered' });

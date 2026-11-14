@@ -72,6 +72,8 @@ interface QuestionRow {
   page_invoice_id: string;
   page_of: string | null;
   repeats: string | null;
+  /** Round 11 (M6): every invoice the page may continue (raw.pageOf.invoiceIds). */
+  heads?: unknown;
 }
 /** One open page question, from either of its invoices (round 8). */
 function questionOf(r: QuestionRow, asPageOne: boolean) {
@@ -83,6 +85,8 @@ function questionOf(r: QuestionRow, asPageOne: boolean) {
     pageInvoiceId: r.page_invoice_id,
     /** The invoice the page belongs to (page 1, settle's record) or repeats (a duplicate). */
     otherInvoiceId: r.page_of ?? r.repeats ?? null,
+    /** Round 11 (M6): every recorded head, likeliest first — the compare page shows each. */
+    heads: Array.isArray(r.heads) ? (r.heads as unknown[]).filter((h): h is string => typeof h === 'string') : [],
   };
 }
 
@@ -226,6 +230,7 @@ export const ingestRouter = router({
     const own = (await ctx.db.execute(sql`
       select d.id as document_id, d.error as flag, d.invoice_id::text as page_invoice_id,
              i.ocr_payload -> 'raw' -> 'pageOf' ->> 'invoiceId' as page_of,
+             i.ocr_payload -> 'raw' -> 'pageOf' -> 'invoiceIds' as heads,
              coalesce(i.ocr_payload -> 'raw' -> 'pageRepeats' ->> 'invoiceId', i.ocr_payload -> 'raw' -> 'duplicateOf' ->> 'invoiceId') as repeats
         from ${ingestDocuments} d
         join ${invoices} i on i.id = d.invoice_id and i.restaurant_id = d.restaurant_id
@@ -237,7 +242,8 @@ export const ingestRouter = router({
       select d.id as document_id, d.error as flag, d.invoice_id::text as page_invoice_id,
              -- round 10 (P9): from ANY head, the page is compared with its LIKELIEST head
              -- (the answer covers the whole question, so it is given where it is truthful)
-             coalesce(i.ocr_payload -> 'raw' -> 'pageOf' ->> 'invoiceId', ${input.invoiceId}::text) as page_of, null::text as repeats
+             coalesce(i.ocr_payload -> 'raw' -> 'pageOf' ->> 'invoiceId', ${input.invoiceId}::text) as page_of, null::text as repeats,
+             i.ocr_payload -> 'raw' -> 'pageOf' -> 'invoiceIds' as heads
         from ${ingestDocuments} d
         join ${invoices} i on i.id = d.invoice_id and i.restaurant_id = d.restaurant_id
        where d.restaurant_id = ${rid} and ${openFlagSql('d')} and d.error in (${sql.join(PAGE_ONE_FLAGS.map((f) => sql`${f}`), sql`, `)})

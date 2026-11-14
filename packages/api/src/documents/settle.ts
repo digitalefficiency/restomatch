@@ -554,25 +554,54 @@ export function decidePages(
   const NOT_A_HEAD: ReadonlySet<string> = new Set(['page_other_supplier', 'page_duplicate', 'page_unreadable', 'page_unreadable_closed']);
   /** Normalised number → the earliest same-supplier page that printed it. */
   const numbered = new Map<string, string>();
-  if (anchor.number) numbered.set(anchor.number, first.invoiceId);
+  /** Round 11 (M1): normalised number → EVERY same-supplier page that printed it. */
+  const sameNumber = new Map<string, string[]>();
+  const numberOf = new Map<string, string>(); // page id → its normalised number
+  if (anchor.number) {
+    numbered.set(anchor.number, first.invoiceId);
+    sameNumber.set(anchor.number, [first.invoiceId]);
+    numberOf.set(first.invoiceId, anchor.number);
+  }
+  /** Round 11 (M6): the latest run head that is still an OPEN document (not a whole invoice). */
+  let openHead: string | null = standaloneHead ? null : first.invoiceId;
+  let runHeadComplete = Boolean(standaloneHead);
   const followRun = (page: PageHeader, flag: string | null) => {
     const number = alnum(page.invoiceNumber);
     if (!number || page.unreadable || (flag && NOT_A_HEAD.has(flag))) return;
     if (chainMismatch(anchor, page) === 'page_other_supplier') return;
-    runHead = page.invoiceId;
+    // Round 11 (M1): a page printing a number already seen continues THAT page's run —
+    // the head stays the page that printed it first (never a middle page repeating it).
+    const head = numbered.get(number) ?? page.invoiceId;
     if (!numbered.has(number)) numbered.set(number, page.invoiceId);
+    sameNumber.set(number, [...new Set([...(sameNumber.get(number) ?? []), page.invoiceId])]);
+    numberOf.set(page.invoiceId, number);
+    if (head === page.invoiceId) {
+      runHeadComplete = selfComplete(page.print) || creditKind(page.print);
+      if (!runHeadComplete) openHead = page.invoiceId;
+    }
+    runHead = head;
   };
   /**
    * Likeliest first: the page whose number this page prints (or whose invoice its
-   * duplicate stamp names) — round 10 P3 — then the run head, then page 1 while open.
+   * duplicate stamp names) — round 10 P3 — then (round 11 M6) for a page WITHOUT a
+   * number after a whole interleaved invoice, the still-open run; then the run head and
+   * every page that printed its number (M1), then page 1 while open.
    */
   const headsFor = (page: PageHeader): string[] => {
     const own = alnum(page.invoiceNumber);
     const byNumber = own ? numbered.get(own) : undefined;
     const byStamp = page.duplicateOf && ids.has(page.duplicateOf) ? page.duplicateOf : undefined;
-    return [...new Set([byNumber, byStamp, runHead, ...(standaloneHead ? [] : [first.invoiceId])].filter((h): h is string => Boolean(h)))].filter(
-      (h) => h !== page.invoiceId,
-    );
+    const open = !own && runHeadComplete && openHead ? openHead : undefined;
+    const headNumber = numberOf.get(runHead);
+    const siblings = headNumber ? (sameNumber.get(headNumber) ?? []) : [];
+    const ownSiblings = own ? (sameNumber.get(own) ?? []) : [];
+    return [
+      ...new Set(
+        [byNumber, byStamp, open, runHead, ...siblings, ...ownSiblings, ...(standaloneHead ? [] : [first.invoiceId])].filter(
+          (h): h is string => Boolean(h),
+        ),
+      ),
+    ].filter((h) => h !== page.invoiceId);
   };
   for (const page of rest) {
     const dupOfChain = Boolean(page.duplicateOf && chainIds.has(page.duplicateOf));
@@ -698,6 +727,54 @@ interface ClusterRow {
 }
 
 /**
+ * A G-09 re-read (merge / attach / split) that failed for good gives back what the
+ * reopen took: the number it RESERVED (never one a person typed after the stall) and
+ * the duplicate stamp it dropped. Runs on the failed-re-read path whatever the switch
+ * says (round 11 L4; round 9 L2/L5). `onlyIfFailedReread` checks the failure here.
+ */
+async function restoreAfterFailedReread(
+  tx: Database,
+  restaurantId: string,
+  invoiceId: string,
+  opts: { onlyIfFailedReread?: boolean } = {},
+): Promise<void> {
+  if (opts.onlyIfFailedReread) {
+    const [failed] = (await tx.execute(sql`
+      select 1 as hit from ${invoices} i
+       where i.id = ${invoiceId} and i.restaurant_id = ${restaurantId}
+         and i.status <> 'ocr_pending'
+         and coalesce((i.ocr_payload -> 'raw' ->> 'ocrFailed')::boolean, false)
+         and exists (select 1 from ${auditLog} a
+                      where a.entity_type = 'invoice' and a.entity_id = i.id and a.restaurant_id = i.restaurant_id
+                        and a.action = ${REOPENED_FOR_OCR_ACTION})`)) as unknown as Array<{ hit: number }>;
+    if (!failed) return;
+  }
+  // Round 9 (L4): only the number the re-read RESERVED (the latest reopen's audit
+  // before.invoiceNumber) — never a number a person typed after the stall.
+  await tx.execute(sql`
+    update ${invoices} i set invoice_number = null, updated_at = now()
+     where i.id = ${invoiceId} and i.restaurant_id = ${restaurantId}
+       and not coalesce((i.ocr_payload -> 'raw' ->> 'headerEntered')::boolean, false)
+       and not coalesce((i.ocr_payload -> 'raw' ->> 'manualHeader')::boolean, false)
+       and i.invoice_number is not distinct from (
+         select a.before ->> 'invoiceNumber' from ${auditLog} a
+          where a.entity_type = 'invoice' and a.entity_id = i.id and a.restaurant_id = i.restaurant_id
+            and a.action = ${REOPENED_FOR_OCR_ACTION}
+          order by a.at desc limit 1)`);
+  // Round 10 (Q1): the duplicate stamp the reopen dropped comes back with the failure.
+  await tx.execute(sql`
+    update ${invoices} i
+       set ocr_payload = jsonb_set(coalesce(i.ocr_payload, '{}'::jsonb), '{raw,duplicateOf}', a.before -> 'duplicateOf', true)
+      from (select before from ${auditLog}
+             where entity_type = 'invoice' and entity_id = ${invoiceId} and restaurant_id = ${restaurantId}
+               and action = ${REOPENED_FOR_OCR_ACTION}
+             order by at desc limit 1) a
+     where i.id = ${invoiceId} and i.restaurant_id = ${restaurantId}
+       and a.before ? 'duplicateOf' and jsonb_typeof(i.ocr_payload -> 'raw') = 'object'
+       and (i.ocr_payload -> 'raw' -> 'duplicateOf') is null`);
+}
+
+/**
  * Settle the page cluster of `invoiceId` after its OCR. Tenant-scoped (every
  * query filters `restaurantId`); a foreign or unknown invoice is a no-op.
  */
@@ -715,7 +792,12 @@ export async function settleDocumentPages(
       .from(restaurants)
       .where(eq(restaurants.id, restaurantId))
       .limit(1);
-    if (!restaurant || !multiPageEnabled(restaurant.settings)) return { result: NOTHING, ocr: [], match: [], superseded: null };
+    if (!restaurant || !multiPageEnabled(restaurant.settings)) {
+      // Round 11 (L4) + round 9 (L2/L5): on rollback (switch OFF / killed) a G-09 re-read
+      // that failed for good still gives back its duplicate stamp and its reserved number.
+      if (restaurant) await restoreAfterFailedReread(tx, restaurantId, invoiceId, { onlyIfFailedReread: true });
+      return { result: NOTHING, ocr: [], match: [], superseded: null };
+    }
     const minutes = groupMinutes(restaurant.settings);
 
     // The page(s) of this invoice and their sender.
@@ -772,29 +854,7 @@ export async function settleDocumentPages(
     if (failedComposed) {
       // Round 8: the read is gone, so is its claim on the number — a re-send of
       // the document is never blocked as its duplicate (the number is in the audit).
-      // Round 9 (L4): only the number the re-read RESERVED (the latest reopen's audit
-      // before.invoiceNumber) — never a number a person typed after the stall.
-      await tx.execute(sql`
-        update ${invoices} i set invoice_number = null, updated_at = now()
-         where i.id = ${invoiceId} and i.restaurant_id = ${restaurantId}
-           and not coalesce((i.ocr_payload -> 'raw' ->> 'headerEntered')::boolean, false)
-           and not coalesce((i.ocr_payload -> 'raw' ->> 'manualHeader')::boolean, false)
-           and i.invoice_number is not distinct from (
-             select a.before ->> 'invoiceNumber' from ${auditLog} a
-              where a.entity_type = 'invoice' and a.entity_id = i.id and a.restaurant_id = i.restaurant_id
-                and a.action = ${REOPENED_FOR_OCR_ACTION}
-              order by a.at desc limit 1)`);
-      // Round 10 (Q1): the duplicate stamp the reopen dropped comes back with the failure.
-      await tx.execute(sql`
-        update ${invoices} i
-           set ocr_payload = jsonb_set(coalesce(i.ocr_payload, '{}'::jsonb), '{raw,duplicateOf}', a.before -> 'duplicateOf', true)
-          from (select before from ${auditLog}
-                 where entity_type = 'invoice' and entity_id = ${invoiceId} and restaurant_id = ${restaurantId}
-                   and action = ${REOPENED_FOR_OCR_ACTION}
-                 order by at desc limit 1) a
-         where i.id = ${invoiceId} and i.restaurant_id = ${restaurantId}
-           and a.before ? 'duplicateOf' and jsonb_typeof(i.ocr_payload -> 'raw') = 'object'
-           and (i.ocr_payload -> 'raw' -> 'duplicateOf') is null`);
+      await restoreAfterFailedReread(tx, restaurantId, invoiceId);
       await tx
         .update(ingestDocuments)
         .set({ error: 'page_unreadable', updatedAt: new Date() })

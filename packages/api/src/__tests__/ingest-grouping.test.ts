@@ -9,7 +9,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PDFDocument } from 'pdf-lib';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   and,
   applyAuditImmutableRls,
@@ -44,6 +44,7 @@ import { toObjectRef } from '../documents/objectRef';
 import { localDocumentStorage } from '../documents/storage';
 import { splitDocument } from '../documents/attach';
 import { reopenForOcr, retireInvoice } from '../documents/reocr';
+import { setAsideGroupTotals } from '../documents/groupTotals';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 import { jpegBytes, pngBytes } from './documentTestKit';
 
@@ -2039,16 +2040,18 @@ describe('round 10 · run heads: only a NUMBERED page of the same supplier start
     expect(JSON.stringify((inv!.ocrPayload as { raw?: { pageOf?: unknown } }).raw?.pageOf)).not.toContain(other!);
   });
 
-  it('P9 [A p1, A p2, B p1, B p2]: from A\'s CTA the page is compared with B p1 (its likeliest head); A is never the pair', async () => {
+  it('P9/M6 [A p1, A p2, B p1, B p2]: from A\'s CTA the page is compared with B p1 first, and A is offered too; never an unrecorded invoice', async () => {
     const [a1, a2, b1, b2] = await pages(4, 'r10p9');
     await writeOcr(a1!, { ...ACME, invoiceNumber: 'A-990' });
     await writeOcr(a2!, NOHEAD);
     await writeOcr(b1!, { ...ACME, invoiceNumber: 'B-290' });
     await writeOcr(b2!, { ...NOHEAD, totalInclVat: '2340.00' });
     await settle(b2!);
-    expect(await pageQ(a1!)).toMatchObject({ pageInvoiceId: b2, otherInvoiceId: b1 });
+    const q = await pageQ(a1!);
+    expect(q).toMatchObject({ pageInvoiceId: b2, otherInvoiceId: b1 });
+    expect(q!.heads).toEqual(expect.arrayContaining([b1, a1])); // round 11 (M6): every head is shown
     await expect(
-      owner().ingest.resolvePageFlag({ documentId: (await docOf(b2!)).id, action: 'checked_together', payableInvoiceId: b2!, withInvoiceId: a1! }),
+      owner().ingest.resolvePageFlag({ documentId: (await docOf(b2!)).id, action: 'checked_together', payableInvoiceId: b2!, withInvoiceId: A.invoiceId }),
     ).rejects.toMatchObject({ message: 'payable_required' });
   });
 });
@@ -2188,6 +2191,245 @@ describe('round 10 · pay run: "included in" only while its carrier is real', ()
       const row2 = (await owner().payRun.month()).suppliers.flatMap((g) => g.invoices).find((i) => i.invoiceId === p1);
       expect(row2).toMatchObject({ status: 'hold', paidWith: null, openPageQuestion: true });
     } finally {
+      await ownerDb.update(restaurants).set({ settings: saved as never }).where(eq(restaurants.id, A.restaurantId));
+    }
+  });
+});
+
+describe('round 11 · run heads: the page that FIRST printed a number heads its run (M1/M6)', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+  const owner = () =>
+    appRouter.createCaller({ db: ownerDb, session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' } } as AppContext);
+  const pageQ = (invoiceId: string) => owner().ingest.pageQuestionOf({ invoiceId });
+  const docOf = async (invoiceId: string) => (await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, invoiceId)))[0]!;
+  const COMPLETE: OcrHead = { ...ACME, lines: [{ qty: '1', total: '500.00', desc: 'whole invoice line' }], totalExclVat: '500.00' };
+  const withPayRun = async <T,>(fn: () => Promise<T>): Promise<T> => {
+    const [rest] = await ownerDb.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, A.restaurantId));
+    const saved = rest!.settings as { features?: Record<string, unknown> };
+    try {
+      await ownerDb.update(restaurants).set({ settings: { ...saved, features: { ...(saved.features ?? {}), payRun: true } } as never }).where(eq(restaurants.id, A.restaurantId));
+      return await fn();
+    } finally {
+      await ownerDb.update(restaurants).set({ settings: saved as never }).where(eq(restaurants.id, A.restaurantId));
+    }
+  };
+
+  for (const shape of ['open', 'complete'] as const) {
+    for (const stamp of ['kept', 'dup'] as const) {
+      it(`M1 [A ${shape}, B p1, B p2 printing "B 28x" (${stamp}), B p3 total no number]: B p1 stays held until B p3 is answered`, async () => {
+        const tag = `r11m1-${shape}-${stamp}`;
+        const n = `B-${shape === 'open' ? 1 : 2}${stamp === 'kept' ? 1 : 2}8`;
+        const [a, b1, b2, b3] = await pages(4, tag);
+        await writeOcr(a!, shape === 'open' ? { ...ACME, invoiceNumber: `A-${n}` } : { ...COMPLETE, invoiceNumber: `A-${n}` });
+        await writeOcr(b1!, { ...ACME, invoiceNumber: n });
+        await writeOcr(b2!, stamp === 'kept' ? { ...ACME, invoiceNumber: n.replace('-', ' ') } : { ...ACME, invoiceNumber: n, duplicateOf: { invoiceId: b1!, invoiceNumber: n } });
+        await writeOcr(b3!, { ...NOHEAD, totalInclVat: '2800.00' });
+        await settle(b3!);
+        // two truthful "separate" answers (B p1's own question, B p2's) — B p3 still asks about B p1
+        for (const id of [b1!, b2!]) {
+          const d = await docOf(id);
+          if (d.error && d.error !== 'page_separate') await owner().ingest.resolvePageFlag({ documentId: d.id, action: 'separate' });
+        }
+        expect(await pageQ(b1!)).toMatchObject({ flag: 'page_belongs', pageInvoiceId: b3 });
+        await withPayRun(async () => {
+          const row = (await owner().payRun.month()).suppliers.flatMap((g) => g.invoices).find((i) => i.invoiceId === b1);
+          expect(row).toMatchObject({ status: 'hold', openPageQuestion: true });
+        });
+      });
+    }
+  }
+
+  it('M6 [A p1 open, B whole interleaved, unnumbered continuation]: the continuation names A p1 first and B too; compare offers both', async () => {
+    const [a1, b, p3] = await pages(3, 'r11m6');
+    await writeOcr(a1!, { ...ACME, invoiceNumber: 'A-1106' });
+    await writeOcr(b!, { ...COMPLETE, invoiceNumber: 'B-1106' });
+    await writeOcr(p3!, NOHEAD);
+    await settle(p3!);
+    const q = await pageQ(a1!);
+    expect(q).toMatchObject({ pageInvoiceId: p3, otherInvoiceId: a1 });
+    expect(q!.heads.slice(0, 2)).toEqual([a1, b]);
+  });
+});
+
+describe('round 11 · "checked together": same-document repeats, exact LIFO undo, the whole group held, one payable under concurrency', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+  const owner = () =>
+    appRouter.createCaller({ db: ownerDb, session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' } } as AppContext);
+  const docOf = async (invoiceId: string) => (await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, invoiceId)))[0]!;
+  const paidWith = async (invoiceId: string) => {
+    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, invoiceId));
+    return ((inv?.ocrPayload as { raw?: { paidWith?: { invoiceId?: string } } } | null)?.raw?.paidWith?.invoiceId ?? null) as string | null;
+  };
+  const together = async (page: string, payable: string) =>
+    owner().ingest.resolvePageFlag({ documentId: (await docOf(page)).id, action: 'checked_together', payableInvoiceId: payable });
+  const undo = async (page: string) => owner().ingest.resolvePageFlag({ documentId: (await docOf(page)).id, action: 'undo_checked_together' });
+  let seq = 0;
+  /** [A p1 ₪1,000, OTHER photo, p3 ₪700, p4 ₪2,500 total]: p3 and p4 both point at p1. */
+  const burst = async (tag: string) => {
+    seq += 1;
+    const [p1, other, p3, p4] = await pages(4, tag);
+    await writeOcr(p1!, { ...ACME, invoiceNumber: `A-11${seq}0`, totalInclVat: '1000.00' });
+    await writeOcr(other!, OTHER);
+    await writeOcr(p3!, { ...NOHEAD, totalInclVat: '700.00' });
+    await writeOcr(p4!, { ...NOHEAD, totalInclVat: '2500.00' });
+    await settle(p4!);
+    return { p1: p1!, p3: p3!, p4: p4! };
+  };
+
+  it('M2: a continuation stamped as a "duplicate" of its OWN page 1 can be answered "one invoice"', async () => {
+    const [p1, p2] = await pages(2, 'r11m2');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-1102' });
+    await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p1!, grId: A.grId, overallStatus: 'clean' });
+    await ocr(p2!, { ...ACME, invoiceNumber: 'A-1102', duplicateOf: { invoiceId: p1!, invoiceNumber: 'A-1102' } });
+    expect((await docOf(p2!)).error).toBe('page_merge_blocked');
+    await together(p2!, p2!);
+    expect(await paidWith(p1!)).toBe(p2);
+  });
+
+  it('M3: undo the LATER answer → the earlier link stands exactly as it was', async () => {
+    const { p1, p3, p4 } = await burst('r11m3a');
+    await together(p3, p3);
+    await together(p4, p4);
+    expect([await paidWith(p1), await paidWith(p3), await paidWith(p4)]).toEqual([p4, p4, null]);
+    await undo(p4);
+    expect([await paidWith(p1), await paidWith(p3), await paidWith(p4)]).toEqual([p3, null, null]);
+    expect((await docOf(p3)).error).toBe('page_checked_together');
+    expect((await docOf(p4)).error).not.toBe('page_checked_together');
+  });
+
+  it('M3: undoing the EARLIER answer while a later one builds on it is refused', async () => {
+    const { p3, p4 } = await burst('r11m3bb');
+    await together(p3, p3);
+    await together(p4, p4);
+    await expect(undo(p3)).rejects.toMatchObject({ message: 'undo_later_first' });
+  });
+
+  it('M3: undo + re-answer → exactly ONE payable; undo + "separate" hides nothing', async () => {
+    const { p1, p3, p4 } = await burst('r11m3ccc');
+    await together(p3, p3);
+    await together(p4, p4);
+    await undo(p4);
+    await together(p4, p4);
+    const marks = [await paidWith(p1), await paidWith(p3), await paidWith(p4)];
+    expect(marks.filter((m) => m === null)).toHaveLength(1);
+    await undo(p4);
+    await owner().ingest.resolvePageFlag({ documentId: (await docOf(p4)).id, action: 'separate' });
+    expect(await paidWith(p4)).toBeNull();
+    expect(await paidWith(p1)).toBe(p3); // the earlier answer — still standing, still exact
+  });
+
+  it('M4: the carrier is held while another page question of its document is still open', async () => {
+    const { p3 } = await burst('r11m4dddd');
+    await together(p3, p3); // p1 included in p3; p4 still asks about p1
+    const [run] = await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p3, grId: A.grId, overallStatus: 'minor' }).returning();
+    const [gap] = await ownerDb
+      .insert(discrepancies)
+      .values({ matchRunId: run!.id, restaurantId: A.restaurantId, type: 'PRICE_HIGHER', severity: 'warn', requiresRole: 'manager', deltaAmount: '7.00' })
+      .returning();
+    await expect(owner().approvals.approve({ discrepancyId: gap!.id })).rejects.toBeTruthy();
+    const [rest] = await ownerDb.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, A.restaurantId));
+    const saved = rest!.settings as { features?: Record<string, unknown> };
+    try {
+      await ownerDb.update(restaurants).set({ settings: { ...saved, features: { ...(saved.features ?? {}), payRun: true } } as never }).where(eq(restaurants.id, A.restaurantId));
+      const row = (await owner().payRun.month()).suppliers.flatMap((g) => g.invoices).find((i) => i.invoiceId === p3);
+      expect(row).toMatchObject({ status: 'hold', openPageQuestion: true });
+    } finally {
+      await ownerDb.update(restaurants).set({ settings: saved as never }).where(eq(restaurants.id, A.restaurantId));
+    }
+  });
+
+  it('L3: two answers on pages sharing a head, at the same moment → exactly ONE payable', async () => {
+    const { p1, p3, p4 } = await burst('r11l3eeeee');
+    const caller = (userId: string) =>
+      appRouter.createCaller({ db: appDb, session: { userId, restaurantId: A.restaurantId, role: 'owner' } } as AppContext);
+    const [d3, d4] = [await docOf(p3), await docOf(p4)];
+    const results = await Promise.allSettled([
+      caller(A.ownerUserId).ingest.resolvePageFlag({ documentId: d3.id, action: 'checked_together', payableInvoiceId: p3 }),
+      caller(A.ownerUserId).ingest.resolvePageFlag({ documentId: d4.id, action: 'checked_together', payableInvoiceId: p4 }),
+    ]);
+    expect(results.some((r) => r.status === 'fulfilled')).toBe(true);
+    const marks = [await paidWith(p1), await paidWith(p3), await paidWith(p4)];
+    expect(marks.filter((m) => m === null)).toHaveLength(1);
+  });
+
+  it('L1: the hero never moves from a "checked together" answer — a page TOTAL_MISMATCH is set aside, now and on every later match', async () => {
+    const [p1, p2] = await pages(2, 'r11l1');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-1101', totalInclVat: '1000.00' });
+    await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p1!, grId: A.grId, overallStatus: 'clean' });
+    expect((await ocr(p2!, { ...NOHEAD, totalInclVat: '1500.00' })).flagged).toEqual([{ invoiceId: p2, reason: 'page_merge_blocked' }]);
+    const before = (await owner().owner.leakHero()).leakIls;
+    await together(p2!, p2!);
+    // a later match of the carrier (window job / re-match) produces its page-level TOTAL_MISMATCH
+    const [run] = await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p2!, grId: A.grId, overallStatus: 'minor' }).returning();
+    const [tm] = await ownerDb
+      .insert(discrepancies)
+      .values({ matchRunId: run!.id, restaurantId: A.restaurantId, type: 'TOTAL_MISMATCH', severity: 'warn', requiresRole: 'manager', deltaAmount: '500.00' })
+      .returning();
+    await withRestaurant(appDb, A.restaurantId, (tx) => setAsideGroupTotals(tx, A.restaurantId, p2!));
+    const [after] = await ownerDb.select().from(discrepancies).where(eq(discrepancies.id, tm!.id));
+    expect(after!.resolutionStatus).toBe('rejected');
+    expect((await owner().owner.leakHero()).leakIls).toBe(before);
+  });
+});
+
+describe('round 11 · month close, rollback and OFF-path lows (L2/L4/L5)', () => {
+  const owner = () =>
+    appRouter.createCaller({ db: ownerDb, session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' } } as AppContext);
+  const setMultiPage = async (on: boolean) => {
+    const [rest] = await ownerDb.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, A.restaurantId));
+    const saved = rest!.settings as { features?: Record<string, unknown> };
+    await ownerDb.update(restaurants).set({ settings: { ...saved, features: { ...(saved.features ?? {}), multiPage: on } } as never }).where(eq(restaurants.id, A.restaurantId));
+    return saved;
+  };
+
+  it('L2: the month close never counts an invoice "included in" another as unchecked', async () => {
+    const month = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7);
+    const [p1, p2] = await pages(2, 'r11l2');
+    await writeOcr(p1!, { ...ACME, invoiceNumber: 'A-1112', totalInclVat: '300.00' });
+    await writeOcr(p2!, { ...ACME, invoiceNumber: 'A-1113', totalInclVat: '900.00' });
+    const before = (await owner().close.checklist({ month })).unchecked.count;
+    await ownerDb.update(invoices).set({ ocrPayload: { raw: { paidWith: { invoiceId: p2 } } } as never }).where(eq(invoices.id, p1!));
+    expect((await owner().close.checklist({ month })).unchecked.count).toBe(before - 1);
+  });
+
+  it('L4: on rollback (switch OFF) a failed re-read still gives back its duplicate stamp and reserved number', async () => {
+    const [p1] = await pages(1, 'r11l4');
+    await writeOcr(p1!, { ...ACME, invoiceNumber: 'A-1114' });
+    await ownerDb
+      .update(invoices)
+      .set({ ocrPayload: sql`jsonb_set(${invoices.ocrPayload}, '{raw,duplicateOf}', '{"invoiceId":null,"invoiceNumber":"A-1114"}'::jsonb, true)` })
+      .where(eq(invoices.id, p1!));
+    await withRestaurant(appDb, A.restaurantId, (tx) => reopenForOcr(tx, A.restaurantId, p1!));
+    await ownerDb.update(invoices).set({ status: 'parsed', ocrPayload: { raw: { ocrFailed: true } } as never }).where(eq(invoices.id, p1!));
+    const saved = await setMultiPage(false);
+    try {
+      await settle(p1!);
+    } finally {
+      await ownerDb.update(restaurants).set({ settings: saved as never }).where(eq(restaurants.id, A.restaurantId));
+    }
+    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, p1!));
+    expect((inv!.ocrPayload as { raw?: { duplicateOf?: { invoiceNumber?: string } } }).raw?.duplicateOf?.invoiceNumber).toBe('A-1114');
+    expect(inv!.invoiceNumber).toBeNull();
+  });
+
+  it('L5: with the switch OFF, an e-mailed PDF is never parsed during intake', async () => {
+    const saved = await setMultiPage(false);
+    const spy = vi.spyOn(PDFDocument, 'load');
+    try {
+      const doc = await PDFDocument.create();
+      doc.addPage();
+      const bytes = await doc.save();
+      spy.mockClear();
+      await send(ch.email, mail([{ name: 'inv.pdf', bytes }]), at(0));
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
       await ownerDb.update(restaurants).set({ settings: saved as never }).where(eq(restaurants.id, A.restaurantId));
     }
   });

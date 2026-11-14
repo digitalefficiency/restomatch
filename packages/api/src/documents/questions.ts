@@ -26,7 +26,7 @@ export function openFlagSql(alias: string): SQL {
  *    never a "newest earlier row" guess (wrong for one-message or interleaved pages).
  * Shared by the approvals queue, the pay run and ingest.pageQuestionOf.
  */
-export function openPageQuestionSql(rid: string, invoiceId: SQL): SQL {
+function ownQuestionSql(rid: string, invoiceId: SQL): SQL {
   const one = sql.join(PAGE_ONE_FLAGS.map((f) => sql`${f}`), sql`, `);
   return sql`(
     EXISTS (SELECT 1 FROM ingest_documents q
@@ -37,6 +37,29 @@ export function openPageQuestionSql(rid: string, invoiceId: SQL): SQL {
         JOIN invoices qi ON qi.id = q.invoice_id AND qi.restaurant_id = q.restaurant_id
        WHERE q.restaurant_id = ${rid} AND ${openFlagSql('q')} AND q.error IN (${one})
          AND ${pageOfIncludesSql('qi', invoiceId)}))`;
+}
+
+/**
+ * The open-question rule, plus (round 11 M4) the "checked together" GROUP: an invoice
+ * that carries a group, or is included in one, is held while ANY member of that group
+ * (its carrier or an invoice included in it) still has a page question open — a carrier
+ * is never "pay" while another page of its document is undecided.
+ */
+export function openPageQuestionSql(rid: string, invoiceId: SQL): SQL {
+  const carrier = sql`coalesce((SELECT gi.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' FROM invoices gi
+                                 WHERE gi.restaurant_id = ${rid} AND gi.id = ${invoiceId}), (${invoiceId})::text)`;
+  return sql`(
+    ${ownQuestionSql(rid, invoiceId)}
+    OR EXISTS (
+      SELECT 1 FROM invoices gm
+       WHERE gm.restaurant_id = ${rid}
+         AND gm.id <> ${invoiceId}
+         AND (gm.id::text = ${carrier} OR gm.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${carrier})
+         AND EXISTS (SELECT 1 FROM invoices me WHERE me.restaurant_id = ${rid} AND me.id = ${invoiceId}
+                      AND (me.ocr_payload -> 'raw' ? 'paidWith'
+                           OR EXISTS (SELECT 1 FROM invoices inc WHERE inc.restaurant_id = ${rid}
+                                       AND inc.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' = (${invoiceId})::text)))
+         AND ${ownQuestionSql(rid, sql`gm.id`)}))`;
 }
 
 /**

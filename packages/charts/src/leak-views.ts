@@ -152,16 +152,25 @@ export function isLeakType(type: string): boolean {
 }
 
 /**
+ * G-09 (round 11 L1): a page checked as ONE invoice with other pages ("checked
+ * together") has its page-level TOTAL_MISMATCH set aside with this note prefix
+ * (api documents/groupTotals.ts GROUP_TOTAL_NOTE) — its lines vs the whole document's
+ * total is no money at risk, like a rejected DUPLICATE_INVOICE.
+ */
+export const GROUP_TOTAL_NOTE_PREFIX = 'G-09:';
+
+/**
  * Does a discrepancy line (alias `d`) count toward the leak? warn/block only;
  * never a LEAK_EXCLUDED_TYPES type (an under-charge, waiting for a PO link, or
  * an ordered line never billed); and never a DUPLICATE_INVOICE a bookkeeper rejected — "not a
- * duplicate" means no money was at risk. (Other rejected findings stay in: the
+ * duplicate" means no money was at risk, nor a G-09 group's page TOTAL_MISMATCH. (Other rejected findings stay in: the
  * money did leak, the team chose not to claim it — the report's "waived".)
  * The single definition for the hero, views, report and chain.
  */
 export const LEAK_FILTER: SQL = sql`d.severity IN ('warn','block')
   AND d.type NOT IN (${textList([...LEAK_EXCLUDED_TYPES])})
-  AND NOT (d.type = 'DUPLICATE_INVOICE' AND d.resolution_status = 'rejected')`;
+  AND NOT (d.type = 'DUPLICATE_INVOICE' AND d.resolution_status = 'rejected')
+  AND NOT (d.type = 'TOTAL_MISMATCH' AND d.resolution_status = 'rejected' AND d.resolution_note LIKE ${GROUP_TOTAL_NOTE_PREFIX + '%'})`;
 
 /**
  * A live duplicate finding (alias `d`): the invoice is a second bill for goods

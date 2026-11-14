@@ -12,3 +12,4 @@ export { multiPageEnabled } from '../ingest/grouping';
 export { PAGE_ABSORBED_ACTION } from './reocr';
 export { STORE_OBJECT_PATH } from './objectRef';
 export { resolvePageFlag, PAGE_SEPARATE, type PageFlagAction } from './resolve';
+export { setAsideGroupTotals, GROUP_TOTAL_NOTE } from './groupTotals';

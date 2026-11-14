@@ -3,6 +3,7 @@ import { and, auditLog, discrepancies, eq, ingestDocuments, invoices, matchRuns,
 import { enqueueMatchInvoice } from '@restomatch/queue';
 import { DocumentError, documentNotFound } from './errors';
 import { PAGES_RECOMPOSED_ACTION, retireInvoice } from './reocr';
+import { GROUP_TOTAL_NOTE } from './groupTotals';
 import { PAGE_FLAGS, PAGE_ONE_FLAGS, type PageFlag } from './settle';
 
 /**
@@ -24,6 +25,7 @@ export type PageFlagAction = 'separate' | 'delete_duplicate' | 'close_unreadable
  */
 export const PAGE_CHECKED_TOGETHER = 'page_checked_together';
 export const CHECKED_TOGETHER_ACTION = 'document.page_checked_together';
+export const UNDONE_ACTION = 'document.page_checked_together_undone';
 
 /** Round 7: a person closed an unreadable page as not read (answered; the invoice is untouched). */
 export const PAGE_UNREADABLE_CLOSED = 'page_unreadable_closed';
@@ -83,35 +85,75 @@ export async function resolvePageFlag(
         .limit(1);
       if ((was?.before as { flag?: string } | null)?.flag === 'page_duplicate') flag = 'page_duplicate';
     }
-    // Round 10 (P6/P7): "checked together" is undoable (audited): the page asks again,
-    // and the invoices that answer marked "included" are payable on their own again.
+    // Round 10 (P6/P7) + round 11 (M3): "checked together" is undoable — EXACTLY: the
+    // members' prior state (the answer's snapshot) comes back, its set-aside totals reopen,
+    // and the page asks again. Last answer first: undoing an answer a later answer on the
+    // same invoices builds on is refused (undo that one first).
     if (action === 'undo_checked_together') {
       if (flag !== (PAGE_CHECKED_TOGETHER as string)) throw new TRPCError({ code: 'CONFLICT', message: 'not_flagged' });
-      const [was] = await tx
-        .select({ before: auditLog.before, after: auditLog.after })
-        .from(auditLog)
-        .where(
-          and(
-            eq(auditLog.restaurantId, restaurantId),
-            eq(auditLog.entityType, 'invoice'),
-            eq(auditLog.entityId, doc.invoiceId),
-            eq(auditLog.action, CHECKED_TOGETHER_ACTION),
-          ),
-        )
-        .orderBy(sql`${auditLog.at} desc`)
-        .limit(1);
-      const before = (was?.before as { flag?: string } | null)?.flag;
-      const after = (was?.after as { payableInvoiceId?: string; paidWithInvoiceIds?: string[]; paidWithInvoiceId?: string } | null) ?? {};
-      const restore = before && (PAGE_ONE_FLAGS as readonly string[]).includes(before) ? before : 'page_not_merged';
-      const marked = after.paidWithInvoiceIds ?? (after.paidWithInvoiceId ? [after.paidWithInvoiceId] : []);
-      if (marked.length > 0 && after.payableInvoiceId) {
-        const list = sql.join(marked.map((id) => sql`${id}::uuid`), sql`, `);
-        await tx.execute(sql`
-          update ${invoices}
-             set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - 'paidWith'), updated_at = now()
-           where restaurant_id = ${restaurantId} and id in (${list})
-             and ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${after.payableInvoiceId}`);
+      const [was] = (await tx.execute(sql`
+        select a.id::text as id, a.before, a.after, a.at
+          from ${auditLog} a
+         where a.restaurant_id = ${restaurantId} and a.entity_type = 'invoice' and a.entity_id = ${doc.invoiceId}
+           and a.action = ${CHECKED_TOGETHER_ACTION}
+           and not exists (select 1 from ${auditLog} u
+                            where u.restaurant_id = a.restaurant_id and u.action = ${UNDONE_ACTION}
+                              and u.after ->> 'answerId' = a.id::text)
+         order by a.at desc limit 1`)) as unknown as Array<{ id: string; before: unknown; after: unknown; at: Date }>;
+      if (!was) throw new TRPCError({ code: 'CONFLICT', message: 'not_flagged' });
+      const before = (was.before as { flag?: string; members?: Array<{ id: string; paidWith: string | null }> } | null) ?? {};
+      const after = (was.after as { memberIds?: string[]; paidWithInvoiceIds?: string[]; payableInvoiceId?: string; waivedTotalMismatchIds?: string[] } | null) ?? {};
+      const members = after.memberIds ?? [...new Set([...(after.paidWithInvoiceIds ?? []), ...(after.payableInvoiceId ? [after.payableInvoiceId] : [])])];
+      // LIFO: a LATER, still-standing answer touching any of these invoices blocks the undo.
+      if (members.length > 0) {
+        const [later] = (await tx.execute(sql`
+          select 1 as hit from ${auditLog} a
+           where a.restaurant_id = ${restaurantId} and a.action = ${CHECKED_TOGETHER_ACTION}
+             and a.at > ${was.at} and a.id::text <> ${was.id}
+             and exists (select 1 from jsonb_array_elements_text(coalesce(a.after -> 'memberIds', a.after -> 'paidWithInvoiceIds', '[]'::jsonb)) m
+                          where m in (${sql.join(members.map((m) => sql`${m}`), sql`, `)}))
+             and not exists (select 1 from ${auditLog} u
+                              where u.restaurant_id = a.restaurant_id and u.action = ${UNDONE_ACTION}
+                                and u.after ->> 'answerId' = a.id::text)
+           limit 1`)) as unknown as Array<{ hit: number }>;
+        if (later) throw new TRPCError({ code: 'CONFLICT', message: 'undo_later_first' });
       }
+      // restore EXACTLY the snapshot (an earlier answer's links stay as they were)
+      for (const m of before.members ?? []) {
+        if (m.paidWith) {
+          await tx.execute(sql`
+            update ${invoices}
+               set ocr_payload = jsonb_set(coalesce(ocr_payload, '{}'::jsonb), '{raw,paidWith}', jsonb_build_object('invoiceId', ${m.paidWith}::text), true),
+                   updated_at = now()
+             where restaurant_id = ${restaurantId} and id = ${m.id}::uuid and jsonb_typeof(ocr_payload -> 'raw') = 'object'`);
+        } else {
+          await tx.execute(sql`
+            update ${invoices}
+               set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - 'paidWith'), updated_at = now()
+             where restaurant_id = ${restaurantId} and id = ${m.id}::uuid and (ocr_payload -> 'raw') ? 'paidWith'`);
+        }
+      }
+      if (!before.members) {
+        // a round-9/10 answer without a snapshot: release only what it marked
+        const marked = after.paidWithInvoiceIds ?? [];
+        if (marked.length > 0 && after.payableInvoiceId) {
+          await tx.execute(sql`
+            update ${invoices}
+               set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - 'paidWith'), updated_at = now()
+             where restaurant_id = ${restaurantId} and id in (${sql.join(marked.map((id) => sql`${id}::uuid`), sql`, `)})
+               and ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${after.payableInvoiceId}`);
+        }
+      }
+      // Round 11 (L1): the totals the answer set aside are open again.
+      const waived = after.waivedTotalMismatchIds ?? [];
+      if (waived.length > 0) {
+        await tx.execute(sql`
+          update ${discrepancies}
+             set resolution_status = 'open', resolved_by = null, resolved_at = null, resolution_note = null
+           where restaurant_id = ${restaurantId} and id in (${sql.join(waived.map((id) => sql`${id}::uuid`), sql`, `)})
+             and resolution_status = 'rejected'`);
+      }
+      const restore = before.flag && (PAGE_ONE_FLAGS as readonly string[]).includes(before.flag) ? before.flag : 'page_not_merged';
       await tx
         .update(ingestDocuments)
         .set({ error: restore, updatedAt: new Date() })
@@ -119,11 +161,11 @@ export async function resolvePageFlag(
       await tx.insert(auditLog).values({
         restaurantId,
         userId: args.userId,
-        action: 'document.page_checked_together_undone',
+        action: UNDONE_ACTION,
         entityType: 'invoice',
         entityId: doc.invoiceId,
         before: { flag: PAGE_CHECKED_TOGETHER } as never,
-        after: { flag: restore, released: marked } as never,
+        after: { flag: restore, answerId: was.id, restored: before.members ?? null, reopened: waived } as never,
       });
       return { invoiceId: doc.invoiceId, match: false, released: [] as string[] };
     }
@@ -238,32 +280,68 @@ export async function resolvePageFlag(
       // Round 9 (N4): ONE invoice stays payable. Round 10 (P9): the pair is the page's
       // invoice and its LIKELIEST head (raw.pageOf.invoiceId — what every compare shows).
       const [pair] = (await tx.execute(sql`
-        select ocr_payload -> 'raw' -> 'pageOf' ->> 'invoiceId' as head
-          from ${invoices} where id = ${invoiceId} and restaurant_id = ${restaurantId}`)) as unknown as Array<{ head: string | null }>;
-      const head = pair?.head ?? null;
-      if (!head) throw new TRPCError({ code: 'CONFLICT', message: 'not_comparable' });
-      if (args.withInvoiceId && args.withInvoiceId !== head) throw new TRPCError({ code: 'BAD_REQUEST', message: 'payable_required' });
+        select ocr_payload -> 'raw' -> 'pageOf' ->> 'invoiceId' as head,
+               coalesce(ocr_payload -> 'raw' -> 'pageOf' -> 'invoiceIds', '[]'::jsonb) as heads
+          from ${invoices} where id = ${invoiceId} and restaurant_id = ${restaurantId}`)) as unknown as Array<{ head: string | null; heads: unknown }>;
+      const recorded = [pair?.head, ...(Array.isArray(pair?.heads) ? (pair!.heads as unknown[]) : [])].filter((h): h is string => typeof h === 'string');
+      if (recorded.length === 0) throw new TRPCError({ code: 'CONFLICT', message: 'not_comparable' });
+      // Round 11 (M6): the compare page shows EVERY recorded head; the person answers for
+      // the one they compared with (default: the likeliest). Never an unrecorded invoice.
+      if (args.withInvoiceId && !recorded.includes(args.withInvoiceId)) throw new TRPCError({ code: 'BAD_REQUEST', message: 'payable_required' });
+      const head = args.withInvoiceId ?? recorded[0]!;
       const payable = args.payableInvoiceId;
       if (!payable) throw new TRPCError({ code: 'BAD_REQUEST', message: 'payable_required' });
       // Round 10 (P4/Q4): ONE group. Any invoice already "included in" one of the pair,
       // or that one of the pair is included in, joins it — and every member is
       // re-pointed to the carrier picked now (order-independent: exactly one payable).
+      // Round 11 (L3): the members are LOCKED in id order and the group is re-read inside
+      // the lock until it is stable — two answers at once never build on a stale group.
+      const groupOf = async (seed: string[]): Promise<string[]> => {
+        const r = (await tx.execute(sql`
+          with recursive grp(id) as (
+            select unnest(array[${sql.join(seed.map((id) => sql`${id}::uuid`), sql`, `)}])
+            union
+            select i.id from ${invoices} i, grp
+             where i.restaurant_id = ${restaurantId}
+               and (i.id::text = (select g.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' from ${invoices} g where g.id = grp.id and g.restaurant_id = ${restaurantId})
+                    or (i.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId') = grp.id::text))
+          select id::text as id from grp order by id`)) as unknown as Array<{ id: string }>;
+        return r.map((x) => x.id);
+      };
+      const lockAll = async (ids: string[]) => {
+        await tx.execute(sql`
+          select id from ${invoices}
+           where restaurant_id = ${restaurantId} and id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
+           order by id for update`);
+      };
+      let memberIds = [invoiceId, head].sort();
+      await lockAll(memberIds);
+      for (let i = 0; i < 6; i++) {
+        const next = await groupOf(memberIds);
+        if (next.length === memberIds.length && next.every((id, k) => id === memberIds[k])) break;
+        memberIds = next;
+        await lockAll(memberIds);
+      }
+      const memberList = sql.join(memberIds.map((id) => sql`${id}::uuid`), sql`, `);
       const rows = (await tx.execute(sql`
-        with recursive grp(id) as (
-          select unnest(array[${invoiceId}::uuid, ${head}::uuid])
-          union
-          select i.id from ${invoices} i, grp
-           where i.restaurant_id = ${restaurantId}
-             and (i.id::text = (select g.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' from ${invoices} g where g.id = grp.id and g.restaurant_id = ${restaurantId})
-                  or (i.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId') = grp.id::text))
         select i.id::text as id, i.status, i.supplier_id::text as supplier_id,
+               i.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' as paid_with,
                (i.ocr_payload -> 'raw' -> 'duplicateOf') is not null as dup_stamp,
+               i.ocr_payload -> 'raw' -> 'duplicateOf' ->> 'invoiceId' as dup_of,
                exists (select 1 from ${matchRuns} mr join ${discrepancies} d on d.match_run_id = mr.id and d.restaurant_id = mr.restaurant_id
                         where mr.invoice_id = i.id and mr.restaurant_id = i.restaurant_id
                           and d.type = 'DUPLICATE_INVOICE' and d.resolution_status in ('open', 'escalated', 'accepted')) as dup_finding
-          from ${invoices} i join grp on grp.id = i.id
-         where i.restaurant_id = ${restaurantId}
-         for update of i`)) as unknown as Array<{ id: string; status: string; supplier_id: string | null; dup_stamp: boolean; dup_finding: boolean }>;
+          from ${invoices} i
+         where i.restaurant_id = ${restaurantId} and i.id in (${memberList})
+         order by i.id`)) as unknown as Array<{
+        id: string;
+        status: string;
+        supplier_id: string | null;
+        paid_with: string | null;
+        dup_stamp: boolean;
+        dup_of: string | null;
+        dup_finding: boolean;
+      }>;
       const pairRows = rows.filter((r) => r.id === invoiceId || r.id === head);
       if (pairRows.length < 2) throw new TRPCError({ code: 'CONFLICT', message: 'not_comparable' });
       // the payable is one of the pair — or the invoice the head is already included in
@@ -274,11 +352,17 @@ export async function resolvePageFlag(
       // Round 10 (P6): never while either is being re-read (its invoice may still change).
       if (pairRows.some((r) => r.status === 'ocr_pending')) throw new TRPCError({ code: 'CONFLICT', message: 'reocr_pending' });
       // Round 10 (P5): a known duplicate is never folded into a payable invoice (it would
-      // hide as a calm "included" row while its copy is paid again).
-      if (rows.some((r) => r.dup_stamp || r.dup_finding)) throw new TRPCError({ code: 'CONFLICT', message: 'duplicate_on_file' });
+      // hide as a calm "included" row while its copy is paid again). Round 11 (M2): a
+      // stamp pointing at a page of THIS document (a member or a recorded head — a
+      // continuation repeating its own page 1's number) is a repeat, not a duplicate.
+      const inDocument = new Set([...memberIds, ...recorded]);
+      const realDuplicate = (r: (typeof rows)[number]) => r.dup_finding || (r.dup_stamp && !(r.dup_of && inDocument.has(r.dup_of)));
+      if (rows.some(realDuplicate)) throw new TRPCError({ code: 'CONFLICT', message: 'duplicate_on_file' });
       if (rows.some((r) => r.status === 'paid' && r.id !== payable)) throw new TRPCError({ code: 'CONFLICT', message: 'already_paid' });
-      const marked = rows.map((r) => r.id).filter((id) => id !== payable);
+      const marked = memberIds.filter((id) => id !== payable);
       const markList = sql.join(marked.map((id) => sql`${id}::uuid`), sql`, `);
+      // Round 11 (M3): the exact prior state of every member — the undo restores THIS.
+      const snapshot = rows.map((r) => ({ id: r.id, paidWith: r.paid_with }));
       await tx.execute(sql`
         update ${invoices}
            set ocr_payload = coalesce(ocr_payload, '{}'::jsonb) || jsonb_build_object('raw',
@@ -290,6 +374,18 @@ export async function resolvePageFlag(
         update ${invoices}
            set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - 'paidWith'), updated_at = now()
          where restaurant_id = ${restaurantId} and id = ${payable}::uuid and (ocr_payload -> 'raw') ? 'paidWith'`);
+      // Round 11 (L1): one document, one total — a single page's TOTAL_MISMATCH (its
+      // lines vs the document's printed total, or a total printed on another page) is
+      // not a leak. Open ones on the members are set aside (audited; the undo reopens them).
+      const waived = (await tx.execute(sql`
+        update ${discrepancies} d
+           set resolution_status = 'rejected', resolved_by = ${args.userId}, resolved_at = now(),
+               resolution_note = ${GROUP_TOTAL_NOTE}
+          from ${matchRuns} mr
+         where mr.id = d.match_run_id and mr.restaurant_id = d.restaurant_id
+           and d.restaurant_id = ${restaurantId} and mr.invoice_id in (${memberList})
+           and d.type = 'TOTAL_MISMATCH' and d.resolution_status in ('open', 'escalated')
+         returning d.id::text as id, d.resolution_status as status`)) as unknown as Array<{ id: string }>;
       await tx
         .update(ingestDocuments)
         .set({ error: PAGE_CHECKED_TOGETHER, updatedAt: new Date() })
@@ -300,8 +396,15 @@ export async function resolvePageFlag(
         action: CHECKED_TOGETHER_ACTION,
         entityType: 'invoice',
         entityId: invoiceId,
-        before: { flag } as never,
-        after: { flag: PAGE_CHECKED_TOGETHER, payableInvoiceId: payable, withInvoiceId: head, paidWithInvoiceIds: marked } as never,
+        before: { flag, members: snapshot } as never,
+        after: {
+          flag: PAGE_CHECKED_TOGETHER,
+          payableInvoiceId: payable,
+          withInvoiceId: head,
+          memberIds,
+          paidWithInvoiceIds: marked,
+          waivedTotalMismatchIds: waived.map((w) => w.id),
+        } as never,
       });
       return { invoiceId, match: false, released: [] as string[] };
     }

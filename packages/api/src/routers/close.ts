@@ -91,7 +91,14 @@ async function invoiceFigures(db: Database, restaurantId: string, monthOffset: n
     .map((r) => r.id);
   const consSet = new Set(consolidatedIds);
   const cons = open.filter((s) => consSet.has(s.invoiceId));
-  const unchecked = states.filter((s) => tabOfState(s.state) === 'awaiting' && !consSet.has(s.invoiceId));
+  // G-09 (round 11 L2): an invoice "included in" another (checked together as one
+  // document) is counted once, at its carrier — exactly like the pay run.
+  const included = new Set(
+    payloads
+      .filter((r) => typeof (r.payload as { raw?: { paidWith?: { invoiceId?: unknown } } } | null)?.raw?.paidWith?.invoiceId === 'string')
+      .map((r) => r.id),
+  );
+  const unchecked = states.filter((s) => tabOfState(s.state) === 'awaiting' && !consSet.has(s.invoiceId) && !included.has(s.invoiceId));
   return {
     unchecked: {
       count: unchecked.length,

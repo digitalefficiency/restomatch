@@ -31,7 +31,11 @@ export default async function PageQuestionPage({ searchParams }: { searchParams:
   if (!q) notFound();
   const [locale, t] = await Promise.all([getLocale(), getT(ingest)]);
 
-  const ids = [q.otherInvoiceId, q.pageInvoiceId].filter((id): id is string => Boolean(id) && UUID.test(id!));
+  // Round 11 (M6): every invoice the page may continue (likeliest first), the page itself,
+  // and (M5) the invoice the compared one is already included in — each with its panel.
+  const heads = (q.heads?.length ? q.heads : [q.otherInvoiceId]).filter((id): id is string => Boolean(id) && UUID.test(id!));
+  const ids = [...heads, q.pageInvoiceId, q.otherIncludedIn].filter((id): id is string => Boolean(id) && UUID.test(id!));
+  const roleOf = (id: string): 'page' | 'head' | 'carrier' => (id === q.pageInvoiceId ? 'page' : heads.includes(id) ? 'head' : 'carrier');
   const panels = await Promise.all(
     [...new Set(ids)].map(async (id) => {
       const inv = await caller.receiving.getInvoice({ invoiceId: id }).catch(() => null);
@@ -41,6 +45,7 @@ export default async function PageQuestionPage({ searchParams }: { searchParams:
       return {
         id,
         isPage: id === q.pageInvoiceId,
+        role: roleOf(id),
         supplier: (locale === 'en' && inv.supplierNameEn) || inv.supplierName || null,
         number: inv.invoiceNumber ?? null,
         total: total == null ? null : Number(total),
@@ -53,7 +58,10 @@ export default async function PageQuestionPage({ searchParams }: { searchParams:
   const shown = panels.filter((p): p is NonNullable<typeof p> => p !== null);
   if (shown.length === 0) notFound();
   const page = shown.find((p) => p.isPage) ?? null;
-  const other = shown.find((p) => !p.isPage) ?? null;
+  const headPanels = heads.map((id) => shown.find((p) => p.id === id)).filter((p): p is NonNullable<typeof p> => Boolean(p));
+  const other = headPanels[0] ?? null;
+  const carrier = shown.find((p) => p.role === 'carrier') ?? null;
+  const ordered = [...headPanels, ...(page ? [page] : []), ...(carrier ? [carrier] : [])];
 
   return (
     <div className="space-y-4">
@@ -70,11 +78,19 @@ export default async function PageQuestionPage({ searchParams }: { searchParams:
         <p className="text-sm text-ink">{t(`errors.${q.pageFlag as 'page_not_merged'}`)}</p>
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {[other, page].map((p, i) =>
+        {ordered.map((p, i) =>
           p ? (
             <section key={p.id} className="space-y-2 rounded-2xl border border-line bg-surface p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold text-ink">{i === 0 ? t('inbox.compareBefore') : t('inbox.compareThis')}</h2>
+                <h2 className="text-sm font-semibold text-ink">
+                  {p.role === 'page'
+                    ? t('inbox.compareThis')
+                    : p.role === 'carrier'
+                      ? t('inbox.compareCarrier')
+                      : i === 0
+                        ? t('inbox.compareBefore')
+                        : t('inbox.compareAlsoHead')}
+                </h2>
                 <Link href={`/dashboard/invoices/${p.id}`} className="inline-flex min-h-11 items-center text-sm font-semibold text-primary hover:underline">
                   {t('inbox.openInvoice')}
                 </Link>
@@ -117,6 +133,7 @@ export default async function PageQuestionPage({ searchParams }: { searchParams:
         pageInvoiceId={page?.id ?? null}
         otherInvoiceId={other?.id ?? null}
         otherIncludedIn={q.otherIncludedIn ?? null}
+        options={ordered.map((p) => ({ id: p.id, role: p.role, supplier: p.supplier, number: p.number, total: p.total }))}
         pageTotal={page?.total ?? null}
         otherTotal={other?.total ?? null}
         supplier={page?.supplier ?? other?.supplier ?? null}

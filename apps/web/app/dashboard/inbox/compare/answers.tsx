@@ -29,6 +29,11 @@ export function PageAnswers(props: {
   otherTotal: number | null;
   supplier: string | null;
   canManage: boolean;
+  /**
+   * Round 11 (M5/M6): every invoice shown — the page, each head it may continue, and
+   * the carrier the head is already included in — with its supplier, number and ₪.
+   */
+  options?: Array<{ id: string; role: 'page' | 'head' | 'carrier'; supplier: string | null; number: string | null; total: number | null }>;
 }) {
   const t = useT(ingest);
   const locale = useLocale();
@@ -36,7 +41,14 @@ export function PageAnswers(props: {
   const toast = useToast();
   const resolve = trpc.ingest.resolvePageFlag.useMutation();
   const [confirm, setConfirm] = useState<Action | null>(null);
-  const [payable, setPayable] = useState<string | null>(null);
+  const options = props.options ?? [];
+  const headOptions = options.filter((o) => o.role === 'head');
+  // Round 11 (M5): default carrier = the invoice that carries the printed document total
+  // (the largest printed ₪ among them) — never a guess without ₪.
+  const totalCarrier = options.filter((o) => o.total !== null).sort((x, y) => (y.total ?? 0) - (x.total ?? 0))[0] ?? null;
+  const [payable, setPayable] = useState<string | null>(totalCarrier?.id ?? null);
+  const [withHead, setWithHead] = useState<string | null>(props.otherInvoiceId);
+  const [smallerOk, setSmallerOk] = useState(false);
   const [pickMissing, setPickMissing] = useState(false);
   if (!props.canManage) return <p className="text-sm text-muted">{t('inbox.compareManagerOnly')}</p>;
 
@@ -53,7 +65,7 @@ export function PageAnswers(props: {
         action,
         // Round 9 (N4): one of the two stays payable; the other is "included in it".
         ...(action === 'checked_together' && payable
-          ? { payableInvoiceId: payable, ...(props.otherInvoiceId ? { withInvoiceId: props.otherInvoiceId } : {}) }
+          ? { payableInvoiceId: payable, ...(withHead ? { withInvoiceId: withHead } : {}) }
           : {}),
       });
       toast.success(done[action]);
@@ -85,6 +97,12 @@ export function PageAnswers(props: {
   const confirmFirst = (a: Action) =>
     a === 'delete_duplicate' || a === 'checked_together' || (a === 'separate' && (props.flag === 'page_duplicate' || PAGE_ONE.includes(props.flag)));
   const together = confirm === 'checked_together';
+  const describe = (o: { supplier: string | null; number: string | null; total: number | null }) =>
+    [o.supplier, o.number, o.total !== null ? ils(o.total) : null].filter(Boolean).join(' · ') || '—';
+  const pickedOption = options.find((o) => o.id === payable) ?? null;
+  const smallerPick = Boolean(
+    pickedOption && totalCarrier && pickedOption.id !== totalCarrier.id && (pickedOption.total ?? 0) < (totalCarrier.total ?? 0),
+  );
 
   const secondary: Action | null = primary === 'separate' || primary === 'close_unreadable' ? null : 'separate';
 
@@ -108,13 +126,22 @@ export function PageAnswers(props: {
             <span className="block space-y-3">
               <span className="block">{t('inbox.pageTogetherConfirmBody')}</span>
               {props.otherIncludedIn ? <span className="block text-sm text-muted">{t('inbox.pageTogetherAlreadyIncluded')}</span> : null}
+              {/* Round 11 (M6): the page may continue more than one invoice — the person says which. */}
+              {headOptions.length > 1 ? (
+                <span role="radiogroup" aria-label={t('inbox.pageTogetherWithTitle')} className="flex flex-col gap-2">
+                  <span className="text-sm font-semibold text-ink">{t('inbox.pageTogetherWithTitle')}</span>
+                  {headOptions.map((o) => (
+                    <label key={`with-${o.id}`} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-line px-3">
+                      <input type="radio" name="with" checked={withHead === o.id} onChange={() => setWithHead(o.id)} />
+                      <span>{describe(o)}</span>
+                    </label>
+                  ))}
+                </span>
+              ) : null}
               <span role="radiogroup" aria-label={t('inbox.pageTogetherConfirmTitle')} className="flex flex-col gap-2">
-                {[
-                  { id: props.otherInvoiceId, label: t('inbox.pageTogetherPickOther', { amount: ils(props.otherTotal) }) },
-                  { id: props.pageInvoiceId, label: t('inbox.pageTogetherPickThis', { amount: ils(props.pageTotal) }) },
-                  ...(props.otherIncludedIn ? [{ id: props.otherIncludedIn, label: t('inbox.pageTogetherPickCarrier') }] : []),
-                ].map((o) =>
-                  o.id ? (
+                {options
+                  .filter((o) => o.role === 'page' || o.role === 'carrier' || o.id === withHead)
+                  .map((o) => (
                     <label key={o.id} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-line px-3">
                       <input
                         type="radio"
@@ -122,14 +149,23 @@ export function PageAnswers(props: {
                         checked={payable === o.id}
                         onChange={() => {
                           setPayable(o.id);
+                          setSmallerOk(false);
                           setPickMissing(false);
                         }}
                       />
-                      <span>{o.label}</span>
+                      <span>{t('inbox.pageTogetherPickOption', { what: describe(o) })}</span>
                     </label>
-                  ) : null,
-                )}
+                  ))}
               </span>
+              {/* Round 11 (M5): making the invoice with the bigger printed total "included" in a smaller one needs an explicit yes. */}
+              {smallerPick ? (
+                <label className="flex min-h-11 cursor-pointer items-start gap-2 rounded-xl border border-warn/50 bg-surface-2 px-3 py-2 text-sm">
+                  <input type="checkbox" checked={smallerOk} onChange={(e) => setSmallerOk(e.target.checked)} />
+                  <span>
+                    {t('inbox.pageTogetherSmallerConfirm', { bigger: ils(totalCarrier?.total ?? null), picked: ils(pickedOption?.total ?? null) })}
+                  </span>
+                </label>
+              ) : null}
               {pickMissing ? (
                 <span role="alert" className="block text-sm font-semibold text-danger">
                   {t('inbox.pageTogetherPickRequired')}
@@ -158,7 +194,7 @@ export function PageAnswers(props: {
         }}
         onConfirm={() => {
           const a = confirm;
-          if (a === 'checked_together' && !payable) {
+          if (a === 'checked_together' && (!payable || (smallerPick && !smallerOk))) {
             setPickMissing(true);
             return;
           }
