@@ -46,6 +46,7 @@ import {
   sampleCatalogCsv,
 } from './file-logic';
 import { confidenceWord, suggestionBasis } from '../money-logic';
+import { WhatChanges } from './what-changes';
 
 type Outputs = inferRouterOutputs<AppRouter>;
 type Preview = Outputs['catalog']['parsePreview'];
@@ -125,6 +126,7 @@ export function ImportWizard({
   const [mapping, setMapping] = useState<Mapping>({});
   const [vatBasis, setVatBasis] = useState<VatBasis | null>(null);
   const [check, setCheck] = useState<Check | null>(null);
+  const [diff, setDiff] = useState<Preview['diff'] | null>(null);
   const [flaggedOk, setFlaggedOk] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
   const [result, setResult] = useState<CommitResult | null>(null);
@@ -234,6 +236,7 @@ export function ImportWizard({
       setMapping(res.mapping);
       setVatBasis(res.vatBasisDetected);
       setCheck(res.check);
+      setDiff(res.diff);
       setFlaggedOk(false);
       setCommitError(null);
       setStep('MAP');
@@ -266,6 +269,7 @@ export function ImportWizard({
         ...(vatBasis ? { vatBasis } : {}),
       });
       setCheck(res.check);
+      setDiff(res.diff);
       setFlaggedOk(false);
       setCheckStale(false);
       return res.check;
@@ -338,6 +342,7 @@ export function ImportWizard({
     setMapping({});
     setVatBasis(null);
     setCheck(null);
+    setDiff(null);
     setLastResolved(null);
     firstCheck.current = true;
     parsePreview.reset();
@@ -589,6 +594,7 @@ export function ImportWizard({
           </fieldset>
 
           <PriceCheck check={check} busy={recheck.isPending} money={money} />
+          {diff && <WhatChanges diff={diff} stale={checkStale || recheck.isPending} />}
 
           {(check?.flaggedCount ?? 0) > 0 && (
             <label className="mt-3 flex min-h-[44px] items-center gap-2 text-sm text-ink">
