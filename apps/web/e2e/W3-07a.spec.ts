@@ -177,9 +177,15 @@ test.describe('slice 2 · connections hub and plan usage (demo owner)', () => {
     await page.goto('/dashboard/settings');
     const plan = page.getByTestId('plan-usage');
     await expect(plan).toBeVisible();
+    // The usage rows sit in a "פרטים" fold (the settings page has a W2-16 word budget).
+    const toggle = plan.locator('[data-explain-toggle]');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await toggle.click();
     await expect(plan.locator('[data-row="scans"]')).toBeVisible();
     await expect(plan.locator('[data-row="seats"]')).toBeVisible();
     await expect(plan).not.toContainText('₪');
-    await expect(plan.locator('button, input, select')).toHaveCount(0);
+    // Read-only: the fold toggle is the only control.
+    await expect(plan.locator('input, select, a')).toHaveCount(0);
+    await expect(plan.locator('button')).toHaveCount(1);
   });
 });

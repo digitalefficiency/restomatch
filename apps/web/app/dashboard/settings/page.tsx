@@ -79,7 +79,7 @@ export default async function SettingsPage() {
       </div>
       {planUsage ? (
         <div>
-          <SectionHeader title={t('plan.title')} subtitle={t('plan.subtitle')} />
+          <SectionHeader title={t('plan.title')} />
           <PlanUsageSection data={planUsage} />
         </div>
       ) : null}
