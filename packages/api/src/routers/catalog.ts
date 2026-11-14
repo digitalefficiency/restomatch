@@ -21,6 +21,7 @@ import {
 } from '@restomatch/db';
 import { MockEmbeddingProvider, recordConfirmedMatch } from '@restomatch/catalog';
 import { enqueueCatalogImport, isQueueUnavailableError } from '@restomatch/queue';
+import { seesMoney } from '../lib/moneyVisibility';
 import { managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 import {
@@ -207,7 +208,7 @@ export const catalogRouter = router({
           sql`(${supplierCatalogItems.supplierNameRaw} ILIKE ${like} OR ${supplierCatalogItems.supplierSku} ILIKE ${like} OR ${products.canonicalName} ILIKE ${like} OR ${products.nameEn} ILIKE ${like})`,
         );
       }
-      return ctx.db
+      const rows = await ctx.db
         .select({
           id: supplierCatalogItems.id,
           supplierId: supplierCatalogItems.supplierId,
@@ -231,6 +232,10 @@ export const catalogRouter = router({
         .orderBy(asc(supplierCatalogItems.supplierNameRaw))
         .limit(input?.limit ?? 50)
         .offset(input?.offset ?? 0);
+      // H-11 strip: no list price for the receiver. The chef keeps it: the
+      // order wizard reads this list (orders exemption, brief Q1).
+      if (seesMoney(ctx.session.role, 'orders')) return rows;
+      return rows.map((r) => ({ ...r, listPrice: null }));
     }),
 
   /** A product with all its supplier prices + recent observed-price history. */
@@ -303,6 +308,16 @@ export const catalogRouter = router({
         )
         .orderBy(desc(priceHistory.observedAt))
         .limit(24);
+      // H-11 strip: the product page is no order screen, so neither the
+      // receiver nor the chef gets its prices. Keys stay, values are null.
+      if (!seesMoney(ctx.session.role)) {
+        return {
+          product,
+          items: priced.map((it) => ({ ...it, listPrice: null, unitPricePerDefaultUnit: null })),
+          cheapestUnitPrice: null,
+          history: history.map((h) => ({ ...h, unitPrice: null })),
+        };
+      }
       return { product, items: priced, cheapestUnitPrice, history };
     }),
 

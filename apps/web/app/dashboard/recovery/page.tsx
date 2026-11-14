@@ -152,7 +152,7 @@ export default async function RecoveryPage({
                 </div>
                 <div>
                   <dt className="text-xs text-subtle">{t('tracker.returnedThisMonthLabel')}</dt>
-                  <dd className="font-semibold tabular-nums text-gold">{exact(returnedThisMonth.returnedAgorot)}</dd>
+                  <dd className="font-semibold tabular-nums text-gold">{returnedThisMonth.returnedAgorot == null ? null : exact(returnedThisMonth.returnedAgorot)}</dd>
                 </div>
               </dl>
             </div>
