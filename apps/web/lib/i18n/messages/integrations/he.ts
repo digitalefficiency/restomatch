@@ -32,6 +32,7 @@ export const he = {
       intake: 'לכתובות הקליטה',
       contact: 'לחיבור חשבון אמיתי',
     },
+    errors: { syncStale: 'לא סונכרן יותר מיומיים, כדאי לבדוק את החיבור' },
     contactText: 'שלום, נשמח לחבר את {platform} ל-RestoMatch.',
   },
   accounting: {

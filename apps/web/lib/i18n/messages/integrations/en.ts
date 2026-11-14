@@ -31,6 +31,7 @@ export const en: Shape<typeof he> = {
       intake: 'Intake addresses',
       contact: 'Connect a real account',
     },
+    errors: { syncStale: 'Not synced for over two days, check the connection' },
     contactText: 'Hello, we would like to connect {platform} to RestoMatch.',
   },
   accounting: {
