@@ -6,6 +6,7 @@ import { getLocale, getT } from '@/lib/i18n/server';
 import { components } from '@/lib/i18n/messages/components';
 import { products as productsNs } from '@/lib/i18n/messages/products';
 import { ProductEditor } from './product-client';
+import { MergePanel } from './merge-panel';
 
 export default async function ProductPage({ params }: { params: Promise<{ productId: string }> }) {
   const { productId } = await params;
@@ -50,6 +51,7 @@ export default async function ProductPage({ params }: { params: Promise<{ produc
         }
       />
       <ProductEditor detail={detail} suppliers={suppliers} canEdit={canEdit} />
+      {canEdit && <MergePanel productId={detail.product.id} />}
     </div>
   );
 }
