@@ -166,17 +166,18 @@ export const fontUrl = (set: FaceSet, subset: Subset, weight: number): string =>
  * Google Sans (DS3-07): the same bands, asc 966, desc 286, gap 0 (USE_TYPO_METRICS),
  * measured against Liberation Sans (Arial's metrics) on the variable file instanced at
  * each band's weight. One size-adjust per band did not fit: against Arial, Google Sans's
- * Hebrew letters are 103–110 % wide, its Latin 100–107 %, its space 84 % and its tabular
- * digits 108 %, and with the face held back the fallback moved phone layouts by up to
- * CLS 0.34 when it swapped in. So within each band a face per character class (Latin,
- * Hebrew, space, digits at their 'tnum' width), each weighted by how often the product's
- * own he/en message strings use each character, overrides the DS2-method catch-all.
- * Measured on 537 Hebrew and 600 English catalogue strings, fallback widths are within
- * 0.2–0.7 % of the face at every weight (catch-all alone: −3.4 to +2.3 %).
+ * Hebrew letters are 103–110 % wide, its Latin 100–107 %, its space 84 % and its
+ * digits 98–108 %, and with the face held back the fallback moved phone layouts by up
+ * to CLS 0.38 when it swapped in. So within each band a face per character class
+ * (Latin, Hebrew, space, digits at the face's own proportional width), each weighted by
+ * how often the product's own he/en message strings use each character, overrides the
+ * DS2-method catch-all. On 537 Hebrew and 600 English catalogue strings the fallback is
+ * within 0.2–0.6 % of the face at every weight (catch-all alone: −3.4 to +2.3 %); with
+ * the face held back 3 s, 1 of 32 screen loads moved more than 0.01 (Plex: 3 of 32).
  */
 const ARIAL = ["local('Arial')", "local('ArialMT')", "local('Liberation Sans')"] as const;
 const ARIAL_BOLD = ["local('Arial Bold')", "local('Arial-BoldMT')", "local('Liberation Sans Bold')"] as const;
-/** The space and no-break space (Google Sans: 84 % of Arial's) and the digits (its 'tnum' 0.600 em: 108 %). */
+/** The space and no-break space (Google Sans: 84 % of Arial's) and the digits (its own, proportional: 98–104 %). */
 const FALLBACK_SPACE = 'U+0020, U+00A0';
 const FALLBACK_DIGITS = 'U+0030-0039';
 
@@ -204,10 +205,10 @@ export const fallbackFaces = [
   { family: 'Google Sans Fallback', weight: '450 549', local: ARIAL, sizeAdjust: '83.86%', ascent: '115.19%', descent: '34.1%', lineGap: '0%', unicodeRange: FALLBACK_SPACE },
   { family: 'Google Sans Fallback', weight: '550 649', local: ARIAL_BOLD, sizeAdjust: '83.86%', ascent: '115.19%', descent: '34.1%', lineGap: '0%', unicodeRange: FALLBACK_SPACE },
   { family: 'Google Sans Fallback', weight: '650 900', local: ARIAL_BOLD, sizeAdjust: '84.22%', ascent: '114.7%', descent: '33.96%', lineGap: '0%', unicodeRange: FALLBACK_SPACE },
-  { family: 'Google Sans Fallback', weight: '100 449', local: ARIAL, sizeAdjust: '107.88%', ascent: '89.54%', descent: '26.51%', lineGap: '0%', unicodeRange: FALLBACK_DIGITS },
-  { family: 'Google Sans Fallback', weight: '450 549', local: ARIAL, sizeAdjust: '107.88%', ascent: '89.54%', descent: '26.51%', lineGap: '0%', unicodeRange: FALLBACK_DIGITS },
-  { family: 'Google Sans Fallback', weight: '550 649', local: ARIAL_BOLD, sizeAdjust: '107.88%', ascent: '89.54%', descent: '26.51%', lineGap: '0%', unicodeRange: FALLBACK_DIGITS },
-  { family: 'Google Sans Fallback', weight: '650 900', local: ARIAL_BOLD, sizeAdjust: '107.88%', ascent: '89.54%', descent: '26.51%', lineGap: '0%', unicodeRange: FALLBACK_DIGITS },
+  { family: 'Google Sans Fallback', weight: '100 449', local: ARIAL, sizeAdjust: '98.3%', ascent: '98.27%', descent: '29.09%', lineGap: '0%', unicodeRange: FALLBACK_DIGITS },
+  { family: 'Google Sans Fallback', weight: '450 549', local: ARIAL, sizeAdjust: '101.05%', ascent: '95.6%', descent: '28.3%', lineGap: '0%', unicodeRange: FALLBACK_DIGITS },
+  { family: 'Google Sans Fallback', weight: '550 649', local: ARIAL_BOLD, sizeAdjust: '102.44%', ascent: '94.3%', descent: '27.92%', lineGap: '0%', unicodeRange: FALLBACK_DIGITS },
+  { family: 'Google Sans Fallback', weight: '650 900', local: ARIAL_BOLD, sizeAdjust: '103.86%', ascent: '93.01%', descent: '27.54%', lineGap: '0%', unicodeRange: FALLBACK_DIGITS },
 ] as const;
 
 export interface FontPreloads {

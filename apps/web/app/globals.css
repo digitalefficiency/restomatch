@@ -388,9 +388,9 @@
   font-family: 'Google Sans Fallback';
   font-weight: 100 449;
   src: local('Arial'), local('ArialMT'), local('Liberation Sans');
-  size-adjust: 107.88%;
-  ascent-override: 89.54%;
-  descent-override: 26.51%;
+  size-adjust: 98.3%;
+  ascent-override: 98.27%;
+  descent-override: 29.09%;
   line-gap-override: 0%;
   unicode-range: U+0030-0039;
 }
@@ -398,9 +398,9 @@
   font-family: 'Google Sans Fallback';
   font-weight: 450 549;
   src: local('Arial'), local('ArialMT'), local('Liberation Sans');
-  size-adjust: 107.88%;
-  ascent-override: 89.54%;
-  descent-override: 26.51%;
+  size-adjust: 101.05%;
+  ascent-override: 95.6%;
+  descent-override: 28.3%;
   line-gap-override: 0%;
   unicode-range: U+0030-0039;
 }
@@ -408,9 +408,9 @@
   font-family: 'Google Sans Fallback';
   font-weight: 550 649;
   src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
-  size-adjust: 107.88%;
-  ascent-override: 89.54%;
-  descent-override: 26.51%;
+  size-adjust: 102.44%;
+  ascent-override: 94.3%;
+  descent-override: 27.92%;
   line-gap-override: 0%;
   unicode-range: U+0030-0039;
 }
@@ -418,9 +418,9 @@
   font-family: 'Google Sans Fallback';
   font-weight: 650 900;
   src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
-  size-adjust: 107.88%;
-  ascent-override: 89.54%;
-  descent-override: 26.51%;
+  size-adjust: 103.86%;
+  ascent-override: 93.01%;
+  descent-override: 27.54%;
   line-gap-override: 0%;
   unicode-range: U+0030-0039;
 }
