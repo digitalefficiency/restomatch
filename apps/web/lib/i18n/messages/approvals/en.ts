@@ -274,7 +274,7 @@ export const en: Shape<typeof he> = {
     'severity-block': 'High severity — owner approval',
     'cumulative-large': 'Large total difference on the invoice — owner',
     'cumulative-medium': 'Medium total difference on the invoice — manager',
-    'non-leak-acknowledge': 'Not part of the leak — noted, no ₪',
+    'non-leak-acknowledge': 'Not part of the leak, noted with no ₪',
     'minor-info': 'Negligible difference — auto-approved',
     fallback: 'Default — manager',
   },
