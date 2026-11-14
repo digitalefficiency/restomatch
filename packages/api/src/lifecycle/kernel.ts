@@ -266,6 +266,11 @@ export class TransitionRefusedCause extends Error {
   }
 }
 
+/** A typed refusal (PRECONDITION_FAILED, appCode `lifecycle.refused`, `appParams.reason`); machines throw it from their hooks. */
+export function transitionRefused(reason: string, message: string): TRPCError {
+  return refused(message, reason);
+}
+
 function refused(message: string, reason: string): TRPCError {
   return new TRPCError({
     code: 'PRECONDITION_FAILED',

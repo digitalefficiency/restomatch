@@ -13,7 +13,7 @@ import { TRPCError } from '@trpc/server';
 import { parseNumberInput } from '@restomatch/types';
 import { stampFor } from '../recovery/lifecycle';
 import { columnType } from './capabilities';
-import { defineMachine, type MoveContext } from './kernel';
+import { defineMachine, transitionRefused, type MoveContext } from './kernel';
 
 export type InvoiceStatus = (typeof invoiceStatus.enumValues)[number];
 export type ResolutionStatus = (typeof resolutionStatus.enumValues)[number];
@@ -66,8 +66,9 @@ const shekelString = (agorot: number) => `${Math.trunc(agorot / 100)}.${String(a
  *
  * The amount is `payload.paidAmount` parsed at the boundary (exact agorot,
  * never a float), else the invoice's own total incl. VAT. The source is
- * returned for the audit row. An invalid amount or method is BAD_REQUEST and
- * rolls the move back.
+ * returned for the audit row. An invalid amount or method is BAD_REQUEST; an
+ * invoice with no total and no payload amount is refused with
+ * `invoice_paid_amount_unknown` (never a guessed 0). Either rolls the move back.
  */
 async function writePayment(tx: Database, c: MoveContext<string, string>): Promise<Record<string, unknown>> {
   const cols = await paymentColumns(tx);
@@ -86,7 +87,10 @@ async function writePayment(tx: Database, c: MoveContext<string, string>): Promi
     const [row] = (await tx.execute(sql`
       SELECT total_incl_vat::text AS total FROM invoices WHERE id = ${c.id}::uuid AND restaurant_id = ${c.restaurantId}::uuid
     `)) as unknown as Array<{ total: string | null }>;
-    if (row?.total == null) throw badPayment('the invoice has no total — send paidAmount');
+    // Never a guessed 0: without a total there is no amount that left the bank.
+    if (row?.total == null) {
+      throw transitionRefused('invoice_paid_amount_unknown', 'the invoice has no total incl. VAT — send paidAmount');
+    }
     paidAmount = row.total;
   }
   const method = c.payload.paymentMethod;

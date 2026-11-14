@@ -229,6 +229,7 @@ describe('invoice machine', () => {
       ((await ownerDb.execute(
         sql`SELECT paid_at, paid_amount::text AS paid_amount, payment_method, payment_ref FROM invoices WHERE id = ${A.invoiceId}::uuid`,
       )) as unknown as Pay[])[0]!;
+    const setTotal = (v: string | null) => ownerDb.update(invoices).set({ totalInclVat: v }).where(eq(invoices.id, A.invoiceId));
     const lastMarkAudit = async () => {
       const rows = await ownerDb
         .select({ action: auditLog.action, after: auditLog.after })
@@ -274,6 +275,19 @@ describe('invoice machine', () => {
       expect(await invoiceStatus()).toBe('approved');
       expect(await pay()).toEqual({ paid_at: null, paid_amount: null, payment_method: null, payment_ref: null });
       expect((await invoiceAudits()).map((a) => a.action)).toEqual(['invoice.approved_for_payment']);
+    });
+
+    it('no total and no payload amount → refused invoice_paid_amount_unknown (never a guessed 0), nothing moves', async () => {
+      await move('approve_for_payment', { expectedFrom: 'matched' });
+      await setTotal(null);
+      const err = await move('mark_paid', { expectedFrom: 'approved' }).catch((e: unknown) => e);
+      expect(isTransitionRefused(err)).toBe(true);
+      expect((err as { cause: { appParams: { reason: string } } }).cause.appParams.reason).toBe('invoice_paid_amount_unknown');
+      expect(await invoiceStatus()).toBe('approved');
+      expect(await pay()).toEqual({ paid_at: null, paid_amount: null, payment_method: null, payment_ref: null });
+      // …while an explicit amount still records it.
+      await move('mark_paid', { expectedFrom: 'approved', payload: { paidAmount: '88.20' } });
+      expect(await pay()).toMatchObject({ paid_amount: '88.20' });
     });
 
     it('unmark clears all four payment facts together', async () => {
