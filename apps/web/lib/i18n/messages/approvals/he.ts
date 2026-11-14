@@ -144,7 +144,7 @@ export const he = {
   },
   card: {
     pageQuestion: 'עמוד פתוח',
-    pageQuestionBody: 'עמוד ששייך לחשבונית הזאת, או שאולי שייך לה, מחכה להחלטה. החליטו עליו לפני שמחליטים כאן.',
+    pageQuestionBody: 'עמוד של החשבונית הזאת עדיין פתוח בתיבת הקליטה, החליטו עליו קודם',
     pageQuestionCta: 'להחלטה על העמוד',
     invoice: 'חשבונית {number}',
     fixInvoice: 'פתחו חשבונית',

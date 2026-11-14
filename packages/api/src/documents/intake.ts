@@ -10,10 +10,11 @@ import {
   type Database,
 } from '@restomatch/db';
 import type { DocumentFailureReason } from './types';
+import { INVOICE_RECOMPOSABLE } from '../lifecycle/predicates';
 
 /**
  * INTERIM until G-05 merges: the ONE place this package creates an invoice
- * (G-05's invoice machine `initial: ['ocr_pending']`). The swap to G-05's
+ * (G-05's invoice machine: its initial status). The swap to G-05's
  * `createInvoice` is this function's body — no other status literal exists
  * in this package outside the interim re-OCR edge below.
  */
@@ -79,8 +80,8 @@ export async function upsertInvoiceScan(
   });
 }
 
-/** Statuses an invoice may hold and still gain or lose pages. */
-export const OPEN_STATUSES = ['ocr_pending', 'parsed', 'matched'] as const;
+/** Statuses an invoice may hold and still gain or lose pages (the lifecycle predicate). */
+export const OPEN_STATUSES = INVOICE_RECOMPOSABLE;
 
 /**
  * Why an invoice may NOT be recomposed (null = open): approved/paid/disputed,
