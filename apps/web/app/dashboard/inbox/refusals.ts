@@ -15,6 +15,8 @@ export const REFUSALS = [
   'not_comparable',
   'payable_required',
   'already_paid',
+  'duplicate_on_file',
+  'reocr_pending',
 ] as const;
 export type Refusal = (typeof REFUSALS)[number];
 

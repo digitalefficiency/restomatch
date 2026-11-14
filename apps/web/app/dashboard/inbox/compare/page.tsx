@@ -44,6 +44,8 @@ export default async function PageQuestionPage({ searchParams }: { searchParams:
         supplier: (locale === 'en' && inv.supplierNameEn) || inv.supplierName || null,
         number: inv.invoiceNumber ?? null,
         total: total == null ? null : Number(total),
+        /** Round 10 (P5): a copy of an invoice already on file — said on the panel, never hidden. */
+        duplicateOfNumber: inv.duplicateOf?.invoiceNumber ?? null,
         scan,
       };
     }),
@@ -77,6 +79,9 @@ export default async function PageQuestionPage({ searchParams }: { searchParams:
                   {t('inbox.openInvoice')}
                 </Link>
               </div>
+              {p.duplicateOfNumber ? (
+                <Badge tone="danger-solid">{t('inbox.compareDuplicateOf', { number: p.duplicateOfNumber })}</Badge>
+              ) : null}
               <p className="text-sm text-muted">
                 {[p.supplier, p.number].filter(Boolean).join(' · ') || '—'}
                 {p.total !== null ? (
@@ -111,6 +116,7 @@ export default async function PageQuestionPage({ searchParams }: { searchParams:
         flag={q.pageFlag}
         pageInvoiceId={page?.id ?? null}
         otherInvoiceId={other?.id ?? null}
+        otherIncludedIn={q.otherIncludedIn ?? null}
         pageTotal={page?.total ?? null}
         otherTotal={other?.total ?? null}
         supplier={page?.supplier ?? other?.supplier ?? null}

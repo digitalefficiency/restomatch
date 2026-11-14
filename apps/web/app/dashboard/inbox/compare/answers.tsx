@@ -23,6 +23,8 @@ export function PageAnswers(props: {
   /** The page's own invoice, and the invoice shown beside it (round 9: "checked together" picks ONE to pay). */
   pageInvoiceId: string | null;
   otherInvoiceId: string | null;
+  /** Round 10 (P4/Q4): the invoice the one shown is already "included in" (an earlier answer). */
+  otherIncludedIn?: string | null;
   pageTotal: number | null;
   otherTotal: number | null;
   supplier: string | null;
@@ -83,7 +85,7 @@ export function PageAnswers(props: {
   const confirmFirst = (a: Action) =>
     a === 'delete_duplicate' || a === 'checked_together' || (a === 'separate' && (props.flag === 'page_duplicate' || PAGE_ONE.includes(props.flag)));
   const together = confirm === 'checked_together';
-  const sum = props.pageTotal !== null && props.otherTotal !== null ? props.pageTotal + props.otherTotal : null;
+
   const secondary: Action | null = primary === 'separate' || primary === 'close_unreadable' ? null : 'separate';
 
   return (
@@ -104,11 +106,13 @@ export function PageAnswers(props: {
         body={
           together ? (
             <span className="block space-y-3">
-              <span className="block">{t('inbox.pageTogetherConfirmBody', { page: ils(props.pageTotal), other: ils(props.otherTotal), sum: ils(sum) })}</span>
+              <span className="block">{t('inbox.pageTogetherConfirmBody')}</span>
+              {props.otherIncludedIn ? <span className="block text-sm text-muted">{t('inbox.pageTogetherAlreadyIncluded')}</span> : null}
               <span role="radiogroup" aria-label={t('inbox.pageTogetherConfirmTitle')} className="flex flex-col gap-2">
                 {[
                   { id: props.otherInvoiceId, label: t('inbox.pageTogetherPickOther', { amount: ils(props.otherTotal) }) },
                   { id: props.pageInvoiceId, label: t('inbox.pageTogetherPickThis', { amount: ils(props.pageTotal) }) },
+                  ...(props.otherIncludedIn ? [{ id: props.otherIncludedIn, label: t('inbox.pageTogetherPickCarrier') }] : []),
                 ].map((o) =>
                   o.id ? (
                     <label key={o.id} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-line px-3">

@@ -105,12 +105,14 @@ let A = '';
 let B = '';
 let OFF = '';
 let NEVER = '';
+let STORED = '';
 
 beforeAll(async () => {
   A = await restaurant('G-09 sweep A', true);
   B = await restaurant('G-09 sweep B', true);
   OFF = await restaurant('G-09 sweep switch off', false);
   NEVER = await restaurant('G-09 sweep never multi-page', null);
+  STORED = await restaurant('G-09 sweep stores multiPage:false, never ON', false);
   // U-1: path-form scans.
   await invoice(A, 'lost', { status: 'ocr_pending', age: 15, url: `${A}/scan-a1b2-0000beef.jpg` });
   const queued = await invoice(A, 'queued', { status: 'ocr_pending', age: 15, url: `${A}/scan-a1b2-0000cafe.jpg` });
@@ -136,8 +138,12 @@ beforeAll(async () => {
   await ingestPage(NEVER, never, { onEra: false });
   // Round 9 (L6): a tenant whose features merely STORE multiPage:false (never ON when the
   // page arrived — no G-09 mapping) is exactly main: never released by the sweep.
-  const storedFalse = await invoice(OFF, 'heldStoredFalse', { status: 'matched', age: 40, url: `${OFF}/scan-h1-0000000f.jpg` });
-  await ingestPage(OFF, storedFalse, { sender: '9790', onEra: false });
+  const storedFalse = await invoice(STORED, 'heldStoredFalse', { status: 'matched', age: 40, url: `${STORED}/scan-h1-0000000f.jpg` });
+  await ingestPage(STORED, storedFalse, { sender: '9790', onEra: false });
+  // Round 10 (Q2): a page registered seconds before the switch went ON (no mapping of its
+  // own) in a tenant where the switch WAS on is still released.
+  const preOn = await invoice(A, 'heldPreSwitch', { status: 'matched', age: 40, url: `${A}/scan-h1-00000011.jpg` });
+  await ingestPage(A, preOn, { sender: '9792', onEra: false });
   // Round 9 (L11): with the switch OFF, the 'unsettled' backstop enqueues nothing (settle is a no-op).
   const stalledOff = await invoice(OFF, 'stalledComposedOff', { status: 'parsed', age: 20, url: `${OFF}/scan-h1-00000010.pdf`, pages: 2 });
   await db.update(invoices).set({ ocrPayload: { raw: { ocrFailed: true, reason: 'stalled' } } as never }).where(eq(invoices.id, stalledOff));
@@ -217,7 +223,7 @@ describe('G-09 sweep', () => {
     const res = await runOcrSweep(sql, NOW, rids);
     expect(mine(res.released)).toEqual([]); // already released by the first sweep
     const hour = Math.floor(NOW.getTime() / 3_600_000);
-    for (const k of ['held', 'heldSwitchOff', 'heldStuckSibling']) {
+    for (const k of ['held', 'heldSwitchOff', 'heldStuckSibling', 'heldPreSwitch']) {
       expect((await jobs('match-invoice', ids[k]!)).map((j) => j.dedupe_key)).toEqual([`g09-release-${ids[k]}-${hour}`]);
     }
     // round 8: a finished window chain does not block the backstop release

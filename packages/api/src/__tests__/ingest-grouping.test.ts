@@ -43,6 +43,7 @@ import type { AppContext, Session } from '../context';
 import { toObjectRef } from '../documents/objectRef';
 import { localDocumentStorage } from '../documents/storage';
 import { splitDocument } from '../documents/attach';
+import { reopenForOcr, retireInvoice } from '../documents/reocr';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 import { jpegBytes, pngBytes } from './documentTestKit';
 
@@ -1980,5 +1981,214 @@ describe('round 9 · N1/N3: a stray page points at the run it follows — every 
     expect(await pageQ(b1!)).toMatchObject({ documentId: db1!.id });
     await owner().ingest.resolvePageFlag({ documentId: db1!.id, action: 'separate' });
     expect(await pageQ(b1!)).toMatchObject({ flag: 'page_belongs', otherInvoiceId: b1 });
+  });
+});
+
+describe('round 10 · run heads: only a NUMBERED page of the same supplier starts a run', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+  const owner = () =>
+    appRouter.createCaller({ db: ownerDb, session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' } } as AppContext);
+  const related = async (invoiceId: string) =>
+    (await owner().ingest.inbox({ filter: 'errors' })).flatMap((m) => m.documents).find((d) => d.invoiceId === invoiceId)?.relatedInvoiceId ?? null;
+  const pageQ = (invoiceId: string) => owner().ingest.pageQuestionOf({ invoiceId });
+  const docOf = async (invoiceId: string) => (await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, invoiceId)))[0]!;
+  const LETTERHEAD: OcrHead = { ...ACME, invoiceNumber: null }; // name + ח.פ., no number
+  const COMPLETE: OcrHead = { ...ACME, lines: [{ qty: '1', total: '500.00', desc: 'whole invoice line' }], totalExclVat: '500.00' };
+
+  for (const shape of ['open', 'complete'] as const) {
+    it(`P1/P2 [A ${shape}, B p1, B p2 letterhead, B p3 letterhead + total]: B p1 stays held until B p3 is answered`, async () => {
+      const [a, b1, b2, b3] = await pages(4, `r10p1-${shape}`);
+      await writeOcr(a!, shape === 'open' ? { ...ACME, invoiceNumber: `A-98${shape === 'open' ? 0 : 1}` } : { ...COMPLETE, invoiceNumber: 'A-981' });
+      await writeOcr(b1!, { ...ACME, invoiceNumber: `B-28${shape === 'open' ? 0 : 1}` });
+      await writeOcr(b2!, LETTERHEAD);
+      await writeOcr(b3!, { ...LETTERHEAD, totalInclVat: '2500.00' });
+      await settle(b3!);
+      expect(await related(b2!)).toBe(b1); // a letterhead page never heads a run
+      expect(await related(b3!)).toBe(b1);
+      // B p1's own question → "separate"; B p2 → "checked together" (B p1 pays): B p3 still holds B p1
+      if ((await docOf(b1!)).error) await owner().ingest.resolvePageFlag({ documentId: (await docOf(b1!)).id, action: 'separate' });
+      await owner().ingest.resolvePageFlag({ documentId: (await docOf(b2!)).id, action: 'checked_together', payableInvoiceId: b1! });
+      expect(await pageQ(b1!)).toMatchObject({ flag: 'page_belongs', pageInvoiceId: b3 });
+    });
+  }
+
+  it('P3 [A p1, B one-page, A p2 printing "A-960"]: A p2 is compared with A p1 (its own number), not B', async () => {
+    const [a1, b, a2] = await pages(3, 'r10p3');
+    await writeOcr(a1!, { ...ACME, invoiceNumber: 'A-960' });
+    await writeOcr(b!, { ...COMPLETE, invoiceNumber: 'B-260' });
+    await writeOcr(a2!, { ...ACME, invoiceNumber: 'A 960' });
+    await settle(a2!);
+    expect(await related(a2!)).toBe(a1);
+    expect(await pageQ(a1!)).toMatchObject({ flag: 'page_belongs', otherInvoiceId: a1 });
+  });
+
+  it('P7 [ACME p1, OTHER answered "separate", ACME continuation]: the other supplier never heads the run', async () => {
+    const [p1, other] = await pages(2, 'r10p7');
+    await writeOcr(p1!, { ...ACME, invoiceNumber: 'A-300' });
+    await writeOcr(other!, { ...OTHER, invoiceNumber: 'S-77' });
+    expect((await settle(other!)).flagged.find((f) => f.invoiceId === other)?.reason).toBe('page_other_supplier');
+    await owner().ingest.resolvePageFlag({ documentId: (await docOf(other!)).id, action: 'separate' });
+    const p3 = await invoiceOf(await send(ch.wa, wa([jpegBytes('r10p7-2')]), at(2))); // later, same phone
+    await writeOcr(p3, NOHEAD);
+    await settle(p3!);
+    expect(await related(p3!)).toBe(p1);
+    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, p3!));
+    expect(JSON.stringify((inv!.ocrPayload as { raw?: { pageOf?: unknown } }).raw?.pageOf)).not.toContain(other!);
+  });
+
+  it('P9 [A p1, A p2, B p1, B p2]: from A\'s CTA the page is compared with B p1 (its likeliest head); A is never the pair', async () => {
+    const [a1, a2, b1, b2] = await pages(4, 'r10p9');
+    await writeOcr(a1!, { ...ACME, invoiceNumber: 'A-990' });
+    await writeOcr(a2!, NOHEAD);
+    await writeOcr(b1!, { ...ACME, invoiceNumber: 'B-290' });
+    await writeOcr(b2!, { ...NOHEAD, totalInclVat: '2340.00' });
+    await settle(b2!);
+    expect(await pageQ(a1!)).toMatchObject({ pageInvoiceId: b2, otherInvoiceId: b1 });
+    await expect(
+      owner().ingest.resolvePageFlag({ documentId: (await docOf(b2!)).id, action: 'checked_together', payableInvoiceId: b2!, withInvoiceId: a1! }),
+    ).rejects.toMatchObject({ message: 'payable_required' });
+  });
+});
+
+describe('round 10 · "checked together" keeps ONE payable, never on a duplicate, and is final', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+  const owner = () =>
+    appRouter.createCaller({ db: ownerDb, session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' } } as AppContext);
+  const docOf = async (invoiceId: string) => (await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, invoiceId)))[0]!;
+  const paidWith = async (invoiceId: string) => {
+    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, invoiceId));
+    return ((inv?.ocrPayload as { raw?: { paidWith?: { invoiceId?: string } } } | null)?.raw?.paidWith?.invoiceId ?? null) as string | null;
+  };
+  const together = async (page: string, payable: string) =>
+    owner().ingest.resolvePageFlag({ documentId: (await docOf(page)).id, action: 'checked_together', payableInvoiceId: payable });
+
+  /** [A p1 ₪1,000, OTHER photo, p3 ₪700, p4 ₪2,500 total]: p3 and p4 both point at p1. */
+  const burst = async (tag: string) => {
+    const [p1, other, p3, p4] = await pages(4, tag);
+    await writeOcr(p1!, { ...ACME, invoiceNumber: `A-97${tag.length}`, totalInclVat: '1000.00' });
+    await writeOcr(other!, OTHER);
+    await writeOcr(p3!, { ...NOHEAD, totalInclVat: '700.00' });
+    await writeOcr(p4!, { ...NOHEAD, totalInclVat: '2500.00' });
+    await settle(p4!);
+    return { p1: p1!, p3: p3!, p4: p4! };
+  };
+
+  it('P4/Q4: two answers sharing one head → exactly ONE payable (p3 then p4)', async () => {
+    const { p1, p3, p4 } = await burst('r10p4a');
+    await together(p3, p3);
+    await together(p4, p4);
+    expect([await paidWith(p1), await paidWith(p3), await paidWith(p4)]).toEqual([p4, p4, null]);
+  });
+
+  it('P4/Q4: … and in the other order (p4 then p3, keeping p4 — the invoice p1 is already included in)', async () => {
+    const { p1, p3, p4 } = await burst('r10p4bb');
+    await together(p4, p4);
+    expect(await owner().ingest.pageQuestionOf({ invoiceId: p3 })).toMatchObject({ otherInvoiceId: p1, otherIncludedIn: p4 });
+    await together(p3, p4);
+    expect([await paidWith(p1), await paidWith(p3), await paidWith(p4)]).toEqual([p4, p4, null]);
+  });
+
+  it('P5: never on an invoice already on file as a duplicate (it would hide as "included" while its copy is paid)', async () => {
+    const [p1, p2] = await pages(2, 'r10p5');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-951' });
+    await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p1!, grId: A.grId, overallStatus: 'clean' });
+    expect((await ocr(p2!, { ...NOHEAD, totalInclVat: '600.00' })).flagged).toEqual([{ invoiceId: p2, reason: 'page_merge_blocked' }]);
+    await ownerDb
+      .update(invoices)
+      .set({ ocrPayload: sql`jsonb_set(${invoices.ocrPayload}, '{raw,duplicateOf}', '{"invoiceId":null,"invoiceNumber":"A-951"}'::jsonb, true)` })
+      .where(eq(invoices.id, p1!));
+    await expect(together(p2!, p2!)).rejects.toMatchObject({ message: 'duplicate_on_file' });
+    expect(await paidWith(p1!)).toBeNull();
+  });
+
+  it('P6: an answered page is a permanent break — a later settle never merges it (the payable invoice survives)', async () => {
+    const [p1, p2] = await pages(2, 'r10p6');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-952', totalInclVat: '1000.00' });
+    await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p1!, grId: A.grId, overallStatus: 'clean' });
+    expect((await ocr(p2!, { ...NOHEAD, totalInclVat: '1500.00' })).flagged).toEqual([{ invoiceId: p2, reason: 'page_merge_blocked' }]);
+    await together(p2!, p2!);
+    // the merge blocker is gone; the window job / a composed read settles again
+    await ownerDb.delete(matchRuns).where(eq(matchRuns.invoiceId, p1!));
+    expect((await settle(p1!)).absorbed).toBe(false);
+    expect(await settle(p2!)).toMatchObject({ absorbed: false });
+    expect(await ownerDb.select().from(invoices).where(eq(invoices.id, p2!))).toHaveLength(1);
+    expect(await paidWith(p1!)).toBe(p2);
+    // a new photo from the same phone in the window: still nothing merges into the answered pair
+    const p3 = await invoiceOf(await send(ch.wa, wa([jpegBytes('r10p6-x')]), at(2)));
+    await writeOcr(p3, NOHEAD);
+    await settle(p3);
+    expect(await ownerDb.select().from(invoices).where(eq(invoices.id, p2!))).toHaveLength(1);
+  });
+
+  it('P6: refused while either invoice is being re-read; the undo releases the "included" one (audited)', async () => {
+    const [p1, p2] = await pages(2, 'r10p6u');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-953' });
+    await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p1!, grId: A.grId, overallStatus: 'clean' });
+    await ocr(p2!, NOHEAD);
+    await ownerDb.update(invoices).set({ status: 'ocr_pending' }).where(eq(invoices.id, p1!));
+    await expect(together(p2!, p2!)).rejects.toMatchObject({ message: 'reocr_pending' });
+    await ownerDb.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, p1!));
+    await together(p2!, p2!);
+    expect(await paidWith(p1!)).toBe(p2);
+    await owner().ingest.resolvePageFlag({ documentId: (await docOf(p2!)).id, action: 'undo_checked_together' });
+    expect(await paidWith(p1!)).toBeNull();
+    expect((await docOf(p2!)).error).toBe('page_merge_blocked');
+    const audit = await ownerDb.select().from(auditLog).where(eq(auditLog.entityId, p2!));
+    expect(audit.map((a) => a.action)).toContain('document.page_checked_together_undone');
+  });
+
+  it('P6: retiring the carrier re-points "included in" to the document that absorbed it (never a deleted invoice)', async () => {
+    const [x, y, z] = await pages(3, 'r10p6r');
+    await ownerDb.update(invoices).set({ ocrPayload: { raw: { paidWith: { invoiceId: x } } } as never }).where(eq(invoices.id, z!));
+    await ownerDb.update(invoices).set({ ocrPayload: { raw: { paidWith: { invoiceId: x } } } as never }).where(eq(invoices.id, y!));
+    const r = await withRestaurant(appDb, A.restaurantId, (tx) => retireInvoice(tx, { restaurantId: A.restaurantId, invoiceId: x!, absorbedInto: y!, userId: null }));
+    expect(r).toEqual({ ok: true });
+    expect(await paidWith(z!)).toBe(y); // follows into the absorbing document
+    expect(await paidWith(y!)).toBeNull(); // never included in itself
+  });
+
+  it('Q1: a re-read that fails for good gives the copy its duplicate stamp back', async () => {
+    const [p1] = await pages(1, 'r10q1');
+    await writeOcr(p1!, { ...ACME, invoiceNumber: null, duplicateOf: { invoiceId: A.invoiceId, invoiceNumber: A.invoiceNumber } });
+    await withRestaurant(appDb, A.restaurantId, (tx) => reopenForOcr(tx, A.restaurantId, p1!));
+    await ownerDb.update(invoices).set({ status: 'parsed', ocrPayload: { raw: { ocrFailed: true } } as never }).where(eq(invoices.id, p1!));
+    await settle(p1!);
+    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, p1!));
+    expect((inv!.ocrPayload as { raw?: { duplicateOf?: { invoiceNumber?: string } } }).raw?.duplicateOf?.invoiceNumber).toBe(A.invoiceNumber);
+  });
+});
+
+describe('round 10 · pay run: "included in" only while its carrier is real', () => {
+  const owner = () =>
+    appRouter.createCaller({ db: ownerDb, session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' } } as AppContext);
+  it('P6/Q3: a carrier that is gone → an open question (never a calm T4); an included invoice is not "waiting for a link"', async () => {
+    const [rest] = await ownerDb.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, A.restaurantId));
+    const saved = rest!.settings as { features?: Record<string, unknown> };
+    const [p1, p2] = await pages(2, 'r10pr');
+    await writeOcr(p1!, { ...ACME, invoiceNumber: 'A-954' });
+    await writeOcr(p2!, { ...ACME, invoiceNumber: 'A-955' });
+    try {
+      await ownerDb
+        .update(restaurants)
+        .set({ settings: { ...saved, features: { ...(saved.features ?? {}), payRun: true } } as never })
+        .where(eq(restaurants.id, A.restaurantId));
+      const before = (await owner().payRun.month()).totals.linkCount;
+      await ownerDb.update(invoices).set({ ocrPayload: { raw: { paidWith: { invoiceId: p2 } } } as never }).where(eq(invoices.id, p1!));
+      const run1 = await owner().payRun.month();
+      const row1 = run1.suppliers.flatMap((g) => g.invoices).find((i) => i.invoiceId === p1);
+      expect(row1).toMatchObject({ paidWith: p2, openPageQuestion: false });
+      expect(run1.totals.linkCount).toBe(before - 1); // p1 (no run) was "waiting for a link"; included now, not counted
+      await ownerDb.update(invoices).set({ ocrPayload: { raw: { paidWith: { invoiceId: '00000000-0000-4000-8000-000000000000' } } } as never }).where(eq(invoices.id, p1!));
+      const row2 = (await owner().payRun.month()).suppliers.flatMap((g) => g.invoices).find((i) => i.invoiceId === p1);
+      expect(row2).toMatchObject({ status: 'hold', paidWith: null, openPageQuestion: true });
+    } finally {
+      await ownerDb.update(restaurants).set({ settings: saved as never }).where(eq(restaurants.id, A.restaurantId));
+    }
   });
 });

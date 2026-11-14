@@ -81,6 +81,18 @@ function questionOf(r: QuestionRow, asPageOne: boolean) {
   };
 }
 
+/**
+ * Round 10 (P4/Q4): the invoice the compared one is already "included in" (a previous
+ * "checked together" answer) — the compare page says so and offers it as the payable one.
+ */
+async function withIncluded(db: Database, rid: string, q: ReturnType<typeof questionOf>) {
+  if (!q.otherInvoiceId) return { ...q, otherIncludedIn: null as string | null };
+  const [r] = (await db.execute(sql`
+    select ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' as inc
+      from ${invoices} where id = ${q.otherInvoiceId} and restaurant_id = ${rid}`)) as unknown as Array<{ inc: string | null }>;
+  return { ...q, otherIncludedIn: r?.inc ?? null };
+}
+
 async function ownDocument(db: Database, restaurantId: string, documentId: string) {
   const [doc] = await db
     .select({
@@ -166,17 +178,19 @@ export const ingestRouter = router({
         join ${invoices} i on i.id = d.invoice_id and i.restaurant_id = d.restaurant_id
        where d.restaurant_id = ${rid} and d.invoice_id = ${input.invoiceId} and ${openFlagSql('d')}
        limit 1`)) as unknown as QuestionRow[];
-    if (own[0]) return questionOf(own[0], false);
+    if (own[0]) return withIncluded(ctx.db, rid, questionOf(own[0], false));
     // Round 7/8: page 1 of a page that probably belongs to it (raw.pageOf) waits too.
     const one = (await ctx.db.execute(sql`
       select d.id as document_id, d.error as flag, d.invoice_id::text as page_invoice_id,
-             ${input.invoiceId}::text as page_of, null::text as repeats
+             -- round 10 (P9): from ANY head, the page is compared with its LIKELIEST head
+             -- (the answer covers the whole question, so it is given where it is truthful)
+             coalesce(i.ocr_payload -> 'raw' -> 'pageOf' ->> 'invoiceId', ${input.invoiceId}::text) as page_of, null::text as repeats
         from ${ingestDocuments} d
         join ${invoices} i on i.id = d.invoice_id and i.restaurant_id = d.restaurant_id
        where d.restaurant_id = ${rid} and ${openFlagSql('d')} and d.error in (${sql.join(PAGE_ONE_FLAGS.map((f) => sql`${f}`), sql`, `)})
          and ${pageOfIncludesSql('i', sql`${input.invoiceId}`)}
        limit 1`)) as unknown as QuestionRow[];
-    return one[0] ? questionOf(one[0], true) : null;
+    return one[0] ? withIncluded(ctx.db, rid, questionOf(one[0], true)) : null;
   }),
 
   /** New secret for a channel; the old one stops working at once. Plaintext returned ONCE. */
@@ -443,7 +457,7 @@ export const ingestRouter = router({
     .input(
       z.object({
         documentId: z.string().uuid(),
-        action: z.enum(['separate', 'delete_duplicate', 'close_unreadable', 'checked_together']),
+        action: z.enum(['separate', 'delete_duplicate', 'close_unreadable', 'checked_together', 'undo_checked_together']),
         /** Round 9 (N4): checked_together — the invoice that carries the total and is paid. */
         payableInvoiceId: z.string().uuid().optional(),
         withInvoiceId: z.string().uuid().optional(),

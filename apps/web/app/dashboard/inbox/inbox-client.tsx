@@ -502,6 +502,20 @@ export function InboxClient(props: Props) {
                               ) : null}
                             </>
                           ) : null}
+                          {/* Round 10 (P6/P7): "one invoice" is undoable — the page asks again. */}
+                          {props.canManage && d.invoiceId && d.error === 'page_checked_together' ? (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              className="min-h-11"
+                              disabled={resolvePage.isPending}
+                              onClick={() =>
+                                act(() => resolvePage.mutateAsync({ documentId: d.id, action: 'undo_checked_together' }), t('inbox.pageUndoneTogether'))
+                              }
+                            >
+                              {t('inbox.pageUndoTogether')}
+                            </Button>
+                          ) : null}
                         </div>
                       </li>
                     ))}

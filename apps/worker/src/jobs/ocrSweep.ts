@@ -223,10 +223,11 @@ export async function runOcrSweep(
        AND coalesce(i.updated_at, i.created_at) >= ${pathSince}
        AND EXISTS (SELECT 1 FROM ingest_documents d
                     WHERE d.invoice_id = i.id AND d.restaurant_id = i.restaurant_id AND d.status = 'registered')
-       -- Round 9 (L6): the page arrived while the switch was really ON — G-09 writes its
-       -- invoice_scans mapping only then (main never writes one for an ingested page). A
-       -- tenant whose features merely STORE multiPage:false stays exactly as main.
-       AND EXISTS (SELECT 1 FROM invoice_scans sc WHERE sc.invoice_id = i.id AND sc.restaurant_id = i.restaurant_id)
+       -- Round 9 (L6) / round 10 (Q2): the switch was really ON for this tenant — G-09
+       -- writes invoice_scans mappings only then (main never writes one). Tenant-level, so a
+       -- page registered seconds before the switch went ON is still released; a tenant whose
+       -- features merely STORE multiPage:false stays exactly as main.
+       AND EXISTS (SELECT 1 FROM invoice_scans sc WHERE sc.restaurant_id = i.restaurant_id)
        AND NOT EXISTS (SELECT 1 FROM ingest_documents d
                         WHERE d.invoice_id = i.id AND d.restaurant_id = i.restaurant_id AND d.error = 'page_duplicate')
        AND NOT EXISTS (

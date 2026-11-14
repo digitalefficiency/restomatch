@@ -68,6 +68,9 @@ export const PAGE_FLAGS: readonly PageFlag[] = [
 ];
 
 /** A flagged page; `repeats` = the in-cluster chain page a page_duplicate repeats. */
+/** Answers that end a document chain for good (round 10 P6: not only "separate"). */
+export const ANSWERED_BREAKS: readonly string[] = ['page_separate', 'page_checked_together', 'page_unreadable_closed'];
+
 export interface PageFlagged {
   invoiceId: string;
   reason: PageFlag;
@@ -541,15 +544,36 @@ export function decidePages(
     }
   };
   addPrints(first);
-  // Round 9 (N1/N3): the head of the run the next page follows — page 1, then any
-  // later page that carries its OWN header (flagged or not), never a page of another
-  // supplier, a duplicate or an unreadable page (r7 M15 case 2).
+  // Round 9 (N1/N3) + round 10 (P1/P2/P3/P7): the head of the run the next page
+  // follows — page 1, then any later page with its OWN invoice NUMBER from page 1's
+  // supplier. A letterhead-only page (name / ח.פ., no number) never starts a run; a
+  // page of another supplier never does (whatever its answer, even "separate"); nor a
+  // duplicate or an unreadable page.
   let runHead = first.invoiceId;
-  const NOT_A_HEAD: ReadonlySet<string> = new Set(['page_other_supplier', 'page_duplicate', 'page_unreadable']);
+  const anchor = identityOf(first);
+  const NOT_A_HEAD: ReadonlySet<string> = new Set(['page_other_supplier', 'page_duplicate', 'page_unreadable', 'page_unreadable_closed']);
+  /** Normalised number → the earliest same-supplier page that printed it. */
+  const numbered = new Map<string, string>();
+  if (anchor.number) numbered.set(anchor.number, first.invoiceId);
   const followRun = (page: PageHeader, flag: string | null) => {
-    if (!page.unreadable && !(flag && NOT_A_HEAD.has(flag)) && hasHeaderEvidence(page)) runHead = page.invoiceId;
+    const number = alnum(page.invoiceNumber);
+    if (!number || page.unreadable || (flag && NOT_A_HEAD.has(flag))) return;
+    if (chainMismatch(anchor, page) === 'page_other_supplier') return;
+    runHead = page.invoiceId;
+    if (!numbered.has(number)) numbered.set(number, page.invoiceId);
   };
-  const headsFor = (): string[] => [...new Set([runHead, ...(standaloneHead ? [] : [first.invoiceId])])];
+  /**
+   * Likeliest first: the page whose number this page prints (or whose invoice its
+   * duplicate stamp names) — round 10 P3 — then the run head, then page 1 while open.
+   */
+  const headsFor = (page: PageHeader): string[] => {
+    const own = alnum(page.invoiceNumber);
+    const byNumber = own ? numbered.get(own) : undefined;
+    const byStamp = page.duplicateOf && ids.has(page.duplicateOf) ? page.duplicateOf : undefined;
+    return [...new Set([byNumber, byStamp, runHead, ...(standaloneHead ? [] : [first.invoiceId])].filter((h): h is string => Boolean(h)))].filter(
+      (h) => h !== page.invoiceId,
+    );
+  };
   for (const page of rest) {
     const dupOfChain = Boolean(page.duplicateOf && chainIds.has(page.duplicateOf));
     if (page.alreadyFlagged) {
@@ -591,7 +615,7 @@ export function decidePages(
         invoiceId: page.invoiceId,
         reason,
         ...(repeats ? { repeats } : {}),
-        ...(reason === 'page_not_merged' ? { heads: headsFor().filter((h) => h !== page.invoiceId) } : {}),
+        ...(reason === 'page_not_merged' ? { heads: headsFor(page) } : {}),
       });
       // An exact copy is just a copy: it does not cut the document; a near-copy does.
       if (!(reason === 'page_duplicate' && exact)) broken = true;
@@ -760,6 +784,17 @@ export async function settleDocumentPages(
               where a.entity_type = 'invoice' and a.entity_id = i.id and a.restaurant_id = i.restaurant_id
                 and a.action = ${REOPENED_FOR_OCR_ACTION}
               order by a.at desc limit 1)`);
+      // Round 10 (Q1): the duplicate stamp the reopen dropped comes back with the failure.
+      await tx.execute(sql`
+        update ${invoices} i
+           set ocr_payload = jsonb_set(coalesce(i.ocr_payload, '{}'::jsonb), '{raw,duplicateOf}', a.before -> 'duplicateOf', true)
+          from (select before from ${auditLog}
+                 where entity_type = 'invoice' and entity_id = ${invoiceId} and restaurant_id = ${restaurantId}
+                   and action = ${REOPENED_FOR_OCR_ACTION}
+                 order by at desc limit 1) a
+         where i.id = ${invoiceId} and i.restaurant_id = ${restaurantId}
+           and a.before ? 'duplicateOf' and jsonb_typeof(i.ocr_payload -> 'raw') = 'object'
+           and (i.ocr_payload -> 'raw' -> 'duplicateOf') is null`);
       await tx
         .update(ingestDocuments)
         .set({ error: 'page_unreadable', updatedAt: new Date() })
@@ -817,9 +852,11 @@ export async function settleDocumentPages(
         ...r,
         storagePath: r.storagePath!,
         invoiceId: r.invoiceId!,
-        // A person's "separate invoice" decision is a permanent break too.
+        // A person's answer is a permanent break too: "separate invoice", and (round 10
+        // P6) "checked together" / "closed as unreadable" — a later settle never
+        // re-decides an answered page as a continuation (merge + retire its invoice).
         flag:
-          r.error && ((PAGE_FLAGS as readonly string[]).includes(r.error) || r.error === 'page_separate')
+          r.error && ((PAGE_FLAGS as readonly string[]).includes(r.error) || ANSWERED_BREAKS.includes(r.error))
             ? (r.error as PageFlag)
             : null,
       }));

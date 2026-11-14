@@ -256,7 +256,12 @@ export const payRunRouter = router({
                -- G-09: a page question is open in the inbox (never "pay" while a page is undecided).
                ${openPageQuestionSql(rid, sql`i.id`)} AS open_page,
                -- G-09 (round 9): checked as one invoice with another that carries the total.
-               i.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' AS paid_with
+               i.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' AS paid_with,
+               -- round 10 (P6): the carrier still exists and is itself payable (not included elsewhere)
+               EXISTS (SELECT 1 FROM invoices c
+                        WHERE c.restaurant_id = ${rid}
+                          AND c.id::text = i.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId'
+                          AND (c.ocr_payload -> 'raw' -> 'paidWith') IS NULL) AS carrier_ok
         FROM invoices i
         LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${rid}
         WHERE i.restaurant_id = ${rid}
@@ -302,8 +307,10 @@ export const payRunRouter = router({
         const openPageQuestion = row.open_page === true;
         if (openPageQuestion) s.status = 'hold';
         // Round 9 (N4): its ₪ is inside the invoice that carries the document total — never paid on its own.
-        const paidWith = row.paid_with == null ? null : String(row.paid_with);
-        if (paidWith) s.status = 'hold';
+        // A carrier that is gone (retired) or itself "included" is an open question, never T4.
+        const paidWith = row.paid_with == null || row.carrier_ok !== true ? null : String(row.paid_with);
+        if (row.paid_with != null) s.status = 'hold';
+        const brokenCarrier = row.paid_with != null && row.carrier_ok !== true;
         const inv: PayRunInvoice = {
           invoiceId: id,
           invoiceNumber: row.invoice_number == null ? null : String(row.invoice_number),
@@ -314,7 +321,7 @@ export const payRunRouter = router({
           awaitingQuestion,
           awaitingReview,
           duplicate: s.duplicate,
-          openPageQuestion,
+          openPageQuestion: openPageQuestion || brokenCarrier,
           paidWith,
           duplicateIls: s.duplicateIls,
           totalInclVat: Number(row.total_incl),
@@ -356,7 +363,8 @@ export const payRunRouter = router({
       const suppliers: PayRunSupplier[] = [...groups.values()].map(({ a, ...g }) => {
         for (const k of ['pay', 'hold', 'claim', 'credit', 'pending', 'link'] as const) t[k] += a[k]!;
         t.invoices += g.invoices.length;
-        t.linkCount += g.invoices.filter((i) => i.pendingLink && !i.duplicate).length;
+        // Round 10 (Q3): an invoice included in another is not "waiting for a link" (its ₪ is not summed).
+        t.linkCount += g.invoices.filter((i) => i.pendingLink && !i.duplicate && !i.paidWith).length;
         return {
           ...g,
           payIls: ils(a.pay!),

@@ -55,7 +55,7 @@ export async function reopenGeneration(tx: Database, restaurantId: string, invoi
  */
 export async function reopenForOcr(tx: Database, restaurantId: string, invoiceId: string): Promise<boolean> {
   const [prev] = await tx
-    .select({ invoiceNumber: invoices.invoiceNumber })
+    .select({ invoiceNumber: invoices.invoiceNumber, duplicateOf: sql<unknown>`${invoices.ocrPayload} -> 'raw' -> 'duplicateOf'` })
     .from(invoices)
     .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)))
     .limit(1);
@@ -78,7 +78,9 @@ export async function reopenForOcr(tx: Database, restaurantId: string, invoiceId
     entityType: 'invoice',
     entityId: invoiceId,
     // The number before the re-read (round 7: kept for the audit; released only on a terminal failure).
-    before: { invoiceNumber: prev?.invoiceNumber ?? null } as never,
+    // Round 10 (Q1): the duplicate stamp the re-read drops is kept here — a terminal
+    // failure of the re-read restores it (a copy never loses its marker).
+    before: { invoiceNumber: prev?.invoiceNumber ?? null, ...(prev?.duplicateOf ? { duplicateOf: prev.duplicateOf } : {}) } as never,
   });
   await tx.delete(matchRuns).where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
   // The re-OCR rewrites every line and the totals. Clear them now, so a failed
@@ -205,6 +207,23 @@ export async function retireInvoice(
     )
     .returning({ id: invoices.id });
   if (gone.length === 0) return { ok: false, reason: 'approved_or_paid' };
+  // Round 10 (P6): an invoice "included in" the one retired now follows it into the
+  // document that absorbed it (never left pointing at a deleted invoice); one that
+  // would now point at itself is payable again.
+  if (args.absorbedInto) {
+    await tx.execute(sql`
+      update ${invoices}
+         set ocr_payload = case when id = ${args.absorbedInto}::uuid
+               then jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - 'paidWith')
+               else jsonb_set(ocr_payload, '{raw,paidWith}', jsonb_build_object('invoiceId', ${args.absorbedInto}::text)) end,
+             updated_at = now()
+       where restaurant_id = ${restaurantId} and ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${invoiceId}`);
+  } else {
+    await tx.execute(sql`
+      update ${invoices}
+         set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - 'paidWith'), updated_at = now()
+       where restaurant_id = ${restaurantId} and ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${invoiceId}`);
+  }
   await tx.insert(auditLog).values({
     restaurantId,
     userId: args.userId,
