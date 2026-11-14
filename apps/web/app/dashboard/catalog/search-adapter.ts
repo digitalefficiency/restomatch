@@ -1,25 +1,13 @@
 /**
- * W3-10 · INTERIM catalog search normaliser. W3-04a (#246) publishes the shared
- * `normalizeHe`; until it is on main this local adapter keeps the catalog and
- * products search behaving the same way. On adoption, `normalizeForSearch`
- * becomes a re-export of `normalizeHe` and this body is deleted — callers only
- * import from here, so the swap is one file.
- *
- * Rules: NFKC, lowercase, no niqqud, final letters → regular (ך→כ, ם→מ, ן→נ,
- * ף→פ, ץ→צ), geresh/gershayim and punctuation → space, one space.
+ * W3-10 · catalog / products search. The Hebrew normaliser is W3-04a's shared
+ * `normalizeHe` (niqqud, final letters, geresh/gershayim, bidi marks, dashes and
+ * whitespace); this module adds only the catalog ranking (barcode > SKU > name
+ * prefix > every word) on top of it.
  */
-
-const FINALS: Record<string, string> = { ך: 'כ', ם: 'מ', ן: 'נ', ף: 'פ', ץ: 'צ' };
+import { normalizeHe } from '@/lib/components/palette/normalizeHe';
 
 export function normalizeForSearch(raw: string): string {
-  return raw
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/[֑-ׇ]/g, '')
-    .replace(/[ךםןףץ]/g, (c) => FINALS[c] ?? c)
-    .replace(/["'`.,;:()\[\]{}\-_/\\|*+׳״]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return normalizeHe(raw);
 }
 
 export interface Searchable {
