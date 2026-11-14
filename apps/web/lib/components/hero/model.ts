@@ -111,3 +111,121 @@ export function heroCtaVariant(state: LeakHeroState): HeroCtaVariant {
 export const HERO_CTA_CLASS: Record<HeroCtaVariant, string> = {
   secondary: 'border border-line-strong bg-surface text-ink hover:border-primary/40 hover:text-primary',
 };
+
+/* ─────────────────────────── DS3 · the pace line ─────────────────────────── */
+
+/** One day of `owner.leakTrend` (bucket 'day'): the UTC instant of a local midnight and that day's leak. */
+export interface PacePoint {
+  bucketStart: string;
+  leakIls: number;
+}
+
+/**
+ * The pace line's two series, as integer agorot running totals for days 1..`days`: this month
+ * (`cur`) and the same days of last month (`prev`). Chart geometry only: no figure on the screen
+ * is read from it, and the home draws it only when `cur`'s last value equals the hero to the agora.
+ */
+export interface PaceSeries {
+  days: number;
+  cur: number[];
+  prev: number[] | null;
+}
+
+const IL_TZ = 'Asia/Jerusalem';
+
+/** Day of the month (1–31) of an instant on the Israel wall clock, the zone every figure is dated in. */
+export function israelDayOfMonth(value: Date | string | number): number {
+  return Number(new Intl.DateTimeFormat('en-CA', { timeZone: IL_TZ, day: 'numeric' }).format(new Date(value)));
+}
+
+function runningTotals(points: readonly PacePoint[], days: number): number[] {
+  const perDay = new Array<number>(days).fill(0);
+  for (const p of points) {
+    const d = israelDayOfMonth(p.bucketStart);
+    if (d >= 1 && d <= days) perDay[d - 1]! += Math.round(p.leakIls * 100);
+  }
+  let run = 0;
+  return perDay.map((v) => (run += v));
+}
+
+/**
+ * Sparse daily points (days without invoices are absent) → running totals day by day. The axis
+ * runs from day 1 to today (or to the last dated day, if an invoice is dated later this month).
+ * `null` before day 2: one day is a dot, not a pace.
+ */
+export function paceSeries(points: readonly PacePoint[], previous: readonly PacePoint[] | null, today: Date | string | number): PaceSeries | null {
+  const lastPointDay = points.reduce((m, p) => Math.max(m, israelDayOfMonth(p.bucketStart)), 0);
+  const days = Math.max(israelDayOfMonth(today), lastPointDay);
+  if (days < 2) return null;
+  return { days, cur: runningTotals(points, days), prev: previous ? runningTotals(previous, days) : null };
+}
+
+/** The reference's chart box (SPEC §10.1, ex1.html): x from 0 to 240, the baseline at y 64, the top at y 2. */
+export const PACE_BOX = { viewBox: '-2 -6 250 78', width: 240, baseline: 64, top: 2 } as const;
+
+/**
+ * A step-after path of a running total ("M0,64 V… H… V…"): each total holds until the next day it
+ * changes, then rises. Time runs left to right in every language (charts never mirror).
+ */
+export function pacePath(totals: readonly number[], max: number): string {
+  const n = totals.length;
+  const x = (i: number) => (n <= 1 ? 0 : (i * PACE_BOX.width) / (n - 1));
+  const y = (v: number) => PACE_BOX.baseline - (max > 0 ? (v / max) * (PACE_BOX.baseline - PACE_BOX.top) : 0);
+  const r = (v: number) => Math.round(v * 10) / 10;
+  let d = `M0,${PACE_BOX.baseline}`;
+  totals.forEach((v, i) => {
+    if (i > 0) d += ` H${r(x(i))}`;
+    d += ` V${r(y(v))}`;
+  });
+  return d;
+}
+
+/** Geometry of the whole chart: both paths on one scale and the end dot on today's total. */
+export function paceGeometry(s: PaceSeries): { cur: string; prev: string | null; end: { x: number; y: number } } {
+  const last = (xs: readonly number[]) => xs[xs.length - 1] ?? 0;
+  const max = Math.max(last(s.cur), s.prev ? last(s.prev) : 0, 1);
+  const endY = PACE_BOX.baseline - (last(s.cur) / max) * (PACE_BOX.baseline - PACE_BOX.top);
+  return {
+    cur: pacePath(s.cur, max),
+    prev: s.prev ? pacePath(s.prev, max) : null,
+    end: { x: PACE_BOX.width, y: Math.round(endY * 10) / 10 },
+  };
+}
+
+/* ─────────────────────────── DS3 · motion helpers ─────────────────────────── */
+
+/** "400ms" / "0.4s" (the motion tokens) → milliseconds. */
+export function msOf(token: string): number {
+  const m = /^([\d.]+)(ms|s)$/.exec(token.trim());
+  if (!m) return 0;
+  return m[2] === 's' ? Number(m[1]) * 1000 : Number(m[1]);
+}
+
+/** "cubic-bezier(0,0,0.38,0.9)" (an easing token) → its four control values, or null. */
+export function parseCubicBezier(token: string): [number, number, number, number] | null {
+  const m = /^cubic-bezier\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)$/.exec(token.trim());
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])] : null;
+}
+
+/**
+ * The CSS cubic-bezier timing function, for the one motion CSS cannot run: a number counting to
+ * its value (SPEC §8). x(t) is solved by bisection; precise to well under a frame.
+ */
+export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (progress: number) => number {
+  const at = (a: number, b: number, t: number) => 3 * a * t * (1 - t) ** 2 + 3 * b * t ** 2 * (1 - t) + t ** 3;
+  return (progress) => {
+    if (progress <= 0) return 0;
+    if (progress >= 1) return 1;
+    let lo = 0;
+    let hi = 1;
+    let t = progress;
+    for (let i = 0; i < 40; i++) {
+      t = (lo + hi) / 2;
+      const x = at(x1, x2, t);
+      if (Math.abs(x - progress) < 1e-6) break;
+      if (x < progress) lo = t;
+      else hi = t;
+    }
+    return at(y1, y2, t);
+  };
+}
