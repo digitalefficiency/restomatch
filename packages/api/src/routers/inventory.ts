@@ -30,6 +30,7 @@ import {
   type PricedWithSource,
 } from '../inventory/data';
 import { actualFoodCost, STORAGE_AREAS, valueCount, valueLine, type CountLineInput } from '../inventory/valuation';
+import { equation, periodSeries } from '../inventory/controlRoom';
 
 /**
  * Inventory counting (ספירת מלאי) → actual food cost per period. Flag
@@ -439,6 +440,9 @@ async function periodFor(db: Database, restaurantId: string, rc: Awaited<ReturnT
     ...result,
   };
 }
+
+/** How many closed periods the control-room sparkline shows. */
+const CONTROL_PERIODS = 6;
 
 export const inventoryRouter = router({
   /** Whether `inventoryCount` is on for the caller's restaurant (drives the nav). Never FORBIDDEN. */
@@ -864,6 +868,52 @@ export const inventoryRouter = router({
     // The period is all ₪ (purchases, credits, sales, food cost): owner, manager and bookkeeper. The chef reads `foodCostPercent`.
     if (!seesMoney(ctx.session.role)) noMoney();
     return periodFor(ctx.db, ctx.session.restaurantId, ctx.rc, input?.closingId, ctx.adminDb);
+  }),
+
+  /**
+   * W3-02b · the food-cost control room (owner / manager / bookkeeper; all ₪).
+   * Built from the same periods as `inventory.period`: the sparkline over the
+   * last CONTROL_PERIODS closed counts (a period with no honest % is a gap, never
+   * 0%), and the clickable equation of the latest available period, where
+   * opening + purchases − credits − closing = usage, exactly the period's
+   * actualAgorot. Each term carries its drill target.
+   */
+  controlRoom: inventoryReaderProcedure.query(async ({ ctx }) => {
+    if (!seesMoney(ctx.session.role)) noMoney();
+    const rid = ctx.session.restaurantId;
+    const done = await completedCounts(ctx.db, rid, CONTROL_PERIODS + 1);
+    const periods = [];
+    for (const c of done.slice(0, CONTROL_PERIODS)) periods.push(await periodFor(ctx.db, rid, ctx.rc, c.id, ctx.adminDb));
+    const series = periodSeries(
+      periods.map((p, i) => ({
+        closingCountId: done[i]!.id,
+        closingDate: done[i]!.countDate,
+        actualBp: p.available ? p.actualBp : null,
+        implausible: p.available ? p.implausible : false,
+      })),
+      ctx.rc.targetBp,
+    );
+    const latest = periods.find((p) => p.available);
+    const eq =
+      latest && latest.available
+        ? equation({
+            opening: { countId: latest.opening.id, countDate: latest.opening.countDate, valueAgorot: latest.opening.valueAgorot },
+            closing: { countId: latest.closing.id, countDate: latest.closing.countDate, valueAgorot: latest.closing.valueAgorot },
+            purchasesAgorot: latest.purchases.purchasesAgorot,
+            creditsAgorot: latest.purchases.creditsAgorot,
+            salesAgorot: latest.salesAgorot,
+            salesSource: latest.salesSource,
+          })
+        : null;
+    return {
+      targetBp: ctx.rc.targetBp,
+      series,
+      equation: eq,
+      /** The latest available period's dates (opening count → closing count). */
+      period: latest && latest.available ? { from: latest.opening.countDate, to: latest.closing.countDate } : null,
+      /** The latest period is plausible and fully counted (otherwise the UI labels the % "check the count"). */
+      trustworthy: !!latest && latest.available && !latest.implausible && latest.coverageComplete,
+    };
   }),
 
   /** The same period as percentages and dates only — the chef's food cost (owner decision: % only, no ₪ key). */

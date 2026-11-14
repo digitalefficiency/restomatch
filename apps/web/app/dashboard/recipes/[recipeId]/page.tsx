@@ -1,3 +1,4 @@
+import { routeAccess } from '@/lib/roleLens';
 import { notFound } from 'next/navigation';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
@@ -19,8 +20,9 @@ export default async function EditRecipePage({ params }: { params: Promise<{ rec
   const detail = await caller.recipes.get({ id: recipeId }).catch(() => null);
   if (!detail) notFound();
   const [t, tc, session] = await Promise.all([getT(recipesNs), getT(components), auth()]);
-  // Owner decision I3: the bookkeeper reads the recipe (₪ included) and edits nothing.
-  const readOnly = session?.user?.role === 'bookkeeper';
+  // Owner decision I3 via the IA lens: a read-only role (the bookkeeper) reads the recipe (₪ included) and edits nothing.
+  const role = session?.user?.role;
+  const readOnly = !!role && routeAccess(role, `/dashboard/recipes/${recipeId}`) === 'read';
   return (
     <div>
       <Breadcrumbs

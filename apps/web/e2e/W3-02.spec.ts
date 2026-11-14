@@ -79,3 +79,28 @@ test('owner: a new dish is costed live while typing, never saved, and the trial 
   expect(saves).toEqual([]);
   await page.context().close();
 });
+
+test('W3-02b: the owner sees the food-cost control room; the chef never mounts it (no ₪ query)', async ({ browser, baseURL }) => {
+  const owner = await open(browser, baseURL!, 'owner', DESK);
+  await owner.goto('/dashboard/inventory');
+  await expect(owner.getByTestId('control-room')).toBeVisible();
+  await expect(owner.getByTestId('control-room')).toContainText('חדר הבקרה של עלות המזון');
+  // With a closed period the equation's terms are links to their sources; with none, the card says what is missing.
+  const eq = owner.getByTestId('control-room-equation');
+  if (await eq.count()) {
+    await expect(eq.getByRole('link').first()).toHaveAttribute('href', /^\/dashboard\/inventory\//);
+  }
+  await owner.context().close();
+
+  const chef = await open(browser, baseURL!, 'chef', PHONE);
+  const calls: string[] = [];
+  chef.on('request', (r) => {
+    if (r.url().includes('inventory.controlRoom')) calls.push(r.url());
+  });
+  await chef.goto('/dashboard/inventory');
+  await expect(chef.locator('main h1')).toBeVisible();
+  await chef.waitForLoadState('networkidle');
+  await expect(chef.getByTestId('control-room')).toHaveCount(0);
+  expect(calls).toEqual([]);
+  await chef.context().close();
+});
