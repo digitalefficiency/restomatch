@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { AbsoluteFill, Composition, Sequence, interpolate, useCurrentFrame } from 'remotion';
 import { loadFonts } from './fonts';
-import { applyFacts, COPY, Facts, Locale } from './copy';
+import { COPY, Locale } from './copy';
 import { C, FONT, setStage } from './theme';
 import { Background } from './components/Background';
 import { Hook } from './scenes/Hook';
@@ -13,11 +13,10 @@ import { Value } from './scenes/Value';
 import { Cta } from './scenes/Cta';
 import { HeroLoop, HERO_LOOP_FRAMES } from './scenes/HeroLoop';
 import { HeroLoopVertical } from './scenes/HeroLoopVertical';
-import { PhoneDash, PHONE_DASH_DURATION } from './scenes/PhoneDash';
 
 loadFonts();
 
-type Props = { locale: Locale; facts?: Partial<Facts>; light?: boolean };
+type Props = { locale: Locale; light?: boolean; probe?: boolean };
 
 /** Crossfade wrapper: every scene fades in/out over 8 frames on top of its own motion. */
 const Shell: React.FC<{ d: number; children: React.ReactNode }> = ({ d, children }) => {
@@ -43,15 +42,8 @@ export const TIMELINE: Beat[] = [
 ];
 export const PROMO_FRAMES = 1800;
 
-const VERTICAL: Beat[] = [
-  { from: 0, d: 170, el: (l) => <Hook locale={l} /> },
-  { from: 162, d: PHONE_DASH_DURATION, el: (l) => <PhoneDash locale={l} /> },
-  { from: 162 + PHONE_DASH_DURATION - 8, d: RECEIVER_DURATION, el: (l) => <Receiver locale={l} /> },
-  { from: 162 + PHONE_DASH_DURATION + RECEIVER_DURATION - 16, d: 200, el: (l) => <Value locale={l} duration={200} /> },
-];
-const VLAST = VERTICAL[VERTICAL.length - 1];
-export const VERTICAL_FRAMES = VLAST.from + VLAST.d - 8 + 130;
-VERTICAL.push({ from: VLAST.from + VLAST.d - 8, d: 130, el: (l) => <Cta locale={l} /> });
+// The old 9:16 "PromoVertical" cut (demo-seed phone captures, ₪760) is retired. A 9:16 cut of the
+// sample-month film is a follow-up; until it exists the site offers the film on sm+ only.
 
 const Film: React.FC<Props & { beats: Beat[] }> = ({ locale, beats }) => (
   <AbsoluteFill style={{ background: C.bgDeep }}>
@@ -64,7 +56,6 @@ const Film: React.FC<Props & { beats: Beat[] }> = ({ locale, beats }) => (
   </AbsoluteFill>
 );
 
-// `facts` input prop overrides the demo numbers (copy.ts FACTS) for a re-render after a seed change.
 // `light` (default true — the product's light identity) picks the stage palette; light:false = dark stage.
 /** A legible "דוגמה / Sample" tag for the whole film: every figure is the site's sample month. */
 const SampleTag: React.FC<{ locale: Locale }> = ({ locale }) => (
@@ -89,39 +80,38 @@ const SampleTag: React.FC<{ locale: Locale }> = ({ locale }) => (
   </div>
 );
 
-const Promo: React.FC<Props> = ({ locale, facts, light }) => {
+/**
+ * Frame-gate probe (input prop `probe`, scripts/frame-check.mjs only): logs the text of every element
+ * mounted on this frame, so the gate asserts on the DOM — the Sample tag on every frame, no ₪ in the
+ * receiver beat — instead of guessing from pixels. Renders nothing.
+ */
+const Probe: React.FC = () => {
+  const f = useCurrentFrame();
+  useEffect(() => {
+    console.log(`PROBE ${f} ${JSON.stringify(document.body.innerText)}`);
+  });
+  return null;
+};
+
+const Promo: React.FC<Props> = ({ locale, light, probe }) => {
   setStage(light ?? true);
-  applyFacts(facts);
   return (
     <AbsoluteFill>
       <Film locale={locale} beats={TIMELINE} />
       <SampleTag locale={locale} />
+      {probe ? <Probe /> : null}
     </AbsoluteFill>
   );
 };
-const PromoVertical: React.FC<Props> = ({ locale, facts, light }) => {
+// scripts/frame-check.mjs probes the receiver-only window 996–1227 (= 440 + PRODUCT_DURATION … VALUE_FROM − 1)
+const Loop: React.FC<Props> = ({ locale, light }) => {
   setStage(light ?? true);
-  applyFacts(facts);
-  return <Film locale={locale} beats={VERTICAL} />;
-};
-const Loop: React.FC<Props> = ({ locale, facts, light }) => {
-  setStage(light ?? true);
-  applyFacts(facts);
   return <HeroLoop locale={locale} light={light ?? true} />;
 };
 
 export const Root: React.FC = () => (
   <>
     <Composition id="Promo" component={Promo} durationInFrames={PROMO_FRAMES} fps={30} width={1920} height={1080} defaultProps={{ locale: 'he' as Locale }} />
-    <Composition
-      id="PromoVertical"
-      component={PromoVertical}
-      durationInFrames={VERTICAL_FRAMES}
-      fps={30}
-      width={1080}
-      height={1920}
-      defaultProps={{ locale: 'he' as Locale }}
-    />
     <Composition id="HeroLoop" component={Loop} durationInFrames={HERO_LOOP_FRAMES} fps={30} width={1280} height={720} defaultProps={{ locale: 'he' as Locale }} />
     <Composition id="HeroLoopVertical" component={HeroLoopVertical} durationInFrames={HERO_LOOP_FRAMES} fps={30} width={1080} height={1920} />
   </>

@@ -21,7 +21,7 @@ if (!existsSync(file)) {
   }
 }
 const m = await import(pathToFileURL(file).href);
-const { SAMPLE } = await import(pathToFileURL(resolve(here, '../src/sample.ts')).href);
+const { SAMPLE, FILM, kegGap, risePct } = await import(pathToFileURL(resolve(here, '../src/sample.ts')).href);
 const decide = m.SAMPLE_NEEDS.find((n) => n.key === 'decide');
 const credit = m.SAMPLE_NEEDS.find((n) => n.key === 'credit');
 const pairs = [
@@ -38,11 +38,22 @@ const pairs = [
   ['credit.count', SAMPLE.credit.count, credit.count],
   ['goodNews', SAMPLE.goodNews, m.SAMPLE_GOOD_NEWS_ILS],
 ];
-if (decide.example) {
-  pairs.push(['decide.example.amount', SAMPLE.decide.example.amount, decide.example.amountIls]);
-  pairs.push(['decide.example.he', SAMPLE.decide.example.he, decide.example.label.he]);
-  pairs.push(['decide.example.en', SAMPLE.decide.example.en, decide.example.label.en]);
-}
+// the example is pinned, never skipped: a missing example on the site is a FAIL
+pairs.push(['decide.example.amount', SAMPLE.decide.example.amount, decide.example?.amountIls]);
+pairs.push(['decide.example.he', SAMPLE.decide.example.he, decide.example?.label?.he]);
+pairs.push(['decide.example.en', SAMPLE.decide.example.en, decide.example?.label?.en]);
+// the film's own breakdown reconciles to the sample month (integer agorot)
+const ag = (n) => Math.round(n * 100);
+pairs.push(['FILM keg (latest − usual) × qty', ag(kegGap()), ag(SAMPLE.decide.example.amount)]);
+pairs.push(['FILM keg < decide.amount', kegGap() < SAMPLE.decide.amount, true]);
+pairs.push(['FILM Σ credits', FILM.credits.reduce((a, b) => a + ag(b), 0), ag(SAMPLE.credit.amount)]);
+pairs.push(['FILM credits.length', FILM.credits.length, SAMPLE.credit.count]);
+pairs.push(['FILM rises all > 0', FILM.rises.every((r) => r.latest > r.usual), true]);
+pairs.push(['FILM keg rise %', risePct(FILM.keg.usual, FILM.keg.latest), '+10.1%']);
+pairs.push(['FILM delivery short > 0', FILM.delivery.received < FILM.delivery.ordered, true]);
+pairs.push(['leak = purchasing × pct', ag(SAMPLE.purchasing * SAMPLE.leakPct / 100), ag(SAMPLE.leak)]);
+pairs.push(['unpaid + paid = leak', ag(SAMPLE.unpaid + SAMPLE.paid), ag(SAMPLE.leak)]);
+pairs.push(['unpaid − decide = goodNews', ag(SAMPLE.unpaid - SAMPLE.decide.amount), ag(SAMPLE.goodNews)]);
 let bad = 0;
 for (const [k, a, b] of pairs) {
   const ok = a === b;

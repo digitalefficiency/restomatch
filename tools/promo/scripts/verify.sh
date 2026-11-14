@@ -30,7 +30,9 @@ probe() { # file  w  h  fps  codec  min_s  max_s  max_bytes
 echo "== ffprobe"
 probe out/restomatch-promo-he.mp4 1920 1080 30 h264 59 61 $((30 * 1024 * 1024))
 probe out/restomatch-promo-en.mp4 1920 1080 30 h264 59 61 $((30 * 1024 * 1024))
-probe out/restomatch-promo-he-vertical.mp4 1080 1920 30 h264 20 35 $((30 * 1024 * 1024))
+for v in out/restomatch-promo-*-vertical*.mp4 $WEB/promo-*-vertical*.mp4; do
+  [ -e "$v" ] && bad "$v: the retired demo-seed vertical cut must not exist"
+done
 probe $WEB/hero-loop.mp4 1280 720 30 h264 10 14 $((2560 * 1024))
 probe $WEB/hero-loop.webm 1280 720 30 vp9 10 14 $((2560 * 1024))
 p=$WEB/hero-poster.jpg

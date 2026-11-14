@@ -15,3 +15,27 @@ export const SAMPLE = {
   credit: { amount: 720, count: 3 }, // T2 credit requests to send (the paid part)
   goodNews: 620, // unpaid − undecided
 };
+
+/**
+ * The film's own breakdown INSIDE the sample month (the site shows only the totals above). Every
+ * figure here reconciles to SAMPLE, and scripts/check-sample.mjs asserts it — no free literals on
+ * a product screen.
+ */
+export const FILM = {
+  // the decide example: (572.40 − 520.00) × 2 kegs = 104.80 = SAMPLE.decide.example.amount
+  keg: { usual: 520, latest: 572.4, qty: 2 },
+  // the other price rises on the "מחירים שעלו" screen (usual → latest, per unit)
+  rises: [
+    { usual: 139, latest: 149 }, // entrecôte · HaKerem Butchery
+    { usual: 89, latest: 96 }, // salmon fillet · Mediterranean Fish Co.
+  ],
+  // the three credit requests to send — Σ = SAMPLE.credit.amount
+  credits: [300, 240, 180],
+  // the receiver beat: quantities only, never ₪ (ordered → received on the door)
+  delivery: { ordered: 15, received: 12 },
+};
+
+/** Price rise in % with one decimal, as the leak screen shows it ("+10.1%"). */
+export const risePct = (usual: number, latest: number) => `+${(((latest - usual) / usual) * 100).toFixed(1)}%`;
+/** The keg example's gap in agorot-exact shekels. */
+export const kegGap = () => Math.round((FILM.keg.latest - FILM.keg.usual) * FILM.keg.qty * 100) / 100;

@@ -50,25 +50,29 @@ caught before payment ₪1,530; ₪620 approved for offset. The product beats ar
 ("בקשת זיכוי", "אושר לבקשת זיכוי" — never "דרישה/נדרש"). The chains beat is out (the sample month has no branch
 figures). The tables below describe the earlier demo-seed cut.
 
-## Sources of every number / מקור לכל מספר
+## Sources of every number / מקור לכל מספר (current cut)
 
-All demo figures are from the seeded demo tenant **"כפר הזיתים"** (`./scripts/dev-setup.sh`, seed run
-with `DEMO_TODAY=2026-10-25`), month **October 2026**, and appear on the real screens captured into `public/shots/`.
+Every figure on screen comes from `src/sample.ts`: `SAMPLE` (= the site's `sampleMonth.ts`, pinned by
+`scripts/check-sample.mjs`) or `FILM`, the film's breakdown inside that month, which the same script
+reconciles to SAMPLE in integer agorot. No demo-seed figure and no demo restaurant name ("מסעדה לדוגמה /
+Sample restaurant") appear anywhere.
 
-| Number | Where it comes from |
+| On screen | Source |
 |---|---|
-| ₪760 leaked this month | `/dashboard` hero (`owner.leakHero`), `public/shots/dashboard-he.png`; seed log: "dashboard hero (this month): leak ₪760 of ₪42263 spend (1.8%)" |
-| 1.8% of ₪42,263 | same hero ("1.8% מההוצאה על סחורה · מתוך ₪42,263 לפני מע״מ"); 760 / 42,263 = 1.80% |
-| ₪296 caught before payment | hero card "נתפס לפני תשלום"; seed log "caught before payment ₪296" |
-| ₪464 claimed from suppliers | hero card "נדרש מהספקים" (accepted to claim back). Shown as *claimed*, not "recovered" |
-| Chain: leakiest branch ירושלים 975 ₪ = 2.9%, חיפה 355 ₪ = 0.6% (chain 2,090 ₪ = 1.5% of 137,059 ₪) | `/dashboard/chain` capture `public/shots/chain-he.png` after `pnpm --filter @restomatch/worker seed:chain-demo` (same `DEMO_TODAY`; base branch unchanged at ₪760) |
-| 104.80 ₪ (approvals card / claim total) | `/dashboard/approvals` first card "ההפסד המוערך 104.80 ₪" (beer keg, Steinberg, invoice ST-24108) and `/dashboard/leaks/claims` "סה״כ לזיכוי 104.80 ₪" |
-| 13 of 35 invoices flagged | hero card "חשבוניות עם חריגה 13 מתוך 35" (not used on screen beyond the real UI) |
-| Beer keg ₪520 → ₪575 (+10.6%) | `/dashboard/leaks` table row "בירה מהחבית — חבית 30 ל׳", median ₪520.00 / latest ₪575.00 / +10.6% |
-| "Billed 3 kg that never came" | `/dashboard/approvals`: cherry tomatoes, expected 6.5 received vs 9.5 billed ("חיוב על יותר ממה שהתקבל") |
-| Receiver lines (Cherry tomatoes ₪14.00 ×15 kg, Coriander 10 bunch ×₪3.01, Romaine lettuce, Cucumbers) | the real English reconciliation `public/shots/reconcile-en.png` (local dev OCR stub; translations from `packages/translate` glossary) |
-| 1.5% | not claimed as a result anywhere in the film (pilot target, docs/ICP.md) |
+| Leak ₪2,250 · 1.5% · of ₪150,000 checked spend, before VAT | `SAMPLE.leak`, `SAMPLE.leakPct`, `SAMPLE.purchasing` (check: 150,000 × 1.5% = 2,250) |
+| 35 invoices checked · 13 with a gap | `SAMPLE.checked`, `SAMPLE.withGap` |
+| Caught before payment ₪1,530 | `SAMPLE.unpaid` (check: unpaid + paid = leak) |
+| Awaiting your decision ₪910 · 2 gaps | `SAMPLE.decide` |
+| Keg gap ₪104.80 = (₪572.40 − ₪520.00) × 2 kegs · price +10.1% | `FILM.keg` (check: = `SAMPLE.decide.example.amount`); % computed (`risePct`) |
+| The other gap ₪805.20 | `SAMPLE.decide.amount − SAMPLE.decide.example.amount` |
+| Entrecôte ₪139 → ₪149 · salmon ₪89 → ₪96 | `FILM.rises` (% computed) |
+| Credit requests ₪300 · ₪240 · ₪180 = ₪720 · 3 | `FILM.credits` (check: Σ = `SAMPLE.credit.amount`, length = count) |
+| Approved for offset ₪620 | `SAMPLE.goodNews` (check: unpaid − decide) |
+| Receiver beat: cherry tomatoes ordered 15 kg, received 12 kg ("Short 3 kg") — **no ₪** | `FILM.delivery`; `scripts/frame-check.mjs` OCRs nothing — it checks the beat's frames against a ₪-free render |
 
+Words follow `apps/web/lib/i18n/glossary.ts`: an undecided ₪ is a "פער / Gap", never "הפסד / loss"; nav and
+screen names are the app's (בית · קבלת סחורה · אישורים · דליפה · בקשות זיכוי לשליחה; "מחירים שעלו", "המחיר
+הרגיל"). No URL on the end card (the domain isn't final) — the site's dialog shows the real CTA. The old
+9:16 social cut (demo-seed phone capture) is retired; a 9:16 cut of the sample-month film is a follow-up.
 No ROI, savings-rate or customer claims are made. The paper invoices in beat 2 are illustrative props
-built from real seeded product names and prices (line totals = qty × price, totals = Σ lines). URL `restomatch.co.il` is a placeholder (the landing's canonical URL is `APP_URL`, not yet
-fixed) — change `SITE` in `src/copy.ts`.
+(line totals = qty × price, totals = Σ lines; the keg/entrecôte/salmon prices are `FILM`'s).

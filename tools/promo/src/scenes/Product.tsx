@@ -1,6 +1,6 @@
 import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
-import { COPY, ilsText, Locale, SAMPLE } from '../copy';
+import { COPY, FILM, ilsText, Locale, risePct, SAMPLE } from '../copy';
 import { C, EASE_IN, EASE_IN_OUT, FONT, prog } from '../theme';
 import { zones } from '../layout';
 import { Laptop, laptopScreen } from '../components/Devices';
@@ -77,8 +77,8 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
     ),
     leaks: (
       <span>
-        {t.chipBeer.replace('{from}', ilsText(520, locale)).replace('{to}', ilsText(575, locale))}{' '}
-        <bdi dir="ltr" style={{ color: C.danger }}>+10.6%</bdi>
+        {t.chipBeer.replace('{from}', ilsText(FILM.keg.usual, locale, 2)).replace('{to}', ilsText(FILM.keg.latest, locale, 2))}{' '}
+        <bdi dir="ltr" style={{ color: C.danger }}>{risePct(FILM.keg.usual, FILM.keg.latest)}</bdi>
       </span>
     ),
     approvals: (

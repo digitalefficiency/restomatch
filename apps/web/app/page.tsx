@@ -18,6 +18,7 @@ import { LazyLeadForm } from './(marketing)/_components/LazyLeadForm';
 import { leadAction } from './(marketing)/_components/leadAction';
 import { SAMPLE_LEAK_ILS, SAMPLE_LEAK_PCT, SAMPLE_PURCHASING_ILS } from './(marketing)/_components/sampleMonth';
 import { PromoVideoButton } from './(marketing)/_components/PromoVideoButton';
+import promoTranscript from './(marketing)/_components/promoTranscript.json';
 import { ReceiverMorph } from './(marketing)/_components/ReceiverMorph';
 import { primaryCtaHref } from './(marketing)/_components/cta';
 import { Eyebrow, FaqSection, Forward, faqItems } from './(marketing)/_components/detail-sections';
@@ -221,20 +222,25 @@ export default async function Home() {
                 <Forward />
               </Link>
               {promoSrc ? (
+                // The film is 16:9 only: below sm it would play ~360 px wide (the Sample tag
+                // illegible), so phones keep the /showcase link until a 9:16 cut exists.
                 <PromoVideoButton
                   src={promoSrc.src}
                   poster={promoSrc.poster}
                   label={t('hero.ctaWatch')}
                   title={t('hero.watchTitle')}
                   closeLabel={t('hero.watchClose')}
-                  className={btnSecondary}
+                  transcript={promoTranscript[locale]}
+                  transcriptLabel={t('hero.watchTranscript')}
+                  ctaHref={ctaHref}
+                  ctaLabel={t('hero.ctaPrimary')}
+                  className={cn(btnSecondary, 'hidden sm:inline-flex')}
                 />
-              ) : (
-                <Link href="/showcase" className={btnSecondary}>
-                  <PlayCircle className="h-4 w-4" aria-hidden="true" />
-                  {t('hero.ctaDemo')}
-                </Link>
-              )}
+              ) : null}
+              <Link href="/showcase" className={promoSrc ? cn(btnSecondary, 'sm:hidden') : btnSecondary}>
+                <PlayCircle className="h-4 w-4" aria-hidden="true" />
+                {t('hero.ctaDemo')}
+              </Link>
             </div>
             <ul className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-muted lg:justify-start">
               {[t('hero.note1'), t('hero.note2'), t('hero.note3')].map((n) => (

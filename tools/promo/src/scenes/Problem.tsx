@@ -1,6 +1,6 @@
 import React from 'react';
 import { AbsoluteFill, random, useCurrentFrame, useVideoConfig } from 'remotion';
-import { COPY, Locale } from '../copy';
+import { COPY, FILM, Locale, risePct } from '../copy';
 import { C, EASE_IN, EASE_OUT, FONT, isLight, lerp, prog } from '../theme';
 import { RiseLine } from '../components/primitives';
 
@@ -9,10 +9,10 @@ import { RiseLine } from '../components/primitives';
 type Row = [string, number, number]; // item, qty, unit price
 const INVOICES: { supplier: string; rows: Row[] }[] = [
   { supplier: 'ירקות השרון', rows: [['עגבניות שרי', 15, 14], ['מלפפונים', 12, 5.87], ['חסה ערבית', 20, 4.5], ['כוסברה', 10, 3.01]] },
-  { supplier: 'דגי הים התיכון', rows: [['פילה סלמון', 6, 96]] },
-  { supplier: 'משקאות שטיינברג', rows: [['בירה מהחבית — חבית 30 ל׳', 2, 575]] },
+  { supplier: 'דגי הים התיכון', rows: [['פילה סלמון', 6, FILM.rises[1].latest]] },
+  { supplier: 'משקאות שטיינברג', rows: [['בירה מהחבית — חבית 30 ל׳', FILM.keg.qty, FILM.keg.latest]] },
   { supplier: 'מחלבות הגליל', rows: [['מוצרלה', 6, 42.21], ['חמאה', 4, 46], ['חלב 3%', 37.5, 6.43], ['גבינה בולגרית', 4.5, 37.81]] },
-  { supplier: 'קצביית הכרם', rows: [['אנטריקוט', 4, 149], ['חזה עוף', 30, 21.6]] },
+  { supplier: 'קצביית הכרם', rows: [['אנטריקוט', 4, FILM.rises[0].latest], ['חזה עוף', 30, 21.6]] },
 ];
 const CARD_INVOICE = [0, 1, 2, 3, 4, 0, 1, 3, 4]; // card i → invoice
 const money = (n: number) => `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₪`;
@@ -115,7 +115,7 @@ export const Problem: React.FC<{ locale: Locale }> = ({ locale }) => {
   const shake = f > 60 && f < 168 ? Math.sin(f * 1.7) * 2.2 * (1 - out) : 0;
 
   const stamps = [
-    { card: 2, text: t.stampPrice, at: 78 },
+    { card: 2, text: t.stampPrice.replace('{pct}', risePct(FILM.keg.usual, FILM.keg.latest)), at: 78 },
     { card: 5, text: t.stampShort, at: 96 },
     { card: 7, text: t.stampUnordered, at: 114 },
   ];

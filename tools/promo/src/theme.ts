@@ -28,7 +28,7 @@ const LIGHT_STAGE: typeof DARK = {
   line: '#D3DDD7',
   ink: '#0F1F17',
   muted: '#4A5D53',
-  subtle: '#6B7C73',
+  subtle: '#566860', // ≥4.5:1 on bg, bgDeep and the spotlight fog (was #6B7C73 ≈3.8:1)
   primary: '#066B4A',
   onPrimary: '#FFFFFF',
   gold: '#755C00',

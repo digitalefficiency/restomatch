@@ -1,5 +1,5 @@
 import React from 'react';
-import { ilsText, Locale, SAMPLE } from '../copy';
+import { FILM, ilsText, Locale, risePct, SAMPLE } from '../copy';
 import { FONT } from '../theme';
 import { SampleGoodNews, SampleHeroCard, SampleNeedsCard, SAMPLE_TONES as T } from './SampleCards';
 
@@ -24,80 +24,82 @@ const S = {
   he: {
     brand: 'מסעדה לדוגמה',
     sample: 'דוגמה',
-    nav: ['סקירה', 'קליטת סחורה', 'תור החלטות', 'בלש הדליפות', 'בקשות זיכוי'],
+    nav: ['בית', 'קבלת סחורה', 'אישורים', 'דליפה', 'בקשות זיכוי לשליחה'], // apps/web common screens.*
     navOf: { dashboard: 0, leaks: 3, approvals: 2, claims: 4 } as Record<BeatKey, number>,
-    title: { dashboard: 'לוח הבעלים', leaks: 'בלש הדליפות', approvals: 'תור החלטות', claims: 'בקשות זיכוי' } as Record<BeatKey, string>,
+    title: { dashboard: 'לוח הבעלים', leaks: 'מחירים שעלו', approvals: 'אישורים', claims: 'בקשות זיכוי לשליחה' } as Record<BeatKey, string>,
     sub: {
       dashboard: 'איפה כסף בורח — ומה מחכה להחלטה שלך עכשיו.',
-      leaks: 'המחיר האחרון מול החציון ההיסטורי, לפי ספק ומוצר.',
+      leaks: 'המחיר האחרון מול המחיר הרגיל, לפי ספק ומוצר.',
       approvals: 'פערים על חשבוניות שעוד לא שולמו — לפני התשלום.',
       claims: 'פערים על חשבוניות ששולמו — בקשת זיכוי מנומסת לכל ספק.',
     } as Record<BeatKey, string>,
-    kpi: ['דליפה החודש', 'מהקניות שנבדקו', 'קניות שנבדקו', 'חשבוניות עם פער'],
-    cols: ['מוצר', 'ספק', 'חציון', 'מחיר אחרון', 'שינוי'],
+    kpi: ['דליפה החודש', 'מהרכש שנבדק', 'הרכש שנבדק', 'חשבוניות עם פער'],
+    cols: ['מוצר', 'ספק', 'המחיר הרגיל', 'מחיר אחרון', 'שינוי'],
     rows: [
-      ['בירה מהחבית — חבית 30 ל׳', 'משקאות שטיינברג', 520, 575, '+10.6%'],
-      ['אנטריקוט', 'קצביית הכרם', 139, 149, '+7.2%'],
-      ['פילה סלמון', 'דגי הים התיכון', 89, 96, '+7.9%'],
-    ] as [string, string, number, number, string][],
+      ['בירה מהחבית — חבית 30 ל׳', 'משקאות שטיינברג'],
+      ['אנטריקוט', 'קצביית הכרם'],
+      ['פילה סלמון', 'דגי הים התיכון'],
+    ] as [string, string][],
     decide: 'ממתין להחלטה שלך',
     credit: 'בקשות זיכוי לשליחה',
     gaps: (n: number) => `${n} פערים`,
     priceHigh: 'מחיר גבוה מהמצופה',
     overBilled: 'חיוב על יותר ממה שהתקבל',
-    kegLine: 'חבית 30 ל׳ · משקאות שטיינברג',
-    loss: 'ההפסד המוערך',
+    kegLine: (n: number) => `${n} חביות 30 ל׳ · משקאות שטיינברג`,
+    vs: 'במקום',
+    loss: 'פער',
     approve: 'אישור',
     reject: 'דחייה',
     askCredit: 'בקשת זיכוי',
     claims: [
-      ['קצביית הכרם', 'אנטריקוט', 300],
-      ['דגי הים התיכון', 'פילה סלמון', 240],
-      ['ירקות השרון', 'עגבניות שרי', 180],
-    ] as [string, string, number][],
+      ['קצביית הכרם', 'אנטריקוט'],
+      ['דגי הים התיכון', 'פילה סלמון'],
+      ['ירקות השרון', 'עגבניות שרי'],
+    ] as [string, string][],
     send: 'שליחת המכתב',
-    total: 'סה״כ לבקשות זיכוי',
+    total: 'סה״כ בקשות זיכוי לשליחה',
     letterTitle: 'בקשת זיכוי · קצביית הכרם',
     letter1: 'שלום רב, בחשבונית מ־21.10 חויב אנטריקוט מעל המחיר שסוכם.',
-    letter2: 'נשמח לזיכוי על ההפרש. תודה על השירות הקבוע!',
+    letter2: 'נשמח לזיכוי על הפער. תודה על השירות הקבוע!',
     letter3: 'בברכה, מסעדה לדוגמה',
   },
   en: {
     brand: 'Sample restaurant',
     sample: 'Sample',
-    nav: ['Overview', 'Receiving', 'Decisions', 'Leak detective', 'Credit requests'],
+    nav: ['Home', 'Receiving', 'Approvals', 'Leak', 'Credit requests to send'],
     navOf: { dashboard: 0, leaks: 3, approvals: 2, claims: 4 } as Record<BeatKey, number>,
-    title: { dashboard: 'Owner dashboard', leaks: 'Leak detective', approvals: 'Decisions', claims: 'Credit requests' } as Record<BeatKey, string>,
+    title: { dashboard: 'Owner dashboard', leaks: 'Price rises', approvals: 'Approvals', claims: 'Credit requests to send' } as Record<BeatKey, string>,
     sub: {
       dashboard: 'Where money is leaking — and what needs your decision now.',
-      leaks: 'Latest price vs. the historical median, by supplier and product.',
+      leaks: 'Latest price vs. the usual price, by supplier and product.',
       approvals: 'Gaps on invoices not yet paid — before payment.',
       claims: 'Gaps on paid invoices — a polite credit request per supplier.',
     } as Record<BeatKey, string>,
-    kpi: ['Leak this month', 'of purchases checked', 'Purchases checked', 'Invoices with a gap'],
-    cols: ['Product', 'Supplier', 'Median', 'Latest price', 'Change'],
+    kpi: ['Leak this month', 'of checked spend', 'Checked spend', 'Invoices with a gap'],
+    cols: ['Product', 'Supplier', 'Usual price', 'Latest price', 'Change'],
     rows: [
-      ['Draft beer keg 30L', 'Steinberg Beverages', 520, 575, '+10.6%'],
-      ['Entrecôte', 'HaKerem Butchery', 139, 149, '+7.2%'],
-      ['Salmon fillet', 'Mediterranean Fish Co.', 89, 96, '+7.9%'],
-    ] as [string, string, number, number, string][],
+      ['Draft beer keg 30L', 'Steinberg Beverages'],
+      ['Entrecôte', 'HaKerem Butchery'],
+      ['Salmon fillet', 'Mediterranean Fish Co.'],
+    ] as [string, string][],
     decide: 'Awaiting your decision',
     credit: 'Credit requests to send',
     gaps: (n: number) => `${n} gaps`,
     priceHigh: 'Price above expected',
     overBilled: 'Billed more than received',
-    kegLine: '30L keg · Steinberg Beverages',
-    loss: 'Estimated loss',
+    kegLine: (n: number) => `${n} × 30L keg · Steinberg Beverages`,
+    vs: 'vs.',
+    loss: 'Gap',
     approve: 'Approve',
     reject: 'Reject',
     askCredit: 'Request a credit',
     claims: [
-      ['HaKerem Butchery', 'Entrecôte', 300],
-      ['Mediterranean Fish Co.', 'Salmon fillet', 240],
-      ['HaSharon Produce', 'Cherry tomatoes', 180],
-    ] as [string, string, number][],
+      ['HaKerem Butchery', 'Entrecôte'],
+      ['Mediterranean Fish Co.', 'Salmon fillet'],
+      ['HaSharon Produce', 'Cherry tomatoes'],
+    ] as [string, string][],
     send: 'Send the letter',
-    total: 'Total credit requests',
+    total: 'Total credit requests to send',
     letterTitle: 'Credit request · HaKerem Butchery',
     letter1: 'Hello, on the 21.10 invoice the entrecôte was billed above the agreed price.',
     letter2: 'We’d appreciate a credit for the difference. Thanks for the steady service!',
@@ -200,19 +202,22 @@ export const ProductScreen: React.FC<{ beat: BeatKey; locale: Locale; sw: number
             {row(0, 40, [s.cols[0], s.cols[2], s.cols[3], s.cols[4]].map((c, i) => (
               <span key={c} style={{ width: [250, 100, 110, 70][i] * u, fontSize: 12.5 * u, fontWeight: 700, color: T.muted }}>{c}</span>
             )), { borderBottom: `${Math.max(1, u)}px solid ${T.line}` })}
-            {s.rows.map((r, j) =>
+            {s.rows.map((r, j) => {
+              const [usual, latest] = j === 0 ? [FILM.keg.usual, FILM.keg.latest] : [FILM.rises[j - 1].usual, FILM.rises[j - 1].latest];
+              return (
               row(40 + j * 56, 56, (
                 <>
                   <span style={{ width: 250 * u, display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
                     <span style={{ fontSize: 15 * u, fontWeight: 700 }}>{r[0]}</span>
                     <span style={{ fontSize: 12 * u, color: T.muted }}>{r[1]}</span>
                   </span>
-                  <span style={{ width: 100 * u, fontSize: 14 * u }}>{money(r[2], 2)}</span>
-                  <span style={{ width: 110 * u, fontSize: 14 * u, fontWeight: 700 }}>{money(r[3], 2)}</span>
-                  <span style={{ width: 70 * u, fontSize: 14 * u, fontWeight: 800, color: T.warn }}><bdi dir="ltr">{r[4]}</bdi></span>
+                  <span style={{ width: 100 * u, fontSize: 14 * u }}>{money(usual, 2)}</span>
+                  <span style={{ width: 110 * u, fontSize: 14 * u, fontWeight: 700 }}>{money(latest, 2)}</span>
+                  <span style={{ width: 70 * u, fontSize: 14 * u, fontWeight: 800, color: T.warn }}><bdi dir="ltr">{risePct(usual, latest)}</bdi></span>
                 </>
-              ), j ? { borderTop: `${Math.max(1, u)}px solid ${T.line}` } : undefined),
-            )}
+              ), j ? { borderTop: `${Math.max(1, u)}px solid ${T.line}` } : undefined)
+              );
+            })}
           </Panel>
         </>
       ) : null}
@@ -234,7 +239,9 @@ export const ProductScreen: React.FC<{ beat: BeatKey; locale: Locale; sw: number
                 <Pill u={u} bg={T.danger} fg="#FFFFFF">{s.priceHigh}</Pill>
                 <span style={{ fontSize: 17 * u, fontWeight: 800 }}>{SAMPLE.decide.example[locale]}</span>
               </div>
-              <div style={{ fontSize: 14 * u, color: T.muted }}>{s.kegLine}</div>
+              <div style={{ fontSize: 14 * u, color: T.muted }}>
+                {s.kegLine(FILM.keg.qty)} · {money(FILM.keg.latest, 2)} {s.vs} {money(FILM.keg.usual, 2)}
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 * u }}>
                 <span style={{ fontSize: 14 * u, color: T.muted }}>{s.loss}</span>
                 <span style={{ fontSize: 20 * u, fontWeight: 800, color: T.danger }}>{money(SAMPLE.decide.example.amount, 2)}</span>
@@ -251,7 +258,7 @@ export const ProductScreen: React.FC<{ beat: BeatKey; locale: Locale; sw: number
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 * u }}>
                 <span style={{ fontSize: 14 * u, color: T.muted }}>{s.loss}</span>
-                <span style={{ fontSize: 18 * u, fontWeight: 800, color: T.danger }}>{money(SAMPLE.decide.amount - SAMPLE.decide.example.amount, 2)}</span>
+                <span style={{ fontSize: 18 * u, fontWeight: 800, color: T.danger }}>{money(Math.round((SAMPLE.decide.amount - SAMPLE.decide.example.amount) * 100) / 100, 2)}</span>
               </div>
             </div>
           </Panel>
@@ -278,7 +285,7 @@ export const ProductScreen: React.FC<{ beat: BeatKey; locale: Locale; sw: number
                 <>
                   <span style={{ fontSize: 15 * u, fontWeight: 700, width: 190 * u }}>{c[0]}</span>
                   <span style={{ fontSize: 14 * u, color: T.muted, flex: 1 }}>{c[1]}</span>
-                  <span style={{ fontSize: 16 * u, fontWeight: 800, width: 100 * u }}>{money(c[2], 2)}</span>
+                  <span style={{ fontSize: 16 * u, fontWeight: 800, width: 100 * u }}>{money(FILM.credits[j], 2)}</span>
                   <Pill u={u} bg={T.primary} fg="#FFFFFF">{s.send}</Pill>
                 </>
               ), { padding: `0 ${28 * u}px`, borderBottom: `${Math.max(1, u)}px solid ${T.line}` }),

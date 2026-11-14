@@ -67,6 +67,19 @@ test.describe('W3-06b · hero media gate', () => {
     const video = page.locator('dialog video');
     await expect(video).toBeVisible();
     await expect(video).toHaveAttribute('src', /\/media\/promo-he-720\.mp4$/);
+    // #320 review: the silent film's text alternative + the real next step live in the dialog
+    const dialog = page.locator('dialog[open]');
+    const transcriptId = await video.getAttribute('aria-describedby');
+    expect(transcriptId).toBeTruthy();
+    await expect(dialog.locator(`[id="${transcriptId}"] li`).first()).toBeAttached();
+    await dialog.getByText(lHe.hero.watchTranscript).click();
+    await expect(dialog.locator(`[id="${transcriptId}"]`)).toBeVisible();
+    const close = dialog.getByRole('button', { name: lHe.hero.watchClose });
+    const box = await close.boundingBox();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    await dialog.getByRole('link', { name: lHe.hero.ctaPrimary }).click();
+    await expect(page.locator('dialog[open]')).toHaveCount(0);
   });
 
   test('M12: the hero loop is captioned as a sample (desktop)', async ({ page }) => {
@@ -77,6 +90,12 @@ test.describe('W3-06b · hero media gate', () => {
 
   test.describe('phones', () => {
     test.use(PHONE);
+
+    test('#320: the 16:9 film is not offered on a phone — the /showcase link is', async ({ page }) => {
+      await open(page, '/');
+      await expect(page.getByRole('button', { name: lHe.hero.ctaWatch })).toBeHidden();
+      await expect(page.getByRole('link', { name: lHe.hero.ctaDemo })).toBeVisible();
+    });
 
     test('Q1: an English phone gets HeroMatch and never fetches the Hebrew 9:16 cut', async ({ page }) => {
       const nineBySixteen: string[] = [];

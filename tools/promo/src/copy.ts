@@ -1,49 +1,26 @@
-// Every on-screen string, per locale. Every NUMBER here is traceable — see
-// STORYBOARD.md §Sources. Demo figures come from the seeded demo tenant
-// "כפר הזיתים" (scripts/dev-setup.sh → seed-demo log + the live /dashboard hero),
-// month = October 2026. Change copy here; layout reads it.
-
-import receiverGenerated from './receiver.generated.json';
+// Every on-screen string, per locale. Every NUMBER on screen comes from the site's ONE sample month
+// (sample.ts SAMPLE = apps/web/app/(marketing)/_components/sampleMonth.ts) or from its reconciled
+// film breakdown (sample.ts FILM) — scripts/check-sample.mjs pins both. No demo-seed figure, no
+// demo restaurant name. Terms follow apps/web/lib/i18n/glossary.ts (the w3-06 vitest scans this file).
 
 export type Locale = 'he' | 'en';
 
-/** Facts shown on screen (seeded demo tenant, dashboard hero, Oct 2026). */
-export const FACTS = {
-  // Demo seed DEMO_TODAY=2026-10-25 (the live demo's seed), month = October 2026.
-  leak: 760, // "דלף החודש" — owner.leakHero
-  spend: 42263, // pre-VAT checked spend this month
-  leakPct: '1.8%', // 760 / 42,263 = 1.80% — the app's hero shows "1.8%"
-  caught: 296, // "נתפס לפני תשלום" — leak on unpaid invoices
-  claimed: 464, // "נדרש מהספקים" — accepted to claim back
-  flagged: 13, // invoices with a leak
-  checked: 35, // checked invoices (dashboard "13 מתוך 35")
-  beerFrom: 520, // leak detective: beer keg baseline ₪520.00
-  beerTo: 575, // last price ₪575.00 (+10.6%)
-  apprAmount: 104.8, // /dashboard/approvals top card: beer keg ST-24108, "ההפסד המוערך 104.80 ₪"
-  chainLeakPct: '2.9%', // /dashboard/chain: worst branch (Jerusalem ₪975 of ₪33,056) — seed:chain-demo
-  pilotTarget: '1.5%', // North Star / pilot target (docs/ICP.md, AGENTS.md)
-};
-export type Facts = typeof FACTS;
+export { SAMPLE, FILM, risePct, kegGap } from './sample';
 
-export { SAMPLE } from './sample';
-
-/** Override demo numbers at render time (input prop `facts`) — e.g. after the seed changes. */
-export const applyFacts = (over?: Partial<Facts>) => {
-  if (over) Object.assign(FACTS, over);
-};
-
-/** ₪ amount exactly as the app's formatIls renders it: he-IL "572 ₪" (RTL), en "₪572". */
+/**
+ * ₪ amount exactly as the app's formatIls renders it: he-IL "‏572 ₪" — WITH the leading RLM, so a
+ * plain <bdi> resolves RTL and the glyph sits at the visual left, as on the site (Money.tsx) — and
+ * en "₪572".
+ */
 export const ilsText = (n: number, locale: Locale, decimals = 0) => {
   const v = n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-  return locale === 'he' ? `${v} ₪` : `₪${v}`;
+  return locale === 'he' ? `\u200F${v} ₪` : `₪${v}`;
 };
-
-export const SITE = 'restomatch.co.il'; // placeholder — final domain TBD (canonical = APP_URL)
 
 const he = {
   hook: {
     l1: 'כמה כסף',
-    l2: 'דלף לך',
+    l2: 'דולף לכם',
     l3: 'החודש?',
     sub: 'רוב בעלי המסעדות לא יודעים לענות.',
     tag: 'דוגמה · מסעדה בדויה · אוקטובר',
@@ -52,7 +29,7 @@ const he = {
     t1: 'עשרות משלוחים בשבוע.',
     t2: 'חשבונית לכל אחד.',
     t3: 'ואף אחד לא משווה שורה מול שורה.',
-    stampPrice: 'מחיר עלה +10.6%',
+    stampPrice: 'מחיר עלה {pct}',
     stampShort: 'חויב על 3 ק״ג שלא הגיעו',
     stampUnordered: 'לא הוזמן',
     suppliers: ['ירקות השרון', 'קצביית הכרם', 'משקאות שטיינברג', 'דגי הים התיכון', 'מחלבות הגליל', 'מאפיית ברנר'],
@@ -70,12 +47,12 @@ const he = {
   },
   product: {
     heroTitle: 'מספר אחד. בשקלים.',
-    heroSub: 'כמה דלף החודש — ומה עוד לא שולם.',
+    heroSub: 'כמה כסף דולף החודש — ומה עוד לא שולם.',
     chipLeak: 'דליפה החודש',
-    chipPct: 'מהקניות',
+    chipPct: 'מהרכש',
     chipCaught: 'נתפס לפני תשלום',
-    heatTitle: 'בלש הדליפות',
-    heatSub: 'איפה המחיר מזחל, ומי מקצר משלוחים.',
+    heatTitle: 'מחירים שעלו',
+    heatSub: 'איזה מחיר עלה מעל המחיר הרגיל — ואצל איזה ספק.',
     chipBeer: 'בירה מהחבית: {from} ← {to}',
     apprTitle: 'מסמנים לפני התשלום.',
     apprSub: 'כל פער מגיע לאדם הנכון — מאשרים, דוחים, או מבקשים זיכוי.',
@@ -94,19 +71,13 @@ const he = {
     paper: 'חשבונית ספק · בעברית',
     phoneCaption: 'Receiver in English',
   },
-  chains: {
-    title: 'רשתות וסניפים',
-    sub: 'כל הסניפים במסך אחד — איפה הכסף דולף, ואיפה אותו מוצר עולה יותר.',
-    chipWorst: 'הסניף הכי דולף: ירושלים',
-    chipGap: 'פערי מחיר בין סניפים',
-  },
   value: {
     eyebrow: 'דוגמה · מסעדה בדויה · אוקטובר',
     leak: 'דליפה החודש',
-    leakNote: 'מתוך {spend} קניות',
+    leakNote: 'מתוך {spend} רכש, לפני מע״מ',
     caught: 'נתפסו לפני תשלום',
     caughtNote: 'על חשבוניות שעוד לא שולמו',
-    claimed: 'אושר לבקשת זיכוי',
+    claimed: 'בקשות זיכוי לשליחה',
     claimedNote: 'על חשבוניות ששולמו — מכתב לספק מוכן',
     calm: 'בלי לשנות את העבודה היומיומית.',
     steps: ['מצלמים את החשבונית', 'המערכת משווה שורה מול שורה', 'מאשרים — לפני התשלום'],
@@ -114,7 +85,6 @@ const he = {
   cta: {
     tagline: 'המספר שכל בעל מסעדה צריך',
     action: 'תאמו הדגמה קצרה',
-    url: SITE,
   },
   loop: { chip: 'נתוני הדגמה' },
   sampleTag: 'דוגמה · מספרים להמחשה',
@@ -124,7 +94,7 @@ const he = {
   sample: {
     eyebrow: 'דוגמה · דליפה שזוהתה · אוקטובר',
     label: 'דליפה החודש',
-    pct: '{pct} מהקניות שנבדקו',
+    pct: '{pct} מהרכש שנבדק',
     base: 'מתוך {amount} לפני מע״מ',
     completeness: '{checked} חשבוניות נבדקו · {withGap} עם פער',
     caught: 'נתפסו לפני תשלום',
@@ -152,7 +122,7 @@ const en: typeof he = {
     t1: 'Dozens of deliveries a week.',
     t2: 'An invoice for each one.',
     t3: 'And nobody checks them line by line.',
-    stampPrice: 'Price up +10.6%',
+    stampPrice: 'Price up {pct}',
     stampShort: 'Billed 3 kg that never came',
     stampUnordered: 'Not ordered',
     suppliers: ['ירקות השרון', 'קצביית הכרם', 'משקאות שטיינברג', 'דגי הים התיכון', 'מחלבות הגליל', 'מאפיית ברנר'],
@@ -174,9 +144,9 @@ const en: typeof he = {
     chipLeak: 'Leak this month',
     chipPct: '', // the callout keeps only "· 1.5%": the words overflow the chip in English
     chipCaught: 'Caught before payment',
-    heatTitle: 'Leak detective',
-    heatSub: 'Where prices creep, and who short-delivers.',
-    chipBeer: 'Draft beer keg: {from} → {to}',
+    heatTitle: 'Price rises',
+    heatSub: 'Which price rose above the usual price — and at which supplier.',
+    chipBeer: 'Beer keg: {from} → {to}',
     apprTitle: 'Flag it before you pay.',
     apprSub: 'Every gap goes to the right person — approve, reject, or request a credit.',
     chipAppr: 'Awaiting your decision:',
@@ -194,19 +164,13 @@ const en: typeof he = {
     paper: 'Supplier invoice · in Hebrew',
     phoneCaption: 'Receiver in English',
   },
-  chains: {
-    title: 'Chains & branches',
-    sub: 'Every branch on one screen — where money leaks, and where the same product costs more.',
-    chipWorst: 'Leakiest branch: Jerusalem',
-    chipGap: 'Price gaps between branches',
-  },
   value: {
     eyebrow: 'Sample · fictional restaurant · October',
     leak: 'Leak this month',
-    leakNote: 'of {spend} purchases',
+    leakNote: 'of {spend} spend, before VAT',
     caught: 'Caught before payment',
     caughtNote: 'on invoices not yet paid',
-    claimed: 'Approved credit requests',
+    claimed: 'Credit requests to send',
     claimedNote: 'on paid invoices — the letter is ready',
     calm: 'Without changing your daily routine.',
     steps: ['Snap the invoice', 'It’s checked line by line', 'Approve — before you pay'],
@@ -214,7 +178,6 @@ const en: typeof he = {
   cta: {
     tagline: 'The number every restaurant owner needs',
     action: 'Book a short demo',
-    url: SITE,
   },
   loop: { chip: 'Demo data' },
   sampleTag: 'Sample · illustrative figures',
@@ -222,7 +185,7 @@ const en: typeof he = {
   sample: {
     eyebrow: 'Sample · leak found · October',
     label: 'Leak this month',
-    pct: '{pct} of purchases checked',
+    pct: '{pct} of checked spend',
     base: 'of {amount} before VAT',
     completeness: '{checked} invoices checked · {withGap} with a gap',
     caught: 'Caught before payment',
@@ -242,30 +205,15 @@ export const COPY = { he, en };
 export type Copy = typeof he;
 
 
-type Line = { he: string; en: string; qty: string; qtyEn: string; price: string; flag?: 'price' | 'qty' };
-/** Hebrew invoice line → English, exactly as the app showed them (public/shots/reconcile-en.png, HaSharon Produce). */
-const LINES_FALLBACK: Line[] = [
-  { he: 'עגבניות שרי', en: 'Cherry tomatoes', qty: '15 ק״ג', qtyEn: '15 kg', price: '₪14.00', flag: 'price' },
-  { he: 'כוסברה', en: 'Coriander', qty: '10 צרור', qtyEn: '10 bunch', price: '₪3.01', flag: 'qty' },
-  { he: 'חסה ערבית', en: 'Romaine lettuce', qty: '20 יח׳', qtyEn: '20 unit', price: '₪4.50' },
-  { he: 'מלפפונים', en: 'Cucumbers', qty: '12 ק״ג', qtyEn: '12 kg', price: '₪5.87' },
+/**
+ * The receiver beat's invoice lines (Hebrew paper → English): names and quantities only — the
+ * receiver never sees ₪ (apps/web receiving UI: quantities and states). Cherry tomatoes are the
+ * short line: ordered FILM.delivery.ordered, received FILM.delivery.received.
+ */
+type Line = { he: string; en: string; qty: string; qtyEn: string; flag?: 'qty' };
+export const LINES: Line[] = [
+  { he: 'עגבניות שרי', en: 'Cherry tomatoes', qty: '15 ק״ג', qtyEn: '15 kg', flag: 'qty' },
+  { he: 'כוסברה', en: 'Coriander', qty: '10 צרור', qtyEn: '10 bunch' },
+  { he: 'חסה ערבית', en: 'Romaine lettuce', qty: '20 יח׳', qtyEn: '20 unit' },
+  { he: 'מלפפונים', en: 'Cucumbers', qty: '12 ק״ג', qtyEn: '12 kg' },
 ];
-
-// English unit → the Hebrew abbreviation the paper invoice uses.
-const UNIT_HE: Record<string, string> = { kg: 'ק״ג', g: 'גר׳', L: 'ל׳', ml: 'מ״ל', unit: 'יח׳', tray: 'תבנית', bunch: 'צרור', case: 'ארגז', pack: 'מארז', bottle: 'בקבוק', can: 'פחית', carton: 'קרטון', sack: 'שק', jar: 'צנצנת' };
-
-/** The first invoice lines of the real English reconciliation (scripts/capture.mjs → receiver.generated.json). */
-type Captured = { en: string; he: string; qty: string; unit: string; price: string; flag?: 'price' | 'qty' };
-const captured = receiverGenerated as Captured[];
-export const LINES: Line[] =
-  captured.length >= 4
-    ? captured.slice(0, 4).map((c) => ({
-        he: c.he,
-        en: c.en,
-        // qty/price stay empty when the capture couldn't read them — the scene then shows the names only
-        qty: c.qty ? `${c.qty} ${UNIT_HE[c.unit] ?? c.unit}` : '',
-        qtyEn: c.qty ? `${c.qty} ${c.unit}` : '',
-        price: c.price ? `₪${c.price}` : '',
-        flag: c.flag,
-      }))
-    : LINES_FALLBACK;

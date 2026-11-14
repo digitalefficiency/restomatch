@@ -32,11 +32,11 @@ export const heroMedia = {
    * Full promo shown in the "Watch 60 seconds" modal (S10's film, per locale).
    * null hides the button. Nothing downloads until the modal opens.
    *
-   * Re-enabled on S10's sample-month render (#318 @b0937588): the films show
-   * only the ONE sample month (₪2,250 · 1.5% of ₪150,000 · ₪910 / ₪104.80 keg ·
-   * ₪720 · Value ₪2,250 / ₪1,530 / ₪720), a "דוגמה · מספרים להמחשה" tag on
-   * every frame, no target line. The files are pinned by SHA-256 in
-   * APPROVED_MEDIA_FILES; the old ₪760 cut is in REJECTED_PROMO_SHA256.
+   * The #320 review-fix render of the sample-month films: only the ONE sample month
+   * (₪2,250 · 1.5% of ₪150,000 · ₪910 incl. the ₪104.80 keg · ₪720 · Value ₪2,250 / ₪1,530 /
+   * ₪720), a "דוגמה · מספרים להמחשה" tag on every frame, a ₪-free receiver beat, no URL. Pinned
+   * by SHA-256 in APPROVED_MEDIA_FILES; the ₪760 cut and #318's cut are in REJECTED_PROMO_SHA256.
+   * The 16:9 film is offered on sm+ only (page.tsx) until a 9:16 cut exists.
    */
   promoVideo: {
     he: { src: '/media/promo-he-720.mp4', poster: '/media/promo-poster-he.jpg' },
@@ -101,22 +101,30 @@ export const APPROVED_MEDIA_FILES: Readonly<Record<string, string>> = {
   // S10 #318 @b0937588 9:16 poster WebPs (540×960, 810×1440) — same frame as hero-poster-9x16.jpg.
   '/media/hero-poster-9x16-540.webp': '3b451f8fc3f98b37a1dab53f57192be0fea5f59dc3f5a50e1104da31222615fe',
   '/media/hero-poster-9x16-810.webp': '0f014686e33de7f7ceca2108b69e10e45ee4675b61b9da9cd41e63b9d9b46b5b',
-  // S10 #318 @b0937588 60 s films + posters, rendered from the sample month. Frames checked at
-  // 3/6/10/15/19/24/30/36/42/47–54/55/59 s (he + en): ₪2,250 · 1.5% of ₪150,000 · 35/13 ·
-  // credit requests ₪720 · Value settles at ₪2,250 / ₪1,530 / ₪720 (count-up in between);
-  // "דוגמה · מספרים להמחשה" / "Sample · illustrative figures" tag on every frame; no target line.
-  '/media/promo-he-720.mp4': 'fa83db83faf08b103d460b31eaa3e4254f2c588c3f13ead9460ef0cd711e6f4c',
-  '/media/promo-en-720.mp4': '2f39a99aaa3f17e4a744171eec9b4dc80fb5fd805adad20e5cb4f2913833dfe4',
-  '/media/promo-poster-he.jpg': '8cc67ef4525a82c229be95a172b57bf4f2f4ac572030eaa5281b4b32dff38aed',
-  '/media/promo-poster-en.jpg': 'c4fd861f83dba2d22f5b60be0944c758fe5175c05ce22b5ac0d438deeed4de04',
+  // #320 review-fix re-render (14.11), from the sample month only. Frame gate
+  // (tools/promo/scripts/frame-check.mjs, he + en): DOM probe every 2 s + every 0.2 s through the
+  // receiver beat (33.2–40.9 s) + the poster — Sample tag on every frame, NO ₪ in the receiver beat
+  // (drawn screen: quantities and states only), no URL; pixel check of the tag on every 2 s grab of
+  // the files below and on the posters. ₪ at the visual left in Hebrew; "פער" for undecided money.
+  '/media/promo-he-720.mp4': 'c8b807c893f37a91368588ad70f823244a46d2446fa9fc4f38e17b7bb8ded6f0',
+  '/media/promo-en-720.mp4': '88304eef45d9601377a92efc407b32356bde33427b3a05e38e316e94f53bcf1a',
+  '/media/promo-poster-he.jpg': '7390e09750e9be1edf8e402e636c3e16d33faf430937ce3b7e3139bfe521fa2d',
+  '/media/promo-poster-en.jpg': '92570bbb49650a52c6b58b41723c250b1ba9083c6796b3cd5a97a51c16968614',
 };
 
-/** SHA-256 of the OLD promo films + posters (₪760 · 1.8% · "דרישה"): never approvable. */
+/** SHA-256 of rejected promo films + posters (the ₪760 cut, and #318's demo-seed receiver beat): never approvable. */
 export const REJECTED_PROMO_SHA256: readonly string[] = [
   '1d1f29db6aeb61c5d3b79bb5e55fbf3c03ddfcb7d08eebe38b40c0d53c84b8ca', // promo-he-720.mp4
   '40e10c1ba04c34edfd2399367072331adce274ed0713895bb44442ac5c0011b1', // promo-en-720.mp4
   '217e3fac676b1508fa7c1b3b9a72587c7337e4b8e047ea9238bc4cbb5f8db344', // promo-poster-he.jpg
   'aa259ecffc5e4265e0e1ec4213fa759f4c892556cd1538f0b9337041886a54f5', // promo-poster-en.jpg
+  // #318 @b0937588 cut, blocked in #320 review (14.11): its receiver beat (33–41 s) showed demo-seed
+  // screenshots with a second figure set (₪17.05 · lettuce ₪90.00/₪97.20 · peppers, "כפר הזיתים"),
+  // "ההפסד המוערך" on undecided money, and ₪ on both sides of the number in Hebrew.
+  'fa83db83faf08b103d460b31eaa3e4254f2c588c3f13ead9460ef0cd711e6f4c', // promo-he-720.mp4
+  '2f39a99aaa3f17e4a744171eec9b4dc80fb5fd805adad20e5cb4f2913833dfe4', // promo-en-720.mp4
+  '8cc67ef4525a82c229be95a172b57bf4f2f4ac572030eaa5281b4b32dff38aed', // promo-poster-he.jpg
+  'c4fd861f83dba2d22f5b60be0944c758fe5175c05ce22b5ac0d438deeed4de04', // promo-poster-en.jpg
 ];
 
 /**
