@@ -45,3 +45,13 @@ export * from './data-viz';
 export * from './icon';
 export { PrintButton, startPrint } from './PrintButton';
 export type { PrintEnv } from './PrintButton';
+
+// DS3 · the clean finish (docs/ux/ds3, kit). Role choices live in ./tone.
+export { Kbd } from './Kbd';
+export { Tooltip } from './Tooltip';
+export { Calculation, CalculationFold } from './Calculation';
+export type { CalcSource, CalcSourceKind } from './Calculation';
+export { StatusRail } from './StatusRail';
+export type { RailStep, RailState } from './StatusRail';
+export { DataAnswer } from './DataAnswer';
+export type { AnswerFigure } from './DataAnswer';

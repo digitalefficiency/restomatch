@@ -9,3 +9,5 @@ export type { DateTimeVariant } from './DateTime';
 export { MetricTile } from './MetricTile';
 export { DeadlineChip } from './DeadlineChip';
 export { MONEY_DECIMALS, NUM_ALIGN, type MoneyContext } from './format';
+export { MatchStrip } from './MatchStrip';
+export type { MatchStripProps, MatchGap, MatchCell } from './MatchStrip';

@@ -1,5 +1,5 @@
 import { extendTailwindMerge } from 'tailwind-merge';
-import { radiusRoles, typeRoles, elevation, motion, zIndex } from '@restomatch/ui-tokens';
+import { radiusRoles, typeRoles, typeRolesV2, elevation, motion, zIndex } from '@restomatch/ui-tokens';
 
 /**
  * Tailwind-aware class merge (design-system v2). Later classes win, so
@@ -14,7 +14,9 @@ const twMerge = extendTailwindMerge({
       borderRadius: Object.keys(radiusRoles),
     },
     classGroups: {
-      'font-size': [{ text: Object.keys(typeRoles) }],
+      // DS2 v2 roles too (`text-kbd`, `text-id`, `text-cell`…): unregistered, tailwind-merge would
+      // read them as colours and drop them beside a `text-fg…` colour class.
+      'font-size': [{ text: [...Object.keys(typeRoles), ...Object.keys(typeRolesV2)] }],
       shadow: [{ shadow: [...Object.keys(elevation), 'card', 'glow-primary', 'glow-danger', 'glow-gold'] }],
       duration: [{ duration: Object.keys(motion.duration) }],
       ease: [{ ease: Object.keys(motion.easing) }],
