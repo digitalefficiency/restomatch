@@ -10,8 +10,10 @@ import {
   completeJoin,
   invitedAccountExists,
   issueJoinCode,
+  publicCompleteReason,
   loadInvite,
 } from '../_lib/joinFlow';
+import { joinSignInEmail } from '../_lib/codeEmail';
 import { cleanup, makeInvite, makeRestaurant, makeUser, membershipsOf, ownerDb, uniqueEmail, userByEmail } from './helpers';
 
 /**
@@ -255,5 +257,65 @@ describe('join attack: B5 — a tenant owner brute-forcing the join code', () =>
     const { token } = await makeInvite({ restaurantId: await makeRestaurant(), email });
     expect(await issueJoinCode(token)).toMatchObject({ ok: false, reason: 'rate' });
     expect((await issueJoinCode(token, Date.now() + 16 * 60 * 1000)).ok).toBe(true);
+  });
+});
+
+describe('join attack: no account oracle for the inviting owner (security review, /join)', () => {
+  /** What the public page shows for each attempt (the action maps reasons through publicCompleteReason). */
+  async function publicTrail(token: string, attempts: number): Promise<string[]> {
+    const out: string[] = [];
+    for (let i = 0; i < attempts; i += 1) {
+      const r = await completeJoin({ token, code: '000000', name: 'דנה', password: PASSWORD });
+      out.push(r.ok ? 'ok' : publicCompleteReason(r.reason));
+    }
+    return out;
+  }
+
+  it('after "send", an existing account and a new address answer the same, step by step, and lock at the same attempt', async () => {
+    const rid = await makeRestaurant();
+    const existing = uniqueEmail('oracle-existing');
+    const fresh = uniqueEmail('oracle-fresh');
+    await makeUser(existing, 'Has an account');
+    const a = await makeInvite({ restaurantId: rid, email: existing });
+    const b = await makeInvite({ restaurantId: rid, email: fresh });
+    // send: the existing account gets no code (the action e-mails a sign-in link); the new address a code
+    expect(await issueJoinCode(a.token)).toMatchObject({ ok: false, reason: 'hasPassword' });
+    const sentB = await issueJoinCode(b.token);
+    expect(sentB.ok).toBe(true);
+    if (sentB.ok && sentB.code === '000000') await issueJoinCode(b.token); // keep '000000' a wrong guess
+    const trailA = await publicTrail(a.token, JOIN_CODE_MAX_ATTEMPTS + 2);
+    const trailB = await publicTrail(b.token, JOIN_CODE_MAX_ATTEMPTS + 2);
+    expect(trailA).toEqual(trailB);
+    expect(trailA).toEqual([...Array(JOIN_CODE_MAX_ATTEMPTS).fill('wrongCode'), 'locked', 'locked']);
+  });
+
+  it('the per-address send cap applies to an existing account too (no "never throttled" tell)', async () => {
+    const email = uniqueEmail('oracle-cap');
+    await makeUser(email, 'Has an account');
+    const reasons: string[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      const { token } = await makeInvite({ restaurantId: await makeRestaurant(), email });
+      const r = await issueJoinCode(token);
+      reasons.push(r.ok ? 'ok' : r.reason === 'hasPassword' && r.throttled ? 'rate' : r.reason);
+    }
+    // the action answers "rate" on the 4th send, exactly as for a new address
+    expect(reasons).toEqual(['hasPassword', 'hasPassword', 'hasPassword', 'rate']);
+  });
+
+  it('publicCompleteReason folds "no code" and "has an account" into a wrong code', () => {
+    expect(publicCompleteReason('noCode')).toBe('wrongCode');
+    expect(publicCompleteReason('hasPassword')).toBe('wrongCode');
+    expect(publicCompleteReason('locked')).toBe('locked');
+    expect(publicCompleteReason('expired')).toBe('expired');
+  });
+
+  it('the sign-in e-mail for an existing account carries a sign-in link and no code', () => {
+    const url = 'https://app.example/login?callbackUrl=%2Finvite%2Faccept%3Ftoken%3Dabc%26then%3Dwelcome';
+    for (const locale of ['he', 'en'] as const) {
+      const m = joinSignInEmail({ url, restaurantName: 'מסעדת בדיקה', locale });
+      expect(m.text).toContain(url);
+      expect(m.html).toContain('href="https://app.example/login?callbackUrl=');
+      expect(m.text).not.toMatch(/\b\d{6}\b/);
+    }
   });
 });

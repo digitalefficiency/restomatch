@@ -7,7 +7,7 @@ import { labelForRole } from '@/lib/roles';
 import { AuthShell, authTitle } from '../../(auth)/_components/AuthShell';
 import { Notice } from '../../(auth)/_components/Notice';
 import { SubmitButton } from '../../(auth)/_components/SubmitButton';
-import { invitedAccountExists, loadInvite } from '../_lib/joinFlow';
+import { loadInvite } from '../_lib/joinFlow';
 import { sendJoinCodeAction } from '../actions';
 import { joinAcceptPath } from '../paths';
 import { JoinCodeForm } from './JoinCodeForm';
@@ -57,7 +57,11 @@ export default async function JoinPage({ params, searchParams }: PageProps) {
     );
   }
 
-  const [session, hasPassword] = await Promise.all([auth(), invitedAccountExists(token)]);
+  // No account lookup before the e-mail step: the first screen is the same for an
+  // address with or without a RestoMatch account (security review: no oracle for
+  // the inviting owner). The send action decides server-side: a code for a new
+  // address, a sign-in link for an existing account.
+  const session = await auth();
   const signedInAs = session?.user?.id ? (session.user.email ?? '') : null;
   const step = sp.step === 'code' ? 'code' : 'start';
   const errorKey = (ERROR_KEYS as readonly string[]).includes(sp.e ?? '') ? (sp.e as JoinErrorKey) : null;
@@ -89,17 +93,6 @@ export default async function JoinPage({ params, searchParams }: PageProps) {
         <LinkButton href={joinAcceptPath(token)} className="min-h-12 w-full text-base" data-testid="join-signed-in">
           {t('join.signedInJoin', { email: signedInAs })}
         </LinkButton>
-      ) : hasPassword ? (
-        <>
-          <p className="mb-4 text-base text-ink">{t('join.hasPasswordBody')}</p>
-          <LinkButton
-            href={`/login?${new URLSearchParams({ callbackUrl: joinAcceptPath(token) }).toString()}`}
-            className="min-h-12 w-full text-base"
-            data-testid="join-has-password"
-          >
-            {t('join.hasPasswordCta')}
-          </LinkButton>
-        </>
       ) : step === 'code' ? (
         <>
           {sp.sent ? (

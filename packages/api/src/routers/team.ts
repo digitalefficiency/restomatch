@@ -9,7 +9,9 @@ import {
   invitations,
   memberships,
   restaurants,
+  sql,
   users,
+  type Database,
 } from '@restomatch/db';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
@@ -17,10 +19,46 @@ import { canonicalizeEmail } from '../email';
 import { recordAudit, type AuditAction } from '../audit';
 import { appError } from '../errors';
 import type { MemberContext } from '../context';
+import { checkRateLimit, type RateLimitOptions, type RateLimitStore } from '../rateLimit';
 import { financeProcedure, managerProcedure, ownerProcedure, router, userScopedProcedure } from '../trpc';
 
 /** Invite link validity. */
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Per-owner cap on invite churn at the tRPC layer (security review, /join): invite,
+ * resend and revoke share 20 per hour per inviting user, matching the web server
+ * action's INVITE_EMAIL_LIMIT. The owner can no longer loop revoke → re-invite to
+ * spam a mailbox or to probe /join. Its own prefix, so the server action's
+ * counter and this one never double-count. Durable counter (rate_limit_counters,
+ * owner connection); fails open on a store outage, like every limiter.
+ */
+export const TEAM_INVITE_LIMIT: RateLimitOptions = { limit: 20, windowSec: 60 * 60, prefix: 'team-invite-api' };
+
+class CounterTableStore implements RateLimitStore {
+  constructor(private readonly db: Database) {}
+  async incr(key: string, windowSec: number): Promise<number> {
+    const rows = (await this.db.execute(sql`
+      INSERT INTO rate_limit_counters (key, count, expires_at)
+      VALUES (${key}, 1, now() + ${windowSec} * interval '1 second')
+      ON CONFLICT (key) DO UPDATE SET count = rate_limit_counters.count + 1
+      RETURNING count`)) as unknown as Array<{ count: number }>;
+    return Number(rows[0]?.count ?? 0);
+  }
+}
+
+async function assertInviteBudget(ctx: MemberContext): Promise<void> {
+  let allowed = true;
+  try {
+    const store = new CounterTableStore(ctx.adminDb ?? ctx.db);
+    allowed = (await checkRateLimit(store, ctx.session.userId, TEAM_INVITE_LIMIT)).allowed;
+  } catch (err) {
+    console.warn('[team] invite limiter unavailable, failing open:', err instanceof Error ? err.message : err);
+  }
+  if (!allowed) {
+    throw new TRPCError({ code: 'TOO_MANY_REQUESTS', message: 'יותר מדי הזמנות בשעה האחרונה. נסו שוב מאוחר יותר.' });
+  }
+}
 
 const roleSchema = z.enum(['owner', 'manager', 'receiver', 'bookkeeper', 'chef']);
 /** App UI language of a member / invitee (memberships/invitations.preferred_locale). */
@@ -180,6 +218,7 @@ export const teamRouter = router({
   invite: ownerProcedure
     .input(z.object({ email: z.string().email(), role: roleSchema, locale: localeSchema.optional() }))
     .mutation(async ({ ctx, input }) => {
+      await assertInviteBudget(ctx);
       const adminDb = ctx.adminDb ?? ctx.db;
       const email = normalizeEmail(input.email);
       const canon = canonicalizeEmail(email);
@@ -263,6 +302,7 @@ export const teamRouter = router({
   resendInvite: ownerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
+      await assertInviteBudget(ctx);
       const adminDb = ctx.adminDb ?? ctx.db;
       const [inv] = await ctx.db
         .select()
@@ -320,6 +360,7 @@ export const teamRouter = router({
   revokeInvite: ownerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
+      await assertInviteBudget(ctx);
       const revoked = await ctx.db
         .update(invitations)
         .set({ status: 'revoked', updatedAt: new Date() })

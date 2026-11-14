@@ -6,8 +6,16 @@ import { AuthError } from 'next-auth';
 import { clientIpFromHeaders, type RateLimitOptions } from '@restomatch/api';
 import { signIn } from '@/auth';
 import { enforceRateLimit, trustedProxyHops } from '@/lib/rateLimit';
-import { deliverJoinCode } from './_lib/codeEmail';
-import { completeJoin, hashInviteToken, issueJoinCode, loadInvite, plausibleToken } from './_lib/joinFlow';
+import { deliverJoinCode, deliverJoinSignInLink } from './_lib/codeEmail';
+import {
+  completeJoin,
+  hashInviteToken,
+  issueJoinCode,
+  joinContact,
+  loadInvite,
+  plausibleToken,
+  publicCompleteReason,
+} from './_lib/joinFlow';
 import { joinAcceptPath } from './paths';
 
 /**
@@ -29,6 +37,10 @@ function tokenOf(formData: FormData): string {
   return token;
 }
 
+function baseUrl(): string {
+  return process.env.AUTH_URL ?? process.env.APP_URL ?? '';
+}
+
 function back(token: string, params: Record<string, string>): never {
   redirect(`/join/${token}?${new URLSearchParams(params).toString()}`);
 }
@@ -41,7 +53,22 @@ export async function sendJoinCodeAction(formData: FormData): Promise<void> {
   if (!perInvite.allowed || !perIp.allowed) back(token, { step: 'code', e: 'rate' });
 
   const res = await issueJoinCode(token);
-  if (!res.ok) back(token, res.reason === 'hasPassword' ? {} : res.reason === 'rate' ? { step: 'code', e: 'rate' } : { e: res.reason });
+  if (!res.ok && res.reason === 'hasPassword') {
+    // An existing account: e-mail a sign-in link (no code, no password set) and
+    // answer EXACTLY like the code path, so /join is no account oracle.
+    if (res.throttled) back(token, { step: 'code', e: 'rate' });
+    const contact = await joinContact(token);
+    if (contact) {
+      await deliverJoinSignInLink({
+        to: contact.email,
+        url: `${baseUrl()}/login?${new URLSearchParams({ callbackUrl: joinAcceptPath(token) }).toString()}`,
+        restaurantName: contact.restaurantName,
+        locale: contact.locale,
+      });
+    }
+    back(token, { step: 'code', sent: '1' });
+  }
+  if (!res.ok) back(token, res.reason === 'rate' ? { step: 'code', e: 'rate' } : { e: res.reason });
   const invite = await loadInvite(token);
   await deliverJoinCode({ to: res.email, code: res.code, restaurantName: invite.restaurantName, locale: res.locale ?? 'he' });
   back(token, { step: 'code', sent: '1' });
@@ -59,7 +86,8 @@ export async function completeJoinAction(formData: FormData): Promise<void> {
     name: formData.get('name'),
     password,
   });
-  if (!res.ok) back(token, res.reason === 'hasPassword' ? {} : { step: 'code', e: res.reason });
+  // "No live code" and "already has an account" both read as a wrong code (no oracle).
+  if (!res.ok) back(token, { step: 'code', e: publicCompleteReason(res.reason) });
 
   const remember = formData.get('rememberMe') === 'on';
   try {

@@ -98,4 +98,60 @@ test.describe('W3-07b join', () => {
     await page.goto('/join/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
     await expect(page.getByTestId('join-state')).toHaveAttribute('data-state', 'notFound');
   });
+
+  test('no account oracle: /join looks the same for an existing account and a new address, before and after "send"', async ({
+    page,
+    browser,
+  }) => {
+    // Same first/last letter and domain, so the masked addresses on screen match too.
+    const stamp = Date.now();
+    const existing = `xexisting${stamp}z@oracle.e2e.test`;
+    const fresh = `xfresh${stamp}z@oracle.e2e.test`;
+    const sql = e2eSql();
+    await sql`insert into users (email, name, email_verified) values (${existing}, 'Existing account', now())`;
+    await sql.end();
+
+    const pathExisting = await inviteFromTeamScreen(page, existing);
+    const pathFresh = await inviteFromTeamScreen(page, fresh);
+
+    const ctx = await browser.newContext({ storageState: undefined, locale: 'he-IL' });
+    const base = test.info().project.use.baseURL!;
+    await ctx.addCookies([
+      { name: 'rm_cookie_consent', value: 'necessary', url: base },
+      { name: 'rm_locale', value: 'he', url: base },
+    ]);
+    const a = await ctx.newPage();
+    const b = await ctx.newPage();
+    await a.goto(pathExisting);
+    await b.goto(pathFresh);
+    const card = (p: Page) => p.locator('main').innerText();
+    await expect(a.getByTestId('join-send-code')).toBeVisible();
+    await expect(b.getByTestId('join-send-code')).toBeVisible();
+    expect(await card(a)).toBe(await card(b));
+    expect(await a.getByTestId('join-has-password').count()).toBe(0);
+
+    const SIGNIN_FILE = MAGIC_LINK_FILE.replace('magic-link', 'join-signin');
+    await unlink(SIGNIN_FILE).catch(() => {});
+    await a.getByTestId('join-send-code').click();
+    await b.getByTestId('join-send-code').click();
+    await expect(a.getByTestId('join-code-form')).toBeVisible();
+    await expect(b.getByTestId('join-code-form')).toBeVisible();
+    expect(await card(a)).toBe(await card(b));
+    expect(new URL(a.url()).search).toBe(new URL(b.url()).search);
+
+    // server-side only: the existing account got a sign-in link (no code), the new address a code
+    await readJoinCode(fresh);
+    const deadline = Date.now() + 30_000;
+    let link: { to: string; url: string } | null = null;
+    while (!link && Date.now() < deadline) {
+      try {
+        const parsed = JSON.parse(await readFile(SIGNIN_FILE, 'utf8')) as { to: string; url: string };
+        if (parsed.to === existing) link = parsed;
+      } catch {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+    expect(link?.url).toMatch(/\/login\?callbackUrl=/);
+    await ctx.close();
+  });
 });

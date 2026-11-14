@@ -150,6 +150,20 @@ export async function loadInvite(token: string, now = Date.now()): Promise<Invit
 }
 
 /**
+ * Server-side only: the invited address (unmasked), restaurant and locale of a
+ * valid invite — what the sign-in-link e-mail needs. Never sent to the client.
+ */
+export async function joinContact(
+  token: string,
+  now = Date.now(),
+): Promise<{ email: string; restaurantName: string | null; locale: 'he' | 'en' } | null> {
+  const row = await inviteRowByToken(token);
+  if (!row || stateOf(row, now) !== 'valid') return null;
+  const view = await loadInvite(token, now);
+  return { email: row.email, restaurantName: view.restaurantName, locale: view.locale ?? 'he' };
+}
+
+/**
  * Canonical form of `users.email` in SQL — the same rules as @restomatch/api
  * canonicalizeEmail (strip +tag; Gmail ignores dots, googlemail = gmail), so an
  * alias of an address that already has a password is treated as that account.
@@ -216,7 +230,9 @@ const sendDayId = (addr: string) => `join-send-d:${addr}`;
 
 export type IssueResult =
   | { ok: true; code: string; email: string; locale: 'he' | 'en' | null }
-  | { ok: false; reason: Exclude<InviteState, 'valid'> | 'hasPassword' | 'rate' };
+  | { ok: false; reason: Exclude<InviteState, 'valid'> | 'rate' }
+  /** An existing account: no code. `throttled` = the per-address send cap is hit (same cap as a new address). */
+  | { ok: false; reason: 'hasPassword'; throttled: boolean };
 
 /**
  * Mint a fresh code for a valid invite (any earlier code dies). The CALLER sends
@@ -226,15 +242,19 @@ export async function issueJoinCode(token: string, now = Date.now()): Promise<Is
   const row = await inviteRowByToken(token);
   const state = stateOf(row, now);
   if (!row || state !== 'valid') return { ok: false, reason: state === 'valid' ? 'notFound' : state };
-  if (await accountExists(row.email)) return { ok: false, reason: 'hasPassword' };
-  // Per-address send cap (durable; reserve, then count — holds when the limiter fails open).
+  // Per-address send cap FIRST (durable; reserve, then count — holds when the limiter
+  // fails open), for existing and new addresses alike, so the cap is no account oracle.
   const addr = joinAddressKey(row.email);
   await authDb.insert(verificationTokens).values([
     { identifier: sendId(addr), token: randomUUID(), expires: new Date(now + 15 * 60 * 1000) },
     { identifier: sendDayId(addr), token: randomUUID(), expires: new Date(now + 24 * 60 * 60 * 1000) },
   ]);
   const [sent15, sentDay] = await Promise.all([countLive(sendId(addr), now), countLive(sendDayId(addr), now)]);
-  if (sent15 > JOIN_CODE_SENDS_PER_15_MIN || sentDay > JOIN_CODE_SENDS_PER_DAY) return { ok: false, reason: 'rate' };
+  const throttled = sent15 > JOIN_CODE_SENDS_PER_15_MIN || sentDay > JOIN_CODE_SENDS_PER_DAY;
+  // An existing account gets a sign-in link from the caller instead of a code
+  // (unless throttled — then the caller answers "rate", exactly as for a new address).
+  if (await accountExists(row.email)) return { ok: false, reason: 'hasPassword', throttled };
+  if (throttled) return { ok: false, reason: 'rate' };
   const code = generateCode();
   await authDb.transaction(async (tx) => {
     await tx.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(row.id)));
@@ -297,15 +317,10 @@ export async function completeJoin(
   const policy = passwordPolicyError(input.password);
   if (policy) return { ok: false, reason: 'policy', message: policy };
 
-  const code = String(input.code ?? '').replace(/\D/g, '');
-  const [stored] = await authDb
-    .select({ token: verificationTokens.token, expires: verificationTokens.expires })
-    .from(verificationTokens)
-    .where(and(eq(verificationTokens.identifier, codeId(row.id)), gt(verificationTokens.expires, new Date(now))))
-    .limit(1);
-  if (!stored) return { ok: false, reason: 'noCode' };
-
   // Reserve the attempt first, then count (concurrent guesses can't overshoot).
+  // It is reserved even when no code is live, so an address with no code (an
+  // existing account, which never gets one) locks at the same attempt as a new
+  // one — no account oracle (security review, /join).
   // Keyed on the ADDRESS: resend / revoke + re-invite cannot reset it (B5).
   const addr = joinAddressKey(row.email);
   await authDb.insert(verificationTokens).values([
@@ -318,6 +333,15 @@ export async function completeJoin(
     await authDb.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(row.id)));
     return { ok: false, reason: 'locked' };
   }
+
+  const code = String(input.code ?? '').replace(/\D/g, '');
+  const [stored] = await authDb
+    .select({ token: verificationTokens.token, expires: verificationTokens.expires })
+    .from(verificationTokens)
+    .where(and(eq(verificationTokens.identifier, codeId(row.id)), gt(verificationTokens.expires, new Date(now))))
+    .limit(1);
+
+  if (!stored) return { ok: false, reason: 'noCode' };
 
   const expected = Buffer.from(stored.token, 'hex');
   const given = Buffer.from(code.length === 6 ? codeDigest(row, code) : '00', 'hex');
@@ -346,4 +370,16 @@ export async function completeJoin(
     .delete(verificationTokens)
     .where(inArray(verificationTokens.identifier, [codeId(row.id), windowFailId(addr)]));
   return { ok: true, email };
+}
+
+/**
+ * What the PUBLIC /join page may learn from a completion attempt. "No live code"
+ * and "this address already has an account" both read as a wrong code, so a
+ * tenant owner who invites an address cannot tell whether it has a RestoMatch
+ * account (security review, /join existence oracle).
+ */
+export function publicCompleteReason(
+  reason: Extract<CompleteResult, { ok: false }>['reason'],
+): Exclude<Extract<CompleteResult, { ok: false }>['reason'], 'noCode' | 'hasPassword'> {
+  return reason === 'noCode' || reason === 'hasPassword' ? 'wrongCode' : reason;
 }
