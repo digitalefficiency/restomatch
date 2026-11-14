@@ -28,6 +28,7 @@ import {
   type NextStep,
 } from './logic';
 import { rich } from './rich';
+import { WhatsAppPreview } from './whatsapp-preview';
 import '../report.css';
 
 /**
@@ -64,7 +65,8 @@ export default async function MonthReportPage({
     caller.monthlyReport.preview({ month, locale: 'he' }),
   ]);
   // The e-mail / WhatsApp text in the viewer's language (the snapshot data is the same).
-  const sentPreview = tab === 'sent' && locale !== 'he' ? await caller.monthlyReport.preview({ month, locale }) : preview;
+  const sentLocale = tab === 'sent' ? locale : 'he';
+  const sentPreview = sentLocale !== 'he' ? await caller.monthlyReport.preview({ month, locale: sentLocale }) : preview;
   const { data, frozen } = preview;
 
   const status = statusOf({ frozen, generatedAt: data.generatedAt }, now);
@@ -545,13 +547,7 @@ export default async function MonthReportPage({
               <MessageCircle className="h-4 w-4 text-muted" aria-hidden="true" />
               {t('sent.whatsappTitle')}
             </h2>
-            <pre
-              dir={locale === 'he' ? 'rtl' : 'ltr'}
-              className="mt-3 max-w-md whitespace-pre-wrap rounded-2xl rounded-ss-sm bg-surface-2 p-4 font-sans text-sm leading-relaxed text-ink"
-              data-testid="report-whatsapp"
-            >
-              {whatsapp}
-            </pre>
+            <WhatsAppPreview text={whatsapp} locale={sentLocale} />
             <p className="mt-2 text-xs text-muted">{t('sent.whatsappNote')}</p>
           </Card>
           <Card padding="lg">
