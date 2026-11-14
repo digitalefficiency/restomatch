@@ -137,6 +137,7 @@ describe('DS2 v2 contrast (every mode, direction A)', () => {
 
   it('rails and the leak series stay danger/warn', () => {
     expect(emphasis.t1Rail).toBe(status.danger.text);
-    expect(dataVizV2.leak).toBe(status.danger.text);
+    // DS3: a leak bar is the danger family's solid (SPEC §2 `--leak-solid`: "a dot or a bar").
+    expect(dataVizV2.leak).toBe(status.danger.dot);
   });
 });

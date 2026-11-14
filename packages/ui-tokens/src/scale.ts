@@ -226,6 +226,10 @@ export const typeScaleV2: Record<string, TypeRoleV2> = {
   'money-hero': { base: t(56, 64), phone: t(40, 48), field: t(40, 48), fw: 700, ls: '-0.01em' },
   'qty-field': { base: t(20, 28), fw: 700, ls: '0' },
   id: { base: t(13, 20), compact: t(12, 16), field: t(14, 20), fw: 500, ls: '0' },
+  // DS3 SPEC §3/§7: a queue row's title and amount (14/20 → 14/18 compact) and its sub-line
+  // (13/18 → 12/16 compact). No DS2 role has these steps; nothing reads them yet.
+  'row-title': { base: t(14, 20), compact: t(14, 18), field: t(16, 24), fw: 500, ls: '0' },
+  'row-sub': { base: t(13, 18), compact: t(12, 16), field: t(14, 20), fw: 400, ls: '0' },
   kbd: { base: t(12, 16), fw: 500, ls: '0' },
   'display-sm': { base: t(36, 44), phone: t(32, 40), fw: 700, ls: '-0.02em' },
   'display-md': { base: t(48, 56), phone: t(40, 48), fw: 700, ls: '-0.02em' },

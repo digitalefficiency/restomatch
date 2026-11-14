@@ -1,6 +1,8 @@
 // Semantic colour roles — "Command Center Light v2" (docs/ux/review/lens-design-system.md §3.2),
-// valued in DS3's clean finish (docs/ux/ds3/SPEC.md §2). Every value is a step of
-// `primitives.ts`; DS3 moved values and added a few roles, never a meaning.
+// valued in DS3's clean finish (docs/ux/ds3/SPEC.md §2). Every role reads a step of
+// `primitives.ts`; DS3 moved values and added a few roles, never a meaning. Exception: the v1
+// data-viz literals (`dataViz.categorical`, the creep fills) stay DS2 values until the charts
+// move to the v2 set (W2-09).
 //
 // Components consume ROLES, never raw hex: surfaces, text, the focus colour, six
 // status families (each with the same nine roles), money states and data-viz.
@@ -53,11 +55,17 @@ export interface FamilyRoles {
   /** Decorative border on subtle surfaces (not a control boundary). */
   borderSubtle: string;
   onBold: string;
+  /**
+   * DS3: the family's solid indicator — a dot, a bar, the fill of a round tick — never text and
+   * never a money figure (SPEC §2 `--leak-solid`, `--warn-solid`, `--ok-solid`). ≥3:1 on the
+   * surfaces it sits on, except warn's amber, which always carries `indicator.warnRing`.
+   */
+  dot: string;
 }
 
-/** A family read from one ramp: 700 text and fill, 800 hover, 50 / 100 tint, 200 tint border. */
-function fromRamp(r: { 50: string; 100: string; 200: string; 700: string; 800: string }): FamilyRoles {
-  return { text: r[700], bgBold: r[700], bgBoldHover: r[800], bgSubtle: r[50], bgSubtleHover: r[100], borderSubtle: r[200], onBold: text.onBold };
+/** A family read from one ramp: 700 text and fill, 800 hover, 50 / 100 tint, 200 tint border; the dot defaults to 700. */
+function fromRamp(r: { 50: string; 100: string; 200: string; 700: string; 800: string }, dot: string = r[700]): FamilyRoles {
+  return { text: r[700], bgBold: r[700], bgBoldHover: r[800], bgSubtle: r[50], bgSubtleHover: r[100], borderSubtle: r[200], onBold: text.onBold, dot };
 }
 
 /**
@@ -68,26 +76,27 @@ function fromRamp(r: { 50: string; 100: string; 200: string; 700: string; 800: s
  */
 export const status: Record<StatusFamily, FamilyRoles> = {
   primary: fromRamp(ramp.green),
-  danger: fromRamp(ramp.red),
-  warn: fromRamp(ramp.amber),
-  gold: fromRamp(ramp.leaf),
+  danger: fromRamp(ramp.red, ramp.red[500]),
+  warn: fromRamp(ramp.amber, ramp.amber[400]),
+  gold: fromRamp(ramp.leaf, ramp.leaf[500]),
   info: fromRamp(ramp.blue),
-  neutral: { text: text.muted, bgBold: text.muted, bgBoldHover: ramp.neutral[800], bgSubtle: surfaces.sunken, bgSubtleHover: ramp.neutral[75], borderSubtle: surfaces.line, onBold: text.onBold },
+  neutral: { text: text.muted, bgBold: text.muted, bgBoldHover: ramp.neutral[800], bgSubtle: surfaces.sunken, bgSubtleHover: ramp.neutral[75], borderSubtle: surfaces.line, onBold: text.onBold, dot: text.subtle },
 };
 
 /**
- * DS3: the solid indicator of a status — a dot, a bar, the fill of a round tick —
- * never text and never a money figure (SPEC §2 `--leak-solid`, `--warn-solid`,
- * `--ok-solid`). Brighter than the family's text colour; each is ≥3:1 on white
- * except warn, whose amber dot carries a 1.5 px `warnRing` (3.75:1, WCAG 1.4.11).
- * Families without an indicator (primary, info) draw with their text colour.
+ * DS3: every family's dot (`status[f].dot`) in one place, plus the warn dot's ring. The amber
+ * dot alone is 1.98:1 on white, so it always carries a 1.5 px `warnRing` (3.75:1, WCAG 1.4.11).
+ * Primary and info draw their dot in their text colour; danger, warn and T3 (gold) have a
+ * brighter solid; neutral uses the tertiary text colour (as the reference's neutral pill).
  */
 export const indicator = {
-  danger: ramp.red[500],
-  warn: ramp.amber[400],
+  primary: status.primary.dot,
+  danger: status.danger.dot,
+  warn: status.warn.dot,
   warnRing: ramp.amber[600],
-  gold: ramp.leaf[500],
-  neutral: text.subtle,
+  gold: status.gold.dot,
+  info: status.info.dot,
+  neutral: status.neutral.dot,
 } as const;
 
 export type MoneyState =
@@ -110,12 +119,12 @@ export type MoneyState =
 export const moneyStates: Record<MoneyState, { figure: 'ink' | 'muted' | 'gold' | 'primary'; tier: 'T1' | 'T2' | 'T3' | 'T4' | null }> = {
   leak: { figure: 'ink', tier: 'T1' }, // ink figure + danger marker (rail) on the T1 hero only
   atRisk: { figure: 'ink', tier: 'T2' }, // bold StatusChip + ink figure + one primary CTA
-  // T3 is green in the clean finish: `gold` is the T3 family, now leaf (SPEC §2 `--ok`).
-  // claimed / credited keep `primary` (basil green): moving them changes Money's class,
-  // which lib/components/__tests__/ds-foundation.test.ts pins (DS3-01; see the DS3-00 PR).
+  // T3 is green in the clean finish: `gold` is the T3 family, now leaf (SPEC §2 `--ok`, "money
+  // that came back"). `claimed` (asked for, not back yet) keeps `primary` (basil, also green):
+  // lib/components/__tests__/ds-foundation.test.ts:80 pins its class, outside this package.
   caught: { figure: 'gold', tier: 'T3' },
   claimed: { figure: 'primary', tier: 'T3' },
-  credited: { figure: 'primary', tier: 'T3' }, // + ✓ icon
+  credited: { figure: 'gold', tier: 'T3' }, // + ✓ icon
   returned: { figure: 'gold', tier: 'T3' },
   outstanding: { figure: 'ink', tier: 'T2' }, // + DeadlineChip (warn ≤7 days, danger only when late)
   pending: { figure: 'muted', tier: 'T4' }, // + clock icon
@@ -129,11 +138,11 @@ export const dataViz = {
   categorical: ['#066B4A', '#1A5BC7', '#755C00', '#8A4FBF', '#00838F', '#A63D00'],
   /** Sequential "price creep" ramp with the text colour that passes on each step. */
   creep: [
-    { bg: '#FDF0E7', text: '#0F1F17' },
-    { bg: '#F4CDB0', text: '#0F1F17' },
-    { bg: '#E8A67A', text: '#0F1F17' },
-    { bg: '#B4531A', text: '#FFFFFF' },
-    { bg: '#7A2D00', text: '#FFFFFF' },
+    { bg: '#FDF0E7', text: text.ink },
+    { bg: '#F4CDB0', text: text.ink },
+    { bg: '#E8A67A', text: text.ink },
+    { bg: '#B4531A', text: text.onBold },
+    { bg: '#7A2D00', text: text.onBold },
   ],
   grid: surfaces.line,
   axis: text.muted,
@@ -211,6 +220,6 @@ export const dataVizV2 = {
   up: ramp.orange[600], // a price rise (creep-4)
   down: status.gold.text, // a price drop is T3 good news (green in the clean finish)
   prev: surfaces.lineStrong, // the previous period, thin bar or 1.5 px line
-  leak: status.danger.text, // the only danger in a chart
+  leak: status.danger.dot, // the only danger in a chart; a bar, so the solid (SPEC §2 `--leak-solid`)
   grid: surfaces.line,
 } as const;

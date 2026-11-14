@@ -3,7 +3,7 @@
 // Regenerate with `pnpm --filter @restomatch/ui-tokens tokens:css`; a unit test
 // fails when the committed block drifts from this output.
 
-import { focus, indicator, status, surfaces, text, dataViz, type StatusFamily } from './semantic';
+import { focus, status, surfaces, text, dataViz, type StatusFamily } from './semantic';
 import {
   containers,
   density,
@@ -65,12 +65,6 @@ export function colorVars(): Record<string, string> {
     vars[`${f}-subtle-hover`] = r.bgSubtleHover;
     vars[`${f}-border-subtle`] = r.borderSubtle;
   }
-  // DS3: status indicators — a dot, a bar, the fill of a round tick; never text (semantic.ts `indicator`).
-  vars['danger-dot'] = indicator.danger;
-  vars['warn-dot'] = indicator.warn;
-  vars['warn-dot-ring'] = indicator.warnRing;
-  vars['gold-dot'] = indicator.gold;
-  vars['neutral-dot'] = indicator.neutral;
   dataViz.categorical.forEach((hex, i) => (vars[`viz-${i + 1}`] = hex));
   dataViz.creep.forEach((step, i) => {
     vars[`creep-${i + 1}`] = step.bg;
@@ -148,7 +142,8 @@ export function cssVariables(): string {
     '  }',
     '}',
   );
-  // DS2 phase 1 (additive): the v1 lines above are byte-for-byte unchanged.
+  // DS2 phase 1 was additive; DS3 (the clean finish) re-valued the v1 lines above on purpose —
+  // their recorded baseline is __tests__/fixtures/v1-token-block.css (re-recorded, owner-signed).
   // DS2 phase 2 (β): the self-hosted faces and their measured fallbacks.
   if (ACTIVE_FACE !== 'heebo') lines.push(fontFaceCss());
   lines.push(v2Css(), TOKENS_END);
@@ -181,6 +176,18 @@ function family(f: StatusFamily) {
 }
 
 /**
+ * DS3 indicators (`bg-danger-dot`, `border-gold-dot`, `ring-warn-dot-ring`, `fill-info-dot` …):
+ * a dot, a bar, a tick's fill. Deliberately NOT under `colors`, so `text-warn-dot` (1.98:1) and
+ * the other text utilities never exist — an indicator is never text.
+ */
+function dotKeys(): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = Object.fromEntries(FAMILIES.map((f) => [f, { dot: v(`${f}-dot`) }]));
+  out.warn!['dot-ring'] = v('warn-dot-ring');
+  out.ok = { dot: v('gold-dot') };
+  return out;
+}
+
+/**
  * Tailwind preset. `fontSize`, `borderRadius`, `boxShadow`, `transitionDuration`
  * and `transitionTimingFunction` are REPLACED (roles + deprecated v1 keys);
  * colours, layers and containers extend Tailwind's defaults.
@@ -205,14 +212,13 @@ export const tailwindPreset = {
         'on-bold': v('on-bold'),
         focus: v('focus'),
         primary: family('primary'),
-        // DS3 indicators (`bg-danger-dot`, `ring-warn-dot-ring` …): dots and bars only, never text.
-        danger: { ...family('danger'), dot: v('danger-dot') },
-        warn: { ...family('warn'), dot: v('warn-dot'), 'dot-ring': v('warn-dot-ring') },
-        gold: { ...family('gold'), dot: v('gold-dot') },
+        danger: family('danger'),
+        warn: family('warn'),
+        gold: family('gold'),
         // DS3: `ok` names the T3 family by meaning for new code (SPEC §2 `--ok`); same variables as `gold`.
-        ok: { ...family('gold'), dot: v('gold-dot') },
+        ok: family('gold'),
         info: family('info'),
-        neutral: { ...family('neutral'), dot: v('neutral-dot') },
+        neutral: family('neutral'),
         ...Object.fromEntries(dataViz.categorical.map((_, i) => [`viz-${i + 1}`, v(`viz-${i + 1}`)])),
         ...Object.fromEntries(dataViz.creep.map((_, i) => [`creep-${i + 1}`, v(`creep-${i + 1}`)])),
         ...Object.fromEntries(dataViz.creep.map((_, i) => [`on-creep-${i + 1}`, v(`on-creep-${i + 1}`)])),
@@ -241,10 +247,15 @@ export const tailwindPreset = {
             .map((k) => [k, v(k)]),
         ),
       },
+      // DS3 indicators: fills, borders, rings and SVG paint only (see dotKeys()).
+      backgroundColor: dotKeys(),
+      ringColor: dotKeys(),
+      fill: dotKeys(),
+      stroke: dotKeys(),
       // `border-danger-subtle` is the decorative border role, not the subtle fill.
       borderColor: {
-        ...Object.fromEntries(FAMILIES.map((f) => [f, { subtle: v(`${f}-border-subtle`) }])),
-        ok: { subtle: v('gold-border-subtle') },
+        ...Object.fromEntries(FAMILIES.map((f) => [f, { subtle: v(`${f}-border-subtle`), ...dotKeys()[f] }])),
+        ok: { subtle: v('gold-border-subtle'), dot: v('gold-dot') },
         // DS2: the only routes to a danger/warn rail (`border-s-t1`, `border-s-t2`).
         t1: v('emphasis-t1-rail'),
         t2: v('emphasis-t2-rail'),

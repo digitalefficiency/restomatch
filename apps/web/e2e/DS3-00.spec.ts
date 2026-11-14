@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { channels, colorVars, colorVarsV2, elevation, focus, motion, status, surfaces, text } from '@restomatch/ui-tokens';
+import { channels, colorVars, colorVarsV2, elevation, focus, indicator, motion, status, surfaces, text } from '@restomatch/ui-tokens';
 import { labHe } from '../app/dashboard/lab/tokens/copy';
 import { OWNER_STATE } from './env';
 
@@ -207,14 +207,13 @@ test.describe('4 · tiers keep their meaning', () => {
     );
     const T3 = rgb(status.gold.text);
     expect(colours.caught).toBe(T3);
+    expect(colours.credited).toBe(T3);
     expect(colours.returned).toBe(T3);
     expect(colours.claimed).toBe(rgb(status.primary.text));
-    expect(colours.credited).toBe(rgb(status.primary.text));
     for (const s of ['leak', 'atRisk', 'outstanding', 'spend']) expect(colours[s], s).toBe(rgb(text.ink));
     for (const s of ['pending', 'zero']) expect(colours[s], s).toBe(rgb(text.muted));
     for (const [s, c] of Object.entries(colours)) {
-      expect(c, `${s} is never red`).not.toBe(rgb(status.danger.text));
-      expect(c, `${s} is never red`).not.toBe(rgb(status.danger.bgBold));
+      for (const red of [status.danger.text, status.danger.bgBold, status.danger.bgBoldHover, indicator.danger]) expect(c, `${s} is never red`).not.toBe(rgb(red));
     }
   });
 
@@ -223,7 +222,7 @@ test.describe('4 · tiers keep their meaning', () => {
     for (const path of ['/dashboard', '/dashboard/recovery']) {
       await page.goto(path);
       await page.locator('main').first().waitFor();
-      const golds = await page.locator('main .text-gold').evaluateAll((els) => els.map((el) => getComputedStyle(el).color));
+      const golds = await page.locator('main :is(.text-gold, .text-ok)').evaluateAll((els) => els.map((el) => getComputedStyle(el).color));
       for (const c of golds) expect(c, path).toBe(rgb(status.gold.text));
     }
   });
@@ -308,7 +307,7 @@ test.describe('7 · the token lab shows the new roles', () => {
     await setLang(page, 'he');
     await page.goto(LAB);
     const row = page.getByTestId('lab-indicators');
-    await expect(row.locator('li')).toHaveCount(5);
-    for (const name of ['danger-dot', 'warn-dot + ring', 'gold-dot (ok)', 'neutral-dot', 'rule']) await expect(row).toContainText(name);
+    await expect(row.locator('li')).toHaveCount(7);
+    for (const name of ['primary-dot', 'danger-dot', 'warn-dot + ring', 'gold-dot (ok)', 'info-dot', 'neutral-dot', 'rule']) await expect(row).toContainText(name);
   });
 });
