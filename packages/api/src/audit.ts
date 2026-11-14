@@ -99,6 +99,13 @@ export type AuditAction =
   | 'order.sent'
   | 'order.sent_manually'
   | 'order.amended'
+  // Order autopilot (W3-09 / AU-11, orchestrator 14.11)
+  | 'order.prepared_draft_created'
+  | 'order.prepared_draft_opened'
+  | 'order.prepared_draft_dismissed'
+  | 'order.backorder_draft_created'
+  | 'order.backorder_draft_opened'
+  | 'order.backorder_draft_dismissed'
   // Inventory (W2-07)
   | 'inventory.sales_set'
   | 'inventory.count_submitted'

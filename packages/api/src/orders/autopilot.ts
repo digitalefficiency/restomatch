@@ -55,25 +55,19 @@ import { ordersAutopilotEn } from './messages/en';
 import { notify, type Rendered, type RenderInput } from '../notifications/notify';
 import { SKIPPED_NO_PROVIDER } from '../notifications/delivery';
 import { poRefOf } from './supplierMessage';
+import { automationOption } from '../automations/options';
+import type { AuditAction } from '../audit';
 import type { SendState } from '../routers/orders';
 
 export { ordersAutopilotEn, ordersAutopilotHe } from './messages';
 
-// ─── options (AU-01 registry rows pending; inline defaults meanwhile) ─────────
+// ─── options (AU-01 registry rows A16 / A16b / A16c) ──────────────────────────
 
-export const AUTOPILOT_OPTION_DEFAULTS = {
-  /** Off until icp-keeper signs the scope (AU-11 §8). */
-  preparedOrderDraft: false,
-  backorderDraft: true,
-  sendRescue: true,
-} as const;
-export type AutopilotOptionKey = keyof typeof AUTOPILOT_OPTION_DEFAULTS;
+export type AutopilotOptionKey = 'preparedOrderDraft' | 'backorderDraft' | 'sendRescue';
 
-/** `restaurants.settings.automations[key]` when boolean, else the default. */
+/** The AU-01 reader: the stored boolean, else the registry default (prepared OFF, the others ON). */
 export function autopilotOption(settings: unknown, key: AutopilotOptionKey): boolean {
-  const a = (settings as { automations?: Record<string, unknown> } | null | undefined)?.automations;
-  const v = a && typeof a === 'object' ? a[key] : undefined;
-  return typeof v === 'boolean' ? v : AUTOPILOT_OPTION_DEFAULTS[key];
+  return automationOption(settings, key);
 }
 
 async function restaurantSettings(db: Database, restaurantId: string): Promise<unknown> {
@@ -96,10 +90,10 @@ async function poByRef(db: Database, restaurantId: string, ref: string): Promise
   return row?.id ?? null;
 }
 
-/** Audit row (direct insert, like receiving's `goods_receipt.closed`; AuditAction values requested). */
+/** Audit row: append-only insert, typed by the AuditAction taxonomy. */
 async function audit(
   db: Database,
-  row: { restaurantId: string; userId: string | null; action: string; entityId: string; after: Record<string, unknown> },
+  row: { restaurantId: string; userId: string | null; action: AuditAction; entityId: string; after: Record<string, unknown> },
 ): Promise<void> {
   await db.insert(auditLog).values({
     restaurantId: row.restaurantId,
