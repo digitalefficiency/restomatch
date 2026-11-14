@@ -24,6 +24,8 @@ import {
 import { discrepancyLabel, displayName } from '../approvals/vocab';
 import { LeakStateNote, leakStateOf } from './leak-state';
 import { noDataCtaFor } from './states';
+import { DrillLink } from '@/lib/components/drill';
+import { serializeView } from '@/lib/components/views';
 
 /**
  * Leak explorer: the hero leak for any period, sliced by supplier / category /
@@ -43,6 +45,14 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
     caller.owner.leakGrouped({ view: input, groupBy: view.group, compare: view.compare }),
     caller.owner.viewOptions(),
   ]);
+  // W2-09c · what moved the leak (exec-desktop-19): only against the previous span; a failure hides the chips.
+  const drivers = view.compare === 'prev' ? await caller.owner.leakDrivers({ view: input }).catch(() => null) : null;
+  const breakdownHref = (extra?: Record<string, string>) => {
+    const q = serializeView(view);
+    for (const [k, v] of Object.entries(extra ?? {})) q.set(k, v);
+    const qs = q.toString();
+    return `/dashboard/leaks/breakdown${qs ? `?${qs}` : ''}`;
+  };
   const cur = summary.current;
   const prev = summary.previous && summary.previous.invoiceCount > 0 ? summary.previous : null;
   // A comparison period with almost no data gets a calm ₪ difference, not a % alarm.
@@ -71,7 +81,12 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
     // An empty comparison period (no checked invoices) has no base: neutral "—", never a red ▲ +₪X.
     previous: grouped.previous && prev ? (prevByKey.get(r.key) ?? 0) : null,
   }));
-  const linesTotal = grouped.rows.reduce((s, r) => s + Math.round(r.leakIls * 100), 0) / 100;
+  // W2-09c: groups past the shown rows are one "אחר" row, so Σ rows = the groups' total.
+  if (grouped.otherIls > 0) {
+    rows.push({ key: '__other', label: t('explorer.other'), value: grouped.otherIls, count: grouped.otherCount, previous: null } as ChartRow);
+  }
+  const linesTotal =
+    (grouped.rows.reduce((s, r) => s + Math.round(r.leakIls * 100), 0) + Math.round(grouped.otherIls * 100)) / 100;
   const groupName = t(`groups.${view.group}`);
   const range = rangeLabel(view.period, cur.monthStart, cur.monthEnd, locale);
   const leakLabel = view.period === 'this_month' ? t('kpis.leakMonth') : t('kpis.leak');
@@ -138,10 +153,52 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
                 testId="explorer-leak"
                 amount={cur.leakIls}
                 title={exact(cur.leakIls)}
-                value={state === 'clean' ? tl('states.clean', { count: formatNumber(cur.matchedInvoiceCount, locale) }) : whole(cur.leakIls)}
+                value={
+                  state === 'clean' ? (
+                    tl('states.clean', { count: formatNumber(cur.matchedInvoiceCount, locale) })
+                  ) : (
+                    // The number is a door to the rows that sum to it (the drill contract).
+                    <DrillLink href={breakdownHref()} totalAgorot={Math.round(cur.leakIls * 100)} label={leakLabel} rows={cur.invoicesWithLeak}>
+                      {whole(cur.leakIls)}
+                    </DrillLink>
+                  )
+                }
                 calm={state === 'clean'}
                 hint={
-                  <DeltaBadge current={cur.leakIls} previous={prevOf('leakIls')} compare={view.compare} thinBase={thinBase} vs={vs} showAmount />
+                  <>
+                    <DeltaBadge current={cur.leakIls} previous={prevOf('leakIls')} compare={view.compare} thinBase={thinBase} vs={vs} showAmount />
+                    {drivers && drivers.drivers.length > 0 ? (
+                      <ul className="mt-2 flex flex-wrap gap-2 [@media(pointer:fine)]:gap-1.5" aria-label={tl('hub.drivers.label')} data-testid="leak-drivers" data-record="">
+                        {drivers.drivers.map((d) => {
+                          const name = labelOf(d.key, d.label, d.labelEn);
+                          const sign = d.deltaAgorot > 0 ? '+' : '−';
+                          const amount = `${sign}${whole(Math.abs(d.deltaAgorot) / 100)}`;
+                          return (
+                            <li key={d.key || 'none'}>
+                              <DrillLink
+                                href={d.key ? breakdownHref({ sup: d.key }) : breakdownHref()}
+                                totalAgorot={d.currentAgorot}
+                                label={`${name} ${amount}`}
+                                className={cn(
+                                  'inline-flex min-h-11 items-center gap-1 rounded-full px-3 text-xs font-semibold ring-1 [@media(pointer:fine)]:min-h-8 [@media(pointer:fine)]:px-2.5',
+                                  d.deltaAgorot > 0 ? 'bg-danger/10 text-danger ring-danger/30' : 'bg-primary/10 text-primary ring-primary/30',
+                                )}
+                              >
+                                <bdi className="tabular-nums">{amount}</bdi> {name}
+                              </DrillLink>
+                            </li>
+                          );
+                        })}
+                        {drivers.otherAgorot !== 0 ? (
+                          // inline-flex drops whitespace-only text between children: the gap is the space (lab: '−74 ₪אחר').
+                          <li className="inline-flex min-h-11 items-center gap-1 rounded-full px-3 text-xs text-muted ring-1 ring-line [@media(pointer:fine)]:min-h-8 [@media(pointer:fine)]:px-2.5" data-testid="leak-drivers-other">
+                            <bdi className="tabular-nums">{`${drivers.otherAgorot > 0 ? '+' : '−'}${whole(Math.abs(drivers.otherAgorot) / 100)}`}</bdi>
+                            <span>{tl('hub.drivers.other')}</span>
+                          </li>
+                        ) : null}
+                      </ul>
+                    ) : null}
+                  </>
                 }
               />
               <Tile

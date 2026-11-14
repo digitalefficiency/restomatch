@@ -20,6 +20,7 @@ const ROUTER_KEYS = [
   'admin',
   'approvals',
   'ask',
+  'automations',
   'catalog',
   'chain',
   'close',

@@ -12,6 +12,8 @@ import type { he as consolidatedHe } from '@/lib/i18n/messages/consolidated/he';
 import { formatIls } from '@/lib/money';
 import { translateUnit } from '@restomatch/translate/units';
 import { PrintButton } from '../../leaks/claims/print-button';
+import { Delta } from '@/lib/components/money';
+import { CellStateView } from '@/lib/components/table';
 
 type T = Translator<typeof consolidatedHe>;
 
@@ -105,7 +107,6 @@ export function ConsolidatedPanel({
       : inclAsk > 0
         ? t('letter.askIncl', { amount: ils(inclAsk) })
         : t('letter.ask', { amount: ils(exclAsk) });
-  const signed = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${ils(Math.abs(v))}`;
 
   return (
     <section
@@ -115,7 +116,8 @@ export function ConsolidatedPanel({
       data-print-root="xmatch"
     >
       {proposal.status === 'differences' ? (
-        // Print only: the letter header for the supplier.
+        // Print only: the letter for the supplier. TODO(H-03): move to W2-10's claim
+        // letter once consolidated_invoice_links lets the claims page carry ריכוז findings.
         <div className="mb-6 hidden space-y-1 text-sm text-ink print:block" data-testid="xmatch-letter">
           <p className="font-semibold">{t('letter.to', { supplier: supplierName ?? '—' })}</p>
           <p>{t('letter.subject', { number: invoiceNumber ?? '—', period })}</p>
@@ -159,6 +161,7 @@ export function ConsolidatedPanel({
             </p>
           </div>
           <div className="print:hidden">
+            {/* TODO(H-03): link to the supplier's claim letter (W2-10) instead, once the claims page includes ריכוז findings. */}
             <PrintButton label={t('print')} primary scope="xmatch" />
           </div>
         </Card>
@@ -187,9 +190,9 @@ export function ConsolidatedPanel({
             {[
               [t('totals.notes'), ils(totals.deliveryNotesIls)],
               [t('totals.invoice'), ils(totals.invoiceSubtotalIls)],
-              [t('totals.difference'), signed(totals.differenceIls)],
+              [t('totals.difference'), <Delta key="d" current={totals.invoiceSubtotalIls} previous={totals.deliveryNotesIls} goodWhen="down" />],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-xl border border-line bg-surface-2 px-4 py-3">
+              <div key={String(label)} className="rounded-xl border border-line bg-surface-2 px-4 py-3">
                 <dt className="text-xs text-muted">{label}</dt>
                 <dd className="mt-1 font-mono text-lg font-semibold tabular-nums text-ink">
                   {/* bdi keeps a leading +/− with its ₪ amount (formatIls carries its own direction marks). */}
@@ -201,11 +204,11 @@ export function ConsolidatedPanel({
 
           <h3 className="mb-2 text-sm font-semibold text-ink">{t('notes.title')}</h3>
           {/* Phone: one card per note, so the Δ and the state are never clipped. */}
-          <ul className="mb-6 space-y-2 sm:hidden" data-testid="xmatch-note-cards">
+          <ul className="mb-6 space-y-2 md:hidden" data-testid="xmatch-note-cards">
             {proposal.deliveryNotes.map((n) => (
               <li key={n.grId} className="rounded-xl border border-line bg-surface px-3 py-2 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-mono text-xs text-ink">{n.number ?? '—'}</span>
+                  <span className="font-mono text-xs text-ink">{n.number ?? <CellStateView state="na" />}</span>
                   <span className="text-xs text-muted">{day(n.receivedAt)}</span>
                   <Badge tone={NOTE_TONE[n.status]}>{t(`notes.${n.status}`)}</Badge>
                 </div>
@@ -222,12 +225,12 @@ export function ConsolidatedPanel({
             ))}
           </ul>
           <div
-            className="relative mb-6 hidden max-w-full overflow-x-auto rounded-xl border border-line sm:block"
+            className="relative mb-6 hidden max-w-full rounded-xl border border-line md:block"
             tabIndex={0}
             role="region"
             aria-label={t('notes.title')}
           >
-            <table className="w-full min-w-[28rem] text-sm" data-testid="xmatch-notes">
+            <table className="w-full text-sm" data-testid="xmatch-notes">
               <thead className="bg-surface-2 text-xs text-muted">
                 <tr>
                   <th scope="col" className={`${cell} text-start font-semibold`}>{t('notes.number')}</th>
@@ -242,13 +245,13 @@ export function ConsolidatedPanel({
                 {proposal.deliveryNotes.flatMap((n) => {
                   const rows = [
                     <tr key={n.grId} className="border-t border-line">
-                      <td className={`${cell} font-mono text-xs text-ink`}>{n.number ?? '—'}</td>
+                      <td className={`${cell} font-mono text-xs text-ink`}>{n.number ?? <CellStateView state="na" />}</td>
                       <td className={`${cell} text-ink`}>{day(n.receivedAt)}</td>
                       <td className={`${cell} font-mono text-xs text-muted`}>{n.poRef ?? t('notes.noRef')}</td>
                       <td className={`${cell} text-end font-mono tabular-nums text-ink`}>{ils(n.receivedValueIls)}</td>
                       {noteDeltas ? (
                         <td className={`${cell} text-end font-mono tabular-nums ${n.deltaIls > 0 ? 'font-semibold text-danger' : 'text-muted'}`}>
-                          {n.deltaIls > 0 ? ils(n.deltaIls) : '—'}
+                          {n.deltaIls > 0 ? ils(n.deltaIls) : <CellStateView state="na" />}
                         </td>
                       ) : null}
                       <td className={`${cell} text-end`}>
@@ -307,10 +310,10 @@ export function ConsolidatedPanel({
                       </td>
                       <td className={`${cell} text-end font-mono tabular-nums text-ink`}>{num(p.qtyReceived)}</td>
                       <td className={`${cell} text-end font-mono tabular-nums text-ink`}>{num(p.qtyBilled)}</td>
-                      <td className={`${cell} text-end font-mono tabular-nums text-muted`}>{p.poPrice != null ? price(p.poPrice) : '—'}</td>
-                      <td className={`${cell} text-end font-mono tabular-nums text-muted`}>{p.billedPrice != null ? price(p.billedPrice) : '—'}</td>
+                      <td className={`${cell} text-end font-mono tabular-nums text-muted`}>{p.poPrice != null ? price(p.poPrice) : <CellStateView state="na" />}</td>
+                      <td className={`${cell} text-end font-mono tabular-nums text-muted`}>{p.billedPrice != null ? price(p.billedPrice) : <CellStateView state="na" />}</td>
                       <td className={`${cell} text-end font-mono tabular-nums ${p.deltaIls > 0 ? 'font-semibold text-danger' : 'text-muted'}`}>
-                        {p.deltaIls > 0 ? ils(p.deltaIls) : '—'}
+                        {p.deltaIls > 0 ? ils(p.deltaIls) : <CellStateView state="na" />}
                       </td>
                       <td className={`${cell} text-end`}>
                         <Badge tone={PRODUCT_TONE[p.status]}>{t(`products.${p.status}`)}</Badge>

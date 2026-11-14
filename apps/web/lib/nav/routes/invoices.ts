@@ -6,13 +6,15 @@ export const routes: RouteDef[] = [
     // approvals, the inbox and the leak drill-down. Never the chef or the receiver
     // (owner decision: they see no ₪; the Delivery Check wizard reads
     // receiving.getInvoice over tRPC, not this page). The server-side ₪ strip is H-11.
-    // PILOT (W2-02, train B): the page lists invoices waiting for lines (reached
-    // from the home "מחכה לך" row). W2-02's register (#217) makes it a nav item.
+    // W2-02: the invoice register — the bookkeeper's bar slot 4 "invoices".
     key: 'invoices',
     path: '/dashboard/invoices',
     group: 'money',
+    rank: 25,
     roles: ['owner', 'manager', 'bookkeeper'],
-    nav: 'hidden',
+    nav: 'item',
+    bar: { bookkeeper: { slot: 4, label: 'invoices' } },
+    aliases: ['חשבוניות', 'רשימת חשבוניות', 'invoices', 'invoice register'],
   },
   {
     key: 'invoiceDetail',

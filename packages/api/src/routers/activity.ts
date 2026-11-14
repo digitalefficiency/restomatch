@@ -1,13 +1,17 @@
 import { z } from 'zod';
-import { activityEvents, and, desc, eq, lt, type UserRole } from '@restomatch/db';
+import { activityEvents, and, desc, eq, inArray, lt, users, type UserRole } from '@restomatch/db';
+import { hasCap } from '../lib/capabilities';
 import { NO_MONEY_ROLES, hasShekel, stripShekelFigures } from '../lib/staffMoney';
 import { memberProcedure, router } from '../trpc';
 
 /**
- * PILOT (train B): receiver and chef see no ₪ in the activity feed (owner rule:
- * the receiver never sees ₪; the chef sees ₪ only on orders and recipes). This
- * is the data-tier backstop: their homes don't mount the feed, but tRPC is
- * callable directly. Superseded by G-07 (#182), which keeps these names.
+ * Receiver and chef see no ₪ in the activity feed (owner rule: the receiver
+ * never sees ₪; the chef sees ₪ only on orders and recipes). The data-tier
+ * backstop: their homes don't mount the feed, but tRPC is callable directly.
+ * G-07: the gate is the `money.view` capability (CAP); the rule itself is the
+ * pilot's (#219): allow-listed metadata, detail null, ₪ in every spelling cut.
+ * `NO_MONEY_ROLES` stays exported for the pilot's callers; it equals the roles
+ * without `money.view` (pinned in activity-scope.test.ts).
  */
 export { NO_MONEY_ROLES };
 
@@ -68,6 +72,8 @@ interface FeedRow {
   detail: string | null;
   metadata: Record<string, unknown>;
   createdAt: Date;
+  actorId?: string | null;
+  actorName?: string | null;
 }
 
 /**
@@ -78,11 +84,13 @@ interface FeedRow {
  * and bookkeeper get the row untouched (same reference).
  */
 export function redactActivityForRole<T extends FeedRow>(role: UserRole, row: T): T {
-  if (!NO_MONEY_ROLES.has(role)) return row;
+  if (hasCap(role, 'money.view')) return row;
   return {
     ...row,
     title: hasShekel(row.title) ? stripShekelFigures(row.title) : row.title,
     detail: null,
+    // users.name is self-chosen free text; keep the feed ₪-free end to end.
+    ...(row.actorName && hasShekel(row.actorName) ? { actorName: stripShekelFigures(row.actorName) } : {}),
     metadata: redactMetadata(row.metadata),
   };
 }
@@ -97,6 +105,9 @@ export const activityRouter = router({
    * load the next page.
    *
    * Receiver / chef get ₪-free rows (redactActivityForRole); same shape.
+   * Every row carries `actorId` + `actorName` (null for system events or a
+   * deleted user) for the actor chip; names are visible to every role that
+   * sees the row.
    */
   feed: memberProcedure
     .input(
@@ -120,6 +131,7 @@ export const activityRouter = router({
           // render the entry in any locale instead of parsing the Hebrew text.
           metadata: activityEvents.metadata,
           createdAt: activityEvents.createdAt,
+          actorId: activityEvents.actorId,
         })
         .from(activityEvents)
         .where(
@@ -130,7 +142,23 @@ export const activityRouter = router({
         )
         .orderBy(desc(activityEvents.createdAt))
         .limit(limit);
-      if (!NO_MONEY_ROLES.has(ctx.session.role)) return rows;
-      return rows.map((row) => redactActivityForRole(ctx.session.role, row));
+      // Names resolve on the privileged connection: users_self RLS hides
+      // co-members' rows on the tenant connection (same pattern as team.list).
+      // Only actor ids taken from this tenant's own rows are looked up, and only
+      // the display name leaves this function (never the e-mail).
+      const actorIds = [...new Set(rows.map((r) => r.actorId).filter((id): id is string => !!id))];
+      const nameRows = actorIds.length
+        ? await (ctx.adminDb ?? ctx.db)
+            .select({ id: users.id, name: users.name })
+            .from(users)
+            .where(inArray(users.id, actorIds))
+        : [];
+      const nameById = new Map(nameRows.map((u) => [u.id, u.name]));
+      const withActor = rows.map((row) => ({
+        ...row,
+        actorName: row.actorId ? (nameById.get(row.actorId) ?? null) : null,
+      }));
+      if (hasCap(ctx.session.role, 'money.view')) return withActor;
+      return withActor.map((row) => redactActivityForRole(ctx.session.role, row));
     }),
 });

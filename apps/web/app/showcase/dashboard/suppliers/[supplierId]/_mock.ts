@@ -267,7 +267,7 @@ function buildProfiles(): Record<string, SupplierProfile> {
         at: isoDaysAgo(4, 7, 58),
         type: 'invoice_closed',
         title: 'INV-7754 נסגרה',
-        detail: 'נחסך בעקבות תיקון כמות פלפל אדום',
+        detail: 'נתפס בעקבות תיקון כמות פלפל אדום',
         amount: 64,
       },
       {

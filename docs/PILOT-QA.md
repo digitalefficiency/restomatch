@@ -24,23 +24,23 @@ against the pilot customer's tenant or the demo tenant. Files: `scripts/pilot-la
   totals on the orders screens only. Everywhere else the chef sees no ₪. Step 7b runs on main:
   W1-11 (#207) opened chef order writes in train A (4c887688).
 - ₪ amounts are never left-aligned in RTL. Each worker signs in with their own email and password.
-- Terminology: מרכזת / פער / דרישת זיכוי / קבלת סחורה (`TERMINOLOGY` in `support.ts`).
+- Terminology: מרכזת / פער / בקשת זיכוי / קבלת סחורה (`TERMINOLOGY` in `support.ts`; בקשת זיכוי replaced דרישת זיכוי, owner 7.11).
 - The cookie banner shows on a fresh visit; `/accessibility` and `/privacy` return 200.
 - Isolation: one branch (no switcher entries beyond the tenant itself), no demo supplier name on
   any visited screen, and a demo PO id is not-found or forbidden.
 
-Steps that wait on an unmerged PR are `test.fixme`, with the PR named in `WAITS`
-(`pilot-journey.spec.ts`).
-To run one against a lab built from its branch, name it: `PILOT_ON_TREE=w1-06,s2
-scripts/pilot-lab.sh`. Once it merges, it goes into `MERGED_ON_MAIN` in the spec:
-- 5b (6 MB photo upload) waits on W1-06's image shrink (#210).
+Since train B (3d64808d), every step runs on main: `MERGED_ON_MAIN` lists `w1-11` (#207), `w1-06`
+(#210) and `s2` (#216). A step that waits on an unmerged PR is `test.fixme`, with the PR named in
+`WAITS` (`pilot-journey.spec.ts`); to run it on a lab built from that branch, name it in
+`PILOT_ON_TREE` (comma list) for `scripts/pilot-lab.sh`, and add it to `MERGED_ON_MAIN` once it merges.
+- 5b (6 MB photo upload): W1-06's image shrink (#210).
   - In the lab, it proves the shrink: a 6.95 MB phone JPEG goes out as a 1.75 MB request, under
     Vercel's 4.5 MB body limit, and the server does not refuse it on size. The lab's scan storage
     is a placeholder, so the upload itself stops there.
   - In Stage C, it also expects the upload to succeed and the calm "automatic reading is off"
     notice (no OCR key for a non-demo tenant).
-- 7b (the chef places an order and sees ₪ on the orders screens) is on main (W1-11, #207).
-- 11, 8 and 9 wait on S2's manual invoice lines (#216). Without OCR keys, a fresh tenant gets no
+- 7b (the chef places an order and sees ₪ on the orders screens): W1-11 (#207).
+- 11, 8 and 9: S2's manual invoice lines (#216). Without OCR keys, a fresh tenant gets no
   invoice lines. Step 11 runs first because it makes the findings for 8 and 9.
   - 11: the owner enters three lines by hand on an OCR-failed invoice. Each line is picked from the
     order line when the invoice knows its order; otherwise it's typed with the exact catalogue name.

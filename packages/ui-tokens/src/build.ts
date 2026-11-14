@@ -18,7 +18,11 @@ import {
   scrim,
   typeRoles,
   zIndex,
+  spaceRoles,
+  typeRolesV2,
 } from './scale';
+import { colorVarsV2, v2Css } from './modes';
+import { ACTIVE_FACE, fontFaceCss } from './fonts';
 
 /** '#066B4A' → '6 107 74' (channels, so Tailwind's `/opacity` modifiers keep working). */
 export function channels(hex: string): string {
@@ -137,8 +141,11 @@ export function cssVariables(): string {
     `    --c-line-strong: ${channels(text.ink)};`,
     '  }',
     '}',
-    TOKENS_END,
   );
+  // DS2 phase 1 (additive): the v1 lines above are byte-for-byte unchanged.
+  // DS2 phase 2 (β): the self-hosted faces and their measured fallbacks.
+  if (ACTIVE_FACE !== 'heebo') lines.push(fontFaceCss());
+  lines.push(v2Css(), TOKENS_END);
   return lines.join('\n');
 }
 
@@ -174,17 +181,17 @@ function family(f: StatusFamily) {
  */
 export const tailwindPreset = {
   theme: {
-    fontSize: { ...legacyFontSize, ...typeRoles },
-    borderRadius: { ...legacyRadius, ...radiusRoles },
+    fontSize: { ...legacyFontSize, ...typeRoles, ...typeRolesV2 },
+    borderRadius: { ...legacyRadius, ...radiusRoles, xs: 'var(--radius-xs)', chip: 'var(--radius-chip)' },
     boxShadow: { ...legacyShadow, ...elevation },
     transitionDuration: { ...legacyDuration, ...motion.duration },
     transitionTimingFunction: { ...legacyEasing, ...motion.easing },
     extend: {
       colors: {
         bg: v('bg'),
-        surface: { DEFAULT: v('surface'), sunken: v('surface-sunken') },
+        surface: { DEFAULT: v('surface'), sunken: v('surface-sunken'), selected: v('surface-selected'), raised: v('surface-raised'), overlay: v('surface-overlay') },
         'surface-2': v('surface-2'),
-        line: { DEFAULT: v('line'), strong: v('line-strong'), field: v('line-field') },
+        line: { DEFAULT: v('line'), strong: v('line-strong'), field: v('line-field'), rule: v('border-rule') },
         ink: v('ink'),
         muted: v('muted'),
         subtle: v('subtle'),
@@ -200,14 +207,52 @@ export const tailwindPreset = {
         ...Object.fromEntries(dataViz.categorical.map((_, i) => [`viz-${i + 1}`, v(`viz-${i + 1}`)])),
         ...Object.fromEntries(dataViz.creep.map((_, i) => [`creep-${i + 1}`, v(`creep-${i + 1}`)])),
         ...Object.fromEntries(dataViz.creep.map((_, i) => [`on-creep-${i + 1}`, v(`on-creep-${i + 1}`)])),
+        // DS2 v2 roles (phase 1, additive; DS2-SPEC §5.4). Never a v1 meaning.
+        canvas: v('surface-canvas'),
+        fg: { DEFAULT: v('text-primary'), secondary: v('text-secondary'), tertiary: v('text-tertiary'), link: v('text-link') },
+        action: {
+          DEFAULT: v('action-primary-bg'),
+          hover: v('action-primary-bg-hover'),
+          fg: v('action-primary-fg'),
+          'secondary-border': v('action-secondary-border'),
+          'secondary-bg': v('action-secondary-bg'),
+          'secondary-bg-hover': v('action-secondary-bg-hover'),
+          'secondary-fg': v('action-secondary-fg'),
+          'quiet-fg': v('action-quiet-fg'),
+          'quiet-fg-hover': v('action-quiet-fg-hover'),
+          'quiet-bg-hover': v('action-quiet-bg-hover'),
+          danger: v('action-danger-bg'),
+          'danger-hover': v('action-danger-bg-hover'),
+          'danger-fg': v('action-danger-fg'),
+        },
+        'money-marker': v('money-marker'),
+        ...Object.fromEntries(
+          Object.keys(colorVarsV2())
+            .filter((k) => k.startsWith('viz-'))
+            .map((k) => [k, v(k)]),
+        ),
       },
       // `border-danger-subtle` is the decorative border role, not the subtle fill.
-      borderColor: Object.fromEntries(
-        FAMILIES.map((f) => [f, { subtle: v(`${f}-border-subtle`) }]),
-      ),
+      borderColor: {
+        ...Object.fromEntries(FAMILIES.map((f) => [f, { subtle: v(`${f}-border-subtle`) }])),
+        // DS2: the only routes to a danger/warn rail (`border-s-t1`, `border-s-t2`).
+        t1: v('emphasis-t1-rail'),
+        t2: v('emphasis-t2-rail'),
+      },
       // Tints used across v1 pages (bg-danger/12, bg-warn/8 …) — deprecated, kept for rendering.
       opacity: { 8: '0.08', 12: '0.12' },
       zIndex: Object.fromEntries(Object.entries(zIndex).map(([k, n]) => [k, String(n)])),
+      // DS2 (phase 1, additive).
+      spacing: { ...spaceRoles },
+      height: {
+        row: 'var(--row-h)',
+        control: 'var(--control-h)',
+        'decision-row': 'var(--decision-row-h)',
+        'count-row': 'var(--count-row-h)',
+        header: 'var(--chrome-header-h)',
+      },
+      width: { sidebar: 'var(--chrome-sidebar-w)', rail: 'var(--chrome-rail-w)' },
+      fontFamily: { display: 'var(--font-display)' },
       maxWidth: { app: containers.app, form: containers.form, auth: containers.auth, marketing: containers.marketing },
     },
   },
