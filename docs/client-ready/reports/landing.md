@@ -276,7 +276,7 @@ The owner's brief: *"The landing page should be efficient and not overloaded wit
 | 4 | **Proof**: one block, real numbers | ₪2,250/month = 1.5% of ₪150,000 (pilot target) · **0.39%** = Pro ₪590 ÷ ₪150,000 (break-even) · **12** checks. The block says "a target, not a promise". | Reveal |
 | 5 | **Pricing teaser** | Trial free · from ₪349 (from `PLAN_SEED`) → `/pricing` | Reveal |
 | 6 | **FAQ** | 7 questions, **collapsed** `<details>` (still in `FAQPage` JSON-LD) | — |
-| 7 | **Final CTA** (`#lead`) | Lead form (lazy), a one-line trust strip → `/about#trust`, and a demo link | — |
+| 7 | **Final CTA** (`#lead`) | Lead form (lazy), a one-line trust strip → `/product#trust`, and a demo link | — |
 
 All ₪ goes through `formatIls()`. Prices come from `PLAN_SEED`, and the proof figures are derived in code (`EXAMPLE_PURCHASING_ILS × PILOT_TARGET`, `pro ÷ purchasing`), so they cannot drift from `/pricing` or the calculator. This is the leak-economist rule: one consistent set of numbers.
 
@@ -285,10 +285,10 @@ All ₪ goes through `formatIls()`. Prices come from `PLAN_SEED`, and the proof 
 | Block (v1 home) | Now |
 |---|---|
 | Facts strip | `/about` (`FactsStrip`) |
-| Problem in ₪ (4 leak types plus the ₪2,250 example) | `/about#problem` |
-| Full features (Receiver card, approvals, leak heatmap, "quiet when all is well", accounting export) | `/about#features`. Nav "Features" now points here. |
-| ROI calculator | `/about#roi`. The proof block links to it. |
-| Trust and security (RLS, 2FA, Amendment 13, audit log) | `/about#trust`. The CTA trust line links to it. |
+| Problem in ₪ (4 leak types plus the ₪2,250 example) | `/product#problem` |
+| Full features (Receiver card, approvals, leak heatmap, "quiet when all is well", accounting export) | `/product#features`. Nav "Features" now points here. |
+| ROI calculator | `/product#roi`. The proof block links to it. |
+| Trust and security (RLS, 2FA, Amendment 13, audit log) | `/product#trust`. The CTA trust line links to it. |
 | FAQ | still on `/`, collapsed |
 
 These sections live in `app/(marketing)/_components/detail-sections.tsx` and were moved unchanged in substance.
@@ -441,7 +441,7 @@ Assertions:
   - It is lazy: absent before scrolling.
   - It submits locally (into the local dev DB) and shows the success message, in he and en.
   - Loading `/#lead` directly mounts it.
-- **Pages:** the `/about` anchors `#problem #features #roi #trust` exist.
+- **Pages:** the `/product` anchors (W3-06b; `/about#…` forwards here) `#problem #features #roi #trust` exist.
 - **English mode:** no Hebrew outside `lang="he"` anywhere in the pages above.
 - **Showcase numbers:**
   - The INV-7821 drawer shows 464 / 428 / 36.

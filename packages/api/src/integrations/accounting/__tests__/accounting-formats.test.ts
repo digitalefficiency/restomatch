@@ -55,8 +55,11 @@ const INVOICES: AccountingInvoice[] = [
 
 const CFG: AccountingConfig = {
   ...DEFAULT_ACCOUNTING_CONFIG,
-  // The accountant mapped one supplier to an existing card.
-  supplierAccounts: { '33333333-3333-4333-8333-333333333333': '40015' },
+  // The accountant mapped two suppliers to existing cards (one has no ח״פ).
+  supplierAccounts: {
+    '22222222-2222-4222-8222-222222222222': '40022',
+    '33333333-3333-4333-8333-333333333333': '40015',
+  },
 };
 
 function golden(format: AccountingFormat, bytes: Uint8Array, ext: string) {
@@ -82,7 +85,7 @@ describe('accounting formats — golden files', () => {
       '6000', '3700', '514200103', '524.14', '94.35', '618.49',
     ]);
     expect(rows[1]![5]).toBe('חד״פ מהיר בע״מ');
-    expect(rows[1]![8]).toBe('S22222222'); // no company id → stable fallback card
+    expect(rows[1]![8]).toBe('40022'); // no company id → the mapped card (never an invented code)
     expect(rows[2]![8]).toBe('40015'); // explicit mapping wins
   });
 
@@ -106,6 +109,23 @@ describe('accounting formats — golden files', () => {
     expect(lines[0]).toBe('תאריך מסמך,מספר מסמך,שם ספק,מספר עוסק,כרטיס ספק,סכום לפני מע״מ,מע״מ,סכום כולל מע״מ,כרטיס הוצאה');
     expect(lines[1]).toBe('01/10/2026,BR-24118,מאפיית ברנר,514200103,514200103,524.14,94.35,618.49,6000');
     expect(lines).toHaveLength(4);
+  });
+
+  it('a supplier with no card and no ח״פ is left out and counted, never given an invented code', () => {
+    const noCard = { ...CFG, supplierAccounts: { '33333333-3333-4333-8333-333333333333': '40015' } };
+    for (const format of ['hashavshevet', 'priority', 'rivhit'] as const) {
+      const f = renderAccountingFile(format, INVOICES, noCard, PERIOD);
+      expect(f.rowCount).toBe(2);
+      expect(f.unmappedCount).toBe(1);
+      const text =
+        format === 'hashavshevet'
+          ? new TextDecoder('windows-1255').decode(f.bytes)
+          : format === 'priority'
+            ? new TextDecoder('utf-16le').decode(f.bytes.slice(2))
+            : new TextDecoder().decode(f.bytes.slice(3));
+      expect(text).not.toContain('000731');
+      expect(text).not.toMatch(/\bS[0-9A-F]{8}\b|SUPPLIER/);
+    }
   });
 
   it('an empty period renders an empty (but valid) file', () => {

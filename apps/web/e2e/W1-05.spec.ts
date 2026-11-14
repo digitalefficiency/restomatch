@@ -185,9 +185,9 @@ test.describe('owner home', () => {
     });
     expect(amountBox.y + amountBox.height, 'hero ₪ bottom').toBeLessThanOrEqual(navTop);
     expect(rowBox.y + rowBox.height, 'first Needs-you row bottom').toBeLessThanOrEqual(navTop);
-    // The view toolbar is behind one chip on the phone, not a filter form above the money.
-    await expect(page.getByTestId('home-view-toggle')).toBeVisible();
-    await expect(page.locator('#home-view-toolbar')).toBeHidden();
+    // Owner decision I1 (7.11): the home has no view toolbar at all (views live on the leaks page).
+    await expect(page.getByTestId('home-view-toggle')).toHaveCount(0);
+    await expect(page.locator('#home-view-toolbar')).toHaveCount(0);
 
     // The split tiles are real targets on the phone (≥48 px), and the ⓘ note opens inside the viewport.
     for (const id of ['hero-unpaid', 'hero-paid']) {
@@ -205,20 +205,22 @@ test.describe('owner home', () => {
     }
   });
 
-  test('1440×900: strip ≤330 px, compact hero ≤260 px, page ≤1,800 px, trend collapsed, no target line', async ({ page }) => {
+  test('1440×900: the 5 blocks fit the fold, compact hero ≤260 px, no trend, no target line', async ({ page }) => {
     await page.setViewportSize(DESKTOP.viewport);
     await page.goto('/dashboard');
     await expect(page.getByTestId('leak-hero')).toBeVisible();
     // Each card streams on its own: wait for the strip itself before measuring it.
     await expect(page.getByTestId('needs-you')).toBeVisible();
+    // Owner decision I1 (7.11): hero first, then the task rows — the whole home fits 1440×900.
     const strip = (await page.getByTestId('needs-you').boundingBox())!;
-    expect(strip.y + strip.height, 'Needs-you strip bottom').toBeLessThanOrEqual(330);
+    expect(strip.y + strip.height, 'Needs-you rows bottom').toBeLessThanOrEqual(900);
     const hero = (await page.getByTestId('leak-hero').boundingBox())!;
     expect(hero.height, 'hero height').toBeLessThanOrEqual(260);
     await page.waitForLoadState('networkidle');
     const height = await page.evaluate(() => document.documentElement.scrollHeight);
-    expect(height, 'desktop home height').toBeLessThanOrEqual(1800);
-    await expect(page.getByTestId('home-trend')).not.toHaveAttribute('open', /.*/);
+    expect(height, 'desktop home height').toBeLessThanOrEqual(1100);
+    // The trend lives on the leaks page now (I1), not collapsed on the home.
+    await expect(page.getByTestId('home-trend')).toHaveCount(0);
     // No target line (R-14 default) and no full-month "חודש קודם" caption in the hero.
     await expect(page.getByTestId('leak-hero')).not.toContainText('יעד');
     await expect(page.getByTestId('leak-hero')).not.toContainText('חודש קודם');
@@ -286,8 +288,12 @@ test.describe('owner home', () => {
       expect(Math.abs(sum - amount(await hero.getByTestId('leak-hero-amount').innerText())), 'unpaid + paid = hero ₪').toBeLessThanOrEqual(1);
     }
     const rows = page.locator('[data-testid="needs-you"] [data-needs-row] a');
+    // The rows stream in after the hero (inside a Suspense boundary that is still hidden for a few
+    // hundred ms): wait until they are on screen before measuring them.
+    await expect(rows.first()).toBeVisible();
     expect(await rows.count()).toBeGreaterThan(0);
     for (const a of await rows.all()) {
+      await expect(a).toBeVisible();
       const box = (await a.boundingBox())!;
       expect(box.height, 'Needs-you row target').toBeGreaterThanOrEqual(48);
     }
@@ -350,18 +356,18 @@ test.describe('owner home', () => {
 
   test('a card that fails shows "לא נטען · נסו שוב" — never ₪0 — and the hero still renders', async ({ page }) => {
     await page.setViewportSize(DESKTOP.viewport);
-    await page.goto('/dashboard?homeFail=vat,activity');
+    // The VAT card and the activity log left the home (I1); its other blocks fail on their own.
+    await page.goto('/dashboard?homeFail=needs,returned');
     await expect(page.getByTestId('leak-hero')).toBeVisible();
-    for (const name of ['vat', 'activity']) {
+    for (const name of ['needs', 'returned']) {
       const failed = page.getByTestId(`home-section-failed-${name}`);
       await expect(failed).toBeVisible();
       await expect(failed).toContainText(ovHe.section.failed);
       await expect(failed.getByRole('button', { name: ovHe.section.retry })).toBeVisible();
     }
     // "נסו שוב" never drops focus to <body> (it fails again here: the new retry button takes it).
-    await page.getByTestId('home-section-failed-vat').getByRole('button', { name: ovHe.section.retry }).click();
-    await expect(page.getByTestId('home-section-failed-vat').getByRole('button', { name: ovHe.section.retry })).toBeFocused();
-    await expect(page.getByTestId('needs-you')).toBeVisible();
+    await page.getByTestId('home-section-failed-returned').getByRole('button', { name: ovHe.section.retry }).click();
+    await expect(page.getByTestId('home-section-failed-returned').getByRole('button', { name: ovHe.section.retry })).toBeFocused();
   });
 });
 

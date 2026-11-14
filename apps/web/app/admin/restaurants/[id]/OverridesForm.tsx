@@ -7,6 +7,8 @@ import { Button } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { admin } from '@/lib/i18n/messages/admin';
 import { localizeServerError } from '@/lib/serverErrors';
+import { StagedChange } from '../../_components/StagedChange';
+import { changedFields, type StagedField } from '../../_components/staged';
 
 const FEATURES = ['integrations', 'whatsapp_alerts', 'advanced_analytics', 'accounting_export'] as const;
 
@@ -37,7 +39,15 @@ export function OverridesForm({ restaurantId, current }: { restaurantId: string;
   );
   const [features, setFeatures] = useState<string[]>(current.features ?? []);
 
-  const save = trpc.admin.setOverrides.useMutation({ onSuccess: () => router.refresh() });
+  // W3-07a: "שמירה" stages a before → after diff; the write happens on confirm, with a reason.
+  const [staged, setStaged] = useState<StagedField[] | null>(null);
+  const [noChanges, setNoChanges] = useState(false);
+  const save = trpc.admin.setOverrides.useMutation({
+    onSuccess: () => {
+      setStaged(null);
+      router.refresh();
+    },
+  });
 
   function intOrNull(raw: string): number | null {
     const t = raw.trim();
@@ -50,8 +60,45 @@ export function OverridesForm({ restaurantId, current }: { restaurantId: string;
     setFeatures((prev) => (prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]));
   }
 
-  function submit() {
+  function show(n: number | null | undefined): string {
+    return n == null ? '' : String(n);
+  }
+
+  function stage() {
+    const on = t('staged.on');
+    const off = t('staged.off');
+    const fields: StagedField[] = [
+      { key: 'invoices', label: t('overrides.invoices'), before: show(current.limits?.invoicesPerMonth), after: show(intOrNull(invoices)) },
+      { key: 'restaurants', label: t('overrides.restaurants'), before: show(current.limits?.restaurants), after: show(intOrNull(restaurants)) },
+      { key: 'seats', label: t('overrides.seats'), before: show(current.limits?.seatsPerRestaurant), after: show(intOrNull(seats)) },
+      ...FEATURES.map((f) => ({
+        key: `feature.${f}`,
+        label: t(`overrides.features.${f}`),
+        before: (current.features ?? []).includes(f) ? on : off,
+        after: features.includes(f) ? on : off,
+      })),
+    ];
+    const diff = changedFields(fields);
+    save.reset();
+    if (diff.length === 0) {
+      setNoChanges(true);
+      return;
+    }
+    setNoChanges(false);
+    setStaged(diff);
+  }
+
+  function cancel() {
+    setStaged(null);
+    setInvoices(show(current.limits?.invoicesPerMonth));
+    setRestaurants(show(current.limits?.restaurants));
+    setSeats(show(current.limits?.seatsPerRestaurant));
+    setFeatures(current.features ?? []);
+  }
+
+  function confirm(reason: string) {
     save.mutate({
+      reason,
       restaurantId,
       overrides: {
         limits: {
@@ -69,9 +116,8 @@ export function OverridesForm({ restaurantId, current }: { restaurantId: string;
 
   return (
     <div className="mt-5 border-t border-line pt-5">
-      <label className="mb-2 block font-mono text-xs font-medium uppercase tracking-wider text-subtle">
-        {t('overrides.label')}
-      </label>
+      <p className="mb-2 block text-xs font-semibold text-subtle">{t('overrides.label')}</p>
+      <fieldset disabled={staged !== null} className="contents">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div>
           <span className="mb-1 block text-xs text-subtle">{t('overrides.invoices')}</span>
@@ -96,15 +142,25 @@ export function OverridesForm({ restaurantId, current }: { restaurantId: string;
         ))}
       </div>
 
-      <div className="mt-4 flex items-center gap-2">
-        <Button size="sm" onClick={submit} disabled={save.isPending}>
-          {save.isPending ? t('overrides.saving') : t('overrides.save')}
-        </Button>
-        {save.error ? (
-          <span className="text-xs text-danger">{localizeServerError(save.error, locale, t('generic'))}</span>
-        ) : null}
-        {save.isSuccess ? <span className="text-xs text-primary">{t('overrides.saved')}</span> : null}
-      </div>
+      </fieldset>
+
+      {staged === null ? (
+        <div className="mt-4 flex items-center gap-2">
+          <Button size="sm" variant="secondary" onClick={stage}>
+            {t('staged.review')}
+          </Button>
+          {noChanges ? <span className="text-xs text-muted">{t('staged.noChanges')}</span> : null}
+          {save.isSuccess ? <span className="text-xs text-primary">{t('overrides.saved')}</span> : null}
+        </div>
+      ) : (
+        <StagedChange
+          fields={staged}
+          pending={save.isPending}
+          error={save.error ? localizeServerError(save.error, locale, t('generic')) : null}
+          onConfirm={confirm}
+          onCancel={cancel}
+        />
+      )}
     </div>
   );
 }

@@ -88,7 +88,7 @@ describe('first count: blank ≠ zero, close by owner/manager, price source, fir
   });
 
   it('with one count only: "purchases food cost" for the month, never an invented opening', async () => {
-    await caller(A).inventory.setMeta({ countId: first, foodSalesExVat: '4000.00' });
+    await caller(A).inventory.setSales({ countId: first, foodSalesExVat: '4000.00' });
     const p = await caller(A).inventory.period();
     expect(p.available).toBe(false);
     if (p.available) return;
@@ -105,16 +105,18 @@ describe('first count: blank ≠ zero, close by owner/manager, price source, fir
   it('the chef counts but sees no ₪ (owner decision): no values, prices, sales or period; no CSV', async () => {
     const chef = caller(A, 'chef');
     const view = await chef.inventory.get({ countId: first });
-    expect(view).toMatchObject({ showMoney: false, totalValueAgorot: null, foodSalesExVat: null });
-    for (const l of view.lines) expect(l).toMatchObject({ unitCost: null, valueAgorot: null, priceSource: null });
+    // W2-07: the ₪ keys are absent from the chef's JSON (not merely null).
+    expect(view).toMatchObject({ showMoney: false });
+    for (const k of ['totalValueAgorot', 'foodValueAgorot', 'foodSalesExVat']) expect(view).not.toHaveProperty(k);
+    for (const l of view.lines) for (const k of ['unitCost', 'valueAgorot', 'priceSource']) expect(l).not.toHaveProperty(k);
     // The count itself still reads: quantities, status and tallies.
     expect(view.lines.find((l) => l.productId === beef)).toMatchObject({ qty: '5.0000', status: 'ok' });
     const hist = await chef.inventory.history();
     expect(hist.length).toBeGreaterThan(0);
-    for (const h of hist) expect(h).toMatchObject({ totalValueAgorot: null, foodSalesExVat: null });
+    for (const h of hist) for (const k of ['totalValueAgorot', 'foodValueAgorot', 'foodSalesExVat']) expect(h).not.toHaveProperty(k);
     await expect(chef.inventory.period()).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(chef.inventory.exportCsv({ countId: first })).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    await expect(chef.inventory.setMeta({ countId: first, foodSalesExVat: '1.00' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(chef.inventory.setSales({ countId: first, foodSalesExVat: '1.00' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     // Owner and manager keep every ₪.
     const owner = await caller(A, 'manager').inventory.get({ countId: first });
     expect(owner.showMoney).toBe(true);

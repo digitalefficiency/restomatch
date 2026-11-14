@@ -42,6 +42,7 @@ import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 import { diffCoverage, loadFragments, mergeCoverage } from './coverage/index';
+import { syncClaims } from '../recovery/service';
 
 /**
  * CROSS-TENANT ATTACK SUITE
@@ -2223,6 +2224,9 @@ describe('recovery + monthly report (A → B)', () => {
     for (const t of [A, B]) {
       await db.update(restaurants).set({ settings: { features: { all: true } } as never }).where(eq(restaurants.id, t.restaurantId));
       await db.update(discrepancies).set({ resolutionStatus: 'accepted' }).where(eq(discrepancies.id, t.discrepancyId));
+      // W2-10a: a read no longer creates claims (they are made at decision
+      // time). Materialise the accepted claim here, as the decision would.
+      await syncClaims(db, t.restaurantId);
     }
     aClaimId = (await callerFor(A).recovery.list())[0]!.id;
     bClaimId = (await callerFor(B).recovery.list())[0]!.id;
@@ -2875,10 +2879,10 @@ describe('H-11 · receiver and chef get no ₪ (A own ids; B ids rejected)', () 
   it('orders.list / orders.get: the receiver gets no order ₪; the chef keeps it', async () => {
     const receiverList = await callerWithRole(A, 'receiver').orders.list();
     expect(receiverList.length).toBeGreaterThan(0);
-    expect(receiverList.every((r) => 'totalEstimated' in r && r.totalEstimated === null)).toBe(true);
+    expect(receiverList.every((r) => (r.totalEstimated ?? null) === null)).toBe(true);
     const receiverPo = await callerWithRole(A, 'receiver').orders.get({ poId: A.poId });
-    expect(receiverPo.po?.totalEstimated).toBeNull();
-    expect(receiverPo.lines.every((l) => l.unitPriceExpected === null)).toBe(true);
+    expect(receiverPo.po?.totalEstimated ?? null).toBeNull();
+    expect(receiverPo.lines.every((l) => (l.unitPriceExpected ?? null) === null)).toBe(true);
     const chefPo = await callerWithRole(A, 'chef').orders.get({ poId: A.poId });
     expect(chefPo.po?.totalEstimated).toBe('321.00');
   });
