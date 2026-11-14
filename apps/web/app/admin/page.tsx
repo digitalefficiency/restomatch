@@ -41,7 +41,7 @@ export default async function AdminRestaurantsPage() {
         {kpis.map((k) => (
           <div key={k.label} className="rounded-xl border border-line bg-surface p-4 shadow-card">
             <p className="text-xs text-subtle">{k.label}</p>
-            <p className="mt-1 font-mono text-2xl font-bold tabular-nums text-ink">
+            <p className="mt-1 text-2xl font-bold tabular-nums text-ink">
               {formatNumber(k.value, locale)}
             </p>
           </div>
@@ -50,7 +50,7 @@ export default async function AdminRestaurantsPage() {
 
       <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-card">
         <table className="w-full text-start text-sm">
-          <thead className="border-b border-line bg-surface-2 font-mono text-xs uppercase tracking-wider text-subtle">
+          <thead className="border-b border-line bg-surface-2 text-xs text-subtle">
             <tr>
               <th className="px-4 py-3 text-start font-medium">{t('list.colRestaurant')}</th>
               <th className="px-4 py-3 text-start font-medium">{t('list.colPlan')}</th>
@@ -83,11 +83,11 @@ export default async function AdminRestaurantsPage() {
                     </span>
                   ) : null}
                 </td>
-                <td className="px-4 py-3 font-mono tabular-nums text-ink">
+                <td className="px-4 py-3 tabular-nums text-ink">
                   {formatNumber(r.ocrScansThisMonth, locale)}
                 </td>
-                <td className="px-4 py-3 font-mono tabular-nums text-ink">{formatNumber(r.members, locale)}</td>
-                <td className="px-4 py-3 font-mono tabular-nums text-subtle">
+                <td className="px-4 py-3 tabular-nums text-ink">{formatNumber(r.members, locale)}</td>
+                <td className="px-4 py-3 tabular-nums text-subtle">
                   {formatDate(r.createdAt, locale)}
                 </td>
               </tr>

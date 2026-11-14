@@ -14,6 +14,11 @@ export * from './semantic';
 export * from './scale';
 export { channels, colorVars, cssVariables, tailwindPreset, tokenBlockOf, withTokenBlock, TOKENS_START, TOKENS_END } from './build';
 export { contrastRatio } from './contrast';
+// DS2 (phase 1). `primitives.ts` is private and deliberately not exported.
+export * from './directions';
+export * from './components';
+export * from './fonts';
+export { colorVarsV2, v2Blocks, v2Css, type VarBlock } from './modes';
 
 import { focus, status, surfaces, text } from './semantic';
 

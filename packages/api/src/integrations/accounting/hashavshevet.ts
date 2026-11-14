@@ -1,6 +1,6 @@
 import { agorotToPlain, cell, CRLF, ddmmyyyy, safeCell, supplierAccount } from './common';
 import { encodeWindows1255WithReport } from './encoding';
-import type { AccountingConfig, AccountingFile, AccountingInvoice } from './types';
+import type { AccountingConfig, AccountingInvoice, RenderedFile } from './types';
 
 /**
  * Hashavshevet (חשבשבת) journal-movement import — "קליטת תנועות" from a
@@ -56,7 +56,7 @@ export function hashavshevetFile(
   invoices: AccountingInvoice[],
   cfg: AccountingConfig,
   period: { from: string; to: string },
-): AccountingFile {
+): RenderedFile {
   const lines = hashavshevetLines(invoices, cfg);
   const { bytes, replaced } = encodeWindows1255WithReport(lines.length ? lines.join(CRLF) + CRLF : '');
   return {

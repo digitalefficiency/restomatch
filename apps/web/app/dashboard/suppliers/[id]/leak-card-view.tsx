@@ -10,7 +10,8 @@ import { createTranslator } from '@/lib/i18n/translate';
 import { leaks as leaksNs } from '@/lib/i18n/messages/leaks';
 import { Badge, LinkButton, cn } from '@/lib/components';
 import { discrepancyLabel, displayName } from '../../approvals/vocab';
-import { lineMathText } from '../../leaks/claims/why';
+import { WhyLine, whySegments } from '@/lib/components/flags';
+import { leakWhyLabels } from '../../leaks/why-labels';
 import type { SupplierLeakCard } from './leak-card-data';
 
 const ils = (agorot: number, locale: Locale) => formatIls(agorot / 100, { locale, maximumFractionDigits: 2 });
@@ -60,7 +61,9 @@ export function LeakCardBody({
             <p className="mt-2 text-xs tabular-nums text-subtle">{windowText}</p>
           </div>
         </section>
-        <Scorecard sc={sc} gated={card.scorecardGated} locale={locale} t={t} />
+        {!print ? (
+          <Scorecard sc={sc} gated={card.scorecardGated} unavailable={card.scorecardUnavailable} locale={locale} t={t} />
+        ) : null}
       </div>
     );
   }
@@ -85,17 +88,24 @@ export function LeakCardBody({
           </p>
         </div>
         {!print && (
-          <Link href={explorerHref} className="rounded text-sm font-semibold text-primary underline underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+          <Link href={explorerHref} className="inline-flex min-h-11 items-center rounded text-sm font-semibold text-primary underline underline-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 [@media(pointer:fine)]:min-h-6">
             {t('leakCard.explorer')}
           </Link>
         )}
       </section>
 
       {/* T2 — what's still open, with one CTA */}
-      {card.openAgorot > 0 && (
-        <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-danger/8 p-4">
+      {/* I6 (owner 7.11): the printed card carries the gap lines and the request ₪ only. */}
+      {print && card.letterAgorot != null && card.letterAgorot > 0 ? (
+        <section data-testid="supplier-card-request" className="flex flex-wrap items-center gap-3 rounded-2xl border border-line p-4">
+          <span className="text-sm font-semibold text-muted">{t('leakCard.request')}</span>
+          <span className="rm-print-accent text-xl font-bold tabular-nums text-ink">{ils(card.letterAgorot, locale)}</span>
+        </section>
+      ) : null}
+      {!print && card.openAgorot > 0 && (
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line p-4">
           <div className="flex flex-wrap items-center gap-3">
-            <Badge tone="danger-solid">{tl('claims.openForClaim')}</Badge>
+            <Badge tone="neutral">{tl('claims.openForClaim')}</Badge>
             <span className="rm-print-accent text-xl font-bold tabular-nums text-ink">
               {ils(card.openAgorot, locale)}
             </span>
@@ -103,10 +113,15 @@ export function LeakCardBody({
               {t('leakCard.openLines', { count: formatNumber(card.openCount, locale) })}
             </span>
           </div>
+          {!print && card.letterAgorot === null ? (
+            <span className="text-xs text-muted" data-testid="supplier-letter-unavailable">
+              {t('overview.unavailable')}
+            </span>
+          ) : null}
           {!print && (
             <LinkButton href={`/dashboard/leaks/claims?sup=${supplierId}`} size="sm" data-testid="supplier-claims-cta">
               {/* The ₪ the letter it opens prints — never the 90-day open total. */}
-              {card.letterAgorot > 0
+              {card.letterAgorot != null && card.letterAgorot > 0
                 ? tl('claims.openSupplierLetter', { amount: ils(card.letterAgorot, locale) })
                 : tl('claims.openSupplierLetterPlain')}
             </LinkButton>
@@ -141,21 +156,16 @@ export function LeakCardBody({
             {card.topLines.map((l) => {
               const item = displayName(locale, l.productName ?? l.lineDescription, l.productNameEn ?? l.lineDescriptionEn);
               const inv = l.invoiceNumber ? t('leakCard.invoice', { number: l.invoiceNumber }) : t('leakCard.invoiceNoNumber');
-              // Expected vs charged, so the supplier can verify the line (SUP-02).
-              // TODO(W2-09): render through W1-07's flags/WhyLine once both are on main (no cross-package imports in wave 1).
-              const math = lineMathText(
-                { type: l.type, severity: l.severity ?? null, expected: l.expected ?? null, actual: l.actual ?? null, deltaAmount: l.deltaAmount },
-                t.appLocale,
-              );
+              // The line's verified basis, so the supplier can check it (SUP-02, W2-09c): the one
+              // shared why formatter — "חויב ₪149.00 × 10 ק״ג · בהזמנה ₪139.00 (PO-…, 14.10) · פער ₪100.00".
+              // No order number: name it by its date ("הזמנה, 14.10"), never a raw id ("PO-186CCE6E").
+              const facts = l.evidence ? (l.evidence.facts.poRef ? l.evidence.facts : { ...l.evidence.facts, poRef: t('leakCard.orderWord') }) : null;
+              const math = facts ? whySegments(facts, leakWhyLabels(t.appLocale)) : null;
               return (
                 <li key={l.discrepancyId} className="flex items-start justify-between gap-3 py-2" data-testid="supplier-leak-line">
                   <div className="min-w-0">
                     <p className="truncate text-ink">{item || discrepancyLabel(ta, l.type)}</p>
-                    {math ? (
-                      <p className="text-xs text-ink" data-testid="supplier-leak-math">
-                        {math}
-                      </p>
-                    ) : null}
+                    {math ? <WhyLine id={`why-${l.discrepancyId}`} groups={math} className="text-xs" /> : null}
                     <p className="text-xs text-subtle">
                       {discrepancyLabel(ta, l.type)} ·{' '}
                       {print ? (
@@ -176,7 +186,9 @@ export function LeakCardBody({
         </section>
       </div>
 
-      <Scorecard sc={sc} gated={card.scorecardGated} locale={locale} t={t} />
+      {!print ? (
+        <Scorecard sc={sc} gated={card.scorecardGated} unavailable={card.scorecardUnavailable} locale={locale} t={t} />
+      ) : null}
     </div>
   );
 }
@@ -184,15 +196,17 @@ export function LeakCardBody({
 function Scorecard({
   sc,
   gated,
+  unavailable = false,
   locale,
   t,
 }: {
   sc: SupplierLeakCard['scorecard'];
   gated: boolean;
+  unavailable?: boolean;
   locale: Locale;
   t: Translator<typeof suppliersHe>;
 }) {
-  if (!sc && !gated) return null; // no match runs with this supplier yet
+  if (!sc && !gated && !unavailable) return null; // no match runs with this supplier yet
   return (
     <section aria-labelledby="leak-scorecard" className="border-t border-line pt-4">
       <h2 id="leak-scorecard" className="mb-2 text-sm font-bold text-ink">{t('leakCard.scorecard')}</h2>
@@ -203,6 +217,10 @@ function Scorecard({
           <Stat label={t('leakCard.priceDelta')} value={formatPercent(sc.avgPriceDeltaPct, locale)} />
           <Stat label={t('leakCard.duplicates')} value={formatNumber(sc.duplicateInvoicesCount, locale)} />
         </dl>
+      ) : unavailable ? (
+        <p className="text-sm text-muted" data-testid="supplier-scorecard-unavailable">
+          {t('overview.unavailable')}
+        </p>
       ) : (
         <p className="text-sm text-subtle">{t('leakCard.noScorecard')}</p>
       )}

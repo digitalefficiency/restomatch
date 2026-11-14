@@ -151,7 +151,7 @@ async function main() {
       .map(([nameEn, q]) => ({ productId: byName.get(nameEn), qty: q[i] }))
       .filter((l): l is { productId: string; qty: string } => !!l.productId);
     await caller.inventory.saveLines({ countId: id, lines });
-    if (date === CLOSING) await caller.inventory.setMeta({ countId: id, foodSalesExVat: OCTOBER_FOOD_SALES });
+    if (date === CLOSING) await caller.inventory.setSales({ countId: id, foodSalesExVat: OCTOBER_FOOD_SALES });
     // Products bought in the last 60 days that the demo list doesn't count stay blank (not zero).
     const done = await caller.inventory.complete({ countId: id, acceptUncounted: true });
     results.push({ date, value: done.totalValueAgorot, counted: done.counted, unpriced: done.unpriced });
