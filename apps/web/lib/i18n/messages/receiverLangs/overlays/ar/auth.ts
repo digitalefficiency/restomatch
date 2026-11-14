@@ -2,7 +2,7 @@ import type { Shape } from '../../../../translate';
 import type { he } from '../../../auth/he';
 
 /** auth — ar overlay (Arabic). */
-export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 'signin'>> = {
+export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 'signin' | 'codeLogin' | 'passkeys'>> = {
   login: {
     title: 'تسجيل الدخول إلى RestoMatch',
     subtitle: 'سجّل الدخول بكلمة المرور، أو اطلب رابط دخول إلى بريدك الإلكتروني.',
@@ -56,5 +56,32 @@ export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 
     switchUser: 'الدخول بمستخدم آخر',
     newHere: 'جديد في RestoMatch؟ أول دخول برابط من البريد يفتح حسابًا.',
     demo: 'شاهد العرض التجريبي',
+  },
+  codeLogin: {
+    button: 'أرسل لي رمزًا بالبريد',
+    title: 'الرمز في الطريق',
+    sentTo: 'إذا كان هذا العنوان مسجّلًا لدينا، فقد أرسلنا إليه رمزًا من 6 أرقام:',
+    validFor: 'الرمز صالح لمدة 10 دقائق.',
+    codeLabel: 'الرمز من البريد',
+    submit: 'دخول',
+    resend: 'إرسال رمز جديد',
+    resent: 'أرسلنا رمزًا جديدًا، استخدم الرمز من آخر رسالة.',
+    useOther: 'الدخول بطريقة أخرى',
+    errors: {
+      sendRate: 'أرسلنا عدة رموز بالفعل، استخدم الرمز من آخر رسالة.',
+      wrongCode: 'الرمز غير مطابق أو انتهت صلاحيته، تحقّق من آخر رسالة.',
+      rate: 'الدخول بالرمز مقفل حاليًا، سجّل الدخول بكلمة المرور أو برابط في البريد.',
+    },
+  },
+  passkeys: {
+    title: 'مفتاح المرور',
+    intro: 'سجّل الدخول ببصمة الإصبع أو الوجه أو رمز الجهاز، بدون كلمة مرور.',
+    introWhere: 'يبقى مفتاح المرور على جهازك، وليس لدينا.',
+    notForRole: 'مفاتيح المرور متاحة فقط للمالكين ولمسك الدفاتر.',
+    count: '{count, plural, =0 {لا يوجد مفتاح مرور في هذا الحساب بعد.} other {عدد مفاتيح المرور في هذا الحساب: #}}',
+    add: 'إضافة مفتاح مرور على هذا الجهاز',
+    signIn: 'الدخول بمفتاح مرور',
+    failed: 'تعذّر استخدام مفتاح المرور، حاول مرة أخرى أو سجّل الدخول بكلمة المرور.',
+    back: 'العودة إلى التطبيق',
   },
 };
