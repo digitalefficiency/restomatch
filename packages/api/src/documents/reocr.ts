@@ -90,7 +90,20 @@ export async function reopenForOcr(tx: Database, restaurantId: string, invoiceId
     // Round 8: the number stays RESERVED through the re-read (a copy read in the
     // meantime is the duplicate, never the full document); a terminal failure of
     // the composed read releases it (settle's failed-re-read guard).
-    .set({ totalExclVat: null, vatAmount: null, totalInclVat: null, updatedAt: new Date() })
+    .set({
+      totalExclVat: null,
+      vatAmount: null,
+      totalInclVat: null,
+      // Round 9 (N2/N5): the composed re-read is a NEW verdict. Drop the replaced
+      // read's verdict (review reasons, checks, failure marker, duplicate stamp)
+      // so it is never inherited; pre-read stamps (scanGrId, link holds, a
+      // person's manualLines / headerEntered) stay.
+      ocrPayload: sql`case when jsonb_typeof(${invoices.ocrPayload} -> 'raw') = 'object'
+        then jsonb_set(${invoices.ocrPayload}, '{raw}',
+               (${invoices.ocrPayload} -> 'raw') - 'reviewReasons' - 'checks' - 'ocrFailed' - 'duplicateOf')
+        else ${invoices.ocrPayload} end`,
+      updatedAt: new Date(),
+    })
     .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)));
   return true;
 }

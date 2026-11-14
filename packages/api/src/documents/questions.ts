@@ -36,5 +36,16 @@ export function openPageQuestionSql(rid: string, invoiceId: SQL): SQL {
       SELECT 1 FROM ingest_documents q
         JOIN invoices qi ON qi.id = q.invoice_id AND qi.restaurant_id = q.restaurant_id
        WHERE q.restaurant_id = ${rid} AND ${openFlagSql('q')} AND q.error IN (${one})
-         AND qi.ocr_payload -> 'raw' -> 'pageOf' ->> 'invoiceId' = (${invoiceId})::text))`;
+         AND ${pageOfIncludesSql('qi', invoiceId)}))`;
+}
+
+/**
+ * Round 9 (N1/N3): invoice `alias`'s page names `invoiceId` among the invoices it
+ * may continue (raw.pageOf.invoiceIds — every plausible head; round-8 rows carry
+ * only raw.pageOf.invoiceId).
+ */
+export function pageOfIncludesSql(alias: string, invoiceId: SQL): SQL {
+  const a = sql.raw(alias);
+  return sql`(coalesce(${a}.ocr_payload -> 'raw' -> 'pageOf' -> 'invoiceIds', '[]'::jsonb) ? ((${invoiceId})::text)
+    OR ${a}.ocr_payload -> 'raw' -> 'pageOf' ->> 'invoiceId' = (${invoiceId})::text)`;
 }

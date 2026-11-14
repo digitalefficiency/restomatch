@@ -30,7 +30,7 @@ import { appError } from '../errors';
 import { featureEnabled } from '../lib/features';
 import { enqueueIngestJobs, INGEST_FEATURE, messageStatus, registerIngestedDocument } from '../ingest/pipeline';
 import { PAGE_FLAGS, PAGE_ONE_FLAGS } from '../documents/settle';
-import { openFlagSql, openPageQuestionSql } from '../documents/questions';
+import { openFlagSql, openPageQuestionSql, pageOfIncludesSql } from '../documents/questions';
 import { resolvePageFlag } from '../documents/resolve';
 import { assertSupplierOwned } from '../tenant';
 import { captureSourceRef } from '../orders/captureOrder';
@@ -170,11 +170,11 @@ export const ingestRouter = router({
     // Round 7/8: page 1 of a page that probably belongs to it (raw.pageOf) waits too.
     const one = (await ctx.db.execute(sql`
       select d.id as document_id, d.error as flag, d.invoice_id::text as page_invoice_id,
-             i.ocr_payload -> 'raw' -> 'pageOf' ->> 'invoiceId' as page_of, null::text as repeats
+             ${input.invoiceId}::text as page_of, null::text as repeats
         from ${ingestDocuments} d
         join ${invoices} i on i.id = d.invoice_id and i.restaurant_id = d.restaurant_id
        where d.restaurant_id = ${rid} and ${openFlagSql('d')} and d.error in (${sql.join(PAGE_ONE_FLAGS.map((f) => sql`${f}`), sql`, `)})
-         and i.ocr_payload -> 'raw' -> 'pageOf' ->> 'invoiceId' = ${input.invoiceId}
+         and ${pageOfIncludesSql('i', sql`${input.invoiceId}`)}
        limit 1`)) as unknown as QuestionRow[];
     return one[0] ? questionOf(one[0], true) : null;
   }),

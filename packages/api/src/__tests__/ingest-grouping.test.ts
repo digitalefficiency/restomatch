@@ -143,6 +143,10 @@ interface OcrHead {
   lineTotal?: string;
   lines?: Array<{ qty: string; total: string; desc?: string; unitPrice?: string }>;
   totalInclVat?: string;
+  /** A whole invoice on its own: totalExclVat = the lines' sum (selfComplete). */
+  totalExclVat?: string;
+  /** raw.reviewReasons the read wrote (round 9: reasons can outlive their hold). */
+  reviewReasons?: string[];
 }
 const ACME: OcrHead = { supplierName: 'תנובה בע"מ', businessId: '51-000123-4', invoiceNumber: 'A-100' };
 const OTHER: OcrHead = { supplierName: 'שטראוס', businessId: '52-999888-7', invoiceNumber: 'S-7' };
@@ -174,6 +178,7 @@ async function writeOcr(invoiceId: string, head: OcrHead): Promise<void> {
     : {
         reconciled: { supplier: { name: head.supplierName, businessId: head.businessId }, invoiceNumber: head.invoiceNumber },
         ...(head.duplicateOf ? { duplicateOf: head.duplicateOf } : {}),
+        ...(head.reviewReasons ? { reviewReasons: head.reviewReasons } : {}),
       };
   await ownerDb
     .update(invoices)
@@ -181,6 +186,7 @@ async function writeOcr(invoiceId: string, head: OcrHead): Promise<void> {
       status: head.failed || head.duplicateOf ? 'parsed' : (head.status ?? 'matched'),
       invoiceNumber: head.duplicateOf || head.failed ? null : (head.invoiceNumber ?? null),
       totalInclVat: head.totalInclVat ?? null,
+      totalExclVat: head.totalExclVat ?? null,
       ocrPayload: { provider: 'stub', raw } as never,
     })
     .where(eq(invoices.id, invoiceId));
@@ -1053,8 +1059,25 @@ const OTHERL: LineIn[] = [
 ];
 const verdict = (members: PageHeader[]) => {
   const d = decidePages(members);
-  return { merged: d.merge.map((m) => m.invoiceId), flagged: d.flagged };
+  return { merged: d.merge.map((m) => m.invoiceId), flagged: d.flagged.map(({ heads: _h, ...f }) => f) };
 };
+
+describe('round 9 · decidePages (pure): the heads a stray page may continue', () => {
+  const headsOf = (members: PageHeader[], id: string) => decidePages(members).flagged.find((f) => f.invoiceId === id)?.heads;
+  const COMPLETE_L = [{ qty: '1', total: '500.00', desc: 'whole invoice' }];
+  it('after a complete page 1, a continuation follows the run head only', () => {
+    const m = [H('a', { ...TNUVA, number: 'A-1', lines: COMPLETE_L, totalExclVat: '500.00' }), H('b1', { ...TNUVA, number: 'B-2', lines: L5 }), H('b2', { lines: OTHERL })];
+    expect(headsOf(m, 'b2')).toEqual(['b1']);
+  });
+  it('after an OPEN page 1, the run head first, then page 1', () => {
+    const m = [H('a1', { ...TNUVA, number: 'A-1', lines: L5 }), H('a2', { lines: OTHERL }), H('b1', { ...TNUVA, number: 'B-2', lines: [{ qty: '9', total: '99.00', desc: 'x' }] }), H('b2', { lines: [{ qty: '3', total: '33.00', desc: 'y' }] })];
+    expect(headsOf(m, 'b2')).toEqual(['b1', 'a1']);
+  });
+  it("another supplier's page is never a head", () => {
+    const m = [H('p1', { ...TNUVA, number: 'A-1', lines: L5 }), H('p2', { supplierName: 'שטראוס', businessId: '529998887', number: 'S-7', lines: OTHERL }), H('p3', { ...TNUVA, number: 'A 1', lines: [{ qty: '3', total: '33.00', desc: 'y' }] })];
+    expect(headsOf(m, 'p3')).toEqual(['p1']);
+  });
+});
 
 describe('round 4 · decidePages (pure): in doubt, a person — never a merge', () => {
   it('HIGH-1 c1: an exact re-shot whose number was lost to glare → page_duplicate, not page 2', () => {
@@ -1377,6 +1400,38 @@ describe('round 6 · HIGH: the window-close match is settle-aware', () => {
       .where(eq(invoices.id, p1));
     expect(await gate(p1, at(11))).toBe('skip');
     expect(await gate(p1, at(11), WINDOW_CEILING_ATTEMPTS)).toBe('skip');
+  });
+
+  it('round 9 (N2): a released invoice (status matched) whose reasons outlived the hold IS matched — the OCR job\'s own rule', async () => {
+    // learned-charge release: 'matched' with reviewReasons ['unlinked'] kept
+    const p1 = await invoiceOf(await send(ch.wa, wa([jpegBytes('r9n2-1')]), at(0)));
+    await writeOcr(p1, { ...ACME, invoiceNumber: 'A-901', reviewReasons: ['unlinked'] });
+    expect(await settle(p1, new Date(at(0).getTime() + 30_000))).toMatchObject({ hold: true, holdReason: 'window_open' });
+    expect(await gate(p1, at(11))).toBe('match');
+    expect(await gate(p1, at(11), WINDOW_CEILING_ATTEMPTS)).toBe('match');
+    // control: a number already on file (raw.duplicateOf) is still never auto-matched
+    const p2 = await invoiceOf(await send(ch.wa, wa([jpegBytes('r9n2-2')]), at(20)));
+    await writeOcr(p2, { ...ACME, invoiceNumber: 'A-902' });
+    await ownerDb
+      .update(invoices)
+      .set({ ocrPayload: sql`jsonb_set(${invoices.ocrPayload}, '{raw,duplicateOf}', '{"invoiceId":null,"invoiceNumber":"A-902"}'::jsonb, true)` })
+      .where(eq(invoices.id, p2));
+    expect(await gate(p2, at(31))).toBe('skip');
+  });
+
+  it('round 9 (N5): a merge drops page 1\'s own verdict — the composed read is never held by a single page\'s failed checks', async () => {
+    const [p1, p2] = await pages(2, 'r9n5');
+    // page 1 read alone: no total, "continues on another page" → held 'parsed'
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-905', status: 'parsed', reviewReasons: ['missing_total', 'continues_on_another_page'] });
+    expect((await ocr(p2!, NOHEAD)).absorbed).toBe(true); // p1 → ocr_pending (one composed re-read)
+    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, p1!));
+    const raw = (inv!.ocrPayload as { raw?: Record<string, unknown> }).raw ?? {};
+    expect(raw.reviewReasons).toBeUndefined(); // nothing for the composed read to inherit
+    expect(raw.reconciled).toBeDefined(); // the rest of the payload stays
+    // the composed read is confident → 'matched'; at window close it is matched
+    await writeOcr(p1!, { ...ACME, invoiceNumber: 'A-905', totalInclVat: '1170.00' });
+    expect(await settle(p1!, new Date(at(0).getTime() + 30_000))).toMatchObject({ hold: true });
+    expect(await gate(p1!, at(11))).toBe('match');
   });
 
   it('round 7: at the cap, a STALE sibling (no live job, untouched > 1 h) → page 1 is matched alone', async () => {
@@ -1702,7 +1757,9 @@ describe('round 8 · P1: page 1 is the chain page settle recorded (never a "newe
     ]);
     expect(await owner().ingest.pageQuestionOf({ invoiceId: p1 })).toMatchObject({ flag: 'page_belongs' });
     expect(await related(p2)).toBe(p1);
-    expect(await related(p3)).toBe(p1);
+    // Round 9 (N1): p3 most likely continues A-777 (the run head) — p1, still open, is held too.
+    expect(await related(p3)).toBe(p2);
+    expect(await owner().ingest.pageQuestionOf({ invoiceId: p2 })).toMatchObject({ documentId: d2!.id });
   });
 
   it('interleaved [p1 ACME A-100, p2 OTHER supplier, p3 ACME]: p3 points at p1, never at the other supplier', async () => {
@@ -1771,5 +1828,85 @@ describe('round 8 · L4: switch OFF intake is as before G-09', () => {
     } finally {
       await ownerDb.update(restaurants).set({ settings: saved as never }).where(eq(restaurants.id, A.restaurantId));
     }
+  });
+});
+
+describe('round 9 · N1/N3: a stray page points at the run it follows — every plausible head is held', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+  const owner = () =>
+    appRouter.createCaller({
+      db: ownerDb,
+      session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' },
+    } as AppContext);
+  const related = async (invoiceId: string) => {
+    const inbox = await owner().ingest.inbox({ filter: 'errors' });
+    return inbox.flatMap((m) => m.documents).find((d) => d.invoiceId === invoiceId)?.relatedInvoiceId ?? null;
+  };
+  const COMPLETE: OcrHead = { ...ACME, lines: [{ qty: '1', total: '500.00', desc: 'whole invoice line' }], totalExclVat: '500.00' };
+  const pageQ = (invoiceId: string) => owner().ingest.pageQuestionOf({ invoiceId });
+
+  const burst = async (shape: 'messages' | 'one', tag: string): Promise<string[]> => {
+    if (shape === 'messages') return pages(3, tag);
+    const m = await send(ch.wa, wa([jpegBytes(`${tag}-0`), jpegBytes(`${tag}-1`), jpegBytes(`${tag}-2`)]), at(0));
+    return (await docsOf((m as { messageId: string }).messageId)).map((d) => d.invoiceId!);
+  };
+
+  for (const shape of ['messages', 'one'] as const) {
+    it(`[complete A-100, B-200 p1, B-200 p2] (${shape}): the continuation holds B-200, never the complete A-100`, async () => {
+      const [a, b1, b2] = await burst(shape, `r9n1-${shape}`);
+      await writeOcr(a!, { ...COMPLETE, invoiceNumber: shape === 'one' ? 'A-911' : 'A-910' });
+      await writeOcr(b1!, { ...ACME, invoiceNumber: shape === 'one' ? 'B-211' : 'B-210' });
+      await writeOcr(b2!, NOHEAD);
+      const s = await settle(b2!);
+      expect(s.flagged.find((f) => f.invoiceId === b2)?.reason).toBe('page_not_merged');
+      expect(await pageQ(a!)).toBeNull(); // the complete invoice is not held
+      expect(await related(b2!)).toBe(b1); // compare / "check both together" shows B-200
+      // B-200 answered "separate" is STILL held by its continuation (r8 let it be paid)
+      const [db1] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, b1!));
+      if (db1!.error) await owner().ingest.resolvePageFlag({ documentId: db1!.id, action: 'separate' });
+      expect(await pageQ(b1!)).toMatchObject({ flag: 'page_belongs', otherInvoiceId: b1 });
+    });
+  }
+
+  it('[unreadable p1, A-100, continuation]: the continuation holds A-100 AND the open page 1', async () => {
+    const [p1, p2, p3] = await pages(3, 'r9n1u');
+    await writeOcr(p1!, { failed: true });
+    await writeOcr(p2!, { ...ACME, invoiceNumber: 'A-912' });
+    await writeOcr(p3!, NOHEAD);
+    await settle(p3!);
+    expect(await related(p3!)).toBe(p2);
+    expect(await pageQ(p2!)).not.toBeNull();
+    expect(await pageQ(p1!)).not.toBeNull();
+  });
+
+  it("[ACME A-100, OTHER supplier, ACME 'A 100']: the run head skips the other supplier's page", async () => {
+    const [p1, p2, p3] = await pages(3, 'r9n1o');
+    await writeOcr(p1!, { ...ACME, invoiceNumber: 'A-913' });
+    await writeOcr(p2!, OTHER);
+    await writeOcr(p3!, { ...ACME, invoiceNumber: 'A 913' });
+    await settle(p3!);
+    expect(await related(p3!)).toBe(p1);
+    expect(await pageQ(p1!)).toMatchObject({ flag: 'page_belongs', otherInvoiceId: p1 });
+    expect(await pageQ(p2!)).not.toMatchObject({ flag: 'page_belongs' });
+  });
+
+  it('N3: two back-to-back 2-page invoices [A p1, A p2, B p1, B p2] — B p2 holds B (and the open A), compare shows B', async () => {
+    const [a1, a2, b1, b2] = await pages(4, 'r9n3');
+    await writeOcr(a1!, { ...ACME, invoiceNumber: 'A-914' });
+    await writeOcr(a2!, NOHEAD);
+    await writeOcr(b1!, { ...ACME, invoiceNumber: 'B-214' });
+    await writeOcr(b2!, NOHEAD);
+    const s = await settle(b2!);
+    expect(s.flagged.find((f) => f.invoiceId === b2)?.reason).toBe('page_not_merged');
+    expect(await related(b2!)).toBe(b1);
+    expect(await pageQ(a1!)).not.toBeNull(); // when in doubt: the open A is held too
+    // B p1's own question answered "separate" — B is STILL held by its undecided page 2
+    const [db1] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, b1!));
+    expect(await pageQ(b1!)).toMatchObject({ documentId: db1!.id });
+    await owner().ingest.resolvePageFlag({ documentId: db1!.id, action: 'separate' });
+    expect(await pageQ(b1!)).toMatchObject({ flag: 'page_belongs', otherInvoiceId: b1 });
   });
 });

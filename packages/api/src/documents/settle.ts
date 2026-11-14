@@ -72,6 +72,13 @@ export interface PageFlagged {
   invoiceId: string;
   reason: PageFlag;
   repeats?: string;
+  /**
+   * Round 9 (N1/N3): page_not_merged only — every invoice this page may continue:
+   * the head of the run it follows (the last earlier page with its own header,
+   * skipping other-supplier / duplicate / unreadable pages), plus the cluster's
+   * page 1 while that is an open document. First entry = the likeliest (the run head).
+   */
+  heads?: string[];
 }
 
 export interface SettleResult {
@@ -115,12 +122,17 @@ function defaultDelayedMatch(job: { restaurantId: string; invoiceId: string }, r
 }
 
 /** Round 8: what a plain first match may run on — read ('matched') and not held for a person. */
+/**
+ * Round 9 (N2/N5): the OCR job's OWN auto-match rule — status 'matched' (every
+ * hold for a person is written 'parsed') and no number already on file
+ * (raw.duplicateOf). Never "no review reasons": reasons outlive their hold (a
+ * learned-charge release, a composed re-read) and would strand the ₪ unmatched.
+ */
 async function autoMatchable(db: Database, restaurantId: string, invoiceId: string): Promise<boolean> {
   const rows = (await db.execute(sql`
     select 1 from ${invoices} i
      where i.id = ${invoiceId} and i.restaurant_id = ${restaurantId} and i.status = 'matched'
-       and not coalesce(jsonb_typeof(i.ocr_payload -> 'raw' -> 'reviewReasons') = 'array'
-                        and jsonb_array_length(i.ocr_payload -> 'raw' -> 'reviewReasons') > 0, false)
+       and (i.ocr_payload -> 'raw' -> 'duplicateOf') is null
      limit 1`)) as unknown as unknown[];
   return rows.length > 0;
 }
@@ -529,12 +541,22 @@ export function decidePages(
     }
   };
   addPrints(first);
+  // Round 9 (N1/N3): the head of the run the next page follows — page 1, then any
+  // later page that carries its OWN header (flagged or not), never a page of another
+  // supplier, a duplicate or an unreadable page (r7 M15 case 2).
+  let runHead = first.invoiceId;
+  const NOT_A_HEAD: ReadonlySet<string> = new Set(['page_other_supplier', 'page_duplicate', 'page_unreadable']);
+  const followRun = (page: PageHeader, flag: string | null) => {
+    if (!page.unreadable && !(flag && NOT_A_HEAD.has(flag)) && hasHeaderEvidence(page)) runHead = page.invoiceId;
+  };
+  const headsFor = (): string[] => [...new Set([runHead, ...(standaloneHead ? [] : [first.invoiceId])])];
   for (const page of rest) {
     const dupOfChain = Boolean(page.duplicateOf && chainIds.has(page.duplicateOf));
     if (page.alreadyFlagged) {
       // An exact re-shot copy of a chain page does not cut the document; anything else does.
       const copy = chainPrints.some((p) => exactCopy(p, page.print, { duplicateOfChain: dupOfChain }));
       if (!(page.alreadyFlagged === 'page_duplicate' && copy)) broken = true;
+      followRun(page, page.alreadyFlagged);
       continue;
     }
     let reason: PageFlag | null = null;
@@ -565,11 +587,18 @@ export function decidePages(
     }
     if (!reason && !silentBreak && broken) reason = 'page_not_merged';
     if (reason) {
-      flagged.push({ invoiceId: page.invoiceId, reason, ...(repeats ? { repeats } : {}) });
+      flagged.push({
+        invoiceId: page.invoiceId,
+        reason,
+        ...(repeats ? { repeats } : {}),
+        ...(reason === 'page_not_merged' ? { heads: headsFor().filter((h) => h !== page.invoiceId) } : {}),
+      });
       // An exact copy is just a copy: it does not cut the document; a near-copy does.
       if (!(reason === 'page_duplicate' && exact)) broken = true;
+      followRun(page, reason);
     } else if (silentBreak) {
       broken = true; // its own complete invoice / credit note: matched alone, not a question
+      followRun(page, null);
     } else {
       merge.push(page);
       chainIds.add(page.invoiceId);
@@ -1072,11 +1101,17 @@ export async function settleDocumentPages(
       // Round 8: the chain's page 1 a page that probably belongs to it points at
       // — the hold, the compare link and pageQuestionOf all read THIS (never a
       // "newest earlier row" guess, wrong for one-message or interleaved pages).
-      if (set.length > 0 && PAGE_ONE_FLAGS.includes(f.reason) && f.invoiceId !== first.invoiceId) {
+      // Round 9 (N1/N3): a page that does not continue the chain points at the head of
+      // the run it follows (+ page 1 while that is open) — EVERY plausible head is held;
+      // a merge refused into page 1 (blocked / too large) points at page 1.
+      const heads = f.reason === 'page_not_merged' && f.heads?.length ? f.heads : [first.invoiceId];
+      if (set.length > 0 && PAGE_ONE_FLAGS.includes(f.reason) && !heads.includes(f.invoiceId)) {
+        const headList = sql.join(heads.map((h) => sql`${h}::text`), sql`, `);
         await tx.execute(sql`
           update ${invoices}
           set ocr_payload = coalesce(ocr_payload, '{}'::jsonb) || jsonb_build_object('raw',
-                coalesce(ocr_payload -> 'raw', '{}'::jsonb) || jsonb_build_object('pageOf', jsonb_build_object('invoiceId', ${first.invoiceId}::text)))
+                coalesce(ocr_payload -> 'raw', '{}'::jsonb) || jsonb_build_object('pageOf',
+                  jsonb_build_object('invoiceId', ${heads[0]!}::text, 'invoiceIds', jsonb_build_array(${headList}))))
           where id = ${f.invoiceId} and restaurant_id = ${restaurantId}`);
       }
     }
@@ -1121,7 +1156,8 @@ export async function settleDocumentPages(
       ...(merged && first.invoiceId === invoiceId ? { holdReason: 'reocr' as const } : currentIsDuplicate ? { holdReason: 'duplicate' as const } : {}),
       absorbed,
       ...(absorbed || (merged && first.invoiceId === invoiceId) ? { mergedInto: first.invoiceId } : {}),
-      flagged,
+      // `heads` is settle's own bookkeeping (raw.pageOf), not part of the answer.
+      flagged: flagged.map(({ heads: _heads, ...f }) => f),
     };
     return {
       result,
