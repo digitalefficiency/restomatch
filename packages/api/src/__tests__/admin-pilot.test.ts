@@ -62,7 +62,7 @@ describe('adminProcedure requires an enrolled authenticator (TOTP)', () => {
     await expect2fa(c.admin.getRestaurant({ restaurantId: T.restaurantId }));
     await expect2fa(c.admin.listLeads());
     await expect2fa(c.admin.assignPlan({ reason: R, restaurantId: T.restaurantId, planKey: 'pro' }));
-    await expect2fa(c.admin.setFeatures({ restaurantId: T.restaurantId, features: { contracts: true } }));
+    await expect2fa(c.admin.setFeatures({ reason: R, restaurantId: T.restaurantId, features: { contracts: true } }));
     // …and nothing was written.
     const [r] = await db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, T.restaurantId));
     expect((r!.settings as { features?: unknown }).features).toBeUndefined();
@@ -118,7 +118,7 @@ describe('admin.setFeatures — per-tenant flags without SQL', () => {
       .set({ settings: { tolerances, features: { recipes: true, chain: false } } as never })
       .where(eq(restaurants.id, T.restaurantId));
 
-    const res = await adminCaller(adminUserId).admin.setFeatures({
+    const res = await adminCaller(adminUserId).admin.setFeatures({ reason: R,
       restaurantId: T.restaurantId,
       features: { contracts: true, chain: true },
     });
@@ -132,7 +132,7 @@ describe('admin.setFeatures — per-tenant flags without SQL', () => {
 
   it('turns a flag off with an explicit false (wins over the demo’s all), keeping all', async () => {
     await db.update(restaurants).set({ settings: { features: { all: true } } as never }).where(eq(restaurants.id, T.restaurantId));
-    const res = await adminCaller(adminUserId).admin.setFeatures({
+    const res = await adminCaller(adminUserId).admin.setFeatures({ reason: R,
       restaurantId: T.restaurantId,
       features: { aiAssistant: false },
     });
@@ -146,7 +146,7 @@ describe('admin.setFeatures — per-tenant flags without SQL', () => {
     const c = adminCaller(adminUserId);
     for (const features of [{ all: true }, { notAFeature: true }, { contracts: 'yes' }, {}]) {
       await expect(
-        c.admin.setFeatures({ restaurantId: T.restaurantId, features: features as never }),
+        c.admin.setFeatures({ reason: R, restaurantId: T.restaurantId, features: features as never }),
       ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     }
     const [r] = await db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, T.restaurantId));
@@ -155,24 +155,24 @@ describe('admin.setFeatures — per-tenant flags without SQL', () => {
 
   it('G-08 orderQuestions is default-ON: nothing stored → effective true (defaultOn lists it); false → off', async () => {
     const c = adminCaller(adminUserId);
-    const shown = await c.admin.setFeatures({ restaurantId: T.restaurantId, features: { contracts: true } });
+    const shown = await c.admin.setFeatures({ reason: R, restaurantId: T.restaurantId, features: { contracts: true } });
     expect(shown.features.stored.orderQuestions).toBeUndefined();
     expect(shown.features.effective.orderQuestions).toBe(true);
     expect(shown.features.defaultOn).toContain('orderQuestions');
-    const off = await c.admin.setFeatures({ restaurantId: T.restaurantId, features: { orderQuestions: false } });
+    const off = await c.admin.setFeatures({ reason: R, restaurantId: T.restaurantId, features: { orderQuestions: false } });
     expect(off.features.effective.orderQuestions).toBe(false);
     expect(off.features.stored.orderQuestions).toBe(false);
   });
 
   it('accepts every FEATURE_KEY', async () => {
     const all = Object.fromEntries(FEATURE_KEYS.map((k) => [k, true]));
-    const res = await adminCaller(adminUserId).admin.setFeatures({ restaurantId: T.restaurantId, features: all });
+    const res = await adminCaller(adminUserId).admin.setFeatures({ reason: R, restaurantId: T.restaurantId, features: all });
     expect(FEATURE_KEYS.every((k) => res.features.effective[k])).toBe(true);
   });
 
   it('an unknown restaurant is NOT_FOUND', async () => {
     await expect(
-      adminCaller(adminUserId).admin.setFeatures({
+      adminCaller(adminUserId).admin.setFeatures({ reason: R,
         restaurantId: '00000000-0000-0000-0000-000000000000',
         features: { contracts: true },
       }),
@@ -181,7 +181,7 @@ describe('admin.setFeatures — per-tenant flags without SQL', () => {
 
   it('records admin.features with the before and after flags', async () => {
     await db.update(restaurants).set({ settings: { features: { recipes: true } } as never }).where(eq(restaurants.id, T.restaurantId));
-    await adminCaller(adminUserId).admin.setFeatures({ restaurantId: T.restaurantId, features: { contracts: true } });
+    await adminCaller(adminUserId).admin.setFeatures({ reason: R, restaurantId: T.restaurantId, features: { contracts: true } });
     const rows = await db
       .select()
       .from(auditLog)

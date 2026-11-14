@@ -170,7 +170,7 @@ export const en: Shape<typeof he> = {
     statuses: { trialing: 'Trial', active: 'Active', past_due: 'Needs attention', canceled: 'Canceled', none: 'None' },
     implicit: 'Trial without a subscription: usage is not metered.',
     trialLeft: '{days} trial days left',
-    rows: { scans: 'Invoice scans this month', restaurants: 'Restaurants on the account', seats: 'Users in this restaurant' },
+    rows: { scans: 'Invoice scans this month (whole account)', restaurants: 'Restaurants on the account', seats: 'Users in this restaurant' },
     usedOf: '{used} of {limit}',
     unlimited: '{used} · unlimited',
     nearLimit: 'Close to the limit',

@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { TRPCError } from '@trpc/server';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { SectionHeader } from '@/lib/components';
@@ -18,6 +19,14 @@ import { procurementTiles } from './_hub/hub';
  * sections. Each source is read only for the roles its procedure allows; a
  * source that refuses (role, flag) simply leaves its tile out.
  */
+/** A source the role or a flag refuses leaves its tile out; any other failure is real and surfaces. */
+function refusedOnly<T>(p: Promise<T>): Promise<T | null> {
+  return p.catch((err: unknown) => {
+    if (err instanceof TRPCError && (err.code === 'FORBIDDEN' || err.code === 'NOT_FOUND')) return null;
+    throw err;
+  });
+}
+
 export default async function IntegrationsPage() {
   const caller = await createServerCaller();
   const [status, memberships, session, t, locale] = await Promise.all([
@@ -34,10 +43,10 @@ export default async function IntegrationsPage() {
   const intakeRole = role === 'owner' || role === 'manager' || role === 'bookkeeper';
 
   const [accounting, posImports, providers, intake] = await Promise.all([
-    finance ? caller.integrations.accountingConfig().catch(() => null) : null,
-    ops ? caller.integrations.posImports().catch(() => null) : null,
-    ops ? caller.integrations.procurementProviders().catch(() => null) : null,
-    intakeRole ? caller.ingest.overview().catch(() => null) : null,
+    finance ? refusedOnly(caller.integrations.accountingConfig()) : null,
+    ops ? refusedOnly(caller.integrations.posImports()) : null,
+    ops ? refusedOnly(caller.integrations.procurementProviders()) : null,
+    intakeRole ? refusedOnly(caller.ingest.overview()) : null,
   ]);
 
   const tiles: HubTileView[] = [];

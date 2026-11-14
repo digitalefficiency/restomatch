@@ -171,7 +171,7 @@ export const he = {
     statuses: { trialing: 'ניסיון', active: 'פעיל', past_due: 'דורש טיפול', canceled: 'בוטל', none: 'ללא' },
     implicit: 'ניסיון בלי מנוי: השימוש לא נמדד.',
     trialLeft: 'נשארו {days} ימי ניסיון',
-    rows: { scans: 'סריקות חשבוניות החודש', restaurants: 'מסעדות בחשבון', seats: 'משתמשים במסעדה' },
+    rows: { scans: 'סריקות חשבוניות החודש (לכל החשבון)', restaurants: 'מסעדות בחשבון', seats: 'משתמשים במסעדה' },
     usedOf: '{used} מתוך {limit}',
     unlimited: '{used} · ללא הגבלה',
     nearLimit: 'קרוב למגבלה',
