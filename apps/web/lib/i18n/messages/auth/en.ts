@@ -162,7 +162,7 @@ export const en: Shape<typeof he> = {
     back: 'Back to the app',
   },
   codeLogin: {
-    button: 'E-mail me a code',
+    button: 'Sign in with a code',
     title: 'Your code is on its way',
     sentTo: 'If this address is registered with us, we sent it a 6-digit code:',
     validFor: 'The code is valid for 10 minutes.',
