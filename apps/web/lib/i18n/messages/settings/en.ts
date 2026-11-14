@@ -149,8 +149,6 @@ export const en: Shape<typeof he> = {
     keysTitle: 'Single-key shortcuts',
     keysQueue: 'in the approvals queue',
     keysSearch: 'to search',
-    on: 'On',
-    off: 'Off',
     ctrlNote: 'Combinations with {mod} always work',
     reset: 'Back to default',
     sr: {
@@ -164,13 +162,10 @@ export const en: Shape<typeof he> = {
     unsaved: 'Not saved',
     restoreDefault: 'Back to default',
     restoreDefaultAria: 'Back to default: {field}',
-    lessAria: 'Less: {field}',
-    moreAria: 'More: {field}',
     tolerancesTitle: 'Tolerances',
     approvalsTitle: 'Approval and scan thresholds',
     fixed: 'Fixed',
     fixedNote: 'The rules themselves are fixed; only the numbers change',
-    range: 'Between {min} and {max}',
     fields: {
       pricePercent: { label: 'Price tolerance (%)', hint: 'A price difference opens a gap above this percentage' },
       priceAbsolute: { label: 'Price tolerance (₪)', hint: 'or above this amount per unit, before VAT' },

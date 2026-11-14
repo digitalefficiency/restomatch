@@ -150,8 +150,6 @@ export const he = {
     keysTitle: 'קיצורים בתו אחד',
     keysQueue: 'בתור האישורים',
     keysSearch: 'לחיפוש',
-    on: 'פעיל',
-    off: 'כבוי',
     ctrlNote: 'צירופים עם {mod} נשארים פעילים תמיד',
     reset: 'חזרה לברירת המחדל',
     sr: {
@@ -165,13 +163,10 @@ export const he = {
     unsaved: 'לא נשמר',
     restoreDefault: 'חזרה לברירת המחדל',
     restoreDefaultAria: 'חזרה לברירת המחדל: {field}',
-    lessAria: 'פחות: {field}',
-    moreAria: 'יותר: {field}',
     tolerancesTitle: 'ספי סבולת',
     approvalsTitle: 'ספי אישור וסריקה',
     fixed: 'קבוע',
     fixedNote: 'הכללים עצמם קבועים, משנים רק את המספרים',
-    range: 'בין {min} ל־{max}',
     fields: {
       pricePercent: { label: 'סבולת מחיר (%)', hint: 'הפרש מחיר נפתח כפער מעל האחוז הזה' },
       priceAbsolute: { label: 'סבולת מחיר (₪)', hint: 'או מעל הסכום הזה ליחידה, לפני מע״מ' },

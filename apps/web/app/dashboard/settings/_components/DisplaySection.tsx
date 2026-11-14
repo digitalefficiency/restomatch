@@ -1,12 +1,12 @@
 'use client';
 
-import { SegmentedControl, useAnnounce } from '@/lib/components';
+import { Kbd, SegmentedControl, Switch, useAnnounce } from '@/lib/components';
 import { keyLabel } from '@/lib/hotkeys';
 import { useT } from '@/lib/i18n/client';
+import { components } from '@/lib/i18n/messages/components';
 import { settings } from '@/lib/i18n/messages/settings';
 import { useIsApple, usePrefs, type Density, type TextSize } from '@/lib/prefs';
-import { Switch } from './controls';
-import { Kbd, SectionFoot, SettingRow, SettingsRows } from './ui';
+import { SectionFoot, SettingControlRow, SettingRow, SettingsRows } from './ui';
 import { useShellRail } from './useShellRail';
 
 /** Forced colours: the selected option keeps a visible mark (SegmentedControl draws it with a fill only). */
@@ -24,6 +24,7 @@ const SEGMENT_TOUCH = '[@media(pointer:coarse)]:[&_button]:min-h-11';
  */
 export function DisplaySection({ initialRail }: { initialRail: boolean }) {
   const t = useT(settings);
+  const tc = useT(components);
   const announce = useAnnounce();
   const p = usePrefs();
   const apple = useIsApple();
@@ -47,7 +48,7 @@ export function DisplaySection({ initialRail }: { initialRail: boolean }) {
 
   const toggleKeys = (on: boolean) => {
     p.setSingleKeys(on);
-    said(t('display.keysTitle'), on ? t('display.on') : t('display.off'));
+    said(t('display.keysTitle'), on ? tc('ds.switch.on') : tc('ds.switch.off'));
   };
 
   return (
@@ -106,38 +107,28 @@ export function DisplaySection({ initialRail }: { initialRail: boolean }) {
                     said(t('display.railTitle'), railOptions.find((o) => o.value === v)!.label);
                   }}
                 />
-                <span aria-hidden="true">
-                  <Kbd>{`${mod} B`}</Kbd>
-                </span>
+                <Kbd>{`${mod} B`}</Kbd>
               </>
             }
           />
         ) : null}
-        <SettingRow
-          id="keys"
-          absentOn="phone"
-          className="cursor-pointer"
-          onClick={(e) => {
-            // The whole row is the switch's target (reference `.set-row[data-row="keys"]`).
-            if ((e.target as HTMLElement).closest('button')) return;
-            toggleKeys(!p.singleKeys);
-          }}
-          label={t('display.keysTitle')}
-          hint={
-            <span className="inline-flex flex-wrap items-center gap-1">
-              <Kbd>J</Kbd> <Kbd>K</Kbd> <Kbd>1</Kbd> <Kbd>2</Kbd> <Kbd>Z</Kbd> {t('display.keysQueue')},{' '}
-              <Kbd>/</Kbd> {t('display.keysSearch')}
-            </span>
-          }
-          control={
-            <>
-              <Switch checked={p.singleKeys} onChange={toggleKeys} label={t('display.keysTitle')} />
-              <span aria-hidden="true" className="min-w-8 text-body-sm text-muted">
-                {p.singleKeys ? t('display.on') : t('display.off')}
+        {/* The shared switch: the whole row is its target (reference `.set-row[data-row="keys"]`). */}
+        <SettingControlRow id="keys" absentOn="phone">
+          <Switch
+            checked={p.singleKeys}
+            onCheckedChange={toggleKeys}
+            label={t('display.keysTitle')}
+            hint={
+              <span className="inline-flex flex-wrap items-center gap-1">
+                {/* Key caps are decorative (shared Kbd): the keys are said once, in words. */}
+                <span className="sr-only">J, K, 1, 2, Z</span>
+                <Kbd>J</Kbd> <Kbd>K</Kbd> <Kbd>1</Kbd> <Kbd>2</Kbd> <Kbd>Z</Kbd> {t('display.keysQueue')},{' '}
+                <span className="sr-only">/</span>
+                <Kbd>/</Kbd> {t('display.keysSearch')}
               </span>
-            </>
-          }
-        />
+            }
+          />
+        </SettingControlRow>
       </SettingsRows>
       <SectionFoot>
         <span className="[@media(max-width:1023.98px)_and_(pointer:coarse)]:hidden">{t('display.ctrlNote', { mod })}</span>

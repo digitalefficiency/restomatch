@@ -91,7 +91,6 @@ export function SettingRow({
   absentOn,
   className,
   stack,
-  onClick,
 }: {
   id?: string;
   label: React.ReactNode;
@@ -101,13 +100,10 @@ export function SettingRow({
   className?: string;
   /** Put the control under the text at every width (wide forms). */
   stack?: boolean;
-  /** Pointer convenience: the whole row toggles (a switch row); the control stays the accessible target. */
-  onClick?: React.MouseEventHandler<HTMLDivElement>;
 }) {
   return (
     <div
       id={id}
-      onClick={onClick}
       data-setting-row={id}
       tabIndex={id ? -1 : undefined}
       className={cn(
@@ -126,6 +122,34 @@ export function SettingRow({
   );
 }
 
+/**
+ * A row whose control brings its own label and hint (the shared `Switch`, a
+ * whole-row target): the same frame, anchor and `absentOn` as SettingRow.
+ */
+export function SettingControlRow({
+  id,
+  absentOn,
+  children,
+}: {
+  id: string;
+  absentOn?: AbsentOn;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      id={id}
+      data-setting-row={id}
+      tabIndex={-1}
+      className={cn(
+        'scroll-mt-24 border-t border-line-rule px-4 py-2 transition-colors duration-medium first:rounded-t-card first:border-t-0 last:rounded-b-card focus:outline-none data-[hit=true]:bg-info-subtle',
+        absentOn && ABSENT_CLASS[absentOn],
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
 /** The anchor block around a whole form (several settings share it): the search lands and highlights here. */
 export function SettingAnchor({ id, children, className }: { id: string; children: React.ReactNode; className?: string }) {
   return (
@@ -137,18 +161,6 @@ export function SettingAnchor({ id, children, className }: { id: string; childre
     >
       {children}
     </div>
-  );
-}
-
-/** A key cap inside running text (`<kbd>`), LTR-isolated. */
-export function Kbd({ children }: { children: React.ReactNode }) {
-  return (
-    <kbd
-      dir="ltr"
-      className="inline-flex h-5 min-w-5 items-center justify-center rounded-xs border border-line bg-surface-2 px-1 font-sans text-kbd text-ink"
-    >
-      {children}
-    </kbd>
   );
 }
 

@@ -2,13 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Lock } from 'lucide-react';
-import { Button, StatusChip, cn, useAnnounce, useToast } from '@/lib/components';
+import { Button, NumberField, StatusChip, cn, useAnnounce, useToast } from '@/lib/components';
 import { DateTime, Money } from '@/lib/components/money';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { settings } from '@/lib/i18n/messages/settings';
 import { localizeServerError } from '@/lib/serverErrors';
 import { trpc } from '@/lib/trpc/client';
-import { NumberStepper } from '../_components/controls';
 import { useSectionDraft } from '../_components/SettingsFrame';
 import { SectionFoot, SettingRow, SettingsRows, SubHead } from '../_components/ui';
 import {
@@ -16,7 +15,6 @@ import {
   APPROVAL_FIELDS,
   OCR_FIELD,
   TOLERANCE_FIELDS,
-  canStep,
   changesOf,
   errorOf,
   fieldDef,
@@ -26,7 +24,6 @@ import {
   sameAsSnapshot,
   savePatch,
   savedAfter,
-  stepValue,
   toDisplay,
   toStored,
   undoPatch,
@@ -35,6 +32,7 @@ import {
   type Defaults,
   type FieldDef,
   type FieldKey,
+  type FieldKind,
   type FormValues,
   type StoredKnobs,
   type UpdatePatch,
@@ -103,12 +101,8 @@ function focusSoon(id: string) {
   requestAnimationFrame(() => document.getElementById(id)?.focus());
 }
 
-/** A field's limits as people read them ("בין 0% ל־100%"), for a screen reader. */
-function rangeText(t: T, f: FieldDef): string {
-  const show = (stored: number) =>
-    f.kind === 'percent' ? `${toDisplay(stored, f.kind)}%` : f.kind === 'currency' ? `₪${toDisplay(stored, f.kind)}` : toDisplay(stored, f.kind);
-  return t('thresholds.range', { min: show(0), max: show(f.max) });
-}
+/** Decimals a typed value keeps (7.5 %, ₪0.50, 2.5 units). */
+const DECIMALS: Record<FieldKind, number> = { percent: 1, currency: 2, units: 2 };
 
 /** A stored value as people read it: 7.5%, ₪ through the money component, units as a number. */
 function ValueText({ f, stored }: { f: FieldDef; stored: number }) {
@@ -315,31 +309,35 @@ export function RulesForm({
       </button>
     ) : null;
 
+  /**
+   * The shared number field with steppers (DS3-01): it holds its limits (the
+   * server's) and says them under percent fields; ₪ and unit fields carry
+   * technical bounds only, so their hint stands alone. A field at its default
+   * shows the default value; a change commits on a step, Enter or leaving.
+   */
   const stepper = (f: FieldDef, label: string, describedBy?: string) => {
     const raw = values[f.key];
-    const shown = raw ?? toDisplay(defaults[f.key], f.kind);
-    const rangeId = `range-${f.key}`;
+    const stored = raw === null ? defaults[f.key] : toStored(raw, f.kind);
+    const shown = Number(toDisplay(Number.isFinite(stored) ? stored : defaults[f.key], f.kind));
+    const id = `set-${f.key}`;
     return (
-      <span key={f.key} className="contents">
-      <span id={rangeId} className="sr-only">
-        {rangeText(t, f)}
-      </span>
-      <NumberStepper
-        key={f.key}
-        id={`set-${f.key}`}
-        value={shown}
-        onChange={(v) => set(f.key, v)}
-        onStep={(d) => set(f.key, stepValue(values, defaults, f, d))}
-        canDecrease={canStep(values, defaults, f, -1)}
-        canIncrease={canStep(values, defaults, f, 1)}
-        unit={f.kind === 'percent' ? '%' : f.kind === 'currency' ? '₪' : ''}
-        label={label}
-        lessLabel={t('thresholds.lessAria', { field: label })}
-        moreLabel={t('thresholds.moreAria', { field: label })}
-        disabled={!canEdit}
-        invalid={!!errors[f.key]}
-        describedBy={describedBy ? `${describedBy} ${rangeId}` : rangeId}
-      />
+      <span key={f.key} className="inline-flex">
+        <label htmlFor={id} className="sr-only">
+          {label}
+        </label>
+        <NumberField
+          id={id}
+          value={shown}
+          onValueChange={(n) => set(f.key, String(n))}
+          min={0}
+          max={f.kind === 'percent' ? f.max * 100 : f.max}
+          step={f.step}
+          decimals={DECIMALS[f.kind]}
+          unit={f.kind === 'percent' ? '%' : f.kind === 'currency' ? '₪' : undefined}
+          disabled={!canEdit}
+          showLimits={f.kind === 'percent'}
+          aria-describedby={describedBy}
+        />
       </span>
     );
   };
