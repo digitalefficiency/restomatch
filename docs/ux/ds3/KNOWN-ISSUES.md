@@ -1,0 +1,100 @@
+# DS3 · known issues in the reference
+
+The mock-ups are a proposal, not product code. Independent reviewers checked them against the product's rules;
+the points below are where a mock-up is wrong, looser than an approved spec, or shows demo values. **Where this
+file and the reference disagree, this file wins. Where the product's code or an approved spec and the reference
+disagree, the code or the spec wins.** Two review rounds were cut short on 14.11, so this list is not complete:
+check your own area as you map it.
+
+## Production moved after the proposal was written
+
+Train C was merged and deployed on 14.11.2026 (`main`, pull request 321, then twelve more merges). The
+proposal's "today" pictures and sentences describe production before that. Much of what the proposal calls new
+now exists on `main` in some form: the DS2 token system, a reworked owner home, the approvals desk with an
+evidence panel and shortcut keys, the invoice register, the receiving board, a command palette. Map your area
+on `main` first and build the difference only.
+
+## Settings: the tolerance thresholds (DS3-06)
+
+1. **The quantity rule, exactly** (`packages/matching/src/engine.ts`, read only; take your wording from the
+   code, not from this file):
+   - an ordered-versus-received gap **opens** above the percentage alone (`evaluateQty`);
+   - its **severity** is `info` when the difference is within the larger of the unit tolerance and the
+     percentage of the order, or when it is under 10 %; otherwise `warn`. An `info` gap is auto-approved by the
+     approvals rules unless a rule of higher priority fires;
+   - a bill for more than was received **blocks payment** only when the excess is above **both** the unit
+     tolerance and the percentage of what was received (the billed-over-received block).
+   The first version of the mock-up treated a quantity gap as needing both to open. A reviewer caught it by
+   running the real engine, and the reference was corrected on 14.11. In the product the preview is computed by
+   calling the engine, never by re-implementing its rule in the client.
+2. The field descriptions in the reference, as corrected (they are mock-up copy, not final):
+   - quantity, percent: `הפרש בין מה שהוזמן למה שהתקבל נפתח כפער מעל האחוז הזה`
+   - quantity, units: `חיוב על יותר ממה שהתקבל חוסם תשלום מעל היחידות האלה והאחוז`
+3. **Saving a threshold re-checks nothing.** Thresholds are read when an invoice is matched. Saving starts no
+   re-match, so gaps that are open stay as they are at that moment. But an open invoice is matched again by
+   later events (a product link is confirmed, a received line is edited), and then it reads the new thresholds.
+   The reference says so in a constant line under the preview ("סף חדש חל על חשבוניות שייבדקו מעכשיו, כולל
+   חשבונית פתוחה שנבדקת מחדש.") and words the preview conditionally. Keep both properties: never state a count
+   of open gaps that saving would not really produce, and never promise that open gaps stay open for good.
+4. The mock-up lists three approval rules; the approvals engine has more (`packages/api/src/approvals/engine.ts`,
+   read only). Show what the engine has.
+5. Density already exists per screen: the toolbar switch "מרווח / צפוף" on approvals and the leak screens
+   (`apps/web/lib/components/views/`), kept in the address. Decision D4 (7.11) asks for density by role with a
+   saved personal switch worded **"רגיל / צפוף"**. DS3-06 unifies the two; it does not add a third.
+6. Copy defects found in the settings mock-up: four preview lines run to 13 or 14 words (the limit is 12);
+   "צור קשר" is a masculine singular imperative (use a plural form); the favourite toast "הגדרות נוסף למועדפים"
+   needs rewording; the empty states use two sentences; a screen reader hears the internal words "dens",
+   "text", "rail" on three controls. Fix them as you build; do not copy them.
+
+## Side menu (DS3-02): where the mock-up is looser than `docs/ux/sidebar/SPEC.md`
+
+The owner-approved spec wins on every point.
+
+- Arrow keys must reach **every** row (spec §8, §14.9). In the mock-up they reach only the four linked rows and
+  the group headers.
+- Lists in the collapsed menu open on click, Enter or ←, **and after 220 ms of hover** (spec §7.2, with its aim
+  detection): keep all of them. The mock-up's defect is only this: a click on a tile whose list the hover has
+  already opened closes it again. A click must leave an open list open.
+- Tab order equals DOM order equals visual order (spec §8). In the mock-up Tab from inside a flyout list leaves
+  the menu.
+- Forced-colours mode (spec §6): the current row and tile get a 2 px `Highlight` outline, pills a 1 px
+  `CanvasText` border, dots keep their colour. Not built in the mock-up.
+- Not in the mock-up at all, but in the spec: the bell's list, the `G` shortcuts and the keys `/` and `?`, aim
+  detection for the flyout, the icons' glide on collapse, the cross-fade of a changed amount, the pressed state
+  (ink at 7 %), `aria-controls` on a tile.
+- The fit rule may fold the "ניהול" group too (spec §4.2 exempts only the group just opened, the current
+  page's group and a group holding money).
+- Flyout rows have the same height as panel rows (spec §1.3). In two mock-ups they differ (32 against 28).
+- Mirroring: the truck icon is never mirrored (spec §15); list icons are (spec §3).
+- "לטיפולי" keeps its count when a gap becomes a credit request ready to send (spec §5.3).
+- The top bar follows spec §1.5 (background, padding, the bell's size, the page name).
+- A shortcut bug of the reference page (Ctrl B acting on another mock-up than the one under the pointer) was
+  fixed on 14.11. It was a property of a page with three menus and does not exist in the product.
+
+## Approvals desk (DS3-04)
+
+- The lines on each document image and the receiving times were brought in line with the demo restaurant's
+  data on 14.11. The product shows the real lines of the real document.
+- Train C already lists the three quantities (ordered, received, billed). What DS3 adds is the table form with
+  prices and the calculation line, and dense rows instead of cards.
+- The button "שלמו כפי שחויב" follows the wording in the product, which does not yet record payments. The page
+  suggested considering "ישולם כפי שחויב": an owner decision, not yours. The same holds for the toast and the
+  row result "שולם כפי שחויב", which say that a payment happened: keep the product's current wording for all
+  three and name the question in your pull request.
+
+## Owner home (DS3-03)
+
+- The count "23 numbers on the first screen" includes four numbers in the side menu; like for like with the
+  product's own meter it is 19 in the content.
+- The card "מחכה לך" is titled "לפני מע״מ", but the pay-run task it discloses is "כולל מע״מ": two VAT bases
+  under one label. State the basis beside each amount, or keep an amount with another basis out of that card.
+- The pilot restaurant will not see: the pay run, incoming invoices, "שאלו את RestoMatch", the group "מטבח",
+  integrations, and (with one branch) the group "רשת". The mock-up shows the demo restaurant with every
+  feature on.
+
+## Design language
+
+- Google Sans has fixed-width digits only with tabular figures switched on (`font-variant-numeric:
+  tabular-nums`); IBM Plex Sans Hebrew has them by default. Keep the numeric feature settings on the number
+  role whatever the typeface.
+- The 5:1 contrast statement holds for the clean finish (lowest measured pair 5.42:1).
