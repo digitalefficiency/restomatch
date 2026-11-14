@@ -129,7 +129,7 @@ describe('evaluateApproval — default rules', () => {
     expect(decision.ruleId).toBe('cumulative-medium');
   });
 
-  it('severity=info, no other rules → auto_approve', () => {
+  it('severity=info → acknowledged with no ₪ (G-15 non-leak-acknowledge; was minor-info)', () => {
     const decision = evaluateApproval(
       ctx({
         discrepancy: { type: 'PRICE_LOWER', severity: 'info', deltaAmount: 10 },
@@ -138,7 +138,7 @@ describe('evaluateApproval — default rules', () => {
     );
     expect(decision.action).toBe('auto_approve');
     expect(decision.requiredRole).toBeNull();
-    expect(decision.ruleId).toBe('minor-info');
+    expect(decision.ruleId).toBe('non-leak-acknowledge');
   });
 
   it('warn with no cumulative match → fallback to manager queue', () => {

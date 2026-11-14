@@ -86,6 +86,7 @@ export const he = {
     unpaid: 'טרם שולמה',
     pendingTitle: 'ממתינות לשיוך להזמנה',
     pendingHint: 'לא נמצאה הזמנה תואמת — לרוב חשבונית מרכזת. לא נספר כדליפה עד שיוך.',
+    acknowledged: 'לידיעה',
     notCounted: 'לא נספר',
     noMoney: 'ללא השפעה כספית',
     noMoneyShort: 'כבר נספר בשורת החיוב העודף',
