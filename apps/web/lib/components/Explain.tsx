@@ -31,7 +31,7 @@ export interface DisclosureToggleProps {
 export interface DisclosurePanelProps {
   id: string;
   hidden: boolean;
-  ref: React.RefObject<HTMLDivElement>;
+  ref: React.RefObject<HTMLDivElement | null>;
 }
 
 /** Low-level disclosure: any layout. The panel MUST follow the toggle's row in DOM order. */
