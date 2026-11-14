@@ -16,20 +16,26 @@ on `main` first and build the difference only.
 
 ## Settings: the tolerance thresholds (DS3-06)
 
-1. **The quantity rule.** The matching engine opens an ordered-versus-received gap above the **percentage
-   alone** (`evaluateQty` in `packages/matching/src/engine.ts`); the unit tolerance only decides when a bill
-   for more than was received blocks payment (the billed-over-received block in the same file). The first
-   version of the mock-up treated a quantity gap as needing both; a reviewer caught it by running the real
-   engine, and **the reference was corrected on 14.11** (its preview and the two descriptions below). In the
-   product, implement the preview by calling the engine (read only: `packages/matching/**` is on the
-   immutability list), never by re-implementing its rule in the client.
-2. The field descriptions, as corrected:
+1. **The quantity rule, exactly** (`packages/matching/src/engine.ts`, read only; take your wording from the
+   code, not from this file):
+   - an ordered-versus-received gap **opens** above the percentage alone (`evaluateQty`);
+   - its **severity** is `info` when the difference is within the larger of the unit tolerance and the
+     percentage of the order, or when it is under 10 %; otherwise `warn`. An `info` gap is auto-approved by the
+     approvals rules unless a rule of higher priority fires;
+   - a bill for more than was received **blocks payment** only when the excess is above **both** the unit
+     tolerance and the percentage of what was received (the billed-over-received block).
+   The first version of the mock-up treated a quantity gap as needing both to open. A reviewer caught it by
+   running the real engine, and the reference was corrected on 14.11. In the product the preview is computed by
+   calling the engine, never by re-implementing its rule in the client.
+2. The field descriptions in the reference, as corrected (they are mock-up copy, not final):
    - quantity, percent: `הפרש בין מה שהוזמן למה שהתקבל נפתח כפער מעל האחוז הזה`
-   - quantity, units: `חיוב על יותר ממה שהתקבל חוסם תשלום רק מעל מספר היחידות הזה`
-3. **A saved threshold does not touch gaps that are already open.** Thresholds are read when an invoice is
-   matched; saving starts no re-match. The reference says so in a constant line under the preview ("סף חדש חל
-   על חשבוניות שייבדקו מעכשיו. פערים שכבר נפתחו נשארים פתוחים.") and words the preview conditionally. Keep both
-   properties: never state a count of open gaps that saving would not really produce.
+   - quantity, units: `חיוב על יותר ממה שהתקבל חוסם תשלום מעל היחידות האלה והאחוז`
+3. **Saving a threshold re-checks nothing.** Thresholds are read when an invoice is matched. Saving starts no
+   re-match, so gaps that are open stay as they are at that moment. But an open invoice is matched again by
+   later events (a product link is confirmed, a received line is edited), and then it reads the new thresholds.
+   The reference says so in a constant line under the preview ("סף חדש חל על חשבוניות שייבדקו מעכשיו, כולל
+   חשבונית פתוחה שנבדקת מחדש.") and words the preview conditionally. Keep both properties: never state a count
+   of open gaps that saving would not really produce, and never promise that open gaps stay open for good.
 4. The mock-up lists three approval rules; the approvals engine has more (`packages/api/src/approvals/engine.ts`,
    read only). Show what the engine has.
 5. Density already exists per screen: the toolbar switch "מרווח / צפוף" on approvals and the leak screens
@@ -46,8 +52,9 @@ The owner-approved spec wins on every point.
 
 - Arrow keys must reach **every** row (spec §8, §14.9). In the mock-up they reach only the four linked rows and
   the group headers.
-- Lists in the collapsed menu open on click (spec §7.2). The mock-up also opens on a 220 ms hover, so a click
-  after a short rest closes the list it just opened.
+- Lists in the collapsed menu open on click, Enter or ←, **and after 220 ms of hover** (spec §7.2, with its aim
+  detection): keep all of them. The mock-up's defect is only this: a click on a tile whose list the hover has
+  already opened closes it again. A click must leave an open list open.
 - Tab order equals DOM order equals visual order (spec §8). In the mock-up Tab from inside a flyout list leaves
   the menu.
 - Forced-colours mode (spec §6): the current row and tile get a 2 px `Highlight` outline, pills a 1 px
@@ -71,12 +78,16 @@ The owner-approved spec wins on every point.
 - Train C already lists the three quantities (ordered, received, billed). What DS3 adds is the table form with
   prices and the calculation line, and dense rows instead of cards.
 - The button "שלמו כפי שחויב" follows the wording in the product, which does not yet record payments. The page
-  suggested considering "ישולם כפי שחויב": an owner decision, not yours.
+  suggested considering "ישולם כפי שחויב": an owner decision, not yours. The same holds for the toast and the
+  row result "שולם כפי שחויב", which say that a payment happened: keep the product's current wording for all
+  three and name the question in your pull request.
 
 ## Owner home (DS3-03)
 
 - The count "23 numbers on the first screen" includes four numbers in the side menu; like for like with the
   product's own meter it is 19 in the content.
+- The card "מחכה לך" is titled "לפני מע״מ", but the pay-run task it discloses is "כולל מע״מ": two VAT bases
+  under one label. State the basis beside each amount, or keep an amount with another basis out of that card.
 - The pilot restaurant will not see: the pay run, incoming invoices, "שאלו את RestoMatch", the group "מטבח",
   integrations, and (with one branch) the group "רשת". The mock-up shows the demo restaurant with every
   feature on.

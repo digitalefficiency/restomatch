@@ -34,6 +34,31 @@ is touched; `money-format-marshal` whenever ₪ is rendered; `icp-keeper` for sc
 - **Messages:** each package edits only its own area under `apps/web/lib/i18n/messages/<area>/`. Put new
   strings in an existing area file; do not add an area (that needs a line in `messages/index.ts`, a shared
   file). The copy guard in `apps/web/lib/copy/**` stays as it is: meet it, do not loosen it.
+- **Receiver-language overlays.** The areas receivers see have an overlay per language under
+  `apps/web/lib/i18n/messages/receiverLangs/overlays/{ar,ru,th,ti}/`, typed so that a missing key fails the
+  type check (`apps/web/lib/__tests__/receiver-langs.test.ts`). A package that adds a key to one of these
+  areas adds it to the four overlays too, and only to its own file there: `nav.ts` → `DS3-02`;
+  `components.ts` and `common.ts` → `DS3-01`; `overview.ts` → `DS3-03`; everything else under
+  `receiverLangs/` → `DS3-05`. These overlay files, and the index file `overlays/<area>.ts` beside them
+  should it need a line, are part of the named package's boundary.
+- **A new page needs one registry line.** Any new `page.tsx` under `apps/web/app/dashboard` fails
+  `apps/web/lib/__tests__/nav-registry.test.ts` until it has a line in `apps/web/lib/nav/routes/**` and a
+  label `links.<key>` in `messages/nav/{he,en}.ts` and in the four overlay `nav.ts` files. That is a permitted
+  seam for every package: exactly those lines, named in the pull request. `DS3-02` owns the files and expects
+  the lines.
+- **Personal preferences: one contract** (owner of the stored values: `DS3-06`, in `apps/web/lib/prefs/**`):
+  - single-key shortcuts: `localStorage` key `rm:keys:single`, values `'1'` / `'0'`, on when absent, every
+    read and write in try/catch (sidebar spec §13). `DS3-06` wraps this key in its store; `DS3-02` renders the
+    switch in the account menu, the cheat sheet and the palette through that store; the desk keys (`DS3-04`)
+    and `apps/web/lib/hotkeys.ts` (`DS3-02`) read it. Until the store is pushed, read the raw key.
+  - density: cookie `rm_density` mirrored in `localStorage` `rm:density`, values `regular` / `compact`
+    (worded "רגיל / צפוף"). It is the default for both existing switches: the table's `d` parameter
+    (`default` / `compact`; `touch` stays automatic on coarse pointers) and the views toolbar
+    (`comfortable` / `compact`). An explicit value in a page's address still wins for that view.
+  - text size: cookie `rm_text` mirrored in `rm:text`, values `regular` / `large`.
+  - before first paint: `DS3-02` reads the two cookies in `apps/web/app/dashboard/layout.tsx`, as it does for
+    `rm_nav_rail`, and sets `data-density` and `data-text` on the shell; it also mounts the provider. The
+    styles those attributes drive belong to `DS3-00` (tokens) and `DS3-01` (components).
 - **e2e:** one spec per package, `apps/web/e2e/DS3-NN.spec.ts` (plus `DS3-NN-*.spec.ts` if needed). Existing
   specs of your screen may be updated where the screen changed on purpose; shared helpers
   (`apps/web/e2e/helpers*`, `auth.setup.ts`, `env.ts`) are read-only.
@@ -53,7 +78,8 @@ is touched; `money-format-marshal` whenever ₪ is rendered; `icp-keeper` for sc
 **Goal.** Production renders in the clean finish's colours, elevation and focus, through the DS token
 pipeline, with every guard green. This is a change of values and a few roles, not of structure.
 
-**Reference.** `SPEC.md` §2, §4, §7, §8; `reference/src/product.css` lines 1 to 60 (the `.rm` block).
+**Reference.** `SPEC.md` §2, §4, §7, §8; `reference/src/product.css` lines 1 to 60 (the `.rm` block). The
+side menu sits on the canvas role, not on the surface role (sidebar spec §1.1).
 
 **Write boundary.** `packages/ui-tokens/**` (except `src/fonts.ts`, which `DS3-07` owns; you may read it) ·
 `apps/web/app/globals.css` · `apps/web/tailwind.config.ts` · `apps/web/app/dashboard/lab/tokens/**` (the
@@ -75,9 +101,16 @@ token lab) · the token lab's snapshot baselines (`apps/web/e2e/W1-01.spec.ts-sn
 5. Regenerate, update the guards the repository's way (never by weakening a test), refresh the lab snapshots,
    and capture the six highest-traffic screens before and after at 1440 and 390 for the pull request.
 
+**Seams.** (1) The canvas colour is hard-coded in a few places outside the tokens; change the literal to the
+new canvas value, nothing else: the `themeColor` in `apps/web/app/layout.tsx`,
+`apps/web/public/pwa/manifest.webmanifest`, `apps/web/app/global-error.tsx`,
+`apps/web/lib/pwa/ReceiverPwa.tsx`, `apps/web/app/og/[file]/route.tsx`. (2) The named motion set of the side
+menu (`SPEC.md` §8): add it as tokens; `DS3-02` uses it.
+
 **Acceptance.** Every text pair still passes the contrast test (AA), and the pairs listed in `SPEC.md` §2
-hold what the reference holds. No hex colour outside `packages/ui-tokens`. No screen breaks: run the e2e
-suite and the a11y spec; list anything that changed visually and was not intended. The typeface is untouched.
+hold what the reference holds. No new hex colour outside `packages/ui-tokens`, and the existing copies of the
+canvas colour named above carry the new value. No screen breaks: run the e2e suite and the a11y spec; list
+anything that changed visually and was not intended. The typeface is untouched.
 
 **Downstream.** `DS3-01` and `DS3-07` stack on your branch. Push early: a first commit with the values, then
 the refinements.
@@ -92,8 +125,17 @@ clean finish, and the kit page shows them live. Screens adopt them instead of dr
 
 **Write boundary.** `apps/web/lib/components/**` except `palette/`, `hero/`, `desk/` · a new
 `apps/web/app/dashboard/lab/kit/**` (the kit page, beside the existing `lab/tokens` and `lab/desk`, which
-are not yours) · `apps/web/lib/i18n/messages/{components,common,explain,views}/**` ·
-`apps/web/e2e/DS3-01.spec.ts`.
+are not yours) · `apps/web/lib/i18n/messages/{components,common,explain,views}/**` and the overlay files
+`receiverLangs/overlays/{ar,ru,th,ti}/{components,common}.ts` · `apps/web/e2e/DS3-01.spec.ts`.
+
+**Seams.** The registry line and labels for the kit page: `{ key: 'labKit', path: '/dashboard/lab/kit',
+group: 'top', nav: 'hidden' }` in `apps/web/lib/nav/routes/system.ts`, `links.labKit` in
+`messages/nav/{he,en}.ts` and in the four overlay `nav.ts` files (see "Rules of the partition").
+
+**Asked of you by others.** The number pad that the phone flow uses is yours
+(`apps/web/lib/components/overlay/QtyKeypad.tsx`): `DS3-05` needs it in the clean finish (`SPEC.md` §5,
+§10.3). Both density switches (the table's `DensityMenu` and the views toolbar) take their default from the
+personal preference (see "Personal preferences: one contract").
 
 **Slices.**
 1. Inventory every exported component, its props, variants, tests and how many screens import it. Table: kit
@@ -128,12 +170,19 @@ menu"; `SPEC.md` §10.4; `KNOWN-ISSUES.md`, "Side menu": the spec wins over the 
 
 **Write boundary.** `apps/web/lib/nav/**` · `apps/web/app/dashboard/{layout.tsx,nav.tsx,search.tsx,
 searchOptions.ts,branch-switcher.tsx}` · `apps/web/lib/components/palette/**` · `apps/web/lib/hotkeys.ts` ·
-`apps/web/lib/i18n/messages/nav/**` · `apps/web/e2e/DS3-02.spec.ts` and the existing navigation specs where
-the menu changed on purpose.
+`apps/web/lib/i18n/messages/nav/**` and the overlay files `receiverLangs/overlays/{ar,ru,th,ti}/nav.ts` ·
+the shell's unit tests `apps/web/lib/__tests__/{nav-registry,hotkeys}.test.ts` (update an assertion only
+with the reason stated) · `apps/web/e2e/DS3-02.spec.ts` and the existing navigation specs where the menu
+changed on purpose.
 
 **Seams.** `DS3-06` gives you a preferences provider (`apps/web/lib/prefs/**`); mounting it in `layout.tsx`
-is yours. The star beside a page title needs the shared page header: ask `DS3-01` (or build the star inside
-your boundary and list it under "Promote to shared").
+is yours, and so is setting `data-density` and `data-text` on the shell before first paint from its two
+cookies (see "Personal preferences: one contract"). The single-key switch in the account menu, the cheat
+sheet and the palette writes through that store (key `rm:keys:single`). Other packages add one registry
+line and its labels for a new page: expect them. The menu's timings use the named motion set that `DS3-00`
+adds; until its branch is pushed, keep them in one place so that they are easy to swap. The star beside a
+page title needs the shared page header: ask `DS3-01` (or build the star inside your boundary and list it
+under "Promote to shared").
 
 **Slices.**
 1. Spec conformance table: every numbered item of the sidebar spec → built / partly / not built on `main`,
@@ -160,9 +209,10 @@ owner now with a single primary action, good news in calm green.
 **Reference.** `reference/reference.html#ex1`, `reference/src/ex1.html`, script section "1 · home".
 
 **Write boundary.** `apps/web/app/dashboard/page.tsx` · `apps/web/app/dashboard/home/**` ·
-`apps/web/lib/components/hero/**` · `apps/web/lib/i18n/messages/overview/**` (confirm this is the home's
-area before editing) · `apps/web/e2e/DS3-03.spec.ts` and the home's existing specs where it changed on
-purpose.
+`apps/web/lib/components/hero/**` · `apps/web/lib/i18n/messages/overview/**` and the overlay files
+`receiverLangs/overlays/{ar,ru,th,ti}/overview.ts` (the home also reads strings from other areas, such as
+`leaks`, `recovery` and `views`: read them, do not edit them) · `apps/web/e2e/DS3-03.spec.ts` and the home's
+existing specs where it changed on purpose.
 
 **Not yours.** The numbers themselves: every figure comes from the existing procedures and the charts SQL
 (`packages/charts`, owned by `matching-engine-guardian`); the leak definition is immutable. If the calculation
@@ -203,8 +253,11 @@ toast with undo → keys honour the single-key preference (from `DS3-06`; until 
 key defensively) → narrow layout → empty state.
 
 **Acceptance.** Every decision still calls the same procedure with the same input. Keys never fire while
-typing. Undo behaves as the server allows; the visible window matches the server's. No ₪ shown to a role that
-must not see it. The desk's existing e2e specs pass or are updated with the reason.
+typing, and they honour `rm:keys:single`. The visible undo window (10 s) stays shorter than the server's
+(`REOPEN_WINDOW_MS`, 15 s); change neither without saying so in the pull request. No ₪ shown to a role that
+must not see it. The desk's existing e2e specs pass or are updated with the reason. Copy of the dock slip
+(`apps/web/app/dashboard/receiving/[poId]/dock-slip.tsx` reads `messages/approvals`) is yours when `DS3-05`
+asks for a change.
 
 ## DS3-05 · Delivery check on a phone
 
@@ -215,12 +268,24 @@ product's own number pad, a button that always says the next step.
 check on a phone".
 
 **Write boundary.** `apps/web/app/dashboard/receiving/**` ·
-`apps/web/lib/i18n/messages/{receiving,receiverLangs,dockPrice}/**` · `apps/web/e2e/DS3-05.spec.ts` and the
-receiving specs where the flow changed on purpose.
+`apps/web/lib/i18n/messages/{receiving,dockPrice}/**` and `messages/receiverLangs/**` **except** the overlay
+files `overlays/{ar,ru,th,ti}/{nav,components,common,overview}.ts`, which belong to `DS3-02`, `DS3-01` and
+`DS3-03` (see "Rules of the partition") · `apps/web/e2e/DS3-05.spec.ts` and the receiving specs where the
+flow changed on purpose.
 
-**Seams.** One entry in the feature registry for the flag below (find how flows are gated and defaulted off
-today; `packages/api/src/lib/features.ts` is the likely place). Nothing in `apps/web/app/receiver-sw.js` or
-the offline queue unless a change is needed for parity, and then say so.
+**Seams.** The flag below needs two edits: its key in `FEATURE_KEYS` of `packages/api/src/lib/features.ts`,
+and the mirror `PILOT_FEATURE_KEYS` in `packages/db/scripts/pilot-setup.ts` (pinned by
+`scripts/__tests__/pilot-setup.test.ts`), with the pilot's value **off**. Nothing in
+`apps/web/app/receiver-sw.js` or the offline queue (`apps/web/lib/pwa/**`) unless a change is needed for
+parity, and then say so. The number pad is `apps/web/lib/components/overlay/QtyKeypad.tsx` (`DS3-01`): ask
+for what you need there, or wrap it inside your boundary. The dock slip's strings are in `messages/approvals`
+(`DS3-04`): route copy changes there.
+
+**The flag and the demo restaurant.** The demo restaurant, which is also the e2e tenant, has `features.all`,
+and `all` switches every key on unless the key is set to `false`. So: the existing receiving specs must set
+your key to `false` explicitly and keep passing as today's flow; `DS3-05.spec.ts` sets it to `true`; and the
+pull request says plainly that the demo restaurant will show the new order while the pilot restaurant will
+not.
 
 **Slices.**
 1. Map today's flow step by step (photo, reading, review, count, close; online and offline) and its six
@@ -250,9 +315,14 @@ settings specs where the screen changed on purpose.
 
 **Seams.** A read-only preview procedure in `packages/api/src/routers/settings.ts` (what a threshold change
 would do to the gaps open now), calling the matching engine without editing it; add its line to the
-cross-tenant coverage manifest as `AGENTS.md` allows (add only). The density switch that exists in
-`apps/web/lib/components/views/` becomes a reader of your store: that edit belongs to `DS3-01`; give it the
-hook and list the request.
+cross-tenant coverage manifest as `AGENTS.md` allows (add only). A new settings page needs its registry line
+and labels (see "Rules of the partition").
+
+**The preferences contract is yours to implement** (see "Personal preferences: one contract"): the storage
+key and cookie names there are fixed, because three other packages read them. You own the stored values and
+the store; `DS3-02` sets the attributes before first paint and renders the single-key switch outside the
+settings screen; `DS3-01` makes the two existing density switches read your default. Give them a hook and a
+short `apps/web/lib/prefs/README.md`, and push early.
 
 **Not yours.** The schema (`packages/db/**`): preferences stay per device, so no column is needed. The
 approvals engine and the matching engine. Team and integrations screens. Pull requests `#324` (features hub)
@@ -279,8 +349,8 @@ else in DS3 depends on it.
 typeface switch at the top of `reference/reference.html`.
 
 **Write boundary.** `packages/ui-tokens/src/fonts.ts` · `apps/web/public/fonts/**` (a new folder for the
-face, with its licence text, beside the existing ones) · the font loading in `apps/web/app/layout.tsx` ·
-`apps/web/e2e/DS3-07.spec.ts`.
+face, with its licence text, beside the existing ones) · the font loading in `apps/web/app/layout.tsx` (its
+`themeColor` line is `DS3-00`'s seam: leave it) · `apps/web/e2e/DS3-07.spec.ts`.
 
 **Seams.** After merging `DS3-00`: regenerate the token block of `globals.css` (run the generator, change
 nothing by hand); the font tests of `packages/ui-tokens`; and, only if a face needs it, the lines of
@@ -289,7 +359,8 @@ nothing by hand); the font tests of `packages/ui-tokens`; and, only if a face ne
 **Slices.** Read how DS2 defines a face (`FaceId`, roles, metric-matched fallback, self-hosted files with the
 licence text, preload rules, the receiver scripts) → **check the licence of every file before adding it** and
 record the source and version → add the face beside Plex and Heebo for the six receiver languages; self-host,
-subset the way DS2 does, stay within the download budget the owner set (100 KB for Hebrew and Latin) →
+subset the way DS2 does, stay within both budgets that `packages/ui-tokens/src/__tests__/ds2-beta.test.ts`
+pins (the preloaded Hebrew file at most 50 KB; the four weights together at most 100 KB) →
 switch the active face in one line, keeping the undo → tabular figures on the number role → measure layout
 shift and the largest paint against Plex on the home and the desk; publish both sets of numbers and
 side-by-side screenshots in six languages.

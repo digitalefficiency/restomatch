@@ -1148,7 +1148,7 @@
     var effect = function () {
       var e = effectParts();
       return '<div class="set-effect"><h3 aria-level="6">' + (sameR(sv.rules, sv.saved) ? 'הספים שבתוקף' : 'לפני ששומרים') + '</h3><p>' + e.first + '</p>' + (e.second ? '<p>' + e.second + '</p>' : '') +
-        '<p class="set-when">סף חדש חל על חשבוניות שייבדקו מעכשיו. פערים שכבר נפתחו נשארים פתוחים.</p></div>';
+        '<p class="set-when">סף חדש חל על חשבוניות שייבדקו מעכשיו, כולל חשבונית פתוחה שנבדקת מחדש.</p></div>';
     };
     /* what a change of a threshold would do is said once, in the one region that stays on the page */
     var sayEffect = function (lead) { var e = effectParts(); sayS((lead ? lead + '. ' : '') + plain(e.first) + (e.second ? '. ' + plain(e.second) : '')); };
@@ -1156,7 +1156,7 @@
       ['pp', 'סבילות מחיר (%)', 'הפרש מחיר נפתח כפער מעל האחוז הזה', '%'],
       ['pa', 'סבילות מחיר (₪)', 'או מעל הסכום הזה ליחידה', '₪'],
       ['qp', 'סבילות כמות (%)', 'הפרש בין מה שהוזמן למה שהתקבל נפתח כפער מעל האחוז הזה', '%'],
-      ['qa', 'סבילות כמות (יחידות)', 'חיוב על יותר ממה שהתקבל חוסם תשלום רק מעל מספר היחידות הזה', ''],
+      ['qa', 'סבילות כמות (יחידות)', 'חיוב על יותר ממה שהתקבל חוסם תשלום מעל היחידות האלה והאחוז', ''],
       ['bp', 'סף חסימת מחיר (%)', 'עליית מחיר מהאחוז הזה ומעלה חוסמת את התשלום', '%']
     ];
     var fmtR = function (k, v) { var u = RULES.filter(function (x) { return x[0] === k; })[0][3]; return u === '₪' ? '<span class="money"><span class="cur">₪</span><span>' + v + '</span></span>' : v + u; };

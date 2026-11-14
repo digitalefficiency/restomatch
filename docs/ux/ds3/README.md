@@ -24,6 +24,8 @@ So: build everything the proposal shows, in the **clean** finish ("נקי").
 | `SPEC.md` | The design spec of the clean finish: colour, type, shape, controls, status language, icons, density, motion, and the five screens. Binding for every package. |
 | `WORKPLAN.md` | The work packages `DS3-00` … `DS3-07` (batch 1) and the later batches: goal, write boundary, upstream, slices, acceptance. Binding for every package. |
 | `KNOWN-ISSUES.md` | Where the mock-ups are known to be wrong or looser than the product's own rules. Read it before copying behaviour or wording from the reference. |
+| `CHANGES.md` | Corrections to this folder made after the sessions started, newest first. |
+| `OPEN-PRS.md` | The open pull requests whose files fall inside each package's boundary, as of 14.11.2026. |
 | `reference/reference.html` | The mock-ups and the kit in the clean finish, live, in one standalone page. **The visual and behavioural source of truth.** |
 | `reference/src/` | The sources of that page: `product.css` (the look), `script.js` (the behaviour), `ex1.html` … `ex4.html`, `kit.html`, `sprite.html` (60 icons), `kit-sources.json`. |
 | `reference/PAGE-TEXT.he.md` | The Hebrew text of the proposal page: what changes on each screen and why, with sources. Its "היום" statements describe production **before** train C; see the note at its top. |
@@ -57,21 +59,29 @@ two, an artifact for every run). On top of it, the owner's rules that the propos
 - **Pending is never a warning.** Waiting and consolidated invoices are neutral (T4).
 - Never show "1.5%" or the word "יעד". Never write "דרישה" or "תביעה": the term is **"בקשת זיכוי"**. None of
   "נחסם", "נחסך", "הפסד", "חיסכון", "חריגה", "ריכוז" in new copy.
-- Buttons: plural imperative, at most 4 words. A visible line: one sentence, at most 12 words. A toast: at most
-  8 words. Gender-neutral Hebrew (no gendered second-person forms).
+- Buttons: at most 4 words. A button that tells the person to act is in the plural imperative ("שמרו", "שלמו
+  כפי שחויב"); a button or link may also be the name of what it creates or opens, as the product's glossary
+  already has it ("בקשת זיכוי", "להחלטה"). Never a singular imperative. A visible line: one sentence, at most
+  12 words. A toast: at most 8 words. Gender-neutral Hebrew (no gendered second-person forms). Spell "הכול".
 - ₪ sits left of the digits; every ₪ goes through `formatIls()` / the shared money component; the VAT basis is
   stated beside an amount; numbers are physically right-aligned in columns.
 - Dates `dd.MM.yyyy`; date and time `dd.MM.yyyy · HH:mm`.
-- Undo window 10 s where the proposal shows one. (The approvals router has `REOPEN_WINDOW_MS`; do not change
-  server windows without saying so in the pull request.)
+- Undo is visible for 10 s where the proposal shows one. On the approvals desk the server allows a little
+  more on purpose (`REOPEN_WINDOW_MS`, 15 s), so that a click at the last moment still lands: keep the visible
+  window shorter than the server's, and change neither without saying so in the pull request.
 - Touch targets at least 44 px on a phone; desk text at least 12 px; one filled primary button per viewport.
 - Receivers never see ₪; chefs see ₪ only where they do today.
 - Radii 8 (control) · 12 (card) · 16 (overlay), as decision D6 already set.
-- No colour, size, radius, shadow, duration or easing is hard-coded outside the tokens.
+- No colour, size, radius, shadow, duration or easing is hard-coded outside the tokens. The side menu's
+  timings come from the one named motion set that `DS3-00` adds for it (`SPEC.md` §8).
+- A new key in the message areas that receivers see (`nav`, `components`, and the parts of `common` and
+  `overview` that `apps/web/lib/__tests__/receiver-langs.test.ts` lists) must be added in all four overlay
+  languages (ar, ru, th, ti) in the same pull request, or the type check fails. `WORKPLAN.md` says which
+  package may edit which overlay file.
 
 The owner-decision documents that older specs cite (`OWNER-DECISIONS-0711.md`, `KICKOFF-0711.md`,
-`terms/GLOSSARY.md`, the DS2 spec and verdict) are not on `main`; they live on the kit branches
-`claude/wave2-kit-addendum-0711` and `claude/wave2-kit-terms-flags`. Fetch and read them there.
+`terms/GLOSSARY.md`, the DS2 spec and verdict) are not on `main`; they live on the kit branch
+`claude/wave2-kit-addendum-0711`. Fetch and read them there.
 
 ## How a package works
 
@@ -118,12 +128,19 @@ git fetch origin claude/admiring-faraday-3oxulo
 git worktree add ../ds3-handoff origin/claude/admiring-faraday-3oxulo
 ```
 
-Then read `../ds3-handoff/docs/ux/ds3/`. Do not copy the folder into your own branch.
+Then read `../ds3-handoff/docs/ux/ds3/`. Do not copy the folder into your own branch. The branch moves when
+the handoff is corrected; to refresh:
+
+```bash
+git -C ../ds3-handoff fetch origin claude/admiring-faraday-3oxulo && git -C ../ds3-handoff checkout --detach origin/claude/admiring-faraday-3oxulo
+```
+
+`CHANGES.md` in this folder lists every correction made after the sessions started, newest first.
 
 ### Using the reference
 
 ```bash
-node docs/ux/ds3/reference/checks/ref-check.cjs "$PWD/docs/ux/ds3/reference/reference.html" 1440 /tmp/ds3-shots
+cd ../ds3-handoff && node docs/ux/ds3/reference/checks/ref-check.cjs "$PWD/docs/ux/ds3/reference/reference.html" 1440 /tmp/ds3-shots
 ```
 
 That loads the page headless, reports script errors and what rendered, and writes one screenshot per mock-up.

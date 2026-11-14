@@ -212,7 +212,7 @@ const html = `<!doctype html><html data-theme="light"><head><meta charset="utf-8
     ok('set: back to the defaults', await p.evaluate(() => document.querySelector('#sh-body [data-sw="keys"]').getAttribute('aria-checked') === 'true' && !document.querySelector('#desk').classList.contains('no-keys') && document.activeElement.getAttribute('data-do') === 'reset'));
     // the rules
     await p.click('#sh-sects [data-sect="rules"]'); await wait(60);
-    const WHEN = ' סף חדש חל על חשבוניות שייבדקו מעכשיו. פערים שכבר נפתחו נשארים פתוחים.';
+    const WHEN = ' סף חדש חל על חשבוניות שייבדקו מעכשיו, כולל חשבונית פתוחה שנבדקת מחדש.';
     const eff = async () => (await txt('#sh-body .set-effect')).replace(/\s+/g, ' ').replace(WHEN, '');
     ok('rules: the box says when a new threshold starts to act', (await txt('#sh-body .set-effect')).replace(/\s+/g, ' ').endsWith(WHEN.trim()), await txt('#sh-body .set-effect'));
     ok('rules: the section reaches the whole restaurant', (await txt('#sh-body .set-h')) === 'כללי התאמה ואישור לכל המסעדה' && (await p.locator('#sh-body .numf').count()) === 5);
