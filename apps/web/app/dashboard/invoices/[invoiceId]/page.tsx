@@ -20,6 +20,7 @@ import { overContractBadgesForInvoice } from '../../contracts/over-contract';
 import { InvoiceCorrection } from './correction-client';
 import { dockPriceNotesForInvoice, mergeLineBadges } from './dock-price-notes';
 import { ConsolidatedPanel } from './consolidated-panel';
+import { AllocationField } from './allocation-field';
 import { Cockpit, type CockpitCopy, type CockpitFrom } from './cockpit';
 import { loadDetail } from './load';
 import { anyFailed, settled, valueOf } from './partial';
@@ -245,6 +246,12 @@ export default async function InvoiceCockpitPage({
                       : tv('invoice.closed', { date: formatDate(vatRow.deductionDeadline, locale) })}
                   </p>
                 </div>
+              </div>
+            ) : null}
+            {/* AU-08 (A13): the allocation-number field — behind vatAtRisk, finance roles (writes: owner + bookkeeper, server-checked). */}
+            {finance && features.includes('vatAtRisk') ? (
+              <div className="mb-4">
+                <AllocationField invoiceId={invoiceId} />
               </div>
             ) : null}
             {/* A חשבונית מרכזת: its cross-match first — that is the job on this page. */}
