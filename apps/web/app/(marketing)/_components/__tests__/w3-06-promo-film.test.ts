@@ -117,6 +117,12 @@ describe('W3-06 · promo film: ₪ side, figures, end card', () => {
 });
 
 describe('W3-06 · promo film: text alternative + next step in the dialog', () => {
+  it('promoTranscript.json is exactly transcript(COPY, SAMPLE) — copy drift fails here', async () => {
+    const path = join(PROMO, 'transcript.ts'); // non-literal: the web typecheck doesn't pull tools/promo in
+    const mod = (await import(/* @vite-ignore */ path)) as { transcript: (l: 'he' | 'en') => unknown };
+    expect({ he: mod.transcript('he'), en: mod.transcript('en') }).toEqual(transcript);
+  });
+
   it('a per-locale transcript, generated from the film’s copy + the sample month', () => {
     expect(transcript.he.length).toBe(transcript.en.length);
     expect(transcript.he.length).toBeGreaterThanOrEqual(8);
@@ -134,8 +140,11 @@ describe('W3-06 · promo film: text alternative + next step in the dialog', () =
   it('the dialog: video described by the transcript, real CTA in a footer, 44 px close', () => {
     const btn = read(join(WEB, 'app/(marketing)/_components/PromoVideoButton.tsx'));
     expect(btn).toMatch(/aria-describedby=\{transcriptId\}/);
-    expect(btn).toMatch(/<ol id=\{transcriptId\}/);
-    expect(btn).toMatch(/<details[\s\S]*<summary/);
+    expect(btn).toMatch(/<ol\s+id=\{transcriptId\}/);
+    expect(btn).toMatch(/aria-expanded=\{showTranscript\}/); // a visible, labelled toggle
+    expect(btn).toMatch(/tabIndex=\{0\}\s*aria-label=\{transcriptLabel\}/); // keyboard-scrollable list
+    expect(btn).toMatch(/<span key=\{i\} lang=\{other\}/); // other-language runs carry lang
+    expect(btn).toMatch(/className="sticky bottom-0/); // the CTA stays visible on short screens
     expect(btn).toMatch(/href=\{ctaHref\}/);
     expect(btn).toMatch(/h-11 w-11/);
   });

@@ -101,15 +101,15 @@ export const APPROVED_MEDIA_FILES: Readonly<Record<string, string>> = {
   // S10 #318 @b0937588 9:16 poster WebPs (540×960, 810×1440) — same frame as hero-poster-9x16.jpg.
   '/media/hero-poster-9x16-540.webp': '3b451f8fc3f98b37a1dab53f57192be0fea5f59dc3f5a50e1104da31222615fe',
   '/media/hero-poster-9x16-810.webp': '0f014686e33de7f7ceca2108b69e10e45ee4675b61b9da9cd41e63b9d9b46b5b',
-  // #320 review-fix re-render (14.11), from the sample month only. Frame gate
+  // #320 review-fix re-render, round 2 (14.11: end card = the real CTA, ₪720 T2, stamps readable), from the sample month only. Frame gate
   // (tools/promo/scripts/frame-check.mjs, he + en): DOM probe every 2 s + every 0.2 s through the
   // receiver beat (33.2–40.9 s) + the poster — Sample tag on every frame, NO ₪ in the receiver beat
   // (drawn screen: quantities and states only), no URL; pixel check of the tag on every 2 s grab of
   // the files below and on the posters. ₪ at the visual left in Hebrew; "פער" for undecided money.
-  '/media/promo-he-720.mp4': 'c8b807c893f37a91368588ad70f823244a46d2446fa9fc4f38e17b7bb8ded6f0',
-  '/media/promo-en-720.mp4': '88304eef45d9601377a92efc407b32356bde33427b3a05e38e316e94f53bcf1a',
-  '/media/promo-poster-he.jpg': '7390e09750e9be1edf8e402e636c3e16d33faf430937ce3b7e3139bfe521fa2d',
-  '/media/promo-poster-en.jpg': '92570bbb49650a52c6b58b41723c250b1ba9083c6796b3cd5a97a51c16968614',
+  '/media/promo-he-720.mp4': '40d41107df594f9981b96a33d4edee0b7216e5ba5a0372f9b9a27668327cf00d',
+  '/media/promo-en-720.mp4': '0547675725d511e50851de8d3c180ff842868ad9b5d75a5c8ec3c80749dca83e',
+  '/media/promo-poster-he.jpg': 'e496b602babd00b2f49b3f7b3606f1e7f100cbd735db775a0aed2833643ebfb4',
+  '/media/promo-poster-en.jpg': '67f0bcaec1c8d3b69f0268c027616940e8b0ce1ef81a1b30b108d413a68b1056',
 };
 
 /** SHA-256 of rejected promo films + posters (the ₪760 cut, and #318's demo-seed receiver beat): never approvable. */
@@ -125,6 +125,11 @@ export const REJECTED_PROMO_SHA256: readonly string[] = [
   '2f39a99aaa3f17e4a744171eec9b4dc80fb5fd805adad20e5cb4f2913833dfe4', // promo-en-720.mp4
   '8cc67ef4525a82c229be95a172b57bf4f2f4ac572030eaa5281b4b32dff38aed', // promo-poster-he.jpg
   'c4fd861f83dba2d22f5b60be0944c758fe5175c05ce22b5ac0d438deeed4de04', // promo-poster-en.jpg
+  // #320 @7e55012f round-1 render — superseded (end card said "תאמו הדגמה קצרה" ≠ the dialog's CTA).
+  'c8b807c893f37a91368588ad70f823244a46d2446fa9fc4f38e17b7bb8ded6f0', // promo-he-720.mp4
+  '88304eef45d9601377a92efc407b32356bde33427b3a05e38e316e94f53bcf1a', // promo-en-720.mp4
+  '7390e09750e9be1edf8e402e636c3e16d33faf430937ce3b7e3139bfe521fa2d', // promo-poster-he.jpg
+  '92570bbb49650a52c6b58b41723c250b1ba9083c6796b3cd5a97a51c16968614', // promo-poster-en.jpg
 ];
 
 /**

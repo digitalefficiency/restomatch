@@ -84,7 +84,7 @@ const he = {
   },
   cta: {
     tagline: 'המספר שכל בעל מסעדה צריך',
-    action: 'תאמו הדגמה קצרה',
+    action: 'בדיקת דליפה חינם', // = the site's hero.ctaPrimary (the dialog's real CTA)
   },
   loop: { chip: 'נתוני הדגמה' },
   sampleTag: 'דוגמה · מספרים להמחשה',
@@ -177,7 +177,7 @@ const en: typeof he = {
   },
   cta: {
     tagline: 'The number every restaurant owner needs',
-    action: 'Book a short demo',
+    action: 'Get a free leak check', // = the site's hero.ctaPrimary (the dialog's real CTA)
   },
   loop: { chip: 'Demo data' },
   sampleTag: 'Sample · illustrative figures',

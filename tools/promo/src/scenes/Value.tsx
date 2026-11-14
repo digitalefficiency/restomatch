@@ -23,7 +23,7 @@ export const Value: React.FC<{ locale: Locale; duration?: number }> = ({ locale,
   const stats = [
     { label: t.leak, value: SAMPLE.leak, note: `${SAMPLE.leakPct}% ${t.leakNote.replace('{spend}', ilsText(SAMPLE.purchasing, locale))}`, color: C.danger },
     { label: t.caught, value: SAMPLE.unpaid, note: t.caughtNote, color: C.gold },
-    { label: t.claimed, value: SAMPLE.credit.amount, note: t.claimedNote, color: C.primary },
+    { label: t.claimed, value: SAMPLE.credit.amount, note: t.claimedNote, color: C.warn }, // T2: to send
   ];
 
   return (

@@ -69,6 +69,9 @@ node --experimental-strip-types scripts/check-layout.mjs 2>/dev/null && ok "layo
 echo "== sample month: copy.ts SAMPLE == the site's sampleMonth.ts"
 node --experimental-strip-types scripts/check-sample.mjs 2>/dev/null | tail -1 | grep -q "SKIP\|== apps" && ok "SAMPLE pinned to sampleMonth.ts (or skipped: not reachable)" || bad "SAMPLE differs from sampleMonth.ts"
 
+echo "== transcript: promoTranscript.json == transcript(COPY, SAMPLE)"
+node scripts/transcript.mjs --check && ok "transcript in sync with the film's copy" || bad "promoTranscript.json is stale — run scripts/transcript.mjs"
+
 echo "== typecheck"
 npx tsc -p . && ok "tsc 0 errors" || bad "tsc errors"
 

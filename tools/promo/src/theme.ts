@@ -16,6 +16,7 @@ export const DARK = {
   onPrimary: '#07120D',
   gold: '#E0B341',
   danger: '#FF5C7A',
+  warn: '#FFB347',
   paper: '#F4F1E8',
   paperInk: '#22261F',
 };
@@ -33,6 +34,7 @@ const LIGHT_STAGE: typeof DARK = {
   onPrimary: '#FFFFFF',
   gold: '#755C00',
   danger: '#B80F2A',
+  warn: '#A63D00', // T2 act-now (credit requests to send) — = SampleCards / ui-tokens warn
   paper: '#FFFFFF',
   paperInk: '#22261F',
 };

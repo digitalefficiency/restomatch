@@ -234,6 +234,7 @@ export default async function Home() {
                   transcriptLabel={t('hero.watchTranscript')}
                   ctaHref={ctaHref}
                   ctaLabel={t('hero.ctaPrimary')}
+                  lang={locale}
                   className={cn(btnSecondary, 'hidden sm:inline-flex')}
                 />
               ) : null}

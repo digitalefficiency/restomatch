@@ -11,11 +11,11 @@ import { Eyebrow, FadeUp, RiseLine } from '../components/primitives';
 // One beat per screen. Within a beat (relative to `push`): camera push 0→28,
 // spotlight opens 22→34 (12 f), holds to 80 (≈1.5 s), closes 80→92, camera pulls back 86→112.
 // The screens are drawn from components on the site's sample month (components/ProductScreens).
-const BEATS: { key: BeatKey; from: number; push: number; accent: 'danger' | 'gold' | 'primary' }[] = [
+const BEATS: { key: BeatKey; from: number; push: number; accent: 'danger' | 'gold' | 'primary' | 'warn' }[] = [
   { key: 'dashboard', from: 0, push: 56, accent: 'danger' },
   { key: 'leaks', from: 172, push: 192, accent: 'danger' },
   { key: 'approvals', from: 290, push: 310, accent: 'danger' },
-  { key: 'claims', from: 408, push: 428, accent: 'gold' },
+  { key: 'claims', from: 408, push: 428, accent: 'warn' }, // T2: credit requests to send
 ];
 const PUSH = 28;
 const SPOT_IN = 22;
@@ -90,7 +90,7 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
     claims: (
       <>
         <span>{t.chipClaim}</span>
-        <bdi dir={d} style={{ color: C.gold }}>{ilsText(SAMPLE.credit.amount, locale)}</bdi>
+        <bdi dir={d} style={{ color: C.warn }}>{ilsText(SAMPLE.credit.amount, locale)}</bdi>
       </>
     ),
   };
