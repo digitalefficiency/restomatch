@@ -61,12 +61,24 @@ export function loginCodeEmail(input: { code: string; locale: string }) {
   return { subject: c.subject, html, text: `${c.lead}\n\n${code}\n\n${c.tail}` };
 }
 
-/** Without a provider (dev, lab, e2e) it writes the code beside MAGIC_LINK_FILE; production never logs it. */
-export async function deliverLoginCode(input: { to: string; code: string; locale: string }): Promise<void> {
-  if (!isEmailConfigured()) {
-    if (process.env.NODE_ENV === 'production') throw new Error('login code: e-mail provider not configured');
+/**
+ * Without a provider (dev, lab, e2e) it writes the code beside MAGIC_LINK_FILE;
+ * production never logs it. The production decision is read at RUNTIME through
+ * `env` (same rule as the /join code e-mail, train C r8): `next build` inlines a literal NODE_ENV
+ * read on process.env, so a built app served with runtime
+ * NODE_ENV=development and no provider would throw instead of printing the code.
+ * Keep every NODE_ENV read on `env`.
+ */
+export async function deliverLoginCode(
+  input: { to: string; code: string; locale: string },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const production = env.NODE_ENV === 'production';
+  const configured = production && Boolean(env.RESEND_API_KEY) && isEmailConfigured();
+  if (!configured) {
+    if (production) throw new Error('login code: e-mail provider not configured');
     console.log(`\n──────── LOGIN CODE ────────\nto: ${input.to}\ncode: ${input.code}\n────────────────────────────\n`);
-    const file = process.env.LOGIN_CODE_FILE ?? process.env.MAGIC_LINK_FILE?.replace('magic-link', 'login-code');
+    const file = env.LOGIN_CODE_FILE ?? env.MAGIC_LINK_FILE?.replace('magic-link', 'login-code');
     if (file) {
       const { writeFile } = await import('node:fs/promises');
       await writeFile(file, JSON.stringify({ to: input.to, code: input.code, at: Date.now() }), 'utf8');

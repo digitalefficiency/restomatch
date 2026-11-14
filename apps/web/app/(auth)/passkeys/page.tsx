@@ -27,6 +27,7 @@ export default async function PasskeysPage() {
     <AuthShell>
       <h1 className="mb-2 text-2xl font-bold text-ink">{t('passkeys.title')}</h1>
       <p className="mb-6 text-base text-ink">{allowed ? t('passkeys.intro') : t('passkeys.notForRole')}</p>
+      {allowed ? <p className="-mt-4 mb-6 text-sm text-muted">{t('passkeys.introWhere')}</p> : null}
       {allowed ? (
         <>
           <p className="mb-4 text-sm text-muted" data-testid="passkey-count">

@@ -152,12 +152,13 @@ export const en: Shape<typeof he> = {
   },
   passkeys: {
     title: 'Passkey',
-    intro: 'Sign in with your fingerprint, face or device PIN, no password. The passkey is kept on your device or in your password manager, not with us.',
-    notForRole: 'Passkeys are available to owners and bookkeepers. You can keep signing in with e-mail and password.',
+    intro: 'Sign in with your fingerprint, face or device PIN, no password.',
+    introWhere: 'The passkey stays on your device, not with us.',
+    notForRole: 'Passkeys are only for owners and bookkeepers.',
     count: '{count, plural, =0 {No passkey on this account yet.} one {One passkey on this account.} other {# passkeys on this account.}}',
     add: 'Add a passkey on this device',
     signIn: 'Sign in with a passkey',
-    failed: "We couldn't use the passkey. Try again, or sign in with e-mail and password.",
+    failed: "We couldn't use the passkey, try again or sign in with a password.",
     back: 'Back to the app',
   },
   codeLogin: {
@@ -168,12 +169,12 @@ export const en: Shape<typeof he> = {
     codeLabel: 'Code from the e-mail',
     submit: 'Sign in',
     resend: 'Send a new code',
-    resent: 'We sent a new code. Use the code from the latest e-mail.',
+    resent: 'We sent a new code, use the one in the latest e-mail.',
     useOther: 'Sign in another way',
     errors: {
-      sendRate: 'We already sent a few codes. Use the code from the latest e-mail.',
-      wrongCode: "That code doesn't match or has expired. Check the latest e-mail, or send a new code.",
-      rate: 'Too many attempts. Code sign-in is locked for now. Sign in with your password or an e-mail link, or try again later.',
+      sendRate: 'We already sent a few codes, use the latest e-mail.',
+      wrongCode: "That code doesn't match or has expired, check the latest e-mail.",
+      rate: 'Code sign-in is locked, use your password or an e-mail link.',
     },
   },
   join: {
