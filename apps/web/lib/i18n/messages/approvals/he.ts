@@ -277,7 +277,7 @@ export const he = {
     'severity-block': 'חומרה גבוהה — אישור בעלים',
     'cumulative-large': 'הפרש מצטבר גבוה בחשבונית — בעלים',
     'cumulative-medium': 'הפרש מצטבר בינוני בחשבונית — מנהל',
-    'non-leak-acknowledge': 'פער ללא ₪ לדליפה — נרשם לידיעה',
+    'non-leak-acknowledge': 'פער ללא ₪ לדליפה, נרשם לידיעה',
     'minor-info': 'הפרש זניח — אושר אוטומטית',
     fallback: 'ברירת מחדל — מנהל',
   },

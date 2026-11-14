@@ -1,6 +1,6 @@
 import { testDbUrl } from '@restomatch/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createDb, eq, invoiceLines, invoices, poLines, priceHistory, restaurants } from '@restomatch/db';
+import { createDb, eq, goodsReceipts, inArray, invoiceLines, invoices, poLines, priceHistory, restaurants } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -56,6 +56,14 @@ describe('H-11 slice c · receiver and chef get no ₪ (A own ids; B ids rejecte
         .set({ settings: { features: { dockPriceContext: true, consolidatedMatch: true } } as never })
         .where(eq(restaurants.id, t.restaurantId));
     }
+    // G-04 (#188) counts only CLOSED goods receipts (completed/partial) as delivery notes,
+    // and seedTenant's receipt is 'pending'. Close BOTH tenants' receipts: A's makes
+    // consolidated.coverage return rows for the owner (the strip is then really exercised),
+    // and B's keeps the "B ids rejected" negatives meaningful instead of vacuous.
+    await db
+      .update(goodsReceipts)
+      .set({ status: 'completed' })
+      .where(inArray(goodsReceipts.restaurantId, [A.restaurantId, B.restaurantId]));
     // Three earlier prices for A's product from A's supplier, inside the 90-day window
     // before A's invoice, so priceContext has a usual price to compare against.
     const [inv] = await db.select({ invoiceDate: invoices.invoiceDate }).from(invoices).where(eq(invoices.id, A.invoiceId));
