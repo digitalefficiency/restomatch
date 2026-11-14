@@ -13,7 +13,8 @@ const html = `<!doctype html><html data-theme="light"><head><meta charset="utf-8
   const errs = []; p.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 200)); }); p.on('pageerror', e => errs.push('PAGEERROR ' + String(e).slice(0, 300)));
   await p.emulateMedia({ reducedMotion: MOTION ? 'no-preference' : 'reduce' });
   // loaded from a file, so the browser storage the page uses for kept choices is available
-  const file = path.join(require('os').tmpdir(), 'ds3-reference-checks', '_page-' + W + '.html'); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, html);
+  const OUT = require('./launch.cjs').outDir();
+  const file = path.join(OUT, '_page-' + W + '.html'); fs.writeFileSync(file, html);
   const load = async () => { await p.goto('file://' + file, { waitUntil: 'networkidle' }); await p.evaluate(() => document.fonts.ready); await p.waitForTimeout(500); };
   await load();
   const fails = []; let n = 0;
@@ -22,7 +23,7 @@ const html = `<!doctype html><html data-theme="light"><head><meta charset="utf-8
   const vis = async s => (await p.locator(s).count()) > 0 && await p.locator(s).first().isVisible();
   const wait = ms => p.waitForTimeout(ms); const wide = W >= 932; let shot = 0;
   const T = MOTION ? 420 : 60;   // time for the menu to finish a collapse or an expand
-  const snap = async (sec, name) => { if (SHOTS) { const l = p.locator(sec + ' .stage'); await l.scrollIntoViewIfNeeded(); await l.screenshot({ path: path.join(require('os').tmpdir(), 'ds3-reference-checks', `mn-${W}-${String(shot++).padStart(2, '0')}-${name}.png`) }); } };
+  const snap = async (sec, name) => { if (SHOTS) { const l = p.locator(sec + ' .stage'); await l.scrollIntoViewIfNeeded(); await l.screenshot({ path: path.join(OUT, `mn-${W}-${String(shot++).padStart(2, '0')}-${name}.png`) }); } };
   // geometry in the mock-up's own pixels, measured from the start edge (the right edge) of the menu
   const geo = (sec, sel) => p.evaluate(([sec, sel]) => {
     const a = document.querySelector(sec + ' aside.mn'), z = a.getBoundingClientRect().width / a.offsetWidth, A = a.getBoundingClientRect();

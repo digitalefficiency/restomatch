@@ -3,6 +3,12 @@
 Newest first. When an entry names your package, refresh your copy of the handoff (`README.md`, "Where this
 folder lives") and read the sections it points to. Your contract is still your section of `WORKPLAN.md`.
 
+## 14.11.2026 · third correction
+
+The reference's check scripts only. They keep their working copies and screenshots in `reference/checks/out/`
+(ignored by git) instead of the system's temporary folder, which the repository's code scanning flags as unsafe.
+No package is affected; refresh only if you run the checks.
+
 ## 14.11.2026 · second correction
 
 From an independent review of this folder against the reference, today's code and the open pull requests.

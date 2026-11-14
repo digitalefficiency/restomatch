@@ -3,7 +3,7 @@
 // Check the component kit's live parts and the density switch. usage: node tools/kit-check.cjs <width>
 const { chromium } = require('playwright'); const fs = require('node:fs'); const path = require('node:path');
 const W = Number(process.argv[2] || 1440);
-const OUT = path.join(require('os').tmpdir(), 'ds3-reference-checks');
+const OUT = require('./launch.cjs').outDir();
 const page = fs.readFileSync(process.env.PAGE || path.join(__dirname, '..', 'reference.html'), 'utf8');
 const html = `<!doctype html><html data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0}</style></head><body>${page}</body></html>`;
 (async () => {

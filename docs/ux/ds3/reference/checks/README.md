@@ -5,7 +5,8 @@ use them to read what behaviour is expected, and to confirm the reference still 
 
 They need Playwright with a Chromium it can launch (`require('playwright')`). In a cloud session it is
 pre-installed; the scripts pass `HTTPS_PROXY` to the browser so that the two typefaces load from Google Fonts.
-Screenshots and working copies go to the system's temporary folder, never into the repository.
+Screenshots and working copies go to an `out` folder beside the scripts. The repository's `.gitignore` ignores
+it, so nothing of it is committed.
 
 | Script | What it checks | Result on 14.11.2026 |
 | --- | --- | --- |
