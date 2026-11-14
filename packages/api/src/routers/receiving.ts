@@ -74,6 +74,7 @@ import { isFeatureOn } from '../lib/featureGate';
 import { dockPriceContext } from '../dockPriceContext/service';
 import { readConsolidatedRaw } from '../match/consolidated';
 import { invoiceQuestionCount } from '../catalog/linkQuestions';
+import { notifyBackorderDraft, prepareBackorderDraft } from '../orders/autopilot';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 /** R5: undated open POs this recent still show in the receiving inbox. */
@@ -2080,6 +2081,7 @@ async function submitReceiptOnce(
     },
   });
   await rematchAfterCount(db, session.restaurantId, receipt, input.invoiceIds ?? [], wasOpen);
+  if (newStatus === 'partial' && receipt.poId) await backorderAfterPartial(db, session.restaurantId, receipt.id);
   return receipt;
 }
 
@@ -2660,4 +2662,37 @@ async function recomputeAndRematch(
   const totals = owned ? await recomputeInvoiceTotals(ctx.db, ctx.session.restaurantId, inv) : null;
   if (!totals) return { totals: null, rematch: await rematchAfterEdit(ctx, inv.id) };
   return rematchThenSettleHeader(ctx, inv, owned, totals);
+}
+
+/**
+ * W3-09 / AU-11 b: a receipt closed short leaves a backorder draft with the
+ * missing units (never the ones the supplier billed). In its own savepoint:
+ * a failure here is logged and never voids the closed receipt. Nothing is sent
+ * to the supplier; the orderers get a notice with the draft.
+ */
+async function backorderAfterPartial(db: Database, restaurantId: string, grId: string): Promise<void> {
+  try {
+    await db.transaction(async (sp) => {
+      const tx = sp as unknown as Database;
+      const r = await prepareBackorderDraft(tx, { restaurantId, goodsReceiptId: grId, now: new Date() });
+      if (r.status !== 'created') return;
+      const [row] = await tx
+        .select({ fromPoId: goodsReceipts.poId, supplierName: suppliers.name })
+        .from(goodsReceipts)
+        .innerJoin(purchaseOrders, eq(purchaseOrders.id, goodsReceipts.poId))
+        .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
+        .where(and(eq(goodsReceipts.id, grId), eq(goodsReceipts.restaurantId, restaurantId)))
+        .limit(1);
+      if (!row?.fromPoId) return;
+      await notifyBackorderDraft(tx, {
+        restaurantId,
+        draftPoId: r.poId,
+        fromPoId: row.fromPoId,
+        supplierName: row.supplierName,
+        missing: r.lineCount,
+      });
+    });
+  } catch (err) {
+    console.error(`[receiving] backorder draft for gr=${grId} failed — the receipt stands`, err);
+  }
 }

@@ -1,12 +1,14 @@
+import type { ExpectedPriceSource } from './expectedPrice';
+
 /**
  * W3-09 / AU-11 a · Prepared order draft: the pure core.
  *
  * On an order day a draft built from the order guide (W2-06) is waiting for the
  * chef or manager. It is shown, never sent: nothing here places an order or
- * enqueues an outbox row. Slice b adds the idempotent insert (advisory lock on
- * `<rid>:<source_ref>` + select-by-source_ref, the `captureOrderDraft` pattern —
- * the unique index includes `source_platform`, which is NULL for these drafts,
- * so it never dedupes on its own).
+ * enqueues an outbox row. The idempotent insert lives in `autopilot.ts`
+ * (advisory lock on `<rid>:<source_ref>` + select-by-source_ref, the
+ * `captureOrderDraft` pattern — the unique index includes `source_platform`,
+ * which is NULL for these drafts, so it never dedupes on its own).
  *
  * Prices come ONLY from the injected expected-price resolver (W2-06's
  * `resolveExpectedPrice`: contract > own last explicit price > list). The
@@ -32,6 +34,18 @@ export function isPreparedSourceRef(ref: string | null | undefined): boolean {
   return !!ref && ref.startsWith('au:A16:');
 }
 
+export function isBackorderSourceRef(ref: string | null | undefined): boolean {
+  return !!ref && ref.startsWith('au:A16b:');
+}
+
+/** A draft the autopilot prepared (prepared or backorder), adoptable by the first orderer. */
+export function isAutopilotSourceRef(ref: string | null | undefined): boolean {
+  return isPreparedSourceRef(ref) || isBackorderSourceRef(ref);
+}
+
+/** SQL LIKE patterns for the two autopilot refs (never the W1-11 capture refs). */
+export const AUTOPILOT_REF_LIKES = ['au:A16:%', 'au:A16b:%'] as const;
+
 /** A guide row (structural: W2-06's `orderGuide` row narrowed to what we need). */
 export interface GuideRow {
   productId: string | null;
@@ -45,7 +59,7 @@ export interface GuideRow {
 
 export interface ExpectedPrice {
   unitPrice: number | null;
-  source: 'contract' | 'last_explicit' | 'list' | null;
+  source: ExpectedPriceSource | null;
 }
 
 export type ExpectedPriceResolver = (row: GuideRow) => ExpectedPrice;
