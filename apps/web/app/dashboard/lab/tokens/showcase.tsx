@@ -153,7 +153,7 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
             [
               ['primary-dot', indicator.primary, 'bg-primary-dot', ''],
               ['danger-dot', indicator.danger, 'bg-danger-dot', ''],
-              ['warn-dot + ring', indicator.warnRing, 'bg-warn-dot', 'ring-1 ring-inset ring-warn-dot-ring'],
+              ['warn-dot + ring', indicator.warnRing, 'bg-warn-dot', 'ring-[1.5px] ring-inset ring-warn-dot-ring'],
               ['gold-dot (ok)', indicator.gold, 'bg-gold-dot', ''],
               ['info-dot', indicator.info, 'bg-info-dot', ''],
               ['neutral-dot', indicator.neutral, 'bg-neutral-dot', ''],
@@ -161,7 +161,8 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
             ] as const
           ).map(([name, hex, bg, ring]) => (
             <li key={name} className="flex items-center gap-2 text-caption text-muted">
-              <span aria-hidden className={`inline-block h-2 w-2 shrink-0 rounded-pill ${bg} ${ring}`} />
+              {/* forced-color-adjust: none keeps a dot's colour in forced-colours mode, as the reference's `.dot`. */}
+              <span aria-hidden className={`inline-block h-2 w-2 shrink-0 rounded-pill forced-color-adjust-none ${bg} ${ring}`} />
               <bdi dir="ltr">{name}</bdi>
               <span className="num">{lab('contrast', { ratio: contrastRatio(hex, surfaces.surface).toFixed(2) })}</span>
             </li>

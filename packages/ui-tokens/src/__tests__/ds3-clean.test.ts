@@ -201,6 +201,29 @@ describe('DS3 · contrast holds what the reference holds (5:1; lowest 5.42:1)', 
       for (const dot of [indicator.primary, indicator.info, indicator.neutral]) expect(contrastRatio(dot, bg)).toBeGreaterThanOrEqual(3);
     }
   });
+
+  it('the one indicator pair below 3:1 is documented and pinned: ok-solid on --hover (2.95:1)', () => {
+    // The reference never paints ok-solid on --hover, and a status dot always comes with its word
+    // (SPEC §2), so the dot is never the only cue. Listed under "Not done" in the PR; pinned so it cannot slip.
+    expect(contrastRatio(indicator.gold, surfaceV2.hover)).toBeGreaterThanOrEqual(2.95);
+  });
+
+  it('the v1 tint recipe the product paints most (`bg-{f}/a text-{f}`, a ≤ 12 %) stays ≥ 4.6:1 on surface and canvas', () => {
+    // apps/web, 14.11: 28 × `bg-primary/12 text-primary`, 18 × danger, 12 × warn, 5 × info, 4 × gold (Badge) …
+    // The re-valued families drive these translucent tints, which no other test reaches. Heavier tints
+    // (the chain heat band's `/20`) were already below AA on the canvas on main; the PR lists them as requests.
+    const over = (fg: string, a: number, bg: string) => {
+      const ch = (hex: string, i: number) => parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16);
+      return `#${[0, 1, 2].map((i) => Math.round(ch(fg, i) * a + ch(bg, i) * (1 - a)).toString(16).padStart(2, '0')).join('')}`;
+    };
+    for (const f of ['primary', 'danger', 'warn', 'gold', 'info'] as const) {
+      for (const a of [0.05, 0.08, 0.1, 0.12]) {
+        for (const bg of [surfaces.surface, surfaces.canvas]) {
+          expect(contrastRatio(status[f].text, over(status[f].text, a, bg)), `${f}/${a * 100} on ${bg}`).toBeGreaterThanOrEqual(4.6);
+        }
+      }
+    }
+  });
 });
 
 describe('DS3 · shape, elevation, focus (SPEC §4)', () => {

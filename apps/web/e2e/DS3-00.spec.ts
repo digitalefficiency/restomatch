@@ -310,4 +310,24 @@ test.describe('7 · the token lab shows the new roles', () => {
     await expect(row.locator('li')).toHaveCount(7);
     for (const name of ['primary-dot', 'danger-dot', 'warn-dot + ring', 'gold-dot (ok)', 'info-dot', 'neutral-dot', 'rule']) await expect(row).toContainText(name);
   });
+
+  test('the amber dot carries its 1.5 px ring; in forced colours a dot keeps its colour (forced-color-adjust: none, as the reference)', async ({ page }) => {
+    await setLang(page, 'he');
+    await page.goto(LAB);
+    const dot = page.getByTestId('lab-indicators').locator('li', { hasText: 'warn-dot + ring' }).locator('span').first();
+    expect(await dot.evaluate((el) => getComputedStyle(el).boxShadow)).toContain(`${rgb(indicator.warnRing)} 0px 0px 0px 1.5px inset`);
+
+    // Control: the same fill without the opt-out, so the test proves the emulation really forces colours.
+    await page.evaluate(() => {
+      const probe = document.createElement('span');
+      probe.id = 'ds3-dot-probe';
+      probe.className = 'inline-block h-2 w-2 bg-warn-dot';
+      document.body.append(probe);
+    });
+    const probe = page.locator('#ds3-dot-probe');
+    expect(await probe.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(rgb(indicator.warn));
+    await page.emulateMedia({ forcedColors: 'active' });
+    expect(await probe.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe(rgb(indicator.warn));
+    expect(await dot.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(rgb(indicator.warn));
+  });
 });
