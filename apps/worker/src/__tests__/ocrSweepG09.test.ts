@@ -69,7 +69,15 @@ async function invoice(rid: string, key: string, opts: { status: string; age: nu
 }
 
 const channels = new Map<string, string>();
-async function ingestPage(rid: string, invoiceId: string, opts: { sender?: string; at?: Date; error?: string } = {}) {
+/**
+ * `onEra` (default true): the page arrived while multiPage was ON — G-09 wrote its
+ * invoice_scans mapping (round 9 L6: main never writes one for an ingested page).
+ */
+async function ingestPage(rid: string, invoiceId: string, opts: { sender?: string; at?: Date; error?: string; onEra?: boolean } = {}) {
+  if (opts.onEra !== false) {
+    const [has] = await db.select({ id: invoiceScans.invoiceId }).from(invoiceScans).where(eq(invoiceScans.invoiceId, invoiceId));
+    if (!has) await db.insert(invoiceScans).values({ invoiceId, restaurantId: rid, storagePath: `${rid}/scan-a1-0000aaaa.jpg`, mimeType: 'image/jpeg' });
+  }
   if (!channels.has(rid)) {
     const [c] = await db
       .insert(ingestChannels)
@@ -125,7 +133,16 @@ beforeAll(async () => {
   await ingestPage(OFF, off);
   // Switch-OFF = zero change: a restaurant that never had multi-page is untouched.
   const never = await invoice(NEVER, 'heldNever', { status: 'matched', age: 40, url: `${NEVER}/scan-h1-0000000c.jpg` });
-  await ingestPage(NEVER, never);
+  await ingestPage(NEVER, never, { onEra: false });
+  // Round 9 (L6): a tenant whose features merely STORE multiPage:false (never ON when the
+  // page arrived — no G-09 mapping) is exactly main: never released by the sweep.
+  const storedFalse = await invoice(OFF, 'heldStoredFalse', { status: 'matched', age: 40, url: `${OFF}/scan-h1-0000000f.jpg` });
+  await ingestPage(OFF, storedFalse, { sender: '9790', onEra: false });
+  // Round 9 (L11): with the switch OFF, the 'unsettled' backstop enqueues nothing (settle is a no-op).
+  const stalledOff = await invoice(OFF, 'stalledComposedOff', { status: 'parsed', age: 20, url: `${OFF}/scan-h1-00000010.pdf`, pages: 2 });
+  await db.update(invoices).set({ ocrPayload: { raw: { ocrFailed: true, reason: 'stalled' } } as never }).where(eq(invoices.id, stalledOff));
+  await db.insert(auditLog).values({ restaurantId: OFF, action: 'document.reopened_for_ocr', entityType: 'invoice', entityId: stalledOff });
+  await ingestPage(OFF, stalledOff, { sender: '9791' });
   await invoice(A, 'notIngested', { status: 'matched', age: 40, url: `${A}/scan-h1-00000004.jpg` });
   // Round 8: a held page whose own window chain FINISHED (skipped) is still released.
   const fin = await invoice(A, 'heldFinishedWindow', { status: 'matched', age: 40, url: `${A}/scan-h1-0000000d.jpg` });
@@ -209,7 +226,7 @@ describe('G-09 sweep', () => {
     const [st] = await jobs('match-invoice', ids.stalledComposed!);
     expect(st).toMatchObject({ dedupe_key: `g09-unsettled-${ids.stalledComposed}-${hour}` });
     expect(st!.payload).toMatchObject({ g09Window: true });
-    for (const k of ['heldYoung', 'notIngested', 'heldDuplicate', 'heldSlowSibling', 'heldLiveSibling', 'heldNever']) {
+    for (const k of ['heldYoung', 'notIngested', 'heldDuplicate', 'heldSlowSibling', 'heldLiveSibling', 'heldNever', 'heldStoredFalse', 'stalledComposedOff']) {
       expect(await jobs('match-invoice', ids[k]!)).toHaveLength(0);
     }
     expect(mine(res.requeued)).toEqual([]); // idempotent

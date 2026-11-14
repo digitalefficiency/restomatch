@@ -32,6 +32,7 @@ import { formatDateTime, formatNumber } from '@/lib/i18n/format';
 import { originalProps } from '@/lib/i18n/original';
 import { ingest } from '@/lib/i18n/messages/ingest';
 import { trpc } from '@/lib/trpc/client';
+import { REFUSALS } from './refusals';
 
 type Kind = 'whatsapp' | 'email';
 
@@ -122,21 +123,7 @@ const KNOWN_ERRORS = [
   'page_too_large',
   'page_separate',
   'page_unreadable_closed',
-] as const;
-/** Named refusals of ingest.resolvePageFlag, shown as copy. */
-const REFUSALS = [
-  'not_flagged',
-  'not_a_duplicate',
-  'approved_or_paid',
-  'has_claim',
-  'decided',
-  'linked',
-  'multi_page',
-  'too_large',
-  'too_many_pages',
-  'reocr_not_enabled',
-  'corrected',
-  'not_unreadable',
+  'page_checked_together',
 ] as const;
 /** Flags that still ask a person something (page_separate is already answered). */
 const PAGE_QUESTIONS: readonly string[] = [
@@ -150,6 +137,8 @@ const PAGE_QUESTIONS: readonly string[] = [
 ];
 /** Page questions whose honest next step is to look at both invoices together. */
 const COMPARE: readonly string[] = ['page_not_merged', 'page_merge_blocked', 'page_too_large'];
+/** Page questions a person already answered (round 9: calm, never "an error"). */
+const ANSWERED: readonly string[] = ['page_separate', 'page_unreadable_closed', 'page_checked_together'];
 const shekels = (v: string | null | undefined) => {
   const n = v == null ? NaN : Number(v);
   return Number.isFinite(n) ? n : undefined;
@@ -359,7 +348,8 @@ export function InboxClient(props: Props) {
                                 d.status === 'failed' || d.error === 'page_duplicate' ? 'text-danger' : 'text-muted',
                               )}
                             >
-                              <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+                              {/* An answered page question reads calmly (no warning glyph). */}
+                              {ANSWERED.includes(d.error) ? null : <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />}
                               {errorText(d.error)}
                             </span>
                           ) : null}
@@ -463,7 +453,7 @@ export function InboxClient(props: Props) {
                                 >
                                   {t('inbox.pageDeleteDuplicate')}
                                 </Button>
-                              ) : COMPARE.includes(d.error) && d.relatedInvoiceId ? (
+                              ) : COMPARE.includes(d.error) ? (
                                 <LinkButton
                                   href={`/dashboard/inbox/compare?invoice=${d.invoiceId}`}
                                   size="sm"
@@ -489,10 +479,12 @@ export function InboxClient(props: Props) {
                                   {t('inbox.pageCloseUnreadable')}
                                 </Button>
                               ) : null}
-                              {d.error !== 'page_unreadable' ? (
+                              {/* Round 9 (L12): a "same invoice?" question is answered on the compare page
+                                  only, where "separate" asks first with both ₪ — never one tap here. */}
+                              {d.error !== 'page_unreadable' && !COMPARE.includes(d.error) ? (
                                 <Button
                                   size="sm"
-                                  variant={COMPARE.includes(d.error) && d.relatedInvoiceId ? 'secondary' : d.error === 'page_duplicate' ? 'secondary' : 'primary'}
+                                  variant={d.error === 'page_duplicate' ? 'secondary' : 'primary'}
                                   className="min-h-11"
                                   disabled={resolvePage.isPending}
                                   onClick={() =>

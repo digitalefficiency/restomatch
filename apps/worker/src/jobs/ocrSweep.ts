@@ -40,7 +40,7 @@
  * retry could only be refused ('disabled') or re-stub the demo, so with nobody
  * listed the sweep does nothing.
  */
-import { WINDOW_MAX_ATTEMPTS } from '@restomatch/api';
+import { multiPageEnabled, WINDOW_MAX_ATTEMPTS } from '@restomatch/api';
 import type { Sql } from '@restomatch/queue';
 import { insertJob } from '@restomatch/queue';
 import { makeWorker, workerSql, type WorkerJob } from '../queue';
@@ -223,6 +223,10 @@ export async function runOcrSweep(
        AND coalesce(i.updated_at, i.created_at) >= ${pathSince}
        AND EXISTS (SELECT 1 FROM ingest_documents d
                     WHERE d.invoice_id = i.id AND d.restaurant_id = i.restaurant_id AND d.status = 'registered')
+       -- Round 9 (L6): the page arrived while the switch was really ON — G-09 writes its
+       -- invoice_scans mapping only then (main never writes one for an ingested page). A
+       -- tenant whose features merely STORE multiPage:false stays exactly as main.
+       AND EXISTS (SELECT 1 FROM invoice_scans sc WHERE sc.invoice_id = i.id AND sc.restaurant_id = i.restaurant_id)
        AND NOT EXISTS (SELECT 1 FROM ingest_documents d
                         WHERE d.invoice_id = i.id AND d.restaurant_id = i.restaurant_id AND d.error = 'page_duplicate')
        AND NOT EXISTS (
@@ -269,10 +273,14 @@ export async function runOcrSweep(
   // Round 8 (M12): a G-09 re-read that ended outside settle (stall recovery
   // dead-letters the job and marks the invoice failed, never settling) still
   // reaches the failed-re-read guard: settle-aware job, last attempt.
-  const unsettled = await sql<Array<{ id: string; restaurant_id: string }>>`
+  // Round 9 (L11): settle is a no-op with the switch OFF (or killed) — never enqueue one.
+  const multiPageLive = multiPageEnabled({ features: { multiPage: true } });
+  const unsettled = !multiPageLive ? [] : await sql<Array<{ id: string; restaurant_id: string }>>`
     SELECT i.id, i.restaurant_id
       FROM invoices i
      WHERE i.restaurant_id::text = ANY(string_to_array(${only.join(',')}, ','))
+       AND EXISTS (SELECT 1 FROM restaurants r
+                    WHERE r.id = i.restaurant_id AND (r.settings -> 'features' ->> 'multiPage') = 'true')
        AND i.status <> 'ocr_pending'
        AND coalesce((i.ocr_payload -> 'raw' ->> 'ocrFailed')::boolean, false)
        AND coalesce(i.updated_at, i.created_at) >= ${pathSince}

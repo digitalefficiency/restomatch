@@ -7,6 +7,7 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { ingest } from '@/lib/i18n/messages/ingest';
 import { formatIls } from '@/lib/money';
 import { trpc } from '@/lib/trpc/client';
+import { refusalOf } from '../refusals';
 
 type Action = 'separate' | 'delete_duplicate' | 'close_unreadable' | 'checked_together';
 const PAGE_ONE = ['page_not_merged', 'page_merge_blocked', 'page_too_large'];
@@ -57,8 +58,16 @@ export function PageAnswers(props: {
       router.push('/dashboard/approvals');
       router.refresh();
     } catch (err) {
-      const msg = err instanceof Error && /[֐-׿]/.test(err.message) ? err.message : t('errors.unknown');
+      // Round 9 (L14): a named refusal reads as a sentence (shared with the inbox); a
+      // page someone else already answered refreshes so no stale button stays.
+      const refusal = refusalOf(err);
+      const msg = refusal
+        ? t(`refusals.${refusal}`)
+        : err instanceof Error && /[֐-׿]/.test(err.message)
+          ? err.message
+          : t('errors.unknown');
       toast.error(t('inbox.actionFailed', { message: msg }));
+      if (refusal === 'not_flagged') router.refresh();
     }
   }
   const ils = (v: number | null) => (v === null ? '—' : formatIls(v, { locale }));

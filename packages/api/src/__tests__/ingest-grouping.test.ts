@@ -1499,7 +1499,10 @@ describe('round 8 · M3/M7: inbox approval is per page (own supplier); page 1 wa
     expect(r1.invoiceIds).toHaveLength(1);
     expect((await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.id, d2!.id)))[0]!.status).toBe('needs_review');
     // page 1 read: a same-sender page in its window still waits for approval → held, never matched alone
+    delayedCalls = [];
     expect(await ocr(r1.invoiceId!, ACME)).toMatchObject({ hold: true, holdReason: 'sibling_pending', pendingReview: true });
+    // round 9 (L1/L8): the hold has its own scheduled, settle-aware re-check (never only the sweep)
+    expect(delayedCalls.map((c) => c.invoiceId)).toEqual([r1.invoiceId]);
     const r2 = await caller.ingest.approveDocument({ documentId: d2!.id, supplierId: A.supplierId });
     expect(await ocr(r2.invoiceId!, { ...ACME, invoiceNumber: null })).toMatchObject({ absorbed: true, mergedInto: r1.invoiceId });
   });
@@ -1684,6 +1687,20 @@ describe('round 7 · R6–R9', () => {
     expect(after!.invoiceNumber).toBeNull();
     const audit = await ownerDb.select().from(auditLog).where(eq(auditLog.entityId, p1!));
     expect(audit.find((a) => a.action === 'document.reopened_for_ocr')?.before).toMatchObject({ invoiceNumber: 'A-733' });
+  });
+
+  it('round 9 (L4): a number a manager typed after the stall is never erased by the failed-re-read release', async () => {
+    const [p1, p2] = await pages(2, 'r9l4');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-944' });
+    expect((await ocr(p2!, NOHEAD)).absorbed).toBe(true);
+    // the composed read stalled and failed; a manager typed the real number meanwhile
+    await ownerDb
+      .update(invoices)
+      .set({ status: 'parsed', invoiceNumber: 'A-944-B', ocrPayload: { raw: { ocrFailed: true } } as never })
+      .where(eq(invoices.id, p1!));
+    expect((await settle(p1!)).flagged).toEqual([{ invoiceId: p1, reason: 'page_unreadable' }]);
+    const [after] = await ownerDb.select().from(invoices).where(eq(invoices.id, p1!));
+    expect(after!.invoiceNumber).toBe('A-944-B');
   });
 
   it("R8: page 1 a person corrected (hand lines / typed header) is never read away → page_merge_blocked", async () => {

@@ -55,7 +55,12 @@ export default async function PageQuestionPage({ searchParams }: { searchParams:
 
   return (
     <div className="space-y-4">
-      <SectionHeader level={1} title={t('inbox.compareTitle')} subtitle={t('inbox.compareSubtitle')} />
+      {/* Round 9 (L15): one invoice only (another supplier / unreadable page) → no "side by side" wording. */}
+      <SectionHeader
+        level={1}
+        title={other ? t('inbox.compareTitle') : t('inbox.compareTitleSingle')}
+        subtitle={other ? t('inbox.compareSubtitle') : t('inbox.compareSubtitleSingle')}
+      />
       <div className="flex flex-wrap items-center gap-2" role="note">
         <Badge tone={q.pageFlag === 'page_duplicate' ? 'danger-solid' : 'warning-solid'}>
           {q.pageFlag === 'page_duplicate' ? t('inbox.possibleDuplicate') : t('inbox.pageQuestion')}

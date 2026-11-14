@@ -748,10 +748,18 @@ export async function settleDocumentPages(
     if (failedComposed) {
       // Round 8: the read is gone, so is its claim on the number — a re-send of
       // the document is never blocked as its duplicate (the number is in the audit).
-      await tx
-        .update(invoices)
-        .set({ invoiceNumber: null, updatedAt: new Date() })
-        .where(and(eq(invoices.id, invoiceId), eq(invoices.restaurantId, restaurantId)));
+      // Round 9 (L4): only the number the re-read RESERVED (the latest reopen's audit
+      // before.invoiceNumber) — never a number a person typed after the stall.
+      await tx.execute(sql`
+        update ${invoices} i set invoice_number = null, updated_at = now()
+         where i.id = ${invoiceId} and i.restaurant_id = ${restaurantId}
+           and not coalesce((i.ocr_payload -> 'raw' ->> 'headerEntered')::boolean, false)
+           and not coalesce((i.ocr_payload -> 'raw' ->> 'manualHeader')::boolean, false)
+           and i.invoice_number is not distinct from (
+             select a.before ->> 'invoiceNumber' from ${auditLog} a
+              where a.entity_type = 'invoice' and a.entity_id = i.id and a.restaurant_id = i.restaurant_id
+                and a.action = ${REOPENED_FOR_OCR_ACTION}
+              order by a.at desc limit 1)`);
       await tx
         .update(ingestDocuments)
         .set({ error: 'page_unreadable', updatedAt: new Date() })
@@ -849,6 +857,10 @@ export async function settleDocumentPages(
           ocr: [],
           match: [],
           superseded: null,
+          // Round 9 (L1/L8): a scheduled, settle-aware re-check — if the page in review is
+          // rejected (or never approved), page 1 is released by its own chain, not the sweep.
+          // (The window gate suppresses this: it reschedules itself.)
+          delayed: { invoiceId, runAt: new Date(Math.max(until.getTime(), now.getTime()) + WINDOW_RETRY_MS), retry: true },
         };
       }
     }
