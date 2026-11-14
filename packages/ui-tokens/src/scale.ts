@@ -217,8 +217,9 @@ const t = (fs: number, lh: number): TypeStep => ({ fs: `${fs / 16}rem`, lh: `${l
 export const typeScaleV2: Record<string, TypeRoleV2> = {
   cell: { base: t(14, 22), compact: t(13, 20), field: t(16, 24), fw: 400, ls: '0' },
   'title-sm': { base: t(16, 24), field: t(18, 26), fw: 600, ls: '0' },
-  'title-md': { base: t(20, 28), field: t(20, 28), fw: 600, ls: '0' },
-  'title-lg': { base: t(24, 32), field: t(22, 30), fw: 600, ls: '0' },
+  // DS3 SPEC §7: in compact density a screen title is 20/26 (★ from DS3; nothing reads these roles yet).
+  'title-md': { base: t(20, 28), compact: t(20, 26), field: t(20, 28), fw: 600, ls: '0' },
+  'title-lg': { base: t(24, 32), compact: t(20, 26), field: t(22, 30), fw: 600, ls: '0' },
   'money-dense': { base: t(14, 22), compact: t(13, 20), field: t(16, 24), fw: 400, ls: '0' },
   'money-row': { base: t(16, 24), compact: t(14, 20), field: t(18, 26), fw: 600, ls: '0' },
   'money-card': { base: t(28, 36), compact: t(24, 32), field: t(28, 36), fw: 700, ls: '-0.01em' },

@@ -437,6 +437,8 @@
   --fw-display-lg: 700;
   --ls-display-lg: -0.02em;
   --decision-row-h: 64px;
+  --decision-row-pt: 7px;
+  --decision-row-pb: 8px;
   --btn-h-primary: 40px;
   --chip-h: 24px;
   --count-row-h: 72px;
@@ -481,6 +483,10 @@
 [data-density='compact'] {
   --fs-cell: 0.8125rem;
   --lh-cell: 1.25rem;
+  --fs-title-md: 1.25rem;
+  --lh-title-md: 1.625rem;
+  --fs-title-lg: 1.25rem;
+  --lh-title-lg: 1.625rem;
   --fs-money-dense: 0.8125rem;
   --lh-money-dense: 1.25rem;
   --fs-money-row: 0.875rem;
@@ -490,6 +496,8 @@
   --fs-id: 0.75rem;
   --lh-id: 1rem;
   --decision-row-h: 52px;
+  --decision-row-pt: 4px;
+  --decision-row-pb: 5px;
   --btn-h-primary: 32px;
   --chip-h: 20px;
   --nav-item-h: 32px;
@@ -499,6 +507,10 @@
 [data-density='default'] {
   --fs-cell: 0.875rem;
   --lh-cell: 1.375rem;
+  --fs-title-md: 1.25rem;
+  --lh-title-md: 1.75rem;
+  --fs-title-lg: 1.5rem;
+  --lh-title-lg: 2rem;
   --fs-money-dense: 0.875rem;
   --lh-money-dense: 1.375rem;
   --fs-money-row: 1rem;
@@ -508,6 +520,8 @@
   --fs-id: 0.8125rem;
   --lh-id: 1.25rem;
   --decision-row-h: 64px;
+  --decision-row-pt: 7px;
+  --decision-row-pb: 8px;
   --btn-h-primary: 40px;
   --chip-h: 24px;
   --count-row-h: 72px;
@@ -523,6 +537,10 @@
 [data-density='touch'] {
   --fs-cell: 0.875rem;
   --lh-cell: 1.375rem;
+  --fs-title-md: 1.25rem;
+  --lh-title-md: 1.75rem;
+  --fs-title-lg: 1.5rem;
+  --lh-title-lg: 2rem;
   --fs-money-dense: 0.875rem;
   --lh-money-dense: 1.375rem;
   --fs-money-row: 1rem;
@@ -535,6 +553,32 @@
   --chip-h: 28px;
   --nav-item-h: 44px;
   --cell-px: 16px;
+}
+/* DS3: density is fixed on a phone — compact type steps and dials fall back to default under a coarse pointer. */
+@media (pointer: coarse) {
+  [data-density='compact'] {
+    --fs-cell: 0.875rem;
+    --lh-cell: 1.375rem;
+    --fs-title-md: 1.25rem;
+    --lh-title-md: 1.75rem;
+    --fs-title-lg: 1.5rem;
+    --lh-title-lg: 2rem;
+    --fs-money-dense: 0.875rem;
+    --lh-money-dense: 1.375rem;
+    --fs-money-row: 1rem;
+    --lh-money-row: 1.5rem;
+    --fs-money-card: 1.75rem;
+    --lh-money-card: 2.25rem;
+    --fs-id: 0.8125rem;
+    --lh-id: 1.25rem;
+    --decision-row-h: 64px;
+    --decision-row-pt: 7px;
+    --decision-row-pb: 8px;
+    --btn-h-primary: 40px;
+    --chip-h: 24px;
+    --nav-item-h: 36px;
+    --icon-md: 16px;
+  }
 }
 /* DS2 field mode (C6): field type steps, ≥8.2:1 secondary text, no tertiary, field borders. */
 [data-mode='field'] {

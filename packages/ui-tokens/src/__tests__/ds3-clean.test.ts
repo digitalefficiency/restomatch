@@ -214,6 +214,35 @@ describe('DS3 · shape, elevation, focus (SPEC §4)', () => {
   });
 });
 
+describe('DS3 · density variables express SPEC §7 (the switch itself is DS3-06)', () => {
+  const css = cssVariables();
+  const block = (head: string) => {
+    const at = css.indexOf(head);
+    expect(at, head).toBeGreaterThan(-1);
+    return css.slice(at, css.indexOf('}', at));
+  };
+
+  it('compact: screen titles 20/26 and a queue row\'s block padding 4/5 (regular 7/8)', () => {
+    const compact = block("[data-density='compact'] {\n  --fs-cell"); // the v2 block (the v1 one sets --row-h)
+    for (const decl of ['--fs-title-lg: 1.25rem;', '--lh-title-lg: 1.625rem;', '--fs-title-md: 1.25rem;', '--lh-title-md: 1.625rem;', '--decision-row-pt: 4px;', '--decision-row-pb: 5px;']) {
+      expect(compact).toContain(decl);
+    }
+    const root = block(':root {\n  --c-surface-canvas');
+    expect(root).toContain('--decision-row-pt: 7px;');
+    expect(root).toContain('--decision-row-pb: 8px;');
+  });
+
+  it('a phone keeps regular density: a coarse pointer undoes every compact type step and dial', () => {
+    const floor = css.slice(css.indexOf("@media (pointer: coarse) {\n  [data-density='compact'] {"));
+    const body = floor.slice(0, floor.indexOf('}'));
+    for (const decl of ['--lh-title-lg: 2rem;', '--decision-row-pt: 7px;', '--decision-row-pb: 8px;', '--btn-h-primary: 40px;', '--chip-h: 24px;', '--nav-item-h: 36px;', '--fs-cell: 0.875rem;']) {
+      expect(body).toContain(decl);
+    }
+    // The floor comes after the compact block, so it wins at equal specificity.
+    expect(css.indexOf("@media (pointer: coarse) {\n  [data-density='compact'] {")).toBeGreaterThan(css.indexOf("[data-density='compact'] {"));
+  });
+});
+
 describe('DS3 · motion is SPEC §8 already (confirmed, not duplicated)', () => {
   it('durations and curves equal the spec table', () => {
     expect(motion.duration).toEqual({ micro: '100ms', short: '150ms', medium: '240ms', long: '400ms' });
