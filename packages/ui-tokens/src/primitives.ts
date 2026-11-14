@@ -1,34 +1,49 @@
 // DS2 tier 0: primitives (docs/ux/ds2/DS2-SPEC.md §5.1). PRIVATE to ui-tokens:
 // `index.ts` never re-exports this file, and only semantic roles reach components.
 //
-// The colour steps are today's anchors, re-keyed by lightness. They are the
-// exact values the v1 roles already use, plus the few that DS2 direction A adds
-// (border.rule, field secondary text, the v2 categorical set). Steps no role
-// needs yet are deliberately absent; they are added when a role asks for one.
+// DS3 (the clean finish, docs/ux/ds3/SPEC.md §2): the steps below are the clean
+// values, keyed by lightness as in DS2. The semantic roles read them, so a value
+// lives here once. Steps no role needs are deliberately absent; they are added
+// when a role asks for one. Values the clean spec does not name keep their DS2
+// value (marked "DS2").
 
 export const ramp = {
-  green: { 50: '#E7F3ED', 100: '#D3EADF', 200: '#A9D3C0', 700: '#066B4A', 800: '#05583D' },
-  red: { 50: '#FCECEF', 100: '#F8DADF', 200: '#EDB3BD', 700: '#B80F2A', 800: '#990C23' },
-  orange: { 50: '#FDF0E7', 100: '#F9E0CF', 200: '#EBBF9F', 600: '#B4531A', 700: '#A63D00', 800: '#893200' },
-  gold: { 50: '#F8F2DD', 100: '#EFE6C3', 200: '#D9C789', 700: '#755C00', 800: '#5F4A00' },
-  blue: { 50: '#EBF2FD', 100: '#D9E6FB', 200: '#B1CAF1', 700: '#1A5BC7', 800: '#154BA6' },
+  /** Basil: the one primary action of a screen and text links (SPEC §2 --brand). */
+  green: { 50: '#E0F9ED', 100: '#D0F3E3', 200: '#ADDEC7', 700: '#00573B', 800: '#00452D' },
+  /** Leaf: a counted line and money that came back, T3 (SPEC §2 --ok). */
+  leaf: { 50: '#E2FBE9', 100: '#D2F6DD', 200: '#ADE3BF', 500: '#0EA053', 700: '#00713E', 800: '#005D32' },
+  /** Tomato: leak and "blocks payment", nothing else (SPEC §2 --leak). */
+  red: { 50: '#FFF0EE', 100: '#FBE6E3', 200: '#FACAC5', 500: '#DD2729', 700: '#B7191C', 800: '#991416' },
+  /** Turmeric: waits for handling (SPEC §2 --warn); 400 is the dot, 600 its 3:1 ring. */
+  amber: { 50: '#FFF6E1', 100: '#FAEDD0', 200: '#F5D79A', 400: '#F2AB19', 600: '#B97500', 700: '#925000', 800: '#794201' },
+  /** Sea: selection and keyboard focus (SPEC §2 --info / --focus). */
+  blue: { 50: '#ECF4FF', 100: '#E1ECFB', 200: '#BFD5FD', 700: '#2256BB', 800: '#1A469B' },
+  /** DS2: data-viz only (price creep, a price rise). */
+  orange: { 600: '#B4531A' },
+  /** DS2: a categorical data-viz hue only (no money meaning since T3 is green). */
+  gold: { 700: '#755C00' },
   teal: { 700: '#007A85' },
   violet: { 700: '#8A4FBF' },
   plum: { 700: '#9C3D7A' },
-  /** Direction A keeps today's green-tinted grey (D5: no warm paper). */
+  /** Paper, steel and ink (D5: no warm paper; the clean neutrals are a hair less green than DS2's). */
   neutral: {
     0: '#FFFFFF',
-    25: '#F6F8F7',
-    50: '#EEF3F0',
-    100: '#E2EAE5',
-    150: '#E4EBE7',
-    200: '#D3DDD7',
-    500: '#7A8B82',
-    550: '#66756D',
-    600: '#5A6A62',
-    650: '#4A5D53',
-    750: '#3B4B43',
-    950: '#0F1F17',
+    // HELD at DS2's value until packages/api/src/__tests__/price-creep-digest.test.ts:124 stops pinning
+    // the literal (it reads this role through the e-mail); then SPEC §2's #F8FBF9 (see `held` in semantic.ts).
+    25: '#F6F8F7', // canvas
+    50: '#F1F5F3', // sunken
+    75: '#EBF0ED', // hover
+    150: '#E2E8E5', // rule
+    200: '#D4DBD8', // line
+    // HELD at DS2's value until apps/web/e2e/W1-09.spec.ts:495 stops pinning rgb(122, 139, 130);
+    // then SPEC §2's #808984 (see `held` in semantic.ts).
+    500: '#7A8B82', // line-strong
+    550: '#66756D', // DS2: field-mode border
+    600: '#5D6561', // fg3
+    650: '#49524E', // fg2
+    750: '#3B4B43', // DS2: field-mode secondary text
+    800: '#39413E', // neutral bold hover
+    950: '#121C17', // ink
   },
 } as const;
 

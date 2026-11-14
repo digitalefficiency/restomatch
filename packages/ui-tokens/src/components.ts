@@ -15,6 +15,10 @@ export type DialMode = 'compact' | 'default' | 'touch' | 'field';
 /** New dials (nothing reads them yet), direction A values per density × mode. */
 export const dials: Record<string, Partial<Record<DialMode, Px>>> = {
   'decision-row-h': { compact: 52, default: 64 },
+  // DS3 SPEC §7: a queue row's block padding, 7/8 regular → 4/5 compact (inline 12 in both).
+  // DS3 departs here from DS2's "layout spacing never changes with density"; nothing reads these yet.
+  'decision-row-pt': { compact: 4, default: 7 },
+  'decision-row-pb': { compact: 5, default: 8 },
   'btn-h-primary': { compact: 32, default: 40, touch: 48, field: 56 },
   'chip-h': { compact: 20, default: 24, touch: 28, field: 28 },
   'count-row-h': { default: 72, field: 72 },

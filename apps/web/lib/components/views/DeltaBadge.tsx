@@ -9,8 +9,8 @@ import { cn } from '../cn';
 import { deltaView, type Compare } from './state';
 
 /**
- * ▲/▼ change against the comparison period. For a leak, up is bad (danger) and
- * down is good (primary); `upIsGood` flips that for spend-like figures shown
+ * ▲/▼ change against the comparison period. For a leak, up is bad (ink words, the arrow in the
+ * leak colour; DS3) and down is good (primary); `upIsGood` flips that for spend-like figures shown
  * neutrally. Renders nothing when compare is off or `previous` is undefined (not compared). With `thinBase` (isThinBase)
  * it shows only the calm ₪ difference — never a % or a red ▲ against a period
  * that has almost no data.
@@ -83,7 +83,10 @@ export function DeltaBadge({
   const flat = v.kind === 'flat';
   const up = v.kind === 'change' && v.up;
   const diff = v.kind === 'change' ? v.diff : 0;
-  const tone = flat || neutral ? 'text-muted' : up === upIsGood ? 'text-primary' : 'text-danger';
+  // DS3: colour by meaning, and a money figure is never red. Bad keeps its words in ink; only the
+  // arrow and the drawn mark take the leak colour.
+  const bad = !flat && !neutral && up !== upIsGood;
+  const tone = flat || neutral ? 'text-muted' : bad ? 'text-fg' : 'text-primary';
   const Icon = flat ? Minus : up ? TrendingUp : TrendingDown;
   const pct = v.kind === 'change' && v.pct != null ? formatPercent(Math.abs(v.pct), locale, 1) : null;
   const text = flat
@@ -96,13 +99,13 @@ export function DeltaBadge({
       className={cn('inline-flex flex-wrap items-center gap-1 text-xs font-semibold', tone, className)}
       title={vs}
     >
-      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <Icon className={cn('h-3.5 w-3.5 shrink-0', bad && 'text-danger-dot')} aria-hidden="true" />
       {/* G11: the ▲/▼ mark is drawn, never typed. No UI face (Heebo, Plex) has U+25B2/U+25BC,
           so a text glyph was painted by a system font. Never mirrored (R1). */}
       {flat ? null : (
         <Triangle
           data-delta-mark={up ? 'up' : 'down'}
-          className={cn('h-2 w-2 shrink-0 fill-current', !up && 'rotate-180')}
+          className={cn('h-2 w-2 shrink-0 fill-current', !up && 'rotate-180', bad && 'text-danger-dot')}
           strokeWidth={0}
           aria-hidden="true"
         />

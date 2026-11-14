@@ -19,10 +19,11 @@ export function DeadlineChip({ due, today, className }: { due: Date | string; to
         ? t('ds.deadline.today', { date })
         : t('ds.deadline.left', { days, date });
   const tone = deadlineTone(days);
+  // DS3: the solid pill is only "חוסם תשלום"; a late deadline is the tinted red pill, a near one amber.
   return (
     <StatusChip
       tone={tone}
-      emphasis={tone === 'neutral' ? 'subtle' : 'bold'}
+      emphasis={tone === 'warn' ? 'bold' : 'subtle'}
       icon={<CalendarClock className="h-3.5 w-3.5" aria-hidden="true" />}
       label={label}
       className={className}

@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { cnMerge as cn } from '../cn';
-import { CountBadge } from '../feedback/StatusChip';
 
 export interface TabItem {
   href: string;
@@ -10,26 +9,29 @@ export interface TabItem {
 }
 
 /**
- * In-page navigation tabs (links, so each view has a URL): a 2 px primary
- * underline on the current one, `aria-current="page"`, counts as CountBadge.
- * Scrolls sideways on narrow screens instead of wrapping.
+ * In-page navigation tabs (links, so each view has a URL), in the clean finish (DS3 kit
+ * "לשוניות ומסננים"): every tab says how many wait in it — also when that is zero — as a quiet
+ * number; the current one is ink with a 2 px ink underline and `aria-current="page"`. 44 px on
+ * coarse pointers. Scrolls sideways on narrow screens instead of wrapping.
  */
 export function Tabs({ items, label, className }: { items: TabItem[]; label: string; className?: string }) {
   return (
-    <nav aria-label={label} className={cn('border-b border-line', className)}>
-      <ul className="-mb-px flex gap-1 overflow-x-auto">
+    <nav aria-label={label} className={cn('border-b border-line-rule', className)}>
+      <ul className="-mb-px flex gap-5 overflow-x-auto">
         {items.map((it) => (
           <li key={it.href} className="shrink-0">
             <Link
               href={it.href}
               aria-current={it.current ? 'page' : undefined}
               className={cn(
-                'inline-flex min-h-10 items-center gap-2 border-b-2 px-3 text-body-sm font-semibold transition-colors duration-micro',
-                it.current ? 'border-primary text-ink' : 'border-transparent text-muted hover:border-line-strong hover:text-ink',
+                'inline-flex min-h-10 items-center border-b-2 pb-2.5 pt-2 text-body-sm font-medium transition-colors duration-micro ease-standard [@media(pointer:coarse)]:min-h-11',
+                it.current ? 'border-fg text-fg' : 'border-transparent text-fg-secondary hover:text-fg',
               )}
             >
               {it.label}
-              {typeof it.count === 'number' ? <CountBadge count={it.count} /> : null}
+              {typeof it.count === 'number' && Number.isFinite(it.count) ? (
+                <span className="num ms-1.5 font-normal text-fg-tertiary">{it.count}</span>
+              ) : null}
             </Link>
           </li>
         ))}
