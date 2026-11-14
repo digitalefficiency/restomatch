@@ -388,6 +388,22 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
           </CalculationFold>
         </KitCard>
 
+        <KitCard id="kit-answer" title={c.cards.answer} note={c.notes.answer}>
+          <DataAnswer
+            question={d.question}
+            figures={[
+              { value: <Money value={760} context="tile" split />, caption: d.leakSince },
+              { value: <Money value={296} context="tile" split />, caption: d.unpaid },
+            ]}
+            facts={[d.checked, d.openGaps]}
+            action={
+              <Button variant="secondary" size="sm">
+                {d.toDecision}
+              </Button>
+            }
+          />
+        </KitCard>
+
         <KitCard id="kit-states" title={c.cards.states} note={c.notes.states} wide>
           <div className="grid gap-4 md:grid-cols-3">
             <div aria-busy="true" aria-label={d.loadingLabel}>
@@ -408,22 +424,6 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
               }
             />
           </div>
-        </KitCard>
-
-        <KitCard id="kit-answer" title={c.cards.answer} note={c.notes.answer}>
-          <DataAnswer
-            question={d.question}
-            figures={[
-              { value: <Money value={760} context="tile" split />, caption: d.leakSince },
-              { value: <Money value={296} context="tile" split />, caption: d.unpaid },
-            ]}
-            facts={[d.checked, d.openGaps]}
-            action={
-              <Button variant="secondary" size="sm">
-                {d.toDecision}
-              </Button>
-            }
-          />
         </KitCard>
 
         <KitCard id="kit-charts" title={c.cards.charts} note={c.notes.charts} wide>
