@@ -1,118 +1,55 @@
-import { auth } from '@/auth';
-import { createServerCaller } from '@/lib/trpc/server';
-import { SectionHeader } from '@/lib/components';
-import { settings as settingsMessages } from '@/lib/i18n/messages/settings';
+import type { Metadata } from 'next';
 import { getT } from '@/lib/i18n/server';
-import { hasPassword } from '@/lib/passwords';
-import { countUnusedRecoveryCodes, isTwoFactorEnabled } from '@/lib/totp';
-import { enabledFeatures } from '@/lib/ingest/features';
-import { ReferralCard } from '@/lib/growth/ReferralCard';
-import { AccountSection } from './account-section';
-import { SettingsForm } from './form';
-import { ProfileForm } from './profile-form';
-import { LetterheadForm } from './letterhead-form';
-import { DsrSection } from './dsr';
-import { TwoFactorSection } from './TwoFactorSection';
-import { PhoneSection } from './phone-section';
-import { RulesPanel } from './rules-panel';
+import { settings as settingsMessages } from '@/lib/i18n/messages/settings';
+import { LegacyHashRedirect } from './_components/misc';
+import { sectionById, sectionFromParam } from './_index/sections';
+import { AccountSettings } from './_sections/account';
+import { DisplaySettings } from './_sections/display';
+import { LetterheadSettings } from './_sections/letterhead';
+import { PrivacySettings } from './_sections/privacy';
+import { RestaurantSettings } from './_sections/restaurant';
+import { RulesSettings } from './_sections/rules';
+import { SecuritySettings } from './_sections/security';
+
+type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> };
+
+export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
+  const [t, sp] = await Promise.all([getT(settingsMessages), searchParams]);
+  const section = sectionById(sectionFromParam(sp.s));
+  const tt = t as unknown as (k: string) => string;
+  return { title: `${tt(section.titleKey)} · ${t('title')} — RestoMatch` };
+}
 
 /**
- * Settings. PERSONAL sections (language, password, devices, 2FA, DSR) are for
- * every role — a receiver must be able to turn on 2FA or set a password. The
- * RESTAURANT sections are owner-editable, read-only for manager + bookkeeper,
- * and hidden from receiver + chef (least privilege: they never need VAT or
- * matching tolerances).
+ * Settings (DS3-06, SPEC §10.5). One route; the open section is in the address
+ * (`?s=rules`), so a section is shareable, survives Back, and every setting has
+ * a link (`?s=rules#qtyPercent`) for the search field and the command palette.
+ * No `?s` opens "תצוגה", the first section of "אני", for every role. The frame
+ * (title, search, the two groups) is the layout. Each section re-checks the
+ * role on the server; restaurant sections are owner-edit / manager+bookkeeper
+ * read-only / absent for receiver and chef, as before.
  */
-export default async function SettingsPage() {
-  const caller = await createServerCaller();
-  const [memberships, session, t] = await Promise.all([
-    caller.onboarding.myMemberships(),
-    auth(),
-    getT(settingsMessages),
-  ]);
-
-  const userId = session?.user?.id;
-  const [twoFactorEnabled, recoveryRemaining, passwordSet] = userId
-    ? await Promise.all([isTwoFactorEnabled(userId), countUnusedRecoveryCodes(userId), hasPassword(userId)])
-    : [false, 0, false];
-
-  // Resolve the caller's role on the active restaurant (matching the layout's
-  // selection) to decide between editable / read-only / hidden.
-  const active =
-    memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
-  const role = active?.role ?? null;
-  const isOwner = role === 'owner';
-  const seesRestaurant = role === 'owner' || role === 'manager' || role === 'bookkeeper';
-
-  const [restaurantSettings, profile, letterhead, effective, history] = seesRestaurant
-    ? await Promise.all([
-        caller.settings.get(),
-        caller.settings.profile(),
-        caller.settings.letterhead(),
-        caller.settings.effective(),
-        caller.settings.history({ limit: 20 }),
-      ])
-    : [null, null, null, null, null];
-  const myPhone = await caller.settings.myPhone();
-  // Referral programme (wave 1, S15 — flag `growth`): owner/manager see the
-  // restaurant's code + stats; only the owner may redeem someone else's code.
-  const referralOn =
-    (role === 'owner' || role === 'manager') && (await enabledFeatures(active?.restaurantId)).includes('growth');
-
+export default async function SettingsPage({ searchParams }: Props) {
+  const sp = await searchParams;
+  const id = sectionFromParam(sp.s);
   return (
-    <div className="space-y-10">
-      <SectionHeader level={1} title={t('title')} className="mb-0" />
-      <div>
-        <SectionHeader title={t('sections.accountTitle')} subtitle={t('sections.accountSubtitle')} />
-        <AccountSection hasPassword={passwordSet} />
-      </div>
-      <div>
-        <SectionHeader title={t('sections.securityTitle')} subtitle={t('sections.securitySubtitle')} />
-        <TwoFactorSection initialEnabled={twoFactorEnabled} recoveryRemaining={recoveryRemaining} />
-      </div>
-      <div>
-        <SectionHeader title={t('phone.title')} />
-        <PhoneSection initial={myPhone.phone} />
-      </div>
-      {profile ? (
-        <div>
-          <SectionHeader title={t('sections.profileTitle')} subtitle={t('sections.profileSubtitle')} />
-          <ProfileForm initial={profile} canEdit={isOwner} />
-        </div>
-      ) : null}
-      {profile && letterhead ? (
-        <div id="letterhead" className="scroll-mt-24">
-          <SectionHeader title={t('sections.letterheadTitle')} subtitle={t('sections.letterheadSubtitle')} />
-          {/* Prefilled from the restaurant's name and ח״פ until the letterhead is saved. */}
-          <LetterheadForm
-            initial={{
-              legalName: letterhead.legalName ?? profile.name,
-              businessId: letterhead.businessId ?? (/^\d{9}$/.test(profile.businessId ?? '') ? profile.businessId! : ''),
-              address: letterhead.address ?? '',
-              phone: letterhead.phone ?? '',
-              email: letterhead.email ?? '',
-            }}
-            canEdit={role === 'owner' || role === 'manager'}
-          />
-        </div>
-      ) : null}
-      {effective ? (
-        <div>
-          <SectionHeader title={t('rules.title')} subtitle={t('rules.subtitle')} />
-          <RulesPanel rules={effective} history={history} />
-        </div>
-      ) : null}
-      {restaurantSettings ? (
-        <div>
-          <SectionHeader title={t('sections.matchingTitle')} subtitle={t('sections.matchingSubtitle')} />
-          <SettingsForm initial={restaurantSettings} canEdit={isOwner} effective={effective!} />
-        </div>
-      ) : null}
-      {referralOn ? <ReferralCard canRedeem={isOwner} /> : null}
-      <div>
-        <SectionHeader title={t('sections.privacyTitle')} subtitle={t('sections.privacySubtitle')} />
-        <DsrSection />
-      </div>
-    </div>
+    <>
+      <LegacyHashRedirect />
+      {id === 'account' ? (
+        <AccountSettings />
+      ) : id === 'security' ? (
+        <SecuritySettings />
+      ) : id === 'privacy' ? (
+        <PrivacySettings />
+      ) : id === 'restaurant' ? (
+        <RestaurantSettings />
+      ) : id === 'letterhead' ? (
+        <LetterheadSettings />
+      ) : id === 'rules' ? (
+        <RulesSettings />
+      ) : (
+        <DisplaySettings />
+      )}
+    </>
   );
 }

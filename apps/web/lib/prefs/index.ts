@@ -5,4 +5,4 @@
 export * from './schema';
 export { getDisplayChoices, setDisplayChoices, singleKeysEnabled, subscribeDisplay } from './store';
 export { PrefsProvider, usePrefs, type PrefsApi } from './PrefsProvider';
-export { TOUCH_QUERY, useIsTouch } from './media';
+export { NARROW_QUERY, TOUCH_QUERY, useIsNarrow, useIsTouch, useMediaMatch } from './media';

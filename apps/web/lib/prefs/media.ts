@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
 /**
  * "A phone" for the display preferences: no side menu (the shell shows it from
@@ -7,21 +7,32 @@ import { useSyncExternalStore } from 'react';
  * settings that do nothing (the side menu, single-key shortcuts) are absent.
  */
 export const TOUCH_QUERY = '(max-width: 1023px), (pointer: coarse)';
+/** No side menu: the shell shows it from 1024 px. Desk-only settings (side menu, single-key shortcuts) are absent below. */
+export const NARROW_QUERY = '(max-width: 1023px)';
 
-function subscribe(onChange: () => void): () => void {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {};
-  const mq = window.matchMedia(TOUCH_QUERY);
-  mq.addEventListener('change', onChange);
-  return () => mq.removeEventListener('change', onChange);
+const hasMatchMedia = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function';
+
+/** A media query as React state: false on the server and during hydration (the first HTML always matches), then live. */
+export function useMediaMatch(query: string): boolean {
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      if (!hasMatchMedia()) return () => {};
+      const mq = window.matchMedia(query);
+      mq.addEventListener('change', onChange);
+      return () => mq.removeEventListener('change', onChange);
+    },
+    [query],
+  );
+  const snapshot = useCallback(() => (hasMatchMedia() ? window.matchMedia(query).matches : false), [query]);
+  return useSyncExternalStore(subscribe, snapshot, serverSnapshot);
 }
 
-function snapshot(): boolean {
-  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-    ? window.matchMedia(TOUCH_QUERY).matches
-    : false;
-}
+const serverSnapshot = () => false;
 
-/** False on the server and during hydration (so the first HTML always matches), then the real answer. */
 export function useIsTouch(): boolean {
-  return useSyncExternalStore(subscribe, snapshot, () => false);
+  return useMediaMatch(TOUCH_QUERY);
+}
+
+export function useIsNarrow(): boolean {
+  return useMediaMatch(NARROW_QUERY);
 }

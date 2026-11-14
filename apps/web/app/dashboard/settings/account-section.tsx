@@ -3,9 +3,10 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
-import { CheckCircle2, KeyRound, Languages, LogOut, XCircle } from 'lucide-react';
+import { CheckCircle2, KeyRound, LogOut, XCircle } from 'lucide-react';
 import { logOutEverywhereAction } from '@/app/(auth)/actions';
-import { Button, Card } from '@/lib/components';
+import { Button } from '@/lib/components';
+import { SettingRow, SettingsRows } from './_components/ui';
 import { dirOf, LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE_SEC, type Locale } from '@/lib/i18n/config';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { settings } from '@/lib/i18n/messages/settings';
@@ -21,9 +22,9 @@ function applyDeviceLocale(target: Locale) {
 }
 
 /**
- * "My account" — available to EVERY role: the member's own app language (saved
+ * "חשבון" — available to EVERY role: the member's own app language (saved
  * on their membership so it follows them to new devices), the password entry
- * point (set / change) and "sign out of all devices".
+ * point (set / change) and "sign out of all devices". DS3-06: one row each.
  */
 export function AccountSection({ hasPassword }: { hasPassword: boolean }) {
   const t = useT(settings);
@@ -48,84 +49,82 @@ export function AccountSection({ hasPassword }: { hasPassword: boolean }) {
   ];
 
   return (
-    <div className="grid gap-4 md:grid-cols-3">
-      <Card flow elevated padding="lg">
-        <div className="mb-1 flex items-center gap-2">
-          <Languages className="h-4 w-4 text-primary" aria-hidden="true" />
-          <h3 className="text-base font-semibold text-ink">{t('account.languageTitle')}</h3>
-        </div>
-        <p className="mb-4 text-sm text-muted">{t('account.languageHint')}</p>
-        <div role="radiogroup" aria-label={t('account.languageTitle')} className="flex gap-2">
-          {options.map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              role="radio"
-              aria-checked={locale === value}
-              lang={value}
-              disabled={setMyLocale.isPending || refreshing}
-              onClick={() => {
-                setStatus(null);
-                setMyLocale.mutate({ locale: value });
-              }}
-              className={`rounded-xl border px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-60 ${
-                locale === value
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-line bg-surface-2 text-muted hover:text-ink'
-              }`}
+    <div className="space-y-2">
+      <SettingsRows>
+        <SettingRow
+          id="language"
+          label={t('account.languageTitle')}
+          hint={t('account.languageHint')}
+          control={
+            <div role="radiogroup" aria-label={t('account.languageTitle')} className="flex gap-2">
+              {options.map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={locale === value}
+                  lang={value}
+                  disabled={setMyLocale.isPending || refreshing}
+                  onClick={() => {
+                    setStatus(null);
+                    setMyLocale.mutate({ locale: value });
+                  }}
+                  className={`min-h-9 rounded-control px-4 text-body-sm font-semibold ring-1 ring-inset transition-colors duration-micro disabled:opacity-60 [@media(pointer:coarse)]:min-h-11 ${
+                    locale === value ? 'bg-primary/10 text-primary ring-primary' : 'bg-surface text-muted ring-line-strong hover:text-ink'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          }
+        />
+        <SettingRow
+          id="password"
+          label={t('account.passwordTitle')}
+          hint={hasPassword ? t('account.passwordSet') : t('account.passwordNone')}
+          control={
+            <Link
+              href="/set-password"
+              className="inline-flex min-h-9 items-center rounded-control bg-surface px-4 text-body-sm font-semibold text-ink ring-1 ring-inset ring-line-strong transition-colors duration-micro hover:text-primary [@media(pointer:coarse)]:min-h-11"
             >
-              {label}
-            </button>
-          ))}
-        </div>
-        {status ? (
-          <p
-            role="status"
-            className={`mt-3 flex items-center gap-1.5 text-xs font-medium ${status.ok ? 'text-primary' : 'text-danger'}`}
-          >
-            {status.ok ? (
-              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
-              <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
-            {status.ok ? t('account.languageSaved') : status.message}
-          </p>
-        ) : null}
-      </Card>
-
-      <Card flow elevated padding="lg">
-        <div className="mb-1 flex items-center gap-2">
-          <KeyRound className="h-4 w-4 text-primary" aria-hidden="true" />
-          <h3 className="text-base font-semibold text-ink">{t('account.passwordTitle')}</h3>
-        </div>
-        <p className="mb-4 text-sm text-muted">
-          {hasPassword ? t('account.passwordSet') : t('account.passwordNone')}
+              <KeyRound className="me-1.5 h-4 w-4" aria-hidden="true" />
+              {hasPassword ? t('account.passwordChangeCta') : t('account.passwordSetCta')}
+            </Link>
+          }
+        />
+        <SettingRow
+          id="devices"
+          label={t('account.devicesTitle')}
+          hint={t('account.devicesHint')}
+          control={
+            <form
+              action={logOutEverywhereAction}
+              onSubmit={(e) => {
+                if (!window.confirm(t('account.devicesConfirm'))) e.preventDefault();
+              }}
+            >
+              <Button type="submit" variant="secondary" size="sm">
+                <LogOut className="me-1.5 h-4 w-4" aria-hidden="true" />
+                {t('account.devicesCta')}
+              </Button>
+            </form>
+          }
+        />
+      </SettingsRows>
+      {status ? (
+        <p
+          role="status"
+          className={`flex items-center gap-1.5 text-caption font-medium ${status.ok ? 'text-primary' : 'text-danger'}`}
+        >
+          {status.ok ? (
+            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          {status.ok ? t('account.languageSaved') : status.message}
         </p>
-        <Link
-          href="/set-password"
-          className="inline-flex items-center rounded-xl border border-line bg-surface-2 px-4 py-2 text-sm font-semibold text-ink transition-colors hover:border-primary/40 hover:text-primary"
-        >
-          {hasPassword ? t('account.passwordChangeCta') : t('account.passwordSetCta')}
-        </Link>
-      </Card>
-
-      <Card flow elevated padding="lg">
-        <div className="mb-1 flex items-center gap-2">
-          <LogOut className="h-4 w-4 text-primary" aria-hidden="true" />
-          <h3 className="text-base font-semibold text-ink">{t('account.devicesTitle')}</h3>
-        </div>
-        <p className="mb-4 text-sm text-muted">{t('account.devicesHint')}</p>
-        <form
-          action={logOutEverywhereAction}
-          onSubmit={(e) => {
-            if (!window.confirm(t('account.devicesConfirm'))) e.preventDefault();
-          }}
-        >
-          <Button type="submit" variant="secondary">
-            {t('account.devicesCta')}
-          </Button>
-        </form>
-      </Card>
+      ) : null}
     </div>
   );
 }
