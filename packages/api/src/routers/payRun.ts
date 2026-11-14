@@ -39,6 +39,7 @@ function shiftDay(day: string, n: number): string {
   return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
 }
 import { financeProcedure, router } from '../trpc';
+import { acknowledgedFlagsSchema, assertPreflightClear, makePreflightProcedures } from '../payRun/procedures';
 
 /** The charts leak exclusion list (LEAK_EXCLUDED_TYPES) as SQL values. */
 const LEAK_EXCLUDED_SQL = sql.join(
@@ -548,6 +549,8 @@ const MARK_PAID_INPUT = z.object({
   paidOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   method: z.enum(['bank_transfer', 'check', 'cash', 'credit_card', 'other']),
   reference: z.string().trim().max(120).optional(),
+  /** AU-14: the soft pre-flight flags the person ticked in the confirm dialog, per invoice. */
+  acknowledgedFlags: acknowledgedFlagsSchema,
   clientMutationId: z.string().min(8).max(80),
 });
 const UNMARK_PAID_INPUT = z.object({
@@ -607,6 +610,9 @@ export function markPaidRefusal(
 }
 
 export const payRunRouter = router({
+  /** AU-14: `payRun.preflight` + `payRun.remittanceText` (payRun/procedures.ts). */
+  ...makePreflightProcedures(),
+
   /** Cheap: is the pay run on for the active restaurant (the approvals page links to it)? */
   enabled: financeProcedure.query(async ({ ctx }) => flagOn(ctx.db, ctx.session.restaurantId)),
 
@@ -793,6 +799,17 @@ export const payRunRouter = router({
     );
     if (!markPaidEnabled())
       throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'payRun.markPaidOff' });
+    // AU-14 pre-flight guard, before anything is written, for the whole batch: a bank-detail
+    // change the owner has not confirmed or a confirmed copy → PRECONDITION_FAILED (always on,
+    // AD12); a soft flag not acknowledged → PRECONDITION_FAILED. The acknowledged kinds go into
+    // each paid invoice's audit row (`automationId: 'A19'`) with the write below.
+    const acknowledged = await assertPreflightClear(
+      ctx.db,
+      ctx.session.restaurantId,
+      input.items.map((i) => i.invoiceId),
+      input.acknowledgedFlags,
+    );
+    void acknowledged;
     // TODO(H-03 + G-05, γ rebase): the guarded write. Until then the flag stays OFF.
     throw new TRPCError({ code: 'NOT_IMPLEMENTED', message: 'payRun.markPaidAwaitsH03' });
   }),
