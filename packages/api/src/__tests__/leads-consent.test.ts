@@ -40,6 +40,7 @@ describe('leads.create — marketing consent capture (E.7)', () => {
   it('does NOT stamp consent when the box is unchecked (default false)', async () => {
     await publicCaller().leads.create({
       name: 'משה לוי',
+      phone: '050-7654321',
       source: 'landing',
       marketingConsent: false,
       consentText: 'הוצג אך לא סומן',
@@ -51,7 +52,7 @@ describe('leads.create — marketing consent capture (E.7)', () => {
   });
 
   it('treats omitted consent as not-consented', async () => {
-    await publicCaller().leads.create({ name: 'אורח', source: 'landing' });
+    await publicCaller().leads.create({ name: 'אורח', email: 'guest@example.com', source: 'landing' });
     const [row] = await db.select().from(leads);
     expect(row?.marketingConsent).toBe(false);
     expect(row?.consentAt).toBeNull();
