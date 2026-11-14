@@ -58,7 +58,7 @@ export function ReferralCard({ canRedeem }: { canRedeem: boolean }) {
       {mine.data ? (
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <span className="text-sm text-muted">{t('referral.yourCode')}</span>
-          <code dir="ltr" className="rounded-lg bg-surface-2 px-3 py-2 font-mono text-lg tracking-widest text-ink">
+          <code dir="ltr" className="rounded-lg bg-surface-2 px-3 py-2 font-mono text-lg tracking-widest text-ink" data-record="">
             {mine.data.code}
           </code>
           <button

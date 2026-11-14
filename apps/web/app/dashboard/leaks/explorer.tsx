@@ -168,7 +168,7 @@ export async function LeakExplorer({ view }: { view: ViewState }) {
                   <>
                     <DeltaBadge current={cur.leakIls} previous={prevOf('leakIls')} compare={view.compare} thinBase={thinBase} vs={vs} showAmount />
                     {drivers && drivers.drivers.length > 0 ? (
-                      <ul className="mt-2 flex flex-wrap gap-2 [@media(pointer:fine)]:gap-1.5" aria-label={tl('hub.drivers.label')} data-testid="leak-drivers">
+                      <ul className="mt-2 flex flex-wrap gap-2 [@media(pointer:fine)]:gap-1.5" aria-label={tl('hub.drivers.label')} data-testid="leak-drivers" data-record="">
                         {drivers.drivers.map((d) => {
                           const name = labelOf(d.key, d.label, d.labelEn);
                           const sign = d.deltaAgorot > 0 ? '+' : '−';

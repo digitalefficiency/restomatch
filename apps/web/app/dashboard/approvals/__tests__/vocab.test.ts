@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createTranslator } from '@/lib/i18n/translate';
 import { approvals } from '@/lib/i18n/messages/approvals';
 import { formatIls } from '@/lib/money';
-import { canEscalate, discrepancyValue, toleranceLabel } from '../vocab';
+import { ageLabel, canEscalate, discrepancyValue, toleranceLabel } from '../vocab';
 
 const he = createTranslator('he', approvals);
 const en = createTranslator('en', approvals);
@@ -315,5 +315,27 @@ describe('pre-merge review findings (#141), web', () => {
   it('F7: the "mark as checked" done label equals the activity title the server writes', () => {
     expect(he('decision.reviewedDone')).toBe(DECISION_COPY.he.reviewed);
     expect(en('decision.reviewedDone')).toBe(DECISION_COPY.en.reviewed);
+  });
+});
+
+describe('ageLabel (#418: one string on the server and in every browser)', () => {
+  it('he / en from i18n plural keys: יום אחד · יומיים · N ימים / 1 day · N days; null on day 0', () => {
+    expect([1, 2, 3, 11, 20].map((n) => ageLabel(he, n))).toEqual(['יום אחד', 'יומיים', '3 ימים', '11 ימים', '20 ימים']);
+    expect([1, 2, 20].map((n) => ageLabel(en, n))).toEqual(['1 day', '2 days', '20 days']);
+    expect(ageLabel(he, 0)).toBeNull();
+  });
+
+  it('never uses Intl unit formatting (Node ICU "1 יום" vs Chromium "יום 1" broke hydration)', () => {
+    const spy = vi.spyOn(Intl, 'NumberFormat');
+    try {
+      for (const n of [1, 2, 5]) {
+        ageLabel(he, n);
+        ageLabel(en, n);
+      }
+      const unitCalls = spy.mock.calls.filter(([, o]) => (o as Intl.NumberFormatOptions | undefined)?.style === 'unit');
+      expect(unitCalls).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

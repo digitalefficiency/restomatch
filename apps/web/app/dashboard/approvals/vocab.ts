@@ -308,6 +308,14 @@ export function ageDays(from: Date | string, now: Date = new Date()): number {
   return Math.max(0, Math.floor((now.getTime() - new Date(from).getTime()) / 86_400_000));
 }
 
+/**
+ * The age words from i18n plural keys (#418), never Intl unit formatting: one
+ * deterministic string on the server and in every browser. Null for 0 days.
+ */
+export function ageLabel(t: T, days: number): string | null {
+  return days > 0 ? t('card.age', { count: days }) : null;
+}
+
 /** The CONFLICT payload a stale decision gets (packages/api DECIDED_CONFLICT_PREFIX). */
 export const DECIDED_CONFLICT_PREFIX = 'approvals.decided:';
 export interface DecidedConflict {

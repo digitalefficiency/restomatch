@@ -200,6 +200,48 @@ test('edit mode: saving re-matches automatically and shows ₪ before → after 
   await page.context().close();
 });
 
+/** Set the demo restaurant's ingest flags; returns its previous settings for the restore. */
+async function setIngestFlags(on: boolean): Promise<{ id: string; settings: unknown }> {
+  const sql = e2eSql();
+  try {
+    const [r] = await sql<{ id: string; settings: unknown }[]>`select id, settings from restaurants where name = ${DEMO_RESTAURANT_NAME} order by created_at limit 1`;
+    await sql`update restaurants set settings = jsonb_set(jsonb_set(coalesce(settings, '{}'::jsonb), '{features,ingestWhatsapp}', to_jsonb(${on}::boolean), true), '{features,ingestEmail}', to_jsonb(${on}::boolean), true) where id = ${r!.id}`;
+    return r!;
+  } finally {
+    await sql.end();
+  }
+}
+async function restoreSettings(prev: { id: string; settings: unknown }): Promise<void> {
+  const sql = e2eSql();
+  try {
+    await sql`update restaurants set settings = ${sql.json(prev.settings as never)} where id = ${prev.id}`;
+  } finally {
+    await sql.end();
+  }
+}
+
+test('register intake tab: hidden with the ingest flags off (no dead /dashboard/inbox link), shown when on (he 1440)', async ({ browser }) => {
+  const prev = await setIngestFlags(false);
+  try {
+    const page = await signedIn(browser, 'owner');
+    await page.goto('/dashboard/invoices');
+    await expect(page.getByTestId('invoice-register').first()).toBeVisible();
+    await expect(page.getByRole('group').getByRole('button', { name: /נכנסות/ })).toHaveCount(0);
+    await expect(page.locator('a[href^="/dashboard/inbox"]')).toHaveCount(0);
+    // A stale ?view=intake link lands on the default tab, never on a dead end.
+    await page.goto('/dashboard/invoices?view=intake');
+    await expect(page.getByTestId('invoice-register').first()).toBeVisible();
+    await expect(page.locator('a[href^="/dashboard/inbox"]')).toHaveCount(0);
+    await setIngestFlags(true);
+    await page.goto('/dashboard/invoices?view=intake');
+    await expect(page.getByRole('group').getByRole('button', { name: /נכנסות/ })).toHaveCount(1);
+    await expect(page.locator('a[href="/dashboard/inbox?filter=needs_review"]')).toBeVisible();
+    await page.context().close();
+  } finally {
+    await restoreSettings(prev);
+  }
+});
+
 test('inbox: real h1 + tabs, document preview, intake settings off the queue', async ({ browser }) => {
   const fname = `w202-${Date.now()}.pdf`;
   const sql = e2eSql();

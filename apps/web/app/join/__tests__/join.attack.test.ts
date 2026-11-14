@@ -1,12 +1,14 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
-import { eq, invitations, memberships } from '@restomatch/db';
+import { eq, invitations, memberships, userCredentials } from '@restomatch/db';
 import { authorizeCredentials, setUserPassword } from '@/lib/passwords';
 import {
   JOIN_CODE_MAX_ATTEMPTS,
   JOIN_CODE_MAX_TOTAL_ATTEMPTS,
+  JOIN_CODE_SENDS_PER_15_MIN,
   JOIN_CODE_TTL_MS,
   completeJoin,
+  invitedAccountExists,
   issueJoinCode,
   loadInvite,
 } from '../_lib/joinFlow';
@@ -158,5 +160,100 @@ describe('join attack: guessing', () => {
     const after = await completeJoin({ token, code, name: 'דנה', password: PASSWORD });
     expect(after.ok).toBe(false);
     expect(['locked', 'noCode']).toContain(after.ok ? 'ok' : after.reason);
+  });
+});
+
+describe('join attack: B5 — a tenant owner brute-forcing the join code', () => {
+  const credentialsOf = (uid: string) => ownerDb.select().from(userCredentials).where(eq(userCredentials.userId, uid));
+  const revoke = (id: string) => ownerDb.update(invitations).set({ status: 'revoked' }).where(eq(invitations.id, id));
+
+  it('revoke → re-invite against an EXISTING passwordless user never mints a code and never sets a password', async () => {
+    const rid = await makeRestaurant('מסעדה זדונית');
+    const email = uniqueEmail('passwordless');
+    const uid = await makeUser(email, 'Victim'); // e.g. a magic-link-only account in another tenant
+    const before = await userByEmail(email);
+    for (let round = 0; round < 6; round += 1) {
+      const { token, id } = await makeInvite({ restaurantId: rid, email });
+      expect(await invitedAccountExists(token)).toBe(true);
+      expect(await issueJoinCode(token)).toMatchObject({ ok: false, reason: 'hasPassword' });
+      for (const guess of ['000000', '123456', '999999']) {
+        const r = await completeJoin({ token, code: guess, name: 'Evil', password: PASSWORD });
+        expect(r.ok).toBe(false);
+      }
+      await revoke(id);
+    }
+    expect(await credentialsOf(uid)).toEqual([]);
+    expect(await authorizeCredentials({ email, password: PASSWORD })).toBeNull();
+    const after = await userByEmail(email);
+    expect(after?.name).toBe('Victim');
+    expect(after?.emailVerified?.getTime()).toBe(before?.emailVerified?.getTime());
+  });
+
+  it('even a CORRECT code minted before the account existed never sets a password on the existing row', async () => {
+    const rid = await makeRestaurant();
+    const email = uniqueEmail('late-account');
+    const { token } = await makeInvite({ restaurantId: rid, email });
+    const code = await issued(token);
+    const uid = await makeUser(email, 'Victim'); // passwordless row appears after the code
+    expect(await completeJoin({ token, code, name: 'Evil', password: PASSWORD })).toMatchObject({ ok: false, reason: 'hasPassword' });
+    expect(await credentialsOf(uid)).toEqual([]);
+    expect((await userByEmail(email))?.name).toBe('Victim');
+  });
+
+  it('a canonical alias of a passwordless account is sent to sign in too', async () => {
+    const rid = await makeRestaurant();
+    const n = `${Date.now()}${Math.floor(Math.random() * 1e6)}`;
+    const uid = await makeUser(`w307bpl${n}@gmail.com`, 'Owner of mailbox');
+    const { token } = await makeInvite({ restaurantId: rid, email: `w307b.pl${n}+bar@gmail.com` });
+    expect(await issueJoinCode(token)).toMatchObject({ ok: false, reason: 'hasPassword' });
+    expect(await credentialsOf(uid)).toEqual([]);
+  });
+
+  it('the guess ceilings are keyed on the ADDRESS: revoke → re-invite (and resend) keeps the count growing', async () => {
+    const rid = await makeRestaurant();
+    const email = uniqueEmail('rotating');
+    let now = Date.now();
+    let wrongs = 0;
+    // each round: a fresh invite (new id + token), one code, up to the window cap of wrong guesses, revoke
+    while (wrongs < JOIN_CODE_MAX_TOTAL_ATTEMPTS) {
+      const { token, id } = await makeInvite({ restaurantId: rid, email });
+      const code = await issued(token, now);
+      const wrong = code === '000000' ? '111111' : '000000';
+      for (let i = 0; i < JOIN_CODE_MAX_ATTEMPTS && wrongs < JOIN_CODE_MAX_TOTAL_ATTEMPTS; i += 1) {
+        expect(await completeJoin({ token, code: wrong, name: 'דנה', password: PASSWORD }, now)).toMatchObject({ reason: 'wrongCode' });
+        wrongs += 1;
+      }
+      await revoke(id);
+      now += JOIN_CODE_TTL_MS + 1000;
+    }
+    const { token } = await makeInvite({ restaurantId: rid, email });
+    const code = await issued(token, now);
+    expect(await completeJoin({ token, code, name: 'דנה', password: PASSWORD }, now)).toMatchObject({ reason: 'locked' });
+    expect(await userByEmail(email)).toBeNull();
+  });
+
+  it('the window cap is shared by every invite to the same address', async () => {
+    const rid = await makeRestaurant();
+    const rid2 = await makeRestaurant();
+    const email = uniqueEmail('two-tenants');
+    const a = await makeInvite({ restaurantId: rid, email });
+    const codeA = await issued(a.token);
+    for (let i = 0; i < JOIN_CODE_MAX_ATTEMPTS; i += 1) {
+      await completeJoin({ token: a.token, code: codeA === '000000' ? '111111' : '000000', name: 'דנה', password: PASSWORD });
+    }
+    const b = await makeInvite({ restaurantId: rid2, email });
+    const codeB = await issued(b.token);
+    expect(await completeJoin({ token: b.token, code: codeB, name: 'דנה', password: PASSWORD })).toMatchObject({ reason: 'locked' });
+  });
+
+  it(`code sends are capped per address (${JOIN_CODE_SENDS_PER_15_MIN} / 15 min), across invites`, async () => {
+    const email = uniqueEmail('send-cap');
+    for (let i = 0; i < JOIN_CODE_SENDS_PER_15_MIN; i += 1) {
+      const { token } = await makeInvite({ restaurantId: await makeRestaurant(), email });
+      expect((await issueJoinCode(token)).ok).toBe(true);
+    }
+    const { token } = await makeInvite({ restaurantId: await makeRestaurant(), email });
+    expect(await issueJoinCode(token)).toMatchObject({ ok: false, reason: 'rate' });
+    expect((await issueJoinCode(token, Date.now() + 16 * 60 * 1000)).ok).toBe(true);
   });
 });
