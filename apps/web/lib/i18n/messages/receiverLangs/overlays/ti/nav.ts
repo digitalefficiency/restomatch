@@ -101,6 +101,8 @@ export const nav: Shape<typeof he> = {
     platformAdmin: 'መቆጻጸሪ መድረኽ',
     help: 'ሓገዝ',
     accessibility: 'መግለጺ ተበጻሕነት',
+    privacy: 'ፖሊሲ ብሕትውና',
+    terms: 'ውዕላት ኣጠቓቕማ',
     contact: 'ርኸቡና',
     support: 'ሓገዝን ተበጻሕነትን',
     keyboardHint: 'Ctrl+B ንምጽባብ',

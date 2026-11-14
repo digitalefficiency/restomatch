@@ -100,6 +100,8 @@ export const en: Shape<typeof he> = {
     platformAdmin: 'Platform console',
     help: 'Help',
     accessibility: 'Accessibility statement',
+    privacy: 'Privacy policy',
+    terms: 'Terms of use',
     contact: 'Contact us',
     support: 'Help & accessibility',
     keyboardHint: 'Ctrl+B to collapse',

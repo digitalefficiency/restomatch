@@ -101,6 +101,8 @@ export const nav: Shape<typeof he> = {
     platformAdmin: 'คอนโซลแพลตฟอร์ม',
     help: 'ช่วยเหลือ',
     accessibility: 'คำชี้แจงการเข้าถึง',
+    privacy: 'นโยบายความเป็นส่วนตัว',
+    terms: 'ข้อกำหนดการใช้งาน',
     contact: 'ติดต่อเรา',
     support: 'ช่วยเหลือและการเข้าถึง',
     keyboardHint: 'Ctrl+B เพื่อย่อ',

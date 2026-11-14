@@ -101,6 +101,8 @@ export const nav: Shape<typeof he> = {
     platformAdmin: 'لوحة المنصة',
     help: 'مساعدة',
     accessibility: 'بيان إمكانية الوصول',
+    privacy: 'سياسة الخصوصية',
+    terms: 'شروط الاستخدام',
     contact: 'اتصل بنا',
     support: 'المساعدة وإمكانية الوصول',
     keyboardHint: 'Ctrl+B للطي',
