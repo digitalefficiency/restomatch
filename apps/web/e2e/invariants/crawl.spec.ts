@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { LEGAL_PAGE_PATHS } from '../../lib/legal/registry';
 import { REGISTRY } from '../../lib/nav/registry';
 import { OWNER_STATE } from '../env';
 import { expectDrillParity, expectNoZeroForUnknown, expectShekelLeftOfDigits, expectTotalsMatchRows } from '../helpers';
@@ -18,7 +19,6 @@ import { expectDrillParity, expectNoZeroForUnknown, expectShekelLeftOfDigits, ex
  */
 
 const CRAWL = process.env.G16_CRAWL === '1';
-const LEGAL = ['/privacy', '/terms', '/cookies', '/accessibility'];
 
 /** Static (no [param]), linked from nav, open to the owner. */
 export const CRAWL_ROUTES: string[] = REGISTRY.filter(
@@ -30,15 +30,29 @@ const SIZES = [
   { name: '1440', viewport: { width: 1440, height: 900 } },
 ] as const;
 
+test.describe('G-16 crawl · signed out', () => {
+  test.skip(!CRAWL, 'G-16 crawl: set G16_CRAWL=1 to run');
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  test('legal links are present on the landing page and answer 200', async ({ page, request }) => {
+    await page.goto('/');
+    for (const path of LEGAL_PAGE_PATHS) {
+      await expect(page.locator(`a[href="${path}"]`).first(), `${path} linked from /`).toBeAttached();
+      expect((await request.get(path)).status(), path).toBe(200);
+    }
+  });
+});
+
 test.describe('G-16 crawl', () => {
   test.skip(!CRAWL, 'G-16 crawl: set G16_CRAWL=1 to run');
   test.use({ storageState: OWNER_STATE });
   test.describe.configure({ timeout: 15 * 60_000 });
 
-  test('legal links are present and answer 200', async ({ page, request }) => {
-    await page.goto('/');
-    for (const path of LEGAL) {
-      await expect(page.locator(`a[href="${path}"]`).first(), `${path} linked from /`).toBeAttached();
+  // Signed in, `/` redirects to /dashboard: the app shell carries the legal links there.
+  test('legal links are present in the app shell and answer 200', async ({ page, request }) => {
+    await page.goto('/dashboard');
+    for (const path of LEGAL_PAGE_PATHS) {
+      await expect(page.locator(`a[href="${path}"]`).first(), `${path} linked from /dashboard`).toBeAttached();
       expect((await request.get(path)).status(), path).toBe(200);
     }
   });
