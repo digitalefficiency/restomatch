@@ -272,6 +272,10 @@ describe('invoice machine', () => {
       expect((badMethod as { code?: string }).code).toBe('BAD_REQUEST');
       const badAmount = await move('mark_paid', { expectedFrom: 'approved', payload: { paidAmount: '12.345' } }).catch((e: unknown) => e);
       expect((badAmount as { code?: string }).code).toBe('BAD_REQUEST');
+      for (const negative of ['-12.50', -12.5, '(12.50)']) {
+        const err = await move('mark_paid', { expectedFrom: 'approved', payload: { paidAmount: negative } }).catch((e: unknown) => e);
+        expect((err as { code?: string }).code, String(negative)).toBe('BAD_REQUEST'); // never a 500 from the ::numeric cast
+      }
       expect(await invoiceStatus()).toBe('approved');
       expect(await pay()).toEqual({ paid_at: null, paid_amount: null, payment_method: null, payment_ref: null });
       expect((await invoiceAudits()).map((a) => a.action)).toEqual(['invoice.approved_for_payment']);

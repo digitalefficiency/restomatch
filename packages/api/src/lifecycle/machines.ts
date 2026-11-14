@@ -80,6 +80,8 @@ async function writePayment(tx: Database, c: MoveContext<string, string>): Promi
   if (raw !== undefined && raw !== null && raw !== '') {
     const cell = parseNumberInput(typeof raw === 'number' ? String(raw) : String(raw), { scale: 2 });
     if (cell.kind !== 'ok') throw badPayment(`paidAmount "${String(raw)}" is not an amount in ₪`);
+    // parseNumberInput refuses a sign by default; guard anyway: 0072 forbids paid_amount < 0.
+    if (cell.scaled < 0) throw badPayment('paidAmount must be ≥ 0');
     paidAmount = shekelString(cell.scaled);
     amountSql = sql`${paidAmount}::numeric(12,2)`;
     source = 'payload';
