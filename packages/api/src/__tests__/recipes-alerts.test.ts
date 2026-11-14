@@ -113,9 +113,9 @@ describe('recipes.priceAlerts', () => {
     await setFlags(A.restaurantId, { recipes: true, dishPriceAlert: true });
   });
 
-  it('roles: chef/manager see alerts; receiver/bookkeeper are FORBIDDEN', async () => {
-    for (const role of ['chef', 'manager'] as const) await expect(caller(A, role).recipes.priceAlerts()).resolves.toMatchObject({ enabled: true });
-    for (const role of ['receiver', 'bookkeeper'] as const) await expect(caller(A, role).recipes.priceAlerts()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  it('roles: chef/manager/bookkeeper (I3, read-only) see alerts; the receiver is FORBIDDEN', async () => {
+    for (const role of ['chef', 'manager', 'bookkeeper'] as const) await expect(caller(A, role).recipes.priceAlerts()).resolves.toMatchObject({ enabled: true });
+    for (const role of ['receiver'] as const) await expect(caller(A, role).recipes.priceAlerts()).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
   it('recipes.changes now names the supplier of the driving price (additive field)', async () => {

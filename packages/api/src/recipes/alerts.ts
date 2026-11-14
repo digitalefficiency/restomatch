@@ -1,4 +1,4 @@
-import { parseScaled, roundHalfUp } from './cost';
+import { parseNumericScaled, roundHalfUp } from './cost';
 
 /**
  * Dish price alerts (flag `dishPriceAlert`). Pure: fed the rows of
@@ -67,8 +67,8 @@ export function dishPriceAlerts(rows: readonly ChangeRowLike[], targetBp: number
     if (r.costDeltaAgorot <= 0) continue;
     const d = r.riser;
     if (!d || d.deltaAgorot <= 0 || !d.priceBefore || !d.priceNow) continue;
-    const before = parseScaled(d.priceBefore, 4); // ₪ × 10^4
-    const now = parseScaled(d.priceNow, 4);
+    const before = parseNumericScaled(d.priceBefore, 4); // ₪ × 10^4
+    const now = parseNumericScaled(d.priceNow, 4);
     if (now <= before || before <= 0n) continue;
     out.push({
       recipeId: r.recipeId,

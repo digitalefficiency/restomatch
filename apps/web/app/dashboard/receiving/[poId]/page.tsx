@@ -96,6 +96,7 @@ export default async function ReceivingPoPage({
         status: existing.status,
         receivedAt: existing.receivedAt ? new Date(existing.receivedAt).toISOString() : null,
         version: existing.updatedAt ? new Date(existing.updatedAt).toISOString() : null,
+        closedUncounted: existing.closedUncounted ?? 0,
         lines: existing.lines.map((l) => ({
           grLineId: l.grLineId,
           poLineId: l.poLineId,

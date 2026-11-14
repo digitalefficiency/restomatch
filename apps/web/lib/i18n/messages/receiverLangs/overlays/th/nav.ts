@@ -13,6 +13,7 @@ export const nav: Shape<typeof he> = {
     labDesk: 'ห้องทดลองตาราง',
     labDeskRow: 'แถว',
     approvals: 'อนุมัติ',
+    approvalInvoice: 'ตัดสินใจใบแจ้งหนี้',
     payRun: 'รอบจ่ายเงิน',
     inbox: 'บิลขาเข้า',
     invoices: 'บิล',
@@ -28,6 +29,7 @@ export const nav: Shape<typeof he> = {
     supplierDetail: 'ผู้จำหน่าย (รายละเอียด)',
     supplierLeakCard: 'การ์ดเงินรั่วไหลของผู้จำหน่าย',
     exports: 'ปิดเดือนและส่งออก',
+    close: 'ปิดเดือน', // review
     reports: 'รายงาน',
     monthlyReport: 'รายงานประจำเดือน',
     digest: 'ตัวอย่างอีเมลประจำเดือน',
@@ -36,6 +38,7 @@ export const nav: Shape<typeof he> = {
     ordersNew: 'ใบสั่งซื้อใหม่',
     ordersCapture: 'สั่งซื้อจาก WhatsApp',
     orderDetail: 'ใบสั่งซื้อ (รายละเอียด)',
+    recoverySupplierSheet: 'หน้าผู้จำหน่าย',
     receiving: 'รับสินค้า',
     receivingPo: 'รับของที่ส่งมา',
     catalog: 'แคตตาล็อก',
@@ -52,10 +55,12 @@ export const nav: Shape<typeof he> = {
     inventoryCount: 'การนับ',
     inventoryDetail: 'รายละเอียดการนับ',
     chain: 'ภาพรวมเครือ',
+    chainMatrix: 'ทุกสาขา', // review
     branches: 'สาขา',
     team: 'ทีม',
     integrations: 'การเชื่อมต่อ',
     settings: 'ตั้งค่า',
+    automations: 'ระบบอัตโนมัติ',
   },
   bar: {
     today: 'วันนี้',
@@ -126,4 +131,25 @@ export const nav: Shape<typeof he> = {
     ownerNotified: 'แจ้งเจ้าของร้านแล้ว',
   },
   loading: 'กำลังโหลด',
+  badge: {
+    items: '{count} รายการ',
+    atRisk: '{amount} มีความเสี่ยง',
+    owed: '{amount} เครดิตที่ค้างอยู่',
+    blocking: 'ระงับการชำระเงิน',
+  },
+  bell: {
+    activity: 'เกิดอะไรขึ้น',
+    label: 'รอคุณอยู่',
+    unseen: 'ใหม่ {count}',
+    title: 'รอคุณอยู่',
+    empty: 'ฝั่งคุณเรียบร้อยแล้ว ✓',
+    close: 'ปิด',
+    all: 'ไปหน้าแรก',
+    failed: 'โหลดไม่สำเร็จ · ลองอีกครั้ง',
+    retry: 'ลองอีกครั้ง',
+  },
+  whereIs: {
+    belongs: 'รายการนี้เป็นของ {branch}',
+    open: 'เปิดที่นั่น',
+  },
 };

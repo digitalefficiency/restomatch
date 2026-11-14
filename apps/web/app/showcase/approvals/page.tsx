@@ -156,7 +156,7 @@ const rules = dayMemo((now): Rule[] => {
         actorRole: 'owner',
         decision: 'rejected',
         amount: CHERRY_EXCEPTION_ILS,
-        note: 'דרשנו הסבר מאבי הירקן',
+        note: 'ביקשנו הבהרה מאבי הירקן',
       },
     ],
   },
