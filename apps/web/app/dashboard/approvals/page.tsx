@@ -10,6 +10,7 @@ import { overview } from '@/lib/i18n/messages/overview';
 import { views as viewsNs } from '@/lib/i18n/messages/views';
 import { payRun as payRunNs } from '@/lib/i18n/messages/payRun';
 import { ApprovalsList, FiltersDisclosure, type QueueFilters } from './list';
+import { BranchStrip } from '../chain/branch-strip';
 import { discrepancyLabel, displayName, severityLabel } from './vocab';
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -100,6 +101,9 @@ async function ApprovalsContent({ searchParams }: { searchParams: SearchParams }
           ) : undefined
         }
       />
+
+      {/* W3-01: the per-branch strip (chain owners / bookkeepers with 2+ branches only). */}
+      <BranchStrip kind="approvals" then="/dashboard/approvals" />
 
       {showToolbar ? (
         <FiltersDisclosure active={activeFilters}>
