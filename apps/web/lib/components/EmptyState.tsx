@@ -37,12 +37,16 @@ const KIND_ICON: Partial<Record<EmptyStateKind, React.ReactNode>> = {
   permission: <Lock className="h-5 w-5" aria-hidden="true" />,
 };
 
-/** DS3: a round chip; calm green for earned calm (inbox zero), grey otherwise. No red: an empty or broken view is not money waiting. */
+/**
+ * DS3: a round chip. Earned calm (inbox zero) is the calm green of good news (`ok`, the kit's
+ * empty state); an invitation to set up keeps the brand tint; everything else is grey. No red: an
+ * empty or broken view is not money waiting.
+ */
 const KIND_CHIP: Record<EmptyStateKind | 'legacy', string> = {
   legacy: 'border-primary-subtle bg-primary-subtle text-primary',
   'first-use': 'border-primary-subtle bg-primary-subtle text-primary',
   'no-results': 'border-line bg-surface-sunken text-fg-secondary',
-  'inbox-zero': 'border-primary-subtle bg-primary-subtle text-primary',
+  'inbox-zero': 'border-ok-subtle bg-ok-subtle text-ok',
   error: 'border-line bg-surface-sunken text-fg-secondary',
   permission: 'border-line bg-surface-sunken text-fg-secondary',
 };

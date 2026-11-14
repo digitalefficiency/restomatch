@@ -3,7 +3,7 @@
 // Regenerate with `pnpm --filter @restomatch/ui-tokens tokens:css`; a unit test
 // fails when the committed block drifts from this output.
 
-import { focus, status, surfaces, text, dataViz, type StatusFamily } from './semantic';
+import { focus, indicator, status, surfaces, text, dataViz, type StatusFamily } from './semantic';
 import {
   containers,
   density,
@@ -35,7 +35,7 @@ const FAMILIES: StatusFamily[] = ['primary', 'danger', 'warn', 'gold', 'info', '
 /** Every colour variable, by name (without the `--c-` prefix). */
 export function colorVars(): Record<string, string> {
   const vars: Record<string, string> = {
-    // v1 names — unchanged values, still consumed by every page.
+    // v1 names — still consumed by every page; DS3 re-valued them (the clean finish).
     bg: surfaces.canvas,
     surface: surfaces.surface,
     'surface-2': surfaces.sunken,
@@ -65,6 +65,12 @@ export function colorVars(): Record<string, string> {
     vars[`${f}-subtle-hover`] = r.bgSubtleHover;
     vars[`${f}-border-subtle`] = r.borderSubtle;
   }
+  // DS3: status indicators — a dot, a bar, the fill of a round tick; never text (semantic.ts `indicator`).
+  vars['danger-dot'] = indicator.danger;
+  vars['warn-dot'] = indicator.warn;
+  vars['warn-dot-ring'] = indicator.warnRing;
+  vars['gold-dot'] = indicator.gold;
+  vars['neutral-dot'] = indicator.neutral;
   dataViz.categorical.forEach((hex, i) => (vars[`viz-${i + 1}`] = hex));
   dataViz.creep.forEach((step, i) => {
     vars[`creep-${i + 1}`] = step.bg;
@@ -189,7 +195,7 @@ export const tailwindPreset = {
     extend: {
       colors: {
         bg: v('bg'),
-        surface: { DEFAULT: v('surface'), sunken: v('surface-sunken'), selected: v('surface-selected'), raised: v('surface-raised'), overlay: v('surface-overlay') },
+        surface: { DEFAULT: v('surface'), sunken: v('surface-sunken'), selected: v('surface-selected'), raised: v('surface-raised'), overlay: v('surface-overlay'), hover: v('surface-hover') },
         'surface-2': v('surface-2'),
         line: { DEFAULT: v('line'), strong: v('line-strong'), field: v('line-field'), rule: v('border-rule') },
         ink: v('ink'),
@@ -199,11 +205,14 @@ export const tailwindPreset = {
         'on-bold': v('on-bold'),
         focus: v('focus'),
         primary: family('primary'),
-        danger: family('danger'),
-        warn: family('warn'),
-        gold: family('gold'),
+        // DS3 indicators (`bg-danger-dot`, `ring-warn-dot-ring` …): dots and bars only, never text.
+        danger: { ...family('danger'), dot: v('danger-dot') },
+        warn: { ...family('warn'), dot: v('warn-dot'), 'dot-ring': v('warn-dot-ring') },
+        gold: { ...family('gold'), dot: v('gold-dot') },
+        // DS3: `ok` names the T3 family by meaning for new code (SPEC §2 `--ok`); same variables as `gold`.
+        ok: { ...family('gold'), dot: v('gold-dot') },
         info: family('info'),
-        neutral: family('neutral'),
+        neutral: { ...family('neutral'), dot: v('neutral-dot') },
         ...Object.fromEntries(dataViz.categorical.map((_, i) => [`viz-${i + 1}`, v(`viz-${i + 1}`)])),
         ...Object.fromEntries(dataViz.creep.map((_, i) => [`creep-${i + 1}`, v(`creep-${i + 1}`)])),
         ...Object.fromEntries(dataViz.creep.map((_, i) => [`on-creep-${i + 1}`, v(`on-creep-${i + 1}`)])),
@@ -235,6 +244,7 @@ export const tailwindPreset = {
       // `border-danger-subtle` is the decorative border role, not the subtle fill.
       borderColor: {
         ...Object.fromEntries(FAMILIES.map((f) => [f, { subtle: v(`${f}-border-subtle`) }])),
+        ok: { subtle: v('gold-border-subtle') },
         // DS2: the only routes to a danger/warn rail (`border-s-t1`, `border-s-t2`).
         t1: v('emphasis-t1-rail'),
         t2: v('emphasis-t2-rail'),

@@ -28,6 +28,10 @@ const focusRing = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-pr
  *
  * Adoption is per area from wave 2; the shell focuses this `h1` after client
  * navigations (it carries `tabIndex={-1}`).
+ *
+ * DS3 (SPEC §6, §7): the title is the `title-lg` role — 24/32 at weight 600 (700 is kept for the
+ * monogram and the flyout header), 20/26 in compact density. `titleAside` sits beside the title,
+ * outside the `h1` (the heading stays the page's name): the place for the favourite star (DS3-02).
  */
 export function PageHeader({
   route,
@@ -36,6 +40,7 @@ export function PageHeader({
   primary,
   secondary,
   overflow,
+  titleAside,
   className,
 }: {
   /** Registry key; defaults to the route of the current path. */
@@ -47,6 +52,8 @@ export function PageHeader({
   primary?: React.ReactNode;
   secondary?: React.ReactNode;
   overflow?: PageHeaderOverflowItem[];
+  /** A control beside the title, outside the h1 — e.g. the favourite star (DS3-02). */
+  titleAside?: React.ReactNode;
   className?: string;
 }) {
   const t = useT(nav) as unknown as (key: string) => string;
@@ -74,9 +81,18 @@ export function PageHeader({
             {t(`links.${up.key}`)}
           </Link>
         ) : null}
-        <h1 tabIndex={-1} className="text-2xl font-bold leading-8 text-ink focus:outline-none">
-          {heading}
-        </h1>
+        {titleAside ? (
+          <div className="flex min-w-0 items-center gap-1.5">
+            <h1 tabIndex={-1} className="min-w-0 text-title-lg text-fg focus:outline-none">
+              {heading}
+            </h1>
+            {titleAside}
+          </div>
+        ) : (
+          <h1 tabIndex={-1} className="text-title-lg text-fg focus:outline-none">
+            {heading}
+          </h1>
+        )}
         {contextParts.length > 0 ? (
           <p className="mt-1 text-sm text-muted" data-testid="page-context">
             {contextParts.map((part, i) => (

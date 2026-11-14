@@ -82,7 +82,7 @@ describe('<Money> in the clean finish (SPEC §3)', () => {
       const html = render(h(Money, { value: 1104.8, context: 'line', split: true }), locale);
       expect(textOf(html)).toBe(formatIls(1104.8, { maximumFractionDigits: 2, locale }));
       expect(html).toMatch(/<span data-money="cur" class="[^"]*text-fg-tertiary[^"]*">₪<\/span>/);
-      expect(html).toMatch(/<span data-money="dec" class="text-fg-tertiary">\.80<\/span>/);
+      expect(html).toMatch(/<span data-money="dec" class="text-fg-tertiary[^"]*">\.80<\/span>/);
       expect(html).toContain('max(0.74em,var(--fs-caption))');
       expect(html).not.toMatch(/dir=/);
     }
@@ -96,6 +96,16 @@ describe('<Money> in the clean finish (SPEC §3)', () => {
     expect(green).toContain('text-primary');
     expect(green).not.toContain('text-fg-tertiary');
     expect(render(h(Money, { value: 296, context: 'line', split: true, quietParts: false }))).not.toContain('text-fg-tertiary');
+  });
+
+  it('split: inside a filled ancestor the quiet parts take the fill\'s word colour (never grey on a fill)', () => {
+    const html = render(h('span', { className: 'bg-primary-bold text-on-bold' }, h(Money, { value: 152.5, context: 'line', split: true })));
+    const cls = (part: string) => (html.match(new RegExp(`<span data-money="${part}" class="([^"]*)"`))?.[1] ?? '').split('&amp;').join('&');
+    const [cur, dec] = [cls('cur'), cls('dec')];
+    for (const cls of [cur, dec]) {
+      expect(cls).toContain('[.text-on-bold_&]:text-inherit');
+      expect(cls).toContain('[.text-on-primary_&]:text-inherit');
+    }
   });
 
   it('a money figure is never red, in any state', () => {
@@ -141,6 +151,8 @@ describe('the status pill (kit "סטטוס", SPEC §2 tiers)', () => {
 
   it('the word is ink on every tinted pill and white only on the solid one', () => {
     for (const pill of ['leak', 'warn', 'ok', 'info'] as const) expect(PILL_TONE[pill]).toContain('text-fg');
+    // good news is the leaf green of the ok family (SPEC §2 --ok-sub / --ok-bd), not the brand
+    expect(PILL_TONE.ok).toBe('border-ok-subtle bg-ok-subtle text-fg');
     expect(PILL_TONE.solid).toContain('text-on-bold');
     expect(PILL_TONE.neutral).toContain('text-fg-secondary');
     expect(PILL_TONE.neutral).not.toMatch(/warn|danger/);
@@ -149,14 +161,20 @@ describe('the status pill (kit "סטטוס", SPEC §2 tiers)', () => {
   it('renders a 6 px dot by default, an explicit icon instead, or nothing with icon={null}', () => {
     const dot = render(h(StatusChip, { tone: 'warn', label: 'ממתינה לתשובה' }));
     expect(dot).toContain('data-pill="warn"');
-    expect(dot).toMatch(/data-dot="warn" class="inline-block size-1\.5 shrink-0 rounded-full forced-color-adjust-none bg-warn-bold"/);
+    // DS3-00 indicator roles: the amber dot carries its 3:1 ring (SPEC §2 --warn-solid, --warn-ring).
+    expect(dot).toMatch(/data-dot="warn" class="inline-block size-1\.5 shrink-0 rounded-full forced-color-adjust-none bg-warn-dot ring-1 ring-warn-dot-ring"/);
     expect(render(h(StatusChip, { tone: 'neutral', label: 'x', icon: null }))).not.toContain('data-dot');
   });
 
   it('StatusDot is 8 px beside a label and 6 px inside a pill', () => {
     expect(render(h(StatusDot, { tone: 'leak' }))).toContain('size-2');
     expect(render(h(StatusDot, { tone: 'leak', size: 'sm' }))).not.toContain('size-2');
-    expect(DOT_TONE.leak).toBe('bg-danger-bold');
+    expect(DOT_TONE.leak).toBe('bg-danger-dot');
+    expect(DOT_TONE.ok).toBe('bg-ok-dot');
+    expect(DOT_TONE.neutral).toBe('bg-neutral-dot');
+    // the 8 px amber dot: an inset ring, so it stays 8 px
+    expect(render(h(StatusDot, { tone: 'warn' }))).toContain('ring-[1.5px] ring-inset ring-warn-dot-ring');
+    expect(render(h(StatusDot, { tone: 'leak' }))).not.toContain('ring-');
   });
 
   it('Badge draws the same shell with no dot; warning-solid is the amber pill', () => {
@@ -304,7 +322,7 @@ describe('change against a previous period (kit "שינוי מול תקופה ק
     const bad = render(h(Delta, { current: 846, previous: 760, goodWhen: 'down' }));
     expect(bad).toContain('data-delta="bad"');
     expect(bad).toMatch(/<span data-delta="bad" class="[^"]*text-fg[^"]*"/);
-    expect(bad).toMatch(/<svg[^>]*class="[^"]*text-danger/);
+    expect(bad).toMatch(/<svg[^>]*class="[^"]*text-danger-dot/);
     // the amount itself is never red
     expect(bad.replace(/<svg[\s\S]*?<\/svg>/g, '')).not.toContain('text-danger');
     const flat = render(h(Delta, { current: 760, previous: 760, goodWhen: 'down' }));
@@ -369,7 +387,8 @@ describe('the credit-request track (kit "מסלול של בקשת זיכוי")',
     expect(textOf(html)).not.toContain('never');
     expect(textOf(html)).toContain('· בוצע');
     expect(textOf(html)).toContain('· השלב הנוכחי');
-    expect(html).toContain('bg-warn-bold');
+    expect(html).toMatch(/data-rail-step="now"[^>]*><span aria-hidden="true" class="[^"]*bg-warn-dot[^"]*ring-4 ring-warn-subtle/);
+    expect(html).toContain('border-warn-dot-ring');
   });
 });
 
@@ -394,7 +413,7 @@ describe('loading, empty, error (kit "טעינה, ריק, שגיאה")', () => {
   it('an empty state is calm and can sit inside a card; an error has no red and no icon', () => {
     const inline = render(h(EmptyStateComp, { kind: 'inbox-zero', title: 'אין פערים פתוחים', description: 'נבדקו 35 חשבוניות', variant: 'inline' }));
     expect(inline).not.toContain('rounded-card border');
-    expect(inline).toContain('bg-primary-subtle');
+    expect(inline).toContain('bg-ok-subtle text-ok');
     const error = render(h(EmptyStateComp, { kind: 'error', title: 'הסכום לא נטען' }));
     expect(error).not.toMatch(/danger/);
     expect(error).not.toContain('<svg');
@@ -501,5 +520,48 @@ describe('tabs, filters and controls (kit "לשוניות ומסננים", SPEC 
     expect(html).toContain('bg-fg');
     expect(html).toContain('group-hover/tip:delay-500');
     expect(html).toContain('<kbd');
+  });
+});
+
+describe('charts (kit "גרפים", SPEC §10.1)', () => {
+  it('pace line: both series span the same days on one scale, step after, never mirrored', async () => {
+    const { PACE_BOX, pacePath, paceGeometry } = await import('../data-viz/PaceLine');
+    // the reference's own drawing: a 2-point running total holds, then rises at the next day
+    expect(pacePath([10, 20], 20)).toBe(`M0,${PACE_BOX.baseline} V33 H240 V2`);
+    const g = paceGeometry({ cur: [0, 5, 5, 9], prev: [2, 4, 8, 12] });
+    expect(g.end).toEqual({ x: PACE_BOX.width, y: 17.5 }); // 64 − 9/12 × 62: the larger series sets the scale
+    expect(g.prev).toMatch(/H240 V2$/); // the previous period's same days reach the top at the right edge
+    expect(paceGeometry({ cur: [3, 7], prev: null }).prev).toBeNull();
+    // nothing below the baseline, nothing above the box, even for a correction
+    expect(pacePath([4, -2], 4)).toBe(`M0,${PACE_BOX.baseline} V2 H240 V${PACE_BOX.baseline}`);
+  });
+
+  it('pace line: one figure named by its sentence, the drawing hidden, the legend readable; entry parts for the home', async () => {
+    const { PaceLine } = await import('../data-viz/PaceLine');
+    const html = render(h(PaceLine, { series: { cur: [0, 4, 9], prev: [1, 5, 11] }, curLabel: 'אוקטובר', prevLabel: 'ספטמבר, אותם ימים', label: 'הדליפה המצטברת מול אותם ימים בספטמבר', testId: 'pace' }));
+    expect(html).toMatch(/^<figure aria-label="הדליפה המצטברת מול אותם ימים בספטמבר" data-pace-line="" data-testid="pace"/);
+    expect(html).toMatch(/<svg viewBox="-2 -6 250 78"[^>]*aria-hidden="true"/);
+    expect(textOf(html)).toBe('אוקטוברספטמבר, אותם ימים');
+    for (const part of ['fade', 'draw', 'pop']) expect(html).toContain(`data-entry-part="${part}"`);
+    expect(html).toContain('pathLength="1"');
+    expect(html).not.toMatch(/#[0-9a-f]{3,6}\b/i); // colours are roles
+    // no previous period: no dashed line and no legend for it
+    const alone = render(h(PaceLine, { series: { cur: [0, 4, 9], prev: null }, curLabel: 'אוקטובר', prevLabel: 'ספטמבר, אותם ימים', label: 'x' }));
+    expect(alone).not.toContain('data-entry-part="fade"');
+    expect(textOf(alone)).toBe('אוקטובר');
+  });
+
+  it('split bar: the leak indicator solid, the second part hatched (pattern, not only colour), decorative unless named', async () => {
+    const { SplitBar } = await import('../data-viz/SplitBar');
+    const html = render(h(SplitBar, { first: 296, second: 464 }));
+    expect(html).toContain('aria-hidden="true"');
+    expect(html).not.toContain('role="img"');
+    expect(html).toContain('bg-danger-dot');
+    expect(html).toContain('repeating-linear-gradient(135deg,rgb(var(--c-danger-dot))');
+    expect(html.match(/forced-color-adjust-none/g)).toHaveLength(2);
+    expect(html).toContain('flex-grow:296');
+    const named = render(h(SplitBar, { first: 1, second: 0, label: 'שולם במלואו' }));
+    expect(named).toContain('role="img" aria-label="שולם במלואו"');
+    expect(named.match(/<i /g)).toHaveLength(1); // an empty part is not drawn
   });
 });

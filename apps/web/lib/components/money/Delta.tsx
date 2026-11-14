@@ -55,11 +55,12 @@ export function Delta({
       data-delta={meaning}
       className={cn(
         'inline-flex flex-wrap items-center gap-x-1.5 text-body-sm',
-        meaning === 'good' ? cn(TEXT_TONE.ok, 'font-medium') : meaning === 'bad' ? 'font-medium text-fg' : cn(TEXT_TONE.neutral, 'font-normal'),
+        // SPEC kit "שינוי": good in the brand green, bad in ink with the arrow in the leak indicator, flat grey.
+        meaning === 'good' ? 'font-medium text-primary' : meaning === 'bad' ? 'font-medium text-fg' : cn(TEXT_TONE.neutral, 'font-normal'),
         className,
       )}
     >
-      <Icon className={cn('h-4 w-4 shrink-0', meaning === 'bad' && TEXT_TONE.leak)} aria-hidden="true" />
+      <Icon className={cn('h-4 w-4 shrink-0', meaning === 'bad' && 'text-danger-dot')} aria-hidden="true" />
       {dir === 'same' ? (
         <span>{t(negligible ? 'ds.delta.negligible' : 'ds.delta.same')}</span>
       ) : (

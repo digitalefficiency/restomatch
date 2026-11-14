@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { expect, test, type Page } from '@playwright/test';
+import { channels, focus } from '@restomatch/ui-tokens';
 import { components } from '../lib/i18n/messages/components';
 import { marketing } from '../lib/i18n/messages/marketing';
 import { labEn, labHe } from '../app/dashboard/lab/tokens/copy';
@@ -10,7 +11,7 @@ import { ensurePasswordUser, loginViaMagicLink } from './helpers';
 /**
  * W1-01 · design-system foundation v2 — the acceptance list in
  * docs/ux/IMPLEMENTATION-PLAN.md §W1-01, checked in a real browser:
- *  2. one focus indicator (2 px #1A5BC7, offset 2) on every Tab stop, never hidden under chrome;
+ *  2. one focus indicator (2 px in the focus token's colour, offset 2) on every Tab stop, never hidden under chrome;
  *  3. reduced motion: nothing animates except `.motion-essential`;
  *  4. <Money>: ₪ at the visual left in Hebrew, no `dir`;
  *  5. Toast v2 timings, pause, stack and live regions;
@@ -22,7 +23,8 @@ import { ensurePasswordUser, loginViaMagicLink } from './helpers';
 const LAB = '/dashboard/lab/tokens';
 const ds = { he: { ...components.he.ds, lab: labHe }, en: { ...components.en.ds, lab: labEn } };
 const cookieLabel = { he: marketing.he.cookie.label, en: marketing.en.cookie.label };
-const FOCUS_RGB = 'rgb(26, 91, 199)';
+/** The focus colour as the browser reports it, read from the token (DS3: sea #2256BB → rgb(34, 86, 187)). */
+const FOCUS_RGB = `rgb(${channels(focus).split(' ').join(', ')})`;
 const AXE_SOURCE = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
 
 test.use({ storageState: OWNER_STATE });

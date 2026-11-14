@@ -80,8 +80,11 @@ const GAPS: GapRow[] = [
 ];
 
 /** Cumulative leak per day (the reference's pace line, in shekels). */
-const PACE_NOW = [0, 4, 10, 10, 18, 24, 31, 31, 31, 46, 56, 57, 61, 61, 61, 61, 72, 78, 87, 87, 98, 100];
-const PACE_PREV = [5, 11, 11, 11, 20, 20, 20, 28, 34, 34, 40, 40, 40, 40, 48, 48, 57, 61, 61, 61, 73, 80, 80, 95, 101];
+/** Running totals for days 1..22 of this month and the same days of the last one (demo values). */
+const PACE = {
+  cur: [0, 4, 10, 10, 18, 24, 31, 31, 31, 46, 56, 57, 61, 61, 61, 61, 72, 78, 87, 87, 92, 98],
+  prev: [5, 11, 11, 11, 20, 20, 20, 28, 34, 34, 40, 40, 48, 48, 57, 61, 61, 61, 73, 80, 95, 101],
+};
 
 function KitCard({ id, title, note, wide, children }: { id: string; title: string; note: string; wide?: boolean; children: React.ReactNode }) {
   return (
@@ -446,7 +449,7 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
             <div className="grid content-start gap-4">
               <div>
                 <p className="mb-2 text-caption text-fg-tertiary">{d.pace}</p>
-                <PaceLine current={PACE_NOW} previous={PACE_PREV} days={31} label={d.paceLabel} />
+                <PaceLine series={PACE} curLabel={d.paceCur} prevLabel={d.pacePrev} label={d.paceLabel} />
               </div>
               <div>
                 <p className="mb-2 text-caption text-fg-tertiary">{d.paid}</p>

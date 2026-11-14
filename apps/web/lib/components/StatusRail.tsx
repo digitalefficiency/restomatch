@@ -42,7 +42,7 @@ export function StatusRail({ steps, label, className }: { steps: RailStep[]; lab
               className={cn(
                 'absolute start-0.5 top-1 size-2.5 rounded-full',
                 s.state === 'done' && 'bg-fg',
-                s.state === 'now' && 'bg-warn-bold ring-4 ring-warn-subtle',
+                s.state === 'now' && 'border-[1.5px] border-warn-dot-ring bg-warn-dot ring-4 ring-warn-subtle',
                 s.state === 'todo' && 'bg-surface ring-2 ring-inset ring-line-strong',
               )}
             />

@@ -99,7 +99,7 @@ export function BreakdownChart({
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.key} className="border-t border-line transition-colors hover:bg-surface-2/60">
+              <tr key={r.key} className="border-t border-line transition-colors hover:bg-surface-sunken">
                 <td className={cn(cell, 'font-medium text-ink')}>{r.label}</td>
                 <td className={cn(cell, 'text-right font-semibold tabular-nums', isZero(r.value) ? 'text-subtle' : 'text-ink')}>{ils(r.value)}</td>
                 {countHeader ? (
