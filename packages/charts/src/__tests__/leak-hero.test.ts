@@ -11,6 +11,7 @@ import {
   poLines,
   products,
   purchaseOrders,
+  recoveryClaims,
   restaurants,
   suppliers,
   testDbUrl,
@@ -33,6 +34,9 @@ import { computeBranchSnapshot } from '../chain';
 const db = createDb(testDbUrl());
 
 async function resetDb() {
+  // A suite that ran earlier on the shared test DB (e.g. the worker's demo-seed
+  // tests) can leave recovery claims; they reference discrepancies, so clear first.
+  await db.delete(recoveryClaims);
   await db.delete(discrepancies);
   await db.delete(matchRuns);
   await db.delete(invoiceLines);
