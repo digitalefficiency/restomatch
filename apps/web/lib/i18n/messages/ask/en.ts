@@ -8,6 +8,8 @@ export const en: Shape<typeof he> = {
   label: 'Your question',
   submit: 'Ask',
   thinking: 'Checking your data…',
+  stop: 'Stop',
+  stopped: 'Stopped',
   suggestionsLabel: 'Common questions',
   suggestions: {
     leakChange: 'What changed in the leak this month?',

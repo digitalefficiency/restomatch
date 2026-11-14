@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Bot, Loader2, Send, User } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, ArrowLeft, Bot, Loader2, Send, Square, User } from 'lucide-react';
 import type { AskResult } from '@restomatch/api';
 import { trpc } from '@/lib/trpc/client';
 import { Badge, Button, Card, Textarea } from '@/lib/components';
@@ -14,6 +14,16 @@ import type { Translator } from '@/lib/i18n/translate';
 import type { Locale } from '@/lib/i18n/config';
 import { formatIls } from '@/lib/money';
 import { opsLines } from './ops-lines';
+import {
+  appendTurn,
+  autoSubmitQuestion,
+  loadThread,
+  saveThread,
+  settleTurn,
+  withoutQ,
+  type AskTurn,
+} from './thread';
+import { intentChip, intentCopy, intentFromCanned } from './intent';
 
 const SUGGESTIONS = [
   'leakChange',
@@ -30,7 +40,7 @@ const SUGGESTIONS = [
 ] as const;
 
 type T = Translator<typeof askNs.he>;
-type Turn = { id: number; question: string; result: AskResult | null; error: false | 'generic' | 'rateLimited' };
+type Turn = AskTurn & { result?: AskResult };
 // The offline facts bag is shaped per intent server-side (ask/offline.ts); read it loosely here.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Facts = Record<string, any>;
@@ -122,42 +132,90 @@ function citationValue(c: AskResult['citations'][number], locale: Locale): strin
   return formatNumber(c.value, locale);
 }
 
-export function AskClient({ claude, questionsLeftToday }: { claude: boolean; questionsLeftToday: number }) {
+export function AskClient({
+  claude,
+  questionsLeftToday,
+}: {
+  claude: boolean;
+  questionsLeftToday: number;
+}) {
   const t = useT(askNs);
   const locale = useLocale();
   const [question, setQuestion] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [left, setLeft] = useState(questionsLeftToday);
-  const idRef = useRef(0);
-  const mutation = trpc.ask.ask.useMutation();
+  const [pending, setPending] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const loadedRef = useRef(false);
+  const client = trpc.useUtils().client;
+
+  const storage = () => (typeof window === 'undefined' ? undefined : window.sessionStorage);
 
   async function submit(q: string) {
     const text = q.trim();
-    if (text.length < 2 || mutation.isPending) return;
-    const id = ++idRef.current;
-    setTurns((prev) => [...prev, { id, question: text, result: null, error: false }]);
+    if (text.length < 2 || pending) return;
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setTurns(
+      (prev) => appendTurn(prev, { id, question: text, answer: null, at: Date.now() }) as Turn[],
+    );
     setQuestion('');
+    const ac = new AbortController();
+    abortRef.current = ac;
+    setPending(true);
     try {
-      const result = await mutation.mutateAsync({ question: text, locale });
-      setTurns((prev) => prev.map((x) => (x.id === id ? { ...x, result } : x)));
+      const result = await client.ask.ask.mutate({ question: text, locale }, { signal: ac.signal });
+      setTurns((prev) => settleTurn(prev, id, { result, ungrounded: !result.grounded }) as Turn[]);
       setLeft((n) => Math.max(0, n - 1));
     } catch (err) {
-      // Burst limit: a calm "wait a moment", not a red failure.
+      // "עצור" aborts the wait; the burst limit is a calm "wait a moment", not a red failure.
       const code = (err as { data?: { code?: string } } | null)?.data?.code;
-      const error = code === 'TOO_MANY_REQUESTS' ? 'rateLimited' : 'generic';
-      setTurns((prev) => prev.map((x) => (x.id === id ? { ...x, error } : x)));
+      const error = ac.signal.aborted
+        ? 'stopped'
+        : code === 'TOO_MANY_REQUESTS'
+          ? 'rateLimited'
+          : 'generic';
+      setTurns((prev) => settleTurn(prev, id, { error }) as Turn[]);
+    } finally {
+      if (abortRef.current === ac) abortRef.current = null;
+      setPending(false);
     }
   }
 
+  // Restore this tab's thread, then ask a `?q=` question once (palette "שאלו: …", deep links).
+  useEffect(() => {
+    if (loadedRef.current) return;
+    loadedRef.current = true;
+    setTurns(loadThread(storage()) as Turn[]);
+    const q = autoSubmitQuestion(window.location.search);
+    if (q) {
+      window.history.replaceState(
+        null,
+        '',
+        withoutQ(window.location.pathname, window.location.search),
+      );
+      void submit(q);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (loadedRef.current) saveThread(storage(), turns);
+  }, [turns]);
+
+  function rephrase(q: string) {
+    setQuestion(q);
+    document.getElementById('ask-question')?.focus();
+  }
+
   return (
-    <div className="space-y-4" data-testid="ask-page">
+    <div className="space-y-4 pb-2" data-testid="ask-page">
       <div aria-label={t('suggestionsLabel')} className="flex flex-wrap gap-2">
         {SUGGESTIONS.map((k) => (
           <button
             key={k}
             type="button"
             onClick={() => submit(t(`suggestions.${k}`))}
-            disabled={mutation.isPending}
+            disabled={pending}
             className="min-h-10 rounded-full border border-line bg-surface-2 px-3 py-1.5 text-sm text-ink transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-50"
             data-testid={`ask-suggestion-${k}`}
           >
@@ -169,39 +227,66 @@ export function AskClient({ claude, questionsLeftToday }: { claude: boolean; que
       {turns.length === 0 ? <p className="text-sm text-subtle">{t('empty')}</p> : null}
 
       <ol className="space-y-4" aria-live="polite">
-        {turns.map((turn) => (
-          <li key={turn.id} className="space-y-2">
-            <div className="flex items-start gap-2">
-              <User className="mt-1 h-4 w-4 shrink-0 text-subtle" aria-label={t('you')} />
-              <p className="font-medium text-ink" {...originalProps(turn.question)}>
-                {turn.question}
-              </p>
-            </div>
-            <Card padding="md" className="space-y-3" data-testid="ask-answer">
-              <div className="flex items-center gap-2 text-xs text-muted">
-                <Bot className="h-4 w-4 text-primary" aria-hidden="true" />
-                <span className="font-semibold text-ink">{t('assistant')}</span>
-                {turn.result ? (
-                  <Badge tone={turn.result.mode === 'claude' ? 'accent' : 'neutral'}>
-                    {t(`mode.${turn.result.mode}`)}
-                  </Badge>
-                ) : null}
+        {turns.map((turn) => {
+          const chip =
+            turn.result?.mode === 'offline' ? intentFromCanned(turn.result.intent) : null;
+          return (
+            <li key={turn.id} className="space-y-2">
+              <div className="flex items-start gap-2">
+                <User className="mt-1 h-4 w-4 shrink-0 text-subtle" aria-label={t('you')} />
+                <p className="font-medium text-ink" {...originalProps(turn.question)}>
+                  {turn.question}
+                </p>
               </div>
-              {turn.error ? (
-                <p className={`text-sm ${turn.error === 'rateLimited' ? 'text-muted' : 'text-danger'}`}>
-                  {t(turn.error === 'rateLimited' ? 'rateLimited' : 'error')}
-                </p>
-              ) : !turn.result ? (
-                <p className="inline-flex items-center gap-2 text-sm text-muted">
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  {t('thinking')}
-                </p>
-              ) : (
-                <AnswerBody result={turn.result} t={t} locale={locale} />
-              )}
-            </Card>
-          </li>
-        ))}
+              <Card padding="md" className="space-y-3" data-testid="ask-answer">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+                  <Bot className="h-4 w-4 text-primary" aria-hidden="true" />
+                  <span className="font-semibold text-ink">{t('assistant')}</span>
+                  {turn.result ? (
+                    <Badge tone={turn.result.mode === 'claude' ? 'accent' : 'neutral'}>
+                      {t(`mode.${turn.result.mode}`)}
+                    </Badge>
+                  ) : null}
+                  {chip ? (
+                    <span className="inline-flex items-center gap-2" data-testid="ask-intent">
+                      <span className="rounded-full bg-surface-2 px-2 py-0.5 text-ink">
+                        {intentChip(chip, locale)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => rephrase(turn.question)}
+                        className="min-h-9 underline underline-offset-2 hover:text-primary"
+                        data-testid="ask-not-this"
+                      >
+                        {intentCopy[locale].notThis}
+                      </button>
+                    </span>
+                  ) : null}
+                </div>
+                {turn.error ? (
+                  <p
+                    className={`text-sm ${turn.error === 'generic' ? 'text-danger' : 'text-muted'}`}
+                  >
+                    {t(
+                      turn.error === 'rateLimited'
+                        ? 'rateLimited'
+                        : turn.error === 'stopped'
+                          ? 'stopped'
+                          : 'error',
+                    )}
+                  </p>
+                ) : !turn.result ? (
+                  <p className="inline-flex items-center gap-2 text-sm text-muted">
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    {t('thinking')}
+                  </p>
+                ) : (
+                  <AnswerBody result={turn.result} t={t} locale={locale} />
+                )}
+              </Card>
+            </li>
+          );
+        })}
       </ol>
 
       <form
@@ -209,7 +294,8 @@ export function AskClient({ claude, questionsLeftToday }: { claude: boolean; que
           e.preventDefault();
           void submit(question);
         }}
-        className="space-y-2 rounded-2xl border border-line bg-surface p-3"
+        className="sticky bottom-0 z-10 space-y-2 rounded-2xl border border-line bg-surface p-3 shadow-card"
+        data-testid="ask-composer"
       >
         <label htmlFor="ask-question" className="sr-only">
           {t('label')}
@@ -230,11 +316,25 @@ export function AskClient({ claude, questionsLeftToday }: { claude: boolean; que
           data-testid="ask-input"
         />
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-subtle">{claude ? t('questionsLeft', { count: formatNumber(left, locale) }) : ''}</span>
-          <Button type="submit" disabled={mutation.isPending || question.trim().length < 2} data-testid="ask-submit">
-            <Send className="h-4 w-4 rtl:-scale-x-100" aria-hidden="true" />
-            {t('submit')}
-          </Button>
+          <span className="text-xs text-subtle">
+            {claude ? t('questionsLeft', { count: formatNumber(left, locale) }) : ''}
+          </span>
+          {pending ? (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => abortRef.current?.abort()}
+              data-testid="ask-stop"
+            >
+              <Square className="h-4 w-4" aria-hidden="true" />
+              {t('stop')}
+            </Button>
+          ) : (
+            <Button type="submit" disabled={question.trim().length < 2} data-testid="ask-submit">
+              <Send className="h-4 w-4 rtl:-scale-x-100" aria-hidden="true" />
+              {t('submit')}
+            </Button>
+          )}
         </div>
       </form>
     </div>
@@ -249,6 +349,12 @@ function AnswerBody({ result, t, locale }: { result: AskResult; t: T; locale: Lo
     : result.links.map((l) => ({ href: l.href, label: t(`screens.${l.screen}`), value: null as string | null }));
   return (
     <div className="space-y-3 text-sm leading-relaxed text-ink">
+      {!result.grounded ? (
+        <p role="note" className="flex items-start gap-1.5 rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs text-ink" data-testid="ask-ungrounded">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gold" aria-hidden="true" />
+          {t('ungrounded')}
+        </p>
+      ) : null}
       {lines.map((line, i) => (
         <p key={i} {...originalProps(line)} className={i > 0 && result.mode === 'offline' ? 'ps-3' : undefined}>
           {line}
@@ -256,12 +362,6 @@ function AnswerBody({ result, t, locale }: { result: AskResult; t: T; locale: Lo
       ))}
       {result.mode === 'offline' && result.reason ? (
         <p className="text-xs text-subtle">{t(`offlineNote.${result.reason}`)}</p>
-      ) : null}
-      {!result.grounded ? (
-        <p className="inline-flex items-center gap-1.5 text-xs text-gold">
-          <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-          {t('ungrounded')}
-        </p>
       ) : null}
       {sources.length > 0 ? (
         <div>

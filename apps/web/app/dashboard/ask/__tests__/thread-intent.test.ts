@@ -74,3 +74,30 @@ describe('intent chip', () => {
     expect(formatPeriod(null)).toBeNull();
   });
 });
+
+describe('wiring helpers (W3-04b part 2)', () => {
+  it('maps the offline canned intents to a chip, and nothing for Claude/unknown', async () => {
+    const { intentFromCanned } = await import('../intent');
+    expect(intentFromCanned('leakChange')).toEqual({ topic: 'leak' });
+    expect(intentFromCanned('claimWeek')).toEqual({ topic: 'claims' });
+    expect(intentChip(intentFromCanned('claimWeek')!, 'he')).toBe('הבנתי: בקשות זיכוי');
+    expect(intentFromCanned(null)).toBeNull();
+    expect(intentFromCanned('somethingNew')).toBeNull();
+  });
+  it('a stopped turn and a result survive the session round-trip', () => {
+    const mem = new Map<string, string>();
+    const store = {
+      getItem: (k: string) => mem.get(k) ?? null,
+      setItem: (k: string, v: string) => void mem.set(k, v),
+    };
+    const t = settleTurn(
+      settleTurn([turn('a'), turn('b')], 'a', { error: 'stopped' }),
+      'b',
+      { result: { mode: 'offline', grounded: true }, ungrounded: false },
+    );
+    saveThread(store, t);
+    const back = loadThread(store);
+    expect(back[0]).toMatchObject({ id: 'a', error: 'stopped' });
+    expect(back[1]).toMatchObject({ id: 'b', result: { mode: 'offline' } });
+  });
+});
