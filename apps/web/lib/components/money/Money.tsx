@@ -6,7 +6,19 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import type { Locale } from '@/lib/i18n/config';
 import { components } from '@/lib/i18n/messages/components';
 import { cnMerge as cn } from '../cn';
-import { exactText, moneyFigureText, moneyText, MONEY_DECIMALS, shekelsOf, splitGlyph, stateClass, type MoneyContext } from './format';
+import { MONEY_QUIET } from '../tone';
+import {
+  exactText,
+  moneyFigureText,
+  moneyText,
+  MONEY_DECIMALS,
+  shekelsOf,
+  splitGlyph,
+  splitMoney,
+  stateClass,
+  type MoneyContext,
+  type MoneyPart,
+} from './format';
 
 const CONTEXT_CLASS: Record<MoneyContext, string> = {
   hero: 'text-metric-hero',
@@ -15,6 +27,13 @@ const CONTEXT_CLASS: Record<MoneyContext, string> = {
   unit: '',
   inline: '',
 };
+
+/**
+ * SPEC §3: the ₪ sign at about 0.74 em of the figure and never under the 12 px desk floor (the
+ * caption role), in regular weight; the agorot keep the figure's size. Both are quiet (tertiary)
+ * unless the figure itself is coloured, in which case they take the figure's colour.
+ */
+const GLYPH_SIZE = 'text-[length:max(0.74em,var(--fs-caption))] font-normal';
 
 export interface MoneyProps {
   /** Shekels (NUMERIC strings must be parsed by the caller — this never does money math). */
@@ -42,14 +61,40 @@ export interface MoneyProps {
    * exact amount with ₪ stays in `title`.
    */
   symbol?: 'inline' | 'header';
+  /**
+   * DS3: the ₪ sign and the agorot in the tertiary colour (default). Pass `false` where the figure
+   * sits in a coloured context and the whole amount should share that colour.
+   */
+  quietParts?: boolean;
   className?: string;
 }
 
+function Parts({ parts, quiet }: { parts: MoneyPart[]; quiet: boolean }) {
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.kind === 'glyph' ? (
+          <span key={i} data-money="cur" className={cn(GLYPH_SIZE, quiet && MONEY_QUIET)}>
+            {part.text}
+          </span>
+        ) : part.kind === 'dec' ? (
+          <span key={i} data-money="dec" className={quiet ? MONEY_QUIET : undefined}>
+            {part.text}
+          </span>
+        ) : (
+          part.text
+        ),
+      )}
+    </>
+  );
+}
+
 /**
- * The ONE way to show ₪ (design-system-01/-02). A plain <bdi> around the frozen
- * `formatIls()` output — no `dir`, so in Hebrew the glyph sits at the visual
- * left ("‏760 ₪") exactly like the claim letter. The UI face with tabular, lining
- * figures (`.num`); never mono. Rounded figures carry the exact agorot in `title`.
+ * The ONE way to show ₪ (design-system-01/-02, DS3 SPEC §3). A plain <bdi> around the frozen
+ * `formatIls()` output — no `dir`, so in Hebrew the glyph sits at the visual left ("‏760 ₪")
+ * exactly like the claim letter. The text is cut, never changed: the ₪ sign and the agorot are
+ * spans of the same string, quiet and smaller, the digits keep the figure's colour. The UI face
+ * with tabular, lining figures (`.num`); never mono. Rounded figures carry the exact agorot in `title`.
  */
 export function Money({
   value,
@@ -62,6 +107,7 @@ export function Money({
   pending = false,
   locale: localeProp,
   symbol = 'inline',
+  quietParts,
   className,
 }: MoneyProps) {
   const ctxLocale = useLocale();
@@ -88,24 +134,27 @@ export function Money({
   const figureOnly = symbol === 'header' && context !== 'hero';
   // With the glyph in the header, the title always names the amount with ₪.
   const title = exact ?? (figureOnly ? text : null);
+  const figureColour = stateClass(state, shekels);
+  // A coloured figure (muted, green…) keeps one colour; an ink figure has quiet parts.
+  const quiet = quietParts ?? (figureColour === undefined || figureColour === 'text-ink');
 
   return (
-    <span className={cn('inline-flex items-baseline gap-1', CONTEXT_CLASS[context], stateClass(state, shekels), className)}>
+    <span className={cn('inline-flex items-baseline gap-1', CONTEXT_CLASS[context], figureColour, className)}>
       {credit ? <span>{t('ds.money.credit')}</span> : null}
       <bdi className="num whitespace-nowrap" title={title ? t('ds.money.exact', { amount: title }) : undefined}>
-        {figureOnly
-          ? moneyFigureText(amount, context, locale, shown)
-          : context === 'hero'
-          ? splitGlyph(text).map((part, i) =>
-              part.glyph ? (
-                <span key={i} className="money-glyph">
-                  {part.text}
-                </span>
-              ) : (
-                <span key={i}>{part.text}</span>
-              ),
-            )
-          : text}
+        {context === 'hero' && !figureOnly ? (
+          splitGlyph(text).map((part, i) =>
+            part.glyph ? (
+              <span key={i} className="money-glyph">
+                {part.text}
+              </span>
+            ) : (
+              <span key={i}>{part.text}</span>
+            ),
+          )
+        ) : (
+          <Parts parts={splitMoney(figureOnly ? moneyFigureText(amount, context, locale, shown) : text, shown)} quiet={quiet} />
+        )}
       </bdi>
       {state === 'credited' ? <CheckCircle2 className="h-[0.9em] w-[0.9em] shrink-0 self-center" aria-hidden="true" /> : null}
     </span>

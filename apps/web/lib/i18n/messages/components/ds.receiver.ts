@@ -50,6 +50,16 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       variance: 'الفرق {pct}',
       confirmAgain: 'الفرق أكبر من {pct}. تأكيد على أي حال؟',
     },
+    matchStrip: {
+      ordered: 'المطلوب',
+      received: 'المستلم',
+      billed: 'المفوتر',
+      invoice: 'في الفاتورة',
+      none: 'لا يوجد',
+      less: 'أقل بـ {value}',
+      more: 'أكثر بـ {value}',
+      perUnit: 'لكل {unit}',
+    },
   },
   ru: {
     money: {
@@ -91,6 +101,16 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       ordered: 'Заказано {qty}',
       variance: 'Отклонение {pct}',
       confirmAgain: 'Отклонение больше {pct}. Всё равно подтвердить?',
+    },
+    matchStrip: {
+      ordered: 'Заказано',
+      received: 'Получено',
+      billed: 'Выставлено',
+      invoice: 'В счёте',
+      none: 'Нет',
+      less: 'на {value} меньше',
+      more: 'на {value} больше',
+      perUnit: 'за {unit}',
     },
   },
   th: {
@@ -134,6 +154,16 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       variance: 'ส่วนต่าง {pct}',
       confirmAgain: 'ส่วนต่างเกิน {pct} ยืนยันต่อหรือไม่?',
     },
+    matchStrip: {
+      ordered: 'สั่ง',
+      received: 'ได้รับ',
+      billed: 'เรียกเก็บ',
+      invoice: 'ในใบแจ้งหนี้',
+      none: 'ไม่มี',
+      less: 'น้อยกว่า {value}',
+      more: 'มากกว่า {value}',
+      perUnit: 'ต่อ {unit}',
+    },
   },
   ti: {
     money: {
@@ -175,6 +205,16 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       ordered: 'ዝተኣዘዘ {qty}',
       variance: 'ፍልልይ {pct}',
       confirmAgain: 'ፍልልይ ካብ {pct} ይበዝሕ። ብዝኾነ ኣረጋግጽ?',
+    },
+    matchStrip: {
+      ordered: 'ዝተኣዘዘ',
+      received: 'ዝተቐበልናዮ',
+      billed: 'ዝተሓተተ',
+      invoice: 'ኣብ ፋክቱር',
+      none: 'የለን',
+      less: 'ብ{value} ዝወሓደ',
+      more: 'ብ{value} ዝበዝሐ',
+      perUnit: 'ን{unit}',
     },
   },
 };

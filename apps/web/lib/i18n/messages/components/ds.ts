@@ -46,6 +46,16 @@ export const dsHe = {
     variance: 'סטייה {pct}',
     confirmAgain: 'הסטייה גבוהה מ-{pct}. לאשר בכל זאת?',
   },
+  matchStrip: {
+    ordered: 'הוזמן',
+    received: 'התקבל',
+    billed: 'חויב',
+    invoice: 'בחשבונית',
+    none: 'אין',
+    less: '{value} פחות',
+    more: '{value} יותר',
+    perUnit: 'ל{unit}',
+  },
 };
 
 export const dsEn: Shape<typeof dsHe> = {
@@ -88,5 +98,15 @@ export const dsEn: Shape<typeof dsHe> = {
     ordered: 'Ordered {qty}',
     variance: 'Variance {pct}',
     confirmAgain: 'Variance is above {pct}. Confirm anyway?',
+  },
+  matchStrip: {
+    ordered: 'Ordered',
+    received: 'Received',
+    billed: 'Billed',
+    invoice: 'On the invoice',
+    none: 'None',
+    less: '{value} less',
+    more: '{value} more',
+    perUnit: 'per {unit}',
   },
 };
