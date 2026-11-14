@@ -1,7 +1,7 @@
 import { readFile, unlink } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
 import { DEMO_RESTAURANT_NAME, MAGIC_LINK_FILE, OWNER_STATE } from './env';
-import { e2eSql } from './helpers';
+import { e2eSql, ensurePasswordUser } from './helpers';
 
 /**
  * W3-07b · invite → /join/<token> → e-mail code → own password → /welcome →
@@ -11,6 +11,20 @@ import { e2eSql } from './helpers';
  */
 const JOIN_CODE_FILE = MAGIC_LINK_FILE.replace('magic-link', 'join-code');
 const PASSWORD = 'W3-07b e2e password 2026';
+
+async function readCodeFile(file: string, email: string): Promise<string> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    try {
+      const parsed = JSON.parse(await readFile(file, 'utf8')) as { to: string; code: string };
+      if (parsed.to === email) return parsed.code;
+    } catch {
+      // not written yet
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`code for ${email} did not appear in ${file}`);
+}
 
 async function readJoinCode(email: string): Promise<string> {
   const deadline = Date.now() + 30_000;
@@ -34,6 +48,7 @@ async function inviteFromTeamScreen(page: Page, email: string): Promise<string> 
   await page.getByRole('button', { name: 'שליחת הזמנה' }).click();
   const wa = page.getByTestId('invite-whatsapp');
   await expect(wa).toBeVisible();
+  await expect(page.getByTestId('invite-qr')).toHaveAttribute('src', /^data:image\/png;base64,/);
   const href = (await wa.getAttribute('href')) ?? '';
   const text = decodeURIComponent(href.replace(/^https:\/\/wa\.me\/\?text=/, ''));
   const link = /https?:\/\/\S+\/join\/[A-Za-z0-9_-]+(\?\S*)?/.exec(text)?.[0];
@@ -99,3 +114,104 @@ test.describe('W3-07b join', () => {
     await expect(page.getByTestId('join-state')).toHaveAttribute('data-state', 'notFound');
   });
 });
+
+test.describe('W3-07b slice b: sign in with an e-mail code', () => {
+  test('e-mail → 6-digit code → signed in; a wrong code is refused calmly', async ({ browser }) => {
+    const email = `w307b-code-${Date.now()}@login.e2e.test`;
+    await ensurePasswordUser({ email, password: 'W3-07b code-login 2026' });
+    const sql = e2eSql();
+    await sql`delete from rate_limit_counters`;
+    await sql.end();
+    const file = MAGIC_LINK_FILE.replace('magic-link', 'login-code');
+    await unlink(file).catch(() => {});
+
+    const ctx = await browser.newContext({ storageState: undefined, locale: 'he-IL' });
+    const base = test.info().project.use.baseURL!;
+    await ctx.addCookies([
+      { name: 'rm_cookie_consent', value: 'necessary', url: base },
+      { name: 'rm_locale', value: 'he', url: base },
+    ]);
+    const page = await ctx.newPage();
+    await page.goto('/login');
+    await page.locator('input[name="email"]').first().fill(email);
+    await page.getByTestId('login-code-button').click();
+    await page.waitForURL(/\/login\/code/);
+    // M6: a whole sentence (no empty placeholder), with the masked address on its own line
+    await expect(page.getByTestId('login-code-sent')).toHaveText('אם הכתובת הזו רשומה אצלנו, שלחנו אליה קוד בן 6 ספרות:');
+    await expect(page.getByTestId('login-code-email')).toHaveText(/^w\S*•••@login\.e2e\.test$/);
+
+    const code = await readCodeFile(file, email);
+    const wrong = code === '000000' ? '111111' : '000000';
+    await page.locator('#login-code').fill(wrong);
+    await page.waitForURL(/e=wrongCode/);
+    await page.locator('#login-code').fill(code);
+    await page.waitForURL(/\/dashboard/, { timeout: 60_000 });
+    await ctx.close();
+  });
+});
+
+test.describe('W3-07b slice b: code sign-in lockout (M5)', () => {
+  test('after too many wrong codes the page says "locked", disables the field and offers no new code', async ({ browser }) => {
+    const email = `w307b-lock-${Date.now()}@login.e2e.test`;
+    await ensurePasswordUser({ email, password: 'W3-07b code-lock 2026' });
+    const sql = e2eSql();
+    await sql`delete from rate_limit_counters`;
+    await sql.end();
+    const file = MAGIC_LINK_FILE.replace('magic-link', 'login-code');
+    await unlink(file).catch(() => {});
+
+    const ctx = await browser.newContext({ storageState: undefined, locale: 'he-IL' });
+    const base = test.info().project.use.baseURL!;
+    await ctx.addCookies([
+      { name: 'rm_cookie_consent', value: 'necessary', url: base },
+      { name: 'rm_locale', value: 'he', url: base },
+    ]);
+    const page = await ctx.newPage();
+    await page.goto('/login');
+    await page.locator('input[name="email"]').first().fill(email);
+    await page.getByTestId('login-code-button').click();
+    await page.waitForURL(/\/login\/code/);
+    const code = await readCodeFile(file, email);
+    const wrong = code === '000000' ? '111111' : '000000';
+    for (let i = 0; i < 6; i += 1) {
+      if (await page.locator('#login-code').isDisabled()) break;
+      await page.locator('#login-code').fill('');
+      await Promise.all([page.waitForEvent('framenavigated'), page.locator('#login-code').fill(wrong)]);
+      await page.waitForLoadState('networkidle');
+    }
+    await expect(page).toHaveURL(/e=rate/);
+    await expect(page.locator('#login-code-error')).toContainText('נעולה');
+    await expect(page.locator('#login-code')).toBeDisabled();
+    await expect(page.getByTestId('login-code-resend')).toHaveCount(0);
+    await ctx.close();
+  });
+});
+
+test.describe('W3-07b slice b: /login/code copy in en + a receiver language (M6/M7)', () => {
+  for (const [lang, sentence] of [
+    ['en', 'If this address is registered with us, we sent it a 6-digit code:'],
+    ['ru', 'Если этот адрес у нас зарегистрирован, мы отправили на него 6-значный код:'],
+  ] as const) {
+    test(`${lang}: the sent-to sentence is whole and in ${lang}`, async ({ browser }) => {
+      const email = `w307b-${lang}-${Date.now()}@login.e2e.test`;
+      await ensurePasswordUser({ email, password: 'W3-07b code-lang 2026' });
+      const sql = e2eSql();
+      await sql`delete from rate_limit_counters`;
+      await sql.end();
+      const ctx = await browser.newContext({ storageState: undefined });
+      const base = test.info().project.use.baseURL!;
+      await ctx.addCookies([
+        { name: 'rm_cookie_consent', value: 'necessary', url: base },
+        { name: 'rm_locale', value: lang, url: base },
+      ]);
+      const page = await ctx.newPage();
+      await page.goto('/login');
+      await page.locator('input[name="email"]').first().fill(email);
+      await page.getByTestId('login-code-button').click();
+      await page.waitForURL(/\/login\/code/);
+      await expect(page.getByTestId('login-code-sent')).toHaveText(sentence);
+      await ctx.close();
+    });
+  }
+});
+

@@ -25,24 +25,30 @@ export interface LoginHint {
   sentAt: number | null;
   /** Where the link should land (a validated same-origin path). */
   next: string | null;
+  /**
+   * "Remember me" as ticked on the code screen, kept across a wrong code or a
+   * resend. Server-written only (never from the URL), so a crafted link cannot
+   * pre-tick it.
+   */
+  remember?: boolean;
 }
 
 const EMAIL_MAX = 254;
 
 export function encodeHint(h: LoginHint): string {
-  return JSON.stringify({ e: h.email.slice(0, EMAIL_MAX), f: h.fails, s: h.sentAt, n: h.next });
+  return JSON.stringify({ e: h.email.slice(0, EMAIL_MAX), f: h.fails, s: h.sentAt, n: h.next, ...(h.remember ? { m: 1 } : {}) });
 }
 
 /** Parse a cookie value; anything malformed is "no hint". */
 export function decodeHint(raw: string | undefined | null): LoginHint | null {
   if (!raw || raw.length > 1024) return null;
   try {
-    const v = JSON.parse(raw) as { e?: unknown; f?: unknown; s?: unknown; n?: unknown };
+    const v = JSON.parse(raw) as { e?: unknown; f?: unknown; s?: unknown; n?: unknown; m?: unknown };
     if (typeof v.e !== 'string' || v.e.length === 0 || v.e.length > EMAIL_MAX) return null;
     const fails = typeof v.f === 'number' && Number.isInteger(v.f) && v.f >= 0 ? Math.min(v.f, 99) : 0;
     const sentAt = typeof v.s === 'number' && Number.isFinite(v.s) && v.s > 0 ? v.s : null;
     const next = typeof v.n === 'string' && v.n.startsWith('/') && !v.n.startsWith('//') ? v.n.slice(0, 512) : null;
-    return { email: v.e, fails, sentAt, next };
+    return { email: v.e, fails, sentAt, next, ...(v.m === 1 ? { remember: true } : {}) };
   } catch {
     return null;
   }
