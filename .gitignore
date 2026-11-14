@@ -51,3 +51,6 @@ playwright-report/
 # Pilot tenant configs hold real customer data: keep them out of git (better: ~/restomatch-pilot/).
 packages/db/scripts/pilot.local.json
 *.pilot.json
+
+# Graphify knowledge graph (rebuilt locally: graphify update .)
+graphify-out/
