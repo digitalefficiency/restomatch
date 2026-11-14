@@ -15,7 +15,7 @@ import { NavProvider } from '@/lib/nav/NavProvider';
 import { RouteTitle } from '@/lib/nav/RouteTitle';
 import { RouteFocus } from '@/lib/nav/useRouteFocus';
 import type { NavViewer } from '@/lib/nav';
-import { RAIL_COOKIE } from '@/lib/nav/prefs';
+import { DENSITY_COOKIE, RAIL_COOKIE, TEXT_COOKIE, densityAttr, textAttr } from '@/lib/nav/prefs';
 import { LocaleSync } from './locale-sync';
 import { BranchSwitcher } from './branch-switcher';
 import { getWave1Access } from './contracts/access';
@@ -148,6 +148,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const viewer: NavViewer = { role: active.role, features, showChain };
   const rail = cookieStore.get(RAIL_COOKIE)?.value === '1';
+  // Density and text size before first paint (the preferences contract; DS3-06 owns the values).
+  const density = densityAttr(cookieStore.get(DENSITY_COOKIE)?.value);
+  const textSize = textAttr(cookieStore.get(TEXT_COOKIE)?.value);
 
   async function logout() {
     'use server';
@@ -175,6 +178,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <RouteFocus />
             <ShellFrame
               initialRail={rail}
+              density={density}
+              textSize={textSize}
               viewer={viewer}
               sidebar={
                 <Sidebar

@@ -49,15 +49,15 @@ const GO: ReadonlyArray<[letter: string, href: string, he: string, en: string]> 
   ['H', '/dashboard', 'בית', 'Home'],
   ['Q', QUEUE_HREF, 'לטיפולי', 'My queue'],
   ['A', '/dashboard/approvals', 'אישורים', 'Approvals'],
-  ['I', '/dashboard/invoices', 'חשבוניות', 'Invoices'],
+  ['I', '/dashboard/inbox', 'חשבוניות נכנסות', 'Incoming invoices'],
   ['P', '/dashboard/approvals/pay-run', 'תשלומים', 'Payments'],
-  ['C', '/dashboard/recovery', 'בקשות זיכוי', 'Credit requests'],
+  ['C', '/dashboard/leaks/claims', 'בקשות זיכוי', 'Credit claims'],
   ['L', '/dashboard/leaks', 'דליפה', 'Leak'],
   ['O', '/dashboard/orders', 'הזמנות', 'Orders'],
   ['R', '/dashboard/receiving', 'קבלת סחורה', 'Receiving'],
   ['S', '/dashboard/suppliers', 'ספקים', 'Suppliers'],
   ['B', '/dashboard/chain', 'רשת', 'Chain'],
-  ['M', '/dashboard/recipes', 'מתכונים', 'Recipes'],
+  ['M', '/dashboard/recipes', 'עלות מנה', 'Food cost'],
 ];
 
 /** The side-menu toggle (§7.1): collapse / expand, or the overlay at 1024–1279. */

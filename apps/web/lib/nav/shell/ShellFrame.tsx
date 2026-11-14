@@ -6,13 +6,13 @@ import type { UserRole } from '@restomatch/db';
 import { cn } from '@/lib/components/cn';
 import { usePalette } from '@/lib/components/palette';
 import {
-  DISPLAY_CHANNEL,
   RAIL_STORAGE,
+  SINGLE_KEYS_EVENT,
+  SINGLE_KEYS_STORAGE,
   railCookie,
   readFavourites,
   readSingleKeys,
   safeStorage,
-  SINGLE_KEYS_EVENT,
   writeFavourites,
   writeSingleKeys,
 } from '../prefs';
@@ -118,12 +118,20 @@ function restoreFocus(el: HTMLElement | null) {
  */
 export function ShellFrame({
   initialRail,
+  density,
+  textSize,
   viewer,
   sidebar,
   overlays,
   children,
 }: {
   initialRail: boolean;
+  /**
+   * `data-density` / `data-text` from the preference cookies, read on the server so the first HTML is final
+   * (DS3 WORKPLAN, "Personal preferences: one contract"). The styles they drive belong to DS3-00 / DS3-01.
+   */
+  density?: 'compact' | 'default';
+  textSize?: 'regular' | 'large';
   viewer: NavViewer;
   /** The side menu (rendered first: skip link → menu → top bar → main is the Tab order). */
   sidebar: React.ReactNode;
@@ -162,41 +170,22 @@ export function ShellFrame({
             ? 'rail'
             : 'panel';
 
-  // Per-device preferences, read after hydration (spec §7.1, §13): favourites from localStorage; the
-  // single-key switch from DS3-06's display cookie, following other tabs (its channel) and tabs that come
-  // back into view, as DS3-06's store does.
+  // Per-device preferences live in localStorage (spec §7.1, §13); read after hydration.
   useEffect(() => {
-    setFavourites(readFavourites(role, safeStorage()));
-    const sync = () => setSingleKeysState(readSingleKeys());
-    sync();
-    let channel: BroadcastChannel | null = null;
-    try {
-      if (typeof BroadcastChannel !== 'undefined') {
-        channel = new BroadcastChannel(DISPLAY_CHANNEL);
-        channel.onmessage = sync;
-      }
-    } catch {
-      channel = null;
-    }
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') sync();
+    const s = safeStorage();
+    setSingleKeysState(readSingleKeys(s));
+    setFavourites(readFavourites(role, s));
+    const sync = (e?: Event) => {
+      if (e instanceof StorageEvent && e.key !== SINGLE_KEYS_STORAGE) return;
+      setSingleKeysState(readSingleKeys(safeStorage()));
     };
     window.addEventListener(SINGLE_KEYS_EVENT, sync);
-    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('storage', sync);
     return () => {
       window.removeEventListener(SINGLE_KEYS_EVENT, sync);
-      document.removeEventListener('visibilitychange', onVisible);
-      try {
-        channel?.close();
-      } catch {
-        /* already closed */
-      }
+      window.removeEventListener('storage', sync);
     };
   }, [role]);
-  // DS3-06's DOM contract: key handlers outside React (the desk keys) read <html data-single-keys>.
-  useEffect(() => {
-    document.documentElement.dataset.singleKeys = singleKeys ? 'on' : 'off';
-  }, [singleKeys]);
 
   const closeOverlay = useCallback((opts?: { restoreFocus?: boolean }) => {
     setOverlayOpen((open) => {
@@ -269,7 +258,7 @@ export function ShellFrame({
 
   const setSingleKeys = useCallback((on: boolean) => {
     setSingleKeysState(on);
-    writeSingleKeys(on);
+    writeSingleKeys(on, safeStorage());
   }, []);
 
   const toggleFavourite = useCallback(
@@ -360,6 +349,8 @@ export function ShellFrame({
         id="rm-app"
         className={cn(css.app, 'min-h-screen')}
         data-rail={rail ? 'on' : 'off'}
+        data-density={density}
+        data-text={textSize}
         data-flat={flat ? '' : undefined}
         data-overlay={overlayOpen ? 'open' : undefined}
         data-nav-mode={viewport ? mode : undefined}

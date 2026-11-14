@@ -57,7 +57,7 @@ describe('hotkeys registry', () => {
       matchKeydown({ code: 'KeyI' }, g.state, at('/dashboard', 100 + CHORD_MS)).action,
     ).toEqual({
       type: 'go',
-      href: '/dashboard/invoices',
+      href: '/dashboard/inbox', // sidebar SPEC §8: G I = נכנסות
     });
     expect(
       matchKeydown({ code: 'KeyI' }, g.state, at('/dashboard', 101 + CHORD_MS)).action,
@@ -122,6 +122,15 @@ describe('side-menu keys (sidebar SPEC §8, DS3-02)', () => {
       type: 'go',
       href: '/dashboard/chain',
     });
+  });
+
+  it('G I opens the incoming invoices and G C the credit claims (spec §8: נכנסות · זיכוי)', () => {
+    const g = matchKeydown({ code: 'KeyG' }, IDLE, at('/dashboard', 100)).state;
+    expect(matchKeydown({ code: 'KeyI' }, g, at('/dashboard', 200)).action).toEqual({ type: 'go', href: '/dashboard/inbox' });
+    expect(matchKeydown({ code: 'KeyC' }, g, at('/dashboard', 200)).action).toEqual({ type: 'go', href: '/dashboard/leaks/claims' });
+    // The cheat sheet names them like the menu does.
+    const label = (letter: string) => HOTKEYS.find((h) => h.chord?.code === `Key${letter}`)?.label.he;
+    expect([label('I'), label('C'), label('M')]).toEqual(['חשבוניות נכנסות', 'בקשות זיכוי', 'עלות מנה']);
   });
 
   it('Ctrl/⌘B toggles the menu by code (Hebrew נ), never while typing', () => {
