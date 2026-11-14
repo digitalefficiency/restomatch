@@ -203,7 +203,10 @@ describe('A6 late truck', () => {
 
   it('receiver: day 1 only, no supplier link', () => {
     const r = lateTruckReceiverBrief(base)!;
-    expect(r.text).toContain('המשלוח מתנובה מאחר (תוכנן ל-24/10)');
+    expect(r.subject).toBe('איחור באספקה מ-תנובה');
+    expect(r.text).toContain('ההזמנה באיחור של יום אחד. מועד צפוי: 24/10.');
+    expect(r.text).toContain('ההנהלה מטפלת מול הספק.');
+    expect(r.text).not.toContain('שלחו לספק');
     expect(r.text).not.toContain('wa.me');
     expect(r.text).not.toContain('mailto:');
     expect(lateTruckReceiverBrief({ ...base, daysLate: 3 })).toBeNull();

@@ -58,6 +58,13 @@ export const he = {
     body: 'בהזמנה {lines, plural, one {פריט אחד} two {שני פריטים} other {# פריטים}}, והיא עדיין לא התקבלה. כדאי ליצור קשר עם הספק או לעדכן את הסטטוס.',
     cta: 'צפייה בהזמנה',
     text: 'ההזמנה {late}. מועד צפוי: {date}. {lines, plural, one {פריט אחד} two {שני פריטים} other {# פריטים}}, עדיין לא התקבלה.',
+    /** AU-04 A6: the manager's pre-addressed question to the supplier (a draft, never sent by us). */
+    sendToSupplier: 'שלחו לספק:',
+    whatsapp: 'וואטסאפ',
+    emailLink: 'מייל',
+    noContact: 'אין פרטי קשר לספק · הוסיפו בכרטיס הספק',
+    /** AU-04 A6: the receiver's day-1 notice (no supplier link: the manager follows up). */
+    receiverBody: 'ההנהלה מטפלת מול הספק.',
   },
   orderNotPlaced: {
     subject: 'לא בוצעה הזמנה מ-{supplier}',
