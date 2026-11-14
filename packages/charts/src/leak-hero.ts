@@ -1,4 +1,5 @@
 import { AWAITING_QUESTION_SQL } from './awaiting-question';
+import { DECISION_KEY_SQL } from './decisions';
 import { sql, type Database } from '@restomatch/db';
 import { scanAwaitingCountSql } from './awaiting-count';
 import { LEAK_FILTER, LIVE_DUPLICATE, lineFilter, originalChecked, viewInvoicesSql, type ViewSpec } from './leak-views';
@@ -189,6 +190,12 @@ export interface LeakBreakdownLine {
   actual: number | null;
   /** Counts toward the hero leak (false for info / PRICE_LOWER / UNORDERED_ARRIVAL / a rejected duplicate). */
   countsAsLeak: boolean;
+  /**
+   * G-14 / owner M7 (7.11): the engine auto-approved it within tolerance (the system decision
+   * `tolerate`: accepted with no resolved_at — decisions.ts DECISION_KEY_SQL). Waived: never a
+   * credit request. Optional so hand-built lines stay valid; absent = false.
+   */
+  tolerated?: boolean;
   productName: string | null;
   productNameEn: string | null;
   lineDescription: string | null;
@@ -336,6 +343,7 @@ async function breakdownLines(
       mr.invoice_id, d.id, d.type, d.severity, d.resolution_status, d.delta_amount,
       d.expected_value, d.actual_value, d.po_line_id, d.invoice_line_id, d.product_id,
       (${counts}) AS counts,
+      (${DECISION_KEY_SQL}) = 'tolerated' AS tolerated,
       p.canonical_name AS product_name, p.name_en AS product_name_en,
       il.raw_description AS line_desc, il.raw_description_en AS line_desc_en,
       d.tolerance_used, il.qty_billed, COALESCE(il.unit, pl.unit) AS unit, il.unit_price_billed,
@@ -366,6 +374,7 @@ async function breakdownLines(
       expected: l.expected_value == null ? null : Number(l.expected_value),
       actual: l.actual_value == null ? null : Number(l.actual_value),
       countsAsLeak: Boolean(l.counts),
+      tolerated: Boolean(l.tolerated),
       productName: (l.product_name as string | null) ?? null,
       productNameEn: (l.product_name_en as string | null) ?? null,
       lineDescription: (l.line_desc as string | null) ?? null,

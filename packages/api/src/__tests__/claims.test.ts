@@ -313,6 +313,20 @@ describe('owner decisions 31.10 — the claim rules', () => {
     expect(claimableLines(inv).map((c) => c.line.discrepancyId)).toEqual(['p']);
   });
 
+  it('owner M7 (7.11): a tolerance row the engine auto-approved is waived — never a claim line', () => {
+    const inv = invoice({
+      leakIls: 100,
+      lines: [
+        line({ discrepancyId: 't', resolutionStatus: 'accepted', deltaAmount: 70, tolerated: true }),
+        line({ discrepancyId: 'h', resolutionStatus: 'accepted', deltaAmount: 50 }),
+      ],
+    });
+    // The tolerated ₪70 takes no cap: the person-accepted line gets its full ₪50.
+    expect(claimableLines(inv).map((c) => [c.line.discrepancyId, c.amount])).toEqual([['h', 50]]);
+    // Absent flag = not tolerated (hand-built lines keep their old meaning).
+    expect(claimableLines(invoice({ lines: [line({ discrepancyId: 'x', resolutionStatus: 'accepted' })] }))).toHaveLength(1);
+  });
+
   it('a claim is overdue after a week ("שבוע"): one constant, the reminder job uses it', () => {
     expect(CLAIM_ANSWER_DAYS).toBe(7);
     expect(OVERDUE_DAYS).toBe(CLAIM_ANSWER_DAYS);

@@ -190,6 +190,22 @@ describe('claims', () => {
     }
   });
 
+  it('owner M7 (7.11): never claims a tolerance row the engine auto-approved (engine rule, no person)', async () => {
+    await db
+      .update(discrepancies)
+      .set({ resolutionStatus: 'accepted', resolvedAt: null, resolvedBy: null, ruleId: 'minor-info' })
+      .where(eq(discrepancies.id, T.discrepancyId));
+    try {
+      expect(await syncClaims(db, T.restaurantId)).toBe(0);
+      expect(await db.select().from(recoveryClaims).where(eq(recoveryClaims.discrepancyId, T.discrepancyId))).toHaveLength(0);
+      // A person's accept (resolved_at stamped) is claimed as before.
+      await db.update(discrepancies).set({ resolvedAt: new Date() }).where(eq(discrepancies.id, T.discrepancyId));
+      expect(await syncClaims(db, T.restaurantId)).toBe(1);
+    } finally {
+      await db.update(discrepancies).set({ ruleId: null }).where(eq(discrepancies.id, T.discrepancyId));
+    }
+  });
+
   it('writes off a never-claimable claim ONLY while untouched: claimed, no letter, no money, no person', async () => {
     await db.update(discrepancies).set({ resolutionStatus: 'open' }).where(eq(discrepancies.id, T.discrepancyId));
     const m = await moiDiscrepancy();
