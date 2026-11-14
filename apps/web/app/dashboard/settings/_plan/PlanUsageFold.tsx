@@ -1,13 +1,12 @@
 'use client';
 
-import type { ReactNode } from 'react';
 import { ExplainToggle, useDisclosure } from '@/lib/components';
 
 /**
  * W3-07a · "תוכנית ושימוש" folds its details (W2-16 copy focus: the settings page has a
  * word budget). The summary line stays visible; usage rows open in place below it.
  */
-export function PlanUsageFold({ summary, about, children }: { summary: ReactNode; about: string; children: ReactNode }) {
+export function PlanUsageFold({ summary, about, children }: { summary: React.ReactNode; about: string; children: React.ReactNode }) {
   const { toggleProps, panelProps } = useDisclosure('plan-usage');
   return (
     <>
