@@ -26,6 +26,12 @@ export const AUTOMATION_OPTION_KEYS = [
   'priceCreepDigest',
   'contractExpiry',
   'priceListDiff',
+  // W3-09 / AU-11 (orchestrator 14.11): the order autopilot. preparedOrderDraft OFF until
+  // icp-keeper signs; backorderDraft ON (an in-app draft only); sendRescue ON (a staff
+  // notice only — it never sends anything to a supplier).
+  'preparedOrderDraft',
+  'backorderDraft',
+  'sendRescue',
 ] as const;
 export type AutomationOptionKey = (typeof AUTOMATION_OPTION_KEYS)[number];
 
@@ -210,6 +216,35 @@ export const AUTOMATIONS: ReadonlyArray<AutomationDef> = [
     audience: ['owner', 'manager'],
     carriesIls: true,
     outboxMatch: { kind: 'none' },
+  },
+  // W3-09 / AU-11 (catalogue A16, orchestrator 14.11): the order autopilot. Nothing here
+  // sends to a supplier: drafts wait for a person; notices go to the orderers only.
+  {
+    id: 'A16',
+    key: 'orderPrepared',
+    control: { kind: 'option', option: 'preparedOrderDraft', default: false },
+    slot: '09:00',
+    audience: ['owner', 'manager', 'chef'],
+    carriesIls: false,
+    outboxMatch: { kind: 'prefix', prefix: 'au:A16:' },
+  },
+  {
+    id: 'A16b',
+    key: 'orderBackorder',
+    control: { kind: 'option', option: 'backorderDraft', default: true },
+    slot: 'event',
+    audience: ['owner', 'manager', 'chef'],
+    carriesIls: false,
+    outboxMatch: { kind: 'prefix', prefix: 'au:A16b:' },
+  },
+  {
+    id: 'A16c',
+    key: 'orderSendRescue',
+    control: { kind: 'option', option: 'sendRescue', default: true },
+    slot: '09:00',
+    audience: ['owner', 'manager', 'chef'],
+    carriesIls: false,
+    outboxMatch: { kind: 'prefix', prefix: 'au:A16c:' },
   },
 ];
 

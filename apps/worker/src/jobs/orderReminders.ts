@@ -6,16 +6,30 @@
  * supplier's unsent draft when there is one, else the new-order wizard. No ₪.
  * Deduped once per (recipient, supplier, IL day): `au:A5:<rid>:<userId>:<sid>:<day>`.
  *
+ * W3-09 / AU-11 (option `preparedOrderDraft`, default off): for a supplier due
+ * today, a draft is PREPARED from the order guide and the A5 line is replaced by
+ * "טיוטה מוכנה ל<ספק> · N פריטים" (one message per supplier per person, dedupe
+ * `au:A16:<rid>:<userId>:<sid>:<day>`). A supplier whose cut-off is before 09:30
+ * gets TOMORROW's draft today, when tomorrow is one of its order days. Nothing
+ * is sent to a supplier; the draft waits for a person. Then (option `sendRescue`)
+ * placed orders whose send failed in the last 48 h are reported to their sender.
+ *
  * Runs in the morning after daily-expectations (see cron.ts). Detection only —
  * delivery happens through outbox-dispatch.
  */
 import {
+  autopilotDeepLink,
+  autopilotOption,
   briefDedupeKey,
   briefOptionOn,
   briefPayload,
   enqueueNotification,
+  findSendRescues,
   newOrderPath,
+  notifySendRescue,
   orderReminderBrief,
+  ordersAutopilotHe,
+  prepareOrderDraft,
   recipientsForRestaurant,
 } from '@restomatch/api';
 import {
@@ -24,7 +38,6 @@ import {
   eq,
   inArray,
   isNotNull,
-  ne,
   notificationsOutbox,
   or,
   purchaseOrders,
@@ -41,6 +54,7 @@ import {
   startOfIlDay,
 } from '../lib/notifyHelpers';
 import { jobDb } from '../db';
+import { ilMinuteOfDay, parseCutoff } from './orderCutoff';
 
 export interface OrderRemindersJob {
   /** When omitted, sweeps ALL restaurants. */
@@ -62,6 +76,8 @@ export function orderReminderUrl(baseUrl: string, supplierId: string): string {
 export const ORDERED_STATUSES = ['sent', 'confirmed', 'partial', 'closed'] as const;
 /** Who hears the reminder: the chef orders directly (`chefProcedure`), so the chef too. */
 export const ORDER_REMINDER_ROLES = ['owner', 'manager', 'chef'] as const;
+/** AU-11: a cut-off before 09:30 IL gets tomorrow's prepared draft at today's 09:00 run. */
+export const EARLY_CUTOFF_MIN = 9 * 60 + 30;
 
 /**
  * DEPLOY-DAY GUARD (one-time; delete after B2 deploy day + 1, i.e. from 14.11.2026).
@@ -102,6 +118,13 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
   let dueToday = 0;
   let enqueued = 0;
   let skipped = 0;
+  let prepared = 0;
+  let rescued = 0;
+  const nowMin = ilMinuteOfDay(now);
+  const tomorrowRef = new Date(endToday.getTime() + 3600_000);
+  const tomorrowKey = ilDateKey(tomorrowRef);
+  const tomorrowWeekday = ilWeekday(tomorrowRef);
+  const endTomorrow = startOfIlDay(new Date(endToday.getTime() + 36 * 3600_000));
 
   for (const restaurant of restaurantRows) {
     const supplierRows = await db
@@ -118,6 +141,14 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
           isNotNull(suppliers.orderSchedule),
         ),
       );
+
+    // AU-11 c · failed-send rescue: its own option, independent of the reminder.
+    if (autopilotOption(restaurant.settings, 'sendRescue')) {
+      for (const r of await findSendRescues(db, restaurant.id, now)) {
+        await notifySendRescue(db, { restaurantId: restaurant.id, poId: r.poId, supplierName: r.supplierName, createdBy: r.createdBy, now });
+        rescued += 1;
+      }
+    }
 
     if (!briefOptionOn(restaurant.settings, 'orderReminders')) {
       console.log(`[order-reminders] restaurant=${restaurant.id} skipped: option off`);
@@ -140,20 +171,95 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
           eq(purchaseOrders.restaurantId, restaurant.id),
           or(
             inArray(purchaseOrders.status, [...ORDERED_STATUSES]),
-            and(eq(purchaseOrders.status, 'draft'), ne(purchaseOrders.source, 'manual')),
+            // A held platform/import draft counts; the buyer's own drafts (manual,
+            // or AU-11's prepared 'recurring' ones) are not orders.
+            and(eq(purchaseOrders.status, 'draft'), sql`${purchaseOrders.source} not in ('manual', 'recurring')`),
           ),
           sql`${sentOrCreated} >= ${startToday.toISOString()}::timestamptz`,
           sql`${sentOrCreated} < ${endToday.toISOString()}::timestamptz`,
         ),
       );
     const orderedSet = new Set(orderedToday.map((r) => r.supplierId));
+    // AU-11: a prepared draft FOR today that someone already sent (yesterday, for an
+    // early cut-off) is today's order — no "you haven't ordered" nag for it.
+    const sentPrepared = await db
+      .select({ supplierId: purchaseOrders.supplierId })
+      .from(purchaseOrders)
+      .where(
+        and(
+          eq(purchaseOrders.restaurantId, restaurant.id),
+          inArray(purchaseOrders.status, [...ORDERED_STATUSES]),
+          sql`${purchaseOrders.sourceRef} like ${`au:A16:%:${todayKey}`}`,
+        ),
+      );
+    for (const r of sentPrepared) orderedSet.add(r.supplierId);
 
     const missing = supplierRows.filter((s) => {
       const window = s.orderSchedule?.windows?.find((w) => w.orderDays.includes(weekday));
       return Boolean(window) && !orderedSet.has(s.id);
     });
-    if (missing.length === 0) continue;
+    // AU-11 a · TOMORROW's draft today for an early cut-off (before 09:30): the
+    // 09:00 message is the only one that reaches them in time (H-05a's slot later).
+    const preparedOn = autopilotOption(restaurant.settings, 'preparedOrderDraft');
+    const early = preparedOn
+      ? supplierRows.filter((s) => {
+          const w = s.orderSchedule?.windows?.find((x) => x.orderDays.includes(tomorrowWeekday));
+          const c = parseCutoff(w?.cutoff);
+          return c !== null && c < EARLY_CUTOFF_MIN;
+        })
+      : [];
+
+    if (missing.length === 0 && early.length === 0) continue;
     dueToday += missing.length;
+
+    // AU-11 a · prepare today's draft for each due supplier whose cut-off is still ahead.
+    type Prepared = { poId: string; lines: number; cutoff: string | null; tomorrow: boolean };
+    // Today's prepared draft REPLACES that supplier's A5 line; tomorrow's is an extra
+    // message and never hides today's reminder.
+    const preparedBySupplier = new Map<string, Prepared>();
+    const preparedTomorrow = new Map<string, Prepared>();
+    if (preparedOn) {
+      for (const s of missing) {
+        const w = s.orderSchedule?.windows?.find((x) => x.orderDays.includes(weekday));
+        const c = parseCutoff(w?.cutoff);
+        if (c !== null && c <= nowMin) continue; // past today's cut-off: the A5 line (or nothing) as before
+        const r = await db.transaction((tx) =>
+          prepareOrderDraft(tx as unknown as typeof db, {
+            restaurantId: restaurant.id,
+            supplierId: s.id,
+            orderDay: todayKey,
+            dayStart: startToday,
+            dayEnd: endToday,
+            now,
+            optionChecked: true,
+          }),
+        );
+        if (r.status === 'skipped' || r.lineCount === 0) continue;
+        if (r.status === 'created') prepared += 1;
+        preparedBySupplier.set(s.id, { poId: r.poId, lines: r.lineCount, cutoff: w?.cutoff ?? null, tomorrow: false });
+      }
+      for (const s of early) {
+        const w = s.orderSchedule?.windows?.find((x) => x.orderDays.includes(tomorrowWeekday));
+        // An order created today AFTER today's cut-off (or any order today, when today is
+        // not an order day for it) is tomorrow's order: no second draft for it.
+        const todayCut = parseCutoff(s.orderSchedule?.windows?.find((x) => x.orderDays.includes(weekday))?.cutoff);
+        const forTomorrowFrom = todayCut === null ? startToday : new Date(startToday.getTime() + todayCut * 60_000);
+        const r = await db.transaction((tx) =>
+          prepareOrderDraft(tx as unknown as typeof db, {
+            restaurantId: restaurant.id,
+            supplierId: s.id,
+            orderDay: tomorrowKey,
+            dayStart: forTomorrowFrom,
+            dayEnd: endTomorrow,
+            now,
+            optionChecked: true,
+          }),
+        );
+        if (r.status === 'skipped' || r.lineCount === 0) continue;
+        if (r.status === 'created') prepared += 1;
+        preparedTomorrow.set(s.id, { poId: r.poId, lines: r.lineCount, cutoff: w?.cutoff ?? null, tomorrow: true });
+      }
+    }
 
     // Any open draft for those suppliers, whatever day it was created (AU-11's
     // prepared drafts are usually created the day before); the newest one wins.
@@ -164,7 +270,7 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
         and(
           eq(purchaseOrders.restaurantId, restaurant.id),
           eq(purchaseOrders.status, 'draft'),
-          eq(purchaseOrders.source, 'manual'), // the buyer's own drafts, never a held import
+          inArray(purchaseOrders.source, ['manual', 'recurring']), // the buyer's own (or prepared) drafts, never a held import
           inArray(
             purchaseOrders.supplierId,
             missing.map((s) => s.id),
@@ -193,7 +299,31 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
       ).map((r) => r.key),
     );
 
+    // AU-11 a · one prepared-draft message per supplier per person; it REPLACES
+    // that supplier's A5 line (never both). No ₪, even though the chef may see it on screen.
+    for (const [supplierId, p] of [...preparedBySupplier, ...preparedTomorrow]) {
+      const name = supplierRows.find((x) => x.id === supplierId)?.name ?? '';
+      const link = `${appBaseUrl()}${autopilotDeepLink(restaurant.id, p.poId)}`;
+      for (const recipient of recipients) {
+        const t = ordersAutopilotHe; // the reminder is Hebrew, like AU-04's A5 line
+        const title = p.tomorrow ? t.preparedTomorrowTitle(name, p.lines, p.cutoff) : t.preparedTitle(name, p.lines, p.cutoff);
+        const { deduped } = await enqueueNotification(db, {
+          restaurantId: restaurant.id,
+          channel: 'email',
+          target: recipient.email,
+          subject: title,
+          body: `${title}\n${t.preparedCta}: ${link}`,
+          payload: { userId: recipient.userId, event: 'au:A16', poId: p.poId, deepLink: link },
+          relatedEntityType: 'purchase_order',
+          relatedEntityId: p.poId,
+          dedupeKey: `au:A16:${restaurant.id}:${recipient.userId}:${supplierId}:${p.tomorrow ? tomorrowKey : todayKey}`,
+        });
+        if (!deduped) enqueued += 1;
+      }
+    }
+
     for (const s of missing) {
+      if (preparedBySupplier.has(s.id)) continue; // the prepared message replaced the A5 line
       const window = s.orderSchedule?.windows?.find((w) => w.orderDays.includes(weekday));
       const msg = orderReminderBrief({
         restaurantId: restaurant.id,
@@ -226,7 +356,7 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
   }
 
   console.log(
-    `[order-reminders] date=${todayKey} weekday=${weekday} restaurants=${restaurantRows.length} due=${dueToday} enqueued=${enqueued} skipped=${skipped}`,
+    `[order-reminders] date=${todayKey} weekday=${weekday} restaurants=${restaurantRows.length} due=${dueToday} enqueued=${enqueued} skipped=${skipped} prepared=${prepared} rescued=${rescued}`,
   );
   // The result shape is pinned (reminderDay.db.test.ts); option-off is in the log line.
   return { date: todayKey, dueToday, enqueued };

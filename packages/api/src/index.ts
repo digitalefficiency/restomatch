@@ -437,6 +437,8 @@ export {
 export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunClaim } from './routers/payRun';
 export { SKIPPED_NO_PROVIDER, providerConfigured, supplierMessageState, type SupplierMessageState } from './notifications/delivery';
 export * from './briefs';
+// W3-09 / AU-11 order autopilot (worker: prepared drafts + failed-send rescue at 09:00).
+export * from './orders/autopilot';
 export * from './notifications/sendWindow';
 export { awaitingDecision, awaitingDecisionDetail, type AwaitingDecision } from './approvals/awaiting';
 export { notify, notifyEffect, resolveAudience, type Address, type Audience } from './notifications/notify';
