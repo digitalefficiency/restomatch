@@ -3,10 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { runCutoverChecks } from '../cutoverChecks';
 import { runDoctor } from '../doctor';
 import { findJournalGaps, readJournal, runMigrator } from '../migrations';
 import { planSupabaseSync, repoRoot, SUPABASE_LOCK, SUPABASE_MIGRATIONS_DIR } from '../supabaseSync';
 import { testDbUrl } from '../test-env';
+import { NEEDS_TRANSACTION_BLOCK, NOT_IN_PIPELINE, splitSqlStatements, stripSqlComments } from './sqlStatements';
 
 /**
  * The Supabase GitHub-integration path, proven on an EMULATED Supabase:
@@ -15,8 +17,17 @@ import { testDbUrl } from '../test-env';
  *   - `storage` (buckets/objects/foldername) is owned by a separate
  *     supabase_storage_admin role; anon/authenticated/service_role exist;
  *   - uuid-ossp is pre-installed in an `extensions` schema, as on Supabase;
- *   - every supabase/migrations file is applied in filename order, one
- *     transaction per file, aborting on the first error (psql -1 ON_ERROR_STOP).
+ *   - every supabase/migrations file is applied in filename order the way the
+ *     Supabase CLI does it: its statements go out as a pipeline with NO BEGIN
+ *     (the CLI queues them into one pgconn batch with a single Sync). Here each
+ *     statement is sent on its own, also without BEGIN, which is stricter: any
+ *     statement that needs a transaction block (a top-level LOCK, SET LOCAL, …)
+ *     fails exactly as on Supabase (25P01). Aborts on the first error.
+ *     It does NOT model cross-statement pipeline semantics: here each statement
+ *     commits on its own, so transaction-local settings (set_config(…, true)) and
+ *     per-file atomicity are not exercised. Those are covered by migration-0071's
+ *     lock tests on the drizzle path and by the static scan below; the real CLI
+ *     path (one pgconn ExecBatch, one Sync) was verified out of band (PR #237).
  * Then: drizzle sees the DB as fully migrated, the doctor reports no FAIL, the
  * RLS file is idempotent, and the storage block degrades to a WARNING instead
  * of failing the deploy when the role may not touch storage.objects.
@@ -46,8 +57,10 @@ let canCreate = true;
 const notices: string[] = [];
 
 async function applyFile(sql: postgres.Sql, file: string): Promise<void> {
-  const body = readFileSync(join(migDir, file), 'utf8');
-  await sql.begin((tx) => tx.unsafe(body));
+  // Pipeline mode, like the Supabase CLI: no explicit BEGIN around the file.
+  for (const stmt of splitSqlStatements(readFileSync(join(migDir, file), 'utf8'))) {
+    await sql.unsafe(stmt);
+  }
 }
 
 const TENANT_POLICIES = ['invoice_scans_tenant_delete', 'invoice_scans_tenant_insert', 'invoice_scans_tenant_select', 'invoice_scans_tenant_update'];
@@ -397,11 +410,165 @@ describe('git deploy onto an emulated Supabase project', () => {
     expect(await status('Supabase Data API locked out')).toBe('PASS');
   });
 
+  /** Apply a file inside ONE transaction (the CLI pipeline's atomicity); `inspect` runs before commit. */
+  async function applyFileInTx(conn: postgres.Sql, file: string, inspect?: (tx: postgres.TransactionSql) => Promise<void>) {
+    await conn.begin(async (tx) => {
+      for (const stmt of splitSqlStatements(readFileSync(join(migDir, file), 'utf8'))) await tx.unsafe(stmt);
+      if (inspect) await inspect(tx);
+    });
+  }
+  const strongLocks = async (tx: postgres.TransactionSql) =>
+    (await tx`
+      select c.relname, l.mode from pg_locks l join pg_class c on c.oid = l.relation
+      where l.pid = pg_backend_pid() and l.mode in ('AccessExclusiveLock', 'ShareRowExclusiveLock', 'ExclusiveLock')
+        and c.relnamespace in ('public'::regnamespace, 'storage'::regnamespace)
+      order by 1`) as unknown as Array<{ relname: string; mode: string }>;
+
+  it('LOCK-SAFE RLS file: a second apply on a provisioned project plans nothing and takes no strong lock', async (ctx) => {
+    if (!canCreate) ctx.skip();
+    let planned = -1;
+    let locks: Array<{ relname: string; mode: string }> = [{ relname: '?', mode: '?' }];
+    await sql.begin(async (tx) => {
+      for (const stmt of splitSqlStatements(readFileSync(join(migDir, rlsFile), 'utf8'))) {
+        if (/drop table if exists pg_temp\.rm_todo/.test(stmt)) {
+          planned = ((await tx`select count(*)::int as n from pg_temp.rm_todo`) as unknown as [{ n: number }])[0].n;
+        }
+        await tx.unsafe(stmt);
+      }
+      locks = await strongLocks(tx);
+    });
+    expect(planned).toBe(0);
+    expect(locks).toEqual([]);
+  });
+
+  it('LOCK-SAFE RLS file: with work to do, a live startReceipt (goods_receipts, then purchase_orders FOR UPDATE) is not deadlocked', async (ctx) => {
+    if (!canCreate) ctx.skip();
+    // Make the file do real work on exactly the two tables startReceipt touches.
+    await sql.unsafe('drop policy if exists purchase_orders_tenant on purchase_orders');
+    await sql.unsafe('drop policy if exists goods_receipts_tenant on goods_receipts');
+    const app = postgres(migratorUrl.toString(), { max: 1, prepare: false, onnotice: () => undefined });
+    try {
+      let forUpdateMs = -1;
+      const appTx = app.begin(async (tx) => {
+        await tx`select count(*) from goods_receipts`; // startReceipt step 1
+        await new Promise((r) => setTimeout(r, 300)); // the RLS file starts meanwhile
+        const t = Date.now();
+        await tx`select id from purchase_orders for update`; // step 2: the cycle the old file closed
+        forUpdateMs = Date.now() - t;
+      });
+      await new Promise((r) => setTimeout(r, 100));
+      const deploy = applyFileInTx(sql, rlsFile);
+      await appTx; // no 40P01 for the receiver
+      await deploy; // and the deploy then applies
+      expect(forUpdateMs).toBeGreaterThanOrEqual(0);
+      expect(forUpdateMs).toBeLessThan(1_000); // the file held nothing while it waited
+    } finally {
+      await app.end();
+    }
+    const pols = (await sql`
+      select polname from pg_policy where polname in ('purchase_orders_tenant', 'goods_receipts_tenant') order by 1`) as unknown as Array<{ polname: string }>;
+    expect(pols.map((p) => p.polname)).toEqual(['goods_receipts_tenant', 'purchase_orders_tenant']);
+    // Restored exactly: the next apply has nothing left to do.
+    let locks: Array<{ relname: string; mode: string }> = [{ relname: '?', mode: '?' }];
+    await applyFileInTx(sql, rlsFile, async (tx) => {
+      locks = await strongLocks(tx);
+    });
+    expect(locks).toEqual([]);
+  }, 30_000);
+
+  /** Apply the RLS file in one transaction; returns how many items it planned. */
+  async function applyCountingPlan(conn: postgres.Sql): Promise<number> {
+    let planned = -1;
+    await conn.begin(async (tx) => {
+      for (const stmt of splitSqlStatements(readFileSync(join(migDir, rlsFile), 'utf8'))) {
+        if (/drop table if exists pg_temp\.rm_todo/.test(stmt)) {
+          planned = ((await tx`select count(*)::int as n from pg_temp.rm_todo`) as unknown as [{ n: number }])[0].n;
+        }
+        await tx.unsafe(stmt);
+      }
+    });
+    return planned;
+  }
+  const auditTriggerState = async () =>
+    ((await sql`
+      select tgenabled::text as st from pg_trigger
+      where tgname = 'audit_log_no_update_delete' and not tgisinternal`) as unknown as Array<{ st: string }>).map((r) => r.st);
+
+  for (const [mode, st] of [['DISABLE', 'D'], ['ENABLE REPLICA', 'R'], ['ENABLE ALWAYS', 'A']] as const) {
+    it(`LOCK-SAFE RLS file: the audit_log trigger left "${mode}" is planned and restored to ORIGIN; doctor + cutover flag it until then`, async (ctx) => {
+      if (!canCreate) ctx.skip();
+      const sup = postgres(superUrl.toString(), { max: 1, prepare: false, onnotice: () => undefined });
+      try {
+        await sup.unsafe(`alter table public.audit_log ${mode} trigger audit_log_no_update_delete`);
+      } finally {
+        await sup.end();
+      }
+      expect(await auditTriggerState()).toEqual([st]);
+      const doctor = async () =>
+        (await runDoctor(migratorUrl.toString())).findings.find((f) => f.name === 'audit_log append-only trigger')?.status;
+      const cutover = async () =>
+        (await runCutoverChecks(migratorUrl.toString(), { checkDefaultPassword: false })).find((r) => r.name === 'audit_log_immutable')?.ok;
+      expect(await doctor()).toBe('WARN');
+      expect(await cutover()).toBe(false);
+
+      expect(await applyCountingPlan(sql)).toBeGreaterThanOrEqual(1);
+      expect(await auditTriggerState()).toEqual(['O']);
+      expect(await doctor()).toBe('PASS');
+      expect(await cutover()).toBe(true);
+      expect(await applyCountingPlan(sql)).toBe(0); // and a clean DB plans nothing again
+    });
+  }
+
+  it('LOCK-SAFE RLS file: storage.objects contention neither blocks nor rolls back the tenant repair (WARNING; storage done on the next run)', async (ctx) => {
+    if (!canCreate) ctx.skip();
+    const sup = postgres(superUrl.toString(), { max: 1, prepare: false, onnotice: () => undefined });
+    const reader = postgres(superUrl.toString(), { max: 1, prepare: false, onnotice: () => undefined });
+    const fresh = postgres(migratorUrl.toString(), { max: 1, prepare: false, onnotice: (n) => notices.push(String(n.message)) });
+    try {
+      // Work on both sides: one tenant policy and one storage policy missing.
+      await sup.unsafe('drop policy if exists purchase_orders_tenant on purchase_orders');
+      await sup.unsafe('drop policy if exists invoice_scans_tenant_select on storage.objects');
+      // A long storage reader holds storage.objects for the whole apply.
+      let release!: () => void;
+      const held = new Promise<void>((r) => (release = r));
+      let readerHas!: () => void;
+      const readerReady = new Promise<void>((r) => (readerHas = r));
+      const readerTx = reader.begin(async (tx) => {
+        await tx`select count(*) from storage.objects`;
+        readerHas();
+        await held;
+      });
+      await readerReady;
+      notices.length = 0;
+      const t = Date.now();
+      try {
+        await applyFileInTx(fresh, rlsFile);
+      } finally {
+        release();
+        await readerTx;
+      }
+      expect(Date.now() - t).toBeLessThan(5_000); // never waited out lock_timeout behind the reader
+      expect(notices.join('\n')).toMatch(/storage\.objects policies NOT applied/);
+      const pols = (await sql`
+        select polname from pg_policy where polname in ('purchase_orders_tenant', 'invoice_scans_tenant_select') order by 1`) as unknown as Array<{ polname: string }>;
+      expect(pols.map((p) => p.polname)).toEqual(['purchase_orders_tenant']); // tenant repaired, storage skipped
+      // Quiet again: the next run finishes storage and then has nothing left to do.
+      expect(await applyCountingPlan(fresh)).toBeGreaterThanOrEqual(1);
+      expect(await storagePolicies(sql)).toEqual(TENANT_POLICIES);
+      expect(await applyCountingPlan(fresh)).toBe(0);
+    } finally {
+      await Promise.all([sup.end(), reader.end(), fresh.end()]);
+    }
+  }, 30_000);
+
   it('without rights on storage.objects the RLS file still applies (WARNING, deploy not blocked)', async (ctx) => {
     if (!canCreate) ctx.skip();
     const sup = postgres(superUrl.toString(), { max: 1, prepare: false, onnotice: () => undefined });
     try {
       await sup.unsafe(`revoke supabase_storage_admin from ${MIGRATOR}`);
+      // The RLS file is lock-safe: it only touches a storage policy that differs. Make one
+      // differ, so the file has storage work to do that this role may not perform.
+      await sup.unsafe('drop policy if exists invoice_scans_tenant_select on storage.objects');
     } finally {
       await sup.end();
     }
@@ -417,5 +584,26 @@ describe('git deploy onto an emulated Supabase project', () => {
     } finally {
       await fresh.end();
     }
+  });
+});
+
+describe('every supabase/migrations file is safe for the CLI pipeline (one Sync, no BEGIN)', () => {
+  it('has no top-level statement that needs a transaction block or cannot run in a pipeline', () => {
+    const bad: string[] = [];
+    for (const f of files) {
+      for (const stmt of splitSqlStatements(readFileSync(join(migDir, f), 'utf8'))) {
+        const head = stripSqlComments(stmt).trim();
+        if (NEEDS_TRANSACTION_BLOCK.test(head) || NOT_IN_PIPELINE.test(head)) bad.push(`${f}: ${head.slice(0, 60)}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('the scanner itself catches the round-1 shape (top-level LOCK / SET LOCAL) and allows a LOCK inside DO', () => {
+    const stmts = splitSqlStatements(
+      "SET LOCAL lock_timeout = '5s';\nLOCK TABLE a IN ACCESS EXCLUSIVE MODE;\nDO $$ BEGIN LOCK TABLE a; END $$;\nCREATE INDEX CONCURRENTLY i ON a (x);\nselect set_config('lock_timeout', '5s', true);",
+    ).map((x) => stripSqlComments(x).trim());
+    expect(stmts).toHaveLength(5);
+    expect(stmts.map((x) => NEEDS_TRANSACTION_BLOCK.test(x) || NOT_IN_PIPELINE.test(x))).toEqual([true, true, false, true, false]);
   });
 });

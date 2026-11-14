@@ -179,6 +179,11 @@ export const users = pgTable(
     name: text('name'),
     image: text('image'),
     phone: varchar('phone', { length: 32 }),
+    /**
+     * When `phone` was verified (0071, G-03). Written ONLY on the auth/owner
+     * connection: the tenant app role has no INSERT/UPDATE/DELETE on users.
+     */
+    phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
     /** Platform operator (internal ops console). NOT a tenant role. */
     isPlatformAdmin: boolean('is_platform_admin').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -556,6 +561,9 @@ export const products = pgTable(
   ],
 );
 
+export const PRODUCT_ALIAS_SOURCES = ['human', 'exact_key', 'new_product', 'import_guess', 'legacy'] as const;
+export type ProductAliasSource = (typeof PRODUCT_ALIAS_SOURCES)[number];
+
 export const productAliases = pgTable(
   'product_aliases',
   {
@@ -567,6 +575,11 @@ export const productAliases = pgTable(
     supplierSku: varchar('supplier_sku', { length: 64 }),
     supplierNameRaw: text('supplier_name_raw').notNull(),
     confidence: numeric('confidence', { precision: 4, scale: 3 }),
+    /**
+     * Provenance (0071, G-03): 'human' | 'exact_key' | 'new_product' | 'import_guess' |
+     * 'legacy' (CHECK in 0071; every alias created before 0071 is 'legacy').
+     */
+    source: varchar('source', { length: 16 }).$type<ProductAliasSource>().notNull().default('legacy'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -673,6 +686,9 @@ export const supplierCatalogItems = pgTable(
  * Purchase Orders
  * ────────────────────────────────────────────────────────────────────────── */
 
+export const PO_KINDS = ['standard', 'walk_in'] as const;
+export type PoKind = (typeof PO_KINDS)[number];
+
 export const purchaseOrders = pgTable(
   'purchase_orders',
   {
@@ -703,6 +719,10 @@ export const purchaseOrders = pgTable(
     /** Outbound placement: set when a manual draft is placed (status → sent). */
     sentAt: timestamp('sent_at', { withTimezone: true }),
     sentChannel: poSentChannel('sent_channel'),
+    /** 'standard' | 'walk_in' (0071, G-03; CHECK in 0071). A walk-in PO is opened retro at the dock. */
+    kind: varchar('kind', { length: 16 }).$type<PoKind>().notNull().default('standard'),
+    /** The order number as printed / sent to the supplier (0071, G-03). */
+    poNumber: varchar('po_number', { length: 64 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -758,6 +778,8 @@ export const goodsReceipts = pgTable(
     photos: jsonb('photos').$type<string[]>().notNull().default([]),
     signatureUrl: text('signature_url'),
     notes: text('notes'),
+    /** The supplier's printed delivery-note (תעודת משלוח) number (0071, G-03). */
+    deliveryNoteNumber: varchar('delivery_note_number', { length: 64 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -774,6 +796,9 @@ export const goodsReceipts = pgTable(
   ],
 );
 
+export const GR_COUNT_METHODS = ['line', 'bulk_as_ordered', 'legacy'] as const;
+export type GrCountMethod = (typeof GR_COUNT_METHODS)[number];
+
 export const grLines = pgTable(
   'gr_lines',
   {
@@ -788,11 +813,23 @@ export const grLines = pgTable(
     rejectReason: text('reject_reason'),
     conditionNotes: text('condition_notes'),
     photos: jsonb('photos').$type<string[]>().notNull().default([]),
+    /**
+     * Count truth (0071, G-03): when the line was counted, by whom, and how
+     * ('line' | 'bulk_as_ordered' | 'legacy'; CHECK in 0071). The 0071 backfill
+     * stamped only lines the interim marker counted, on receipts closed before
+     * 0071: counted_at = the receipt's updated_at ("counted NO LATER THAN", never
+     * an ordering key), counted_by NULL. Untouched 0/0 lines stay NULL (unknown).
+     */
+    countedAt: timestamp('counted_at', { withTimezone: true }),
+    countedBy: uuid('counted_by').references(() => users.id, { onDelete: 'set null' }),
+    countMethod: varchar('count_method', { length: 16 }).$type<GrCountMethod>(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('gr_lines_gr_idx').on(t.grId),
     index('gr_lines_po_line_idx').on(t.poLineId),
     index('gr_lines_product_idx').on(t.productId),
+    index('gr_lines_counted_by_idx').on(t.countedBy),
   ],
 );
 
@@ -965,6 +1002,17 @@ export const matchRuns = pgTable(
   ],
 );
 
+export const DISCREPANCY_DECISIONS = [
+  'claim',
+  'waive',
+  'acknowledge',
+  'hold_duplicate',
+  'release_duplicate',
+  'link_po',
+  'tolerate',
+] as const;
+export type DiscrepancyDecision = (typeof DISCREPANCY_DECISIONS)[number];
+
 export const discrepancies = pgTable(
   'discrepancies',
   {
@@ -995,9 +1043,19 @@ export const discrepancies = pgTable(
     resolvedBy: uuid('resolved_by').references(() => users.id, { onDelete: 'set null' }),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     resolutionNote: text('resolution_note'),
+    /**
+     * The decision taken on this פער (0071, G-03; CHECK in 0071), the basis it was
+     * taken on (the ₪ and refs shown at decision time), and who escalated it from
+     * which role. NULL = no decision recorded in the column yet.
+     */
+    decision: varchar('decision', { length: 24 }).$type<DiscrepancyDecision>(),
+    basis: jsonb('basis').$type<Record<string, unknown>>(),
+    escalatedFromRole: userRole('escalated_from_role'),
+    escalatedBy: uuid('escalated_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    index('discrepancies_escalated_by_idx').on(t.escalatedBy),
     index('discrepancies_queue_idx').on(
       t.restaurantId,
       t.resolutionStatus,
@@ -1023,6 +1081,8 @@ export const activityEventType = pgEnum('activity_event_type', [
   'discrepancy_rejected',
   'alias_learned',
   'sync_completed',
+  // 0071 (G-03): the generic kind; the specific kind lives in metadata.kind.
+  'event',
 ]);
 
 export const activityEvents = pgTable(
@@ -1511,6 +1571,8 @@ export const notificationStatus = pgEnum('notification_status', [
   'sent',
   'failed',
   'cancelled',
+  // 0071 (G-03): not sent on purpose (e.g. no provider configured).
+  'skipped',
 ]);
 
 export const notificationsOutbox = pgTable(
@@ -2163,9 +2225,12 @@ export const recoveryClaims = pgTable(
     lastReminderAt: timestamp('last_reminder_at', { withTimezone: true }),
     note: text('note'),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    /** The claim letter this claim went out in (0071, G-03; same-tenant composite FK in 0071). */
+    letterId: uuid('letter_id'),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    index('recovery_claims_letter_idx').on(t.letterId, t.restaurantId),
     uniqueIndex('recovery_claims_discrepancy_unique').on(t.discrepancyId),
     index('recovery_claims_restaurant_status_idx').on(t.restaurantId, t.status, t.claimedAt),
     index('recovery_claims_discrepancy_tenant_idx').on(t.discrepancyId, t.restaurantId),
@@ -2352,3 +2417,105 @@ export const referralRedemptions = pgTable(
 
 export type ReferralCode = typeof referralCodes.$inferSelect;
 export type ReferralRedemption = typeof referralRedemptions.$inferSelect;
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Schema batch 0 (wave 2, G-03, migration 0071): idempotency keys, claim
+ * letters, payment deductions. All three are tenant tables: restaurant_id NOT
+ * NULL, UNIQUE (id, restaurant_id), RLS `<table>_tenant` (0071 + rls/0002).
+ * The same-tenant composite FKs live in 0071's SQL; Drizzle mirrors the columns.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** One recorded mutation per (restaurant, client key): a retry returns `response`. */
+export const idempotencyKeys = pgTable(
+  'idempotency_keys',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    key: varchar('key', { length: 128 }).notNull(),
+    procedure: varchar('procedure', { length: 128 }).notNull(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    requestHash: varchar('request_hash', { length: 64 }),
+    response: jsonb('response'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('idempotency_keys_restaurant_key_key').on(t.restaurantId, t.key),
+    unique('idempotency_keys_id_restaurant_id_key').on(t.id, t.restaurantId),
+    index('idempotency_keys_user_idx').on(t.userId),
+    index('idempotency_keys_created_at_idx').on(t.createdAt),
+  ],
+);
+
+export const CLAIM_LETTER_STATUSES = ['draft', 'sent', 'answered', 'closed'] as const;
+export type ClaimLetterStatus = (typeof CLAIM_LETTER_STATUSES)[number];
+export const CLAIM_LETTER_CHANNELS = ['whatsapp', 'email', 'print'] as const;
+export type ClaimLetterChannel = (typeof CLAIM_LETTER_CHANNELS)[number];
+
+/** One credit-claim letter (דרישת זיכוי) to one supplier, numbered per restaurant. */
+export const claimLetters = pgTable(
+  'claim_letters',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    /** Same-tenant composite FK → suppliers (ON DELETE NO ACTION) in 0071. */
+    supplierId: uuid('supplier_id').notNull(),
+    /** Running letter number per restaurant (UNIQUE (restaurant_id, seq_no), > 0). */
+    seqNo: integer('seq_no').notNull(),
+    /** 'draft' | 'sent' | 'answered' | 'closed' (CHECK in 0071). */
+    status: varchar('status', { length: 16 }).$type<ClaimLetterStatus>().notNull().default('draft'),
+    /** How it went out: 'whatsapp' | 'email' | 'print' (CHECK in 0071); NULL = not sent yet. */
+    channel: varchar('channel', { length: 16 }).$type<ClaimLetterChannel>(),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    /** The answer deadline printed on the letter (local date). */
+    replyBy: date('reply_by', { mode: 'string' }),
+    /** The letter exactly as sent (lines, ₪, wording), frozen. */
+    contentSnapshot: jsonb('content_snapshot').$type<Record<string, unknown>>(),
+    version: integer('version').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('claim_letters_id_restaurant_id_key').on(t.id, t.restaurantId),
+    unique('claim_letters_restaurant_seq_key').on(t.restaurantId, t.seqNo),
+    index('claim_letters_supplier_idx').on(t.supplierId, t.restaurantId),
+    index('claim_letters_restaurant_status_idx').on(t.restaurantId, t.status),
+  ],
+);
+
+export const PAYMENT_DEDUCTION_VAT_BASES = ['incl_vat', 'excl_vat'] as const;
+export type PaymentDeductionVatBasis = (typeof PAYMENT_DEDUCTION_VAT_BASES)[number];
+
+/**
+ * A SHORT-PAY record: ₪ held back from an invoice's payment, optionally for a
+ * claim. Never a credit note; it changes neither the invoice nor the claim.
+ */
+export const paymentDeductions = pgTable(
+  'payment_deductions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    /** Same-tenant composite FK → invoices (ON DELETE NO ACTION) in 0071. */
+    invoiceId: uuid('invoice_id').notNull(),
+    /** Same-tenant composite FK → recovery_claims (ON DELETE SET NULL (claim_id)) in 0071. */
+    claimId: uuid('claim_id'),
+    /** Integer agorot, > 0. */
+    amountAgorot: bigint('amount_agorot', { mode: 'number' }).notNull(),
+    /** Whether amount_agorot includes VAT: 'incl_vat' | 'excl_vat' (CHECK in 0071). */
+    vatBasis: varchar('vat_basis', { length: 16 }).$type<PaymentDeductionVatBasis>().notNull().default('incl_vat'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('payment_deductions_id_restaurant_id_key').on(t.id, t.restaurantId),
+    index('payment_deductions_invoice_idx').on(t.invoiceId, t.restaurantId),
+    index('payment_deductions_claim_idx').on(t.claimId, t.restaurantId),
+    index('payment_deductions_restaurant_idx').on(t.restaurantId, t.createdAt),
+    index('payment_deductions_created_by_idx').on(t.createdBy),
+  ],
+);
