@@ -14,6 +14,8 @@ export const PUBLIC_EXACT_PATHS = [
   '/',
   '/pricing',
   '/about',
+  // W3-06b (orchestrator-granted): the product page split from About.
+  '/product',
   '/privacy',
   '/terms',
   '/cookies',
@@ -29,6 +31,8 @@ export const PUBLIC_EXACT_PATHS = [
 export const PUBLIC_PREFIX_PATHS = [
   '/login',
   '/reset',
+  // W3-07b: invite join page (token-scoped; codes + limits in app/join/_lib/joinFlow.ts).
+  '/join',
   '/showcase',
   '/api/showcase',
   // Free leak check (S15 wave 1): the page 404s unless LEAK_CHECK_PUBLIC=1; each
@@ -47,6 +51,9 @@ export const PUBLIC_PREFIX_PATHS = [
   // Wave-1 supplier portal (flag `supplierConfirm`): token-scoped, rate-limited, no session.
   '/s',
   '/api/supplier-confirm',
+  // H-06ʰ supplier reply link for a "מכתב בקשת זיכוי" (page under '/s/c'): a signed
+  // 72 h token, guardPublicRequest per IP and per token hash, CLAIM_PORTAL_SECRET-gated.
+  '/api/claims',
   '/_next',
 ] as const;
 

@@ -1,0 +1,24 @@
+/*
+ * "דוח החודש" display face (owner decision D11): Frank Ruhl Libre on the
+ * report cover and the print header ONLY — never for ₪ (every figure stays in
+ * the app face via <Money>). The self-hosted file arrives with the W2-15 β font
+ * swap; until then the stack falls back to a calm system serif.
+ */
+.report-display {
+  font-family: 'Frank Ruhl Libre', 'David Libre', 'David', 'Times New Roman', serif;
+  font-weight: 700;
+  letter-spacing: 0;
+  font-feature-settings: normal;
+}
+
+/* Print: the sheet only — no app chrome, no controls. */
+@media print {
+  header,
+  nav,
+  [data-print-hide] {
+    display: none !important;
+  }
+  [data-report-print-header] {
+    display: block !important;
+  }
+}
