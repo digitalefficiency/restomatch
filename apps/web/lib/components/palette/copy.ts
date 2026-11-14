@@ -33,7 +33,19 @@ export const paletteCopy = {
     /** For a role whose palette finds screens only (no records to suggest). */
     noResultsScreens: 'אין תוצאות ל„{q}". נסו שם של מסך.',
     error: 'החיפוש נכשל. נסו שוב.',
-    footer: '↑↓ לניווט · Enter לפתיחה · Esc לסגירה · # מספר · @ ספק · > פעולה',
+    /**
+     * Footer hints, each a key and its words. The key renders in its own
+     * `<kbd dir="ltr">` (sidebar spec §9): bare in a Hebrew line, ">" is a
+     * mirrored character and would show as "<".
+     */
+    footerHints: [
+      ['↑↓', 'לניווט'],
+      ['Enter', 'לפתיחה'],
+      ['Esc', 'לסגירה'],
+      ['#', 'מספר'],
+      ['@', 'ספק'],
+      ['>', 'פעולה'],
+    ],
     footerMoney: 'פעולת כסף נפתחת במסך שלה · לא מאשרים מכאן',
     /** Screen-reader words before an option's shortcut keys (the chip itself is hidden). */
     shortcut: 'קיצור',
@@ -73,7 +85,14 @@ export const paletteCopy = {
     noResults: 'No results for “{q}”. Try a supplier name, an invoice number or a screen.',
     noResultsScreens: 'No results for “{q}”. Try a screen name.',
     error: 'Search failed. Try again.',
-    footer: '↑↓ move · Enter open · Esc close · # number · @ supplier · > action',
+    footerHints: [
+      ['↑↓', 'move'],
+      ['Enter', 'open'],
+      ['Esc', 'close'],
+      ['#', 'number'],
+      ['@', 'supplier'],
+      ['>', 'action'],
+    ],
     footerMoney: 'A money action opens on its own screen · nothing is approved here',
     shortcut: 'shortcut',
     close: 'Close',

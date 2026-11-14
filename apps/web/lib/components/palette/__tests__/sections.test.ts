@@ -4,15 +4,19 @@ import { GLOSSARY } from '../../../i18n/glossary';
 import { lint } from '../../../i18n/__tests__/copyGate';
 import {
   buildPaletteSections,
+  chooseOption,
   chordsByHref,
   flatItems,
+  paletteStatus,
   parsePrefix,
   recordItems,
+  recordSearch,
   SECTION_ORDER,
   withoutMoney,
   type BuildInput,
   type PaletteCommand,
   type PaletteItem,
+  type PaletteLinkItem,
   type PaletteSection,
 } from '../sections';
 import { defaultActions } from '../actions';
@@ -477,5 +481,85 @@ describe('DS3-02 · copy (sidebar spec §1.6)', () => {
     const retired = GLOSSARY.find((g) => g.concept === 'creditClaim')!.retireHe;
     const offenders = heStrings().filter(([, text]) => retired.some((t) => text.includes(t)));
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('DS3-02 · choosing an option (chooseOption)', () => {
+  const fx = () => {
+    const log: string[] = [];
+    return {
+      log,
+      fx: {
+        close: () => void log.push('close'),
+        navigate: (href: string) => void log.push(`navigate ${href}`),
+        remember: (item: PaletteLinkItem) => void log.push(`remember ${item.kind}:${item.id}`),
+      },
+    };
+  };
+
+  it('a display command closes the palette first, then runs; it never navigates and is never remembered', () => {
+    const { log, fx: effects } = fx();
+    const cmd: PaletteItem = {
+      kind: 'command',
+      id: 'rail',
+      label: 'כיווץ התפריט',
+      run: () => void log.push('run'),
+    };
+    chooseOption(cmd, effects);
+    expect(log).toEqual(['close', 'run']);
+  });
+
+  it('a link is remembered, then the palette closes, then the page opens', () => {
+    const { log, fx: effects } = fx();
+    chooseOption(
+      { kind: 'setting', id: 'profile', label: 'פרופיל המסעדה', href: '/dashboard/settings' },
+      effects,
+    );
+    expect(log).toEqual(['remember setting:profile', 'close', 'navigate /dashboard/settings']);
+  });
+});
+
+describe('DS3-02 · record search and the status line (never "no results" before a search ran)', () => {
+  it('runs from 2 debounced characters; due while the debounce lags behind what is typed', () => {
+    expect(recordSearch('24950', '', true)).toEqual({ run: false, due: true });
+    expect(recordSearch('24950', '2495', true)).toEqual({ run: true, due: true });
+    expect(recordSearch('24950', '24950', true)).toEqual({ run: true, due: false });
+    // One character: no search will run (search.global takes min 2), so nothing is due.
+    expect(recordSearch('1', '1', true)).toEqual({ run: false, due: false });
+    // Prefixes: `#` and `@` search their term; `>` (actions, commands) never searches records.
+    expect(recordSearch('#24950', '24950', true)).toEqual({ run: true, due: false });
+    expect(recordSearch('@תנובה', 'תנו', true)).toEqual({ run: true, due: true });
+    expect(recordSearch('>כיווץ', 'כיווץ', true)).toEqual({ run: false, due: false });
+  });
+
+  it('a role that finds screens only (or a closed palette) never searches records', () => {
+    expect(recordSearch('INV', '', false)).toEqual({ run: false, due: false });
+    expect(recordSearch('INV', 'INV', false)).toEqual({ run: false, due: false });
+  });
+
+  it('status: error beats everything; options speak for themselves; pending says searching; else no results', () => {
+    const s = (over: Partial<Parameters<typeof paletteStatus>[0]>) =>
+      paletteStatus({ query: '24950', count: 0, pending: false, failed: false, ...over });
+    expect(s({ failed: true })).toBe('error');
+    expect(s({ failed: true, count: 3 })).toBe('error');
+    expect(s({ count: 1 })).toBeNull();
+    expect(s({ count: 1, pending: true })).toBeNull();
+    expect(s({ pending: true })).toBe('searching');
+    expect(s({})).toBe('noResults');
+  });
+
+  it('a bare prefix (# or @) names no term, so it never claims no results', () => {
+    for (const raw of ['#', '@', '  @ ']) {
+      const { query } = parsePrefix(raw);
+      const search = recordSearch(raw, query, true);
+      expect(
+        paletteStatus({ query, count: 0, pending: search.due, failed: false }),
+        raw,
+      ).toBeNull();
+    }
+    // Typing the term brings the claim back once nothing matched and nothing is pending.
+    expect(paletteStatus({ query: 'zz', count: 0, pending: false, failed: false })).toBe(
+      'noResults',
+    );
   });
 });

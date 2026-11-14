@@ -11,9 +11,12 @@ import { defaultActions } from './actions';
 import { browserStorage, loadRecents, rankRecents, recordVisit, saveRecents } from './frecency';
 import {
   buildPaletteSections,
+  chooseOption,
   flatItems,
+  paletteStatus,
   parsePrefix,
   recordItems,
+  recordSearch,
   withoutMoney,
   type PaletteCommand,
   type PaletteItem,
@@ -35,13 +38,35 @@ const NO_MONEY: ReadonlySet<UserRole> = new Set<UserRole>(['chef', 'receiver']);
 /**
  * The selected option: `surface-2` plus the nav's 2 × 16 primary notch at the
  * inline-start edge (sidebar spec §1.6; never a full-height edge). Forced
- * colours drop backgrounds, so an outline keeps the selection visible there.
+ * colours drop backgrounds, so there it gets the nav's 2 px Highlight outline
+ * and the notch keeps its colour, as on the nav's current row (§6).
  */
 const SELECTED =
-  "bg-surface-2 text-ink before:pointer-events-none before:absolute before:start-0 before:top-[calc(50%-8px)] before:h-4 before:w-0.5 before:rounded-[1px] before:bg-primary before:content-[''] forced-colors:outline forced-colors:outline-2 forced-colors:-outline-offset-2";
+  "bg-surface-2 text-ink before:pointer-events-none before:absolute before:start-0 before:top-[calc(50%-8px)] before:h-4 before:w-0.5 before:rounded-[1px] before:bg-primary before:content-[''] forced-colors:outline forced-colors:outline-2 forced-colors:-outline-offset-2 forced-colors:outline-[color:Highlight] forced-colors:before:forced-color-adjust-none";
 
-/** A copy line with `{q}`: the query goes in as plain text, isolated in its own `<bdi>`. */
-function withQuery(template: string, q: string) {
+/**
+ * A key chip, `<kbd dir="ltr">` on every key token (sidebar spec §9): 20 tall,
+ * 12/16 500, with the fill chosen by the caller.
+ */
+const KBD =
+  'inline-flex h-5 shrink-0 items-center whitespace-nowrap rounded-xs border-b border-line px-1.5 font-sans text-caption font-medium text-muted';
+
+/**
+ * A shortcut chip's text: "G A", "Ctrl B". On Apple a modifier glyph joins its
+ * key ("⌘B"), as in the sidebar's "⌘K" chip (sidebar spec §1.1).
+ */
+function chipText(keys: readonly string[], apple: boolean): string {
+  return keys
+    .map((k) => keyLabel(k, apple))
+    .join(' ')
+    .replace(/([⌘⌥]) /gu, '$1');
+}
+
+/**
+ * A copy line with `{q}`: the query goes in as plain text, isolated in its own
+ * `<bdi>` (never as HTML). Exported for the markup test.
+ */
+export function withQuery(template: string, q: string) {
   const at = template.indexOf('{q}');
   if (at < 0) return template;
   return (
@@ -108,6 +133,7 @@ export function CommandPalette(props: CommandPaletteProps) {
     chords,
   } = props;
   const c = paletteCopy[locale];
+  const hints: ReadonlyArray<readonly [key: string, words: string]> = c.footerHints;
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [raw, setRaw] = useState('');
@@ -135,13 +161,12 @@ export function CommandPalette(props: CommandPaletteProps) {
     return () => clearTimeout(t);
   }, [raw]);
 
-  const { mode, query } = parsePrefix(raw);
-  const searchable = open && FINDS_RECORDS[role] && mode !== 'actions';
-  const enabled = searchable && debounced.length >= 2;
+  const { query } = parsePrefix(raw);
+  // `due`: typed but not yet debounced, so the status says "searching", never
+  // "no results" for a term nobody has searched yet.
+  const search = recordSearch(raw, debounced, open && FINDS_RECORDS[role]);
+  const enabled = search.run;
   const results = trpc.search.global.useQuery({ q: debounced }, { enabled, staleTime: 30_000 });
-  // A record search is due but the debounce has not caught up with the input:
-  // say "searching", never "no results" for a query nobody has searched yet.
-  const settling = searchable && query.length >= 2 && debounced !== query;
 
   const actions = useMemo(() => defaultActions(c).filter((a) => canSee(a.href)), [c, canSee]);
   // The money note speaks to viewers who can open a money action at all.
@@ -204,19 +229,20 @@ export function CommandPalette(props: CommandPaletteProps) {
   }, [open, safeActive]);
 
   function choose(item: PaletteItem) {
-    if (item.kind === 'command') {
-      // Close first, so the dialog hands focus back before the command runs and
-      // whatever it opens or focuses stays put. A command never navigates.
-      dialogRef.current?.close();
-      onClose();
-      item.run();
-      return;
-    }
-    const next = recordVisit(recents, item, Date.now());
-    setRecents(next);
-    saveRecents(browserStorage(), next);
-    onClose();
-    onNavigate(item.href);
+    chooseOption(item, {
+      // Close now, not on the next render: the dialog hands focus back before a
+      // command runs, so whatever the command opens or focuses stays put.
+      close: () => {
+        dialogRef.current?.close();
+        onClose();
+      },
+      navigate: onNavigate,
+      remember: (link) => {
+        const next = recordVisit(recents, link, Date.now());
+        setRecents(next);
+        saveRecents(browserStorage(), next);
+      },
+    });
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -231,14 +257,19 @@ export function CommandPalette(props: CommandPaletteProps) {
     }
   }
 
-  const typed = raw.trim();
+  const statusKind = paletteStatus({
+    query,
+    count: items.length,
+    pending: search.due || (enabled && results.isFetching),
+    failed: enabled && results.isError,
+  });
   const status =
-    enabled && results.isError
+    statusKind === 'error'
       ? c.error
-      : items.length === 0 && (settling || (enabled && results.isFetching))
+      : statusKind === 'searching'
         ? c.searching
-        : typed && items.length === 0
-          ? withQuery(FINDS_RECORDS[role] ? c.noResults : c.noResultsScreens, typed)
+        : statusKind === 'noResults'
+          ? withQuery(FINDS_RECORDS[role] ? c.noResults : c.noResultsScreens, raw.trim())
           : null;
 
   let index = -1;
@@ -256,8 +287,11 @@ export function CommandPalette(props: CommandPaletteProps) {
     >
       {open ? (
         <>
-          {/* 52 px and flex: none, so the row never collapses when the list is empty (§1.6). */}
-          <label className="flex h-[52px] flex-none cursor-text items-center gap-3 border-b border-line px-4">
+          {/* 52 px and flex: none, so the row never collapses when the list is empty (§1.6). The
+              input fills the row's height (the field is the 52 px header, as in the reference); the
+              hairline under it is drawn by ::after, so it takes none of that height, and the focus
+              ring sits inside the field (offset −2, as on the nav's rows, §6). */}
+          <label className="relative flex h-[52px] flex-none cursor-text items-center gap-3 px-4 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-line">
             <Search
               aria-hidden="true"
               width={20}
@@ -283,7 +317,7 @@ export function CommandPalette(props: CommandPaletteProps) {
               onKeyDown={onKeyDown}
               autoComplete="off"
               spellCheck={false}
-              className="h-9 min-w-0 flex-1 border-0 bg-transparent p-0 text-body text-ink placeholder:text-subtle"
+              className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-body text-ink [--focus-offset:-2px] placeholder:text-subtle"
             />
           </label>
           <div className="max-h-[60vh] min-h-0 overflow-auto">
@@ -302,9 +336,7 @@ export function CommandPalette(props: CommandPaletteProps) {
                     index += 1;
                     const i = index;
                     const selected = i === safeActive;
-                    const keys = item.keys?.length
-                      ? item.keys.map((k) => keyLabel(k, apple)).join(' ')
-                      : null;
+                    const keys = item.keys?.length ? chipText(item.keys, apple) : null;
                     return (
                       <div
                         key={`${item.kind}:${item.id}`}
@@ -333,10 +365,7 @@ export function CommandPalette(props: CommandPaletteProps) {
                             <kbd
                               dir="ltr"
                               aria-hidden="true"
-                              className={cn(
-                                'inline-flex h-5 shrink-0 items-center whitespace-nowrap rounded-xs border-b border-line px-1.5 font-sans text-caption font-medium text-muted',
-                                selected ? 'bg-surface' : 'bg-surface-2',
-                              )}
+                              className={cn(KBD, selected ? 'bg-surface' : 'bg-surface-2')}
                             >
                               {keys}
                             </kbd>
@@ -362,7 +391,15 @@ export function CommandPalette(props: CommandPaletteProps) {
               moneyNote ? 'flex' : 'hidden sm:flex',
             )}
           >
-            <span className="hidden sm:inline">{c.footer}</span>
+            {/* Key hints from sm up; each key is its own LTR chip, so ">" never shows mirrored. */}
+            {hints.map(([key, words]) => (
+              <span key={key} className="hidden items-center gap-1 sm:inline-flex">
+                <kbd dir="ltr" className={cn(KBD, 'bg-surface-2')}>
+                  {key}
+                </kbd>
+                {words}
+              </span>
+            ))}
             {moneyNote ? <span className="sm:ms-auto">{c.footerMoney}</span> : null}
           </div>
         </>

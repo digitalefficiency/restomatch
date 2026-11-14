@@ -36,13 +36,18 @@ export function ShortcutSheet({
 }: ShortcutSheetProps) {
   const c = paletteCopy[locale];
   const ref = useRef<HTMLDialogElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const apple = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
-    if (open && !d.open) d.showModal();
-    else if (!open && d.open) d.close();
+    if (open && !d.open) {
+      d.showModal();
+      // Start on the title, not on the first control: the switch now comes first, and a Space
+      // pressed to scroll the list must not turn the single-key shortcuts off.
+      titleRef.current?.focus();
+    } else if (!open && d.open) d.close();
   }, [open]);
 
   const groups: HotkeyGroup[] = ['general', 'go'];
@@ -60,7 +65,13 @@ export function ShortcutSheet({
     >
       {open ? (
         <>
-          <h2 id="rm-shortcuts-title" className="text-lg font-semibold">
+          {/* Focused on open (tabIndex −1, no ring: it is not a control, like the page h1, spec §9). */}
+          <h2
+            id="rm-shortcuts-title"
+            ref={titleRef}
+            tabIndex={-1}
+            className="text-lg font-semibold [--focus-width:0px]"
+          >
             {c.cheatTitle}
           </h2>
           {singleKeys !== undefined && onSingleKeysChange ? (
@@ -74,16 +85,18 @@ export function ShortcutSheet({
                 className="flex min-h-10 w-full items-center justify-between gap-3 rounded-control text-start text-body-sm font-medium text-ink"
               >
                 <span className="min-w-0 flex-1">{c.singleKeys}</span>
+                {/* Forced colours drop both fills: the track keeps a border and the knob a solid
+                    CanvasText dot, so its side still shows the state. */}
                 <span
                   aria-hidden="true"
                   className={cn(
-                    'relative inline-flex h-5 w-9 shrink-0 items-center rounded-pill transition-colors duration-micro motion-reduce:transition-none',
+                    'relative inline-flex h-5 w-9 shrink-0 items-center rounded-pill transition-colors duration-micro motion-reduce:transition-none forced-colors:border',
                     singleKeys ? 'bg-primary' : 'bg-line-strong',
                   )}
                 >
                   <span
                     className={cn(
-                      'absolute h-4 w-4 rounded-pill bg-surface shadow-e1 transition-[inset-inline-start] duration-micro motion-reduce:transition-none',
+                      'absolute h-4 w-4 rounded-pill bg-surface shadow-e1 transition-[inset-inline-start] duration-micro motion-reduce:transition-none forced-colors:bg-[color:CanvasText] forced-colors:forced-color-adjust-none',
                       singleKeys ? 'start-[18px]' : 'start-0.5',
                     )}
                   />

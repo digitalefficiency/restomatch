@@ -12,6 +12,11 @@
  *
  * Prefixes narrow the query: `#` invoices and orders (numbers), `@` suppliers,
  * `>` actions and display commands.
+ *
+ * The palette's other rules live here too, pure, so they are unit-tested
+ * without a DOM: when the record search runs (`recordSearch`), which status
+ * line shows (`paletteStatus`) and what choosing an option does
+ * (`chooseOption`).
  */
 import { normalizeHe, searchVariants } from './normalizeHe';
 
@@ -302,6 +307,83 @@ export function buildPaletteSections(input: BuildInput): PaletteSection[] {
 /** The flat keyboard order of a section list (↑/↓ walk this). */
 export function flatItems(sections: readonly PaletteSection[]): PaletteItem[] {
   return sections.flatMap((s) => s.items);
+}
+
+/** `search.global` takes 2 characters or more (its input is `min(2)`); shorter terms match locally only. */
+const RECORD_SEARCH_MIN = 2;
+
+/**
+ * The record search for one input state. `run`: `search.global` runs for the
+ * debounced term. `due`: a search will run for what is typed, but the 200 ms
+ * debounce has not caught up yet, so the palette says "searching" instead of
+ * claiming no results for a term nobody has searched. Neither for the `>`
+ * prefix (actions and display commands only) nor for a role whose palette
+ * finds screens only (`findsRecords` false; the caller also passes false while
+ * the palette is closed).
+ */
+export function recordSearch(
+  raw: string,
+  debounced: string,
+  findsRecords: boolean,
+): { run: boolean; due: boolean } {
+  const { mode, query } = parsePrefix(raw);
+  const can = findsRecords && mode !== 'actions';
+  return {
+    run: can && debounced.length >= RECORD_SEARCH_MIN,
+    due: can && query.length >= RECORD_SEARCH_MIN && debounced !== query,
+  };
+}
+
+/** The line under the list (`role="status"`); null when the options speak for themselves. */
+export type PaletteStatus = 'error' | 'searching' | 'noResults' | null;
+
+/**
+ * Which status line the palette shows. "No results" is a claim about a search
+ * that ran: while a record search is due or in flight the line says
+ * "searching", and a bare prefix (`#`, `@`) names no term that could have
+ * missed, so the line stays empty. A failed record search is said even beside
+ * local matches, since records may be missing from the list.
+ */
+export function paletteStatus(s: {
+  /** The term after any prefix (`parsePrefix(raw).query`). */
+  query: string;
+  /** How many options the list shows. */
+  count: number;
+  /** A record search is due (`recordSearch(…).due`) or in flight. */
+  pending: boolean;
+  /** The record search failed. */
+  failed: boolean;
+}): PaletteStatus {
+  if (s.failed) return 'error';
+  if (s.count > 0) return null;
+  if (s.pending) return 'searching';
+  return s.query ? 'noResults' : null;
+}
+
+/**
+ * Choosing an option (Enter or a click). A display command closes the palette
+ * first, so focus is back on the opener before the command moves anything
+ * (the menu, the cheat sheet), and then runs in place: it never navigates and
+ * is never remembered, since it has no page to reopen. A link is remembered
+ * for "אחרונים" (`recordVisit` skips Ask and recents), then the palette closes
+ * and the page opens.
+ */
+export function chooseOption(
+  item: PaletteItem,
+  fx: {
+    close: () => void;
+    navigate: (href: string) => void;
+    remember: (item: PaletteLinkItem) => void;
+  },
+): void {
+  if (item.kind === 'command') {
+    fx.close();
+    item.run();
+    return;
+  }
+  fx.remember(item);
+  fx.close();
+  fx.navigate(item.href);
 }
 
 /**
