@@ -109,7 +109,7 @@ describe('exports.preview (W3-05b)', () => {
     expect(by.undated).toEqual({ reason: 'undated', count: 1, totalInclVatAgorot: 2_000, invoiceIds: [ids.undated] });
     expect(by.notInUniform).toEqual({ reason: 'notInUniform', count: 1, totalInclVatAgorot: 5_000, invoiceIds: [ids.noNum] });
     // The undated group agrees with the summary's own count.
-    expect((await callerFor(A).exports.summary(PERIOD)).undatedCount).toBe(by.undated.count);
+    expect((await callerFor(A).exports.summary(PERIOD)).undatedCount).toBe(by.undated?.count);
   });
 
   it("tenant isolation: B's preview holds only B's rows, A's ids never leak", async () => {
