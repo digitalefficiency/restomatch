@@ -1,12 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { History } from 'lucide-react';
+import { useState } from 'react';
+import { History, Undo2 } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
-import { Badge, Card, Spinner, type BadgeTone } from '@/lib/components';
+import { Badge, Button, Card, Spinner, friendlyError, useToast, type BadgeTone } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatDateTime, formatNumber } from '@/lib/i18n/format';
 import { catalog as catalogNs } from '@/lib/i18n/messages/catalog';
+import { components } from '@/lib/i18n/messages/components';
 
 type Status = 'pending' | 'mapped' | 'committed' | 'failed';
 const TONE: Record<Status, BadgeTone> = {
@@ -33,6 +35,21 @@ export function ImportHistory({ supplierId }: { supplierId: string }) {
     },
   );
   const n = (v: number) => formatNumber(v, locale);
+  const tc = useT(components);
+  const toast = useToast();
+  const utils = trpc.useUtils();
+  // W3-10: "ביטול הייבוא" asks once, then reverts from the import's audit record.
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const revert = trpc.catalog.revertImport.useMutation({
+    onSuccess: (r) => {
+      setConfirming(null);
+      toast.success(t('history.revertDone', { restored: n(r.restored), deactivated: n(r.deactivated) }));
+      if (r.skipped.length > 0) toast.info(t('history.revertSkipped', { count: n(r.skipped.length) }));
+      void utils.catalog.imports.invalidate();
+      void utils.catalog.items.invalidate();
+    },
+    onError: (e) => toast.error(friendlyError(e, tc)),
+  });
 
   return (
     <section aria-labelledby="import-history-title">
@@ -68,6 +85,25 @@ export function ImportHistory({ supplierId }: { supplierId: string }) {
                     >
                       {t('history.review', { count: n(imp.unlinkedItems) })}
                     </Link>
+                  ) : null}
+                  {imp.reverted ? (
+                    <Badge tone="neutral">{t('history.reverted')}</Badge>
+                  ) : status === 'committed' && imp.revertable ? (
+                    confirming === imp.id ? (
+                      <span className="inline-flex items-center gap-2 text-xs">
+                        <span className="text-ink">{t('history.revertConfirm')}</span>
+                        <Button size="sm" variant="secondary" disabled={revert.isPending} onClick={() => revert.mutate({ importId: imp.id })}>
+                          {t('history.revertYes')}
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
+                          {t('history.revertNo')}
+                        </Button>
+                      </span>
+                    ) : (
+                      <Button size="sm" variant="ghost" onClick={() => setConfirming(imp.id)}>
+                        <Undo2 className="h-4 w-4" aria-hidden="true" /> {t('history.revert')}
+                      </Button>
+                    )
                   ) : null}
                   {status === 'failed' && imp.error ? (
                     <p className="w-full truncate text-xs text-danger" title={imp.error}>

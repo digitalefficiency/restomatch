@@ -48,6 +48,8 @@ export const IMPORT_COMMITTED_AUDIT_ACTION = 'catalog.import_committed';
 
 /** One list-price change in a committed import (NUMERIC strings, as stored). */
 export interface ImportPriceChange {
+  /** The supplier_catalog_items row (W3-10 revert works from it; older records lack it). */
+  itemId?: string;
   productId: string | null;
   name: string;
   sku: string | null;
@@ -135,6 +137,8 @@ export async function commitCatalogRows(
   let createdProducts = 0;
   const ambiguous: AmbiguousRow[] = [];
   const priceChanges: ImportPriceChange[] = [];
+  /** Rows this commit inserted (a revert turns them off). */
+  const createdItemIds: string[] = [];
 
   for (const row of rows) {
     // 1. Existing catalog item for this supplier? By SKU when present, else by
@@ -287,6 +291,7 @@ export async function commitCatalogRows(
         toPriceUnits(Number(existing.listPrice)) !== toPriceUnits(Number(newListPrice))
       ) {
         priceChanges.push({
+          itemId: existing.id,
           productId,
           name: row.supplierNameRaw,
           sku: row.supplierSku,
@@ -303,6 +308,7 @@ export async function commitCatalogRows(
       if (!ins) throw new Error('failed to insert catalog item');
       itemId = ins.id;
       created += 1;
+      createdItemIds.push(ins.id);
     }
     if (pendingReview) ambiguous.push({ itemId, ...pendingReview });
 
@@ -343,7 +349,7 @@ export async function commitCatalogRows(
     action: IMPORT_COMMITTED_AUDIT_ACTION,
     entityType: 'catalog_import',
     entityId: args.sourceImportId ?? null,
-    after: { supplierId, created, updated, createdProducts, priceChanges },
+    after: { supplierId, created, updated, createdProducts, priceChanges, createdItemIds },
   });
 
   return { created, updated, createdProducts, ambiguous, priceChanges };

@@ -61,6 +61,13 @@ export const en: Shape<typeof he> = {
     descriptionRequired: 'Supplier description is required.',
   },
   history: {
+    revert: 'Undo import',
+    revertConfirm: 'Put the previous prices back?',
+    revertYes: 'Yes, undo',
+    revertNo: 'No',
+    reverted: 'Undone',
+    revertDone: '{restored} prices restored · {deactivated} new items turned off',
+    revertSkipped: '{count} prices changed after the import were kept',
     title: 'Import history',
     empty: 'No price lists imported for this supplier yet.',
     file: 'File',

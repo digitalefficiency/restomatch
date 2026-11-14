@@ -62,6 +62,13 @@ export const he = {
     descriptionRequired: 'תיאור הספק הוא שדה חובה.',
   },
   history: {
+    revert: 'ביטול הייבוא',
+    revertConfirm: 'להחזיר את המחירים הקודמים?',
+    revertYes: 'כן, לבטל',
+    revertNo: 'לא',
+    reverted: 'בוטל',
+    revertDone: 'הוחזרו {restored} מחירים · כובו {deactivated} פריטים חדשים',
+    revertSkipped: '{count} מחירים שהשתנו אחרי הייבוא נשארו כמו שהם',
     title: 'היסטוריית ייבוא',
     empty: 'עוד לא יובאו מחירונים לספק הזה.',
     file: 'קובץ',

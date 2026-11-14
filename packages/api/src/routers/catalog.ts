@@ -33,6 +33,7 @@ import {
   type ParsedTable,
 } from '../catalog/parse';
 import { commitCatalogRows } from '../catalog/commit';
+import { revertCatalogImport } from '../catalog/revert';
 import { catalogUnitPrice, cheapestComparable } from '../lib/unitPrice';
 
 /**
@@ -485,6 +486,26 @@ export const catalogRouter = router({
     }),
 
   /**
+   * W3-10 · undo a committed price-list import from its audit record: changed
+   * list prices go back where the row still holds the imported price (a later
+   * change wins and is listed), rows the import created are turned off. One
+   * revert per import; audited. Owner / manager, like commitImport. Another
+   * restaurant's import → NOT_FOUND.
+   */
+  revertImport: managerProcedure
+    .input(z.object({ importId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const res = await revertCatalogImport(ctx.db, {
+        restaurantId: ctx.session.restaurantId,
+        importId: input.importId,
+        userId: ctx.session.userId,
+      });
+      if (res === 'NOT_FOUND') throw new TRPCError({ code: 'NOT_FOUND', message: 'import not found' });
+      if (res === 'ALREADY_REVERTED') throw new TRPCError({ code: 'CONFLICT', message: 'import already reverted' });
+      return res;
+    }),
+
+  /**
    * Import history (catalog_imports) — newest first, optionally for one
    * supplier. Restaurant-scoped; a foreign supplierId simply yields nothing.
    */
@@ -517,6 +538,11 @@ export const catalogRouter = router({
            */
           unlinkedItems: sql<number>`(SELECT count(*)::int FROM supplier_catalog_items sci
             WHERE sci.source_import_id = "catalog_imports"."id" AND sci.restaurant_id = ${rid} AND sci.product_id IS NULL)`,
+          /** W3-10: has an import_committed record (so it can be reverted) / was reverted. */
+          revertable: sql<boolean>`EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = ${rid}
+            AND a.action = 'catalog.import_committed' AND a.entity_id = "catalog_imports"."id")`,
+          reverted: sql<boolean>`EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = ${rid}
+            AND a.action = 'catalog.import_reverted' AND a.entity_id = "catalog_imports"."id")`,
         })
         .from(catalogImports)
         .where(
