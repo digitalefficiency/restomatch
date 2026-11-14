@@ -36,10 +36,10 @@ const Card: React.FC<{ u: number; rail?: string; locale: Locale; width: number; 
 );
 
 /** T1: the leak hero of the sample month. */
-export const SampleHeroCard: React.FC<{ u: number; width: number; locale: Locale; numberGlow?: number }> = ({ u, width, locale, numberGlow = 0 }) => {
+export const SampleHeroCard: React.FC<{ u: number; width: number; locale: Locale; numberGlow?: number; style?: React.CSSProperties }> = ({ u, width, locale, numberGlow = 0, style }) => {
   const t = COPY[locale].sample;
   return (
-    <Card u={u} width={width} rail={T.danger} locale={locale}>
+    <Card u={u} width={width} rail={T.danger} locale={locale} style={style}>
       <div style={{ fontSize: 12.5 * u, fontWeight: 600, color: T.muted, letterSpacing: '0.01em' }}>{t.eyebrow}</div>
       <div style={{ fontSize: 15 * u, fontWeight: 600, color: T.muted, marginTop: 10 * u }}>{t.label}</div>
       <div
@@ -104,10 +104,10 @@ const NeedRow: React.FC<{ u: number; locale: Locale; tone: string; label: string
 );
 
 /** T2: "מחכה לך" with the sample month's two rows (decide ₪910 · credit ₪720). */
-export const SampleNeedsCard: React.FC<{ u: number; width: number; locale: Locale; example?: boolean }> = ({ u, width, locale, example = true }) => {
+export const SampleNeedsCard: React.FC<{ u: number; width: number; locale: Locale; example?: boolean; style?: React.CSSProperties }> = ({ u, width, locale, example = true, style }) => {
   const t = COPY[locale].sample;
   return (
-    <Card u={u} width={width} locale={locale}>
+    <Card u={u} width={width} locale={locale} style={style}>
       <div style={{ fontSize: 15 * u, fontWeight: 800, marginBottom: 12 * u }}>{t.needsTitle}</div>
       <NeedRow
         first
@@ -118,7 +118,7 @@ export const SampleNeedsCard: React.FC<{ u: number; width: number; locale: Local
         sub={fill(t.gaps, { count: SAMPLE.decide.count })}
         amount={SAMPLE.decide.amount}
         verb={t.decideVerb}
-        example={example ? `${t.example} · ${ilsText(104.8, locale, 2)}` : undefined}
+        example={example ? `${t.example} · ${ilsText(SAMPLE.decide.example.amount, locale, 2)}` : undefined}
       />
       <NeedRow u={u} locale={locale} tone={T.warn} label={t.credit} sub={fill(t.gaps, { count: SAMPLE.credit.count })} amount={SAMPLE.credit.amount} verb={t.creditVerb} />
     </Card>

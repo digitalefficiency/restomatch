@@ -1,15 +1,14 @@
 import React from 'react';
 import { AbsoluteFill, Composition, Sequence, interpolate, useCurrentFrame } from 'remotion';
 import { loadFonts } from './fonts';
-import { applyFacts, Facts, Locale } from './copy';
-import { C, setStage } from './theme';
+import { applyFacts, COPY, Facts, Locale } from './copy';
+import { C, FONT, setStage } from './theme';
 import { Background } from './components/Background';
 import { Hook } from './scenes/Hook';
 import { Problem } from './scenes/Problem';
 import { Match } from './scenes/Match';
 import { Product, PRODUCT_DURATION } from './scenes/Product';
 import { Receiver, RECEIVER_DURATION } from './scenes/Receiver';
-import { Chains, CHAINS_DURATION } from './scenes/Chains';
 import { Value } from './scenes/Value';
 import { Cta } from './scenes/Cta';
 import { HeroLoop, HERO_LOOP_FRAMES } from './scenes/HeroLoop';
@@ -31,15 +30,14 @@ type Beat = { from: number; d: number; el: (l: Locale) => React.ReactNode };
 
 // Main film timeline (30 fps). Overlaps of ~8 frames = crossfades.
 const RECEIVER_FROM = 986; // overlaps the laptop exit — no empty frame
-const CHAINS_FROM = RECEIVER_FROM + RECEIVER_DURATION - 8;
-const VALUE_FROM = CHAINS_FROM + CHAINS_DURATION - 8;
+// no chains beat: the site's sample month has no branch figures
+const VALUE_FROM = RECEIVER_FROM + RECEIVER_DURATION - 8;
 export const TIMELINE: Beat[] = [
   { from: 0, d: 180, el: (l) => <Hook locale={l} /> },
   { from: 172, d: 206, el: (l) => <Problem locale={l} /> },
   { from: 368, d: 82, el: (l) => <Match locale={l} /> },
   { from: 440, d: PRODUCT_DURATION, el: (l) => <Product locale={l} /> },
   { from: RECEIVER_FROM, d: RECEIVER_DURATION, el: (l) => <Receiver locale={l} /> },
-  { from: CHAINS_FROM, d: CHAINS_DURATION, el: (l) => <Chains locale={l} /> },
   { from: VALUE_FROM, d: 1646 - VALUE_FROM, el: (l) => <Value locale={l} duration={1646 - VALUE_FROM} /> },
   { from: 1638, d: 162, el: (l) => <Cta locale={l} /> },
 ];
@@ -68,10 +66,38 @@ const Film: React.FC<Props & { beats: Beat[] }> = ({ locale, beats }) => (
 
 // `facts` input prop overrides the demo numbers (copy.ts FACTS) for a re-render after a seed change.
 // `light` (default true — the product's light identity) picks the stage palette; light:false = dark stage.
+/** A legible "דוגמה / Sample" tag for the whole film: every figure is the site's sample month. */
+const SampleTag: React.FC<{ locale: Locale }> = ({ locale }) => (
+  <div
+    dir={locale === 'he' ? 'rtl' : 'ltr'}
+    style={{
+      position: 'absolute',
+      top: 54,
+      [locale === 'he' ? 'left' : 'right']: 96, // the device side: the caption zone stays clear
+      fontFamily: FONT.sans,
+      fontSize: 26,
+      fontWeight: 700,
+      color: C.gold,
+      background: '#FFFFFF',
+      border: `1.5px solid ${C.gold}66`,
+      borderRadius: 999,
+      padding: '8px 22px',
+      boxShadow: '0 6px 18px rgba(15,31,23,0.08)',
+    }}
+  >
+    {COPY[locale].sampleTag}
+  </div>
+);
+
 const Promo: React.FC<Props> = ({ locale, facts, light }) => {
   setStage(light ?? true);
   applyFacts(facts);
-  return <Film locale={locale} beats={TIMELINE} />;
+  return (
+    <AbsoluteFill>
+      <Film locale={locale} beats={TIMELINE} />
+      <SampleTag locale={locale} />
+    </AbsoluteFill>
+  );
 };
 const PromoVertical: React.FC<Props> = ({ locale, facts, light }) => {
   setStage(light ?? true);

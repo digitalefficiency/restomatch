@@ -64,6 +64,9 @@ done
 echo "== caption zone ∩ device zone = ∅ (all sizes, both locales)"
 node --experimental-strip-types scripts/check-layout.mjs 2>/dev/null && ok "layout zones disjoint" || bad "caption/device zones intersect"
 
+echo "== sample month: copy.ts SAMPLE == the site's sampleMonth.ts"
+node --experimental-strip-types scripts/check-sample.mjs 2>/dev/null | tail -1 | grep -q "SKIP\|== apps" && ok "SAMPLE pinned to sampleMonth.ts (or skipped: not reachable)" || bad "SAMPLE differs from sampleMonth.ts"
+
 echo "== typecheck"
 npx tsc -p . && ok "tsc 0 errors" || bad "tsc errors"
 
