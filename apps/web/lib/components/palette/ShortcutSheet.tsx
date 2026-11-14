@@ -2,23 +2,38 @@
 
 import { useEffect, useRef } from 'react';
 import { HOTKEYS, keyLabel, type HotkeyGroup } from '@/lib/hotkeys';
+import { cn } from '@/lib/components/cn';
 import { paletteCopy } from './copy';
+
+export interface ShortcutSheetProps {
+  open: boolean;
+  onClose: () => void;
+  locale: 'he' | 'en';
+  canGo: (href: string) => boolean;
+  /**
+   * The "קיצורים בתו אחד" preference (sidebar spec §8: the switch lives in the
+   * account menu, this sheet and the palette). Controlled: the switch renders
+   * only when both this and `onSingleKeysChange` are given, so the sheet never
+   * shows a switch that cannot persist.
+   */
+  singleKeys?: boolean;
+  onSingleKeysChange?: (on: boolean) => void;
+}
 
 /**
  * The `?` cheat sheet (W3-04). It renders from `HOTKEYS`, so it cannot drift
- * from what the keys do. `canGo` drops G-chords the role cannot open.
+ * from what the keys do. `canGo` drops G-chords the role cannot open. With
+ * `singleKeys` + `onSingleKeysChange` it also carries the single-key switch
+ * (WCAG 2.1.4): Ctrl/⌘ combinations stay on either way.
  */
 export function ShortcutSheet({
   open,
   onClose,
   locale,
   canGo,
-}: {
-  open: boolean;
-  onClose: () => void;
-  locale: 'he' | 'en';
-  canGo: (href: string) => boolean;
-}) {
+  singleKeys,
+  onSingleKeysChange,
+}: ShortcutSheetProps) {
   const c = paletteCopy[locale];
   const ref = useRef<HTMLDialogElement>(null);
   const apple = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -48,6 +63,37 @@ export function ShortcutSheet({
           <h2 id="rm-shortcuts-title" className="text-lg font-semibold">
             {c.cheatTitle}
           </h2>
+          {singleKeys !== undefined && onSingleKeysChange ? (
+            <div className="mt-3 border-b border-line pb-3">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={singleKeys}
+                aria-describedby="rm-shortcuts-single-hint"
+                onClick={() => onSingleKeysChange(!singleKeys)}
+                className="flex min-h-10 w-full items-center justify-between gap-3 rounded-control text-start text-body-sm font-medium text-ink"
+              >
+                <span className="min-w-0 flex-1">{c.singleKeys}</span>
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    'relative inline-flex h-5 w-9 shrink-0 items-center rounded-pill transition-colors duration-micro motion-reduce:transition-none',
+                    singleKeys ? 'bg-primary' : 'bg-line-strong',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'absolute h-4 w-4 rounded-pill bg-surface shadow-e1 transition-[inset-inline-start] duration-micro motion-reduce:transition-none',
+                      singleKeys ? 'start-[18px]' : 'start-0.5',
+                    )}
+                  />
+                </span>
+              </button>
+              <p id="rm-shortcuts-single-hint" className="text-caption text-subtle">
+                {c.singleKeysHint(keyLabel('Mod', apple))}
+              </p>
+            </div>
+          ) : null}
           {groups.map((g) => (
             <section key={g} className="mt-4">
               <h3 className="text-xs font-semibold text-subtle">{c.cheatGroups[g]}</h3>

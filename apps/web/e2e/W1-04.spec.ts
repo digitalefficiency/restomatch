@@ -367,7 +367,9 @@ test.describe('connectivity and session layer (perf-states-08, -15)', () => {
     await context.clearCookies();
     await context.addCookies(keep);
 
-    const search = page.locator('header').getByRole('combobox', { name: 'חיפוש כללי' });
+    // DS3-02: the search is the command palette (Ctrl K); its record search is the tRPC call that meets the dead session.
+    await page.keyboard.press('Control+KeyK');
+    const search = page.locator('dialog[open]').getByRole('combobox');
     await search.fill('ירקות');
     const sheet = page.getByTestId('reauth-sheet');
     await expect(sheet).toBeVisible();
@@ -381,7 +383,7 @@ test.describe('connectivity and session layer (perf-states-08, -15)', () => {
     await sheet.getByRole('button', { name: 'התחברות' }).click();
     await expect(sheet).toBeHidden();
     await expect(search).toHaveValue('ירקות');
-    await expect(page.locator('#dashboard-search-header-list')).toBeVisible();
+    await expect(page.locator('#rm-palette-list')).toBeVisible();
     await expect(page).toHaveURL(/\/dashboard$/);
     await context.close();
   });

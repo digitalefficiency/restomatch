@@ -3,7 +3,7 @@ import type { he } from './he';
 
 export const en: Shape<typeof he> = {
   mainLabel: 'Main navigation',
-  mobileLabel: 'Quick navigation',
+  mobileLabel: 'Bottom navigation',
   skipToContent: 'Skip to content',
   links: {
     home: 'Home',
@@ -78,7 +78,7 @@ export const en: Shape<typeof he> = {
   groups: {
     top: 'Main',
     money: 'Money',
-    leaks: 'Leak & prices',
+    leaks: 'Analysis',
     procure: 'Purchasing',
     kitchen: 'Kitchen',
     chain: 'Chain',

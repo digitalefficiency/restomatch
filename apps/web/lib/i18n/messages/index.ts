@@ -22,6 +22,7 @@ import { landing } from './landing';
 import { leaks } from './leaks';
 import { marketing } from './marketing';
 import { nav } from './nav';
+import { navShell } from './nav/shell';
 import { onboarding } from './onboarding';
 import { orders } from './orders';
 import { overview } from './overview';
@@ -68,6 +69,7 @@ export const ALL_NAMESPACES = [
   leaks,
   marketing,
   nav,
+  navShell,
   onboarding,
   orders,
   overview,

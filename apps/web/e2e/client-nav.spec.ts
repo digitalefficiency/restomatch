@@ -47,9 +47,8 @@ test('favicon: /favicon.ico is served (no 404 in every page load)', async ({ req
   expect(res.headers()['content-type']).toMatch(/image\//);
 });
 
-test('header search: fixed combobox ids, and aria-controls names the listbox', async ({ page }) => {
-  // The ids used to come from useId(), which shifted when Next's dev-only
-  // wrappers gave server and client different tree shapes (hydration mismatch).
+test('command palette (DS3-02, replaces the header search): fixed combobox ids, and aria-controls names the listbox', async ({ page }) => {
+  // Fixed ids, never useId(): Next's dev-only wrappers give server and client different tree shapes.
   await page
     .context()
     .addCookies([
@@ -60,10 +59,9 @@ test('header search: fixed combobox ids, and aria-controls names the listbox', a
       },
     ]);
   await page.goto('/dashboard', { waitUntil: 'load' });
-  // By name: the header can also hold the language picker, a native <select>
-  // (role combobox) when the receiverLanguages flag is on.
-  const input = page.locator('header').getByRole('combobox', { name: 'חיפוש כללי' });
-  await expect(input).toHaveAttribute('aria-controls', 'dashboard-search-header-list');
+  await page.keyboard.press('Control+KeyK');
+  const input = page.locator('dialog[open]').getByRole('combobox');
+  await expect(input).toHaveAttribute('aria-controls', 'rm-palette-list');
   await input.fill('ירקות');
-  await expect(page.locator('#dashboard-search-header-list')).toBeVisible();
+  await expect(page.locator('#rm-palette-list')).toBeVisible();
 });

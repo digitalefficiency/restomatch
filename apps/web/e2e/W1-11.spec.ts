@@ -257,7 +257,7 @@ test.describe('phone 390 · manager · he', () => {
     await expect(page.locator('input[value="W1-11 שורה חופשית"]')).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`supplierId=${supplierA.id}`));
     // Field mode: no bottom nav inside the task; the primary sits in the thumb zone.
-    await expect(page.locator(`nav[aria-label="ניווט מהיר"]`)).toBeHidden();
+    await expect(page.locator(`nav[aria-label="ניווט תחתון"]`)).toBeHidden();
     await expectThumbZonePrimary(page);
     expect(await shekelLeftOfDigits(page.getByTestId('cart-summary')), '₪ left of the digits in he').toBe(true);
 

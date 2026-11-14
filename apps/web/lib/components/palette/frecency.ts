@@ -2,12 +2,13 @@
  * Frecency recents for the palette (W3-04): what the viewer opened, ranked by
  * count × recency (half-life 7 days). Local to the browser, so the palette at
  * 0 characters needs no network. Storage is wrapped: private mode or a full
- * quota just means no recents.
+ * quota just means no recents. Only pages are remembered: a display command
+ * has no href to store and runs in place, so it never becomes a recent.
  */
-import type { PaletteItem } from './sections';
+import type { PaletteItem, PaletteLinkKind } from './sections';
 
 export interface RecentEntry {
-  kind: PaletteItem['kind'];
+  kind: PaletteLinkKind;
   id: string;
   label: string;
   secondary?: string;
@@ -31,7 +32,7 @@ export function recordVisit(
   item: PaletteItem,
   now: number,
 ): RecentEntry[] {
-  if (item.kind === 'ask' || item.kind === 'recent') return list.slice();
+  if (item.kind === 'ask' || item.kind === 'recent' || item.kind === 'command') return list.slice();
   const key = `${item.kind}:${item.id}`;
   const prev = list.find((e) => `${e.kind}:${e.id}` === key);
   const next: RecentEntry = {
@@ -71,6 +72,19 @@ export function rankRecents(
       secondary: e.secondary,
       href: e.href,
     }));
+}
+
+/**
+ * `window.localStorage`, or undefined on the server or where storage is
+ * blocked. Reading the getter can itself throw (a SecurityError when site data
+ * is blocked), so even the lookup sits inside try/catch.
+ */
+export function browserStorage(): Storage | undefined {
+  try {
+    return typeof window === 'undefined' ? undefined : window.localStorage;
+  } catch {
+    return undefined;
+  }
 }
 
 export function loadRecents(storage: Pick<Storage, 'getItem'> | undefined): RecentEntry[] {

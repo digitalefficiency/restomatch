@@ -138,7 +138,8 @@ for (const role of ROLES) {
       const page = await open(browser, baseURL!, role, locale, DESK);
       const sidebar = page.getByTestId('sidebar');
       await expect(sidebar).toBeVisible();
-      expect(Math.round((await sidebar.boundingBox())!.width)).toBe(248);
+      // DS3-02 (sidebar spec §1.4): chef and receiver get the flat labelled 64 px rail.
+      expect(Math.round((await sidebar.boundingBox())!.width)).toBe(role === 'chef' || role === 'receiver' ? 64 : 248);
       await expect(page.getByTestId('bottom-bar')).toBeHidden();
       // Content starts high: a 56 px top bar, no wrapped tab rows.
       const top = await page.locator('#main-content > div').evaluate((el) => el.getBoundingClientRect().top);
@@ -262,14 +263,16 @@ test('bar labels never truncate at 360 px in he / en / ar / ru', async ({ browse
   }
 });
 
-test('search "מסכים": screens by role, from the first characters', async ({ browser, baseURL }) => {
+test('search "מסכים": screens by role, from the first characters (DS3-02: in the command palette)', async ({ browser, baseURL }) => {
   const page = await open(browser, baseURL!, 'bookkeeper', 'he', DESK);
-  const input = page.locator('header').getByRole('combobox', { name: 'חיפוש כללי' });
+  await page.keyboard.press('Control+KeyK');
+  const dialog = page.locator('dialog[open]');
+  const input = dialog.getByRole('combobox');
   await input.fill('כרט');
-  await expect(page.locator('#dashboard-search-header-list [role=option]').first()).toHaveText('כרטסת ספקים');
+  await expect(dialog.locator('[role=option]').first()).toContainText('כרטסת ספקים');
   await input.fill('הזמנ');
   // The bookkeeper can't open orders: no screen offered.
-  await expect(page.locator('#dashboard-search-header-list [role=group][aria-label="מסכים"]')).toHaveCount(0);
+  await expect(dialog.locator('[role=option]', { hasText: /^הזמנות/ })).toHaveCount(0);
   await page.context().close();
 });
 
@@ -284,17 +287,18 @@ test('account menu: sign-out keeps the data-rm-logout form contract', async ({ b
   await page.context().close();
 });
 
-test('language picker: a button + menu; arrow keys never switch the language', async ({ browser, baseURL }) => {
+test('language: in the account menu (DS3-02); arrow keys move, never switch the language', async ({ browser, baseURL }) => {
   const page = await open(browser, baseURL!, 'owner', 'he', DESK);
-  const picker = page.locator('header [data-testid="language-picker"]');
-  await expect(picker).toHaveAttribute('aria-haspopup', 'menu');
-  await picker.focus();
+  const account = page.getByTestId('avatar-menu');
+  await expect(account).toHaveAttribute('aria-haspopup', 'menu');
+  await account.click();
+  await expect(page.locator('#rm-account-panel [role=menuitemradio]').first()).toBeVisible();
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   expect(await page.evaluate(() => document.documentElement.lang)).toBe('he');
   await page.keyboard.press('Escape');
-  await expect(picker).toBeFocused();
+  await expect(account).toBeFocused();
   expect(await page.evaluate(() => document.documentElement.lang)).toBe('he');
   await page.context().close();
 });
@@ -442,15 +446,16 @@ test('receiver: searches screens only, and an invoice page is refused (owner dec
   page.on('request', (r) => {
     if (r.url().includes('search.global')) records.push(r.url());
   });
+  // DS3-02: the phone search opens the command palette, screens only for the receiver.
   await page.locator('header').getByRole('button', { name: 'חיפוש' }).first().click();
-  const input = page.getByRole('combobox', { name: 'חיפוש כללי' }).last();
-  await expect(input).toHaveAttribute('placeholder', 'חיפוש מסך…');
+  const dialog = page.locator('dialog[open]');
+  const input = dialog.getByRole('combobox');
   await input.fill('INV');
   await page.waitForTimeout(600);
   expect(records, 'no record search for the receiver').toEqual([]);
-  await expect(page.locator('[role=group][aria-label="חשבוניות"]')).toHaveCount(0);
-  // Nothing matched: "no results", never the "type at least 2 characters" hint.
-  await expect(page.getByText('לא נמצאו תוצאות')).toBeVisible();
+  await expect(dialog.locator('[role=group][aria-label="רשומות"]')).toHaveCount(0);
+  // Nothing matched: the zero-result line, never a "type more" hint.
+  await expect(dialog.getByRole('status')).toBeVisible();
   const res = await page.goto('/dashboard/invoices/00000000-0000-4000-8000-000000000000');
   expect(/\/dashboard$/.test(page.url()) || res?.status() === 403).toBe(true);
   await page.context().close();
