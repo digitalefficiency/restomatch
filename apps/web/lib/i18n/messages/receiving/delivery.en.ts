@@ -150,7 +150,7 @@ export const en: Shape<typeof he> = {
         supplier: 'Supplier',
         at: 'at {time}',
         gaps: 'Gaps',
-        notCounted: 'Not counted',
+        notCounted: 'Not counted item by item',
         bulk: '{count, plural, one {1 item marked as ordered} other {{n} items marked as ordered}}',
         doc: 'Document',
         docNone: 'Not photographed',

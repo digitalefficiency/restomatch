@@ -157,7 +157,7 @@ export const he = {
         supplier: 'ספק',
         at: 'בשעה {time}',
         gaps: '{count, plural, one {פער} other {פערים}}',
-        notCounted: 'לא נספרו',
+        notCounted: 'לא נספרו פריט-פריט',
         bulk: '{count, plural, one {פריט אחד סומן כמו בהזמנה} other {{n} פריטים סומנו כמו בהזמנה}}',
         doc: 'המסמך',
         docNone: 'לא צולם',

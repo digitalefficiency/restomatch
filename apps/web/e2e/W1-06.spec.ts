@@ -320,7 +320,8 @@ test('invoice 10 = order 10, 8 arrived: recorded as qty_received 8 in ≤4 taps;
   expect(taps.count, 'short line taps').toBeLessThanOrEqual(4);
   await expect(line.getByTestId('line-save-state')).toHaveAttribute('data-state', 'saved', { timeout: 15_000 });
 
-  await expectPrimaryInThumbZone(page, 'close-receipt');
+  // DS3-05: one button at the bottom says the next step — here "סמנו את השאר (2)" — under the thumb.
+  await expectPrimaryInThumbZone(page, 'mark-rest');
   await page.getByTestId('mark-rest').tap();
   // Two lines left: the spot check counts both blind, so nothing is marked in bulk.
   expect((await passSpotCheck(page, po)).length).toBe(2);
