@@ -41,6 +41,7 @@ const db = createDb(testDbUrl());
 let A: Tenant;
 let B: Tenant;
 let onion: string;
+let invoiceSeq = 0;
 
 const DAY = '2026-11-15';
 const dayStart = new Date('2026-11-14T22:00:00Z');
@@ -182,6 +183,11 @@ describe('adoption, board and dismiss', () => {
     });
     expect(await dismissAutopilotDraft(db, { restaurantId: A.restaurantId, poId, userId: A.ownerUserId })).toEqual({ status: 'cancelled' });
     expect(await dismissAutopilotDraft(db, { restaurantId: A.restaurantId, poId, userId: A.ownerUserId })).toEqual({ status: 'already_cancelled' });
+    // A dismissed prepared draft is never announced or prepared again the same day.
+    expect(await prepareOrderDraft(db, { restaurantId: A.restaurantId, supplierId: A.supplierId, orderDay: DAY, dayStart, dayEnd, now })).toEqual({
+      status: 'skipped',
+      reason: 'handled',
+    });
 
     // A fresh one, opened by the owner → no longer dismissable.
     await db.delete(purchaseOrders).where(eq(purchaseOrders.id, poId));
@@ -228,7 +234,7 @@ describe('prepareBackorderDraft (A16b): never re-order units the supplier billed
       .values({
         restaurantId: t.restaurantId,
         supplierId: t.supplierId,
-        invoiceNumber: `INV-BO-${s.grId.slice(0, 6)}`,
+        invoiceNumber: `INV-BO-${s.grId.slice(0, 6)}-${++invoiceSeq}`,
         invoiceDate: now,
         totalExclVat: '1.00',
         vatAmount: '0.17',
@@ -257,6 +263,8 @@ describe('prepareBackorderDraft (A16b): never re-order units the supplier billed
         resolutionStatus: 'open',
         poLineId,
         invoiceLineId: il!.id,
+        expectedValue: '0',
+        actualValue: String(billed), // the engine stores the billed qty here, in the order's unit
       });
     }
   }
@@ -295,6 +303,35 @@ describe('prepareBackorderDraft (A16b): never re-order units the supplier billed
     await matched(A, s, [[s.l1, A.productId, 8]]);
     const r = await prepareBackorderDraft(db, { restaurantId: A.restaurantId, goodsReceiptId: s.grId, now });
     expect(await draftLines((r as { poId: string }).poId)).toEqual({ עגבניות: 2 });
+  });
+
+  it('two invoices bill the same line: the bills add up (10 ordered, 2 arrived, 3 + 3 billed → re-order 4)', async () => {
+    const s = await shortDelivery(A, [2, 4]);
+    await matched(A, s, [[s.l1, A.productId, 3]]);
+    await matched(A, s, [[s.l1, A.productId, 3]]);
+    const r = await prepareBackorderDraft(db, { restaurantId: A.restaurantId, goodsReceiptId: s.grId, now });
+    expect(await draftLines((r as { poId: string }).poId)).toEqual({ עגבניות: 4 });
+  });
+
+  it('a QTY_OVER already escalated (credit request in progress) still counts as billed', async () => {
+    const s = await shortDelivery(A, [8, 4]);
+    await matched(A, s, [[s.l1, A.productId, 10]]);
+    await db.update(discrepancies).set({ resolutionStatus: 'escalated' }).where(eq(discrepancies.type, 'QTY_OVER'));
+    expect(await prepareBackorderDraft(db, { restaurantId: A.restaurantId, goodsReceiptId: s.grId, now })).toEqual({
+      status: 'skipped',
+      reason: 'nothing_to_reorder',
+    });
+  });
+
+  it('the invoice bills the product in another unit (a case) → never re-ordered, noted', async () => {
+    const s = await shortDelivery(A, [0, 4]);
+    await matched(A, s, []);
+    const [run] = await db.select({ invoiceId: matchRuns.invoiceId }).from(matchRuns).where(eq(matchRuns.grId, s.grId));
+    await db.insert(invoiceLines).values({ invoiceId: run!.invoiceId!, productId: A.productId, rawDescription: 'ארגז עגבניות', qtyBilled: '1', unit: 'case', unitPriceBilled: '85', lineTotal: '85' });
+    expect(await prepareBackorderDraft(db, { restaurantId: A.restaurantId, goodsReceiptId: s.grId, now })).toEqual({
+      status: 'skipped',
+      reason: 'nothing_to_reorder',
+    });
   });
 
   it('everything billed → no draft; completed receipt, foreign receipt or option off → nothing', async () => {

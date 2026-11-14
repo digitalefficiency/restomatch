@@ -81,13 +81,13 @@ async function lockRef(db: Database, restaurantId: string, ref: string): Promise
   await db.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`${restaurantId}:${ref}`}, 0))`);
 }
 
-async function poByRef(db: Database, restaurantId: string, ref: string): Promise<string | null> {
+async function poByRef(db: Database, restaurantId: string, ref: string): Promise<{ id: string; status: string } | null> {
   const [row] = await db
-    .select({ id: purchaseOrders.id })
+    .select({ id: purchaseOrders.id, status: purchaseOrders.status })
     .from(purchaseOrders)
     .where(and(eq(purchaseOrders.restaurantId, restaurantId), eq(purchaseOrders.sourceRef, ref)))
     .limit(1);
-  return row?.id ?? null;
+  return row ?? null;
 }
 
 /** Audit row: append-only insert, typed by the AuditAction taxonomy. */
@@ -111,7 +111,7 @@ const autopilotRefSql = sql`(${purchaseOrders.sourceRef} like ${AUTOPILOT_REF_LI
 
 export type PrepareResult =
   | { status: 'created' | 'exists'; poId: string; lineCount: number }
-  | { status: 'skipped'; reason: PreparedSkip | 'option_off' };
+  | { status: 'skipped'; reason: PreparedSkip | 'option_off' | 'handled' };
 
 export interface PrepareArgs {
   restaurantId: string;
@@ -138,9 +138,11 @@ export async function prepareOrderDraft(db: Database, args: PrepareArgs): Promis
   const ref = preparedSourceRef(args.supplierId, args.orderDay);
   await lockRef(db, args.restaurantId, ref);
   const existing = await poByRef(db, args.restaurantId, ref);
+  // Dismissed or already sent: never announce it again, never prepare a second one.
+  if (existing && existing.status !== 'draft') return { status: 'skipped', reason: 'handled' };
   if (existing) {
-    const [c] = await db.select({ n: sql<number>`count(*)::int` }).from(poLines).where(eq(poLines.poId, existing));
-    return { status: 'exists', poId: existing, lineCount: Number(c?.n ?? 0) };
+    const [c] = await db.select({ n: sql<number>`count(*)::int` }).from(poLines).where(eq(poLines.poId, existing.id));
+    return { status: 'exists', poId: existing.id, lineCount: Number(c?.n ?? 0) };
   }
 
   const [supplier] = await db
@@ -407,8 +409,8 @@ export async function prepareBackorderDraft(
   await lockRef(db, args.restaurantId, ref);
   const existing = await poByRef(db, args.restaurantId, ref);
   if (existing) {
-    const [c] = await db.select({ n: sql<number>`count(*)::int` }).from(poLines).where(eq(poLines.poId, existing));
-    return { status: 'exists', poId: existing, lineCount: Number(c?.n ?? 0) };
+    const [c] = await db.select({ n: sql<number>`count(*)::int` }).from(poLines).where(eq(poLines.poId, existing.id));
+    return { status: 'exists', poId: existing.id, lineCount: Number(c?.n ?? 0) };
   }
 
   const [po] = await db
@@ -438,58 +440,78 @@ export async function prepareBackorderDraft(
     .groupBy(grLines.poLineId);
   const receivedBy = new Map(received.map((r) => [r.poLineId!, Number(r.qty)]));
 
-  // Billed-not-received: an open/accepted QTY_OVER on this order line carries
-  // the invoice line that billed more than arrived (engine.ts; read-only).
+  // Billed-not-received (engine.ts, read-only): a QTY_OVER on this order line
+  // stores the billed quantity in `actual_value`, ALREADY CONVERTED to the order's
+  // unit. Every status but 'rejected' counts (an escalated/resolved one is a
+  // credit request in progress). Per invoice the newest run's value wins (a
+  // re-match is not a second bill); across invoices the bills ADD UP.
   const over = await db
-    .select({ poLineId: discrepancies.poLineId, qtyBilled: invoiceLines.qtyBilled })
+    .select({ poLineId: discrepancies.poLineId, invoiceId: matchRuns.invoiceId, actual: discrepancies.actualValue })
     .from(discrepancies)
-    .innerJoin(invoiceLines, eq(invoiceLines.id, discrepancies.invoiceLineId))
+    .innerJoin(matchRuns, and(eq(matchRuns.id, discrepancies.matchRunId), eq(matchRuns.restaurantId, args.restaurantId)))
     .where(
       and(
         eq(discrepancies.restaurantId, args.restaurantId),
         eq(discrepancies.type, 'QTY_OVER'),
-        inArray(discrepancies.resolutionStatus, ['open', 'accepted']),
+        ne(discrepancies.resolutionStatus, 'rejected'),
         inArray(
           discrepancies.poLineId,
           ordered.map((l) => l.id),
         ),
       ),
     );
-  const billedBy = new Map<string, number>();
+  const overByLineInvoice = new Map<string, number>(); // `${poLineId}|${invoiceId}` → billed
   for (const o of over) {
-    if (!o.poLineId) continue;
-    billedBy.set(o.poLineId, Math.max(billedBy.get(o.poLineId) ?? 0, Number(o.qtyBilled)));
+    if (!o.poLineId || o.actual == null) continue;
+    const k = `${o.poLineId}|${o.invoiceId ?? ''}`;
+    overByLineInvoice.set(k, Math.max(overByLineInvoice.get(k) ?? 0, Number(o.actual)));
   }
-  // Invoices already matched against this receipt: what each billed per product.
-  // A stale match run may lack the QTY_OVER, so the invoice lines decide too.
+  const billedBy = new Map<string, number>();
+  for (const [k, v] of overByLineInvoice) {
+    const line = k.split('|')[0]!;
+    billedBy.set(line, (billedBy.get(line) ?? 0) + v);
+  }
+
+  // Invoices already matched against this receipt: what each billed per product,
+  // in case a stale run lacks the QTY_OVER. Only lines in the ORDER's unit are
+  // summed; a line in another unit (case vs unit, g vs kg) cannot be compared
+  // here, so the order line is treated as billed in full — never re-ordered.
   const runs = await db
     .select({ invoiceId: matchRuns.invoiceId })
     .from(matchRuns)
     .where(and(eq(matchRuns.restaurantId, args.restaurantId), eq(matchRuns.grId, gr.id)));
   const invoiceIds = [...new Set(runs.map((r) => r.invoiceId).filter((x): x is string => !!x))];
-  const billedByProduct = new Map<string, number>();
+  const billedByProductUnit = new Map<string, number>(); // `${productId}|${unit}` → Σ over invoices
+  const productsWithOtherUnit = new Set<string>(); // `${productId}|${orderUnit}` billed in a different unit
   if (invoiceIds.length > 0) {
-    const perInvoice = await db
-      .select({ invoiceId: invoiceLines.invoiceId, productId: invoiceLines.productId, qty: sql<string>`sum(${invoiceLines.qtyBilled})` })
+    const lines = await db
+      .select({ productId: invoiceLines.productId, unit: invoiceLines.unit, qty: invoiceLines.qtyBilled })
       .from(invoiceLines)
-      .where(and(inArray(invoiceLines.invoiceId, invoiceIds), isNotNull(invoiceLines.productId)))
-      .groupBy(invoiceLines.invoiceId, invoiceLines.productId);
-    for (const r of perInvoice) {
-      billedByProduct.set(r.productId!, Math.max(billedByProduct.get(r.productId!) ?? 0, Number(r.qty)));
+      .where(and(inArray(invoiceLines.invoiceId, invoiceIds), isNotNull(invoiceLines.productId)));
+    for (const r of lines) {
+      const k = `${r.productId}|${r.unit}`;
+      billedByProductUnit.set(k, (billedByProductUnit.get(k) ?? 0) + Number(r.qty));
+    }
+    for (const l of ordered) {
+      if (!l.productId) continue;
+      if (lines.some((r) => r.productId === l.productId && r.unit !== l.unit)) productsWithOtherUnit.add(`${l.productId}|${l.unit}`);
     }
   }
   const matched = invoiceIds.length > 0;
 
   const input: BackorderLineInput[] = ordered.map((l) => {
     const rec = receivedBy.get(l.id) ?? 0;
-    const fromInvoice = l.productId ? billedByProduct.get(l.productId) : undefined;
-    const billed = Math.max(billedBy.get(l.id) ?? 0, fromInvoice ?? 0);
+    const qtyOrdered = Number(l.qtyOrdered);
+    const key = l.productId ? `${l.productId}|${l.unit}` : null;
+    const otherUnit = key ? productsWithOtherUnit.has(key) : false;
+    const fromInvoice = key ? (billedByProductUnit.get(key) ?? 0) : 0;
+    const billed = otherUnit ? qtyOrdered : Math.max(billedBy.get(l.id) ?? 0, fromInvoice);
     return {
       poLineId: l.id,
       productId: l.productId,
       description: l.rawDescription ?? '',
       unit: l.unit,
-      qtyOrdered: Number(l.qtyOrdered),
+      qtyOrdered,
       qtyReceived: rec,
       // null = no invoice yet; a matched receipt without a billed line billed nothing for it.
       qtyBilled: matched || billedBy.has(l.id) ? billed : null,

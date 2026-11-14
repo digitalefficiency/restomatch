@@ -168,3 +168,46 @@ describe('09:00 failed-send rescue (AU-11 c)', () => {
     expect(notices[0]!.body).not.toMatch(/₪/);
   });
 });
+
+describe('early cut-off, daily supplier (review fixes)', () => {
+  let dailySid = '';
+  beforeAll(async () => {
+    const daily = { windows: [{ orderDays: [0, 1, 2, 3, 4, 5, 6], cutoff: '08:00', fulfillment: { kind: 'lead_days', leadDays: 1 } }] };
+    const [d] = await sql<{ id: string }[]>`
+      insert into suppliers (restaurant_id, name, active, order_schedule) values (${rid}, 'מאפייה', true, ${sql.json(daily)}) returning id`;
+    dailySid = d!.id;
+  });
+
+  it("today's cut-off passed: today's A5 line stays, and tomorrow's draft is announced on top (never instead)", async () => {
+    await guide(dailySid);
+    await setOption({ preparedOrderDraft: true });
+    await processOrderReminders(job({ restaurantId: rid, forDate: SLOT }));
+    const msgs = (await rows()).filter((o) => o.dedupe_key.includes(dailySid));
+    const kinds = msgs.map((o) => o.dedupe_key.split(':')[1]).sort();
+    expect(kinds).toEqual(['A16', 'A16', 'A16', 'A5', 'A5', 'A5']);
+    expect(msgs.filter((o) => o.dedupe_key.startsWith('au:A16:')).every((o) => o.dedupe_key.endsWith(':2026-10-26'))).toBe(true);
+    const drafts = await sql<{ source_ref: string }[]>`
+      select source_ref from purchase_orders where restaurant_id = ${rid} and supplier_id = ${dailySid} and status = 'draft'`;
+    expect(drafts.map((d) => d.source_ref)).toEqual([`au:A16:${dailySid}:2026-10-26`]);
+  });
+
+  it("today's prepared draft was already sent yesterday → today's order, no A5 nag and no new draft", async () => {
+    await guide(dailySid);
+    await setOption({ preparedOrderDraft: true });
+    await sql`insert into purchase_orders (restaurant_id, supplier_id, status, source, source_ref, created_at, sent_at)
+              values (${rid}, ${dailySid}, 'sent', 'recurring', ${`au:A16:${dailySid}:2026-10-25`}, '2026-10-24T07:00:00Z', '2026-10-24T12:00:00Z')`;
+    await processOrderReminders(job({ restaurantId: rid, forDate: SLOT }));
+    const msgs = (await rows()).filter((o) => o.dedupe_key.includes(dailySid));
+    expect(msgs.some((o) => o.dedupe_key.startsWith('au:A5:'))).toBe(false);
+  });
+
+  it('an order already placed today after the cut-off (for tomorrow) → no duplicate tomorrow draft', async () => {
+    await guide(dailySid);
+    await setOption({ preparedOrderDraft: true });
+    // 08:30 IL today = after today's 08:00 cut-off → it is tomorrow's order.
+    await sql`insert into purchase_orders (restaurant_id, supplier_id, status, source, created_at, sent_at)
+              values (${rid}, ${dailySid}, 'sent', 'manual', '2026-10-25T06:30:00Z', '2026-10-25T06:30:00Z')`;
+    await processOrderReminders(job({ restaurantId: rid, forDate: SLOT }));
+    expect(await sql`select id from purchase_orders where restaurant_id = ${rid} and supplier_id = ${dailySid} and status = 'draft'`).toHaveLength(0);
+  });
+});
