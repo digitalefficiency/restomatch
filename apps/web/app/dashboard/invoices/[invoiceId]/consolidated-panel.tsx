@@ -31,6 +31,10 @@ const PRODUCT_TONE: Record<ConsolidatedProposal['products'][number]['status'], B
 };
 
 type Finding = ConsolidatedProposal['findings'][number];
+type ReviewItem = NonNullable<ConsolidatedProposal['reviewItems']>[number];
+
+/** G-04 §9 tiers → badge: T2 act-now (solid), warn (tinted), T4 neutral. */
+const REVIEW_TONE: Record<ReviewItem['tier'], BadgeTone> = { T2: 'warning-solid', warn: 'warning', T4: 'neutral' };
 
 /**
  * "הצלבה מול תעודות משלוח" — the read-only cross-match of a consolidated invoice
@@ -107,6 +111,22 @@ export function ConsolidatedPanel({
       : inclAsk > 0
         ? t('letter.askIncl', { amount: ils(inclAsk) })
         : t('letter.ask', { amount: ils(exclAsk) });
+  // G-04 §9: review items and notes still being counted are read-only rows. When they
+  // are all that keeps the ריכוז from "תואמת" (nothing to claim, no leak), there is no
+  // red "פערים" card and no supplier letter — never a letter asking ₪0.00.
+  const review = proposal.reviewItems ?? [];
+  const pending = proposal.pendingNotes ?? [];
+  const reviewOnly =
+    proposal.status === 'differences' && exclAsk + inclAsk <= 0 && totals.leakIls <= 0 && review.some((r) => r.blocksMatched);
+  const showDifferences = proposal.status === 'differences' && !reviewOnly;
+  /** One review row, its parts joined: "ת.מ. 9001 · חשבונית A-M-1 · 36.00 ₪". ₪ only when known — never ₪0. */
+  const reviewParts = (r: ReviewItem) =>
+    [
+      r.noteNumber ? t('finding.note', { number: r.noteNumber }) : r.flag === 'note_billed_twice' ? t('review.monthTotal') : null,
+      r.otherInvoice ? t('review.otherInvoice', { number: r.otherInvoice.invoiceNumber ?? '—' }) : null,
+      r.receivedOn ? t('review.receivedOn', { date: day(r.receivedOn) }) : null,
+      r.amountIls != null ? (r.flag === 'note_other_month' ? t('review.value', { amount: ils(r.amountIls) }) : ils(r.amountIls)) : null,
+    ].filter((x): x is string => !!x);
 
   return (
     <section
@@ -115,7 +135,7 @@ export function ConsolidatedPanel({
       data-testid="consolidated-panel"
       data-print-root="xmatch"
     >
-      {proposal.status === 'differences' ? (
+      {showDifferences ? (
         // Print only: the letter for the supplier. TODO(H-03): move to W2-10's claim
         // letter once consolidated_invoice_links lets the claims page carry ריכוז findings.
         <div className="mb-6 hidden space-y-1 text-sm text-ink print:block" data-testid="xmatch-letter">
@@ -145,7 +165,16 @@ export function ConsolidatedPanel({
         <span>{t(settled ? 'referenceNote' : 'proposalNote')}</span>
       </p>
 
-      {proposal.status === 'differences' ? (
+      {reviewOnly ? (
+        // Only review items block "תואמת": calm, no ₪ hero, no letter (G-04 §9).
+        <Card padding="md" className="mb-4 flex items-start gap-3 print:hidden" data-testid="xmatch-review-only">
+          <ClipboardList className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+          <div>
+            <p className="font-semibold text-ink">{t('review.title')}</p>
+            <p className="text-sm text-muted">{t('review.blocked')}</p>
+          </div>
+        </Card>
+      ) : showDifferences ? (
         // T2: act now — solid badge + ₪ + ONE primary action.
         <Card padding="md" className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between print:hidden" data-testid="xmatch-differences">
           <div>
@@ -183,6 +212,39 @@ export function ConsolidatedPanel({
           </div>
         </Card>
       )}
+
+      {review.length > 0 || pending.length > 0 ? (
+        <div className="mb-6 print:hidden" data-testid="xmatch-review">
+          <h3 className="mb-1 text-sm font-semibold text-ink">{t('review.title')}</h3>
+          <p className="mb-2 text-xs text-muted">{t('review.body')}</p>
+          <ul className="space-y-2">
+            {review.map((r, i) => (
+              <li
+                key={`${r.flag}-${r.noteNumber ?? 'month'}-${i}`}
+                className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-sm"
+                data-testid={`xmatch-review-${r.flag}`}
+              >
+                <Badge tone={REVIEW_TONE[r.tier]}>{t(`review.${r.flag}`)}</Badge>
+                <span className="text-ink">
+                  <bdi>{reviewParts(r).join(' · ')}</bdi>
+                </span>
+              </li>
+            ))}
+            {pending.map((p) => (
+              <li
+                key={`pending-${p.number}`}
+                className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-sm"
+                data-testid="xmatch-review-pending"
+              >
+                <Badge tone="neutral">{t('review.pending')}</Badge>
+                <span className="text-ink">
+                  <bdi>{[t('finding.note', { number: p.number }), t('review.billed', { amount: ils(p.billedIls) })].join(' · ')}</bdi>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {proposal.deliveryNotes.length > 0 ? (
         <>

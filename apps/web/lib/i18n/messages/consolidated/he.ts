@@ -52,6 +52,21 @@ export const he = {
     not_billed: 'לא חויב בחשבונית הזו',
     noRef: 'ללא מספר',
   },
+  // G-04 §9 review items: read-only, never a claim (T2 billed twice · warn · T4).
+  review: {
+    title: 'לבדיקה',
+    body: 'פריטים לבדיקה, לא הפסד מאומת. הם לא נכנסים לדרישת זיכוי.',
+    blocked: 'החשבונית לא תסומן "תואמת" עד שהפריטים ייבדקו.',
+    note_billed_twice: 'אפשר שחויב פעמיים',
+    note_not_in_system: 'תעודה שלא נקלטה במערכת',
+    note_other_month: 'תעודת משלוח מחודש אחר',
+    pending: 'עדיין בספירה',
+    monthTotal: 'שורת סה״כ חודש',
+    otherInvoice: 'חשבונית {number}',
+    receivedOn: 'התקבלה ב-{date}',
+    billed: 'חויב {amount}',
+    value: 'שווי {amount}',
+  },
   products: {
     title: 'לפי מוצר',
     product: 'מוצר',
