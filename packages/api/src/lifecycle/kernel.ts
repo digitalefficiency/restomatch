@@ -93,7 +93,11 @@ export interface MachineConfig<S extends string, E extends string> {
   /** Extra columns set by the guarded UPDATE (drizzle property names). */
   patch?: (c: MoveContext<S, E>) => Record<string, unknown>;
   /** Writes after the guarded UPDATE, in the same tx (the row is locked): optional columns, side tables. */
-  afterMove?: (tx: Database, c: MoveContext<S, E>) => Promise<void>;
+  /**
+   * May return extra fields for the audit row's `after` (facts only known
+   * after the write, e.g. which amount was recorded).
+   */
+  afterMove?: (tx: Database, c: MoveContext<S, E>) => Promise<Record<string, unknown> | void>;
   /** Extra fields for the audit row's `after`. */
   auditAfter?: (c: MoveContext<S, E>) => Record<string, unknown>;
   /** Per-machine history (e.g. `recovery_events`), in the same tx. */
@@ -385,7 +389,7 @@ async function move<S extends string, E extends string>(
     .returning({ id: machine.idColumn })) as Array<{ id: string }>;
   if (updated.length === 0) return null;
 
-  await machine.afterMove?.(tx, ctx);
+  const moveFacts = (await machine.afterMove?.(tx, ctx)) ?? {};
   await recordAudit(tx, {
     restaurantId: input.restaurantId,
     userId: input.actorId,
@@ -402,6 +406,7 @@ async function move<S extends string, E extends string>(
       payload: prepared.payload,
       at: prepared.at.toISOString(),
       ...(machine.auditAfter?.(ctx) ?? {}),
+      ...moveFacts,
     },
   });
   await machine.history?.(tx, ctx);

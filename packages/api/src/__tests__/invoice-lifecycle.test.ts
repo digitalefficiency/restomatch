@@ -31,6 +31,8 @@ const TEST_DB_URL = testDbUrl();
 const ownerDb = createDb(TEST_DB_URL);
 /** Collection-time probe: H-03 adds invoices.paid_at. */
 const hasPaidAt = await hasColumn(ownerDb, 'invoices', 'paid_at');
+/** H-03 0072 adds paid_amount / payment_method / payment_ref with the pair CHECKs. */
+const hasPaymentFacts = await hasColumn(ownerDb, 'invoices', 'paid_amount');
 let appDb: Database;
 let A: Tenant;
 
@@ -219,5 +221,67 @@ describe('invoice machine', () => {
     expect(new Date(await paidAt() as Date).toISOString()).toBe(at.toISOString());
     await move('unmark', { expectedFrom: 'paid' });
     expect(await paidAt()).toBeNull();
+  });
+
+  describe.skipIf(!hasPaymentFacts)('H-03 0072 payment facts (one statement, CHECK-safe)', () => {
+    type Pay = { paid_at: Date | null; paid_amount: string | null; payment_method: string | null; payment_ref: string | null };
+    const pay = async () =>
+      ((await ownerDb.execute(
+        sql`SELECT paid_at, paid_amount::text AS paid_amount, payment_method, payment_ref FROM invoices WHERE id = ${A.invoiceId}::uuid`,
+      )) as unknown as Pay[])[0]!;
+    const lastMarkAudit = async () => {
+      const rows = await ownerDb
+        .select({ action: auditLog.action, after: auditLog.after })
+        .from(auditLog)
+        .where(and(eq(auditLog.entityType, 'invoice'), eq(auditLog.entityId, A.invoiceId)));
+      return rows.filter((r) => r.action === 'invoice.marked_paid' || r.action === 'invoice.external_sync').at(-1)?.after as
+        | Record<string, unknown>
+        | undefined;
+    };
+
+    it('a payload amount is parsed at the boundary (exact agorot) and written with paid_at, method and ref in one UPDATE', async () => {
+      await move('approve_for_payment', { expectedFrom: 'matched' });
+      const at = new Date('2026-10-30T22:00:00Z');
+      await move('mark_paid', {
+        expectedFrom: 'approved',
+        at,
+        payload: { paidAmount: '1,234.50', paymentMethod: 'bank_transfer', paymentRef: 'העברה 778' },
+      });
+      const p = await pay();
+      expect(new Date(p.paid_at as Date).toISOString()).toBe(at.toISOString());
+      expect(p).toMatchObject({ paid_amount: '1234.50', payment_method: 'bank_transfer', payment_ref: 'העברה 778' });
+      expect(await lastMarkAudit()).toMatchObject({ paidAmount: '1234.50', paidAmountSource: 'payload' });
+    });
+
+    it("without a payload amount the invoice's own total incl. VAT is recorded, and the audit says so", async () => {
+      await move('approve_for_payment', { expectedFrom: 'matched' });
+      await move('mark_paid', { expectedFrom: 'approved' });
+      expect(await pay()).toMatchObject({ paid_amount: '117.00', payment_method: null, payment_ref: null });
+      expect(await lastMarkAudit()).toMatchObject({ paidAmount: '117.00', paidAmountSource: 'invoice_total' });
+    });
+
+    it('external_sync records the pair the same way', async () => {
+      await move('external_sync', { expectedFrom: 'matched', payload: { paidAmount: 117, paymentMethod: 'offset' } });
+      expect(await pay()).toMatchObject({ paid_amount: '117.00', payment_method: 'offset' });
+    });
+
+    it('an invalid method or amount is refused (BAD_REQUEST) and nothing moves', async () => {
+      await move('approve_for_payment', { expectedFrom: 'matched' });
+      const badMethod = await move('mark_paid', { expectedFrom: 'approved', payload: { paymentMethod: 'paypal' } }).catch((e: unknown) => e);
+      expect((badMethod as { code?: string }).code).toBe('BAD_REQUEST');
+      const badAmount = await move('mark_paid', { expectedFrom: 'approved', payload: { paidAmount: '12.345' } }).catch((e: unknown) => e);
+      expect((badAmount as { code?: string }).code).toBe('BAD_REQUEST');
+      expect(await invoiceStatus()).toBe('approved');
+      expect(await pay()).toEqual({ paid_at: null, paid_amount: null, payment_method: null, payment_ref: null });
+      expect((await invoiceAudits()).map((a) => a.action)).toEqual(['invoice.approved_for_payment']);
+    });
+
+    it('unmark clears all four payment facts together', async () => {
+      await move('approve_for_payment', { expectedFrom: 'matched' });
+      await move('mark_paid', { expectedFrom: 'approved', payload: { paidAmount: '100', paymentMethod: 'check', paymentRef: '#55' } });
+      await move('unmark', { expectedFrom: 'paid' });
+      expect(await invoiceStatus()).toBe('approved');
+      expect(await pay()).toEqual({ paid_at: null, paid_amount: null, payment_method: null, payment_ref: null });
+    });
   });
 });
