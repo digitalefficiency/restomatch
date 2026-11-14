@@ -13,12 +13,14 @@ import { useMarkUnsaved } from '../_components/SettingsFrame';
 import { SectionFoot, SettingRow, SettingsRows, SubHead } from '../_components/ui';
 import {
   ALL_FIELDS,
+  APPROVAL_FIELDS,
   OCR_FIELD,
   TOLERANCE_FIELDS,
   canStep,
   changesOf,
   errorOf,
   fieldDef,
+  intentOf,
   isDirty,
   isFieldDirty,
   sameAsSnapshot,
@@ -26,6 +28,7 @@ import {
   savedAfter,
   stepValue,
   toDisplay,
+  toStored,
   undoPatch,
   valuesFrom,
   valuesOfAudit,
@@ -41,6 +44,23 @@ import {
 const UNDO_MS = 10_000;
 /** The preview waits for the steppers to rest. */
 const PREVIEW_DEBOUNCE_MS = 400;
+/** The history shows the latest this many changes (settings.history's own maximum). */
+const HISTORY_LIMIT = 100;
+/**
+ * Fields whose LOWER value can open gaps that are not open today (a smaller
+ * tolerance, a smaller cumulative routing threshold). The preview cannot count
+ * those — they are not rows yet — so it says so instead of a number.
+ */
+const OPENS_MORE_WHEN_LOWER: ReadonlySet<FieldKey> = new Set<FieldKey>([
+  'pricePercent',
+  'priceAbsolute',
+  'qtyPercent',
+  'qtyAbsolute',
+  'cumulativeLargeAmount',
+  'cumulativeLargePct',
+  'cumulativeMediumAmountMin',
+  'cumulativeMediumPctMin',
+]);
 
 export interface HistoryRow {
   id: string;
@@ -134,8 +154,11 @@ export function RulesForm({
   }, [values]);
   const hasErrors = Object.values(errors).some(Boolean);
 
-  const historyQuery = trpc.settings.history.useQuery({ limit: 20 }, { initialData: initialHistory });
-  const history = (historyQuery.data ?? initialHistory).filter((h) => h.kind === 'rules');
+  const historyQuery = trpc.settings.history.useQuery({ limit: HISTORY_LIMIT }, { initialData: initialHistory });
+  const historyAll = historyQuery.data ?? initialHistory;
+  const history = historyAll.filter((h) => h.kind === 'rules');
+  /** The server returned its maximum: older changes may exist, so the count is not the total. */
+  const historyCapped = historyAll.length >= HISTORY_LIMIT;
 
   const refreshAfterWrite = useCallback(() => {
     void utils.settings.history.invalidate();
@@ -193,15 +216,35 @@ export function RulesForm({
     focusFirstField();
   };
 
-  /* ── the preview: what the unsaved thresholds would have done to the gaps open now ── */
+  /* ── the preview: what the unsaved thresholds would have done to the gaps open now ──
+     Only the owner (the one who can save) asks the what-if; everyone else reads
+     the count in force ({}), which is all the server answers them. */
   const thresholdPatch = useMemo(() => {
     if (!canEdit || hasErrors) return {};
     const p = savePatch(values, saved, defaults);
     return { ...(p?.tolerances ? { tolerances: p.tolerances } : {}), ...(p?.approvalThresholds ? { approvalThresholds: p.approvalThresholds } : {}) };
   }, [canEdit, hasErrors, values, saved, defaults]);
   const previewInput = useDebounced(thresholdPatch, PREVIEW_DEBOUNCE_MS);
-  const preview = trpc.settings.previewThresholds.useQuery(previewInput, { placeholderData: (p) => p, staleTime: 30_000 });
+  const preview = trpc.settings.previewThresholds.useQuery(previewInput, {
+    placeholderData: (p) => p,
+    staleTime: 30_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
   const thresholdsUnsaved = Object.keys(thresholdPatch).length > 0;
+  /** The answer on screen is for other values than the fields hold (typing, or the request still out). */
+  const previewStale = previewInput !== thresholdPatch || preview.isPlaceholderData;
+  /** Some unsaved value is lower where lower can open gaps that are not open today. */
+  const opensMore = useMemo(() => {
+    if (!canEdit || hasErrors) return false;
+    return [...TOLERANCE_FIELDS, ...APPROVAL_FIELDS].some((f) => {
+      if (!OPENS_MORE_WHEN_LOWER.has(f.key)) return false;
+      const now = saved[f.key] === null ? defaults[f.key] : toStored(saved[f.key]!, f.kind);
+      const intent = intentOf(values, saved, defaults, f);
+      const next = intent === null ? defaults[f.key] : intent;
+      return Number.isFinite(next) && Number.isFinite(now) && next < now - 1e-9;
+    });
+  }, [canEdit, hasErrors, values, saved, defaults]);
 
   /* ── field rows ── */
   const chipFor = (fields: FieldDef[]) => {
@@ -340,10 +383,12 @@ export function RulesForm({
 
       <EffectBox
         t={t}
+        locale={locale}
         unsaved={thresholdsUnsaved}
-        data={preview.data ?? null}
+        data={preview.isError ? null : (preview.data ?? null)}
         failed={preview.isError}
-        busy={preview.isFetching}
+        stale={previewStale && !preview.isError}
+        opensMore={opensMore}
       />
 
       <SubHead>{t('thresholds.approvalsTitle')}</SubHead>
@@ -365,6 +410,7 @@ export function RulesForm({
       <HistoryBlock
         t={t}
         rows={history}
+        capped={historyCapped}
         open={historyOpen}
         onToggle={() => setHistoryOpen((o) => !o)}
         canRestore={canEdit && !dirty && !undo}
@@ -486,74 +532,102 @@ function UndoBar({ t, onUndo, onEnd, returnFocus }: { t: T; onUndo: () => void; 
   );
 }
 
+/** settings.previewThresholds' answer, as this screen reads it (packages/api ThresholdPreview). */
 interface PreviewData {
   openNow: number;
   changed: boolean;
-  considered: number;
   wouldOpen: number;
   wouldBlock: number;
   notOpenedCount: number;
   notOpenedAgorot: number;
-  notOpened: Array<{ label: string | null; amountAgorot: number }>;
+  notOpened: Array<{ label: string | null; labelEn: string | null; amountAgorot: number }>;
+  notEvaluated: number;
 }
 
 /**
  * What the thresholds would do — in conditional words, from the matching
  * engine on the server (settings.previewThresholds). It never says that saving
  * changes a gap that is already open: thresholds act on invoices checked from
- * now on (KNOWN-ISSUES "Settings" #3).
+ * now on (KNOWN-ISSUES "Settings" #3). While the answer is for other values
+ * than the fields hold it is dimmed and marked busy; a failure shows no number.
  */
-function EffectBox({ t, unsaved, data, failed, busy }: { t: T; unsaved: boolean; data: PreviewData | null; failed: boolean; busy: boolean }) {
+function EffectBox({
+  t,
+  locale,
+  unsaved,
+  data,
+  failed,
+  stale,
+  opensMore,
+}: {
+  t: T;
+  locale: string;
+  unsaved: boolean;
+  data: PreviewData | null;
+  failed: boolean;
+  stale: boolean;
+  opensMore: boolean;
+}) {
   const lines: React.ReactNode[] = [];
   if (data) {
-    if (!unsaved || !data.changed) {
-      lines.push(t('thresholds.effect.openNow', { count: data.openNow }));
+    const n = data.openNow;
+    if (!unsaved || !data.changed || n === 0) {
+      lines.push(t('thresholds.effect.openNow', { count: n }));
     } else {
-      const n = data.considered;
       const k = data.wouldOpen;
-      if (n === 0) lines.push(t('thresholds.effect.openNow', { count: data.openNow }));
-      else if (k === n) lines.push(t('thresholds.effect.all', { n }));
+      if (k === n) lines.push(t('thresholds.effect.all', { n }));
       else if (k === 0) lines.push(t('thresholds.effect.none', { n }));
       else lines.push(t('thresholds.effect.some', { k, n }));
       if (k > 0) lines.push(t('thresholds.effect.blocks', { b: data.wouldBlock }));
       if (data.notOpenedCount > 0) {
-        const named = data.notOpened.map((x) => x.label ?? t('thresholds.effect.unnamed'));
+        const named = data.notOpened.map((x) => (locale === 'en' ? (x.labelEn ?? x.label) : x.label) ?? t('thresholds.effect.unnamed'));
         const more = data.notOpenedCount - named.length;
         const names = [...named, ...(more > 0 ? [t('thresholds.effect.andMore', { count: more })] : [])].join(', ');
         lines.push(
-          <>
-            {t('thresholds.effect.notOpened', { count: data.notOpenedCount, names })},{' '}
-            <Money agorot={data.notOpenedAgorot} context="line" className="font-semibold" /> {t('thresholds.effect.beforeVat')}
-          </>,
+          data.notOpenedAgorot > 0 ? (
+            <>
+              {t('thresholds.effect.notOpened', { count: data.notOpenedCount, names })},{' '}
+              <Money agorot={data.notOpenedAgorot} context="line" className="font-semibold" /> {t('thresholds.effect.beforeVat')}
+            </>
+          ) : (
+            t('thresholds.effect.notOpened', { count: data.notOpenedCount, names })
+          ),
         );
       }
-      if (data.openNow > n) lines.push(t('thresholds.effect.notChecked', { count: data.openNow - n }));
+      if (data.notEvaluated > 0) lines.push(t('thresholds.effect.notEvaluated', { count: data.notEvaluated }));
     }
   }
   return (
     <div
       data-testid="threshold-effect"
-      aria-busy={busy || undefined}
+      data-stale={stale || undefined}
+      aria-busy={stale || undefined}
       className="mt-3 grid gap-0.5 rounded-card bg-surface-2 px-4 py-3"
     >
-      <h3 className="text-caption font-medium text-muted">
+      <h3 className="flex items-center gap-2 text-caption font-medium text-muted">
         {unsaved ? t('thresholds.effect.titleUnsaved') : t('thresholds.effect.titleSaved')}
+        {stale ? (
+          <span aria-hidden="true" className="font-normal">
+            {t('thresholds.effect.computing')}
+          </span>
+        ) : null}
       </h3>
-      {failed && !data ? <p className="text-body-sm text-muted">{t('thresholds.effect.failed')}</p> : null}
+      {failed ? <p className="text-body-sm text-muted">{t('thresholds.effect.failed')}</p> : null}
       {lines.map((l, i) => (
-        <p key={i} className={cn('text-body-sm text-ink', busy && 'opacity-70')}>
+        <p key={i} className={cn('text-body-sm text-ink transition-opacity duration-short', stale && 'opacity-60')}>
           {l}
         </p>
       ))}
       {unsaved ? (
         <>
-          <p className="mt-1 text-caption text-muted">{t('thresholds.effect.newOnly')}</p>
+          {opensMore ? <p className="mt-1 text-caption text-muted">{t('thresholds.effect.stricter')}</p> : null}
+          <p className={cn('text-caption text-muted', !opensMore && 'mt-1')}>{t('thresholds.effect.newOnly')}</p>
           <p className="text-caption text-muted">{t('thresholds.effect.openStay')}</p>
         </>
       ) : (
         <p className="mt-1 text-caption text-muted">{t('thresholds.effect.savedApply')}</p>
       )}
-      {busy ? <span className="sr-only">{t('thresholds.effect.busySr')}</span> : null}
+      {stale ? <span className="sr-only">{t('thresholds.effect.busySr')}</span> : null}
     </div>
   );
 }
@@ -562,6 +636,7 @@ function EffectBox({ t, unsaved, data, failed, busy }: { t: T; unsaved: boolean;
 function HistoryBlock({
   t,
   rows,
+  capped,
   open,
   onToggle,
   canRestore,
@@ -570,6 +645,8 @@ function HistoryBlock({
 }: {
   t: T;
   rows: HistoryRow[];
+  /** The server's maximum came back: say "the latest", never a total. */
+  capped: boolean;
   open: boolean;
   onToggle: () => void;
   canRestore: boolean;
@@ -605,7 +682,7 @@ function HistoryBlock({
         onClick={onToggle}
         className="-ms-2 inline-flex min-h-8 items-center gap-1 rounded-control px-2 text-caption font-medium text-muted hover:bg-surface-2 hover:text-ink [@media(pointer:coarse)]:min-h-11"
       >
-        {t('thresholds.history.toggle', { n: rows.length })}
+        {capped ? t('thresholds.history.toggleLatest') : t('thresholds.history.toggle', { n: rows.length })}
         <ChevronDown className={cn('h-4 w-4 transition-transform duration-short', open && 'rotate-180')} aria-hidden="true" />
       </button>
       <ul id="rules-history-list" hidden={!open} className="space-y-2">
