@@ -1,4 +1,5 @@
 import Papa from 'papaparse';
+import { parseDecimalInput } from '@restomatch/types';
 import { PosFileError, type PosParseIssue, type PosParseResult, type PosSaleRow, type PosSalesProvider } from './types';
 
 export const MAX_POS_BYTES = 5 * 1024 * 1024;
@@ -104,66 +105,24 @@ export function parsePosDate(raw: string): string | null {
 }
 
 /**
- * A decimal cell → integer units of 10^-scale (scale 2 = money in agorot,
- * scale 3 = qty in thousandths), exact. ONE locale-safe rule set that refuses
- * to guess — an ambiguous value is null (the line is reported, not imported):
+ * @deprecated G-13 — use `parseDecimalInput(raw, 'ils' | 'qty', …)` from
+ * @restomatch/types, the one input parser. Kept as a thin wrapper so the POS
+ * importer and its tests are unchanged: a decimal cell → integer units of
+ * 10^-scale (scale 2 = agorot, scale 3 = qty in thousandths), or null when the
+ * cell is ambiguous or not a number (the line is reported, not imported).
  *
- *  - both "," and "." → the later one is the decimal mark, the other must be
- *    proper thousands grouping ("1,234.50", "1.234,50");
- *  - only ","  → "1,234" / "12,345,678" is thousands for money but AMBIGUOUS
- *    for a qty (1,250 units or 1.25 kg?); "12,5" / "0,500" is a decimal comma;
- *  - only "."  → money takes ≤ 2 decimals ("1.234" could be ₪1,234 European →
- *    ambiguous); qty takes ≤ 3;
- *  - one sign only: "-50", "50-" or "(50)"; "(-5)" / "-5-" are refused.
+ * The POS grammar it always had: a sign is allowed; a value with both "," and
+ * "." takes the later one as the decimal mark ("1,234.50", "1.234,50") for
+ * money and qty alike; "1,250" is thousands for money and ambiguous for a qty;
+ * "1.234" as money (3 decimals) is ambiguous. Only ₪, spaces and LRM/RLM are
+ * ignored (a currency word is not a POS number).
  */
 export function parseScaled(raw: string, scale: 2 | 3): number | null {
-  let s = raw.replace(/[₪\s‎‏]/g, '');
-  if (!s) return null;
-  let signs = 0;
-  if (/^\(.*\)$/.test(s)) {
-    signs++;
-    s = s.slice(1, -1);
-  }
-  if (s.endsWith('-')) {
-    signs++;
-    s = s.slice(0, -1);
-  }
-  if (s.startsWith('-')) {
-    signs++;
-    s = s.slice(1);
-  }
-  if (signs > 1 || !/^[\d.,]+$/.test(s)) return null;
-  const money = scale === 2;
-  const dots = (s.match(/\./g) ?? []).length;
-  const commas = (s.match(/,/g) ?? []).length;
-  let intPart: string;
-  let frac = '';
-  if (dots && commas) {
-    const dec = s.lastIndexOf('.') > s.lastIndexOf(',') ? '.' : ',';
-    const grp = dec === '.' ? ',' : '.';
-    const [head, tail] = [s.slice(0, s.lastIndexOf(dec)), s.slice(s.lastIndexOf(dec) + 1)];
-    if (head.includes(dec) || !new RegExp(`^\\d{1,3}(\\${grp}\\d{3})+$`).test(head)) return null;
-    intPart = head.split(grp).join('');
-    frac = tail;
-  } else if (commas) {
-    if (/^\d{1,3}(,\d{3})+$/.test(s) && !/^0,/.test(s)) {
-      if (!money) return null; // qty "1,250": thousands or a decimal comma — don't guess
-      intPart = s.replace(/,/g, '');
-    } else if (commas === 1) {
-      [intPart, frac] = s.split(',') as [string, string];
-    } else return null;
-  } else if (dots) {
-    if (dots > 1) {
-      if (!money || !/^\d{1,3}(\.\d{3})+$/.test(s)) return null;
-      intPart = s.replace(/\./g, '');
-    } else {
-      [intPart, frac] = s.split('.') as [string, string];
-    }
-  } else intPart = s;
-  if (!/^\d+$/.test(intPart) || !/^\d*$/.test(frac) || frac.length > scale) return null;
-  const v = Number(intPart) * 10 ** scale + Number(frac.padEnd(scale, '0') || '0');
-  if (!Number.isSafeInteger(v)) return null;
-  return signs ? -v : v;
+  if (/[^\d.,()\-₪\s\u200e\u200f]/.test(raw)) return null;
+  const both = raw.includes(',') && raw.includes('.');
+  const r = parseDecimalInput(raw, scale === 2 ? 'ils' : 'qty', { negative: true, decimal: both ? 'comma' : 'auto' });
+  if (r.kind !== 'ok') return null;
+  return 'agorot' in r ? r.agorot : (r as { milli: number }).milli;
 }
 
 /** NUMERIC(12,3) qty and NUMERIC(12,2) money ceilings (pos_sales). */

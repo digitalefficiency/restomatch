@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { csvPosProvider, detectPosColumns, parsePosDate, parseScaled, PosFileError } from '../index';
+import { parseDecimalInput } from '@restomatch/types';
 
 const fx = (name: string) => new Uint8Array(readFileSync(join(__dirname, 'fixtures', name)));
 
@@ -166,3 +167,92 @@ describe('POS CSV adapter — S1 cross-QA', () => {
     expect(out.rejectedDays).toEqual(['2026-10-02']);
   });
 });
+
+/* G-13: parseScaled is now a @deprecated thin wrapper over parseDecimalInput. */
+describe('parseScaled wrapper delegates to parseDecimalInput (G-13)', () => {
+  it('same integers as parseDecimalInput ils/qty with signs allowed', () => {
+    for (const raw of ['1250', '1,250', '12,90', '0,500', '1,234.50', '1.234,50', '-50', '(50)', '1.234']) {
+      const ils = parseDecimalInput(raw, 'ils', { negative: true, decimal: raw.includes(',') && raw.includes('.') ? 'comma' : 'auto' });
+      expect(parseScaled(raw, 2)).toBe(ils.kind === 'ok' ? ils.agorot : null);
+      const qty = parseDecimalInput(raw, 'qty', { negative: true, decimal: raw.includes(',') && raw.includes('.') ? 'comma' : 'auto' });
+      expect(parseScaled(raw, 3)).toBe(qty.kind === 'ok' ? qty.milli : null);
+    }
+  });
+
+  it('matches the pre-G-13 implementation on 5,000 seeded cells (only a leading-zero thousands group differs, now refused)', () => {
+    let seed = 7;
+    const rnd = () => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return seed / 2_147_483_648;
+    };
+    const ALPHABET = '0123456789012345678901234567890123456789.,.,-() ₪';
+    const diffs: string[] = [];
+    for (let i = 0; i < 5000; i++) {
+      const len = 1 + Math.floor(rnd() * 10);
+      let raw = '';
+      for (let k = 0; k < len; k++) raw += ALPHABET[Math.floor(rnd() * ALPHABET.length)];
+      for (const scale of [2, 3] as const) {
+        if (parseScaled(raw, scale) !== LEGACY(raw, scale)) diffs.push(`${scale}:${raw}`);
+      }
+    }
+    // Hand-built cases on both sides of the one intended divergence.
+    for (const raw of ['1,234.50', '12,345,678', '1.234.567', '999,999.99', '0,123.45', '0.123.456'])
+      for (const scale of [2, 3] as const) if (parseScaled(raw, scale) !== LEGACY(raw, scale)) diffs.push(`${scale}:${raw}`);
+    // Every difference is a "0,…"/"0.…" (or "00…") thousands head the old code read as 0-thousands.
+    expect(diffs.filter((d) => !/^\d:[-(₪ ]*0\d{0,2}[.,]\d{3}/.test(d))).toEqual([]);
+    expect(LEGACY('0,123.45', 2)).toBe(12_345);
+    expect(parseScaled('0,123.45', 2)).toBeNull();
+  });
+});
+
+/** The pre-G-13 parseScaled body, frozen as the parity oracle. */
+const LEGACY = (raw: string, scale: 2 | 3): number | null => legacyParseScaled(raw, scale);
+function legacyParseScaled(raw: string, scale: 2 | 3): number | null {
+  let s = raw.replace(/[₪\s‎‏]/g, '');
+  if (!s) return null;
+  let signs = 0;
+  if (/^\(.*\)$/.test(s)) {
+    signs++;
+    s = s.slice(1, -1);
+  }
+  if (s.endsWith('-')) {
+    signs++;
+    s = s.slice(0, -1);
+  }
+  if (s.startsWith('-')) {
+    signs++;
+    s = s.slice(1);
+  }
+  if (signs > 1 || !/^[\d.,]+$/.test(s)) return null;
+  const money = scale === 2;
+  const dots = (s.match(/\./g) ?? []).length;
+  const commas = (s.match(/,/g) ?? []).length;
+  let intPart: string;
+  let frac = '';
+  if (dots && commas) {
+    const dec = s.lastIndexOf('.') > s.lastIndexOf(',') ? '.' : ',';
+    const grp = dec === '.' ? ',' : '.';
+    const [head, tail] = [s.slice(0, s.lastIndexOf(dec)), s.slice(s.lastIndexOf(dec) + 1)];
+    if (head.includes(dec) || !new RegExp(`^\\d{1,3}(\\${grp}\\d{3})+$`).test(head)) return null;
+    intPart = head.split(grp).join('');
+    frac = tail;
+  } else if (commas) {
+    if (/^\d{1,3}(,\d{3})+$/.test(s) && !/^0,/.test(s)) {
+      if (!money) return null; // qty "1,250": thousands or a decimal comma — don't guess
+      intPart = s.replace(/,/g, '');
+    } else if (commas === 1) {
+      [intPart, frac] = s.split(',') as [string, string];
+    } else return null;
+  } else if (dots) {
+    if (dots > 1) {
+      if (!money || !/^\d{1,3}(\.\d{3})+$/.test(s)) return null;
+      intPart = s.replace(/\./g, '');
+    } else {
+      [intPart, frac] = s.split('.') as [string, string];
+    }
+  } else intPart = s;
+  if (!/^\d+$/.test(intPart) || !/^\d*$/.test(frac) || frac.length > scale) return null;
+  const v = Number(intPart) * 10 ** scale + Number(frac.padEnd(scale, '0') || '0');
+  if (!Number.isSafeInteger(v)) return null;
+  return signs ? -v : v;
+}

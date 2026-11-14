@@ -6,6 +6,7 @@
  * the known timezone bugs lived.
  */
 import { startOfDayInTz } from '@restomatch/api';
+import { formatIlsPlain } from '@restomatch/types';
 
 export const IL_TZ = 'Asia/Jerusalem';
 
@@ -62,12 +63,12 @@ export function formatIlDate(ref: Date): string {
  * Whole shekels by default (emails are headlines, not ledgers).
  */
 export function formatIlsAmount(value: number, fractionDigits = 0): string {
-  return new Intl.NumberFormat('he-IL', {
-    style: 'currency',
-    currency: 'ILS',
+  // G-13: delegates to the shared formatter (same Intl options, same bytes) — no private Intl.
+  return formatIlsPlain(value, {
+    locale: 'he',
     minimumFractionDigits: fractionDigits,
     maximumFractionDigits: fractionDigits,
-  }).format(value);
+  });
 }
 
 /** Public app base URL for deep links in emails (no trailing slash). */
