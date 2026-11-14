@@ -5,7 +5,7 @@ import { DEMO_RESTAURANT_NAME } from './env';
 import { e2eSql, loginViaMagicLink } from './helpers';
 
 /**
- * AU-08 (A13) · allocation-number guard and chase — the VAT card on the finance home.
+ * AU-08 (A13) · allocation-number guard and chase — the VAT card on the month-close desk (step 6).
  *
  *   - bookkeeper: the card's request panel shows one block per supplier with its
  *     stage line, the server draft, a wa.me link prefilled with that draft, and
@@ -71,8 +71,11 @@ async function setLocale(page: Page, locale: 'he' | 'en') {
   ]);
 }
 
+/** The VAT card lives on the month-close desk (step 6 · W3-05a), not on the homes (W2-08). */
+const CARD_PATH = '/dashboard/close';
+
 async function openSupplierBlock(page: Page) {
-  await page.goto('/dashboard', { waitUntil: 'load' });
+  await page.goto(CARD_PATH, { waitUntil: 'load' });
   const card = page.getByTestId('vat-at-risk-card');
   await expect(card).toBeVisible({ timeout: 30_000 });
   await card.getByTestId('vat-request-cta').click();

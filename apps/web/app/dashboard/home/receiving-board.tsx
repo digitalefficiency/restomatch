@@ -107,7 +107,7 @@ function NextTruck({ item, t, locale }: { item: BoardItem; t: T; locale: Locale 
       <h2 id="next-truck-title" className="text-xs font-semibold text-subtle">
         {t('board.next')}
       </h2>
-      <div className="mt-2 flex items-start gap-3">
+      <div className="mt-2 flex items-start gap-3" data-record="">
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-surface-2 text-ink">
           <Truck className="h-6 w-6" aria-hidden="true" />
         </div>
@@ -142,7 +142,7 @@ function NextTruck({ item, t, locale }: { item: BoardItem; t: T; locale: Locale 
 function Group({ id, title, items, t, locale }: { id: string; title: string; items: BoardItem[]; t: T; locale: Locale }) {
   if (items.length === 0) return null;
   return (
-    <section aria-labelledby={`board-${id}`} data-testid={`board-group-${id}`}>
+    <section aria-labelledby={`board-${id}`} data-testid={`board-group-${id}`} data-record="">
       <h2 id={`board-${id}`} className="mb-2 text-sm font-bold text-ink">
         {title} <span className="font-normal text-muted">({formatNumber(items.length, locale)})</span>
       </h2>

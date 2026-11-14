@@ -96,7 +96,7 @@ export function SupplierBoard({
     items.length ? (
       <section aria-label={label}>
         <h3 className="mb-1 mt-3 text-xs font-semibold text-muted first:mt-0">{label}</h3>
-        <ul className="divide-y divide-line/60 overflow-hidden rounded-xl border border-line" data-testid="supplier-board">
+        <ul className="divide-y divide-line/60 overflow-hidden rounded-xl border border-line" data-testid="supplier-board" data-record="">
           {items.map((r) => (
             <Row key={r.supplierId} r={r} />
           ))}

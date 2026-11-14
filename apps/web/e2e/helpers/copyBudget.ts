@@ -3,10 +3,17 @@ import type { Page } from '@playwright/test';
 /**
  * The copy word metric in the browser (MECHANISM §5.1; same regex as lib/copy/words.ts and the
  * auditors' capture.cjs). Visible text nodes inside `main`, folds closed. Excluded: .sr-only,
- * [aria-hidden=true], [hidden], tbody, [data-record] (data rows/cards), [data-copy-exempt].
+ * [aria-hidden=true], [hidden], [data-copy-exempt], and data only: tbody, ARIA data rows/gridcells and
+ * [data-record]/[data-row] (components mark their record cards), so the count does not depend on seed rows
+ * or spec order while headers and static explanation lists still count.
+ *
+ * The first screen is measured with those record rows collapsed: a long list above a heading must not push
+ * the heading out of the count (the pay run's due buckets, the approvals cards). So `first` is the chrome
+ * that would sit in the first screen with no records at all — an upper bound on the copy the person reads
+ * at load, and the same number whatever data the seed or an earlier spec left behind.
  */
 export interface CopyMeasure {
-  /** Words whose text box starts above innerHeight at load. */
+  /** Words whose text box starts above innerHeight at load, measured with the record rows collapsed. */
   first: number;
   /** Words on the whole page. */
   page: number;
@@ -22,9 +29,20 @@ export async function measureCopy(page: Page): Promise<CopyMeasure> {
   return page.evaluate(() => {
     const WORD = /[A-Za-zא-ת][A-Za-zא-ת'"׳״\-]*/g;
     const count = (s: string) => (s.match(WORD) ?? []).length;
-    const EXCLUDE = '.sr-only, [aria-hidden="true"], [hidden], tbody, [data-record], [data-copy-exempt], script, style, noscript, template';
+    // Data, not copy: record rows depend on the seed and on rows earlier specs left behind, so they
+    // never count. Only real data is skipped: table bodies, ARIA data rows (a header row has
+    // columnheader cells and still counts), and elements a component marks [data-record]/[data-row].
+    // Column headers, static explanation lists and step lists count (unit-tested in W2-16.spec).
+    const DATA = 'tbody, [role="row"]:not(:has([role="columnheader"])), [role="gridcell"], [data-record], [data-row]';
+    const EXCLUDE = `.sr-only, [aria-hidden="true"], [hidden], [data-copy-exempt], script, style, noscript, template, ${DATA}`;
     const BLOCK = 'p, li, h1, h2, h3, h4, h5, h6, dd, dt, label, figcaption, blockquote, td, th, div, span';
     const main = document.querySelector('main') ?? document.body;
+    const bodyWords = count(document.body.innerText);
+    const exemptWords = [...main.querySelectorAll('[data-copy-exempt]')].reduce((a, e) => a + count((e as HTMLElement).innerText ?? ''), 0);
+    // Collapse the record rows for the geometry (synchronously: no observer runs before the style goes).
+    const collapse = document.createElement('style');
+    collapse.textContent = `${DATA} { display: none !important; }`;
+    document.head.appendChild(collapse);
     let first = 0;
     let total = 0;
     const blockWords = new Map<Element, number>();
@@ -47,11 +65,11 @@ export async function measureCopy(page: Page): Promise<CopyMeasure> {
       while (b && b !== main && getComputedStyle(b).display.startsWith('inline')) b = b.parentElement;
       if (b && b.matches(BLOCK)) blockWords.set(b, (blockWords.get(b) ?? 0) + w);
     }
+    collapse.remove();
     const blocks = [...blockWords.entries()]
       .filter(([, w]) => w > 12)
       .map(([el, words]) => ({ text: (el.textContent ?? '').trim().slice(0, 120), words }));
-    const exemptWords = [...main.querySelectorAll('[data-copy-exempt]')].reduce((a, e) => a + count((e as HTMLElement).innerText ?? ''), 0);
-    return { first, page: total, blocks, bodyWords: count(document.body.innerText), exemptWords };
+    return { first, page: total, blocks, bodyWords, exemptWords };
   });
 }
 

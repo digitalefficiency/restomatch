@@ -5,7 +5,6 @@ import { createServerCaller } from '@/lib/trpc/server';
 import Link from 'next/link';
 import { MessageCircle, Phone } from 'lucide-react';
 import { Badge, Breadcrumbs, LinkButton, displayName } from '@/lib/components';
-import { Money } from '@/lib/components/money';
 import { waLink } from '@/lib/messageTemplates';
 import { components } from '@/lib/i18n/messages/components';
 import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
@@ -14,6 +13,7 @@ import { formatIls } from '@/lib/money';
 import { formatPercent } from '@/lib/i18n/format';
 import { SupplierTabBar } from './tab-bar';
 import { loadSupplierOverview } from './overview-data';
+import { ServerMoney } from './server-money';
 import { telHref } from '../terms';
 
 export const dynamic = 'force-dynamic';
@@ -93,7 +93,7 @@ export default async function SupplierDetailLayout({
             <p className="text-xs text-subtle">{t('overview.leakLabel')}</p>
             {overview ? (
               <>
-                <Money agorot={overview.leakAgorot} context="hero" decimals={2} locale={locale} className="text-3xl font-extrabold" />
+                <ServerMoney agorot={overview.leakAgorot} decimals={2} locale={locale} unavailableText={t('overview.unavailable')} className="text-metric-hero text-3xl font-extrabold" hero />
                 {overview.leakAgorot > 0 && supplier.leakCardEnabled ? (
                   <Link
                     href={`/dashboard/suppliers/${id}?tab=overview#leak-card`}

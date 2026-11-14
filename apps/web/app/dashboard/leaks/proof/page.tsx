@@ -163,7 +163,7 @@ export default async function LeakProofPage({
             <p className="text-sm text-muted">{t('none')}</p>
           </Card>
         ) : (
-          <ol className="space-y-3">
+          <ol className="space-y-3" data-record="">
             {proof.top.map((c, i) => (
               <li key={c.invoiceId} className="break-inside-avoid">
                 <Card padding="none" className="overflow-hidden" data-testid="proof-catch">

@@ -60,7 +60,7 @@ export async function OverContractCard({ variant = 'full' }: { variant?: 'full' 
             <p className="text-2xl font-bold">{total}</p>
           </div>
         </div>
-        <ul className="mt-3 space-y-1.5 text-sm">
+        <ul className="mt-3 space-y-1.5 text-sm" data-record="">
           {top.map((l) => (
             <li key={l.invoiceLineId} className="flex flex-wrap items-center justify-between gap-2">
               <span className="min-w-0 truncate text-ink">

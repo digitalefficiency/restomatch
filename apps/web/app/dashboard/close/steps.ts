@@ -84,7 +84,8 @@ export function hrefOf(key: StepKey, s: Pick<CloseSources, 'consolidated' | 'mon
     case 'deliveryNotes':
       return LEDGER_HREF;
     case 'vat':
-      return null;
+      // AU-08: the VAT-at-risk card (request / reminder hand-off) is mounted below the checklist.
+      return '#vat-at-risk';
     case 'exports':
       return '/dashboard/exports';
   }
@@ -159,8 +160,11 @@ export function currentMonth(now: Date, tz = 'Asia/Jerusalem'): string {
   return key(y, m);
 }
 
-/** `?month=` if valid and not in the future, else the default. */
+/** How far back the close reads (the register's range; `close.checklist` rejects older months). */
+export const MAX_MONTHS_BACK = 24;
+
+/** `?month=` if valid, not in the future and within MAX_MONTHS_BACK, else the default. */
 export function resolveMonth(raw: string | undefined, now: Date, tz = 'Asia/Jerusalem'): string {
-  if (raw && MONTH_RE.test(raw) && raw <= currentMonth(now, tz)) return raw;
+  if (raw && MONTH_RE.test(raw) && raw <= currentMonth(now, tz) && raw >= shiftMonth(currentMonth(now, tz), -MAX_MONTHS_BACK)) return raw;
   return defaultMonth(now, tz);
 }
