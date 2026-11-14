@@ -22,7 +22,7 @@ export const FORBIDDEN_TARGET_COPY: readonly RegExp[] = [/1\.5\s*%/, /יעד/];
 export const TERMINOLOGY = {
   consolidated: 'מרכזת',
   discrepancy: 'פער',
-  creditClaim: 'דרישת זיכוי',
+  creditClaim: 'בקשת זיכוי', // owner 7.11 (partner wording); was דרישת זיכוי
   receiving: 'קבלת סחורה',
 } as const;
 

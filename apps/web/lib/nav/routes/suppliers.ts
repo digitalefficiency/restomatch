@@ -6,7 +6,9 @@ export const routes: RouteDef[] = [
     path: '/dashboard/suppliers',
     group: 'procure',
     rank: 30,
-    roles: ['owner', 'manager'],
+    // Owner decision (orchestrator, 7.11): the bookkeeper reads everything. A
+    // read-only hub for them; the writes stay managerProcedure on the server.
+    roles: ['owner', 'manager', 'bookkeeper'],
     nav: 'item',
     aliases: ['ספק', 'suppliers', 'vendors'],
   },

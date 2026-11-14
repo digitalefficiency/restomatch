@@ -22,7 +22,7 @@ async function signedIn(browser: Browser, role: string) {
   return page;
 }
 
-test('an unread photo invoice shows on home and in the waiting list, and opens its page', async ({ browser }) => {
+test('an unread photo invoice shows on home; the row opens the invoice register; the invoice page opens', async ({ browser }) => {
   const number = `PILOT-${Date.now()}`;
   const sql = e2eSql();
   let id: string;
@@ -43,13 +43,19 @@ test('an unread photo invoice shows on home and in the waiting list, and opens i
     const page = await signedIn(browser, 'owner');
     const errors = collectPageErrors(page);
     await page.goto('/dashboard');
-    await expect(page.locator('a[href="/dashboard/invoices"]').filter({ hasText: 'חשבוניות שממתינות לכם' })).toBeVisible();
-    await page.goto('/dashboard/invoices');
-    await expect(page.getByRole('heading', { level: 1, name: 'חשבוניות שממתינות לכם' })).toBeVisible();
-    const row = page.getByTestId('needs-lines-row').filter({ hasText: number });
-    await expect(row).toContainText('הקריאה נכשלה');
+    // Train-C B2: the home row opens the register's lines view (invoices.needsLines), not the review tab.
+    const more = page.getByTestId('needs-you-more');
+    if (await more.count()) await more.locator('summary').click();
+    const homeRow = page.locator('a[href="/dashboard/invoices?view=lines"]').filter({ hasText: 'חשבוניות שממתינות לכם' });
+    await expect(homeRow).toBeVisible();
+    await homeRow.click();
+    await expect(page).toHaveURL(/\/dashboard\/invoices\?view=lines$/);
+    await expect(page.getByTestId('invoice-register').first()).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
-    await row.click();
+    // The lines view lists it with its reason, and opens it.
+    const lineRow = page.getByTestId('register-lines-row').filter({ hasText: number });
+    await expect(lineRow).toContainText('הקריאה נכשלה');
+    await lineRow.click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/invoices/${id!}`));
     expect(errors).toEqual([]);
     await page.context().close();
@@ -64,7 +70,7 @@ test('an unread photo invoice shows on home and in the waiting list, and opens i
   }
 });
 
-test('a held invoice says why (T4 chips) in the list and on its page; a link-only hold is not listed', async ({ browser }) => {
+test('a held invoice says why (T4 chips) on its page; a link-only hold has no held banner', async ({ browser }) => {
   const tag = Date.now();
   const sql = e2eSql();
   const ids: string[] = [];
@@ -89,16 +95,21 @@ test('a held invoice says why (T4 chips) in the list and on its page; a link-onl
   }
   try {
     const page = await signedIn(browser, 'owner');
-    await page.goto('/dashboard/invoices');
-    const row = page.getByTestId('needs-lines-row').filter({ hasText: `HELD-${tag}` });
-    const chips = row.getByTestId('needs-lines-held-reasons');
+    // The reasons live on the invoice page (the cockpit's held banner) since #217.
+    // The 'lines' view lists the held invoice with its reasons (T4), never the link-only hold.
+    await page.goto('/dashboard/invoices?view=lines');
+    const heldRow = page.getByTestId('register-lines-row').filter({ hasText: `HELD-${tag}` });
+    await expect(heldRow.getByTestId('register-lines-reasons')).toContainText('נראה כמו קבלה');
+    await expect(page.getByTestId('register-lines-row').filter({ hasText: `LINK-${tag}` })).toHaveCount(0);
+    await page.goto(`/dashboard/invoices/${ids[0]}`);
+    const chips = page.getByTestId('invoice-held-reasons');
     await expect(chips).toContainText('ח.פ. במסמך שונה מהרשום לספק');
     await expect(chips).toContainText('נראה כמו קבלה');
     await expect(chips).not.toContainText('unlinked');
-    await expect(page.getByTestId('needs-lines-row').filter({ hasText: `LINK-${tag}` })).toHaveCount(0);
-    await row.click();
-    await expect(page.getByTestId('invoice-held-reasons')).toContainText('ח.פ. במסמך שונה מהרשום לספק');
     await expect(page.getByTestId('invoice-held-supplier-link')).toHaveAttribute('href', /\/dashboard\/suppliers\/[0-9a-f-]{36}$/);
+    // A link-only hold is G-08's question flow: no held banner.
+    await page.goto(`/dashboard/invoices/${ids[1]}`);
+    await expect(page.getByTestId('invoice-held-reasons')).toHaveCount(0);
     await page.context().close();
     // The bookkeeper sees the reasons read-only, with no dead-end link to the supplier pages.
     const bk = await signedIn(browser, 'bookkeeper');
@@ -117,12 +128,12 @@ test('a held invoice says why (T4 chips) in the list and on its page; a link-onl
   }
 });
 
-test('the receiver and the chef cannot open the list', async ({ browser }) => {
+test('the receiver and the chef cannot open the invoice register', async ({ browser }) => {
   for (const role of ['receiver', 'chef']) {
     const page = await signedIn(browser, role);
     const res = await page.goto('/dashboard/invoices');
     expect(res?.status() === 403 || res?.status() === 404 || /\/dashboard$/.test(page.url()), role).toBe(true);
-    await expect(page.getByTestId('invoices-needs-lines')).toHaveCount(0);
+    await expect(page.getByTestId('invoice-register')).toHaveCount(0);
     await page.context().close();
   }
 });

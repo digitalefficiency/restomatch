@@ -33,6 +33,7 @@ node render.mjs en          # out/restomatch-promo-en.mp4
 node render.mjs vertical    # out/restomatch-promo-he-vertical.mp4 (1080×1920)
 node render.mjs loop        # out/hero-loop-master.mp4  → see "Hero loop" below
 node render.mjs loop-en     # out/hero-loop-en-master.mp4
+node render.mjs loop-9x16   # out/hero-loop-9x16-master.mp4 — portrait phone loop (he, light): two real cards at native phone scale
 STAGE=dark node render.mjs he   # the original dark stage (default is light)
 node render.mjs stills he 150,600,1100   # check frames → out/frames/*.png
 npm run studio              # interactive preview/scrubbing (Remotion Studio)

@@ -1,13 +1,15 @@
 import type { RouteDef } from '../types';
 
+// Owner decision I3 (7.11): the bookkeeper reads every month report, read-only (W3-08).
 export const routes: RouteDef[] = [
   {
     // Prefix gate for every report (incl. monthly/pdf); no page of its own.
     key: 'reports',
     path: '/dashboard/reports',
     group: 'leaks',
-    roles: ['owner', 'manager'],
+    roles: ['owner', 'manager', 'bookkeeper'],
     nav: 'hidden',
+    badge: null,
     gateOnly: true,
   },
   {
@@ -16,9 +18,10 @@ export const routes: RouteDef[] = [
     path: '/dashboard/reports/monthly',
     group: 'leaks',
     rank: 30,
-    roles: ['owner', 'manager'],
+    roles: ['owner', 'manager', 'bookkeeper'],
     features: ['monthlyReport'],
     nav: 'item',
+    badge: null,
     aliases: ['דוח חודשי', 'דוחות', 'monthly', 'report'],
   },
   {
@@ -26,7 +29,8 @@ export const routes: RouteDef[] = [
     path: '/dashboard/reports/digest',
     group: 'leaks',
     parent: 'monthlyReport',
-    roles: ['owner', 'manager'],
+    roles: ['owner', 'manager', 'bookkeeper'],
     nav: 'linked',
+    badge: null,
   },
 ];

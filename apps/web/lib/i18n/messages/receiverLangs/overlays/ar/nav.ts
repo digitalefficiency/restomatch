@@ -13,6 +13,7 @@ export const nav: Shape<typeof he> = {
     labDesk: 'مختبر الجداول',
     labDeskRow: 'صف',
     approvals: 'الموافقات',
+    approvalInvoice: 'قرار الفاتورة',
     payRun: 'دفعة المدفوعات',
     inbox: 'الفواتير الواردة',
     invoices: 'الفواتير',
@@ -28,6 +29,7 @@ export const nav: Shape<typeof he> = {
     supplierDetail: 'مورد',
     supplierLeakCard: 'بطاقة خسائر المورد',
     exports: 'إغلاق الشهر والتصدير',
+    close: 'إغلاق الشهر', // review
     reports: 'التقارير',
     monthlyReport: 'التقرير الشهري',
     digest: 'معاينة البريد الشهري',
@@ -36,6 +38,7 @@ export const nav: Shape<typeof he> = {
     ordersNew: 'طلبية جديدة',
     ordersCapture: 'طلبية من واتساب',
     orderDetail: 'طلبية',
+    recoverySupplierSheet: 'صفحة المورّد',
     receiving: 'استلام البضاعة',
     receivingPo: 'استلام شحنة',
     catalog: 'الكتالوج',
@@ -52,10 +55,12 @@ export const nav: Shape<typeof he> = {
     inventoryCount: 'جرد',
     inventoryDetail: 'تفاصيل الجرد',
     chain: 'نظرة على السلسلة',
+    chainMatrix: 'كل الفروع', // review
     branches: 'الفروع',
     team: 'الفريق',
     integrations: 'الربط',
     settings: 'الإعدادات',
+    automations: 'الأتمتة',
   },
   bar: {
     today: 'اليوم',
@@ -126,4 +131,25 @@ export const nav: Shape<typeof he> = {
     ownerNotified: 'تم إبلاغ صاحب المطعم.',
   },
   loading: 'جارٍ التحميل',
+  badge: {
+    items: '{count} عناصر',
+    atRisk: '{amount} معرّض للخطر',
+    owed: '{amount} أرصدة دائنة مفتوحة',
+    blocking: 'يوقف الدفع',
+  },
+  bell: {
+    activity: 'ما الذي حدث',
+    label: 'بانتظارك',
+    unseen: '{count} جديد',
+    title: 'بانتظارك',
+    empty: 'كل شيء منجز من جهتك ✓',
+    close: 'إغلاق',
+    all: 'إلى الصفحة الرئيسية',
+    failed: 'لم يتم التحميل · حاول مرة أخرى',
+    retry: 'حاول مرة أخرى',
+  },
+  whereIs: {
+    belongs: 'هذا السجل يتبع {branch}',
+    open: 'افتحه هناك',
+  },
 };
