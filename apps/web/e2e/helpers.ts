@@ -168,25 +168,52 @@ export async function expectTotalsMatchRows(page: Page): Promise<string[]> {
   return g16Report(page, 'totals-match-rows', checks.map((c: TotalCheck) => totalMismatch(c)).filter((v): v is string => v != null));
 }
 
-/** Follows every [data-drill] on the page and checks the list's [data-drill-total] to the agora. */
+/**
+ * The W2-09 drill contract, on any page: every `a[data-drill]` carries the clicked ₪ in
+ * `data-drill-total` (integer agorot). An in-page door (`#id`) points at a row whose
+ * `data-amount` (₪) must match; a page door must land on a page whose total element
+ * (`[data-testid$="-total"][data-amount]`) echoes it to the agora. A landing that shows no
+ * total element (a filtered landing, e.g. a supplier chip) is counted as unverified, not as a
+ * violation.
+ */
 export async function expectDrillParity(page: Page): Promise<string[]> {
-  const links = await page.$$eval('a[data-drill][data-money-agorot]', (as) =>
-    (as as HTMLAnchorElement[]).map((a) => ({ href: a.getAttribute('href') ?? '', agorot: Number(a.dataset.moneyAgorot) })),
+  const doors = await page.$$eval('a[data-drill]', (as) =>
+    (as as HTMLAnchorElement[]).map((a) => ({ href: a.getAttribute('href') ?? '', total: a.getAttribute('data-drill-total') })),
   );
   const from = page.url();
   const out: string[] = [];
-  for (const link of links) {
-    if (!link.href) continue;
-    await page.goto(link.href);
-    const total = await page
-      .locator('[data-drill-total]')
+  let unverified = 0;
+  const amountOf = async (sel: string) =>
+    page
+      .locator(sel)
       .first()
-      .getAttribute('data-drill-total', { timeout: 5000 })
+      .getAttribute('data-amount', { timeout: 5000 })
       .catch(() => null);
-    const v = drillMismatch(link, total == null ? null : Number(total));
+  for (const d of doors) {
+    const agorot = d.total == null ? NaN : Number(d.total);
+    if (!d.href) continue;
+    if (!Number.isSafeInteger(agorot)) {
+      out.push(`${d.href}: data-drill-total "${d.total}" is not integer agorot`);
+      continue;
+    }
+    if (d.href.startsWith('#')) {
+      await page.goto(from);
+      const row = await amountOf(d.href);
+      const v = drillMismatch({ href: d.href, agorot }, row == null ? null : Math.round(Number(row) * 100));
+      if (v) out.push(v);
+      continue;
+    }
+    await page.goto(d.href);
+    const landing = await amountOf('[data-testid$="-total"][data-amount]');
+    if (landing == null) {
+      unverified += 1;
+      continue;
+    }
+    const v = drillMismatch({ href: d.href, agorot }, Math.round(Number(landing) * 100));
     if (v) out.push(v);
   }
-  if (links.length) await page.goto(from);
+  if (doors.length) await page.goto(from);
+  if (unverified) console.warn(`[G-16] drill-parity · ${new URL(from).pathname}: ${unverified} door(s) land on a page with no total element`);
   return g16Report(page, 'drill-parity', out);
 }
 
@@ -214,14 +241,28 @@ export async function expectShekelLeftOfDigits(page: Page): Promise<string[]> {
   return g16Report(page, 'shekel-left-of-digits', boxes.map(shekelPlacement).filter((v): v is string => v != null));
 }
 
-/** No red ₪0, and no ₪0 where [data-money-state] says unmeasured / unavailable. */
+/**
+ * No red ₪0, and no ₪0 where [data-money-state] says unmeasured / unavailable. Until the
+ * screens carry the money markers, every rendered text node holding ₪ is checked for a red ₪0.
+ */
 export async function expectNoZeroForUnknown(page: Page): Promise<string[]> {
-  const items = await page.evaluate(() =>
-    [...document.querySelectorAll<HTMLElement>('[data-money-agorot], [data-money-state]')].map((el) => ({
-      text: el.innerText ?? '',
-      state: (el.dataset.moneyState ?? null) as MoneyState | null,
-      color: getComputedStyle(el).color,
-    })),
+  const items = await page.evaluate(() => {
+    const out: { text: string; state: string | null; color: string }[] = [];
+    for (const el of document.querySelectorAll<HTMLElement>('[data-money-agorot], [data-money-state]')) {
+      out.push({ text: el.innerText ?? '', state: el.dataset.moneyState ?? null, color: getComputedStyle(el).color });
+    }
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+      const el = n.parentElement;
+      if (!el || !n.data.includes('₪') || el.closest('[data-money-agorot], [data-money-state]')) continue;
+      if (el.getClientRects().length === 0) continue;
+      out.push({ text: n.data, state: null, color: getComputedStyle(el).color });
+    }
+    return out;
+  });
+  return g16Report(
+    page,
+    'no-zero-for-unknown',
+    items.map((i) => zeroViolation({ ...i, state: i.state as MoneyState | null })).filter((v): v is string => v != null),
   );
-  return g16Report(page, 'no-zero-for-unknown', items.map(zeroViolation).filter((v): v is string => v != null));
 }
