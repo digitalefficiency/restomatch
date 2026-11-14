@@ -13,6 +13,8 @@ import { DISCREPANCY_CLAIMABLE, DISCREPANCY_CLAIMED, DISCREPANCY_DECIDABLE } fro
  *    the same ₪ is never asked twice;
  *  • a line is claimable when it counts as leak and is open, escalated, accepted or resolved
  *    (waived lines drop); open / escalated ones are flagged `undecided`;
+ *  • never a line the engine auto-approved within tolerance (`tolerated`, the system decision
+ *    `tolerate` → waive in charts DECISION_RULES; owner M7, 7.11): no credit request for it;
  *  • lines are taken in the breakdown's order (biggest |Δ| first) and never claim more on an
  *    invoice than its capped leak (`leakIls`, the hero's per-invoice cap).
  */
@@ -125,6 +127,8 @@ export function claimableLines(inv: LeakBreakdownInvoice, opts: ClaimableOptions
   for (const l of inv.lines) {
     if (!l.countsAsLeak || !CLAIMABLE.has(l.resolutionStatus) || NEVER_CLAIMABLE.has(l.type)) continue;
     if (claimed?.has(l.discrepancyId)) continue;
+    // Owner M7 (7.11): a tolerance row the engine auto-approved is waived — never asked back.
+    if (l.tolerated) continue;
     // Never claim more on an invoice than its capped leak.
     const amount = Math.min(Math.abs(l.deltaAmount), Math.max(0, inv.leakIls - invClaimed));
     if (amount <= 0) continue;
