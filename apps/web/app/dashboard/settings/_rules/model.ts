@@ -14,7 +14,12 @@ export type KnobGroup = 'tolerances' | 'approvalThresholds' | 'ocr';
 /** percent = stored as a fraction (0.05), shown as 5; currency = ₪; units = quantity units. */
 export type FieldKind = 'percent' | 'currency' | 'units';
 
-export type ToleranceKey = 'pricePercent' | 'priceAbsolute' | 'qtyPercent' | 'qtyAbsolute' | 'blockPricePercent';
+export type ToleranceKey =
+  | 'pricePercent'
+  | 'priceAbsolute'
+  | 'qtyPercent'
+  | 'qtyAbsolute'
+  | 'blockPricePercent';
 export type ApprovalKey =
   | 'largeInvoiceWithoutPo'
   | 'unorderedItemSignificant'
@@ -43,15 +48,45 @@ export const TOLERANCE_FIELDS: readonly FieldDef[] = [
 ];
 
 export const APPROVAL_FIELDS: readonly FieldDef[] = [
-  { key: 'largeInvoiceWithoutPo', group: 'approvalThresholds', kind: 'currency', step: 500, max: 100_000_000 },
-  { key: 'unorderedItemSignificant', group: 'approvalThresholds', kind: 'currency', step: 10, max: 100_000_000 },
-  { key: 'cumulativeLargeAmount', group: 'approvalThresholds', kind: 'currency', step: 50, max: 100_000_000 },
+  {
+    key: 'largeInvoiceWithoutPo',
+    group: 'approvalThresholds',
+    kind: 'currency',
+    step: 500,
+    max: 100_000_000,
+  },
+  {
+    key: 'unorderedItemSignificant',
+    group: 'approvalThresholds',
+    kind: 'currency',
+    step: 10,
+    max: 100_000_000,
+  },
+  {
+    key: 'cumulativeLargeAmount',
+    group: 'approvalThresholds',
+    kind: 'currency',
+    step: 50,
+    max: 100_000_000,
+  },
   { key: 'cumulativeLargePct', group: 'approvalThresholds', kind: 'percent', step: 1, max: 1 },
-  { key: 'cumulativeMediumAmountMin', group: 'approvalThresholds', kind: 'currency', step: 10, max: 100_000_000 },
+  {
+    key: 'cumulativeMediumAmountMin',
+    group: 'approvalThresholds',
+    kind: 'currency',
+    step: 10,
+    max: 100_000_000,
+  },
   { key: 'cumulativeMediumPctMin', group: 'approvalThresholds', kind: 'percent', step: 1, max: 1 },
 ];
 
-export const OCR_FIELD: FieldDef = { key: 'ocrReviewThreshold', group: 'ocr', kind: 'percent', step: 1, max: 1 };
+export const OCR_FIELD: FieldDef = {
+  key: 'ocrReviewThreshold',
+  group: 'ocr',
+  kind: 'percent',
+  step: 1,
+  max: 1,
+};
 
 export const ALL_FIELDS: readonly FieldDef[] = [...TOLERANCE_FIELDS, ...APPROVAL_FIELDS, OCR_FIELD];
 export const fieldDef = (key: FieldKey): FieldDef => ALL_FIELDS.find((f) => f.key === key)!;
@@ -120,7 +155,12 @@ const near = (a: number, b: number) => Math.abs(a - b) < 1e-9;
  * the default too (stepping 2 → 3 → 2 is no change, and no override is
  * written); otherwise a typed value is an override, even if it equals it.
  */
-export function intentOf(values: FormValues, saved: FormValues, defaults: Defaults, f: FieldDef): number | null {
+export function intentOf(
+  values: FormValues,
+  saved: FormValues,
+  defaults: Defaults,
+  f: FieldDef,
+): number | null {
   const raw = values[f.key];
   if (raw === null) return null;
   const v = toStored(raw, f.kind);
@@ -134,7 +174,12 @@ function sameIntent(a: number | null, b: number | null): boolean {
   return near(a, b);
 }
 
-export function isFieldDirty(values: FormValues, saved: FormValues, defaults: Defaults, f: FieldDef): boolean {
+export function isFieldDirty(
+  values: FormValues,
+  saved: FormValues,
+  defaults: Defaults,
+  f: FieldDef,
+): boolean {
   const now = intentOf(values, saved, defaults, f);
   const before = saved[f.key] === null ? null : toStored(saved[f.key]!, f.kind);
   return !sameIntent(now, before);
@@ -153,11 +198,16 @@ export interface UpdatePatch {
 
 function put(patch: UpdatePatch, f: FieldDef, v: number | null) {
   if (f.group === 'tolerances') (patch.tolerances ??= {})[f.key as ToleranceKey] = v;
-  else if (f.group === 'approvalThresholds') (patch.approvalThresholds ??= {})[f.key as ApprovalKey] = v;
+  else if (f.group === 'approvalThresholds')
+    (patch.approvalThresholds ??= {})[f.key as ApprovalKey] = v;
   else patch.ocrReviewThreshold = v;
 }
 
-export function savePatch(values: FormValues, saved: FormValues, defaults: Defaults): UpdatePatch | null {
+export function savePatch(
+  values: FormValues,
+  saved: FormValues,
+  defaults: Defaults,
+): UpdatePatch | null {
   const patch: UpdatePatch = {};
   let any = false;
   for (const f of ALL_FIELDS) {
@@ -194,7 +244,12 @@ export function undoPatch(before: FormValues, after: FormValues): UpdatePatch | 
 }
 
 /** One step of a stepper from what the field shows now, clamped to [0, max]; returns the new typed text. */
-export function stepValue(values: FormValues, defaults: Defaults, f: FieldDef, direction: 1 | -1): string {
+export function stepValue(
+  values: FormValues,
+  defaults: Defaults,
+  f: FieldDef,
+  direction: 1 | -1,
+): string {
   const raw = values[f.key];
   const current = raw === null ? defaults[f.key] : toStored(raw, f.kind);
   const base = Number.isFinite(current) ? current : defaults[f.key];
@@ -203,7 +258,12 @@ export function stepValue(values: FormValues, defaults: Defaults, f: FieldDef, d
   return toDisplay(next, f.kind);
 }
 
-export function canStep(values: FormValues, defaults: Defaults, f: FieldDef, direction: 1 | -1): boolean {
+export function canStep(
+  values: FormValues,
+  defaults: Defaults,
+  f: FieldDef,
+  direction: 1 | -1,
+): boolean {
   const raw = values[f.key];
   const current = raw === null ? defaults[f.key] : toStored(raw, f.kind);
   if (!Number.isFinite(current)) return true;

@@ -36,7 +36,11 @@ const set = (v: FormValues, patch: Partial<FormValues>): FormValues => ({ ...v, 
 
 describe('stored ⇄ form values', () => {
   it('reads only the stored overrides; everything else is the default (null)', () => {
-    const v = valuesFrom({ tolerances: { pricePercent: 0.075 }, approvalThresholds: { largeInvoiceWithoutPo: 4000 }, ocrReviewThreshold: 0.8 });
+    const v = valuesFrom({
+      tolerances: { pricePercent: 0.075 },
+      approvalThresholds: { largeInvoiceWithoutPo: 4000 },
+      ocrReviewThreshold: 0.8,
+    });
     expect(v.pricePercent).toBe('7.5');
     expect(v.largeInvoiceWithoutPo).toBe('4000');
     expect(v.ocrReviewThreshold).toBe('80');
@@ -65,7 +69,10 @@ describe('the save patch keeps today’s settings.update semantics', () => {
 
   it('approval thresholds and OCR go in their own groups', () => {
     const v = set(saved, { cumulativeLargeAmount: '450', ocrReviewThreshold: '90' });
-    expect(savePatch(v, saved, D)).toEqual({ approvalThresholds: { cumulativeLargeAmount: 450 }, ocrReviewThreshold: 0.9 });
+    expect(savePatch(v, saved, D)).toEqual({
+      approvalThresholds: { cumulativeLargeAmount: 450 },
+      ocrReviewThreshold: 0.9,
+    });
   });
 
   it('stepping away from a default and back is no change (no override written)', () => {
@@ -97,7 +104,9 @@ describe('undo puts back exactly what was there', () => {
   it('changed overrides return to their old values; a new override is removed again (null)', () => {
     const before = valuesFrom({ tolerances: { pricePercent: 0.05 } });
     const after = valuesFrom({ tolerances: { pricePercent: 0.03, qtyPercent: 0.06 } });
-    expect(undoPatch(before, after)).toEqual({ tolerances: { pricePercent: 0.05, qtyPercent: null } });
+    expect(undoPatch(before, after)).toEqual({
+      tolerances: { pricePercent: 0.05, qtyPercent: null },
+    });
     expect(undoPatch(before, before)).toBeNull();
   });
 });
@@ -123,8 +132,16 @@ describe('limits are the server’s, said only when broken', () => {
 
 describe('history diff from the audit rows', () => {
   it('lists each changed field, null = the default', () => {
-    const before = { tolerances: { pricePercent: 0.05 }, approvalThresholds: {}, ocrReviewThreshold: null };
-    const after = { tolerances: { pricePercent: 0.03, qtyAbsolute: 2 }, approvalThresholds: {}, ocrReviewThreshold: 0.9 };
+    const before = {
+      tolerances: { pricePercent: 0.05 },
+      approvalThresholds: {},
+      ocrReviewThreshold: null,
+    };
+    const after = {
+      tolerances: { pricePercent: 0.03, qtyAbsolute: 2 },
+      approvalThresholds: {},
+      ocrReviewThreshold: 0.9,
+    };
     expect(changesOf(before, after)).toEqual([
       { key: 'pricePercent', from: 0.05, to: 0.03 },
       { key: 'qtyAbsolute', from: null, to: 2 },
@@ -134,7 +151,11 @@ describe('history diff from the audit rows', () => {
   });
 
   it('restore applies only while the saved state still equals the entry’s result', () => {
-    const after = { tolerances: { pricePercent: 0.03 }, approvalThresholds: {}, ocrReviewThreshold: null };
+    const after = {
+      tolerances: { pricePercent: 0.03 },
+      approvalThresholds: {},
+      ocrReviewThreshold: null,
+    };
     expect(sameAsSnapshot(valuesFrom(after), after)).toBe(true);
     expect(sameAsSnapshot(valuesFrom({}), after)).toBe(false);
   });

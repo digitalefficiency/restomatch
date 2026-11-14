@@ -3,7 +3,8 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import { NARROW_QUERY, PHONE_QUERY } from './schema';
 
-const hasMatchMedia = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function';
+const hasMatchMedia = () =>
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function';
 
 /**
  * A media query as React state. `serverValue` is the snapshot for the server
@@ -20,7 +21,10 @@ export function useMediaMatch(query: string, serverValue = false): boolean {
     },
     [query],
   );
-  const snapshot = useCallback(() => (hasMatchMedia() ? window.matchMedia(query).matches : serverValue), [query, serverValue]);
+  const snapshot = useCallback(
+    () => (hasMatchMedia() ? window.matchMedia(query).matches : serverValue),
+    [query, serverValue],
+  );
   return useSyncExternalStore(subscribe, snapshot, () => serverValue);
 }
 

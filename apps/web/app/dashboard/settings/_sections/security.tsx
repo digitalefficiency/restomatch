@@ -9,7 +9,10 @@ import { settingsViewer } from '../_lib/viewer';
 export async function SecuritySettings() {
   const [t, viewer] = await Promise.all([getT(settingsMessages), settingsViewer()]);
   const [enabled, remaining] = viewer.userId
-    ? await Promise.all([isTwoFactorEnabled(viewer.userId), countUnusedRecoveryCodes(viewer.userId)])
+    ? await Promise.all([
+        isTwoFactorEnabled(viewer.userId),
+        countUnusedRecoveryCodes(viewer.userId),
+      ])
     : [false, 0];
   return (
     <section aria-labelledby="settings-security">

@@ -49,7 +49,8 @@ export function useIsCoarse(): boolean {
 
 const noSubscribe = () => () => {};
 const isAppleClient = () =>
-  typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(`${navigator.platform ?? ''} ${navigator.userAgent ?? ''}`);
+  typeof navigator !== 'undefined' &&
+  /Mac|iPhone|iPad|iPod/.test(`${navigator.platform ?? ''} ${navigator.userAgent ?? ''}`);
 
 /** macOS / iOS: shortcuts are labelled ⌘ (lib/hotkeys.ts keyLabel). SSR uses the device hint. */
 export function useIsApple(): boolean {
@@ -162,14 +163,25 @@ function PrefsApplier({ children }: { children: React.ReactNode }) {
   const rule = textSizeRule(p.textSize);
 
   useEffect(
-    () => mirrorDisplayAttrs(document.documentElement.dataset, { density, textSize: p.textSize, singleKeys: keys }),
+    () =>
+      mirrorDisplayAttrs(document.documentElement.dataset, {
+        density,
+        textSize: p.textSize,
+        singleKeys: keys,
+      }),
     [density, p.textSize, keys],
   );
 
   return (
     <>
       {rule ? <style>{rule}</style> : null}
-      <div data-rm-prefs="" data-density={density} data-text-size={p.textSize} data-single-keys={keys} className="contents">
+      <div
+        data-rm-prefs=""
+        data-density={density}
+        data-text-size={p.textSize}
+        data-single-keys={keys}
+        className="contents"
+      >
         {children}
       </div>
     </>

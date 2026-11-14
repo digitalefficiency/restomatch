@@ -69,9 +69,16 @@ export function SubHead({ children, id }: { children: React.ReactNode; id?: stri
 }
 
 /** The white card that holds a section's rows. */
-export function SettingsRows({ children, className, ...rest }: React.HTMLAttributes<HTMLDivElement>) {
+export function SettingsRows({
+  children,
+  className,
+  ...rest
+}: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div {...rest} className={cn('rounded-card border border-line bg-surface shadow-e1', className)}>
+    <div
+      {...rest}
+      className={cn('rounded-card border border-line bg-surface shadow-e1', className)}
+    >
       {children}
     </div>
   );
@@ -114,7 +121,9 @@ export function SettingRow({
       )}
     >
       <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-body-sm font-medium text-ink">{label}</div>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-body-sm font-medium text-ink">
+          {label}
+        </div>
         {hint ? <div className="mt-0.5 text-caption text-muted">{hint}</div> : null}
       </div>
       {control ? <div className="flex min-w-0 flex-wrap items-center gap-2">{control}</div> : null}
@@ -151,13 +160,24 @@ export function SettingControlRow({
 }
 
 /** The anchor block around a whole form (several settings share it): the search lands and highlights here. */
-export function SettingAnchor({ id, children, className }: { id: string; children: React.ReactNode; className?: string }) {
+export function SettingAnchor({
+  id,
+  children,
+  className,
+}: {
+  id: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
     <div
       id={id}
       data-setting-row={id}
       tabIndex={-1}
-      className={cn('scroll-mt-24 rounded-card transition-colors duration-medium focus:outline-none data-[hit=true]:bg-info-subtle', className)}
+      className={cn(
+        'scroll-mt-24 rounded-card transition-colors duration-medium focus:outline-none data-[hit=true]:bg-info-subtle',
+        className,
+      )}
     >
       {children}
     </div>
@@ -166,5 +186,9 @@ export function SettingAnchor({ id, children, className }: { id: string; childre
 
 /** A section's quiet footer line (notes on the start side, a link action on the end side). */
 export function SectionFoot({ children }: { children: React.ReactNode }) {
-  return <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-caption text-muted">{children}</div>;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-caption text-muted">
+      {children}
+    </div>
+  );
 }

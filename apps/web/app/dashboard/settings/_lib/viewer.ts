@@ -23,7 +23,8 @@ export interface SettingsViewer {
 export const settingsViewer = cache(async (): Promise<SettingsViewer> => {
   const [caller, session] = await Promise.all([createServerCaller(), auth()]);
   const memberships = await caller.onboarding.myMemberships();
-  const active = memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
+  const active =
+    memberships.find((m) => m.restaurantId === session?.user?.restaurantId) ?? memberships[0];
   const role = (active?.role ?? null) as UserRole | null;
   const features = active?.restaurantId ? await enabledFeatures(active.restaurantId) : [];
   return {

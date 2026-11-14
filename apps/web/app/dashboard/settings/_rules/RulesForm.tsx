@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Lock } from 'lucide-react';
 import { Button, NumberField, StatusChip, cn, useAnnounce, useToast } from '@/lib/components';
+import { TOAST_MS } from '@/lib/components/Toast';
 import { DateTime, Money } from '@/lib/components/money';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { settings } from '@/lib/i18n/messages/settings';
@@ -38,8 +39,8 @@ import {
   type UpdatePatch,
 } from './model';
 
-/** The undo window after a save (README "Rules every package keeps": 10 s where the proposal shows one). */
-const UNDO_MS = 10_000;
+/** The undo window after a save: the shared action window (10 s, README "Rules every package keeps"). */
+const UNDO_MS = TOAST_MS.action;
 /** The preview waits for the steppers to rest. */
 const PREVIEW_DEBOUNCE_MS = 400;
 /** The history shows the latest this many changes (settings.history's own maximum). */
@@ -85,7 +86,11 @@ function useActionBarHeight(ref: React.RefObject<HTMLElement | null>) {
     const el = ref.current;
     if (!el) return;
     const root = document.documentElement;
-    const update = () => root.style.setProperty('--rm-actionbar-h', `${Math.ceil(el.getBoundingClientRect().height)}px`);
+    const update = () =>
+      root.style.setProperty(
+        '--rm-actionbar-h',
+        `${Math.ceil(el.getBoundingClientRect().height)}px`,
+      );
     update();
     const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
     ro?.observe(el);
@@ -158,11 +163,18 @@ export function RulesForm({
     // A kept draft applies only over the same saved values (someone may have saved since).
     return kept && ALL_FIELDS.every((f) => kept.base[f.key] === base[f.key]) ? kept.values : base;
   });
-  const [undo, setUndo] = useState<{ before: FormValues; after: FormValues; focus: boolean } | null>(null);
+  const [undo, setUndo] = useState<{
+    before: FormValues;
+    after: FormValues;
+    focus: boolean;
+  } | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   /** Where focus goes when the bar it was in goes away (after discard, or when the undo window ends). */
-  const focusFirstField = useCallback(() => document.getElementById(`set-${TOLERANCE_FIELDS[0]!.key}`)?.focus(), []);
+  const focusFirstField = useCallback(
+    () => document.getElementById(`set-${TOLERANCE_FIELDS[0]!.key}`)?.focus(),
+    [],
+  );
 
   const dirty = canEdit && isDirty(values, saved, defaults);
   // Keep (or drop) the draft in the frame; it marks the section and guards a reload.
@@ -178,7 +190,10 @@ export function RulesForm({
   }, [values]);
   const hasErrors = Object.values(errors).some(Boolean);
 
-  const historyQuery = trpc.settings.history.useQuery({ limit: HISTORY_LIMIT }, { initialData: initialHistory });
+  const historyQuery = trpc.settings.history.useQuery(
+    { limit: HISTORY_LIMIT },
+    { initialData: initialHistory },
+  );
   const historyAll = historyQuery.data ?? initialHistory;
   const history = historyAll.filter((h) => h.kind === 'rules');
   /** The server returned its maximum: older changes may exist, so the count is not the total. */
@@ -250,7 +265,10 @@ export function RulesForm({
   const thresholdPatch = useMemo(() => {
     if (!canEdit || hasErrors) return {};
     const p = savePatch(values, saved, defaults);
-    return { ...(p?.tolerances ? { tolerances: p.tolerances } : {}), ...(p?.approvalThresholds ? { approvalThresholds: p.approvalThresholds } : {}) };
+    return {
+      ...(p?.tolerances ? { tolerances: p.tolerances } : {}),
+      ...(p?.approvalThresholds ? { approvalThresholds: p.approvalThresholds } : {}),
+    };
   }, [canEdit, hasErrors, values, saved, defaults]);
   const previewInput = useDebounced(thresholdPatch, PREVIEW_DEBOUNCE_MS);
   const preview = trpc.settings.previewThresholds.useQuery(previewInput, {
@@ -275,12 +293,22 @@ export function RulesForm({
   }, [canEdit, hasErrors, values, saved, defaults]);
 
   /* ── field rows ── */
+  /** A field's value in force (stored units): the typed or saved value, else the engine default. */
+  const valueOf = (from: FormValues, f: FieldDef): number => {
+    const raw = from[f.key];
+    const v = raw === null ? defaults[f.key] : toStored(raw, f.kind);
+    return Number.isFinite(v) ? v : defaults[f.key];
+  };
+  /** Differs from the engine default by value (the reference's rule): a stored override equal to it is "ברירת מחדל". */
+  const offDefault = (from: FormValues, f: FieldDef) =>
+    Math.abs(valueOf(from, f) - defaults[f.key]) > 1e-9;
+
   const chipFor = (fields: FieldDef[]) => {
     if (canEdit && fields.some((f) => isFieldDirty(values, saved, defaults, f))) {
       // An unsaved form is a state of the interface, not a warning (SPEC §2): info, the word carries it.
       return <StatusChip tone="info" label={t('thresholds.unsaved')} />;
     }
-    return fields.some((f) => saved[f.key] !== null) ? (
+    return fields.some((f) => offDefault(saved, f)) ? (
       <StatusChip tone="info" label={t('thresholds.custom')} icon={null} />
     ) : (
       <StatusChip tone="neutral" label={t('thresholds.default')} icon={null} />
@@ -288,7 +316,7 @@ export function RulesForm({
   };
 
   const restoreFor = (fields: FieldDef[], label: string) =>
-    canEdit && fields.some((f) => values[f.key] !== null) ? (
+    canEdit && fields.some((f) => offDefault(values, f)) ? (
       <button
         type="button"
         onClick={() => {
@@ -316,28 +344,40 @@ export function RulesForm({
    * shows the default value; a change commits on a step, Enter or leaving.
    */
   const stepper = (f: FieldDef, label: string, describedBy?: string) => {
-    const raw = values[f.key];
-    const stored = raw === null ? defaults[f.key] : toStored(raw, f.kind);
-    const shown = Number(toDisplay(Number.isFinite(stored) ? stored : defaults[f.key], f.kind));
+    const shown = Number(toDisplay(valueOf(values, f), f.kind));
     const id = `set-${f.key}`;
+    const field = (
+      <NumberField
+        id={id}
+        value={shown}
+        onValueChange={(n) => set(f.key, String(n))}
+        min={0}
+        max={f.kind === 'percent' ? f.max * 100 : f.max}
+        step={f.step}
+        decimals={DECIMALS[f.kind]}
+        unit={f.kind === 'percent' ? '%' : undefined}
+        disabled={!canEdit}
+        showLimits={f.kind === 'percent'}
+        aria-describedby={describedBy}
+      />
+    );
     return (
       <span key={f.key} className="inline-flex">
         <label htmlFor={id} className="sr-only">
           {label}
         </label>
-        <NumberField
-          id={id}
-          value={shown}
-          onValueChange={(n) => set(f.key, String(n))}
-          min={0}
-          max={f.kind === 'percent' ? f.max * 100 : f.max}
-          step={f.step}
-          decimals={DECIMALS[f.kind]}
-          unit={f.kind === 'percent' ? '%' : f.kind === 'currency' ? '₪' : undefined}
-          disabled={!canEdit}
-          showLimits={f.kind === 'percent'}
-          aria-describedby={describedBy}
-        />
+        {f.kind === 'currency' ? (
+          // ₪ at the visual left of the digits in both languages (DoD-4), as the money markup does;
+          // a ₪ field shows no limits line, so the LTR box holds only the frame.
+          <span className="inline-flex items-center gap-1.5 [direction:ltr]">
+            <span aria-hidden="true" data-currency="" className="text-body-sm text-muted">
+              ₪
+            </span>
+            {field}
+          </span>
+        ) : (
+          field
+        )}
       </span>
     );
   };
@@ -397,9 +437,15 @@ export function RulesForm({
         }
         control={
           fields.length ? (
-            fields.map((f) =>
-              stepper(f, `${label}: ${t(f.kind === 'percent' ? 'thresholds.approvals.percent' : 'thresholds.approvals.amount')}`),
-            )
+            // Two fields (amount, share): aligned at the top, the share's limits line under it.
+            <span className="flex flex-wrap items-start gap-2">
+              {fields.map((f) =>
+                stepper(
+                  f,
+                  `${label}: ${t(f.kind === 'percent' ? 'thresholds.approvals.percent' : 'thresholds.approvals.amount')}`,
+                ),
+              )}
+            </span>
           ) : (
             <span className="text-body-sm text-muted">{t('thresholds.fixed')}</span>
           )
@@ -473,9 +519,21 @@ export function RulesForm({
 
       {anyAction ? (
         undo ? (
-          <UndoBar t={t} focusOnMount={undo.focus} onUndo={doUndo} onEnd={() => setUndo(null)} returnFocus={focusFirstField} />
+          <UndoBar
+            t={t}
+            focusOnMount={undo.focus}
+            onUndo={doUndo}
+            onEnd={() => setUndo(null)}
+            returnFocus={focusFirstField}
+          />
         ) : (
-          <DirtyBar t={t} hasErrors={hasErrors} saving={update.isPending} onDiscard={doDiscard} onSave={doSave} />
+          <DirtyBar
+            t={t}
+            hasErrors={hasErrors}
+            saving={update.isPending}
+            onDiscard={doDiscard}
+            onSave={doSave}
+          />
         )
       ) : null}
     </div>
@@ -507,12 +565,22 @@ function DirtyBar({
       className="sticky bottom-[calc(var(--rm-bottomnav-h,0px)+var(--consent-h,0px)+theme(spacing.4))] z-10 flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface px-4 py-3 shadow-e2"
     >
       <span className="text-body-sm font-medium text-ink">{t('thresholds.save.dirty')}</span>
-      {hasErrors ? <span className="text-caption text-danger">{t('thresholds.save.invalid')}</span> : null}
+      {hasErrors ? (
+        <span className="text-caption text-danger">{t('thresholds.save.invalid')}</span>
+      ) : null}
       <span className="flex-1" />
       <Button type="button" variant="ghost" size="sm" onClick={onDiscard}>
         {t('thresholds.save.discardCta')}
       </Button>
-      <Button id="settings-save-cta" type="button" variant="primary" size="sm" loading={saving} disabled={hasErrors} onClick={onSave}>
+      <Button
+        id="settings-save-cta"
+        type="button"
+        variant="primary"
+        size="sm"
+        loading={saving}
+        disabled={hasErrors}
+        onClick={onSave}
+      >
         {t('thresholds.save.saveCta')}
       </Button>
     </div>
@@ -545,7 +613,11 @@ function UndoBar({
   useEffect(() => {
     if (focusOnMount) undoButton.current?.focus();
   }, [focusOnMount]);
-  const timer = useRef<{ id: ReturnType<typeof setTimeout> | null; left: number; since: number }>({ id: null, left: UNDO_MS, since: 0 });
+  const timer = useRef<{ id: ReturnType<typeof setTimeout> | null; left: number; since: number }>({
+    id: null,
+    left: UNDO_MS,
+    since: 0,
+  });
   const anim = useRef<Animation | null>(null);
 
   const end = useCallback(() => {
@@ -574,11 +646,14 @@ function UndoBar({
   useEffect(() => {
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (line.current && !reduce && typeof line.current.animate === 'function') {
-      anim.current = line.current.animate([{ transform: 'scaleX(1)' }, { transform: 'scaleX(0)' }], {
-        duration: UNDO_MS,
-        easing: 'linear',
-        fill: 'forwards',
-      });
+      anim.current = line.current.animate(
+        [{ transform: 'scaleX(1)' }, { transform: 'scaleX(0)' }],
+        {
+          duration: UNDO_MS,
+          easing: 'linear',
+          fill: 'forwards',
+        },
+      );
     }
     run();
     const tm = timer.current;
@@ -612,7 +687,11 @@ function UndoBar({
       >
         {t('thresholds.save.undoCta')}
       </button>
-      <div ref={line} aria-hidden="true" className="absolute inset-x-0 bottom-0 h-0.5 bg-on-bold/60 ltr:origin-left rtl:origin-right" />
+      <div
+        ref={line}
+        aria-hidden="true"
+        className="absolute inset-x-0 bottom-0 h-0.5 bg-on-bold/60 ltr:origin-left rtl:origin-right"
+      />
     </div>
   );
 }
@@ -672,7 +751,12 @@ function EffectBox({
       lines.push(first);
     } else {
       const k = data.wouldOpen;
-      first = k === n ? t('thresholds.effect.all', { n }) : k === 0 ? t('thresholds.effect.none', { n }) : t('thresholds.effect.some', { k, n });
+      first =
+        k === n
+          ? t('thresholds.effect.all', { n })
+          : k === 0
+            ? t('thresholds.effect.none', { n })
+            : t('thresholds.effect.some', { k, n });
       lines.push(first);
       if (k > 0) lines.push(t('thresholds.effect.blocks', { b: data.wouldBlock }));
       if (data.notOpenedCount > 0) {
@@ -680,7 +764,9 @@ function EffectBox({
           data.notOpenedAgorot > 0 ? (
             <>
               {fill(t('thresholds.effect.notOpenedAmount', { count: data.notOpenedCount }), {
-                amount: <Money agorot={data.notOpenedAgorot} context="line" className="font-semibold" />,
+                amount: (
+                  <Money agorot={data.notOpenedAgorot} context="line" className="font-semibold" />
+                ),
               })}
             </>
           ) : (
@@ -689,10 +775,15 @@ function EffectBox({
         );
         names = data.notOpened
           .slice(0, NAMED_MAX)
-          .map((x) => (locale === 'en' ? (x.labelEn ?? x.label) : x.label) ?? t('thresholds.effect.unnamed'));
+          .map(
+            (x) =>
+              (locale === 'en' ? (x.labelEn ?? x.label) : x.label) ??
+              t('thresholds.effect.unnamed'),
+          );
         more = data.notOpenedCount - names.length;
       }
-      if (data.notEvaluated > 0) lines.push(t('thresholds.effect.notEvaluated', { count: data.notEvaluated }));
+      if (data.notEvaluated > 0)
+        lines.push(t('thresholds.effect.notEvaluated', { count: data.notEvaluated }));
     }
   }
 
@@ -724,12 +815,24 @@ function EffectBox({
       </h3>
       {failed ? <p className="text-body-sm text-muted">{t('thresholds.effect.failed')}</p> : null}
       {lines.map((l, i) => (
-        <p key={i} className={cn('text-body-sm text-ink transition-opacity duration-short', stale && 'opacity-60')}>
+        <p
+          key={i}
+          className={cn(
+            'text-body-sm text-ink transition-opacity duration-short',
+            stale && 'opacity-60',
+          )}
+        >
           {l}
         </p>
       ))}
       {names.length > 0 ? (
-        <ul data-record="" className={cn('flex flex-wrap gap-x-3 gap-y-0.5 text-caption text-muted', stale && 'opacity-60')}>
+        <ul
+          data-record=""
+          className={cn(
+            'flex flex-wrap gap-x-3 gap-y-0.5 text-caption text-muted',
+            stale && 'opacity-60',
+          )}
+        >
           {names.map((name, i) => (
             <li key={i}>
               <bdi>{name}</bdi>
@@ -740,8 +843,12 @@ function EffectBox({
       ) : null}
       {unsaved ? (
         <>
-          {opensMore ? <p className="mt-1 text-caption text-muted">{t('thresholds.effect.stricter')}</p> : null}
-          <p className={cn('text-caption text-muted', !opensMore && 'mt-1')}>{t('thresholds.effect.newOnly')}</p>
+          {opensMore ? (
+            <p className="mt-1 text-caption text-muted">{t('thresholds.effect.stricter')}</p>
+          ) : null}
+          <p className={cn('text-caption text-muted', !opensMore && 'mt-1')}>
+            {t('thresholds.effect.newOnly')}
+          </p>
         </>
       ) : (
         <p className="mt-1 text-caption text-muted">{t('thresholds.effect.savedApply')}</p>
@@ -792,7 +899,12 @@ function HistoryBlock({
     <div className="mt-4 space-y-1" data-testid="rules-history">
       {last ? (
         <p className="text-caption text-muted">
-          {fill(lastTemplate, { name: <bdi className="text-ink">{last.byName ?? t('thresholds.history.unknownUser')}</bdi>, when: <DateTime value={last.at} variant="datetime" className="text-ink" /> })}
+          {fill(lastTemplate, {
+            name: (
+              <bdi className="text-ink">{last.byName ?? t('thresholds.history.unknownUser')}</bdi>
+            ),
+            when: <DateTime value={last.at} variant="datetime" className="text-ink" />,
+          })}
         </p>
       ) : null}
       <button
@@ -802,16 +914,27 @@ function HistoryBlock({
         onClick={onToggle}
         className="-ms-2 inline-flex min-h-8 items-center gap-1 rounded-control px-2 text-caption font-medium text-muted hover:bg-surface-2 hover:text-ink [@media(pointer:coarse)]:min-h-11"
       >
-        {capped ? t('thresholds.history.toggleLatest') : t('thresholds.history.toggle', { n: rows.length })}
-        <ChevronDown className={cn('h-4 w-4 transition-transform duration-short', open && 'rotate-180')} aria-hidden="true" />
+        {capped
+          ? t('thresholds.history.toggleLatest')
+          : t('thresholds.history.toggle', { n: rows.length })}
+        <ChevronDown
+          className={cn('h-4 w-4 transition-transform duration-short', open && 'rotate-180')}
+          aria-hidden="true"
+        />
       </button>
       <ul id="rules-history-list" hidden={!open} className="space-y-2">
-        {rows.length === 0 ? <li className="text-caption text-muted">{t('thresholds.history.empty')}</li> : null}
+        {rows.length === 0 ? (
+          <li className="text-caption text-muted">{t('thresholds.history.empty')}</li>
+        ) : null}
         {rows.map((row, i) => {
           const changes = changesOf(row.before, row.after);
-          const restorable = i === 0 && canRestore && !!row.before && sameAsSnapshot(saved, row.after);
+          const restorable =
+            i === 0 && canRestore && !!row.before && sameAsSnapshot(saved, row.after);
           return (
-            <li key={row.id} className="grid gap-x-3 text-caption text-muted sm:grid-cols-[auto_auto_minmax(0,1fr)]">
+            <li
+              key={row.id}
+              className="grid gap-x-3 text-caption text-muted sm:grid-cols-[auto_auto_minmax(0,1fr)]"
+            >
               <DateTime value={row.at} variant="datetime" className="text-ink" />
               <bdi>{row.byName ?? t('thresholds.history.unknownUser')}</bdi>
               <span>
@@ -823,7 +946,10 @@ function HistoryBlock({
                         <span key={c.key}>
                           {j > 0 ? ', ' : null}
                           {fill(changeTemplate, {
-                            field: f.group === 'approvalThresholds' ? labelOfApprovalKey(t, c.key) : t(`thresholds.fields.${c.key}.label`),
+                            field:
+                              f.group === 'approvalThresholds'
+                                ? labelOfApprovalKey(t, c.key)
+                                : t(`thresholds.fields.${c.key}.label`),
                             from: value(f, c.from, null),
                             to: value(f, c.to, null),
                           })}

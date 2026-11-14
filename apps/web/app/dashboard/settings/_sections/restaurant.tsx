@@ -17,7 +17,8 @@ export async function RestaurantSettings() {
   if (!viewer.seesRestaurant) return <SectionForbidden screen={t('areas.restaurant.title')} />;
   const caller = await createServerCaller();
   const profile = await caller.settings.profile();
-  const referralOn = (viewer.role === 'owner' || viewer.role === 'manager') && viewer.features.includes('growth');
+  const referralOn =
+    (viewer.role === 'owner' || viewer.role === 'manager') && viewer.features.includes('growth');
   return (
     <section aria-labelledby="settings-restaurant" className="space-y-6">
       <SectionHead

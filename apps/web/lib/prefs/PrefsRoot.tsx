@@ -36,7 +36,13 @@ export async function readDeviceHints(): Promise<DeviceHints> {
  * layout.tsx, DS3-02), inside NavProvider; `role` may be omitted there (the
  * provider reads the viewer).
  */
-export async function PrefsRoot({ role, children }: { role?: UserRole | null; children: React.ReactNode }) {
+export async function PrefsRoot({
+  role,
+  children,
+}: {
+  role?: UserRole | null;
+  children: React.ReactNode;
+}) {
   const [initial, hints] = await Promise.all([readDisplayChoices(), readDeviceHints()]);
   return (
     <PrefsProvider initial={initial} hints={hints} role={role}>

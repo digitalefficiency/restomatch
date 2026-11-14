@@ -40,7 +40,9 @@ export function SectionForbidden({ screen }: { screen: string }) {
     <div className="rounded-card border border-line bg-surface p-6 shadow-e1">
       <h2 className="mb-2 text-title-sm text-ink">{tc('shell.forbidden.title', { screen })}</h2>
       <p className="mb-4 text-body-sm text-muted">
-        {tc('shell.forbidden.allowed', { roles: RESTAURANT_ROLES.map((r) => labelForRole(r, locale)).join(', ') })}
+        {tc('shell.forbidden.allowed', {
+          roles: RESTAURANT_ROLES.map((r) => labelForRole(r, locale)).join(', '),
+        })}
       </p>
       <LinkButton href={SETTINGS_BASE} variant="secondary">
         {t('frame.backCta')}

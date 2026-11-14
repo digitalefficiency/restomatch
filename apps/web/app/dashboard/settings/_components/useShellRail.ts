@@ -29,7 +29,15 @@ export function useShellRail(initial: boolean) {
   const set = useCallback((next: boolean) => {
     const el = document.getElementById('rm-app');
     if (!el || (el.dataset.rail === 'on') === next) return;
-    document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyB', key: 'b', ctrlKey: true, bubbles: true, cancelable: true }));
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        code: 'KeyB',
+        key: 'b',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
   }, []);
 
   return useMemo(() => ({ rail, available, setRail: set }), [rail, available, set]);

@@ -26,7 +26,10 @@ export async function RulesSettings() {
   const [t, viewer] = await Promise.all([getT(settingsMessages), settingsViewer()]);
   if (!viewer.seesRestaurant) return <SectionForbidden screen={t('areas.rules.title')} />;
   const caller = await createServerCaller();
-  const [stored, history] = await Promise.all([caller.settings.get(), caller.settings.history({ limit: 100 })]);
+  const [stored, history] = await Promise.all([
+    caller.settings.get(),
+    caller.settings.history({ limit: 100 }),
+  ]);
   const knobs: StoredKnobs = {
     tolerances: stored.tolerances,
     approvalThresholds: stored.approvalThresholds,

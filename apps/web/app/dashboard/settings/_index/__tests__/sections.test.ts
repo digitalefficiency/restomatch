@@ -38,7 +38,8 @@ describe('the settings map (two groups, a scope per section)', () => {
   });
 
   it('a setting that does nothing on this device is not offered (SPEC §10.5)', () => {
-    const ids = (device: Parameters<typeof settingsFor>[1]) => settingsFor('owner', device).map((e) => e.id);
+    const ids = (device: Parameters<typeof settingsFor>[1]) =>
+      settingsFor('owner', device).map((e) => e.id);
     expect(ids({})).toEqual(expect.arrayContaining(['density', 'text', 'rail', 'keys']));
     // A phone: narrow and touch — no density (fixed), no side menu, no keyboard.
     const phone = ids({ coarse: true, narrow: true, phone: true });
@@ -56,9 +57,15 @@ describe('the settings map (two groups, a scope per section)', () => {
 
   it('every setting links to its section with its anchor; ids are unique', () => {
     expect(new Set(SETTINGS.map((e) => e.id)).size).toBe(SETTINGS.length);
-    expect(settingHref(SETTINGS.find((e) => e.id === 'qtyPercent')!)).toBe('/dashboard/settings?s=rules#qtyPercent');
-    expect(settingHref(SETTINGS.find((e) => e.id === 'vat')!)).toBe('/dashboard/settings?s=restaurant#profile');
-    expect(settingHref(SETTINGS.find((e) => e.id === 'density')!)).toBe('/dashboard/settings#density');
+    expect(settingHref(SETTINGS.find((e) => e.id === 'qtyPercent')!)).toBe(
+      '/dashboard/settings?s=rules#qtyPercent',
+    );
+    expect(settingHref(SETTINGS.find((e) => e.id === 'vat')!)).toBe(
+      '/dashboard/settings?s=restaurant#profile',
+    );
+    expect(settingHref(SETTINGS.find((e) => e.id === 'density')!)).toBe(
+      '/dashboard/settings#density',
+    );
   });
 
   it('?s= picks the section; anything else is "תצוגה"; automations keeps its route', () => {
@@ -78,11 +85,15 @@ describe('the settings map (two groups, a scope per section)', () => {
   it('every title and keyword key exists in both languages', () => {
     for (const locale of ['he', 'en'] as const) {
       const t = createTranslator(locale, settings) as unknown as (k: string) => string;
-      for (const s of SECTIONS) expect(t(s.titleKey), `${locale} ${s.titleKey}`).not.toBe(s.titleKey);
-      for (const s of SECTIONS) if (s.subtitleKey) expect(t(s.subtitleKey), `${locale} ${s.subtitleKey}`).not.toBe(s.subtitleKey);
+      for (const s of SECTIONS)
+        expect(t(s.titleKey), `${locale} ${s.titleKey}`).not.toBe(s.titleKey);
+      for (const s of SECTIONS)
+        if (s.subtitleKey)
+          expect(t(s.subtitleKey), `${locale} ${s.subtitleKey}`).not.toBe(s.subtitleKey);
       for (const e of SETTINGS) {
         expect(t(e.titleKey), `${locale} ${e.titleKey}`).not.toBe(e.titleKey);
-        if (e.keywordsKey) expect(t(e.keywordsKey), `${locale} ${e.keywordsKey}`).not.toBe(e.keywordsKey);
+        if (e.keywordsKey)
+          expect(t(e.keywordsKey), `${locale} ${e.keywordsKey}`).not.toBe(e.keywordsKey);
       }
     }
   });
@@ -94,9 +105,14 @@ describe('the palette export (DS3-02)', () => {
   it('PaletteScreen-shaped, role-filtered, translated', () => {
     const owner = settingsPaletteEntries(t, 'owner');
     const vat = owner.find((e) => e.key === 'settings.restaurant.vat')!;
-    expect(vat).toMatchObject({ href: '/dashboard/settings?s=restaurant#profile', section: 'פרטי המסעדה' });
+    expect(vat).toMatchObject({
+      href: '/dashboard/settings?s=restaurant#profile',
+      section: 'פרטי המסעדה',
+    });
     expect(vat.aliases).toContain('מע״מ');
-    expect(owner.find((e) => e.key === 'settings.rules')).toMatchObject({ label: 'כללי התאמה ואישור' });
+    expect(owner.find((e) => e.key === 'settings.rules')).toMatchObject({
+      label: 'כללי התאמה ואישור',
+    });
     const receiver = settingsPaletteEntries(t, 'receiver');
     expect(receiver.some((e) => e.href.includes('s=rules'))).toBe(false);
     expect(receiver.some((e) => e.key === 'settings.display.density')).toBe(true);
@@ -104,7 +120,8 @@ describe('the palette export (DS3-02)', () => {
 
   it('no setting that does nothing on this device', () => {
     const phone = settingsPaletteEntries(t, 'owner', { coarse: true, narrow: true, phone: true });
-    for (const id of ['keys', 'rail', 'density']) expect(phone.some((e) => e.key === `settings.display.${id}`)).toBe(false);
+    for (const id of ['keys', 'rail', 'density'])
+      expect(phone.some((e) => e.key === `settings.display.${id}`)).toBe(false);
     const narrowDesk = settingsPaletteEntries(t, 'owner', { narrow: true });
     expect(narrowDesk.some((e) => e.key === 'settings.display.keys')).toBe(true);
   });

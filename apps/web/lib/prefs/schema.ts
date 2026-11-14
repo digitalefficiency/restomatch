@@ -53,10 +53,17 @@ export function roleDefaultDensity(role: UserRole | null | undefined): Density {
 
 /** The defaults for a role: what "חזרה לברירת המחדל" gives. */
 export function defaultPrefs(role: UserRole | null | undefined): DisplayPrefs {
-  return { density: roleDefaultDensity(role), textSize: DEFAULT_TEXT_SIZE, singleKeys: DEFAULT_SINGLE_KEYS };
+  return {
+    density: roleDefaultDensity(role),
+    textSize: DEFAULT_TEXT_SIZE,
+    singleKeys: DEFAULT_SINGLE_KEYS,
+  };
 }
 
-export function resolvePrefs(choices: DisplayChoices, role: UserRole | null | undefined): DisplayPrefs {
+export function resolvePrefs(
+  choices: DisplayChoices,
+  role: UserRole | null | undefined,
+): DisplayPrefs {
   const d = defaultPrefs(role);
   return {
     density: choices.density ?? d.density,
@@ -119,7 +126,8 @@ export function choicesFromCookieHeader(header: string | null | undefined): Disp
   for (const part of header.split(';')) {
     const i = part.indexOf('=');
     if (i < 0) continue;
-    if (part.slice(0, i).trim() === DISPLAY_COOKIE) return parseDisplayChoices(part.slice(i + 1).trim());
+    if (part.slice(0, i).trim() === DISPLAY_COOKIE)
+      return parseDisplayChoices(part.slice(i + 1).trim());
   }
   return {};
 }
@@ -147,7 +155,10 @@ export const CONTENT_SELECTOR = '#main-content > *';
 
 /** The CSS a text size adds to the page (null for the regular size). */
 export function textSizeRule(size: TextSize): string | null {
-  return size === 'regular' ? null : `@media screen{${CONTENT_SELECTOR}{zoom:${TEXT_ZOOM[size]}}}`;
+  // The step is a token when DS3-00 defines it (`--text-zoom-large`); 1.1 (the reference's) until then.
+  return size === 'regular'
+    ? null
+    : `@media screen{${CONTENT_SELECTOR}{zoom:var(--text-zoom-${size},${TEXT_ZOOM[size]})}}`;
 }
 
 /**
@@ -171,7 +182,10 @@ export interface DeviceHints {
   /** macOS or iOS: shortcuts are labelled with ⌘. */
   apple: boolean;
 }
-export const NO_DEVICE_HINTS: DeviceHints = Object.freeze({ coarse: false, apple: false }) as DeviceHints;
+export const NO_DEVICE_HINTS: DeviceHints = Object.freeze({
+  coarse: false,
+  apple: false,
+}) as DeviceHints;
 
 /**
  * The `data-density` attribute for the density in force: only "compact" is

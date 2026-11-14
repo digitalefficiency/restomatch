@@ -10,7 +10,8 @@ import { SectionFoot, SettingControlRow, SettingRow, SettingsRows } from './ui';
 import { useShellRail } from './useShellRail';
 
 /** Forced colours: the selected option keeps a visible mark (SegmentedControl draws it with a fill only). */
-const SEGMENT_FORCED = 'forced-colors:[&_[aria-checked=true]]:outline forced-colors:[&_[aria-checked=true]]:outline-2 forced-colors:[&_[aria-checked=true]]:outline-[Highlight]';
+const SEGMENT_FORCED =
+  'forced-colors:[&_[aria-checked=true]]:outline forced-colors:[&_[aria-checked=true]]:outline-2 forced-colors:[&_[aria-checked=true]]:outline-[Highlight]';
 /** 44 px targets on a touch screen. */
 const SEGMENT_TOUCH = '[@media(pointer:coarse)]:[&_button]:min-h-11';
 
@@ -31,7 +32,8 @@ export function DisplaySection({ initialRail }: { initialRail: boolean }) {
   const shell = useShellRail(initialRail);
   const mod = keyLabel('Mod', apple);
 
-  const said = (what: string, value: string) => announce(t('display.sr.saved', { what: `${what}, ${value}` }));
+  const said = (what: string, value: string) =>
+    announce(t('display.sr.saved', { what: `${what}, ${value}` }));
 
   const densityOptions: Array<{ value: Density; label: string }> = [
     { value: 'regular', label: t('display.regular') },
@@ -122,8 +124,8 @@ export function DisplaySection({ initialRail }: { initialRail: boolean }) {
               <span className="inline-flex flex-wrap items-center gap-1">
                 {/* Key caps are decorative (shared Kbd): the keys are said once, in words. */}
                 <span className="sr-only">J, K, 1, 2, Z</span>
-                <Kbd>J</Kbd> <Kbd>K</Kbd> <Kbd>1</Kbd> <Kbd>2</Kbd> <Kbd>Z</Kbd> {t('display.keysQueue')},{' '}
-                <span className="sr-only">/</span>
+                <Kbd>J</Kbd> <Kbd>K</Kbd> <Kbd>1</Kbd> <Kbd>2</Kbd> <Kbd>Z</Kbd>{' '}
+                {t('display.keysQueue')}, <span className="sr-only">/</span>
                 <Kbd>/</Kbd> {t('display.keysSearch')}
               </span>
             }
@@ -131,7 +133,9 @@ export function DisplaySection({ initialRail }: { initialRail: boolean }) {
         </SettingControlRow>
       </SettingsRows>
       <SectionFoot>
-        <span className="[@media(max-width:1023.98px)_and_(pointer:coarse)]:hidden">{t('display.ctrlNote', { mod })}</span>
+        <span className="[@media(max-width:1023.98px)_and_(pointer:coarse)]:hidden">
+          {t('display.ctrlNote', { mod })}
+        </span>
         <span className="flex-1" />
         <button
           type="button"

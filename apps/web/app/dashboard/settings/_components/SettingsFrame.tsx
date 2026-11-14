@@ -1,6 +1,14 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Search } from 'lucide-react';
@@ -10,7 +18,15 @@ import { matchesHe } from '@/lib/components/palette/normalizeHe';
 import { useT } from '@/lib/i18n/client';
 import { settings } from '@/lib/i18n/messages/settings';
 import { useIsCoarse, useIsNarrow, useIsPhone } from '@/lib/prefs';
-import { activeSection, sectionById, sectionsFor, settingHref, settingsFor, type SectionId, type SettingsGroup } from '../_index/sections';
+import {
+  activeSection,
+  sectionById,
+  sectionsFor,
+  settingHref,
+  settingsFor,
+  type SectionId,
+  type SettingsGroup,
+} from '../_index/sections';
 
 /* ───────────── unsaved changes: kept across sections, marked in the list ───────────── */
 
@@ -19,7 +35,10 @@ interface SessionApi {
   drafts: Map<SectionId, unknown>;
 }
 const SessionContext = createContext<SessionApi>({ mark: () => {}, drafts: new Map() });
-const SessionProvider = SessionContext.Provider as unknown as React.ComponentType<{ value: SessionApi; children: React.ReactNode }>;
+const SessionProvider = SessionContext.Provider as unknown as React.ComponentType<{
+  value: SessionApi;
+  children: React.ReactNode;
+}>;
 
 /**
  * A form's unsaved draft, kept by the frame (the settings layout), so opening
@@ -28,7 +47,10 @@ const SessionProvider = SessionContext.Provider as unknown as React.ComponentTyp
  * closed tab asks first. `initial` is the kept draft (read it once, when the
  * form mounts); `keep(draft)` stores it, `keep(undefined)` drops it.
  */
-export function useSectionDraft<T>(section: SectionId): { initial: T | undefined; keep: (draft: T | undefined) => void } {
+export function useSectionDraft<T>(section: SectionId): {
+  initial: T | undefined;
+  keep: (draft: T | undefined) => void;
+} {
   const api = useContext(SessionContext);
   const keep = useCallback(
     (draft: T | undefined) => {
@@ -77,7 +99,13 @@ function useArrivalHighlight() {
  * section beside them. On a phone the sections become a row of chips above the
  * open section and settings that do nothing there are not offered.
  */
-export function SettingsFrame({ role, children }: { role: UserRole | null; children: React.ReactNode }) {
+export function SettingsFrame({
+  role,
+  children,
+}: {
+  role: UserRole | null;
+  children: React.ReactNode;
+}) {
   const t = useT(settings);
   const tt = t as unknown as (key: string, vars?: Record<string, string | number>) => string;
   const pathname = usePathname();
@@ -116,6 +144,13 @@ export function SettingsFrame({ role, children }: { role: UserRole | null; child
 
   const params = useSearchParams();
   const current = activeSection(pathname, params?.get('s') ?? null);
+  // Say which section opened (the page title is the shell's and stays "הגדרות"); focus stays on the link clicked.
+  const opened = useRef(current);
+  useEffect(() => {
+    if (opened.current === current) return;
+    opened.current = current;
+    announce(tt(sectionById(current).titleKey));
+  }, [current, announce, tt]);
   const sections = sectionsFor(role);
   const groups = (['me', 'restaurant'] as SettingsGroup[])
     .map((g) => ({ g, items: sections.filter((s) => s.group === g) }))
@@ -126,7 +161,11 @@ export function SettingsFrame({ role, children }: { role: UserRole | null; child
     if (!q) return null;
     return settingsFor(role, { coarse, narrow, phone }).filter((e) => {
       const section = sectionById(e.section);
-      const hay = [tt(e.titleKey), tt(section.titleKey), e.keywordsKey ? tt(e.keywordsKey) : ''].join(' ');
+      const hay = [
+        tt(e.titleKey),
+        tt(section.titleKey),
+        e.keywordsKey ? tt(e.keywordsKey) : '',
+      ].join(' ');
       return matchesHe(hay, q);
     });
   }, [q, role, coarse, narrow, phone, tt]);
@@ -178,7 +217,9 @@ export function SettingsFrame({ role, children }: { role: UserRole | null; child
                         className="flex min-h-11 items-center gap-2 rounded-control px-2.5 text-body-sm font-medium text-muted transition-colors duration-micro hover:bg-surface-2 hover:text-ink lg:min-h-8"
                       >
                         <span className="min-w-0 flex-1 truncate">{tt(e.titleKey)}</span>
-                        <span className="shrink-0 text-caption font-normal text-subtle">{tt(sectionById(e.section).titleKey)}</span>
+                        <span className="shrink-0 text-caption font-normal text-subtle">
+                          {tt(sectionById(e.section).titleKey)}
+                        </span>
                       </Link>
                     </li>
                   ))}
@@ -212,7 +253,10 @@ export function SettingsFrame({ role, children }: { role: UserRole | null; child
                             <span className="min-w-0 flex-1 truncate">{tt(s.titleKey)}</span>
                             {unsaved ? (
                               <>
-                                <span aria-hidden="true" className="size-2 shrink-0 rounded-pill bg-info forced-color-adjust-none" />
+                                <span
+                                  aria-hidden="true"
+                                  className="size-2 shrink-0 rounded-pill bg-info forced-color-adjust-none"
+                                />
                                 <span className="sr-only">, {t('frame.unsavedSr')}</span>
                               </>
                             ) : null}

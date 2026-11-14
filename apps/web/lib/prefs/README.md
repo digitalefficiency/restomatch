@@ -7,10 +7,10 @@ nothing in `packages/db`.
 
 ## Storage keys (read these, do not invent new ones)
 
-| Where | Key | Value | Lifetime |
-| --- | --- | --- | --- |
+| Where                                                                           | Key          | Value                                                                                                                                                                                                                 | Lifetime                                                                                                                                                          |
+| ------------------------------------------------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Cookie (first-party, not HttpOnly, `path=/`, `samesite=lax`, `secure` on https) | `rm_display` | `key=value` pairs joined by `&`, fixed tokens, **only explicit choices**: `density=regular\|compact`, `text=regular\|large`, `keys=on\|off`. Example: `density=compact&keys=off`. Absent cookie or key = the default. | 1 year (renewed on every page load; Safari and iOS cap a script-written cookie at 7 days, so there a choice lasts while the device opens the app at least weekly) |
-| BroadcastChannel (no storage) | `rm-display` | message `'changed'`: other tabs re-read the cookie | — |
+| BroadcastChannel (no storage)                                                   | `rm-display` | message `'changed'`: other tabs re-read the cookie                                                                                                                                                                    | —                                                                                                                                                                 |
 
 Nothing is kept in localStorage. The cookie must be listed on the cookie policy page
 (`app/(marketing)/cookies/page.tsx`, category "preference") before this ships — a request to that page's owner.
@@ -26,11 +26,11 @@ A choice equal to the role's default is not stored (a shared device gives the ne
 
 ## Where a setting does nothing (it is then absent)
 
-| Query (`schema.ts`) | Value | Effect |
-| --- | --- | --- |
-| `COARSE_QUERY` | `(pointer: coarse)` | density is fixed at the regular size; the density setting and its command are absent |
-| `NARROW_QUERY` | `(max-width: 1023.98px)` | no side menu (the shell's `lg`); the side-menu setting and command are absent |
-| `PHONE_QUERY` | narrow **and** coarse | no keyboard; the single-key setting and command are absent |
+| Query (`schema.ts`) | Value                    | Effect                                                                               |
+| ------------------- | ------------------------ | ------------------------------------------------------------------------------------ |
+| `COARSE_QUERY`      | `(pointer: coarse)`      | density is fixed at the regular size; the density setting and its command are absent |
+| `NARROW_QUERY`      | `(max-width: 1023.98px)` | no side menu (the shell's `lg`); the side-menu setting and command are absent        |
+| `PHONE_QUERY`       | narrow **and** coarse    | no keyboard; the single-key setting and command are absent                           |
 
 The server cannot see the pointer: `PrefsRoot` passes a User-Agent hint (`readDeviceHints`: a phone or tablet
 browser) as the SSR snapshot of `COARSE_QUERY`, so phones render the regular density from the first HTML. An
@@ -42,11 +42,11 @@ below).
 Inside `PrefsProvider` (from the first HTML) and on `<html>` (after hydration, so portals follow; restored when the
 provider unmounts):
 
-| Attribute | Values | Meaning |
-| --- | --- | --- |
-| `data-density` | `compact`, or **absent** | Selects the DS2 compact token mode (`[data-density='compact']` in `globals.css`). The regular density writes no attribute: the `:root` values apply (an explicit `default` would cancel `:root` media rules). Never on a touch pointer. |
-| `data-text-size` | `regular` \| `large` | The text size in force. `large` also adds `@media screen{#main-content > *{zoom:1.1}}`. |
-| `data-single-keys` | `on` \| `off` | Whether single-key shortcuts may fire on this device. |
+| Attribute          | Values                   | Meaning                                                                                                                                                                                                                                 |
+| ------------------ | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data-density`     | `compact`, or **absent** | Selects the DS2 compact token mode (`[data-density='compact']` in `globals.css`). The regular density writes no attribute: the `:root` values apply (an explicit `default` would cancel `:root` media rules). Never on a touch pointer. |
+| `data-text-size`   | `regular` \| `large`     | The text size in force. `large` also adds `@media screen{#main-content > *{zoom:var(--text-zoom-large,1.1)}}`.                                                                                                                          |
+| `data-single-keys` | `on` \| `off`            | Whether single-key shortcuts may fire on this device.                                                                                                                                                                                   |
 
 The SSR wrapper is `<div data-rm-prefs class="contents">` (no box of its own). Large text depends on the dashboard's
 `#main-content` (app/dashboard/layout.tsx) having one child, its width container: the side menu, the top bar,
@@ -57,20 +57,23 @@ never enlarged.
 
 ```ts
 import { usePrefs, singleKeysEnabled, useIsCoarse, useIsNarrow, useIsPhone } from '@/lib/prefs'; // client code
-import { DISPLAY_COOKIE, viewDensity } from '@/lib/prefs/schema';                               // server-safe constants
-import { PrefsRoot, readDisplayChoices, readDeviceHints } from '@/lib/prefs/server';           // server components
+import { DISPLAY_COOKIE, viewDensity } from '@/lib/prefs/schema'; // server-safe constants
+import { PrefsRoot, readDisplayChoices, readDeviceHints } from '@/lib/prefs/server'; // server components
 
 const p = usePrefs();
-p.density          // 'regular' | 'compact' — the CHOICE (the switch's selected value)
-p.appliedDensity   // what the screen really uses ('regular' on a touch pointer)
-p.viewDensity      // 'comfortable' | 'compact' — the views toolbar vocabulary, from the density in force
-p.tableDensity     // 'default' | 'compact'     — DataTable's vocabulary, from the density in force
-p.textSize         // 'regular' | 'large'
-p.singleKeys       // boolean
-p.coarse           // a touch pointer (the User-Agent hint on the server and during hydration)
-p.setDensity('compact'); p.setTextSize('large'); p.setSingleKeys(false); p.reset();
+p.density; // 'regular' | 'compact' — the CHOICE (the switch's selected value)
+p.appliedDensity; // what the screen really uses ('regular' on a touch pointer)
+p.viewDensity; // 'comfortable' | 'compact' — the views toolbar vocabulary, from the density in force
+p.tableDensity; // 'default' | 'compact'     — DataTable's vocabulary, from the density in force
+p.textSize; // 'regular' | 'large'
+p.singleKeys; // boolean
+p.coarse; // a touch pointer (the User-Agent hint on the server and during hydration)
+p.setDensity('compact');
+p.setTextSize('large');
+p.setSingleKeys(false);
+p.reset();
 
-singleKeysEnabled() // for key handlers outside React: reads the cookie on every call
+singleKeysEnabled(); // for key handlers outside React: reads the cookie on every call
 ```
 
 The barrel `@/lib/prefs` re-exports client modules: server components import constants from `@/lib/prefs/schema`

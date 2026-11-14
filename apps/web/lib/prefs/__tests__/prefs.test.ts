@@ -40,7 +40,11 @@ const provider = (
   hints?: DeviceHints,
 ): ReactElement =>
   createElement(
-    PrefsProvider as unknown as (p: { initial: DisplayChoices; role: typeof role; hints?: DeviceHints }) => ReactElement,
+    PrefsProvider as unknown as (p: {
+      initial: DisplayChoices;
+      role: typeof role;
+      hints?: DeviceHints;
+    }) => ReactElement,
     { initial, role, hints },
     child,
   );
@@ -48,15 +52,22 @@ const provider = (
 describe('D4 role defaults', () => {
   it('bookkeeper compact; owner, manager, chef, receiver and no role regular', () => {
     expect(roleDefaultDensity('bookkeeper')).toBe('compact');
-    for (const r of ['owner', 'manager', 'chef', 'receiver'] as const) expect(roleDefaultDensity(r)).toBe('regular');
+    for (const r of ['owner', 'manager', 'chef', 'receiver'] as const)
+      expect(roleDefaultDensity(r)).toBe('regular');
     expect(roleDefaultDensity(null)).toBe('regular');
-    expect(defaultPrefs('owner')).toEqual({ density: 'regular', textSize: 'regular', singleKeys: true });
+    expect(defaultPrefs('owner')).toEqual({
+      density: 'regular',
+      textSize: 'regular',
+      singleKeys: true,
+    });
   });
 
   it('an explicit choice beats the role default; a missing key falls back to it', () => {
     expect(resolvePrefs({}, 'bookkeeper').density).toBe('compact');
     expect(resolvePrefs({ density: 'regular' }, 'bookkeeper').density).toBe('regular');
-    expect(resolvePrefs({ density: 'compact', textSize: 'large', singleKeys: false }, 'owner')).toEqual({
+    expect(
+      resolvePrefs({ density: 'compact', textSize: 'large', singleKeys: false }, 'owner'),
+    ).toEqual({
       density: 'compact',
       textSize: 'large',
       singleKeys: false,
@@ -68,7 +79,10 @@ describe('D4 role defaults', () => {
     expect(withChoice({}, 'owner', 'density', 'compact')).toEqual({ density: 'compact' });
     expect(withChoice({ density: 'compact' }, 'owner', 'density', 'regular')).toEqual({});
     expect(withChoice({}, 'bookkeeper', 'density', 'regular')).toEqual({ density: 'regular' });
-    expect(withChoice({ textSize: 'large' }, 'owner', 'singleKeys', false)).toEqual({ textSize: 'large', singleKeys: false });
+    expect(withChoice({ textSize: 'large' }, 'owner', 'singleKeys', false)).toEqual({
+      textSize: 'large',
+      singleKeys: false,
+    });
     expect(withChoice({ singleKeys: false }, 'owner', 'singleKeys', true)).toEqual({});
   });
 });
@@ -83,14 +97,23 @@ describe('cookie value', () => {
   });
 
   it('ignores unknown keys, unknown values and junk, never throws', () => {
-    expect(parseDisplayChoices('density=huge&text=large&foo=bar&=x&keys')).toEqual({ textSize: 'large' });
+    expect(parseDisplayChoices('density=huge&text=large&foo=bar&=x&keys')).toEqual({
+      textSize: 'large',
+    });
     expect(parseDisplayChoices('%E0%A4%A')).toEqual({});
     expect(parseDisplayChoices(undefined)).toEqual({});
-    expect(parseDisplayChoices('density%3Dcompact%26keys%3Doff')).toEqual({ density: 'compact', singleKeys: false });
+    expect(parseDisplayChoices('density%3Dcompact%26keys%3Doff')).toEqual({
+      density: 'compact',
+      singleKeys: false,
+    });
   });
 
   it('is read from a cookie header among others', () => {
-    expect(choicesFromCookieHeader(`rm_locale=he; ${DISPLAY_COOKIE}=density=compact&keys=off; rm_nav_rail=1`)).toEqual({
+    expect(
+      choicesFromCookieHeader(
+        `rm_locale=he; ${DISPLAY_COOKIE}=density=compact&keys=off; rm_nav_rail=1`,
+      ),
+    ).toEqual({
       density: 'compact',
       singleKeys: false,
     });
@@ -117,7 +140,9 @@ describe('cookie value', () => {
     expect(densityAttr('compact')).toBe('compact');
     expect(densityAttr('regular')).toBeUndefined();
     expect(textSizeRule('regular')).toBeNull();
-    expect(textSizeRule('large')).toBe('@media screen{#main-content > *{zoom:1.1}}');
+    expect(textSizeRule('large')).toBe(
+      '@media screen{#main-content > *{zoom:var(--text-zoom-large,1.1)}}',
+    );
   });
 
   it('the device queries agree with the shell breakpoint (lg = 1024 px)', () => {
@@ -130,15 +155,28 @@ describe('cookie value', () => {
 describe('mirroring onto <html>', () => {
   it('sets the attributes and restores exactly what was there on unmount', () => {
     const dataset: Record<string, string | undefined> = { textSize: 'regular', other: 'kept' };
-    const restore = mirrorDisplayAttrs(dataset, { density: 'compact', textSize: 'large', singleKeys: 'off' });
-    expect(dataset).toEqual({ density: 'compact', textSize: 'large', singleKeys: 'off', other: 'kept' });
+    const restore = mirrorDisplayAttrs(dataset, {
+      density: 'compact',
+      textSize: 'large',
+      singleKeys: 'off',
+    });
+    expect(dataset).toEqual({
+      density: 'compact',
+      textSize: 'large',
+      singleKeys: 'off',
+      other: 'kept',
+    });
     restore();
     expect(dataset).toEqual({ textSize: 'regular', other: 'kept' });
   });
 
   it('a regular density removes the attribute (the :root token values apply)', () => {
     const dataset: Record<string, string | undefined> = { density: 'compact' };
-    const restore = mirrorDisplayAttrs(dataset, { density: undefined, textSize: 'regular', singleKeys: 'on' });
+    const restore = mirrorDisplayAttrs(dataset, {
+      density: undefined,
+      textSize: 'regular',
+      singleKeys: 'on',
+    });
     expect('density' in dataset).toBe(false);
     restore();
     expect(dataset.density).toBe('compact');
@@ -202,7 +240,9 @@ describe('client store', () => {
   it('renews the stored choices once per page load (Safari caps script cookies at 7 days)', () => {
     jar.set('rm_display', 'text=large');
     const off = subscribeDisplay(() => {});
-    expect(assignments).toEqual(['rm_display=text=large; max-age=31536000; path=/; samesite=lax; secure']);
+    expect(assignments).toEqual([
+      'rm_display=text=large; max-age=31536000; path=/; samesite=lax; secure',
+    ]);
     const off2 = subscribeDisplay(() => {});
     expect(assignments).toHaveLength(1);
     off();
@@ -238,7 +278,9 @@ describe('PrefsProvider: the first HTML already carries the choices (no flash)',
 
   it('compact + large + keys off: wrapper attributes and the content zoom rule', () => {
     const html = render({ density: 'compact', textSize: 'large', singleKeys: false }, 'owner');
-    expect(html).toContain('<style>@media screen{#main-content > *{zoom:1.1}}</style>'); // raw text: React does not escape a style element
+    expect(html).toContain(
+      '<style>@media screen{#main-content > *{zoom:var(--text-zoom-large,1.1)}}</style>',
+    ); // raw text: React does not escape a style element
     expect(html).toContain('data-rm-prefs=""');
     expect(html).toContain('data-density="compact"');
     expect(html).toContain('data-text-size="large"');
@@ -253,17 +295,26 @@ describe('PrefsProvider: the first HTML already carries the choices (no flash)',
   });
 
   it('a phone or tablet (User-Agent hint) renders the regular density from the first HTML', () => {
-    const html = renderToStaticMarkup(provider({}, 'bookkeeper', createElement('p', null, 'x'), { coarse: true, apple: false }));
+    const html = renderToStaticMarkup(
+      provider({}, 'bookkeeper', createElement('p', null, 'x'), { coarse: true, apple: false }),
+    );
     expect(html).not.toContain('data-density');
     const chosen = renderToStaticMarkup(
-      provider({ density: 'compact' }, 'owner', createElement('p', null, 'x'), { coarse: true, apple: true }),
+      provider({ density: 'compact' }, 'owner', createElement('p', null, 'x'), {
+        coarse: true,
+        apple: true,
+      }),
     );
     expect(chosen).not.toContain('data-density');
   });
 
   it('a nested provider passes through (one wrapper, one rule)', () => {
     const html = renderToStaticMarkup(
-      provider({ textSize: 'large' }, 'owner', provider({}, 'owner', createElement('p', null, 'x'))),
+      provider(
+        { textSize: 'large' },
+        'owner',
+        provider({}, 'owner', createElement('p', null, 'x')),
+      ),
     );
     expect(html.match(/data-rm-prefs/g)).toHaveLength(1);
     expect(html.match(/<style>/g)).toHaveLength(1);

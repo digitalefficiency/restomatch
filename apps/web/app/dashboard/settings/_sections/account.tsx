@@ -9,7 +9,11 @@ import { settingsViewer } from '../_lib/viewer';
 
 /** חשבון — the person's own sign-in details, on every device: language, password, devices, phone. Every role. */
 export async function AccountSettings() {
-  const [t, viewer, caller] = await Promise.all([getT(settingsMessages), settingsViewer(), createServerCaller()]);
+  const [t, viewer, caller] = await Promise.all([
+    getT(settingsMessages),
+    settingsViewer(),
+    createServerCaller(),
+  ]);
   const [passwordSet, myPhone] = await Promise.all([
     viewer.userId ? hasPassword(viewer.userId) : Promise.resolve(false),
     caller.settings.myPhone(),

@@ -35,14 +35,20 @@ type T = (key: string) => string;
 
 const words = (s: string) => s.split(/\s+/).filter(Boolean);
 
-export function settingsPaletteEntries(t: T, role: UserRole | null, device: DeviceFacts = {}): SettingPaletteEntry[] {
-  const sections = SECTIONS.filter((s) => (role ? s.roles.includes(role) : s.group === 'me')).map((s) => ({
-    key: `settings.${s.id}`,
-    href: s.href,
-    label: t(s.titleKey),
-    aliases: [t('title')],
-    section: t('title'),
-  }));
+export function settingsPaletteEntries(
+  t: T,
+  role: UserRole | null,
+  device: DeviceFacts = {},
+): SettingPaletteEntry[] {
+  const sections = SECTIONS.filter((s) => (role ? s.roles.includes(role) : s.group === 'me')).map(
+    (s) => ({
+      key: `settings.${s.id}`,
+      href: s.href,
+      label: t(s.titleKey),
+      aliases: [t('title')],
+      section: t('title'),
+    }),
+  );
   const rows = settingsFor(role, device).map((e) => {
     const sec = sectionById(e.section);
     return {
@@ -63,7 +69,10 @@ export function useSettingsPaletteScreens(): SettingPaletteEntry[] {
   const coarse = useIsCoarse();
   const narrow = useIsNarrow();
   const phone = useIsPhone();
-  return useMemo(() => settingsPaletteEntries(t, role, { coarse, narrow, phone }), [t, role, coarse, narrow, phone]);
+  return useMemo(
+    () => settingsPaletteEntries(t, role, { coarse, narrow, phone }),
+    [t, role, coarse, narrow, phone],
+  );
 }
 
 /** A display command: acts at once, per device (no navigation). */
@@ -100,7 +109,8 @@ export function useDisplayCommands(): DisplayCommand[] {
     if (!p.coarse) {
       list.push({
         id: 'density',
-        label: p.density === 'compact' ? t('commands.densityRegular') : t('commands.densityCompact'),
+        label:
+          p.density === 'compact' ? t('commands.densityRegular') : t('commands.densityCompact'),
         keywords: words(t('commands.keywords.density')),
         run: () => p.setDensity(p.density === 'compact' ? 'regular' : 'compact'),
       });

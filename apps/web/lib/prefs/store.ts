@@ -1,4 +1,9 @@
-import { choicesFromCookieHeader, displayCookieAssignment, serializeDisplayChoices, type DisplayChoices } from './schema';
+import {
+  choicesFromCookieHeader,
+  displayCookieAssignment,
+  serializeDisplayChoices,
+  type DisplayChoices,
+} from './schema';
 
 /**
  * The client side of the display preferences: one module-level store over the
@@ -36,7 +41,10 @@ function readCookie(): DisplayChoices {
 function writeCookie(c: DisplayChoices): void {
   if (typeof document === 'undefined') return;
   try {
-    document.cookie = displayCookieAssignment(c, typeof window !== 'undefined' && window.location?.protocol === 'https:');
+    document.cookie = displayCookieAssignment(
+      c,
+      typeof window !== 'undefined' && window.location?.protocol === 'https:',
+    );
   } catch {
     /* cookies blocked: the choice lasts for this page only */
   }
