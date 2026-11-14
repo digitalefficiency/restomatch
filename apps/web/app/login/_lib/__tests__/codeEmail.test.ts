@@ -106,6 +106,28 @@ describe('deliverLoginCode — runtime environment decides', () => {
   });
 });
 
+describe('deliverLoginCode — each runtime guard is load-bearing (review low 6: a mutant must not survive)', () => {
+  it('`production &&`: a development runtime never sends, even when the provider helper would say "configured"', async () => {
+    // isEmailConfigured() reads process.env: make it true. The passed env is development + a key.
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('RESEND_API_KEY', 're_test_only');
+    const file = join(dir, 'guard-production.json');
+    await deliverLoginCode(INPUT, { NODE_ENV: 'development', RESEND_API_KEY: 're_test_only', LOGIN_CODE_FILE: file });
+    expect(sendEmail).not.toHaveBeenCalled(); // without the guard this would send
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ code: INPUT.code });
+  });
+
+  it('`env.RESEND_API_KEY`: a production runtime with no key in env throws, even when the provider helper says "configured"', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('RESEND_API_KEY', 're_test_only');
+    const file = join(dir, 'guard-key.json');
+    await expect(deliverLoginCode(INPUT, { NODE_ENV: 'production', LOGIN_CODE_FILE: file })).rejects.toThrow('login code: e-mail provider not configured');
+    expect(sendEmail).not.toHaveBeenCalled(); // without the guard this would send
+    for (const s of spies) expect(s).not.toHaveBeenCalled();
+    expect(existsSync(file)).toBe(false);
+  });
+});
+
 describe('codeEmail.ts source', () => {
   it('has no literal process.env NODE_ENV read (next build would inline it)', () => {
     const src = readFileSync(fileURLToPath(new URL('../codeEmail.ts', import.meta.url)), 'utf8');

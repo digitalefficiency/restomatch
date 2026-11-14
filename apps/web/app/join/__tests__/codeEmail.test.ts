@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import type { SendEmailArgs } from '@/lib/email';
-import { deliverJoinCode } from '../_lib/codeEmail';
+import { deliverJoinCode, deliverJoinSignInLink } from '../_lib/codeEmail';
 
 // The provider call is the only thing replaced: isEmailConfigured() stays real.
 const sendEmail = vi.hoisted(() => vi.fn<(args: SendEmailArgs) => Promise<void>>(async () => {}));
@@ -102,6 +102,69 @@ describe('deliverJoinCode — runtime environment decides', () => {
     expect(sent.text).toContain(INPUT.code);
     for (const s of spies) expect(s).not.toHaveBeenCalled();
     expect(existsSync(file)).toBe(false);
+  });
+});
+
+describe('deliverJoinCode — each runtime guard is load-bearing (review low 6: a mutant must not survive)', () => {
+  it('`production &&`: a development runtime never sends, even when the provider helper would say "configured"', async () => {
+    // isEmailConfigured() reads process.env: make it true. The passed env is development + a key.
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('RESEND_API_KEY', 're_test_only');
+    const file = join(dir, 'guard-production.json');
+    await deliverJoinCode(INPUT, { NODE_ENV: 'development', RESEND_API_KEY: 're_test_only', JOIN_CODE_FILE: file });
+    expect(sendEmail).not.toHaveBeenCalled(); // without the guard this would send
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ code: INPUT.code });
+  });
+
+  it('`env.RESEND_API_KEY`: a production runtime with no key in env throws, even when the provider helper says "configured"', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('RESEND_API_KEY', 're_test_only');
+    const file = join(dir, 'guard-key.json');
+    await expect(deliverJoinCode(INPUT, { NODE_ENV: 'production', JOIN_CODE_FILE: file })).rejects.toThrow('join code: e-mail provider not configured');
+    expect(sendEmail).not.toHaveBeenCalled(); // without the guard this would send
+    for (const s of spies) expect(s).not.toHaveBeenCalled();
+    expect(existsSync(file)).toBe(false);
+  });
+});
+
+describe('deliverJoinSignInLink — the existing-account e-mail (no code), same runtime rules', () => {
+  const LINK = { to: 'has.account@restaurant.example', url: '/login?callbackUrl=%2Finvite%2Faccept', restaurantName: 'מסעדת בדיקה', locale: 'he' as const };
+
+  it('development runtime + no provider: writes JOIN_SIGNIN_FILE (beside MAGIC_LINK_FILE), sends nothing', async () => {
+    await deliverJoinSignInLink(LINK, { NODE_ENV: 'development', MAGIC_LINK_FILE: join(dir, 'magic-link-s.json') });
+    expect(JSON.parse(readFileSync(join(dir, 'join-signin-s.json'), 'utf8'))).toMatchObject({ to: LINK.to, url: LINK.url });
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('production runtime + no provider: throws, writes and sends nothing', async () => {
+    const file = join(dir, 'signin-prod.json');
+    await expect(deliverJoinSignInLink(LINK, { NODE_ENV: 'production', JOIN_SIGNIN_FILE: file })).rejects.toThrow(
+      'join sign-in link: e-mail provider not configured',
+    );
+    expect(existsSync(file)).toBe(false);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('`production &&` and `env.RESEND_API_KEY` are each load-bearing', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('RESEND_API_KEY', 're_test_only');
+    const devFile = join(dir, 'signin-guard-dev.json');
+    await deliverJoinSignInLink(LINK, { NODE_ENV: 'development', RESEND_API_KEY: 're_test_only', JOIN_SIGNIN_FILE: devFile });
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(existsSync(devFile)).toBe(true);
+    await expect(deliverJoinSignInLink(LINK, { NODE_ENV: 'production' })).rejects.toThrow();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('production runtime + provider configured: sends a link (no 6-digit code) to the invited address', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('RESEND_API_KEY', 're_test_only');
+    await deliverJoinSignInLink(LINK);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    const sent = sendEmail.mock.calls[0]![0];
+    expect(sent.to).toBe(LINK.to);
+    expect(sent.text).toContain(LINK.url);
+    expect(sent.text).not.toMatch(/\b\d{6}\b/);
   });
 });
 

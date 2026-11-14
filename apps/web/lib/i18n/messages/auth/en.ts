@@ -153,12 +153,12 @@ export const en: Shape<typeof he> = {
   passkeys: {
     title: 'Passkey',
     intro: 'Sign in with your fingerprint, face or device PIN, no password.',
-    introWhere: 'The passkey stays on your device, not with us.',
+    introWhere: 'Stored on your device or in your password manager, not with us.',
     notForRole: 'Passkeys are only for owners and bookkeepers.',
     count: '{count, plural, =0 {No passkey on this account yet.} one {One passkey on this account.} other {# passkeys on this account.}}',
     add: 'Add a passkey on this device',
     signIn: 'Sign in with a passkey',
-    failed: "We couldn't use the passkey, try again or sign in with a password.",
+    failed: "We couldn't use the passkey, try again or use a password.",
     back: 'Back to the app',
   },
   codeLogin: {
@@ -174,7 +174,7 @@ export const en: Shape<typeof he> = {
     errors: {
       sendRate: 'We already sent a few codes, use the latest e-mail.',
       wrongCode: "That code doesn't match or has expired, check the latest e-mail.",
-      rate: 'Code sign-in is locked, use your password or an e-mail link.',
+      rate: 'Code sign-in is locked for now, use a password or try later.',
     },
   },
   join: {
