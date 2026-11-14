@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { PDFDocument } from 'pdf-lib';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  and,
   createDb,
   creditNotes,
   discrepancies,
@@ -20,7 +21,7 @@ import { computeLeakHero } from '@restomatch/charts';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { enqueueRecoveryReminders } from '../recovery/reminders';
-import { AUTO_WRITE_OFF_NOTE, listClaims, MAX_CLAIMS, NEVER_CLAIMABLE_NOTE, OVERDUE_DAYS, syncClaims } from '../recovery/service';
+import { AUTO_WRITE_OFF_NOTE, listClaims, materializeClaims, MAX_CLAIMS, NEVER_CLAIMABLE_NOTE, OVERDUE_DAYS, syncClaims } from '../recovery/service';
 import { OVERDUE_BOUNDARY_CASES, OVERDUE_BOUNDARY_NOW } from '../lib/claims';
 import { computeMonthlyReport, ensureMonthlyReport, monthlyReportEmail, monthlyReportWhatsApp, WHATSAPP_MAX } from '../reports/monthly';
 import { renderMonthlyReportPdf } from '../reports/pdf';
@@ -50,6 +51,19 @@ async function dropDiscrepancies(where: ReturnType<typeof eq>) {
     await db.delete(recoveryClaims).where(eq(recoveryClaims.discrepancyId, id));
     await db.delete(discrepancies).where(eq(discrepancies.id, id));
   }
+}
+
+/**
+ * W2-10a: a read no longer creates claims — the decision does. Tests that
+ * start from "an accepted leak has its claim" take that decision step here
+ * (what approve does inside its transaction), instead of relying on a GET.
+ */
+async function claimsAtDecision(...extraIds: string[]) {
+  await materializeClaims(db, {
+    restaurantId: T.restaurantId,
+    discrepancyIds: [T.discrepancyId, ...extraIds],
+    actorId: T.ownerUserId,
+  });
 }
 
 async function setFlags(features: Record<string, boolean>) {
@@ -123,7 +137,9 @@ describe('feature flag', () => {
 
   it('keeps role gates: a receiver cannot read the tracker or the report', async () => {
     await expect(caller('receiver').recovery.summary()).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    await expect(caller('bookkeeper').monthlyReport.preview()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller('receiver').monthlyReport.preview()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    // Owner decision I3 (7.11): the bookkeeper reads the month report, read-only (W3-08).
+    await expect(caller('bookkeeper').monthlyReport.preview()).resolves.toBeTruthy();
     await expect(caller('bookkeeper').recovery.summary()).resolves.toBeTruthy();
   });
 });
@@ -216,6 +232,7 @@ describe('claims', () => {
   });
 
   it('each claim names its discrepancy, and list takes a limit up to MAX_CLAIMS (W1-08 letters pair on the id)', async () => {
+    await claimsAtDecision();
     const c = caller();
     const claims = await c.recovery.list();
     expect(claims.length).toBeGreaterThan(0);
@@ -226,6 +243,7 @@ describe('claims', () => {
   });
 
   it('walks claimed → letter sent → acknowledged → credited (credit note) → recovered', async () => {
+    await claimsAtDecision();
     const c = caller();
     const { summary } = await c.recovery.summary();
     expect(summary.claimedAgorot).toBe(10000);
@@ -264,6 +282,7 @@ describe('claims', () => {
   });
 
   it('matches a later invoice credit line: amount/number/date come from the invoice, used once', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     const [inv] = await db
@@ -293,6 +312,7 @@ describe('claims', () => {
   });
 
   it('refuses a positive line as a credit note and a claim of another supplier', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     await expect(c.recovery.recordCreditNote({ claimIds: [claim!.id], invoiceLineId: T.invoiceLineId })).rejects.toMatchObject({
@@ -431,20 +451,22 @@ describe('monthly report', () => {
     await expect(caller('chef').monthlyReport.pdf({ month: month(), locale: 'he' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
-  it('sendMonthlyReports: freezes last month once, emails managers via the outbox, WhatsApp via the stub', async () => {
+  it('sendMonthlyReports: freezes last month once, e-mails managers via notify(); nothing is "sent" until the dispatcher says so (G-06)', async () => {
     const now = new Date();
     const r1 = await sendMonthlyReports(db, { restaurantId: T.restaurantId, now, appUrl: 'https://app.test' });
-    expect(r1).toMatchObject({ restaurants: 1, emails: 1, whatsapp: 1, skipped: 0 });
+    // No verified phone (G-03 + OTP) → no WhatsApp row at all, instead of a stub "sent".
+    expect(r1).toMatchObject({ restaurants: 1, emails: 1, whatsapp: 0, skipped: 0 });
     const rows = await db.select().from(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, T.restaurantId));
-    const wa = rows.find((r) => r.channel === 'whatsapp')!;
-    expect(wa.status).toBe('sent'); // stub provider: marked sent, nothing left the building
+    expect(rows.filter((r) => r.channel === 'whatsapp')).toHaveLength(0);
+    expect(rows.filter((r) => r.target.startsWith('role:'))).toHaveLength(0);
+    expect(rows.filter((r) => r.status === 'sent')).toHaveLength(0);
     expect(rows.find((r) => r.channel === 'email')!.status).toBe('queued');
     const [stored] = await db.select().from(monthlyReports).where(eq(monthlyReports.restaurantId, T.restaurantId));
-    expect(stored!.sentAt).not.toBeNull();
-    // Second run: already sent → skipped, no new outbox rows.
+    expect(stored!.sentAt).toBeNull(); // only the reconcile sets it, from a row the dispatcher really sent
+    // Second run: nothing new to enqueue → skipped, no new outbox rows.
     const r2 = await sendMonthlyReports(db, { restaurantId: T.restaurantId, now });
     expect(r2).toMatchObject({ emails: 0, whatsapp: 0, skipped: 1 });
-    expect(await db.select().from(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, T.restaurantId))).toHaveLength(2);
+    expect(await db.select().from(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, T.restaurantId))).toHaveLength(rows.length);
   });
 
   it('digest preview (flag monthlyDigestPreview): same numbers as the report, owner recipients, nothing queued', async () => {
@@ -465,7 +487,9 @@ describe('monthly report', () => {
     expect(d.sendOn).toMatch(/^\d{4}-\d{2}-01$/);
     expect(d.subject.length).toBeGreaterThan(0);
     expect(await db.select().from(notificationsOutbox).where(eq(notificationsOutbox.restaurantId, T.restaurantId))).toHaveLength(0);
-    await expect(caller('bookkeeper').monthlyReport.digest()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller('receiver').monthlyReport.digest()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    // Owner decision I3 (7.11): the bookkeeper reads the digest too (W3-08).
+    await expect(caller('bookkeeper').monthlyReport.digest()).resolves.toMatchObject({ data: { month: d.data.month } });
   });
 
   it('sendMonthlyReports skips restaurants without the flag', async () => {
@@ -496,6 +520,7 @@ describe('refuter regressions', () => {
   });
 
   it('parallel credit notes on one claim never over-credit (row lock)', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     const results = await Promise.allSettled(
@@ -515,6 +540,7 @@ describe('refuter regressions', () => {
   });
 
   it('a partly credited claim can be topped up; recovering short books the shortfall as written off', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     await c.recovery.recordCreditNote({ claimIds: [claim!.id], supplierId: T.supplierId, amountAgorot: 6000, issuedOn: '2026-10-10' });
@@ -528,6 +554,7 @@ describe('refuter regressions', () => {
   });
 
   it('re-using a credit line is a CONFLICT, not a 500', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     const [inv] = await db
@@ -574,6 +601,7 @@ describe('bulk transitions', () => {
       .insert(discrepancies)
       .values({ matchRunId: T.matchRunId, restaurantId: T.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '5.00', resolutionStatus: 'accepted' })
       .returning();
+    await claimsAtDecision(extra!.id);
     try {
       const list = await caller().recovery.list();
       const [a, b] = list.map((x) => x.id);
@@ -657,6 +685,7 @@ describe('money cross-QA (S3) regressions', () => {
   });
 
   it('MEDIUM 5: a credit-note number is recorded once per supplier; an idempotency key replays', async () => {
+    await claimsAtDecision();
     const c = caller();
     const [claim] = await c.recovery.list();
     const key = randomUUID();
@@ -676,6 +705,7 @@ describe('money cross-QA (S3) regressions', () => {
       .insert(discrepancies)
       .values({ matchRunId: T.matchRunId, restaurantId: T.restaurantId, type: 'QTY_OVER', severity: 'warn', deltaAmount: '10.00', resolutionStatus: 'accepted' })
       .returning();
+    await claimsAtDecision(extra!.id);
     try {
       const c = caller();
       const claims = await c.recovery.list();
@@ -694,7 +724,14 @@ describe('money cross-QA (S3) regressions', () => {
   it('LOW: a sent snapshot is never rewritten, even with refresh', async () => {
     const now = new Date();
     await sendMonthlyReports(db, { restaurantId: T.restaurantId, now });
+    // G-06: the snapshot is "sent" once the dispatcher really sent a row; the next run reconciles sent_at.
+    await db
+      .update(notificationsOutbox)
+      .set({ status: 'sent', sentAt: now })
+      .where(and(eq(notificationsOutbox.restaurantId, T.restaurantId), eq(notificationsOutbox.relatedEntityType, 'monthly_report')));
+    expect(await sendMonthlyReports(db, { restaurantId: T.restaurantId, now })).toMatchObject({ emails: 0, skipped: 1 });
     const [row] = await db.select().from(monthlyReports).where(eq(monthlyReports.restaurantId, T.restaurantId));
+    expect(row!.sentAt).not.toBeNull();
     await db.update(monthlyReports).set({ snapshot: { ...(row!.snapshot as object), leakAgorot: 1 } }).where(eq(monthlyReports.id, row!.id));
     const again = await ensureMonthlyReport(db, T.restaurantId, (row!.month as string).slice(0, 7), { refresh: true });
     expect(again.data.leakAgorot).toBe(1);
@@ -748,7 +785,14 @@ describe('sendMonthlyReports isolates a failing restaurant (S4 M1)', () => {
     expect(res.failed).toEqual([bad.restaurantId]);
     for (const id of [T.restaurantId, good.restaurantId]) {
       const [stored] = await db.select().from(monthlyReports).where(eq(monthlyReports.restaurantId, id));
-      expect(stored?.sentAt).not.toBeNull();
+      expect(stored).toBeDefined(); // frozen…
+      expect(stored!.sentAt).toBeNull(); // …and honestly not "sent" until the dispatcher sends (G-06)
+      const queued = await db
+        .select()
+        .from(notificationsOutbox)
+        .where(and(eq(notificationsOutbox.relatedEntityId, stored!.id), eq(notificationsOutbox.channel, 'email')));
+      expect(queued.length).toBeGreaterThan(0);
+      expect(queued.every((r) => r.status === 'queued' && !r.target.startsWith('role:'))).toBe(true);
     }
     expect(await db.select().from(monthlyReports).where(eq(monthlyReports.restaurantId, bad.restaurantId))).toHaveLength(0);
   });
@@ -887,5 +931,27 @@ describe('refuter round 4 (S3 fixes)', () => {
     const sm = settle(c.recovery.summary());
     await holder;
     for (const o of await Promise.all([tr, sm])) expect(o).not.toBe('INTERNAL_SERVER_ERROR');
+  });
+});
+
+describe('W2-10: history names the actor (chain-05)', () => {
+  it('returns the actor display name and membership role per step; a system step has neither', async () => {
+    // Own tenant: earlier re-match tests replace T's discrepancy.
+    const X = await seedTenant(db, 'RH');
+    await db.update(restaurants).set({ settings: { features: { all: true } } as never }).where(eq(restaurants.id, X.restaurantId));
+    await db.update(discrepancies).set({ resolutionStatus: 'accepted', resolvedAt: new Date() }).where(eq(discrepancies.id, X.discrepancyId));
+    await materializeClaims(db, { restaurantId: X.restaurantId, discrepancyIds: [X.discrepancyId], actorId: X.ownerUserId });
+    const c = appRouter.createCaller({ db, session: { userId: X.ownerUserId, restaurantId: X.restaurantId, role: 'owner' } } as AppContext);
+    const [claim] = await c.recovery.list();
+    await c.recovery.transition({ items: [{ claimId: claim!.id, expectedStatus: 'claimed' }], to: 'letter_sent' });
+    const history = await c.recovery.history({ claimId: claim!.id });
+    expect(history.map((h) => [h.toStatus, h.actorName, h.actorRole])).toEqual([
+      ['claimed', 'Owner RH', 'owner'],
+      ['letter_sent', 'Owner RH', 'owner'],
+    ]);
+    await db.update(discrepancies).set({ resolutionStatus: 'rejected' }).where(eq(discrepancies.id, X.discrepancyId));
+    await syncClaims(db, X.restaurantId);
+    const last = (await c.recovery.history({ claimId: claim!.id })).at(-1)!;
+    expect(last).toMatchObject({ toStatus: 'written_off', actorId: null, actorName: null, actorRole: null });
   });
 });

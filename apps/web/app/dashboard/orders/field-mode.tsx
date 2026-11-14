@@ -19,19 +19,49 @@ const MOBILE_NAV_LABELS = [
  * Focus Not Obscured (WCAG 2.4.11): a control that takes focus under a sticky task
  * bar (marked `data-field-bar`) is scrolled to the middle. Browsers don't scroll an
  * element that is technically inside the viewport, even when the bar covers it.
+ *
+ * A pointer press focuses on pointerdown, before its click: scrolling then moves the
+ * control out from under the pointer, the release lands elsewhere and the tap is
+ * lost (a catalog item near the bar added nothing). So focus from a pointer waits
+ * for the release; keyboard focus (Tab) still scrolls at once.
  */
 function useFocusClearOfBars() {
   useEffect(() => {
-    const onFocusIn = (e: FocusEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (!el || el.closest('[data-field-bar]')) return;
+    let pressing = false;
+    let pending: HTMLElement | null = null;
+    const clear = (el: HTMLElement) => {
+      if (!el.isConnected || el.closest('[data-field-bar]')) return;
       const bars = [...document.querySelectorAll<HTMLElement>('[data-field-bar]')];
       if (bars.length === 0) return;
       const top = Math.min(...bars.map((b) => b.getBoundingClientRect().top));
       if (el.getBoundingClientRect().bottom > top - 8) el.scrollIntoView({ block: 'center', behavior: 'instant' });
     };
+    const onFocusIn = (e: FocusEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (!el) return;
+      if (pressing) pending = el;
+      else clear(el);
+    };
+    const onDown = () => {
+      pressing = true;
+    };
+    const onUp = () => {
+      pressing = false;
+      const el = pending;
+      pending = null;
+      // After the click has been dispatched to the element that was pressed.
+      if (el) window.setTimeout(() => document.activeElement === el && clear(el), 0);
+    };
     document.addEventListener('focusin', onFocusIn);
-    return () => document.removeEventListener('focusin', onFocusIn);
+    document.addEventListener('pointerdown', onDown, true);
+    document.addEventListener('pointerup', onUp, true);
+    document.addEventListener('pointercancel', onUp, true);
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('pointerdown', onDown, true);
+      document.removeEventListener('pointerup', onUp, true);
+      document.removeEventListener('pointercancel', onUp, true);
+    };
   }, []);
 }
 

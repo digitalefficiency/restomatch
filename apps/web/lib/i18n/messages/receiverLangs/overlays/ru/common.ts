@@ -150,4 +150,37 @@ export const common: Shape<CommonReceiverSlice> = {
     listSep: ', ',
     listLast: ' и ',
   },
+  // W3-03a field components — machine translation, pending native review.
+  field: {
+    scan: {
+      button: 'Сканировать штрихкод', // review
+      scanning: 'Наведите камеру на штрихкод', // review
+      cancel: 'Отмена', // review
+      typeInstead: 'Ввести вручную', // review
+      manualLabel: 'Номер штрихкода', // review
+      manualHint: 'Цифры под полосками', // review
+      submit: 'Подтвердить', // review
+      empty: 'Сначала введите номер', // review
+      found: 'Отсканировано: {code}', // review
+      unsupported: 'Этот телефон не сканирует штрихкоды. Введите номер вручную.', // review
+      denied: 'Нет доступа к камере. Введите номер вручную.', // review
+      failed: 'Сканирование не удалось. Введите номер вручную.', // review
+    },
+    mic: {
+      button: 'Голосовой ввод', // review
+      listening: 'Слушаем… говорите', // review
+      stop: 'Остановить запись', // review
+      cancel: 'Отмена', // review
+      confirmLabel: 'Вот что мы услышали. Исправьте перед подтверждением', // review
+      typedLabel: 'Введите текст', // review
+      confirm: 'Подтвердить', // review
+      retry: 'Записать снова', // review
+      empty: 'Сначала добавьте текст', // review
+      unsupported: 'Этот телефон не поддерживает голосовой ввод. Введите текст.', // review
+      denied: 'Нет доступа к микрофону. Введите текст.', // review
+      offline: 'Нет связи, голосовой ввод сейчас недоступен. Введите текст.', // review
+      noSpeech: 'Мы ничего не услышали. Попробуйте снова или введите текст.', // review
+      failed: 'Голосовой ввод не сработал. Введите текст.', // review
+    },
+  },
 };
