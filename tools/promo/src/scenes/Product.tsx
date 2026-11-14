@@ -1,29 +1,22 @@
 import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
-import { COPY, FACTS, ilsText, Locale } from '../copy';
+import { COPY, ilsText, Locale, SAMPLE } from '../copy';
 import { C, EASE_IN, EASE_IN_OUT, FONT, prog } from '../theme';
 import { zones } from '../layout';
-import { Laptop, laptopScreen, Screen } from '../components/Devices';
+import { Laptop, laptopScreen } from '../components/Devices';
+import { BeatKey, focusRect, ProductScreen } from '../components/ProductScreens';
 import { CaptionZone, Callout, DeviceZone, Spotlight } from '../components/Stage';
 import { Eyebrow, FadeUp, RiseLine } from '../components/primitives';
-import { autoScroll, emailStrip, rectFor } from '../rects';
-
-// Focus rects (units of screenshot width; x0,y0,x1,y1) measured on the captures in public/shots.
-type U = [number, number, number, number];
-const FOCUS: Record<Locale, Record<'hero' | 'beer' | 'appr' | 'claim', U>> = {
-  // beer = product → change columns of the leak-detective row; claim = amount column + total line
-  he: { hero: [0.615, 0.378, 0.89, 0.49], beer: [0.34, 1.012, 0.885, 1.052], appr: [0.58, 0.298, 0.882, 0.366], claim: [0.117, 0.345, 0.5, 0.407] },
-  en: { hero: [0.12, 0.378, 0.38, 0.49], beer: [0.08, 1.054, 0.66, 1.092], appr: [0.118, 0.298, 0.42, 0.366], claim: [0.46, 0.345, 0.883, 0.407] },
-};
 
 // One beat per screen. Within a beat (relative to `push`): camera push 0→28,
 // spotlight opens 22→34 (12 f), holds to 80 (≈1.5 s), closes 80→92, camera pulls back 86→112.
-const BEATS = [
-  { key: 'dashboard', from: 0, focus: 'hero', push: 56, accent: 'danger' as const },
-  { key: 'leaks', from: 172, focus: 'beer', push: 192, accent: 'danger' as const },
-  { key: 'approvals', from: 290, focus: 'appr', push: 310, accent: 'gold' as const },
-  { key: 'claims', from: 408, focus: 'claim', push: 428, accent: 'primary' as const },
-] as const;
+// The screens are drawn from components on the site's sample month (components/ProductScreens).
+const BEATS: { key: BeatKey; from: number; push: number; accent: 'danger' | 'gold' | 'primary' }[] = [
+  { key: 'dashboard', from: 0, push: 56, accent: 'danger' },
+  { key: 'leaks', from: 172, push: 192, accent: 'danger' },
+  { key: 'approvals', from: 290, push: 310, accent: 'danger' },
+  { key: 'claims', from: 408, push: 428, accent: 'gold' },
+];
 const PUSH = 28;
 const SPOT_IN = 22;
 const SPOT_OUT = 80;
@@ -50,13 +43,7 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
   });
   const beat = BEATS[bi];
   const lf = f - beat.push;
-  const shotName = (k: string) => (k === 'dashboard' ? `dashboard-${locale}-full` : `${k}-${locale}`);
-  const focusOf = (b: (typeof BEATS)[number]) => rectFor(shotName(b.key), b.focus, FOCUS[locale][b.focus]);
-  const u = focusOf(beat);
-  // some focus rows sit below the first viewport: scroll the page there before the push-in
-  const scrollOf = (b: (typeof BEATS)[number]) => autoScroll(focusOf(b));
-  const scrollU = scrollOf(beat) * prog(lf, -16, 0, EASE_IN_OUT);
-  const rect = { x: u[0] * sw, y: (u[1] - scrollU) * sw, w: (u[2] - u[0]) * sw, h: (u[3] - u[1]) * sw };
+  const rect = focusRect(beat.key, locale, sw);
 
   // camera push-in: the focus rect fills the device zone
   const target = Math.min((device.w * 0.9) / rect.w, (device.h * 0.62) / rect.h, 3.4);
@@ -74,38 +61,36 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
 
   const spot = prog(lf, SPOT_IN, SPOT_IN + 12) * (1 - prog(lf, SPOT_OUT, SPOT_OUT + 12));
 
-  const shot = (k: string) => (k === 'dashboard' ? `shots/dashboard-${locale}-full.png` : `shots/${k}-${locale}.png`);
   const wipe = bi > 0 ? prog(f, beat.from, beat.from + 16, EASE_IN_OUT) : 1;
-  const fallbackStrip = isRtl ? { y: 0.027, h: 0.013, x: 0.72, w: 0.21 } : { y: 0.027, h: 0.013, x: 0.075, w: 0.21 };
-  const redactFor = (k: string) => [emailStrip(shotName(k), fallbackStrip)];
+  const screen = (k: BeatKey) => <ProductScreen beat={k} locale={locale} sw={sw} sh={sh} />;
   const d = isRtl ? 'rtl' : 'ltr';
 
   const callouts: Record<string, React.ReactNode> = {
     dashboard: (
       <>
         <span>{t.chipLeak}</span>
-        <bdi dir={d} style={{ color: C.danger }}>{ilsText(FACTS.leak, locale)}</bdi>
+        <bdi dir={d} style={{ color: C.danger }}>{ilsText(SAMPLE.leak, locale)}</bdi>
         <span style={{ color: C.muted, fontWeight: 500 }}>
-          · <bdi dir="ltr">{FACTS.leakPct}</bdi> {t.chipPct}
+          · <bdi dir="ltr">{`${SAMPLE.leakPct}%`}</bdi>{t.chipPct ? ` ${t.chipPct}` : ''}
         </span>
       </>
     ),
     leaks: (
       <span>
-        {t.chipBeer.replace('{from}', ilsText(FACTS.beerFrom, locale)).replace('{to}', ilsText(FACTS.beerTo, locale))}{' '}
+        {t.chipBeer.replace('{from}', ilsText(520, locale)).replace('{to}', ilsText(575, locale))}{' '}
         <bdi dir="ltr" style={{ color: C.danger }}>+10.6%</bdi>
       </span>
     ),
     approvals: (
       <>
         <span>{t.chipAppr}</span>
-        <bdi dir={d} style={{ color: C.gold }}>{ilsText(104.8, locale, 2)}</bdi>
+        <bdi dir={d} style={{ color: C.danger }}>{ilsText(SAMPLE.decide.amount, locale)}</bdi>
       </>
     ),
     claims: (
       <>
         <span>{t.chipClaim}</span>
-        <bdi dir={d} style={{ color: C.primary }}>{ilsText(104.8, locale, 2)}</bdi>
+        <bdi dir={d} style={{ color: C.gold }}>{ilsText(SAMPLE.credit.amount, locale)}</bdi>
       </>
     ),
   };
@@ -133,14 +118,8 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
           }}
         >
           <Laptop width={W} glare={ry / 20}>
-            {bi > 0 ? <Screen src={shot(BEATS[bi - 1].key)} width={sw} scroll={scrollOf(BEATS[bi - 1]) * sw} redact={redactFor(BEATS[bi - 1].key)} /> : null}
-            <Screen
-              src={shot(beat.key)}
-              width={sw}
-              scroll={scrollU * sw}
-              redact={redactFor(beat.key)}
-              clip={bi > 0 ? (isRtl ? `inset(0 0 0 ${(1 - wipe) * 100}%)` : `inset(0 ${(1 - wipe) * 100}% 0 0)`) : undefined}
-            />
+            {bi > 0 ? <div style={{ position: 'absolute', inset: 0 }}>{screen(BEATS[bi - 1].key)}</div> : null}
+            <div style={{ position: bi > 0 ? 'absolute' : 'relative', inset: 0, clipPath: bi > 0 ? (isRtl ? `inset(0 0 0 ${(1 - wipe) * 100}%)` : `inset(0 ${(1 - wipe) * 100}% 0 0)`) : undefined }}>{screen(beat.key)}</div>
             {bi > 0 && wipe < 1 ? (
               <div
                 style={{
@@ -154,7 +133,7 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
                 }}
               />
             ) : null}
-            <Spotlight rect={rect} a={spot} src={shot(beat.key)} imgWidth={sw} imgTop={-scrollU * sw} screenW={sw} screenH={sh} accent={C[beat.accent]} />
+            <Spotlight rect={rect} a={spot} content={screen(beat.key)} imgWidth={sw} imgTop={0} screenW={sw} screenH={sh} accent={C[beat.accent]} />
           </Laptop>
         </div>
       </DeviceZone>

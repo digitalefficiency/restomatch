@@ -38,6 +38,18 @@ Landing hero loop (for S6): 12 s, 1280×720, silent; the real dashboard on a slo
 one scan-beam pass, three floating chips (₪760 · 1.8% · ₪296) and a small "נתוני הדגמה" label.
 Every motion is periodic in the 360-frame loop → seamless.
 
+## Sample month (2026-11) / חודש הדוגמה
+
+Since the public release, the 60 s films show the site's ONE sample month, not the demo seed: `src/sample.ts`
+mirrors `apps/web/app/(marketing)/_components/sampleMonth.ts` and `scripts/check-sample.mjs` pins it (run by
+`verify.sh`). Leak ₪2,250 = 1.5% of ₪150,000 purchases; 35 invoices checked · 13 with a gap; awaiting your
+decision ₪910 (2 gaps, incl. the ₪104.80 draft-beer-keg example); credit requests to send ₪720 (3 gaps);
+caught before payment ₪1,530; ₪620 approved for offset. The product beats are drawn from components
+(`components/ProductScreens.tsx`, light tokens, Heebo) instead of demo-seed screenshots; every frame carries a
+"דוגמה · מספרים להמחשה / Sample · illustrative figures" tag; no target line; partner wording toward suppliers
+("בקשת זיכוי", "אושר לבקשת זיכוי" — never "דרישה/נדרש"). The chains beat is out (the sample month has no branch
+figures). The tables below describe the earlier demo-seed cut.
+
 ## Sources of every number / מקור לכל מספר
 
 All demo figures are from the seeded demo tenant **"כפר הזיתים"** (`./scripts/dev-setup.sh`, seed run
