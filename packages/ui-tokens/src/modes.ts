@@ -7,7 +7,7 @@
 import { cellPx, dials, gutterPage, rowConstants, type DialMode } from './components';
 import { activeFonts } from './fonts';
 import { chrome, radiusRolesV2, typeScaleV2, type TypeStep } from './scale';
-import { action, border, dataVizV2, emphasis, moneyMarker, surfaceV2, text, textV2 } from './semantic';
+import { action, border, dataVizV2, emphasis, indicator, moneyMarker, status, surfaceV2, text, textV2, type StatusFamily } from './semantic';
 
 export interface VarBlock {
   comment?: string;
@@ -25,6 +25,7 @@ export function colorVarsV2(): Record<string, string> {
     'surface-raised': surfaceV2.raised,
     'surface-overlay': surfaceV2.overlay,
     'surface-selected': surfaceV2.selected,
+    'surface-hover': surfaceV2.hover,
     'text-primary': textV2.primary,
     'text-secondary': textV2.secondary,
     'text-tertiary': textV2.tertiary,
@@ -50,6 +51,9 @@ export function colorVarsV2(): Record<string, string> {
     'emphasis-t1-rail': emphasis.t1Rail,
     'emphasis-t2-rail': emphasis.t2Rail,
     'money-marker': moneyMarker,
+    // DS3: every family's indicator and the warn dot's ring (never text; see build.ts dotKeys()).
+    ...Object.fromEntries((['primary', 'danger', 'warn', 'gold', 'info', 'neutral'] as StatusFamily[]).map((f) => [`${f}-dot`, status[f].dot])),
+    'warn-dot-ring': indicator.warnRing,
     ...Object.fromEntries(dataVizV2.categorical.map((hex, i) => [`viz-cat-${i + 1}`, hex])),
     'viz-up': dataVizV2.up,
     'viz-down': dataVizV2.down,
@@ -91,6 +95,15 @@ function dialVars(mode: DialMode, fallbackToDefault: boolean): Record<string, st
   return out;
 }
 
+/** The default value of every dial that compact re-binds (the coarse-pointer floor). */
+function compactDialDefaults(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, byMode] of Object.entries(dials)) {
+    if (byMode.compact !== undefined && byMode.default !== undefined) out[`--${name}`] = px(byMode.default);
+  }
+  return out;
+}
+
 /** Every v2 variable block, in emission order. */
 export function v2Blocks(): VarBlock[] {
   const rows = rowConstants();
@@ -118,7 +131,8 @@ export function v2Blocks(): VarBlock[] {
     '--cell-px': px(cell.default),
     '--radius-xs': radiusRolesV2.xs,
     '--radius-chip': radiusRolesV2.chip,
-    '--ring-selected': 'inset 0 0 0 2px rgb(var(--c-action-primary-bg))',
+    // DS3 SPEC §2: selection is a state of the interface — sea, never the brand.
+    '--ring-selected': 'inset 0 0 0 2px rgb(var(--c-info))',
     '--gutter-page': px(gutterPage.base),
   });
   for (const [k, v] of Object.entries(chrome)) root[`--chrome-${k}`] = v;
@@ -137,6 +151,14 @@ export function v2Blocks(): VarBlock[] {
     { selector: "[data-density='compact']", vars: { ...typeVars(starred), ...dialVars('compact', false), '--cell-px': px(cell.compact) } },
     { selector: "[data-density='default']", vars: { ...typeVars(base), ...dialVars('default', false), '--cell-px': px(cell.default) } },
     { selector: "[data-density='touch']", vars: { ...typeVars(base), ...dialVars('touch', false), '--cell-px': px(cell.touch) } },
+    {
+      // DS3 SPEC §7: on a phone density is fixed, so a coarse pointer undoes compact's type steps and
+      // dials (no compact text or 32 px control under a thumb). `--cell-px` keeps its v1 behaviour.
+      comment: 'DS3: density is fixed on a phone — compact type steps and dials fall back to default under a coarse pointer.',
+      media: '(pointer: coarse)',
+      selector: "[data-density='compact']",
+      vars: { ...typeVars(base), ...compactDialDefaults() },
+    },
     {
       comment: 'DS2 field mode (C6): field type steps, ≥8.2:1 secondary text, no tertiary, field borders.',
       selector: "[data-mode='field']",

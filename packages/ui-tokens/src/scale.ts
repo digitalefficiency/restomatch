@@ -11,7 +11,7 @@ type FontSize = [string, { lineHeight: string; fontWeight?: string; letterSpacin
 /**
  * Closed type scale (R-15). Sizes are rem so they follow the browser's font
  * size (a11y-16). `caption` and `metric-hero` read CSS variables: field mode
- * raises caption to 14/20 and the hero drops to 40/44 below md (tokens.css).
+ * raises caption to 14/20 and the hero drops to 40/44 below md (the generated block of globals.css).
  */
 export const typeRoles: Record<string, FontSize> = {
   caption: ['var(--fs-caption)', { lineHeight: 'var(--lh-caption)' }], // 12/16 · 14/20 in field mode
@@ -63,18 +63,25 @@ export const legacyRadius = {
   full: '9999px',
 } as const;
 
-const CARD_SHADOW = '0 1px 2px rgba(15,31,23,0.06), 0 8px 24px -12px rgba(15,31,23,0.12)';
+/** Shadows are tinted with the ink (`text.ink` #121C17; a unit test keeps the two equal). */
+export const SHADOW_INK = '18 28 23';
 
-/** Elevation: e0 = border only (no shadow) · e1 raised · e2 overlay · e3 modal (+ scrim). */
+/** DS3 (SPEC §4): one resting shadow (a card: white, 1 px `line` border, this) … */
+const SH1 = `0 1px 2px rgb(${SHADOW_INK} / .05)`;
+/** … and one floating shadow (toast, sheet, flyout, palette, dialog), with no border. */
+const SH2 = `0 2px 6px rgb(${SHADOW_INK} / .06), 0 12px 28px -10px rgb(${SHADOW_INK} / .18)`;
+const CARD_SHADOW = SH1;
+
+/** Elevation: e0 = border only (no shadow) · e1 resting card · e2 floating layer · e3 modal (e2's shadow over the scrim). */
 export const elevation = {
   e0: 'none',
   e1: CARD_SHADOW,
-  e2: '0 8px 16px -4px rgba(15,31,23,.16), 0 0 1px rgba(15,31,23,.24)',
-  e3: '0 20px 24px -8px rgba(15,31,23,.22), 0 0 1px rgba(15,31,23,.24)',
+  e2: SH2,
+  e3: SH2,
 } as const;
 
 /** Scrim behind e3 surfaces. */
-export const scrim = 'rgba(15,31,23,.48)';
+export const scrim = `rgb(${SHADOW_INK} / .48)`;
 
 /**
  * v1 shadows — deprecated. `card` = e1; the `glow-*` names are the dark-era
@@ -90,9 +97,10 @@ export const legacyShadow = {
   inner: 'inset 0 2px 4px 0 rgb(0 0 0 / 0.05)',
   none: 'none',
   card: CARD_SHADOW,
-  'glow-primary': '0 0 0 1px rgb(var(--c-primary) / 0.28), 0 1px 2px rgba(15,31,23,0.06), 0 8px 24px -12px rgba(15,31,23,0.14)',
-  'glow-danger': '0 0 0 1px rgb(var(--c-danger) / 0.30), 0 1px 2px rgba(15,31,23,0.06), 0 8px 24px -12px rgba(184,15,42,0.16)',
-  'glow-gold': '0 0 0 1px rgb(var(--c-gold) / 0.28), 0 1px 2px rgba(15,31,23,0.06), 0 8px 24px -12px rgba(15,31,23,0.14)',
+  // The glows keep their v1 geometry; their colours now read the roles (no literal colour).
+  'glow-primary': `0 0 0 1px rgb(var(--c-primary) / 0.28), 0 1px 2px rgb(${SHADOW_INK} / 0.06), 0 8px 24px -12px rgb(${SHADOW_INK} / 0.14)`,
+  'glow-danger': `0 0 0 1px rgb(var(--c-danger) / 0.30), 0 1px 2px rgb(${SHADOW_INK} / 0.06), 0 8px 24px -12px rgb(var(--c-danger) / 0.16)`,
+  'glow-gold': `0 0 0 1px rgb(var(--c-gold) / 0.28), 0 1px 2px rgb(${SHADOW_INK} / 0.06), 0 8px 24px -12px rgb(${SHADOW_INK} / 0.14)`,
 } as const;
 
 /** Motion (R-10). Exits run at 0.5–0.7× the entrance. `transition-all` is deprecated. */
@@ -209,14 +217,19 @@ const t = (fs: number, lh: number): TypeStep => ({ fs: `${fs / 16}rem`, lh: `${l
 export const typeScaleV2: Record<string, TypeRoleV2> = {
   cell: { base: t(14, 22), compact: t(13, 20), field: t(16, 24), fw: 400, ls: '0' },
   'title-sm': { base: t(16, 24), field: t(18, 26), fw: 600, ls: '0' },
-  'title-md': { base: t(20, 28), field: t(20, 28), fw: 600, ls: '0' },
-  'title-lg': { base: t(24, 32), field: t(22, 30), fw: 600, ls: '0' },
+  // DS3 SPEC §7: in compact density a screen title is 20/26 (★ from DS3; nothing reads these roles yet).
+  'title-md': { base: t(20, 28), compact: t(20, 26), field: t(20, 28), fw: 600, ls: '0' },
+  'title-lg': { base: t(24, 32), compact: t(20, 26), field: t(22, 30), fw: 600, ls: '0' },
   'money-dense': { base: t(14, 22), compact: t(13, 20), field: t(16, 24), fw: 400, ls: '0' },
   'money-row': { base: t(16, 24), compact: t(14, 20), field: t(18, 26), fw: 600, ls: '0' },
   'money-card': { base: t(28, 36), compact: t(24, 32), field: t(28, 36), fw: 700, ls: '-0.01em' },
   'money-hero': { base: t(56, 64), phone: t(40, 48), field: t(40, 48), fw: 700, ls: '-0.01em' },
   'qty-field': { base: t(20, 28), fw: 700, ls: '0' },
   id: { base: t(13, 20), compact: t(12, 16), field: t(14, 20), fw: 500, ls: '0' },
+  // DS3 SPEC §3/§7: a queue row's title and amount (14/20 → 14/18 compact) and its sub-line
+  // (13/18 → 12/16 compact). No DS2 role has these steps; nothing reads them yet.
+  'row-title': { base: t(14, 20), compact: t(14, 18), field: t(16, 24), fw: 500, ls: '0' },
+  'row-sub': { base: t(13, 18), compact: t(12, 16), field: t(14, 20), fw: 400, ls: '0' },
   kbd: { base: t(12, 16), fw: 500, ls: '0' },
   'display-sm': { base: t(36, 44), phone: t(32, 40), fw: 700, ls: '-0.02em' },
   'display-md': { base: t(48, 56), phone: t(40, 48), fw: 700, ls: '-0.02em' },

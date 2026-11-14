@@ -20,7 +20,7 @@ export const METRICS: Record<string, Metric> = {
   dir_ltr: { why: 'N4: never wrap a Hebrew ₪ string in dir="ltr"', pattern: /\bdir=["']ltr["']/g, ext: TS },
   v1_opacity_tints: {
     why: 'C7: /N status tints move to the -subtle roles',
-    pattern: /\b(?:bg|border|ring|text|fill|stroke|outline|divide|from|via|to)-(?:primary|danger|warn|gold|info|neutral)(?:-[a-z]+)*\/\d+\b/g,
+    pattern: /\b(?:bg|border|ring|text|fill|stroke|outline|divide|from|via|to)-(?:primary|danger|warn|gold|ok|info|neutral)(?:-[a-z]+)*\/\d+\b/g,
     ext: TS,
   },
   hex_in_tsx: { why: 'colours come from tokens', pattern: /#[0-9A-Fa-f]{6}\b/g, ext: ['.tsx'] },

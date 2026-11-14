@@ -35,7 +35,7 @@ const FAMILIES: StatusFamily[] = ['primary', 'danger', 'warn', 'gold', 'info', '
 /** Every colour variable, by name (without the `--c-` prefix). */
 export function colorVars(): Record<string, string> {
   const vars: Record<string, string> = {
-    // v1 names — unchanged values, still consumed by every page.
+    // v1 names — still consumed by every page; DS3 re-valued them (the clean finish).
     bg: surfaces.canvas,
     surface: surfaces.surface,
     'surface-2': surfaces.sunken,
@@ -142,7 +142,8 @@ export function cssVariables(): string {
     '  }',
     '}',
   );
-  // DS2 phase 1 (additive): the v1 lines above are byte-for-byte unchanged.
+  // DS2 phase 1 was additive; DS3 (the clean finish) re-valued the v1 lines above on purpose —
+  // their recorded baseline is __tests__/fixtures/v1-token-block.css (re-recorded, owner-signed).
   // DS2 phase 2 (β): the self-hosted faces and their measured fallbacks.
   if (ACTIVE_FACE !== 'heebo') lines.push(fontFaceCss());
   lines.push(v2Css(), TOKENS_END);
@@ -175,6 +176,18 @@ function family(f: StatusFamily) {
 }
 
 /**
+ * DS3 indicators (`bg-danger-dot`, `border-gold-dot`, `ring-warn-dot-ring`, `fill-info-dot` …):
+ * a dot, a bar, a tick's fill. Deliberately NOT under `colors`, so `text-warn-dot` (1.98:1) and
+ * the other text utilities never exist — an indicator is never text.
+ */
+function dotKeys(): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = Object.fromEntries(FAMILIES.map((f) => [f, { dot: v(`${f}-dot`) }]));
+  out.warn!['dot-ring'] = v('warn-dot-ring');
+  out.ok = { dot: v('gold-dot') };
+  return out;
+}
+
+/**
  * Tailwind preset. `fontSize`, `borderRadius`, `boxShadow`, `transitionDuration`
  * and `transitionTimingFunction` are REPLACED (roles + deprecated v1 keys);
  * colours, layers and containers extend Tailwind's defaults.
@@ -189,7 +202,7 @@ export const tailwindPreset = {
     extend: {
       colors: {
         bg: v('bg'),
-        surface: { DEFAULT: v('surface'), sunken: v('surface-sunken'), selected: v('surface-selected'), raised: v('surface-raised'), overlay: v('surface-overlay') },
+        surface: { DEFAULT: v('surface'), sunken: v('surface-sunken'), selected: v('surface-selected'), raised: v('surface-raised'), overlay: v('surface-overlay'), hover: v('surface-hover') },
         'surface-2': v('surface-2'),
         line: { DEFAULT: v('line'), strong: v('line-strong'), field: v('line-field'), rule: v('border-rule') },
         ink: v('ink'),
@@ -202,6 +215,8 @@ export const tailwindPreset = {
         danger: family('danger'),
         warn: family('warn'),
         gold: family('gold'),
+        // DS3: `ok` names the T3 family by meaning for new code (SPEC §2 `--ok`); same variables as `gold`.
+        ok: family('gold'),
         info: family('info'),
         neutral: family('neutral'),
         ...Object.fromEntries(dataViz.categorical.map((_, i) => [`viz-${i + 1}`, v(`viz-${i + 1}`)])),
@@ -232,9 +247,15 @@ export const tailwindPreset = {
             .map((k) => [k, v(k)]),
         ),
       },
+      // DS3 indicators: fills, borders, rings and SVG paint only (see dotKeys()).
+      backgroundColor: dotKeys(),
+      ringColor: dotKeys(),
+      fill: dotKeys(),
+      stroke: dotKeys(),
       // `border-danger-subtle` is the decorative border role, not the subtle fill.
       borderColor: {
-        ...Object.fromEntries(FAMILIES.map((f) => [f, { subtle: v(`${f}-border-subtle`) }])),
+        ...Object.fromEntries(FAMILIES.map((f) => [f, { subtle: v(`${f}-border-subtle`), ...dotKeys()[f] }])),
+        ok: { subtle: v('gold-border-subtle'), dot: v('gold-dot') },
         // DS2: the only routes to a danger/warn rail (`border-s-t1`, `border-s-t2`).
         t1: v('emphasis-t1-rail'),
         t2: v('emphasis-t2-rail'),
