@@ -4,7 +4,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { X, XCircle } from 'lucide-react';
 import { useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
-import { cnMerge as cn } from './cn';
 import { AnnouncerProvider, useAnnounce } from './feedback/LiveRegion';
 
 export type ToastKind = 'success' | 'error' | 'info';

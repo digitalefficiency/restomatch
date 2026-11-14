@@ -58,9 +58,13 @@ export const SURFACE_TONE: Record<Tone, string> = {
 /** The quiet parts of a money figure: the ₪ sign and the agorot (SPEC §3). */
 export const MONEY_QUIET = 'text-fg-tertiary';
 
-/** The pill's shell (SPEC §5: a 22 px pill, 12 px word, weight 500; DS2's chip height role). */
+/**
+ * The pill's shell (SPEC §5: 12 px word, weight 500). Its height is DS2's chip role (`--chip-h`: 24 px,
+ * 20 compact); SPEC §5 draws 22 — a token change requested from DS3-00, not a value written here.
+ * A real border, so forced-colours mode keeps the outline (SPEC §4).
+ */
 export const PILL_SHELL =
   'inline-flex max-w-full items-center gap-1.5 border text-caption font-medium min-h-[var(--chip-h)] px-2';
 
 /** The dot inside a pill. */
-export const PILL_DOT = 'size-1.5 shrink-0 rounded-full';
+export const PILL_DOT = 'inline-block size-1.5 shrink-0 rounded-full forced-color-adjust-none';

@@ -149,7 +149,7 @@ describe('the status pill (kit "סטטוס", SPEC §2 tiers)', () => {
   it('renders a 6 px dot by default, an explicit icon instead, or nothing with icon={null}', () => {
     const dot = render(h(StatusChip, { tone: 'warn', label: 'ממתינה לתשובה' }));
     expect(dot).toContain('data-pill="warn"');
-    expect(dot).toMatch(/data-dot="warn" class="size-1\.5 shrink-0 rounded-full bg-warn-bold"/);
+    expect(dot).toMatch(/data-dot="warn" class="inline-block size-1\.5 shrink-0 rounded-full forced-color-adjust-none bg-warn-bold"/);
     expect(render(h(StatusChip, { tone: 'neutral', label: 'x', icon: null }))).not.toContain('data-dot');
   });
 
@@ -208,10 +208,21 @@ describe('<MatchStrip>: ordered · received · billed in one line', () => {
     expect(html).toMatch(/data-gap=""[^>]*class="[^"]*text-warn/);
   });
 
-  it('unknown is "אין", never 0; at the dock the billed cell is left out', () => {
+  it('unknown is never 0: a quantity not counted says so, a missing price is "אין"; the dock leaves billed out', () => {
     const dock = render(h(MatchStrip, { ordered: 12, received: null }));
-    expect(textOf(dock)).toContain('אין');
+    expect(textOf(dock)).toContain('לא נספר');
     expect(dock).not.toContain('data-cell="billed"');
+    const price = render(h(MatchStrip, { kind: 'price', ordered: 10, received: null, billed: 11 }));
+    expect(textOf(price)).toContain('אין');
+  });
+
+  it('an off cell never changes the strip height; a ₪ gap is drawn through <Money> in ink', () => {
+    const plain = render(h(MatchStrip, { ordered: 1, received: 1, billed: 1 }));
+    const off = render(h(MatchStrip, { ordered: 1, received: 1, billed: 2, off: 'billed', gap: { value: 52.4, kind: 'ils', direction: 'more' } }));
+    for (const html of [plain, off]) for (const m of html.matchAll(/data-cell="\w+"[^>]*class="([^"]*)"/g)) expect(m[1]).toContain('border ');
+    expect(off).toContain('[&amp;_[data-money-figure]]:text-fg');
+    expect(off).toContain('data-money-figure');
+    expect(textOf(off)).toContain('יותר ב־');
   });
 
   it('a gap passed as a node stays audible where it stands', () => {
@@ -434,5 +445,61 @@ describe('icons: Lucide plus four product glyphs, and the two-tone state (SPEC �
     expect(leak).toContain('fill-opacity:var(--i-duo, 0)');
     expect(render(h(Icon, { as: CreditGlyph }))).toContain('rtl:-scale-x-100');
     for (const g of [MatchGlyph, ReceiptGlyph]) expect(render(h(Icon, { as: g, label: 'x' }))).toContain('role="img"');
+  });
+});
+
+describe('tabs, filters and controls (kit "לשוניות ומסננים", SPEC §5)', () => {
+  it('Tabs say their count also at zero, as a quiet number; the current tab has an ink underline', async () => {
+    const { Tabs } = await import('../form/Tabs');
+    const html = render(
+      h(Tabs, {
+        label: 'תצוגות',
+        items: [
+          { href: '?v=a', label: 'להחלטה', count: 4, current: true },
+          { href: '?v=b', label: 'לבדיקה', count: 0 },
+        ],
+      }),
+    );
+    expect(textOf(html)).toContain('להחלטה4');
+    expect(textOf(html)).toContain('לבדיקה0');
+    expect(html).toMatch(/aria-current="page" class="[^"]*border-fg text-fg/);
+    expect(html).toContain('[@media(pointer:coarse)]:min-h-11');
+  });
+
+  it('an active filter chip stays on screen with a remove button named after it', async () => {
+    const { FilterChip } = await import('../form/FilterChip');
+    const html = render(h(FilterChip, { label: 'ספק: ירקות השרון', active: true, onRemove: () => {} }));
+    expect(html).toContain('aria-label="הסרת הסינון ספק: ירקות השרון"');
+    expect(html).not.toContain('bg-primary-subtle');
+  });
+
+  it('Switch: role=switch, the row is its label, the state written beside it, no opacity when disabled', async () => {
+    const { Switch } = await import('../form/Switch');
+    const html = render(h(Switch, { checked: true, onCheckedChange: () => {}, label: 'קיצורים בתו אחד', hint: 'J ו־K לתנועה' }));
+    expect(html).toMatch(/<label for="sw-[^"]+" data-switch=""/);
+    expect(html).toContain('role="switch" aria-checked="true"');
+    expect(html).toMatch(/aria-labelledby="sw-[^"]+-label" aria-describedby="sw-[^"]+-hint"/);
+    expect(textOf(html)).toContain('פעיל');
+    const off = render(h(Switch, { checked: false, disabled: true, onCheckedChange: () => {}, label: 'x' }));
+    expect(off).not.toMatch(/opacity/);
+    expect(textOf(off)).toContain('כבוי');
+  });
+
+  it('NumberField holds its limits and says them; steppers stop at the limits', async () => {
+    const { NumberField } = await import('../form/NumberField');
+    const html = render(h(NumberField, { value: 20, min: 0, max: 20, onValueChange: () => {}, label: 'סף כמות', unit: '%' }));
+    expect(textOf(html)).toContain('בין 0 ל־20');
+    expect(html).toMatch(/aria-label="הוספה"[^>]*disabled=""|disabled=""[^>]*aria-label="הוספה"/);
+    expect(html).toMatch(/aria-describedby="nf-[^"]+-limits"/);
+    expect(html).not.toMatch(/aria-valuemin/);
+  });
+
+  it('Tooltip is decorative, dark, with an optional key cap; the control keeps its own name', async () => {
+    const { Tooltip } = await import('../Tooltip');
+    const html = render(h(Tooltip, { label: 'הגדרות', kbd: 'G S' }, h('button', { 'aria-label': 'הגדרות' }, 'x')));
+    expect(html).toMatch(/<span aria-hidden="true" class="invisible absolute/);
+    expect(html).toContain('bg-fg');
+    expect(html).toContain('group-hover/tip:delay-500');
+    expect(html).toContain('<kbd');
   });
 });

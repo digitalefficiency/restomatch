@@ -6,6 +6,7 @@ import type { Locale } from '@/lib/i18n/config';
 import { formatNumber } from '@/lib/i18n/format';
 import { formatIls } from '@/lib/money';
 import { cn } from '../cn';
+import { splitMoney } from '../money/format';
 import { deskCopy } from './copy';
 import type { CellState } from './types';
 
@@ -74,9 +75,19 @@ export function NumValue({ value, kind = 'money', decimals, state, onRetry }: Om
   if (value == null) return <CellStateView state={state ?? 'na'} onRetry={onRetry} />;
   if (kind === 'money') {
     const d = decimals ?? 2;
+    // DS3 (SPEC §3, kit "טבלה"): the agorot are quiet. Same text, cut — never rebuilt.
+    const parts = splitMoney(formatMoneyFigure(value, d, locale), d);
     return (
       <span title={formatIls(value / 100, { maximumFractionDigits: 2, locale })}>
-        {formatMoneyFigure(value, d, locale)}
+        {parts.map((p, i) =>
+          p.kind === 'dec' ? (
+            <span key={i} data-money="dec" className="text-fg-tertiary">
+              {p.text}
+            </span>
+          ) : (
+            p.text
+          ),
+        )}
       </span>
     );
   }

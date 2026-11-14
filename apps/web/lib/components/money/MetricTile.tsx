@@ -58,7 +58,16 @@ export function MetricTile({
       ) : unavailable ? (
         <p className="text-body-sm text-muted">{unavailable}</p>
       ) : (
-        <div data-num className={cn('min-w-0 break-words text-metric-lg', NUM_ALIGN, state ? FIGURE[moneyStates[state].figure] : 'text-ink')}>
+        <div
+          data-num
+          className={cn(
+            'min-w-0 break-words text-metric-lg',
+            NUM_ALIGN,
+            state ? FIGURE[moneyStates[state].figure] : 'text-ink',
+            // A coloured figure keeps one colour: a <Money split> inside it does not grey its ₪ and agorot.
+            state && moneyStates[state].figure !== 'ink' && '[&_[data-money]]:text-inherit',
+          )}
+        >
           {value}
         </div>
       )}
