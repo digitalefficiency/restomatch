@@ -601,12 +601,39 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
 
 /* ═══════════════════════════════ C. receiver ═══════════════════════════════ */
 
+/**
+ * DS3-05: test C walks today's order of steps (the photo first, the quantity
+ * pre-filled). The demo restaurant's `features.all` turns the count-first flag
+ * (`dockCountFirst`) on, so the test pins it off for the order's restaurant and
+ * the file puts it back.
+ */
+let restoreCountFirst: (() => Promise<unknown>) | undefined;
+test.afterAll(async () => {
+  await restoreCountFirst?.();
+  restoreCountFirst = undefined;
+});
+const SETTINGS_OBJ = `(case jsonb_typeof(settings) when 'object' then settings when 'string' then (settings #>> '{}')::jsonb else '{}'::jsonb end)`;
+async function pinCountFirstOff(poId: string) {
+  const [row] = await withDb((sql) => sql<{ id: string; prev: string | null }[]>`
+    select r.id, ${sql.unsafe(SETTINGS_OBJ)} #>> '{features,dockCountFirst}' as prev
+    from restaurants r join purchase_orders p on p.restaurant_id = r.id where p.id = ${poId}`);
+  if (!row) return;
+  await withDb((sql) => sql`update restaurants set settings = jsonb_set(${sql.unsafe(SETTINGS_OBJ)}, '{features,dockCountFirst}', 'false'::jsonb, true) where id = ${row.id}`);
+  restoreCountFirst ??= () =>
+    withDb((sql) =>
+      row.prev === null
+        ? sql`update restaurants set settings = ${sql.unsafe(SETTINGS_OBJ)} #- '{features,dockCountFirst}' where id = ${row.id}`
+        : sql`update restaurants set settings = jsonb_set(${sql.unsafe(SETTINGS_OBJ)}, '{features,dockCountFirst}', ${row.prev}::jsonb, true) where id = ${row.id}`,
+    );
+}
+
 test('C · receiver: HaSharon Produce → photo → OCR → review → Delivery Check → confirm', async ({ page, browser }, info) => {
   test.skip(!STUB, 'DEMO_STUB_URL unset — the dev OCR stub only runs outside NODE_ENV=production');
   const L = localeOf(info);
   const r = M[L].receiving;
   const errors = watchErrors(page);
   const { original, clone } = await hasharonOrders(info.project.name);
+  await pinCountFirstOff(clone);
 
   await test.step('/login?lang=… as the receiver', async () => {
     await login(page, STUB!, RECEIVER, L);
@@ -701,6 +728,10 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → Delivery 
       update purchase_orders c set expected_delivery_at = o.expected_delivery_at
       from purchase_orders o where c.id = ${clone} and o.id = ${original}`);
     await page.getByTestId('close-receipt').click();
+    // DS3-05: a hand count outside the tolerance is a gap — the short check before closing names it.
+    const check = page.getByTestId('close-check');
+    await expect(check.or(page.getByTestId('receipt-confirmed'))).toBeVisible({ timeout: 30_000 });
+    if (await check.isVisible()) await page.getByTestId('close-confirm').click();
     await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('heading', { name: r.steps.confirmed.title })).toBeVisible();
     // Who received it is on the receipt; the ₪-full invoice page is not linked for the receiver.

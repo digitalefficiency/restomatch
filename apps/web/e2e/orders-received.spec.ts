@@ -18,6 +18,52 @@ import { collectPageErrors, e2eSql } from './helpers';
 test.describe.configure({ mode: 'serial' });
 test.use({ storageState: OWNER_STATE });
 
+/**
+ * DS3-05: this file drives today's order of steps (the invoice photo first, the
+ * quantity pre-filled). The demo restaurant's `features.all` turns the
+ * count-first flag (`dockCountFirst`) on, so the file pins it OFF and puts the
+ * setting back after its last test.
+ */
+let restoreCountFirst: (() => Promise<void>) | undefined;
+test.beforeAll(async () => {
+  restoreCountFirst = await pinCountFirstOff();
+});
+test.afterAll(async () => {
+  await restoreCountFirst?.();
+});
+
+async function pinCountFirstOff(): Promise<() => Promise<void>> {
+  const sql = e2eSql();
+  try {
+    const [row] = await sql<{ id: string; prev: string | null }[]>`
+      select id, (case jsonb_typeof(settings) when 'object' then settings when 'string' then (settings #>> '{}')::jsonb else '{}'::jsonb end) #>> '{features,dockCountFirst}' as prev
+      from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
+    if (!row) return async () => undefined;
+    await setCountFirst(row.id, false);
+    return () => setCountFirst(row.id, row.prev === null ? null : row.prev === 'true');
+  } finally {
+    await sql.end();
+  }
+}
+
+/** `features.dockCountFirst` on one restaurant: a value, or null to drop it (back to `features.all`). */
+async function setCountFirst(id: string, value: boolean | null) {
+  const sql = e2eSql();
+  try {
+    if (value === null) {
+      await sql`update restaurants
+        set settings = (case jsonb_typeof(settings) when 'object' then settings when 'string' then (settings #>> '{}')::jsonb else '{}'::jsonb end) #- '{features,dockCountFirst}'
+        where id = ${id}`;
+    } else {
+      await sql`update restaurants
+        set settings = jsonb_set(case jsonb_typeof(settings) when 'object' then settings when 'string' then (settings #>> '{}')::jsonb else '{}'::jsonb end, '{features,dockCountFirst}', to_jsonb(${value}::boolean), true)
+        where id = ${id}`;
+    }
+  } finally {
+    await sql.end();
+  }
+}
+
 type Locale = 'he' | 'en';
 const VIEWPORTS = [
   { name: '1366', use: { viewport: { width: 1366, height: 900 } } },
