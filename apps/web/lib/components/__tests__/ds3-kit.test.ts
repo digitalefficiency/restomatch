@@ -9,6 +9,7 @@ import type { Locale } from '../../i18n/config';
 import { Badge, type BadgeTone } from '../Badge';
 import { CountBadge, pillToneOf, StatusChip, StatusDot, type StatusTone } from '../feedback/StatusChip';
 import { DeadlineChip } from '../money/DeadlineChip';
+import { EmptyState as EmptyStateComp } from '../EmptyState';
 import { MatchStrip } from '../money/MatchStrip';
 import { Money } from '../money/Money';
 import { moneyFigureText, moneyGlyph, moneyText, splitMoney } from '../money/format';
@@ -213,6 +214,21 @@ describe('<MatchStrip>: ordered · received · billed in one line', () => {
     expect(dock).not.toContain('data-cell="billed"');
   });
 
+  it('a gap passed as a node stays audible where it stands', () => {
+    const html = render(h(MatchStrip, { ordered: 10, received: 7, billed: 10, unit: 'kg', off: 'received', gap: h('span', null, '3 kg short') }), 'en');
+    expect(html).toMatch(/<span data-gap=""[^>]*>/);
+    expect(html).not.toMatch(/aria-hidden="true" data-gap=""/);
+    expect(html).toContain('aria-label="Ordered 10, Received 7, Billed 10 kg"');
+  });
+
+  it('neutral pills keep the clock of what is pending (T4); a neutral fact can take a dot', () => {
+    const pending = render(h(StatusChip, { tone: 'neutral', label: 'ממתינה לשיוך' }));
+    expect(pending).toContain('lucide-clock');
+    expect(pending).not.toContain('data-dot');
+    const fact = render(h(StatusChip, { tone: 'neutral', label: 'תקינה', icon: h(StatusDot, { tone: 'neutral', size: 'sm' }) }));
+    expect(fact).toContain('data-dot="neutral"');
+  });
+
   it('prices go through <Money>, per unit; a percentage gap is formatted', () => {
     const html = render(
       h(MatchStrip, { kind: 'price', ordered: 522.6, received: null, billed: 575, unit: 'חבית', off: 'billed', tone: 'warn', gap: { value: 0.1, kind: 'pct', direction: 'more' } }),
@@ -221,6 +237,8 @@ describe('<MatchStrip>: ordered · received · billed in one line', () => {
     expect(textOf(html)).toContain(formatIls(575, { maximumFractionDigits: 2 }));
     expect(textOf(html)).toContain('לחבית');
     expect(textOf(html)).toContain('10% יותר');
+    // the price strip is one sentence too, prices through formatIls
+    expect(html).toContain(`aria-label="הוזמן ${formatIls(522.6, { maximumFractionDigits: 2 })}, התקבל אין, חויב ${formatIls(575, { maximumFractionDigits: 2 })} לחבית, 10% יותר"`);
   });
 
   it('no gap without an off cell; the supplier letter names the third column "בחשבונית"', () => {
@@ -289,5 +307,132 @@ describe('change against a previous period (kit "שינוי מול תקופה ק
     expect(tiny).toContain('data-delta="flat"');
     expect(textOf(tiny)).toBe('ללא שינוי מהותי');
     expect(render(h(Delta, { current: 761, previous: 760, goodWhen: 'down' }))).toContain('data-delta="bad"');
+  });
+});
+
+describe('where the amount comes from (kit "מאיפה הסכום")', () => {
+  it('the formula with the real numbers, a source per number, the eye only for a scanned value', async () => {
+    const { Calculation } = await import('../Calculation');
+    const html = render(
+      h(Calculation, {
+        terms: ['3 ק״ג', h(Money, { value: 12.9, context: 'line', split: true })],
+        result: h(Money, { value: 38.7, context: 'line', split: true, quietParts: false }),
+        sources: [
+          { value: '9.5 ק״ג', kind: 'scan', text: 'נקרא מהחשבונית, שורה 2' },
+          { value: '6.5 ק״ג', kind: 'count', text: 'נספר בקבלה, 15.10.2026' },
+        ],
+      }),
+    );
+    expect(textOf(html)).toContain('3 ק״ג×');
+    expect(textOf(html)).toContain('=');
+    expect(textOf(html)).toContain(formatIls(38.7, { maximumFractionDigits: 2 }));
+    expect(html).toContain('data-calc-source="scan"');
+    expect(html).toContain('lucide-eye');
+    expect((html.match(/lucide-eye/g) ?? []).length).toBe(1);
+  });
+
+  it('CalculationFold is closed on first render and names its panel', async () => {
+    const { CalculationFold } = await import('../Calculation');
+    const html = render(h(CalculationFold, { about: 'הפער בשורה', children: 'x' }));
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toMatch(/<div id="[^"]+-panel" hidden="" aria-label="פירוט החישוב" role="group"/);
+  });
+});
+
+describe('the credit-request track (kit "מסלול של בקשת זיכוי")', () => {
+  it('one current step with aria-current and its action; states in words for screen readers', async () => {
+    const { StatusRail } = await import('../StatusRail');
+    const html = render(
+      h(StatusRail, {
+        label: 'מסלול הבקשה',
+        steps: [
+          { key: 'sent', label: 'נשלחה לספק', detail: '12.10.2026, בוואטסאפ', state: 'done' },
+          { key: 'wait', label: 'ממתינה לתשובה', detail: '9 ימים בלי תשובה', state: 'now', action: h('button', null, 'שלחו תזכורת') },
+          { key: 'ok', label: 'הספק אישר', state: 'todo', action: h('button', null, 'never') },
+        ],
+      }),
+    );
+    expect(html).toContain('<ol aria-label="מסלול הבקשה"');
+    expect((html.match(/aria-current="step"/g) ?? []).length).toBe(1);
+    expect(textOf(html)).toContain('שלחו תזכורת');
+    expect(textOf(html)).not.toContain('never');
+    expect(textOf(html)).toContain('· בוצע');
+    expect(textOf(html)).toContain('· השלב הנוכחי');
+    expect(html).toContain('bg-warn-bold');
+  });
+});
+
+describe('an answer from the data (kit "תשובה מהנתונים")', () => {
+  it('figures with their meaning, facts as grey pills, the tag and one action', async () => {
+    const { DataAnswer } = await import('../DataAnswer');
+    const html = render(
+      h(DataAnswer, {
+        question: 'כמה דלף החודש?',
+        figures: [{ value: h(Money, { value: 760, context: 'tile' }), caption: 'דליפה מתחילת אוקטובר' }],
+        facts: ['35 חשבוניות נבדקו'],
+        action: h('a', { href: '/x' }, 'להחלטה'),
+      }),
+    );
+    expect(html).toContain('<dt class="sr-only">דליפה מתחילת אוקטובר</dt>');
+    expect(html).toContain('data-pill="neutral"');
+    expect(textOf(html)).toContain('תשובה מהנתונים');
+  });
+});
+
+describe('loading, empty, error (kit "טעינה, ריק, שגיאה")', () => {
+  it('an empty state is calm and can sit inside a card; an error has no red and no icon', () => {
+    const inline = render(h(EmptyStateComp, { kind: 'inbox-zero', title: 'אין פערים פתוחים', description: 'נבדקו 35 חשבוניות', variant: 'inline' }));
+    expect(inline).not.toContain('rounded-card border');
+    expect(inline).toContain('bg-primary-subtle');
+    const error = render(h(EmptyStateComp, { kind: 'error', title: 'הסכום לא נטען' }));
+    expect(error).not.toMatch(/danger/);
+    expect(error).not.toContain('<svg');
+    expect(render(h(EmptyStateComp, { title: 'ריק' }))).not.toMatch(/rounded-2xl|\/10\b/);
+  });
+
+  it('ErrorNotice says what is safe, offers one action, stays announced, never red', async () => {
+    const { ErrorNotice } = await import('../EntitlementUpsell');
+    const html = render(h(ErrorNotice, { title: 'הסכום לא נטען', safe: 'ההחלטות שכבר התקבלו שמורות.', action: h('button', null, 'נסו שוב') }));
+    expect(html).toContain('role="alert"');
+    expect(textOf(html)).toContain('ההחלטות שכבר התקבלו שמורות.');
+    expect(html).not.toMatch(/danger/);
+  });
+
+  it('a delayed skeleton waits a second before it fades in (CSS only, server-safe)', async () => {
+    const { Skeleton } = await import('../Skeleton');
+    const html = render(h(Skeleton, { variant: 'card', delayed: true }));
+    expect(html).toContain('[@starting-style]:opacity-0');
+    expect(html).toContain('delay-1000');
+    expect(render(h(Skeleton, { variant: 'card' }))).not.toContain('starting-style');
+  });
+});
+
+describe('icons: Lucide plus four product glyphs, and the two-tone state (SPEC §6)', () => {
+  it('at rest an icon is exactly the glyph (1.75 stroke, decorative)', async () => {
+    const { Icon } = await import('../icon/Icon');
+    const { Inbox } = await import('lucide-react');
+    const html = render(h(Icon, { as: Inbox }));
+    expect(html).toMatch(/^<svg[^>]*stroke-width="1.75"[^>]*aria-hidden="true"/);
+    expect(html).not.toContain('data-icon-state');
+  });
+
+  it('active: stroke 2 and a filled copy underneath at .18, composited once; marked: .9', async () => {
+    const { Icon } = await import('../icon/Icon');
+    const { Inbox } = await import('lucide-react');
+    const active = render(h(Icon, { as: Inbox, state: 'active' }));
+    expect(active).toContain('data-icon-state="active"');
+    expect(active).toMatch(/<svg[^>]*fill="currentColor" stroke="none"[^>]*style="opacity:0.18"/);
+    expect(active).toContain('stroke-width="2"');
+    expect(render(h(Icon, { as: Inbox, state: 'marked' }))).toContain('opacity:0.9');
+  });
+
+  it('the product glyphs carry their own fill layer and take --i-duo; the credit glyph mirrors in RTL', async () => {
+    const { Icon } = await import('../icon/Icon');
+    const { CreditGlyph, LeakGlyph, MatchGlyph, ReceiptGlyph } = await import('../icon/glyphs');
+    const leak = render(h(Icon, { as: LeakGlyph, state: 'active' }));
+    expect(leak).toContain('--i-duo:0.18');
+    expect(leak).toContain('fill-opacity:var(--i-duo, 0)');
+    expect(render(h(Icon, { as: CreditGlyph }))).toContain('rtl:-scale-x-100');
+    for (const g of [MatchGlyph, ReceiptGlyph]) expect(render(h(Icon, { as: g, label: 'x' }))).toContain('role="img"');
   });
 });

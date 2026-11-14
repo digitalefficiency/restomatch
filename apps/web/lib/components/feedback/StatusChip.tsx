@@ -1,3 +1,4 @@
+import { Clock } from 'lucide-react';
 import { cnMerge as cn } from '../cn';
 import { DOT_TONE, PILL_DOT, PILL_SHELL, PILL_TONE, type PillTone } from '../tone';
 
@@ -58,8 +59,9 @@ export function StatusChip({
   label: React.ReactNode;
   emphasis?: 'bold' | 'subtle';
   /**
-   * The marker before the word. Default: the tone's dot. Pass an icon to replace it (a clock for
-   * what is pending, a calendar for a deadline), or `null` to drop it (the word still carries the state).
+   * The marker before the word. Default: the tone's dot; a neutral pill keeps the clock of what is
+   * pending (T4). Pass an icon to replace it (a calendar for a deadline, `<StatusDot tone="neutral"
+   * size="sm" />` for a neutral pill that is not pending), or `null` to drop it.
    */
   icon?: React.ReactNode | null;
   size?: 'sm' | 'md';
@@ -80,7 +82,17 @@ export function StatusChip({
         className,
       )}
     >
-      {icon === undefined ? <StatusDot tone={pill} size="sm" /> : icon}
+      {icon === undefined ? (
+        pill === 'neutral' ? (
+          // T4 keeps its clock: callers that mean "pending" (the register, the cockpit, month close)
+          // rely on the neutral default. A neutral pill that is not pending passes `icon={<StatusDot … />}`.
+          <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        ) : (
+          <StatusDot tone={pill} size="sm" />
+        )
+      ) : (
+        icon
+      )}
       <span className="min-w-0">{label}</span>
     </span>
   );

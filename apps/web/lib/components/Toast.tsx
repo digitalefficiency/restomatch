@@ -177,7 +177,7 @@ function ToastCard({ item, onDismiss, dismissLabel }: { item: ToastItem; onDismi
             item.action!.onClick();
             onDismiss();
           }}
-          className="inline-flex min-h-7 shrink-0 items-center rounded-control px-1 font-medium text-on-bold underline-offset-2 transition-colors duration-micro hover:underline focus-visible:outline-on-bold [@media(pointer:coarse)]:min-h-11"
+          className="inline-flex min-h-7 shrink-0 items-center rounded-control px-1 font-medium text-on-bold underline-offset-2 transition-colors duration-micro ease-standard hover:underline focus-visible:outline-on-bold [@media(pointer:coarse)]:min-h-11"
         >
           {item.action.label}
         </button>
@@ -186,7 +186,7 @@ function ToastCard({ item, onDismiss, dismissLabel }: { item: ToastItem; onDismi
         type="button"
         onClick={onDismiss}
         aria-label={dismissLabel}
-        className="-m-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-on-bold transition-colors duration-micro hover:bg-on-bold/15 focus-visible:outline-on-bold [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+        className="-m-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-on-bold transition-colors duration-micro ease-standard hover:bg-on-bold/15 focus-visible:outline-on-bold [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
       >
         <X className="h-4 w-4" aria-hidden="true" />
       </button>

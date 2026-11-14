@@ -60,6 +60,9 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       more: 'أكثر بـ {value}',
       perUnit: 'لكل {unit}',
     },
+    calc: { panel: 'تفاصيل الحساب' },
+    rail: { done: 'تم', now: 'الخطوة الحالية', todo: 'لم يحن بعد' },
+    answer: { tag: 'إجابة من البيانات' },
   },
   ru: {
     money: {
@@ -112,6 +115,9 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       more: 'на {value} больше',
       perUnit: 'за {unit}',
     },
+    calc: { panel: 'Как посчитано' },
+    rail: { done: 'выполнено', now: 'текущий шаг', todo: 'ещё нет' },
+    answer: { tag: 'Ответ по данным' },
   },
   th: {
     money: {
@@ -164,6 +170,9 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       more: 'มากกว่า {value}',
       perUnit: 'ต่อ {unit}',
     },
+    calc: { panel: 'รายละเอียดการคำนวณ' },
+    rail: { done: 'เสร็จแล้ว', now: 'ขั้นตอนปัจจุบัน', todo: 'ยังไม่ถึง' },
+    answer: { tag: 'คำตอบจากข้อมูล' },
   },
   ti: {
     money: {
@@ -216,5 +225,8 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       more: 'ብ{value} ዝበዝሐ',
       perUnit: 'ን{unit}',
     },
+    calc: { panel: 'ዝርዝር ሕሳብ' },
+    rail: { done: 'ተፈጺሙ', now: 'ናይ ሕጂ ደረጃ', todo: 'ገና' },
+    answer: { tag: 'መልሲ ካብ ዳታ' },
   },
 };

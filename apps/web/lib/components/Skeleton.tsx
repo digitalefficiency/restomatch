@@ -5,6 +5,14 @@ export type SkeletonVariant = 'block' | 'text' | 'metric' | 'hero' | 'kpiRow' | 
 const bar = 'rm-shimmer rounded-control bg-surface-2';
 
 /**
+ * DS3 (SPEC §9 "loading that does not flicker"): the skeleton fades in only after a one-second
+ * wait, so a fast answer never flashes one. Pure CSS (`@starting-style` + a delayed opacity
+ * transition), so it stays server-safe in `loading.tsx`; a browser without `@starting-style`
+ * shows it at once, as today, and reduced motion shows it at once too.
+ */
+const DELAYED = 'transition-opacity duration-short ease-enter delay-1000 [@starting-style]:opacity-0';
+
+/**
  * Loading placeholder. `className` alone keeps the v1 behaviour (one box you
  * size yourself). Variants draw the same boxes as the final layout so nothing
  * jumps (perf-states-18). The shimmer is motion-safe: reduced motion gets a
@@ -14,12 +22,16 @@ export function Skeleton({
   className,
   variant = 'block',
   rows = 5,
+  delayed = false,
 }: {
   className?: string;
   variant?: SkeletonVariant;
   /** Rows for `table` / `form`. */
   rows?: number;
+  /** DS3: appear only when the wait passes one second (opt-in; see DELAYED). */
+  delayed?: boolean;
 }) {
+  if (delayed) return <Skeleton className={cn(DELAYED, className)} variant={variant} rows={rows} />;
   switch (variant) {
     case 'block':
       return <div aria-hidden="true" className={cn(bar, 'rounded-xl', className)} />;

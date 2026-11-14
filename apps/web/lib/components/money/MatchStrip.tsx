@@ -6,6 +6,7 @@ import { components } from '@/lib/i18n/messages/components';
 import { cnMerge as cn } from '../cn';
 import { MONEY_QUIET, SURFACE_TONE, TEXT_TONE } from '../tone';
 import { Money } from './Money';
+import { moneyText } from './format';
 
 export type MatchCell = 'ordered' | 'received' | 'billed';
 
@@ -73,24 +74,23 @@ export function MatchStrip({
   }
 
   const unitText = unit ? (kind === 'price' ? t('ds.matchStrip.perUnit', { unit }) : unit) : '';
-  const gapNode: React.ReactNode = off
-    ? isGap(gap)
+  const gapText: string | null =
+    off && isGap(gap)
       ? t(gap.direction === 'less' ? 'ds.matchStrip.less' : 'ds.matchStrip.more', {
           value: gap.kind === 'pct' ? formatPercent(Math.abs(gap.value), locale) : qty(Math.abs(gap.value)),
         })
-      : gap ?? null
-    : null;
+      : off && typeof gap === 'string'
+        ? gap
+        : null;
+  // A gap passed as a node (a <Money>, a phrase with markup) is read where it stands, not in the summary.
+  const gapNode: React.ReactNode = off ? (gapText ?? (isGap(gap) ? null : (gap ?? null))) : null;
 
-  // One sentence for assistive tech: "הוזמן 9.5, התקבל 6.5, חויב 9.5 ק״ג, 3 פחות".
-  const plain = (n: number | null) => (n === null ? t('ds.matchStrip.none') : kind === 'price' ? null : qty(n));
-  const spoken = cells.every((c) => plain(c.value) !== null)
-    ? [
-        cells.map((c) => `${c.label} ${plain(c.value)}`).join(', ') + (unitText ? ` ${unitText}` : ''),
-        typeof gapNode === 'string' ? gapNode : '',
-      ]
-        .filter(Boolean)
-        .join(', ')
-    : undefined;
+  // One sentence for assistive tech: "הוזמן 9.5, התקבל 6.5, חויב 9.5 ק״ג, 3 פחות". Prices are
+  // spoken through the frozen formatter (formatIls via moneyText), never built by hand.
+  const plain = (n: number | null) => (n === null ? t('ds.matchStrip.none') : kind === 'price' ? moneyText(n, 'line', locale) : qty(n));
+  const spoken = [cells.map((c) => `${c.label} ${plain(c.value)}`).join(', ') + (unitText ? ` ${unitText}` : ''), gapText ?? '']
+    .filter(Boolean)
+    .join(', ');
 
   return (
     <div
@@ -106,7 +106,7 @@ export function MatchStrip({
           <span
             key={c.key}
             data-cell={c.key}
-            aria-hidden={spoken ? true : undefined}
+            aria-hidden
             className={cn(
               'flex min-w-0 flex-col justify-center px-3 py-1.5',
               i > 0 && 'border-s border-line-rule',
@@ -129,13 +129,13 @@ export function MatchStrip({
         );
       })}
       {unitText ? (
-        <span aria-hidden={spoken ? true : undefined} className="flex items-center whitespace-nowrap border-s border-line-rule pe-1 ps-2.5 text-body-sm text-fg-secondary">
+        <span aria-hidden className="flex items-center whitespace-nowrap border-s border-line-rule pe-1 ps-2.5 text-body-sm text-fg-secondary">
           {unitText}
         </span>
       ) : null}
       {gapNode ? (
         <span
-          aria-hidden={spoken ? true : undefined}
+          aria-hidden={gapText ? true : undefined}
           data-gap=""
           className={cn('me-2.5 ms-auto self-center whitespace-nowrap ps-2 text-body-sm font-semibold', TEXT_TONE[tone])}
         >

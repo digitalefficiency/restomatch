@@ -56,6 +56,9 @@ export const dsHe = {
     more: '{value} יותר',
     perUnit: 'ל{unit}',
   },
+  calc: { panel: 'פירוט החישוב' },
+  rail: { done: 'בוצע', now: 'השלב הנוכחי', todo: 'עוד לא הגיע' },
+  answer: { tag: 'תשובה מהנתונים' },
 };
 
 export const dsEn: Shape<typeof dsHe> = {
@@ -109,4 +112,7 @@ export const dsEn: Shape<typeof dsHe> = {
     more: '{value} more',
     perUnit: 'per {unit}',
   },
+  calc: { panel: 'How it was calculated' },
+  rail: { done: 'done', now: 'current step', todo: 'not yet' },
+  answer: { tag: 'Answer from the data' },
 };
