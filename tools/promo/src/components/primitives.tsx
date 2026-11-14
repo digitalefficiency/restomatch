@@ -73,7 +73,10 @@ export const ReelNumber: React.FC<{
   weight?: number;
 }> = ({ value, at, dur = 48, size, color = C.ink, prefix = '₪', id, weight = 800 }) => {
   const f = useCurrentFrame();
-  const digits = String(value).split('').map(Number);
+  // grouped like formatIls ('2,250'): digits spin, the separator is a static glyph
+  const chars = value.toLocaleString('en-US').split('');
+  const digits = chars.filter((ch) => ch !== ',').map(Number);
+  let di = -1;
   const h = size * 1.08;
   return (
     <div
@@ -102,7 +105,17 @@ export const ReelNumber: React.FC<{
           {prefix}
         </span>
       ) : null}
-      {digits.map((d, i) => {
+      {chars.map((ch, ci) => {
+        if (ch === ',') {
+          return (
+            <span key={`sep-${ci}`} style={{ display: 'inline-block', width: '0.28em', textAlign: 'center', opacity: prog(f, at + 6, at + 20) }}>
+              ,
+            </span>
+          );
+        }
+        di += 1;
+        const i = di;
+        const d = digits[i];
         const start = at + i * 4;
         const end = start + dur + i * 6;
         const p = prog(f, start, end);

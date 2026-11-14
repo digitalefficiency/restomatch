@@ -19,10 +19,13 @@ export const FACTS = {
   checked: 35, // checked invoices (dashboard "13 מתוך 35")
   beerFrom: 520, // leak detective: beer keg baseline ₪520.00
   beerTo: 575, // last price ₪575.00 (+10.6%)
+  apprAmount: 104.8, // /dashboard/approvals top card: beer keg ST-24108, "ההפסד המוערך 104.80 ₪"
   chainLeakPct: '2.9%', // /dashboard/chain: worst branch (Jerusalem ₪975 of ₪33,056) — seed:chain-demo
   pilotTarget: '1.5%', // North Star / pilot target (docs/ICP.md, AGENTS.md)
 };
 export type Facts = typeof FACTS;
+
+export { SAMPLE } from './sample';
 
 /** Override demo numbers at render time (input prop `facts`) — e.g. after the seed changes. */
 export const applyFacts = (over?: Partial<Facts>) => {
@@ -43,7 +46,7 @@ const he = {
     l2: 'דלף לך',
     l3: 'החודש?',
     sub: 'רוב בעלי המסעדות לא יודעים לענות.',
-    tag: 'מסעדת הדגמה · אוקטובר 2026',
+    tag: 'דוגמה · מסעדה בדויה · אוקטובר',
   },
   problem: {
     t1: 'עשרות משלוחים בשבוע.',
@@ -68,20 +71,20 @@ const he = {
   product: {
     heroTitle: 'מספר אחד. בשקלים.',
     heroSub: 'כמה דלף החודש — ומה עוד לא שולם.',
-    chipLeak: 'דלף החודש',
-    chipPct: 'מהרכש',
+    chipLeak: 'דליפה החודש',
+    chipPct: 'מהקניות',
     chipCaught: 'נתפס לפני תשלום',
     heatTitle: 'בלש הדליפות',
     heatSub: 'איפה המחיר מזחל, ומי מקצר משלוחים.',
     chipBeer: 'בירה מהחבית: {from} ← {to}',
     apprTitle: 'מסמנים לפני התשלום.',
-    apprSub: 'כל פער מגיע לאדם הנכון — מאשרים, דוחים, או דורשים זיכוי.',
-    chipAppr: 'ממתין לאישור שלך:',
-    claimTitle: 'מכתב דרישת זיכוי',
-    claimSub: 'מכתב לכל ספק, מוכן להדפסה — בלחיצה.',
-    chipClaim: 'סה״כ לזיכוי:',
-    chipClaimed: 'נדרש מהספקים',
-    realUi: 'מסך אמיתי · נתוני הדגמה',
+    apprSub: 'כל פער מגיע לאדם הנכון — מאשרים, דוחים, או מבקשים זיכוי.',
+    chipAppr: 'ממתין להחלטה שלך:',
+    claimTitle: 'בקשת זיכוי לכל ספק',
+    claimSub: 'מכתב מנומס לכל ספק, מוכן לשליחה — בלחיצה.',
+    chipClaim: 'אושר לבקשת זיכוי:',
+    chipClaimed: 'אושר לבקשת זיכוי',
+    realUi: 'דוגמה · מסעדה בדויה, מספרים להמחשה',
   },
   receiver: {
     badge: 'חדש · פיצ׳ר הדגל',
@@ -98,13 +101,13 @@ const he = {
     chipGap: 'פערי מחיר בין סניפים',
   },
   value: {
-    eyebrow: 'מסעדת ההדגמה · אוקטובר 2026',
-    leak: 'דלף החודש',
-    leakNote: 'מתוך {spend} רכש',
-    caught: 'נתפס לפני תשלום',
+    eyebrow: 'דוגמה · מסעדה בדויה · אוקטובר',
+    leak: 'דליפה החודש',
+    leakNote: 'מתוך {spend} קניות',
+    caught: 'נתפסו לפני תשלום',
     caughtNote: 'על חשבוניות שעוד לא שולמו',
-    claimed: 'נדרש מהספקים',
-    claimedNote: 'חריגות שאושרו לדרישה',
+    claimed: 'אושר לבקשת זיכוי',
+    claimedNote: 'על חשבוניות ששולמו — מכתב לספק מוכן',
     calm: 'בלי לשנות את העבודה היומיומית.',
     steps: ['מצלמים את החשבונית', 'המערכת משווה שורה מול שורה', 'מאשרים — לפני התשלום'],
   },
@@ -114,6 +117,27 @@ const he = {
     url: SITE,
   },
   loop: { chip: 'נתוני הדגמה' },
+  sampleTag: 'דוגמה · מספרים להמחשה',
+  // portrait hero loop: partner wording toward suppliers — a credit *request*, not a demand
+  loopVertical: { held: 'ממתין להחלטה שלך:', claim: 'בקשת זיכוי לספק — בלחיצה' },
+  // the site's showcase wording for the sample month (showcase/overview messages on W3-06)
+  sample: {
+    eyebrow: 'דוגמה · דליפה שזוהתה · אוקטובר',
+    label: 'דליפה החודש',
+    pct: '{pct} מהקניות שנבדקו',
+    base: 'מתוך {amount} לפני מע״מ',
+    completeness: '{checked} חשבוניות נבדקו · {withGap} עם פער',
+    caught: 'נתפסו לפני תשלום',
+    needsTitle: 'מחכה לך',
+    decide: 'ממתין להחלטה שלך',
+    credit: 'בקשות זיכוי לשליחה',
+    gaps: '{count} פערים',
+    decideVerb: 'להחלטה',
+    creditVerb: 'שליחת המכתב',
+    example: 'לדוגמה: בירה מהחבית — חבית 30 ל׳',
+    goodNews: '{amount} כבר אושרו לקיזוז בתשלום',
+    title: 'לוח הבעלים',
+  },
 };
 
 const en: typeof he = {
@@ -122,7 +146,7 @@ const en: typeof he = {
     l2: 'money leaked',
     l3: 'this month?',
     sub: 'Most restaurant owners can’t answer.',
-    tag: 'Demo restaurant · October 2026',
+    tag: 'Sample · fictional restaurant · October',
   },
   problem: {
     t1: 'Dozens of deliveries a week.',
@@ -147,20 +171,20 @@ const en: typeof he = {
   product: {
     heroTitle: 'One number. In shekels.',
     heroSub: 'What leaked this month — and what’s still unpaid.',
-    chipLeak: 'Leaked this month',
-    chipPct: 'of spend',
+    chipLeak: 'Leak this month',
+    chipPct: '', // the callout keeps only "· 1.5%": the words overflow the chip in English
     chipCaught: 'Caught before payment',
     heatTitle: 'Leak detective',
     heatSub: 'Where prices creep, and who short-delivers.',
     chipBeer: 'Draft beer keg: {from} → {to}',
     apprTitle: 'Flag it before you pay.',
-    apprSub: 'Every gap goes to the right person — approve, reject, or claim a credit.',
-    chipAppr: 'Held for your approval:',
-    claimTitle: 'Credit-request letters',
-    claimSub: 'One letter per supplier, ready to print — in one click.',
-    chipClaim: 'Total credit requested:',
-    chipClaimed: 'Claimed from suppliers',
-    realUi: 'Real screen · demo data',
+    apprSub: 'Every gap goes to the right person — approve, reject, or request a credit.',
+    chipAppr: 'Awaiting your decision:',
+    claimTitle: 'A credit request per supplier',
+    claimSub: 'A polite letter per supplier, ready to send — in one click.',
+    chipClaim: 'Approved for a credit request:',
+    chipClaimed: 'Approved for a credit request',
+    realUi: 'Sample · a fictional restaurant, illustrative figures',
   },
   receiver: {
     badge: 'New · flagship feature',
@@ -177,13 +201,13 @@ const en: typeof he = {
     chipGap: 'Price gaps between branches',
   },
   value: {
-    eyebrow: 'Demo restaurant · October 2026',
-    leak: 'Leaked this month',
-    leakNote: 'of {spend} food spend',
+    eyebrow: 'Sample · fictional restaurant · October',
+    leak: 'Leak this month',
+    leakNote: 'of {spend} purchases',
     caught: 'Caught before payment',
     caughtNote: 'on invoices not yet paid',
-    claimed: 'Claimed from suppliers',
-    claimedNote: 'gaps approved for a credit request',
+    claimed: 'Approved credit requests',
+    claimedNote: 'on paid invoices — the letter is ready',
     calm: 'Without changing your daily routine.',
     steps: ['Snap the invoice', 'It’s checked line by line', 'Approve — before you pay'],
   },
@@ -193,6 +217,25 @@ const en: typeof he = {
     url: SITE,
   },
   loop: { chip: 'Demo data' },
+  sampleTag: 'Sample · illustrative figures',
+  loopVertical: { held: 'Awaiting your decision:', claim: 'Credit request to the supplier — one click' },
+  sample: {
+    eyebrow: 'Sample · leak found · October',
+    label: 'Leak this month',
+    pct: '{pct} of purchases checked',
+    base: 'of {amount} before VAT',
+    completeness: '{checked} invoices checked · {withGap} with a gap',
+    caught: 'Caught before payment',
+    needsTitle: 'Waiting for you',
+    decide: 'Awaiting your decision',
+    credit: 'Credit requests to send',
+    gaps: '{count} gaps',
+    decideVerb: 'Decide',
+    creditVerb: 'Send the letter',
+    example: 'e.g. Draft beer keg 30L',
+    goodNews: '{amount} already approved for offset at payment',
+    title: 'Owner dashboard',
+  },
 };
 
 export const COPY = { he, en };
