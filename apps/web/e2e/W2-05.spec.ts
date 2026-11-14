@@ -65,9 +65,14 @@ async function freshPo(tag: string, n: number): Promise<Po> {
       select id, canonical_name as name from products
       where restaurant_id = ${r!.id} and canonical_name ~ '[א-ת]' order by canonical_name limit ${n}`;
     if (prods.length < n) throw new Error(`the e2e seed has only ${prods.length} Hebrew products`);
+    // Due within the hour, but never past today's Israel midnight: the board (and its offline snapshot)
+    // lists TODAY's deliveries, so a run between 23:00 and 00:00 must not date the truck tomorrow.
     const [po] = await sql<{ id: string }[]>`
       insert into purchase_orders (restaurant_id, supplier_id, expected_delivery_at, status, source, notes)
-      values (${r!.id}, ${sup!.id}, now() + interval '1 hour', 'sent', 'manual', ${`e2e-w205-${tag}`}) returning id`;
+      values (${r!.id}, ${sup!.id},
+              least(now() + interval '1 hour',
+                    ((now() at time zone 'Asia/Jerusalem')::date + 1)::timestamp at time zone 'Asia/Jerusalem' - interval '5 minutes'),
+              'sent', 'manual', ${`e2e-w205-${tag}`}) returning id`;
     const lines: Po['lines'] = [];
     for (const p of prods) {
       const [pl] = await sql<{ id: string }[]>`

@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { interpolate } from '../lib/i18n/translate';
 import { OWNER_STATE } from './env';
-import { loginViaMagicLink } from './helpers';
+import { e2eSql, loginViaMagicLink } from './helpers';
 
 /**
  * W2-13 copy system: the activity feed (owner: in the bell panel since W2-08 I1 moved
@@ -92,9 +92,32 @@ test.describe('owner activity feed, bell panel (W2-13)', () => {
       const feed = await openFeed(page);
       const links = feed.getByRole('link');
       await expect(links.first()).toBeVisible();
-      for (const title of await links.allInnerTexts()) {
-        expect(title.replace(/[⁦-⁩]/g, '')).toMatch(/^(Consolidated invoice|Invoice) \S+ (matched|received)$/);
+      const rows = await links.evaluateAll((els) =>
+        els.map((a) => ({ title: (a as HTMLElement).innerText.replace(/[⁦-⁩]/g, ''), href: a.getAttribute('href') ?? '' })),
+      );
+      const NUMBERED = /^(Consolidated invoice|Invoice) \S+ (matched|received)$/;
+      // An invoice whose events carry no number (an OCR-failed photo, e.g. invoice-manual-lines earlier in the
+      // run) reads as the plain English type label: still rendered from metadata, never a stored sentence.
+      const NUMBERLESS = /^(Invoice (matched|received)|Consolidated invoice received)$/;
+      const sql = e2eSql();
+      try {
+        for (const { title, href } of rows) {
+          if (NUMBERED.test(title)) continue;
+          expect(title, `feed row "${title}" is neither "Invoice <number> …" nor the numberless label`).toMatch(NUMBERLESS);
+          // …and only when the metadata really has no number to show.
+          const id = href.split('/').pop() ?? '';
+          const [r] = await sql<{ n: number }[]>`
+            select count(*)::int as n from activity_events
+            where event_type in ('invoice_received', 'invoice_matched')
+              and (metadata ->> 'invoiceId' = ${id} or (entity_type = 'invoice' and entity_id::text = ${id}))
+              and coalesce(metadata ->> 'invoiceNumber', '') <> ''`;
+          expect(r!.n, `"${title}" (${href}) dropped an invoice number its metadata carries`).toBe(0);
+        }
+      } finally {
+        await sql.end();
       }
+      // The seeded invoices carry numbers: the numbered metadata path is what renders most of the feed.
+      expect(rows.filter((r) => NUMBERED.test(r.title)).length).toBeGreaterThan(0);
       expect(await feed.innerText()).not.toMatch(/הותאמה|התקבלה|חריג|הפסד/);
       expect(await axeSerious(page, '[data-testid="bell-activity"]')).toEqual([]);
     } finally {

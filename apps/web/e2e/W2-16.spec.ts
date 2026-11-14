@@ -8,11 +8,18 @@ import { SCREENS, SLACK, TYPE_BUDGET, VIEWPORT, type CopyScreen } from '../lib/c
 import { DEMO_RESTAURANT_NAME, E2E_DATABASE_URL } from './env';
 import { e2eSql, loginViaMagicLink } from './helpers';
 import { foldContract, measureCopy } from './helpers/copyBudget';
+import { clearCopyState, seedCopyState } from './helpers/copyState';
 
 /**
  * W2-16 · Copy focus. Per screen: the word budget ratchet (folds closed; MECHANISM §5.1/§5.4) and the
  * fold contract (§5.5). Non-blocking until W4-01 flips the gates: it prints the gap to the type budget
  * and fails only when a screen GROWS past its recorded baseline (+3 for relative-time strings).
+ *
+ * The measured state is W2-16's own, so the numbers do not depend on spec order or on the calendar:
+ * every chrome section that only shows with certain data is made present by helpers/copyState.ts
+ * (rows dated from the DB clock in beforeAll, removed in afterAll), every screen renders in Hebrew
+ * (the §5.1 metric) whatever language a member saved, and the first screen is measured with the
+ * record rows collapsed (helpers/copyBudget.ts), so a longer list never moves copy below the fold.
  */
 const AXE = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
 const EMAIL: Record<string, string> = {
@@ -43,6 +50,8 @@ test.beforeAll(async () => {
     await sql`insert into worker_heartbeats (worker_id, host, pid, workers, started_at, beat_at)
               values (${HEARTBEAT}, 'e2e', 1, 1, now(), now() + interval '1 day')
               on conflict (worker_id) do update set beat_at = now() + interval '1 day'`;
+    // Every data-gated chrome section present, dated from today's Israel day (helpers/copyState.ts).
+    await seedCopyState(sql, r.id);
   } finally {
     await sql.end();
   }
@@ -52,6 +61,8 @@ test.afterAll(async () => {
   const sql = e2eSql();
   try {
     await sql`delete from worker_heartbeats where worker_id = ${HEARTBEAT}`;
+    const [r] = await sql<{ id: string }[]>`select id from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
+    if (r) await clearCopyState(sql, r.id);
   } finally {
     await sql.end();
   }
@@ -87,6 +98,9 @@ async function open(browser: Browser, s: CopyScreen): Promise<Page> {
     viewport: VIEWPORT[s.vp],
     ...(s.role === 'anon' ? {} : { storageState: await stateFor(browser, s.role) }),
   });
+  // The metric is Hebrew (§5.1): a member's saved language (the seed's receiver prefers English,
+  // a later spec clears it) must not switch the words being counted. The cookie wins over it.
+  await ctx.addCookies([{ name: 'rm_locale', value: 'he', url: test.info().project.use.baseURL! }]);
   const page = await ctx.newPage();
   await page.goto(s.route);
   await page.waitForLoadState('networkidle');
@@ -159,4 +173,22 @@ test('measureCopy: headers, static lists and new paragraphs count; record rows n
   // + the static filter option 'מחיר גבוה מהמצופה' (3) = 30; the data option list and the record group count 0.
   expect(m.page).toBe(30);
   expect(m.blocks.map((b) => b.words)).toEqual([14]);
+});
+
+test('measureCopy: the first screen ignores the height of record rows, never the height of copy', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  // 40 records above the bucket heading (≈ 2000 px): the heading still counts as first-screen copy.
+  const rows = Array.from({ length: 40 }, (_, i) => `<tr><td style="height:50px">שורה ${i}</td></tr>`).join('');
+  await page.setContent(`<main>
+    <h1>כותרת</h1>
+    <table><thead><tr><th>ספק</th></tr></thead><tbody>${rows}</tbody></table>
+    <h2>מאוחר יותר</h2>
+    <div style="height:2000px">פסקה ארוכה של הסבר</div>
+    <p>מתחת לקפל</p>
+  </main>`);
+  const m = await measureCopy(page);
+  // כותרת (1) + ספק (1) + מאוחר יותר (2) + the tall explanation's 4 words are first; the 2 words after
+  // 2000 px of copy are not. The 40 rows count nowhere and push nothing.
+  expect(m.page).toBe(10);
+  expect(m.first).toBe(8);
 });
