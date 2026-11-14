@@ -1,0 +1,52 @@
+{
+  "caseId": "WA-G-OWNER-10",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "leak.bySupplier",
+      "toolCalls": [
+        {
+          "name": "suppliers.resolve",
+          "args": {
+            "query": "ירקות הש"
+          },
+          "result": {
+            "matches": [
+              {
+                "supplierId": "sup-veg",
+                "name": "ירקות השרון"
+              },
+              {
+                "supplierId": "sup-veg2",
+                "name": "ירקות השומרון"
+              }
+            ]
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "list",
+          "text": "למי התכוונת?",
+          "list": {
+            "button": "בחרו ספק",
+            "rows": [
+              {
+                "id": "row:0",
+                "title": "ירקות השרון"
+              },
+              {
+                "id": "row:1",
+                "title": "ירקות השומרון"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

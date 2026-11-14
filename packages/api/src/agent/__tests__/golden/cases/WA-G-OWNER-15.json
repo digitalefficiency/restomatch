@@ -1,0 +1,48 @@
+{
+  "id": "WA-G-OWNER-15",
+  "role": "owner",
+  "adversarial": false,
+  "flow": "O2",
+  "title": "Mute today from the brief",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "template_button",
+        "id": "brief:mute",
+        "title": "השתק להיום"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "brief.mute",
+    "tools": [
+      {
+        "name": "notifications.muteToday",
+        "args": {
+          "channel": "whatsapp"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "proactiveSent": 0
+    }
+  }
+}

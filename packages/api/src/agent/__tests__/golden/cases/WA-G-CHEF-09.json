@@ -1,0 +1,56 @@
+{
+  "id": "WA-G-CHEF-09",
+  "role": "chef",
+  "adversarial": false,
+  "flow": "C1",
+  "title": "Slang edit: \"תוסיף 2 ארגזים מלפפון להזמנה של השרון\"",
+  "neverList": [],
+  "ownerRules": [
+    "chef-ils-orders-only"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "תוסיף 2 ארגזים מלפפון להזמנה של השרון"
+    }
+  ],
+  "expect": {
+    "intent": "order.edit",
+    "tools": [
+      {
+        "name": "suppliers.resolve",
+        "args": {
+          "query": "השרון"
+        }
+      },
+      {
+        "name": "orders.captureFromText",
+        "args": {
+          "text": "תוסיף 2 ארגזים מלפפון להזמנה של השרון",
+          "supplierId": "sup-veg"
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "leak|claim|decision|discrepanc"
+    ],
+    "forbiddenText": [],
+    "buttons": [
+      "עדכן טיוטה",
+      "ביטול"
+    ],
+    "noButtons": [],
+    "allowIls": true,
+    "noOutbound": false,
+    "state": {}
+  }
+}

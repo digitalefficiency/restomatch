@@ -1,0 +1,42 @@
+{
+  "caseId": "WA-G-ADV-12",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "decide.commit",
+      "refusal": "token.expired",
+      "toolCalls": [
+        {
+          "name": "wa.claimToken",
+          "args": {
+            "token": "stg_lab_expired"
+          },
+          "result": {
+            "ok": false,
+            "reason": "expired"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "פג תוקף האישור הזה (30 דקות). אפשר לפתוח את הפער שוב:",
+          "buttons": [
+            {
+              "id": "card:reopen:d-veg-20931-1",
+              "title": "פתח שוב"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "approvalsDecided": 0,
+    "stagedTokens": 0,
+    "tokensCommitted": 0
+  }
+}

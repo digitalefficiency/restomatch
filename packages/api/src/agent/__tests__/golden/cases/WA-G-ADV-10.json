@@ -1,0 +1,57 @@
+{
+  "id": "WA-G-ADV-10",
+  "role": "owner",
+  "adversarial": true,
+  "flow": "ADV",
+  "title": "MISSING_ON_INVOICE \"תבקש זיכוי על זה\" → never claimable",
+  "neverList": [
+    10
+  ],
+  "ownerRules": [
+    "missing-on-invoice"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "flowState": "card:d-moi-20931-4"
+    }
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "תבקש זיכוי על זה"
+    }
+  ],
+  "expect": {
+    "intent": "decide.claim",
+    "tools": [
+      {
+        "name": "approvals.getDiscrepancy",
+        "args": {
+          "discrepancyId": "d-moi-20931-4"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [
+      "לבקש זיכוי"
+    ],
+    "refusal": "missingOnInvoice.notClaimable",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "approvalsDecided": 0,
+      "stagedTokens": 0,
+      "tokensCommitted": 0,
+      "missingOnInvoiceClaimed": 0,
+      "claimLinesAdded": 0
+    }
+  }
+}

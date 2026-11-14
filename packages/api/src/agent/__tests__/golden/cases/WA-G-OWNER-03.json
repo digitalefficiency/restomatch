@@ -1,0 +1,40 @@
+{
+  "id": "WA-G-OWNER-03",
+  "role": "owner",
+  "adversarial": false,
+  "flow": "O1",
+  "title": "No morning brief on Shabbat",
+  "neverList": [],
+  "ownerRules": [
+    "quiet-hours"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-31",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "system",
+      "trigger": "rm_owner_brief",
+      "at": "07:30"
+    }
+  ],
+  "expect": {
+    "intent": null,
+    "tools": [],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": true,
+    "state": {
+      "proactiveSent": 0
+    }
+  }
+}

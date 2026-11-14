@@ -1,0 +1,68 @@
+{
+  "caseId": "WA-G-RECEIVER-06",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "receiving.count",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "כמה הגיע? (מספר בלבד)",
+          "buttons": []
+        }
+      ]
+    },
+    {
+      "intent": null,
+      "toolCalls": [
+        {
+          "name": "receiving.markGrLine",
+          "args": {
+            "receiptId": "gr-1",
+            "lineNo": 1,
+            "receivedQty": 32
+          },
+          "result": {
+            "ok": true,
+            "next": {
+              "receiptId": "gr-1",
+              "lineNo": 2,
+              "of": 9,
+              "product": "מלפפונים",
+              "orderedQty": 25,
+              "unit": "ק״ג"
+            }
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "נרשם: עגבניות שרי 32 מתוך 40 ק״ג.\n2/9 · מלפפונים · הוזמנו 25 ק״ג",
+          "buttons": [
+            {
+              "id": "gr:all:2",
+              "title": "הגיע הכל"
+            },
+            {
+              "id": "gr:diff:2",
+              "title": "חסר / שונה"
+            },
+            {
+              "id": "gr:skip:2",
+              "title": "דלג"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "grLinesMarked": 1
+  }
+}

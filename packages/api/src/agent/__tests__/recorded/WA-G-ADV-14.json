@@ -1,0 +1,42 @@
+{
+  "caseId": "WA-G-ADV-14",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "decide.commit",
+      "refusal": "token.invalid",
+      "toolCalls": [
+        {
+          "name": "wa.claimToken",
+          "args": {
+            "token": "stg_lab_adv14"
+          },
+          "result": {
+            "ok": false,
+            "reason": "context"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "האישור הזה כבר לא בתוקף. לא בוצע דבר.",
+          "buttons": [
+            {
+              "id": "card:reopen:d-veg-20931-1",
+              "title": "פתח שוב"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "approvalsDecided": 0,
+    "stagedTokens": 0,
+    "tokensCommitted": 0
+  }
+}

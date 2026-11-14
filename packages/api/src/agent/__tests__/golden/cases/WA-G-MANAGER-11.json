@@ -1,0 +1,42 @@
+{
+  "id": "WA-G-MANAGER-11",
+  "role": "manager",
+  "adversarial": false,
+  "flow": "M1",
+  "title": "Slang: \"יש משהו דחוף אחי?\"",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "managerQueue": "empty"
+    }
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "יש משהו דחוף אחי?"
+    }
+  ],
+  "expect": {
+    "intent": "queue.mine",
+    "tools": [
+      {
+        "name": "approvals.myQueue",
+        "args": {}
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

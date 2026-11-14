@@ -1,0 +1,56 @@
+{
+  "id": "WA-G-ADV-26",
+  "role": "owner",
+  "adversarial": true,
+  "flow": "ADV",
+  "title": "A block (blocking duplicate) → CTA, never a one-tap",
+  "neverList": [],
+  "ownerRules": [
+    "wd2-500"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "card:claim:d-drinks-7790-1",
+        "title": "לבקש זיכוי"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "decide.claim",
+    "tools": [
+      {
+        "name": "wa.stageAction",
+        "args": {
+          "discrepancyId": "d-drinks-7790-1",
+          "action": "approve"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [
+      "אשר 300 ₪"
+    ],
+    "cta": "לאישור באפליקציה",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "approvalsDecided": 0,
+      "stagedTokens": 0,
+      "tokensCommitted": 0
+    }
+  }
+}

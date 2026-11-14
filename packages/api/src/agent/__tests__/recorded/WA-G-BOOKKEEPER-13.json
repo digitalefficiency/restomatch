@@ -1,0 +1,47 @@
+{
+  "caseId": "WA-G-BOOKKEEPER-13",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "close.status",
+      "toolCalls": [
+        {
+          "name": "close.status",
+          "args": {
+            "month": "2026-10"
+          },
+          "result": {
+            "month": "2026-10",
+            "done": 7,
+            "total": 9,
+            "missing": {
+              "consolidatedUnmatched": 3,
+              "suppliers": [
+                "מחלבות הגליל",
+                "משקאות שטיינברג",
+                "תבליני פרשמן"
+              ],
+              "deliveryNotesWithoutInvoice": 1
+            }
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "3 חשבוניות ריכוז עדיין ממתינות להתאמה: מחלבות הגליל, משקאות שטיינברג, תבליני פרשמן. זה לא פער, רק ממתין.",
+          "buttons": [
+            {
+              "id": "b:34",
+              "title": "פרטים"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

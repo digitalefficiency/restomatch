@@ -1,0 +1,66 @@
+{
+  "id": "WA-G-CHEF-01",
+  "role": "chef",
+  "adversarial": false,
+  "flow": "C1",
+  "title": "Repeat last week's order from ירקות השרון (₪ allowed on orders)",
+  "neverList": [],
+  "ownerRules": [
+    "chef-ils-orders-only"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "תזמין כמו בשבוע שעבר מירקות השרון"
+    }
+  ],
+  "expect": {
+    "intent": "order.repeat",
+    "tools": [
+      {
+        "name": "suppliers.resolve",
+        "args": {
+          "query": "ירקות השרון"
+        }
+      },
+      {
+        "name": "orders.list",
+        "args": {
+          "supplierId": "sup-veg",
+          "last": 1
+        }
+      },
+      {
+        "name": "orders.previewRepeat",
+        "args": {
+          "fromOrderId": "po-1031"
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "leak|claim|decision|discrepanc"
+    ],
+    "forbiddenText": [],
+    "buttons": [
+      "צור טיוטה",
+      "שנה כמויות",
+      "ביטול"
+    ],
+    "noButtons": [],
+    "allowIls": true,
+    "noOutbound": false,
+    "state": {
+      "draftsCreated": 0,
+      "ordersPlacedViaWhatsapp": 0
+    }
+  }
+}

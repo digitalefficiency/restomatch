@@ -1,0 +1,45 @@
+{
+  "caseId": "WA-G-OWNER-02",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "brief.owner",
+      "toolCalls": [
+        {
+          "name": "owner.leakHero",
+          "args": {
+            "month": "2026-10"
+          },
+          "result": {
+            "month": "2026-10",
+            "leakIls": 0
+          }
+        },
+        {
+          "name": "approvals.queueSummary",
+          "args": {},
+          "result": {
+            "count": 0,
+            "totalIls": 0
+          }
+        },
+        {
+          "name": "recovery.list",
+          "args": {
+            "overdueOnly": true
+          },
+          "result": {
+            "overdue": 0,
+            "claims": []
+          }
+        }
+      ],
+      "outbound": []
+    }
+  ],
+  "staged": [],
+  "state": {
+    "proactiveSent": 0
+  }
+}

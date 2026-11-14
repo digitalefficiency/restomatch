@@ -1,0 +1,77 @@
+{
+  "caseId": "WA-G-OWNER-04",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "brief.owner",
+      "toolCalls": [
+        {
+          "name": "owner.leakHero",
+          "args": {
+            "month": "2026-10"
+          },
+          "result": {
+            "month": "2026-10",
+            "leakIls": 3180
+          }
+        },
+        {
+          "name": "approvals.queueSummary",
+          "args": {},
+          "result": {
+            "count": 4,
+            "totalIls": 1412
+          }
+        },
+        {
+          "name": "recovery.list",
+          "args": {
+            "overdueOnly": true
+          },
+          "result": {
+            "overdue": 1,
+            "claims": [
+              {
+                "claimId": "claim-meat-1",
+                "supplier": "קצביית הכרם",
+                "ageDays": 8
+              }
+            ]
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "template",
+          "text": "בוקר טוב. בכפר הזיתים מחכים לך היום:\n• 4 פערים להחלטה, בסך 1,412 ₪\n• 1 בקשות זיכוי שממתינות לתשובה יותר מ-7 ימים מהספק\nהדליפה החודש עד עכשיו: 3,180 ₪. הפרטים באפליקציה.",
+          "template": {
+            "name": "rm_owner_brief",
+            "vars": [
+              "כפר הזיתים",
+              "4",
+              "1,412 ₪",
+              "1",
+              "3,180 ₪"
+            ]
+          },
+          "buttons": [
+            {
+              "id": "brief:decide",
+              "title": "להחלטות עכשיו"
+            },
+            {
+              "id": "brief:mute",
+              "title": "השתק להיום"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "proactiveSent": 1
+  }
+}

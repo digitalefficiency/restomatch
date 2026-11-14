@@ -1,0 +1,59 @@
+{
+  "id": "WA-G-OWNER-02",
+  "role": "owner",
+  "adversarial": false,
+  "flow": "O1",
+  "title": "Morning brief skipped when nothing waits",
+  "neverList": [],
+  "ownerRules": [
+    "quiet-hours"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "scenario": "empty-day"
+    }
+  },
+  "turns": [
+    {
+      "from": "system",
+      "trigger": "rm_owner_brief",
+      "at": "07:30"
+    }
+  ],
+  "expect": {
+    "intent": "brief.owner",
+    "tools": [
+      {
+        "name": "owner.leakHero",
+        "args": {
+          "month": "2026-10"
+        }
+      },
+      {
+        "name": "approvals.queueSummary",
+        "args": {}
+      },
+      {
+        "name": "recovery.list",
+        "args": {
+          "overdueOnly": true
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": true,
+    "state": {
+      "proactiveSent": 0
+    }
+  }
+}

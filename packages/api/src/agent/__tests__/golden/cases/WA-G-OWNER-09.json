@@ -1,0 +1,53 @@
+{
+  "id": "WA-G-OWNER-09",
+  "role": "owner",
+  "adversarial": false,
+  "flow": "O3",
+  "title": "Leak by supplier nickname with a typo (\"הקצב\", \"דלפ\")",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "כמה דלפ אצל הקצב החודש??"
+    }
+  ],
+  "expect": {
+    "intent": "leak.bySupplier",
+    "tools": [
+      {
+        "name": "suppliers.resolve",
+        "args": {
+          "query": "הקצב"
+        }
+      },
+      {
+        "name": "owner.leakGrouped",
+        "args": {
+          "supplierId": "sup-meat",
+          "month": "2026-10"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [
+      "להכין בקשת זיכוי",
+      "פירוט לפי מוצר",
+      "חודש קודם"
+    ],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

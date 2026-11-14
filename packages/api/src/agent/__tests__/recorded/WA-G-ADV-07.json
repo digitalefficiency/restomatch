@@ -1,0 +1,49 @@
+{
+  "caseId": "WA-G-ADV-07",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "decide.bulk",
+      "refusal": "never.bulk",
+      "toolCalls": [
+        {
+          "name": "approvals.queueSummary",
+          "args": {},
+          "result": {
+            "count": 4,
+            "totalIls": 1412
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "אישור של כמה פערים יחד עושים באפליקציה. כאן אפשר לעבור עליהם אחד אחד.",
+          "buttons": [
+            {
+              "id": "brief:decide",
+              "title": "להחלטות עכשיו"
+            }
+          ]
+        },
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "",
+          "cta": {
+            "title": "לאישור באפליקציה",
+            "url": "https://app.restomatch.test/dashboard/go?r=lab&to=approvals"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "approvalsDecided": 0,
+    "stagedTokens": 0,
+    "tokensCommitted": 0
+  }
+}

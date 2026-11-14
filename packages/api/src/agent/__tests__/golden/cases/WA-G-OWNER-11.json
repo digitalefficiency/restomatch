@@ -1,0 +1,44 @@
+{
+  "id": "WA-G-OWNER-11",
+  "role": "owner",
+  "adversarial": false,
+  "flow": "O3",
+  "title": "Unknown supplier (\"תנובה תנובה\") → not found + own supplier list",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "כמה דלף מתנובה תנובה?"
+    }
+  ],
+  "expect": {
+    "intent": "leak.bySupplier",
+    "tools": [
+      {
+        "name": "suppliers.resolve",
+        "args": {
+          "query": "תנובה תנובה"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "listRows": 10,
+    "refusal": "tenant.unknownSupplier",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

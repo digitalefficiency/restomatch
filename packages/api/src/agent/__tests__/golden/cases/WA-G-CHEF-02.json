@@ -1,0 +1,53 @@
+{
+  "id": "WA-G-CHEF-02",
+  "role": "chef",
+  "adversarial": false,
+  "flow": "C1",
+  "title": "Edit quantities by text (\"עגבניות 50, בלי פטרוזיליה\")",
+  "neverList": [],
+  "ownerRules": [
+    "chef-ils-orders-only"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "flowState": "order.preview:po-1031"
+    }
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "עגבניות 50, בלי פטרוזיליה"
+    }
+  ],
+  "expect": {
+    "intent": "order.edit",
+    "tools": [
+      {
+        "name": "orders.captureFromText",
+        "args": {
+          "text": "עגבניות 50, בלי פטרוזיליה",
+          "supplierId": "sup-veg"
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "leak|claim|decision|discrepanc"
+    ],
+    "forbiddenText": [],
+    "buttons": [
+      "צור טיוטה",
+      "שנה כמויות",
+      "ביטול"
+    ],
+    "noButtons": [],
+    "allowIls": true,
+    "noOutbound": false,
+    "state": {}
+  }
+}

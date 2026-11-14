@@ -1,0 +1,49 @@
+{
+  "caseId": "WA-G-MANAGER-12",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "delivery.when",
+      "toolCalls": [
+        {
+          "name": "suppliers.resolve",
+          "args": {
+            "query": "הדגים"
+          },
+          "result": {
+            "matches": [
+              {
+                "supplierId": "sup-fish",
+                "name": "דגי הים התיכון"
+              }
+            ]
+          }
+        },
+        {
+          "name": "receiving.todayExpectations",
+          "args": {
+            "supplierId": "sup-fish"
+          },
+          "result": {
+            "deliveries": [],
+            "next": {
+              "day": "ג׳",
+              "until": "11:00"
+            }
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "היום לא צפוי משלוח מדגי הים התיכון. המשלוח הבא: יום ג׳ עד 11:00.",
+          "buttons": []
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

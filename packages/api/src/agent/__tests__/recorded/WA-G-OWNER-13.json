@@ -1,0 +1,59 @@
+{
+  "caseId": "WA-G-OWNER-13",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "claim.letter",
+      "toolCalls": [
+        {
+          "name": "suppliers.resolve",
+          "args": {
+            "query": "קצביית הכרם"
+          },
+          "result": {
+            "matches": [
+              {
+                "supplierId": "sup-meat",
+                "name": "קצביית הכרם"
+              }
+            ]
+          }
+        },
+        {
+          "name": "recovery.letterDraft",
+          "args": {
+            "supplierId": "sup-meat"
+          },
+          "result": {
+            "letterId": "ltr-meat-1",
+            "claimIls": 860,
+            "lineCount": 6,
+            "excludedMissingOnInvoice": 1
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "מכתב בקשת זיכוי לקצביית הכרם מוכן: 860 ₪ על 6 שורות (בלי שורות \"חסר בחשבונית\").",
+          "buttons": []
+        },
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "השליחה היא מהוואטסאפ שלך. אנחנו לא שולחים לספק.",
+          "cta": {
+            "title": "שלח מהוואטסאפ שלי",
+            "url": "https://wa.me/972521110102?text=%D7%A9%D7%9C%D7%95%D7%9D%2C%20%D7%9E%D7%A6%D7%95%D7%A8%D7%A4%D7%AA%20%D7%91%D7%A7%D7%A9%D7%AA%20%D7%96%D7%99%D7%9B%D7%95%D7%99%20%D7%A2%D7%9C%20%D7%A4%D7%A2%D7%A8%D7%99%D7%9D%20%D7%91%D7%97%D7%A9%D7%91%D7%95%D7%A0%D7%99%D7%95%D7%AA%20%D7%90%D7%95%D7%A7%D7%98%D7%95%D7%91%D7%A8."
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "supplierOutboundRows": 0
+  }
+}

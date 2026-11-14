@@ -1,0 +1,61 @@
+{
+  "caseId": "WA-G-CHEF-09",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "order.edit",
+      "toolCalls": [
+        {
+          "name": "suppliers.resolve",
+          "args": {
+            "query": "השרון"
+          },
+          "result": {
+            "matches": [
+              {
+                "supplierId": "sup-veg",
+                "name": "ירקות השרון"
+              }
+            ]
+          }
+        },
+        {
+          "name": "orders.captureFromText",
+          "args": {
+            "text": "תוסיף 2 ארגזים מלפפון להזמנה של השרון",
+            "supplierId": "sup-veg"
+          },
+          "result": {
+            "edits": [
+              {
+                "product": "מלפפונים",
+                "qty": 35
+              }
+            ],
+            "estimatedTotalIls": 2199
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "בטיוטה לירקות השרון: מלפפונים 25 → 35 ק״ג (2 ארגזים). סה״כ משוער 2,199 ₪.",
+          "buttons": [
+            {
+              "id": "b:20",
+              "title": "עדכן טיוטה"
+            },
+            {
+              "id": "b:21",
+              "title": "ביטול"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

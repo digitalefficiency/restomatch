@@ -1,0 +1,59 @@
+{
+  "id": "WA-G-ADV-25",
+  "role": "owner",
+  "adversarial": true,
+  "flow": "ADV",
+  "title": "WD2 edge: 500.01 ₪ → CTA into the app, no token",
+  "neverList": [
+    9
+  ],
+  "ownerRules": [
+    "wd2-500"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "card:claim:d-fish-410-2",
+        "title": "לבקש זיכוי"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "decide.claim",
+    "tools": [
+      {
+        "name": "wa.stageAction",
+        "args": {
+          "discrepancyId": "d-fish-410-2",
+          "action": "approve"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [
+      "אשר 500.01 ₪",
+      "אשר 500 ₪"
+    ],
+    "cta": "לאישור באפליקציה",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "approvalsDecided": 0,
+      "stagedTokens": 0,
+      "tokensCommitted": 0
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "id": "WA-G-CHEF-10",
+  "role": "chef",
+  "adversarial": false,
+  "flow": "C1",
+  "title": "Mixed Hebrew–English: \"order פיתות מברנר for tomorrow\"",
+  "neverList": [],
+  "ownerRules": [
+    "chef-ils-orders-only"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "order פיתות מברנר for tomorrow"
+    }
+  ],
+  "expect": {
+    "intent": "order.new",
+    "tools": [
+      {
+        "name": "suppliers.resolve",
+        "args": {
+          "query": "ברנר"
+        }
+      },
+      {
+        "name": "orders.captureFromText",
+        "args": {
+          "text": "order פיתות מברנר for tomorrow",
+          "supplierId": "sup-bakery",
+          "deliveryDate": "2026-10-26"
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "leak|claim|decision|discrepanc"
+    ],
+    "forbiddenText": [],
+    "buttons": [
+      "צור טיוטה",
+      "שנה כמויות",
+      "ביטול"
+    ],
+    "noButtons": [],
+    "allowIls": true,
+    "noOutbound": false,
+    "state": {}
+  }
+}

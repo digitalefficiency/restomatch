@@ -1,0 +1,108 @@
+{
+  "caseId": "WA-G-RECEIVER-13",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "receiving.fix",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "list",
+          "text": "איזו שורה לתקן?",
+          "list": {
+            "button": "בחרו שורה",
+            "rows": [
+              {
+                "id": "row:0",
+                "title": "עגבניות שרי"
+              },
+              {
+                "id": "row:1",
+                "title": "מלפפונים"
+              },
+              {
+                "id": "row:2",
+                "title": "פטרוזיליה"
+              },
+              {
+                "id": "row:3",
+                "title": "חסה ערבית"
+              },
+              {
+                "id": "row:4",
+                "title": "כוסברה"
+              },
+              {
+                "id": "row:5",
+                "title": "בצל יבש"
+              },
+              {
+                "id": "row:6",
+                "title": "לימונים"
+              },
+              {
+                "id": "row:7",
+                "title": "תפוחי אדמה"
+              },
+              {
+                "id": "row:8",
+                "title": "פלפל אדום"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "intent": null,
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "text",
+          "text": "פטרוזיליה · הוזמנו 12 צרור. כמה הגיע? (מספר בלבד)",
+          "buttons": []
+        }
+      ]
+    },
+    {
+      "intent": null,
+      "toolCalls": [
+        {
+          "name": "receiving.markGrLine",
+          "args": {
+            "receiptId": "gr-1",
+            "lineNo": 3,
+            "receivedQty": 12
+          },
+          "result": {
+            "ok": true
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "תוקן: פטרוזיליה 12 מתוך 12 צרור.",
+          "buttons": [
+            {
+              "id": "b:30",
+              "title": "שלח ספירה"
+            },
+            {
+              "id": "b:31",
+              "title": "תקן שורה"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "grLinesMarked": 1
+  }
+}

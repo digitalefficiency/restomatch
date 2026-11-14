@@ -1,0 +1,56 @@
+{
+  "id": "WA-G-RECEIVER-12",
+  "role": "receiver",
+  "adversarial": false,
+  "flow": "R1",
+  "title": "\"המשאית של השרון לא הגיעה\"",
+  "neverList": [],
+  "ownerRules": [
+    "receiver-no-ils"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "המשאית של השרון לא הגיעה",
+      "at": "08:10"
+    }
+  ],
+  "expect": {
+    "intent": "delivery.when",
+    "tools": [
+      {
+        "name": "suppliers.resolve",
+        "args": {
+          "query": "השרון"
+        }
+      },
+      {
+        "name": "receiving.todayExpectations",
+        "args": {
+          "supplierId": "sup-veg"
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "ils|agorot|amount|total|price"
+    ],
+    "forbiddenText": [
+      "₪",
+      "\\d+[.,]\\d{2}"
+    ],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

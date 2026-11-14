@@ -1,0 +1,53 @@
+{
+  "id": "WA-G-BOOKKEEPER-10",
+  "role": "bookkeeper",
+  "adversarial": false,
+  "flow": "K1",
+  "title": "Credit requests with no reply: day 8 counts, day 6 and 7 do not",
+  "neverList": [],
+  "ownerRules": [
+    "claim-overdue-7d",
+    "partner-wording"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "letterSentDaysAgo": [
+        6,
+        7,
+        8
+      ]
+    }
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "אילו בקשות זיכוי לא קיבלו תשובה?"
+    }
+  ],
+  "expect": {
+    "intent": "claims.noReply",
+    "tools": [
+      {
+        "name": "recovery.list",
+        "args": {
+          "overdueOnly": true
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [
+      "באיחור"
+    ],
+    "buttons": [],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

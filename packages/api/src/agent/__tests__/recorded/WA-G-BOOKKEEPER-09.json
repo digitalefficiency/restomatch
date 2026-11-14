@@ -1,0 +1,38 @@
+{
+  "caseId": "WA-G-BOOKKEEPER-09",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "vat.atRisk",
+      "toolCalls": [
+        {
+          "name": "owner.vatAtRisk",
+          "args": {
+            "month": "2026-10"
+          },
+          "result": {
+            "vatAtRiskIls": 640,
+            "invoiceCount": 3,
+            "nextDue": "2026-11-15"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "מע״מ בסיכון באוקטובר: 640 ₪ ב-3 חשבוניות. המועד הקרוב: 15.11.",
+          "buttons": [
+            {
+              "id": "b:32",
+              "title": "פירוט"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

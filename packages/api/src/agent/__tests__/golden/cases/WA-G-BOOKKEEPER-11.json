@@ -1,0 +1,45 @@
+{
+  "id": "WA-G-BOOKKEEPER-11",
+  "role": "bookkeeper",
+  "adversarial": false,
+  "flow": "K1",
+  "title": "Typo: \"כמה חשבונות לתשלום השבוע\"",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "כמה חשבונות לתשלום השבוע"
+    }
+  ],
+  "expect": {
+    "intent": "payRun.week",
+    "tools": [
+      {
+        "name": "payRun.month",
+        "args": {
+          "month": "2026-10"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "cta": "פתח באפליקציה",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "payRunsApproved": 0
+    }
+  }
+}

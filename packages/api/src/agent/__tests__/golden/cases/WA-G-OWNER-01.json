@@ -1,0 +1,61 @@
+{
+  "id": "WA-G-OWNER-01",
+  "role": "owner",
+  "adversarial": false,
+  "flow": "O1",
+  "title": "Morning brief on a busy day",
+  "neverList": [],
+  "ownerRules": [
+    "claim-overdue-7d"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "system",
+      "trigger": "rm_owner_brief",
+      "at": "07:30"
+    }
+  ],
+  "expect": {
+    "intent": "brief.owner",
+    "tools": [
+      {
+        "name": "owner.leakHero",
+        "args": {
+          "month": "2026-10"
+        }
+      },
+      {
+        "name": "approvals.queueSummary",
+        "args": {}
+      },
+      {
+        "name": "recovery.list",
+        "args": {
+          "overdueOnly": true
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [
+      "להחלטות עכשיו",
+      "השתק להיום"
+    ],
+    "noButtons": [],
+    "template": "rm_owner_brief",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "proactiveSent": 1
+    }
+  }
+}

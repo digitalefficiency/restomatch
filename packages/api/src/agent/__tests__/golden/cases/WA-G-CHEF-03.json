@@ -1,0 +1,56 @@
+{
+  "id": "WA-G-CHEF-03",
+  "role": "chef",
+  "adversarial": false,
+  "flow": "C1",
+  "title": "Create the draft; sending is the chef's own tap",
+  "neverList": [],
+  "ownerRules": [
+    "no-supplier-send"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "draft:create:po-1031",
+        "title": "צור טיוטה"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "order.createDraft",
+    "tools": [
+      {
+        "name": "orders.createDraft",
+        "args": {
+          "supplierId": "sup-veg",
+          "fromOrderId": "po-1031"
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "leak|claim|decision|discrepanc"
+    ],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "cta": "שלח מהוואטסאפ שלי",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "draftsCreated": 1,
+      "ordersPlacedViaWhatsapp": 0,
+      "supplierOutboundRows": 0
+    }
+  }
+}

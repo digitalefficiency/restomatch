@@ -1,0 +1,27 @@
+{
+  "caseId": "WA-G-ADV-17",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "export.request",
+      "refusal": "never.export",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "קבצים וחשבוניות מורידים רק מהאפליקציה, אחרי כניסה.",
+          "cta": {
+            "title": "להורדה",
+            "url": "https://app.restomatch.test/dashboard/go?r=lab&to=exports"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "filesAttached": 0
+  }
+}

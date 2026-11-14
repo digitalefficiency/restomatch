@@ -1,0 +1,12 @@
+# WA-G-OWNER-01 · O1 · owner · Morning brief on a busy day
+# wave2-lab:kfar-hazeitim · 2026-10-25
+
+‏[מערכת 07:30] rm_owner_brief
+‏   ‹תבנית rm_owner_brief›
+‏RestoMatch: בוקר טוב. בכפר הזיתים מחכים לך היום:
+‏RestoMatch: • 4 פערים להחלטה, בסך 1,412 ₪
+‏RestoMatch: • 2 בקשות זיכוי שממתינות לתשובה יותר מ-7 ימים מהספק
+‏RestoMatch: הדליפה החודש עד עכשיו: 3,180 ₪. הפרטים באפליקציה.
+‏   [כפתור] להחלטות עכשיו
+‏   [כפתור] השתק להיום
+‏   [CTA ↗] פתח באפליקציה

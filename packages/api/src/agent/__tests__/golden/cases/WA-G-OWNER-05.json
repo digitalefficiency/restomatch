@@ -1,0 +1,90 @@
+{
+  "id": "WA-G-OWNER-05",
+  "role": "owner",
+  "adversarial": false,
+  "flow": "O2",
+  "title": "Request credit for a 96 ₪ gap: card, amount confirm, undo offer",
+  "neverList": [],
+  "ownerRules": [
+    "token-tap-only",
+    "wd2-500"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "template_button",
+        "id": "brief:decide",
+        "title": "להחלטות עכשיו"
+      }
+    },
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "card:claim:d-veg-20931-1",
+        "title": "לבקש זיכוי"
+      }
+    },
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "tok:stg_lab_own05",
+        "title": "אשר 96 ₪"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "decide.next",
+    "tools": [
+      {
+        "name": "approvals.myQueue",
+        "args": {
+          "limit": 1
+        }
+      },
+      {
+        "name": "wa.stageAction",
+        "args": {
+          "discrepancyId": "d-veg-20931-1",
+          "action": "approve"
+        }
+      },
+      {
+        "name": "approvals.approve",
+        "args": {
+          "discrepancyId": "d-veg-20931-1"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [
+      "לבקש זיכוי",
+      "לשלם כפי שחויב",
+      "פרטים",
+      "אשר 96 ₪",
+      "ביטול",
+      "בטל",
+      "הפער הבא"
+    ],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "stagedTokens": 1,
+      "tokensCommitted": 1,
+      "approvalsDecided": 1
+    }
+  }
+}

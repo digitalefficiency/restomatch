@@ -1,0 +1,45 @@
+{
+  "id": "WA-G-OWNER-12",
+  "role": "owner",
+  "adversarial": false,
+  "flow": "O3",
+  "title": "Mixed Hebrew–English leak total",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "מה ה-leak החודש? total"
+    }
+  ],
+  "expect": {
+    "intent": "leak.total",
+    "tools": [
+      {
+        "name": "owner.leakHero",
+        "args": {
+          "month": "2026-10"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [
+      "פירוט לפי ספק",
+      "להחלטות עכשיו"
+    ],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {}
+  }
+}

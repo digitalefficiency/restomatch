@@ -1,0 +1,46 @@
+{
+  "caseId": "WA-G-ADV-10",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "decide.claim",
+      "refusal": "missingOnInvoice.notClaimable",
+      "toolCalls": [
+        {
+          "name": "approvals.getDiscrepancy",
+          "args": {
+            "discrepancyId": "d-moi-20931-4"
+          },
+          "result": {
+            "discrepancyId": "d-moi-20931-4",
+            "type": "MISSING_ON_INVOICE",
+            "claimable": false,
+            "countsAsLeak": false
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "buttons",
+          "text": "על שורה שחסרה בחשבונית לא מבקשים זיכוי: לא חויבתם עליה. היא מופיעה לידיעה בלבד.",
+          "buttons": [
+            {
+              "id": "b:35",
+              "title": "פרטים"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "approvalsDecided": 0,
+    "stagedTokens": 0,
+    "tokensCommitted": 0,
+    "missingOnInvoiceClaimed": 0,
+    "claimLinesAdded": 0
+  }
+}

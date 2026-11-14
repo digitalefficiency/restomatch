@@ -1,0 +1,26 @@
+{
+  "caseId": "WA-G-MANAGER-05",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "delivery.arrived",
+      "toolCalls": [],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "cta",
+          "text": "מעולה. אחרי הספירה אעדכן אותך אם יש פערים.",
+          "cta": {
+            "title": "פתח קבלה",
+            "url": "https://app.restomatch.test/dashboard/go?r=lab&to=receiving"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "poDatesRevised": 0
+  }
+}

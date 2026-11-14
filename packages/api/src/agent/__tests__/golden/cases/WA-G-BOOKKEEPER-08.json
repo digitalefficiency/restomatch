@@ -1,0 +1,50 @@
+{
+  "id": "WA-G-BOOKKEEPER-08",
+  "role": "bookkeeper",
+  "adversarial": false,
+  "flow": "K1",
+  "title": "Manager-routed item: information only, no token",
+  "neverList": [],
+  "ownerRules": [
+    "wd2-500"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "תאשר את הפער של יבשים בן-עמי"
+    }
+  ],
+  "expect": {
+    "intent": "decide.claim",
+    "tools": [
+      {
+        "name": "wa.stageAction",
+        "args": {
+          "discrepancyId": "d-dry-330-1",
+          "action": "approve"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [
+      "אשר 150 ₪"
+    ],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "stagedTokens": 0,
+      "approvalsDecided": 0
+    }
+  }
+}

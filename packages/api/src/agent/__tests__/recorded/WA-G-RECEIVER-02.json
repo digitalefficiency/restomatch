@@ -1,0 +1,24 @@
+{
+  "caseId": "WA-G-RECEIVER-02",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "receiving.today",
+      "toolCalls": [
+        {
+          "name": "receiving.todayExpectations",
+          "args": {},
+          "result": {
+            "deliveries": []
+          }
+        }
+      ],
+      "outbound": []
+    }
+  ],
+  "staged": [],
+  "state": {
+    "proactiveSent": 0
+  }
+}

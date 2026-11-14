@@ -1,0 +1,80 @@
+{
+  "id": "WA-G-CHEF-04",
+  "role": "chef",
+  "adversarial": false,
+  "flow": "C1",
+  "title": "Supplier without a WhatsApp contact → open the draft in the app",
+  "neverList": [],
+  "ownerRules": [
+    "chef-ils-orders-only"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "supplierNoWhatsapp": "sup-bakery"
+    }
+  },
+  "turns": [
+    {
+      "from": "user",
+      "text": "תזמין לחמניות ממאפיית ברנר כמו תמיד"
+    },
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "draft:create:po-1036",
+        "title": "צור טיוטה"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "order.repeat",
+    "tools": [
+      {
+        "name": "suppliers.resolve",
+        "args": {
+          "query": "מאפיית ברנר"
+        }
+      },
+      {
+        "name": "orders.list",
+        "args": {
+          "supplierId": "sup-bakery",
+          "last": 1
+        }
+      },
+      {
+        "name": "orders.previewRepeat",
+        "args": {
+          "fromOrderId": "po-1036"
+        }
+      },
+      {
+        "name": "orders.createDraft",
+        "args": {
+          "supplierId": "sup-bakery",
+          "fromOrderId": "po-1036"
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "leak|claim|decision|discrepanc"
+    ],
+    "forbiddenText": [],
+    "buttons": [],
+    "noButtons": [],
+    "cta": "פתח טיוטה",
+    "allowIls": true,
+    "noOutbound": false,
+    "state": {
+      "draftsCreated": 1,
+      "supplierOutboundRows": 0
+    }
+  }
+}

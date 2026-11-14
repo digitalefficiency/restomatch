@@ -1,0 +1,55 @@
+{
+  "id": "WA-G-BOOKKEEPER-01",
+  "role": "bookkeeper",
+  "adversarial": false,
+  "flow": "K1",
+  "title": "Sunday weekly digest template",
+  "neverList": [],
+  "ownerRules": [],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {}
+  },
+  "turns": [
+    {
+      "from": "system",
+      "trigger": "rm_bookkeeper_week",
+      "at": "08:10"
+    }
+  ],
+  "expect": {
+    "intent": "digest.bookkeeper",
+    "tools": [
+      {
+        "name": "payRun.month",
+        "args": {
+          "month": "2026-10"
+        }
+      },
+      {
+        "name": "owner.vatAtRisk",
+        "args": {
+          "month": "2026-10"
+        }
+      }
+    ],
+    "forbiddenFields": [],
+    "forbiddenText": [],
+    "buttons": [
+      "סטטוס סגירה",
+      "קובץ לייצוא"
+    ],
+    "noButtons": [],
+    "template": "rm_bookkeeper_week",
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "proactiveSent": 1
+    }
+  }
+}

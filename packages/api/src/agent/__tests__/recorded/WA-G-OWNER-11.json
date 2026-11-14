@@ -1,0 +1,76 @@
+{
+  "caseId": "WA-G-OWNER-11",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "leak.bySupplier",
+      "refusal": "tenant.unknownSupplier",
+      "toolCalls": [
+        {
+          "name": "suppliers.resolve",
+          "args": {
+            "query": "תנובה תנובה"
+          },
+          "result": {
+            "matches": []
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "list",
+          "text": "לא מצאתי ספק בשם הזה. אלה הספקים שלך:",
+          "list": {
+            "button": "הספקים שלי",
+            "rows": [
+              {
+                "id": "row:0",
+                "title": "ירקות השרון"
+              },
+              {
+                "id": "row:1",
+                "title": "קצביית הכרם"
+              },
+              {
+                "id": "row:2",
+                "title": "מאפיית ברנר"
+              },
+              {
+                "id": "row:3",
+                "title": "דגי הים התיכון"
+              },
+              {
+                "id": "row:4",
+                "title": "מחלבות הגליל"
+              },
+              {
+                "id": "row:5",
+                "title": "תבליני פרשמן"
+              },
+              {
+                "id": "row:6",
+                "title": "משקאות שטיינברג"
+              },
+              {
+                "id": "row:7",
+                "title": "יבשים בן-עמי"
+              },
+              {
+                "id": "row:8",
+                "title": "חד״פ מהיר"
+              },
+              {
+                "id": "row:9",
+                "title": "עמית חומרי ניקוי"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {}
+}

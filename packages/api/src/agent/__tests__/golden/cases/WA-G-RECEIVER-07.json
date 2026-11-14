@@ -1,0 +1,77 @@
+{
+  "id": "WA-G-RECEIVER-07",
+  "role": "receiver",
+  "adversarial": false,
+  "flow": "R2",
+  "title": "Last line → summary → submit; mismatches go to the manager",
+  "neverList": [],
+  "ownerRules": [
+    "receiver-no-ils"
+  ],
+  "seed": {
+    "scenario": "wave2-lab:kfar-hazeitim",
+    "today": "2026-10-25",
+    "features": {
+      "all": true,
+      "whatsappAgent": true
+    },
+    "overrides": {
+      "flowState": "receiving.line:gr-1:9"
+    }
+  },
+  "turns": [
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "gr:all:9",
+        "title": "הגיע הכל"
+      }
+    },
+    {
+      "from": "user",
+      "tap": {
+        "kind": "button_reply",
+        "id": "gr:submit:gr-1",
+        "title": "שלח ספירה"
+      }
+    }
+  ],
+  "expect": {
+    "intent": "receiving.count",
+    "tools": [
+      {
+        "name": "receiving.markGrLine",
+        "args": {
+          "receiptId": "gr-1",
+          "lineNo": 9,
+          "receivedQty": 8
+        }
+      },
+      {
+        "name": "receiving.submitReceipt",
+        "args": {
+          "receiptId": "gr-1"
+        }
+      }
+    ],
+    "forbiddenFields": [
+      "ils|agorot|amount|total|price"
+    ],
+    "forbiddenText": [
+      "₪",
+      "\\d+[.,]\\d{2}"
+    ],
+    "buttons": [
+      "שלח ספירה",
+      "תקן שורה"
+    ],
+    "noButtons": [],
+    "allowIls": false,
+    "noOutbound": false,
+    "state": {
+      "grLinesMarked": 1,
+      "receiptsSubmitted": 1
+    }
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "caseId": "WA-G-BOOKKEEPER-01",
+  "source": "reference",
+  "recordedAt": "2026-11-07",
+  "turns": [
+    {
+      "intent": "digest.bookkeeper",
+      "toolCalls": [
+        {
+          "name": "payRun.month",
+          "args": {
+            "month": "2026-10"
+          },
+          "result": {
+            "dueThisWeek": 12,
+            "dueIls": 18450,
+            "heldByOpenGap": 3
+          }
+        },
+        {
+          "name": "owner.vatAtRisk",
+          "args": {
+            "month": "2026-10"
+          },
+          "result": {
+            "vatAtRiskIls": 640,
+            "nextDue": "2026-11-15"
+          }
+        }
+      ],
+      "outbound": [
+        {
+          "origin": "server",
+          "kind": "template",
+          "text": "סיכום שבועי לכפר הזיתים: 12 חשבוניות לתשלום השבוע, בסך 18,450 ₪. 3 מעוכבות בגלל פער פתוח. מע״מ בסיכון: 640 ₪, המועד הקרוב 15.11. הפירוט באפליקציה.",
+          "template": {
+            "name": "rm_bookkeeper_week",
+            "vars": [
+              "כפר הזיתים",
+              "12",
+              "18,450 ₪",
+              "3",
+              "640 ₪",
+              "15.11"
+            ]
+          },
+          "buttons": [
+            {
+              "id": "bk:close",
+              "title": "סטטוס סגירה"
+            },
+            {
+              "id": "bk:export",
+              "title": "קובץ לייצוא"
+            }
+          ],
+          "cta": {
+            "title": "פתח באפליקציה",
+            "url": "https://app.restomatch.test/dashboard/go?r=lab&to=pay-run"
+          }
+        }
+      ]
+    }
+  ],
+  "staged": [],
+  "state": {
+    "proactiveSent": 1
+  }
+}
