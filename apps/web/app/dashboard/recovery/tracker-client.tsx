@@ -495,6 +495,7 @@ export function TrackerClient({
                   className="mt-2 min-h-11 md:min-h-9"
                   onClick={() => setShownRows((n) => n + PAGE_ROWS)}
                   data-testid="recovery-show-more"
+                  data-record=""
                 >
                   {t('tracker.showMore', { shown: formatNumber(visible.length, locale), total: formatNumber(ordered.length, locale) })}
                 </Button>
@@ -557,7 +558,7 @@ export function TrackerClient({
         <Card padding="lg">
           <h2 className="text-sm font-bold text-ink">{t('tracker.suggestionsTitle')}</h2>
           <p className="mt-1 text-xs text-muted">{t('tracker.suggestionsHint')}</p>
-          <ul className="mt-3 divide-y divide-line/60">
+          <ul className="mt-3 divide-y divide-line/60" data-record="">
             {suggestions.map((s) => {
               const group = creditable.find((g) => g.supplierId === s.supplierId);
               return (
@@ -593,7 +594,7 @@ export function TrackerClient({
         <Card padding="lg">
           <h2 className="text-sm font-bold text-ink">{t('tracker.creditNote')}</h2>
           <p className="mt-1 text-xs text-muted">{t('tracker.creditNoteHint')}</p>
-          <ul className="mt-2 divide-y divide-line/60">
+          <ul className="mt-2 divide-y divide-line/60" data-record="">
             {creditable.map((g) => (
               <li key={g.supplierId} className="py-2" id={`credit-${g.supplierId}`}>
                 <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
