@@ -10,7 +10,7 @@ export const he = {
   submit: 'שאלו',
   thinking: 'בודק בנתונים…',
   stop: 'עצור',
-  stopped: 'נעצר. אפשר לשאול שוב.',
+  stopped: 'נעצר',
   suggestionsLabel: 'שאלות נפוצות',
   suggestions: {
     leakChange: 'מה השתנה בדליפה החודש?',

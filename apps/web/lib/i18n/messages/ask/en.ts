@@ -9,7 +9,7 @@ export const en: Shape<typeof he> = {
   submit: 'Ask',
   thinking: 'Checking your data…',
   stop: 'Stop',
-  stopped: 'Stopped. You can ask again.',
+  stopped: 'Stopped',
   suggestionsLabel: 'Common questions',
   suggestions: {
     leakChange: 'What changed in the leak this month?',
