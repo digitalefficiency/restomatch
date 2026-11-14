@@ -1803,13 +1803,68 @@ describe('round 8 · M16/M9: a truthful "checked together" answer, available wit
         .set({ settings: { ...(saved as object), features: { ...((saved as { features?: object }).features ?? {}), ingestWhatsapp: false, ingestEmail: false } } as never })
         .where(eq(restaurants.id, A.restaurantId));
       const [d2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, p2!));
-      await owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'checked_together' });
+      await owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'checked_together', payableInvoiceId: p1! });
       expect((await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.id, d2!.id)))[0]!.error).toBe('page_checked_together');
       expect(await owner().ingest.pageQuestionOf({ invoiceId: p1! })).toBeNull();
       await expect(owner().approvals.approve({ discrepancyId: gap!.id })).resolves.toBeTruthy();
     } finally {
       await ownerDb.update(restaurants).set({ settings: saved as never }).where(eq(restaurants.id, A.restaurantId));
     }
+  });
+});
+
+describe('round 9 · N4: "checked together" keeps exactly ONE of the two invoices payable', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+  const owner = () =>
+    appRouter.createCaller({
+      db: ownerDb,
+      session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' },
+    } as AppContext);
+  const withPayRun = async <T,>(fn: () => Promise<T>): Promise<T> => {
+    const [rest] = await ownerDb.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, A.restaurantId));
+    const saved = rest!.settings as { features?: Record<string, unknown> };
+    try {
+      await ownerDb
+        .update(restaurants)
+        .set({ settings: { ...saved, features: { ...(saved.features ?? {}), payRun: true } } as never })
+        .where(eq(restaurants.id, A.restaurantId));
+      return await fn();
+    } finally {
+      await ownerDb.update(restaurants).set({ settings: saved as never }).where(eq(restaurants.id, A.restaurantId));
+    }
+  };
+  const payRow = async (invoiceId: string) =>
+    (await owner().payRun.month()).suppliers.flatMap((g) => g.invoices).find((i) => i.invoiceId === invoiceId) ?? null;
+
+  it('page 1 ₪1,000 + page 2 ₪1,500 (the document total): the person picks page 2 → page 1 is held "paid with" page 2, never ₪2,500', async () => {
+    const [p1, p2] = await pages(2, 'r9n4');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-941', totalInclVat: '1000.00' });
+    await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p1!, grId: A.grId, overallStatus: 'clean' });
+    expect((await ocr(p2!, { ...NOHEAD, totalInclVat: '1500.00' })).flagged).toEqual([{ invoiceId: p2, reason: 'page_merge_blocked' }]);
+    await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p2!, grId: A.grId, overallStatus: 'clean' });
+    const [d2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, p2!));
+    // the answer must say which invoice carries the total
+    await expect(owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'checked_together' })).rejects.toMatchObject({ message: 'payable_required' });
+    await withPayRun(async () => {
+      await owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'checked_together', payableInvoiceId: p2! });
+      expect(await payRow(p1!)).toMatchObject({ status: 'hold', paidWith: p2 });
+      expect(await payRow(p2!)).toMatchObject({ paidWith: null, openPageQuestion: false });
+    });
+  });
+
+  it('a foreign / unrelated invoice is never accepted as the payable one', async () => {
+    const [p1, p2] = await pages(2, 'r9n4b');
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-942' });
+    await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p1!, grId: A.grId, overallStatus: 'clean' });
+    await ocr(p2!, NOHEAD);
+    const [d2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, p2!));
+    await expect(
+      owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'checked_together', payableInvoiceId: A.invoiceId }),
+    ).rejects.toMatchObject({ message: 'payable_required' });
+    expect((await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.id, d2!.id)))[0]!.error).toBe('page_merge_blocked');
   });
 });
 

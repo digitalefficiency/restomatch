@@ -440,7 +440,15 @@ export const ingestRouter = router({
    * re-shot copy behind every refusal guard. Foreign ids → NOT_FOUND.
    */
   resolvePageFlag: managerProcedure
-    .input(z.object({ documentId: z.string().uuid(), action: z.enum(['separate', 'delete_duplicate', 'close_unreadable', 'checked_together']) }))
+    .input(
+      z.object({
+        documentId: z.string().uuid(),
+        action: z.enum(['separate', 'delete_duplicate', 'close_unreadable', 'checked_together']),
+        /** Round 9 (N4): checked_together — the invoice that carries the total and is paid. */
+        payableInvoiceId: z.string().uuid().optional(),
+        withInvoiceId: z.string().uuid().optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
       const doc = await ownDocument(ctx.db, rid, input.documentId);
@@ -451,6 +459,8 @@ export const ingestRouter = router({
         documentId: doc.id,
         action: input.action,
         userId: ctx.session.userId,
+        ...(input.payableInvoiceId ? { payableInvoiceId: input.payableInvoiceId } : {}),
+        ...(input.withInvoiceId ? { withInvoiceId: input.withInvoiceId } : {}),
       });
       await refreshMessageStatus(ctx.db, rid, doc.messageId);
       return res;

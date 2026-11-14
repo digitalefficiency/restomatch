@@ -17,7 +17,11 @@ import { PAGE_FLAGS, PAGE_ONE_FLAGS, type PageFlag } from './settle';
  */
 export type PageFlagAction = 'separate' | 'delete_duplicate' | 'close_unreadable' | 'checked_together';
 
-/** Round 8: a person compared the page with its page 1 and will handle them together (answered; nothing merged or split). */
+/**
+ * Round 8: a person compared the page with its page 1 — they are ONE invoice (answered;
+ * nothing merged or split). Round 9 (N4): the person picks which invoice carries the
+ * total; the other is marked raw.paidWith and held in the pay run (T4), never paid twice.
+ */
 export const PAGE_CHECKED_TOGETHER = 'page_checked_together';
 
 /** Round 7: a person closed an unreadable page as not read (answered; the invoice is untouched). */
@@ -33,7 +37,20 @@ export interface ResolveDeps {
 
 export async function resolvePageFlag(
   db: Database,
-  args: { restaurantId: string; documentId: string; action: PageFlagAction; userId: string | null },
+  args: {
+    restaurantId: string;
+    documentId: string;
+    action: PageFlagAction;
+    userId: string | null;
+    /**
+     * Round 9 (N4), `checked_together` only: which of the two invoices carries the
+     * document's total and is paid — the page's own invoice or the one it belongs to.
+     * The other is held in the pay run as "paid with" it (never paid twice).
+     */
+    payableInvoiceId?: string;
+    /** …and the invoice the person compared it with (one of the heads settle recorded; default the likeliest). */
+    withInvoiceId?: string;
+  },
   deps: ResolveDeps = {},
 ): Promise<{ invoiceId: string | null; action: PageFlagAction }> {
   const { restaurantId, documentId, action } = args;
@@ -173,6 +190,27 @@ export async function resolvePageFlag(
 
     if (action === 'checked_together') {
       if (!(PAGE_ONE_FLAGS as readonly string[]).includes(flag)) throw new TRPCError({ code: 'CONFLICT', message: 'not_comparable' });
+      // Round 9 (N4): ONE invoice stays payable. The pair is the page's invoice and the
+      // invoice settle recorded it belongs to (raw.pageOf.invoiceId — what the compare shows).
+      const [pair] = (await tx.execute(sql`
+        select ocr_payload -> 'raw' -> 'pageOf' ->> 'invoiceId' as head,
+               coalesce(ocr_payload -> 'raw' -> 'pageOf' -> 'invoiceIds', '[]'::jsonb) as heads
+          from ${invoices} where id = ${invoiceId} and restaurant_id = ${restaurantId}`)) as unknown as Array<{ head: string | null; heads: unknown }>;
+      const heads = [pair?.head, ...(Array.isArray(pair?.heads) ? (pair!.heads as unknown[]) : [])].filter((h): h is string => typeof h === 'string');
+      if (heads.length === 0) throw new TRPCError({ code: 'CONFLICT', message: 'not_comparable' });
+      if (args.withInvoiceId && !heads.includes(args.withInvoiceId)) throw new TRPCError({ code: 'BAD_REQUEST', message: 'payable_required' });
+      const head = args.withInvoiceId ?? heads[0]!;
+      const payable = args.payableInvoiceId;
+      if (payable !== invoiceId && payable !== head) throw new TRPCError({ code: 'BAD_REQUEST', message: 'payable_required' });
+      const paidWith = payable === invoiceId ? head : invoiceId;
+      const marked = (await tx.execute(sql`
+        update ${invoices}
+           set ocr_payload = coalesce(ocr_payload, '{}'::jsonb) || jsonb_build_object('raw',
+                 coalesce(ocr_payload -> 'raw', '{}'::jsonb) || jsonb_build_object('paidWith', jsonb_build_object('invoiceId', ${payable}::text))),
+               updated_at = now()
+         where id = ${paidWith} and restaurant_id = ${restaurantId} and status <> 'paid'
+         returning id`)) as unknown as unknown[];
+      if (marked.length === 0) throw new TRPCError({ code: 'CONFLICT', message: 'already_paid' });
       await tx
         .update(ingestDocuments)
         .set({ error: PAGE_CHECKED_TOGETHER, updatedAt: new Date() })
@@ -184,7 +222,7 @@ export async function resolvePageFlag(
         entityType: 'invoice',
         entityId: invoiceId,
         before: { flag } as never,
-        after: { flag: PAGE_CHECKED_TOGETHER } as never,
+        after: { flag: PAGE_CHECKED_TOGETHER, payableInvoiceId: payable, paidWithInvoiceId: paidWith } as never,
       });
       return { invoiceId, match: false, released: [] as string[] };
     }

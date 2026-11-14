@@ -73,6 +73,8 @@ export interface PayRunInvoice {
   duplicate: boolean;
   /** G-09: a page of this invoice still waits for a person's decision in the inbox — held ("עמוד פתוח"). */
   openPageQuestion: boolean;
+  /** G-09 (round 9): checked as ONE invoice with this one, which carries the total — held, calmly (T4: "נכללת בחשבונית …"). */
+  paidWith: string | null;
   /** The claimable ₪ of the duplicate finding(s) (= the copy's total incl. VAT); not in pending / credit. */
   duplicateIls: number;
   totalInclVat: number;
@@ -252,7 +254,9 @@ export const payRunRouter = router({
                -- G-08: held for a "זה אותו מוצר?" question (same rule as the hero).
                ${AWAITING_QUESTION_SQL} AS question,
                -- G-09: a page question is open in the inbox (never "pay" while a page is undecided).
-               ${openPageQuestionSql(rid, sql`i.id`)} AS open_page
+               ${openPageQuestionSql(rid, sql`i.id`)} AS open_page,
+               -- G-09 (round 9): checked as one invoice with another that carries the total.
+               i.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' AS paid_with
         FROM invoices i
         LEFT JOIN suppliers s ON s.id = i.supplier_id AND s.restaurant_id = ${rid}
         WHERE i.restaurant_id = ${rid}
@@ -297,6 +301,9 @@ export const payRunRouter = router({
         if (pendingLink || awaitingCount || awaitingQuestion || awaitingReview) s.status = 'hold';
         const openPageQuestion = row.open_page === true;
         if (openPageQuestion) s.status = 'hold';
+        // Round 9 (N4): its ₪ is inside the invoice that carries the document total — never paid on its own.
+        const paidWith = row.paid_with == null ? null : String(row.paid_with);
+        if (paidWith) s.status = 'hold';
         const inv: PayRunInvoice = {
           invoiceId: id,
           invoiceNumber: row.invoice_number == null ? null : String(row.invoice_number),
@@ -308,6 +315,7 @@ export const payRunRouter = router({
           awaitingReview,
           duplicate: s.duplicate,
           openPageQuestion,
+          paidWith,
           duplicateIls: s.duplicateIls,
           totalInclVat: Number(row.total_incl),
           totalExclVat: Number(row.total_excl),
@@ -335,7 +343,10 @@ export const payRunRouter = router({
         }
         g.invoices.push(inv);
         // Waiting for a PO link is T4: its total is reported on its own, never as pay or hold ₪.
-        if (inv.pendingLink && !inv.duplicate) g.a.link! += ag(inv.totalInclVat);
+        // Round 9 (N4): "included in" another invoice — its ₪ is inside that invoice's total, counted once there.
+        if (inv.paidWith) {
+          /* T4: listed, never summed */
+        } else if (inv.pendingLink && !inv.duplicate) g.a.link! += ag(inv.totalInclVat);
         else g.a[inv.status]! += ag(inv.totalInclVat);
         g.a.credit! += ag(inv.creditIls);
         g.a.pending! += ag(inv.pendingIls);

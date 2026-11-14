@@ -26,7 +26,9 @@ function toneOf(inv: {
   awaitingQuestion: boolean;
   awaitingReview: boolean;
   duplicate: boolean;
+  paidWith?: string | null;
 }): BadgeTone {
+  if (inv.paidWith) return 'neutral'; // G-09 round 9: included in another invoice — T4, nothing to decide
   if (inv.status === 'pay') return 'accent';
   if (inv.status === 'claim') return 'danger-solid';
   return (inv.pendingLink || inv.awaitingCount || inv.awaitingQuestion || inv.awaitingReview) && !inv.duplicate ? 'neutral' : 'warning-solid';
@@ -78,9 +80,12 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
     awaitingReview: boolean;
     duplicate: boolean;
     openPageQuestion?: boolean;
+    paidWith?: string | null;
     creditIls: number;
   }) =>
-    inv.status === 'claim'
+    inv.paidWith
+      ? t('status.includedIn')
+      : inv.status === 'claim'
       ? t('status.claim', { amount: ils(inv.creditIls) })
       : inv.status === 'hold' && inv.openPageQuestion
         ? t('status.holdPage')
@@ -285,6 +290,11 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
                             {t('table.toQuestions')}
                           </LinkButton>
                         ) : null}
+                        {inv.paidWith ? (
+                          <LinkButton href={`/dashboard/invoices/${inv.paidWith}`} size="sm" variant="secondary" className="touch-target">
+                            {t('table.openCarrier')}
+                          </LinkButton>
+                        ) : null}
                         {inv.status === 'hold' && inv.openPageQuestion ? (
                           <LinkButton href={`/dashboard/inbox/compare?invoice=${inv.invoiceId}`} size="sm" variant="primary" className="touch-target">
                             {t('table.toInbox')}
@@ -295,7 +305,7 @@ export default async function PayRunPage({ searchParams }: { searchParams: Promi
                             {t('table.openInvoice')}
                           </LinkButton>
                         ) : null}
-                        {inv.status === 'hold' && !inv.openPageQuestion && !inv.pendingLink && !inv.awaitingCount && !inv.awaitingQuestion && !inv.awaitingReview ? (
+                        {inv.status === 'hold' && !inv.paidWith && !inv.openPageQuestion && !inv.pendingLink && !inv.awaitingCount && !inv.awaitingQuestion && !inv.awaitingReview ? (
                           <LinkButton href="/dashboard/approvals" size="sm" variant="primary" className="touch-target">
                             {t('table.toApprovals')}
                           </LinkButton>

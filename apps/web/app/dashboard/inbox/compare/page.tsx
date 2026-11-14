@@ -104,6 +104,8 @@ export default async function PageQuestionPage({ searchParams }: { searchParams:
       <PageAnswers
         documentId={q.documentId}
         flag={q.pageFlag}
+        pageInvoiceId={page?.id ?? null}
+        otherInvoiceId={other?.id ?? null}
         pageTotal={page?.total ?? null}
         otherTotal={other?.total ?? null}
         supplier={page?.supplier ?? other?.supplier ?? null}

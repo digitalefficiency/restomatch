@@ -19,6 +19,9 @@ const PAGE_ONE = ['page_not_merged', 'page_merge_blocked', 'page_too_large'];
 export function PageAnswers(props: {
   documentId: string;
   flag: string;
+  /** The page's own invoice, and the invoice shown beside it (round 9: "checked together" picks ONE to pay). */
+  pageInvoiceId: string | null;
+  otherInvoiceId: string | null;
   pageTotal: number | null;
   otherTotal: number | null;
   supplier: string | null;
@@ -30,6 +33,8 @@ export function PageAnswers(props: {
   const toast = useToast();
   const resolve = trpc.ingest.resolvePageFlag.useMutation();
   const [confirm, setConfirm] = useState<Action | null>(null);
+  const [payable, setPayable] = useState<string | null>(null);
+  const [pickMissing, setPickMissing] = useState(false);
   if (!props.canManage) return <p className="text-sm text-muted">{t('inbox.compareManagerOnly')}</p>;
 
   const done: Record<Action, string> = {
@@ -40,7 +45,14 @@ export function PageAnswers(props: {
   };
   async function run(action: Action) {
     try {
-      await resolve.mutateAsync({ documentId: props.documentId, action });
+      await resolve.mutateAsync({
+        documentId: props.documentId,
+        action,
+        // Round 9 (N4): one of the two stays payable; the other is "included in it".
+        ...(action === 'checked_together' && payable
+          ? { payableInvoiceId: payable, ...(props.otherInvoiceId ? { withInvoiceId: props.otherInvoiceId } : {}) }
+          : {}),
+      });
       toast.success(done[action]);
       router.push('/dashboard/approvals');
       router.refresh();
@@ -58,7 +70,11 @@ export function PageAnswers(props: {
     close_unreadable: t('inbox.pageCloseUnreadable'),
     checked_together: t('inbox.pageCheckTogether'),
   };
-  const confirmFirst = (a: Action) => a === 'delete_duplicate' || (a === 'separate' && (props.flag === 'page_duplicate' || PAGE_ONE.includes(props.flag)));
+  // Every answer that decides what gets paid asks first and names the ₪ (round 9: "checked together" too).
+  const confirmFirst = (a: Action) =>
+    a === 'delete_duplicate' || a === 'checked_together' || (a === 'separate' && (props.flag === 'page_duplicate' || PAGE_ONE.includes(props.flag)));
+  const together = confirm === 'checked_together';
+  const sum = props.pageTotal !== null && props.otherTotal !== null ? props.pageTotal + props.otherTotal : null;
   const secondary: Action | null = primary === 'separate' || primary === 'close_unreadable' ? null : 'separate';
 
   return (
@@ -73,8 +89,41 @@ export function PageAnswers(props: {
       ) : null}
       <ConfirmDialog
         open={confirm !== null}
-        title={confirm === 'delete_duplicate' ? t('inbox.pageDeleteConfirmTitle') : t('inbox.pageSeparateConfirmTitle')}
+        title={
+          together ? t('inbox.pageTogetherConfirmTitle') : confirm === 'delete_duplicate' ? t('inbox.pageDeleteConfirmTitle') : t('inbox.pageSeparateConfirmTitle')
+        }
         body={
+          together ? (
+            <span className="block space-y-3">
+              <span className="block">{t('inbox.pageTogetherConfirmBody', { page: ils(props.pageTotal), other: ils(props.otherTotal), sum: ils(sum) })}</span>
+              <span role="radiogroup" aria-label={t('inbox.pageTogetherConfirmTitle')} className="flex flex-col gap-2">
+                {[
+                  { id: props.otherInvoiceId, label: t('inbox.pageTogetherPickOther', { amount: ils(props.otherTotal) }) },
+                  { id: props.pageInvoiceId, label: t('inbox.pageTogetherPickThis', { amount: ils(props.pageTotal) }) },
+                ].map((o) =>
+                  o.id ? (
+                    <label key={o.id} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-line px-3">
+                      <input
+                        type="radio"
+                        name="payable"
+                        checked={payable === o.id}
+                        onChange={() => {
+                          setPayable(o.id);
+                          setPickMissing(false);
+                        }}
+                      />
+                      <span>{o.label}</span>
+                    </label>
+                  ) : null,
+                )}
+              </span>
+              {pickMissing ? (
+                <span role="alert" className="block text-sm font-semibold text-danger">
+                  {t('inbox.pageTogetherPickRequired')}
+                </span>
+              ) : null}
+            </span>
+          ) : (
           <span>
             {confirm === 'delete_duplicate'
               ? t('inbox.pageDeleteConfirmBody')
@@ -82,16 +131,24 @@ export function PageAnswers(props: {
                 ? t('inbox.pageSeparateConfirmBody')
                 : t('inbox.pageSeparateBothBody', { page: ils(props.pageTotal), other: ils(props.otherTotal) })}
           </span>
+          )
         }
-        amount={props.pageTotal ?? undefined}
+        amount={together ? undefined : (props.pageTotal ?? undefined)}
         party={props.supplier ?? undefined}
-        confirmLabel={confirm ? label[confirm] : ''}
+        confirmLabel={together ? t('inbox.pageTogetherConfirm') : confirm ? label[confirm] : ''}
         cancelLabel={t('inbox.keep')}
-        danger
+        danger={!together}
         loading={resolve.isPending}
-        onClose={() => setConfirm(null)}
+        onClose={() => {
+          setConfirm(null);
+          setPickMissing(false);
+        }}
         onConfirm={() => {
           const a = confirm;
+          if (a === 'checked_together' && !payable) {
+            setPickMissing(true);
+            return;
+          }
           setConfirm(null);
           if (a) void run(a);
         }}
