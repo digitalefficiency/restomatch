@@ -179,7 +179,31 @@ test.describe('G-11 legal links: same links, same order, every shell', () => {
     await expectLegalOrder(page);
   });
 
-  test.fixme('dashboard + settings footer (awaiting W2-08 footer)', async () => {});
+  // The signed-in shell carries the legal pages in its help cluster (orchestrator product call,
+  // 14.11; G-16 crawl #331): same place on every route, never in the top-level nav.
+  for (const path of ['/dashboard', '/dashboard/settings']) {
+    test(`signed-in ${path}: the help cluster links accessibility, privacy and terms in registry order`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await login(page, 'owner@kfar-hazeitim.test');
+      await open(page, path);
+      const hrefs = await page
+        .getByTestId('support-links-sidebar')
+        .locator('a')
+        .evaluateAll((as) => as.map((a) => a.getAttribute('href')));
+      const legal = hrefs.filter((h) => h && ['/accessibility', '/privacy', '/terms'].includes(h));
+      expect(legal).toEqual(['/accessibility', '/privacy', '/terms']);
+      // Not promoted to the top-level nav: every /privacy and /terms link lives in a support cluster.
+      for (const h of ['/privacy', '/terms']) {
+        const all = await page.locator(`a[href="${h}"]`).count();
+        const inCluster = await page
+          .locator(`[data-testid^="support-links-"] a[href="${h}"]`)
+          .count();
+        expect(all, h).toBe(inCluster);
+      }
+    });
+  }
   test.fixme('/scans/<id> footer (awaiting W2-02)', async () => {});
 });
 

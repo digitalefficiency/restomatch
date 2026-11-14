@@ -4,10 +4,27 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ChevronDown, ChevronRight, LogOut, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Search, Settings, ShieldCheck, X } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  LogOut,
+  MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Search,
+  Settings,
+  ShieldCheck,
+  X,
+} from 'lucide-react';
 import { cn } from '@/lib/components';
 import { Money } from '@/lib/components/money';
-import { badgeAria, cappedCount, useNavBadges, type NavBadges, type NavBadgeValue } from '@/lib/components/notifications';
+import {
+  badgeAria,
+  cappedCount,
+  useNavBadges,
+  type NavBadges,
+  type NavBadgeValue,
+} from '@/lib/components/notifications';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { originalProps } from '@/lib/i18n/original';
 import { nav } from '@/lib/i18n/messages/nav';
@@ -28,14 +45,20 @@ import {
 import { iconFor } from '@/lib/nav/icons';
 import { GROUPS_STORAGE, RAIL_COOKIE, RAIL_STORAGE } from '@/lib/nav/prefs';
 import { DashboardSearch } from './search';
+import { legalHref } from '@/lib/legal/registry';
 
 /* ───────────────────────────── shared shell state ───────────────────────────── */
 
-
-/** Help, accessibility statement and contact: same place on every shell (ia-nav-20). */
+/**
+ * Help, the accessibility statement, privacy, terms and contact: same place on every shell
+ * (ia-nav-20, WCAG 3.2.6). The legal hrefs come from the legal registry (G-11) in its order;
+ * privacy + terms join the cluster, never the top-level nav (orchestrator product call, 14.11).
+ */
 export const SUPPORT_LINKS = [
   { key: 'help', href: '/accessibility#help' }, // PLACEHOLDER until a help page exists (owner decision #3)
-  { key: 'accessibility', href: '/accessibility' }, // the statement page itself ships in W1-12
+  { key: 'accessibility', href: legalHref('accessibility') },
+  { key: 'privacy', href: legalHref('privacy') },
+  { key: 'terms', href: legalHref('terms') },
   { key: 'contact', href: '/accessibility#contact' }, // PLACEHOLDER until contact channels are set (owner decision #3)
 ] as const;
 
@@ -94,7 +117,13 @@ function restoreFocus(el: HTMLElement | null) {
  * layout) to the sidebar rail. `initialRail` comes from the cookie so the
  * server renders the sidebar at its final width.
  */
-export function ShellFrame({ initialRail, children }: { initialRail: boolean; children: React.ReactNode }) {
+export function ShellFrame({
+  initialRail,
+  children,
+}: {
+  initialRail: boolean;
+  children: React.ReactNode;
+}) {
   const [rail, setRail] = useState(initialRail);
   const [moreOpen, setMoreOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -154,7 +183,16 @@ export function ShellFrame({ initialRail, children }: { initialRail: boolean; ch
     requestAnimationFrame(() => restoreFocus(opener));
   }, []);
 
-  const value: ShellUi = { rail, toggleRail, moreOpen, openMore, closeMore, searchOpen, openSearch, closeSearch };
+  const value: ShellUi = {
+    rail,
+    toggleRail,
+    moreOpen,
+    openMore,
+    closeMore,
+    searchOpen,
+    openSearch,
+    closeSearch,
+  };
 
   return (
     <ShellUiProvider value={value}>
@@ -179,7 +217,9 @@ function useFocusWrap(open: boolean, getRoot: () => HTMLElement | null) {
       const root = getRoot();
       if (!root) return;
       const focusables = [
-        ...root.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'),
+        ...root.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
       ].filter((el) => !el.closest('[hidden]') && el.getClientRects().length > 0);
       if (focusables.length === 0) return;
       const first = focusables[0]!;
@@ -242,7 +282,10 @@ function NavBadge({ value, dot = false }: { value?: NavBadgeValue; dot?: boolean
       <span
         aria-hidden="true"
         data-badge-dot={value.block ? 'block' : 'on'}
-        className={cn('absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-surface', value.block ? 'bg-danger' : 'bg-ink/70')}
+        className={cn(
+          'absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-surface',
+          value.block ? 'bg-danger' : 'bg-ink/70',
+        )}
       />
     );
   }
@@ -256,7 +299,11 @@ function NavBadge({ value, dot = false }: { value?: NavBadgeValue; dot?: boolean
         value.block ? 'bg-danger text-on-primary' : 'bg-surface-2 text-ink ring-1 ring-line',
       )}
     >
-      {value.ilsAgorot !== null && value.ilsAgorot > 0 ? <Money agorot={value.ilsAgorot} context="inline" decimals={0} /> : cappedCount(value.count, locale)}
+      {value.ilsAgorot !== null && value.ilsAgorot > 0 ? (
+        <Money agorot={value.ilsAgorot} context="inline" decimals={0} />
+      ) : (
+        cappedCount(value.count, locale)
+      )}
     </span>
   );
 }
@@ -317,11 +364,18 @@ function SidebarItem({
           'relative flex h-9 items-center gap-2.5 rounded-lg text-sm transition-colors',
           rail ? 'justify-center px-0' : 'ps-3 pe-2',
           focusRing,
-          active ? 'bg-primary/10 font-semibold text-primary' : 'text-muted hover:bg-surface-2 hover:text-ink',
+          active
+            ? 'bg-primary/10 font-semibold text-primary'
+            : 'text-muted hover:bg-surface-2 hover:text-ink',
         )}
       >
         {/* 3 px inline-start indicator: the active state never relies on colour alone. */}
-        {active ? <span aria-hidden="true" className="absolute inset-y-1.5 start-0 w-[3px] rounded-full bg-primary" /> : null}
+        {active ? (
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-1.5 start-0 w-[3px] rounded-full bg-primary"
+          />
+        ) : null}
         <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
         <span className={rail ? 'sr-only' : 'min-w-0 truncate'}>{label}</span>
         <BadgeSr id={badgeId('side', def.key)} label={label} value={badge} />
@@ -349,7 +403,11 @@ function SidebarGroup({
   const t = useT(nav) as unknown as (key: string) => string;
   const listId = `rm-nav-group-${group.group}`;
   const items = (
-    <ul id={listId} className="space-y-0.5" aria-label={rail || group.group === 'top' ? t(`groups.${group.group}`) : undefined}>
+    <ul
+      id={listId}
+      className="space-y-0.5"
+      aria-label={rail || group.group === 'top' ? t(`groups.${group.group}`) : undefined}
+    >
       {group.items.map((d) => (
         <SidebarItem
           key={d.key}
@@ -380,7 +438,13 @@ function SidebarGroup({
         )}
       >
         {t(`groups.${group.group}`)}
-        <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', !open && 'ltr:-rotate-90 rtl:rotate-90')} aria-hidden="true" />
+        <ChevronDown
+          className={cn(
+            'h-3.5 w-3.5 transition-transform',
+            !open && 'ltr:-rotate-90 rtl:rotate-90',
+          )}
+          aria-hidden="true"
+        />
       </button>
       <div hidden={!open}>{items}</div>
     </div>
@@ -440,7 +504,9 @@ export function Sidebar({
     });
 
   // Navigating opens the group holding the current page; its toggle still works afterwards.
-  const activeGroup = [...groups, ...footer].find((g) => g.items.some((d) => d.key === activeKey))?.group;
+  const activeGroup = [...groups, ...footer].find((g) =>
+    g.items.some((d) => d.key === activeKey),
+  )?.group;
   useEffect(() => {
     if (!activeGroup) return;
     setOpen((prev) => (prev.has(activeGroup) ? prev : new Set(prev).add(activeGroup)));
@@ -453,7 +519,12 @@ export function Sidebar({
       data-testid="sidebar"
       className="fixed inset-y-0 start-0 z-40 hidden w-[var(--rm-sidebar-w)] flex-col border-e border-line bg-surface lg:flex"
     >
-      <div className={cn('flex h-14 shrink-0 items-center gap-2 border-b border-line', rail ? 'justify-center px-2' : 'px-4')}>
+      <div
+        className={cn(
+          'flex h-14 shrink-0 items-center gap-2 border-b border-line',
+          rail ? 'justify-center px-2' : 'px-4',
+        )}
+      >
         <span
           aria-hidden="true"
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-on-primary"
@@ -468,7 +539,10 @@ export function Sidebar({
         </div>
       </div>
       <nav aria-label={t('mainLabel')} className="flex min-h-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-3" data-testid="sidebar-groups">
+        <div
+          className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-3"
+          data-testid="sidebar-groups"
+        >
           {groups.map((g) => (
             <SidebarGroup
               key={g.group}
@@ -507,7 +581,9 @@ export function Sidebar({
             )}
           >
             <RailIcon className="h-4 w-4 shrink-0 rtl:-scale-x-100" aria-hidden="true" />
-            <span className={rail ? 'sr-only' : ''}>{rail ? t('shell.expand') : t('shell.collapse')}</span>
+            <span className={rail ? 'sr-only' : ''}>
+              {rail ? t('shell.expand') : t('shell.collapse')}
+            </span>
           </button>
         </div>
       </nav>
@@ -524,7 +600,10 @@ export function SupportLinks({ variant }: { variant: 'sidebar' | 'rail' | 'sheet
         href="/accessibility"
         prefetch={false}
         title={t('shell.support')}
-        className={cn('flex h-9 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-ink', focusRing)}
+        className={cn(
+          'flex h-9 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-ink',
+          focusRing,
+        )}
       >
         <ShieldCheck className="h-4 w-4" aria-hidden="true" />
         <span className="sr-only">{t('shell.support')}</span>
@@ -569,7 +648,11 @@ export function TopCrumbs({ viewer }: { viewer: NavViewer }) {
   const crumbs = crumbsFor(pathname, viewer);
   if (crumbs.length === 0) return null;
   return (
-    <nav aria-label={t('shell.breadcrumbs')} className="hidden min-w-0 lg:block" data-testid="top-crumbs">
+    <nav
+      aria-label={t('shell.breadcrumbs')}
+      className="hidden min-w-0 lg:block"
+      data-testid="top-crumbs"
+    >
       <ol className="flex min-w-0 items-center gap-1 text-sm">
         {crumbs.map((c, i) => {
           const last = i === crumbs.length - 1;
@@ -580,13 +663,21 @@ export function TopCrumbs({ viewer }: { viewer: NavViewer }) {
                   {t(`links.${c.key}`)}
                 </span>
               ) : c.href ? (
-                <Link href={c.href} className={cn('truncate rounded text-muted hover:text-ink', focusRing)}>
+                <Link
+                  href={c.href}
+                  className={cn('truncate rounded text-muted hover:text-ink', focusRing)}
+                >
                   {t(`links.${c.key}`)}
                 </Link>
               ) : (
                 <span className="truncate text-muted">{t(`links.${c.key}`)}</span>
               )}
-              {!last ? <ChevronRight className="h-4 w-4 shrink-0 text-subtle rtl:-scale-x-100" aria-hidden="true" /> : null}
+              {!last ? (
+                <ChevronRight
+                  className="h-4 w-4 shrink-0 text-subtle rtl:-scale-x-100"
+                  aria-hidden="true"
+                />
+              ) : null}
             </li>
           );
         })}
@@ -606,7 +697,10 @@ export function MobileSearchButton() {
       aria-label={t('shell.openSearch')}
       aria-expanded={searchOpen}
       aria-controls="dashboard-search-sheet"
-      className={cn('inline-flex h-11 w-11 items-center justify-center rounded-xl text-ink hover:bg-surface-2 lg:hidden', focusRing)}
+      className={cn(
+        'inline-flex h-11 w-11 items-center justify-center rounded-xl text-ink hover:bg-surface-2 lg:hidden',
+        focusRing,
+      )}
     >
       <Search className="h-5 w-5" aria-hidden="true" />
     </button>
@@ -621,7 +715,10 @@ export function SearchSheet({ role }: { role: NavViewer['role'] }) {
   useEffect(() => setMounted(true), []);
   useInertApp(searchOpen);
   const ref = useRef<HTMLDivElement>(null);
-  useFocusWrap(searchOpen, useCallback(() => ref.current, []));
+  useFocusWrap(
+    searchOpen,
+    useCallback(() => ref.current, []),
+  );
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -634,29 +731,41 @@ export function SearchSheet({ role }: { role: NavViewer['role'] }) {
   }, [searchOpen, closeSearch]);
 
   if (!mounted || !searchOpen) return null;
-  return <>{createPortal(
-    <div
-      ref={ref}
-      id="dashboard-search-sheet"
-      role="dialog"
-      aria-modal="true"
-      aria-label={t('search.label')}
-      className="fixed inset-0 z-50 flex flex-col bg-surface pt-[env(safe-area-inset-top)]"
-    >
-      <div className="flex items-center gap-2 border-b border-line px-3 py-2">
-        <DashboardSearch role={role} variant="drawer" className="flex-1" onNavigate={closeSearch} />
-        <button
-          type="button"
-          onClick={closeSearch}
-          aria-label={t('shell.closeSearch')}
-          className={cn('inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-muted hover:text-ink', focusRing)}
+  return (
+    <>
+      {createPortal(
+        <div
+          ref={ref}
+          id="dashboard-search-sheet"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('search.label')}
+          className="fixed inset-0 z-50 flex flex-col bg-surface pt-[env(safe-area-inset-top)]"
         >
-          <X className="h-5 w-5" aria-hidden="true" />
-        </button>
-      </div>
-    </div>,
-    document.body,
-  )}</>;
+          <div className="flex items-center gap-2 border-b border-line px-3 py-2">
+            <DashboardSearch
+              role={role}
+              variant="drawer"
+              className="flex-1"
+              onNavigate={closeSearch}
+            />
+            <button
+              type="button"
+              onClick={closeSearch}
+              aria-label={t('shell.closeSearch')}
+              className={cn(
+                'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-muted hover:text-ink',
+                focusRing,
+              )}
+            >
+              <X className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
 }
 
 /**
@@ -707,7 +816,10 @@ export function AvatarMenu({
   }, [open]);
 
   const initial = (email.trim().charAt(0) || '?').toUpperCase();
-  const itemClass = cn('flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-sm text-ink hover:bg-surface-2', focusRing);
+  const itemClass = cn(
+    'flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-sm text-ink hover:bg-surface-2',
+    focusRing,
+  );
 
   return (
     <div ref={rootRef} className="relative">
@@ -737,7 +849,11 @@ export function AvatarMenu({
         className="absolute end-0 top-full z-50 mt-2 w-72 rounded-xl border border-line bg-surface p-1.5 shadow-card"
       >
         <div className="border-b border-line px-3 pb-2 pt-1.5">
-          <p className="truncate text-sm font-semibold text-ink" dir="ltr" style={{ textAlign: 'start' }}>
+          <p
+            className="truncate text-sm font-semibold text-ink"
+            dir="ltr"
+            style={{ textAlign: 'start' }}
+          >
             {email}
           </p>
           <p className="truncate text-xs text-subtle">
@@ -827,7 +943,8 @@ export function BottomBar({ viewer }: { viewer: NavViewer }) {
   }, [hidden]);
 
   const slot = 'flex flex-1 flex-col items-center justify-center gap-1 px-0.5 text-xs leading-4';
-  const pill = 'relative inline-flex h-8 w-14 items-center justify-center rounded-full transition-colors';
+  const pill =
+    'relative inline-flex h-8 w-14 items-center justify-center rounded-full transition-colors';
 
   return (
     <nav
@@ -846,15 +963,25 @@ export function BottomBar({ viewer }: { viewer: NavViewer }) {
               <Link
                 href={def.path}
                 aria-current={active ? 'page' : undefined}
-                aria-describedby={(badges[def.key]?.count ?? 0) > 0 ? badgeId('bar', def.key) : undefined}
-                className={cn(slot, focusRing, active ? 'font-semibold text-primary' : 'text-muted hover:text-ink')}
+                aria-describedby={
+                  (badges[def.key]?.count ?? 0) > 0 ? badgeId('bar', def.key) : undefined
+                }
+                className={cn(
+                  slot,
+                  focusRing,
+                  active ? 'font-semibold text-primary' : 'text-muted hover:text-ink',
+                )}
               >
                 <span className={cn(pill, active && 'bg-primary/12')}>
                   <Icon className="h-6 w-6" aria-hidden="true" />
                   <NavBadge value={badges[def.key]} dot />
                 </span>
                 <span className="max-w-full whitespace-nowrap">{t(`bar.${label}`)}</span>
-                <BadgeSr id={badgeId('bar', def.key)} label={t(`bar.${label}`)} value={badges[def.key]} />
+                <BadgeSr
+                  id={badgeId('bar', def.key)}
+                  label={t(`bar.${label}`)}
+                  value={badges[def.key]}
+                />
               </Link>
             </li>
           );
@@ -913,7 +1040,10 @@ export function MoreSheet({
   useEffect(() => setMounted(true), []);
   useInertApp(moreOpen);
   const closeRef = useRef<HTMLButtonElement>(null);
-  useFocusWrap(moreOpen, useCallback(() => document.getElementById('dashboard-drawer'), []));
+  useFocusWrap(
+    moreOpen,
+    useCallback(() => document.getElementById('dashboard-drawer'), []),
+  );
   const activeKey = activeNavKey(pathname);
   const groups = moreGroups(viewer);
   const titleId = 'dashboard-drawer-title';
@@ -949,105 +1079,128 @@ export function MoreSheet({
   }, [moreOpen, closeMore]);
 
   if (!mounted || !moreOpen) return null;
-  return <>{createPortal(
-    <div className="fixed inset-0 z-50 lg:hidden">
-      <button type="button" tabIndex={-1} aria-hidden="true" className="absolute inset-0 bg-ink/40" onClick={() => closeMore()} />
-      <div
-        id="dashboard-drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="absolute inset-x-0 bottom-0 flex max-h-[85vh] flex-col rounded-t-2xl border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] shadow-card"
-      >
-        <div aria-hidden="true" className="mx-auto mt-2 h-1 w-10 rounded-full bg-line-strong" />
-        <div className="flex items-center justify-between gap-3 px-4 py-2">
-          <h2 id={titleId} className="text-base font-bold text-ink">
-            {t('bar.more')}
-          </h2>
+  return (
+    <>
+      {createPortal(
+        <div className="fixed inset-0 z-50 lg:hidden">
           <button
-            ref={closeRef}
             type="button"
+            tabIndex={-1}
+            aria-hidden="true"
+            className="absolute inset-0 bg-ink/40"
             onClick={() => closeMore()}
-            aria-label={t('menu.close')}
-            className={cn('inline-flex h-11 w-11 items-center justify-center rounded-xl text-muted hover:text-ink', focusRing)}
+          />
+          <div
+            id="dashboard-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            className="absolute inset-x-0 bottom-0 flex max-h-[85vh] flex-col rounded-t-2xl border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] shadow-card"
           >
-            <X className="h-5 w-5" aria-hidden="true" />
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-          <button
-            type="button"
-            onClick={() => openSearch()}
-            className={cn(
-              'mb-4 flex min-h-12 w-full items-center gap-2 rounded-xl border border-line-strong bg-surface px-3 text-start text-sm text-subtle',
-              focusRing,
-            )}
-          >
-            <Search className="h-4 w-4" aria-hidden="true" />
-            {t('shell.openSearch')}
-          </button>
-          {branchList ? <div className="mb-4 rounded-xl border border-line py-2">{branchList}</div> : null}
-          <nav aria-label={t('mainLabel')}>
-            {groups.map((g) => (
-              <section key={g.group} className="mb-4" aria-labelledby={`more-${g.group}`}>
-                <h3 id={`more-${g.group}`} className="mb-2 text-xs font-semibold text-subtle">
-                  {t(`groups.${g.group}`)}
-                </h3>
-                <ul className="grid grid-cols-2 gap-2">
-                  {g.items.map((d) => {
-                    const Icon = iconFor(d.key);
-                    const active = d.key === activeKey;
-                    return (
-                      <li key={d.key}>
-                        <Link
-                          href={d.path}
-                          aria-current={active ? 'page' : undefined}
-                          aria-describedby={(badges[d.key]?.count ?? 0) > 0 ? badgeId('more', d.key) : undefined}
-                          className={cn(
-                            'flex min-h-16 items-center gap-2.5 rounded-xl border px-3 py-2 text-sm',
-                            focusRing,
-                            active
-                              ? 'border-primary/40 bg-primary/10 font-semibold text-primary'
-                              : 'border-line text-ink hover:bg-surface-2',
-                          )}
-                        >
-                          <Icon className="h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
-                          <span className="min-w-0 flex-1 break-words leading-5">{t(`links.${d.key}`)}</span>
-                          <BadgeSr id={badgeId('more', d.key)} label={t(`links.${d.key}`)} value={badges[d.key]} />
-                          <NavBadge value={badges[d.key]} />
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-            ))}
-          </nav>
-          <section aria-labelledby="more-profile" className="border-t border-line pt-4">
-            <h3 id="more-profile" className="mb-2 text-xs font-semibold text-subtle">
-              {t('shell.profile')}
-            </h3>
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <span className="text-sm text-ink">{t('shell.language')}</span>
-              {language}
-            </div>
-            <SupportLinks variant="sheet" />
-            <form action={logout} data-rm-logout="" className="mt-3">
+            <div aria-hidden="true" className="mx-auto mt-2 h-1 w-10 rounded-full bg-line-strong" />
+            <div className="flex items-center justify-between gap-3 px-4 py-2">
+              <h2 id={titleId} className="text-base font-bold text-ink">
+                {t('bar.more')}
+              </h2>
               <button
-                type="submit"
+                ref={closeRef}
+                type="button"
+                onClick={() => closeMore()}
+                aria-label={t('menu.close')}
                 className={cn(
-                  'flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-line text-sm font-semibold text-ink hover:bg-surface-2',
+                  'inline-flex h-11 w-11 items-center justify-center rounded-xl text-muted hover:text-ink',
                   focusRing,
                 )}
               >
-                <LogOut className="h-4 w-4 rtl:-scale-x-100" aria-hidden="true" />
-                {t('signOut')}
+                <X className="h-5 w-5" aria-hidden="true" />
               </button>
-            </form>
-          </section>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  )}</>;
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+              <button
+                type="button"
+                onClick={() => openSearch()}
+                className={cn(
+                  'mb-4 flex min-h-12 w-full items-center gap-2 rounded-xl border border-line-strong bg-surface px-3 text-start text-sm text-subtle',
+                  focusRing,
+                )}
+              >
+                <Search className="h-4 w-4" aria-hidden="true" />
+                {t('shell.openSearch')}
+              </button>
+              {branchList ? (
+                <div className="mb-4 rounded-xl border border-line py-2">{branchList}</div>
+              ) : null}
+              <nav aria-label={t('mainLabel')}>
+                {groups.map((g) => (
+                  <section key={g.group} className="mb-4" aria-labelledby={`more-${g.group}`}>
+                    <h3 id={`more-${g.group}`} className="mb-2 text-xs font-semibold text-subtle">
+                      {t(`groups.${g.group}`)}
+                    </h3>
+                    <ul className="grid grid-cols-2 gap-2">
+                      {g.items.map((d) => {
+                        const Icon = iconFor(d.key);
+                        const active = d.key === activeKey;
+                        return (
+                          <li key={d.key}>
+                            <Link
+                              href={d.path}
+                              aria-current={active ? 'page' : undefined}
+                              aria-describedby={
+                                (badges[d.key]?.count ?? 0) > 0 ? badgeId('more', d.key) : undefined
+                              }
+                              className={cn(
+                                'flex min-h-16 items-center gap-2.5 rounded-xl border px-3 py-2 text-sm',
+                                focusRing,
+                                active
+                                  ? 'border-primary/40 bg-primary/10 font-semibold text-primary'
+                                  : 'border-line text-ink hover:bg-surface-2',
+                              )}
+                            >
+                              <Icon className="h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+                              <span className="min-w-0 flex-1 break-words leading-5">
+                                {t(`links.${d.key}`)}
+                              </span>
+                              <BadgeSr
+                                id={badgeId('more', d.key)}
+                                label={t(`links.${d.key}`)}
+                                value={badges[d.key]}
+                              />
+                              <NavBadge value={badges[d.key]} />
+                            </Link>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                ))}
+              </nav>
+              <section aria-labelledby="more-profile" className="border-t border-line pt-4">
+                <h3 id="more-profile" className="mb-2 text-xs font-semibold text-subtle">
+                  {t('shell.profile')}
+                </h3>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <span className="text-sm text-ink">{t('shell.language')}</span>
+                  {language}
+                </div>
+                <SupportLinks variant="sheet" />
+                <form action={logout} data-rm-logout="" className="mt-3">
+                  <button
+                    type="submit"
+                    className={cn(
+                      'flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-line text-sm font-semibold text-ink hover:bg-surface-2',
+                      focusRing,
+                    )}
+                  >
+                    <LogOut className="h-4 w-4 rtl:-scale-x-100" aria-hidden="true" />
+                    {t('signOut')}
+                  </button>
+                </form>
+              </section>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
 }

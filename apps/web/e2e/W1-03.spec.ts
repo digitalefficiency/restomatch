@@ -15,16 +15,31 @@ type Role = 'owner' | 'manager' | 'bookkeeper' | 'chef' | 'receiver';
 const ROLES: Role[] = ['owner', 'manager', 'bookkeeper', 'chef', 'receiver'];
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 const DESK = { viewport: { width: 1440, height: 900 } };
-const AXE_SOURCE = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
+const AXE_SOURCE = readFileSync(
+  createRequire(import.meta.url).resolve('axe-core/axe.min.js'),
+  'utf8',
+);
 
 /** The plan's per-role bars (slot 1 → 4, then "עוד"). */
 const BARS: Record<Role, { he: string[]; en: string[] }> = {
   // Owner decision (2026-10-25): no supplier ledger or ₪ screens for the receiver.
   receiver: { he: ['היום', 'קבלות', 'עוד'], en: ['Today', 'Receipts', 'More'] },
-  chef: { he: ['היום', 'ספירה', 'מנות', 'הזמנות', 'עוד'], en: ['Today', 'Count', 'Dishes', 'Orders', 'More'] },
-  manager: { he: ['היום', 'הזמנות', 'קבלה', 'אישורים', 'עוד'], en: ['Today', 'Orders', 'Receive', 'Approvals', 'More'] },
-  owner: { he: ['בית', 'אישורים', 'דליפה', 'הזמנות', 'עוד'], en: ['Home', 'Approvals', 'Leak', 'Orders', 'More'] },
-  bookkeeper: { he: ['בית', 'אישורים', 'תשלומים', 'חשבוניות', 'עוד'], en: ['Home', 'Approvals', 'Payments', 'Invoices', 'More'] },
+  chef: {
+    he: ['היום', 'ספירה', 'מנות', 'הזמנות', 'עוד'],
+    en: ['Today', 'Count', 'Dishes', 'Orders', 'More'],
+  },
+  manager: {
+    he: ['היום', 'הזמנות', 'קבלה', 'אישורים', 'עוד'],
+    en: ['Today', 'Orders', 'Receive', 'Approvals', 'More'],
+  },
+  owner: {
+    he: ['בית', 'אישורים', 'דליפה', 'הזמנות', 'עוד'],
+    en: ['Home', 'Approvals', 'Leak', 'Orders', 'More'],
+  },
+  bookkeeper: {
+    he: ['בית', 'אישורים', 'תשלומים', 'חשבוניות', 'עוד'],
+    en: ['Home', 'Approvals', 'Payments', 'Invoices', 'More'],
+  },
 };
 
 type StorageState = Awaited<ReturnType<BrowserContext['storageState']>>;
@@ -58,7 +73,11 @@ async function open(
   device: typeof PHONE | typeof DESK,
   path = '/dashboard',
 ): Promise<Page> {
-  const ctx = await browser.newContext({ ...device, baseURL, storageState: await stateFor(browser, baseURL, role) });
+  const ctx = await browser.newContext({
+    ...device,
+    baseURL,
+    storageState: await stateFor(browser, baseURL, role),
+  });
   await ctx.addCookies([
     { name: 'rm_locale', value: locale, url: baseURL },
     { name: 'rm_cookie_consent', value: 'necessary', url: baseURL },
@@ -80,12 +99,24 @@ async function axeSerious(page: Page): Promise<string[]> {
   await page.addScriptTag({ content: AXE_SOURCE });
   return page.evaluate(async () => {
     const w = window as unknown as {
-      axe: { run: (c: unknown, o: unknown) => Promise<{ violations: { id: string; impact: string; nodes: { target: string[] }[] }[] }> };
+      axe: {
+        run: (
+          c: unknown,
+          o: unknown,
+        ) => Promise<{
+          violations: { id: string; impact: string; nodes: { target: string[] }[] }[];
+        }>;
+      };
     };
     const res = await w.axe.run(
       // The lab worker banner is excluded by the DoD (it reflects the lab, not the shell).
       { exclude: [['nextjs-portal'], ['#main-content [role=status]']] },
-      { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'] } },
+      {
+        runOnly: {
+          type: 'tag',
+          values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice'],
+        },
+      },
     );
     return res.violations
       .filter((v) => v.impact === 'critical' || v.impact === 'serious')
@@ -97,7 +128,10 @@ test.describe.configure({ mode: 'serial' });
 
 for (const role of ROLES) {
   for (const locale of ['he', 'en'] as const) {
-    test(`${role} · ${locale} · phone: SSR role bar, geometry, axe`, async ({ browser, baseURL }) => {
+    test(`${role} · ${locale} · phone: SSR role bar, geometry, axe`, async ({
+      browser,
+      baseURL,
+    }) => {
       const page = await open(browser, baseURL!, role, locale, PHONE);
       // Server-rendered: the bar is in the HTML, not portalled in after hydration (perf-states-06).
       const html = await (await page.request.get('/dashboard')).text();
@@ -116,9 +150,14 @@ for (const role of ROLES) {
       expect(Math.round(pill.width)).toBe(56);
       expect(Math.round(pill.height)).toBe(32);
       // 12 px labels, never truncated.
-      const labels = await bar.locator('li span:last-child').evaluateAll((els) =>
-        els.map((el) => ({ fs: getComputedStyle(el).fontSize, cut: el.scrollWidth > el.clientWidth + 1 })),
-      );
+      const labels = await bar
+        .locator('li span:last-child')
+        .evaluateAll((els) =>
+          els.map((el) => ({
+            fs: getComputedStyle(el).fontSize,
+            cut: el.scrollWidth > el.clientWidth + 1,
+          })),
+        );
       for (const l of labels) expect(l).toEqual({ fs: '12px', cut: false });
 
       // Header: 56 px, no ☰, no e-mail in the visible chrome.
@@ -127,21 +166,30 @@ for (const role of ROLES) {
       await expect(page.getByRole('button', { name: /^(open menu|פתיחת תפריט)$/i })).toHaveCount(0);
       await expect(page.getByText(`${role}@kfar-hazeitim.test`, { exact: true })).toBeHidden();
       // The bar never covers content: main reserves its height.
-      const pad = await page.locator('main').evaluate((m) => parseFloat(getComputedStyle(m).paddingBottom));
+      const pad = await page
+        .locator('main')
+        .evaluate((m) => parseFloat(getComputedStyle(m).paddingBottom));
       expect(pad).toBeGreaterThanOrEqual(64);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
       expect(await axeSerious(page)).toEqual([]);
       await page.context().close();
     });
 
-    test(`${role} · ${locale} · desktop: sidebar, top bar, title, axe`, async ({ browser, baseURL }) => {
+    test(`${role} · ${locale} · desktop: sidebar, top bar, title, axe`, async ({
+      browser,
+      baseURL,
+    }) => {
       const page = await open(browser, baseURL!, role, locale, DESK);
       const sidebar = page.getByTestId('sidebar');
       await expect(sidebar).toBeVisible();
       expect(Math.round((await sidebar.boundingBox())!.width)).toBe(248);
       await expect(page.getByTestId('bottom-bar')).toBeHidden();
       // Content starts high: a 56 px top bar, no wrapped tab rows.
-      const top = await page.locator('#main-content > div').evaluate((el) => el.getBoundingClientRect().top);
+      const top = await page
+        .locator('#main-content > div')
+        .evaluate((el) => el.getBoundingClientRect().top);
       expect(top).toBeLessThanOrEqual(180);
       // Inline-start: right in Hebrew, left in English.
       const x = (await sidebar.boundingBox())!.x;
@@ -155,10 +203,18 @@ for (const role of ROLES) {
   }
 }
 
-test('bookkeeper: pay run, ledger, integrations and claims are in the sidebar; no dead-end crumb', async ({ browser, baseURL }) => {
+test('bookkeeper: pay run, ledger, integrations and claims are in the sidebar; no dead-end crumb', async ({
+  browser,
+  baseURL,
+}) => {
   const page = await open(browser, baseURL!, 'bookkeeper', 'he', DESK);
   const sidebar = page.getByTestId('sidebar');
-  for (const href of ['/dashboard/approvals/pay-run', '/dashboard/suppliers/ledger', '/dashboard/integrations', '/dashboard/leaks/claims']) {
+  for (const href of [
+    '/dashboard/approvals/pay-run',
+    '/dashboard/suppliers/ledger',
+    '/dashboard/integrations',
+    '/dashboard/leaks/claims',
+  ]) {
     await expect(sidebar.locator(`a[href="${href}"]`), href).toHaveCount(1);
   }
   // No link to a page the bookkeeper can't open.
@@ -173,7 +229,10 @@ test('bookkeeper: pay run, ledger, integrations and claims are in the sidebar; n
   await page.context().close();
 });
 
-test('client navigation: title changes, the route is announced, focus moves to the h1', async ({ browser, baseURL }) => {
+test('client navigation: title changes, the route is announced, focus moves to the h1', async ({
+  browser,
+  baseURL,
+}) => {
   const page = await open(browser, baseURL!, 'owner', 'he', DESK);
   // The branch shows only with ≥2 memberships (the lab reseed has two, the e2e seed one).
   await expect(page).toHaveTitle(/^בית( · .+)? — RestoMatch$/);
@@ -181,25 +240,39 @@ test('client navigation: title changes, the route is announced, focus moves to t
   await page.waitForURL('**/dashboard/approvals');
   await expect(page).toHaveTitle(/^אישורים( · .+)? — RestoMatch$/);
   await expect
-    .poll(() => page.evaluate(() => document.querySelector('next-route-announcer')?.shadowRoot?.textContent ?? ''))
+    .poll(() =>
+      page.evaluate(
+        () => document.querySelector('next-route-announcer')?.shadowRoot?.textContent ?? '',
+      ),
+    )
     .toContain('אישורים');
   await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe('H1');
   await page.context().close();
 });
 
-test('rail: Ctrl+B (by key code) collapses to 64 px and the choice survives a reload', async ({ browser, baseURL }) => {
+test('rail: Ctrl+B (by key code) collapses to 64 px and the choice survives a reload', async ({
+  browser,
+  baseURL,
+}) => {
   const page = await open(browser, baseURL!, 'manager', 'he', DESK);
   await page.keyboard.press('Control+KeyB');
-  await expect.poll(async () => Math.round((await page.getByTestId('sidebar').boundingBox())!.width)).toBe(64);
+  await expect
+    .poll(async () => Math.round((await page.getByTestId('sidebar').boundingBox())!.width))
+    .toBe(64);
   await page.reload();
   await settle(page);
   expect(Math.round((await page.getByTestId('sidebar').boundingBox())!.width)).toBe(64);
   await page.keyboard.press('Control+KeyB');
-  await expect.poll(async () => Math.round((await page.getByTestId('sidebar').boundingBox())!.width)).toBe(248);
+  await expect
+    .poll(async () => Math.round((await page.getByTestId('sidebar').boundingBox())!.width))
+    .toBe(248);
   await page.context().close();
 });
 
-test('"עוד" sheet: modal (0 of 45 Tab stops escape), Esc returns focus to the opener', async ({ browser, baseURL }) => {
+test('"עוד" sheet: modal (0 of 45 Tab stops escape), Esc returns focus to the opener', async ({
+  browser,
+  baseURL,
+}) => {
   const page = await open(browser, baseURL!, 'owner', 'he', PHONE);
   const more = page.getByTestId('bottom-bar').locator('button[aria-controls="dashboard-drawer"]');
   await more.click();
@@ -208,11 +281,13 @@ test('"עוד" sheet: modal (0 of 45 Tab stops escape), Esc returns focus to the
   let escaped = 0;
   for (let i = 0; i < 45; i++) {
     await page.keyboard.press('Tab');
-    if (!(await page.evaluate(() => !!document.activeElement?.closest('#dashboard-drawer')))) escaped += 1;
+    if (!(await page.evaluate(() => !!document.activeElement?.closest('#dashboard-drawer'))))
+      escaped += 1;
   }
   expect(escaped).toBe(0);
-  // Help, accessibility statement and contact sit in the sheet; the branch list too with ≥2 memberships.
-  await expect(sheet.getByTestId('support-links-sheet').locator('a')).toHaveCount(3);
+  // Help, accessibility statement, privacy, terms and contact sit in the sheet (G-11 follow-up);
+  // the branch list too with ≥2 memberships.
+  await expect(sheet.getByTestId('support-links-sheet').locator('a')).toHaveCount(5);
   const multiBranch = (await page.getByTestId('branch-switcher').count()) > 0;
   await expect(sheet.getByTestId('branch-switcher-list')).toHaveCount(multiBranch ? 1 : 0);
   expect(await axeSerious(page)).toEqual([]);
@@ -222,24 +297,36 @@ test('"עוד" sheet: modal (0 of 45 Tab stops escape), Esc returns focus to the
   await page.context().close();
 });
 
-test('field routes: no bottom bar, and the shell publishes --rm-bottomnav-h = 0', async ({ browser, baseURL }) => {
+test('field routes: no bottom bar, and the shell publishes --rm-bottomnav-h = 0', async ({
+  browser,
+  baseURL,
+}) => {
   const page = await open(browser, baseURL!, 'manager', 'he', PHONE, '/dashboard/orders/new');
   await expect(page.getByTestId('bottom-bar')).toBeHidden();
-  expect((await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--rm-bottomnav-h'))).trim()).toBe('0px');
+  expect(
+    (
+      await page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue('--rm-bottomnav-h'),
+      )
+    ).trim(),
+  ).toBe('0px');
   await page.goto('/dashboard/orders');
   await settle(page);
   await expect(page.getByTestId('bottom-bar')).toBeVisible();
   await page.context().close();
 });
 
-test('help · accessibility · contact: same place in the sidebar footer on every route', async ({ browser, baseURL }) => {
+test('help · accessibility · privacy · terms · contact: same place in the sidebar footer on every route', async ({
+  browser,
+  baseURL,
+}) => {
   const page = await open(browser, baseURL!, 'owner', 'he', DESK);
   let first: { x: number; y: number } | null = null;
   for (const path of ['/dashboard', '/dashboard/approvals', '/dashboard/orders']) {
     await page.goto(path);
     await settle(page);
     const links = page.getByTestId('support-links-sidebar').locator('a');
-    await expect(links).toHaveCount(3);
+    await expect(links).toHaveCount(5);
     const b = (await links.first().boundingBox())!;
     if (!first) first = { x: b.x, y: b.y };
     else expect({ x: b.x, y: b.y }).toEqual(first);
@@ -250,13 +337,21 @@ test('help · accessibility · contact: same place in the sidebar footer on ever
 test('bar labels never truncate at 360 px in he / en / ar / ru', async ({ browser, baseURL }) => {
   for (const role of ['owner', 'manager', 'bookkeeper'] as const) {
     for (const locale of ['he', 'en', 'ar', 'ru']) {
-      const page = await open(browser, baseURL!, role, locale, { ...PHONE, viewport: { width: 360, height: 780 } });
+      const page = await open(browser, baseURL!, role, locale, {
+        ...PHONE,
+        viewport: { width: 360, height: 780 },
+      });
       const cut = await page
         .getByTestId('bottom-bar')
         .locator('li span:last-child')
-        .evaluateAll((els) => els.filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent));
+        .evaluateAll((els) =>
+          els.filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent),
+        );
       expect(cut, `${role} ${locale}`).toEqual([]);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${role} ${locale} overflow`).toBe(true);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        `${role} ${locale} overflow`,
+      ).toBe(true);
       await page.context().close();
     }
   }
@@ -266,14 +361,21 @@ test('search "מסכים": screens by role, from the first characters', async ({
   const page = await open(browser, baseURL!, 'bookkeeper', 'he', DESK);
   const input = page.locator('header').getByRole('combobox', { name: 'חיפוש כללי' });
   await input.fill('כרט');
-  await expect(page.locator('#dashboard-search-header-list [role=option]').first()).toHaveText('כרטסת ספקים');
+  await expect(page.locator('#dashboard-search-header-list [role=option]').first()).toHaveText(
+    'כרטסת ספקים',
+  );
   await input.fill('הזמנ');
   // The bookkeeper can't open orders: no screen offered.
-  await expect(page.locator('#dashboard-search-header-list [role=group][aria-label="מסכים"]')).toHaveCount(0);
+  await expect(
+    page.locator('#dashboard-search-header-list [role=group][aria-label="מסכים"]'),
+  ).toHaveCount(0);
   await page.context().close();
 });
 
-test('account menu: sign-out keeps the data-rm-logout form contract', async ({ browser, baseURL }) => {
+test('account menu: sign-out keeps the data-rm-logout form contract', async ({
+  browser,
+  baseURL,
+}) => {
   const page = await open(browser, baseURL!, 'chef', 'he', DESK);
   await page.getByTestId('avatar-menu').click();
   const form = page.locator('#rm-account-panel form[data-rm-logout]');
@@ -284,7 +386,10 @@ test('account menu: sign-out keeps the data-rm-logout form contract', async ({ b
   await page.context().close();
 });
 
-test('language picker: a button + menu; arrow keys never switch the language', async ({ browser, baseURL }) => {
+test('language picker: a button + menu; arrow keys never switch the language', async ({
+  browser,
+  baseURL,
+}) => {
   const page = await open(browser, baseURL!, 'owner', 'he', DESK);
   const picker = page.locator('header [data-testid="language-picker"]');
   await expect(picker).toHaveAttribute('aria-haspopup', 'menu');
@@ -308,13 +413,21 @@ test('admin layout: skip link, banner, labelled nav, main', async ({ browser, ba
   await page.context().close();
 });
 
-test('receiver: no supplier ledger in the nav, and the URL is refused (owner decision 2026-10-25)', async ({ browser, baseURL }) => {
+test('receiver: no supplier ledger in the nav, and the URL is refused (owner decision 2026-10-25)', async ({
+  browser,
+  baseURL,
+}) => {
   for (const device of [PHONE, DESK]) {
     const page = await open(browser, baseURL!, 'receiver', 'he', device);
     await expect(page.locator('header a[href="/dashboard/suppliers/ledger"]')).toHaveCount(0);
     if (device === PHONE) {
-      await page.getByTestId('bottom-bar').locator('button[aria-controls="dashboard-drawer"]').click();
-      await expect(page.locator('#dashboard-drawer a[href="/dashboard/suppliers/ledger"]')).toHaveCount(0);
+      await page
+        .getByTestId('bottom-bar')
+        .locator('button[aria-controls="dashboard-drawer"]')
+        .click();
+      await expect(
+        page.locator('#dashboard-drawer a[href="/dashboard/suppliers/ledger"]'),
+      ).toHaveCount(0);
     }
     // The route gate refuses it: a bounce home (or the in-shell 403 page once W1-04 lands).
     const res = await page.goto('/dashboard/suppliers/ledger');
@@ -323,7 +436,10 @@ test('receiver: no supplier ledger in the nav, and the URL is refused (owner dec
   }
 });
 
-test('a member with no restaurant is sent to /onboarding, not to an error page', async ({ browser, baseURL }) => {
+test('a member with no restaurant is sent to /onboarding, not to an error page', async ({
+  browser,
+  baseURL,
+}) => {
   const email = 'e2e-w103-no-membership@restomatch.test';
   const password = 'W1-03-e2e-password-2026!';
   await ensurePasswordUser({ email, password });
@@ -347,13 +463,18 @@ test('a member with no restaurant is sent to /onboarding, not to an error page',
   await ctx.close();
 });
 
-test('"עוד" sheet: navigating from it lands focus on the new page h1, not on "עוד"', async ({ browser, baseURL }) => {
+test('"עוד" sheet: navigating from it lands focus on the new page h1, not on "עוד"', async ({
+  browser,
+  baseURL,
+}) => {
   const page = await open(browser, baseURL!, 'owner', 'he', PHONE);
   await page.getByTestId('bottom-bar').locator('button[aria-controls="dashboard-drawer"]').click();
   await page.locator('#dashboard-drawer a[href="/dashboard/suppliers"]').click();
   await page.waitForURL('**/dashboard/suppliers');
   await expect(page.locator('#dashboard-drawer')).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-controls'))).not.toBe('dashboard-drawer');
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-controls')))
+    .not.toBe('dashboard-drawer');
   await expect
     .poll(() => page.evaluate(() => document.activeElement?.tagName))
     .toMatch(/^(H1|MAIN)$/);
@@ -366,7 +487,8 @@ test('"עוד" sheet: Esc in its language menu closes only the menu', async ({ b
   const sheet = page.locator('#dashboard-drawer');
   const picker = sheet.locator('[data-testid="language-picker"]');
   // The demo tenant has receiver languages on: the six-language picker (a menu).
-  if ((await picker.count()) === 0) test.skip(true, 'receiver languages off: the עב/EN toggle has no menu');
+  if ((await picker.count()) === 0)
+    test.skip(true, 'receiver languages off: the עב/EN toggle has no menu');
   await picker.click();
   await expect(sheet.getByRole('menu')).toBeVisible();
   await page.keyboard.press('Escape');
@@ -375,8 +497,15 @@ test('"עוד" sheet: Esc in its language menu closes only the menu', async ({ b
   await page.context().close();
 });
 
-test('"עוד" sheet: rotating past 1024 px closes it and the app is usable (not inert)', async ({ browser, baseURL }) => {
-  const page = await open(browser, baseURL!, 'manager', 'he', { viewport: { width: 820, height: 1180 }, isMobile: true, hasTouch: true });
+test('"עוד" sheet: rotating past 1024 px closes it and the app is usable (not inert)', async ({
+  browser,
+  baseURL,
+}) => {
+  const page = await open(browser, baseURL!, 'manager', 'he', {
+    viewport: { width: 820, height: 1180 },
+    isMobile: true,
+    hasTouch: true,
+  });
   await page.getByTestId('bottom-bar').locator('button[aria-controls="dashboard-drawer"]').click();
   await expect(page.locator('#dashboard-drawer')).toBeVisible();
   await page.setViewportSize({ width: 1180, height: 820 });
@@ -387,7 +516,9 @@ test('"עוד" sheet: rotating past 1024 px closes it and the app is usable (not
 
 test("sidebar: the current page's group can still be collapsed", async ({ browser, baseURL }) => {
   const page = await open(browser, baseURL!, 'owner', 'he', DESK, '/dashboard/orders');
-  const toggle = page.getByTestId('sidebar').locator('button[aria-controls="rm-nav-group-procure"]');
+  const toggle = page
+    .getByTestId('sidebar')
+    .locator('button[aria-controls="rm-nav-group-procure"]');
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
@@ -397,7 +528,10 @@ test("sidebar: the current page's group can still be collapsed", async ({ browse
   await page.context().close();
 });
 
-test('field route: the task footer sits at the bottom edge once the bar is hidden', async ({ browser, baseURL }) => {
+test('field route: the task footer sits at the bottom edge once the bar is hidden', async ({
+  browser,
+  baseURL,
+}) => {
   const page = await open(browser, baseURL!, 'chef', 'he', PHONE, '/dashboard/inventory/count');
   await expect(page.getByTestId('bottom-bar')).toBeHidden();
   // The count screen's fixed footer (if a count is open) ends at the viewport bottom, not 72 px above it.
@@ -409,7 +543,10 @@ test('field route: the task footer sits at the bottom edge once the bar is hidde
   await page.context().close();
 });
 
-test('owner: the "דליפה" bar slot opens the leak hub, and nav label = tab title = h1', async ({ browser, baseURL }) => {
+test('owner: the "דליפה" bar slot opens the leak hub, and nav label = tab title = h1', async ({
+  browser,
+  baseURL,
+}) => {
   const page = await open(browser, baseURL!, 'owner', 'he', PHONE);
   await page.getByTestId('bottom-bar').getByRole('link', { name: 'דליפה' }).click();
   await page.waitForURL(/\/dashboard\/leaks$/);
@@ -420,7 +557,10 @@ test('owner: the "דליפה" bar slot opens the leak hub, and nav label = tab t
   await page.context().close();
 });
 
-test('chef: the "ספירה" bar slot opens the count hub with no ₪ (owner decision)', async ({ browser, baseURL }) => {
+test('chef: the "ספירה" bar slot opens the count hub with no ₪ (owner decision)', async ({
+  browser,
+  baseURL,
+}) => {
   const page = await open(browser, baseURL!, 'chef', 'he', PHONE);
   const periods: string[] = [];
   page.on('request', (r) => {
@@ -436,7 +576,10 @@ test('chef: the "ספירה" bar slot opens the count hub with no ₪ (owner dec
   await page.context().close();
 });
 
-test('receiver: searches screens only, and an invoice page is refused (owner decision: no ₪)', async ({ browser, baseURL }) => {
+test('receiver: searches screens only, and an invoice page is refused (owner decision: no ₪)', async ({
+  browser,
+  baseURL,
+}) => {
   const page = await open(browser, baseURL!, 'receiver', 'he', PHONE);
   const records: string[] = [];
   page.on('request', (r) => {
