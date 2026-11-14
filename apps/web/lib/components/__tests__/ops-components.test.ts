@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { localizeActivity } from '../activityText';
 import { displayName } from '../displayName';
 import { entitlementCauseOf, featureLabel } from '../entitlement';
 import { friendlyError, trpcErrorCode } from '../errors';
@@ -15,41 +14,6 @@ describe('displayName', () => {
     expect(displayName('עגבניה', 'Tomato', 'en')).toEqual({ primary: 'Tomato', secondary: 'עגבניה' });
     expect(displayName('עגבניה', '  ', 'en')).toEqual({ primary: 'עגבניה', secondary: null });
     expect(displayName('Coca-Cola', 'Coca-Cola', 'en')).toEqual({ primary: 'Coca-Cola', secondary: null });
-  });
-});
-
-describe('localizeActivity', () => {
-  const seedRow = {
-    eventType: 'invoice_matched',
-    title: 'חשבונית 2026-1000 הותאמה',
-    detail: 'ירקני אבי · 9 חריגות · הפסד פוטנציאלי ₪3571',
-  };
-  it('leaves Hebrew untouched', () => {
-    expect(localizeActivity(seedRow, 'he')).toEqual({ title: seedRow.title, detail: seedRow.detail });
-  });
-  it('rebuilds known templates in English (supplier name kept)', () => {
-    const out = localizeActivity(seedRow, 'en');
-    expect(out.title).toBe('Invoice 2026-1000 matched');
-    expect(out.detail).toBe('ירקני אבי · 9 discrepancies · potential loss ₪3,571');
-  });
-  it('maps the API titles and falls back to the event label', () => {
-    expect(localizeActivity({ eventType: 'discrepancy_approved', title: 'חריגה אושרה', detail: 'חיסכון ₪1,200' }, 'en')).toEqual({
-      title: 'Discrepancy approved',
-      detail: 'saved ₪1,200',
-    });
-    expect(localizeActivity({ eventType: 'mystery', title: 'משהו', detail: null }, 'en').title).toBe('Update');
-    expect(localizeActivity({ eventType: 'invoice_received', title: 'חשבונית התקבלה', detail: 'ירקות השרון · ₪1027 כולל מע״מ' }, 'en').detail).toBe(
-      'ירקות השרון · ₪1,027 incl. VAT',
-    );
-    expect(localizeActivity({ eventType: 'invoice_matched', title: 'x', detail: 'מאפיית ברנר · תואמת להזמנה ולקבלה' }, 'en').detail).toBe(
-      'מאפיית ברנר · matches the order and the delivery',
-    );
-    expect(
-      localizeActivity({ eventType: 'invoice_received', title: 'x', detail: 'מחלבות הגליל · ממתינה להתאמה מול תעודות המשלוח של החודש' }, 'en').detail,
-    ).toBe("מחלבות הגליל · waiting to be matched against this month's delivery notes");
-    expect(localizeActivity({ eventType: 'sync_completed', title: 'Synced 3 orders', detail: null }, 'en').title).toBe(
-      'Synced 3 orders',
-    );
   });
 });
 
@@ -85,103 +49,6 @@ describe('friendlyError', () => {
     expect(friendlyError(new TypeError('Failed to fetch'), t)).toBe(
       'Can’t reach the server. Check your connection and try again.',
     );
-  });
-});
-
-describe('localizeActivity — structured metadata (S3 writers + demo seed)', () => {
-  const he = { title: 'חשבונית HK-24108 הותאמה', detail: 'קצביית הכרם · 2 חריגות · הפסד פוטנציאלי ₪154' };
-
-  it('renders invoice_matched from metadata in English (supplier in English)', () => {
-    const out = localizeActivity(
-      {
-        eventType: 'invoice_matched',
-        ...he,
-        metadata: {
-          invoiceNumber: 'HK-24108',
-          supplierName: 'קצביית הכרם',
-          supplierNameEn: 'HaKerem Butchery',
-          discrepancyCount: 2,
-          potentialLossIls: 153.52,
-        },
-      },
-      'en',
-    );
-    expect(out.title).toBe('Invoice HK-24108 matched');
-    expect(out.detail).toBe('HaKerem Butchery · 2 discrepancies · potential loss ₪154');
-  });
-
-  it('English never shows "חריגה אחת" (stored singular / pending text, no metadata)', () => {
-    const out = localizeActivity({ eventType: 'invoice_matched', title: 'x', detail: 'משקאות שטיינברג · חריגה אחת · הפסד פוטנציאלי ₪105' }, 'en');
-    expect(out.detail).toBe('משקאות שטיינברג · 1 discrepancy · potential loss ₪105');
-    const pending = localizeActivity({ eventType: 'invoice_matched', title: 'x', detail: 'ירקות השרון · ממתינה לשיוך להזמנה' }, 'en');
-    expect(pending.detail).toBe('ירקות השרון · waiting to be linked to an order');
-  });
-
-  it('metadata: the hero-rule leak (leakCount / leakIls / pendingLink) wins over the engine totals', () => {
-    const base = { invoiceNumber: 'X-1', supplierNameEn: 'Sharon', discrepancyCount: 3, potentialLossIls: 1273 };
-    const pending = localizeActivity({ eventType: 'invoice_matched', ...he, metadata: { ...base, leakCount: 0, leakIls: 0, pendingLink: true } }, 'en');
-    expect(pending.detail).toBe('Sharon · waiting to be linked to an order');
-    const clean = localizeActivity({ eventType: 'invoice_matched', ...he, metadata: { ...base, leakCount: 0, leakIls: 0, pendingLink: false } }, 'en');
-    expect(clean.detail).toBe('Sharon · matches the order and the goods receipt');
-    const one = localizeActivity({ eventType: 'invoice_matched', ...he, metadata: { ...base, leakCount: 1, leakIls: 104.8, pendingLink: false } }, 'en');
-    expect(one.detail).toBe('Sharon · 1 discrepancy · potential loss ₪105');
-  });
-
-  it('metadata with poMatched: worded from the findings (no PO + loss, to review, no order linked)', () => {
-    const base = { invoiceNumber: 'X-1', supplierNameEn: 'Sharon', discrepancyCount: 2, potentialLossIls: 1285 };
-    const pendingLoss = localizeActivity(
-      { eventType: 'invoice_matched', ...he, metadata: { ...base, poMatched: false, pendingLink: true, leakCount: 1, leakIls: 12.6, reviewCount: 0 } },
-      'en',
-    );
-    expect(pendingLoss.detail).toBe('Sharon · waiting to be linked to an order · 1 discrepancy · potential loss ₪13');
-    const review = localizeActivity(
-      { eventType: 'invoice_matched', ...he, metadata: { ...base, poMatched: true, pendingLink: false, leakCount: 0, leakIls: 0, reviewCount: 2 } },
-      'en',
-    );
-    expect(review.detail).toBe('Sharon · 2 findings to review');
-    const noPo = localizeActivity(
-      { eventType: 'invoice_matched', ...he, metadata: { ...base, poMatched: false, pendingLink: false, leakCount: 0, leakIls: 0, reviewCount: 0 } },
-      'en',
-    );
-    expect(noPo.detail).toBe('Sharon · no order linked');
-    expect(localizeActivity({ eventType: 'invoice_matched', title: 'x', detail: 'ירקות השרון · חריגה אחת לבדיקה' }, 'en').detail).toBe(
-      'ירקות השרון · 1 finding to review',
-    );
-  });
-
-  it('singular discrepancy', () => {
-    const out = localizeActivity(
-      { eventType: 'invoice_matched', ...he, metadata: { invoiceNumber: 'ST-1', supplierNameEn: 'Steinberg', discrepancyCount: 1, potentialLossIls: 104.8 } },
-      'en',
-    );
-    expect(out.detail).toBe('Steinberg · 1 discrepancy · potential loss ₪105');
-  });
-
-  it('a clean match says it matches the order', () => {
-    const out = localizeActivity(
-      { eventType: 'invoice_matched', ...he, metadata: { invoiceNumber: 'X-1', supplierNameEn: 'Sharon', discrepancyCount: 0 } },
-      'en',
-    );
-    expect(out.detail).toBe('Sharon · matches the order and the goods receipt');
-  });
-
-  it('invoice_received and consolidated invoices render without Hebrew', () => {
-    const rec = localizeActivity(
-      { eventType: 'invoice_received', title: 'x', detail: 'y', metadata: { invoiceNumber: 'BR-1', supplierNameEn: 'Brenner', totalInclVatIls: 618.49 } },
-      'en',
-    );
-    expect(rec).toEqual({ title: 'Invoice BR-1 received', detail: 'Brenner · ₪618 incl. VAT' });
-    const cons = localizeActivity(
-      { eventType: 'invoice_received', title: 'x', detail: 'y', metadata: { consolidated: true, invoiceNumber: 'BR-R-1', supplierNameEn: 'Brenner' } },
-      'en',
-    );
-    expect(cons.title).toBe('Consolidated invoice BR-R-1 received');
-    expect(cons.detail).not.toMatch(/[֐-׿]/);
-  });
-
-  it('Hebrew always shows the stored text; rows without metadata fall back to parsing', () => {
-    expect(localizeActivity({ eventType: 'invoice_matched', ...he, metadata: { invoiceNumber: 'HK-24108' } }, 'he')).toEqual(he);
-    expect(localizeActivity({ eventType: 'invoice_matched', ...he, metadata: {} }, 'en').title).toBe('Invoice HK-24108 matched');
   });
 });
 

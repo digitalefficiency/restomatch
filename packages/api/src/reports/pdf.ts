@@ -1,6 +1,7 @@
 import fontkit from '@pdf-lib/fontkit';
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import { visualOrder } from './bidi';
+import { DISPLAY_TTF_BASE64 } from './fonts/reportDisplayFont';
 import { BOLD_TTF_BASE64, REGULAR_TTF_BASE64 } from './fonts/reportFont';
 import {
   issueLabel,
@@ -54,6 +55,8 @@ interface Ctx {
   page: PDFPage;
   regular: PDFFont;
   bold: PDFFont;
+  /** Frank Ruhl Libre subset (D11): the cover / header lines only — it has no ₪ glyph. */
+  display: PDFFont;
   rtl: boolean;
   y: number;
 }
@@ -73,9 +76,22 @@ export function pdfRuns(visual: string): string[] {
 function draw(
   ctx: Ctx,
   text: string,
-  opts: { size?: number; bold?: boolean; color?: ReturnType<typeof rgb>; at?: 'start' | 'end'; y?: number; inset?: number } = {},
+  opts: {
+    size?: number;
+    bold?: boolean;
+    /** Set in the display face (D11: cover / header text only). Refuses ₪. */
+    display?: boolean;
+    color?: ReturnType<typeof rgb>;
+    at?: 'start' | 'end';
+    y?: number;
+    inset?: number;
+  } = {},
 ) {
-  const font = opts.bold ? ctx.bold : ctx.regular;
+  if (opts.display) assertNoShekel(text);
+  // A name with a letter outside the display subset (é, Arabic…) falls back to the
+  // bold app face rather than drawing an empty box.
+  const display = opts.display && displayCovers(ctx.display, text);
+  const font = display ? ctx.display : opts.bold || opts.display ? ctx.bold : ctx.regular;
   const size = opts.size ?? 11;
   const runs = pdfRuns(visualOrder(text, ctx.rtl ? 'rtl' : 'ltr'));
   const widths = runs.map((r) => font.widthOfTextAtSize(r, size));
@@ -90,6 +106,26 @@ function draw(
     ctx.page.drawText(run, { x, y: opts.y ?? ctx.y, size, font, color: opts.color ?? C.ink });
     x += widths[i]!;
   });
+}
+
+/**
+ * Owner decision D11: the display face (Frank Ruhl Libre) is never used for ₪.
+ * The embedded subset has no ₪ glyph, and this refuses a money string outright
+ * so the failure is loud, not a missing glyph.
+ */
+export function assertNoShekel(text: string): void {
+  if (/\u20AA|\bILS\b|\bNIS\b/.test(text)) throw new Error(`D11: the report display face never sets ₪ (${text})`);
+}
+
+const displaySets = new WeakMap<PDFFont, Set<number>>();
+/** Does the display subset have a glyph for every character of `text`? (Bidi marks are always fine.) */
+export function displayCovers(font: PDFFont, text: string): boolean {
+  let set = displaySets.get(font);
+  if (!set) {
+    set = new Set(font.getCharacterSet());
+    displaySets.set(font, set);
+  }
+  return [...text].every((ch) => /[\u200E\u200F\u2066-\u2069]/.test(ch) || set!.has(ch.codePointAt(0)!));
 }
 
 function rule(ctx: Ctx, y: number) {
@@ -112,14 +148,15 @@ export async function renderMonthlyReportPdf(
   doc.setModificationDate(new Date(data.generatedAt));
   const regular = await doc.embedFont(Buffer.from(REGULAR_TTF_BASE64, 'base64'), { subset: true });
   const bold = await doc.embedFont(Buffer.from(BOLD_TTF_BASE64, 'base64'), { subset: true });
+  const display = await doc.embedFont(Buffer.from(DISPLAY_TTF_BASE64, 'base64'), { subset: true });
   const page = doc.addPage(A4);
-  const ctx: Ctx = { page, regular, bold, rtl: locale === 'he', y: A4[1] - M };
+  const ctx: Ctx = { page, regular, bold, display, rtl: locale === 'he', y: A4[1] - M };
 
-  // Header band.
+  // Header band (the cover): the report title, month and restaurant in the display face (D11).
   page.drawRectangle({ x: 0, y: A4[1] - 92, width: A4[0], height: 92, color: C.band });
   draw(ctx, 'RestoMatch', { size: 18, bold: true, color: C.white, y: A4[1] - 44 });
-  draw(ctx, `${c.title} · ${monthLabel(data.month, locale)}`, { size: 12, color: C.white, y: A4[1] - 68 });
-  draw(ctx, data.restaurantName, { size: 11, color: C.white, at: 'end', y: A4[1] - 44 });
+  draw(ctx, `${c.title} · ${monthLabel(data.month, locale)}`, { size: 13, display: true, color: C.white, y: A4[1] - 68 });
+  draw(ctx, data.restaurantName, { size: 12, display: true, color: C.white, at: 'end', y: A4[1] - 44 });
 
   // The one number.
   ctx.y = A4[1] - 140;
