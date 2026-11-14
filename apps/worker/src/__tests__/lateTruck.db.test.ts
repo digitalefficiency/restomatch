@@ -9,7 +9,8 @@ import type { WorkerJob } from '../queue';
  *  - owner + manager get the late PO + a pre-addressed wa.me / mailto question
  *    to the supplier (or the "no contact" hint); NOTHING is sent to the supplier;
  *  - receivers hear it on day 1 only, with no ₪ and no supplier link, and only when
- *    receiverBrief is on (a NEW send → default OFF for existing tenants);
+ *    receiverLateNotice (A6b) is on (a NEW send → default OFF for existing tenants);
+ *  - e-mail only: a member with a phone gets no WhatsApp row (never a default-on billed send);
  *  - a chase step on Shabbat is delayed to Saturday night, never dropped;
  *  - the option turns it off; the old-format key on deploy day suppresses a repeat.
  */
@@ -41,7 +42,7 @@ beforeAll(async () => {
   const [r] = await sql<{ id: string }[]>`insert into restaurants (name) values ('ציקטי בדיקה') returning id`;
   rid = r!.id;
   for (const role of ['owner', 'manager', 'receiver', 'chef']) {
-    const [u] = await sql<{ id: string }[]>`insert into users (email, name) values (${`${TAG}-${role}@example.test`}, ${role}) returning id`;
+    const [u] = await sql<{ id: string }[]>`insert into users (email, name, phone) values (${`${TAG}-${role}@example.test`}, ${role}, '0521112233') returning id`;
     uids[role] = u!.id;
     await sql`insert into memberships (user_id, restaurant_id, role) values (${u!.id}, ${rid}, ${role})`;
   }
@@ -75,7 +76,7 @@ afterAll(async () => {
 
 describe('A6 late truck (DB)', () => {
   it('day 1: owner + manager get pre-addressed supplier drafts; the receiver gets the plain notice; chef nothing', async () => {
-    await sql`update restaurants set settings = ${sql.json({ automations: { receiverBrief: true } })} where id = ${rid}`;
+    await sql`update restaurants set settings = ${sql.json({ automations: { receiverLateNotice: true } })} where id = ${rid}`;
     await processSupplierDelays(job({ restaurantId: rid, forDate: dayRun(1) }));
     const out = await rows();
     expect(out.map((o) => o.target.split('-').pop())).toEqual([
@@ -101,7 +102,7 @@ describe('A6 late truck (DB)', () => {
   });
 
   it('a chase step on Shabbat is delayed to Saturday night, never dropped (the perishable receiver notice is skipped)', async () => {
-    await sql`update restaurants set settings = ${sql.json({ automations: { receiverBrief: true } })} where id = ${rid}`;
+    await sql`update restaurants set settings = ${sql.json({ automations: { receiverLateNotice: true } })} where id = ${rid}`;
     // Expected Fri 6 Nov → day 1 = Sat 7 Nov, run at 10:00 IST (the Mon PO is day 5: not a chase day).
     await sql`insert into purchase_orders (restaurant_id, supplier_id, status, expected_delivery_at, customer_ref)
               values (${rid}, ${sid}, 'sent', '2026-11-06T06:00:00Z', '4472')`;
@@ -115,8 +116,20 @@ describe('A6 late truck (DB)', () => {
     }
   });
 
+  it('e-mail only: every row is channel email, no :whatsapp key, though members have a phone', async () => {
+    await sql`update restaurants set settings = ${sql.json({ automations: { receiverLateNotice: true } })} where id = ${rid}`;
+    for (const d of [1, 3, 7]) await processSupplierDelays(job({ restaurantId: rid, forDate: dayRun(d) }));
+    const out = await sql<{ channel: string; dedupe_key: string }[]>`
+      select channel, dedupe_key from notifications_outbox where restaurant_id = ${rid}`;
+    expect(out.length).toBeGreaterThan(0);
+    for (const o of out) {
+      expect(o.channel).toBe('email');
+      expect(o.dedupe_key.endsWith(':whatsapp')).toBe(false);
+    }
+  });
+
   it('nothing is ever addressed to the supplier', async () => {
-    await sql`update restaurants set settings = ${sql.json({ automations: { receiverBrief: true } })} where id = ${rid}`;
+    await sql`update restaurants set settings = ${sql.json({ automations: { receiverLateNotice: true } })} where id = ${rid}`;
     for (const d of [1, 3, 7]) await processSupplierDelays(job({ restaurantId: rid, forDate: dayRun(d) }));
     const out = await rows();
     expect(out.length).toBeGreaterThan(0);

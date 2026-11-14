@@ -25,6 +25,7 @@ import {
   resolveApprovalThresholds,
   formatIlsAgorot,
   findingIdentity,
+  briefOptionOn,
   matchAlertBrief,
   newFindingKeys,
 } from '@restomatch/api';
@@ -357,7 +358,8 @@ export async function matchInvoiceForJob(
       newFindingsOut = { keys, roles };
       // Enqueued in THIS transaction, atomic with the run: a retry after commit reads
       // the committed run (no new identities) and must not be the only chance to send.
-      if (keys.length > 0 && roles.length > 0) {
+      // A NEW send (main is silent on a re-match) → behind `rematchAlerts`, default OFF.
+      if (keys.length > 0 && roles.length > 0 && briefOptionOn(restaurant?.settings, 'rematchAlerts')) {
         await notifyNewFindingsOnRematch(tx, { restaurantId, invoiceId, matchRunId: out.matchRunId, newFindings: newFindingsOut });
       }
     }

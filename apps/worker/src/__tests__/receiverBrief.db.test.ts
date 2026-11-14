@@ -45,7 +45,7 @@ beforeAll(async () => {
   const [r] = await sql<{ id: string }[]>`insert into restaurants (name) values (${TAG}) returning id`;
   rid = r!.id;
   for (const role of ['receiver', 'owner', 'chef']) {
-    const [u] = await sql<{ id: string }[]>`insert into users (email, name) values (${`${TAG}-${role}@example.test`}, ${role}) returning id`;
+    const [u] = await sql<{ id: string }[]>`insert into users (email, name, phone) values (${`${TAG}-${role}@example.test`}, ${role}, '0521112233') returning id`;
     uids.push(u!.id);
     await sql`insert into memberships (user_id, restaurant_id, role) values (${u!.id}, ${rid}, ${role})`;
   }
@@ -90,6 +90,15 @@ describe('A4 receiver morning brief (DB)', () => {
     // The audit row is still written.
     const [a] = await sql<{ n: number }[]>`select count(*)::int as n from audit_log where restaurant_id = ${rid} and action = 'daily_expectations.computed'`;
     expect(a!.n).toBe(1);
+  });
+
+  it('e-mail only: the receiver has a phone, yet the only row is channel email (no :whatsapp key)', async () => {
+    await po(TUE_0900);
+    await processDailyExpectations(job({ restaurantId: rid, forDate: TUE_0600 }));
+    const out = await sql<{ channel: string; dedupe_key: string }[]>`
+      select channel, dedupe_key from notifications_outbox where restaurant_id = ${rid}`;
+    expect(out.map((o) => o.channel)).toEqual(['email']);
+    expect(out[0]!.dedupe_key.endsWith(':email')).toBe(true);
   });
 
   it('a replay the same morning enqueues nothing new', async () => {

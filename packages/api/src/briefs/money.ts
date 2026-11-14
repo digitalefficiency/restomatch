@@ -6,6 +6,8 @@ import type { BriefLocale } from './types';
  * vetted server twin `formatIlsAgorot` (reports/money.ts, parity-tested against the
  * web `formatIls()`); it becomes G-13 `moneyText` in this one line when G-13 merges.
  */
-export function briefIls(agorot: number, locale: BriefLocale = 'he'): string {
-  return formatIlsAgorot(agorot, { locale });
+export function briefIls(agorot: number, locale: BriefLocale = 'he', opts: { agorot?: boolean } = {}): string {
+  // `agorot`: the per-invoice claim precision of W2-04's first-match alert (up to 2
+  // decimals), so a ₪0.40 claim never prints as "₪0".
+  return formatIlsAgorot(agorot, { locale, ...(opts.agorot ? { maximumFractionDigits: 2 } : {}) });
 }

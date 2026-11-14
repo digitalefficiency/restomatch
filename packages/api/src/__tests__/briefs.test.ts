@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  briefDedupeKey,
   briefPayload,
   eveningBrief,
   findingIdentity,
@@ -17,6 +16,8 @@ import {
   waDigits,
   waMeLink,
 } from '../briefs';
+import { notifyDedupeKey } from '../notifications/notify';
+import { formatIlsAgorot } from '../reports/money';
 
 /** AU-04 · the pure role-brief builders (no DB). Fixed instants, Israel time. */
 const RID = '11111111-1111-4111-8111-111111111111';
@@ -79,7 +80,8 @@ describe('A4 receiver morning brief', () => {
     expect(m.html).toContain('dir="rtl"');
     expect(m.dedupeSuffix).toBe('2026-10-25');
     expect(m.automationId).toBe('A4');
-    expect(briefDedupeKey(m, RID, 'u1')).toBe(`au:A4:${RID}:u1:2026-10-25`);
+    // The key the producer really writes: notify() on event `au:A4:<IL day>`, entity = the restaurant.
+    expect(notifyDedupeKey(`au:A4:${m.dedupeSuffix}`, RID, RID, 'u1', 'email')).toBe(`au:A4:2026-10-25:${RID}:${RID}:u1:email`);
   });
 
   it('en renders LTR', () => {
@@ -237,7 +239,9 @@ describe('A1 match alert on re-match', () => {
     const m = matchAlertBrief({ ...ctx, invoiceId: 'inv-1', invoiceRef: '7781', supplierName: 'שטראוס', newKeys: [k('PRICE_HIGHER', 'c')], leakAgorot: 4550 })!;
     expect(m.dedupeSuffix).toBe(`inv-1:${identitySetHash([k('PRICE_HIGHER', 'c')])}`);
     expect(m.text).toContain('נמצא פער חדש בחשבונית 7781 של שטראוס.');
-    expect(m.text).toMatch(/אפשר לבקש זיכוי: .*46/);
+    // The first-match alert's precision (formatIlsAgorot, up to 2 decimals), never rounded to whole ₪.
+    expect(m.text).toContain(`אפשר לבקש זיכוי: ${formatIlsAgorot(4550, { maximumFractionDigits: 2 })}`);
+    expect(m.text).toMatch(/45\.5/);
     expect(m.text).not.toMatch(BANNED_HE);
     expect(m.deepLink).toBe(goLink(BASE, RID, '/dashboard/invoices/inv-1'));
   });
@@ -247,6 +251,12 @@ describe('A1 match alert on re-match', () => {
     const m = matchAlertBrief({ ...ctx, invoiceId: 'i', invoiceRef: '1', supplierName: 's', newKeys: ['x', 'y'], leakAgorot: null })!;
     expect(m.text).not.toContain('₪');
     expect(m.subject).toBe('2 פערים חדשים בחשבונית של s');
+    // A small claim keeps its agorot (never "₪0"); a zero claim prints no ₪ line at all.
+    const small = matchAlertBrief({ ...ctx, invoiceId: 'i', invoiceRef: '1', supplierName: 's', newKeys: ['x'], leakAgorot: 40 })!;
+    expect(small.text).toContain(formatIlsAgorot(40, { maximumFractionDigits: 2 }));
+    expect(small.text).toMatch(/0\.4/);
+    const zero = matchAlertBrief({ ...ctx, invoiceId: 'i', invoiceRef: '1', supplierName: 's', newKeys: ['x'], leakAgorot: 0 })!;
+    expect(zero.text).not.toContain('₪');
   });
 });
 

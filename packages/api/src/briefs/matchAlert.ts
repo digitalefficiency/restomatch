@@ -60,7 +60,7 @@ export function matchAlertBrief(input: MatchAlertInput): BriefMessage | null {
   const n = input.newKeys.length;
   const deepLink = goLink(input.baseUrl, input.restaurantId, `/dashboard/invoices/${encodeURIComponent(input.invoiceId)}`);
   const line = c.line(n, input.invoiceRef, input.supplierName);
-  const ilsLine = input.leakAgorot != null && input.leakAgorot > 0 ? c.ils(briefIls(input.leakAgorot, locale)) : null;
+  const ilsLine = input.leakAgorot != null && input.leakAgorot > 0 ? c.ils(briefIls(input.leakAgorot, locale, { agorot: true })) : null;
   const subject = c.subject(n, input.supplierName);
   const text = `${line}${ilsLine ? `\n${ilsLine}` : ''}\n\n${c.cta}: ${deepLink}`;
   const html = briefHtml({

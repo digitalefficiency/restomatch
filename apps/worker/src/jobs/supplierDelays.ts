@@ -188,9 +188,9 @@ export async function processSupplierDelays(job: WorkerJob<SupplierDelaysJob>) {
       enqueued += managers.enqueued;
 
       // Day 1 only: the receivers hear the truck is late (no ₪, no supplier link). A NEW
-      // send for existing tenants → also behind receiverBrief (default OFF). Perishable:
+      // send → its own switch, receiverLateNotice (A6b, default OFF). Perishable:
       // "the truck is late today" is useless tomorrow.
-      if (r.daysLate === 1 && briefOptionOn(restaurant.settings, 'receiverBrief')) {
+      if (r.daysLate === 1 && briefOptionOn(restaurant.settings, 'receiverLateNotice')) {
         const receivers = await sendBrief(db, {
           restaurantId: restaurant.id,
           now,

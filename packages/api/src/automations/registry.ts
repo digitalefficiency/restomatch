@@ -20,6 +20,9 @@ export const AUTOMATION_OPTION_KEYS = [
   'supplierDelays',
   'eveningDigest',
   'receiverBrief',
+  // AU-04 (orchestrator 14.11): NEW sends → default OFF.
+  'receiverLateNotice',
+  'rematchAlerts',
   'recoveryBookkeeper',
   'chaseAcknowledged',
   // AU-13 (A18) price-creep sections: digest + contract expiry default ON (they replace behaviour on main), list diff OFF.
@@ -127,8 +130,8 @@ export const AUTOMATIONS: ReadonlyArray<AutomationDef> = [
     id: 'A6',
     key: 'supplierDelays',
     // AU-04: supplierDelays.ts honours the option. Default ON: every tenant already gets
-    // the late-truck mail today (continuity). Its day-1 receiver notice is a NEW send and
-    // is also gated by receiverBrief (default OFF).
+    // the late-truck mail today (continuity). Its day-1 receiver notice is a NEW send on
+    // its own switch (A6b receiverLateNotice, default OFF).
     control: { kind: 'option', option: 'supplierDelays', default: true },
     slot: '10:00',
     audience: ['owner', 'manager'],
@@ -172,13 +175,37 @@ export const AUTOMATIONS: ReadonlyArray<AutomationDef> = [
     outboxMatch: { kind: 'prefix', prefix: 'au:A4:' },
   },
   {
+    id: 'A6b',
+    key: 'receiverLateNotice',
+    // AU-04: the day-1 "the truck is late" notice to receivers (no ₪, no supplier link),
+    // sent by supplierDelays.ts at 10:00. A NEW send → default OFF.
+    control: { kind: 'option', option: 'receiverLateNotice', default: false },
+    slot: '10:00',
+    audience: ['receiver'],
+    carriesIls: false,
+    outboxMatch: { kind: 'prefix', prefix: 'au:A6:d1:receiver:' },
+  },
+  {
     id: 'A1',
     key: 'matchAlerts',
     control: { kind: 'always' },
     slot: 'event',
-    audience: ['owner', 'manager'],
+    // The first-match alert goes to the roles the findings route to (rolesNeedingNotification).
+    audience: ['owner', 'manager', 'bookkeeper'],
     carriesIls: true,
     outboxMatch: { kind: 'relatedEntityType', type: 'match_run' },
+  },
+  {
+    id: 'A1b',
+    key: 'rematchAlerts',
+    // AU-04: a RE-match (OCR edit, receiving count, mapping confirm) that finds NEW
+    // findings tells their deciders. Main sends nothing on a re-match → a NEW send,
+    // no owner decision → default OFF (orchestrator review B1, 14.11).
+    control: { kind: 'option', option: 'rematchAlerts', default: false },
+    slot: 'event',
+    audience: ['owner', 'manager', 'bookkeeper'],
+    carriesIls: true,
+    outboxMatch: { kind: 'prefix', prefix: 'au:A1:' },
   },
   {
     id: 'A8b',
@@ -251,12 +278,12 @@ export function isOwnerToggleable(key: string): key is OwnerToggleableKey {
   return (OWNER_TOGGLEABLE as ReadonlyArray<string>).includes(key);
 }
 
-/** The registry default of an option key (true when no row names it). */
+/** The registry default of an option key (FALSE when no row names it: never a silent default-on). */
 export function optionDefault(key: AutomationOptionKey): boolean {
   for (const a of AUTOMATIONS) {
     if (a.control.kind === 'option' && a.control.option === key) return a.control.default;
   }
-  return true;
+  return false;
 }
 
 /** True when the FEATURES_OFF kill-switch turns `flag` off for every tenant. */

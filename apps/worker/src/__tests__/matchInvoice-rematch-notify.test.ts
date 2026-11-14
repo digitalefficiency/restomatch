@@ -33,6 +33,7 @@ import type { WorkerJob } from '../queue';
  *    never `rolesNeedingNotification` (which re-lists every undecided carry-over);
  *  - one row per (invoice, new identity set, person); a replay or a re-match that
  *    adds nothing sends nothing; deciders only (never receiver / chef); no `role:` targets;
+ *  - a NEW send → behind `rematchAlerts`, default OFF: `{}` settings send nothing;
  *  - enqueued INSIDE the match transaction (atomic with the run): a retry after the
  *    commit sees no new identity, so the send cannot wait for post-commit code.
  */
@@ -146,7 +147,23 @@ describe('A1 match alert on re-match (DB)', () => {
     expect(await a1Rows()).toHaveLength(0);
   });
 
+  it('default OFF: `{}` settings → a re-match with a NEW finding writes no au:A1 row', async () => {
+    // No stored automations option (the seed's other settings kept).
+    await db.execute(sql`update restaurants set settings = coalesce(settings, '{}'::jsonb) - 'automations' where id = ${restaurantId}`);
+    await overbill(0);
+    await rematch();
+    expect(await a1Rows()).toHaveLength(0);
+    // Back to the clean bill for the cases below.
+    await db
+      .update(invoiceLines)
+      .set({ unitPriceBilled: String(lines[0]!.price), lineTotal: (Math.round(lines[0]!.qty * lines[0]!.price * 100) / 100).toFixed(2) })
+      .where(eq(invoiceLines.id, invLineIds[0]!));
+    await rematch();
+  });
+
   it('a re-match with a NEW finding → one alert per decider, deciders only, no role: targets', async () => {
+    await db.execute(sql`update restaurants
+      set settings = coalesce(settings, '{}'::jsonb) || '{"automations":{"rematchAlerts":true}}'::jsonb where id = ${restaurantId}`);
     await overbill(0);
     await rematch();
     const rows = await a1Rows();

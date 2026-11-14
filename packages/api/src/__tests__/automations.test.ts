@@ -17,7 +17,7 @@ import { appRouter } from '../index';
 import { restaurantDateKey } from './helpers/il-day';
 import type { AppContext, Session } from '../context';
 import { FEATURE_KEYS, OWNER_TOGGLEABLE, featureEnabled } from '../lib/features';
-import { AUTOMATIONS, AUTOMATION_OPTION_KEYS } from '../automations/registry';
+import { AUTOMATIONS, AUTOMATION_OPTION_KEYS, optionDefault, type AutomationOptionKey } from '../automations/registry';
 import { automationOption } from '../automations/options';
 import { israelWeekStart, listAutomations } from '../routers/automations';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
@@ -100,7 +100,9 @@ describe('registry (pure)', () => {
         'supplierDelays',
         'eveningDigest',
         'receiverBrief',
+        'receiverLateNotice',
         'matchAlerts',
+        'rematchAlerts',
         'recoveryBookkeeper',
         'chaseAcknowledged',
         'orderCapture',
@@ -146,6 +148,27 @@ describe('registry (pure)', () => {
       outboxMatch: { kind: 'prefix', prefix: 'au:A4:' },
     });
     expect(automationOption({}, 'receiverBrief')).toBe(false);
+    // The A6 day-1 receiver notice and the A1 re-match alert are NEW sends on their own switches → OFF.
+    expect(by('receiverLateNotice')).toMatchObject({
+      id: 'A6b',
+      control: { kind: 'option', option: 'receiverLateNotice', default: false },
+      slot: '10:00',
+      audience: ['receiver'],
+      carriesIls: false,
+      outboxMatch: { kind: 'prefix', prefix: 'au:A6:d1:receiver:' },
+    });
+    expect(by('rematchAlerts')).toMatchObject({
+      id: 'A1b',
+      control: { kind: 'option', option: 'rematchAlerts', default: false },
+      slot: 'event',
+      audience: ['owner', 'manager', 'bookkeeper'],
+      carriesIls: true,
+      outboxMatch: { kind: 'prefix', prefix: 'au:A1:' },
+    });
+    expect(automationOption({}, 'receiverLateNotice')).toBe(false);
+    expect(automationOption({}, 'rematchAlerts')).toBe(false);
+    // An option key with no registry row never defaults ON.
+    expect(optionDefault('noSuchOption' as AutomationOptionKey)).toBe(false);
     // A6 / A7 replace sends every tenant already gets → default ON (today's behaviour kept).
     expect(by('supplierDelays').control).toEqual({ kind: 'option', option: 'supplierDelays', default: true });
     expect(by('eveningDigest').control).toEqual({ kind: 'option', option: 'eveningDigest', default: true });

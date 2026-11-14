@@ -70,9 +70,13 @@ test.describe('AU-01 automations page', () => {
     }
     // AU-04: the receiver brief is sent now → its row shows, OFF by default (a new send);
     // the evening digest and late trucks honour their option → a switch, ON (today's behaviour).
-    const a4 = page.locator('[data-automation=receiverBrief]');
-    await expect(a4.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
-    expect(await a4.innerText()).not.toMatch(/₪/);
+    // New sends are OFF by default: the receiver brief, the receiver late notice, the re-match alert.
+    for (const key of ['receiverBrief', 'receiverLateNotice', 'rematchAlerts']) {
+      await expect(page.locator(`[data-automation=${key}]`).getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+    }
+    for (const key of ['receiverBrief', 'receiverLateNotice']) {
+      expect(await page.locator(`[data-automation=${key}]`).innerText()).not.toMatch(/₪/);
+    }
     for (const key of ['eveningDigest', 'supplierDelays']) {
       await expect(page.locator(`[data-automation=${key}]`).getByRole('switch')).toHaveAttribute('aria-checked', 'true');
     }
