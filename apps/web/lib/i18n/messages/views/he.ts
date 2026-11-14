@@ -55,7 +55,7 @@ export const he = {
     table: 'טבלה',
   },
   densities: {
-    comfortable: 'מרווח',
+    comfortable: 'רגיל',
     compact: 'צפוף',
   },
   filterNames: {

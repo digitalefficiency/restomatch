@@ -205,10 +205,14 @@ describe('component contracts', () => {
     expect(html).not.toContain('animate-pulse');
   });
 
-  it('StatusChip is icon + word; CountBadge hides at 0', () => {
+  it('StatusChip is a marker (dot or icon) + word; CountBadge hides at 0', () => {
+    // DS3 (SPEC §2, §5): the default marker is the tone's dot; an explicit icon replaces it.
     const chip = render(h(StatusChip, { tone: 'danger', label: 'חוסם', emphasis: 'bold' }));
-    expect(chip).toContain('<svg');
+    expect(chip).toMatch(/<span aria-hidden="true" data-dot="solid"/);
     expect(chip).toContain('חוסם');
+    const withIcon = render(h(StatusChip, { tone: 'neutral', label: 'ממתין', icon: h('svg', { 'aria-hidden': 'true' }) }));
+    expect(withIcon).toContain('<svg');
+    expect(withIcon).not.toContain('data-dot');
     expect(render(h(CountBadge, { count: 0 }))).toBe('');
     expect(textOf(render(h(CountBadge, { count: 140 })))).toBe('99+');
   });

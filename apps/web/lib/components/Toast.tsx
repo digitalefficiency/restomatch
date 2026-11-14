@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, Info, X, XCircle } from 'lucide-react';
+import { X, XCircle } from 'lucide-react';
 import { useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
 import { cnMerge as cn } from './cn';
@@ -57,6 +57,8 @@ export function toastDuration(kind: ToastKind, opts: ToastOptions = {}): number 
  * are announced through persistent live regions (polite; assertive for errors),
  * and `useAnnounce()` is available below this provider too. The stack sits at
  * the inline-start bottom, above the bottom nav, the consent bar and the safe area.
+ * DS3 (kit "הודעה עם ביטול"): the dark toast, white words and focus ring, the
+ * action ("ביטול") beside the message, and a line that shows the time left.
  */
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
@@ -113,6 +115,13 @@ function ToastStack({ children }: { children: React.ReactNode }) {
 function ToastCard({ item, onDismiss, dismissLabel }: { item: ToastItem; onDismiss: () => void; dismissLabel: string }) {
   const [paused, setPaused] = useState(false);
   const remaining = useRef(item.duration);
+  const lineRef = useRef<HTMLElement>(null);
+  const line = useRef<Animation | null>(null);
+  const [lineOn, setLineOn] = useState(false);
+  // DS3 (SPEC §8): the time left to undo is visible — a thin line that shortens over the toast's
+  // real duration and pauses with its timer. Only for a toast with an action; an enhancement where
+  // the Web Animations API exists; off under reduced motion (everything appears in place).
+  const timed = Boolean(item.action) && Number.isFinite(item.duration);
 
   useEffect(() => {
     if (paused || !Number.isFinite(remaining.current)) return;
@@ -124,7 +133,30 @@ function ToastCard({ item, onDismiss, dismissLabel }: { item: ToastItem; onDismi
     };
   }, [paused, onDismiss]);
 
-  const Icon = item.kind === 'success' ? CheckCircle2 : item.kind === 'error' ? XCircle : Info;
+  useEffect(() => {
+    const el = lineRef.current;
+    if (!timed || !el || typeof el.animate !== 'function') return;
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const anim = el.animate([{ transform: 'scaleX(1)' }, { transform: 'scaleX(0)' }], {
+      duration: item.duration,
+      easing: 'linear',
+      fill: 'forwards',
+    });
+    line.current = anim;
+    setLineOn(true);
+    return () => {
+      anim.cancel();
+      line.current = null;
+    };
+  }, [timed, item.duration]);
+
+  useEffect(() => {
+    const anim = line.current;
+    if (!anim) return;
+    if (paused) anim.pause();
+    else anim.play();
+  }, [paused]);
+
   return (
     <div
       data-toast={item.kind}
@@ -134,18 +166,9 @@ function ToastCard({ item, onDismiss, dismissLabel }: { item: ToastItem; onDismi
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPaused(false);
       }}
-      className={cn(
-        'pointer-events-auto flex w-full items-start gap-2.5 rounded-card border bg-surface px-4 py-3 text-body-sm text-ink shadow-e2 motion-safe:animate-[rm-toast-in_var(--dur-medium)_var(--ease-enter)]',
-        item.kind === 'error' ? 'border-danger-subtle' : item.kind === 'success' ? 'border-primary-subtle' : 'border-info-subtle',
-      )}
+      className="pointer-events-auto relative flex w-full items-center gap-3 overflow-hidden rounded-card bg-fg px-3.5 py-2.5 text-body-sm text-on-bold shadow-e2 motion-safe:animate-[rm-toast-in_var(--dur-medium)_var(--ease-enter)]"
     >
-      <Icon
-        className={cn(
-          'mt-0.5 h-4 w-4 shrink-0',
-          item.kind === 'error' ? 'text-danger' : item.kind === 'success' ? 'text-primary' : 'text-info',
-        )}
-        aria-hidden="true"
-      />
+      {item.kind === 'error' ? <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" /> : null}
       <p className="min-w-0 flex-1">{item.message}</p>
       {item.action ? (
         <button
@@ -154,7 +177,7 @@ function ToastCard({ item, onDismiss, dismissLabel }: { item: ToastItem; onDismi
             item.action!.onClick();
             onDismiss();
           }}
-          className="shrink-0 rounded-control px-2 font-semibold text-primary underline-offset-2 transition-colors duration-micro hover:underline"
+          className="inline-flex min-h-7 shrink-0 items-center rounded-control px-1 font-medium text-on-bold underline-offset-2 transition-colors duration-micro ease-standard hover:underline focus-visible:outline-on-bold [@media(pointer:coarse)]:min-h-11"
         >
           {item.action.label}
         </button>
@@ -163,10 +186,19 @@ function ToastCard({ item, onDismiss, dismissLabel }: { item: ToastItem; onDismi
         type="button"
         onClick={onDismiss}
         aria-label={dismissLabel}
-        className="-m-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-subtle transition-colors duration-micro hover:bg-surface-2 hover:text-ink"
+        className="-m-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-on-bold transition-colors duration-micro ease-standard hover:bg-on-bold/15 focus-visible:outline-on-bold [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
       >
         <X className="h-4 w-4" aria-hidden="true" />
       </button>
+      {timed ? (
+        <i
+          ref={lineRef}
+          aria-hidden="true"
+          data-toast-timer=""
+          hidden={!lineOn}
+          className="absolute inset-x-0 bottom-0 h-0.5 bg-on-bold/60 ltr:origin-left rtl:origin-right"
+        />
+      ) : null}
     </div>
   );
 }

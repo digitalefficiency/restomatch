@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Lock, ShieldAlert } from 'lucide-react';
+import { Lock } from 'lucide-react';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
 import { Button } from './Button';
@@ -86,30 +86,33 @@ export function EntitlementUpsell({
 }
 
 /**
- * Generic (non-entitlement) error surface, Ledger style. Used as the fallback
- * branch when an error is NOT ENTITLEMENT_REQUIRED.
+ * Generic (non-entitlement) error surface. Used as the fallback branch when an error is NOT
+ * ENTITLEMENT_REQUIRED. DS3 (kit "שגיאה"): it says what failed, what is safe, offers one action
+ * and never shows ₪0 — calm, with no red and no icon, since a view that did not load is not money
+ * waiting for a person. Still announced (`role="alert"`) as before.
  */
 export function ErrorNotice({
   title,
   message,
+  safe,
+  action,
   className,
 }: {
   title?: React.ReactNode;
   message?: React.ReactNode;
+  /** What is safe despite the failure: "ההחלטות שכבר התקבלו שמורות." */
+  safe?: React.ReactNode;
+  /** The one action, e.g. a small secondary "נסו שוב". */
+  action?: React.ReactNode;
   className?: string;
 }) {
   const t = useT(components);
   return (
-    <Card
-      padding="md"
-      role="alert"
-      className={`flex items-center gap-3 border-danger/30 bg-danger/5 text-danger ${className ?? ''}`}
-    >
-      <ShieldAlert className="h-5 w-5 shrink-0" aria-hidden="true" />
-      <div>
-        <p className="font-medium">{title ?? t('errorNotice.title')}</p>
-        {message ? <p className="mt-0.5 text-sm text-danger/80">{message}</p> : null}
-      </div>
+    <Card padding="md" role="alert" data-error-notice="" className={`flex flex-col items-start gap-1 ${className ?? ''}`}>
+      <p className="text-body-sm font-semibold text-fg">{title ?? t('errorNotice.title')}</p>
+      {message ? <p className="text-body-sm text-fg-secondary">{message}</p> : null}
+      {safe ? <p className="text-body-sm text-fg-secondary">{safe}</p> : null}
+      {action ? <div className="mt-1.5">{action}</div> : null}
     </Card>
   );
 }

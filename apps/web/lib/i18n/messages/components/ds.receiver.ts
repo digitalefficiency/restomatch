@@ -17,7 +17,7 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       exact: 'المبلغ الدقيق: {amount}',
       credit: 'إشعار دائن',
     },
-    delta: { up: 'ارتفاع', down: 'انخفاض', same: 'بدون تغيير' },
+    delta: { up: 'ارتفاع', down: 'انخفاض', same: 'بدون تغيير', upBy: 'ارتفاع بمقدار', downBy: 'انخفاض بمقدار', negligible: 'بدون تغيير يُذكر' },
     priceMove: { label: 'تغيّر السعر من {from} إلى {to}' },
     token: { copy: 'نسخ الرقم {value}', copied: 'تم النسخ' },
     deadline: {
@@ -50,6 +50,19 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       variance: 'الفرق {pct}',
       confirmAgain: 'الفرق أكبر من {pct}. تأكيد على أي حال؟',
     },
+    matchStrip: {
+      ordered: 'المطلوب',
+      received: 'المستلم',
+      billed: 'المفوتر',
+      invoice: 'في الفاتورة',
+      none: 'لا يوجد',
+      less: 'أقل بـ {value}',
+      more: 'أكثر بـ {value}',
+      perUnit: 'لكل {unit}',
+    },
+    calc: { panel: 'تفاصيل الحساب' },
+    rail: { done: 'تم', now: 'الخطوة الحالية', todo: 'لم يحن بعد' },
+    answer: { tag: 'إجابة من البيانات' },
   },
   ru: {
     money: {
@@ -59,7 +72,7 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       exact: 'Точная сумма: {amount}',
       credit: 'Кредит',
     },
-    delta: { up: 'Рост', down: 'Снижение', same: 'Без изменений' },
+    delta: { up: 'Рост', down: 'Снижение', same: 'Без изменений', upBy: 'Рост на', downBy: 'Снижение на', negligible: 'Без заметных изменений' },
     priceMove: { label: 'Цена изменилась с {from} на {to}' },
     token: { copy: 'Копировать номер {value}', copied: 'Скопировано' },
     deadline: {
@@ -92,6 +105,19 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       variance: 'Отклонение {pct}',
       confirmAgain: 'Отклонение больше {pct}. Всё равно подтвердить?',
     },
+    matchStrip: {
+      ordered: 'Заказано',
+      received: 'Получено',
+      billed: 'Выставлено',
+      invoice: 'В счёте',
+      none: 'Нет',
+      less: 'на {value} меньше',
+      more: 'на {value} больше',
+      perUnit: 'за {unit}',
+    },
+    calc: { panel: 'Как посчитано' },
+    rail: { done: 'выполнено', now: 'текущий шаг', todo: 'ещё нет' },
+    answer: { tag: 'Ответ по данным' },
   },
   th: {
     money: {
@@ -101,7 +127,7 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       exact: 'ยอดที่แน่นอน: {amount}',
       credit: 'เครดิต',
     },
-    delta: { up: 'เพิ่มขึ้น', down: 'ลดลง', same: 'ไม่เปลี่ยนแปลง' },
+    delta: { up: 'เพิ่มขึ้น', down: 'ลดลง', same: 'ไม่เปลี่ยนแปลง', upBy: 'เพิ่มขึ้น', downBy: 'ลดลง', negligible: 'แทบไม่เปลี่ยนแปลง' },
     priceMove: { label: 'ราคาเปลี่ยนจาก {from} เป็น {to}' },
     token: { copy: 'คัดลอกหมายเลข {value}', copied: 'คัดลอกแล้ว' },
     deadline: {
@@ -134,6 +160,19 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       variance: 'ส่วนต่าง {pct}',
       confirmAgain: 'ส่วนต่างเกิน {pct} ยืนยันต่อหรือไม่?',
     },
+    matchStrip: {
+      ordered: 'สั่ง',
+      received: 'ได้รับ',
+      billed: 'เรียกเก็บ',
+      invoice: 'ในใบแจ้งหนี้',
+      none: 'ไม่มี',
+      less: 'น้อยกว่า {value}',
+      more: 'มากกว่า {value}',
+      perUnit: 'ต่อ {unit}',
+    },
+    calc: { panel: 'รายละเอียดการคำนวณ' },
+    rail: { done: 'เสร็จแล้ว', now: 'ขั้นตอนปัจจุบัน', todo: 'ยังไม่ถึง' },
+    answer: { tag: 'คำตอบจากข้อมูล' },
   },
   ti: {
     money: {
@@ -143,7 +182,7 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       exact: 'ልክዕ መጠን: {amount}',
       credit: 'ክሬዲት',
     },
-    delta: { up: 'ወሰኽ', down: 'ምንካይ', same: 'ለውጢ የለን' },
+    delta: { up: 'ወሰኽ', down: 'ምንካይ', same: 'ለውጢ የለን', upBy: 'ወሰኽ ብ', downBy: 'ምንካይ ብ', negligible: 'ዝኾነ ለውጢ የለን' },
     priceMove: { label: 'ዋጋ ካብ {from} ናብ {to} ተቐይሩ' },
     token: { copy: 'ቁጽሪ {value} ቅዳሕ', copied: 'ተቐዲሑ' },
     deadline: {
@@ -176,5 +215,18 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       variance: 'ፍልልይ {pct}',
       confirmAgain: 'ፍልልይ ካብ {pct} ይበዝሕ። ብዝኾነ ኣረጋግጽ?',
     },
+    matchStrip: {
+      ordered: 'ዝተኣዘዘ',
+      received: 'ዝተቐበልናዮ',
+      billed: 'ዝተሓተተ',
+      invoice: 'ኣብ ፋክቱር',
+      none: 'የለን',
+      less: 'ብ{value} ዝወሓደ',
+      more: 'ብ{value} ዝበዝሐ',
+      perUnit: 'ን{unit}',
+    },
+    calc: { panel: 'ዝርዝር ሕሳብ' },
+    rail: { done: 'ተፈጺሙ', now: 'ናይ ሕጂ ደረጃ', todo: 'ገና' },
+    answer: { tag: 'መልሲ ካብ ዳታ' },
   },
 };
