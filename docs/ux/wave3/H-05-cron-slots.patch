@@ -1,0 +1,83 @@
+diff --git a/apps/worker/src/cron.ts b/apps/worker/src/cron.ts
+--- a/apps/worker/src/cron.ts
++++ b/apps/worker/src/cron.ts
+@@ -33,6 +33,11 @@
+ import type { PriceAlertsJob } from './jobs/priceAlerts';
+ import type { RetentionJob } from './jobs/retention';
+ import type { SupplierDelaysJob } from './jobs/supplierDelays';
++// H-05a: job files shipped by their consumers (AU-12, AU-18, AU-08 via AU-12, AU-11).
++import type { WeeklyDigestJob } from './jobs/weeklyDigest';
++import type { MissingDocsJob } from './jobs/missingDocs';
++import type { AllocationDeadlineJob } from './jobs/allocationDeadline';
++import type { OrderCutoffJob } from './jobs/orderCutoff';
+ 
+ const dailyExpectationsQueue = makeQueue<DailyExpectationsJob>('daily-expectations');
+ const baselinesQueue = makeQueue<BaselinesJob>('baselines');
+@@ -46,6 +51,10 @@
+ const monthlyReportQueue = makeQueue<MonthlyReportJob>('monthly-report');
+ const healthDigestQueue = makeQueue<HealthDigestJob>('health-digest');
+ const ocrSweepQueue = makeQueue<OcrSweepJob>('ocr-sweep');
++const weeklyDigestQueue = makeQueue<WeeklyDigestJob>('weekly-digest');
++const missingDocsQueue = makeQueue<MissingDocsJob>('missing-docs');
++const allocationDeadlineQueue = makeQueue<AllocationDeadlineJob>('allocation-deadline');
++const orderCutoffQueue = makeQueue<OrderCutoffJob>('order-cutoff');
+ 
+ const TZ = 'Asia/Jerusalem';
+ 
+@@ -132,6 +141,37 @@
+     { name: 'ocr-sweep', data: {} },
+   );
+ 
++  // H-05a (automation schedules). Every body checks its flag/option per
++  // restaurant and sends through G-06 notify() only (quiet hours, Shabbat, ≤6/day).
++  // Weekly bookkeeper digest — Sunday 08:00 IL (AU-12, A17)
++  await weeklyDigestQueue.upsertJobScheduler(
++    'weekly-digest-sun-0800',
++    { pattern: '0 8 * * 0', tz: TZ },
++    { name: 'weekly-digest', data: {} },
++  );
++
++  // Month-end missing-documents report — 8th of the month 08:00 IL (AU-18, A23)
++  await missingDocsQueue.upsertJobScheduler(
++    'missing-docs-8th-0800',
++    { pattern: '0 8 8 * *', tz: TZ },
++    { name: 'missing-docs', data: {} },
++  );
++
++  // Allocation-number deadline countdown — every day 08:15 IL (AU-08 builder, A13)
++  await allocationDeadlineQueue.upsertJobScheduler(
++    'allocation-deadline-0815',
++    { pattern: '15 8 * * *', tz: TZ },
++    { name: 'allocation-deadline', data: {} },
++  );
++
++  // Order cut-off "draft ready" push — every 15 min 06:00–21:45 IL (AU-11, A16).
++  // The body works from its own floored 15-min bucket, never a slot time.
++  await orderCutoffQueue.upsertJobScheduler(
++    'order-cutoff-15m',
++    { pattern: '*/15 6-21 * * *', tz: TZ },
++    { name: 'order-cutoff', data: {} },
++  );
++
+   // Retention purge — every day 03:30 IL. Opt-in via RETENTION_CRON_ENABLED; even
+   // when scheduled it dry-runs unless RETENTION_PURGE_ENABLED=1 (see retention.ts).
+   if (RETENTION_CRON_ENABLED) {
+@@ -145,7 +185,8 @@
+   console.log(
+     '[cron] registered: daily-expectations(06:00), baselines(02:00), outbox-dispatch(60s), ' +
+       'order-reminders(09:00), supplier-delays(10:00), end-of-day-report(19:00), price-alerts(07:00), ' +
+-      'recovery-reminders(08:30), monthly-report(1st 07:45), health-digest(06:45), ocr-sweep(5m)' +
++      'recovery-reminders(08:30), monthly-report(1st 07:45), health-digest(06:45), ocr-sweep(5m), ' +
++      'weekly-digest(Sun 08:00), missing-docs(8th 08:00), allocation-deadline(08:15), order-cutoff(15m 06-22)' +
+       (RETENTION_CRON_ENABLED ? ', retention(03:30)' : ''),
+   );
+ }
+@@ -163,4 +204,8 @@
+   await priceAlertsQueue.removeJobScheduler('price-alerts-07');
+   await recoveryRemindersQueue.removeJobScheduler('recovery-reminders-0830');
+   await monthlyReportQueue.removeJobScheduler('monthly-report-1st-0745');
++  await weeklyDigestQueue.removeJobScheduler('weekly-digest-sun-0800');
++  await missingDocsQueue.removeJobScheduler('missing-docs-8th-0800');
++  await allocationDeadlineQueue.removeJobScheduler('allocation-deadline-0815');
++  await orderCutoffQueue.removeJobScheduler('order-cutoff-15m');
+ }
