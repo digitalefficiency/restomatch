@@ -2,7 +2,7 @@ import type { Shape } from '../../../../translate';
 import type { he } from '../../../auth/he';
 
 /** auth — ru overlay (Russian). */
-export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 'signin'>> = {
+export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 'signin' | 'codeLogin' | 'passkeys'>> = {
   login: {
     title: 'Вход в RestoMatch',
     subtitle: 'Войдите с паролем или получите ссылку для входа по почте.',
@@ -56,5 +56,32 @@ export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 
     switchUser: 'Войти как другой пользователь',
     newHere: 'Впервые в RestoMatch? Первый вход по ссылке из письма открывает аккаунт.',
     demo: 'Посмотреть демо',
+  },
+  codeLogin: {
+    button: 'Прислать код на e-mail',
+    title: 'Код уже в пути',
+    sentTo: 'Если этот адрес у нас зарегистрирован, мы отправили на него 6-значный код:',
+    validFor: 'Код действует 10 минут.',
+    codeLabel: 'Код из письма',
+    submit: 'Войти',
+    resend: 'Отправить новый код',
+    resent: 'Мы отправили новый код, используйте код из последнего письма.',
+    useOther: 'Войти другим способом',
+    errors: {
+      sendRate: 'Мы уже отправили несколько кодов, используйте код из последнего письма.',
+      wrongCode: 'Код не подходит или истёк, проверьте последнее письмо.',
+      rate: 'Вход по коду сейчас заблокирован, войдите с паролем или по ссылке из письма.',
+    },
+  },
+  passkeys: {
+    title: 'Ключ доступа',
+    intro: 'Вход по отпечатку пальца, лицу или PIN-коду устройства, без пароля.',
+    introWhere: 'Ключ доступа хранится на вашем устройстве, а не у нас.',
+    notForRole: 'Ключи доступа доступны только владельцам и бухгалтерам.',
+    count: '{count, plural, =0 {В этом аккаунте пока нет ключа доступа.} other {Ключей доступа в этом аккаунте: #}}',
+    add: 'Добавить ключ доступа на этом устройстве',
+    signIn: 'Войти с ключом доступа',
+    failed: 'Не удалось использовать ключ доступа, попробуйте ещё раз или войдите с паролем.',
+    back: 'Назад в приложение',
   },
 };
