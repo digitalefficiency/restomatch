@@ -348,16 +348,18 @@ export async function matchInvoiceForJob(
     if (priorRun) await rebindDecidedClaims(tx, restaurantId, out.matchRunId);
     if (priorIdentities) {
       const now = await findingRowsOf(tx, restaurantId, out.matchRunId);
-      const keys = newFindingKeys(priorIdentities, now.map((r) => r.key));
-      const fresh = new Set(keys);
-      const roles = [
-        ...new Set(
-          now
-            .filter((r) => fresh.has(r.key) && r.open && r.role && ALERT_ROLES.includes(r.role))
-            .map((r) => r.role as UserRole),
-        ),
-      ];
+      const fresh = new Set(newFindingKeys(priorIdentities, now.map((r) => r.key)));
+      // Only NEW findings someone has to decide count: an auto-approved new row is
+      // not "3 new findings" in the message, and alone it sends nothing.
+      const actionable = now.filter((r) => fresh.has(r.key) && r.open && r.role && ALERT_ROLES.includes(r.role));
+      const keys = [...new Set(actionable.map((r) => r.key))];
+      const roles = [...new Set(actionable.map((r) => r.role as UserRole))];
       newFindingsOut = { keys, roles };
+      // Enqueued in THIS transaction, atomic with the run: a retry after commit reads
+      // the committed run (no new identities) and must not be the only chance to send.
+      if (keys.length > 0 && roles.length > 0) {
+        await notifyNewFindingsOnRematch(tx, { restaurantId, invoiceId, matchRunId: out.matchRunId, newFindings: newFindingsOut });
+      }
     }
     return out;
   });
@@ -531,7 +533,7 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
     );
   }
 
-  const { result, persisted, replaced, skipped, newFindings } = await matchInvoiceForJob(db, job.data);
+  const { result, persisted, replaced, skipped } = await matchInvoiceForJob(db, job.data);
   if (!persisted) {
     console.log(`[match-invoice] invoice=${invoiceId} — nothing to do (${skipped})`);
     return result;
@@ -621,13 +623,9 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
     }
   }
 
-  // AU-04 A1 · a RE-match that found something NEW tells the roles those new
-  // findings route to — once per (invoice, new identity set, person). A replay, or
-  // an auto re-match that adds nothing, sends nothing. (W2-04's first-match alert
-  // above is untouched.)
-  if (replaced && newFindings && newFindings.keys.length > 0 && newFindings.roles.length > 0) {
-    await notifyNewFindingsOnRematch(db, { restaurantId, invoiceId, matchRunId: persisted.matchRunId, newFindings });
-  }
+  // AU-04 A1 · a RE-match that found something NEW was told inside the match
+  // transaction (matchInvoiceForJob → notifyNewFindingsOnRematch); W2-04's
+  // first-match alert above is untouched.
 
   console.log(
     `[match-invoice] restaurant=${restaurantId} invoice=${invoiceId} ` +
@@ -639,6 +637,10 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
   return result;
 }
 
+/**
+ * AU-04 A1: tell the roles the NEW findings route to — once per (invoice, new
+ * identity set, person). A replay, or an auto re-match that adds nothing, sends nothing.
+ */
 async function notifyNewFindingsOnRematch(
   db: Database,
   a: { restaurantId: string; invoiceId: string; matchRunId: string; newFindings: { keys: string[]; roles: UserRole[] } },

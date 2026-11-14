@@ -9,6 +9,8 @@ import type { WorkerJob } from '../queue';
  * notify(): the receiver (and only the receiver) gets today's trucks, with no ₪;
  * zero deliveries → nothing; a Saturday 06:00 brief is perishable → skipped, never
  * queued; the option turns it off; the audit row is still written.
+ * Default OFF (orchestrator 14.11: a NEW send, no owner decision for default-on):
+ * an existing tenant with no stored option gets nothing; the suites below turn it on.
  */
 process.env.DATABASE_URL ??= testDbUrl();
 process.env.APP_BASE_URL = 'https://app.example.test';
@@ -55,7 +57,7 @@ beforeEach(async () => {
   await sql`delete from notifications_outbox where restaurant_id = ${rid}`;
   await sql`delete from audit_log where restaurant_id = ${rid}`;
   await sql`delete from purchase_orders where restaurant_id = ${rid}`;
-  await sql`update restaurants set settings = '{}'::jsonb where id = ${rid}`;
+  await sql`update restaurants set settings = ${sql.json({ automations: { receiverBrief: true } })} where id = ${rid}`;
 });
 
 afterAll(async () => {
@@ -106,6 +108,32 @@ describe('A4 receiver morning brief (DB)', () => {
     await po(SAT_0900);
     await processDailyExpectations(job({ restaurantId: rid, forDate: SAT_0600 }));
     expect(await rows()).toHaveLength(0);
+  });
+
+  it('default OFF: an existing tenant with no stored option gets no 06:00 brief', async () => {
+    await po(TUE_0900);
+    await sql`update restaurants set settings = '{}'::jsonb where id = ${rid}`;
+    await processDailyExpectations(job({ restaurantId: rid, forDate: TUE_0600 }));
+    expect(await rows()).toHaveLength(0);
+  });
+
+  it('over the daily cap → the perishable brief is cancelled, never queued for tomorrow 06:00', async () => {
+    await po(TUE_0900);
+    const receiver = uids[0]!;
+    for (let i = 0; i < 6; i++) {
+      await sql`insert into notifications_outbox (restaurant_id, channel, target, body, status, dedupe_key, payload, created_at)
+                values (${rid}, 'email', 'x@example.test', 'earlier', 'sent', ${`${TAG}-cap-${i}`},
+                        ${sql.json({ userId: receiver })}, ${TUE_0600})`;
+    }
+    await processDailyExpectations(job({ restaurantId: rid, forDate: TUE_0600 }));
+    const brief = await sql<{ status: string }[]>`
+      select status from notifications_outbox where restaurant_id = ${rid} and dedupe_key like 'au:A4:%'`;
+    expect(brief.map((b) => b.status)).toEqual(['cancelled']);
+    // A replay does not resurrect it (the dedupe key stays).
+    await processDailyExpectations(job({ restaurantId: rid, forDate: TUE_0600 }));
+    const again = await sql<{ status: string }[]>`
+      select status from notifications_outbox where restaurant_id = ${rid} and dedupe_key like 'au:A4:%'`;
+    expect(again.map((b) => b.status)).toEqual(['cancelled']);
   });
 
   it('option off → nothing; back on → sent', async () => {

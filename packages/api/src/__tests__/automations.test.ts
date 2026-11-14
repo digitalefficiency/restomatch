@@ -99,6 +99,7 @@ describe('registry (pure)', () => {
         'orderReminders',
         'supplierDelays',
         'eveningDigest',
+        'receiverBrief',
         'matchAlerts',
         'recoveryBookkeeper',
         'chaseAcknowledged',
@@ -132,16 +133,39 @@ describe('registry (pure)', () => {
     }
   });
 
-  it('Train C (C3): the registry only offers switches a job honours', () => {
-    // receiverBrief has no sender yet → no row; its option key stays readable.
-    expect(AUTOMATIONS.map((a) => a.key)).not.toContain('receiverBrief');
-    expect(automationOption({}, 'receiverBrief')).toBe(true);
-    // endOfDayReport / supplierDelays do not read their option yet → "always", no switch.
-    for (const k of ['eveningDigest', 'supplierDelays']) {
-      expect(AUTOMATIONS.find((a) => a.key === k)!.control).toEqual({ kind: 'always' });
-    }
+  it('AU-04: every brief row is an option its job honours; new sends default OFF', () => {
+    const by = (k: string) => AUTOMATIONS.find((a) => a.key === k)!;
+    // A4 is a NEW send (receivers get no 06:00 mail today) and no owner decision says
+    // default-on (AD3 is the channel only) → OFF for existing tenants until an admin turns it on.
+    expect(by('receiverBrief')).toMatchObject({
+      id: 'A4',
+      control: { kind: 'option', option: 'receiverBrief', default: false },
+      slot: '06:00',
+      audience: ['receiver'],
+      carriesIls: false,
+      outboxMatch: { kind: 'prefix', prefix: 'au:A4:' },
+    });
+    expect(automationOption({}, 'receiverBrief')).toBe(false);
+    // A6 / A7 replace sends every tenant already gets → default ON (today's behaviour kept).
+    expect(by('supplierDelays').control).toEqual({ kind: 'option', option: 'supplierDelays', default: true });
+    expect(by('eveningDigest').control).toEqual({ kind: 'option', option: 'eveningDigest', default: true });
+    // KPI continuity: historic rows and the new keys both count.
+    expect(by('supplierDelays').outboxMatch).toEqual({
+      kind: 'anyOf',
+      matchers: [
+        { kind: 'like', like: 'po:%:late:%' },
+        { kind: 'prefix', prefix: 'au:A6:' },
+      ],
+    });
+    expect(by('eveningDigest').outboxMatch).toEqual({
+      kind: 'anyOf',
+      matchers: [
+        { kind: 'prefix', prefix: 'eod-report:' },
+        { kind: 'prefix', prefix: 'au:A7:' },
+      ],
+    });
     // orderReminders honours its option (briefOptionOn) and dedupes on au:A5:.
-    const a5 = AUTOMATIONS.find((a) => a.key === 'orderReminders')!;
+    const a5 = by('orderReminders');
     expect(a5.control).toMatchObject({ kind: 'option', option: 'orderReminders' });
     expect(a5.outboxMatch).toEqual({ kind: 'prefix', prefix: 'au:A5:' });
   });
@@ -162,6 +186,8 @@ describe('automationOption', () => {
     expect(automationOption({ automations: { eveningDigest: false } }, 'eveningDigest')).toBe(false);
     expect(automationOption({ automations: { eveningDigest: 'no' } }, 'eveningDigest')).toBe(true);
     expect(automationOption({ automations: [] }, 'supplierDelays')).toBe(true);
+    expect(automationOption({}, 'receiverBrief')).toBe(false);
+    expect(automationOption({ automations: { receiverBrief: true } }, 'receiverBrief')).toBe(true);
     // AU-13 rows (orchestrator 7.11): digest + contract expiry ON, list diff OFF
     expect(automationOption({}, 'priceCreepDigest')).toBe(true);
     expect(automationOption({}, 'contractExpiry')).toBe(true);
@@ -257,6 +283,10 @@ describe('automations.list', () => {
       { dedupeKey: `au:A5:${A.restaurantId}:${randomUUID()}:${randomUUID()}:2026-11-03`, createdAt: '2026-11-03T07:00:00Z' },
       { dedupeKey: `au:A5:${A.restaurantId}:${randomUUID()}:${randomUUID()}:2026-11-03`, createdAt: '2026-11-03T07:00:00Z' },
       { dedupeKey: `po:${randomUUID()}:late:d1:a@x`, createdAt: '2026-11-02T08:00:00Z' },
+      // AU-04 keys: a late truck on Tue and an evening digest on Thu count on the same rows
+      { dedupeKey: `au:A6:d1:${A.restaurantId}:${randomUUID()}:${randomUUID()}:email`, createdAt: '2026-11-03T08:00:00Z' },
+      { dedupeKey: `au:A7:${A.restaurantId}:2026-11-05:${randomUUID()}:email`, createdAt: '2026-11-05T10:00:00Z' },
+      { dedupeKey: `au:A4:2026-11-05:${A.restaurantId}:${A.restaurantId}:${randomUUID()}:email`, createdAt: '2026-11-05T04:00:00Z' },
       // a PO "placed" send is counted on neither row
       { dedupeKey: `po:${randomUUID()}:placed`, createdAt: '2026-11-02T09:00:00Z' },
       // match alerts: two runs, one with 2 recipients, no dedupe key
@@ -265,11 +295,12 @@ describe('automations.list', () => {
       { createdAt: '2026-11-03T10:00:00Z', type: 'match_run', entity: run2 },
     ]);
     const rows = Object.fromEntries((await listAutomations(db, A.restaurantId, now)).map((r) => [r.key, r]));
-    expect(rows.eveningDigest).toMatchObject({ countThisWeek: 1, measured: true });
-    expect(rows.eveningDigest!.lastRunAt?.toISOString()).toBe('2026-11-04T17:00:02.000Z');
+    expect(rows.eveningDigest).toMatchObject({ countThisWeek: 2, measured: true });
+    expect(rows.eveningDigest!.lastRunAt?.toISOString()).toBe('2026-11-05T10:00:00.000Z');
     expect(rows.orderReminders).toMatchObject({ countThisWeek: 1 });
-    expect(rows.supplierDelays).toMatchObject({ countThisWeek: 1 });
-    expect(rows.supplierDelays!.lastRunAt?.toISOString()).toBe('2026-11-02T08:00:00.000Z');
+    expect(rows.supplierDelays).toMatchObject({ countThisWeek: 2 });
+    expect(rows.supplierDelays!.lastRunAt?.toISOString()).toBe('2026-11-03T08:00:00.000Z');
+    expect(rows.receiverBrief).toMatchObject({ countThisWeek: 1, on: false, kind: 'option', controllable: true });
     expect(rows.matchAlerts).toMatchObject({ countThisWeek: 2, on: true, kind: 'always', controllable: false });
     // never ran → lastRunAt null (UI: "עוד לא רץ"), not a fake 0 date
     expect(rows.priceAlerts).toMatchObject({ lastRunAt: null, countThisWeek: 0, measured: true });
@@ -287,7 +318,9 @@ describe('automations.list', () => {
     expect(by.priceAlerts).toMatchObject({ on: true, controllable: true, kind: 'flag' });
     expect(by.recovery).toMatchObject({ on: false, controllable: true });
     expect(by.orderReminders).toMatchObject({ on: true, controllable: true, kind: 'option' });
-    expect(by.eveningDigest).toMatchObject({ on: true, controllable: false, kind: 'always', controlKey: null });
+    expect(by.eveningDigest).toMatchObject({ on: true, controllable: true, kind: 'option', controlKey: 'eveningDigest' });
+    expect(by.supplierDelays).toMatchObject({ on: true, controllable: true, kind: 'option', controlKey: 'supplierDelays' });
+    expect(by.receiverBrief).toMatchObject({ on: false, controllable: true, kind: 'option', controlKey: 'receiverBrief' });
     expect(by.orderCapture).toMatchObject({ on: false, controllable: false, blockedBy: 'ingestWhatsapp' });
   });
 

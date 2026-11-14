@@ -9,7 +9,7 @@ import { he as cHe } from '../lib/i18n/messages/common/he';
  * AU-01 · /dashboard/settings/automations on the seeded demo tenant
  * (features.all → every flag row is on).
  *   - owner: one row per automation, a switch with a confirm naming who gets it;
- *     price alerts off → on round-trips; the order-reminders row shows no ₪; no receiverBrief row (no sender yet);
+ *     price alerts off → on round-trips; the order-reminders row shows no ₪; the receiverBrief row is OFF by default (AU-04);
  *   - manager: the list, no switch;
  *   - receiver: the shell forbidden page (403), never the list;
  *   - he 390 / 1440 and en 1440 render without horizontal scroll; axe clean.
@@ -68,12 +68,14 @@ test.describe('AU-01 automations page', () => {
     for (const key of ['priceAlerts', 'recovery', 'monthlyReport', 'eveningDigest', 'orderReminders', 'matchAlerts']) {
       await expect(page.locator(`[data-automation=${key}]`)).toBeVisible();
     }
-    // Train C (C3): no receiverBrief row until a job sends it; jobs that ignore their
-    // option show "תמיד פעיל" with no switch.
-    await expect(page.locator('[data-automation=receiverBrief]')).toHaveCount(0);
-    const eod = page.locator('[data-automation=eveningDigest]');
-    await expect(eod).toContainText(he.row.always);
-    await expect(eod.getByRole('switch')).toHaveCount(0);
+    // AU-04: the receiver brief is sent now → its row shows, OFF by default (a new send);
+    // the evening digest and late trucks honour their option → a switch, ON (today's behaviour).
+    const a4 = page.locator('[data-automation=receiverBrief]');
+    await expect(a4.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+    expect(await a4.innerText()).not.toMatch(/₪/);
+    for (const key of ['eveningDigest', 'supplierDelays']) {
+      await expect(page.locator(`[data-automation=${key}]`).getByRole('switch')).toHaveAttribute('aria-checked', 'true');
+    }
     const a5 = page.locator('[data-automation=orderReminders]');
     await expect(a5).toContainText(he.row.noIls);
     expect(await a5.innerText()).not.toMatch(/₪/);

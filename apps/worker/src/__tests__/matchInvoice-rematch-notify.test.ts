@@ -24,7 +24,7 @@ import {
   testDbUrl,
   users,
 } from '@restomatch/db';
-import { processMatchInvoice } from '../jobs/matchInvoice';
+import { matchInvoiceForJob, processMatchInvoice } from '../jobs/matchInvoice';
 import type { WorkerJob } from '../queue';
 
 /**
@@ -32,7 +32,9 @@ import type { WorkerJob } from '../queue';
  *  - new = finding identities absent from the replaced run (open AND decided there),
  *    never `rolesNeedingNotification` (which re-lists every undecided carry-over);
  *  - one row per (invoice, new identity set, person); a replay or a re-match that
- *    adds nothing sends nothing; deciders only (never receiver / chef); no `role:` targets.
+ *    adds nothing sends nothing; deciders only (never receiver / chef); no `role:` targets;
+ *  - enqueued INSIDE the match transaction (atomic with the run): a retry after the
+ *    commit sees no new identity, so the send cannot wait for post-commit code.
  */
 process.env.DATABASE_URL ??= testDbUrl();
 process.env.APP_BASE_URL = 'https://app.example.test';
@@ -194,5 +196,17 @@ describe('A1 match alert on re-match (DB)', () => {
     expect(after.length).toBeGreaterThan(before.length);
     const runs = await db.select({ id: matchRuns.id }).from(matchRuns).where(eq(matchRuns.invoiceId, invoiceId));
     expect(runs).toHaveLength(1);
+  });
+
+  it('the alert is written with the run (matchInvoiceForJob alone, no post-commit step) and counts only open new findings', async () => {
+    const before = (await a1Rows()).length;
+    await overbill(2);
+    const out = await matchInvoiceForJob(db, { restaurantId, invoiceId, rematch: true });
+    expect(out.newFindings?.keys.length).toBe(1);
+    const after = await a1Rows();
+    expect(after.length).toBeGreaterThan(before);
+    // A retry after that commit: same identities → nothing more.
+    await rematch();
+    expect((await a1Rows()).length).toBe(after.length);
   });
 });

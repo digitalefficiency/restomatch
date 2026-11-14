@@ -6,8 +6,9 @@
  *     so the PO status alone said "late" for orders already received (G-01), AND
  *   • it is late (deliveryState: expected + 60 min, no receipt), at most
  *     LOOKBACK_DAYS old — and only on days 1, 3 and 7 after the expected day.
- * One e-mail per manager per (PO, step), deduped by the outbox key
- * `po:<id>:late:d1|d3|d7:<recipient>`, so a re-run never re-sends a step.
+ * One e-mail per owner/manager per (PO, step) via notify(), deduped by
+ * `au:A6:d1|d3|d7:<rid>:<poId>:<userId>:email`, so a re-run never re-sends a step
+ * (the old `po:<id>:late:d<n>:<email>` keys are honoured on deploy day).
  *
  * Pure detection: it reads POs and enqueues notifications; real delivery happens
  * through outbox-dispatch. Recipient routing is unchanged (recipientsForRestaurant).
@@ -172,20 +173,24 @@ export async function processSupplierDelays(job: WorkerJob<SupplierDelaysJob>) {
 
       // Owner + manager: the late PO and a pre-addressed question to the supplier
       // (a wa.me / mailto draft: nothing is ever sent to the supplier by the server).
+      // NOT perishable: CHASE_DAYS steps are one-off, so a step on Shabbat (or over the
+      // daily cap) is delayed to the next send window, never dropped.
       const managers = await sendBrief(db, {
         restaurantId: restaurant.id,
         now,
         event: `au:A6:d${r.daysLate}`,
         audience: { roles: ['owner', 'manager'] },
         entity: { type: 'purchase_order', id: r.poId },
-        perishable: true,
+        perishable: false,
         payload: { automationId: 'A6' },
         build: ({ locale }) => lateTruckManagerBrief({ ...base, locale }),
       });
       enqueued += managers.enqueued;
 
-      // Day 1 only: the receivers hear the truck is late (no ₪, no supplier link).
-      if (r.daysLate === 1) {
+      // Day 1 only: the receivers hear the truck is late (no ₪, no supplier link). A NEW
+      // send for existing tenants → also behind receiverBrief (default OFF). Perishable:
+      // "the truck is late today" is useless tomorrow.
+      if (r.daysLate === 1 && briefOptionOn(restaurant.settings, 'receiverBrief')) {
         const receivers = await sendBrief(db, {
           restaurantId: restaurant.id,
           now,

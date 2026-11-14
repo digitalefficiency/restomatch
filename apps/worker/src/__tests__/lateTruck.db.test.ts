@@ -8,7 +8,9 @@ import type { WorkerJob } from '../queue';
  * AU-04 A6 · late trucks on chase days 1/3/7, through G-06 notify():
  *  - owner + manager get the late PO + a pre-addressed wa.me / mailto question
  *    to the supplier (or the "no contact" hint); NOTHING is sent to the supplier;
- *  - receivers hear it on day 1 only, with no ₪ and no supplier link;
+ *  - receivers hear it on day 1 only, with no ₪ and no supplier link, and only when
+ *    receiverBrief is on (a NEW send → default OFF for existing tenants);
+ *  - a chase step on Shabbat is delayed to Saturday night, never dropped;
  *  - the option turns it off; the old-format key on deploy day suppresses a repeat.
  */
 process.env.DATABASE_URL ??= testDbUrl();
@@ -73,6 +75,7 @@ afterAll(async () => {
 
 describe('A6 late truck (DB)', () => {
   it('day 1: owner + manager get pre-addressed supplier drafts; the receiver gets the plain notice; chef nothing', async () => {
+    await sql`update restaurants set settings = ${sql.json({ automations: { receiverBrief: true } })} where id = ${rid}`;
     await processSupplierDelays(job({ restaurantId: rid, forDate: dayRun(1) }));
     const out = await rows();
     expect(out.map((o) => o.target.split('-').pop())).toEqual([
@@ -92,7 +95,28 @@ describe('A6 late truck (DB)', () => {
     expect(`${recv.body}${recv.html ?? ''}`).not.toMatch(/wa\.me|mailto:|₪/);
   });
 
+  it('default settings (existing tenant): managers as today, NO receiver notice', async () => {
+    await processSupplierDelays(job({ restaurantId: rid, forDate: dayRun(1) }));
+    expect((await rows()).map((o) => o.target.split('-').pop())).toEqual(['manager@example.test', 'owner@example.test']);
+  });
+
+  it('a chase step on Shabbat is delayed to Saturday night, never dropped (the perishable receiver notice is skipped)', async () => {
+    await sql`update restaurants set settings = ${sql.json({ automations: { receiverBrief: true } })} where id = ${rid}`;
+    // Expected Fri 6 Nov → day 1 = Sat 7 Nov, run at 10:00 IST (the Mon PO is day 5: not a chase day).
+    await sql`insert into purchase_orders (restaurant_id, supplier_id, status, expected_delivery_at, customer_ref)
+              values (${rid}, ${sid}, 'sent', '2026-11-06T06:00:00Z', '4472')`;
+    await processSupplierDelays(job({ restaurantId: rid, forDate: dayRun(5) }));
+    const out = await sql<{ target: string; status: string; scheduled_at: Date | null }[]>`
+      select target, status, scheduled_at from notifications_outbox where restaurant_id = ${rid} order by target`;
+    expect(out.map((o) => o.target.split('-').pop())).toEqual(['manager@example.test', 'owner@example.test']);
+    for (const o of out) {
+      expect(o.status).toBe('queued');
+      expect(o.scheduled_at!.getTime()).toBeGreaterThan(new Date(dayRun(5)).getTime());
+    }
+  });
+
   it('nothing is ever addressed to the supplier', async () => {
+    await sql`update restaurants set settings = ${sql.json({ automations: { receiverBrief: true } })} where id = ${rid}`;
     for (const d of [1, 3, 7]) await processSupplierDelays(job({ restaurantId: rid, forDate: dayRun(d) }));
     const out = await rows();
     expect(out.length).toBeGreaterThan(0);
