@@ -1,0 +1,12 @@
+# Generated, vendored or binary content that adds noise to the code graph.
+**/node_modules/
+**/.next/
+**/.turbo/
+**/dist/
+**/coverage/
+**/test-results/
+**/playwright-report/
+apps/web/e2e/__screenshots__/
+apps/web/public/
+tools/promo/
+graphify-out/
