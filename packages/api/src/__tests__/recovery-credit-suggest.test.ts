@@ -8,7 +8,7 @@ import { addClaim, addCreditLine, addSupplier, setSettings } from './au03-helper
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 /**
- * AU-03 AC 7–9: credit suggestions. Proposal = allocateCredit oldest first;
+ * AU-03 AC 7–9: credit suggestions. Proposal = W3-11 suggestAllocation (one engine, orchestrator 14.11);
  * nothing is booked before the human confirms; confirm books exactly the
  * ticked claims. Cross-tenant: B's line or claim from A's session → NOT_FOUND
  * and B untouched; another supplier's claim → BAD_REQUEST supplier_mismatch.
@@ -52,9 +52,10 @@ describe('proposeCreditAllocations (pure)', () => {
     descriptionEn: null,
     amountAgorot: agorot,
   });
-  const claim = (id: string, amount: number, claimedAt: string, credited = 0, supplierId = 's1') => ({
+  const claim = (id: string, amount: number, claimedAt: string, credited = 0, supplierId = 's1', invoiceId: string | null = null) => ({
     id,
     supplierId,
+    invoiceId,
     status: 'letter_sent',
     amountAgorot: amount,
     creditedAgorot: credited,
@@ -85,6 +86,31 @@ describe('proposeCreditAllocations (pure)', () => {
     expect(byLine.L1!.proposal).toEqual([{ claimId: 'c1', agorot: 1_000 }]);
     expect(byLine.L2!.proposal).toEqual([{ claimId: 'c1', agorot: 2_000 }]);
     expect(byLine.L2!.remainderAgorot).toBe(500);
+  });
+
+  it('one engine (14.11): the proposal is W3-11 suggestAllocation — an exact single claim beats oldest-first', async () => {
+    const { suggestAllocation } = await import('../recovery/suggest');
+    const claims = [claim('old', 3_000, '2026-10-01T00:00:00Z'), claim('exact', 4_000, '2026-10-15T00:00:00Z')];
+    const [s] = proposeCreditAllocations([line('L1', 4_000, '2026-10-20')], claims);
+    // Before 14.11 this was oldest-first (old 3,000 + exact 1,000); now the exact match is proposed.
+    expect(s!.basis).toBe('exact_single');
+    expect(s!.proposal).toEqual([{ claimId: 'exact', agorot: 4_000 }]);
+    const direct = suggestAllocation(4_000, claims.map((c) => ({ id: c.id, invoiceId: c.invoiceId, amountAgorot: c.amountAgorot, creditedAgorot: 0, claimedAt: c.claimedAt })));
+    expect(s!.proposal).toEqual(direct.allocations.map((a) => ({ claimId: a.id, agorot: a.agorot })));
+    expect(s!.remainderAgorot).toBe(direct.remainderAgorot);
+  });
+
+  it('whole-invoice match: a credit equal to one invoice\'s claims closes exactly that invoice', () => {
+    const [s] = proposeCreditAllocations(
+      [line('L1', 5_000, '2026-10-20')],
+      [
+        claim('a', 2_500, '2026-10-01T00:00:00Z', 0, 's1', 'inv-old'),
+        claim('b', 2_000, '2026-10-03T00:00:00Z', 0, 's1', 'inv-x'),
+        claim('c', 3_000, '2026-10-03T00:00:00Z', 0, 's1', 'inv-x'),
+      ],
+    );
+    expect(s!.basis).toBe('exact_invoice');
+    expect(s!.proposal.map((p) => p.claimId).sort()).toEqual(['b', 'c']);
   });
 });
 

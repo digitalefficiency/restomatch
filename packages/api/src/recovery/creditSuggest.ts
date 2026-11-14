@@ -1,7 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { sql, type Database } from '@restomatch/db';
 import { NEVER_CLAIMABLE_TYPES, vatBasisOf } from '../lib/claims';
-import { allocateCredit } from './lifecycle';
+import { suggestAllocation, type SuggestBasis } from './suggest';
 import { creditLineSuggestions, recordCreditNote, type CreditLineSuggestion } from './service';
 
 /**
@@ -9,8 +9,8 @@ import { creditLineSuggestions, recordCreditNote, type CreditLineSuggestion } fr
  *
  * A negative line on a later invoice of a supplier with open credit requests
  * is a credit the supplier already gave. This PROPOSES how it would close the
- * supplier's open claims — oldest first, integer agorot, via the same
- * `allocateCredit` the booking uses — and books nothing. A human confirms
+ * supplier's open claims — integer agorot, via W3-11's `suggestAllocation`
+ * (the one engine the desk's "שיוך זיכוי" uses) — and books nothing. A human confirms
  * (or edits the ticked claims) and only then `confirmCreditSuggestion` calls
  * `recordCreditNote` with exactly the claims the human selected.
  *
@@ -34,6 +34,7 @@ export interface OpenClaimForCredit {
   amountAgorot: number;
   creditedAgorot: number;
   claimedAt: string;
+  invoiceId: string | null;
   invoiceNumber: string | null;
   discrepancyType: string;
 }
@@ -48,8 +49,10 @@ export interface CreditSuggestion {
   supplierNameEn: string | null;
   description: string;
   amountAgorot: number;
-  /** Proposed allocation, oldest claim first. Nothing is booked until confirm. */
+  /** Proposed allocation (W3-11 suggestAllocation). Nothing is booked until confirm. */
   proposal: Array<{ claimId: string; agorot: number }>;
+  /** Why these claims: exact single / whole invoice / exact subset / oldest first / none (W3-11 basis). */
+  basis: SuggestBasis;
   /** The part of the line no open claim absorbs (stays on the note as unallocated). */
   remainderAgorot: number;
   /** Every open claim of the supplier (for the editable ticks), oldest first. */
@@ -58,8 +61,11 @@ export interface CreditSuggestion {
 
 /**
  * Pure: propose allocations for a supplier's credit lines over its open
- * claims. Lines are taken oldest invoice first; a claim absorbed by an
- * earlier line is not proposed twice.
+ * claims. ONE engine (orchestrator 14.11): each line's proposal is W3-11's
+ * `suggestAllocation` (exact single → whole invoice → exact subset → oldest
+ * first), the same rule the desk's "שיוך זיכוי" uses. Lines are taken oldest
+ * invoice first; a claim absorbed by an earlier line is offered to the next
+ * line only for what is still open on it, so no ₪ is proposed twice.
  */
 export function proposeCreditAllocations(
   lines: ReadonlyArray<CreditLineSuggestion>,
@@ -81,12 +87,10 @@ export function proposeCreditAllocations(
     const open = bySupplier.get(line.supplierId) ?? [];
     if (open.length === 0 || !(line.amountAgorot > 0)) continue;
     const pool = open
-      .map((c) => ({ id: c.id, amountAgorot: left.get(c.id) ?? 0, creditedAgorot: 0 }))
+      .map((c) => ({ id: c.id, invoiceId: c.invoiceId, amountAgorot: left.get(c.id) ?? 0, creditedAgorot: 0, claimedAt: c.claimedAt }))
       .filter((c) => c.amountAgorot > 0);
-    const { allocations, remainder } = pool.length
-      ? allocateCredit(line.amountAgorot, pool)
-      : { allocations: [], remainder: line.amountAgorot };
-    for (const a of allocations) left.set(a.id, (left.get(a.id) ?? 0) - a.agorot);
+    const suggestion = suggestAllocation(line.amountAgorot, pool);
+    for (const a of suggestion.allocations) left.set(a.id, (left.get(a.id) ?? 0) - a.agorot);
     out.push({
       invoiceLineId: line.invoiceLineId,
       invoiceId: line.invoiceId,
@@ -97,8 +101,9 @@ export function proposeCreditAllocations(
       supplierNameEn: line.supplierNameEn,
       description: line.description,
       amountAgorot: line.amountAgorot,
-      proposal: allocations.map((a) => ({ claimId: a.id, agorot: a.agorot })),
-      remainderAgorot: remainder,
+      proposal: suggestion.allocations.map((a) => ({ claimId: a.id, agorot: a.agorot })),
+      basis: suggestion.basis,
+      remainderAgorot: suggestion.remainderAgorot,
       openClaims: open.map((c) => ({
         claimId: c.id,
         outstandingAgorot: Math.max(0, c.amountAgorot - c.creditedAgorot),
@@ -120,7 +125,7 @@ async function openClaimsFor(db: Database, restaurantId: string, supplierIds: st
   if (supplierIds.length === 0) return [];
   const res = await db.execute(sql`
     SELECT c.id, c.supplier_id, c.status, c.amount_agorot, c.credited_agorot, c.claimed_at,
-           i.invoice_number, d.type AS discrepancy_type
+           c.invoice_id, i.invoice_number, d.type AS discrepancy_type
     FROM recovery_claims c
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
     LEFT JOIN invoices i ON i.id = c.invoice_id AND i.restaurant_id = ${restaurantId}
@@ -140,6 +145,7 @@ async function openClaimsFor(db: Database, restaurantId: string, supplierIds: st
     amountAgorot: Number(r.amount_agorot),
     creditedAgorot: Number(r.credited_agorot),
     claimedAt: iso(r.claimed_at),
+    invoiceId: (r.invoice_id as string | null) ?? null,
     invoiceNumber: (r.invoice_number as string | null) ?? null,
     discrepancyType: String(r.discrepancy_type),
   }));

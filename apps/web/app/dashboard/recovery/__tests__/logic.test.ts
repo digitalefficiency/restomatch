@@ -273,6 +273,13 @@ describe('AU-03 · isAwaitingChaseWeb ≡ @restomatch/api isAwaitingChase (one p
       expect(isAwaitingChaseWeb(k.c, OVERDUE_BOUNDARY_NOW, k.opts)).toBe(isAwaitingChase(k.c, OVERDUE_BOUNDARY_NOW, k.opts));
     });
   }
+  it('train-C gate 11.11: a claimed request (no letter) is never awaiting a chase, at any age, on both sides', () => {
+    for (const k of OVERDUE_BOUNDARY_CASES) {
+      const c = { status: 'claimed', outstandingAgorot: 100, letterSentAt: null, claimedAt: k.letterSentAt };
+      expect(isAwaitingChaseWeb(c, OVERDUE_BOUNDARY_NOW), k.why).toBe(false);
+      expect(isAwaitingChase(c, OVERDUE_BOUNDARY_NOW), k.why).toBe(false);
+    }
+  });
   it('the boundary cases give the shared expected answer', () => {
     for (const k of OVERDUE_BOUNDARY_CASES) {
       expect(isAwaitingChaseWeb({ status: 'letter_sent', outstandingAgorot: 1, letterSentAt: k.letterSentAt, claimedAt: k.letterSentAt }, OVERDUE_BOUNDARY_NOW), k.why).toBe(k.overdue);

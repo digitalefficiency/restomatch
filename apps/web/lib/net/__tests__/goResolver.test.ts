@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { DESK_CREDIT_SUGGESTIONS_PATH, DESK_REMINDERS_PATH } from '@restomatch/api';
 import { goTarget, resolveGo, type GoDeps } from '../goResolver';
 
 const MEMBER = '11111111-1111-4111-8111-111111111111';
@@ -66,6 +67,11 @@ describe('/dashboard/go resolver (ia-nav-08/-09)', () => {
       expect(goTarget(bad), String(bad)).toBe('/dashboard');
     }
     expect(goTarget('/dashboard/orders/new?supplierId=abc&from=last')).toBe('/dashboard/orders/new?supplierId=abc&from=last');
+  });
+
+  it('AU-03 digest links keep their query and anchor, so they land on the desk row that acts on them', () => {
+    expect(goTarget(DESK_REMINDERS_PATH)).toBe('/dashboard/recovery?tab=track&remind=1#reminder-drafts');
+    expect(goTarget(DESK_CREDIT_SUGGESTIONS_PATH)).toBe('/dashboard/recovery?tab=track#credit-suggestions');
   });
 
   it('a refused link to an unsafe `to` still points the forbidden page at a safe path', async () => {
