@@ -3,18 +3,26 @@ import {
   and,
   auditLog,
   desc,
+  discrepancies,
   eq,
   inArray,
+  invoiceLines,
+  matchRuns,
   memberships,
+  products,
   restaurants,
   sql,
   users,
   type Database,
   type RestaurantSettings,
 } from '@restomatch/db';
-import { resolveTolerances } from '@restomatch/matching';
+import { notZeroShortTwin } from '@restomatch/charts';
+import { resolveTolerances, runMatch, toAgorot, type MatchInput, type MatchOutput } from '@restomatch/matching';
 import { DEFAULT_REVIEW_THRESHOLD } from '@restomatch/ocr';
-import { resolveApprovalThresholds } from '../approvals/engine';
+import { buildRules, evaluateApproval, resolveApprovalThresholds, type ApprovalContext } from '../approvals/engine';
+import { DISCREPANCY_DECIDABLE } from '../lifecycle/predicates';
+import { buildMatchInputForInvoice } from '../match/buildMatchInput';
+import { discrepancyKey } from '../match/persist';
 import { recordAudit, type AuditAction } from '../audit';
 import { appError } from '../errors';
 import { vatRateOf } from '../lib/vat';
@@ -223,6 +231,107 @@ export function letterheadOf(settings: unknown): Letterhead {
   return out;
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * DS3-06 · what a threshold change WOULD do to the gaps open now (read-only).
+ *
+ * Thresholds are read when an invoice is matched; saving starts no re-match, so
+ * a saved change acts only on invoices checked from then on and every open gap
+ * stays open. The preview answers a conditional question instead: had these
+ * thresholds been in force, which of today's open gaps would have been opened?
+ * It never re-implements a rule. For each invoice with open gaps it rebuilds the
+ * engine's input exactly as a re-match does (buildMatchInputForInvoice, pinned
+ * to the run's order), runs the matching engine (packages/matching, immutable)
+ * twice — with the thresholds in force and with the proposal — and routes each
+ * finding through the approvals engine as persistMatchRun does (auto-approved =
+ * never open). A stored gap counts only when the re-run with the thresholds in
+ * force reproduces it (data that moved since cannot be attributed to a
+ * threshold), so the answer never claims fewer open gaps than there are.
+ * Nothing is written.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** At most this many invoices are re-run per preview (newest gaps first); the rest are reported as not re-run. */
+export const PREVIEW_MAX_INVOICES = 60;
+/** At most this many named gaps in "לא היו נפתחים". */
+export const PREVIEW_MAX_NAMED = 5;
+
+const PreviewInput = z
+  .object({
+    tolerances: TolerancesSchema.optional(),
+    approvalThresholds: ApprovalThresholdsSchema.optional(),
+  })
+  .strict();
+
+export interface ThresholdPreview {
+  /** Open gaps today (open + escalated), as the approvals queue counts them. */
+  openNow: number;
+  /** False when the proposal equals the thresholds in force (then only `openNow` is computed). */
+  changed: boolean;
+  /** Open gaps the re-run with the thresholds in force reproduced (the base of the conditional). */
+  considered: number;
+  /** Of `considered`: would still have been opened with the proposal. */
+  wouldOpen: number;
+  /** Of `wouldOpen`: would block payment (severity block). */
+  wouldBlock: number;
+  /** Of `considered`: would not have been opened with the proposal. */
+  notOpenedCount: number;
+  /** Their gap amounts, before VAT, in integer agorot. */
+  notOpenedAgorot: number;
+  /** The largest of them (label = the product, else the invoice line), at most PREVIEW_MAX_NAMED. */
+  notOpened: Array<{ label: string | null; amountAgorot: number }>;
+  /** Invoices with open gaps that were re-run. */
+  evaluatedInvoices: number;
+  /** Invoices with open gaps beyond PREVIEW_MAX_INVOICES (not re-run; their gaps count as staying open). */
+  skippedInvoices: number;
+}
+
+type OpenFinding = { severity: string };
+
+/**
+ * The findings of one engine run that would be OPEN once persisted: the same
+ * approval context persistMatchRun builds (match/persist.ts), auto-approved ones
+ * dropped. Keyed by discrepancyKey, a list per key (two findings may share one).
+ */
+function openFindingsOf(
+  input: MatchInput,
+  output: MatchOutput,
+  rules: ReturnType<typeof buildRules>,
+): Map<string, OpenFinding[]> {
+  const byKey = new Map<string, OpenFinding[]>();
+  for (const d of output.discrepancies) {
+    const ctx: ApprovalContext = {
+      discrepancy: { type: d.type, severity: d.severity, deltaAmount: d.deltaAmount },
+      matchRun: {
+        totalDiscrepancyAmount: output.totalDiscrepancyAmount,
+        totalInvoiceAmount: input.invoice.totalInclVat,
+        poExists: input.poLines.length > 0,
+      },
+    };
+    if (evaluateApproval(ctx, rules).action === 'auto_approve') continue;
+    const key = discrepancyKey({
+      type: d.type,
+      invoiceLineId: d.invoiceLineId ?? null,
+      poLineId: d.poLineId ?? null,
+      productId: d.productId,
+    });
+    const list = byKey.get(key);
+    if (list) list.push({ severity: d.severity });
+    else byKey.set(key, [{ severity: d.severity }]);
+  }
+  return byKey;
+}
+
+/** Take one finding of `key` (each stored gap is matched to at most one finding). */
+function takeFinding(byKey: Map<string, OpenFinding[]>, key: string): OpenFinding | null {
+  const list = byKey.get(key);
+  return list && list.length > 0 ? (list.shift() ?? null) : null;
+}
+
+function sameValues(a: Record<string, number>, b: Record<string, number>): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const k of keys) if (a[k] !== b[k]) return false;
+  return true;
+}
+
 export const settingsRouter = router({
   /** Current matching-rules settings for the caller's restaurant. */
   get: memberProcedure.query(async ({ ctx }): Promise<RestaurantSettings> => {
@@ -300,6 +409,128 @@ export const settingsRouter = router({
       .where(eq(restaurants.id, ctx.session.restaurantId))
       .limit(1);
     return effectiveSettings(row?.settings ?? {});
+  }),
+
+  /**
+   * DS3-06 · the preview before saving a threshold (see the block comment above
+   * PREVIEW_MAX_INVOICES). Read-only; finance tier, like `history` — it names
+   * products and ₪ of open gaps, so receivers and chefs never get it. The input
+   * is a patch over the stored overrides with update's semantics (null = back to
+   * the engine default).
+   */
+  previewThresholds: financeProcedure.input(PreviewInput).query(async ({ ctx, input }): Promise<ThresholdPreview> => {
+    const rid = ctx.session.restaurantId;
+    const [row] = await ctx.db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, rid))
+      .limit(1);
+    const stored: RestaurantSettings = row?.settings ?? {};
+    const tolNow = resolveTolerances(stored.tolerances);
+    const tolNext = resolveTolerances(
+      input.tolerances !== undefined ? mergeKnobs(stored.tolerances, input.tolerances) : stored.tolerances,
+    );
+    const apprNow = resolveApprovalThresholds(stored.approvalThresholds);
+    const apprNext = resolveApprovalThresholds(
+      input.approvalThresholds !== undefined
+        ? mergeKnobs(stored.approvalThresholds, input.approvalThresholds)
+        : stored.approvalThresholds,
+    );
+
+    // The open gaps, as the approvals queue lists them (open | escalated, without
+    // the zero-₪ short twin of an over-billing). Child tables carry no
+    // restaurant_id: the invoice line is scoped through the run's invoice.
+    const open = await ctx.db
+      .select({
+        type: discrepancies.type,
+        severity: discrepancies.severity,
+        deltaAmount: discrepancies.deltaAmount,
+        invoiceLineId: discrepancies.invoiceLineId,
+        poLineId: discrepancies.poLineId,
+        productId: discrepancies.productId,
+        createdAt: discrepancies.createdAt,
+        invoiceId: matchRuns.invoiceId,
+        poId: matchRuns.poId,
+        productName: products.canonicalName,
+        lineText: invoiceLines.rawDescription,
+      })
+      .from(discrepancies)
+      .innerJoin(matchRuns, and(eq(matchRuns.id, discrepancies.matchRunId), eq(matchRuns.restaurantId, rid)))
+      .leftJoin(products, and(eq(products.id, discrepancies.productId), eq(products.restaurantId, rid)))
+      .leftJoin(
+        invoiceLines,
+        and(eq(invoiceLines.id, discrepancies.invoiceLineId), eq(invoiceLines.invoiceId, matchRuns.invoiceId)),
+      )
+      .where(
+        and(
+          eq(discrepancies.restaurantId, rid),
+          inArray(discrepancies.resolutionStatus, [...DISCREPANCY_DECIDABLE]),
+          notZeroShortTwin(),
+        ),
+      );
+
+    const base: ThresholdPreview = {
+      openNow: open.length,
+      changed: !(sameValues(tolNow, tolNext) && sameValues(apprNow, apprNext)),
+      considered: 0,
+      wouldOpen: 0,
+      wouldBlock: 0,
+      notOpenedCount: 0,
+      notOpenedAgorot: 0,
+      notOpened: [],
+      evaluatedInvoices: 0,
+      skippedInvoices: 0,
+    };
+    if (!base.changed || open.length === 0) return base;
+
+    // Invoices with open gaps, newest gap first; a gap whose invoice is gone cannot be re-run.
+    const byInvoice = new Map<string, { poId: string | null; newest: number; gaps: typeof open }>();
+    for (const g of open) {
+      if (!g.invoiceId) continue;
+      const at = g.createdAt ? new Date(g.createdAt).getTime() : 0;
+      const entry = byInvoice.get(g.invoiceId);
+      if (entry) {
+        entry.gaps.push(g);
+        entry.newest = Math.max(entry.newest, at);
+      } else {
+        byInvoice.set(g.invoiceId, { poId: g.poId, newest: at, gaps: [g] });
+      }
+    }
+    const ordered = [...byInvoice.entries()].sort((a, b) => b[1].newest - a[1].newest);
+    const rulesNow = buildRules(apprNow);
+    const rulesNext = buildRules(apprNext);
+    const notOpened: Array<{ label: string | null; amountAgorot: number }> = [];
+
+    for (const [invoiceId, entry] of ordered.slice(0, PREVIEW_MAX_INVOICES)) {
+      const built = await buildMatchInputForInvoice(ctx.db, rid, invoiceId, { pinnedPoId: entry.poId });
+      if (!built) continue; // e.g. a consolidated invoice: its gaps come from the cross-match and stay open
+      base.evaluatedInvoices += 1;
+      const now = openFindingsOf(built.input, runMatch({ ...built.input, tolerances: tolNow }), rulesNow);
+      const next = openFindingsOf(built.input, runMatch({ ...built.input, tolerances: tolNext }), rulesNext);
+      for (const g of entry.gaps) {
+        const key = discrepancyKey({
+          type: g.type,
+          invoiceLineId: g.invoiceLineId,
+          poLineId: g.poLineId,
+          productId: g.productId,
+        });
+        if (!takeFinding(now, key)) continue; // not reproduced today: never attributed to a threshold
+        base.considered += 1;
+        const kept = takeFinding(next, key);
+        if (kept) {
+          base.wouldOpen += 1;
+          if (kept.severity === 'block') base.wouldBlock += 1;
+        } else {
+          const amountAgorot = toAgorot(Math.abs(Number(g.deltaAmount ?? 0)));
+          base.notOpenedCount += 1;
+          base.notOpenedAgorot += amountAgorot;
+          notOpened.push({ label: g.productName ?? g.lineText ?? null, amountAgorot });
+        }
+      }
+    }
+    base.skippedInvoices = Math.max(0, ordered.length - PREVIEW_MAX_INVOICES);
+    base.notOpened = notOpened.sort((a, b) => b.amountAgorot - a.amountAgorot).slice(0, PREVIEW_MAX_NAMED);
+    return base;
   }),
 
   /**
