@@ -139,6 +139,7 @@ export const he = {
     items: '{count} פריטים',
     atRisk: '{amount} בסיכון',
     owed: '{amount} זיכויים פתוחים',
+    unchecked: '{amount} עוד לא נבדקו',
     blocking: 'חוסם תשלום',
   },
   bell: {

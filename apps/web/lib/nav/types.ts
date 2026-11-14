@@ -38,9 +38,10 @@ export type BarSlot = 1 | 2 | 3 | 4;
 /**
  * The nav badge sources (W2-08 `nav.badges`): one per queue that shows from
  * every screen. Money queues carry ₪ (+ a block flag); capture queues carry a
- * count only. `priceAlerts` is neutral below W2-12's materiality.
+ * count only. `priceAlerts` is neutral below W2-12's materiality. `link` (W3-10)
+ * carries spend not price-checked yet, always neutral.
  */
-export const BADGE_KEYS = ['approvals', 'payRun', 'claims', 'receiving', 'count', 'intake', 'priceAlerts'] as const;
+export const BADGE_KEYS = ['approvals', 'payRun', 'claims', 'receiving', 'count', 'intake', 'priceAlerts', 'link'] as const;
 export type BadgeKey = (typeof BADGE_KEYS)[number];
 
 export interface RouteDef {

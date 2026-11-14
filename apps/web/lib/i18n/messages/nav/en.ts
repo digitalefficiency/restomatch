@@ -135,6 +135,7 @@ export const en: Shape<typeof he> = {
     items: '{count} items',
     atRisk: '{amount} at risk',
     owed: '{amount} open credits',
+    unchecked: '{amount} not checked yet',
     blocking: 'blocking payment',
   },
   bell: {
