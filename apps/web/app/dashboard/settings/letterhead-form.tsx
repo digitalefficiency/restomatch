@@ -17,7 +17,7 @@ export interface LetterheadValues {
 }
 
 /**
- * "פרטים למכתבי דרישת זיכוי" — the letterhead of the supplier credit-request
+ * "פרטים למכתבי בקשת זיכוי" — the letterhead of the supplier credit-request
  * letters, filled once. Prefilled from the restaurant's name and ח״פ until
  * saved. Owner / manager edit; the bookkeeper sees it read-only.
  */

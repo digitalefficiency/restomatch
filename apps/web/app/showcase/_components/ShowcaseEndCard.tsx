@@ -6,9 +6,10 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { showcase } from '@/lib/i18n/messages/showcase';
 import { formatIls } from '@/lib/money';
 import { contactChannels, whatsappHref } from '@/lib/contact';
+import { SAMPLE_CAUGHT_BEFORE_PAYMENT_ILS, SAMPLE_UNDECIDED_ILS } from '../../(marketing)/_components/sampleMonth';
 
-/** What the sample restaurant's caught-this-month tile shows (dashboard KPI "saved"). */
-export const SAMPLE_CAUGHT_THIS_MONTH_ILS = 12_340;
+/** The sample month's "caught before payment" (W3-06: the one figure set, `(marketing)/_components/sampleMonth.ts`). */
+export const SAMPLE_CAUGHT_THIS_MONTH_ILS = SAMPLE_CAUGHT_BEFORE_PAYMENT_ILS;
 
 export type EndCardKind = 'receiver' | 'dashboard' | 'invoices';
 
@@ -29,7 +30,11 @@ export function ShowcaseEndCard({
   const wa = contactChannels().whatsapp;
   const line =
     amountIls && amountIls > 0
-      ? t(`endCard.${kind}`, { amount: formatIls(amountIls, { locale }) })
+      ? t(`endCard.${kind}`, {
+          amount: formatIls(amountIls, { locale }),
+          // The sample month: of what was caught before payment, this much still waits for a decision.
+          pending: formatIls(SAMPLE_UNDECIDED_ILS, { locale }),
+        })
       : t('endCard.receiverClean');
 
   return (
