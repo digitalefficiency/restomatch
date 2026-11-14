@@ -172,7 +172,7 @@ const en: typeof he = {
     heroTitle: 'One number. In shekels.',
     heroSub: 'What leaked this month — and what’s still unpaid.',
     chipLeak: 'Leak this month',
-    chipPct: 'of purchases',
+    chipPct: '', // the callout keeps only "· 1.5%": the words overflow the chip in English
     chipCaught: 'Caught before payment',
     heatTitle: 'Leak detective',
     heatSub: 'Where prices creep, and who short-delivers.',

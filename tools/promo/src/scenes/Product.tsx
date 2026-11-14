@@ -71,7 +71,7 @@ export const Product: React.FC<{ locale: Locale }> = ({ locale }) => {
         <span>{t.chipLeak}</span>
         <bdi dir={d} style={{ color: C.danger }}>{ilsText(SAMPLE.leak, locale)}</bdi>
         <span style={{ color: C.muted, fontWeight: 500 }}>
-          · <bdi dir="ltr">{`${SAMPLE.leakPct}%`}</bdi> {t.chipPct}
+          · <bdi dir="ltr">{`${SAMPLE.leakPct}%`}</bdi>{t.chipPct ? ` ${t.chipPct}` : ''}
         </span>
       </>
     ),
