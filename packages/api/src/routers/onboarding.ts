@@ -93,7 +93,7 @@ export const onboardingRouter = router({
         throw appError(
           'UNAUTHORIZED',
           'onboarding.accountGone',
-          'החשבון שלך כבר לא קיים. התנתק והתחבר מחדש כדי להמשיך.',
+          'החשבון כבר לא קיים. התנתקו והתחברו מחדש כדי להמשיך.',
         );
       }
       if (!signupAllowed(user)) {

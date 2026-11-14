@@ -1,22 +1,40 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import { CheckCircle2, Clock, FileText, MoreHorizontal, Send, Undo2 } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import { formatIls } from '@/lib/money';
-import { formatDate, formatDateTime, formatNumber } from '@/lib/i18n/format';
-import { intlLocaleOf } from '@/lib/i18n/config';
+import { formatDateTime, formatNumber } from '@/lib/i18n/format';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { approvals } from '@/lib/i18n/messages/approvals';
 import type { he as approvalsHe } from '@/lib/i18n/messages/approvals/he';
 import type { MessageKey, Translator } from '@/lib/i18n/translate';
 import { Badge, Card, LoadMore, Textarea, cn, type BadgeTone } from '@/lib/components';
 import { WhyLine } from '@/lib/components/flags';
+import { BatchBar } from '@/lib/components/table/BatchBar';
+import { useTableUrlState } from '@/lib/components/table/useTableUrlState';
+import { Peek } from '@/lib/components/desk/Peek';
+import { deskKeyOf, isTypingTarget, moveIndex } from '@/lib/components/desk/keys';
+import { useMediaQuery } from '@/lib/components/desk/useMediaQuery';
+import { DeadlineChip } from '@/lib/components/money';
+import { daysUntil } from '@/lib/components/money/format';
+import { BULK_CAP_AGOROT, bulkSelection, groupByInvoice, newClientMutationId } from './groups';
+import {
+  EscalateSheet,
+  EvidenceBody,
+  GroupHeader,
+  HistoryDisclosure,
+  KeysButton,
+  KeysHelp,
+  effectLine,
+  ils,
+} from './desk';
 import {
   ageDays,
+  ageLabel,
   amountLabelKey,
   canEscalate,
   decisionActions,
@@ -41,6 +59,8 @@ export interface QueueFilters {
   types?: QueueItem['type'][];
   severities?: QueueItem['severity'][];
   supplierIds?: string[];
+  /** The notification landing: one invoice's rows (`?invoice=<id>`). */
+  invoiceIds?: string[];
 }
 
 // Must equal the server page size so "has more" is right on first paint.
@@ -56,10 +76,12 @@ const OUTSIDE_CLAIMABLE_TOTAL = new Set(['DUPLICATE_INVOICE']);
 type Decide =
   | { procedure: 'approve' }
   | { procedure: 'reject'; reason: string; reasonCode: WaiveReason | 'reviewed' }
-  | { procedure: 'escalate' };
+  | { procedure: 'escalate'; note?: string };
 
 interface UndoState {
   id: string;
+  /** A bulk decision: every id it decided (undo = reopenMany). */
+  ids?: string[];
   text: string;
   /** Epoch ms when the toast ends (paused → `remaining` holds the rest). */
   until: number;
@@ -67,7 +89,24 @@ interface UndoState {
   failed?: boolean;
 }
 
-export function ApprovalsList({
+/**
+ * "Today" for this render (#418): the server passes its clock, so the deadline
+ * day count in the server HTML and on hydration come from one instant (never a
+ * render near Israel midnight or a cached page hydrated later).
+ */
+const NowCtx = createContext<number | null>(null);
+// The repo's React types need the Provider cast (as lib/components/feedback/LiveRegion.tsx).
+const NowProvider = NowCtx.Provider as unknown as React.ComponentType<{ value: number | null; children: React.ReactNode }>;
+
+export function ApprovalsList(props: React.ComponentProps<typeof ApprovalsListInner>) {
+  return (
+    <NowProvider value={props.nowMs ?? null}>
+      <ApprovalsListInner {...props} />
+    </NowProvider>
+  );
+}
+
+function ApprovalsListInner({
   initial,
   initialSummary,
   filters = {},
@@ -75,6 +114,7 @@ export function ApprovalsList({
   filteredNote,
   density = 'comfortable',
   viewerRole = null,
+  landing = false,
 }: {
   initial: QueueItem[];
   initialSummary: QueueSummary;
@@ -86,9 +126,15 @@ export function ApprovalsList({
   density?: 'comfortable' | 'compact';
   /** The signed-in member's role (hides "escalate to owner" for the owner). */
   viewerRole?: string | null;
+  /** `/dashboard/approvals/[invoiceId]`: one card at a time, the 50/50 pair pinned to the thumb. */
+  landing?: boolean;
+  /** The server's clock for this render (#418): server HTML and hydration count days from ONE instant. */
+  nowMs?: number;
 }) {
   const compact = density === 'compact';
   const t = useT(approvals);
+  const nowCtx = useContext(NowCtx);
+  const renderNow = nowCtx != null ? new Date(nowCtx) : undefined;
   const locale = useLocale();
   const utils = trpc.useUtils();
 
@@ -117,6 +163,19 @@ export function ApprovalsList({
   const reject = trpc.approvals.reject.useMutation();
   const escalate = trpc.approvals.escalate.useMutation();
   const reopen = trpc.approvals.reopen.useMutation();
+  const decideMany = trpc.approvals.decideMany.useMutation();
+  const reopenMany = trpc.approvals.reopenMany.useMutation();
+
+  // Desk state (W2-04): the bulk selection, the evidence target (`?sel=`), the
+  // escalation sheet and the keyboard help.
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [batchNote, setBatchNote] = useState<string | null>(null);
+  const [escalateFor, setEscalateFor] = useState<QueueItem | null>(null);
+  const [keysOpen, setKeysOpen] = useState(false);
+  const [peekOpen, setPeekOpen] = useState(false);
+  const [url, updateUrl] = useTableUrlState();
+  const wide = useMediaQuery('(min-width: 1280px)', false);
+  const listRef = useRef<HTMLUListElement | null>(null);
 
   const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
   const visible = items.filter((d) => !hidden.has(d.id));
@@ -149,8 +208,7 @@ export function ApprovalsList({
           ? s.claimableIls
           : Math.max(
               0,
-              Math.round((s.claimableIls + sign * Math.abs(Number(d.deltaAmount ?? 0))) * 100) /
-                100,
+              Math.round(s.claimableIls * 100 + sign * (d.claimAgorot ?? 0)) / 100,
             ),
     }));
   }
@@ -183,14 +241,18 @@ export function ApprovalsList({
 
     const call =
       action.procedure === 'approve'
-        ? approve.mutateAsync({ discrepancyId: d.id })
+        ? approve.mutateAsync({
+            discrepancyId: d.id,
+            expectedStatus: d.resolutionStatus as 'open' | 'escalated',
+            seenClaimAgorot: d.claimAgorot,
+          })
         : action.procedure === 'reject'
           ? reject.mutateAsync({
               discrepancyId: d.id,
               reason: action.reason,
               reasonCode: action.reasonCode,
             })
-          : escalate.mutateAsync({ discrepancyId: d.id });
+          : escalate.mutateAsync({ discrepancyId: d.id, note: action.note });
     const amount = money(Math.abs(Number(d.deltaAmount ?? 0)));
     const what = [itemName(locale, d) || discrepancyLabel(t, d.type), amount].join(' · ');
 
@@ -215,7 +277,23 @@ export function ApprovalsList({
         setExiting((s) => remove(s, d.id));
         setHidden((s) => remove(s, d.id));
         const conflict = err.data?.code === 'CONFLICT' ? parseDecidedConflict(err.message) : null;
-        if (conflict) {
+        const moved = err.data?.code === 'CONFLICT' ? parseAmountChanged(err.message) : null;
+        if (moved) {
+          // The claimable ₪ changed under the decider: show the new figure, decide again.
+          setItems((xs) => xs.map((x) => (x.id === d.id ? { ...x, claimAgorot: moved.nowAgorot } : x)));
+          setRowError((e) => ({
+            ...e,
+            [d.id]: { text: t('desk.amountChanged', { amount: ils(moved.nowAgorot, locale) }) },
+          }));
+          void refreshSummary();
+        } else if (conflict && conflict.status === 'escalated' && viewerRole === 'owner') {
+          // A colleague escalated this card to ME while I looked at it: it is
+          // still a decision, now mine. Update it in place and keep the actions.
+          const fresh = { ...d, resolutionStatus: 'escalated', requiredRole: 'owner' as const, canAct: true };
+          setItems((xs) => xs.map((x) => (x.id === d.id ? (fresh as QueueItem) : x)));
+          setRowError((e) => ({ ...e, [d.id]: { text: t('desk.escalatedToYou') } }));
+          void refreshSummary();
+        } else if (conflict) {
           setDecided((m) => ({ ...m, [d.id]: conflictText(t, conflict, locale) }));
           void refreshSummary();
         } else {
@@ -238,6 +316,16 @@ export function ApprovalsList({
     const { id } = undo;
     const d = items.find((x) => x.id === id);
     try {
+      if (undo.ids) {
+        await reopenMany.mutateAsync({ discrepancyIds: undo.ids });
+        setUndo(null);
+        const back = new Set(undo.ids);
+        setHidden((s) => new Set([...s].filter((x) => !back.has(x))));
+        for (const x of items) if (back.has(x.id)) adjustSummary(x, 1);
+        setAnnouncement(t('undo.undone'));
+        void refreshSummary();
+        return;
+      }
       await reopen.mutateAsync({ discrepancyId: id });
       setUndo(null);
       setHidden((s) => remove(s, id));
@@ -300,10 +388,284 @@ export function ApprovalsList({
     }
   }
 
+  /**
+   * Bulk approve (exec-desktop-08): ONE server call, all-or-nothing. The server
+   * refuses a blocking row and any invoice over ₪200 on its own; the UI never
+   * offers those (BatchBar / group primary), so a refusal here is a race.
+   */
+  // One replay id per attempt on the SAME selection: a re-tap after a lost
+  // response replays (the server answers with the first result), never a 2nd batch.
+  const batchAttempt = useRef<{ key: string; id: string } | null>(null);
+  async function reloadQueue() {
+    try {
+      const fresh = await utils.approvals.myQueue.fetch({ limit: PAGE, ...filters }, { staleTime: 0 });
+      setItems(fresh);
+      setHidden(new Set());
+      setSelected(new Set());
+      setHasMore(fresh.length >= PAGE);
+    } catch {
+      /* the note already says the outcome is unknown */
+    }
+    void refreshSummary();
+  }
+
+  function decideBatch(rows: QueueItem[], doneLabel: string) {
+    if (rows.length === 0) return;
+    const ids = rows.map((r) => r.id);
+    setBatchNote(null);
+    setBusyId('batch');
+    const total = rows.reduce((n, r) => n + (r.claimable ? r.claimAgorot : 0), 0);
+    decideMany
+      .mutateAsync({
+        items: rows.map((r) => ({
+          discrepancyId: r.id,
+          expectedStatus: r.resolutionStatus as 'open' | 'escalated',
+        })),
+        decision: 'accepted',
+        clientMutationId: (() => {
+          const key = [...ids].sort().join(',');
+          if (batchAttempt.current?.key !== key) batchAttempt.current = { key, id: newClientMutationId() };
+          return batchAttempt.current.id;
+        })(),
+      })
+      .then(() => {
+        for (const r of rows) adjustSummary(r, -1);
+        setHidden((s) => new Set([...s, ...ids]));
+        setSelected((s) => new Set([...s].filter((x) => !ids.includes(x))));
+        const text = t('desk.batchDone', { count: formatNumber(rows.length, locale), amount: ils(total, locale) });
+        setAnnouncement(`${doneLabel} · ${text}`);
+        setUndo({ id: ids[0]!, ids, text, until: Date.now() + UNDO_MS, remaining: null });
+        batchAttempt.current = null;
+        void refreshSummary();
+      })
+      .catch((err: { data?: { code?: string } | null }) => {
+        const code = err.data?.code;
+        if (code === 'CONFLICT') setBatchNote(t('desk.batchConflict'));
+        else if (code === 'FORBIDDEN' || code === 'BAD_REQUEST') setBatchNote(t('desk.batchError'));
+        else {
+          // Network / server error: the batch may or may not have committed.
+          setBatchNote(t('desk.batchUnknown'));
+          void reloadQueue();
+        }
+      })
+      .finally(() => setBusyId((b) => (b === 'batch' ? null : b)));
+  }
+
+  const liveRows = items.filter((d) => !hidden.has(d.id) && !decided[d.id]);
+  const batch = bulkSelection(liveRows, selected);
+  const batchReason = batch.blocked.some((b) => b.why === 'block')
+    ? t('desk.batchBlock')
+    : batch.blocked.some((b) => b.why === 'cannotAct')
+      ? t('desk.batchCannotAct')
+      : batch.blocked.some((b) => b.why === 'over_cap')
+        ? t('desk.batchOverCap', { cap: ils(BULK_CAP_AGOROT, locale) })
+        : undefined;
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+
+  // The evidence target: `?sel=` (Back and shared links restore it).
+  const selRow = url.sel ? liveRows.find((d) => d.id === url.sel) ?? null : null;
+  const showEvidence = (d: QueueItem) => {
+    updateUrl({ sel: d.id });
+    if (!wide) setPeekOpen(true);
+  };
+  const escalateAllowed = (d: QueueItem) => canEscalate(d.requiredRole, viewerRole) && d.canAct !== false;
+
+  /**
+   * Desk keys (R-9), bound by `KeyboardEvent.code` (ח/ל/ס on a Hebrew layout),
+   * live only while focus is inside the list and never while typing.
+   */
+  function onListKey(e: React.KeyboardEvent<HTMLUListElement>) {
+    if (isTypingTarget(e.target)) return;
+    const rows = liveRows;
+    const holder = (e.target as HTMLElement).closest<HTMLElement>('[data-row-id]');
+    const cur = holder ? rows.findIndex((r) => r.id === holder.dataset.rowId) : -1;
+    const d = cur >= 0 ? rows[cur]! : null;
+    const focusRow = (i: number) => {
+      const r = rows[i];
+      if (!r) return;
+      cardRefs.current.get(r.id)?.focus();
+      updateUrl({ sel: r.id });
+    };
+    const k = deskKeyOf(e);
+    if (k === 'next' || k === 'prev') {
+      e.preventDefault();
+      focusRow(moveIndex(cur, k === 'next' ? 1 : -1, rows.length));
+      return;
+    }
+    if (k === 'select' && d) {
+      e.preventDefault();
+      if (d.severity !== 'block') toggle(d.id);
+      return;
+    }
+    if ((k === 'open' || e.code === 'KeyO') && d && !(e.target as HTMLElement).closest('button,a')) {
+      e.preventDefault();
+      showEvidence(d);
+      return;
+    }
+    if (k === 'escape' && selected.size > 0) {
+      e.preventDefault();
+      setSelected(new Set());
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.code === 'Slash' && e.shiftKey) {
+      e.preventDefault();
+      setKeysOpen(true);
+    } else if (e.code === 'KeyZ' && undo && !undo.failed) {
+      e.preventDefault();
+      void undoLast();
+    } else if (d && e.code === 'Digit1') {
+      e.preventDefault();
+      primaryRefs.current.get(d.id)?.click();
+    } else if (d && e.code === 'Digit2') {
+      e.preventDefault();
+      cardRefs.current.get(d.id)?.querySelector<HTMLButtonElement>('[data-testid="decide-reject"]')?.click();
+    } else if (d && e.code === 'Digit3' && escalateAllowed(d)) {
+      e.preventDefault();
+      setEscalateFor(d);
+    }
+  }
+
+  // A `?sel=` that arrives from the URL (Back, a link) scrolls its card into view once.
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || !url.sel) return;
+    restored.current = true;
+    cardRefs.current.get(url.sel)?.scrollIntoView({ block: 'nearest' });
+  }, [url.sel]);
+
   const others = summary.others;
   const roleName = (r: string) => {
     const out = t(`roles.${r}` as MessageKey<typeof approvalsHe>);
     return out.startsWith('roles.') ? r : out;
+  };
+
+  const renderCard = (d: QueueItem) => {
+            if (hidden.has(d.id)) return null;
+            if (decided[d.id]) {
+              return (
+                <li key={d.id}>
+                  <Card
+                    padding="sm"
+                    role="status"
+                    className="flex items-center justify-between gap-3 text-sm text-muted"
+                  >
+                    <span>{decided[d.id]}</span>
+                    <button
+                      type="button"
+                      className="touch-target shrink-0 rounded-lg px-3 font-semibold text-ink hover:bg-surface-2 outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface scroll-mb-28 scroll-mt-20"
+                      onClick={() => setHidden((s) => add(s, d.id))}
+                    >
+                      {t('card.hide')}
+                    </button>
+                  </Card>
+                </li>
+              );
+            }
+            return (
+              <li
+                key={d.id}
+                ref={(el) => {
+                  cardRefs.current.set(d.id, el);
+                }}
+                tabIndex={-1}
+                data-row-id={d.id}
+                className={cn(
+                  'transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none',
+                  exiting.has(d.id) && 'pointer-events-none -translate-y-1 opacity-0',
+                )}
+              >
+                <DecisionCard
+                  d={d}
+                  t={t}
+                  locale={locale}
+                  compact={compact}
+                  viewerRole={viewerRole}
+                  busy={busyId === d.id}
+                  error={rowError[d.id] ?? null}
+                  waiveOpen={waiveFor === d.id}
+                  onWaiveOpen={(open) => setWaiveFor(open ? d.id : null)}
+                  onDecide={(action, label) => decide(d, action, label)}
+                  primaryRef={(el) => {
+                    primaryRefs.current.set(d.id, el);
+                  }}
+                  onEscalate={escalateAllowed(d) ? () => setEscalateFor(d) : undefined}
+                  sticky={landing}
+                  select={
+                    landing || d.canAct === false ? null : (
+                      // The label is the 44×44 touch target; -m-3 keeps the 20 px box's layout.
+                      <label
+                        className={cn(
+                          '-m-3 inline-flex h-11 w-11 shrink-0 items-center justify-center',
+                          d.severity === 'block' ? 'cursor-not-allowed' : 'cursor-pointer',
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-5 w-5 shrink-0 accent-[var(--c-primary)]"
+                          checked={selected.has(d.id)}
+                          disabled={d.severity === 'block'}
+                          title={d.severity === 'block' ? t('desk.batchBlock') : undefined}
+                          aria-label={t('desk.select', { name: itemName(locale, d) || discrepancyLabel(t, d.type) })}
+                          onChange={() => toggle(d.id)}
+                          data-testid="card-select"
+                        />
+                      </label>
+                    )
+                  }
+                  footer={
+                    <div className="mt-2 flex flex-wrap items-center gap-x-4">
+                      <button
+                        type="button"
+                        onClick={() => showEvidence(d)}
+                        aria-pressed={url.sel === d.id}
+                        className="inline-flex min-h-12 items-center rounded-lg text-sm font-semibold text-primary outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface scroll-mb-28 scroll-mt-20"
+                        data-testid="card-evidence"
+                      >
+                        {t('desk.evidence')}
+                      </button>
+                      <HistoryDisclosure id={d.id} t={t} locale={locale} />
+                    </div>
+                  }
+                />
+              </li>
+            );
+  };
+
+  /** The decision buttons inside the evidence: they press the card's own, so there is one decision path. */
+  const evidenceActions = (d: QueueItem) => (
+    <div className="grid grid-cols-2 gap-2">
+      <button
+        type="button"
+        onClick={() => primaryRefs.current.get(d.id)?.click()}
+        className="inline-flex h-12 items-center justify-center rounded-xl bg-primary px-3 text-sm font-semibold text-on-primary hover:brightness-95 outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+        data-testid="evidence-primary"
+      >
+        {primaryLabel(d)}
+      </button>
+      {escalateAllowed(d) ? (
+        <button
+          type="button"
+          onClick={() => setEscalateFor(d)}
+          className="inline-flex h-12 items-center justify-center rounded-xl border border-line-strong bg-surface px-3 text-sm font-semibold text-ink hover:bg-surface-2 outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+        >
+          {t('decision.escalate')}
+        </button>
+      ) : null}
+      {d.claimable ? <p className="col-span-2 text-xs text-muted">{effectLine(t, d.invoiceStatus)}</p> : null}
+    </div>
+  );
+  const primaryLabel = (d: QueueItem) => {
+    const a = decisionActions(d.type, d.claimable)[0];
+    if (!a) return t('decision.reviewed');
+    const amount = formatIls(Math.abs(Number(d.deltaAmount ?? 0)), { locale, maximumFractionDigits: 2 });
+    return 'withAmount' in a && a.withAmount ? t(a.label).replace('{amount}', amount) : t(a.label);
   };
 
   return (
@@ -311,6 +673,11 @@ export function ApprovalsList({
       <p className="sr-only" role="status" aria-live="polite" data-testid="approvals-announcer">
         {announcement}
       </p>
+      {landing ? null : (
+        <div className="hidden justify-end lg:flex">
+          <KeysButton t={t} onOpen={() => setKeysOpen(true)} />
+        </div>
+      )}
 
       {/* Server totals (approvals-08). Phone: one line; desktop: tiles. Ink — red only on blockers.
           An empty queue shows its inbox-zero state alone, not a row of zeros. */}
@@ -363,7 +730,7 @@ export function ApprovalsList({
               label={t('summary.oldest')}
               value={
                 summary.oldestAt
-                  ? (ageText(summary.oldestAt, locale) ?? t('card.waitingToday'))
+                  ? (ageText(t, summary.oldestAt, renderNow) ?? t('card.waitingToday'))
                   : '—'
               }
               testId="summary-oldest"
@@ -392,60 +759,73 @@ export function ApprovalsList({
           locale={locale}
         />
       ) : (
-        <ul className={compact ? 'space-y-2' : 'space-y-3'} aria-label={t('title')}>
-          {items.map((d) => {
-            if (hidden.has(d.id)) return null;
-            if (decided[d.id]) {
-              return (
-                <li key={d.id}>
-                  <Card
-                    padding="sm"
-                    role="status"
-                    className="flex items-center justify-between gap-3 text-sm text-muted"
-                  >
-                    <span>{decided[d.id]}</span>
-                    <button
-                      type="button"
-                      className="touch-target shrink-0 rounded-lg px-3 font-semibold text-ink hover:bg-surface-2 outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface scroll-mb-28 scroll-mt-20"
-                      onClick={() => setHidden((s) => add(s, d.id))}
-                    >
-                      {t('card.hide')}
-                    </button>
-                  </Card>
-                </li>
-              );
-            }
-            return (
-              <li
-                key={d.id}
-                ref={(el) => {
-                  cardRefs.current.set(d.id, el);
-                }}
-                tabIndex={-1}
-                className={cn(
-                  'transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none',
-                  exiting.has(d.id) && 'pointer-events-none -translate-y-1 opacity-0',
-                )}
+        <div
+          className={cn(
+            !landing && 'xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:items-start xl:gap-5',
+            !landing && '[@media(min-width:1536px)]:grid-cols-[380px_minmax(0,1fr)]',
+          )}
+        >
+          <div className="min-w-0 space-y-3">
+            {selected.size > 0 ? (
+              <BatchBar
+                count={batch.rows.length}
+                sum={{ kind: 'sum', sumAgorot: batch.sumAgorot, unknownCount: 0 }}
+                notes={batchNote ? [batchNote] : []}
+                actions={[
+                  {
+                    id: 'approve',
+                    label: t('desk.batchApprove'),
+                    primary: true,
+                    disabled: batch.disabled || busyId === 'batch',
+                    disabledReason: batchReason,
+                    onRun: () => decideBatch(batch.rows, t('decision.approved')),
+                  },
+                ]}
+                onClear={() => setSelected(new Set())}
+              />
+            ) : null}
+            {landing ? (
+              <ul aria-label={t('title')} onKeyDown={onListKey} ref={listRef}>
+                {liveRows[0] ? renderCard(liveRows[0]) : null}
+              </ul>
+            ) : (
+              <ul
+                className={compact ? 'space-y-3' : 'space-y-5'}
+                aria-label={t('title')}
+                onKeyDown={onListKey}
+                ref={listRef}
+                data-testid="approvals-list"
+                data-record=""
               >
-                <DecisionCard
-                  d={d}
-                  t={t}
-                  locale={locale}
-                  compact={compact}
-                  viewerRole={viewerRole}
-                  busy={busyId === d.id}
-                  error={rowError[d.id] ?? null}
-                  waiveOpen={waiveFor === d.id}
-                  onWaiveOpen={(open) => setWaiveFor(open ? d.id : null)}
-                  onDecide={(action, label) => decide(d, action, label)}
-                  primaryRef={(el) => {
-                    primaryRefs.current.set(d.id, el);
-                  }}
-                />
-              </li>
-            );
-          })}
-        </ul>
+                {groupByInvoice(items.filter((d) => !hidden.has(d.id))).map((g) => (
+                  <li key={g.key} className="space-y-2">
+                    <GroupHeader
+                      g={g}
+                      t={t}
+                      locale={locale}
+                      busy={busyId === 'batch'}
+                      onApproveAll={() => decideBatch(g.rows.filter((r) => !decided[r.id]), t('desk.groupApproveDone'))}
+                    />
+                    <ul className={compact ? 'space-y-2' : 'space-y-3'}>{g.rows.map(renderCard)}</ul>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          {!landing && wide ? (
+            <aside
+              className="sticky top-4 hidden min-w-0 rounded-2xl border border-line bg-surface p-4 xl:block"
+              aria-label={t('desk.evidenceTitle')}
+              data-testid="approvals-evidence-pane"
+            >
+              {selRow ? (
+                <EvidenceBody d={selRow} t={t} locale={locale} actions={evidenceActions(selRow)} split />
+              ) : (
+                <p className="text-sm text-muted">{t('desk.evidenceEmpty')}</p>
+              )}
+            </aside>
+          ) : null}
+        </div>
       )}
       <LoadMore onClick={loadMore} loading={loadingMore} hasMore={hasMore} />
 
@@ -478,6 +858,31 @@ export function ApprovalsList({
           )}
         </div>
       ) : null}
+
+      {!wide && selRow ? (
+        <Peek
+          open={peekOpen}
+          title={t('desk.evidenceTitle')}
+          onClose={() => setPeekOpen(false)}
+          fullHref={selRow.invoiceId ? `/dashboard/invoices/${selRow.invoiceId}` : undefined}
+          returnFocus={() => cardRefs.current.get(selRow.id)}
+        >
+          <EvidenceBody d={selRow} t={t} locale={locale} actions={evidenceActions(selRow)} />
+        </Peek>
+      ) : null}
+      <EscalateSheet
+        key={escalateFor?.id ?? 'none'}
+        open={escalateFor != null}
+        t={t}
+        busy={busyId === escalateFor?.id}
+        onClose={() => setEscalateFor(null)}
+        onSend={(note) => {
+          const d = escalateFor;
+          setEscalateFor(null);
+          if (d) decide(d, { procedure: 'escalate', note }, t('decision.escalated'));
+        }}
+      />
+      <KeysHelp open={keysOpen} t={t} onClose={() => setKeysOpen(false)} />
     </div>
   );
 }
@@ -496,6 +901,10 @@ function DecisionCard({
   onWaiveOpen,
   onDecide,
   primaryRef,
+  onEscalate,
+  select,
+  footer,
+  sticky = false,
 }: {
   d: QueueItem;
   t: T;
@@ -508,6 +917,14 @@ function DecisionCard({
   onWaiveOpen: (open: boolean) => void;
   onDecide: (action: Decide, doneLabel: string) => void;
   primaryRef: (el: HTMLElement | null) => void;
+  /** Opens the escalation Sheet (note chips) instead of escalating in one tap. */
+  onEscalate?: () => void;
+  /** The bulk-selection checkbox (desk). */
+  select?: React.ReactNode;
+  /** Evidence + history row under the why-line. */
+  footer?: React.ReactNode;
+  /** Landing page: the 50/50 pair sticks to the bottom (thumb zone). */
+  sticky?: boolean;
 }) {
   const isBlock = d.severity === 'block';
   const label = discrepancyLabel(t, d.type);
@@ -530,7 +947,7 @@ function DecisionCard({
           type="button"
           role="menuitem"
           className="flex h-12 w-full items-center gap-2 px-4 text-start text-sm text-ink hover:bg-surface-2 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
-          onClick={() => onDecide({ procedure: 'escalate' }, t('decision.escalated'))}
+          onClick={() => (onEscalate ? onEscalate() : onDecide({ procedure: 'escalate' }, t('decision.escalated')))}
         >
           <Send className="h-4 w-4 text-subtle" aria-hidden="true" />
           {t('decision.escalate')}
@@ -554,10 +971,11 @@ function DecisionCard({
     });
   }
 
+  const nowMs = useContext(NowCtx);
+  const today = nowMs != null ? new Date(nowMs) : undefined;
   const due = d.invoiceDueDate ? new Date(d.invoiceDueDate) : null;
-  const dueDays = due
-    ? Math.floor((startOfDay(due).getTime() - startOfDay(new Date()).getTime()) / 86_400_000)
-    : null;
+  // Israel calendar days from the render's ONE clock (#418), like the chip itself.
+  const dueDays = due ? daysUntil(due, today) : null;
 
   return (
     <Card
@@ -580,7 +998,9 @@ function DecisionCard({
 
       <div className={compact ? 'p-3 ps-4' : 'p-4 ps-5'}>
         <header className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
+          <div className="flex min-w-0 items-start gap-3">
+            {select ? <span className="flex min-h-6 items-center">{select}</span> : null}
+            <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <SeverityBadge severity={d.severity} label={severityLabel(t, d.severity)} />
               <h2 id={headId} className="text-base font-bold text-ink">
@@ -600,6 +1020,7 @@ function DecisionCard({
                 ) : null}
               </p>
             ) : null}
+            </div>
           </div>
           {menuItems.length ? <MoreMenu t={t} items={menuItems} /> : null}
         </header>
@@ -623,20 +1044,9 @@ function DecisionCard({
               className="inline-flex items-center gap-1"
             >
               <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-              {waitingText(t, d.createdAt, locale)}
+              {waitingText(t, d.createdAt, today)}
             </span>
-            {due && dueDays != null ? (
-              <span
-                className={cn(
-                  'rounded-md px-1.5 py-0.5',
-                  dueDays <= 7 ? 'bg-warn/15 text-ink' : '',
-                )}
-              >
-                {t(dueDays < 0 ? 'card.overdue' : 'card.due', {
-                  date: formatDate(due, locale, { day: '2-digit', month: '2-digit' }),
-                })}
-              </span>
-            ) : null}
+            {due && dueDays != null ? <DeadlineChip due={due} today={today} /> : null}
           </p>
         </div>
 
@@ -681,7 +1091,9 @@ function DecisionCard({
           primaryRef={primaryRef}
           rejectRef={rejectRef}
           describedBy={sumId}
+          sticky={sticky}
         />
+        {footer}
       </div>
     </Card>
   );
@@ -700,6 +1112,7 @@ function Actions({
   primaryRef,
   rejectRef,
   describedBy,
+  sticky = false,
 }: {
   d: QueueItem;
   t: T;
@@ -712,6 +1125,7 @@ function Actions({
   primaryRef: (el: HTMLElement | null) => void;
   rejectRef: React.MutableRefObject<HTMLButtonElement | null>;
   describedBy: string;
+  sticky?: boolean;
 }) {
   const btn =
     'inline-flex h-12 w-full items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-45 outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface scroll-mb-28 scroll-mt-20';
@@ -758,7 +1172,15 @@ function Actions({
   const rj = actions.find((a) => a.kind === 'reject');
   return (
     <>
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:justify-start sm:[&>*]:w-auto sm:[&>*]:min-w-44">
+      <div
+        className={cn(
+          'mt-3 grid grid-cols-2 gap-2',
+          sticky
+            ? 'sticky bottom-0 z-10 -mx-4 border-t border-line bg-surface px-4 py-2'
+            : 'sm:flex sm:justify-start sm:[&>*]:w-auto sm:[&>*]:min-w-44',
+        )}
+        data-testid="decide-pair"
+      >
         {ap && ap.kind === 'approve' ? (
           <button
             type="button"
@@ -1037,7 +1459,7 @@ function OthersLane({
       </summary>
       <ul className="space-y-1 pb-2 text-muted">
         {others.byRole.map((r) => (
-          <li key={r.role}>
+          <li key={r.role} data-record="">
             {t('others.role', {
               role: roleName(r.role),
               count: formatNumber(r.count, locale),
@@ -1104,19 +1526,18 @@ function Template({ text, values }: { text: string; values: Record<string, strin
   return <>{parts}</>;
 }
 
-/** "4 ימים" / "יומיים" (Intl unit plurals); null on the first day. */
-function ageText(from: Date | string, locale: 'he' | 'en'): string | null {
-  const days = ageDays(from);
-  if (days === 0) return null;
-  return new Intl.NumberFormat(intlLocaleOf(locale), {
-    style: 'unit',
-    unit: 'day',
-    unitDisplay: 'long',
-  }).format(days);
+/**
+ * "4 ימים" / "יומיים" / "יום אחד" from i18n plural keys (#418): never Intl unit
+ * formatting, whose Hebrew word order differs between ICU versions (Node "1 יום"
+ * vs Chromium "יום 1") and broke hydration. Null on the first day. `now` is the
+ * render's ONE clock (the server's), so server HTML and hydration agree.
+ */
+function ageText(t: T, from: Date | string, now?: Date): string | null {
+  return ageLabel(t, ageDays(from, now));
 }
 
-function waitingText(t: T, from: Date | string, locale: 'he' | 'en'): string {
-  const age = ageText(from, locale);
+function waitingText(t: T, from: Date | string, now?: Date): string {
+  const age = ageText(t, from, now);
   return age ? t('card.waiting', { age }) : t('card.waitingToday');
 }
 
@@ -1133,6 +1554,20 @@ function conflictText(
   return t('card.decidedBy', { who, time, status });
 }
 
+/** CONFLICT `approvals.amountChanged:{seenAgorot, nowAgorot}` → the new figure. */
+function parseAmountChanged(message: string | undefined): { seenAgorot: number; nowAgorot: number } | null {
+  const prefix = 'approvals.amountChanged:';
+  if (!message?.startsWith(prefix)) return null;
+  try {
+    const v = JSON.parse(message.slice(prefix.length)) as { seenAgorot?: unknown; nowAgorot?: unknown };
+    return typeof v.nowAgorot === 'number' && typeof v.seenAgorot === 'number'
+      ? { seenAgorot: v.seenAgorot, nowAgorot: v.nowAgorot }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The catalog product's name, else the invoice line's own text. */
 function itemName(locale: 'he' | 'en', d: QueueItem): string {
   return (
@@ -1141,11 +1576,6 @@ function itemName(locale: 'he' | 'en', d: QueueItem): string {
   );
 }
 
-function startOfDay(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
 const add = (s: ReadonlySet<string>, id: string) => new Set(s).add(id);
 const remove = (s: ReadonlySet<string>, id: string) => {
   const n = new Set(s);

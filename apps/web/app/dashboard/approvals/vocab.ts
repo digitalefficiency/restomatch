@@ -116,7 +116,7 @@ export const DECISION_RESULT: Record<DecisionProcedure, 'accepted' | 'rejected' 
 };
 
 export type DecisionAction =
-  /** approve(): "דרוש ₪X מהספק" (or the duplicate twin "אל תשלם את העותק"). */
+  /** approve(): "בקשת זיכוי · ₪X" (or the duplicate twin "אל תשלם את העותק"). */
   | { kind: 'approve'; procedure: 'approve'; label: MessageKey<Tree>; done: MessageKey<Tree>; withAmount: boolean }
   /** reject(): "שלם כפי שחויב" — opens the reason chips. */
   | { kind: 'reject'; procedure: 'reject'; label: MessageKey<Tree>; done: MessageKey<Tree> }
@@ -132,17 +132,17 @@ export type DecisionAction =
  *  • UNORDERED_ARRIVAL: only "שייך להזמנה" — nothing to decide until it is linked;
  *  • PRICE_LOWER, MISSING_ON_INVOICE: only "סמן כנבדק" — no money to claim;
  *  • DUPLICATE_INVOICE: "אל תשלם את העותק" / "שלם · זו לא כפולה";
- *  • everything else: "דרוש ₪X מהספק" / "שלם כפי שחויב".
+ *  • everything else: "בקשת זיכוי · ₪X" / "שלמו כפי שחויב".
  */
 export function decisionActions(type: string, claimable = true): DecisionAction[] {
   if (type === 'UNORDERED_ARRIVAL') return [{ kind: 'link', label: 'decision.link' }];
-  // No ₪ to claim (info severity, ₪0, PRICE_LOWER — packages/api isClaimableRow): a check, never "דרוש ₪X".
+  // No ₪ to claim (info severity, ₪0, PRICE_LOWER — packages/api isClaimableRow): a check, never "בקשת זיכוי · ₪X".
   if (type === 'PRICE_LOWER' || type === 'MISSING_ON_INVOICE' || !claimable) {
     return [{ kind: 'review', procedure: 'reject', label: 'decision.reviewed', done: 'decision.reviewedDone' }];
   }
   if (type === 'DUPLICATE_INVOICE') {
     return [
-      // Accepting a duplicate HOLDS the copy; it is never "דרוש ₪X" nor "נדרש מהספק".
+      // Accepting a duplicate HOLDS the copy; it is never "בקשת זיכוי · ₪X" nor "נוסף לבקשת הזיכוי".
       { kind: 'approve', procedure: 'approve', label: 'decision.duplicateApprove', done: 'decision.duplicateHeld', withAmount: false },
       { kind: 'reject', procedure: 'reject', label: 'decision.duplicateReject', done: 'decision.rejected' },
     ];
@@ -228,19 +228,15 @@ export interface WhyFacts {
   poId?: string | null;
   poRef?: string | null;
   poDate?: Date | string | null;
+  supplierName?: string | null;
+  supplierNameEn?: string | null;
 }
 
 export const SEP: WhySegment = { text: ' · ' };
 
-/** "PO-7781" or the first 8 of the id (the dock slip's fallback). */
-export function poLabel(poRef: string | null | undefined, poId: string | null | undefined): string | null {
-  if (poRef) return poRef;
-  return poId ? `PO-${poId.slice(0, 8).toUpperCase()}` : null;
-}
-
 /**
  * The one-line "why" (approvals-06), in every density:
- *   "₪575.00 × 2 חבית במקום ₪522.60 (הזמנה PO-…, 14.10) = ₪104.80 · +10.0% · סף ±2% או ₪5".
+ *   "₪575.00 × 2 חבית במקום ₪522.60 (הזמנה מ־<ספק>, 14.10) = ₪104.80 · +10.0% · סף ±2% או ₪5".
  * Groups are separated by SEP; a type with no shown values falls back to its
  * plain-language explanation.
  */
@@ -266,16 +262,17 @@ export function whyLine(t: T, d: WhyFacts): WhySegment[][] {
     const formula = billed
       ? fill(t(isP90 ? 'why.priceP90' : 'why.price'), { actual: ils(act), qty: billed, unit, expected: ils(exp) })
       : fill(t(isP90 ? 'why.priceP90NoQty' : 'why.priceNoQty'), { actual: ils(act), expected: ils(exp) });
-    const po = poLabel(d.poRef, d.poId);
+    // The order by who and when (lab 11.11): never a raw code like "PO-F4841845" in a sentence.
+    const supplier = displayName(locale, d.supplierName ?? null, d.supplierNameEn ?? null);
+    const poDay = d.poDate ? formatDate(d.poDate, locale, { day: '2-digit', month: '2-digit' }) : null;
     const source = isP90
       ? [{ text: ' ' }, { text: t('why.sourceP90') }]
-      : po
+      : d.poId || d.poRef
         ? [
             { text: ' ' },
-            ...fill(t('why.sourcePo'), {
-              po,
-              date: d.poDate ? formatDate(d.poDate, locale, { day: '2-digit', month: '2-digit' }) : '—',
-            }),
+            ...(supplier
+              ? fill(t('why.sourcePo'), { supplier, date: poDay ?? '—' })
+              : fill(t('why.sourcePoNoSupplier'), { date: poDay ?? '—' })),
           ]
         : [];
     groups.push([...formula, ...source, ...(equals.length ? [{ text: ' ' }, ...equals] : [])]);
@@ -309,6 +306,14 @@ export function whyText(groups: WhySegment[][]): string {
 /** Whole days between two instants (Israel calendar is close enough for an age chip). */
 export function ageDays(from: Date | string, now: Date = new Date()): number {
   return Math.max(0, Math.floor((now.getTime() - new Date(from).getTime()) / 86_400_000));
+}
+
+/**
+ * The age words from i18n plural keys (#418), never Intl unit formatting: one
+ * deterministic string on the server and in every browser. Null for 0 days.
+ */
+export function ageLabel(t: T, days: number): string | null {
+  return days > 0 ? t('card.age', { count: days }) : null;
 }
 
 /** The CONFLICT payload a stale decision gets (packages/api DECIDED_CONFLICT_PREFIX). */

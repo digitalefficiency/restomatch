@@ -12,7 +12,12 @@ import {
   type LeakTrendPoint,
   type ViewSpec,
   computeLeakBreakdown,
+  computeLeakComparison,
+  computeLeakDrivers,
   computeLeakReport,
+  DRIVER_DIMENSIONS,
+  type LeakComparison,
+  type LeakDrivers,
   computeLeakHero,
   computeLeaks,
   computeOwnerKpis,
@@ -26,7 +31,9 @@ import {
 } from '@restomatch/charts';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { discrepancyType, eq, restaurants } from '@restomatch/db';
+import { discrepancyType, eq, restaurants, sql } from '@restomatch/db';
+import { invoiceEvidence, type LineEvidence } from '../leaks/evidence';
+import { buildLeakReportExport, type LeakReportExport } from '../leaks/reportExport';
 import { appError } from '../errors';
 import { featureEnabled } from '../lib/features';
 import { moneyKeys, nullFields, seesNoMoney } from '../lib/staffMoney';
@@ -53,11 +60,40 @@ const realDate = (s: string) => {
   return y >= 2000 && y <= 2100 && !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 };
 const FINANCE_ROLES: ReadonlyArray<string> = ['owner', 'manager', 'bookkeeper'];
+/** Grouped rows shown before the "other" remainder. */
+const GROUP_ROWS = 50;
 
 /**
  * A dashboard view: period (+ custom range) and filters. Every value is
  * enumerated or shape-checked here and bound as a SQL parameter downstream.
  */
+export type LeakBreakdownWithEvidence = Omit<LeakBreakdownInvoice, 'lines'> & {
+  lines: Array<LeakBreakdownInvoice['lines'][number] & { evidence: LineEvidence }>;
+};
+
+export interface LineHistoryEntry {
+  /** The audit action, e.g. 'discrepancy.approved'. */
+  action: string;
+  /** ISO instant; the UI shows dd.MM.yyyy HH:mm in Asia/Jerusalem. */
+  at: string;
+  userName: string | null;
+  userRole: string | null;
+  /** The resolution status before → after, when the audit row carries it. */
+  before: string | null;
+  after: string | null;
+}
+
+type DbRow = Record<string, unknown>;
+const rowsOf = (res: unknown): DbRow[] => (Array.isArray(res) ? (res as DbRow[]) : ((res as { rows?: DbRow[] }).rows ?? []));
+const roleOf = (v: unknown): string | null =>
+  v && typeof v === 'object' && typeof (v as Record<string, unknown>).role === 'string' ? ((v as Record<string, unknown>).role as string) : null;
+const statusOf = (v: unknown): string | null => {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  const s = o.resolutionStatus ?? o.resolution_status ?? o.status;
+  return typeof s === 'string' ? s : null;
+};
+
 export const ViewInput = z
   .object({
     period: z.enum(VIEW_PERIODS).default('this_month'),
@@ -156,12 +192,69 @@ export const ownerRouter = router({
         })
         .optional(),
     )
-    .query(async ({ ctx, input }): Promise<LeakBreakdownInvoice[]> => {
-      return computeLeakBreakdown(ctx.db, ctx.session.restaurantId, {
+    .query(async ({ ctx, input }): Promise<LeakBreakdownWithEvidence[]> => {
+      const rows = await computeLeakBreakdown(ctx.db, ctx.session.restaurantId, {
         monthOffset: input?.monthOffset,
         limit: input?.limit,
         view: input?.view ? specOf(input.view) : undefined,
       });
+      // W2-09c: each line carries its verified basis (additive; the ₪ fields are unchanged).
+      return rows.map((inv) => {
+        const ev = invoiceEvidence(inv);
+        return { ...inv, lines: inv.lines.map((l, i) => ({ ...l, evidence: ev[i]! })) };
+      });
+    }),
+
+  // W2-09c · the view's window vs the same span before it, with coverage per window.
+  leakComparison: financeProcedure
+    .input(z.object({ view: ViewInput }))
+    .query(async ({ ctx, input }): Promise<LeakComparison> => {
+      return computeLeakComparison(ctx.db, ctx.session.restaurantId, specOf(input.view));
+    }),
+
+  // W2-09c · what moved the leak: top contributors to the Δ + an "other" rest (Σ = Δ).
+  leakDrivers: financeProcedure
+    .input(
+      z.object({
+        view: ViewInput,
+        by: z.enum(DRIVER_DIMENSIONS).default('supplier'),
+        top: z.number().int().min(1).max(10).default(3),
+      }),
+    )
+    .query(async ({ ctx, input }): Promise<LeakDrivers> => {
+      return computeLeakDrivers(ctx.db, ctx.session.restaurantId, specOf(input.view), { by: input.by, top: input.top });
+    }),
+
+  // W2-09c · who did what to a breakdown line, newest first (the "היסטוריה" disclosure).
+  // A discrepancy of another restaurant is NOT_FOUND, never an empty history.
+  lineHistory: financeProcedure
+    .input(z.object({ discrepancyId: z.string().uuid(), limit: z.number().int().min(1).max(20).default(3) }))
+    .query(async ({ ctx, input }): Promise<LineHistoryEntry[]> => {
+      const rid = ctx.session.restaurantId;
+      const own = rowsOf(
+        await ctx.db.execute(sql`SELECT 1 FROM discrepancies WHERE id = ${input.discrepancyId}::uuid AND restaurant_id = ${rid}`),
+      );
+      if (own.length === 0) throw new TRPCError({ code: 'NOT_FOUND', message: 'discrepancy not found' });
+      const res = rowsOf(
+        await ctx.db.execute(sql`
+          SELECT a.action, a.at, a.before, a.after, u.name AS user_name, m.role AS user_role
+          FROM audit_log a
+          LEFT JOIN users u ON u.id = a.user_id
+          LEFT JOIN memberships m ON m.user_id = a.user_id AND m.restaurant_id = ${rid}
+          WHERE a.restaurant_id = ${rid} AND a.entity_type = 'discrepancy' AND a.entity_id = ${input.discrepancyId}::uuid
+          ORDER BY a.at DESC
+          LIMIT ${input.limit}
+        `),
+      );
+      return res.map((r) => ({
+        action: String(r.action),
+        at: (r.at instanceof Date ? r.at : new Date(String(r.at))).toISOString(),
+        userName: (r.user_name as string | null) ?? null,
+        // The role at decision time (audit `after.role`), else today's membership.
+        userRole: roleOf(r.after) ?? (r.user_role as string | null) ?? null,
+        before: statusOf(r.before),
+        after: statusOf(r.after),
+      }));
     }),
 
   // ── Dashboard views (period / compare / group-by / filters) ──────────────
@@ -191,17 +284,26 @@ export const ownerRouter = router({
   // Group-by breakdown and trend expose supplier/product detail → finance roles.
   leakGrouped: financeProcedure
     .input(z.object({ view: ViewInput, groupBy: z.enum(VIEW_GROUPS), compare: CompareInput }))
-    .query(async ({ ctx, input }): Promise<{ rows: LeakGroupRow[]; previous: LeakGroupRow[] | null }> => {
-      const spec = specOf(input.view);
-      const rid = ctx.session.restaurantId;
-      const [rows, previous] = await Promise.all([
-        computeLeakGrouped(ctx.db, rid, spec, input.groupBy),
-        input.compare === 'off'
-          ? Promise.resolve(null)
-          : computeLeakGrouped(ctx.db, rid, spec, input.groupBy, input.compare, 200),
-      ]);
-      return { rows, previous };
-    }),
+    .query(
+      async ({
+        ctx,
+        input,
+      }): Promise<{ rows: LeakGroupRow[]; previous: LeakGroupRow[] | null; otherIls: number; otherCount: number }> => {
+        const spec = specOf(input.view);
+        const rid = ctx.session.restaurantId;
+        const [all, previous] = await Promise.all([
+          computeLeakGrouped(ctx.db, rid, spec, input.groupBy, 'off', 200),
+          input.compare === 'off'
+            ? Promise.resolve(null)
+            : computeLeakGrouped(ctx.db, rid, spec, input.groupBy, input.compare, 200),
+        ]);
+        // W2-09c: past the shown rows, an "other" remainder keeps Σ rows = the group total (class 10).
+        const rows = all.slice(0, GROUP_ROWS);
+        const rest = all.slice(GROUP_ROWS);
+        const otherIls = rest.reduce((a, r) => a + Math.round(r.leakIls * 100), 0) / 100;
+        return { rows, previous, otherIls, otherCount: rest.length };
+      },
+    ),
 
   leakTrend: financeProcedure
     .input(z.object({ view: ViewInput, compare: CompareInput }))
@@ -229,10 +331,19 @@ export const ownerRouter = router({
 
   // Print-ready monthly leak report — owner/manager only (it lists supplier
   // spend and what the team waived). Core plan, like the hero it expands.
-  leakReport: managerProcedure
+  // W2-09c: finance tier — the bookkeeper reads everything (owner decision).
+  leakReport: financeProcedure
     .input(z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/) }))
     .query(async ({ ctx, input }): Promise<LeakReport> => {
       return computeLeakReport(ctx.db, ctx.session.restaurantId, input.month);
+    }),
+
+  // W2-09c · the same report as a 3-sheet XLSX + a CSV per sheet (totals = the rows shown).
+  leakReportExport: financeProcedure
+    .input(z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/), locale: z.enum(['he', 'en']).default('he') }))
+    .query(async ({ ctx, input }): Promise<LeakReportExport> => {
+      const report = await computeLeakReport(ctx.db, ctx.session.restaurantId, input.month);
+      return buildLeakReportExport(report, input.locale);
     }),
 
   leaks: analyticsProcedure

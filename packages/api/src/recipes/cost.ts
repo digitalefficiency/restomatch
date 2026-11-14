@@ -27,8 +27,22 @@ import { unitConversionFactor } from '@restomatch/matching';
 
 const DECIMAL_RE = /^(-)?(\d+)(?:\.(\d+))?$/;
 
-/** Parse a decimal string ("12.3456") into a BigInt scaled by 10^scale, half-up beyond `scale`. */
-export function parseScaled(value: string | number, scale: number): bigint {
+/**
+ * Parse a TRUSTED Postgres NUMERIC string (or a JS number) into a BigInt scaled
+ * by 10^scale, half-up beyond `scale`: "12.3456" at scale 4 → 123456n.
+ *
+ * Only for values that already passed a boundary: NUMERIC(12,2) / (12,4)
+ * columns read back from the DB, or strings an API schema validated with a
+ * dot-decimal regex. Plain dot grammar only: no grouping, no decimal comma,
+ * no ₪. It THROWS on anything else.
+ *
+ * Never use it on text a person typed or a file carried. That goes through
+ * `parseDecimalInput` / `parseNumberInput` in `@restomatch/types` (G-13),
+ * which refuses to guess "1,250" and reports ambiguity instead of throwing.
+ * Not to be confused with the POS importer's deprecated `parseScaled`
+ * (integrations/pos/csv.ts), which is a user-input parser.
+ */
+export function parseNumericScaled(value: string | number, scale: number): bigint {
   const s = typeof value === 'number' ? numberToPlain(value) : value.trim();
   const m = DECIMAL_RE.exec(s);
   if (!m) throw new RangeError(`not a decimal: ${JSON.stringify(value)}`);
@@ -39,6 +53,13 @@ export function parseScaled(value: string | number, scale: number): bigint {
   if (frac.length > scale && next >= 53 /* '5' */) n += 1n;
   return neg ? -n : n;
 }
+
+/**
+ * @deprecated Renamed to {@link parseNumericScaled} (W3-02, G-13 note). It stays
+ * as an alias for files outside W3-02's boundary (recipes/csv.ts, the
+ * inventory module); their owners switch to the new name.
+ */
+export const parseScaled = parseNumericScaled;
 
 function numberToPlain(n: number): string {
   if (!Number.isFinite(n)) throw new RangeError(`not finite: ${n}`);
@@ -176,7 +197,7 @@ function toSafeNumber(n: bigint): number {
 
 /** VAT rate NUMERIC(5,4) ("0.1800") → basis points (1800). */
 export function vatRateToBp(vatRate: string | number): bigint {
-  return parseScaled(vatRate, 4);
+  return parseNumericScaled(vatRate, 4);
 }
 
 /** Net-of-VAT menu price in agorot (half-up), or the price itself when it excludes VAT. */
@@ -229,7 +250,7 @@ export function costRecipes(
 
   const costOfUnsafe = (r: CostRecipe): RecipeCost => {
     visiting.add(r.id);
-    const yieldScaled = parseScaled(r.yieldQty, 4);
+    const yieldScaled = parseNumericScaled(r.yieldQty, 4);
     const lines: LineCost[] = [];
     let batch = 0n;
     for (const it of r.items) {
@@ -263,8 +284,8 @@ export function costRecipes(
 
   const costLine = (it: CostItem, ownerId: string): Omit<LineCost, 'costAgorot'> & { cost: bigint } => {
     const base = { itemId: it.id, productId: it.productId, subRecipeId: it.subRecipeId };
-    const q = parseScaled(it.quantity, 4);
-    const wasteBp = parseScaled(it.wastePct, 2);
+    const q = parseNumericScaled(it.quantity, 4);
+    const wasteBp = parseNumericScaled(it.wastePct, 2);
     if (wasteBp < 0n || wasteBp >= BP) throw new RangeError(`waste out of range: ${it.wastePct}`);
     const keep = BP - wasteBp;
 
@@ -275,7 +296,7 @@ export function costRecipes(
       const subCost = costOf(sub);
       const conv = bridge(it, sub.yieldUnit);
       if (!conv) return { ...base, status: 'unitMismatch', cost: 0n };
-      const y = parseScaled(sub.yieldQty, 4);
+      const y = parseNumericScaled(sub.yieldQty, 4);
       const [cn, cd] = conv;
       // batch × (q / 10^4 × cn / cd) / (y / 10^4) × 10^4 / keep
       const n = BigInt(subCost.batchCostAgorot) * q * cn * BP;
@@ -290,7 +311,7 @@ export function costRecipes(
     // price costed per gram is 1000× off): only a manual bridge can cost it.
     const conv = price.unit ? bridge(it, price.unit) : manualBridge(it);
     if (!conv) return { ...base, status: 'unitMismatch', cost: 0n };
-    const p = parseScaled(price.unitPrice, 4);
+    const p = parseNumericScaled(price.unitPrice, 4);
     const [cn, cd] = conv;
     // (q / 10^4) × (cn / cd) × (p / 10^4 ₪) × 100 agorot/₪ × 10^4 / keep
     const n = q * cn * p * 100n * BP;
@@ -301,7 +322,7 @@ export function costRecipes(
   /** The manual bridge alone: "unitsPerProductUnit line units per one priced unit". */
   const manualBridge = (it: CostItem): [bigint, bigint] | null => {
     if (it.unitsPerProductUnit) {
-      const u = parseScaled(it.unitsPerProductUnit, 4);
+      const u = parseNumericScaled(it.unitsPerProductUnit, 4);
       if (u > 0n) return [BP, u]; // qty_target = qty / unitsPer
     }
     return null;
@@ -349,7 +370,7 @@ export function assertNoCycle(
 
 /** Scale a NUMERIC(12,4) price by (1 + changeBp/10000), half-up at scale 4. */
 export function applyPriceChange(unitPrice: string, changeBp: number): string {
-  const p = parseScaled(unitPrice, 4);
+  const p = parseNumericScaled(unitPrice, 4);
   const next = roundHalfUp(p * (BP + BigInt(changeBp)), BP);
   if (next < 0n) throw new RangeError('price change makes the price negative');
   return formatScaled(next, 4);

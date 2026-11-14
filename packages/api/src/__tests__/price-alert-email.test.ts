@@ -44,7 +44,9 @@ describe('priceAlertEmail ₪ formatting', () => {
       cheaperSupplierName: null,
       cheaperPrice: null,
     });
-    expect(e.text).toContain(fmt(Math.round(1.005 * 100)));
-    expect(e.text).toContain(fmt(Math.round(2.675 * 100)));
+    // Half-up on the decimal, not on the float: 1.005 → 101 agorot (a float
+    // multiply gives 100.4999… → 100), 2.675 → 268.
+    expect(e.text).toContain(fmt(101));
+    expect(e.text).toContain(fmt(268));
   });
 });
