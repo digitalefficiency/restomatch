@@ -30,7 +30,9 @@ probe() { # file  w  h  fps  codec  min_s  max_s  max_bytes
 echo "== ffprobe"
 probe out/restomatch-promo-he.mp4 1920 1080 30 h264 59 61 $((30 * 1024 * 1024))
 probe out/restomatch-promo-en.mp4 1920 1080 30 h264 59 61 $((30 * 1024 * 1024))
-probe out/restomatch-promo-he-vertical.mp4 1080 1920 30 h264 20 35 $((30 * 1024 * 1024))
+for v in out/restomatch-promo-*-vertical*.mp4 $WEB/promo-*-vertical*.mp4; do
+  [ -e "$v" ] && bad "$v: the retired demo-seed vertical cut must not exist"
+done
 probe $WEB/hero-loop.mp4 1280 720 30 h264 10 14 $((2560 * 1024))
 probe $WEB/hero-loop.webm 1280 720 30 vp9 10 14 $((2560 * 1024))
 p=$WEB/hero-poster.jpg
@@ -63,6 +65,12 @@ done
 
 echo "== caption zone ∩ device zone = ∅ (all sizes, both locales)"
 node --experimental-strip-types scripts/check-layout.mjs 2>/dev/null && ok "layout zones disjoint" || bad "caption/device zones intersect"
+
+echo "== sample month: copy.ts SAMPLE == the site's sampleMonth.ts"
+node --experimental-strip-types scripts/check-sample.mjs 2>/dev/null | tail -1 | grep -q "SKIP\|== apps" && ok "SAMPLE pinned to sampleMonth.ts (or skipped: not reachable)" || bad "SAMPLE differs from sampleMonth.ts"
+
+echo "== transcript: promoTranscript.json == transcript(COPY, SAMPLE)"
+node scripts/transcript.mjs --check && ok "transcript in sync with the film's copy" || bad "promoTranscript.json is stale — run scripts/transcript.mjs"
 
 echo "== typecheck"
 npx tsc -p . && ok "tsc 0 errors" || bad "tsc errors"

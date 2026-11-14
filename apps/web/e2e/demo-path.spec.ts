@@ -421,11 +421,24 @@ test('A · landing + 60-second promo (logged out)', async ({ page }, info) => {
       await expect(page.locator('main a[href^="/showcase"]').first()).toBeVisible();
       return;
     }
+    if (isPhone(info)) {
+      // #320: the film is 16:9 only — below sm it would play ~360 px wide, so phones get the
+      // /showcase link instead of the Watch button (until a 9:16 cut exists).
+      await expect(page.getByRole('button', { name: t.hero.ctaWatch })).toBeHidden();
+      await expect(page.getByRole('link', { name: t.hero.ctaDemo })).toBeVisible();
+      return;
+    }
     await page.getByRole('button', { name: t.hero.ctaWatch }).click();
     const dialog = page.getByRole('dialog', { name: t.hero.watchTitle });
     await expect(dialog).toBeVisible();
     const video = dialog.locator('video');
     await expect(video).toHaveCount(1);
+    // the silent film's text alternative and the real next step (footer CTA) are in the dialog
+    const transcriptId = await video.getAttribute('aria-describedby');
+    expect(transcriptId, 'promo <video aria-describedby>').toBeTruthy();
+    await expect(dialog.locator(`[id="${transcriptId}"] li`).first()).toBeAttached();
+    // 1366×768: the footer CTA stays on screen (sticky), not clipped below the scrolling modal
+    await expect(dialog.getByRole('link', { name: t.hero.ctaPrimary })).toBeInViewport({ ratio: 1 });
     const src = await video.getAttribute('src');
     expect(src, 'promo <video src>').toBeTruthy();
     const media = await page.request.get(src!, { headers: { Range: 'bytes=0-1023' } });

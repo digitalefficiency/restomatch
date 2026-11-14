@@ -70,13 +70,14 @@ export const CaptionZone: React.FC<{ locale: 'he' | 'en'; children: React.ReactN
 export const Spotlight: React.FC<{
   rect: Rect; // screen px, already scroll-corrected
   a: number;
-  src: string;
+  src?: string; // a screenshot, or…
+  content?: React.ReactNode; // …the screen drawn from components (rendered at screen size)
   imgWidth: number; // rendered image width (= screen width)
   imgTop: number; // image y offset inside the screen (top inset − scroll)
   screenW: number;
   screenH: number;
   accent?: string;
-}> = ({ rect, a, src, imgWidth, imgTop, screenW, screenH, accent = C.primary }) => {
+}> = ({ rect, a, src, content, imgWidth, imgTop, screenW, screenH, accent = C.primary }) => {
   if (a <= 0.001) return null;
   const pad = 10;
   const r = { x: rect.x - pad, y: rect.y - pad, w: rect.w + pad * 2, h: rect.h + pad * 2 };
@@ -125,16 +126,20 @@ export const Spotlight: React.FC<{
           background: C.bg,
         }}
       >
-        <Img
-          src={staticFile(src)}
-          style={{
-            position: 'absolute',
-            width: imgWidth,
-            left: -r.x,
-            top: imgTop - hy,
-            filter: `brightness(${1 + 0.14 * a}) saturate(${1 + 0.1 * a})`,
-          }}
-        />
+        {src ? (
+          <Img
+            src={staticFile(src)}
+            style={{
+              position: 'absolute',
+              width: imgWidth,
+              left: -r.x,
+              top: imgTop - hy,
+              filter: `brightness(${1 + 0.14 * a}) saturate(${1 + 0.1 * a})`,
+            }}
+          />
+        ) : (
+          <div style={{ position: 'absolute', width: screenW, height: screenH, left: -r.x, top: imgTop - hy }}>{content}</div>
+        )}
       </div>
     </>
   );

@@ -17,6 +17,7 @@ export const en: Shape<typeof he> = {
     ctaWatch: 'Watch 60 seconds',
     watchClose: 'Close video',
     watchTitle: 'RestoMatch in 60 seconds',
+    watchTranscript: 'Film transcript',
     ctaDemo: 'Try the live demo',
     note1: '30-day free trial',
     note2: 'No credit card',

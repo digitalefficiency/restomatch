@@ -86,6 +86,7 @@ export const Cta: React.FC<{ locale: Locale }> = ({ locale }) => {
           {t.tagline}
         </RiseLine>
       </div>
+      {/* no URL on the end card (the domain isn't final): the site's dialog shows the real CTA link */}
       <FadeUp at={58}>
         <div style={{ marginTop: 54, display: 'flex', gap: 26, alignItems: 'center', flexDirection: vertical ? 'column' : 'row' }} dir={dir}>
           <div
@@ -100,9 +101,6 @@ export const Cta: React.FC<{ locale: Locale }> = ({ locale }) => {
             }}
           >
             {t.action}
-          </div>
-          <div style={{ fontFamily: FONT.mono, fontSize: 36, color: C.muted, letterSpacing: '0.02em' }} dir="ltr">
-            {t.url}
           </div>
         </div>
       </FadeUp>

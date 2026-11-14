@@ -16,6 +16,7 @@ export const DARK = {
   onPrimary: '#07120D',
   gold: '#E0B341',
   danger: '#FF5C7A',
+  warn: '#FFB347',
   paper: '#F4F1E8',
   paperInk: '#22261F',
 };
@@ -28,11 +29,12 @@ const LIGHT_STAGE: typeof DARK = {
   line: '#D3DDD7',
   ink: '#0F1F17',
   muted: '#4A5D53',
-  subtle: '#6B7C73',
+  subtle: '#566860', // ≥4.5:1 on bg, bgDeep and the spotlight fog (was #6B7C73 ≈3.8:1)
   primary: '#066B4A',
   onPrimary: '#FFFFFF',
   gold: '#755C00',
   danger: '#B80F2A',
+  warn: '#A63D00', // T2 act-now (credit requests to send) — = SampleCards / ui-tokens warn
   paper: '#FFFFFF',
   paperInk: '#22261F',
 };

@@ -1,6 +1,6 @@
 import React from 'react';
 import { AbsoluteFill, random, useCurrentFrame, useVideoConfig } from 'remotion';
-import { COPY, Locale } from '../copy';
+import { COPY, FILM, Locale, risePct } from '../copy';
 import { C, EASE_IN, EASE_OUT, FONT, isLight, lerp, prog } from '../theme';
 import { RiseLine } from '../components/primitives';
 
@@ -9,10 +9,10 @@ import { RiseLine } from '../components/primitives';
 type Row = [string, number, number]; // item, qty, unit price
 const INVOICES: { supplier: string; rows: Row[] }[] = [
   { supplier: 'ירקות השרון', rows: [['עגבניות שרי', 15, 14], ['מלפפונים', 12, 5.87], ['חסה ערבית', 20, 4.5], ['כוסברה', 10, 3.01]] },
-  { supplier: 'דגי הים התיכון', rows: [['פילה סלמון', 6, 96]] },
-  { supplier: 'משקאות שטיינברג', rows: [['בירה מהחבית — חבית 30 ל׳', 2, 575]] },
+  { supplier: 'דגי הים התיכון', rows: [['פילה סלמון', 6, FILM.rises[1].latest]] },
+  { supplier: 'משקאות שטיינברג', rows: [['בירה מהחבית — חבית 30 ל׳', FILM.keg.qty, FILM.keg.latest]] },
   { supplier: 'מחלבות הגליל', rows: [['מוצרלה', 6, 42.21], ['חמאה', 4, 46], ['חלב 3%', 37.5, 6.43], ['גבינה בולגרית', 4.5, 37.81]] },
-  { supplier: 'קצביית הכרם', rows: [['אנטריקוט', 4, 149], ['חזה עוף', 30, 21.6]] },
+  { supplier: 'קצביית הכרם', rows: [['אנטריקוט', 4, FILM.rises[0].latest], ['חזה עוף', 30, 21.6]] },
 ];
 const CARD_INVOICE = [0, 1, 2, 3, 4, 0, 1, 3, 4]; // card i → invoice
 const money = (n: number) => `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₪`;
@@ -94,6 +94,9 @@ const Stamp: React.FC<{ text: string; at: number; color?: string; dir: 'rtl' | '
   );
 };
 
+/** Resting offsets (px from the pile centre) of the stamped cards 2 / 5 / 7. */
+const STAMP_SPOTS: Record<number, [number, number]> = { 2: [190, -250], 5: [-230, -20], 7: [150, 220] };
+
 /** 6–13 s: invoices pile up from depth; three of them carry a leak. */
 export const Problem: React.FC<{ locale: Locale }> = ({ locale }) => {
   const f = useCurrentFrame();
@@ -115,7 +118,7 @@ export const Problem: React.FC<{ locale: Locale }> = ({ locale }) => {
   const shake = f > 60 && f < 168 ? Math.sin(f * 1.7) * 2.2 * (1 - out) : 0;
 
   const stamps = [
-    { card: 2, text: t.stampPrice, at: 78 },
+    { card: 2, text: t.stampPrice.replace('{pct}', risePct(FILM.keg.usual, FILM.keg.latest)), at: 78 },
     { card: 5, text: t.stampShort, at: 96 },
     { card: 7, text: t.stampUnordered, at: 114 },
   ];
@@ -128,8 +131,10 @@ export const Problem: React.FC<{ locale: Locale }> = ({ locale }) => {
           const p = prog(f, at, at + 26, EASE_OUT);
           const pPrev = prog(f - 1, at, at + 26, EASE_OUT);
           const speed = Math.abs(p - pPrev);
-          const rx = (random(`x${i}`) - 0.5) * (vertical ? 520 : 520);
-          const ry = (random(`y${i}`) - 0.5) * (vertical ? 760 : 360);
+          // the three stamped cards rest at fixed, spread-out spots on top, so every stamp reads
+          const spot = STAMP_SPOTS[i];
+          const rx = spot ? spot[0] * (vertical ? 0.6 : 1) : (random(`x${i}`) - 0.5) * (vertical ? 520 : 520);
+          const ry = spot ? spot[1] * (vertical ? 1.8 : 1) : (random(`y${i}`) - 0.5) * (vertical ? 760 : 360);
           const rot = (random(`r${i}`) - 0.5) * 34;
           const fromX = (random(`fx${i}`) - 0.5) * 2600;
           const fromY = (random(`fy${i}`) - 0.5) * 1400;
@@ -154,7 +159,7 @@ export const Problem: React.FC<{ locale: Locale }> = ({ locale }) => {
                 transform: `translate3d(${cx}px, ${cy}px, ${z}px) rotateX(${rX}deg) rotateY(${rY}deg) rotateZ(${rz * (1 - out)}deg) scaleY(${sy})`,
                 filter: `blur(${Math.min(speed * 160, 14)}px) brightness(${0.7 + 0.3 * p})`,
                 opacity: p > 0 ? 1 : 0,
-                zIndex: i,
+                zIndex: stamp ? 20 + i : i, // a stamped card is never buried under a later one
               }}
             >
               <div style={{ position: 'relative' }}>

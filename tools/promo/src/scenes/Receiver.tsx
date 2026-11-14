@@ -3,18 +3,15 @@ import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
 import { COPY, LINES, Locale } from '../copy';
 import { C, EASE_IN, EASE_IN_OUT, FONT, isLight, lerp, prog } from '../theme';
 import { zones } from '../layout';
-import { rectFor, type U } from '../rects';
 import { CaptionZone, Callout, DeviceZone, Spotlight } from '../components/Stage';
-import { Phone, phoneScreen, Screen } from '../components/Devices';
+import { Phone, phoneScreen } from '../components/Devices';
+import { RECEIVER_CARD, ReceiverScreen } from '../components/ReceiverScreen';
 import { FadeUp, RiseLine } from '../components/primitives';
 
 export const RECEIVER_DURATION = 250;
 
-// Strips to blur on the phone captures (units of image width): the demo e-mail line, and the
-// local dev-OCR-stub line ("Invoice DEV-… · OCR confidence 100%") — not what a customer sees.
-const toStrip = (u: U, pad = 0.01) => ({ x: u[0] - pad, y: u[1] - pad, w: u[2] - u[0] + 2 * pad, h: u[3] - u[1] + 2 * pad });
-const EMAIL = toStrip(rectFor('receiving-po-en', 'email', [0.17, 0.105, 0.67, 0.145]));
-const STUB = toStrip(rectFor('reconcile-en', 'stub', [0.03, 0.715, 0.97, 0.765]));
+// The phone shows the drawn receiver screens (components/ReceiverScreen): quantities and states
+// only — no ₪ anywhere in this beat (the frame check asserts it), the sample restaurant's brand.
 
 /** One invoice line that is scanned and re-typeset from Hebrew into English. */
 const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w }) => {
@@ -71,7 +68,7 @@ const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w })
         <span>{l.he}</span>
         {l.qty ? (
           <span style={{ fontFamily: FONT.sans, fontSize: 28 * k, opacity: 0.8 }}>
-            {l.qty} · <bdi dir="rtl">{`${l.price.replace('₪', '')} ₪`}</bdi>
+            {l.qty}
           </span>
         ) : null}
       </div>
@@ -100,7 +97,7 @@ const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w })
         </span>
         {l.qtyEn ? (
           <span style={{ fontFamily: FONT.mono, fontSize: 26 * k, color: C.muted }}>
-            {l.qtyEn} × {l.price}
+            {l.qtyEn}
           </span>
         ) : null}
       </div>
@@ -122,12 +119,8 @@ const MorphLine: React.FC<{ i: number; at: number; w: number }> = ({ i, at, w })
   );
 };
 
-// Cherry-tomatoes card on the real English reconciliation (units of the 390-px screen width).
-const [cx0, cy0, cx1, cy1] = rectFor('reconcile-en', 'card', [0.054, 1.965, 0.946, 2.35]);
-const CARD = { x0: cx0, y0: cy0, x1: cx1, y1: cy1 };
-const TOP = 0.11; // status-bar inset
-const SCREEN_H = 844 / 390; // phone screen height in units of its width
-const SCROLL = Math.max(0, (CARD.y0 + CARD.y1) / 2 + TOP - SCREEN_H / 2); // brings the card to mid-screen
+// The short line's card on the drawn "Delivery check" screen (units of the 390-px screen width).
+const CARD = { x0: RECEIVER_CARD.x / 390, y0: RECEIVER_CARD.y / 390, x1: (RECEIVER_CARD.x + RECEIVER_CARD.w) / 390, y1: (RECEIVER_CARD.y + RECEIVER_CARD.h) / 390 };
 
 export const Receiver: React.FC<{ locale: Locale }> = ({ locale }) => {
   const f = useCurrentFrame();
@@ -146,7 +139,6 @@ export const Receiver: React.FC<{ locale: Locale }> = ({ locale }) => {
   const enter = prog(f, 0, 34);
   const exit = prog(f, D - 18, D, EASE_IN);
   const swap = prog(f, 120, 136, EASE_IN_OUT);
-  const scrollU = SCROLL * prog(f, 128, 160, EASE_IN_OUT);
   const pin = prog(f, 160, 188, EASE_IN_OUT);
   const spot = prog(f, 182, 194) * (1 - prog(f, 232, 244));
   const ca = prog(f, 186, 198) * (1 - prog(f, 234, 244));
@@ -158,7 +150,7 @@ export const Receiver: React.FC<{ locale: Locale }> = ({ locale }) => {
   const frame = Math.round(PW * 0.04);
   const rect = {
     x: CARD.x0 * psw,
-    y: (CARD.y0 - scrollU + TOP) * psw,
+    y: CARD.y0 * psw,
     w: (CARD.x1 - CARD.x0) * psw,
     h: (CARD.y1 - CARD.y0) * psw,
   };
@@ -193,27 +185,20 @@ export const Receiver: React.FC<{ locale: Locale }> = ({ locale }) => {
             }}
           >
             <Phone width={PW} glare={ry / 30}>
-              <Screen src="shots/receiving-po-en.png" width={psw} top={psw * TOP} redact={[EMAIL]} />
+              <ReceiverScreen view="result" sw={psw} sh={psh} />
               {/* screen change = a clean wipe (never two screens dissolved over each other) */}
-              <Screen
-                src="shots/reconcile-en.png"
-                width={psw}
-                scroll={scrollU * psw}
-                top={psw * TOP}
-                redact={[EMAIL, STUB]}
-                clip={`inset(0 0 0 ${(1 - swap) * 100}%)`}
-              />
+              <div style={{ position: 'absolute', inset: 0, clipPath: `inset(0 0 0 ${(1 - swap) * 100}%)` }}>
+                <ReceiverScreen view="check" sw={psw} sh={psh} />
+              </div>
               {swap > 0 && swap < 1 ? (
                 <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${(1 - swap) * 100}%`, width: 4, background: C.primary, boxShadow: `0 0 30px 8px ${C.primary}88` }} />
               ) : null}
-              {/* status bar: scrolled content passes under it, never under the island */}
-              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: psw * TOP, background: C.bg }} />
               <Spotlight
                 rect={rect}
                 a={spot}
-                src="shots/reconcile-en.png"
+                content={<ReceiverScreen view="check" sw={psw} sh={psh} />}
                 imgWidth={psw}
-                imgTop={(TOP - scrollU) * psw}
+                imgTop={0}
                 screenW={psw}
                 screenH={psh}
                 accent={C.primary}

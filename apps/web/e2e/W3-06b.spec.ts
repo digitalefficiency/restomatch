@@ -7,7 +7,7 @@ import { he as lHe } from '../lib/i18n/messages/landing/he';
  *   - /product carries the #problem #features #roi #trust anchors; the header
  *     nav, the footer and the home page's proof/trust links land on them;
  *   - an old /about#roi deep link forwards to /product#roi (Q5);
- *   - the old-figure promo film is off (M1): no "Watch 60 seconds" button;
+ *   - the promo films are the sample-month render (#318): the button opens the Hebrew film;
  *   - the Hebrew-only 9:16 cut never reaches an English phone (Q1);
  *   - the hero loop is captioned as a sample (M12).
  */
@@ -59,10 +59,27 @@ test.describe('W3-06b · /product anchors and links', () => {
 });
 
 test.describe('W3-06b · hero media gate', () => {
-  test('M1: no "Watch 60 seconds" promo button (old-figure films are off)', async ({ page }) => {
+  test('promo re-enabled (#318 sample-month films): the button opens the Hebrew film', async ({ page }) => {
     await open(page, '/');
-    await expect(page.getByRole('button', { name: lHe.hero.ctaWatch })).toHaveCount(0);
-    await expect(page.locator('main a[href="/showcase"]').first()).toBeVisible();
+    const watch = page.getByRole('button', { name: lHe.hero.ctaWatch });
+    await expect(watch).toBeVisible();
+    await watch.click();
+    const video = page.locator('dialog video');
+    await expect(video).toBeVisible();
+    await expect(video).toHaveAttribute('src', /\/media\/promo-he-720\.mp4$/);
+    // #320 review: the silent film's text alternative + the real next step live in the dialog
+    const dialog = page.locator('dialog[open]');
+    const transcriptId = await video.getAttribute('aria-describedby');
+    expect(transcriptId).toBeTruthy();
+    await expect(dialog.locator(`[id="${transcriptId}"] li`).first()).toBeAttached();
+    await dialog.getByText(lHe.hero.watchTranscript).click();
+    await expect(dialog.locator(`[id="${transcriptId}"]`)).toBeVisible();
+    const close = dialog.getByRole('button', { name: lHe.hero.watchClose });
+    const box = await close.boundingBox();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    await dialog.getByRole('link', { name: lHe.hero.ctaPrimary }).click();
+    await expect(page.locator('dialog[open]')).toHaveCount(0);
   });
 
   test('M12: the hero loop is captioned as a sample (desktop)', async ({ page }) => {
@@ -73,6 +90,12 @@ test.describe('W3-06b · hero media gate', () => {
 
   test.describe('phones', () => {
     test.use(PHONE);
+
+    test('#320: the 16:9 film is not offered on a phone — the /showcase link is', async ({ page }) => {
+      await open(page, '/');
+      await expect(page.getByRole('button', { name: lHe.hero.ctaWatch })).toBeHidden();
+      await expect(page.getByRole('link', { name: lHe.hero.ctaDemo })).toBeVisible();
+    });
 
     test('Q1: an English phone gets HeroMatch and never fetches the Hebrew 9:16 cut', async ({ page }) => {
       const nineBySixteen: string[] = [];

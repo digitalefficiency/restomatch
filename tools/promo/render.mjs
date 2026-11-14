@@ -1,6 +1,6 @@
 // Renders the promo with the container's preinstalled Chromium (no download).
 //   node render.mjs stills [he|en] [frame,frame,...]   → out/frames/*.png
-//   node render.mjs he | en | vertical | loop | loop-en | loop-9x16 | all
+//   node render.mjs he | en | loop | loop-en | loop-9x16 | all
 import { bundle } from '@remotion/bundler';
 import { renderMedia, renderStill, selectComposition } from '@remotion/renderer';
 import { mkdirSync, renameSync, unlinkSync } from 'node:fs';
@@ -10,20 +10,29 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const OUT = resolve(ROOT, 'out');
-const browserExecutable =
-  process.env.REMOTION_BROWSER ?? '/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell';
+import { existsSync, readdirSync } from 'node:fs';
+// the container's preinstalled Playwright headless shell (whatever revision is installed)
+const pwShell = () => {
+  const base = '/opt/pw-browsers';
+  if (!existsSync(base)) return undefined;
+  for (const d of readdirSync(base).filter((n) => n.startsWith('chromium_headless_shell-')).sort().reverse()) {
+    for (const rel of ['chrome-headless-shell-linux64/chrome-headless-shell', 'chrome-linux/headless_shell']) {
+      if (existsSync(`${base}/${d}/${rel}`)) return `${base}/${d}/${rel}`;
+    }
+  }
+  return undefined;
+};
+const browserExecutable = process.env.REMOTION_BROWSER ?? pwShell();
 const chromiumOptions = { gl: 'swangle' };
 mkdirSync(resolve(OUT, 'frames'), { recursive: true });
 
 const [mode = 'all', a, b] = process.argv.slice(2);
-// FACTS='{"leak":572,"spend":28389,...}' overrides the demo numbers (see src/copy.ts FACTS)
-const facts = process.env.FACTS ? JSON.parse(process.env.FACTS) : undefined;
 // STAGE=dark renders the original dark stage; default = light (the product's identity)
 const light = process.env.STAGE !== 'dark';
 const serveUrl = await bundle({ entryPoint: resolve(ROOT, 'src/index.ts'), publicDir: resolve(ROOT, 'public') });
 
 async function comp(id, locale) {
-  return selectComposition({ serveUrl, id, inputProps: { locale, facts, light }, browserExecutable, chromiumOptions });
+  return selectComposition({ serveUrl, id, inputProps: { locale, light }, browserExecutable, chromiumOptions });
 }
 
 async function video(id, locale, file, extra = {}) {
@@ -34,7 +43,7 @@ async function video(id, locale, file, extra = {}) {
     serveUrl,
     codec: 'h264',
     outputLocation: resolve(OUT, file),
-    inputProps: { locale, facts, light },
+    inputProps: { locale, light },
     browserExecutable,
     chromiumOptions,
     crf: 18,
@@ -66,13 +75,12 @@ if (mode === 'stills') {
   const composition = await comp(id, locale);
   for (const frame of frames) {
     const output = resolve(OUT, 'frames', `${id}-${locale}-${String(frame).padStart(4, '0')}.png`);
-    await renderStill({ composition, serveUrl, frame, output, inputProps: { locale, facts, light }, browserExecutable, chromiumOptions });
+    await renderStill({ composition, serveUrl, frame, output, inputProps: { locale, light }, browserExecutable, chromiumOptions });
     console.log('✓', output);
   }
 } else {
   if (mode === 'he' || mode === 'all') await video('Promo', 'he', 'restomatch-promo-he.mp4');
   if (mode === 'en' || mode === 'all') await video('Promo', 'en', 'restomatch-promo-en.mp4');
-  if (mode === 'vertical' || mode === 'all') await video('PromoVertical', 'he', 'restomatch-promo-he-vertical.mp4');
   if (mode === 'loop' || mode === 'all') await video('HeroLoop', 'he', 'hero-loop-master.mp4', { crf: 12 });
   if (mode === 'loop-en' || mode === 'all') await video('HeroLoop', 'en', 'hero-loop-en-master.mp4', { crf: 12 });
   if (mode === 'loop-9x16' || mode === 'all') await video('HeroLoopVertical', 'he', 'hero-loop-9x16-master.mp4', { crf: 12 });
