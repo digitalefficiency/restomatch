@@ -62,7 +62,7 @@ describe.each(LOCALES)('no ₪ for the receiver / chef (%s)', (locale) => {
   });
 
   it('A6 receiver late-truck notice', () => {
-    const input = { ...ctx, locale, poId: 'po-1', supplierName: 'תנובה', expectedAt: new Date('2026-10-24T06:00:00Z'), daysLate: 1 };
+    const input = { ...ctx, locale, poId: 'po-1', supplierName: 'תנובה', expectedAt: new Date('2026-10-24T06:00:00Z'), daysLate: 1, lineCount: 3 };
     assertNoIls(lateTruckReceiverBrief(input)!, input);
   });
 

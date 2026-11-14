@@ -10,10 +10,7 @@
  * delivery happens through outbox-dispatch.
  */
 import {
-  briefDedupeKey,
   briefOptionOn,
-  briefPayload,
-  enqueueNotification,
   newOrderPath,
   orderReminderBrief,
   recipientsForRestaurant,
@@ -41,6 +38,7 @@ import {
   startOfIlDay,
 } from '../lib/notifyHelpers';
 import { jobDb } from '../db';
+import { sendBrief } from '../lib/briefSend';
 
 export interface OrderRemindersJob {
   /** When omitted, sweeps ALL restaurants. */
@@ -178,7 +176,9 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
     const recipients = await recipientsForRestaurant(db, restaurant.id, [...ORDER_REMINDER_ROLES]);
     if (recipients.length === 0) continue;
 
-    // Deploy-day guard (see legacyOrderReminderKey): today's old-format keys.
+    // Deploy-day guard (see legacyOrderReminderKey): today's keys in either earlier
+    // format — `supplier:<sid>:order-reminder:<day>:<email>` (before #269) and
+    // `au:A5:<rid>:<userId>:<sid>:<day>` (#269, before notify()).
     const legacyToday = new Set(
       (
         await db
@@ -187,7 +187,8 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
           .where(
             and(
               eq(notificationsOutbox.restaurantId, restaurant.id),
-              sql`${notificationsOutbox.dedupeKey} like ${`supplier:%:order-reminder:${todayKey}:%`}`,
+              sql`(${notificationsOutbox.dedupeKey} like ${`supplier:%:order-reminder:${todayKey}:%`}
+                   or ${notificationsOutbox.dedupeKey} like ${`au:A5:${restaurant.id}:%:${todayKey}`})`,
             ),
           )
       ).map((r) => r.key),
@@ -195,33 +196,35 @@ export async function processOrderReminders(job: WorkerJob<OrderRemindersJob>) {
 
     for (const s of missing) {
       const window = s.orderSchedule?.windows?.find((w) => w.orderDays.includes(weekday));
-      const msg = orderReminderBrief({
+      const told = (r: { userId: string; email: string }) =>
+        legacyToday.has(legacyOrderReminderKey(s.id, todayKey, r.email)) ||
+        legacyToday.has(`au:A5:${restaurant.id}:${r.userId}:${s.id}:${todayKey}`);
+      const userIds = recipients.filter((r) => !told(r)).map((r) => r.userId);
+      if (userIds.length === 0) continue;
+      // G-06 notify(): quiet hours / Shabbat / ≤6 a day; perishable (a 09:00 reminder
+      // after noon is noise). Key = au:A5:<IL day>:<rid>:<sid>:<userId>:email.
+      const res = await sendBrief(db, {
         restaurantId: restaurant.id,
-        baseUrl: appBaseUrl(),
-        ilDate: todayKey,
-        supplierId: s.id,
-        supplierName: s.name,
-        orderDayLabel: weekdayLabel,
-        cutoffLabel: window?.cutoff,
-        draftPoId: draftBySupplier.get(s.id) ?? null,
+        now,
+        event: `au:A5:${todayKey}`,
+        audience: { userIds },
+        entity: { type: 'supplier', id: s.id },
+        perishable: true,
+        payload: { automationId: 'A5' },
+        build: ({ locale }) =>
+          orderReminderBrief({
+            restaurantId: restaurant.id,
+            baseUrl: appBaseUrl(),
+            locale,
+            ilDate: todayKey,
+            supplierId: s.id,
+            supplierName: s.name,
+            orderDayLabel: weekdayLabel,
+            cutoffLabel: window?.cutoff,
+            draftPoId: draftBySupplier.get(s.id) ?? null,
+          }),
       });
-      for (const recipient of recipients) {
-        if (legacyToday.has(legacyOrderReminderKey(s.id, todayKey, recipient.email))) continue;
-        // One call site: it becomes G-06 `notify()` (quiet hours, Shabbat, ≤6/day) when G-06 merges.
-        const { deduped } = await enqueueNotification(db, {
-          restaurantId: restaurant.id,
-          channel: 'email',
-          target: recipient.email,
-          subject: msg.subject,
-          body: msg.text,
-          html: msg.html,
-          payload: briefPayload(msg),
-          relatedEntityType: 'supplier',
-          relatedEntityId: s.id,
-          dedupeKey: briefDedupeKey(msg, restaurant.id, recipient.userId),
-        });
-        if (!deduped) enqueued += 1;
-      }
+      enqueued += res.enqueued;
     }
   }
 

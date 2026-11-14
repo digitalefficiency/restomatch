@@ -62,7 +62,7 @@ describe('links', () => {
   });
 });
 
-describe('A3 receiver morning brief', () => {
+describe('A4 receiver morning brief', () => {
   const deliveries = [
     { supplierName: 'תנובה', expectedAt: at('2026-10-25T06:00:00Z'), lineCount: 12 },
     { supplierName: 'שטראוס', expectedAt: at('2026-10-25T08:30:00Z'), lineCount: 5 },
@@ -78,8 +78,8 @@ describe('A3 receiver morning brief', () => {
     expect(m.deepLink).toBe(goLink(BASE, RID, '/dashboard/receiving'));
     expect(m.html).toContain('dir="rtl"');
     expect(m.dedupeSuffix).toBe('2026-10-25');
-    expect(m.automationId).toBe('A3');
-    expect(briefDedupeKey(m, RID, 'u1')).toBe(`au:A3:${RID}:u1:2026-10-25`);
+    expect(m.automationId).toBe('A4');
+    expect(briefDedupeKey(m, RID, 'u1')).toBe(`au:A4:${RID}:u1:2026-10-25`);
   });
 
   it('en renders LTR', () => {
@@ -93,7 +93,7 @@ describe('A3 receiver morning brief', () => {
   });
 });
 
-describe('A4 evening digest', () => {
+describe('A7 evening digest', () => {
   const full = {
     ...ctx,
     ilDate: '2026-10-25',
@@ -203,7 +203,10 @@ describe('A6 late truck', () => {
 
   it('receiver: day 1 only, no supplier link', () => {
     const r = lateTruckReceiverBrief(base)!;
-    expect(r.text).toContain('המשלוח מתנובה מאחר (תוכנן ל-24/10)');
+    expect(r.subject).toBe('איחור באספקה מ-תנובה');
+    expect(r.text).toContain('ההזמנה באיחור של יום אחד. מועד צפוי: 24/10.');
+    expect(r.text).toContain('ההנהלה מטפלת מול הספק.');
+    expect(r.text).not.toContain('שלחו לספק');
     expect(r.text).not.toContain('wa.me');
     expect(r.text).not.toContain('mailto:');
     expect(lateTruckReceiverBrief({ ...base, daysLate: 3 })).toBeNull();
@@ -211,7 +214,7 @@ describe('A6 late truck', () => {
   });
 });
 
-describe('A7 match alert on re-match', () => {
+describe('A1 match alert on re-match', () => {
   const k = (type: string, line: string) => findingIdentity({ invoiceId: 'inv-1', type, poLineId: line });
 
   it('identity prefers po_line, then invoice_line, then gr_line', () => {
@@ -279,7 +282,7 @@ describe('link helpers are linear on hostile input (CodeQL)', () => {
 describe('payload.invoiceId (AU-07 "acted within 48 h" join)', () => {
   it('A7 always carries the invoice; A6 only when the PO has one; others never', () => {
     const a7 = matchAlertBrief({ ...ctx, invoiceId: 'inv-1', invoiceRef: '1', supplierName: 's', newKeys: ['k'], leakAgorot: null })!;
-    expect(briefPayload(a7)).toEqual({ automationId: 'A7', invoiceId: 'inv-1' });
+    expect(briefPayload(a7)).toEqual({ automationId: 'A1', invoiceId: 'inv-1' });
     const late = { ...ctx, poId: 'po-1', poRef: '1', supplierName: 's', restaurantName: 'r', expectedAt: at('2026-10-24T06:00:00Z'), daysLate: 1, lineCount: 1 };
     expect(briefPayload(lateTruckManagerBrief(late))).toEqual({ automationId: 'A6' });
     expect(briefPayload(lateTruckManagerBrief({ ...late, invoiceId: 'inv-9' }))).toEqual({ automationId: 'A6', invoiceId: 'inv-9' });

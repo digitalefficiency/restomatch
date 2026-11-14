@@ -6,19 +6,20 @@
  *     so the PO status alone said "late" for orders already received (G-01), AND
  *   • it is late (deliveryState: expected + 60 min, no receipt), at most
  *     LOOKBACK_DAYS old — and only on days 1, 3 and 7 after the expected day.
- * One e-mail per manager per (PO, step), deduped by the outbox key
- * `po:<id>:late:d1|d3|d7:<recipient>`, so a re-run never re-sends a step.
+ * One e-mail per owner/manager per (PO, step) via notify(), deduped by
+ * `au:A6:d1|d3|d7:<rid>:<poId>:<userId>:email`, so a re-run never re-sends a step
+ * (the old `po:<id>:late:d<n>:<email>` keys are honoured on deploy day).
  *
  * Pure detection: it reads POs and enqueues notifications; real delivery happens
  * through outbox-dispatch. Recipient routing is unchanged (recipientsForRestaurant).
  */
 import {
+  briefOptionOn,
   deliveryState,
-  enqueueNotification,
+  lateTruckManagerBrief,
+  lateTruckReceiverBrief,
   localDaysBetween,
-  recipientsForRestaurant,
   startOfDayInTz,
-  supplierDelayEmail,
 } from '@restomatch/api';
 import {
   and,
@@ -29,6 +30,7 @@ import {
   inArray,
   isNotNull,
   lt,
+  notificationsOutbox,
   poLines,
   purchaseOrders,
   restaurants,
@@ -36,7 +38,8 @@ import {
   suppliers,
 } from '@restomatch/db';
 import { makeWorker, type WorkerJob } from '../queue';
-import { appBaseUrl, formatIlDate, ilDateKey } from '../lib/notifyHelpers';
+import { appBaseUrl, ilDateKey } from '../lib/notifyHelpers';
+import { sendBrief } from '../lib/briefSend';
 import { jobDb } from '../db';
 
 export interface SupplierDelaysJob {
@@ -84,6 +87,10 @@ export async function processSupplierDelays(job: WorkerJob<SupplierDelaysJob>) {
         poId: purchaseOrders.id,
         status: purchaseOrders.status,
         supplierName: suppliers.name,
+        contactWhatsapp: suppliers.contactWhatsapp,
+        contactEmail: suppliers.contactEmail,
+        customerRef: purchaseOrders.customerRef,
+        sourceRef: purchaseOrders.sourceRef,
         expectedAt: purchaseOrders.expectedDeliveryAt,
       })
       .from(purchaseOrders)
@@ -118,8 +125,10 @@ export async function processSupplierDelays(job: WorkerJob<SupplierDelaysJob>) {
     const toChase = rows.filter((r) => (CHASE_DAYS as readonly number[]).includes(r.daysLate));
     if (toChase.length === 0) continue;
 
-    const recipients = await recipientsForRestaurant(db, restaurant.id);
-    if (recipients.length === 0) continue;
+    if (!briefOptionOn(restaurant.settings, 'supplierDelays')) {
+      console.log(`[supplier-delays] restaurant=${restaurant.id} skipped: option off`);
+      continue;
+    }
 
     // Line counts for the POs chased today (one grouped query).
     const poIds = toChase.map((r) => r.poId);
@@ -132,29 +141,67 @@ export async function processSupplierDelays(job: WorkerJob<SupplierDelaysJob>) {
     for (const c of counts) lineCountMap.set(c.poId, Number(c.c));
 
     for (const r of toChase) {
-      const expectedAt = r.expectedAt!;
-      const email = supplierDelayEmail({
+      const base = {
+        restaurantId: restaurant.id,
+        baseUrl: appBaseUrl(),
+        poId: r.poId,
+        // The order number the supplier knows; a short id when it has none.
+        poRef: r.customerRef?.trim() || r.sourceRef?.trim() || r.poId.slice(0, 8),
         supplierName: r.supplierName,
-        expectedAtLabel: formatIlDate(expectedAt),
+        restaurantName: restaurant.name,
+        expectedAt: r.expectedAt!,
         daysLate: r.daysLate,
         lineCount: lineCountMap.get(r.poId) ?? 0,
-        poUrl: `${appBaseUrl()}/dashboard/receiving/${r.poId}`,
-      });
+        contactWhatsapp: r.contactWhatsapp,
+        contactEmail: r.contactEmail,
+      };
 
-      for (const recipient of recipients) {
-        const { deduped } = await enqueueNotification(db, {
+      // DEPLOY-DAY GUARD (one-time; delete once live a full day): the old key was
+      // `po:<id>:late:d<n>:<email>`. If this step already went out under it today,
+      // the managers were told — send nothing new for this PO and step.
+      const [legacy] = await db
+        .select({ id: notificationsOutbox.id })
+        .from(notificationsOutbox)
+        .where(
+          and(
+            eq(notificationsOutbox.restaurantId, restaurant.id),
+            sql`${notificationsOutbox.dedupeKey} like ${`po:${r.poId}:late:d${r.daysLate}:%`}`,
+          ),
+        )
+        .limit(1);
+      if (legacy) continue;
+
+      // Owner + manager: the late PO and a pre-addressed question to the supplier
+      // (a wa.me / mailto draft: nothing is ever sent to the supplier by the server).
+      // NOT perishable: CHASE_DAYS steps are one-off, so a step on Shabbat (or over the
+      // daily cap) is delayed to the next send window, never dropped.
+      const managers = await sendBrief(db, {
+        restaurantId: restaurant.id,
+        now,
+        event: `au:A6:d${r.daysLate}`,
+        audience: { roles: ['owner', 'manager'] },
+        entity: { type: 'purchase_order', id: r.poId },
+        perishable: false,
+        payload: { automationId: 'A6' },
+        build: ({ locale }) => lateTruckManagerBrief({ ...base, locale }),
+      });
+      enqueued += managers.enqueued;
+
+      // Day 1 only: the receivers hear the truck is late (no ₪, no supplier link). A NEW
+      // send for existing tenants → also behind receiverBrief (default OFF). Perishable:
+      // "the truck is late today" is useless tomorrow.
+      if (r.daysLate === 1 && briefOptionOn(restaurant.settings, 'receiverBrief')) {
+        const receivers = await sendBrief(db, {
           restaurantId: restaurant.id,
-          channel: 'email',
-          target: recipient.email,
-          subject: email.subject,
-          body: email.text,
-          html: email.html,
-          relatedEntityType: 'purchase_order',
-          relatedEntityId: r.poId,
-          // One per (PO, chase step, recipient): days 1, 3, 7 — never twice, never daily.
-          dedupeKey: `po:${r.poId}:late:d${r.daysLate}:${recipient.email}`,
+          now,
+          event: 'au:A6:d1:receiver',
+          audience: { roles: ['receiver'] },
+          entity: { type: 'purchase_order', id: r.poId },
+          perishable: true,
+          payload: { automationId: 'A6' },
+          build: ({ locale }) => lateTruckReceiverBrief({ ...base, locale }),
         });
-        if (!deduped) enqueued += 1;
+        enqueued += receivers.enqueued;
       }
     }
   }

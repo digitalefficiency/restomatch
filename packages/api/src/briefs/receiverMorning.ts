@@ -5,7 +5,7 @@ import { briefHtml } from './render';
 import type { BriefContext, BriefMessage } from './types';
 
 /**
- * A3 · the 06:00 receiver truck brief. NO ₪ — the input type carries no amount,
+ * A4 · the 06:00 receiver truck brief. NO ₪ — the input type carries no amount,
  * price or total at all (owner: the receiver sees no ₪ anywhere, notifications
  * included). Zero deliveries → `null` (never "0 משלוחים").
  */
@@ -43,5 +43,5 @@ export function receiverMorningBrief(input: ReceiverMorningInput): BriefMessage 
     lines: items.map((t) => ({ text: t })),
     cta: { label: c.cta, url: deepLink },
   });
-  return { subject, text, html, deepLink, dedupeSuffix: input.ilDate, automationId: 'A3' };
+  return { subject, text, html, deepLink, dedupeSuffix: input.ilDate, automationId: 'A4' };
 }

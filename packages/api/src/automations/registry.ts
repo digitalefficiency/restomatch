@@ -52,9 +52,11 @@ export type AutomationSlot =
  * share `po:` with the PO "placed" send), so each row names its own matcher.
  * `none` = no reliable matcher yet → the UI says "עוד לא נמדד".
  */
+export type OutboxKeyMatch = { kind: 'prefix'; prefix: string } | { kind: 'like'; like: string };
 export type OutboxMatch =
-  | { kind: 'prefix'; prefix: string }
-  | { kind: 'like'; like: string }
+  | OutboxKeyMatch
+  /** Any of these key matchers: a producer whose key format changed counts its historic rows too. */
+  | { kind: 'anyOf'; matchers: ReadonlyArray<OutboxKeyMatch> }
   | { kind: 'relatedEntityType'; type: string }
   | { kind: 'none' };
 
@@ -124,27 +126,51 @@ export const AUTOMATIONS: ReadonlyArray<AutomationDef> = [
   {
     id: 'A6',
     key: 'supplierDelays',
-    // Train C (C3): supplierDelays.ts does not read the option yet, so no switch is
-    // offered ("תמיד פעיל"). Flip back to the option once the job honours it.
-    control: { kind: 'always' },
+    // AU-04: supplierDelays.ts honours the option. Default ON: every tenant already gets
+    // the late-truck mail today (continuity). Its day-1 receiver notice is a NEW send and
+    // is also gated by receiverBrief (default OFF).
+    control: { kind: 'option', option: 'supplierDelays', default: true },
     slot: '10:00',
     audience: ['owner', 'manager'],
     carriesIls: false,
-    outboxMatch: { kind: 'like', like: 'po:%:late:%' },
+    // Historic `po:<id>:late:d<n>:<email>` rows + AU-04's `au:A6:d<n>:…` keys.
+    outboxMatch: {
+      kind: 'anyOf',
+      matchers: [
+        { kind: 'like', like: 'po:%:late:%' },
+        { kind: 'prefix', prefix: 'au:A6:' },
+      ],
+    },
   },
   {
     id: 'A7',
     key: 'eveningDigest',
-    // Train C (C3): endOfDayReport.ts does not read the option yet — "תמיד פעיל", no switch.
-    control: { kind: 'always' },
+    // AU-04: endOfDayReport.ts honours the option. A7 IS the 19:00 end-of-day digest
+    // (one per recipient per Israel day), never a second evening mail. Default ON (today's behaviour).
+    control: { kind: 'option', option: 'eveningDigest', default: true },
     slot: '19:00',
     audience: ['owner', 'manager'],
     carriesIls: true,
-    outboxMatch: { kind: 'prefix', prefix: 'eod-report:' },
+    // Historic + current `eod-report:` rows; `au:A7:` reserved for the digest's notify() keys.
+    outboxMatch: {
+      kind: 'anyOf',
+      matchers: [
+        { kind: 'prefix', prefix: 'eod-report:' },
+        { kind: 'prefix', prefix: 'au:A7:' },
+      ],
+    },
   },
-  // Train C (C3): receiverBrief (A4) is hidden until a job sends receiverMorningBrief;
-  // its option key stays in AUTOMATION_OPTION_KEYS so briefs/options.ts keeps resolving.
-
+  {
+    id: 'A4',
+    key: 'receiverBrief',
+    // AU-04: dailyExpectations.ts sends it (06:00, e-mail per AD3). A NEW send with no
+    // owner decision for default-on → OFF for existing tenants; an admin / owner turns it on.
+    control: { kind: 'option', option: 'receiverBrief', default: false },
+    slot: '06:00',
+    audience: ['receiver'],
+    carriesIls: false,
+    outboxMatch: { kind: 'prefix', prefix: 'au:A4:' },
+  },
   {
     id: 'A1',
     key: 'matchAlerts',

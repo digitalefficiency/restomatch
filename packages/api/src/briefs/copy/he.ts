@@ -28,20 +28,9 @@ export const he: BriefCopy = {
     open: 'פתיחה',
   },
   lateTruck: {
-    managerSubject: (s) => `המשלוח מ${s} עדיין לא הגיע`,
-    managerLine: (s, ref, d, late, l) =>
-      `ההזמנה ${ref} מ${s} תוכננה ל-${d} ועדיין לא הגיעה (${days(late)}, ${lines(l)}).`,
-    sendToSupplier: 'שלחו לספק:',
-    whatsapp: 'וואטסאפ',
-    email: 'מייל',
-    noContact: 'אין פרטי קשר לספק · הוסיפו בכרטיס הספק',
-    openPo: 'צפייה בהזמנה',
     supplierText: (s, ref, d, r) =>
       `שלום ${s}, ההזמנה ${ref} שתוכננה ל-${d} עדיין לא הגיעה. מתי צפוי המשלוח? תודה, ${r}`,
     supplierSubject: (ref) => `ההזמנה ${ref}: מתי צפוי המשלוח?`,
-    receiverSubject: (s) => `המשלוח מ${s} מאחר`,
-    receiverLine: (s, d) => `המשלוח מ${s} מאחר (תוכנן ל-${d}). ההנהלה מטפלת מול הספק.`,
-    receiverCta: 'לקבלת סחורה',
   },
   matchAlert: {
     subject: (n, s) => (n === 1 ? `פער חדש בחשבונית של ${s}` : `${n} פערים חדשים בחשבונית של ${s}`),

@@ -19,19 +19,9 @@ export interface BriefCopy {
     open: string;
   };
   lateTruck: {
-    managerSubject: (supplier: string) => string;
-    managerLine: (supplier: string, poRef: string, plannedDate: string, daysLate: number, lines: number) => string;
-    sendToSupplier: string;
-    whatsapp: string;
-    email: string;
-    noContact: string;
-    openPo: string;
-    /** The supplier draft (dd.MM). Partner wording: a question, never a demand. */
+    /** The supplier draft (dd.MM). Partner wording: a question, never a demand. Hebrew always. */
     supplierText: (supplier: string, poRef: string, plannedDate: string, restaurant: string) => string;
     supplierSubject: (poRef: string) => string;
-    receiverSubject: (supplier: string) => string;
-    receiverLine: (supplier: string, plannedDate: string) => string;
-    receiverCta: string;
   };
   matchAlert: {
     subject: (count: number, supplier: string) => string;

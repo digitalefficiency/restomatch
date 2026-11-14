@@ -24,8 +24,12 @@ import {
   releaseClaimsForRematch,
   resolveApprovalThresholds,
   formatIlsAgorot,
+  findingIdentity,
+  matchAlertBrief,
+  newFindingKeys,
 } from '@restomatch/api';
-import { and, desc, eq, invoices, matchRuns, restaurants, sql, suppliers, type Database } from '@restomatch/db';
+import { and, desc, discrepancies, eq, invoices, matchRuns, restaurants, sql, suppliers, type Database, type UserRole } from '@restomatch/db';
+import { sendBrief } from '../lib/briefSend';
 import { computeInvoiceLeak } from '@restomatch/charts';
 import { runMatch, type MatchOutput } from '@restomatch/matching';
 import { makeWorker, type WorkerJob } from '../queue';
@@ -114,6 +118,12 @@ export interface MatchJobOutcome {
   persisted: Awaited<ReturnType<typeof persistMatchRun>> | null;
   /** True when this run replaced an earlier run of the same invoice. */
   replaced: boolean;
+  /**
+   * AU-04 A1: on a re-match, the finding identities of THIS run that the replaced
+   * run did not have (open OR decided there), and the roles their open rows route
+   * to. Empty on a first match and when the re-match found nothing new.
+   */
+  newFindings?: { keys: string[]; roles: UserRole[] };
   /** Why nothing ran (logs/tests). */
   skipped?:
     | 'ocr_pending'
@@ -237,6 +247,7 @@ export async function matchInvoiceForJob(
   const rules = buildRules(resolveApprovalThresholds(restaurant?.settings?.approvalThresholds));
   const result = runMatch(built.input);
 
+  let newFindingsOut: { keys: string[]; roles: UserRole[] } | undefined;
   const persisted = await db.transaction(async (rawTx) => {
     const tx = rawTx as unknown as Database;
     // K: a retake (registerInvoice) may have sent the invoice back to OCR while
@@ -293,6 +304,7 @@ export async function matchInvoiceForJob(
     // approvals, and a notification for the duplicate. Skip like any already-matched job.
     if (!priorRun && race.has_run) return 'already_matched' as const;
     let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;
+    let priorIdentities: string[] | null = null;
     if (priorRun) {
       // Claims on the run being replaced (round 7): bare ones go, a claim in
       // progress is money history — skip (visible: the invoice keeps its run and
@@ -315,6 +327,10 @@ export async function matchInvoiceForJob(
         return 'claim_in_progress' as const;
       }
       prior = await loadPriorDecisions(tx, restaurantId, invoiceId);
+      // AU-04 A1: the replaced run's finding identities (open AND decided), read
+      // before the delete — "new" is measured against them, never against
+      // rolesNeedingNotification (which re-lists every undecided carry-over).
+      priorIdentities = await findingIdentitiesOf(tx, restaurantId, { invoiceId });
       await tx
         .delete(matchRuns)
         .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
@@ -330,6 +346,21 @@ export async function matchInvoiceForJob(
     // W2-04 rebind: the claims released above come back for the re-applied
     // accepted decisions, under their ORIGINAL decider (shared with match.runForInvoice).
     if (priorRun) await rebindDecidedClaims(tx, restaurantId, out.matchRunId);
+    if (priorIdentities) {
+      const now = await findingRowsOf(tx, restaurantId, out.matchRunId);
+      const fresh = new Set(newFindingKeys(priorIdentities, now.map((r) => r.key)));
+      // Only NEW findings someone has to decide count: an auto-approved new row is
+      // not "3 new findings" in the message, and alone it sends nothing.
+      const actionable = now.filter((r) => fresh.has(r.key) && r.open && r.role && ALERT_ROLES.includes(r.role));
+      const keys = [...new Set(actionable.map((r) => r.key))];
+      const roles = [...new Set(actionable.map((r) => r.role as UserRole))];
+      newFindingsOut = { keys, roles };
+      // Enqueued in THIS transaction, atomic with the run: a retry after commit reads
+      // the committed run (no new identities) and must not be the only chance to send.
+      if (keys.length > 0 && roles.length > 0) {
+        await notifyNewFindingsOnRematch(tx, { restaurantId, invoiceId, matchRunId: out.matchRunId, newFindings: newFindingsOut });
+      }
+    }
     return out;
   });
   if (typeof persisted === 'string') {
@@ -338,7 +369,47 @@ export async function matchInvoiceForJob(
     }
     return { result: CLEAN, persisted: null, replaced: false, skipped: persisted };
   }
-  return { result, persisted, replaced: Boolean(priorRun) };
+  return { result, persisted, replaced: Boolean(priorRun), ...(newFindingsOut ? { newFindings: newFindingsOut } : {}) };
+}
+
+/** Only deciders hear a match alert — never the receiver or the chef. */
+const ALERT_ROLES: readonly UserRole[] = ['owner', 'manager', 'bookkeeper'];
+
+type FindingRow = { key: string; open: boolean; role: UserRole | null };
+
+async function findingRowsOf(tx: Database, restaurantId: string, matchRunId: string): Promise<FindingRow[]> {
+  const rows = await tx
+    .select({
+      type: discrepancies.type,
+      poLineId: discrepancies.poLineId,
+      invoiceLineId: discrepancies.invoiceLineId,
+      grLineId: discrepancies.grLineId,
+      status: discrepancies.resolutionStatus,
+      role: discrepancies.requiresRole,
+      invoiceId: matchRuns.invoiceId,
+    })
+    .from(discrepancies)
+    .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
+    .where(and(eq(discrepancies.matchRunId, matchRunId), eq(discrepancies.restaurantId, restaurantId)));
+  return rows.map((r) => ({
+    key: findingIdentity({ invoiceId: r.invoiceId ?? '', type: r.type, poLineId: r.poLineId, invoiceLineId: r.invoiceLineId, grLineId: r.grLineId }),
+    open: r.status === 'open',
+    role: r.role,
+  }));
+}
+
+async function findingIdentitiesOf(tx: Database, restaurantId: string, by: { invoiceId: string }): Promise<string[]> {
+  const rows = await tx
+    .select({
+      type: discrepancies.type,
+      poLineId: discrepancies.poLineId,
+      invoiceLineId: discrepancies.invoiceLineId,
+      grLineId: discrepancies.grLineId,
+    })
+    .from(discrepancies)
+    .innerJoin(matchRuns, and(eq(matchRuns.id, discrepancies.matchRunId), eq(matchRuns.restaurantId, restaurantId)))
+    .where(and(eq(matchRuns.invoiceId, by.invoiceId), eq(discrepancies.restaurantId, restaurantId)));
+  return rows.map((r) => findingIdentity({ invoiceId: by.invoiceId, ...r }));
 }
 
 // Env-gated provider selection: real WhatsApp Cloud when
@@ -552,6 +623,10 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
     }
   }
 
+  // AU-04 A1 · a RE-match that found something NEW was told inside the match
+  // transaction (matchInvoiceForJob → notifyNewFindingsOnRematch); W2-04's
+  // first-match alert above is untouched.
+
   console.log(
     `[match-invoice] restaurant=${restaurantId} invoice=${invoiceId} ` +
       `status=${result.status} discrepancies=${persisted.discrepancyCount} ` +
@@ -560,4 +635,46 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
   );
 
   return result;
+}
+
+/**
+ * AU-04 A1: tell the roles the NEW findings route to — once per (invoice, new
+ * identity set, person). A replay, or an auto re-match that adds nothing, sends nothing.
+ */
+async function notifyNewFindingsOnRematch(
+  db: Database,
+  a: { restaurantId: string; invoiceId: string; matchRunId: string; newFindings: { keys: string[]; roles: UserRole[] } },
+): Promise<void> {
+  const [inv] = await db
+    .select({ number: invoices.invoiceNumber, supplierName: suppliers.name })
+    .from(invoices)
+    .innerJoin(suppliers, eq(suppliers.id, invoices.supplierId))
+    .where(and(eq(invoices.id, a.invoiceId), eq(invoices.restaurantId, a.restaurantId)))
+    .limit(1);
+  // The invoice's claimable ₪ (the letters' rule, before VAT), never the engine Σ|Δ|.
+  const leak = await invoiceClaimAgorot(db, a.restaurantId, a.invoiceId);
+  const msgOf = (locale: 'he' | 'en') =>
+    matchAlertBrief({
+      restaurantId: a.restaurantId,
+      baseUrl: appBaseUrl(),
+      locale,
+      invoiceId: a.invoiceId,
+      invoiceRef: inv?.number?.trim() || a.invoiceId.slice(0, 8),
+      supplierName: inv?.supplierName ?? 'ספק',
+      newKeys: a.newFindings.keys,
+      leakAgorot: leak > 0 ? leak : null,
+    });
+  const probe = msgOf('he');
+  if (!probe) return;
+  await sendBrief(db, {
+    restaurantId: a.restaurantId,
+    now: new Date(),
+    // The identity-set hash is in the event: never the run id alone.
+    event: `au:A1:${probe.dedupeSuffix.split(':').pop()}`,
+    audience: { roles: a.newFindings.roles },
+    entity: { type: 'match_run', id: a.matchRunId },
+    perishable: false,
+    payload: { automationId: 'A1', invoiceId: a.invoiceId },
+    build: ({ locale }) => msgOf(locale),
+  });
 }

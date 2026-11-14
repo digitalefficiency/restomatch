@@ -117,8 +117,9 @@ describe('supplier-delays only chases deliveries that never arrived (G-01)', () 
     //            d1 d2 d3 d4 d5 d6 d7 d8
     expect(after).toEqual([1, 1, 2, 2, 2, 2, 3, 3]);
     const keys = (await outboxRows(t.restaurantId, id)).map((r) => r.key).sort();
+    // AU-04 A6: the send goes through G-06 notify() — key = event:rid:po:user:channel.
     expect(keys).toEqual(
-      ['d1', 'd3', 'd7'].map((step) => `po:${id}:late:${step}:g01-missing-${RUN}@test.local`).sort(),
+      ['d1', 'd3', 'd7'].map((step) => `au:A6:${step}:${t.restaurantId}:${id}:${t.userId}:email`).sort(),
     );
   });
 
