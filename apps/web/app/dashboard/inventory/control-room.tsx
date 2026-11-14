@@ -51,14 +51,18 @@ export function ControlRoomCard() {
   const geo = sparkGeometry(series.points, targetBp, series.minBp, series.maxBp);
   const known = series.points.filter((p) => p.bp != null);
   const trendLabel = t('controlRoom.trendLabel', {
-    points: known.map((p) => `${dayText(p.closingDate, locale)} ${pct(p.bp!, locale)}`).join(', ') || '—',
+    points:
+      known.map((p) => `${dayText(p.closingDate, locale)} ${pct(p.bp!, locale)}`).join(', ') || '—',
     target: pct(targetBp, locale),
   });
 
   return (
     <Card padding="md" className="space-y-5" data-testid="control-room">
       <div className="flex items-start gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary" aria-hidden="true">
+        <span
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"
+          aria-hidden="true"
+        >
           <Gauge className="h-5 w-5" />
         </span>
         <div className="min-w-0">
@@ -76,33 +80,74 @@ export function ControlRoomCard() {
           <p className="text-sm text-subtle">{t('controlRoom.noData')}</p>
         ) : (
           <div className="flex flex-wrap items-center gap-4">
-            <svg viewBox={`0 0 ${geo.w} ${geo.h}`} className="h-14 w-60 overflow-visible" role="img" aria-label={trendLabel} data-testid="control-room-trend">
-              <line x1={0} x2={geo.w} y1={geo.targetY} y2={geo.targetY} style={{ stroke: 'rgb(var(--c-ink) / 0.35)' }} strokeWidth={1} strokeDasharray="3 3" />
-              {geo.segments.map((pts, i) => (
-                <polyline key={i} points={pts} fill="none" style={{ stroke: 'rgb(var(--c-primary))' }} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-              ))}
-              {geo.dots.map((d) => (
-                // Hover target bigger than the mark; the native title is the tooltip.
-                <g key={d.closingDate}>
-                  <circle cx={d.cx} cy={d.cy} r={9} fill="transparent">
-                    <title>{`${dayText(d.closingDate, locale)} · ${pct(d.bp, locale)}`}</title>
-                  </circle>
-                  <circle cx={d.cx} cy={d.cy} r={4} style={{ fill: 'rgb(var(--c-primary))', stroke: 'rgb(var(--c-surface))' }} strokeWidth={2} pointerEvents="none" />
-                </g>
-              ))}
-            </svg>
+            {/* A trend needs two known points; with one, the text below says it all (no lone dot). */}
+            {known.length >= 2 ? (
+              <svg
+                viewBox={`0 0 ${geo.w} ${geo.h}`}
+                className="h-14 w-60 overflow-visible"
+                role="img"
+                aria-label={trendLabel}
+                data-testid="control-room-trend"
+              >
+                <line
+                  x1={0}
+                  x2={geo.w}
+                  y1={geo.targetY}
+                  y2={geo.targetY}
+                  style={{ stroke: 'rgb(var(--c-ink) / 0.35)' }}
+                  strokeWidth={1}
+                  strokeDasharray="3 3"
+                />
+                {geo.segments.map((pts, i) => (
+                  <polyline
+                    key={i}
+                    points={pts}
+                    fill="none"
+                    style={{ stroke: 'rgb(var(--c-primary))' }}
+                    strokeWidth={2}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                  />
+                ))}
+                {geo.dots.map((d) => (
+                  // Hover target bigger than the mark; the native title is the tooltip.
+                  <g key={d.closingDate}>
+                    <circle cx={d.cx} cy={d.cy} r={9} fill="transparent">
+                      <title>{`${dayText(d.closingDate, locale)} · ${pct(d.bp, locale)}`}</title>
+                    </circle>
+                    <circle
+                      cx={d.cx}
+                      cy={d.cy}
+                      r={4}
+                      style={{ fill: 'rgb(var(--c-primary))', stroke: 'rgb(var(--c-surface))' }}
+                      strokeWidth={2}
+                      pointerEvents="none"
+                    />
+                  </g>
+                ))}
+              </svg>
+            ) : null}
             <div className="text-sm">
               {series.latest ? (
-                <p className={cn('font-semibold tabular-nums', series.latest.bp > targetBp ? 'text-warn' : 'text-ink')}>
+                <p
+                  className={cn(
+                    'font-semibold tabular-nums',
+                    series.latest.bp > targetBp ? 'text-warn' : 'text-ink',
+                  )}
+                >
                   {t('controlRoom.latest', { pct: pct(series.latest.bp, locale) })}
                 </p>
               ) : null}
               {series.latest?.deltaBp != null ? (
                 <p className="text-muted tabular-nums">
-                  {t('controlRoom.delta', { delta: `${series.latest.deltaBp > 0 ? '+' : series.latest.deltaBp < 0 ? '−' : ''}${pct(Math.abs(series.latest.deltaBp), locale)}` })}
+                  {t('controlRoom.delta', {
+                    delta: `${series.latest.deltaBp > 0 ? '+' : series.latest.deltaBp < 0 ? '−' : ''}${pct(Math.abs(series.latest.deltaBp), locale)}`,
+                  })}
                 </p>
               ) : null}
-              <p className="text-subtle">{t('controlRoom.target', { pct: pct(targetBp, locale) })}</p>
+              <p className="text-subtle">
+                {t('controlRoom.target', { pct: pct(targetBp, locale) })}
+              </p>
             </div>
           </div>
         )}
@@ -112,12 +157,26 @@ export function ControlRoomCard() {
       {equation ? (
         <section aria-labelledby="cr-eq" className="space-y-2">
           <h3 id="cr-eq" className="text-sm font-medium text-muted">
-            {q.data.period ? t('controlRoom.period', { from: dayText(q.data.period.from, locale), to: dayText(q.data.period.to, locale) }) : null}
+            {q.data.period
+              ? t('controlRoom.period', {
+                  from: dayText(q.data.period.from, locale),
+                  to: dayText(q.data.period.to, locale),
+                })
+              : null}
           </h3>
-          <ol className="divide-y divide-line rounded-xl border border-line" data-testid="control-room-equation">
+          <ol
+            className="divide-y divide-line rounded-xl border border-line"
+            data-testid="control-room-equation"
+          >
             {equation.terms.map((term) => (
-              <li key={term.key} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                <Link href={drillHref(term.drill)} className="touch-target inline-flex items-center gap-2 font-medium text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+              <li
+                key={term.key}
+                className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+              >
+                <Link
+                  href={drillHref(term.drill)}
+                  className="touch-target inline-flex items-center gap-2 font-medium text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                >
                   <span aria-hidden="true" className="w-3 text-center text-muted">
                     {term.sign < 0 ? '−' : '+'}
                   </span>
@@ -140,27 +199,48 @@ export function ControlRoomCard() {
               </span>
             </li>
             <li className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-              <Link href={drillHref(equation.sales.drill)} className="touch-target inline-flex items-center gap-2 font-medium text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
+              <Link
+                href={drillHref(equation.sales.drill)}
+                className="touch-target inline-flex items-center gap-2 font-medium text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+              >
                 <span aria-hidden="true" className="w-3 text-center text-muted">
                   ÷
                 </span>
                 {t('controlRoom.terms.sales')}
               </Link>
-              <span className="tabular-nums text-ink">{equation.sales.agorot != null ? <Money agorot={equation.sales.agorot} context="line" /> : '—'}</span>
+              <span className="tabular-nums text-ink">
+                {equation.sales.agorot != null ? (
+                  <Money agorot={equation.sales.agorot} context="line" />
+                ) : (
+                  '—'
+                )}
+              </span>
             </li>
-            <li className="flex items-center justify-between gap-3 px-3 py-2 text-sm font-semibold" data-testid="control-room-pct">
+            <li
+              className="flex items-center justify-between gap-3 px-3 py-2 text-sm font-semibold"
+              data-testid="control-room-pct"
+            >
               <span>
                 <span aria-hidden="true" className="me-2 inline-block w-3 text-center text-muted">
                   =
                 </span>
                 {t('controlRoom.terms.pct')}
               </span>
-              <span className={cn('tabular-nums', equation.actualBp != null && equation.actualBp > targetBp ? 'text-warn' : 'text-ink')}>
+              <span
+                className={cn(
+                  'tabular-nums',
+                  equation.actualBp != null && equation.actualBp > targetBp
+                    ? 'text-warn'
+                    : 'text-ink',
+                )}
+              >
                 {equation.actualBp != null ? pct(equation.actualBp, locale) : '—'}
               </span>
             </li>
           </ol>
-          {equation.sales.agorot == null ? <p className="text-xs text-subtle">{t('controlRoom.noSales')}</p> : null}
+          {equation.sales.agorot == null ? (
+            <p className="text-xs text-subtle">{t('controlRoom.noSales')}</p>
+          ) : null}
           {!trustworthy ? (
             <p className="text-xs text-muted" role="status" data-testid="control-room-check">
               {t('controlRoom.check')}
