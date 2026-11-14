@@ -31,7 +31,7 @@ export interface ServerLine {
 export interface Cart {
   lines: CartLine[];
   deliveryDate: string;
-  channel: 'email' | 'whatsapp' | 'none' | null;
+  channel: 'email' | 'whatsapp' | 'none' | 'manual' | null;
   /** The server draft this cart has been saved as (null until review / send). */
   draftId: string | null;
   /** The draft's lines as saved, keyed by the cart line they came from. */
@@ -87,7 +87,7 @@ export function parseStore(raw: string | null, now = Date.now()): CartStore {
       carts[supplierId] = {
         lines,
         deliveryDate: typeof c.deliveryDate === 'string' ? c.deliveryDate : '',
-        channel: c.channel === 'email' || c.channel === 'whatsapp' || c.channel === 'none' ? c.channel : null,
+        channel: c.channel === 'email' || c.channel === 'whatsapp' || c.channel === 'none' || c.channel === 'manual' ? c.channel : null,
         draftId: typeof c.draftId === 'string' ? c.draftId : null,
         server: c.server && typeof c.server === 'object' ? c.server : null,
         updatedAt: c.updatedAt,

@@ -140,7 +140,17 @@ describe('PILOT activity.feed — no ₪ for receiver / chef', () => {
         }
       };
       for (const r of rows) {
-        expect(Object.keys(r).sort()).toEqual(['createdAt', 'detail', 'eventType', 'id', 'metadata', 'title']);
+        // G-07 (#182) adds the actor chip (actorId + display name) for every role.
+        expect(Object.keys(r).sort()).toEqual([
+          'actorId',
+          'actorName',
+          'createdAt',
+          'detail',
+          'eventType',
+          'id',
+          'metadata',
+          'title',
+        ]);
         expect(r.detail).toBeNull();
         walk(r.metadata);
       }

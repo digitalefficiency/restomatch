@@ -4,11 +4,12 @@ import { marketing } from '@/lib/i18n/messages/marketing';
 import { showcase } from '@/lib/i18n/messages/showcase';
 import { getT } from '@/lib/i18n/server';
 import { contactChannels, whatsappHref } from '@/lib/contact';
+import { LegalLinks } from '@/lib/legal/LegalLinks';
 
 /**
  * Showcase footer (W1-12 · mkt-16, a11y-01 / ia-nav-20): the demo disclaimer,
  * the way back to the site, and the same legal + accessibility links as the
- * marketing footer, at the same place (footer end).
+ * marketing footer, at the same place (footer end) — one list (`LegalLinks`, G-11).
  */
 export async function ShowcaseFooter() {
   const t = await getT(showcase);
@@ -40,15 +41,7 @@ export async function ShowcaseFooter() {
               {m('shell.whatsappLabel')}
             </a>
           ) : null}
-          <Link href="/privacy" className={link}>
-            {m('shell.privacy')}
-          </Link>
-          <Link href="/terms" className={link}>
-            {m('shell.terms')}
-          </Link>
-          <Link href="/accessibility" className={link}>
-            {m('shell.accessibility')}
-          </Link>
+          <LegalLinks locale={m.locale} variant="inline-row" align="start" />
         </nav>
       </div>
     </footer>

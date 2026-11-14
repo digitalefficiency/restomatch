@@ -1,3 +1,4 @@
+import type { WhyFacts } from '@/lib/components/flags';
 /**
  * Pure helpers for the supplier leak card (flag `supplierLeakCard`).
  * Unit-tested in app/dashboard/__tests__/supplier-leak-card.test.ts.
@@ -32,6 +33,8 @@ export interface LeakLineLike {
   productNameEn: string | null;
   lineDescription: string | null;
   lineDescriptionEn: string | null;
+  /** W2-09c: the line's verified basis (owner.leakBreakdown), fed to the shared why formatter. */
+  evidence?: { facts: WhyFacts } | null;
   /** The engine's expected / charged values (the line's ₪ basis), when known. */
   expected?: number | null;
   actual?: number | null;
