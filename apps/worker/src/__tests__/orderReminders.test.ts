@@ -141,7 +141,8 @@ describe('A5 order-reminder truth (DB)', () => {
       expect(o.body).toContain(`https://app.example.test/dashboard/orders/${draft}`);
       expect(`${o.body}${o.html}`).not.toContain('₪');
       expect(o.automation).toBe('A5');
-      expect(o.dedupe_key).toMatch(new RegExp(`^au:A5:${rid}:[0-9a-f-]{36}:${sid}:2026-10-25$`));
+      // G-06 notify() key: event:rid:entity:user:channel.
+      expect(o.dedupe_key).toMatch(new RegExp(`^au:A5:2026-10-25:${rid}:${sid}:[0-9a-f-]{36}:email$`));
     }
   });
 
@@ -203,6 +204,15 @@ describe('A5 order-reminder truth (DB)', () => {
     await sql`insert into notifications_outbox (restaurant_id, channel, target, body, status, dedupe_key)
               values (${rid}, 'email', ${email}, 'old', 'sent', ${legacyOrderReminderKey(sid, '2026-10-24', email)})`;
     expect((await processOrderReminders(job({ restaurantId: rid, forDate: SLOT }))).enqueued).toBe(3);
+  });
+
+  it('deploy day: a recipient already reminded under the #269 key (au:A5:<rid>:<user>:<sid>:<day>) is not reminded again', async () => {
+    await resetPos();
+    const ownerId = uids[0]!;
+    await sql`insert into notifications_outbox (restaurant_id, channel, target, body, status, dedupe_key)
+              values (${rid}, 'email', ${`${TAG5}-owner@example.test`}, 'old', 'sent', ${`au:A5:${rid}:${ownerId}:${sid}:2026-10-25`})`;
+    const r = await processOrderReminders(job({ restaurantId: rid, forDate: SLOT }));
+    expect(r.enqueued).toBe(2); // manager + chef
   });
 
   it('a replay the same day enqueues nothing new', async () => {

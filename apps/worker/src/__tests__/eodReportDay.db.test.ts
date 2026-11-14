@@ -97,6 +97,15 @@ describe('end-of-day report dedupe on the Israel day (DB)', () => {
     expect((await outbox())[0]!.dedupe_key).toBe(eodDedupeKey(rid, '2026-11-12', email));
   });
 
+  it('AU-04 A7: the eveningDigest option off → nothing; back on → sent', async () => {
+    await sql`delete from notifications_outbox where restaurant_id = ${rid}`;
+    await sql`update restaurants set settings = ${sql.json({ automations: { eveningDigest: false } })} where id = ${rid}`;
+    expect((await processEndOfDayReport(job({ restaurantId: rid, forDate: THU_1900 }))).sent).toBe(0);
+    await sql`update restaurants set settings = '{}'::jsonb where id = ${rid}`;
+    expect((await processEndOfDayReport(job({ restaurantId: rid, forDate: THU_1900 }))).sent).toBe(1);
+    await sql`delete from notifications_outbox where restaurant_id = ${rid}`;
+  });
+
   it('deploy day: a recipient already sent the OLD-format key for the report day is not sent again', async () => {
     await sql`delete from notifications_outbox where restaurant_id = ${rid}`;
     const day = eodReportDay(new Date(THU_1900));
