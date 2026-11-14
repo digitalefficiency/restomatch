@@ -272,12 +272,19 @@ describe('consolidated.proposal — isolation (RLS app role)', () => {
     });
     try {
       const p = await caller(A).consolidated.proposal({ invoiceId: later!.id });
-      expect(p!.findings.filter((f) => f.countsAsLeak).map((f) => [f.type, f.deltaAmount, f.deliveryNoteNumber, f.alreadyBilledOn?.invoiceNumber])).toEqual([
-        ['QTY_OVER', 36, '9001', 'A-M-1'],
+      // G-04 §9 (owner 1.11): a T2 review item naming A's earlier ריכוז, never a leak finding.
+      expect(p!.reviewItems!.map((r) => [r.flag, r.amountIls, r.noteNumber, r.otherInvoice?.invoiceNumber])).toEqual([
+        ['note_billed_twice', 36, '9001', 'A-M-1'],
       ]);
-      // The earlier ריכוז keeps its own finding only.
+      // …and it is ABSENT from the findings and from the leak / claim totals (the new negative).
+      expect(p!.findings.some((f) => f.alreadyBilledOn)).toBe(false);
+      expect(p!.findings.some((f) => f.countsAsLeak && f.deliveryNoteNumber === '9001')).toBe(false);
+      expect(p!.totals.leakIls).toBe(0);
+      expect(p!.claim).toEqual({ exclIls: 0, inclIls: 0 });
+      // The earlier ריכוז is not flagged.
       const first = await caller(A).consolidated.proposal({ invoiceId: itemizedId });
       expect(first!.findings.every((f) => f.alreadyBilledOn === null)).toBe(true);
+      expect(first!.reviewItems!.some((r) => r.flag === 'note_billed_twice')).toBe(false);
     } finally {
       await ownerDb.delete(invoices).where(eq(invoices.id, later!.id));
     }
@@ -461,6 +468,9 @@ describe('consolidated.coverage — isolation (RLS app role)', () => {
   const wide = { from: '2026-01-01T00:00:00Z', to: '2027-12-31T00:00:00Z' };
 
   it("A's supplier: covered / in the consolidated invoice — and nothing of B", async () => {
+    // G-04 receipt truth: only a CLOSED receipt is a delivery note. The fixture's
+    // receipt is pending (a receiver still counting); this case is about a received one.
+    await ownerDb.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, A.grId));
     const rows = await caller(A).consolidated.coverage({ supplierId: A.supplierId, ...wide });
     const byId = new Map(rows.map((r) => [r.grId, r]));
     expect(byId.get(A.grId)).toMatchObject({ state: 'covered', invoiceId: A.invoiceId, invoiceNumber: A.invoiceNumber });
