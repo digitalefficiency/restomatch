@@ -2,6 +2,7 @@ import { useId } from 'react';
 import Link from 'next/link';
 import { Check } from 'lucide-react';
 import { cnMerge as cn } from './cn';
+import { Kbd } from './Kbd';
 import { Spinner } from './Spinner';
 
 /**
@@ -10,12 +11,15 @@ import { Spinner } from './Spinner';
  * until W4 — gold is a money state, not a button colour. One primary per region.
  */
 export type ButtonVariant = 'primary' | 'secondary' | 'tertiary' | 'danger' | 'ghost' | 'accent' | 'gold';
-/** Heights: sm 32 (desk tables) · md 40 (default) · lg 48 (mobile primary) · xl 56 full width (field primary). */
+/**
+ * Heights (DS3 SPEC §5): sm 32 (desk tables) · md 36 (default) · lg 44 (desk large, the phone floor) ·
+ * xl 56 full width (field primary). Coarse pointers keep 44 for sm/md.
+ */
 export type ButtonSize = 'sm' | 'md' | 'lg' | 'xl';
 
 // Focus is the global :focus-visible outline (globals.css) — no per-variant rings.
 const base =
-  'relative inline-flex select-none items-center justify-center gap-2 rounded-control font-semibold transition-colors duration-micro ease-standard disabled:cursor-not-allowed';
+  'relative inline-flex select-none items-center justify-center gap-1.5 rounded-control font-medium transition-colors duration-micro ease-standard disabled:cursor-not-allowed';
 
 const variants: Record<ButtonVariant, string> = {
   primary: 'bg-primary-bold text-on-bold hover:bg-primary-bold-hover active:bg-primary-bold-hover aria-pressed:bg-primary-bold-hover',
@@ -42,10 +46,13 @@ const disabledLook: Record<ButtonVariant, string> = {
 // Coarse pointers keep the 44 px floor even for sm/md (the utility would otherwise beat the base rule).
 const sizes: Record<ButtonSize, string> = {
   sm: 'min-h-8 px-3 py-1 text-body-sm [@media(pointer:coarse)]:min-h-11',
-  md: 'min-h-10 px-4 py-2 text-body-sm [@media(pointer:coarse)]:min-h-11',
-  lg: 'min-h-12 px-5 py-2 text-body',
+  md: 'min-h-9 px-3.5 py-1.5 text-body-sm [@media(pointer:coarse)]:min-h-11',
+  lg: 'min-h-11 px-5 py-2 text-body',
   xl: 'min-h-14 w-full px-6 py-3 text-body',
 };
+
+/** Filled variants carry a light key cap; the rest the sunken one. */
+const FILLED: ReadonlySet<ButtonVariant> = new Set(['primary', 'accent', 'gold', 'danger']);
 
 const iconSize: Record<ButtonSize, string> = { sm: 'h-4 w-4', md: 'h-4 w-4', lg: 'h-5 w-5', xl: 'h-5 w-5' };
 
@@ -56,6 +63,11 @@ interface CommonProps {
   icon?: React.ReactNode;
   iconEnd?: React.ReactNode;
   fullWidth?: boolean;
+  /**
+   * DS3 (kit "כפתורים ומקשים"): the shortcut written on the button itself, as a key cap after the
+   * label ("בקשת זיכוי [1]"). Sets `aria-keyshortcuts`; the handler stays with the screen.
+   */
+  kbd?: string;
 }
 
 interface ButtonProps extends CommonProps, React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -78,8 +90,9 @@ function Content({
   loading,
   success,
   successLabel,
+  kbd,
   children,
-}: Pick<ButtonProps, 'icon' | 'iconEnd' | 'loading' | 'success' | 'successLabel' | 'children'> & { size: ButtonSize }) {
+}: Pick<ButtonProps, 'icon' | 'iconEnd' | 'loading' | 'success' | 'successLabel' | 'children'> & { size: ButtonSize; kbd?: React.ReactNode }) {
   if (success) {
     return (
       <>
@@ -95,6 +108,7 @@ function Content({
         <Spinner decorative className={iconSize[size]} />
         {children}
         {iconEnd}
+        {kbd}
       </>
     );
   }
@@ -102,7 +116,7 @@ function Content({
     // No icon slot: keep the label in layout (width locked), spinner on top.
     return (
       <>
-        <span className="inline-flex items-center gap-2 opacity-0">{children}{iconEnd}</span>
+        <span className="inline-flex items-center gap-1.5 opacity-0">{children}{iconEnd}{kbd}</span>
         <span className="absolute inset-0 flex items-center justify-center">
           <Spinner decorative className={iconSize[size]} />
         </span>
@@ -114,6 +128,7 @@ function Content({
       {icon}
       {children}
       {iconEnd}
+      {kbd}
     </>
   );
 }
@@ -133,6 +148,7 @@ export function Button({
   icon,
   iconEnd,
   fullWidth = false,
+  kbd,
   disabled,
   className,
   children,
@@ -155,10 +171,19 @@ export function Button({
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       aria-pressed={pressed}
+      aria-keyshortcuts={kbd}
       {...rest}
       aria-describedby={describedBy}
     >
-      <Content size={size} icon={icon} iconEnd={iconEnd} loading={loading} success={success} successLabel={successLabel}>
+      <Content
+        size={size}
+        icon={icon}
+        iconEnd={iconEnd}
+        loading={loading}
+        success={success}
+        successLabel={successLabel}
+        kbd={kbd && !success ? <Kbd tone={FILLED.has(variant) && !isDisabled ? 'onBold' : 'default'}>{kbd}</Kbd> : null}
+      >
         {children}
       </Content>
     </button>
@@ -206,6 +231,7 @@ export function LinkButton({
   icon,
   iconEnd,
   fullWidth = false,
+  kbd,
   className: extraClassName,
   children,
   ...rest
@@ -217,17 +243,18 @@ export function LinkButton({
   const href = safeHref(rawHref);
   const className = cn(fullWidth && 'w-full', extraClassName);
   return (
-    <Link href={href} className={cn(base, variants[variant], sizes[size], className)} {...rest}>
+    <Link href={href} className={cn(base, variants[variant], sizes[size], className)} aria-keyshortcuts={kbd} {...rest}>
       {icon}
       {children}
       {iconEnd}
+      {kbd ? <Kbd tone={FILLED.has(variant) ? 'onBold' : 'default'}>{kbd}</Kbd> : null}
     </Link>
   );
 }
 
 /**
  * Icon-only button. `label` is required: it is the accessible name and the
- * tooltip. Hit area 32 on desk, 44 on coarse pointers, 48 in field mode.
+ * tooltip. 32 / 36 / 44 on desk (DS3 SPEC §5), 44 on coarse pointers, 48 in field mode.
  */
 export function IconButton({
   label,
@@ -249,7 +276,7 @@ export function IconButton({
       title={label}
       className={cn(
         'inline-flex shrink-0 items-center justify-center rounded-control transition-colors duration-micro ease-standard disabled:cursor-not-allowed disabled:text-subtle',
-        size === 'sm' ? 'h-8 w-8' : size === 'md' ? 'h-10 w-10' : 'h-12 w-12',
+        size === 'sm' ? 'h-8 w-8' : size === 'md' ? 'h-9 w-9' : 'h-11 w-11',
         '[@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 [[data-mode=field]_&]:min-h-12 [[data-mode=field]_&]:min-w-12',
         tone === 'danger' ? 'text-danger hover:bg-danger-subtle' : 'text-muted hover:bg-surface-2 hover:text-ink',
         className,

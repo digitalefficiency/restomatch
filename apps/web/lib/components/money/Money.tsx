@@ -62,8 +62,15 @@ export interface MoneyProps {
    */
   symbol?: 'inline' | 'header';
   /**
-   * DS3: the ₪ sign and the agorot in the tertiary colour (default). Pass `false` where the figure
-   * sits in a coloured context and the whole amount should share that colour.
+   * DS3 money markup (SPEC §3, opt-in): the ₪ sign (≈0.74 em, never under 12 px) and the agorot
+   * as their own quiet spans of the same `formatIls()` text. Off by default, so the amount stays
+   * ONE text node: e2e specs of other packages locate the ₪ glyph and its digits inside a single
+   * text node (W1-05…W2-14, G-10, the G-16 crawl). A screen that adopts `split` updates its own spec.
+   */
+  split?: boolean;
+  /**
+   * With `split`: the ₪ sign and the agorot in the tertiary colour. Default: on for an ink figure,
+   * off for a coloured one (they share its colour). Pass `false` inside a coloured context.
    */
   quietParts?: boolean;
   className?: string;
@@ -92,9 +99,10 @@ function Parts({ parts, quiet }: { parts: MoneyPart[]; quiet: boolean }) {
 /**
  * The ONE way to show ₪ (design-system-01/-02, DS3 SPEC §3). A plain <bdi> around the frozen
  * `formatIls()` output — no `dir`, so in Hebrew the glyph sits at the visual left ("‏760 ₪")
- * exactly like the claim letter. The text is cut, never changed: the ₪ sign and the agorot are
- * spans of the same string, quiet and smaller, the digits keep the figure's colour. The UI face
- * with tabular, lining figures (`.num`); never mono. Rounded figures carry the exact agorot in `title`.
+ * exactly like the claim letter. With `split` (the clean finish's markup) the text is cut, never
+ * changed: the ₪ sign and the agorot become quiet, smaller spans of the same string and the digits
+ * keep the figure's colour. The UI face with tabular, lining figures (`.num`); never mono.
+ * Rounded figures carry the exact agorot in `title`.
  */
 export function Money({
   value,
@@ -107,6 +115,7 @@ export function Money({
   pending = false,
   locale: localeProp,
   symbol = 'inline',
+  split = false,
   quietParts,
   className,
 }: MoneyProps) {
@@ -152,8 +161,12 @@ export function Money({
               <span key={i}>{part.text}</span>
             ),
           )
-        ) : (
+        ) : split ? (
           <Parts parts={splitMoney(figureOnly ? moneyFigureText(amount, context, locale, shown) : text, shown)} quiet={quiet} />
+        ) : figureOnly ? (
+          moneyFigureText(amount, context, locale, shown)
+        ) : (
+          text
         )}
       </bdi>
       {state === 'credited' ? <CheckCircle2 className="h-[0.9em] w-[0.9em] shrink-0 self-center" aria-hidden="true" /> : null}

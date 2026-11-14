@@ -67,9 +67,18 @@ describe('splitMoney: the formatIls() text cut, never changed', () => {
 });
 
 describe('<Money> in the clean finish (SPEC §3)', () => {
-  it('keeps the text byte for byte, the ₪ sign and the agorot in their own quiet spans', () => {
+  it('default stays ONE text node: other packages\' e2e specs find ₪ and its digits in a single node', () => {
     for (const locale of ['he', 'en'] as const) {
       const html = render(h(Money, { value: 1104.8, context: 'line' }), locale);
+      const text = formatIls(1104.8, { maximumFractionDigits: 2, locale });
+      expect(html).toContain(`<bdi class="num whitespace-nowrap">${text}</bdi>`);
+      expect(html).not.toContain('data-money=');
+    }
+  });
+
+  it('split: the text byte for byte, the ₪ sign and the agorot in their own quiet spans', () => {
+    for (const locale of ['he', 'en'] as const) {
+      const html = render(h(Money, { value: 1104.8, context: 'line', split: true }), locale);
       expect(textOf(html)).toBe(formatIls(1104.8, { maximumFractionDigits: 2, locale }));
       expect(html).toMatch(/<span data-money="cur" class="[^"]*text-fg-tertiary[^"]*">₪<\/span>/);
       expect(html).toMatch(/<span data-money="dec" class="text-fg-tertiary">\.80<\/span>/);
@@ -78,26 +87,31 @@ describe('<Money> in the clean finish (SPEC §3)', () => {
     }
   });
 
-  it('whole shekels have no agorot span; a coloured figure keeps one colour', () => {
-    const tile = render(h(Money, { value: 760, context: 'tile' }));
+  it('split: whole shekels have no agorot span; a coloured figure keeps one colour', () => {
+    const tile = render(h(Money, { value: 760, context: 'tile', split: true }));
+    expect(tile).toContain('data-money="cur"');
     expect(tile).not.toContain('data-money="dec"');
-    const green = render(h(Money, { value: 296, context: 'line', state: 'claimed' }));
+    const green = render(h(Money, { value: 296, context: 'line', state: 'claimed', split: true }));
     expect(green).toContain('text-primary');
     expect(green).not.toContain('text-fg-tertiary');
-    expect(render(h(Money, { value: 296, context: 'line', quietParts: false }))).not.toContain('text-fg-tertiary');
+    expect(render(h(Money, { value: 296, context: 'line', split: true, quietParts: false }))).not.toContain('text-fg-tertiary');
   });
 
   it('a money figure is never red, in any state', () => {
     for (const state of ['leak', 'atRisk', 'caught', 'claimed', 'credited', 'returned', 'outstanding', 'pending', 'spend', 'zero'] as const) {
       expect(render(h(Money, { value: 38.7, state }))).not.toMatch(/danger/);
+      expect(render(h(Money, { value: 38.7, state, split: true }))).not.toMatch(/danger/);
     }
   });
 
-  it('D8 header symbol: figure only, agorot still quiet, the ₪ amount in the title', () => {
-    const html = render(h(Money, { value: 38.7, context: 'line', symbol: 'header' }));
-    expect(textOf(html)).not.toContain('₪');
-    expect(html).toContain('data-money="dec"');
-    expect(html).toMatch(/title="[^"]*38\.70[^"]*₪/);
+  it('D8 header symbol: figure only (one node by default, agorot quiet with split), the ₪ amount in the title', () => {
+    const plain = render(h(Money, { value: 38.7, context: 'line', symbol: 'header' }));
+    expect(textOf(plain)).not.toContain('₪');
+    expect(plain).not.toContain('data-money=');
+    expect(plain).toMatch(/title="[^"]*38\.70[^"]*₪/);
+    const split = render(h(Money, { value: 38.7, context: 'line', symbol: 'header', split: true }));
+    expect(textOf(split)).not.toContain('₪');
+    expect(split).toContain('data-money="dec"');
   });
 
   it('the hero keeps its own glyph rule (DS3-03 owns the hero)', () => {
@@ -213,5 +227,67 @@ describe('<MatchStrip>: ordered · received · billed in one line', () => {
     const html = render(h(MatchStrip, { ordered: 1, received: 1, billed: 1, gap: { value: 1, kind: 'qty', direction: 'less' }, billedLabel: 'invoice' }));
     expect(html).not.toContain('data-gap');
     expect(textOf(html)).toContain('בחשבונית');
+  });
+});
+
+describe('buttons and key caps (kit "כפתורים ומקשים", SPEC §5)', () => {
+  it('DS3 heights: sm 32 · md 36 · lg 44 · xl 56; coarse pointers keep 44', async () => {
+    const { Button } = await import('../Button');
+    expect(render(h(Button, { size: 'sm' }, 'x'))).toContain('min-h-8');
+    const md = render(h(Button, {}, 'x'));
+    expect(md).toContain('min-h-9');
+    expect(md).toContain('[@media(pointer:coarse)]:min-h-11');
+    expect(render(h(Button, { size: 'lg' }, 'x'))).toContain('min-h-11');
+    expect(render(h(Button, { size: 'xl' }, 'x'))).toContain('min-h-14');
+    expect(md).toContain('font-medium');
+  });
+
+  it('the shortcut is written on the button, decorative, and announced as aria-keyshortcuts', async () => {
+    const { Button, LinkButton } = await import('../Button');
+    const primary = render(h(Button, { kbd: '1' }, 'בקשת זיכוי'));
+    expect(primary).toContain('aria-keyshortcuts="1"');
+    expect(primary).toMatch(/<kbd aria-hidden="true" data-kbd="" class="[^"]*bg-on-bold\/15[^"]*">1<\/kbd>/);
+    expect(textOf(primary)).toBe('בקשת זיכוי1');
+    const secondary = render(h(Button, { kbd: '2', variant: 'secondary' }, 'שלמו כפי שחויב'));
+    expect(secondary).toMatch(/<kbd[^>]*class="[^"]*bg-surface-sunken[^"]*">2<\/kbd>/);
+    expect(render(h(Button, {}, 'x'))).not.toContain('<kbd');
+    expect(render(h(LinkButton, { href: '/x', kbd: 'G' }, 'x'))).toContain('aria-keyshortcuts="G"');
+  });
+
+  it('a key cap is never a dir="ltr" wrapper (ratchet N4) and uses the kbd type role', async () => {
+    const { Kbd } = await import('../Kbd');
+    const html = render(h(Kbd, {}, 'Ctrl K'));
+    expect(html).not.toMatch(/dir=/);
+    expect(html).toContain('text-kbd');
+    expect(html).toContain('[direction:ltr]');
+  });
+});
+
+describe('change against a previous period (kit "שינוי מול תקופה קודמת")', () => {
+  it('colour by meaning: good is green, bad keeps ink words with a leak-coloured arrow, flat is grey', async () => {
+    const { Delta } = await import('../money/Delta');
+    const good = render(h(Delta, { current: 746, previous: 760, goodWhen: 'down', showPercent: true, about: 'בדליפה' }));
+    expect(good).toContain('data-delta="good"');
+    expect(good).toContain('text-primary');
+    expect(textOf(good)).toContain('ירידה של');
+    expect(textOf(good)).toContain('בדליפה');
+    expect(textOf(good)).toContain(formatIls(14));
+    const bad = render(h(Delta, { current: 846, previous: 760, goodWhen: 'down' }));
+    expect(bad).toContain('data-delta="bad"');
+    expect(bad).toMatch(/<span data-delta="bad" class="[^"]*text-fg[^"]*"/);
+    expect(bad).toMatch(/<svg[^>]*class="[^"]*text-danger/);
+    // the amount itself is never red
+    expect(bad.replace(/<svg[\s\S]*?<\/svg>/g, '')).not.toContain('text-danger');
+    const flat = render(h(Delta, { current: 760, previous: 760, goodWhen: 'down' }));
+    expect(flat).toContain('data-delta="flat"');
+    expect(textOf(flat)).toBe('ללא שינוי');
+  });
+
+  it('a negligible change takes no colour, only when the screen sets the threshold', async () => {
+    const { Delta } = await import('../money/Delta');
+    const tiny = render(h(Delta, { current: 761, previous: 760, goodWhen: 'down', flatBelow: 0.02 }));
+    expect(tiny).toContain('data-delta="flat"');
+    expect(textOf(tiny)).toBe('ללא שינוי מהותי');
+    expect(render(h(Delta, { current: 761, previous: 760, goodWhen: 'down' }))).toContain('data-delta="bad"');
   });
 });

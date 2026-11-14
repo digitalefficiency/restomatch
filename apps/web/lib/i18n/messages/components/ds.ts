@@ -13,7 +13,7 @@ export const dsHe = {
     exact: 'סכום מדויק: {amount}',
     credit: 'זיכוי',
   },
-  delta: { up: 'עלייה', down: 'ירידה', same: 'ללא שינוי' },
+  delta: { up: 'עלייה', down: 'ירידה', same: 'ללא שינוי', upBy: 'עלייה של', downBy: 'ירידה של', negligible: 'ללא שינוי מהותי' },
   priceMove: { label: 'המחיר השתנה מ-{from} ל-{to}' },
   token: { copy: 'העתקת המספר {value}', copied: 'הועתק' },
   deadline: {
@@ -66,7 +66,7 @@ export const dsEn: Shape<typeof dsHe> = {
     exact: 'Exact amount: {amount}',
     credit: 'Credit',
   },
-  delta: { up: 'Up', down: 'Down', same: 'No change' },
+  delta: { up: 'Up', down: 'Down', same: 'No change', upBy: 'Up by', downBy: 'Down by', negligible: 'No real change' },
   priceMove: { label: 'Price moved from {from} to {to}' },
   token: { copy: 'Copy number {value}', copied: 'Copied' },
   deadline: {

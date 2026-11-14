@@ -118,7 +118,7 @@ export function MatchStrip({
               <b className={cn('text-body font-normal leading-5', MONEY_QUIET)}>{t('ds.matchStrip.none')}</b>
             ) : kind === 'price' ? (
               <b className={cn('text-body leading-5', isOff ? 'font-semibold' : 'font-medium')}>
-                <Money value={c.value} context="line" />
+                <Money value={c.value} context="line" split />
               </b>
             ) : (
               <b className={cn('text-body leading-5', isOff ? 'font-semibold' : 'font-medium')}>

@@ -17,7 +17,7 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       exact: 'المبلغ الدقيق: {amount}',
       credit: 'إشعار دائن',
     },
-    delta: { up: 'ارتفاع', down: 'انخفاض', same: 'بدون تغيير' },
+    delta: { up: 'ارتفاع', down: 'انخفاض', same: 'بدون تغيير', upBy: 'ارتفاع بمقدار', downBy: 'انخفاض بمقدار', negligible: 'بدون تغيير يُذكر' },
     priceMove: { label: 'تغيّر السعر من {from} إلى {to}' },
     token: { copy: 'نسخ الرقم {value}', copied: 'تم النسخ' },
     deadline: {
@@ -69,7 +69,7 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       exact: 'Точная сумма: {amount}',
       credit: 'Кредит',
     },
-    delta: { up: 'Рост', down: 'Снижение', same: 'Без изменений' },
+    delta: { up: 'Рост', down: 'Снижение', same: 'Без изменений', upBy: 'Рост на', downBy: 'Снижение на', negligible: 'Без заметных изменений' },
     priceMove: { label: 'Цена изменилась с {from} на {to}' },
     token: { copy: 'Копировать номер {value}', copied: 'Скопировано' },
     deadline: {
@@ -121,7 +121,7 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       exact: 'ยอดที่แน่นอน: {amount}',
       credit: 'เครดิต',
     },
-    delta: { up: 'เพิ่มขึ้น', down: 'ลดลง', same: 'ไม่เปลี่ยนแปลง' },
+    delta: { up: 'เพิ่มขึ้น', down: 'ลดลง', same: 'ไม่เปลี่ยนแปลง', upBy: 'เพิ่มขึ้น', downBy: 'ลดลง', negligible: 'แทบไม่เปลี่ยนแปลง' },
     priceMove: { label: 'ราคาเปลี่ยนจาก {from} เป็น {to}' },
     token: { copy: 'คัดลอกหมายเลข {value}', copied: 'คัดลอกแล้ว' },
     deadline: {
@@ -173,7 +173,7 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
       exact: 'ልክዕ መጠን: {amount}',
       credit: 'ክሬዲት',
     },
-    delta: { up: 'ወሰኽ', down: 'ምንካይ', same: 'ለውጢ የለን' },
+    delta: { up: 'ወሰኽ', down: 'ምንካይ', same: 'ለውጢ የለን', upBy: 'ወሰኽ ብ', downBy: 'ምንካይ ብ', negligible: 'ዝኾነ ለውጢ የለን' },
     priceMove: { label: 'ዋጋ ካብ {from} ናብ {to} ተቐይሩ' },
     token: { copy: 'ቁጽሪ {value} ቅዳሕ', copied: 'ተቐዲሑ' },
     deadline: {
