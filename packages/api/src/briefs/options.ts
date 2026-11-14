@@ -1,12 +1,11 @@
+import { automationOption } from '../automations/options';
+
 /**
- * The AU-04 owner options, read from `restaurants.settings.automations` — the
- * path AU-01's registry owns. INTERIM until AU-01's `automationOption(settings, key)`
- * merges: default ON (today's e-mails keep flowing); only an explicit `false` turns
- * a brief off. Swap the body for `automationOption` in this one place.
+ * The AU-04 owner options: AU-01's `automationOption` (registry default when unset).
+ * Kept as a thin alias so the job call sites stay one line.
  */
 export type BriefOptionKey = 'receiverBrief' | 'orderReminders' | 'supplierDelays' | 'eveningDigest';
 
 export function briefOptionOn(settings: unknown, key: BriefOptionKey): boolean {
-  const automations = (settings as { automations?: Record<string, unknown> } | null | undefined)?.automations;
-  return automations?.[key] !== false;
+  return automationOption(settings, key);
 }
