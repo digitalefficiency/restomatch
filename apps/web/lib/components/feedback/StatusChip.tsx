@@ -1,6 +1,6 @@
 import { Clock } from 'lucide-react';
 import { cnMerge as cn } from '../cn';
-import { DOT_TONE, PILL_DOT, PILL_SHELL, PILL_TONE, type PillTone } from '../tone';
+import { DOT_TONE, PILL_DOT, PILL_SHELL, PILL_TONE, WARN_RING, type PillTone } from '../tone';
 
 export type StatusTone = 'danger' | 'warn' | 'success' | 'gold' | 'info' | 'neutral';
 
@@ -27,14 +27,15 @@ export function pillToneOf(tone: StatusTone, emphasis: 'bold' | 'subtle' = 'subt
 
 /**
  * The status dot (decorative: the word beside it carries the state). `sm` is the 6 px dot inside a
- * pill; `md` is the 8 px dot beside a label (the T1 leak label, a queue row, a task).
+ * pill; `md` is the 8 px dot beside a label (the T1 leak label, a queue row, a task). The amber dot
+ * carries its ring (SPEC §2 `--warn-ring`) so it keeps 3:1 against white.
  */
 export function StatusDot({ tone, size = 'md', className }: { tone: PillTone; size?: 'sm' | 'md'; className?: string }) {
   return (
     <span
       aria-hidden="true"
       data-dot={tone}
-      className={cn(PILL_DOT, size === 'md' && 'size-2', DOT_TONE[tone], className)}
+      className={cn(PILL_DOT, size === 'md' && 'size-2', DOT_TONE[tone], tone === 'warn' && WARN_RING[size === 'md' ? 'label' : 'pill'], className)}
     />
   );
 }

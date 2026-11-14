@@ -29,7 +29,7 @@ const variants: Record<ButtonVariant, string> = {
   secondary:
     'border border-line-strong bg-surface text-ink hover:bg-surface-2 active:bg-neutral-subtle-hover aria-pressed:border-primary aria-pressed:bg-primary-subtle aria-pressed:text-primary',
   tertiary: 'text-primary underline-offset-2 hover:underline active:text-primary-bold-hover aria-pressed:underline',
-  ghost: 'text-muted hover:bg-surface-2 hover:text-ink active:bg-neutral-subtle-hover aria-pressed:bg-primary-subtle aria-pressed:text-primary',
+  ghost: 'text-muted hover:bg-surface-hover hover:text-ink active:bg-neutral-subtle-hover aria-pressed:bg-primary-subtle aria-pressed:text-primary',
 };
 
 /** Disabled is its own token set (never an opacity), applied only when truly disabled (not loading). */
@@ -278,7 +278,7 @@ export function IconButton({
         'inline-flex shrink-0 items-center justify-center rounded-control transition-colors duration-micro ease-standard disabled:cursor-not-allowed disabled:text-subtle',
         size === 'sm' ? 'h-8 w-8' : size === 'md' ? 'h-9 w-9' : 'h-11 w-11',
         '[@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 [[data-mode=field]_&]:min-h-12 [[data-mode=field]_&]:min-w-12',
-        tone === 'danger' ? 'text-danger hover:bg-danger-subtle' : 'text-muted hover:bg-surface-2 hover:text-ink',
+        tone === 'danger' ? 'text-danger hover:bg-danger-subtle' : 'text-muted hover:bg-surface-hover hover:text-ink',
         className,
       )}
       {...rest}

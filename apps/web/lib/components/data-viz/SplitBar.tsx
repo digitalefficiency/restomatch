@@ -24,10 +24,10 @@ export function SplitBar({
 }) {
   const a = Math.max(0, first);
   const b = Math.max(0, second);
-  const solid = tone === 'leak' ? 'bg-danger-bold' : 'bg-fg-secondary';
+  const solid = tone === 'leak' ? 'bg-danger-dot' : 'bg-fg-secondary';
   const hatch =
     tone === 'leak'
-      ? 'border border-danger-subtle bg-danger-subtle bg-[repeating-linear-gradient(135deg,rgb(var(--c-danger-bold))_0_1.5px,transparent_1.5px_6px)]'
+      ? 'border border-danger-subtle bg-danger-subtle bg-[repeating-linear-gradient(135deg,rgb(var(--c-danger-dot))_0_1.5px,transparent_1.5px_6px)]'
       : 'border border-line bg-surface-sunken bg-[repeating-linear-gradient(135deg,rgb(var(--c-text-secondary))_0_1.5px,transparent_1.5px_6px)]';
   return (
     <div
@@ -37,8 +37,8 @@ export function SplitBar({
       aria-hidden={label ? undefined : true}
       className={cn('flex h-3 gap-0.5', className)}
     >
-      {a > 0 ? <i className={cn('block rounded-xs', solid)} style={{ flexGrow: a, flexBasis: 0 }} /> : null}
-      {b > 0 ? <i className={cn('block rounded-xs', hatch)} style={{ flexGrow: b, flexBasis: 0 }} /> : null}
+      {a > 0 ? <i className={cn('block rounded-xs forced-color-adjust-none', solid)} style={{ flexGrow: a, flexBasis: 0 }} /> : null}
+      {b > 0 ? <i className={cn('block rounded-xs forced-color-adjust-none', hatch)} style={{ flexGrow: b, flexBasis: 0 }} /> : null}
     </div>
   );
 }

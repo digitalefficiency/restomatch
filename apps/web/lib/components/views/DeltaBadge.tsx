@@ -99,13 +99,13 @@ export function DeltaBadge({
       className={cn('inline-flex flex-wrap items-center gap-1 text-xs font-semibold', tone, className)}
       title={vs}
     >
-      <Icon className={cn('h-3.5 w-3.5 shrink-0', bad && 'text-danger')} aria-hidden="true" />
+      <Icon className={cn('h-3.5 w-3.5 shrink-0', bad && 'text-danger-dot')} aria-hidden="true" />
       {/* G11: the ▲/▼ mark is drawn, never typed. No UI face (Heebo, Plex) has U+25B2/U+25BC,
           so a text glyph was painted by a system font. Never mirrored (R1). */}
       {flat ? null : (
         <Triangle
           data-delta-mark={up ? 'up' : 'down'}
-          className={cn('h-2 w-2 shrink-0 fill-current', !up && 'rotate-180', bad && 'text-danger')}
+          className={cn('h-2 w-2 shrink-0 fill-current', !up && 'rotate-180', bad && 'text-danger-dot')}
           strokeWidth={0}
           aria-hidden="true"
         />

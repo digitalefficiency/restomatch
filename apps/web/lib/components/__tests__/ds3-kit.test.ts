@@ -141,6 +141,8 @@ describe('the status pill (kit "סטטוס", SPEC §2 tiers)', () => {
 
   it('the word is ink on every tinted pill and white only on the solid one', () => {
     for (const pill of ['leak', 'warn', 'ok', 'info'] as const) expect(PILL_TONE[pill]).toContain('text-fg');
+    // good news is the leaf green of the ok family (SPEC §2 --ok-sub / --ok-bd), not the brand
+    expect(PILL_TONE.ok).toBe('border-ok-subtle bg-ok-subtle text-fg');
     expect(PILL_TONE.solid).toContain('text-on-bold');
     expect(PILL_TONE.neutral).toContain('text-fg-secondary');
     expect(PILL_TONE.neutral).not.toMatch(/warn|danger/);
@@ -149,14 +151,20 @@ describe('the status pill (kit "סטטוס", SPEC §2 tiers)', () => {
   it('renders a 6 px dot by default, an explicit icon instead, or nothing with icon={null}', () => {
     const dot = render(h(StatusChip, { tone: 'warn', label: 'ממתינה לתשובה' }));
     expect(dot).toContain('data-pill="warn"');
-    expect(dot).toMatch(/data-dot="warn" class="inline-block size-1\.5 shrink-0 rounded-full forced-color-adjust-none bg-warn-bold"/);
+    // DS3-00 indicator roles: the amber dot carries its 3:1 ring (SPEC §2 --warn-solid, --warn-ring).
+    expect(dot).toMatch(/data-dot="warn" class="inline-block size-1\.5 shrink-0 rounded-full forced-color-adjust-none bg-warn-dot ring-1 ring-warn-dot-ring"/);
     expect(render(h(StatusChip, { tone: 'neutral', label: 'x', icon: null }))).not.toContain('data-dot');
   });
 
   it('StatusDot is 8 px beside a label and 6 px inside a pill', () => {
     expect(render(h(StatusDot, { tone: 'leak' }))).toContain('size-2');
     expect(render(h(StatusDot, { tone: 'leak', size: 'sm' }))).not.toContain('size-2');
-    expect(DOT_TONE.leak).toBe('bg-danger-bold');
+    expect(DOT_TONE.leak).toBe('bg-danger-dot');
+    expect(DOT_TONE.ok).toBe('bg-ok-dot');
+    expect(DOT_TONE.neutral).toBe('bg-neutral-dot');
+    // the 8 px amber dot: an inset ring, so it stays 8 px
+    expect(render(h(StatusDot, { tone: 'warn' }))).toContain('ring-[1.5px] ring-inset ring-warn-dot-ring');
+    expect(render(h(StatusDot, { tone: 'leak' }))).not.toContain('ring-');
   });
 
   it('Badge draws the same shell with no dot; warning-solid is the amber pill', () => {
@@ -304,7 +312,7 @@ describe('change against a previous period (kit "שינוי מול תקופה ק
     const bad = render(h(Delta, { current: 846, previous: 760, goodWhen: 'down' }));
     expect(bad).toContain('data-delta="bad"');
     expect(bad).toMatch(/<span data-delta="bad" class="[^"]*text-fg[^"]*"/);
-    expect(bad).toMatch(/<svg[^>]*class="[^"]*text-danger/);
+    expect(bad).toMatch(/<svg[^>]*class="[^"]*text-danger-dot/);
     // the amount itself is never red
     expect(bad.replace(/<svg[\s\S]*?<\/svg>/g, '')).not.toContain('text-danger');
     const flat = render(h(Delta, { current: 760, previous: 760, goodWhen: 'down' }));
@@ -369,7 +377,8 @@ describe('the credit-request track (kit "מסלול של בקשת זיכוי")',
     expect(textOf(html)).not.toContain('never');
     expect(textOf(html)).toContain('· בוצע');
     expect(textOf(html)).toContain('· השלב הנוכחי');
-    expect(html).toContain('bg-warn-bold');
+    expect(html).toMatch(/data-rail-step="now"[^>]*><span aria-hidden="true" class="[^"]*bg-warn-dot[^"]*ring-4 ring-warn-subtle/);
+    expect(html).toContain('border-warn-dot-ring');
   });
 });
 
@@ -394,7 +403,7 @@ describe('loading, empty, error (kit "טעינה, ריק, שגיאה")', () => {
   it('an empty state is calm and can sit inside a card; an error has no red and no icon', () => {
     const inline = render(h(EmptyStateComp, { kind: 'inbox-zero', title: 'אין פערים פתוחים', description: 'נבדקו 35 חשבוניות', variant: 'inline' }));
     expect(inline).not.toContain('rounded-card border');
-    expect(inline).toContain('bg-primary-subtle');
+    expect(inline).toContain('bg-ok-subtle text-ok');
     const error = render(h(EmptyStateComp, { kind: 'error', title: 'הסכום לא נטען' }));
     expect(error).not.toMatch(/danger/);
     expect(error).not.toContain('<svg');

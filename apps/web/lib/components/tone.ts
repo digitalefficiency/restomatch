@@ -9,10 +9,10 @@
  *   info    — a state of the interface (selection, focus), never of money
  *   neutral — grey: the default, and everything merely pending (T4, never a warning colour)
  *
- * DS2 lacks three roles the reference draws: the brighter red of a dot or a bar (`--leak-solid`),
- * the amber dot with its 3:1 ring (`--warn-solid`, `--warn-ring`) and a green family of its own for
- * money that came back (`--ok*`). Until DS3-00 adds them the nearest DS2 role stands in here, so
- * adopting them is a change to this file only. No hex, size or shadow is written here: roles only.
+ * DS3-00's roles are read by name: the brighter indicator of a dot or a bar (`*-dot`: SPEC §2
+ * `--leak-solid`, `--warn-solid` with its 3:1 ring `--warn-ring`, `--ok-solid`), and `ok`, the T3
+ * family by meaning (leaf green, SPEC §2 `--ok`, `--ok-sub`, `--ok-bd`). Families without an
+ * indicator (info) draw with their text colour. No hex, size or shadow is written here: roles only.
  */
 export type Tone = 'leak' | 'warn' | 'ok' | 'info' | 'neutral';
 export type PillTone = Tone | 'solid';
@@ -21,7 +21,7 @@ export type PillTone = Tone | 'solid';
 export const PILL_TONE: Record<PillTone, string> = {
   leak: 'border-danger-subtle bg-danger-subtle text-fg',
   warn: 'border-warn-subtle bg-warn-subtle text-fg',
-  ok: 'border-primary-subtle bg-primary-subtle text-fg',
+  ok: 'border-ok-subtle bg-ok-subtle text-fg',
   info: 'border-info-subtle bg-info-subtle text-fg',
   neutral: 'border-transparent bg-surface-sunken text-fg-secondary',
   solid: 'border-transparent bg-danger-bold text-on-bold',
@@ -29,19 +29,25 @@ export const PILL_TONE: Record<PillTone, string> = {
 
 /** The dot: 6 px inside a pill, 8 px beside a label. A status never relies on colour alone. */
 export const DOT_TONE: Record<PillTone, string> = {
-  leak: 'bg-danger-bold',
-  warn: 'bg-warn-bold',
-  ok: 'bg-primary-bold',
-  info: 'bg-info-bold',
-  neutral: 'bg-fg-tertiary',
+  leak: 'bg-danger-dot',
+  warn: 'bg-warn-dot',
+  ok: 'bg-ok-dot',
+  info: 'bg-info',
+  neutral: 'bg-neutral-dot',
   solid: 'bg-on-bold',
 };
+
+/**
+ * The amber dot alone falls under 3:1 on white, so it carries its ring (SPEC §2 `--warn-ring`,
+ * WCAG 1.4.11): 1 px outside the 6 px dot of a pill, 1.5 px inside the 8 px dot beside a label.
+ */
+export const WARN_RING = { pill: 'ring-1 ring-warn-dot-ring', label: 'ring-[1.5px] ring-inset ring-warn-dot-ring' } as const;
 
 /** A word or an arrow in a meaning's colour. Never a money figure: a figure is ink, muted or green. */
 export const TEXT_TONE: Record<Tone, string> = {
   leak: 'text-danger',
   warn: 'text-warn',
-  ok: 'text-primary',
+  ok: 'text-ok',
   info: 'text-info',
   neutral: 'text-fg-secondary',
 };
@@ -50,7 +56,7 @@ export const TEXT_TONE: Record<Tone, string> = {
 export const SURFACE_TONE: Record<Tone, string> = {
   leak: 'border-danger-subtle bg-danger-subtle',
   warn: 'border-warn-subtle bg-warn-subtle',
-  ok: 'border-primary-subtle bg-primary-subtle',
+  ok: 'border-ok-subtle bg-ok-subtle',
   info: 'border-info-subtle bg-info-subtle',
   neutral: 'border-line bg-surface-sunken',
 };

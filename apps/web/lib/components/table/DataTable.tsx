@@ -552,7 +552,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
                                   close();
                                   a.onRun();
                                 }}
-                                className={cn('w-full rounded-lg px-2 py-1.5 text-start text-sm hover:bg-surface-2', FOCUS, a.tone === 'danger' ? 'text-danger' : 'text-ink')}
+                                className={cn('w-full rounded-lg px-2 py-1.5 text-start text-sm hover:bg-surface-hover', FOCUS, a.tone === 'danger' ? 'text-danger' : 'text-ink')}
                               >
                                 {a.label}
                               </button>
