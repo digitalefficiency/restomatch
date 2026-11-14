@@ -25,6 +25,7 @@ export function colorVarsV2(): Record<string, string> {
     'surface-raised': surfaceV2.raised,
     'surface-overlay': surfaceV2.overlay,
     'surface-selected': surfaceV2.selected,
+    'surface-hover': surfaceV2.hover,
     'text-primary': textV2.primary,
     'text-secondary': textV2.secondary,
     'text-tertiary': textV2.tertiary,
