@@ -512,3 +512,46 @@ describe('tabs, filters and controls (kit "לשוניות ומסננים", SPEC 
     expect(html).toContain('<kbd');
   });
 });
+
+describe('charts (kit "גרפים", SPEC §10.1)', () => {
+  it('pace line: both series span the same days on one scale, step after, never mirrored', async () => {
+    const { PACE_BOX, pacePath, paceGeometry } = await import('../data-viz/PaceLine');
+    // the reference's own drawing: a 2-point running total holds, then rises at the next day
+    expect(pacePath([10, 20], 20)).toBe(`M0,${PACE_BOX.baseline} V33 H240 V2`);
+    const g = paceGeometry({ cur: [0, 5, 5, 9], prev: [2, 4, 8, 12] });
+    expect(g.end).toEqual({ x: PACE_BOX.width, y: 17.5 }); // 64 − 9/12 × 62: the larger series sets the scale
+    expect(g.prev).toMatch(/H240 V2$/); // the previous period's same days reach the top at the right edge
+    expect(paceGeometry({ cur: [3, 7], prev: null }).prev).toBeNull();
+    // nothing below the baseline, nothing above the box, even for a correction
+    expect(pacePath([4, -2], 4)).toBe(`M0,${PACE_BOX.baseline} V2 H240 V${PACE_BOX.baseline}`);
+  });
+
+  it('pace line: one figure named by its sentence, the drawing hidden, the legend readable; entry parts for the home', async () => {
+    const { PaceLine } = await import('../data-viz/PaceLine');
+    const html = render(h(PaceLine, { series: { cur: [0, 4, 9], prev: [1, 5, 11] }, curLabel: 'אוקטובר', prevLabel: 'ספטמבר, אותם ימים', label: 'הדליפה המצטברת מול אותם ימים בספטמבר', testId: 'pace' }));
+    expect(html).toMatch(/^<figure aria-label="הדליפה המצטברת מול אותם ימים בספטמבר" data-pace-line="" data-testid="pace"/);
+    expect(html).toMatch(/<svg viewBox="-2 -6 250 78"[^>]*aria-hidden="true"/);
+    expect(textOf(html)).toBe('אוקטוברספטמבר, אותם ימים');
+    for (const part of ['fade', 'draw', 'pop']) expect(html).toContain(`data-entry-part="${part}"`);
+    expect(html).toContain('pathLength="1"');
+    expect(html).not.toMatch(/#[0-9a-f]{3,6}\b/i); // colours are roles
+    // no previous period: no dashed line and no legend for it
+    const alone = render(h(PaceLine, { series: { cur: [0, 4, 9], prev: null }, curLabel: 'אוקטובר', prevLabel: 'ספטמבר, אותם ימים', label: 'x' }));
+    expect(alone).not.toContain('data-entry-part="fade"');
+    expect(textOf(alone)).toBe('אוקטובר');
+  });
+
+  it('split bar: the leak indicator solid, the second part hatched (pattern, not only colour), decorative unless named', async () => {
+    const { SplitBar } = await import('../data-viz/SplitBar');
+    const html = render(h(SplitBar, { first: 296, second: 464 }));
+    expect(html).toContain('aria-hidden="true"');
+    expect(html).not.toContain('role="img"');
+    expect(html).toContain('bg-danger-dot');
+    expect(html).toContain('repeating-linear-gradient(135deg,rgb(var(--c-danger-dot))');
+    expect(html.match(/forced-color-adjust-none/g)).toHaveLength(2);
+    expect(html).toContain('flex-grow:296');
+    const named = render(h(SplitBar, { first: 1, second: 0, label: 'שולם במלואו' }));
+    expect(named).toContain('role="img" aria-label="שולם במלואו"');
+    expect(named.match(/<i /g)).toHaveLength(1); // an empty part is not drawn
+  });
+});
