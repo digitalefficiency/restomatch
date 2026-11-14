@@ -25,6 +25,7 @@ export function colorVarsV2(): Record<string, string> {
     'surface-raised': surfaceV2.raised,
     'surface-overlay': surfaceV2.overlay,
     'surface-selected': surfaceV2.selected,
+    'surface-hover': surfaceV2.hover,
     'text-primary': textV2.primary,
     'text-secondary': textV2.secondary,
     'text-tertiary': textV2.tertiary,
@@ -91,6 +92,15 @@ function dialVars(mode: DialMode, fallbackToDefault: boolean): Record<string, st
   return out;
 }
 
+/** The default value of every dial that compact re-binds (the coarse-pointer floor). */
+function compactDialDefaults(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, byMode] of Object.entries(dials)) {
+    if (byMode.compact !== undefined && byMode.default !== undefined) out[`--${name}`] = px(byMode.default);
+  }
+  return out;
+}
+
 /** Every v2 variable block, in emission order. */
 export function v2Blocks(): VarBlock[] {
   const rows = rowConstants();
@@ -137,6 +147,14 @@ export function v2Blocks(): VarBlock[] {
     { selector: "[data-density='compact']", vars: { ...typeVars(starred), ...dialVars('compact', false), '--cell-px': px(cell.compact) } },
     { selector: "[data-density='default']", vars: { ...typeVars(base), ...dialVars('default', false), '--cell-px': px(cell.default) } },
     { selector: "[data-density='touch']", vars: { ...typeVars(base), ...dialVars('touch', false), '--cell-px': px(cell.touch) } },
+    {
+      // DS3 SPEC §7: on a phone density is fixed, so a coarse pointer undoes compact's type steps and
+      // dials (no compact text or 32 px control under a thumb). `--cell-px` keeps its v1 behaviour.
+      comment: 'DS3: density is fixed on a phone — compact type steps and dials fall back to default under a coarse pointer.',
+      media: '(pointer: coarse)',
+      selector: "[data-density='compact']",
+      vars: { ...typeVars(base), ...compactDialDefaults() },
+    },
     {
       comment: 'DS2 field mode (C6): field type steps, ≥8.2:1 secondary text, no tertiary, field borders.',
       selector: "[data-mode='field']",
