@@ -4,7 +4,7 @@ import { tailwindPreset, typography } from '@restomatch/ui-tokens';
 // RestoMatch web — "Command Center Light v2" (חדר בקרה לכסף).
 // Every colour, type role, radius, shadow and duration comes from the
 // @restomatch/ui-tokens preset; colours are CSS variables (RGB channels,
-// generated into app/tokens.css) so `/opacity` modifiers keep working. Nothing
+// generated into the token block of app/globals.css) so `/opacity` modifiers keep working. Nothing
 // here hard-codes a value — change the token source instead.
 
 const config: Config = {

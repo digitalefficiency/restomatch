@@ -11,7 +11,7 @@ type FontSize = [string, { lineHeight: string; fontWeight?: string; letterSpacin
 /**
  * Closed type scale (R-15). Sizes are rem so they follow the browser's font
  * size (a11y-16). `caption` and `metric-hero` read CSS variables: field mode
- * raises caption to 14/20 and the hero drops to 40/44 below md (tokens.css).
+ * raises caption to 14/20 and the hero drops to 40/44 below md (the generated block of globals.css).
  */
 export const typeRoles: Record<string, FontSize> = {
   caption: ['var(--fs-caption)', { lineHeight: 'var(--lh-caption)' }], // 12/16 · 14/20 in field mode

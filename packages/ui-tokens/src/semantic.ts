@@ -4,7 +4,7 @@
 //
 // Components consume ROLES, never raw hex: surfaces, text, the focus colour, six
 // status families (each with the same nine roles), money states and data-viz.
-// `build.ts` turns these into the CSS variables (apps/web/app/tokens.css) and the
+// `build.ts` turns these into the CSS variables (the generated block of apps/web/app/globals.css) and the
 // Tailwind preset; `__tests__/contrast.test.ts` fails any text/background pair
 // below 4.6:1 (AA 4.5 + a 0.1 safety margin, a11y-21).
 

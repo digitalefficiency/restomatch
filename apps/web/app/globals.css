@@ -712,10 +712,10 @@
     color: rgb(var(--c-ink));
   }
 
-  /* Quiet light scrollbar (DS3: tokens only — the control-boundary steel, tinted down). */
+  /* Quiet light scrollbar (DS3: tokens only; the reference's thumb is the card line). */
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgb(var(--c-line-strong) / 0.4) transparent;
+    scrollbar-color: rgb(var(--c-line)) transparent;
   }
   *::-webkit-scrollbar {
     width: 10px;
@@ -725,13 +725,13 @@
     background: transparent;
   }
   *::-webkit-scrollbar-thumb {
-    background: rgb(var(--c-line-strong) / 0.4);
+    background: rgb(var(--c-line));
     border-radius: 9999px;
     border: 2px solid transparent;
     background-clip: padding-box;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: rgb(var(--c-line-strong) / 0.65);
+    background: rgb(var(--c-line-strong) / 0.6);
     background-clip: padding-box;
   }
 }
@@ -1104,7 +1104,7 @@ html[lang='ti'] .font-sans {
   }
 }
 
-/* ───────────── W1-01 design-system foundation v2 (tokens: app/tokens.css) ───────────── */
+/* ───────────── W1-01 design-system foundation v2 (tokens: the generated block at the top) ───────────── */
 
 @layer base {
   /* One focus indicator everywhere (R-5, WCAG 2.4.7 / 1.4.11; DS3 SPEC §4): a 2 px
@@ -1120,6 +1120,11 @@ html[lang='ti'] .font-sans {
      opts in with data-focus="on-dark"; only the colour changes, never width or offset. */
   [data-focus='on-dark'] {
     --c-focus: var(--c-on-bold);
+  }
+  /* Inside a scroll container an outward outline is clipped (DataTable rows, SplitPane lists):
+     such a row opts in with data-focus="inset" and the same 2 px outline is drawn inside it. */
+  [data-focus='inset'] {
+    --focus-offset: -2px;
   }
   @media (forced-colors: active) {
     :focus-visible {

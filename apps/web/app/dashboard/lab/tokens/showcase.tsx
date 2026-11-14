@@ -146,8 +146,9 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
           <Swatch name="line-field" hex={surfaces.lineField} on={text.onBold} />
           <Swatch name="focus" hex={focus} on={text.onBold} />
         </div>
-        {/* DS3 indicators: a dot or a bar, never text — the ratio is against the surface (WCAG 1.4.11). */}
-        <ul className="flex flex-wrap gap-x-6 gap-y-2" data-testid="lab-indicators">
+        {/* DS3 indicators: a dot or a bar, never text — the ratio is against the surface (WCAG 1.4.11).
+            A grid, not a wrapping row, so every Chromium build lays it out the same (W1-01 baseline). */}
+        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5" data-testid="lab-indicators">
           {(
             [
               ['danger-dot', indicator.danger, 'bg-danger-dot', ''],
