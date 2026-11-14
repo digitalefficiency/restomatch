@@ -14,7 +14,6 @@ import { appError } from '../errors';
 import { invoiceQuestionCount, linkPinPoIdOf, orderQuestionCount } from '../catalog/linkQuestions';
 import { loadPriorDecisions, persistMatchRun } from '../match/persist';
 import { buildRules, resolveApprovalThresholds } from '../approvals/engine';
-import { setAsideGroupTotals } from '../documents/groupTotals';
 
 export interface RunForInvoiceResult {
   matchRunId: string | null;
@@ -212,8 +211,6 @@ export const matchRouter = router({
       // W2-04 rebind: the claims released above come back for the re-applied
       // accepted decisions, under their ORIGINAL decider (shared with the worker).
       await rebindDecidedClaims(ctx.db, restaurantId, persisted.matchRunId);
-      // G-09 (round 11 L1): no phantom TOTAL_MISMATCH on a page checked as one invoice with others.
-      await setAsideGroupTotals(ctx.db, restaurantId, input.invoiceId, ctx.session.userId);
       // G-08 hold: a matched invoice no longer waits for an order — drop a stale marker;
       // and (round 10) its order pin follows THIS run's order (none → no pin).
       await ctx.db.execute(sql`

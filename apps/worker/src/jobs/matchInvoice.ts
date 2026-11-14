@@ -24,7 +24,6 @@ import {
   releaseClaimsForRematch,
   resolveApprovalThresholds,
   windowCloseGate,
-  setAsideGroupTotals,
   formatIlsAgorot,
 } from '@restomatch/api';
 import { and, desc, eq, invoices, matchRuns, restaurants, sql, suppliers, type Database } from '@restomatch/db';
@@ -335,9 +334,6 @@ export async function matchInvoiceForJob(
     // W2-04 rebind: the claims released above come back for the re-applied
     // accepted decisions, under their ORIGINAL decider (shared with match.runForInvoice).
     if (priorRun) await rebindDecidedClaims(tx, restaurantId, out.matchRunId);
-    // G-09 (round 11 L1): a page checked as ONE invoice with others never shows a phantom
-    // TOTAL_MISMATCH (its lines vs the whole document's total) — set aside, audited.
-    await setAsideGroupTotals(tx as never, restaurantId, invoiceId);
     return out;
   });
   if (typeof persisted === 'string') {

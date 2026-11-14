@@ -21,6 +21,7 @@ import {
   createDb,
   ensureRlsAppRole,
   eq,
+  inArray,
   ingestChannels,
   ingestDocuments,
   ingestSenders,
@@ -44,7 +45,10 @@ import { toObjectRef } from '../documents/objectRef';
 import { localDocumentStorage } from '../documents/storage';
 import { splitDocument } from '../documents/attach';
 import { reopenForOcr, retireInvoice } from '../documents/reocr';
-import { setAsideGroupTotals } from '../documents/groupTotals';
+import { buildMatchInputForInvoice } from '../match/buildMatchInput';
+import { persistMatchRun } from '../match/persist';
+import { buildRules, resolveApprovalThresholds } from '../approvals/engine';
+import { runMatch } from '@restomatch/matching';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 import { jpegBytes, pngBytes } from './documentTestKit';
 
@@ -2358,23 +2362,63 @@ describe('round 11 · "checked together": same-document repeats, exact LIFO undo
     expect(marks.filter((m) => m === null)).toHaveLength(1);
   });
 
-  it('L1: the hero never moves from a "checked together" answer — a page TOTAL_MISMATCH is set aside, now and on every later match', async () => {
+  it('L1: one document, one match — the carrier is matched on every page\'s lines (no page TOTAL_MISMATCH), the hero never moves', async () => {
     const [p1, p2] = await pages(2, 'r11l1');
-    await ocr(p1!, { ...ACME, invoiceNumber: 'A-1101', totalInclVat: '1000.00' });
+    await ocr(p1!, { ...ACME, invoiceNumber: 'A-1101', lines: [{ qty: '1', total: '400.00', desc: 'עגבניות שרי ארגז' }] });
     await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p1!, grId: A.grId, overallStatus: 'clean' });
-    expect((await ocr(p2!, { ...NOHEAD, totalInclVat: '1500.00' })).flagged).toEqual([{ invoiceId: p2, reason: 'page_merge_blocked' }]);
-    const before = (await owner().owner.leakHero()).leakIls;
+    // the last page carries the DOCUMENT total (₪1,000 = 400 + 600)
+    expect(
+      (await ocr(p2!, { ...NOHEAD, lines: [{ qty: '1', total: '600.00', desc: 'מלפפונים ארגז' }], totalExclVat: '1000.00', totalInclVat: '1170.00' })).flagged,
+    ).toEqual([{ invoiceId: p2, reason: 'page_merge_blocked' }]);
+    const types = (r: ReturnType<typeof runMatch>) => r.discrepancies.map((d) => d.type).sort();
+    // control: matched ALONE, the total page is a phantom TOTAL_MISMATCH (its 600 vs the 1,000 printed)
+    const alone = await withRestaurant(appDb, A.restaurantId, (tx) => buildMatchInputForInvoice(tx, A.restaurantId, p2!));
+    expect(types(runMatch(alone!.input))).toContain('TOTAL_MISMATCH');
+    const hero0 = (await owner().owner.leakHero()).leakIls;
     await together(p2!, p2!);
-    // a later match of the carrier (window job / re-match) produces its page-level TOTAL_MISMATCH
-    const [run] = await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p2!, grId: A.grId, overallStatus: 'minor' }).returning();
-    const [tm] = await ownerDb
-      .insert(discrepancies)
-      .values({ matchRunId: run!.id, restaurantId: A.restaurantId, type: 'TOTAL_MISMATCH', severity: 'warn', requiresRole: 'manager', deltaAmount: '500.00' })
-      .returning();
-    await withRestaurant(appDb, A.restaurantId, (tx) => setAsideGroupTotals(tx, A.restaurantId, p2!));
-    const [after] = await ownerDb.select().from(discrepancies).where(eq(discrepancies.id, tm!.id));
-    expect(after!.resolutionStatus).toBe('rejected');
-    expect((await owner().owner.leakHero()).leakIls).toBe(before);
+    // the included page is never matched on its own; its run is gone
+    expect(await withRestaurant(appDb, A.restaurantId, (tx) => buildMatchInputForInvoice(tx, A.restaurantId, p1!))).toBeNull();
+    expect(await ownerDb.select().from(matchRuns).where(eq(matchRuns.invoiceId, p1!))).toHaveLength(0);
+    // the carrier: the document's real lines against its printed total
+    const carrier = await withRestaurant(appDb, A.restaurantId, (tx) => buildMatchInputForInvoice(tx, A.restaurantId, p2!));
+    const result = runMatch(carrier!.input);
+    expect(types(result)).not.toContain('TOTAL_MISMATCH');
+    // …equal to a single-invoice match of the combined lines
+    const single = await invoiceOf(await send(ch.wa, wa([jpegBytes('r11l1-single')]), at(30)));
+    await writeOcr(single, {
+      ...NOHEAD,
+      lines: [
+        { qty: '1', total: '400.00', desc: 'עגבניות שרי ארגז' },
+        { qty: '1', total: '600.00', desc: 'מלפפונים ארגז' },
+      ],
+      totalExclVat: '1000.00',
+      totalInclVat: '1170.00',
+    });
+    const one = await withRestaurant(appDb, A.restaurantId, (tx) => buildMatchInputForInvoice(tx, A.restaurantId, single));
+    const oneResult = runMatch(one!.input);
+    expect({ status: result.status, total: result.totalDiscrepancyAmount, types: types(result) }).toEqual({
+      status: oneResult.status,
+      total: oneResult.totalDiscrepancyAmount,
+      types: types(oneResult),
+    });
+    const rules = buildRules(resolveApprovalThresholds(undefined));
+    // the answer itself moves nothing in the hero (the included page's run had no leak)
+    expect((await owner().owner.leakHero()).leakIls).toBe(hero0);
+    // the later match (window job / re-match) persists the carrier's run…
+    await withRestaurant(appDb, A.restaurantId, (tx) =>
+      persistMatchRun(tx, { restaurantId: A.restaurantId, invoiceId: p2!, poId: carrier!.poId, grId: carrier!.grId }, carrier!.input, result, rules, undefined),
+    );
+    const heroGroup = (await owner().owner.leakHero()).leakIls;
+    // …and moves the hero by EXACTLY what the same document matched as one ordinary invoice
+    // does — its real findings, never a phantom page total.
+    await ownerDb.delete(matchRuns).where(eq(matchRuns.invoiceId, p2!));
+    await withRestaurant(appDb, A.restaurantId, (tx) =>
+      persistMatchRun(tx, { restaurantId: A.restaurantId, invoiceId: single, poId: one!.poId, grId: one!.grId }, one!.input, oneResult, rules, undefined),
+    );
+    expect((await owner().owner.leakHero()).leakIls).toBe(heroGroup);
+    // never leave state for later suites (charts' hero tests share the DB)
+    await ownerDb.delete(matchRuns).where(inArray(matchRuns.invoiceId, [single, p2!]));
+    await ownerDb.delete(invoices).where(eq(invoices.id, single));
   });
 });
 

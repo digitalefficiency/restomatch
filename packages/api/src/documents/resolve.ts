@@ -3,7 +3,6 @@ import { and, auditLog, discrepancies, eq, ingestDocuments, invoices, matchRuns,
 import { enqueueMatchInvoice } from '@restomatch/queue';
 import { DocumentError, documentNotFound } from './errors';
 import { PAGES_RECOMPOSED_ACTION, retireInvoice } from './reocr';
-import { GROUP_TOTAL_NOTE } from './groupTotals';
 import { PAGE_FLAGS, PAGE_ONE_FLAGS, type PageFlag } from './settle';
 
 /**
@@ -35,7 +34,7 @@ export const PAGE_SEPARATE = 'page_separate';
 export const PAGE_SEPARATED_ACTION = 'document.page_separated';
 
 export interface ResolveDeps {
-  enqueueMatch?: (job: { restaurantId: string; invoiceId: string }) => Promise<unknown>;
+  enqueueMatch?: (job: { restaurantId: string; invoiceId: string; rematch?: boolean }) => Promise<unknown>;
 }
 
 export async function resolvePageFlag(
@@ -167,7 +166,8 @@ export async function resolvePageFlag(
         before: { flag: PAGE_CHECKED_TOGETHER } as never,
         after: { flag: restore, answerId: was.id, restored: before.members ?? null, reopened: waived } as never,
       });
-      return { invoiceId: doc.invoiceId, match: false, released: [] as string[] };
+      // the restored state is matched afresh: each invoice on its own lines, a remaining carrier on its group's
+      return { invoiceId: doc.invoiceId, match: false, released: [] as string[], rematch: members };
     }
     if (!flag || !(PAGE_FLAGS as readonly string[]).includes(flag)) {
       throw new TRPCError({ code: 'CONFLICT', message: 'not_flagged' });
@@ -360,6 +360,15 @@ export async function resolvePageFlag(
       if (rows.some(realDuplicate)) throw new TRPCError({ code: 'CONFLICT', message: 'duplicate_on_file' });
       if (rows.some((r) => r.status === 'paid' && r.id !== payable)) throw new TRPCError({ code: 'CONFLICT', message: 'already_paid' });
       const marked = memberIds.filter((id) => id !== payable);
+      // Round 11 (L1): the included invoices' own runs go (their lines are matched with the
+      // carrier's) — never one a person already decided on (that stays their decision).
+      const markedList = sql.join(marked.map((id) => sql`${id}::uuid`), sql`, `);
+      const [decided] = (await tx.execute(sql`
+        select 1 as hit from ${matchRuns} mr join ${discrepancies} d on d.match_run_id = mr.id and d.restaurant_id = mr.restaurant_id
+         where mr.restaurant_id = ${restaurantId} and mr.invoice_id in (${markedList})
+           and d.resolution_status not in ('open', 'escalated')
+         limit 1`)) as unknown as Array<{ hit: number }>;
+      if (decided) throw new TRPCError({ code: 'CONFLICT', message: 'decided' });
       const markList = sql.join(marked.map((id) => sql`${id}::uuid`), sql`, `);
       // Round 11 (M3): the exact prior state of every member — the undo restores THIS.
       const snapshot = rows.map((r) => ({ id: r.id, paidWith: r.paid_with }));
@@ -374,18 +383,10 @@ export async function resolvePageFlag(
         update ${invoices}
            set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - 'paidWith'), updated_at = now()
          where restaurant_id = ${restaurantId} and id = ${payable}::uuid and (ocr_payload -> 'raw') ? 'paidWith'`);
-      // Round 11 (L1): one document, one total — a single page's TOTAL_MISMATCH (its
-      // lines vs the document's printed total, or a total printed on another page) is
-      // not a leak. Open ones on the members are set aside (audited; the undo reopens them).
-      const waived = (await tx.execute(sql`
-        update ${discrepancies} d
-           set resolution_status = 'rejected', resolved_by = ${args.userId}, resolved_at = now(),
-               resolution_note = ${GROUP_TOTAL_NOTE}
-          from ${matchRuns} mr
-         where mr.id = d.match_run_id and mr.restaurant_id = d.restaurant_id
-           and d.restaurant_id = ${restaurantId} and mr.invoice_id in (${memberList})
-           and d.type = 'TOTAL_MISMATCH' and d.resolution_status in ('open', 'escalated')
-         returning d.id::text as id, d.resolution_status as status`)) as unknown as Array<{ id: string }>;
+      // Round 11 (L1): one document, one match — the included invoices' undecided runs go;
+      // the carrier is re-matched on the document's real lines (buildMatchInputForInvoice),
+      // so no page-level TOTAL_MISMATCH ever arises.
+      await tx.execute(sql`delete from ${matchRuns} where restaurant_id = ${restaurantId} and invoice_id in (${markedList})`);
       await tx
         .update(ingestDocuments)
         .set({ error: PAGE_CHECKED_TOGETHER, updatedAt: new Date() })
@@ -403,10 +404,9 @@ export async function resolvePageFlag(
           withInvoiceId: head,
           memberIds,
           paidWithInvoiceIds: marked,
-          waivedTotalMismatchIds: waived.map((w) => w.id),
         } as never,
       });
-      return { invoiceId, match: false, released: [] as string[] };
+      return { invoiceId, match: false, released: [] as string[], rematch: [payable] };
     }
 
     if (action === 'close_unreadable') {
@@ -454,6 +454,14 @@ export async function resolvePageFlag(
       await (deps.enqueueMatch ?? enqueueMatchInvoice)({ restaurantId, invoiceId: id });
     } catch (err) {
       console.warn(`[documents] failed to enqueue match for invoice=${id}`, err);
+    }
+  }
+  // Round 11 (L1): a "checked together" group (or its undo) is matched afresh.
+  for (const id of (out as { rematch?: string[] }).rematch ?? []) {
+    try {
+      await (deps.enqueueMatch ?? enqueueMatchInvoice)({ restaurantId, invoiceId: id, rematch: true });
+    } catch (err) {
+      console.warn(`[documents] failed to enqueue the re-match for invoice=${id}`, err);
     }
   }
   return { invoiceId: out.invoiceId, action };
