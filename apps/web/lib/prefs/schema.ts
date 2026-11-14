@@ -134,12 +134,53 @@ export function displayCookieAssignment(c: DisplayChoices, secure: boolean): str
 }
 
 /**
- * Root font size for each text size. "גדול" matches the reference's 1.1 zoom
- * (reference/src/product.css `[data-text="large"]`); scaling the root size grows
- * every rem-based size (all text tokens), never below the 12 px floor.
- * Promote to shared: a text-size step token in packages/ui-tokens (DS3-00).
+ * "גדול" enlarges the page content by 1.1, as the reference does
+ * (reference/src/product.css: `[data-text="large"] .rm-main{ zoom:1.1 }`): the
+ * dashboard's content column (`#main-content`, app/dashboard/layout.tsx), on
+ * screen only, so printed letters keep their size. The side menu, the top bar,
+ * dialogs and toasts keep theirs: the side menu's fit rule is measured at
+ * 100 % (docs/ux/sidebar/SPEC.md). Promote to shared: a text-size token (DS3-00).
  */
-export const TEXT_SCALE: Record<TextSize, string> = { regular: '100%', large: '110%' };
+export const TEXT_ZOOM: Record<TextSize, number> = { regular: 1, large: 1.1 };
+/** The box "גדול" enlarges: the content column's single child (its width container). */
+export const CONTENT_SELECTOR = '#main-content > *';
+
+/** The CSS a text size adds to the page (null for the regular size). */
+export function textSizeRule(size: TextSize): string | null {
+  return size === 'regular' ? null : `@media screen{${CONTENT_SELECTOR}{zoom:${TEXT_ZOOM[size]}}}`;
+}
+
+/**
+ * Where a display setting does nothing, and is therefore absent (SPEC §10.5
+ * "on a phone the settings that do nothing there are not shown"):
+ *  • density is fixed on a touch pointer (SPEC §7): the regular size applies,
+ *    whatever the choice, and the density setting is not offered;
+ *  • the side menu exists from 1024 px (the shell's `lg`), so below that its
+ *    setting is not offered;
+ *  • single-key shortcuts need a keyboard: not offered on a phone (narrow and
+ *    touch). An iPad with a keyboard at 1024 px or wider keeps the switch.
+ */
+export const COARSE_QUERY = '(pointer: coarse)';
+export const NARROW_QUERY = '(max-width: 1023.98px)';
+export const PHONE_QUERY = '(max-width: 1023.98px) and (pointer: coarse)';
+
+/** What the server can tell about the requesting device (User-Agent), used only as the SSR snapshot. */
+export interface DeviceHints {
+  /** A phone or tablet browser: density renders at the regular size from the first HTML. */
+  coarse: boolean;
+  /** macOS or iOS: shortcuts are labelled with ⌘. */
+  apple: boolean;
+}
+export const NO_DEVICE_HINTS: DeviceHints = Object.freeze({ coarse: false, apple: false }) as DeviceHints;
+
+/**
+ * The `data-density` attribute for the density in force: only "compact" is
+ * written; the regular density is the `:root` token values (an explicit
+ * "default" would re-declare every token and cancel :root media rules).
+ */
+export function densityAttr(applied: Density): 'compact' | undefined {
+  return applied === 'compact' ? 'compact' : undefined;
+}
 
 /** The DS2 token density mode (`[data-density]` in globals.css) a choice selects. */
 export function tokenDensity(d: Density): 'default' | 'compact' {

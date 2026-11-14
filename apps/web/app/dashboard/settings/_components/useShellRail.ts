@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 /**
  * The side menu's collapsed/expanded state, read from and set through the shell
@@ -32,5 +32,5 @@ export function useShellRail(initial: boolean) {
     document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyB', key: 'b', ctrlKey: true, bubbles: true, cancelable: true }));
   }, []);
 
-  return { rail, available, setRail: set };
+  return useMemo(() => ({ rail, available, setRail: set }), [rail, available, set]);
 }

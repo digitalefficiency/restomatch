@@ -3,9 +3,11 @@
 import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { LinkButton } from '@/lib/components';
-import { useT } from '@/lib/i18n/client';
+import { useLocale, useT } from '@/lib/i18n/client';
+import { common } from '@/lib/i18n/messages/common';
 import { settings } from '@/lib/i18n/messages/settings';
-import { LEGACY_HASHES, SETTINGS_BASE } from '../_index/sections';
+import { labelForRole } from '@/lib/roles';
+import { LEGACY_HASHES, RESTAURANT_ROLES, SETTINGS_BASE } from '../_index/sections';
 
 /**
  * The one-page settings screen had anchors (`/dashboard/settings#letterhead`,
@@ -25,13 +27,21 @@ export function LegacyHashRedirect() {
   return null;
 }
 
-/** A restaurant section opened by a role that does not see it (receiver, chef): calm, with the way back. */
-export function SectionForbidden() {
+/**
+ * A restaurant section opened by a role that does not see it (receiver, chef):
+ * calm, with the way back. The shell's own 403 wording (common:shell.forbidden),
+ * with the section's name and the roles it is open to.
+ */
+export function SectionForbidden({ screen }: { screen: string }) {
   const t = useT(settings);
+  const tc = useT(common);
+  const locale = useLocale();
   return (
     <div className="rounded-card border border-line bg-surface p-6 shadow-e1">
-      <h2 className="mb-2 text-title-sm text-ink">{t('frame.forbiddenTitle')}</h2>
-      <p className="mb-4 text-body-sm text-muted">{t('frame.forbiddenBody')}</p>
+      <h2 className="mb-2 text-title-sm text-ink">{tc('shell.forbidden.title', { screen })}</h2>
+      <p className="mb-4 text-body-sm text-muted">
+        {tc('shell.forbidden.allowed', { roles: RESTAURANT_ROLES.map((r) => labelForRole(r, locale)).join(', ') })}
+      </p>
       <LinkButton href={SETTINGS_BASE} variant="secondary">
         {t('frame.backCta')}
       </LinkButton>

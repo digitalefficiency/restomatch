@@ -37,13 +37,21 @@ describe('the settings map (two groups, a scope per section)', () => {
     }
   });
 
-  it('on a phone the settings that do nothing there are not offered', () => {
-    const desk = settingsFor('owner').map((e) => e.id);
-    const phone = settingsFor('owner', { touch: true }).map((e) => e.id);
-    expect(desk).toEqual(expect.arrayContaining(['rail', 'keys']));
+  it('a setting that does nothing on this device is not offered (SPEC §10.5)', () => {
+    const ids = (device: Parameters<typeof settingsFor>[1]) => settingsFor('owner', device).map((e) => e.id);
+    expect(ids({})).toEqual(expect.arrayContaining(['density', 'text', 'rail', 'keys']));
+    // A phone: narrow and touch — no density (fixed), no side menu, no keyboard.
+    const phone = ids({ coarse: true, narrow: true, phone: true });
+    expect(phone).toContain('text');
+    expect(phone).not.toContain('density');
     expect(phone).not.toContain('rail');
     expect(phone).not.toContain('keys');
-    expect(phone).toContain('density');
+    // A narrow desktop window with a mouse: only the side menu is absent.
+    expect(ids({ narrow: true })).toEqual(expect.arrayContaining(['density', 'keys']));
+    expect(ids({ narrow: true })).not.toContain('rail');
+    // A wide touch screen (a tablet in landscape with a keyboard): density fixed, the rest stays.
+    expect(ids({ coarse: true })).toEqual(expect.arrayContaining(['rail', 'keys']));
+    expect(ids({ coarse: true })).not.toContain('density');
   });
 
   it('every setting links to its section with its anchor; ids are unique', () => {
@@ -94,8 +102,10 @@ describe('the palette export (DS3-02)', () => {
     expect(receiver.some((e) => e.key === 'settings.display.density')).toBe(true);
   });
 
-  it('no desk-only setting on a phone', () => {
-    const phone = settingsPaletteEntries(t, 'owner', { narrow: true });
-    expect(phone.some((e) => e.key === 'settings.display.keys')).toBe(false);
+  it('no setting that does nothing on this device', () => {
+    const phone = settingsPaletteEntries(t, 'owner', { coarse: true, narrow: true, phone: true });
+    for (const id of ['keys', 'rail', 'density']) expect(phone.some((e) => e.key === `settings.display.${id}`)).toBe(false);
+    const narrowDesk = settingsPaletteEntries(t, 'owner', { narrow: true });
+    expect(narrowDesk.some((e) => e.key === 'settings.display.keys')).toBe(true);
   });
 });

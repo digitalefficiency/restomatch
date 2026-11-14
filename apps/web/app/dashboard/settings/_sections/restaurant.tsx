@@ -14,7 +14,7 @@ import { settingsViewer } from '../_lib/viewer';
  */
 export async function RestaurantSettings() {
   const [t, viewer] = await Promise.all([getT(settingsMessages), settingsViewer()]);
-  if (!viewer.seesRestaurant) return <SectionForbidden />;
+  if (!viewer.seesRestaurant) return <SectionForbidden screen={t('areas.restaurant.title')} />;
   const caller = await createServerCaller();
   const profile = await caller.settings.profile();
   const referralOn = (viewer.role === 'owner' || viewer.role === 'manager') && viewer.features.includes('growth');

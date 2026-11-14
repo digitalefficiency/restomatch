@@ -4,24 +4,32 @@ import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } f
 import type { UserRole } from '@restomatch/db';
 import { useNavViewer } from '@/lib/nav/NavProvider';
 import {
-  TEXT_SCALE,
+  COARSE_QUERY,
+  NO_DEVICE_HINTS,
   defaultPrefs,
+  densityAttr,
   resolvePrefs,
-  tokenDensity,
+  tableDensity,
+  textSizeRule,
+  viewDensity,
   withChoice,
   type Density,
+  type DeviceHints,
   type DisplayChoices,
   type DisplayPrefs,
   type TextSize,
 } from './schema';
 import { getDisplayChoices, setDisplayChoices, subscribeDisplay } from './store';
-import { useIsTouch } from './media';
+import { useMediaMatch } from './media';
+import { mirrorDisplayAttrs } from './root';
 
 interface PrefsContextValue {
   /** The viewer's role on the active restaurant (D4 defaults density by role). */
   role: UserRole | null;
   /** What the server read from the cookie: the snapshot for SSR and hydration. */
   serverChoices: DisplayChoices;
+  /** What the server could tell about the device (User-Agent): the SSR snapshot of the device queries. */
+  hints: DeviceHints;
 }
 
 const PrefsContext = createContext<PrefsContextValue | null>(null);
@@ -33,16 +41,37 @@ const PrefsCtxProvider = PrefsContext.Provider as unknown as React.ComponentType
 
 const NO_CHOICES: DisplayChoices = Object.freeze({}) as DisplayChoices;
 
+/** A touch pointer: density is fixed at the regular size and its setting is absent. SSR uses the device hint. */
+export function useIsCoarse(): boolean {
+  const ctx = useContext(PrefsContext);
+  return useMediaMatch(COARSE_QUERY, ctx?.hints.coarse ?? false);
+}
+
+const noSubscribe = () => () => {};
+const isAppleClient = () =>
+  typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(`${navigator.platform ?? ''} ${navigator.userAgent ?? ''}`);
+
+/** macOS / iOS: shortcuts are labelled ⌘ (lib/hotkeys.ts keyLabel). SSR uses the device hint. */
+export function useIsApple(): boolean {
+  const ctx = useContext(PrefsContext);
+  const hint = ctx?.hints.apple ?? false;
+  return useSyncExternalStore(noSubscribe, isAppleClient, () => hint);
+}
+
 export interface PrefsApi extends DisplayPrefs {
   /** Explicit choices stored on this device (missing = default). */
   choices: DisplayChoices;
   /** The role's defaults ("חזרה לברירת המחדל"). */
   defaults: DisplayPrefs;
   role: UserRole | null;
-  /** True on a phone or a touch pointer: density is fixed there and desk-only settings are absent. */
-  touch: boolean;
-  /** The density actually applied on this device (the touch size on a phone, whatever the choice). */
+  /** A touch pointer: density is fixed there (SPEC §7). */
+  coarse: boolean;
+  /** The density the screen really uses: the choice, or 'regular' on a touch pointer. */
   appliedDensity: Density;
+  /** The views toolbar's vocabulary, from the density in force (lib/components/views). */
+  viewDensity: 'comfortable' | 'compact';
+  /** DataTable's vocabulary, from the density in force (lib/components/table). */
+  tableDensity: 'default' | 'compact';
   setDensity: (d: Density) => void;
   setTextSize: (t: TextSize) => void;
   setSingleKeys: (on: boolean) => void;
@@ -54,16 +83,19 @@ export interface PrefsApi extends DisplayPrefs {
  * The personal display preferences, in force and settable. Works anywhere in
  * the dashboard; inside `PrefsProvider` the first render already has the
  * cookie's values (no flash). Setting acts at once and is stored per device.
+ * Readers that size things use `appliedDensity` / `viewDensity` /
+ * `tableDensity`; `density` is the choice (the switch's selected value).
  */
 export function usePrefs(): PrefsApi {
   const ctx = useContext(PrefsContext);
   const viewer = useNavViewer();
   const serverChoices = ctx?.serverChoices ?? NO_CHOICES;
   const choices = useSyncExternalStore(subscribeDisplay, getDisplayChoices, () => serverChoices);
-  const touch = useIsTouch();
+  const coarse = useIsCoarse();
   const role = ctx?.role ?? viewer?.role ?? null;
   return useMemo(() => {
     const prefs = resolvePrefs(choices, role);
+    const applied: Density = coarse ? 'regular' : prefs.density;
     const set = <K extends keyof DisplayPrefs>(key: K, value: DisplayPrefs[K]) =>
       setDisplayChoices(withChoice(getDisplayChoices(), role, key, value));
     return {
@@ -71,40 +103,50 @@ export function usePrefs(): PrefsApi {
       choices,
       defaults: defaultPrefs(role),
       role,
-      touch,
-      appliedDensity: touch ? 'regular' : prefs.density,
+      coarse,
+      appliedDensity: applied,
+      viewDensity: viewDensity(applied),
+      tableDensity: tableDensity(applied),
       setDensity: (d) => set('density', d),
       setTextSize: (t) => set('textSize', t),
       setSingleKeys: (on) => set('singleKeys', on),
       reset: () => setDisplayChoices({}),
     };
-  }, [choices, role, touch]);
+  }, [choices, role, coarse]);
 }
 
 /**
- * Applies the display preferences to everything inside it, from the first
- * HTML: a `display: contents` wrapper carrying `data-density` (the DS2 token
- * density modes in globals.css), `data-text-size` and `data-single-keys`, and a
- * root font-size rule when the text is large. After hydration the same values
- * are mirrored onto <html> so portals (dialogs, toasts, popovers) follow too,
- * and restored when the provider unmounts. A nested provider passes through.
+ * Applies the display preferences from the first HTML: a `display: contents`
+ * wrapper carrying `data-density` (only "compact": the DS2 token density mode
+ * in globals.css), `data-text-size` and `data-single-keys`, and — for large
+ * text — a screen-only rule that enlarges the content column (schema.ts
+ * `textSizeRule`). After hydration the attributes are mirrored onto <html> so
+ * portals follow too, and restored when the provider unmounts. A nested
+ * provider passes through.
  *
  * Usually mounted through the server component `PrefsRoot`, which reads the
- * cookie. `role` defaults to the dashboard viewer's role (NavProvider).
+ * cookie and the device hints. `role` defaults to the dashboard viewer's role
+ * (NavProvider).
  */
 export function PrefsProvider({
   initial,
+  hints,
   role,
   children,
 }: {
   initial: DisplayChoices;
+  hints?: DeviceHints;
   role?: UserRole | null;
   children: React.ReactNode;
 }) {
   const outer = useContext(PrefsContext);
   const viewer = useNavViewer();
   const resolvedRole = role ?? viewer?.role ?? null;
-  const value = useMemo(() => ({ role: resolvedRole, serverChoices: initial }), [resolvedRole, initial]);
+  const resolvedHints = hints ?? NO_DEVICE_HINTS;
+  const value = useMemo(
+    () => ({ role: resolvedRole, serverChoices: initial, hints: resolvedHints }),
+    [resolvedRole, initial, resolvedHints],
+  );
   if (outer) return <>{children}</>;
   return (
     <PrefsCtxProvider value={value}>
@@ -115,36 +157,18 @@ export function PrefsProvider({
 
 function PrefsApplier({ children }: { children: React.ReactNode }) {
   const p = usePrefs();
-  const density = tokenDensity(p.appliedDensity);
+  const density = densityAttr(p.appliedDensity);
   const keys = p.singleKeys ? 'on' : 'off';
+  const rule = textSizeRule(p.textSize);
 
-  useEffect(() => {
-    const html = document.documentElement;
-    const before = {
-      density: html.dataset.density,
-      textSize: html.dataset.textSize,
-      singleKeys: html.dataset.singleKeys,
-      fontSize: html.style.fontSize,
-    };
-    html.dataset.density = density;
-    html.dataset.textSize = p.textSize;
-    html.dataset.singleKeys = keys;
-    html.style.fontSize = p.textSize === 'regular' ? '' : TEXT_SCALE[p.textSize];
-    return () => {
-      const restore = (k: 'density' | 'textSize' | 'singleKeys', v: string | undefined) => {
-        if (v === undefined) delete html.dataset[k];
-        else html.dataset[k] = v;
-      };
-      restore('density', before.density);
-      restore('textSize', before.textSize);
-      restore('singleKeys', before.singleKeys);
-      html.style.fontSize = before.fontSize;
-    };
-  }, [density, p.textSize, keys]);
+  useEffect(
+    () => mirrorDisplayAttrs(document.documentElement.dataset, { density, textSize: p.textSize, singleKeys: keys }),
+    [density, p.textSize, keys],
+  );
 
   return (
     <>
-      {p.textSize !== 'regular' ? <style>{`:root{font-size:${TEXT_SCALE[p.textSize]}}`}</style> : null}
+      {rule ? <style>{rule}</style> : null}
       <div data-rm-prefs="" data-density={density} data-text-size={p.textSize} data-single-keys={keys} className="contents">
         {children}
       </div>

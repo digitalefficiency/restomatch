@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Lock } from 'lucide-react';
-import { Button, StatusChip, cn, useAnnounce } from '@/lib/components';
+import { Button, StatusChip, cn, useAnnounce, useToast } from '@/lib/components';
 import { DateTime, Money } from '@/lib/components/money';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { settings } from '@/lib/i18n/messages/settings';
 import { localizeServerError } from '@/lib/serverErrors';
 import { trpc } from '@/lib/trpc/client';
 import { NumberStepper } from '../_components/controls';
-import { useMarkUnsaved } from '../_components/SettingsFrame';
+import { useSectionDraft } from '../_components/SettingsFrame';
 import { SectionFoot, SettingRow, SettingsRows, SubHead } from '../_components/ui';
 import {
   ALL_FIELDS,
@@ -81,6 +81,35 @@ function fill(template: string, parts: Record<string, React.ReactNode>): React.R
   });
 }
 
+/** The bar's height on <html> while it is shown, so a focused field scrolls clear of it (globals.css scroll-padding, WCAG 2.4.11). */
+function useActionBarHeight(ref: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const update = () => root.style.setProperty('--rm-actionbar-h', `${Math.ceil(el.getBoundingClientRect().height)}px`);
+    update();
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
+    ro?.observe(el);
+    return () => {
+      ro?.disconnect();
+      root.style.removeProperty('--rm-actionbar-h');
+    };
+  }, [ref]);
+}
+
+/** After the element that held focus goes away: focus this one once it is in the page. */
+function focusSoon(id: string) {
+  requestAnimationFrame(() => document.getElementById(id)?.focus());
+}
+
+/** A field's limits as people read them ("בין 0% ל־100%"), for a screen reader. */
+function rangeText(t: T, f: FieldDef): string {
+  const show = (stored: number) =>
+    f.kind === 'percent' ? `${toDisplay(stored, f.kind)}%` : f.kind === 'currency' ? `₪${toDisplay(stored, f.kind)}` : toDisplay(stored, f.kind);
+  return t('thresholds.range', { min: show(0), max: show(f.max) });
+}
+
 /** A stored value as people read it: 7.5%, ₪ through the money component, units as a number. */
 function ValueText({ f, stored }: { f: FieldDef; stored: number }) {
   if (f.kind === 'currency') return <Money value={stored} context="line" className="font-medium" />;
@@ -123,29 +152,30 @@ export function RulesForm({
   const t = useT(settings) as unknown as T;
   const locale = useLocale();
   const announce = useAnnounce();
+  const toast = useToast();
   const utils = trpc.useUtils();
+  /** The unsaved draft lives in the frame, so another section or a search result does not lose it. */
+  const draft = useSectionDraft<{ values: FormValues; base: FormValues }>('rules');
 
   const [saved, setSaved] = useState<FormValues>(() => valuesFrom(initial));
-  const [values, setValues] = useState<FormValues>(saved);
-  const [undo, setUndo] = useState<{ before: FormValues; after: FormValues } | null>(null);
+  const [values, setValues] = useState<FormValues>(() => {
+    const base = valuesFrom(initial);
+    const kept = draft.initial;
+    // A kept draft applies only over the same saved values (someone may have saved since).
+    return kept && ALL_FIELDS.every((f) => kept.base[f.key] === base[f.key]) ? kept.values : base;
+  });
+  const [undo, setUndo] = useState<{ before: FormValues; after: FormValues; focus: boolean } | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   /** Where focus goes when the bar it was in goes away (after discard, or when the undo window ends). */
   const focusFirstField = useCallback(() => document.getElementById(`set-${TOLERANCE_FIELDS[0]!.key}`)?.focus(), []);
 
   const dirty = canEdit && isDirty(values, saved, defaults);
-  useMarkUnsaved('rules', dirty);
-
-  // Leave guard: unsaved rule changes are lost on a reload or a tab close.
+  // Keep (or drop) the draft in the frame; it marks the section and guards a reload.
+  const keepDraft = draft.keep;
   useEffect(() => {
-    if (!dirty) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [dirty]);
+    keepDraft(dirty ? { values, base: saved } : undefined);
+  }, [keepDraft, dirty, values, saved]);
 
   const errors = useMemo(() => {
     const out: Partial<Record<FieldKey, ReturnType<typeof errorOf>>> = {};
@@ -184,7 +214,8 @@ export function RulesForm({
       onSuccess: () => {
         setSaved(after);
         setValues(after);
-        setUndo({ before, after });
+        // Focus moves to "ביטול": the "שמרו" it was on has gone with the bar.
+        setUndo({ before, after, focus: true });
         announce(t('thresholds.save.sr.saved'));
         refreshAfterWrite();
       },
@@ -197,6 +228,8 @@ export function RulesForm({
     const patch: UpdatePatch | null = undoPatch(undo.before, undo.after);
     const target = undo.before;
     setUndo(null);
+    // The undo button goes with its bar: focus returns to the first field.
+    focusFirstField();
     if (!patch) return;
     update.mutate(patch, {
       onSuccess: () => {
@@ -205,7 +238,8 @@ export function RulesForm({
         announce(t('thresholds.save.sr.undone'));
         refreshAfterWrite();
       },
-      onError: (err) => setFailure(localizeServerError(err, locale, t('thresholds.save.failed'))),
+      // Refused: the saved thresholds stay as they are, and the person is told (SPEC §9).
+      onError: () => toast.error(t('thresholds.save.toast.undoFailed')),
     });
   };
 
@@ -249,7 +283,8 @@ export function RulesForm({
   /* ── field rows ── */
   const chipFor = (fields: FieldDef[]) => {
     if (canEdit && fields.some((f) => isFieldDirty(values, saved, defaults, f))) {
-      return <StatusChip tone="warn" label={t('thresholds.unsaved')} />;
+      // An unsaved form is a state of the interface, not a warning (SPEC §2): info, the word carries it.
+      return <StatusChip tone="info" label={t('thresholds.unsaved')} />;
     }
     return fields.some((f) => saved[f.key] !== null) ? (
       <StatusChip tone="info" label={t('thresholds.custom')} icon={null} />
@@ -270,6 +305,8 @@ export function RulesForm({
             return next;
           });
           announce(t('thresholds.save.sr.defaulted'));
+          // This link goes away once the field is back at its default: focus the field.
+          focusSoon(`set-${fields[0]!.key}`);
         }}
         aria-label={t('thresholds.restoreDefaultAria', { field: label })}
         className="inline-flex min-h-6 items-center text-caption font-medium text-primary underline decoration-primary/40 underline-offset-4 hover:decoration-primary [@media(pointer:coarse)]:min-h-11"
@@ -281,7 +318,12 @@ export function RulesForm({
   const stepper = (f: FieldDef, label: string, describedBy?: string) => {
     const raw = values[f.key];
     const shown = raw ?? toDisplay(defaults[f.key], f.kind);
+    const rangeId = `range-${f.key}`;
     return (
+      <span key={f.key} className="contents">
+      <span id={rangeId} className="sr-only">
+        {rangeText(t, f)}
+      </span>
       <NumberStepper
         key={f.key}
         id={`set-${f.key}`}
@@ -296,8 +338,9 @@ export function RulesForm({
         moreLabel={t('thresholds.moreAria', { field: label })}
         disabled={!canEdit}
         invalid={!!errors[f.key]}
-        describedBy={describedBy}
+        describedBy={describedBy ? `${describedBy} ${rangeId}` : rangeId}
       />
+      </span>
     );
   };
 
@@ -384,6 +427,7 @@ export function RulesForm({
       <EffectBox
         t={t}
         locale={locale}
+        announce={announce}
         unsaved={thresholdsUnsaved}
         data={preview.isError ? null : (preview.data ?? null)}
         failed={preview.isError}
@@ -418,6 +462,8 @@ export function RulesForm({
         onRestore={(row) => {
           setValues(valuesOfAudit(row.before));
           announce(t('thresholds.save.sr.restored'));
+          // The restore link goes away (the form now has changes): focus "שמרו".
+          focusSoon('settings-save-cta');
         }}
       />
 
@@ -429,26 +475,48 @@ export function RulesForm({
 
       {anyAction ? (
         undo ? (
-          <UndoBar t={t} onUndo={doUndo} onEnd={() => setUndo(null)} returnFocus={focusFirstField} />
+          <UndoBar t={t} focusOnMount={undo.focus} onUndo={doUndo} onEnd={() => setUndo(null)} returnFocus={focusFirstField} />
         ) : (
-          <div
-            role="region"
-            aria-label={t('thresholds.save.dirty')}
-            data-testid="settings-dirty-bar"
-            className="sticky bottom-[calc(var(--rm-bottomnav-h,0px)+var(--consent-h,0px)+theme(spacing.4))] z-10 flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface px-4 py-3 shadow-e2"
-          >
-            <span className="text-body-sm font-medium text-ink">{t('thresholds.save.dirty')}</span>
-            {hasErrors ? <span className="text-caption text-danger">{t('thresholds.save.invalid')}</span> : null}
-            <span className="flex-1" />
-            <Button type="button" variant="ghost" size="sm" onClick={doDiscard}>
-              {t('thresholds.save.discardCta')}
-            </Button>
-            <Button type="button" variant="primary" size="sm" loading={update.isPending} disabled={hasErrors} onClick={doSave}>
-              {t('thresholds.save.saveCta')}
-            </Button>
-          </div>
+          <DirtyBar t={t} hasErrors={hasErrors} saving={update.isPending} onDiscard={doDiscard} onSave={doSave} />
         )
       ) : null}
+    </div>
+  );
+}
+
+/** "יש שינויים שלא נשמרו · בטלו · שמרו", pinned above the bottom chrome while the form has changes. */
+function DirtyBar({
+  t,
+  hasErrors,
+  saving,
+  onDiscard,
+  onSave,
+}: {
+  t: T;
+  hasErrors: boolean;
+  saving: boolean;
+  onDiscard: () => void;
+  onSave: () => void;
+}) {
+  const bar = useRef<HTMLDivElement | null>(null);
+  useActionBarHeight(bar);
+  return (
+    <div
+      ref={bar}
+      role="region"
+      aria-label={t('thresholds.save.dirty')}
+      data-testid="settings-dirty-bar"
+      className="sticky bottom-[calc(var(--rm-bottomnav-h,0px)+var(--consent-h,0px)+theme(spacing.4))] z-10 flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface px-4 py-3 shadow-e2"
+    >
+      <span className="text-body-sm font-medium text-ink">{t('thresholds.save.dirty')}</span>
+      {hasErrors ? <span className="text-caption text-danger">{t('thresholds.save.invalid')}</span> : null}
+      <span className="flex-1" />
+      <Button type="button" variant="ghost" size="sm" onClick={onDiscard}>
+        {t('thresholds.save.discardCta')}
+      </Button>
+      <Button id="settings-save-cta" type="button" variant="primary" size="sm" loading={saving} disabled={hasErrors} onClick={onSave}>
+        {t('thresholds.save.saveCta')}
+      </Button>
     </div>
   );
 }
@@ -458,9 +526,27 @@ export function RulesForm({
  * as a shrinking line that pauses under the pointer or focus (SPEC §8); under
  * reduced motion the line is not drawn, the window is the same.
  */
-function UndoBar({ t, onUndo, onEnd, returnFocus }: { t: T; onUndo: () => void; onEnd: () => void; returnFocus: () => void }) {
+function UndoBar({
+  t,
+  focusOnMount,
+  onUndo,
+  onEnd,
+  returnFocus,
+}: {
+  t: T;
+  /** Saved from the bar: focus "ביטול" (the time then waits while it has focus, SPEC §8). */
+  focusOnMount: boolean;
+  onUndo: () => void;
+  onEnd: () => void;
+  returnFocus: () => void;
+}) {
   const line = useRef<HTMLDivElement | null>(null);
   const bar = useRef<HTMLDivElement | null>(null);
+  const undoButton = useRef<HTMLButtonElement | null>(null);
+  useActionBarHeight(bar);
+  useEffect(() => {
+    if (focusOnMount) undoButton.current?.focus();
+  }, [focusOnMount]);
   const timer = useRef<{ id: ReturnType<typeof setTimeout> | null; left: number; since: number }>({ id: null, left: UNDO_MS, since: 0 });
   const anim = useRef<Animation | null>(null);
 
@@ -521,6 +607,7 @@ function UndoBar({ t, onUndo, onEnd, returnFocus }: { t: T; onUndo: () => void; 
       <span className="text-body-sm font-medium">{t('thresholds.save.done')}</span>
       <span className="flex-1" />
       <button
+        ref={undoButton}
         type="button"
         onClick={onUndo}
         className="inline-flex min-h-8 items-center rounded-control px-3 text-body-sm font-semibold ring-1 ring-inset ring-on-bold/60 hover:bg-on-bold/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-on-bold [@media(pointer:coarse)]:min-h-11"
@@ -544,16 +631,23 @@ interface PreviewData {
   notEvaluated: number;
 }
 
+/** At most this many gap names under "לא היו נפתחים" (data, not copy: the rest is "ועוד #"). */
+const NAMED_MAX = 3;
+
 /**
  * What the thresholds would do — in conditional words, from the matching
  * engine on the server (settings.previewThresholds). It never says that saving
  * changes a gap that is already open: thresholds act on invoices checked from
- * now on (KNOWN-ISSUES "Settings" #3). While the answer is for other values
- * than the fields hold it is dimmed and marked busy; a failure shows no number.
+ * now on (KNOWN-ISSUES "Settings" #3), and open gaps stay open — said in both
+ * states. While the answer is for other values than the fields hold it is
+ * dimmed and marked busy; a failure shows no number. The first line is
+ * announced once when an answer for the current values arrives (the box is
+ * not a live region: it would re-read after every keystroke).
  */
 function EffectBox({
   t,
   locale,
+  announce,
   unsaved,
   data,
   failed,
@@ -562,41 +656,59 @@ function EffectBox({
 }: {
   t: T;
   locale: string;
+  announce: (message: string) => void;
   unsaved: boolean;
   data: PreviewData | null;
   failed: boolean;
   stale: boolean;
   opensMore: boolean;
 }) {
+  let first: string | null = null;
   const lines: React.ReactNode[] = [];
+  let names: string[] = [];
+  let more = 0;
   if (data) {
     const n = data.openNow;
     if (!unsaved || !data.changed || n === 0) {
-      lines.push(t('thresholds.effect.openNow', { count: n }));
+      first = t('thresholds.effect.openNow', { count: n });
+      lines.push(first);
     } else {
       const k = data.wouldOpen;
-      if (k === n) lines.push(t('thresholds.effect.all', { n }));
-      else if (k === 0) lines.push(t('thresholds.effect.none', { n }));
-      else lines.push(t('thresholds.effect.some', { k, n }));
+      first = k === n ? t('thresholds.effect.all', { n }) : k === 0 ? t('thresholds.effect.none', { n }) : t('thresholds.effect.some', { k, n });
+      lines.push(first);
       if (k > 0) lines.push(t('thresholds.effect.blocks', { b: data.wouldBlock }));
       if (data.notOpenedCount > 0) {
-        const named = data.notOpened.map((x) => (locale === 'en' ? (x.labelEn ?? x.label) : x.label) ?? t('thresholds.effect.unnamed'));
-        const more = data.notOpenedCount - named.length;
-        const names = [...named, ...(more > 0 ? [t('thresholds.effect.andMore', { count: more })] : [])].join(', ');
         lines.push(
           data.notOpenedAgorot > 0 ? (
             <>
-              {t('thresholds.effect.notOpened', { count: data.notOpenedCount, names })},{' '}
-              <Money agorot={data.notOpenedAgorot} context="line" className="font-semibold" /> {t('thresholds.effect.beforeVat')}
+              {fill(t('thresholds.effect.notOpenedAmount', { count: data.notOpenedCount }), {
+                amount: <Money agorot={data.notOpenedAgorot} context="line" className="font-semibold" />,
+              })}
             </>
           ) : (
-            t('thresholds.effect.notOpened', { count: data.notOpenedCount, names })
+            t('thresholds.effect.notOpened', { count: data.notOpenedCount })
           ),
         );
+        names = data.notOpened
+          .slice(0, NAMED_MAX)
+          .map((x) => (locale === 'en' ? (x.labelEn ?? x.label) : x.label) ?? t('thresholds.effect.unnamed'));
+        more = data.notOpenedCount - names.length;
       }
       if (data.notEvaluated > 0) lines.push(t('thresholds.effect.notEvaluated', { count: data.notEvaluated }));
     }
   }
+
+  const said = useRef<string | null>(null);
+  useEffect(() => {
+    if (stale || !first || !unsaved) {
+      if (!unsaved) said.current = null;
+      return;
+    }
+    if (said.current === first) return;
+    said.current = first;
+    announce(first);
+  }, [stale, first, unsaved, announce]);
+
   return (
     <div
       data-testid="threshold-effect"
@@ -618,15 +730,25 @@ function EffectBox({
           {l}
         </p>
       ))}
+      {names.length > 0 ? (
+        <ul data-record="" className={cn('flex flex-wrap gap-x-3 gap-y-0.5 text-caption text-muted', stale && 'opacity-60')}>
+          {names.map((name, i) => (
+            <li key={i}>
+              <bdi>{name}</bdi>
+            </li>
+          ))}
+          {more > 0 ? <li>{t('thresholds.effect.andMore', { count: more })}</li> : null}
+        </ul>
+      ) : null}
       {unsaved ? (
         <>
           {opensMore ? <p className="mt-1 text-caption text-muted">{t('thresholds.effect.stricter')}</p> : null}
           <p className={cn('text-caption text-muted', !opensMore && 'mt-1')}>{t('thresholds.effect.newOnly')}</p>
-          <p className="text-caption text-muted">{t('thresholds.effect.openStay')}</p>
         </>
       ) : (
         <p className="mt-1 text-caption text-muted">{t('thresholds.effect.savedApply')}</p>
       )}
+      <p className="text-caption text-muted">{t('thresholds.effect.openStay')}</p>
       {stale ? <span className="sr-only">{t('thresholds.effect.busySr')}</span> : null}
     </div>
   );

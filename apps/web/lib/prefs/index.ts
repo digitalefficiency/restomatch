@@ -1,8 +1,10 @@
 /**
- * Personal display preferences (DS3-06). Client-safe entry; the server entry is
- * `@/lib/prefs/server` (PrefsRoot, readDisplayChoices). Contract: ./README.md.
+ * Personal display preferences (DS3-06). Client entry; the server entry is
+ * `@/lib/prefs/server` (PrefsRoot, readDisplayChoices, readDeviceHints).
+ * Server components import constants from `@/lib/prefs/schema` (this barrel
+ * re-exports client modules). Contract: ./README.md.
  */
 export * from './schema';
 export { getDisplayChoices, setDisplayChoices, singleKeysEnabled, subscribeDisplay } from './store';
-export { PrefsProvider, usePrefs, type PrefsApi } from './PrefsProvider';
-export { NARROW_QUERY, TOUCH_QUERY, useIsNarrow, useIsTouch, useMediaMatch } from './media';
+export { PrefsProvider, useIsApple, useIsCoarse, usePrefs, type PrefsApi } from './PrefsProvider';
+export { useIsNarrow, useIsPhone, useMediaMatch } from './media';

@@ -1,4 +1,4 @@
-import { choicesFromCookieHeader, displayCookieAssignment, type DisplayChoices } from './schema';
+import { choicesFromCookieHeader, displayCookieAssignment, serializeDisplayChoices, type DisplayChoices } from './schema';
 
 /**
  * The client side of the display preferences: one module-level store over the
@@ -7,6 +7,11 @@ import { choicesFromCookieHeader, displayCookieAssignment, type DisplayChoices }
  * `singleKeysEnabled()`. Other tabs follow through a BroadcastChannel, and a
  * tab that comes back into view re-reads the cookie (browsers without the
  * channel). Server-safe: without `document` it is an empty, inert store.
+ *
+ * Safari and every iOS browser cap a cookie written by script at 7 days
+ * (WebKit ITP), so the first reader on each page load writes the stored
+ * choices back with a fresh lifetime: a choice lasts while the device keeps
+ * opening the app at least once a week (a year elsewhere).
  */
 
 type Listener = () => void;
@@ -25,6 +30,15 @@ function readCookie(): DisplayChoices {
     return choicesFromCookieHeader(document.cookie);
   } catch {
     return EMPTY;
+  }
+}
+
+function writeCookie(c: DisplayChoices): void {
+  if (typeof document === 'undefined') return;
+  try {
+    document.cookie = displayCookieAssignment(c, typeof window !== 'undefined' && window.location?.protocol === 'https:');
+  } catch {
+    /* cookies blocked: the choice lasts for this page only */
   }
 }
 
@@ -58,6 +72,9 @@ function wire() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') refresh();
   });
+  // Renew the cookie's lifetime once per page load (WebKit ITP, see the header).
+  const stored = readCookie();
+  if (serializeDisplayChoices(stored)) writeCookie(stored);
 }
 
 /** The choices stored on this device (stable reference until they change). */
@@ -71,13 +88,7 @@ export function setDisplayChoices(next: DisplayChoices): void {
   const prev = getDisplayChoices();
   if (same(prev, next)) return;
   current = { ...next };
-  if (typeof document !== 'undefined') {
-    try {
-      document.cookie = displayCookieAssignment(current, window.location.protocol === 'https:');
-    } catch {
-      /* cookies blocked: the choice lasts for this page only */
-    }
-  }
+  writeCookie(current);
   emit();
   try {
     channel?.postMessage('changed');
@@ -96,12 +107,14 @@ export function subscribeDisplay(fn: Listener): () => void {
 
 /**
  * For key handlers outside React (lib/hotkeys.ts, the desk keys): are
- * single-key shortcuts on for this device? Ctrl/⌘ combinations are never
- * affected. Defensive equivalent without importing this module:
- * `document.documentElement.dataset.singleKeys !== 'off'`.
+ * single-key shortcuts on for this device? Reads the cookie on every call (a
+ * short string), so a handler on a screen without the provider, or in a tab
+ * that missed the broadcast, never acts on a stale answer. Ctrl/⌘
+ * combinations are never affected. Without importing this module, read the
+ * same cookie (README "Reading defensively").
  */
 export function singleKeysEnabled(): boolean {
-  return getDisplayChoices().singleKeys !== false;
+  return readCookie().singleKeys !== false;
 }
 
 /** Tests only: forget the cached choices and listeners. */

@@ -3,20 +3,25 @@ import { createElement, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  COARSE_QUERY,
   DISPLAY_COOKIE,
-  TEXT_SCALE,
+  NARROW_QUERY,
+  PHONE_QUERY,
   choicesFromCookieHeader,
   defaultPrefs,
+  densityAttr,
   displayCookieAssignment,
   parseDisplayChoices,
   resolvePrefs,
   roleDefaultDensity,
   serializeDisplayChoices,
   tableDensity,
+  textSizeRule,
   tokenDensity,
   viewDensity,
   withChoice,
 } from '../schema';
+import { mirrorDisplayAttrs } from '../root';
 import {
   __resetDisplayStoreForTests,
   getDisplayChoices,
@@ -25,11 +30,20 @@ import {
   subscribeDisplay,
 } from '../store';
 import { PrefsProvider, usePrefs } from '../PrefsProvider';
-import type { DisplayChoices } from '../schema';
+import type { DeviceHints, DisplayChoices } from '../schema';
 
 /** PrefsProvider with children as the third argument (the workspace's two @types/react copies, see lib/i18n/client.tsx). */
-const provider = (initial: DisplayChoices, role: 'owner' | 'bookkeeper' | null, child: ReactElement): ReactElement =>
-  createElement(PrefsProvider as unknown as (p: { initial: DisplayChoices; role: typeof role }) => ReactElement, { initial, role }, child);
+const provider = (
+  initial: DisplayChoices,
+  role: 'owner' | 'bookkeeper' | null,
+  child: ReactElement,
+  hints?: DeviceHints,
+): ReactElement =>
+  createElement(
+    PrefsProvider as unknown as (p: { initial: DisplayChoices; role: typeof role; hints?: DeviceHints }) => ReactElement,
+    { initial, role, hints },
+    child,
+  );
 
 describe('D4 role defaults', () => {
   it('bookkeeper compact; owner, manager, chef, receiver and no role regular', () => {
@@ -97,13 +111,44 @@ describe('cookie value', () => {
     expect(viewDensity('regular')).toBe('comfortable');
     expect(viewDensity('compact')).toBe('compact');
     expect(tableDensity('regular')).toBe('default');
-    expect(TEXT_SCALE.large).toBe('110%');
+  });
+
+  it('writes data-density only for compact; large text enlarges the content column on screen only', () => {
+    expect(densityAttr('compact')).toBe('compact');
+    expect(densityAttr('regular')).toBeUndefined();
+    expect(textSizeRule('regular')).toBeNull();
+    expect(textSizeRule('large')).toBe('@media screen{#main-content > *{zoom:1.1}}');
+  });
+
+  it('the device queries agree with the shell breakpoint (lg = 1024 px)', () => {
+    expect(COARSE_QUERY).toBe('(pointer: coarse)');
+    expect(NARROW_QUERY).toBe('(max-width: 1023.98px)');
+    expect(PHONE_QUERY).toBe(`${NARROW_QUERY} and ${COARSE_QUERY}`);
+  });
+});
+
+describe('mirroring onto <html>', () => {
+  it('sets the attributes and restores exactly what was there on unmount', () => {
+    const dataset: Record<string, string | undefined> = { textSize: 'regular', other: 'kept' };
+    const restore = mirrorDisplayAttrs(dataset, { density: 'compact', textSize: 'large', singleKeys: 'off' });
+    expect(dataset).toEqual({ density: 'compact', textSize: 'large', singleKeys: 'off', other: 'kept' });
+    restore();
+    expect(dataset).toEqual({ textSize: 'regular', other: 'kept' });
+  });
+
+  it('a regular density removes the attribute (the :root token values apply)', () => {
+    const dataset: Record<string, string | undefined> = { density: 'compact' };
+    const restore = mirrorDisplayAttrs(dataset, { density: undefined, textSize: 'regular', singleKeys: 'on' });
+    expect('density' in dataset).toBe(false);
+    restore();
+    expect(dataset.density).toBe('compact');
   });
 });
 
 /** A minimal `document` whose cookie jar behaves like a browser's for one path. */
 function fakeDocument() {
   const jar = new Map<string, string>();
+  const assignments: string[] = [];
   const doc = {
     visibilityState: 'visible',
     addEventListener: vi.fn(),
@@ -111,6 +156,7 @@ function fakeDocument() {
       return [...jar.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
     },
     set cookie(assignment: string) {
+      assignments.push(assignment);
       const [pair, ...attrs] = assignment.split(';').map((s) => s.trim());
       const i = pair!.indexOf('=');
       const name = pair!.slice(0, i);
@@ -119,15 +165,17 @@ function fakeDocument() {
       else jar.set(name, value);
     },
   };
-  return { doc, jar };
+  return { doc, jar, assignments };
 }
 
 describe('client store', () => {
   let jar: Map<string, string>;
+  let assignments: string[];
   beforeEach(() => {
     __resetDisplayStoreForTests();
     const f = fakeDocument();
     jar = f.jar;
+    assignments = f.assignments;
     vi.stubGlobal('document', f.doc);
     vi.stubGlobal('window', { location: { protocol: 'https:' } });
   });
@@ -141,6 +189,30 @@ describe('client store', () => {
     const a = getDisplayChoices();
     expect(a).toEqual({ density: 'compact' });
     expect(getDisplayChoices()).toBe(a);
+  });
+
+  it('singleKeysEnabled reads the cookie itself (no provider, another tab)', () => {
+    expect(singleKeysEnabled()).toBe(true);
+    jar.set('rm_display', 'keys=off'); // written by another tab: no broadcast, no re-render here
+    expect(singleKeysEnabled()).toBe(false);
+    jar.delete('rm_display');
+    expect(singleKeysEnabled()).toBe(true);
+  });
+
+  it('renews the stored choices once per page load (Safari caps script cookies at 7 days)', () => {
+    jar.set('rm_display', 'text=large');
+    const off = subscribeDisplay(() => {});
+    expect(assignments).toEqual(['rm_display=text=large; max-age=31536000; path=/; samesite=lax; secure']);
+    const off2 = subscribeDisplay(() => {});
+    expect(assignments).toHaveLength(1);
+    off();
+    off2();
+  });
+
+  it('writes nothing on load when nothing is stored', () => {
+    const off = subscribeDisplay(() => {});
+    expect(assignments).toEqual([]);
+    off();
   });
 
   it('writes the cookie, notifies readers, and deletes it on reset', () => {
@@ -164,9 +236,9 @@ describe('PrefsProvider: the first HTML already carries the choices (no flash)',
   const render = (initial: DisplayChoices, role: 'owner' | 'bookkeeper' | null) =>
     renderToStaticMarkup(provider(initial, role, createElement('p', null, 'x')));
 
-  it('compact + large + keys off: wrapper attributes and the root font-size rule', () => {
+  it('compact + large + keys off: wrapper attributes and the content zoom rule', () => {
     const html = render({ density: 'compact', textSize: 'large', singleKeys: false }, 'owner');
-    expect(html).toContain('<style>:root{font-size:110%}</style>');
+    expect(html).toContain('<style>@media screen{#main-content > *{zoom:1.1}}</style>'); // raw text: React does not escape a style element
     expect(html).toContain('data-rm-prefs=""');
     expect(html).toContain('data-density="compact"');
     expect(html).toContain('data-text-size="large"');
@@ -174,10 +246,19 @@ describe('PrefsProvider: the first HTML already carries the choices (no flash)',
     expect(html).toContain('class="contents"');
   });
 
-  it('no choices: role defaults, no style element', () => {
-    expect(render({}, 'owner')).toContain('data-density="default"');
+  it('no choices: role defaults, no style element; regular density writes no attribute', () => {
+    expect(render({}, 'owner')).not.toContain('data-density');
     expect(render({}, 'bookkeeper')).toContain('data-density="compact"');
     expect(render({}, 'owner')).not.toContain('<style>');
+  });
+
+  it('a phone or tablet (User-Agent hint) renders the regular density from the first HTML', () => {
+    const html = renderToStaticMarkup(provider({}, 'bookkeeper', createElement('p', null, 'x'), { coarse: true, apple: false }));
+    expect(html).not.toContain('data-density');
+    const chosen = renderToStaticMarkup(
+      provider({ density: 'compact' }, 'owner', createElement('p', null, 'x'), { coarse: true, apple: true }),
+    );
+    expect(chosen).not.toContain('data-density');
   });
 
   it('a nested provider passes through (one wrapper, one rule)', () => {
@@ -197,7 +278,9 @@ describe('PrefsProvider: the first HTML already carries the choices (no flash)',
     renderToStaticMarkup(provider({ density: 'regular' }, 'bookkeeper', createElement(Probe)));
     expect(seen!.density).toBe('regular');
     expect(seen!.defaults.density).toBe('compact');
-    expect(seen!.touch).toBe(false);
+    expect(seen!.coarse).toBe(false);
     expect(seen!.appliedDensity).toBe('regular');
+    expect(seen!.viewDensity).toBe('comfortable');
+    expect(seen!.tableDensity).toBe('default');
   });
 });

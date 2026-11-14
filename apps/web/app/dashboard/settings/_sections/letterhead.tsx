@@ -13,7 +13,7 @@ import { settingsViewer } from '../_lib/viewer';
  */
 export async function LetterheadSettings() {
   const [t, viewer] = await Promise.all([getT(settingsMessages), settingsViewer()]);
-  if (!viewer.seesRestaurant) return <SectionForbidden />;
+  if (!viewer.seesRestaurant) return <SectionForbidden screen={t('areas.letterhead.title')} />;
   const caller = await createServerCaller();
   const [profile, letterhead] = await Promise.all([caller.settings.profile(), caller.settings.letterhead()]);
   return (

@@ -1,30 +1,44 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Search } from 'lucide-react';
 import type { UserRole } from '@restomatch/db';
-import { cn } from '@/lib/components';
+import { cn, useAnnounce } from '@/lib/components';
 import { matchesHe } from '@/lib/components/palette/normalizeHe';
 import { useT } from '@/lib/i18n/client';
 import { settings } from '@/lib/i18n/messages/settings';
-import { useIsNarrow } from '@/lib/prefs';
+import { useIsCoarse, useIsNarrow, useIsPhone } from '@/lib/prefs';
 import { activeSection, sectionById, sectionsFor, settingHref, settingsFor, type SectionId, type SettingsGroup } from '../_index/sections';
 
-/* ───────────── unsaved changes, marked in the section list ───────────── */
+/* ───────────── unsaved changes: kept across sections, marked in the list ───────────── */
 
-type DirtyApi = (section: SectionId, dirty: boolean) => void;
-const DirtyContext = createContext<DirtyApi>(() => {});
-const DirtyProvider = DirtyContext.Provider as unknown as React.ComponentType<{ value: DirtyApi; children: React.ReactNode }>;
+interface SessionApi {
+  mark: (section: SectionId, dirty: boolean) => void;
+  drafts: Map<SectionId, unknown>;
+}
+const SessionContext = createContext<SessionApi>({ mark: () => {}, drafts: new Map() });
+const SessionProvider = SessionContext.Provider as unknown as React.ComponentType<{ value: SessionApi; children: React.ReactNode }>;
 
-/** A form tells the frame it holds unsaved changes (the section list shows a dot). */
-export function useMarkUnsaved(section: SectionId, dirty: boolean) {
-  const mark = useContext(DirtyContext);
-  useEffect(() => {
-    mark(section, dirty);
-    return () => mark(section, false);
-  }, [mark, section, dirty]);
+/**
+ * A form's unsaved draft, kept by the frame (the settings layout), so opening
+ * another section or following a search result does not lose it; the section
+ * list shows a dot on the section while a draft is kept, and a reload or a
+ * closed tab asks first. `initial` is the kept draft (read it once, when the
+ * form mounts); `keep(draft)` stores it, `keep(undefined)` drops it.
+ */
+export function useSectionDraft<T>(section: SectionId): { initial: T | undefined; keep: (draft: T | undefined) => void } {
+  const api = useContext(SessionContext);
+  const keep = useCallback(
+    (draft: T | undefined) => {
+      if (draft === undefined) api.drafts.delete(section);
+      else api.drafts.set(section, draft);
+      api.mark(section, draft !== undefined);
+    },
+    [api, section],
+  );
+  return { initial: api.drafts.get(section) as T | undefined, keep };
 }
 
 /** Highlight (and focus) the row a link pointed at, for a moment, after it arrives. */
@@ -67,11 +81,15 @@ export function SettingsFrame({ role, children }: { role: UserRole | null; child
   const t = useT(settings);
   const tt = t as unknown as (key: string, vars?: Record<string, string | number>) => string;
   const pathname = usePathname();
+  const announce = useAnnounce();
+  const coarse = useIsCoarse();
   const narrow = useIsNarrow();
+  const phone = useIsPhone();
   const [query, setQuery] = useState('');
   const [dirty, setDirty] = useState<ReadonlySet<SectionId>>(() => new Set());
+  const drafts = useRef(new Map<SectionId, unknown>());
 
-  const markDirty = useCallback<DirtyApi>((section, isDirty) => {
+  const mark = useCallback((section: SectionId, isDirty: boolean) => {
     setDirty((prev) => {
       if (prev.has(section) === isDirty) return prev;
       const next = new Set(prev);
@@ -80,6 +98,19 @@ export function SettingsFrame({ role, children }: { role: UserRole | null; child
       return next;
     });
   }, []);
+  const session = useMemo<SessionApi>(() => ({ mark, drafts: drafts.current }), [mark]);
+
+  // Leave guard: a kept draft is lost on a reload or a closed tab.
+  const anyDirty = dirty.size > 0;
+  useEffect(() => {
+    if (!anyDirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [anyDirty]);
 
   useArrivalHighlight();
 
@@ -93,15 +124,23 @@ export function SettingsFrame({ role, children }: { role: UserRole | null; child
   const q = query.trim();
   const results = useMemo(() => {
     if (!q) return null;
-    return settingsFor(role, { touch: narrow }).filter((e) => {
+    return settingsFor(role, { coarse, narrow, phone }).filter((e) => {
       const section = sectionById(e.section);
       const hay = [tt(e.titleKey), tt(section.titleKey), e.keywordsKey ? tt(e.keywordsKey) : ''].join(' ');
       return matchesHe(hay, q);
     });
-  }, [q, role, narrow, tt]);
+  }, [q, role, coarse, narrow, phone, tt]);
+
+  // One announcement once the typing rests (the list itself is not a live region: it would re-read every link).
+  const resultCount = results?.length ?? null;
+  useEffect(() => {
+    if (resultCount === null) return;
+    const id = setTimeout(() => announce(tt('frame.sr.results', { count: resultCount })), 500);
+    return () => clearTimeout(id);
+  }, [resultCount, q, announce, tt]);
 
   return (
-    <DirtyProvider value={markDirty}>
+    <SessionProvider value={session}>
       <h1 className="mb-6 text-title-lg text-ink">{t('title')}</h1>
       <div className="grid gap-6 lg:grid-cols-[theme(spacing.56)_minmax(0,1fr)] lg:gap-8">
         <nav aria-label={t('frame.sectionsAria')} className="min-w-0">
@@ -126,13 +165,9 @@ export function SettingsFrame({ role, children }: { role: UserRole | null; child
           </label>
 
           {results ? (
-            <div aria-label={t('frame.resultsAria')} role="region" aria-live="polite">
+            <div aria-label={t('frame.resultsAria')} role="region">
               {results.length === 0 ? (
-                <p className="px-2.5 py-3 text-body-sm text-muted">
-                  {t('frame.noResults')}
-                  <br />
-                  {t('frame.tryWords')}
-                </p>
+                <p className="px-2.5 py-3 text-body-sm text-muted">{t('frame.noResults')}</p>
               ) : (
                 <ul className="space-y-0.5">
                   {results.map((e) => (
@@ -177,7 +212,7 @@ export function SettingsFrame({ role, children }: { role: UserRole | null; child
                             <span className="min-w-0 flex-1 truncate">{tt(s.titleKey)}</span>
                             {unsaved ? (
                               <>
-                                <span aria-hidden="true" className="size-2 shrink-0 rounded-pill bg-warn" />
+                                <span aria-hidden="true" className="size-2 shrink-0 rounded-pill bg-info forced-color-adjust-none" />
                                 <span className="sr-only">, {t('frame.unsavedSr')}</span>
                               </>
                             ) : null}
@@ -195,6 +230,6 @@ export function SettingsFrame({ role, children }: { role: UserRole | null; child
           {children}
         </div>
       </div>
-    </DirtyProvider>
+    </SessionProvider>
   );
 }

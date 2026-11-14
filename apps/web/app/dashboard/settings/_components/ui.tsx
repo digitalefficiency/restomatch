@@ -1,5 +1,16 @@
 import { cn } from '@/lib/components';
-import type { SettingsScope } from '../_index/sections';
+import type { AbsentOn, SettingsScope } from '../_index/sections';
+
+/**
+ * Where a row is absent, in CSS (so the first HTML is already right): the
+ * same predicates as lib/prefs COARSE_QUERY / NARROW_QUERY / PHONE_QUERY.
+ * Literal class strings, so Tailwind generates them.
+ */
+const ABSENT_CLASS: Record<AbsentOn, string> = {
+  coarse: '[@media(pointer:coarse)]:hidden',
+  narrow: '[@media(max-width:1023.98px)]:hidden',
+  phone: '[@media(max-width:1023.98px)_and_(pointer:coarse)]:hidden',
+};
 
 /**
  * The settings building blocks in the clean finish (reference ex4 `.set-*`):
@@ -69,15 +80,15 @@ export function SettingsRows({ children, className, ...rest }: React.HTMLAttribu
 /**
  * One setting: label (with chips), a one-line hint, the control at the end.
  * `id` is the anchor the search and the palette link to (`#<id>`); the frame
- * highlights it on arrival. `deskOnly` rows are absent on a phone (no side
- * menu, no physical keyboard there).
+ * highlights it on arrival. `absentOn` hides a row where it does nothing
+ * (density on touch, the side menu below 1024 px, shortcuts on a phone).
  */
 export function SettingRow({
   id,
   label,
   hint,
   control,
-  deskOnly,
+  absentOn,
   className,
   stack,
   onClick,
@@ -86,7 +97,7 @@ export function SettingRow({
   label: React.ReactNode;
   hint?: React.ReactNode;
   control?: React.ReactNode;
-  deskOnly?: boolean;
+  absentOn?: AbsentOn;
   className?: string;
   /** Put the control under the text at every width (wide forms). */
   stack?: boolean;
@@ -102,7 +113,7 @@ export function SettingRow({
       className={cn(
         'grid scroll-mt-24 items-center gap-x-6 gap-y-2 border-t border-line-rule px-4 py-3 transition-colors duration-medium first:rounded-t-card first:border-t-0 last:rounded-b-card focus:outline-none data-[hit=true]:bg-info-subtle',
         stack ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto]',
-        deskOnly && 'hidden lg:grid',
+        absentOn && ABSENT_CLASS[absentOn],
         className,
       )}
     >

@@ -39,19 +39,26 @@ export function Switch({
         'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus',
         'disabled:cursor-not-allowed disabled:opacity-60',
         '[@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-16',
+        // Forced colours: the track keeps an outline and the thumb a solid colour (a fill and a shadow disappear).
+        'forced-colors:border forced-colors:border-[ButtonText]',
         checked ? 'justify-end bg-primary' : 'justify-start bg-line-strong',
       )}
     >
-      <span aria-hidden="true" className="block aspect-square h-full rounded-pill bg-surface shadow-e1" />
+      <span
+        aria-hidden="true"
+        className="block aspect-square h-full rounded-pill bg-surface shadow-e1 forced-colors:bg-[CanvasText] forced-colors:forced-color-adjust-none"
+      />
     </button>
   );
 }
 
 /**
  * A number with − / + steppers around a typed field (inputMode decimal, never
- * type=number: "7,5" must work). The steppers clamp to the limits; typing is
- * validated by the caller, which says the limits when a value is out of range.
- * 36 px at the desk, 44 px touch targets on a phone.
+ * type=number: "7,5" must work). The steppers clamp to the limits and stay
+ * focusable at a limit (aria-disabled), so focus never drops to the page;
+ * typing is validated by the caller, which says the limits (`describedBy`
+ * carries them for a screen reader, the error line when a value is out of
+ * range). 36 px at the desk, 44 px touch targets on a phone.
  */
 export function NumberStepper({
   id,
@@ -87,6 +94,7 @@ export function NumberStepper({
   const btn = cn(
     'inline-flex size-9 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-micro',
     'hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40',
+    'aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-transparent',
     'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus',
     '[@media(pointer:coarse)]:size-11',
   );
@@ -101,7 +109,16 @@ export function NumberStepper({
         disabled && 'opacity-70',
       )}
     >
-      <button type="button" className={btn} onClick={() => onStep(-1)} disabled={disabled || !canDecrease} aria-label={lessLabel}>
+      <button
+        type="button"
+        className={btn}
+        onClick={() => {
+          if (canDecrease) onStep(-1);
+        }}
+        disabled={disabled}
+        aria-disabled={!canDecrease || undefined}
+        aria-label={lessLabel}
+      >
         <Minus className="h-4 w-4" aria-hidden="true" />
       </button>
       <div className="relative flex items-center">
@@ -145,7 +162,16 @@ export function NumberStepper({
           </span>
         ) : null}
       </div>
-      <button type="button" className={btn} onClick={() => onStep(1)} disabled={disabled || !canIncrease} aria-label={moreLabel}>
+      <button
+        type="button"
+        className={btn}
+        onClick={() => {
+          if (canIncrease) onStep(1);
+        }}
+        disabled={disabled}
+        aria-disabled={!canIncrease || undefined}
+        aria-label={moreLabel}
+      >
         <Plus className="h-4 w-4" aria-hidden="true" />
       </button>
     </div>

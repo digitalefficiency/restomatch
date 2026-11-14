@@ -43,6 +43,15 @@ export const SECTIONS: readonly SettingsSection[] = [
   { id: 'automations', group: 'restaurant', scope: 'restaurant', href: `${SETTINGS_BASE}/automations`, titleKey: 'areas.automations.title', roles: RESTAURANT_ROLES },
 ];
 
+export type AbsentOn = 'coarse' | 'narrow' | 'phone';
+
+/** What the current device is, for `absentOn` (all false on the server). */
+export interface DeviceFacts {
+  coarse?: boolean;
+  narrow?: boolean;
+  phone?: boolean;
+}
+
 export interface SettingEntry {
   /** Stable id; also the row anchor (`#<id>`) on its section page. */
   id: string;
@@ -50,17 +59,21 @@ export interface SettingEntry {
   titleKey: string;
   /** Extra words the search should match (message key; a space-separated list). */
   keywordsKey?: string;
-  /** Does nothing on a phone (no side menu, no physical keyboard): absent there. */
-  deskOnly?: boolean;
+  /**
+   * Where the setting does nothing and is therefore absent (SPEC §10.5): on a
+   * touch pointer (density is fixed), below 1024 px (no side menu), on a phone
+   * (no keyboard). The queries are lib/prefs COARSE_QUERY / NARROW_QUERY / PHONE_QUERY.
+   */
+  absentOn?: AbsentOn;
   /** The anchor on the section page when several settings share one block (a whole form). Defaults to `id`. */
   anchor?: string;
 }
 
 export const SETTINGS: readonly SettingEntry[] = [
-  { id: 'density', section: 'display', titleKey: 'display.densityTitle', keywordsKey: 'index.keywords.density' },
+  { id: 'density', section: 'display', titleKey: 'display.densityTitle', keywordsKey: 'index.keywords.density', absentOn: 'coarse' },
   { id: 'text', section: 'display', titleKey: 'display.textTitle', keywordsKey: 'index.keywords.text' },
-  { id: 'rail', section: 'display', titleKey: 'display.railTitle', keywordsKey: 'index.keywords.rail', deskOnly: true },
-  { id: 'keys', section: 'display', titleKey: 'display.keysTitle', keywordsKey: 'index.keywords.keys', deskOnly: true },
+  { id: 'rail', section: 'display', titleKey: 'display.railTitle', keywordsKey: 'index.keywords.rail', absentOn: 'narrow' },
+  { id: 'keys', section: 'display', titleKey: 'display.keysTitle', keywordsKey: 'index.keywords.keys', absentOn: 'phone' },
   { id: 'language', section: 'account', titleKey: 'account.languageTitle', keywordsKey: 'index.keywords.language' },
   { id: 'password', section: 'account', titleKey: 'account.passwordTitle', keywordsKey: 'index.keywords.password' },
   { id: 'devices', section: 'account', titleKey: 'account.devicesTitle', keywordsKey: 'index.keywords.devices' },
@@ -111,10 +124,15 @@ export function sectionsFor(role: UserRole | null | undefined): SettingsSection[
   return SECTIONS.filter((s) => (role ? s.roles.includes(role) : s.group === 'me'));
 }
 
-/** The settings a role finds; `touch` drops the ones that do nothing on a phone. */
-export function settingsFor(role: UserRole | null | undefined, opts: { touch?: boolean } = {}): SettingEntry[] {
+/** Is a setting absent on this device (it does nothing there)? */
+export function isAbsent(e: SettingEntry, device: DeviceFacts): boolean {
+  return !!e.absentOn && !!device[e.absentOn];
+}
+
+/** The settings a role finds on this device (the ones that do nothing here are left out). */
+export function settingsFor(role: UserRole | null | undefined, device: DeviceFacts = {}): SettingEntry[] {
   const visible = new Set(sectionsFor(role).map((s) => s.id));
-  return SETTINGS.filter((e) => visible.has(e.section) && !(opts.touch && e.deskOnly));
+  return SETTINGS.filter((e) => visible.has(e.section) && !isAbsent(e, device));
 }
 
 /** Where a setting lives: its section route plus its row anchor. */
