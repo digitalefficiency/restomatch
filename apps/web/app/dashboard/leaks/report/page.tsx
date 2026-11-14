@@ -1,4 +1,8 @@
 import Link from 'next/link';
+import { permanentRedirect } from 'next/navigation';
+import { legacyPeriodRedirect, monthParams } from '../period-url';
+import { ReportExportButtons } from './ExportButtons';
+import { HubTabs } from '../hub-tabs';
 import { WithOriginal } from '@/lib/i18n/original';
 import { auth } from '@/auth';
 import { TRPCError } from '@trpc/server';
@@ -19,6 +23,8 @@ import { approvedNotClaimed, sumAgora } from '../claims/letters';
 import { ALL_CLAIMS } from '../../recovery/logic';
 import { LeakStateNote, leakStateOf } from '../leak-state';
 import { noDataCtaFor } from '../states';
+import { components as componentsNs } from '@/lib/i18n/messages/components';
+import { resolvedNoteState, settle } from './money-read';
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -50,7 +56,7 @@ function monthsBetween(from: string, to: string): number {
  * running is compared with the same day-span of the comparison month
  * (owner.leakSummary's aligned compare, "1–25 באוק׳ מול 1–25 בספט׳"); a month
  * that ended, full against full. The money story is one partition that adds up
- * to the agora: ממתין להחלטה + אושר לדרישה + ויתרנו = נמצא.
+ * to the agora: ממתין להחלטה + אושר לבקשת זיכוי + ויתרנו = נמצא.
  */
 export default async function LeakReportPage({
   searchParams,
@@ -58,21 +64,31 @@ export default async function LeakReportPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
+  // W2-09c: the old `?month=YYYY-MM` answers a 308 to the one period grammar (`p`, `from`, `to`).
+  const legacy = legacyPeriodRedirect('/dashboard/leaks/report', sp, new Date());
+  if (legacy) permanentRedirect(legacy);
   const thisMonth = currentMonth();
-  const monthParam = Array.isArray(sp.month) ? sp.month[0] : sp.month;
-  const month = monthParam && MONTH_RE.test(monthParam) && monthParam <= thisMonth ? monthParam : thisMonth;
-  const openMonth = month === thisMonth;
   // `?cmp=prev|yoy` (default prev) adds ▲/▼ against the previous month or the same month last year.
   const view = parseView(sp);
+  // The report is one month: this month, last month, or a custom range that starts on a 1st.
+  const viewMonth =
+    view.period === 'last_month'
+      ? shiftMonth(thisMonth, -1)
+      : view.period === 'custom' && view.from && view.from.endsWith('-01')
+        ? view.from.slice(0, 7)
+        : thisMonth;
+  const month = MONTH_RE.test(viewMonth) && viewMonth <= thisMonth ? viewMonth : thisMonth;
+  const openMonth = month === thisMonth;
   const compareMonth = view.compare === 'off' ? null : shiftMonth(month, view.compare === 'yoy' ? -12 : -1);
 
   const caller = await createServerCaller();
   const session = await auth();
-  const [t, ta, tv, locale] = await Promise.all([getT(leaksNs), getT(approvalsNs), getT(viewsNs), getLocale()]);
+  const [t, ta, tv, tc, locale] = await Promise.all([getT(leaksNs), getT(approvalsNs), getT(viewsNs), getT(componentsNs), getLocale()]);
   const role = (session?.user as { role?: string } | undefined)?.role;
 
-  // owner|manager only — a calm T4 card for other roles (never an alarm).
-  if (role !== 'owner' && role !== 'manager') {
+  // Finance roles (owner, manager, bookkeeper — the bookkeeper reads everything) — a calm
+  // T4 card for other roles (never an alarm).
+  if (role !== 'owner' && role !== 'manager' && role !== 'bookkeeper') {
     return <RoleCard title={t('report.title')} body={t('report.roleOnly')} />;
   }
   let report: Awaited<ReturnType<typeof caller.owner.leakReport>>;
@@ -99,11 +115,13 @@ export default async function LeakReportPage({
   const [memberships, profile, lines, flags] = await Promise.all([
     caller.onboarding.myMemberships(),
     caller.settings.profile(),
-    monthOffset >= -24 ? caller.owner.leakBreakdown({ monthOffset, limit: 200 }).catch(() => []) : Promise.resolve([]),
+    // No `.catch(() => [])`: a failed breakdown is the route's error state, never "nothing" (W2-09c).
+    monthOffset >= -24 ? caller.owner.leakBreakdown({ monthOffset, limit: 200 }) : Promise.resolve([]),
     caller.recovery.flags(),
   ]);
   // Approved lines no ₪-back claim holds (only meaningful with the tracker on).
-  const tracked = flags.recovery ? await caller.recovery.list({ limit: ALL_CLAIMS }).catch(() => null) : null;
+  // G-16 (W3-08): a failed claims read says "unavailable", never a silently missing note.
+  const tracked = flags.recovery ? await settle(caller.recovery.list({ limit: ALL_CLAIMS })) : null;
   // The report names the ACTIVE restaurant (never memberships[0]).
   const restaurant = activeMembershipOf(memberships, session?.user?.restaurantId)?.restaurantName ?? profile.name ?? '';
   const businessId = profile.businessId?.trim() || null;
@@ -121,9 +139,10 @@ export default async function LeakReportPage({
   const supplierSpendTotal = sumAgora(report.bySupplier.map((r) => r.spendIls));
   const state = leakStateOf(hero);
   const found = sumAgora([status.stillOpenIls, status.claimedIls, status.waivedIls]);
-  const checkedCount = Math.max(0, hero.invoiceCount - hero.pendingLinkCount - hero.awaitingCountCount);
+  const checkedCount = Math.max(0, hero.invoiceCount - hero.pendingLinkCount - hero.awaitingCountCount - hero.awaitingQuestionCount);
   // "טופל" lines count as approved-to-claim but no letter claims them: say so, in ₪.
-  const resolved = (tracked ? approvedNotClaimed(lines, tracked) : []).map(({ invoice, line }) => ({
+  const note = resolvedNoteState({ ok: true as const, value: lines }, tracked, approvedNotClaimed);
+  const resolved = (note.kind === 'items' ? note.items : []).map(({ invoice, line }) => ({
     amount: Math.abs(line.deltaAmount),
     type: line.type,
     supplier: displayName(locale, invoice.supplierName, invoice.supplierNameEn),
@@ -167,20 +186,22 @@ export default async function LeakReportPage({
           {t('hub.title')}
         </Link>
         <div className="flex flex-wrap items-center gap-2">
-          <Link href={`/dashboard/leaks/report?month=${shiftMonth(month, -1)}${cmpQ}`} className={navLink}>
+          <Link href={reportMonthHref(shiftMonth(month, -1), cmpQ)} className={navLink}>
             <ArrowRight className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
             {t('report.prevMonth')}
           </Link>
           {month < thisMonth ? (
-            <Link href={`/dashboard/leaks/report?month=${shiftMonth(month, 1)}${cmpQ}`} className={navLink}>
+            <Link href={reportMonthHref(shiftMonth(month, 1), cmpQ)} className={navLink}>
               {t('report.nextMonth')}
               <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
             </Link>
           ) : null}
+          <ReportExportButtons month={month} />
           <PrintButton label={t('report.print')} />
         </div>
       </div>
 
+      <HubTabs active="report" proof={flags.leakProof} />
       <ViewToolbar
         page="report"
         view={view}
@@ -259,6 +280,14 @@ export default async function LeakReportPage({
               {t('report.pending', { count: num(hero.pendingLinkCount), amount: ils(hero.pendingLinkIls) })}
             </p>
           ) : null}
+          {hero.awaitingQuestionCount > 0 ? (
+            <p data-testid="report-awaiting-question" className="rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-muted">
+              {t('report.awaitingQuestion', { count: num(hero.awaitingQuestionCount), amount: ils(hero.awaitingQuestionIls) })}{' '}
+              <Link href="/dashboard/catalog/mapping" className="font-semibold text-primary underline-offset-2 hover:underline">
+                {t('report.awaitingQuestionCta')}
+              </Link>
+            </p>
+          ) : null}
         </section>
 
         {state === 'noData' ? (
@@ -297,6 +326,11 @@ export default async function LeakReportPage({
                 <Stat label={t('report.waived')} value={ils(status.waivedIls)} amount={status.waivedIls} hint={t('report.lines', { count: num(status.waivedCount) })} />
               </dl>
               <p className="mt-2 text-xs text-subtle">{t('report.partition')}</p>
+              {note.kind === 'unavailable' ? (
+                <p className="mt-1 text-xs text-muted" data-testid="report-resolved-unavailable">
+                  {tc('ds.money.unavailable')}
+                </p>
+              ) : null}
               {resolvedIls > 0 ? (
                 <p className="mt-1 text-xs text-muted" data-testid="report-resolved-note">
                   {t('report.resolvedNote', { amount: ils(resolvedIls), items: resolvedItems })}
@@ -439,6 +473,16 @@ export default async function LeakReportPage({
       </article>
     </div>
   );
+}
+
+/** The report URL of a month in the one period grammar (+ the compare query, which starts with '&'). */
+function reportMonthHref(month: string, cmpQ: string): string {
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  const qs = new URLSearchParams(monthParams(y, m, new Date()));
+  const extra = new URLSearchParams(cmpQ.replace(/^[&?]/, ''));
+  for (const [k, v] of extra) qs.set(k, v);
+  const q = qs.toString();
+  return `/dashboard/leaks/report${q ? `?${q}` : ''}`;
 }
 
 function RoleCard({ title, body }: { title: string; body: string }) {

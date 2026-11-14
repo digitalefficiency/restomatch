@@ -67,7 +67,7 @@ for (const [lang, viewport] of [
     await expect(diff).toContainText('36');
     // The notes: stacked cards on a phone, a table on desktop; the difference sits
     // on its note (DN 61036), with the actual finding under it.
-    if (viewport.width < 640) {
+    if (viewport.width < 768) {
       const cards = page.getByTestId('xmatch-note-cards').locator('li');
       expect(await cards.count()).toBeGreaterThan(1);
       const flagged = cards.filter({ hasText: '61036' });
@@ -82,6 +82,7 @@ for (const [lang, viewport] of [
       await expect(flagged).toContainText('36');
       await expect(page.getByTestId('xmatch-note-finding')).toContainText(lang === 'he' ? 'חויב' : 'billed');
       // Printed, the panel is a letter to the supplier: who, which invoice, the ask.
+      // TODO(H-03): this becomes W2-10's claim letter once the claims page carries ריכוז findings.
       await page.emulateMedia({ media: 'print' });
       const letter = page.getByTestId('xmatch-letter');
       await expect(letter).toBeVisible();

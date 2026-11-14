@@ -62,6 +62,12 @@ export interface InvoiceLineRow {
   unit: string | null;
   unitPriceBilled: string | number | null;
   lineTotal: string | number | null;
+  /**
+   * G-07 strip: the server read a billed price on this line. Set when the
+   * caller sees no ₪ (receiver: price + total arrive null). Absent from older
+   * responses — then the price itself decides, as before.
+   */
+  priceRead?: boolean;
 }
 export interface InvoiceMeta {
   invoiceNumber: string | null;
@@ -112,8 +118,11 @@ function deriveStatus(
  * (EN-3 zero-fills unreadable numbers at low confidence). It is a "check by
  * hand" line, never a ₪ gap.
  */
-function isUnreadable(qty: number | null, price: number | null): boolean {
-  return qty === null || qty === 0 || price === null || price === 0;
+function isUnreadable(qty: number | null, price: number | null, priceRead?: boolean): boolean {
+  if (qty === null || qty === 0) return true;
+  // G-07 strip: a receiver gets no ₪ but the server says whether a price was read.
+  if (priceRead !== undefined) return !priceRead;
+  return price === null || price === 0;
 }
 
 /** One logical line from several invoice lines for the same item: summed qty
@@ -131,11 +140,17 @@ function foldInvoiceLines(group: InvoiceLineRow[]): InvoiceLineRow {
     prices.add(p);
   }
   const single = prices.size === 1 ? [...prices][0]! : null;
+  // G-07 strip: the folded line counts as read only if every part was read.
+  const flags = group.map((il) => il.priceRead);
+  const priceRead = flags.every((f) => f === undefined) ? undefined : flags.every((f) => f === true);
+  // G-07 strip: lines that carry no ₪ at all (receiver) fold to no ₪, not ₪0.
+  const noMoney = group.every((il) => num(il.unitPriceBilled) === null && num(il.lineTotal) === null);
   return {
     ...first,
+    ...(priceRead === undefined ? {} : { priceRead }),
     qtyBilled: Math.round(qty * 1000) / 1000,
-    unitPriceBilled: single ?? (qty > 0 ? Math.round((total / qty) * 10000) / 10000 : null),
-    lineTotal: Math.round(total * 100) / 100,
+    unitPriceBilled: noMoney ? null : (single ?? (qty > 0 ? Math.round((total / qty) * 10000) / 10000 : null)),
+    lineTotal: noMoney ? null : Math.round(total * 100) / 100,
   };
 }
 
@@ -231,7 +246,7 @@ export function adaptReconciliation(args: {
     const derived = deriveStatus(poQty, invoiceQty, poPrice, invoicePrice);
     const { status, deltaIls } =
       (derived.status === 'missing_from_invoice' && !missingIsConclusive) ||
-      (inv && isUnreadable(invoiceQty, invoicePrice))
+      (inv && isUnreadable(invoiceQty, invoicePrice, inv.priceRead))
         ? { status: 'pending_review' as const, deltaIls: 0 }
         : derived;
 
@@ -275,7 +290,7 @@ export function adaptReconciliation(args: {
     if (usedInvoiceIds.has(il.id)) return;
     const invoiceQty = num(il.qtyBilled);
     const invoicePrice = num(il.unitPriceBilled);
-    const conclusive = Boolean(il.productId) && !isUnreadable(invoiceQty, invoicePrice);
+    const conclusive = Boolean(il.productId) && !isUnreadable(invoiceQty, invoicePrice, il.priceRead);
     const line: ReconciliationLine = {
       invoiceLineIndex: invoiceLineIndexCounter++,
       poLineId: null,

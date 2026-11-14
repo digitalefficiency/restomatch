@@ -6,7 +6,6 @@ import {
   products,
   purchaseOrders,
   sql,
-  supplierCatalogItems,
   suppliers,
   type Database,
 } from '@restomatch/db';
@@ -14,6 +13,7 @@ import { matchByAlias } from '@restomatch/catalog';
 import { normalizePhone } from '@restomatch/ingest';
 import { ORDER_TEXT_MAX_CHARS, type OrderTextExtraction, type OrderTextParser } from '@restomatch/ocr';
 import { estimateTotal } from './totals';
+import { orderPriceKey, resolveExpectedPrice } from './expectedPrice';
 
 /**
  * Order capture (flag `orderCapture`): an owner's WhatsApp/e-mail order
@@ -204,19 +204,24 @@ export async function captureOrderDraft(db: Database, args: CaptureArgs): Promis
     lines.push({ ...l, productId: m?.productId ?? null, catalogName: m?.canonicalName ?? null });
   }
 
-  // A price the message doesn't state comes from the supplier's catalog list price.
-  const productIds = lines.map((l) => l.productId).filter((id): id is string => !!id);
-  const listPrice = new Map<string, number>();
-  if (productIds.length > 0) {
-    const cat = await db
-      .select({ productId: supplierCatalogItems.productId, listPrice: supplierCatalogItems.listPrice })
-      .from(supplierCatalogItems)
-      .where(and(eq(supplierCatalogItems.restaurantId, args.restaurantId), eq(supplierCatalogItems.supplierId, supplier.id)));
-    for (const r of cat) if (r.productId && r.listPrice != null) listPrice.set(r.productId, Number(r.listPrice));
-  }
+  // A price the message doesn't state is THE expected price (contract > last
+  // sent > list), the same as createDraft and the walk-in (W2-06 §5.8).
+  const toPrice = lines.filter(
+    (l): l is CapturedLine & { productId: string } => l.unitPrice == null && !!l.productId,
+  );
+  const expected =
+    toPrice.length > 0
+      ? await resolveExpectedPrice(db, {
+          restaurantId: args.restaurantId,
+          supplierId: supplier.id,
+          at: new Date(),
+          lines: toPrice.map((l) => ({ productId: l.productId, unit: l.unit })),
+        })
+      : new Map();
   const priced = lines.map((l) => ({
     ...l,
-    unitPrice: l.unitPrice ?? (l.productId ? (listPrice.get(l.productId) ?? null) : null),
+    unitPrice:
+      l.unitPrice ?? (l.productId ? (expected.get(orderPriceKey(l.productId, l.unit))?.unitPrice ?? null) : null),
   }));
 
   const [po] = await db

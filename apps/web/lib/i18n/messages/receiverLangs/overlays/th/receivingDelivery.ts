@@ -6,6 +6,8 @@ import type { he } from '../../../receiving/delivery.he';
 export const receivingDelivery: Shape<typeof he> = {
   delivery: {
     scan: {
+      registerFailed: 'ไม่ได้บันทึกใบแจ้งหนี้ — ถ่ายรูปใหม่',
+      registerRetry: 'ลองบันทึกอีกครั้ง',
       upload: 'อัปโหลดไฟล์ / PDF',
       uploaded: 'อัปโหลดใบแจ้งหนี้แล้ว',
       uploading: 'กำลังอัปโหลดใบแจ้งหนี้ · {seconds} วินาที',
@@ -16,6 +18,7 @@ export const receivingDelivery: Shape<typeof he> = {
       useAnyway: 'ใช้รูปนี้ต่อไป',
     },
     processing: {
+      ocrDisabled: 'การอ่านอัตโนมัติไม่ได้เปิดใช้ในบัญชีนี้ — ทำต่อโดยเทียบกับใบสั่งซื้อ',
       uploaded: 'ได้รับใบแจ้งหนี้แล้ว',
       reading: 'กำลังอ่านรายการในใบแจ้งหนี้',
       compare: 'กำลังเทียบกับใบสั่งซื้อ',
@@ -74,6 +77,7 @@ export const receivingDelivery: Shape<typeof he> = {
       heldDiscard: 'ลบการนับจากโทรศัพท์',
       heldNotCounted: 'ยังไม่ได้นับ',
       saveFailed: 'บันทึก {count} รายการไม่สำเร็จ',
+      uncounted: "ยังไม่ได้นับ {count} รายการ — นับหรือทำเครื่องหมายว่าขาด",
       unorderedNeeds: 'ทำเครื่องหมายว่าสินค้าที่ไม่ได้สั่งมาถึงหรือไม่',
       spotTitle: 'สุ่มตรวจก่อนยืนยัน',
       spotHint: 'นับสินค้าเหล่านี้แล้วใส่จำนวนที่มาจริง',
@@ -84,6 +88,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkTag: 'ไม่ได้นับทีละชิ้น',
     },
     confirmed: {
+      queued: 'ปิดในโทรศัพท์แล้ว · จะส่งเองเมื่อมีสัญญาณ',
       summary: '{lines} รายการ · ส่วนต่าง {exceptions}',
       noExceptions: '{lines} รายการ · ทุกอย่างตรงตามใบสั่งซื้อ',
       amountPending: 'ยอดสำหรับขอใบลดหนี้จะกำหนดหลังการตรวจ',
@@ -94,6 +99,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkNote: 'ทำเครื่องหมาย {count} รายการว่าตรงตามใบสั่งซื้อ — ไม่ได้นับทีละชิ้น',
     },
     summary: {
+      closedUncounted: 'ปิดไปโดยไม่ได้นับ {count} รายการ',
       title: 'การรับสินค้านี้ปิดไปแล้ว',
       subtitle: 'รับเมื่อ {time} นี่คือจำนวนที่บันทึกไว้',
       subtitleNoTime: 'นี่คือจำนวนที่บันทึกไว้',
@@ -120,6 +126,9 @@ export const receivingDelivery: Shape<typeof he> = {
     wait: 'รอการเชื่อมต่อ',
     keep: 'ออกจากระบบ เก็บไว้ในโทรศัพท์',
     delete: 'ลบ {count} รูปและออกจากระบบ',
+    flushingItems: 'กำลังส่ง {count} รายการรับของก่อนออกจากระบบ…',
+    titleItems: '{count} รายการรับของยังไม่ได้ส่ง',
+    deleteItems: 'ลบ {count} รายการและออกจากระบบ',
   },
   pwa: {
     offline: 'ไม่มีการเชื่อมต่อ · บันทึกไว้ในโทรศัพท์',
@@ -128,5 +137,28 @@ export const receivingDelivery: Shape<typeof he> = {
     capturedByOne: 'อัปโหลดรูปใบแจ้งหนี้แล้ว · ถ่ายโดย {names}',
     capturedByMany: 'อัปโหลดรูปใบแจ้งหนี้ {count} รูปแล้ว · ถ่ายโดย {names}',
     someoneElse: 'ผู้ใช้อื่น',
+    waiting: '⟳ รอ {count} รายการ',
+    details: 'รายละเอียด',
+    outboxTitle: 'รอส่ง',
+    outboxBody: 'บันทึกไว้ในโทรศัพท์ และจะส่งเองเมื่อมีสัญญาณ',
+    sendNow: 'ส่งตอนนี้',
+    kind: {
+      grLine: 'บรรทัดที่นับแล้ว',
+      submitReceipt: 'ปิดการรับของ',
+      photo: 'รูปใบแจ้งหนี้',
+      slipShared: 'ส่งใบรับของให้คนขับ',
+      other: 'รายการภาคสนาม',
+    },
+    state: {
+      waiting: 'รอสัญญาณ',
+      retrying: 'จะลองอีกครั้งเร็วๆ นี้',
+      parked: 'เซิร์ฟเวอร์ไม่รับรายการนี้',
+      keptDays: 'เก็บไว้ในโทรศัพท์อีก 14 วัน',
+    },
+    capturedBy: 'ถ่ายโดย {name}',
+    savedBy: 'บันทึกโดย {name}',
+    retryItem: 'ลองอีกครั้ง',
+    deleteItem: 'ลบ',
+    deleteConfirm: 'ลบออกจากโทรศัพท์',
   },
 };

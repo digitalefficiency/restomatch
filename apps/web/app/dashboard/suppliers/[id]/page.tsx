@@ -6,18 +6,21 @@ import { SupplierOrdersTab } from './tab-orders';
 import { SupplierContractTab } from './tab-contract';
 import { SupplierLeakTab } from './tab-leak';
 import { SupplierLedgerTab } from './tab-ledger';
-import type { SupplierTab } from './tab-bar';
+import { SupplierOverviewTab } from './tab-overview';
+import { resolveSupplierTab } from './tab-model';
+import { getWave1Access } from '../../contracts/access';
+import { auth } from '@/auth';
+import { canEditSupplier } from './read-only';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Supplier-as-hub panels. The layout renders the header + tab bar; this page
- * reads ?tab= and renders the matching panel (default: details). Catalog/orders
- * are async server components; details/schedule are client (they own the
- * suppliers.get query + mutations) and are seeded with the server-loaded row as
- * `initialData`, so they render immediately instead of waiting on a client
- * round trip (QA saw the Details tab stuck on "Loading supplier…" when that
- * first client request stalled).
+ * Supplier-as-hub panels (W2-11): 5 tabs — סקירה · מחירים · הזמנות · כרטסת ·
+ * פרטים — default overview. Old `?tab=` values resolve into their new home
+ * (tab-model.ts): catalog/contract → prices, schedule → details
+ * (#days-and-times), leak → overview with the leak card under it (#leak-card).
+ * Details/schedule are client tabs seeded with the server-loaded row as
+ * `initialData`, so they render immediately.
  */
 export default async function SupplierDetailPage({
   params,
@@ -28,50 +31,51 @@ export default async function SupplierDetailPage({
 }) {
   const { id } = await params;
   const { tab: rawTab } = await searchParams;
-  const tab: SupplierTab = (['details', 'catalog', 'schedule', 'orders', 'contract', 'leak', 'ledger'] as const).includes(
-    rawTab as SupplierTab,
-  )
-    ? (rawTab as SupplierTab)
-    : 'details';
+  const caller = await createServerCaller();
+  const initial = await caller.suppliers.get({ supplierId: id });
+  const tab = resolveSupplierTab(rawTab, { ledger: initial.ledgerEnabled });
+  // Writes are managerProcedure: any other role reads the values, no edit form (IA warden #274).
+  const canEdit = canEditSupplier(((await auth())?.user as { role?: string } | undefined)?.role);
 
   switch (tab) {
-    case 'leak': {
-      // Flag `supplierLeakCard`; with the flag off ?tab=leak falls back to details.
-      const caller = await createServerCaller();
-      const initial = await caller.suppliers.get({ supplierId: id });
-      return initial.leakCardEnabled ? (
-        <SupplierLeakTab supplierId={id} />
-      ) : (
-        <SupplierDetailsTab supplierId={id} initial={initial} />
+    case 'overview':
+      return (
+        <div className="space-y-8">
+          <SupplierOverviewTab supplierId={id} leakCard={initial.leakCardEnabled} />
+          {initial.leakCardEnabled ? (
+            <section id="leak-card" className="scroll-mt-24">
+              <SupplierLeakTab supplierId={id} />
+            </section>
+          ) : null}
+        </div>
+      );
+    case 'prices': {
+      // Wave-1 contract section: `contracts` flag on + finance role (fails silent → hidden).
+      const showContract = (await getWave1Access()).contracts;
+      return (
+        <div className="space-y-8">
+          <SupplierCatalogTab supplierId={id} />
+          {showContract ? (
+            <section id="contract" className="scroll-mt-24">
+              <SupplierContractTab supplierId={id} />
+            </section>
+          ) : null}
+        </div>
       );
     }
-    case 'ledger': {
-      // Flag `supplierLedger`; with the flag off ?tab=ledger falls back to details.
-      const caller = await createServerCaller();
-      const initial = await caller.suppliers.get({ supplierId: id });
-      return initial.ledgerEnabled ? (
-        <SupplierLedgerTab supplierId={id} />
-      ) : (
-        <SupplierDetailsTab supplierId={id} initial={initial} />
-      );
-    }
-    case 'catalog':
-      return <SupplierCatalogTab supplierId={id} />;
     case 'orders':
       return <SupplierOrdersTab supplierId={id} />;
-    case 'contract':
-      return <SupplierContractTab supplierId={id} />;
-    case 'schedule':
+    case 'ledger':
+      return <SupplierLedgerTab supplierId={id} />;
     case 'details':
-    default: {
-      // Ownership is enforced in suppliers.get (the layout already 404s a foreign id).
-      const caller = await createServerCaller();
-      const initial = await caller.suppliers.get({ supplierId: id });
-      return tab === 'schedule' ? (
-        <SupplierScheduleTab supplierId={id} initial={initial} />
-      ) : (
-        <SupplierDetailsTab supplierId={id} initial={initial} />
+    default:
+      return (
+        <div className="space-y-8">
+          <SupplierDetailsTab supplierId={id} initial={initial} canEdit={canEdit} />
+          <section id="days-and-times" className="scroll-mt-24">
+            <SupplierScheduleTab supplierId={id} initial={initial} canEdit={canEdit} />
+          </section>
+        </div>
       );
-    }
   }
 }

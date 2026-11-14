@@ -6,6 +6,8 @@ import type { he } from '../../../receiving/delivery.he';
 export const receivingDelivery: Shape<typeof he> = {
   delivery: {
     scan: {
+      registerFailed: 'እቲ ፋቱራ ኣይተዓቀበን — ደጊምኩም ስኣሉ',
+      registerRetry: 'ደጊምኩም ንምዕቃብ ፈትኑ',
       upload: 'ፋይል / PDF ስደዱ',
       uploaded: 'ፋክቱራ ተሰዲዱ',
       uploading: 'ፋክቱራ ይስደድ ኣሎ · {seconds} ካልኢት',
@@ -16,6 +18,7 @@ export const receivingDelivery: Shape<typeof he> = {
       useAnyway: 'ነዚ ስእሊ ብዝኾነ ተጠቐሙ',
     },
     processing: {
+      ocrDisabled: 'ኣውቶማቲክ ንባብ ኣብዚ ሕሳብ ኣይሰርሕን እዩ — ምስ ትእዛዝ ቀጽሉ',
       uploaded: 'ፋክቱራ ተቐቢልና',
       reading: 'መስመራት ፋክቱራ ነንብብ ኣለና',
       compare: 'ምስ ትእዛዝ ነወዳድር ኣለና',
@@ -74,6 +77,7 @@ export const receivingDelivery: Shape<typeof he> = {
       heldDiscard: 'ቁጽሪ ካብ ተሌፎን ደምስሱ',
       heldNotCounted: 'ኣይተቖጽረን',
       saveFailed: 'ምዕቃብ {count} መስመራት ኣይተዓወተን',
+      uncounted: "{count} መስመራት ገና ኣይተቖጽሩን — ቍጸርዎም ወይ ከም ዝጎደሉ ምልክት ግበሩ",
       unorderedNeeds: 'ዘይተኣዘዙ ኣቕሑ መጺኦም እንተኾይኖም ምልክት ግበሩ',
       spotTitle: 'ቅድሚ ምርግጋጽ ናይ ናሙና ምርመራ',
       spotHint: 'ነዞም ኣቕሑ ቁጸሩ እሞ ብሓቂ ክንደይ ከም ዝመጸ ጽሓፉ።',
@@ -84,6 +88,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkTag: 'ሓደ ብሓደ ኣይተቖጽረን',
     },
     confirmed: {
+      queued: 'ኣብ ተሌፎን ተዓጽዩ · ርክብ ምስ ተመልሰ ባዕሉ ይለኣኽ',
       summary: '{lines} መስመራት · {exceptions} ፍልልያት',
       noExceptions: '{lines} መስመራት · ኩሉ ከም ትእዛዝ',
       amountPending: 'ናይ ክሬዲት ሕቶ መጠን ድሕሪ ምርመራ ይውሰን',
@@ -94,6 +99,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkNote: '{count} መስመራት ከም ትእዛዝ ተመልኪቶም — ሓደ ብሓደ ኣይተቖጽሩን',
     },
     summary: {
+      closedUncounted: '{count} መስመራት ብዘይ ቍጽሪ ተዓጽዮም',
       title: 'ምቕባል ኣቕሓ ድሮ ተዓጽዩ',
       subtitle: 'ኣብ {time} ተቐቢሉ። እዚኦም እዮም ዝተመዝገቡ ብዝሓት።',
       subtitleNoTime: 'እዚኦም እዮም ዝተመዝገቡ ብዝሓት።',
@@ -120,6 +126,9 @@ export const receivingDelivery: Shape<typeof he> = {
     wait: 'ርክብ ተጸበዩ',
     keep: 'ውጹ፣ ኣብ ተሌፎን ግደፍዎም',
     delete: '{count} ስእልታት ደምስሱ እሞ ውጹ',
+    flushingItems: 'ቅድሚ ምውጻእ {count} ናይ ምቕባል ኣቕሑ ይለኣኹ ኣለዉ…',
+    titleItems: '{count} ናይ ምቕባል ኣቕሑ ገና ኣይተላእኩን',
+    deleteItems: '{count} ኣቕሑ ደምስሱ እሞ ውጹ',
   },
   pwa: {
     offline: 'ርክብ የለን · ኣብ ተሌፎን ተዓቂቡ',
@@ -128,5 +137,28 @@ export const receivingDelivery: Shape<typeof he> = {
     capturedByOne: 'ስእሊ ፋክቱራ ተሰዲዱ · ብ{names} ተሳኢሉ',
     capturedByMany: '{count} ስእልታት ፋክቱራ ተሰዲዶም · ብ{names} ተሳኢሎም',
     someoneElse: 'ካልእ ተጠቃሚ',
+    waiting: '⟳ {count} ይጽበዩ ኣለዉ',
+    details: 'ዝርዝር',
+    outboxTitle: 'ንምልኣኽ ይጽበ',
+    outboxBody: 'ኣብ ተሌፎን ተቐሚጡ ኣሎ፣ ርክብ ምስ ዝህሉ ባዕሉ ይለኣኽ።',
+    sendNow: 'ሕጂ ስደዱ',
+    kind: {
+      grLine: 'ዝተቖጽረ መስመር',
+      submitReceipt: 'ምዕጻው ምቕባል',
+      photo: 'ስእሊ ፋክቱር',
+      slipShared: 'ሰነድ ንዘዋሪ',
+      other: 'ናይ መስክ ኣቕሓ',
+    },
+    state: {
+      waiting: 'ርክብ ይጽበ',
+      retrying: 'ቀልጢፍና ደጊምና ክንፍትን ኢና',
+      parked: 'ሰርቨር ኣይተቐበሎን',
+      keptDays: 'ተወሳኺ 14 መዓልቲ ኣብ ተሌፎን ይቕመጥ',
+    },
+    capturedBy: 'ዝሰኣሎ {name}',
+    savedBy: 'ዝዓቐቦ {name}',
+    retryItem: 'ደጊምኩም ፈትኑ',
+    deleteItem: 'ደምስሱ',
+    deleteConfirm: 'ካብ ተሌፎን ደምስሱ',
   },
 };

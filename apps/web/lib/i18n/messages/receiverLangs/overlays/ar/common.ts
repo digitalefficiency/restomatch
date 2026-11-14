@@ -67,6 +67,7 @@ export const common: Shape<CommonReceiverSlice> = {
       submit: 'دخول',
       submitting: 'جارٍ الدخول…',
       wrong: 'البريد الإلكتروني أو كلمة المرور غير صحيحة، أو كانت هناك محاولات كثيرة. حاول مرة أخرى بعد لحظة.',
+      rate: 'محاولات كثيرة جدًا. حاول مرة أخرى لاحقًا.',
       magicLink: 'لا توجد كلمة مرور؟ أرسل لي رابط دخول بالبريد',
       magicSent: 'أرسلنا رابط دخول إلى {email}. افتحه ثم عُد إلى هذا التبويب — سنكمل من هنا.',
       magicFailed: 'لم نتمكن من إرسال الرابط. حاول مرة أخرى بعد لحظة.',
@@ -148,5 +149,38 @@ export const common: Shape<CommonReceiverSlice> = {
     },
     listSep: ', ',
     listLast: ' و',
+  },
+  // W3-03a field components — machine translation, pending native review.
+  field: {
+    scan: {
+      button: 'مسح الباركود', // review
+      scanning: 'وجّه الكاميرا نحو الباركود', // review
+      cancel: 'إلغاء', // review
+      typeInstead: 'إدخال يدوي', // review
+      manualLabel: 'رقم الباركود', // review
+      manualHint: 'الأرقام الموجودة تحت الخطوط', // review
+      submit: 'تأكيد', // review
+      empty: 'يجب كتابة الرقم أولاً', // review
+      found: 'تم المسح: {code}', // review
+      unsupported: 'هذا الهاتف لا يمسح الباركود. يمكنك كتابة الرقم.', // review
+      denied: 'لا يوجد إذن للكاميرا. يمكنك كتابة الرقم.', // review
+      failed: 'لم ينجح المسح. يمكنك كتابة الرقم.', // review
+    },
+    mic: {
+      button: 'إدخال صوتي', // review
+      listening: 'نستمع… تحدّث الآن', // review
+      stop: 'إنهاء التسجيل', // review
+      cancel: 'إلغاء', // review
+      confirmLabel: 'هذا ما سمعناه. يمكنك التصحيح قبل التأكيد', // review
+      typedLabel: 'اكتب النص', // review
+      confirm: 'تأكيد', // review
+      retry: 'تسجيل من جديد', // review
+      empty: 'يجب إدخال نص قبل التأكيد', // review
+      unsupported: 'هذا الهاتف لا يدعم الإدخال الصوتي. يمكنك الكتابة.', // review
+      denied: 'لا يوجد إذن للميكروفون. يمكنك الكتابة.', // review
+      offline: 'لا يوجد اتصال، الإدخال الصوتي غير متاح الآن. يمكنك الكتابة.', // review
+      noSpeech: 'لم نسمع شيئاً. حاول مرة أخرى أو اكتب.', // review
+      failed: 'لم ينجح الإدخال الصوتي. يمكنك الكتابة.', // review
+    },
   },
 };

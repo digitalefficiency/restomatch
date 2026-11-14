@@ -12,6 +12,7 @@ import { useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
 import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
 import { SupplierForm } from '../manager';
+import { SupplierDetailsReadOnly } from './read-only-view';
 import { duplicateKindOf, scheduleToForm, toUpdatePatch, vatChoiceOf } from '../form-logic';
 
 /**
@@ -20,7 +21,16 @@ import { duplicateKindOf, scheduleToForm, toUpdatePatch, vatChoiceOf } from '../
  * edited with one code path. Saves via suppliers.update; cleared fields are
  * sent as null so they really clear.
  */
-export function SupplierDetailsTab({ supplierId, initial }: { supplierId: string; initial?: SupplierWithFlags }) {
+export function SupplierDetailsTab({
+  supplierId,
+  initial,
+  canEdit = true,
+}: {
+  supplierId: string;
+  initial?: SupplierWithFlags;
+  /** False for roles that can't write suppliers (the bookkeeper): values read-only, no form. */
+  canEdit?: boolean;
+}) {
   const t = useT(suppliersNs);
   const tc = useT(components);
   const toast = useToast();
@@ -50,6 +60,7 @@ export function SupplierDetailsTab({ supplierId, initial }: { supplierId: string
 
   const s = supplier.data;
   if (!s) return <ErrorNotice message={supplier.error ? friendlyError(supplier.error, tc) : undefined} />;
+  if (!canEdit) return <SupplierDetailsReadOnly s={s} />;
 
   return (
     <SupplierForm

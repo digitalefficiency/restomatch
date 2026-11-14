@@ -23,12 +23,14 @@ export interface HeroFigures {
   pendingLinkCount: number;
   /** Receiving scans waiting for their receipt's count (not "no data": they will be checked). */
   awaitingCountCount?: number;
+  /** G-08: invoices held for a "זה אותו מוצר?" question (they will be checked after the answer). */
+  awaitingQuestionCount?: number;
 }
 
 export function leakHeroState(h: HeroFigures): LeakHeroState {
   if (h.leakIls > 0) return 'leak';
   if (h.matchedInvoiceCount > 0) return 'clean';
-  if (h.pendingLinkCount > 0 || (h.awaitingCountCount ?? 0) > 0) return 'pendingOnly';
+  if (h.pendingLinkCount > 0 || (h.awaitingCountCount ?? 0) > 0 || (h.awaitingQuestionCount ?? 0) > 0) return 'pendingOnly';
   return 'noData';
 }
 
@@ -90,3 +92,22 @@ export function leakSplit(h: { leakIls: number; caughtBeforePaymentIls: number }
   const unpaid = Math.min(leak, Math.max(0, Math.round(h.caughtBeforePaymentIls * 100)));
   return { unpaidIls: unpaid / 100, paidIls: (leak - unpaid) / 100 };
 }
+
+/**
+ * The hero's primary CTA is ALWAYS the secondary button (owner decision D9,
+ * DS2-SPEC): red is reserved for act-now T2 items. The danger rail and border
+ * carry the leak state; the button never does.
+ */
+export type HeroCtaVariant = 'secondary';
+const HERO_CTA_VARIANT: Record<LeakHeroState, HeroCtaVariant> = {
+  noData: 'secondary',
+  clean: 'secondary',
+  leak: 'secondary',
+  pendingOnly: 'secondary',
+};
+export function heroCtaVariant(state: LeakHeroState): HeroCtaVariant {
+  return HERO_CTA_VARIANT[state];
+}
+export const HERO_CTA_CLASS: Record<HeroCtaVariant, string> = {
+  secondary: 'border border-line-strong bg-surface text-ink hover:border-primary/40 hover:text-primary',
+};

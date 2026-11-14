@@ -7,6 +7,9 @@ import type { TRPCError } from '@trpc/server';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
+/** W3-07a: every admin write carries a reason. */
+const R = 'בדיקה אוטומטית';
+
 /**
  * Pilot admin controls (ציקטי go-live): the TOTP gate on the console, per-tenant
  * feature flags without SQL, a Pro trial with an end date, and audit rows for
@@ -58,7 +61,7 @@ describe('adminProcedure requires an enrolled authenticator (TOTP)', () => {
     await expect2fa(c.admin.listRestaurants());
     await expect2fa(c.admin.getRestaurant({ restaurantId: T.restaurantId }));
     await expect2fa(c.admin.listLeads());
-    await expect2fa(c.admin.assignPlan({ restaurantId: T.restaurantId, planKey: 'pro' }));
+    await expect2fa(c.admin.assignPlan({ reason: R, restaurantId: T.restaurantId, planKey: 'pro' }));
     await expect2fa(c.admin.setFeatures({ restaurantId: T.restaurantId, features: { contracts: true } }));
     // …and nothing was written.
     const [r] = await db.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, T.restaurantId));
@@ -150,6 +153,17 @@ describe('admin.setFeatures — per-tenant flags without SQL', () => {
     expect(r!.settings).toEqual({});
   });
 
+  it('G-08 orderQuestions is default-ON: nothing stored → effective true (defaultOn lists it); false → off', async () => {
+    const c = adminCaller(adminUserId);
+    const shown = await c.admin.setFeatures({ restaurantId: T.restaurantId, features: { contracts: true } });
+    expect(shown.features.stored.orderQuestions).toBeUndefined();
+    expect(shown.features.effective.orderQuestions).toBe(true);
+    expect(shown.features.defaultOn).toContain('orderQuestions');
+    const off = await c.admin.setFeatures({ restaurantId: T.restaurantId, features: { orderQuestions: false } });
+    expect(off.features.effective.orderQuestions).toBe(false);
+    expect(off.features.stored.orderQuestions).toBe(false);
+  });
+
   it('accepts every FEATURE_KEY', async () => {
     const all = Object.fromEntries(FEATURE_KEYS.map((k) => [k, true]));
     const res = await adminCaller(adminUserId).admin.setFeatures({ restaurantId: T.restaurantId, features: all });
@@ -207,7 +221,7 @@ describe('admin.assignPlan — a trial with an end date', () => {
 
   it('Pro trialing for 30 days ends 30 days from now, shown on the restaurant and audited', async () => {
     const before = Date.now();
-    const res = await adminCaller(adminUserId).admin.assignPlan({
+    const res = await adminCaller(adminUserId).admin.assignPlan({ reason: R,
       restaurantId: T.restaurantId,
       planKey: 'pro',
       status: 'trialing',
@@ -231,7 +245,7 @@ describe('admin.assignPlan — a trial with an end date', () => {
   });
 
   it('active has no end date', async () => {
-    const res = await adminCaller(adminUserId).admin.assignPlan({ restaurantId: T.restaurantId, planKey: 'pro', status: 'active' });
+    const res = await adminCaller(adminUserId).admin.assignPlan({ reason: R, restaurantId: T.restaurantId, planKey: 'pro', status: 'active' });
     expect(res.trialEndsAt).toBeNull();
   });
 });

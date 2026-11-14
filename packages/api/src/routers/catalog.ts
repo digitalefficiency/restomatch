@@ -708,7 +708,7 @@ export const catalogRouter = router({
           rawName: set.supplierNameRaw ?? item.supplierNameRaw,
           supplierId: item.supplierId,
           supplierSku: set.supplierSku !== undefined ? set.supplierSku : item.supplierSku,
-          confidence: 1,
+          provenance: 'human', // G-08: a person linked it → 1.000
         });
       }
       return { ok: true, productId: set.productId ?? null };

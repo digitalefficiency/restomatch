@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { Breadcrumbs, SectionHeader } from '@/lib/components';
 import { getT } from '@/lib/i18n/server';
@@ -17,7 +18,9 @@ export default async function EditRecipePage({ params }: { params: Promise<{ rec
   // A foreign / deleted id is NOT_FOUND from the API → 404 here.
   const detail = await caller.recipes.get({ id: recipeId }).catch(() => null);
   if (!detail) notFound();
-  const [t, tc] = await Promise.all([getT(recipesNs), getT(components)]);
+  const [t, tc, session] = await Promise.all([getT(recipesNs), getT(components), auth()]);
+  // Owner decision I3: the bookkeeper reads the recipe (₪ included) and edits nothing.
+  const readOnly = session?.user?.role === 'bookkeeper';
   return (
     <div>
       <Breadcrumbs
@@ -25,7 +28,7 @@ export default async function EditRecipePage({ params }: { params: Promise<{ rec
         items={[{ label: t('breadcrumb'), href: '/dashboard/recipes' }, { label: detail.recipe.name }]}
       />
       <SectionHeader level={1} title={t('editor.titleEdit')} />
-      <RecipeEditor recipeId={recipeId} />
+      <RecipeEditor recipeId={recipeId} readOnly={readOnly} />
     </div>
   );
 }

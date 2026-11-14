@@ -6,6 +6,8 @@ import type { he } from '../../../receiving/delivery.he';
 export const receivingDelivery: Shape<typeof he> = {
   delivery: {
     scan: {
+      registerFailed: 'Накладная не сохранилась — сфотографируйте заново',
+      registerRetry: 'Попробовать сохранить снова',
       upload: 'Загрузить файл / PDF',
       uploaded: 'Накладная загружена',
       uploading: 'Загружаем накладную · {seconds} с',
@@ -16,6 +18,7 @@ export const receivingDelivery: Shape<typeof he> = {
       useAnyway: 'Всё равно использовать это фото',
     },
     processing: {
+      ocrDisabled: 'Автоматическое чтение в этом аккаунте выключено — продолжайте по заказу',
       uploaded: 'Накладная получена',
       reading: 'Читаем строки накладной',
       compare: 'Сравниваем с заказом',
@@ -74,6 +77,7 @@ export const receivingDelivery: Shape<typeof he> = {
       heldDiscard: 'Удалить подсчёт с телефона',
       heldNotCounted: 'не посчитано',
       saveFailed: 'Не удалось сохранить строк: {count}',
+      uncounted: "Ещё не посчитано строк: {count} — посчитайте их или отметьте «нет»",
       unorderedNeeds: 'Отметьте, пришли ли незаказанные товары',
       spotTitle: 'Выборочная проверка перед подтверждением',
       spotHint: 'Посчитайте эти товары и укажите, сколько пришло на самом деле.',
@@ -84,6 +88,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkTag: 'Не посчитано поштучно',
     },
     confirmed: {
+      queued: 'Закрыто в телефоне · отправится само, когда появится связь',
       summary: 'Строк: {lines} · расхождений: {exceptions}',
       noExceptions: 'Строк: {lines} · всё как в заказе',
       amountPending: 'Сумма запроса на кредит-ноту будет определена после проверки',
@@ -94,6 +99,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkNote: 'Отмечено как в заказе строк: {count} — не посчитаны поштучно',
     },
     summary: {
+      closedUncounted: 'Закрыто без пересчёта строк: {count}',
       title: 'Приёмка товара уже закрыта',
       subtitle: 'Принято в {time}. Вот записанные количества.',
       subtitleNoTime: 'Вот записанные количества.',
@@ -120,6 +126,9 @@ export const receivingDelivery: Shape<typeof he> = {
     wait: 'Дождаться связи',
     keep: 'Выйти и оставить их в телефоне',
     delete: 'Удалить фото ({count}) и выйти',
+    flushingItems: 'Отправляем {count} элементов приёмки перед выходом…',
+    titleItems: '{count} элементов приёмки ещё не отправлены',
+    deleteItems: 'Удалить {count} элементов и выйти',
   },
   pwa: {
     offline: 'Нет связи · сохранено в телефоне',
@@ -128,5 +137,28 @@ export const receivingDelivery: Shape<typeof he> = {
     capturedByOne: 'Фото накладной загружено · снял(а) {names}',
     capturedByMany: 'Загружено фото накладных: {count} · сняли {names}',
     someoneElse: 'другой пользователь',
+    waiting: '⟳ {count} ожидают',
+    details: 'Подробно',
+    outboxTitle: 'Ожидает отправки',
+    outboxBody: 'Сохранено в телефоне и отправится само, когда будет связь.',
+    sendNow: 'Отправить сейчас',
+    kind: {
+      grLine: 'Посчитанная строка',
+      submitReceipt: 'Закрытие приёмки',
+      photo: 'Фото счёта',
+      slipShared: 'Накладная водителю',
+      other: 'Полевой элемент',
+    },
+    state: {
+      waiting: 'Ждём связь',
+      retrying: 'Скоро повторим',
+      parked: 'Сервер это не принял',
+      keptDays: 'Хранится в телефоне ещё 14 дней',
+    },
+    capturedBy: 'Снял(а) {name}',
+    savedBy: 'Сохранил(а) {name}',
+    retryItem: 'Повторить',
+    deleteItem: 'Удалить',
+    deleteConfirm: 'Удалить из телефона',
   },
 };

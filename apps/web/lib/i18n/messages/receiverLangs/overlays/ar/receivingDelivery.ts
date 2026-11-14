@@ -6,6 +6,8 @@ import type { he } from '../../../receiving/delivery.he';
 export const receivingDelivery: Shape<typeof he> = {
   delivery: {
     scan: {
+      registerFailed: 'لم تُحفظ الفاتورة — صوّر مرة أخرى',
+      registerRetry: 'حاول الحفظ مرة أخرى',
       upload: 'ارفع ملفًا / PDF',
       uploaded: 'تم رفع الفاتورة',
       uploading: 'جارٍ رفع الفاتورة · {seconds} ثانية',
@@ -16,6 +18,7 @@ export const receivingDelivery: Shape<typeof he> = {
       useAnyway: 'استخدم الصورة رغم ذلك',
     },
     processing: {
+      ocrDisabled: 'القراءة التلقائية غير مفعّلة في هذا الحساب — تابع مقابل الطلبية',
       uploaded: 'تم استلام الفاتورة',
       reading: 'نقرأ أسطر الفاتورة',
       compare: 'نقارن مع الطلبية',
@@ -74,6 +77,7 @@ export const receivingDelivery: Shape<typeof he> = {
       heldDiscard: 'احذف العدّ من الهاتف',
       heldNotCounted: 'لم يُعدّ',
       saveFailed: 'فشل حفظ {count} أسطر',
+      uncounted: "{count} أسطر لم تُعدّ بعد — اعدّها أو علّمها كناقصة",
       unorderedNeeds: 'حدّد هل وصلت الأصناف التي لم تُطلب',
       spotTitle: 'فحص بالعيّنة قبل التأكيد',
       spotHint: 'عُدّ هذه الأصناف واكتب كم وصل فعلًا.',
@@ -84,6 +88,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkTag: 'لم يُعدّ صنفًا صنفًا',
     },
     confirmed: {
+      queued: 'أُغلق في الهاتف · يُرسل تلقائيًا عند عودة الاتصال',
       summary: '{lines} أسطر · {exceptions} فروق',
       noExceptions: '{lines} أسطر · كل شيء كما في الطلبية',
       amountPending: 'مبلغ طلب الإشعار الدائن يُحدَّد بعد الفحص',
@@ -94,6 +99,7 @@ export const receivingDelivery: Shape<typeof he> = {
       bulkNote: 'تم تحديد {count} أسطر كما في الطلبية — لم تُعدّ صنفًا صنفًا',
     },
     summary: {
+      closedUncounted: '{count} أسطر أُغلقت بدون عدّ',
       title: 'استلام البضاعة مُغلق بالفعل',
       subtitle: 'استُلمت في {time}. هذه هي الكميات المسجّلة.',
       subtitleNoTime: 'هذه هي الكميات المسجّلة.',
@@ -120,6 +126,9 @@ export const receivingDelivery: Shape<typeof he> = {
     wait: 'انتظر الاتصال',
     keep: 'سجّل الخروج وأبقِها في الهاتف',
     delete: 'احذف {count} صور وسجّل الخروج',
+    flushingItems: 'جارٍ إرسال {count} عناصر من الاستلام قبل الخروج…',
+    titleItems: '{count} عناصر من الاستلام لم تُرسل بعد',
+    deleteItems: 'احذف {count} عناصر وسجّل الخروج',
   },
   pwa: {
     offline: 'لا يوجد اتصال · محفوظ في الهاتف',
@@ -128,5 +137,28 @@ export const receivingDelivery: Shape<typeof he> = {
     capturedByOne: 'تم رفع صورة فاتورة · صوّرها {names}',
     capturedByMany: 'تم رفع {count} صور فواتير · صوّرها {names}',
     someoneElse: 'مستخدم آخر',
+    waiting: '⟳ {count} بالانتظار',
+    details: 'التفاصيل',
+    outboxTitle: 'بانتظار الإرسال',
+    outboxBody: 'محفوظ في الهاتف ويُرسل تلقائيًا عند توفر الاتصال.',
+    sendNow: 'أرسل الآن',
+    kind: {
+      grLine: 'سطر تم عدّه',
+      submitReceipt: 'إغلاق الاستلام',
+      photo: 'صورة فاتورة',
+      slipShared: 'إرسال الإيصال للسائق',
+      other: 'عنصر ميداني',
+    },
+    state: {
+      waiting: 'بانتظار الاتصال',
+      retrying: 'سنحاول مجددًا بعد قليل',
+      parked: 'الخادم لم يقبل هذا',
+      keptDays: 'محفوظ في الهاتف 14 يومًا أخرى',
+    },
+    capturedBy: 'صوّرها {name}',
+    savedBy: 'حفظه {name}',
+    retryItem: 'حاول مجددًا',
+    deleteItem: 'احذف',
+    deleteConfirm: 'احذف من الهاتف',
   },
 };

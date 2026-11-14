@@ -10,6 +10,7 @@ import { formatDate, formatNumber, formatPercent } from '@/lib/i18n/format';
 import { leakCheck } from '@/lib/i18n/messages/leakCheck';
 import { formatIls } from '@/lib/money';
 import { DemoCta } from './DemoCta';
+import { noteAmountText } from './noteAmount';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,6 +50,8 @@ export default async function LeakCheckResultPage({ searchParams }: { searchPara
   }
 
   const ils = (agorot: number) => formatIls(agorot / 100, { maximumFractionDigits: 2, locale });
+  /** A missing note amount reads "לא זמין" (T4), never ₪0. */
+  const noteAmount = (agorot: number | undefined) => noteAmountText(agorot, ils, t('result.notes.amountUnavailable'));
   const price = (shekels: number) => formatIls(shekels, { maximumFractionDigits: 2, locale });
   const inv = (i: number) => view.invoices.find((x) => x.index === i);
   const { report } = view;
@@ -152,7 +155,7 @@ export default async function LeakCheckResultPage({ searchParams }: { searchPara
                         {inv(f.invoiceIndex)?.fileName}
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-5 py-3 text-end font-mono font-semibold tabular-nums text-danger">
+                    <td className="whitespace-nowrap px-5 py-3 text-end font-semibold tabular-nums text-danger">
                       {ils(f.amountAgorot)}
                     </td>
                   </tr>
@@ -165,7 +168,7 @@ export default async function LeakCheckResultPage({ searchParams }: { searchPara
                   Σ
                 </td>
                 <td className="hidden sm:table-cell" />
-                <td className="whitespace-nowrap px-5 py-3 text-end font-mono font-extrabold tabular-nums text-danger">
+                <td className="whitespace-nowrap px-5 py-3 text-end font-extrabold tabular-nums text-danger">
                   {ils(leak)}
                 </td>
               </tr>
@@ -191,14 +194,14 @@ export default async function LeakCheckResultPage({ searchParams }: { searchPara
                         ref: (n.refInvoiceIndex ?? 0) + 1,
                         number: inv(n.invoiceIndex)?.invoiceNumber ?? '',
                         supplier: inv(n.invoiceIndex)?.supplierName ?? '',
-                        amount: ils(n.amountAgorot ?? 0),
+                        amount: noteAmount(n.amountAgorot),
                       })
                     : n.kind === 'subtotal_mismatch'
-                      ? t('result.notes.subtotal_mismatch', { n: n.invoiceIndex + 1, amount: ils(n.amountAgorot ?? 0) })
+                      ? t('result.notes.subtotal_mismatch', { n: n.invoiceIndex + 1, amount: noteAmount(n.amountAgorot) })
                       : t('result.notes.undercharge', {
                           n: n.invoiceIndex + 1,
                           line: (n.lineIndex ?? 0) + 1,
-                          amount: ils(n.amountAgorot ?? 0),
+                          amount: noteAmount(n.amountAgorot),
                         })}
               </li>
             ))}

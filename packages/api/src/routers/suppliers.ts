@@ -2,10 +2,16 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { and, asc, eq, suppliers, type Database, type Supplier } from '@restomatch/db';
 import { OrderSchedule } from '@restomatch/types';
-import { invoiceReaderProcedure, managerProcedure, memberProcedure, router } from '../trpc';
+import { financeProcedure, invoiceReaderProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 import { assertFeatureOn, isFeatureOn } from '../lib/featureGate';
 import { computeLedgerGrid, computeSupplierLedger } from '../ledger';
+import { computeSupplierOverview, computeSupplierTable } from '../ledger/overview';
+import { canonicalPaymentTerms, normalizeIsraeliPhone } from '../ledger/supplierFields';
+import { reconcileSupplierStatement } from '../ledger/statementData';
+import type { StatementResult } from '../ledger/statement';
+import { MAX_STATEMENT_CSV_CHARS, parseStatementCsv } from '../ledger/statementCsv';
+import { seesNoMoney, stripMoneyDeep } from '../lib/staffMoney';
 
 /**
  * Supplier setup (Phase-2). The CRUD surface for the suppliers a restaurant
@@ -160,14 +166,18 @@ export const suppliersRouter = router({
    * Supplier ledger by month (כרטסת ספק, flag `supplierLedger`): delivery notes
    * vs regular / consolidated invoices per restaurant calendar month, with the
    * engine's leak, credits asked, paid and open balance, and a drill-down of
-   * which invoice covers each delivery note. Invoice readers (not the chef).
+   * which invoice covers each delivery note. Invoice readers (not the chef);
+   * the receiver gets counts and statuses with every ₪ stripped (G-07 #219).
    */
   ledger: invoiceReaderProcedure
     .input(z.object({ supplierId: z.string().uuid(), months: z.number().int().min(1).max(24).default(6) }))
     .query(async ({ ctx, input }) => {
       await assertFeatureOn(ctx.db, ctx.session.restaurantId, 'supplierLedger');
       await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
-      return computeSupplierLedger(ctx.db, ctx.session.restaurantId, input.supplierId, input.months);
+      const ledger = await computeSupplierLedger(ctx.db, ctx.session.restaurantId, input.supplierId, input.months);
+      // G-07 strip (pilot): the receiver (an invoice reader) gets the counts and
+      // statuses, every …Agorot null. The chef can't call this (no invoice reader).
+      return seesNoMoney(ctx.session.role) ? stripMoneyDeep(ledger) : ledger;
     }),
 
   /** Every supplier × month of the ledger (the all-suppliers grid + bookkeeper CSV). */
@@ -175,7 +185,59 @@ export const suppliersRouter = router({
     .input(z.object({ months: z.number().int().min(1).max(24).default(6) }).optional())
     .query(async ({ ctx, input }) => {
       await assertFeatureOn(ctx.db, ctx.session.restaurantId, 'supplierLedger');
-      return computeLedgerGrid(ctx.db, ctx.session.restaurantId, input?.months ?? 6);
+      const grid = await computeLedgerGrid(ctx.db, ctx.session.restaurantId, input?.months ?? 6);
+      // G-07 strip (pilot): as `ledger` — no ₪ for the receiver.
+      return seesNoMoney(ctx.session.role) ? stripMoneyDeep(grid) : grid;
+    }),
+
+  /**
+   * W2-11 · the supplier page "what now": the 90-day leak (the same figure as
+   * owner.leakGrouped / the leak card), its open part, the order rhythm, 6
+   * months of spend and the last invoices. Finance roles only.
+   */
+  overview: financeProcedure
+    .input(z.object({ supplierId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
+      return computeSupplierOverview(ctx.db, ctx.session.restaurantId, input.supplierId);
+    }),
+
+  /** W2-11 · the owner's vendor table: every supplier in one pass, 90-day leak desc, totals = Σ rows. */
+  table: financeProcedure
+    .input(z.object({ includeInactive: z.boolean().optional() }).optional())
+    .query(async ({ ctx, input }) =>
+      computeSupplierTable(ctx.db, ctx.session.restaurantId, { includeInactive: input?.includeInactive }),
+    ),
+
+  /**
+   * W3-11 · Reconcile a supplier statement (כרטסת) against our invoices, credit notes
+   * and agreed credit requests. Finance roles only (receiver/chef see no ₪). Stateless:
+   * the parsed lines come from the client; nothing is stored.
+   */
+  reconcileStatement: financeProcedure
+    .input(
+      z.object({
+        supplierId: z.string().uuid(),
+        /** The statement as CSV / pasted from a spreadsheet (parsed server-side, never stored). */
+        csv: z.string().min(1).max(MAX_STATEMENT_CSV_CHARS),
+      }),
+    )
+    // A mutation only so the statement travels in a POST body, not a URL. No writes.
+    .mutation(async ({ ctx, input }) => {
+      await assertFeatureOn(ctx.db, ctx.session.restaurantId, 'supplierLedger');
+      await assertSupplierOwned(ctx.db, input.supplierId, ctx.session.restaurantId);
+      const parsed = parseStatementCsv(input.csv);
+      const empty: StatementResult = {
+        period: { from: null, to: null },
+        totals: { invoicedAgorot: 0, creditedAgorot: 0, paidAgorot: 0, otherLines: 0 },
+        matched: { invoices: 0, credits: 0 },
+        flags: [],
+      };
+      const result =
+        parsed.headerFound && parsed.lines.length > 0
+          ? await reconcileSupplierStatement(ctx.db, ctx.session.restaurantId, input.supplierId, parsed.lines)
+          : empty;
+      return { ...result, headerFound: parsed.headerFound, lineCount: parsed.lines.length, skipped: parsed.skipped };
     }),
 
   create: managerProcedure
@@ -192,8 +254,8 @@ export const suppliersRouter = router({
           nameEn: input.nameEn || null,
           businessId: input.businessId ?? null,
           contactEmail: input.contactEmail ?? null,
-          contactWhatsapp: input.contactWhatsapp ?? null,
-          paymentTerms: input.paymentTerms ?? null,
+          contactWhatsapp: normalizeIsraeliPhone(input.contactWhatsapp),
+          paymentTerms: canonicalPaymentTerms(input.paymentTerms),
           deliverySchedule: input.deliverySchedule ?? null,
           orderSchedule: input.orderSchedule ?? null,
           vatRate: input.vatRate === undefined ? null : vatRateValue(input.vatRate),
@@ -238,8 +300,8 @@ export const suppliersRouter = router({
       if (patch.nameEn !== undefined) set.nameEn = patch.nameEn || null;
       if (patch.businessId !== undefined) set.businessId = patch.businessId;
       if (patch.contactEmail !== undefined) set.contactEmail = patch.contactEmail;
-      if (patch.contactWhatsapp !== undefined) set.contactWhatsapp = patch.contactWhatsapp;
-      if (patch.paymentTerms !== undefined) set.paymentTerms = patch.paymentTerms;
+      if (patch.contactWhatsapp !== undefined) set.contactWhatsapp = normalizeIsraeliPhone(patch.contactWhatsapp);
+      if (patch.paymentTerms !== undefined) set.paymentTerms = canonicalPaymentTerms(patch.paymentTerms);
       if (patch.deliverySchedule !== undefined) set.deliverySchedule = patch.deliverySchedule;
       if (patch.orderSchedule !== undefined) set.orderSchedule = patch.orderSchedule;
       if (patch.vatRate !== undefined) set.vatRate = vatRateValue(patch.vatRate);
