@@ -11,7 +11,8 @@ export interface PlanUsageInput {
   limits: { invoicesPerMonth: number | null; restaurants: number | null; seatsPerRestaurant: number | null };
   /** getQuota(..., 'ocr_scans'). */
   scans: { metered: boolean; used: number; limit: number | null; withinLimit: boolean };
-  restaurantsUsed: number;
+  /** Omitted when the caller can't see the other restaurants on the account; the row is then skipped. */
+  restaurantsUsed?: number;
   seatsUsed: number;
 }
 
@@ -37,11 +38,10 @@ function row(key: UsageRow['key'], used: number, limit: number | null, blocked =
 }
 
 export function planUsageRows(input: PlanUsageInput): UsageRow[] {
-  return [
-    row('scans', input.scans.used, input.scans.metered ? input.scans.limit : null, !input.scans.withinLimit),
-    row('restaurants', input.restaurantsUsed, input.limits.restaurants),
-    row('seats', input.seatsUsed, input.limits.seatsPerRestaurant),
-  ];
+  const rows = [row('scans', input.scans.used, input.scans.metered ? input.scans.limit : null, !input.scans.withinLimit)];
+  if (input.restaurantsUsed !== undefined) rows.push(row('restaurants', input.restaurantsUsed, input.limits.restaurants));
+  rows.push(row('seats', input.seatsUsed, input.limits.seatsPerRestaurant));
+  return rows;
 }
 
 /** Whole days left in a trial, counted from `now`; null when not trialing. */

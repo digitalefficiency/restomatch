@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import { authenticator } from 'otplib';
-import { DEMO_RESTAURANT_NAME } from './env';
+import { DEMO_RESTAURANT_NAME, OWNER_STATE } from './env';
 import { e2eSql, ensurePasswordUser } from './helpers';
 
 /**
@@ -155,4 +155,31 @@ test('a feature flag change is staged, needs a reason, and shows its source', as
 
   const rows = await auditAfter(restaurantId, 'admin.features', restaurantId);
   expect(rows[0]?.after).toMatchObject({ contracts: false, reason: 'כיבוי לבדיקה' });
+});
+
+test.describe('slice 2 · connections hub and plan usage (demo owner)', () => {
+  test.use({ storageState: OWNER_STATE, viewport: { width: 1440, height: 900 } });
+
+  test('the hub groups every connection with a status chip', async ({ page }) => {
+    await page.goto('/dashboard/integrations');
+    const board = page.getByTestId('hub-status');
+    await expect(board.getByRole('heading', { name: 'חיבורים' })).toBeVisible();
+    for (const group of ['accounting', 'pos', 'procurement']) {
+      await expect(board.locator(`[data-group="${group}"]`)).toBeVisible();
+    }
+    // Every tile carries a known status; "not connected" is never an error.
+    const statuses = await board.locator('[data-tile]').evaluateAll((els) => els.map((e) => e.getAttribute('data-status')));
+    expect(statuses.length).toBeGreaterThan(0);
+    for (const s of statuses) expect(['connected', 'sample', 'error', 'not_connected', 'contact']).toContain(s);
+  });
+
+  test('settings shows a read-only plan and usage, with no ₪', async ({ page }) => {
+    await page.goto('/dashboard/settings');
+    const plan = page.getByTestId('plan-usage');
+    await expect(plan).toBeVisible();
+    await expect(plan.locator('[data-row="scans"]')).toBeVisible();
+    await expect(plan.locator('[data-row="seats"]')).toBeVisible();
+    await expect(plan).not.toContainText('₪');
+    await expect(plan.locator('button, input, select')).toHaveCount(0);
+  });
 });

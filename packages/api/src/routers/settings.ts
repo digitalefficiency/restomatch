@@ -8,6 +8,7 @@ import {
   memberships,
   restaurants,
   sql,
+  subscriptions,
   users,
   type Database,
   type RestaurantSettings,
@@ -19,6 +20,7 @@ import { recordAudit, type AuditAction } from '../audit';
 import { appError } from '../errors';
 import { vatRateOf } from '../lib/vat';
 import { financeProcedure, managerProcedure, memberProcedure, ownerProcedure, router } from '../trpc';
+import { getEntitlements, getQuota } from '../entitlements';
 import { hasNoControlChars, NO_CONTROL_CHARS_MESSAGE } from '../lib/text';
 
 /**
@@ -554,4 +556,37 @@ export const settingsRouter = router({
         .where(eq(users.id, ctx.session.userId));
       return { phone, verified: false };
     }),
+
+  /**
+   * W3-07a · "תוכנית ושימוש": a READ-ONLY view of the active restaurant's plan
+   * and usage, straight from getEntitlements / getQuota (nothing redefined, no ₪).
+   * Seats = memberships of THIS restaurant only.
+   */
+  planUsage: financeProcedure.query(async ({ ctx }) => {
+    const restaurantId = ctx.session.restaurantId;
+    const [ent, scans, seatRows, subRows] = await Promise.all([
+      getEntitlements(ctx.db, restaurantId),
+      getQuota(ctx.db, restaurantId, 'ocr_scans'),
+      ctx.db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(memberships)
+        .where(eq(memberships.restaurantId, restaurantId)),
+      ctx.db
+        .select({ trialEndsAt: subscriptions.trialEndsAt })
+        .from(restaurants)
+        .innerJoin(subscriptions, eq(subscriptions.billingAccountId, restaurants.billingAccountId))
+        .where(eq(restaurants.id, restaurantId))
+        .limit(1),
+    ]);
+    return {
+      planKey: ent.planKey,
+      status: ent.status,
+      trialEndsAt: subRows[0]?.trialEndsAt ?? null,
+      /** No billing account: the implicit trial (unmetered). */
+      implicit: ent.billingAccountId === null,
+      limits: ent.limits,
+      scans: { metered: scans.metered, used: scans.used, limit: scans.limit, withinLimit: scans.withinLimit },
+      seatsUsed: seatRows[0]?.n ?? 0,
+    };
+  }),
 });
