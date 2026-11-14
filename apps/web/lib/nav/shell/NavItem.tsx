@@ -20,17 +20,20 @@ export const DOT_CLASS: Record<DotTone, string> = {
  * A nav glyph at 20 px (stroke 1.75), with the spec's optical size (§3: the
  * glyph scales by k, its stroke divides by k) and RTL mirroring only for list
  * glyphs. The current row's colour and stroke 2 come from the stylesheet.
+ * `duo`: DS3's two-tone state for the current page (DS3 SPEC §6, §10.4): a
+ * filled copy of the glyph underneath, composited once at 18 %, the same
+ * technique as DS3-01's <Icon state="active">.
  */
-export function NavIcon({ icon: Icon, k = 1, mirrored = false }: { icon: LucideIcon; k?: number; mirrored?: boolean }) {
+export function NavIcon({ icon: Icon, k = 1, mirrored = false, duo = false }: { icon: LucideIcon; k?: number; mirrored?: boolean; duo?: boolean }) {
+  const className = mirrored ? 'rtl:-scale-x-100' : undefined;
+  const style = k !== 1 ? { transform: `scale(${k})` } : undefined;
+  const line = <Icon aria-hidden="true" width={20} height={20} strokeWidth={1.75 / k} className={className} style={style} />;
+  if (!duo) return line;
   return (
-    <Icon
-      aria-hidden="true"
-      width={20}
-      height={20}
-      strokeWidth={1.75 / k}
-      className={mirrored ? 'rtl:-scale-x-100' : undefined}
-      style={k !== 1 ? { transform: `scale(${k})` } : undefined}
-    />
+    <span className={css.duo}>
+      <Icon aria-hidden="true" width={20} height={20} fill="currentColor" stroke="none" className={cn(css.duoFill, className)} style={style} />
+      {line}
+    </span>
   );
 }
 
@@ -113,7 +116,7 @@ export function NavItem({ itemKey, href, label, short, tile = false, active = fa
       className={cn(css.item, tile && css.tile, 'text-sm leading-5', active ? 'font-semibold' : 'font-medium')}
     >
       <span className={css.ic}>
-        <NavIcon icon={icon} k={k} mirrored={mirrored} />
+        <NavIcon icon={icon} k={k} mirrored={mirrored} duo={active} />
         {look ? <span aria-hidden="true" data-badge-dot={look.railDot} className={cn(css.railDot, DOT_CLASS[look.railDot])} /> : null}
       </span>
       <span className={css.lab}>{label}</span>

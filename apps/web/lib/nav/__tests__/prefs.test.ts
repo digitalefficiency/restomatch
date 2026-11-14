@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  DISPLAY_CHANNEL,
+  DISPLAY_COOKIE,
+  DISPLAY_COOKIE_MAX_AGE,
   GROUPS_STORAGE,
   RAIL_COOKIE,
   RAIL_COOKIE_MAX_AGE,
   RAIL_STORAGE,
   SINGLE_KEYS_EVENT,
-  SINGLE_KEYS_STORAGE,
   favouritesStorageKey,
   groupsStorageKey,
   railCookie,
@@ -13,9 +15,12 @@ import {
   readGroupState,
   readSingleKeys,
   safeStorage,
+  singleKeysCookie,
+  singleKeysFromCookie,
   writeFavourites,
   writeGroupState,
   writeSingleKeys,
+  type CookieDoc,
   type StorageLike,
 } from '../prefs';
 import type { GroupKey } from '../types';
@@ -76,7 +81,6 @@ describe('keys and constants (spec §13)', () => {
   });
 
   it('names the new keys, per role where the spec says so', () => {
-    expect(SINGLE_KEYS_STORAGE).toBe('rm:keys:single');
     expect(SINGLE_KEYS_EVENT).toBe('rm:keys');
     expect(RAIL_COOKIE_MAX_AGE).toBe(365 * 24 * 60 * 60);
     expect(groupsStorageKey('owner')).toBe('rm:nav:groups:owner');
@@ -121,11 +125,10 @@ describe('safeStorage', () => {
     vi.stubGlobal('window', { localStorage: local, dispatchEvent: () => true });
     writeGroupState('owner', { money: false });
     writeFavourites('owner', ['approvals']);
-    writeSingleKeys(false);
     expect(readGroupState('owner')).toEqual({ money: false });
     expect(readFavourites('owner')).toEqual(['approvals']);
-    expect(readSingleKeys()).toBe(false);
-    expect([...local.data.keys()].sort()).toEqual(['rm:keys:single', 'rm:nav:fav:owner', 'rm:nav:groups:owner']);
+    // The single-key switch is a cookie (DS3-06's display preference), never localStorage.
+    expect([...local.data.keys()].sort()).toEqual(['rm:nav:fav:owner', 'rm:nav:groups:owner']);
   });
 
   it('turns every reader into its default and every writer into a no-op when the browser blocks storage', () => {
@@ -229,75 +232,118 @@ describe('readFavourites / writeFavourites', () => {
   });
 });
 
-describe('readSingleKeys / writeSingleKeys', () => {
-  it('is on by default and off only for "0"', () => {
-    expect(readSingleKeys(new MemoryStorage())).toBe(true);
-    expect(readSingleKeys(holding('1', SINGLE_KEYS_STORAGE))).toBe(true);
-    expect(readSingleKeys(holding('0', SINGLE_KEYS_STORAGE))).toBe(false);
-    expect(readSingleKeys(holding('false', SINGLE_KEYS_STORAGE))).toBe(true);
-    expect(readSingleKeys(holding('', SINGLE_KEYS_STORAGE))).toBe(true);
+/** A `document.cookie` stand-in: reads give `name=value; …`, writes add, replace or (max-age=0) delete one cookie. */
+class CookieJar implements CookieDoc {
+  readonly jar = new Map<string, string>();
+  refuse = false;
+
+  get cookie(): string {
+    return [...this.jar].map(([k, v]) => `${k}=${v}`).join('; ');
+  }
+
+  set cookie(assignment: string) {
+    if (this.refuse) return; // cookies blocked: the browser ignores the write
+    const [pair = '', ...attrs] = assignment.split(';').map((p) => p.trim());
+    const i = pair.indexOf('=');
+    const name = pair.slice(0, i);
+    if (attrs.includes('max-age=0')) this.jar.delete(name);
+    else this.jar.set(name, pair.slice(i + 1));
+  }
+}
+
+describe('the single-key switch on DS3-06\'s display cookie', () => {
+  it('uses DS3-06\'s names: the rm_display cookie, one year, the rm-display channel', () => {
+    expect(DISPLAY_COOKIE).toBe('rm_display');
+    expect(DISPLAY_COOKIE_MAX_AGE).toBe(365 * 24 * 60 * 60);
+    expect(DISPLAY_CHANNEL).toBe('rm-display');
   });
 
-  it('stays on when there is no storage or it throws', () => {
-    expect(readSingleKeys(null)).toBe(true);
+  it('is on unless the device chose keys=off', () => {
+    expect(singleKeysFromCookie(undefined)).toBe(true);
+    expect(singleKeysFromCookie('')).toBe(true);
+    expect(singleKeysFromCookie('rm_nav_rail=1')).toBe(true);
+    expect(singleKeysFromCookie('rm_display=keys=off')).toBe(false);
+    expect(singleKeysFromCookie('a=1; rm_display=density=compact&keys=off; b=2')).toBe(false);
+    expect(singleKeysFromCookie('rm_display=density=compact&keys=on')).toBe(true);
+    expect(singleKeysFromCookie('rm_display=density%3Dcompact%26keys%3Doff')).toBe(false);
+    // Unknown keys or values never break a page: they read as the default.
+    expect(singleKeysFromCookie('rm_display=keys=maybe&zoom=2')).toBe(true);
+    expect(singleKeysFromCookie('xrm_display=keys=off')).toBe(true);
+  });
+
+  it('writes keys=off, drops the pair when switched back on (the default), and keeps the other choices', () => {
+    expect(singleKeysCookie('', false)).toBe('rm_display=keys=off; max-age=31536000; path=/; samesite=lax');
+    expect(singleKeysCookie('rm_display=keys=off', true)).toBe('rm_display=; max-age=0; path=/; samesite=lax');
+    // DS3-06's fixed pair order: density, text, keys.
+    expect(singleKeysCookie('a=1; rm_display=text=large&density=compact', false)).toBe(
+      'rm_display=density=compact&text=large&keys=off; max-age=31536000; path=/; samesite=lax',
+    );
+    expect(singleKeysCookie('rm_display=density=compact&keys=off', true)).toBe(
+      'rm_display=density=compact; max-age=31536000; path=/; samesite=lax',
+    );
+    expect(singleKeysCookie('', false, true)).toBe('rm_display=keys=off; max-age=31536000; path=/; samesite=lax; secure');
+  });
+
+  it('round-trips through a cookie jar and leaves other cookies alone', () => {
+    const doc = new CookieJar();
+    doc.jar.set('rm_nav_rail', '1');
+    doc.jar.set('rm_display', 'density=compact');
+    expect(readSingleKeys(doc)).toBe(true);
+    expect(writeSingleKeys(false, doc)).toBe(true);
+    expect(readSingleKeys(doc)).toBe(false);
+    expect(doc.jar.get('rm_display')).toBe('density=compact&keys=off');
+    expect(writeSingleKeys(true, doc)).toBe(true);
+    expect(readSingleKeys(doc)).toBe(true);
+    expect(doc.jar.get('rm_display')).toBe('density=compact');
+    expect(doc.jar.get('rm_nav_rail')).toBe('1');
+  });
+
+  it('is on, and writes nothing, without a document (the server)', () => {
     expect(readSingleKeys()).toBe(true);
-    expect(readSingleKeys(refusing)).toBe(true);
-  });
-
-  it('writes "1" / "0"', () => {
-    const s = new MemoryStorage();
-    writeSingleKeys(false, s);
-    expect(s.data.get('rm:keys:single')).toBe('0');
-    expect(readSingleKeys(s)).toBe(false);
-    writeSingleKeys(true, s);
-    expect(s.data.get('rm:keys:single')).toBe('1');
-    expect(readSingleKeys(s)).toBe(true);
+    expect(readSingleKeys(null)).toBe(true);
+    expect(writeSingleKeys(false)).toBe(false);
+    expect(writeSingleKeys(false, null)).toBe(false);
   });
 
   it('fires SINGLE_KEYS_EVENT on window once per write, after the write lands', () => {
     const target = new EventTarget();
     vi.stubGlobal('window', target);
-    const s = new MemoryStorage();
-    const seen: Array<{ type: string; isEvent: boolean; on: boolean }> = [];
-    target.addEventListener(SINGLE_KEYS_EVENT, (e) => seen.push({ type: e.type, isEvent: e instanceof Event, on: readSingleKeys(s) }));
-    writeSingleKeys(false, s);
-    writeSingleKeys(true, s);
+    const doc = new CookieJar();
+    const seen: Array<{ type: string; on: boolean }> = [];
+    target.addEventListener(SINGLE_KEYS_EVENT, (e) => seen.push({ type: e.type, on: readSingleKeys(doc) }));
+    writeSingleKeys(false, doc);
+    writeSingleKeys(true, doc);
     expect(seen).toEqual([
-      { type: 'rm:keys', isEvent: true, on: false },
-      { type: 'rm:keys', isEvent: true, on: true },
+      { type: 'rm:keys', on: false },
+      { type: 'rm:keys', on: true },
     ]);
   });
 
-  it('never throws without a window or with storage that refuses the write', () => {
-    expect(() => writeSingleKeys(false)).not.toThrow();
-    expect(() => writeSingleKeys(false, refusing)).not.toThrow();
-  });
-
-  it('fires nothing when the write did not land: no storage, storage that refuses it, or blocked site data', () => {
+  it('announces nothing when cookies are refused, so a listener that re-reads cannot undo the in-memory switch', () => {
     const target = new EventTarget();
     vi.stubGlobal('window', target);
-    let fired = 0;
-    target.addEventListener(SINGLE_KEYS_EVENT, () => fired++);
-    writeSingleKeys(false, null);
-    writeSingleKeys(false, refusing);
-    writeSingleKeys(false); // this window has no localStorage at all
-    expect(fired).toBe(0);
-    const dispatchEvent = vi.fn(() => true);
-    vi.stubGlobal('window', withBlockedStorage({ dispatchEvent }));
-    writeSingleKeys(false);
-    expect(dispatchEvent).not.toHaveBeenCalled();
+    const doc = new CookieJar();
+    doc.refuse = true;
+    let singleKeys = true;
+    target.addEventListener(SINGLE_KEYS_EVENT, () => {
+      singleKeys = readSingleKeys(doc);
+    });
+    singleKeys = false; // ShellFrame applies the value in memory first
+    expect(writeSingleKeys(false, doc)).toBe(false);
+    expect(singleKeys).toBe(false);
   });
 
-  it('lets a shell keep its in-memory switch when storage is blocked, though its listener re-reads storage', () => {
-    // ShellFrame's pattern: apply the value in memory, persist it, and re-read storage on SINGLE_KEYS_EVENT.
-    const win = withBlockedStorage(new EventTarget());
-    vi.stubGlobal('window', win);
-    let singleKeys = true;
-    win.addEventListener(SINGLE_KEYS_EVENT, () => {
-      singleKeys = readSingleKeys(safeStorage());
-    });
-    singleKeys = false;
-    writeSingleKeys(false, safeStorage());
-    expect(singleKeys).toBe(false);
+  it('never throws when reading or writing the cookie throws', () => {
+    const hostile = {
+      get cookie(): string {
+        throw new DOMException('The operation is insecure.', 'SecurityError');
+      },
+      set cookie(_v: string) {
+        throw new DOMException('The operation is insecure.', 'SecurityError');
+      },
+    };
+    expect(readSingleKeys(hostile)).toBe(true);
+    expect(() => writeSingleKeys(false, hostile)).not.toThrow();
+    expect(writeSingleKeys(false, hostile)).toBe(false);
   });
 });

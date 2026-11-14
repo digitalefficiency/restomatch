@@ -284,6 +284,17 @@ button.headBtn:hover {
   width: var(--rm-nav-glyph);
   height: var(--rm-nav-glyph);
 }
+/* DS3 two-tone (the current page): the filled copy sits under the line glyph at 18 %. */
+.duo {
+  display: grid;
+  place-items: center;
+}
+.duo > svg {
+  grid-area: 1 / 1;
+}
+.duoFill {
+  opacity: 0.18;
+}
 .lab {
   flex: 1;
   min-width: 0;
@@ -774,6 +785,9 @@ button.headBtn:hover {
   .gh.tile[aria-current]::before {
     content: none;
   }
+  .gh .duoFill {
+    display: none;
+  }
   .gh.tile[aria-current]:hover {
     background: rgb(var(--c-surface-2));
   }
@@ -874,6 +888,10 @@ button.headBtn:hover {
   .item[aria-current='page']::before,
   .tile[aria-current]::before {
     forced-color-adjust: none;
+  }
+  /* The outline marks the current page; a tinted fill would turn into a solid system-colour blot. */
+  .duoFill {
+    display: none;
   }
 }
 

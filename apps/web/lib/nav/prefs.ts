@@ -6,8 +6,9 @@ import type { GroupKey } from './types';
 /**
  * Per-device nav preferences (sidebar spec §7.1, §13). The rail lives in a
  * cookie so the server renders the sidebar at its final width (no shift), and
- * localStorage mirrors it. Group state, favourites and the single-key switch
- * are localStorage only: server-side pins would be a schema change.
+ * localStorage mirrors it. Group state and favourites are localStorage only:
+ * server-side pins would be a schema change. The single-key switch is DS3-06's
+ * display preference and lives in its `rm_display` cookie (see below).
  *
  * Storage access can throw (site data blocked, a full quota, some private
  * modes), and a nav preference must never break the page, so every storage
@@ -32,8 +33,19 @@ export const RAIL_STORAGE = 'rm:nav:rail';
  */
 export const GROUPS_STORAGE = 'rm:nav:groups';
 
-/** The "קיצורים בתו אחד" switch (`1` / `0`; missing = on). */
-export const SINGLE_KEYS_STORAGE = 'rm:keys:single';
+/**
+ * The "קיצורים בתו אחד" switch is one of DS3-06's per-device display
+ * preferences: the `rm_display` cookie, `key=value` pairs joined by `&`
+ * (`density=regular|compact`, `text=regular|large`, `keys=on|off`), explicit
+ * choices only, one year, path `/`, SameSite=Lax; other tabs re-read it on the
+ * `rm-display` BroadcastChannel (`lib/prefs/README.md` on
+ * claude/ds3-06-settings). Until that module is on main the shell reads and
+ * writes the `keys` pair with the same grammar and leaves the other pairs as
+ * they are; once it lands, `usePrefs()` takes over and these go.
+ */
+export const DISPLAY_COOKIE = 'rm_display';
+export const DISPLAY_CHANNEL = 'rm-display';
+export const DISPLAY_COOKIE_MAX_AGE = 31_536_000;
 
 /** Fired on `window` once `writeSingleKeys` has saved the switch, so mounted key handlers re-read it without a reload. */
 export const SINGLE_KEYS_EVENT = 'rm:keys';
@@ -106,34 +118,116 @@ export function writeFavourites(role: UserRole, keys: readonly string[], storage
   safeSet(storage, favouritesStorageKey(role), JSON.stringify(cleanKeys(keys)));
 }
 
-/**
- * Whether single-character shortcuts (`/`, `?`, `[`, the G chords) are on. On
- * unless the user turned them off (`0`): WCAG 2.1.4 asks for a way to turn
- * them off, because speech-input users trigger them by accident.
- */
-export function readSingleKeys(storage: StorageLike | null = safeStorage()): boolean {
-  return safeGet(storage, SINGLE_KEYS_STORAGE) !== '0';
+/** The slice of `document` the switch uses, so tests and callers can pass their own. */
+export type CookieDoc = { cookie: string };
+
+/** `document`, or null on the server. */
+export function safeDocument(): CookieDoc | null {
+  return typeof document === 'undefined' ? null : document;
+}
+
+interface DisplayPairs {
+  density?: 'regular' | 'compact';
+  text?: 'regular' | 'large';
+  keys?: 'on' | 'off';
+}
+
+/** The `rm_display` pairs in a cookie header; unknown keys and values are ignored (DS3-06 `parseDisplayChoices`). */
+function displayPairs(header: string | null | undefined): DisplayPairs {
+  const out: DisplayPairs = {};
+  if (!header) return out;
+  for (const part of header.split(';')) {
+    const i = part.indexOf('=');
+    if (i < 0 || part.slice(0, i).trim() !== DISPLAY_COOKIE) continue;
+    let value = part.slice(i + 1).trim();
+    try {
+      value = decodeURIComponent(value);
+    } catch {
+      /* a malformed escape: read the raw text */
+    }
+    for (const pair of value.split('&')) {
+      const j = pair.indexOf('=');
+      if (j < 1) continue;
+      const k = pair.slice(0, j).trim();
+      const v = pair.slice(j + 1).trim();
+      if (k === 'density' && (v === 'regular' || v === 'compact')) out.density = v;
+      else if (k === 'text' && (v === 'regular' || v === 'large')) out.text = v;
+      else if (k === 'keys' && (v === 'on' || v === 'off')) out.keys = v;
+    }
+    break;
+  }
+  return out;
 }
 
 /**
- * Persist the single-key switch (`1` / `0`), then, in a browser, fire
- * `SINGLE_KEYS_EVENT` on `window` so key handlers already mounted re-read it.
- * The event fires only after the write has landed. Listeners re-read storage,
- * so an event after a refused write (blocked site data, a full quota) would
- * hand them the old value and undo the switch the caller just applied in
- * memory: single-key shortcuts could then never be turned off on that device,
- * which is the off switch WCAG 2.1.4 asks for. With no event, the caller's
- * in-memory value holds for this page.
+ * Whether single-character shortcuts (`/`, `?`, `[`, the G chords) are on, from
+ * a cookie header. On unless the device chose `keys=off`: WCAG 2.1.4 asks for a
+ * way to turn them off, because speech-input users trigger them by accident.
  */
-export function writeSingleKeys(on: boolean, storage: StorageLike | null = safeStorage()): void {
-  if (!safeSet(storage, SINGLE_KEYS_STORAGE, on ? '1' : '0')) return;
+export function singleKeysFromCookie(header: string | null | undefined): boolean {
+  return displayPairs(header).keys !== 'off';
+}
+
+/**
+ * The `document.cookie` assignment that sets the switch and keeps the other
+ * display choices. On is the default, so it is not stored (DS3-06 `withChoice`);
+ * with nothing left the cookie is deleted. Pair order is fixed (density, text,
+ * keys), so equal choices give equal strings, as DS3-06 writes them.
+ */
+export function singleKeysCookie(header: string | null | undefined, on: boolean, secure = false): string {
+  const p = displayPairs(header);
+  if (on) delete p.keys;
+  else p.keys = 'off';
+  const parts: string[] = [];
+  if (p.density) parts.push(`density=${p.density}`);
+  if (p.text) parts.push(`text=${p.text}`);
+  if (p.keys) parts.push(`keys=${p.keys}`);
+  const value = parts.join('&');
+  const flags = `; path=/; samesite=lax${secure ? '; secure' : ''}`;
+  return value ? `${DISPLAY_COOKIE}=${value}; max-age=${DISPLAY_COOKIE_MAX_AGE}${flags}` : `${DISPLAY_COOKIE}=; max-age=0${flags}`;
+}
+
+/** The switch on this device; on when there is no document or reading it throws. */
+export function readSingleKeys(doc: CookieDoc | null = safeDocument()): boolean {
   try {
-    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-      window.dispatchEvent(new Event(SINGLE_KEYS_EVENT));
-    }
+    return singleKeysFromCookie(doc?.cookie);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Store the switch, then tell this tab (`SINGLE_KEYS_EVENT` on `window`) and
+ * the others (`rm-display` channel), as DS3-06's store does. Returns whether
+ * the write landed. When cookies are refused nothing is announced: listeners
+ * re-read the cookie, and an announcement would hand them the old value and
+ * undo the switch the caller already applied in memory (then single-key
+ * shortcuts could never be turned off on that device).
+ */
+export function writeSingleKeys(on: boolean, doc: CookieDoc | null = safeDocument()): boolean {
+  if (!doc) return false;
+  try {
+    const secure = typeof location !== 'undefined' && location.protocol === 'https:';
+    doc.cookie = singleKeysCookie(doc.cookie, on, secure);
+  } catch {
+    return false;
+  }
+  if (readSingleKeys(doc) !== on) return false;
+  try {
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') window.dispatchEvent(new Event(SINGLE_KEYS_EVENT));
   } catch {
     /* no event support (odd embeds): handlers pick the value up on the next read */
   }
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      const channel = new BroadcastChannel(DISPLAY_CHANNEL);
+      channel.postMessage('changed');
+      channel.close();
+    }
+  } catch {
+    /* no channel: other tabs catch up when they come back into view */
+  }
+  return true;
 }
 
 /**

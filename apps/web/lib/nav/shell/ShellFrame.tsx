@@ -6,13 +6,13 @@ import type { UserRole } from '@restomatch/db';
 import { cn } from '@/lib/components/cn';
 import { usePalette } from '@/lib/components/palette';
 import {
+  DISPLAY_CHANNEL,
   RAIL_STORAGE,
-  SINGLE_KEYS_EVENT,
-  SINGLE_KEYS_STORAGE,
   railCookie,
   readFavourites,
   readSingleKeys,
   safeStorage,
+  SINGLE_KEYS_EVENT,
   writeFavourites,
   writeSingleKeys,
 } from '../prefs';
@@ -162,22 +162,41 @@ export function ShellFrame({
             ? 'rail'
             : 'panel';
 
-  // Per-device preferences live in localStorage (spec §7.1, §13); read after hydration.
+  // Per-device preferences, read after hydration (spec §7.1, §13): favourites from localStorage; the
+  // single-key switch from DS3-06's display cookie, following other tabs (its channel) and tabs that come
+  // back into view, as DS3-06's store does.
   useEffect(() => {
-    const s = safeStorage();
-    setSingleKeysState(readSingleKeys(s));
-    setFavourites(readFavourites(role, s));
-    const sync = (e?: Event) => {
-      if (e instanceof StorageEvent && e.key !== SINGLE_KEYS_STORAGE) return;
-      setSingleKeysState(readSingleKeys(safeStorage()));
+    setFavourites(readFavourites(role, safeStorage()));
+    const sync = () => setSingleKeysState(readSingleKeys());
+    sync();
+    let channel: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        channel = new BroadcastChannel(DISPLAY_CHANNEL);
+        channel.onmessage = sync;
+      }
+    } catch {
+      channel = null;
+    }
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') sync();
     };
     window.addEventListener(SINGLE_KEYS_EVENT, sync);
-    window.addEventListener('storage', sync);
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       window.removeEventListener(SINGLE_KEYS_EVENT, sync);
-      window.removeEventListener('storage', sync);
+      document.removeEventListener('visibilitychange', onVisible);
+      try {
+        channel?.close();
+      } catch {
+        /* already closed */
+      }
     };
   }, [role]);
+  // DS3-06's DOM contract: key handlers outside React (the desk keys) read <html data-single-keys>.
+  useEffect(() => {
+    document.documentElement.dataset.singleKeys = singleKeys ? 'on' : 'off';
+  }, [singleKeys]);
 
   const closeOverlay = useCallback((opts?: { restoreFocus?: boolean }) => {
     setOverlayOpen((open) => {
@@ -250,7 +269,7 @@ export function ShellFrame({
 
   const setSingleKeys = useCallback((on: boolean) => {
     setSingleKeysState(on);
-    writeSingleKeys(on, safeStorage());
+    writeSingleKeys(on);
   }, []);
 
   const toggleFavourite = useCallback(

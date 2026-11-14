@@ -104,7 +104,8 @@ export function NavGroup({
         className={cn(css.gh, css.tile, fav && css.favHead, 'text-xs font-semibold leading-4')}
       >
         <span className={css.ic}>
-          <NavIcon icon={Glyph} />
+          {/* Two-tone on the rail tile that holds the page; the panel's folded header hides it (CSS). */}
+          <NavIcon icon={Glyph} duo={current} />
           {showDot ? <span aria-hidden="true" className={cn(css.railDot, DOT_CLASS[dot])} /> : null}
         </span>
         <span id={labId} className={css.lab}>
