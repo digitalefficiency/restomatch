@@ -19,10 +19,30 @@ export const FACTS = {
   checked: 35, // checked invoices (dashboard "13 מתוך 35")
   beerFrom: 520, // leak detective: beer keg baseline ₪520.00
   beerTo: 575, // last price ₪575.00 (+10.6%)
+  apprAmount: 104.8, // /dashboard/approvals top card: beer keg ST-24108, "ההפסד המוערך 104.80 ₪"
   chainLeakPct: '2.9%', // /dashboard/chain: worst branch (Jerusalem ₪975 of ₪33,056) — seed:chain-demo
   pilotTarget: '1.5%', // North Star / pilot target (docs/ICP.md, AGENTS.md)
 };
 export type Facts = typeof FACTS;
+
+/**
+ * The public site's ONE sample month (apps/web/app/(marketing)/_components/sampleMonth.ts on
+ * claude/ux-w3-06-marketing): every landing asset shows these, never the demo seed above.
+ * Shekels, ex-VAT. An illustration, labelled "דוגמה" — not a promise or a target.
+ */
+export const SAMPLE = {
+  purchasing: 150_000,
+  leakPct: 1.5,
+  leak: 2_250, // 150,000 × 1.5%
+  unpaid: 1_530, // "נתפסו לפני תשלום"
+  paid: 720,
+  checked: 35,
+  withGap: 13,
+  decide: { amount: 910, count: 2 }, // T2 "ממתין להחלטה שלך" (inside the unpaid part)
+  credit: { amount: 720, count: 3 }, // T2 credit requests to send (the paid part)
+  goodNews: 620, // unpaid − undecided
+  example: { amount: 104.8 }, // the 9:16 needs row "לדוגמה: בירה מהחבית · ₪104.80" (inside decide)
+};
 
 /** Override demo numbers at render time (input prop `facts`) — e.g. after the seed changes. */
 export const applyFacts = (over?: Partial<Facts>) => {
@@ -114,6 +134,26 @@ const he = {
     url: SITE,
   },
   loop: { chip: 'נתוני הדגמה' },
+  // portrait hero loop: partner wording toward suppliers — a credit *request*, not a demand
+  loopVertical: { held: 'ממתין להחלטה שלך:', claim: 'בקשת זיכוי לספק — בלחיצה' },
+  // the site's showcase wording for the sample month (showcase/overview messages on W3-06)
+  sample: {
+    eyebrow: 'דוגמה · דליפה שזוהתה · אוקטובר',
+    label: 'דליפה החודש',
+    pct: '{pct} מהקניות שנבדקו',
+    base: 'מתוך {amount} לפני מע״מ',
+    completeness: '{checked} חשבוניות נבדקו · {withGap} עם פער',
+    caught: 'נתפסו לפני תשלום',
+    needsTitle: 'מחכה לך',
+    decide: 'ממתין להחלטה שלך',
+    credit: 'בקשות זיכוי לשליחה',
+    gaps: '{count} פערים',
+    decideVerb: 'להחלטה',
+    creditVerb: 'שליחת המכתב',
+    example: 'לדוגמה: בירה מהחבית — חבית 30 ל׳',
+    goodNews: '{amount} כבר אושרו לקיזוז בתשלום',
+    title: 'לוח הבעלים',
+  },
 };
 
 const en: typeof he = {
@@ -193,6 +233,24 @@ const en: typeof he = {
     url: SITE,
   },
   loop: { chip: 'Demo data' },
+  loopVertical: { held: 'Awaiting your decision:', claim: 'Credit request to the supplier — one click' },
+  sample: {
+    eyebrow: 'Sample · leak found · October',
+    label: 'Leak this month',
+    pct: '{pct} of purchases checked',
+    base: 'of {amount} before VAT',
+    completeness: '{checked} invoices checked · {withGap} with a gap',
+    caught: 'Caught before payment',
+    needsTitle: 'Waiting for you',
+    decide: 'Awaiting your decision',
+    credit: 'Credit requests to send',
+    gaps: '{count} gaps',
+    decideVerb: 'Decide',
+    creditVerb: 'Send the letter',
+    example: 'e.g. Draft beer keg 30L',
+    goodNews: '{amount} already approved for offset at payment',
+    title: 'Owner dashboard',
+  },
 };
 
 export const COPY = { he, en };
