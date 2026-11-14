@@ -8,7 +8,8 @@ import { adaptReconciliation, type InvoiceLineRow, type PoLineRow } from '../_ad
 // The components are compiled with the classic JSX runtime in vitest (as in heatmap.test).
 (globalThis as unknown as { React?: typeof React }).React = React;
 // Loaded after the global exists (Reconciliation builds JSX at module level).
-const { AdjustQuantities } = await import('@/app/showcase/receiver/_steps/AdjustQuantities');
+// The count step is the dock count (DS3-05), which replaced the showcase's AdjustQuantities in the wizard.
+const { DockCount } = await import('../dock-count');
 const { Reconciliation } = await import('@/app/showcase/receiver/_steps/Reconciliation');
 
 /**
@@ -37,11 +38,12 @@ const WRITE_IDS = ['count-arrived', 'count-edit', 'close-receipt', 'all-arrived'
 function count(readOnly?: boolean): string {
   const { result, initialMarks } = adaptReconciliation({ po, poLines, receiptLines: [], invoiceLines: [] });
   return renderToStaticMarkup(
-    createElement(AdjustQuantities, {
+    createElement(DockCount, {
       result,
       marks: initialMarks,
       onUpdateMark: () => undefined,
       onSubmit: () => undefined,
+      supplierName: 'ספק',
       ...(readOnly === undefined ? {} : { readOnly }),
     }),
   );
@@ -90,7 +92,7 @@ describe('ReceivingWizard readOnly — wiring (source guard)', () => {
   it('defaults to false and reaches both screens', () => {
     expect(src).toMatch(/readOnly = false,\n\}: \{/);
     expect(src).toMatch(/<Reconciliation[\s\S]*?readOnly=\{readOnly\}/);
-    expect(src).toMatch(/<AdjustQuantities[\s\S]*?readOnly=\{readOnly\}/);
+    expect(src).toMatch(/<DockCount[\s\S]*?readOnly=\{readOnly\}/);
   });
   it('no photo, no receipt started, no mark, no close, no dock slip when read-only', () => {
     expect(src).toContain("{step === 'SCAN_INVOICE' && !readOnly ? (");

@@ -3,10 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { Camera, Check, FileScan, FileWarning, Info, Loader2, RefreshCw, Scale } from 'lucide-react';
+import { Check, FileScan, FileWarning, Info, Loader2, RefreshCw, Scale } from 'lucide-react';
 
-import { AdjustQuantities, type LineSaveUi } from '@/app/showcase/receiver/_steps/AdjustQuantities';
-import { Confirmed } from '@/app/showcase/receiver/_steps/Confirmed';
+import type { LineSaveUi } from '@/app/showcase/receiver/_steps/AdjustQuantities';
 import { InvoiceScan } from '@/app/showcase/receiver/_steps/InvoiceScan';
 import { Reconciliation } from '@/app/showcase/receiver/_steps/Reconciliation';
 import { StepHeader } from '@/app/showcase/receiver/_steps/SupplierSelect';
@@ -53,6 +52,10 @@ import { clearCloseKey, closeKeyFor, uncountedLinesOf } from './_closeKey';
 import { SUBMIT_RECEIPT_KIND, receiptGroup, type SubmitReceiptPayload } from '@/lib/pwa/fieldOutbox';
 import { enqueue, idbOutboxStore, outboxKey } from '@/lib/pwa/outbox';
 import { ReceiptSummary } from './receipt-summary';
+import { dockGaps } from './_dock';
+import type { DocState } from './dock-close-sheet';
+import { DockCount } from './dock-count';
+import { DockDone } from './dock-done';
 
 // The slip is only needed once there is something to dispute: keep it out of the first load.
 const DockSlip = dynamic(() => import('./dock-slip').then((m) => m.DockSlip), { ssr: false });
@@ -111,6 +114,7 @@ export function ReceivingWizard({
   tolerance,
   showMoney = false,
   receiverName = null,
+  countFirst = false,
   readOnly = false,
 }: {
   po: PoForClient;
@@ -132,6 +136,13 @@ export function ReceivingWizard({
   /** Who is receiving (the signed-in person) — shown on the confirmation. */
   receiverName?: string | null;
   /**
+   * Flag `dockCountFirst` (DS3-05, an open owner decision, off by default): the
+   * count comes first — a fresh order opens on it, the quantity sheet opens
+   * empty, the document is photographed after the count (and never read on
+   * screen while counting). Off: today's order of steps, unchanged.
+   */
+  countFirst?: boolean;
+  /**
    * View only (IA-03: routeAccess(role, path) === 'read'). Every line, count and
    * invoice comparison stays visible; no photo, no receipt is started, no mark is
    * saved, no close, no dock slip. Default false: nothing changes for callers.
@@ -151,10 +162,27 @@ export function ReceivingWizard({
   const draftKey = `rm-rcv-draft:${storeKey}`;
 
   const closedAtOpen = existingReceipt && isClosed(existingReceipt.status) ? existingReceipt : null;
+  // Flag dockCountFirst: a fresh order opens on the count itself, built from the order alone. No
+  // receipt yet: it starts on the receiver's first real action (a mark, the photo, the close).
+  const [countFirstStart] = useState(() =>
+    countFirst && !existingReceipt && !readOnly
+      ? adaptReconciliation({
+          po: { id: po.id, supplierId: po.supplierId, supplierName: po.supplierName, expectedAt: po.expectedAt, status: po.status, totalEstimated: po.totalEstimated },
+          poLines: localizePoLines(po.lines, localNames ?? {}),
+          receiptLines: [],
+          invoiceLines: [],
+          invoiceMeta: null,
+          labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
+        })
+      : null,
+  );
   const [step, setStep] = useState<Step>(
-    closedAtOpen ? 'SUMMARY' : existingReceipt ? 'RESUMING' : 'SCAN_INVOICE',
+    closedAtOpen ? 'SUMMARY' : existingReceipt ? 'RESUMING' : countFirstStart ? 'ADJUST_QUANTITIES' : 'SCAN_INVOICE',
   );
   const [grId, setGrId] = useState<string | null>(existingReceipt?.id ?? null);
+  /** The receipt id as of now (a lazily started receipt is known before the next render). */
+  const grIdRef = useRef(grId);
+  grIdRef.current = grId ?? grIdRef.current;
   /** The receipt's version as loaded now (changes only on close / reopen). */
   const [receiptVersion, setReceiptVersion] = useState<string | null>(closedAtOpen ? null : (existingReceipt?.version ?? null));
   const stampRef = useRef<RowStamp | null>(null);
@@ -184,8 +212,10 @@ export function ReceivingWizard({
   /** Lines the receiver changed by hand — kept when the review is rebuilt, never reset to the invoice. */
   const adjustedKeysRef = useRef(new Set<string>());
   const [image, setImage] = useState<CapturedImage | null>(null);
-  const [result, setResult] = useState<ReconciliationResult | null>(null);
-  const [marks, setMarksState] = useState<Record<string, LineMark>>({});
+  const [result, setResult] = useState<ReconciliationResult | null>(countFirstStart?.result ?? null);
+  const [marks, setMarksState] = useState<Record<string, LineMark>>(countFirstStart?.initialMarks ?? {});
+  /** "צילום המסמך וסגירה": once the photo is in (or kept on the phone), the receipt closes. */
+  const [closeAfterPhoto, setCloseAfterPhoto] = useState(false);
   const marksRef = useRef(marks);
   const [grLineIdByKey, setGrLineIdByKeyState] = useState<Record<string, string>>({});
   const grLineIdByKeyRef = useRef(grLineIdByKey);
@@ -385,6 +415,95 @@ export function ReceivingWizard({
     return r.receiptId;
   }
 
+  /** Count first: marks made before the receipt exists, kept on this phone until it does. */
+  const preCountKey = `rm-rcv-precount:${storeKey}`;
+  function writePreCount(next: Record<string, LineMark> | null) {
+    try {
+      if (next && Object.keys(next).length > 0) window.localStorage.setItem(preCountKey, JSON.stringify(next));
+      else window.localStorage.removeItem(preCountKey);
+    } catch {
+      /* private mode: the marks stay on screen; they are sent once the receipt starts */
+    }
+  }
+  // A reload before the receipt could start (no signal at the first mark): the marks come back, and it starts.
+  useEffect(() => {
+    if (!countFirstStart) return;
+    let saved: Record<string, LineMark> = {};
+    try {
+      saved = JSON.parse(window.localStorage.getItem(preCountKey) ?? '{}') as Record<string, LineMark>;
+    } catch {
+      saved = {};
+    }
+    const keys = Object.keys(saved).filter((k) => marksRef.current[k]);
+    if (keys.length === 0) return;
+    const next = { ...marksRef.current };
+    for (const k of keys) {
+      next[k] = { ...next[k]!, ...saved[k]! };
+      adjustedKeysRef.current.add(k);
+    }
+    setMarks(next);
+    setResumed(true);
+    void startCountReceipt();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // The signal is back with marks still waiting for their receipt: start it now.
+  useEffect(() => {
+    if (!countFirst) return;
+    const onOnline = () => {
+      if (adjustedKeysRef.current.size > 0 && Object.keys(grLineIdByKeyRef.current).length === 0) void startCountReceipt();
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [countFirst]);
+
+  /**
+   * Flag dockCountFirst: the receipt starts on the receiver's first real action, never on page
+   * view. Then the marks made before it existed are sent (the line outbox keeps them through a
+   * lost signal). Failing to start (no signal, expired session) keeps every mark on screen and
+   * says so by the close; the next action tries again. Resolves to the receipt id, or null.
+   */
+  const startingRef = useRef<Promise<string | null> | null>(null);
+  function startCountReceipt(): Promise<string | null> {
+    // Known with its lines: nothing to do. (The photo queue may have started it without them.)
+    if (grIdRef.current && Object.keys(grLineIdByKeyRef.current).length > 0) return Promise.resolve(grIdRef.current);
+    if (startingRef.current) return startingRef.current;
+    const run = (async () => {
+      try {
+        const id = grIdRef.current ?? (await ensureReceipt(null));
+        grIdRef.current = id;
+        const receipt = await loadReceipt(id);
+        noteVersion(id, receipt.updatedAt);
+        const adapted = adaptReconciliation({
+          po: { id: po.id, supplierId: po.supplierId, supplierName: po.supplierName, expectedAt: po.expectedAt, status: po.status, totalEstimated: po.totalEstimated },
+          poLines: localizePoLines(poLines, localNamesRef.current),
+          receiptLines: localizeReceiptLines(receipt.lines, localNamesRef.current),
+          invoiceLines: [],
+          invoiceMeta: null,
+          labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
+        });
+        setGrLineIdByKey(adapted.grLineIdByKey);
+        for (const key of adjustedKeysRef.current) {
+          const grLineId = adapted.grLineIdByKey[key];
+          const m = marksRef.current[key];
+          if (grLineId && m) outbox.set({ ...payloadFor(grLineId, m), ...(stampRef.current ? { stamp: stampRef.current } : {}) });
+        }
+        writePreCount(null); // the line outbox holds them now
+        setFooterError(null);
+        return id;
+      } catch (err) {
+        const expired = isSessionExpired(err);
+        if (expired) requestReauth();
+        setFooterError(td(expired ? 'delivery.count.sessionExpired' : 'delivery.count.offline'));
+        return null;
+      } finally {
+        startingRef.current = null;
+      }
+    })();
+    startingRef.current = run;
+    return run;
+  }
+
   /** After capture: register the invoice for OCR, then poll until parsed. */
   const onCapture = useCallback(
     async (captured: CapturedImage) => {
@@ -394,6 +513,30 @@ export function ReceivingWizard({
       setImage(captured);
       setError(null);
       setRegisterRetry(null);
+
+      // Flag dockCountFirst: the document comes after the count. It is registered for reading
+      // (or kept on the phone until it can upload) and the receiver goes straight back to the
+      // count: no wait, no invoice review — the count stays blind, the engine reads it after the close.
+      if (countFirst) {
+        try {
+          if (captured.publicUrl) {
+            const activeGrId = await startCountReceipt();
+            if (!activeGrId) throw new Error('no receipt');
+            const reg = await registerInvoice.mutateAsync({ grId: activeGrId, imageUrl: captured.publicUrl, supplierId: po.supplierId });
+            setInvoiceId(reg.invoiceId);
+          } else if (offlineQueue && captured.invoiceId?.startsWith('queued-')) {
+            setNotice(tIngest('pwa.savedOffline'));
+          }
+          setStep('ADJUST_QUANTITIES');
+        } catch {
+          const failed = onRegisterError(captured);
+          setRegisterRetry(failed.retry);
+          setStep(failed.step);
+        } finally {
+          capturingRef.current = false;
+        }
+        return;
+      }
 
       // Without an uploaded URL we cannot register/OCR.
       if (!captured.publicUrl) {
@@ -435,8 +578,16 @@ export function ReceivingWizard({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [grId, po.id, po.supplierId, locale, offlineQueue],
+    [grId, po.id, po.supplierId, locale, offlineQueue, countFirst],
   );
+
+  // "צילום המסמך וסגירה": back on the count with the photo in (or kept on the phone) → close.
+  useEffect(() => {
+    if (!closeAfterPhoto || step !== 'ADJUST_QUANTITIES' || capturingRef.current) return;
+    setCloseAfterPhoto(false);
+    void submit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeAfterPhoto, step, invoiceId, image]);
 
   /** A registered invoice: poll until OCR read it, then the review (or the order-only count). */
   async function pollAndShow(activeGrId: string, id: string) {
@@ -478,6 +629,11 @@ export function ReceivingWizard({
       setGrId(d.grId);
       setInvoiceId(d.invoiceId);
       setNotice(null);
+      if (countFirst) {
+        // Counted blind: the engine reads it after the close. The queue may have started the receipt: attach the count to it.
+        if (adjustedKeysRef.current.size > 0) void startCountReceipt();
+        return;
+      }
       setOcrNotice('reading');
       const token = ++pollTokenRef.current;
       watchInBackground(d.invoiceId, token).catch(() => null);
@@ -697,11 +853,16 @@ export function ReceivingWizard({
         }
       }
       if (!serverProgress && !knownInvoice && outbox.pendingCount() === 0 && !draft) {
-        setStep('SCAN_INVOICE');
+        // Count first: the count is the first screen, receipt or not.
+        if (countFirst) await buildFromPoOnly(existingReceipt.id);
+        else setStep('SCAN_INVOICE');
         return;
       }
       setResumed(true);
-      if (knownInvoice) {
+      if (knownInvoice && countFirst) {
+        // Counted blind: the photographed invoice is kept for the close, never shown while counting.
+        setInvoiceId(knownInvoice);
+      } else if (knownInvoice) {
         setInvoiceId(knownInvoice);
         try {
           const inv = await utils.receiving.getInvoice.fetch({ invoiceId: knownInvoice });
@@ -742,6 +903,11 @@ export function ReceivingWizard({
     setFooterError(null);
     const grLineId = grLineIdByKeyRef.current[key];
     if (grLineId) outbox.set({ ...payloadFor(grLineId, nextMark), ...(stampRef.current ? { stamp: stampRef.current } : {}) });
+    else if (countFirst && Object.keys(grLineIdByKeyRef.current).length === 0) {
+      // No receipt yet: keep the count on the phone, start the receipt; it sends this mark once it exists.
+      writePreCount(Object.fromEntries(Object.entries(marksRef.current).filter(([, m]) => m.touched)));
+      void startCountReceipt();
+    }
     else {
       // Invoice-only line: no gr_line exists — keep it on the device so a reload restores it.
       const local = readLocalMarks(localMarksKey, stampRef.current);
@@ -773,13 +939,13 @@ export function ReceivingWizard({
   }
 
   /** Put the close in the field outbox (offline) and show it as closed on the phone, waiting to send. */
-  async function queueClose(activeGrId: string) {
+  async function queueClose(activeGrId: string, version: string | null) {
     await enqueue(
       idbOutboxStore,
       'submitReceipt',
       {
         grId: activeGrId,
-        clientMutationId: closeKeyFor(activeGrId, receiptVersion),
+        clientMutationId: closeKeyFor(activeGrId, version),
         invoiceIds: invoiceId ? [invoiceId] : undefined,
       } satisfies SubmitReceiptPayload,
       { restaurantId: restaurantId!, userId: userId!, capturedByName: receiverName ?? null, group: receiptGroup(activeGrId) },
@@ -793,8 +959,17 @@ export function ReceivingWizard({
   }
 
   /** Close the receipt: every line is already saved (or flushed now); then submitReceipt re-matches. */
-  async function submit() {
+  async function submit(started: string | null = null) {
+    // Count first: the receipt starts on the first action; a close before it exists starts it now.
+    if (countFirst && !started && (!grIdRef.current || Object.keys(grLineIdByKeyRef.current).length === 0) && !readOnly && result) {
+      const id = await startCountReceipt();
+      if (id) await submit(id);
+      return;
+    }
+    const grId = started ?? grIdRef.current;
     if (readOnly || !grId || !result) return;
+    // This open/close cycle's version as of now (a receipt started a moment ago is not in state yet).
+    const version = stampRef.current?.grId === grId ? stampRef.current.version : receiptVersion;
     // Double-tap on "close receipt" must not submit twice.
     if (submittingRef.current) return;
     submittingRef.current = true;
@@ -811,7 +986,7 @@ export function ReceivingWizard({
         } else if (restaurantId && userId && flushed.failed.length === 0) {
           // No signal (W2-05): the close waits in the field outbox behind this receipt's counts and
           // goes by itself — the same close key, so it is ONE close however often it is retried.
-          await queueClose(grId);
+          await queueClose(grId, version);
         } else setFooterError(td('delivery.count.offline'));
         return;
       }
@@ -827,12 +1002,12 @@ export function ReceivingWizard({
         invoiceIds: invoiceId ? [invoiceId] : undefined,
         // ONE close per intent (W2-05): a retry after a lost answer, a reload or a
         // double tap replays the same close — one close, one re-match.
-        clientMutationId: closeKeyFor(grId, receiptVersion),
+        clientMutationId: closeKeyFor(grId, version),
       });
       setConfirmedAt(new Date().toISOString());
       setStep('CONFIRMED');
       writeDraft(draftKey, null);
-      clearCloseKey(grId, receiptVersion);
+      clearCloseKey(grId, version);
       // Closed: nothing left to send or restore for this receipt.
       outbox.clear();
       writeLocalMarks(localMarksKey, null);
@@ -895,6 +1070,8 @@ export function ReceivingWizard({
   }, [closedAtOpen]);
 
   const exceptions = result ? result.lines.filter((l) => lineIssues(l, marks[lineKey(l)]).length > 0).length : 0;
+  // Registered for reading, or kept on the phone until it can upload (S13), or not photographed.
+  const docState: DocState = invoiceId ? 'done' : image?.invoiceId?.startsWith('queued-') ? 'queued' : 'none';
 
   return (
     <div
@@ -973,7 +1150,13 @@ export function ReceivingWizard({
           image={image}
           uploadFile={restaurantId ? authedUpload : undefined}
           onCapture={(img) => void onCapture(img)}
-          onNoInvoice={() => void buildFromPoOnly(grId)}
+          onNoInvoice={() => {
+            // Count first: back to the count (marks kept), and no close waiting on a photo.
+            if (countFirst && result) {
+              setCloseAfterPhoto(false);
+              setStep('ADJUST_QUANTITIES');
+            } else void buildFromPoOnly(grId);
+          }}
         />
       ) : null}
 
@@ -1068,60 +1251,58 @@ export function ReceivingWizard({
               locale={locale}
             />
           ) : null}
-          {result.invoiceMeta.noInvoice && !invoiceId && !image && !readOnly ? (
-            // The invoice can still be photographed: marks are kept (count first, invoice in parallel — RCV-05).
-            <div className="mb-3 flex justify-end" dir={dir}>
-              <button
-                type="button"
-                onClick={() => setStep('SCAN_INVOICE')}
-                className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-line-strong bg-surface px-4 text-base font-semibold text-ink"
-                data-testid="count-scan-invoice"
-              >
-                <Camera className="h-5 w-5" aria-hidden="true" />
-                {t('steps.scan.capture')}
-              </button>
-            </div>
-          ) : null}
-          <AdjustQuantities
+          <DockCount
             result={result}
             marks={marks}
             onUpdateMark={updateMark}
-            readOnly={readOnly}
             onSubmit={() => void submit()}
             onBack={result.invoiceMeta.noInvoice ? undefined : () => setStep('RECONCILIATION_REVIEW')}
-            eyebrow={supplierLabel}
+            supplierName={supplierLabel}
             saveStates={saveStates}
             onRetrySave={() => void outbox.retry()}
             tolerance={tolerance}
             resumed={resumed}
             closing={closing}
             footerMessage={footerError}
+            countFirst={countFirst}
+            doc={docState}
+            // The document can still be photographed: marks are kept (count first, invoice in parallel — RCV-05).
+            onPhoto={
+              (countFirst ? docState === 'none' : result.invoiceMeta.noInvoice && !invoiceId && !image) && !readOnly
+                ? (opts) => {
+                    setCloseAfterPhoto(Boolean(countFirst && opts?.closeAfter));
+                    setStep('SCAN_INVOICE');
+                  }
+                : undefined
+            }
+            readOnly={readOnly}
           />
         </>
       ) : null}
 
       {step === 'CONFIRMED' ? (
-        <Confirmed
+        <DockDone
           supplierName={supplierLabel}
           result={result}
           confirmedAt={confirmedAt}
           // The invoice page and the scan are full of ₪: no link for the receiver / chef (owner decision).
           capturedImage={showMoney ? image : null}
-          exceptions={exceptions}
           invoiceHref={showMoney && invoiceId ? `/dashboard/invoices/${invoiceId}` : null}
+          invoiceNumber={result && !result.invoiceMeta.noInvoice ? result.invoiceMeta.invoiceNumber || null : null}
           amount={showMoney && exceptions > 0 && !dockSlipOn ? td('delivery.confirmed.amountPending') : null}
           receivedBy={receiverName}
           bulkCount={Object.values(marks).filter((m) => m.touched && m.method === 'bulk_as_ordered').length}
+          gaps={dockGaps(result, marks, tolerance)}
+          doc={docState}
+          countFirst={countFirst}
+          closeQueued={closeQueued}
           resetLabel={next?.label ?? t('steps.confirmed.backToInbox')}
           onReset={() => router.push(next ? `/dashboard/receiving/${next.poId}` : '/dashboard/receiving')}
+          listLabel={next ? t('steps.confirmed.backToInbox') : undefined}
+          onList={next ? () => router.push('/dashboard/receiving') : undefined}
         >
           {/* After the close the engine may add findings the count didn't show (VAT,
               total, duplicate): the slip decides itself whether there is anything to say. */}
-          {closeQueued ? (
-            <p role="status" data-testid="close-queued" className="mx-auto mt-3 max-w-md rounded-2xl border border-line bg-surface-2 px-4 py-3 text-base text-ink">
-              {td('delivery.confirmed.queued')}
-            </p>
-          ) : null}
           {result && dockSlipOn && grId && !closeQueued ? (
             <DockSlip
               grId={grId}
@@ -1133,7 +1314,7 @@ export function ReceivingWizard({
               showMoney={showMoney}
             />
           ) : null}
-        </Confirmed>
+        </DockDone>
       ) : null}
 
       <LeaveSheet
