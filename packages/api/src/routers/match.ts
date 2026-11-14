@@ -1,10 +1,12 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { lockRecovery, releaseClaimsForRematch } from '../recovery/service';
+import { rebindDecidedClaims } from '../approvals/rebind'; // W2-04 rebind
 import { and, desc, eq, goodsReceipts, invoiceLines, invoices, matchRuns, restaurants, sql } from '@restomatch/db';
 import { holdForReceipt, receiptStillOpen, scanOwnerReceipt } from '../receiving/matchTriggers';
 import { runMatch, type MatchStatus } from '@restomatch/matching';
-import { managerProcedure, router } from '../trpc';
+import { can, router } from '../trpc';
+import { invoiceStateOf } from '../invoices/state';
 import { assertInvoiceOwned } from '../tenant';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 import { readConsolidatedRaw } from '../match/consolidated';
@@ -25,7 +27,15 @@ export interface RunForInvoiceResult {
   poMatched: boolean;
   /** Why it was held: its receipt is still being counted, or (a possible duplicate) it waits for review. */
   held?: 'receipt_open' | 'awaiting_review';
+  /**
+   * The invoice's gap (G-05 `leakIls`, the register's and hero's figure) before
+   * and after this run, integer agorot — the cockpit's "₪ לפני → אחרי" (W2-02).
+   */
+  before: number;
+  after: number;
 }
+
+const agorotOf = (ils: number | undefined) => Math.round((ils ?? 0) * 100);
 
 /**
  * On-demand 3-way match for an invoice — the interactive counterpart to the
@@ -37,7 +47,8 @@ export interface RunForInvoiceResult {
  * to the findings that still exist.
  */
 export const matchRouter = router({
-  runForInvoice: managerProcedure
+  // W2-02: the bookkeeper corrects OCR and re-matches — capability, not a role list.
+  runForInvoice: can('invoice.correct')
     .input(z.object({ invoiceId: z.string().uuid() }))
     .mutation(async ({ ctx, input }): Promise<RunForInvoiceResult> => {
       const { restaurantId } = ctx.session;
@@ -73,10 +84,13 @@ export const matchRouter = router({
         });
       }
 
+      // The cockpit's "₪ לפני → אחרי": the invoice's gap before this run (W2-02).
+      const before = agorotOf((await invoiceStateOf(ctx.db, restaurantId, input.invoiceId))?.leakIls);
+
       // Nothing to match: say so before any order / receipt check.
       const [anyLine] = await ctx.db.select({ id: invoiceLines.id }).from(invoiceLines).where(eq(invoiceLines.invoiceId, input.invoiceId)).limit(1);
       if (!anyLine) {
-        return { matchRunId: null, status: 'clean', totalDiscrepancyAmount: 0, leakIls: 0, discrepancyCount: 0, poMatched: false };
+        return { matchRunId: null, status: 'clean', totalDiscrepancyAmount: 0, leakIls: 0, discrepancyCount: 0, poMatched: false, before, after: before };
       }
 
       // S2 receipt hold — the scan's receipt (the stamp, else a photo held for
@@ -150,7 +164,8 @@ export const matchRouter = router({
           // otherwise fail on the claim's FK and leave the stale ₪ (round 7).
           await releaseClaimsForRematch(ctx.db, restaurantId, input.invoiceId);
           const held = await holdForReceipt(ctx.db, restaurantId, input.invoiceId, landedGrId);
-          return { matchRunId: null, status: 'held', totalDiscrepancyAmount: 0, leakIls: 0, discrepancyCount: 0, poMatched: built?.poId != null, held };
+          const after = agorotOf((await invoiceStateOf(ctx.db, restaurantId, input.invoiceId))?.leakIls);
+          return { matchRunId: null, status: 'held', totalDiscrepancyAmount: 0, leakIls: 0, discrepancyCount: 0, poMatched: built?.poId != null, held, before, after };
         }
       }
       if (!built) {
@@ -161,6 +176,8 @@ export const matchRouter = router({
           leakIls: 0,
           discrepancyCount: 0,
           poMatched: false,
+          before,
+          after: before,
         };
       }
 
@@ -191,6 +208,9 @@ export const matchRouter = router({
         rules,
         priorDecisions,
       );
+      // W2-04 rebind: the claims released above come back for the re-applied
+      // accepted decisions, under their ORIGINAL decider (shared with the worker).
+      await rebindDecidedClaims(ctx.db, restaurantId, persisted.matchRunId);
       // G-08 hold: a matched invoice no longer waits for an order — drop a stale marker;
       // and (round 10) its order pin follows THIS run's order (none → no pin).
       await ctx.db.execute(sql`
@@ -208,6 +228,8 @@ export const matchRouter = router({
         leakIls: persisted.leakIls,
         discrepancyCount: persisted.discrepancyCount,
         poMatched: built.poId != null,
+        before,
+        after: agorotOf((await invoiceStateOf(ctx.db, restaurantId, input.invoiceId))?.leakIls),
       };
     }),
 });

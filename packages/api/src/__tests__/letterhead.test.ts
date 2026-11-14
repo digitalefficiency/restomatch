@@ -81,7 +81,9 @@ describe('settings.updateLetterhead / settings.letterhead', () => {
     const rows = await db
       .select()
       .from(auditLog)
-      .where(and(eq(auditLog.restaurantId, A.restaurantId), eq(auditLog.action, 'settings.letterhead_updated')));
+      .where(and(eq(auditLog.restaurantId, A.restaurantId), eq(auditLog.action, 'settings.letterhead_updated')))
+      // Oldest first, so at(-1) is the latest update: without an ORDER BY, Postgres may return either row last.
+      .orderBy(auditLog.at, auditLog.id);
     const last = rows.at(-1)!;
     expect(last.before).toEqual({ legalName: 'לפני' });
     expect(last.after).toEqual({ legalName: 'אחרי' });

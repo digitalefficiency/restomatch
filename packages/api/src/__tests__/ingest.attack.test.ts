@@ -693,3 +693,88 @@ describe('rotateChannel keeps the WhatsApp number binding (regression)', () => {
     tokens.aWa = r.token;
   });
 });
+
+/* ── W2-02 (add-only): intake preview, bulk approve and the capability tier ── */
+describe('W2-02 intake: documentPreview / bulkApprove / approve tier (A → B)', () => {
+  const callerOf = (t: Tenant, role: 'owner' | 'manager' | 'bookkeeper' | 'receiver' | 'chef' = 'owner') =>
+    appRouter.createCaller({ db: appDb, session: { userId: t.ownerUserId, restaurantId: t.restaurantId, role } });
+
+  async function needsReviewDoc(t: Tenant, tag: string) {
+    await ownerDb
+      .update(restaurants)
+      .set({ settings: { features: { ingestWhatsapp: true, ingestEmail: true } } as never })
+      .where(eq(restaurants.id, t.restaurantId));
+    const [ch] = await ownerDb
+      .insert(ingestChannels)
+      .values({ restaurantId: t.restaurantId, kind: 'email', tokenHash: `w202${tag}`.padEnd(64, '0'), tokenHint: 'w202', active: false })
+      .returning();
+    const [msg] = await ownerDb
+      .insert(ingestMessages)
+      .values({
+        restaurantId: t.restaurantId,
+        channelId: ch!.id,
+        kind: 'email',
+        provider: 'stub',
+        providerMessageId: `w202-${tag}-${Date.now()}`,
+        sender: `stranger-${tag}@x.test`,
+        senderAllowed: false,
+        subject: `w202 ${tag}`,
+        status: 'needs_review',
+      })
+      .returning();
+    const [doc] = await ownerDb
+      .insert(ingestDocuments)
+      .values({
+        restaurantId: t.restaurantId,
+        messageId: msg!.id,
+        filename: `${tag}.pdf`,
+        mimeType: 'application/pdf',
+        storagePath: `${t.restaurantId}/scan-w202${tag}-00000000.pdf`,
+        status: 'needs_review',
+      })
+      .returning();
+    return doc!.id;
+  }
+
+  it("documentPreview: B's document id → NOT_FOUND and no URL", async () => {
+    const bDoc = await needsReviewDoc(B, 'pb');
+    await expect(callerOf(A).ingest.documentPreview({ documentId: bDoc })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('documentPreview: own document answers its kind; the URL (if any) is never stored', async () => {
+    const aDoc = await needsReviewDoc(A, 'pa');
+    const p = await callerOf(A, 'bookkeeper').ingest.documentPreview({ documentId: aDoc });
+    expect(p.kind).toBe('pdf');
+    if (p.url) expect(p.expiresInSec).toBeLessThanOrEqual(60);
+    const [row] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.id, aDoc));
+    expect(JSON.stringify(row)).not.toMatch(/token=|\/sign\//);
+  });
+
+  it('documentPreview / approve: receiver and chef are refused', async () => {
+    const aDoc = await needsReviewDoc(A, 'pr');
+    for (const role of ['receiver', 'chef'] as const) {
+      await expect(callerOf(A, role).ingest.documentPreview({ documentId: aDoc })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(callerOf(A, role).ingest.bulkApprove({ documentIds: [aDoc] })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(callerOf(A, role).ingest.rejectDocument({ documentId: aDoc })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+  });
+
+  it("bulkApprove: a batch holding B's id → NOT_FOUND, nothing of A or B registered", async () => {
+    const aDoc = await needsReviewDoc(A, 'ba');
+    const bDoc = await needsReviewDoc(B, 'bb');
+    const before = await ownerDb.select({ n: sql<number>`count(*)::int` }).from(invoices);
+    await expect(callerOf(A).ingest.bulkApprove({ documentIds: [aDoc, bDoc] })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const after = await ownerDb.select({ n: sql<number>`count(*)::int` }).from(invoices);
+    expect(after[0]!.n).toBe(before[0]!.n);
+    const [b] = await ownerDb.select({ status: ingestDocuments.status }).from(ingestDocuments).where(eq(ingestDocuments.id, bDoc));
+    expect(b!.status).toBe('needs_review');
+  });
+
+  it('the bookkeeper approves and rejects intake (capability intake.approve)', async () => {
+    const one = await needsReviewDoc(A, 'k1');
+    const two = await needsReviewDoc(A, 'k2');
+    const r = await callerOf(A, 'bookkeeper').ingest.bulkApprove({ documentIds: [one] });
+    expect(r.invoiceIds).toHaveLength(1);
+    await expect(callerOf(A, 'bookkeeper').ingest.rejectDocument({ documentId: two })).resolves.toEqual({ rejected: true });
+  });
+});

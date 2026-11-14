@@ -13,6 +13,7 @@ import {
   Field,
   Input,
   LinkButton,
+  Money,
   SectionHeader,
   Select,
   cn,
@@ -35,12 +36,23 @@ import { contractFileErrorKey, todayIso } from '../logic';
 type Outputs = inferRouterOutputs<AppRouter>;
 type Preview = Outputs['contracts']['importPreview'];
 type CommitResult = Outputs['contracts']['importCommit'];
+type Diff = Outputs['contracts']['importDiff'];
+type DiffChip = Diff['rows'][number]['chip'];
 type Mapping = Preview['mapping'];
 type FileInput = { filename: string; base64?: string; text?: string };
 
-type Step = 'SUPPLIER' | 'UPLOAD' | 'MAP' | 'DONE';
-const ORDER: Step[] = ['SUPPLIER', 'UPLOAD', 'MAP', 'DONE'];
-const STEP_KEY = { SUPPLIER: 'supplier', UPLOAD: 'upload', MAP: 'map', DONE: 'done' } as const;
+type Step = 'SOURCE' | 'MAP' | 'REVIEW' | 'DONE';
+const ORDER: Step[] = ['SOURCE', 'MAP', 'REVIEW', 'DONE'];
+const STEP_LABEL = { SOURCE: 'import.sourceStep', MAP: 'import.steps.map', REVIEW: 'import.reviewStep', DONE: 'import.steps.done' } as const;
+const CHIPS: DiffChip[] = ['up', 'down', 'new', 'unmatched', 'invalid', 'same'];
+const CHIP_TONE: Record<DiffChip, 'warning' | 'accent' | 'info' | 'neutral' | 'danger'> = {
+  up: 'warning',
+  down: 'accent',
+  new: 'info',
+  same: 'neutral',
+  unmatched: 'neutral',
+  invalid: 'danger',
+};
 
 const FIELDS: Array<keyof Mapping> = ['name', 'sku', 'price', 'unit', 'validFrom', 'validTo'];
 
@@ -64,17 +76,20 @@ async function readFile(file: File): Promise<FileInput> {
 const fwd = 'h-4 w-4 rtl:-scale-x-100';
 
 /**
- * Contract price-list import, modelled on the catalog import: supplier → file
- * (CSV/XLSX, read in the browser) → contracts.importPreview (auto-mapping) →
- * column mapping + default valid-from/to → contracts.importCommit → summary
- * with skipped rows and translated reasons.
+ * Contract price-list import, modelled on the catalog import. W2-12: one
+ * supplier + file step (CSV/XLSX, read in the browser) → contracts.importPreview
+ * (auto-mapping) → column mapping + default valid-from/to → "בדיקה": the
+ * contracts.importDiff against the contract in force (מוצר · חוזה נוכחי · חדש
+ * · שינוי · ₪/חודש, chips, per-row exclude) → an effect-named commit
+ * (contracts.importCommit with excludeRowIds) → summary. Parsed ₪ only, never
+ * raw cells. PDF/photo price lists are out of scope (OCR).
  */
 export function ContractImportWizard({ initialSupplierId }: { initialSupplierId: string }) {
   const t = useT(contractsNs);
   const tc = useT(components);
   const locale = useLocale();
   const toast = useToast();
-  const [step, setStep] = useState<Step>(initialSupplierId ? 'UPLOAD' : 'SUPPLIER');
+  const [step, setStep] = useState<Step>('SOURCE');
   const [supplierId, setSupplierId] = useState(initialSupplierId);
   const [file, setFile] = useState<FileInput | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -84,14 +99,16 @@ export function ContractImportWizard({ initialSupplierId }: { initialSupplierId:
   const [defaultFrom, setDefaultFrom] = useState(todayIso());
   const [defaultTo, setDefaultTo] = useState('');
   const [result, setResult] = useState<CommitResult | null>(null);
+  const [diff, setDiff] = useState<Diff | null>(null);
+  const [excluded, setExcluded] = useState<Set<number>>(() => new Set());
+  const [chipFilter, setChipFilter] = useState<DiffChip | null>(null);
 
   const suppliers = trpc.suppliers.list.useQuery({});
   const importPreview = trpc.contracts.importPreview.useMutation();
   const importCommit = trpc.contracts.importCommit.useMutation();
+  const importDiff = trpc.contracts.importDiff.useMutation();
   const utils = trpc.useUtils();
 
-  const supplier = suppliers.data?.find((s) => s.id === supplierId);
-  const supplierName = supplier ? displayName(supplier.name, supplier.nameEn, locale).primary : '';
   const mappingOk = !!mapping.price && (!!mapping.name || !!mapping.sku);
   const datesOk = !!defaultFrom && (!defaultTo || defaultTo >= defaultFrom);
 
@@ -134,6 +151,25 @@ export function ContractImportWizard({ initialSupplierId }: { initialSupplierId:
     }
   }
 
+  async function handleReview() {
+    if (!file || !supplierId || !mappingOk || !datesOk) return;
+    try {
+      const res = await importDiff.mutateAsync({
+        supplierId,
+        file,
+        mapping,
+        defaultValidFrom: defaultFrom,
+        defaultValidTo: defaultTo || null,
+      });
+      setDiff(res);
+      setExcluded(new Set());
+      setChipFilter(null);
+      setStep('REVIEW');
+    } catch {
+      // Rendered below from importDiff.error.
+    }
+  }
+
   async function handleCommit() {
     if (!file || !supplierId || !mappingOk || !datesOk) return;
     try {
@@ -143,6 +179,7 @@ export function ContractImportWizard({ initialSupplierId }: { initialSupplierId:
         mapping,
         defaultValidFrom: defaultFrom,
         defaultValidTo: defaultTo || null,
+        excludeRowIds: [...excluded],
       });
       setResult(res);
       setStep('DONE');
@@ -154,7 +191,10 @@ export function ContractImportWizard({ initialSupplierId }: { initialSupplierId:
   }
 
   const resetAll = () => {
-    setStep(initialSupplierId ? 'UPLOAD' : 'SUPPLIER');
+    setStep('SOURCE');
+    setDiff(null);
+    setExcluded(new Set());
+    importDiff.reset();
     setSupplierId(initialSupplierId);
     setFile(null);
     setPreview(null);
@@ -183,14 +223,14 @@ export function ContractImportWizard({ initialSupplierId }: { initialSupplierId:
                 : 'bg-surface-2 text-subtle',
             )}
           >
-            <span className="tabular-nums">{i + 1}.</span> {t(`import.steps.${STEP_KEY[s]}`)}
+            <span className="num">{i + 1}.</span> {t(STEP_LABEL[s])}
           </li>
         ))}
       </ol>
 
-      {step === 'SUPPLIER' && (
+      {step === 'SOURCE' && (
         <Card elevated flow>
-          <Field label={t('import.pickSupplier')} htmlFor="ci-supplier">
+          <Field label={t('import.pickSupplier')} htmlFor="ci-supplier" className="mb-4">
             <Select id="ci-supplier" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
               <option value="">{t('import.pickSupplierOption')}</option>
               {(suppliers.data ?? []).map((s) => (
@@ -200,19 +240,6 @@ export function ContractImportWizard({ initialSupplierId }: { initialSupplierId:
               ))}
             </Select>
           </Field>
-          <div className="mt-4">
-            <Button variant="primary" size="sm" disabled={!supplierId} onClick={() => setStep('UPLOAD')}>
-              {t('import.continue')} <ArrowRight className={fwd} aria-hidden="true" />
-            </Button>
-          </div>
-        </Card>
-      )}
-
-      {step === 'UPLOAD' && (
-        <Card elevated flow>
-          <p className="mb-3 text-sm text-muted">
-            {t('import.supplierLabel')} <span className="font-semibold text-ink">{supplierName}</span>
-          </p>
           <label
             onDragOver={(e) => {
               e.preventDefault();
@@ -225,7 +252,7 @@ export function ContractImportWizard({ initialSupplierId }: { initialSupplierId:
               void acceptFile(e.dataTransfer.files?.[0]);
             }}
             className={cn(
-              'flex cursor-pointer flex-col items-center gap-2 rounded-2xl border border-dashed bg-surface-2 px-6 py-10 text-center transition-colors focus-within:ring-2 focus-within:ring-primary/60',
+              'flex cursor-pointer flex-col items-center gap-2 rounded-2xl border border-dashed bg-surface-2 px-6 py-10 text-center transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[rgb(var(--c-focus))]',
               dragging ? 'border-primary bg-primary/5' : 'border-line hover:border-primary/40',
             )}
           >
@@ -243,6 +270,7 @@ export function ContractImportWizard({ initialSupplierId }: { initialSupplierId:
             />
           </label>
           <p className="mt-2 text-xs text-subtle">{t('import.formats')}</p>
+          <p className="mt-1 text-xs text-subtle">{t('import.scope')}</p>
           {(fileError || importPreview.error) && (
             <p role="alert" className="mt-3 flex items-start gap-1.5 text-sm text-danger">
               <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
@@ -250,11 +278,8 @@ export function ContractImportWizard({ initialSupplierId }: { initialSupplierId:
             </p>
           )}
           <div className="mt-4 flex items-center gap-2">
-            <Button variant="primary" size="sm" disabled={!file} loading={importPreview.isPending} onClick={handlePreview}>
+            <Button variant="primary" disabled={!file || !supplierId} loading={importPreview.isPending} onClick={handlePreview}>
               {t('import.analyze')} <ArrowRight className={fwd} aria-hidden="true" />
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setStep('SUPPLIER')}>
-              {t('import.back')}
             </Button>
           </div>
         </Card>
@@ -312,7 +337,7 @@ export function ContractImportWizard({ initialSupplierId }: { initialSupplierId:
                       <th key={h} scope="col" className="whitespace-nowrap px-3 py-2 text-start font-medium">
                         {h}
                         {mappedTo ? (
-                          <span className="ms-1 rounded bg-primary/12 px-1 text-[10px] text-primary">
+                          <span className="ms-1 rounded bg-primary/12 px-1 text-xs text-primary">
                             {t(`import.fields.${mappedTo}`).replace(' *', '')}
                           </span>
                         ) : null}
@@ -335,27 +360,35 @@ export function ContractImportWizard({ initialSupplierId }: { initialSupplierId:
             </table>
           </div>
 
-          {importCommit.error && (
+          {importDiff.error && (
             <p role="alert" className="mt-3 text-sm text-danger">
-              {serverError(importCommit.error)}
+              {serverError(importDiff.error)}
             </p>
           )}
-          {!mappingOk && <p className="mt-3 text-xs text-warn">{t('import.mapRequired')}</p>}
+          {!mappingOk && <p className="mt-3 text-sm text-warn">{t('import.mapRequired')}</p>}
           <div className="mt-4 flex items-center gap-2">
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={!mappingOk || !datesOk}
-              loading={importCommit.isPending}
-              onClick={handleCommit}
-            >
-              {t('import.commit', { count: formatNumber(preview.rowCount, locale) })}
+            <Button variant="primary" disabled={!mappingOk || !datesOk} loading={importDiff.isPending} onClick={handleReview}>
+              {t('import.review')} <ArrowRight className={fwd} aria-hidden="true" />
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => setStep('UPLOAD')}>
+            <Button variant="ghost" onClick={() => setStep('SOURCE')}>
               {t('import.back')}
             </Button>
           </div>
         </Card>
+      )}
+
+      {step === 'REVIEW' && diff && (
+        <ReviewStep
+          diff={diff}
+          excluded={excluded}
+          setExcluded={setExcluded}
+          chipFilter={chipFilter}
+          setChipFilter={setChipFilter}
+          committing={importCommit.isPending}
+          commitError={importCommit.error ? serverError(importCommit.error) : null}
+          onCommit={handleCommit}
+          onBack={() => setStep('MAP')}
+        />
       )}
 
       {step === 'DONE' && result && (
@@ -367,6 +400,7 @@ export function ContractImportWizard({ initialSupplierId }: { initialSupplierId:
           <div className="mt-4 flex flex-wrap justify-center gap-2 text-sm">
             <Badge tone="accent">{t('import.created', { count: formatNumber(result.created, locale) })}</Badge>
             <Badge tone="info">{t('import.updated', { count: formatNumber(result.updated, locale) })}</Badge>
+            {result.excluded > 0 && <Badge tone="neutral">{t('import.excluded', { count: result.excluded })}</Badge>}
             {result.skipped.length > 0 && (
               <Badge tone="warning">
                 {t('import.skippedCount', { count: formatNumber(result.skipped.length, locale) })}
@@ -395,18 +429,157 @@ export function ContractImportWizard({ initialSupplierId }: { initialSupplierId:
             </div>
           )}
           <div className="mt-5 flex flex-wrap justify-center gap-2">
-            <LinkButton href="/dashboard/contracts?tab=contracts" size="sm">
+            <LinkButton href="/dashboard/contracts?tab=contracts">
               {t('import.viewContracts')}
             </LinkButton>
-            <LinkButton href={`/dashboard/suppliers/${encodeURIComponent(supplierId)}?tab=contract`} size="sm" variant="secondary">
+            <LinkButton href={`/dashboard/suppliers/${encodeURIComponent(supplierId)}?tab=contract`} variant="secondary">
               {t('import.viewSupplier')}
             </LinkButton>
-            <Button variant="ghost" size="sm" onClick={resetAll}>
+            <Button variant="ghost" onClick={resetAll}>
               {t('import.another')}
             </Button>
           </div>
         </Card>
       )}
     </div>
+  );
+}
+
+function ReviewStep({
+  diff,
+  excluded,
+  setExcluded,
+  chipFilter,
+  setChipFilter,
+  committing,
+  commitError,
+  onCommit,
+  onBack,
+}: {
+  diff: Diff;
+  excluded: Set<number>;
+  setExcluded: (s: Set<number>) => void;
+  chipFilter: DiffChip | null;
+  setChipFilter: (c: DiffChip | null) => void;
+  committing: boolean;
+  commitError: string | null;
+  onCommit: () => void;
+  onBack: () => void;
+}) {
+  const t = useT(contractsNs);
+  const locale = useLocale();
+  const writable = (r: Diff['rows'][number]) => r.chip !== 'unmatched' && r.chip !== 'invalid';
+  const included = diff.rows.filter((r) => writable(r) && !excluded.has(r.rowId));
+  // Σ ₪/month over the INCLUDED rows only — the commit button names what it does.
+  const monthly = included.reduce((s, r) => s + (r.monthlyAgorot ?? 0), 0);
+  const rows = chipFilter ? diff.rows.filter((r) => r.chip === chipFilter) : diff.rows;
+
+  function toggle(rowId: number) {
+    const next = new Set(excluded);
+    if (next.has(rowId)) next.delete(rowId);
+    else next.add(rowId);
+    setExcluded(next);
+  }
+
+  return (
+    <Card elevated flow>
+      <h2 className="text-base font-semibold text-ink">{t('import.reviewTitle')}</h2>
+      <p className="mt-1 text-sm text-muted">{t('import.reviewBody')}</p>
+      <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label={t('import.reviewCaption')}>
+        {CHIPS.filter((c) => diff.counts[c] > 0).map((c) => (
+          <button
+            key={c}
+            type="button"
+            aria-pressed={chipFilter === c}
+            onClick={() => setChipFilter(chipFilter === c ? null : c)}
+            className={cn(
+              'inline-flex min-h-11 items-center gap-1 rounded-full border px-3 text-sm',
+              chipFilter === c ? 'border-primary bg-primary/10 font-semibold text-primary' : 'border-line text-muted',
+            )}
+          >
+            {t(`import.chips.${c}`)} <span className="num font-semibold">{formatNumber(diff.counts[c], locale)}</span>
+          </button>
+        ))}
+      </div>
+      <ul className="mt-4 divide-y divide-line rounded-xl border border-line" aria-label={t('import.reviewCaption')} data-testid="import-diff">
+        {rows.map((r) => {
+          const name = r.productName ? displayName(r.productName, r.productNameEn, locale).primary : r.label;
+          const ok = writable(r);
+          const on = ok && !excluded.has(r.rowId);
+          return (
+            <li key={r.rowId} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 p-3 text-sm" data-chip={r.chip}>
+              {ok ? (
+                <input
+                  type="checkbox"
+                  className="h-5 w-5 accent-primary"
+                  checked={on}
+                  onChange={() => toggle(r.rowId)}
+                  aria-label={t('import.includeRow', { label: name })}
+                />
+              ) : (
+                <span className="w-5" aria-hidden="true" />
+              )}
+              <div className="min-w-0">
+                <p className="truncate font-medium text-ink">{name}</p>
+                <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
+                  <Badge tone={CHIP_TONE[r.chip]}>{t(`import.chips.${r.chip}`)}</Badge>
+                  {r.reason ? <span>{t(`import.reasons.${r.reason}`)}</span> : null}
+                  {r.deltaPct != null ? (
+                    <span className="num">
+                      {t('import.colDelta')} {formatNumber(r.deltaPct * 100, locale, { maximumFractionDigits: 1 })}%
+                    </span>
+                  ) : null}
+                </p>
+              </div>
+              <div className="text-right">
+                {r.newPrice != null && ok ? (
+                  <p className="flex flex-wrap items-baseline justify-end gap-1">
+                    {r.currentPrice != null ? (
+                      <>
+                        <span className="sr-only">{t('import.colCurrent')}</span>
+                        <Money value={r.currentPrice} context="unit" className="text-muted line-through" />
+                        <span aria-hidden="true">{locale === 'he' ? '←' : '→'}</span>
+                      </>
+                    ) : (
+                      <span className="text-xs text-subtle">{t('import.noCurrent')}</span>
+                    )}
+                    <span className="sr-only">{t('import.colNew')}</span>
+                    <Money value={r.newPrice} context="unit" className="font-semibold" />
+                  </p>
+                ) : (
+                  <p className="text-xs text-subtle">{t('import.heldOut')}</p>
+                )}
+                {r.monthlyAgorot != null && r.monthlyAgorot !== 0 ? (
+                  <p className="text-xs text-muted">
+                    <Money agorot={Math.abs(r.monthlyAgorot)} context="line" />{' '}
+                    {r.monthlyAgorot > 0 ? t('import.perMonthMore') : t('import.perMonthLess')}
+                  </p>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {commitError && (
+        <p role="alert" className="mt-3 text-sm text-danger">
+          {commitError}
+        </p>
+      )}
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Button variant="primary" disabled={included.length === 0} loading={committing} onClick={onCommit} data-testid="import-commit">
+          {t('import.commitEffect', { count: included.length })}
+          {monthly !== 0 ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <Money agorot={Math.abs(monthly)} context="line" />
+              {monthly > 0 ? t('import.perMonthMore') : t('import.perMonthLess')}
+            </>
+          ) : null}
+        </Button>
+        <Button variant="ghost" onClick={onBack}>
+          {t('import.back')}
+        </Button>
+      </div>
+    </Card>
   );
 }

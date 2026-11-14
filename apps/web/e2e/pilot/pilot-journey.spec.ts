@@ -58,7 +58,7 @@ const WAITS = {
  * Waiting PRs that are on the tested tree: list them in MERGED_ON_MAIN once they merge, or name them in
  * PILOT_ON_TREE (comma list) to run a lab built from their branch, e.g. PILOT_ON_TREE=w1-06.
  */
-const MERGED_ON_MAIN: readonly string[] = ['w1-11']; // #207 in train A (4c887688); add 'w1-06' / 's2' as they merge
+const MERGED_ON_MAIN: readonly string[] = ['w1-11', 'w1-06', 's2']; // #207 (train A), #210 + #216 (train B, 3d64808d)
 const ON_TREE = new Set([...MERGED_ON_MAIN, ...(process.env.PILOT_ON_TREE ?? '').split(',').map((s) => s.trim().toLowerCase())]);
 /** W1-06's photo shrink (#210) → step 5b runs. */
 const UPLOAD_SHRINK_ON_TREE = ON_TREE.has('w1-06');
