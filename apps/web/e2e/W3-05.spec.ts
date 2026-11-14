@@ -83,6 +83,23 @@ test.describe('W3-05a month close', () => {
     expect(errors).toEqual([]);
   });
 
+  test('W3-05b exports.preview agrees with the W2-14 summary for the demo month (same query as the file)', async ({ page }) => {
+    await loginViaMagicLink(page, 'bookkeeper@kfar-hazeitim.test', '/dashboard');
+    const period = { from: '2026-10-01', to: '2026-10-31' };
+    const [p, s] = await Promise.all([
+      trpc<{ invoiceCount: number; totalInclVatAgorot: number; disputedCount: number; excluded: Array<{ reason: string; count: number }> }>(
+        page,
+        'exports.preview',
+        period,
+      ),
+      trpc<{ invoiceCount: number; totalInclVat: string; disputedCount: number; undatedCount: number }>(page, 'exports.summary', period),
+    ]);
+    expect(p.invoiceCount).toBe(s.invoiceCount);
+    expect(p.totalInclVatAgorot).toBe(Math.round(Number(s.totalInclVat) * 100));
+    expect(p.disputedCount).toBe(s.disputedCount);
+    expect(p.excluded.find((g) => g.reason === 'undated')?.count ?? 0).toBe(s.undatedCount);
+  });
+
   test('receiver: no close page (route roles refuse it)', async ({ page }) => {
     await loginViaMagicLink(page, 'receiver@kfar-hazeitim.test', '/dashboard');
     const res = await page.goto('/dashboard/close');

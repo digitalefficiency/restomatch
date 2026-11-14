@@ -70,4 +70,18 @@ export const he = {
       exports: { title: 'ייצוא להנהלת חשבונות', body: 'הורדת הקובץ לרו״ח, הסימון האוטומטי יגיע בהמשך', verb: 'לייצוא' },
     },
   },
+  preview: {
+    label: 'לפני ההורדה',
+    vat: 'מע״מ בקובץ',
+    excludedLabel: 'לא ייכללו בקובץ',
+    count: '{count} חשבוניות',
+    fix: 'לתיקון',
+    reasons: {
+      notChecked: 'עוד לא נבדקו',
+      duplicate: 'סומנו ככפולות',
+      undated: 'בלי תאריך חשבונית',
+      notInUniform: 'בלי מספר או סכום, לא ייכללו בקובץ האחיד',
+    },
+    missingBusinessId: '{count} חשבוניות של ספקים בלי ח״פ',
+  },
 };

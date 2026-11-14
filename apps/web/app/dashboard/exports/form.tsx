@@ -21,6 +21,7 @@ import { components } from '@/lib/i18n/messages/components';
 import { presetRange, rangeError, withBom, type RangePreset } from './range';
 import { AccountingFiles } from './accounting-files';
 import { ExportSummary } from './summary';
+import { ExportPreview } from './preview';
 
 const PRESETS: RangePreset[] = ['thisMonth', 'lastMonth', 'last30', 'thisYear'];
 
@@ -149,6 +150,7 @@ export function ExportsForm() {
       </fieldset>
 
       {!invalid ? <ExportSummary from={from} to={to} /> : null}
+      {!invalid ? <ExportPreview from={from} to={to} /> : null}
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-xl border border-line bg-surface-2 p-4">

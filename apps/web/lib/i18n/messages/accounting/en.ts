@@ -69,4 +69,18 @@ export const en: Shape<typeof he> = {
       exports: { title: 'Accounting export', body: 'Download the file for the accountant; automatic ticking comes later', verb: 'Export' },
     },
   },
+  preview: {
+    label: 'Before you download',
+    vat: 'VAT in the file',
+    excludedLabel: 'Left out of the file',
+    count: '{count} invoices',
+    fix: 'Fix',
+    reasons: {
+      notChecked: 'Not checked yet',
+      duplicate: 'Flagged as duplicates',
+      undated: 'No invoice date',
+      notInUniform: 'No number or total, left out of the uniform file',
+    },
+    missingBusinessId: '{count} invoices from suppliers with no business ID',
+  },
 };
