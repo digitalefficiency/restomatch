@@ -13,5 +13,7 @@ export const routes: RouteDef[] = [
     features: ['integrations'],
     nav: 'item',
     aliases: ['אינטגרציות', 'חיבורים', 'קופה', 'integrations', 'pos'],
+    // W3-07a: a warn dot only while a connection needs action (nav.badges `connections`).
+    badge: 'connections',
   },
 ];

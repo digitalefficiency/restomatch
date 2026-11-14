@@ -15,6 +15,7 @@ import { DsrSection } from './dsr';
 import { TwoFactorSection } from './TwoFactorSection';
 import { PhoneSection } from './phone-section';
 import { RulesPanel } from './rules-panel';
+import { PlanUsageSection } from './_plan/PlanUsageSection';
 
 /**
  * Settings. PERSONAL sections (language, password, devices, 2FA, DSR) are for
@@ -54,6 +55,8 @@ export default async function SettingsPage() {
       ])
     : [null, null, null, null, null];
   const myPhone = await caller.settings.myPhone();
+  // W3-07a · "תוכנית ושימוש" (read-only): owner, manager and bookkeeper.
+  const planUsage = seesRestaurant ? await caller.settings.planUsage() : null;
   // Referral programme (wave 1, S15 — flag `growth`): owner/manager see the
   // restaurant's code + stats; only the owner may redeem someone else's code.
   const referralOn =
@@ -74,6 +77,12 @@ export default async function SettingsPage() {
         <SectionHeader title={t('phone.title')} />
         <PhoneSection initial={myPhone.phone} />
       </div>
+      {planUsage ? (
+        <div>
+          <SectionHeader title={t('plan.title')} />
+          <PlanUsageSection data={planUsage} />
+        </div>
+      ) : null}
       {profile ? (
         <div>
           <SectionHeader title={t('sections.profileTitle')} subtitle={t('sections.profileSubtitle')} />

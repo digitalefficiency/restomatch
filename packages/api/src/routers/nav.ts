@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { isFeatureOn } from '../lib/featureGate';
 import { memberProcedure, router, userScopedProcedure } from '../trpc';
-import { foldBadges } from '../tasks/badges';
+import { connectionsBadge, foldBadges } from '../tasks/badges';
+import { integrationsRouter } from './integrations';
 import { collectTasks } from '../tasks/collect';
 import { WHERE_IS_KINDS, whereIs } from '../tasks/whereIs';
 import { priceAlertsRouter } from './priceAlerts';
@@ -38,6 +39,17 @@ export const navRouter = router({
         badges.claims = { ...badges.claims, ilsAgorot: owed > 0 ? owed : null, money: 'owed' };
       } catch {
         failed.push('claimsOwed');
+      }
+    }
+    // W3-07a · "חיבורים": a dot only while a connection needs action (owner + manager,
+    // who see the procurement section; flag `integrations`).
+    if ((ctx.session.role === 'owner' || ctx.session.role === 'manager') && (await isFeatureOn(ctx.db, rid, 'integrations'))) {
+      try {
+        const providers = await integrationsRouter.createCaller(sub).procurementProviders();
+        const dot = connectionsBadge(providers.filter((p) => p.syncStale).length);
+        if (dot) badges.connections = dot;
+      } catch {
+        failed.push('connections');
       }
     }
     return { badges, failed };

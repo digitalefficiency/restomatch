@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import { authenticator } from 'otplib';
-import { DEMO_RESTAURANT_NAME } from './env';
+import { DEMO_RESTAURANT_NAME, OWNER_STATE } from './env';
 import { e2eSql, ensurePasswordUser } from './helpers';
 
 /**
@@ -120,4 +120,72 @@ test('cancel restores the form and writes nothing', async ({ page }) => {
   await expect(select).toHaveValue('receiver');
   expect(await roleOf(f.restaurantId, f.memberId)).toBe('receiver');
   expect(await auditAfter(f.restaurantId, 'admin.role_set', f.memberId)).toHaveLength(0);
+});
+
+test('a feature flag change is staged, needs a reason, and shows its source', async ({ page }) => {
+  test.setTimeout(180_000);
+  const f = await adminFixture();
+  // A throwaway restaurant: toggling flags on the demo tenant would leak into other specs.
+  const sql = e2eSql();
+  let restaurantId: string;
+  try {
+    const [r] = await sql<{ id: string }[]>`
+      insert into restaurants (name, settings) values (${`W3-07a flags ${randomBytes(3).toString('hex')}`}, ${sql.json({ features: { contracts: true } })})
+      returning id`;
+    restaurantId = r!.id;
+  } finally {
+    await sql.end();
+  }
+  await signInAsAdmin(page, f.adminEmail, f.secret);
+  await page.goto(`/admin/restaurants/${restaurantId}`);
+
+  // "פיצ׳רים פעילים" names what is in effect, and each row says why.
+  await expect(page.getByTestId('active-features')).toContainText('contracts');
+  await expect(page.locator('tr:has(#feature-contracts) [data-source]')).toHaveAttribute('data-source', 'stored');
+
+  // Toggling only stages it; nothing is written until confirm with a reason.
+  await page.locator('#feature-contracts').uncheck();
+  await page.getByRole('button', { name: 'לבדיקה ואישור' }).last().click();
+  const card = page.getByTestId('staged-change');
+  await expect(card).toBeVisible();
+  await expect(card.getByRole('button', { name: 'אישור השינוי' })).toBeDisabled();
+  await card.getByLabel('סיבה (חובה)').fill('כיבוי לבדיקה');
+  await card.getByRole('button', { name: 'אישור השינוי' }).click();
+  await expect(card).toBeHidden();
+
+  const rows = await auditAfter(restaurantId, 'admin.features', restaurantId);
+  expect(rows[0]?.after).toMatchObject({ contracts: false, reason: 'כיבוי לבדיקה' });
+});
+
+test.describe('slice 2 · connections hub and plan usage (demo owner)', () => {
+  test.use({ storageState: OWNER_STATE, viewport: { width: 1440, height: 900 } });
+
+  test('the hub groups every connection with a status chip', async ({ page }) => {
+    await page.goto('/dashboard/integrations');
+    const board = page.getByTestId('hub-status');
+    await expect(board.getByRole('heading', { name: 'חיבורים' })).toBeVisible();
+    for (const group of ['accounting', 'pos', 'procurement']) {
+      await expect(board.locator(`[data-group="${group}"]`)).toBeVisible();
+    }
+    // Every tile carries a known status; "not connected" is never an error.
+    const statuses = await board.locator('[data-tile]').evaluateAll((els) => els.map((e) => e.getAttribute('data-status')));
+    expect(statuses.length).toBeGreaterThan(0);
+    for (const s of statuses) expect(['connected', 'sample', 'error', 'not_connected', 'contact']).toContain(s);
+  });
+
+  test('settings shows a read-only plan and usage, with no ₪', async ({ page }) => {
+    await page.goto('/dashboard/settings');
+    const plan = page.getByTestId('plan-usage');
+    await expect(plan).toBeVisible();
+    // The usage rows sit in a "פרטים" fold (the settings page has a W2-16 word budget).
+    const toggle = plan.locator('[data-explain-toggle]');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await toggle.click();
+    await expect(plan.locator('[data-row="scans"]')).toBeVisible();
+    await expect(plan.locator('[data-row="seats"]')).toBeVisible();
+    await expect(plan).not.toContainText('₪');
+    // Read-only: the fold toggle is the only control.
+    await expect(plan.locator('input, select, a')).toHaveCount(0);
+    await expect(plan.locator('button')).toHaveCount(1);
+  });
 });
