@@ -61,11 +61,12 @@ const CASES: Case[] = [
     expected: k.overdue,
   })),
   ...OVERDUE_BOUNDARY_CASES.map((k) => ({
-    why: `boundary, no letter (clock from claimed_at): ${k.why}`,
+    // Train-C gate 11.11: a claim whose letter never went out is never chased, at any age.
+    why: `no letter yet (claimed) is never chased: ${k.why}`,
     status: 'claimed',
     letterSentAt: null,
     claimedAt: k.letterSentAt,
-    expected: k.overdue,
+    expected: false,
   })),
   { why: 'acknowledged, option on', status: 'acknowledged', letterSentAt: OLD, claimedAt: OLD, expected: true },
   { why: 'acknowledged, option off', status: 'acknowledged', letterSentAt: OLD, claimedAt: OLD, chaseAcknowledged: false, expected: false },
@@ -113,13 +114,13 @@ describe('AU-03 · the job and the badge use the one rule; ₪ summed per claim'
     const unsent = await addClaim(db, T, { status: 'claimed', claimedAt: new Date(OLD), amountAgorot: 500 });
     const ack = await addClaim(db, T, { status: 'acknowledged', letterSentAt: new Date(OLD), claimedAt: new Date(OLD), amountAgorot: 2000, creditedAgorot: 250 });
     const out = await findOverdue(db, T.restaurantId, NOW);
-    expect(new Set(out.claimIds)).toEqual(new Set([older, unsent, ack]));
-    expect(out.totalAgorot).toBe(12_345 + 500 + 1750);
-    expect(out.count).toBe(3);
+    // Train-C gate 11.11: a request whose letter never went out is never chased nor counted.
+    expect(new Set(out.claimIds)).toEqual(new Set([older, ack]));
+    expect(out.claimIds).not.toContain(unsent);
+    expect(out.totalAgorot).toBe(12_345 + 1750);
+    expect(out.count).toBe(2);
     const kinds = Object.fromEntries(out.suppliers.map((s) => [s.kind, s.outstandingAgorot]));
-    expect(kinds).toEqual({ no_reply: 12_345, unsent: 500, acknowledged: 1750 });
-    // claimed with no letter is "unsent", never shown with a letter date.
-    expect(out.suppliers.find((s) => s.kind === 'unsent')!.latestLetterAt).toBeNull();
+    expect(kinds).toEqual({ no_reply: 12_345, acknowledged: 1750 });
 
     const rows = await listClaims(db, T.restaurantId, { now: NOW, limit: null });
     const badge = rows.filter((r) => r.overdue).map((r) => r.id);

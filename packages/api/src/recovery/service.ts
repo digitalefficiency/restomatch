@@ -14,7 +14,7 @@ import { assertSupplierOwned } from '../tenant';
 import { appError } from '../errors';
 import { HELD_FOR_RECEIPTS_KEY } from '@restomatch/charts';
 import { CLAIM_ANSWER_DAYS, NEVER_CLAIMABLE_TYPES } from '../lib/claims';
-import { REMIND_EVERY_CALENDAR_DAYS, awaitingChaseSql, pastAnswerWindowSql } from './overdue';
+import { CHASE_STATUSES, REMIND_EVERY_CALENDAR_DAYS, awaitingChaseSql, pastAnswerWindowSql } from './overdue';
 import {
   AWAITING_SUPPLIER,
   CREDITABLE,
@@ -567,12 +567,13 @@ export async function listClaims(
       closedAt: isoOrNull(r.closed_at),
       lastReminderAt: isoOrNull(r.last_reminder_at),
       ageDays: int(r.age_days),
-      overdue: (AWAITING_SUPPLIER as readonly string[]).includes(status) && r.waiting_overdue === true,
+      // A chase figure: only a claim whose letter went out (train-C gate 11.11 — never an unsent request).
+      overdue: (CHASE_STATUSES as readonly string[]).includes(status) && r.waiting_overdue === true,
       creditNoteNumber: (r.credit_note_number as string | null) ?? null,
       note: (r.note as string | null) ?? null,
       next: nextEdges(status, { amountAgorot: amount, creditedAgorot: credited }),
       vatRateBp: int(r.vat_rate_bp),
-      daysOverdue: (AWAITING_SUPPLIER as readonly string[]).includes(status) && r.waiting_overdue === true ? int(r.days_past) : 0,
+      daysOverdue: (CHASE_STATUSES as readonly string[]).includes(status) && r.waiting_overdue === true ? int(r.days_past) : 0,
     };
   });
 }

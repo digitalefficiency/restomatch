@@ -160,7 +160,7 @@ describe('reminder draft (owner decision 16)', () => {
       Number(((await db.execute(sql`select (select count(*) from notifications_outbox) + (select count(*) from recovery_events) as n`)) as unknown as Array<{ n: number }>)[0]!.n);
     const before = await count();
     const d = await caller().recovery.reminderDraft({ supplierId: T.supplierId });
-    expect(d).toMatchObject({ count: 1, outstandingAgorot: c.amountAgorot, claimIds: [c.id], whatsapp: '+972501234567', email: 'sales@supplier.test' });
+    expect(d).toMatchObject({ count: 1, outstandingAgorot: c.amountAgorot, claimIds: [c.id], whatsapp: '972501234567', email: 'sales@supplier.test' });
     expect(d.oldestDays).toBeGreaterThanOrEqual(OVERDUE_DAYS);
     expect(await count()).toBe(before);
     // Not overdue yet → an empty draft.
