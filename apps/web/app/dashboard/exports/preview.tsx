@@ -13,6 +13,8 @@ import { fixHref } from './fix-href';
  * already shows the count and ₪): the VAT of the file and every invoice of the
  * range left out, by reason, with a fix link. From `exports.preview` — the same
  * query as the file. Neutral (T4): leaving an invoice out is the guard working.
+ * The group rows are data (which reasons appear depends on the invoices): `data-record`,
+ * so W2-16's per-screen copy budget counts only the fixed copy (3 words).
  */
 export function ExportPreview({ from, to }: { from: string; to: string }) {
   const t = useT(accounting);
@@ -35,7 +37,7 @@ export function ExportPreview({ from, to }: { from: string; to: string }) {
           <p className="mt-3 text-xs font-medium text-muted">{t('preview.excludedLabel')}</p>
           <ul className="mt-1 divide-y divide-line">
             {p.excluded.map((g) => (
-              <li key={g.reason} data-reason={g.reason} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
+              <li key={g.reason} data-reason={g.reason} data-record className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
                 <span className="min-w-0 flex-1">
                   {t(`preview.reasons.${g.reason}`)}
                   <span className="ms-2 text-xs text-muted tabular-nums">{t('preview.count', { count: n(g.count) })}</span>
@@ -50,7 +52,7 @@ export function ExportPreview({ from, to }: { from: string; to: string }) {
         </>
       ) : null}
       {p.missingBusinessId.count > 0 && p.missingBusinessId.supplierIds[0] ? (
-        <p className="mt-3 text-xs text-muted" data-testid="export-preview-bizid">
+        <p className="mt-3 text-xs text-muted" data-testid="export-preview-bizid" data-record>
           {t('preview.missingBusinessId', { count: n(p.missingBusinessId.count) })}{' '}
           <Link href={`/dashboard/suppliers/${p.missingBusinessId.supplierIds[0]}`} className="text-primary underline-offset-2 hover:underline">
             {t('preview.fix')}

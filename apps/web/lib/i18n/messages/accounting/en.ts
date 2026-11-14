@@ -71,16 +71,16 @@ export const en: Shape<typeof he> = {
   },
   preview: {
     label: 'Before you download',
-    vat: 'VAT in the file',
-    excludedLabel: 'Left out of the file',
+    vat: 'VAT',
+    excludedLabel: 'Not in the file',
     count: '{count} invoices',
     fix: 'Fix',
     reasons: {
       notChecked: 'Not checked yet',
       duplicate: 'Flagged as duplicates',
       undated: 'No invoice date',
-      notInUniform: 'No number or total, left out of the uniform file',
+      notInUniform: 'Missing from the uniform file',
     },
-    missingBusinessId: '{count} invoices from suppliers with no business ID',
+    missingBusinessId: '{count} from suppliers with no business ID',
   },
 };

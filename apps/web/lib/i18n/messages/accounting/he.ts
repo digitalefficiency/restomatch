@@ -72,16 +72,16 @@ export const he = {
   },
   preview: {
     label: 'לפני ההורדה',
-    vat: 'מע״מ בקובץ',
-    excludedLabel: 'לא ייכללו בקובץ',
+    vat: 'מע״מ',
+    excludedLabel: 'לא בקובץ',
     count: '{count} חשבוניות',
     fix: 'לתיקון',
     reasons: {
       notChecked: 'עוד לא נבדקו',
       duplicate: 'סומנו ככפולות',
       undated: 'בלי תאריך חשבונית',
-      notInUniform: 'בלי מספר או סכום, לא ייכללו בקובץ האחיד',
+      notInUniform: 'חסרות בקובץ האחיד',
     },
-    missingBusinessId: '{count} חשבוניות של ספקים בלי ח״פ',
+    missingBusinessId: '{count} מספקים בלי ח״פ',
   },
 };
