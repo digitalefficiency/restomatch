@@ -29,7 +29,7 @@ export const en: Shape<typeof he> = {
     cta: {
       setUp: 'Set up',
       intake: 'Intake addresses',
-      contact: 'Connect a real account — talk to us',
+      contact: 'Connect a real account',
     },
     contactText: 'Hello, we would like to connect {platform} to RestoMatch.',
   },

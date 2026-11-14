@@ -30,7 +30,7 @@ export const he = {
     cta: {
       setUp: 'להגדרה',
       intake: 'לכתובות הקליטה',
-      contact: 'לחיבור חשבון אמיתי — דברו איתנו',
+      contact: 'לחיבור חשבון אמיתי',
     },
     contactText: 'שלום, נשמח לחבר את {platform} ל-RestoMatch.',
   },

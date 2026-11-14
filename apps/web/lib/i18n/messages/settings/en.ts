@@ -163,7 +163,7 @@ export const en: Shape<typeof he> = {
   },
   plan: {
     title: 'Plan and usage',
-    subtitle: 'What your plan includes and how much you used this month. To change plans, contact us.',
+    subtitle: 'What your plan includes and how much you used this month',
     planLabel: 'Plan',
     statusLabel: 'Status',
     plans: { trial: 'Trial', basic: 'Basic', pro: 'Pro', chain: 'Chain' },

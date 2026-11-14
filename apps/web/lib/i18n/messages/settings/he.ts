@@ -164,7 +164,7 @@ export const he = {
   },
   plan: {
     title: 'תוכנית ושימוש',
-    subtitle: 'מה כלול בתוכנית שלכם וכמה נוצל החודש. לשינוי תוכנית פנו אלינו.',
+    subtitle: 'מה כלול בתוכנית שלכם וכמה נוצל החודש',
     planLabel: 'תוכנית',
     statusLabel: 'סטטוס',
     plans: { trial: 'ניסיון', basic: 'בסיס', pro: 'מקצועי', chain: 'רשת' },
