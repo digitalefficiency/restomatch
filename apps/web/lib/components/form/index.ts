@@ -7,4 +7,6 @@ export { Tabs } from './Tabs';
 export type { TabItem } from './Tabs';
 export { Steps } from './Steps';
 export { FilterChip } from './FilterChip';
+export { Switch } from './Switch';
+export { NumberField } from './NumberField';
 export { normalizeDecimal, parseMoneyInput, parseQuantityInput, parseDateInput, formatDateField } from './parse';

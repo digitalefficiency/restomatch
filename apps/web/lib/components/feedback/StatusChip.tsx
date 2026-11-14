@@ -1,39 +1,50 @@
-import { CircleCheck, Clock, Coins, Info, OctagonAlert, TriangleAlert } from 'lucide-react';
+import { Clock } from 'lucide-react';
 import { cnMerge as cn } from '../cn';
+import { DOT_TONE, PILL_DOT, PILL_SHELL, PILL_TONE, type PillTone } from '../tone';
 
 export type StatusTone = 'danger' | 'warn' | 'success' | 'gold' | 'info' | 'neutral';
 
-const DEFAULT_ICON: Record<StatusTone, typeof Info> = {
-  danger: OctagonAlert,
-  warn: TriangleAlert,
-  success: CircleCheck,
-  gold: Coins,
-  info: Info,
-  neutral: Clock,
-};
-
-const SUBTLE: Record<StatusTone, string> = {
-  danger: 'bg-danger-subtle text-danger border-danger-subtle',
-  warn: 'bg-warn-subtle text-warn border-warn-subtle',
-  success: 'bg-primary-subtle text-primary border-primary-subtle',
-  gold: 'bg-gold-subtle text-gold border-gold-subtle',
-  info: 'bg-info-subtle text-info border-info-subtle',
-  neutral: 'bg-neutral-subtle text-neutral border-neutral-subtle',
-};
-
-const BOLD: Record<StatusTone, string> = {
-  danger: 'bg-danger-bold text-on-bold border-transparent',
-  warn: 'bg-warn-bold text-on-bold border-transparent',
-  success: 'bg-primary-bold text-on-bold border-transparent',
-  gold: 'bg-gold-bold text-on-bold border-transparent',
-  info: 'bg-info-bold text-on-bold border-transparent',
-  neutral: 'bg-neutral-bold text-on-bold border-transparent',
-};
+/**
+ * DS3 (SPEC §2 "the four tiers", §5): which pill a DS2 tone draws. The solid fill is reserved for
+ * danger + bold, the one "חוסם תשלום" pill; a bold warning is the amber pill (T2); success and gold
+ * are both the calm green of good news (T3); neutral is grey and is what pending looks like (T4).
+ */
+export function pillToneOf(tone: StatusTone, emphasis: 'bold' | 'subtle' = 'subtle'): PillTone {
+  switch (tone) {
+    case 'danger':
+      return emphasis === 'bold' ? 'solid' : 'leak';
+    case 'warn':
+      return 'warn';
+    case 'success':
+    case 'gold':
+      return 'ok';
+    case 'info':
+      return 'info';
+    default:
+      return 'neutral';
+  }
+}
 
 /**
- * Status = icon + word + colour, never colour alone (design-system-07). `bold`
- * is reserved for T2 (act now); everything else is `subtle`. A roll-up passes
- * the worst child's tone. No chip when no state matters.
+ * The status dot (decorative: the word beside it carries the state). `sm` is the 6 px dot inside a
+ * pill; `md` is the 8 px dot beside a label (the T1 leak label, a queue row, a task).
+ */
+export function StatusDot({ tone, size = 'md', className }: { tone: PillTone; size?: 'sm' | 'md'; className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      data-dot={tone}
+      className={cn(PILL_DOT, size === 'md' && 'size-2', DOT_TONE[tone], className)}
+    />
+  );
+}
+
+/**
+ * The status pill of the clean finish (kit "סטטוס"): a dot or an icon, and a word that is always
+ * in ink (white on the solid pill). Colour only when money waits for a person; what merely waits
+ * is grey and never looks like a warning. `emphasis="bold"` is T2: on danger it is the one solid
+ * pill ("חוסם תשלום"), on warn the amber pill. A roll-up passes the worst child's tone; no chip
+ * when no state matters.
  */
 export function StatusChip({
   tone,
@@ -47,37 +58,53 @@ export function StatusChip({
   tone: StatusTone;
   label: React.ReactNode;
   emphasis?: 'bold' | 'subtle';
-  /** Overrides the tone's default icon; pass `null` to drop it (the word still carries the state). */
+  /**
+   * The marker before the word. Default: the tone's dot; a neutral pill keeps the clock of what is
+   * pending (T4). Pass an icon to replace it (a calendar for a deadline, `<StatusDot tone="neutral"
+   * size="sm" />` for a neutral pill that is not pending), or `null` to drop it.
+   */
   icon?: React.ReactNode | null;
   size?: 'sm' | 'md';
   /** `control` (radius 8) inside tables, `pill` elsewhere. */
   shape?: 'pill' | 'control';
   className?: string;
 }) {
-  const Icon = DEFAULT_ICON[tone];
+  const pill = pillToneOf(tone, emphasis);
   return (
     <span
       data-tone={tone}
+      data-pill={pill}
       className={cn(
-        'inline-flex max-w-full items-center gap-1 border font-semibold',
-        size === 'sm' ? 'min-h-5 px-2 text-caption' : 'min-h-6 px-2.5 text-body-sm',
+        PILL_SHELL,
+        size === 'md' && 'min-h-6 px-2.5 text-body-sm',
         shape === 'pill' ? 'rounded-pill' : 'rounded-control',
-        emphasis === 'bold' ? BOLD[tone] : SUBTLE[tone],
+        PILL_TONE[pill],
         className,
       )}
     >
-      {icon === undefined ? <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : icon}
+      {icon === undefined ? (
+        pill === 'neutral' ? (
+          // T4 keeps its clock: callers that mean "pending" (the register, the cockpit, month close)
+          // rely on the neutral default. A neutral pill that is not pending passes `icon={<StatusDot … />}`.
+          <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        ) : (
+          <StatusDot tone={pill} size="sm" />
+        )
+      ) : (
+        icon
+      )}
       <span className="min-w-0">{label}</span>
     </span>
   );
 }
 
-/** A count on a nav item or tab: ≥20×20, caption 600, hidden at 0, "99+" above `max`. */
+/** A count on a nav item or tab: ≥20×20, caption 600, hidden at 0 (unless `showZero`), "99+" above `max`. */
 export function CountBadge({
   count,
   max = 99,
   tone = 'neutral',
   label,
+  showZero = false,
   className,
 }: {
   count: number;
@@ -85,9 +112,11 @@ export function CountBadge({
   tone?: 'neutral' | 'danger';
   /** Screen-reader text, e.g. "3 ממתינות לאישור". Without it the number is read as-is. */
   label?: string;
+  /** DS3 tabs: every tab says how many wait in it, also when that is zero. */
+  showZero?: boolean;
   className?: string;
 }) {
-  if (!count || count < 0) return null;
+  if (!Number.isFinite(count) || count < 0 || (count === 0 && !showZero)) return null;
   return (
     <span
       className={cn(
