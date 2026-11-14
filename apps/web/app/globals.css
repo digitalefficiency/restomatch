@@ -50,11 +50,6 @@
   --c-neutral-subtle: 241 245 243; /* #F1F5F3 */
   --c-neutral-subtle-hover: 235 240 237; /* #EBF0ED */
   --c-neutral-border-subtle: 212 219 216; /* #D4DBD8 */
-  --c-danger-dot: 221 39 41; /* #DD2729 */
-  --c-warn-dot: 242 171 25; /* #F2AB19 */
-  --c-warn-dot-ring: 185 117 0; /* #B97500 */
-  --c-gold-dot: 14 160 83; /* #0EA053 */
-  --c-neutral-dot: 93 101 97; /* #5D6561 */
   --c-viz-1: 6 107 74; /* #066B4A */
   --c-viz-2: 26 91 199; /* #1A5BC7 */
   --c-viz-3: 117 92 0; /* #755C00 */
@@ -62,11 +57,11 @@
   --c-viz-5: 0 131 143; /* #00838F */
   --c-viz-6: 166 61 0; /* #A63D00 */
   --c-creep-1: 253 240 231; /* #FDF0E7 */
-  --c-on-creep-1: 15 31 23; /* #0F1F17 */
+  --c-on-creep-1: 18 28 23; /* #121C17 */
   --c-creep-2: 244 205 176; /* #F4CDB0 */
-  --c-on-creep-2: 15 31 23; /* #0F1F17 */
+  --c-on-creep-2: 18 28 23; /* #121C17 */
   --c-creep-3: 232 166 122; /* #E8A67A */
-  --c-on-creep-3: 15 31 23; /* #0F1F17 */
+  --c-on-creep-3: 18 28 23; /* #121C17 */
   --c-creep-4: 180 83 26; /* #B4531A */
   --c-on-creep-4: 255 255 255; /* #FFFFFF */
   --c-creep-5: 122 45 0; /* #7A2D00 */
@@ -457,6 +452,13 @@
   --c-emphasis-t1-rail: 183 25 28;
   --c-emphasis-t2-rail: 146 80 0;
   --c-money-marker: 221 39 41;
+  --c-primary-dot: 0 87 59;
+  --c-danger-dot: 221 39 41;
+  --c-warn-dot: 242 171 25;
+  --c-gold-dot: 14 160 83;
+  --c-info-dot: 34 86 187;
+  --c-neutral-dot: 93 101 97;
+  --c-warn-dot-ring: 185 117 0;
   --c-viz-cat-1: 34 86 187;
   --c-viz-cat-2: 0 122 133;
   --c-viz-cat-3: 138 79 191;
@@ -466,7 +468,7 @@
   --c-viz-up: 180 83 26;
   --c-viz-down: 0 113 62;
   --c-viz-prev: 122 139 130;
-  --c-viz-leak: 183 25 28;
+  --c-viz-leak: 221 39 41;
   --c-viz-grid: 212 219 216;
   --font-ui-faces: 'Google Sans', 'Google Sans Fallback';
   --font-ui: 'Google Sans', 'Google Sans Fallback', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
@@ -516,6 +518,14 @@
   --lh-id: 1.25rem;
   --fw-id: 500;
   --ls-id: 0;
+  --fs-row-title: 0.875rem;
+  --lh-row-title: 1.25rem;
+  --fw-row-title: 500;
+  --ls-row-title: 0;
+  --fs-row-sub: 0.8125rem;
+  --lh-row-sub: 1.125rem;
+  --fw-row-sub: 400;
+  --ls-row-sub: 0;
   --fs-kbd: 0.75rem;
   --lh-kbd: 1rem;
   --fw-kbd: 500;
@@ -532,7 +542,7 @@
   --lh-display-lg: 3.25rem;
   --fw-display-lg: 700;
   --ls-display-lg: -0.02em;
-  --decision-row-h: 64px;
+  --decision-row-h: 52px;
   --decision-row-pt: 7px;
   --decision-row-pb: 8px;
   --btn-h-primary: 40px;
@@ -551,7 +561,7 @@
   --cell-px: 16px;
   --radius-xs: 0.25rem;
   --radius-chip: 9999px;
-  --ring-selected: inset 0 0 0 2px rgb(var(--c-action-primary-bg));
+  --ring-selected: inset 0 0 0 2px rgb(var(--c-info));
   --gutter-page: 16px;
   --chrome-header-h: 56px;
   --chrome-sidebar-w: 248px;
@@ -591,7 +601,11 @@
   --lh-money-card: 2rem;
   --fs-id: 0.75rem;
   --lh-id: 1rem;
-  --decision-row-h: 52px;
+  --fs-row-title: 0.875rem;
+  --lh-row-title: 1.125rem;
+  --fs-row-sub: 0.75rem;
+  --lh-row-sub: 1rem;
+  --decision-row-h: 43px;
   --decision-row-pt: 4px;
   --decision-row-pb: 5px;
   --btn-h-primary: 32px;
@@ -615,7 +629,11 @@
   --lh-money-card: 2.25rem;
   --fs-id: 0.8125rem;
   --lh-id: 1.25rem;
-  --decision-row-h: 64px;
+  --fs-row-title: 0.875rem;
+  --lh-row-title: 1.25rem;
+  --fs-row-sub: 0.8125rem;
+  --lh-row-sub: 1.125rem;
+  --decision-row-h: 52px;
   --decision-row-pt: 7px;
   --decision-row-pb: 8px;
   --btn-h-primary: 40px;
@@ -645,6 +663,10 @@
   --lh-money-card: 2.25rem;
   --fs-id: 0.8125rem;
   --lh-id: 1.25rem;
+  --fs-row-title: 0.875rem;
+  --lh-row-title: 1.25rem;
+  --fs-row-sub: 0.8125rem;
+  --lh-row-sub: 1.125rem;
   --btn-h-primary: 48px;
   --chip-h: 28px;
   --nav-item-h: 44px;
@@ -667,7 +689,11 @@
     --lh-money-card: 2.25rem;
     --fs-id: 0.8125rem;
     --lh-id: 1.25rem;
-    --decision-row-h: 64px;
+    --fs-row-title: 0.875rem;
+    --lh-row-title: 1.25rem;
+    --fs-row-sub: 0.8125rem;
+    --lh-row-sub: 1.125rem;
+    --decision-row-h: 52px;
     --decision-row-pt: 7px;
     --decision-row-pb: 8px;
     --btn-h-primary: 40px;
@@ -696,6 +722,10 @@
   --lh-money-hero: 3rem;
   --fs-id: 0.875rem;
   --lh-id: 1.25rem;
+  --fs-row-title: 1rem;
+  --lh-row-title: 1.5rem;
+  --fs-row-sub: 0.875rem;
+  --lh-row-sub: 1.25rem;
   --btn-h-primary: 56px;
   --chip-h: 28px;
   --count-row-h: 72px;
@@ -808,10 +838,10 @@
     color: rgb(var(--c-ink));
   }
 
-  /* Quiet light scrollbar (DS3: tokens only — the control-boundary steel, tinted down). */
+  /* Quiet light scrollbar (DS3: tokens only; the reference's thumb is the card line). */
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgb(var(--c-line-strong) / 0.4) transparent;
+    scrollbar-color: rgb(var(--c-line)) transparent;
   }
   *::-webkit-scrollbar {
     width: 10px;
@@ -821,13 +851,13 @@
     background: transparent;
   }
   *::-webkit-scrollbar-thumb {
-    background: rgb(var(--c-line-strong) / 0.4);
+    background: rgb(var(--c-line));
     border-radius: 9999px;
     border: 2px solid transparent;
     background-clip: padding-box;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: rgb(var(--c-line-strong) / 0.65);
+    background: rgb(var(--c-line-strong) / 0.6);
     background-clip: padding-box;
   }
 }
@@ -1200,7 +1230,7 @@ html[lang='ti'] .font-sans {
   }
 }
 
-/* ───────────── W1-01 design-system foundation v2 (tokens: app/tokens.css) ───────────── */
+/* ───────────── W1-01 design-system foundation v2 (tokens: the generated block at the top) ───────────── */
 
 @layer base {
   /* One focus indicator everywhere (R-5, WCAG 2.4.7 / 1.4.11; DS3 SPEC §4): a 2 px
@@ -1216,6 +1246,11 @@ html[lang='ti'] .font-sans {
      opts in with data-focus="on-dark"; only the colour changes, never width or offset. */
   [data-focus='on-dark'] {
     --c-focus: var(--c-on-bold);
+  }
+  /* Inside a scroll container an outward outline is clipped (DataTable rows, SplitPane lists):
+     such a row opts in with data-focus="inset" and the same 2 px outline is drawn inside it. */
+  [data-focus='inset'] {
+    --focus-offset: -2px;
   }
   @media (forced-colors: active) {
     :focus-visible {
