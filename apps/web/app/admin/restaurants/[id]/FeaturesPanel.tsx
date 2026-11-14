@@ -8,6 +8,9 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { admin } from '@/lib/i18n/messages/admin';
 import { localizeServerError } from '@/lib/serverErrors';
 import { releaseNotice } from './releaseNotice';
+import { StagedChange } from '../../_components/StagedChange';
+import type { StagedField } from '../../_components/staged';
+import { activeFeatures, featureSource, type FeatureSource } from './featureSource';
 
 /** What admin.getRestaurant reports for one tenant's wave-1 flags. */
 export interface FeatureState {
@@ -49,23 +52,61 @@ export function FeaturesPanel({ restaurantId, state }: { restaurantId: string; s
   );
   const keys = Object.keys(initial);
   const [on, setOn] = useState<Record<string, boolean>>(initial);
-  const save = trpc.admin.setFeatures.useMutation({ onSuccess: () => router.refresh() });
+  // W3-07a: "שמירה" stages the diff; the write happens on confirm, with a reason.
+  const [staged, setStaged] = useState<StagedField[] | null>(null);
+  const save = trpc.admin.setFeatures.useMutation({
+    onSuccess: () => {
+      setStaged(null);
+      router.refresh();
+    },
+  });
 
   const changed = keys.filter((k) => on[k] !== initial[k]);
+  const active = activeFeatures(state);
+  const sourceLabel = (s: FeatureSource) => t(`features.source.${s}`);
 
-  function submit() {
+  function stage() {
     if (changed.length === 0) return;
-    const list = changed.map((k) => `${k}: ${on[k] ? '✓' : '✗'}`).join('\n');
-    if (!window.confirm(t('features.confirm', { count: changed.length, list }))) return;
-    save.mutate({ restaurantId, features: Object.fromEntries(changed.map((k) => [k, on[k] === true])) });
+    save.reset();
+    setStaged(
+      changed.map((k) => ({
+        key: `feature.${k}`,
+        label: k,
+        before: initial[k] ? t('staged.on') : t('staged.off'),
+        after: on[k] ? t('staged.on') : t('staged.off'),
+      })),
+    );
+  }
+
+  function confirm(reason: string) {
+    save.mutate({
+      restaurantId,
+      features: Object.fromEntries(changed.map((k) => [k, on[k] === true])),
+      reason,
+    });
+  }
+
+  function cancel() {
+    setStaged(null);
+    setOn(initial);
   }
 
   return (
     <section className="mt-6 rounded-xl border border-line bg-surface p-5 shadow-card">
-      <h2 className="mb-1 font-mono text-xs font-semibold uppercase tracking-wider text-subtle">
-        {t('features.title')}
-      </h2>
+      <h2 className="mb-1 text-sm font-semibold text-subtle">{t('features.title')}</h2>
       <p className="mb-3 text-xs text-muted">{t('features.hint')}</p>
+      <div className="mb-3 rounded-lg border border-line bg-surface-2 px-3 py-2" data-testid="active-features">
+        <p className="text-xs font-semibold text-ink">
+          {t('features.activeTitle', { count: active.length, total: keys.length })}
+        </p>
+        {active.length ? (
+          <p className="mt-1 text-xs text-muted" dir="ltr">
+            {active.join(' · ')}
+          </p>
+        ) : (
+          <p className="mt-1 text-xs text-subtle">{t('features.activeNone')}</p>
+        )}
+      </div>
       {state.all ? (
         <p className="mb-3 rounded-lg border border-line bg-surface-2 px-3 py-2 text-xs text-ink">
           {t('features.allNote')}
@@ -76,6 +117,7 @@ export function FeaturesPanel({ restaurantId, state }: { restaurantId: string; s
         <Button
           size="sm"
           variant="secondary"
+          disabled={staged !== null}
           onClick={() => setOn((prev) => ({ ...prev, ...Object.fromEntries(PILOT_DEFAULTS.map((k) => [k, true])) }))}
         >
           {t('features.pilotDefaults')}
@@ -85,11 +127,12 @@ export function FeaturesPanel({ restaurantId, state }: { restaurantId: string; s
 
       <div className="overflow-x-auto">
         <table className="w-full text-start text-sm">
-          <thead className="border-b border-line font-mono text-xs uppercase tracking-wider text-subtle">
+          <thead className="border-b border-line text-xs text-subtle">
             <tr>
               <th className="px-2 py-2 text-start font-medium">{t('features.colKey')}</th>
               <th className="px-2 py-2 text-start font-medium">{t('features.colOn')}</th>
               <th className="px-2 py-2 text-start font-medium">{t('features.colEffective')}</th>
+              <th className="px-2 py-2 text-start font-medium">{t('features.colSource')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -107,6 +150,7 @@ export function FeaturesPanel({ restaurantId, state }: { restaurantId: string; s
                       id={`feature-${k}`}
                       type="checkbox"
                       checked={on[k] === true}
+                      disabled={staged !== null}
                       onChange={(e) => setOn((prev) => ({ ...prev, [k]: e.target.checked }))}
                     />
                   </td>
@@ -119,6 +163,9 @@ export function FeaturesPanel({ restaurantId, state }: { restaurantId: string; s
                       <span className="text-subtle">{t('features.effectiveOff')}</span>
                     )}
                   </td>
+                  <td className="px-2 py-1.5 text-xs text-muted" data-source={featureSource(state, k)}>
+                    {sourceLabel(featureSource(state, k))}
+                  </td>
                 </tr>
               );
             })}
@@ -126,24 +173,31 @@ export function FeaturesPanel({ restaurantId, state }: { restaurantId: string; s
         </table>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Button size="sm" onClick={submit} disabled={save.isPending || changed.length === 0}>
-          {save.isPending ? t('features.saving') : t('features.save')}
-        </Button>
-        {changed.length === 0 && !save.isSuccess ? (
-          <span className="text-xs text-subtle">{t('features.noChanges')}</span>
-        ) : null}
-        {save.error ? (
-          <span className="text-xs text-danger">{localizeServerError(save.error, locale, t('generic'))}</span>
-        ) : null}
-        {save.isSuccess ? <span className="text-xs text-primary">{t('features.saved')}</span> : null}
-        {/* G-08 kill switch: the save stuck, but releasing the held invoices did not (or not all) — the ops fallback. */}
-        {save.data && 'release' in save.data && releaseNotice(save.data.release, restaurantId) ? (
-          <span className="text-xs text-danger" dir="ltr">
-            {releaseNotice(save.data.release, restaurantId)}
-          </span>
-        ) : null}
-      </div>
+      {staged ? (
+        <StagedChange
+          fields={staged}
+          pending={save.isPending}
+          error={save.error ? localizeServerError(save.error, locale, t('generic')) : null}
+          onConfirm={confirm}
+          onCancel={cancel}
+        />
+      ) : (
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="secondary" onClick={stage} disabled={changed.length === 0}>
+            {t('staged.review')}
+          </Button>
+          {changed.length === 0 && !save.isSuccess ? (
+            <span className="text-xs text-subtle">{t('features.noChanges')}</span>
+          ) : null}
+          {save.isSuccess ? <span className="text-xs text-primary">{t('features.saved')}</span> : null}
+        </div>
+      )}
+      {/* G-08 kill switch: the save stuck, but releasing the held invoices did not (or not all) — the ops fallback. */}
+      {save.data && 'release' in save.data && releaseNotice(save.data.release, restaurantId) ? (
+        <p className="mt-2 text-xs text-danger" dir="ltr">
+          {releaseNotice(save.data.release, restaurantId)}
+        </p>
+      ) : null}
     </section>
   );
 }

@@ -121,3 +121,38 @@ test('cancel restores the form and writes nothing', async ({ page }) => {
   expect(await roleOf(f.restaurantId, f.memberId)).toBe('receiver');
   expect(await auditAfter(f.restaurantId, 'admin.role_set', f.memberId)).toHaveLength(0);
 });
+
+test('a feature flag change is staged, needs a reason, and shows its source', async ({ page }) => {
+  test.setTimeout(180_000);
+  const f = await adminFixture();
+  // A throwaway restaurant: toggling flags on the demo tenant would leak into other specs.
+  const sql = e2eSql();
+  let restaurantId: string;
+  try {
+    const [r] = await sql<{ id: string }[]>`
+      insert into restaurants (name, settings) values (${`W3-07a flags ${randomBytes(3).toString('hex')}`}, ${sql.json({ features: { contracts: true } })})
+      returning id`;
+    restaurantId = r!.id;
+  } finally {
+    await sql.end();
+  }
+  await signInAsAdmin(page, f.adminEmail, f.secret);
+  await page.goto(`/admin/restaurants/${restaurantId}`);
+
+  // "פיצ׳רים פעילים" names what is in effect, and each row says why.
+  await expect(page.getByTestId('active-features')).toContainText('contracts');
+  await expect(page.locator('tr:has(#feature-contracts) [data-source]')).toHaveAttribute('data-source', 'stored');
+
+  // Toggling only stages it; nothing is written until confirm with a reason.
+  await page.locator('#feature-contracts').uncheck();
+  await page.getByRole('button', { name: 'לבדיקה ואישור' }).last().click();
+  const card = page.getByTestId('staged-change');
+  await expect(card).toBeVisible();
+  await expect(card.getByRole('button', { name: 'אישור השינוי' })).toBeDisabled();
+  await card.getByLabel('סיבה (חובה)').fill('כיבוי לבדיקה');
+  await card.getByRole('button', { name: 'אישור השינוי' }).click();
+  await expect(card).toBeHidden();
+
+  const rows = await auditAfter(restaurantId, 'admin.features', restaurantId);
+  expect(rows[0]?.after).toMatchObject({ contracts: false, reason: 'כיבוי לבדיקה' });
+});
