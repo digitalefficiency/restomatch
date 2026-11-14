@@ -1,0 +1,35 @@
+diff --git a/packages/api/src/retention.ts b/packages/api/src/retention.ts
+--- a/packages/api/src/retention.ts
++++ b/packages/api/src/retention.ts
+@@ -1,4 +1,5 @@
+ import { and, count, eq, isNotNull, isNull, leads, lt, verificationTokens, type Database } from '@restomatch/db';
++import { minimiseOutboxPayloads } from './notifications/send/outboxMinimise';
+ 
+ /**
+  * Retention / data-minimization engine (E.8 — Amendment 13 minimization).
+@@ -37,6 +38,8 @@
+   expiredVerificationTokens: number;
+   unsubscribedLeads: number;
+   staleLeads: number;
++  /** Finished outbox rows whose heavy payload keys (__html, __attachments) are / would be stripped (H-05). */
++  minimisedOutboxRows: number;
+ }
+ 
+ function daysAgo(now: Date, days: number): Date {
+@@ -82,6 +85,9 @@
+   const unsubscribedLeads = Number(unsubRow?.n ?? 0);
+   const staleLeads = Number(staleRow?.n ?? 0);
+ 
++  // H-05: markSent retains the payload; strip the heavy keys 30 days after a row is final.
++  const { rows: minimisedOutboxRows } = await minimiseOutboxPayloads(db, { now, dryRun });
++
+   if (!dryRun) {
+     if (expiredVerificationTokens > 0) {
+       await db.delete(verificationTokens).where(expiredTokenPred);
+@@ -100,5 +106,6 @@
+     expiredVerificationTokens,
+     unsubscribedLeads,
+     staleLeads,
++    minimisedOutboxRows,
+   };
+ }
