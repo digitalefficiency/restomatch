@@ -8,9 +8,12 @@ import { e2eSql } from './helpers';
  * substring `hasText` filter can match two lines. The ✓ button's aria-label is exact.
  */
 function countLine(page: Page, name: string) {
-  return page
-    .getByTestId('count-line')
-    .filter({ has: page.getByRole('button', { name: `הגיע כמו בהזמנה — ${name}`, exact: true }) });
+  // The label may wrap a mixed-direction name in bidi isolates (U+2066–U+2069): match the
+  // whole label, isolates allowed around the name, nothing else.
+  const iso = '[\\u2066-\\u2069]*';
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const label = new RegExp(`^הגיע כמו בהזמנה — ${iso}${escaped}${iso}$`);
+  return page.getByTestId('count-line').filter({ has: page.getByRole('button', { name: label }) });
 }
 
 /**
@@ -62,9 +65,14 @@ async function freshPo(tag: string, n: number): Promise<Po> {
       select id, canonical_name as name from products
       where restaurant_id = ${r!.id} and canonical_name ~ '[א-ת]' order by canonical_name limit ${n}`;
     if (prods.length < n) throw new Error(`the e2e seed has only ${prods.length} Hebrew products`);
+    // Due within the hour, but never past today's Israel midnight: the board (and its offline snapshot)
+    // lists TODAY's deliveries, so a run between 23:00 and 00:00 must not date the truck tomorrow.
     const [po] = await sql<{ id: string }[]>`
       insert into purchase_orders (restaurant_id, supplier_id, expected_delivery_at, status, source, notes)
-      values (${r!.id}, ${sup!.id}, now() + interval '1 hour', 'sent', 'manual', ${`e2e-w205-${tag}`}) returning id`;
+      values (${r!.id}, ${sup!.id},
+              least(now() + interval '1 hour',
+                    ((now() at time zone 'Asia/Jerusalem')::date + 1)::timestamp at time zone 'Asia/Jerusalem' - interval '5 minutes'),
+              'sent', 'manual', ${`e2e-w205-${tag}`}) returning id`;
     const lines: Po['lines'] = [];
     for (const p of prods) {
       const [pl] = await sql<{ id: string }[]>`

@@ -12,12 +12,14 @@ import {
   type Database,
   type UserRole,
 } from '@restomatch/db';
+import { joinAddressKey } from '../_lib/joinFlow';
 
 /** Owner connection on the test DB (bypasses RLS) — seeding + assertions only. */
 export const ownerDb: Database = createDb(testDbUrl());
 
 const createdUsers: string[] = [];
 const createdRestaurants: string[] = [];
+const inviteEmails = new Set<string>();
 let seq = 0;
 
 export function uniqueEmail(tag: string): string {
@@ -45,6 +47,7 @@ export async function makeInvite(opts: {
   expiresInMs?: number;
   status?: 'pending' | 'accepted' | 'revoked' | 'expired';
 }): Promise<{ token: string; id: string }> {
+  inviteEmails.add(opts.email);
   const token = randomBytes(32).toString('base64url');
   const [inv] = await ownerDb
     .insert(invitations)
@@ -78,8 +81,13 @@ export async function cleanup(): Promise<void> {
       .from(invitations)
       .where(inArray(invitations.restaurantId, createdRestaurants));
     for (const { id } of invs) {
-      for (const prefix of ['join:', 'join-fail:']) {
-        await ownerDb.delete(verificationTokens).where(eq(verificationTokens.identifier, `${prefix}${id}`));
+      await ownerDb.delete(verificationTokens).where(eq(verificationTokens.identifier, `join:${id}`));
+    }
+    // address-keyed ceilings (B5)
+    for (const email of inviteEmails) {
+      const k = joinAddressKey(email);
+      for (const prefix of ['join-fail:', 'join-failtotal:', 'join-send:', 'join-send-d:']) {
+        await ownerDb.delete(verificationTokens).where(eq(verificationTokens.identifier, `${prefix}${k}`));
       }
     }
     await ownerDb.delete(restaurants).where(inArray(restaurants.id, createdRestaurants));

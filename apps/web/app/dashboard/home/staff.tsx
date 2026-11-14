@@ -144,7 +144,7 @@ async function DishesOverTarget({ caller, t, locale }: { caller: HomeCaller<'che
       {!res.enabled || res.alerts.length === 0 ? (
         <p className="mt-3 text-sm font-semibold text-primary">{t('chef.dishesNone')}</p>
       ) : (
-        <ul className="mt-3 divide-y divide-line">
+        <ul className="mt-3 divide-y divide-line" data-record="">
           {res.alerts.slice(0, 5).map((a) => (
             <li key={a.recipeId}>
               <Link

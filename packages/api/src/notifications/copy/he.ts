@@ -82,6 +82,10 @@ export const he = {
     reviewSubject: 'דרושה החלטה: {count, plural, one {פער אחד} two {שני פערים} other {# פערים}} לבדיקה בחשבונית מ-{supplier}',
     reviewPreview: '{count, plural, one {פער אחד ממתין} two {שני פערים ממתינים} other {# פערים ממתינים}} לבדיקה.',
     reviewFound: '{count, plural, one {פער אחד} two {שני פערים} other {# פערים}} לבדיקה בחשבונית מ-{supplier}.',
+    /** The invoice still waits for its order link: no ₪ to claim yet (W2-04, Train C B1). */
+    pendingSubject: 'ממתינה לקישור להזמנה: {count, plural, one {פער אחד} two {שני פערים} other {# פערים}} בחשבונית מ-{supplier}',
+    pendingPreview: 'החשבונית ממתינה לקישור להזמנה, ואז יתברר הסכום לבקשת זיכוי.',
+    pendingFound: '{count, plural, one {פער אחד} two {שני פערים} other {# פערים}} בחשבונית מ-{supplier}, שממתינה לקישור להזמנה.',
     heading: 'דרושה החלטה על חשבונית',
     found: 'נמצאו {count, plural, one {פער אחד} two {שני פערים} other {# פערים}} בחשבונית מ-{supplier}.',
     atRisk: 'סכום בפערים: {amount}',
@@ -105,6 +109,10 @@ export const he = {
     heading: 'סיכום סוף יום · {date}',
     intro: 'מה פתוח לטיפול ומה נמצא היום:',
     openLabel: 'זיכויים פתוחים',
+    /** No ₪ to name (W2-04, Train C R4-2): never '(₪0)'. */
+    subjectNoAmount: 'סיכום יומי · {count, plural, =0 {אין זיכויים פתוחים} one {זיכוי פתוח אחד} two {שני זיכויים פתוחים} other {# זיכויים פתוחים}}',
+    /** Invoices whose claimable rows wait for an order link: not open credits yet, no ₪. */
+    pendingLinkLabel: 'ממתינות לקישור להזמנה',
     caughtLabel: 'פערים שנמצאו היום',
     pendingLabel: 'ממתינים להחלטה',
     topLabel: 'הספק עם הכי הרבה זיכויים',

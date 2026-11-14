@@ -143,7 +143,7 @@ export function BreakdownChart({
   return (
     <figure aria-label={label}>
       <figcaption className="sr-only">{label}</figcaption>
-      <ul className={compact ? 'space-y-1.5' : 'space-y-3'}>
+      <ul className={compact ? 'space-y-1.5' : 'space-y-3'} data-record="">
         {rows.map((r) => (
           <li key={r.key}>
             <div className="flex items-baseline justify-between gap-3 text-sm">

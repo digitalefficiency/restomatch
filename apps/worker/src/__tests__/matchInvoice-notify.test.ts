@@ -18,11 +18,12 @@ describe('match-invoice notification copy', () => {
     const link = approvalsGoLink('rid-1', 'inv-1', 'https://app.test');
     expect(new URL(link).searchParams.get('r')).toBe('rid-1');
     expect(new URL(link).searchParams.get('to')).toBe('/dashboard/approvals?invoice=inv-1');
-    const body = approvalSummary(3, 10_480, link);
+    const body = approvalSummary(3, claimFigure(10_480, 0), link);
     expect(body).toContain('3 פערים');
     expect(body).toContain(formatIlsAgorot(10_480, { maximumFractionDigits: 2 }));
     expect(body).toContain(link);
-    expect(approvalSummary(1, 0, link)).not.toMatch(/₪/);
+    expect(approvalSummary(1, null, link)).not.toMatch(/₪/);
+    expect(approvalSummary(1, null, link, { pendingLink: true })).toContain('ממתינה לקישור להזמנה');
   });
 
   it('a duplicate invoice is never "no amount": its incl.-VAT claim is named on its own (warden MEDIUM-1)', () => {
@@ -30,7 +31,7 @@ describe('match-invoice notification copy', () => {
     expect(claimFigure(0, 117_000)).toBe(`${incl} כולל מע״מ (חשבונית כפולה)`);
     expect(claimFigure(10_480, 117_000)).toBe(`${formatIlsAgorot(10_480, { maximumFractionDigits: 2 })} + ${incl} כולל מע״מ (חשבונית כפולה)`);
     expect(claimFigure(0, 0)).toBeNull();
-    const body = approvalSummary(1, 0, 'https://app.test/x', 117_000);
+    const body = approvalSummary(1, claimFigure(0, 117_000), 'https://app.test/x');
     expect(body).toContain(incl);
     expect(body).toContain('לבקשת זיכוי');
   });

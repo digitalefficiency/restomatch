@@ -58,7 +58,7 @@ describe('close checklist steps', () => {
     expect(progress(steps)).toEqual({ done: 4, total: 7, open: 2 });
   });
 
-  it('each step links to the queue where its number lives (VAT has no screen: no button)', () => {
+  it('each step links to the queue where its number lives (VAT: the AU-08 card below the checklist)', () => {
     const href = Object.fromEntries(buildSteps(clean).map((s) => [s.key, s.href]));
     expect(href).toEqual({
       unchecked: '/dashboard/invoices?month=-1&view=awaiting',
@@ -66,7 +66,7 @@ describe('close checklist steps', () => {
       claims: '/dashboard/recovery',
       consolidated: '/dashboard/suppliers/ledger',
       deliveryNotes: '/dashboard/suppliers/ledger',
-      vat: null,
+      vat: '#vat-at-risk',
       exports: '/dashboard/exports',
     });
   });
@@ -92,6 +92,8 @@ describe('close month', () => {
     expect(resolveMonth('2026-12', now)).toBe('2026-11');
     expect(resolveMonth('2026-13', now)).toBe('2026-11');
     expect(resolveMonth('x', now)).toBe('2026-11');
+    expect(resolveMonth('2024-11', now)).toBe('2024-11'); // 24 back: the register's limit
+    expect(resolveMonth('2024-10', now)).toBe('2026-11'); // older: the API would reject it
   });
 
   it('steps across the year boundary', () => {

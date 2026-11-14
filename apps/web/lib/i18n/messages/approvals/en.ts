@@ -144,6 +144,7 @@ export const en: Shape<typeof he> = {
     fixInvoice: 'Open invoice',
     more: 'More actions',
     waiting: 'Waiting {age}',
+    age: '{count, plural, =1 {1 day} other {# days}}',
     waitingToday: 'Waiting since today',
     due: 'Due {date}',
     overdue: 'Payment was due {date}',
