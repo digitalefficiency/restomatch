@@ -6,8 +6,9 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ChevronDown, ChevronRight, LogOut, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Search, Settings, ShieldCheck, X } from 'lucide-react';
 import { cn } from '@/lib/components';
+import { Money } from '@/lib/components/money';
+import { badgeAria, cappedCount, useNavBadges, type NavBadges, type NavBadgeValue } from '@/lib/components/notifications';
 import { useLocale, useT } from '@/lib/i18n/client';
-import { formatNumber } from '@/lib/i18n/format';
 import { originalProps } from '@/lib/i18n/original';
 import { nav } from '@/lib/i18n/messages/nav';
 import {
@@ -39,7 +40,7 @@ export const SUPPORT_LINKS = [
 ] as const;
 
 const focusRing =
-  'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+  'focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
 
 interface ShellUi {
   rail: boolean;
@@ -217,22 +218,77 @@ function useInertApp(open: boolean) {
 
 /* ───────────────────────────── badges ───────────────────────────── */
 
-/** Per-key nav badges the layout already knows (W1: the open price-alert count on contracts). */
-export type NavBadges = Partial<Record<string, number>>;
+export type { NavBadges };
 
-function NavBadge({ count, dot = false }: { count?: number; dot?: boolean }) {
+/**
+ * One nav badge (W2-08 §5.3) from the task spine (`nav.badges`). ₪ on money
+ * items (0 dp, <Money>), a count on capture items, capped at 99+, hidden at 0.
+ * Danger only when something blocks a payment. Never a tab stop: the link's
+ * accessible name carries it (`BadgeSr`).
+ */
+function NavBadge({ value, dot = false }: { value?: NavBadgeValue; dot?: boolean }) {
   const locale = useLocale();
-  if (!count || count <= 0) return null;
+  const t = useT(nav);
+  if (!value || value.count <= 0) return null;
+  // A hover label for sighted users (the words also reach AT via BadgeSr): what the number IS.
+  const title = badgeAria('', value, locale, {
+    items: (count) => t('badge.items', { count }),
+    atRisk: (amount) => t('badge.atRisk', { amount }),
+    owed: (amount) => t('badge.owed', { amount }),
+    blocking: t('badge.blocking'),
+  }).replace(/^,\s*/, '');
   if (dot) {
-    return <span aria-hidden="true" className="absolute end-1 top-1 h-2 w-2 rounded-full bg-ink/70 ring-2 ring-surface" />;
+    return (
+      <span
+        aria-hidden="true"
+        data-badge-dot={value.block ? 'block' : 'on'}
+        className={cn('absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-surface', value.block ? 'bg-danger' : 'bg-ink/70')}
+      />
+    );
   }
-  // Neutral: a price alert is not a block (exec-desktop-20); danger is reserved for blocking items.
   return (
-    <span className="ms-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-surface-2 px-1.5 text-xs font-semibold tabular-nums text-ink ring-1 ring-line">
-      {count > 99 ? `${formatNumber(99, locale)}+` : formatNumber(count, locale)}
+    <span
+      aria-hidden="true"
+      title={title}
+      data-nav-badge={value.block ? 'block' : value.tone}
+      className={cn(
+        'ms-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-semibold tabular-nums',
+        value.block ? 'bg-danger text-on-primary' : 'bg-surface-2 text-ink ring-1 ring-line',
+      )}
+    >
+      {value.ilsAgorot !== null && value.ilsAgorot > 0 ? <Money agorot={value.ilsAgorot} context="inline" decimals={0} /> : cappedCount(value.count, locale)}
     </span>
   );
 }
+
+/**
+ * The badge's words for the link's accessible name, as an sr-only suffix after
+ * the visible label (so the name starts with what is shown: no aria-label
+ * override): "אישורים, 4 פריטים, ‏296 ₪ בסיכון".
+ */
+/**
+ * The badge's words, as the link's DESCRIPTION (`aria-describedby`): announced
+ * after the name, never part of the visible text or the accessible name (so the
+ * name still starts with what is shown). `hidden`: no layout, no innerText.
+ */
+function BadgeSr({ id, label, value }: { id: string; label: string; value?: NavBadgeValue }) {
+  const t = useT(nav);
+  const locale = useLocale();
+  if (!value || value.count <= 0) return null;
+  const full = badgeAria(label, value, locale, {
+    items: (count) => t('badge.items', { count }),
+    atRisk: (amount) => t('badge.atRisk', { amount }),
+    owed: (amount) => t('badge.owed', { amount }),
+    blocking: t('badge.blocking'),
+  });
+  return (
+    <span id={id} hidden data-badge-sr="">
+      {full.slice(label.length).replace(/^,\s*/, '')}
+    </span>
+  );
+}
+
+const badgeId = (where: string, key: string) => `rm-badge-${where}-${key}`;
 
 /* ───────────────────────────── desktop sidebar ───────────────────────────── */
 
@@ -246,7 +302,7 @@ function SidebarItem({
   def: RouteDef;
   active: boolean;
   rail: boolean;
-  badge?: number;
+  badge?: NavBadgeValue;
   label: string;
 }) {
   const Icon = iconFor(def.key);
@@ -256,6 +312,7 @@ function SidebarItem({
         href={def.path}
         aria-current={active ? 'page' : undefined}
         title={rail ? label : undefined}
+        aria-describedby={badge && badge.count > 0 ? badgeId('side', def.key) : undefined}
         className={cn(
           'relative flex h-9 items-center gap-2.5 rounded-lg text-sm transition-colors',
           rail ? 'justify-center px-0' : 'ps-3 pe-2',
@@ -267,7 +324,8 @@ function SidebarItem({
         {active ? <span aria-hidden="true" className="absolute inset-y-1.5 start-0 w-[3px] rounded-full bg-primary" /> : null}
         <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
         <span className={rail ? 'sr-only' : 'min-w-0 truncate'}>{label}</span>
-        <NavBadge count={badge} dot={rail} />
+        <BadgeSr id={badgeId('side', def.key)} label={label} value={badge} />
+        <NavBadge value={badge} dot={rail} />
       </Link>
     </li>
   );
@@ -336,15 +394,14 @@ function SidebarGroup({
  */
 export function Sidebar({
   viewer,
-  badges,
   restaurantName,
   roleLabel,
 }: {
   viewer: NavViewer;
-  badges: NavBadges;
   restaurantName: string;
   roleLabel: string;
 }) {
+  const badges = useNavBadges();
   const t = useT(nav);
   const pathname = usePathname();
   const { rail, toggleRail } = useShellUi();
@@ -750,7 +807,8 @@ function useKeyboardOpen(): boolean {
  * truncate. Hidden on field routes and while the on-screen keyboard is open;
  * the shell publishes `--rm-bottomnav-h` accordingly.
  */
-export function BottomBar({ viewer, badges }: { viewer: NavViewer; badges: NavBadges }) {
+export function BottomBar({ viewer }: { viewer: NavViewer }) {
+  const badges = useNavBadges();
   const t = useT(nav) as unknown as (key: string) => string;
   const pathname = usePathname();
   const { moreOpen, openMore } = useShellUi();
@@ -788,13 +846,15 @@ export function BottomBar({ viewer, badges }: { viewer: NavViewer; badges: NavBa
               <Link
                 href={def.path}
                 aria-current={active ? 'page' : undefined}
+                aria-describedby={(badges[def.key]?.count ?? 0) > 0 ? badgeId('bar', def.key) : undefined}
                 className={cn(slot, focusRing, active ? 'font-semibold text-primary' : 'text-muted hover:text-ink')}
               >
                 <span className={cn(pill, active && 'bg-primary/12')}>
                   <Icon className="h-6 w-6" aria-hidden="true" />
-                  <NavBadge count={badges[def.key]} dot />
+                  <NavBadge value={badges[def.key]} dot />
                 </span>
                 <span className="max-w-full whitespace-nowrap">{t(`bar.${label}`)}</span>
+                <BadgeSr id={badgeId('bar', def.key)} label={t(`bar.${label}`)} value={badges[def.key]} />
               </Link>
             </li>
           );
@@ -834,19 +894,18 @@ export function BottomBar({ viewer, badges }: { viewer: NavViewer; badges: NavBa
  */
 export function MoreSheet({
   viewer,
-  badges,
   branchList,
   language,
   logout,
 }: {
   viewer: NavViewer;
-  badges: NavBadges;
   /** The branch switcher (list variant) for users with ≥2 memberships. */
   branchList?: React.ReactNode;
   /** The language control (picker or עב/EN toggle). */
   language: React.ReactNode;
   logout: () => Promise<void>;
 }) {
+  const badges = useNavBadges();
   const t = useT(nav) as unknown as (key: string) => string;
   const pathname = usePathname();
   const { moreOpen, closeMore, openSearch } = useShellUi();
@@ -943,6 +1002,7 @@ export function MoreSheet({
                         <Link
                           href={d.path}
                           aria-current={active ? 'page' : undefined}
+                          aria-describedby={(badges[d.key]?.count ?? 0) > 0 ? badgeId('more', d.key) : undefined}
                           className={cn(
                             'flex min-h-16 items-center gap-2.5 rounded-xl border px-3 py-2 text-sm',
                             focusRing,
@@ -953,7 +1013,8 @@ export function MoreSheet({
                         >
                           <Icon className="h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
                           <span className="min-w-0 flex-1 break-words leading-5">{t(`links.${d.key}`)}</span>
-                          <NavBadge count={badges[d.key]} />
+                          <BadgeSr id={badgeId('more', d.key)} label={t(`links.${d.key}`)} value={badges[d.key]} />
+                          <NavBadge value={badges[d.key]} />
                         </Link>
                       </li>
                     );

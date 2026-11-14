@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { expect, test, type Page, type Route } from '@playwright/test';
 import { DEMO_RESTAURANT_NAME, OWNER_STATE } from './env';
-import { e2eSql } from './helpers';
+import { collectPageErrors, e2eSql } from './helpers';
 
 /**
  * W1-06 · Delivery Check v1 and never losing field work — the receiver, on a
@@ -225,6 +225,27 @@ test.beforeEach(async ({ page }) => {
     { name: 'rm_cookie_consent', value: 'necessary', url },
   ]);
   await page.context().addCookies(receiverCookies);
+});
+
+test('a PO due outside today (after midnight in the restaurant tz) opens with no NOT_FOUND; its receipt resumes after a reload', async ({ page }) => {
+  // orders-received.spec failed between 23:00 and 24:00 Israel time: a PO due in an hour
+  // was not in today's list, so the page probed getReceipt({poId}) and the reported
+  // NOT_FOUND reached the browser console. Two days out is outside "today" at any hour.
+  const po = await freshPo('outside-today', { lines: 2 });
+  const sql = e2eSql();
+  try {
+    await sql`update purchase_orders set expected_delivery_at = now() + interval '2 days' where id = ${po.poId}`;
+  } finally {
+    await sql.end();
+  }
+  const errors = collectPageErrors(page);
+  await openPo(page, po.poId);
+  await page.getByTestId('scan-no-invoice').click();
+  await expect(page.getByTestId('delivery-check')).toBeVisible({ timeout: 30_000 });
+  // The receipt now exists: a reload finds it through the order's own receipt status.
+  await openPo(page, po.poId);
+  await expect(page.getByTestId('delivery-check')).toBeVisible({ timeout: 30_000 });
+  expect(errors, errors.join('\n')).toEqual([]);
 });
 
 test('invoice 10 = order 10, 8 arrived: recorded as qty_received 8 in ≤4 taps; no signed URL kept as evidence', async ({ page }) => {
@@ -700,11 +721,12 @@ test('sign-out with a queued invoice photo offline: a sheet names the count; "wa
   await page.evaluate(
     ({ userId, restaurantId }) =>
       new Promise<void>((resolve, reject) => {
-        const req = indexedDB.open('restomatch-receiver', 1);
-        req.onupgradeneeded = () => req.result.createObjectStore('photos', { keyPath: 'clientUploadId' });
+        // W2-05: the photo queue lives in the field outbox (key photo:<clientUploadId>).
+        const req = indexedDB.open('restomatch-outbox', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('items', { keyPath: 'key' });
         req.onsuccess = () => {
-          const tx = req.result.transaction('photos', 'readwrite');
-          tx.objectStore('photos').put({
+          const tx = req.result.transaction('items', 'readwrite');
+          const photo = {
             clientUploadId: '11111111-1111-4111-8111-111111111111',
             restaurantId,
             userId,
@@ -716,6 +738,22 @@ test('sign-out with a queued invoice photo offline: a sheet names the count; "wa
             createdAt: Date.now(),
             attempts: 0,
             lastError: null,
+          };
+          tx.objectStore('items').put({
+            key: `photo:${photo.clientUploadId}`,
+            kind: 'photo',
+            group: null,
+            payload: photo,
+            restaurantId: photo.restaurantId,
+            userId: photo.userId,
+            capturedByName: null,
+            createdAt: photo.createdAt,
+            revision: 1,
+            attempts: 0,
+            nextAttemptAt: photo.createdAt,
+            lastError: null,
+            status: 'pending',
+            warnedAt: null,
           });
           tx.oncomplete = () => resolve();
           tx.onerror = () => reject(tx.error);
@@ -736,15 +774,79 @@ test('sign-out with a queued invoice photo offline: a sheet names the count; "wa
   const left = await page.evaluate(
     () =>
       new Promise<number>((resolve) => {
-        const req = indexedDB.open('restomatch-receiver', 1);
+        // W2-05: the photo queue lives in the field outbox; count its photo:* items.
+        const req = indexedDB.open('restomatch-outbox', 1);
         req.onsuccess = () => {
-          const r = req.result.transaction('photos').objectStore('photos').count();
-          r.onsuccess = () => resolve(r.result);
+          const r = req.result.transaction('items').objectStore('items').getAllKeys();
+          r.onsuccess = () => resolve(r.result.filter((k) => String(k).startsWith('photo:')).length);
         };
       }),
   );
   expect(left, 'the queued photo was not deleted').toBe(1);
   await context.setOffline(false);
+});
+
+test('a receiver whose saved language is English gets English in the FIRST paint (no Hebrew → English flash)', async ({ page, context }) => {
+  const sql = e2eSql();
+  const setPref = (locale: string | null) => sql`
+    update memberships m set preferred_locale = ${locale}
+    from users u where u.id = m.user_id and u.email = ${RECEIVER}`;
+  try {
+    await setPref('en');
+    // This device never chose a language: no rm_locale cookie.
+    const url = test.info().project.use.baseURL!;
+    await context.clearCookies();
+    await context.addCookies([...receiverCookies.filter((c) => c.name !== 'rm_locale'), { name: 'rm_cookie_consent', value: 'necessary', url }]);
+    const res = await page.request.get('/dashboard/receiving');
+    const html = await res.text();
+    expect(html, 'the server-rendered first paint is already English').toMatch(/<html[^>]*lang="en"/);
+    expect(html).toMatch(/<html[^>]*dir="ltr"/);
+  } finally {
+    await setPref(null);
+    await sql.end();
+  }
+});
+
+test('a registration error says "not saved" with one-tap retry — never a silent count without the invoice', async ({ page }) => {
+  test.setTimeout(150_000);
+  const po = await freshPo('register-fail');
+  let fail = true;
+  await page.route('**/api/trpc/receiving.registerInvoice**', (route) =>
+    fail
+      ? route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify([{ error: { json: { message: 'boom', code: -32603, data: { code: 'INTERNAL_SERVER_ERROR', httpStatus: 500 } } } }]),
+        })
+      : route.continue(),
+  );
+  await openPo(page, po.poId);
+  await page.getByTestId('scan-input').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
+  await expect(page.getByTestId('scan-process')).toBeEnabled({ timeout: 60_000 });
+  await page.getByTestId('scan-process').tap();
+  await expect(page.getByTestId('register-failed')).toContainText('החשבונית לא נשמרה — צלמו שוב');
+  // Not quietly dropped into a count with no invoice.
+  await expect(page.getByTestId('delivery-check')).toHaveCount(0);
+  fail = false;
+  await page.getByTestId('register-retry').tap();
+  await expect(page.getByTestId('register-failed')).toHaveCount(0);
+  await expect(page.getByTestId('processing-elapsed').or(page.getByRole('heading', { name: 'תוצאת ההצלבה' }))).toBeVisible({ timeout: 30_000 });
+});
+
+test('dead Wi-Fi (navigator.onLine stays true): exactly one "no connection" chip on the delivery', async ({ page }) => {
+  test.setTimeout(120_000);
+  const po = await freshPo('dead-wifi');
+  await openPo(page, po.poId);
+  // A captive portal / dead access point: every request fails, the browser still says "online".
+  await page.route('**/api/trpc/**', (r) => r.abort('internetdisconnected'));
+  await page.route('**/api/healthz**', (r) => r.abort('internetdisconnected'));
+  expect(await page.evaluate(() => navigator.onLine)).toBe(true);
+  // The receiver photographs the invoice; the upload fails at the network layer.
+  await page.getByTestId('scan-input').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
+  await expect(page.getByTestId('pwa-offline-banner')).toBeVisible({ timeout: 20_000 });
+  await page.waitForTimeout(500);
+  // One chip — never zero (before: the PWA chip followed window events only, and the shell's had yielded).
+  await expect(page.getByTestId('pwa-offline-banner').or(page.getByTestId('offline-chip'))).toHaveCount(1);
 });
 
 test('offline with a queued photo on a delivery: exactly one status chip, and "N waiting" is not covered (W1-04 seam)', async ({
@@ -771,11 +873,12 @@ test('offline with a queued photo on a delivery: exactly one status chip, and "N
   await page.evaluate(
     ({ userId, restaurantId, poId }) =>
       new Promise<void>((resolve, reject) => {
-        const req = indexedDB.open('restomatch-receiver', 1);
-        req.onupgradeneeded = () => req.result.createObjectStore('photos', { keyPath: 'clientUploadId' });
+        // W2-05: the photo queue lives in the field outbox (key photo:<clientUploadId>).
+        const req = indexedDB.open('restomatch-outbox', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('items', { keyPath: 'key' });
         req.onsuccess = () => {
-          const tx = req.result.transaction('photos', 'readwrite');
-          tx.objectStore('photos').put({
+          const tx = req.result.transaction('items', 'readwrite');
+          const photo = {
             clientUploadId: '22222222-2222-4222-8222-222222222222',
             restaurantId,
             userId,
@@ -787,6 +890,22 @@ test('offline with a queued photo on a delivery: exactly one status chip, and "N
             createdAt: Date.now(),
             attempts: 0,
             lastError: null,
+          };
+          tx.objectStore('items').put({
+            key: `photo:${photo.clientUploadId}`,
+            kind: 'photo',
+            group: null,
+            payload: photo,
+            restaurantId: photo.restaurantId,
+            userId: photo.userId,
+            capturedByName: null,
+            createdAt: photo.createdAt,
+            revision: 1,
+            attempts: 0,
+            nextAttemptAt: photo.createdAt,
+            lastError: null,
+            status: 'pending',
+            warnedAt: null,
           });
           tx.oncomplete = () => resolve();
           tx.onerror = () => reject(tx.error);
@@ -815,10 +934,10 @@ test('offline with a queued photo on a delivery: exactly one status chip, and "N
   await page.evaluate(
     () =>
       new Promise<void>((resolve) => {
-        const req = indexedDB.open('restomatch-receiver', 1);
+        const req = indexedDB.open('restomatch-outbox', 1);
         req.onsuccess = () => {
-          const tx = req.result.transaction('photos', 'readwrite');
-          tx.objectStore('photos').delete('22222222-2222-4222-8222-222222222222');
+          const tx = req.result.transaction('items', 'readwrite');
+          tx.objectStore('items').delete('photo:22222222-2222-4222-8222-222222222222');
           tx.oncomplete = () => resolve();
         };
       }),

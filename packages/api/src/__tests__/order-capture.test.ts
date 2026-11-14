@@ -6,10 +6,12 @@ import {
   notificationsOutbox,
   poLines,
   purchaseOrders,
+  products,
   restaurants,
   supplierCatalogItems,
   suppliers,
 } from '@restomatch/db';
+import { decideLink } from '@restomatch/catalog';
 import { StubOrderTextParser } from '@restomatch/ocr';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
@@ -55,6 +57,28 @@ describe('order capture', () => {
         ['חסה', '3.000', 'ארגז', null, '45.0000'],
       ].sort(),
     );
+  });
+
+  // G-08 (catalog-01): a similar name is a guess, never a link. matchLine is
+  // exact-only today; when W2-06 routes it through decideLink this must hold.
+  it('G-08: "פלפל אדום חריף" is NOT linked to "פלפל אדום" (a guess is never a link)', async () => {
+    await db.insert(products).values({
+      restaurantId: A.restaurantId,
+      supplierId: A.supplierId,
+      canonicalName: 'פלפל אדום',
+      defaultUnit: 'ק״ג',
+    });
+    const r = await capture(`הזמנה ל${A.supplierName} למחר:\n5 ק"ג פלפל אדום חריף`);
+    expect(r).toMatchObject({ status: 'draft', lineCount: 1, mappedCount: 0 });
+    if (r.status !== 'draft') return;
+    const lines = await db.select().from(poLines).where(eq(poLines.poId, r.poId));
+    expect(lines.map((l) => [l.rawDescription, l.productId])).toEqual([['פלפל אדום חריף', null]]);
+    // The shared policy agrees: a 0.667 name match is review, never auto.
+    expect(
+      decideLink([{ productId: 'p', canonicalName: 'פלפל אדום', confidence: 0.667, matchedBy: 'fuzzy' }], {
+        unitPack: 'unknown',
+      }),
+    ).toMatchObject({ decision: 'review', productId: null });
   });
 
   it('matches the supplier by the WhatsApp sender phone (E.164-normalised)', async () => {

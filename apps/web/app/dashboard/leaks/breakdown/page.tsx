@@ -1,5 +1,7 @@
 import Link from 'next/link';
-import { ArrowLeft, ArrowRight, ExternalLink, FileBarChart, FileCheck2, FileText, Hourglass, Info } from 'lucide-react';
+import { permanentRedirect } from 'next/navigation';
+import { ArrowRight, ExternalLink, FileBarChart, FileCheck2, FileText, Hourglass, Info } from 'lucide-react';
+import { WhyLine, whySegments } from '@/lib/components/flags';
 import { auth } from '@/auth';
 import { createServerCaller } from '@/lib/trpc/server';
 import { formatIls } from '@/lib/money';
@@ -11,6 +13,10 @@ import { Badge, Card, SectionHeader, type BadgeTone } from '@/lib/components';
 import { sumAgora } from '../claims/letters';
 import { LeakStateNote, leakStateOf } from '../leak-state';
 import { noDataCtaFor, zeroNoteOf } from '../states';
+import { legacyPeriodRedirect, monthParams } from '../period-url';
+import { leakWhyLabels } from '../why-labels';
+import { LineHistory } from './LineHistory';
+import { HubTabs } from '../hub-tabs';
 import {
   discrepancyLabel,
   displayName,
@@ -33,9 +39,12 @@ import {
 /**
  * Drill-down behind the hero leak number: every invoice that contributed to the
  * month's leak (largest first) with the discrepancy lines that caused it, then
- * the invoices calmly waiting for a PO link. `?m=-1` = previous month. Any
- * view param (period / compare / filters, see lib/components/views) switches
- * to that view; the plain URL stays the classic month drill-down.
+ * the invoices calmly waiting for a PO link. Any view param (period / compare /
+ * filters, see lib/components/views) switches to that view; the plain URL stays
+ * the classic month drill-down. The old `?m=-1` answers a 308 to `?p=…` (W2-09c).
+ * Invoices split by decision 19: unpaid → offset before payment (decide them in
+ * approvals), paid → a credit request; a line is never in both. Every line shows
+ * its verified basis (why-line) and, on demand, its decision history.
  */
 export default async function LeakBreakdownPage({
   searchParams,
@@ -43,11 +52,12 @@ export default async function LeakBreakdownPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
-  const m = Array.isArray(sp.m) ? sp.m[0] : sp.m;
-  const parsed = Number.parseInt(m ?? '0', 10);
+  const legacy = legacyPeriodRedirect('/dashboard/leaks/breakdown', sp, new Date());
+  if (legacy) permanentRedirect(legacy);
   const view = parseView(sp);
   const viewMode = !isDefaultData(view);
-  const monthOffset = viewMode ? 0 : Number.isFinite(parsed) ? Math.min(0, Math.max(-24, parsed)) : 0;
+  // The plain URL is this month; any other period arrives as a view (`p=…`).
+  const monthOffset = 0;
 
   const caller = await createServerCaller();
   const [t, ta, tv, locale] = await Promise.all([getT(leaksNs), getT(approvalsNs), getT(viewsNs), getLocale()]);
@@ -67,12 +77,13 @@ export default async function LeakBreakdownPage({
       : caller.owner.leakBreakdown({ monthOffset, limit: 100 }),
     caller.owner.viewOptions(),
   ]);
+  const proofOn = (await caller.recovery.flags().catch(() => null))?.leakProof ?? false;
   const hero = summary.current;
   const compact = view.density === 'compact';
 
   const ils = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
   const month = rangeLabel(viewMode ? view.period : 'this_month', hero.monthStart, hero.monthEnd, locale);
-  // Claims are month-based (?m=): offer them for the month periods only.
+  // Claims are month-based (W2-10's ?m=): offer them for the month periods only.
   const claimsOffset = !viewMode ? monthOffset : view.period === 'this_month' ? 0 : view.period === 'last_month' ? -1 : null;
   // Every invoice that carries leak (a pending one too — its finding is in the hero); pending
   // invoices without leak wait calmly below.
@@ -87,17 +98,27 @@ export default async function LeakBreakdownPage({
     ? tv('delta.vsSpan', compareSpanLabel(hero, previous, locale, new Date().toISOString()))
     : undefined;
 
+  const why = leakWhyLabels(locale);
+  const unpaid = leaking.filter((r) => r.status !== 'paid');
+  const paid = leaking.filter((r) => r.status === 'paid');
+  const reportHref = (() => {
+    const [y, mm] = monthKey(hero.monthEnd).split('-').map(Number);
+    const qs = new URLSearchParams(monthParams(y!, mm!, new Date())).toString();
+    return `/dashboard/leaks/report${qs ? `?${qs}` : ''}`;
+  })();
+
   const navLink =
     'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm font-semibold text-primary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60';
 
   return (
     <div>
-      <Link href="/dashboard" className={`${navLink} mb-3 -ms-2 text-muted`}>
+      <Link href="/dashboard/leaks" className={`${navLink} mb-3 -ms-2 text-muted`}>
         <ArrowRight className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
-        {t('breakdown.back')}
+        {t('breakdown.backHub')}
       </Link>
 
       <SectionHeader level={1} title={t('breakdown.title')} subtitle={t('breakdown.subtitle', { month })} />
+      <HubTabs active="breakdown" proof={proofOn} />
 
       <ViewToolbar
         page="breakdown"
@@ -172,7 +193,7 @@ export default async function LeakBreakdownPage({
         </div>
         <nav className="flex flex-wrap items-center gap-2" aria-label={month}>
           <Link
-            href={`/dashboard/leaks/report?month=${monthKey(hero.monthEnd)}`}
+            href={reportHref}
             className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary ring-1 ring-line hover:bg-surface-2"
           >
             <FileBarChart className="h-4 w-4" aria-hidden="true" />
@@ -187,22 +208,15 @@ export default async function LeakBreakdownPage({
               {t('claims.open')}
             </Link>
           ) : null}
-          {!viewMode && monthOffset > -24 ? (
-            <Link href={`/dashboard/leaks/breakdown?m=${monthOffset - 1}`} className={navLink}>
+          {!viewMode ? (
+            <Link href="/dashboard/leaks/breakdown?p=last_month" className={navLink}>
               <ArrowRight className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
               {t('breakdown.prevMonth')}
             </Link>
-          ) : null}
-          {!viewMode && monthOffset < 0 ? (
-            <>
-              <Link href={`/dashboard/leaks/breakdown?m=${monthOffset + 1}`} className={navLink}>
-                {t('breakdown.nextMonth')}
-                <ArrowLeft className="h-4 w-4 ltr:-scale-x-100" aria-hidden="true" />
-              </Link>
-              <Link href="/dashboard/leaks/breakdown" className={navLink}>
-                {t('breakdown.thisMonth')}
-              </Link>
-            </>
+          ) : view.period === 'last_month' ? (
+            <Link href="/dashboard/leaks/breakdown" className={navLink}>
+              {t('breakdown.thisMonth')}
+            </Link>
           ) : null}
         </nav>
       </Card>
@@ -218,20 +232,34 @@ export default async function LeakBreakdownPage({
         />
       ) : (
         <div className="space-y-4" data-view-region>
-          {leaking.map((inv) => {
+          {([['unpaid', unpaid], ['paid', paid]] as const).map(([group, list]) =>
+            list.length === 0 ? null : (
+          <section key={group} className="space-y-4" aria-labelledby={`group-${group}`} data-testid={`breakdown-group-${group}`}
+            data-amount={sumAgora(list.map((r) => r.leakIls))}>
+          <h2 id={`group-${group}`} className="text-base font-bold text-ink">
+            {group === 'unpaid'
+              ? t('breakdown.groupUnpaid', { amount: ils(sumAgora(list.map((r) => r.leakIls))) })
+              : t('breakdown.groupPaid', { amount: ils(sumAgora(list.map((r) => r.leakIls))) })}
+          </h2>
+          {list.map((inv) => {
             const supplier = displayName(locale, inv.supplierName, inv.supplierNameEn);
             const rawSum = inv.lines.filter((l) => l.countsAsLeak).reduce((s, l) => s + Math.abs(l.deltaAmount), 0);
             const capped = rawSum - inv.leakIls > 0.005;
+            // Undecided gaps (decision 18: they read "החליטו", never a claim).
+            const undecided = inv.lines.filter(
+              (l) => l.countsAsLeak && Math.abs(l.deltaAmount) >= 0.005 && (l.resolutionStatus === 'open' || l.resolutionStatus === 'escalated'),
+            );
+            const undecidedIls = sumAgora(undecided.map((l) => Math.abs(l.deltaAmount)));
             return (
               <Card key={inv.invoiceId} as="article" elevated padding="none" className="overflow-hidden">
                 <header className="flex flex-col gap-2 border-b border-line p-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
-                    <h2 className="text-base font-bold text-ink">
+                    <h3 className="text-base font-bold text-ink">
                       {supplier || '—'}
                       <span className="ms-2 text-sm font-normal text-muted">
                         {t('breakdown.invoice', { number: inv.invoiceNumber ?? t('breakdown.noNumber') })}
                       </span>
-                    </h2>
+                    </h3>
                     <p className="mt-0.5 flex flex-wrap items-center gap-x-1 text-xs text-subtle">
                       {inv.invoiceDate ? formatDate(inv.invoiceDate, locale, { dateStyle: 'medium' }) : null}
                       {' · '}
@@ -280,6 +308,11 @@ export default async function LeakBreakdownPage({
                                 : t('breakdown.noMoney')
                               : resolutionLabel(ta, l.resolutionStatus)}
                           </p>
+                          {/* W2-09c: the line's verified basis, one line (clamped in compact density). */}
+                          {!noMoney && 'evidence' in l && l.evidence ? (
+                            <WhyLine groups={whySegments(l.evidence.facts, why)} clamp={compact} className="mt-0.5 text-xs" />
+                          ) : null}
+                          {!noMoney ? <LineHistory discrepancyId={l.discrepancyId} /> : null}
                         </div>
                         {noMoney ? null : (
                           <div className="shrink-0 text-start sm:text-end">
@@ -296,14 +329,27 @@ export default async function LeakBreakdownPage({
                   })}
                 </ul>
 
-                <footer className="flex flex-wrap justify-end gap-3 border-t border-line bg-surface-2/50 px-4 py-2">
-                  <Link
-                    href="/dashboard/approvals"
-                    className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                  >
-                    {t('breakdown.decide')}
-                    <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                  </Link>
+                <footer className="flex flex-wrap items-center justify-end gap-3 border-t border-line bg-surface-2/50 px-4 py-2">
+                  {/* The CTA follows the invoice state (decision 19): one channel per state. */}
+                  {inv.status !== 'paid' && undecided.length > 0 ? (
+                    <Link
+                      href={`/dashboard/approvals?inv=${inv.invoiceId}`}
+                      className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-primary px-3 py-1.5 text-sm font-semibold text-on-primary hover:brightness-90"
+                      data-testid="breakdown-cta-decide"
+                    >
+                      {t('breakdown.decideN', { count: undecided.length, amount: ils(undecidedIls) })}
+                    </Link>
+                  ) : null}
+                  {inv.status === 'paid' && inv.supplierId ? (
+                    <Link
+                      href={`/dashboard/leaks/claims?sup=${inv.supplierId}`}
+                      className="inline-flex min-h-11 items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-semibold text-primary ring-1 ring-line hover:bg-surface-2"
+                      data-testid="breakdown-cta-claim"
+                    >
+                      {t('breakdown.toClaim')}
+                      <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                    </Link>
+                  ) : null}
                   <Link
                     href={`/dashboard/invoices/${inv.invoiceId}`}
                     className="inline-flex items-center gap-1 text-xs font-medium text-info hover:underline"
@@ -315,6 +361,9 @@ export default async function LeakBreakdownPage({
               </Card>
             );
           })}
+          </section>
+            ),
+          )}
           <p
             className="flex flex-wrap items-baseline justify-between gap-2 rounded-xl border border-line bg-surface-2 px-4 py-3 text-sm"
             data-testid="breakdown-rows-total"

@@ -4,8 +4,10 @@ import { useEffect } from 'react';
 import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import { Button, Card } from '@/lib/components';
-import { useT } from '@/lib/i18n/client';
+import { useLocale, useT } from '@/lib/i18n/client';
 import { common } from '@/lib/i18n/messages/common';
+import { LegalLinks } from '@/lib/legal/LegalLinks';
+import { LEGAL_NAV_LABEL } from '@/lib/legal/registry';
 
 /**
  * App-level client error boundary (Ledger style). Catches render/runtime errors
@@ -20,13 +22,14 @@ export default function Error({
   reset: () => void;
 }) {
   const t = useT(common);
+  const locale = useLocale();
   useEffect(() => {
     // Surface to the console for local debugging; observability hooks elsewhere.
     console.error(error);
   }, [error]);
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-6 py-16">
+    <main className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 py-16">
       <Card elevated padding="lg" className="flex max-w-md flex-col items-center gap-4 text-center">
         <span aria-hidden="true" className="absolute inset-x-0 top-0 h-0.5 leak-gradient" />
         <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-danger/12 text-danger ring-1 ring-danger/25">
@@ -50,6 +53,9 @@ export default function Error({
           </Link>
         </div>
       </Card>
+      <nav aria-label={LEGAL_NAV_LABEL[locale]} className="text-muted">
+        <LegalLinks locale={locale} variant="inline-row" />
+      </nav>
     </main>
   );
 }
