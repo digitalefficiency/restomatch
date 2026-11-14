@@ -1,0 +1,51 @@
+diff --git a/packages/db/src/schema.ts b/packages/db/src/schema.ts
+index b1b6e7a4..e63055f9 100644
+--- a/packages/db/src/schema.ts
++++ b/packages/db/src/schema.ts
+@@ -1169,6 +1169,46 @@ export const recipeItems = pgTable(
+   ],
+ );
+ 
++/**
++ * W3-04b · "טיוטה של RestoMatch" (flag `aiAssistant`): a DRAFT the assistant wrote
++ * for a person to send or discard. Draft-only — nothing is sent from this table.
++ * Outcomes drive the kill-switch (<60 % used of ≥20 decided → drafts off).
++ * ₪ never comes from the model: the body carries `{{amount}}` and the figure is
++ * `amountAgorot` (integer agorot) from the engine / lib/claims basis. CHECK
++ * constraints (kind/status/basis_source/amount/no-₪/decided consistency) live in
++ * the migration SQL, as for recipes. RLS is enabled in the same migration.
++ */
++export const aiDrafts = pgTable(
++  'ai_drafts',
++  {
++    id: uuid('id').defaultRandom().primaryKey(),
++    restaurantId: uuid('restaurant_id')
++      .notNull()
++      .references(() => restaurants.id, { onDelete: 'cascade' }),
++    kind: varchar('kind', { length: 32 }).$type<'creditRequest' | 'supplierMessage' | 'orderNote'>().notNull(),
++    status: varchar('status', { length: 16 })
++      .$type<'draft' | 'accepted' | 'edited' | 'discarded'>()
++      .notNull()
++      .default('draft'),
++    body: text('body').notNull(),
++    basisSource: varchar('basis_source', { length: 16 }).$type<'engine' | 'claims'>().notNull(),
++    basisRefs: jsonb('basis_refs').$type<string[]>().notNull().default([]),
++    /** Integer agorot from the engine / lib/claims basis — never from the model. */
++    amountAgorot: integer('amount_agorot'),
++    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
++    /** Not tied to `status` by a CHECK: ON DELETE SET NULL would break it when a user is removed. */
++    decidedBy: uuid('decided_by').references(() => users.id, { onDelete: 'set null' }),
++    decidedAt: timestamp('decided_at', { withTimezone: true }),
++    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
++  },
++  (t) => [
++    index('ai_drafts_restaurant_created_idx').on(t.restaurantId, t.createdAt.desc()),
++    index('ai_drafts_restaurant_status_idx').on(t.restaurantId, t.status),
++    index('ai_drafts_created_by_idx').on(t.createdBy),
++    index('ai_drafts_decided_by_idx').on(t.decidedBy),
++  ],
++);
++
+ /* ──────────────────────────────────────────────────────────────────────────
+  * Inventory counts (S17, flag `inventoryCount`, migration 0070)
+  * ────────────────────────────────────────────────────────────────────────── */
