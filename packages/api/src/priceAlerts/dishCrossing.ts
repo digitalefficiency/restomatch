@@ -1,16 +1,19 @@
 import { and, auditLog, eq, type Database } from '@restomatch/db';
 import { dishPriceAlerts, type ChangeRowLike, type DishPriceAlert } from '../recipes/alerts';
+import { computeChanges } from '../recipes/changes';
+import { loadRestaurant } from '../recipes/data';
 import type { DishLine } from './digest';
 
 /**
  * AU-13 AC 3 — dishes whose food cost crossed the target this month, pushed to
  * the chef (dish section only), the owner and the manager in the 07:00 slot.
  *
- * Uses the pure `dishPriceAlerts(rows, targetBp)` (recipes/alerts.ts, read only).
- * Its input rows come from `computeChanges`, which today is PRIVATE to
- * `routers/recipes.ts` (W3-02's file). Until W3-02 exports it (requested:
- * `recipes/changes.ts`, no behaviour change), `DISH_CHANGES_SOURCE` is null and
- * the section is omitted — the sweep never re-derives recipe costs itself.
+ * Uses the pure `dishPriceAlerts(rows, targetBp)` (recipes/alerts.ts, read only)
+ * over the rows of W3-02's `computeChanges` (recipes/changes.ts, read only) —
+ * the same rows and target `recipes.priceAlerts` shows in-app, so the mail and
+ * the recipes page always agree. The sweep never re-derives recipe costs itself.
+ * Every loader behind `computeChanges` filters on restaurant_id explicitly, so
+ * it is safe on the worker's service connection (no RLS session).
  *
  * Once per dish per month: audit `prices.dish_crossing_notified` with
  * `{ recipeId, month: 'YYYY-MM' }`.
@@ -23,8 +26,12 @@ export type DishChangesSource = (
   now: Date,
 ) => Promise<{ rows: ChangeRowLike[]; targetBp: number } | null>;
 
-/** Adoption point for W3-02's exported `computeChanges` seam (one line). */
-export const DISH_CHANGES_SOURCE: DishChangesSource | null = null;
+/** W3-02's `computeChanges` with the restaurant's own target (`settings.recipes.targetFoodCostBp`). */
+export const DISH_CHANGES_SOURCE: DishChangesSource = async (db, restaurantId) => {
+  const rc = await loadRestaurant(db, restaurantId);
+  const ch = await computeChanges(db, restaurantId, rc);
+  return { rows: ch.rows, targetBp: ch.targetBp };
+};
 
 export function toDishLine(a: DishPriceAlert, targetBp: number): DishLine {
   return {
