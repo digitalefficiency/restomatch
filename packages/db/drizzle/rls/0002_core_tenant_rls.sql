@@ -17,14 +17,19 @@
 create schema if not exists app;
 
 -- Reads the active restaurant from the per-transaction GUC (NULL if unset).
-create or replace function app.current_restaurant_id() returns uuid
+-- Every name is schema-qualified (no planted pg_temp type can resolve here), but there
+-- is NO `SET search_path`: a SET makes a sql function non-inlinable, and these sit in
+-- every RLS policy (pinning measured 4-15x slower per-row filters). They never run as
+-- the owner (no FORCE RLS; the bank audit reads the GUC itself). db:doctor allows
+-- exactly these two bodies unpinned.
+create or replace function app.current_restaurant_id() returns pg_catalog.uuid
   language sql stable
-  as $$ select nullif(current_setting('app.current_restaurant_id', true), '')::uuid $$;
+  as $$ select nullif(pg_catalog.current_setting('app.current_restaurant_id', true), '')::pg_catalog.uuid $$;
 
 -- Reads the acting user from the per-transaction GUC (NULL if unset).
-create or replace function app.current_user_id() returns uuid
+create or replace function app.current_user_id() returns pg_catalog.uuid
   language sql stable
-  as $$ select nullif(current_setting('app.current_user_id', true), '')::uuid $$;
+  as $$ select nullif(pg_catalog.current_setting('app.current_user_id', true), '')::pg_catalog.uuid $$;
 
 -- The root tenant table keys on `id` rather than `restaurant_id`.
 alter table restaurants enable row level security;
@@ -54,7 +59,12 @@ begin
     'price_baselines','approval_rules','audit_log','procurement_connections',
     'email_inboxes','supplier_integrations','notifications_outbox',
     -- 0071 (wave 2, G-03)
-    'idempotency_keys','claim_letters','payment_deductions'
+    'idempotency_keys','claim_letters','payment_deductions',
+    -- 0072 (wave 2, H-03)
+    'export_runs','export_run_invoices','consolidated_invoice_links',
+    'leak_month_snapshots','leak_month_corrections',
+    'supplier_bank_accounts','supplier_bank_account_changes',
+    'push_subscriptions','notification_prefs','notification_settings'
   ] loop
     if exists (
       select 1 from information_schema.columns

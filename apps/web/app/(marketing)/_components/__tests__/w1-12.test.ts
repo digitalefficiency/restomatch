@@ -286,7 +286,7 @@ describe('attribution → leads.create.source (mkt-28)', () => {
         utm_medium: 'cpc',
         utm_campaign: 'oct',
       }),
-    ).toBe('/|lead|plan=pro|src=google/cpc/oct|in=/pricing');
+    ).toBe('/|lead|pricing:pro|src=google/cpc/oct|in=/pricing');
     const long = 'x'.repeat(40);
     const s = buildLeadSource(`/${long}`, long, {
       entry: `/${long}`,

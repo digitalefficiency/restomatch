@@ -243,6 +243,21 @@ export function rlsAppRoleGrantsSql(): string {
           execute 'revoke all on job_queue, worker_heartbeats, rate_limit_counters, ops_kv from ${RLS_APP_ROLE}';
           execute 'revoke all on sequence job_queue_id_seq from ${RLS_APP_ROLE}';
         end if;
+        -- 0072 (H-03): a frozen month and its corrections are written ONLY on the
+        -- owner connection (H-07's month-close job). The tenant role may read them
+        -- (RLS-scoped SELECT) but never insert, rewrite or erase one. The 0072
+        -- append-only trigger is the backstop for the owner side.
+        if to_regclass('public.leak_month_snapshots') is not null then
+          execute 'revoke insert, update, delete on leak_month_snapshots, leak_month_corrections from ${RLS_APP_ROLE}';
+        end if;
+        -- No app path deletes a restaurant as the tenant role (seed / e2e cleanup / ops use
+        -- the owner connection). Without DELETE the tenant cannot start an owner-run
+        -- cascade (restaurant → audit rows) at all.
+        execute 'revoke delete on restaurants from ${RLS_APP_ROLE}';
+        -- 0072: the bank audit is written ONLY by its SECURITY DEFINER trigger.
+        if to_regclass('public.supplier_bank_account_changes') is not null then
+          execute 'revoke insert, update, delete on supplier_bank_account_changes from ${RLS_APP_ROLE}';
+        end if;
       end $$;
 `;
 }

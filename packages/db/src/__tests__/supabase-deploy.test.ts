@@ -583,6 +583,11 @@ describe('git deploy onto an emulated Supabase project', () => {
       expect(notices.join('\n')).toMatch(/storage\.objects policies NOT applied/);
     } finally {
       await fresh.end();
+      // Give the migrator its storage-admin membership back: the role is cluster-wide, so
+      // the revoke above would otherwise leak into every later run on a shared local PG.
+      const restore = postgres(superUrl.toString(), { max: 1, prepare: false, onnotice: () => undefined });
+      await restore.unsafe(`grant supabase_storage_admin to ${MIGRATOR}`).catch(() => undefined);
+      await restore.end();
     }
   });
 });

@@ -41,6 +41,8 @@ import { tasksRouter } from './routers/tasks';
 import { navRouter } from './routers/nav';
 import { pushRouter } from './routers/push';
 import { closeRouter } from './routers/close';
+import { automationsRouter } from './routers/automations';
+import { vatRouter } from './routers/vat';
 
 export const appRouter = router({
   owner: ownerRouter,
@@ -84,9 +86,12 @@ export const appRouter = router({
   nav: navRouter,
   push: pushRouter,
   close: closeRouter,
+  automations: automationsRouter,
+  vat: vatRouter,
 });
 
 export type AppRouter = typeof appRouter;
+export { automationOption, AUTOMATIONS, type AutomationDef, type AutomationOptionKey } from './automations/options';
 export type { ConsolidatedProposal, DeliveryNoteCoverage } from './match/consolidated';
 export type {
   AppContext,
@@ -169,9 +174,11 @@ export {
   type NotificationChannel,
   type EmailAttachment,
 } from './notifications';
+export { EMAIL_COPY, type EmailCopy } from './notifications/copy';
 export { logActivity, type ActivityEventInput, type ActivityEventType } from './activity';
 export { buildMatchInputForInvoice, type BuiltMatchInput } from './match/buildMatchInput';
 export {
+  heldForReceipts,
   invoicesWaitingOnReceipt,
   lockReceipt,
   readScanGrId,
@@ -184,7 +191,7 @@ export {
   withScanGrId,
 } from './receiving/matchTriggers';
 export { backfillPriceHistory, writePriceHistoryForInvoice } from './match/priceHistory';
-export { loadPriorDecisions, matchActivitySummary, persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
+export { loadPriorDecisions, matchActivitySummary, matchAlert, persistMatchRun, type PersistMatchArgs, type PersistMatchResult } from './match/persist';
 export {
   parseCatalogFile,
   autoDetectMapping,
@@ -200,8 +207,21 @@ export {
   type CommitResult,
   type AmbiguousRow,
 } from './catalog/commit';
+// G-08 kill switch: release invoices held for order questions (admin + worker script).
+export { releaseOrderQuestionHolds } from './routers/mapping';
+// G-08: the shared "open question" rules (mapping router, match job, OCR job).
+export {
+  applyLearnedCharges,
+  invoiceQuestionCount,
+  linkPinPoIdOf,
+  orderQuestionCount,
+  pruneAnsweredReasons,
+  releaseQuestionHolds,
+  type ChargeKey,
+} from './catalog/linkQuestions';
 export {
   checkRateLimit,
+  refundRateLimit,
   resetRateLimit,
   MemoryRateLimitStore,
   RateLimitError,
@@ -233,7 +253,7 @@ export {
   type DeliveryState,
   type DeliveryStateInput,
 } from './lib/deliveryState';
-export { FEATURE_KEYS, featureEnabled, type FeatureKey } from './lib/features';
+export { DEFAULT_ON_FEATURES, FEATURE_KEYS, featureEnabled, type FeatureKey } from './lib/features';
 export { assertFeature } from './lib/featureGate';
 export {
   contractInForce,
@@ -262,6 +282,7 @@ export {
 } from './priceAlerts/detect';
 export { priceAlertEmail } from './priceAlerts/email';
 export * as leakCheck from './leakCheck';
+export * as claimPortal from './claimPortal';
 export {
   confirmationLink,
   createSupplierLink,
@@ -303,6 +324,7 @@ export {
 } from './receiving/english';
 export { devOcrStubEnabled, buildDevOcrStub } from './receiving/devOcrStub';
 export { isAllowedScanUrl } from './lib/scanUrls';
+export { signedUrlForStoragePath } from './ingest/store';
 export {
   localScanStorageEnabled,
   readLocalScan,
@@ -351,7 +373,10 @@ export {
   transitionClaim,
   recordCreditNote,
   creditLineSuggestions,
+  lockRecovery,
+  releaseClaimsForRematch,
   OVERDUE_DAYS,
+  materializeClaims, type MaterializeClaimsInput,
   type RecoveryClaimRow,
   type RecoverySummary,
   type RecoverySupplierRow,
@@ -359,6 +384,10 @@ export {
 } from './recovery/service';
 export { RECOVERY_TRANSITIONS, canTransition, allocateCredit, ageingBucket } from './recovery/lifecycle';
 export { enqueueRecoveryReminders, recoveryReminderEmail } from './recovery/reminders';
+// AU-03 (A12): the one chase predicate, the pre-addressed reminder draft, credit suggestions.
+export { isAwaitingChase, awaitingChaseSql, CHASE_STATUSES, CHASE_DEFAULTS, type ChaseClaim } from './recovery/overdue';
+export { supplierReminderDraft, waPhoneE164, type SupplierReminderDraftText } from './recovery/chase';
+export { creditSuggestions, confirmCreditSuggestion, proposeCreditAllocations, type CreditSuggestion } from './recovery/creditSuggest';
 export {
   computeMonthlyReport,
   ensureMonthlyReport,
@@ -407,3 +436,9 @@ export {
 } from './lib/claims';
 export type { PayRunInvoice, PayRunResult, PayRunStatus, PayRunSupplier, PayRunClaim } from './routers/payRun';
 export { SKIPPED_NO_PROVIDER, providerConfigured, supplierMessageState, type SupplierMessageState } from './notifications/delivery';
+export * from './briefs';
+export * from './notifications/sendWindow';
+export { awaitingDecision, awaitingDecisionDetail, type AwaitingDecision } from './approvals/awaiting';
+export { notify, notifyEffect, resolveAudience, type Address, type Audience } from './notifications/notify';
+export { KIND_ROLES as WHERE_IS_KIND_ROLES, WHERE_IS_KINDS, type WhereIsKind } from './tasks/whereIs';
+export { rebindDecidedClaims } from './approvals/rebind'; // W2-04 (orchestrator-approved line)

@@ -18,6 +18,7 @@ import {
 } from '@restomatch/db';
 import { alias } from 'drizzle-orm/pg-core';
 import { bookkeeperProcedure, requireFeature, router } from '../trpc';
+import { discrepancyDecidableSql } from '../lifecycle/predicates';
 
 /** Bookkeeping exports require the accounting_export plan feature. */
 const exportProcedure = bookkeeperProcedure.use(requireFeature('accounting_export'));
@@ -29,6 +30,14 @@ import {
   exportPeriodBounds,
   localIsoDate,
 } from '../exports/period';
+
+/** The CSV's human status column (the raw `status` column stays for tooling). */
+const STATUS_HE: Record<string, string> = {
+  matched: 'נבדקה',
+  approved: 'אושרה לתשלום',
+  paid: 'שולמה',
+  disputed: 'פער פתוח',
+};
 
 const PeriodSchema = z.object({
   from: z.string().date(),
@@ -49,6 +58,11 @@ export const exportsRouter = router({
         input.from,
         input.to,
       );
+      const gaps = await openGapByInvoice(
+        ctx.db,
+        ctx.session.restaurantId,
+        rows.map((r) => r.id),
+      );
       const csv = toCsv(rows, [
         { header: 'מס׳ חשבונית', value: (r) => r.invoiceNumber },
         { header: 'תאריך', value: (r) => (r.invoiceDate ? localIsoDate(r.invoiceDate, tz) : null) },
@@ -58,6 +72,8 @@ export const exportsRouter = router({
         { header: 'מע״מ', value: (r) => r.vatAmount },
         { header: 'סה״כ עם מע״מ', value: (r) => r.totalInclVat },
         { header: 'סטטוס', value: (r) => r.status },
+        { header: 'מצב', value: (r) => STATUS_HE[r.status] ?? r.status },
+        { header: '₪ בבירור מול ספקים', value: (r) => gaps.get(r.id) ?? '0.00' },
         { header: 'אמינות OCR', value: (r) => r.ocrConfidence },
       ]);
       return {
@@ -67,6 +83,45 @@ export const exportsRouter = router({
         undatedCount,
       };
     }),
+
+  /**
+   * What an export of this period will contain, BEFORE the download (W2-14):
+   * invoice count, their total incl. VAT, how many carry an open gap and the ₪
+   * in dispute (Σ |delta| of the open/escalated gaps on each invoice's latest
+   * match run), plus the dated-out count. Money is summed in Postgres NUMERIC
+   * and returned as a 2-dp shekel string (no float math).
+   */
+  summary: exportProcedure.input(PeriodSchema).query(async ({ ctx, input }) => {
+    const { rows, undatedCount } = await fetchInvoices(
+      ctx.db,
+      ctx.session.restaurantId,
+      input.from,
+      input.to,
+    );
+    const ids = rows.map((r) => r.id);
+    const gaps = await openGapByInvoice(ctx.db, ctx.session.restaurantId, ids);
+    const [totals] = ids.length
+      ? await ctx.db
+          .select({
+            total: sql<string>`coalesce(sum(${invoices.totalInclVat}), 0)::numeric(14,2)::text`,
+          })
+          .from(invoices)
+          .where(and(eq(invoices.restaurantId, ctx.session.restaurantId), inArray(invoices.id, ids)))
+      : [{ total: '0.00' }];
+    const disputedIds = rows.filter((r) => r.status === 'disputed').map((r) => r.id);
+    // Σ in integer agorot (each value is a 2-dp NUMERIC string from Postgres).
+    const inDisputeAgorot = [...gaps.values()].reduce((acc, v) => acc + shekelStringToAgorot(v), 0n);
+    return {
+      invoiceCount: rows.length,
+      totalInclVat: totals?.total ?? '0.00',
+      disputedCount: disputedIds.length,
+      withOpenGapCount: gaps.size,
+      amountInDispute: agorotToShekelString(inDisputeAgorot),
+      undatedCount,
+      missingTotalCount: rows.filter((r) => r.totalInclVat === null).length,
+      missingBusinessIdCount: rows.filter((r) => !r.supplierBusinessId).length,
+    };
+  }),
 
   /**
    * Israeli uniform file (קובץ 1000) — record type C100 only for now.
@@ -196,4 +251,53 @@ function unacceptedDuplicate(db: import('@restomatch/db').Database, restaurantId
         ne(discrepancies.resolutionStatus, 'rejected'),
       ),
     );
+}
+
+/**
+ * invoiceId → Σ |delta_amount| (2-dp shekel string) of the open or escalated
+ * gaps on that invoice's LATEST match run. Invoices with none are absent.
+ */
+export async function openGapByInvoice(
+  db: import('@restomatch/db').Database,
+  restaurantId: string,
+  invoiceIds: string[],
+): Promise<Map<string, string>> {
+  if (invoiceIds.length === 0) return new Map();
+  const latest = db
+    .selectDistinctOn([matchRuns.invoiceId], { id: matchRuns.id, invoiceId: matchRuns.invoiceId })
+    .from(matchRuns)
+    .where(and(eq(matchRuns.restaurantId, restaurantId), inArray(matchRuns.invoiceId, invoiceIds)))
+    .orderBy(matchRuns.invoiceId, desc(matchRuns.runAt))
+    .as('latest');
+  const rows = await db
+    .select({
+      invoiceId: latest.invoiceId,
+      amount: sql<string>`sum(abs(coalesce(${discrepancies.deltaAmount}, 0)))::numeric(14,2)::text`,
+    })
+    .from(discrepancies)
+    .innerJoin(latest, eq(latest.id, discrepancies.matchRunId))
+    .where(
+      and(
+        eq(discrepancies.restaurantId, restaurantId),
+        // Undecided gaps (open/escalated): the lifecycle predicate, not a literal.
+        discrepancyDecidableSql(discrepancies.resolutionStatus),
+      ),
+    )
+    .groupBy(latest.invoiceId);
+  return new Map(rows.map((r) => [r.invoiceId as string, r.amount]));
+}
+
+/** "1234.50" / "-3.1" → integer agorot (exact; no float). */
+function shekelStringToAgorot(v: string): bigint {
+  const neg = v.startsWith('-');
+  const [int = '0', frac = ''] = v.replace('-', '').split('.');
+  const ag = BigInt(int || '0') * 100n + BigInt((frac + '00').slice(0, 2));
+  return neg ? -ag : ag;
+}
+
+/** Integer agorot → "1234.50". */
+function agorotToShekelString(ag: bigint): string {
+  const neg = ag < 0n;
+  const abs = neg ? -ag : ag;
+  return `${neg ? '-' : ''}${abs / 100n}.${(abs % 100n).toString().padStart(2, '0')}`;
 }

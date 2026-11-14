@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createDb, eq, invoices, posSales, procurementConnections, restaurants, suppliers, testDbUrl } from '@restomatch/db';
+import { auditLog, createDb, eq, invoices, posSales, procurementConnections, restaurants, suppliers, testDbUrl } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
+import { restaurantDateKey } from './helpers/il-day';
 
 /**
  * Wave-1 integrations router (flag `integrations`). Functional checks plus the
@@ -27,9 +28,11 @@ async function setFlag(tenant: Tenant, on: boolean) {
     .where(eq(restaurants.id, tenant.restaurantId));
 }
 
+// The restaurant's month-to-date: exports read `from`/`to` as calendar days in
+// the restaurant's zone, and seedTenant dates its invoice on the restaurant's
+// today — so the period is the restaurant's day too, not the UTC day.
 const PERIOD = (() => {
-  const d = new Date();
-  const iso = d.toISOString().slice(0, 10);
+  const iso = restaurantDateKey();
   return { from: `${iso.slice(0, 8)}01`, to: iso };
 })();
 
@@ -150,7 +153,10 @@ describe('accounting exports', () => {
     expect(await callerFor(A).integrations.status()).toEqual({ enabled: true });
   });
 
-  it('roles: bookkeeper exports, manager/receiver/chef cannot; only the owner saves the mapping', async () => {
+  // Rule change by owner decision (wave-2 README §7 Roles: "the bookkeeper reads
+  // everything and edits account cards, with an audit log"), not a weakening:
+  // bookkeeper FORBIDDEN → ALLOWED + an audit row; manager/receiver/chef stay FORBIDDEN.
+  it('roles: bookkeeper exports, manager/receiver/chef cannot; owner + bookkeeper save the mapping (audited)', async () => {
     await expect(
       callerFor(A, 'bookkeeper').integrations.accountingExport({ format: 'rivhit', ...PERIOD }),
     ).resolves.toMatchObject({ rowCount: 1 });
@@ -159,14 +165,25 @@ describe('accounting exports', () => {
         callerFor(A, role).integrations.accountingExport({ format: 'rivhit', ...PERIOD }),
       ).rejects.toMatchObject({ code: 'FORBIDDEN' });
     }
-    await expect(
-      callerFor(A, 'bookkeeper').integrations.setAccountingConfig({
-        expenseAccount: '1',
-        vatInputAccount: '2',
-        movementType: 'x',
-        supplierAccounts: {},
-      }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    const mapping = { expenseAccount: '1', vatInputAccount: '2', movementType: 'x', supplierAccounts: {} };
+    for (const role of ['manager', 'receiver', 'chef'] as const) {
+      await expect(callerFor(A, role).integrations.setAccountingConfig(mapping)).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+      });
+    }
+    await db.delete(auditLog).where(eq(auditLog.restaurantId, A.restaurantId));
+    await expect(callerFor(A, 'bookkeeper').integrations.setAccountingConfig(mapping)).resolves.toMatchObject({
+      expenseAccount: '1',
+    });
+    const audits = await db
+      .select({ action: auditLog.action, after: auditLog.after })
+      .from(auditLog)
+      .where(eq(auditLog.restaurantId, A.restaurantId));
+    expect(audits).toEqual([
+      { action: 'integrations.accounting_config_changed', after: expect.objectContaining({ expenseAccount: '1' }) },
+    ]);
+    const cfg = await callerFor(A).integrations.accountingConfig();
+    expect(cfg.lastChange?.byName).toBe('Owner A');
   });
 
   it('rejects account codes that would break a delimited record', async () => {
@@ -348,5 +365,32 @@ describe('vatFromInclusive', () => {
     expect(vatFromInclusive(-11800, '0.18')).toBe(-1800); // credit note
     expect(vatFromInclusive(999_999_999_999, '0.18')).toBe(152_542_372_881); // NUMERIC(12,2) max, no 2^53 drift
     expect(vatFromInclusive(5000, '0')).toBe(0);
+  });
+});
+
+describe('integrations: no invented supplier card codes (W2-14, admin-10)', () => {
+  it('a supplier without a mapping or ח״פ has no default card (source = missing)', async () => {
+    await setFlag(A, true);
+    await db.update(suppliers).set({ businessId: null }).where(eq(suppliers.id, A.supplierId));
+    const cfg = await callerFor(A).integrations.accountingConfig();
+    const row = cfg.suppliers.find((s) => s.id === A.supplierId);
+    expect(row).toMatchObject({ account: null, defaultAccount: null, source: 'missing' });
+    expect(JSON.stringify(cfg)).not.toMatch(/"S[0-9A-F]{8}"/);
+  });
+});
+
+describe('integrations: bookkeeper mapping write stays tenant-scoped (W2-14)', () => {
+  it("a bookkeeper mapping B's supplier id → NOT_FOUND, A's mapping unchanged", async () => {
+    await setFlag(A, true);
+    await expect(
+      callerFor(A, 'bookkeeper').integrations.setAccountingConfig({
+        expenseAccount: '1',
+        vatInputAccount: '2',
+        movementType: 'x',
+        supplierAccounts: { [B.supplierId]: '99999' },
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const cfg = await callerFor(A).integrations.accountingConfig();
+    expect(cfg.config.supplierAccounts).toEqual({});
   });
 });
