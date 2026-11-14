@@ -231,7 +231,7 @@ const html = `<!doctype html><html data-theme="light"><head><meta charset="utf-8
     await bump('bp', 1, 1);
     ok('rules: an 11% hold no longer holds the beer', (await eff()).startsWith('לפני ששומרים בספים האלה 2 פערים מתוך 4 היו נפתחים, ואחד מהם חוסם תשלום'), await eff());
     await bump('qa', 1, 2);
-    ok('rules: 3 units let the tomatoes through', (await eff()) === 'לפני ששומרים בספים האלה פער אחד מתוך 4 היה נפתח, והוא לא חוסם תשלום לא היו נפתחים: עגבניות שרי, אנטריקוט ופילה סלמון, ₪191.20 לפני מע״מ', await eff());
+    ok('rules: 3 units stop the tomatoes from holding the payment, and the gap stays open', (await eff()) === 'לפני ששומרים בספים האלה 2 פערים מתוך 4 היו נפתחים, ואף אחד מהם לא חוסם תשלום לא היו נפתחים: אנטריקוט ופילה סלמון, ₪152.50 לפני מע״מ', await eff());
     await snap('#ex4', 'rules-dirty');
     await p.click('#sh-body [data-do="discard"]'); await wait(400);
     ok('rules: discarding goes back to what is in force', (await eff()).startsWith('הספים שבתוקף') && !(await vis('#sh-body .set-save')));

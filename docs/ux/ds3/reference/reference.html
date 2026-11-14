@@ -360,6 +360,14 @@ body{ background:var(--pg-bg); color:var(--pg-fg); font:400 1rem/1.65 var(--pg-f
 .finds li.has-fig > span{ flex:1; min-width:0 }
 .finds li.has-fig img{ flex:none; width:40px; height:auto; border-radius:8px; box-shadow:0 0 0 1px var(--pg-line) }
 
+/* round 8: the update notice under the lede, and the state of each decision */
+.upd{ margin:22px 0 4px; padding:14px 18px 15px; max-width:44rem; background:var(--pg-surface); border:1px solid var(--pg-line); border-radius:12px }
+.upd b{ display:block; font-weight:600; margin-bottom:4px }
+.upd p{ font-size:.9375rem; line-height:1.6; color:var(--pg-fg2) }
+.upd p + p{ margin-top:6px }
+.asks li p.ans{ color:var(--pg-fg); background:var(--pg-chip); border-radius:8px; padding:8px 12px; margin-top:2px }
+.asks li p.ans b{ font-size:inherit; font-weight:600 }
+
 /* =====================================================================
    RestoMatch · proposed product language ("פנקס")
    Everything under .rm is the product mock-up and keeps its own light
@@ -2203,17 +2211,17 @@ body{ margin:0 }
       paper: [['בצל יבש', '25', '3.92', '98.00'], ['עגבניות שרי', '9.5', '12.90', '122.55', 1], ['תפוחי אדמה', '28.5', '4.20', '119.70']],
       cost: 'תשלמו לירקות השרון {amt} על 3 ק״ג שלא התקבלו.', reasons: ['הגיע בפועל, הקבלה שגויה', 'יגיע במשלוח הבא', 'הספק כבר זיכה', 'סכום זניח', 'אחר'] },
     { id: 'st', sev: 'block', type: 'מחיר גבוה מהמצופה', product: 'בירה מהחבית, חבית 30 ל׳', supplier: 'משקאות שטיינברג', inv: 'ST-24108', date: '21.10.2026', amt: 104.80, due: 'לתשלום עד 20.11', wait: 'ממתין 4 ימים',
-      unit: 'חביות', po: 'הזמנה מ־20.10', gr: 'נספר פריט־פריט, 21.10', grAt: '21.10.2026 · 10:15', q: ['2', '2', '2'], p: ['522.60', null, '575.00'], off: 'p', delta: '10.0% יותר',
+      unit: 'חביות', po: 'הזמנה מ־20.10', gr: 'נספר פריט־פריט, 21.10', grAt: '21.10.2026 · 11:50', q: ['2', '2', '2'], p: ['522.60', null, '575.00'], off: 'p', delta: '10.0% יותר',
       calc: ['2 חביות', '52.40', 'יותר לחבית'], rule: PRICE_RULE,
-      paper: [['בירה מהחבית 30 ל׳', '2', '575.00', '1,150.00', 1], ['סודה 1.5 ל׳', '24', '3.20', '76.80'], ['טוניק 250 מ״ל', '48', '2.90', '139.20']],
+      paper: [['בירה מהחבית 30 ל׳', '2', '575.00', '1,150.00', 1], ['קולה זירו 330 מ״ל, ארגז', '5', '62.00', '310.00'], ['מיץ תפוזים סחוט', '9', '14.00', '126.00']],
       cost: 'תשלמו למשקאות שטיינברג {amt} מעל המחיר שבהזמנה.', reasons: PRICE_WHY },
     { id: 'hk', sev: 'warn', type: 'מחיר גבוה מהמצופה', product: 'אנטריקוט', supplier: 'קצביית הכרם', inv: 'HK-24108', date: '19.10.2026', amt: 100.00, due: 'לתשלום עד 18.11', wait: 'ממתין 6 ימים',
-      unit: 'ק״ג', po: 'הזמנה מ־18.10', gr: 'נספר פריט־פריט, 19.10', grAt: '19.10.2026 · 08:05', q: ['10', '10', '10'], p: ['139.00', null, '149.00'], off: 'p', delta: '7.2% יותר',
+      unit: 'ק״ג', po: 'הזמנה מ־18.10', gr: 'נספר פריט־פריט, 19.10', grAt: '19.10.2026 · 09:50', q: ['10', '10', '10'], p: ['139.00', null, '149.00'], off: 'p', delta: '7.2% יותר',
       calc: ['10 ק״ג', '10.00', 'יותר לק״ג'], rule: PRICE_RULE,
-      paper: [['אנטריקוט', '10', '149.00', '1,490.00', 1], ['כתף בקר', '8', '74.00', '592.00'], ['שוק טלה', '5', '112.00', '560.00']],
+      paper: [['אנטריקוט', '10', '149.00', '1,490.00', 1], ['חזה עוף', '12', '38.90', '466.80'], ['נקניקיות מרגז', '4', '64.00', '256.00']],
       cost: 'תשלמו לקצביית הכרם {amt} מעל המחיר שבהזמנה.', reasons: PRICE_WHY },
     { id: 'mf', sev: 'warn', type: 'מחיר גבוה מהמצופה', product: 'פילה סלמון', supplier: 'דגי הים התיכון', inv: 'MF-24108', date: '20.10.2026', amt: 52.50, due: 'לתשלום עד 19.11', wait: 'ממתין 5 ימים',
-      unit: 'ק״ג', po: 'הזמנה מ־19.10', gr: 'נספר פריט־פריט, 20.10', grAt: '20.10.2026 · 06:40', q: ['7.5', '7.5', '7.5'], p: ['89.00', null, '96.00'], off: 'p', delta: '7.9% יותר',
+      unit: 'ק״ג', po: 'הזמנה מ־19.10', gr: 'נספר פריט־פריט, 20.10', grAt: '20.10.2026 · 11:20', q: ['7.5', '7.5', '7.5'], p: ['89.00', null, '96.00'], off: 'p', delta: '7.9% יותר',
       calc: ['7.5 ק״ג', '7.00', 'יותר לק״ג'], rule: PRICE_RULE,
       paper: [['קלמרי', '6', '48.76', '292.56'], ['פילה סלמון', '7.5', '96.00', '720.00', 1], ['דניס שלם', '6.5', '62.00', '403.00']],
       cost: 'תשלמו לדגי הים התיכון {amt} מעל המחיר שבהזמנה.', reasons: PRICE_WHY }
@@ -3041,7 +3049,7 @@ body{ margin:0 }
     });
   });
   var typing = function (t) { return !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable); };
-  var menuAt = function () { return menuList().filter(function (m) { return !narrowM(m) && (m.app.contains(document.activeElement) || m.app.matches(':hover')); })[0]; };
+  var menuAt = function () { var ok = menuList().filter(function (m) { return !narrowM(m); }); return ok.filter(function (m) { return m.app.matches(':hover'); })[0] || ok.filter(function (m) { return m.app.contains(document.activeElement); })[0]; };
   document.addEventListener('keydown', function (e) {
     var m;
     if (e.key === 'Escape') { menuList().forEach(function (x) { if (x.tipFor) hideTip(x); else if (x.fly && !x.flyEl.contains(e.target)) closeFly(x, x.flyEl.contains(document.activeElement)); }); return; }
@@ -3126,18 +3134,23 @@ body{ margin:0 }
     /* ----- the rules: what a threshold would do to the gaps that are open today -----
        The four open gaps of example 2, as the matching engine reads them. A price gap is opened unless the unit
        price is within both the percentage and the shekel tolerance; it holds the payment from the hold percentage
-       up. A billed-over-received gap is opened above the larger of the unit tolerance and the percentage of what
-       was received. (packages/matching/src/engine.ts, read only.) */
+       up. A gap between ordered and received is opened above the percentage alone; a bill for more than was
+       received holds the payment above the larger of the unit tolerance and the percentage of what was received.
+       (packages/matching/src/engine.ts: evaluateQty and the billed-over-received block, read only.) */
     var GAPS = [
-      { n: 'עגבניות שרי', kind: 'qty', over: 3, got: 6.5, amt: 38.70 },
+      { n: 'עגבניות שרי', kind: 'qty', ord: 9.5, over: 3, got: 6.5, amt: 38.70 },
       { n: 'בירה מהחבית', kind: 'price', pct: 10.03, abs: 52.40, amt: 104.80 },
       { n: 'אנטריקוט', kind: 'price', pct: 7.19, abs: 10.00, amt: 100.00 },
       { n: 'פילה סלמון', kind: 'price', pct: 7.87, abs: 7.00, amt: 52.50 }
     ];
     var judge = function (r) {
       return GAPS.map(function (g) {
-        var opens = g.kind === 'price' ? !(g.pct <= r.pp && g.abs <= r.pa) : g.over > Math.max(r.qa, g.got * r.qp / 100);
-        return { g: g, opens: opens, holds: opens && (g.kind === 'price' ? g.pct >= r.bp : true) };
+        if (g.kind === 'qty') {
+          var over = g.over > Math.max(r.qa, g.got * r.qp / 100), short = (g.ord - g.got) / g.ord * 100 > r.qp;
+          return { g: g, opens: over || short, holds: over };
+        }
+        var opens = !(g.pct <= r.pp && g.abs <= r.pa);
+        return { g: g, opens: opens, holds: opens && g.pct >= r.bp };
       });
     };
     var holdsTxt = function (n, k) { return !n ? '' : n === 1 ? (k ? ', והוא חוסם תשלום' : ', והוא לא חוסם תשלום') : !k ? ', ואף אחד מהם לא חוסם תשלום' : k === n ? (n === 2 ? ', ושניהם חוסמים תשלום' : ', וכולם חוסמים תשלום') : k === 1 ? ', ואחד מהם חוסם תשלום' : ', ו־<b class="num">' + k + '</b> מהם חוסמים תשלום'; };
@@ -3162,8 +3175,8 @@ body{ margin:0 }
     var RULES = [
       ['pp', 'סבילות מחיר (%)', 'הפרש מחיר נפתח כפער מעל האחוז הזה', '%'],
       ['pa', 'סבילות מחיר (₪)', 'או מעל הסכום הזה ליחידה', '₪'],
-      ['qp', 'סבילות כמות (%)', 'הפרש כמות נפתח כפער מעל האחוז הזה', '%'],
-      ['qa', 'סבילות כמות (יחידות)', 'ומעל מספר היחידות הזה', ''],
+      ['qp', 'סבילות כמות (%)', 'הפרש בין מה שהוזמן למה שהתקבל נפתח כפער מעל האחוז הזה', '%'],
+      ['qa', 'סבילות כמות (יחידות)', 'חיוב על יותר ממה שהתקבל חוסם תשלום רק מעל מספר היחידות הזה', ''],
       ['bp', 'סף חסימת מחיר (%)', 'עליית מחיר מהאחוז הזה ומעלה חוסמת את התשלום', '%']
     ];
     var fmtR = function (k, v) { var u = RULES.filter(function (x) { return x[0] === k; })[0][3]; return u === '₪' ? '<span class="money"><span class="cur">₪</span><span>' + v + '</span></span>' : v + u; };

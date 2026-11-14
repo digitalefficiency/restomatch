@@ -16,20 +16,20 @@ on `main` first and build the difference only.
 
 ## Settings: the tolerance thresholds (DS3-06)
 
-1. **The quantity rule in the mock-up is not the engine's rule.** A reviewer ran the real matching engine
-   against the mock-up's preview: the engine opens an ordered-versus-received gap above the **percentage
-   alone**; the unit tolerance only decides when a bill for more than was received blocks payment. The mock-up
-   treats a quantity gap as needing both. Implement the preview by calling the engine (read only:
-   `packages/matching/**` is on the immutability list), never by re-implementing its rule in the client.
-   Confirm the rule yourself in `packages/matching/src/engine.ts` before you write copy about it.
-2. Corrected field descriptions (replace the mock-up's):
+1. **The quantity rule.** The matching engine opens an ordered-versus-received gap above the **percentage
+   alone** (`evaluateQty` in `packages/matching/src/engine.ts`); the unit tolerance only decides when a bill
+   for more than was received blocks payment (the billed-over-received block in the same file). The first
+   version of the mock-up treated a quantity gap as needing both; a reviewer caught it by running the real
+   engine, and **the reference was corrected on 14.11** (its preview and the two descriptions below). In the
+   product, implement the preview by calling the engine (read only: `packages/matching/**` is on the
+   immutability list), never by re-implementing its rule in the client.
+2. The field descriptions, as corrected:
    - quantity, percent: `הפרש בין מה שהוזמן למה שהתקבל נפתח כפער מעל האחוז הזה`
    - quantity, units: `חיוב על יותר ממה שהתקבל חוסם תשלום רק מעל מספר היחידות הזה`
 3. **A saved threshold does not touch gaps that are already open.** Thresholds are read when an invoice is
-   matched; saving starts no re-match. The mock-up's wording after saving ("בספים שבתוקף פתוחים היום 2 פערים")
-   implies otherwise. After saving, state the real count of open gaps, and add
-   `הספים שנשמרו חלים על חשבוניות שייבדקו מעכשיו`. Show the "לא היו נפתחים" line only while there are unsaved
-   changes.
+   matched; saving starts no re-match. The reference says so in a constant line under the preview ("סף חדש חל
+   על חשבוניות שייבדקו מעכשיו. פערים שכבר נפתחו נשארים פתוחים.") and words the preview conditionally. Keep both
+   properties: never state a count of open gaps that saving would not really produce.
 4. The mock-up lists three approval rules; the approvals engine has more (`packages/api/src/approvals/engine.ts`,
    read only). Show what the engine has.
 5. Density already exists per screen: the toolbar switch "מרווח / צפוף" on approvals and the leak screens
@@ -61,13 +61,13 @@ The owner-approved spec wins on every point.
 - Mirroring: the truck icon is never mirrored (spec §15); list icons are (spec §3).
 - "לטיפולי" keeps its count when a gap becomes a credit request ready to send (spec §5.3).
 - The top bar follows spec §1.5 (background, padding, the bell's size, the page name).
-- The page's shortcut bug (Ctrl B acting on the wrong mock-up) is a property of a page with three menus and
-  does not exist in the product.
+- A shortcut bug of the reference page (Ctrl B acting on another mock-up than the one under the pointer) was
+  fixed on 14.11. It was a property of a page with three menus and does not exist in the product.
 
 ## Approvals desk (DS3-04)
 
-- Four of the twelve invoice lines shown on the document image, and three of the four receiving times, are
-  invented demo values. The product shows the real lines.
+- The lines on each document image and the receiving times were brought in line with the demo restaurant's
+  data on 14.11. The product shows the real lines of the real document.
 - Train C already lists the three quantities (ordered, received, billed). What DS3 adds is the table form with
   prices and the calculation line, and dense rows instead of cards.
 - The button "שלמו כפי שחויב" follows the wording in the product, which does not yet record payments. The page
