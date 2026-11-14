@@ -170,6 +170,8 @@ export default async function Home() {
           rel="preload"
           as="image"
           href={phoneLoop.poster}
+          imageSrcSet={phoneLoop.posterSrcSet}
+          imageSizes={phoneLoop.posterSrcSet ? heroMedia.phonePosterSizes : undefined}
           fetchPriority="high"
           media={PHONE_MEDIA}
         />

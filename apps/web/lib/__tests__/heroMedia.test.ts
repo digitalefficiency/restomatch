@@ -20,15 +20,14 @@ function referencedMedia(): string[] {
 }
 
 describe('heroMedia', () => {
-  // Conductor M1: the promo films still show the old demo figures, so promoVideo is null
-  // until S10 re-renders them from SAMPLE (w3-06b-hero.test.ts pins that) — no film either locale.
-  it('serves the English hero loop to English visitors; no promo film while it is off', () => {
-    expect(promoVideoFor('en')).toBeNull();
+  // S10 re-rendered the films from the sample month (#318); SHA-pinned in w3-06b-hero.test.ts.
+  it('serves the English promo film and hero loop to English visitors', () => {
+    expect(promoVideoFor('en')?.src).toBe('/media/promo-en-720.mp4');
     expect(heroLoopFor('en').mp4).toBe('/media/hero-loop-en.mp4');
   });
 
   it('keeps Hebrew as the default', () => {
-    expect(promoVideoFor('he')).toBeNull();
+    expect(promoVideoFor('he')?.src).toBe('/media/promo-he-720.mp4');
     expect(heroLoopFor('he')).toMatchObject({ mp4: heroMedia.loop.mp4, poster: heroMedia.poster });
   });
 

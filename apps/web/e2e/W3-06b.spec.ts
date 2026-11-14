@@ -7,7 +7,7 @@ import { he as lHe } from '../lib/i18n/messages/landing/he';
  *   - /product carries the #problem #features #roi #trust anchors; the header
  *     nav, the footer and the home page's proof/trust links land on them;
  *   - an old /about#roi deep link forwards to /product#roi (Q5);
- *   - the old-figure promo film is off (M1): no "Watch 60 seconds" button;
+ *   - the promo films are the sample-month render (#318): the button opens the Hebrew film;
  *   - the Hebrew-only 9:16 cut never reaches an English phone (Q1);
  *   - the hero loop is captioned as a sample (M12).
  */
@@ -59,10 +59,14 @@ test.describe('W3-06b · /product anchors and links', () => {
 });
 
 test.describe('W3-06b · hero media gate', () => {
-  test('M1: no "Watch 60 seconds" promo button (old-figure films are off)', async ({ page }) => {
+  test('promo re-enabled (#318 sample-month films): the button opens the Hebrew film', async ({ page }) => {
     await open(page, '/');
-    await expect(page.getByRole('button', { name: lHe.hero.ctaWatch })).toHaveCount(0);
-    await expect(page.locator('main a[href="/showcase"]').first()).toBeVisible();
+    const watch = page.getByRole('button', { name: lHe.hero.ctaWatch });
+    await expect(watch).toBeVisible();
+    await watch.click();
+    const video = page.locator('dialog video');
+    await expect(video).toBeVisible();
+    await expect(video).toHaveAttribute('src', /\/media\/promo-he-720\.mp4$/);
   });
 
   test('M12: the hero loop is captioned as a sample (desktop)', async ({ page }) => {
