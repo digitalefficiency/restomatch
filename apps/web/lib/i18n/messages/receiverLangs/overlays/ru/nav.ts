@@ -135,6 +135,7 @@ export const nav: Shape<typeof he> = {
     items: '{count} шт.',
     atRisk: '{amount} под риском',
     owed: '{amount} открытые кредиты',
+    unchecked: '{amount} ещё не проверено',
     blocking: 'блокирует оплату',
   },
   bell: {

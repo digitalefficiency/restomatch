@@ -235,6 +235,7 @@ function NavBadge({ value, dot = false }: { value?: NavBadgeValue; dot?: boolean
     items: (count) => t('badge.items', { count }),
     atRisk: (amount) => t('badge.atRisk', { amount }),
     owed: (amount) => t('badge.owed', { amount }),
+    unchecked: (amount) => t('badge.unchecked', { amount }),
     blocking: t('badge.blocking'),
   }).replace(/^,\s*/, '');
   if (dot) {
@@ -279,6 +280,7 @@ function BadgeSr({ id, label, value }: { id: string; label: string; value?: NavB
     items: (count) => t('badge.items', { count }),
     atRisk: (amount) => t('badge.atRisk', { amount }),
     owed: (amount) => t('badge.owed', { amount }),
+    unchecked: (amount) => t('badge.unchecked', { amount }),
     blocking: t('badge.blocking'),
   });
   return (

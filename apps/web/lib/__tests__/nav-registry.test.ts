@@ -586,6 +586,11 @@ describe('nav badges (W2-08)', () => {
     expect([...new Set(Object.values(map))].sort()).toEqual([...BADGE_KEYS].sort());
     // The unowned route files carry no badge (null, or absent on routes added later — e.g. W3-01's chainMatrix).
     for (const r of REGISTRY) {
+      // W3-10 owns routes/catalog.ts now: only its `catalog` item shows the neutral `link` badge.
+      if (r.key === 'catalog') {
+        expect(r.badge, r.key).toBe('link');
+        continue;
+      }
       if (['ask', 'branches', 'catalog', 'chain', 'products', 'recipes', 'reports'].some((seg) => r.path.startsWith(`/dashboard/${seg}`))) {
         expect(r.badge ?? null, r.key).toBeNull();
         expect(badgeFor(r)).toBeNull();

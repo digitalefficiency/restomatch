@@ -5,7 +5,7 @@ import type { Task, TaskType } from './types';
  * folded per nav source. The keys mirror `apps/web/lib/nav/types.ts`
  * `BADGE_KEYS` (the web registry test pins every key).
  */
-export const NAV_BADGE_KEYS = ['approvals', 'payRun', 'claims', 'receiving', 'count', 'intake', 'priceAlerts'] as const;
+export const NAV_BADGE_KEYS = ['approvals', 'payRun', 'claims', 'receiving', 'count', 'intake', 'priceAlerts', 'link'] as const;
 export type NavBadgeKey = (typeof NAV_BADGE_KEYS)[number];
 
 export interface NavBadge {
@@ -18,10 +18,12 @@ export interface NavBadge {
   /** Neutral only (e.g. a price alert below materiality). */
   tone: 'danger' | 'warn' | 'neutral';
   /**
-   * What the ₪ means, so the UI names it: 'atRisk' (the sum of the tasks) or
-   * 'owed' (claims: the recovery page's own "זיכויים פתוחים" figure — train C review).
+   * What the ₪ means, so the UI names it: 'atRisk' (the sum of the tasks),
+   * 'owed' (claims: the recovery page's own "זיכויים פתוחים" figure — train C review)
+   * or 'unchecked' (link: invoice spend not price-checked yet because its line has
+   * no product — neither at risk nor owed; W3-10).
    */
-  money?: 'atRisk' | 'owed';
+  money?: 'atRisk' | 'owed' | 'unchecked';
 }
 
 /** Which badge a task type adds into. `waiting_on_others` adds into none: it is not mine. */
@@ -36,7 +38,11 @@ export const BADGE_OF: Partial<Record<TaskType, NavBadgeKey>> = {
   doc_review: 'intake',
 };
 
-/** Money badges show ₪; the rest show a count. */
+/**
+ * Task-fed badges whose ₪ is the sum of their tasks' ₪ (foldBadges only). The
+ * `link` badge is not task-fed and carries its own 'unchecked' ₪ (linkBadge), so
+ * it is deliberately not here: that keeps the 'atRisk' sum off it.
+ */
 export const MONEY_BADGES: ReadonlySet<NavBadgeKey> = new Set(['approvals', 'payRun', 'claims']);
 
 export function foldBadges(tasks: readonly Task[], extra: Partial<Record<NavBadgeKey, number>> = {}): Partial<Record<NavBadgeKey, NavBadge>> {
@@ -57,4 +63,21 @@ export function foldBadges(tasks: readonly Task[], extra: Partial<Record<NavBadg
     if (count > 0) out[key] = { count, ilsAgorot: null, block: false, tone: 'neutral' };
   }
   return out;
+}
+
+/**
+ * W3-10 · the "לקשר" badge: spend not price-checked yet (mapping.queueSummary).
+ * Always neutral (T4, never a false alarm), never blocking. The ₪ is integer
+ * agorot summed in SQL by the queue; `showMoney` false (any role but owner /
+ * manager / bookkeeper) → ilsAgorot null. No rows → no badge.
+ */
+export function linkBadge(summary: { count: number; unmappedAgorot: number }, showMoney: boolean): NavBadge | null {
+  if (summary.count <= 0) return null;
+  return {
+    count: summary.count,
+    ilsAgorot: showMoney && summary.unmappedAgorot > 0 ? summary.unmappedAgorot : null,
+    block: false,
+    tone: 'neutral',
+    money: 'unchecked',
+  };
 }
