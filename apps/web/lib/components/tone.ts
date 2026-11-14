@@ -61,8 +61,12 @@ export const SURFACE_TONE: Record<Tone, string> = {
   neutral: 'border-line bg-surface-sunken',
 };
 
-/** The quiet parts of a money figure: the ₪ sign and the agorot (SPEC §3). */
-export const MONEY_QUIET = 'text-fg-tertiary';
+/**
+ * The quiet parts of a money figure: the ₪ sign and the agorot (SPEC §3). Inside a filled ancestor
+ * (a primary button, the solid pill, the dark toast, a solid menu badge) they take the fill's word
+ * colour instead, as the reference's `.cur{ color:inherit }` does: grey on a fill reads at ~1.2:1.
+ */
+export const MONEY_QUIET = 'text-fg-tertiary [.text-on-bold_&]:text-inherit [.text-on-primary_&]:text-inherit';
 
 /**
  * The pill's shell (SPEC §5: 12 px word, weight 500). Its height is DS2's chip role (`--chip-h`: 24 px,
