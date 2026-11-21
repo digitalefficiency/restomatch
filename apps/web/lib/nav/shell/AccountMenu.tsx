@@ -87,6 +87,13 @@ export function AccountMenu({ userName, email, roleLabel, isPlatformAdmin, recei
     return () => document.removeEventListener('pointerdown', onDown);
   }, [open]);
 
+  // Focus leaving both the button and the menu closes it (§8: Tab out closes and continues), also when the
+  // Tab comes before the menu has taken focus.
+  function onLeave(e: React.FocusEvent) {
+    const next = e.relatedTarget as Node | null;
+    if (open && !menuRef.current?.contains(next) && !buttonRef.current?.contains(next)) setOpen(false);
+  }
+
   function onMenuKey(e: React.KeyboardEvent) {
     const items = [...(menuRef.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? [])];
     const i = items.indexOf(document.activeElement as HTMLElement);
@@ -156,6 +163,7 @@ export function AccountMenu({ userName, email, roleLabel, isPlatformAdmin, recei
         aria-expanded={open}
         aria-controls={menuId}
         data-testid="avatar-menu"
+        onBlur={onLeave}
         data-tip={userName || email}
         data-tip-text={roleLabel}
         data-tip-when="rail"
@@ -185,6 +193,7 @@ export function AccountMenu({ userName, email, roleLabel, isPlatformAdmin, recei
           role="menu"
           aria-label={t('menu.account')}
           onKeyDown={onMenuKey}
+          onBlur={onLeave}
           data-testid="account-menu"
           style={{ insetInlineStart: pos?.start ?? 12, bottom: pos?.bottom ?? 64, visibility: pos ? 'visible' : 'hidden' }}
           className="fixed z-sheet w-[223px] rounded-card bg-surface p-1 text-ink shadow-e2 ring-1 ring-line"

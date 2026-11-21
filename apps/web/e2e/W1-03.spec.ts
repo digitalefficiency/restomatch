@@ -105,7 +105,9 @@ for (const role of ROLES) {
 
       const bar = page.getByTestId('bottom-bar');
       await expect(bar).toBeVisible();
-      expect(await bar.locator('li').allInnerTexts()).toEqual(BARS[role][locale]);
+      // DS3-02: a badge's meaning is visually hidden text inside the link (sidebar spec §9), so the visible
+      // label is read from its own element, not from the link's whole text.
+      expect(await bar.locator('li [data-bar-label]').allInnerTexts()).toEqual(BARS[role][locale]);
       const box = (await bar.boundingBox())!;
       expect(box.height).toBeGreaterThanOrEqual(64);
       // Home is active, with aria-current and a 56×32 pill.
@@ -116,7 +118,7 @@ for (const role of ROLES) {
       expect(Math.round(pill.width)).toBe(56);
       expect(Math.round(pill.height)).toBe(32);
       // 12 px labels, never truncated.
-      const labels = await bar.locator('li span:last-child').evaluateAll((els) =>
+      const labels = await bar.locator('li [data-bar-label]').evaluateAll((els) =>
         els.map((el) => ({ fs: getComputedStyle(el).fontSize, cut: el.scrollWidth > el.clientWidth + 1 })),
       );
       for (const l of labels) expect(l).toEqual({ fs: '12px', cut: false });

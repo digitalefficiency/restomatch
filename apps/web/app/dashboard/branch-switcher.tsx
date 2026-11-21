@@ -152,6 +152,14 @@ export function BranchSwitcher({
     }
   }
 
+  /**
+   * Tab / Shift+Tab out of the switcher closes it (§8 popover contract), also when focus leaves from the
+   * trigger before the menu has taken it, and when a click lands elsewhere.
+   */
+  function onLeave(e: React.FocusEvent<HTMLDivElement>) {
+    if (open && !e.currentTarget.contains(e.relatedTarget as Node | null)) setOpen(false);
+  }
+
   /** Same page in the target branch, minus what belongs to the branch being left. */
   function placeIn(target: SwitcherBranch): BranchTarget {
     return branchSafeTarget(pathname ?? '/dashboard', window.location.search, target.role);
@@ -271,7 +279,7 @@ export function BranchSwitcher({
 
   if (variant === 'head') {
     return (
-      <div ref={rootRef} className={cn('min-w-0 flex-1', className)}>
+      <div ref={rootRef} className={cn('min-w-0 flex-1', className)} onBlur={onLeave}>
         <button
           ref={triggerRef}
           type="button"
@@ -332,7 +340,7 @@ export function BranchSwitcher({
   }
 
   return (
-    <div ref={rootRef} className={cn('relative', className)}>
+    <div ref={rootRef} className={cn('relative', className)} onBlur={onLeave}>
       <button
         ref={triggerRef}
         type="button"

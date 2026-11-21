@@ -122,7 +122,10 @@ export function BottomBar({ viewer }: { viewer: NavViewer }) {
                     ) : null}
                   </span>
                 </span>
-                <span className="max-w-full whitespace-nowrap">{t(`bar.${label}`)}</span>
+                <span data-bar-label="" className="max-w-full whitespace-nowrap">
+                  {t(`bar.${label}`)}
+                </span>
+                {/* The badge's meaning inside the link, visually hidden (sidebar spec §9). */}
                 {bw ? <span className="sr-only">, {bw}</span> : null}
               </Link>
             </li>
@@ -146,7 +149,9 @@ export function BottomBar({ viewer }: { viewer: NavViewer }) {
             <span className={cn(pill, !inBar && activeKey && 'bg-primary-subtle text-primary')}>
               <MoreHorizontal aria-hidden="true" width={24} height={24} strokeWidth={1.75} />
             </span>
-            <span className="whitespace-nowrap">{t('bar.more')}</span>
+            <span data-bar-label="" className="whitespace-nowrap">
+              {t('bar.more')}
+            </span>
           </button>
         </li>
       </ul>
