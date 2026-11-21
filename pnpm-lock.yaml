@@ -18,6 +18,8 @@ overrides:
   source-map-js@>=1.0.0 <1.2.2: ^1.2.2
   undici@>=6.7.0 <6.28.1: ^6.28.1
   node-forge@<1.4.1: ^1.4.1
+  drizzle-orm>@types/react: 19.0.10
+  drizzle-orm>react: 19.0.0
 
 importers:
 
@@ -26,6 +28,9 @@ importers:
       '@types/node':
         specifier: ^22.10.5
         version: 22.19.19
+      '@types/react':
+        specifier: 19.0.10
+        version: 19.0.10
       prettier:
         specifier: ^3.4.2
         version: 3.8.3
@@ -385,7 +390,7 @@ importers:
         version: 11.17.0(typescript@5.9.3)
       drizzle-orm:
         specifier: ^0.38.3
-        version: 0.38.4(@opentelemetry/api@1.10.0)(@types/react@19.2.15)(postgres@3.4.9)(react@19.2.6)
+        version: 0.38.4(@opentelemetry/api@1.10.0)(@types/react@19.0.10)(postgres@3.4.9)(react@19.0.0)
       exceljs:
         specifier: ^4.4.0
         version: 4.4.0
@@ -464,7 +469,7 @@ importers:
     dependencies:
       drizzle-orm:
         specifier: ^0.38.3
-        version: 0.38.4(@opentelemetry/api@1.10.0)(@types/react@19.2.15)(postgres@3.4.9)(react@19.2.6)
+        version: 0.38.4(@opentelemetry/api@1.10.0)(@types/react@19.0.10)(postgres@3.4.9)(react@19.0.0)
       postgres:
         specifier: ^3.4.5
         version: 3.4.9
@@ -3238,9 +3243,6 @@ packages:
   '@types/react@19.0.10':
     resolution: {integrity: sha512-JuRQ9KXLEjaUNjTWpzuR231Z2WpIwczOkBEIvbHNCzQefFIT0L8IqE6NV6ULLyC1SI/i234JnDoMkfg+RjQj2g==}
 
-  '@types/react@19.2.15':
-    resolution: {integrity: sha512-eRwcGNHve+E8qtEQSSRl6urh+rFop4v8gm6O8rGv25CodbvFdLjA1vVQ1KkiFE0w0UPOnb8tDiFKL5lp0rtY5Q==}
-
   '@types/set-cookie-parser@2.4.10':
     resolution: {integrity: sha512-GGmQVGpQWUe5qglJozEjZV/5dyxbOOZ0LHe/lqyWssB88Y4svNfst0uqBVscdDeIKl5Jy5+aPSvy7mI9tYRguw==}
 
@@ -4269,7 +4271,7 @@ packages:
       '@tidbcloud/serverless': '*'
       '@types/better-sqlite3': '*'
       '@types/pg': '*'
-      '@types/react': '>=18'
+      '@types/react': 19.0.10
       '@types/sql.js': '*'
       '@vercel/postgres': '>=0.8.0'
       '@xata.io/client': '*'
@@ -4282,7 +4284,7 @@ packages:
       pg: '>=8'
       postgres: '>=3'
       prisma: '*'
-      react: '>=18'
+      react: 19.0.0
       sql.js: '>=1'
       sqlite3: '>=5'
     peerDependenciesMeta:
@@ -6466,10 +6468,6 @@ packages:
 
   react@19.0.0:
     resolution: {integrity: sha512-V8AVnmPIICiWpGfm6GLzCR/W5FXLchHop40W4nXBmdlEceh16rCN8O8LNWm5bh5XUX91fh7KpA+W0TgMKmgTpQ==}
-    engines: {node: '>=0.10.0'}
-
-  react@19.2.6:
-    resolution: {integrity: sha512-sfWGGfavi0xr8Pg0sVsyHMAOziVYKgPLNrS7ig+ivMNb3wbCBw3KxtflsGBAwD3gYQlE/AEZsTLgToRrSCjb0Q==}
     engines: {node: '>=0.10.0'}
 
   read-cache@1.0.0:
@@ -10374,11 +10372,6 @@ snapshots:
     dependencies:
       csstype: 3.2.3
 
-  '@types/react@19.2.15':
-    dependencies:
-      csstype: 3.2.3
-    optional: true
-
   '@types/set-cookie-parser@2.4.10':
     dependencies:
       '@types/node': 22.19.19
@@ -11477,12 +11470,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  drizzle-orm@0.38.4(@opentelemetry/api@1.10.0)(@types/react@19.2.15)(postgres@3.4.9)(react@19.2.6):
+  drizzle-orm@0.38.4(@opentelemetry/api@1.10.0)(@types/react@19.0.10)(postgres@3.4.9)(react@19.0.0):
     optionalDependencies:
       '@opentelemetry/api': 1.10.0
-      '@types/react': 19.2.15
+      '@types/react': 19.0.10
       postgres: 3.4.9
-      react: 19.2.6
+      react: 19.0.0
 
   dunder-proto@1.0.1:
     dependencies:
@@ -14020,9 +14013,6 @@ snapshots:
       loose-envify: 1.4.0
 
   react@19.0.0: {}
-
-  react@19.2.6:
-    optional: true
 
   read-cache@1.0.0:
     dependencies:

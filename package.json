@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/react": "19.0.10",
     "prettier": "^3.4.2",
     "turbo": "^2.3.3",
     "typescript": "^5.7.3",
@@ -103,7 +104,9 @@
       "js-yaml@>=4.0.0 <4.3.2": "^4.3.2",
       "source-map-js@>=1.0.0 <1.2.2": "^1.2.2",
       "undici@>=6.7.0 <6.28.1": "^6.28.1",
-      "node-forge@<1.4.1": "^1.4.1"
+      "node-forge@<1.4.1": "^1.4.1",
+      "drizzle-orm>@types/react": "19.0.10",
+      "drizzle-orm>react": "19.0.0"
     }
   }
 }
