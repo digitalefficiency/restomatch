@@ -32,4 +32,12 @@ describe('login hint codec (auth-06/-07/-25)', () => {
     expect(resendWaitSec(now - 10_500, now)).toBe(20);
     expect(resendWaitSec(now - 31_000, now)).toBe(0);
   });
+
+  it('keeps "remember me" only as a server-written flag (round 4: never from the URL)', () => {
+    const base = { email: 'dana@kfar.co.il', fails: 0, sentAt: null, next: null };
+    expect(decodeHint(encodeHint({ ...base, remember: true }))?.remember).toBe(true);
+    expect(decodeHint(encodeHint({ ...base, remember: false }))?.remember).toBeUndefined();
+    expect(decodeHint(encodeHint(base))?.remember).toBeUndefined();
+    expect(decodeHint(JSON.stringify({ e: 'a@b.co', m: 'yes' }))?.remember).toBeUndefined();
+  });
 });
