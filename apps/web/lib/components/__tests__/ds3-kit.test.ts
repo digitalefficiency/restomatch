@@ -95,7 +95,9 @@ describe('<Money> in the clean finish (SPEC §3)', () => {
     expect(tile).toContain('data-money="cur"');
     expect(tile).not.toContain('data-money="dec"');
     const green = render(h(Money, { value: 296, context: 'line', state: 'claimed', split: true }));
-    expect(green).toContain('text-primary');
+    // `claimed` reads the T3 family since DS3-00 700952c0 (it was text-primary; both are #00573B).
+    expect(green).toContain('text-gold');
+    expect(green).not.toContain('text-primary');
     expect(green).not.toContain('text-fg-tertiary');
     expect(render(h(Money, { value: 296, context: 'line', split: true, quietParts: false }))).not.toContain('text-fg-tertiary');
   });

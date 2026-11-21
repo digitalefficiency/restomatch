@@ -115,11 +115,10 @@ export type MoneyState =
 export const moneyStates: Record<MoneyState, { figure: 'ink' | 'muted' | 'gold' | 'primary'; tier: 'T1' | 'T2' | 'T3' | 'T4' | null }> = {
   leak: { figure: 'ink', tier: 'T1' }, // ink figure + danger marker (rail) on the T1 hero only
   atRisk: { figure: 'ink', tier: 'T2' }, // bold StatusChip + ink figure + one primary CTA
-  // T3 is green in the clean finish: caught, credited and returned read the T3 family, whose text is
-  // the recovered amount's own role (#00573B, `--c-gold-text`). `claimed` (asked for, not back yet)
-  // keeps `primary`, the same value: lib/components/__tests__/ds-foundation.test.ts:80 pins its class.
+  // T3 is green in the clean finish: caught, claimed, credited and returned read the T3 family, whose
+  // text is the recovered amount's own role (#00573B, `--c-gold-text`), never the action role.
   caught: { figure: 'gold', tier: 'T3' },
-  claimed: { figure: 'primary', tier: 'T3' },
+  claimed: { figure: 'gold', tier: 'T3' }, // asked for, not back yet
   credited: { figure: 'gold', tier: 'T3' }, // + ✓ icon
   returned: { figure: 'gold', tier: 'T3' },
   outstanding: { figure: 'ink', tier: 'T2' }, // + DeadlineChip (warn ≤7 days, danger only when late)

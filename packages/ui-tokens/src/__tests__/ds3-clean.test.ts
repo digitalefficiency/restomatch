@@ -125,14 +125,10 @@ describe('DS3 · SPEC §2 colours land on the DS2 roles', () => {
 describe('DS3 · tiers keep their meaning (SPEC §2 rules)', () => {
   const T3: MoneyState[] = ['caught', 'claimed', 'credited', 'returned'];
 
-  it('T3 (good news) is green: money that came back (caught, credited, returned) reads the T3 family; claimed reads the brand', () => {
+  it('T3 (good news) is green: caught, claimed, credited and returned all read the T3 family, never the brand', () => {
     for (const s of T3) expect(moneyStates[s].tier, s).toBe('T3');
-    expect(moneyStates.caught.figure).toBe('gold');
-    expect(moneyStates.credited.figure).toBe('gold');
-    expect(moneyStates.returned.figure).toBe('gold');
-    // Held on `primary`: ds-foundation.test.ts:80 (DS3-01's folder) pins claimed's class (see the DS3-00 PR).
-    expect(moneyStates.claimed.figure).toBe('primary');
-    for (const s of T3) expect([status.gold.text, status.primary.text], s).toContain(status[moneyStates[s].figure as StatusFamily].text);
+    for (const s of T3) expect(moneyStates[s].figure, s).toBe('gold');
+    for (const s of T3) expect(status[moneyStates[s].figure as StatusFamily].text, s).toBe(status.gold.text);
     // Its own variable, even though the clean value equals the action colour (SPEC §2).
     const css = cssVariables();
     expect(css).toContain(`--c-gold-text: ${channels(status.gold.text)};`);
