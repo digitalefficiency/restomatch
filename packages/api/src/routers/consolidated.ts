@@ -3,6 +3,7 @@ import { eq, restaurants } from '@restomatch/db';
 import { financeProcedure, invoiceReaderProcedure, router } from '../trpc';
 import { assertInvoiceOwned } from '../tenant';
 import { featureEnabled } from '../lib/features';
+import { seesNoMoney } from '../lib/staffMoney';
 import {
   consolidatedProposal,
   deliveryNoteCoverage,
@@ -24,6 +25,9 @@ async function enabled(db: Parameters<typeof consolidatedProposal>[0], restauran
     .limit(1);
   return featureEnabled(r?.settings, 'consolidatedMatch');
 }
+
+/** A delivery note as the coverage read returns it: no ₪ for staff roles (H-11). */
+type DeliveryNoteCoverageView = Omit<DeliveryNoteCoverage, 'receivedValueIls'> & { receivedValueIls: number | null };
 
 export const consolidatedRouter = router({
   /**
@@ -49,9 +53,12 @@ export const consolidatedRouter = router({
         to: z.string().datetime({ offset: true }),
       }),
     )
-    .query(async ({ ctx, input }): Promise<DeliveryNoteCoverage[]> => {
+    .query(async ({ ctx, input }): Promise<DeliveryNoteCoverageView[]> => {
       const { restaurantId } = ctx.session;
       if (!(await enabled(ctx.db, restaurantId))) return [];
-      return deliveryNoteCoverage(ctx.db, restaurantId, input.supplierId, new Date(input.from), new Date(input.to));
+      const notes = await deliveryNoteCoverage(ctx.db, restaurantId, input.supplierId, new Date(input.from), new Date(input.to));
+      // H-11 strip (slice c): the receiver (an invoice reader) gets the notes and
+      // their state, never the received ₪.
+      return seesNoMoney(ctx.session.role) ? notes.map((n) => ({ ...n, receivedValueIls: null })) : notes;
     }),
 });
