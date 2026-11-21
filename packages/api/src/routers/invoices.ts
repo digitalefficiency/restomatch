@@ -24,6 +24,7 @@ import { can, financeProcedure, invoiceReaderProcedure, router } from '../trpc';
 import { canViewPrices } from '../lib/capabilities';
 import { readDuplicateOf } from '../lib/invoiceDedupe';
 import { readConsolidatedRaw } from '../match/consolidated';
+import { closedReceiptSql, countedLineSql } from '../match/receiptTruth';
 import { localDateKeyInTz } from '../lib/time';
 import { allocationThreshold } from '../vat/vatAtRisk';
 import {
@@ -368,6 +369,9 @@ export const invoicesRouter = router({
             productId: sql<string | null>`COALESCE(${grLines.productId}, ${poLines.productId})`,
             qty: grLines.qtyReceived,
             rejected: grLines.qtyRejected,
+            // G-04 Q3: the same "closed receipt" / "counted line" truth the engine reads.
+            closed: sql<boolean>`${closedReceiptSql()}`,
+            counted: sql<boolean>`${countedLineSql()}`,
           })
           .from(grLines)
           .innerJoin(goodsReceipts, and(eq(goodsReceipts.id, grLines.grId), eq(goodsReceipts.restaurantId, rid)))
@@ -458,6 +462,14 @@ export const invoicesRouter = router({
         ocrConfidenceLine: num(l.ocrConfidenceLine),
         qtyOrdered: sumBy(ordered, (r) => Number(r.qty), l.productId),
         qtyReceived: sumBy(received, (r) => Number(r.qty) - Number(r.rejected ?? 0), l.productId),
+        /**
+         * G-04 Q3 (owner 11.11): the receipt is closed but nobody counted this product's
+         * line(s), so there is no quantity check on it (§5.2). Read-only, neutral, no ₪.
+         */
+        notCounted:
+          l.productId != null &&
+          received.some((r) => r.productId === l.productId) &&
+          received.filter((r) => r.productId === l.productId).every((r) => r.closed === true && r.counted !== true),
         expectedPrice: money ? num(ordered.find((r) => r.productId === l.productId && l.productId != null)?.price ?? null) : null,
         expectedPriceSource: ordered.some((r) => r.productId === l.productId && l.productId != null) ? ('po_price' as const) : null,
         expectedPriceAt: run?.poDate ?? null,

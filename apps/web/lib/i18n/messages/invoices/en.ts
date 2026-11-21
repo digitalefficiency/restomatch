@@ -192,6 +192,7 @@ export const en: Shape<typeof he> = {
     zoom: 'Zoom {pct}%',
     ordered: 'Ordered',
     received: 'Received',
+    notCounted: 'Not counted',
     billed: 'Billed',
     expected: 'Expected price',
     expectedSource: { po_price: 'order', receipt: 'receiving', invoice: 'invoice' },
