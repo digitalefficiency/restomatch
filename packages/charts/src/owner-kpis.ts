@@ -53,6 +53,7 @@ export interface ComputeOwnerKpisOptions {
  *  • monthPotentialLossIls — sum of unresolved discrepancy delta amounts
  *    (warn+block severity) in the current month.
  *  • monthSavingsCapturedIls — sum of resolved discrepancy delta amounts
+ *    (a person's accept/resolve; system auto-accepts excluded, G-15 Q8)
  *    (resolved or accepted) in the current month.
  *  • pendingApprovalsCount — discrepancies awaiting decision (open or escalated).
  *  • weekCleanMatchPct — % of match_runs in the last 7 days whose
@@ -86,7 +87,9 @@ export async function computeOwnerKpis(
   // 2. Savings captured — this month's findings decided as a claim (accepted / resolved).
   //    G-14 Q3: the same shekel as every other ₪ figure — leak lines only (LEAK_FILTER), |Δ|
   //    like the hero, and the decision table's 'claim' effect, so a tolerance row the engine
-  //    auto-approved (owner M7: waived) is never "captured".
+  //    auto-approved (owner M7: waived) is never "captured". This subsumes G-15 Q8 (#357):
+  //    the routing engine's auto-accepts (non-leak-acknowledge / minor-info) are `info`, so
+  //    outside LEAK_FILTER, and a rule-tolerated accept is 'waive' in the decision table.
   const savings = (await db.execute(sql`
     SELECT COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER} AND ${effectSql()} = 'claim'), 0) AS sum
     FROM discrepancies d

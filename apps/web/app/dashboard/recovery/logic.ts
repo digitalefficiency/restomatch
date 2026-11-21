@@ -184,7 +184,7 @@ export function countdownOf(
  * browser and cannot import the server package, so a parity test
  * (__tests__/logic.test.ts) runs every OVERDUE_BOUNDARY_CASES case and the
  * status / option / outstanding / type cases through both and requires them
- * to agree. A claim is awaiting a chase when its status is claimed,
+ * to agree. A claim is awaiting a chase when its letter went out — status
  * letter_sent or acknowledged (acknowledged only with `chaseAcknowledged`,
  * default on), something is outstanding, its type is never one the owner does
  * not ask back, and MORE than ANSWER_DAYS whole Israel days passed since the
@@ -201,7 +201,8 @@ export interface ChaseClaimWeb {
 }
 export function isAwaitingChaseWeb(c: ChaseClaimWeb, nowIso: string, opts: { chaseAcknowledged?: boolean } = {}): boolean {
   const chaseAck = opts.chaseAcknowledged ?? true;
-  if (!(AWAITING as readonly string[]).includes(c.status)) return false;
+  // Only a sent letter is chased (letter_sent, acknowledged); an unsent request (claimed) never is.
+  if (c.status !== 'letter_sent' && c.status !== 'acknowledged') return false;
   if (c.status === 'acknowledged' && !chaseAck) return false;
   if (!(c.outstandingAgorot > 0)) return false;
   if (c.discrepancyType && (NEVER_CLAIMABLE_TYPES_WEB as readonly string[]).includes(c.discrepancyType)) return false;
