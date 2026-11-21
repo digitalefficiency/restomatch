@@ -212,6 +212,17 @@ export const en: Shape<typeof he> = {
     },
   },
   pwa: {
+    install: {
+      title: 'Install RestoMatch on this phone?',
+      body: 'Open it from the home screen, work without signal, and get alerts on deliveries and approvals.',
+      install: 'Install',
+      later: 'Not now',
+      iosTitle: 'Install on iPhone: three steps',
+      iosStep1: 'Tap the Share button at the bottom of the screen',
+      iosStep2: 'Choose "Add to Home Screen"',
+      iosStep3: 'Tap "Add" in the corner',
+      done: 'Got it',
+    },
     share: {
       title: 'Share to RestoMatch',
       loading: 'Opening what you shared…',
