@@ -841,19 +841,14 @@ function EffectBox({
           {more > 0 ? <li>{t('thresholds.effect.andMore', { count: more })}</li> : null}
         </ul>
       ) : null}
-      {unsaved ? (
-        <>
-          {opensMore ? (
-            <p className="mt-1 text-caption text-muted">{t('thresholds.effect.stricter')}</p>
-          ) : null}
-          <p className={cn('text-caption text-muted', !opensMore && 'mt-1')}>
-            {t('thresholds.effect.newOnly')}
-          </p>
-        </>
-      ) : (
-        <p className="mt-1 text-caption text-muted">{t('thresholds.effect.savedApply')}</p>
-      )}
-      <p className="text-caption text-muted">{t('thresholds.effect.openStay')}</p>
+      {unsaved && opensMore ? (
+        <p className="mt-1 text-caption text-muted">{t('thresholds.effect.stricter')}</p>
+      ) : null}
+      {/* The constant line (SPEC §10.5, KNOWN-ISSUES "Settings" #3): when a threshold starts to act.
+          Saving re-checks nothing; an open invoice checked again later reads the new thresholds. */}
+      <p className={cn('text-caption text-muted', !(unsaved && opensMore) && 'mt-1')}>
+        {t('thresholds.effect.applies')}
+      </p>
       {stale ? <span className="sr-only">{t('thresholds.effect.busySr')}</span> : null}
     </div>
   );

@@ -14,7 +14,8 @@ import { foldContract, measureCopy } from './helpers/copyBudget';
  * Acceptance, as tested here:
  *   - SPEC §10.5 layout: one h1, two groups ("אני", "המסעדה"), a scope chip per section, a search
  *     field that finds any setting; receiver and chef see only "אני".
- *   - Display preferences act at once, are stored per device (the rm_display cookie) and are in the
+ *   - Display preferences act at once, are stored per device under the contract's names (rm_density,
+ *     rm_text and their rm:density / rm:text mirrors, rm:keys:single) and are in the
  *     first HTML: no attribute changes after hydration ("no preference flashes on load").
  *   - Phone: the settings that do nothing on a phone are absent (density, the side menu, single keys).
  *   - Thresholds: saving writes exactly what settings.update writes and is audited the same way
@@ -85,10 +86,15 @@ async function seriousAxe(page: Page): Promise<string[]> {
 const sideways = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
-async function displayCookie(page: Page): Promise<string | null> {
-  const c = (await page.context().cookies()).find((x) => x.name === 'rm_display');
+/** One preference cookie's value on this device (the contract: rm_density, rm_text), or null. */
+async function prefCookie(page: Page, name: 'rm_density' | 'rm_text'): Promise<string | null> {
+  const c = (await page.context().cookies()).find((x) => x.name === name);
   return c ? decodeURIComponent(c.value) : null;
 }
+
+/** A localStorage value (the contract: rm:density, rm:text, rm:keys:single), or null. */
+const stored = (page: Page, key: string) =>
+  page.evaluate((k) => window.localStorage.getItem(k), key);
 
 for (const lang of ['he', 'en'] as const) {
   test(`the frame: one h1, two groups with scope chips, a search that finds any setting (${lang})`, async ({
@@ -162,8 +168,13 @@ test('display preferences act at once, stay on this device and are in the first 
 }) => {
   const errors = collectPageErrors(page);
   await prepare(page, 'he', 1440);
-  await page.context().clearCookies({ name: 'rm_display' });
+  await page.context().clearCookies({ name: 'rm_density' });
+  await page.context().clearCookies({ name: 'rm_text' });
   await page.goto(BASE);
+  await page.evaluate(() =>
+    ['rm:density', 'rm:text', 'rm:keys:single'].forEach((k) => localStorage.removeItem(k)),
+  );
+  await page.reload();
   const html = page.locator('html');
 
   await page
@@ -175,22 +186,30 @@ test('display preferences act at once, stay on this device and are in the first 
     .getByRole('radiogroup', { name: sHe.display.textTitle })
     .getByRole('radio', { name: sHe.display.textLarge })
     .click();
-  await expect(html).toHaveAttribute('data-text-size', 'large');
+  await expect(html).toHaveAttribute('data-text', 'large');
   expect(
     await page.evaluate(() => getComputedStyle(document.querySelector('#main-content > *')!).zoom),
   ).toBe('1.1');
   await page.getByRole('switch', { name: sHe.display.keysTitle }).click();
-  await expect(html).toHaveAttribute('data-single-keys', 'off');
-  expect(await displayCookie(page)).toBe('density=compact&text=large&keys=off');
+  await expect(page.getByRole('switch', { name: sHe.display.keysTitle })).toHaveAttribute(
+    'aria-checked',
+    'false',
+  );
 
-  // The first HTML already carries the choices (the server reads the cookie)…
+  // The contract's names and values (three other packages read them).
+  expect(await prefCookie(page, 'rm_density')).toBe('compact');
+  expect(await prefCookie(page, 'rm_text')).toBe('large');
+  expect(await stored(page, 'rm:density')).toBe('compact');
+  expect(await stored(page, 'rm:text')).toBe('large');
+  expect(await stored(page, 'rm:keys:single')).toBe('0');
+
+  // The first HTML already carries density and text size (the server reads the cookies)…
   const body = await (await page.request.get(BASE)).text();
   expect(body).toContain('data-density="compact"');
-  expect(body).toContain('data-text-size="large"');
-  expect(body).toContain('data-single-keys="off"');
+  expect(body).toContain('data-text="large"');
   expect(body).toContain('zoom:var(--text-zoom-large,1.1)');
 
-  // …so nothing flips after hydration.
+  // …so nothing flips after hydration (the single-key switch appears once, with its stored state).
   await page.addInitScript(() => {
     const w = window as unknown as { __prefsFlips: string[] };
     w.__prefsFlips = [];
@@ -202,7 +221,7 @@ test('display preferences act at once, stay on this device and are in the first 
     }).observe(document, {
       attributes: true,
       subtree: true,
-      attributeFilter: ['data-density', 'data-text-size', 'data-single-keys'],
+      attributeFilter: ['data-density', 'data-text'],
     });
   });
   await page.reload();
@@ -215,12 +234,17 @@ test('display preferences act at once, stay on this device and are in the first 
     await page.evaluate(() => (window as unknown as { __prefsFlips: string[] }).__prefsFlips),
   ).toEqual([]);
 
-  // Back to the defaults: nothing stored, the owner's regular density (no attribute).
+  // Back to the defaults: nothing stored, the owner's regular density and text (no attributes).
   await page.getByRole('button', { name: sHe.display.reset }).click();
-  await expect.poll(() => displayCookie(page)).toBeNull();
+  await expect.poll(() => prefCookie(page, 'rm_density')).toBeNull();
+  await expect.poll(() => prefCookie(page, 'rm_text')).toBeNull();
+  expect(await stored(page, 'rm:keys:single')).toBeNull();
   await expect(html).not.toHaveAttribute('data-density', /.+/);
-  await expect(html).toHaveAttribute('data-text-size', 'regular');
-  await expect(html).toHaveAttribute('data-single-keys', 'on');
+  await expect(html).not.toHaveAttribute('data-text', /.+/);
+  await expect(page.getByRole('switch', { name: sHe.display.keysTitle })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  );
   expect(errors).toEqual([]);
 });
 
@@ -241,7 +265,7 @@ test.describe('on a phone', () => {
     const errors = collectPageErrors(page);
     await prepare(page, 'he');
     const url = test.info().project.use.baseURL ?? 'http://localhost:3100';
-    await page.context().addCookies([{ name: 'rm_display', value: 'density=compact', url }]);
+    await page.context().addCookies([{ name: 'rm_density', value: 'compact', url }]);
 
     const body = await (
       await page.request.get(BASE, { headers: { 'user-agent': pixel.userAgent } })
@@ -293,7 +317,7 @@ test('thresholds: save writes what settings.update writes, audited; 10 s undo; h
     const effect = page.getByTestId('threshold-effect');
     await expect(row.getByText(sHe.thresholds.default, { exact: true })).toBeVisible();
     await expect(effect).toContainText(sHe.thresholds.effect.titleSaved);
-    await expect(effect).toContainText(sHe.thresholds.effect.openStay);
+    await expect(effect).toContainText(sHe.thresholds.effect.applies);
 
     // A change: marked unsaved, the bar, and the preview in conditional words.
     await row.getByRole('button', { name: dsHe.quantity.increase }).click();
@@ -302,8 +326,7 @@ test('thresholds: save writes what settings.update writes, audited; 10 s undo; h
     const dirtyBar = page.getByTestId('settings-dirty-bar');
     await expect(dirtyBar).toContainText(sHe.thresholds.save.dirty);
     await expect(effect).toContainText(sHe.thresholds.effect.titleUnsaved);
-    await expect(effect).toContainText(sHe.thresholds.effect.newOnly);
-    await expect(effect).toContainText(sHe.thresholds.effect.openStay);
+    await expect(effect).toContainText(sHe.thresholds.effect.applies);
     await expect(effect).not.toHaveAttribute('data-stale', /.+/);
     await expect(effect).not.toContainText(/ייסגר|נסגר|יסגרו|נסגרים/);
 
@@ -316,8 +339,8 @@ test('thresholds: save writes what settings.update writes, audited; 10 s undo; h
     const saved = await lastAudit();
     expect(saved!.action).toBe('settings.updated');
     expect(saved!.after.tolerances?.pricePercent).toBe(0.03);
-    await expect(effect).toContainText(sHe.thresholds.effect.savedApply);
-    await expect(effect).toContainText(sHe.thresholds.effect.openStay);
+    await expect(effect).toContainText(sHe.thresholds.effect.titleSaved);
+    await expect(effect).toContainText(sHe.thresholds.effect.applies);
 
     // Undo inside the ten seconds: the override is removed again, and that is audited too.
     await undoBar.getByRole('button', { name: sHe.thresholds.save.undoCta }).click();

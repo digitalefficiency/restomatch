@@ -5,9 +5,10 @@ import { keyLabel } from '@/lib/hotkeys';
 import { useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
 import { settings } from '@/lib/i18n/messages/settings';
-import { useIsApple, usePrefs, type Density, type TextSize } from '@/lib/prefs';
+import { useHydrated, useIsApple, usePrefs, type Density, type TextSize } from '@/lib/prefs';
 import { SectionFoot, SettingControlRow, SettingRow, SettingsRows } from './ui';
 import { useShellRail } from './useShellRail';
+import { useShellRefresh } from './useShellRefresh';
 
 /** Forced colours: the selected option keeps a visible mark (SegmentedControl draws it with a fill only). */
 const SEGMENT_FORCED =
@@ -29,7 +30,9 @@ export function DisplaySection({ initialRail }: { initialRail: boolean }) {
   const announce = useAnnounce();
   const p = usePrefs();
   const apple = useIsApple();
+  const hydrated = useHydrated();
   const shell = useShellRail(initialRail);
+  const refreshShell = useShellRefresh();
   const mod = keyLabel('Mod', apple);
 
   const said = (what: string, value: string) =>
@@ -69,6 +72,7 @@ export function DisplaySection({ initialRail }: { initialRail: boolean }) {
               className={SEGMENT_FORCED}
               onChange={(v) => {
                 p.setDensity(v);
+                refreshShell();
                 said(t('display.densityTitle'), densityOptions.find((o) => o.value === v)!.label);
               }}
             />
@@ -86,6 +90,7 @@ export function DisplaySection({ initialRail }: { initialRail: boolean }) {
               className={`${SEGMENT_TOUCH} ${SEGMENT_FORCED}`}
               onChange={(v) => {
                 p.setTextSize(v);
+                refreshShell();
                 said(t('display.textTitle'), textOptions.find((o) => o.value === v)!.label);
               }}
             />
@@ -116,20 +121,23 @@ export function DisplaySection({ initialRail }: { initialRail: boolean }) {
         ) : null}
         {/* The shared switch: the whole row is its target (reference `.set-row[data-row="keys"]`). */}
         <SettingControlRow id="keys" absentOn="phone">
-          <Switch
-            checked={p.singleKeys}
-            onCheckedChange={toggleKeys}
-            label={t('display.keysTitle')}
-            hint={
-              <span className="inline-flex flex-wrap items-center gap-1">
-                {/* Key caps are decorative (shared Kbd): the keys are said once, in words. */}
-                <span className="sr-only">J, K, 1, 2, Z</span>
-                <Kbd>J</Kbd> <Kbd>K</Kbd> <Kbd>1</Kbd> <Kbd>2</Kbd> <Kbd>Z</Kbd>{' '}
-                {t('display.keysQueue')}, <span className="sr-only">/</span>
-                <Kbd>/</Kbd> {t('display.keysSearch')}
-              </span>
-            }
-          />
+          {/* The switch lives in localStorage (rm:keys:single): shown once its real state is known. */}
+          <div className={hydrated ? undefined : 'invisible'}>
+            <Switch
+              checked={p.singleKeys}
+              onCheckedChange={toggleKeys}
+              label={t('display.keysTitle')}
+              hint={
+                <span className="inline-flex flex-wrap items-center gap-1">
+                  {/* Key caps are decorative (shared Kbd): the keys are said once, in words. */}
+                  <span className="sr-only">J, K, 1, 2, Z</span>
+                  <Kbd>J</Kbd> <Kbd>K</Kbd> <Kbd>1</Kbd> <Kbd>2</Kbd> <Kbd>Z</Kbd>{' '}
+                  {t('display.keysQueue')}, <span className="sr-only">/</span>
+                  <Kbd>/</Kbd> {t('display.keysSearch')}
+                </span>
+              }
+            />
+          </div>
         </SettingControlRow>
       </SettingsRows>
       <SectionFoot>
@@ -141,6 +149,7 @@ export function DisplaySection({ initialRail }: { initialRail: boolean }) {
           type="button"
           onClick={() => {
             p.reset();
+            refreshShell();
             // The reference's reset also expands the side menu (script.js "reset").
             if (shell.rail) shell.setRail(false);
             announce(t('display.sr.resetDone'));

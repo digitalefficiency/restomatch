@@ -7,6 +7,7 @@ import { settings } from '@/lib/i18n/messages/settings';
 import { useNavViewer } from '@/lib/nav/NavProvider';
 import { useIsCoarse, useIsNarrow, useIsPhone, usePrefs } from '@/lib/prefs';
 import { useShellRail } from '../_components/useShellRail';
+import { useShellRefresh } from '../_components/useShellRefresh';
 import { SECTIONS, sectionById, settingHref, settingsFor, type DeviceFacts } from './sections';
 
 /**
@@ -96,6 +97,7 @@ export function useDisplayCommands(): DisplayCommand[] {
   const narrow = useIsNarrow();
   const phone = useIsPhone();
   const shell = useShellRail(false);
+  const refreshShell = useShellRefresh();
   return useMemo(() => {
     const list: DisplayCommand[] = [];
     if (shell.available && !narrow) {
@@ -112,14 +114,20 @@ export function useDisplayCommands(): DisplayCommand[] {
         label:
           p.density === 'compact' ? t('commands.densityRegular') : t('commands.densityCompact'),
         keywords: words(t('commands.keywords.density')),
-        run: () => p.setDensity(p.density === 'compact' ? 'regular' : 'compact'),
+        run: () => {
+          p.setDensity(p.density === 'compact' ? 'regular' : 'compact');
+          refreshShell();
+        },
       });
     }
     list.push({
       id: 'text',
       label: p.textSize === 'large' ? t('commands.textRegular') : t('commands.textLarge'),
       keywords: words(t('commands.keywords.text')),
-      run: () => p.setTextSize(p.textSize === 'large' ? 'regular' : 'large'),
+      run: () => {
+        p.setTextSize(p.textSize === 'large' ? 'regular' : 'large');
+        refreshShell();
+      },
     });
     if (!phone) {
       list.push({
@@ -130,5 +138,5 @@ export function useDisplayCommands(): DisplayCommand[] {
       });
     }
     return list;
-  }, [t, p, narrow, phone, shell]);
+  }, [t, p, narrow, phone, shell, refreshShell]);
 }
