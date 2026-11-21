@@ -399,6 +399,15 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
     const [sup] = (await db.execute(sql`SELECT supplier_id FROM invoices WHERE id = ${a.invoiceId}`)) as unknown as Array<{
       supplier_id: string;
     }>;
+    // Drop afterwards only the tables this test created: G-03 ships payment_deductions (and H-03
+    // the payment ledger); dropping a real table here breaks every later suite on this DB.
+    const hadTable = async (t: string) =>
+      ((await db.execute(sql`select to_regclass(${`public.${t}`}) is not null as e`)) as unknown as Array<{ e: boolean }>)[0]!.e;
+    const had = {
+      payments: await hadTable('payments'),
+      payment_invoices: await hadTable('payment_invoices'),
+      payment_deductions: await hadTable('payment_deductions'),
+    };
     await db.execute(sql`CREATE TABLE IF NOT EXISTS payments (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), restaurant_id uuid NOT NULL, supplier_id uuid NOT NULL,
       paid_on date NOT NULL, amount_agorot bigint NOT NULL)`);
@@ -435,9 +444,9 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
       expect(by[c.invoiceId]).toMatchObject({ invoicePaid: false, paidAt: null });
       expect(by[e.invoiceId]).toMatchObject({ invoicePaid: true, paidAt: '2026-10-13T21:00:00.000Z' });
     } finally {
-      await db.execute(sql`DROP TABLE IF EXISTS payment_deductions`);
-      await db.execute(sql`DROP TABLE IF EXISTS payment_invoices`);
-      await db.execute(sql`DROP TABLE IF EXISTS payments`);
+      if (!had.payment_deductions) await db.execute(sql`DROP TABLE IF EXISTS payment_deductions`);
+      if (!had.payment_invoices) await db.execute(sql`DROP TABLE IF EXISTS payment_invoices`);
+      if (!had.payments) await db.execute(sql`DROP TABLE IF EXISTS payments`);
     }
   });
 
