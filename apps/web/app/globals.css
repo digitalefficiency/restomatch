@@ -3,53 +3,58 @@
 :root {
   --c-bg: 246 248 247; /* #F6F8F7 */
   --c-surface: 255 255 255; /* #FFFFFF */
-  --c-surface-2: 238 243 240; /* #EEF3F0 */
-  --c-line: 211 221 215; /* #D3DDD7 */
+  --c-surface-2: 241 245 243; /* #F1F5F3 */
+  --c-line: 212 219 216; /* #D4DBD8 */
   --c-line-strong: 122 139 130; /* #7A8B82 */
-  --c-ink: 15 31 23; /* #0F1F17 */
-  --c-muted: 74 93 83; /* #4A5D53 */
-  --c-subtle: 90 106 98; /* #5A6A62 */
-  --c-primary: 6 107 74; /* #066B4A */
+  --c-ink: 18 28 23; /* #121C17 */
+  --c-muted: 73 82 78; /* #49524E */
+  --c-subtle: 93 101 97; /* #5D6561 */
+  --c-primary: 0 87 59; /* #00573B */
   --c-on-primary: 255 255 255; /* #FFFFFF */
-  --c-gold: 117 92 0; /* #755C00 */
-  --c-danger: 184 15 42; /* #B80F2A */
-  --c-warn: 166 61 0; /* #A63D00 */
-  --c-info: 26 91 199; /* #1A5BC7 */
-  --c-surface-sunken: 238 243 240; /* #EEF3F0 */
+  --c-gold: 0 113 62; /* #00713E */
+  --c-danger: 183 25 28; /* #B7191C */
+  --c-warn: 146 80 0; /* #925000 */
+  --c-info: 34 86 187; /* #2256BB */
+  --c-surface-sunken: 241 245 243; /* #F1F5F3 */
   --c-line-field: 102 117 109; /* #66756D */
   --c-on-bold: 255 255 255; /* #FFFFFF */
-  --c-neutral: 74 93 83; /* #4A5D53 */
-  --c-focus: 26 91 199; /* #1A5BC7 */
-  --c-primary-bold: 6 107 74; /* #066B4A */
-  --c-primary-bold-hover: 5 88 61; /* #05583D */
-  --c-primary-subtle: 231 243 237; /* #E7F3ED */
-  --c-primary-subtle-hover: 211 234 223; /* #D3EADF */
-  --c-primary-border-subtle: 169 211 192; /* #A9D3C0 */
-  --c-danger-bold: 184 15 42; /* #B80F2A */
-  --c-danger-bold-hover: 153 12 35; /* #990C23 */
-  --c-danger-subtle: 252 236 239; /* #FCECEF */
-  --c-danger-subtle-hover: 248 218 223; /* #F8DADF */
-  --c-danger-border-subtle: 237 179 189; /* #EDB3BD */
-  --c-warn-bold: 166 61 0; /* #A63D00 */
-  --c-warn-bold-hover: 137 50 0; /* #893200 */
-  --c-warn-subtle: 253 240 231; /* #FDF0E7 */
-  --c-warn-subtle-hover: 249 224 207; /* #F9E0CF */
-  --c-warn-border-subtle: 235 191 159; /* #EBBF9F */
-  --c-gold-bold: 117 92 0; /* #755C00 */
-  --c-gold-bold-hover: 95 74 0; /* #5F4A00 */
-  --c-gold-subtle: 248 242 221; /* #F8F2DD */
-  --c-gold-subtle-hover: 239 230 195; /* #EFE6C3 */
-  --c-gold-border-subtle: 217 199 137; /* #D9C789 */
-  --c-info-bold: 26 91 199; /* #1A5BC7 */
-  --c-info-bold-hover: 21 75 166; /* #154BA6 */
-  --c-info-subtle: 235 242 253; /* #EBF2FD */
-  --c-info-subtle-hover: 217 230 251; /* #D9E6FB */
-  --c-info-border-subtle: 177 202 241; /* #B1CAF1 */
-  --c-neutral-bold: 74 93 83; /* #4A5D53 */
-  --c-neutral-bold-hover: 59 75 67; /* #3B4B43 */
-  --c-neutral-subtle: 238 243 240; /* #EEF3F0 */
-  --c-neutral-subtle-hover: 226 234 229; /* #E2EAE5 */
-  --c-neutral-border-subtle: 211 221 215; /* #D3DDD7 */
+  --c-neutral: 73 82 78; /* #49524E */
+  --c-focus: 34 86 187; /* #2256BB */
+  --c-primary-bold: 0 87 59; /* #00573B */
+  --c-primary-bold-hover: 0 69 45; /* #00452D */
+  --c-primary-subtle: 224 249 237; /* #E0F9ED */
+  --c-primary-subtle-hover: 208 243 227; /* #D0F3E3 */
+  --c-primary-border-subtle: 173 222 199; /* #ADDEC7 */
+  --c-danger-bold: 183 25 28; /* #B7191C */
+  --c-danger-bold-hover: 153 20 22; /* #991416 */
+  --c-danger-subtle: 255 240 238; /* #FFF0EE */
+  --c-danger-subtle-hover: 251 230 227; /* #FBE6E3 */
+  --c-danger-border-subtle: 250 202 197; /* #FACAC5 */
+  --c-warn-bold: 146 80 0; /* #925000 */
+  --c-warn-bold-hover: 121 66 1; /* #794201 */
+  --c-warn-subtle: 255 246 225; /* #FFF6E1 */
+  --c-warn-subtle-hover: 250 237 208; /* #FAEDD0 */
+  --c-warn-border-subtle: 245 215 154; /* #F5D79A */
+  --c-gold-bold: 0 113 62; /* #00713E */
+  --c-gold-bold-hover: 0 93 50; /* #005D32 */
+  --c-gold-subtle: 226 251 233; /* #E2FBE9 */
+  --c-gold-subtle-hover: 210 246 221; /* #D2F6DD */
+  --c-gold-border-subtle: 173 227 191; /* #ADE3BF */
+  --c-info-bold: 34 86 187; /* #2256BB */
+  --c-info-bold-hover: 26 70 155; /* #1A469B */
+  --c-info-subtle: 236 244 255; /* #ECF4FF */
+  --c-info-subtle-hover: 225 236 251; /* #E1ECFB */
+  --c-info-border-subtle: 191 213 253; /* #BFD5FD */
+  --c-neutral-bold: 73 82 78; /* #49524E */
+  --c-neutral-bold-hover: 57 65 62; /* #39413E */
+  --c-neutral-subtle: 241 245 243; /* #F1F5F3 */
+  --c-neutral-subtle-hover: 235 240 237; /* #EBF0ED */
+  --c-neutral-border-subtle: 212 219 216; /* #D4DBD8 */
+  --c-danger-dot: 221 39 41; /* #DD2729 */
+  --c-warn-dot: 242 171 25; /* #F2AB19 */
+  --c-warn-dot-ring: 185 117 0; /* #B97500 */
+  --c-gold-dot: 14 160 83; /* #0EA053 */
+  --c-neutral-dot: 93 101 97; /* #5D6561 */
   --c-viz-1: 6 107 74; /* #066B4A */
   --c-viz-2: 26 91 199; /* #1A5BC7 */
   --c-viz-3: 117 92 0; /* #755C00 */
@@ -66,7 +71,7 @@
   --c-on-creep-4: 255 255 255; /* #FFFFFF */
   --c-creep-5: 122 45 0; /* #7A2D00 */
   --c-on-creep-5: 255 255 255; /* #FFFFFF */
-  --scrim: rgba(15,31,23,.48);
+  --scrim: rgb(18 28 23 / .48);
   --dur-micro: 100ms;
   --dur-short: 150ms;
   --dur-medium: 240ms;
@@ -75,9 +80,9 @@
   --ease-enter: cubic-bezier(0,0,0.38,0.9);
   --ease-exit: cubic-bezier(0.2,0,1,0.9);
   --shadow-e0: none;
-  --shadow-e1: 0 1px 2px rgba(15,31,23,0.06), 0 8px 24px -12px rgba(15,31,23,0.12);
-  --shadow-e2: 0 8px 16px -4px rgba(15,31,23,.16), 0 0 1px rgba(15,31,23,.24);
-  --shadow-e3: 0 20px 24px -8px rgba(15,31,23,.22), 0 0 1px rgba(15,31,23,.24);
+  --shadow-e1: 0 1px 2px rgb(18 28 23 / .05);
+  --shadow-e2: 0 2px 6px rgb(18 28 23 / .06), 0 12px 28px -10px rgb(18 28 23 / .18);
+  --shadow-e3: 0 2px 6px rgb(18 28 23 / .06), 0 12px 28px -10px rgb(18 28 23 / .18);
   --radius-control: 0.5rem;
   --radius-card: 0.75rem;
   --radius-overlay: 1rem;
@@ -145,9 +150,9 @@
 }
 @media (prefers-contrast: more) {
   :root {
-    --c-muted: 15 31 23;
-    --c-subtle: 15 31 23;
-    --c-line-strong: 15 31 23;
+    --c-muted: 18 28 23;
+    --c-subtle: 18 28 23;
+    --c-line-strong: 18 28 23;
   }
 }
 @font-face {
@@ -329,43 +334,44 @@
   --c-surface-default: 255 255 255;
   --c-surface-raised: 255 255 255;
   --c-surface-overlay: 255 255 255;
-  --c-surface-selected: 235 242 253;
-  --c-text-primary: 15 31 23;
-  --c-text-secondary: 74 93 83;
-  --c-text-tertiary: 90 106 98;
-  --c-text-link: 26 91 199;
-  --c-border-subtle: 211 221 215;
-  --c-border-rule: 228 235 231;
+  --c-surface-selected: 236 244 255;
+  --c-surface-hover: 235 240 237;
+  --c-text-primary: 18 28 23;
+  --c-text-secondary: 73 82 78;
+  --c-text-tertiary: 93 101 97;
+  --c-text-link: 0 87 59;
+  --c-border-subtle: 212 219 216;
+  --c-border-rule: 226 232 229;
   --c-border-control: 122 139 130;
   --c-border-field: 102 117 109;
-  --c-border-focus: 26 91 199;
-  --c-action-primary-bg: 6 107 74;
-  --c-action-primary-bg-hover: 5 88 61;
+  --c-border-focus: 34 86 187;
+  --c-action-primary-bg: 0 87 59;
+  --c-action-primary-bg-hover: 0 69 45;
   --c-action-primary-fg: 255 255 255;
   --c-action-secondary-border: 122 139 130;
   --c-action-secondary-bg: 255 255 255;
-  --c-action-secondary-bg-hover: 238 243 240;
-  --c-action-secondary-fg: 15 31 23;
-  --c-action-quiet-fg: 74 93 83;
-  --c-action-quiet-fg-hover: 15 31 23;
-  --c-action-quiet-bg-hover: 238 243 240;
-  --c-action-danger-bg: 184 15 42;
-  --c-action-danger-bg-hover: 153 12 35;
+  --c-action-secondary-bg-hover: 241 245 243;
+  --c-action-secondary-fg: 18 28 23;
+  --c-action-quiet-fg: 73 82 78;
+  --c-action-quiet-fg-hover: 18 28 23;
+  --c-action-quiet-bg-hover: 235 240 237;
+  --c-action-danger-bg: 183 25 28;
+  --c-action-danger-bg-hover: 153 20 22;
   --c-action-danger-fg: 255 255 255;
-  --c-emphasis-t1-rail: 184 15 42;
-  --c-emphasis-t2-rail: 166 61 0;
-  --c-money-marker: 184 15 42;
-  --c-viz-cat-1: 26 91 199;
+  --c-emphasis-t1-rail: 183 25 28;
+  --c-emphasis-t2-rail: 146 80 0;
+  --c-money-marker: 221 39 41;
+  --c-viz-cat-1: 34 86 187;
   --c-viz-cat-2: 0 122 133;
   --c-viz-cat-3: 138 79 191;
   --c-viz-cat-4: 117 92 0;
-  --c-viz-cat-5: 74 93 83;
+  --c-viz-cat-5: 73 82 78;
   --c-viz-cat-6: 156 61 122;
   --c-viz-up: 180 83 26;
-  --c-viz-down: 6 107 74;
+  --c-viz-down: 0 113 62;
   --c-viz-prev: 122 139 130;
-  --c-viz-leak: 184 15 42;
-  --c-viz-grid: 211 221 215;
+  --c-viz-leak: 183 25 28;
+  --c-viz-grid: 212 219 216;
   --font-ui-faces: 'IBM Plex Sans Hebrew', 'IBM Plex Sans Hebrew Fallback';
   --font-ui: 'IBM Plex Sans Hebrew', 'IBM Plex Sans Hebrew Fallback', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --font-num: var(--font-ui);
@@ -431,6 +437,8 @@
   --fw-display-lg: 700;
   --ls-display-lg: -0.02em;
   --decision-row-h: 64px;
+  --decision-row-pt: 7px;
+  --decision-row-pb: 8px;
   --btn-h-primary: 40px;
   --chip-h: 24px;
   --count-row-h: 72px;
@@ -475,6 +483,10 @@
 [data-density='compact'] {
   --fs-cell: 0.8125rem;
   --lh-cell: 1.25rem;
+  --fs-title-md: 1.25rem;
+  --lh-title-md: 1.625rem;
+  --fs-title-lg: 1.25rem;
+  --lh-title-lg: 1.625rem;
   --fs-money-dense: 0.8125rem;
   --lh-money-dense: 1.25rem;
   --fs-money-row: 0.875rem;
@@ -484,6 +496,8 @@
   --fs-id: 0.75rem;
   --lh-id: 1rem;
   --decision-row-h: 52px;
+  --decision-row-pt: 4px;
+  --decision-row-pb: 5px;
   --btn-h-primary: 32px;
   --chip-h: 20px;
   --nav-item-h: 32px;
@@ -493,6 +507,10 @@
 [data-density='default'] {
   --fs-cell: 0.875rem;
   --lh-cell: 1.375rem;
+  --fs-title-md: 1.25rem;
+  --lh-title-md: 1.75rem;
+  --fs-title-lg: 1.5rem;
+  --lh-title-lg: 2rem;
   --fs-money-dense: 0.875rem;
   --lh-money-dense: 1.375rem;
   --fs-money-row: 1rem;
@@ -502,6 +520,8 @@
   --fs-id: 0.8125rem;
   --lh-id: 1.25rem;
   --decision-row-h: 64px;
+  --decision-row-pt: 7px;
+  --decision-row-pb: 8px;
   --btn-h-primary: 40px;
   --chip-h: 24px;
   --count-row-h: 72px;
@@ -517,6 +537,10 @@
 [data-density='touch'] {
   --fs-cell: 0.875rem;
   --lh-cell: 1.375rem;
+  --fs-title-md: 1.25rem;
+  --lh-title-md: 1.75rem;
+  --fs-title-lg: 1.5rem;
+  --lh-title-lg: 2rem;
   --fs-money-dense: 0.875rem;
   --lh-money-dense: 1.375rem;
   --fs-money-row: 1rem;
@@ -529,6 +553,32 @@
   --chip-h: 28px;
   --nav-item-h: 44px;
   --cell-px: 16px;
+}
+/* DS3: density is fixed on a phone — compact type steps and dials fall back to default under a coarse pointer. */
+@media (pointer: coarse) {
+  [data-density='compact'] {
+    --fs-cell: 0.875rem;
+    --lh-cell: 1.375rem;
+    --fs-title-md: 1.25rem;
+    --lh-title-md: 1.75rem;
+    --fs-title-lg: 1.5rem;
+    --lh-title-lg: 2rem;
+    --fs-money-dense: 0.875rem;
+    --lh-money-dense: 1.375rem;
+    --fs-money-row: 1rem;
+    --lh-money-row: 1.5rem;
+    --fs-money-card: 1.75rem;
+    --lh-money-card: 2.25rem;
+    --fs-id: 0.8125rem;
+    --lh-id: 1.25rem;
+    --decision-row-h: 64px;
+    --decision-row-pt: 7px;
+    --decision-row-pb: 8px;
+    --btn-h-primary: 40px;
+    --chip-h: 24px;
+    --nav-item-h: 36px;
+    --icon-md: 16px;
+  }
 }
 /* DS2 field mode (C6): field type steps, ≥8.2:1 secondary text, no tertiary, field borders. */
 [data-mode='field'] {
@@ -560,9 +610,9 @@
 }
 @media (prefers-contrast: more) {
   :root {
-    --c-text-secondary: 15 31 23;
-    --c-text-tertiary: 15 31 23;
-    --c-border-control: 15 31 23;
+    --c-text-secondary: 18 28 23;
+    --c-text-tertiary: 18 28 23;
+    --c-border-control: 18 28 23;
   }
 }
 /* @tokens:end */
@@ -662,10 +712,10 @@
     color: rgb(var(--c-ink));
   }
 
-  /* Quiet light scrollbar. */
+  /* Quiet light scrollbar (DS3: tokens only — the control-boundary steel, tinted down). */
   * {
     scrollbar-width: thin;
-    scrollbar-color: #c3cfc8 transparent;
+    scrollbar-color: rgb(var(--c-line-strong) / 0.4) transparent;
   }
   *::-webkit-scrollbar {
     width: 10px;
@@ -675,61 +725,64 @@
     background: transparent;
   }
   *::-webkit-scrollbar-thumb {
-    background: #c3cfc8;
+    background: rgb(var(--c-line-strong) / 0.4);
     border-radius: 9999px;
     border: 2px solid transparent;
     background-clip: padding-box;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: #a7b6ad;
+    background: rgb(var(--c-line-strong) / 0.65);
     background-clip: padding-box;
   }
 }
 
 @layer utilities {
-  /* SIGNATURE MOTIF — "money flow": a flowing primary→gold gradient stream.
+  /* SIGNATURE MOTIF — "money flow": a flowing primary→T3 gradient stream.
      Used as a thin top-accent on cards / section headers. (RTL-friendly:
-     left-to-right reads as "flow into savings", neutral on both sides.) */
+     left-to-right reads as "flow into savings", neutral on both sides.)
+     Deprecated (DS2 §2.5, ratchet `flow_stream_accents`). DS3: its colours read
+     the roles, so it follows the clean finish (the T3 end is green, no brass). */
   .flow-stream {
     background-image: linear-gradient(
       90deg,
-      rgba(6, 107, 74, 0) 0%,
-      #0e8f63 22%,
-      #3fb58a 50%,
-      #c08a1e 82%,
-      rgba(192, 138, 30, 0) 100%
+      rgb(var(--c-primary) / 0) 0%,
+      rgb(var(--c-primary)) 22%,
+      rgb(var(--c-gold-dot)) 50%,
+      rgb(var(--c-gold)) 82%,
+      rgb(var(--c-gold) / 0) 100%
     );
   }
 
   /* Alias kept for any consumer that referenced the accent by intent. */
   .flow-accent {
-    background-image: linear-gradient(90deg, #0e8f63 0%, #3fb58a 50%, #c08a1e 100%);
+    background-image: linear-gradient(90deg, rgb(var(--c-primary)) 0%, rgb(var(--c-gold-dot)) 50%, rgb(var(--c-gold)) 100%);
   }
 
   /* LEAK gradient — a downward danger stream for "money leaking / loss". */
   .leak-gradient {
     background-image: linear-gradient(
       180deg,
-      rgba(184, 15, 42, 0.85) 0%,
-      rgba(184, 15, 42, 0.3) 60%,
-      rgba(184, 15, 42, 0) 100%
+      rgb(var(--c-danger) / 0.85) 0%,
+      rgb(var(--c-danger) / 0.3) 60%,
+      rgb(var(--c-danger) / 0) 100%
     );
   }
 
-  /* Subtle radial glow helpers (decorative blobs inside cards). */
+  /* Subtle radial glow helpers (decorative blobs inside cards). Deprecated (DS2 §2.5,
+     ratchet `glow_blobs`); DS3: colours read the roles. */
   .glow-primary-blob {
-    background: radial-gradient(circle, rgba(6, 107, 74, 0.08), transparent 70%);
+    background: radial-gradient(circle, rgb(var(--c-primary) / 0.08), transparent 70%);
   }
   .glow-gold-blob {
-    background: radial-gradient(circle, rgba(192, 138, 30, 0.1), transparent 70%);
+    background: radial-gradient(circle, rgb(var(--c-gold) / 0.1), transparent 70%);
   }
   .glow-danger-blob {
-    background: radial-gradient(circle, rgba(184, 15, 42, 0.08), transparent 70%);
+    background: radial-gradient(circle, rgb(var(--c-danger) / 0.08), transparent 70%);
   }
 
   /* Frosted glass for sticky nav / headers. */
   .glass {
-    background-color: rgba(255, 255, 255, 0.82);
+    background-color: rgb(var(--c-surface) / 0.82);
     backdrop-filter: saturate(140%) blur(14px);
     -webkit-backdrop-filter: saturate(140%) blur(14px);
   }
@@ -754,11 +807,12 @@ html {
 
 /* Faint ledger grid behind the hero — fades out towards the edges. */
 .rm-grid {
-  background-image: linear-gradient(rgba(15, 31, 23, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(15, 31, 23, 0.06) 1px, transparent 1px);
+  background-image: linear-gradient(rgb(var(--c-ink) / 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--c-ink) / 0.06) 1px, transparent 1px);
   background-size: 44px 44px;
-  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 20%, transparent 75%);
-  mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, #000 20%, transparent 75%);
+  /* The mask reads only alpha; black = fully shown. */
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, black 20%, transparent 75%);
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, black 20%, transparent 75%);
 }
 
 /* Scroll reveal with zero JS: scroll-driven animations where supported
@@ -1053,13 +1107,19 @@ html[lang='ti'] .font-sans {
 /* ───────────── W1-01 design-system foundation v2 (tokens: app/tokens.css) ───────────── */
 
 @layer base {
-  /* One focus indicator everywhere (R-5, WCAG 2.4.7 / 1.4.11): a 2 px #1A5BC7
-     outline with a 2 px offset (3 px in field mode). `!important` so it beats
-     the v1 `focus:outline-none` / `ring-primary/60` / `ring-line` sites without
-     a codemod. Outline (not box-shadow) so forced-colors mode keeps it. */
+  /* One focus indicator everywhere (R-5, WCAG 2.4.7 / 1.4.11; DS3 SPEC §4): a 2 px
+     outline in the focus colour (--c-focus, the sea of SPEC §2) with a 2 px offset (3 px in
+     field mode). `!important` so it beats the v1 `focus:outline-none` /
+     `ring-primary/60` / `ring-line` sites without a codemod. Outline (not
+     box-shadow) so forced-colors mode keeps it. */
   :focus-visible {
     outline: var(--focus-width, 2px) solid rgb(var(--c-focus)) !important;
     outline-offset: var(--focus-offset, 2px) !important;
+  }
+  /* DS3 SPEC §4: on a dark surface (a dark toast) the outline is white. A component
+     opts in with data-focus="on-dark"; only the colour changes, never width or offset. */
+  [data-focus='on-dark'] {
+    --c-focus: var(--c-on-bold);
   }
   @media (forced-colors: active) {
     :focus-visible {

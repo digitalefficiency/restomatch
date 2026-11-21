@@ -87,18 +87,18 @@ export function Field({
 
   return (
     <div className={className}>
-      <label htmlFor={controlId} className="mb-1.5 block text-sm font-medium text-muted">
+      <label htmlFor={controlId} className="mb-1.5 block text-body-sm font-medium text-fg">
         {label}
-        {optional ? <span className="ms-1 font-normal text-subtle">{optional}</span> : null}
+        {optional ? <span className="ms-1 font-normal text-fg-tertiary">{optional}</span> : null}
       </label>
       {hint ? (
-        <p id={hintId} className="-mt-0.5 mb-1.5 text-xs text-subtle">
+        <p id={hintId} className="-mt-0.5 mb-1.5 text-caption text-fg-secondary">
           {hint}
         </p>
       ) : null}
       {control}
       {error ? (
-        <p id={errorId} className="mt-1.5 flex items-start gap-1.5 text-sm text-danger">
+        <p id={errorId} className="mt-1.5 flex items-start gap-1.5 text-body-sm text-danger">
           <OctagonAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <span>{error}</span>
         </p>

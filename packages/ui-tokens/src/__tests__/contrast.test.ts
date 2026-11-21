@@ -52,7 +52,7 @@ describe('token contrast', () => {
 
   it('the checker itself matches known values', () => {
     expect(contrastRatio('#000000', '#FFFFFF')).toBeCloseTo(21, 5);
-    expect(contrastRatio(focus, '#FFFFFF')).toBeCloseTo(6.24, 1);
+    expect(contrastRatio(focus, '#FFFFFF')).toBeCloseTo(6.74, 1);
   });
 });
 
@@ -73,7 +73,7 @@ describe('generated CSS', () => {
     for (const name of ['bg', 'surface', 'surface-2', 'line', 'line-strong', 'ink', 'muted', 'subtle', 'primary', 'on-primary', 'gold', 'danger', 'warn', 'info']) {
       expect(css).toContain(`--c-${name}: `);
     }
-    expect(css).toContain('--c-focus: 26 91 199;');
+    expect(css).toContain('--c-focus: 34 86 187;');
   });
 });
 
@@ -132,7 +132,7 @@ describe('DS2 v2 contrast (every mode, direction A)', () => {
 
   it('v2 categorical viz hues are ≥4.6:1 on white and carry no money colour', () => {
     for (const hex of dataVizV2.categorical) expect(contrastRatio(hex, '#FFFFFF')).toBeGreaterThanOrEqual(TEXT_MIN);
-    for (const money of [status.primary.text, status.danger.text, status.warn.text]) expect(dataVizV2.categorical).not.toContain(money);
+    for (const money of [status.primary.text, status.danger.text, status.warn.text, status.gold.text]) expect(dataVizV2.categorical).not.toContain(money);
   });
 
   it('rails and the leak series stay danger/warn', () => {
