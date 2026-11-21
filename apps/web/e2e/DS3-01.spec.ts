@@ -232,6 +232,41 @@ test.describe('DS3-01 kit page (platform admins)', () => {
     const bg = await off.evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(bg).not.toBe('rgba(0, 0, 0, 0)');
   });
+
+  // The sidebar spec is binding on sizes (DS3 SPEC §10.4): the bell is 32 × 32 at the desk (§1.5) with a
+  // 384 px dialog below-end of it (§1.6), and 44 × 44 under 1024 (§11). The dot sits 2 px outside the glyph's top-end corner.
+  test('the top-bar bell: 32 × 32 at the desk with a 384 px panel below-end of it, 44 × 44 under 1024, the dot beside the glyph', async ({ page }) => {
+    await setLang(page, 'he');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const tasksLoaded = page.waitForResponse((r) => r.url().includes('/api/trpc/') && r.url().includes('tasks.mine'));
+    await page.goto(KIT);
+    await tasksLoaded;
+    const bell = page.getByTestId('bell-trigger');
+    const size = async () => {
+      const b = await bell.boundingBox();
+      return [b?.width, b?.height];
+    };
+    expect(await size()).toEqual([32, 32]);
+    // The seed leaves the demo owner gaps to decide (W2-08 reads the same queue), and a fresh context has seen none.
+    const dot = page.getByTestId('bell-dot');
+    await expect(dot).toBeVisible();
+    const d = (await dot.boundingBox())!;
+    const g = (await bell.locator('svg').boundingBox())!;
+    // Hebrew: the end side is the left.
+    expect([d.width, d.height, d.x - g.x, d.y - g.y]).toEqual([8, 8, -2, -2]);
+    await bell.click();
+    const panel = page.getByTestId('bell-panel');
+    await expect(panel).toBeVisible();
+    const p = (await panel.boundingBox())!;
+    const b = (await bell.boundingBox())!;
+    // "Below-end of the bell": in Hebrew the end edge is the left one, and the panel's lands on the bell's.
+    expect([p.width, Math.round(p.x)]).toEqual([384, Math.round(b.x)]);
+    expect(p.y).toBeGreaterThan(b.y + b.height);
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(size).toEqual([44, 44]);
+  });
 });
 
 test.describe('DS3-01 kit page is hidden from everyone but platform admins', () => {

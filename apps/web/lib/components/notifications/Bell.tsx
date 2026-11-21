@@ -15,6 +15,7 @@ import { nav } from '@/lib/i18n/messages/nav';
 import { overview } from '@/lib/i18n/messages/overview';
 import { trpc } from '@/lib/trpc/client';
 import { cappedCount, readSeen, taskSig, unseenCount, writeSeen, type Task } from './model';
+import { bellPanelEnd } from './place';
 import { othersLine, taskRow, type TaskRow } from './rows';
 
 function storage(): Storage | null {
@@ -27,7 +28,7 @@ function storage(): Storage | null {
 
 /**
  * The bell (W2-08 §5.4): the same task spine as the home and the badges, one
- * tap from every screen. A 360 px panel at ≥1024, a sheet on the phone. Items
+ * tap from every screen. A 384 px panel at ≥1024 (sidebar SPEC §1.6), a sheet on the phone. Items
  * land on their exact card. "Seen" is per browser (localStorage, best-effort);
  * the app badge mirrors the unseen count where supported. No OS notification
  * and no sound (quiet hours, Shabbat and the daily cap are H-05).
@@ -85,21 +86,24 @@ export function Bell({ className, activity = false }: { className?: string; /** 
         aria-expanded={open}
         onClick={toggle}
         data-testid="bell-trigger"
-        // The reference's top-bar icon (.rm-ico): 36 px (44 on a phone), 8 px corners, an 18 px glyph, --sunken on hover.
-        className="relative inline-flex size-9 items-center justify-center rounded-control text-fg-secondary hover:bg-surface-sunken hover:text-fg [@media(pointer:coarse)]:size-11"
+        // Sized by the sidebar spec, which DS3 SPEC §10.4 makes binding on sizes: 32 × 32 at the desk (its §1.5),
+        // 44 × 44 under 1024 (its §11) and on a touch screen (DS3 SPEC §5). 8 px corners, an 18 px glyph (DS3 SPEC §6),
+        // --sunken on hover. The reference draws 36; KNOWN-ISSUES: the spec wins over the mock-up there.
+        className="relative inline-flex size-8 items-center justify-center rounded-control text-fg-secondary hover:bg-surface-sunken hover:text-fg max-lg:size-11 [@media(pointer:coarse)]:size-11"
       >
         <Icon as={BellIcon} size="bar" />
         {unseen > 0 ? (
-          // An 8 px ink dot, never a count (the reference's .cnt-dot); the number stays in the trigger's name.
+          // An 8 px ink dot, never a count (sidebar SPEC §1.6; the reference's .cnt-dot); the number stays in the
+          // trigger's name. It sits 2 px outside the glyph's top-end corner (the centre less 9 + 2) at any box size.
           <span
             aria-hidden="true"
             data-testid="bell-dot"
-            className="absolute end-[7px] top-[7px] size-2 rounded-full bg-fg ring-2 ring-surface forced-color-adjust-none [@media(pointer:coarse)]:end-[11px] [@media(pointer:coarse)]:top-[11px]"
+            className="absolute end-[calc(50%-11px)] top-[calc(50%-11px)] size-2 rounded-full bg-fg ring-2 ring-surface forced-color-adjust-none"
           />
         ) : null}
       </button>
       {desk ? (
-        <BellPanel open={open} onClose={close} title={t('bell.title')} closeLabel={t('bell.close')}>
+        <BellPanel open={open} onClose={close} title={t('bell.title')} closeLabel={t('bell.close')} anchor={trigger}>
           {body}
         </BellPanel>
       ) : (
@@ -165,17 +169,27 @@ export function Bell({ className, activity = false }: { className?: string; /** 
   }
 }
 
-/** Desktop panel: a native modal <dialog> (focus trapped inside, returned on close), 360 px under the bell. */
-function BellPanel({ open, onClose, title, closeLabel, children }: { open: boolean; onClose: () => void; title: string; closeLabel: string; children: React.ReactNode }) {
+/** Desktop panel: a native modal <dialog> (focus trapped inside, returned on close), 384 px, below-end of the bell (sidebar SPEC §1.6). */
+function BellPanel({ open, onClose, title, closeLabel, anchor, children }: { open: boolean; onClose: () => void; title: string; closeLabel: string; anchor: React.RefObject<HTMLElement | null>; children: React.ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
   // One bell per page: a constant id, independent of the tree position (train-C B6).
   const titleId = 'rm-bell-panel-title';
   useEffect(() => {
     const d = ref.current;
     if (!d || typeof d.showModal !== 'function') return;
-    if (open && !d.open) d.showModal();
-    else if (!open && d.open) d.close();
-  }, [open]);
+    // Placed before it shows (a closed dialog is not drawn, so it never jumps), and again if the window resizes.
+    const place = () => {
+      const a = anchor.current;
+      if (a) d.style.insetInlineEnd = `${bellPanelEnd(a.getBoundingClientRect(), document.documentElement.clientWidth, getComputedStyle(a).direction === 'rtl')}px`;
+    };
+    if (open && !d.open) {
+      place();
+      d.showModal();
+    } else if (!open && d.open) d.close();
+    if (!open) return;
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [open, anchor]);
   return (
     <dialog
       ref={ref}
@@ -188,7 +202,7 @@ function BellPanel({ open, onClose, title, closeLabel, children }: { open: boole
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed end-4 start-auto top-16 m-0 w-[360px] max-w-[calc(100vw-2rem)] rounded-overlay bg-surface p-4 text-ink shadow-e2 ring-1 ring-line-rule backdrop:bg-transparent"
+      className="fixed end-4 start-auto top-16 m-0 w-[384px] max-w-[calc(100vw-2rem)] rounded-overlay bg-surface p-4 text-ink shadow-e2 ring-1 ring-line-rule backdrop:bg-transparent"
     >
       <div className="mb-3 flex items-center justify-between gap-2">
         <h2 id={titleId} className="text-base font-bold">
