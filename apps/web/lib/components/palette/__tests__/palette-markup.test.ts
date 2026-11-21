@@ -80,7 +80,10 @@ describe('<CommandPalette> markup', () => {
     const label = tag(html, /<label\b[^>]*>/);
     const input = tag(html, /<input\b[^>]*>/);
     expect(input).toMatch(/class="[^"]*\bh-full\b/);
-    expect(input).toContain('[--focus-offset:-2px]');
+    // DS3-00's one mechanism for a ring drawn inside (globals.css [data-focus='inset'] → --focus-offset −2 px),
+    // which replaced the field's own [--focus-offset:-2px] class.
+    expect(input).toContain('data-focus="inset"');
+    expect(input).not.toContain('[--focus-offset:-2px]');
     // A border on the row itself would leave the input 51 px tall; the ::after line overlays it instead.
     expect(label).toContain('after:border-b');
     expect(label).not.toMatch(/class="(?:[^"]*\s)?border-b(?:\s|")/);
