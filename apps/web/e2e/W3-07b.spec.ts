@@ -114,6 +114,57 @@ test.describe('W3-07b join', () => {
     await expect(page.getByTestId('join-state')).toHaveAttribute('data-state', 'notFound');
   });
 
+  test('review finding 3: the address-wide send cap answers like a sent e-mail, never "too many"', async ({ page, browser }) => {
+    const email = `xcap${Date.now()}z@oracle.e2e.test`;
+    const first = await inviteFromTeamScreen(page, email);
+    const ctx = await browser.newContext({ storageState: undefined, locale: 'he-IL' });
+    const base = test.info().project.use.baseURL!;
+    await ctx.addCookies([
+      { name: 'rm_cookie_consent', value: 'necessary', url: base },
+      { name: 'rm_locale', value: 'he', url: base },
+    ]);
+    const anon = await ctx.newPage();
+    // 3 sends through the first invite use up the address's 15-minute send cap;
+    // each send rewrites the code file (its `at` changes), so wait for that.
+    const sentAt = async (): Promise<number> => {
+      try {
+        const v = JSON.parse(await readFile(JOIN_CODE_FILE, 'utf8')) as { to: string; at: number };
+        return v.to === email ? v.at : 0;
+      } catch {
+        return 0;
+      }
+    };
+    const sendAndWait = async (click: () => Promise<void>) => {
+      const before = await sentAt();
+      await click();
+      await expect.poll(sentAt, { timeout: 30_000 }).toBeGreaterThan(before);
+    };
+    await unlink(JOIN_CODE_FILE).catch(() => {});
+    await anon.goto(first);
+    await sendAndWait(() => anon.getByTestId('join-send-code').click());
+    await expect(anon.getByTestId('join-code-form')).toBeVisible();
+    for (let i = 0; i < 2; i += 1) {
+      await sendAndWait(() => anon.getByRole('button', { name: 'שליחת קוד חדש' }).click());
+      await expect(anon.getByTestId('join-code-form')).toBeVisible();
+    }
+    // the owner revokes and re-invites (a fresh token: its own limiter is unused)
+    const sql = e2eSql();
+    await sql`update invitations set status = 'revoked' where email = ${email} and status = 'pending'`;
+    await sql.end();
+    const second = await inviteFromTeamScreen(page, email);
+    await unlink(JOIN_CODE_FILE).catch(() => {});
+    await anon.goto(second);
+    await anon.getByTestId('join-send-code').click();
+    await anon.waitForURL(/step=code/);
+    const url = new URL(anon.url());
+    expect(url.searchParams.get('sent')).toBe('1');
+    expect(url.searchParams.get('e')).toBeNull();
+    // ... and nothing was sent
+    await new Promise((r) => setTimeout(r, 1500));
+    await expect(readFile(JOIN_CODE_FILE, 'utf8')).rejects.toThrow();
+    await ctx.close();
+  });
+
   test('no account oracle: /join looks the same for an existing account and a new address, before and after "send"', async ({
     page,
     browser,

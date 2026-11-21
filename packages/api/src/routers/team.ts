@@ -26,10 +26,10 @@ import { financeProcedure, managerProcedure, ownerProcedure, router, userScopedP
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * Per-owner cap on invite churn at the tRPC layer (security review, /join): invite,
- * resend and revoke share 20 per hour per inviting user, matching the web server
- * action's INVITE_EMAIL_LIMIT. The owner can no longer loop revoke → re-invite to
- * spam a mailbox or to probe /join. Its own prefix, so the server action's
+ * Per-owner cap on invite mail at the tRPC layer (security review, /join): invite
+ * and resend (the two that send an e-mail) share 20 per hour per inviting user,
+ * matching the web server action's INVITE_EMAIL_LIMIT, so a revoke → re-invite
+ * loop cannot spam a mailbox or probe /join. Revoke is never budgeted. Its own prefix, so the server action's
  * counter and this one never double-count. Durable counter (rate_limit_counters,
  * owner connection); fails open on a store outage, like every limiter.
  */
@@ -360,7 +360,9 @@ export const teamRouter = router({
   revokeInvite: ownerProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      await assertInviteBudget(ctx);
+      // Never budgeted: revoking sends no mail, and an owner must always be able
+      // to kill a live invite, e.g. an owner-role invite to a mistyped address
+      // (review finding 2).
       const revoked = await ctx.db
         .update(invitations)
         .set({ status: 'revoked', updatedAt: new Date() })

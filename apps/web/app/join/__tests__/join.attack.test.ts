@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
-import { eq, invitations, memberships, userCredentials } from '@restomatch/db';
+import { eq, invitations, memberships, sql, userCredentials, verificationTokens } from '@restomatch/db';
 import { authorizeCredentials, setUserPassword } from '@/lib/passwords';
 import {
   JOIN_CODE_MAX_ATTEMPTS,
@@ -10,6 +10,7 @@ import {
   completeJoin,
   invitedAccountExists,
   issueJoinCode,
+  joinAddressKey,
   publicCompleteReason,
   loadInvite,
 } from '../_lib/joinFlow';
@@ -298,7 +299,8 @@ describe('join attack: no account oracle for the inviting owner (security review
       const r = await issueJoinCode(token);
       reasons.push(r.ok ? 'ok' : r.reason === 'hasPassword' && r.throttled ? 'rate' : r.reason);
     }
-    // the action answers "rate" on the 4th send, exactly as for a new address
+    // the action answers the 4th send exactly as for a new address: like a sent
+    // e-mail, with nothing sent (the address-wide cap is never shown as "rate")
     expect(reasons).toEqual(['hasPassword', 'hasPassword', 'hasPassword', 'rate']);
   });
 
@@ -317,5 +319,63 @@ describe('join attack: no account oracle for the inviting owner (security review
       expect(m.html).toContain('href="https://app.example/login?callbackUrl=');
       expect(m.text).not.toMatch(/\b\d{6}\b/);
     }
+  });
+});
+
+describe('join attack: no-code attempts never touch the address budget (security review of the oracle branch, finding 1)', () => {
+  const addrRows = (email: string) =>
+    ownerDb
+      .select()
+      .from(verificationTokens)
+      .where(sql`${verificationTokens.identifier} in (${`join-fail:${joinAddressKey(email)}`}, ${`join-failtotal:${joinAddressKey(email)}`})`);
+  const trail = async (token: string, n: number, now?: number) => {
+    const out: string[] = [];
+    for (let i = 0; i < n; i += 1) {
+      const r = await completeJoin({ token, code: '000000', name: 'דנה', password: PASSWORD }, now);
+      out.push(r.ok ? 'ok' : publicCompleteReason(r.reason));
+    }
+    return out;
+  };
+
+  it('(a) earlier address markers from other restaurants do not change the inviting owner\'s trail', async () => {
+    const email = uniqueEmail('seeded');
+    // 19 earlier failures on this address (e.g. other restaurants, within 7 days)
+    await ownerDb.insert(verificationTokens).values(
+      Array.from({ length: JOIN_CODE_MAX_TOTAL_ATTEMPTS - 1 }, () => ({
+        identifier: `join-failtotal:${joinAddressKey(email)}`,
+        token: randomBytes(16).toString('hex'),
+        expires: new Date(Date.now() + 6 * 24 * 3600 * 1000),
+      })),
+    );
+    const fresh = uniqueEmail('unseeded');
+    const seeded = await makeInvite({ restaurantId: await makeRestaurant(), email });
+    const control = await makeInvite({ restaurantId: await makeRestaurant(), email: fresh });
+    // no code sent: the owner posts guesses straight away
+    expect(await trail(seeded.token, JOIN_CODE_MAX_ATTEMPTS + 2)).toEqual(await trail(control.token, JOIN_CODE_MAX_ATTEMPTS + 2));
+    expect((await addrRows(email)).length).toBe(JOIN_CODE_MAX_TOTAL_ATTEMPTS - 1); // nothing added
+  });
+
+  it('(b) 21 no-code attempts through tenant A do not lock the address out of tenant B', async () => {
+    const email = uniqueEmail('cross-tenant');
+    const a = await makeInvite({ restaurantId: await makeRestaurant('מסעדה A'), email });
+    let now = Date.now();
+    for (let i = 0; i < JOIN_CODE_MAX_TOTAL_ATTEMPTS + 1; i += 1) {
+      await completeJoin({ token: a.token, code: '123456', name: 'דנה', password: PASSWORD }, now);
+      if ((i + 1) % JOIN_CODE_MAX_ATTEMPTS === 0) now += JOIN_CODE_TTL_MS + 1000;
+    }
+    expect(await addrRows(email)).toEqual([]);
+    const b = await makeInvite({ restaurantId: await makeRestaurant('מסעדה B'), email });
+    const code = await issued(b.token, now);
+    expect(await completeJoin({ token: b.token, code, name: 'דנה', password: PASSWORD }, now)).toMatchObject({ ok: true });
+  });
+
+  it('attempts past a per-invitation lock insert no more markers', async () => {
+    const { token, id } = await makeInvite({ restaurantId: await makeRestaurant(), email: uniqueEmail('no-growth') });
+    await trail(token, JOIN_CODE_MAX_ATTEMPTS + 1);
+    const count = async () =>
+      (await ownerDb.select().from(verificationTokens).where(eq(verificationTokens.identifier, `join-fail-inv:${id}`))).length;
+    const before = await count();
+    expect(await trail(token, 5)).toEqual(Array(5).fill('locked'));
+    expect(await count()).toBe(before);
   });
 });

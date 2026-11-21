@@ -50,13 +50,18 @@ export async function sendJoinCodeAction(formData: FormData): Promise<void> {
   const ip = await requestIp();
   const perInvite = await enforceRateLimit(hashInviteToken(token).slice(0, 32), SEND_PER_INVITE);
   const perIp = await enforceRateLimit(ip, SEND_PER_IP);
+  // "Too many" is shown ONLY for this invite's and this IP's limiters. The
+  // address-wide cap (shared by every restaurant inviting the mailbox) answers
+  // like a successful send and sends nothing, so it reveals neither another
+  // restaurant's recent invite nor an existing account (review finding 3).
   if (!perInvite.allowed || !perIp.allowed) back(token, { step: 'code', e: 'rate' });
+  const quietlySent = (): never => back(token, { step: 'code', sent: '1' });
 
   const res = await issueJoinCode(token);
   if (!res.ok && res.reason === 'hasPassword') {
     // An existing account: e-mail a sign-in link (no code, no password set) and
     // answer EXACTLY like the code path, so /join is no account oracle.
-    if (res.throttled) back(token, { step: 'code', e: 'rate' });
+    if (res.throttled) quietlySent();
     const contact = await joinContact(token);
     if (contact) {
       await deliverJoinSignInLink({
@@ -68,7 +73,8 @@ export async function sendJoinCodeAction(formData: FormData): Promise<void> {
     }
     back(token, { step: 'code', sent: '1' });
   }
-  if (!res.ok) back(token, res.reason === 'rate' ? { step: 'code', e: 'rate' } : { e: res.reason });
+  if (!res.ok && res.reason === 'rate') quietlySent();
+  if (!res.ok) back(token, { e: res.reason });
   const invite = await loadInvite(token);
   await deliverJoinCode({ to: res.email, code: res.code, restaurantName: invite.restaurantName, locale: res.locale ?? 'he' });
   back(token, { step: 'code', sent: '1' });

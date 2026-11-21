@@ -227,6 +227,9 @@ const windowFailId = (addr: string) => `join-fail:${addr}`;
 const totalFailId = (addr: string) => `join-failtotal:${addr}`;
 const sendId = (addr: string) => `join-send:${addr}`;
 const sendDayId = (addr: string) => `join-send-d:${addr}`;
+/** Per-INVITATION attempt counters: every attempt, with or without a live code. */
+const invWindowFailId = (invId: string) => `join-fail-inv:${invId}`;
+const invTotalFailId = (invId: string) => `join-failtotal-inv:${invId}`;
 
 export type IssueResult =
   | { ok: true; code: string; email: string; locale: 'he' | 'en' | null }
@@ -317,29 +320,45 @@ export async function completeJoin(
   const policy = passwordPolicyError(input.password);
   if (policy) return { ok: false, reason: 'policy', message: policy };
 
-  // Reserve the attempt first, then count (concurrent guesses can't overshoot).
-  // It is reserved even when no code is live, so an address with no code (an
-  // existing account, which never gets one) locks at the same attempt as a new
-  // one — no account oracle (security review, /join).
-  // Keyed on the ADDRESS: resend / revoke + re-invite cannot reset it (B5).
-  const addr = joinAddressKey(row.email);
-  await authDb.insert(verificationTokens).values([
-    { identifier: windowFailId(addr), token: randomUUID(), expires: new Date(now + JOIN_CODE_TTL_MS) },
-    { identifier: totalFailId(addr), token: randomUUID(), expires: new Date(now + JOIN_CODE_TOTAL_WINDOW_MS) },
-  ]);
-  const [inWindow, total] = await Promise.all([countLive(windowFailId(addr), now), countLive(totalFailId(addr), now)]);
-  if (inWindow > JOIN_CODE_MAX_ATTEMPTS || total > JOIN_CODE_MAX_TOTAL_ATTEMPTS) {
-    // Too many guesses: the current code dies too, so a lucky late guess can't land.
-    await authDb.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(row.id)));
-    return { ok: false, reason: 'locked' };
-  }
-
+  // Attempt ceilings (security review of the /join oracle branch, finding 1):
+  //  - PER INVITATION, every attempt (live code or not): ≤ 5 per 10 min and
+  //    ≤ 20 over the invite's life. These are the only counters an attempt
+  //    with NO live code touches, so a token holder posting guesses without
+  //    a code (an existing account never gets one) can neither read nor spend
+  //    the address's budget in other restaurants.
+  //  - PER ADDRESS (B5), only while a code is LIVE: ≤ 5 per 10 min, ≤ 20 per
+  //    7 days, shared by every invite to the mailbox, so resend / revoke +
+  //    re-invite cannot reset real guessing. Each such burst costs the mailbox
+  //    an e-mail (a code had to be sent), as in the base.
+  // Reserve first, then count (concurrent guesses can't overshoot); already at
+  // a ceiling → answer 'locked' WITHOUT inserting more markers.
   const code = String(input.code ?? '').replace(/\D/g, '');
   const [stored] = await authDb
     .select({ token: verificationTokens.token, expires: verificationTokens.expires })
     .from(verificationTokens)
     .where(and(eq(verificationTokens.identifier, codeId(row.id)), gt(verificationTokens.expires, new Date(now))))
     .limit(1);
+  const addr = joinAddressKey(row.email);
+  const ids = stored
+    ? [invWindowFailId(row.id), invTotalFailId(row.id), windowFailId(addr), totalFailId(addr)]
+    : [invWindowFailId(row.id), invTotalFailId(row.id)];
+  const caps = [JOIN_CODE_MAX_ATTEMPTS, JOIN_CODE_MAX_TOTAL_ATTEMPTS, JOIN_CODE_MAX_ATTEMPTS, JOIN_CODE_MAX_TOTAL_ATTEMPTS];
+  const killAndLock = async (): Promise<CompleteResult> => {
+    // Too many guesses: the current code dies too, so a lucky late guess can't land.
+    await authDb.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(row.id)));
+    return { ok: false, reason: 'locked' };
+  };
+  const pre = await Promise.all(ids.map((id) => countLive(id, now)));
+  if (pre.some((c, i) => c >= caps[i]!)) return killAndLock();
+  const expiresOf = (id: string) =>
+    id === invWindowFailId(row.id) || id === windowFailId(addr)
+      ? new Date(now + JOIN_CODE_TTL_MS)
+      : id === invTotalFailId(row.id)
+        ? row.expiresAt
+        : new Date(now + JOIN_CODE_TOTAL_WINDOW_MS);
+  await authDb.insert(verificationTokens).values(ids.map((id) => ({ identifier: id, token: randomUUID(), expires: expiresOf(id) })));
+  const post = await Promise.all(ids.map((id) => countLive(id, now)));
+  if (post.some((c, i) => c > caps[i]!)) return killAndLock();
 
   if (!stored) return { ok: false, reason: 'noCode' };
 
@@ -364,11 +383,14 @@ export async function completeJoin(
   if (!created?.id) return { ok: false, reason: 'hasPassword' };
   await setUserPassword(created.id, input.password);
 
-  // The code is spent; the window markers go too. The 7-day address markers
-  // stay (an address that has joined no longer gets codes at all).
+  // The code is spent; the window markers and this invite's counters go too.
+  // The 7-day address markers stay (an address that has joined no longer gets
+  // codes at all, so they are never read for it again).
   await authDb
     .delete(verificationTokens)
-    .where(inArray(verificationTokens.identifier, [codeId(row.id), windowFailId(addr)]));
+    .where(
+      inArray(verificationTokens.identifier, [codeId(row.id), windowFailId(addr), invWindowFailId(row.id), invTotalFailId(row.id)]),
+    );
   return { ok: true, email };
 }
 
