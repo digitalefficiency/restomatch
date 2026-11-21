@@ -38,6 +38,7 @@ function proposal(over: Partial<ConsolidatedProposal>): ConsolidatedProposal {
     products: [],
     findings: [],
     claim: { exclIls: 0, inclIls: 0 },
+    toDecide: { exclIls: 0, inclIls: 0 },
     totals: { deliveryNotesIls: 34, invoiceSubtotalIls: 34, differenceIls: 0, leakIls: 0, invoiceTotalInclVat: 40.12 },
     status: 'matched',
     pendingNotes: [],
@@ -166,6 +167,27 @@ describe('ConsolidatedPanel · G-04 §9 review items', () => {
     expect(html).toContain('data-testid="xmatch-letter"');
     expect(html).not.toContain('data-testid="xmatch-review-only"');
     expect(html).toContain('data-testid="xmatch-review-note_not_in_system"');
+  });
+
+  it('G-14 Q1 (decision 18): an undecided proposal never asks — the letter says the ₪ is pending a decision', () => {
+    const html = render(
+      proposal({
+        status: 'differences',
+        claim: { exclIls: 0, inclIls: 0 },
+        toDecide: { exclIls: 2, inclIls: 0 },
+        totals: { deliveryNotesIls: 34, invoiceSubtotalIls: 36, differenceIls: 2, leakIls: 2, invoiceTotalInclVat: 42.48 },
+        findings: [
+          {
+            type: 'PRICE_HIGHER', severity: 'warn', productId: 'p', deliveryNoteNumber: '9001', alreadyBilledOn: null, basis: 'excl',
+            productName: 'חלב', productNameEn: 'Milk', unit: 'kg', qty: 4, expected: 8.5, actual: 9, deltaAmount: 2, countsAsLeak: true,
+          },
+        ],
+      }),
+    );
+    expect(html).toContain('data-testid="xmatch-differences"');
+    const letter = textOf(html, 'xmatch-letter')!;
+    expect(letter).toContain('ממתינים להחלטה');
+    expect(letter).not.toContain('נא לזכות');
   });
 
   it('en renders the same rows (copy parity)', () => {

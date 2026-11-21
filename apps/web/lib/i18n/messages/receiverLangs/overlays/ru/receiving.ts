@@ -199,6 +199,7 @@ export const receiving: Shape<typeof he> = {
     },
     atStake: 'Сумма расхождения',
     quantitiesOnly: 'Только количества',
+    toDecide: 'На проверке — решение ещё не принято', // review: new (G-14 Q1)
     total: 'Итого к возврату (кредит-нота)', // review: "credit note" wording
     computing: 'Система сверки рассчитывает суммы…',
     afterClose: 'Сумма в ₪ определится после закрытия приёмки — система сверки сверит её с фактическим пересчётом.',

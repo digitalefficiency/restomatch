@@ -116,6 +116,13 @@ export interface ClaimableOptions {
    * are skipped — and do not use the invoice cap — so one ₪ is never claimed twice.
    */
   claimedIds?: ReadonlySet<string>;
+  /**
+   * G-14 Q1 (decision 18): allocate the invoice cap to DECIDED lines first, then the
+   * undecided ones get only what is left — the leak ledger's tier order (decided → undecided),
+   * so a decision's ₪ is never squeezed out by a line nobody decided yet. The decided lines
+   * come first in the result. Callers that show "אפשר לבקש" count only `!undecided` lines.
+   */
+  decidedFirst?: boolean;
 }
 
 /** The claimable lines of one invoice, capped like the claims letters. */
@@ -124,7 +131,13 @@ export function claimableLines(inv: LeakBreakdownInvoice, opts: ClaimableOptions
   const claimed = opts.claimedIds;
   const out: ClaimLine[] = [];
   let invClaimed = 0;
-  for (const l of inv.lines) {
+  const ordered = opts.decidedFirst
+    ? [
+        ...inv.lines.filter((l) => !UNDECIDED.has(l.resolutionStatus)),
+        ...inv.lines.filter((l) => UNDECIDED.has(l.resolutionStatus)),
+      ]
+    : inv.lines;
+  for (const l of ordered) {
     if (!l.countsAsLeak || !CLAIMABLE.has(l.resolutionStatus) || NEVER_CLAIMABLE.has(l.type)) continue;
     if (claimed?.has(l.discrepancyId)) continue;
     // Owner M7 (7.11): a tolerance row the engine auto-approved is waived — never asked back.
@@ -141,4 +154,13 @@ export function claimableLines(inv: LeakBreakdownInvoice, opts: ClaimableOptions
 /** Σ of claim amounts, rounded to the agora (as the letters' totals). */
 export function sumClaims(lines: ReadonlyArray<{ amount: number }>): number {
   return Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+}
+
+/**
+ * G-14 Q1 (decision 18): the ₪ one may ask a supplier for on these invoices — decided lines
+ * only, with the cap allocated decided-first. An open / escalated gap is "to decide", never
+ * "אפשר לבקש".
+ */
+export function decidedClaimLines(inv: LeakBreakdownInvoice, opts: Omit<ClaimableOptions, 'decidedFirst'> = {}): ClaimLine[] {
+  return claimableLines(inv, { ...opts, decidedFirst: true }).filter((c) => !c.undecided);
 }

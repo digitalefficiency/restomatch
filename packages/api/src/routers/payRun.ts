@@ -174,7 +174,9 @@ export function payRunStatusOf(b: LeakBreakdownInvoice | null): {
   creditIls: number;
 } {
   if (!b) return { status: 'pay', duplicate: false, duplicateIls: 0, claims: [], pendingIls: 0, creditIls: 0 };
-  const lines = claimableLines(b);
+  // G-14 Q1 (decision 18): decided lines take the invoice cap first, so the credit to ask
+  // is never squeezed by a gap nobody decided yet; open lines get what is left ("in dispute").
+  const lines = claimableLines(b, { decidedFirst: true });
   const claims = lines.map(({ line, amount, basis }) => ({
     discrepancyId: line.discrepancyId,
     type: line.type,

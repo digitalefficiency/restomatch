@@ -25,6 +25,8 @@ export interface EngineSlipLine {
   expected: number | null;
   actual: number | null;
   amountIls: number;
+  /** G-14 Q1: still open / escalated — shown as "to decide", never in the total asked. */
+  undecided?: boolean;
 }
 
 export interface SlipLine {
@@ -43,6 +45,8 @@ export interface SlipLine {
   invoicePrice: number | null;
   /** Engine ₪ for this line; null = no engine discrepancy → quantities only. */
   amountIls: number | null;
+  /** G-14 Q1: the part of amountIls nobody decided yet (null = none) — "לבירור", never asked. */
+  toDecideIls: number | null;
 }
 
 const EPS = 0.0005;
@@ -113,6 +117,7 @@ export function buildSlipLines(
       poPrice: line.poUnitPrice,
       invoicePrice: line.invoiceUnitPrice,
       amountIls: mine.length ? sumIls(mine.map((e) => e.amountIls)) : null,
+      toDecideIls: undecidedIls(mine),
     });
   }
   // Engine findings the wizard has no row for (e.g. a duplicate invoice, VAT).
@@ -131,9 +136,23 @@ export function buildSlipLines(
       poPrice: null,
       invoicePrice: null,
       amountIls: e.amountIls,
+      toDecideIls: undecidedIls([e]),
     });
   }
   return out;
+}
+
+/** Σ of the undecided engine amounts (null when none is undecided). */
+function undecidedIls(lines: EngineSlipLine[]): number | null {
+  const open = lines.filter((e) => e.undecided);
+  return open.length ? sumIls(open.map((e) => e.amountIls)) : null;
+}
+
+/** G-14 Q1 (decision 18): the slip's totals — asked (decided) vs to decide (open gaps). */
+export function slipTotals(lines: SlipLine[]): { asked: number; toDecide: number } {
+  const toDecide = sumIls(lines.map((l) => l.toDecideIls ?? 0));
+  const all = sumIls(lines.map((l) => l.amountIls ?? 0));
+  return { asked: Math.round((all - toDecide) * 100) / 100, toDecide };
 }
 
 /** Σ in integer agorot (exact). */

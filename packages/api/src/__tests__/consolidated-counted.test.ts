@@ -190,7 +190,8 @@ describe('consolidatedProposal reads only closed receipts and counted lines', ()
     expect(p.products.some((r) => r.productId === cream)).toBe(false);
     const leak = p.findings.filter((f) => f.countsAsLeak);
     expect(leak.map((f) => [f.type, f.deliveryNoteNumber, f.deltaAmount])).toEqual([['PRICE_HIGHER', '7701', 2]]);
-    expect(p.claim).toEqual({ exclIls: 2, inclIls: 0 });
+    expect(p.claim).toEqual({ exclIls: 0, inclIls: 0 }); // G-14 Q1: undecided → never asked
+    expect(p.toDecide).toEqual({ exclIls: 2, inclIls: 0 });
     expect(p.totals.leakIls).toBe(2);
     // 7702 (a receipt still being counted): T4 pending, never claimed.
     expect(p.pendingNotes).toEqual([{ number: '7702', billedIls: 51 }]);
@@ -221,6 +222,7 @@ describe('consolidatedProposal reads only closed receipts and counted lines', ()
     const p = (await consolidatedProposal(db, T.restaurantId, inv))!;
     expect(p.findings.filter((f) => f.countsAsLeak)).toEqual([]);
     expect(p.claim).toEqual({ exclIls: 0, inclIls: 0 });
+    expect(p.toDecide).toEqual({ exclIls: 0, inclIls: 0 });
     expect(p.pendingNotes).toEqual([{ number: '7702', billedIls: 51 }]);
     expect(p.reviewItems).toEqual([]);
     expect(p.status).toBe('matched');
@@ -272,6 +274,7 @@ describe('§9 consolidated flags', () => {
     // Context only: no leak, no claim, and it does not block "תואמת".
     expect(p.totals.leakIls).toBe(0);
     expect(p.claim).toEqual({ exclIls: 0, inclIls: 0 });
+    expect(p.toDecide).toEqual({ exclIls: 0, inclIls: 0 });
     expect(p.status).toBe('matched');
   });
 

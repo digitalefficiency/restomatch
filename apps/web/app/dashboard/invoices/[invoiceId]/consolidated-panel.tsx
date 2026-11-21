@@ -105,12 +105,17 @@ export function ConsolidatedPanel({
   // each line's VAT basis (lib/claims.ts): "+ מע״מ" only on amounts before VAT.
   const exclAsk = proposal.claim.exclIls;
   const inclAsk = proposal.claim.inclIls;
+  // G-14 Q1 (decision 18): a gap nobody decided is never asked — the letter says it is
+  // pending a decision instead of "נא לזכות".
+  const toDecideIls = (proposal.toDecide?.exclIls ?? 0) + (proposal.toDecide?.inclIls ?? 0);
   const letterAsk =
     exclAsk > 0 && inclAsk > 0
       ? t('letter.askBoth', { excl: ils(exclAsk), incl: ils(inclAsk) })
       : inclAsk > 0
         ? t('letter.askIncl', { amount: ils(inclAsk) })
-        : t('letter.ask', { amount: ils(exclAsk) });
+        : exclAsk > 0
+          ? t('letter.ask', { amount: ils(exclAsk) })
+          : t('letter.toDecide', { amount: ils(toDecideIls) });
   // G-04 §9: review items and notes still being counted are read-only rows. When they
   // are all that keeps the ריכוז from "תואמת" (nothing to claim, no leak), there is no
   // red "פערים" card and no supplier letter — never a letter asking ₪0.00.

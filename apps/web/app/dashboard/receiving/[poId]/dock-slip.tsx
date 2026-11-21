@@ -14,7 +14,7 @@ import { receiving } from '@/lib/i18n/messages/receiving';
 import { approvals } from '@/lib/i18n/messages/approvals';
 import { waLink } from '@/lib/messageTemplates';
 import { discrepancyLabel } from '../../approvals/vocab';
-import { buildSlipLines, issueMessageKey, needsSlip, slipBullet, slipNote, sumIls, type SlipLine } from './_dockSlip';
+import { buildSlipLines, issueMessageKey, needsSlip, slipBullet, slipNote, sumIls, slipTotals, type SlipLine } from './_dockSlip';
 
 /** Stop polling for the engine after this long; the slip still shows quantities. */
 const ENGINE_WAIT_MS = 120_000;
@@ -88,7 +88,10 @@ export function DockSlip({
     () => buildSlipLines(lines, marks, data?.engine.lines ?? []),
     [lines, marks, data?.engine.lines],
   );
-  const total = data && showMoney ? sumIls(slipLines.map((l) => l.amountIls ?? 0)) : 0;
+  // G-14 Q1 (decision 18): the total asked counts decided gaps only; open ones are "to decide".
+  const totals = data && showMoney ? slipTotals(slipLines) : { asked: 0, toDecide: 0 };
+  const total = totals.asked;
+  const toDecide = totals.toDecide;
   const dup = duplicateNumber ?? data?.invoice?.duplicateOfNumber ?? null;
 
   // Nothing to dispute: no flagged line, no engine finding, no duplicate.
@@ -136,6 +139,7 @@ export function DockSlip({
       (l) => slipBullet(name(l), issueTexts(l), amountOf(l) !== null ? money(amountOf(l)!) : null),
     ),
     ...(total > 0 ? ['', `${t('dockSlip.total')}: ${money(total)}`] : []),
+    ...(toDecide > 0 ? [`${t('dockSlip.toDecide')}: ${money(toDecide)}`] : []),
   ].join('\n');
 
   async function copy() {
@@ -211,9 +215,16 @@ export function DockSlip({
             </div>
             <div className="shrink-0 text-end text-base">
               {amountOf(l) !== null ? (
-                <bdi data-testid="dock-slip-amount" className="font-semibold tabular-nums text-ink">
-                  {money(amountOf(l)!)}
-                </bdi>
+                <>
+                  <bdi data-testid="dock-slip-amount" className="font-semibold tabular-nums text-ink">
+                    {money(amountOf(l)!)}
+                  </bdi>
+                  {showMoney && (l.toDecideIls ?? 0) > 0 ? (
+                    <span data-testid="dock-slip-to-decide" className="block text-sm text-muted">
+                      {t('dockSlip.toDecide')}
+                    </span>
+                  ) : null}
+                </>
               ) : showMoney ? (
                 <span className="text-sm text-muted">{t('dockSlip.quantitiesOnly')}</span>
               ) : null}
@@ -259,6 +270,13 @@ export function DockSlip({
         <div className="mt-3 flex items-center justify-between border-t border-line pt-3 text-base font-bold text-ink">
           <span>{t('dockSlip.total')}</span>
           <bdi className="tabular-nums" data-testid="dock-slip-total-line">{money(total)}</bdi>
+        </div>
+      ) : null}
+      {toDecide > 0 ? (
+        // T4 (pending): neutral, never a false alarm and never "אפשר לבקש" (decision 18).
+        <div className="mt-2 flex items-center justify-between text-base text-muted">
+          <span>{t('dockSlip.toDecide')}</span>
+          <bdi className="tabular-nums" data-testid="dock-slip-to-decide-total">{money(toDecide)}</bdi>
         </div>
       ) : null}
 

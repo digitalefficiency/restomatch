@@ -5,6 +5,7 @@ import {
   CLAIMABLE_DECIDED_STATUSES,
   NEVER_CLAIMABLE_TYPES,
   claimableLines,
+  decidedClaimLines,
   isClaimable,
   isDecidedClaim,
   isNeverClaimable,
@@ -216,6 +217,36 @@ describe('W2-03 M5 — the one claimable rule (shared with recovery CLAIMABLE_FI
   });
 });
 
+describe('G-14 Q1 — decided lines take the cap first (decision 18)', () => {
+  const inv = () =>
+    invoice({
+      leakIls: 50,
+      lines: [
+        // Biggest first: the open ₪40 used to take the cap ahead of the decided ₪30.
+        line({ discrepancyId: 'open', resolutionStatus: 'open', deltaAmount: 40 }),
+        line({ discrepancyId: 'acc', resolutionStatus: 'accepted', deltaAmount: 30 }),
+      ],
+    });
+  it('default order is unchanged (|Δ| order, undecided can take cap first)', () => {
+    expect(claimableLines(inv()).map((c) => [c.line.discrepancyId, c.amount])).toEqual([
+      ['open', 40],
+      ['acc', 10],
+    ]);
+  });
+  it('decidedFirst: the decided line gets its full ₪, the open one what is left', () => {
+    expect(claimableLines(inv(), { decidedFirst: true }).map((c) => [c.line.discrepancyId, c.amount, c.undecided])).toEqual([
+      ['acc', 30, false],
+      ['open', 20, true],
+    ]);
+  });
+  it('decidedClaimLines: "אפשר לבקש" never includes an open gap', () => {
+    expect(decidedClaimLines(inv()).map((c) => [c.line.discrepancyId, c.amount])).toEqual([['acc', 30]]);
+  });
+  it('the pay run credits the decided ₪ in full; the open gap is the held "in dispute" ₪', () => {
+    expect(payRunStatusOf(inv())).toMatchObject({ status: 'hold', creditIls: 30, pendingIls: 20 });
+  });
+});
+
 describe('payRunStatusOf', () => {
   it('no finding at all ⇒ can pay', () => {
     expect(payRunStatusOf(null)).toEqual({ status: 'pay', duplicate: false, duplicateIls: 0, claims: [], pendingIls: 0, creditIls: 0 });
@@ -346,9 +377,10 @@ describe('ask "what to claim" (claimableData / offline claimWeek) = the claims r
     });
     const c = claimableData([inv]);
     expect(c.lines.map((l) => l.type)).not.toContain('MISSING_ON_INVOICE');
-    expect(c.lines.map((l) => l.amountIls)).toEqual([40, 10]);
-    expect(c.totalIls).toBe(50);
+    // G-14 Q1 (decision 18): the decided ₪5 takes the cap first; the open lines get what is left.
+    expect(c.lines.map((l) => l.amountIls)).toEqual([40, 5]);
+    expect(c.totalIls).toBe(45);
     // W2-03 (owner decision): a paid invoice KEEPS its claims — same lines as unpaid.
-    expect(claimableData([{ ...inv, status: 'paid' }]).totalIls).toBe(50);
+    expect(claimableData([{ ...inv, status: 'paid' }]).totalIls).toBe(45);
   });
 });
