@@ -59,10 +59,13 @@ is touched; `money-format-marshal` whenever ₪ is rendered; `icp-keeper` for sc
     in a key handler outside React, `shellAttrs()` / `readDisplayChoices()` on the server. The desk keys
     (`DS3-04`) and `apps/web/lib/hotkeys.ts` (`DS3-02`) read `singleKeysEnabled()`. The store is pushed, so
     the earlier "until the store is pushed, read the raw key" no longer applies.
-  - **one copy of the store.** No package keeps its own copy of `apps/web/lib/prefs/**`: take it by merging
-    `claude/ds3-06-settings`, and merge again when it moves. (On 21.11 three branches still carried an older
-    copy that kept one cookie, `rm_display`, and rendered `data-text-size`; that copy is replaced, not
-    followed.)
+  - **one source of the store.** `DS3-06` is the only package that edits `apps/web/lib/prefs/**`. Its pull
+    request is stacked on `DS3-01`'s branch, so the folder cannot reach the others by a merge of `DS3-06`
+    (that would carry all of `DS3-06` into their pull requests). Instead `claude/ds3-01-components` carries
+    a mirror of the folder, byte for byte: `DS3-01` copies it again whenever `DS3-06` changes it and edits
+    nothing in it; `DS3-06` tells `DS3-01` when it does. `DS3-02` and `DS3-04` get the store by merging
+    `claude/ds3-01-components`. (On 21.11 three branches still carried an older copy that kept one cookie,
+    `rm_display`, and rendered `data-text-size`; that copy is replaced, not followed.)
   - before first paint: `DS3-02` mounts `PrefsRoot` in `apps/web/app/dashboard/layout.tsx` and the shell
     carries `data-density` (`compact`, or absent) and `data-text` (`large`, or absent), as it does for
     `rm_nav_rail`. There is no attribute for the single-key switch. The styles those two attributes drive

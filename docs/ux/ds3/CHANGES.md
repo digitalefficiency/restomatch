@@ -19,9 +19,12 @@ folder lives") and read the sections it points to. Your contract is still your s
 - **Readers go through the store, never a raw key or cookie:** `usePrefs()`, `singleKeysEnabled()`,
   `shellAttrs()` / `readDisplayChoices()`. `DS3-04`: the desk keys read `singleKeysEnabled()`. There is no
   `data-single-keys` attribute.
-- **One copy of the store.** `DS3-01`, `DS3-02` and `DS3-04` carried an older copy of `apps/web/lib/prefs/**`
-  (one cookie `rm_display`, attribute `data-text-size`). Replace it by merging `claude/ds3-06-settings`; do not
-  edit a copy of your own.
+- **One source of the store.** `DS3-01`, `DS3-02` and `DS3-04` carried an older copy of `apps/web/lib/prefs/**`
+  (one cookie `rm_display`, attribute `data-text-size`). Only `DS3-06` edits the folder. Because `DS3-06` is
+  stacked on `DS3-01`, the others do not merge `DS3-06`: `claude/ds3-01-components` carries a byte-for-byte
+  mirror, which `DS3-01` copies again whenever `DS3-06` changes it, and `DS3-02` and `DS3-04` take it from
+  there. (Corrected the same morning: the first wording asked for a merge of `DS3-06`, which would have
+  moved its 45 files into the other pull requests.)
 - **Large text has one mechanism**, `DS3-00`'s: `[data-text='large']` sets `--text-zoom`, and `rm-text-zoom`
   on the content wrapper applies it. `DS3-02` adds the class; `DS3-06` removes the provider's interim zoom
   rule once `DS3-00`'s is in its base, so nothing is enlarged twice.
