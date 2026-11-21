@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Pencil, Plus, Trash2, Truck } from 'lucide-react';
-import { border, contrastRatio, dataViz, elevation, focus, indicator, motion, status, surfaceV2, surfaces, text, typeRoles, type MoneyState, type StatusFamily } from '@restomatch/ui-tokens';
+import { border, contrastRatio, dataViz, elevation, focus, indicator, menuMotion, motion, status, surfaceV2, surfaces, text, typeRoles, type MoneyState, type StatusFamily } from '@restomatch/ui-tokens';
 import {
   Banner,
   Button,
@@ -236,6 +236,19 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
               </bdi>
             </li>
           ))}
+        </ul>
+        {/* DS3 SPEC §8: the side menu's one named set (sidebar spec §10), for DS3-02. */}
+        <ul className="mt-2 grid gap-2 sm:grid-cols-3" data-testid="lab-menu-motion">
+          {Object.entries(menuMotion.duration).map(([k, v]) => (
+            <li key={k} className="rounded-control border border-line px-3 py-2 text-caption text-muted">
+              <bdi dir="ltr">
+                --dur-menu-{k} · {v}
+              </bdi>
+            </li>
+          ))}
+          <li className="rounded-control border border-line px-3 py-2 text-caption text-muted sm:col-span-3">
+            <bdi dir="ltr">--ease-menu · {menuMotion.easing}</bdi>
+          </li>
         </ul>
       </Section>
 

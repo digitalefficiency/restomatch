@@ -13,6 +13,7 @@ import {
   legacyFontSize,
   legacyRadius,
   legacyShadow,
+  menuMotion,
   motion,
   radiusRoles,
   scrim,
@@ -187,6 +188,11 @@ function dotKeys(): Record<string, Record<string, string>> {
   return out;
 }
 
+/** The side menu's durations as Tailwind keys that read their variables (`duration-menu-collapse` …). */
+function menuKeys(keyPrefix: string, varPrefix: string): Record<string, string> {
+  return Object.fromEntries(Object.keys(menuMotion.duration).map((k) => [`${keyPrefix}${k}`, `var(--${varPrefix}${k})`]));
+}
+
 /**
  * Tailwind preset. `fontSize`, `borderRadius`, `boxShadow`, `transitionDuration`
  * and `transitionTimingFunction` are REPLACED (roles + deprecated v1 keys);
@@ -197,9 +203,11 @@ export const tailwindPreset = {
     fontSize: { ...legacyFontSize, ...typeRoles, ...typeRolesV2 },
     borderRadius: { ...legacyRadius, ...radiusRoles, xs: 'var(--radius-xs)', chip: 'var(--radius-chip)' },
     boxShadow: { ...legacyShadow, ...elevation },
-    transitionDuration: { ...legacyDuration, ...motion.duration },
-    transitionTimingFunction: { ...legacyEasing, ...motion.easing },
+    transitionDuration: { ...legacyDuration, ...motion.duration, ...menuKeys('menu-', 'dur-menu-') },
+    transitionTimingFunction: { ...legacyEasing, ...motion.easing, menu: 'var(--ease-menu)' },
     extend: {
+      // DS3 SPEC §8: the side menu's labels come back after the width starts (`delay-menu`).
+      transitionDelay: { menu: 'var(--dur-menu-delay)' },
       colors: {
         bg: v('bg'),
         surface: { DEFAULT: v('surface'), sunken: v('surface-sunken'), selected: v('surface-selected'), raised: v('surface-raised'), overlay: v('surface-overlay'), hover: v('surface-hover') },
@@ -215,8 +223,10 @@ export const tailwindPreset = {
         danger: family('danger'),
         warn: family('warn'),
         gold: family('gold'),
-        // DS3: `ok` names the T3 family by meaning for new code (SPEC §2 `--ok`); same variables as `gold`.
-        ok: family('gold'),
+        // DS3: `ok` names the good-news family by meaning for new code: `text-ok` / `bg-ok` are SPEC §2
+        // `--ok` (#00713E, the T3 family's bold); its tint, border and dot are the T3 family's. The
+        // recovered amount itself is `text-gold` (#00573B, its own role; SPEC §2 correction of 14.11).
+        ok: { ...family('gold'), DEFAULT: v('gold-bold') },
         info: family('info'),
         neutral: family('neutral'),
         ...Object.fromEntries(dataViz.categorical.map((_, i) => [`viz-${i + 1}`, v(`viz-${i + 1}`)])),

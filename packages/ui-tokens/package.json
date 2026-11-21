@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "tokens:css": "tsx scripts/generate.ts",
-    "ds:baseline": "tsx scripts/ds-baseline.ts"
+    "ds:baseline": "tsx scripts/ds-baseline.ts",
+    "fixtures:record": "tsx scripts/fixtures.ts",
+    "fixtures:check": "tsx scripts/fixtures.ts --check"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

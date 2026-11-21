@@ -6,7 +6,7 @@
 
 import { cellPx, dials, gutterPage, rowConstants, type DialMode } from './components';
 import { activeFonts } from './fonts';
-import { chrome, radiusRolesV2, typeScaleV2, type TypeStep } from './scale';
+import { chrome, menuMotion, radiusRolesV2, typeScaleV2, type TypeStep } from './scale';
 import { action, border, dataVizV2, emphasis, indicator, moneyMarker, status, surfaceV2, text, textV2, type StatusFamily } from './semantic';
 
 export interface VarBlock {
@@ -136,6 +136,11 @@ export function v2Blocks(): VarBlock[] {
     '--gutter-page': px(gutterPage.base),
   });
   for (const [k, v] of Object.entries(chrome)) root[`--chrome-${k}`] = v;
+  // DS3 SPEC §8: the side menu's named set (scale.ts `menuMotion`), for DS3-02.
+  for (const [k, v] of Object.entries(menuMotion.duration)) root[`--dur-menu-${k}`] = v;
+  root['--ease-menu'] = menuMotion.easing;
+  // DS3: the large-text preference zooms the content beside the menu (`.rm-text-zoom` in globals.css).
+  root['--text-zoom'] = '1';
 
   const starred = (role: string) => typeScaleV2[role]!.compact;
   const base = (role: string) => (typeScaleV2[role]!.compact ? typeScaleV2[role]!.base : undefined);
@@ -169,6 +174,13 @@ export function v2Blocks(): VarBlock[] {
         '--c-text-tertiary': hexChannels(textV2.secondaryField),
         '--c-border-control': hexChannels(border.field),
       },
+    },
+    {
+      // DS3 (WORKPLAN, personal preferences): the shell carries data-text from the rm_text cookie;
+      // large text zooms the content 1.1×, as the reference does (`[data-text="large"] .rm-main`).
+      comment: 'DS3: large text (data-text on the shell) zooms the content beside the menu.',
+      selector: "[data-text='large']",
+      vars: { '--text-zoom': '1.1' },
     },
     {
       media: '(prefers-contrast: more)',
