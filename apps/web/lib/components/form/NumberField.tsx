@@ -8,6 +8,22 @@ import { components } from '@/lib/i18n/messages/components';
 import { cnMerge as cn } from '../cn';
 import { parseQuantityInput } from './parse';
 
+/** The number the field holds now: what is typed when it parses, else the value. */
+export function fieldNumber(text: string, value: number, decimals: number): number {
+  return parseQuantityInput(text, decimals) ?? value;
+}
+
+/**
+ * What leaving the field does. Nothing when the text is the value as shown: an unedited field never
+ * saves a change nobody made (a stored 2.5 shown as "3", a stored 25 above `max`). An edit that parses
+ * is committed (rounded and held to the limits); one that does not is put back.
+ */
+export function blurAction(text: string, shownValue: string, decimals: number): { kind: 'none' } | { kind: 'reset' } | { kind: 'commit'; n: number } {
+  if (text === shownValue) return { kind: 'none' };
+  const n = parseQuantityInput(text, decimals);
+  return n === null ? { kind: 'reset' } : { kind: 'commit', n };
+}
+
 /**
  * The number field with steppers (DS3 SPEC §5 `.numf`): ONE frame holding "less", the value and
  * "more"; 36 px at the desk, 44 px on coarse pointers. It holds its limits and says them: the
@@ -62,6 +78,8 @@ export function NumberField({
     setText(shown(next));
     if (next !== value) onValueChange(next);
   };
+  // The arrows and the steppers start from what is typed, when it parses (else the value).
+  const base = () => fieldNumber(text, value, decimals);
   const limitsId = `${id}-limits`;
   const described = [describedBy, showLimits ? limitsId : null].filter(Boolean).join(' ') || undefined;
   const stepBtn =
@@ -77,7 +95,7 @@ export function NumberField({
         <button
           type="button"
           className={stepBtn}
-          onClick={() => commit(value - step)}
+          onClick={() => commit(base() - step)}
           disabled={disabled || value <= min}
           aria-label={t('ds.quantity.decrease')}
           aria-controls={id}
@@ -97,17 +115,17 @@ export function NumberField({
             aria-describedby={described}
             onChange={(e) => setText(e.target.value)}
             onBlur={() => {
-              const n = parseQuantityInput(text, decimals);
-              if (n === null) setText(shown(value));
-              else commit(n);
+              const act = blurAction(text, shown(value), decimals);
+              if (act.kind === 'reset') setText(shown(value));
+              else if (act.kind === 'commit') commit(act.n);
             }}
             onKeyDown={(e) => {
               if (e.key === 'ArrowUp') {
                 e.preventDefault();
-                commit(value + step);
+                commit(base() + step);
               } else if (e.key === 'ArrowDown') {
                 e.preventDefault();
-                commit(value - step);
+                commit(base() - step);
               } else if (e.key === 'Enter') {
                 const n = parseQuantityInput(text, decimals);
                 if (n !== null) commit(n);
@@ -124,7 +142,7 @@ export function NumberField({
         <button
           type="button"
           className={stepBtn}
-          onClick={() => commit(value + step)}
+          onClick={() => commit(base() + step)}
           disabled={disabled || value >= max}
           aria-label={t('ds.quantity.increase')}
           aria-controls={id}

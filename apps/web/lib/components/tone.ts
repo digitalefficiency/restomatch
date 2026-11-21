@@ -69,8 +69,8 @@ export const SURFACE_TONE: Record<Tone, string> = {
 export const MONEY_QUIET = 'text-fg-tertiary [.text-on-bold_&]:text-inherit [.text-on-primary_&]:text-inherit';
 
 /**
- * The pill's shell (SPEC §5: 12 px word, weight 500). Its height is DS2's chip role (`--chip-h`: 24 px,
- * 20 compact); SPEC §5 draws 22 — a token change requested from DS3-00, not a value written here.
+ * The pill's shell (SPEC §5: 12 px word, weight 500). Its height is the chip role (`--chip-h`: 22 px as
+ * SPEC §5 draws it, 20 compact; DS3-00's dial, not a value written here).
  * A real border, so forced-colours mode keeps the outline (SPEC §4).
  */
 export const PILL_SHELL =

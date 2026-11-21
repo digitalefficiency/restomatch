@@ -61,7 +61,9 @@ export function BatchBar({
       )}
     >
       <p aria-live="polite" className="text-sm font-semibold text-ink">
-        <span data-batch-count>{copy.selected(count)}</span>
+        <span data-batch-count className="tabular-nums">
+          {copy.selected(count)}
+        </span>
         {sum ? (
           <>
             {' · '}

@@ -433,11 +433,11 @@ describe('loading, empty, error (kit "טעינה, ריק, שגיאה")', () => {
     expect(html).not.toMatch(/danger/);
   });
 
-  it('a delayed skeleton waits a second before it fades in (CSS only, server-safe)', async () => {
+  it('a delayed skeleton waits (SPEC §9: one second, on a DS3-00 motion token) before it fades in (CSS only, server-safe)', async () => {
     const { Skeleton } = await import('../Skeleton');
     const html = render(h(Skeleton, { variant: 'card', delayed: true }));
     expect(html).toContain('[@starting-style]:opacity-0');
-    expect(html).toContain('delay-1000');
+    expect(html).toContain('[transition-delay:var(--dur-skeleton-wait,0ms)]');
     expect(render(h(Skeleton, { variant: 'card' }))).not.toContain('starting-style');
   });
 });
@@ -523,7 +523,7 @@ describe('tabs, filters and controls (kit "לשוניות ומסננים", SPEC 
     const html = render(h(Tooltip, { label: 'הגדרות', kbd: 'G S' }, h('button', { 'aria-label': 'הגדרות' }, 'x')));
     expect(html).toMatch(/<span aria-hidden="true" class="invisible absolute/);
     expect(html).toContain('bg-fg');
-    expect(html).toContain('group-hover/tip:delay-500');
+    expect(html).toContain('group-hover/tip:[transition-delay:var(--dur-tooltip-rest,0ms)]');
     expect(html).toContain('<kbd');
   });
 });
@@ -591,6 +591,7 @@ describe('handoff corrections (CHANGES.md 14.11, DS3-01)', () => {
     const { he: viewsHe } = await import('../../i18n/messages/views/he');
     const { he: commonHe } = await import('../../i18n/messages/common/he');
     expect(viewsHe.toolbar.clearFilters).toBe('ניקוי הסינון');
+    expect(viewsHe.toolbar).toMatchObject({ apply: 'החלה', save: 'שמירה', delete: 'מחיקה', reset: 'איפוס תצוגה' });
     expect(JSON.stringify(commonHe)).not.toMatch(/הכל(?!ו)/);
   });
 });
@@ -821,5 +822,116 @@ describe('review fixes (fidelity to the reference)', () => {
     expect(render(h(Card, { elevated: true }, 'x'))).toContain('data-elevated="true"');
     expect(read('Calculation.tsx')).toContain('rounded-card border border-line-rule bg-surface p-3');
     expect(read('Tooltip.tsx')).toContain('duration-menu-tooltip');
+  });
+});
+
+describe('review fixes (correctness)', () => {
+  it('no time value outside the tokens: no delay from Tailwind\'s default scale in the shared components', async () => {
+    const { readdirSync, statSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const root = new URL('..', import.meta.url).pathname;
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (name === '__tests__' || name === 'node_modules' || (dir.replace(/\/$/, '') === root.replace(/\/$/, '') && ['palette', 'hero', 'desk'].includes(name))) continue;
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.tsx?$/.test(name)) files.push(p);
+      }
+    };
+    walk(root);
+    const offScale = files.filter((f) => /\bdelay-(75|100|150|200|300|500|700|1000)\b/.test(readFileSync(f, 'utf8')));
+    expect(offScale).toEqual([]);
+  });
+
+  it('a change shown as ₪0 is no change: never "עלייה של ₪0" with an arrow; the basis stays in the sentence', async () => {
+    const { Delta } = await import('../money/Delta');
+    const tiny = render(h(Delta, { change: { agorot: 40, share: null }, goodWhen: 'down' }));
+    expect(tiny).toContain('data-delta="flat"');
+    expect(textOf(tiny)).toBe('ללא שינוי מהותי');
+    expect(textOf(tiny)).not.toContain('₪0');
+    const tinyAbout = render(h(Delta, { change: { agorot: -49, share: -0.001 }, goodWhen: 'down', about: 'לעומת אותם ימים בספטמבר' }));
+    expect(textOf(tinyAbout)).toBe('ללא שינוי מהותי לעומת אותם ימים בספטמבר');
+    // shekel figures: under half a shekel rounds to ₪0 inline
+    expect(render(h(Delta, { current: 100.3, previous: 100, goodWhen: 'down' }))).toContain('data-delta="flat"');
+    // from half a shekel the change shows, as before
+    const half = render(h(Delta, { change: { agorot: 50, share: null }, goodWhen: 'down' }));
+    expect(half).toContain('data-delta="bad"');
+    expect(textOf(half)).toContain('עלייה של');
+    // no change at all keeps its own words, with the basis
+    expect(textOf(render(h(Delta, { current: 5, previous: 5, about: 'בדליפה' })))).toBe('ללא שינוי בדליפה');
+    // counts and percents are not money: a small count change still shows
+    expect(render(h(Delta, { current: 1, previous: 0, kind: 'count', goodWhen: 'up' }))).toContain('data-delta="good"');
+  });
+
+  it('NumberField: leaving an unedited field saves nothing; the arrows and steppers start from what is typed', async () => {
+    const { blurAction, fieldNumber } = await import('../form/NumberField');
+    // a stored 2.5 shown as "3" (0 decimals), or a stored 25 above max: untouched, nothing is committed
+    expect(blurAction('3', '3', 0)).toEqual({ kind: 'none' });
+    expect(blurAction('25', '25', 0)).toEqual({ kind: 'none' });
+    expect(blurAction('abc', '3', 0)).toEqual({ kind: 'reset' });
+    expect(blurAction('', '3', 0)).toEqual({ kind: 'reset' });
+    expect(blurAction('4', '3', 0)).toEqual({ kind: 'commit', n: 4 });
+    expect(blurAction('2,5', '3', 1)).toEqual({ kind: 'commit', n: 2.5 });
+    expect(fieldNumber('7', 3, 0)).toBe(7);
+    expect(fieldNumber('7.5', 3, 1)).toBe(7.5);
+    expect(fieldNumber('x', 3, 0)).toBe(3);
+    const src = readFileSync(new URL('../form/NumberField.tsx', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/commit\(value [+-] step\)/);
+    expect(src.match(/commit\(base\(\) [+-] step\)/g)).toHaveLength(4);
+  });
+
+  it("the quantity sheet names the item also when nothing was ordered (an arrival that wasn't on the order)", async () => {
+    const { QtyKeypad } = await import('../overlay/QtyKeypad');
+    const noop = () => {};
+    const named = render(h(QtyKeypad, { open: true, onClose: noop, onConfirm: noop, name: 'עגבניות שרי', unit: 'ק״ג' }));
+    expect(textOf(named)).toContain('עגבניות שרי');
+    const ordered = render(h(QtyKeypad, { open: true, onClose: noop, onConfirm: noop, name: 'עגבניות שרי', unit: 'ק״ג', ordered: 6.5 }));
+    expect(textOf(ordered)).toContain('עגבניות שרי');
+    expect(textOf(ordered)).toContain('6.5');
+  });
+});
+
+describe("DS3-07's requests: digits that line up or change in place are tabular in any face; no measure in ch", () => {
+  const read = (rel: string) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+
+  it('identifiers, deadlines and tile context render in tabular figures', async () => {
+    const { Token } = await import('../money/Token');
+    const { MetricTile } = await import('../money/MetricTile');
+    expect(render(h(Token, { value: 'ST-24108', kind: 'invoice' }))).toMatch(/<bdi dir="ltr" class="[^"]*tabular-nums/);
+    expect(render(h(DeadlineChip, { due: '2026-12-12', today: new Date('2026-11-21T09:00:00+02:00') }))).toContain('tabular-nums');
+    expect(render(h(MetricTile, { label: 'דליפה החודש', value: 760, context: '35 חשבוניות נבדקו' }))).toMatch(/<p class="[^"]*tabular-nums[^"]*">35 חשבוניות נבדקו/);
+  });
+
+  it('the table, the batch bar, the change badge, the phone cards, the bell and the pad keep their digits in place', () => {
+    const table = read('table/DataTable.tsx');
+    expect(table).toContain('<p data-table-showing className="tabular-nums">');
+    expect(table).toContain("c.kind === 'date' && 'tabular-nums'");
+    expect(table).toMatch(/bg-surface px-\[var\(--cell-px,16px\)\] tabular-nums',\s*c\.identity/);
+    expect(read('table/BatchBar.tsx')).toContain('<span data-batch-count className="tabular-nums">');
+    expect(read('views/DeltaBadge.tsx')).toContain('<span className="tabular-nums">{text}</span>');
+    expect(read('table/MobileCardList.tsx')).toContain('text-sm tabular-nums text-muted');
+    expect(read('KpiCard.tsx')).toContain('<p className="text-xs tabular-nums text-muted">{subtitle}</p>');
+    expect(read('StatCard.tsx')).toContain('<p className="mt-1 text-xs tabular-nums text-muted">{hint}</p>');
+    expect(read('notifications/Bell.tsx').match(/tabular-nums text-(muted|primary)/g)).toHaveLength(2);
+    expect(read('overlay/QtyKeypad.tsx')).toContain('<span className="tabular-nums">');
+  });
+
+  it('no reading measure or size in ch or ex in the shared components (they differ between the fallback and the face)', async () => {
+    const { readdirSync, statSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const root = new URL('..', import.meta.url).pathname;
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (name === '__tests__' || name === 'node_modules' || (dir.replace(/\/$/, '') === root.replace(/\/$/, '') && ['palette', 'hero', 'desk'].includes(name))) continue;
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.tsx?$/.test(name)) files.push(p);
+      }
+    };
+    walk(root);
+    const offenders = files.filter((f) => /max-w-prose|\[[0-9.]+(ch|ex)\]/.test(readFileSync(f, 'utf8')));
+    expect(offenders).toEqual([]);
   });
 });

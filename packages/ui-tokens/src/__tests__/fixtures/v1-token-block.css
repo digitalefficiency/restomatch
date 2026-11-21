@@ -1,17 +1,17 @@
 /* @tokens:start — GENERATED from packages/ui-tokens; do not edit by hand.
    Regenerate: pnpm --filter @restomatch/ui-tokens tokens:css */
 :root {
-  --c-bg: 246 248 247; /* #F6F8F7 */
+  --c-bg: 248 251 249; /* #F8FBF9 */
   --c-surface: 255 255 255; /* #FFFFFF */
   --c-surface-2: 241 245 243; /* #F1F5F3 */
   --c-line: 212 219 216; /* #D4DBD8 */
-  --c-line-strong: 122 139 130; /* #7A8B82 */
+  --c-line-strong: 128 137 132; /* #808984 */
   --c-ink: 18 28 23; /* #121C17 */
   --c-muted: 73 82 78; /* #49524E */
   --c-subtle: 93 101 97; /* #5D6561 */
   --c-primary: 0 87 59; /* #00573B */
   --c-on-primary: 255 255 255; /* #FFFFFF */
-  --c-gold: 0 87 59; /* #00573B */
+  --c-gold: 0 113 62; /* #00713E */
   --c-danger: 183 25 28; /* #B7191C */
   --c-warn: 146 80 0; /* #925000 */
   --c-info: 34 86 187; /* #2256BB */
@@ -133,6 +133,7 @@
   :root, [data-density] {
     --row-h: 56px;
     --control-h: 48px;
+    --cell-inline: 16px;
   }
 }
 /* Field mode (lens-mobile-field §3.6): bigger floor, stronger borders, 3 px focus. */

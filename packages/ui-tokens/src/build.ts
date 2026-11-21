@@ -47,7 +47,9 @@ export function colorVars(): Record<string, string> {
     subtle: text.subtle,
     primary: status.primary.text,
     'on-primary': text.onBold,
-    gold: status.gold.text,
+    // T3: the v1 `gold` drives fills, tints, borders, rings and gradients — the family's leaf `--ok`.
+    // Only text reads the recovered amount's own role (`--c-gold-text`, Tailwind `textColor.gold`).
+    gold: status.gold.bgBold,
     danger: status.danger.text,
     warn: status.warn.text,
     info: status.info.text,
@@ -125,6 +127,9 @@ export function cssVariables(): string {
     `  :root, [data-density] {`,
     `    --row-h: ${density.touch.row}px;`,
     `    --control-h: ${density.touch.control}px;`,
+    // DS3 SPEC §7 (density is fixed on a phone): the cell padding takes the floor too, so compact's
+    // 12 px never reaches a thumb. The v2 floor in modes.ts does the same for `--cell-px`.
+    `    --cell-inline: ${density.touch.cellInline}px;`,
     '  }',
     '}',
     '/* Field mode (lens-mobile-field §3.6): bigger floor, stronger borders, 3 px focus. */',
@@ -208,6 +213,9 @@ export const tailwindPreset = {
     extend: {
       // DS3 SPEC §8: the side menu's labels come back after the width starts (`delay-menu`).
       transitionDelay: { menu: 'var(--dur-menu-delay)' },
+      // DS3 T3 (SPEC §2): the recovered amount is its own role, so `text-gold` reads it (#00573B);
+      // bg-, border-, ring-, from-gold … keep the family's leaf (`--c-gold`, #00713E).
+      textColor: { gold: { DEFAULT: v('gold-text') } },
       colors: {
         bg: v('bg'),
         surface: { DEFAULT: v('surface'), sunken: v('surface-sunken'), selected: v('surface-selected'), raised: v('surface-raised'), overlay: v('surface-overlay'), hover: v('surface-hover') },
@@ -225,7 +233,7 @@ export const tailwindPreset = {
         gold: family('gold'),
         // DS3: `ok` names the good-news family by meaning for new code: `text-ok` / `bg-ok` are SPEC §2
         // `--ok` (#00713E, the T3 family's bold); its tint, border and dot are the T3 family's. The
-        // recovered amount itself is `text-gold` (#00573B, its own role; SPEC §2 correction of 14.11).
+        // recovered amount itself is `text-gold` (#00573B, `--c-gold-text`; SPEC §2 correction of 14.11).
         ok: { ...family('gold'), DEFAULT: v('gold-bold') },
         info: family('info'),
         neutral: family('neutral'),

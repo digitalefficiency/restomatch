@@ -93,7 +93,10 @@ export function QtyPad({
   const orderedText = ordered !== undefined ? `${keypadDotText(ordered)}${unit ? ` ${unit}` : ''}` : '';
   const empty = text === '';
 
-  const press = (k: KeypadKey) => onChange({ ...state, text: typeKeypadKey(text, first, k, whole), first: false });
+  const press = (k: KeypadKey) => {
+    if (k === '.' && whole) return; // as the disabled key on screen: the selection stays
+    onChange({ ...state, text: typeKeypadKey(text, first, k, whole), first: false });
+  };
   const nudge = (dir: 1 | -1) => {
     if (dir === -1 && value === null) return;
     onChange({ ...state, text: keypadDotText(Math.max(0, (value ?? 0) + dir * by)), first: true });
@@ -247,6 +250,7 @@ export function QtyKeypad({
       const k = keypadKeyOf(e);
       if (!k) return;
       e.preventDefault();
+      if (k === '.' && whole) return; // as the disabled key on screen
       setState((s) => ({ ...s, text: typeKeypadKey(s.text, s.first, k, whole), first: false }));
     };
     document.addEventListener('keydown', onKey);
@@ -264,7 +268,14 @@ export function QtyKeypad({
       onClose={onClose}
       title={title ?? t('ds.keypad.title')}
       description={
-        ordered === undefined ? undefined : name ? t('ds.keypad.itemOrdered', { name, qty: orderedText }) : t('ds.keypad.ordered', { qty: orderedText })
+        // The ordered quantity in tabular figures (DS3-07): it never shifts with the face.
+        ordered === undefined ? (
+          name
+        ) : (
+          <span className="tabular-nums">
+            {name ? t('ds.keypad.itemOrdered', { name, qty: orderedText }) : t('ds.keypad.ordered', { qty: orderedText })}
+          </span>
+        )
       }
       detent="auto"
       primary={
