@@ -34,6 +34,10 @@ folder lives") and read the sections it points to. Your contract is still your s
 as literals, which held both values back. `DS3-00` may change exactly those two literals with their
 primitives (`WORKPLAN.md`, DS3-00, "Seams", item 3).
 
+**`DS3-06`: one more seam.** Three links elsewhere in the product open the settings screen and landed on its
+first section once the screen had sections. `DS3-06` may change the one `href` in each of the three files
+(`WORKPLAN.md`, DS3-06, "Seams").
+
 ## 21.11.2026 · fourth correction
 
 The reference's script only (`reference/src/script.js` and its copy inside `reference.html`). No package is

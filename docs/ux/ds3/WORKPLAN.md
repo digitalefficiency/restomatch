@@ -340,7 +340,12 @@ settings specs where the screen changed on purpose.
 **Seams.** A read-only preview procedure in `packages/api/src/routers/settings.ts` (what a threshold change
 would do to the gaps open now), calling the matching engine without editing it; add its line to the
 cross-tenant coverage manifest as `AGENTS.md` allows (add only). A new settings page needs its registry line
-and labels (see "Rules of the partition").
+and labels (see "Rules of the partition"). Three links outside your boundary point into the settings screen
+and must name their section now that it has sections: one `href` in each of
+`apps/web/app/admin/TwoFactorRequired.tsx` (`?s=security#twofa`),
+`apps/web/app/(marketing)/privacy/page.tsx` (`?s=privacy#dsr`) and
+`apps/web/app/(auth)/set-password/page.tsx` (`?s=account#password`); nothing else in those files, each named
+in the pull request.
 
 **The preferences contract is yours to implement** (see "Personal preferences: one contract"): the storage
 key and cookie names there are fixed, because three other packages read them. You own the stored values and
