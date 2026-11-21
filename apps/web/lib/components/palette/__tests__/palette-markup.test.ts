@@ -59,15 +59,18 @@ const tag = (html: string, re: RegExp) => html.match(re)?.[0] ?? '';
 describe('<CommandPalette> markup', () => {
   const html = palette();
 
-  it('a native dialog 14vh from the top, min(640px, 100vw - 32px) wide, overlay radius, e3', () => {
+  it('a native dialog 14vh from the top, min(640px, 100vw - 32px) wide, radius 12, e3', () => {
     const dialog = tag(html, /<dialog\b[^>]*>/);
+    // Sidebar spec §1.6 (and DS3 SPEC §4): the palette's radius is 12, the card radius; this test first pinned
+    // the 16 px overlay radius, which the review found against the spec.
     for (const cls of [
       'top-[14vh]',
       'w-[min(640px,calc(100vw-32px))]',
-      'rounded-overlay',
+      'rounded-card',
       'shadow-e3',
     ])
       expect(dialog, cls).toContain(cls);
+    expect(dialog).not.toContain('rounded-overlay');
   });
 
   it('the input row is 52 px and flex: none, holding the combobox', () => {

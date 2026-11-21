@@ -14,6 +14,7 @@ import {
   FileChartColumn,
   FileDown,
   FileSearch,
+  FileStack,
   FileText,
   HandCoins,
   Handshake,
@@ -37,7 +38,6 @@ import {
   Users,
   Utensils,
   Wallet,
-  Mail,
   type LucideIcon,
 } from 'lucide-react';
 import type { GroupKey } from './types';
@@ -53,9 +53,10 @@ export const ROUTE_ICONS: Record<string, LucideIcon> = {
   queue: Inbox,
   approvals: BadgeCheck,
   payRun: Banknote,
-  inbox: Mail,
-  invoices: ReceiptText,
-  invoiceDetail: ReceiptText,
+  /** §4.1: חשבוניות נכנסות is ReceiptText; the invoices register (a row the spec folds away) takes FileStack. */
+  inbox: ReceiptText,
+  invoices: FileStack,
+  invoiceDetail: FileStack,
   leaks: Droplet,
   leaksProof: FileSearch,
   claims: HandCoins,

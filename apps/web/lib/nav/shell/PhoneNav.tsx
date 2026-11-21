@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LogOut, MoreHorizontal, Search, ShieldCheck, X } from 'lucide-react';
+import { Ellipsis, LogOut, Search, ShieldCheck, X } from 'lucide-react';
 import { cn } from '@/lib/components/cn';
 import { useNavBadges } from '@/lib/components/notifications';
 import { useLocale, useT } from '@/lib/i18n/client';
@@ -136,7 +136,7 @@ export function BottomBar({ viewer }: { viewer: NavViewer }) {
             )}
           >
             <span className={cn(pill, !inBar && activeKey && 'bg-primary-subtle text-primary')}>
-              <MoreHorizontal aria-hidden="true" width={24} height={24} strokeWidth={1.75} />
+              <Ellipsis aria-hidden="true" width={24} height={24} strokeWidth={1.75} />
             </span>
             <span data-bar-label="" className="whitespace-nowrap">
               {t('bar.more')}
@@ -296,7 +296,7 @@ export function MoreSheet({
             {branchList ? <div className="mb-4 rounded-card border border-line py-2">{branchList}</div> : null}
             <nav aria-label={t('mainLabel')}>
               {groups.map((g) => (
-                <section key={g.group} className="mb-4" aria-labelledby={`more-${g.group}`}>
+                <div role="group" key={g.group} className="mb-4" aria-labelledby={`more-${g.group}`}>
                   <h3 id={`more-${g.group}`} className="mb-2 text-xs font-semibold leading-4 text-subtle">
                     {t(`groups.${g.group}`)}
                   </h3>
@@ -331,10 +331,10 @@ export function MoreSheet({
                       );
                     })}
                   </ul>
-                </section>
+                </div>
               ))}
             </nav>
-            <section aria-labelledby="more-profile" className="border-t border-line pt-4">
+            <div role="group" aria-labelledby="more-profile" className="border-t border-line pt-4">
               <h3 id="more-profile" className="mb-2 text-xs font-semibold leading-4 text-subtle">
                 {t('shell.profile')}
               </h3>
@@ -379,7 +379,7 @@ export function MoreSheet({
                   {t('signOut')}
                 </button>
               </form>
-            </section>
+            </div>
           </div>
         </>
       ) : null}

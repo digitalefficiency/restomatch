@@ -928,6 +928,15 @@ button.headBtn:hover {
    −2), so the scroll region never clips it and it never touches a solid pill: the aside carries DS3-00's
    data-focus="inset", which every focusable in the menu inherits. */
 
+/* The page's h1 (§9): kept clear of the sticky top bar when focus or a jump lands on it, and the focus the route
+   change puts on it draws no ring: it is not a control (tabindex −1). The global ring reads --focus-width. */
+.col :global(h1) {
+  scroll-margin-top: 80px;
+}
+.col :global(h1[tabindex='-1']) {
+  --focus-width: 0px;
+}
+
 /* Windows high contrast (§6): the current row and tile get a Highlight outline, pills a CanvasText border,
    dots keep their colour. */
 @media (forced-colors: active) {
