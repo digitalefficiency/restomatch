@@ -589,3 +589,31 @@ describe('handoff corrections (CHANGES.md 14.11, DS3-01)', () => {
     expect(JSON.stringify(commonHe)).not.toMatch(/הכל(?!ו)/);
   });
 });
+
+describe("DS3-03's requests to the shared components", () => {
+  it('Delta from a change computed upstream (agorot-exact, its own percent rule), the SPEC sentence', async () => {
+    const { Delta } = await import('../money/Delta');
+    const down = render(h(Delta, { change: { agorot: -1400, share: -0.02 }, goodWhen: 'down', showPercent: true, about: 'לעומת אותם ימים בספטמבר' }));
+    expect(down).toContain('data-delta="good"');
+    expect(textOf(down)).toContain('ירידה של');
+    expect(textOf(down)).toContain(formatIls(14));
+    expect(textOf(down)).toContain('(2%)');
+    expect(textOf(down)).toContain('לעומת אותם ימים בספטמבר');
+    // a thin base quotes no percent; a rise in leak keeps its words and ₪ in ink, only the arrow is red
+    const up = render(h(Delta, { change: { agorot: 5000, share: null }, goodWhen: 'down', showPercent: true }));
+    expect(up).toContain('data-delta="bad"');
+    expect(textOf(up)).not.toContain('%');
+    expect(up).toMatch(/<svg[^>]*class="[^"]*stroke-danger-dot/);
+    expect(up).not.toMatch(/text-danger(?!-dot)/);
+  });
+
+  it('TaskRow carries the decision row\'s blocking count (the one solid pill, apart from the count line)', async () => {
+    const { taskRow } = await import('../notifications/rows');
+    const task = { type: 'decision', tone: 'danger', deepLink: '/dashboard/approvals', ilsAgorot: 76000, count: 7, blocking: 3, detail: {}, entityId: 'x' };
+    const t = ((k: string) => k) as never;
+    const row = taskRow(task as never, t, 'he', (a: number) => String(a));
+    expect(row?.blocking).toBe(3);
+    const other = taskRow({ ...task, type: 'claim_to_send', blocking: 0 } as never, t, 'he', (a: number) => String(a));
+    expect(other).not.toHaveProperty('blocking');
+  });
+});

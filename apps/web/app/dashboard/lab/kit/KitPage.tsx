@@ -60,6 +60,7 @@ import { DataTable } from '@/lib/components/table/DataTable';
 import { ViewTabs } from '@/lib/components/table/ViewTabs';
 import type { ColumnDef } from '@/lib/components/table/types';
 import { BreakdownChart } from '@/lib/components/views/BreakdownChart';
+import { formatIls } from '@/lib/money';
 import { kitCopy, type KitCopy } from './_copy';
 
 type KitDensity = 'regular' | 'compact';
@@ -333,7 +334,13 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
             {filters.supplier ? (
               <FilterChip label={d.supplierFilter} active onRemove={() => setFilters((f) => ({ ...f, supplier: false }))} />
             ) : null}
-            {filters.over ? <FilterChip label={d.overFilter} active onRemove={() => setFilters((f) => ({ ...f, over: false }))} /> : null}
+            {filters.over ? (
+              <FilterChip
+                label={d.overFilter.replace('{amount}', formatIls(50, { maximumFractionDigits: 0, locale }))}
+                active
+                onRemove={() => setFilters((f) => ({ ...f, over: false }))}
+              />
+            ) : null}
             <Button variant="ghost" size="sm" onClick={() => setFilters({ supplier: false, over: false })}>
               {d.clear}
             </Button>
