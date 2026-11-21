@@ -60,7 +60,8 @@ export function Delta({
         className,
       )}
     >
-      <Icon className={cn('h-4 w-4 shrink-0', meaning === 'bad' && 'text-danger-dot')} aria-hidden="true" />
+      {/* The arrow is a drawing in the leak indicator (DS3-00 generates the dot roles for strokes and fills, never text). */}
+      <Icon className={cn('h-4 w-4 shrink-0', meaning === 'bad' && 'stroke-danger-dot')} aria-hidden="true" />
       {dir === 'same' ? (
         <span>{t(negligible ? 'ds.delta.negligible' : 'ds.delta.same')}</span>
       ) : (
