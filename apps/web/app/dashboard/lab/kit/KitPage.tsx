@@ -198,7 +198,7 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-title-lg text-fg">{c.title}</h1>
-          <p className="mt-1 max-w-prose text-body-sm text-fg-secondary">{c.intro}</p>
+          <p className="mt-1 max-w-xl text-body-sm text-fg-secondary">{c.intro}</p>
           <p className="mt-0.5 text-caption text-fg-tertiary">{c.source}</p>
         </div>
         <SegmentedControl<KitDensity>

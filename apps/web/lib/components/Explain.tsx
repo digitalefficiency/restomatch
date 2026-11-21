@@ -106,7 +106,7 @@ export function ExplainPanel({
       {...p}
       ref={ref}
       data-explain-panel=""
-      className={cn('mt-1 max-w-prose border-s-2 border-line ps-3 text-body-sm text-muted print:!block', className)}
+      className={cn('mt-1 max-w-xl border-s-2 border-line ps-3 text-body-sm text-muted print:!block', className)}
     >
       <p>{children}</p>
     </div>

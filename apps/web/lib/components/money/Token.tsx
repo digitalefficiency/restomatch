@@ -40,7 +40,7 @@ export function Token({
 
   return (
     <span className={cn('inline-flex items-center gap-1', className)} data-token={kind}>
-      <bdi dir="ltr" className="whitespace-nowrap font-mono text-[0.8125rem] font-medium">
+      <bdi dir="ltr" className="whitespace-nowrap font-mono text-[0.8125rem] font-medium tabular-nums">
         {value}
       </bdi>
       {copy ? (
