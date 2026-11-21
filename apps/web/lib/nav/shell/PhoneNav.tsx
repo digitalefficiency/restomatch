@@ -74,7 +74,8 @@ export function BottomBar({ viewer }: { viewer: NavViewer }) {
 
   const slot = 'flex flex-1 flex-col items-center justify-center gap-1 px-0.5 text-xs leading-4';
   // 56 × 32, as the bar has been since W1-03 (and as its spec pins).
-  const pill = 'relative inline-flex h-8 w-14 items-center justify-center rounded-pill transition-colors duration-micro';
+  // §11: the icon sits in a 56×28 pill (active: primary-subtle, the one fill the phone bar allows).
+  const pill = 'relative inline-flex h-7 w-14 items-center justify-center rounded-pill transition-colors duration-micro';
 
   return (
     <nav
@@ -315,8 +316,10 @@ export function MoreSheet({
                             className={cn(
                               'flex min-h-12 items-center gap-2.5 rounded-control border px-3 py-2 text-sm leading-5',
                               focusRing,
+                              // Here: the menu's white raised tile with its 2 × 16 brand notch (§6: never a mint fill;
+                              // the phone bar's own pill is the one mint fill on the phone, §11).
                               active
-                                ? 'border-primary-border-subtle bg-primary-subtle font-semibold text-ink'
+                                ? 'relative border-line bg-surface font-semibold text-ink shadow-e1 before:absolute before:start-0 before:top-1/2 before:h-4 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-primary'
                                 : 'border-line text-ink hover:bg-surface-2',
                             )}
                           >

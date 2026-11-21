@@ -110,13 +110,14 @@ for (const role of ROLES) {
       expect(await bar.locator('li [data-bar-label]').allInnerTexts()).toEqual(BARS[role][locale]);
       const box = (await bar.boundingBox())!;
       expect(box.height).toBeGreaterThanOrEqual(64);
-      // Home is active, with aria-current and a 56×32 pill.
+      // Home is active, with aria-current and a 56×28 pill (DS3-02: sidebar spec §11 "icon 24 inside a 56×28 pill";
+      // W1-03 had drawn it 56×32).
       const active = bar.locator('a[aria-current="page"]');
       await expect(active).toHaveCount(1);
       await expect(active).toHaveAttribute('href', '/dashboard');
       const pill = (await active.locator('span').first().boundingBox())!;
       expect(Math.round(pill.width)).toBe(56);
-      expect(Math.round(pill.height)).toBe(32);
+      expect(Math.round(pill.height)).toBe(28);
       // 12 px labels, never truncated.
       const labels = await bar.locator('li [data-bar-label]').evaluateAll((els) =>
         els.map((el) => ({ fs: getComputedStyle(el).fontSize, cut: el.scrollWidth > el.clientWidth + 1 })),
@@ -361,7 +362,8 @@ test('"עוד" sheet: navigating from it lands focus on the new page h1, not on 
   await page.getByTestId('bottom-bar').locator('button[aria-controls="dashboard-drawer"]').click();
   await page.locator('#dashboard-drawer a[href="/dashboard/suppliers"]').click();
   await page.waitForURL('**/dashboard/suppliers');
-  await expect(page.locator('#dashboard-drawer')).toHaveCount(0);
+  // DS3-02: the sheet is a native <dialog> (sidebar spec §11) that stays in the page closed; "gone" = not open.
+  await expect(page.locator('#dashboard-drawer[open]')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-controls'))).not.toBe('dashboard-drawer');
   await expect
     .poll(() => page.evaluate(() => document.activeElement?.tagName))

@@ -24,7 +24,7 @@ export const he = {
     leaks: 'דליפה',
     leaksBreakdown: 'פירוק הדליפה',
     leaksProof: 'הוכחת הדליפה',
-    leaksReport: 'דוח דליפות להדפסה',
+    leaksReport: 'דוח הדליפה להדפסה',
     claims: 'בקשות זיכוי',
     recovery: 'מעקב זיכויים',
     suppliers: 'ספקים',
