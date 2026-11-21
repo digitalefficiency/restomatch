@@ -100,9 +100,25 @@ export function padStep(unit: string | null | undefined): number | null {
   return en && HALF_STEP.has(en) ? 0.5 : null;
 }
 
-/** An item counted in whole units: the pad's point is off. */
-export function isWhole(unit: string | null | undefined): boolean {
-  return qtyKind(unit) === 'counted';
+/**
+ * The units translateUnit names that are counted, never weighed or measured (units, cases,
+ * cartons, packs …): an item in one of these comes in whole pieces.
+ */
+const WHOLE_UNITS = new Set([
+  'unit', 'case', 'carton', 'pack', 'sack', 'bag', 'bottle', 'can', 'jar', 'bucket', 'tray', 'package', 'box', 'roll',
+  'bunch', 'head', 'dozen', 'pair', 'container', 'jerrycan', 'keg', 'six-pack', 'pallet', 'portion', 'slice', 'loaf', 'sleeve',
+]);
+
+/**
+ * An item counted in whole units: the pad's point is off (the reference: a step of one). Only a
+ * unit known to be counted, ordered in a whole number: an unknown unit ("KG" typed in Latin, a word
+ * the table lacks) or half a case on the order keeps the point, as today's entry accepts a decimal
+ * for every unit.
+ */
+export function isWhole(unit: string | null | undefined, ordered?: number | null): boolean {
+  const en = translateUnit(unit ?? null)?.toLowerCase();
+  if (!en || !WHOLE_UNITS.has(en)) return false;
+  return ordered == null || Number.isInteger(roundQty(ordered));
 }
 
 /** One step of the − / +: never below zero. */

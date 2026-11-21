@@ -18,8 +18,11 @@ export type RowState = 'open' | 'ok' | 'gap';
 
 const onOrder = (line: ReconciliationLine): boolean => line.poLineId !== null && line.poQty !== null;
 const missing = (mark: LineMark): boolean => mark.rejectReason === 'missing';
-/** Damaged, or rejected on an earlier visit: the dock says "פגום" for both. */
-const hurt = (mark: LineMark): boolean => !missing(mark) && (mark.condition !== 'ok' || mark.qtyRejected > 0);
+/** Damaged, or rejected on an earlier visit: the dock says "פגום" for both (and the sheet opens with "פגום" on). */
+export function isHurt(mark: LineMark): boolean {
+  return !missing(mark) && (mark.condition !== 'ok' || mark.qtyRejected > 0);
+}
+const hurt = isHurt;
 
 /**
  * The count agrees with the order: exactly, or inside the engine's quantity

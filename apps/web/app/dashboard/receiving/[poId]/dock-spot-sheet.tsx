@@ -45,7 +45,7 @@ export function DockSpotSheet({
   }
   const refs = useRef<(HTMLInputElement | null)[]>([]);
   const cur = picked[at] ?? picked[0];
-  const whole = cur ? isWhole(cur.poUnit) : false;
+  const whole = cur ? isWhole(cur.poUnit, cur.poQty) : false;
 
   // The dialog took focus on open; the first field is where the count starts.
   useEffect(() => {
@@ -210,7 +210,7 @@ function SpotBody({
                   placeholder={td('delivery.dock.spot.empty')}
                   value={t}
                   onFocus={() => onFocusLine(i)}
-                  onChange={(e) => onType(key, e.target.value, isWhole(l.poUnit))}
+                  onChange={(e) => onType(key, e.target.value, isWhole(l.poUnit, l.poQty))}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();

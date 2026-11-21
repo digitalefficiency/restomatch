@@ -34,6 +34,7 @@ export function DockDone({
   gaps,
   doc,
   countFirst = false,
+  otherFindings = false,
   closeQueued,
   resetLabel,
   onReset,
@@ -57,6 +58,11 @@ export function DockDone({
   doc: DocState;
   /** The document came after the count (flag `dockCountFirst`): it is read in the background. */
   countFirst?: boolean;
+  /**
+   * Something beyond the count is still open for this receipt (the invoice's lines, the dock slip,
+   * a price for the desk): a clean count is then not called "all as ordered".
+   */
+  otherFindings?: boolean;
   /** Closed on this phone with no signal: the close waits in the outbox and goes by itself. */
   closeQueued: boolean;
   resetLabel: string;
@@ -98,10 +104,11 @@ export function DockDone({
           {/* A close found waiting on this phone at reopen has no count on screen: no summary to give. */}
           {result ? (
             <p className="text-body text-muted" data-testid="confirmed-summary">
-              {td('delivery.dock.done.sum', {
-                items,
-                rest: n > 0 ? td('delivery.dock.check.gaps', { count: n, n: formatNumber(n, locale) }) : td('delivery.dock.done.clean'),
-              })}
+              {n > 0
+                ? td('delivery.dock.done.sum', { items, rest: td('delivery.dock.check.gaps', { count: n, n: formatNumber(n, locale) }) })
+                : otherFindings
+                  ? items
+                  : td('delivery.dock.done.sum', { items, rest: td('delivery.dock.done.clean') })}
             </p>
           ) : null}
         </div>
@@ -122,6 +129,8 @@ export function DockDone({
             {td('delivery.dock.done.bulk', { count: bulkCount, n: formatNumber(bulkCount, locale) })}
           </Row>
         ) : null}
+        {/* A close found waiting on this phone at reopen: what it carries is not on screen, so no claim. */}
+        {result ? (
         <Row term={td('delivery.dock.done.doc')} testId="confirmed-doc">
           <span className="flex flex-wrap items-center justify-between gap-2">
             <span>
@@ -146,6 +155,7 @@ export function DockDone({
             ) : null}
           </span>
         </Row>
+        ) : null}
         {closeQueued ? (
           <Row term={td('delivery.dock.done.sending')}>
             <span role="status" data-testid="close-queued">

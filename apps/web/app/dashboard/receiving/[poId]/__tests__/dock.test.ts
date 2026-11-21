@@ -7,6 +7,7 @@ import {
   farNote,
   gapNote,
   isAsOrdered,
+  isHurt,
   mainAction,
   needsCloseCheck,
   orderedForCount,
@@ -129,6 +130,19 @@ describe('dock count rows (DS3-05)', () => {
     const y = line({ id: 'y', status: 'qty_diff' });
     const z = line({ id: 'z', status: 'unordered' });
     expect(orderedForCount([x, y, z]).map((l) => l.poLineId)).toEqual(['y', 'z', 'x']);
+  });
+});
+
+describe('what the row calls damaged, and the sheet opens with (DS3-05)', () => {
+  const a = line({ id: 'a' });
+  it('damaged, or rejected on an earlier visit, is "פגום" for the row and for the sheet\'s chip', () => {
+    expect(isHurt(counted(a, { condition: 'damaged', rejectReason: 'damaged' }))).toBe(true);
+    expect(isHurt(counted(a, { qtyReceived: 8, qtyRejected: 2, condition: 'rejected' }))).toBe(true);
+    expect(isHurt(counted(a, { qtyReceived: 8, qtyRejected: 2 }))).toBe(true);
+  });
+  it('a missing line, or one in good condition, is not', () => {
+    expect(isHurt(counted(a, MISSING_PATCH))).toBe(false);
+    expect(isHurt(counted(a, asOrderedPatch(a)))).toBe(false);
   });
 });
 

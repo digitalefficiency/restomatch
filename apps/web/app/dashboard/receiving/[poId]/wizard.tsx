@@ -213,6 +213,9 @@ export function ReceivingWizard({
   const adjustedKeysRef = useRef(new Set<string>());
   const [image, setImage] = useState<CapturedImage | null>(null);
   const [result, setResult] = useState<ReconciliationResult | null>(countFirstStart?.result ?? null);
+  /** The count as of now (read inside callbacks created before it was built). */
+  const resultRef = useRef(result);
+  resultRef.current = result;
   const [marks, setMarksState] = useState<Record<string, LineMark>>(countFirstStart?.initialMarks ?? {});
   /** "צילום המסמך וסגירה": once the photo is in (or kept on the phone), the receipt closes. */
   const [closeAfterPhoto, setCloseAfterPhoto] = useState(false);
@@ -282,7 +285,10 @@ export function ReceivingWizard({
   const counting = step === 'RECONCILIATION_REVIEW' || step === 'ADJUST_QUANTITIES';
   useFieldBarOffset(rootRef);
   useWakeLock(step !== 'CONFIRMED' && step !== 'SUMMARY');
-  const { leave } = useLeaveGuard(unsent > 0 && step !== 'CONFIRMED', setLeaveAsk);
+  // Count first, before its receipt exists: the count is only on this phone, so leaving asks first too (RCV-02).
+  const preCountUnsent =
+    countFirst && Object.keys(grLineIdByKey).length === 0 ? Object.values(marks).filter((m) => m.touched).length : 0;
+  const { leave } = useLeaveGuard((unsent > 0 || preCountUnsent > 0) && step !== 'CONFIRMED', setLeaveAsk);
 
   // A step change moves focus to its heading and the page to the top (a11y-06).
   const firstStep = useRef(true);
@@ -425,28 +431,58 @@ export function ReceivingWizard({
       /* private mode: the marks stay on screen; they are sent once the receipt starts */
     }
   }
-  // A reload before the receipt could start (no signal at the first mark): the marks come back, and it starts.
-  useEffect(() => {
-    if (!countFirstStart) return;
+  /**
+   * The counts kept on this phone, for the lines of `base` (this order's lines on screen). Only a
+   * valid count of each (restoredMark): nothing stored is taken as it is.
+   */
+  function readPreCount(base: Record<string, LineMark>): Record<string, LineMark> {
     let saved: unknown = {};
     try {
       saved = JSON.parse(window.localStorage.getItem(preCountKey) ?? '{}');
     } catch {
       saved = {};
     }
-    if (!saved || typeof saved !== 'object') return;
-    // Only lines of this order, and only a valid count of each (restoredMark): nothing stored is taken as it is.
-    const next = { ...marksRef.current };
-    let restored = 0;
-    for (const k of Object.keys(next)) {
-      const m = restoredMark(next[k]!, (saved as Record<string, unknown>)[k]);
-      if (!m) continue;
-      next[k] = m;
-      adjustedKeysRef.current.add(k);
-      restored += 1;
+    if (!saved || typeof saved !== 'object') return {};
+    const out: Record<string, LineMark> = {};
+    for (const k of Object.keys(base)) {
+      const m = restoredMark(base[k]!, (saved as Record<string, unknown>)[k]);
+      if (m) out[k] = m;
     }
-    if (restored === 0) return;
-    setMarks(next);
+    return out;
+  }
+  /**
+   * Count first, a receipt now known (a reload after it started, or another phone started it): the
+   * counts this phone kept before it existed join it, for the lines it has no count for (a count
+   * on the receipt stands). They are sent through the line outbox, and the phone's copy goes.
+   */
+  function adoptPreCount(merged: Record<string, LineMark>, grLineIds: Record<string, string>): Record<string, LineMark> {
+    if (!countFirst || readOnly) return merged;
+    const kept = readPreCount(merged);
+    const keys = Object.keys(kept).filter((k) => !merged[k]?.touched);
+    writePreCount(null);
+    if (keys.length === 0) return merged;
+    const out = { ...merged };
+    for (const k of keys) {
+      out[k] = kept[k]!;
+      adjustedKeysRef.current.add(k);
+      const grLineId = grLineIds[k];
+      if (grLineId) outbox.set({ ...payloadFor(grLineId, kept[k]!), ...(stampRef.current ? { stamp: stampRef.current } : {}) });
+    }
+    setResumed(true);
+    return out;
+  }
+  // A reload before the receipt could start (no signal at the first mark): the marks come back, and it starts.
+  useEffect(() => {
+    if (!countFirstStart) {
+      // Opened on a closed receipt: a count kept on this phone has nothing left to join.
+      if (countFirst && closedAtOpen) writePreCount(null);
+      return;
+    }
+    const kept = readPreCount(marksRef.current);
+    const keys = Object.keys(kept);
+    if (keys.length === 0) return;
+    for (const k of keys) adjustedKeysRef.current.add(k);
+    setMarks({ ...marksRef.current, ...kept });
     setResumed(true);
     void startCountReceipt();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -488,6 +524,9 @@ export function ReceivingWizard({
           labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
         });
         setGrLineIdByKey(adapted.grLineIdByKey);
+        // A line this phone has not touched takes the receipt's own count (another phone may have
+        // counted it), as every rebuild of the count does; what this phone counted stands and is sent.
+        setMarks(withUnsent(keepAdjusted(marksRef.current, adapted.initialMarks, adjustedKeysRef.current), adapted.grLineIdByKey));
         for (const key of adjustedKeysRef.current) {
           const grLineId = adapted.grLineIdByKey[key];
           const m = marksRef.current[key];
@@ -497,9 +536,13 @@ export function ReceivingWizard({
         setFooterError(null);
         return id;
       } catch (err) {
+        // Expired session: the re-auth sheet (a start is a mutation: the next tap starts it again,
+        // never a replay). No signal: "no connection". Anything else says what the server said.
         const expired = isSessionExpired(err);
         if (expired) requestReauth();
-        setFooterError(td(expired ? 'delivery.count.sessionExpired' : 'delivery.count.offline'));
+        setFooterError(
+          expired ? td('delivery.count.sessionExpired') : isTransientFailure(err) ? td('delivery.count.offline') : errorText(err, t, locale),
+        );
         return null;
       } finally {
         startingRef.current = null;
@@ -532,7 +575,9 @@ export function ReceivingWizard({
           } else if (offlineQueue && captured.invoiceId?.startsWith('queued-')) {
             setNotice(tIngest('pwa.savedOffline'));
           }
-          setStep('ADJUST_QUANTITIES');
+          // Back to the count; if it was never built here (reopened with no signal), build it now.
+          if (resultRef.current) setStep('ADJUST_QUANTITIES');
+          else await buildFromPoOnly(grIdRef.current);
         } catch {
           const failed = onRegisterError(captured);
           setRegisterRetry(failed.retry);
@@ -797,7 +842,9 @@ export function ReceivingWizard({
       });
       setResult(adapted.result);
       setGrLineIdByKey(adapted.grLineIdByKey);
-      setMarks(withUnsent(keepAdjusted(marksRef.current, adapted.initialMarks, adjustedKeysRef.current), adapted.grLineIdByKey));
+      setMarks(
+        adoptPreCount(withUnsent(keepAdjusted(marksRef.current, adapted.initialMarks, adjustedKeysRef.current), adapted.grLineIdByKey), adapted.grLineIdByKey),
+      );
       setStep('ADJUST_QUANTITIES');
     } catch (err) {
       // The session expired (startReceipt / getReceipt said 401): the re-auth
@@ -1298,6 +1345,8 @@ export function ReceivingWizard({
           receivedBy={receiverName}
           bulkCount={Object.values(marks).filter((m) => m.touched && m.method === 'bulk_as_ordered').length}
           gaps={dockGaps(result, marks, tolerance)}
+          // The invoice or the slip still has something to say: a clean count is not called "all as ordered".
+          otherFindings={exceptions > 0 || slipNeeded}
           doc={docState}
           countFirst={countFirst}
           closeQueued={closeQueued}
@@ -1324,7 +1373,7 @@ export function ReceivingWizard({
 
       <LeaveSheet
         target={leaveAsk}
-        count={unsent}
+        count={unsent + preCountUnsent}
         td={td}
         locale={locale}
         onStay={() => setLeaveAsk(null)}

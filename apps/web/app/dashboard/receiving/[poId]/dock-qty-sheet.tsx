@@ -10,7 +10,7 @@ import { useUnitLabel } from '@/app/showcase/receiver/_steps/english';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber, formatPercent } from '@/lib/i18n/format';
 import { receivingDelivery } from '@/lib/i18n/messages/receiving/delivery';
-import { farNote } from './_dock';
+import { farNote, isHurt } from './_dock';
 import { initialPadText, isWhole, padKeyFromKeyboard, padStep, padValue, sanitizeTyped, stepText, typeKey, type PadKey } from './_keypad';
 import { DockKeypad } from './dock-keypad';
 import { PHONE_CTA } from './_phone';
@@ -58,13 +58,15 @@ export function DockQtySheet({
   const unitText = u ? unit(u) : '';
   const onOrder = line.poLineId !== null && line.poQty !== null;
   const step = padStep(u);
-  const whole = isWhole(u);
+  const whole = isWhole(u, line.poQty);
   const shown = (v: number) => `${formatNumber(v, locale, { maximumFractionDigits: 3 })}${unitText ? ` ${unitText}` : ''}`;
 
   const [text, setText] = useState('');
   // A value put there for the receiver reads as selected: the first key replaces it.
   const [replace, setReplace] = useState(false);
   const [damaged, setDamaged] = useState(false);
+  /** What the row said when the sheet opened (damaged, or rejected on an earlier visit). */
+  const [damagedAtOpen, setDamagedAtOpen] = useState(false);
   // Every opening starts from the line as it stands (React's "adjust state when a prop changes").
   const [wasOpen, setWasOpen] = useState(false);
   if (open !== wasOpen) {
@@ -73,7 +75,10 @@ export function DockQtySheet({
       const start = initialPadText(mark, blind);
       setText(start);
       setReplace(start !== '');
-      setDamaged(mark.touched && mark.condition === 'damaged');
+      // The chip starts from what the row says: "פגום" for damaged and for rejected on an earlier visit.
+      const hurtNow = mark.touched && isHurt(mark);
+      setDamaged(hurtNow);
+      setDamagedAtOpen(hurtNow);
     }
   }
 
@@ -126,9 +131,11 @@ export function DockQtySheet({
       return;
     }
     const base = qtyPatch(mark, value);
-    if (onOrder && damaged) onSave({ ...base, ...DAMAGED_PATCH });
+    // "פגום" left as the row said: keep what was recorded (a rejection on an earlier visit stays one).
+    if (onOrder && damaged && damagedAtOpen) onSave({ ...base, condition: mark.condition, qtyRejected: mark.qtyRejected, rejectReason: mark.rejectReason });
+    else if (onOrder && damaged) onSave({ ...base, ...DAMAGED_PATCH });
     else onSave({ ...base, condition: 'ok', rejectReason: null });
-  }, [value, mark, onOrder, damaged, onSave]);
+  }, [value, mark, onOrder, damaged, damagedAtOpen, onSave]);
 
   // A hardware key pressed while focus is on a button of the sheet still types into the field.
   useEffect(() => {

@@ -280,7 +280,8 @@ export function DockCount({
               <DocButton doc={doc} onPhoto={onPhoto ? () => onPhoto() : undefined} td={td} />
             </div>
           ) : null}
-          {failedSaves > 0 ? (
+          {/* The close's own footer already says it (the same words): one alert, not two. */}
+          {failedSaves > 0 && !footerMessage ? (
             <p role="alert" className="flex min-h-12 items-center justify-between gap-3 text-body text-ink" data-testid="count-save-failed">
               <span className="flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5 shrink-0 text-danger" aria-hidden="true" />

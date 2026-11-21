@@ -33,7 +33,17 @@ describe('the dock number pad (DS3-05) — one typing rule in every language', (
     expect(type(['.'], '24', true, true)).toBe('24');
     expect(isWhole('יח׳')).toBe(true);
     expect(isWhole('ארגז')).toBe(true);
+    expect(isWhole('ארגז', 3)).toBe(true);
     expect(isWhole('ק״ג')).toBe(false);
+  });
+
+  it('keeps the point wherever today accepts a decimal: an unknown unit, half a case on the order', () => {
+    expect(isWhole('KG', 2.5)).toBe(false); // Latin, not in the unit table
+    expect(isWhole('lb')).toBe(false);
+    expect(isWhole('צנוברים')).toBe(false); // a Hebrew word the table does not know
+    expect(isWhole(null)).toBe(false);
+    expect(isWhole('ארגז', 0.5)).toBe(false); // the order itself says half a case
+    expect(isWhole('Case', 4)).toBe(true); // an English label the table names
   });
 
   it('a leading 0 is replaced, not kept as 07', () => {
