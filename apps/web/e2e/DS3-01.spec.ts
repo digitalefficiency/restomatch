@@ -170,6 +170,41 @@ test.describe('DS3-01 kit page (platform admins)', () => {
     await expect(tip).toBeHidden();
   });
 
+  test('the number pad: the first key replaces, a decimal point, a plain note far from the order, the chips, the sheet', async ({ page }) => {
+    await setLang(page, 'he');
+    await page.goto(KIT);
+    const pad = page.locator('#kit-keypad [data-qty-pad]').first();
+    const value = pad.locator('[data-qty-value] > span').first();
+    await expect(value).toHaveText('24');
+    await expect(value).toHaveAttribute('data-selected', '');
+    await pad.getByRole('button', { name: '7', exact: true }).click();
+    await expect(value).toHaveText('7');
+    await expect(value).not.toHaveAttribute('data-selected', '');
+    await pad.getByRole('button', { name: 'נקודה עשרונית' }).click();
+    await pad.getByRole('button', { name: '5', exact: true }).click();
+    await expect(value).toHaveText('7.5');
+    // 7.5 of 28.5 ordered: one plain note, above the stepper, so no key moved under the thumb
+    await expect(pad.getByRole('status')).toHaveText(/שונה ב־74% מההזמנה \(28\.5 ק״ג\)/);
+    await pad.getByRole('button', { name: 'כמו בהזמנה' }).click();
+    await expect(value).toHaveText('28.5');
+    await expect(pad.getByRole('status')).toHaveCount(0);
+    await pad.getByRole('button', { name: 'פגום' }).click();
+    await expect(pad.getByRole('button', { name: 'פגום' })).toHaveAttribute('aria-pressed', 'true');
+    await pad.getByRole('button', { name: 'חסר' }).click();
+    await expect(value).toHaveText('0');
+    await expect(pad.getByRole('button', { name: 'פגום' })).toHaveAttribute('aria-pressed', 'false');
+    const key = await pad.getByRole('button', { name: '1', exact: true }).boundingBox();
+    expect(Math.round(key!.height)).toBe(64);
+
+    await page.getByRole('button', { name: kitHe.demo.keypadOpen }).click();
+    const sheet = page.getByRole('dialog', { name: 'כמה הגיע?' });
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText(`${kitHe.demo.keypadItem}, הוזמן 28.5 ק״ג`);
+    await sheet.getByRole('button', { name: 'אישור: 24 ק״ג' }).click();
+    await expect(sheet).toBeHidden();
+    await expect(page.locator('#kit-keypad')).toContainText('נרשם: 24 ק״ג');
+  });
+
   test('the three-way strip: one summary for assistive tech, the off cell tinted', async ({ page }) => {
     await setLang(page, 'he');
     await page.goto(KIT);
