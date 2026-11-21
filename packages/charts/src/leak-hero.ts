@@ -3,6 +3,7 @@ import { DECISION_KEY_SQL, effectSql } from './decisions';
 import { sql, type Database } from '@restomatch/db';
 import { scanAwaitingCountSql } from './awaiting-count';
 import { LEAK_FILTER, LIVE_DUPLICATE, lineFilter, originalChecked, viewInvoicesSql, type ViewSpec } from './leak-views';
+import { claimedAgorotOf, computeLeakPartition } from './leak-ledger';
 
 /**
  * The owner's 10-second story: "₪X leaked this month, Y% of spend, Z caught
@@ -162,6 +163,10 @@ export async function computeLeakHero(
   const r = rowsOf(res)[0] ?? {};
   const spend = ils(r.spend);
   const leak = ils(r.leak);
+  // G-14 Q3: "recovered" (accepted for a claim) = the leak ledger's claim states for this month —
+  // the one basis every "claimed" figure shares (a live claim's persisted amount, claims first).
+  const mid = new Date((Date.parse(iso(r.lo)) + Date.parse(iso(r.hi))) / 2);
+  const claimed = claimedAgorotOf(await computeLeakPartition(db, restaurantId, { period: 'this_month', now: mid }));
   return {
     monthStart: iso(r.lo),
     monthEnd: iso(r.hi),
@@ -169,7 +174,7 @@ export async function computeLeakHero(
     spendIls: spend,
     leakPct: spend > 0 ? leak / spend : null,
     caughtBeforePaymentIls: ils(r.caught),
-    recoveredIls: ils(r.recovered),
+    recoveredIls: claimed / 100,
     invoiceCount: n(r.invoice_count),
     matchedInvoiceCount: n(r.matched_count),
     invoicesWithLeak: n(r.with_leak),
@@ -197,6 +202,8 @@ export interface LeakBreakdownLine {
    * `tolerate`: accepted with no resolved_at — decisions.ts DECISION_KEY_SQL). Waived: never a
    * credit request. Optional so hand-built lines stay valid; absent = false.
    */
+  /** When the engine found it (ISO). The order key inside a tier (created_at, id) — the leak ledger's. Optional for hand-built lines. */
+  createdAt?: string;
   tolerated?: boolean;
   productName: string | null;
   productNameEn: string | null;
@@ -342,7 +349,7 @@ async function breakdownLines(
 ): Promise<Map<string, LeakBreakdownLine[]>> {
   const lineRes = await db.execute(sql`
     SELECT
-      mr.invoice_id, d.id, d.type, d.severity, d.resolution_status, d.delta_amount,
+      mr.invoice_id, d.id, d.type, d.severity, d.resolution_status, d.delta_amount, d.created_at,
       d.expected_value, d.actual_value, d.po_line_id, d.invoice_line_id, d.product_id,
       (${counts}) AS counts,
       (${DECISION_KEY_SQL}) = 'tolerated' AS tolerated,
@@ -377,6 +384,7 @@ async function breakdownLines(
       actual: l.actual_value == null ? null : Number(l.actual_value),
       countsAsLeak: Boolean(l.counts),
       tolerated: Boolean(l.tolerated),
+      createdAt: l.created_at == null ? undefined : iso(l.created_at),
       productName: (l.product_name as string | null) ?? null,
       productNameEn: (l.product_name_en as string | null) ?? null,
       lineDescription: (l.line_desc as string | null) ?? null,
@@ -530,27 +538,12 @@ export async function computeInvoiceLeak(
 }
 
 /**
- * G-14 Q3: "claimed" (accepted for a claim) for any view — the hero's per-invoice capped
- * value, LEAST(Σ|Δ| of claim-effect leak lines, LEAST(raw leak, total)), with the decision
- * table's 'claim' effect, so a tolerance row the engine auto-approved (owner M7: waived) is
- * never counted. Replaces computeLeakSummary().recoveredIls (leak-views, immutable, which
- * still reads a status list) wherever a screen shows "claimed".
+ * G-14 Q3: "claimed" (accepted for a claim) for any view — the leak ledger's claim money states
+ * (to_offset … recovered), the one basis every "claimed" figure shares, so a tolerance row the
+ * engine auto-approved (owner M7: waived) is never counted and a live claim counts at its own
+ * amount. Replaces computeLeakSummary().recoveredIls (leak-views, immutable, which still reads a
+ * status list) wherever a screen shows "claimed".
  */
 export async function computeClaimedIls(db: Database, restaurantId: string, spec: ViewSpec): Promise<number> {
-  const res = await db.execute(sql`
-    WITH ${viewInvoicesSql(restaurantId, spec)},
-    c AS (
-      SELECT per.id, LEAST(per.raw_leak, per.total) AS cap,
-        COALESCE((
-          SELECT SUM(ABS(d.delta_amount))
-          FROM match_runs mr
-          JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
-          WHERE mr.invoice_id = per.id AND mr.restaurant_id = ${restaurantId}
-            AND ${lineFilter(restaurantId, spec.filters)} AND ${effectSql()} = 'claim'
-        ), 0) AS raw_claim
-      FROM per
-    )
-    SELECT COALESCE(SUM(LEAST(c.raw_claim, c.cap)), 0) AS claimed FROM c
-  `);
-  return ils(rowsOf(res)[0]?.claimed);
+  return claimedAgorotOf(await computeLeakPartition(db, restaurantId, spec)) / 100;
 }

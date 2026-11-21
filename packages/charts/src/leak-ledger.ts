@@ -417,3 +417,14 @@ export async function computeLeakPartition(db: Database, restaurantId: string, s
   ]);
   return partitionOf(rows, hero);
 }
+
+/** The money states that are "claimed" (accepted for a claim, in any stage): to_offset … recovered. */
+export const CLAIM_STATES = ['to_offset', 'to_send', 'requested', 'disputed', 'credited', 'recovered'] as const;
+
+/**
+ * G-14 Q3: "claimed" in agorot = Σ of the claim money states. THE one basis for every
+ * "claimed / accepted for a claim" figure (hero.recoveredIls, chain, leak report, monthly).
+ */
+export function claimedAgorotOf(p: Pick<LeakPartition, 'states'>): number {
+  return CLAIM_STATES.reduce((a, s) => a + p.states[s], 0);
+}

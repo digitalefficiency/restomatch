@@ -688,7 +688,7 @@ describe('claimability (verbs keyed by type AND claimability)', () => {
     expect(sum.others).toMatchObject({ count: 2, amountIls: 300 });
   });
 
-  it('a tolerance row the engine auto-approved takes no cap from the open rows: per-row ₪ = the tile (G-14 Q3, M7)', async () => {
+  it('a tolerance row the engine auto-approved is a waiver: it holds its share of the cap, never claimed; per-row ₪ = the tile (G-14 Q3, M7)', async () => {
     const s = await seed();
     const [i] = await db
       .insert(invoices)
@@ -704,7 +704,36 @@ describe('claimability (verbs keyed by type AND claimability)', () => {
     const q = await ownerOf(s).approvals.myQueue({ limit: 100 });
     const row = q.find((r) => r.id === open.id)!;
     expect(row.claimable).toBe(true);
-    expect(row.claimAgorot).toBe(5000);
+    // The ledger's tiers: the waived ₪90 holds its share of the ₪100 cap → ₪10 left to decide.
+    expect(row.claimAgorot).toBe(1000);
+    expect((await ownerOf(s).approvals.queueSummary()).toDecide.amountIls).toBe(10);
+  });
+
+  it('one "to decide" ₪ on every screen: a waiver holds its share of a binding cap (G-14 Q3 probe)', async () => {
+    const { computeLeakReport, computeInvoiceLeak } = await import('@restomatch/charts');
+    const { payRunStatusOf } = await import('../routers/payRun');
+    const s = await seed();
+    const [i] = await db
+      .insert(invoices)
+      .values({ restaurantId: s.restaurantId, source: 'manual', status: 'matched', totalInclVat: '8.00' })
+      .returning();
+    const [mr] = await db
+      .insert(matchRuns)
+      .values({ restaurantId: s.restaurantId, invoiceId: i!.id, overallStatus: 'major', totalDiscrepancyAmount: '0' })
+      .returning();
+    // Cap ₪8: a person waived ₪4 (rejected), ₪5 is still open → ₪4 left to decide.
+    await insertD(s, { matchRunId: mr!.id, type: 'QTY_SHORT', deltaAmount: '4.00', resolutionStatus: 'rejected', resolvedAt: new Date() });
+    const open = await insertD(s, { matchRunId: mr!.id, type: 'PRICE_HIGHER', deltaAmount: '5.00', requiresRole: 'owner' });
+    const month = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' }).format(new Date());
+    const report = await computeLeakReport(db, s.restaurantId, month);
+    const pay = payRunStatusOf(await computeInvoiceLeak(db, s.restaurantId, i!.id));
+    const sum = await ownerOf(s).approvals.queueSummary();
+    const row = (await ownerOf(s).approvals.myQueue({ limit: 100 })).find((r) => r.id === open.id)!;
+    expect(report.status.stillOpenIls).toBe(4);
+    expect(report.ledgerDriftAgorot).toBe(0);
+    expect(pay.pendingIls).toBe(4);
+    expect(sum.toDecide.amountIls).toBe(4);
+    expect(row.claimAgorot).toBe(400);
   });
 
   it('an accepted duplicate is logged as a hold, never as a claim', async () => {

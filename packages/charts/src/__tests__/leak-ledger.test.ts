@@ -557,4 +557,47 @@ describe('G-14 Q3 · every screen counts the same shekel the same way', () => {
     expect(Math.round((status.claimedIls + status.stillOpenIls + status.waivedIls) * 100)).toBe(Math.round(hero.leakIls * 100));
     expect(status.claimedIls).toBe(hero.recoveredIls);
   });
+
+  it('S4–S7: "claimed" has one basis (the ledger claim states) on every screen; found = hero leak', async () => {
+    const { rid, invoice } = await setup();
+    // S4: a live claim held at a binding cap (₪8 invoice, ₪10 accepted, claim ₪8).
+    await invoice({ inclVat: '8.00', d: [{ type: 'QTY_SHORT', delta: '10.00', status: 'accepted', claim: { status: 'claimed', amountAgorot: 800 } }] });
+    // S5: a live claim on a row a person later rejected (letter already sent) + an accepted ₪3.
+    await invoice({
+      inclVat: '1000.00',
+      d: [
+        { type: 'PRICE_HIGHER', delta: '6.00', status: 'rejected', claim: { status: 'letter_sent', amountAgorot: 600 } },
+        { type: 'QTY_OVER', delta: '3.00', status: 'accepted' },
+      ],
+    });
+    // S6: written off after ₪4 of ₪10 came back → ₪4 claimed (credited), ₪6 waived.
+    await invoice({
+      inclVat: '1000.00',
+      d: [{ type: 'UNIT_MISMATCH', delta: '10.00', status: 'accepted', claim: { status: 'written_off', amountAgorot: 1000, creditedAgorot: 400 } }],
+    });
+    // S7: a binding cap over a claim, a waiver and an open gap (₪12: 8 + 3 + 5 raw).
+    await invoice({
+      inclVat: '12.00',
+      d: [
+        { type: 'QTY_SHORT', delta: '8.00', status: 'accepted' },
+        { type: 'UNORDERED_ITEM', delta: '3.00', status: 'rejected' },
+        { type: 'PRICE_HIGHER', delta: '5.00', status: 'open' },
+      ],
+    });
+
+    const hero = await computeLeakHero(db, rid, { now: NOW });
+    expect(hero.leakIls).toBe(39);
+    const report = await computeLeakReport(db, rid, '2026-10');
+    const snap = await computeBranchSnapshot(db, rid, 'Ledger Bistro', { spec: SPEC, trendMonths: 1 });
+    expect(report.status.claimedIls).toBe(29); // 8 + 6 + 3 + 4 + 8
+    expect(hero.recoveredIls).toBe(report.status.claimedIls);
+    expect(snap.claimedIls).toBe(report.status.claimedIls);
+    expect(await computeClaimedIls(db, rid, SPEC)).toBe(report.status.claimedIls);
+    expect([report.status.waivedIls, report.status.stillOpenIls]).toEqual([9, 1]); // 6 + 3 ; 1
+    const found = Math.round((report.status.claimedIls + report.status.waivedIls + report.status.stillOpenIls) * 100);
+    expect(found).toBe(Math.round(hero.leakIls * 100));
+    expect(report.ledgerDriftAgorot).toBe(0);
+    // Counts follow the same rows (₪ > 0 per state group).
+    expect([report.status.claimedCount, report.status.waivedCount, report.status.stillOpenCount]).toEqual([5, 2, 1]);
+  });
 });

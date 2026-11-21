@@ -15,8 +15,9 @@ import { DISCREPANCY_CLAIMABLE, DISCREPANCY_CLAIMED, DISCREPANCY_DECIDABLE } fro
  *    (waived lines drop); open / escalated ones are flagged `undecided`;
  *  • never a line the engine auto-approved within tolerance (`tolerated`, the system decision
  *    `tolerate` → waive in charts DECISION_RULES; owner M7, 7.11): no credit request for it;
- *  • lines are taken in the breakdown's order (biggest |Δ| first) and never claim more on an
- *    invoice than its capped leak (`leakIls`, the hero's per-invoice cap).
+ *  • the invoice's capped leak (`leakIls`, the hero's per-invoice cap) is split in the leak
+ *    ledger's tiers: decided claims first, then waivers (rejected / tolerated: they hold their
+ *    share, never asked), then undecided lines get what is left; inside a tier (created_at, id).
  */
 /**
  * Decided "ask the supplier" statuses. Owner decision 7.11 (M5): 'resolved' counts as decided,
@@ -118,29 +119,42 @@ export interface ClaimableOptions {
   claimedIds?: ReadonlySet<string>;
 }
 
-/** The claimable lines of one invoice, capped like the claims letters (decided first, then undecided). */
+/** The claimable lines of one invoice, capped like the claims letters — the ledger's tiers (decided claims, waivers, undecided). */
 export function claimableLines(inv: LeakBreakdownInvoice, opts: ClaimableOptions = {}): ClaimLine[] {
   if (inv.pendingLink) return [];
   const claimed = opts.claimedIds;
   const out: ClaimLine[] = [];
-  let invClaimed = 0;
-  // G-14 Q3: one cap-split order everywhere — the leak ledger's tiers. Decided lines take the
-  // invoice cap first, undecided ones get only what is left (biggest |Δ| first inside a tier),
-  // so a decision's ₪ is never squeezed out by a line nobody decided yet.
-  const ordered = [
-    ...inv.lines.filter((l) => !UNDECIDED.has(l.resolutionStatus)),
-    ...inv.lines.filter((l) => UNDECIDED.has(l.resolutionStatus)),
-  ];
-  for (const l of ordered) {
-    if (!l.countsAsLeak || !CLAIMABLE.has(l.resolutionStatus) || NEVER_CLAIMABLE.has(l.type)) continue;
-    if (claimed?.has(l.discrepancyId)) continue;
-    // Owner M7 (7.11): a tolerance row the engine auto-approved is waived — never asked back.
-    if (l.tolerated) continue;
+  // G-14 Q3: the leak ledger's tiers, so every screen splits an invoice's cap the same way —
+  //   1. decided claims (accepted / resolved, not tolerated): emitted;
+  //   2. waivers (rejected, or tolerated — owner M7): take their share of the cap but are never
+  //      emitted (never asked back);
+  //   3. undecided (open / escalated): emitted with only what is left — so "to decide" ₪ is the
+  //      ledger's tier-3 amount on every screen.
+  // Inside a tier: (created_at, id), the ledger's / syncClaims' order. Integer agorot.
+  const tierOf = (l: LeakBreakdownLine): 0 | 1 | 2 | null => {
+    if (!l.countsAsLeak || NEVER_CLAIMABLE.has(l.type)) return null;
+    if (UNDECIDED.has(l.resolutionStatus)) return 2;
+    if (l.tolerated || !CLAIMABLE.has(l.resolutionStatus)) return 1; // tolerated accept, or rejected
+    return 0;
+  };
+  const ranked = inv.lines
+    .map((l) => ({ l, tier: tierOf(l) }))
+    .filter((x): x is { l: LeakBreakdownLine; tier: 0 | 1 | 2 } => x.tier !== null && !claimed?.has(x.l.discrepancyId))
+    .sort(
+      (x, y) =>
+        x.tier - y.tier ||
+        (x.l.createdAt ?? '').localeCompare(y.l.createdAt ?? '') ||
+        x.l.discrepancyId.localeCompare(y.l.discrepancyId),
+    );
+  const capAg = Math.max(0, Math.round(inv.leakIls * 100));
+  let usedAg = 0;
+  for (const { l, tier } of ranked) {
     // Never claim more on an invoice than its capped leak.
-    const amount = Math.min(Math.abs(l.deltaAmount), Math.max(0, inv.leakIls - invClaimed));
-    if (amount <= 0) continue;
-    invClaimed += amount;
-    out.push({ line: l, amount, basis: vatBasisOf(l.type), undecided: UNDECIDED.has(l.resolutionStatus) });
+    const ag = Math.min(Math.abs(Math.round(l.deltaAmount * 100)), Math.max(0, capAg - usedAg));
+    if (ag <= 0) continue;
+    usedAg += ag;
+    if (tier === 1) continue; // a waiver holds its share of the cap, never asked back
+    out.push({ line: l, amount: ag / 100, basis: vatBasisOf(l.type), undecided: tier === 2 });
   }
   return out;
 }

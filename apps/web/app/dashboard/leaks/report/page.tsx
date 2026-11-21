@@ -336,9 +336,7 @@ export default async function LeakReportPage({
                   {t('report.resolvedNote', { amount: ils(resolvedIls), items: resolvedItems })}
                 </p>
               ) : null}
-              {report.capAdjustmentIls > 0 ? (
-                <p className="mt-1 text-xs text-muted">{t('report.capNoteShort', { amount: ils(report.capAdjustmentIls) })}</p>
-              ) : null}
+              {/* G-14 Q3: the status tiles are the capped ledger states (found = the hero) — no cap note here; the by-type note stays. */}
             </section>
 
             {/* By type */}

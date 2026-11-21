@@ -31,13 +31,18 @@ function referenceLetterLines(inv: LeakBreakdownInvoice): Array<{ id: string; am
   const out: Array<{ id: string; amount: number }> = [];
   if (inv.pendingLink) return out;
   let invClaimed = 0;
-  // G-14 Q3: the leak ledger's tier order — decided lines take the cap first, then undecided.
-  const undecided = (l: LeakBreakdownLine) => l.resolutionStatus === 'open' || l.resolutionStatus === 'escalated';
-  for (const l of [...inv.lines.filter((x) => !undecided(x)), ...inv.lines.filter(undecided)]) {
-    if (!l.countsAsLeak || !REF_CLAIMABLE.has(l.resolutionStatus)) continue;
-    const amount = Math.min(Math.abs(l.deltaAmount), Math.max(0, inv.leakIls - invClaimed));
+  // G-14 Q3: the leak ledger's tiers — decided claims, then waivers (rejected: they hold their
+  // share of the cap, never emitted), then undecided; inside a tier (created_at, id).
+  const tier = (l: LeakBreakdownLine) =>
+    l.resolutionStatus === 'open' || l.resolutionStatus === 'escalated' ? 2 : REF_CLAIMABLE.has(l.resolutionStatus) ? 0 : 1;
+  const ordered = inv.lines
+    .filter((l) => l.countsAsLeak)
+    .sort((x, y) => tier(x) - tier(y) || x.discrepancyId.localeCompare(y.discrepancyId));
+  for (const l of ordered) {
+    const amount = Math.min(Math.abs(l.deltaAmount), Math.max(0, Math.round((inv.leakIls - invClaimed) * 100) / 100));
     if (amount <= 0) continue;
-    invClaimed += amount;
+    invClaimed = Math.round((invClaimed + amount) * 100) / 100;
+    if (tier(l) === 1) continue;
     out.push({ id: l.discrepancyId, amount });
   }
   return out;
@@ -178,11 +183,11 @@ describe('W2-03 claims rule — a paid invoice keeps its claims', () => {
       line({ discrepancyId: 'e', resolutionStatus: 'escalated', deltaAmount: 5 }),
       line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 5 }),
     ];
-    // G-14 Q3: decided lines come first (they take the cap first).
+    // G-14 Q3: decided lines come first (they take the cap first); inside a tier (created_at, id).
     expect(claimableLines(invoice({ lines, leakIls: 15 })).map((c) => [c.line.discrepancyId, c.undecided])).toEqual([
       ['a', false],
-      ['o', true],
       ['e', true],
+      ['o', true],
     ]);
   });
 
@@ -216,6 +221,41 @@ describe('W2-03 M5 — the one claimable rule (shared with recovery CLAIMABLE_FI
   it('a resolved claim is a credit to ask for in the pay run, not a hold', () => {
     const inv = invoice({ lines: [line({ discrepancyId: 'r', resolutionStatus: 'resolved', deltaAmount: 30 })], leakIls: 30 });
     expect(payRunStatusOf(inv)).toMatchObject({ status: 'claim', creditIls: 30, pendingIls: 0 });
+  });
+});
+
+describe('G-14 Q3 — claimableLines splits the cap in the leak ledger\'s tiers', () => {
+  it('a waiver (rejected / tolerated) holds its share of the cap; undecided gets only what is left', () => {
+    const inv = invoice({
+      leakIls: 8,
+      lines: [
+        line({ discrepancyId: 'rej', resolutionStatus: 'rejected', deltaAmount: 4 }),
+        line({ discrepancyId: 'open', resolutionStatus: 'open', deltaAmount: 5 }),
+      ],
+    });
+    expect(claimableLines(inv).map((c) => [c.line.discrepancyId, c.amount, c.undecided])).toEqual([['open', 4, true]]);
+    expect(payRunStatusOf(inv)).toMatchObject({ pendingIls: 4, creditIls: 0 });
+    const tol = invoice({
+      leakIls: 8,
+      lines: [
+        line({ discrepancyId: 'tol', resolutionStatus: 'accepted', deltaAmount: 4, tolerated: true }),
+        line({ discrepancyId: 'open', resolutionStatus: 'open', deltaAmount: 5 }),
+      ],
+    });
+    expect(claimableLines(tol).map((c) => c.amount)).toEqual([4]);
+  });
+  it('inside a tier the order is (created_at, id), not |Δ|', () => {
+    const inv = invoice({
+      leakIls: 10,
+      lines: [
+        line({ discrepancyId: 'z', resolutionStatus: 'accepted', deltaAmount: 9, createdAt: '2026-10-02T00:00:00.000Z' }),
+        line({ discrepancyId: 'y', resolutionStatus: 'accepted', deltaAmount: 6, createdAt: '2026-10-01T00:00:00.000Z' }),
+      ],
+    });
+    expect(claimableLines(inv).map((c) => [c.line.discrepancyId, c.amount])).toEqual([
+      ['y', 6],
+      ['z', 4],
+    ]);
   });
 });
 
