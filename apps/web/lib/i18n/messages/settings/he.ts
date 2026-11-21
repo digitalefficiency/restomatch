@@ -149,7 +149,7 @@ export const he = {
     railCollapsed: 'מכווץ',
     keysTitle: 'קיצורים בתו אחד',
     keysQueue: 'בתור האישורים',
-    keysSearch: 'לחיפוש',
+    keysMenu: 'לתפריט',
     ctrlNote: 'צירופים עם {mod} נשארים פעילים תמיד',
     reset: 'חזרה לברירת המחדל',
     sr: {

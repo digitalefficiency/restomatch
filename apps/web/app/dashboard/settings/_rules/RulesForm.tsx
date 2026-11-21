@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Lock } from 'lucide-react';
-import { Button, NumberField, StatusChip, cn, useAnnounce, useToast } from '@/lib/components';
+import {
+  Button,
+  NumberField,
+  StatusChip,
+  StatusDot,
+  cn,
+  useAnnounce,
+  useToast,
+} from '@/lib/components';
 import { TOAST_MS } from '@/lib/components/Toast';
 import { DateTime, Money } from '@/lib/components/money';
 import { useLocale, useT } from '@/lib/i18n/client';
@@ -309,9 +317,14 @@ export function RulesForm({
       return <StatusChip tone="info" label={t('thresholds.unsaved')} />;
     }
     return fields.some((f) => offDefault(saved, f)) ? (
-      <StatusChip tone="info" label={t('thresholds.custom')} icon={null} />
+      <StatusChip tone="info" label={t('thresholds.custom')} />
     ) : (
-      <StatusChip tone="neutral" label={t('thresholds.default')} icon={null} />
+      // A neutral pill that is not pending: a dot, not the clock (StatusChip's T4 default).
+      <StatusChip
+        tone="neutral"
+        label={t('thresholds.default')}
+        icon={<StatusDot tone="neutral" size="sm" />}
+      />
     );
   };
 

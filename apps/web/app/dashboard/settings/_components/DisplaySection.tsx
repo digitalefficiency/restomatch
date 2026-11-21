@@ -132,8 +132,8 @@ export function DisplaySection({ initialRail }: { initialRail: boolean }) {
                   {/* Key caps are decorative (shared Kbd): the keys are said once, in words. */}
                   <span className="sr-only">J, K, 1, 2, Z</span>
                   <Kbd>J</Kbd> <Kbd>K</Kbd> <Kbd>1</Kbd> <Kbd>2</Kbd> <Kbd>Z</Kbd>{' '}
-                  {t('display.keysQueue')}, <span className="sr-only">/</span>
-                  <Kbd>/</Kbd> {t('display.keysSearch')}
+                  {t('display.keysQueue')}, <span className="sr-only">[</span>
+                  <Kbd>[</Kbd> {t('display.keysMenu')}
                 </span>
               }
             />
