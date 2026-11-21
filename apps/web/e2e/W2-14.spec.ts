@@ -135,7 +135,8 @@ test('settings: one h1, the approval rules in force with ₪ and a default/custo
   await shot(page, 'settings-he-1440');
   expect(await seriousAxe(page)).toEqual([]);
   await page.goto('/dashboard/settings?s=account');
-  await expect(page.getByRole('heading', { name: 'טלפון נייד' })).toBeVisible();
+  // The phone is a row of "חשבון" now (its anchor is the old #phone), no longer a section heading.
+  await expect(page.locator('[data-setting-row="phone"]')).toContainText('טלפון נייד');
   // VAT is read-only + "שנו…".
   await page.goto('/dashboard/settings?s=restaurant');
   await expect(page.getByTestId('vat-readonly')).toContainText('%');

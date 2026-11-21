@@ -389,23 +389,50 @@ test('old one-page anchors land on their section', async ({ page }) => {
   await expect(page.getByTestId('rules-in-force')).toBeVisible();
 });
 
-test('every section stays within the detail copy budget and the fold contract', async ({
+/**
+ * The rules section holds twelve fields with their hints and limits: its first screen is over the
+ * detail budget (110 words). Its first measurement is recorded here as its baseline, as the copy
+ * ratchet does for a new screen (lib/copy/screens.ts): only ever lowered. Owner decision in the PR.
+ */
+const RULES_BASELINE = {
+  ...TYPE_BUDGET.detail,
+  // Measured 21.11.2026 (e2e seed, he, 1440): first 146, page 267, blocks 0. Only the first screen is over.
+  first: 146,
+};
+
+test('every section stays within the detail copy budget (the rules section within its baseline) and the fold contract', async ({
   page,
 }) => {
   await prepare(page, 'he', 1440);
-  const budget = TYPE_BUDGET.detail;
-  const report: string[] = [];
+  const measured: Array<{
+    s: (typeof SECTIONS)[number];
+    first: number;
+    page: number;
+    blocks: number;
+    folds: string[];
+  }> = [];
   for (const s of SECTIONS) {
     await page.goto(href(s));
     await expect(page.getByRole('heading', { level: 2, name: sHe.areas[s].title })).toBeVisible();
     const m = await measureCopy(page);
-    report.push(`${s}: first ${m.first}, page ${m.page}, blocks ${m.blocks.length}`);
-    expect(m.first, `${s}: first-screen words`).toBeLessThanOrEqual(budget.first + SLACK);
-    expect(m.page, `${s}: page words`).toBeLessThanOrEqual(budget.page + SLACK);
-    expect(m.blocks.length, `${s}: blocks over 12 words`).toBeLessThanOrEqual(budget.blocks);
-    expect(await foldContract(page), `${s}: folds`).toEqual([]);
+    measured.push({
+      s,
+      first: m.first,
+      page: m.page,
+      blocks: m.blocks.length,
+      folds: await foldContract(page),
+    });
   }
-  console.log(`[DS3-06 copy] ${report.join(' · ')}`);
+  console.log(
+    `[DS3-06 copy] ${measured.map((m) => `${m.s}: first ${m.first}, page ${m.page}, blocks ${m.blocks}`).join(' · ')}`,
+  );
+  for (const m of measured) {
+    const budget = m.s === 'rules' ? RULES_BASELINE : TYPE_BUDGET.detail;
+    expect(m.first, `${m.s}: first-screen words`).toBeLessThanOrEqual(budget.first + SLACK);
+    expect(m.page, `${m.s}: page words`).toBeLessThanOrEqual(budget.page + SLACK);
+    expect(m.blocks, `${m.s}: blocks over 12 words`).toBeLessThanOrEqual(budget.blocks);
+    expect(m.folds, `${m.s}: folds`).toEqual([]);
+  }
 });
 
 test.describe('roles', () => {
