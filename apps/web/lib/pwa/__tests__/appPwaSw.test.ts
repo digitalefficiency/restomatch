@@ -144,6 +144,16 @@ describe('share target without a worker (server fallback)', () => {
   });
 });
 
+describe('app-wide scope leaves other navigations alone (W3-03b)', () => {
+  it('only receiving navigations are answered by the worker', async () => {
+    const w = await loadWorker();
+    const nav = (path: string) => w.run('fetch', { request: { url: ORIGIN + path, method: 'GET', mode: 'navigate' } });
+    expect(await nav('/dashboard/chain')).toBeNull();
+    expect(await nav('/dashboard/approvals?x=1')).toBeNull();
+    expect(await nav('/dashboard/receivingx')).toBeNull();
+  });
+});
+
 describe('push + notification click (W3-03b)', () => {
   it('shows the notification and sets the app badge', async () => {
     const w = await loadWorker();

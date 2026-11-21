@@ -223,7 +223,10 @@ self.addEventListener('fetch', (event) => {
   }
   // Page navigations: always the network (this worker never stores page HTML);
   // offline, the page's own snapshot of that page, else the static offline page.
-  if (req.mode === 'navigate') {
+  // Only the receiving pages (W2-05's offline shell). Since the scope is app-wide
+  // (W3-03b), every other navigation is left to the browser untouched, so its
+  // real status (403 in-shell forbidden, 404) reaches the page as before.
+  if (req.mode === 'navigate' && (url.pathname === '/dashboard/receiving' || url.pathname.startsWith('/dashboard/receiving/'))) {
     event.respondWith(fetch(req).catch(() => offlineNavigation(url)));
   }
   // Everything else (API, tRPC, scans, RSC payloads) is not intercepted.
