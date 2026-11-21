@@ -29,9 +29,9 @@ export async function readDeviceHints(): Promise<DeviceHints> {
 }
 
 /**
- * Server entry of the display preferences: reads the `rm_display` cookie and
- * the device hints and renders `PrefsProvider`, so the first HTML already
- * carries the device's density, text size and shortcut choice (no flash).
+ * Server entry of the display preferences: reads the `rm_density` and `rm_text`
+ * cookies (./schema.ts) and the device hints and renders `PrefsProvider`, so the
+ * first HTML already carries the device's density and text size (no flash).
  * Mount it once, around the whole dashboard shell (apps/web/app/dashboard/
  * layout.tsx, DS3-02), inside NavProvider; `role` may be omitted there (the
  * provider reads the viewer).
