@@ -122,7 +122,9 @@ test.describe(`DS3-07 · the UI face (${FAMILY})`, () => {
     await setLang(page, 'he');
     await page.goto('/dashboard');
     await settle(page);
-    const widths = await page.evaluate((weights) => {
+    const widths = await page.evaluate(async ({ weights, family }) => {
+      // Load the face at every weight first: a face with a file per weight (Plex) loads 500/600 on demand.
+      await Promise.all(weights.map((w) => document.fonts.load(`${w} 40px "${family}"`, '0123456789')));
       const host = document.createElement('div');
       document.querySelector('main')!.appendChild(host);
       const measure = (text: string, cls: string, weight: number) => {
@@ -142,7 +144,7 @@ test.describe(`DS3-07 · the UI face (${FAMILY})`, () => {
         tabularNums: runs.map((t) => measure(t, 'tabular-nums', w)),
         plain: runs.map((t) => measure(t, '', w)),
       }));
-    }, WEIGHTS);
+    }, { weights: WEIGHTS, family: FAMILY });
     const spread = (xs: number[]) => Math.max(...xs) - Math.min(...xs);
     for (const w of widths) {
       expect(spread(w.num), `.num digits at ${w.weight}: ${w.num.join(', ')}`).toBeLessThanOrEqual(0.5);
