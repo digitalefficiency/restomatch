@@ -173,7 +173,7 @@ function SpotBody({
       <div className="mt-auto flex flex-col gap-2 pt-1">
         {askAll ? (
           <p role="alert" className="flex items-center gap-2 rounded-card border border-warn-subtle bg-warn-subtle px-3 py-1.5 text-body-sm text-ink" data-testid="spot-fill-all">
-            <span className="h-2 w-2 shrink-0 rounded-pill bg-warn-bold" aria-hidden="true" />
+            <span className="h-2 w-2 shrink-0 rounded-pill border-[1.5px] border-warn-dot-ring bg-warn-dot" aria-hidden="true" />
             {td('delivery.dock.spot.fillAll')}
           </p>
         ) : null}
@@ -217,7 +217,7 @@ function SpotBody({
                       onEnter(i);
                     }
                   }}
-                  className="num h-full w-20 bg-transparent text-center text-metric-md font-medium text-ink caret-primary outline-none placeholder:text-body placeholder:font-normal placeholder:text-muted focus-visible:!outline-none"
+                  className="num h-full w-24 bg-transparent text-center text-metric-md font-medium text-ink caret-primary outline-none placeholder:text-body placeholder:font-normal placeholder:text-muted focus-visible:!outline-none"
                   data-testid="spot-qty"
                 />
                 {u ? <span className="text-body text-muted">{u}</span> : null}

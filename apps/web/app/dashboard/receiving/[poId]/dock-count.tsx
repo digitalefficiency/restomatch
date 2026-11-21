@@ -259,8 +259,9 @@ export function DockCount({
       {readOnly ? null : (
         <ActionBar testId="count-actions">
           {status || onPhoto || doc !== 'none' ? (
-            <div className="flex min-h-14 items-center gap-2">
-              <div className="flex min-w-0 flex-1 items-center gap-2" data-testid={undo ? 'mark-rest-undo' : undefined}>
+            // Wraps when a long label (a receiver language) would squeeze the status: the camera then takes its own line.
+            <div className="flex min-h-14 flex-wrap items-center gap-x-2 gap-y-1">
+              <div className="flex min-w-[10rem] flex-1 items-center gap-2" data-testid={undo ? 'mark-rest-undo' : undefined}>
                 <p
                   id="count-status-text"
                   role={status?.tone === 'warn' ? 'alert' : 'status'}
@@ -384,7 +385,7 @@ function MainButton({
 function DocButton({ doc, onPhoto, td }: { doc: DocState; onPhoto?: () => void; td: TD }) {
   if (doc !== 'none') {
     return (
-      <span className="inline-flex min-h-12 shrink-0 items-center gap-2 rounded-pill border border-primary-subtle bg-primary-subtle px-4 text-body font-medium text-primary" data-testid="count-doc" data-doc={doc}>
+      <span className="inline-flex min-h-12 shrink-0 items-center gap-2 rounded-pill border border-ok-subtle bg-ok-subtle px-4 text-body font-medium text-ok" data-testid="count-doc" data-doc={doc}>
         {doc === 'queued' ? <CloudOff className="h-5 w-5" aria-hidden="true" /> : <Check className="h-5 w-5" strokeWidth={3} aria-hidden="true" />}
         {doc === 'queued' ? td('delivery.dock.doc.queued') : td('delivery.dock.doc.done')}
       </span>
@@ -464,9 +465,9 @@ function CountRow({
           aria-label={state === 'gap' ? td('delivery.dock.aria.gapFor', { name }) : td('delivery.count.arrivedFor', { name })}
           className={`inline-flex h-16 w-16 shrink-0 items-center justify-center rounded-pill border-2 transition-colors duration-short ease-standard ${
             state === 'ok'
-              ? 'border-primary-subtle bg-primary-subtle text-primary'
+              ? 'border-ok-subtle bg-ok-subtle text-ok'
               : state === 'gap'
-                ? 'border-warn-bold bg-warn-bold text-on-bold'
+                ? 'border-warn-dot-ring bg-warn-dot text-ink'
                 : 'border-ink bg-surface text-line-strong active:bg-surface-2'
           }`}
           data-testid="count-arrived"

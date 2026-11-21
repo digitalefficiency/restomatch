@@ -180,6 +180,37 @@ export function dockGaps(result: ReconciliationResult | null, marks: Record<stri
   return out;
 }
 
+const CONDITIONS = ['ok', 'damaged', 'rejected'] as const;
+const REASONS = ['missing', 'damaged'] as const;
+const METHODS = ['per_line', 'bulk_as_ordered', 'spot_check'] as const;
+
+/**
+ * A mark kept on this phone before its receipt existed (flag `dockCountFirst`),
+ * read back from the browser's storage. Nothing stored is taken as it is: the
+ * count must be a finite, non-negative number and every other field picks one
+ * of the model's own values (a tampered or stale value falls back to the
+ * default); the line's identity always comes from the order on screen. Returns
+ * null when there is no count to restore.
+ */
+export function restoredMark(base: LineMark, saved: unknown): LineMark | null {
+  if (!saved || typeof saved !== 'object') return null;
+  const s = saved as Record<string, unknown>;
+  if (s.touched !== true) return null;
+  const amount = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 1e7 ? roundQty(v) : null);
+  const qtyReceived = amount(s.qtyReceived);
+  if (qtyReceived === null) return null;
+  return {
+    ...base,
+    qtyReceived,
+    qtyRejected: amount(s.qtyRejected) ?? 0,
+    condition: CONDITIONS.find((c) => c === s.condition) ?? 'ok',
+    rejectReason: REASONS.find((r) => r === s.rejectReason) ?? null,
+    method: METHODS.find((m) => m === s.method) ?? 'per_line',
+    touched: true,
+    unconfirmed: false,
+  };
+}
+
 /**
  * Whether closing first shows the short check. A clean receipt closes in one
  * tap, as today. A gap always shows it. The photo is asked about only when the

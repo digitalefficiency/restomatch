@@ -37,7 +37,7 @@ export function DockKeypad({
           aria-label={k === 'del' ? labels.del : k === '.' ? labels.point : undefined}
           data-key={k}
           // 64 px on an 844 px phone, 56 on a 667 px one: the whole sheet, note included, fits without moving a key.
-          className="num inline-flex h-[clamp(3.5rem,7.6dvh,4rem)] select-none items-center justify-center rounded-card border border-line-strong bg-surface-2 text-metric-md font-medium text-ink transition-colors duration-micro ease-standard active:bg-neutral-subtle-hover disabled:border-transparent disabled:bg-transparent disabled:text-subtle"
+          className="num inline-flex h-[clamp(3.5rem,7.6dvh,4rem)] select-none items-center justify-center rounded-card border border-line-strong bg-surface-2 text-metric-md font-medium text-ink transition-colors duration-micro ease-standard active:bg-surface-hover disabled:border-transparent disabled:bg-transparent disabled:text-subtle"
         >
           {k === 'del' ? <Delete className="h-6 w-6" aria-hidden="true" /> : k}
         </button>

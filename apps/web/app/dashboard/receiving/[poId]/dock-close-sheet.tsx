@@ -57,7 +57,7 @@ export function DockCloseSheet({
               <Button size="xl" variant="secondary" onClick={onClose} className={PHONE_CTA} data-testid="close-nodoc">
                 {td('delivery.dock.actions.closeNoDoc')}
               </Button>
-              <Button size="lg" variant="tertiary" onClick={onBack} data-testid="close-back">
+              <Button size="lg" variant="tertiary" onClick={onBack} className="min-h-12" data-testid="close-back">
                 {td('delivery.dock.actions.backToCount')}
               </Button>
             </>

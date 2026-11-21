@@ -52,7 +52,7 @@ import { clearCloseKey, closeKeyFor, uncountedLinesOf } from './_closeKey';
 import { SUBMIT_RECEIPT_KIND, receiptGroup, type SubmitReceiptPayload } from '@/lib/pwa/fieldOutbox';
 import { enqueue, idbOutboxStore, outboxKey } from '@/lib/pwa/outbox';
 import { ReceiptSummary } from './receipt-summary';
-import { dockGaps } from './_dock';
+import { dockGaps, restoredMark } from './_dock';
 import type { DocState } from './dock-close-sheet';
 import { DockCount } from './dock-count';
 import { DockDone } from './dock-done';
@@ -428,19 +428,24 @@ export function ReceivingWizard({
   // A reload before the receipt could start (no signal at the first mark): the marks come back, and it starts.
   useEffect(() => {
     if (!countFirstStart) return;
-    let saved: Record<string, LineMark> = {};
+    let saved: unknown = {};
     try {
-      saved = JSON.parse(window.localStorage.getItem(preCountKey) ?? '{}') as Record<string, LineMark>;
+      saved = JSON.parse(window.localStorage.getItem(preCountKey) ?? '{}');
     } catch {
       saved = {};
     }
-    const keys = Object.keys(saved).filter((k) => marksRef.current[k]);
-    if (keys.length === 0) return;
+    if (!saved || typeof saved !== 'object') return;
+    // Only lines of this order, and only a valid count of each (restoredMark): nothing stored is taken as it is.
     const next = { ...marksRef.current };
-    for (const k of keys) {
-      next[k] = { ...next[k]!, ...saved[k]! };
+    let restored = 0;
+    for (const k of Object.keys(next)) {
+      const m = restoredMark(next[k]!, (saved as Record<string, unknown>)[k]);
+      if (!m) continue;
+      next[k] = m;
       adjustedKeysRef.current.add(k);
+      restored += 1;
     }
+    if (restored === 0) return;
     setMarks(next);
     setResumed(true);
     void startCountReceipt();

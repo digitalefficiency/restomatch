@@ -11,6 +11,7 @@ import {
   needsCloseCheck,
   orderedForCount,
   qtyAgrees,
+  restoredMark,
   rowNote,
   rowState,
 } from '../_dock';
@@ -231,5 +232,39 @@ describe('the check before closing and the end screen (DS3-05)', () => {
     expect(needsCloseCheck({ gaps: 0, photographed: true, countFirst: true })).toBe(false);
     expect(needsCloseCheck({ gaps: 1, photographed: true, countFirst: false })).toBe(true);
     expect(needsCloseCheck({ gaps: 0, photographed: false, countFirst: true })).toBe(true);
+  });
+});
+
+describe('a count kept on the phone before its receipt existed (DS3-05, flag dockCountFirst)', () => {
+  const a = line({ id: 'a' });
+  const base = fresh(a);
+
+  it('restores a valid count with its condition and method', () => {
+    const m = restoredMark(base, { touched: true, qtyReceived: 8, qtyRejected: 0, condition: 'damaged', rejectReason: 'damaged', method: 'per_line' });
+    expect(m).toMatchObject({ qtyReceived: 8, condition: 'damaged', rejectReason: 'damaged', method: 'per_line', touched: true, unconfirmed: false });
+  });
+
+  it('takes nothing stored as it is: identity from the order, unknown values back to the defaults', () => {
+    const m = restoredMark(base, {
+      touched: true,
+      qtyReceived: 4.12345,
+      condition: '<img src=x onerror=alert(1)>',
+      rejectReason: 'gone',
+      method: 'whatever',
+      productName: 'משהו אחר',
+      poLineId: 'other',
+    });
+    expect(m).toMatchObject({ qtyReceived: 4.123, condition: 'ok', rejectReason: null, method: 'per_line' });
+    expect(m?.productName).toBe(base.productName);
+    expect(m?.poLineId).toBe(base.poLineId);
+  });
+
+  it('restores nothing without a real count', () => {
+    expect(restoredMark(base, null)).toBeNull();
+    expect(restoredMark(base, 'x')).toBeNull();
+    expect(restoredMark(base, { touched: false, qtyReceived: 3 })).toBeNull();
+    expect(restoredMark(base, { touched: true, qtyReceived: '5' })).toBeNull();
+    expect(restoredMark(base, { touched: true, qtyReceived: -1 })).toBeNull();
+    expect(restoredMark(base, { touched: true, qtyReceived: Number.NaN })).toBeNull();
   });
 });

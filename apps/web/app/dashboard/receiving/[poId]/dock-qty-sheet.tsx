@@ -185,7 +185,7 @@ export function DockQtySheet({
         <div className="mt-auto flex flex-col gap-2 pt-1">
           {note ? (
             <p id={noteId} role="status" className="flex items-center gap-2 rounded-card border border-warn-subtle bg-warn-subtle px-3 py-1.5 text-body-sm text-ink" data-testid="count-tolerance">
-              <span className="h-2 w-2 shrink-0 rounded-pill bg-warn-bold" aria-hidden="true" />
+              <span className="h-2 w-2 shrink-0 rounded-pill border-[1.5px] border-warn-dot-ring bg-warn-dot" aria-hidden="true" />
               <span>
                 {note.kind === 'double'
                   ? td('delivery.dock.sheet.double', { ordered: shown(note.ordered) })

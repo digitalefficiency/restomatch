@@ -88,7 +88,7 @@ export function DockDone({
   return (
     <div dir={dir} className="mx-auto w-full max-w-xl py-2" data-testid="receipt-confirmed" data-queued={closeQueued ? 'true' : 'false'}>
       <div className="mb-4 flex items-start gap-3">
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-pill border border-primary-subtle bg-primary-subtle text-primary">
+        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-pill border border-ok-subtle bg-ok-subtle text-ok">
           <Check className="h-7 w-7" strokeWidth={3} aria-hidden="true" />
         </span>
         <div className="min-w-0">
@@ -171,7 +171,7 @@ export function DockDone({
           {resetLabel}
         </Button>
         {onList && listLabel ? (
-          <Button size="lg" variant="tertiary" onClick={onList} data-testid="confirmed-list">
+          <Button size="lg" variant="tertiary" onClick={onList} className="min-h-12" data-testid="confirmed-list">
             {listLabel}
           </Button>
         ) : null}
