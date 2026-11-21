@@ -28,9 +28,10 @@ export const ramp = {
   /** Paper, steel and ink (D5: no warm paper; the clean neutrals are a hair less green than DS2's). */
   neutral: {
     0: '#FFFFFF',
-    // HELD at DS2's value until packages/api/src/__tests__/price-creep-digest.test.ts:124 stops pinning
-    // the literal (it reads this role through the e-mail); then SPEC §2's #F8FBF9 (see `held` in semantic.ts).
-    25: '#F6F8F7', // canvas
+    // Five copies outside the package carry this value (WORKPLAN DS3-00, seam 1: the themeColor in
+    // apps/web/app/layout.tsx, the PWA manifest, global-error.tsx, ReceiverPwa.tsx, the og route); change
+    // them with it. The price-creep digest's test checks the e-mail's canvas against this literal.
+    25: '#F8FBF9', // canvas
     50: '#F1F5F3', // sunken
     75: '#EBF0ED', // hover
     150: '#E2E8E5', // rule

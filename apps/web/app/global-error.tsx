@@ -40,7 +40,7 @@ export default function GlobalError({
           fontFamily: 'system-ui, -apple-system, "Segoe UI", Rubik, Arial, sans-serif',
           color: '#0F1F17',
           background:
-            'radial-gradient(ellipse 90% 55% at 50% -10%, rgba(6,107,74,0.05), transparent 60%), #F6F8F7',
+            'radial-gradient(ellipse 90% 55% at 50% -10%, rgba(6,107,74,0.05), transparent 60%), #F8FBF9',
         }}
       >
         <div

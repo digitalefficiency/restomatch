@@ -1,7 +1,7 @@
 /* @tokens:start — GENERATED from packages/ui-tokens; do not edit by hand.
    Regenerate: pnpm --filter @restomatch/ui-tokens tokens:css */
 :root {
-  --c-bg: 246 248 247; /* #F6F8F7 */
+  --c-bg: 248 251 249; /* #F8FBF9 */
   --c-surface: 255 255 255; /* #FFFFFF */
   --c-surface-2: 241 245 243; /* #F1F5F3 */
   --c-line: 212 219 216; /* #D4DBD8 */

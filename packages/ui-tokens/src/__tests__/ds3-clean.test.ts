@@ -71,7 +71,6 @@ const SPEC_COLOURS: Array<[prop: string, hex: string, roles: Record<string, stri
 
 /** Spec values held at today's value because a test outside packages/ui-tokens pins the literal. */
 const HELD: Record<string, { today: string; spec: string }> = {
-  '--canvas': { today: '#F6F8F7', spec: held.canvas.spec },
   '--line-strong': { today: '#7A8B82', spec: held.lineStrong.spec },
 };
 
@@ -82,24 +81,27 @@ describe('DS3 · SPEC §2 colours land on the DS2 roles', () => {
     for (const [role, value] of Object.entries(roles)) expect(value, role).toBe(want);
   });
 
-  it('held values: exactly canvas and line-strong, each pinned by a named test outside the package', () => {
-    expect(Object.keys(held).sort()).toEqual(['canvas', 'lineStrong']);
-    expect(held.canvas.pinnedBy).toMatch(/price-creep-digest\.test\.ts:\d+$/);
+  it('held values: exactly line-strong, pinned by a named test outside the package', () => {
+    expect(Object.keys(held).sort()).toEqual(['lineStrong']);
     expect(held.lineStrong.pinnedBy).toMatch(/W1-09\.spec\.ts:\d+$/);
   });
 
-  it('flipping a held value is safe: the spec value passes the same gates', () => {
+  it('the canvas is live at the spec value and every text role passes 5:1 on it', () => {
+    expect(surfaces.canvas).toBe('#F8FBF9');
     for (const fg of [text.ink, text.muted, text.subtle, status.primary.text, status.danger.text, status.warn.text, status.gold.text, status.info.text, focus]) {
-      expect(contrastRatio(fg, held.canvas.spec)).toBeGreaterThanOrEqual(5);
+      expect(contrastRatio(fg, surfaces.canvas)).toBeGreaterThanOrEqual(5);
     }
-    for (const bg of [surfaces.surface, held.canvas.spec, surfaces.sunken, surfaceV2.hover, surfaceV2.selected]) {
+  });
+
+  it('flipping a held value is safe: the spec value passes the same gates', () => {
+    for (const bg of [surfaces.surface, surfaces.canvas, surfaces.sunken, surfaceV2.hover, surfaceV2.selected]) {
       expect(contrastRatio(held.lineStrong.spec, bg)).toBeGreaterThanOrEqual(3);
     }
   });
 
   it('the generated block carries the clean values (channels)', () => {
     const css = cssVariables();
-    for (const decl of ['--c-bg: 246 248 247;', '--c-ink: 18 28 23;', '--c-focus: 34 86 187;', '--c-gold: 0 113 62;', '--c-gold-text: 0 87 59;', '--c-gold-bold: 0 113 62;', '--c-danger-dot: 221 39 41;', '--c-warn-dot-ring: 185 117 0;', '--c-surface-hover: 235 240 237;']) {
+    for (const decl of ['--c-bg: 248 251 249;','--c-ink: 18 28 23;', '--c-focus: 34 86 187;', '--c-gold: 0 113 62;', '--c-gold-text: 0 87 59;', '--c-gold-bold: 0 113 62;', '--c-danger-dot: 221 39 41;', '--c-warn-dot-ring: 185 117 0;', '--c-surface-hover: 235 240 237;']) {
       expect(css).toContain(decl);
     }
   });

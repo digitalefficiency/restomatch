@@ -14,14 +14,13 @@ import { activeDirection } from './directions';
 import { ramp } from './primitives';
 
 /**
- * SPEC §2 values that DS3-00 could not land yet: a test outside the token package pins today's
- * literal. Each is invisible at a glance (ΔL < 1 %) and passes every contrast gate either way
- * (ds3-clean.test.ts proves it). Once its owner reads the token instead of the literal, a flip is:
- * the step in primitives.ts, `pnpm --filter @restomatch/ui-tokens fixtures:record`, its row out of
- * ds3-clean's HELD table, `tokens:css`; for the canvas also the five copies WORKPLAN DS3-00 names.
+ * SPEC §2 values that DS3-00 has not landed yet: a test outside the token package pins today's
+ * literal. Invisible at a glance (ΔL < 1 %) and passes every contrast gate either way
+ * (ds3-clean.test.ts proves it). WORKPLAN DS3-00 seam 3 lets DS3-00 change the literal in the same
+ * commit as the step in primitives.ts; then `pnpm --filter @restomatch/ui-tokens fixtures:record`,
+ * its row out of ds3-clean's HELD table, and `tokens:css`.
  */
 export const held = {
-  canvas: { spec: '#F8FBF9', pinnedBy: 'packages/api/src/__tests__/price-creep-digest.test.ts:124' },
   lineStrong: { spec: '#808984', pinnedBy: 'apps/web/e2e/W1-09.spec.ts:495' },
 } as const;
 
