@@ -438,7 +438,7 @@ export async function failOrphanedCatalogImports(sql: Sql, cutoffMinutes = CATAL
            AND (
              (i.status IN ('pending', 'mapped')
               AND greatest(i.created_at, coalesce((SELECT max(a.at) FROM audit_log a
-                    WHERE a.entity_type = 'catalog_import' AND a.entity_id = i.id
+                    WHERE a.entity_type = 'catalog_import' AND a.entity_id = i.id AND a.restaurant_id = i.restaurant_id
                       AND a.action = 'catalog.import_chunk_committed'), i.created_at))
                   < now() - ${cutoffMinutes} * interval '1 minute')
              OR
@@ -446,9 +446,9 @@ export async function failOrphanedCatalogImports(sql: Sql, cutoffMinutes = CATAL
               -- once: never again after its finalize job ran (done or failed)
               AND NOT EXISTS (SELECT 1 FROM job_queue f WHERE f.queue = 'import-catalog'
                                 AND f.dedupe_key = 'import-catalog:finalize:' || i.id::text)
-              AND EXISTS (SELECT 1 FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.entity_id = i.id
+              AND EXISTS (SELECT 1 FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.entity_id = i.id AND a.restaurant_id = i.restaurant_id
                             AND a.action = 'catalog.import_chunk_committed')
-              AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.entity_id = i.id
+              AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.entity_id = i.id AND a.restaurant_id = i.restaurant_id
                                 AND a.action IN ('catalog.import_committed', 'catalog.import_reverted')))
            )
          ORDER BY i.created_at, i.id

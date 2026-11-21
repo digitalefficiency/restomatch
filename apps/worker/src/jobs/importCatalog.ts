@@ -57,7 +57,7 @@ async function importRecords(db: Database, restaurantId: string, importId: strin
     select action, (after -> 'chunk' ->> 'index')::int as idx, (after -> 'chunk' ->> 'size')::int as size,
            (after -> 'chunk' ->> 'count')::int as count
       from audit_log
-     where restaurant_id = ${restaurantId} and entity_id = ${importId}::uuid
+     where entity_type = 'catalog_import' and entity_id = ${importId}::uuid and restaurant_id = ${restaurantId}
        and action in (${IMPORT_CHUNK_AUDIT_ACTION}, ${COMMITTED}, ${REVERTED})
   `)) as unknown as Array<{ action: string; idx: number | null; size: number | null; count: number | null }>;
   const chunks = recs.filter((r) => r.action === IMPORT_CHUNK_AUDIT_ACTION);
@@ -139,7 +139,7 @@ export async function commitImportInChunks(
           select coalesce(sum((after ->> 'created')::int), 0)::int as created,
                  coalesce(sum((after ->> 'updated')::int), 0)::int as updated
             from audit_log
-           where restaurant_id = ${restaurantId} and entity_id = ${importId}::uuid
+           where entity_type = 'catalog_import' and entity_id = ${importId}::uuid and restaurant_id = ${restaurantId}
              and action = ${IMPORT_CHUNK_AUDIT_ACTION}
         `)) as unknown as Array<{ created: number; updated: number }>;
         await tx

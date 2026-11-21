@@ -308,3 +308,35 @@ describe('round 5 nits · the finalize sweep', () => {
     expect(n.length).toBe(1);
   });
 });
+
+describe('round 5 nits · the finalize sweep looks past imports already finalized', () => {
+  it('101 older failed imports whose finalize job already failed do not crowd a newer orphan out of the LIMIT', async () => {
+    const seeded = await qsql<Array<{ id: string }>>`
+      WITH imp AS (
+        INSERT INTO catalog_imports (restaurant_id, supplier_id, filename, status, created_at)
+        SELECT ${restaurantId}::uuid, ${supplierId}::uuid, 'old.csv', 'failed', now() - interval '2 days' - g * interval '1 second'
+          FROM generate_series(1, 101) g
+        RETURNING id
+      ), chunk AS (
+        INSERT INTO audit_log (restaurant_id, action, entity_type, entity_id, after)
+        SELECT ${restaurantId}::uuid, 'catalog.import_chunk_committed', 'catalog_import', id, '{}'::jsonb FROM imp
+      )
+      INSERT INTO job_queue (queue, payload, restaurant_id, status, dedupe_key, max_attempts, attempts, finished_at)
+      SELECT 'import-catalog', jsonb_build_object('importId', id, 'finalize', true), ${restaurantId}::uuid, 'failed',
+             'import-catalog:finalize:' || id::text, 3, 3, now()
+        FROM imp
+      RETURNING id`;
+    expect(seeded).toHaveLength(101);
+    const orphan = await newImport(five);
+    await db
+      .update(catalogImports)
+      .set({ createdAt: new Date(Date.now() - 2 * 3_600_000) })
+      .where(eq(catalogImports.id, orphan.importId));
+
+    expect(await failOrphanedCatalogImports(qsql)).toBe(1);
+    expect((await importRow(orphan.importId)).status).toBe('failed');
+    const fin = await qsql<Array<{ payload: CatalogImportJob }>>`
+      SELECT payload FROM job_queue WHERE queue = 'import-catalog' AND status = 'queued' AND payload ->> 'finalize' = 'true'`;
+    expect(fin.map((f) => f.payload.importId)).toEqual([orphan.importId]);
+  });
+});

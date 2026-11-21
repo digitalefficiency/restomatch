@@ -32,7 +32,7 @@ import {
   type CatalogImportMapping,
   type ParsedTable,
 } from '../catalog/parse';
-import { commitCatalogRows, lockSupplierCatalog, samePack, storedBasis } from '../catalog/commit';
+import { commitCatalogRows, lockSupplierCatalog, samePack, sameUnitOrBlank, storedBasis } from '../catalog/commit';
 import { revertCatalogImport } from '../catalog/revert';
 import { anyOpenImport, expireStaleImports, importActiveSql } from '../catalog/importLifecycle';
 import { catalogUnitPrice, cheapestComparable } from '../lib/unitPrice';
@@ -359,7 +359,7 @@ export const catalogRouter = router({
         const basisMoved =
           row != null &&
           basis != null &&
-          ((basis.unit ?? null) !== (row.unit ?? null) || !samePack(basis.packSize, row.packSize));
+          (!sameUnitOrBlank(basis.unit, row.unit) || !samePack(basis.packSize, row.packSize));
         const fileSilent = (!columns.unit || r.unit == null) && (!columns.packSize || r.packSize == null);
         return {
           rowNumber: r.rowNumber,
@@ -382,7 +382,10 @@ export const catalogRouter = router({
         };
       });
       const flagged = priced.filter((r) => r.flag != null);
-      // Over ALL rows, not the 20 shown (round 5): how many change their unit / pack.
+      // Over ALL rows, not the 20 shown (round 5): how many change their unit / pack
+      // (a spelling-only unit rewrite is no change). Accepted difference: a key
+      // listed twice in one file is judged here against today's row each time,
+      // while the commit applies the rows in order.
       const basisChangedCount = priced.filter((r) => r.basis?.change === 'changed').length;
       return {
         headers: table.headers,

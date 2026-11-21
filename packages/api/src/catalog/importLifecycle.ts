@@ -77,8 +77,9 @@ export async function finalizeFailedImport(
       .from(auditLog)
       .where(
         and(
-          eq(auditLog.restaurantId, restaurantId),
+          eq(auditLog.entityType, 'catalog_import'),
           eq(auditLog.entityId, importId),
+          eq(auditLog.restaurantId, restaurantId),
           inArray(auditLog.action, [IMPORT_CHUNK_AUDIT_ACTION, IMPORT_COMMITTED_AUDIT_ACTION, 'catalog.import_reverted']),
         ),
       );

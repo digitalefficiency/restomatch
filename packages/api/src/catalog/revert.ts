@@ -126,7 +126,12 @@ export async function revertCatalogImport(
     await lockSupplierCatalog(tx as unknown as Database, rid, supplierId);
 
     const scoped = (actions: string[]) =>
-      and(eq(auditLog.restaurantId, rid), inArray(auditLog.action, actions), eq(auditLog.entityId, importId));
+      and(
+        eq(auditLog.entityType, 'catalog_import'),
+        eq(auditLog.entityId, importId),
+        eq(auditLog.restaurantId, rid),
+        inArray(auditLog.action, actions),
+      );
     const records = await tx
       .select({ action: auditLog.action, after: auditLog.after })
       .from(auditLog)

@@ -80,7 +80,7 @@ export function storedBasis(
   if (!existing) return { unit: row.unit, packSize: packString(row.packSize) };
   if (row.listPrice == null) return { unit: existing.unit, packSize: existing.packSize };
   const unit = columns.unit && row.unit != null ? row.unit : existing.unit;
-  const unitChanged = unit == null || existing.unit == null ? unit !== existing.unit : !sameUnit(unit, existing.unit);
+  const unitChanged = !sameUnitOrBlank(unit, existing.unit);
   const packSize =
     columns.packSize && row.packSize != null ? packString(row.packSize) : unitChanged ? null : existing.packSize;
   return { unit, packSize };
@@ -603,9 +603,10 @@ export async function recordImportSummary(
       .from(auditLog)
       .where(
         and(
+          eq(auditLog.entityType, 'catalog_import'),
+          eq(auditLog.entityId, args.importId),
           eq(auditLog.restaurantId, args.restaurantId),
           eq(auditLog.action, IMPORT_CHUNK_AUDIT_ACTION),
-          eq(auditLog.entityId, args.importId),
         ),
       )
   )
@@ -617,7 +618,7 @@ export async function recordImportSummary(
   // written later at finalize must not rank as the supplier's latest import.
   const [maxChunk] = (await db.execute(sql`
     select max((after ->> 'lockedAt')::timestamptz)::text as t from audit_log
-     where restaurant_id = ${args.restaurantId} and entity_id = ${args.importId}::uuid
+     where entity_type = 'catalog_import' and entity_id = ${args.importId}::uuid and restaurant_id = ${args.restaurantId}
        and action = ${IMPORT_CHUNK_AUDIT_ACTION}
   `)) as unknown as Array<{ t: string | null }>;
   const lockedAt = maxChunk?.t ?? lockTime;
@@ -762,11 +763,16 @@ export function samePack(a: string | null, b: string | null): boolean {
   return n(a) === n(b);
 }
 
+/** One unit (sameUnit: יח' = יח׳), or both none. A spelling-only difference is no change (round 5). */
+export function sameUnitOrBlank(a: string | null, b: string | null): boolean {
+  return a == null || b == null ? a == null && b == null : sameUnit(a, b);
+}
+
 /** Would writing `b` over `a` change anything stored? */
 export function sameSnapshot(a: ItemSnapshot, b: ItemSnapshot): boolean {
   return (
     samePrice(a.listPrice, b.listPrice) &&
-    (a.unit ?? null) === (b.unit ?? null) &&
+    sameUnitOrBlank(a.unit, b.unit) &&
     samePack(a.packSize, b.packSize) &&
     (a.productId ?? null) === (b.productId ?? null) &&
     a.active === b.active &&
