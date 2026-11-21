@@ -11,8 +11,8 @@
  *
  * DS3-00's roles are read by name: the brighter indicator of a dot or a bar (`*-dot`: SPEC §2
  * `--leak-solid`, `--warn-solid` with its 3:1 ring `--warn-ring`, `--ok-solid`), and `ok`, the T3
- * family by meaning (leaf green, SPEC §2 `--ok`, `--ok-sub`, `--ok-bd`). Families without an
- * indicator (info) draw with their text colour. No hex, size or shadow is written here: roles only.
+ * family by meaning (leaf green, SPEC §2 `--ok`, `--ok-sub`, `--ok-bd`). Every family has its dot; the dot
+ * roles exist for fills, strokes, rings and borders only (never text). No hex, size or shadow here: roles only.
  */
 export type Tone = 'leak' | 'warn' | 'ok' | 'info' | 'neutral';
 export type PillTone = Tone | 'solid';
@@ -32,7 +32,7 @@ export const DOT_TONE: Record<PillTone, string> = {
   leak: 'bg-danger-dot',
   warn: 'bg-warn-dot',
   ok: 'bg-ok-dot',
-  info: 'bg-info',
+  info: 'bg-info-dot',
   neutral: 'bg-neutral-dot',
   solid: 'bg-on-bold',
 };
