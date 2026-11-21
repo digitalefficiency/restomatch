@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, ChevronsUpDown, Lock, MoreHorizontal } from 'lucide
 import { useLocale } from '@/lib/i18n/client';
 import { formatDate } from '@/lib/i18n/format';
 import { formatIls } from '@/lib/money';
+import { tableDensity, usePrefs } from '@/lib/prefs';
 import { cn } from '../cn';
 import { Skeleton } from '../Skeleton';
 import { Peek } from '../desk/Peek';
@@ -43,6 +44,7 @@ export interface DataTableProps<Row> {
   /** Server-computed totals (count + Σ agorot); the totals row shows these, never a page sum. */
   totals?: TableTotals & { columnId: string };
   pageSize?: number;
+  /** Row density. Omit it to follow the device's display preference (DS3-06; the role's default until a choice is made). */
   density?: Density;
   status?: 'ready' | 'loading' | 'error';
   onRetry?: () => void;
@@ -112,7 +114,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     defaultSort,
     totals,
     pageSize = 50,
-    density: densityProp = 'default',
+    density: densityProp,
     status = 'ready',
     onRetry,
     filtered,
@@ -144,7 +146,12 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   selectedRef.current = selected;
 
   const sort = state.sort && columns.some((c) => c.id === state.sort!.id && c.sortable !== false) ? state.sort : defaultSort;
-  const density = state.density ?? densityProp;
+  // DS3-06's display preference (lib/prefs): with no `density` from the caller the table follows the
+  // device's choice, and with no choice the role's default (D4: the bookkeeper's tables are compact).
+  // An explicit prop still wins, and the URL override `d` wins over both (shareable, as before).
+  const prefs = usePrefs();
+  const baseDensity: Density = densityProp ?? tableDensity(prefs.density);
+  const density = state.density ?? baseDensity;
   const visibleIds = state.cols ?? columns.filter((c) => !c.defaultHidden).map((c) => c.id);
   const visibleKey = visibleIds.join(',');
   const visible = useMemo(
@@ -421,7 +428,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       <div className="min-w-0 flex-1">{toolbar}</div>
       {!mobile ? (
         <div className="flex items-center gap-2 pb-1">
-          <DensityMenu value={density} onChange={(d) => update({ density: d === densityProp ? null : d })} />
+          <DensityMenu value={density} onChange={(d) => update({ density: d === baseDensity ? null : d })} />
           <ColumnsMenu columns={columns} visible={visibleIds} onChange={(cols) => update({ cols })} />
           <ExportMenu onCsv={exportCsv} />
         </div>

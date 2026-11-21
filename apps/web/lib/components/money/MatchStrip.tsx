@@ -118,8 +118,11 @@ export function MatchStrip({
       aria-label={spoken}
       data-match-strip=""
       data-off={off ?? undefined}
-      className={cn('num flex max-w-full items-stretch overflow-hidden rounded-control border border-line-rule bg-surface', className)}
+      className={cn('num flex max-w-full flex-wrap items-stretch overflow-hidden rounded-control border border-line-rule bg-surface', className)}
     >
+      {/* The figures stay on one line; the unit and the gap follow them, or take a second line when
+          the strip is narrower than its content (a phone, a side panel), instead of overlapping. */}
+      <span className="flex shrink-0 items-stretch">
       {cells.map((c, i) => {
         const isOff = off === c.key;
         return (
@@ -149,18 +152,31 @@ export function MatchStrip({
           </span>
         );
       })}
-      {unitText ? (
-        <span aria-hidden className="flex items-center whitespace-nowrap border-s border-line-rule pe-1 ps-2.5 text-body-sm text-fg-secondary">
-          {unitText}
-        </span>
-      ) : null}
-      {gapNode ? (
+      </span>
+      {unitText || gapNode ? (
         <span
-          aria-hidden={gapText ? true : undefined}
-          data-gap=""
-          className={cn('me-2.5 ms-auto self-center whitespace-nowrap ps-2 text-body-sm font-semibold [&_[data-money-figure]]:text-fg', TEXT_TONE[tone])}
+          data-strip-tail=""
+          className={cn(
+            // -1 px on the start and top: beside the figures the start border is the separator and the top
+            // border hides under the frame; on a line of its own the start border hides and the top one shows.
+            '-ms-px -mt-px flex min-w-0 grow items-center border-s border-t border-line-rule py-1',
+            off && off === cells[cells.length - 1]?.key && 'border-s-transparent',
+          )}
         >
-          {gapNode}
+          {unitText ? (
+            <span aria-hidden className="whitespace-nowrap pe-1 ps-2.5 text-body-sm text-fg-secondary">
+              {unitText}
+            </span>
+          ) : null}
+          {gapNode ? (
+            <span
+              aria-hidden={gapText ? true : undefined}
+              data-gap=""
+              className={cn('me-2.5 ms-auto whitespace-nowrap ps-2 text-body-sm font-semibold [&_[data-money-figure]]:text-fg', TEXT_TONE[tone])}
+            >
+              {gapNode}
+            </span>
+          ) : null}
         </span>
       ) : null}
     </div>

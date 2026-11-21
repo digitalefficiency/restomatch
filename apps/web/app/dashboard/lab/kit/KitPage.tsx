@@ -61,9 +61,11 @@ import { kitCopy, type KitCopy } from './_copy';
 
 type KitDensity = 'regular' | 'compact';
 
+type SupplierKey = 'sharon' | 'steinberg' | 'kerem' | 'med';
+
 interface GapRow {
   id: string;
-  supplier: string;
+  supplier: SupplierKey;
   invoice: string;
   kind: 'overbilled' | 'price';
   blocks: boolean;
@@ -73,10 +75,10 @@ interface GapRow {
 
 /** The reference's demo gaps (docs/ux/ds3 kit "טבלה"); lab data, not a record. */
 const GAPS: GapRow[] = [
-  { id: 'g1', supplier: 'ירקות השרון', invoice: 'SH-24121', kind: 'overbilled', blocks: true, due: '14.11.2026', gapAgorot: 3870 },
-  { id: 'g2', supplier: 'משקאות שטיינברג', invoice: 'ST-24108', kind: 'price', blocks: true, due: '20.11.2026', gapAgorot: 10480 },
-  { id: 'g3', supplier: 'קצביית הכרם', invoice: 'HK-24108', kind: 'price', blocks: false, due: '18.11.2026', gapAgorot: 10000 },
-  { id: 'g4', supplier: 'דגי הים התיכון', invoice: 'MF-24108', kind: 'price', blocks: false, due: '19.11.2026', gapAgorot: 5250 },
+  { id: 'g1', supplier: 'sharon', invoice: 'SH-24121', kind: 'overbilled', blocks: true, due: '14.11.2026', gapAgorot: 3870 },
+  { id: 'g2', supplier: 'steinberg', invoice: 'ST-24108', kind: 'price', blocks: true, due: '20.11.2026', gapAgorot: 10480 },
+  { id: 'g3', supplier: 'kerem', invoice: 'HK-24108', kind: 'price', blocks: false, due: '18.11.2026', gapAgorot: 10000 },
+  { id: 'g4', supplier: 'med', invoice: 'MF-24108', kind: 'price', blocks: false, due: '19.11.2026', gapAgorot: 5250 },
 ];
 
 /** Cumulative leak per day (the reference's pace line, in shekels). */
@@ -140,7 +142,7 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
 
   const columns = useMemo<ColumnDef<GapRow>[]>(
     () => [
-      { id: 'supplier', header: d.colSupplier, identity: true, value: (r) => r.supplier },
+      { id: 'supplier', header: d.colSupplier, identity: true, value: (r) => d.suppliers[r.supplier] },
       { id: 'invoice', header: d.colInvoice, value: (r) => r.invoice, cell: (r) => <bdi className="text-fg-secondary">{r.invoice}</bdi> },
       { id: 'kind', header: d.colKind, value: (r) => (r.kind === 'overbilled' ? d.kindOverbilled : d.kindPrice) },
       {
@@ -388,6 +390,22 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
           </CalculationFold>
         </KitCard>
 
+        <KitCard id="kit-answer" title={c.cards.answer} note={c.notes.answer}>
+          <DataAnswer
+            question={d.question}
+            figures={[
+              { value: <Money value={760} context="tile" split />, caption: d.leakSince },
+              { value: <Money value={296} context="tile" split />, caption: d.unpaid },
+            ]}
+            facts={[d.checked, d.openGaps]}
+            action={
+              <Button variant="secondary" size="sm">
+                {d.toDecision}
+              </Button>
+            }
+          />
+        </KitCard>
+
         <KitCard id="kit-states" title={c.cards.states} note={c.notes.states} wide>
           <div className="grid gap-4 md:grid-cols-3">
             <div aria-busy="true" aria-label={d.loadingLabel}>
@@ -408,22 +426,6 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
               }
             />
           </div>
-        </KitCard>
-
-        <KitCard id="kit-answer" title={c.cards.answer} note={c.notes.answer}>
-          <DataAnswer
-            question={d.question}
-            figures={[
-              { value: <Money value={760} context="tile" split />, caption: d.leakSince },
-              { value: <Money value={296} context="tile" split />, caption: d.unpaid },
-            ]}
-            facts={[d.checked, d.openGaps]}
-            action={
-              <Button variant="secondary" size="sm">
-                {d.toDecision}
-              </Button>
-            }
-          />
         </KitCard>
 
         <KitCard id="kit-charts" title={c.cards.charts} note={c.notes.charts} wide>
@@ -504,7 +506,7 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
         <KitCard id="kit-controls" title={c.cards.controls} note={c.notes.controls}>
           <div className="grid gap-3">
             <Field label={d.fieldLabel} hint={d.fieldHint}>
-              <Input defaultValue="ירקות השרון" />
+              <Input defaultValue={d.suppliers.sharon} />
             </Field>
             <Switch checked={shortcuts} onCheckedChange={setShortcuts} label={d.switchLabel} hint={d.switchHint} />
             <Field label={d.numberLabel}>

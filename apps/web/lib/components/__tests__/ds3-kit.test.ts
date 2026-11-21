@@ -82,7 +82,7 @@ describe('<Money> in the clean finish (SPEC §3)', () => {
       const html = render(h(Money, { value: 1104.8, context: 'line', split: true }), locale);
       expect(textOf(html)).toBe(formatIls(1104.8, { maximumFractionDigits: 2, locale }));
       expect(html).toMatch(/<span data-money="cur" class="[^"]*text-fg-tertiary[^"]*">₪<\/span>/);
-      expect(html).toMatch(/<span data-money="dec" class="text-fg-tertiary">\.80<\/span>/);
+      expect(html).toMatch(/<span data-money="dec" class="text-fg-tertiary[^"]*">\.80<\/span>/);
       expect(html).toContain('max(0.74em,var(--fs-caption))');
       expect(html).not.toMatch(/dir=/);
     }
@@ -96,6 +96,16 @@ describe('<Money> in the clean finish (SPEC §3)', () => {
     expect(green).toContain('text-primary');
     expect(green).not.toContain('text-fg-tertiary');
     expect(render(h(Money, { value: 296, context: 'line', split: true, quietParts: false }))).not.toContain('text-fg-tertiary');
+  });
+
+  it('split: inside a filled ancestor the quiet parts take the fill\'s word colour (never grey on a fill)', () => {
+    const html = render(h('span', { className: 'bg-primary-bold text-on-bold' }, h(Money, { value: 152.5, context: 'line', split: true })));
+    const cls = (part: string) => (html.match(new RegExp(`<span data-money="${part}" class="([^"]*)"`))?.[1] ?? '').split('&amp;').join('&');
+    const [cur, dec] = [cls('cur'), cls('dec')];
+    for (const cls of [cur, dec]) {
+      expect(cls).toContain('[.text-on-bold_&]:text-inherit');
+      expect(cls).toContain('[.text-on-primary_&]:text-inherit');
+    }
   });
 
   it('a money figure is never red, in any state', () => {
