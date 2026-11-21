@@ -2,6 +2,11 @@
 // `lib/components/data-viz` (PaceLine, SplitBar, PACE_BOX, PaceSeries): import them from there.
 export { LeakHero } from './LeakHero';
 export type { LeakHeroLink, LeakHeroPart, LeakHeroProps } from './LeakHero';
+export { HeroAmount } from './HeroAmount';
+export type { HeroAmountProps } from './HeroAmount';
+export { HeroFold, useFold, useHeroFoldOpen, useHeroFoldOpened } from './HeroFold';
+export type { Fold } from './HeroFold';
+export { PacePlaceholder } from './PacePlaceholder';
 export {
   DAY_MS,
   HERO_CTA_CLASS,
