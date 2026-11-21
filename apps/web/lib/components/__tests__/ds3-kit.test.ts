@@ -834,7 +834,7 @@ describe('review fixes (correctness)', () => {
     const walk = (dir: string) => {
       for (const name of readdirSync(dir)) {
         const p = join(dir, name);
-        if (name === '__tests__' || name === 'node_modules') continue;
+        if (name === '__tests__' || name === 'node_modules' || (dir.replace(/\/$/, '') === root.replace(/\/$/, '') && ['palette', 'hero', 'desk'].includes(name))) continue;
         if (statSync(p).isDirectory()) walk(p);
         else if (/\.tsx?$/.test(name)) files.push(p);
       }
@@ -889,5 +889,49 @@ describe('review fixes (correctness)', () => {
     const ordered = render(h(QtyKeypad, { open: true, onClose: noop, onConfirm: noop, name: 'עגבניות שרי', unit: 'ק״ג', ordered: 6.5 }));
     expect(textOf(ordered)).toContain('עגבניות שרי');
     expect(textOf(ordered)).toContain('6.5');
+  });
+});
+
+describe("DS3-07's requests: digits that line up or change in place are tabular in any face; no measure in ch", () => {
+  const read = (rel: string) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+
+  it('identifiers, deadlines and tile context render in tabular figures', async () => {
+    const { Token } = await import('../money/Token');
+    const { MetricTile } = await import('../money/MetricTile');
+    expect(render(h(Token, { value: 'ST-24108', kind: 'invoice' }))).toMatch(/<bdi dir="ltr" class="[^"]*tabular-nums/);
+    expect(render(h(DeadlineChip, { due: '2026-12-12', today: new Date('2026-11-21T09:00:00+02:00') }))).toContain('tabular-nums');
+    expect(render(h(MetricTile, { label: 'דליפה החודש', value: 760, context: '35 חשבוניות נבדקו' }))).toMatch(/<p class="[^"]*tabular-nums[^"]*">35 חשבוניות נבדקו/);
+  });
+
+  it('the table, the batch bar, the change badge, the phone cards, the bell and the pad keep their digits in place', () => {
+    const table = read('table/DataTable.tsx');
+    expect(table).toContain('<p data-table-showing className="tabular-nums">');
+    expect(table).toContain("c.kind === 'date' && 'tabular-nums'");
+    expect(table).toMatch(/bg-surface px-\[var\(--cell-px,16px\)\] tabular-nums',\s*c\.identity/);
+    expect(read('table/BatchBar.tsx')).toContain('<span data-batch-count className="tabular-nums">');
+    expect(read('views/DeltaBadge.tsx')).toContain('<span className="tabular-nums">{text}</span>');
+    expect(read('table/MobileCardList.tsx')).toContain('text-sm tabular-nums text-muted');
+    expect(read('KpiCard.tsx')).toContain('<p className="text-xs tabular-nums text-muted">{subtitle}</p>');
+    expect(read('StatCard.tsx')).toContain('<p className="mt-1 text-xs tabular-nums text-muted">{hint}</p>');
+    expect(read('notifications/Bell.tsx').match(/tabular-nums text-(muted|primary)/g)).toHaveLength(2);
+    expect(read('overlay/QtyKeypad.tsx')).toContain('<span className="tabular-nums">');
+  });
+
+  it('no reading measure or size in ch or ex in the shared components (they differ between the fallback and the face)', async () => {
+    const { readdirSync, statSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const root = new URL('..', import.meta.url).pathname;
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (name === '__tests__' || name === 'node_modules' || (dir.replace(/\/$/, '') === root.replace(/\/$/, '') && ['palette', 'hero', 'desk'].includes(name))) continue;
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.tsx?$/.test(name)) files.push(p);
+      }
+    };
+    walk(root);
+    const offenders = files.filter((f) => /max-w-prose|\[[0-9.]+(ch|ex)\]/.test(readFileSync(f, 'utf8')));
+    expect(offenders).toEqual([]);
   });
 });

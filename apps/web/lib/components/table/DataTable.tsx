@@ -364,6 +364,8 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
         className={cn(
           'px-[var(--cell-px,16px)]',
           num && NUM_ALIGN,
+          // Dates line up down the column in any face (DS3-07: digits outside the number role can be proportional).
+          c.kind === 'date' && 'tabular-nums',
           c.identity
             ? cn('sticky z-10 start-0 min-w-[200px] max-w-[320px] bg-inherit', selectable && 'start-10')
             : 'whitespace-nowrap',
@@ -439,7 +441,9 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
 
   const footer = (
     <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-sm text-muted">
-      <p data-table-showing>{copy.showing(win.from, win.to, sorted.length)}</p>
+      <p data-table-showing className="tabular-nums">
+        {copy.showing(win.from, win.to, sorted.length)}
+      </p>
       {win.pages > 1 ? (
         <nav aria-label={copy.pager} className="flex items-center gap-1">
           <button
@@ -722,7 +726,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
                     <td
                       key={c.id}
                       className={cn(
-                        'sticky bottom-0 z-20 whitespace-nowrap border-t-4 border-double border-fg bg-surface px-[var(--cell-px,16px)]',
+                        'sticky bottom-0 z-20 whitespace-nowrap border-t-4 border-double border-fg bg-surface px-[var(--cell-px,16px)] tabular-nums',
                         c.identity && cn('z-30 start-0', selectable && 'start-10'),
                       )}
                     >
