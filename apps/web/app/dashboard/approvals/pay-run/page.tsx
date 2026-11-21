@@ -12,6 +12,7 @@ import { displayName } from '../vocab';
 import { PayRunExport } from './export-button';
 import { PayRunSelection, RowCheck } from './selection';
 import { localMonth, localYmd } from './dates';
+import { BranchStrip } from '../../chain/branch-strip';
 
 type ListResult = Awaited<
   ReturnType<Awaited<ReturnType<typeof createServerCaller>>['payRun']['list']>
@@ -263,6 +264,9 @@ export default async function PayRunPage({
           ) : undefined
         }
       />
+
+      {/* W3-01: the per-branch strip (chain owners / bookkeepers with 2+ branches only). */}
+      <BranchStrip kind="payRun" then="/dashboard/approvals/pay-run" />
 
       {/* All open / this invoice month / last invoice month. */}
       <nav
