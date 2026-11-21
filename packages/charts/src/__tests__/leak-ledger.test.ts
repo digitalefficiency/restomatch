@@ -399,6 +399,17 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
     const [sup] = (await db.execute(sql`SELECT supplier_id FROM invoices WHERE id = ${a.invoiceId}`)) as unknown as Array<{
       supplier_id: string;
     }>;
+    // Schema-tolerant: G-03 / H-03 (0071) already create payment_deductions (with a NO ACTION FK
+    // to invoices); H-04 will add payments / payment_invoices. Create only the missing tables;
+    // afterwards delete just this test's rows from a table a migration owns (FK order), and drop
+    // only the tables this test created.
+    const tableExists = async (name: string) =>
+      ((await db.execute(sql`SELECT to_regclass(${`public.${name}`}) IS NOT NULL AS ok`)) as unknown as Array<{ ok: boolean }>)[0]!
+        .ok;
+    const PAYMENT_TABLES = ['payment_deductions', 'payment_invoices', 'payments'] as const; // FK order (children first)
+    const existed = Object.fromEntries(
+      await Promise.all(PAYMENT_TABLES.map(async (t) => [t, await tableExists(t)] as const)),
+    ) as Record<(typeof PAYMENT_TABLES)[number], boolean>;
     await db.execute(sql`CREATE TABLE IF NOT EXISTS payments (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), restaurant_id uuid NOT NULL, supplier_id uuid NOT NULL,
       paid_on date NOT NULL, amount_agorot bigint NOT NULL)`);
@@ -435,9 +446,10 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
       expect(by[c.invoiceId]).toMatchObject({ invoicePaid: false, paidAt: null });
       expect(by[e.invoiceId]).toMatchObject({ invoicePaid: true, paidAt: '2026-10-13T21:00:00.000Z' });
     } finally {
-      await db.execute(sql`DROP TABLE IF EXISTS payment_deductions`);
-      await db.execute(sql`DROP TABLE IF EXISTS payment_invoices`);
-      await db.execute(sql`DROP TABLE IF EXISTS payments`);
+      for (const t of PAYMENT_TABLES) {
+        if (existed[t]) await db.execute(sql`DELETE FROM ${sql.identifier(t)} WHERE restaurant_id = ${rid}`);
+        else await db.execute(sql`DROP TABLE IF EXISTS ${sql.identifier(t)}`);
+      }
     }
   });
 
