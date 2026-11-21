@@ -433,11 +433,11 @@ describe('loading, empty, error (kit "טעינה, ריק, שגיאה")', () => {
     expect(html).not.toMatch(/danger/);
   });
 
-  it('a delayed skeleton waits a second before it fades in (CSS only, server-safe)', async () => {
+  it('a delayed skeleton waits (SPEC §9: one second, on a DS3-00 motion token) before it fades in (CSS only, server-safe)', async () => {
     const { Skeleton } = await import('../Skeleton');
     const html = render(h(Skeleton, { variant: 'card', delayed: true }));
     expect(html).toContain('[@starting-style]:opacity-0');
-    expect(html).toContain('delay-1000');
+    expect(html).toContain('[transition-delay:var(--dur-skeleton-wait,0ms)]');
     expect(render(h(Skeleton, { variant: 'card' }))).not.toContain('starting-style');
   });
 });
@@ -523,7 +523,7 @@ describe('tabs, filters and controls (kit "לשוניות ומסננים", SPEC 
     const html = render(h(Tooltip, { label: 'הגדרות', kbd: 'G S' }, h('button', { 'aria-label': 'הגדרות' }, 'x')));
     expect(html).toMatch(/<span aria-hidden="true" class="invisible absolute/);
     expect(html).toContain('bg-fg');
-    expect(html).toContain('group-hover/tip:delay-500');
+    expect(html).toContain('group-hover/tip:[transition-delay:var(--dur-tooltip-rest,0ms)]');
     expect(html).toContain('<kbd');
   });
 });
@@ -826,6 +826,24 @@ describe('review fixes (fidelity to the reference)', () => {
 });
 
 describe('review fixes (correctness)', () => {
+  it('no time value outside the tokens: no delay from Tailwind\'s default scale in the shared components', async () => {
+    const { readdirSync, statSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const root = new URL('..', import.meta.url).pathname;
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (name === '__tests__' || name === 'node_modules') continue;
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.tsx?$/.test(name)) files.push(p);
+      }
+    };
+    walk(root);
+    const offScale = files.filter((f) => /\bdelay-(75|100|150|200|300|500|700|1000)\b/.test(readFileSync(f, 'utf8')));
+    expect(offScale).toEqual([]);
+  });
+
   it('a change shown as ₪0 is no change: never "עלייה של ₪0" with an arrow; the basis stays in the sentence', async () => {
     const { Delta } = await import('../money/Delta');
     const tiny = render(h(Delta, { change: { agorot: 40, share: null }, goodWhen: 'down' }));
