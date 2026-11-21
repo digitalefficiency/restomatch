@@ -23,6 +23,8 @@ export const he = {
     chef: 'ספירה ועלות מנות.',
     receiver: 'המשאית הבאה למעלה, אחריה כל השאר.',
   },
+  /** The owner home's context line under the title (DS3 §10.1): "יום שבת, 21.11.2026" (Israel time). */
+  homeDate: '{weekday}, {date}',
   section: {
     failed: 'לא נטען',
     retry: 'נסו שוב',
@@ -35,39 +37,85 @@ export const he = {
     eyebrow: 'דליפה שזוהתה · {month}',
     leakedLabel: 'דליפה החודש',
     pctOfSpend: '{pct} מהקניות שנבדקו',
+    /** Beside the label, outside the h2: the hero counts from the 1st of the month. */
+    period: 'מתחילת {month}',
+    /** The scale sentence (glossary `leakBase`): "1.9% מהרכש שנבדק, מתוך ₪41,526 לפני מע״מ". */
+    pctOfChecked: 'מהרכש שנבדק',
+    /** The base after the %: it brings its own comma. */
+    pctBase: ', מתוך {spend} לפני מע״מ',
+    /** The base alone, on a thin base (no %). */
     spendBase: 'מתוך {spend} לפני מע״מ',
     noSpend: 'עדיין אין חשבוניות החודש',
     /** Split of the leak by payment status (the two parts add up to it, to the agora). */
     unpaid: 'על חשבוניות שעוד לא שולמו',
     paid: 'על חשבוניות ששולמו',
     split: 'מתוכם',
+    splitAria: 'הדליפה מתחלקת לשניים',
+    unpaidLink: 'לחשבוניות שלא שולמו',
+    paidLink: 'לבקשות הזיכוי',
+    /** One line when (almost) all of the leak sits on one side. Nothing marks payments yet: "not marked as paid". */
+    allUnpaid: 'כל הסכום על חשבוניות שלא סומנו כשולמו',
+    allUnpaidLink: 'לחשבוניות שלא סומנו כשולמו',
+    allPaid: 'כל הסכום על חשבוניות ששולמו',
     invoices: 'חשבוניות עם פער',
     invoicesValue: '{withLeak} מתוך {total}',
     invoicesLine: '{total} חשבוניות נבדקו · {withLeak} עם פער',
+    /** The foot line: "34 חשבוניות נבדקו, ב־13 מהן נמצא פער" (numbers, never formatted strings). */
+    checkedLine:
+      '{total, plural, one {חשבונית אחת נבדקה ונמצא בה פער} other {# חשבוניות נבדקו, {withLeak, plural, =0 {ולא נמצא פער} one {באחת מהן נמצא פער} other {ב־# מהן נמצא פער}}}}',
     drill: 'לחשבוניות שמאחורי {amount}',
     drillPending: 'לחשבוניות שממתינות לשיוך',
     howCalc: 'איך חישבנו?',
     more: 'עוד פעולות',
-    pending: '{count} חשבוניות ({amount}) ממתינות לשיוך להזמנה — לרוב מרכזות. עד השיוך הן לא בהוצאה.',
-    awaitingQuestion: '{count} חשבוניות ({amount}) מחכות לשאלה: זה אותו מוצר? הן ייבדקו אחרי התשובה, ולא נספרות בדליפה ולא בהוצאה.',
+    /** T4 lines (grey, a clock): what waits and is in neither the leak nor the spend. One sentence, the basis inside. */
+    pending: '{count, plural, one {חשבונית אחת ממתינה} other {# חשבוניות ממתינות}} לשיוך להזמנה: {amount} כולל מע״מ',
+    awaitingQuestion: '{count, plural, one {חשבונית אחת מחכה} other {# חשבוניות מחכות}} לתשובה אם זה אותו מוצר: {amount} כולל מע״מ',
     awaitingQuestionCta: 'לשאלות',
-    awaitingCount: '{count} חשבוניות ({amount}) ממתינות לסגירת קבלת הסחורה',
-    clean: 'אין דליפה · {count} חשבוניות נבדקו ✓',
+    awaitingCount: '{count, plural, one {חשבונית אחת ממתינה} other {# חשבוניות ממתינות}} לסגירת קבלת הסחורה: {amount} כולל מע״מ',
+    clean: 'אין דליפה · {count, plural, one {חשבונית אחת נבדקה} other {# חשבוניות נבדקו}}',
     calc: 'נספרים פערים ברמת אזהרה וחסימה, עד סכום כל חשבונית. לא נספרים: "מחיר נמוך מהמצופה", "ממתינה לשיוך להזמנה" ו"שורת הזמנה לא חויבה".',
-    thinBase: 'מוקדם לאחוז: נבדקו רק {count} חשבוניות',
+    thinBase: '{count, plural, one {מוקדם לאחוז: נבדקה רק חשבונית אחת} other {מוקדם לאחוז: נבדקו רק # חשבוניות}}',
     noData: {
       title: 'עוד לא נבדקו חשבוניות ב{month}',
       hint: 'הדליפה תחושב אחרי שחשבונית תותאם להזמנה ולקבלת הסחורה.',
       cta: 'צלמו חשבונית',
     },
+    /** The change against the same days last month, in words; the % (unsigned) follows in parentheses. */
     delta: {
+      downBy: 'ירידה של {amount}',
+      upBy: 'עלייה של {amount}',
       down: 'ירידה',
       up: 'עלייה',
       same: 'ללא שינוי',
       vs: 'לעומת {range}',
+      vsSameDays: 'לעומת אותם ימים ב{month}',
       none: 'אין נתוני השוואה',
       noneYoy: 'אין חשבוניות באותם ימים בשנה שעברה להשוואה',
     },
+    /** The pace line: legends, and the figure's name in words (never a total). */
+    pace: {
+      aria: 'הדליפה המצטברת מתחילת {month}, מול אותם ימים ב{prevMonth}. {trend}.',
+      ariaCurOnly: 'הדליפה המצטברת מתחילת {month}',
+      prev: '{month}, אותם ימים',
+      trend: {
+        up: 'החודש מעל {prevMonth}',
+        down: 'החודש מתחת ל{prevMonth}',
+        same: 'החודש כמו {prevMonth}',
+      },
+    },
+    /** "איך הגענו לסכום?" — the calculation, opened in place. */
+    calcAria: 'החישוב של הדליפה, שורה אחרי שורה',
+    calcTitle:
+      'הסכום, שורה אחרי שורה: {gaps, plural, one {פער אחד} other {# פערים}} {invoices, plural, one {בחשבונית אחת} other {ב־# חשבוניות}}',
+    calcGaps: '{count, plural, one {פער אחד} other {# פערים}}',
+    calcCap: 'בניכוי מה שמעל סכום החשבונית',
+    calcTotal: 'סך הכול, לפני עיגול לשקל',
+    calcCounted: 'נספרים פערים ברמת אזהרה וחסימה, עד סכום כל חשבונית.',
+    calcNotCounted: 'לא נספרים:',
+    calcNotDuplicate: 'חשבונית שסומנה "לא כפולה"',
+    calcLink: 'לפירוט המלא לפי חשבונית',
+    calcChanged: 'הסכום התעדכן מאז שהדף נטען',
+    calcRefreshCta: 'רענון',
     range: '{from}–{to} ב{month}',
     returned: 'הוחזר החודש',
     returnedHint: 'זיכויים שהתקבלו החודש, גם על חודשים קודמים',
