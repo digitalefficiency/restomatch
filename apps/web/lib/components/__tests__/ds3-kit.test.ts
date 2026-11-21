@@ -12,6 +12,7 @@ import { CountBadge, pillToneOf, StatusChip, StatusDot, type StatusTone } from '
 import { DeadlineChip } from '../money/DeadlineChip';
 import { EmptyState as EmptyStateComp } from '../EmptyState';
 import { MatchStrip } from '../money/MatchStrip';
+import { bellPanelEnd } from '../notifications/place';
 import { Money } from '../money/Money';
 import { moneyFigureText, moneyGlyph, moneyText, splitMoney } from '../money/format';
 import { DOT_TONE, PILL_TONE } from '../tone';
@@ -785,15 +786,38 @@ describe('review fixes (fidelity to the reference)', () => {
     expect(read('overlay/QtyKeypad.tsx')).toContain('detent="auto"');
   });
 
-  it('the top-bar bell: 36 px (44 on a phone), an 18 px glyph, an ink dot and never a count', () => {
+  it('the top-bar bell: 32 × 32 at the desk, 44 under 1024 or on touch, an 18 px glyph, an ink dot and never a count; a 384 px panel', () => {
     const src = read('notifications/Bell.tsx');
-    expect(src).toContain('size-9');
-    expect(src).toContain('[@media(pointer:coarse)]:size-11');
+    // The sidebar spec is binding on sizes (DS3 SPEC §10.4): §1.5 32 × 32, §11 44 × 44 under 1024; DS3 SPEC §5 44 px touch target.
+    expect(src).toMatch(/data-testid="bell-trigger"[\s\S]{0,700}className="relative inline-flex size-8 [^"]*max-lg:size-11 \[@media\(pointer:coarse\)\]:size-11"/);
+    expect(src).not.toMatch(/\bsize-9\b/);
     expect(src).toContain('<Icon as={BellIcon} size="bar" />');
-    expect(src).toMatch(/data-testid="bell-dot"\s+className="[^"]*size-2 rounded-full bg-fg ring-2 ring-surface/);
+    // The dot keeps its place beside the glyph at every box size: 2 px outside the 18 px glyph's corner.
+    expect(src).toMatch(/data-testid="bell-dot"\s+className="absolute end-\[calc\(50%-11px\)\] top-\[calc\(50%-11px\)\] size-2 rounded-full bg-fg ring-2 ring-surface/);
+    // §1.6: the desk panel is 384 wide (and still never wider than the window).
+    expect(src).toContain('w-[384px] max-w-[calc(100vw-2rem)]');
+    expect(src).not.toContain('w-[360px]');
     expect(src).not.toMatch(/bell-dot[\s\S]{0,400}\{cappedCount/);
     // the number is still said: it is part of the trigger's name
     expect(src).toMatch(/const label = unseen > 0 \? `\$\{t\('bell\.label'\)\}, \$\{t\('bell\.unseen', \{ count: cappedCount\(unseen, locale\) \}\)\}`/);
+  });
+
+  it('the desk panel sits below-end of the bell (sidebar SPEC §1.6), whole and inside the window', () => {
+    // Hebrew: the end edge is the left, and the panel's end edge lands on the bell's.
+    expect(bellPanelEnd({ left: 170, right: 202 }, 1440, true)).toBe(170);
+    // English: the end edge is the right.
+    expect(bellPanelEnd({ left: 1238, right: 1270 }, 1440, false)).toBe(170);
+    // Never closer than 16 px to the window's edge.
+    expect(bellPanelEnd({ left: 4, right: 36 }, 1440, true)).toBe(16);
+    // A bell far from the end still leaves the 384 px panel whole.
+    expect(bellPanelEnd({ left: 900, right: 932 }, 1100, true)).toBe(1100 - 16 - 384);
+    // A window narrower than the panel: it fills the window less the two gutters.
+    expect(bellPanelEnd({ left: 300, right: 332 }, 400, true)).toBe(16);
+    // The component places it before it shows (no jump) and again when the window resizes.
+    const src = read('notifications/Bell.tsx');
+    expect(src).toMatch(/place\(\);\s+d\.showModal\(\);/);
+    expect(src).toContain("window.addEventListener('resize', place)");
+    expect(src).toContain('anchor={trigger}');
   });
 
   it('a figure that failed to load offers its one action when there is one; otherwise the words stay', () => {
