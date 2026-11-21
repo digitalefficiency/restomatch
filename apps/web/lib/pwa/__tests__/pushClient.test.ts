@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { pushSupport, subscribeThisDevice, toInput, unsubscribeThisDevice, vapidKeyBytes, type PushEnv, type SubscriptionLike } from '../pushClient';
 
-const KEY = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U';
+// A VAPID *public* key shape (65 bytes, base64url), made at runtime: no key-like literal in the repo.
+const KEY = Buffer.from(Uint8Array.from({ length: 65 }, (_, i) => (i === 0 ? 4 : (i * 37) % 256))).toString('base64url');
 
 function fakeSub(endpoint = 'https://push.example/e1'): SubscriptionLike {
   return {
