@@ -7,16 +7,14 @@ import { cn } from '@/lib/components/cn';
 import { usePalette } from '@/lib/components/palette';
 import {
   RAIL_STORAGE,
-  SINGLE_KEYS_EVENT,
-  SINGLE_KEYS_STORAGE,
   railCookie,
   readFavourites,
-  readSingleKeys,
   safeStorage,
   writeFavourites,
-  writeSingleKeys,
 } from '../prefs';
-import { toggleFavourite as toggleFavouriteIn } from '../favourites';
+import { sanitizeFavourites, toggleFavourite as toggleFavouriteIn } from '../favourites';
+import { tokenDensity, usePrefs } from '@/lib/prefs';
+import { shellModel } from '../shellModel';
 import css from './shell.module.css';
 import { NavTooltip } from './NavTooltip';
 import { PaletteMount } from './PaletteMount';
@@ -37,6 +35,11 @@ export interface ShellUi {
   overlayOpen: boolean;
   /** Ctrl/⌘ B, `[`, the toggle, the edge, the palette: ≥ 1280 flips the rail, 1024–1279 opens or closes the overlay. */
   toggleRail: () => void;
+  /**
+   * Set the stored rail preference itself (the settings screen's "תפריט הצד": מורחב / מכווץ). It applies at
+   * ≥ 1280, with the collapse motion; below that only the choice is stored (1024–1279 always shows the rail).
+   */
+  setRail: (on: boolean) => void;
   closeOverlay: (opts?: { restoreFocus?: boolean }) => void;
   /** Register the toggle button, so closing the overlay can give it focus back. */
   toggleRef: React.MutableRefObject<HTMLButtonElement | null>;
@@ -118,20 +121,12 @@ function restoreFocus(el: HTMLElement | null) {
  */
 export function ShellFrame({
   initialRail,
-  density,
-  textSize,
   viewer,
   sidebar,
   overlays,
   children,
 }: {
   initialRail: boolean;
-  /**
-   * `data-density` / `data-text` from the preference cookies, read on the server so the first HTML is final
-   * (DS3 WORKPLAN, "Personal preferences: one contract"). The styles they drive belong to DS3-00 / DS3-01.
-   */
-  density?: 'compact' | 'default';
-  textSize?: 'regular' | 'large';
   viewer: NavViewer;
   /** The side menu (rendered first: skip link → menu → top bar → main is the Tab order). */
   sidebar: React.ReactNode;
@@ -151,7 +146,11 @@ export function ShellFrame({
   const toggleRef = useRef<HTMLButtonElement | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const openerRef = useRef<HTMLElement | null>(null);
-  const [singleKeys, setSingleKeysState] = useState(true);
+  // The single-key switch is a display preference: DS3-06's store (lib/prefs), mounted by the layout, so
+  // the account menu, the cheat sheet, the palette, the settings screen and the desk keys share one value.
+  const prefs = usePrefs();
+  const singleKeys = prefs.singleKeys;
+  const setSingleKeys = prefs.setSingleKeys;
   const [favourites, setFavourites] = useState<string[]>([]);
   const [said, setSaid] = useState('');
   const pathname = usePathname();
@@ -170,21 +169,9 @@ export function ShellFrame({
             ? 'rail'
             : 'panel';
 
-  // Per-device preferences live in localStorage (spec §7.1, §13); read after hydration.
+  // Favourites live in localStorage per role (spec §7.1, §13); read after hydration.
   useEffect(() => {
-    const s = safeStorage();
-    setSingleKeysState(readSingleKeys(s));
-    setFavourites(readFavourites(role, s));
-    const sync = (e?: Event) => {
-      if (e instanceof StorageEvent && e.key !== SINGLE_KEYS_STORAGE) return;
-      setSingleKeysState(readSingleKeys(safeStorage()));
-    };
-    window.addEventListener(SINGLE_KEYS_EVENT, sync);
-    window.addEventListener('storage', sync);
-    return () => {
-      window.removeEventListener(SINGLE_KEYS_EVENT, sync);
-      window.removeEventListener('storage', sync);
-    };
+    setFavourites(readFavourites(role, safeStorage()));
   }, [role]);
 
   const closeOverlay = useCallback((opts?: { restoreFocus?: boolean }) => {
@@ -202,15 +189,9 @@ export function ShellFrame({
     setOverlayOpen(false);
   }, [pathname]);
 
-  const toggleRail = useCallback(() => {
-    if (flat || busy.current) return;
-    const vp = viewport ?? (window.matchMedia('(min-width: 1280px)').matches ? 'wide' : window.matchMedia('(min-width: 1024px)').matches ? 'mid' : 'narrow');
-    if (vp === 'narrow') return;
-    if (vp === 'mid') {
-      setOverlayOpen((o) => !o);
-      return;
-    }
-    const next = !railRef.current;
+  // Store the rail choice and, at ≥ 1280, move to it: the words fade (80 ms), then the width closes (160 ms);
+  // expanding, the width opens (200 ms), then the words arrive (140 ms after 130 ms) — sidebar spec §10.
+  const applyRail = useCallback((next: boolean, vp: Viewport) => {
     railRef.current = next;
     try {
       document.cookie = railCookie(next, window.location.protocol === 'https:');
@@ -222,12 +203,10 @@ export function ShellFrame({
     } catch {
       /* the cookie still carries it */
     }
-    if (prefersReducedMotion()) {
+    if (vp !== 'wide' || prefersReducedMotion()) {
       setRail(next);
       return;
     }
-    // Collapse: the words fade (80 ms), then the width closes (160 ms). Expand: the width opens (200 ms),
-    // then the words arrive (140 ms after 130 ms) — sidebar spec §10.
     busy.current = true;
     setDir(next ? 'collapse' : 'expand');
     setPhase('out');
@@ -243,7 +222,32 @@ export function ShellFrame({
         next ? 220 : 300,
       );
     }, 80);
-  }, [flat, viewport]);
+  }, []);
+
+  const currentViewport = useCallback(
+    (): Viewport =>
+      viewport ?? (window.matchMedia('(min-width: 1280px)').matches ? 'wide' : window.matchMedia('(min-width: 1024px)').matches ? 'mid' : 'narrow'),
+    [viewport],
+  );
+
+  const toggleRail = useCallback(() => {
+    if (flat || busy.current) return;
+    const vp = currentViewport();
+    if (vp === 'narrow') return;
+    if (vp === 'mid') {
+      setOverlayOpen((o) => !o);
+      return;
+    }
+    applyRail(!railRef.current, vp);
+  }, [flat, currentViewport, applyRail]);
+
+  const setRailPref = useCallback(
+    (on: boolean) => {
+      if (flat || busy.current || railRef.current === on) return;
+      applyRail(on, currentViewport());
+    },
+    [flat, currentViewport, applyRail],
+  );
 
   const openMore = useCallback((opener?: HTMLElement | null) => {
     openerRef.current = opener ?? (document.activeElement as HTMLElement | null);
@@ -256,21 +260,22 @@ export function ShellFrame({
     requestAnimationFrame(() => restoreFocus(opener));
   }, []);
 
-  const setSingleKeys = useCallback((on: boolean) => {
-    setSingleKeysState(on);
-    writeSingleKeys(on, safeStorage());
-  }, []);
-
+  // A stored key the viewer can no longer open (another restaurant's flags, a renamed route) must not hold
+  // one of the five places with no star to remove it: toggle on the list the menu shows.
+  const navKeys = useMemo(() => {
+    const m = shellModel(viewer);
+    return new Set([...m.groups, ...m.footer].flatMap((g) => g.items.map((i) => i.key)));
+  }, [viewer]);
   const toggleFavourite = useCallback(
     (key: string) => {
-      const res = toggleFavouriteIn(favourites, key);
+      const res = toggleFavouriteIn(sanitizeFavourites(favourites, navKeys), key);
       if (!res.full) {
         setFavourites(res.list);
         writeFavourites(role, res.list, safeStorage());
       }
       return { added: res.added, full: res.full };
     },
-    [favourites, role],
+    [favourites, navKeys, role],
   );
 
   const announce = useCallback((text: string) => {
@@ -297,6 +302,7 @@ export function ShellFrame({
       mode,
       overlayOpen,
       toggleRail,
+      setRail: setRailPref,
       closeOverlay,
       toggleRef,
       moreOpen,
@@ -330,6 +336,7 @@ export function ShellFrame({
       mode,
       overlayOpen,
       toggleRail,
+      setRailPref,
       closeOverlay,
       moreOpen,
       openMore,
@@ -343,14 +350,17 @@ export function ShellFrame({
     ],
   );
 
+  // DS3 "Personal preferences: one contract": the shell carries density and text size from the first HTML.
+  // The values come from DS3-06's store (its provider, mounted by the layout, hands over the server's cookie
+  // snapshot), so the shell, the settings screen and the tables always agree.
   return (
     <ShellUiProvider value={value}>
       <div
         id="rm-app"
         className={cn(css.app, 'min-h-screen')}
         data-rail={rail ? 'on' : 'off'}
-        data-density={density}
-        data-text={textSize}
+        data-density={tokenDensity(prefs.appliedDensity)}
+        data-text={prefs.textSize}
         data-flat={flat ? '' : undefined}
         data-overlay={overlayOpen ? 'open' : undefined}
         data-nav-mode={viewport ? mode : undefined}

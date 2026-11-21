@@ -1,25 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  DENSITY_COOKIE,
-  TEXT_COOKIE,
-  densityAttr,
-  textAttr,
   GROUPS_STORAGE,
   RAIL_COOKIE,
   RAIL_COOKIE_MAX_AGE,
   RAIL_STORAGE,
-  SINGLE_KEYS_EVENT,
-  SINGLE_KEYS_STORAGE,
   favouritesStorageKey,
   groupsStorageKey,
   railCookie,
   readFavourites,
   readGroupState,
-  readSingleKeys,
   safeStorage,
   writeFavourites,
   writeGroupState,
-  writeSingleKeys,
   type StorageLike,
 } from '../prefs';
 import type { GroupKey } from '../types';
@@ -80,8 +72,6 @@ describe('keys and constants (spec §13)', () => {
   });
 
   it('names the new keys, per role where the spec says so', () => {
-    expect(SINGLE_KEYS_STORAGE).toBe('rm:keys:single');
-    expect(SINGLE_KEYS_EVENT).toBe('rm:keys');
     expect(RAIL_COOKIE_MAX_AGE).toBe(365 * 24 * 60 * 60);
     expect(groupsStorageKey('owner')).toBe('rm:nav:groups:owner');
     expect(groupsStorageKey('bookkeeper')).toBe('rm:nav:groups:bookkeeper');
@@ -125,11 +115,10 @@ describe('safeStorage', () => {
     vi.stubGlobal('window', { localStorage: local, dispatchEvent: () => true });
     writeGroupState('owner', { money: false });
     writeFavourites('owner', ['approvals']);
-    writeSingleKeys(false);
     expect(readGroupState('owner')).toEqual({ money: false });
     expect(readFavourites('owner')).toEqual(['approvals']);
-    expect(readSingleKeys()).toBe(false);
-    expect([...local.data.keys()].sort()).toEqual(['rm:keys:single', 'rm:nav:fav:owner', 'rm:nav:groups:owner']);
+    // The single-key switch is a display preference (DS3-06's store), never a key of this module.
+    expect([...local.data.keys()].sort()).toEqual(['rm:nav:fav:owner', 'rm:nav:groups:owner']);
   });
 
   it('turns every reader into its default and every writer into a no-op when the browser blocks storage', () => {
@@ -137,11 +126,9 @@ describe('safeStorage', () => {
     expect(() => {
       writeGroupState('owner', { money: true });
       writeFavourites('owner', ['approvals']);
-      writeSingleKeys(false);
     }).not.toThrow();
     expect(readGroupState('owner')).toBeNull();
     expect(readFavourites('owner')).toEqual([]);
-    expect(readSingleKeys()).toBe(true);
   });
 });
 
@@ -230,97 +217,5 @@ describe('readFavourites / writeFavourites', () => {
   it('never throws when storage refuses the write or is missing', () => {
     expect(() => writeFavourites('owner', ['approvals'], refusing)).not.toThrow();
     expect(() => writeFavourites('owner', ['approvals'], null)).not.toThrow();
-  });
-});
-
-describe('readSingleKeys / writeSingleKeys', () => {
-  it('is on by default and off only for "0"', () => {
-    expect(readSingleKeys(new MemoryStorage())).toBe(true);
-    expect(readSingleKeys(holding('1', SINGLE_KEYS_STORAGE))).toBe(true);
-    expect(readSingleKeys(holding('0', SINGLE_KEYS_STORAGE))).toBe(false);
-    expect(readSingleKeys(holding('false', SINGLE_KEYS_STORAGE))).toBe(true);
-    expect(readSingleKeys(holding('', SINGLE_KEYS_STORAGE))).toBe(true);
-  });
-
-  it('stays on when there is no storage or it throws', () => {
-    expect(readSingleKeys(null)).toBe(true);
-    expect(readSingleKeys()).toBe(true);
-    expect(readSingleKeys(refusing)).toBe(true);
-  });
-
-  it('writes "1" / "0"', () => {
-    const s = new MemoryStorage();
-    writeSingleKeys(false, s);
-    expect(s.data.get('rm:keys:single')).toBe('0');
-    expect(readSingleKeys(s)).toBe(false);
-    writeSingleKeys(true, s);
-    expect(s.data.get('rm:keys:single')).toBe('1');
-    expect(readSingleKeys(s)).toBe(true);
-  });
-
-  it('fires SINGLE_KEYS_EVENT on window once per write, after the write lands', () => {
-    const target = new EventTarget();
-    vi.stubGlobal('window', target);
-    const s = new MemoryStorage();
-    const seen: Array<{ type: string; isEvent: boolean; on: boolean }> = [];
-    target.addEventListener(SINGLE_KEYS_EVENT, (e) => seen.push({ type: e.type, isEvent: e instanceof Event, on: readSingleKeys(s) }));
-    writeSingleKeys(false, s);
-    writeSingleKeys(true, s);
-    expect(seen).toEqual([
-      { type: 'rm:keys', isEvent: true, on: false },
-      { type: 'rm:keys', isEvent: true, on: true },
-    ]);
-  });
-
-  it('never throws without a window or with storage that refuses the write', () => {
-    expect(() => writeSingleKeys(false)).not.toThrow();
-    expect(() => writeSingleKeys(false, refusing)).not.toThrow();
-  });
-
-  it('fires nothing when the write did not land: no storage, storage that refuses it, or blocked site data', () => {
-    const target = new EventTarget();
-    vi.stubGlobal('window', target);
-    let fired = 0;
-    target.addEventListener(SINGLE_KEYS_EVENT, () => fired++);
-    writeSingleKeys(false, null);
-    writeSingleKeys(false, refusing);
-    writeSingleKeys(false); // this window has no localStorage at all
-    expect(fired).toBe(0);
-    const dispatchEvent = vi.fn(() => true);
-    vi.stubGlobal('window', withBlockedStorage({ dispatchEvent }));
-    writeSingleKeys(false);
-    expect(dispatchEvent).not.toHaveBeenCalled();
-  });
-
-  it('lets a shell keep its in-memory switch when storage is blocked, though its listener re-reads storage', () => {
-    // ShellFrame's pattern: apply the value in memory, persist it, and re-read storage on SINGLE_KEYS_EVENT.
-    const win = withBlockedStorage(new EventTarget());
-    vi.stubGlobal('window', win);
-    let singleKeys = true;
-    win.addEventListener(SINGLE_KEYS_EVENT, () => {
-      singleKeys = readSingleKeys(safeStorage());
-    });
-    singleKeys = false;
-    writeSingleKeys(false, safeStorage());
-    expect(singleKeys).toBe(false);
-  });
-});
-
-describe('density and text size (the preferences contract)', () => {
-  it('reads the two fixed cookie names', () => {
-    expect(DENSITY_COOKIE).toBe('rm_density');
-    expect(TEXT_COOKIE).toBe('rm_text');
-  });
-
-  it('maps the density cookie onto the DS2 token modes, and anything else onto nothing', () => {
-    expect(densityAttr('compact')).toBe('compact');
-    expect(densityAttr('regular')).toBe('default');
-    for (const v of [undefined, null, '', 'touch', 'default', 'COMPACT', 'compact ']) expect(densityAttr(v)).toBeUndefined();
-  });
-
-  it('passes the text size through, and anything else onto nothing', () => {
-    expect(textAttr('large')).toBe('large');
-    expect(textAttr('regular')).toBe('regular');
-    for (const v of [undefined, null, '', 'huge', 'LARGE']) expect(textAttr(v)).toBeUndefined();
   });
 });

@@ -73,6 +73,10 @@ export const he = {
     singleKeysOn: 'הפעלת קיצורים בתו אחד',
     singleKeysOff: 'כיבוי קיצורים בתו אחד',
     shortcuts: 'קיצורי מקלדת',
+    densityCompact: 'מעבר למצב צפוף',
+    densityRegular: 'מעבר למצב רגיל',
+    textLarge: 'מעבר לטקסט גדול',
+    textRegular: 'מעבר לטקסט רגיל',
   },
 };
 
@@ -130,6 +134,10 @@ export const en: Shape<typeof he> = {
     singleKeysOn: 'Turn on single-key shortcuts',
     singleKeysOff: 'Turn off single-key shortcuts',
     shortcuts: 'Keyboard shortcuts',
+    densityCompact: 'Switch to compact density',
+    densityRegular: 'Switch to regular density',
+    textLarge: 'Switch to large text',
+    textRegular: 'Switch to regular text',
   },
 };
 

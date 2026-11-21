@@ -6,8 +6,9 @@ import type { GroupKey } from './types';
 /**
  * Per-device nav preferences (sidebar spec §7.1, §13). The rail lives in a
  * cookie so the server renders the sidebar at its final width (no shift), and
- * localStorage mirrors it. Group state, favourites and the single-key switch
- * are localStorage only: server-side pins would be a schema change.
+ * localStorage mirrors it. Group state and favourites are localStorage only:
+ * server-side pins would be a schema change. Density, text size and the
+ * single-key switch are display preferences: DS3-06's store (`@/lib/prefs`).
  *
  * Storage access can throw (site data blocked, a full quota, some private
  * modes), and a nav preference must never break the page, so every storage
@@ -32,40 +33,6 @@ export const RAIL_STORAGE = 'rm:nav:rail';
  */
 export const GROUPS_STORAGE = 'rm:nav:groups';
 
-/**
- * The "קיצורים בתו אחד" switch (`1` / `0`; missing = on). One of the personal
- * preferences whose names are fixed for every package (DS3 WORKPLAN, "Personal
- * preferences: one contract"): DS3-06's store wraps this key; until it lands
- * the shell reads and writes the raw key.
- */
-export const SINGLE_KEYS_STORAGE = 'rm:keys:single';
-
-/**
- * Density and text size, the contract's two cookies (values `regular` /
- * `compact` and `regular` / `large`; DS3-06 owns the stored values and mirrors
- * them in localStorage). The shell reads them on the server, like the rail, so
- * `data-density` and `data-text` are right in the first HTML.
- */
-export const DENSITY_COOKIE = 'rm_density';
-export const TEXT_COOKIE = 'rm_text';
-
-/**
- * `data-density` for the shell from the cookie: `compact` selects the DS2
- * token density mode of that name, `regular` the `default` one. Anything else
- * (absent, an old or edited value) sets nothing, so the page keeps its
- * defaults.
- */
-export function densityAttr(value: string | null | undefined): 'compact' | 'default' | undefined {
-  return value === 'compact' ? 'compact' : value === 'regular' ? 'default' : undefined;
-}
-
-/** `data-text` for the shell from the cookie (`regular` / `large`); anything else sets nothing. */
-export function textAttr(value: string | null | undefined): 'regular' | 'large' | undefined {
-  return value === 'large' || value === 'regular' ? value : undefined;
-}
-
-/** Fired on `window` once `writeSingleKeys` has saved the switch, so mounted key handlers re-read it without a reload. */
-export const SINGLE_KEYS_EVENT = 'rm:keys';
 
 /** The rail cookie lives one year, in seconds (spec §13). */
 export const RAIL_COOKIE_MAX_AGE = 31_536_000;
@@ -133,36 +100,6 @@ export function readFavourites(role: UserRole, storage: StorageLike | null = saf
 /** Persist `role`'s starred pages, cleaned the same way `readFavourites` reads them. */
 export function writeFavourites(role: UserRole, keys: readonly string[], storage: StorageLike | null = safeStorage()): void {
   safeSet(storage, favouritesStorageKey(role), JSON.stringify(cleanKeys(keys)));
-}
-
-/**
- * Whether single-character shortcuts (`/`, `?`, `[`, the G chords) are on. On
- * unless the user turned them off (`0`): WCAG 2.1.4 asks for a way to turn
- * them off, because speech-input users trigger them by accident.
- */
-export function readSingleKeys(storage: StorageLike | null = safeStorage()): boolean {
-  return safeGet(storage, SINGLE_KEYS_STORAGE) !== '0';
-}
-
-/**
- * Persist the single-key switch (`1` / `0`), then, in a browser, fire
- * `SINGLE_KEYS_EVENT` on `window` so key handlers already mounted re-read it.
- * The event fires only after the write has landed. Listeners re-read storage,
- * so an event after a refused write (blocked site data, a full quota) would
- * hand them the old value and undo the switch the caller just applied in
- * memory: single-key shortcuts could then never be turned off on that device,
- * which is the off switch WCAG 2.1.4 asks for. With no event, the caller's
- * in-memory value holds for this page.
- */
-export function writeSingleKeys(on: boolean, storage: StorageLike | null = safeStorage()): void {
-  if (!safeSet(storage, SINGLE_KEYS_STORAGE, on ? '1' : '0')) return;
-  try {
-    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-      window.dispatchEvent(new Event(SINGLE_KEYS_EVENT));
-    }
-  } catch {
-    /* no event support (odd embeds): handlers pick the value up on the next read */
-  }
 }
 
 /**

@@ -15,7 +15,8 @@ import { NavProvider } from '@/lib/nav/NavProvider';
 import { RouteTitle } from '@/lib/nav/RouteTitle';
 import { RouteFocus } from '@/lib/nav/useRouteFocus';
 import type { NavViewer } from '@/lib/nav';
-import { DENSITY_COOKIE, RAIL_COOKIE, TEXT_COOKIE, densityAttr, textAttr } from '@/lib/nav/prefs';
+import { RAIL_COOKIE } from '@/lib/nav/prefs';
+import { PrefsRoot } from '@/lib/prefs/server';
 import { LocaleSync } from './locale-sync';
 import { BranchSwitcher } from './branch-switcher';
 import { getWave1Access } from './contracts/access';
@@ -148,9 +149,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const viewer: NavViewer = { role: active.role, features, showChain };
   const rail = cookieStore.get(RAIL_COOKIE)?.value === '1';
-  // Density and text size before first paint (the preferences contract; DS3-06 owns the values).
-  const density = densityAttr(cookieStore.get(DENSITY_COOKIE)?.value);
-  const textSize = textAttr(cookieStore.get(TEXT_COOKIE)?.value);
 
   async function logout() {
     'use server';
@@ -176,84 +174,86 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </a>
             <RouteTitle />
             <RouteFocus />
-            <ShellFrame
-              initialRail={rail}
-              density={density}
-              textSize={textSize}
-              viewer={viewer}
-              sidebar={
-                <Sidebar
-                  viewer={viewer}
-                  restaurantName={active.restaurantName}
-                  roleLabel={roleLabel}
-                  subline={subline}
-                  userName={userName}
-                  email={email}
-                  isPlatformAdmin={platformAdmin}
-                  receiverLangs={receiverLangsOn}
-                  logout={logout}
-                  switcher={
-                    multiBranch ? (
-                      <BranchSwitcher variant="head" branches={switcherBranches} activeId={active.restaurantId} subline={subline} />
-                    ) : undefined
-                  }
-                />
-              }
-              overlays={
-                <MoreSheet
-                  viewer={viewer}
-                  email={email}
-                  isPlatformAdmin={platformAdmin}
-                  // 44 px targets in the sheet (the picker's class lands on its wrapper, the toggle's on itself).
-                  language={languageFor('rm-lang-sheet min-h-11 [&>button]:min-h-11')}
-                  logout={logout}
-                  branchList={
-                    multiBranch ? (
-                      <BranchSwitcher variant="list" branches={switcherBranches} activeId={active.restaurantId} />
-                    ) : undefined
-                  }
-                />
-              }
-            >
-              <TopBar
+            {/* DS3-06's display preferences (density, text size, single-key shortcuts): one store for the shell,
+                the settings screen and the tables, applied from the first HTML. */}
+            <PrefsRoot role={active.role}>
+              <ShellFrame
+                initialRail={rail}
                 viewer={viewer}
-                phoneBranch={
-                  multiBranch ? (
-                    // The chip names the branch; the role is in its list and in the "עוד" sheet.
-                    <BranchSwitcher branches={switcherBranches} activeId={active.restaurantId} className="min-w-0" />
-                  ) : (
-                    <div className="min-w-0">
-                      <p className="truncate text-base font-bold text-ink">
-                        {/* Tenant data (usually Hebrew) inside a possibly-English UI: mark the
-                            language and isolate its direction without changing alignment. */}
-                        <span {...originalProps(active.restaurantName)}>{active.restaurantName}</span>
-                      </p>
-                      <p className="truncate text-xs text-subtle">{roleLabel}</p>
-                    </div>
-                  )
+                sidebar={
+                  <Sidebar
+                    viewer={viewer}
+                    restaurantName={active.restaurantName}
+                    roleLabel={roleLabel}
+                    subline={subline}
+                    userName={userName}
+                    email={email}
+                    isPlatformAdmin={platformAdmin}
+                    receiverLangs={receiverLangsOn}
+                    logout={logout}
+                    switcher={
+                      multiBranch ? (
+                        <BranchSwitcher variant="head" branches={switcherBranches} activeId={active.restaurantId} subline={subline} />
+                      ) : undefined
+                    }
+                  />
                 }
-                // The bell (W2-08): the same task spine as the home and the badges.
-                bell={<Bell activity={active.role === 'owner' || active.role === 'manager' || active.role === 'bookkeeper'} />}
-                // Phone: language lives in "עוד", except for the receiver with receiver languages on —
-                // that phone is often shared, so it stays one tap away. Desktop: the account menu.
-                phoneLanguage={receiverLangsOn && active.role === 'receiver' ? languageFor() : undefined}
-              />
-              <main
-                id="main-content"
-                tabIndex={-1}
-                className="pb-[calc(var(--rm-bottomnav-h)+var(--consent-h,0px)+1.5rem)] focus:outline-none lg:pb-[calc(var(--consent-h,0px)+2rem)]"
+                overlays={
+                  <MoreSheet
+                    viewer={viewer}
+                    email={email}
+                    isPlatformAdmin={platformAdmin}
+                    // 44 px targets in the sheet (the picker's class lands on its wrapper, the toggle's on itself).
+                    language={languageFor('rm-lang-sheet min-h-11 [&>button]:min-h-11')}
+                    logout={logout}
+                    branchList={
+                      multiBranch ? (
+                        <BranchSwitcher variant="list" branches={switcherBranches} activeId={active.restaurantId} />
+                      ) : undefined
+                    }
+                  />
+                }
               >
-                <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-                  <WorkerStatusBanner status={workerStatus} />
-                  <LocaleSync />
-                  {/* Always mounted: it only touches an EXISTING receiver queue, so a sign-out from a branch
-                      without receiverPwa still wipes photos queued on another branch. */}
-                  <PwaSessionGuard userId={userId} />
-                  {children}
-                </div>
-              </main>
-              <BottomBar viewer={viewer} />
-            </ShellFrame>
+                <TopBar
+                  viewer={viewer}
+                  phoneBranch={
+                    multiBranch ? (
+                      // The chip names the branch; the role is in its list and in the "עוד" sheet.
+                      <BranchSwitcher branches={switcherBranches} activeId={active.restaurantId} className="min-w-0" />
+                    ) : (
+                      <div className="min-w-0">
+                        <p className="truncate text-base font-bold text-ink">
+                          {/* Tenant data (usually Hebrew) inside a possibly-English UI: mark the
+                              language and isolate its direction without changing alignment. */}
+                          <span {...originalProps(active.restaurantName)}>{active.restaurantName}</span>
+                        </p>
+                        <p className="truncate text-xs text-subtle">{roleLabel}</p>
+                      </div>
+                    )
+                  }
+                  // The bell (W2-08): the same task spine as the home and the badges.
+                  bell={<Bell activity={active.role === 'owner' || active.role === 'manager' || active.role === 'bookkeeper'} />}
+                  // Phone: language lives in "עוד", except for the receiver with receiver languages on —
+                  // that phone is often shared, so it stays one tap away. Desktop: the account menu.
+                  phoneLanguage={receiverLangsOn && active.role === 'receiver' ? languageFor() : undefined}
+                />
+                <main
+                  id="main-content"
+                  tabIndex={-1}
+                  className="pb-[calc(var(--rm-bottomnav-h)+var(--consent-h,0px)+1.5rem)] focus:outline-none lg:pb-[calc(var(--consent-h,0px)+2rem)]"
+                >
+                  <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+                    <WorkerStatusBanner status={workerStatus} />
+                    <LocaleSync />
+                    {/* Always mounted: it only touches an EXISTING receiver queue, so a sign-out from a branch
+                        without receiverPwa still wipes photos queued on another branch. */}
+                    <PwaSessionGuard userId={userId} />
+                    {children}
+                  </div>
+                </main>
+                <BottomBar viewer={viewer} />
+              </ShellFrame>
+            </PrefsRoot>
           </NavBadgesProvider>
         </NavProvider>
       </ToastProvider>

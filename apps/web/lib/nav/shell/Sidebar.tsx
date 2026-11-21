@@ -266,9 +266,12 @@ export function Sidebar({ viewer, restaurantName, roleLabel, switcher, subline, 
       const fly = flyRefs.current.get(g);
       if (fly) savings[g] = fly.offsetHeight + 8;
     }
+    // Only groups this menu renders: a stored state for a group another restaurant's flags hide must not be
+    // "folded" (saving nothing) and announced.
+    const rendered = new Set(allGroups.map((g) => g.group));
     const folds = planFolds({
       overflow,
-      open: [...open],
+      open: [...open].filter((g) => rendered.has(g)),
       openedAt: openedAt.current,
       justOpened: justOpened.current,
       here: activeGroup,

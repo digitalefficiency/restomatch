@@ -11,6 +11,7 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { nav } from '@/lib/i18n/messages/nav';
 import { navShell } from '@/lib/i18n/messages/nav/shell';
 import { overview } from '@/lib/i18n/messages/overview';
+import { useMediaMatch, usePrefs } from '@/lib/prefs';
 import type { NavViewer } from '../types';
 import { routeByKey } from '../registry';
 import { canFollowPath } from '../visibility';
@@ -37,6 +38,11 @@ export function PaletteMount({ viewer, ui }: { viewer: NavViewer; ui: ShellUi })
   const ts = useT(navShell) as unknown as (key: string) => string;
   const to = useT(overview);
   const fieldRole = FIELD_ROLES.has(viewer.role);
+  const prefs = usePrefs();
+  // DS3-06's rule: a setting that does nothing on this device is absent (lib/prefs/README.md). Density is
+  // fixed on a touch pointer or a narrow window; the side menu needs ≥ 1024; single keys need a keyboard.
+  const coarse = useMediaMatch('(pointer: coarse)');
+  const phone = ui.viewport === 'narrow' && coarse;
 
   const screens: PaletteScreen[] = useMemo(() => {
     const m = shellModel(viewer);
@@ -76,29 +82,51 @@ export function PaletteMount({ viewer, ui }: { viewer: NavViewer; ui: ShellUi })
   }, [tasks.data, to, locale, fieldRole]);
 
   const commands = useMemo(() => {
-    const list: Array<{ id: string; label: string; keywords: readonly string[]; run: () => void }> = [];
+    const list: Array<{ id: string; label: string; keywords: readonly string[]; keys?: readonly string[]; run: () => void }> = [];
     if (!ui.flat && ui.viewport !== 'narrow') {
       list.push({
         id: 'rail',
         label: ui.mode === 'rail' ? ts('commands.expand') : ts('commands.collapse'),
         keywords: ['תפריט', 'כיווץ', 'הרחבה', 'menu', 'sidebar', 'collapse', 'expand', 'ctrl b'],
+        keys: ['Mod', 'B'],
         run: ui.toggleRail,
       });
     }
-    list.push({
-      id: 'singleKeys',
-      label: ui.singleKeys ? ts('commands.singleKeysOff') : ts('commands.singleKeysOn'),
-      keywords: ['קיצורים', 'מקשים', 'מקלדת', 'shortcuts', 'keys', 'keyboard'],
-      run: () => ui.setSingleKeys(!ui.singleKeys),
-    });
-    list.push({
-      id: 'shortcuts',
-      label: ts('commands.shortcuts'),
-      keywords: ['קיצורים', 'מקלדת', 'shortcuts', 'keyboard', '?'],
-      run: ui.openCheat,
-    });
+    if (!prefs.touch) {
+      const compact = prefs.density === 'compact';
+      list.push({
+        id: 'density',
+        label: compact ? ts('commands.densityRegular') : ts('commands.densityCompact'),
+        keywords: ['צפיפות', 'שורות', 'רגיל', 'צפוף', 'density', 'compact', 'rows'],
+        run: () => prefs.setDensity(compact ? 'regular' : 'compact'),
+      });
+    }
+    {
+      const large = prefs.textSize === 'large';
+      list.push({
+        id: 'textSize',
+        label: large ? ts('commands.textRegular') : ts('commands.textLarge'),
+        keywords: ['גודל טקסט', 'טקסט', 'אותיות', 'גדול', 'text', 'size', 'large'],
+        run: () => prefs.setTextSize(large ? 'regular' : 'large'),
+      });
+    }
+    if (!phone) {
+      list.push({
+        id: 'singleKeys',
+        label: ui.singleKeys ? ts('commands.singleKeysOff') : ts('commands.singleKeysOn'),
+        keywords: ['קיצורים', 'מקשים', 'מקלדת', 'shortcuts', 'keys', 'keyboard'],
+        run: () => ui.setSingleKeys(!ui.singleKeys),
+      });
+      list.push({
+        id: 'shortcuts',
+        label: ts('commands.shortcuts'),
+        keywords: ['קיצורים', 'מקלדת', 'shortcuts', 'keyboard', '?'],
+        keys: ['?'],
+        run: ui.openCheat,
+      });
+    }
     return list;
-  }, [ui, ts]);
+  }, [ui, ts, prefs, phone]);
 
   const settings: PaletteScreen[] = useMemo(
     () =>
@@ -125,7 +153,8 @@ export function PaletteMount({ viewer, ui }: { viewer: NavViewer; ui: ShellUi })
         canAsk={viewer.features.includes('aiAssistant')}
         commands={commands}
         settings={settings}
-        chords={chords}
+        // G-chords are single keys: show their chips only while single keys are on.
+        chords={ui.singleKeys ? chords : undefined}
       />
       <ShortcutSheet
         open={ui.cheatOpen}
