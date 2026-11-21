@@ -8,6 +8,7 @@ import {
   NO_DEVICE_HINTS,
   defaultPrefs,
   densityAttr,
+  textAttr,
   resolvePrefs,
   tableDensity,
   textSizeRule,
@@ -118,15 +119,16 @@ export function usePrefs(): PrefsApi {
 
 /**
  * Applies the display preferences from the first HTML: a `display: contents`
- * wrapper carrying `data-density` (only "compact": the DS2 token density mode
- * in globals.css), `data-text-size` and `data-single-keys`, and — for large
- * text — a screen-only rule that enlarges the content column (schema.ts
- * `textSizeRule`). After hydration the attributes are mirrored onto <html> so
- * portals follow too, and restored when the provider unmounts. A nested
- * provider passes through.
+ * wrapper carrying the contract's attributes, `data-density` (only "compact":
+ * the DS2 token density mode in globals.css) and `data-text` (only "large"),
+ * and — for large text — the interim screen-only rule that enlarges the content
+ * column (schema.ts `textSizeRule`). After hydration the attributes are mirrored
+ * onto <html> so portals follow too, and restored when the provider unmounts.
+ * A nested provider passes through. The single-key switch has no attribute:
+ * key handlers read `rm:keys:single` (`singleKeysEnabled()`).
  *
  * Usually mounted through the server component `PrefsRoot`, which reads the
- * cookie and the device hints. `role` defaults to the dashboard viewer's role
+ * cookies and the device hints. `role` defaults to the dashboard viewer's role
  * (NavProvider).
  */
 export function PrefsProvider({
@@ -159,29 +161,18 @@ export function PrefsProvider({
 function PrefsApplier({ children }: { children: React.ReactNode }) {
   const p = usePrefs();
   const density = densityAttr(p.appliedDensity);
-  const keys = p.singleKeys ? 'on' : 'off';
+  const text = textAttr(p.textSize);
   const rule = textSizeRule(p.textSize);
 
   useEffect(
-    () =>
-      mirrorDisplayAttrs(document.documentElement.dataset, {
-        density,
-        textSize: p.textSize,
-        singleKeys: keys,
-      }),
-    [density, p.textSize, keys],
+    () => mirrorDisplayAttrs(document.documentElement.dataset, { density, text }),
+    [density, text],
   );
 
   return (
     <>
       {rule ? <style>{rule}</style> : null}
-      <div
-        data-rm-prefs=""
-        data-density={density}
-        data-text-size={p.textSize}
-        data-single-keys={keys}
-        className="contents"
-      >
+      <div data-rm-prefs="" data-density={density} data-text={text} className="contents">
         {children}
       </div>
     </>

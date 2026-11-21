@@ -3,18 +3,31 @@ import {
   and,
   auditLog,
   desc,
+  discrepancies,
   eq,
+  goodsReceipts,
   inArray,
+  invoiceLines,
+  invoices,
+  matchRuns,
   memberships,
+  products,
   restaurants,
   sql,
   users,
   type Database,
   type RestaurantSettings,
 } from '@restomatch/db';
-import { resolveTolerances } from '@restomatch/matching';
+import { resolveTolerances, runMatch, toAgorot, type MatchInput, type MatchOutput } from '@restomatch/matching';
 import { DEFAULT_REVIEW_THRESHOLD } from '@restomatch/ocr';
-import { resolveApprovalThresholds } from '../approvals/engine';
+import { buildRules, evaluateApproval, resolveApprovalThresholds, type ApprovalContext } from '../approvals/engine';
+import { awaitingDecision } from '../approvals/awaiting';
+import { orderQuestionCount } from '../catalog/linkQuestions';
+import { hasCap } from '../lib/capabilities';
+import { DISCREPANCY_DECIDABLE } from '../lifecycle/predicates';
+import { buildMatchInputForInvoice } from '../match/buildMatchInput';
+import { pairPriorDecisions, type FindingIdentity, type PriorDecision } from '../match/persist';
+import { isClaimableRow } from './approvals';
 import { recordAudit, type AuditAction } from '../audit';
 import { appError } from '../errors';
 import { vatRateOf } from '../lib/vat';
@@ -223,6 +236,147 @@ export function letterheadOf(settings: unknown): Letterhead {
   return out;
 }
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * DS3-06 · what a threshold change WOULD do to the gaps open now (read-only).
+ *
+ * Thresholds are read when an invoice is matched; saving starts no re-match, so
+ * a saved change acts only on invoices checked from then on and every open gap
+ * stays open until its invoice is checked again. The preview answers a
+ * conditional question: had these thresholds been in force, which of today's
+ * open gaps would have been opened? It never re-implements a rule:
+ *  • only the four finding types a tolerance can change are re-run
+ *    (PRICE_HIGHER, PRICE_LOWER, QTY_SHORT, QTY_OVER); every other open gap has
+ *    a fixed type and severity in the engine and is counted as it is;
+ *  • a re-run rebuilds the engine's input exactly as a re-match does
+ *    (buildMatchInputForInvoice, strictly pinned to the run's order) and runs
+ *    the matching engine (packages/matching, immutable) with the thresholds in
+ *    force and with the proposal; each finding is routed through the approvals
+ *    engine as persistMatchRun does (auto-approved = never open);
+ *  • stored rows pair with re-run findings per run, by fingerprint first and by
+ *    key only when one of each is left (pairPriorDecisions, the persist rule);
+ *  • the quantity findings of one order line (QTY_SHORT, QTY_OVER) are one unit:
+ *    the engine moves units between them when the unit tolerance changes;
+ *  • a gap the re-run with the thresholds in force does not reproduce (data that
+ *    moved since), or whose invoice was not re-run (budget, a receipt still being
+ *    counted, an open order question, another order chosen), counts as one that
+ *    would open, with its stored severity — the answer never claims fewer open
+ *    gaps, or fewer blocking ones, than there are.
+ * The transaction is READ ONLY (any write fails), bounded by a statement timeout,
+ * a run cap and a time budget. Only SELECTs, buildMatchInputForInvoice, runMatch,
+ * evaluateApproval and awaitingDecision are used: no lock, hold or persist helper.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** At most this many runs are re-run per preview (newest first). */
+export const PREVIEW_MAX_RUNS = 25;
+/** Stop starting re-runs after this long; the rest count as not re-run. */
+export const PREVIEW_BUDGET_MS = 2_000;
+/** The whole preview's statement timeout (per statement, inside its read-only transaction). */
+const PREVIEW_STATEMENT_TIMEOUT_MS = 5_000;
+/** At most this many named gaps in "לא היו נפתחים". */
+export const PREVIEW_MAX_NAMED = 5;
+
+/** The finding types a tolerance can create, remove or re-grade (engine.ts evaluatePrice / evaluateQty / 5b / evaluateBaseline). */
+const TOLERANCE_TYPES: ReadonlySet<string> = new Set(['PRICE_HIGHER', 'PRICE_LOWER', 'QTY_SHORT', 'QTY_OVER']);
+const QTY_TYPES: ReadonlySet<string> = new Set(['QTY_SHORT', 'QTY_OVER']);
+/** Approval thresholds that can change whether an info finding is queued or approved by itself. */
+const ROUTING_KEYS = ['cumulativeLargeAmount', 'cumulativeLargePct', 'cumulativeMediumAmountMin', 'cumulativeMediumPctMin'] as const;
+
+const PreviewInput = z
+  .object({
+    tolerances: TolerancesSchema.optional(),
+    approvalThresholds: ApprovalThresholdsSchema.optional(),
+  })
+  .strict();
+
+export interface ThresholdPreview {
+  /** Open gaps today, as awaitingDecision counts them (the figure every screen shows). */
+  openNow: number;
+  /** False when the proposal resolves to the thresholds in force (then only `openNow`). */
+  changed: boolean;
+  /** Of `openNow`: gaps that would still have been opened (including those not re-run). */
+  wouldOpen: number;
+  /** Of `wouldOpen`: would block payment (severity block). */
+  wouldBlock: number;
+  /** Of `openNow`: would not have been opened with the proposal. */
+  notOpenedCount: number;
+  /** Their ₪ that the queue would ask back (claimable rows only), before VAT, in integer agorot. */
+  notOpenedAgorot: number;
+  /** The largest of them by ₪, at most PREVIEW_MAX_NAMED; label = the product, else the invoice line. */
+  notOpened: Array<{ label: string | null; labelEn: string | null; amountAgorot: number }>;
+  /** Of `wouldOpen`: tolerance-type gaps that were not re-run or not reproduced (counted as staying). */
+  notEvaluated: number;
+  /** Runs re-run / runs left out by the cap or the time budget. */
+  evaluatedRuns: number;
+  skippedRuns: number;
+  /** The thresholds this answer is for (resolved), so a client can tell a stale answer. */
+  proposal: { tolerances: Record<string, number>; approvalThresholds: Record<string, number> };
+}
+
+interface RunFinding {
+  type: string;
+  severity: string;
+  deltaAmount: number;
+  expected: number | null;
+  actual: number | null;
+  invoiceLineId: string | null;
+  poLineId: string | null;
+  productId: string | null;
+  open: boolean;
+}
+
+/** One engine run's findings, each marked open or approved by itself — persistMatchRun's routing (match/persist.ts). */
+function routedFindings(input: MatchInput, output: MatchOutput, rules: ReturnType<typeof buildRules>): RunFinding[] {
+  return output.discrepancies.map((d) => {
+    const ctx: ApprovalContext = {
+      discrepancy: { type: d.type, severity: d.severity, deltaAmount: d.deltaAmount },
+      matchRun: {
+        totalDiscrepancyAmount: output.totalDiscrepancyAmount,
+        totalInvoiceAmount: input.invoice.totalInclVat,
+        poExists: input.poLines.length > 0,
+      },
+    };
+    return {
+      type: d.type,
+      severity: d.severity,
+      deltaAmount: d.deltaAmount,
+      // DATE_ANOMALY carries dates in expected/actual; persist stores no number for it.
+      expected: d.type === 'DATE_ANOMALY' ? null : (d.expected ?? null),
+      actual: d.type === 'DATE_ANOMALY' ? null : (d.actual ?? null),
+      invoiceLineId: d.invoiceLineId ?? null,
+      poLineId: d.poLineId ?? null,
+      productId: d.productId,
+      open: evaluateApproval(ctx, rules).action !== 'auto_approve',
+    };
+  });
+}
+
+/**
+ * Pair `from` with `to` the way persist carries a decision across a re-match
+ * (pairPriorDecisions: fingerprint first, then key when exactly one of each is
+ * left). Returns, for each item of `from`, the index of its partner in `to`.
+ */
+function pairByFingerprint(from: FindingIdentity[], to: FindingIdentity[]): Array<number | undefined> {
+  const tags = from.map((_, i) => ({ fromIndex: i }) as unknown as PriorDecision);
+  const paired = pairPriorDecisions(
+    from.map((f, i) => ({ ...f, decision: tags[i]! })),
+    to,
+  );
+  const out: Array<number | undefined> = from.map(() => undefined);
+  paired.forEach((tag, toIndex) => {
+    if (tag) out[(tag as unknown as { fromIndex: number }).fromIndex] = toIndex;
+  });
+  return out;
+}
+
+const isZeroShortTwin = (r: { type: string; deltaAmount: string | number | null }) =>
+  r.type === 'QTY_SHORT' && Number(r.deltaAmount ?? 0) === 0;
+
+function sameValues(a: Record<string, number>, b: Record<string, number>): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const k of keys) if (a[k] !== b[k]) return false;
+  return true;
+}
+
 export const settingsRouter = router({
   /** Current matching-rules settings for the caller's restaurant. */
   get: memberProcedure.query(async ({ ctx }): Promise<RestaurantSettings> => {
@@ -300,6 +454,229 @@ export const settingsRouter = router({
       .where(eq(restaurants.id, ctx.session.restaurantId))
       .limit(1);
     return effectiveSettings(row?.settings ?? {});
+  }),
+
+  /**
+   * DS3-06 · the preview before saving a threshold (see the block comment above
+   * PREVIEW_MAX_RUNS). Read-only. The count of open gaps is finance tier (it is
+   * the figure the rules section shows in force); the what-if — a proposal that
+   * differs from the thresholds in force — needs `settings.edit` (the owner: the
+   * only role that can save). The input is a patch over the stored overrides
+   * with update's semantics (null = back to the engine default).
+   */
+  previewThresholds: financeProcedure.input(PreviewInput).query(async ({ ctx, input }): Promise<ThresholdPreview> => {
+    const startedAt = Date.now();
+    // Read-only by construction: any write in this transaction fails (SQLSTATE 25006).
+    await ctx.db.execute(sql`set transaction read only`);
+    await ctx.db.execute(sql.raw(`set local statement_timeout = ${PREVIEW_STATEMENT_TIMEOUT_MS}`));
+
+    const rid = ctx.session.restaurantId;
+    const [row] = await ctx.db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, rid))
+      .limit(1);
+    const stored: RestaurantSettings = row?.settings ?? {};
+    const tolNow = resolveTolerances(stored.tolerances);
+    const tolNext = resolveTolerances(
+      input.tolerances !== undefined ? mergeKnobs(stored.tolerances, input.tolerances) : stored.tolerances,
+    );
+    const apprNow = resolveApprovalThresholds(stored.approvalThresholds);
+    const apprNext = resolveApprovalThresholds(
+      input.approvalThresholds !== undefined
+        ? mergeKnobs(stored.approvalThresholds, input.approvalThresholds)
+        : stored.approvalThresholds,
+    );
+    const toleranceChanged = !sameValues(tolNow, tolNext);
+    const routingChanged = ROUTING_KEYS.some((k) => apprNow[k] !== apprNext[k]);
+    const changed = toleranceChanged || !sameValues(apprNow, apprNext);
+
+    const awaiting = await awaitingDecision(ctx.db, { session: { restaurantId: rid, role: ctx.session.role } }, { scope: 'all' });
+    const base: ThresholdPreview = {
+      openNow: awaiting.count,
+      changed,
+      wouldOpen: awaiting.count,
+      wouldBlock: 0,
+      notOpenedCount: 0,
+      notOpenedAgorot: 0,
+      notOpened: [],
+      notEvaluated: 0,
+      evaluatedRuns: 0,
+      skippedRuns: 0,
+      proposal: { tolerances: tolNext, approvalThresholds: apprNext },
+    };
+    if (!changed) return base;
+    if (!hasCap(ctx.session.role, 'settings.edit')) {
+      throw appError('FORBIDDEN', 'capability.required', 'Required capability: settings.edit', {
+        capability: 'settings.edit',
+      });
+    }
+
+    // The open rows, the zero-₪ short twins included (they pair, they are not counted).
+    // Child tables carry no restaurant_id: the line is scoped through this tenant's invoice.
+    const rows = await ctx.db
+      .select({
+        type: discrepancies.type,
+        severity: discrepancies.severity,
+        deltaAmount: discrepancies.deltaAmount,
+        expected: discrepancies.expectedValue,
+        actual: discrepancies.actualValue,
+        invoiceLineId: discrepancies.invoiceLineId,
+        poLineId: discrepancies.poLineId,
+        productId: discrepancies.productId,
+        runId: matchRuns.id,
+        runAt: matchRuns.runAt,
+        poId: matchRuns.poId,
+        invoiceId: invoices.id,
+        productName: products.canonicalName,
+        productNameEn: products.nameEn,
+        lineText: invoiceLines.rawDescription,
+        lineTextEn: invoiceLines.rawDescriptionEn,
+      })
+      .from(discrepancies)
+      .innerJoin(matchRuns, and(eq(matchRuns.id, discrepancies.matchRunId), eq(matchRuns.restaurantId, rid)))
+      .leftJoin(invoices, and(eq(invoices.id, matchRuns.invoiceId), eq(invoices.restaurantId, rid)))
+      .leftJoin(invoiceLines, and(eq(invoiceLines.id, discrepancies.invoiceLineId), eq(invoiceLines.invoiceId, invoices.id)))
+      .leftJoin(products, and(eq(products.id, discrepancies.productId), eq(products.restaurantId, rid)))
+      .where(and(eq(discrepancies.restaurantId, rid), inArray(discrepancies.resolutionStatus, [...DISCREPANCY_DECIDABLE])));
+    type Row = (typeof rows)[number];
+
+    // Every counted row starts as "would open" with its stored severity; re-runs below can only lower that.
+    const counted = rows.filter((r) => !isZeroShortTwin(r));
+    let wouldBlock = counted.filter((r) => r.severity === 'block').length;
+    let notEvaluated = 0;
+    const notOpened: Array<{ label: string | null; labelEn: string | null; amountAgorot: number }> = [];
+
+    // Which runs a re-run could change: a run with an order, the latest of its invoice, holding an open
+    // tolerance-type gap — an info one when only the routing thresholds changed.
+    const latestRunOf = new Map<string, { runId: string; at: number }>();
+    for (const r of rows) {
+      if (!r.invoiceId) continue;
+      const at = r.runAt ? new Date(r.runAt).getTime() : 0;
+      const cur = latestRunOf.get(r.invoiceId);
+      if (!cur || at > cur.at) latestRunOf.set(r.invoiceId, { runId: r.runId, at });
+    }
+    const runs = new Map<string, { invoiceId: string; poId: string; at: number; rows: Row[] }>();
+    for (const r of rows) {
+      if (!r.invoiceId || !r.poId || latestRunOf.get(r.invoiceId)?.runId !== r.runId) continue;
+      const entry = runs.get(r.runId);
+      if (entry) entry.rows.push(r);
+      else runs.set(r.runId, { invoiceId: r.invoiceId, poId: r.poId, at: latestRunOf.get(r.invoiceId)!.at, rows: [r] });
+    }
+    const candidates = [...runs.values()]
+      .filter((run) =>
+        run.rows.some(
+          (r) => !isZeroShortTwin(r) && TOLERANCE_TYPES.has(r.type) && (toleranceChanged || (routingChanged && r.severity === 'info')),
+        ),
+      )
+      .sort((a, b) => b.at - a.at);
+    const tolTypeRows = (rs: Row[]) => rs.filter((r) => !isZeroShortTwin(r) && TOLERANCE_TYPES.has(r.type) && (toleranceChanged || (routingChanged && r.severity === 'info'))).length;
+    // Tolerance-type rows on runs that cannot be re-run (no order, a superseded run, a gone invoice).
+    const rerunnable = new Set(candidates.flatMap((c) => c.rows));
+    const canChange = (r: Row) => TOLERANCE_TYPES.has(r.type) && (toleranceChanged || (routingChanged && r.severity === 'info'));
+    notEvaluated += counted.filter((r) => canChange(r) && !rerunnable.has(r)).length;
+
+    if (toleranceChanged || routingChanged) {
+      const rulesNow = buildRules(apprNow);
+      const rulesNext = buildRules(apprNext);
+      for (const [i, run] of candidates.entries()) {
+        if (i >= PREVIEW_MAX_RUNS || Date.now() - startedAt > PREVIEW_BUDGET_MS) {
+          base.skippedRuns += candidates.length - i;
+          notEvaluated += candidates.slice(i).reduce((n, c) => n + tolTypeRows(c.rows), 0);
+          break;
+        }
+        const built = await buildMatchInputForInvoice(ctx.db, rid, run.invoiceId, { pinnedPoId: run.poId, strictPin: true });
+        // The same guards as the match job: the run's own order, no receipt still being counted, no open order question.
+        let skip = !built || built.poId !== run.poId;
+        if (!skip && built!.grId) {
+          const [gr] = await ctx.db
+            .select({ status: goodsReceipts.status })
+            .from(goodsReceipts)
+            .where(and(eq(goodsReceipts.id, built!.grId), eq(goodsReceipts.restaurantId, rid)))
+            .limit(1);
+          skip = gr?.status === 'pending';
+        }
+        if (!skip && (await orderQuestionCount(ctx.db, rid, run.poId)) > 0) skip = true;
+        if (skip || !built) {
+          notEvaluated += tolTypeRows(run.rows);
+          continue;
+        }
+        base.evaluatedRuns += 1;
+        const now = routedFindings(built.input, runMatch({ ...built.input, tolerances: tolNow }), rulesNow);
+        const next = routedFindings(built.input, runMatch({ ...built.input, tolerances: tolNext }), rulesNext);
+        const storedIds: FindingIdentity[] = run.rows.map((r) => ({
+          type: r.type,
+          invoiceLineId: r.invoiceLineId,
+          poLineId: r.poLineId,
+          productId: r.productId,
+          deltaAmount: r.deltaAmount,
+          expected: r.expected,
+          actual: r.actual,
+        }));
+        const toNow = pairByFingerprint(storedIds, now);
+        const nowToNext = pairByFingerprint(now, next);
+
+        // Units: a price finding on its own; the quantity findings of one order line together.
+        const units = new Map<string, Row[]>();
+        run.rows.forEach((r, idx) => {
+          if (!TOLERANCE_TYPES.has(r.type)) return;
+          const reproduced = toNow[idx] !== undefined && now[toNow[idx]!]!.open;
+          if (!reproduced) {
+            if (!isZeroShortTwin(r) && canChange(r)) notEvaluated += 1; // not reproduced today: never attributed to a threshold
+            return;
+          }
+          const key = QTY_TYPES.has(r.type) && r.poLineId ? `qty|${r.poLineId}` : `row|${idx}`;
+          const list = units.get(key);
+          if (list) list.push(r);
+          else units.set(key, [r]);
+        });
+        for (const [key, unitRows] of units) {
+          const countedRows = unitRows.filter((r) => !isZeroShortTwin(r));
+          if (countedRows.length === 0) continue;
+          let opensNext: boolean;
+          let blocksNext: boolean;
+          if (key.startsWith('qty|')) {
+            const poLineId = key.slice(4);
+            const nextQty = next.filter(
+              (f) => f.open && QTY_TYPES.has(f.type) && f.poLineId === poLineId && !isZeroShortTwin(f),
+            );
+            opensNext = nextQty.length > 0;
+            blocksNext = nextQty.some((f) => f.severity === 'block');
+          } else {
+            const idx = run.rows.indexOf(unitRows[0]!);
+            const nowIdx = toNow[idx]!;
+            const nextIdx = nowToNext[nowIdx];
+            const partner = nextIdx === undefined ? null : next[nextIdx]!;
+            opensNext = !!partner && partner.open;
+            blocksNext = !!partner && partner.severity === 'block';
+          }
+          const storedBlocks = countedRows.filter((r) => r.severity === 'block').length;
+          if (opensNext) {
+            // Still open: its blocking follows the proposal (a block may become a warning, or the other way).
+            wouldBlock += (blocksNext ? Math.max(1, storedBlocks) : 0) - storedBlocks;
+            continue;
+          }
+          wouldBlock -= storedBlocks;
+          for (const r of countedRows) {
+            base.notOpenedCount += 1;
+            const claimable = isClaimableRow({ type: r.type, severity: r.severity, deltaAmount: r.deltaAmount });
+            const amountAgorot = claimable ? toAgorot(Math.abs(Number(r.deltaAmount ?? 0))) : 0;
+            base.notOpenedAgorot += amountAgorot;
+            notOpened.push({
+              label: r.productName ?? r.lineText ?? null,
+              labelEn: r.productNameEn ?? r.lineTextEn ?? null,
+              amountAgorot,
+            });
+          }
+        }
+      }
+    }
+
+    base.wouldOpen = Math.max(0, base.openNow - base.notOpenedCount);
+    base.wouldBlock = Math.max(0, Math.min(base.wouldOpen, wouldBlock));
+    base.notEvaluated = notEvaluated;
+    base.notOpened = notOpened.sort((a, b) => b.amountAgorot - a.amountAgorot).slice(0, PREVIEW_MAX_NAMED);
+    return base;
   }),
 
   /**
