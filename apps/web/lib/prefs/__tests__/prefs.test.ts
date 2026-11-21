@@ -201,20 +201,28 @@ describe('mirroring onto <html>', () => {
   });
 });
 
-/** A minimal browser: one cookie jar (one path), localStorage and window events. */
+/**
+ * A minimal browser: one cookie jar (one path), localStorage, window and
+ * document events. `refuse.storage` makes localStorage writes throw (a full or
+ * refused store); `refuse.cookies` makes the browser ignore script cookies.
+ */
 function fakeBrowser() {
   const jar = new Map<string, string>();
   const assignments: string[] = [];
   const local = new Map<string, string>();
+  const refuse = { storage: false, cookies: false };
   const handlers = new Map<string, Array<(e: { key?: string | null }) => void>>();
+  const docHandlers = new Map<string, Array<() => void>>();
   const doc = {
     visibilityState: 'visible',
-    addEventListener: vi.fn(),
+    addEventListener: (type: string, fn: () => void) =>
+      docHandlers.set(type, [...(docHandlers.get(type) ?? []), fn]),
     get cookie() {
       return [...jar.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
     },
     set cookie(assignment: string) {
       assignments.push(assignment);
+      if (refuse.cookies) return;
       const [pair, ...attrs] = assignment.split(';').map((s) => s.trim());
       const i = pair!.indexOf('=');
       const name = pair!.slice(0, i);
@@ -227,8 +235,14 @@ function fakeBrowser() {
     location: { protocol: 'https:' },
     localStorage: {
       getItem: (k: string) => local.get(k) ?? null,
-      setItem: (k: string, v: string) => void local.set(k, v),
-      removeItem: (k: string) => void local.delete(k),
+      setItem: (k: string, v: string) => {
+        if (refuse.storage) throw new DOMException('quota', 'QuotaExceededError');
+        local.set(k, v);
+      },
+      removeItem: (k: string) => {
+        if (refuse.storage) throw new DOMException('refused', 'SecurityError');
+        local.delete(k);
+      },
     },
     addEventListener: (type: string, fn: (e: { key?: string | null }) => void) =>
       handlers.set(type, [...(handlers.get(type) ?? []), fn]),
@@ -240,7 +254,10 @@ function fakeBrowser() {
   const fire = (type: string, key?: string | null) => {
     for (const fn of handlers.get(type) ?? []) fn({ key });
   };
-  return { doc, win, jar, local, assignments, fire };
+  const fireDoc = (type: string) => {
+    for (const fn of docHandlers.get(type) ?? []) fn();
+  };
+  return { doc, win, jar, local, assignments, refuse, fire, fireDoc };
 }
 
 describe('client store', () => {
@@ -330,6 +347,55 @@ describe('client store', () => {
   it('writes nothing on load when nothing is stored', () => {
     const off = subscribeDisplay(() => {});
     expect(b.assignments).toEqual([]);
+    off();
+  });
+
+  it('a choice the browser refuses to store holds for this page, for readers and for key handlers', () => {
+    b.refuse.storage = true;
+    b.refuse.cookies = true;
+    const off = subscribeDisplay(() => {});
+    setDisplayChoices({ density: 'compact', singleKeys: false });
+    expect(b.jar.size).toBe(0);
+    expect(b.local.size).toBe(0);
+    // No event after a refused write (it would hand handlers the old value).
+    expect(b.win.dispatchEvent).not.toHaveBeenCalled();
+    expect(getDisplayChoices()).toEqual({ density: 'compact', singleKeys: false });
+    expect(singleKeysEnabled()).toBe(false);
+    // A tab coming back into view re-reads storage, and keeps this page's choices.
+    b.fireDoc('visibilitychange');
+    expect(getDisplayChoices()).toEqual({ density: 'compact', singleKeys: false });
+    expect(singleKeysEnabled()).toBe(false);
+    // Another tab's write landed: storage speaks for that key again; the other one stays held.
+    b.local.set('rm:keys:single', '1');
+    b.fire('storage', 'rm:keys:single');
+    expect(getDisplayChoices()).toEqual({ density: 'compact', singleKeys: true });
+    expect(singleKeysEnabled()).toBe(true);
+    off();
+  });
+
+  it('a later write that lands takes over from the page, and so does the shell switch', () => {
+    const off = subscribeDisplay(() => {});
+    b.refuse.storage = true;
+    setDisplayChoices({ singleKeys: false });
+    expect(singleKeysEnabled()).toBe(false);
+    b.refuse.storage = false;
+    setDisplayChoices({ singleKeys: true });
+    expect(b.local.get('rm:keys:single')).toBe('1');
+    expect(b.win.dispatchEvent).toHaveBeenCalledTimes(1);
+    // Nothing held any more: the key itself answers.
+    b.local.set('rm:keys:single', '0');
+    expect(singleKeysEnabled()).toBe(false);
+    // Back to the default, refused: the page holds "on" although storage still says off.
+    b.refuse.storage = true;
+    b.local.set('rm:keys:single', '0');
+    b.fire(SINGLE_KEYS_EVENT);
+    setDisplayChoices({});
+    expect(singleKeysEnabled()).toBe(true);
+    // The shell's own switch (its event comes only after its write landed) takes over.
+    b.local.set('rm:keys:single', '0');
+    b.fire(SINGLE_KEYS_EVENT);
+    expect(singleKeysEnabled()).toBe(false);
+    expect(getDisplayChoices()).toEqual({ singleKeys: false });
     off();
   });
 });
