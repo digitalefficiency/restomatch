@@ -391,7 +391,8 @@ test('"עוד" sheet: rotating past 1024 px closes it and the app is usable (not
   await page.getByTestId('bottom-bar').locator('button[aria-controls="dashboard-drawer"]').click();
   await expect(page.locator('#dashboard-drawer')).toBeVisible();
   await page.setViewportSize({ width: 1180, height: 820 });
-  await expect(page.locator('#dashboard-drawer')).toHaveCount(0);
+  // DS3-02: the sheet is a native <dialog> (sidebar spec §11) that stays in the page closed; "gone" = not open.
+  await expect(page.locator('#dashboard-drawer[open]')).toHaveCount(0);
   await expect(page.locator('#rm-app')).not.toHaveAttribute('inert', '');
   await page.context().close();
 });
