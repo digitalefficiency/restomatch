@@ -183,4 +183,71 @@ export const common: Shape<CommonReceiverSlice> = {
       failed: 'ብድምጺ ምእታው ኣይሰለጠን። ክትጽሕፉ ትኽእሉ።', // review
     },
   },
+  // W3-03b PWA (share, install, notifications) — machine translation, pending native review.
+  pwa: {
+    notify: {
+      title: 'መፍለጢታት', // review
+      subtitle: 'እንታይ ይበጽሓኩምን ናበይን፡ ተሌፎን፡ ኢመይል ወይ WhatsApp።', // review
+      unavailable: 'መፍለጢታት ተሌፎን ቀልጢፉ ክጅመር እዩ። ክሳብ ሽዑ መልእኽትታት ብኢመይል ይመጹ።', // review
+      deviceTitle: 'እዚ ተሌፎን', // review
+      deviceOn: 'መፍለጢታት ኣብዚ ተሌፎን ንጡፋት እዮም', // review
+      deviceOff: 'መፍለጢታት ኣብዚ ተሌፎን ጠፊኦም እዮም', // review
+      enable: 'ኣብዚ ተሌፎን መፍለጢታት ኣብርሁ', // review
+      disable: 'ኣብዚ ተሌፎን መፍለጢታት ኣጥፍኡ', // review
+      noKey: 'ኣቕራቢ መፍለጢታት ገና ኣይተራኸበን። እቲ መጠወቒ ምስ ተራኸበ ክሰርሕ እዩ።', // review
+      denied: 'እቲ መርበብ መፍለጢታት ነዚ ገጽ ይዓግቶ ኣሎ። ኣብ ቅጥዒ መርበብ ክተፍቅዱ ትኽእሉ።', // review
+      unsupported: 'እዚ መርበብ መፍለጢታት ተሌፎን ኣይድግፍን።', // review
+      needsInstall: 'ኣብ iPhone መፍለጢታት ካብቲ ዝተጸዓነ ኣፕ ጥራይ እዮም ዝሰርሑ። ካብ ዝርዝር ምክፋል ጽዓንዎ።', // review
+      failed: 'ኣይሰለጠን። እንደገና ፈትኑ።', // review
+      enabled: 'ኣብዚ ተሌፎን መፍለጢታት በሪሆም', // review
+      disabled: 'ኣብዚ ተሌፎን መፍለጢታት ጠፊኦም', // review
+      eventsTitle: 'ብዛዕባ እንታይ ነፍልጠኩም', // review
+      channelPush: 'ተሌፎን', // review
+      channelEmail: 'ኢመይል', // review
+      channelWhatsapp: 'WhatsApp', // review
+      saved: 'ተዓቂቡ', // review
+      test: 'ናይ ፈተነ መፍለጢ ስደዱ', // review
+      testSkipped: 'ናይ ፈተነ መፍለጢ ኣይተሰደደን፡ ኣቕራቢ መፍለጢታት ገና ኣይተራኸበን።', // review
+      quiet: 'ካብ 23:00 ክሳብ 06:00ን ብሰንበትን መፍለጢ የለን፡ ብመዓልቲ ክሳብ 6።', // review
+      events: {
+        receiver_morning_brief: 'ናይ ሎሚ ኣቕርቦታት (06:00)', // review
+        delivery_late: 'ዝደንጐየ ኣቕርቦት', // review
+        approval_waiting: 'ፍቓድ ዝጽበያ ፋክቱራታት', // review
+        order_reminder: 'መዘኻኸሪ ትእዛዝ', // review
+        claim_overdue: 'መልሲ ዘይብሉ ሕቶ ክሬዲት', // review
+        invoice_ocr_failed: 'ዘይተነበበት ፋክቱራ', // review
+      },
+    },
+    install: {
+      title: 'RestoMatch ኣብዚ ተሌፎን ክጽዓን?', // review
+      body: 'ካብ ቀንዲ ስክሪን ክፈትዎ፡ ብዘይ ሲግናል ስርሑ፡ ብዛዕባ ኣቕርቦታትን ፍቓዳትን መፍለጢ ተቐበሉ።', // review
+      install: 'ጽዓን', // review
+      later: 'ሕጂ ኣይኮነን', // review
+      iosTitle: 'ኣብ iPhone ምጽዓን፡ ሰለስተ ስጉምትታት', // review
+      iosStep1: 'ኣብ ታሕቲ ስክሪን ዘሎ መጠወቒ ምክፋል ጠውቑ', // review
+      iosStep2: '"ናብ ቀንዲ ስክሪን ወስኽ" ምረጹ', // review
+      iosStep3: 'ኣብ ኩርናዕ "ወስኽ" ጠውቑ', // review
+      done: 'ተረዲኡኒ', // review
+    },
+    share: {
+      title: 'ናብ RestoMatch ምክፋል', // review
+      loading: 'ዘካፈልኩምዎ ንኸፍት ኣለና…', // review
+      toOrder: 'ከም ምቕባል ትእዛዝ ንኸፍት ኣለና…', // review
+      filesTitle: '{count, plural, one {ሓደ ፋይል ኣብዚ ተሌፎን ተዓቂቡ} other {# ፋይላት ኣብዚ ተሌፎን ተዓቂቦም}}', // review
+      filesBody: 'ፋይላት ኣብዚ ተሌፎን ክሳብ 24 ሰዓት ይጸንሑ። ነቲ ኣቕርቦት ከፊትኩም ምስ ፋክቱራ ኣተሓሕዝዎም።', // review
+      filesOther: 'ፋይላት ኣብዚ ተሌፎን ክሳብ 24 ሰዓት ይጸንሑ። ንኣመሓዳሪ ወይ ንዋና ኣሕልፍዎም።', // review
+      toReceiving: 'ናብ ምቕባል ኣቕሓ', // review
+      discard: 'ምክፋል ደምስስ', // review
+      discarded: 'ምክፋል ካብዚ ተሌፎን ተደምሲሱ', // review
+      skipped: '{count, plural, one {ሓደ ፋይል ኣይተዓቀበን (ስእሊ ወይ PDF ጥራይ፡ ክሳብ 20MB)} other {# ፋይላት ኣይተዓቀቡን (ስእሊ ወይ PDF ጥራይ፡ ክሳብ 20MB)}}', // review
+      filesLost: 'ፋይል ኣይበጽሐን። ካብቲ ዝተጸዓነ ኣፕ እንደገና ኣካፍሉ።', // review
+      textTitle: 'ዘካፈልኩምዎ ጽሑፍ', // review
+      textBody: 'ምቕባል ትእዛዝ ኣብዚ ኣይነጥፍን። ነቲ ጽሑፍ ቀዲሕኩም ኣሕልፍዎ።', // review
+      copy: 'ቅዳሕ', // review
+      copied: 'ጽሑፍ ተቐዲሑ', // review
+      emptyTitle: 'ዝበጽሐ ትሕዝቶ የለን', // review
+      emptyBody: 'ምክፋል ግዜኡ ሓሊፉ ወይ ድሮ ተኸፊቱ። እንደገና ኣካፍሉ።', // review
+      home: 'ናብ ቀንዲ ገጽ', // review
+    },
+  },
 };

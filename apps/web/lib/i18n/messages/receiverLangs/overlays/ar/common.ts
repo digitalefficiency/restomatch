@@ -183,4 +183,71 @@ export const common: Shape<CommonReceiverSlice> = {
       failed: 'لم ينجح الإدخال الصوتي. يمكنك الكتابة.', // review
     },
   },
+  // W3-03b PWA (share, install, notifications) — machine translation, pending native review.
+  pwa: {
+    notify: {
+      title: 'الإشعارات', // review
+      subtitle: 'ما يصلك وإلى أين: الهاتف أو البريد الإلكتروني أو واتساب.', // review
+      unavailable: 'إشعارات الهاتف قادمة قريبًا. حتى ذلك الحين تصل الرسائل بالبريد الإلكتروني.', // review
+      deviceTitle: 'هذا الهاتف', // review
+      deviceOn: 'الإشعارات مفعّلة على هذا الهاتف', // review
+      deviceOff: 'الإشعارات متوقفة على هذا الهاتف', // review
+      enable: 'تفعيل الإشعارات على هذا الهاتف', // review
+      disable: 'إيقاف الإشعارات على هذا الهاتف', // review
+      noKey: 'مزوّد الإشعارات غير متصل بعد. سيعمل الزر عند اكتمال الاتصال.', // review
+      denied: 'المتصفح يحظر الإشعارات لهذا الموقع. يمكنك السماح بها من إعدادات المتصفح.', // review
+      unsupported: 'هذا المتصفح لا يدعم إشعارات الهاتف.', // review
+      needsInstall: 'على الآيفون تعمل الإشعارات فقط من التطبيق المثبّت. ثبّته من قائمة المشاركة.', // review
+      failed: 'لم ينجح ذلك. حاول مرة أخرى.', // review
+      enabled: 'تم تفعيل الإشعارات على هذا الهاتف', // review
+      disabled: 'تم إيقاف الإشعارات على هذا الهاتف', // review
+      eventsTitle: 'بماذا نبلغك', // review
+      channelPush: 'الهاتف', // review
+      channelEmail: 'البريد الإلكتروني', // review
+      channelWhatsapp: 'واتساب', // review
+      saved: 'تم الحفظ', // review
+      test: 'إرسال إشعار تجريبي', // review
+      testSkipped: 'لم يُرسل الإشعار التجريبي: مزوّد الإشعارات غير متصل بعد.', // review
+      quiet: 'لا إشعارات بين 23:00 و06:00 ولا يوم السبت، وحتى 6 في اليوم.', // review
+      events: {
+        receiver_morning_brief: 'شحنات اليوم (06:00)', // review
+        delivery_late: 'شحنة متأخرة', // review
+        approval_waiting: 'فواتير تنتظر الموافقة', // review
+        order_reminder: 'تذكير بالطلب', // review
+        claim_overdue: 'طلب ائتمان بلا رد', // review
+        invoice_ocr_failed: 'فاتورة لم تُقرأ', // review
+      },
+    },
+    install: {
+      title: 'تثبيت رستوماتش على هذا الهاتف؟', // review
+      body: 'افتحه من الشاشة الرئيسية، اعمل بدون إشارة، واحصل على تنبيهات الشحنات والموافقات.', // review
+      install: 'تثبيت', // review
+      later: 'ليس الآن', // review
+      iosTitle: 'التثبيت على الآيفون: ثلاث خطوات', // review
+      iosStep1: 'اضغط زر المشاركة أسفل الشاشة', // review
+      iosStep2: 'اختر "إضافة إلى الشاشة الرئيسية"', // review
+      iosStep3: 'اضغط "إضافة" في الزاوية', // review
+      done: 'فهمت', // review
+    },
+    share: {
+      title: 'مشاركة إلى رستوماتش', // review
+      loading: 'نفتح ما شاركته…', // review
+      toOrder: 'نفتحه كطلب جديد…', // review
+      filesTitle: '{count, plural, one {تم حفظ ملف واحد على هذا الهاتف} other {تم حفظ # ملفات على هذا الهاتف}}', // review
+      filesBody: 'تبقى الملفات على هذا الهاتف حتى 24 ساعة. افتح الشحنة وأرفقها بالفاتورة.', // review
+      filesOther: 'تبقى الملفات على هذا الهاتف حتى 24 ساعة. مرّرها إلى المدير أو المالك لإرفاقها.', // review
+      toReceiving: 'إلى استلام البضائع', // review
+      discard: 'حذف المشاركة', // review
+      discarded: 'تم حذف المشاركة من هذا الهاتف', // review
+      skipped: '{count, plural, one {لم يُحفظ ملف واحد (صورة أو PDF فقط، حتى 20MB)} other {لم تُحفظ # ملفات (صورة أو PDF فقط، حتى 20MB)}}', // review
+      filesLost: 'لم يصل الملف. شارك مرة أخرى من التطبيق المثبّت.', // review
+      textTitle: 'النص الذي شاركته', // review
+      textBody: 'إدخال الطلبات غير مفعّل هنا. يمكنك نسخ النص وتمريره.', // review
+      copy: 'نسخ', // review
+      copied: 'تم نسخ النص', // review
+      emptyTitle: 'لم يصل أي محتوى', // review
+      emptyBody: 'انتهت صلاحية المشاركة أو فُتحت مسبقًا. شارك مرة أخرى.', // review
+      home: 'إلى الشاشة الرئيسية', // review
+    },
+  },
 };

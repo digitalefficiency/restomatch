@@ -183,4 +183,71 @@ export const common: Shape<CommonReceiverSlice> = {
       failed: 'Голосовой ввод не сработал. Введите текст.', // review
     },
   },
+  // W3-03b PWA (share, install, notifications) — machine translation, pending native review.
+  pwa: {
+    notify: {
+      title: 'Уведомления', // review
+      subtitle: 'Что вам приходит и куда: телефон, e-mail или WhatsApp.', // review
+      unavailable: 'Уведомления на телефон скоро появятся. Пока сообщения приходят по e-mail.', // review
+      deviceTitle: 'Этот телефон', // review
+      deviceOn: 'Уведомления на этом телефоне включены', // review
+      deviceOff: 'Уведомления на этом телефоне выключены', // review
+      enable: 'Включить уведомления на этом телефоне', // review
+      disable: 'Выключить уведомления на этом телефоне', // review
+      noKey: 'Сервис уведомлений ещё не подключён. Кнопка заработает после подключения.', // review
+      denied: 'Браузер блокирует уведомления для этого сайта. Разрешите их в настройках браузера.', // review
+      unsupported: 'Этот браузер не поддерживает уведомления на телефон.', // review
+      needsInstall: 'На iPhone уведомления работают только в установленном приложении. Установите его через меню «Поделиться».', // review
+      failed: 'Не получилось. Попробуйте ещё раз.', // review
+      enabled: 'Уведомления на этом телефоне включены', // review
+      disabled: 'Уведомления на этом телефоне выключены', // review
+      eventsTitle: 'О чём уведомлять', // review
+      channelPush: 'Телефон', // review
+      channelEmail: 'E-mail', // review
+      channelWhatsapp: 'WhatsApp', // review
+      saved: 'Сохранено', // review
+      test: 'Отправить тестовое уведомление', // review
+      testSkipped: 'Тестовое уведомление не отправлено: сервис уведомлений ещё не подключён.', // review
+      quiet: 'Нет уведомлений с 23:00 до 06:00 и в шабат, не более 6 в день.', // review
+      events: {
+        receiver_morning_brief: 'Поставки сегодня (06:00)', // review
+        delivery_late: 'Поставка опаздывает', // review
+        approval_waiting: 'Счета ждут утверждения', // review
+        order_reminder: 'Напоминание о заказе', // review
+        claim_overdue: 'Требование о кредите без ответа', // review
+        invoice_ocr_failed: 'Счёт не удалось прочитать', // review
+      },
+    },
+    install: {
+      title: 'Установить RestoMatch на этот телефон?', // review
+      body: 'Открывайте с главного экрана, работайте без сети и получайте оповещения о поставках и утверждениях.', // review
+      install: 'Установить', // review
+      later: 'Не сейчас', // review
+      iosTitle: 'Установка на iPhone: три шага', // review
+      iosStep1: 'Нажмите кнопку «Поделиться» внизу экрана', // review
+      iosStep2: 'Выберите «На экран „Домой“»', // review
+      iosStep3: 'Нажмите «Добавить» в углу', // review
+      done: 'Понятно', // review
+    },
+    share: {
+      title: 'Поделиться в RestoMatch', // review
+      loading: 'Открываем то, чем вы поделились…', // review
+      toOrder: 'Открываем как приём заказа…', // review
+      filesTitle: '{count, plural, one {# файл сохранён на этом телефоне} few {# файла сохранены на этом телефоне} many {# файлов сохранены на этом телефоне} other {# файла сохранены на этом телефоне}}', // review
+      filesBody: 'Файлы хранятся на этом телефоне до 24 часов. Откройте поставку и прикрепите их к счёту.', // review
+      filesOther: 'Файлы хранятся на этом телефоне до 24 часов. Передайте их менеджеру или владельцу.', // review
+      toReceiving: 'К приёмке товара', // review
+      discard: 'Удалить', // review
+      discarded: 'Удалено с этого телефона', // review
+      skipped: '{count, plural, one {# файл не сохранён (только фото или PDF, до 20MB)} few {# файла не сохранены (только фото или PDF, до 20MB)} many {# файлов не сохранены (только фото или PDF, до 20MB)} other {# файла не сохранены (только фото или PDF, до 20MB)}}', // review
+      filesLost: 'Файл не дошёл. Поделитесь ещё раз из установленного приложения.', // review
+      textTitle: 'Текст, которым вы поделились', // review
+      textBody: 'Приём заказов здесь не включён. Скопируйте текст и передайте его.', // review
+      copy: 'Копировать', // review
+      copied: 'Текст скопирован', // review
+      emptyTitle: 'Ничего не пришло', // review
+      emptyBody: 'Срок истёк или уже открыто. Поделитесь ещё раз.', // review
+      home: 'На главную', // review
+    },
+  },
 };
