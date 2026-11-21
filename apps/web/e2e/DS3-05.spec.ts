@@ -1,4 +1,6 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 import { DEMO_RESTAURANT_NAME } from './env';
 import { collectPageErrors, e2eSql, HEBREW } from './helpers';
 
@@ -158,6 +160,24 @@ async function passSpotCheck(page: Page, po: Po) {
   await page.getByTestId('spot-confirm').tap();
 }
 
+/** axe, serious and critical only, the WCAG 2.2 AA tags — the same run as W1-06's (helpers.ts is shared, so a copy). */
+const AXE_SOURCE = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
+async function axe(page: Page): Promise<string[]> {
+  await page.addScriptTag({ content: AXE_SOURCE });
+  return page.evaluate(async () => {
+    const w = window as unknown as {
+      axe: { run: (c: unknown, o: unknown) => Promise<{ violations: { id: string; impact: string; nodes: { target: string[] }[] }[] }> };
+    };
+    const res = await w.axe.run(
+      { exclude: [['nextjs-portal'], ['[data-testid="worker-status-banner"]']] },
+      { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'] } },
+    );
+    return res.violations
+      .filter((v) => v.impact === 'critical' || v.impact === 'serious')
+      .flatMap((v) => v.nodes.map((n) => `${v.id} @ ${n.target.join(' ')}`));
+  });
+}
+
 /** Controls under 44 px (SPEC §5) and anything wider than the screen. */
 async function layoutProblems(page: Page): Promise<string[]> {
   return page.evaluate(() => {
@@ -273,10 +293,55 @@ test.describe('flag off — today\'s order of steps, the new look', () => {
     await row(page, po.lines[1]!.name).getByTestId('count-edit').tap();
     await expect(page.getByRole('dialog', { name: 'כמה הגיע?' })).toBeVisible();
     expect(await layoutProblems(page), 'quantity sheet').toEqual([]);
-    await page.keyboard.press('Escape');
-    await page.getByTestId('all-arrived').tap();
+    // A gap on that line (1 of 5 kg), saved on the sheet's button.
+    const gapLine = row(page, po.lines[1]!.name);
+    await pad(gapLine, '1');
+    await gapLine.getByTestId('count-done').tap();
+    await expect(gapLine).toHaveAttribute('data-state', 'gap');
+    await page.getByTestId('mark-rest').tap();
     await expect(page.getByTestId('spot-check')).toBeVisible();
     expect(await layoutProblems(page), 'spot check').toEqual([]);
+    await passSpotCheck(page, po);
+    // The check before closing, then the end screen: the same rules, and axe clean.
+    await page.getByTestId('close-receipt').tap();
+    await expect(page.getByTestId('close-check')).toBeVisible();
+    await expect(page.getByTestId('close-check'), 'the check opens on its content, not on the grabber').toBeFocused();
+    expect(await layoutProblems(page), 'check before closing').toEqual([]);
+    expect(await axe(page), 'check before closing axe').toEqual([]);
+    await page.getByTestId('close-confirm').tap();
+    await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 60_000 });
+    expect(await layoutProblems(page), 'end screen').toEqual([]);
+    expect(await axe(page), 'end screen axe').toEqual([]);
+  });
+
+  test('a dialog stacked on the quantity sheet (the sign-in sheet) keeps its own keys: no digit and no Enter reach the count', async ({ page }) => {
+    test.setTimeout(120_000);
+    const po = await freshPo('stacked');
+    await openPo(page, po.poId);
+    await page.getByTestId('scan-no-invoice').tap();
+    const kilos = row(page, po.lines[1]!.name);
+    await kilos.getByTestId('count-edit').tap();
+    const sheet = kilos.getByRole('dialog', { name: 'כמה הגיע?' });
+    await expect(sheet).toBeVisible();
+    await expect(kilos.getByTestId('count-qty')).toHaveValue(String(po.lines[1]!.qty));
+    // A modal with a field opens on top, as the session's sign-in sheet does after a 401.
+    await page.evaluate(() => {
+      const d = document.createElement('dialog');
+      d.id = 'stacked';
+      const input = document.createElement('input');
+      input.id = 'stacked-input';
+      d.append(input);
+      document.body.append(d);
+      d.showModal();
+      input.focus();
+    });
+    await page.keyboard.type('2026');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#stacked-input')).toHaveValue('2026');
+    await expect(kilos.getByTestId('count-qty'), 'the count underneath is untouched').toHaveValue(String(po.lines[1]!.qty));
+    await expect(sheet, 'Enter in the other dialog did not save the count').toBeVisible();
+    await page.evaluate(() => (document.getElementById('stacked') as HTMLDialogElement).close());
+    await expect(kilos).toHaveAttribute('data-resolved', 'false');
   });
 
   test('a short phone (360 × 640): the sheet fits with its note, keys stay ≥44 px, and none moves when the note appears', async ({ page }) => {
@@ -348,13 +413,20 @@ test.describe('flag on — the count comes first', () => {
     await page.getByTestId('close-photo').tap();
 
     // The photo after the count: registered, never read on screen, then the receipt closes.
+    // From here on the screen never asks the server for the invoice's reading (the count stays blind).
+    const reads: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().includes('receiving.getInvoice')) reads.push(r.url());
+    });
     await page.getByTestId('scan-input').setInputFiles({ name: 'invoice.png', mimeType: 'image/png', buffer: TINY_PNG });
     await expect(page.getByTestId('scan-process')).toBeEnabled({ timeout: 60_000 });
     await page.getByTestId('scan-process').tap();
     const done = page.getByTestId('receipt-confirmed');
     await expect(done).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByTestId('confirmed-doc')).toContainText('צולם');
-    await expect(page.getByTestId('recon-cards').or(page.getByTestId('recon-table')), 'no invoice review while counting').toHaveCount(0);
+    // Photographed after the count: read in the background, after the close ("לא צולם" would fail this).
+    await expect(page.getByTestId('confirmed-doc')).toContainText('צולם, נקרא ברקע');
+    await expect(page.getByTestId('confirmed-doc')).not.toContainText('לא צולם');
+    expect(reads, 'the invoice is never read on screen while counting').toEqual([]);
     await expect.poll(async () => (await receiptOf(po.poId)).gr?.status, { timeout: 30_000 }).toBe('completed');
     expect((await receiptOf(po.poId)).invoices.length).toBe(1);
     expect(errors, errors.join('\n')).toEqual([]);
@@ -378,6 +450,68 @@ test.describe('flag on — the count comes first', () => {
     await expect(page.getByTestId('close-queued')).toHaveText('אוטומטית, כשהחיבור יחזור');
     await expect(page.getByTestId('confirmed-doc')).toContainText('לא צולם');
     await context.setOffline(false);
+  });
+
+  test('a count made while the receipt cannot start stays on the phone, asks before leaving, comes back after a reload and joins the receipt', async ({ page }) => {
+    test.setTimeout(150_000);
+    const po = await freshPo('kept');
+    // The start cannot reach the server (as with no signal at the first mark); everything else can.
+    const noStart = (r: Route) => (r.request().url().includes('receiving.startReceipt') ? r.abort('internetdisconnected') : r.continue());
+    await page.route('**/api/trpc/**', noStart);
+    await openPo(page, po.poId);
+    const [units, kilos] = po.lines;
+    await row(page, units!.name).getByTestId('count-arrived').tap();
+    await row(page, kilos!.name).getByTestId('count-arrived').tap();
+    await expect(page.getByTestId('count-footer-message')).toContainText('אין חיבור');
+    expect((await receiptOf(po.poId)).gr, 'no receipt yet').toBeNull();
+    const kept = () => page.evaluate(() => Object.entries(localStorage).filter(([k]) => k.startsWith('rm-rcv-precount:')).map(([, v]) => Object.keys(JSON.parse(v) as object).length));
+    expect(await kept(), 'both counts kept on this phone').toEqual([2]);
+
+    // Leaving asks first (RCV-02), then the server is back and the page reloads.
+    const asked: string[] = [];
+    page.on('dialog', (d) => {
+      asked.push(d.type());
+      void d.accept();
+    });
+    await page.unroute('**/api/trpc/**', noStart);
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    expect(asked, 'the reload asked before leaving the count kept on the phone').toContain('beforeunload');
+
+    // Both counts come back, the receipt starts with them, and the phone's copy goes.
+    await expect(page.getByTestId('count-resumed')).toBeVisible();
+    await expect(row(page, units!.name)).toHaveAttribute('data-resolved', 'true');
+    await expect(row(page, kilos!.name)).toHaveAttribute('data-resolved', 'true');
+    await expect
+      .poll(async () => (await receiptOf(po.poId)).lines.filter((l) => Number(l.qty) > 0).map((l) => l.poLineId).sort(), { timeout: 20_000 })
+      .toEqual([units!.poLineId, kilos!.poLineId].sort());
+    await expect.poll(kept, { timeout: 10_000 }).toEqual([]);
+  });
+
+  test('no signal from the first mark to the close: the close says so and keeps the count; with the signal back the receipt starts with every mark and closes', async ({ page, context }) => {
+    test.setTimeout(180_000);
+    const po = await freshPo('nosignal');
+    await openPo(page, po.poId);
+    await expect(page.getByTestId('delivery-check')).toBeVisible();
+    await context.setOffline(true);
+    for (const l of po.lines) await row(page, l.name).getByTestId('count-arrived').tap();
+    await page.getByTestId('close-receipt').tap();
+    await page.getByTestId('close-nodoc').tap();
+    // Today's order cannot start a receipt without a signal either: the count is kept, and the screen says what to do.
+    await expect(page.getByTestId('count-footer-message')).toHaveText('אין חיבור · הספירה שמורה בטלפון. סגרו כשהחיבור יחזור');
+    await expect(page.getByTestId('receipt-confirmed')).toHaveCount(0);
+    expect((await receiptOf(po.poId)).gr, 'nothing reached the server').toBeNull();
+
+    // The signal is back: one receipt starts by itself with every mark, and the close goes through.
+    await context.setOffline(false);
+    await expect
+      .poll(async () => (await receiptOf(po.poId)).lines.filter((l) => Number(l.qty) > 0).length, { timeout: 30_000 })
+      .toBe(po.lines.length);
+    await expect(page.getByTestId('count-footer-message')).toHaveCount(0);
+    await page.getByTestId('close-receipt').tap();
+    await page.getByTestId('close-nodoc').tap();
+    await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 60_000 });
+    await expect.poll(async () => (await receiptOf(po.poId)).gr?.status, { timeout: 30_000 }).toBe('completed');
   });
 
   test('English and Arabic: the same screen in the receiver\'s language', async ({ page, context }) => {

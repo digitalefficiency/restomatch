@@ -33,9 +33,9 @@ const inv = (o: Partial<InvoiceLineRow>): InvoiceLineRow => ({
   ...o,
 });
 
-const WRITE_IDS = ['count-arrived', 'count-edit', 'close-receipt', 'all-arrived', 'mark-rest', 'count-actions'];
+const WRITE_IDS = ['count-arrived', 'count-edit', 'close-receipt', 'all-arrived', 'mark-rest', 'count-actions', 'count-scan-invoice'];
 
-function count(readOnly?: boolean): string {
+function count(readOnly?: boolean, extra: Record<string, unknown> = {}): string {
   const { result, initialMarks } = adaptReconciliation({ po, poLines, receiptLines: [], invoiceLines: [] });
   return renderToStaticMarkup(
     createElement(DockCount, {
@@ -44,6 +44,7 @@ function count(readOnly?: boolean): string {
       onUpdateMark: () => undefined,
       onSubmit: () => undefined,
       supplierName: 'ספק',
+      ...extra,
       ...(readOnly === undefined ? {} : { readOnly }),
     }),
   );
@@ -62,6 +63,12 @@ describe('ReceivingWizard readOnly — the count screen', () => {
     expect(html).toContain('חזה עוף');
     expect(html).toContain('עגבניה שרי');
     expect(html).toContain('data-testid="count-progress"');
+    for (const id of WRITE_IDS) expect(html).not.toContain(`data-testid="${id}"`);
+  });
+
+  it('readOnly with the count first and a camera offered: still no camera and no write action', () => {
+    expect(count(false, { countFirst: true, onPhoto: () => undefined })).toContain('data-testid="count-scan-invoice"');
+    const html = count(true, { countFirst: true, onPhoto: () => undefined });
     for (const id of WRITE_IDS) expect(html).not.toContain(`data-testid="${id}"`);
   });
 });
@@ -101,5 +108,15 @@ describe('ReceivingWizard readOnly — wiring (source guard)', () => {
     expect(src).toContain('if (readOnly) return; // view only: nothing is marked or saved');
     expect(src).toContain('if (readOnly || !grId || !result) return;');
     expect(src).toContain('{dockSlipOn && grId && slipNeeded && !readOnly ? (');
+  });
+  it('count first (flag dockCountFirst): no receipt started, no kept count sent or cleared, when read-only', () => {
+    // The count that opens before any receipt is never built for a read-only view…
+    expect(src).toContain('countFirst && !existingReceipt && !readOnly');
+    // …a count kept on the phone never joins a receipt from it…
+    expect(src).toContain('if (readOnly) return merged;');
+    // …nor is it cleared by it…
+    expect(src).toContain('if (closedAtOpen && !readOnly) writePreCount(null);');
+    // …and the close never starts a receipt from it.
+    expect(src).toContain('if (countFirst && !started && (!grIdRef.current || Object.keys(grLineIdByKeyRef.current).length === 0) && !readOnly && result) {');
   });
 });

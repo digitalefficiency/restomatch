@@ -326,6 +326,8 @@ test('invoice 10 = order 10, 8 arrived: recorded as qty_received 8 in ≤4 taps;
   // Two lines left: the spot check counts both blind, so nothing is marked in bulk.
   expect((await passSpotCheck(page, po)).length).toBe(2);
   await expect(page.getByTestId('mark-rest-undo')).toHaveCount(0);
+  // Every line resolved: the one button is now the close, still under the thumb.
+  await expectPrimaryInThumbZone(page, 'close-receipt');
   await page.getByTestId('close-receipt').tap();
   // DS3-05: a gap (8 of 10) shows the short check before closing, which names it.
   await expect(page.getByTestId('close-check')).toContainText(units!.name);
@@ -512,7 +514,7 @@ test('offline: marks are kept on the phone, the leave sheet stops a silent exit,
 
   await context.setOffline(true);
   await line.getByTestId('count-edit').tap();
-  // A weighed line takes a decimal comma and 3 decimals; far from the order it asks once.
+  // A weighed line takes a decimal comma and 3 decimals; far from the order, a plain note says so.
   await line.getByTestId('count-qty').fill('2,125');
   await expect(line.getByTestId('count-tolerance')).toBeVisible();
   // DS3-05: the statement sits above the keys; the button that says the quantity confirms it.
@@ -571,7 +573,6 @@ test('a count on a line that is only on the invoice survives a reload', async ({
   if (await line.getByTestId('count-edit').count()) await line.getByTestId('count-edit').tap();
   await line.getByTestId('count-qty').fill('4');
   await line.getByTestId('count-qty').press('Enter');
-  if (await line.getByTestId('count-confirm-qty').count()) await line.getByTestId('count-confirm-qty').tap();
   await expect(line).toHaveAttribute('data-resolved', 'true');
 
   await page.reload();

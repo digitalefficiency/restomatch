@@ -451,12 +451,13 @@ export function ReceivingWizard({
     return out;
   }
   /**
-   * Count first, a receipt now known (a reload after it started, or another phone started it): the
-   * counts this phone kept before it existed join it, for the lines it has no count for (a count
-   * on the receipt stands). They are sent through the line outbox, and the phone's copy goes.
+   * A receipt now known (a reload after it started, another phone started it, or the flag was turned
+   * off meanwhile): the counts this phone kept before it existed join it, in either order of steps,
+   * for the lines it has no count for (a count on the receipt stands). They are sent through the line
+   * outbox, and the phone's copy goes. Read-only never writes.
    */
   function adoptPreCount(merged: Record<string, LineMark>, grLineIds: Record<string, string>): Record<string, LineMark> {
-    if (!countFirst || readOnly) return merged;
+    if (readOnly) return merged;
     const kept = readPreCount(merged);
     const keys = Object.keys(kept).filter((k) => !merged[k]?.touched);
     writePreCount(null);
@@ -475,7 +476,7 @@ export function ReceivingWizard({
   useEffect(() => {
     if (!countFirstStart) {
       // Opened on a closed receipt: a count kept on this phone has nothing left to join.
-      if (countFirst && closedAtOpen) writePreCount(null);
+      if (closedAtOpen && !readOnly) writePreCount(null);
       return;
     }
     const kept = readPreCount(marksRef.current);
@@ -814,7 +815,9 @@ export function ReceivingWizard({
     setResult(adapted.result);
     setDuplicateNumber(invoice.duplicateOf?.invoiceNumber ?? null);
     setGrLineIdByKey(adapted.grLineIdByKey);
-    setMarks(withUnsent(keepAdjusted(marksRef.current, adapted.initialMarks, adjustedKeysRef.current), adapted.grLineIdByKey));
+    setMarks(
+      adoptPreCount(withUnsent(keepAdjusted(marksRef.current, adapted.initialMarks, adjustedKeysRef.current), adapted.grLineIdByKey), adapted.grLineIdByKey),
+    );
     setStep(toStep);
   }
 

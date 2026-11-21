@@ -702,7 +702,6 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → Delivery 
     const before = Number((await qty.inputValue()).replace(',', '.'));
     await qty.fill(String(before - 1));
     await qty.press('Enter');
-    if (await first.getByTestId('count-confirm-qty').isVisible().catch(() => false)) await first.getByTestId('count-confirm-qty').click();
     await expect(first).toHaveAttribute('data-resolved', 'true');
     // The rest "as ordered" — only after two random lines are counted blind.
     await page.getByTestId('mark-rest').click();
@@ -728,10 +727,13 @@ test('C · receiver: HaSharon Produce → photo → OCR → review → Delivery 
       update purchase_orders c set expected_delivery_at = o.expected_delivery_at
       from purchase_orders o where c.id = ${clone} and o.id = ${original}`);
     await page.getByTestId('close-receipt').click();
-    // DS3-05: a hand count outside the tolerance is a gap — the short check before closing names it.
+    // DS3-05: one unit short is outside the engine's tolerance on any line under 33 units (the band is
+    // ±1 unit AND at most 3 %), so it is a gap: the short check before closing names exactly that one.
     const check = page.getByTestId('close-check');
-    await expect(check.or(page.getByTestId('receipt-confirmed'))).toBeVisible({ timeout: 30_000 });
-    if (await check.isVisible()) await page.getByTestId('close-confirm').click();
+    await expect(check).toBeVisible({ timeout: 30_000 });
+    await expect(check.getByTestId('gap-line')).toHaveCount(1);
+    await expect(check.getByTestId('gap-line')).toHaveAttribute('data-kind', 'short');
+    await page.getByTestId('close-confirm').click();
     await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole('heading', { name: r.steps.confirmed.title })).toBeVisible();
     // Who received it is on the receipt; the ₪-full invoice page is not linked for the receiver.

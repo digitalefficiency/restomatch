@@ -58,7 +58,16 @@ describe('DockDone — the end screen', () => {
     expect(html).toContain('data-testid="close-queued"');
   });
 
-  it('with a count, the document row says where the document stands', () => {
-    expect(done({ doc: 'none' })).toContain('data-testid="confirmed-doc"');
+  it('with a count, the document row says where the document stands — each state in its own words', () => {
+    const docRow = (html: string) => html.slice(html.indexOf('data-testid="confirmed-doc"'));
+    expect(docRow(done({ doc: 'none' }))).toContain('לא צולם');
+    // Today's order: photographed before the count.
+    expect(docRow(done({ doc: 'done' }))).toContain('צולם');
+    expect(docRow(done({ doc: 'done' }))).not.toContain('לא צולם');
+    expect(docRow(done({ doc: 'done' }))).not.toContain('ברקע');
+    // Count first: photographed after the count, read in the background — or when the signal returns.
+    expect(docRow(done({ doc: 'done', countFirst: true }))).toContain('צולם, נקרא ברקע');
+    expect(docRow(done({ doc: 'queued' }))).toContain('צולם, ייקרא כשהחיבור יחזור');
+    expect(docRow(done({ doc: 'done', countFirst: true, closeQueued: true }))).toContain('צולם, ייקרא כשהחיבור יחזור');
   });
 });
