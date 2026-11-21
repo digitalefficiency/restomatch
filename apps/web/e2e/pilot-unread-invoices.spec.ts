@@ -45,7 +45,7 @@ test('an unread photo invoice shows on home; the row opens the invoice register;
     await page.goto('/dashboard');
     // Train-C B2: the home row opens the register's lines view (invoices.needsLines), not the review tab.
     const more = page.getByTestId('needs-you-more');
-    if (await more.count()) await more.locator('summary').click();
+    if (await more.count()) await more.getByRole('button').click(); // DS3-03: "עוד" is a button that unfolds the rows in place, not a <details> summary
     const homeRow = page.locator('a[href="/dashboard/invoices?view=lines"]').filter({ hasText: 'חשבוניות שממתינות לכם' });
     await expect(homeRow).toBeVisible();
     await homeRow.click();

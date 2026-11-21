@@ -476,8 +476,11 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
     n.spend = num(await hero.getByTestId('leak-hero-base').innerText());
     // The split boxes are desktop-only (the phone reads them as one sentence): read the DOM text.
     // The hero split is by payment status (unpaid / paid invoices) and adds up to the hero.
-    n.unpaid = num((await hero.getByTestId('hero-unpaid').textContent())!.replace(m.overview.hero.unpaid, ''));
-    n.paid = num((await hero.getByTestId('hero-paid').textContent())!.replace(m.overview.hero.paid, ''));
+    // DS3-03: with one part under ₪0.50 the split is one sentence (hero-split-single) and has no figures to read.
+    if ((await hero.getByTestId('hero-split-single').count()) === 0) {
+      n.unpaid = num((await hero.getByTestId('hero-unpaid').textContent())!.replace(m.overview.hero.unpaid, ''));
+      n.paid = num((await hero.getByTestId('hero-paid').textContent())!.replace(m.overview.hero.paid, ''));
+    }
     // "מחכה לך": the decisions waiting for the viewer, in ₪ and count (the old count-only KPI is gone).
     n.pendingApprovals = num(await page.getByTestId('needs-decide-sub').innerText());
     n.decide = num(await page.getByTestId('needs-decide-value').innerText());
@@ -485,7 +488,7 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
     // The % is leak ÷ spend, rounded to one decimal (no target line: R-14 default).
     expect(Math.abs(n.pct - Math.round((n.leak / n.spend) * 1000) / 10), `hero % (${n.pct}) vs ₪${n.leak} ÷ ₪${n.spend}`).toBeLessThanOrEqual(0.1);
     // The leak splits into "on unpaid invoices" + "on paid invoices" (by payment status).
-    expect(Math.abs(n.unpaid + n.paid - n.leak), `unpaid ₪${n.unpaid} + paid ₪${n.paid} vs leak ₪${n.leak}`).toBeLessThanOrEqual(1);
+    if (n.unpaid !== undefined && n.paid !== undefined) expect(Math.abs(n.unpaid + n.paid - n.leak), `unpaid ₪${n.unpaid} + paid ₪${n.paid} vs leak ₪${n.leak}`).toBeLessThanOrEqual(1); // DS3-03: only in the two-part form
     await checkScreen(page, errors, L, 'B2-hero');
   });
 
