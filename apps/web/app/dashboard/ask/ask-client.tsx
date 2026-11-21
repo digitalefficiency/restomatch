@@ -185,7 +185,11 @@ export function AskClient({
   useEffect(() => {
     if (loadedRef.current) return;
     loadedRef.current = true;
-    setTurns(loadThread(storage()) as Turn[]);
+    // Merge, never replace: a question asked before this effect ran (a click handled
+    // right after hydration on a slow first load) must keep its turn, or its answer
+    // would settle into a turn that no longer exists.
+    const restored = loadThread(storage()) as Turn[];
+    setTurns((prev) => [...restored.filter((r) => !prev.some((p) => p.id === r.id)), ...prev]);
     const q = autoSubmitQuestion(window.location.search);
     if (q) {
       window.history.replaceState(
