@@ -107,7 +107,10 @@ describe('review MAJOR 3 · a later change wins (not by value only)', () => {
     const b = await importRows([{ sku: 'M', price: 6 }]); // B: same ₪
     expect(b.res).toMatchObject({ updated: 0, unchanged: 1 });
     expect((await item('M')).updatedAt.getTime()).toBe(stampA);
-    await expect(revert(a.id)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    await expect(revert(a.id)).rejects.toMatchObject({
+      code: 'PRECONDITION_FAILED',
+      message: expect.stringContaining('CATALOG_IMPORT_NOT_LATEST'),
+    });
     await revert(b.id);
     const r = await revert(a.id);
     expect(r.restored).toBe(1);

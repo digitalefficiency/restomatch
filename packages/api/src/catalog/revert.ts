@@ -4,6 +4,7 @@ import {
   IMPORT_CHUNK_AUDIT_ACTION,
   IMPORT_COMMITTED_AUDIT_ACTION,
   IMPORT_RECORD_VERSION,
+  lockSupplierCatalog,
   type ImportRowChange,
   type ItemSnapshot,
 } from './commit';
@@ -38,6 +39,8 @@ interface CommitRecord {
   chunk?: { index: number; count: number };
   /** On the summary of a chunked import: how many chunk records carry the revert data. */
   chunked?: number;
+  /** A summary written when the import ended failed part-way (its chunks are the ones that went live). */
+  partial?: boolean;
   rowChanges?: ImportRowChange[];
   createdItems?: Array<{ itemId: string; updatedAt: string }>;
 }
@@ -68,7 +71,10 @@ function revertUnits(
     (r, i) => r.chunk?.index === i && r.chunk.count === count && r.supplierId === sorted[0]!.supplierId,
   );
   if (!contiguous || count == null) return 'NOT_REVERTABLE';
-  if (summary) {
+  if (summary?.partial) {
+    // Ended failed part-way: the chunks that went live, 0..k-1 of the planned count.
+    if (status !== 'failed' || summary.chunked !== sorted.length || count < sorted.length) return 'NOT_REVERTABLE';
+  } else if (summary) {
     if (summary.chunked !== sorted.length || count !== sorted.length) return 'NOT_REVERTABLE';
   } else if (status !== 'failed') {
     // No summary yet: still committing. A failed one is undone as far as it got.
@@ -96,7 +102,8 @@ function revertUnits(
  * Only the latest un-reverted import of the supplier can be undone (round 2):
  * an older one is refused (NOT_LATEST) with no audit row. One transaction,
  * holding the import row (FOR UPDATE, which also waits out a worker chunk) and
- * a per-supplier advisory lock: no double revert, no check-then-write race.
+ * then the per-supplier lock every commit takes (lockSupplierCatalog): no double
+ * revert, no commit between the checks and the writes, no lock cycle.
  * Restaurant- and supplier-scoped on every statement. Writes
  * `catalog.import_reverted`. No price_history / baseline writes.
  */
@@ -113,7 +120,9 @@ export async function revertCatalogImport(
       .for('update');
     if (!imp) return 'NOT_FOUND' as const;
     const supplierId = imp.supplierId;
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`catalog-revert:${rid}:${supplierId}`}))`);
+    // The supplier lock every commit takes too (round 3): no commit runs between
+    // this revert's checks and its writes, and none reads a row it is restoring.
+    await lockSupplierCatalog(tx as unknown as Database, rid, supplierId);
 
     const scoped = (actions: string[]) =>
       and(eq(auditLog.restaurantId, rid), inArray(auditLog.action, actions), eq(auditLog.entityId, importId));
@@ -128,17 +137,24 @@ export async function revertCatalogImport(
     if (typeof units === 'string') return units;
     if (units.some((u) => u.supplierId !== supplierId)) return 'NOT_REVERTABLE' as const;
 
-    // Stack semantics: a later commit of this supplier by another import that
-    // is not reverted means this one is no longer the latest.
+    // Stack semantics: this is no longer the latest import when another import
+    // of the supplier is still on its way (pending / mapped), or committed later
+    // and is not reverted. "Later" is the commit-order stamp each record takes
+    // under the supplier lock (lockedAt), never a transaction-start time.
     const later = (await tx.execute(sql`
+      select 1 from catalog_imports o
+       where o.restaurant_id = ${rid} and o.supplier_id = ${supplierId}::uuid
+         and o.id <> ${importId}::uuid and o.status in ('pending', 'mapped')
+      union all
       select 1 from audit_log l
        where l.restaurant_id = ${rid}
          and l.action in (${IMPORT_COMMITTED_AUDIT_ACTION}, ${IMPORT_CHUNK_AUDIT_ACTION})
          and l.after ->> 'supplierId' = ${supplierId}
          and l.entity_id is distinct from ${importId}::uuid
-         and l.at > (select max(m.at) from audit_log m
-                      where m.restaurant_id = ${rid} and m.entity_id = ${importId}::uuid
-                        and m.action in (${IMPORT_COMMITTED_AUDIT_ACTION}, ${IMPORT_CHUNK_AUDIT_ACTION}))
+         and coalesce((l.after ->> 'lockedAt')::timestamptz, l.at) >
+             (select max(coalesce((m.after ->> 'lockedAt')::timestamptz, m.at)) from audit_log m
+               where m.restaurant_id = ${rid} and m.entity_id = ${importId}::uuid
+                 and m.action in (${IMPORT_COMMITTED_AUDIT_ACTION}, ${IMPORT_CHUNK_AUDIT_ACTION}))
          and not exists (select 1 from audit_log r
                           where r.restaurant_id = ${rid} and r.action = ${IMPORT_REVERTED_AUDIT_ACTION}
                             and r.entity_id = l.entity_id)

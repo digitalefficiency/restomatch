@@ -48,7 +48,20 @@ export interface CommitArgs {
    * `catalog.import_chunk_committed` row; the worker writes the one
    * `catalog.import_committed` summary (what AU-13 reads) after the last chunk.
    */
-  chunk?: { index: number; count: number };
+  chunk?: { index: number; count: number; size: number };
+}
+
+/**
+ * W3-10 round 3 · the one lock that orders a supplier's catalog writes: every
+ * commit (inline, and each worker chunk), the summary, and every revert take
+ * it, always after their own catalog_imports row (no lock cycle). Returns the
+ * commit-order stamp (`clock_timestamp()` read under the lock, µs, as text):
+ * "later than" between imports compares these, never transaction-start times.
+ */
+export async function lockSupplierCatalog(db: Database, restaurantId: string, supplierId: string): Promise<string> {
+  await db.execute(sql`select pg_advisory_xact_lock(hashtext(${`catalog-revert:${restaurantId}:${supplierId}`}))`);
+  const [r] = (await db.execute(sql`select clock_timestamp()::text as t`)) as unknown as Array<{ t: string }>;
+  return r!.t;
 }
 
 /** W3-10 · the audit action AU-13's priceListDiff reads (one row per committed import). */
@@ -171,6 +184,8 @@ export async function commitCatalogRows(
       `[catalog.commit] supplier ${supplierId} does not belong to restaurant ${restaurantId} — refusing to commit`,
     );
   }
+  // Serialize with reverts (and other commits) of this supplier (round 3).
+  const lockedAt = await lockSupplierCatalog(db, restaurantId, supplierId);
 
   let created = 0;
   let updated = 0;
@@ -242,7 +257,7 @@ export async function commitCatalogRows(
           existingFilter,
         ),
       )
-      .orderBy(asc(supplierCatalogItems.createdAt))
+      .orderBy(asc(supplierCatalogItems.createdAt), asc(supplierCatalogItems.id))
       .limit(1);
 
     // 2. Resolve the canonical product.
@@ -343,11 +358,13 @@ export async function commitCatalogRows(
     if (existing) {
       // What this row would store. A blank / unreadable price cell keeps
       // everything that defines the existing price — the price, its unit and
-      // its pack (round 2: 12.00/kg never becomes 12.00 per case of 12).
+      // its pack (round 2: 12.00/kg never becomes 12.00 per case of 12). A
+      // blank or unmapped unit / pack cell on a priced row keeps the existing
+      // one too (round 3: 120.00 per case of 12 never becomes 125.00 per unit).
       const next: ItemSnapshot = {
         listPrice: blankPrice ? existing.listPrice : String(row.listPrice),
-        unit: blankPrice ? existing.unit : row.unit,
-        packSize: blankPrice ? existing.packSize : packString(row.packSize),
+        unit: blankPrice || row.unit == null ? existing.unit : row.unit,
+        packSize: blankPrice || row.packSize == null ? existing.packSize : packString(row.packSize),
         productId,
         // A row an earlier revert turned off comes back when a file lists it
         // again, but only while it is exactly as that revert left it.
@@ -496,6 +513,7 @@ export async function commitCatalogRows(
       revertVersion: IMPORT_RECORD_VERSION,
       ...(args.chunk ? { chunk: args.chunk } : {}),
       commitAt: commitAt.toISOString(),
+      lockedAt,
       supplierId,
       created,
       updated,
@@ -512,28 +530,33 @@ export async function commitCatalogRows(
   return { created, updated, unchanged, createdProducts, ambiguous, priceChanges, keptPriceOnBlank };
 }
 
-/** What a chunk record carries beyond the revert data (the summary adds these up). */
+/** What a chunk record carries (the summary adds these up). */
 interface ChunkRecord {
-  chunk?: { index: number; count: number };
+  chunk?: { index: number; count: number; size?: number };
   created?: number;
   updated?: number;
   unchanged?: number;
   createdProducts?: number;
   keptPriceOnBlank?: number;
-  priceChanges?: ImportPriceChange[];
+  rowChanges?: ImportRowChange[];
+  createdItemIds?: string[];
 }
 
 /**
- * W3-10 · after the last chunk of a background import: the ONE
- * `catalog.import_committed` record (what AU-13's priceListDiff announces),
- * adding the chunks up. A row two chunks changed is one price change (first old
- * price → last new price). It carries no revert data (`chunked` = the number of
- * chunk records the revert works from). Run in the last chunk's transaction.
+ * W3-10 · the ONE `catalog.import_committed` record of a background import
+ * (what AU-13's priceListDiff announces), adding its chunks up — after the last
+ * chunk, or (`partial`) when the import ends failed part-way, so the rises that
+ * did go live are still announced. Its price changes are merged across chunks
+ * per row (round 3): the first chunk's `before`, the last chunk's `after`; a
+ * row this import created, or one with no price before it, is not a change. It
+ * carries no revert data (`chunked` = the chunk records the revert works from).
+ * Runs in the caller's transaction, under the supplier lock.
  */
 export async function recordImportSummary(
   db: Database,
-  args: { restaurantId: string; supplierId: string; importId: string; userId?: string | null },
+  args: { restaurantId: string; supplierId: string; importId: string; userId?: string | null; partial?: boolean },
 ): Promise<{ created: number; updated: number; unchanged: number; createdProducts: number; chunks: number }> {
+  const lockedAt = await lockSupplierCatalog(db, args.restaurantId, args.supplierId);
   const recs = (
     await db
       .select({ after: auditLog.after })
@@ -550,19 +573,31 @@ export async function recordImportSummary(
     .sort((x, y) => (x.chunk?.index ?? 0) - (y.chunk?.index ?? 0));
   const sum = (k: 'created' | 'updated' | 'unchanged' | 'createdProducts' | 'keptPriceOnBlank') =>
     recs.reduce((n, r) => n + (r[k] ?? 0), 0);
-  const merged = new Map<string, ImportPriceChange>();
-  const loose: ImportPriceChange[] = [];
+  const createdHere = new Set(recs.flatMap((r) => r.createdItemIds ?? []));
+  const rows = new Map<string, ImportRowChange>();
   for (const r of recs) {
-    for (const c of r.priceChanges ?? []) {
-      if (!c.itemId) {
-        loose.push(c);
-        continue;
-      }
-      const prev = merged.get(c.itemId);
-      merged.set(c.itemId, prev ? { ...c, oldListPrice: prev.oldListPrice } : c);
+    for (const c of r.rowChanges ?? []) {
+      const prev = rows.get(c.itemId);
+      rows.set(c.itemId, prev ? { ...c, before: prev.before } : c);
     }
   }
-  const priceChanges = [...merged.values(), ...loose].filter((c) => !samePrice(c.oldListPrice, c.newListPrice));
+  const priceChanges: ImportPriceChange[] = [...rows.values()]
+    .filter(
+      (c) =>
+        !createdHere.has(c.itemId) &&
+        c.before.listPrice != null &&
+        c.after.listPrice != null &&
+        !samePrice(c.before.listPrice, c.after.listPrice),
+    )
+    .map((c) => ({
+      itemId: c.itemId,
+      productId: c.after.productId,
+      name: c.name,
+      sku: c.sku,
+      oldListPrice: c.before.listPrice!,
+      newListPrice: c.after.listPrice!,
+      unit: c.after.unit ?? c.before.unit,
+    }));
   const totals = {
     created: sum('created'),
     updated: sum('updated'),
@@ -578,6 +613,8 @@ export async function recordImportSummary(
     after: {
       revertVersion: IMPORT_RECORD_VERSION,
       chunked: recs.length,
+      ...(args.partial ? { partial: true } : {}),
+      lockedAt,
       supplierId: args.supplierId,
       ...totals,
       keptPriceOnBlank: sum('keptPriceOnBlank'),

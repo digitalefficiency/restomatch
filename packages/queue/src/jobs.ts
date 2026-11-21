@@ -326,6 +326,8 @@ export async function recoverStalled(
     RETURNING status, queue, payload, restaurant_id::text`;
   const ocrDead = rows.filter((r) => r.status === 'failed' && r.queue === 'ocr-invoice');
   if (ocrDead.length) await markStalledOcrInvoicesFailed(sql, ocrDead);
+  const importDead = rows.filter((r) => r.status === 'failed' && r.queue === 'import-catalog');
+  if (importDead.length) await markStalledCatalogImportsFailed(sql, importDead);
   return {
     requeued: rows.filter((r) => r.status === 'queued').length,
     failed: rows.filter((r) => r.status === 'failed').length,
@@ -363,6 +365,49 @@ async function markStalledOcrInvoicesFailed(
          WHERE id = ${invoiceId}::uuid AND restaurant_id = ${j.restaurant_id}::uuid AND status = 'ocr_pending'`;
     } catch (err) {
       console.warn(`[queue] could not mark the invoice of a stalled OCR job failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+}
+
+/**
+ * W3-10 round 3 · an import-catalog job dead-lettered by stall recovery (its
+ * runner was killed twice mid-chunk) never reached the job's own failure path,
+ * so its import would stay 'pending' — neither resumable nor revertable, and
+ * blocking the supplier's "undo the latest import". Mark it failed (only while
+ * still pending / mapped, only the job's own tenant) and queue a small
+ * `finalize` job (no file) that writes the import's partial summary, so the
+ * chunks that went live are announced and can be undone. Logged, never thrown.
+ */
+async function markStalledCatalogImportsFailed(
+  sql: Sql,
+  jobs: Array<{ payload: unknown; restaurant_id: string | null }>,
+): Promise<void> {
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  for (const j of jobs) {
+    const p = (j.payload ?? {}) as { importId?: unknown; supplierId?: unknown; mapping?: unknown; file?: { filename?: unknown } };
+    if (typeof p.importId !== 'string' || !UUID.test(p.importId) || !j.restaurant_id) continue;
+    try {
+      const marked = await sql`
+        UPDATE catalog_imports
+           SET status = 'failed', error = 'stalled: the import run was cut off twice'
+         WHERE id = ${p.importId}::uuid AND restaurant_id = ${j.restaurant_id}::uuid AND status IN ('pending', 'mapped')
+        RETURNING id`;
+      if (marked.length === 0) continue;
+      await insertJob(
+        sql,
+        'import-catalog',
+        {
+          restaurantId: j.restaurant_id,
+          supplierId: p.supplierId,
+          importId: p.importId,
+          file: { filename: typeof p.file?.filename === 'string' ? p.file.filename : '' },
+          mapping: p.mapping ?? {},
+          finalize: true,
+        },
+        { restaurantId: j.restaurant_id, maxAttempts: 3, dedupeKey: `import-catalog:finalize:${p.importId}` },
+      );
+    } catch (err) {
+      console.warn(`[queue] could not mark the import of a stalled import-catalog job failed: ${err instanceof Error ? err.message : err}`);
     }
   }
 }

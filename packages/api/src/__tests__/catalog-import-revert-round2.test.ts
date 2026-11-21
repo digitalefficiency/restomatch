@@ -100,8 +100,14 @@ describe('round 2 MAJOR 1 · a blank price keeps its unit and pack', () => {
 describe('round 2 MAJOR 2 · blank and unchanged rows keep their times', () => {
   it('a file with no prices does not restamp the list over a newer PO price', async () => {
     await importRows([{ sku: 'M', price: 5 }]);
+    // Round 3: the list was last updated 2 h ago and a PO was sent 1 h ago, so a
+    // restamp to "now" would really put the list price back in front of the PO.
+    const now = Date.now();
+    const listAt = new Date(now - 2 * 3_600_000);
+    const sentAt = new Date(now - 3_600_000);
+    const id = (await item('M')).id;
+    await db.update(supplierCatalogItems).set({ updatedAt: listAt, observedAt: listAt }).where(eq(supplierCatalogItems.id, id));
     const before = await item('M');
-    const sentAt = new Date(before.updatedAt.getTime() + 60_000);
     const [po] = await db
       .insert(purchaseOrders)
       .values({ restaurantId: A.restaurantId, supplierId: A.supplierId, status: 'sent', source: 'manual', sentAt, createdAt: sentAt })
@@ -109,16 +115,16 @@ describe('round 2 MAJOR 2 · blank and unchanged rows keep their times', () => {
     await db.insert(poLines).values({ poId: po!.id, productId: before.productId, qtyOrdered: '2', unit: 'ק״ג', unitPriceExpected: '4.5' });
 
     await importRows([{ sku: 'M', price: null }]);
-    const after = await item('M');
-    expect(after.updatedAt.getTime()).toBe(before.updatedAt.getTime());
-    expect(after.observedAt?.getTime()).toBe(before.observedAt?.getTime());
     const expected = await resolveExpectedPrice(db, {
       restaurantId: A.restaurantId,
       supplierId: A.supplierId,
-      at: new Date(sentAt.getTime() + 3_600_000),
+      at: new Date(now + 3_600_000),
       lines: [{ productId: before.productId!, unit: 'ק״ג' }],
     });
     expect(expected.get(orderPriceKey(before.productId!, 'ק״ג'))).toMatchObject({ source: 'last_po', unitPrice: 4.5 });
+    const after = await item('M');
+    expect(after.updatedAt.getTime()).toBe(listAt.getTime());
+    expect(after.observedAt?.getTime()).toBe(listAt.getTime());
   });
 });
 

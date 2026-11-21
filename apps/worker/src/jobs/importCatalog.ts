@@ -7,7 +7,7 @@ import {
 } from '@restomatch/api';
 import { MockEmbeddingProvider } from '@restomatch/catalog';
 import { and, catalogImports, eq, sql, type CatalogColumnMapping, type Database } from '@restomatch/db';
-import { enqueueCatalogImport } from '@restomatch/queue';
+import { CATALOG_IMPORT_RUN_BUDGET_MS, enqueueCatalogImport } from '@restomatch/queue';
 import { makeWorker, type WorkerJob } from '../queue';
 import { jobDb } from '../db';
 
@@ -18,21 +18,21 @@ export interface CatalogImportJob {
   importId: string;
   file: { filename: string; base64?: string; text?: string };
   mapping: CatalogColumnMapping;
+  /**
+   * Set only by the queue's stall dead-letter (no file): the import ended
+   * failed without its own failure path — write its partial summary.
+   */
+  finalize?: boolean;
 }
 
 /**
  * Rows per chunk — one transaction and one revert record each (W3-10 review
- * round 2). Measured locally at ~25 ms per new row (2,000 rows: 50 s; 20,000
- * rows in one transaction: far past the 300 s function limit), so a chunk of
- * 500 commits in seconds even at several times that latency in production.
+ * rounds 2–3). Measured locally in ONE transaction: 2,000 new rows 50 s,
+ * 20,000 new rows 1,109 s (≈25 → 55 ms/row as the catalog grows). 250 rows
+ * stay well inside CATALOG_IMPORT_CHUNK_ALLOWANCE_MS. A resumed import keeps
+ * the size its first chunks were recorded with.
  */
-export const IMPORT_CHUNK_ROWS = 500;
-/**
- * After a chunk, a run that has spent this long hands the rest to a fresh job
- * (the cron route's claim window is 240 s, its function limit 300 s): a long
- * import never gets cut off mid-chunk, and never burns its retries on time.
- */
-export const IMPORT_RUN_BUDGET_MS = 120_000;
+export const IMPORT_CHUNK_ROWS = 250;
 
 const embedder = new MockEmbeddingProvider(1536);
 
@@ -45,14 +45,38 @@ export type ImportChunksOutcome =
   | { status: 'continue'; nextChunk: number }
   | { status: 'skipped'; reason: 'already committed' | 'reverted' };
 
+const REVERTED = 'catalog.import_reverted';
+const COMMITTED = 'catalog.import_committed';
+
+/** This import's records: its chunks (index + size), and whether it has a summary / was reverted. */
+async function importRecords(db: Database, restaurantId: string, importId: string) {
+  const recs = (await db.execute(sql`
+    select action, (after -> 'chunk' ->> 'index')::int as idx, (after -> 'chunk' ->> 'size')::int as size,
+           (after -> 'chunk' ->> 'count')::int as count
+      from audit_log
+     where restaurant_id = ${restaurantId} and entity_id = ${importId}::uuid
+       and action in (${IMPORT_CHUNK_AUDIT_ACTION}, ${COMMITTED}, ${REVERTED})
+  `)) as unknown as Array<{ action: string; idx: number | null; size: number | null; count: number | null }>;
+  const chunks = recs.filter((r) => r.action === IMPORT_CHUNK_AUDIT_ACTION);
+  return {
+    done: new Set(chunks.map((r) => Number(r.idx))),
+    size: chunks.find((r) => r.size != null)?.size ?? null,
+    count: chunks.find((r) => r.count != null)?.count ?? null,
+    summarized: recs.some((r) => r.action === COMMITTED),
+    reverted: recs.some((r) => r.action === REVERTED),
+  };
+}
+
 /**
  * Commit an import chunk by chunk, resuming after the last chunk that has a
- * record (a retry or a continuation never redoes one). Each chunk is one
- * transaction that holds the catalog_imports row (FOR UPDATE, id + restaurant)
- * and re-checks it first: committed already, or reverted → stop; this chunk
- * recorded already → skip. The last chunk, in the same transaction, writes the
- * one `catalog.import_committed` summary and sets status = committed — so two
- * runs can never both commit, and a failure mid-chunk leaves nothing of it.
+ * record (a retry or a continuation never redoes one, and keeps the chunk size
+ * the first chunks were recorded with). Each chunk is one transaction that
+ * holds the catalog_imports row (FOR UPDATE, id + restaurant), then the
+ * supplier lock (inside commitCatalogRows, the same order as a revert), and
+ * re-checks first: summarized already, or reverted → stop; this chunk recorded
+ * already → skip. The last chunk, in the same transaction, writes the one
+ * `catalog.import_committed` summary and sets status = committed — so two runs
+ * can never both commit, and a failure mid-chunk leaves nothing of it.
  */
 export async function commitImportInChunks(
   db: Database,
@@ -60,13 +84,14 @@ export async function commitImportInChunks(
   opts: { chunkRows?: number; budgetMs?: number } = {},
 ): Promise<ImportChunksOutcome> {
   const { restaurantId, supplierId, importId, file, mapping } = data;
-  const chunkRows = opts.chunkRows ?? IMPORT_CHUNK_ROWS;
-  const budgetMs = opts.budgetMs ?? IMPORT_RUN_BUDGET_MS;
+  const budgetMs = opts.budgetMs ?? CATALOG_IMPORT_RUN_BUDGET_MS;
   const t0 = Date.now();
 
   const table = await parseCatalogFile(file);
   const rows = extractCatalogRows(table, mapping);
-  const count = Math.max(1, Math.ceil(rows.length / chunkRows));
+  const prior = await importRecords(db, restaurantId, importId);
+  const chunkRows = prior.size ?? opts.chunkRows ?? IMPORT_CHUNK_ROWS;
+  const count = prior.count ?? Math.max(1, Math.ceil(rows.length / chunkRows));
   let didChunk = false;
 
   for (let index = 0; index < count; index++) {
@@ -82,18 +107,15 @@ export async function commitImportInChunks(
         throw new Error(`[import-catalog] import=${importId} not found in restaurant=${restaurantId} — refusing to process`);
       }
       if (imp.status === 'committed') return { stop: 'already committed' as const };
-      const recs = (await tx.execute(sql`
-        select action, (after -> 'chunk' ->> 'index')::int as idx
-          from audit_log
-         where restaurant_id = ${restaurantId} and entity_id = ${importId}::uuid
-           and action in (${IMPORT_CHUNK_AUDIT_ACTION}, 'catalog.import_reverted')
-      `)) as unknown as Array<{ action: string; idx: number | null }>;
-      if (recs.some((r) => r.action === 'catalog.import_reverted')) return { stop: 'reverted' as const };
-      const done = new Set(recs.filter((r) => r.action === IMPORT_CHUNK_AUDIT_ACTION).map((r) => Number(r.idx)));
+      const now = await importRecords(tx, restaurantId, importId);
+      if (now.reverted) return { stop: 'reverted' as const };
+      // A summary means the import ended (committed, or failed and finalized).
+      if (now.summarized) return { stop: 'already committed' as const };
+      const done = now.done;
       if (!done.has(index)) {
         await commitCatalogRows(
           tx,
-          { restaurantId, supplierId, sourceImportId: importId, chunk: { index, count } },
+          { restaurantId, supplierId, sourceImportId: importId, chunk: { index, count, size: chunkRows } },
           rows.slice(index * chunkRows, (index + 1) * chunkRows),
           embedder,
         );
@@ -130,14 +152,59 @@ export async function commitImportInChunks(
   throw new Error(`[import-catalog] import=${importId}: all chunks recorded but not committed`);
 }
 
+/**
+ * An import that ends failed (its last attempt threw, or the queue's stall
+ * dead-letter gave up on it): status failed, and — when chunks went live — the
+ * partial `catalog.import_committed` summary, so AU-13 announces the rises that
+ * are live and the revert can undo them as one import (round 3). Once only:
+ * never over a committed, summarized or reverted import.
+ */
+export async function finalizeFailedImport(db: Database, data: CatalogImportJob, error: string | null): Promise<void> {
+  const { restaurantId, supplierId, importId } = data;
+  await db.transaction(async (txRaw) => {
+    const tx = txRaw as unknown as Database;
+    const [imp] = await tx
+      .select({ status: catalogImports.status })
+      .from(catalogImports)
+      .where(and(eq(catalogImports.id, importId), eq(catalogImports.restaurantId, restaurantId)))
+      .for('update');
+    if (!imp || imp.status === 'committed') return;
+    await tx
+      .update(catalogImports)
+      .set({ status: 'failed', ...(error != null ? { error } : {}) })
+      .where(and(eq(catalogImports.id, importId), eq(catalogImports.restaurantId, restaurantId)));
+    const recs = await importRecords(tx, restaurantId, importId);
+    if (recs.done.size > 0 && !recs.summarized && !recs.reverted) {
+      await recordImportSummary(tx, { restaurantId, supplierId, importId, partial: true });
+    }
+  });
+}
+
+export interface ProcessImportOptions {
+  /** Tests: the run budget (default CATALOG_IMPORT_RUN_BUDGET_MS). */
+  budgetMs?: number;
+  /** Tests: rows per chunk for a new import. */
+  chunkRows?: number;
+  /** Tests: how the continuation job is queued. */
+  enqueue?: (data: CatalogImportJob) => Promise<boolean>;
+}
+
 /** The import-catalog job: run by the worker loop (above) and by the serverless runner (handlers.ts). */
-export async function processImportCatalog(job: WorkerJob<CatalogImportJob>) {
+export async function processImportCatalog(job: WorkerJob<CatalogImportJob>, opts: ProcessImportOptions = {}) {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is required');
-  const db = jobDb(url);
+  const db = jobDb(url) as unknown as Database;
   const { restaurantId, importId } = job.data;
 
-  // Tenant guard: the import row must belong to the payload's restaurant.
+  if (job.data.finalize) {
+    await finalizeFailedImport(db, job.data, null);
+    return { importId, finalized: true as const };
+  }
+
+  // Tenant guard: the import row must belong to the payload's restaurant. Not
+  // found may also mean the request that queued this job has not committed yet
+  // (the job is queued inside it): thrown, so a later attempt (3, with backoff)
+  // finds it (round 3).
   const [imp] = await db
     .select({ id: catalogImports.id, status: catalogImports.status })
     .from(catalogImports)
@@ -157,10 +224,13 @@ export async function processImportCatalog(job: WorkerJob<CatalogImportJob>) {
   }
 
   try {
-    const out = await commitImportInChunks(db as unknown as Database, job.data);
+    const out = await commitImportInChunks(db, job.data, { budgetMs: opts.budgetMs, chunkRows: opts.chunkRows });
     if (out.status === 'continue') {
-      // Out of this run's budget: the rest goes to a fresh job, which resumes at nextChunk.
-      await enqueueCatalogImport({ ...job.data, mapping: { ...job.data.mapping } });
+      // Out of this run's budget: the rest goes to a fresh job, which resumes at
+      // nextChunk. If that cannot be queued, this attempt fails and the queue's
+      // retry resumes instead.
+      const queued = await (opts.enqueue ?? ((d) => enqueueCatalogImport({ ...d, mapping: { ...d.mapping } })))(job.data);
+      if (!queued) throw new Error(`[import-catalog] import=${importId}: the continuation job could not be queued`);
       console.log(`[import-catalog] import=${importId} continues at chunk ${out.nextChunk}`);
       return { importId, continued: out.nextChunk };
     }
@@ -171,13 +241,19 @@ export async function processImportCatalog(job: WorkerJob<CatalogImportJob>) {
     );
     return { importId, ...out };
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     // The chunk that failed left nothing (its transaction rolled back); the
-    // chunks before it stay and are resumed by the retry. If the retries run
-    // out, the import stays failed and can be undone as far as it got.
-    await db
-      .update(catalogImports)
-      .set({ status: 'failed', error: err instanceof Error ? err.message : String(err) })
-      .where(and(eq(catalogImports.id, importId), eq(catalogImports.restaurantId, restaurantId)));
+    // chunks before it stay. While attempts remain the import stays pending and
+    // the retry resumes it; the last attempt ends it failed (with its partial
+    // summary when chunks went live).
+    if (job.attemptsMade + 1 >= job.opts.attempts) {
+      await finalizeFailedImport(db, job.data, message);
+    } else {
+      await db
+        .update(catalogImports)
+        .set({ error: `attempt ${job.attemptsMade + 1} failed, retrying: ${message}` })
+        .where(and(eq(catalogImports.id, importId), eq(catalogImports.restaurantId, restaurantId)));
+    }
     throw err;
   }
 }

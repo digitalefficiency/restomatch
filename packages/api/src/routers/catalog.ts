@@ -141,7 +141,7 @@ async function currentPrices(db: Database, restaurantId: string, supplierId: str
     })
     .from(supplierCatalogItems)
     .where(and(eq(supplierCatalogItems.restaurantId, restaurantId), eq(supplierCatalogItems.supplierId, supplierId)))
-    .orderBy(asc(supplierCatalogItems.createdAt));
+    .orderBy(asc(supplierCatalogItems.createdAt), asc(supplierCatalogItems.id));
   const bySku = new Map<string, number | null>();
   const byName = new Map<string, number | null>();
   for (const it of items) {
@@ -576,13 +576,17 @@ export const catalogRouter = router({
               AND a.action = 'catalog.import_committed' AND a.entity_id = "catalog_imports"."id") <= 1
             AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = ${rid}
               AND a.action = 'catalog.import_reverted' AND a.entity_id = "catalog_imports"."id")
+            AND NOT EXISTS (SELECT 1 FROM catalog_imports o WHERE o.restaurant_id = ${rid}
+              AND o.supplier_id = "catalog_imports"."supplier_id" AND o.id <> "catalog_imports"."id"
+              AND o.status IN ('pending', 'mapped'))
             AND NOT EXISTS (SELECT 1 FROM audit_log l WHERE l.restaurant_id = ${rid}
               AND l.action IN ('catalog.import_committed', 'catalog.import_chunk_committed')
               AND l.after ->> 'supplierId' = "catalog_imports"."supplier_id"::text
               AND l.entity_id IS DISTINCT FROM "catalog_imports"."id"
-              AND l.at > (SELECT max(m.at) FROM audit_log m WHERE m.restaurant_id = ${rid}
-                AND m.entity_id = "catalog_imports"."id"
-                AND m.action IN ('catalog.import_committed', 'catalog.import_chunk_committed'))
+              AND coalesce((l.after ->> 'lockedAt')::timestamptz, l.at) >
+                (SELECT max(coalesce((m.after ->> 'lockedAt')::timestamptz, m.at)) FROM audit_log m
+                  WHERE m.restaurant_id = ${rid} AND m.entity_id = "catalog_imports"."id"
+                  AND m.action IN ('catalog.import_committed', 'catalog.import_chunk_committed'))
               AND NOT EXISTS (SELECT 1 FROM audit_log r WHERE r.restaurant_id = ${rid}
                 AND r.action = 'catalog.import_reverted' AND r.entity_id = l.entity_id))`,
           reverted: sql<boolean>`EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = ${rid}
