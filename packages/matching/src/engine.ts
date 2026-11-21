@@ -2,6 +2,7 @@ import type { Tolerances } from '@restomatch/types';
 import type {
   BaselineEntry,
   Discrepancy,
+  DiscrepancyBasis,
   DiscrepancyType,
   GrLineInput,
   InvoiceLineInput,
@@ -32,6 +33,52 @@ function discrepancy(
   fields: Omit<Discrepancy, 'type' | 'severity'>,
 ): Discrepancy {
   return { type, severity, ...fields };
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * G-15 basis: the calculation behind each deltaAmount (additive)
+ * ────────────────────────────────────────────────────────────────────────── */
+
+const NO_THRESHOLD: DiscrepancyBasis['threshold'] = { pct: null, abs: null, units: null };
+
+function basisOf(
+  b: Pick<DiscrepancyBasis, 'source' | 'formula'> & Partial<DiscrepancyBasis>,
+): DiscrepancyBasis {
+  return {
+    qtyOrdered: null,
+    qtyReceived: null,
+    qtyBilled: null,
+    qtyUsed: null,
+    unitPriceUsed: null,
+    referencePrice: null,
+    unitFactor: null,
+    overlapUnits: null,
+    actualAmount: null,
+    referenceAmount: null,
+    vatRate: null,
+    threshold: NO_THRESHOLD,
+    ...b,
+  };
+}
+
+/**
+ * Recompute a discrepancy's ₪ from its basis with the engine's own money
+ * helpers. `basisDeltaAmount(d.basis) === d.deltaAmount` for every engine
+ * discrepancy (basis.test.ts).
+ */
+export function basisDeltaAmount(basis: DiscrepancyBasis): number {
+  switch (basis.formula) {
+    case 'price_x_qty':
+      return mulIls(Math.abs((basis.unitPriceUsed ?? 0) - (basis.referencePrice ?? 0)), basis.qtyUsed ?? 0);
+    case 'unit_x_qty':
+      return mulIls(basis.unitPriceUsed ?? 0, basis.qtyUsed ?? 0);
+    case 'amount':
+      return quantizeIls(basis.actualAmount ?? 0);
+    case 'amount_diff':
+      return toShekels(Math.abs(toAgorot(basis.actualAmount ?? 0) - toAgorot(basis.referenceAmount ?? 0)));
+    case 'none':
+      return 0;
+  }
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -76,6 +123,14 @@ function evaluatePrice(
       actual,
       deltaAmount: mulIls(absDiff, qty),
       toleranceUsed: `price: ±${tolerances.pricePercent * 100}% or ₪${tolerances.priceAbsolute}`,
+      basis: basisOf({
+        source: 'po',
+        formula: 'price_x_qty',
+        qtyUsed: qty,
+        unitPriceUsed: actual,
+        referencePrice: expected,
+        threshold: { pct: tolerances.pricePercent, abs: tolerances.priceAbsolute, units: null },
+      }),
     },
   };
 }
@@ -125,6 +180,15 @@ function evaluateQty(
       actual: received,
       deltaAmount: mulIls(unitPrice, absDiff),
       toleranceUsed: `qty: ±${tolerances.qtyPercent * 100}% or ${tolerances.qtyAbsolute} units`,
+      basis: basisOf({
+        source: 'gr',
+        formula: 'unit_x_qty',
+        qtyOrdered: ordered,
+        qtyReceived: received,
+        qtyUsed: absDiff,
+        unitPriceUsed: unitPrice,
+        threshold: { pct: tolerances.qtyPercent, abs: null, units: tolerances.qtyAbsolute },
+      }),
     },
   };
 }
@@ -146,6 +210,7 @@ export function runMatch(input: MatchInput): MatchOutput {
         actual: null,
         deltaAmount: quantizeIls(invoice.totalInclVat),
         toleranceUsed: 'invoice number uniqueness per supplier',
+        basis: basisOf({ source: 'invoice_total', formula: 'amount', actualAmount: invoice.totalInclVat }),
         message: `Invoice number ${invoice.invoiceNumber} already exists for supplier ${invoice.supplierId}`,
       }),
     );
@@ -164,6 +229,7 @@ export function runMatch(input: MatchInput): MatchOutput {
           actual: invoice.invoiceDate.getTime(),
           deltaAmount: 0,
           toleranceUsed: `±${DATE_ANOMALY_DAYS} days from expected delivery`,
+          basis: basisOf({ source: 'none', formula: 'none' }),
           message: `Invoice date ${invoice.invoiceDate.toISOString()} is ${dayDiff.toFixed(1)} days from expected delivery`,
         }),
       );
@@ -179,6 +245,7 @@ export function runMatch(input: MatchInput): MatchOutput {
         actual: null,
         deltaAmount: quantizeIls(invoice.totalInclVat),
         toleranceUsed: 'PO must exist for invoice',
+        basis: basisOf({ source: 'invoice_total', formula: 'amount', actualAmount: invoice.totalInclVat }),
         message: 'Invoice arrived without any matching purchase order',
       }),
     );
@@ -263,7 +330,13 @@ export function runMatch(input: MatchInput): MatchOutput {
           const shortUnits = po.qtyOrdered - gr.qtyReceived;
           const overlap = Math.min(shortUnits, billedNotReceived);
           qtyEval.discrepancy.deltaAmount = mulIls(po.unitPriceExpected ?? 0, shortUnits - overlap);
+          qtyEval.discrepancy.basis = { ...qtyEval.discrepancy.basis!, qtyUsed: shortUnits - overlap, overlapUnits: overlap };
         }
+        qtyEval.discrepancy.basis = {
+          ...qtyEval.discrepancy.basis!,
+          qtyBilled: inv ? invQty : null,
+          unitFactor: inv ? unitFactor : null,
+        };
         out.push(
           discrepancy(qtyEval.discrepancy.type, qtyEval.discrepancy.severity, {
             ...qtyEval.discrepancy,
@@ -288,6 +361,7 @@ export function runMatch(input: MatchInput): MatchOutput {
             actual: null,
             deltaAmount: 0,
             toleranceUsed: 'unit must match between PO and invoice',
+            basis: basisOf({ source: 'none', formula: 'none', qtyOrdered: po.qtyOrdered, unitFactor: null }),
             message: `PO unit "${po.unit}" vs invoice unit "${inv.unit}"`,
           }),
         );
@@ -305,6 +379,17 @@ export function runMatch(input: MatchInput): MatchOutput {
             actual: invQty,
             deltaAmount: mulIls(invPrice, billedNotReceived),
             toleranceUsed: 'billed quantity exceeds received quantity',
+            basis: basisOf({
+              source: 'gr',
+              formula: 'unit_x_qty',
+              qtyOrdered: po.qtyOrdered,
+              qtyReceived: gr.qtyReceived,
+              qtyBilled: invQty,
+              qtyUsed: billedNotReceived,
+              unitPriceUsed: invPrice,
+              unitFactor,
+              threshold: { pct: tolerances.qtyPercent, abs: null, units: tolerances.qtyAbsolute },
+            }),
             message: 'Invoice charges for more units than were received',
           }),
         );
@@ -317,6 +402,13 @@ export function runMatch(input: MatchInput): MatchOutput {
           out.push(
             discrepancy(priceEval.discrepancy.type, priceEval.discrepancy.severity, {
               ...priceEval.discrepancy,
+              basis: {
+                ...priceEval.discrepancy.basis!,
+                qtyOrdered: po.qtyOrdered,
+                qtyReceived: gr?.qtyReceived ?? null,
+                qtyBilled: invQty,
+                unitFactor,
+              },
               productId: po.productId,
               poLineId: po.id,
               invoiceLineId: inv.id,
@@ -346,6 +438,13 @@ export function runMatch(input: MatchInput): MatchOutput {
           out.push(
             discrepancy(baselineDiscrepancy.type, baselineDiscrepancy.severity, {
               ...baselineDiscrepancy,
+              basis: {
+                ...baselineDiscrepancy.basis!,
+                qtyOrdered: po.qtyOrdered,
+                qtyReceived: gr?.qtyReceived ?? null,
+                qtyBilled: invQty,
+                unitFactor,
+              },
               productId: po.productId,
               poLineId: po.id,
               invoiceLineId: inv.id,
@@ -364,6 +463,16 @@ export function runMatch(input: MatchInput): MatchOutput {
           actual: 0,
           deltaAmount: mulIls(po.unitPriceExpected ?? 0, po.qtyOrdered),
           toleranceUsed: 'PO line must appear on invoice',
+          basis: basisOf({
+            source: 'po',
+            formula: 'unit_x_qty',
+            qtyOrdered: po.qtyOrdered,
+            qtyReceived: gr?.qtyReceived ?? null,
+            qtyBilled: 0,
+            qtyUsed: po.qtyOrdered,
+            unitPriceUsed: po.unitPriceExpected ?? 0,
+            referencePrice: po.unitPriceExpected,
+          }),
         }),
       );
     }
@@ -381,6 +490,13 @@ export function runMatch(input: MatchInput): MatchOutput {
           actual: il.qtyBilled,
           deltaAmount: quantizeIls(il.lineTotal),
           toleranceUsed: 'invoice line must match a PO line',
+          basis: basisOf({
+            source: 'invoice_line',
+            formula: 'amount',
+            qtyBilled: il.qtyBilled,
+            unitPriceUsed: il.unitPriceBilled,
+            actualAmount: il.lineTotal,
+          }),
           message: `Invoice line for ${il.productId ?? 'unknown product'} has no matching PO line`,
         }),
       );
@@ -398,6 +514,13 @@ export function runMatch(input: MatchInput): MatchOutput {
         actual: invoice.totalExclVat,
         deltaAmount: toShekels(totalDiffAgorot),
         toleranceUsed: `±₪${TOTAL_TOLERANCE_ILS}`,
+        basis: basisOf({
+          source: 'invoice_total',
+          formula: 'amount_diff',
+          actualAmount: invoice.totalExclVat,
+          referenceAmount: linesSum,
+          threshold: { pct: null, abs: TOTAL_TOLERANCE_ILS, units: null },
+        }),
         message: `Lines sum to ₪${linesSum.toFixed(2)} but invoice subtotal claims ₪${invoice.totalExclVat.toFixed(2)}`,
       }),
     );
@@ -414,6 +537,14 @@ export function runMatch(input: MatchInput): MatchOutput {
         actual: invoice.vatAmount,
         deltaAmount: toShekels(vatDiffAgorot),
         toleranceUsed: `${vatRate * 100}% VAT on subtotal, ±₪${TOTAL_TOLERANCE_ILS}`,
+        basis: basisOf({
+          source: 'vat_rate',
+          formula: 'amount_diff',
+          actualAmount: invoice.vatAmount,
+          referenceAmount: expectedVat,
+          vatRate,
+          threshold: { pct: null, abs: TOTAL_TOLERANCE_ILS, units: null },
+        }),
       }),
     );
   }
@@ -468,6 +599,14 @@ function evaluateBaseline(
     actual: actualPrice,
     deltaAmount: mulIls(actualPrice - baseline.p90, qty),
     toleranceUsed: `actual exceeds historical p90 of ₪${baseline.p90}`,
+    basis: basisOf({
+      source: 'baseline_p90',
+      formula: 'price_x_qty',
+      qtyUsed: qty,
+      unitPriceUsed: actualPrice,
+      referencePrice: baseline.p90,
+      threshold: { pct: tolerances.pricePercent, abs: tolerances.priceAbsolute, units: null },
+    }),
     message: `Price ₪${actualPrice} exceeds supplier's 90th-percentile (₪${baseline.p90})`,
   };
 }
