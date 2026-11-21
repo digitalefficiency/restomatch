@@ -35,10 +35,10 @@ export function DockSpotSheet({
   const [texts, setTexts] = useState<Record<string, string>>({});
   const [at, setAt] = useState(0);
   const [askAll, setAskAll] = useState(false);
-  const [wasKey, setWasKey] = useState('');
-  const sessionKey = picked.map(lineKey).join('|');
-  if (sessionKey !== wasKey) {
-    setWasKey(sessionKey);
+  const [wasPicked, setWasPicked] = useState('');
+  const pickedIds = picked.map(lineKey).join('|');
+  if (pickedIds !== wasPicked) {
+    setWasPicked(pickedIds);
     setTexts({});
     setAt(0);
     setAskAll(false);
@@ -52,7 +52,7 @@ export function DockSpotSheet({
     if (!open) return;
     const id = requestAnimationFrame(() => refs.current[0]?.focus({ preventScroll: true }));
     return () => cancelAnimationFrame(id);
-  }, [open, sessionKey]);
+  }, [open, pickedIds]);
 
   const press = useCallback(
     (k: PadKey) => {
