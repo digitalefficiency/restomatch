@@ -657,7 +657,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       {toolbarRow}
       <div
         ref={scroller}
-        className="max-h-[min(72dvh,900px)] overflow-auto rounded-card border border-line bg-surface"
+        className="max-h-[min(72dvh,900px)] overflow-auto rounded-card border border-line-rule bg-surface"
         data-table-scroll=""
       >
         <table

@@ -46,7 +46,7 @@ export function MetricTile({
 }) {
   return (
     <div
-      className={cn('flex min-w-0 flex-col gap-1 rounded-card border border-line bg-surface p-4 md:p-5', className)}
+      className={cn('flex min-w-0 flex-col gap-1 rounded-card border border-line-rule bg-surface p-4 md:p-5', className)}
       aria-busy={loading || undefined}
     >
       <div className="flex items-start justify-between gap-2">

@@ -97,7 +97,7 @@ function KitCard({ id, title, note, wide, children }: { id: string; title: strin
       id={id}
       aria-labelledby={`${id}-title`}
       data-kit-card={id}
-      className={cn('flex min-w-0 flex-col rounded-card border border-line bg-surface p-4 shadow-e1', wide && 'lg:col-span-2')}
+      className={cn('flex min-w-0 flex-col rounded-card border border-line-rule bg-surface p-4 shadow-e1', wide && 'lg:col-span-2')}
     >
       <h2 id={`${id}-title`} className="text-title-sm text-fg">
         {title}
