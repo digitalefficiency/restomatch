@@ -1,6 +1,7 @@
 import {
   and,
   asc,
+  auditLog,
   eq,
   goodsReceipts,
   grLines,
@@ -193,9 +194,33 @@ export interface ConsolidatedReviewItem {
   /** note_other_month: the receipt's Israel day (YYYY-MM-DD) and how many days it lies outside the period. */
   receivedOn?: string;
   daysOutside?: number;
-  /** The invoice cannot read "תואמת" while this item stands. */
+  /** The invoice cannot read "תואמת" while this item stands (false once reviewed — Q5). */
   blocksMatched: boolean;
+  /** G-04 Q5: stable identity of the item (flag + note / month total + other invoice). */
+  key: string;
+  /** G-04 Q5: the fact it states now (₪, other invoice, receipt day). A review is bound to it. */
+  value: string;
+  /** G-04 Q5: a finance role marked this exact fact "נבדק" (audit `consolidated.item_reviewed`). */
+  reviewed: boolean;
 }
+
+/** G-04 Q5: the audit action recording a "נבדק" on a review item. */
+export const CONSOLIDATED_ITEM_REVIEWED = 'consolidated.item_reviewed' as const;
+
+/** The identity and the current fact of a review item; a review matches both (a changed fact re-appears). */
+export function reviewItemIdentity(r: Pick<ConsolidatedReviewItem, 'flag' | 'noteNumber' | 'otherInvoice' | 'amountIls' | 'receivedOn' | 'daysOutside'>): {
+  key: string;
+  value: string;
+} {
+  const other = r.otherInvoice?.invoiceId ?? '-';
+  return {
+    key: `${r.flag}:${r.noteNumber ?? 'month-total'}:${other}`,
+    value: [r.amountIls == null ? 'null' : r.amountIls.toFixed(2), other, r.receivedOn ?? '-', r.daysOutside ?? '-'].join('|'),
+  };
+}
+
+/** The set entry for a review: key + current value. */
+export const reviewedEntry = (key: string, value: string) => `${key}\u0000${value}`;
 
 export interface ConsolidatedProposal {
   invoiceId: string;
@@ -377,6 +402,8 @@ export function buildConsolidatedProposal(args: {
   otherMonthNotes?: ReadonlyArray<{ number: string; receivedOn: string; daysOutside: number }>;
   /** §9 note_billed_twice for month-total lines: overlap with an earlier consolidated invoice of the same period. */
   monthTotalOverlaps?: ReadonlyArray<{ otherInvoice: OtherInvoice; amountIls: number }>;
+  /** G-04 Q5: reviewedEntry(key, value) of each "נבדק" recorded on this invoice. */
+  reviewed?: ReadonlySet<string>;
   /** Display names for invoice-only products (not on any delivery note). */
   productNames?: Map<string, { name: string | null; nameEn: string | null }>;
 }): ConsolidatedProposal {
@@ -784,7 +811,7 @@ export function buildConsolidatedProposal(args: {
 
   // ── §9 review items. ──
   const valueOfNote = new Map(deliveryNotes.filter((n) => n.number).map((n) => [n.number!, n.receivedValueIls]));
-  const reviewItems: ConsolidatedReviewItem[] = [
+  const rawReviewItems: Array<Omit<ConsolidatedReviewItem, 'key' | 'value' | 'reviewed'>> = [
     ...[...missingNumbers].sort().map((number) => ({
       flag: 'note_not_in_system' as const,
       tier: 'warn' as const,
@@ -822,6 +849,12 @@ export function buildConsolidatedProposal(args: {
         blocksMatched: true,
       })),
   ];
+  // G-04 Q5: a reviewed item (this exact fact) stays listed, marked, and no longer blocks "תואמת".
+  const reviewItems: ConsolidatedReviewItem[] = rawReviewItems.map((r) => {
+    const { key, value } = reviewItemIdentity(r);
+    const reviewed = args.reviewed?.has(reviewedEntry(key, value)) ?? false;
+    return { ...r, key, value, reviewed, blocksMatched: r.blocksMatched && !reviewed };
+  });
   const blocked = reviewItems.some((r) => r.blocksMatched);
   const claim = claimSplit(findings, args.base.invoice.totalInclVat);
   const leakAg = ag(claim.totalIls);
@@ -1363,6 +1396,8 @@ export async function consolidatedProposal(
       .where(and(eq(products.restaurantId, restaurantId), inArray(products.id, invoiceProductIds)));
     for (const r of rows) productNames.set(r.id, { name: r.name, nameEn: r.nameEn ?? null });
   }
+  // G-04 Q5: the "נבדק" marks on this invoice — this restaurant's audit rows only.
+  const reviewed = await loadReviewedEntries(db, restaurantId, invoiceId);
   const build = (period: { start: Date; end: Date }, notes: DeliveryNoteData[]) =>
     buildConsolidatedProposal({
       invoiceId,
@@ -1378,6 +1413,7 @@ export async function consolidatedProposal(
       otherMonthNotes,
       monthTotalOverlaps,
       productNames,
+      reviewed,
     });
 
   if (raw.deliveryNoteNumbers.length > 0) {
@@ -1565,4 +1601,25 @@ export async function deliveryNoteCoverage(
     }
     return { ...base, state: 'not_invoiced' as const, invoiceId: null, invoiceNumber: null, consolidated: false };
   });
+}
+
+/** G-04 Q5: reviewedEntry(key, value) of every "נבדק" recorded on an invoice, restaurant-scoped. */
+export async function loadReviewedEntries(db: Database, restaurantId: string, invoiceId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ after: auditLog.after })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.restaurantId, restaurantId),
+        eq(auditLog.action, CONSOLIDATED_ITEM_REVIEWED),
+        eq(auditLog.entityType, 'invoice'),
+        eq(auditLog.entityId, invoiceId),
+      ),
+    );
+  const out = new Set<string>();
+  for (const r of rows) {
+    const a = r.after as { key?: unknown; value?: unknown } | null;
+    if (typeof a?.key === 'string' && typeof a.value === 'string') out.add(reviewedEntry(a.key, a.value));
+  }
+  return out;
 }

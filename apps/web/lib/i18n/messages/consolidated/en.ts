@@ -68,6 +68,9 @@ export const en: Shape<typeof he> = {
     receivedOn: 'received {date}',
     billed: 'billed {amount}',
     value: 'worth {amount}',
+    markReviewed: 'Reviewed',
+    reviewedTag: 'Reviewed',
+    stale: 'This item changed. The screen was refreshed.',
   },
   products: {
     title: 'By product',

@@ -198,7 +198,7 @@ describe('consolidatedProposal reads only closed receipts and counted lines', ()
     expect(pending.length).toBeGreaterThan(0);
     expect(pending.every((f) => !f.countsAsLeak && f.deliveryNoteNumber === '7702' && f.productId === milk)).toBe(true);
     // 7703 (no receipt in RestoMatch at all): §9 note_not_in_system — warn, blocks "תואמת", never claimed.
-    expect(p.reviewItems).toEqual([
+    expect(p.reviewItems).toMatchObject([
       { flag: 'note_not_in_system', tier: 'warn', noteNumber: '7703', amountIls: 42.5, otherInvoice: null, blocksMatched: true },
     ]);
     const missing = p.findings.filter((f) => f.noteNotInSystem);
@@ -266,7 +266,7 @@ describe('§9 consolidated flags', () => {
       ['7801', '7802'],
     );
     const p = (await consolidatedProposal(db, T.restaurantId, inv))!;
-    expect(items(p, 'note_other_month')).toEqual([
+    expect(items(p, 'note_other_month')).toMatchObject([
       { flag: 'note_other_month', tier: 'warn', noteNumber: '7802', amountIls: 34, otherInvoice: null, receivedOn: '2026-07-05', daysOutside: 5, blocksMatched: false },
     ]);
     // Context only: no leak, no claim, and it does not block "תואמת".
@@ -297,7 +297,7 @@ describe('§9 consolidated flags', () => {
     await note('7821', 'completed', [{ productId: milk, qty: '4' }]);
     const inv = await consolidated([{ d: 'ת.מ. 7821 · חלב', qty: 4, price: 8.5 }], ['7821', '007822']); // 7822: listed in the header only
     const p = (await consolidatedProposal(db, T.restaurantId, inv))!;
-    expect(items(p, 'note_not_in_system')).toEqual([
+    expect(items(p, 'note_not_in_system')).toMatchObject([
       { flag: 'note_not_in_system', tier: 'warn', noteNumber: '7822', amountIls: null, otherInvoice: null, blocksMatched: true },
     ]);
     expect(p.totals.leakIls).toBe(0);
@@ -312,7 +312,7 @@ describe('§9 consolidated flags', () => {
     const first = await consolidated(month, [], { number: 'R-JUN-A', createdAt: new Date('2026-07-01T08:00:00Z') });
     const second = await consolidated(month, [], { number: 'R-JUN-B', createdAt: new Date('2026-07-02T08:00:00Z') });
     const p2 = (await consolidatedProposal(db, T.restaurantId, second))!;
-    expect(items(p2, 'note_billed_twice')).toEqual([
+    expect(items(p2, 'note_billed_twice')).toMatchObject([
       { flag: 'note_billed_twice', tier: 'T2', noteNumber: null, amountIls: 170, otherInvoice: { invoiceId: first, invoiceNumber: 'R-JUN-A' }, blocksMatched: true },
     ]);
     expect(p2.claim.exclIls + p2.claim.inclIls).toBe(0); // the overlap is never claimed through the leak

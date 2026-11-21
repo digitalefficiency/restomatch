@@ -66,6 +66,9 @@ export const he = {
     receivedOn: 'התקבלה ב-{date}',
     billed: 'חויב {amount}',
     value: 'שווי {amount}',
+    markReviewed: 'נבדק',
+    reviewedTag: 'נבדק',
+    stale: 'הנתון השתנה. המסך רוענן.',
   },
   products: {
     title: 'לפי מוצר',
