@@ -314,8 +314,10 @@ describe('DS3 · density variables express SPEC §7 (the switch itself is DS3-06
     // Top-level rules (a rule inside @media is indented), v1 and v2 blocks alike.
     const top = (sel: string) => {
       const vars = new Map<string, string>();
-      for (const m of css.matchAll(new RegExp(`(?:^|\\n)${sel.replace(/[[\]]/g, '\\$&')} \\{([^}]*)\\}`, 'g'))) {
-        for (const d of m[1]!.matchAll(/(--[\w-]+): ([^;]+);/g)) vars.set(d[1]!, d[2]!);
+      const open = `\n${sel} {`;
+      for (let at = css.indexOf(open); at !== -1; at = css.indexOf(open, at + open.length)) {
+        const body = css.slice(at + open.length, css.indexOf('}', at));
+        for (const d of body.matchAll(/(--[\w-]+): ([^;]+);/g)) vars.set(d[1]!, d[2]!);
       }
       return vars;
     };
