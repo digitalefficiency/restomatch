@@ -16,7 +16,7 @@ export const he = {
     to: 'עד תאריך',
     apply: 'החל',
     filters: 'סינון',
-    clearFilters: 'נקה סינון',
+    clearFilters: 'ניקוי הסינון',
     reset: 'איפוס תצוגה',
     tv: 'מצב מסך מלא',
     export: 'ייצוא CSV',

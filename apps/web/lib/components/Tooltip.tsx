@@ -46,7 +46,7 @@ export function Tooltip({
         hidden={dismissed}
         className={cn(
           'invisible absolute left-1/2 z-snackbar w-max max-w-xs -translate-x-1/2 opacity-0',
-          'transition-[opacity,visibility] duration-micro ease-standard',
+          'transition-[opacity,visibility] duration-menu-tooltip ease-standard',
           'group-hover/tip:visible group-hover/tip:opacity-100 group-hover/tip:delay-500',
           'group-has-[:focus-visible]/tip:visible group-has-[:focus-visible]/tip:opacity-100 group-has-[:focus-visible]/tip:delay-0',
           side === 'top' ? 'bottom-full pb-2' : 'top-full pt-2',

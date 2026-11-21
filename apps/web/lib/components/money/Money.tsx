@@ -20,7 +20,16 @@ import {
   type MoneyPart,
 } from './format';
 
-const CONTEXT_CLASS: Record<MoneyContext, string> = {
+/**
+ * `display` is the owner home's one number (SPEC §3 hero): DS3-00's `money-hero` role, 84/88 at weight 400
+ * (64/70 on a phone), with the ₪ at 0.4 em in the tertiary colour (`.text-money-hero .money-glyph` in
+ * globals.css). It formats exactly as `hero` (whole shekels). `hero` keeps `metric-hero` for the screens
+ * that use it today.
+ */
+export type MoneyDisplayContext = MoneyContext | 'display';
+
+const CONTEXT_CLASS: Record<MoneyDisplayContext, string> = {
+  display: 'text-money-hero',
   hero: 'text-metric-hero',
   tile: 'text-metric-lg',
   line: '',
@@ -40,8 +49,8 @@ export interface MoneyProps {
   value?: number | null;
   /** Integer agorot (billing/pricing). Takes precedence over `value`. */
   agorot?: number | null;
-  /** Precision and type role: hero/tile/inline 0 dp · line 2 dp · unit 4 dp. */
-  context?: MoneyContext;
+  /** Precision and type role: display/hero/tile/inline 0 dp · line 2 dp · unit 4 dp. */
+  context?: MoneyDisplayContext;
   /** Money state → figure colour (A9). ₪0 is never danger. */
   state?: MoneyState;
   /** Override the context's decimals (e.g. a total beside 2 dp rows uses 2). */
@@ -50,6 +59,11 @@ export interface MoneyProps {
   credit?: boolean;
   /** The value failed to load: "לא זמין · נסו שוב" — never ₪0. */
   unavailable?: boolean;
+  /**
+   * With `unavailable`: the one action an error gives. The words become "לא זמין," and a link-style
+   * "נסו שוב" button (the reference's kit). Without it the words stay as they were.
+   */
+  onRetry?: () => void;
   /** Not known yet (T4): "ממתין". */
   pending?: boolean;
   /** Locale override for server-rendered callers that already know it. */
@@ -112,6 +126,7 @@ export function Money({
   decimals,
   credit = false,
   unavailable = false,
+  onRetry,
   pending = false,
   locale: localeProp,
   symbol = 'inline',
@@ -133,14 +148,30 @@ export function Money({
     );
   }
   if (unavailable || shekels === null) {
+    if (onRetry) {
+      return (
+        <span className={cn('text-muted', className)}>
+          {t('ds.money.unavailableShort')},{' '}
+          <button
+            type="button"
+            onClick={onRetry}
+            className="inline-flex min-h-6 items-center font-medium text-primary underline underline-offset-[3px] [@media(pointer:coarse)]:min-h-11"
+          >
+            {t('ds.money.retry')}
+          </button>
+        </span>
+      );
+    }
     return <span className={cn('text-muted', className)}>{t('ds.money.unavailable')}</span>;
   }
 
-  const shown = decimals ?? MONEY_DECIMALS[context];
+  // `display` is the hero at the home's size: the same precision and glyph markup as `hero`.
+  const fmt: MoneyContext = context === 'display' ? 'hero' : context;
+  const shown = decimals ?? MONEY_DECIMALS[fmt];
   const amount = credit ? Math.abs(shekels) : shekels;
-  const text = moneyText(amount, context, locale, shown);
+  const text = moneyText(amount, fmt, locale, shown);
   const exact = exactText(amount, shown, locale);
-  const figureOnly = symbol === 'header' && context !== 'hero';
+  const figureOnly = symbol === 'header' && fmt !== 'hero';
   // With the glyph in the header, the title always names the amount with ₪.
   const title = exact ?? (figureOnly ? text : null);
   const figureColour = stateClass(state, shekels);
@@ -151,7 +182,7 @@ export function Money({
     <span data-money-figure="" className={cn('inline-flex items-baseline gap-1', CONTEXT_CLASS[context], figureColour, className)}>
       {credit ? <span>{t('ds.money.credit')}</span> : null}
       <bdi className="num whitespace-nowrap" title={title ? t('ds.money.exact', { amount: title }) : undefined}>
-        {context === 'hero' && !figureOnly ? (
+        {fmt === 'hero' && !figureOnly ? (
           splitGlyph(text).map((part, i) =>
             part.glyph ? (
               <span key={i} className="money-glyph">
@@ -162,9 +193,9 @@ export function Money({
             ),
           )
         ) : split ? (
-          <Parts parts={splitMoney(figureOnly ? moneyFigureText(amount, context, locale, shown) : text, shown)} quiet={quiet} />
+          <Parts parts={splitMoney(figureOnly ? moneyFigureText(amount, fmt, locale, shown) : text, shown)} quiet={quiet} />
         ) : figureOnly ? (
-          moneyFigureText(amount, context, locale, shown)
+          moneyFigureText(amount, fmt, locale, shown)
         ) : (
           text
         )}

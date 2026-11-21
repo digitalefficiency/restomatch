@@ -11,7 +11,7 @@
   --c-subtle: 93 101 97; /* #5D6561 */
   --c-primary: 0 87 59; /* #00573B */
   --c-on-primary: 255 255 255; /* #FFFFFF */
-  --c-gold: 0 113 62; /* #00713E */
+  --c-gold: 0 87 59; /* #00573B */
   --c-danger: 183 25 28; /* #B7191C */
   --c-warn: 146 80 0; /* #925000 */
   --c-info: 34 86 187; /* #2256BB */
@@ -370,7 +370,7 @@
   --c-viz-cat-5: 73 82 78;
   --c-viz-cat-6: 156 61 122;
   --c-viz-up: 180 83 26;
-  --c-viz-down: 0 113 62;
+  --c-viz-down: 0 87 59;
   --c-viz-prev: 122 139 130;
   --c-viz-leak: 221 39 41;
   --c-viz-grid: 212 219 216;
@@ -410,10 +410,10 @@
   --lh-money-card: 2.25rem;
   --fw-money-card: 700;
   --ls-money-card: -0.01em;
-  --fs-money-hero: 2.5rem;
-  --lh-money-hero: 3rem;
-  --fw-money-hero: 700;
-  --ls-money-hero: -0.01em;
+  --fs-money-hero: 4rem;
+  --lh-money-hero: 4.375rem;
+  --fw-money-hero: 400;
+  --ls-money-hero: -0.03em;
   --fs-qty-field: 1.25rem;
   --lh-qty-field: 1.75rem;
   --fw-qty-field: 700;
@@ -430,6 +430,14 @@
   --lh-row-sub: 1.125rem;
   --fw-row-sub: 400;
   --ls-row-sub: 0;
+  --fs-sub: 0.8125rem;
+  --lh-sub: 1.125rem;
+  --fw-sub: 400;
+  --ls-sub: 0;
+  --fs-lead: 1.125rem;
+  --lh-lead: 1.5rem;
+  --fw-lead: 500;
+  --ls-lead: 0;
   --fs-kbd: 0.75rem;
   --lh-kbd: 1rem;
   --fw-kbd: 500;
@@ -471,11 +479,19 @@
   --chrome-sidebar-w: 248px;
   --chrome-rail-w: 64px;
   --chrome-bottombar-h: 64px;
+  --dur-menu-fade: 80ms;
+  --dur-menu-tooltip: 90ms;
+  --dur-menu-chevron: 120ms;
+  --dur-menu-delay: 130ms;
+  --dur-menu-collapse: 160ms;
+  --dur-menu-expand: 200ms;
+  --ease-menu: cubic-bezier(0.2,0,0,1);
+  --text-zoom: 1;
 }
 @media (min-width: 768px) {
   :root {
-    --fs-money-hero: 3.5rem;
-    --lh-money-hero: 4rem;
+    --fs-money-hero: 5.25rem;
+    --lh-money-hero: 5.5rem;
     --fs-display-sm: 2.25rem;
     --lh-display-sm: 2.75rem;
     --fs-display-md: 3rem;
@@ -622,14 +638,16 @@
   --lh-money-row: 1.625rem;
   --fs-money-card: 1.75rem;
   --lh-money-card: 2.25rem;
-  --fs-money-hero: 2.5rem;
-  --lh-money-hero: 3rem;
+  --fs-money-hero: 4rem;
+  --lh-money-hero: 4.375rem;
   --fs-id: 0.875rem;
   --lh-id: 1.25rem;
   --fs-row-title: 1rem;
   --lh-row-title: 1.5rem;
   --fs-row-sub: 0.875rem;
   --lh-row-sub: 1.25rem;
+  --fs-sub: 0.875rem;
+  --lh-sub: 1.25rem;
   --btn-h-primary: 56px;
   --chip-h: 28px;
   --count-row-h: 72px;
@@ -637,6 +655,10 @@
   --c-text-secondary: 59 75 67;
   --c-text-tertiary: 59 75 67;
   --c-border-control: 102 117 109;
+}
+/* DS3: large text (data-text on the shell) zooms the content beside the menu. */
+[data-text='large'] {
+  --text-zoom: 1.1;
 }
 @media (prefers-contrast: more) {
   :root {
@@ -742,10 +764,12 @@
     color: rgb(var(--c-ink));
   }
 
-  /* Quiet light scrollbar (DS3: tokens only; the reference's thumb is the card line). */
+  /* Quiet light scrollbar (DS3: tokens only). The thumb is line-strong at 45 %: 1.66:1 on white, no fainter
+     than DS2's thumb (1.61:1); 65 % on hover (2.14:1, DS2 2.11:1). The reference draws only the menu's own
+     scroller in the card line, so the global thumb keeps DS2's strength. */
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgb(var(--c-line)) transparent;
+    scrollbar-color: rgb(var(--c-line-strong) / 0.45) transparent;
   }
   *::-webkit-scrollbar {
     width: 10px;
@@ -755,13 +779,13 @@
     background: transparent;
   }
   *::-webkit-scrollbar-thumb {
-    background: rgb(var(--c-line));
+    background: rgb(var(--c-line-strong) / 0.45);
     border-radius: 9999px;
     border: 2px solid transparent;
     background-clip: padding-box;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: rgb(var(--c-line-strong) / 0.6);
+    background: rgb(var(--c-line-strong) / 0.65);
     background-clip: padding-box;
   }
 }
@@ -1225,6 +1249,25 @@ html[lang='ti'] .font-sans {
   font-size: 0.55em;
   font-weight: 600;
   color: rgb(var(--c-muted));
+}
+/* DS3 SPEC §3: on the owner home's hero (the `money-hero` type role) the ₪ is 0.4 em, regular, in the
+   tertiary colour and raised slightly, as the reference's `.hero-num .money .cur`. Scoped to that
+   role, so the screens that keep `metric-hero` keep the glyph above. */
+.text-money-hero .money-glyph {
+  display: inline-block;
+  font-size: 0.4em;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: rgb(var(--c-subtle));
+  transform: translateY(-0.1em);
+}
+
+/* DS3 (WORKPLAN, personal preferences): large text. The shell carries data-text from the rm_text
+   cookie (DS3-02); --text-zoom is 1, or 1.1 under [data-text='large'], as the reference zooms its
+   content. Put the class on the content wrapper beside the menu — not on <main>, whose
+   padding-start holds the fixed menu and would grow with it. */
+.rm-text-zoom {
+  zoom: var(--text-zoom, 1);
 }
 
 /* Bottom sheet detents (lib/components/overlay/Sheet). */

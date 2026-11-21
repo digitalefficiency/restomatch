@@ -18,8 +18,9 @@ export type ButtonVariant = 'primary' | 'secondary' | 'tertiary' | 'danger' | 'g
 export type ButtonSize = 'sm' | 'md' | 'lg' | 'xl';
 
 // Focus is the global :focus-visible outline (globals.css) — no per-variant rings.
+// Forced colours: fills and shadows are dropped, so every button keeps a 1 px ButtonText edge (the reference's rule).
 const base =
-  'relative inline-flex select-none items-center justify-center gap-1.5 rounded-control font-medium transition-colors duration-micro ease-standard disabled:cursor-not-allowed';
+  'relative inline-flex select-none items-center justify-center gap-1.5 rounded-control font-medium transition-colors duration-micro ease-standard disabled:cursor-not-allowed forced-colors:border forced-colors:border-[color:ButtonText]';
 
 const variants: Record<ButtonVariant, string> = {
   primary: 'bg-primary-bold text-on-bold hover:bg-primary-bold-hover active:bg-primary-bold-hover aria-pressed:bg-primary-bold-hover',
@@ -45,10 +46,13 @@ const disabledLook: Record<ButtonVariant, string> = {
 
 // Coarse pointers keep the 44 px floor even for sm/md (the utility would otherwise beat the base rule).
 const sizes: Record<ButtonSize, string> = {
-  sm: 'min-h-8 px-3 py-1 text-body-sm [@media(pointer:coarse)]:min-h-11',
+  // SPEC §5 small button: 32 px, 13 px text at 500 (DS3-00's `sub` role, 13/18 in every density).
+  sm: 'min-h-8 px-3 py-1 text-sub [@media(pointer:coarse)]:min-h-11',
   md: 'min-h-9 px-3.5 py-1.5 text-body-sm [@media(pointer:coarse)]:min-h-11',
   lg: 'min-h-11 px-5 py-2 text-body',
-  xl: 'min-h-14 w-full px-6 py-3 text-body',
+  // The phone flow's full-width action: every control of the phone flow has 12 px corners (SPEC §4, CHANGES.md 14.11).
+  // SPEC §5 "Phone primary button": 60 px high, 12 px radius; the reference's 18 px text at 500 (`lead`).
+  xl: 'min-h-[3.75rem] w-full rounded-card px-6 py-3 text-lead',
 };
 
 /** Filled variants carry a light key cap; the rest the sunken one. */

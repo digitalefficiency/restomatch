@@ -104,12 +104,19 @@ test.describe('DS3-01 kit page (platform admins)', () => {
         return { text: el.textContent ?? '', left: digit ? cur.right <= digit.left + 0.5 : false, smaller: curSize < figSize, floor: curSize >= 12 };
       }),
     );
-    expect(checks.length).toBeGreaterThan(3);
+    // The card's three split figures that carry a ₪ (a line, a unit price, a credit); the bookkeeper's
+    // compact-table figure below prints no ₪ by design (D8: the column header carries it once).
+    expect(checks.length).toBe(3);
     for (const c of checks) {
       expect(c.left, `₪ left of digits in "${c.text}"`).toBe(true);
       expect(c.smaller, `smaller ₪ in "${c.text}"`).toBe(true);
       expect(c.floor, `₪ at least 12 px in "${c.text}"`).toBe(true);
     }
+    // D8: the compact-table figure shows the digits only and keeps the exact amount with ₪ in its title
+    const header = page.locator('#kit-money bdi.num', { hasText: '38.70' });
+    await expect(header).toHaveCount(1);
+    await expect(header).not.toContainText('₪');
+    await expect(header).toHaveAttribute('title', /₪/);
   });
 
   test('status: one solid pill with a white word; pending is grey with a clock, never a warning', async ({ page }) => {
@@ -168,6 +175,52 @@ test.describe('DS3-01 kit page (platform admins)', () => {
     await expect(tip).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(tip).toBeHidden();
+  });
+
+  test('the number pad: the first key replaces, a decimal point, a plain note far from the order, the chips, the sheet', async ({ page }) => {
+    await setLang(page, 'he');
+    await page.goto(KIT);
+    const pad = page.locator('#kit-keypad [data-qty-pad]').first();
+    const value = pad.locator('[data-qty-value] > span').first();
+    await expect(value).toHaveText('24');
+    await expect(value).toHaveAttribute('data-selected', '');
+    await pad.getByRole('button', { name: '7', exact: true }).click();
+    await expect(value).toHaveText('7');
+    await expect(value).not.toHaveAttribute('data-selected', '');
+    await pad.getByRole('button', { name: 'נקודה עשרונית' }).click();
+    await pad.getByRole('button', { name: '5', exact: true }).click();
+    await expect(value).toHaveText('7.5');
+    // 7.5 of 28.5 ordered: one plain note, above the stepper, so no key moved under the thumb
+    await expect(pad.getByRole('status')).toHaveText(/שונה ב־74% מההזמנה \(28\.5 ק״ג\)/);
+    await pad.getByRole('button', { name: 'כמו בהזמנה' }).click();
+    await expect(value).toHaveText('28.5');
+    // the live region stays (so the next note is announced) and is empty
+    await expect(pad.getByRole('status')).toHaveCount(1);
+    await expect(pad.getByRole('status')).toBeEmpty();
+    await pad.getByRole('button', { name: 'פגום' }).click();
+    await expect(pad.getByRole('button', { name: 'פגום' })).toHaveAttribute('aria-pressed', 'true');
+    await pad.getByRole('button', { name: 'חסר' }).click();
+    await expect(value).toHaveText('0');
+    await expect(pad.getByRole('button', { name: 'פגום' })).toHaveAttribute('aria-pressed', 'false');
+    await expect(pad.getByRole('button', { name: 'פגום' })).toHaveAttribute('aria-disabled', 'true');
+    const key = await pad.getByRole('button', { name: '1', exact: true }).boundingBox();
+    expect(Math.round(key!.height)).toBe(64);
+
+    await page.getByRole('button', { name: kitHe.demo.keypadOpen }).click();
+    const sheet = page.getByRole('dialog', { name: 'כמה הגיע?' });
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText(`${kitHe.demo.keypadItem}, הוזמן 28.5 ק״ג`);
+    await expect(sheet.getByRole('button', { name: 'אישור: 24 ק״ג' })).toBeVisible();
+    // a hardware keyboard types into the pad (the reference's sheet): the first key replaces, ',' is the point
+    await page.keyboard.press('2');
+    await page.keyboard.press('5');
+    await page.keyboard.press(',');
+    await page.keyboard.press('5');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
+    await sheet.getByRole('button', { name: 'אישור: 25 ק״ג' }).click();
+    await expect(sheet).toBeHidden();
+    await expect(page.locator('#kit-keypad')).toContainText('נרשם: 25 ק״ג');
   });
 
   test('the three-way strip: one summary for assistive tech, the off cell tinted', async ({ page }) => {
