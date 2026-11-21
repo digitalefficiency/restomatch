@@ -349,7 +349,9 @@ test.describe('8 · the side menu motion set, large text and the hero ₪ (corre
       ...Object.keys(menuMotion.duration).map((k) => `--dur-menu-${k}`),
       '--ease-menu',
     ]);
-    expect(vars).toEqual([...Object.values(menuMotion.duration), menuMotion.easing]);
+    // The CSS pipeline rewrites times and curves (120ms → .12s): compare numbers, not spellings.
+    expect(vars.slice(0, -1).map(ms)).toEqual(Object.values(menuMotion.duration).map(ms));
+    expect(curve(vars.at(-1)!)).toEqual(curve(menuMotion.easing));
     await expect(page.getByTestId('lab-menu-motion').locator('li')).toHaveCount(Object.keys(menuMotion.duration).length + 1);
   });
 
