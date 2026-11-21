@@ -44,7 +44,7 @@ async function invoice(
       invoiceDate: at,
       source: 'email',
       status: o.status ?? 'matched',
-      ...(o.linkPinPoId ? { ocrPayload: { linkPinPoId: o.linkPinPoId } } : {}),
+      ...(o.linkPinPoId ? { ocrPayload: { linkPinPoId: o.linkPinPoId } as unknown as (typeof invoices.$inferInsert)['ocrPayload'] } : {}),
     })
     .returning({ id: invoices.id });
   const run = async (when: Date, r: { unordered?: boolean; poId?: string | null; resolution?: 'open' | 'escalated' | 'resolved' }) => {
