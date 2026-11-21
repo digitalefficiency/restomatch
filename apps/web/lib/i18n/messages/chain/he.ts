@@ -182,6 +182,15 @@ export const he = {
       switchFirst: 'מעבר לסניף כדי לפתוח',
     },
   },
+  strip: {
+    title: 'לפי סניף',
+    active: 'הסניף הפעיל',
+    approvals: '{count} להחלטה · {amount}',
+    payRun: 'לתשלום {pay} · בהמתנה {hold}',
+    off: 'ריצת התשלומים כבויה בסניף הזה',
+    error: 'לא נטען כרגע',
+    partial: 'חלק מהסניפים לא נטענו כרגע.',
+  },
   plans: {
     trial: 'ניסיון',
     basic: 'בסיס',
