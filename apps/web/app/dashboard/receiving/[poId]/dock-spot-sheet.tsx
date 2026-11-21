@@ -84,8 +84,13 @@ export function DockSpotSheet({
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || refs.current.includes(e.target as HTMLInputElement)) return;
+      // Only keys pressed in THIS sheet (a dialog stacked on top keeps its own), never another field's.
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      const dialog = refs.current.find(Boolean)?.closest('dialog');
+      if (!target || !dialog || (target !== document.body && !dialog.contains(target))) return;
+      if (target.isContentEditable || target.closest('input, textarea, select')) return;
       if (e.key === 'Enter') {
-        if ((e.target as HTMLElement | null)?.tagName === 'BUTTON') return;
+        if (target.tagName === 'BUTTON') return;
         e.preventDefault();
         confirm();
         return;
@@ -190,7 +195,8 @@ function SpotBody({
               data-key={key}
               data-active={active ? 'true' : 'false'}
               className={`flex min-h-14 cursor-text items-center justify-between gap-3 rounded-card border-2 px-3 py-0.5 transition-colors duration-micro ease-standard focus-within:[outline-offset:var(--focus-offset,2px)] focus-within:[outline:var(--focus-width,2px)_solid_rgb(var(--c-focus))] ${
-                active ? 'border-info bg-surface' : 'border-line-strong bg-surface'
+                // The line the pad types into: the colour, and an outline too (not colour alone).
+                active ? 'border-info bg-surface [outline-offset:2px] [outline:2px_solid_rgb(var(--c-info))]' : 'border-line-strong bg-surface'
               }`}
             >
               <ItemName he={l.productName} en={l.productNameEn} className="min-w-0 flex-1 text-title-sm text-ink" />
@@ -205,7 +211,8 @@ function SpotBody({
                   autoComplete="off"
                   autoCorrect="off"
                   spellCheck={false}
-                  dir="ltr"
+                  // Empty: the page's direction (the Hebrew question reads right to left); digits: left to right.
+                  dir="auto"
                   aria-label={td('delivery.count.spotQtyFor', { name, unit: u || '—' })}
                   placeholder={td('delivery.dock.spot.empty')}
                   value={t}

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { Camera, PenLine } from 'lucide-react';
 import { Button, Sheet } from '@/lib/components';
 import { useUnitLabel } from '@/app/showcase/receiver/_steps/english';
@@ -41,6 +42,13 @@ export function DockCloseSheet({
   const td = useT(receivingDelivery);
   const locale = useLocale();
   const n = gaps.length;
+  // The dialog would open on its grabber: the check itself (the gaps, the document) is what is read first.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const id = requestAnimationFrame(() => bodyRef.current?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(id);
+  }, [open]);
   return (
     <Sheet
       open={open}
@@ -75,7 +83,7 @@ export function DockCloseSheet({
       }
     >
       {open ? (
-        <div className="flex flex-col gap-4 pt-1" data-testid="close-check" data-gaps={n}>
+        <div ref={bodyRef} tabIndex={-1} className="flex flex-col gap-4 pt-1 outline-none" data-testid="close-check" data-gaps={n}>
           <dl className="divide-y divide-line rounded-card border border-line bg-surface">
             {n > 0 ? (
               <div className="flex flex-col gap-1 px-4 py-3">

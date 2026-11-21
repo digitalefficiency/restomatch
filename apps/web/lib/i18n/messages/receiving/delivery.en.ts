@@ -124,7 +124,7 @@ export const en: Shape<typeof he> = {
       },
       status: {
         allMarked: 'All marked, document photographed',
-        allMarkedNoDoc: 'All marked, the document is still to photograph',
+        allMarkedNoDoc: 'All marked, document still to be photographed',
       },
       doc: {
         done: 'Document photographed',

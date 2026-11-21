@@ -95,6 +95,10 @@ export function DockQtySheet({
       if (!el) return;
       el.focus({ preventScroll: true });
       if (el.value) el.select();
+      // A very short screen where the sheet still scrolls: the keys and the button open whole and stay
+      // put while typing (what gives way is the top, the note's reserved row).
+      const scroller = el.closest('[data-testid="count-editor"]')?.parentElement;
+      if (scroller && scroller.scrollHeight > scroller.clientHeight) scroller.scrollTop = scroller.scrollHeight;
     });
     return () => cancelAnimationFrame(id);
   }, [open]);
@@ -142,8 +146,14 @@ export function DockQtySheet({
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.target === inputRef.current) return;
+      // Only keys pressed in THIS sheet: a dialog stacked on top (the sign-in sheet) keeps its own
+      // keys, and another field never loses its typing to the count.
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      const dialog = inputRef.current?.closest('dialog');
+      if (!target || !dialog || (target !== document.body && !dialog.contains(target))) return;
+      if (target.isContentEditable || target.closest('input, textarea, select')) return;
       if (e.key === 'Enter') {
-        if ((e.target as HTMLElement | null)?.tagName === 'BUTTON') return; // a focused button handles its own Enter
+        if (target.tagName === 'BUTTON') return; // a focused button handles its own Enter
         e.preventDefault();
         save();
         return;
@@ -169,10 +179,10 @@ export function DockQtySheet({
 
   const chip = (active: boolean) =>
     `inline-flex min-h-12 items-center justify-center gap-1.5 rounded-pill border px-[18px] text-body font-medium transition-colors duration-micro ease-standard ${
-      active ? 'border-ink bg-ink text-on-bold' : 'border-line-strong bg-surface text-ink active:bg-surface-2'
+      active ? 'border-ink bg-ink text-on-bold' : 'border-line-strong bg-surface text-ink active:bg-surface-2 disabled:border-line disabled:text-subtle'
     }`;
   const stepper =
-    'inline-flex h-16 w-16 shrink-0 items-center justify-center rounded-card border border-line-strong bg-surface text-ink transition-colors duration-micro ease-standard active:bg-surface-2 disabled:border-line disabled:text-subtle';
+    'inline-flex h-16 w-16 shrink-0 items-center justify-center rounded-card border border-line-strong bg-surface text-ink transition-colors duration-micro ease-standard active:bg-surface-2 disabled:border-line disabled:text-subtle [@media(max-height:640px)]:h-[3.25rem] [@media(max-height:640px)]:w-[3.25rem]';
 
   return (
     <Sheet
@@ -187,19 +197,31 @@ export function DockQtySheet({
         </Button>
       }
     >
-      {/* Bottom-aligned: a note that appears grows the content upward, so no key moves under the thumb. */}
+      {/*
+        Bottom-aligned, and sized to fit with the note (the keys shrink with the screen's height, never
+        under 44 px): a note that appears grows the content upward, so no key moves under the thumb. On a
+        short screen (640 px or less) the note's row is kept even when empty, for the same reason.
+      */}
       <div className="flex min-h-full flex-col" data-testid="count-editor">
         <div className="mt-auto flex flex-col gap-2 pt-1">
-          {note ? (
-            <p id={noteId} role="status" className="flex items-center gap-2 rounded-card border border-warn-subtle bg-warn-subtle px-3 py-1.5 text-body-sm text-ink" data-testid="count-tolerance">
-              <span className="h-2 w-2 shrink-0 rounded-pill border-[1.5px] border-warn-dot-ring bg-warn-dot" aria-hidden="true" />
-              <span>
-                {note.kind === 'double'
-                  ? td('delivery.dock.sheet.double', { ordered: shown(note.ordered) })
-                  : td('delivery.dock.sheet.far', { pct: formatPercent(note.pct, locale, 0), ordered: shown(note.ordered) })}
-              </span>
-            </p>
-          ) : null}
+          <div>
+          {/* Mounted while the sheet is open, so a note that appears is a change a screen reader speaks. */}
+          <div id={noteId} role="status" className="[@media(max-height:640px)]:min-h-[2.625rem]">
+            {note ? (
+              <p className="mb-2 flex items-center gap-2 rounded-card border border-warn-subtle bg-warn-subtle px-3 py-1.5 text-body-sm text-ink" data-testid="count-tolerance">
+                <span className="h-2 w-2 shrink-0 rounded-pill border-[1.5px] border-warn-dot-ring bg-warn-dot" aria-hidden="true" />
+                <span>
+                  {note.kind === 'double'
+                    ? td('delivery.dock.sheet.double', { ordered: shown(note.ordered) })
+                    : td('delivery.dock.sheet.far', { pct: formatPercent(note.pct, locale, 0), ordered: shown(note.ordered) })}
+                </span>
+              </p>
+            ) : null}
+          </div>
+          {/* The pad's keys keep a screen reader on the key: the number being built is spoken here. */}
+          <p className="sr-only" aria-live="polite">
+            {value === null ? '' : cta}
+          </p>
 
           <div className="flex items-center gap-2">
             {step ? (
@@ -216,7 +238,7 @@ export function DockQtySheet({
             ) : null}
             <label
               // The box shows focus (the field inside it is only as wide as its digits).
-              className={`flex h-16 min-w-0 flex-1 cursor-text items-center justify-center gap-1.5 rounded-card border-2 px-2 transition-colors duration-micro ease-standard focus-within:[outline-offset:var(--focus-offset,2px)] focus-within:[outline:var(--focus-width,2px)_solid_rgb(var(--c-focus))] ${
+              className={`flex h-16 min-w-0 flex-1 cursor-text items-center justify-center gap-1.5 rounded-card border-2 px-2 [@media(max-height:640px)]:h-[3.25rem] transition-colors duration-micro ease-standard focus-within:[outline-offset:var(--focus-offset,2px)] focus-within:[outline:var(--focus-width,2px)_solid_rgb(var(--c-focus))] ${
                 replace && text !== '' ? 'border-info bg-info-subtle' : 'border-line-strong bg-surface'
               }`}
             >
@@ -253,6 +275,8 @@ export function DockQtySheet({
                     save();
                   } else if (step && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
                     e.preventDefault();
+                    // As the − button: nothing below an empty field or 0 (0 is "missing", a choice of its own).
+                    if (e.key === 'ArrowDown' && (value === null || value === 0)) return;
                     bump(e.key === 'ArrowUp' ? 1 : -1);
                   }
                 }}
@@ -277,6 +301,7 @@ export function DockQtySheet({
               </button>
             ) : null}
           </div>
+          </div>
 
           <div className="flex flex-wrap gap-2">
             <button
@@ -298,6 +323,8 @@ export function DockQtySheet({
                 type="button"
                 onPointerDown={(e) => e.preventDefault()}
                 aria-pressed={damaged && value !== 0}
+                // Off while the line is "missing": nothing arrived to be damaged, and a press would hide a state.
+                disabled={value === 0}
                 onClick={() => setDamaged((d) => !d)}
                 className={chip(damaged && value !== 0)}
                 data-testid="chip-damaged"

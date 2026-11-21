@@ -116,7 +116,8 @@ export function DockDone({
 
       <dl className="mb-4 divide-y divide-line rounded-card border border-line bg-surface text-body">
         <Row term={td('delivery.dock.done.supplier')}>
-          <span>{supplierName}</span>
+          {/* Isolated: a Latin name ending in "." stays whole beside the Hebrew (copy-rtl-13). */}
+          <bdi>{supplierName}</bdi>
           {time ? <span className="text-muted"> · {td('delivery.dock.done.at', { time })}</span> : null}
         </Row>
         {n > 0 ? (
@@ -167,7 +168,7 @@ export function DockDone({
         )}
         {receivedBy ? (
           <Row term={td('delivery.dock.done.receiver')} testId="confirmed-received-by">
-            {receivedBy}
+            <bdi>{receivedBy}</bdi>
           </Row>
         ) : null}
       </dl>

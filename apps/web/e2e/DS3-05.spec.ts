@@ -278,6 +278,33 @@ test.describe('flag off — today\'s order of steps, the new look', () => {
     await expect(page.getByTestId('spot-check')).toBeVisible();
     expect(await layoutProblems(page), 'spot check').toEqual([]);
   });
+
+  test('a short phone (360 × 640): the sheet fits with its note, keys stay ≥44 px, and none moves when the note appears', async ({ page }) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 360, height: 640 });
+    const po = await freshPo('short');
+    await openPo(page, po.poId);
+    await page.getByTestId('scan-no-invoice').tap();
+    await expect(page.getByTestId('delivery-check')).toBeVisible();
+    const kilos = row(page, po.lines[1]!.name);
+    await kilos.getByTestId('count-edit').tap();
+    const sheet = kilos.getByRole('dialog', { name: 'כמה הגיע?' });
+    await expect(sheet).toBeVisible();
+    const keys = kilos.getByTestId('dock-keypad').locator('button');
+    // Measured against the dialog, so the sheet's own rise never counts as a move.
+    const inSheet = async (l: Locator) => {
+      const [b, s] = [(await l.boundingBox())!, (await sheet.boundingBox())!];
+      return { top: Math.round(b.y - s.y), bottom: Math.round(b.y + b.height - s.y), height: b.height };
+    };
+    const first = await inSheet(keys.first());
+    expect(first.height, 'a key is at least 44 px').toBeGreaterThanOrEqual(44);
+    expect((await inSheet(keys.last())).bottom, 'the last row of keys sits above the button').toBeLessThanOrEqual((await inSheet(kilos.getByTestId('count-done'))).top);
+    // The ordered quantity is selected: "1" replaces it — far from the order, so the note appears.
+    await pad(kilos, '1');
+    await expect(kilos.getByTestId('count-tolerance')).toBeVisible();
+    expect((await inSheet(keys.first())).top, 'no key moved when the note appeared').toBe(first.top);
+    expect(await layoutProblems(page), 'quantity sheet with its note').toEqual([]);
+  });
 });
 
 test.describe('flag on — the count comes first', () => {

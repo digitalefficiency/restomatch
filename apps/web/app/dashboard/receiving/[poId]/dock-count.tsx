@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Camera, Check, CloudOff, Loader2, Minus, Pencil } from 'lucide-react';
 import { Button } from '@/lib/components';
 import type { ReconciliationLine, ReconciliationResult } from '@/app/showcase/receiver/_mock';
@@ -99,10 +99,20 @@ export function DockCount({
   const [editKey, setEditKey] = useState<string | null>(null);
   // The check before closing; it remembers the marks of a close that changed them ("everything arrived").
   const [check, setCheck] = useState<{ finalMarks?: Record<string, LineMark> } | null>(null);
+  // Focus never falls to the page when a control it is on goes away (the spot check closing on a
+  // close that waits, the undo button leaving).
+  const rootRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLDivElement>(null);
+  const undoRef = useRef<HTMLButtonElement>(null);
+  const [focusAfterSpot, setFocusAfterSpot] = useState(false);
+  const focusMain = () => mainRef.current?.querySelector<HTMLButtonElement>('button:not([disabled])')?.focus({ preventScroll: true });
 
   useEffect(() => {
     if (!undo) return;
-    const id = setTimeout(() => setUndo(null), UNDO_MS);
+    const id = setTimeout(() => {
+      if (undoRef.current && document.activeElement === undoRef.current) focusMain();
+      setUndo(null);
+    }, UNDO_MS);
     return () => clearTimeout(id);
   }, [undo]);
 
@@ -138,6 +148,7 @@ export function DockCount({
     for (const key of Object.keys(r.previous)) onUpdateMark(key, r.next[key]!);
     const mode = spot.mode;
     setSpot(null);
+    setFocusAfterSpot(true);
     if (r.mismatched.length > 0) {
       setSpotMismatch(true);
       return;
@@ -155,7 +166,22 @@ export function DockCount({
     if (!undo) return;
     for (const [key, prev] of Object.entries(undo.previous)) onUpdateMark(key, { ...prev, touched: prev.touched });
     setUndo(null);
+    // The undo button goes; the main button (now "mark the rest" again) takes the focus.
+    requestAnimationFrame(focusMain);
   }
+
+  // The spot check closed. The dialog hands focus back to the button that opened it; when that button
+  // now waits (disabled), focus goes on: to the undo of the bulk, or to the first line still to count.
+  useEffect(() => {
+    if (spot || !focusAfterSpot) return;
+    setFocusAfterSpot(false);
+    const main = mainRef.current?.querySelector('button');
+    if (main && !main.disabled) return;
+    const target =
+      undoRef.current ??
+      rootRef.current?.querySelector<HTMLButtonElement>('[data-testid="count-line"][data-resolved="false"] [data-testid="count-edit"]');
+    target?.focus({ preventScroll: true });
+  }, [spot, focusAfterSpot]);
 
   function tick(line: ReconciliationLine) {
     const key = lineKey(line);
@@ -175,9 +201,18 @@ export function DockCount({
         : action.kind === 'close' && countFirst
           ? { text: doc === 'none' ? td('delivery.dock.status.allMarkedNoDoc') : td('delivery.dock.status.allMarked'), tone: 'calm' }
           : null;
+  // Why the close waits, for the disabled button's description (the undo text may be on screen meanwhile).
+  const waitText =
+    action.kind !== 'wait'
+      ? null
+      : spotMismatch && unresolvedOrder.length > 0
+        ? td('delivery.count.spotMismatch')
+        : unresolvedOrder.length === 0
+          ? td('delivery.count.unorderedNeeds')
+          : null;
 
   return (
-    <div dir={dir} data-testid="delivery-check" data-count-first={countFirst ? 'true' : 'false'} className="mx-auto w-full max-w-xl">
+    <div ref={rootRef} dir={dir} data-testid="delivery-check" data-count-first={countFirst ? 'true' : 'false'} className="mx-auto w-full max-w-xl">
       <header className="mb-3 flex flex-col">
         <p className="text-title-sm text-ink" data-testid="count-supplier">
           {supplierName}
@@ -263,8 +298,8 @@ export function DockCount({
             <div className="flex min-h-14 flex-wrap items-center gap-x-2 gap-y-1">
               <div className="flex min-w-[10rem] flex-1 items-center gap-2" data-testid={undo ? 'mark-rest-undo' : undefined}>
                 <p
-                  id="count-status-text"
-                  role={status?.tone === 'warn' ? 'alert' : 'status'}
+                  // For the eye; screen readers hear the same words from the two live regions below.
+                  aria-hidden="true"
                   className={`flex min-w-0 flex-1 items-center gap-2 text-body ${status?.tone === 'warn' ? 'font-semibold text-ink' : 'text-muted'}`}
                   data-testid={status?.tone === 'warn' ? 'spot-mismatch' : 'count-status'}
                 >
@@ -272,7 +307,7 @@ export function DockCount({
                   <span className="min-w-0">{status?.text}</span>
                 </p>
                 {undo ? (
-                  <button type="button" onClick={undoMarkRest} className="min-h-12 shrink-0 rounded-card px-3 text-body font-semibold text-primary underline-offset-4 hover:underline">
+                  <button ref={undoRef} type="button" onClick={undoMarkRest} className="min-h-12 shrink-0 rounded-card px-3 text-body font-semibold text-primary underline-offset-4 hover:underline">
                     {td('delivery.count.undo')}
                   </button>
                 ) : null}
@@ -280,7 +315,7 @@ export function DockCount({
               <DocButton doc={doc} onPhoto={onPhoto ? () => onPhoto() : undefined} td={td} />
             </div>
           ) : null}
-          {/* The close's own footer already says it (the same words): one alert, not two. */}
+          {/* With a footer on screen, its words stand alone (never the same alert twice); Retry stays beside it. */}
           {failedSaves > 0 && !footerMessage ? (
             <p role="alert" className="flex min-h-12 items-center justify-between gap-3 text-body text-ink" data-testid="count-save-failed">
               <span className="flex items-center gap-2">
@@ -295,11 +330,30 @@ export function DockCount({
             </p>
           ) : null}
           {footerMessage ? (
-            <div role="alert" className="text-body font-medium text-ink" data-testid="count-footer-message">
-              {footerMessage}
+            <div className="flex min-h-12 items-center justify-between gap-3">
+              <div role="alert" className="text-body font-medium text-ink" data-testid="count-footer-message">
+                {footerMessage}
+              </div>
+              {failedSaves > 0 && onRetrySave ? (
+                <button type="button" onClick={onRetrySave} className="min-h-12 shrink-0 rounded-card px-3 font-semibold text-primary underline underline-offset-4">
+                  {td('delivery.count.retry')}
+                </button>
+              ) : null}
             </div>
           ) : null}
-          <MainButton action={action} td={td} locale={locale} waitReason={status ? 'count-status-text' : undefined} onAll={() => startSpotCheck('all')} onRest={() => startSpotCheck('rest')} onClose={() => requestClose()} />
+          {/* Always mounted, so each new message is spoken: one polite region, one alert region. */}
+          <p className="sr-only" role="status">
+            {status?.tone === 'calm' ? status.text : ''}
+          </p>
+          <p className="sr-only" role="alert">
+            {status?.tone === 'warn' ? status.text : ''}
+          </p>
+          <span id="count-wait-reason" className="sr-only">
+            {waitText ?? ''}
+          </span>
+          <div ref={mainRef} className="contents">
+            <MainButton action={action} td={td} locale={locale} waitReason={waitText ? 'count-wait-reason' : undefined} onAll={() => startSpotCheck('all')} onRest={() => startSpotCheck('rest')} onClose={() => requestClose()} />
+          </div>
         </ActionBar>
       )}
 
@@ -517,7 +571,8 @@ function CountRow({
         <button
           type="button"
           onClick={onEdit}
-          aria-label={td('delivery.dock.aria.other', { name })}
+          // "Another quantity" is the alternative to the tick; a line not on the order has no tick.
+          aria-label={onOrder ? td('delivery.dock.aria.other', { name }) : td('delivery.count.editFor', { name })}
           className="inline-flex h-14 w-[84px] shrink-0 items-center justify-center rounded-card border border-line-strong bg-surface text-muted transition-colors duration-micro ease-standard hover:bg-surface-2 hover:text-ink"
           data-testid="count-edit"
         >
