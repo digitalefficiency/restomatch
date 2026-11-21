@@ -36,7 +36,6 @@ export const he = {
   hero: {
     eyebrow: 'דליפה שזוהתה · {month}',
     leakedLabel: 'דליפה החודש',
-    pctOfSpend: '{pct} מהקניות שנבדקו',
     /** Beside the label, outside the h2: the hero counts from the 1st of the month. */
     period: 'מתחילת {month}',
     /** The scale sentence (glossary `leakBase`): "1.9% מהרכש שנבדק, מתוך ₪41,526 לפני מע״מ". */
@@ -59,7 +58,6 @@ export const he = {
     allPaid: 'כל הסכום על חשבוניות ששולמו',
     invoices: 'חשבוניות עם פער',
     invoicesValue: '{withLeak} מתוך {total}',
-    invoicesLine: '{total} חשבוניות נבדקו · {withLeak} עם פער',
     /** The foot line: "34 חשבוניות נבדקו, ב־13 מהן נמצא פער" (numbers, never formatted strings). */
     checkedLine:
       '{total, plural, one {חשבונית אחת נבדקה ונמצא בה פער} other {# חשבוניות נבדקו, {withLeak, plural, =0 {ולא נמצא פער} one {באחת מהן נמצא פער} other {ב־# מהן נמצא פער}}}}',
@@ -73,7 +71,6 @@ export const he = {
     awaitingQuestionCta: 'לשאלות',
     awaitingCount: '{count, plural, one {חשבונית אחת ממתינה} other {# חשבוניות ממתינות}} לסגירת קבלת הסחורה: {amount} כולל מע״מ',
     clean: 'אין דליפה · {count, plural, one {חשבונית אחת נבדקה} other {# חשבוניות נבדקו}}',
-    calc: 'נספרים פערים ברמת אזהרה וחסימה, עד סכום כל חשבונית. לא נספרים: "מחיר נמוך מהמצופה", "ממתינה לשיוך להזמנה" ו"שורת הזמנה לא חויבה".',
     thinBase: '{count, plural, one {מוקדם לאחוז: נבדקה רק חשבונית אחת} other {מוקדם לאחוז: נבדקו רק # חשבוניות}}',
     noData: {
       title: 'עוד לא נבדקו חשבוניות ב{month}',
@@ -84,10 +81,7 @@ export const he = {
     delta: {
       downBy: 'ירידה של {amount}',
       upBy: 'עלייה של {amount}',
-      down: 'ירידה',
-      up: 'עלייה',
       same: 'ללא שינוי',
-      vs: 'לעומת {range}',
       vsSameDays: 'לעומת אותם ימים ב{month}',
       none: 'אין נתוני השוואה',
       noneYoy: 'אין חשבוניות באותם ימים בשנה שעברה להשוואה',
@@ -116,7 +110,6 @@ export const he = {
     calcLink: 'לפירוט המלא לפי חשבונית',
     calcChanged: 'הסכום התעדכן מאז שהדף נטען',
     calcRefreshCta: 'רענון',
-    range: '{from}–{to} ב{month}',
     returned: 'הוחזר החודש',
     returnedHint: 'זיכויים שהתקבלו החודש, גם על חודשים קודמים',
     trendShow: 'הצג מגמה',
@@ -158,7 +151,6 @@ export const he = {
     why: 'איך הגענו לסכום?',
     whyBase: 'מתוך קניות של {spend} לפני מע״מ שנבדקו.',
     whySplit: 'בחשבוניות שעוד לא שולמו: {unpaid} · בחשבוניות ששולמו: {paid}.',
-    whyProof: 'לפירוט המלא',
     age: { today: 'מהיום', days: 'לפני {days} ימים' },
     othersLine: 'אצלך הכול מטופל · {count} ממתינים אצל {who} · {amount}',
     othersLineCount: 'אצלך הכול מטופל · {count} ממתינים אצל {who}',

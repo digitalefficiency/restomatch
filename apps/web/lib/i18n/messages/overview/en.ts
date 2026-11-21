@@ -31,7 +31,6 @@ export const en: Shape<typeof he> = {
   hero: {
     eyebrow: 'Leak detected · {month}',
     leakedLabel: 'Leak this month',
-    pctOfSpend: '{pct} of checked purchases',
     period: 'Since the start of {month}',
     pctOfChecked: 'of checked spend',
     pctBase: ', out of {spend} before VAT',
@@ -48,7 +47,6 @@ export const en: Shape<typeof he> = {
     allPaid: 'All of it is on paid invoices',
     invoices: 'Invoices with a discrepancy',
     invoicesValue: '{withLeak} of {total}',
-    invoicesLine: '{total} checked · {withLeak} with a gap',
     checkedLine:
       '{total, plural, one {# invoice checked, with a gap} other {# invoices checked, {withLeak, plural, =0 {none with a gap} one {# with a gap} other {# with a gap}}}}',
     drill: 'See the invoices behind {amount}',
@@ -60,7 +58,6 @@ export const en: Shape<typeof he> = {
     awaitingQuestionCta: 'To the questions',
     awaitingCount: '{count, plural, one {# invoice waits} other {# invoices wait}} for the goods receipt to close: {amount} incl. VAT',
     clean: 'No leak · {count, plural, one {# invoice checked} other {# invoices checked}}',
-    calc: 'Counts warning- and blocker-level discrepancies, capped at each invoice total. Not counted: "Price below expected", "Waiting for a PO link" and "Ordered line not billed".',
     thinBase: '{count, plural, one {Too early for a %: only # invoice checked} other {Too early for a %: only # invoices checked}}',
     noData: {
       title: 'No invoices checked in {month} yet',
@@ -70,10 +67,7 @@ export const en: Shape<typeof he> = {
     delta: {
       downBy: 'Down {amount}',
       upBy: 'Up {amount}',
-      down: 'Down',
-      up: 'Up',
       same: 'No change',
-      vs: 'vs {range}',
       vsSameDays: 'vs the same days in {month}',
       none: 'Nothing to compare with',
       noneYoy: 'No invoices in the same days of last year to compare with',
@@ -100,7 +94,6 @@ export const en: Shape<typeof he> = {
     calcLink: 'Full breakdown by invoice',
     calcChanged: 'The sum changed since the page loaded',
     calcRefreshCta: 'Refresh',
-    range: '{month} {from}–{to}',
     returned: 'Returned this month',
     returnedHint: 'Credits received this month, including for earlier months',
     trendShow: 'Show trend',
@@ -139,7 +132,6 @@ export const en: Shape<typeof he> = {
     why: 'How did we get to this figure?',
     whyBase: 'Out of {spend} of checked purchases before VAT.',
     whySplit: 'On invoices not paid yet: {unpaid} · on paid invoices: {paid}.',
-    whyProof: 'Full breakdown',
     age: { today: 'Since today', days: '{days} days ago' },
     othersLine: 'All handled on your side · {count} waiting with {who} · {amount}',
     othersLineCount: 'All handled on your side · {count} waiting with {who}',
