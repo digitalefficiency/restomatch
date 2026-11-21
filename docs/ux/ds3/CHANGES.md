@@ -3,6 +3,20 @@
 Newest first. When an entry names your package, refresh your copy of the handoff (`README.md`, "Where this
 folder lives") and read the sections it points to. Your contract is still your section of `WORKPLAN.md`.
 
+## 21.11.2026 · fourth correction
+
+The reference's script only (`reference/src/script.js` and its copy inside `reference.html`). No package is
+affected, and the mock-ups behave as before (139 of 139 checks at 1440, 11 of 11 at 390).
+
+- **The menu's tip** is built from elements whose words are set as text. Before, the words of the `data-tip`
+  attribute were joined into markup and parsed.
+- **The phone's number pad** finds a tapped key in its own list of keys by the key's place there. Before, the
+  text of the button's `data-d` attribute went into the typed quantity, and from there into the sheet's markup.
+
+Both are the same rule as the third correction: what the script reads back from the page (an attribute, a
+label, a stored value) is never written into the page as markup. `DS3-02` and `DS3-05`: build the tip and the
+number pad the same way.
+
 ## 14.11.2026 · third correction
 
 The reference's check scripts only. They keep their working copies and screenshots in `reference/checks/out/`
