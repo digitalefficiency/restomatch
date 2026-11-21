@@ -38,6 +38,12 @@ primitives (`WORKPLAN.md`, DS3-00, "Seams", item 3).
 first section once the screen had sections. `DS3-06` may change the one `href` in each of the three files
 (`WORKPLAN.md`, DS3-06, "Seams").
 
+**`DS3-00` and `DS3-01`: two seams from their stacking.** `DS3-01`'s branch sits on `DS3-00`'s, so a change
+that needs both cannot be split between them and stay green on each. `claimed` moves to T3 in one commit on
+`DS3-00`'s branch, which takes the one pin in `DS3-01`'s folder with it. W1-01's three lab-tokens baselines
+are recorded on `DS3-01`'s branch, where the components they show live. (`WORKPLAN.md`, DS3-00 "Seams" item 4
+and DS3-01 "Seams".)
+
 ## 21.11.2026 · fourth correction
 
 The reference's script only (`reference/src/script.js` and its copy inside `reference.html`). No package is

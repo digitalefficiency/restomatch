@@ -128,7 +128,10 @@ menu (`SPEC.md` §8): add it as tokens; `DS3-02` uses it. (3) Two assertions out
 old canvas and the old strong line as literals: `packages/api/src/__tests__/price-creep-digest.test.ts`
 (the light e-mail template contains the canvas colour) and `apps/web/e2e/W1-09.spec.ts` (the computed border
 colour of a quantity field). Change exactly those two literals to the new values, each in the same commit as
-its primitive, and name them in the pull request with the reason. Nothing else in those files.
+its primitive, and name them in the pull request with the reason. Nothing else in those files. (4) The colour
+role of `claimed` moves to T3 in one commit on your branch: `semantic.ts`, your own pin, and the one assertion
+in `apps/web/lib/components/__tests__/ds-foundation.test.ts` that pins the old class (`DS3-01`'s folder).
+Exactly that line, named in the pull request; a change split across the two branches would leave yours red.
 
 **Acceptance.** Every text pair still passes the contrast test (AA), and the pairs listed in `SPEC.md` §2
 hold what the reference holds. No new hex colour outside `packages/ui-tokens`, and the existing copies of the
@@ -153,7 +156,10 @@ are not yours) · `apps/web/lib/i18n/messages/{components,common,explain,views}/
 
 **Seams.** The registry line and labels for the kit page: `{ key: 'labKit', path: '/dashboard/lab/kit',
 group: 'top', nav: 'hidden' }` in `apps/web/lib/nav/routes/system.ts`, `links.labKit` in
-`messages/nav/{he,en}.ts` and in the four overlay `nav.ts` files (see "Rules of the partition").
+`messages/nav/{he,en}.ts` and in the four overlay `nav.ts` files (see "Rules of the partition"). The three
+PNG baselines of W1-01's lab-tokens test (`DS3-00`'s spec) are recorded again on your branch, because your
+components change what they show and a baseline must match the code of the branch it sits on: exactly those
+three files, the threshold and the mask untouched, named in the pull request.
 
 **Asked of you by others.** The number pad that the phone flow uses is yours
 (`apps/web/lib/components/overlay/QtyKeypad.tsx`): `DS3-05` needs it in the clean finish (`SPEC.md` §5,
