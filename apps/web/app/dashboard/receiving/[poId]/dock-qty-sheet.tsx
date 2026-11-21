@@ -188,7 +188,9 @@ export function DockQtySheet({
     <Sheet
       open={open}
       onClose={onClose}
-      detent="full"
+      // As tall as its content, as the reference's sheet (the list stays in view above it). Anchored at
+      // the bottom, it grows upward when the note appears, so no key moves; the grabber never halves it.
+      detent="auto"
       title={td('delivery.dock.sheet.title')}
       description={onOrder ? td('delivery.dock.sheet.sub', { name, qty: shown(line.poQty!) }) : td('delivery.dock.sheet.subNotOrdered', { name })}
       primary={

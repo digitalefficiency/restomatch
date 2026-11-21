@@ -356,18 +356,27 @@ test.describe('flag off — today\'s order of steps, the new look', () => {
     const sheet = kilos.getByRole('dialog', { name: 'כמה הגיע?' });
     await expect(sheet).toBeVisible();
     const keys = kilos.getByTestId('dock-keypad').locator('button');
-    // Measured against the dialog, so the sheet's own rise never counts as a move.
-    const inSheet = async (l: Locator) => {
-      const [b, s] = [(await l.boundingBox())!, (await sheet.boundingBox())!];
-      return { top: Math.round(b.y - s.y), bottom: Math.round(b.y + b.height - s.y), height: b.height };
+    // Where a control sits on the screen, once the sheet has come to rest (it rises, and grows with a note).
+    const box = async (l: Locator) => {
+      const b = (await l.boundingBox())!;
+      return { top: Math.round(b.y), bottom: Math.round(b.y + b.height), height: b.height };
     };
-    const first = await inSheet(keys.first());
+    const settled = async (l: Locator) => {
+      await expect.poll(async () => {
+        const a = await box(l);
+        await page.waitForTimeout(120);
+        return (await box(l)).top - a.top;
+      }).toBe(0);
+      return box(l);
+    };
+    const first = await settled(keys.first());
     expect(first.height, 'a key is at least 44 px').toBeGreaterThanOrEqual(44);
-    expect((await inSheet(keys.last())).bottom, 'the last row of keys sits above the button').toBeLessThanOrEqual((await inSheet(kilos.getByTestId('count-done'))).top);
+    expect((await box(keys.last())).bottom, 'the last row of keys sits above the button').toBeLessThanOrEqual((await box(kilos.getByTestId('count-done'))).top);
+    expect((await box(kilos.getByTestId('count-done'))).bottom, 'the button is on screen').toBeLessThanOrEqual(640);
     // The ordered quantity is selected: "1" replaces it — far from the order, so the note appears.
     await pad(kilos, '1');
     await expect(kilos.getByTestId('count-tolerance')).toBeVisible();
-    expect((await inSheet(keys.first())).top, 'no key moved when the note appeared').toBe(first.top);
+    expect((await settled(keys.first())).top, 'no key moved when the note appeared').toBe(first.top);
     expect(await layoutProblems(page), 'quantity sheet with its note').toEqual([]);
   });
 });
