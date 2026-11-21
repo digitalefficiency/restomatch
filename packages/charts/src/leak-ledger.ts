@@ -23,7 +23,7 @@ type SQL = ReturnType<typeof sql>;
  * ONE ALLOCATOR. Per invoice the cap is round(total_incl_vat × 100) (the hero's
  * per-invoice cap and syncClaims' cap). Rows draw from it greedily in the order
  *   tier 1 — rows holding a live claim: their persisted `amount_agorot` (≤ |Δ|);
- *   tier 2 — other decided rows (claim / waive effect, no live claim): |Δ|;
+ *   tier 2 — other decided rows (claim / waive effect, no live claim): |Δ|, claims before waivers;
  *   tier 3 — undecided rows: only what is left;
  * and inside a tier (created_at, id) — the order of syncClaims and the monthly
  * report's cappedIssues. capped = LEAST(want, GREATEST(0, cap − Σ wants before)).
@@ -220,7 +220,7 @@ export function leakLedgerSql(
     led AS (
       SELECT w.*,
         LEAST(w.want, GREATEST(0, w.cap_agorot - (SUM(w.want) OVER (
-          PARTITION BY w.invoice_id ORDER BY w.tier, w.created_at, w.discrepancy_id
+          PARTITION BY w.invoice_id ORDER BY w.tier, (w.effect = 'waive'), w.created_at, w.discrepancy_id
           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
         ) - w.want))) AS capped_agorot
       FROM w

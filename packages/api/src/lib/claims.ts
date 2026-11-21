@@ -118,13 +118,20 @@ export interface ClaimableOptions {
   claimedIds?: ReadonlySet<string>;
 }
 
-/** The claimable lines of one invoice, capped like the claims letters. */
+/** The claimable lines of one invoice, capped like the claims letters (decided first, then undecided). */
 export function claimableLines(inv: LeakBreakdownInvoice, opts: ClaimableOptions = {}): ClaimLine[] {
   if (inv.pendingLink) return [];
   const claimed = opts.claimedIds;
   const out: ClaimLine[] = [];
   let invClaimed = 0;
-  for (const l of inv.lines) {
+  // G-14 Q3: one cap-split order everywhere — the leak ledger's tiers. Decided lines take the
+  // invoice cap first, undecided ones get only what is left (biggest |Δ| first inside a tier),
+  // so a decision's ₪ is never squeezed out by a line nobody decided yet.
+  const ordered = [
+    ...inv.lines.filter((l) => !UNDECIDED.has(l.resolutionStatus)),
+    ...inv.lines.filter((l) => UNDECIDED.has(l.resolutionStatus)),
+  ];
+  for (const l of ordered) {
     if (!l.countsAsLeak || !CLAIMABLE.has(l.resolutionStatus) || NEVER_CLAIMABLE.has(l.type)) continue;
     if (claimed?.has(l.discrepancyId)) continue;
     // Owner M7 (7.11): a tolerance row the engine auto-approved is waived — never asked back.

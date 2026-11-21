@@ -31,7 +31,9 @@ function referenceLetterLines(inv: LeakBreakdownInvoice): Array<{ id: string; am
   const out: Array<{ id: string; amount: number }> = [];
   if (inv.pendingLink) return out;
   let invClaimed = 0;
-  for (const l of inv.lines) {
+  // G-14 Q3: the leak ledger's tier order — decided lines take the cap first, then undecided.
+  const undecided = (l: LeakBreakdownLine) => l.resolutionStatus === 'open' || l.resolutionStatus === 'escalated';
+  for (const l of [...inv.lines.filter((x) => !undecided(x)), ...inv.lines.filter(undecided)]) {
     if (!l.countsAsLeak || !REF_CLAIMABLE.has(l.resolutionStatus)) continue;
     const amount = Math.min(Math.abs(l.deltaAmount), Math.max(0, inv.leakIls - invClaimed));
     if (amount <= 0) continue;
@@ -176,10 +178,11 @@ describe('W2-03 claims rule — a paid invoice keeps its claims', () => {
       line({ discrepancyId: 'e', resolutionStatus: 'escalated', deltaAmount: 5 }),
       line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 5 }),
     ];
+    // G-14 Q3: decided lines come first (they take the cap first).
     expect(claimableLines(invoice({ lines, leakIls: 15 })).map((c) => [c.line.discrepancyId, c.undecided])).toEqual([
+      ['a', false],
       ['o', true],
       ['e', true],
-      ['a', false],
     ]);
   });
 
@@ -346,9 +349,10 @@ describe('ask "what to claim" (claimableData / offline claimWeek) = the claims r
     });
     const c = claimableData([inv]);
     expect(c.lines.map((l) => l.type)).not.toContain('MISSING_ON_INVOICE');
-    expect(c.lines.map((l) => l.amountIls)).toEqual([40, 10]);
-    expect(c.totalIls).toBe(50);
+    // G-14 Q3: the decided ₪5 takes the cap first; the open lines get what is left.
+    expect(c.lines.map((l) => l.amountIls)).toEqual([40, 5]);
+    expect(c.totalIls).toBe(45);
     // W2-03 (owner decision): a paid invoice KEEPS its claims — same lines as unpaid.
-    expect(claimableData([{ ...inv, status: 'paid' }]).totalIls).toBe(50);
+    expect(claimableData([{ ...inv, status: 'paid' }]).totalIls).toBe(45);
   });
 });

@@ -1,6 +1,7 @@
 import { sql, type Database } from '@restomatch/db';
 import { effectSql } from './decisions';
 import { computeLeakHero, type LeakHero } from './leak-hero';
+import { computeLeakPartition } from './leak-ledger';
 import { LEAK_FILTER, LIVE_DUPLICATE, originalChecked } from './leak-views';
 
 /**
@@ -104,6 +105,9 @@ export async function computeLeakReport(
   // so the hero's tz-aware month bounds resolve to exactly this month.
   const anchor = new Date(Date.UTC(year, mm - 1, 15, 12, 0, 0));
   const hero = await computeLeakHero(db, restaurantId, { now: anchor });
+  // G-14 Q3: the open / claimed / waived ₪ are the money states of the hero's own capped leak
+  // (open + claimed + waived = hero.leakIls to the agora; claims take the cap first).
+  const partition = await computeLeakPartition(db, restaurantId, { period: 'this_month', now: anchor });
   const lo = hero.monthStart;
   const hi = hero.monthEnd;
   const creepLimit = Math.min(Math.max(options.priceCreepLimit ?? 8, 1), 50);
@@ -163,11 +167,8 @@ export async function computeLeakReport(
     db.execute(sql`
       WITH ${monthInv}
       SELECT
-        COALESCE(SUM(amt) FILTER (WHERE effect = 'undecided'), 0) AS open_amt,
         COUNT(*) FILTER (WHERE effect = 'undecided') AS open_c,
-        COALESCE(SUM(amt) FILTER (WHERE effect = 'claim'), 0) AS claimed_amt,
         COUNT(*) FILTER (WHERE effect = 'claim') AS claimed_c,
-        COALESCE(SUM(amt) FILTER (WHERE effect = 'waive'), 0) AS waived_amt,
         COUNT(*) FILTER (WHERE effect = 'waive') AS waived_c,
         COUNT(DISTINCT supplier_id) FILTER (WHERE effect = 'claim') AS credit_suppliers
       FROM lines WHERE counts
@@ -248,11 +249,18 @@ export async function computeLeakReport(
     priceCreep,
     status: {
       caughtBeforePaymentIls: hero.caughtBeforePaymentIls,
-      stillOpenIls: ils(s.open_amt),
+      stillOpenIls: partition.states.undecided / 100,
       stillOpenCount: n(s.open_c),
-      claimedIls: ils(s.claimed_amt),
+      claimedIls:
+        (partition.states.to_offset +
+          partition.states.to_send +
+          partition.states.requested +
+          partition.states.disputed +
+          partition.states.credited +
+          partition.states.recovered) /
+        100,
       claimedCount: n(s.claimed_c),
-      waivedIls: ils(s.waived_amt),
+      waivedIls: partition.states.waived / 100,
       waivedCount: n(s.waived_c),
       creditRequestSuppliers: n(s.credit_suppliers),
     },

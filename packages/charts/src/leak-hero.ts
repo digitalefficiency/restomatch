@@ -361,7 +361,7 @@ async function breakdownLines(
     LEFT JOIN goods_receipts gr ON gr.id = COALESCE(grl.gr_id, mr.gr_id) AND gr.restaurant_id = ${restaurantId}
     WHERE d.restaurant_id = ${restaurantId}
       AND mr.invoice_id IN (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
-    ORDER BY ABS(d.delta_amount) DESC
+    ORDER BY ABS(d.delta_amount) DESC, d.id
   `);
   const linesByInvoice = new Map<string, LeakBreakdownLine[]>();
   for (const l of rowsOf(lineRes)) {
@@ -527,4 +527,30 @@ export async function computeInvoiceLeak(
   invoiceId: string,
 ): Promise<LeakBreakdownInvoice | null> {
   return (await computeInvoicesLeak(db, restaurantId, [invoiceId])).get(invoiceId) ?? null;
+}
+
+/**
+ * G-14 Q3: "claimed" (accepted for a claim) for any view — the hero's per-invoice capped
+ * value, LEAST(Σ|Δ| of claim-effect leak lines, LEAST(raw leak, total)), with the decision
+ * table's 'claim' effect, so a tolerance row the engine auto-approved (owner M7: waived) is
+ * never counted. Replaces computeLeakSummary().recoveredIls (leak-views, immutable, which
+ * still reads a status list) wherever a screen shows "claimed".
+ */
+export async function computeClaimedIls(db: Database, restaurantId: string, spec: ViewSpec): Promise<number> {
+  const res = await db.execute(sql`
+    WITH ${viewInvoicesSql(restaurantId, spec)},
+    c AS (
+      SELECT per.id, LEAST(per.raw_leak, per.total) AS cap,
+        COALESCE((
+          SELECT SUM(ABS(d.delta_amount))
+          FROM match_runs mr
+          JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
+          WHERE mr.invoice_id = per.id AND mr.restaurant_id = ${restaurantId}
+            AND ${lineFilter(restaurantId, spec.filters)} AND ${effectSql()} = 'claim'
+        ), 0) AS raw_claim
+      FROM per
+    )
+    SELECT COALESCE(SUM(LEAST(c.raw_claim, c.cap)), 0) AS claimed FROM c
+  `);
+  return ils(rowsOf(res)[0]?.claimed);
 }

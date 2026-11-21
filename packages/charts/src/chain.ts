@@ -1,5 +1,5 @@
 import { sql, type Database } from '@restomatch/db';
-import { computeLeakHero } from './leak-hero';
+import { computeClaimedIls, computeLeakHero } from './leak-hero';
 import { parseReportMonth } from './leak-report';
 import { LEAK_FILTER, computeLeakSummary, viewInvoicesSql, type ViewCompare, type ViewSpec } from './leak-views';
 import { computeOwnerKpis } from './owner-kpis';
@@ -171,7 +171,8 @@ export async function computeBranchSnapshot(
     spendIls: current.spendIls,
     leakPct: current.leakPct,
     caughtBeforePaymentIls: current.caughtBeforePaymentIls,
-    claimedIls: current.recoveredIls,
+    // G-14 Q3: the decision table's 'claim' effect (tolerated = waived), not leak-views' status list.
+    claimedIls: await computeClaimedIls(db, restaurantId, spec),
     pendingApprovals: kpis.pendingApprovalsCount,
     openDiscrepancies: num(rowsOf(openRes)[0]?.c),
     invoiceCount: current.invoiceCount,

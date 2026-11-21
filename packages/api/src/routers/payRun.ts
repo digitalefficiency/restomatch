@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   AWAITING_QUESTION_SQL,
   LEAK_EXCLUDED_TYPES,
+  LEAK_FILTER,
   TOLERATED_SQL,
   computeInvoicesLeak,
   computeLeakHero,
@@ -214,8 +215,14 @@ function unpaidInvoicesSql(rid: string, window: { start: string; end: string } |
                  AND COALESCE(i.ocr_payload -> 'raw' ->> 'kind', '') <> 'consolidated') AS review_held,
                COALESCE(i.total_incl_vat, 0) AS total_incl, COALESCE(i.total_excl_vat, 0) AS total_excl,
                i.supplier_id, s.name AS supplier_name, s.name_en AS supplier_name_en,
-               -- Safety net for an invoice past the breakdown's 200-row window: any open
-               -- warn/block finding still holds it (never shown as payable by omission).
+               -- G-14 Q3: does it have any leak line? Only those need the per-invoice leak batch.
+               EXISTS (
+                 SELECT 1 FROM match_runs mr1
+                 JOIN discrepancies d ON d.match_run_id = mr1.id AND d.restaurant_id = ${rid}
+                 WHERE mr1.invoice_id = i.id AND mr1.restaurant_id = ${rid} AND ${LEAK_FILTER}
+               ) AS has_leak,
+               -- Guard for an id the leak batch does not return (it returns every listed id with a
+               -- leak line): any open warn/block finding still holds it (never payable by omission).
                EXISTS (
                  SELECT 1 FROM match_runs mr2
                  JOIN discrepancies d ON d.match_run_id = mr2.id AND d.restaurant_id = ${rid}
@@ -223,8 +230,8 @@ function unpaidInvoicesSql(rid: string, window: { start: string; end: string } |
                    AND d.severity IN ('warn','block') AND ${discrepancyDecidableSql(sql`d.resolution_status`)}
                    AND d.type NOT IN (${LEAK_EXCLUDED_SQL}) AND ABS(d.delta_amount) > 0
                ) AS has_open,
-               -- …and accepted real findings still ask for a credit (Σ |Δ|, capped at the
-               -- invoice total like the hero's per-invoice cap), never "can pay".
+               -- …and accepted real findings (not tolerated) still ask for a credit (Σ |Δ|, capped
+               -- at the invoice total), never "can pay" — same guard.
                (
                  SELECT LEAST(COALESCE(SUM(ABS(d.delta_amount)), 0), COALESCE(i.total_incl_vat, 0))
                  FROM match_runs mr3
@@ -298,8 +305,9 @@ function unpaidInvoicesSql(rid: string, window: { start: string; end: string } |
 /** One SQL row (+ its breakdown entry, if any) → its pay-run invoice. Shared by `month` and `list`. */
 function invoiceOfRow(row: Row, b: LeakBreakdownInvoice | null): PayRunInvoice {
   const s = payRunStatusOf(b);
-  // Past the breakdown's 200-row window (known limit, not reached by the demo): an open
-  // real finding still holds the invoice; an unmatched one waits for its link.
+  // Guard: an invoice the leak batch did not return (G-14 Q3: every listed invoice with a leak
+  // line is in it, so normally none): an open real finding still holds it; an unmatched one
+  // waits for its link.
   if (!b && row.has_open === true) s.status = 'hold';
   if (!b && Number(row.accepted_ils ?? 0) > 0) {
     s.creditIls = Math.round(Number(row.accepted_ils) * 100) / 100;
@@ -669,14 +677,13 @@ export const payRunRouter = router({
       }
       const raw = rowsOf(await ctx.db.execute(unpaidInvoicesSql(rid, window)));
 
-      // Per-invoice capped leak for EVERY listed invoice (G-14 Q3: the batch computeInvoicesLeak,
-      // no 200-row window), so each row's claim ₪ comes from the same lines and rules as the
-      // letters (claimableLines: tolerated rows waived, M7). The SQL safety net above stays for
-      // an id the batch does not return.
+      // Per-invoice capped leak for every listed invoice WITH a leak line (G-14 Q3: the batch
+      // computeInvoicesLeak, no 200-row window; an invoice with no leak line has nothing to cap,
+      // exactly as before), so each row's claim ₪ comes from the same lines and rules as the
+      // letters (claimableLines: tolerated rows waived, M7).
       let byInvoice = new Map<string, LeakBreakdownInvoice>();
-      if (raw.length) {
-        byInvoice = await computeInvoicesLeak(ctx.db, rid, raw.map((r) => String(r.id)));
-      }
+      const leaky = raw.filter((r) => r.has_leak === true).map((r) => String(r.id));
+      if (leaky.length) byInvoice = await computeInvoicesLeak(ctx.db, rid, leaky);
 
       // "חסר מספר הקצאה" hold — read-only reuse of vatAtRisk().
       const vat = await vatAtRisk(ctx.db, rid, 'all', { now });
@@ -857,7 +864,11 @@ export async function computePayRunMonth(
     unpaidInvoicesSql(rid, { start: hero.monthStart, end: hero.monthEnd }),
   );
   // G-14 Q3: every listed invoice's leak from the batch (no 200-row window).
-  const byInvoice = await computeInvoicesLeak(db, rid, rowsOf(res).map((r) => String(r.id)));
+  const byInvoice = await computeInvoicesLeak(
+    db,
+    rid,
+    rowsOf(res).filter((r) => r.has_leak === true).map((r) => String(r.id)),
+  );
 
   const groups = new Map<string, PayRunSupplier & { a: Record<string, number> }>();
   for (const row of rowsOf(res)) {

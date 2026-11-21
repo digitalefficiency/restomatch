@@ -19,6 +19,8 @@ import { caughtBefore, computeLeakLedger, computeLeakPartition, dayIn, parseBasi
 import { computeLeakBreakdown } from '../leak-hero';
 import { MONEY_STATES, type ClaimStatus } from '../decisions';
 import { computeLeakReport } from '../leak-report';
+import { computeBranchSnapshot } from '../chain';
+import { computeClaimedIls } from '../leak-hero';
 import { computeOwnerKpis } from '../owner-kpis';
 
 const db = createDb(testDbUrl());
@@ -524,5 +526,35 @@ describe('G-14 Q3 · every screen counts the same shekel the same way', () => {
     const claimStates = p.states.to_offset + p.states.to_send + p.states.requested + p.states.disputed + p.states.credited + p.states.recovered;
     expect(claimStates).toBe(Math.round(hero.recoveredIls * 100));
     expect(claimStates).toBe(Math.round(report.status.claimedIls * 100));
+
+    // The chain page's "התבקש מהספקים" reads the same rule (not leak-views' status list).
+    expect(await computeClaimedIls(db, rid, SPEC)).toBe(6);
+    const snap = await computeBranchSnapshot(db, rid, 'Ledger Bistro', { spec: SPEC, trendMonths: 1 });
+    expect(snap.claimedIls).toBe(6);
+  });
+
+  it('the report tiles are the capped money states: open + claimed + waived = hero leak, even when a cap binds', async () => {
+    const { rid, invoice } = await setup();
+    // Cap binds below the raw leak: ₪8 total, ₪10 claim + ₪5 open + ₪4 waived raw.
+    await invoice({
+      inclVat: '8.00',
+      d: [
+        { type: 'QTY_SHORT', delta: '10.00', status: 'accepted' },
+        { type: 'QTY_OVER', delta: '5.00', status: 'open' },
+        { type: 'UNORDERED_ITEM', delta: '4.00', status: 'rejected' },
+      ],
+    });
+    // A zero total and a NULL total cap everything at ₪0 (the hero's rule).
+    await invoice({ inclVat: '0.00', d: [{ type: 'QTY_SHORT', delta: '10.00', status: 'accepted' }, { type: 'QTY_OVER', delta: '5.00' }] });
+    const { invoiceId: nullTotal } = await invoice({ inclVat: '1.00', d: [{ type: 'QTY_SHORT', delta: '7.00', status: 'accepted' }] });
+    await db.execute(sql`UPDATE invoices SET total_incl_vat = NULL, total_excl_vat = NULL WHERE id = ${nullTotal}`);
+
+    const hero = await computeLeakHero(db, rid, { now: NOW });
+    expect(hero.leakIls).toBe(8);
+    const { status } = await computeLeakReport(db, rid, '2026-10');
+    // Claims take the cap first: ₪8 claimed, nothing left for the open or waived lines.
+    expect([status.claimedIls, status.stillOpenIls, status.waivedIls]).toEqual([8, 0, 0]);
+    expect(Math.round((status.claimedIls + status.stillOpenIls + status.waivedIls) * 100)).toBe(Math.round(hero.leakIls * 100));
+    expect(status.claimedIls).toBe(hero.recoveredIls);
   });
 });
