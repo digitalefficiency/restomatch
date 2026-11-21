@@ -15,6 +15,7 @@ type Profile = inferRouterOutputs<AppRouter>['settings']['profile'];
 export function ProfileForm({ initial, canEdit }: { initial: Profile; canEdit: boolean }) {
   const t = useT(settings);
   const locale = useLocale();
+  const utils = trpc.useUtils();
   const [name, setName] = useState(initial.name);
   const [businessId, setBusinessId] = useState(initial.businessId ?? '');
   // VAT is read-only here (W2-14): it changes the leak ₪ of every invoice whose
@@ -34,13 +35,17 @@ export function ProfileForm({ initial, canEdit }: { initial: Profile; canEdit: b
       setVatRate(res.vatRate);
       setVatOpen(false);
       setStatus({ ok: true, message: t('profile.saved') });
+      void utils.settings.history.invalidate();
     },
     onError: (err) => setStatus({ ok: false, message: localizeServerError(err, locale, t('profile.failed')) }),
   });
   const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
 
   const update = trpc.settings.updateProfile.useMutation({
-    onSuccess: () => setStatus({ ok: true, message: t('profile.saved') }),
+    onSuccess: () => {
+      setStatus({ ok: true, message: t('profile.saved') });
+      void utils.settings.history.invalidate();
+    },
     onError: (err) => setStatus({ ok: false, message: localizeServerError(err, locale, t('profile.failed')) }),
   });
 
@@ -63,11 +68,8 @@ export function ProfileForm({ initial, canEdit }: { initial: Profile; canEdit: b
         </Card>
       ) : null}
 
+      {/* The section's head (פרטי המסעדה, its subtitle) names this card: no second title here. */}
       <Card flow elevated padding="lg">
-        <h3 className="mb-1 text-lg font-bold text-ink">{t('profile.cardTitle')}</h3>
-        <p className="mb-5 text-sm text-muted">
-          {t('profile.cardSubtitle')}
-        </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label={t('profile.name')} htmlFor="prof-name">
             <Input

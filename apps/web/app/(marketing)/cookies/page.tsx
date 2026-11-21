@@ -26,7 +26,8 @@ export async function generateMetadata(): Promise<Metadata> {
  * (lib/authCookies.ts), sign-out tombstone (lib/signOutTombstone.ts), locale
  * (lib/i18n/config.ts), consent (lib/cookieConsent.ts), sign-in/reset hints
  * (app/login/hintCodec.ts, app/(auth)/reset/resetHint.ts), nav rail
- * (lib/nav/prefs.ts), and on-device storage (lib/pwa/offlineQueue.ts,
+ * (lib/nav/prefs.ts), display preferences (lib/prefs/schema.ts), and on-device
+ * storage (lib/pwa/offlineQueue.ts,
  * lib/pwa/lineOutbox.ts, receiving wizard drafts, lead attribution). Production
  * cookie names carry the `__Secure-` / `__Host-` prefixes shown.
  * Copy: `marketing.legal.cookies.*`.
@@ -41,12 +42,15 @@ const COOKIES = [
   { id: 'consent', name: 'rm_cookie_consent', lifetime: 'days180', category: 'essential' },
   { id: 'locale', name: 'rm_locale', lifetime: 'year1', category: 'preference' },
   { id: 'navRail', name: 'rm_nav_rail', lifetime: 'year1', category: 'preference' },
+  { id: 'density', name: 'rm_density', lifetime: 'year1', category: 'preference' },
+  { id: 'textSize', name: 'rm_text', lifetime: 'year1', category: 'preference' },
 ] as const;
 
 const STORAGE = [
   { id: 'photoQueue', name: 'restomatch-receiver', where: 'IndexedDB', lifetime: 'untilUploaded' },
   { id: 'receiving', name: 'rm-rcv-draft:* · rm-rcv-lines:* · rm-rcv-unordered:*', where: 'localStorage', lifetime: 'untilDone' },
   { id: 'nav', name: 'rm:nav:rail · rm:nav:groups', where: 'localStorage', lifetime: 'untilCleared' },
+  { id: 'display', name: 'rm:density · rm:text · rm:keys:single', where: 'localStorage', lifetime: 'untilCleared' },
   { id: 'attribution', name: 'rm.attribution', where: 'sessionStorage', lifetime: 'tab' },
   { id: 'temp', name: 'rm-pwa · …', where: 'sessionStorage', lifetime: 'tab' },
 ] as const;

@@ -64,37 +64,71 @@ export function useSectionDraft<T>(section: SectionId): {
   return { initial: api.drafts.get(section) as T | undefined, keep };
 }
 
-/** Highlight (and focus) the row a link pointed at, for a moment, after it arrives. */
-function useArrivalHighlight() {
+/**
+ * Highlight (and focus) the row a link pointed at, for a moment, after it
+ * arrives. Returns `arrive(id)` for a search result: the router changes a
+ * fragment-only address with pushState, which fires no `hashchange`, so a
+ * result in the open section would otherwise never be marked.
+ */
+function useArrivalHighlight(): (id: string) => void {
   const pathname = usePathname();
   const search = useSearchParams()?.toString() ?? '';
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pending = useRef<number | null>(null);
+
+  /** Mark the row with this anchor; false when it is not on the screen (yet). */
+  const mark = useCallback((id: string): boolean => {
+    if (!id) return true;
+    // The anchor is only compared with the rows on the screen (never turned into a selector).
+    const el = [...document.querySelectorAll<HTMLElement>('[data-setting-row]')].find(
+      (row) => row.dataset.settingRow === id,
+    );
+    if (!el) return false;
+    el.scrollIntoView({ block: 'nearest' });
+    el.focus({ preventScroll: true });
+    el.dataset.hit = 'true';
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      delete el.dataset.hit;
+    }, 1600);
+    return true;
+  }, []);
+
+  // A full load, another section, Back / Forward: the anchor in the address, after the section rendered.
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
     const hit = () => {
-      const id = hashAnchor(window.location.hash);
-      if (!id) return;
-      // The address is only compared with the rows on the screen (never turned into a selector).
-      const el = [...document.querySelectorAll<HTMLElement>('[data-setting-row]')].find(
-        (row) => row.dataset.settingRow === id,
-      );
-      if (!el) return;
-      el.scrollIntoView({ block: 'nearest' });
-      el.focus({ preventScroll: true });
-      el.dataset.hit = 'true';
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        delete el.dataset.hit;
-      }, 1600);
+      mark(hashAnchor(window.location.hash));
     };
-    // After the section has rendered.
     const raf = requestAnimationFrame(hit);
     window.addEventListener('hashchange', hit);
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('hashchange', hit);
-      clearTimeout(timer);
     };
-  }, [pathname, search]);
+  }, [pathname, search, mark]);
+
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current);
+      if (pending.current !== null) cancelAnimationFrame(pending.current);
+    },
+    [],
+  );
+
+  return useCallback(
+    (id: string) => {
+      if (pending.current !== null) cancelAnimationFrame(pending.current);
+      let frames = 0;
+      // Once the row is on the screen (another section renders after its navigation; about a second at most).
+      const attempt = () => {
+        pending.current = null;
+        if (mark(id) || ++frames > 60) return;
+        pending.current = requestAnimationFrame(attempt);
+      };
+      pending.current = requestAnimationFrame(attempt);
+    },
+    [mark],
+  );
 }
 
 /**
@@ -144,7 +178,7 @@ export function SettingsFrame({
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [anyDirty]);
 
-  useArrivalHighlight();
+  const arrive = useArrivalHighlight();
 
   const params = useSearchParams();
   const current = activeSection(pathname, params?.get('s') ?? null);
@@ -217,7 +251,10 @@ export function SettingsFrame({
                     <li key={e.id}>
                       <Link
                         href={settingHref(e)}
-                        onClick={() => setQuery('')}
+                        onClick={() => {
+                          setQuery('');
+                          arrive(e.anchor ?? e.id);
+                        }}
                         className="flex min-h-11 items-center gap-2 rounded-control px-2.5 text-body-sm font-medium text-muted transition-colors duration-micro hover:bg-surface-2 hover:text-ink lg:min-h-8"
                       >
                         <span className="min-w-0 flex-1 truncate">{tt(e.titleKey)}</span>

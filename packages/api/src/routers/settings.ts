@@ -289,7 +289,11 @@ const PreviewInput = z
   .strict();
 
 export interface ThresholdPreview {
-  /** Open gaps today, as awaitingDecision counts them (the figure every screen shows). */
+  /**
+   * Open gaps today, as awaitingDecision counts them (the figure every screen shows). With a
+   * proposal it is counted from the same statement as everything else in the answer (one
+   * snapshot), over the same rows awaitingDecision counts for the finance roles.
+   */
   openNow: number;
   /** False when the proposal resolves to the thresholds in force (then only `openNow`). */
   changed: boolean;
@@ -491,11 +495,10 @@ export const settingsRouter = router({
     const routingChanged = ROUTING_KEYS.some((k) => apprNow[k] !== apprNext[k]);
     const changed = toleranceChanged || !sameValues(apprNow, apprNext);
 
-    const awaiting = await awaitingDecision(ctx.db, { session: { restaurantId: rid, role: ctx.session.role } }, { scope: 'all' });
-    const base: ThresholdPreview = {
-      openNow: awaiting.count,
+    const answer = (openNow: number): ThresholdPreview => ({
+      openNow,
       changed,
-      wouldOpen: awaiting.count,
+      wouldOpen: openNow,
       wouldBlock: 0,
       notOpenedCount: 0,
       notOpenedAgorot: 0,
@@ -504,8 +507,11 @@ export const settingsRouter = router({
       evaluatedRuns: 0,
       skippedRuns: 0,
       proposal: { tolerances: tolNext, approvalThresholds: apprNext },
-    };
-    if (!changed) return base;
+    });
+    if (!changed) {
+      const awaiting = await awaitingDecision(ctx.db, { session: { restaurantId: rid, role: ctx.session.role } }, { scope: 'all' });
+      return answer(awaiting.count);
+    }
     if (!hasCap(ctx.session.role, 'settings.edit')) {
       throw appError('FORBIDDEN', 'capability.required', 'Required capability: settings.edit', {
         capability: 'settings.edit',
@@ -543,6 +549,11 @@ export const settingsRouter = router({
 
     // Every counted row starts as "would open" with its stored severity; re-runs below can only lower that.
     const counted = rows.filter((r) => !isZeroShortTwin(r));
+    // Every number of the what-if comes from this one statement: a count taken by a second statement
+    // could see a re-match the first did not (READ COMMITTED), and claim fewer open gaps than there are.
+    // These are the rows awaitingDecision counts for the finance roles (open / escalated, this tenant's
+    // runs, the zero-₪ QTY_SHORT twin left out), so the count is the same figure.
+    const base = answer(counted.length);
     let wouldBlock = counted.filter((r) => r.severity === 'block').length;
     let notEvaluated = 0;
     const notOpened: Array<{ label: string | null; labelEn: string | null; amountAgorot: number }> = [];

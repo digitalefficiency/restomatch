@@ -29,6 +29,15 @@ export function useShellRail(initial: boolean) {
   const set = useCallback((next: boolean) => {
     const el = document.getElementById('rm-app');
     if (!el || (el.dataset.rail === 'on') === next) return;
+    // The shell ignores Ctrl/⌘+B while a text field has focus (app/dashboard/nav.tsx), and a command
+    // chosen in the palette runs from the palette's own field, which closes with it.
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName))
+    ) {
+      active.blur();
+    }
     document.dispatchEvent(
       new KeyboardEvent('keydown', {
         code: 'KeyB',

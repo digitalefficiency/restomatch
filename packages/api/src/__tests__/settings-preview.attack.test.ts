@@ -18,7 +18,7 @@
  * older run of the same invoice: it can never be re-run, so it counts as open.
  */
 import { applyCoreTenantRls, ensureRlsAppRole, testDbUrl } from '@restomatch/db';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   activityEvents,
   and,
@@ -44,6 +44,41 @@ import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 import { persistMatchRun } from '../match/persist';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
+/** While `on`, the transaction mode the preview's own transaction reports, read where it calls out. */
+const observed = vi.hoisted(() => ({ on: false, modes: [] as string[] }));
+async function readMode(db: unknown): Promise<void> {
+  if (!observed.on) return;
+  const { sql: q } = await import('@restomatch/db');
+  const rows = (await (db as Database).execute(
+    q`select current_setting('transaction_read_only') as mode`,
+  )) as unknown as Array<{
+    mode: string;
+  }>;
+  observed.modes.push(String(rows[0]?.mode));
+}
+vi.mock('../approvals/awaiting', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../approvals/awaiting')>();
+  return {
+    ...actual,
+    awaitingDecision: async (...args: Parameters<typeof actual.awaitingDecision>) => {
+      await readMode(args[0]);
+      return actual.awaitingDecision(...args);
+    },
+  };
+});
+vi.mock('../match/buildMatchInput', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../match/buildMatchInput')>();
+  return {
+    ...actual,
+    buildMatchInputForInvoice: async (
+      ...args: Parameters<typeof actual.buildMatchInputForInvoice>
+    ) => {
+      await readMode(args[0]);
+      return actual.buildMatchInputForInvoice(...args);
+    },
+  };
+});
+
 const TEST_DB_URL = testDbUrl();
 const ownerDb = createDb(TEST_DB_URL);
 let appDb: Database;
@@ -60,8 +95,14 @@ const owner = (t: Tenant) => callerWithRole(t, 'owner');
 
 /** Complete the seeded receipt and match the seeded invoice through the real pipeline, as the job does. */
 async function matchSeeded(t: Tenant) {
-  await ownerDb.update(goodsReceipts).set({ status: 'completed' }).where(eq(goodsReceipts.id, t.grId));
-  const built = await buildMatchInputForInvoice(ownerDb, t.restaurantId, t.invoiceId, { pinnedPoId: t.poId, strictPin: true });
+  await ownerDb
+    .update(goodsReceipts)
+    .set({ status: 'completed' })
+    .where(eq(goodsReceipts.id, t.grId));
+  const built = await buildMatchInputForInvoice(ownerDb, t.restaurantId, t.invoiceId, {
+    pinnedPoId: t.poId,
+    strictPin: true,
+  });
   if (!built) throw new Error('seed: no match input');
   await persistMatchRun(
     ownerDb,
@@ -79,7 +120,15 @@ async function matchSeeded(t: Tenant) {
 
 /** Everything a write could touch, for one tenant. */
 async function snapshot(t: Tenant) {
-  const count = async (table: typeof discrepancies | typeof matchRuns | typeof auditLog | typeof activityEvents | typeof priceHistory | typeof notificationsOutbox) => {
+  const count = async (
+    table:
+      | typeof discrepancies
+      | typeof matchRuns
+      | typeof auditLog
+      | typeof activityEvents
+      | typeof priceHistory
+      | typeof notificationsOutbox,
+  ) => {
     const [r] = await ownerDb
       .select({ n: sql<number>`count(*)::int` })
       .from(table)
@@ -87,7 +136,11 @@ async function snapshot(t: Tenant) {
     return r?.n;
   };
   const rows = await ownerDb
-    .select({ id: discrepancies.id, status: discrepancies.resolutionStatus, role: discrepancies.requiresRole })
+    .select({
+      id: discrepancies.id,
+      status: discrepancies.resolutionStatus,
+      role: discrepancies.requiresRole,
+    })
     .from(discrepancies)
     .where(eq(discrepancies.restaurantId, t.restaurantId))
     .orderBy(discrepancies.id);
@@ -96,7 +149,10 @@ async function snapshot(t: Tenant) {
     .from(invoices)
     .where(eq(invoices.restaurantId, t.restaurantId))
     .orderBy(invoices.id);
-  const [r] = await ownerDb.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, t.restaurantId));
+  const [r] = await ownerDb
+    .select({ settings: restaurants.settings })
+    .from(restaurants)
+    .where(eq(restaurants.id, t.restaurantId));
   return {
     discrepancies: await count(discrepancies),
     runs: await count(matchRuns),
@@ -132,12 +188,24 @@ describe('DS3-06 settings.previewThresholds', () => {
   it('no change: only the real count of open gaps (awaitingDecision), nothing re-run', async () => {
     const p = await owner(A).settings.previewThresholds({});
     // QTY_OVER + PRICE_HIGHER + VAT_MISMATCH from the match, + the seeded row; the zero-₪ twin is left out.
-    expect(p).toMatchObject({ openNow: 4, changed: false, wouldOpen: 4, notOpenedCount: 0, evaluatedRuns: 0 });
+    expect(p).toMatchObject({
+      openNow: 4,
+      changed: false,
+      wouldOpen: 4,
+      notOpenedCount: 0,
+      evaluatedRuns: 0,
+    });
     // The figure every screen shows: awaitingDecision over all open rows the owner reads.
-    const awaiting = await awaitingDecision(ownerDb, { session: { restaurantId: A.restaurantId, role: 'owner' } }, { scope: 'all' });
+    const awaiting = await awaitingDecision(
+      ownerDb,
+      { session: { restaurantId: A.restaurantId, role: 'owner' } },
+      { scope: 'all' },
+    );
     expect(p.openNow).toBe(awaiting.count);
     // A proposal that resolves to the values in force is no change either.
-    expect((await owner(A).settings.previewThresholds({ tolerances: { pricePercent: 0.02 } })).changed).toBe(false);
+    expect(
+      (await owner(A).settings.previewThresholds({ tolerances: { pricePercent: 0.02 } })).changed,
+    ).toBe(false);
   });
 
   it('a looser price tolerance: the price gap would not have opened, named with its ₪ (A only)', async () => {
@@ -167,23 +235,45 @@ describe('DS3-06 settings.previewThresholds', () => {
   });
 
   it('a stricter threshold never claims a gap would close', async () => {
-    const p = await owner(A).settings.previewThresholds({ tolerances: { pricePercent: 0.01, blockPricePercent: 0.05 } });
+    const p = await owner(A).settings.previewThresholds({
+      tolerances: { pricePercent: 0.01, blockPricePercent: 0.05 },
+    });
     expect(p).toMatchObject({ wouldOpen: 4, wouldBlock: 2, notOpenedCount: 0 });
   });
 
   it('only the no-PO / unordered amounts changed: nothing can change, nothing is re-run', async () => {
-    const p = await owner(A).settings.previewThresholds({ approvalThresholds: { largeInvoiceWithoutPo: 10, unorderedItemSignificant: 1 } });
-    expect(p).toMatchObject({ changed: true, evaluatedRuns: 0, notEvaluated: 0, wouldOpen: 4, notOpenedCount: 0 });
+    const p = await owner(A).settings.previewThresholds({
+      approvalThresholds: { largeInvoiceWithoutPo: 10, unorderedItemSignificant: 1 },
+    });
+    expect(p).toMatchObject({
+      changed: true,
+      evaluatedRuns: 0,
+      notEvaluated: 0,
+      wouldOpen: 4,
+      notOpenedCount: 0,
+    });
   });
 
   it('null brings a knob back to the engine default (update’s semantics); unreproduced gaps stay counted', async () => {
-    await ownerDb.update(restaurants).set({ settings: { tolerances: { pricePercent: 0.25 } } }).where(eq(restaurants.id, A.restaurantId));
+    await ownerDb
+      .update(restaurants)
+      .set({ settings: { tolerances: { pricePercent: 0.25 } } })
+      .where(eq(restaurants.id, A.restaurantId));
     try {
       const p = await owner(A).settings.previewThresholds({ tolerances: { pricePercent: null } });
       // In force (25 %) the stored price gap is not reproduced: it is never attributed, it stays open.
-      expect(p).toMatchObject({ changed: true, wouldOpen: 4, wouldBlock: 2, notOpenedCount: 0, notEvaluated: 2 });
+      expect(p).toMatchObject({
+        changed: true,
+        wouldOpen: 4,
+        wouldBlock: 2,
+        notOpenedCount: 0,
+        notEvaluated: 2,
+      });
     } finally {
-      await ownerDb.update(restaurants).set({ settings: {} }).where(eq(restaurants.id, A.restaurantId));
+      await ownerDb
+        .update(restaurants)
+        .set({ settings: {} })
+        .where(eq(restaurants.id, A.restaurantId));
     }
   });
 
@@ -198,6 +288,20 @@ describe('DS3-06 settings.previewThresholds', () => {
     expect(await snapshot(B)).toEqual(beforeB);
   });
 
+  it('its transaction is READ ONLY, without a proposal and on the re-run path', async () => {
+    observed.modes.length = 0;
+    observed.on = true;
+    try {
+      await owner(A).settings.previewThresholds({}); // the count: awaitingDecision
+      const p = await owner(A).settings.previewThresholds({ tolerances: { pricePercent: 0.3 } }); // a re-run
+      expect(p.evaluatedRuns).toBe(1);
+    } finally {
+      observed.on = false;
+    }
+    // One reading from awaitingDecision, one from buildMatchInputForInvoice, both inside the preview.
+    expect(observed.modes).toEqual(['on', 'on']);
+  });
+
   it('B sees only B', async () => {
     const p = await owner(B).settings.previewThresholds({ tolerances: { pricePercent: 0.01 } });
     expect(p.openNow).toBe(4);
@@ -206,19 +310,27 @@ describe('DS3-06 settings.previewThresholds', () => {
 
   it('roles: the count is finance tier; the what-if is the owner’s (settings.edit); receiver and chef FORBIDDEN', async () => {
     for (const role of ['manager', 'bookkeeper'] as const) {
-      await expect(callerWithRole(A, role).settings.previewThresholds({})).resolves.toMatchObject({ openNow: 4 });
+      await expect(callerWithRole(A, role).settings.previewThresholds({})).resolves.toMatchObject({
+        openNow: 4,
+      });
       await expect(
         callerWithRole(A, role).settings.previewThresholds({ tolerances: { pricePercent: 0.25 } }),
       ).rejects.toMatchObject({ code: 'FORBIDDEN' });
     }
     for (const role of ['receiver', 'chef'] as const) {
-      await expect(callerWithRole(A, role).settings.previewThresholds({})).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(callerWithRole(A, role).settings.previewThresholds({})).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+      });
     }
   });
 
   it('rejects out-of-range and unknown knobs (same schema as update)', async () => {
-    await expect(owner(A).settings.previewThresholds({ tolerances: { pricePercent: 2 } })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    await expect(owner(A).settings.previewThresholds({ tolerances: { nope: 1 } } as never)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      owner(A).settings.previewThresholds({ tolerances: { pricePercent: 2 } }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      owner(A).settings.previewThresholds({ tolerances: { nope: 1 } } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 
   it('planted cross-tenant references: an A gap pointing at B’s product, line, invoice and order leaks nothing of B', async () => {
@@ -243,7 +355,13 @@ describe('DS3-06 settings.previewThresholds', () => {
     // (2) an A run on B's invoice and B's order, with an open A gap.
     const [foreignRun] = await ownerDb
       .insert(matchRuns)
-      .values({ restaurantId: A.restaurantId, invoiceId: B.invoiceId, poId: B.poId, overallStatus: 'major', totalDiscrepancyAmount: '9.00' })
+      .values({
+        restaurantId: A.restaurantId,
+        invoiceId: B.invoiceId,
+        poId: B.poId,
+        overallStatus: 'major',
+        totalDiscrepancyAmount: '9.00',
+      })
       .returning({ id: matchRuns.id });
     await ownerDb.insert(discrepancies).values({
       matchRunId: foreignRun!.id,

@@ -185,6 +185,8 @@ export const legalEn: Shape<typeof legalHe> = {
         locale: 'Interface language',
         consent: 'Stores your choice in the cookie banner',
         navRail: 'Side menu collapsed or open',
+        density: 'The display density chosen on this device: regular or compact',
+        textSize: 'The text size chosen on this device',
       },
       lifetime: {
         session: 'Until the browser closes, or 30 days with "remember me"',
@@ -212,6 +214,7 @@ export const legalEn: Shape<typeof legalHe> = {
         photoQueue: 'Photos taken during goods receiving without a network connection, until they upload',
         receiving: 'The goods-receipt draft and line marks, so they are not lost',
         nav: 'Menu preferences',
+        display: 'Display choices from Settings: density, text size and single-key shortcuts',
         attribution: 'How you reached the site (for example a campaign), sent with the contact form',
         temp: 'Temporary page state (for example a notice after a network switch)',
       },

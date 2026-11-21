@@ -235,6 +235,12 @@ export const SETTINGS: readonly SettingEntry[] = [
     titleKey: 'letterhead.legalName',
     anchor: 'letterhead',
   },
+  {
+    id: 'letterBusinessId',
+    section: 'letterhead',
+    titleKey: 'letterhead.businessId',
+    anchor: 'letterhead',
+  },
   { id: 'address', section: 'letterhead', titleKey: 'letterhead.address', anchor: 'letterhead' },
   { id: 'letterPhone', section: 'letterhead', titleKey: 'letterhead.phone', anchor: 'letterhead' },
   {
@@ -280,6 +286,28 @@ export const SETTINGS: readonly SettingEntry[] = [
     titleKey: 'thresholds.approvalsTitle',
     keywordsKey: 'index.keywords.approvals',
   },
+  // Each approval rule by its own name (its row: `rule-<id>`; the no-order row keeps the old #approvals).
+  { id: 'rule-duplicate', section: 'rules', titleKey: 'thresholds.approvals.duplicate.label' },
+  {
+    id: 'noPo',
+    section: 'rules',
+    titleKey: 'thresholds.approvals.noPo.label',
+    anchor: 'approvals',
+  },
+  { id: 'rule-unordered', section: 'rules', titleKey: 'thresholds.approvals.unordered.label' },
+  { id: 'rule-blocking', section: 'rules', titleKey: 'thresholds.approvals.blocking.label' },
+  {
+    id: 'rule-cumulativeLarge',
+    section: 'rules',
+    titleKey: 'thresholds.approvals.cumulativeLarge.label',
+  },
+  {
+    id: 'rule-cumulativeMedium',
+    section: 'rules',
+    titleKey: 'thresholds.approvals.cumulativeMedium.label',
+  },
+  { id: 'rule-minor', section: 'rules', titleKey: 'thresholds.approvals.minor.label' },
+  { id: 'rule-fallback', section: 'rules', titleKey: 'thresholds.approvals.fallback.label' },
   {
     id: 'ocrReviewThreshold',
     section: 'rules',
