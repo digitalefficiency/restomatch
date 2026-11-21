@@ -9,9 +9,11 @@ import {
   sql,
   type Database,
 } from '@restomatch/db';
+import { TRPCError } from '@trpc/server';
+import { parseNumberInput } from '@restomatch/types';
 import { stampFor } from '../recovery/lifecycle';
 import { columnType } from './capabilities';
-import { defineMachine, type MoveContext } from './kernel';
+import { defineMachine, transitionRefused, type MoveContext } from './kernel';
 
 export type InvoiceStatus = (typeof invoiceStatus.enumValues)[number];
 export type ResolutionStatus = (typeof resolutionStatus.enumValues)[number];
@@ -37,6 +39,90 @@ async function setOptionalColumn(
 }
 
 // ── invoice ───────────────────────────────────────────────────────────────
+
+/** H-03 0072 `invoices_payment_method_check` vocabulary. */
+export const PAYMENT_METHODS = ['bank_transfer', 'check', 'cash', 'card', 'offset', 'other'] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+const PAYMENT_COLUMNS = ['paid_at', 'paid_amount', 'payment_method', 'payment_ref'] as const;
+
+/** Which H-03 payment columns exist (each probed once per process). */
+async function paymentColumns(tx: Database): Promise<Set<(typeof PAYMENT_COLUMNS)[number]>> {
+  const present = new Set<(typeof PAYMENT_COLUMNS)[number]>();
+  for (const col of PAYMENT_COLUMNS) if (await columnType(tx, 'invoices', col)) present.add(col);
+  return present;
+}
+
+const badPayment = (message: string) => new TRPCError({ code: 'BAD_REQUEST', message: `invoice payment: ${message}` });
+
+/** Integer agorot → the NUMERIC(12,2) shekel string ("1234.50"). */
+const shekelString = (agorot: number) => `${Math.trunc(agorot / 100)}.${String(agorot % 100).padStart(2, '0')}`;
+
+/**
+ * Record the payment facts of a move into `paid` in ONE statement, so H-03's
+ * per-statement CHECKs hold: `(paid_at IS NULL) = (paid_amount IS NULL)` and
+ * method/ref only on a paid invoice. Only the columns that exist are written
+ * (a no-op before H-03 is deployed).
+ *
+ * The amount is `payload.paidAmount` parsed at the boundary (exact agorot,
+ * never a float), else the invoice's own total incl. VAT. The source is
+ * returned for the audit row. An invalid amount or method is BAD_REQUEST; an
+ * invoice with no total and no payload amount is refused with
+ * `invoice_paid_amount_unknown` (never a guessed 0). Either rolls the move back.
+ */
+async function writePayment(tx: Database, c: MoveContext<string, string>): Promise<Record<string, unknown>> {
+  const cols = await paymentColumns(tx);
+  if (!cols.has('paid_at')) return {};
+  const raw = c.payload.paidAmount;
+  let amountSql = sql`total_incl_vat`;
+  let source: 'payload' | 'invoice_total' = 'invoice_total';
+  let paidAmount: string | null = null;
+  if (raw !== undefined && raw !== null && raw !== '') {
+    const cell = parseNumberInput(typeof raw === 'number' ? String(raw) : String(raw), { scale: 2 });
+    if (cell.kind !== 'ok') throw badPayment(`paidAmount "${String(raw)}" is not an amount in ₪`);
+    // parseNumberInput refuses a sign by default; guard anyway: 0072 forbids paid_amount < 0.
+    if (cell.scaled < 0) throw badPayment('paidAmount must be ≥ 0');
+    paidAmount = shekelString(cell.scaled);
+    amountSql = sql`${paidAmount}::numeric(12,2)`;
+    source = 'payload';
+  } else if (cols.has('paid_amount')) {
+    const [row] = (await tx.execute(sql`
+      SELECT total_incl_vat::text AS total FROM invoices WHERE id = ${c.id}::uuid AND restaurant_id = ${c.restaurantId}::uuid
+    `)) as unknown as Array<{ total: string | null }>;
+    // Never a guessed 0: without a total there is no amount that left the bank.
+    if (row?.total == null) {
+      throw transitionRefused('invoice_paid_amount_unknown', 'the invoice has no total incl. VAT — send paidAmount');
+    }
+    paidAmount = row.total;
+  }
+  const method = c.payload.paymentMethod;
+  if (method != null && !(PAYMENT_METHODS as readonly string[]).includes(String(method))) {
+    throw badPayment(`paymentMethod must be one of ${PAYMENT_METHODS.join(', ')}`);
+  }
+  const ref = c.payload.paymentRef;
+  if (ref != null && typeof ref !== 'string') throw badPayment('paymentRef must be text');
+
+  const sets = [sql`paid_at = ${c.at.toISOString()}::timestamptz`];
+  if (cols.has('paid_amount')) sets.push(sql`paid_amount = ${amountSql}`);
+  if (cols.has('payment_method')) sets.push(sql`payment_method = ${method == null ? null : String(method)}`);
+  if (cols.has('payment_ref')) sets.push(sql`payment_ref = ${ref ?? null}`);
+  await tx.execute(sql`
+    UPDATE invoices SET ${sql.join(sets, sql`, `)}
+    WHERE id = ${c.id}::uuid AND restaurant_id = ${c.restaurantId}::uuid
+  `);
+  return cols.has('paid_amount') ? { paidAmount, paidAmountSource: source } : {};
+}
+
+/** Clear every payment fact in ONE statement (unmark), so the H-03 CHECKs hold. */
+async function clearPayment(tx: Database, c: MoveContext<string, string>): Promise<void> {
+  const cols = await paymentColumns(tx);
+  if (cols.size === 0) return;
+  const sets = [...cols].map((col) => sql`${sql.identifier(col)} = NULL`);
+  await tx.execute(sql`
+    UPDATE invoices SET ${sql.join(sets, sql`, `)}
+    WHERE id = ${c.id}::uuid AND restaurant_id = ${c.restaurantId}::uuid
+  `);
+}
 
 /**
  * Precondition shared by `reocr` and `retire` (G-09): the invoice carries no
@@ -165,8 +251,9 @@ export const invoiceMachine = defineMachine({
   },
   patch: (c) => ({ updatedAt: c.at }),
   afterMove: async (tx, c) => {
-    if (c.to === 'paid' && c.from !== 'paid') await setOptionalColumn(tx, 'invoices', 'paid_at', c.id, c.restaurantId, c.at);
-    if (c.event === 'unmark') await setOptionalColumn(tx, 'invoices', 'paid_at', c.id, c.restaurantId, null);
+    if (c.to === 'paid' && c.from !== 'paid') return writePayment(tx, c);
+    if (c.event === 'unmark') await clearPayment(tx, c);
+    return {};
   },
 });
 
