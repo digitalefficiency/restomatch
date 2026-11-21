@@ -491,6 +491,11 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
           : {}),
         ...(allReasons.length ? { reviewReasons: allReasons } : {}),
         ...((result as { checks?: unknown }).checks !== undefined ? { checks: (result as { checks?: unknown }).checks } : {}),
+        // G-17: the payment terms / due date PRINTED on the paper — evidence for the
+        // "תנאים קצרים מהמוסכם" flag (lib/termsCheck). Only when printed; never ₪,
+        // and never invoices.due_date (that stays the human-entered date).
+        ...(r.paymentTermsText ? { printedTerms: r.paymentTermsText } : {}),
+        ...(r.dueDate ? { printedDueDate: r.dueDate } : {}),
       },
       scanGrId,
     );
@@ -512,7 +517,10 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
       const prior = cur?.payload?.raw;
       const priorRaw = prior && typeof prior === 'object' && !Array.isArray(prior) ? (prior as Record<string, unknown>) : {};
       const reasons = [...new Set([...stringList(priorRaw.reviewReasons), ...stringList((raw as { reviewReasons?: unknown }).reviewReasons)])];
-      const mergedRaw = { ...priorRaw, ...raw, ...(reasons.length ? { reviewReasons: reasons } : {}) };
+      const mergedRaw: Record<string, unknown> = { ...priorRaw, ...raw, ...(reasons.length ? { reviewReasons: reasons } : {}) };
+      // G-17: the printed terms belong to THIS read — a re-read that finds none
+      // must not keep a previous read's value.
+      for (const k of ['printedTerms', 'printedDueDate'] as const) if (!(k in raw)) delete mergedRaw[k];
       const header = await writeOcrHeader(
         tx,
         { restaurantId: job.data.restaurantId, invoiceId: job.data.invoiceId, supplierId: invoice.supplierId },

@@ -367,4 +367,32 @@ describe('processOcrInvoice persistence (DB)', () => {
     expect(await db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, id))).toHaveLength(0);
     expect(await matchJobs(id)).toHaveLength(0);
   });
+
+  it('G-17: printed terms / due date land in raw.printedTerms / raw.printedDueDate, merged — invoices.due_date untouched', async () => {
+    h.result = { ...base, paymentTermsText: 'שוטף + 30', dueDate: '2026-11-30' } as unknown as InvoiceOcrResult;
+    const id = await newInvoice();
+    const stamped = crypto.randomUUID();
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'claude_vision', raw: { scanGrId: stamped, keep: 'me' } } })
+      .where(eq(invoices.id, id));
+    await run(id);
+    const r = await raw(id);
+    expect(r).toMatchObject({ printedTerms: 'שוטף + 30', printedDueDate: '2026-11-30', scanGrId: stamped, keep: 'me' });
+    expect((await row(id)).dueDate).toBeNull();
+  });
+
+  it('G-17: no printed terms → no printed keys, and a re-read without them drops a previous read’s values', async () => {
+    const id = await newInvoice();
+    await db
+      .update(invoices)
+      .set({ ocrPayload: { provider: 'claude_vision', raw: { printedTerms: 'שוטף+60', printedDueDate: '2026-12-31', keep: 'me' } } })
+      .where(eq(invoices.id, id));
+    await run(id);
+    const r = await raw(id);
+    expect(r).not.toHaveProperty('printedTerms');
+    expect(r).not.toHaveProperty('printedDueDate');
+    expect(r.keep).toBe('me');
+    expect((await row(id)).dueDate).toBeNull();
+  });
 });

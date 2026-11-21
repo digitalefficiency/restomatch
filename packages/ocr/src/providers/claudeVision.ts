@@ -101,6 +101,8 @@ export const SYSTEM_PROMPT = `אתה מומחה לקריאת מסמכי ספקי
   "periodEnd": "YYYY-MM-DD" | null,
   "lines": [{ "sku": string?, "rawDescription": string, "rawDescriptionEn": string, "lineKind": "item" | "deposit" | "delivery_fee", "qty": number, "unit": string, "unitPrice": number, "lineDiscountPct": number?, "lineTotal": number, "vatRate": number?, "confidence": number? }],
   "invoiceDiscount": number | null,
+  "paymentTermsText": string | null,
+  "dueDate": "YYYY-MM-DD" | null,
   "totals": { "subtotal": number, "vatRate": number?, "vat": number, "total": number },
   "continuesOnAnotherPage": boolean,
   "handwrittenCorrection": boolean,
@@ -135,6 +137,10 @@ export const SYSTEM_PROMPT = `אתה מומחה לקריאת מסמכי ספקי
 - "invoiceDiscount" = הנחה כללית בשקלים ברמת החשבונית (לפני מע״מ), אם מודפסת.
 - "totals": "subtotal" = סה״כ לפני מע״מ, "vatRate" = שיעור המע״מ המודפס כשבר (0.18), "vat" = סכום המע״מ, "total" = סה״כ לתשלום — כולם כפי שמודפסים. אל תחשב בעצמך במקום לקרוא; אם הסכומים לא מסתדרים — העתק את המודפס, המערכת תבדוק.
 - כל הסכומים מספרים (לא מחרוזות), נקודה עשרונית, בלי ₪ ובלי פסיקי אלפים.
+
+תנאי תשלום:
+- "paymentTermsText" = תנאי התשלום כפי שהם מודפסים, מילה במילה ("שוטף + 60", "שוטף+30", "net 45", "מזומן"), בלי התווית "תנאי תשלום:". לא מודפס או לא קריא — null.
+- "dueDate" = תאריך התשלום המודפס ("לתשלום עד 30.11.2026", "תאריך פירעון") בפורמט YYYY-MM-DD. לא מודפס או לא קריא — null. אל תחשב תאריך מתנאי התשלום.
 
 דגלים:
 - "continuesOnAnotherPage" = true אם המסמך ממשיך בעמוד שלא נמצא כאן ("המשך בעמוד הבא", "עמוד 1 מתוך 2", אין סה״כ בסוף).

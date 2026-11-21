@@ -121,6 +121,9 @@ export async function runOcrPipeline(
       'invoiceDiscount',
       'continuesOnAnotherPage',
       'handwrittenCorrection',
+      // G-17: printed terms evidence (never ₪, never invoices.due_date).
+      'paymentTermsText',
+      'dueDate',
     ]),
   });
   if (v2.totals?.vatRate !== undefined) reconciledInvoice.totals.vatRate = v2.totals.vatRate;

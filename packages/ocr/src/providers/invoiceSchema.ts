@@ -11,7 +11,10 @@
  *  - lineKind — deposit (פיקדון) and delivery-fee lines are not products;
  *  - totals.vatRate — the printed VAT rate;
  *  - continuesOnAnotherPage / handwrittenCorrection — the read is partial or
- *    was changed by hand: a person checks it.
+ *    was changed by hand: a person checks it;
+ *  - paymentTermsText / dueDate (G-17) — the payment terms and due date
+ *    PRINTED on the paper. Read-only evidence for the "תנאים קצרים מהמוסכם"
+ *    flag; they never set invoices.due_date and never carry ₪.
  *
  * Everything new is optional with a safe default, so an older model answer still
  * parses. Unknown enum values fall back ('other' / 'item') instead of failing
@@ -87,6 +90,14 @@ export function cleanDeliveryNotes(raw: unknown): DeliveryNoteRef[] | undefined 
   return out;
 }
 
+/** G-17: the raw printed terms string, capped; anything not a string → absent. */
+const printedTermsText = z
+  .string()
+  .max(200)
+  .optional()
+  .transform((v) => (v && v.trim() !== '' ? v.trim() : undefined))
+  .catch(undefined);
+
 export const InvoiceExtractionV2 = InvoiceOcrResult.extend({
   documentKind: z.enum(DOCUMENT_KINDS).optional().catch('other'),
   buyer: z
@@ -100,6 +111,10 @@ export const InvoiceExtractionV2 = InvoiceOcrResult.extend({
   periodEnd: localDate,
   /** Invoice-level discount in ₪ (before VAT), when printed. */
   invoiceDiscount: amount,
+  /** G-17: payment terms as printed ("שוטף + 60", "net 45", "מזומן"); absent when not printed. */
+  paymentTermsText: printedTermsText,
+  /** G-17: the due date as printed, YYYY-MM-DD; anything else → absent (never a guess). */
+  dueDate: localDate,
   continuesOnAnotherPage: flag,
   handwrittenCorrection: flag,
   lines: z.array(InvoiceLineV2),
