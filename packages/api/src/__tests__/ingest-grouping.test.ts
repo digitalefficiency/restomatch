@@ -2478,3 +2478,22 @@ describe('round 11 · month close, rollback and OFF-path lows (L2/L4/L5)', () =>
     }
   });
 });
+
+describe('round 12 · #1: a single invoice\'s lines reach the engine in main\'s order', () => {
+  it('an ordinary invoice (no group) keeps storage order, not id order — the engine pairs each PO line with the FIRST unpaired line of its product', async () => {
+    const [inv] = await pages(1, 'r12n1');
+    await ocr(inv!, { ...ACME, invoiceNumber: 'A-1201', lines: [{ qty: '1', total: '10.00' }] });
+    await ownerDb.delete(invoiceLines).where(eq(invoiceLines.invoiceId, inv!));
+    // two lines of the same item, the HIGHER uuid stored first
+    const hi = 'ffffffff-ffff-4fff-bfff-ffffffff1201';
+    const lo = '00000000-0000-4000-8000-000000001201';
+    for (const [id, qty] of [
+      [hi, '3'],
+      [lo, '5'],
+    ] as const) {
+      await ownerDb.insert(invoiceLines).values({ id, invoiceId: inv!, rawDescription: 'עגבניות שרי', qtyBilled: qty, unit: 'unit', unitPriceBilled: '10.0000', lineTotal: `${Number(qty) * 10}.00` });
+    }
+    const built = await withRestaurant(appDb, A.restaurantId, (tx) => buildMatchInputForInvoice(tx, A.restaurantId, inv!));
+    expect(built!.input.invoiceLines.map((l) => l.qtyBilled)).toEqual([3, 5]);
+  });
+});

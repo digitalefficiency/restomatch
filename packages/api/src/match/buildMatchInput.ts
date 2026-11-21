@@ -212,26 +212,35 @@ export async function buildMatchInputForInvoice(
   // G-09 (round 11 L1): the CARRIER of a "checked together" group is matched on the
   // document's real lines — its own plus every invoice included in it — against its
   // printed (document) total: one document, one match, never a page TOTAL_MISMATCH.
+  // Members in the order they arrived (created_at, then id); each member's lines in the
+  // same storage order main reads a single invoice's lines in (round 12 #1: the engine
+  // pairs a PO line with the FIRST unpaired invoice line of its product, so the order
+  // of a single invoice's lines must stay exactly main's).
   const groupRows = await db
     .select({ id: invoices.id, ocrPayload: invoices.ocrPayload })
     .from(invoices)
-    .where(and(eq(invoices.restaurantId, restaurantId), sql`${invoices.ocrPayload} -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${invoiceId}::text`));
+    .where(and(eq(invoices.restaurantId, restaurantId), sql`${invoices.ocrPayload} -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${invoiceId}::text`))
+    .orderBy(asc(invoices.createdAt), asc(invoices.id));
   const groupMemberIds = groupRows.map((r) => r.id);
-  const invLineRows = await db
-    .select({
-      id: invoiceLines.id,
-      productId: invoiceLines.productId,
-      supplierSku: invoiceLines.supplierSku,
-      rawDescription: invoiceLines.rawDescription, // G-08 charge (round 6)
-      qtyBilled: invoiceLines.qtyBilled,
-      unit: invoiceLines.unit,
-      unitPriceBilled: invoiceLines.unitPriceBilled,
-      lineTotal: invoiceLines.lineTotal,
-      vatRate: invoiceLines.vatRate, // G-08 charge
-    })
-    .from(invoiceLines)
-    .where(inArray(invoiceLines.invoiceId, [invoiceId, ...groupMemberIds]))
-    .orderBy(asc(invoiceLines.invoiceId), asc(invoiceLines.id));
+  const linesOf = (id: string) =>
+    db
+      .select({
+        id: invoiceLines.id,
+        productId: invoiceLines.productId,
+        supplierSku: invoiceLines.supplierSku,
+        rawDescription: invoiceLines.rawDescription, // G-08 charge (round 6)
+        qtyBilled: invoiceLines.qtyBilled,
+        unit: invoiceLines.unit,
+        unitPriceBilled: invoiceLines.unitPriceBilled,
+        lineTotal: invoiceLines.lineTotal,
+        vatRate: invoiceLines.vatRate, // G-08 charge
+      })
+      .from(invoiceLines)
+      .where(eq(invoiceLines.invoiceId, id));
+  // No group ⇒ exactly main's single query. A group ⇒ the carrier's lines first (as main
+  // reads them), then each member's lines appended after.
+  const invLineRows = await linesOf(invoiceId);
+  for (const memberId of groupMemberIds) invLineRows.push(...(await linesOf(memberId)));
   if (invLineRows.length === 0) return null;
 
   // G-08 charge: lines a person answered "שורת חיוב — לא מוצר" (deposit, delivery,
