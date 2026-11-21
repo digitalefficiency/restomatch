@@ -1,5 +1,7 @@
+import type { PaceSeries } from '../data-viz';
+
 /**
- * The honest leak hero's rules (W1-05), kept pure so the home, the showcase and
+ * The honest leak hero's rules (W1-05, DS3 SPEC §10.1), kept pure so the home, the showcase and
  * the public leak check render the same states from the same numbers.
  *
  *  - Typed state: no data ("—", one CTA) · clean (T3 sentence) · leak (T1) ·
@@ -7,6 +9,10 @@
  *  - Thin base: under THIN_BASE_INVOICES checked invoices the ₪ shows, the % does not.
  *  - The delta compares the SAME day-span of the previous period (Oct 1–25 vs
  *    Sep 1–25), never a running month against a full one.
+ *
+ * Nothing here computes a ₪ that is shown: the figures come from the procedures. The integer
+ * agorot below are for checks (the pace line ends on the hero, the calculation panel matches it)
+ * and for the G-16 markers, never for a label.
  */
 
 export type LeakHeroState = 'noData' | 'clean' | 'leak' | 'pendingOnly';
@@ -95,8 +101,8 @@ export function leakSplit(h: { leakIls: number; caughtBeforePaymentIls: number }
 
 /**
  * The hero's primary CTA is ALWAYS the secondary button (owner decision D9,
- * DS2-SPEC): red is reserved for act-now T2 items. The danger rail and border
- * carry the leak state; the button never does.
+ * DS2-SPEC): red is reserved for act-now T2 items. In the clean finish the leak
+ * state is carried by the 8 px dot beside the label; the button never carries it.
  */
 export type HeroCtaVariant = 'secondary';
 const HERO_CTA_VARIANT: Record<LeakHeroState, HeroCtaVariant> = {
@@ -108,11 +114,85 @@ const HERO_CTA_VARIANT: Record<LeakHeroState, HeroCtaVariant> = {
 export function heroCtaVariant(state: LeakHeroState): HeroCtaVariant {
   return HERO_CTA_VARIANT[state];
 }
+/** The secondary button's look (SPEC §5: white with a strong border), for a caller that cannot use LinkButton. */
 export const HERO_CTA_CLASS: Record<HeroCtaVariant, string> = {
-  secondary: 'border border-line-strong bg-surface text-ink hover:border-primary/40 hover:text-primary',
+  secondary: 'border border-line-strong bg-surface text-fg hover:bg-surface-hover',
 };
 
-/* ─────────────────────────── DS3 · the pace line ─────────────────────────── */
+/* ─────────────────────────── agorot, for checks and markers ─────────────────────────── */
+
+/** Integer agorot of a ₪ figure as a procedure returned it (2 dp). For checks and data markers only. */
+export function agorotOf(ils: number): number {
+  return Math.round(ils * 100);
+}
+
+/* ─────────────────────────── DS3 · the split ─────────────────────────── */
+
+/**
+ * The two-part bar and its legend need both parts at ₪0.50 or more: a smaller part would print
+ * as "₪0" beside a visible segment (Money inline rounds to the shekel), so the hero says the
+ * whole sum sits on one side instead (v2 C2).
+ */
+export const SPLIT_MIN_AGOROT = 50;
+
+export type HeroSplitForm =
+  /** Nothing to split. */
+  | { kind: 'none' }
+  /** Parts without exact agorot (the showcase's strings): the legend alone, no bar. */
+  | { kind: 'legend' }
+  /** Both parts at ₪0.50 or more: the bar and the legend, sized by the agorot. */
+  | { kind: 'bar'; first: number; second: number }
+  /** (Almost) all of the sum on one side: one line about part `index`. */
+  | { kind: 'single'; index: 0 | 1 };
+
+/** Which form the hero's split takes, from the parts' exact agorot (when they carry them). */
+export function heroSplitForm(parts: ReadonlyArray<{ agorot?: number | null }> | null | undefined): HeroSplitForm {
+  if (!parts || parts.length === 0) return { kind: 'none' };
+  const exact = parts.every((p) => typeof p.agorot === 'number' && Number.isFinite(p.agorot));
+  if (!exact || parts.length !== 2) return { kind: 'legend' };
+  const a = parts[0]!.agorot as number;
+  const b = parts[1]!.agorot as number;
+  if (a >= SPLIT_MIN_AGOROT && b >= SPLIT_MIN_AGOROT) return { kind: 'bar', first: a, second: b };
+  return { kind: 'single', index: b > a ? 1 : 0 };
+}
+
+/* ─────────────────────────── DS3 · the calculation panel ─────────────────────────── */
+
+/**
+ * The 'YYYY-MM' that owner.leakReport takes for the hero's month (v2 A1). The hero's bounds are
+ * the UTC instants of local midnights, so `monthStart.slice(0, 7)` is the PREVIOUS month in
+ * Israel (1.11 00:00 local = 31.10 22:00Z); the middle of the month is in the right one, in any
+ * zone. null when the bounds do not parse.
+ */
+export function heroMonthKey(monthStart: string, monthEnd: string): string | null {
+  const mid = (Date.parse(monthStart) + Date.parse(monthEnd)) / 2;
+  return Number.isFinite(mid) ? new Date(mid).toISOString().slice(0, 7) : null;
+}
+
+/** What the calculation panel reads from owner.leakReport (the procedure's own type fits it). */
+export interface CalcReport {
+  hero: { monthStart: string; leakIls: number };
+  byType: ReadonlyArray<{ amountIls: number }>;
+  /** Σ rows − hero (≥ 0): what the per-invoice cap removed. */
+  capAdjustmentIls: number;
+}
+
+/**
+ * The panel's rows may stand under the hero only when they prove THIS hero (v4 H3): the report
+ * covers the hero's month, its total is the hero's figure to the agora (a match landing between
+ * the two reads changes it), and its rows minus the cap make its total (the server's identity).
+ * Otherwise the panel says the sum changed since the page loaded and offers a refresh.
+ */
+export function calcRowsGuard(report: CalcReport, heroMonthStart: string, heroAgorot: number): boolean {
+  const reportStart = Date.parse(report.hero.monthStart);
+  if (!Number.isFinite(reportStart) || reportStart !== Date.parse(heroMonthStart)) return false;
+  const total = agorotOf(report.hero.leakIls);
+  if (total !== heroAgorot) return false;
+  const rows = report.byType.reduce((sum, row) => sum + agorotOf(row.amountIls), 0);
+  return rows - agorotOf(report.capAdjustmentIls) === total;
+}
+
+/* ─────────────────────────── DS3 · the pace line's data ─────────────────────────── */
 
 /** One day of `owner.leakTrend` (bucket 'day'): the UTC instant of a local midnight and that day's leak. */
 export interface PacePoint {
@@ -120,76 +200,107 @@ export interface PacePoint {
   leakIls: number;
 }
 
-/**
- * The pace line's two series, as integer agorot running totals for days 1..`days`: this month
- * (`cur`) and the same days of last month (`prev`). Chart geometry only: no figure on the screen
- * is read from it, and the home draws it only when `cur`'s last value equals the hero to the agora.
- */
-export interface PaceSeries {
-  days: number;
-  cur: number[];
-  prev: number[] | null;
-}
-
+export const DAY_MS = 86_400_000;
 const IL_TZ = 'Asia/Jerusalem';
 
-/** Day of the month (1–31) of an instant on the Israel wall clock, the zone every figure is dated in. */
-export function israelDayOfMonth(value: Date | string | number): number {
-  return Number(new Intl.DateTimeFormat('en-CA', { timeZone: IL_TZ, day: 'numeric' }).format(new Date(value)));
+/**
+ * 1-based day of a period of a LOCAL MIDNIGHT (a trend bucket start), against the period's first
+ * local midnight. A clock change moves a midnight by an hour at most, so rounding the distance in
+ * days is exact in any time zone and across daylight saving (v2 D2).
+ */
+export function bucketDayIndex(bucketStart: string, periodStart: string): number {
+  return Math.round((Date.parse(bucketStart) - Date.parse(periodStart)) / DAY_MS) + 1;
 }
 
-function runningTotals(points: readonly PacePoint[], days: number): number[] {
+/** An instant's wall clock in `timeZone`, written as if that wall clock were UTC (ms). */
+function wallClockMs(instant: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  }).formatToParts(instant);
+  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === type)?.value);
+  return Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'), part('second'));
+}
+
+/**
+ * 1-based local day of `now` in the period that starts at `periodStart` (a local midnight): the
+ * distance between the two WALL CLOCKS, so the hour a clock change adds or removes inside the
+ * month never shifts the day (v2 D3). The wall clock is Israel's, the zone every date in the app
+ * is shown in (the page's date line says the same day). 0 when an instant does not parse.
+ */
+export function todayDayIndex(now: Date | string | number, periodStart: string, timeZone: string = IL_TZ): number {
+  const at = new Date(now).getTime();
+  const start = Date.parse(periodStart);
+  if (!Number.isFinite(at) || !Number.isFinite(start)) return 0;
+  return Math.floor((wallClockMs(at, timeZone) - wallClockMs(start, timeZone)) / DAY_MS) + 1;
+}
+
+/** A period's first local midnight and its leak, as one procedure returned them. */
+export interface PacePeriod {
+  monthStart: string;
+  leakIls: number;
+}
+
+export interface PaceInput {
+  /** owner.leakTrend's bucket: anything but days draws no pace (month buckets would all land on day 1). */
+  bucket?: 'day' | 'month';
+  /** This month's days (owner.leakTrend `points`; sparse: a day without invoices is absent). */
+  points: readonly PacePoint[] | null | undefined;
+  /** The hero (owner.leakHero): the line is drawn only when it ends on this figure, to the agora. */
+  current: PacePeriod;
+  /** Today's local day of the month (`todayDayIndex`): the axis runs from day 1 to today. */
+  today: number;
+  /**
+   * The same days last month: owner.leakTrend `previous` as `points`, with leakSummary's previous
+   * figures beside them. Drawn only when it has days, has checked invoices, and ends on that figure.
+   */
+  previous?: (PacePeriod & { points: readonly PacePoint[] | null | undefined; matchedInvoiceCount?: number }) | null;
+}
+
+/**
+ * Sparse days → running totals in integer agorot for days 1..`days`. A day after `days` (an
+ * invoice dated later this month) counts on the last day, so the line still ends on the period's
+ * figure; a point before day 1 means the two reads disagree about the month → null.
+ */
+function runningTotals(points: readonly PacePoint[], periodStart: string, days: number): number[] | null {
   const perDay = new Array<number>(days).fill(0);
   for (const p of points) {
-    const d = israelDayOfMonth(p.bucketStart);
-    if (d >= 1 && d <= days) perDay[d - 1]! += Math.round(p.leakIls * 100);
+    const day = bucketDayIndex(p.bucketStart, periodStart);
+    if (!Number.isFinite(day) || day < 1) return null;
+    perDay[Math.min(day, days) - 1]! += agorotOf(p.leakIls);
   }
   let run = 0;
   return perDay.map((v) => (run += v));
 }
 
 /**
- * Sparse daily points (days without invoices are absent) → running totals day by day. The axis
- * runs from day 1 to today (or to the last dated day, if an invoice is dated later this month).
- * `null` before day 2: one day is a dot, not a pace.
+ * The pace line's two series (DS3 SPEC §10.1; v2 D1–D4), in the shared `PaceSeries` shape. Chart
+ * geometry only: no label, aria text or title reads these totals.
+ *  - null when the trend is not daily, before day 2 (one day is a dot, not a pace), or when this
+ *    month's line does not end on the hero to the agora (never imply a different figure);
+ *  - `prev` is null when last month's same days are unknown: no days at all ([] is never drawn as
+ *    zeros), no checked invoices, or a line that does not end on leakSummary's previous figure.
  */
-export function paceSeries(points: readonly PacePoint[], previous: readonly PacePoint[] | null, today: Date | string | number): PaceSeries | null {
-  const lastPointDay = points.reduce((m, p) => Math.max(m, israelDayOfMonth(p.bucketStart)), 0);
-  const days = Math.max(israelDayOfMonth(today), lastPointDay);
-  if (days < 2) return null;
-  return { days, cur: runningTotals(points, days), prev: previous ? runningTotals(previous, days) : null };
+export function paceSeries(input: PaceInput): PaceSeries | null {
+  if (input.bucket !== undefined && input.bucket !== 'day') return null;
+  const days = Math.floor(input.today);
+  if (!Number.isFinite(days) || days < 2) return null;
+  const cur = runningTotals(input.points ?? [], input.current.monthStart, days);
+  if (!cur || cur[days - 1] !== agorotOf(input.current.leakIls)) return null;
+  return { cur, prev: previousTotals(input.previous, days) };
 }
 
-/** The reference's chart box (SPEC §10.1, ex1.html): x from 0 to 240, the baseline at y 64, the top at y 2. */
-export const PACE_BOX = { viewBox: '-2 -6 250 78', width: 240, baseline: 64, top: 2 } as const;
-
-/**
- * A step-after path of a running total ("M0,64 V… H… V…"): each total holds until the next day it
- * changes, then rises. Time runs left to right in every language (charts never mirror).
- */
-export function pacePath(totals: readonly number[], max: number): string {
-  const n = totals.length;
-  const x = (i: number) => (n <= 1 ? 0 : (i * PACE_BOX.width) / (n - 1));
-  const y = (v: number) => PACE_BOX.baseline - (max > 0 ? (v / max) * (PACE_BOX.baseline - PACE_BOX.top) : 0);
-  const r = (v: number) => Math.round(v * 10) / 10;
-  let d = `M0,${PACE_BOX.baseline}`;
-  totals.forEach((v, i) => {
-    if (i > 0) d += ` H${r(x(i))}`;
-    d += ` V${r(y(v))}`;
-  });
-  return d;
-}
-
-/** Geometry of the whole chart: both paths on one scale and the end dot on today's total. */
-export function paceGeometry(s: PaceSeries): { cur: string; prev: string | null; end: { x: number; y: number } } {
-  const last = (xs: readonly number[]) => xs[xs.length - 1] ?? 0;
-  const max = Math.max(last(s.cur), s.prev ? last(s.prev) : 0, 1);
-  const endY = PACE_BOX.baseline - (last(s.cur) / max) * (PACE_BOX.baseline - PACE_BOX.top);
-  return {
-    cur: pacePath(s.cur, max),
-    prev: s.prev ? pacePath(s.prev, max) : null,
-    end: { x: PACE_BOX.width, y: Math.round(endY * 10) / 10 },
-  };
+function previousTotals(previous: PaceInput['previous'], days: number): number[] | null {
+  if (!previous?.points || previous.points.length === 0) return null;
+  if (previous.matchedInvoiceCount !== undefined && previous.matchedInvoiceCount <= 0) return null;
+  const prev = runningTotals(previous.points, previous.monthStart, days);
+  return prev && prev[days - 1] === agorotOf(previous.leakIls) ? prev : null;
 }
 
 /* ─────────────────────────── DS3 · motion helpers ─────────────────────────── */
@@ -229,3 +340,35 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (pr
     return at(y1, y2, t);
   };
 }
+
+/** The hero section, as the coarse-pointer rule in globals.css already names it. */
+const HERO_SCOPE = 'section[aria-labelledby="leak-hero-label"][data-entry]';
+
+/**
+ * The entry motion, once (SPEC §8, §10.1; v4 H1): the ONE hero-scoped stylesheet the owner home
+ * renders with `data-entry`. Everything runs only under `prefers-reduced-motion: no-preference`,
+ * on the motion tokens (`var(--dur-*)`, `var(--ease-*)`), and plays when the streamed HTML is
+ * inserted, whatever the hydration timing:
+ *  - `count` — the final number is held invisible for the long duration, with NO fill, so CSS
+ *    alone shows it again even if no script runs; the HeroAmount island counts over that hold;
+ *  - `draw` / `fade` / `pop` — the shared pace line's parts; the shared split bar grows from its
+ *    start edge (its transform origin is set where it is rendered).
+ * The keyframes are `rm-hero-*` (globals.css already has an `rm-draw`).
+ */
+export const HERO_ENTRY_CSS = [
+  '@media (prefers-reduced-motion: no-preference){',
+  `${HERO_SCOPE} [data-entry-part="count"]{animation:rm-hero-hold var(--dur-long) linear}`,
+  `${HERO_SCOPE} [data-entry-part="draw"]{animation:rm-hero-draw var(--dur-long) var(--ease-standard) both}`,
+  `${HERO_SCOPE} [data-entry-part="fade"]{animation:rm-hero-fade var(--dur-medium) linear both}`,
+  `${HERO_SCOPE} [data-entry-part="pop"]{animation:rm-hero-pop var(--dur-short) var(--ease-enter) calc(var(--dur-long) - var(--dur-short)) backwards}`,
+  `${HERO_SCOPE} [data-split-bar]{animation:rm-hero-grow var(--dur-long) var(--ease-enter) both}`,
+  '}',
+  '@keyframes rm-hero-hold{from,to{opacity:0}}',
+  '@keyframes rm-hero-draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}',
+  '@keyframes rm-hero-fade{from{opacity:0}to{opacity:1}}',
+  '@keyframes rm-hero-pop{from{opacity:0;transform:scale(.7)}to{opacity:1;transform:none}}',
+  '@keyframes rm-hero-grow{from{transform:scaleX(0)}to{transform:none}}',
+].join('');
+
+/** The name of the hold animation the HeroAmount island reads (it counts only while the hold runs). */
+export const HERO_HOLD_ANIMATION = 'rm-hero-hold';
