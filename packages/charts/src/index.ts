@@ -37,6 +37,8 @@ export {
   readClosedLeakMonth,
   type ClosedLeakMonth,
   type ClosedLeakMonthCorrection,
+  type ClosedLeakMonthFunnel,
+  type ClosedLeakMonthPartition,
   type LeakReport,
   type LeakReportPriceCreepRow,
   type LeakReportStatus,

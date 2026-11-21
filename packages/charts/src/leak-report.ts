@@ -280,7 +280,27 @@ export interface ClosedLeakMonth {
   corrections: ClosedLeakMonthCorrection[];
   /** Σ corrections (agorot): shown as its own dated line, never folded into the frozen figure. */
   correctionsAgorot: number;
+  /** G-14 money states at close (agorot) — v2 snapshots only; null for v1. */
+  partition: ClosedLeakMonthPartition | null;
+  /** נמצא → התבקש → זוכה → הוחזר at close (agorot) — v2 only; null for v1. */
+  funnel: ClosedLeakMonthFunnel | null;
+  /** "Caught before payment" at close by the G-14 time rule (agorot) — v2 only; null for v1. */
+  caughtBeforePaymentAgorot: number | null;
   payload: Record<string, unknown>;
+}
+
+export interface ClosedLeakMonthPartition {
+  states: Record<string, number>;
+  totalAgorot: number;
+  heroAgorot: number;
+  driftAgorot: number;
+}
+
+export interface ClosedLeakMonthFunnel {
+  foundAgorot: number;
+  requestedAgorot: number;
+  creditedAgorot: number;
+  recoveredAgorot: number;
 }
 
 const ymd = (v: unknown): string =>
@@ -330,6 +350,35 @@ export async function readClosedLeakMonth(
     frozenLeakAgorot: Number(s.leak_agorot),
     corrections,
     correctionsAgorot: corrections.reduce((a, c) => a + c.deltaAgorot, 0),
+    ...v2Fields((s.payload as Record<string, unknown>) ?? {}),
     payload: (s.payload as Record<string, unknown>) ?? {},
+  };
+}
+
+/** The v2 (slice b) fields of a snapshot payload; all null for a v1 snapshot (read unchanged). */
+function v2Fields(payload: Record<string, unknown>): Pick<ClosedLeakMonth, 'partition' | 'funnel' | 'caughtBeforePaymentAgorot'> {
+  if (payload.schema !== 'leak-month-close/v2') return { partition: null, funnel: null, caughtBeforePaymentAgorot: null };
+  const p = payload.partition as Partial<ClosedLeakMonthPartition> | undefined;
+  const f = payload.funnel as Partial<ClosedLeakMonthFunnel> | undefined;
+  const c = payload.caughtBeforePayment as { agorot?: number } | undefined;
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  return {
+    partition: p
+      ? {
+          states: Object.fromEntries(Object.entries(p.states ?? {}).map(([k, v]) => [k, num(v)])),
+          totalAgorot: num(p.totalAgorot),
+          heroAgorot: num(p.heroAgorot),
+          driftAgorot: num(p.driftAgorot),
+        }
+      : null,
+    funnel: f
+      ? {
+          foundAgorot: num(f.foundAgorot),
+          requestedAgorot: num(f.requestedAgorot),
+          creditedAgorot: num(f.creditedAgorot),
+          recoveredAgorot: num(f.recoveredAgorot),
+        }
+      : null,
+    caughtBeforePaymentAgorot: c ? num(c.agorot) : null,
   };
 }
