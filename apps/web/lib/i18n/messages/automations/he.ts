@@ -103,7 +103,7 @@ export const he = {
     // W3-09 / AU-11 — the order autopilot (nothing is sent to a supplier by itself).
     orderPrepared: {
       name: 'טיוטת הזמנה מוכנה',
-      what: 'ביום ההזמנה: טיוטה לפי מדריך ההזמנה מחכה לבדיקה ושליחה. לא נשלח לספק בלי לחיצה.',
+      what: 'ביום ההזמנה: טיוטה לפי מדריך ההזמנה, נשלחת לספק רק בלחיצה שלכם.',
       when: 'כל יום ב-09:00',
     },
     orderBackorder: {
@@ -113,7 +113,7 @@ export const he = {
     },
     orderSendRescue: {
       name: 'הזמנה שלא נשלחה',
-      what: 'אם הזמנה לא יצאה לספק, מי ששלח אותה מקבל הודעה ושולח מהוואטסאפ שלו.',
+      what: 'הזמנה שלא יצאה לספק: השולח מקבל הודעה ושולח מהוואטסאפ שלו.',
       when: 'כל יום ב-09:00',
     },
     orderCapture: {
