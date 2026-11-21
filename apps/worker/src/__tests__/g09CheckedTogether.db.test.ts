@@ -108,7 +108,7 @@ afterAll(async () => {
     await qsql`DELETE FROM job_queue WHERE restaurant_id = ${rid}`;
     await db.delete(restaurants).where(eq(restaurants.id, rid));
   }
-  await qsql.end();
+  // queueSql is a memoised, shared pool (singleFork): never end it here.
 });
 
 describe('round 12 · checked together, through the worker', () => {

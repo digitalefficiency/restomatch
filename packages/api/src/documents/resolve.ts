@@ -5,6 +5,7 @@ import { DocumentError, documentNotFound } from './errors';
 import { PAGES_RECOMPOSED_ACTION, retireInvoice } from './reocr';
 import { PAGE_FLAGS, PAGE_ONE_FLAGS, type PageFlag } from './settle';
 import { A_PERSONS_DECISION } from '../lib/decisions';
+import { isInvoiceRematchLocked } from '../lifecycle/predicates';
 
 /**
  * G-09 · the inbox's recourse for a flagged page (owner/manager).
@@ -168,7 +169,7 @@ export async function resolvePageFlag(
           select i.id::text as id, i.status from ${invoices} i where i.restaurant_id = ${restaurantId} and i.id in (${memberList})`)) as unknown as Array<{ id: string; status: string }>;
         const statusOf = new Map(now.map((r) => [r.id, r.status]));
         // the carrier was signed off or paid on the combined document: its pages can't be un-included
-        if (payable && ['approved', 'paid'].includes(statusOf.get(payable) ?? '')) throw new TRPCError({ code: 'CONFLICT', message: 'already_paid' });
+        if (payable && isInvoiceRematchLocked(statusOf.get(payable) ?? '')) throw new TRPCError({ code: 'CONFLICT', message: 'already_paid' });
         // a person decided on the carrier's combined run (or a claim hangs on it): that decision stays
         if (payable) {
           const [decidedOnCarrier] = (await tx.execute(sql`
@@ -463,7 +464,7 @@ export async function resolvePageFlag(
       // skipped: the included pages' lines would be matched nowhere), nor one a credit claim
       // hangs on (the re-match keeps that run).
       const carrierRow = rows.find((r) => r.id === payable)!;
-      if (carrierRow.status === 'approved' || carrierRow.status === 'paid') throw new TRPCError({ code: 'CONFLICT', message: 'already_paid' });
+      if (isInvoiceRematchLocked(carrierRow.status)) throw new TRPCError({ code: 'CONFLICT', message: 'already_paid' });
       const [claimOnCarrier] = (await tx.execute(sql`
         select 1 as hit from ${matchRuns} mr join ${discrepancies} d on d.match_run_id = mr.id and d.restaurant_id = mr.restaurant_id
          where mr.restaurant_id = ${restaurantId} and mr.invoice_id = ${payable}::uuid
