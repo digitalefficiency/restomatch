@@ -14,6 +14,7 @@ import { translateUnit } from '@restomatch/translate/units';
 import { PrintButton } from '../../leaks/claims/print-button';
 import { Delta } from '@/lib/components/money';
 import { CellStateView } from '@/lib/components/table';
+import { ReviewButton } from './review-button';
 
 type T = Translator<typeof consolidatedHe>;
 
@@ -221,13 +222,28 @@ export function ConsolidatedPanel({
             {review.map((r, i) => (
               <li
                 key={`${r.flag}-${r.noteNumber ?? 'month'}-${i}`}
-                className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-sm"
+                className={`flex flex-wrap items-center gap-2 rounded-xl border border-line px-3 py-2 text-sm ${r.reviewed ? 'bg-surface-2' : 'bg-surface'}`}
                 data-testid={`xmatch-review-${r.flag}`}
+                data-reviewed={r.reviewed ? 'true' : undefined}
               >
-                <Badge tone={REVIEW_TONE[r.tier]}>{t(`review.${r.flag}`)}</Badge>
-                <span className="text-ink">
+                {/* G-04 Q5: a reviewed fact stays listed, calm and neutral; it no longer blocks "תואמת". */}
+                <Badge tone={r.reviewed ? 'neutral' : REVIEW_TONE[r.tier]}>{t(`review.${r.flag}`)}</Badge>
+                <span className={r.reviewed ? 'text-muted' : 'text-ink'}>
                   <bdi>{reviewParts(r).join(' · ')}</bdi>
                 </span>
+                {r.reviewed ? (
+                  <span className="ms-auto text-xs font-medium text-muted" data-testid="xmatch-review-reviewed">
+                    ✓ {t('review.reviewedTag')}
+                  </span>
+                ) : (
+                  <ReviewButton
+                    invoiceId={proposal.invoiceId}
+                    itemKey={r.key}
+                    value={r.value}
+                    label={t('review.markReviewed')}
+                    staleLabel={t('review.stale')}
+                  />
+                )}
               </li>
             ))}
             {pending.map((p) => (

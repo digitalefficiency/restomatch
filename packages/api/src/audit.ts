@@ -106,7 +106,9 @@ export type AuditAction =
   | 'contracts.price_set'
   | 'contracts.prices_locked'
   | 'price_alert.dismissed'
-  | 'price_alert.reopened';
+  | 'price_alert.reopened'
+  // Consolidated invoices (G-04 Q5): a finance role marked a review item "נבדק"
+  | 'consolidated.item_reviewed';
 
 export interface AuditEntry {
   /** Tenant the action belongs to. On a tenant connection this must equal the GUC. */

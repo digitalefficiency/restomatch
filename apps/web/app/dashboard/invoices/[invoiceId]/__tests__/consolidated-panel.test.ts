@@ -1,6 +1,6 @@
 import React, { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ConsolidatedProposal } from '@restomatch/api';
 import { createTranslator } from '@/lib/i18n/translate';
 import { consolidated } from '@/lib/i18n/messages/consolidated';
@@ -8,6 +8,11 @@ import { consolidated } from '@/lib/i18n/messages/consolidated';
 // The JSX compiles to React.createElement (classic runtime in vitest), and the
 // components barrel builds JSX at module load: set React first, then import the panel.
 (globalThis as unknown as { React?: typeof React }).React = React;
+// The "נבדק" button is a client component (router + tRPC hooks): a static stub here.
+vi.mock('../review-button', () => ({
+  ReviewButton: (p: { itemKey: string; label: string }) =>
+    createElement('button', { 'data-testid': 'xmatch-review-mark', 'data-key': p.itemKey }, p.label),
+}));
 const { ConsolidatedPanel } = await import('../consolidated-panel');
 
 /**
@@ -78,7 +83,7 @@ describe('ConsolidatedPanel · G-04 §9 review items', () => {
       proposal({
         status: 'differences',
         reviewItems: [
-          { flag: 'note_billed_twice', tier: 'T2', noteNumber: '9001', amountIls: 36, otherInvoice: { invoiceId: 'i0', invoiceNumber: 'A-M-1' }, blocksMatched: true },
+          { flag: 'note_billed_twice', tier: 'T2', noteNumber: '9001', amountIls: 36, otherInvoice: { invoiceId: 'i0', invoiceNumber: 'A-M-1' }, blocksMatched: true, key: 'k', value: 'v', reviewed: false },
         ],
       }),
     );
@@ -97,7 +102,7 @@ describe('ConsolidatedPanel · G-04 §9 review items', () => {
     const html = render(
       proposal({
         status: 'differences',
-        reviewItems: [{ flag: 'note_not_in_system', tier: 'warn', noteNumber: '7822', amountIls: null, otherInvoice: null, blocksMatched: true }],
+        reviewItems: [{ flag: 'note_not_in_system', tier: 'warn', noteNumber: '7822', amountIls: null, otherInvoice: null, blocksMatched: true, key: 'k', value: 'v', reviewed: false }],
       }),
     );
     const row = textOf(html, 'xmatch-review-note_not_in_system')!;
@@ -112,7 +117,7 @@ describe('ConsolidatedPanel · G-04 §9 review items', () => {
       proposal({
         status: 'differences',
         reviewItems: [
-          { flag: 'note_billed_twice', tier: 'T2', noteNumber: null, amountIls: 170, otherInvoice: { invoiceId: 'i0', invoiceNumber: 'R-JUN-A' }, blocksMatched: true },
+          { flag: 'note_billed_twice', tier: 'T2', noteNumber: null, amountIls: 170, otherInvoice: { invoiceId: 'i0', invoiceNumber: 'R-JUN-A' }, blocksMatched: true, key: 'k', value: 'v', reviewed: false },
         ],
       }),
     );
@@ -137,7 +142,7 @@ describe('ConsolidatedPanel · G-04 §9 review items', () => {
       proposal({
         status: 'matched',
         reviewItems: [
-          { flag: 'note_other_month', tier: 'T4', noteNumber: '7812', amountIls: 8.5, otherInvoice: null, receivedOn: '2026-07-01', daysOutside: 1, blocksMatched: false },
+          { flag: 'note_other_month', tier: 'T4', noteNumber: '7812', amountIls: 8.5, otherInvoice: null, receivedOn: '2026-07-01', daysOutside: 1, blocksMatched: false, key: 'k', value: 'v', reviewed: false },
         ],
       }),
     );
@@ -159,7 +164,7 @@ describe('ConsolidatedPanel · G-04 §9 review items', () => {
             productName: 'חלב', productNameEn: 'Milk', unit: 'kg', qty: 4, expected: 8.5, actual: 9, deltaAmount: 2, countsAsLeak: true,
           },
         ],
-        reviewItems: [{ flag: 'note_not_in_system', tier: 'warn', noteNumber: '7822', amountIls: null, otherInvoice: null, blocksMatched: true }],
+        reviewItems: [{ flag: 'note_not_in_system', tier: 'warn', noteNumber: '7822', amountIls: null, otherInvoice: null, blocksMatched: true, key: 'k', value: 'v', reviewed: false }],
       }),
     );
     expect(html).toContain('data-testid="xmatch-differences"');
@@ -168,11 +173,41 @@ describe('ConsolidatedPanel · G-04 §9 review items', () => {
     expect(html).toContain('data-testid="xmatch-review-note_not_in_system"');
   });
 
+  it('Q5: an open review item offers "נבדק"; a reviewed one is calm, marked, and no longer blocks (no letter, no red card)', () => {
+    const open = render(
+      proposal({
+        status: 'differences',
+        reviewItems: [
+          { flag: 'note_billed_twice', tier: 'T2', noteNumber: '9001', amountIls: 36, otherInvoice: { invoiceId: 'i0', invoiceNumber: 'A-M-1' }, blocksMatched: true, key: 'note_billed_twice:9001:i0', value: '36.00|i0|-|-', reviewed: false },
+        ],
+      }),
+    );
+    expect(open).toContain('data-testid="xmatch-review-mark"');
+    expect(open).toContain('data-key="note_billed_twice:9001:i0"');
+    expect(open).not.toContain('data-testid="xmatch-review-reviewed"');
+
+    const reviewed = render(
+      proposal({
+        status: 'matched',
+        reviewItems: [
+          { flag: 'note_billed_twice', tier: 'T2', noteNumber: '9001', amountIls: 36, otherInvoice: { invoiceId: 'i0', invoiceNumber: 'A-M-1' }, blocksMatched: false, key: 'note_billed_twice:9001:i0', value: '36.00|i0|-|-', reviewed: true },
+        ],
+      }),
+    );
+    expect(reviewed).toContain('data-reviewed="true"');
+    expect(textOf(reviewed, 'xmatch-review-reviewed')).toContain('נבדק');
+    expect(reviewed).not.toContain('data-testid="xmatch-review-mark"');
+    expect(reviewed).toContain('data-testid="xmatch-matched"');
+    expect(reviewed).not.toContain('data-testid="xmatch-differences"');
+    expect(reviewed).not.toContain('data-testid="xmatch-letter"');
+    expect(reviewed).not.toContain('warning-solid');
+  });
+
   it('en renders the same rows (copy parity)', () => {
     const html = render(
       proposal({
         status: 'differences',
-        reviewItems: [{ flag: 'note_billed_twice', tier: 'T2', noteNumber: '9001', amountIls: 36, otherInvoice: { invoiceId: 'i0', invoiceNumber: 'A-M-1' }, blocksMatched: true }],
+        reviewItems: [{ flag: 'note_billed_twice', tier: 'T2', noteNumber: '9001', amountIls: 36, otherInvoice: { invoiceId: 'i0', invoiceNumber: 'A-M-1' }, blocksMatched: true, key: 'k', value: 'v', reviewed: false }],
       }),
       'en',
     );
