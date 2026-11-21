@@ -26,6 +26,17 @@ const TONE: Record<FlagKind, BadgeTone> = {
   payment_unapplied: 'warning',
 };
 
+/**
+ * Fixed control ids, not Field's useId: useId derives the id from the fiber's
+ * tree position, and on this page (a server page streaming a large ledger-grid
+ * payload into client components) the SSR pass and dev hydration don't always
+ * agree on that position — the labels came out as `f_R_cqpbn…` on the server and
+ * `f_R_1jb5…` in the browser (a hydration mismatch). One statement form per page,
+ * so a constant id is unique (the same fix as the Bell's panel title).
+ */
+const STATEMENT_SUPPLIER_ID = 'rm-statement-supplier';
+const STATEMENT_CSV_ID = 'rm-statement-csv';
+
 export function StatementClient({
   suppliers,
   initialSupplierId,
@@ -60,7 +71,7 @@ export function StatementClient({
             run.mutate({ supplierId, csv: text });
           }}
         >
-          <Field label={t('statement.supplier')}>
+          <Field label={t('statement.supplier')} htmlFor={STATEMENT_SUPPLIER_ID}>
             <Select
               value={supplierId}
               onChange={(e) => {
@@ -81,7 +92,7 @@ export function StatementClient({
               ))}
             </Select>
           </Field>
-          <Field label={t('statement.paste')} hint={error ?? undefined}>
+          <Field label={t('statement.paste')} htmlFor={STATEMENT_CSV_ID} hint={error ?? undefined}>
             <Textarea
               dir="auto"
               rows={8}
