@@ -194,7 +194,9 @@ export function NavTooltip({ mode }: { mode: NavMode }) {
     const rtl = document.documentElement.dir === 'rtl';
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const aside = tip.el.closest('aside');
+    // Beside the menu, 8 px past its edge — or past the flyout's edge for a control inside a flyout (its pin),
+    // so the tip never lands on the flyout's own title.
+    const aside = tip.el.closest<HTMLElement>('[data-fly-panel]') ?? tip.el.closest('aside');
     let top: number;
     let start: number;
     if (aside) {

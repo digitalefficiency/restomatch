@@ -231,7 +231,8 @@ export function BranchSwitcher({
                 'flex w-full items-center gap-3 rounded-control px-3 text-start text-sm leading-5 transition-colors',
                 variant === 'head' ? 'min-h-[52px]' : 'py-2',
                 focusRing,
-                isActive ? 'bg-primary-subtle text-ink' : 'text-ink hover:bg-surface-2',
+                // The current branch: the selection fill (sea, DS3 SPEC §2), never a mint fill (sidebar §6); ✓ marks it too.
+                isActive ? 'bg-info-subtle text-ink' : 'text-ink hover:bg-surface-2',
               )}
             >
               <Store className="h-4 w-4 shrink-0 text-muted" aria-hidden="true" />

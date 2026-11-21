@@ -429,7 +429,9 @@ export function Sidebar({ viewer, restaurantName, roleLabel, switcher, subline, 
   const toChild = dir === 'rtl' ? 'ArrowLeft' : 'ArrowRight';
   const toParent = dir === 'rtl' ? 'ArrowRight' : 'ArrowLeft';
   function onKeyDown(e: React.KeyboardEvent<HTMLElement>) {
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // A control inside the menu that took the key itself (the account button's ↓ opens its menu, a popover's
+    // ↑↓ walk its items) keeps it: the roving focus below must not move as well.
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
     const target = e.target as HTMLElement;
     const flyBox = target.closest<HTMLElement>('[data-fly-panel]');
     if (rail && flyBox && fly) {
