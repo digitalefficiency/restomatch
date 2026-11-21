@@ -20,8 +20,11 @@ const FACE_DIR = ACTIVE_FACE === 'heebo' ? '/fonts/heebo/' : `${faces[ACTIVE_FAC
 /** CDP reports the family name inside the font file ('Google Sans 18pt', 'IBM Plex Sans Hebrew'). */
 const IN_FACE = new RegExp(`^${FAMILY}`, 'i');
 const WEIGHTS = [400, 500, 600, 700] as const;
-/** Text the face covers: Hebrew, Latin, digits, ₪ and the punctuation the product writes. */
-const COVERED = /^[\p{Script=Hebrew}\p{Script=Latin}\p{Nd}\s₪.,:;!?%()[\]{}'"’‘“”\-–—־׳״/·•+−×=@#&*|<>…]+$/u;
+/**
+ * Text the face covers: Hebrew, Latin, digits, ₪, the punctuation the product writes, and the bidi
+ * marks formatIls puts around a Hebrew amount (U+200E, U+200F, U+2066–U+2069).
+ */
+const COVERED = /^[\p{Script=Hebrew}\p{Script=Latin}\p{Nd}\s₪.,:;!?%()[\]{}'"’‘“”\-–—־׳״/·•+−×=@#&*|<>…\u200E\u200F\u2066-\u2069]+$/u;
 
 async function setLang(page: Page, lang: string) {
   const url = test.info().project.use.baseURL!;
@@ -80,6 +83,8 @@ test.describe(`DS3-07 · the UI face (${FAMILY})`, () => {
           return { n, money };
         }, COVERED.source);
         expect(marked.n, `${route}: text elements checked`).toBeGreaterThan(10);
+        // Amounts are among them (their digits and ₪ are checked below with the rest).
+        expect(marked.money, `${route}: amounts checked`).toBeGreaterThan(0);
         const families = await platformFamilies(page, '[data-ds307]');
         expect(families.filter((f) => !IN_FACE.test(f)), `${route} (${lang}) drew glyphs outside ${FAMILY}: ${families.join(', ')}`).toEqual([]);
       }

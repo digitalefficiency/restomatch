@@ -104,14 +104,39 @@ export const activeFonts: FontRoles = fontRoles[ACTIVE_FACE];
  * that browsers apply by default. The fontTools subsetter drops those seven glyphs and the rules
  * that make them; every other glyph, codepoint, feature, outline, advance and variation delta is
  * the published file's (61,160 shaping comparisons, 4 weights × 11 feature sets, identical).
- * Reproducible: same input, same bytes.
+ * Reproducible: `TTFont(published, recalcTimestamp=False)`, then fontTools.subset with `options`
+ * below, glyphs = every glyph but the seven, unicodes = the file's cmap, saved as woff2; with
+ * these versions (uharfbuzz serialises GSUB/GPOS) the bytes are the shipped ones.
+ * Trademark: the upstream font's name table (google/fonts GoogleSans[GRAD,opsz,wght].ttf, nameID 7)
+ * says "“Google” and “Google Sans” are trademarks of Google LLC."; the OFL grants the font, not
+ * the marks. Fontsource's subsets, and so these files, keep the family name without that record.
  */
 export const GOOGLE_SANS_LATIN_EDIT = {
   published: 'google-sans-latin-wght-normal.woff2, @fontsource-variable/google-sans@5.3.2 (35,968 B)',
+  publishedSha256: '3f43e613a4176decfb0ab2e4cf68bfcfbebe9eee1a3de080c4115426258fa32f',
   removedGlyphs: ['Google.logo', 'G.logo', 'G.super', 'e.logo', 'g.logo', 'l.logo', 'o.logo'],
-  tool:
-    "fontTools 4.60.1 subset: glyphs = all but the seven, unicodes = the file's cmap, layout_features *, " +
-    'layout_closure off, glyph and name tables kept, hinting kept, timestamp kept, woff2 (brotli 1.2.1)',
+  tools: 'fontTools 4.60.1, brotli 1.2.1, uharfbuzz 0.57.0',
+  options: {
+    layout_features: ['*'],
+    layout_scripts: ['*'],
+    layout_closure: false,
+    glyph_names: true,
+    name_IDs: ['*'],
+    name_languages: ['*'],
+    name_legacy: true,
+    notdef_glyph: true,
+    notdef_outline: true,
+    hinting: true,
+    legacy_kern: true,
+    symbol_cmap: true,
+    legacy_cmap: true,
+    prune_unicode_ranges: false,
+    prune_codepage_ranges: false,
+    passthrough_tables: true,
+    drop_tables: [],
+    recalc_timestamp: false,
+    flavor: 'woff2',
+  },
 } as const;
 
 /**

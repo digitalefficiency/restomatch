@@ -67,6 +67,17 @@ function woff2TableData(buf: Buffer): Buffer {
   return brotliDecompressSync(buf.subarray(off, off + totalCompressedSize));
 }
 
+/** Whether a CSS unicode-range list covers a code point (U+XXXX, U+XXXX-YYYY and U+XX?? forms). */
+function covers(range: string, cp: number): boolean {
+  return range.split(',').some((part) => {
+    const m = /^U\+([0-9A-F?]+)(?:-([0-9A-F]+))?$/i.exec(part.trim());
+    if (!m?.[1]) throw new Error(`not a unicode-range part: ${part}`);
+    const lo = parseInt(m[1].replace(/\?/g, '0'), 16);
+    const hi = m[2] ? parseInt(m[2], 16) : parseInt(m[1].replace(/\?/g, 'F'), 16);
+    return cp >= lo && cp <= hi;
+  });
+}
+
 describe('DS3-07 Google Sans', () => {
   it('the roles follow the one-line switch; Google Sans keeps numbers and identifiers in the UI face (D3) and D11', () => {
     expect(['plex', 'google-sans']).toContain(ACTIVE_FACE);
@@ -89,7 +100,7 @@ describe('DS3-07 Google Sans', () => {
     expect(css).not.toContain(ACTIVE_FACE === 'plex' ? "'Google Sans" : "'IBM Plex Sans Hebrew");
   });
 
-  it('the number role keeps tabular figures in both faces (Google Sans digits are proportional without them)', () => {
+  it('the number-role token keeps tabular figures in both faces (nothing reads it yet; the e2e spec checks the digits drawn)', () => {
     for (const face of ['plex', 'google-sans'] as const) expect(fontRoles[face].featuresNum).toBe("'tnum' 1, 'lnum' 1");
     expect(cssVariables()).toContain("--font-features-num: 'tnum' 1, 'lnum' 1;");
   });
@@ -124,6 +135,7 @@ describe('DS3-07 Google Sans', () => {
 
   it('no file can put a Google logo in place of ordinary text', () => {
     expect(GOOGLE_SANS_LATIN_EDIT.removedGlyphs).toEqual(['Google.logo', 'G.logo', 'G.super', 'e.logo', 'g.logo', 'l.logo', 'o.logo']);
+    expect(GOOGLE_SANS_LATIN_EDIT.publishedSha256).not.toBe(SHIPPED_SHA256.latin);
     for (const s of gs.subsets) {
       const data = woff2TableData(readFileSync(pub(fontUrl(gs, s, 400))));
       for (const glyph of GOOGLE_SANS_LATIN_EDIT.removedGlyphs) expect(data.includes(Buffer.from(glyph, 'latin1')), `${s}: ${glyph}`).toBe(false);
@@ -148,7 +160,8 @@ describe('DS3-07 Google Sans', () => {
         ].join('\n'),
       );
     }
-    expect(rangeOf(gs, 'latin-ext')).toContain('U+20AD-20C4');
+    // Fontsource 5.3.2's latin-ext file reaches U+20C4 (it draws U+20C1); Plex keeps the shared range.
+    expect(covers(rangeOf(gs, 'latin-ext'), 0x20c1)).toBe(true);
     expect(rangeOf(faces.plex, 'latin-ext')).toBe(UNICODE_RANGE['latin-ext']);
     expect(css).not.toContain('IBM Plex Sans Hebrew');
   });
@@ -192,10 +205,13 @@ describe('DS3-07 Google Sans', () => {
     expect(fontPreloads().he.reduce((n, href) => n + bytes(href), 0)).toBeLessThanOrEqual(50 * KB);
   });
 
-  it('₪ is drawn by the hebrew file (never latin-ext); Cyrillic is preloaded for ru only', () => {
-    expect(rangeOf(gs, 'hebrew')).toContain('U+20AA');
-    expect(rangeOf(gs, 'latin-ext')).not.toMatch(/U\+20A0-20AB|U\+20AA/);
-    expect(UNICODE_RANGE['latin-ext']).not.toMatch(/U\+20A0-20AB|U\+20AA/);
+  it('₪, geresh, gershayim and maqaf are drawn by the hebrew file only; Cyrillic is preloaded for ru only', () => {
+    for (const cp of [0x20aa, 0x05f3, 0x05f4, 0x05be]) {
+      const hex = cp.toString(16);
+      expect(covers(rangeOf(gs, 'hebrew'), cp), `hebrew U+${hex}`).toBe(true);
+      for (const s of gs.subsets.filter((x) => x !== 'hebrew')) expect(covers(rangeOf(gs, s), cp), `${s} U+${hex}`).toBe(false);
+    }
+    expect(covers(UNICODE_RANGE['latin-ext'], 0x20aa)).toBe(false);
     expect(fontPreloads('google-sans').ru).toEqual([fontUrl(gs, 'latin', 400), fontUrl(gs, 'cyrillic', 400)]);
     expect(fontPreloads('plex').ru).toBeUndefined();
   });
