@@ -99,7 +99,7 @@ export function BreakdownChart({
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.key} className="border-t border-line transition-colors hover:bg-surface-2/60">
+              <tr key={r.key} className="border-t border-line transition-colors hover:bg-surface-sunken">
                 <td className={cn(cell, 'font-medium text-ink')}>{r.label}</td>
                 <td className={cn(cell, 'text-right font-semibold tabular-nums', isZero(r.value) ? 'text-subtle' : 'text-ink')}>{ils(r.value)}</td>
                 {countHeader ? (
@@ -139,48 +139,45 @@ export function BreakdownChart({
     );
   }
 
-  // Bars: ranked, labelled, with the comparison period as a thin ghost bar.
+  // Bars (DS3 kit "גרפים"): a ranked list, each bar in ink growing from the start edge with its
+  // amount at the end of the row; the comparison period is a thin ghost bar. No track, no red.
   return (
     <figure aria-label={label}>
       <figcaption className="sr-only">{label}</figcaption>
-      <ul className={compact ? 'space-y-1.5' : 'space-y-3'} data-record="">
+      <ul className={compact ? 'space-y-1.5' : 'space-y-2.5'} data-record="">
         {rows.map((r) => (
-          <li key={r.key}>
-            <div className="flex items-baseline justify-between gap-3 text-sm">
-              <span className="min-w-0 truncate font-medium text-ink">{r.label}</span>
-              <span className="flex shrink-0 items-baseline gap-2">
-                {compare !== 'off' ? (
-                  <DeltaBadge current={r.value} previous={r.previous} compare={compare} thinBase={thinBase} bare />
-                ) : null}
-                <span
-                  className={cn('font-semibold tabular-nums', isZero(r.value) ? 'text-subtle' : 'text-ink')}
-                  data-testid="chart-row"
-                  data-amount={r.value}
-                >
-                  {ils(r.value)}
-                </span>
-              </span>
-            </div>
-            <div className={cn('mt-1 overflow-hidden rounded-full bg-surface-2', compact ? 'h-1.5' : 'h-2.5')}>
+          <li key={r.key} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 text-body-sm">
+            <span className="col-start-1 row-start-1 min-w-0 truncate text-fg">{r.label}</span>
+            <div className={cn('col-start-1 row-start-2', compact ? 'h-1.5' : 'h-2')}>
               {isZero(r.value) ? (
                 // A clean ₪0 row: a muted baseline tick, not a red stub.
-                <div className="h-full w-1 rounded-full bg-line-strong" />
+                <div className="h-full w-1 rounded-xs bg-line-strong" />
               ) : (
-                <div className="rm-bar leak-gradient h-full rounded-full" style={{ width: `${Math.max(1.5, (r.value / max) * 100)}%` }} />
+                <div className="rm-bar h-full rounded-xs bg-fg" style={{ width: `${Math.max(1.5, (r.value / max) * 100)}%` }} />
               )}
+              {compare !== 'off' && r.previous != null && r.previous > 0 ? (
+                <div className="mt-0.5 h-1 rounded-xs bg-viz-prev" style={{ width: `${(r.previous / max) * 100}%` }} />
+              ) : null}
             </div>
-            {compare !== 'off' && r.previous != null && r.previous > 0 ? (
-              <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-transparent">
-                <div className="h-full rounded-full bg-muted/40" style={{ width: `${(r.previous / max) * 100}%` }} />
-              </div>
-            ) : null}
+            <span className="col-start-2 row-span-2 row-start-1 flex shrink-0 items-baseline gap-2 self-center">
+              {compare !== 'off' ? (
+                <DeltaBadge current={r.value} previous={r.previous} compare={compare} thinBase={thinBase} bare />
+              ) : null}
+              <span
+                className={cn('num font-medium', isZero(r.value) ? 'text-fg-tertiary' : 'text-fg')}
+                data-testid="chart-row"
+                data-amount={r.value}
+              >
+                {ils(r.value)}
+              </span>
+            </span>
           </li>
         ))}
       </ul>
       {totalLabel ? (
-        <p className="mt-3 flex items-baseline justify-between gap-3 border-t border-line pt-2 text-sm">
-          <span className="font-semibold text-ink">{totalLabel}</span>
-          <span className="font-bold tabular-nums text-ink" data-testid="chart-total" data-amount={total}>
+        <p className="mt-3 flex items-baseline justify-between gap-3 border-t border-line-rule pt-2 text-body-sm">
+          <span className="font-semibold text-fg">{totalLabel}</span>
+          <span className="num font-semibold text-fg" data-testid="chart-total" data-amount={total}>
             {ils(total)}
           </span>
         </p>

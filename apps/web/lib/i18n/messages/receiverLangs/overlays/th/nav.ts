@@ -12,6 +12,7 @@ export const nav: Shape<typeof he> = {
     labTokens: 'ห้องทดลองการออกแบบ',
     labDesk: 'ห้องทดลองตาราง',
     labDeskRow: 'แถว',
+    labKit: 'แล็บคอมโพเนนต์',
     approvals: 'อนุมัติ',
     approvalInvoice: 'ตัดสินใจใบแจ้งหนี้',
     payRun: 'รอบจ่ายเงิน',

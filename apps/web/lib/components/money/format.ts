@@ -54,6 +54,67 @@ export function splitGlyph(text: string): Array<{ glyph: boolean; text: string }
     .map((part) => ({ glyph: part === '₪', text: part }));
 }
 
+export type MoneyPartKind = 'text' | 'glyph' | 'dec';
+export interface MoneyPart {
+  kind: MoneyPartKind;
+  text: string;
+}
+
+/**
+ * DS3 money markup (SPEC §3): the frozen `formatIls()` string cut into the ₪ glyph, the agorot
+ * (the decimal point and what follows it) and the rest, so each can be styled while the text stays
+ * byte for byte what `formatIls()` returned (`parts.map(p => p.text).join('') === text`). Both
+ * display locales format through he-IL or en-GB (`intlLocaleOf`), whose decimal separator is ".";
+ * with `decimals` 0 there are no agorot to cut. Anything unexpected stays plain text, never lost.
+ */
+export function splitMoney(text: string, decimals: number): MoneyPart[] {
+  let head = text;
+  let dec = '';
+  let tail = '';
+  if (decimals > 0) {
+    const m = /^(.*\d)(\.\d+)(\D*)$/su.exec(text);
+    if (m) {
+      head = m[1]!;
+      dec = m[2]!;
+      tail = m[3]!;
+    }
+  }
+  const out: MoneyPart[] = [];
+  const pushText = (s: string) => {
+    for (const p of splitGlyph(s)) out.push({ kind: p.glyph ? 'glyph' : 'text', text: p.text });
+  };
+  pushText(head);
+  if (dec) out.push({ kind: 'dec', text: dec });
+  pushText(tail);
+  return out;
+}
+
+/**
+ * The ₪ glyph as `formatIls()` prints it, for a unit label that names the currency without an
+ * amount. Taken from the util's own output, so the glyph keeps one source.
+ */
+export function moneyGlyph(locale: Locale): string {
+  return splitGlyph(formatIls(0, { locale })).find((p) => p.glyph)?.text ?? '';
+}
+
+/** Bidi marks and spaces Intl puts between the figure and the ₪ glyph. */
+const GLYPH_JOINERS = /[\s\u00a0\u200e\u200f]+$/;
+
+/**
+ * The figure without its ₪, for a column whose ₪ sits once in the header (owner
+ * decision D8, bookkeeper compact tables only). It is the frozen `formatIls()`
+ * output (via `moneyText`) with the glyph and the joiners next to it removed, so
+ * the digits, grouping, precision and the leading bidi marks that keep a minus
+ * sign before the digits in Hebrew are exactly what an inline `<Money>` shows.
+ */
+export function moneyFigureText(value: number, context: MoneyContext, locale: Locale, decimals?: number): string {
+  return splitGlyph(moneyText(value, context, locale, decimals))
+    .filter((part) => !part.glyph)
+    .map((part) => part.text)
+    .join('')
+    .replace(GLYPH_JOINERS, '');
+}
+
 const FIGURE_CLASS = { ink: 'text-ink', muted: 'text-muted', gold: 'text-gold', primary: 'text-primary' } as const;
 
 /** Figure colour for a money state. ₪0 is never danger: `zero` and `pending` are muted. */
