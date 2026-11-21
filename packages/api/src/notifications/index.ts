@@ -1,5 +1,5 @@
 export * from './types';
-export { DEDUPE_INDEX_PREDICATE, enqueueNotification, markSent, markFailed } from './outbox';
+export { DEDUPE_INDEX_PREDICATE, enqueueNotification, markSent, markFailed, markSkippedNoProvider, storedPayload } from './outbox';
 export { MockWhatsAppNotifier } from './whatsapp';
 export { WhatsAppCloudNotifier, type WhatsAppCloudConfig } from './whatsappCloud';
 export { MockPushNotifier } from './push';
@@ -39,3 +39,4 @@ export {
   type Notifiers,
   type NotifierFactoryEnv,
 } from './factory';
+export * from './send';
