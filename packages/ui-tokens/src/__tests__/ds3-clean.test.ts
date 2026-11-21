@@ -11,7 +11,6 @@ import {
   cssVariables,
   elevation,
   focus,
-  held,
   indicator,
   menuMotion,
   moneyStates,
@@ -69,37 +68,31 @@ const SPEC_COLOURS: Array<[prop: string, hex: string, roles: Record<string, stri
   ['--info-bd', '#BFD5FD', { 'status.info.borderSubtle': status.info.borderSubtle }],
 ];
 
-/** Spec values held at today's value because a test outside packages/ui-tokens pins the literal. */
-const HELD: Record<string, { today: string; spec: string }> = {
-  '--canvas': { today: '#F6F8F7', spec: held.canvas.spec },
-  '--line-strong': { today: '#7A8B82', spec: held.lineStrong.spec },
-};
-
 describe('DS3 · SPEC §2 colours land on the DS2 roles', () => {
-  it.each(SPEC_COLOURS)('%s = %s', (prop, hex, roles) => {
-    const want = HELD[prop] ? HELD[prop]!.today : hex;
-    if (HELD[prop]) expect(HELD[prop]!.spec, `${prop}: the held role still names the spec value`).toBe(hex);
-    for (const [role, value] of Object.entries(roles)) expect(value, role).toBe(want);
+  it.each(SPEC_COLOURS)('%s = %s', (_prop, hex, roles) => {
+    for (const [role, value] of Object.entries(roles)) expect(value, role).toBe(hex);
   });
 
-  it('held values: exactly canvas and line-strong, each pinned by a named test outside the package', () => {
-    expect(Object.keys(held).sort()).toEqual(['canvas', 'lineStrong']);
-    expect(held.canvas.pinnedBy).toMatch(/price-creep-digest\.test\.ts:\d+$/);
-    expect(held.lineStrong.pinnedBy).toMatch(/W1-09\.spec\.ts:\d+$/);
+  it('nothing is held: the canvas and the strong line are live at the spec values', () => {
+    expect(surfaces.canvas).toBe('#F8FBF9');
+    expect(surfaces.lineStrong).toBe('#808984');
   });
 
-  it('flipping a held value is safe: the spec value passes the same gates', () => {
+  it('every text role passes 5:1 on the canvas', () => {
     for (const fg of [text.ink, text.muted, text.subtle, status.primary.text, status.danger.text, status.warn.text, status.gold.text, status.info.text, focus]) {
-      expect(contrastRatio(fg, held.canvas.spec)).toBeGreaterThanOrEqual(5);
+      expect(contrastRatio(fg, surfaces.canvas)).toBeGreaterThanOrEqual(5);
     }
-    for (const bg of [surfaces.surface, held.canvas.spec, surfaces.sunken, surfaceV2.hover, surfaceV2.selected]) {
-      expect(contrastRatio(held.lineStrong.spec, bg)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('the strong line is a 3:1 boundary on every surface a control sits on', () => {
+    for (const bg of [surfaces.surface, surfaces.canvas, surfaces.sunken, surfaceV2.hover, surfaceV2.selected]) {
+      expect(contrastRatio(surfaces.lineStrong, bg)).toBeGreaterThanOrEqual(3);
     }
   });
 
   it('the generated block carries the clean values (channels)', () => {
     const css = cssVariables();
-    for (const decl of ['--c-bg: 246 248 247;', '--c-ink: 18 28 23;', '--c-focus: 34 86 187;', '--c-gold: 0 113 62;', '--c-gold-text: 0 87 59;', '--c-gold-bold: 0 113 62;', '--c-danger-dot: 221 39 41;', '--c-warn-dot-ring: 185 117 0;', '--c-surface-hover: 235 240 237;']) {
+    for (const decl of ['--c-bg: 248 251 249;', '--c-line-strong: 128 137 132;', '--c-ink: 18 28 23;', '--c-focus: 34 86 187;', '--c-gold: 0 113 62;', '--c-gold-text: 0 87 59;', '--c-gold-bold: 0 113 62;', '--c-danger-dot: 221 39 41;', '--c-warn-dot-ring: 185 117 0;', '--c-surface-hover: 235 240 237;']) {
       expect(css).toContain(decl);
     }
   });
@@ -315,6 +308,37 @@ describe('DS3 · density variables express SPEC §7 (the switch itself is DS3-06
     }
     // The floor comes after the compact block, so it wins at equal specificity.
     expect(css.indexOf("@media (pointer: coarse) {\n  [data-density='compact'] {")).toBeGreaterThan(css.indexOf("[data-density='compact'] {\n  --fs-cell"));
+  });
+
+  it('density is fixed on a touch pointer as a CSS fact: every variable compact sets is undone there', () => {
+    // Top-level rules (a rule inside @media is indented), v1 and v2 blocks alike.
+    const top = (sel: string) => {
+      const vars = new Map<string, string>();
+      const open = `\n${sel} {`;
+      for (let at = css.indexOf(open); at !== -1; at = css.indexOf(open, at + open.length)) {
+        const body = css.slice(at + open.length, css.indexOf('}', at));
+        for (const d of body.matchAll(/(--[\w-]+): ([^;]+);/g)) vars.set(d[1]!, d[2]!);
+      }
+      return vars;
+    };
+    const compact = top("[data-density='compact']");
+    const regular = top("[data-density='default']");
+    const touch = top("[data-density='touch']");
+    // What a coarse pointer sets for compact, or for every density (v1's touch floor).
+    const coarse = new Map<string, string>();
+    for (const m of css.matchAll(/@media \(pointer: coarse\) \{\n {2}([^{\n]+) \{([^}]*)\}/g)) {
+      if (!/\[data-density(='compact')?\]/.test(m[1]!)) continue;
+      for (const d of m[2]!.matchAll(/(--[\w-]+): ([^;]+);/g)) coarse.set(d[1]!, d[2]!);
+    }
+    expect(compact.size).toBeGreaterThan(25);
+    expect([...compact.keys()].filter((v) => !coarse.has(v)), 'compact variables a coarse pointer leaves compact').toEqual([]);
+    // Each falls back to the regular value; v1's row and control heights take the touch floor (DS2).
+    for (const [v, value] of coarse) {
+      if (!compact.has(v)) continue;
+      expect([regular.get(v), touch.get(v)], v).toContain(value);
+    }
+    expect(coarse.get('--cell-px')).toBe('16px');
+    expect(coarse.get('--cell-inline')).toBe('16px');
   });
 });
 
