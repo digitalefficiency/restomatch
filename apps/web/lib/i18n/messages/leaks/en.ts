@@ -80,6 +80,7 @@ export const en: Shape<typeof he> = {
     unpaid: 'Not paid yet',
     pendingTitle: 'Waiting for a PO link',
     pendingHint: 'No matching order found — usually a consolidated invoice. Not counted as leak until linked.',
+    acknowledged: 'for information',
     notCounted: 'not counted',
     noMoney: 'No money impact',
     noMoneyShort: 'Already counted in the over-billed line',
