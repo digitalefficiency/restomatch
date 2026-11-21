@@ -565,6 +565,8 @@ export function decidePages(
   /** Round 11 (M6): the latest run head that is still an OPEN document (not a whole invoice). */
   let openHead: string | null = standaloneHead ? null : first.invoiceId;
   let runHeadComplete = Boolean(standaloneHead);
+  /** Round 12 (nit): each run head's own completeness (a whole invoice, or a credit note). */
+  const completeOf = new Map<string, boolean>([[first.invoiceId, Boolean(standaloneHead)]]);
   const followRun = (page: PageHeader, flag: string | null) => {
     const number = alnum(page.invoiceNumber);
     if (!number || page.unreadable || (flag && NOT_A_HEAD.has(flag))) return;
@@ -576,9 +578,12 @@ export function decidePages(
     sameNumber.set(number, [...new Set([...(sameNumber.get(number) ?? []), page.invoiceId])]);
     numberOf.set(page.invoiceId, number);
     if (head === page.invoiceId) {
-      runHeadComplete = selfComplete(page.print) || creditKind(page.print);
-      if (!runHeadComplete) openHead = page.invoiceId;
+      completeOf.set(page.invoiceId, selfComplete(page.print) || creditKind(page.print));
+      if (!completeOf.get(page.invoiceId)) openHead = page.invoiceId;
     }
+    // Round 12 (nit): a repeated number sends the run BACK to an earlier head — its own
+    // completeness applies, never the last head's.
+    runHeadComplete = completeOf.get(head) ?? runHeadComplete;
     runHead = head;
   };
   /**

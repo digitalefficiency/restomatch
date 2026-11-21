@@ -40,7 +40,7 @@
  * retry could only be refused ('disabled') or re-stub the demo, so with nobody
  * listed the sweep does nothing.
  */
-import { multiPageEnabled, WINDOW_MAX_ATTEMPTS } from '@restomatch/api';
+import { multiPageEnabled, REMATCH_PENDING_KEY, WINDOW_MAX_ATTEMPTS } from '@restomatch/api';
 import type { Sql } from '@restomatch/queue';
 import { insertJob } from '@restomatch/queue';
 import { makeWorker, workerSql, type WorkerJob } from '../queue';
@@ -65,12 +65,16 @@ export interface OcrSweepResult {
   raced: string[];
   /** G-09: held multi-page pages released to the match after the hold cap. */
   released?: string[];
+  /** G-09 (round 12 #9): "checked together" re-matches re-enqueued after a lost enqueue. */
+  rematched?: string[];
 }
 
 /** G-09: a page held for its siblings' OCR is released to the match after this long. */
 export const G09_HOLD_MAX_MS = 30 * 60_000;
 /** G-09: path-form scans are signed at sweep time, so they have no URL expiry; look back a day. */
 export const G09_PATH_MAX_AGE_MS = 24 * 60 * 60_000;
+/** G-09 (round 12 #9): a stamped group re-match still pending after this long is re-enqueued. */
+export const G09_REMATCH_RETRY_MS = 5 * 60_000;
 
 /**
  * `restaurantIds` = the tenants on real OCR (claudeOcrRestaurantIds); others are
@@ -300,6 +304,25 @@ export async function runOcrSweep(
       { restaurantId: inv.restaurant_id, dedupeKey: `g09-unsettled-${inv.id}-${Math.floor(now.getTime() / 3_600_000)}`, maxAttempts: 3 },
     );
     if (inserted) result.released.push(inv.id);
+  }
+  // Round 12 (#9): a "checked together" re-match whose enqueue was lost (the answer
+  // stamped raw.groupRematchPending in its own transaction; the job clears it).
+  const rematchBefore = new Date(now.getTime() - G09_REMATCH_RETRY_MS);
+  const rematchPending = await sql<Array<{ id: string; restaurant_id: string }>>`
+    SELECT i.id, i.restaurant_id FROM invoices i
+     WHERE i.restaurant_id::text = ANY(string_to_array(${only.join(',')}, ','))
+       AND (i.ocr_payload -> 'raw') ? ${REMATCH_PENDING_KEY}
+       AND (i.ocr_payload -> 'raw' ->> ${REMATCH_PENDING_KEY})::timestamptz < ${rematchBefore}
+     ORDER BY i.updated_at
+     LIMIT ${OCR_SWEEP_BATCH}`;
+  for (const inv of rematchPending) {
+    const inserted = await insertJob(
+      sql,
+      'match-invoice',
+      { restaurantId: inv.restaurant_id, invoiceId: inv.id, rematch: true },
+      { restaurantId: inv.restaurant_id, dedupeKey: `g09-rematch-${inv.id}-${Math.floor(now.getTime() / 3_600_000)}`, maxAttempts: 3 },
+    );
+    if (inserted) (result.rematched ??= []).push(inv.id);
   }
   // end G-09 sweep
 

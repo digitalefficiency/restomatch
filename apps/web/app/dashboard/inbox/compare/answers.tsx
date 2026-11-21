@@ -8,6 +8,7 @@ import { ingest } from '@/lib/i18n/messages/ingest';
 import { formatIls } from '@/lib/money';
 import { trpc } from '@/lib/trpc/client';
 import { refusalOf } from '../refusals';
+import { carrierChoice, type CarrierOption } from './carrier';
 
 type Action = 'separate' | 'delete_duplicate' | 'close_unreadable' | 'checked_together';
 const PAGE_ONE = ['page_not_merged', 'page_merge_blocked', 'page_too_large'];
@@ -33,7 +34,7 @@ export function PageAnswers(props: {
    * Round 11 (M5/M6): every invoice shown — the page, each head it may continue, and
    * the carrier the head is already included in — with its supplier, number and ₪.
    */
-  options?: Array<{ id: string; role: 'page' | 'head' | 'carrier'; supplier: string | null; number: string | null; total: number | null }>;
+  options?: CarrierOption[];
 }) {
   const t = useT(ingest);
   const locale = useLocale();
@@ -43,11 +44,9 @@ export function PageAnswers(props: {
   const [confirm, setConfirm] = useState<Action | null>(null);
   const options = props.options ?? [];
   const headOptions = options.filter((o) => o.role === 'head');
-  // Round 11 (M5): default carrier = the invoice that carries the printed document total
-  // (the largest printed ₪ among them) — never a guess without ₪.
-  const totalCarrier = options.filter((o) => o.total !== null).sort((x, y) => (y.total ?? 0) - (x.total ?? 0))[0] ?? null;
-  const [payable, setPayable] = useState<string | null>(totalCarrier?.id ?? null);
   const [withHead, setWithHead] = useState<string | null>(props.otherInvoiceId);
+  const [picked, setPayable] = useState<string | null>(null);
+  const { offered, totalCarrier, payable } = carrierChoice(options, withHead, picked);
   const [smallerOk, setSmallerOk] = useState(false);
   const [pickMissing, setPickMissing] = useState(false);
   if (!props.canManage) return <p className="text-sm text-muted">{t('inbox.compareManagerOnly')}</p>;
@@ -65,7 +64,12 @@ export function PageAnswers(props: {
         action,
         // Round 9 (N4): one of the two stays payable; the other is "included in it".
         ...(action === 'checked_together' && payable
-          ? { payableInvoiceId: payable, ...(withHead ? { withInvoiceId: withHead } : {}) }
+          ? {
+              payableInvoiceId: payable,
+              ...(withHead ? { withInvoiceId: withHead } : {}),
+              // Round 12 (#8): the person explicitly confirmed a carrier with a smaller printed total.
+              ...(smallerPick && smallerOk ? { acceptShortTotal: true } : {}),
+            }
           : {}),
       });
       toast.success(done[action]);
@@ -139,8 +143,7 @@ export function PageAnswers(props: {
                 </span>
               ) : null}
               <span role="radiogroup" aria-label={t('inbox.pageTogetherConfirmTitle')} className="flex flex-col gap-2">
-                {options
-                  .filter((o) => o.role === 'page' || o.role === 'carrier' || o.id === withHead)
+                {offered
                   .map((o) => (
                     <label key={o.id} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-line px-3">
                       <input

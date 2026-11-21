@@ -4,6 +4,7 @@ import { enqueueMatchInvoice } from '@restomatch/queue';
 import { DocumentError, documentNotFound } from './errors';
 import { PAGES_RECOMPOSED_ACTION, retireInvoice } from './reocr';
 import { PAGE_FLAGS, PAGE_ONE_FLAGS, type PageFlag } from './settle';
+import { A_PERSONS_DECISION } from '../lib/decisions';
 
 /**
  * G-09 · the inbox's recourse for a flagged page (owner/manager).
@@ -33,6 +34,39 @@ export const PAGE_UNREADABLE_CLOSED = 'page_unreadable_closed';
 export const PAGE_SEPARATE = 'page_separate';
 export const PAGE_SEPARATED_ACTION = 'document.page_separated';
 
+/**
+ * Round 12 (#9): a group re-match that must happen. Stamped inside the answer's (or the
+ * undo's) transaction; the match job clears it once it ran, and the worker's sweep
+ * re-enqueues any stamp left behind — the re-match is never lost to a failed enqueue.
+ */
+export const REMATCH_PENDING_KEY = 'groupRematchPending';
+
+/** Round 12 (#6): answers and undos of one restaurant run one at a time. */
+async function lockTogether(tx: Database, restaurantId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${'g09.checked_together:' + restaurantId}, 0))`);
+}
+
+/** Round 12 (#6): an answer's order — the stamp taken under the lock (older answers: their audit time). Alias a. */
+const ANSWER_STAMP = sql.raw(`coalesce((a.after ->> 'stampedAt')::timestamptz, a.at)`);
+
+/** The prior state an answer records, and its undo restores (round 11 M3, round 12 #2/#3). */
+interface TogetherSnapshot {
+  flag?: string;
+  members?: Array<{ id: string; paidWith: string | null; status?: string; duplicateOf?: unknown; releasedFromReview?: boolean }>;
+  /** Every member's own match_runs row, and its findings, as they were (row_to_json). */
+  runs?: unknown[];
+  findings?: unknown[];
+}
+
+async function markRematchPending(tx: Database, restaurantId: string, ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await tx.execute(sql`
+    update ${invoices}
+       set ocr_payload = jsonb_set(ocr_payload, ${`{raw,${REMATCH_PENDING_KEY}}`}::text[], to_jsonb(now()), true), updated_at = now()
+     where restaurant_id = ${restaurantId} and id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
+       and jsonb_typeof(ocr_payload -> 'raw') = 'object'`);
+}
+
 export interface ResolveDeps {
   enqueueMatch?: (job: { restaurantId: string; invoiceId: string; rematch?: boolean }) => Promise<unknown>;
 }
@@ -52,6 +86,8 @@ export async function resolvePageFlag(
     payableInvoiceId?: string;
     /** …and the invoice the person compared it with (one of the heads settle recorded; default the likeliest). */
     withInvoiceId?: string;
+    /** Round 12 (#8): the person confirmed a carrier whose printed total does not cover the document's lines. */
+    acceptShortTotal?: boolean;
   },
   deps: ResolveDeps = {},
 ): Promise<{ invoiceId: string | null; action: PageFlagAction }> {
@@ -84,23 +120,27 @@ export async function resolvePageFlag(
         .limit(1);
       if ((was?.before as { flag?: string } | null)?.flag === 'page_duplicate') flag = 'page_duplicate';
     }
-    // Round 10 (P6/P7) + round 11 (M3): "checked together" is undoable — EXACTLY: the
-    // members' prior state (the answer's snapshot) comes back, its set-aside totals reopen,
-    // and the page asks again. Last answer first: undoing an answer a later answer on the
-    // same invoices builds on is refused (undo that one first).
+    // Round 10 (P6/P7) + rounds 11/12 (M3, #3, #6): "checked together" is undoable —
+    // EXACTLY: every member's prior state (the answer's snapshot: its link, its stamp, its
+    // own run and findings) comes back in this transaction, the carrier's combined run goes,
+    // and the page asks again. Last answer first, ordered by a stamp taken under one
+    // per-restaurant lock (never the transaction start time). When the prior state can no
+    // longer come back exactly (the carrier was approved or paid, a person decided on its
+    // run, a member moved on) the undo is refused — never a half-undo.
     if (action === 'undo_checked_together') {
       if (flag !== (PAGE_CHECKED_TOGETHER as string)) throw new TRPCError({ code: 'CONFLICT', message: 'not_flagged' });
+      await lockTogether(tx, restaurantId);
       const [was] = (await tx.execute(sql`
-        select a.id::text as id, a.before, a.after, a.at
+        select a.id::text as id, a.before, a.after, ${ANSWER_STAMP} as stamp
           from ${auditLog} a
          where a.restaurant_id = ${restaurantId} and a.entity_type = 'invoice' and a.entity_id = ${doc.invoiceId}
            and a.action = ${CHECKED_TOGETHER_ACTION}
            and not exists (select 1 from ${auditLog} u
                             where u.restaurant_id = a.restaurant_id and u.action = ${UNDONE_ACTION}
                               and u.after ->> 'answerId' = a.id::text)
-         order by a.at desc limit 1`)) as unknown as Array<{ id: string; before: unknown; after: unknown; at: Date }>;
+         order by ${ANSWER_STAMP} desc limit 1`)) as unknown as Array<{ id: string; before: unknown; after: unknown; stamp: string }>;
       if (!was) throw new TRPCError({ code: 'CONFLICT', message: 'not_flagged' });
-      const before = (was.before as { flag?: string; members?: Array<{ id: string; paidWith: string | null }> } | null) ?? {};
+      const before = (was.before as TogetherSnapshot | null) ?? {};
       const after = (was.after as { memberIds?: string[]; paidWithInvoiceIds?: string[]; payableInvoiceId?: string; waivedTotalMismatchIds?: string[] } | null) ?? {};
       const members = after.memberIds ?? [...new Set([...(after.paidWithInvoiceIds ?? []), ...(after.payableInvoiceId ? [after.payableInvoiceId] : [])])];
       // LIFO: a LATER, still-standing answer touching any of these invoices blocks the undo.
@@ -108,7 +148,7 @@ export async function resolvePageFlag(
         const [later] = (await tx.execute(sql`
           select 1 as hit from ${auditLog} a
            where a.restaurant_id = ${restaurantId} and a.action = ${CHECKED_TOGETHER_ACTION}
-             and a.at > ${was.at} and a.id::text <> ${was.id}
+             and ${ANSWER_STAMP} > ${was.stamp}::timestamptz and a.id::text <> ${was.id}
              and exists (select 1 from jsonb_array_elements_text(coalesce(a.after -> 'memberIds', a.after -> 'paidWithInvoiceIds', '[]'::jsonb)) m
                           where m in (${sql.join(members.map((m) => sql`${m}`), sql`, `)}))
              and not exists (select 1 from ${auditLog} u
@@ -116,6 +156,32 @@ export async function resolvePageFlag(
                                 and u.after ->> 'answerId' = a.id::text)
            limit 1`)) as unknown as Array<{ hit: number }>;
         if (later) throw new TRPCError({ code: 'CONFLICT', message: 'undo_later_first' });
+      }
+      const exact = Array.isArray(before.runs);
+      const memberList = members.length > 0 ? sql.join(members.map((id) => sql`${id}::uuid`), sql`, `) : null;
+      if (memberList) {
+        await tx.execute(sql`select id from ${invoices} where restaurant_id = ${restaurantId} and id in (${memberList}) order by id for update`);
+      }
+      if (exact && memberList) {
+        const payable = after.payableInvoiceId ?? null;
+        const now = (await tx.execute(sql`
+          select i.id::text as id, i.status from ${invoices} i where i.restaurant_id = ${restaurantId} and i.id in (${memberList})`)) as unknown as Array<{ id: string; status: string }>;
+        const statusOf = new Map(now.map((r) => [r.id, r.status]));
+        // the carrier was signed off or paid on the combined document: its pages can't be un-included
+        if (payable && ['approved', 'paid'].includes(statusOf.get(payable) ?? '')) throw new TRPCError({ code: 'CONFLICT', message: 'already_paid' });
+        // a person decided on the carrier's combined run (or a claim hangs on it): that decision stays
+        if (payable) {
+          const [decidedOnCarrier] = (await tx.execute(sql`
+            select 1 as hit from ${matchRuns} mr join ${discrepancies} d on d.match_run_id = mr.id and d.restaurant_id = mr.restaurant_id
+             where mr.restaurant_id = ${restaurantId} and mr.invoice_id = ${payable}::uuid and ${A_PERSONS_DECISION}
+             limit 1`)) as unknown as Array<{ hit: number }>;
+          if (decidedOnCarrier) throw new TRPCError({ code: 'CONFLICT', message: 'decided' });
+        }
+        // a member that moved on since the answer can't come back exactly
+        for (const m of before.members ?? []) {
+          const expected = m.releasedFromReview ? 'matched' : m.status;
+          if (expected && statusOf.get(m.id) !== expected) throw new TRPCError({ code: 'CONFLICT', message: 'decided' });
+        }
       }
       // restore EXACTLY the snapshot (an earlier answer's links stay as they were)
       for (const m of before.members ?? []) {
@@ -131,6 +197,15 @@ export async function resolvePageFlag(
                set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - 'paidWith'), updated_at = now()
              where restaurant_id = ${restaurantId} and id = ${m.id}::uuid and (ocr_payload -> 'raw') ? 'paidWith'`);
         }
+        // Round 12 (#2): the carrier's own-document stamp the answer cleared comes back.
+        if (m.duplicateOf) {
+          await tx.execute(sql`
+            update ${invoices}
+               set ocr_payload = jsonb_set(ocr_payload, '{raw,duplicateOf}', ${JSON.stringify(m.duplicateOf)}::jsonb, true),
+                   status = case when ${Boolean(m.releasedFromReview)} then ${m.status ?? 'parsed'} else status end,
+                   updated_at = now()
+             where restaurant_id = ${restaurantId} and id = ${m.id}::uuid and jsonb_typeof(ocr_payload -> 'raw') = 'object'`);
+        }
       }
       if (!before.members) {
         // a round-9/10 answer without a snapshot: release only what it marked
@@ -143,7 +218,7 @@ export async function resolvePageFlag(
                and ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${after.payableInvoiceId}`);
         }
       }
-      // Round 11 (L1): the totals the answer set aside are open again.
+      // Round 11 (L1): the totals an earlier version of the answer set aside are open again.
       const waived = after.waivedTotalMismatchIds ?? [];
       if (waived.length > 0) {
         await tx.execute(sql`
@@ -152,11 +227,27 @@ export async function resolvePageFlag(
            where restaurant_id = ${restaurantId} and id in (${sql.join(waived.map((id) => sql`${id}::uuid`), sql`, `)})
              and resolution_status = 'rejected'`);
       }
+      // Round 12 (#3): the runs come back EXACTLY — the combined run goes, each member's
+      // own run and findings (statuses, PO, receipt) are re-inserted as they were.
+      let rematch: string[] = members;
+      if (exact && memberList) {
+        await tx.execute(sql`delete from ${matchRuns} where restaurant_id = ${restaurantId} and invoice_id in (${memberList})`);
+        for (const run of before.runs ?? []) {
+          await tx.execute(sql`insert into ${matchRuns} select * from jsonb_populate_record(null::match_runs, ${JSON.stringify(run)}::jsonb)`);
+        }
+        for (const f of before.findings ?? []) {
+          await tx.execute(sql`insert into ${discrepancies} select * from jsonb_populate_record(null::discrepancies, ${JSON.stringify(f)}::jsonb)`);
+        }
+        // only an invoice that had no run of its own goes to the matcher (its own gates decide)
+        const hadRun = new Set((before.runs ?? []).map((r) => (r as { invoice_id?: string }).invoice_id));
+        rematch = members.filter((id) => !hadRun.has(id));
+      }
       const restore = before.flag && (PAGE_ONE_FLAGS as readonly string[]).includes(before.flag) ? before.flag : 'page_not_merged';
       await tx
         .update(ingestDocuments)
         .set({ error: restore, updatedAt: new Date() })
         .where(and(eq(ingestDocuments.restaurantId, restaurantId), eq(ingestDocuments.invoiceId, doc.invoiceId), eq(ingestDocuments.error, PAGE_CHECKED_TOGETHER)));
+      await markRematchPending(tx, restaurantId, rematch);
       await tx.insert(auditLog).values({
         restaurantId,
         userId: args.userId,
@@ -164,10 +255,9 @@ export async function resolvePageFlag(
         entityType: 'invoice',
         entityId: doc.invoiceId,
         before: { flag: PAGE_CHECKED_TOGETHER } as never,
-        after: { flag: restore, answerId: was.id, restored: before.members ?? null, reopened: waived } as never,
+        after: { flag: restore, answerId: was.id, restored: before.members ?? null, restoredRuns: (before.runs ?? []).length, reopened: waived } as never,
       });
-      // the restored state is matched afresh: each invoice on its own lines, a remaining carrier on its group's
-      return { invoiceId: doc.invoiceId, match: false, released: [] as string[], rematch: members };
+      return { invoiceId: doc.invoiceId, match: false, released: [] as string[], rematch };
     }
     if (!flag || !(PAGE_FLAGS as readonly string[]).includes(flag)) {
       throw new TRPCError({ code: 'CONFLICT', message: 'not_flagged' });
@@ -277,6 +367,8 @@ export async function resolvePageFlag(
 
     if (action === 'checked_together') {
       if (!(PAGE_ONE_FLAGS as readonly string[]).includes(flag)) throw new TRPCError({ code: 'CONFLICT', message: 'not_comparable' });
+      // Round 12 (#6): one answer / undo at a time per restaurant, before anything is read.
+      await lockTogether(tx, restaurantId);
       // Round 9 (N4): ONE invoice stays payable. Round 10 (P9): the pair is the page's
       // invoice and its LIKELIEST head (raw.pageOf.invoiceId — what every compare shows).
       const [pair] = (await tx.execute(sql`
@@ -328,6 +420,9 @@ export async function resolvePageFlag(
                i.ocr_payload -> 'raw' -> 'paidWith' ->> 'invoiceId' as paid_with,
                (i.ocr_payload -> 'raw' -> 'duplicateOf') is not null as dup_stamp,
                i.ocr_payload -> 'raw' -> 'duplicateOf' ->> 'invoiceId' as dup_of,
+               i.ocr_payload -> 'raw' -> 'duplicateOf' as dup_json,
+               (coalesce(jsonb_array_length(case when jsonb_typeof(i.ocr_payload -> 'raw' -> 'reviewReasons') = 'array' then i.ocr_payload -> 'raw' -> 'reviewReasons' end), 0) > 0
+                 or coalesce(i.ocr_payload -> 'raw' -> 'ocrFailed' = 'true'::jsonb, false)) as other_review,
                exists (select 1 from ${matchRuns} mr join ${discrepancies} d on d.match_run_id = mr.id and d.restaurant_id = mr.restaurant_id
                         where mr.invoice_id = i.id and mr.restaurant_id = i.restaurant_id
                           and d.type = 'DUPLICATE_INVOICE' and d.resolution_status in ('open', 'escalated', 'accepted')) as dup_finding
@@ -340,6 +435,8 @@ export async function resolvePageFlag(
         paid_with: string | null;
         dup_stamp: boolean;
         dup_of: string | null;
+        dup_json: unknown;
+        other_review: boolean;
         dup_finding: boolean;
       }>;
       const pairRows = rows.filter((r) => r.id === invoiceId || r.id === head);
@@ -360,50 +457,106 @@ export async function resolvePageFlag(
       if (rows.some(realDuplicate)) throw new TRPCError({ code: 'CONFLICT', message: 'duplicate_on_file' });
       if (rows.some((r) => r.status === 'paid' && r.id !== payable)) throw new TRPCError({ code: 'CONFLICT', message: 'already_paid' });
       const marked = memberIds.filter((id) => id !== payable);
-      // Round 11 (L1): the included invoices' own runs go (their lines are matched with the
-      // carrier's) — never one a person already decided on (that stays their decision).
       const markedList = sql.join(marked.map((id) => sql`${id}::uuid`), sql`, `);
+      // Round 12 (#3/#9): the carrier is matched again on the whole document and its undo
+      // must be exact — so never a carrier already signed off or paid (its re-match would be
+      // skipped: the included pages' lines would be matched nowhere), nor one a credit claim
+      // hangs on (the re-match keeps that run).
+      const carrierRow = rows.find((r) => r.id === payable)!;
+      if (carrierRow.status === 'approved' || carrierRow.status === 'paid') throw new TRPCError({ code: 'CONFLICT', message: 'already_paid' });
+      const [claimOnCarrier] = (await tx.execute(sql`
+        select 1 as hit from ${matchRuns} mr join ${discrepancies} d on d.match_run_id = mr.id and d.restaurant_id = mr.restaurant_id
+         where mr.restaurant_id = ${restaurantId} and mr.invoice_id = ${payable}::uuid
+           and exists (select 1 from recovery_claims c where c.discrepancy_id = d.id and c.restaurant_id = d.restaurant_id)
+         limit 1`)) as unknown as Array<{ hit: number }>;
+      if (claimOnCarrier) throw new TRPCError({ code: 'CONFLICT', message: 'decided' });
+      // Round 11 (L1) / round 12 (#4): the included invoices' own runs go (their lines are
+      // matched with the carrier's) — never one a PERSON decided on (the codebase's one rule:
+      // resolved by a person, escalated, or a claim on it). An engine auto-approval is not
+      // a decision and never blocks.
       const [decided] = (await tx.execute(sql`
         select 1 as hit from ${matchRuns} mr join ${discrepancies} d on d.match_run_id = mr.id and d.restaurant_id = mr.restaurant_id
-         where mr.restaurant_id = ${restaurantId} and mr.invoice_id in (${markedList})
-           and d.resolution_status not in ('open', 'escalated')
+         where mr.restaurant_id = ${restaurantId} and mr.invoice_id in (${markedList}) and ${A_PERSONS_DECISION}
          limit 1`)) as unknown as Array<{ hit: number }>;
       if (decided) throw new TRPCError({ code: 'CONFLICT', message: 'decided' });
-      const markList = sql.join(marked.map((id) => sql`${id}::uuid`), sql`, `);
-      // Round 11 (M3): the exact prior state of every member — the undo restores THIS.
-      const snapshot = rows.map((r) => ({ id: r.id, paidWith: r.paid_with }));
+      // Round 12 (#8): the carrier is the page that prints the DOCUMENT total — its printed
+      // total (before VAT) covers every line of the group (±₪0.10, the engine's rounding
+      // allowance). Otherwise its match would read a phantom TOTAL_MISMATCH. The person may
+      // still pick a smaller carrier, but only by saying so (acceptShortTotal).
+      const [covered] = (await tx.execute(sql`
+        select (c.total_excl_vat is not null and c.total_excl_vat + 0.10 >= (
+                  select coalesce(sum(il.line_total), 0) from invoice_lines il join ${invoices} i on i.id = il.invoice_id
+                   where i.restaurant_id = ${restaurantId} and i.id in (${memberList}))) as ok
+          from ${invoices} c where c.id = ${payable}::uuid and c.restaurant_id = ${restaurantId}`)) as unknown as Array<{ ok: boolean }>;
+      if (!covered?.ok && !args.acceptShortTotal) throw new TRPCError({ code: 'CONFLICT', message: 'carrier_total_short' });
+      // Round 11 (M3) + round 12 (#2/#3): the exact prior state of every member — its link,
+      // its status, the carrier's own-document stamp, and every member's run and findings
+      // as stored. The undo restores THIS, in one transaction.
+      const snapRuns = (await tx.execute(sql`
+        select to_jsonb(mr) as row from ${matchRuns} mr where mr.restaurant_id = ${restaurantId} and mr.invoice_id in (${memberList})`)) as unknown as Array<{ row: unknown }>;
+      const snapFindings = (await tx.execute(sql`
+        select to_jsonb(d) as row from ${discrepancies} d join ${matchRuns} mr on mr.id = d.match_run_id and mr.restaurant_id = d.restaurant_id
+         where mr.restaurant_id = ${restaurantId} and mr.invoice_id in (${memberList})`)) as unknown as Array<{ row: unknown }>;
+      // Round 12 (#2): a carrier stamped as a "duplicate" of one of this document's own pages
+      // (a continuation repeating its page 1's number) is the same document: the stamp goes
+      // (else its re-match waits for review forever) and comes back on undo.
+      const ownStamp = Boolean(carrierRow.dup_stamp && carrierRow.dup_of && inDocument.has(carrierRow.dup_of));
+      // The OCR held the carrier ('parsed') for that stamp; when it was the ONLY reason on
+      // record (no other review reason, not a failed read), the person's answer settles it:
+      // the carrier goes to the matcher like any read invoice. Any other reason keeps it held.
+      const releaseFromReview = ownStamp && carrierRow.status === 'parsed' && !carrierRow.other_review;
+      const snapshot = rows.map((r) => ({
+        id: r.id,
+        paidWith: r.paid_with,
+        status: r.status,
+        ...(r.id === payable && ownStamp ? { duplicateOf: r.dup_json } : {}),
+        ...(r.id === payable && releaseFromReview ? { releasedFromReview: true } : {}),
+      }));
       await tx.execute(sql`
         update ${invoices}
            set ocr_payload = coalesce(ocr_payload, '{}'::jsonb) || jsonb_build_object('raw',
                  coalesce(ocr_payload -> 'raw', '{}'::jsonb) || jsonb_build_object('paidWith', jsonb_build_object('invoiceId', ${payable}::text))),
                updated_at = now()
-         where restaurant_id = ${restaurantId} and id in (${markList})`);
+         where restaurant_id = ${restaurantId} and id in (${markedList})`);
       // the carrier itself is payable — never "included" in anything
       await tx.execute(sql`
         update ${invoices}
            set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - 'paidWith'), updated_at = now()
          where restaurant_id = ${restaurantId} and id = ${payable}::uuid and (ocr_payload -> 'raw') ? 'paidWith'`);
-      // Round 11 (L1): one document, one match — the included invoices' undecided runs go;
-      // the carrier is re-matched on the document's real lines (buildMatchInputForInvoice),
-      // so no page-level TOTAL_MISMATCH ever arises.
+      if (ownStamp) {
+        await tx.execute(sql`
+          update ${invoices}
+             set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - 'duplicateOf'),
+                 status = case when ${releaseFromReview} then 'matched' else status end,
+                 updated_at = now()
+           where restaurant_id = ${restaurantId} and id = ${payable}::uuid`);
+      }
+      // Round 11 (L1): one document, one match — the included invoices' runs go; the carrier
+      // is re-matched on the document's real lines (buildMatchInputForInvoice), so no
+      // page-level TOTAL_MISMATCH ever arises. Round 12 (#9): the re-match is stamped here,
+      // in the transaction, and the sweep retries it until it ran.
       await tx.execute(sql`delete from ${matchRuns} where restaurant_id = ${restaurantId} and invoice_id in (${markedList})`);
+      await markRematchPending(tx, restaurantId, [payable]);
       await tx
         .update(ingestDocuments)
         .set({ error: PAGE_CHECKED_TOGETHER, updatedAt: new Date() })
         .where(and(eq(ingestDocuments.restaurantId, restaurantId), eq(ingestDocuments.invoiceId, invoiceId), eq(ingestDocuments.error, flag)));
+      const [stamp] = (await tx.execute(sql`select clock_timestamp()::text as at`)) as unknown as Array<{ at: string }>;
       await tx.insert(auditLog).values({
         restaurantId,
         userId: args.userId,
         action: CHECKED_TOGETHER_ACTION,
         entityType: 'invoice',
         entityId: invoiceId,
-        before: { flag, members: snapshot } as never,
+        before: { flag, members: snapshot, runs: snapRuns.map((r) => r.row), findings: snapFindings.map((r) => r.row) } satisfies TogetherSnapshot as never,
         after: {
           flag: PAGE_CHECKED_TOGETHER,
           payableInvoiceId: payable,
           withInvoiceId: head,
           memberIds,
           paidWithInvoiceIds: marked,
+          stampedAt: stamp!.at,
+          ...(covered?.ok ? {} : { acceptedShortTotal: true }),
         } as never,
       });
       return { invoiceId, match: false, released: [] as string[], rematch: [payable] };

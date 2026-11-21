@@ -17,6 +17,7 @@ export const REFUSALS = [
   'already_paid',
   'duplicate_on_file',
   'reocr_pending',
+  'carrier_total_short',
 ] as const;
 export type Refusal = (typeof REFUSALS)[number];
 

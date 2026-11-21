@@ -530,6 +530,7 @@ export const ingestRouter = router({
         /** Round 9 (N4): checked_together — the invoice that carries the total and is paid. */
         payableInvoiceId: z.string().uuid().optional(),
         withInvoiceId: z.string().uuid().optional(),
+        acceptShortTotal: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -544,6 +545,7 @@ export const ingestRouter = router({
         userId: ctx.session.userId,
         ...(input.payableInvoiceId ? { payableInvoiceId: input.payableInvoiceId } : {}),
         ...(input.withInvoiceId ? { withInvoiceId: input.withInvoiceId } : {}),
+        ...(input.acceptShortTotal ? { acceptShortTotal: true } : {}),
       });
       await refreshMessageStatus(ctx.db, rid, doc.messageId);
       return res;

@@ -12,6 +12,7 @@ import {
   lt,
   lte,
   ne,
+  not,
   or,
   poLines,
   priceBaselines,
@@ -156,16 +157,33 @@ export async function buildMatchInputForInvoice(
   // document) is never matched on its own — its lines are matched with the carrier's.
   const includedIn = (inv.ocrPayload?.raw as { paidWith?: { invoiceId?: unknown } } | null | undefined)?.paidWith?.invoiceId;
   if (typeof includedIn === 'string') return null;
+  // G-09 (round 11 L1): the CARRIER of a "checked together" group is matched on the
+  // document's real lines — its own plus every invoice included in it — against its
+  // printed (document) total: one document, one match, never a page TOTAL_MISMATCH.
+  // Members in the order they arrived (created_at, then id); each member's lines in the
+  // same storage order main reads a single invoice's lines in (round 12 #1: the engine
+  // pairs a PO line with the FIRST unpaired invoice line of its product, so the order
+  // of a single invoice's lines must stay exactly main's).
+  const groupRows = await db
+    .select({ id: invoices.id, ocrPayload: invoices.ocrPayload })
+    .from(invoices)
+    .where(and(eq(invoices.restaurantId, restaurantId), sql`${invoices.ocrPayload} -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${invoiceId}::text`))
+    .orderBy(asc(invoices.createdAt), asc(invoices.id));
+  const groupMemberIds = groupRows.map((r) => r.id);
+  const groupMembers = new Set(groupMemberIds);
   // A scan whose number another invoice of this supplier already holds is
   // stored WITHOUT it (invoices_dedupe_idx; the worker's writeOcrHeader) and
   // keeps the number in ocr_payload.raw.duplicateOf. Match on that number so
   // the engine still raises DUPLICATE_INVOICE (block) on the copy.
-  const heldDuplicate = (
+  const stamped = (
     inv.ocrPayload?.raw as
       | { duplicateOf?: { invoiceId?: unknown; invoiceNumber?: unknown } }
       | null
       | undefined
   )?.duplicateOf;
+  // G-09 (round 12 #2): a carrier's stamp naming one of its OWN pages (a continuation
+  // repeating its page 1's number) is the same document, never a duplicate.
+  const heldDuplicate = typeof stamped?.invoiceId === 'string' && groupMembers.has(stamped.invoiceId) ? undefined : stamped;
   const heldDuplicateNumber = heldDuplicate?.invoiceNumber;
   const invoiceNumber =
     inv.invoiceNumber ?? (typeof heldDuplicateNumber === 'string' ? heldDuplicateNumber : null);
@@ -188,6 +206,8 @@ export async function buildMatchInputForInvoice(
           eq(invoices.restaurantId, restaurantId),
           eq(invoices.supplierId, inv.supplierId),
           ne(invoices.id, invoiceId),
+          // G-09 (round 12 #2): the group's own pages are this document, not earlier invoices.
+          ...(groupMemberIds.length > 0 ? [not(inArray(invoices.id, groupMemberIds))] : []),
           // Only invoices that arrived BEFORE this one: re-matching the original
           // after its duplicate shows up must not flag the original too (the
           // pair would otherwise both be blocked and the total counted twice).
@@ -209,19 +229,6 @@ export async function buildMatchInputForInvoice(
   const normalizedNumber = normalizeInvoiceNumber(invoiceNumber);
   const isDuplicate = !!normalizedNumber && (knownInvoiceNumbers?.has(normalizedNumber) ?? false);
 
-  // G-09 (round 11 L1): the CARRIER of a "checked together" group is matched on the
-  // document's real lines — its own plus every invoice included in it — against its
-  // printed (document) total: one document, one match, never a page TOTAL_MISMATCH.
-  // Members in the order they arrived (created_at, then id); each member's lines in the
-  // same storage order main reads a single invoice's lines in (round 12 #1: the engine
-  // pairs a PO line with the FIRST unpaired invoice line of its product, so the order
-  // of a single invoice's lines must stay exactly main's).
-  const groupRows = await db
-    .select({ id: invoices.id, ocrPayload: invoices.ocrPayload })
-    .from(invoices)
-    .where(and(eq(invoices.restaurantId, restaurantId), sql`${invoices.ocrPayload} -> 'raw' -> 'paidWith' ->> 'invoiceId' = ${invoiceId}::text`))
-    .orderBy(asc(invoices.createdAt), asc(invoices.id));
-  const groupMemberIds = groupRows.map((r) => r.id);
   const linesOf = (id: string) =>
     db
       .select({

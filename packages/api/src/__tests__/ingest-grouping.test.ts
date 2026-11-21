@@ -38,7 +38,9 @@ import {
 import { StubIngestProvider, type InboundMessage } from '@restomatch/ingest';
 import { processInboundMessage, registerReviewGroup, type ResolvedChannel } from '../ingest/pipeline';
 import { decidePages, settleDocumentPages, windowCloseGate, WINDOW_MAX_ATTEMPTS, WINDOW_RETRY_MS, WINDOW_LONG_RETRY_MS, WINDOW_CEILING_ATTEMPTS, type PageHeader, type SettleResult } from '../documents/settle';
-import { resolvePageFlag } from '../documents/resolve';
+import { resolvePageFlag, REMATCH_PENDING_KEY } from '../documents/resolve';
+import { rematchHoldReason } from '../receiving/matchTriggers';
+import { buildClaimLetters } from '../recovery/letters';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { toObjectRef } from '../documents/objectRef';
@@ -1826,7 +1828,7 @@ describe('round 8 · M16/M9: a truthful "checked together" answer, available wit
         .set({ settings: { ...(saved as object), features: { ...((saved as { features?: object }).features ?? {}), ingestWhatsapp: false, ingestEmail: false } } as never })
         .where(eq(restaurants.id, A.restaurantId));
       const [d2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, p2!));
-      await owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'checked_together', payableInvoiceId: p1! });
+      await owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'checked_together', payableInvoiceId: p1!, acceptShortTotal: true });
       expect((await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.id, d2!.id)))[0]!.error).toBe('page_checked_together');
       expect(await owner().ingest.pageQuestionOf({ invoiceId: p1! })).toBeNull();
       await expect(owner().approvals.approve({ discrepancyId: gap!.id })).resolves.toBeTruthy();
@@ -1872,7 +1874,7 @@ describe('round 9 · N4: "checked together" keeps exactly ONE of the two invoice
     // the answer must say which invoice carries the total
     await expect(owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'checked_together' })).rejects.toMatchObject({ message: 'payable_required' });
     await withPayRun(async () => {
-      await owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'checked_together', payableInvoiceId: p2! });
+      await owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'checked_together', payableInvoiceId: p2!, acceptShortTotal: true });
       expect(await payRow(p1!)).toMatchObject({ status: 'hold', paidWith: p2 });
       expect(await payRow(p2!)).toMatchObject({ paidWith: null, openPageQuestion: false });
     });
@@ -1885,7 +1887,7 @@ describe('round 9 · N4: "checked together" keeps exactly ONE of the two invoice
     await ocr(p2!, NOHEAD);
     const [d2] = await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, p2!));
     await expect(
-      owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'checked_together', payableInvoiceId: A.invoiceId }),
+      owner().ingest.resolvePageFlag({ documentId: d2!.id, action: 'checked_together', payableInvoiceId: A.invoiceId, acceptShortTotal: true }),
     ).rejects.toMatchObject({ message: 'payable_required' });
     expect((await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.id, d2!.id)))[0]!.error).toBe('page_merge_blocked');
   });
@@ -2015,7 +2017,7 @@ describe('round 10 · run heads: only a NUMBERED page of the same supplier start
       expect(await related(b3!)).toBe(b1);
       // B p1's own question → "separate"; B p2 → "checked together" (B p1 pays): B p3 still holds B p1
       if ((await docOf(b1!)).error) await owner().ingest.resolvePageFlag({ documentId: (await docOf(b1!)).id, action: 'separate' });
-      await owner().ingest.resolvePageFlag({ documentId: (await docOf(b2!)).id, action: 'checked_together', payableInvoiceId: b1! });
+      await owner().ingest.resolvePageFlag({ documentId: (await docOf(b2!)).id, action: 'checked_together', payableInvoiceId: b1!, acceptShortTotal: true });
       expect(await pageQ(b1!)).toMatchObject({ flag: 'page_belongs', pageInvoiceId: b3 });
     });
   }
@@ -2055,7 +2057,7 @@ describe('round 10 · run heads: only a NUMBERED page of the same supplier start
     expect(q).toMatchObject({ pageInvoiceId: b2, otherInvoiceId: b1 });
     expect(q!.heads).toEqual(expect.arrayContaining([b1, a1])); // round 11 (M6): every head is shown
     await expect(
-      owner().ingest.resolvePageFlag({ documentId: (await docOf(b2!)).id, action: 'checked_together', payableInvoiceId: b2!, withInvoiceId: A.invoiceId }),
+      owner().ingest.resolvePageFlag({ documentId: (await docOf(b2!)).id, action: 'checked_together', payableInvoiceId: b2!, acceptShortTotal: true, withInvoiceId: A.invoiceId }),
     ).rejects.toMatchObject({ message: 'payable_required' });
   });
 });
@@ -2073,7 +2075,7 @@ describe('round 10 · "checked together" keeps ONE payable, never on a duplicate
     return ((inv?.ocrPayload as { raw?: { paidWith?: { invoiceId?: string } } } | null)?.raw?.paidWith?.invoiceId ?? null) as string | null;
   };
   const together = async (page: string, payable: string) =>
-    owner().ingest.resolvePageFlag({ documentId: (await docOf(page)).id, action: 'checked_together', payableInvoiceId: payable });
+    owner().ingest.resolvePageFlag({ documentId: (await docOf(page)).id, action: 'checked_together', payableInvoiceId: payable, acceptShortTotal: true });
 
   /** [A p1 ₪1,000, OTHER photo, p3 ₪700, p4 ₪2,500 total]: p3 and p4 both point at p1. */
   const burst = async (tag: string) => {
@@ -2271,7 +2273,7 @@ describe('round 11 · "checked together": same-document repeats, exact LIFO undo
     return ((inv?.ocrPayload as { raw?: { paidWith?: { invoiceId?: string } } } | null)?.raw?.paidWith?.invoiceId ?? null) as string | null;
   };
   const together = async (page: string, payable: string) =>
-    owner().ingest.resolvePageFlag({ documentId: (await docOf(page)).id, action: 'checked_together', payableInvoiceId: payable });
+    owner().ingest.resolvePageFlag({ documentId: (await docOf(page)).id, action: 'checked_together', payableInvoiceId: payable, acceptShortTotal: true });
   const undo = async (page: string) => owner().ingest.resolvePageFlag({ documentId: (await docOf(page)).id, action: 'undo_checked_together' });
   let seq = 0;
   /** [A p1 ₪1,000, OTHER photo, p3 ₪700, p4 ₪2,500 total]: p3 and p4 both point at p1. */
@@ -2354,8 +2356,8 @@ describe('round 11 · "checked together": same-document repeats, exact LIFO undo
       appRouter.createCaller({ db: appDb, session: { userId, restaurantId: A.restaurantId, role: 'owner' } } as AppContext);
     const [d3, d4] = [await docOf(p3), await docOf(p4)];
     const results = await Promise.allSettled([
-      caller(A.ownerUserId).ingest.resolvePageFlag({ documentId: d3.id, action: 'checked_together', payableInvoiceId: p3 }),
-      caller(A.ownerUserId).ingest.resolvePageFlag({ documentId: d4.id, action: 'checked_together', payableInvoiceId: p4 }),
+      caller(A.ownerUserId).ingest.resolvePageFlag({ documentId: d3.id, action: 'checked_together', payableInvoiceId: p3, acceptShortTotal: true }),
+      caller(A.ownerUserId).ingest.resolvePageFlag({ documentId: d4.id, action: 'checked_together', payableInvoiceId: p4, acceptShortTotal: true }),
     ]);
     expect(results.some((r) => r.status === 'fulfilled')).toBe(true);
     const marks = [await paidWith(p1), await paidWith(p3), await paidWith(p4)];
@@ -2374,8 +2376,12 @@ describe('round 11 · "checked together": same-document repeats, exact LIFO undo
     // control: matched ALONE, the total page is a phantom TOTAL_MISMATCH (its 600 vs the 1,000 printed)
     const alone = await withRestaurant(appDb, A.restaurantId, (tx) => buildMatchInputForInvoice(tx, A.restaurantId, p2!));
     expect(types(runMatch(alone!.input))).toContain('TOTAL_MISMATCH');
-    const hero0 = (await owner().owner.leakHero()).leakIls;
+    const before = await owner().owner.leakHero();
+    const hero0 = before.leakIls;
     await together(p2!, p2!);
+    // round 12 (#5): the included page (no run of its own, ever) is never "waiting to be linked"
+    const afterAnswer = await owner().owner.leakHero();
+    expect({ count: afterAnswer.pendingLinkCount, ils: afterAnswer.pendingLinkIls }).toEqual({ count: before.pendingLinkCount, ils: before.pendingLinkIls });
     // the included page is never matched on its own; its run is gone
     expect(await withRestaurant(appDb, A.restaurantId, (tx) => buildMatchInputForInvoice(tx, A.restaurantId, p1!))).toBeNull();
     expect(await ownerDb.select().from(matchRuns).where(eq(matchRuns.invoiceId, p1!))).toHaveLength(0);
@@ -2495,5 +2501,186 @@ describe('round 12 · #1: a single invoice\'s lines reach the engine in main\'s 
     }
     const built = await withRestaurant(appDb, A.restaurantId, (tx) => buildMatchInputForInvoice(tx, A.restaurantId, inv!));
     expect(built!.input.invoiceLines.map((l) => l.qtyBilled)).toEqual([3, 5]);
+  });
+});
+
+describe('round 12 · "checked together": the carrier\'s own stamp, an exact undo, a person\'s decision, a covered total', () => {
+  beforeEach(() => {
+    matchCalls = [];
+    ocrCalls = [];
+  });
+  const owner = () =>
+    appRouter.createCaller({ db: ownerDb, session: { userId: A.ownerUserId, restaurantId: A.restaurantId, role: 'owner' } } as AppContext);
+  const docOf = async (invoiceId: string) => (await ownerDb.select().from(ingestDocuments).where(eq(ingestDocuments.invoiceId, invoiceId)))[0]!;
+  const rawOf = async (invoiceId: string) => {
+    const [inv] = await ownerDb.select().from(invoices).where(eq(invoices.id, invoiceId));
+    return ((inv?.ocrPayload as { raw?: Record<string, unknown> } | null)?.raw ?? {}) as Record<string, unknown>;
+  };
+  const answer = async (page: string, payable: string, extra: { acceptShortTotal?: boolean } = {}) =>
+    owner().ingest.resolvePageFlag({ documentId: (await docOf(page)).id, action: 'checked_together', payableInvoiceId: payable, ...extra });
+  const undo = async (page: string) => owner().ingest.resolvePageFlag({ documentId: (await docOf(page)).id, action: 'undo_checked_together' });
+  /** [p1 A-12xx ₪400 line, p2 continuation ₪600 line printing the DOCUMENT total ₪1,000]. */
+  const pair = async (tag: string, number: string, p2Head: (p1: string) => Partial<OcrHead> = () => ({})) => {
+    const [p1, p2] = await pages(2, tag);
+    await ocr(p1!, { ...ACME, invoiceNumber: number, lines: [{ qty: '1', total: '400.00', desc: 'עגבניות שרי ארגז' }] });
+    // page 1 already matched (linked): the continuation is asked about, never merged into it
+    const [r1] = await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p1!, grId: A.grId, overallStatus: 'clean' }).returning();
+    const settled = await ocr(p2!, {
+      ...NOHEAD,
+      lines: [{ qty: '1', total: '600.00', desc: 'מלפפונים ארגז' }],
+      totalExclVat: '1000.00',
+      totalInclVat: '1170.00',
+      ...p2Head(p1!),
+    });
+    expect(settled.flagged).toEqual([{ invoiceId: p2, reason: 'page_merge_blocked' }]);
+    return { p1: p1!, p2: p2!, r1: r1! };
+  };
+  const runOf = async (invoiceId: string) => ownerDb.select().from(matchRuns).where(eq(matchRuns.invoiceId, invoiceId));
+  const findingsOf = async (runId: string) => ownerDb.select().from(discrepancies).where(eq(discrepancies.matchRunId, runId));
+
+  it('#2: a carrier stamped as a "duplicate" of its own page 1 loses the stamp (undo gives it back), is not held for review, and its own pages are no DUPLICATE_INVOICE', async () => {
+    const { p1, p2 } = await pair('r12n2', 'A-1202', (p1) => ({ ...ACME, invoiceNumber: 'A-1202', duplicateOf: { invoiceId: p1, invoiceNumber: 'A-1202' } }));
+    const stamp = (await rawOf(p2)).duplicateOf;
+    expect(stamp).toMatchObject({ invoiceId: p1 });
+    await answer(p2, p2);
+    expect((await rawOf(p2)).duplicateOf).toBeUndefined();
+    const [carrier] = await ownerDb.select().from(invoices).where(eq(invoices.id, p2));
+    expect(carrier!.status).toBe('matched');
+    expect(rematchHoldReason(carrier!, false)).toBeNull();
+    const built = await withRestaurant(appDb, A.restaurantId, (tx) => buildMatchInputForInvoice(tx, A.restaurantId, p2));
+    expect(runMatch(built!.input).discrepancies.map((d) => d.type)).not.toContain('DUPLICATE_INVOICE');
+    await undo(p2);
+    expect((await rawOf(p2)).duplicateOf).toEqual(stamp);
+    expect((await ownerDb.select().from(invoices).where(eq(invoices.id, p2)))[0]!.status).toBe('parsed');
+  });
+
+  it('#3/#4: an engine auto-approval on a member never blocks; the undo restores every run and finding EXACTLY and drops the combined run', async () => {
+    const { p1, p2, r1 } = await pair('r12n3a', 'A-1203');
+    const [f1] = await ownerDb
+      .insert(discrepancies)
+      .values({ matchRunId: r1!.id, restaurantId: A.restaurantId, type: 'PRICE_HIGHER', severity: 'warn', resolutionStatus: 'accepted' })
+      .returning();
+    const [r2] = await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p2, grId: A.grId, overallStatus: 'clean' }).returning();
+    await answer(p2, p2);
+    expect(await runOf(p1)).toHaveLength(0);
+    // the re-match replaces the carrier's run with the combined one
+    await ownerDb.delete(matchRuns).where(eq(matchRuns.id, r2!.id));
+    const [combined] = await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p2, grId: A.grId, overallStatus: 'minor' }).returning();
+    await ownerDb.insert(discrepancies).values({ matchRunId: combined!.id, restaurantId: A.restaurantId, type: 'QTY_SHORT', severity: 'warn' });
+    await undo(p2);
+    const back1 = await runOf(p1);
+    expect(back1.map((r) => r.id)).toEqual([r1!.id]);
+    expect((await findingsOf(r1!.id)).map((f) => [f.id, f.resolutionStatus])).toEqual([[f1!.id, 'accepted']]);
+    expect((await runOf(p2)).map((r) => r.id)).toEqual([r2!.id]);
+    expect(await ownerDb.select().from(matchRuns).where(eq(matchRuns.id, combined!.id))).toHaveLength(0);
+  });
+
+  it('#3: the undo is refused (never half-done) when the carrier was approved/paid, or a person decided on its combined run', async () => {
+    const { p1, p2 } = await pair('r12n3b', 'A-1204');
+    await answer(p2, p2);
+    const [combined] = await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p2, grId: A.grId, overallStatus: 'minor' }).returning();
+    const [f] = await ownerDb.insert(discrepancies).values({ matchRunId: combined!.id, restaurantId: A.restaurantId, type: 'QTY_SHORT', severity: 'warn', resolutionStatus: 'escalated' }).returning();
+    await expect(undo(p2)).rejects.toMatchObject({ message: 'decided' });
+    await ownerDb.update(discrepancies).set({ resolutionStatus: 'open' }).where(eq(discrepancies.id, f!.id));
+    await ownerDb.update(invoices).set({ status: 'approved' }).where(eq(invoices.id, p2));
+    await expect(undo(p2)).rejects.toMatchObject({ message: 'already_paid' });
+    // nothing moved: still one document, the combined run stands
+    expect((await rawOf(p1)).paidWith).toEqual({ invoiceId: p2 });
+    expect((await runOf(p2)).map((r) => r.id)).toEqual([combined!.id]);
+  });
+
+  it('#4: a person\'s escalation on a member blocks the answer (its decision stays); an approved or paid carrier is refused too', async () => {
+    const { p1, p2, r1 } = await pair('r12n4', 'A-1205');
+    const [f] = await ownerDb.insert(discrepancies).values({ matchRunId: r1!.id, restaurantId: A.restaurantId, type: 'PRICE_HIGHER', severity: 'warn', resolutionStatus: 'escalated' }).returning();
+    await expect(answer(p2, p2)).rejects.toMatchObject({ message: 'decided' });
+    await ownerDb.update(discrepancies).set({ resolutionStatus: 'open' }).where(eq(discrepancies.id, f!.id));
+    await ownerDb.update(invoices).set({ status: 'approved' }).where(eq(invoices.id, p2));
+    await expect(answer(p2, p2)).rejects.toMatchObject({ message: 'already_paid' });
+    await ownerDb.update(invoices).set({ status: 'matched' }).where(eq(invoices.id, p2));
+    await answer(p2, p2);
+    expect((await rawOf(p1)).paidWith).toEqual({ invoiceId: p2 });
+  });
+
+  it('#8: the server refuses a carrier whose printed total does not cover the document\'s lines — unless the person says so', async () => {
+    const { p1, p2 } = await pair('r12n8', 'A-1208');
+    // p1 prints no document total: ₪400 of lines on p1 + ₪600 on p2 = ₪1,000 > p1's nothing
+    await expect(answer(p2, p1)).rejects.toMatchObject({ message: 'carrier_total_short' });
+    expect((await rawOf(p2)).paidWith).toBeUndefined();
+    await answer(p2, p1, { acceptShortTotal: true });
+    const [audit] = await ownerDb
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.entityId, p2), eq(auditLog.action, 'document.page_checked_together')));
+    expect(audit!.after).toMatchObject({ payableInvoiceId: p1, acceptedShortTotal: true });
+  });
+
+  it('#9: the answer stamps the carrier\'s re-match in its own transaction (the worker clears it; the sweep retries it)', async () => {
+    const { p2 } = await pair('r12n9', 'A-1209');
+    await answer(p2, p2);
+    expect(typeof (await rawOf(p2))[REMATCH_PENDING_KEY]).toBe('string');
+    const queued = (await ownerDb.execute(sql`
+      select payload from job_queue where queue = 'match-invoice' and payload ->> 'invoiceId' = ${p2}`)) as unknown as Array<{ payload: { rematch?: boolean } }>;
+    expect(queued.map((j) => j.payload.rematch)).toContain(true);
+  });
+
+  it('#6: an undo and a new answer on the same pages at the same moment → exactly one payable, never a half state', async () => {
+    const { p1, p2 } = await pair('r12n6', 'A-1206');
+    await answer(p2, p2);
+    const results = await Promise.allSettled([undo(p2), answer(p2, p2)]);
+    expect(results.some((r) => r.status === 'fulfilled')).toBe(true);
+    const marks = [(await rawOf(p1)).paidWith ?? null, (await rawOf(p2)).paidWith ?? null];
+    expect(marks.filter((m) => m === null).length).toBeGreaterThanOrEqual(1);
+    const flag = (await docOf(p2)).error;
+    if (marks[0]) expect(flag).toBe('page_checked_together');
+    else expect(flag).not.toBe('page_checked_together');
+  });
+
+  it('#11: an "included" invoice whose carrier is gone is unchecked again at month close', async () => {
+    const month = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7);
+    const [p1] = await pages(1, 'r12n11');
+    await writeOcr(p1!, { ...ACME, invoiceNumber: 'A-1211', totalInclVat: '300.00' });
+    const before = (await owner().close.checklist({ month })).unchecked.count;
+    await ownerDb
+      .update(invoices)
+      .set({ ocrPayload: { raw: { paidWith: { invoiceId: '00000000-0000-4000-8000-00000000c0de' } } } as never })
+      .where(eq(invoices.id, p1!));
+    expect((await owner().close.checklist({ month })).unchecked.count).toBe(before);
+  });
+
+  it('#12: a claim letter keeps the line description of a finding on an included page\'s line', async () => {
+    const { p1, p2 } = await pair('r12n12', 'A-1212');
+    await answer(p2, p2);
+    const [line] = await ownerDb.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, p1));
+    const [run] = await ownerDb.insert(matchRuns).values({ restaurantId: A.restaurantId, invoiceId: p2, grId: A.grId, overallStatus: 'minor' }).returning();
+    const [gap] = await ownerDb
+      .insert(discrepancies)
+      .values({ matchRunId: run!.id, restaurantId: A.restaurantId, type: 'PRICE_HIGHER', severity: 'warn', invoiceLineId: line!.id, resolutionStatus: 'accepted' })
+      .returning();
+    const [carrier] = await ownerDb.select().from(invoices).where(eq(invoices.id, p2));
+    const [claim] = await ownerDb
+      .insert(recoveryClaims)
+      .values({ restaurantId: A.restaurantId, discrepancyId: gap!.id, supplierId: carrier!.supplierId, invoiceId: p2, amountAgorot: 1_000, status: 'claimed' })
+      .returning();
+    try {
+      const letters = await withRestaurant(appDb, A.restaurantId, (tx) => buildClaimLetters(tx, A.restaurantId));
+      const lines = letters.flatMap((l) => [...l.beforePayment, ...l.forCredit]).filter((l) => l.claimId === claim!.id);
+      expect(lines.map((l) => l.lineDescription)).toEqual(['עגבניות שרי ארגז']);
+    } finally {
+      await ownerDb.delete(recoveryClaims).where(eq(recoveryClaims.id, claim!.id));
+    }
+  });
+});
+
+describe('round 12 · nit: a repeated number sends the run back to an earlier head — ITS completeness applies', () => {
+  const headsOf = (members: PageHeader[], id: string) => decidePages(members).flagged.find((f) => f.invoiceId === id)?.heads;
+  it('[A open, B whole, C open, B repeated, unnumbered]: back on the WHOLE invoice B, the unnumbered page also names the open run C', () => {
+    const m = [
+      H('a1', { ...TNUVA, number: 'A-1', lines: L5 }),
+      H('b1', { ...TNUVA, number: 'B-2', lines: [{ qty: '1', total: '500.00', desc: 'whole invoice' }], totalExclVat: '500.00' }),
+      H('c1', { ...TNUVA, number: 'C-3', lines: [{ qty: '9', total: '99.00', desc: 'x' }] }),
+      H('b2', { ...TNUVA, number: 'B-2', lines: [{ qty: '2', total: '22.00', desc: 'z' }] }),
+      H('x', { lines: [{ qty: '3', total: '33.00', desc: 'y' }] }),
+    ];
+    expect(headsOf(m, 'x')?.[0]).toBe('c1');
   });
 });

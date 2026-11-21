@@ -25,6 +25,7 @@ import {
   resolveApprovalThresholds,
   windowCloseGate,
   formatIlsAgorot,
+  REMATCH_PENDING_KEY,
 } from '@restomatch/api';
 import { and, desc, eq, invoices, matchRuns, restaurants, sql, suppliers, type Database } from '@restomatch/db';
 import { computeInvoiceLeak } from '@restomatch/charts';
@@ -127,7 +128,9 @@ export interface MatchJobOutcome {
     | 'settled'
     | 'po_rejected'
     | 'receipt_open'
-    | 'claim_in_progress';
+    | 'claim_in_progress'
+    /** G-09 (round 12 #7): the invoice was "checked together" into another meanwhile — its lines are matched with the carrier's. */
+    | 'included';
 }
 
 /**
@@ -146,6 +149,19 @@ export async function matchInvoiceForJob(
   db: Database,
   data: MatchInvoiceJob,
 ): Promise<MatchJobOutcome> {
+  const out = await matchInvoiceOnce(db, data);
+  // G-09 (round 12 #9): a group re-match the answer (or its undo) stamped has now run —
+  // whatever its outcome. A job that threw keeps the stamp: the sweep retries it.
+  if (data.rematch) {
+    await db.execute(sql`
+      update invoices set ocr_payload = jsonb_set(ocr_payload, '{raw}', (ocr_payload -> 'raw') - ${REMATCH_PENDING_KEY})
+       where id = ${data.invoiceId}::uuid and restaurant_id = ${data.restaurantId}
+         and jsonb_typeof(ocr_payload -> 'raw') = 'object' and (ocr_payload -> 'raw') ? ${REMATCH_PENDING_KEY}`);
+  }
+  return out;
+}
+
+async function matchInvoiceOnce(db: Database, data: MatchInvoiceJob): Promise<MatchJobOutcome> {
   const { restaurantId, invoiceId } = data;
   const [inv] = await db
     .select({ status: invoices.status, ocrPayload: invoices.ocrPayload })
@@ -282,11 +298,15 @@ export async function matchInvoiceForJob(
                or coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS}) as link_held,
              (coalesce(i.ocr_payload -> 'raw' -> 'ocrFailed' = 'true'::jsonb, false)
                or coalesce(i.ocr_payload -> 'raw' -> 'manualLines' = 'true'::jsonb, false)) as hand_entered,
-             coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS} as question_reason
+             coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS} as question_reason,
+             coalesce((i.ocr_payload -> 'raw') ? 'paidWith', false) as included
         from invoices i where i.id = ${invoiceId}::uuid and i.restaurant_id = ${restaurantId}
        for no key update
-    `)) as unknown as Array<{ status: string; has_run: boolean; unlinked: boolean; link_held: boolean; hand_entered: boolean; question_reason: boolean }>;
+    `)) as unknown as Array<{ status: string; has_run: boolean; unlinked: boolean; link_held: boolean; hand_entered: boolean; question_reason: boolean; included: boolean }>;
     if (!race || race.status === 'ocr_pending') return 'ocr_pending' as const;
+    // G-09 (round 12 #7): "checked together" into another invoice while this job was
+    // matching (the answer takes this row lock too) — never a second run for its lines.
+    if (race.included) return 'included' as const;
     if ((race.link_held || race.hand_entered) && race.unlinked) return 'awaiting_review' as const;
     if (race.status === 'parsed' && race.question_reason) return 'awaiting_review' as const;
     if (priorRun && !race.has_run) return 'awaiting_review' as const;
