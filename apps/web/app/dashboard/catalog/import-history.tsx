@@ -38,7 +38,8 @@ export function ImportHistory({ supplierId }: { supplierId: string }) {
   const tc = useT(components);
   const toast = useToast();
   const utils = trpc.useUtils();
-  // W3-10: "ביטול הייבוא" asks once, then reverts from the import's audit record.
+  // W3-10: "ביטול הייבוא האחרון" asks once, then reverts from the import's audit
+  // record. Offered only on the supplier's latest un-reverted import (server-decided).
   const [confirming, setConfirming] = useState<string | null>(null);
   const revert = trpc.catalog.revertImport.useMutation({
     onSuccess: (r) => {
@@ -51,7 +52,13 @@ export function ImportHistory({ supplierId }: { supplierId: string }) {
       void utils.catalog.imports.invalidate();
       void utils.catalog.items.invalidate();
     },
-    onError: (e) => toast.error(friendlyError(e, tc)),
+    onError: (e) => {
+      setConfirming(null);
+      // A newer import landed since the list loaded: say so and move the button.
+      if (e.message.includes('CATALOG_IMPORT_NOT_LATEST')) toast.error(t('history.revertNotLatest'));
+      else toast.error(friendlyError(e, tc));
+      void utils.catalog.imports.invalidate();
+    },
   });
 
   return (
@@ -91,7 +98,7 @@ export function ImportHistory({ supplierId }: { supplierId: string }) {
                   ) : null}
                   {imp.reverted ? (
                     <Badge tone="neutral">{t('history.reverted')}</Badge>
-                  ) : status === 'committed' && imp.revertable ? (
+                  ) : imp.revertable ? (
                     confirming === imp.id ? (
                       <span className="inline-flex items-center gap-2 text-xs">
                         <span className="text-ink">{t('history.revertConfirm')}</span>

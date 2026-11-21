@@ -62,7 +62,8 @@ export const he = {
     descriptionRequired: 'תיאור הספק הוא שדה חובה.',
   },
   history: {
-    revert: 'ביטול הייבוא',
+    revert: 'ביטול הייבוא האחרון',
+    revertNotLatest: 'אפשר לבטל רק את הייבוא האחרון',
     revertConfirm: 'להחזיר את המחירים הקודמים?',
     revertYes: 'כן, לבטל',
     revertNo: 'לא',
@@ -151,6 +152,7 @@ export const he = {
       current: 'מחיר נוכחי',
       note: 'הערה',
       noPrice: 'ללא מחיר',
+      keptPrice: 'המחיר הקיים נשמר',
       flags: { ZERO: 'מחיר 0', HIGH: 'פי 5 ויותר מהמחיר הנוכחי', LOW: 'פחות מחמישית מהמחיר הנוכחי' },
       sampleNote: 'מוצגות 20 השורות הראשונות. כל השורות נבדקות.',
       flaggedSummary: '{count} מחירים רחוקים מהמחירון — בדקו לפני הייבוא.',

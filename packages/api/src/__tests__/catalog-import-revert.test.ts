@@ -68,7 +68,8 @@ describe('W3-10 catalog.revertImport', () => {
     expect((await item(A, 'N-1')).active).toBe(false);
 
     const list = await callerFor(A).catalog.imports({ supplierId: A.supplierId });
-    expect(list.find((i) => i.id === second)).toMatchObject({ revertable: true, reverted: true });
+    // Reverted: no longer offered (round 2 — only the latest un-reverted import is).
+    expect(list.find((i) => i.id === second)).toMatchObject({ revertable: false, reverted: true });
 
     await expect(callerFor(A).catalog.revertImport({ importId: second })).rejects.toMatchObject({ code: 'CONFLICT' });
   });

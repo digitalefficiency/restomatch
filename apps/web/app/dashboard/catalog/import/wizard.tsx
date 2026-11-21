@@ -776,7 +776,9 @@ function PriceCheck({
                   data-testid="imported-price"
                 >
                   {r.price == null ? (
-                    <span className="font-normal text-subtle">{t('import.check.noPrice')}</span>
+                    <span className="font-normal text-subtle">
+                      {t(r.keepsPrice ? 'import.check.keptPrice' : 'import.check.noPrice')}
+                    </span>
                   ) : (
                     money(r.price)
                   )}

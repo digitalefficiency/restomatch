@@ -97,14 +97,21 @@ describe('review MAJOR 2 · a row hit twice in one import', () => {
 });
 
 describe('review MAJOR 3 · a later change wins (not by value only)', () => {
-  it('a newer import at the same price owns the row: reverting the older one skips it', async () => {
+  // Round 2 decision: a re-list at the same price writes nothing (no restamp, no
+  // ownership), and only the latest import can be undone — so the old puzzle
+  // (B owns A's row without recording it) cannot arise.
+  it('a newer import at the same price writes nothing; the older one reverts only after it', async () => {
     await importRows([{ sku: 'M', price: 5 }]);
     const a = await importRows([{ sku: 'M', price: 6 }]);
-    await importRows([{ sku: 'M', price: 6 }]); // B: same ₪, restamps the row
+    const stampA = (await item('M')).updatedAt.getTime();
+    const b = await importRows([{ sku: 'M', price: 6 }]); // B: same ₪
+    expect(b.res).toMatchObject({ updated: 0, unchanged: 1 });
+    expect((await item('M')).updatedAt.getTime()).toBe(stampA);
+    await expect(revert(a.id)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+    await revert(b.id);
     const r = await revert(a.id);
-    expect(r.restored).toBe(0);
-    expect(r.skipped).toEqual([expect.objectContaining({ reason: 'CHANGED_SINCE' })]);
-    expect(await price('M')).toBe(6);
+    expect(r.restored).toBe(1);
+    expect(await price('M')).toBe(5);
   });
 
   it('a hand edit on a row the import created keeps it on', async () => {

@@ -61,7 +61,8 @@ export const en: Shape<typeof he> = {
     descriptionRequired: 'Supplier description is required.',
   },
   history: {
-    revert: 'Undo import',
+    revert: 'Undo last import',
+    revertNotLatest: 'Only the latest import can be undone',
     revertConfirm: 'Put the previous prices back?',
     revertYes: 'Yes, undo',
     revertNo: 'No',
@@ -150,6 +151,7 @@ export const en: Shape<typeof he> = {
       current: 'Current price',
       note: 'Note',
       noPrice: 'No price',
+      keptPrice: 'Current price kept',
       flags: { ZERO: 'Price is 0', HIGH: '5× or more the current price', LOW: 'Under a fifth of the current price' },
       sampleNote: 'Showing the first 20 rows. Every row is checked.',
       flaggedSummary: '{count} prices are far from the price list — check before importing.',

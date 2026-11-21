@@ -203,6 +203,8 @@ export {
 } from './catalog/parse';
 export {
   commitCatalogRows,
+  recordImportSummary,
+  IMPORT_CHUNK_AUDIT_ACTION,
   type CommitArgs,
   type CommitResult,
   type AmbiguousRow,

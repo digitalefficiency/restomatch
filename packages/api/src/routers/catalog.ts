@@ -19,9 +19,9 @@ import {
   restaurants,
   type Database,
 } from '@restomatch/db';
-import { MockEmbeddingProvider, recordConfirmedMatch } from '@restomatch/catalog';
+import { MockEmbeddingProvider, normalizeLinkName, recordConfirmedMatch } from '@restomatch/catalog';
 import { enqueueCatalogImport, isQueueUnavailableError } from '@restomatch/queue';
-import { managerProcedure, memberProcedure, router } from '../trpc';
+import { MANAGER_PROCEDURE_ROLES, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 import {
   analyzeCatalogRows,
@@ -125,7 +125,13 @@ function priceFlag(price: number | null, current: number | null): PriceFlag | nu
   return null;
 }
 
-/** The supplier's current list prices, keyed the way commit finds an existing row (SKU, else name). */
+/**
+ * The price on the row the commit will write, found exactly the way the commit
+ * finds it (round 2): by SKU when the file row has one, else by G-08's name key
+ * among rows without a SKU; the oldest row wins; active or not (the commit
+ * writes an inactive row too). So the outlier check and the "kept price" line
+ * judge the very row the commit changes.
+ */
 async function currentPrices(db: Database, restaurantId: string, supplierId: string) {
   const items = await db
     .select({
@@ -134,24 +140,21 @@ async function currentPrices(db: Database, restaurantId: string, supplierId: str
       listPrice: supplierCatalogItems.listPrice,
     })
     .from(supplierCatalogItems)
-    .where(
-      and(
-        eq(supplierCatalogItems.restaurantId, restaurantId),
-        eq(supplierCatalogItems.supplierId, supplierId),
-        // A row a revert (or a person) turned off is not today's price (W3-10 review).
-        eq(supplierCatalogItems.active, true),
-      ),
-    );
-  const bySku = new Map<string, number>();
-  const byName = new Map<string, number>();
+    .where(and(eq(supplierCatalogItems.restaurantId, restaurantId), eq(supplierCatalogItems.supplierId, supplierId)))
+    .orderBy(asc(supplierCatalogItems.createdAt));
+  const bySku = new Map<string, number | null>();
+  const byName = new Map<string, number | null>();
   for (const it of items) {
-    if (it.listPrice == null) continue;
-    const v = Number(it.listPrice);
-    if (it.supplierSku) bySku.set(it.supplierSku, v);
-    byName.set(it.supplierNameRaw, v);
+    const v = it.listPrice == null ? null : Number(it.listPrice);
+    if (it.supplierSku) {
+      if (!bySku.has(it.supplierSku)) bySku.set(it.supplierSku, v);
+    } else {
+      const key = normalizeLinkName(it.supplierNameRaw);
+      if (!byName.has(key)) byName.set(key, v);
+    }
   }
   return (sku: string | null, name: string): number | null =>
-    (sku ? bySku.get(sku) : byName.get(name)) ?? null;
+    (sku ? bySku.get(sku) : byName.get(normalizeLinkName(name))) ?? null;
 }
 
 const embedder = new MockEmbeddingProvider(1536);
@@ -351,6 +354,8 @@ export const catalogRouter = router({
           rawPrice: r.rawPrice,
           price: r.listPrice,
           currentPrice: cur,
+          /** A blank price cell on a priced row: the commit keeps that price (and its unit and pack). */
+          keepsPrice: r.listPrice == null && cur != null,
           flag: priceFlag(r.listPrice, cur),
         };
       });
@@ -493,10 +498,11 @@ export const catalogRouter = router({
     }),
 
   /**
-   * W3-10 · undo a committed price-list import from its audit record: changed
-   * list prices go back where the row still holds the imported price (a later
-   * change wins and is listed), rows the import created are turned off. One
-   * revert per import; audited. Owner / manager, like commitImport. Another
+   * W3-10 · undo the latest price-list import of a supplier from its audit
+   * record: written rows go back where the row is still exactly as the import
+   * left it (a later hand edit wins and is listed), rows the import created are
+   * turned off. Only the latest un-reverted import of the supplier; one revert
+   * per import; audited. Owner / manager, like commitImport. Another
    * restaurant's import → NOT_FOUND.
    */
   revertImport: managerProcedure
@@ -510,7 +516,13 @@ export const catalogRouter = router({
       if (res === 'NOT_FOUND') throw new TRPCError({ code: 'NOT_FOUND', message: 'import not found' });
       if (res === 'ALREADY_REVERTED') throw new TRPCError({ code: 'CONFLICT', message: 'import already reverted' });
       if (res === 'NOT_REVERTABLE') {
-        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'CATALOG_IMPORT_NOT_REVERTABLE: this import predates revertable records' });
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'CATALOG_IMPORT_NOT_REVERTABLE: no record a revert can trust' });
+      }
+      if (res === 'NOT_LATEST') {
+        throw new TRPCError({
+          code: 'PRECONDITION_FAILED',
+          message: 'CATALOG_IMPORT_NOT_LATEST: only the latest import of this supplier can be reverted',
+        });
       }
       return res;
     }),
@@ -530,8 +542,8 @@ export const catalogRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
-      // W3-10: only owner / manager may revert (the bookkeeper reads, never undoes).
-      const canRevert = ctx.session.role === 'owner' || ctx.session.role === 'manager';
+      // W3-10: only who may call revertImport is offered it (the bookkeeper reads, never undoes).
+      const canRevert = MANAGER_PROCEDURE_ROLES.includes(ctx.session.role);
       return ctx.db
         .select({
           id: catalogImports.id,
@@ -550,10 +562,29 @@ export const catalogRouter = router({
            */
           unlinkedItems: sql<number>`(SELECT count(*)::int FROM supplier_catalog_items sci
             WHERE sci.source_import_id = "catalog_imports"."id" AND sci.restaurant_id = ${rid} AND sci.product_id IS NULL)`,
-          /** W3-10: has an import_committed record (so it can be reverted) / was reverted. */
-          revertable: sql<boolean>`${canRevert} AND EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = ${rid}
-            AND a.action = 'catalog.import_committed' AND a.entity_id = "catalog_imports"."id"
-            AND (a.after ->> 'revertVersion') = '2')`,
+          /**
+           * W3-10: "ביטול הייבוא האחרון" — the latest un-reverted import of its
+           * supplier, finished (or failed part-way), with revertable records and
+           * committed once. revertImport re-checks all of it (and the chunk set).
+           */
+          revertable: sql<boolean>`${canRevert}
+            AND "catalog_imports"."status" IN ('committed', 'failed')
+            AND EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = ${rid}
+              AND a.action IN ('catalog.import_committed', 'catalog.import_chunk_committed')
+              AND a.entity_id = "catalog_imports"."id" AND (a.after ->> 'revertVersion') = '2')
+            AND (SELECT count(*) FROM audit_log a WHERE a.restaurant_id = ${rid}
+              AND a.action = 'catalog.import_committed' AND a.entity_id = "catalog_imports"."id") <= 1
+            AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = ${rid}
+              AND a.action = 'catalog.import_reverted' AND a.entity_id = "catalog_imports"."id")
+            AND NOT EXISTS (SELECT 1 FROM audit_log l WHERE l.restaurant_id = ${rid}
+              AND l.action IN ('catalog.import_committed', 'catalog.import_chunk_committed')
+              AND l.after ->> 'supplierId' = "catalog_imports"."supplier_id"::text
+              AND l.entity_id IS DISTINCT FROM "catalog_imports"."id"
+              AND l.at > (SELECT max(m.at) FROM audit_log m WHERE m.restaurant_id = ${rid}
+                AND m.entity_id = "catalog_imports"."id"
+                AND m.action IN ('catalog.import_committed', 'catalog.import_chunk_committed'))
+              AND NOT EXISTS (SELECT 1 FROM audit_log r WHERE r.restaurant_id = ${rid}
+                AND r.action = 'catalog.import_reverted' AND r.entity_id = l.entity_id))`,
           reverted: sql<boolean>`EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = ${rid}
             AND a.action = 'catalog.import_reverted' AND a.entity_id = "catalog_imports"."id")`,
         })
