@@ -488,6 +488,8 @@
   --dur-menu-collapse: 160ms;
   --dur-menu-expand: 200ms;
   --ease-menu: cubic-bezier(0.2,0,0,1);
+  --dur-tooltip-rest: 450ms;
+  --dur-skeleton-wait: 1000ms;
   --text-zoom: 1;
 }
 @media (min-width: 768px) {

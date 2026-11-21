@@ -26,6 +26,7 @@ import {
   text,
   textV2,
   typeScaleV2,
+  waits,
   type MoneyState,
   type StatusFamily,
 } from '../index';
@@ -366,14 +367,21 @@ describe('DS3 · motion is SPEC §8 already (confirmed, not duplicated)', () => 
     const css = cssVariables();
     for (const [k, v] of Object.entries(menuMotion.duration)) expect(css.split(`--dur-menu-${k}: ${v};`).length - 1, k).toBe(1);
     expect(css.split('--ease-menu: cubic-bezier(0.2,0,0,1);').length - 1).toBe(1);
-    // Nothing else adds a duration or a curve.
+    // Nothing else adds a duration or a curve. The only other --dur-* names are the two waits (next test).
     const names = (re: RegExp) => [...new Set([...css.matchAll(re)].map((m) => m[1]))].sort();
-    expect(names(/--dur-([a-z-]+):/g)).toEqual(['long', 'medium', 'menu-chevron', 'menu-collapse', 'menu-delay', 'menu-expand', 'menu-fade', 'menu-tooltip', 'micro', 'short']);
+    expect(names(/--dur-([a-z-]+):/g)).toEqual(['long', 'medium', 'menu-chevron', 'menu-collapse', 'menu-delay', 'menu-expand', 'menu-fade', 'menu-tooltip', 'micro', 'short', 'skeleton-wait', 'tooltip-rest']);
     expect(names(/--ease-([a-z-]+):/g)).toEqual(['enter', 'exit', 'menu', 'standard']);
     const theme = tailwindPreset.theme as unknown as Record<string, Record<string, unknown>>;
     for (const k of Object.keys(menuMotion.duration)) expect(theme.transitionDuration![`menu-${k}`]).toBe(`var(--dur-menu-${k})`);
     expect(theme.transitionTimingFunction!.menu).toBe('var(--ease-menu)');
     expect((theme.extend!.transitionDelay as Record<string, string>).menu).toBe('var(--dur-menu-delay)');
+  });
+
+  it('two waits DS3-01 reads by name, each emitted once: the tooltip rest (450 ms) and the skeleton wait (SPEC §9: 1 s)', () => {
+    expect(waits).toEqual({ 'tooltip-rest': '450ms', 'skeleton-wait': '1000ms' });
+    const css = cssVariables();
+    expect(css.split('--dur-tooltip-rest: 450ms;').length - 1).toBe(1);
+    expect(css.split('--dur-skeleton-wait: 1000ms;').length - 1).toBe(1);
   });
 });
 

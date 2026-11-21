@@ -6,7 +6,7 @@
 
 import { cellPx, dials, gutterPage, rowConstants, type DialMode } from './components';
 import { activeFonts } from './fonts';
-import { chrome, menuMotion, radiusRolesV2, typeScaleV2, type TypeStep } from './scale';
+import { chrome, menuMotion, radiusRolesV2, typeScaleV2, waits, type TypeStep } from './scale';
 import { action, border, dataVizV2, emphasis, indicator, moneyMarker, status, surfaceV2, text, textV2, type StatusFamily } from './semantic';
 
 export interface VarBlock {
@@ -141,6 +141,8 @@ export function v2Blocks(): VarBlock[] {
   // DS3 SPEC §8: the side menu's named set (scale.ts `menuMotion`), for DS3-02.
   for (const [k, v] of Object.entries(menuMotion.duration)) root[`--dur-menu-${k}`] = v;
   root['--ease-menu'] = menuMotion.easing;
+  // DS3: the two waits DS3-01 reads by name (scale.ts `waits`): the tooltip's rest, the skeleton's wait.
+  for (const [k, v] of Object.entries(waits)) root[`--dur-${k}`] = v;
   // DS3: the large-text preference zooms the content beside the menu (`.rm-text-zoom` in globals.css).
   root['--text-zoom'] = '1';
 
