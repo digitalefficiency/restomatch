@@ -460,7 +460,7 @@
   --decision-row-pt: 7px;
   --decision-row-pb: 8px;
   --btn-h-primary: 40px;
-  --chip-h: 24px;
+  --chip-h: 22px;
   --count-row-h: 72px;
   --nav-item-h: 36px;
   --icon-sm: 14px;
@@ -488,6 +488,8 @@
   --dur-menu-collapse: 160ms;
   --dur-menu-expand: 200ms;
   --ease-menu: cubic-bezier(0.2,0,0,1);
+  --dur-tooltip-rest: 450ms;
+  --dur-skeleton-wait: 1000ms;
   --text-zoom: 1;
 }
 @media (min-width: 768px) {
@@ -559,7 +561,7 @@
   --decision-row-pt: 7px;
   --decision-row-pb: 8px;
   --btn-h-primary: 40px;
-  --chip-h: 24px;
+  --chip-h: 22px;
   --count-row-h: 72px;
   --nav-item-h: 36px;
   --icon-sm: 14px;
@@ -619,7 +621,7 @@
     --decision-row-pt: 7px;
     --decision-row-pb: 8px;
     --btn-h-primary: 40px;
-    --chip-h: 24px;
+    --chip-h: 22px;
     --nav-item-h: 36px;
     --icon-md: 16px;
     --cell-px: 16px;

@@ -26,6 +26,7 @@ import {
   text,
   textV2,
   typeScaleV2,
+  waits,
   type MoneyState,
   type StatusFamily,
 } from '../index';
@@ -303,7 +304,7 @@ describe('DS3 · density variables express SPEC §7 (the switch itself is DS3-06
   it('a phone keeps regular density: a coarse pointer undoes every compact type step and dial', () => {
     const floor = css.slice(css.indexOf("@media (pointer: coarse) {\n  [data-density='compact'] {"));
     const body = floor.slice(0, floor.indexOf('}'));
-    for (const decl of ['--lh-title-lg: 2rem;', '--lh-row-title: 1.25rem;', '--fs-row-sub: 0.8125rem;', '--decision-row-h: 52px;', '--decision-row-pt: 7px;', '--decision-row-pb: 8px;', '--btn-h-primary: 40px;', '--chip-h: 24px;', '--nav-item-h: 36px;', '--fs-cell: 0.875rem;']) {
+    for (const decl of ['--lh-title-lg: 2rem;', '--lh-row-title: 1.25rem;', '--fs-row-sub: 0.8125rem;', '--decision-row-h: 52px;', '--decision-row-pt: 7px;', '--decision-row-pb: 8px;', '--btn-h-primary: 40px;', '--chip-h: 22px;', '--nav-item-h: 36px;', '--fs-cell: 0.875rem;']) {
       expect(body).toContain(decl);
     }
     // The floor comes after the compact block, so it wins at equal specificity.
@@ -340,6 +341,16 @@ describe('DS3 · density variables express SPEC §7 (the switch itself is DS3-06
     expect(coarse.get('--cell-px')).toBe('16px');
     expect(coarse.get('--cell-inline')).toBe('16px');
   });
+
+  it("a status pill is 22 px high (SPEC §5) on DS2's chip dial; compact 20 and touch 28 stay", () => {
+    const block = (open: string) => {
+      const at = css.indexOf(open);
+      return css.slice(at, css.indexOf('}', at));
+    };
+    expect(block("\n[data-density='default'] {\n  --fs-cell")).toContain('--chip-h: 22px;');
+    expect(block("\n[data-density='compact'] {\n  --fs-cell")).toContain('--chip-h: 20px;');
+    expect(block("\n[data-density='touch'] {\n  --fs-cell")).toContain('--chip-h: 28px;');
+  });
 });
 
 describe('DS3 · motion is SPEC §8 already (confirmed, not duplicated)', () => {
@@ -366,14 +377,21 @@ describe('DS3 · motion is SPEC §8 already (confirmed, not duplicated)', () => 
     const css = cssVariables();
     for (const [k, v] of Object.entries(menuMotion.duration)) expect(css.split(`--dur-menu-${k}: ${v};`).length - 1, k).toBe(1);
     expect(css.split('--ease-menu: cubic-bezier(0.2,0,0,1);').length - 1).toBe(1);
-    // Nothing else adds a duration or a curve.
+    // Nothing else adds a duration or a curve. The only other --dur-* names are the two waits (next test).
     const names = (re: RegExp) => [...new Set([...css.matchAll(re)].map((m) => m[1]))].sort();
-    expect(names(/--dur-([a-z-]+):/g)).toEqual(['long', 'medium', 'menu-chevron', 'menu-collapse', 'menu-delay', 'menu-expand', 'menu-fade', 'menu-tooltip', 'micro', 'short']);
+    expect(names(/--dur-([a-z-]+):/g)).toEqual(['long', 'medium', 'menu-chevron', 'menu-collapse', 'menu-delay', 'menu-expand', 'menu-fade', 'menu-tooltip', 'micro', 'short', 'skeleton-wait', 'tooltip-rest']);
     expect(names(/--ease-([a-z-]+):/g)).toEqual(['enter', 'exit', 'menu', 'standard']);
     const theme = tailwindPreset.theme as unknown as Record<string, Record<string, unknown>>;
     for (const k of Object.keys(menuMotion.duration)) expect(theme.transitionDuration![`menu-${k}`]).toBe(`var(--dur-menu-${k})`);
     expect(theme.transitionTimingFunction!.menu).toBe('var(--ease-menu)');
     expect((theme.extend!.transitionDelay as Record<string, string>).menu).toBe('var(--dur-menu-delay)');
+  });
+
+  it('two waits DS3-01 reads by name, each emitted once: the tooltip rest (450 ms) and the skeleton wait (SPEC §9: 1 s)', () => {
+    expect(waits).toEqual({ 'tooltip-rest': '450ms', 'skeleton-wait': '1000ms' });
+    const css = cssVariables();
+    expect(css.split('--dur-tooltip-rest: 450ms;').length - 1).toBe(1);
+    expect(css.split('--dur-skeleton-wait: 1000ms;').length - 1).toBe(1);
   });
 });
 
