@@ -135,6 +135,8 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [skeletonKey, setSkeletonKey] = useState(0);
   const [pad, setPad] = useState<QtyPadState>({ text: '24', first: true, damaged: false });
+  // The money card's failed figure: "נסו שוב" loads it (a demo of the one action an error gives).
+  const [retried, setRetried] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [recorded, setRecorded] = useState<string | null>(null);
 
@@ -264,7 +266,7 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
             <Money value={null} pending />
           </Labelled>
           <Labelled label={d.unavailable}>
-            <Money value={null} unavailable />
+            {retried ? <Money value={1104.8} context="line" /> : <Money value={null} unavailable onRetry={() => setRetried(true)} />}
           </Labelled>
           <Labelled label={d.header}>
             <Money value={38.7} context="line" symbol="header" split />
@@ -407,8 +409,8 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
           <DataAnswer
             question={d.question}
             figures={[
-              { value: <Money value={760} context="tile" split />, caption: d.leakSince },
-              { value: <Money value={296} context="tile" split />, caption: d.unpaid },
+              { value: <Money value={760} context="inline" split />, caption: d.leakSince },
+              { value: <Money value={296} context="inline" split />, caption: d.unpaid },
             ]}
             facts={[d.checked, d.openGaps]}
             action={

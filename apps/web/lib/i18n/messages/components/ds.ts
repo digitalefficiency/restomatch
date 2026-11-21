@@ -8,6 +8,8 @@ import type { Shape } from '../../translate';
 export const dsHe = {
   money: {
     unavailable: 'לא זמין · נסו שוב',
+    unavailableShort: 'לא זמין',
+    retry: 'נסו שוב',
     pending: 'ממתין',
     na: 'לא רלוונטי',
     exact: 'סכום מדויק: {amount}',
@@ -78,6 +80,8 @@ export const dsHe = {
 export const dsEn: Shape<typeof dsHe> = {
   money: {
     unavailable: 'Unavailable · try again',
+    unavailableShort: 'Unavailable',
+    retry: 'try again',
     pending: 'Pending',
     na: 'Not applicable',
     exact: 'Exact amount: {amount}',

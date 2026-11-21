@@ -38,6 +38,12 @@ describe('the typing rule: Latin digits, a point, 4 + 3 digits', () => {
 
   it('whole units take no point', () => {
     expect(typeAll(['1', '.', '2'], '', false, true)).toBe('12');
+    // the point does nothing at all, not even replace the value the sheet opened on
+    expect(typeKeypadKey('23', true, '.', true)).toBe('23');
+    expect(typeKeypadKey('23', false, '.', true)).toBe('23');
+    // and the sheet keeps the selection (no state change), from the screen or a keyboard
+    const src = readFileSync(new URL('../overlay/QtyKeypad.tsx', import.meta.url), 'utf8');
+    expect(src.match(/if \(k === '\.' && whole\) return;/g)).toHaveLength(2);
   });
 
   it('parses what can be counted, and nothing else', () => {
@@ -96,15 +102,19 @@ describe('<QtyPad> (the reference quantity sheet)', () => {
     expect(html).toMatch(/aria-pressed="true"[^>]*bg-fg text-on-bold/);
     expect(textOf(html)).toContain('כמו בהזמנה');
     expect(textOf(render(pad({}, { ordered: undefined })))).not.toContain('כמו בהזמנה');
-    // "פגום" on a missing line is not pressed: nothing arrived to be damaged
-    expect(render(pad({ text: '0', damaged: true }))).toContain('aria-pressed="false"');
+    // "פגום" on a missing line is not pressed and waits for a count: nothing arrived to be damaged
+    const missing = render(pad({ text: '0', damaged: true }));
+    expect(missing).toContain('aria-pressed="false"');
+    expect(missing).toMatch(/aria-pressed="false" aria-disabled="true"/);
+    expect(render(pad({ text: '5', damaged: false }))).not.toMatch(/ aria-disabled="/);
   });
 
   it('far from the order: one plain note above the stepper, never a warning colour on the figure', () => {
+    // the live region is always there (a region that arrives already filled is never announced) and empty when near
     const near = render(pad({ text: '28.5' }));
-    expect(near).not.toContain('role="status"');
+    expect(near).toContain('<div role="status" aria-atomic="true" data-qty-note=""></div>');
     const off = render(pad({ text: '24' }));
-    expect(off).toMatch(/<p role="status"[^>]*bg-warn-subtle/);
+    expect(off).toMatch(/<div role="status" aria-atomic="true" data-qty-note=""><p class="[^"]*bg-warn-subtle/);
     expect(textOf(off)).toContain('שונה ב־16% מההזמנה (28.5 ק״ג)');
     expect(off.indexOf('role="status"')).toBeLessThan(off.indexOf('aria-label="הפחתה"'));
     expect(textOf(render(pad({ text: '60' })))).toContain('יותר מפי 2 מההזמנה (28.5 ק״ג)');
@@ -117,6 +127,20 @@ describe('<QtyPad> (the reference quantity sheet)', () => {
       expect(html, locale).not.toContain('₪');
       expect(textOf(html).length, locale).toBeGreaterThan(20);
     }
+  });
+
+  it('the value reads in the page direction: Arabic is rtl although its base locale is en', () => {
+    const he = render(pad({ text: '24' }), 'he');
+    const ar = render(pad({ text: '24' }), 'ar');
+    expect(he).toMatch(/<div dir="rtl" aria-live="polite"[^>]*data-qty-value=""/);
+    expect(ar).toMatch(/<div dir="rtl" aria-live="polite"[^>]*data-qty-value=""/);
+    expect(render(pad({ text: '24' }), 'ru')).toMatch(/<div dir="ltr" aria-live="polite"[^>]*data-qty-value=""/);
+  });
+
+  it('forced colours: keys, chips and steppers keep a ButtonText edge; the selected value an outline', () => {
+    const html = render(pad({ text: '24', first: true }));
+    expect(html.match(/forced-colors:border-\[color:ButtonText\]/g)?.length ?? 0).toBeGreaterThanOrEqual(12 + 3 + 2);
+    expect(html).toMatch(/data-selected=""[^>]*forced-colors:outline-\[color:Highlight\]/);
   });
 
   it('never reads text back from the page into the pad (CHANGES.md 21.11)', () => {

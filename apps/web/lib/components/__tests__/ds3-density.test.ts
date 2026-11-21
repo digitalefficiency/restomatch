@@ -1,5 +1,6 @@
 // DS3-01 × DS3-06: the shared components read the device's display density (lib/prefs/README.md, "Who reads what").
 import './reactGlobal';
+import { readFileSync } from 'node:fs';
 import { createElement, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -15,7 +16,7 @@ const { I18nProvider } = await import('../../i18n/client');
 const { NavProvider } = await import('../../nav/NavProvider');
 const { DataTable } = await import('../table/DataTable');
 const { ViewToolbar } = await import('../views/ViewToolbar');
-const { DEFAULT_VIEW, parseView, serializeView } = await import('../views/state');
+const { DEFAULT_VIEW, parseView, resetView, serializeView } = await import('../views/state');
 
 // Loosely typed createElement: two @types/react majors are hoisted in the workspace (STATE.md).
 const h = createElement as unknown as (type: unknown, props?: Record<string, unknown> | null, ...children: unknown[]) => ReactElement;
@@ -69,6 +70,17 @@ describe('the views density switch takes its default from the preference; the ad
     expect(serializeView({ ...compactDefault, density: 'comfortable' }).get('d')).toBe('comfortable');
     expect(serializeView({ ...DEFAULT_VIEW, density: 'compact' }).get('d')).toBe('compact');
     expect(serializeView(DEFAULT_VIEW).get('d')).toBeNull();
+  });
+
+  it('"איפוס תצוגה" goes back to the page\'s defaults, the preferred density included', () => {
+    const fromPref = parseView(new URLSearchParams('d=comfortable&g=category&sev=block'), { density: 'compact' });
+    const reset = resetView(fromPref);
+    expect(reset).toEqual({ ...DEFAULT_VIEW, density: 'compact', densityDefault: 'compact' });
+    // the reset address is the plain one
+    expect(serializeView(reset).toString()).toBe('');
+    // a page without a preference resets to the global default, as before
+    expect(resetView({ ...DEFAULT_VIEW, density: 'compact', group: 'category' })).toEqual(DEFAULT_VIEW);
+    expect(readFileSync(new URL('../views/ViewToolbar.tsx', import.meta.url), 'utf8')).toContain('go(resetView(view))');
   });
 
   it('the switch shows what the page renders, labelled רגיל / צפוף', () => {

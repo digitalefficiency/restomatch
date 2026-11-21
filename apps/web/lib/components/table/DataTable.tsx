@@ -657,6 +657,8 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       {toolbarRow}
       <div
         ref={scroller}
+        // Rows and cells sit in a scroll container: the global focus outline is drawn inside them (DS3-00 hook).
+        data-focus="inset"
         className="max-h-[min(72dvh,900px)] overflow-auto rounded-card border border-line-rule bg-surface"
         data-table-scroll=""
       >

@@ -73,8 +73,9 @@ export function SegmentedControl<V extends string>({
             onClick={() => onChange(o.value)}
             className={cn(
               'inline-flex min-w-0 items-center justify-center whitespace-nowrap rounded-md px-3 font-medium transition-colors duration-micro ease-standard',
-              size === 'sm' ? 'min-h-7 text-caption' : size === 'md' ? 'min-h-9 text-body-sm' : 'min-h-11 text-body',
-              checked ? 'bg-surface text-fg shadow-e1 ring-1 ring-inset ring-fg' : 'text-fg-secondary hover:text-fg',
+              // A phone keeps the 44 px target (SPEC §5): the size utilities would otherwise beat the base coarse floor.
+              size === 'sm' ? 'min-h-7 text-caption [@media(pointer:coarse)]:min-h-11' : size === 'md' ? 'min-h-9 text-body-sm [@media(pointer:coarse)]:min-h-11' : 'min-h-11 text-body',
+              checked ? 'bg-surface text-fg shadow-e1 ring-1 ring-inset ring-fg forced-colors:outline forced-colors:outline-2 forced-colors:-outline-offset-2 forced-colors:outline-[color:Highlight]' : 'text-fg-secondary hover:text-fg',
             )}
           >
             {o.label}

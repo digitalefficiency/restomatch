@@ -17,7 +17,9 @@ nothing in `packages/db`.
 
 - After writing `rm:keys:single` the store fires `rm:keys` on `window` (the shell's event name), and only after
   the write landed, so mounted key handlers re-read it.
-- Every storage read and write sits in try/catch: a preference never breaks a page.
+- Every storage read and write sits in try/catch: a preference never breaks a page. A choice the browser
+  refuses to store (cookies blocked, a full or refused localStorage) still holds for that page: re-reads keep
+  it and `singleKeysEnabled()` answers with it, until storage holds a value for that key again.
 - **A stored value only picks one of the product's constants** (`pickDensity`, `pickTextSize`,
   `pickSingleKeys`): anything else reads as "not chosen". Nothing read from storage, or back from the page, is
   written into the page as is (DS3 `CHANGES.md`, third and fourth corrections).
@@ -25,8 +27,8 @@ nothing in `packages/db`.
   their own default. The single-key switch is stored as the person set it, as the shell's switch does.
 - Safari and iOS cap a script-written cookie at 7 days: the first reader on each page load writes the cookies
   back with a fresh lifetime, and restores a dropped cookie from its localStorage mirror.
-- The cookies must be listed on the cookie policy page (`app/(marketing)/cookies/page.tsx`, category
-  "preference") before this ships — a request to that page's owner.
+- The cookie policy page (`app/(marketing)/cookies/page.tsx`) lists the two cookies (category "preference",
+  one year) and the three localStorage keys; a new key or cookie here needs its line there too.
 
 **Defaults** (D4, OWNER-DECISIONS-0711): density `compact` ("צפוף") for the bookkeeper, `regular` ("רגיל")
 for owner, manager, chef and receiver; on a touch pointer the regular density applies whatever the choice
@@ -58,10 +60,13 @@ browser) as the SSR snapshot of `COARSE_QUERY`. DS3-00's coarse-pointer floor ma
   shell's server-set attributes follow without a reload. Simpler for the shell: read `usePrefs()` in
   `ShellFrame` (its SSR snapshot is the cookies) and drop the refresh.
 - **Styles.** What `data-density` and `data-text` drive belongs to DS3-00 (tokens) and DS3-01 (components).
-  Until DS3-00 styles `[data-text='large']`, the provider adds the interim rule
+  Large text has one mechanism, DS3-00's: `[data-text='large']` sets `--text-zoom` to 1.1 and the class
+  `rm-text-zoom` on the content wrapper beside the menu applies it (DS3-02 adds the class). Until DS3-00's
+  rule is in this branch's base, the provider adds the interim rule
   `@media screen{#main-content > *{zoom:var(--text-zoom-large,1.1)}}` (the reference's zoom on the content
-  column; the side menu, dialogs, toasts and print keep their size). DS3-00 can switch it off with
-  `--text-zoom-large: 1`, or the rule can be deleted in `PrefsProvider.tsx` (one line).
+  column; the side menu, dialogs, toasts and print keep their size), and it is deleted then (`textSizeRule`
+  in `schema.ts`, one line in `PrefsProvider.tsx`). `#main-content > *` is the very element DS3-02 gives
+  `rm-text-zoom`, so if both meet before that, the content is still zoomed once, not twice.
 
 ## API
 
@@ -108,19 +113,21 @@ contract's names, and the provider's attributes act while a settings screen is o
 when it unmounts). A nested provider passes through, so the double mount is harmless; the settings mount can
 go once the shell mounts it.
 
-## Without importing this module
-
-```ts
-const keysOn = localStorage.getItem('rm:keys:single') !== '0'; // in try/catch
-```
+Readers go through this module, never a raw key or cookie (WORKPLAN, "Personal preferences: one contract"):
+`usePrefs()` in React, `singleKeysEnabled()` in a key handler outside React, `shellAttrs()` /
+`readDisplayChoices()` on the server.
 
 ## Who reads what (requests)
 
-- **DS3-00** — style `[data-text='large']` (the reference: zoom 1.1 on the content column) or define
-  `--text-zoom-large`; keep the coarse-pointer floor for every compact token.
-- **DS3-01** — done on your branch: `DataTable` and the views toolbar read `usePrefs()`. Prefer
-  `p.tableDensity` / `p.viewDensity` (the density in force) to `p.density` (the choice). The selected
+- **DS3-00** — done on your branch (`[data-text='large']` sets `--text-zoom`; `.rm-text-zoom` applies it).
+  Keep the coarse-pointer floor for every compact token.
+- **DS3-01** — done on your branch: `DataTable` reads `usePrefs().tableDensity` (the density in force). The
+  views toolbar takes the preference as its default only where the page passes it to the parser:
+  `parseView(searchParams, await viewDefaults(role))` (`lib/components/views/defaults.ts`). The selected
   segment of `SegmentedControl` needs a forced-colours mark.
+- **Every screen that parses views** (the home, approvals, leaks and its report and breakdown, chain and its
+  matrix: DS3-03, DS3-04 and later owners) — call `parseView(searchParams, await viewDefaults(role))`, or a
+  bookkeeper and anyone who chose "צפוף" still get the comfortable view there.
 - **DS3-02** — set the shell's attributes with `shellAttrs` (role default when the cookie is absent); the
   single-key switch in the account menu, the cheat sheet and the palette goes through `usePrefs()` /
   `setDisplayChoices` (same key, same event); the palette lists `useSettingsPaletteScreens()` and runs

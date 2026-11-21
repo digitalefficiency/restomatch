@@ -42,7 +42,7 @@ export interface ScanButtonProps {
 type Mode = 'idle' | 'scanning' | 'manual';
 
 /**
- * Field barcode scanner (W3-03a). A 56 px thumb button; the camera panel and
+ * Field barcode scanner (W3-03a). A 60 px thumb button (SPEC §5 phone primary); the camera panel and
  * the manual-entry fallback open inline below it (no portal, works offline:
  * the native detector runs on-device). Shows no ₪.
  */

@@ -40,7 +40,7 @@ export function StatusRail({ steps, label, className }: { steps: RailStep[]; lab
             <span
               aria-hidden="true"
               className={cn(
-                'absolute start-0.5 top-1 size-2.5 rounded-full',
+                'absolute start-0.5 top-1 size-2.5 rounded-full forced-color-adjust-none',
                 s.state === 'done' && 'bg-fg',
                 s.state === 'now' && 'border-[1.5px] border-warn-dot-ring bg-warn-dot ring-4 ring-warn-subtle',
                 s.state === 'todo' && 'bg-surface ring-2 ring-inset ring-line-strong',

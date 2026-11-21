@@ -5,12 +5,13 @@ export type SkeletonVariant = 'block' | 'text' | 'metric' | 'hero' | 'kpiRow' | 
 const bar = 'rm-shimmer rounded-control bg-surface-2';
 
 /**
- * DS3 (SPEC §9 "loading that does not flicker"): the skeleton fades in only after a one-second
- * wait, so a fast answer never flashes one. Pure CSS (`@starting-style` + a delayed opacity
+ * DS3 (SPEC §9 "loading that does not flicker"): the skeleton fades in only after the wait
+ * `--dur-skeleton-wait` (SPEC §9: one second; a DS3-00 motion token: until DS3-00 defines it, no wait),
+ * so a fast answer never flashes one. Pure CSS (`@starting-style` + a delayed opacity
  * transition), so it stays server-safe in `loading.tsx`; a browser without `@starting-style`
  * shows it at once, as today, and reduced motion shows it at once too.
  */
-const DELAYED = 'transition-opacity duration-short ease-enter delay-1000 [@starting-style]:opacity-0';
+const DELAYED = 'transition-opacity duration-short ease-enter [transition-delay:var(--dur-skeleton-wait,0ms)] [@starting-style]:opacity-0';
 
 /**
  * Loading placeholder. `className` alone keeps the v1 behaviour (one box you
