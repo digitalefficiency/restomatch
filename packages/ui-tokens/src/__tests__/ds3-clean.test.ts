@@ -11,7 +11,6 @@ import {
   cssVariables,
   elevation,
   focus,
-  held,
   indicator,
   menuMotion,
   moneyStates,
@@ -27,6 +26,7 @@ import {
   text,
   textV2,
   typeScaleV2,
+  waits,
   type MoneyState,
   type StatusFamily,
 } from '../index';
@@ -69,37 +69,31 @@ const SPEC_COLOURS: Array<[prop: string, hex: string, roles: Record<string, stri
   ['--info-bd', '#BFD5FD', { 'status.info.borderSubtle': status.info.borderSubtle }],
 ];
 
-/** Spec values held at today's value because a test outside packages/ui-tokens pins the literal. */
-const HELD: Record<string, { today: string; spec: string }> = {
-  '--canvas': { today: '#F6F8F7', spec: held.canvas.spec },
-  '--line-strong': { today: '#7A8B82', spec: held.lineStrong.spec },
-};
-
 describe('DS3 · SPEC §2 colours land on the DS2 roles', () => {
-  it.each(SPEC_COLOURS)('%s = %s', (prop, hex, roles) => {
-    const want = HELD[prop] ? HELD[prop]!.today : hex;
-    if (HELD[prop]) expect(HELD[prop]!.spec, `${prop}: the held role still names the spec value`).toBe(hex);
-    for (const [role, value] of Object.entries(roles)) expect(value, role).toBe(want);
+  it.each(SPEC_COLOURS)('%s = %s', (_prop, hex, roles) => {
+    for (const [role, value] of Object.entries(roles)) expect(value, role).toBe(hex);
   });
 
-  it('held values: exactly canvas and line-strong, each pinned by a named test outside the package', () => {
-    expect(Object.keys(held).sort()).toEqual(['canvas', 'lineStrong']);
-    expect(held.canvas.pinnedBy).toMatch(/price-creep-digest\.test\.ts:\d+$/);
-    expect(held.lineStrong.pinnedBy).toMatch(/W1-09\.spec\.ts:\d+$/);
+  it('nothing is held: the canvas and the strong line are live at the spec values', () => {
+    expect(surfaces.canvas).toBe('#F8FBF9');
+    expect(surfaces.lineStrong).toBe('#808984');
   });
 
-  it('flipping a held value is safe: the spec value passes the same gates', () => {
+  it('every text role passes 5:1 on the canvas', () => {
     for (const fg of [text.ink, text.muted, text.subtle, status.primary.text, status.danger.text, status.warn.text, status.gold.text, status.info.text, focus]) {
-      expect(contrastRatio(fg, held.canvas.spec)).toBeGreaterThanOrEqual(5);
+      expect(contrastRatio(fg, surfaces.canvas)).toBeGreaterThanOrEqual(5);
     }
-    for (const bg of [surfaces.surface, held.canvas.spec, surfaces.sunken, surfaceV2.hover, surfaceV2.selected]) {
-      expect(contrastRatio(held.lineStrong.spec, bg)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('the strong line is a 3:1 boundary on every surface a control sits on', () => {
+    for (const bg of [surfaces.surface, surfaces.canvas, surfaces.sunken, surfaceV2.hover, surfaceV2.selected]) {
+      expect(contrastRatio(surfaces.lineStrong, bg)).toBeGreaterThanOrEqual(3);
     }
   });
 
   it('the generated block carries the clean values (channels)', () => {
     const css = cssVariables();
-    for (const decl of ['--c-bg: 246 248 247;', '--c-ink: 18 28 23;', '--c-focus: 34 86 187;', '--c-gold: 0 113 62;', '--c-gold-text: 0 87 59;', '--c-gold-bold: 0 113 62;', '--c-danger-dot: 221 39 41;', '--c-warn-dot-ring: 185 117 0;', '--c-surface-hover: 235 240 237;']) {
+    for (const decl of ['--c-bg: 248 251 249;', '--c-line-strong: 128 137 132;', '--c-ink: 18 28 23;', '--c-focus: 34 86 187;', '--c-gold: 0 113 62;', '--c-gold-text: 0 87 59;', '--c-gold-bold: 0 113 62;', '--c-danger-dot: 221 39 41;', '--c-warn-dot-ring: 185 117 0;', '--c-surface-hover: 235 240 237;']) {
       expect(css).toContain(decl);
     }
   });
@@ -310,11 +304,52 @@ describe('DS3 · density variables express SPEC §7 (the switch itself is DS3-06
   it('a phone keeps regular density: a coarse pointer undoes every compact type step and dial', () => {
     const floor = css.slice(css.indexOf("@media (pointer: coarse) {\n  [data-density='compact'] {"));
     const body = floor.slice(0, floor.indexOf('}'));
-    for (const decl of ['--lh-title-lg: 2rem;', '--lh-row-title: 1.25rem;', '--fs-row-sub: 0.8125rem;', '--decision-row-h: 52px;', '--decision-row-pt: 7px;', '--decision-row-pb: 8px;', '--btn-h-primary: 40px;', '--chip-h: 24px;', '--nav-item-h: 36px;', '--fs-cell: 0.875rem;']) {
+    for (const decl of ['--lh-title-lg: 2rem;', '--lh-row-title: 1.25rem;', '--fs-row-sub: 0.8125rem;', '--decision-row-h: 52px;', '--decision-row-pt: 7px;', '--decision-row-pb: 8px;', '--btn-h-primary: 40px;', '--chip-h: 22px;', '--nav-item-h: 36px;', '--fs-cell: 0.875rem;']) {
       expect(body).toContain(decl);
     }
     // The floor comes after the compact block, so it wins at equal specificity.
     expect(css.indexOf("@media (pointer: coarse) {\n  [data-density='compact'] {")).toBeGreaterThan(css.indexOf("[data-density='compact'] {\n  --fs-cell"));
+  });
+
+  it('density is fixed on a touch pointer as a CSS fact: every variable compact sets is undone there', () => {
+    // Top-level rules (a rule inside @media is indented), v1 and v2 blocks alike.
+    const top = (sel: string) => {
+      const vars = new Map<string, string>();
+      const open = `\n${sel} {`;
+      for (let at = css.indexOf(open); at !== -1; at = css.indexOf(open, at + open.length)) {
+        const body = css.slice(at + open.length, css.indexOf('}', at));
+        for (const d of body.matchAll(/(--[\w-]+): ([^;]+);/g)) vars.set(d[1]!, d[2]!);
+      }
+      return vars;
+    };
+    const compact = top("[data-density='compact']");
+    const regular = top("[data-density='default']");
+    const touch = top("[data-density='touch']");
+    // What a coarse pointer sets for compact, or for every density (v1's touch floor).
+    const coarse = new Map<string, string>();
+    for (const m of css.matchAll(/@media \(pointer: coarse\) \{\n {2}([^{\n]+) \{([^}]*)\}/g)) {
+      if (!/\[data-density(='compact')?\]/.test(m[1]!)) continue;
+      for (const d of m[2]!.matchAll(/(--[\w-]+): ([^;]+);/g)) coarse.set(d[1]!, d[2]!);
+    }
+    expect(compact.size).toBeGreaterThan(25);
+    expect([...compact.keys()].filter((v) => !coarse.has(v)), 'compact variables a coarse pointer leaves compact').toEqual([]);
+    // Each falls back to the regular value; v1's row and control heights take the touch floor (DS2).
+    for (const [v, value] of coarse) {
+      if (!compact.has(v)) continue;
+      expect([regular.get(v), touch.get(v)], v).toContain(value);
+    }
+    expect(coarse.get('--cell-px')).toBe('16px');
+    expect(coarse.get('--cell-inline')).toBe('16px');
+  });
+
+  it("a status pill is 22 px high (SPEC §5) on DS2's chip dial; compact 20 and touch 28 stay", () => {
+    const block = (open: string) => {
+      const at = css.indexOf(open);
+      return css.slice(at, css.indexOf('}', at));
+    };
+    expect(block("\n[data-density='default'] {\n  --fs-cell")).toContain('--chip-h: 22px;');
+    expect(block("\n[data-density='compact'] {\n  --fs-cell")).toContain('--chip-h: 20px;');
+    expect(block("\n[data-density='touch'] {\n  --fs-cell")).toContain('--chip-h: 28px;');
   });
 });
 
@@ -342,14 +377,21 @@ describe('DS3 · motion is SPEC §8 already (confirmed, not duplicated)', () => 
     const css = cssVariables();
     for (const [k, v] of Object.entries(menuMotion.duration)) expect(css.split(`--dur-menu-${k}: ${v};`).length - 1, k).toBe(1);
     expect(css.split('--ease-menu: cubic-bezier(0.2,0,0,1);').length - 1).toBe(1);
-    // Nothing else adds a duration or a curve.
+    // Nothing else adds a duration or a curve. The only other --dur-* names are the two waits (next test).
     const names = (re: RegExp) => [...new Set([...css.matchAll(re)].map((m) => m[1]))].sort();
-    expect(names(/--dur-([a-z-]+):/g)).toEqual(['long', 'medium', 'menu-chevron', 'menu-collapse', 'menu-delay', 'menu-expand', 'menu-fade', 'menu-tooltip', 'micro', 'short']);
+    expect(names(/--dur-([a-z-]+):/g)).toEqual(['long', 'medium', 'menu-chevron', 'menu-collapse', 'menu-delay', 'menu-expand', 'menu-fade', 'menu-tooltip', 'micro', 'short', 'skeleton-wait', 'tooltip-rest']);
     expect(names(/--ease-([a-z-]+):/g)).toEqual(['enter', 'exit', 'menu', 'standard']);
     const theme = tailwindPreset.theme as unknown as Record<string, Record<string, unknown>>;
     for (const k of Object.keys(menuMotion.duration)) expect(theme.transitionDuration![`menu-${k}`]).toBe(`var(--dur-menu-${k})`);
     expect(theme.transitionTimingFunction!.menu).toBe('var(--ease-menu)');
     expect((theme.extend!.transitionDelay as Record<string, string>).menu).toBe('var(--dur-menu-delay)');
+  });
+
+  it('two waits DS3-01 reads by name, each emitted once: the tooltip rest (450 ms) and the skeleton wait (SPEC §9: 1 s)', () => {
+    expect(waits).toEqual({ 'tooltip-rest': '450ms', 'skeleton-wait': '1000ms' });
+    const css = cssVariables();
+    expect(css.split('--dur-tooltip-rest: 450ms;').length - 1).toBe(1);
+    expect(css.split('--dur-skeleton-wait: 1000ms;').length - 1).toBe(1);
   });
 });
 

@@ -13,18 +13,6 @@
 import { activeDirection } from './directions';
 import { ramp } from './primitives';
 
-/**
- * SPEC §2 values that DS3-00 could not land yet: a test outside the token package pins today's
- * literal. Each is invisible at a glance (ΔL < 1 %) and passes every contrast gate either way
- * (ds3-clean.test.ts proves it). Once its owner reads the token instead of the literal, a flip is:
- * the step in primitives.ts, `pnpm --filter @restomatch/ui-tokens fixtures:record`, its row out of
- * ds3-clean's HELD table, `tokens:css`; for the canvas also the five copies WORKPLAN DS3-00 names.
- */
-export const held = {
-  canvas: { spec: '#F8FBF9', pinnedBy: 'packages/api/src/__tests__/price-creep-digest.test.ts:124' },
-  lineStrong: { spec: '#808984', pinnedBy: 'apps/web/e2e/W1-09.spec.ts:495' },
-} as const;
-
 /** Canvas, cards and borders (SPEC §2 paper and steel). */
 export const surfaces = {
   canvas: ramp.neutral[25], // page background and the side menu, which sits on the canvas (Tailwind `bg`; SPEC §2, sidebar spec §1.1)

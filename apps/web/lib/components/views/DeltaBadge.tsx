@@ -110,7 +110,7 @@ export function DeltaBadge({
           aria-hidden="true"
         />
       )}
-      <span>{text}</span>
+      <span className="tabular-nums">{text}</span>
       {showAmount && !flat && pct ? (
         <span className="tabular-nums" data-delta-signed>
           ({up ? '+' : '−'}

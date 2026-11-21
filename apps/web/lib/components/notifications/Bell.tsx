@@ -127,7 +127,9 @@ export function Bell({ className, activity = false }: { className?: string; /** 
     if (state === 'loading') return <p className="min-h-11 text-sm text-muted" aria-busy="true">…</p>;
     return (
       <div className="space-y-2">
-        {rows.length === 0 ? <p className="text-sm font-semibold text-primary" data-testid="bell-empty">{others ?? t('bell.empty')}</p> : null}
+        {rows.length === 0 ? <p className="text-sm font-semibold tabular-nums text-primary" data-testid="bell-empty">
+            {others ?? t('bell.empty')}
+          </p> : null}
         <ul className="space-y-2">
           {rows.map((r) => (
             <li key={r.key}>
@@ -149,7 +151,7 @@ export function Bell({ className, activity = false }: { className?: string; /** 
             </li>
           ))}
         </ul>
-        {rows.length > 0 && others ? <p className="text-xs text-muted">{others}</p> : null}
+        {rows.length > 0 && others ? <p className="text-xs tabular-nums text-muted">{others}</p> : null}
         {activity && feed.data && feed.data.length > 0 ? (
           <section aria-labelledby="bell-activity-title" data-testid="bell-activity" className="border-t border-line pt-3">
             <h3 id="bell-activity-title" className="mb-2 text-sm font-bold text-ink">

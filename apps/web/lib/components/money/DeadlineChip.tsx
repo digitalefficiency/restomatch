@@ -5,6 +5,7 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
 import { StatusChip } from '../feedback/StatusChip';
 import { daysUntil, deadlineTone, formatDay } from './format';
+import { cnMerge as cn } from '../cn';
 
 /** "נותרו 6 ימים · עד 31.10.2026": neutral above 7 days, warn ≤ 7, danger only when late (H8). */
 export function DeadlineChip({ due, today, className }: { due: Date | string; today?: Date; className?: string }) {
@@ -26,7 +27,7 @@ export function DeadlineChip({ due, today, className }: { due: Date | string; to
       emphasis={tone === 'warn' ? 'bold' : 'subtle'}
       icon={<CalendarClock className="h-3.5 w-3.5" aria-hidden="true" />}
       label={label}
-      className={className}
+      className={cn('tabular-nums', className)}
     />
   );
 }

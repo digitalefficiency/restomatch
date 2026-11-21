@@ -268,7 +268,14 @@ export function QtyKeypad({
       onClose={onClose}
       title={title ?? t('ds.keypad.title')}
       description={
-        ordered === undefined ? name : name ? t('ds.keypad.itemOrdered', { name, qty: orderedText }) : t('ds.keypad.ordered', { qty: orderedText })
+        // The ordered quantity in tabular figures (DS3-07): it never shifts with the face.
+        ordered === undefined ? (
+          name
+        ) : (
+          <span className="tabular-nums">
+            {name ? t('ds.keypad.itemOrdered', { name, qty: orderedText }) : t('ds.keypad.ordered', { qty: orderedText })}
+          </span>
+        )
       }
       detent="auto"
       primary={

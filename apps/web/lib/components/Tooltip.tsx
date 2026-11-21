@@ -7,8 +7,8 @@ import { Kbd } from './Kbd';
 /**
  * The dark tooltip of icon-only controls (DS3 SPEC §10.4, reference `.mn-tip`): the control's
  * name in white on ink, an optional key cap and a one-line description. It appears after the pointer
- * rests (`--dur-tooltip-rest`, a DS3-00 motion token the reference sets at 450 ms; until DS3-00 defines
- * it, at once) and at once on keyboard focus, beside the control and never over it; it
+ * rests (`--dur-tooltip-rest`, DS3-00's wait: the reference's 450 ms; skipped under reduced motion)
+ * and at once on keyboard focus, beside the control and never over it; it
  * stays while the pointer is on it (WCAG 1.4.13 hoverable) and Escape dismisses it. Pure CSS
  * show/hide, so nothing renders late; it is decorative (`aria-hidden`): the control keeps its own
  * accessible name (IconButton's `label`). Anchor positioning is not relied on (SPEC §9).

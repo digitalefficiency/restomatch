@@ -71,7 +71,7 @@ export function MetricTile({
           {value}
         </div>
       )}
-      {context ? <p className="line-clamp-2 text-body-sm text-muted">{context}</p> : null}
+      {context ? <p className="line-clamp-2 text-body-sm tabular-nums text-muted">{context}</p> : null}
       {delta || sparkline ? (
         <div className="mt-1 flex items-end justify-between gap-3">
           {delta ?? <span />}

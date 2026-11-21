@@ -77,7 +77,10 @@ describe('<Money> renders formatIls() output unchanged (acceptance 4)', () => {
     expect(stateClass('leak', 0)).toBe('text-muted');
     expect(stateClass('outstanding', 1759)).toBe('text-ink');
     expect(stateClass('caught', 296)).toBe('text-gold');
-    expect(stateClass('claimed', 10)).toBe('text-primary');
+    // `claimed` moves to the T3 role in three green steps (DS3-00 PR #346, request 3): (a) this pin accepts
+    // the old class and the new one; (b) DS3-00 moves `claimed` in semantic.ts and its own pin; (c) this pin
+    // is tightened to `text-gold` alone. Both classes are #00573B, and no other class passes meanwhile.
+    expect(['text-primary', 'text-gold']).toContain(stateClass('claimed', 10));
     expect(render(h(Money, { value: 0, state: 'leak' }))).not.toContain('danger');
   });
 

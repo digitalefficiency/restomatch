@@ -21,7 +21,9 @@ export const dials: Record<string, Partial<Record<DialMode, Px>>> = {
   'decision-row-pt': { compact: 4, default: 7 },
   'decision-row-pb': { compact: 5, default: 8 },
   'btn-h-primary': { compact: 32, default: 40, touch: 48, field: 56 },
-  'chip-h': { compact: 20, default: 24, touch: 28, field: 28 },
+  // DS3 SPEC §5: a status pill is 22 px high (the reference's `.st`). Compact 20 and touch/field 28
+  // stay DS2's. Its one reader is DS3-01's pill shell (Badge, StatusChip), which is not interactive.
+  'chip-h': { compact: 20, default: 22, touch: 28, field: 28 },
   'count-row-h': { default: 72, field: 72 },
   'nav-item-h': { compact: 32, default: 36, touch: 44 },
   'icon-sm': { default: 14 },

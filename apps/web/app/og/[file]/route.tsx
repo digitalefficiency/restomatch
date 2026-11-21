@@ -82,8 +82,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ file: s
           flexDirection: 'column',
           justifyContent: 'space-between',
           padding: '64px 72px',
-          background: 'radial-gradient(ellipse 80% 70% at 50% -10%, rgba(6,107,74,0.12), #F6F8F7 62%)',
-          backgroundColor: '#F6F8F7',
+          background: 'radial-gradient(ellipse 80% 70% at 50% -10%, rgba(6,107,74,0.12), #F8FBF9 62%)',
+          backgroundColor: '#F8FBF9',
           color: '#0F1F17',
           fontFamily: 'Heebo',
         }}
