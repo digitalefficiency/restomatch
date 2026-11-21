@@ -67,14 +67,15 @@ export function Switch({
           disabled={disabled}
           onClick={() => onCheckedChange(!checked)}
           className={cn(
-            'inline-flex h-6 w-11 shrink-0 items-center rounded-pill p-0.5 transition-colors duration-short ease-standard',
+            // min-h-6: the label row is the 44 px target, so the track keeps its 44 × 24 shape on a phone (no coarse floor).
+            'inline-flex h-6 min-h-6 w-11 shrink-0 items-center rounded-pill p-0.5 transition-colors duration-short ease-standard forced-colors:border forced-colors:border-[color:ButtonText]',
             disabled ? 'bg-line' : checked ? 'bg-action hover:bg-action-hover' : 'bg-line-strong',
           )}
         >
           <span
             aria-hidden="true"
             className={cn(
-              'size-5 rounded-full bg-surface shadow-e1 transition-transform duration-short ease-standard',
+              'size-5 rounded-full bg-surface shadow-e1 transition-transform duration-short ease-standard forced-colors:border forced-colors:border-[color:ButtonText]',
               checked && 'ltr:translate-x-5 rtl:-translate-x-5',
             )}
           />

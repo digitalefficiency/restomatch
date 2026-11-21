@@ -166,7 +166,7 @@ function ToastCard({ item, onDismiss, dismissLabel }: { item: ToastItem; onDismi
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPaused(false);
       }}
       data-focus="on-dark"
-      className="pointer-events-auto relative flex w-full items-center gap-3 overflow-hidden rounded-card bg-fg px-3.5 py-2.5 text-body-sm text-on-bold shadow-e2 motion-safe:animate-[rm-toast-in_var(--dur-medium)_var(--ease-enter)]"
+      className="pointer-events-auto relative flex w-full items-center gap-3 overflow-hidden rounded-card bg-fg px-3.5 py-2.5 text-body-sm text-on-bold shadow-e2 forced-colors:border forced-colors:border-[color:ButtonText] motion-safe:animate-[rm-toast-in_var(--dur-medium)_var(--ease-enter)]"
     >
       {item.kind === 'error' ? <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" /> : null}
       <p className="min-w-0 flex-1">{item.message}</p>

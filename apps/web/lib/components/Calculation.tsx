@@ -56,16 +56,13 @@ export function Calculation({
         {terms.map((term, i) => (
           <span key={i} className="inline-flex items-baseline gap-2">
             {i > 0 ? (
-              <span aria-hidden="true" className="text-fg-tertiary">
-                {op}
-              </span>
+              <span className="text-fg-tertiary">{op}</span>
             ) : null}
             <span>{term}</span>
           </span>
         ))}
-        <span aria-hidden="true" className="text-fg-tertiary">
-          =
-        </span>
+        {/* The operator and the equals sign are read too: the relation is the explanation (WCAG 1.3.1). */}
+        <span className="text-fg-tertiary">=</span>
         <b className="text-title-sm font-semibold">{result}</b>
       </p>
       {sources.length ? (

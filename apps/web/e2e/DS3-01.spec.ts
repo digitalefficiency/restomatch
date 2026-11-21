@@ -187,12 +187,15 @@ test.describe('DS3-01 kit page (platform admins)', () => {
     await expect(pad.getByRole('status')).toHaveText(/שונה ב־74% מההזמנה \(28\.5 ק״ג\)/);
     await pad.getByRole('button', { name: 'כמו בהזמנה' }).click();
     await expect(value).toHaveText('28.5');
-    await expect(pad.getByRole('status')).toHaveCount(0);
+    // the live region stays (so the next note is announced) and is empty
+    await expect(pad.getByRole('status')).toHaveCount(1);
+    await expect(pad.getByRole('status')).toBeEmpty();
     await pad.getByRole('button', { name: 'פגום' }).click();
     await expect(pad.getByRole('button', { name: 'פגום' })).toHaveAttribute('aria-pressed', 'true');
     await pad.getByRole('button', { name: 'חסר' }).click();
     await expect(value).toHaveText('0');
     await expect(pad.getByRole('button', { name: 'פגום' })).toHaveAttribute('aria-pressed', 'false');
+    await expect(pad.getByRole('button', { name: 'פגום' })).toHaveAttribute('aria-disabled', 'true');
     const key = await pad.getByRole('button', { name: '1', exact: true }).boundingBox();
     expect(Math.round(key!.height)).toBe(64);
 

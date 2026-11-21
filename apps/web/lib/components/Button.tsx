@@ -18,8 +18,9 @@ export type ButtonVariant = 'primary' | 'secondary' | 'tertiary' | 'danger' | 'g
 export type ButtonSize = 'sm' | 'md' | 'lg' | 'xl';
 
 // Focus is the global :focus-visible outline (globals.css) — no per-variant rings.
+// Forced colours: fills and shadows are dropped, so every button keeps a 1 px ButtonText edge (the reference's rule).
 const base =
-  'relative inline-flex select-none items-center justify-center gap-1.5 rounded-control font-medium transition-colors duration-micro ease-standard disabled:cursor-not-allowed';
+  'relative inline-flex select-none items-center justify-center gap-1.5 rounded-control font-medium transition-colors duration-micro ease-standard disabled:cursor-not-allowed forced-colors:border forced-colors:border-[color:ButtonText]';
 
 const variants: Record<ButtonVariant, string> = {
   primary: 'bg-primary-bold text-on-bold hover:bg-primary-bold-hover active:bg-primary-bold-hover aria-pressed:bg-primary-bold-hover',

@@ -697,3 +697,55 @@ describe("DS3-00's requests to the shared components (PR #346, request 3)", () =
     expect(render(h(Card, { tone: 'warn' }, 'x'))).toContain('border-warn/40');
   });
 });
+
+describe('review fixes (accessibility of the shared components)', () => {
+  it('forced colours: every button and the toast keep a 1 px ButtonText edge; a checked segment an outline', async () => {
+    const { Button } = await import('../Button');
+    for (const variant of ['primary', 'secondary', 'ghost', 'danger']) {
+      expect(render(h(Button, { variant }, 'x')), variant).toContain('forced-colors:border-[color:ButtonText]');
+    }
+    const read = (rel: string) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+    expect(read('Toast.tsx')).toMatch(/bg-fg [^"]*forced-colors:border-\[color:ButtonText\]/);
+    const { SegmentedControl } = await import('../form/SegmentedControl');
+    const seg = render(h(SegmentedControl, { label: 'צפיפות', value: 'a', onChange: () => {}, options: [{ value: 'a', label: 'רגיל' }, { value: 'b', label: 'צפוף' }] }));
+    expect(seg).toMatch(/aria-checked="true"[^>]*forced-colors:outline-\[color:Highlight\]/);
+    expect(seg).not.toMatch(/aria-checked="false"[^>]*forced-colors:outline/);
+  });
+
+  it('a phone keeps the 44 px target on the segmented control; the switch track keeps its 44 × 24 shape', async () => {
+    const { SegmentedControl } = await import('../form/SegmentedControl');
+    for (const size of ['sm', 'md']) {
+      const seg = render(h(SegmentedControl, { label: 'x', value: 'a', size, onChange: () => {}, options: [{ value: 'a', label: 'א' }, { value: 'b', label: 'ב' }] }));
+      expect(seg, size).toContain('[@media(pointer:coarse)]:min-h-11');
+    }
+    const { Switch } = await import('../form/Switch');
+    const sw = render(h(Switch, { label: 'התראות', checked: true, onCheckedChange: () => {} }));
+    expect(sw).toMatch(/role="switch"[^>]*class="[^"]*h-6 min-h-6 w-11/);
+  });
+
+  it('NumberField: `label` names the input itself, not only the group', async () => {
+    const { NumberField } = await import('../form/NumberField');
+    const html = render(h(NumberField, { label: 'סף כמות', value: 5, min: 0, max: 20, onValueChange: () => {} }));
+    expect(html).toMatch(/<input[^>]*aria-label="סף כמות"/);
+  });
+
+  it('where the amount comes from: the operator and the equals sign are read, not hidden', async () => {
+    const { Calculation } = await import('../Calculation');
+    const html = render(h(Calculation, { terms: ['3 ק״ג', '12.90'], operator: 'times', result: '38.70' }));
+    expect(html).not.toMatch(/aria-hidden="true"[^>]*>(×|=)</);
+    expect(html).toMatch(/>×</);
+    expect(html).toMatch(/>=</);
+  });
+
+  it('Delta: the percent sits after a space outside its isolate, never glued to the ₪', async () => {
+    const { Delta } = await import('../money/Delta');
+    const html = render(h(Delta, { current: 746, previous: 760, goodWhen: 'down', showPercent: true }));
+    expect(html).toMatch(/<bdi class="num whitespace-nowrap">\([^)]*%\)<\/bdi>/);
+    expect(html).not.toContain('<bdi class="num whitespace-nowrap"> (');
+  });
+
+  it('the credit-request track keeps its markers in forced colours (like the dots)', () => {
+    const src = readFileSync(new URL('../StatusRail.tsx', import.meta.url), 'utf8');
+    expect(src).toContain('size-2.5 rounded-full forced-color-adjust-none');
+  });
+});

@@ -92,6 +92,8 @@ export function NumberField({
             autoComplete="off"
             value={text}
             disabled={disabled}
+            // Without a <Field>, `label` names the input itself, not only the group around it.
+            aria-label={label}
             aria-describedby={described}
             onChange={(e) => setText(e.target.value)}
             onBlur={() => {

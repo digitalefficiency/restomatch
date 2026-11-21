@@ -83,7 +83,13 @@ export function Delta({
           ) : (
             <bdi className="num whitespace-nowrap">{kind === 'pct' ? formatPercent(abs / 100, locale) : formatNumber(abs, locale)}</bdi>
           )}
-          {pct ? <bdi className="num whitespace-nowrap"> ({pct})</bdi> : null}
+          {/* The space stays outside the isolate, so in Hebrew it separates the percent from the amount. */}
+          {pct ? (
+            <>
+              {' '}
+              <bdi className="num whitespace-nowrap">({pct})</bdi>
+            </>
+          ) : null}
           {about ? ` ${about}` : null}
         </span>
       )}
