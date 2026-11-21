@@ -211,6 +211,8 @@ export const fontUrl = (set: FaceSet, subset: Subset, weight: number): string =>
  * Faces for more classes (Latin, the space, the digits) fitted a little closer but cost
  * first paint: each class splits text runs, and 20 faces delayed a throttled phone's
  * Hebrew first paint by 40–90 ms, where the Hebrew face alone cost nothing measurable.
+ * With every font held back 3 s (8 routes × he/en × 1440/390), 1 of 32 screen loads moved
+ * more than CLS 0.01 when the face swapped in, worst 0.031 (Plex: 3 of 32, worst 0.072).
  * While the fallback shows, ch and ex come from the catch-all (1ch ≈ 0.56 em; the face's
  * is 0.643 em), so nothing that paints before the face may be sized in ch or ex.
  */
@@ -248,6 +250,11 @@ export interface FontPreloads {
  * β budget: ≤50 KB preloaded (Plex 400 + 700 × hebrew + latin = 48.8 KiB).
  * Google Sans: one file per script holds all four weights (hebrew + latin = 46.6 KiB),
  * so nothing paints in a fallback weight once they arrive; ru also preloads Cyrillic.
+ * Rule 2 costs Google Sans first paint on a slow phone: Chromium holds the first paint
+ * for the preloaded files, and the latin file (35.6 KiB, every weight) arrives last.
+ * Measured (Pixel 7, 4× CPU, 1.6 Mbps): Hebrew pages preloading the hebrew file alone
+ * painted 236 ms sooner, on a par with Plex, and the latin file swapped in with CLS ≤ 0.0013;
+ * the cost is that digits (and so amounts) show in the fallback until it arrives.
  */
 export function fontPreloads(face: FaceId = ACTIVE_FACE): FontPreloads {
   if (face === 'heebo') {
