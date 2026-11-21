@@ -1,4 +1,5 @@
 import { sql, type Database } from '@restomatch/db';
+import { effectSql } from './decisions';
 import { computeLeakHero, type LeakHero } from './leak-hero';
 import { LEAK_FILTER, LIVE_DUPLICATE, originalChecked } from './leak-views';
 
@@ -120,7 +121,10 @@ export async function computeLeakReport(
     lines AS (
       SELECT inv.id AS invoice_id, inv.supplier_id, inv.status, d.type, d.resolution_status,
              ABS(d.delta_amount) AS amt,
-             (${LEAK_FILTER} AND ABS(d.delta_amount) > 0) AS counts
+             (${LEAK_FILTER} AND ABS(d.delta_amount) > 0) AS counts,
+             -- G-14 Q3: the line's ₪ effect from the decision table (undecided / claim / waive);
+             -- a tolerance row the engine auto-approved is a waiver (owner M7), not a claim.
+             ${effectSql()} AS effect
       FROM inv
       JOIN match_runs mr ON mr.invoice_id = inv.id AND mr.restaurant_id = ${restaurantId}
       JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
@@ -159,13 +163,13 @@ export async function computeLeakReport(
     db.execute(sql`
       WITH ${monthInv}
       SELECT
-        COALESCE(SUM(amt) FILTER (WHERE resolution_status IN ('open','escalated')), 0) AS open_amt,
-        COUNT(*) FILTER (WHERE resolution_status IN ('open','escalated')) AS open_c,
-        COALESCE(SUM(amt) FILTER (WHERE resolution_status IN ('accepted','resolved')), 0) AS claimed_amt,
-        COUNT(*) FILTER (WHERE resolution_status IN ('accepted','resolved')) AS claimed_c,
-        COALESCE(SUM(amt) FILTER (WHERE resolution_status = 'rejected'), 0) AS waived_amt,
-        COUNT(*) FILTER (WHERE resolution_status = 'rejected') AS waived_c,
-        COUNT(DISTINCT supplier_id) FILTER (WHERE resolution_status IN ('accepted','resolved')) AS credit_suppliers
+        COALESCE(SUM(amt) FILTER (WHERE effect = 'undecided'), 0) AS open_amt,
+        COUNT(*) FILTER (WHERE effect = 'undecided') AS open_c,
+        COALESCE(SUM(amt) FILTER (WHERE effect = 'claim'), 0) AS claimed_amt,
+        COUNT(*) FILTER (WHERE effect = 'claim') AS claimed_c,
+        COALESCE(SUM(amt) FILTER (WHERE effect = 'waive'), 0) AS waived_amt,
+        COUNT(*) FILTER (WHERE effect = 'waive') AS waived_c,
+        COUNT(DISTINCT supplier_id) FILTER (WHERE effect = 'claim') AS credit_suppliers
       FROM lines WHERE counts
     `),
   ]);

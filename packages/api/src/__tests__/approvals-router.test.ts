@@ -688,6 +688,25 @@ describe('claimability (verbs keyed by type AND claimability)', () => {
     expect(sum.others).toMatchObject({ count: 2, amountIls: 300 });
   });
 
+  it('a tolerance row the engine auto-approved takes no cap from the open rows: per-row ₪ = the tile (G-14 Q3, M7)', async () => {
+    const s = await seed();
+    const [i] = await db
+      .insert(invoices)
+      .values({ restaurantId: s.restaurantId, source: 'manual', status: 'matched', totalInclVat: '100.00' })
+      .returning();
+    const [mr] = await db
+      .insert(matchRuns)
+      .values({ restaurantId: s.restaurantId, invoiceId: i!.id, overallStatus: 'major', totalDiscrepancyAmount: '0' })
+      .returning();
+    // Cap ₪100. The engine accepted ₪90 within tolerance (rule, no person) — waived, never claimed.
+    await insertD(s, { matchRunId: mr!.id, type: 'PRICE_HIGHER', deltaAmount: '90.00', resolutionStatus: 'accepted', ruleId: 'minor-info' });
+    const open = await insertD(s, { matchRunId: mr!.id, type: 'QTY_SHORT', deltaAmount: '50.00', requiresRole: 'owner' });
+    const q = await ownerOf(s).approvals.myQueue({ limit: 100 });
+    const row = q.find((r) => r.id === open.id)!;
+    expect(row.claimable).toBe(true);
+    expect(row.claimAgorot).toBe(5000);
+  });
+
   it('an accepted duplicate is logged as a hold, never as a claim', async () => {
     const { DECISION_COPY } = await import('../notifications/templates');
     const { activityEvents } = await import('@restomatch/db');

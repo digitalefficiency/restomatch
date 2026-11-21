@@ -1,5 +1,5 @@
 import { AWAITING_QUESTION_SQL } from './awaiting-question';
-import { DECISION_KEY_SQL } from './decisions';
+import { DECISION_KEY_SQL, effectSql } from './decisions';
 import { sql, type Database } from '@restomatch/db';
 import { scanAwaitingCountSql } from './awaiting-count';
 import { LEAK_FILTER, LIVE_DUPLICATE, lineFilter, originalChecked, viewInvoicesSql, type ViewSpec } from './leak-views';
@@ -102,8 +102,10 @@ export function monthInvoicesCte(restaurantId: string, now: Date, offset: number
         COALESCE(inv.total_excl_vat, 0) AS total_excl,
         bool_or(mr.id IS NOT NULL) AS matched,
         COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER}), 0) AS raw_leak,
+        -- G-14 Q3: "accepted for a claim" = the decision table's 'claim' effect, so a tolerance
+        -- row the engine auto-approved (owner M7: waived) is never counted as recovered.
         COALESCE(SUM(ABS(d.delta_amount)) FILTER (
-          WHERE ${LEAK_FILTER} AND d.resolution_status IN ('accepted','resolved')
+          WHERE ${LEAK_FILTER} AND ${effectSql()} = 'claim'
         ), 0) AS raw_recovered,
         -- Pending = no PO link yet: an UNORDERED_ARRIVAL still open, or not matched
         -- at all (e.g. a parsed consolidated invoice waiting to be linked).
@@ -413,11 +415,11 @@ export function invoiceLeakStateCte(restaurantId: string, invoiceIds: readonly s
         COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER}), 0) AS raw_leak,
         LEAST(COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER}), 0), COALESCE(i.total_incl_vat, 0)) AS leak,
         COALESCE(SUM(ABS(d.delta_amount)) FILTER (
-          WHERE ${LEAK_FILTER} AND d.resolution_status IN ('accepted','resolved')
+          WHERE ${LEAK_FILTER} AND ${effectSql()} = 'claim'
         ), 0) AS raw_recovered,
         LEAST(
           COALESCE(SUM(ABS(d.delta_amount)) FILTER (
-            WHERE ${LEAK_FILTER} AND d.resolution_status IN ('accepted','resolved')
+            WHERE ${LEAK_FILTER} AND ${effectSql()} = 'claim'
           ), 0),
           LEAST(COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER}), 0), COALESCE(i.total_incl_vat, 0))
         ) AS recovered,

@@ -13,6 +13,8 @@ import {
   sql,
   type Database,
 } from '@restomatch/db';
+import { effectSql } from './decisions';
+import { LEAK_FILTER } from './leak-views';
 
 export interface OwnerKpis {
   monthPotentialLossIls: number;
@@ -81,19 +83,16 @@ export async function computeOwnerKpis(
       ),
     );
 
-  // 2. Savings captured — resolved/accepted discrepancies this month
-  const savings = await db
-    .select({
-      sum: sql<string>`COALESCE(SUM(${discrepancies.deltaAmount}), 0)`.as('sum'),
-    })
-    .from(discrepancies)
-    .where(
-      and(
-        eq(discrepancies.restaurantId, restaurantId),
-        inArray(discrepancies.resolutionStatus, ['accepted', 'resolved']),
-        gte(discrepancies.createdAt, startOfMonth),
-      ),
-    );
+  // 2. Savings captured — this month's findings decided as a claim (accepted / resolved).
+  //    G-14 Q3: the same shekel as every other ₪ figure — leak lines only (LEAK_FILTER), |Δ|
+  //    like the hero, and the decision table's 'claim' effect, so a tolerance row the engine
+  //    auto-approved (owner M7: waived) is never "captured".
+  const savings = (await db.execute(sql`
+    SELECT COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER} AND ${effectSql()} = 'claim'), 0) AS sum
+    FROM discrepancies d
+    WHERE d.restaurant_id = ${restaurantId}
+      AND d.created_at >= ${startOfMonth.toISOString()}::timestamptz
+  `)) as unknown as Array<{ sum: string | number | null }>;
 
   // 3. Pending approvals — open or escalated, any severity above info, minus
   //    the ₪0 QTY_SHORT twin of a short delivery billed in full (nothing to decide).

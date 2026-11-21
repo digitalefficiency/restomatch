@@ -18,6 +18,8 @@ import { computeLeakSummary } from '../leak-views';
 import { caughtBefore, computeLeakLedger, computeLeakPartition, dayIn, parseBasis, partitionOf, type LeakLedgerRow } from '../leak-ledger';
 import { computeLeakBreakdown } from '../leak-hero';
 import { MONEY_STATES, type ClaimStatus } from '../decisions';
+import { computeLeakReport } from '../leak-report';
+import { computeOwnerKpis } from '../owner-kpis';
 
 const db = createDb(testDbUrl());
 
@@ -480,5 +482,47 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
     expect(parseBasis('[1]')).toBeNull();
     expect(parseBasis('{"source":"gr"}')).toEqual({ source: 'gr' });
     expect(parseBasis(3)).toBeNull();
+  });
+});
+
+describe('G-14 Q3 · every screen counts the same shekel the same way', () => {
+  it('hero recovered, leak report open/claimed/waived, owner savings and the partition agree; tolerated = waived', async () => {
+    const { rid, invoice } = await setup();
+    await invoice({
+      inclVat: '1000.00',
+      d: [
+        // The engine auto-approved it within tolerance (owner M7): waived, never claimed.
+        { type: 'PRICE_HIGHER', delta: '5.00', status: 'accepted', tolerated: true },
+        { type: 'QTY_SHORT', delta: '6.00', status: 'accepted' },
+        { type: 'QTY_OVER', delta: '7.00', status: 'open' },
+        { type: 'UNORDERED_ITEM', delta: '8.00', status: 'rejected' },
+      ],
+    });
+
+    const hero = await computeLeakHero(db, rid, { now: NOW });
+    expect(hero.leakIls).toBe(26);
+    expect(hero.recoveredIls).toBe(6);
+
+    const report = await computeLeakReport(db, rid, '2026-10');
+    expect(report.status).toMatchObject({
+      stillOpenIls: 7,
+      stillOpenCount: 1,
+      claimedIls: 6,
+      claimedCount: 1,
+      waivedIls: 13,
+      waivedCount: 2,
+      creditRequestSuppliers: 1,
+    });
+
+    const kpis = await computeOwnerKpis(db, rid, { now: NOW });
+    expect(kpis.monthSavingsCapturedIls).toBe(6);
+
+    const p = await computeLeakPartition(db, rid, SPEC);
+    expect(p.driftAgorot).toBe(0);
+    expect(p.states.undecided).toBe(Math.round(report.status.stillOpenIls * 100));
+    expect(p.states.waived).toBe(Math.round(report.status.waivedIls * 100));
+    const claimStates = p.states.to_offset + p.states.to_send + p.states.requested + p.states.disputed + p.states.credited + p.states.recovered;
+    expect(claimStates).toBe(Math.round(hero.recoveredIls * 100));
+    expect(claimStates).toBe(Math.round(report.status.claimedIls * 100));
   });
 });

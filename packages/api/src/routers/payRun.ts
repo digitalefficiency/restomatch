@@ -3,7 +3,8 @@ import { z } from 'zod';
 import {
   AWAITING_QUESTION_SQL,
   LEAK_EXCLUDED_TYPES,
-  computeLeakBreakdown,
+  TOLERATED_SQL,
+  computeInvoicesLeak,
   computeLeakHero,
   scanAwaitingCountSql,
   type LeakBreakdownInvoice,
@@ -32,12 +33,6 @@ import { featureEnabled } from '../lib/features';
 import { canActOn } from '../lib/roles';
 import { vatAtRisk } from '../vat/vatAtRisk';
 
-/** 'YYYY-MM-DD' ± n calendar days (pure calendar counting). */
-function shiftDay(day: string, n: number): string {
-  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
-  const t = new Date(Date.UTC(y, m - 1, d + n));
-  return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
-}
 import { financeProcedure, router } from '../trpc';
 import { acknowledgedFlagsSchema, assertPreflightClear, makePreflightProcedures } from '../payRun/procedures';
 
@@ -66,7 +61,7 @@ const NOT_A_CREDIT_SQL = sql.join(
  *
  * "Not paid" is `invoices.status <> 'paid'` — the app has no payment rail; the
  * UI says "not marked as paid". No new leak math: the month bounds and the
- * per-invoice capped leak come from computeLeakHero / computeLeakBreakdown.
+ * per-invoice capped leak come from computeLeakHero / computeInvoicesLeak.
  * Finance roles only (owner / manager / bookkeeper), like the leak drill-down.
  */
 
@@ -237,6 +232,8 @@ function unpaidInvoicesSql(rid: string, window: { start: string; end: string } |
                  WHERE mr3.invoice_id = i.id AND mr3.restaurant_id = ${rid}
                    AND d.severity IN ('warn','block') AND ${statusInSql(sql`d.resolution_status`, CLAIMABLE_DECIDED_STATUSES)}
                    AND d.type NOT IN (${NOT_A_CREDIT_SQL}) AND ABS(d.delta_amount) > 0
+                   -- G-14 Q3 / owner M7: a tolerance row the engine auto-approved is waived.
+                   AND NOT ${TOLERATED_SQL}
                ) AS accepted_ils,
                -- …a non-waived duplicate copy is held ("don't pay this copy"); its ₪ is the copy's total.
                (
@@ -672,22 +669,13 @@ export const payRunRouter = router({
       }
       const raw = rowsOf(await ctx.db.execute(unpaidInvoicesSql(rid, window)));
 
-      // Per-invoice capped leak for every listed invoice. INTERIM (TODO(W2-09a)): a custom
-      // view over the rows' span; swap for the batch `computeInvoicesLeak` when it lands.
-      // Past its 200-row window the SQL safety net above still holds / credits the row.
+      // Per-invoice capped leak for EVERY listed invoice (G-14 Q3: the batch computeInvoicesLeak,
+      // no 200-row window), so each row's claim ₪ comes from the same lines and rules as the
+      // letters (claimableLines: tolerated rows waived, M7). The SQL safety net above stays for
+      // an id the batch does not return.
       let byInvoice = new Map<string, LeakBreakdownInvoice>();
       if (raw.length) {
-        const days = raw.map((r) => jerusalemDayKey(iso(r.at))!).sort();
-        const breakdown = await computeLeakBreakdown(ctx.db, rid, {
-          limit: 200,
-          view: {
-            period: 'custom',
-            from: shiftDay(days[0]!, -1),
-            to: shiftDay(days[days.length - 1]!, 1),
-            now,
-          },
-        });
-        byInvoice = new Map(breakdown.map((b) => [b.invoiceId, b]));
+        byInvoice = await computeInvoicesLeak(ctx.db, rid, raw.map((r) => String(r.id)));
       }
 
       // "חסר מספר הקצאה" hold — read-only reuse of vatAtRisk().
@@ -863,14 +851,13 @@ export async function computePayRunMonth(
     };
   }
   const hero = await computeLeakHero(db, rid, { monthOffset });
-  const breakdown = await computeLeakBreakdown(db, rid, { monthOffset, limit: 200 });
-  const byInvoice = new Map(breakdown.map((b) => [b.invoiceId, b]));
-
   // The month's invoices not marked paid (matched, or read but waiting for a PO link) — same
   // date rule as the hero.
   const res = await db.execute(
     unpaidInvoicesSql(rid, { start: hero.monthStart, end: hero.monthEnd }),
   );
+  // G-14 Q3: every listed invoice's leak from the batch (no 200-row window).
+  const byInvoice = await computeInvoicesLeak(db, rid, rowsOf(res).map((r) => String(r.id)));
 
   const groups = new Map<string, PayRunSupplier & { a: Record<string, number> }>();
   for (const row of rowsOf(res)) {
