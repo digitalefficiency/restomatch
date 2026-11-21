@@ -27,10 +27,12 @@ const Shell: React.FC<{ d: number; children: React.ReactNode }> = ({ d, children
 
 type Beat = { from: number; d: number; el: (l: Locale) => React.ReactNode };
 
-// Main film timeline (30 fps). Overlaps of ~8 frames = crossfades.
-const RECEIVER_FROM = 986; // overlaps the laptop exit — no empty frame
+// Main film timeline (30 fps). Overlaps of ~8 frames = crossfades — EXCEPT around the receiver:
+// there it DIPS (the laptop is gone before the phone fades in, and the phone is gone before the
+// Value ₪ count-ups appear), so no ₪ from a neighbouring beat ever shows through the receiver phone.
+const RECEIVER_FROM = 440 + PRODUCT_DURATION; // 996: Product (incl. its own fade-out) has ended
 // no chains beat: the site's sample month has no branch figures
-const VALUE_FROM = RECEIVER_FROM + RECEIVER_DURATION - 8;
+const VALUE_FROM = RECEIVER_FROM + RECEIVER_DURATION; // 1246: the receiver has faded out
 export const TIMELINE: Beat[] = [
   { from: 0, d: 180, el: (l) => <Hook locale={l} /> },
   { from: 172, d: 206, el: (l) => <Problem locale={l} /> },
@@ -103,7 +105,7 @@ const Promo: React.FC<Props> = ({ locale, light, probe }) => {
     </AbsoluteFill>
   );
 };
-// scripts/frame-check.mjs probes the receiver-only window 996–1227 (= 440 + PRODUCT_DURATION … VALUE_FROM − 1)
+// scripts/frame-check.mjs probes 986–1253 (the receiver beat 996–1245 plus both boundaries)
 const Loop: React.FC<Props> = ({ locale, light }) => {
   setStage(light ?? true);
   return <HeroLoop locale={locale} light={light ?? true} />;

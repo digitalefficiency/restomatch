@@ -5,7 +5,8 @@
 //    the poster frame, with the `probe` input prop, so each frame logs the text of everything
 //    mounted on it (src/Root.tsx Probe). Asserts:
 //      · the "דוגמה · מספרים להמחשה / Sample · illustrative figures" tag is on EVERY frame
-//      · NO ₪ anywhere on a receiver-beat frame (WINDOWS.receiverOnly)
+//      · NO ₪ on ANY frame where the receiver beat is mounted (probed 986–1253, both boundaries
+//        frame by frame — the beats dip there, so a neighbour's ₪ never shows through the phone)
 //      · no URL / domain on any frame
 // 2. Pixels, the shipped files: grabs a frame every 2 s from apps/web/public/media/promo-{he,en}-720.mp4
 //    and checks the tag pill is drawn on each (same pixels as the reference grab), checks the posters
@@ -45,7 +46,9 @@ const bad = (m) => {
 // ── 1. DOM ────────────────────────────────────────────────────────────────────────────────────────
 const serveUrl = await bundle({ entryPoint: resolve(ROOT, 'src/index.ts'), publicDir: resolve(ROOT, 'public') });
 // keep in step with src/Root.tsx (TIMELINE): Product 440..996, Receiver 986..1236, Value from 1228
-const RECEIVER_ONLY = [996, 1227];
+// keep in step with src/Root.tsx: Product 440..995, Receiver 996..1245 (dips both sides), Value from 1246
+const RECEIVER_WINDOW = [986, 1253];
+const RECEIVER_MARK = { he: 'חדש · פיצ׳ר הדגל', en: 'New · flagship feature' }; // the beat's badge = it is mounted
 const LAST = 1799;
 const tmp = mkdtempSync(join(tmpdir(), 'frame-check-'));
 
@@ -57,10 +60,11 @@ for (const locale of ['he', 'en']) {
   for (let f = 0; f <= LAST; f += 2 * FPS) frames.add(f);
   frames.add(LAST);
   frames.add(Math.round(POSTER_S * FPS));
-  for (let f = RECEIVER_ONLY[0]; f <= RECEIVER_ONLY[1]; f += 6) frames.add(f);
-  frames.add(RECEIVER_ONLY[1]);
+  for (let f = RECEIVER_WINDOW[0]; f <= RECEIVER_WINDOW[1]; f += 6) frames.add(f);
+  for (const [a, b] of [[986, 1000], [1238, 1253]]) for (let f = a; f <= b; f++) frames.add(f); // the boundaries, every frame
   let tagMiss = 0;
   let ilsInReceiver = 0;
+  let receiverFrames = 0;
   let urls = 0;
   for (const frame of [...frames].sort((a, b) => a - b)) {
     let text = null;
@@ -85,7 +89,9 @@ for (const locale of ['he', 'en']) {
       tagMiss++;
       bad(`${locale} frame ${frame} (${(frame / FPS).toFixed(1)} s): Sample tag missing`);
     }
-    if (frame >= RECEIVER_ONLY[0] && frame <= RECEIVER_ONLY[1] && text.includes('₪')) {
+    const receiverOn = text.includes(RECEIVER_MARK[locale]);
+    if (receiverOn) receiverFrames++;
+    if (receiverOn && text.includes('₪')) {
       ilsInReceiver++;
       bad(`${locale} frame ${frame} (${(frame / FPS).toFixed(1)} s): ₪ in the receiver beat: ${JSON.stringify(text.slice(0, 200))}`);
     }
@@ -94,9 +100,9 @@ for (const locale of ['he', 'en']) {
       bad(`${locale} frame ${frame}: a URL is on screen`);
     }
   }
-  const nRecv = [...frames].filter((f) => f >= RECEIVER_ONLY[0] && f <= RECEIVER_ONLY[1]).length;
+  if (receiverFrames < 40) bad(`${locale}: only ${receiverFrames} probed frames had the receiver beat mounted`);
   if (!tagMiss) ok(`${locale}: Sample tag on all ${frames.size} probed frames (every 2 s + receiver beat + poster)`);
-  if (!ilsInReceiver) ok(`${locale}: no ₪ on ${nRecv} receiver-beat frames (${(RECEIVER_ONLY[0] / FPS).toFixed(1)}–${(RECEIVER_ONLY[1] / FPS).toFixed(1)} s, every 0.2 s)`);
+  if (!ilsInReceiver) ok(`${locale}: no ₪ on any of the ${receiverFrames} probed frames with the receiver beat mounted (${(RECEIVER_WINDOW[0] / FPS).toFixed(2)}–${(RECEIVER_WINDOW[1] / FPS).toFixed(2)} s; boundaries frame by frame)`);
   if (!urls) ok(`${locale}: no URL on any probed frame`);
 }
 

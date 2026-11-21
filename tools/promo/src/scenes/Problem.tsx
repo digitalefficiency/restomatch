@@ -118,7 +118,7 @@ export const Problem: React.FC<{ locale: Locale }> = ({ locale }) => {
   const shake = f > 60 && f < 168 ? Math.sin(f * 1.7) * 2.2 * (1 - out) : 0;
 
   const stamps = [
-    { card: 2, text: t.stampPrice.replace('{pct}', risePct(FILM.keg.usual, FILM.keg.latest)), at: 78 },
+    { card: 2, text: t.stampPrice.replace('{pct}', `\u2066${risePct(FILM.keg.usual, FILM.keg.latest)}\u2069`) /* LTR isolate: the sign stays left of the number in he */, at: 78 },
     { card: 5, text: t.stampShort, at: 96 },
     { card: 7, text: t.stampUnordered, at: 114 },
   ];

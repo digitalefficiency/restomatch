@@ -142,7 +142,11 @@ describe('W3-06 · promo film: text alternative + next step in the dialog', () =
     expect(btn).toMatch(/aria-describedby=\{transcriptId\}/);
     expect(btn).toMatch(/<ol\s+id=\{transcriptId\}/);
     expect(btn).toMatch(/aria-expanded=\{showTranscript\}/); // a visible, labelled toggle
-    expect(btn).toMatch(/tabIndex=\{0\}\s*aria-label=\{transcriptLabel\}/); // keyboard-scrollable list
+    // the scroll box is the focusable, labelled region…
+    expect(btn).toMatch(/role="region"\s*tabIndex=\{0\}\s*aria-label=\{transcriptLabel\}/);
+    // …and the describedby target stays unlabelled, so the description is the scene lines, not the label
+    expect(btn).toMatch(/<ol id=\{transcriptId\} lang=\{lang\} className="[^"]*">/);
+    expect(btn).not.toMatch(/<ol[^>]*aria-label/);
     expect(btn).toMatch(/<span key=\{i\} lang=\{other\}/); // other-language runs carry lang
     expect(btn).toMatch(/className="sticky bottom-0/); // the CTA stays visible on short screens
     expect(btn).toMatch(/href=\{ctaHref\}/);

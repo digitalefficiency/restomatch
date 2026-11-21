@@ -126,24 +126,27 @@ export function PromoVideoButton({
         </div>
         {/* The transcript region: always in the DOM (the video's description), shown on demand. */}
         <div id={regionId} hidden={!showTranscript} className="border-t border-line px-4 py-3 text-sm">
-          <ol
-            id={transcriptId}
-            lang={lang}
+          {/* The scroll box is the focusable, labelled region; the <ol> inside stays UNLABELLED,
+              because it is the video's aria-describedby target and must read as the scene lines. */}
+          <div
+            role="region"
             tabIndex={0}
             aria-label={transcriptLabel}
-            className="max-h-48 space-y-1.5 overflow-y-auto rounded-lg pe-2 text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            className="max-h-48 overflow-y-auto rounded-lg pe-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
           >
-            {transcript.map((l) => (
-              <li key={l.at} className="flex gap-2">
-                <span className="shrink-0 font-semibold tabular-nums text-ink" dir="ltr">
-                  {l.at}
-                </span>
-                <span>
-                  <Runs text={l.text} lang={lang} />
-                </span>
-              </li>
-            ))}
-          </ol>
+            <ol id={transcriptId} lang={lang} className="space-y-1.5 text-muted">
+              {transcript.map((l) => (
+                <li key={l.at} className="flex gap-2">
+                  <span className="shrink-0 font-semibold tabular-nums text-ink" dir="ltr">
+                    {l.at}
+                  </span>
+                  <span>
+                    <Runs text={l.text} lang={lang} />
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </div>
         </div>
         {/* sticky: the next step stays on screen even when the modal scrolls (1366×768 laptops) */}
         <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-line bg-bg px-4 py-2">

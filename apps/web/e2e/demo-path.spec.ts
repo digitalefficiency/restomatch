@@ -437,7 +437,9 @@ test('A · landing + 60-second promo (logged out)', async ({ page }, info) => {
     const transcriptId = await video.getAttribute('aria-describedby');
     expect(transcriptId, 'promo <video aria-describedby>').toBeTruthy();
     await expect(dialog.locator(`[id="${transcriptId}"] li`).first()).toBeAttached();
-    // 1366×768: the footer CTA stays on screen (sticky), not clipped below the scrolling modal
+    // 1366×768 with the transcript OPEN (the dialog now scrolls): the footer CTA stays on screen
+    await dialog.getByRole('button', { name: t.hero.watchTranscript }).click();
+    await expect(dialog.locator(`[id="${transcriptId}"]`)).toBeVisible();
     await expect(dialog.getByRole('link', { name: t.hero.ctaPrimary })).toBeInViewport({ ratio: 1 });
     const src = await video.getAttribute('src');
     expect(src, 'promo <video src>').toBeTruthy();

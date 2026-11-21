@@ -101,15 +101,16 @@ export const APPROVED_MEDIA_FILES: Readonly<Record<string, string>> = {
   // S10 #318 @b0937588 9:16 poster WebPs (540×960, 810×1440) — same frame as hero-poster-9x16.jpg.
   '/media/hero-poster-9x16-540.webp': '3b451f8fc3f98b37a1dab53f57192be0fea5f59dc3f5a50e1104da31222615fe',
   '/media/hero-poster-9x16-810.webp': '0f014686e33de7f7ceca2108b69e10e45ee4675b61b9da9cd41e63b9d9b46b5b',
-  // #320 review-fix re-render, round 2 (14.11: end card = the real CTA, ₪720 T2, stamps readable), from the sample month only. Frame gate
+  // #320 review-fix re-render, round 3 (14.11: dips around the receiver beat, he stamp sign left; round 2: end card = the
+  // real CTA, ₪720 T2, stamps readable), from the sample month only. Frame gate
   // (tools/promo/scripts/frame-check.mjs, he + en): DOM probe every 2 s + every 0.2 s through the
-  // receiver beat (33.2–40.9 s) + the poster — Sample tag on every frame, NO ₪ in the receiver beat
+  // receiver beat (986–1253, boundaries frame by frame) + the poster — Sample tag on every frame, NO ₪ on any frame with the receiver beat mounted
   // (drawn screen: quantities and states only), no URL; pixel check of the tag on every 2 s grab of
   // the files below and on the posters. ₪ at the visual left in Hebrew; "פער" for undecided money.
-  '/media/promo-he-720.mp4': '40d41107df594f9981b96a33d4edee0b7216e5ba5a0372f9b9a27668327cf00d',
-  '/media/promo-en-720.mp4': '0547675725d511e50851de8d3c180ff842868ad9b5d75a5c8ec3c80749dca83e',
-  '/media/promo-poster-he.jpg': 'e496b602babd00b2f49b3f7b3606f1e7f100cbd735db775a0aed2833643ebfb4',
-  '/media/promo-poster-en.jpg': '67f0bcaec1c8d3b69f0268c027616940e8b0ce1ef81a1b30b108d413a68b1056',
+  '/media/promo-he-720.mp4': '517d92ec2220a544a938250c498657756da44d865de069246e6cd919437ade1d',
+  '/media/promo-en-720.mp4': '2b98e35ecb83d59df046f8ac8a6e6b5c8f03c666a900b5112aec8f5351d950eb',
+  '/media/promo-poster-he.jpg': 'aaa3416f9ab8ecf86929e77c86cebad3bc2aa2aa8a1c2c591cc6216f00c203e4',
+  '/media/promo-poster-en.jpg': '63ca8ec304c249ad51ac55f215fd492bd7fb0fd749d44cf26254af0e038d5a1b',
 };
 
 /** SHA-256 of rejected promo films + posters (the ₪760 cut, and #318's demo-seed receiver beat): never approvable. */
@@ -130,6 +131,26 @@ export const REJECTED_PROMO_SHA256: readonly string[] = [
   '88304eef45d9601377a92efc407b32356bde33427b3a05e38e316e94f53bcf1a', // promo-en-720.mp4
   '7390e09750e9be1edf8e402e636c3e16d33faf430937ce3b7e3139bfe521fa2d', // promo-poster-he.jpg
   '92570bbb49650a52c6b58b41723c250b1ba9083c6796b3cd5a97a51c16968614', // promo-poster-en.jpg
+  // #320 @fcc7b7c3 round-2 render — superseded (receiver beat crossfaded with the laptop's ₪ rows).
+  '40d41107df594f9981b96a33d4edee0b7216e5ba5a0372f9b9a27668327cf00d', // promo-he-720.mp4
+  '0547675725d511e50851de8d3c180ff842868ad9b5d75a5c8ec3c80749dca83e', // promo-en-720.mp4
+  'e496b602babd00b2f49b3f7b3606f1e7f100cbd735db775a0aed2833643ebfb4', // promo-poster-he.jpg
+  '67f0bcaec1c8d3b69f0268c027616940e8b0ce1ef81a1b30b108d413a68b1056', // promo-poster-en.jpg
+  // Older demo-seed cuts from git history (commit · date): demo tenant figures, never approvable.
+  '80f421ba7adc5b4f15dac8669d5e717c97bbdf0206ead868b17830f851900b25', // promo-he-720.mp4 · ea385511 · 2026-10-18
+  '76bab579633298c961a295ac01baf7811897f0c6e7eab5af340b5155abba8517', // promo-he-720.mp4 · b6882440 · 2026-10-18
+  '0cf98f7df912ec23465a4f5252c4a142747b5e000dc315eae17226dea51b874d', // promo-he-720.mp4 · 056bfd07 · 2026-10-18
+  '2e4e113f3573def275275afd81255539656957fb4a92055a480cf71cd074423a', // promo-he-720.mp4 · a27db0f3 · 2026-10-24
+  '07654f0becd5900665914eff3cc00da64125b1bbc2a85981dff2f61640596e1f', // promo-he-720.mp4 · 54858771 · 2026-10-24
+  '2c49ee912d753458a72b6efc37345906a9e38c9b60a000b6f6ae0cec28f14946', // promo-en-720.mp4 · baf0a54e · 2026-10-24
+  'a7701137be3f4a9994492e0afe4a8f83a005b9ef32b754a966c1aeadad311917', // promo-en-720.mp4 · 472b183e · 2026-10-24
+  'c5d45dc4551697750693bed043c0405805e73398b4343e01fd5888b83e8d3589', // promo-poster-he.jpg · ea385511 · 2026-10-18
+  '7abc7117a015d94db23f93e89c751b0659099a7011c807065f34e68f93b198c7', // promo-poster-he.jpg · b6882440 · 2026-10-18
+  '6f395bb8d1238ced8411421d263129a4d74341b20cbbdad7ec2eb682ea5ccd09', // promo-poster-he.jpg · 056bfd07 · 2026-10-18
+  'c8a3dd65db6da850c5086a5ce5942b65dfb8df8dd9cb68f5bc0a63d50e523d64', // promo-poster-he.jpg · a27db0f3 · 2026-10-24
+  '73ae8813d330392803aa3bf1f6f08afb934db994f5d276d8d59a6ca70f50223b', // promo-poster-he.jpg · 54858771 · 2026-10-24
+  '3d5345f92dce7f1f30fc37e4ba29661495bee7c7a205d4cb397435930d511277', // promo-poster-en.jpg · baf0a54e · 2026-10-24
+  'd8b36b0c759acdd0112abb34dfb7d8f3bfac078f77999aa5c4ea63a85cbf25f2', // promo-poster-en.jpg · 472b183e · 2026-10-24
 ];
 
 /**
