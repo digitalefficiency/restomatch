@@ -13,6 +13,7 @@ export const nav: Shape<typeof he> = {
     labDesk: 'ቤት ፈተነ ሰንጠረዥ',
     labDeskRow: 'መስመር',
     approvals: 'ምጽዳቕ',
+    approvalInvoice: 'ውሳነ ፋክቱር',
     payRun: 'ዙርያ ክፍሊት',
     inbox: 'ዝኣተዉ ፋቱራታት',
     invoices: 'ፋቱራታት',
@@ -28,6 +29,7 @@ export const nav: Shape<typeof he> = {
     supplierDetail: 'ኣቕራቢ',
     supplierLeakCard: 'ካርድ ብኽነት ኣቕራቢ',
     exports: 'ምዕጻው ወርሒ ከምኡ’ውን ምውጻእ',
+    close: 'ምዕጻው ወርሒ', // review
     reports: 'ጸብጻባት',
     monthlyReport: 'ወርሓዊ ጸብጻብ',
     digest: 'ቅድመ-ርእይቶ ወርሓዊ ኢመይል',
@@ -36,6 +38,7 @@ export const nav: Shape<typeof he> = {
     ordersNew: 'ሓድሽ ትእዛዝ',
     ordersCapture: 'ትእዛዝ ካብ WhatsApp',
     orderDetail: 'ትእዛዝ',
+    recoverySupplierSheet: 'ገጽ ኣቕራቢ',
     receiving: 'ምቕባል ኣቕሓ',
     receivingPo: 'ምቕባል ጽዕነት',
     catalog: 'ካታሎግ',
@@ -52,10 +55,12 @@ export const nav: Shape<typeof he> = {
     inventoryCount: 'ቆጸራ',
     inventoryDetail: 'ዝርዝር ቆጸራ',
     chain: 'ሓፈሻዊ ርእይቶ ሰንሰለት',
+    chainMatrix: 'ኩሎም ጨንፈራት', // review
     branches: 'ጨናፍር',
     team: 'ጉጅለ',
     integrations: 'ምትእስሳራት',
     settings: 'ቅጥዕታት',
+    automations: 'ኣውቶሜሽን',
   },
   bar: {
     today: 'ሎሚ',
@@ -126,4 +131,25 @@ export const nav: Shape<typeof he> = {
     ownerNotified: 'ወናኒ ተሓቢሩ ኣሎ።',
   },
   loading: 'ይጽዓን ኣሎ',
+  badge: {
+    items: '{count} ኣቕሓታት',
+    atRisk: '{amount} ኣብ ሓደጋ',
+    owed: '{amount} ክፉት ክረዲት',
+    blocking: 'ክፍሊት የዕግት',
+  },
+  bell: {
+    activity: 'እንታይ ተፈጺሙ',
+    label: 'ይጽበየካ ኣሎ',
+    unseen: '{count} ሓደሽቲ',
+    title: 'ይጽበየካ ኣሎ',
+    empty: 'ብወገንካ ኩሉ ተፈጺሙ ✓',
+    close: 'ዕጸው',
+    all: 'ናብ መበገሲ',
+    failed: 'ኣይተጻዕነን · እንደገና ፈትን',
+    retry: 'እንደገና ፈትን',
+  },
+  whereIs: {
+    belongs: 'እዚ መዝገብ ናይ {branch} እዩ',
+    open: 'ኣብኡ ክፈቶ',
+  },
 };

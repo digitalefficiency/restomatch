@@ -17,6 +17,7 @@ import {
   subscriptions,
   suppliers,
   testDbUrl,
+  users,
   type Database,
 } from '@restomatch/db';
 import { appRouter } from '../index';
@@ -230,6 +231,247 @@ describe('chain.overview', () => {
       code: 'FORBIDDEN',
       message: 'ENTITLEMENT_REQUIRED:chain',
     });
+  });
+});
+
+/* ── W3-01 · chain.matrix + chain.branchPeek (add-only) ───────────────────── */
+describe('chain.matrix (W3-01)', () => {
+  let bookkeeperId: string;
+  beforeAll(async () => {
+    // A bookkeeper on A and A2 (ACCT), and on X (another account) — never B or M.
+    const [u] = await ownerDb
+      .insert(users)
+      .values({ email: 'bookkeeper-w301@attack.test', name: 'Bookkeeper W3-01', emailVerified: new Date() })
+      .returning();
+    bookkeeperId = u!.id;
+    await ownerDb.insert(memberships).values([
+      { userId: bookkeeperId, restaurantId: A.restaurantId, role: 'bookkeeper' },
+      { userId: bookkeeperId, restaurantId: A2.restaurantId, role: 'bookkeeper' },
+      { userId: bookkeeperId, restaurantId: X.restaurantId, role: 'bookkeeper' },
+    ]);
+  });
+
+  const ids = (m: { branches: { restaurantId: string }[] }) => m.branches.map((b) => b.restaurantId).sort();
+
+  it('scope all = A + A2 only; the pinned total equals chain.overview totals to the agora', async () => {
+    const m = await asA().chain.matrix();
+    const o = await asA().chain.overview();
+    expect(ids(m)).toEqual([A.restaurantId, A2.restaurantId].sort());
+    expect(m.pool.map((b) => b.restaurantId).sort()).toEqual([A.restaurantId, A2.restaurantId].sort());
+    expect(m.branches.every((b) => b.status === 'ok')).toBe(true);
+    expect(m.totals.partial).toBe(false);
+    for (const k of ['leakIls', 'spendIls', 'claimedIls', 'caughtBeforePaymentIls', 'pendingApprovals'] as const) {
+      expect(Math.round(m.totals[k] * 100)).toBe(Math.round(o.totals[k] * 100));
+    }
+    const ok = m.branches.filter((b) => b.status === 'ok');
+    const sumAg = (f: (b: (typeof ok)[number]) => number) => ok.reduce((s, b) => s + Math.round(f(b) * 100), 0);
+    expect(Math.round(m.totals.awaitingIls * 100)).toBe(sumAg((b) => (b.status === 'ok' ? b.awaitingIls : 0)));
+    expect(m.worstBranchId).toBe(A.restaurantId);
+    expect(m.lens).toBe('owner');
+    const a = m.branches.find((b) => b.restaurantId === A.restaurantId);
+    expect(a?.status === 'ok' && a.state).toBe('leak');
+    expect(JSON.stringify(m)).not.toContain(B.restaurantId);
+    expect(JSON.stringify(m)).not.toContain(M.restaurantId);
+    expect(JSON.stringify(m)).not.toContain(X.restaurantId);
+  });
+
+  it('scope <id> narrows to one owned branch; B, M or a random id → NOT_FOUND', async () => {
+    const one = await asA().chain.matrix({ scope: A2.restaurantId });
+    expect(ids(one)).toEqual([A2.restaurantId]);
+    expect(one.totals.leakIls).toBe(40);
+    for (const bad of [B.restaurantId, M.restaurantId, X.restaurantId, randomUUID()]) {
+      await expect(asA().chain.matrix({ scope: bad })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    }
+  });
+
+  it('scope g:<group> = the active billing account only; another group → NOT_FOUND; junk → all', async () => {
+    const g = await asA().chain.matrix({ scope: `g:${acct}` });
+    expect(ids(g)).toEqual([A.restaurantId, A2.restaurantId].sort());
+    await expect(asA().chain.matrix({ scope: `g:${randomUUID()}` })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const junk = await asA().chain.matrix({ scope: "g:'; drop table x --" });
+    expect(junk.scope).toEqual({ kind: 'all' });
+    expect(ids(junk)).toEqual([A.restaurantId, A2.restaurantId].sort());
+  });
+
+  it('bookkeeper on the chain account reads the matrix (A + A2), never B / M / X', async () => {
+    const m = await caller(bookkeeperId, A.restaurantId, 'bookkeeper').chain.matrix();
+    expect(m.lens).toBe('bookkeeper');
+    expect(ids(m)).toEqual([A.restaurantId, A2.restaurantId].sort());
+    expect(m.totals.leakIls).toBe(140);
+    for (const other of [B.restaurantId, M.restaurantId, X.restaurantId]) expect(JSON.stringify(m)).not.toContain(other);
+    const bk = caller(bookkeeperId, A.restaurantId, 'bookkeeper');
+    expect(ids(await bk.chain.matrix({ scope: `g:${acct}` }))).toEqual([A.restaurantId, A2.restaurantId].sort());
+    for (const bad of [X.restaurantId, B.restaurantId, M.restaurantId, randomUUID(), `g:${randomUUID()}`]) {
+      await expect(bk.chain.matrix({ scope: bad })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    }
+  });
+
+  it('bookkeeper active on X (another account) sees X alone, never A or A2', async () => {
+    const m = await caller(bookkeeperId, X.restaurantId, 'bookkeeper').chain.matrix();
+    expect(ids(m)).toEqual([X.restaurantId]);
+    expect(JSON.stringify(m)).not.toContain(A.restaurantId);
+    expect(JSON.stringify(m)).not.toContain(A2.restaurantId);
+  });
+
+  it('a forged session role is ignored: the DB membership decides the lens', async () => {
+    const forged = caller(bookkeeperId, A.restaurantId, 'owner');
+    expect((await forged.chain.matrix()).lens).toBe('bookkeeper');
+    await expect(forged.chain.overview()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('bookkeeper stays read-only: chain writes and the owner-only overview are FORBIDDEN / NOT_FOUND', async () => {
+    const bk = caller(bookkeeperId, A.restaurantId, 'bookkeeper');
+    await expect(bk.chain.overview()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(bk.chain.addBranch({ name: 'bk branch' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(bk.chain.renameBranch({ restaurantId: A2.restaurantId, name: 'renamed by bk' })).rejects.toThrow();
+    const [a2] = await ownerDb.select({ name: restaurants.name }).from(restaurants).where(eq(restaurants.id, A2.restaurantId));
+    expect(a2?.name).not.toBe('renamed by bk');
+  });
+
+  it('manager-only active branch and a forged session (B, no membership) → FORBIDDEN', async () => {
+    await expect(caller(A.ownerUserId, M.restaurantId, 'owner').chain.matrix()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller(A.ownerUserId, B.restaurantId, 'owner').chain.matrix()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller(bookkeeperId, B.restaurantId, 'bookkeeper').chain.matrix()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('branchPeek: own branch only; B / M / X / random → NOT_FOUND; forged session → FORBIDDEN', async () => {
+    const p = await asA().chain.branchPeek({ restaurantId: A2.restaurantId });
+    expect(p.restaurantId).toBe(A2.restaurantId);
+    expect(p.leakIls).toBe(40);
+    expect(p.biggestInvoices.length).toBeGreaterThan(0);
+    for (const leak of [B.restaurantId, B.supplierId, M.restaurantId, M.supplierId, X.restaurantId]) {
+      expect(JSON.stringify(p)).not.toContain(leak);
+    }
+    for (const bad of [B.restaurantId, M.restaurantId, X.restaurantId, randomUUID()]) {
+      await expect(asA().chain.branchPeek({ restaurantId: bad })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    }
+    await expect(caller(A.ownerUserId, B.restaurantId, 'owner').chain.branchPeek({ restaurantId: A.restaurantId })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+    const bkCaller = caller(bookkeeperId, A.restaurantId, 'bookkeeper');
+    const bk = await bkCaller.chain.branchPeek({ restaurantId: A2.restaurantId });
+    expect(bk.leakIls).toBe(40);
+    for (const bad of [B.restaurantId, M.restaurantId, X.restaurantId, randomUUID()]) {
+      await expect(bkCaller.chain.branchPeek({ restaurantId: bad })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    }
+  });
+});
+
+/* ── W3-01b · chain.byBranch (add-only) ───────────────────────────────────── */
+describe('chain.byBranch (W3-01b)', () => {
+  let bkId: string;
+  const prevSettings = new Map<string, unknown>();
+  const KINDS = ['approvals', 'payRun'] as const;
+  const others = [() => B.restaurantId, () => M.restaurantId, () => X.restaurantId];
+
+  beforeAll(async () => {
+    const [u] = await ownerDb
+      .insert(users)
+      .values({ email: 'bookkeeper-w301b@attack.test', name: 'Bookkeeper W3-01b', emailVerified: new Date() })
+      .returning();
+    bkId = u!.id;
+    await ownerDb.insert(memberships).values([
+      { userId: bkId, restaurantId: A.restaurantId, role: 'bookkeeper' },
+      { userId: bkId, restaurantId: A2.restaurantId, role: 'bookkeeper' },
+      { userId: bkId, restaurantId: X.restaurantId, role: 'bookkeeper' },
+    ]);
+  });
+
+  afterAll(async () => {
+    for (const [id, settings] of prevSettings) {
+      await ownerDb.update(restaurants).set({ settings: settings as never }).where(eq(restaurants.id, id));
+    }
+  });
+
+  async function payRunOn(t: Tenant) {
+    const [r] = await ownerDb.select({ settings: restaurants.settings }).from(restaurants).where(eq(restaurants.id, t.restaurantId));
+    if (!prevSettings.has(t.restaurantId)) prevSettings.set(t.restaurantId, r?.settings ?? {});
+    const s = (r?.settings ?? {}) as { features?: Record<string, unknown> };
+    await ownerDb
+      .update(restaurants)
+      .set({ settings: { ...s, features: { ...(s.features ?? {}), payRun: true } } as never })
+      .where(eq(restaurants.id, t.restaurantId));
+  }
+
+  it('approvals per branch equal each branch’s own approvals.queueSummary; A + A2 only, every row ok', async () => {
+    const r = await asA().chain.byBranch({ kind: 'approvals' });
+    expect(r.rows.map((x) => x.restaurantId).sort()).toEqual([A.restaurantId, A2.restaurantId].sort());
+    expect(r.rows.every((x) => x.status === 'ok')).toBe(true);
+    for (const t of [A, A2]) {
+      const own = await caller(A.ownerUserId, t.restaurantId).approvals.queueSummary();
+      const row = r.rows.find((x) => x.restaurantId === t.restaurantId);
+      expect(row?.status).toBe('ok');
+      if (row?.status === 'ok') {
+        expect(row.approvals?.count).toBe(own.count);
+        expect(Math.round((row.approvals?.toDecideIls ?? -1) * 100)).toBe(Math.round(own.toDecide.amountIls * 100));
+      }
+    }
+    const sumAg = r.rows.reduce((s, x) => s + (x.status === 'ok' ? Math.round((x.approvals?.toDecideIls ?? 0) * 100) : 0), 0);
+    expect(Math.round((r.totals.approvals?.toDecideIls ?? -1) * 100)).toBe(sumAg);
+    for (const o of others) expect(JSON.stringify(r)).not.toContain(o());
+  });
+
+  it('payRun per branch: flag off ⇒ enabled false and no ₪ total (never a fake ₪0); B/M/X never in the payload', async () => {
+    const r = await asA().chain.byBranch({ kind: 'payRun' });
+    expect(r.rows.every((x) => x.status === 'ok' && x.payRun?.enabled === false)).toBe(true);
+    expect(r.totals.payRun).toBeNull();
+    for (const o of others) expect(JSON.stringify(r)).not.toContain(o());
+  });
+
+  it('payRun ₪: flag on for A, A2 and B ⇒ each row = that branch’s own payRun.month totals, Σ excludes B', async () => {
+    for (const t of [A, A2, B]) await payRunOn(t);
+    const r = await asA().chain.byBranch({ kind: 'payRun' });
+    expect(r.rows.map((x) => x.restaurantId).sort()).toEqual([A.restaurantId, A2.restaurantId].sort());
+    let sumAg = 0;
+    for (const t of [A, A2]) {
+      const own = await caller(A.ownerUserId, t.restaurantId).payRun.month();
+      expect(own.enabled).toBe(true);
+      const row = r.rows.find((x) => x.restaurantId === t.restaurantId);
+      expect(row?.status).toBe('ok');
+      if (row?.status !== 'ok' || !row.payRun) throw new Error('missing payRun row');
+      expect(row.payRun.enabled).toBe(true);
+      expect(row.payRun.invoices).toBe(own.totals.invoices);
+      for (const k of ['payIls', 'holdIls', 'claimIls', 'creditIls', 'linkIls'] as const) {
+        expect(Math.round(row.payRun[k] * 100), `${t.restaurantId} ${k}`).toBe(Math.round(own.totals[k] * 100));
+      }
+      sumAg += Math.round(row.payRun.holdIls * 100);
+    }
+    expect(Math.round((r.totals.payRun?.holdIls ?? -1) * 100)).toBe(sumAg);
+    const bOwn = await caller(B.ownerUserId, B.restaurantId).payRun.month();
+    expect(bOwn.enabled).toBe(true);
+    for (const o of others) expect(JSON.stringify(r)).not.toContain(o());
+  });
+
+  it('bookkeeper (read-only lens): A + A2 only for both kinds; on X sees X alone; a forged owner role keeps the bookkeeper lens', async () => {
+    for (const kind of KINDS) {
+      const r = await caller(bkId, A.restaurantId, 'bookkeeper').chain.byBranch({ kind });
+      expect(r.lens).toBe('bookkeeper');
+      expect(r.rows.map((x) => x.restaurantId).sort()).toEqual([A.restaurantId, A2.restaurantId].sort());
+      for (const o of others) expect(JSON.stringify(r)).not.toContain(o());
+      const onX = await caller(bkId, X.restaurantId, 'bookkeeper').chain.byBranch({ kind });
+      expect(onX.rows.map((x) => x.restaurantId)).toEqual([X.restaurantId]);
+      expect(JSON.stringify(onX)).not.toContain(A.restaurantId);
+      const forged = await caller(bkId, A.restaurantId, 'owner').chain.byBranch({ kind });
+      expect(forged.lens).toBe('bookkeeper');
+    }
+  });
+
+  it('scope outside the memberships → NOT_FOUND; manager / forged session → FORBIDDEN, for both kinds', async () => {
+    for (const kind of KINDS) {
+      for (const bad of [B.restaurantId, M.restaurantId, X.restaurantId, randomUUID(), `g:${randomUUID()}`]) {
+        await expect(asA().chain.byBranch({ kind, scope: bad })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      }
+      const one = await asA().chain.byBranch({ kind, scope: A2.restaurantId });
+      expect(one.rows.map((x) => x.restaurantId)).toEqual([A2.restaurantId]);
+      for (const active of [M.restaurantId, B.restaurantId]) {
+        await expect(caller(A.ownerUserId, active, 'owner').chain.byBranch({ kind })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      }
+    }
+  });
+
+  it('rejects an unknown kind or month offset', async () => {
+    await expect(asA().chain.byBranch({ kind: 'invoices' as never })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(asA().chain.byBranch({ kind: 'payRun', monthOffset: -5 as never })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 });
 

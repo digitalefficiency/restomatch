@@ -18,6 +18,15 @@ export const routes: RouteDef[] = [
     aliases: ['אש', 'תור אישורים', 'approvals', 'queue'],
   },
   {
+    // W2-04: the notification landing (push / e-mail "דרושה החלטה"): one invoice's
+    // gaps. Roles come from the parent (longest-prefix match on /dashboard/approvals).
+    key: 'approvalInvoice',
+    path: '/dashboard/approvals/[invoiceId]',
+    group: 'money',
+    parent: 'approvals',
+    nav: 'detail',
+  },
+  {
     // The bookkeeper's main job (approvals-52): a first-class nav entry.
     key: 'payRun',
     path: '/dashboard/approvals/pay-run',

@@ -79,8 +79,25 @@ describe('PwaSessionGuard wiring', () => {
     expect(src).not.toMatch(/\bclearQueue\s*\(/);
     expect(src).not.toMatch(/\bpurgeOtherUsers\s*\(/);
     expect(src).toMatch(/runLogoutGuard\(/);
-    // clearForUser is reachable only as the guard's clearMine (called after ask → 'delete').
-    expect(src.match(/clearForUser\(/g)?.length).toBe(1);
-    expect(src).toMatch(/clearMine: \(\) => clearForUser\(userId\)/);
+    // W2-05: the queue is the field outbox; its delete (this user's items, every kind) is reachable
+    // only as the guard's clearMine (called after ask → 'delete'). No other delete path in the guard.
+    expect(src.match(/clearMineOnDevice\(/g)?.length).toBe(1);
+    expect(src).toMatch(/clearMine: \(\) => clearMineOnDevice\(userId\)/);
+    expect(src).not.toMatch(/\bclearForUser\s*\(|\bremoveItem\s*\(|\.remove\(/);
+  });
+});
+
+describe('OutboxStatusSheet never shows field data', () => {
+  it("renders only kind, time, state and who saved it: never an item's payload (decision 22: a colleague sees that work waits, not what it says)", async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../OutboxStatusSheet.tsx', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/\.payload\b/);
+    expect(src).not.toMatch(/\.meta\b/);
+  });
+
+  it('the receiving chip lists only the active restaurant\'s items', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../ReceiverPwa.tsx', import.meta.url), 'utf8');
+    expect(src).toMatch(/const mine = all\.filter\(ofBranch\);\s*\n\s*setItems\(mine\);/);
   });
 });

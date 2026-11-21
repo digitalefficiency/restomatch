@@ -12,6 +12,8 @@ import type { he as consolidatedHe } from '@/lib/i18n/messages/consolidated/he';
 import { formatIls } from '@/lib/money';
 import { translateUnit } from '@restomatch/translate/units';
 import { PrintButton } from '../../leaks/claims/print-button';
+import { Delta } from '@/lib/components/money';
+import { CellStateView } from '@/lib/components/table';
 
 type T = Translator<typeof consolidatedHe>;
 
@@ -29,6 +31,10 @@ const PRODUCT_TONE: Record<ConsolidatedProposal['products'][number]['status'], B
 };
 
 type Finding = ConsolidatedProposal['findings'][number];
+type ReviewItem = NonNullable<ConsolidatedProposal['reviewItems']>[number];
+
+/** G-04 §9 tiers → badge: T2 act-now (solid), warn (tinted), T4 neutral. */
+const REVIEW_TONE: Record<ReviewItem['tier'], BadgeTone> = { T2: 'warning-solid', warn: 'warning', T4: 'neutral' };
 
 /**
  * "הצלבה מול תעודות משלוח" — the read-only cross-match of a consolidated invoice
@@ -105,7 +111,22 @@ export function ConsolidatedPanel({
       : inclAsk > 0
         ? t('letter.askIncl', { amount: ils(inclAsk) })
         : t('letter.ask', { amount: ils(exclAsk) });
-  const signed = (v: number) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${ils(Math.abs(v))}`;
+  // G-04 §9: review items and notes still being counted are read-only rows. When they
+  // are all that keeps the ריכוז from "תואמת" (nothing to claim, no leak), there is no
+  // red "פערים" card and no supplier letter — never a letter asking ₪0.00.
+  const review = proposal.reviewItems ?? [];
+  const pending = proposal.pendingNotes ?? [];
+  const reviewOnly =
+    proposal.status === 'differences' && exclAsk + inclAsk <= 0 && totals.leakIls <= 0 && review.some((r) => r.blocksMatched);
+  const showDifferences = proposal.status === 'differences' && !reviewOnly;
+  /** One review row, its parts joined: "ת.מ. 9001 · חשבונית A-M-1 · 36.00 ₪". ₪ only when known — never ₪0. */
+  const reviewParts = (r: ReviewItem) =>
+    [
+      r.noteNumber ? t('finding.note', { number: r.noteNumber }) : r.flag === 'note_billed_twice' ? t('review.monthTotal') : null,
+      r.otherInvoice ? t('review.otherInvoice', { number: r.otherInvoice.invoiceNumber ?? '—' }) : null,
+      r.receivedOn ? t('review.receivedOn', { date: day(r.receivedOn) }) : null,
+      r.amountIls != null ? (r.flag === 'note_other_month' ? t('review.value', { amount: ils(r.amountIls) }) : ils(r.amountIls)) : null,
+    ].filter((x): x is string => !!x);
 
   return (
     <section
@@ -114,8 +135,9 @@ export function ConsolidatedPanel({
       data-testid="consolidated-panel"
       data-print-root="xmatch"
     >
-      {proposal.status === 'differences' ? (
-        // Print only: the letter header for the supplier.
+      {showDifferences ? (
+        // Print only: the letter for the supplier. TODO(H-03): move to W2-10's claim
+        // letter once consolidated_invoice_links lets the claims page carry ריכוז findings.
         <div className="mb-6 hidden space-y-1 text-sm text-ink print:block" data-testid="xmatch-letter">
           <p className="font-semibold">{t('letter.to', { supplier: supplierName ?? '—' })}</p>
           <p>{t('letter.subject', { number: invoiceNumber ?? '—', period })}</p>
@@ -143,7 +165,16 @@ export function ConsolidatedPanel({
         <span>{t(settled ? 'referenceNote' : 'proposalNote')}</span>
       </p>
 
-      {proposal.status === 'differences' ? (
+      {reviewOnly ? (
+        // Only review items block "תואמת": calm, no ₪ hero, no letter (G-04 §9).
+        <Card padding="md" className="mb-4 flex items-start gap-3 print:hidden" data-testid="xmatch-review-only">
+          <ClipboardList className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden="true" />
+          <div>
+            <p className="font-semibold text-ink">{t('review.title')}</p>
+            <p className="text-sm text-muted">{t('review.blocked')}</p>
+          </div>
+        </Card>
+      ) : showDifferences ? (
         // T2: act now — solid badge + ₪ + ONE primary action.
         <Card padding="md" className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between print:hidden" data-testid="xmatch-differences">
           <div>
@@ -159,6 +190,7 @@ export function ConsolidatedPanel({
             </p>
           </div>
           <div className="print:hidden">
+            {/* TODO(H-03): link to the supplier's claim letter (W2-10) instead, once the claims page includes ריכוז findings. */}
             <PrintButton label={t('print')} primary scope="xmatch" />
           </div>
         </Card>
@@ -181,15 +213,48 @@ export function ConsolidatedPanel({
         </Card>
       )}
 
+      {review.length > 0 || pending.length > 0 ? (
+        <div className="mb-6 print:hidden" data-testid="xmatch-review">
+          <h3 className="mb-1 text-sm font-semibold text-ink">{t('review.title')}</h3>
+          <p className="mb-2 text-xs text-muted">{t('review.body')}</p>
+          <ul className="space-y-2">
+            {review.map((r, i) => (
+              <li
+                key={`${r.flag}-${r.noteNumber ?? 'month'}-${i}`}
+                className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-sm"
+                data-testid={`xmatch-review-${r.flag}`}
+              >
+                <Badge tone={REVIEW_TONE[r.tier]}>{t(`review.${r.flag}`)}</Badge>
+                <span className="text-ink">
+                  <bdi>{reviewParts(r).join(' · ')}</bdi>
+                </span>
+              </li>
+            ))}
+            {pending.map((p) => (
+              <li
+                key={`pending-${p.number}`}
+                className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-sm"
+                data-testid="xmatch-review-pending"
+              >
+                <Badge tone="neutral">{t('review.pending')}</Badge>
+                <span className="text-ink">
+                  <bdi>{[t('finding.note', { number: p.number }), t('review.billed', { amount: ils(p.billedIls) })].join(' · ')}</bdi>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {proposal.deliveryNotes.length > 0 ? (
         <>
           <dl className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3" data-testid="xmatch-totals">
             {[
               [t('totals.notes'), ils(totals.deliveryNotesIls)],
               [t('totals.invoice'), ils(totals.invoiceSubtotalIls)],
-              [t('totals.difference'), signed(totals.differenceIls)],
+              [t('totals.difference'), <Delta key="d" current={totals.invoiceSubtotalIls} previous={totals.deliveryNotesIls} goodWhen="down" />],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-xl border border-line bg-surface-2 px-4 py-3">
+              <div key={String(label)} className="rounded-xl border border-line bg-surface-2 px-4 py-3">
                 <dt className="text-xs text-muted">{label}</dt>
                 <dd className="mt-1 font-mono text-lg font-semibold tabular-nums text-ink">
                   {/* bdi keeps a leading +/− with its ₪ amount (formatIls carries its own direction marks). */}
@@ -201,11 +266,11 @@ export function ConsolidatedPanel({
 
           <h3 className="mb-2 text-sm font-semibold text-ink">{t('notes.title')}</h3>
           {/* Phone: one card per note, so the Δ and the state are never clipped. */}
-          <ul className="mb-6 space-y-2 sm:hidden" data-testid="xmatch-note-cards">
+          <ul className="mb-6 space-y-2 md:hidden" data-testid="xmatch-note-cards">
             {proposal.deliveryNotes.map((n) => (
               <li key={n.grId} className="rounded-xl border border-line bg-surface px-3 py-2 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-mono text-xs text-ink">{n.number ?? '—'}</span>
+                  <span className="font-mono text-xs text-ink">{n.number ?? <CellStateView state="na" />}</span>
                   <span className="text-xs text-muted">{day(n.receivedAt)}</span>
                   <Badge tone={NOTE_TONE[n.status]}>{t(`notes.${n.status}`)}</Badge>
                 </div>
@@ -222,12 +287,12 @@ export function ConsolidatedPanel({
             ))}
           </ul>
           <div
-            className="relative mb-6 hidden max-w-full overflow-x-auto rounded-xl border border-line sm:block"
+            className="relative mb-6 hidden max-w-full rounded-xl border border-line md:block"
             tabIndex={0}
             role="region"
             aria-label={t('notes.title')}
           >
-            <table className="w-full min-w-[28rem] text-sm" data-testid="xmatch-notes">
+            <table className="w-full text-sm" data-testid="xmatch-notes">
               <thead className="bg-surface-2 text-xs text-muted">
                 <tr>
                   <th scope="col" className={`${cell} text-start font-semibold`}>{t('notes.number')}</th>
@@ -242,13 +307,13 @@ export function ConsolidatedPanel({
                 {proposal.deliveryNotes.flatMap((n) => {
                   const rows = [
                     <tr key={n.grId} className="border-t border-line">
-                      <td className={`${cell} font-mono text-xs text-ink`}>{n.number ?? '—'}</td>
+                      <td className={`${cell} font-mono text-xs text-ink`}>{n.number ?? <CellStateView state="na" />}</td>
                       <td className={`${cell} text-ink`}>{day(n.receivedAt)}</td>
                       <td className={`${cell} font-mono text-xs text-muted`}>{n.poRef ?? t('notes.noRef')}</td>
                       <td className={`${cell} text-end font-mono tabular-nums text-ink`}>{ils(n.receivedValueIls)}</td>
                       {noteDeltas ? (
                         <td className={`${cell} text-end font-mono tabular-nums ${n.deltaIls > 0 ? 'font-semibold text-danger' : 'text-muted'}`}>
-                          {n.deltaIls > 0 ? ils(n.deltaIls) : '—'}
+                          {n.deltaIls > 0 ? ils(n.deltaIls) : <CellStateView state="na" />}
                         </td>
                       ) : null}
                       <td className={`${cell} text-end`}>
@@ -307,10 +372,10 @@ export function ConsolidatedPanel({
                       </td>
                       <td className={`${cell} text-end font-mono tabular-nums text-ink`}>{num(p.qtyReceived)}</td>
                       <td className={`${cell} text-end font-mono tabular-nums text-ink`}>{num(p.qtyBilled)}</td>
-                      <td className={`${cell} text-end font-mono tabular-nums text-muted`}>{p.poPrice != null ? price(p.poPrice) : '—'}</td>
-                      <td className={`${cell} text-end font-mono tabular-nums text-muted`}>{p.billedPrice != null ? price(p.billedPrice) : '—'}</td>
+                      <td className={`${cell} text-end font-mono tabular-nums text-muted`}>{p.poPrice != null ? price(p.poPrice) : <CellStateView state="na" />}</td>
+                      <td className={`${cell} text-end font-mono tabular-nums text-muted`}>{p.billedPrice != null ? price(p.billedPrice) : <CellStateView state="na" />}</td>
                       <td className={`${cell} text-end font-mono tabular-nums ${p.deltaIls > 0 ? 'font-semibold text-danger' : 'text-muted'}`}>
-                        {p.deltaIls > 0 ? ils(p.deltaIls) : '—'}
+                        {p.deltaIls > 0 ? ils(p.deltaIls) : <CellStateView state="na" />}
                       </td>
                       <td className={`${cell} text-end`}>
                         <Badge tone={PRODUCT_TONE[p.status]}>{t(`products.${p.status}`)}</Badge>

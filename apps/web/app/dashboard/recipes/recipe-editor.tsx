@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
-import { AlertTriangle, ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, FlaskConical, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
 import {
   Badge,
@@ -32,13 +32,17 @@ import {
   ils,
   pct,
   priceText,
-  shekelInputToAgorot,
   trimDecimal,
   unitOptions,
 } from './recipe-ui';
 import { PriceAlertLine } from './price-alert';
+import { parseDecimalInput } from './decimal';
+import { buildPreviewInput, type LineProblem } from './workbench';
+import { useRecipePreview } from './use-recipe-preview';
 
 type Detail = inferRouterOutputs<AppRouter>['recipes']['get'];
+type Preview = inferRouterOutputs<AppRouter>['recipes']['preview'];
+type LiveLine = Preview['lines'][number];
 
 interface Line {
   key: string;
@@ -78,7 +82,8 @@ function fromDetail(d: Detail): Line[] {
   }));
 }
 
-export function RecipeEditor({ recipeId, startAsSub = false }: { recipeId?: string; startAsSub?: boolean }) {
+/** `readOnly` (owner decision I3, the bookkeeper): every input disabled, no save / trial / delete; the live numbers still show. */
+export function RecipeEditor({ recipeId, startAsSub = false, readOnly = false }: { recipeId?: string; startAsSub?: boolean; readOnly?: boolean }) {
   const t = useT(recipesNs);
   const tc = useT(components);
   const locale = useLocale();
@@ -103,10 +108,10 @@ export function RecipeEditor({ recipeId, startAsSub = false }: { recipeId?: stri
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<Line[]>([]);
   const [loaded, setLoaded] = useState(!recipeId);
+  // "נסה בלי לשמור": a trial of the draft — the preview runs, nothing can be saved.
+  const [trial, setTrial] = useState(false);
 
-  useEffect(() => {
-    const d = detail.data;
-    if (!d) return;
+  const loadFrom = (d: Detail) => {
     setName(d.recipe.name);
     setNameEn(d.recipe.nameEn ?? '');
     setCategory(d.recipe.category ?? '');
@@ -119,6 +124,9 @@ export function RecipeEditor({ recipeId, startAsSub = false }: { recipeId?: stri
     setNotes(d.notes ?? '');
     setLines(fromDetail(d));
     setLoaded(true);
+  };
+  useEffect(() => {
+    if (detail.data) loadFrom(detail.data);
   }, [detail.data]);
 
   const errorText = (e: unknown) => {
@@ -146,28 +154,48 @@ export function RecipeEditor({ recipeId, startAsSub = false }: { recipeId?: stri
     onError: (e) => toast.error(errorText(e)),
   });
 
-  const menuAgorot = shekelInputToAgorot(menuPrice);
-  const invalidPrice = Number.isNaN(menuAgorot);
+  const menuParsed = parseDecimalInput(menuPrice, 'ils');
+  const menuAgorot = menuParsed.kind === 'ok' ? menuParsed.agorot : null;
+  const invalidPrice = menuParsed.kind === 'invalid' || menuParsed.kind === 'ambiguous' || (menuAgorot ?? 0) > 10_000_000;
+  /** A typed decimal ("1,5") in the API's dot form; anything else is sent as typed (the server rejects it). */
+  const qtyText = (v: string) => {
+    const p = parseDecimalInput(v, 'qty');
+    return p.kind === 'ok' ? p.text : v.trim();
+  };
+
+  const built = useMemo(
+    () => buildPreviewInput({ id: recipeId, name, isSub, yieldQty, yieldUnit, menuPrice, includesVat, lines }),
+    [recipeId, name, isSub, yieldQty, yieldUnit, menuPrice, includesVat, lines],
+  );
+  const preview = useRecipePreview(loaded ? built.input : null);
+  const live = preview.data;
+  const liveByKey = useMemo(() => {
+    const m = new Map<string, LiveLine>();
+    if (live) built.keys.forEach((k, i) => live.lines[i] && m.set(k, live.lines[i]!));
+    return m;
+  }, [live, built.keys]);
+
   const submit = () => {
+    if (trial || readOnly) return;
     save.mutate({
       id: recipeId,
       name: name.trim(),
       nameEn: nameEn.trim() || null,
       category: category.trim() || null,
       isSubRecipe: isSub,
-      yieldQty: yieldQty.trim() || '1',
+      yieldQty: qtyText(yieldQty) || '1',
       yieldUnit: yieldUnit.trim() || 'מנה',
-      menuPriceAgorot: isSub || menuAgorot == null || Number.isNaN(menuAgorot) ? null : menuAgorot,
+      menuPriceAgorot: isSub || menuAgorot == null ? null : menuAgorot,
       menuPriceIncludesVat: includesVat,
       active,
       notes: notes.trim() || null,
       items: lines.map((l) => ({
         productId: l.productId,
         subRecipeId: l.subRecipeId,
-        quantity: l.quantity.trim(),
+        quantity: qtyText(l.quantity),
         unit: l.unit,
-        wastePct: Number(l.wastePct || '0'),
-        unitsPerProductUnit: l.unitsPerProductUnit.trim() || null,
+        wastePct: Number(qtyText(l.wastePct || '0')),
+        unitsPerProductUnit: qtyText(l.unitsPerProductUnit) || null,
       })),
     });
   };
@@ -184,7 +212,6 @@ export function RecipeEditor({ recipeId, startAsSub = false }: { recipeId?: stri
     });
 
   const r = detail.data?.recipe;
-  const dirtyCosts = lines.some((l) => l.costAgorot === undefined);
   const availableSubs = (subs.data ?? []).filter((s) => s.id !== recipeId);
 
   if (!loaded) return <p className="text-sm text-muted">…</p>;
@@ -197,12 +224,9 @@ export function RecipeEditor({ recipeId, startAsSub = false }: { recipeId?: stri
         submit();
       }}
     >
-      <div className="space-y-6">
+      <fieldset disabled={readOnly} className="min-w-0 space-y-6">
         {priceAlert && alertsQ.data?.enabled ? (
-          <div>
-            <p className="mb-1 text-xs text-subtle">{t('alert.banner')}</p>
-            <PriceAlertLine alert={priceAlert} targetBp={alertsQ.data.targetBp} />
-          </div>
+          <PriceAlertLine alert={priceAlert} targetBp={alertsQ.data.targetBp} />
         ) : null}
         <Card className="grid gap-4 sm:grid-cols-2">
           <Field label={t('editor.name')} htmlFor="r-name">
@@ -266,6 +290,8 @@ export function RecipeEditor({ recipeId, startAsSub = false }: { recipeId?: stri
               <LineRow
                 key={l.key}
                 line={l}
+                live={liveByKey.get(l.key)}
+                problem={built.problems.get(l.key)}
                 first={i === 0}
                 last={i === lines.length - 1}
                 onChange={(patch) => update(l.key, patch)}
@@ -336,50 +362,156 @@ export function RecipeEditor({ recipeId, startAsSub = false }: { recipeId?: stri
         <Field label={t('editor.notes')} htmlFor="r-notes">
           <Textarea id="r-notes" rows={3} maxLength={1000} value={notes} onChange={(e) => setNotes(e.target.value)} dir="auto" />
         </Field>
-      </div>
+        <PhoneSummary isSub={isSub} live={live} saved={r} pending={preview.pending} />
+      </fieldset>
 
       <aside className="space-y-4 lg:sticky lg:top-36 lg:self-start">
-        <Card flow className="space-y-3">
-          {r ? (
+        <Card flow className="space-y-3" data-testid="recipe-live">
+          <LiveSummary isSub={isSub} live={live} saved={r} pending={preview.pending} error={preview.error} />
+          {readOnly ? (
+            <p className="rounded-lg bg-surface-2 p-2 text-xs text-muted" data-testid="recipe-readonly">
+              {t('workbench.readOnly')}
+            </p>
+          ) : trial ? (
             <>
-              <Stat label={isSub ? t('editor.batchTotal') : t('editor.total')} value={ils(isSub ? r.batchCostAgorot : r.portionCostAgorot, locale)} big />
-              {!isSub ? (
-                <>
-                  <Stat label={t('editor.netPrice')} value={ils(r.netMenuPriceAgorot, locale)} />
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm text-muted">{t('editor.foodCost')}</span>
-                    <Badge tone={LIGHT_TONE[r.light]}>
-                      {r.foodCostBp == null ? t('list.light.none') : pct(r.foodCostBp, locale)}
-                    </Badge>
-                  </div>
-                  <Stat label={t('editor.margin')} value={ils(r.grossMarginAgorot, locale)} />
-                </>
+              <p className="rounded-lg bg-surface-2 p-2 text-xs text-muted" role="status">
+                {t('workbench.sandbox.on')}
+              </p>
+              {recipeId && detail.data ? (
+                <Button type="button" variant="secondary" className="w-full" onClick={() => loadFrom(detail.data!)}>
+                  <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                  {t('workbench.sandbox.reset')}
+                </Button>
               ) : null}
-              {dirtyCosts ? <p className="text-xs text-subtle">{t('editor.preview')}</p> : null}
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                onClick={() => {
+                  if (detail.data) loadFrom(detail.data);
+                  setTrial(false);
+                }}
+              >
+                {t('workbench.sandbox.exit')}
+              </Button>
             </>
           ) : (
-            <p className="text-sm text-subtle">{t('editor.preview')}</p>
+            <>
+              <Button type="submit" className="w-full" loading={save.isPending} disabled={!name.trim() || invalidPrice}>
+                {t('editor.save')}
+              </Button>
+              <Button type="button" variant="ghost" className="w-full" onClick={() => setTrial(true)} data-testid="recipe-trial">
+                <FlaskConical className="h-4 w-4" aria-hidden="true" />
+                {t('workbench.sandbox.toggle')}
+              </Button>
+              {recipeId ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="w-full text-danger"
+                  loading={del.isPending}
+                  onClick={() => {
+                    if (window.confirm(t('editor.deleteConfirm', { name }))) del.mutate({ id: recipeId });
+                  }}
+                >
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  {t('editor.delete')}
+                </Button>
+              ) : null}
+            </>
           )}
-          <Button type="submit" className="w-full" loading={save.isPending} disabled={!name.trim() || invalidPrice}>
-            {t('editor.save')}
-          </Button>
-          {recipeId ? (
-            <Button
-              type="button"
-              variant="ghost"
-              className="w-full text-danger"
-              loading={del.isPending}
-              onClick={() => {
-                if (window.confirm(t('editor.deleteConfirm', { name }))) del.mutate({ id: recipeId });
-              }}
-            >
-              <Trash2 className="h-4 w-4" aria-hidden="true" />
-              {t('editor.delete')}
-            </Button>
-          ) : null}
         </Card>
       </aside>
     </form>
+  );
+}
+
+type Saved = Detail['recipe'] | undefined;
+
+/** The live numbers: the preview of the draft, else the saved recipe. */
+function current(live: Preview | undefined, saved: Saved) {
+  if (live) return live;
+  if (!saved) return null;
+  return {
+    batchCostAgorot: saved.batchCostAgorot,
+    portionCostAgorot: saved.portionCostAgorot,
+    netMenuPriceAgorot: saved.netMenuPriceAgorot,
+    foodCostBp: saved.foodCostBp,
+    grossMarginAgorot: saved.grossMarginAgorot,
+    targetBp: null,
+    gapToTargetBp: null,
+    light: saved.light,
+    complete: saved.complete,
+    lines: [] as LiveLine[],
+  };
+}
+
+function LiveSummary({ isSub, live, saved, pending, error }: { isSub: boolean; live: Preview | undefined; saved: Saved; pending: boolean; error: boolean }) {
+  const t = useT(recipesNs);
+  const locale = useLocale();
+  const v = current(live, saved);
+  if (!v) return <p className="text-sm text-subtle">{pending ? t('workbench.updating') : t('editor.preview')}</p>;
+  const missing = v.lines.filter((l) => l.status !== 'ok').length;
+  const gap = v.gapToTargetBp;
+  const target = v.targetBp;
+  return (
+    <div className="space-y-3">
+      <div aria-live="polite" aria-atomic="true">
+        <Stat label={isSub ? t('workbench.liveBatch') : t('workbench.live')} value={ils(isSub ? v.batchCostAgorot : v.portionCostAgorot, locale)} big />
+      </div>
+      {!isSub ? (
+        <>
+          <Stat label={t('editor.netPrice')} value={ils(v.netMenuPriceAgorot, locale)} />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm text-muted">{t('editor.foodCost')}</span>
+            <Badge tone={LIGHT_TONE[v.light]}>{v.foodCostBp == null ? t('list.light.none') : pct(v.foodCostBp, locale)}</Badge>
+          </div>
+          {v.netMenuPriceAgorot == null ? (
+            <p className="text-xs text-subtle">{t('workbench.noMenuPrice')}</p>
+          ) : gap != null && target != null ? (
+            <p className={cn('text-xs', gap > 0 ? 'text-warn' : 'text-muted')} data-testid="recipe-gap">
+              {gap > 0
+                ? t('workbench.gapAbove', { gap: pct(gap, locale), target: pct(target, locale) })
+                : gap < 0
+                  ? t('workbench.gapBelow', { gap: pct(-gap, locale), target: pct(target, locale) })
+                  : t('workbench.gapOn', { target: pct(target, locale) })}
+            </p>
+          ) : null}
+          <Stat label={t('editor.margin')} value={ils(v.grossMarginAgorot, locale)} />
+        </>
+      ) : null}
+      {missing ? <p className="text-xs text-warn">{t('workbench.partial', { count: missing })}</p> : null}
+      {error ? (
+        <p className="text-xs text-muted" role="status">
+          {t('workbench.previewError')}
+        </p>
+      ) : pending ? (
+        <p className="text-xs text-subtle">{live ? t('workbench.stale') : t('workbench.updating')}</p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Phone only: the plate cost and food % stay in view while the chef scrolls the ingredients. */
+function PhoneSummary({ isSub, live, saved, pending }: { isSub: boolean; live: Preview | undefined; saved: Saved; pending: boolean }) {
+  const t = useT(recipesNs);
+  const locale = useLocale();
+  const v = current(live, saved);
+  if (!v) return null;
+  return (
+    <div
+      className="sticky bottom-20 z-30 flex items-center justify-between gap-3 rounded-xl border border-line bg-surface/95 p-3 shadow-card backdrop-blur lg:hidden"
+      data-testid="recipe-live-phone"
+      aria-hidden="true"
+    >
+      <span className="text-sm text-muted">{isSub ? t('workbench.liveBatch') : t('workbench.live')}</span>
+      <span className="flex items-center gap-2">
+        <span className={cn('text-lg font-bold tabular-nums text-ink', pending && 'opacity-70')}>
+          {ils(isSub ? v.batchCostAgorot : v.portionCostAgorot, locale)}
+        </span>
+        {!isSub && v.foodCostBp != null ? <Badge tone={LIGHT_TONE[v.light]}>{pct(v.foodCostBp, locale)}</Badge> : null}
+      </span>
+    </div>
   );
 }
 
@@ -399,6 +531,8 @@ function Stat({ label, value, big = false }: { label: string; value: string; big
 
 function LineRow({
   line: l,
+  live,
+  problem,
   first,
   last,
   onChange,
@@ -406,6 +540,8 @@ function LineRow({
   onMove,
 }: {
   line: Line;
+  live?: LiveLine;
+  problem?: LineProblem;
   first: boolean;
   last: boolean;
   onChange: (p: Partial<Line>) => void;
@@ -419,6 +555,14 @@ function LineRow({
   const opts = unitOptions(l.sourceUnit);
   if (!opts.includes(l.unit)) opts.push(l.unit);
   const id = `line-${l.key}`;
+  // The live preview wins over the last saved cost (it is the draft on screen).
+  const costAgorot = live ? live.costAgorot : l.costAgorot;
+  const status = live ? live.status : l.status;
+  const qtyError = problem
+    ? problem.kind === 'ambiguous'
+      ? t('workbench.qtyAmbiguous', { raw: problem.raw })
+      : t('workbench.qtyInvalid')
+    : undefined;
   return (
     <li className="rounded-xl border border-line bg-surface-2/40 p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -441,12 +585,14 @@ function LineRow({
           </p>
         </div>
         <div className="flex items-center gap-1">
-          {l.costAgorot !== undefined ? (
-            <span className="me-2 text-sm font-semibold tabular-nums text-ink">{ils(l.costAgorot, locale)}</span>
+          {costAgorot !== undefined && !problem ? (
+            <span className="me-2 text-sm font-semibold tabular-nums text-ink" data-testid="line-cost">
+              {ils(costAgorot, locale)}
+            </span>
           ) : null}
-          {l.status && l.status !== 'ok' ? (
+          {status && status !== 'ok' && !problem ? (
             <Badge tone="warning" icon={<AlertTriangle className="h-3 w-3" aria-hidden="true" />}>
-              {t(`editor.status.${l.status as 'missingPrice'}`)}
+              {t(`editor.status.${status as 'missingPrice'}`)}
             </Badge>
           ) : null}
           <Button type="button" size="sm" variant="ghost" disabled={first} onClick={() => onMove(-1)} aria-label={t('editor.moveUp')}>
@@ -461,7 +607,7 @@ function LineRow({
         </div>
       </div>
       <div className="grid grid-cols-3 gap-2">
-        <Field label={t('editor.qty')} htmlFor={`${id}-q`}>
+        <Field label={t('editor.qty')} htmlFor={`${id}-q`} error={qtyError}>
           <Input id={`${id}-q`} required inputMode="decimal" value={l.quantity} onChange={(e) => onChange({ quantity: e.target.value })} />
         </Field>
         <Field label={t('editor.unit')} htmlFor={`${id}-u`}>
@@ -474,9 +620,17 @@ function LineRow({
           </Select>
         </Field>
         <Field label={t('editor.waste')} htmlFor={`${id}-w`}>
-          <Input id={`${id}-w`} type="number" min={0} max={95} step={0.5} value={l.wastePct} onChange={(e) => onChange({ wastePct: e.target.value })} title={t('editor.wasteHint')} />
+          <Input id={`${id}-w`} inputMode="decimal" value={l.wastePct} onChange={(e) => onChange({ wastePct: e.target.value })} title={t('editor.wasteHint')} />
         </Field>
       </div>
+      {live && live.shareBp > 0 ? (
+        <div className="mt-2 flex items-center gap-2" data-testid="line-share">
+          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-2" aria-hidden="true">
+            <div className="h-full rounded-full bg-primary/60" style={{ width: `${live.shareBp / 100}%` }} />
+          </div>
+          <span className="text-xs tabular-nums text-muted">{t('workbench.shareOf', { pct: pct(live.shareBp, locale) })}</span>
+        </div>
+      ) : null}
       {needsBridge ? (
         <Field
           className="mt-2"

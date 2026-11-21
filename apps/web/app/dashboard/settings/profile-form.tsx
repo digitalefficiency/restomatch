@@ -5,7 +5,7 @@ import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import { CheckCircle2, Lock, XCircle } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
-import { Button, Card, Field, Input } from '@/lib/components';
+import { Button, Card, ConfirmDialog, Field, Input, Select, normalizeDecimal } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { settings } from '@/lib/i18n/messages/settings';
 import { localizeServerError } from '@/lib/serverErrors';
@@ -17,9 +17,26 @@ export function ProfileForm({ initial, canEdit }: { initial: Profile; canEdit: b
   const locale = useLocale();
   const [name, setName] = useState(initial.name);
   const [businessId, setBusinessId] = useState(initial.businessId ?? '');
-  // VAT is stored as a fraction (0.18) but edited as a whole percent (18).
-  const [vat, setVat] = useState(String(Math.round(initial.vatRate * 1000) / 10));
+  // VAT is read-only here (W2-14): it changes the leak ₪ of every invoice whose
+  // VAT is derived, so it changes only through the "שנו…" dialog that says so.
+  const [vatRate, setVatRate] = useState(initial.vatRate);
+  const [vatOpen, setVatOpen] = useState(false);
+  const [vatDraft, setVatDraft] = useState('');
+  const vatPct = Math.round(vatRate * 1000) / 10;
+  const vatDraftCanon = normalizeDecimal(vatDraft);
+  const vatDraftNum = vatDraftCanon === null ? NaN : Number(vatDraftCanon);
+  const vatDraftValid = Number.isFinite(vatDraftNum) && vatDraftNum >= 0 && vatDraftNum <= 100;
   const [timezone, setTimezone] = useState(initial.timezone);
+  /** Israel only (owner decision): the one zone, plus a legacy stored value if any. */
+  const timezones = timezone === 'Asia/Jerusalem' ? ['Asia/Jerusalem'] : ['Asia/Jerusalem', timezone];
+  const updateVat = trpc.settings.updateProfile.useMutation({
+    onSuccess: (res) => {
+      setVatRate(res.vatRate);
+      setVatOpen(false);
+      setStatus({ ok: true, message: t('profile.saved') });
+    },
+    onError: (err) => setStatus({ ok: false, message: localizeServerError(err, locale, t('profile.failed')) }),
+  });
   const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
 
   const update = trpc.settings.updateProfile.useMutation({
@@ -30,11 +47,9 @@ export function ProfileForm({ initial, canEdit }: { initial: Profile; canEdit: b
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setStatus(null);
-    const vatNum = Number(vat.trim());
     update.mutate({
       name: name.trim(),
       businessId: businessId.trim() || null,
-      ...(Number.isFinite(vatNum) ? { vatRate: vatNum / 100 } : {}),
       timezone: timezone.trim(),
     });
   }
@@ -76,29 +91,41 @@ export function ProfileForm({ initial, canEdit }: { initial: Profile; canEdit: b
               placeholder="514778123"
             />
           </Field>
-          <Field label={t('profile.vat')} htmlFor="prof-vat" hint={t('profile.vatHint')}>
-            <Input
-              id="prof-vat"
-              type="number"
-              inputMode="decimal"
-              value={vat}
-              onChange={(e) => setVat(e.target.value)}
-              disabled={!canEdit}
-              step="0.1"
-              min="0"
-              max="100"
-            />
-          </Field>
-          <Field label={t('profile.timezone')} htmlFor="prof-tz" hint={t('profile.timezoneHint')}>
-            <Input
+          <div>
+            <p className="mb-1.5 text-sm font-medium text-ink">{t('profile.vat')}</p>
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="text-sm text-ink" data-testid="vat-readonly">
+                <bdi className="num font-semibold">{vatPct}%</bdi> ·{' '}
+                {vatRate === 0.18 ? t('profile.vatNational') : t('profile.vatCustom')}
+              </p>
+              {canEdit ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setVatDraft(String(vatPct));
+                    setVatOpen(true);
+                  }}
+                >
+                  {t('profile.vatChange')}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+          <Field label={t('profile.timezone')} htmlFor="prof-tz">
+            <Select
               id="prof-tz"
               value={timezone}
               onChange={(e) => setTimezone(e.target.value)}
               disabled={!canEdit}
-              maxLength={64}
-              dir="ltr"
-              placeholder="Asia/Jerusalem"
-            />
+            >
+              {timezones.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz === 'Asia/Jerusalem' ? t('profile.timezoneIsrael') : tz}
+                </option>
+              ))}
+            </Select>
           </Field>
         </div>
       </Card>
@@ -125,6 +152,35 @@ export function ProfileForm({ initial, canEdit }: { initial: Profile; canEdit: b
           ) : null}
         </div>
       ) : null}
+      <ConfirmDialog
+        open={vatOpen}
+        title={t('profile.vatDialogTitle')}
+        body={
+          <div className="space-y-3">
+            <p>{t('profile.vatDialogBody')}</p>
+            <Field label={t('profile.vat')} htmlFor="prof-vat" hint={vatDraftValid ? undefined : t('matching.percentRange')}>
+              <Input
+                id="prof-vat"
+                type="text"
+                inputMode="decimal"
+                value={vatDraft}
+                onChange={(e) => setVatDraft(e.target.value)}
+                aria-invalid={!vatDraftValid || undefined}
+                className="text-right"
+              />
+            </Field>
+          </div>
+        }
+        confirmLabel={t('profile.vatConfirm')}
+        cancelLabel={t('matching.discard')}
+        danger={false}
+        loading={updateVat.isPending}
+        onConfirm={() => {
+          if (!vatDraftValid) return;
+          updateVat.mutate({ vatRate: vatDraftNum / 100 });
+        }}
+        onClose={() => setVatOpen(false)}
+      />
     </form>
   );
 }

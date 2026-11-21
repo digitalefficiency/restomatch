@@ -4,6 +4,8 @@ import { sql, testDbUrl } from '@restomatch/db';
 import {
   CATCH_UP_MONTHS,
   correctionDeltas,
+  funnelOf,
+  lastDayOf,
   monthsToClose,
   processLeakMonthClose,
   runLeakMonthClose,
@@ -83,7 +85,7 @@ describe('leak-month-close (DB)', () => {
     expect(dec!.frozenLeakAgorot).toBe(5000 + 3000 + 701);
     const hero = await computeLeakHero(db, t.restaurantId, { now: JAN5_0415, monthOffset: -1 });
     expect(Math.round(hero.leakIls * 100)).toBe(dec!.frozenLeakAgorot);
-    expect(dec!.payload).toMatchObject({ schema: 'leak-month-close/v1', tz: 'Asia/Jerusalem', hero: { leakAgorot: 8701 } });
+    expect(dec!.payload).toMatchObject({ schema: 'leak-month-close/v2', tz: 'Asia/Jerusalem', hero: { leakAgorot: 8701 } });
     expect(Object.keys(dec!.payload.invoices as object)).toHaveLength(3);
     expect(dec!.corrections).toEqual([]);
   });
@@ -138,5 +140,81 @@ describe('leak-month-close (DB)', () => {
     await expect(
       db.execute(sql`UPDATE leak_month_snapshots SET leak_agorot = 0 WHERE restaurant_id = ${t.restaurantId}::uuid`),
     ).rejects.toThrow();
+  });
+});
+
+describe('slice b: payload v2 (G-14 partition, funnel, caught before payment)', () => {
+  it('pure helpers: lastDayOf and funnelOf', () => {
+    expect(lastDayOf('2026-12-01')).toBe('2026-12-31');
+    expect(lastDayOf('2027-02-01')).toBe('2027-02-28');
+    expect(lastDayOf('2028-02-01')).toBe('2028-02-29');
+    const states = { undecided: 1, to_offset: 2, to_send: 3, requested: 4, disputed: 5, credited: 6, recovered: 7, waived: 8 };
+    expect(funnelOf({ states, totalAgorot: 36 })).toEqual({
+      foundAgorot: 36,
+      requestedAgorot: 4 + 5 + 6 + 7,
+      creditedAgorot: 6 + 7,
+      recoveredAgorot: 7,
+    });
+  });
+
+  it('the frozen partition adds up to the frozen leak; undecided, recovered and the funnel are right', async () => {
+    const t = await tenant('v2');
+    const a = await t.invoice(new Date('2026-12-10T10:00:00Z'), '1000', []);
+    const open = await a.add({ delta: '50' });
+    const b = await t.invoice(new Date('2026-12-12T10:00:00Z'), '500', []);
+    const back = await b.add({ delta: '20' });
+    // A credit request that came back in full.
+    await db.execute(sql`
+      INSERT INTO recovery_claims (restaurant_id, discrepancy_id, status, amount_agorot, credited_agorot)
+      VALUES (${t.restaurantId}::uuid, ${back}::uuid, 'recovered', 2000, 2000)
+    `);
+    await db.execute(sql`UPDATE discrepancies SET resolution_status = 'accepted', resolved_at = created_at WHERE id = ${back}::uuid`);
+    expect(open).toBeTruthy();
+
+    await runLeakMonthClose(db, { now: JAN5_0415, restaurantId: t.restaurantId });
+    const dec = await readClosedLeakMonth(db, t.restaurantId, '2026-12');
+    expect(dec!.frozenLeakAgorot).toBe(7000);
+    expect(dec!.partition).toMatchObject({ totalAgorot: 7000, heroAgorot: 7000, driftAgorot: 0 });
+    expect(dec!.partition!.states).toMatchObject({ undecided: 5000, recovered: 2000 });
+    expect(dec!.funnel).toEqual({ foundAgorot: 7000, requestedAgorot: 2000, creditedAgorot: 2000, recoveredAgorot: 2000 });
+    // Nothing paid yet: every agora was found before payment.
+    expect(dec!.caughtBeforePaymentAgorot).toBe(7000);
+  });
+
+  it('caught before payment is measured by day, not by status: a gap found after the pay day is not caught', async () => {
+    const t = await tenant('caught');
+    const early = await t.invoice(new Date('2026-12-03T10:00:00Z'), '300', []);
+    const e = await early.add({ delta: '30' });
+    const late = await t.invoice(new Date('2026-12-04T10:00:00Z'), '400', []);
+    const l = await late.add({ delta: '40' });
+    // Both invoices paid on 15.12. The first gap was found on 10.12 (before), the second on 20.12 (after).
+    for (const id of [early.invoiceId, late.invoiceId]) {
+      await db.execute(sql`
+        UPDATE invoices SET status = 'paid', paid_at = '2026-12-14T22:00:00Z', paid_amount = total_incl_vat WHERE id = ${id}::uuid
+      `);
+    }
+    await db.execute(sql`UPDATE discrepancies SET created_at = '2026-12-10T08:00:00Z' WHERE id = ${e}::uuid`);
+    await db.execute(sql`UPDATE discrepancies SET created_at = '2026-12-20T08:00:00Z' WHERE id = ${l}::uuid`);
+
+    await runLeakMonthClose(db, { now: JAN5_0415, restaurantId: t.restaurantId });
+    const dec = await readClosedLeakMonth(db, t.restaurantId, '2026-12');
+    expect(dec!.frozenLeakAgorot).toBe(7000);
+    expect(dec!.caughtBeforePaymentAgorot).toBe(3000);
+    expect(dec!.payload).toMatchObject({ caughtBeforePayment: { agorot: 3000, onInterimPaidAgorot: 0 } });
+  });
+
+  it('a v1 snapshot (written before slice b) is read unchanged next to a v2 one', async () => {
+    const t = await tenant('v1read');
+    await t.invoice(new Date('2026-11-10T10:00:00Z'), '100', [{ delta: '5' }]);
+    await t.invoice(new Date('2026-12-10T10:00:00Z'), '100', [{ delta: '6' }]);
+    await db.execute(sql`
+      INSERT INTO leak_month_snapshots (restaurant_id, month, version, leak_agorot, payload)
+      VALUES (${t.restaurantId}::uuid, '2026-11-01', 1, 500, '{"schema":"leak-month-close/v1","invoices":{}}'::jsonb)
+    `);
+    await runLeakMonthClose(db, { now: JAN5_0415, restaurantId: t.restaurantId });
+    const nov = await readClosedLeakMonth(db, t.restaurantId, '2026-11');
+    const dec = await readClosedLeakMonth(db, t.restaurantId, '2026-12');
+    expect(nov).toMatchObject({ frozenLeakAgorot: 500, partition: null, funnel: null, caughtBeforePaymentAgorot: null });
+    expect(dec).toMatchObject({ frozenLeakAgorot: 600, funnel: { foundAgorot: 600 } });
   });
 });

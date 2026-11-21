@@ -162,13 +162,14 @@ test('bookkeeper: pay run, ledger, integrations and claims are in the sidebar; n
     await expect(sidebar.locator(`a[href="${href}"]`), href).toHaveCount(1);
   }
   // No link to a page the bookkeeper can't open.
-  for (const href of ['/dashboard/suppliers', '/dashboard/orders', '/dashboard/team']) {
+  for (const href of ['/dashboard/orders', '/dashboard/team']) {
     await expect(page.locator(`a[href="${href}"]`), href).toHaveCount(0);
   }
   await sidebar.locator('a[href="/dashboard/suppliers/ledger"]').click();
   await page.waitForURL('**/dashboard/suppliers/ledger');
-  // The page's own "ספקים" crumb is plain text for this role (SUP-01).
-  await expect(page.locator('#main-content nav a[href="/dashboard/suppliers"]')).toHaveCount(0);
+  // Owner decision 7.11 (the bookkeeper reads everything): the suppliers hub opens read-only,
+  // so the ledger's "ספקים" crumb is a live link for this role now (it was plain text, SUP-01).
+  await expect(page.locator('#main-content nav a[href="/dashboard/suppliers"]')).toHaveCount(1);
   await page.context().close();
 });
 

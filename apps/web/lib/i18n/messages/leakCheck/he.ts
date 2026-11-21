@@ -43,6 +43,9 @@ export const he = {
     privacy: 'בשליחה אתם מסכימים שנעבד את הקבצים כדי להפיק את הבדיקה. הקבצים עצמם לא נשמרים, והתוצאות נמחקות אוטומטית אחרי 7 ימים.',
     privacyLink: 'מדיניות הפרטיות',
     submit: 'בדקו לי את החשבוניות',
+    remove: 'הסרת {name}',
+    dropped: 'אפשר עד {max} קבצים, ולכן {n} לא נוספו.',
+    stage: 'שלב {n} מתוך {total}',
     working: {
       challenge: 'מכינים את הבדיקה…',
       pow: 'מאמתים שאתם לא בוט…',
@@ -84,6 +87,7 @@ export const he = {
       above_price_list: '{desc}: {qty} × {price} — במחירון שלכם {listPrice}',
     },
     notes: {
+      amountUnavailable: 'סכום לא זמין',
       title: 'לידיעתכם (לא נכלל בסכום)',
       same_file_twice: 'קובץ {n} זהה לקובץ {ref} — נבדק פעם אחת בלבד.',
       undercharge: 'חשבונית {n}, שורה {line}: חויבתם {amount} פחות מהחישוב — טעות לטובתכם.',

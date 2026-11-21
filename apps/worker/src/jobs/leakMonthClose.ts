@@ -22,11 +22,22 @@
  * Runs on the owner DATABASE_URL like every job (jobDb): the app role may only
  * read leak_month_* (H-03 rls.ts revokes its writes).
  *
- * Interim basis (owner decision M6): "caught before payment" in the payload is
- * the hero's `status <> 'paid'` until H-03's paid_at and G-14's partition land
- * (slice b). The frozen leak itself does not depend on it.
+ * Payload v2 (slice b, after G-14 #244): the snapshot also freezes G-14's money-state
+ * partition (eight states, one allocator), the funnel נמצא → התבקש → זוכה → הוחזר and
+ * "caught before payment" by G-14's time rule (detected or decided on a calendar day
+ * before the pay day), replacing v1's interim `status <> 'paid'` (owner decision M6).
+ * The partition's hero must equal the frozen leak to the agora or the restaurant is
+ * skipped for the day; drift between the hero and Σ states (G-14 reports it on purpose,
+ * e.g. a claim holding less than its gap) is recorded in the payload, not a gate.
+ * v1 snapshots are never rewritten; readClosedLeakMonth reads both.
  */
-import { computeLeakHero, computeMonthInvoiceLeaks, type LeakHero } from '@restomatch/charts';
+import {
+  computeLeakHero,
+  computeLeakPartition,
+  computeMonthInvoiceLeaks,
+  type LeakHero,
+  type LeakPartition,
+} from '@restomatch/charts';
 import { sql, type Database } from '@restomatch/db';
 import { jobDb } from '../db';
 import { makeWorker, type WorkerJob } from '../queue';
@@ -49,7 +60,39 @@ export interface LeakMonthCloseResult {
 export const CATCH_UP_MONTHS = 24;
 /** The day of the next month on which a month closes (restaurant-local). */
 export const CLOSE_DAY = 5;
-export const PAYLOAD_SCHEMA = 'leak-month-close/v1';
+/** v2 (slice b): + G-14 money-state partition, funnel and time-rule "caught before payment". */
+export const PAYLOAD_SCHEMA = 'leak-month-close/v2';
+
+/** The funnel נמצא → התבקש → זוכה → הוחזר, in agorot, derived from the G-14 money states. */
+export interface LeakFunnel {
+  /** נמצא: every agora of the leak (Σ states). */
+  foundAgorot: number;
+  /** התבקש: asked of the supplier (a letter went out), whatever came back since. */
+  requestedAgorot: number;
+  /** זוכה: the supplier issued credit (credited + recovered). */
+  creditedAgorot: number;
+  /** הוחזר: the money is back. */
+  recoveredAgorot: number;
+}
+
+/** Pure: the funnel from the partition's states. */
+export function funnelOf(p: Pick<LeakPartition, 'states' | 'totalAgorot'>): LeakFunnel {
+  const s = p.states;
+  return {
+    foundAgorot: p.totalAgorot,
+    requestedAgorot: s.requested + s.disputed + s.credited + s.recovered,
+    creditedAgorot: s.credited + s.recovered,
+    recoveredAgorot: s.recovered,
+  };
+}
+
+/** 'YYYY-MM-01' → 'YYYY-MM-<last day>' (the inclusive custom-period end G-14's views take). */
+export function lastDayOf(first: string): string {
+  const y = Number(first.slice(0, 4));
+  const m = Number(first.slice(5, 7));
+  const d = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${first.slice(0, 8)}${String(d).padStart(2, '0')}`;
+}
 
 type Row = Record<string, unknown>;
 const rowsOf = (res: unknown): Row[] => (Array.isArray(res) ? (res as Row[]) : ((res as { rows?: Row[] }).rows ?? []));
@@ -111,7 +154,13 @@ export function correctionReason(now: Date, tz: string): string {
   return `שינוי אחרי סגירת החודש · חושב מחדש ב-${localDate(now, tz)}`;
 }
 
-function heroPayload(hero: LeakHero, invoices: Record<string, number>, tz: string, now: Date): Record<string, unknown> {
+function heroPayload(
+  hero: LeakHero,
+  partition: LeakPartition,
+  invoices: Record<string, number>,
+  tz: string,
+  now: Date,
+): Record<string, unknown> {
   return {
     schema: PAYLOAD_SCHEMA,
     tz,
@@ -120,21 +169,41 @@ function heroPayload(hero: LeakHero, invoices: Record<string, number>, tz: strin
     closedAt: now.toISOString(),
     basis: {
       leak: 'leak-hero: LEAK_FILTER, per-invoice cap at the invoice total',
-      caughtBeforePayment: "interim: status <> 'paid' (until H-03 paid_at + G-14; owner decision M6)",
+      caughtBeforePayment:
+        'G-14 time rule: detected or decided on a calendar day (restaurant tz) before the pay day; nothing paid = caught',
+      partition: 'G-14 leak ledger: one allocator, eight money states; drift = hero − Σ states, recorded, never hidden',
     },
     hero: {
       leakAgorot: agorot(hero.leakIls),
       spendAgorot: agorot(hero.spendIls),
-      caughtBeforePaymentAgorot: agorot(hero.caughtBeforePaymentIls),
       recoveredAgorot: agorot(hero.recoveredIls),
       pendingLinkAgorot: agorot(hero.pendingLinkIls),
       awaitingCountAgorot: agorot(hero.awaitingCountIls),
+      /** G-08: invoices held on an open "זה אותו מוצר?" question (in neither leak nor spend). */
+      awaitingQuestionAgorot: agorot(hero.awaitingQuestionIls),
       invoiceCount: hero.invoiceCount,
       matchedInvoiceCount: hero.matchedInvoiceCount,
       invoicesWithLeak: hero.invoicesWithLeak,
       pendingLinkCount: hero.pendingLinkCount,
       awaitingCountCount: hero.awaitingCountCount,
+      awaitingQuestionCount: hero.awaitingQuestionCount,
     },
+    /** Replaces v1's interim status-based figure (owner decision M6). */
+    caughtBeforePayment: {
+      agorot: partition.caughtBeforePaymentAgorot,
+      /** Part whose pay day is the interim `updated_at` estimate (no paid_at / ledger row yet). */
+      onInterimPaidAgorot: partition.caughtOnInterimPaidAgorot,
+    },
+    /** G-14 money states at close (agorot). The live states keep moving; this is the at-close picture. */
+    partition: {
+      states: partition.states,
+      totalAgorot: partition.totalAgorot,
+      heroAgorot: partition.heroAgorot,
+      driftAgorot: partition.driftAgorot,
+      absDriftAgorot: partition.absDriftAgorot,
+      driftInvoiceCount: partition.driftInvoiceCount,
+    },
+    funnel: funnelOf(partition),
     /** The leak per invoice at close (agorot; absent = 0): the correction baseline. */
     invoices,
   };
@@ -213,12 +282,23 @@ export async function closeRestaurantMonths(
       if (sum !== agorot(hero.leakIls)) {
         throw new Error(`leak parity failed for ${month}: Σ invoices ${sum} ≠ hero ${agorot(hero.leakIls)} agorot`);
       }
+      // G-14 partition over the same local month. Its hero side must be the frozen leak
+      // exactly (same CTE family); drift between hero and Σ states is recorded, not a gate.
+      const partition = await computeLeakPartition(tx, clock.id, {
+        period: 'custom',
+        from: month,
+        to: lastDayOf(month),
+        now,
+      });
+      if (partition.heroAgorot !== sum) {
+        throw new Error(`partition parity failed for ${month}: G-14 hero ${partition.heroAgorot} ≠ frozen ${sum} agorot`);
+      }
       const invoices = Object.fromEntries([...perInvoice.entries()].sort(([a], [b]) => (a < b ? -1 : 1)));
       const inserted = rowsOf(
         await tx.execute(sql`
           INSERT INTO leak_month_snapshots (restaurant_id, month, version, computed_at, leak_agorot, payload)
           VALUES (${clock.id}::uuid, ${month}::date, 1, ${now.toISOString()}::timestamptz, ${sum},
-                  ${JSON.stringify(heroPayload(hero, invoices, clock.tz, now))}::jsonb)
+                  ${JSON.stringify(heroPayload(hero, partition, invoices, clock.tz, now))}::jsonb)
           ON CONFLICT (restaurant_id, month, version) DO NOTHING
           RETURNING id
         `),

@@ -1,5 +1,7 @@
 'use client';
 
+import { TimeField } from '../time-field';
+import { SupplierScheduleReadOnly } from './read-only-view';
 import { useState } from 'react';
 import type { OrderSchedule, OrderWindow } from '@restomatch/types';
 import { CalendarClock, Plus, Trash2 } from 'lucide-react';
@@ -78,7 +80,16 @@ function formToSchedule(rows: WindowForm[]): OrderSchedule | null {
  * can actually be persisted (it used to fall back to the empty state, leaving
  * the old schedule in the database).
  */
-export function SupplierScheduleTab({ supplierId, initial }: { supplierId: string; initial?: SupplierWithFlags }) {
+export function SupplierScheduleTab({
+  supplierId,
+  initial,
+  canEdit = true,
+}: {
+  supplierId: string;
+  initial?: SupplierWithFlags;
+  /** False for roles that can't write suppliers (the bookkeeper): the schedule read-only, no form. */
+  canEdit?: boolean;
+}) {
   const t = useT(suppliersNs);
   const tc = useT(components);
   const toast = useToast();
@@ -104,6 +115,7 @@ export function SupplierScheduleTab({ supplierId, initial }: { supplierId: strin
   }
   const s = supplier.data;
   if (!s) return null;
+  if (!canEdit) return <SupplierScheduleReadOnly s={s} />;
 
   // Hydrate the editable rows from the saved schedule once.
   const current = rows ?? scheduleToForm(s.orderSchedule);
@@ -196,11 +208,11 @@ export function SupplierScheduleTab({ supplierId, initial }: { supplierId: strin
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label={t('schedule.cutoff')} htmlFor={`cutoff-${row.key}`}>
-                <Input
+                <TimeField
                   id={`cutoff-${row.key}`}
-                  type="time"
+                  label={t('schedule.cutoff')}
                   value={row.cutoff}
-                  onChange={(e) => patchRow(row.key, { cutoff: e.target.value })}
+                  onChange={(v) => patchRow(row.key, { cutoff: v })}
                 />
               </Field>
               <Field label={t('schedule.fulfillment')} htmlFor={`fulfill-${row.key}`}>
@@ -220,12 +232,15 @@ export function SupplierScheduleTab({ supplierId, initial }: { supplierId: strin
                 <Field label={t('schedule.leadDays')} htmlFor={`lead-${row.key}`}>
                   <Input
                     id={`lead-${row.key}`}
-                    type="number"
-                    min={0}
-                    max={30}
-                    value={row.leadDays}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={2}
+                    dir="ltr"
+                    value={String(row.leadDays)}
                     onChange={(e) =>
-                      patchRow(row.key, { leadDays: Math.max(0, Math.min(30, Number(e.target.value) || 0)) })
+                      patchRow(row.key, {
+                        leadDays: Math.max(0, Math.min(30, Number(e.target.value.replace(/\D/g, '')) || 0)),
+                      })
                     }
                   />
                 </Field>
@@ -256,6 +271,11 @@ export function SupplierScheduleTab({ supplierId, initial }: { supplierId: strin
         <Button variant="primary" size="sm" loading={update.isPending} disabled={!valid} onClick={save}>
           {t('schedule.save')}
         </Button>
+        {!valid && current.length === 0 ? (
+          <span className="text-xs text-muted">{t('schedule.saveNeedsWindow')}</span>
+        ) : !valid ? (
+          <span className="text-xs text-muted">{t('schedule.saveBlocked')}</span>
+        ) : null}
         <Button variant="secondary" size="sm" onClick={() => setRowsAnd([...current, newWindow()])}>
           <Plus className="h-4 w-4" aria-hidden="true" /> {t('schedule.addWindow')}
         </Button>

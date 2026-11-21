@@ -1,5 +1,6 @@
 import type { UserRole } from '@restomatch/db';
 import { canFollowPath } from '@/lib/nav/visibility';
+import { routeAccess } from '@/lib/roleLens';
 
 /**
  * The three honest states of a leak figure (rubric A4), pure: no checked
@@ -52,5 +53,8 @@ export const NO_DATA_CTA_HREF = '/dashboard/receiving';
  */
 export function noDataCtaFor(role: string | null | undefined, label: string): { label: string; href: string } | undefined {
   if (!role) return undefined;
-  return canFollowPath({ role: role as UserRole, features: [] }, NO_DATA_CTA_HREF) ? { label, href: NO_DATA_CTA_HREF } : undefined;
+  // An action CTA needs `edit` (IA-03): the bookkeeper reads receiving (I3) but records no delivery.
+  return canFollowPath({ role: role as UserRole, features: [] }, NO_DATA_CTA_HREF) && routeAccess(role as UserRole, NO_DATA_CTA_HREF) === 'edit'
+    ? { label, href: NO_DATA_CTA_HREF }
+    : undefined;
 }

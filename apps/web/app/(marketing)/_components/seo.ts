@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { Locale } from '@/lib/i18n/config';
+import { LEGAL_PAGE_PATHS } from '@/lib/legal/registry';
 
 /**
  * Canonical origin for SEO surfaces (metadataBase, sitemap, robots, JSON-LD).
@@ -11,17 +12,15 @@ export function siteUrl(): string {
 /** Module-load value (pages render per request, so this is the runtime env). */
 export const SITE_URL = siteUrl();
 
-/** Public marketing routes (sitemap + hreflang). */
-export const MARKETING_ROUTES = [
-  '/',
-  '/pricing',
-  '/about',
-  '/showcase',
-  '/privacy',
-  '/terms',
-  '/cookies',
-  '/accessibility',
-] as const;
+/** Public marketing pages that are not legal documents. */
+export const SITE_PAGE_ROUTES = ['/', '/pricing', '/about', '/product', '/showcase'] as const;
+
+/**
+ * Public marketing routes (sitemap + hreflang + robots `allow`). The legal pages
+ * come from the legal registry (G-11), in its order, so a new legal document is
+ * listed everywhere at once. Actions (`#cookie-settings`) are never routes here.
+ */
+export const MARKETING_ROUTES: readonly string[] = [...SITE_PAGE_ROUTES, ...LEGAL_PAGE_PATHS];
 
 /**
  * hreflang alternates + per-locale canonical: Hebrew at the bare URL, English at

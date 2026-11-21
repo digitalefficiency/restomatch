@@ -123,12 +123,13 @@ export function mergeAttribution(stored: Attribution | null, next: Attribution):
 }
 
 /**
- * `leads.create.source`: "<path>|<cta>|plan=…|src=…/…/…|in=<entry>", ≤120 chars.
+ * `leads.create.source`: "<path>|<cta>|pricing:<plan>|src=…/…/…|in=<entry>", ≤120 chars.
  * The path is where the form was sent; `cta` names the form placement.
  */
 export function buildLeadSource(path: string, cta: string, a: Attribution | null): string {
   const bits = [part(path, 40) || '/', part(cta, 20)];
-  if (a?.plan) bits.push(`plan=${a.plan}`);
+  // W3-06: a plan chosen on /pricing reads as "pricing:<plan>" (the CTA that sent them).
+  if (a?.plan) bits.push(`pricing:${a.plan}`);
   const utm = [a?.utm_source, a?.utm_medium, a?.utm_campaign].filter(Boolean).join('/');
   if (utm) bits.push(`src=${utm}`);
   if (a?.entry && a.entry !== path) bits.push(`in=${a.entry}`);

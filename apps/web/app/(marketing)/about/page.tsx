@@ -3,17 +3,9 @@ import Link from 'next/link';
 import { Target, HeartHandshake, ScanLine } from 'lucide-react';
 import { getT } from '@/lib/i18n/server';
 import { marketing } from '@/lib/i18n/messages/marketing';
-import { landing } from '@/lib/i18n/messages/landing';
-import { PLAN_SEED } from '@restomatch/db';
-import {
-  FactsStrip,
-  FeaturesSection,
-  ProblemSection,
-  RoiSection,
-  TrustSection,
-} from '../_components/detail-sections';
 import { primaryCtaHref } from '../_components/cta';
 import { alternatesFor, metadataBase, socialFor } from '../_components/seo';
+import { AboutHashForward } from './AboutHashForward';
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getT(marketing);
@@ -28,18 +20,17 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function AboutPage() {
   const t = await getT(marketing);
-  const tl = await getT(landing);
-  const proIls = PLAN_SEED.pro.priceAgorotMonthly / 100;
   const values = [
     { icon: Target, title: t('about.v1Title'), body: t('about.v1Body') },
     { icon: ScanLine, title: t('about.v2Title'), body: t('about.v2Body') },
     { icon: HeartHandshake, title: t('about.v3Title'), body: t('about.v3Body') },
   ];
 
-  // Landing v2 keeps the home page short; the detail it used to carry lives
-  // here, unchanged in substance (problem in ₪, features, calculator, trust).
+  // W3-06b: About is the story + values; the product detail (problem in ₪,
+  // features, calculator, trust) moved to /product, unchanged in substance.
   return (
     <>
+      <AboutHashForward />
       <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6 sm:py-20">
         <div className="mb-12">
           <div className="mb-4 h-0.5 w-12 rounded-full flow-stream" aria-hidden="true" />
@@ -70,11 +61,6 @@ export default async function AboutPage() {
         </div>
       </div>
 
-      <FactsStrip t={tl} />
-      <ProblemSection t={tl} locale={tl.locale} />
-      <FeaturesSection t={tl} />
-      <RoiSection t={tl} proIls={proIls} />
-      <TrustSection t={tl} />
 
       <div className="mx-auto max-w-3xl px-4 pb-16 sm:px-6 sm:pb-20">
         <div className="relative mt-14 overflow-hidden rounded-3xl border border-line bg-surface p-8 text-center shadow-card">

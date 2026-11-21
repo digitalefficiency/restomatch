@@ -6,8 +6,9 @@
  * Schedule:
  *   • daily-expectations — every day at 06:00 IL: compute today's PO list
  *   • baselines          — every day at 02:00 IL: recompute price baselines
- *   • sync-platforms     — every 30 minutes: sync each restaurant's
- *                          connected procurement platform
+ *   • sync-platforms     — NOT scheduled. The consumer exists (handlers.ts);
+ *                          a schedule is added only when a tenant has live
+ *                          MarketMan/Zester credentials (Phase-6, human)
  *   • outbox-dispatch    — every 60 seconds: pick up queued notifications
  *                          and dispatch via real provider clients
  *   • price-alerts       — every day at 07:00 IL: sustained price increases

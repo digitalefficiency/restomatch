@@ -1,5 +1,5 @@
 export * from './types';
-export { DEDUPE_INDEX_PREDICATE, enqueueNotification, markSent, markFailed } from './outbox';
+export { DEDUPE_INDEX_PREDICATE, enqueueNotification, markSent, markFailed, markSkippedNoProvider, storedPayload } from './outbox';
 export { MockWhatsAppNotifier } from './whatsapp';
 export { WhatsAppCloudNotifier, type WhatsAppCloudConfig } from './whatsappCloud';
 export { MockPushNotifier } from './push';
@@ -16,10 +16,14 @@ export {
   approvalNeededEmail,
   weeklyLeakReportEmail,
   endOfDayReportEmail,
+  invoiceOcrFailedEmail,
+  taskNoticeEmail,
+  DECISION_COPY,
   type RenderedEmail,
   type EmailLocale,
   type EmailLayout,
 } from './templates';
+export { EMAIL_COPY, fill as fillEmailCopy, type EmailCopy, type CopyShape } from './copy';
 export {
   recipientsForRestaurant,
   MANAGER_ROLES,
@@ -35,3 +39,4 @@ export {
   type Notifiers,
   type NotifierFactoryEnv,
 } from './factory';
+export * from './send';

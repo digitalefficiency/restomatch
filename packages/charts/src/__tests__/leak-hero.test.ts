@@ -4,6 +4,7 @@ import {
   discrepancies,
   eq,
   goodsReceipts,
+  grLines,
   invoiceLines,
   invoices,
   matchRuns,
@@ -14,7 +15,17 @@ import {
   suppliers,
   testDbUrl,
 } from '@restomatch/db';
-import { computeLeakBreakdown, computeLeakHero } from '../leak-hero';
+import {
+  computeInvoiceLeak,
+  computeInvoicesLeak,
+  computeLeakBreakdown,
+  computeLeakHero,
+  expectedSourceOf,
+  invoiceLeakStateCte,
+  monthInvoicesCte,
+} from '../leak-hero';
+import { sql } from '@restomatch/db';
+import { LEAK_FILTER } from '../leak-views';
 import { computeLeakReport } from '../leak-report';
 import { computeLeakGrouped, computeLeakSummary, computeLeakTrend } from '../leak-views';
 import { computeBranchSnapshot } from '../chain';
@@ -26,7 +37,9 @@ async function resetDb() {
   await db.delete(matchRuns);
   await db.delete(invoiceLines);
   await db.delete(invoices);
+  await db.delete(grLines);
   await db.delete(goodsReceipts);
+  await db.delete(poLines);
   await db.delete(purchaseOrders);
   await db.delete(products);
   await db.delete(suppliers);
@@ -240,6 +253,31 @@ describe('computeLeakHero', () => {
     const last = await computeLeakHero(db, restaurantId, { now: NOW, monthOffset: -1 });
     expect(last.leakIls).toBe(9.99);
     expect(last.spendIls).toBe(200);
+  });
+
+  it('computeInvoicesLeak is restaurant-scoped, dedupes ids and caps at the invoice total', async () => {
+    const a = await setup();
+    const capped = await a.invoice({
+      date: THIS_MONTH,
+      exclVat: '100',
+      inclVat: '118',
+      d: [
+        { type: 'DUPLICATE_INVOICE', severity: 'block', delta: '118', invoiceLevel: true, status: 'accepted' },
+        { type: 'PRICE_HIGHER', severity: 'warn', delta: '20' },
+      ],
+    });
+    const b = await setup();
+    const foreign = await b.invoice({ date: THIS_MONTH, exclVat: '50', inclVat: '59', d: [{ type: 'QTY_SHORT', severity: 'warn', delta: '9' }] });
+    const got = await computeInvoicesLeak(db, a.restaurantId, [capped, foreign, capped]);
+    expect([...got.keys()]).toEqual([capped]);
+    expect(got.get(capped)!.leakIls).toBe(118);
+    expect(await computeInvoicesLeak(db, a.restaurantId, [])).toEqual(new Map());
+    expect(await computeInvoiceLeak(db, a.restaurantId, foreign)).toBeNull();
+    const rows = (r: unknown) => (Array.isArray(r) ? r : (r as { rows: unknown[] }).rows) as Record<string, unknown>[];
+    const [st] = rows(
+      await db.execute(sql`WITH ${invoiceLeakStateCte(a.restaurantId, [capped])} SELECT raw_leak, leak, raw_recovered, recovered FROM per`),
+    );
+    expect([st!.raw_leak, st!.leak, st!.raw_recovered, st!.recovered].map(Number)).toEqual([138, 118, 118, 118]);
   });
 
   it('is restaurant-scoped', async () => {
@@ -575,6 +613,77 @@ describe('every surface sums to the hero (mutation guards: trend, chain supplier
     expect(report.status.waivedIls).toBe(20);
   });
 
+  it('batch computeInvoicesLeak = per-invoice computeInvoiceLeak, and Σ = the hero (W2-09a)', async () => {
+    const { restaurantId } = await mixedMonth();
+    const all = (await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.restaurantId, restaurantId))).map(
+      (r) => r.id,
+    );
+    const batch = await computeInvoicesLeak(db, restaurantId, [...all].reverse());
+    expect([...batch.keys()]).toEqual([...all].reverse()); // input order
+    for (const id of all) expect(batch.get(id)).toEqual(await computeInvoiceLeak(db, restaurantId, id));
+    // Σ over the non-pending invoices (the hero's leak basis) is the hero, to the agora.
+    const agorot = [...batch.values()].reduce((a, v) => a + Math.round(v.leakIls * 100), 0);
+    expect(agorot).toBe(LEAK * 100);
+  });
+
+  it('parity: the new batch = the pre-W2-09a single-invoice SQL (verbatim reference), every invoice', async () => {
+    const { restaurantId } = await mixedMonth();
+    const rows = (r: unknown) => (Array.isArray(r) ? r : (r as { rows: unknown[] }).rows) as Record<string, unknown>[];
+    // The computeInvoiceLeak query as it was before W2-09a (release/wave-1-clean), kept here as the oracle.
+    const legacy = async (invoiceId: string) =>
+      rows(
+        await db.execute(sql`
+        WITH per AS (
+          SELECT
+            i.id,
+            i.status,
+            COALESCE(i.total_incl_vat, 0) AS total,
+            COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER}), 0) AS raw_leak,
+            (NOT bool_or(mr.id IS NOT NULL))
+              OR COALESCE(bool_or(d.type = 'UNORDERED_ARRIVAL' AND d.resolution_status IN ('open','escalated')), false)
+              AS pending_link
+          FROM invoices i
+          LEFT JOIN match_runs mr ON mr.invoice_id = i.id AND mr.restaurant_id = ${restaurantId}
+          LEFT JOIN discrepancies d ON d.match_run_id = mr.id AND d.restaurant_id = ${restaurantId}
+          WHERE i.id = ${invoiceId}::uuid AND i.restaurant_id = ${restaurantId}
+          GROUP BY i.id, i.status, i.total_incl_vat
+        )
+        SELECT per.id, per.status, per.total, LEAST(per.raw_leak, per.total) AS leak, per.pending_link FROM per`),
+      )[0];
+    const all = (await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.restaurantId, restaurantId))).map(
+      (r) => r.id,
+    );
+    const batch = await computeInvoicesLeak(db, restaurantId, all);
+    expect(batch.size).toBe(all.length);
+    for (const id of all) {
+      const old = (await legacy(id))!;
+      const now = batch.get(id)!;
+      expect([now.status, Math.round(now.totalInclVat * 100), Math.round(now.leakIls * 100), now.pendingLink]).toEqual([
+        String(old.status),
+        Math.round(Number(old.total) * 100),
+        Math.round(Number(old.leak) * 100),
+        Boolean(old.pending_link),
+      ]);
+    }
+  });
+
+  it('exported CTEs: monthInvoicesCte and invoiceLeakStateCte agree per invoice with the hero', async () => {
+    const { restaurantId } = await mixedMonth();
+    const rows = (r: unknown) => (Array.isArray(r) ? r : (r as { rows: unknown[] }).rows) as Record<string, unknown>[];
+    const month = rows(
+      await db.execute(sql`WITH ${monthInvoicesCte(restaurantId, NOW, 0)}
+        SELECT id, LEAST(raw_leak, total) AS leak, pending_link FROM per ORDER BY id`),
+    );
+    const ids = month.map((m) => String(m.id));
+    const state = rows(
+      await db.execute(sql`WITH ${invoiceLeakStateCte(restaurantId, ids)}
+        SELECT id, leak, raw_leak, recovered, matched, pending_link FROM per ORDER BY id`),
+    );
+    expect(state.map((r) => [String(r.id), Number(r.leak)])).toEqual(month.map((m) => [String(m.id), Number(m.leak)]));
+    expect(state.reduce((a, r) => a + Math.round(Number(r.leak) * 100), 0)).toBe(LEAK * 100);
+    expect(() => invoiceLeakStateCte(restaurantId, [])).toThrow(/empty/);
+  });
+
   it('breakdown: countsAsLeak marks exactly the lines the hero counts', async () => {
     const { restaurantId } = await mixedMonth();
     const rows = await computeLeakBreakdown(db, restaurantId, { now: NOW });
@@ -671,6 +780,58 @@ describe('a receiving scan waiting for its count (#94) is not "waiting to be lin
       awaitingCountCount: 0,
       awaitingCountIls: 0,
     });
+  });
+});
+
+describe('breakdown line evidence (W2-09c, additive)', () => {
+  it('carries qty, unit, billed and PO prices, PO id/date, receipt note and the expected source', async () => {
+    const [r] = await db.insert(restaurants).values({ name: 'Evidence Bistro' }).returning();
+    const [s] = await db.insert(suppliers).values({ restaurantId: r!.id, name: 'קצביית הכרם' }).returning();
+    const [p] = await db.insert(products).values({ restaurantId: r!.id, canonicalName: 'אנטריקוט', defaultUnit: 'ק״ג' }).returning();
+    const poAt = new Date('2026-10-14T07:00:00Z');
+    const [po] = await db.insert(purchaseOrders).values({ restaurantId: r!.id, supplierId: s!.id, status: 'sent', createdAt: poAt }).returning();
+    const [pl] = await db.insert(poLines).values({ poId: po!.id, productId: p!.id, qtyOrdered: '10', unit: 'ק״ג', unitPriceExpected: '139.0000' }).returning();
+    const grAt = new Date('2026-10-15T06:00:00Z');
+    const [gr] = await db.insert(goodsReceipts).values({ restaurantId: r!.id, poId: po!.id, receivedAt: grAt, notes: 'ת.מ. 61036' }).returning();
+    const [grl] = await db.insert(grLines).values({ grId: gr!.id, poLineId: pl!.id, productId: p!.id, qtyReceived: '9' }).returning();
+    const [inv] = await db.insert(invoices).values({
+      restaurantId: r!.id, supplierId: s!.id, invoiceNumber: 'E-1', invoiceDate: THIS_MONTH,
+      totalExclVat: '1490', vatAmount: '0', totalInclVat: '1490', status: 'matched', source: 'photo',
+    }).returning();
+    const [il] = await db.insert(invoiceLines).values({
+      invoiceId: inv!.id, productId: p!.id, rawDescription: 'אנטריקוט', qtyBilled: '10', unit: 'ק״ג',
+      unitPriceBilled: '149.0000', lineTotal: '1490',
+    }).returning();
+    const [mr] = await db.insert(matchRuns).values({
+      restaurantId: r!.id, invoiceId: inv!.id, poId: po!.id, grId: gr!.id, overallStatus: 'major', totalDiscrepancyAmount: '0',
+    }).returning();
+    const base = { restaurantId: r!.id, matchRunId: mr!.id, productId: p!.id, invoiceLineId: il!.id, poLineId: pl!.id } as const;
+    await db.insert(discrepancies).values([
+      { ...base, type: 'PRICE_HIGHER', severity: 'block', expectedValue: '139', actualValue: '149', deltaAmount: '100', toleranceUsed: 'price: ±2% or ₪5' },
+      { ...base, grLineId: grl!.id, type: 'QTY_OVER', severity: 'warn', expectedValue: '9', actualValue: '10', deltaAmount: '149', toleranceUsed: 'qty: ±2% or 0.5 units' },
+    ]);
+
+    const [row] = await computeLeakBreakdown(db, r!.id, { now: NOW });
+    expect(row!.leakIls).toBe(249); // ₪ unchanged: Σ|Δ|, the evidence is display only
+    const price = row!.lines.find((l) => l.type === 'PRICE_HIGHER')!;
+    expect(price).toMatchObject({
+      toleranceUsed: 'price: ±2% or ₪5', qtyBilled: 10, unit: 'ק״ג', unitPriceBilled: 149, unitPriceExpected: 139, poUnit: 'ק״ג',
+      poId: po!.id, poNumber: null, deliveryNoteNumber: null, receiptNote: 'ת.מ. 61036',
+      expectedSource: 'po', expectedAsOf: poAt.toISOString(),
+    });
+    const qty = row!.lines.find((l) => l.type === 'QTY_OVER')!;
+    expect([qty.expectedSource, qty.expectedAsOf]).toEqual(['receipt', grAt.toISOString()]);
+    // The same fields reach the per-invoice and batch readers.
+    expect((await computeInvoiceLeak(db, r!.id, inv!.id))!.lines).toEqual(row!.lines);
+  });
+
+  it('expectedSourceOf: p90 wins, then by type', () => {
+    expect(expectedSourceOf('PRICE_HIGHER', 'actual exceeds historical p90 of ₪139.00')).toBe('p90');
+    expect(expectedSourceOf('PRICE_HIGHER', 'price: ±2% or ₪5')).toBe('po');
+    expect(expectedSourceOf('QTY_OVER', null)).toBe('receipt');
+    expect(expectedSourceOf('TOTAL_MISMATCH', '±₪1')).toBe('invoiceTotal');
+    expect(expectedSourceOf('VAT_MISMATCH', null)).toBe('vat');
+    expect(expectedSourceOf('DUPLICATE_INVOICE', null)).toBeNull();
   });
 });
 

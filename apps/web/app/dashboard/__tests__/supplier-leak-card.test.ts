@@ -77,3 +77,36 @@ describe('top types', () => {
     expect(toAgorot(1234.565)).toBe(123457);
   });
 });
+
+// ── W2-09c: the basis per type, through the one shared why formatter ─────────
+import { whySegments as whyOf, whyText as whyTextOf } from '@/lib/components/flags';
+import { leakWhyLabels as leakLabels } from '../leaks/why-labels';
+import { topLeakLines as topLines } from '../suppliers/[id]/leak-card-logic';
+
+describe('supplier leak card — the basis per type (W2-09c)', () => {
+  const facts = (type: string, extra: Record<string, unknown> = {}) => ({
+    type, deltaAmount: 100, expectedValue: 139, actualValue: 149, toleranceUsed: null as string | null,
+    qtyBilled: 10, billedUnit: 'ק״ג', poId: 'abcdef12-0000', poRef: null, poDate: '2026-10-14T07:00:00Z', capped: false, unavailable: false, ...extra,
+  });
+  const line = (type: string, f = facts(type)) => ({
+    discrepancyId: type, type, deltaAmount: 100, countsAsLeak: true,
+    productName: 'אנטריקוט', productNameEn: null, lineDescription: null, lineDescriptionEn: null, evidence: { facts: f },
+  });
+
+  it('topLeakLines keeps each line’s evidence', () => {
+    const [top] = topLines([{ invoiceId: 'i', invoiceNumber: '1', invoiceDate: null, lines: [line('PRICE_HIGHER')] }]);
+    expect(top!.evidence!.facts.expectedValue).toBe(139);
+  });
+
+  it('every leak type renders one basis line with its gap and no unfilled placeholder', () => {
+    for (const type of ['PRICE_HIGHER', 'QTY_OVER', 'QTY_SHORT', 'MISSING_ON_INVOICE', 'UNORDERED_ITEM', 'TOTAL_MISMATCH', 'VAT_MISMATCH', 'DUPLICATE_INVOICE']) {
+      const text = whyTextOf(whyOf(facts(type), leakLabels('he')));
+      expect([type, /\{\w+\}/.test(text), /פער/.test(text)]).toEqual([type, false, true]);
+    }
+    expect(whyTextOf(whyOf(facts('PRICE_HIGHER'), leakLabels('he')))).toMatch(/^בחשבונית .*149\.00.* × 10 ק״ג · בהזמנה .*139\.00/);
+  });
+
+  it('an unverifiable line reads "פירוט לא זמין", never a wrong formula', () => {
+    expect(whyTextOf(whyOf(facts('PRICE_HIGHER', { unavailable: true }), leakLabels('he')))).toBe('פירוט לא זמין');
+  });
+});

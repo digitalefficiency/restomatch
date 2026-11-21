@@ -8,9 +8,9 @@ import { UnitText } from '@/lib/components/UnitText';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { supplierConfirm } from '@/lib/i18n/messages/supplierConfirm';
-import { formatIls } from '@/lib/money';
+import { Money } from '@/lib/components/money';
 import { DiffList } from './Diff';
-import { answerBody, computeAnswer, primaryAction, type DiffItem, type PortalLine } from './logic';
+import { buildAnswer, mergeAfterOrderChange, orderChangedKey, type Answer, type AnswerLimits, type DiffItem, type PortalLine } from './logic';
 import { rememberAttempt } from './attempt';
 
 export type { PortalLine } from './logic';
@@ -19,18 +19,29 @@ type Phase =
   | { kind: 'edit' }
   | { kind: 'sending'; what: 'answer' | 'asIs' }
   | { kind: 'done'; status: 'confirmed' | 'changes'; diff: DiffItem[]; note: string | null }
-  | { kind: 'error'; key: ErrorKey };
-type ErrorKey = 'notFound' | 'expired' | 'rateLimited' | 'generic';
+  | { kind: 'error'; key: ErrorKey; count?: number; removed?: number; refilled?: number };
+type ErrorKey =
+  | 'notFound'
+  | 'expired'
+  | 'closed'
+  | 'rateLimited'
+  | 'incomplete'
+  | 'intentMismatch'
+  | 'orderChanged'
+  | 'orderChangedOne'
+  | 'orderChangedNeutral'
+  | 'orderChangedRemovedOne'
+  | 'orderChangedRemoved'
+  | 'orderChangedBoth'
+  | 'tooLarge'
+  | 'generic';
 
 const inputClass =
   'mt-1 block min-h-12 w-full rounded-lg border bg-surface px-3 py-2.5 text-base text-ink tabular-nums focus:outline-none focus-visible:ring-2 focus-visible:ring-primary';
 
-/**
- * ₪ in a plain `<bdi>` — no `dir`, so in Hebrew the ₪ sits left of the digits (E4).
- * TODO(W2-15): adopt W1-01's `<Money context="line">` (no cross-package imports in wave 1).
- */
+/** ₪ for a line or a total: `<Money context="line">` (2 dp; in Hebrew the ₪ sits left of the digits). */
 function Ils({ agorot, locale }: { agorot: number; locale: 'he' | 'en' }) {
-  return <bdi className="tabular-nums">{formatIls(agorot / 100, { locale, maximumFractionDigits: 2 })}</bdi>;
+  return <Money agorot={agorot} context="line" locale={locale} />;
 }
 
 /**
@@ -42,7 +53,19 @@ function Ils({ agorot, locale }: { agorot: number; locale: 'he' | 'en' }) {
  *    "as ordered" demoted to a text button that first asks to discard the edits.
  * A marked change can therefore never be dropped by the natural tap.
  */
-export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; poNumber: string; lines: PortalLine[] }) {
+export function SupplierAnswerForm({
+  token,
+  poNumber,
+  lines,
+  linesVersion,
+  limits,
+}: {
+  token: string;
+  poNumber: string;
+  lines: PortalLine[];
+  linesVersion: string;
+  limits: AnswerLimits;
+}) {
   const t = useT(supplierConfirm);
   const locale = useLocale();
   const router = useRouter();
@@ -54,6 +77,34 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
   );
   const [note, setNote] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'edit' });
+  // The order changed under the supplier (409 order_changed → refresh). Keep every
+  // value typed on a line that is still the same line — a typed shortage must never
+  // fall back to "as ordered" (G-10 review #2.1) — prefill only new or changed
+  // lines, mark them, and move focus to the first one.
+  const shown = useRef({ version: linesVersion, lines });
+  const [changedIds, setChangedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const qtyRef = useRef(qty);
+  const priceRef = useRef(price);
+  qtyRef.current = qty;
+  priceRef.current = price;
+  useEffect(() => {
+    if (shown.current.version === linesVersion) return;
+    const merged = mergeAfterOrderChange(shown.current.lines, lines, qtyRef.current, priceRef.current);
+    shown.current = { version: linesVersion, lines };
+    setQty(merged.qtyText);
+    setPrice(merged.priceText);
+    setChangedIds(new Set(merged.changedIds));
+    const n = merged.changedIds.length;
+    setPhase({
+      kind: 'error',
+      key: orderChangedKey(n, merged.removed),
+      count: n,
+      removed: merged.removed,
+      refilled: merged.refilled,
+    });
+    const first = merged.changedIds[0];
+    if (first) requestAnimationFrame(() => document.getElementById(`qty-${first}`)?.focus());
+  }, [linesVersion, lines]);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const asIsRef = useRef<HTMLButtonElement>(null);
   const wasConfirming = useRef(false);
@@ -65,21 +116,26 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
   const [showInvalid, setShowInvalid] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
 
-  const answer = useMemo(() => computeAnswer(lines, qty, price, note), [lines, qty, price, note]);
-  const { rows, diff, changeCount, lineChangeCount, invalid } = answer;
+  // ONE answer model (G-10): the primary, its count, "as ordered" and the discard confirm.
+  const built = useMemo(
+    () => buildAnswer({ lines, linesVersion, limits, qtyText: qty, priceText: price, note }),
+    [lines, linesVersion, limits, qty, price, note],
+  );
+  const { answer, diff, count: changeCount, discardCount: lineChangeCount } = built;
+  const { rows, invalid } = answer;
   const hasChanges = changeCount > 0;
 
   async function send(what: 'answer' | 'asIs') {
     setConfirmDiscard(false);
     setPhase({ kind: 'sending', what });
-    const body = answerBody(what, answer, note);
+    const body = what === 'asIs' ? built.asOrderedBody : built.body;
     try {
       const res = await fetch(`/api/supplier-confirm/${encodeURIComponent(token)}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; status?: 'confirmed' | 'changes' };
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; status?: 'confirmed' | 'changes'; error?: string };
       if (res.ok && data.ok && data.status) {
         return setPhase({
           kind: 'done',
@@ -88,18 +144,43 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
           note: body.note,
         });
       }
-      // auth-03: someone already answered this order. Never a false success —
-      // reload the page, which shows the RECORDED answer, its date, and that
-      // these changes were not saved.
+      // The order changed after this form was opened: nothing was saved. Reload
+      // the order; the effect above keeps what was typed and marks what changed.
+      if (res.status === 409 && data.error === 'order_changed') {
+        // Say so at once (a failed refresh still leaves feedback); the effect
+        // above refines the message once the new lines arrive.
+        setPhase({ kind: 'error', key: 'orderChangedNeutral' });
+        router.refresh();
+        return;
+      }
+      // The order was cancelled or closed meanwhile: say so, then reload the page
+      // (which shows the same "closed" message instead of the form).
+      if (res.status === 410 && data.error === 'order_closed') {
+        setPhase({ kind: 'error', key: 'closed' });
+        router.refresh();
+        return;
+      }
       if (res.status === 409) {
+        // auth-03: someone already answered this order. Never a false success —
+        // reload the page, which shows the RECORDED answer, its date, and that
+        // these changes were not saved.
         // The page then compares the recorded answer with this attempt: a
         // retried submit whose first try did land is the supplier's own answer.
         rememberAttempt(token, body);
         router.refresh();
         return;
       }
+      // A 422 is always an inline error on the form — never the done card.
       const key: ErrorKey =
-        res.status === 404 ? 'notFound' : res.status === 410 ? 'expired' : res.status === 429 ? 'rateLimited' : 'generic';
+        res.status === 422
+          ? data.error === 'incomplete_answer'
+            ? 'incomplete'
+            : data.error === 'intent_mismatch'
+              ? 'intentMismatch'
+              : 'generic'
+          : res.status === 413
+            ? 'tooLarge'
+            : res.status === 404 ? 'notFound' : res.status === 410 ? 'expired' : res.status === 429 ? 'rateLimited' : 'generic';
       setPhase({ kind: 'error', key });
     } catch {
       setPhase({ kind: 'error', key: 'generic' });
@@ -134,7 +215,7 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
       : t('portal.sendAnswerMany', { count: formatNumber(changeCount, locale) });
 
   function onPrimary() {
-    const action = primaryAction(answer);
+    const action = built.primary;
     if (action === 'invalid') {
       // An invalid field blocks the send — never a fallback to "as is", never a
       // silently disabled button: say why and go to the first bad field.
@@ -142,7 +223,7 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
       formRef.current?.querySelector<HTMLInputElement>('[aria-invalid="true"]')?.focus();
       return;
     }
-    void send(action);
+    void send(action === 'as_ordered' ? 'asIs' : 'answer');
   }
 
   return (
@@ -162,14 +243,17 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
           const qtyId = `qty-${l.id}`;
           const priceId = `price-${l.id}`;
           return (
-            <li key={l.id}>
-              <Card padding="sm" className={cn((shortage || priceChanged) && 'border-warn')}>
+            <li key={l.id} data-order-changed={changedIds.has(l.id) || undefined}>
+              <Card padding="sm" className={cn((shortage || priceChanged || changedIds.has(l.id)) && 'border-warn')}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-base font-semibold text-ink">{l.name}</p>
                     {l.sku ? <p className="text-sm text-muted">{t('portal.sku', { sku: l.sku })}</p> : null}
                   </div>
                   <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                    {changedIds.has(l.id) ? (
+                      <span className="rounded-full border border-warn px-2 py-0.5 text-sm font-semibold text-ink">{t('portal.lineUpdated')}</span>
+                    ) : null}
                     {shortage && !out ? (
                       <span className="rounded-full border border-warn px-2 py-0.5 text-sm font-semibold text-ink">{t('portal.shortage')}</span>
                     ) : null}
@@ -185,7 +269,7 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
                     <>
                       {' · '}
                       {t(l.agreed ? 'portal.agreedPrice' : 'portal.orderPrice')}:{' '}
-                      <bdi className="tabular-nums">{formatIls(l.unitPrice, { locale, maximumFractionDigits: 2 })}</bdi>
+                      <Money value={l.unitPrice} context="line" locale={locale} />
                     </>
                   ) : null}
                 </p>
@@ -305,7 +389,11 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
             ) : null}
             {phase.kind === 'error' ? (
               <p role="alert" className="mt-1 text-sm font-medium text-danger">
-                {t(`portal.errors.${phase.key}`)}
+                {t(`portal.errors.${phase.key}`, {
+                  count: formatNumber(phase.count ?? 0, locale),
+                  removed: formatNumber(phase.removed ?? 0, locale),
+                })}
+                {phase.refilled ? ` ${t('portal.errors.orderRefilled')}` : null}
               </p>
             ) : null}
           </div>
@@ -357,7 +445,7 @@ export function SupplierAnswerForm({ token, poNumber, lines }: { token: string; 
   );
 }
 
-function OrderTotals({ answer, locale }: { answer: ReturnType<typeof computeAnswer>; locale: 'he' | 'en' }) {
+function OrderTotals({ answer, locale }: { answer: Answer; locale: 'he' | 'en' }) {
   const t = useT(supplierConfirm);
   const { orderTotalAgorot, answerTotalAgorot, unpriced, rows, changeCount, invalid } = answer;
   if (rows.length === unpriced) return null;

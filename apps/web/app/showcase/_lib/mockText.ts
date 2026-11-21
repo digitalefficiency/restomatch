@@ -18,7 +18,7 @@ const EN: Record<string, string> = {
   'גולדסטאר אושר במחיר ההזמנה · תוויות מבצע ללא עלות': 'Goldstar approved at the order price · promo labels at no charge',
   'פטרוזיליה': 'Parsley',
   'הוזמן ולא סופק — לא חויב.': 'Ordered but not delivered — not billed.',
-  'נחסך בעקבות תיקון כמות פלפל אדום': 'Saved by correcting the red pepper quantity',
+  'נתפס בעקבות תיקון כמות פלפל אדום': 'Caught by correcting the red pepper quantity',
   'דנה תפסה כמות חסרה בסלמון ומחיר גבוה בדניס': 'Dana caught short salmon and an over-priced sea bream',
   'INV-3344 נסגרה': 'INV-3344 closed',
   // ── Suppliers ────────────────────────────────────────────────────────────
@@ -182,7 +182,7 @@ const EN: Record<string, string> = {
   'מבצע לקראת חג': 'Holiday promotion',
   'פער מחיר > 10%': 'Price variance over 10%',
   'המחיר שחויב חרג מסף החסימה המוגדר': 'The billed price exceeded the configured blocking threshold',
-  'דרשנו הסבר מאבי הירקן': 'We asked Avi the greengrocer for an explanation',
+  'ביקשנו הבהרה מאבי הירקן': 'We asked Avi the greengrocer for clarification',
   'פער מחיר 2-10%': 'Price variance 2–10%',
   'פער בינוני — דרושה סקירה של מנהל משמרת': 'Moderate variance — needs a shift manager review',
   'פערים < 2%': 'Variances under 2%',
