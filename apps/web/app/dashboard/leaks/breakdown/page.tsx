@@ -306,7 +306,11 @@ export default async function LeakBreakdownPage({
                               ? zeroNoteOf(l, inv.lines) === 'billedShort'
                                 ? t('breakdown.noMoneyShort')
                                 : t('breakdown.noMoney')
-                              : resolutionLabel(ta, l.resolutionStatus)}
+                              : !l.countsAsLeak && l.resolutionStatus === 'accepted'
+                                ? // G-15: an accepted row the leak does not count was never claimed from
+                                  // the supplier — the routing engine acknowledges it (T4 "לידיעה").
+                                  t('breakdown.acknowledged')
+                                : resolutionLabel(ta, l.resolutionStatus)}
                           </p>
                           {/* W2-09c: the line's verified basis, one line (clamped in compact density). */}
                           {!noMoney && 'evidence' in l && l.evidence ? (
