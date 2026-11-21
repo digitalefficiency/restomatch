@@ -216,6 +216,21 @@ test('§14.5 1100×700: the toggle opens the panel over the page; the page is in
   await page.context().close();
 });
 
+test('§14.5 1100×700: a link in the overlay closes it and focus lands on the new page\'s h1, not in the menu', async ({ browser, baseURL }) => {
+  const page = await open(browser, baseURL!, { width: 1100, height: 700 });
+  await page.getByTestId('sidebar-toggle').click();
+  await expect(page.locator('#rm-app')).toHaveAttribute('data-overlay', 'open');
+  await aside(page).locator('a[data-nav-key="approvals"]').first().click();
+  await page.waitForURL('**/dashboard/approvals');
+  await expect(page.locator('#rm-app')).not.toHaveAttribute('data-overlay', 'open');
+  await expect(page.locator('main').locator('xpath=ancestor::div[@inert]')).toHaveCount(0);
+  // The column was inert when the route changed; focus still lands on the page heading once it is free.
+  await expect
+    .poll(() => page.evaluate(() => (document.activeElement?.tagName === 'H1' ? !!document.activeElement.closest('#main-content') : document.activeElement?.tagName)))
+    .toBe(true);
+  await page.context().close();
+});
+
 test('§4.2 default-open groups by role; the current page\'s group is always open', async ({ browser, baseURL }) => {
   const expectOpen: Record<'owner' | 'manager' | 'bookkeeper', string[]> = {
     owner: ['money', 'leaks'],
