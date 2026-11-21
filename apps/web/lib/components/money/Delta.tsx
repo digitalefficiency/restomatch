@@ -81,13 +81,18 @@ export function Delta({
           ) : kind === 'ils' ? (
             <Money value={abs} context="inline" />
           ) : (
-            <bdi className="num whitespace-nowrap">{kind === 'pct' ? formatPercent(abs / 100, locale) : formatNumber(abs, locale)}</bdi>
+            // Isolated, but not a money figure: `bdi.num` is the class <Money> gives an amount with ₪ (W1-01 reads it so).
+            <bdi className="whitespace-nowrap">
+              <span className="num">{kind === 'pct' ? formatPercent(abs / 100, locale) : formatNumber(abs, locale)}</span>
+            </bdi>
           )}
           {/* The space stays outside the isolate, so in Hebrew it separates the percent from the amount. */}
           {pct ? (
             <>
               {' '}
-              <bdi className="num whitespace-nowrap">({pct})</bdi>
+              <bdi className="whitespace-nowrap">
+                <span className="num">({pct})</span>
+              </bdi>
             </>
           ) : null}
           {about ? ` ${about}` : null}

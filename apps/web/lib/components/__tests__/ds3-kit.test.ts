@@ -740,8 +740,14 @@ describe('review fixes (accessibility of the shared components)', () => {
   it('Delta: the percent sits after a space outside its isolate, never glued to the ₪', async () => {
     const { Delta } = await import('../money/Delta');
     const html = render(h(Delta, { current: 746, previous: 760, goodWhen: 'down', showPercent: true }));
-    expect(html).toMatch(/<bdi class="num whitespace-nowrap">\([^)]*%\)<\/bdi>/);
-    expect(html).not.toContain('<bdi class="num whitespace-nowrap"> (');
+    expect(html).toMatch(/<bdi class="whitespace-nowrap"><span class="num">\([^)]*%\)<\/span><\/bdi>/);
+    expect(html).not.toMatch(/<bdi[^>]*>\s+\(/);
+    // `bdi.num` is the money figure (W1-01 reads every one for a ₪ left of the digits): none here lacks a ₪
+    const figures = html.match(/<bdi class="num[^"]*"[^>]*>[\s\S]*?<\/bdi>/g) ?? [];
+    expect(figures.length).toBeGreaterThan(0);
+    for (const f of figures) expect(f, f).toContain('₪');
+    const count = render(h(Delta, { current: 12, previous: 10, goodWhen: 'down', kind: 'count', showPercent: true }));
+    expect(count.match(/<bdi class="num/g) ?? []).toHaveLength(0);
   });
 
   it('the credit-request track keeps its markers in forced colours (like the dots)', () => {

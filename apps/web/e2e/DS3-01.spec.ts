@@ -104,12 +104,19 @@ test.describe('DS3-01 kit page (platform admins)', () => {
         return { text: el.textContent ?? '', left: digit ? cur.right <= digit.left + 0.5 : false, smaller: curSize < figSize, floor: curSize >= 12 };
       }),
     );
-    expect(checks.length).toBeGreaterThan(3);
+    // The card's three split figures that carry a ₪ (a line, a unit price, a credit); the bookkeeper's
+    // compact-table figure below prints no ₪ by design (D8: the column header carries it once).
+    expect(checks.length).toBe(3);
     for (const c of checks) {
       expect(c.left, `₪ left of digits in "${c.text}"`).toBe(true);
       expect(c.smaller, `smaller ₪ in "${c.text}"`).toBe(true);
       expect(c.floor, `₪ at least 12 px in "${c.text}"`).toBe(true);
     }
+    // D8: the compact-table figure shows the digits only and keeps the exact amount with ₪ in its title
+    const header = page.locator('#kit-money bdi.num', { hasText: '38.70' });
+    await expect(header).toHaveCount(1);
+    await expect(header).not.toContainText('₪');
+    await expect(header).toHaveAttribute('title', /₪/);
   });
 
   test('status: one solid pill with a white word; pending is grey with a clock, never a warning', async ({ page }) => {
