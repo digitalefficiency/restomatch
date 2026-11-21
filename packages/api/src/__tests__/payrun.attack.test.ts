@@ -600,3 +600,78 @@ describe('payRun.list (W2-03)', () => {
     expect(a!.status).toBe('matched');
   });
 });
+
+/* ── AU-14 · pre-flight + payment note (add-only) ─────────────────────────── */
+
+describe('payRun.preflight / payRun.remittanceText / markPaid guard (AU-14)', () => {
+  it("preflight: A never sees B's invoices, suppliers or ₪, even when B's ids are passed; receiver/chef FORBIDDEN", async () => {
+    const all = await asA('bookkeeper').payRun.preflight();
+    const json = JSON.stringify(all);
+    for (const leak of [B.invoiceId, B.supplierId, B.supplierName]) expect(json).not.toContain(leak);
+    const probed = await asA().payRun.preflight({ invoiceIds: [B.invoiceId] });
+    expect(probed.invoices).toEqual([]);
+    expect(probed.summary?.atRiskIls ?? 0).toBe(0);
+    for (const role of ['receiver', 'chef'] as const) {
+      await expect(asA(role).payRun.preflight()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+  });
+
+  it("remittanceText: B's supplier or invoice (alone or mixed) → NOT_FOUND, same message as an unknown id; receiver/chef FORBIDDEN", async () => {
+    const errOf = (p: Promise<unknown>) =>
+      p.then(
+        () => null,
+        (e: { code?: string; message?: string }) => ({ code: e.code, message: e.message }),
+      );
+    const ghost = '00000000-0000-4000-8000-00000000beef';
+    expect(await errOf(asA().payRun.remittanceText({ supplierId: B.supplierId, invoiceIds: [B.invoiceId] }))).toMatchObject({
+      code: 'NOT_FOUND',
+    });
+    expect(await errOf(asA().payRun.remittanceText({ supplierId: B.supplierId, invoiceIds: [A.invoiceId] }))).toEqual(
+      await errOf(asA().payRun.remittanceText({ supplierId: ghost, invoiceIds: [A.invoiceId] })),
+    );
+    const mixed = await errOf(asA().payRun.remittanceText({ supplierId: A.supplierId, invoiceIds: [A.invoiceId, B.invoiceId] }));
+    expect(mixed).toMatchObject({ code: 'NOT_FOUND' });
+    expect(mixed).toEqual(await errOf(asA().payRun.remittanceText({ supplierId: A.supplierId, invoiceIds: [A.invoiceId, ghost] })));
+    for (const role of ['receiver', 'chef'] as const) {
+      await expect(asA(role).payRun.remittanceText({ supplierId: A.supplierId, invoiceIds: [A.invoiceId] })).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+      });
+    }
+  });
+
+  it('markPaid (flag on): an unacknowledged soft flag → PRECONDITION_FAILED before any write; acknowledged → reaches the write (NOT_IMPLEMENTED until H-03)', async () => {
+    const prev = process.env.PAY_RUN_MARK_PAID;
+    process.env.PAY_RUN_MARK_PAID = '1';
+    const items = [{ invoiceId: A.invoiceId, expectedStatus: 'matched' as const }];
+    try {
+      // A's supplier was never paid → `first_payment` (soft).
+      await expect(
+        asA('bookkeeper').payRun.markPaid({ items, paidOn: '2026-10-25', method: 'bank_transfer', clientMutationId: 'cmid-au14-0001' }),
+      ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: 'preflight_unacknowledged' });
+      await expect(
+        asA('bookkeeper').payRun.markPaid({
+          items,
+          paidOn: '2026-10-25',
+          method: 'bank_transfer',
+          acknowledgedFlags: [{ invoiceId: A.invoiceId, kinds: ['first_payment'] }],
+          clientMutationId: 'cmid-au14-0002',
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_IMPLEMENTED' });
+      // A foreign id is still NOT_FOUND first (W2-03's ownership check runs before the guard).
+      await expect(
+        asA().payRun.markPaid({
+          items: [{ invoiceId: B.invoiceId, expectedStatus: 'matched' }],
+          paidOn: '2026-10-25',
+          method: 'bank_transfer',
+          acknowledgedFlags: [{ invoiceId: B.invoiceId, kinds: ['first_payment'] }],
+          clientMutationId: 'cmid-au14-0003',
+        }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    } finally {
+      if (prev === undefined) delete process.env.PAY_RUN_MARK_PAID;
+      else process.env.PAY_RUN_MARK_PAID = prev;
+    }
+    const [a] = await ownerDb.select({ status: invoices.status }).from(invoices).where(eq(invoices.id, A.invoiceId));
+    expect(a!.status).toBe('matched');
+  });
+});
