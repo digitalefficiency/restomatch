@@ -8,9 +8,9 @@
 // value (marked "DS2").
 
 export const ramp = {
-  /** Basil: the one primary action of a screen and text links (SPEC §2 --brand). */
+  /** Basil: the one primary action of a screen and text links (SPEC §2 --brand); 700 is also the value of the T3 amount role. */
   green: { 50: '#E0F9ED', 100: '#D0F3E3', 200: '#ADDEC7', 700: '#00573B', 800: '#00452D' },
-  /** Leaf: a counted line and money that came back, T3 (SPEC §2 --ok). */
+  /** Leaf: a counted line, the tick of good news, and the T3 family's fills, tint and border (SPEC §2 --ok). */
   leaf: { 50: '#E2FBE9', 100: '#D2F6DD', 200: '#ADE3BF', 500: '#0EA053', 700: '#00713E', 800: '#005D32' },
   /** Tomato: leak and "blocks payment", nothing else (SPEC §2 --leak). */
   red: { 50: '#FFF0EE', 100: '#FBE6E3', 200: '#FACAC5', 500: '#DD2729', 700: '#B7191C', 800: '#991416' },

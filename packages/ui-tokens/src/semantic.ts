@@ -84,6 +84,8 @@ export const status: Record<StatusFamily, FamilyRoles> = {
   primary: fromRamp(ramp.green),
   danger: fromRamp(ramp.red, ramp.red[500]),
   warn: fromRamp(ramp.amber, ramp.amber[400]),
+  // The v1 `--c-gold` (fills, tints, borders, rings, gradients) is this family's bold; only text reads
+  // `text` (build.ts, Tailwind `textColor.gold`), so no T3 fill turns into the action colour.
   gold: { ...fromRamp(ramp.leaf, ramp.leaf[500]), text: ramp.green[700] },
   info: fromRamp(ramp.blue),
   neutral: { text: text.muted, bgBold: text.muted, bgBoldHover: ramp.neutral[800], bgSubtle: surfaces.sunken, bgSubtleHover: ramp.neutral[75], borderSubtle: surfaces.line, onBold: text.onBold, dot: text.subtle },
@@ -125,9 +127,9 @@ export type MoneyState =
 export const moneyStates: Record<MoneyState, { figure: 'ink' | 'muted' | 'gold' | 'primary'; tier: 'T1' | 'T2' | 'T3' | 'T4' | null }> = {
   leak: { figure: 'ink', tier: 'T1' }, // ink figure + danger marker (rail) on the T1 hero only
   atRisk: { figure: 'ink', tier: 'T2' }, // bold StatusChip + ink figure + one primary CTA
-  // T3 is green in the clean finish: `gold` is the T3 family, now leaf (SPEC §2 `--ok`, "money
-  // that came back"). `claimed` (asked for, not back yet) keeps `primary` (basil, also green):
-  // lib/components/__tests__/ds-foundation.test.ts:80 pins its class, outside this package.
+  // T3 is green in the clean finish: caught, credited and returned read the T3 family, whose text is
+  // the recovered amount's own role (#00573B, `--c-gold-text`). `claimed` (asked for, not back yet)
+  // keeps `primary`, the same value: lib/components/__tests__/ds-foundation.test.ts:80 pins its class.
   caught: { figure: 'gold', tier: 'T3' },
   claimed: { figure: 'primary', tier: 'T3' },
   credited: { figure: 'gold', tier: 'T3' }, // + ✓ icon

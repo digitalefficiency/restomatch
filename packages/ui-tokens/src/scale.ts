@@ -116,10 +116,13 @@ export const motion = {
 /**
  * DS3 SPEC §8: the side menu's own named set, the one addition to motion. The owner-approved
  * sidebar spec (§10) fixes these timings and DS3-02 uses them: the labels fade out (and a row's
- * hover fill fades) in `fade`; the width collapses in `collapse` and expands in `expand`, on
- * `easing`; the labels come back `delay` after the width starts; a tooltip fades in `tooltip`,
- * the chevron turns in `chevron`. Under prefers-reduced-motion the global rule of globals.css
- * (a11y-15) already takes every transition to 0, so nothing is duplicated here.
+ * hover fill fades) in `fade`, linearly; the width collapses in `collapse` and expands in
+ * `expand`, on `easing`; the labels come back `delay` after the width starts; a tooltip fades in
+ * `tooltip`; the chevron turns in `chevron` (the reference runs it on the standard curve).
+ * The sidebar spec's 150 ms badge cross-fade is `--dur-short`. Its 140 ms label fade-in and 180 ms
+ * icon glide are not among SPEC §8's six values, so they are an open owner question (see the PR).
+ * Under prefers-reduced-motion the global rule of globals.css (a11y-15) takes every transition
+ * and delay to 0, so nothing is duplicated here.
  */
 export const menuMotion = {
   duration: { fade: '80ms', tooltip: '90ms', chevron: '120ms', delay: '130ms', collapse: '160ms', expand: '200ms' },
@@ -224,18 +227,21 @@ const t = (fs: number, lh: number): TypeStep => ({ fs: `${fs / 16}rem`, lh: `${l
 /**
  * The closed v2 scale, direction A values (DS2 §6.1: line-heights one step
  * looser than the base because Plex's Hebrew is tall; titles at 600 so the ₪
- * carries the weight; the hero at 700, Plex has no 800). `id` is Plex Sans 500
- * with `tnum` (D3), never a mono face.
+ * carries the weight). `id` is Plex Sans 500 with `tnum` (D3), never a mono face.
+ * DS3 SPEC §3 moved four of them to the clean finish's steps — the region title (title-sm 16/22),
+ * the leading figure that is not the hero (money-card 28/32 at 600), the hero (money-hero 84/88 at
+ * 400) — and added `sub`, `lead`, `row-title` and `row-sub`. None of the v2 roles has a call site yet.
  */
 export const typeScaleV2: Record<string, TypeRoleV2> = {
   cell: { base: t(14, 22), compact: t(13, 20), field: t(16, 24), fw: 400, ls: '0' },
-  'title-sm': { base: t(16, 24), field: t(18, 26), fw: 600, ls: '0' },
+  'title-sm': { base: t(16, 22), field: t(18, 26), fw: 600, ls: '0' }, // DS3 SPEC §3: the region title is 16/22
   // DS3 SPEC §7: in compact density a screen title is 20/26 (★ from DS3; nothing reads these roles yet).
   'title-md': { base: t(20, 28), compact: t(20, 26), field: t(20, 28), fw: 600, ls: '0' },
   'title-lg': { base: t(24, 32), compact: t(20, 26), field: t(22, 30), fw: 600, ls: '0' },
   'money-dense': { base: t(14, 22), compact: t(13, 20), field: t(16, 24), fw: 400, ls: '0' },
   'money-row': { base: t(16, 24), compact: t(14, 20), field: t(18, 26), fw: 600, ls: '0' },
-  'money-card': { base: t(28, 36), compact: t(24, 32), field: t(28, 36), fw: 700, ls: '-0.01em' },
+  // DS3 SPEC §3: "28/32 where a screen has one leading figure that is not the hero", at 600 (700 is the monogram's).
+  'money-card': { base: t(28, 32), compact: t(24, 32), field: t(28, 36), fw: 600, ls: '-0.01em' },
   // DS3 SPEC §3: the owner home's one number — 84/88 at weight 400, 64/70 on a phone (no call site yet;
   // `metric-hero` stays for the screens that use it today).
   'money-hero': { base: t(84, 88), phone: t(64, 70), field: t(64, 70), fw: 400, ls: '-0.03em' },
