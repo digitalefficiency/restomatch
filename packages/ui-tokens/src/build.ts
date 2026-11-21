@@ -127,6 +127,9 @@ export function cssVariables(): string {
     `  :root, [data-density] {`,
     `    --row-h: ${density.touch.row}px;`,
     `    --control-h: ${density.touch.control}px;`,
+    // DS3 SPEC §7 (density is fixed on a phone): the cell padding takes the floor too, so compact's
+    // 12 px never reaches a thumb. The v2 floor in modes.ts does the same for `--cell-px`.
+    `    --cell-inline: ${density.touch.cellInline}px;`,
     '  }',
     '}',
     '/* Field mode (lens-mobile-field §3.6): bigger floor, stronger borders, 3 px focus. */',
