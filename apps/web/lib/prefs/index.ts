@@ -7,4 +7,4 @@
 export * from './schema';
 export { getDisplayChoices, setDisplayChoices, singleKeysEnabled, subscribeDisplay } from './store';
 export { PrefsProvider, useIsApple, useIsCoarse, usePrefs, type PrefsApi } from './PrefsProvider';
-export { useIsNarrow, useIsPhone, useMediaMatch } from './media';
+export { useHydrated, useIsNarrow, useIsPhone, useMediaMatch } from './media';

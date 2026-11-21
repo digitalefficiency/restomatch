@@ -37,3 +37,18 @@ export function useIsNarrow(): boolean {
 export function useIsPhone(): boolean {
   return useMediaMatch(PHONE_QUERY);
 }
+
+const noSubscribe = () => () => {};
+
+/**
+ * False on the server and during hydration, true after: for a value that only
+ * the browser knows (the single-key switch lives in localStorage), so the
+ * control appears once, with its real state, instead of flipping after load.
+ */
+export function useHydrated(): boolean {
+  return useSyncExternalStore(
+    noSubscribe,
+    () => true,
+    () => false,
+  );
+}
