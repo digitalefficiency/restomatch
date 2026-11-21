@@ -197,9 +197,7 @@ export function claimableFromAwaiting(claims: readonly AwaitingClaim[], locale: 
  */
 export function claimableData(invoices: LeakBreakdownInvoice[], locale: AskLocale = 'en') {
   const lines = invoices.flatMap((inv) =>
-    // G-14 Q1 (decision 18): decided lines take the cap first; these open lines get what is
-    // left — "to decide", never "can be claimed".
-    claimableLines(inv, { decidedFirst: true })
+    claimableLines(inv)
       .filter(({ line: l }) => l.resolutionStatus === 'open' || l.resolutionStatus === 'escalated')
       .map(({ line: l, amount }) => ({
         invoiceId: inv.invoiceId,

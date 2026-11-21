@@ -199,7 +199,7 @@ export const receiving: Shape<typeof he> = {
     },
     atStake: 'المبلغ موضع الخلاف',
     quantitiesOnly: 'الكميات فقط',
-    toDecide: 'قيد المراجعة — لم يُتخذ قرار بعد', // review: new (G-14 Q1)
+    toDecide: 'لم يُتخذ قرار بعد', // review: new (G-14 Q1)
     total: 'المجموع المطلوب كإشعار دائن', // review: "credit note" wording
     computing: 'محرّك المطابقة يحسب المبالغ…',
     afterClose: 'يُحدَّد مبلغ الفرق بالـ ₪ بعد إغلاق الاستلام — يقارنه محرّك المطابقة بالعدّ الفعلي.',

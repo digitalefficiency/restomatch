@@ -495,8 +495,8 @@ export const receivingRouter = router({
           expected: number | null;
           actual: number | null;
           amountIls: number;
-          /** Still open / escalated (decision 18): the slip shows it as "to decide", never asked. */
-          undecided: boolean;
+          /** Still open / escalated (decision 18): the slip shows it as "to decide", never asked. null for a receiver. */
+          undecided: boolean | null;
         }>;
       } = { receiptClosed, ready: false, holdReason: null, totalIls: 0, lines: [] };
 
@@ -576,6 +576,8 @@ export const receivingRouter = router({
           lines: engine.lines.map((l) => ({
             ...stripMoneyDeep(l),
             ...(QTY_DISCREPANCY_TYPES.has(l.type) ? {} : { expected: null, actual: null }),
+            // The decision state is the money side's, not the dock's (G-14 Q1): same shape, no value.
+            undecided: null,
           })),
         };
       }

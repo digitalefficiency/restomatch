@@ -174,7 +174,7 @@ export const he = {
     },
     atStake: 'בסיכון',
     quantitiesOnly: 'כמויות בלבד',
-    toDecide: 'לבירור — טרם הוחלט',
+    toDecide: 'טרם הוחלט',
     total: 'סה״כ פערים',
     computing: 'מחשבים את הסכומים…',
     afterClose: 'הסכום ייקבע אחרי סגירת קבלת הסחורה.',

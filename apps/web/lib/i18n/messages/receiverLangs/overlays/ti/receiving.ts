@@ -200,7 +200,7 @@ export const receiving: Shape<typeof he> = {
     },
     atStake: 'ኣብ ክትዕ ዘሎ መጠን', // review
     quantitiesOnly: 'ብዝሒ ጥራይ',
-    toDecide: 'ንምርመራ — ገና ኣይተወሰነን', // review: new (G-14 Q1)
+    toDecide: 'ገና ኣይተወሰነን', // review: new (G-14 Q1)
     total: 'ጠቕላላ ንምምላስ (credit note)', // review: "credit note" wording
     computing: 'ናይ ምንጽጻር ሲስተም ገንዘብ ይሕሰብ ኣሎ…',
     afterClose: 'መጠን ₪ ምቕባል ምስ ተዓጽወ ይውሰን — ናይ ምንጽጻር ሲስተም ምስ ብሓቂ ዝተቘጽረ የነጻጽሮ።', // review

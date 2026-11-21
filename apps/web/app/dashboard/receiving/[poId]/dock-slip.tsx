@@ -14,7 +14,7 @@ import { receiving } from '@/lib/i18n/messages/receiving';
 import { approvals } from '@/lib/i18n/messages/approvals';
 import { waLink } from '@/lib/messageTemplates';
 import { discrepancyLabel } from '../../approvals/vocab';
-import { buildSlipLines, issueMessageKey, needsSlip, slipBullet, slipNote, sumIls, slipTotals, type SlipLine } from './_dockSlip';
+import { buildSlipLines, issueMessageKey, needsSlip, slipBullet, slipNote, slipTotals, type SlipLine } from './_dockSlip';
 
 /** Stop polling for the engine after this long; the slip still shows quantities. */
 const ENGINE_WAIT_MS = 120_000;
@@ -100,6 +100,13 @@ export function DockSlip({
   const note = showMoney ? slipNote(data.engine, !!invoiceId, gaveUp) : null;
   const engineReady = showMoney && data.engine.ready;
   const amountOf = (l: SlipLine) => (showMoney ? l.amountIls : null);
+  // G-14 Q1: a line's open part is "טרם הוחלט" — the whole line, or "of which" on a mixed line —
+  // so the bullets add up to the labelled totals.
+  const toDecideOf = (l: SlipLine) => (showMoney ? (l.toDecideIls ?? 0) : 0);
+  const isMixed = (l: SlipLine) => toDecideOf(l) > 0 && Math.round(toDecideOf(l) * 100) < Math.round((l.amountIls ?? 0) * 100);
+  const toDecideLabel = (l: SlipLine) =>
+    isMixed(l) ? `${t('dockSlip.toDecide')}: ${money(toDecideOf(l))}` : t('dockSlip.toDecide');
+  const amountText = (l: SlipLine) => (toDecideOf(l) > 0 ? `${money(amountOf(l)!)} (${toDecideLabel(l)})` : money(amountOf(l)!));
 
   const money = (v: number) => formatIls(v, { locale, maximumFractionDigits: 2 });
   const qty = (v: number | null, u: string | null) =>
@@ -136,7 +143,7 @@ export function DockSlip({
     ...(dup ? [t('dockSlip.duplicate', { number: dup })] : []),
     '',
     ...slipLines.map(
-      (l) => slipBullet(name(l), issueTexts(l), amountOf(l) !== null ? money(amountOf(l)!) : null),
+      (l) => slipBullet(name(l), issueTexts(l), amountOf(l) !== null ? amountText(l) : null),
     ),
     ...(total > 0 ? ['', `${t('dockSlip.total')}: ${money(total)}`] : []),
     ...(toDecide > 0 ? [`${t('dockSlip.toDecide')}: ${money(toDecide)}`] : []),
@@ -219,9 +226,9 @@ export function DockSlip({
                   <bdi data-testid="dock-slip-amount" className="font-semibold tabular-nums text-ink">
                     {money(amountOf(l)!)}
                   </bdi>
-                  {showMoney && (l.toDecideIls ?? 0) > 0 ? (
+                  {toDecideOf(l) > 0 ? (
                     <span data-testid="dock-slip-to-decide" className="block text-sm text-muted">
-                      {t('dockSlip.toDecide')}
+                      {toDecideLabel(l)}
                     </span>
                   ) : null}
                 </>

@@ -25,8 +25,8 @@ export interface EngineSlipLine {
   expected: number | null;
   actual: number | null;
   amountIls: number;
-  /** G-14 Q1: still open / escalated — shown as "to decide", never in the total asked. */
-  undecided?: boolean;
+  /** G-14 Q1: still open / escalated — shown as "to decide", never in the total asked (null for a receiver). */
+  undecided?: boolean | null;
 }
 
 export interface SlipLine {
@@ -150,9 +150,16 @@ function undecidedIls(lines: EngineSlipLine[]): number | null {
 
 /** G-14 Q1 (decision 18): the slip's totals — asked (decided) vs to decide (open gaps). */
 export function slipTotals(lines: SlipLine[]): { asked: number; toDecide: number } {
-  const toDecide = sumIls(lines.map((l) => l.toDecideIls ?? 0));
-  const all = sumIls(lines.map((l) => l.amountIls ?? 0));
-  return { asked: Math.round((all - toDecide) * 100) / 100, toDecide };
+  // Integer agorot throughout (money rule): asked = Σ (line ₪ − its to-decide ₪).
+  let askedAg = 0;
+  let toDecideAg = 0;
+  for (const l of lines) {
+    const all = Math.round((l.amountIls ?? 0) * 100);
+    const open = Math.round((l.toDecideIls ?? 0) * 100);
+    askedAg += all - open;
+    toDecideAg += open;
+  }
+  return { asked: askedAg / 100, toDecide: toDecideAg / 100 };
 }
 
 /** Σ in integer agorot (exact). */

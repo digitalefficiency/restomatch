@@ -65,7 +65,7 @@ export const en: Shape<typeof he> = {
     priceIntro: 'Products that got more expensive this month vs the previous 90 days:',
     priceItem: '{product} from {supplier}: {before} → {after} ({pct}), {excess} extra',
     claimNone: 'There are no discrepancies waiting for a decision right now. Nice.',
-    claimIntro: 'Not decided yet: {total} (before VAT) across {count} discrepancies. Once you decide, you can send a credit request for them. The biggest:',
+    claimIntro: 'Not decided yet: {total} (before VAT) across {count} discrepancies. The biggest:',
     claimOther: 'Also: duplicate invoices {incl} (incl. VAT), VAT {vat} — separate, never added together.',
     claimItem: '{supplier} · {item} ({type}): {amount}',
     topSupplier: 'The supplier that leaked most this month: {supplier} — {leak} out of {spend} spent.',

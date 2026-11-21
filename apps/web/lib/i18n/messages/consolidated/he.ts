@@ -22,7 +22,9 @@ export const he = {
     ask: 'נא לזכות {amount} + מע״מ.',
     askIncl: 'נא לזכות {amount} (כולל מע״מ).',
     askBoth: 'נא לזכות {excl} + מע״מ, ועוד {incl} (כולל מע״מ).',
-    toDecide: '{amount} ממתינים להחלטה שלנו — עוד לא ביקשנו זיכוי.',
+    toDecide: 'ממתינים להחלטה שלנו: {amount} + מע״מ.',
+    toDecideIncl: 'ממתינים להחלטה שלנו: {amount} (כולל מע״מ).',
+    toDecideBoth: 'ממתינים להחלטה שלנו: {excl} + מע״מ, ועוד {incl} (כולל מע״מ).',
     inclVat: '(כולל מע״מ)',
   },
   finding: {

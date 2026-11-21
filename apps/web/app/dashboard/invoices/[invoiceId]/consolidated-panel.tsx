@@ -106,16 +106,23 @@ export function ConsolidatedPanel({
   const exclAsk = proposal.claim.exclIls;
   const inclAsk = proposal.claim.inclIls;
   // G-14 Q1 (decision 18): a gap nobody decided is never asked — the letter says it is
-  // pending a decision instead of "נא לזכות".
-  const toDecideIls = (proposal.toDecide?.exclIls ?? 0) + (proposal.toDecide?.inclIls ?? 0);
+  // pending a decision instead of "נא לזכות", with the same VAT split (lib/claims VatBasis:
+  // "+ מע״מ" only on amounts before VAT; never adding the two bases together).
+  const exclTd = proposal.toDecide?.exclIls ?? 0;
+  const inclTd = proposal.toDecide?.inclIls ?? 0;
+  const pos = (v: number) => Math.round(v * 100) > 0;
   const letterAsk =
-    exclAsk > 0 && inclAsk > 0
+    pos(exclAsk) && pos(inclAsk)
       ? t('letter.askBoth', { excl: ils(exclAsk), incl: ils(inclAsk) })
-      : inclAsk > 0
+      : pos(inclAsk)
         ? t('letter.askIncl', { amount: ils(inclAsk) })
-        : exclAsk > 0
+        : pos(exclAsk)
           ? t('letter.ask', { amount: ils(exclAsk) })
-          : t('letter.toDecide', { amount: ils(toDecideIls) });
+          : pos(exclTd) && pos(inclTd)
+            ? t('letter.toDecideBoth', { excl: ils(exclTd), incl: ils(inclTd) })
+            : pos(inclTd)
+              ? t('letter.toDecideIncl', { amount: ils(inclTd) })
+              : t('letter.toDecide', { amount: ils(exclTd) });
   // G-04 §9: review items and notes still being counted are read-only rows. When they
   // are all that keeps the ריכוז from "תואמת" (nothing to claim, no leak), there is no
   // red "פערים" card and no supplier letter — never a letter asking ₪0.00.

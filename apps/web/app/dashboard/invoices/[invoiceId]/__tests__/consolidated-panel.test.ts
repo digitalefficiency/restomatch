@@ -187,7 +187,27 @@ describe('ConsolidatedPanel · G-04 §9 review items', () => {
     expect(html).toContain('data-testid="xmatch-differences"');
     const letter = textOf(html, 'xmatch-letter')!;
     expect(letter).toContain('ממתינים להחלטה');
+    expect(letter).toContain('+ מע״מ');
     expect(letter).not.toContain('נא לזכות');
+  });
+
+  it('G-14 Q1: the pending letter keeps the VAT split — never adds before-VAT and incl-VAT ₪', () => {
+    const html = render(
+      proposal({
+        status: 'differences',
+        toDecide: { exclIls: 2, inclIls: 42.48 },
+        totals: { deliveryNotesIls: 34, invoiceSubtotalIls: 36, differenceIls: 2, leakIls: 44.48, invoiceTotalInclVat: 84.96 },
+        findings: [
+          {
+            type: 'PRICE_HIGHER', severity: 'warn', productId: 'p', deliveryNoteNumber: '9001', alreadyBilledOn: null, basis: 'excl',
+            productName: 'חלב', productNameEn: 'Milk', unit: 'kg', qty: 4, expected: 8.5, actual: 9, deltaAmount: 2, countsAsLeak: true,
+          },
+        ],
+      }),
+    );
+    const letter = textOf(html, 'xmatch-letter')!;
+    expect(letter).toContain('ועוד');
+    expect(letter).not.toContain('44.48');
   });
 
   it('en renders the same rows (copy parity)', () => {
