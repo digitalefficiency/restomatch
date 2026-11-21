@@ -11,6 +11,10 @@ import { safeRelativePath } from '@/lib/safeRedirect';
 import { AuthShell, authTitle } from '../(auth)/_components/AuthShell';
 import { Notice } from '../(auth)/_components/Notice';
 import { PasswordInput } from '../(auth)/_components/PasswordInput';
+import { RememberMe } from '../(auth)/_components/RememberMe';
+import { requestLoginCode } from './_lib/sendLoginCode';
+import { PasskeyButton } from '../(auth)/_components/PasskeyButton';
+import { passkeysEnabled } from '../(auth)/_lib/passkeys';
 import { OutsideSubmitButton } from '../(auth)/_components/OutsideSubmitButton';
 import { SubmitButton } from '../(auth)/_components/SubmitButton';
 import { PwaSessionGuard } from '@/lib/pwa/PwaSessionGuard';
@@ -155,6 +159,18 @@ export default async function LoginPage({ searchParams }: PageProps) {
     redirect('/login/check-email');
   }
 
+  // W3-07b slice b: a 6-digit code instead of a link (same e-mail field). The
+  // send is throttled per mailbox (the magic-link limiter) and per IP; the
+  // screen after it is the same whether or not the address exists.
+  async function codeLoginAction(formData: FormData) {
+    'use server';
+    const email = String(formData.get('email') ?? '').trim();
+    if (!email) redirect(back('EmailMissing', redirectTo, lockedEmail));
+    if (!(await requestLoginCode(email))) redirect(back('EmailSignin', redirectTo, lockedEmail));
+    await writeHint({ email, fails: 0, sentAt: Date.now(), next: redirectTo });
+    redirect('/login/code');
+  }
+
   async function switchUserAction() {
     'use server';
     await clearHint();
@@ -266,10 +282,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
             aria-describedby={wrongPassword ? 'login-error' : undefined}
           />
         </div>
-        <label className="flex min-h-11 items-center gap-3 text-sm text-ink">
-          <input type="checkbox" name="rememberMe" className="h-5 w-5 accent-primary" />
-          {t('login.rememberMe')}
-        </label>
+        <RememberMe label={t('login.rememberMe')} />
         <SubmitButton className="min-h-12 w-full text-base">
           {t('login.submit')}
         </SubmitButton>
@@ -293,6 +306,22 @@ export default async function LoginPage({ searchParams }: PageProps) {
       >
         {t('login.magicSubmit')}
       </OutsideSubmitButton>
+      <OutsideSubmitButton
+        form="login-form"
+        variant="ghost"
+        formAction={codeLoginAction}
+        formNoValidate
+        className="mt-2 min-h-12 w-full text-base"
+        data-testid="login-code-button"
+      >
+        {t('codeLogin.button')}
+      </OutsideSubmitButton>
+
+      {passkeysEnabled() ? (
+        <div className="mt-2">
+          <PasskeyButton mode="signin" label={t('passkeys.signIn')} failedLabel={t('passkeys.failed')} callbackUrl={redirectTo} />
+        </div>
+      ) : null}
 
       <p className="mt-6 text-center text-sm text-muted">
         {t('signin.newHere')}{' '}

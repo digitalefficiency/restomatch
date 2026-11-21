@@ -54,6 +54,24 @@ export function splitGlyph(text: string): Array<{ glyph: boolean; text: string }
     .map((part) => ({ glyph: part === '₪', text: part }));
 }
 
+/** Bidi marks and spaces Intl puts between the figure and the ₪ glyph. */
+const GLYPH_JOINERS = /[\s\u00a0\u200e\u200f]+$/;
+
+/**
+ * The figure without its ₪, for a column whose ₪ sits once in the header (owner
+ * decision D8, bookkeeper compact tables only). It is the frozen `formatIls()`
+ * output (via `moneyText`) with the glyph and the joiners next to it removed, so
+ * the digits, grouping, precision and the leading bidi marks that keep a minus
+ * sign before the digits in Hebrew are exactly what an inline `<Money>` shows.
+ */
+export function moneyFigureText(value: number, context: MoneyContext, locale: Locale, decimals?: number): string {
+  return splitGlyph(moneyText(value, context, locale, decimals))
+    .filter((part) => !part.glyph)
+    .map((part) => part.text)
+    .join('')
+    .replace(GLYPH_JOINERS, '');
+}
+
 const FIGURE_CLASS = { ink: 'text-ink', muted: 'text-muted', gold: 'text-gold', primary: 'text-primary' } as const;
 
 /** Figure colour for a money state. ₪0 is never danger: `zero` and `pending` are muted. */
