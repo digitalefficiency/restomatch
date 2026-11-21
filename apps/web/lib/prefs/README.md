@@ -27,8 +27,8 @@ nothing in `packages/db`.
   their own default. The single-key switch is stored as the person set it, as the shell's switch does.
 - Safari and iOS cap a script-written cookie at 7 days: the first reader on each page load writes the cookies
   back with a fresh lifetime, and restores a dropped cookie from its localStorage mirror.
-- The cookies must be listed on the cookie policy page (`app/(marketing)/cookies/page.tsx`, category
-  "preference") before this ships — a request to that page's owner.
+- The cookie policy page (`app/(marketing)/cookies/page.tsx`) lists the two cookies (category "preference",
+  one year) and the three localStorage keys; a new key or cookie here needs its line there too.
 
 **Defaults** (D4, OWNER-DECISIONS-0711): density `compact` ("צפוף") for the bookkeeper, `regular` ("רגיל")
 for owner, manager, chef and receiver; on a touch pointer the regular density applies whatever the choice
