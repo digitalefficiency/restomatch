@@ -85,6 +85,7 @@ describe('DS2 v2 contrast (every mode, direction A)', () => {
     raised: surfaceV2.raised,
     overlay: surfaceV2.overlay,
     selected: surfaceV2.selected,
+    hover: surfaceV2.hover, // DS3: the quiet control's and the row's hover fill (SPEC §2 `--hover`)
   };
   const modes = {
     desk: { primary: textV2.primary, secondary: textV2.secondary, tertiary: textV2.tertiary as string | null, min: TEXT_MIN },
