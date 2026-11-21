@@ -13,11 +13,13 @@ import { metadataBase, socialFor } from './(marketing)/_components/seo';
 import './globals.css';
 
 // Fonts are self-hosted (public/fonts, @font-face generated into globals.css from
-// packages/ui-tokens fonts.ts): IBM Plex Sans Hebrew for every interface text,
-// money and identifier (DS2 β). Preload the subsets the page's language paints
-// with, at the two weights above the fold, so text doesn't flash on first load
-// (an English page preloading the Hebrew subset drew Chrome's "preloaded but
-// not used within a few seconds" warning). Frank Ruhl Libre is never preloaded.
+// packages/ui-tokens fonts.ts): the active UI face (ACTIVE_FACE; Google Sans since
+// DS3-07, IBM Plex Sans Hebrew before) for every interface text, money and
+// identifier. Preload the subsets the page's language paints with, so text doesn't
+// flash on first load (an English page preloading the Hebrew subset drew Chrome's
+// "preloaded but not used within a few seconds" warning): Plex's two weights above
+// the fold, or Google Sans's one variable file per script (every weight), plus
+// Cyrillic on a Russian page. Frank Ruhl Libre is never preloaded.
 const FONT_PRELOADS = fontPreloads();
 
 // `viewport-fit=cover` so env(safe-area-inset-*) resolves on notched phones;
@@ -50,12 +52,14 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function RootLayout(props: { children: React.ReactNode }) {
   // Locale comes from the `rm_locale` cookie (LocaleSwitcher / `?lang=`); the
   // document direction follows it so English renders LTR.
-  // A receiver locale (ar/ru/th/ti) preloads its base locale's subsets.
+  // A receiver locale (ar/ru/th/ti) preloads its base locale's subsets, unless the
+  // face draws its script too (Google Sans: Cyrillic, so ru has its own list).
   const locale = await getAppLocale();
   // The consent cookie is read here so the banner renders (or not) in the first paint.
   const consent = (await cookies()).get(CONSENT_COOKIE)?.value;
   const consentDecided = readConsentFrom(consent ? `${CONSENT_COOKIE}=${consent}` : null) !== null;
-  for (const href of FONT_PRELOADS[baseLocaleOf(locale)]) {
+  const fontPreloadList = (locale === 'ru' ? FONT_PRELOADS.ru : undefined) ?? FONT_PRELOADS[baseLocaleOf(locale)];
+  for (const href of fontPreloadList) {
     preload(href, { as: 'font', type: 'font/woff2', crossOrigin: 'anonymous' });
   }
   return (

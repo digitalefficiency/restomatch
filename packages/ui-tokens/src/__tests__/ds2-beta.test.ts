@@ -1,18 +1,19 @@
 // DS2 phase 2 (train β): the font swap (D2, D3, D10, D11; VERDICT §8–§9).
+// DS3-07 makes Google Sans the active face; Plex stays defined as the one-line undo, so the
+// Plex assertions below name the face instead of reading ACTIVE_FACE (ds3-07.test.ts has the rest).
 import { readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { ACTIVE_FACE, activeFonts, cssVariables, DS2_PHASE, faces, fontPreloads, fontUrl } from '../index';
+import { activeFonts, cssVariables, DS2_PHASE, faces, fontFaceCss, fontPreloads, fontRoles, fontUrl } from '../index';
 
 const pub = (url: string) => fileURLToPath(new URL(`../../../../apps/web/public${url}`, import.meta.url));
 const bytes = (url: string) => statSync(pub(url)).size;
 const KB = 1024;
 
 describe('DS2 β font swap', () => {
-  it('is phase 2 with Plex active', () => {
+  it('is phase 2, with Plex defined for the undo', () => {
     expect(DS2_PHASE).toBe(2);
-    expect(ACTIVE_FACE).toBe('plex');
-    expect(activeFonts.ui.startsWith("'IBM Plex Sans Hebrew', 'IBM Plex Sans Hebrew Fallback'")).toBe(true);
+    expect(fontRoles.plex.ui.startsWith("'IBM Plex Sans Hebrew', 'IBM Plex Sans Hebrew Fallback'")).toBe(true);
   });
 
   it('D3: identifiers use the UI family, no mono face', () => {
@@ -22,7 +23,10 @@ describe('DS2 β font swap', () => {
 
   it('D11: Frank Ruhl Libre is the display role only, never preloaded', () => {
     expect(activeFonts.display.startsWith("'Frank Ruhl Libre'")).toBe(true);
-    for (const list of Object.values(fontPreloads())) for (const href of list) expect(href).not.toMatch(/frank-ruhl/);
+    expect(fontRoles.plex.display.startsWith("'Frank Ruhl Libre'")).toBe(true);
+    for (const face of ['plex', 'google-sans'] as const) {
+      for (const list of Object.values(fontPreloads(face))) for (const href of list ?? []) expect(href).not.toMatch(/frank-ruhl/);
+    }
   });
 
   it('every @font-face file exists, with its OFL licence beside it', () => {
@@ -30,11 +34,12 @@ describe('DS2 β font swap', () => {
       for (const w of set.weights) for (const s of set.subsets) expect(bytes(fontUrl(set, s, w))).toBeGreaterThan(1000);
       expect(readFileSync(pub(`${set.dir}/OFL.txt`), 'utf8')).toMatch(/SIL Open Font License, Version 1\.1/);
     }
-    expect(cssVariables()).toContain("font-family: 'IBM Plex Sans Hebrew Fallback';");
+    expect(fontFaceCss('plex')).toContain("font-family: 'IBM Plex Sans Hebrew Fallback';");
+    expect(cssVariables()).toContain("font-family: 'Frank Ruhl Libre Fallback';");
   });
 
   it('PERF: preloaded font bytes ≤ 50 KB (he) and both subsets carry Hebrew money', () => {
-    const he = fontPreloads().he;
+    const he = fontPreloads('plex').he;
     const total = he.reduce((n, href) => n + bytes(href), 0);
     expect(total).toBeLessThanOrEqual(50 * KB);
     // ₪ lives in the hebrew subset and digits in latin: both are preloaded.
