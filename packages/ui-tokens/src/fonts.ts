@@ -14,7 +14,9 @@
 // as a third face, defined the same way as Plex, beside it. The switch is the one
 // line `ACTIVE_FACE` below; the undo is `ACTIVE_FACE = 'plex'` and `tokens:css`, which
 // regenerates DS3-00's token block byte for byte, with train C's @font-face rules, roles
-// and preloads. No test pins the active face, so the undo needs no other edit.
+// and preloads. No ui-tokens test pins the active face, so the undo needs no other edit. The
+// e2e checks W1-01 #4/#10 and W2-15 #3 (other packages) pin Plex: they pass after the undo and
+// fail while Google Sans is active.
 // - Self-hosted Fontsource 5.3.2 subsets (SIL OFL 1.1, no Reserved Font Name; OFL.txt
 //   beside them), unmodified except the latin file: it is published with seven Google
 //   logo glyphs that its 'liga' and 'calt' put in place of ordinary text ('store_logo.png'
@@ -237,7 +239,8 @@ export const fontUrl = (set: FaceSet, subset: Subset, weight: number): string =>
  * first paint: each class splits text runs, and 20 faces delayed a throttled phone's
  * Hebrew first paint by 40–90 ms, where the Hebrew face alone cost nothing measurable.
  * With every font held back 3 s (8 routes × he/en × 1440/390), 1 of 32 screen loads moved
- * more than CLS 0.01 when the face swapped in, worst 0.031 (Plex: 3 of 32, worst 0.072).
+ * more than CLS 0.01 when the face swapped in, worst 0.031 (Plex: 3 of 32, worst 0.072);
+ * none of them is a load DS3-07.spec.ts checks (there: Google Sans ≤ 0.0018, Plex ≤ 0.0004).
  * While the fallback shows, ch and ex come from the catch-all (1ch ≈ 0.56 em; the face's
  * is 0.643 em), so nothing that paints before the face may be sized in ch or ex.
  */
@@ -276,7 +279,7 @@ export interface FontPreloads {
  * Google Sans: one file per script holds all four weights (hebrew + latin = 46.6 KiB),
  * so nothing paints in a fallback weight once they arrive; ru also preloads Cyrillic.
  * Rule 2 costs Google Sans first paint on a slow phone: Chromium holds the first paint
- * for the preloaded files, and the latin file (35.6 KiB, every weight) arrives last.
+ * for the preloaded files, and the latin file (34.7 KiB, every weight) arrives last.
  * Measured (Pixel 7, 4× CPU, 1.6 Mbps): Hebrew pages preloading the hebrew file alone
  * painted 236 ms sooner, on a par with Plex, and the latin file swapped in with CLS ≤ 0.0013;
  * the cost is that digits (and so amounts) show in the fallback until it arrives.
