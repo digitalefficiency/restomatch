@@ -14,7 +14,7 @@ import {
 } from '@restomatch/db';
 import { resolveTolerances } from '@restomatch/matching';
 import { DEFAULT_REVIEW_THRESHOLD } from '@restomatch/ocr';
-import { resolveApprovalThresholds } from '../approvals/engine';
+import { resolveApprovalThresholds, resolvePayApprovalThresholds } from '../approvals/engine';
 import { recordAudit, type AuditAction } from '../audit';
 import { appError } from '../errors';
 import { vatRateOf } from '../lib/vat';
@@ -65,6 +65,9 @@ const ApprovalThresholdsSchema = z
     cumulativeLargePct: knob(fraction),
     cumulativeMediumAmountMin: knob(boundedNonNeg(100_000_000)),
     cumulativeMediumPctMin: knob(fraction),
+    // G-15b (owner 11.11, Q3): ₪N incl. VAT and above → the owner approves for payment.
+    // Stored in the same jsonb; schema.ts's type for it gains the key in the schema train.
+    payApprovalOverAmount: knob(boundedNonNeg(100_000_000)),
   })
   .strict();
 
@@ -146,9 +149,17 @@ export function effectiveSettings(settings: RestaurantSettings) {
         { value, isDefault: stored?.[k as keyof T] == null } satisfies EffectiveValue,
       ]),
     ) as { [K in keyof T]: EffectiveValue };
+  const storedAppr = (settings.approvalThresholds ?? {}) as Record<string, number | undefined>;
+  const pay = resolvePayApprovalThresholds(storedAppr);
   return {
     tolerances: pick(tol, settings.tolerances),
-    approvalThresholds: pick(appr, settings.approvalThresholds),
+    approvalThresholds: {
+      ...pick(appr, settings.approvalThresholds),
+      payApprovalOverAmount: {
+        value: pay.payApprovalOverAmount,
+        isDefault: storedAppr.payApprovalOverAmount == null,
+      } satisfies EffectiveValue,
+    },
     ocrReviewThreshold: {
       value: settings.ocrReviewThreshold ?? DEFAULT_REVIEW_THRESHOLD,
       isDefault: settings.ocrReviewThreshold == null,
