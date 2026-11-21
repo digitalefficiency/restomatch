@@ -1,11 +1,11 @@
 /* @tokens:start — GENERATED from packages/ui-tokens; do not edit by hand.
    Regenerate: pnpm --filter @restomatch/ui-tokens tokens:css */
 :root {
-  --c-bg: 246 248 247; /* #F6F8F7 */
+  --c-bg: 248 251 249; /* #F8FBF9 */
   --c-surface: 255 255 255; /* #FFFFFF */
   --c-surface-2: 241 245 243; /* #F1F5F3 */
   --c-line: 212 219 216; /* #D4DBD8 */
-  --c-line-strong: 122 139 130; /* #7A8B82 */
+  --c-line-strong: 128 137 132; /* #808984 */
   --c-ink: 18 28 23; /* #121C17 */
   --c-muted: 73 82 78; /* #49524E */
   --c-subtle: 93 101 97; /* #5D6561 */
@@ -325,7 +325,7 @@
 }
 /* DS2 phase 1: new roles only. No v1 variable is re-bound below. */
 :root {
-  --c-surface-canvas: 246 248 247;
+  --c-surface-canvas: 248 251 249;
   --c-surface-default: 255 255 255;
   --c-surface-raised: 255 255 255;
   --c-surface-overlay: 255 255 255;
@@ -338,13 +338,13 @@
   --c-gold-text: 0 87 59;
   --c-border-subtle: 212 219 216;
   --c-border-rule: 226 232 229;
-  --c-border-control: 122 139 130;
+  --c-border-control: 128 137 132;
   --c-border-field: 102 117 109;
   --c-border-focus: 34 86 187;
   --c-action-primary-bg: 0 87 59;
   --c-action-primary-bg-hover: 0 69 45;
   --c-action-primary-fg: 255 255 255;
-  --c-action-secondary-border: 122 139 130;
+  --c-action-secondary-border: 128 137 132;
   --c-action-secondary-bg: 255 255 255;
   --c-action-secondary-bg-hover: 241 245 243;
   --c-action-secondary-fg: 18 28 23;
@@ -372,7 +372,7 @@
   --c-viz-cat-6: 156 61 122;
   --c-viz-up: 180 83 26;
   --c-viz-down: 0 87 59;
-  --c-viz-prev: 122 139 130;
+  --c-viz-prev: 128 137 132;
   --c-viz-leak: 221 39 41;
   --c-viz-grid: 212 219 216;
   --font-ui-faces: 'IBM Plex Sans Hebrew', 'IBM Plex Sans Hebrew Fallback';
