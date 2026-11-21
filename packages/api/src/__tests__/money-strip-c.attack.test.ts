@@ -187,4 +187,22 @@ describe('H-11 slice c · receiver and chef get no ₪ (A own ids; B ids rejecte
       }
     }
   });
+
+  it('receiving.pendingInvoices: the chef gets no invoice image link (₪ printed on it); the receiver keeps it (owner Q2(א))', async () => {
+    const IMAGE = 'invoices/h11c-q2-pending.jpg';
+    await db.update(invoices).set({ rawImageUrl: IMAGE }).where(eq(invoices.invoiceNumber, 'INV-A-PENDING'));
+    const imageOf = (rows: Array<{ invoiceNumber: string | null; rawImageUrl: string | null }>) =>
+      rows.find((r) => r.invoiceNumber === 'INV-A-PENDING')?.rawImageUrl;
+    const owner = await callerFor(A, 'owner').receiving.pendingInvoices();
+    expect(imageOf(owner)).toBe(IMAGE);
+    for (const role of [...MONEY_ROLES, 'receiver'] as Role[]) {
+      expect(await callerFor(A, role).receiving.pendingInvoices(), role).toEqual(owner);
+    }
+    const chef = await callerFor(A, 'chef').receiving.pendingInvoices();
+    expect(chef.length).toBeGreaterThan(0);
+    expect(chef).toEqual(owner.map((r) => ({ ...r, rawImageUrl: null })));
+    expect(chef.every((r) => r.rawImageUrl === null)).toBe(true);
+    // B's invoices never reach A's chef.
+    expect(chef.some((r) => r.id === B.invoiceId)).toBe(false);
+  });
 });

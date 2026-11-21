@@ -1780,7 +1780,7 @@ export const receivingRouter = router({
    * List invoices awaiting OCR / human review for the receiving screen.
    */
   pendingInvoices: memberProcedure.query(async ({ ctx }) => {
-    return ctx.db
+    const rows = await ctx.db
       .select({
         id: invoices.id,
         invoiceNumber: invoices.invoiceNumber,
@@ -1805,6 +1805,10 @@ export const receivingRouter = router({
         ),
       )
       .orderBy(desc(invoices.createdAt));
+    // H-11 owner Q2(א), 11.11: the invoice image has ₪ printed on it, so the chef
+    // gets no link to it. The receiver keeps it (he photographed the invoice).
+    if (ctx.session.role !== 'chef') return rows;
+    return rows.map((r) => ({ ...r, rawImageUrl: null }));
   }),
   /**
    * Flag `dockPriceContext`: "your usual price" (90-day p50 from this
