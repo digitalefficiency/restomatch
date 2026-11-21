@@ -8,6 +8,8 @@ import {
   JOIN_CODE_SENDS_PER_15_MIN,
   JOIN_CODE_TTL_MS,
   completeJoin,
+  codeDigest,
+  hashInviteToken,
   invitedAccountExists,
   issueJoinCode,
   joinAddressKey,
@@ -441,8 +443,14 @@ describe('join attack: review r2 — no cross-invite account oracle, no free sen
     expect(await issueJoinCode(token)).toMatchObject({ ok: false, reason: 'hasPassword', throttled: false });
     const [row] = await ownerDb.select().from(verificationTokens).where(eq(verificationTokens.identifier, `join:${id}`));
     expect(row?.token).toMatch(/^[0-9a-f]{64}$/);
+    // review r3 nit: the stored token is a decoy, not a real code digest. Try EVERY
+    // 6-digit code against it: none matches.
+    const inv = { id, tokenHash: hashInviteToken(token) };
+    let matches = 0;
+    for (let c = 0; c < 1_000_000; c += 1) if (codeDigest(inv, String(c).padStart(6, '0')) === row!.token) matches += 1;
+    expect(matches).toBe(0);
     expect(await ownerDb.select().from(userCredentials).where(eq(userCredentials.userId, uid))).toEqual([]);
-  });
+  }, 60_000);
 
   it('at the send cap, more sends insert no send markers (a token holder cannot keep the cap up for free)', async () => {
     const email = uniqueEmail('r2-sendcap');
@@ -458,5 +466,62 @@ describe('join attack: review r2 — no cross-invite account oracle, no free sen
     const atCap = await sendRows();
     for (let i = 0; i < 3; i += 1) expect(await issueJoinCode(token)).toMatchObject({ ok: false, reason: 'rate' });
     expect(await sendRows()).toBe(atCap);
+  });
+});
+
+describe('join attack: review r3 — parallel sends and guesses are serialised per address', () => {
+  const rowsOf = async (identifier: string) =>
+    (await ownerDb.select().from(verificationTokens).where(eq(verificationTokens.identifier, identifier))).length;
+
+  it(`parallel sends at count 0: exactly as many pass as the cap allows, and every surviving marker is a real send`, async () => {
+    const email = uniqueEmail('r3-parallel-send');
+    const tokens = await Promise.all(
+      Array.from({ length: 3 }, async () => (await makeInvite({ restaurantId: await makeRestaurant(), email })).token),
+    );
+    // alias-like fan-out: several tokens for one address, 8 parallel sends
+    const res = await Promise.all(Array.from({ length: 8 }, (_, i) => issueJoinCode(tokens[i % tokens.length]!)));
+    const unthrottled = res.filter((r) => r.ok).length;
+    const markers = await rowsOf(`join-send:${joinAddressKey(email)}`);
+    expect(markers).toBe(unthrottled);
+    expect(unthrottled).toBe(JOIN_CODE_SENDS_PER_15_MIN);
+    expect(await rowsOf(`join-send-d:${joinAddressKey(email)}`)).toBe(unthrottled);
+  });
+
+  it('a parallel burst of guesses on one live code adds at most the window cap to the address total', async () => {
+    const email = uniqueEmail('r3-parallel-guess');
+    const { token } = await makeInvite({ restaurantId: await makeRestaurant(), email });
+    const code = await issued(token);
+    const guesses = Array.from({ length: 25 }, (_, i) => String((Number(code) + 1 + i) % 1_000_000).padStart(6, '0'));
+    await Promise.all(guesses.map((g) => completeJoin({ token, code: g, name: 'דנה', password: PASSWORD })));
+    expect(await rowsOf(`join-failtotal:${joinAddressKey(email)}`)).toBeLessThanOrEqual(JOIN_CODE_MAX_ATTEMPTS);
+    expect(await rowsOf(`join-fail:${joinAddressKey(email)}`)).toBeLessThanOrEqual(JOIN_CODE_MAX_ATTEMPTS);
+  });
+
+  it('a resend moves the code row\'s expiry to resend + TTL for both kinds; an existing account keeps a pre-account code (main B5)', async () => {
+    const t0 = Date.now();
+    const t1 = t0 + 9 * 60 * 1000;
+    const expiryOf = async (invId: string) =>
+      (await ownerDb.select().from(verificationTokens).where(eq(verificationTokens.identifier, `join:${invId}`)))[0]?.expires.getTime();
+
+    // new address: issue at t0, resend at t1
+    const fresh = await makeInvite({ restaurantId: await makeRestaurant(), email: uniqueEmail('r3-expiry-new') });
+    await issued(fresh.token, t0);
+    await issued(fresh.token, t1);
+    expect(await expiryOf(fresh.id)).toBe(t1 + JOIN_CODE_TTL_MS);
+
+    // existing account (the account appears after the first code): the refresh path
+    const email = uniqueEmail('r3-expiry-existing');
+    const ex = await makeInvite({ restaurantId: await makeRestaurant(), email });
+    const preCode = await issued(ex.token, t0);
+    const [before] = await ownerDb.select().from(verificationTokens).where(eq(verificationTokens.identifier, `join:${ex.id}`));
+    await makeUser(email, 'Account appeared');
+    expect(await issueJoinCode(ex.token, t1)).toMatchObject({ ok: false, reason: 'hasPassword', throttled: false });
+    const [after] = await ownerDb.select().from(verificationTokens).where(eq(verificationTokens.identifier, `join:${ex.id}`));
+    expect(after?.expires.getTime()).toBe(t1 + JOIN_CODE_TTL_MS); // same as the new address
+    expect(after?.token).toBe(before?.token); // the live row was refreshed, not replaced
+    // ... and that pre-account code still never sets a password
+    expect(await completeJoin({ token: ex.token, code: preCode, name: 'Evil', password: PASSWORD }, t1)).toMatchObject({
+      reason: 'hasPassword',
+    });
   });
 });

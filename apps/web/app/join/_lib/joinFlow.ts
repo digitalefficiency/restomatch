@@ -252,21 +252,23 @@ export async function issueJoinCode(token: string, now = Date.now()): Promise<Is
   // Per-address send cap FIRST, for existing and new addresses alike, so the cap
   // is no account oracle. Durable (holds when the limiter fails open). Count
   // first: at the cap, return throttled WITHOUT inserting, so a token holder
-  // cannot keep the cap up for free (review r2 finding 2). Below it, reserve,
-  // then recount (concurrent sends can't overshoot).
+  // cannot keep the cap up for free (review r2 finding 2).
   const addr = joinAddressKey(row.email);
   const sendCaps = [JOIN_CODE_SENDS_PER_15_MIN, JOIN_CODE_SENDS_PER_DAY];
   const sendIds = [sendId(addr), sendDayId(addr)];
-  const preSends = await Promise.all(sendIds.map((id) => countLive(id, now)));
-  let throttled = preSends.some((c, i) => c >= sendCaps[i]!);
-  if (!throttled) {
-    await authDb.insert(verificationTokens).values([
+  // One transaction under the address's send lock: count, and insert only when
+  // below BOTH caps. Parallel sends queue on the lock, so exactly as many sends
+  // pass as the cap allows, and a throttled send writes nothing (review r3).
+  const throttled = await authDb.transaction(async (tx) => {
+    await lockAddress(tx, 'send', addr);
+    const counts = await Promise.all(sendIds.map((id) => countLive(id, now, tx)));
+    if (counts.some((c, i) => c >= sendCaps[i]!)) return true;
+    await tx.insert(verificationTokens).values([
       { identifier: sendId(addr), token: randomUUID(), expires: new Date(now + 15 * 60 * 1000) },
       { identifier: sendDayId(addr), token: randomUUID(), expires: new Date(now + 24 * 60 * 60 * 1000) },
     ]);
-    const postSends = await Promise.all(sendIds.map((id) => countLive(id, now)));
-    throttled = postSends.some((c, i) => c > sendCaps[i]!);
-  }
+    return false;
+  });
   // A throttled send leaves the code rows untouched, for both kinds of address.
   // The caller answers it like a sent e-mail and sends nothing.
   const existing = await accountExists(row.email);
@@ -308,8 +310,19 @@ export async function issueJoinCode(token: string, now = Date.now()): Promise<Is
   };
 }
 
-async function countLive(identifier: string, now: number): Promise<number> {
-  const [r] = await authDb
+type Conn = typeof authDb | Parameters<Parameters<typeof authDb.transaction>[0]>[0];
+
+/**
+ * Serialise every count-then-insert on one address (review r3): a transaction-
+ * scoped advisory lock, so parallel sends or guesses cannot all pass the
+ * pre-count. Released at commit/rollback.
+ */
+async function lockAddress(tx: Conn, scope: 'send' | 'attempt', addr: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`join-${scope}:${addr}`}, 0))`);
+}
+
+async function countLive(identifier: string, now: number, db: Conn = authDb): Promise<number> {
+  const [r] = await db
     .select({ c: count() })
     .from(verificationTokens)
     .where(and(eq(verificationTokens.identifier, identifier), gt(verificationTokens.expires, new Date(now))));
@@ -363,8 +376,7 @@ export async function completeJoin(
   //    7 days, shared by every invite to the mailbox, so resend / revoke +
   //    re-invite cannot reset real guessing. Each such burst costs the mailbox
   //    an e-mail (a code had to be sent), as in the base.
-  // Reserve first, then count (concurrent guesses can't overshoot); already at
-  // a ceiling → answer 'locked' WITHOUT inserting more markers.
+  // Already at a ceiling → answer 'locked' WITHOUT inserting more markers.
   const code = String(input.code ?? '').replace(/\D/g, '');
   const [stored] = await authDb
     .select({ token: verificationTokens.token, expires: verificationTokens.expires })
@@ -381,17 +393,23 @@ export async function completeJoin(
     await authDb.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(row.id)));
     return { ok: false, reason: 'locked' };
   };
-  const pre = await Promise.all(ids.map((id) => countLive(id, now)));
-  if (pre.some((c, i) => c >= caps[i]!)) return killAndLock();
+  // One transaction under the address's attempt lock: count, and reserve only
+  // when below every ceiling. Parallel guesses queue on the lock, so a burst on
+  // one live code adds at most the window cap to the address total (review r3).
   const expiresOf = (id: string) =>
     id === invWindowFailId(row.id) || id === windowFailId(addr)
       ? new Date(now + JOIN_CODE_TTL_MS)
       : id === invTotalFailId(row.id)
         ? row.expiresAt
         : new Date(now + JOIN_CODE_TOTAL_WINDOW_MS);
-  await authDb.insert(verificationTokens).values(ids.map((id) => ({ identifier: id, token: randomUUID(), expires: expiresOf(id) })));
-  const post = await Promise.all(ids.map((id) => countLive(id, now)));
-  if (post.some((c, i) => c > caps[i]!)) return killAndLock();
+  const atCeiling = await authDb.transaction(async (tx) => {
+    await lockAddress(tx, 'attempt', addr);
+    const counts = await Promise.all(ids.map((id) => countLive(id, now, tx)));
+    if (counts.some((c, i) => c >= caps[i]!)) return true;
+    await tx.insert(verificationTokens).values(ids.map((id) => ({ identifier: id, token: randomUUID(), expires: expiresOf(id) })));
+    return false;
+  });
+  if (atCeiling) return killAndLock();
 
   if (!stored) return { ok: false, reason: 'noCode' };
 
