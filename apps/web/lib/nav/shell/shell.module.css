@@ -14,7 +14,8 @@
   --rm-sidebar-w: 0px;
   --rm-nav-row: 32px;
   --rm-nav-tile-h: 48px;
-  --rm-nav-tile-pt: 4px;
+  /* §1.2: the icon at the top, padding-top 5 (the reference draws 4; the spec wins). */
+  --rm-nav-tile-pt: 5px;
   --rm-nav-tile-gap: 4px;
   --rm-nav-tile-w: 56px;
   --rm-nav-gutter: 12px;

@@ -14,7 +14,7 @@ import { badgeLook, type BadgeValueLike } from '../badgeLook';
 import { isViewOnly } from '../viewOnly';
 import { inSpecOrder } from '../shellModel';
 import { SUPPORT_LINKS } from '../support';
-import { DOT_CLASS, NavIcon, Pill, badgeWordsFor, iconProps, useNavBadgeWords } from './NavItem';
+import { DOT_CLASS, NavIcon, Pill, badgeWordsFor, iconProps, useNavBadgeWords, withBrand } from './NavItem';
 import { useShellUi } from './ShellFrame';
 
 const focusRing =
@@ -323,7 +323,7 @@ export function MoreSheet({
                             <span className={cn('inline-flex shrink-0 [&>svg]:h-5 [&>svg]:w-5', active ? 'text-primary' : 'text-muted')}>
                               <NavIcon icon={icon} k={k} mirrored={mirrored} />
                             </span>
-                            <span className="min-w-0 flex-1 break-words">{t(`links.${d.key}`)}</span>
+                            <span className="min-w-0 flex-1 break-words">{withBrand(t(`links.${d.key}`))}</span>
                             {bw ? <span className="sr-only">, {bw}</span> : null}
                             {look ? <Pill look={look} tone={value?.tone ?? 'neutral'} locale={locale} /> : null}
                           </Link>

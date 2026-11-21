@@ -4,7 +4,6 @@ import { useMemo } from 'react';
 import Link from 'next/link';
 import { Eye, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/components/cn';
-import { Money } from '@/lib/components/money';
 import { cappedCount, type BadgeWords } from '@/lib/components/notifications';
 import { useT } from '@/lib/i18n/client';
 import type { Locale } from '@/lib/i18n/config';
@@ -44,6 +43,25 @@ export function NavIcon({ icon: Icon, k = 1, mirrored = false, duo = false }: { 
 
 export function iconProps(key: string): { icon: LucideIcon; k: number; mirrored: boolean } {
   return { icon: iconFor(key), k: OPTICAL_SCALE[key] ?? 1, mirrored: MIRRORED_ICONS.has(key) };
+}
+
+/**
+ * "RestoMatch" inside a Hebrew (or any right-to-left) label is marked as English and kept left-to-right
+ * (sidebar spec §9: `<span lang="en" dir="ltr">`), so a screen reader says it in English and the bidi
+ * algorithm never reorders it ("שאלו את RestoMatch").
+ */
+export function withBrand(label: string): React.ReactNode {
+  const parts = label.split(/(RestoMatch)/);
+  if (parts.length === 1) return label;
+  return parts.map((part, i) =>
+    part === 'RestoMatch' ? (
+      <span key={i} lang="en" dir="ltr">
+        {part}
+      </span>
+    ) : (
+      part
+    ),
+  );
 }
 
 /**
@@ -94,7 +112,7 @@ export function useNavBadgeWords(): BadgeWords {
 /**
  * One badge pill (§5.1): solid danger only when a payment is blocked (and only
  * the first one in the menu), warn-subtle for other money that waits, a quiet
- * count otherwise. ₪ goes through <Money> (formatIls, inside <bdi>); a count is
+ * count otherwise. ₪ goes through formatIls (inside <bdi>, no title); a count is
  * LTR-isolated and capped at 99+. A changed value fades in over 150 ms.
  */
 export function Pill({ look, tone, locale }: { look: BadgeLook; tone: BadgeValueLike['tone']; locale: Locale }) {
@@ -114,7 +132,13 @@ export function Pill({ look, tone, locale }: { look: BadgeLook; tone: BadgeValue
       )}
     >
       {look.innerDot ? <span className={css.innerDot} /> : null}
-      {money ? <Money agorot={look.agorot!} context="inline" decimals={0} /> : <bdi dir="ltr">{cappedCount(look.count, locale)}</bdi>}
+      {/* The rounded ₪ straight from formatIls, without <Money>'s native "exact amount" title: in the open panel a
+          tooltip belongs only to icon-only controls (§1.6), and the pill is aria-hidden (the link's words carry it). */}
+      {money ? (
+        <bdi className="num whitespace-nowrap">{formatIls(look.agorot! / 100, { locale, maximumFractionDigits: 0 })}</bdi>
+      ) : (
+        <bdi dir="ltr">{cappedCount(look.count, locale)}</bdi>
+      )}
     </span>
   );
 }
@@ -157,10 +181,10 @@ export function NavItem({ itemKey, href, label, short, tile = false, active = fa
         <NavIcon icon={icon} k={k} mirrored={mirrored} duo={active} />
         {look ? <span aria-hidden="true" data-badge-dot={look.railDot} className={cn(css.railDot, DOT_CLASS[look.railDot])} /> : null}
       </span>
-      <span className={css.lab}>{label}</span>
+      <span className={css.lab}>{withBrand(label)}</span>
       {tile ? (
         <span aria-hidden="true" className={cn(css.short, 'text-xs leading-4 font-medium')}>
-          {short ?? label}
+          {short ?? withBrand(label)}
         </span>
       ) : null}
       {badgeWords ? <span className="sr-only">, {badgeWords}</span> : null}
