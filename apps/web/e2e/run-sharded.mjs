@@ -10,6 +10,11 @@
  * run (~every 22 min), killing whatever navigation was in flight (the "F-7"
  * flakes: W2-04:304, W1-04:325, W1-03, W3-01 …). A shard ends long before that.
  *
+ * Measured locally (15 GB, 21.11): one run → 1 restart at +32 min, 514 passed /
+ * 90 failed; 4 shards → 0 restarts, 592 passed / 33 failed (no new failure), peak
+ * heap 55/55/69/73% of the limit (trigger 80%). Default 6 keeps that margin in CI,
+ * which grows faster (~22 min to the trigger on one server).
+ *
  * Same DB state and order as one run: shard 1 seeds (playwright.config.ts →
  * e2e/prepare-db.ts); shards 2…N run with E2E_SKIP_SEED=1 on the same DB.
  * Playwright gives contiguous file chunks in the usual order with
@@ -31,7 +36,7 @@ const PORT = Number(process.env.E2E_PORT ?? 3100);
 const args = process.argv.slice(2);
 const PASS_THROUGH = /^(-g|--grep|--grep-invert|--list|--shard|--ui|--debug|--last-failed|--only-changed)(=|$)/;
 const filtered = args.some((a) => !a.startsWith('-') || PASS_THROUGH.test(a));
-const shards = filtered ? 1 : Math.max(1, Number(process.env.E2E_SHARDS ?? 4));
+const shards = filtered ? 1 : Math.max(1, Number(process.env.E2E_SHARDS ?? 6));
 
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
 const RESTART = /approaching the used memory threshold/;
