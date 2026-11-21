@@ -1,6 +1,6 @@
 'use client';
 
-import { registerAppWorker } from './registerWorker';
+import { registerReceivingWorker } from './registerWorker';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CloudOff, Download, Loader2, UploadCloud } from 'lucide-react';
 import { claimOfflineChip } from '@/lib/net/offlineChipOwner';
@@ -49,7 +49,7 @@ html[data-pwa='installed'] body { overscroll-behavior-y: contain; }
 /**
  * Receiver PWA shell (flag `receiverPwa`), mounted on the receiving pages:
  * manifest + theme links, service-worker registration (scope
- * /dashboard/, W3-03b), the offline photo queue uploader and the install
+ * /dashboard/receiving), the offline photo queue uploader and the install
  * prompt. Its state is ONE fixed chip under the header (mobile-field
  * §3.7) — it never sits in the content flow, so it can't push the delivery
  * cards under the receiver's thumb (CLS). Offline is neutral (T4), never a
@@ -192,8 +192,8 @@ export function ReceiverPwa({
       document.documentElement.dataset.pwa = 'installed';
       setInstalled(true);
     }
-    // W3-03b: one worker at the app-wide scope (lib/pwa/registerWorker).
-    if ('serviceWorker' in navigator) void registerAppWorker();
+    // The offline shell at the receiving scope (lib/pwa/registerWorker).
+    if ('serviceWorker' in navigator) void registerReceivingWorker();
     // Back online (browser event): start a sync. The chip itself follows useOnline().
     const onOnline = () => void sync();
     const onQueue = () => void refreshCount();

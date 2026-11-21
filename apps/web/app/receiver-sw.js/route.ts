@@ -1,7 +1,8 @@
 /**
  * Service worker for the receiver PWA (flag `receiverPwa`), served from the
- * origin root so it may control the scope `/dashboard/` (W3-03b, registered
- * by lib/pwa/registerWorker.ts). Public (the last path segment
+ * origin root. Two registrations: scope `/dashboard/receiving` (W2-05 offline
+ * shell, lib/pwa/ReceiverPwa.tsx) and scope `/dashboard/` (W3-03b share target
+ * and push, lib/pwa/registerWorker.ts); the narrower one controls receiving. Public (the last path segment
  * looks like a static asset) — it contains no tenant data.
  *
  * W2-05 offline shell. Three caches, each with ONE writer:
@@ -40,6 +41,11 @@ const SNAPSHOT_CACHE = 'rm-receiver-snapshot-v1';
 const SHARE_CACHE = 'rm-share-v1';
 const KEEP = [CACHE, STATIC_CACHE, SNAPSHOT_CACHE, SHARE_CACHE];
 const SHARE_ACTION = '/dashboard/share/receive';
+// Two registrations run this script: scope /dashboard/receiving (W2-05, the
+// offline shell) and scope /dashboard/ (W3-03b, share/push). Only the first
+// answers page navigations. No registration info (an old test harness) = shell.
+const RECEIVING_SHELL = !(self.registration && self.registration.scope)
+  || new URL(self.registration.scope).pathname.replace(/\/$/, '').endsWith('/dashboard/receiving');
 const SHARE_MAX_FILES = 10;
 const SHARE_MAX_BYTES = 20 * 1024 * 1024;
 const SHARE_TTL_MS = 24 * 3600 * 1000;
@@ -223,10 +229,11 @@ self.addEventListener('fetch', (event) => {
   }
   // Page navigations: always the network (this worker never stores page HTML);
   // offline, the page's own snapshot of that page, else the static offline page.
-  // Only the receiving pages (W2-05's offline shell). Since the scope is app-wide
-  // (W3-03b), every other navigation is left to the browser untouched, so its
-  // real status (403 in-shell forbidden, 404) reaches the page as before.
-  if (req.mode === 'navigate' && (url.pathname === '/dashboard/receiving' || url.pathname.startsWith('/dashboard/receiving/'))) {
+  // Only the receiving pages, and only in the receiving registration (W2-05's
+  // offline shell, registered by ReceiverPwa for the roles that open receiving).
+  // The app-wide registration (W3-03b) leaves every navigation to the browser,
+  // so the real status (the in-shell 403, a 404) reaches the page as before.
+  if (req.mode === 'navigate' && RECEIVING_SHELL && (url.pathname === '/dashboard/receiving' || url.pathname.startsWith('/dashboard/receiving/'))) {
     event.respondWith(fetch(req).catch(() => offlineNavigation(url)));
   }
   // Everything else (API, tRPC, scans, RSC payloads) is not intercepted.

@@ -35,7 +35,7 @@ function fakeCaches() {
   };
 }
 
-async function loadWorker() {
+async function loadWorker(scope = `${ORIGIN}/dashboard/`) {
   const src = await GET().text();
   const listeners: Record<string, (e: unknown) => void> = {};
   const c = fakeCaches();
@@ -50,6 +50,7 @@ async function loadWorker() {
     addEventListener: (type: string, fn: (e: unknown) => void) => void (listeners[type] = fn),
     skipWaiting: () => Promise.resolve(),
     registration: {
+      scope,
       showNotification: async (title: string, options: Record<string, unknown>) => void shown.push({ title, options }),
     },
     clients: {
@@ -144,13 +145,15 @@ describe('share target without a worker (server fallback)', () => {
   });
 });
 
-describe('app-wide scope leaves other navigations alone (W3-03b)', () => {
-  it('only receiving navigations are answered by the worker', async () => {
-    const w = await loadWorker();
-    const nav = (path: string) => w.run('fetch', { request: { url: ORIGIN + path, method: 'GET', mode: 'navigate' } });
-    expect(await nav('/dashboard/chain')).toBeNull();
-    expect(await nav('/dashboard/approvals?x=1')).toBeNull();
-    expect(await nav('/dashboard/receivingx')).toBeNull();
+describe('two registrations, one script (W3-03b)', () => {
+  it('the app-wide registration never answers a navigation; the receiving one keeps the offline shell', async () => {
+    const app = await loadWorker();
+    const nav = (w: Awaited<ReturnType<typeof loadWorker>>, path: string) =>
+      w.run('fetch', { request: { url: ORIGIN + path, method: 'GET', mode: 'navigate' } });
+    expect(await nav(app, '/dashboard/chain')).toBeNull();
+    expect(await nav(app, '/dashboard/receiving')).toBeNull(); // a bookkeeper's 403 stays a 403
+    const shell = await loadWorker(`${ORIGIN}/dashboard/receiving`);
+    expect(await nav(shell, '/dashboard/receivingx')).toBeNull();
   });
 });
 
@@ -201,23 +204,16 @@ describe('app-wide manifest (W3-03b)', () => {
   });
 });
 
-describe('one app-wide worker registration (W3-03b)', () => {
-  it('registers at /dashboard/ and drops the old receiving-scope registration', async () => {
-    const { registerAppWorker } = await import('../registerWorker');
-    const unregister = vi.fn(async () => true);
-    const keep = vi.fn(async () => true);
+describe('worker registrations (W3-03b)', () => {
+  it('app-wide at /dashboard/, the offline shell at /dashboard/receiving; never throws', async () => {
+    const { registerAppWorker, registerReceivingWorker } = await import('../registerWorker');
     const register = vi.fn(async () => ({}));
-    const ok = await registerAppWorker({
-      register,
-      getRegistrations: async () => [
-        { scope: `${ORIGIN}/dashboard/receiving`, unregister },
-        { scope: `${ORIGIN}/dashboard/`, unregister: keep },
-      ],
-    });
-    expect(ok).toBe(true);
-    expect(register).toHaveBeenCalledWith('/receiver-sw.js', { scope: '/dashboard/' });
-    expect(unregister).toHaveBeenCalled();
-    expect(keep).not.toHaveBeenCalled();
+    expect(await registerAppWorker({ register })).toBe(true);
+    expect(await registerReceivingWorker({ register })).toBe(true);
+    expect(register.mock.calls).toEqual([
+      ['/receiver-sw.js', { scope: '/dashboard/' }],
+      ['/receiver-sw.js', { scope: '/dashboard/receiving' }],
+    ]);
     expect(await registerAppWorker(undefined)).toBe(false);
     expect(await registerAppWorker({ register: async () => Promise.reject(new Error('x')) })).toBe(false);
   });

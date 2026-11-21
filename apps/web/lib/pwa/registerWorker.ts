@@ -1,31 +1,35 @@
 /**
- * W3-03b · the one service-worker registration: /receiver-sw.js at scope
- * /dashboard/ (the app-wide manifest scope, so the share target's POST and push
- * clicks on any dashboard card are inside it). The W2-05 registration at the
- * narrower /dashboard/receiving scope is removed so a single worker controls
- * the app. Never throws.
+ * W3-03b · service-worker registrations of /receiver-sw.js. Two scopes, one
+ * script (the worker reads its own scope):
+ * - `/dashboard/` (app-wide, every role): share target + push + notification
+ *   clicks. It never answers page navigations.
+ * - `/dashboard/receiving` (W2-05, ReceiverPwa — roles that open receiving):
+ *   the offline shell. The narrower scope controls the receiving pages.
+ * Never throws.
  */
 export const SW_URL = '/receiver-sw.js';
 export const SW_SCOPE = '/dashboard/';
-const LEGACY_SCOPE_SUFFIX = '/dashboard/receiving';
+export const RECEIVING_SCOPE = '/dashboard/receiving';
 
-type Reg = { scope: string; unregister(): Promise<boolean> };
 export interface SwContainer {
   register(url: string, opts: { scope: string }): Promise<unknown>;
-  getRegistrations?(): Promise<readonly Reg[]>;
 }
 
-export async function registerAppWorker(sw: SwContainer | undefined = typeof navigator !== 'undefined' ? navigator.serviceWorker : undefined): Promise<boolean> {
+const container = (): SwContainer | undefined => (typeof navigator !== 'undefined' ? navigator.serviceWorker : undefined);
+
+async function reg(sw: SwContainer | undefined, scope: string): Promise<boolean> {
   if (!sw) return false;
   try {
-    await sw.register(SW_URL, { scope: SW_SCOPE });
-    const regs = (await sw.getRegistrations?.()) ?? [];
-    for (const r of regs) {
-      const path = new URL(r.scope, 'https://x.invalid').pathname.replace(/\/$/, '');
-      if (path.endsWith(LEGACY_SCOPE_SUFFIX)) await r.unregister().catch(() => false);
-    }
+    await sw.register(SW_URL, { scope });
     return true;
   } catch {
     return false;
   }
+}
+
+export function registerAppWorker(sw: SwContainer | undefined = container()): Promise<boolean> {
+  return reg(sw, SW_SCOPE);
+}
+export function registerReceivingWorker(sw: SwContainer | undefined = container()): Promise<boolean> {
+  return reg(sw, RECEIVING_SCOPE);
 }
