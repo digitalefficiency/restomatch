@@ -6,8 +6,9 @@ import { Kbd } from './Kbd';
 
 /**
  * The dark tooltip of icon-only controls (DS3 SPEC §10.4, reference `.mn-tip`): the control's
- * name in white on ink, an optional key cap and a one-line description. It appears after a rest
- * of the pointer (≈½ s) and at once on keyboard focus, beside the control and never over it; it
+ * name in white on ink, an optional key cap and a one-line description. It appears after the pointer
+ * rests (`--dur-tooltip-rest`, a DS3-00 motion token the reference sets at 450 ms; until DS3-00 defines
+ * it, at once) and at once on keyboard focus, beside the control and never over it; it
  * stays while the pointer is on it (WCAG 1.4.13 hoverable) and Escape dismisses it. Pure CSS
  * show/hide, so nothing renders late; it is decorative (`aria-hidden`): the control keeps its own
  * accessible name (IconButton's `label`). Anchor positioning is not relied on (SPEC §9).
@@ -47,7 +48,7 @@ export function Tooltip({
         className={cn(
           'invisible absolute left-1/2 z-snackbar w-max max-w-xs -translate-x-1/2 opacity-0',
           'transition-[opacity,visibility] duration-menu-tooltip ease-standard',
-          'group-hover/tip:visible group-hover/tip:opacity-100 group-hover/tip:delay-500',
+          'group-hover/tip:visible group-hover/tip:opacity-100 group-hover/tip:[transition-delay:var(--dur-tooltip-rest,0ms)]',
           'group-has-[:focus-visible]/tip:visible group-has-[:focus-visible]/tip:opacity-100 group-has-[:focus-visible]/tip:delay-0',
           side === 'top' ? 'bottom-full pb-2' : 'top-full pt-2',
         )}
