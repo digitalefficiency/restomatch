@@ -304,7 +304,7 @@ describe('DS3 · density variables express SPEC §7 (the switch itself is DS3-06
   it('a phone keeps regular density: a coarse pointer undoes every compact type step and dial', () => {
     const floor = css.slice(css.indexOf("@media (pointer: coarse) {\n  [data-density='compact'] {"));
     const body = floor.slice(0, floor.indexOf('}'));
-    for (const decl of ['--lh-title-lg: 2rem;', '--lh-row-title: 1.25rem;', '--fs-row-sub: 0.8125rem;', '--decision-row-h: 52px;', '--decision-row-pt: 7px;', '--decision-row-pb: 8px;', '--btn-h-primary: 40px;', '--chip-h: 24px;', '--nav-item-h: 36px;', '--fs-cell: 0.875rem;']) {
+    for (const decl of ['--lh-title-lg: 2rem;', '--lh-row-title: 1.25rem;', '--fs-row-sub: 0.8125rem;', '--decision-row-h: 52px;', '--decision-row-pt: 7px;', '--decision-row-pb: 8px;', '--btn-h-primary: 40px;', '--chip-h: 22px;', '--nav-item-h: 36px;', '--fs-cell: 0.875rem;']) {
       expect(body).toContain(decl);
     }
     // The floor comes after the compact block, so it wins at equal specificity.
@@ -340,6 +340,16 @@ describe('DS3 · density variables express SPEC §7 (the switch itself is DS3-06
     }
     expect(coarse.get('--cell-px')).toBe('16px');
     expect(coarse.get('--cell-inline')).toBe('16px');
+  });
+
+  it("a status pill is 22 px high (SPEC §5) on DS2's chip dial; compact 20 and touch 28 stay", () => {
+    const block = (open: string) => {
+      const at = css.indexOf(open);
+      return css.slice(at, css.indexOf('}', at));
+    };
+    expect(block("\n[data-density='default'] {\n  --fs-cell")).toContain('--chip-h: 22px;');
+    expect(block("\n[data-density='compact'] {\n  --fs-cell")).toContain('--chip-h: 20px;');
+    expect(block("\n[data-density='touch'] {\n  --fs-cell")).toContain('--chip-h: 28px;');
   });
 });
 
