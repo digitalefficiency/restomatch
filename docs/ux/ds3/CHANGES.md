@@ -27,6 +27,10 @@ folder lives") and read the sections it points to. Your contract is still your s
   rule once `DS3-00`'s is in its base, so nothing is enlarged twice.
 - `DS3-06` adds the two cookies and the three stored keys to the cookie policy page (a permitted seam).
 
+**`DS3-00`: one more seam.** Two assertions outside the package pinned the old canvas and the old strong line
+as literals, which held both values back. `DS3-00` may change exactly those two literals with their
+primitives (`WORKPLAN.md`, DS3-00, "Seams", item 3).
+
 ## 21.11.2026 · fourth correction
 
 The reference's script only (`reference/src/script.js` and its copy inside `reference.html`). No package is

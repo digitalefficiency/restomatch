@@ -121,7 +121,11 @@ token lab) · the token lab's snapshot baselines (`apps/web/e2e/W1-01.spec.ts-sn
 new canvas value, nothing else: the `themeColor` in `apps/web/app/layout.tsx`,
 `apps/web/public/pwa/manifest.webmanifest`, `apps/web/app/global-error.tsx`,
 `apps/web/lib/pwa/ReceiverPwa.tsx`, `apps/web/app/og/[file]/route.tsx`. (2) The named motion set of the side
-menu (`SPEC.md` §8): add it as tokens; `DS3-02` uses it.
+menu (`SPEC.md` §8): add it as tokens; `DS3-02` uses it. (3) Two assertions outside your boundary pin the
+old canvas and the old strong line as literals: `packages/api/src/__tests__/price-creep-digest.test.ts`
+(the light e-mail template contains the canvas colour) and `apps/web/e2e/W1-09.spec.ts` (the computed border
+colour of a quantity field). Change exactly those two literals to the new values, each in the same commit as
+its primitive, and name them in the pull request with the reason. Nothing else in those files.
 
 **Acceptance.** Every text pair still passes the contrast test (AA), and the pairs listed in `SPEC.md` §2
 hold what the reference holds. No new hex colour outside `packages/ui-tokens`, and the existing copies of the
