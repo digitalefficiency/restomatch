@@ -213,20 +213,34 @@ export async function computeCappedGroups(
 }
 
 /**
- * The hero's comparison window for `spec` (boundsCte 'prev', in the restaurant's
- * timezone) as a custom view over the same filters; null when it is empty.
+ * One of the hero's windows for `spec` (boundsCte with `compare`, in the
+ * restaurant's timezone) as a custom view over the same filters. Null when the
+ * window is empty or outside 2000–2100 (what a custom view accepts).
  */
-export async function previousWindowSpec(db: Database, restaurantId: string, spec: ViewSpec): Promise<ViewSpec | null> {
-  const prev = await computeLeakSummary(db, restaurantId, spec, 'prev');
+export async function heroWindowSpec(
+  db: Database,
+  restaurantId: string,
+  spec: ViewSpec,
+  compare: 'off' | 'prev',
+): Promise<(ViewSpec & { from: string; to: string }) | null> {
+  const w = await computeLeakSummary(db, restaurantId, spec, compare);
   const res = await db.execute(sql`
-    SELECT to_char((${prev.monthStart}::timestamptz AT TIME ZONE r.tz), 'YYYY-MM-DD') AS from_d,
-           to_char((${prev.monthEnd}::timestamptz AT TIME ZONE r.tz) - interval '1 day', 'YYYY-MM-DD') AS to_d,
-           (${prev.monthEnd}::timestamptz > ${prev.monthStart}::timestamptz) AS nonempty
+    SELECT to_char((${w.monthStart}::timestamptz AT TIME ZONE r.tz), 'YYYY-MM-DD') AS from_d,
+           to_char((${w.monthEnd}::timestamptz AT TIME ZONE r.tz) - interval '1 day', 'YYYY-MM-DD') AS to_d,
+           (${w.monthEnd}::timestamptz > ${w.monthStart}::timestamptz) AS nonempty
     FROM (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) r
   `);
   const r = rowsOf(res)[0];
   if (!r || !r.nonempty) return null;
-  return { period: 'custom', from: String(r.from_d), to: String(r.to_d), filters: spec.filters, now: spec.now };
+  const from = String(r.from_d);
+  const to = String(r.to_d);
+  if (from < '2000-01-01' || to > '2100-12-31') return null;
+  return { period: 'custom', from, to, filters: spec.filters, now: spec.now };
+}
+
+/** The hero's comparison window (boundsCte 'prev'); see heroWindowSpec. */
+export async function previousWindowSpec(db: Database, restaurantId: string, spec: ViewSpec): Promise<ViewSpec | null> {
+  return heroWindowSpec(db, restaurantId, spec, 'prev');
 }
 
 export async function computeLeakDrivers(
@@ -238,10 +252,18 @@ export async function computeLeakDrivers(
   const by = opts.by ?? 'supplier';
   const top = Math.min(Math.max(opts.top ?? 3, 1), 10);
   const spec = { ...view, now: view.now ?? new Date() };
-  const [comparison, prevSpec] = await Promise.all([
+  const [jsComparison, curWin, prevSpec] = await Promise.all([
     computeLeakComparison(db, restaurantId, spec, opts.tz),
-    previousWindowSpec(db, restaurantId, spec),
+    heroWindowSpec(db, restaurantId, spec, 'off'),
+    heroWindowSpec(db, restaurantId, spec, 'prev'),
   ]);
+  // The comparison's labels come from resolveWindow (JS, Asia/Jerusalem by default), which can be a day
+  // off the data window at period ends; label the windows with the dates the ₪ were measured over.
+  const comparison: LeakComparison = {
+    ...jsComparison,
+    current: curWin ? { ...jsComparison.current, from: curWin.from, to: curWin.to } : jsComparison.current,
+    previous: prevSpec ? { ...jsComparison.previous, from: prevSpec.from, to: prevSpec.to } : jsComparison.previous,
+  };
   const [cur, prev] = await Promise.all([
     computeCappedGroups(db, restaurantId, spec, by),
     prevSpec ? computeCappedGroups(db, restaurantId, prevSpec, by) : Promise.resolve(new Map<string, CapGroup>()),

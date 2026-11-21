@@ -125,16 +125,16 @@ describe('computeLeakDrivers', () => {
 
   // The previous window must be the hero's SQL comparison window (boundsCte 'prev'), not a JS
   // re-derivation: at month / quarter end and for running custom ranges the two differ by a day.
-  const edges: Array<{ name: string; now: string; view: Omit<ViewSpec, 'now'>; inside: string[]; outside: string[] }> = [
+  const edges: Array<{ name: string; now: string; view: Omit<ViewSpec, 'now'>; inside: string[]; outside: string[]; prev: [string, string] }> = [
     // On 30.11 the hero compares 1–30.11 with 1–30.10: 31.10 is outside.
-    { name: 'month end (30.11)', now: '2026-11-30T12:00:00+02:00', view: { period: 'this_month' }, inside: ['2026-10-30T10:00:00+02:00'], outside: ['2026-10-31T10:00:00+02:00'] },
+    { name: 'month end (30.11)', now: '2026-11-30T12:00:00+02:00', view: { period: 'this_month' }, inside: ['2026-10-30T10:00:00+02:00'], outside: ['2026-10-31T10:00:00+02:00'], prev: ['2026-10-01', '2026-10-30'] },
     // On 28.02 (not a leap year) the previous window is 1–28.01: 29–31.01 are outside.
-    { name: 'Feb 28', now: '2027-02-28T12:00:00+02:00', view: { period: 'this_month' }, inside: ['2027-01-28T10:00:00+02:00'], outside: ['2027-01-29T10:00:00+02:00', '2027-01-31T10:00:00+02:00'] },
+    { name: 'Feb 28', now: '2027-02-28T12:00:00+02:00', view: { period: 'this_month' }, inside: ['2027-01-28T10:00:00+02:00'], outside: ['2027-01-29T10:00:00+02:00', '2027-01-31T10:00:00+02:00'], prev: ['2027-01-01', '2027-01-28'] },
     // On 30.06 the quarter compares 1.04–30.06 with 1.01–30.03: 31.03 is outside.
-    { name: 'quarter end (30.06)', now: '2026-06-30T12:00:00+03:00', view: { period: 'quarter' }, inside: ['2026-03-30T10:00:00+03:00'], outside: ['2026-03-31T10:00:00+03:00'] },
+    { name: 'quarter end (30.06)', now: '2026-06-30T12:00:00+03:00', view: { period: 'quarter' }, inside: ['2026-03-30T10:00:00+03:00'], outside: ['2026-03-31T10:00:00+03:00'], prev: ['2026-01-01', '2026-03-30'] },
     // A running custom range 1–31.12 on 20.12: cut at today (1–20.12), shifted back by the range's
     // 31 days → 31.10–19.11. 30.10 and 20.11 are outside.
-    { name: 'running custom range', now: '2026-12-20T12:00:00+02:00', view: { period: 'custom', from: '2026-12-01', to: '2026-12-31' }, inside: ['2026-10-31T10:00:00+02:00', '2026-11-19T10:00:00+02:00'], outside: ['2026-10-30T10:00:00+02:00', '2026-11-20T10:00:00+02:00'] },
+    { name: 'running custom range', now: '2026-12-20T12:00:00+02:00', view: { period: 'custom', from: '2026-12-01', to: '2026-12-31' }, inside: ['2026-10-31T10:00:00+02:00', '2026-11-19T10:00:00+02:00'], outside: ['2026-10-30T10:00:00+02:00', '2026-11-20T10:00:00+02:00'], prev: ['2026-10-31', '2026-11-19'] },
   ];
   for (const e of edges) {
     it(`the previous window is the hero's at ${e.name}: Σ drivers + other = Δ with nothing left over`, async () => {
@@ -152,6 +152,8 @@ describe('computeLeakDrivers', () => {
         const prev = await computeCappedGroups(db, rid, (await previousWindowSpec(db, rid, view))!, by);
         expect([...prev.values()].reduce((s, g) => s + g.agorot, 0), `${e.name} ${by} previous`).toBe(heroPrev);
         expect(d.otherAgorot, `${e.name} ${by} other`).toBe(0);
+        // The comparison is labelled with the window the ₪ were measured over.
+        expect([d.comparison.previous.from, d.comparison.previous.to], `${e.name} previous label`).toEqual(e.prev);
         expect(d.drivers.reduce((s, x) => s + x.deltaAgorot, 0) + d.otherAgorot).toBe(d.comparison.deltaAgorot);
       }
     });
