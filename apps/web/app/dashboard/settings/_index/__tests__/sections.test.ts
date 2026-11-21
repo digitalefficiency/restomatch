@@ -126,3 +126,19 @@ describe('the palette export (DS3-02)', () => {
     expect(narrowDesk.some((e) => e.key === 'settings.display.keys')).toBe(true);
   });
 });
+
+describe('reading the address (compared, never written into the page)', () => {
+  it('decodes the anchor, and a malformed escape reads as none', async () => {
+    const { hashAnchor } = await import('../sections');
+    expect(hashAnchor('#letterhead')).toBe('letterhead');
+    expect(hashAnchor('#%E0%A4%A')).toBe('');
+    expect(hashAnchor('')).toBe('');
+  });
+
+  it('an old anchor maps only through the table, never through a prototype member', async () => {
+    const { legacyTarget } = await import('../sections');
+    expect(legacyTarget('letterhead')).toBe('/dashboard/settings?s=letterhead#letterhead');
+    for (const k of ['__proto__', 'constructor', 'toString', 'hasOwnProperty', 'nope'])
+      expect(legacyTarget(k)).toBeUndefined();
+  });
+});

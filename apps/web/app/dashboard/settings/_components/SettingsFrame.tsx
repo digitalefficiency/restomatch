@@ -26,6 +26,7 @@ import {
   settingsFor,
   type SectionId,
   type SettingsGroup,
+  hashAnchor,
 } from '../_index/sections';
 
 /* ───────────── unsaved changes: kept across sections, marked in the list ───────────── */
@@ -70,9 +71,12 @@ function useArrivalHighlight() {
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const hit = () => {
-      const id = decodeURIComponent(window.location.hash.slice(1));
+      const id = hashAnchor(window.location.hash);
       if (!id) return;
-      const el = document.querySelector<HTMLElement>(`[data-setting-row="${CSS.escape(id)}"]`);
+      // The address is only compared with the rows on the screen (never turned into a selector).
+      const el = [...document.querySelectorAll<HTMLElement>('[data-setting-row]')].find(
+        (row) => row.dataset.settingRow === id,
+      );
       if (!el) return;
       el.scrollIntoView({ block: 'nearest' });
       el.focus({ preventScroll: true });

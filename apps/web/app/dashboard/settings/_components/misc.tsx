@@ -7,7 +7,7 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { common } from '@/lib/i18n/messages/common';
 import { settings } from '@/lib/i18n/messages/settings';
 import { labelForRole } from '@/lib/roles';
-import { LEGACY_HASHES, RESTAURANT_ROLES, SETTINGS_BASE } from '../_index/sections';
+import { RESTAURANT_ROLES, SETTINGS_BASE, hashAnchor, legacyTarget } from '../_index/sections';
 
 /**
  * The one-page settings screen had anchors (`/dashboard/settings#letterhead`,
@@ -20,8 +20,7 @@ export function LegacyHashRedirect() {
   useEffect(() => {
     // Only the old one-page address (no section in it): new links carry `?s=` and their own anchors.
     if (section) return;
-    const id = decodeURIComponent(window.location.hash.slice(1));
-    const to = id ? LEGACY_HASHES[id] : undefined;
+    const to = legacyTarget(hashAnchor(window.location.hash));
     if (to) router.replace(to);
   }, [router, section]);
   return null;

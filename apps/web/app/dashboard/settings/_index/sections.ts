@@ -347,6 +347,24 @@ export function settingHref(e: SettingEntry): string {
   return `${sectionById(e.section).href}#${e.anchor ?? e.id}`;
 }
 
+/**
+ * The anchor in the address (`#…`), decoded, or '' — a malformed escape reads
+ * as none. Only ever COMPARED with the screen's own anchors, never written
+ * into the page (DS3 CHANGES.md, fourth correction).
+ */
+export function hashAnchor(hash: string): string {
+  try {
+    return decodeURIComponent(hash.replace(/^#/, ''));
+  } catch {
+    return '';
+  }
+}
+
+/** Where an old one-page anchor now lives, from this table only (own keys: never a prototype member). */
+export function legacyTarget(anchor: string): string | undefined {
+  return Object.hasOwn(LEGACY_HASHES, anchor) ? LEGACY_HASHES[anchor] : undefined;
+}
+
 /** Legacy anchors of the one-page settings screen (links elsewhere still use them). */
 export const LEGACY_HASHES: Readonly<Record<string, string>> = {
   letterhead: `${SETTINGS_BASE}?s=letterhead#letterhead`,
