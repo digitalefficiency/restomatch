@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { BookOpenCheck, FileDown, Settings2 } from 'lucide-react';
+import { AlertTriangle, BookOpenCheck, CheckCircle2, FileDown, Info, Settings2 } from 'lucide-react';
 import type { inferRouterInputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
 import { trpc } from '@/lib/trpc/client';
@@ -29,6 +29,18 @@ export function AccountingFiles({ from, to, disabled }: { from: string; to: stri
   const once = useSingleFlight();
   const utils = trpc.useUtils();
   const [busy, setBusy] = useState<Format | null>(null);
+  // One persistent result panel instead of up to 4 auto-dismissing toasts
+  // (W2-14, admin-22 / perf-states-10). It stays until the next download or a
+  // range change.
+  const [result, setResult] = useState<{
+    format: Format;
+    rowCount: number;
+    skippedCount: number;
+    unmappedCount: number;
+    replacedChars: number;
+    derivedVatCount: number;
+  } | null>(null);
+  useEffect(() => setResult(null), [from, to]);
 
   function download(format: Format) {
     once(async () => {
@@ -44,14 +56,14 @@ export function AccountingFiles({ from, to, disabled }: { from: string; to: stri
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        toast.success(
-          data.rowCount === 0
-            ? t('accounting.empty')
-            : t('accounting.downloaded', { count: formatNumber(data.rowCount, locale) }),
-        );
-        if (data.skippedCount > 0) toast.error(t('accounting.skipped', { count: formatNumber(data.skippedCount, locale) }));
-        if (data.replacedChars > 0) toast.error(t('accounting.replaced', { count: formatNumber(data.replacedChars, locale) }));
-        if (data.derivedVatCount > 0) toast.success(t('accounting.derivedVat', { count: formatNumber(data.derivedVatCount, locale) }));
+        setResult({
+          format,
+          rowCount: data.rowCount,
+          skippedCount: data.skippedCount,
+          unmappedCount: data.unmappedCount,
+          replacedChars: data.replacedChars,
+          derivedVatCount: data.derivedVatCount,
+        });
       } catch (err) {
         toast.error(`${t('accounting.failed')} ${friendlyError(err, tc)}`);
       } finally {
@@ -99,6 +111,50 @@ export function AccountingFiles({ from, to, disabled }: { from: string; to: stri
           </li>
         ))}
       </ul>
+      {result ? (
+        <div
+          role="status"
+          data-testid="accounting-result"
+          className="mt-4 space-y-1.5 rounded-xl border border-line-strong p-3 text-sm text-ink"
+        >
+          <p className="flex items-start gap-2 font-medium">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+            {result.rowCount === 0
+              ? t('accounting.empty')
+              : t('accounting.downloaded', { count: formatNumber(result.rowCount, locale) })}{' '}
+            · {t(`accounting.formats.${result.format}.name`)}
+          </p>
+          {result.unmappedCount > 0 ? (
+            <p className="flex items-start gap-2 text-warn">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>
+                {t('accounting.unmapped', { count: formatNumber(result.unmappedCount, locale) })}{' '}
+                <Link href="/dashboard/integrations#accounting" className="underline">
+                  {t('accounting.fixLink')}
+                </Link>
+              </span>
+            </p>
+          ) : null}
+          {result.skippedCount > 0 ? (
+            <p className="flex items-start gap-2 text-warn">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              {t('accounting.skipped', { count: formatNumber(result.skippedCount, locale) })}
+            </p>
+          ) : null}
+          {result.replacedChars > 0 ? (
+            <p className="flex items-start gap-2 text-warn">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              {t('accounting.replaced', { count: formatNumber(result.replacedChars, locale) })}
+            </p>
+          ) : null}
+          {result.derivedVatCount > 0 ? (
+            <p className="flex items-start gap-2 text-muted">
+              <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              {t('accounting.derivedVat', { count: formatNumber(result.derivedVatCount, locale) })}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

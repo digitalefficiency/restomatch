@@ -25,7 +25,7 @@ type Locale = 'he' | 'en';
 const LOCALES: Locale[] = ['he', 'en'];
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 
-const PUBLIC_PAGES = ['/', '/login'];
+const PUBLIC_PAGES = ['/', '/product', '/login'];
 const DASHBOARD_PAGES = [
   '/dashboard',
   '/dashboard/leaks',
@@ -176,6 +176,17 @@ for (const locale of LOCALES) {
       for (const path of PUBLIC_PAGES) {
         test(`${locale} ${vpName} ${path}`, async ({ page }) => {
           await open(page, locale, path);
+          // Two CSS fades would be scanned mid-frame and blended by axe into false contrast
+          // fails: the scroll-driven reveal (`.rm-reveal` / `.rm-step`, opacity 0→1 at the
+          // fold — /product en desktop) and HeroMatch's he↔en label cross-fade (`.rm-morph-*`,
+          // a 7 s loop — / en). Pin ONLY those to a rest frame (reveal shown, morph on the
+          // Hebrew label). No reduced-motion emulation: the page is swept with motion on and
+          // the HeroVideo pause control (WCAG 2.2.2) stays in the scan (conductor R6).
+          await page.addStyleTag({
+            content:
+              '.rm-reveal, .rm-step { animation: none !important; opacity: 1 !important; transform: none !important; }' +
+              ' .rm-morph-he, .rm-morph-en { animation: none !important; }',
+          });
           expect(await axeViolations(page), `${path} axe`).toEqual([]);
         });
       }

@@ -168,6 +168,24 @@ describe('computeLeakSummary', () => {
     expect(yoy.monthStart).toBe('2025-09-30T21:00:00.000Z');
   });
 
+  it('prev of a running month = days 1–N of the previous month, clamped to its length (Jerusalem)', async () => {
+    const t = await setup();
+    // Local bounds as UTC: Jerusalem is +03:00 until 25.10, +02:00 after (DST ends 25.10.2026).
+    const cases: Array<[string, string, string]> = [
+      // now (local noon)            prev lo (local 1st 00:00)     prev hi (exclusive, local)
+      ['2026-10-30T12:00:00+02:00', '2026-08-31T21:00:00.000Z', '2026-09-30T21:00:00.000Z'], // 1–30.09
+      ['2026-10-31T12:00:00+02:00', '2026-08-31T21:00:00.000Z', '2026-09-30T21:00:00.000Z'], // 1–30.09 (clamped)
+      ['2026-03-31T12:00:00+03:00', '2026-01-31T22:00:00.000Z', '2026-02-28T22:00:00.000Z'], // 1–28.02
+      ['2028-03-31T12:00:00+03:00', '2028-01-31T22:00:00.000Z', '2028-02-29T22:00:00.000Z'], // 1–29.02 (leap)
+      // just after Jerusalem midnight on 30.10 is already the 30th
+      ['2026-10-29T22:30:00Z', '2026-08-31T21:00:00.000Z', '2026-09-30T21:00:00.000Z'],
+    ];
+    for (const [now, lo, hi] of cases) {
+      const prev = await computeLeakSummary(db, t.restaurantId, { period: 'this_month', now: new Date(now) }, 'prev');
+      expect([now, prev.monthStart, prev.monthEnd]).toEqual([now, lo, hi]);
+    }
+  });
+
   it('compare covers the same to-date stretch (month-to-date vs the same days last month)', async () => {
     const t = await demo();
     // After the 15th of September → outside "Sep 1–15", the comparison for Oct 1–15.

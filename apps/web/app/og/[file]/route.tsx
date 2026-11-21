@@ -1,12 +1,16 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ImageResponse } from 'next/og';
+import { formatIls } from '@/lib/money';
+import { SAMPLE_CAUGHT_BEFORE_PAYMENT_ILS } from '../../(marketing)/_components/sampleMonth';
 
 /**
  * Social share cards, one per language: /og/he.png (default) and /og/en.png
  * (`?lang=en` pages). Pages pick theirs via socialFor() in _components/seo.ts.
  * Public without a session: the path ends in a file extension (publicPaths).
- * The ₪ figure is the same illustrative example the landing hero animates.
+ * The ₪ figure is the sample month's "caught before payment" (sampleMonth.ts,
+ * the one figure set the landing, showcase and loops use), formatted by
+ * formatIls() and laid out in visual order like every other Hebrew line.
  */
 const SIZE = { width: 1200, height: 630 };
 
@@ -44,6 +48,13 @@ function visual(text: string, lang: Lang): string {
     .reverse()
     .map((r) => (/^[A-Za-z0-9₪]/.test(r) ? r : [...r].reverse().join('')))
     .join('');
+}
+
+/** formatIls() without bidi marks (Satori draws them) and with a plain space. */
+function plainIls(ils: number, lang: Lang): string {
+  return formatIls(ils, { locale: lang })
+    .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+    .replace(/[\u00a0\u202f]/g, ' ');
 }
 
 async function font(weight: 500 | 800) {
@@ -163,7 +174,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ file: s
           >
             <div style={{ fontSize: 20, color: '#B80F2A', fontWeight: 500, display: 'flex' }}>{v(c.caught)}</div>
             <div style={{ fontSize: 58, fontWeight: 800, color: '#B80F2A', display: 'flex' }}>
-              {rtl ? '₪ 412' : '₪412'}
+              {v(plainIls(SAMPLE_CAUGHT_BEFORE_PAYMENT_ILS, lang))}
             </div>
           </div>
         </div>

@@ -9,6 +9,7 @@ import { AssignPlanForm } from './AssignPlanForm';
 import { OverridesForm } from './OverridesForm';
 import { MemberRoles } from './MemberRoles';
 import { FeaturesPanel } from './FeaturesPanel';
+import { AutomationsList } from './AutomationsList';
 import { isAdmin2faRequired, TwoFactorRequired } from '../../TwoFactorRequired';
 
 type Overrides = {
@@ -52,15 +53,21 @@ export default async function AdminRestaurantDetail({ params }: PageProps) {
         {t('detail.back')}
       </Link>
       <h1 className="mb-1 mt-2 text-2xl font-bold text-ink">{restaurant.name}</h1>
-      <p className="mb-6 font-mono text-xs tabular-nums text-subtle">
+      <p className="mb-6 text-xs tabular-nums text-subtle">
         {restaurant.businessId ? `${t('detail.businessId')} ${restaurant.businessId} · ` : ''}
         {t('detail.created')} {formatDate(restaurant.createdAt, locale)}
       </p>
+      <Link
+        href={`/admin/automation?r=${restaurant.id}`}
+        className="mb-6 inline-block text-sm text-primary underline underline-offset-2 hover:text-ink"
+      >
+        {t('automation.open')}
+      </Link>
 
       <div className="grid gap-6 md:grid-cols-2">
         <section className="relative overflow-hidden rounded-xl border border-line bg-surface p-5 shadow-card">
           <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px flow-stream" />
-          <h2 className="mb-4 font-mono text-xs font-semibold uppercase tracking-wider text-subtle">
+          <h2 className="mb-4 text-sm font-semibold text-subtle">
             {t('detail.subscription')}
           </h2>
           {subscription ? (
@@ -91,7 +98,7 @@ export default async function AdminRestaurantDetail({ params }: PageProps) {
         </section>
 
         <section className="rounded-xl border border-line bg-surface p-5 shadow-card">
-          <h2 className="mb-4 font-mono text-xs font-semibold uppercase tracking-wider text-subtle">
+          <h2 className="mb-4 text-sm font-semibold text-subtle">
             {t('detail.members', { count: members.length })}
           </h2>
           {members.length ? (
@@ -103,6 +110,7 @@ export default async function AdminRestaurantDetail({ params }: PageProps) {
       </div>
 
       <FeaturesPanel restaurantId={restaurant.id} state={features} />
+      <AutomationsList restaurantId={restaurant.id} />
     </div>
   );
 }

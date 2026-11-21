@@ -4,6 +4,7 @@ import {
   fillEnglishNames,
   isAllowedScanUrl,
   meterOcrScan,
+  notifyEffect,
   signedUrlForStoragePath,
   receiptState,
   scanReceiptToStamp,
@@ -625,9 +626,11 @@ export async function processOcrInvoice(job: WorkerJob<OcrInvoiceJob>) {
     // second paid call that fails the same way.
     const raw = job as { attemptsMade?: number; opts?: { attempts?: number } };
     const kind = classifyOcrError(err);
-    const final = kind.retryable === false || (raw.attemptsMade ?? 0) + 1 >= (raw.opts?.attempts ?? 1);
+    const attempt = finalAttempt(raw, kind.retryable);
+    const final = attempt !== null;
     if (final) {
-      await markOcrFailed(db, job.data.restaurantId, job.data.invoiceId, err, kind.reason).catch((e) =>
+      // G-06: mark failed (same guard and payload), then tell the uploader and the managers.
+      await failAndHandOff(db, job.data.restaurantId, job.data.invoiceId, err, attempt, kind.reason).catch((e) =>
         console.error(`[ocr-invoice] could not mark invoice=${job.data.invoiceId} failed`, e),
       );
     }
@@ -959,10 +962,10 @@ export async function markOcrFailed(
   invoiceId: string,
   err: unknown,
   forced?: OcrFailureReason,
-): Promise<void> {
+): Promise<{ updated: boolean; reason: OcrFailureReason }> {
   const reason: OcrFailureReason =
     forced ?? (err instanceof Error && err.name === 'QuotaExceededError' ? 'quota_exceeded' : 'extraction_failed');
-  await db
+  const updated = await db
     .update(invoices)
     .set({
       status: 'parsed',
@@ -985,7 +988,73 @@ export async function markOcrFailed(
         eq(invoices.restaurantId, restaurantId),
         eq(invoices.status, 'ocr_pending'),
       ),
-    );
+    )
+    .returning({ id: invoices.id });
+  return { updated: updated.length > 0, reason };
+}
+
+/**
+ * The attempt number when this run is final (no retry follows), else null.
+ * A terminal error (`retryable === false`, see classifyOcrError) is final at once.
+ */
+export function finalAttempt(
+  job: { attemptsMade?: number; opts?: { attempts?: number } },
+  retryable = true,
+): number | null {
+  const attempt = (job.attemptsMade ?? 0) + 1;
+  return retryable === false || attempt >= (job.opts?.attempts ?? 1) ? attempt : null;
+}
+
+/**
+ * The terminal-failure hand-off (G-06): mark the invoice failed (same guard and
+ * payload), then tell the uploader and the managers — in ONE transaction, with
+ * the notice in a savepoint so a notify error never leaves the invoice stuck in
+ * `ocr_pending`. Only the call that actually moved the row notifies, and the
+ * per-(user, channel) dedupe keys make a replay enqueue nothing.
+ *
+ * The forced early exits (`ocr_disabled`, `scan_url_refused`) keep calling
+ * plain `markOcrFailed`: no notice (configuration, not a failed read).
+ */
+export async function failAndHandOff(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+  err: unknown,
+  attempt?: number,
+  forced?: OcrFailureReason,
+): Promise<{ updated: boolean; reason: OcrFailureReason }> {
+  return db.transaction(async (rawTx) => {
+    const tx = rawTx as unknown as Database;
+    const res = await markOcrFailed(tx, restaurantId, invoiceId, err, forced);
+    if (!res.updated) return res;
+    try {
+      await tx.transaction(async (sp) =>
+        onOcrFailed(sp as unknown as Database, { restaurantId, invoiceId, reason: res.reason, attempt }),
+      );
+    } catch (e) {
+      console.error(`[ocr-invoice] invoice=${invoiceId} failure notice not enqueued`, e);
+    }
+    return res;
+  });
+}
+
+/**
+ * Interim until G-05 merges: becomes
+ * `emit(tx, { type: 'invoice.ocr_failed', entityType: 'invoice', entityId, payload: { reason, attempt } … })`,
+ * which runs the same `notify` handler (registered from @restomatch/api) plus
+ * W2-08's task effect.
+ */
+export async function onOcrFailed(
+  tx: Database,
+  input: { restaurantId: string; invoiceId: string; reason: string; attempt?: number; at?: Date },
+): Promise<void> {
+  await notifyEffect(tx, {
+    type: 'invoice.ocr_failed',
+    restaurantId: input.restaurantId,
+    entityId: input.invoiceId,
+    at: input.at ?? new Date(),
+    payload: { reason: input.reason, ...(input.attempt ? { attempt: input.attempt } : {}) },
+  });
 }
 
 /**

@@ -85,3 +85,22 @@ export function featureEnabled(
   if (!features) return false;
   return features[key] === true || (features.all === true && features[key] !== false);
 }
+
+/**
+ * AU-01 (owner decision AD2): the flags an owner may switch on or off for their
+ * own restaurant from /dashboard/settings/automations. Everything else stays
+ * admin-only (FeaturesPanel). The FEATURES_OFF kill-switch still wins: a
+ * stored owner wish never overrides it.
+ */
+export const OWNER_TOGGLEABLE = [
+  'priceAlerts',
+  'recovery',
+  'monthlyReport',
+  'vatAtRisk',
+  'supplierLedger',
+  'monthlyDigestPreview',
+  'dishPriceAlert',
+] as const satisfies ReadonlyArray<FeatureKey>;
+
+export type OwnerToggleableKey = (typeof OWNER_TOGGLEABLE)[number];
+

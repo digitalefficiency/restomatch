@@ -35,6 +35,14 @@ export type BarLabel =
 
 export type BarSlot = 1 | 2 | 3 | 4;
 
+/**
+ * The nav badge sources (W2-08 `nav.badges`): one per queue that shows from
+ * every screen. Money queues carry ₪ (+ a block flag); capture queues carry a
+ * count only. `priceAlerts` is neutral below W2-12's materiality.
+ */
+export const BADGE_KEYS = ['approvals', 'payRun', 'claims', 'receiving', 'count', 'intake', 'priceAlerts'] as const;
+export type BadgeKey = (typeof BADGE_KEYS)[number];
+
 export interface RouteDef {
   /** Stable key; the i18n label lives at `nav.routes.<key>`. */
   key: string;
@@ -65,6 +73,12 @@ export interface RouteDef {
   aliases?: readonly string[];
   /** A prefix gate with no page of its own (e.g. `/dashboard/reports`). */
   gateOnly?: boolean;
+  /**
+   * The `nav.badges` source this entry shows (W2-08). `null` = decided: no
+   * badge. Omitted = the default in `lib/nav/badges.ts` (`DEFAULT_ROUTE_BADGES`)
+   * until the route's owner moves the key into its own `routes/<seg>.ts`.
+   */
+  badge?: BadgeKey | null;
 }
 
 /** What the layout knows about the viewer, enough to decide what nav shows. */

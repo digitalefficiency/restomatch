@@ -87,7 +87,9 @@ describe('findJobInvoice', () => {
     const t = await newTenant('rolled back');
     const started = performance.now();
     expect(await findJobInvoice(db, t.restaurantId, crypto.randomUUID(), [20, 20])).toBeNull();
-    expect(performance.now() - started).toBeGreaterThanOrEqual(40);
+    // Two 20 ms waits. Node may fire a setTimeout up to ~1 ms early against performance.now()
+    // (ms clamping), so allow 2 ms of timer slack: an immediate give-up would be ~0-2 ms, far below.
+    expect(performance.now() - started).toBeGreaterThanOrEqual(38);
   });
 
   it('covers a slow commit by default (several seconds of grace)', () => {

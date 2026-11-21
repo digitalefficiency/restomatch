@@ -9,9 +9,9 @@ import { common as ti } from './ti/common';
 /**
  * The receiver-facing slice of 'common': generic actions/states, plus shell
  * resilience (W1-04) — offline chip, re-auth sheet, 403/404/error — and the
- * screen names those pages interpolate.
+ * screen names those pages interpolate. Plus `field.*` (W3-03 ScanButton / MicButton at the dock).
  */
-export type CommonReceiverSlice = Pick<typeof he, 'actions' | 'states'> & {
+export type CommonReceiverSlice = Pick<typeof he, 'actions' | 'states' | 'field'> & {
   shell: Pick<
     (typeof he)['shell'],
     'offline' | 'session' | 'forbidden' | 'notFound' | 'error' | 'screens' | 'listSep' | 'listLast'

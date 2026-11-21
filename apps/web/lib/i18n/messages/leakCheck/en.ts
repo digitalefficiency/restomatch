@@ -42,6 +42,9 @@ export const en: Shape<typeof he> = {
     privacy: 'By submitting you agree we process the files to produce the check. The files themselves are not kept, and the results are deleted automatically after 7 days.',
     privacyLink: 'Privacy policy',
     submit: 'Check my invoices',
+    remove: 'Remove {name}',
+    dropped: 'Up to {max} files, so {n} were not added.',
+    stage: 'Step {n} of {total}',
     working: {
       challenge: 'Preparing your check…',
       pow: 'Making sure you’re not a bot…',
@@ -83,6 +86,7 @@ export const en: Shape<typeof he> = {
       above_price_list: '{desc}: {qty} × {price} — your price list says {listPrice}',
     },
     notes: {
+      amountUnavailable: 'amount unavailable',
       title: 'For your information (not in the total)',
       same_file_twice: 'File {n} is identical to file {ref} — checked once only.',
       undercharge: 'Invoice {n}, line {line}: billed {amount} less than the calculation — an error in your favour.',

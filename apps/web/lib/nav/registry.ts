@@ -4,6 +4,7 @@ import { routes as ask } from './routes/ask';
 import { routes as branches } from './routes/branches';
 import { routes as catalog } from './routes/catalog';
 import { routes as chain } from './routes/chain';
+import { routes as close } from './routes/close';
 import { routes as contracts } from './routes/contracts';
 import { routes as exportsRoutes } from './routes/exports';
 import { routes as home } from './routes/home';
@@ -42,6 +43,7 @@ export const REGISTRY: readonly RouteDef[] = [
   ...recovery,
   ...suppliers,
   ...exportsRoutes,
+  ...close,
   // דליפות
   ...reports,
   ...ask,

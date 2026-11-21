@@ -1,11 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Settings2 } from 'lucide-react';
 import { trpc } from '@/lib/trpc/client';
+import { DateTime } from '@/lib/components/money';
 import {
   Button,
   Card,
+  StatusChip,
   EntitlementUpsell,
   ErrorNotice,
   Field,
@@ -88,6 +91,12 @@ export function AccountingMapping({ canEdit }: { canEdit: boolean }) {
         >
           <Card elevated flow>
             {!canEdit ? <p className="mb-3 text-xs text-subtle">{t('accounting.mapping.readOnly')}</p> : null}
+            {q.data.lastChange ? (
+              <p className="mb-3 flex flex-wrap gap-x-1 text-xs text-muted" data-testid="accounting-last-change">
+                {t('accounting.mapping.lastChange')} <bdi>{q.data.lastChange.byName ?? '—'}</bdi> ·{' '}
+                <DateTime value={q.data.lastChange.at} />
+              </p>
+            ) : null}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               {(
                 [
@@ -135,7 +144,7 @@ export function AccountingMapping({ canEdit }: { canEdit: boolean }) {
                       <Input
                         id={id}
                         value={form.supplierAccounts[s.id] ?? ''}
-                        placeholder={s.defaultAccount}
+                        placeholder={s.defaultAccount ?? undefined}
                         disabled={!canEdit}
                         onChange={(e) =>
                           setForm({ ...form, supplierAccounts: { ...form.supplierAccounts, [s.id]: e.target.value } })
@@ -146,6 +155,18 @@ export function AccountingMapping({ canEdit }: { canEdit: boolean }) {
                         dir="ltr"
                         className="font-mono sm:w-44"
                       />
+                      {form.supplierAccounts[s.id]?.trim() ? (
+                        <StatusChip tone="neutral" label={t('accounting.mapping.sourceMapped')} />
+                      ) : s.defaultAccount ? (
+                        <StatusChip tone="neutral" label={t('accounting.mapping.sourceBusinessId')} />
+                      ) : (
+                        <Link
+                          href={`/dashboard/suppliers/${s.id}`}
+                          className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                        >
+                          <StatusChip tone="warn" label={t('accounting.mapping.missingBusinessId')} />
+                        </Link>
+                      )}
                       {err(`supplier:${s.id}`) ? (
                         <p className="text-xs text-danger">{err(`supplier:${s.id}`)}</p>
                       ) : null}

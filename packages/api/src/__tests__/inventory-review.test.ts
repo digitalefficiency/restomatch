@@ -194,7 +194,7 @@ describe('period: plausibility', () => {
     // 400 kg on the shelf at close: closing ≫ opening + purchases → a negative food cost.
     await c.inventory.saveLines({ countId: close, lines: [{ productId: beef, qty: '400' }] });
     await c.inventory.complete({ countId: close });
-    await c.inventory.setMeta({ countId: close, foodSalesExVat: '10000.00' });
+    await c.inventory.setSales({ countId: close, foodSalesExVat: '10000.00' });
     const p = await c.inventory.period();
     if (!p.available) throw new Error('period');
     expect(p.actualAgorot).toBeLessThan(0);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { inferRouterOutputs } from '@trpc/server';
 import type { AppRouter } from '@restomatch/api';
@@ -16,6 +16,9 @@ import { discrepancyLabel, displayName } from '../approvals/vocab';
 import { parseIlsInput } from './parseIls';
 import { UndoBar, useDeferredCommit } from './deferred';
 import { RowMenu } from './row-menu';
+import { ReminderDrafts } from './reminder-drafts';
+import { ClaimPeek } from './claim-peek';
+import { ExportButtons } from './export-buttons';
 import {
   CLOSED,
   CONFIRMED_MOVES,
@@ -25,6 +28,7 @@ import {
   countdownOf,
   menuMoves,
   nextStep,
+  previewExclAgorot,
   type Countdown,
   type RecoveryStatus,
 } from './logic';
@@ -47,7 +51,11 @@ const TONE: Record<Status, BadgeTone> = {
 };
 const WRITE_OFF_REASONS = ['refused', 'trivial', 'ourMistake', 'other'] as const;
 const RECOVERED_REASONS = ['offset', 'refund', 'other'] as const;
-type Tab = 'todo' | 'all' | 'closed';
+/** Which list this page shows (URL `?tab=`): to send · in tracking · closed (under "מה קרה"). */
+export type View = 'send' | 'track' | 'closed';
+type Sort = 'rank' | 'amount' | 'age';
+/** Rows shown before "הציגו עוד" (WF-3: ≥10 rows in the fold). */
+const PAGE_ROWS = 12;
 
 /**
  * The ₪-back claims list. No money state ever changes on a select's `change`:
@@ -57,21 +65,33 @@ type Tab = 'todo' | 'all' | 'closed';
  * with a reason sent as the transition note. Selected rows move in ONE call.
  */
 export function TrackerClient({
-  claims,
+  claims: serverClaims,
   suggestions,
   nowIso,
-  initialTab = 'todo',
+  view = 'track',
+  remind = false,
+  sender = { restaurant: '', signer: '' },
 }: {
   claims: Claim[];
   suggestions: Suggestion[];
   nowIso: string;
-  initialTab?: Tab;
+  view?: View;
+  /** The reminder drafts open only after the owner pressed "הכינו תזכורות" (owner decision 16). */
+  remind?: boolean;
+  /** Who signs a supplier reminder draft (the active restaurant + the signed-in person). */
+  sender?: { restaurant: string; signer: string };
 }) {
   const t = useT(recovery);
   const ta = useT(approvals);
   const locale = useLocale();
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>(initialTab);
+  // Rows are local state: a move updates its row in place (optimistic, then the server's answer),
+  // and a failed row shows its own error with "נסו שוב" — no page reload (chain-26).
+  const [claims, setClaims] = useState(serverClaims);
+  useEffect(() => setClaims(serverClaims), [serverClaims]);
+  const [rowErrors, setRowErrors] = useState<Record<string, () => void>>({});
+  const [sort, setSort] = useState<Sort>('rank');
+  const [shownRows, setShownRows] = useState(PAGE_ROWS);
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [creditFor, setCreditFor] = useState<string | null>(null); // supplier id
   // A suggested invoice credit line opens the same form, prefilled (the user still picks the claims).
@@ -79,6 +99,8 @@ export function TrackerClient({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirm, setConfirm] = useState<{ ids: string[]; to: 'written_off' | 'recovered' } | null>(null);
   const [reason, setReason] = useState<string>('');
+  const [reasonMissing, setReasonMissing] = useState(false);
+  const [peekId, setPeekId] = useState<string | null>(null);
   const ils = (agorot: number) => formatIls(agorot / 100, { locale, maximumFractionDigits: 2 });
   const supplierOf = (c: Claim) => displayName(locale, c.supplierName, c.supplierNameEn) || '—';
   const itemOf = (c: Claim) =>
@@ -110,16 +132,13 @@ export function TrackerClient({
   const statusOf = (c: Claim): Status => (deferred.pendingTo(c.id) as Status | null) ?? c.status;
   const byId = useMemo(() => new Map(claims.map((c) => [c.id, c])), [claims]);
 
-  const inTab = (c: Claim, which: Tab) => {
+  const inView = (c: Claim) => {
     const s = statusOf(c);
-    return which === 'all' ? true : which === 'closed' ? CLOSED.includes(s) : !CLOSED.includes(s);
+    if (view === 'closed') return CLOSED.includes(s);
+    if (view === 'send') return s === 'claimed';
+    return !CLOSED.includes(s) && s !== 'claimed';
   };
-  const shown = claims.filter((c) => inTab(c, tab));
-  const counts = { todo: 0, all: claims.length, closed: 0 };
-  for (const c of claims) {
-    if (inTab(c, 'closed')) counts.closed += 1;
-    else counts.todo += 1;
-  }
+  const shown = claims.filter(inView);
 
   const sumOf = (ids: string[]) => ids.reduce((s, id) => s + (byId.get(id)?.outstandingAgorot ?? 0), 0);
   /** The ₪ a closing confirm names: money back for "recovered", the remainder for a write-off. */
@@ -131,6 +150,27 @@ export function TrackerClient({
     const names = [...new Set(ids.map((id) => byId.get(id)).filter(Boolean).map((c) => supplierOf(c!)))];
     return names.length === 1 ? names[0]! : t('undo.suppliers', { count: formatNumber(names.length, locale) });
   };
+
+  const itemsOf = (ids: string[]) => ids.map((claimId) => ({ claimId, expectedStatus: byId.get(claimId)!.status }));
+  /** Whether the server says this move needs a reason for any of the claims (terminal edges, a short "money back"). */
+  const needsReason = (ids: string[], to: Move) =>
+    ids.some((id) => byId.get(id)?.next.find((e) => e.to === to)?.requiresReason === true);
+
+  /** A failed move: the row says so in place, with "נסו שוב" that repeats exactly that move. */
+  const markFailed = (ids: string[], retry: () => void) =>
+    setRowErrors((prev) => {
+      const next = { ...prev };
+      for (const id of ids)
+        next[id] = () => {
+          setRowErrors((p) => {
+            const q = { ...p };
+            for (const x of ids) delete q[x];
+            return q;
+          });
+          retry();
+        };
+      return next;
+    });
 
   /** A reversible move: optimistic now, written after 10 s unless undone. */
   function moveLater(ids: string[], to: Move) {
@@ -145,7 +185,13 @@ export function TrackerClient({
         amount: ils(sumOf(ids)),
         supplier: nameOfIds(ids),
       }),
-      run: () => transition.mutateAsync({ claimIds: ids, to }),
+      // Guarded: each claim must still be in the status this screen showed (CONFLICT otherwise).
+      run: async () => {
+        const moved = await transition.mutateAsync({ items: itemsOf(ids), to });
+        const next = new Map(moved.map((m) => [m.id, m.status]));
+        setClaims((rows) => rows.map((c) => (next.has(c.id) ? { ...c, status: next.get(c.id)! } : c)));
+      },
+      onFailed: () => markFailed(ids, () => moveLater(ids, to)),
     });
     setSelected(new Set());
   }
@@ -155,6 +201,7 @@ export function TrackerClient({
     if (ids.length === 0) return;
     if ((CONFIRMED_MOVES as readonly string[]).includes(to)) {
       setReason('');
+      setReasonMissing(false);
       setConfirm({ ids, to: to as 'written_off' | 'recovered' });
     } else moveLater(ids, to);
   }
@@ -163,8 +210,14 @@ export function TrackerClient({
     if (!confirm) return;
     const reasons = confirm.to === 'written_off' ? WRITE_OFF_REASONS : RECOVERED_REASONS;
     const note = reason && (reasons as readonly string[]).includes(reason) ? t(`confirm.reasons.${confirm.to}.${reason}` as never) : undefined;
+    if (!note && needsReason(confirm.ids, confirm.to)) {
+      setReasonMissing(true);
+      return;
+    }
     try {
-      await transition.mutateAsync({ claimIds: confirm.ids, to: confirm.to, note });
+      const moved = await transition.mutateAsync({ items: itemsOf(confirm.ids), to: confirm.to, note });
+      const next = new Map(moved.map((m) => [m.id, m.status]));
+      setClaims((rows) => rows.map((c) => (next.has(c.id) ? { ...c, status: next.get(c.id)! } : c)));
       setMessage({ tone: 'ok', text: t('actions.saved') });
       setConfirm(null);
       setSelected(new Set());
@@ -203,7 +256,8 @@ export function TrackerClient({
       return next;
     });
   const selectedIds = [...selected].filter((id) => byId.has(id) && !isPending(id));
-  const selectedMoves = batchMoves(selectedIds.map((id) => statusOf(byId.get(id)!) as RecoveryStatus)) as Move[];
+  // The server's next[] per claim (no client mirror of the transition table).
+  const selectedMoves = batchMoves(selectedIds.map((id) => byId.get(id)!.next)) as Move[];
 
   const countdownText = (cd: Countdown) =>
     cd.tone === 'danger'
@@ -212,6 +266,17 @@ export function TrackerClient({
         ? t('countdown.today', { date: formatDate(cd.dueIso, locale) })
         : t('countdown.left', { days: formatNumber(cd.daysLeft, locale), date: formatDate(cd.dueIso, locale) });
 
+  /** A row whose move failed: the error sits on the row, with one "נסו שוב". */
+  const rowError = (id: string) =>
+    rowErrors[id] ? (
+      <p role="alert" className="mt-1 flex items-center gap-2 text-xs text-danger" data-testid="row-error">
+        {t('actions.failedRow')}
+        <button type="button" className="min-h-11 font-semibold underline md:min-h-0" onClick={rowErrors[id]}>
+          {t('actions.retry')}
+        </button>
+      </p>
+    ) : null;
+
   const rowActions = (c: Claim, wide = false) => {
     const status = statusOf(c);
     const step = nextStep(status as RecoveryStatus);
@@ -219,12 +284,14 @@ export function TrackerClient({
     const name = t('actions.rowLabel', { invoice: c.invoiceNumber ?? '—', item: itemOf(c) });
     const menu: Array<{ key: string; label: string; danger: boolean; onSelect: () => void }> = menuMoves(
       status as RecoveryStatus,
+      pending ? [] : c.next,
     ).map((to) => ({
       key: to,
       label: t(`actions.${to as Move}`),
       danger: to === 'written_off',
       onSelect: () => request([c.id], to as Move),
     }));
+    menu.push({ key: 'history', label: t('peek.open'), danger: false, onSelect: () => setPeekId(c.id) });
     if ((CREDITABLE as string[]).includes(status) && step?.kind !== 'credit' && c.outstandingAgorot > 0 && c.supplierId) {
       menu.push({ key: 'credit', label: t('actions.credit'), danger: false, onSelect: () => openCredit(c.supplierId) });
     }
@@ -281,7 +348,17 @@ export function TrackerClient({
     </>
   );
 
+  // The desk order: suppliers ranked by owed ₪ × days overdue; rows follow their supplier.
   const groups = bySupplier(shown);
+  const ranked = groups.flatMap((g) => g.claims);
+  const ordered =
+    sort === 'amount'
+      ? [...shown].sort((a, b) => b.outstandingAgorot - a.outstandingAgorot || a.id.localeCompare(b.id))
+      : sort === 'age'
+        ? [...shown].sort((a, b) => b.ageDays - a.ageDays || a.id.localeCompare(b.id))
+        : ranked;
+  const visible = ordered.slice(0, shownRows);
+  const overdueGroups = bySupplier(claims.filter((c) => c.daysOverdue > 0 && c.outstandingAgorot > 0 && !isPending(c.id)));
 
   return (
     <div className="space-y-4">
@@ -297,42 +374,39 @@ export function TrackerClient({
         </p>
       ) : null}
 
+      {remind && overdueGroups.length > 0 ? (
+        <ReminderDrafts
+          sender={sender}
+          suppliers={overdueGroups
+            .filter((g) => g.claims[0]?.supplierId)
+            .map((g) => ({ supplierId: g.claims[0]!.supplierId!, name: supplierOf(g.claims[0]!) }))}
+        />
+      ) : null}
+
       <Card padding="lg" id="claims">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-bold text-ink" id="claims-title">
             {t('tracker.claimsTitle')}
           </h2>
-          <div role="radiogroup" aria-label={t('tracker.claimsTitle')} className="flex gap-1 rounded-xl bg-surface-2 p-1 text-sm">
-            {(['todo', 'all', 'closed'] as const).map((f) => (
-              <button
-                key={f}
-                type="button"
-                role="radio"
-                aria-checked={tab === f}
-                tabIndex={tab === f ? 0 : -1}
-                onClick={() => setTab(f)}
-                onKeyDown={(e) => {
-                  const order = ['todo', 'all', 'closed'] as const;
-                  const i = order.indexOf(f);
-                  const go = e.key === 'ArrowLeft' || e.key === 'ArrowRight';
-                  if (!go) return;
-                  e.preventDefault();
-                  const rtl = document.documentElement.dir === 'rtl';
-                  const step = (e.key === 'ArrowRight') !== rtl ? 1 : -1;
-                  const next = order[(i + step + order.length) % order.length]!;
-                  setTab(next);
-                  (e.currentTarget.parentElement?.querySelector(`[data-tab="${next}"]`) as HTMLElement | null)?.focus();
-                }}
-                data-tab={f}
-                className={cn(
-                  'min-h-11 rounded-lg px-3 font-semibold md:min-h-8',
-                  tab === f ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink',
-                )}
-              >
-                {t(`tracker.tab.${f}`)} · {formatNumber(counts[f], locale)}
-              </button>
-            ))}
-          </div>
+          <ExportButtons />
+          <label className="flex items-center gap-2 text-sm text-muted">
+            {t('tracker.sortLabel')}
+            <select
+              className="min-h-11 rounded-lg border border-line bg-surface px-2 text-ink md:min-h-9"
+              value={sort}
+              onChange={(e) => {
+                setSort(e.target.value as Sort);
+                setShownRows(PAGE_ROWS);
+              }}
+              data-testid="recovery-sort"
+            >
+              {(['rank', 'amount', 'age'] as const).map((k) => (
+                <option key={k} value={k}>
+                  {t(`tracker.sort.${k}`)}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         {selectedIds.length > 0 ? (
@@ -363,7 +437,7 @@ export function TrackerClient({
 
         {shown.length === 0 ? (
           <p className="mt-4 rounded-xl border border-line bg-surface-2/50 px-4 py-6 text-center text-sm text-muted">
-            {t(`tracker.tabEmpty.${tab}`)}
+            {t(`tracker.viewEmpty.${view}`)}
           </p>
         ) : (
           <>
@@ -378,13 +452,13 @@ export function TrackerClient({
                     <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('tracker.colSupplier')}</th>
                     <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('tracker.colInvoice')}</th>
                     <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('tracker.colItem')}</th>
-                    <th scope="col" className="py-2 pe-3 text-right font-semibold">{t('tracker.colAmount')}</th>
-                    <th scope="col" className="py-2 pe-3 text-start font-semibold">{t('tracker.colStatus')}</th>
+                    <th scope="col" className="py-2 pe-3 text-right font-semibold" aria-sort={sort === 'amount' ? 'descending' : 'none'}>{t('tracker.colAmount')}</th>
+                    <th scope="col" className="py-2 pe-3 text-start font-semibold" aria-sort={sort === 'age' ? 'descending' : 'none'}>{t('tracker.colStatus')}</th>
                     <th scope="col" className="py-2 text-end font-semibold">{t('tracker.colActions')}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.map((c) => (
+                  {visible.map((c) => (
                     <tr key={c.id} className="border-b border-line/60 align-top" data-testid="claim-row" data-status={statusOf(c)}>
                       <td className="py-2 pe-2">
                         <input
@@ -406,15 +480,30 @@ export function TrackerClient({
                       </td>
                       <td className="py-2 pe-3 text-right">{amountCell(c)}</td>
                       <td className="py-2 pe-3">{statusChips(c)}</td>
-                      <td className="py-2">{rowActions(c)}</td>
+                      <td className="py-2">
+                        {rowActions(c)}
+                        {rowError(c.id)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              {ordered.length > visible.length ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="mt-2 min-h-11 md:min-h-9"
+                  onClick={() => setShownRows((n) => n + PAGE_ROWS)}
+                  data-testid="recovery-show-more"
+                  data-record=""
+                >
+                  {t('tracker.showMore', { shown: formatNumber(visible.length, locale), total: formatNumber(ordered.length, locale) })}
+                </Button>
+              ) : null}
             </div>
 
             {/* Phone: cards grouped by supplier, the outstanding ₪ at the line end. */}
-            <div className="mt-3 space-y-4 md:hidden" data-testid="recovery-claim-cards">
+            <div className="mt-3 space-y-4 md:hidden" data-testid="recovery-claim-cards" data-record="">
               {groups.map((g) => {
                 const first = g.claims[0]!;
                 return (
@@ -450,7 +539,10 @@ export function TrackerClient({
                             <span>· {discrepancyLabel(ta, c.discrepancyType)}</span>
                             {statusChips(c)}
                           </div>
-                          <div className="ps-8">{rowActions(c, true)}</div>
+                          <div className="ps-8">
+                            {rowActions(c, true)}
+                            {rowError(c.id)}
+                          </div>
                         </li>
                       ))}
                     </ul>
@@ -466,7 +558,7 @@ export function TrackerClient({
         <Card padding="lg">
           <h2 className="text-sm font-bold text-ink">{t('tracker.suggestionsTitle')}</h2>
           <p className="mt-1 text-xs text-muted">{t('tracker.suggestionsHint')}</p>
-          <ul className="mt-3 divide-y divide-line/60">
+          <ul className="mt-3 divide-y divide-line/60" data-record="">
             {suggestions.map((s) => {
               const group = creditable.find((g) => g.supplierId === s.supplierId);
               return (
@@ -502,7 +594,7 @@ export function TrackerClient({
         <Card padding="lg">
           <h2 className="text-sm font-bold text-ink">{t('tracker.creditNote')}</h2>
           <p className="mt-1 text-xs text-muted">{t('tracker.creditNoteHint')}</p>
-          <ul className="mt-2 divide-y divide-line/60">
+          <ul className="mt-2 divide-y divide-line/60" data-record="">
             {creditable.map((g) => (
               <li key={g.supplierId} className="py-2" id={`credit-${g.supplierId}`}>
                 <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
@@ -526,6 +618,7 @@ export function TrackerClient({
                   <CreditForm
                     key={`${g.supplierId}:${creditLine?.invoiceLineId ?? 'manual'}`}
                     supplier={g.name}
+                    supplierId={g.supplierId}
                     claims={g.claims}
                     line={creditLine && creditLine.supplierId === g.supplierId ? creditLine : null}
                     busy={credit.isPending}
@@ -541,8 +634,10 @@ export function TrackerClient({
                               claimIds: v.claimIds,
                               supplierId: g.supplierId,
                               number: v.number,
-                              amountAgorot: v.amountAgorot,
+                              printedAgorot: v.printedAgorot,
+                              vat: v.vat,
                               issuedOn: v.issuedOn,
+                              note: v.note,
                               idempotencyKey: v.idempotencyKey,
                             },
                       )
@@ -586,7 +681,10 @@ export function TrackerClient({
                       type="button"
                       role="radio"
                       aria-checked={reason === r}
-                      onClick={() => setReason(r)}
+                      onClick={() => {
+                        setReason(r);
+                        setReasonMissing(false);
+                      }}
                       className={cn(
                         'min-h-11 rounded-full border px-3 text-sm md:min-h-9',
                         reason === r ? 'border-primary bg-primary/10 font-semibold text-ink' : 'border-line text-muted hover:text-ink',
@@ -596,6 +694,11 @@ export function TrackerClient({
                     </button>
                   ))}
                 </div>
+                {reasonMissing ? (
+                  <p role="alert" className="mt-1.5 text-sm font-semibold text-danger" data-testid="confirm-reason-missing">
+                    {t('confirm.reasonRequired')}
+                  </p>
+                ) : null}
               </fieldset>
             </>
           ) : null
@@ -612,6 +715,24 @@ export function TrackerClient({
         onClose={() => setConfirm(null)}
       />
 
+      <ClaimPeek
+        claim={(() => {
+          const c = peekId ? byId.get(peekId) : undefined;
+          return c
+            ? {
+                id: c.id,
+                invoiceId: c.invoiceId,
+                invoiceNumber: c.invoiceNumber,
+                supplierLabel: supplierOf(c),
+                itemLabel: itemOf(c),
+                amountAgorot: c.amountAgorot,
+                outstandingAgorot: c.outstandingAgorot,
+              }
+            : null;
+        })()}
+        onClose={() => setPeekId(null)}
+      />
+
       <UndoBar
         pending={deferred.pending}
         onUndo={deferred.undo}
@@ -625,6 +746,7 @@ export function TrackerClient({
 
 function CreditForm({
   supplier,
+  supplierId,
   claims,
   line,
   busy,
@@ -632,6 +754,7 @@ function CreditForm({
   onCancel,
 }: {
   supplier: string;
+  supplierId: string;
   claims: Claim[];
   /** A suggested invoice credit line: amount / number / date come from the invoice. */
   line: Suggestion | null;
@@ -639,9 +762,11 @@ function CreditForm({
   onSubmit: (v: {
     claimIds: string[];
     number?: string;
-    amountAgorot?: number;
+    printedAgorot?: number;
+    vat?: 'incl' | 'excl';
     issuedOn?: string;
     invoiceLineId?: string;
+    note?: string;
     idempotencyKey: string;
   }) => void;
   onCancel: () => void;
@@ -652,24 +777,80 @@ function CreditForm({
   const ils = (agorot: number) => formatIls(agorot / 100, { locale, maximumFractionDigits: 2 });
   // One key per form instance: a double submit records the note once (server-side idempotency).
   const [idempotencyKey] = useState(() => crypto.randomUUID());
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(claims.map((c) => c.id)));
+  // chain-09: nothing is pre-selected and the amount starts empty — the paper is the source, not our number.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const chosen = claims.filter((c) => selected.has(c.id));
   const owed = chosen.reduce((sum, c) => sum + c.outstandingAgorot, 0);
   const [number, setNumber] = useState(line?.invoiceNumber ?? '');
-  const [amount, setAmount] = useState(((line?.amountAgorot ?? owed) / 100).toFixed(2));
+  const [amount, setAmount] = useState(line ? (line.amountAgorot / 100).toFixed(2) : '');
+  // As printed: incl. or excl. VAT — NO default; the server converts (agorot, half-up, the supplier's rate).
+  const [vat, setVat] = useState<'incl' | 'excl' | null>(line ? 'excl' : null);
+  // Owner 7.11: which document arrived — the supplier's credit invoice, or a credit note (kept on the note).
+  const [docKind, setDocKind] = useState<'invoice' | 'note' | null>(line ? 'invoice' : null);
   // Today on the Israeli calendar, not the UTC day (yesterday between local midnight and 02:00/03:00).
   const [date, setDate] = useState(line?.invoiceDate?.slice(0, 10) ?? localDay(new Date()));
   const [error, setError] = useState<string | null>(null);
-  const toggle = (id: string) =>
+  // TODO(G-13): parseDecimalInput(raw, 'ils') once it lands; "1,250" = ₪1,250.00 either way.
+  const typed = line ? line.amountAgorot : parseIlsInput(amount);
+  // Before-VAT preview of what the server will book (it converts again); compares like with like.
+  const rateBp = claims[0]?.vatRateBp ?? 1800;
+  const typedExcl = typed != null && vat ? previewExclAgorot(typed, vat, rateBp) : null;
+  const diff = typedExcl == null ? null : typedExcl - owed;
+  // W3-11 · "שיוך זיכוי": the server proposes which requests the note answers; the user confirms.
+  const utils = trpc.useUtils();
+  const [basis, setBasis] = useState<Out['suggestAllocation']['suggestion']['basis'] | null>(null);
+  const [remainder, setRemainder] = useState(0);
+  const [suggesting, setSuggesting] = useState(false);
+  async function suggest() {
+    // The claims are before VAT. The server converts the amount as printed with #197's rule
+    // (the supplier's rate, integer agorot, half-up): the same figure recordCreditNote books.
+    if (!line && (typed == null || typed <= 0)) {
+      setError(t('creditForm.invalidAmount'));
+      return;
+    }
+    if (!line && !vat) {
+      setError(t('creditForm.vatRequired'));
+      return;
+    }
+    setSuggesting(true);
+    setError(null);
+    try {
+      const r = await utils.recovery.suggestAllocation.fetch(
+        line ? { supplierId, amountAgorot: line.amountAgorot } : { supplierId, printedAgorot: typed!, vat: vat! },
+      );
+      const known = new Set(claims.map((c) => c.id));
+      const ids = r.suggestion.allocations.map((a) => a.id);
+      const shown = ids.filter((id) => known.has(id));
+      setSelected(new Set(shown));
+      if (shown.length !== ids.length) {
+        // A suggested request is not on this screen: never present a partial match as exact.
+        setBasis(null);
+        setError(t('allocation.failed'));
+      } else {
+        setBasis(r.suggestion.basis);
+        setRemainder(r.suggestion.remainderAgorot);
+      }
+    } catch {
+      setError(t('allocation.failed'));
+    } finally {
+      setSuggesting(false);
+    }
+  }
+  const toggle = (id: string) => {
+    // A hand-edited selection is no longer the suggestion.
+    setBasis(null);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+  };
+  const canSubmit = chosen.length > 0 && (line != null || (vat != null && typed != null && docKind != null));
   return (
     <form
       className="mt-3 grid gap-3 rounded-xl border border-line bg-surface-2/60 p-3 sm:grid-cols-3"
+      data-testid="credit-form"
       onSubmit={(e) => {
         e.preventDefault();
         if (chosen.length === 0) {
@@ -681,12 +862,27 @@ function CreditForm({
           onSubmit({ claimIds, invoiceLineId: line.invoiceLineId, idempotencyKey });
           return;
         }
-        const agorot = parseIlsInput(amount);
-        if (agorot == null) {
+        if (typed == null) {
           setError(t('creditForm.invalidAmount'));
           return;
         }
-        onSubmit({ claimIds, number: number.trim() || undefined, amountAgorot: agorot, issuedOn: date, idempotencyKey });
+        if (!vat) {
+          setError(t('creditForm.vatRequired'));
+          return;
+        }
+        if (!docKind) {
+          setError(t('creditForm.docRequired'));
+          return;
+        }
+        onSubmit({
+          claimIds,
+          number: number.trim() || undefined,
+          printedAgorot: typed,
+          vat,
+          issuedOn: date,
+          note: t(`creditForm.doc.${docKind}`),
+          idempotencyKey,
+        });
       }}
     >
       <p className="text-sm font-semibold text-ink sm:col-span-3">{t('creditForm.title', { supplier })}</p>
@@ -695,33 +891,107 @@ function CreditForm({
         <ul className="max-h-48 space-y-1 overflow-y-auto">
           {claims.map((c) => (
             <li key={c.id}>
-              <label className="flex items-center gap-2 text-sm text-ink">
+              <label className="flex min-h-11 items-center gap-2 text-sm text-ink md:min-h-9">
                 <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggle(c.id)} />
-                <bdi dir="ltr" className="whitespace-nowrap font-mono text-xs text-muted">{c.invoiceNumber ?? '—'}</bdi>
+                <bdi className="whitespace-nowrap text-xs text-muted">{c.invoiceNumber ?? '—'}</bdi>
                 <span className="min-w-0 flex-1 truncate">
                   {displayName(locale, c.productName, c.productNameEn) || discrepancyLabel(ta, c.discrepancyType)}
                 </span>
-                <span className="tabular-nums">{ils(c.outstandingAgorot)}</span>
+                <span className="text-right tabular-nums">{ils(c.outstandingAgorot)}</span>
               </label>
             </li>
           ))}
         </ul>
       </fieldset>
+      {line ? null : (
+        <fieldset className="sm:col-span-3">
+          <legend className="mb-1.5 text-sm font-medium text-muted">{t('creditForm.docLegend')}</legend>
+          <div role="radiogroup" aria-label={t('creditForm.docLegend')} className="flex flex-wrap gap-2" data-testid="credit-doc">
+            {(['invoice', 'note'] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                role="radio"
+                aria-checked={docKind === k}
+                onClick={() => {
+                  setDocKind(k);
+                  setError(null);
+                }}
+                className={cn(
+                  'min-h-11 rounded-full border px-3 text-sm md:min-h-9',
+                  docKind === k ? 'border-primary bg-primary/10 font-semibold text-ink' : 'border-line text-muted hover:text-ink',
+                )}
+              >
+                {t(`creditForm.doc.${k}`)}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      )}
       <Field label={t('creditForm.number')}>
         <Input value={number} onChange={(e) => setNumber(e.target.value)} maxLength={64} readOnly={!!line} />
       </Field>
-      <Field label={t('creditForm.amount')} hint={error ?? undefined}>
-        <Input inputMode="decimal" dir="ltr" value={amount} onChange={(e) => setAmount(e.target.value)} readOnly={!!line} />
+      <Field label={t('creditForm.amountAsPrinted')} hint={error ?? undefined}>
+        <Input
+          inputMode="decimal"
+          dir="ltr"
+          value={amount}
+          onChange={(e) => {
+            setAmount(e.target.value);
+            setError(null);
+            setBasis(null);
+          }}
+          readOnly={!!line}
+          data-testid="credit-amount"
+        />
       </Field>
       <Field label={t('creditForm.date')}>
         <Input type="date" dir="ltr" value={date} onChange={(e) => setDate(e.target.value)} required readOnly={!!line} />
       </Field>
-      <p className="text-xs text-muted sm:col-span-3">
-        {t('creditForm.claims', { count: chosen.length, amount: ils(owed) })} {t('creditForm.vatNote')}
+      {line ? null : (
+        <fieldset className="sm:col-span-3">
+          <legend className="mb-1.5 text-sm font-medium text-muted">{t('creditForm.vatLegend')}</legend>
+          <div role="radiogroup" aria-label={t('creditForm.vatLegend')} className="flex flex-wrap gap-2" data-testid="credit-vat">
+            {(['incl', 'excl'] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                role="radio"
+                aria-checked={vat === v}
+                onClick={() => {
+                  setVat(v);
+                  setError(null);
+                  setBasis(null);
+                }}
+                className={cn(
+                  'min-h-11 rounded-full border px-3 text-sm md:min-h-9',
+                  vat === v ? 'border-primary bg-primary/10 font-semibold text-ink' : 'border-line text-muted hover:text-ink',
+                )}
+              >
+                {t(`creditForm.vat.${v}`)}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      )}
+      <p className="text-sm text-ink sm:col-span-3" aria-live="polite" data-testid="credit-remainder">
+        {t('creditForm.running', { chosen: ils(owed), typed: typedExcl == null ? '—' : ils(typedExcl) })}
+        {diff == null ? null : diff === 0 ? (
+          <span className="ms-2 font-semibold text-gold">✓</span>
+        ) : (
+          <span className="ms-2 font-semibold text-warn">{t('creditForm.diff', { amount: ils(Math.abs(diff)) })}</span>
+        )}
       </p>
-      <div className="flex gap-2 sm:col-span-3">
-        <Button type="submit" size="sm" variant="gold" loading={busy}>
-          {t('creditForm.submit')}
+      <p className="text-xs text-muted sm:col-span-3" data-testid="allocation-basis" aria-live="polite">
+        {basis ? t(`allocation.basis.${basis}`) : t('allocation.hint')}
+        {basis && remainder > 0 ? ` · ${t('allocation.remainder', { amount: ils(remainder) })}` : ''}
+      </p>
+      <div className="flex flex-wrap gap-2 sm:col-span-3">
+        <Button type="button" size="sm" variant="secondary" loading={suggesting} onClick={() => void suggest()}>
+          {t('allocation.suggest')}
+        </Button>
+        <Button type="submit" size="sm" variant="gold" loading={busy} disabled={!canSubmit}>
+          {basis ? t('allocation.confirm') : t('creditForm.submit')}
         </Button>
         <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
           {t('creditForm.cancel')}

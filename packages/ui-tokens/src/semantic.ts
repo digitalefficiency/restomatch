@@ -6,6 +6,9 @@
 // Tailwind preset; `__tests__/contrast.test.ts` fails any text/background pair
 // below 4.6:1 (AA 4.5 + a 0.1 safety margin, a11y-21).
 
+import { activeDirection } from './directions';
+import { ramp } from './primitives';
+
 /** Canvas, cards and borders. Values unchanged from v1 — now named by role. */
 export const surfaces = {
   canvas: '#F6F8F7', // page background (Tailwind `bg`)
@@ -97,4 +100,74 @@ export const dataViz = {
   target: text.muted, // 1 px dashed
   leak: status.danger.text,
   series: text.ink, // at 70 %
+} as const;
+
+// ── DS2 semantic roles (docs/ux/ds2/DS2-SPEC.md §2.2, §5.3) ─────────────────
+// Added beside the v1 roles above, which stay as they are until phase 5. Each
+// v2 role points at today's value, so adopting a v2 name never moves a pixel.
+// Tailwind keys never collide with v1 meanings: `text-primary` is the green
+// family, so the v2 text roles are `fg`, `fg-secondary` and `fg-tertiary`.
+
+
+export const textV2 = {
+  primary: text.ink,
+  secondary: text.muted,
+  tertiary: text.subtle,
+  /** C6: field mode's darker secondary (≥8.2:1); tertiary is not allowed there. */
+  secondaryField: activeDirection.neutrals.textSecondaryField,
+  link: focus,
+} as const;
+
+export const surfaceV2 = {
+  canvas: surfaces.canvas,
+  default: surfaces.surface,
+  sunken: surfaces.sunken,
+  raised: surfaces.surface,
+  overlay: surfaces.surface,
+  /** C3 / D9: selection is a UI state, so it is blue (today's info-subtle). */
+  selected: status.info.bgSubtle,
+} as const;
+
+export const border = {
+  subtle: surfaces.line,
+  /** Ruled tables (direction A): horizontal hairlines, no zebra. Decorative. */
+  rule: activeDirection.neutrals.borderRule,
+  control: surfaces.lineStrong,
+  field: surfaces.lineField,
+  focus,
+} as const;
+
+/**
+ * C2: buttons read `action`, never a status family. Values mirror today's
+ * Button variants (primary / secondary / ghost / danger). `danger` is for
+ * destructive verbs only; a navigation CTA is never red (D9).
+ */
+export const action = {
+  primary: { bg: status.primary.bgBold, bgHover: status.primary.bgBoldHover, fg: text.onBold },
+  secondary: { border: surfaces.lineStrong, bg: surfaces.surface, bgHover: surfaces.sunken, fg: text.ink },
+  quiet: { fg: text.muted, fgHover: text.ink, bgHover: surfaces.sunken },
+  danger: { bg: status.danger.bgBold, bgHover: status.danger.bgBoldHover, fg: text.onBold },
+} as const;
+
+/** The only routes to a danger/warn rail (T1 hero, T2 rows). */
+export const emphasis = {
+  t1Rail: status.danger.text,
+  t2Rail: status.warn.text,
+} as const;
+
+/** C4: figures are never red; danger reaches money only as a marker. */
+export const moneyMarker = status.danger.text;
+
+/**
+ * DS2 §2.2.3. No green, red or orange in the categorical set: those keep their
+ * money meanings. Each hue is ≥4.6:1 on white so it also works as a label.
+ * `dataViz.categorical` (v1) stays as `viz-1…6` until the charts move (W2-09).
+ */
+export const dataVizV2 = {
+  categorical: [ramp.blue[700], ramp.teal[700], ramp.violet[700], ramp.gold[700], ramp.neutral[650], ramp.plum[700]] as string[],
+  up: ramp.orange[600], // a price rise (creep-4)
+  down: status.primary.text, // a price drop is T3 good news
+  prev: surfaces.lineStrong, // the previous period, thin bar or 1.5 px line
+  leak: status.danger.text, // the only danger in a chart
+  grid: surfaces.line,
 } as const;

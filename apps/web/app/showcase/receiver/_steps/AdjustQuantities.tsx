@@ -55,6 +55,8 @@ interface Props {
   footerMessage?: React.ReactNode;
   /** Extra rows under the screen (the wizard's banners stay above). */
   children?: React.ReactNode;
+  /** View only (IA-03 route access 'read'): every line and its count stay visible; no ✓ / edit, no bulk, no close. */
+  readOnly?: boolean;
 }
 
 /** Lines whose invoice differs in a way the receiver must look at (shown open). */
@@ -82,6 +84,7 @@ export function AdjustQuantities({
   closing = false,
   footerMessage,
   children,
+  readOnly = false,
 }: Props) {
   const t = useT(receiving);
   const td = useT(receivingDelivery);
@@ -200,6 +203,7 @@ export function AdjustQuantities({
               open={open.has(key)}
               onToggle={(v) => toggle(key, v)}
               onUpdate={(patch) => onUpdateMark(key, patch)}
+              readOnly={readOnly}
               saveState={saveStates?.[key]}
               onRetrySave={onRetrySave}
               tolerance={tolerance}
@@ -219,6 +223,7 @@ export function AdjustQuantities({
 
       {children}
 
+      {readOnly ? null : (
       <ActionBar testId="count-actions">
         {spot ? (
           <SpotCheck
@@ -285,6 +290,7 @@ export function AdjustQuantities({
         </>
         )}
       </ActionBar>
+      )}
     </div>
   );
 }
@@ -300,10 +306,11 @@ interface LineProps {
   tolerance?: QtyTolerance;
   td: TD;
   locale: 'he' | 'en';
+  readOnly?: boolean;
 }
 
 /** One order line: a row (✓ / edit) that opens into the editor in place. */
-function CountLine({ line, mark, open, onToggle, onUpdate, saveState, onRetrySave, tolerance, td, locale }: LineProps) {
+function CountLine({ line, mark, open, onToggle, onUpdate, saveState, onRetrySave, tolerance, td, locale, readOnly = false }: LineProps) {
   const unit = useUnitLabel();
   const lineUnit = line.poUnit ?? line.invoiceUnit;
   const name = locale === 'en' && line.productNameEn ? line.productNameEn : line.productName;
@@ -348,7 +355,7 @@ function CountLine({ line, mark, open, onToggle, onUpdate, saveState, onRetrySav
         ) : null}
       </div>
 
-      {!open ? (
+      {readOnly ? null : !open ? (
         <div className="mt-3 flex gap-2">
           {onOrder ? (
             <button

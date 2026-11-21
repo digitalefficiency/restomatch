@@ -144,8 +144,13 @@ describe('supplier view + answer', () => {
     const t1 = (await createSupplierLink(db, A.restaurantId, A.poId))!.token;
     const t2 = (await createSupplierLink(db, A.restaurantId, A.poId))!.token;
     const l1 = await resolveOk(t1);
-    expect((await submitSupplierAnswer(db, l1, { lines: [] })).ok).toBe(true);
-    expect(await submitSupplierAnswer(db, l1, { lines: [] })).toEqual({ ok: false, error: 'ALREADY_ANSWERED' });
+    // G-10: `lines: []` is no longer "as ordered" — it is refused and writes nothing.
+    expect(await submitSupplierAnswer(db, l1, { intent: 'as_ordered', lines: [] })).toEqual({ ok: false, error: 'INCOMPLETE_ANSWER' });
+    expect(await submitSupplierAnswer(db, l1, { lines: [] })).toEqual({ ok: false, error: 'INCOMPLETE_ANSWER' });
+    expect(await db.select().from(supplierResponses)).toEqual([]);
+    const asOrdered = { intent: 'as_ordered' as const, lines: [{ poLineId: A.poLineId, qtyAvailable: 10 }] };
+    expect(await submitSupplierAnswer(db, l1, asOrdered)).toEqual({ ok: true, status: 'confirmed' });
+    expect(await submitSupplierAnswer(db, l1, asOrdered)).toEqual({ ok: false, error: 'ALREADY_ANSWERED' });
     expect(await submitSupplierAnswer(db, await resolveOk(t2), { lines: [{ poLineId: A.poLineId, qtyAvailable: 1 }] })).toEqual({
       ok: false,
       error: 'ALREADY_ANSWERED',
@@ -162,6 +167,26 @@ describe('supplier view + answer', () => {
     // a forged link object pointing at B's order under A's restaurant finds nothing
     expect(await submitSupplierAnswer(db, { ...link, poId: B.poId }, { lines: [] })).toEqual({ ok: false, error: 'NOT_FOUND' });
     expect(await loadSupplierOrder(db, { ...link, poId: B.poId })).toBeNull();
+    expect(await db.select().from(supplierResponses)).toEqual([]);
+  });
+
+  it("cross-tenant: B's link cannot answer A's lines, even as a complete answer", async () => {
+    const linkB = await resolveOk((await createSupplierLink(db, B.restaurantId, B.poId))!.token);
+    for (const intent of ['as_ordered', 'with_changes'] as const) {
+      expect(await submitSupplierAnswer(db, linkB, { intent, lines: [{ poLineId: A.poLineId, qtyAvailable: 4 }] })).toEqual({
+        ok: false,
+        error: 'BAD_LINE',
+      });
+      expect(
+        await submitSupplierAnswer(db, linkB, {
+          intent,
+          lines: [
+            { poLineId: B.poLineId, qtyAvailable: 4 },
+            { poLineId: A.poLineId, qtyAvailable: 4 },
+          ],
+        }),
+      ).toEqual({ ok: false, error: 'BAD_LINE' });
+    }
     expect(await db.select().from(supplierResponses)).toEqual([]);
   });
 

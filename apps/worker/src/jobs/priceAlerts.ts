@@ -2,9 +2,12 @@
  * price-alerts — daily sweep for SUSTAINED price increases in price_history
  * (wave-1 `priceAlerts`, e.g. "tomatoes +18% over 3 weeks"). For every
  * restaurant with the feature on, runPriceAlertSweep persists new
- * `price_alerts` rows (the in-app list) and enqueues one email per
- * owner/manager through the notification outbox (deduped per alert); real
- * delivery happens in outbox-dispatch. Restaurants with the flag off are a no-op.
+ * `price_alerts` rows (the in-app list) and queues the AU-13 morning digest:
+ * ONE "מחירים שעלו" mail per owner/manager per Israel day (price creep ranked by
+ * ≈₪/month, contracts ending within 14 days, new price lists, dishes over their
+ * target) and a dish-only mail for the chef, deduped `au:A18:<rid>:<user>:<day>`.
+ * Real delivery happens in outbox-dispatch. Restaurants with the flag off are a
+ * no-op, and one tenant's failure never stops the others.
  */
 import { runPriceAlertSweep } from '@restomatch/api';
 import { eq, restaurants } from '@restomatch/db';

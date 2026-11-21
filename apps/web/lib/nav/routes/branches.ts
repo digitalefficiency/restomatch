@@ -11,6 +11,7 @@ export const routes: RouteDef[] = [
     groupWhenSingle: 'admin',
     roles: ['owner'],
     nav: 'item',
+    badge: null,
     aliases: ['סניף', 'סניפים', 'branches'],
   },
 ];

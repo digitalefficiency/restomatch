@@ -3,7 +3,7 @@ import { agorotToPlain, CRLF, ddmmyyyy, safeCell, supplierAccount } from './comm
 
 export { safeCell };
 import { encodeUtf8Bom } from './encoding';
-import type { AccountingConfig, AccountingFile, AccountingInvoice } from './types';
+import type { AccountingConfig, AccountingInvoice, RenderedFile } from './types';
 
 /**
  * Rivhit (ריווחית) expense-document import from a spreadsheet. Rivhit's import
@@ -44,7 +44,7 @@ export function rivhitFile(
   invoices: AccountingInvoice[],
   cfg: AccountingConfig,
   period: { from: string; to: string },
-): AccountingFile {
+): RenderedFile {
   return {
     filename: `restomatch-rivhit-${period.from}-to-${period.to}.csv`,
     mimeType: 'text/csv; charset=utf-8',
