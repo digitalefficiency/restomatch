@@ -32,12 +32,11 @@ export async function enqueueNotification(
       target: payload.target,
       subject: payload.subject ?? null,
       body: payload.body,
-      // Fold an optional HTML body into the jsonb payload (under `__html`) so we
-      // can deliver rich email without a schema change. Plain `body` stays the
-      // text fallback.
-      payload: payload.html
-        ? { ...(payload.payload ?? {}), __html: payload.html }
-        : (payload.payload ?? null),
+      // Fold an optional HTML body (under `__html`) and attachments (under
+      // `__attachments`, the key the dispatcher reads) into the jsonb payload
+      // so rich email needs no schema change. Plain `body` stays the text
+      // fallback. H-05: attachments used to be dropped here silently.
+      payload: storedPayload(payload),
       status: 'queued',
       relatedEntityType: payload.relatedEntityType ?? null,
       relatedEntityId: payload.relatedEntityId ?? null,
@@ -64,8 +63,20 @@ export async function enqueueNotification(
   return { id: row.id, deduped: false };
 }
 
+/** The jsonb payload as stored: the producer's keys plus `__html` / `__attachments`. */
+export function storedPayload(payload: NotificationPayload): Record<string, unknown> | null {
+  const extra: Record<string, unknown> = {};
+  if (payload.html) extra.__html = payload.html;
+  if (payload.attachments?.length) extra.__attachments = payload.attachments;
+  if (Object.keys(extra).length === 0) return payload.payload ?? null;
+  return { ...(payload.payload ?? {}), ...extra };
+}
+
 /**
- * Mark an outbox row as sent.
+ * Mark an outbox row as sent. `externalId` is MERGED into the stored payload:
+ * it used to replace it, wiping `__html`, `userId`, `event` and `digest`
+ * (G-06's keys), so a sent row could no longer be counted against the
+ * per-person daily cap or reconciled to its report.
  */
 export async function markSent(db: Database, outboxId: string, externalId?: string): Promise<void> {
   await db
@@ -73,9 +84,37 @@ export async function markSent(db: Database, outboxId: string, externalId?: stri
     .set({
       status: 'sent',
       sentAt: new Date(),
-      payload: externalId ? { externalId } : null,
+      ...(externalId
+        ? {
+            payload: sql`coalesce(${notificationsOutbox.payload}, '{}'::jsonb) || jsonb_build_object('externalId', ${externalId}::text)`,
+          }
+        : {}),
     })
     .where(eq(notificationsOutbox.id, outboxId));
+}
+
+/**
+ * Park a row that no provider can deliver yet (Phase-6 credentials missing):
+ * `failed` + `skipped_no_provider` (or another skip reason), never `sent`.
+ * Only from `queued`/`sending`, so it can never downgrade a sent row.
+ */
+/**
+ * Same value as delivery.ts `SKIPPED_NO_PROVIDER`. Not imported from there:
+ * delivery → factory → resend → email → outbox would be an import cycle
+ * ("Class extends value undefined" when email.ts loads first). The equality is
+ * pinned in outbox-honest.db.test.ts.
+ */
+const SKIPPED_NO_PROVIDER = 'skipped_no_provider';
+
+export async function markSkippedNoProvider(
+  db: Database,
+  outboxId: string,
+  reason: string = SKIPPED_NO_PROVIDER,
+): Promise<void> {
+  await db
+    .update(notificationsOutbox)
+    .set({ status: 'failed', lastError: reason, claimedAt: null })
+    .where(sql`${notificationsOutbox.id} = ${outboxId} and ${notificationsOutbox.status} in ('queued', 'sending')`);
 }
 
 /**
