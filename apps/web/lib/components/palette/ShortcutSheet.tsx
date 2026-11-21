@@ -61,7 +61,7 @@ export function ShortcutSheet({
         onClose();
       }}
       onClick={(e) => e.target === ref.current && onClose()}
-      className="fixed inset-x-0 top-[12vh] z-sheet m-0 mx-auto w-[min(520px,calc(100vw-2rem))] rounded-overlay border border-line bg-surface p-5 text-ink shadow-e3 backdrop:bg-ink/30"
+      className="fixed inset-x-0 top-[12vh] z-sheet m-0 mx-auto w-[min(520px,calc(100vw-2rem))] rounded-overlay border border-line bg-surface p-5 text-ink shadow-e3 backdrop:bg-ink/40"
     >
       {open ? (
         <>
@@ -122,7 +122,7 @@ export function ShortcutSheet({
                         {h.keys.map((k) => (
                           <kbd
                             key={k}
-                            className="min-w-6 rounded border border-line bg-surface-2 px-1.5 text-center text-xs"
+                            className="min-w-6 rounded border border-line bg-surface-2 px-1.5 text-center text-xs font-medium leading-4"
                           >
                             {keyLabel(k, apple)}
                           </kbd>

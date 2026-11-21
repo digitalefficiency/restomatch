@@ -288,7 +288,7 @@ export function CommandPalette(props: CommandPaletteProps) {
         onClose();
       }}
       onClick={(e) => e.target === dialogRef.current && onClose()}
-      className="fixed inset-x-0 top-[14vh] z-sheet m-0 mx-auto w-[min(640px,calc(100vw-32px))] flex-col overflow-hidden rounded-card border border-line bg-surface p-0 text-ink shadow-e3 backdrop:bg-ink/30 open:flex"
+      className="fixed inset-x-0 top-[14vh] z-sheet m-0 mx-auto w-[min(640px,calc(100vw-32px))] flex-col overflow-hidden rounded-card border border-line bg-surface p-0 text-ink shadow-e3 backdrop:bg-ink/40 open:flex"
     >
       {open ? (
         <>

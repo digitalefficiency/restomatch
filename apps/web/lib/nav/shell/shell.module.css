@@ -928,6 +928,14 @@ button.headBtn:hover {
    −2), so the scroll region never clips it and it never touches a solid pill: the aside carries DS3-00's
    data-focus="inset", which every focusable in the menu inherits. */
 
+/* Pressed (§6: ink 7 %), after every hover rule so it shows on rows, tiles, group headers and the menu's icon
+   buttons alike (a later :hover of equal weight used to mask it). The here tile keeps its white card. */
+.item:active,
+.tile:active:not([aria-current]),
+.ib:active {
+  background: rgb(var(--c-ink) / 0.07);
+}
+
 /* The page's h1 (§9): kept clear of the sticky top bar when focus or a jump lands on it, and the focus the route
    change puts on it draws no ring: it is not a control (tabindex −1). The global ring reads --focus-width. */
 .col :global(h1) {
