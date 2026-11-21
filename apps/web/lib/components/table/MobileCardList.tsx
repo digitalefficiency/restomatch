@@ -115,7 +115,7 @@ export function MobileCardList<Row>({
               {money ? <span className="shrink-0 text-base font-semibold tabular-nums text-ink">{text(money, row)}</span> : null}
             </div>
             {rest.length > 0 ? (
-              <p className="mt-1 flex flex-wrap gap-x-2 text-sm text-muted">
+              <p className="mt-1 flex flex-wrap gap-x-2 text-sm tabular-nums text-muted">
                 {rest.map((c, i) => (
                   <span key={c.id}>
                     {i > 0 ? <span aria-hidden>· </span> : null}

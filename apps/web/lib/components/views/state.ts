@@ -61,6 +61,12 @@ export interface ViewState {
   group: Group;
   chart: ChartType;
   density: Density;
+  /**
+   * The density this page uses when the address names none: the device's display preference
+   * (WORKPLAN "Personal preferences: one contract"), when the page passed it to `parseView`.
+   * The address omits `d` only when the choice equals it, so an explicit `d` still wins.
+   */
+  densityDefault?: Density;
   tv: boolean;
   filters: ViewFilters;
 }
@@ -125,7 +131,8 @@ const validDate = (v: string | undefined): string | undefined => {
 const MAX_RANGE_MS = 3 * 366 * 86_400_000;
 
 /** Parse (and sanitize) a view from searchParams. */
-export function parseView(sp: ParamSource): ViewState {
+export function parseView(sp: ParamSource, defaults?: { density?: Density }): ViewState {
+  const densityDefault = defaults?.density && (DENSITIES as readonly string[]).includes(defaults.density) ? defaults.density : undefined;
   let period = oneOf(PERIODS, get(sp, 'p'), DEFAULT_VIEW.period);
   let from = validDate(get(sp, 'from'));
   let to = validDate(get(sp, 'to'));
@@ -147,7 +154,8 @@ export function parseView(sp: ParamSource): ViewState {
     compare: oneOf(COMPARES, get(sp, 'cmp'), DEFAULT_VIEW.compare),
     group: oneOf(GROUPS, get(sp, 'g'), DEFAULT_VIEW.group),
     chart: oneOf(CHARTS, get(sp, 'chart'), DEFAULT_VIEW.chart),
-    density: oneOf(DENSITIES, get(sp, 'd'), DEFAULT_VIEW.density),
+    density: oneOf(DENSITIES, get(sp, 'd'), densityDefault ?? DEFAULT_VIEW.density),
+    ...(densityDefault ? { densityDefault } : {}),
     tv: get(sp, 'tv') === '1',
     filters: {
       supplierIds: list(get(sp, 'sup'), isUuid),
@@ -157,6 +165,14 @@ export function parseView(sp: ParamSource): ViewState {
       statuses: list(get(sp, 'st'), isIn(STATUSES)),
     },
   };
+}
+
+/**
+ * "איפוס תצוגה": the page's own defaults. The density is the one the page parsed with (the preference, via
+ * `parseView(sp, defaults)`), so a reset never flips the switch to the global default or loses a later choice.
+ */
+export function resetView(v: ViewState): ViewState {
+  return v.densityDefault ? { ...DEFAULT_VIEW, density: v.densityDefault, densityDefault: v.densityDefault } : { ...DEFAULT_VIEW };
 }
 
 /** Serialize a view; defaults are omitted so the plain URL stays the default view. */
@@ -176,7 +192,7 @@ export function serializeView(v: ViewState, keep?: URLSearchParams): URLSearchPa
   if (v.compare !== DEFAULT_VIEW.compare) out.set('cmp', v.compare);
   if (v.group !== DEFAULT_VIEW.group) out.set('g', v.group);
   if (v.chart !== DEFAULT_VIEW.chart) out.set('chart', v.chart);
-  if (v.density !== DEFAULT_VIEW.density) out.set('d', v.density);
+  if (v.density !== (v.densityDefault ?? DEFAULT_VIEW.density)) out.set('d', v.density);
   if (v.tv) out.set('tv', '1');
   const f = v.filters;
   if (f.supplierIds.length) out.set('sup', f.supplierIds.join(','));

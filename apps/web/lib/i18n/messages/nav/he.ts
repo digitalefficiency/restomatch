@@ -14,6 +14,7 @@ export const he = {
     labTokens: 'מעבדת עיצוב',
     labDesk: 'מעבדת טבלאות',
     labDeskRow: 'שורה',
+    labKit: 'מעבדת רכיבים',
     approvals: 'אישורים',
     approvalInvoice: 'החלטה על חשבונית',
     payRun: 'ריצת תשלומים',

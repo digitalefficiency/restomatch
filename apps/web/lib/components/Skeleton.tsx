@@ -5,6 +5,15 @@ export type SkeletonVariant = 'block' | 'text' | 'metric' | 'hero' | 'kpiRow' | 
 const bar = 'rm-shimmer rounded-control bg-surface-2';
 
 /**
+ * DS3 (SPEC §9 "loading that does not flicker"): the skeleton fades in only after the wait
+ * `--dur-skeleton-wait` (DS3-00's wait: SPEC §9's one second),
+ * so a fast answer never flashes one. Pure CSS (`@starting-style` + a delayed opacity
+ * transition), so it stays server-safe in `loading.tsx`; a browser without `@starting-style`
+ * shows it at once, as today, and reduced motion shows it at once too.
+ */
+const DELAYED = 'transition-opacity duration-short ease-enter [transition-delay:var(--dur-skeleton-wait,0ms)] [@starting-style]:opacity-0';
+
+/**
  * Loading placeholder. `className` alone keeps the v1 behaviour (one box you
  * size yourself). Variants draw the same boxes as the final layout so nothing
  * jumps (perf-states-18). The shimmer is motion-safe: reduced motion gets a
@@ -14,12 +23,16 @@ export function Skeleton({
   className,
   variant = 'block',
   rows = 5,
+  delayed = false,
 }: {
   className?: string;
   variant?: SkeletonVariant;
   /** Rows for `table` / `form`. */
   rows?: number;
+  /** DS3: appear only when the wait passes one second (opt-in; see DELAYED). */
+  delayed?: boolean;
 }) {
+  if (delayed) return <Skeleton className={cn(DELAYED, className)} variant={variant} rows={rows} />;
   switch (variant) {
     case 'block':
       return <div aria-hidden="true" className={cn(bar, 'rounded-xl', className)} />;
@@ -40,7 +53,7 @@ export function Skeleton({
       return (
         <div aria-hidden="true" className={cn('grid grid-cols-2 gap-3 lg:grid-cols-4', className)}>
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="min-w-0 space-y-2 rounded-card border border-line bg-surface p-4">
+            <div key={i} className="min-w-0 space-y-2 rounded-card border border-line-rule bg-surface p-4">
               <div className={cn(bar, 'h-3 w-1/2')} />
               <div className={cn(bar, 'h-8 w-3/4')} />
             </div>
@@ -56,7 +69,7 @@ export function Skeleton({
       );
     case 'card':
       return (
-        <div aria-hidden="true" className={cn('space-y-3 rounded-card border border-line bg-surface p-5', className)}>
+        <div aria-hidden="true" className={cn('space-y-3 rounded-card border border-line-rule bg-surface p-5', className)}>
           <div className={cn(bar, 'h-4 w-1/3')} />
           <div className={cn(bar, 'h-4 w-2/3')} />
           <div className={cn(bar, 'h-4 w-1/2')} />
@@ -64,7 +77,7 @@ export function Skeleton({
       );
     case 'table':
       return (
-        <div aria-hidden="true" className={cn('overflow-hidden rounded-card border border-line bg-surface', className)}>
+        <div aria-hidden="true" className={cn('overflow-hidden rounded-card border border-line-rule bg-surface', className)}>
           <div className="flex h-10 items-center gap-3 border-b border-line px-4">
             <div className={cn(bar, 'h-3 w-24')} />
             <div className={cn(bar, 'ms-auto h-3 w-16')} />

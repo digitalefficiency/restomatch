@@ -209,9 +209,9 @@ const render = (el: ReactElement, locale: AppLocale = 'he') => renderToStaticMar
 
 describe('ScanButton / MicButton render', () => {
   const noop = () => undefined;
-  it('ScanButton: 56 px full-width thumb target, Hebrew label, panel closed, no ₪', () => {
+  it('ScanButton: 60 px full-width thumb target (SPEC §5 phone primary), Hebrew label, panel closed, no ₪', () => {
     const html = render(createElement(ScanButton, { onCode: noop }));
-    expect(html).toContain('min-h-14');
+    expect(html).toContain('min-h-[3.75rem]');
     expect(html).toContain('w-full');
     expect(html).toContain(he.field.scan.button);
     expect(html).toContain('aria-expanded="false"');
@@ -228,9 +228,9 @@ describe('ScanButton / MicButton render', () => {
     expect(html).not.toContain('₪');
     expect(html).not.toContain('dir="ltr"');
   });
-  it('MicButton: 56 px, English label in en', () => {
+  it('MicButton: 60 px (SPEC §5 phone primary), English label in en', () => {
     const html = render(createElement(MicButton, { onTranscript: noop }), 'en');
-    expect(html).toContain('min-h-14');
+    expect(html).toContain('min-h-[3.75rem]');
     expect(html).toContain(en.field.mic.button);
   });
   it('MicButton: the confirm panel shows the transcript, editable, before any write', () => {

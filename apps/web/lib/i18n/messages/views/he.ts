@@ -14,9 +14,9 @@ export const he = {
     density: 'צפיפות',
     from: 'מתאריך',
     to: 'עד תאריך',
-    apply: 'החל',
+    apply: 'החלה',
     filters: 'סינון',
-    clearFilters: 'נקה סינון',
+    clearFilters: 'ניקוי הסינון',
     reset: 'איפוס תצוגה',
     tv: 'מצב מסך מלא',
     export: 'ייצוא CSV',
@@ -55,7 +55,7 @@ export const he = {
     table: 'טבלה',
   },
   densities: {
-    comfortable: 'מרווח',
+    comfortable: 'רגיל',
     compact: 'צפוף',
   },
   filterNames: {

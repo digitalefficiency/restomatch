@@ -57,7 +57,7 @@ export const en: Shape<typeof he> = {
     table: 'Table',
   },
   densities: {
-    comfortable: 'Comfortable',
+    comfortable: 'Regular',
     compact: 'Compact',
   },
   filterNames: {

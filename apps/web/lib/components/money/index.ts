@@ -1,5 +1,5 @@
 export { Money } from './Money';
-export type { MoneyProps } from './Money';
+export type { MoneyDisplayContext, MoneyProps } from './Money';
 export { Token } from './Token';
 export type { TokenKind } from './Token';
 export { Delta } from './Delta';
@@ -9,3 +9,5 @@ export type { DateTimeVariant } from './DateTime';
 export { MetricTile } from './MetricTile';
 export { DeadlineChip } from './DeadlineChip';
 export { MONEY_DECIMALS, NUM_ALIGN, type MoneyContext } from './format';
+export { MatchStrip } from './MatchStrip';
+export type { MatchStripProps, MatchGap, MatchCell } from './MatchStrip';

@@ -11,4 +11,5 @@ export const routes: RouteDef[] = [
   { key: 'labTokens', path: '/dashboard/lab/tokens', group: 'top', nav: 'hidden' },
   { key: 'labDesk', path: '/dashboard/lab/desk', group: 'top', nav: 'hidden' },
   { key: 'labDeskRow', path: '/dashboard/lab/desk/[rowId]', group: 'top', parent: 'labDesk', nav: 'detail' },
+  { key: 'labKit', path: '/dashboard/lab/kit', group: 'top', nav: 'hidden' },
 ];

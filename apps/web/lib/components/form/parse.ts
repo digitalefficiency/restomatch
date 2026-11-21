@@ -81,6 +81,39 @@ export function formatKeypadText(value: number): string {
   return String(value).replace('.', ',');
 }
 
+/**
+ * DS3 number pad (SPEC §10.3, the reference's quantity sheet): one typing rule for every quantity —
+ * Latin digits and a decimal POINT, at most four digits before it and three after it; an item
+ * counted in whole units takes no point; the first key after the sheet opens on a value replaces
+ * it (and ⌫ clears it). `key` is one of the pad's own keys, never text read back from the page.
+ */
+export type KeypadKey = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '.' | 'del';
+
+export function typeKeypadKey(text: string, first: boolean, key: KeypadKey, whole = false): string {
+  if (key === '.' && whole) return text; // whole units take no point: nothing changes, not even a selected value
+  if (key === 'del') return first ? '' : text.slice(0, -1);
+  const t = first ? '' : text;
+  const dot = t.indexOf('.');
+  if (key === '.') return whole || dot >= 0 ? t : `${t || '0'}.`;
+  if (t === '0') return key;
+  if (dot < 0 ? t.length >= 4 : t.length - dot > 3) return t;
+  return t + key;
+}
+
+/** Number-pad text ("6.5", "24", "0.") → a quantity, or null while nothing countable is typed. */
+export function parseKeypadDot(text: string): number | null {
+  // The typing rule limits what can be typed; parsing accepts any plain number (a larger value can arrive as `initial`).
+  if (!/^(\d+\.?\d*|\.\d+)$/.test(text)) return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** A quantity → number-pad text: a point, at most three decimals, no grouping (1.125 → "1.125", 24 → "24"). */
+export function keypadDotText(value: number): string {
+  const v = Math.max(0, Math.round(value * 1000) / 1000);
+  return String(v);
+}
+
 /** Agorot → the field's display text on blur: grouped, 2 dp ("1,250.50"). Not a ₪ string. */
 export function formatMoneyField(agorot: number): string {
   return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(agorot / 100);

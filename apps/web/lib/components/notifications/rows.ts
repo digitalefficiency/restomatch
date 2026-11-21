@@ -22,6 +22,11 @@ export interface TaskRow {
   decimals: 0 | 2;
   /** Count text when there is no ₪ (or for staff). */
   countText: string | null;
+  /**
+   * The decision row only: how many of its items block payment, so a screen can draw the one solid
+   * "N חוסמים תשלום" pill apart from the count line (DS3-03's home). Absent on every other row.
+   */
+  blocking?: number;
   sub?: string;
   notes?: string;
   verb: string;
@@ -64,6 +69,7 @@ export function taskRow(task: Task, t: T, locale: Locale, sideMoney: (agorot: nu
         ...base,
         label: t('needs.decide.label'),
         countText: task.ilsAgorot === null ? n(task.count) : null,
+        blocking: task.blocking,
         sub: join(
           task.blocking > 0 ? t('needs.decide.subBlocking', { count: n(task.count), blocking: n(task.blocking) }) : t('needs.decide.sub', { count: n(task.count) }),
           Number(d.toReview) > 0 && t('needs.decide.review', { count: n(d.toReview) }),

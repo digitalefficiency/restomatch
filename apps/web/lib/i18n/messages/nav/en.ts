@@ -11,6 +11,7 @@ export const en: Shape<typeof he> = {
     labTokens: 'Design lab',
     labDesk: 'Desk lab',
     labDeskRow: 'Row',
+    labKit: 'Component kit',
     approvals: 'Approvals',
     approvalInvoice: 'Invoice decision',
     payRun: 'Pay run',
