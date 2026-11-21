@@ -493,8 +493,8 @@ describe('join attack: review r3 — parallel sends and guesses are serialised p
     const code = await issued(token);
     const guesses = Array.from({ length: 25 }, (_, i) => String((Number(code) + 1 + i) % 1_000_000).padStart(6, '0'));
     await Promise.all(guesses.map((g) => completeJoin({ token, code: g, name: 'דנה', password: PASSWORD })));
-    expect(await rowsOf(`join-failtotal:${joinAddressKey(email)}`)).toBeLessThanOrEqual(JOIN_CODE_MAX_ATTEMPTS);
-    expect(await rowsOf(`join-fail:${joinAddressKey(email)}`)).toBeLessThanOrEqual(JOIN_CODE_MAX_ATTEMPTS);
+    expect(await rowsOf(`join-failtotal:${joinAddressKey(email)}`)).toBe(JOIN_CODE_MAX_ATTEMPTS); // exact: a reserve-nothing regression fails too
+    expect(await rowsOf(`join-fail:${joinAddressKey(email)}`)).toBe(JOIN_CODE_MAX_ATTEMPTS); // exact: a reserve-nothing regression fails too
   });
 
   it('a resend moves the code row\'s expiry to resend + TTL for both kinds; an existing account keeps a pre-account code (main B5)', async () => {
@@ -524,4 +524,46 @@ describe('join attack: review r3 — parallel sends and guesses are serialised p
       reason: 'hasPassword',
     });
   });
+});
+
+describe('join attack: review r3 nits — a held address lock cannot block or pin', () => {
+  /** Hold `join-<scope>:<addressKey>` from another connection while `fn` runs. */
+  async function whileLockHeld<T>(scope: 'send' | 'attempt', email: string, fn: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    let held!: () => void;
+    const isHeld = new Promise<void>((r) => (held = r));
+    const holder = ownerDb.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`join-${scope}:${joinAddressKey(email)}`}, 0))`);
+      held();
+      await new Promise<void>((r) => (release = r));
+    });
+    await isHeld;
+    try {
+      return await fn();
+    } finally {
+      release();
+      await holder;
+    }
+  }
+
+  it('a send that cannot get the address lock answers "rate" (shown like a sent e-mail) and writes nothing', async () => {
+    const email = uniqueEmail('r3-lock-send');
+    const { token, id } = await makeInvite({ restaurantId: await makeRestaurant(), email });
+    const t0 = Date.now();
+    const r = await whileLockHeld('send', email, () => issueJoinCode(token));
+    expect(r).toMatchObject({ ok: false, reason: 'rate' });
+    expect(Date.now() - t0).toBeLessThan(10_000); // bounded by lock_timeout, not by the holder
+    expect(await ownerDb.select().from(verificationTokens).where(eq(verificationTokens.identifier, `join:${id}`))).toEqual([]);
+  }, 20_000);
+
+  it('an attempt that cannot get the address lock answers "locked", reserves nothing and leaves the live code alive', async () => {
+    const email = uniqueEmail('r3-lock-attempt');
+    const { token, id } = await makeInvite({ restaurantId: await makeRestaurant(), email });
+    const code = await issued(token);
+    const r = await whileLockHeld('attempt', email, () => completeJoin({ token, code: '000000', name: 'דנה', password: PASSWORD }));
+    expect(r).toMatchObject({ ok: false, reason: 'locked' });
+    expect(await ownerDb.select().from(verificationTokens).where(eq(verificationTokens.identifier, `join-fail-inv:${id}`))).toEqual([]);
+    // the real code still works afterwards
+    expect(await completeJoin({ token, code, name: 'דנה', password: PASSWORD })).toMatchObject({ ok: true });
+  }, 20_000);
 });
