@@ -50,8 +50,6 @@ export const en: Shape<typeof he> = {
     failed: 'Not saved — check the details and try again.',
   },
   profile: {
-    cardTitle: 'Restaurant details',
-    cardSubtitle: 'The VAT rate and time zone directly affect the leak calculation and day boundaries — make sure they are right.',
     name: 'Restaurant name',
     businessId: 'Company / VAT number',
     vat: 'VAT rate (%)',

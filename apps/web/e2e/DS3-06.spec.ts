@@ -19,10 +19,12 @@ import { foldContract, measureCopy } from './helpers/copyBudget';
  *     first HTML: no attribute changes after hydration ("no preference flashes on load").
  *   - Phone: the settings that do nothing on a phone are absent (density, the side menu, single keys).
  *   - Thresholds: saving writes exactly what settings.update writes and is audited the same way
- *     (settings.updated); ten seconds to undo; the history; restore; a draft survives another
- *     section; the preview never claims that saving changes a gap that is already open.
- *   - Old one-page anchors land on their section; axe WCAG 2.2 AA (0 serious) on the sections;
- *     every section within the detail copy budget and the fold contract.
+ *     (settings.updated); ten seconds to undo, waiting while focus is on it; the history; restore
+ *     from the history and back to the default (both unsaved); a draft survives another section;
+ *     the preview never claims that saving changes a gap that is already open.
+ *   - The restaurant's details list who changed them and when (settings.profile_updated).
+ *   - Old one-page anchors land on their section; axe WCAG 2.2 AA (0 serious) on every section, in
+ *     Hebrew and English; every section within the detail copy budget and the fold contract.
  * DS3_06_SHOTS=1 writes the screens to e2e/__screenshots__/DS3-06/.
  */
 test.use({ storageState: OWNER_STATE });
@@ -423,12 +425,90 @@ test('the undo window waits while focus is on "ביטול" and ends ten seconds 
         >`select settings->'tolerances'->>'pricePercent' as v from restaurants where id = ${id}`
       )[0]!.v,
     ).toBe('0.03');
+
+    // Restore from the history: the previous values come back as an unsaved change, focus on "שמרו".
+    const row = page.locator('#pricePercent');
+    const dirtyBar = page.getByTestId('settings-dirty-bar');
+    const history = page.getByTestId('rules-history');
+    await history.getByRole('button', { name: /היסטוריית שינויים/ }).click();
+    await history.getByRole('button', { name: sHe.thresholds.history.restoreCta }).click();
+    await expect(page.locator('#set-pricePercent')).toHaveValue('2');
+    await expect(row.getByText(sHe.thresholds.unsaved, { exact: true })).toBeVisible();
+    await expect(dirtyBar).toBeVisible();
+    await expect(page.locator('#settings-save-cta')).toBeFocused();
+    await dirtyBar.getByRole('button', { name: sHe.thresholds.save.discardCta }).click();
+    await expect(page.locator('#set-pricePercent')).toHaveValue('3');
+
+    // The field's own "חזרה לברירת המחדל": the default, unsaved, focus on the field.
+    await row
+      .getByRole('button', {
+        name: sHe.thresholds.restoreDefaultAria.replace(
+          '{field}',
+          sHe.thresholds.fields.pricePercent.label,
+        ),
+      })
+      .click();
+    await expect(page.locator('#set-pricePercent')).toHaveValue('2');
+    await expect(row.getByText(sHe.thresholds.unsaved, { exact: true })).toBeVisible();
+    await expect(page.locator('#set-pricePercent')).toBeFocused();
+    await dirtyBar.getByRole('button', { name: sHe.thresholds.save.discardCta }).click();
+    await expect(dirtyBar).toHaveCount(0);
+    // Nothing was saved by either restore.
+    expect(
+      (
+        await sql<
+          { v: string | null }[]
+        >`select settings->'tolerances'->>'pricePercent' as v from restaurants where id = ${id}`
+      )[0]!.v,
+    ).toBe('0.03');
     expect(errors).toEqual([]);
   } finally {
     await sql`update restaurants set settings = ${sql.json(before as never)} where id = ${id}`;
     await sql.end();
   }
 });
+
+test('restaurant details: a change is listed with who and when (settings.profile_updated)', async ({
+  page,
+}) => {
+  const sql = e2eSql();
+  const [restaurant] = await sql<{ id: string; business_id: string | null }[]>`
+    select id, business_id from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
+  const id = restaurant!.id;
+  const before = restaurant!.business_id;
+  try {
+    const errors = collectPageErrors(page);
+    await prepare(page, 'he', 1440);
+    await page.goto(`${BASE}?s=restaurant`);
+    // One title for the section: the form under it has none of its own.
+    await expect(page.getByRole('heading', { name: sHe.areas.restaurant.title })).toHaveCount(1);
+    const next = before === '512345674' ? '513456782' : '512345674';
+    await page.locator('#prof-biz').fill(next);
+    await page.getByRole('button', { name: sHe.profile.save }).click();
+    await expect(page.getByText(sHe.profile.saved)).toBeVisible();
+    const history = page.getByTestId('profile-history');
+    await history.getByRole('button', { name: /היסטוריית שינויים/ }).click();
+    const latest = history.locator('#profile-history-list > li').first();
+    await expect(latest).toContainText(sHe.profile.businessId);
+    await expect(latest).toContainText(next);
+    expect(errors).toEqual([]);
+  } finally {
+    await sql`update restaurants set business_id = ${before} where id = ${id}`;
+    await sql.end();
+  }
+});
+
+for (const lang of ['he', 'en'] as const) {
+  test(`axe WCAG 2.2 AA: no serious violation on any section (${lang})`, async ({ page }) => {
+    const titles = lang === 'he' ? sHe.areas : sEn.areas;
+    await prepare(page, lang, 1440);
+    for (const s of SECTIONS) {
+      await page.goto(href(s));
+      await expect(page.getByRole('heading', { level: 2, name: titles[s].title })).toBeVisible();
+      expect(await seriousAxe(page), `${lang} · ${s}`).toEqual([]);
+    }
+  });
+}
 
 test('old one-page anchors land on their section', async ({ page }) => {
   await prepare(page, 'he', 1440);
@@ -504,6 +584,20 @@ test.describe('roles', () => {
       /לא פתוח לתפקיד שלכם|isn't open to your role/,
     );
     await expect(page.getByTestId('rules-in-force')).toHaveCount(0);
+  });
+
+  test('chef: only "אני", like the receiver', async ({ page }) => {
+    await prepare(page, 'he', 1440);
+    await loginViaMagicLink(page, 'chef@kfar-hazeitim.test', BASE);
+    await page.goto(BASE);
+    await expect(page.locator('h1')).toHaveCount(1);
+    await expect(
+      page.locator('a[href*="s=rules"], a[href*="s=restaurant"], a[href*="s=letterhead"]'),
+    ).toHaveCount(0);
+    await page.goto(`${BASE}?s=restaurant`);
+    await expect(page.getByRole('heading', { level: 2 })).toContainText(
+      /לא פתוח לתפקיד שלכם|isn't open to your role/,
+    );
   });
 
   test('manager: the rules are shown read-only, with the history', async ({ page }) => {
