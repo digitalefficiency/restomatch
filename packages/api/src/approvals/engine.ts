@@ -73,7 +73,7 @@ interface Rule {
  * ────────────────────────────────────────────────────────────────────────── */
 
 export interface ApprovalThresholds {
-  /** Invoice without any PO above this amount → owner blocks. */
+  /** Invoice without any PO at or above this amount → owner blocks. */
   largeInvoiceWithoutPo?: number;
   /** Unordered item with delta above this → owner blocks. */
   unorderedItemSignificant?: number;
@@ -157,11 +157,13 @@ export function buildRules(t: Required<ApprovalThresholds> = DEFAULT_APPROVAL_TH
     },
     {
       id: 'large-invoice-without-po',
-      name: `חשבונית מעל ₪${t.largeInvoiceWithoutPo.toLocaleString('he-IL')} ללא PO`,
+      name: `חשבונית של ₪${t.largeInvoiceWithoutPo.toLocaleString('he-IL')} ומעלה ללא PO`,
       priority: 95,
+      // Owner 11.11 (Q5): "₪5,000 ומעלה", so the boundary itself counts. Compared in
+      // agorot, like evaluatePayApproval.
       predicate: (ctx) =>
         ctx.discrepancy.type === 'UNORDERED_ARRIVAL' &&
-        ctx.matchRun.totalInvoiceAmount > t.largeInvoiceWithoutPo,
+        Math.round(ctx.matchRun.totalInvoiceAmount * 100) >= Math.round(t.largeInvoiceWithoutPo * 100),
       decision: { requiredRole: 'owner', action: 'block' },
     },
     {
