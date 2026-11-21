@@ -13,17 +13,6 @@
 import { activeDirection } from './directions';
 import { ramp } from './primitives';
 
-/**
- * SPEC §2 values that DS3-00 has not landed yet: a test outside the token package pins today's
- * literal. Invisible at a glance (ΔL < 1 %) and passes every contrast gate either way
- * (ds3-clean.test.ts proves it). WORKPLAN DS3-00 seam 3 lets DS3-00 change the literal in the same
- * commit as the step in primitives.ts; then `pnpm --filter @restomatch/ui-tokens fixtures:record`,
- * its row out of ds3-clean's HELD table, and `tokens:css`.
- */
-export const held = {
-  lineStrong: { spec: '#808984', pinnedBy: 'apps/web/e2e/W1-09.spec.ts:495' },
-} as const;
-
 /** Canvas, cards and borders (SPEC §2 paper and steel). */
 export const surfaces = {
   canvas: ramp.neutral[25], // page background and the side menu, which sits on the canvas (Tailwind `bg`; SPEC §2, sidebar spec §1.1)

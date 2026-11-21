@@ -492,7 +492,7 @@ test.describe('auth-02/03/14/16 · supplier portal', () => {
     // Inputs: decimal keypad, ≥3:1 border (line-strong), 14 px labels.
     const qty = page.locator('input[id^="qty-"]').first();
     await expect(qty).toHaveAttribute('inputmode', 'decimal');
-    expect(await qty.evaluate((el) => getComputedStyle(el).borderColor)).toBe('rgb(122, 139, 130)');
+    expect(await qty.evaluate((el) => getComputedStyle(el).borderColor)).toBe('rgb(128, 137, 132)');
     expect(await page.locator('label[for^="qty-"]').first().evaluate((el) => getComputedStyle(el).fontSize)).toBe('14px');
     // The sticky primary is never under the cookie bar or off-screen.
     const bar = (await page.getByTestId('portal-actions').boundingBox())!;

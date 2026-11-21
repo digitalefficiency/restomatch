@@ -36,9 +36,8 @@ export const ramp = {
     75: '#EBF0ED', // hover
     150: '#E2E8E5', // rule
     200: '#D4DBD8', // line
-    // HELD at DS2's value until apps/web/e2e/W1-09.spec.ts:495 stops pinning rgb(122, 139, 130);
-    // then SPEC §2's #808984 (see `held` in semantic.ts).
-    500: '#7A8B82', // line-strong
+    // W1-09's quantity field checks its computed border against this value (rgb(128, 137, 132)).
+    500: '#808984', // line-strong
     550: '#66756D', // DS2: field-mode border
     600: '#5D6561', // fg3
     650: '#49524E', // fg2
