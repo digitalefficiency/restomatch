@@ -9,6 +9,8 @@ import { he as supplierConfirmHe } from '../i18n/messages/supplierConfirm/he';
 import { en as supplierConfirmEn } from '../i18n/messages/supplierConfirm/en';
 import { he as suppliersHe } from '../i18n/messages/suppliers/he';
 import { en as suppliersEn } from '../i18n/messages/suppliers/en';
+import { he as recoveryHe } from '../i18n/messages/recovery/he';
+import { en as recoveryEn } from '../i18n/messages/recovery/en';
 
 /**
  * Owner decision 7.11: suppliers are daily partners. Every text a supplier reads uses
@@ -79,11 +81,13 @@ function supplierFacing(
   approvals: Msgs,
   supplierConfirm: Msgs,
   suppliers: Msgs,
+  recovery: Msgs,
 ): Array<{ where: string; text: string }> {
   const claims = leaks.claims as Msgs;
   const groups: Array<[string, unknown]> = [
     ['leaks.claims (letter)', pick(claims, LETTER_KEYS)],
-    ['leaks.claims.reminder.text', (claims.reminder as Msgs).text],
+    // One reminder text for the claims page and the recovery tracker (W2-16: one wording per idea).
+    ['recovery.reminder.body', (recovery.reminder as Msgs).body],
     ['receiving.dockSlip', receiving.dockSlip],
     ['approvals.types.*.label', Object.values(approvals.types as Record<string, Msgs>).map((t) => t.label)],
     ['supplierConfirm', supplierConfirm],
@@ -106,8 +110,8 @@ const BANNED_HE: RegExp[] = [
 ];
 const BANNED_EN: RegExp[] = [/\bclaim/i, /\bdisput/i, /\bowe[sd]?\b/i, /\boverdue/i, /\bleak/i, /\bdemand/i];
 
-const he = supplierFacing(leaksHe, receivingHe, approvalsHe, supplierConfirmHe, suppliersHe);
-const en = supplierFacing(leaksEn, receivingEn, approvalsEn, supplierConfirmEn, suppliersEn);
+const he = supplierFacing(leaksHe, receivingHe, approvalsHe, supplierConfirmHe, suppliersHe, recoveryHe);
+const en = supplierFacing(leaksEn, receivingEn, approvalsEn, supplierConfirmEn, suppliersEn, recoveryEn);
 
 describe('supplier-facing wording: partner words only (owner 7.11)', () => {
   it('covers the supplier-facing strings (sanity)', () => {

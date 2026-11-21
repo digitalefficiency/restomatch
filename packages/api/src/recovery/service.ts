@@ -14,6 +14,7 @@ import { assertSupplierOwned } from '../tenant';
 import { appError } from '../errors';
 import { HELD_FOR_RECEIPTS_KEY } from '@restomatch/charts';
 import { CLAIM_ANSWER_DAYS, NEVER_CLAIMABLE_TYPES } from '../lib/claims';
+import { REMIND_EVERY_CALENDAR_DAYS, awaitingChaseSql, pastAnswerWindowSql } from './overdue';
 import {
   AWAITING_SUPPLIER,
   CREDITABLE,
@@ -21,6 +22,9 @@ import {
   ageingBucket,
   allocateCredit,
   canTransition,
+  edgeRequiresReason,
+  nextEdges,
+  type RecoveryEdge,
   stampFor,
   type AgeingBucket,
 } from './lifecycle';
@@ -70,8 +74,8 @@ export const NEVER_CLAIMABLE_TYPE_SQL = sql`d.type IN (${NEVER_CLAIMABLE_SQL})`;
  * days) all use this one rule, so they can never be a day apart.
  */
 export function overdueSql(now: Date, tz: SQL): SQL {
-  return sql`((${now.toISOString()}::timestamptz AT TIME ZONE ${tz})::date
-    - (COALESCE(c.letter_sent_at, c.claimed_at) AT TIME ZONE ${tz})::date) > ${OVERDUE_DAYS}`;
+  // AU-03: the boundary lives in recovery/overdue.ts (TS + SQL twins of one rule).
+  return pastAnswerWindowSql(now, tz);
 }
 
 /** Event note of the narrow never-claimable write-off (owner 31.10). */
@@ -150,7 +154,7 @@ function heldRunSql(restaurantId: string) {
  * (heldRunSql) instead of the rest — so the tracker's "waiting for the count"
  * figure is exactly what the sync would file once the hold ends (round 10).
  */
-function claimCandidatesSql(restaurantId: string, held: boolean) {
+function claimCandidatesSql(restaurantId: string, held: boolean, scope: { inScope: SQL; actorId: string | null } = { inScope: sql`TRUE`, actorId: null }) {
   return sql`
     WITH claimed AS (
       -- Agorot already claimed per invoice: new claims only get what is left of
@@ -167,6 +171,9 @@ function claimCandidatesSql(restaurantId: string, held: boolean) {
         i.id AS invoice_id,
         i.supplier_id,
         COALESCE(d.resolved_at, d.created_at) AS claimed_at,
+        -- The decider owns the claim: the explicit actor (materializeClaims),
+        -- else whoever decided the discrepancy — never whoever ran the sync.
+        COALESCE(${scope.actorId}::uuid, d.resolved_by) AS created_by,
         round(abs(d.delta_amount) * 100)::bigint AS raw_agorot,
         GREATEST(0, round(COALESCE(i.total_incl_vat, 0) * 100)::bigint - COALESCE(cl.agorot, 0)) AS cap_agorot,
         SUM(round(abs(d.delta_amount) * 100)::bigint) OVER (
@@ -185,6 +192,7 @@ function claimCandidatesSql(restaurantId: string, held: boolean) {
         -- its bare claims, and a claim filed now would block the count's run.
         -- The tracker shows these as "waiting for the count" (heldForCountTotals).
         AND ${held ? sql`` : sql`NOT`} ${heldRunSql(restaurantId)}
+        AND ${scope.inScope}
     )`;
 }
 
@@ -247,9 +255,13 @@ async function reopenRoom(db: Database, restaurantId: string, claimId: string, i
 }
 
 /**
- * Bring claims in line with the team's current decisions, then create the
- * missing ones (idempotent: one claim per discrepancy). Returns how many were
- * created. Runs under a per-restaurant advisory lock (its own transaction, or
+ * Restaurant-wide catch-up for jobs and scripts (reminders, the monthly
+ * report, demo seeds): bring claims in line with the team's current decisions,
+ * then create the missing ones (idempotent: one claim per discrepancy).
+ * Returns how many were created. NOT for read paths (W2-10a): a GET writes
+ * nothing, and a decision calls `materializeClaims` for its own discrepancies.
+ * New claims belong to the decider (`d.resolved_by`) unless `actorId` is
+ * given, and are dated at the decision (`d.resolved_at`). Runs under a per-restaurant advisory lock (its own transaction, or
  * a savepoint inside the caller's).
  *  1. A discrepancy that is no longer accepted (rejected / re-opened): its
  *     claim, if no money moved yet (claimed / letter_sent), is written off by
@@ -264,11 +276,46 @@ export async function syncClaims(db: Database, restaurantId: string, actorId?: s
   return db.transaction(async (rawTx) => {
     const tx = rawTx as unknown as Database;
     await lockRecovery(tx, restaurantId);
-    return syncClaimsLocked(tx, restaurantId, actorId);
+    return syncClaimsLocked(tx, restaurantId, { discrepancyIds: null, actorId: actorId ?? null });
   });
 }
 
-async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: string | null): Promise<number> {
+export interface MaterializeClaimsInput {
+  restaurantId: string;
+  /** The discrepancies just decided (any decision: accept creates, reject / re-open writes off). */
+  discrepancyIds: string[];
+  /** The decider: `created_by` of the new claims and the actor of their "claimed" event. */
+  actorId: string;
+}
+
+/**
+ * Claims at DECISION time (W2-10a, deep-fix class 6). Call it inside the
+ * decision's transaction, right after the discrepancy row is updated: the new
+ * claim carries the decider as `created_by` and the decision time
+ * (`resolved_at`) as `claimed_at`. Idempotent per discrepancy (one claim each;
+ * a second call creates nothing). Only the named discrepancies are touched:
+ * a rejected / re-opened one writes off its untouched claim, a re-accepted
+ * one re-opens a system write-off — the same rules as `syncClaims`, scoped.
+ * Serialised per restaurant (advisory xact lock, held to the caller's commit).
+ * Returns how many claims were created.
+ */
+export async function materializeClaims(tx: Database, input: MaterializeClaimsInput): Promise<number> {
+  const ids = [...new Set(input.discrepancyIds)];
+  if (ids.length === 0) return 0;
+  await lockRecovery(tx, input.restaurantId);
+  return syncClaimsLocked(tx, input.restaurantId, { discrepancyIds: ids, actorId: input.actorId });
+}
+
+async function syncClaimsLocked(
+  db: Database,
+  restaurantId: string,
+  opts: { discrepancyIds: string[] | null; actorId: string | null },
+): Promise<number> {
+  const { actorId } = opts;
+  const inScope =
+    opts.discrepancyIds == null
+      ? sql`TRUE`
+      : sql`d.id IN (${sql.join(opts.discrepancyIds.map((id) => sql`${id}::uuid`), sql`, `)})`;
   const autoClosed = rowsOf(
     await db.execute(sql`
       WITH gone AS (
@@ -278,6 +325,7 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
         WHERE c.restaurant_id = ${restaurantId}
           AND c.status IN ('claimed', 'letter_sent')
           AND NOT (${ACCEPTED_FILTER})
+          AND ${inScope}
         ORDER BY c.id
         FOR UPDATE OF c
       )
@@ -300,6 +348,7 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
         WHERE c.restaurant_id = ${restaurantId}
           AND c.status = 'claimed' AND c.letter_sent_at IS NULL AND c.credited_agorot = 0
           AND ${NEVER_CLAIMABLE_TYPE_SQL}
+          AND ${inScope}
           AND NOT EXISTS (
             SELECT 1 FROM recovery_events e
             WHERE e.claim_id = c.id AND e.restaurant_id = ${restaurantId}
@@ -333,6 +382,7 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
         AND c.status = 'written_off' AND c.credited_agorot = 0
         AND d.delta_amount IS NOT NULL
         AND ${CLAIMABLE_FILTER}
+        AND ${inScope}
       ORDER BY c.claimed_at, c.id
       FOR UPDATE OF c
     `),
@@ -369,11 +419,11 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
   }
 
   const res = await db.execute(sql`
-    ${claimCandidatesSql(restaurantId, false)}
+    ${claimCandidatesSql(restaurantId, false, { inScope, actorId })}
     INSERT INTO recovery_claims (restaurant_id, discrepancy_id, supplier_id, invoice_id, amount_agorot, claimed_at, created_by)
     SELECT ${restaurantId}, c.discrepancy_id, c.supplier_id, c.invoice_id,
            ${CLAIM_AMOUNT_SQL},
-           c.claimed_at, ${actorId ?? null}
+           c.claimed_at, c.created_by
     FROM cand c
     WHERE ${CLAIM_AMOUNT_SQL} > 0
     ON CONFLICT (discrepancy_id) DO NOTHING
@@ -383,7 +433,7 @@ async function syncClaimsLocked(db: Database, restaurantId: string, actorId?: st
   if (created.length > 0) {
     await db.execute(sql`
       INSERT INTO recovery_events (restaurant_id, claim_id, from_status, to_status, amount_agorot, actor_id)
-      SELECT restaurant_id, id, NULL, 'claimed', amount_agorot, ${actorId ?? null}
+      SELECT restaurant_id, id, NULL, 'claimed', amount_agorot, created_by
       FROM recovery_claims
       WHERE restaurant_id = ${restaurantId}
         AND id IN (${sql.join(created.map((r) => sql`${String(r.id)}::uuid`), sql`, `)})
@@ -423,10 +473,23 @@ export interface RecoveryClaimRow {
   note: string | null;
 }
 
+/** A `listClaims` row: the claim plus the moves it may take next, from the server machine (no client mirror). */
+export interface RecoveryClaimListRow extends RecoveryClaimRow {
+  next: RecoveryEdge[];
+  /** The VAT rate this supplier's paper uses (basis points): supplier rate ?? restaurant rate — for the credit form's preview. */
+  vatRateBp: number;
+  /**
+   * Whole days past the answer deadline (OVERDUE_DAYS after the letter, or
+   * the claim when no letter went out); 0 when not overdue or not waiting on
+   * the supplier. The desk ranks suppliers by owed ₪ × these days.
+   */
+  daysOverdue: number;
+}
+
 /** Waiting on the supplier this many days after the letter (or the claim) ⇒ overdue (owner 31.10: a week). */
 export const OVERDUE_DAYS = CLAIM_ANSWER_DAYS;
 /** Do not chase the same claim more often than this. */
-export const REMIND_EVERY_DAYS = 7;
+export const REMIND_EVERY_DAYS = REMIND_EVERY_CALENDAR_DAYS;
 /** Upper bound for one page of the claims LIST (totals never truncate — see computeRecoverySummary). */
 export const MAX_CLAIMS = 5000;
 
@@ -435,7 +498,7 @@ export async function listClaims(
   restaurantId: string,
   /** `limit: null` = every claim (summaries); otherwise one list page, at most MAX_CLAIMS. */
   opts: { status?: RecoveryStatus; supplierId?: string; now?: Date; limit?: number | null } = {},
-): Promise<RecoveryClaimRow[]> {
+): Promise<RecoveryClaimListRow[]> {
   const now = opts.now ?? new Date();
   const limit = opts.limit === null ? null : Math.min(Math.max(opts.limit ?? 200, 1), MAX_CLAIMS);
   const res = await db.execute(sql`
@@ -444,6 +507,7 @@ export async function listClaims(
       c.claimed_at, c.letter_sent_at, c.acknowledged_at, c.credited_at, c.recovered_at, c.closed_at,
       c.last_reminder_at, c.note,
       s.name AS supplier_name, s.name_en AS supplier_name_en,
+      round(COALESCE(s.vat_rate, tz.vat_rate) * 10000)::int AS vat_rate_bp,
       i.invoice_number,
       d.type AS discrepancy_type,
       p.canonical_name AS product_name, p.name_en AS product_name_en,
@@ -453,9 +517,12 @@ export async function listClaims(
       ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date - (c.claimed_at AT TIME ZONE tz.tz)::date) AS age_days,
       -- Overdue: exactly the reminder job's rule (findOverdue), so the badge and the email agree;
       -- never a type the owner decided is not claimed (it is not "owed").
-      (${overdueSql(now, sql`tz.tz`)} AND NOT ${NEVER_CLAIMABLE_TYPE_SQL}) AS waiting_overdue
+      (${overdueSql(now, sql`tz.tz`)} AND NOT ${NEVER_CLAIMABLE_TYPE_SQL}) AS waiting_overdue,
+      -- Whole restaurant-calendar days past the deadline (the same calendar as overdueSql).
+      GREATEST(0, ((${now.toISOString()}::timestamptz AT TIME ZONE tz.tz)::date
+        - (COALESCE(c.letter_sent_at, c.claimed_at) AT TIME ZONE tz.tz)::date) - ${OVERDUE_DAYS}) AS days_past
     FROM recovery_claims c
-    CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) tz
+    CROSS JOIN (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz, vat_rate FROM restaurants WHERE id = ${restaurantId}) tz
     JOIN discrepancies d ON d.id = c.discrepancy_id AND d.restaurant_id = ${restaurantId}
     LEFT JOIN suppliers s ON s.id = c.supplier_id AND s.restaurant_id = ${restaurantId}
     LEFT JOIN invoices i ON i.id = c.invoice_id AND i.restaurant_id = ${restaurantId}
@@ -503,6 +570,9 @@ export async function listClaims(
       overdue: (AWAITING_SUPPLIER as readonly string[]).includes(status) && r.waiting_overdue === true,
       creditNoteNumber: (r.credit_note_number as string | null) ?? null,
       note: (r.note as string | null) ?? null,
+      next: nextEdges(status, { amountAgorot: amount, creditedAgorot: credited }),
+      vatRateBp: int(r.vat_rate_bp),
+      daysOverdue: (AWAITING_SUPPLIER as readonly string[]).includes(status) && r.waiting_overdue === true ? int(r.days_past) : 0,
     };
   });
 }
@@ -550,7 +620,7 @@ const ALL_STATUSES: RecoveryStatus[] = [
 ];
 
 /** Totals, ageing and per-supplier recovery rate — all integer agorot, summed from listClaims. */
-export function summarize(claims: RecoveryClaimRow[]): RecoverySummary {
+export function summarize(claims: ReadonlyArray<RecoveryClaimRow>): RecoverySummary {
   const ageing: Record<AgeingBucket, number> = { d0_30: 0, d31_60: 0, d61_90: 0, d90p: 0 };
   const byStatus = Object.fromEntries(ALL_STATUSES.map((s) => [s, { count: 0, agorot: 0 }])) as RecoverySummary['byStatus'];
   const suppliers = new Map<string, RecoverySupplierRow>();
@@ -687,6 +757,30 @@ async function loadOwnedClaims(db: Database, restaurantId: string, ids: string[]
   return rows;
 }
 
+/**
+ * H-06 security review: the instant a transition is recorded at. A caller-supplied
+ * `at` is ignored: the transition is stamped now(), but never earlier than the
+ * claim's last event, so the event history stays ordered and a back-dated move can't
+ * slip under a later one. Ordering wins over the clock on purpose: if an older write
+ * left a future-dated event, the next stamp takes that instant rather than land before it.
+ */
+export async function clampTransitionAt(
+  db: Database,
+  restaurantId: string,
+  claimId: string,
+  now: Date = new Date(),
+): Promise<Date> {
+  const wanted = now;
+  const [last] = rowsOf(
+    await db.execute(sql`
+      SELECT max(created_at) AS at FROM recovery_events
+      WHERE claim_id = ${claimId}::uuid AND restaurant_id = ${restaurantId}::uuid
+    `),
+  );
+  const floor = last?.at ? new Date(last.at as string | Date) : null;
+  return floor && floor.getTime() > wanted.getTime() ? floor : wanted;
+}
+
 /** Move one claim along the lifecycle (not into `credited` — see recordCreditNote). */
 export async function transitionClaim(
   db: Database,
@@ -701,11 +795,17 @@ export async function transitionClaim(
   if (!canTransition(claim.status, input.to)) {
     throw new TRPCError({ code: 'CONFLICT', message: `cannot move a claim from ${claim.status} to ${input.to}` });
   }
-  const at = input.at ?? new Date();
+  // input.at is not trusted: a back-dated (or future) instant is clamped to now().
+  const at = await clampTransitionAt(db, restaurantId, claim.id);
   const stamp = stampFor(input.to);
   const patch: Partial<typeof recoveryClaims.$inferInsert> = { status: input.to };
   if (stamp) patch[stamp] = at;
   if (input.to === 'claimed') patch.closedAt = null;
+  // H-06 security review: a re-opened request is a new request. Re-stamping
+  // letter_sent_at gives H-06's supplier-link verifier the instant to reject links
+  // issued before the re-open (that check lands with H-06; nothing enforces it yet),
+  // and the 7-day answer clock restarts from the re-open.
+  if (claim.status === 'written_off' && input.to === 'claimed') patch.letterSentAt = at;
   if (claim.status === 'written_off' && input.to === 'claimed' && claim.creditedAgorot === 0) {
     // A re-open takes a share of the invoice cap again: re-cap it like the
     // system re-open does (another claim may hold the freed share by now).
@@ -737,6 +837,54 @@ export async function transitionClaim(
     createdAt: at,
   });
   return { id: claim.id, status: input.to };
+}
+
+export interface TransitionItem {
+  claimId: string;
+  /** The status the screen showed: a claim that moved meanwhile is a CONFLICT, not a silent move. */
+  expectedStatus: RecoveryStatus;
+}
+
+/**
+ * Move several claims together, ALL OR NOTHING (W2-10, deep-fix class 8):
+ * every claim is owned (NOT_FOUND first, so a foreign id never leaks a state),
+ * still in its `expectedStatus` (CONFLICT naming the claim) and allowed to
+ * take the edge; a terminal edge (or a short `recovered`) needs a reason.
+ * Any failure throws before the first write, and the caller's transaction
+ * rolls back whatever already ran.
+ */
+export async function transitionClaims(
+  db: Database,
+  restaurantId: string,
+  input: { items: TransitionItem[]; to: RecoveryStatus; note?: string | null; actorId?: string | null; at?: Date },
+): Promise<Array<{ id: string; status: RecoveryStatus }>> {
+  const ids = [...new Set(input.items.map((i) => i.claimId))];
+  if (ids.length !== input.items.length) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'a claim is listed twice' });
+  }
+  const rows = await loadOwnedClaims(db, restaurantId, ids, true);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const note = input.note?.trim() || null;
+  for (const item of input.items) {
+    const claim = byId.get(item.claimId)!;
+    if (claim.status !== item.expectedStatus) {
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: `claim ${item.claimId} is ${claim.status}, not ${item.expectedStatus} — refresh and try again`,
+      });
+    }
+    if (input.to !== 'credited' && !canTransition(claim.status, input.to)) {
+      throw new TRPCError({ code: 'CONFLICT', message: `claim ${item.claimId}: cannot move from ${claim.status} to ${input.to}` });
+    }
+    if (!note && edgeRequiresReason(input.to, claim)) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: `moving a claim to ${input.to} needs a reason` });
+    }
+  }
+  const out: Array<{ id: string; status: RecoveryStatus }> = [];
+  for (const id of [...ids].sort()) {
+    out.push(await transitionClaim(db, restaurantId, { claimId: id, to: input.to, note, actorId: input.actorId, at: input.at }));
+  }
+  return out;
 }
 
 export interface CreditLineSuggestion {
@@ -798,6 +946,40 @@ export async function creditLineSuggestions(
     descriptionEn: (r.raw_description_en as string | null) ?? null,
     amountAgorot: int(r.amount_agorot),
   }));
+}
+
+/** How the credit-note amount was typed: as printed incl. VAT, or before VAT. */
+export type CreditVatMode = 'incl' | 'excl';
+
+/**
+ * Before-VAT agorot of an amount typed as printed (W2-10, chain-09). Pure,
+ * integer, half-up: `excl = round(printed / (1 + rate))`, the rate in basis
+ * points (NUMERIC(5,4) × 10,000). ₪118.00 incl. at 0.18 → ₪100.00.
+ */
+export function exclVatAgorot(printedAgorot: number, vat: CreditVatMode, rateBp: number): number {
+  if (!Number.isSafeInteger(printedAgorot) || printedAgorot <= 0) throw new Error('amount must be a positive integer of agorot');
+  if (vat === 'excl') return printedAgorot;
+  if (!Number.isInteger(rateBp) || rateBp < 0 || rateBp > 10_000) throw new Error('VAT rate out of range');
+  const den = 10_000 + rateBp;
+  return Math.floor((2 * printedAgorot * 10_000 + den) / (2 * den));
+}
+
+/**
+ * The VAT rate a supplier's paper uses, in basis points: the supplier's own
+ * rate, else the restaurant's (default 0.18). Never the engine's 0.17 — that
+ * is a matching constant, not a conversion rate. NOT_FOUND for a foreign supplier.
+ */
+export async function creditVatRateBp(db: Database, restaurantId: string, supplierId: string): Promise<number> {
+  const [r] = rowsOf(
+    await db.execute(sql`
+      SELECT round(COALESCE(s.vat_rate, rt.vat_rate) * 10000)::int AS bp
+      FROM suppliers s
+      JOIN restaurants rt ON rt.id = s.restaurant_id
+      WHERE s.id = ${supplierId}::uuid AND s.restaurant_id = ${restaurantId}
+    `),
+  );
+  if (!r) throw notFound('supplier');
+  return int(r.bp);
 }
 
 export interface RecordCreditNoteInput {
@@ -872,7 +1054,12 @@ export async function recordCreditNote(
   if (input.invoiceLineId) {
     const res = await db.execute(sql`
       SELECT i.id AS invoice_id, i.supplier_id, i.invoice_number,
-             to_char(COALESCE(i.invoice_date, i.created_at), 'YYYY-MM-DD') AS issued_on,
+             -- The restaurant's calendar day, never the session's (UTC on Supabase): an undated
+             -- invoice created 00:00–02:00 IL must not get yesterday's (or last month's) issued_on.
+             -- invoice_date is stored at 00:00Z, so it keeps its date in Israel.
+             to_char(COALESCE(i.invoice_date, i.created_at) AT TIME ZONE
+               (SELECT COALESCE(timezone, 'Asia/Jerusalem') FROM restaurants WHERE id = ${restaurantId}),
+               'YYYY-MM-DD') AS issued_on,
              il.line_total, round(abs(il.line_total) * 100)::bigint AS amount_agorot
       FROM invoice_lines il
       JOIN invoices i ON i.id = il.invoice_id AND i.restaurant_id = ${restaurantId}
@@ -1039,19 +1226,78 @@ export async function releaseClaimsForRematch(db: Database, restaurantId: string
   return claims.length;
 }
 
-/** Lifecycle history of one claim (oldest first). */
+/**
+ * Lifecycle history of one claim (oldest first), with WHO did each step
+ * (chain-05): the actor's display name and their role in THIS restaurant.
+ * A system step (no actor) has both null.
+ */
 export async function claimHistory(db: Database, restaurantId: string, claimId: string) {
   await loadOwnedClaims(db, restaurantId, [claimId]);
-  return db
-    .select({
-      id: recoveryEvents.id,
-      fromStatus: recoveryEvents.fromStatus,
-      toStatus: recoveryEvents.toStatus,
-      amountAgorot: recoveryEvents.amountAgorot,
-      note: recoveryEvents.note,
-      createdAt: recoveryEvents.createdAt,
-    })
-    .from(recoveryEvents)
-    .where(and(eq(recoveryEvents.claimId, claimId), eq(recoveryEvents.restaurantId, restaurantId)))
-    .orderBy(recoveryEvents.createdAt);
+  const res = await db.execute(sql`
+    SELECT e.id, e.from_status, e.to_status, e.amount_agorot, e.note, e.created_at, e.actor_id,
+           u.name AS actor_name, m.role AS actor_role
+    FROM recovery_events e
+    LEFT JOIN users u ON u.id = e.actor_id
+    LEFT JOIN memberships m ON m.user_id = e.actor_id AND m.restaurant_id = ${restaurantId}
+    WHERE e.claim_id = ${claimId}::uuid AND e.restaurant_id = ${restaurantId}
+    ORDER BY e.created_at, e.id
+  `);
+  return rowsOf(res).map((r) => ({
+    id: String(r.id),
+    fromStatus: (r.from_status as RecoveryStatus | null) ?? null,
+    toStatus: String(r.to_status) as RecoveryStatus,
+    amountAgorot: r.amount_agorot == null ? null : int(r.amount_agorot),
+    note: (r.note as string | null) ?? null,
+    createdAt: new Date(String(r.created_at instanceof Date ? r.created_at.toISOString() : r.created_at)),
+    actorId: (r.actor_id as string | null) ?? null,
+    actorName: (r.actor_name as string | null) ?? null,
+    actorRole: (r.actor_role as string | null) ?? null,
+  }));
+}
+
+/**
+ * Auto-advance (W2-10, chain-10): a fully credited claim whose credit line
+ * sits on an invoice that is now PAID was offset in that payment — it moves
+ * `credited → recovered` by itself, with the note "קוזז בחשבונית X ששולמה
+ * dd.MM" (the paid event's time, Israel date) and no actor (a system step). A partly credited claim stays: the
+ * shortfall is a person's call (a reason). Idempotent.
+ * Driven by the paid event: G-05 `invoice.paid` once it ships (W2-03
+ * `markPaid` after H-03); until then the caller is the test fixture.
+ */
+export async function autoAdvanceOnPaid(db: Database, restaurantId: string, invoiceId: string, at: Date = new Date()): Promise<string[]> {
+  await lockRecovery(db, restaurantId);
+  const rows = rowsOf(
+    await db.execute(sql`
+      SELECT c.id, i.invoice_number,
+             to_char((${at.toISOString()}::timestamptz AT TIME ZONE rt.timezone), 'DD.MM') AS paid_on
+      FROM recovery_claims c
+      JOIN credit_notes cn ON cn.id = c.credit_note_id AND cn.restaurant_id = ${restaurantId}
+      JOIN invoices i ON i.id = cn.invoice_id AND i.restaurant_id = ${restaurantId}
+      JOIN restaurants rt ON rt.id = ${restaurantId}
+      WHERE c.restaurant_id = ${restaurantId}
+        AND cn.invoice_id = ${invoiceId}::uuid
+        AND i.status = 'paid'
+        AND c.status = 'credited'
+        AND c.credited_agorot >= c.amount_agorot
+      ORDER BY c.id
+      FOR UPDATE OF c
+    `),
+  );
+  for (const r of rows) {
+    const note = `קוזז בחשבונית ${String(r.invoice_number ?? '—')} ששולמה ${String(r.paid_on)}`;
+    await db
+      .update(recoveryClaims)
+      .set({ status: 'recovered', recoveredAt: at, note })
+      .where(and(eq(recoveryClaims.id, String(r.id)), eq(recoveryClaims.restaurantId, restaurantId)));
+    await db.insert(recoveryEvents).values({
+      restaurantId,
+      claimId: String(r.id),
+      fromStatus: 'credited',
+      toStatus: 'recovered',
+      actorId: null,
+      note,
+      createdAt: at,
+    });
+  }
+  return rows.map((r) => String(r.id));
 }

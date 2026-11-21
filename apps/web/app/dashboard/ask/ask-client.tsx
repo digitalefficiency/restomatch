@@ -13,8 +13,21 @@ import { ask as askNs } from '@/lib/i18n/messages/ask';
 import type { Translator } from '@/lib/i18n/translate';
 import type { Locale } from '@/lib/i18n/config';
 import { formatIls } from '@/lib/money';
+import { opsLines } from './ops-lines';
 
-const SUGGESTIONS = ['leakChange', 'priceRaise', 'claimWeek', 'leakTotal', 'topSupplier'] as const;
+const SUGGESTIONS = [
+  'leakChange',
+  'priceRaise',
+  'claimWeek',
+  'leakTotal',
+  'topSupplier',
+  // AU-06: what needs me
+  'waitingForMe',
+  'intakeStuck',
+  'whoOwesMe',
+  'toPayThisWeek',
+  'vatAtRisk',
+] as const;
 
 type T = Translator<typeof askNs.he>;
 type Turn = { id: number; question: string; result: AskResult | null; error: false | 'generic' | 'rateLimited' };
@@ -47,7 +60,7 @@ export function offlineLines(r: AskResult, t: T, locale: Locale): string[] {
       ];
     case 'leakChange': {
       const d = Number(f.deltaIls ?? 0);
-      const vars = { delta: ils(Math.abs(d)), leak: ils(f.leakIls), prev: ils(f.prevLeakIls) };
+      const vars = { delta: ils(Math.abs(d)), leak: ils(f.leakIls), prev: ils(f.prevLeakIls), span: f.spanLabel, curSpan: f.curSpanLabel, prevSpan: f.prevSpanLabel };
       const out = [Math.abs(d) < 1 ? t('answers.leakSame', vars) : t(d > 0 ? 'answers.leakUp' : 'answers.leakDown', vars)];
       if (f.topSupplier) out.push(t('answers.leakDriverSupplier', { supplier: f.topSupplier, amount: ils(f.topSupplierDeltaIls) }));
       if (f.topType) out.push(t('answers.leakDriverType', { type: typeLabel(t, f.topType), amount: ils(f.topTypeDeltaIls) }));
@@ -72,9 +85,11 @@ export function offlineLines(r: AskResult, t: T, locale: Locale): string[] {
     }
     case 'claimWeek': {
       const items = (f.items ?? []) as Facts[];
-      if (!f.count) return [t('answers.claimNone')];
+      // Nothing to claim only when NO basis has a line (a duplicate incl. VAT is still a claim).
+      if (!f.count && !f.otherBasisCount) return [t('answers.claimNone')];
       return [
-        t('answers.claimIntro', { total: ils(f.totalIls), count: f.count }),
+        ...(f.count ? [t('answers.claimIntro', { total: ils(f.totalIls), count: f.count })] : []),
+        ...(f.otherBasisCount ? [t('answers.claimOther', { incl: ils(f.duplicateInclVatIls), vat: ils(f.vatIls) })] : []),
         ...items.map((c) =>
           t('answers.claimItem', {
             supplier: c.supplier ?? '—',
@@ -89,6 +104,12 @@ export function offlineLines(r: AskResult, t: T, locale: Locale): string[] {
       return f.supplier
         ? [t('answers.topSupplier', { supplier: f.supplier, leak: ils(f.leakIls), spend: ils(f.spendIls) })]
         : [t('answers.topSupplierNone')];
+    case 'waitingForMe':
+    case 'intakeStuck':
+    case 'whoOwesMe':
+    case 'toPayThisWeek':
+    case 'vatAtRisk':
+      return opsLines(r.intent, f, t, locale);
     default:
       return [t('answers.unknown')];
   }

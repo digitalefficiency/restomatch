@@ -17,12 +17,17 @@ export {
 } from './awaiting-count';
 export {
   computeInvoiceLeak,
+  computeInvoicesLeak,
   computeLeakBreakdown,
   computeLeakHero,
   computeMonthInvoiceLeaks,
+  expectedSourceOf,
+  invoiceLeakStateCte,
+  monthInvoicesCte,
   type MonthInvoiceLeak,
   type LeakBreakdownInvoice,
   type LeakBreakdownLine,
+  type LeakExpectedSource,
   type LeakHero,
   type LeakHeroOptions,
 } from './leak-hero';
@@ -83,3 +88,24 @@ export {
   type DisparityMatchMethod,
   type PriceDisparityRow,
 } from './chain-disparity';
+export { automationKpis, computeFoundAgorot, computeTimeLedger, clampWeeks, AUTOMATION_MAX_WEEKS, AUTOMATION_NEVER_CLAIMABLE, AUTOMATION_RATE_DEFAULTS, AUTOMATION_ROLES, BOOKKEEPER_FEE_DEFAULT_ILS, TOUCH_ACTIONS, type AutomationAlertRow, type AutomationKpis, type AutomationKpisOptions, type AutomationRole, type AutomationTimeLedger, type AutomationWeek } from './automation';
+export {
+  computeLeakComparison,
+  COVERAGE_GAP,
+  localToday,
+  measuredStateOf,
+  resolveWindow,
+  type Coverage,
+  type DateSpan,
+  type LeakComparison,
+  type LeakComparisonWindow,
+  type MeasuredState,
+  type ResolvedWindow,
+} from './period';
+export {
+  computeLeakDrivers,
+  DRIVER_DIMENSIONS,
+  type DriverDimension,
+  type LeakDriver,
+  type LeakDrivers,
+} from './leak-drivers';

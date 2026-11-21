@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { cookies } from 'next/headers';
 import { preload } from 'react-dom';
+import { fontPreloads } from '@restomatch/ui-tokens';
 import { CookieConsent } from '@/lib/components/CookieConsent';
 import { ChromeMetrics } from '@/lib/components/overlay/ChromeMetrics';
 import { RouteProgress } from '@/lib/components/RouteProgress';
@@ -11,15 +12,13 @@ import { getAppLocale, getLocale } from '@/lib/i18n/server';
 import { metadataBase, socialFor } from './(marketing)/_components/seo';
 import './globals.css';
 
-// Fonts are self-hosted (public/fonts, @font-face in globals.css): Heebo for
-// Hebrew, display and money; JetBrains Mono for identifiers only. Preload the Heebo
-// subsets the page's language paints with so text doesn't flash on first load
+// Fonts are self-hosted (public/fonts, @font-face generated into globals.css from
+// packages/ui-tokens fonts.ts): IBM Plex Sans Hebrew for every interface text,
+// money and identifier (DS2 β). Preload the subsets the page's language paints
+// with, at the two weights above the fold, so text doesn't flash on first load
 // (an English page preloading the Hebrew subset drew Chrome's "preloaded but
-// not used within a few seconds" warning).
-const FONT_PRELOADS = {
-  he: ['/fonts/heebo/heebo-hebrew-wght.woff2', '/fonts/heebo/heebo-latin-wght.woff2'],
-  en: ['/fonts/heebo/heebo-latin-wght.woff2'],
-} as const;
+// not used within a few seconds" warning). Frank Ruhl Libre is never preloaded.
+const FONT_PRELOADS = fontPreloads();
 
 // `viewport-fit=cover` so env(safe-area-inset-*) resolves on notched phones;
 // `resizes-content` so fixed footers rise above the Android keyboard (mobile-field-22).

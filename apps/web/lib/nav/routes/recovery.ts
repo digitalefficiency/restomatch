@@ -12,4 +12,6 @@ export const routes: RouteDef[] = [
     nav: 'item',
     aliases: ['₪ חוזר', 'זיכויים', 'מעקב', 'recovery', 'credits'],
   },
+  // W2-10: the per-supplier sheet ("דף לספק") — a detail of the tracker, same finance roles.
+  { key: 'recoverySupplierSheet', path: '/dashboard/recovery/sheet/[supplierId]', group: 'money', parent: 'recovery', nav: 'detail' },
 ];

@@ -15,12 +15,15 @@ import { PrintButton } from './print-button';
  */
 export function LetterActions({
   scope,
+  supplierId = null,
   claimIds,
   whatsappText,
   mailSubject,
   labels,
 }: {
   scope: string;
+  /** The letter's supplier: "mark as sent" confirms THIS letter (recovery.sendLetter, all or nothing). */
+  supplierId?: string | null;
   claimIds: string[];
   whatsappText: string;
   mailSubject: string;
@@ -38,6 +41,9 @@ export function LetterActions({
 }) {
   const [error, setError] = useState(false);
   const transition = trpc.recovery.transition.useMutation();
+  const send = trpc.recovery.sendLetter.useMutation();
+  // The hand-off the user opened last: recorded as the letter's channel on confirm.
+  const [channel, setChannel] = useState<'whatsapp' | 'email' | 'print'>('print');
   // One queue + ONE undo bar for all the letters (DeferredProvider on the page).
   const deferred = useSharedDeferred();
   const pending = claimIds.length > 0 && claimIds.every((id) => deferred.pendingTo(id) === 'letter_sent');
@@ -49,11 +55,11 @@ export function LetterActions({
   return (
     <div className="flex flex-wrap items-center gap-2 print:hidden" data-testid="letter-actions">
       <PrintButton label={labels.print} scope={scope} />
-      <a href={wa} target="_blank" rel="noopener noreferrer" className={link} data-testid="letter-whatsapp">
+      <a href={wa} target="_blank" rel="noopener noreferrer" className={link} data-testid="letter-whatsapp" onClick={() => setChannel('whatsapp')}>
         <MessageCircle className="h-4 w-4" aria-hidden="true" />
         {labels.whatsapp}
       </a>
-      <a href={mail} className={link} data-testid="letter-mail">
+      <a href={mail} className={link} data-testid="letter-mail" onClick={() => setChannel('email')}>
         <Mail className="h-4 w-4" aria-hidden="true" />
         {labels.mail}
       </a>
@@ -77,7 +83,11 @@ export function LetterActions({
                 keys: claimIds,
                 to: 'letter_sent',
                 label: labels.undoMoved,
-                run: () => transition.mutateAsync({ claimIds, to: 'letter_sent' }),
+                // Only on confirm (after the 10 s undo): the letter's claims move together, guarded.
+                run: () =>
+                  supplierId
+                    ? send.mutateAsync({ supplierId, claimIds, channel })
+                    : transition.mutateAsync({ items: claimIds.map((claimId) => ({ claimId, expectedStatus: 'claimed' as const })), to: 'letter_sent' }),
                 onFailed: () => setError(true),
               });
             }}

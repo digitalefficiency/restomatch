@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { LeakBreakdownInvoice, LeakBreakdownLine } from '@restomatch/charts';
-import { CLAIM_ANSWER_DAYS, NEVER_CLAIMABLE_TYPES, claimableLines, isNeverClaimable, sumClaims, vatBasisOf } from '../lib/claims';
+import {
+  CLAIM_ANSWER_DAYS,
+  CLAIMABLE_DECIDED_STATUSES,
+  NEVER_CLAIMABLE_TYPES,
+  claimableLines,
+  isClaimable,
+  isDecidedClaim,
+  isNeverClaimable,
+  sumClaims,
+  vatBasisOf,
+} from '../lib/claims';
 import { isClaimableRow } from '../routers/approvals';
 import { OVERDUE_DAYS } from '../recovery/service';
 import { payRunStatusOf } from '../routers/payRun';
@@ -11,11 +21,15 @@ import { claimableData } from '../ask/tools';
  * into lib/claims.ts (shared with the pay run). `referenceLetterLines` is the
  * page's loop as it was before the move, verbatim in substance: the helper must
  * give the same lines and the same ₪ on every invoice.
+ *
+ * W2-03 (owner decision: a paid invoice keeps its claims): the reference no longer
+ * drops `status === 'paid'` — the only intended change to the rule.
  */
-const REF_CLAIMABLE = new Set(['open', 'escalated', 'accepted']);
+// W2-03 M5 (owner 7.11): 'resolved' is decided, like 'accepted'.
+const REF_CLAIMABLE = new Set(['open', 'escalated', 'accepted', 'resolved']);
 function referenceLetterLines(inv: LeakBreakdownInvoice): Array<{ id: string; amount: number }> {
   const out: Array<{ id: string; amount: number }> = [];
-  if (inv.pendingLink || inv.status === 'paid') return out;
+  if (inv.pendingLink) return out;
   let invClaimed = 0;
   for (const l of inv.lines) {
     if (!l.countsAsLeak || !REF_CLAIMABLE.has(l.resolutionStatus)) continue;
@@ -118,6 +132,90 @@ describe('claimableLines — no behaviour change vs the claims letters', () => {
   });
 });
 
+describe('W2-03 claims rule — a paid invoice keeps its claims', () => {
+  it('a paid invoice keeps its accepted lines (same ₪ as unpaid)', () => {
+    const lines = [line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 40 })];
+    const unpaid = claimableLines(invoice({ lines, leakIls: 40, status: 'matched' }));
+    const paid = claimableLines(invoice({ lines, leakIls: 40, status: 'paid' }));
+    expect(paid).toEqual(unpaid);
+    expect(sumClaims(paid)).toBe(40);
+  });
+
+  it('claimedIds skips a line that already holds a claim, and frees the cap', () => {
+    const lines = [
+      line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 30 }),
+      line({ discrepancyId: 'b', resolutionStatus: 'accepted', deltaAmount: 30 }),
+    ];
+    const inv = invoice({ lines, leakIls: 40 });
+    expect(claimableLines(inv).map((c) => [c.line.discrepancyId, c.amount])).toEqual([
+      ['a', 30],
+      ['b', 10],
+    ]);
+    expect(claimableLines(inv, { claimedIds: new Set(['a']) }).map((c) => [c.line.discrepancyId, c.amount])).toEqual([
+      ['b', 30],
+    ]);
+  });
+
+  it('a written-off claim does not skip (the caller leaves it out of claimedIds)', () => {
+    const lines = [line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 30 })];
+    // The written-off claim on 'a' is not in the set ⇒ 'a' is claimable again.
+    expect(claimableLines(invoice({ lines, leakIls: 30 }), { claimedIds: new Set(['zz']) })).toHaveLength(1);
+  });
+
+  it('the cap is still per invoice, paid or not', () => {
+    const lines = [
+      line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 80 }),
+      line({ discrepancyId: 'b', resolutionStatus: 'accepted', deltaAmount: 80 }),
+    ];
+    expect(sumClaims(claimableLines(invoice({ lines, leakIls: 100, status: 'paid' })))).toBe(100);
+  });
+
+  it('undecided (open / escalated) lines are flagged so letters can keep excluding them', () => {
+    const lines = [
+      line({ discrepancyId: 'o', resolutionStatus: 'open', deltaAmount: 5 }),
+      line({ discrepancyId: 'e', resolutionStatus: 'escalated', deltaAmount: 5 }),
+      line({ discrepancyId: 'a', resolutionStatus: 'accepted', deltaAmount: 5 }),
+    ];
+    expect(claimableLines(invoice({ lines, leakIls: 15 })).map((c) => [c.line.discrepancyId, c.undecided])).toEqual([
+      ['o', true],
+      ['e', true],
+      ['a', false],
+    ]);
+  });
+
+  it('a pending-link invoice still has nothing to claim', () => {
+    const lines = [line({ discrepancyId: 'a', resolutionStatus: 'accepted' })];
+    expect(claimableLines(invoice({ lines, pendingLink: true, status: 'paid' }))).toEqual([]);
+  });
+});
+
+describe('W2-03 M5 — the one claimable rule (shared with recovery CLAIMABLE_FILTER)', () => {
+  it("'resolved' is decided and claimable, exactly like 'accepted'", () => {
+    expect([...CLAIMABLE_DECIDED_STATUSES]).toEqual(['accepted', 'resolved']);
+    const lines = [line({ discrepancyId: 'r', resolutionStatus: 'resolved', deltaAmount: 25 })];
+    expect(claimableLines(invoice({ lines, leakIls: 25 })).map((c) => [c.amount, c.undecided])).toEqual([[25, false]]);
+  });
+  it('isClaimable / isDecidedClaim: severity, never-claimable types and status', () => {
+    const d = (over: Partial<{ type: string; severity: string; resolutionStatus: string }>) => ({
+      type: 'PRICE_HIGHER',
+      severity: 'warn',
+      resolutionStatus: 'accepted',
+      ...over,
+    });
+    expect(isDecidedClaim(d({}))).toBe(true);
+    expect(isDecidedClaim(d({ resolutionStatus: 'resolved' }))).toBe(true);
+    expect(isDecidedClaim(d({ resolutionStatus: 'open' }))).toBe(false);
+    expect(isClaimable(d({ resolutionStatus: 'escalated' }))).toBe(true);
+    expect(isClaimable(d({ resolutionStatus: 'rejected' }))).toBe(false);
+    expect(isClaimable(d({ severity: 'info' }))).toBe(false);
+    for (const type of NEVER_CLAIMABLE_TYPES) expect(isClaimable(d({ type }))).toBe(false);
+  });
+  it('a resolved claim is a credit to ask for in the pay run, not a hold', () => {
+    const inv = invoice({ lines: [line({ discrepancyId: 'r', resolutionStatus: 'resolved', deltaAmount: 30 })], leakIls: 30 });
+    expect(payRunStatusOf(inv)).toMatchObject({ status: 'claim', creditIls: 30, pendingIls: 0 });
+  });
+});
+
 describe('payRunStatusOf', () => {
   it('no finding at all ⇒ can pay', () => {
     expect(payRunStatusOf(null)).toEqual({ status: 'pay', duplicate: false, duplicateIls: 0, claims: [], pendingIls: 0, creditIls: 0 });
@@ -184,11 +282,12 @@ describe('payRunStatusOf', () => {
     expect(waived).toMatchObject({ status: 'pay', duplicate: false });
   });
 
-  it('waived / resolved lines do not hold and are not claimed', () => {
-    const s = payRunStatusOf(
-      invoice({ lines: [line({ discrepancyId: 'a', resolutionStatus: 'rejected' }), line({ discrepancyId: 'b', resolutionStatus: 'resolved' })] }),
-    );
-    expect(s).toMatchObject({ status: 'pay', claims: [], creditIls: 0 });
+  it('waived lines do not hold and are not claimed; a resolved line is a credit (M5, owner 7.11)', () => {
+    const waived = payRunStatusOf(invoice({ lines: [line({ discrepancyId: 'a', resolutionStatus: 'rejected' })] }));
+    expect(waived).toMatchObject({ status: 'pay', claims: [], creditIls: 0 });
+    const resolved = payRunStatusOf(invoice({ lines: [line({ discrepancyId: 'b', resolutionStatus: 'resolved' })] }));
+    expect(resolved).toMatchObject({ status: 'claim', pendingIls: 0 });
+    expect(resolved.creditIls).toBeGreaterThan(0);
   });
 });
 
@@ -235,7 +334,7 @@ describe('ask "what to claim" (claimableData / offline claimWeek) = the claims r
     expect(c.lines.map((l) => l.type)).not.toContain('MISSING_ON_INVOICE');
     expect(c.lines.map((l) => l.amountIls)).toEqual([40, 10]);
     expect(c.totalIls).toBe(50);
-    // A paid invoice has nothing left to claim (same as the letters).
-    expect(claimableData([{ ...inv, status: 'paid' }]).count).toBe(0);
+    // W2-03 (owner decision): a paid invoice KEEPS its claims — same lines as unpaid.
+    expect(claimableData([{ ...inv, status: 'paid' }]).totalIls).toBe(50);
   });
 });

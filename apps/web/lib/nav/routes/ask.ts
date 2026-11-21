@@ -2,14 +2,15 @@ import type { RouteDef } from '../types';
 
 export const routes: RouteDef[] = [
   {
-    // AI assistant (S14, flag aiAssistant): owner + manager only.
+    // AI assistant (S14, flag aiAssistant): owner + manager + bookkeeper (AU-06, read-only).
     key: 'ask',
     path: '/dashboard/ask',
     group: 'leaks',
     rank: 40,
-    roles: ['owner', 'manager'],
+    roles: ['owner', 'manager', 'bookkeeper'],
     features: ['aiAssistant'],
     nav: 'item',
+    badge: null,
     aliases: ['שאלו', 'שאלה', 'ask', 'ai'],
   },
 ];

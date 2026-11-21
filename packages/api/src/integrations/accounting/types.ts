@@ -51,4 +51,12 @@ export interface AccountingFile {
   rowCount: number;
   /** Characters the file's encoding can't hold (written as '?'): Arabic, emoji… */
   replacedChars: number;
+  /**
+   * Invoices left OUT because their supplier has no card code (no mapping and
+   * no ח״פ). Never posted under an invented code; the UI lists them to fix.
+   */
+  unmappedCount: number;
 }
+
+/** What a format renderer returns; `renderAccountingFile` adds `unmappedCount`. */
+export type RenderedFile = Omit<AccountingFile, 'unmappedCount'>;

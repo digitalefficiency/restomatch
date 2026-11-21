@@ -1,5 +1,18 @@
 import { ANSWER_DAYS, type followUps } from '../recovery/logic';
-import type { NeedRow } from './needs-you';
+/**
+ * SUPERSEDED (W2-08): the home reads its claim rows from the task spine
+ * (`tasks.mine` → claim_to_send / credit_to_match). Kept with its test until
+ * W2-10 moves `followUps` server-side; needs-rows.test.ts pins the two rules.
+ */
+interface NeedRow {
+  key: string;
+  tone: 'danger' | 'warn' | 'neutral';
+  label: string;
+  value: string;
+  sub?: string;
+  verb: string;
+  href: string;
+}
 
 type Queues = ReturnType<typeof followUps>;
 

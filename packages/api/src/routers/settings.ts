@@ -1,8 +1,34 @@
 import { z } from 'zod';
-import { and, eq, memberships, restaurants, sql, type RestaurantSettings } from '@restomatch/db';
-import { recordAudit } from '../audit';
+import {
+  and,
+  auditLog,
+  desc,
+  eq,
+  inArray,
+  memberships,
+  restaurants,
+  sql,
+  users,
+  type Database,
+  type RestaurantSettings,
+} from '@restomatch/db';
+import { resolveTolerances } from '@restomatch/matching';
+import { DEFAULT_REVIEW_THRESHOLD } from '@restomatch/ocr';
+import { resolveApprovalThresholds } from '../approvals/engine';
+import { recordAudit, type AuditAction } from '../audit';
+import { appError } from '../errors';
+import { vatRateOf } from '../lib/vat';
 import { financeProcedure, managerProcedure, memberProcedure, ownerProcedure, router } from '../trpc';
 import { hasNoControlChars, NO_CONTROL_CHARS_MESSAGE } from '../lib/text';
+
+/**
+ * W2-14 audit actions. G-05 pre-adds them to the `AuditAction` union
+ * (`claude/ux-g-05-write-kernel`); until it is on main they are cast here.
+ * TODO(W2-14 rebase): drop the casts once G-05 merges.
+ */
+const SETTINGS_UPDATED = 'settings.updated' as AuditAction;
+const SETTINGS_PROFILE_UPDATED = 'settings.profile_updated' as AuditAction;
+const SETTINGS_ACTIONS = [SETTINGS_UPDATED, SETTINGS_PROFILE_UPDATED] as const;
 
 /**
  * Per-restaurant matching-rules editor (Phase 5).
@@ -18,25 +44,27 @@ import { hasNoControlChars, NO_CONTROL_CHARS_MESSAGE } from '../lib/text';
 const boundedNonNeg = (max: number) => z.number().finite().nonnegative().max(max);
 /** A fraction in [0, 1] (e.g. percent tolerances stored as 0.05 = 5%). */
 const fraction = z.number().finite().min(0).max(1);
+/** A knob value, or `null` = remove the override and fall back to the engine default. */
+const knob = <T extends z.ZodTypeAny>(s: T) => s.nullable().optional();
 
 const TolerancesSchema = z
   .object({
-    pricePercent: fraction.optional(),
-    priceAbsolute: boundedNonNeg(1_000_000).optional(),
-    qtyPercent: fraction.optional(),
-    qtyAbsolute: boundedNonNeg(1_000_000).optional(),
-    blockPricePercent: fraction.optional(),
+    pricePercent: knob(fraction),
+    priceAbsolute: knob(boundedNonNeg(1_000_000)),
+    qtyPercent: knob(fraction),
+    qtyAbsolute: knob(boundedNonNeg(1_000_000)),
+    blockPricePercent: knob(fraction),
   })
   .strict();
 
 const ApprovalThresholdsSchema = z
   .object({
-    largeInvoiceWithoutPo: boundedNonNeg(100_000_000).optional(),
-    unorderedItemSignificant: boundedNonNeg(100_000_000).optional(),
-    cumulativeLargeAmount: boundedNonNeg(100_000_000).optional(),
-    cumulativeLargePct: fraction.optional(),
-    cumulativeMediumAmountMin: boundedNonNeg(100_000_000).optional(),
-    cumulativeMediumPctMin: fraction.optional(),
+    largeInvoiceWithoutPo: knob(boundedNonNeg(100_000_000)),
+    unorderedItemSignificant: knob(boundedNonNeg(100_000_000)),
+    cumulativeLargeAmount: knob(boundedNonNeg(100_000_000)),
+    cumulativeLargePct: knob(fraction),
+    cumulativeMediumAmountMin: knob(boundedNonNeg(100_000_000)),
+    cumulativeMediumPctMin: knob(fraction),
   })
   .strict();
 
@@ -44,7 +72,7 @@ const UpdateInput = z
   .object({
     tolerances: TolerancesSchema.optional(),
     approvalThresholds: ApprovalThresholdsSchema.optional(),
-    ocrReviewThreshold: fraction.optional(),
+    ocrReviewThreshold: knob(fraction),
   })
   .strict();
 
@@ -66,7 +94,7 @@ const timezoneSchema = z
     { message: 'אזור זמן לא תקין', params: { appCode: 'settings.invalidTimezone' } },
   );
 
-/** Restaurant profile patch. vatRate is a fraction (0.17 = 17%). businessId
+/** Restaurant profile patch. vatRate is a fraction (0.18 = 18%). businessId
  *  nullable so it can be cleared. At least one field required. */
 const ProfileUpdateInput = z
   .object({
@@ -78,17 +106,79 @@ const ProfileUpdateInput = z
   .strict()
   .refine((v) => Object.values(v).some((x) => x !== undefined), { message: 'אין שינויים לעדכן', params: { appCode: 'settings.noChanges' } });
 
-/** Drop undefined leaf values so a partial patch never blanks an existing knob. */
-function pruneUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (v !== undefined) out[k] = v;
+/**
+ * Merge a partial patch over the stored knobs. `undefined` leaves a knob alone;
+ * `null` DELETES the key (restores the engine default). Writing `null` would not
+ * do: `resolve*` would still see the key, so the key must be gone.
+ */
+function mergeKnobs<T extends Record<string, number | undefined>>(
+  current: T | undefined,
+  patch: Record<string, number | null | undefined>,
+): T {
+  const out: Record<string, number | undefined> = { ...(current ?? {}) };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) continue;
+    if (v === null) delete out[k];
+    else out[k] = v;
   }
-  return out as Partial<T>;
+  return out as T;
+}
+
+export interface EffectiveValue {
+  value: number;
+  /** true = no override stored, the engine default is in force. */
+  isDefault: boolean;
 }
 
 /**
- * The letterhead of the supplier credit-request letters (דרישת זיכוי):
+ * The values the engine ACTUALLY enforces for a settings blob: the stored
+ * override, else the default. Defaults come from the engine's own resolvers
+ * (`resolveTolerances`, `resolveApprovalThresholds`, `DEFAULT_REVIEW_THRESHOLD`)
+ * and are never redefined here.
+ */
+export function effectiveSettings(settings: RestaurantSettings) {
+  const tol = resolveTolerances(settings.tolerances);
+  const appr = resolveApprovalThresholds(settings.approvalThresholds);
+  const pick = <T extends Record<string, number>>(resolved: T, stored: Partial<T> | undefined) =>
+    Object.fromEntries(
+      Object.entries(resolved).map(([k, value]) => [
+        k,
+        { value, isDefault: stored?.[k as keyof T] == null } satisfies EffectiveValue,
+      ]),
+    ) as { [K in keyof T]: EffectiveValue };
+  return {
+    tolerances: pick(tol, settings.tolerances),
+    approvalThresholds: pick(appr, settings.approvalThresholds),
+    ocrReviewThreshold: {
+      value: settings.ocrReviewThreshold ?? DEFAULT_REVIEW_THRESHOLD,
+      isDefault: settings.ocrReviewThreshold == null,
+    } satisfies EffectiveValue,
+  };
+}
+
+/**
+ * Normalise an Israeli phone number to E.164 (+972…). Accepts local forms
+ * ("050-123 4567", "03-1234567") and international ones ("+972 50…", "00972…").
+ * Returns null when it is not a plausible Israeli number (8–9 national digits).
+ */
+export function normalizeIlPhone(raw: string): string | null {
+  let d = raw.replace(/[\s\-().]/g, '');
+  if (d.startsWith('+')) d = d.slice(1);
+  else if (d.startsWith('00')) d = d.slice(2);
+  else if (d.startsWith('0')) d = `972${d.slice(1)}`;
+  if (!/^972\d+$/.test(d)) return null;
+  const national = d.slice(3).replace(/^0/, '');
+  if (!/^[2-9]\d{7,8}$/.test(national)) return null;
+  return `+972${national}`;
+}
+
+/** Owner/admin connection: `users` is REVOKE'd from the tenant app role (rls.ts). */
+function adminConn(ctx: { adminDb?: Database; db: Database }): Database {
+  return ctx.adminDb ?? ctx.db;
+}
+
+/**
+ * The letterhead of the supplier credit-request letters (בקשת זיכוי):
  * restaurants.settings.letterhead (JSONB, no migration), every field optional.
  * An empty string clears a field.
  */
@@ -162,15 +252,14 @@ export const settingsRouter = router({
 
     const next: RestaurantSettings = { ...current };
     if (input.tolerances !== undefined) {
-      next.tolerances = { ...current.tolerances, ...pruneUndefined(input.tolerances) };
+      next.tolerances = mergeKnobs(current.tolerances, input.tolerances);
     }
     if (input.approvalThresholds !== undefined) {
-      next.approvalThresholds = {
-        ...current.approvalThresholds,
-        ...pruneUndefined(input.approvalThresholds),
-      };
+      next.approvalThresholds = mergeKnobs(current.approvalThresholds, input.approvalThresholds);
     }
-    if (input.ocrReviewThreshold !== undefined) {
+    if (input.ocrReviewThreshold === null) {
+      delete next.ocrReviewThreshold;
+    } else if (input.ocrReviewThreshold !== undefined) {
       next.ocrReviewThreshold = input.ocrReviewThreshold;
     }
 
@@ -179,8 +268,85 @@ export const settingsRouter = router({
       .set({ settings: next, updatedAt: new Date() })
       .where(eq(restaurants.id, ctx.session.restaurantId))
       .returning({ settings: restaurants.settings });
+    await recordAudit(ctx.db, {
+      restaurantId: ctx.session.restaurantId,
+      userId: ctx.session.userId,
+      action: SETTINGS_UPDATED,
+      entityType: 'restaurant',
+      entityId: ctx.session.restaurantId,
+      before: {
+        tolerances: current.tolerances ?? {},
+        approvalThresholds: current.approvalThresholds ?? {},
+        ocrReviewThreshold: current.ocrReviewThreshold ?? null,
+      },
+      after: {
+        tolerances: next.tolerances ?? {},
+        approvalThresholds: next.approvalThresholds ?? {},
+        ocrReviewThreshold: next.ocrReviewThreshold ?? null,
+      },
+    });
     return updated?.settings ?? next;
   }),
+
+  /**
+   * The rules in force, per knob: `{ value, isDefault }`. Read-only, any member
+   * (the same tier as `get`). The UI shows a "ברירת מחדל" / "הותאם" chip and one
+   * rule sentence per group from this, so a blank input never hides a ₪ rule.
+   */
+  effective: memberProcedure.query(async ({ ctx }) => {
+    const [row] = await ctx.db
+      .select({ settings: restaurants.settings })
+      .from(restaurants)
+      .where(eq(restaurants.id, ctx.session.restaurantId))
+      .limit(1);
+    return effectiveSettings(row?.settings ?? {});
+  }),
+
+  /**
+   * Change history of the restaurant's rules and profile (audit rows written by
+   * `update` / `updateProfile`), newest first. Finance tier (owner, manager,
+   * bookkeeper): the same roles that see the settings sections.
+   */
+  history: financeProcedure
+    .input(z.object({ limit: z.number().int().min(1).max(100).default(30) }).optional())
+    .query(async ({ ctx, input }) => {
+      const rows = await ctx.db
+        .select({
+          id: auditLog.id,
+          action: auditLog.action,
+          at: auditLog.at,
+          before: auditLog.before,
+          after: auditLog.after,
+          userId: auditLog.userId,
+        })
+        .from(auditLog)
+        .where(
+          and(
+            eq(auditLog.restaurantId, ctx.session.restaurantId),
+            inArray(auditLog.action, [...SETTINGS_ACTIONS]),
+          ),
+        )
+        .orderBy(desc(auditLog.at))
+        .limit(input?.limit ?? 30);
+      // Names live in `users` (off-limits to the app role): read them on the
+      // owner connection, only for the ids this tenant's own audit rows name.
+      const ids = [...new Set(rows.map((r) => r.userId).filter((v): v is string => !!v))];
+      const names = ids.length
+        ? await adminConn(ctx)
+            .select({ id: users.id, name: users.name, email: users.email })
+            .from(users)
+            .where(inArray(users.id, ids))
+        : [];
+      const byId = new Map(names.map((u) => [u.id, u.name || u.email]));
+      return rows.map((r) => ({
+        id: r.id,
+        kind: r.action === SETTINGS_UPDATED ? ('rules' as const) : ('profile' as const),
+        at: r.at,
+        byName: r.userId ? (byId.get(r.userId) ?? null) : null,
+        before: r.before as Record<string, unknown> | null,
+        after: r.after as Record<string, unknown> | null,
+      }));
+    }),
 
   /** Restaurant profile (name / business id / VAT rate / timezone) for the editor. */
   profile: memberProcedure.query(async ({ ctx }) => {
@@ -198,7 +364,7 @@ export const settingsRouter = router({
       name: row?.name ?? '',
       businessId: row?.businessId ?? null,
       // vatRate is NUMERIC → Drizzle returns a string; expose it as a fraction number.
-      vatRate: row?.vatRate != null ? Number(row.vatRate) : 0.17,
+      vatRate: vatRateOf(row?.vatRate),
       timezone: row?.timezone ?? 'Asia/Jerusalem',
     };
   }),
@@ -215,6 +381,17 @@ export const settingsRouter = router({
     if (input.vatRate !== undefined) patch.vatRate = String(input.vatRate);
     if (input.timezone !== undefined) patch.timezone = input.timezone;
 
+    const [prev] = await ctx.db
+      .select({
+        name: restaurants.name,
+        businessId: restaurants.businessId,
+        vatRate: restaurants.vatRate,
+        timezone: restaurants.timezone,
+      })
+      .from(restaurants)
+      .where(eq(restaurants.id, ctx.session.restaurantId))
+      .limit(1);
+
     const [updated] = await ctx.db
       .update(restaurants)
       .set(patch)
@@ -225,10 +402,21 @@ export const settingsRouter = router({
         vatRate: restaurants.vatRate,
         timezone: restaurants.timezone,
       });
+    // Only the fields the patch touched, before and after.
+    const touched = (['name', 'businessId', 'vatRate', 'timezone'] as const).filter((k) => input[k] !== undefined);
+    await recordAudit(ctx.db, {
+      restaurantId: ctx.session.restaurantId,
+      userId: ctx.session.userId,
+      action: SETTINGS_PROFILE_UPDATED,
+      entityType: 'restaurant',
+      entityId: ctx.session.restaurantId,
+      before: Object.fromEntries(touched.map((k) => [k, prev?.[k] ?? null])),
+      after: Object.fromEntries(touched.map((k) => [k, updated?.[k] ?? null])),
+    });
     return {
       name: updated?.name ?? '',
       businessId: updated?.businessId ?? null,
-      vatRate: updated?.vatRate != null ? Number(updated.vatRate) : 0.17,
+      vatRate: vatRateOf(updated?.vatRate),
       timezone: updated?.timezone ?? 'Asia/Jerusalem',
     };
   }),
@@ -329,5 +517,41 @@ export const settingsRouter = router({
         after: { locale: input.locale },
       });
       return { locale: input.locale };
+    }),
+
+  /**
+   * The caller's own phone (users.phone) and whether it is verified. Verification
+   * is not live yet: `users.phone_verified_at` arrives with G-03 (deploy Tue
+   * 24.11) and OTP sending needs a WhatsApp/SMS provider (Phase-6), so
+   * `verified` is false and `verificationAvailable` is false until then.
+   */
+  myPhone: memberProcedure.query(async ({ ctx }) => {
+    const [row] = await adminConn(ctx)
+      .select({ phone: users.phone })
+      .from(users)
+      .where(eq(users.id, ctx.session.userId))
+      .limit(1);
+    return { phone: row?.phone ?? null, verified: false, verificationAvailable: false };
+  }),
+
+  /**
+   * Self only: set (or clear, with null) the caller's phone, normalised to E.164
+   * (+972…). `users` is REVOKE'd from the tenant app role, so this writes on the
+   * auth/owner connection, scoped `WHERE id = session.userId` and nothing else.
+   * The number is stored UNVERIFIED (interim until G-03's phone_verified_at).
+   */
+  setMyPhone: memberProcedure
+    .input(z.object({ phone: z.string().trim().max(32).nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      let phone: string | null = null;
+      if (input.phone) {
+        phone = normalizeIlPhone(input.phone);
+        if (!phone) throw appError('BAD_REQUEST', 'input.invalid', 'מספר טלפון לא תקין');
+      }
+      await adminConn(ctx)
+        .update(users)
+        .set({ phone, updatedAt: new Date() })
+        .where(eq(users.id, ctx.session.userId));
+      return { phone, verified: false };
     }),
 });

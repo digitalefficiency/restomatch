@@ -1,8 +1,8 @@
 import 'server-only';
 import { createServerCaller } from '@/lib/trpc/server';
 import { leakCardWindow, topLeakLines, topTypes, toAgorot, type TopLeakLine } from './leak-card-logic';
-import { buildLetters, letterAgorotFor } from '../../leaks/claims/letters';
-import { ALL_CLAIMS } from '../../recovery/logic';
+import { entitlementCauseOf } from '@/lib/components/entitlement';
+import { settle } from './leak-card-reads';
 
 type Caller = Awaited<ReturnType<typeof createServerCaller>>;
 type Scorecard = Awaited<ReturnType<Caller['owner']['suppliers']>>[number];
@@ -22,13 +22,16 @@ export interface SupplierLeakCard {
   /**
    * The ₪ of this supplier's credit-request letter right now (the claims page's
    * own model: this month's unpaid lines + its unsent ₪-back claims) — the only ₪
-   * the "open the credit request" button may name. 0 = no letter to open.
+   * the "open the credit request" button may name. 0 = no letter to open;
+   * null = the read failed (shown as unavailable, never ₪0).
    */
-  letterAgorot: number;
+  letterAgorot: number | null;
   /** null when the scorecard isn't available (advanced_analytics plan) or the supplier has no runs. */
   scorecard: Scorecard | null;
   /** True when the plan doesn't include the scorecard (advanced_analytics). */
   scorecardGated: boolean;
+  /** The scorecard read failed for another reason: "unavailable", never an empty card. */
+  scorecardUnavailable: boolean;
 }
 
 /**
@@ -48,14 +51,16 @@ export async function loadSupplierLeakCard(supplierId: string, now = new Date())
     caller.owner.leakGrouped({ view, groupBy: 'type', compare: 'off' }),
     caller.owner.leakGrouped({ view: openView, groupBy: 'supplier', compare: 'off' }),
     caller.owner.leakBreakdown({ view, limit: 200 }),
-    // The scorecard is plan-gated (advanced_analytics): absent, the card just omits it.
-    caller.owner.suppliers().catch(() => null),
-    letterTotal(caller, supplierId).catch(() => 0),
+    // The scorecard is plan-gated (advanced_analytics): only the entitlement
+    // refusal reads as "gated"; any other failure is "unavailable" (G-16).
+    settle(caller.owner.suppliers(), (err) => entitlementCauseOf(err) !== null),
+    // A failed letter read is unknown (null), never ₪0 (G-16).
+    settle(letterTotal(caller, supplierId)),
   ]);
 
   const row = bySupplier.rows.find((r) => r.key === supplierId);
   const openRow = open.rows.find((r) => r.key === supplierId);
-  const card = scorecards?.find((s) => s.supplierId === supplierId) ?? null;
+  const card = scorecards.state === 'ok' ? (scorecards.value.find((s) => s.supplierId === supplierId) ?? null) : null;
   return {
     window,
     leakAgorot: toAgorot(row?.leakIls ?? 0),
@@ -64,20 +69,20 @@ export async function loadSupplierLeakCard(supplierId: string, now = new Date())
     topLines: topLeakLines(breakdown),
     openAgorot: toAgorot(openRow?.leakIls ?? 0),
     openCount: openRow?.count ?? 0,
-    letterAgorot,
+    letterAgorot: letterAgorot.state === 'ok' ? letterAgorot.value : null,
     scorecard: card && card.matchRunsCount > 0 ? card : null,
-    scorecardGated: scorecards === null,
+    scorecardGated: scorecards.state === 'gated',
+    scorecardUnavailable: scorecards.state === 'unavailable',
   };
 }
 
-/** The supplier's letter total, built exactly like /dashboard/leaks/claims builds it. */
+/**
+ * The supplier's credit-request letter total — exactly the letter the click
+ * opens (W2-10's recovery.letters: built from that supplier's claimed claims),
+ * so the card CTA and the printed card ₪ equal the letters page (B1 ₪ trust).
+ * No catch: a failed read is "unavailable" upstream (G-16), never ₪0.
+ */
 async function letterTotal(caller: Caller, supplierId: string): Promise<number> {
-  const [month, flags, supplier] = await Promise.all([
-    caller.owner.leakBreakdown({ monthOffset: 0, limit: 200 }),
-    caller.recovery.flags(),
-    caller.suppliers.get({ supplierId }),
-  ]);
-  const tracked = flags.recovery ? await caller.recovery.list({ supplierId, limit: ALL_CLAIMS }).catch(() => []) : [];
-  const { letters } = buildLetters({ month, tracked });
-  return letterAgorotFor(letters, { id: supplierId, name: supplier.name });
+  const letters = await caller.recovery.letters({ supplierId });
+  return letters.find((l) => l.supplierId === supplierId)?.totalAgorot ?? 0;
 }

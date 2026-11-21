@@ -41,9 +41,11 @@ import {
   sumAbsIls,
 } from '../catalog/linkQuestions';
 import { enqueue, isQueueUnavailableError, MATCH_INVOICE_QUEUE, type MatchInvoiceQueueJob } from '@restomatch/queue';
-import { chefProcedure, managerProcedure, memberProcedure, router } from '../trpc';
+import { chefProcedure, financeProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import { assertSupplierOwned } from '../tenant';
 import { readConsolidatedRaw } from '../match/consolidated';
+import { buildLinkQueue, summarizeLinkQueue, type LinkQueueRow } from '../catalog/linkQueue';
+import { loadLinkQueueCandidates } from '../catalog/linkQueueLoad';
 
 type SQL = ReturnType<typeof sql>;
 
@@ -1326,6 +1328,55 @@ export const mappingRouter = router({
     // The chef answers name questions only; owner / manager also the SKU ones.
     count: await countQuestions(ctx.db, ctx.session.restaurantId, ctx.session.role !== 'chef'),
   })),
+
+  /**
+   * W3-10 · the one "לקשר" queue: SKU lines, no-SKU lines and price-list review
+   * rows in one list, ranked by the ₪ still unmapped (Σ |line_total| of unlinked
+   * invoice lines, integer agorot). Owner / manager / bookkeeper (read-only, owner
+   * decision 7): it carries ₪, so the chef keeps G-08's name questions and the
+   * receiver sees neither. The top
+   * `suggestFor` rows carry the link policy's 1–3 suggestions (names, no ₪) for
+   * the 1/2/3 keys; the summary covers the whole queue, not just the page.
+   */
+  queue: financeProcedure
+    .input(
+      z
+        .object({
+          supplierId: z.string().uuid().optional(),
+          limit: z.number().int().min(1).max(200).default(50),
+          suggestFor: z.number().int().min(0).max(25).default(10),
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      const rid = ctx.session.restaurantId;
+      const limit = input?.limit ?? 50;
+      const suggestFor = input?.suggestFor ?? 10;
+      const all = buildLinkQueue(await loadLinkQueueCandidates(ctx.db, rid, input?.supplierId));
+      const page = all.slice(0, limit);
+      const names = new Map(
+        (
+          await ctx.db
+            .select({ id: suppliers.id, name: suppliers.name })
+            .from(suppliers)
+            .where(eq(suppliers.restaurantId, rid))
+        ).map((r) => [r.id, r.name]),
+      );
+      const rows: Array<LinkQueueRow & { supplierName: string; suggestions: LinkSuggestion[] }> = [];
+      for (const [i, r] of page.entries()) {
+        rows.push({
+          ...r,
+          supplierName: names.get(r.supplierId) ?? '',
+          suggestions: i < suggestFor && r.nameRaw ? await suggestionsFor(ctx.db, rid, r.supplierId, r.nameRaw) : [],
+        });
+      }
+      return { rows, summary: summarizeLinkQueue(all) };
+    }),
+
+  /** W3-10 · "7 לקישור · ₪1,240" for the nav and the Needs-you row. Owner / manager / bookkeeper (₪). */
+  queueSummary: financeProcedure.query(async ({ ctx }) =>
+    summarizeLinkQueue(buildLinkQueue(await loadLinkQueueCandidates(ctx.db, ctx.session.restaurantId))),
+  ),
 
   /** Product picker: fuzzy/ILIKE search over the restaurant's products. */
   searchProducts: memberProcedure

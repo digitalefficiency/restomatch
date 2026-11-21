@@ -31,7 +31,6 @@ export default async function CatalogPage() {
       <SectionHeader
         level={1}
         title={t('title')}
-        subtitle={t('subtitle')}
         className="flex-wrap"
         action={
           canEdit ? (

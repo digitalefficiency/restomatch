@@ -1,4 +1,4 @@
-import { MAX_AMOUNT_AGOROT, parseScaled, roundHalfUp, type RecipeCost } from './cost';
+import { MAX_AMOUNT_AGOROT, parseNumericScaled, roundHalfUp, type RecipeCost } from './cost';
 
 /**
  * Theoretical vs actual food cost per dish, from POS sales (wave 1; needs both
@@ -122,8 +122,8 @@ export function posVsTheory(
     const cost = costs.get(recipeId);
     if (!cost) continue; // its items stay in `unmatched` — never silently dropped
     for (const i of its) matchedRefs.add(i.itemRef);
-    const qty = its.reduce((a, i) => a + parseScaled(i.qty, 3), 0n); // × 1000
-    const sales = its.reduce((a, i) => a + parseScaled(i.netAmount, 2), 0n); // agorot
+    const qty = its.reduce((a, i) => a + parseNumericScaled(i.qty, 3), 0n); // × 1000
+    const sales = its.reduce((a, i) => a + parseNumericScaled(i.netAmount, 2), 0n); // agorot
     const portion = BigInt(cost.portionCostAgorot);
     const theoretical = roundHalfUp(portion * qty, 1000n);
     const actualBigBp = sales > 0n ? roundHalfUp(theoretical * 10_000n, sales) : null;
@@ -153,7 +153,7 @@ export function posVsTheory(
   const costN = capped(totalCost) ?? 0;
   const unmatched = items
     .filter((i) => !matchedRefs.has(i.itemRef))
-    .map((i) => ({ itemRef: i.itemRef, itemName: i.itemName, netSalesAgorot: Number(parseScaled(i.netAmount, 2)) }))
+    .map((i) => ({ itemRef: i.itemRef, itemName: i.itemName, netSalesAgorot: Number(parseNumericScaled(i.netAmount, 2)) }))
     .sort((a, b) => b.netSalesAgorot - a.netSalesAgorot);
   return {
     rows,

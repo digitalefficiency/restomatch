@@ -187,8 +187,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
 
   return (
     <AuthShell>
-      <h1 className="mb-2 text-2xl font-bold text-ink">{t('login.title')}</h1>
-      <p className="mb-6 text-sm text-muted">{t('login.subtitle')}</p>
+      <h1 className="mb-6 text-2xl font-bold text-ink">{t('login.title')}</h1>
 
       <QueuedPhotosNote />
 

@@ -330,7 +330,7 @@ export function CatalogBrowser({
         <EmptyState
           icon={<Boxes className="h-6 w-6" />}
           title={filtered ? t('browser.noResultsTitle') : t('browser.emptyTitle')}
-          description={filtered ? t('browser.noResultsBody') : t('browser.emptyBody')}
+          description={filtered ? undefined : t('browser.emptyBody')}
           action={
             !filtered ? (
               canEdit ? (

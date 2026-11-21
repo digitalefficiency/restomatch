@@ -8,6 +8,9 @@ import { he as overview } from '../i18n/messages/overview/he';
 import { he as recipes } from '../i18n/messages/recipes/he';
 import { he as inventory } from '../i18n/messages/inventory/he';
 import { he as suppliers } from '../i18n/messages/suppliers/he';
+import { he as ask } from '../i18n/messages/ask/he';
+import { he as payRun } from '../i18n/messages/payRun/he';
+import { he as showcase } from '../i18n/messages/showcase/he';
 
 /**
  * Owner terminology (31.10; 7.11: בקשת זיכוי): מרכזת · פער · בקשת זיכוי · קבלת סחורה, and
@@ -41,4 +44,12 @@ describe('pilot terminology', () => {
     expect(overview.homeSubtitle.chef).toBe('ספירה ועלות מנות.');
     expect(recipes.alert.crossed).toContain('מעל עלות המזון הרצויה');
   });
+
+  // Batch P (W2-16): the same words outside W1-08's paths. settings + chain join once #255 lands.
+  for (const [ns, msgs] of Object.entries({ ask, payRun, showcase })) {
+    it(`${ns}: no off-vocabulary word (Batch P)`, () => {
+      const hits = values(msgs).flatMap((v) => OFF.filter((o) => o.re.test(v)).map((o) => `${o.re} → ${o.use}: ${v}`));
+      expect(hits).toEqual([]);
+    });
+  }
 });

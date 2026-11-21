@@ -9,6 +9,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { cn } from '../cn';
+import { HERO_CTA_CLASS, heroCtaVariant } from './model';
 import type { DeltaDirection, LeakHeroState } from './model';
 
 export interface LeakHeroLink {
@@ -53,7 +54,7 @@ export interface LeakHeroProps {
   cleanSentence?: string | null;
   /** noData: one CTA. */
   noData?: { title: string; hint: string; cta: LeakHeroLink | null } | null;
-  /** One primary action (danger-solid only when money leaked). */
+  /** One primary action — always the secondary button, never red (D9). */
   primary?: LeakHeroLink | null;
   /** One tertiary text link ("איך חישבנו?"). */
   tertiary?: LeakHeroLink | null;
@@ -62,11 +63,17 @@ export interface LeakHeroProps {
   calcLabel?: string;
   /** Secondary actions (report, digest…) in a ⋯ menu at the hero's top end. */
   more?: { label: string; items: LeakHeroLink[] } | null;
+  /**
+   * "למה?" (IA rule 2, owner decision I1): the base, the unpaid/paid split, the
+   * waiting-for-PO-link line and the leak rule, closed by default and opened in
+   * place. With it, the compact hero shows only the WHAT (₪ · % · Δ · completeness).
+   */
+  why?: { label: string; children: React.ReactNode; testId?: string } | null;
   className?: string;
 }
 
 const linkFocus =
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2';
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2';
 
 /**
  * The T1 leak hero: one number, one story, one primary action. Pure and
@@ -97,9 +104,9 @@ export function LeakHero(p: LeakHeroProps) {
       ) : null}
 
       <div>
-        <p className={cn('text-xs font-semibold text-subtle', p.more?.items.length ? 'pe-10' : '')}>
-          {p.eyebrow}
-        </p>
+        {p.eyebrow ? (
+          <p className={cn('text-xs font-semibold text-subtle', p.more?.items.length ? 'pe-10' : '')}>{p.eyebrow}</p>
+        ) : null}
         {p.more && p.more.items.length > 0 ? (
           <details className="absolute end-2 top-2 z-10">
             <summary
@@ -233,7 +240,7 @@ export function LeakHero(p: LeakHeroProps) {
                         href={p.completeness.href}
                         data-testid="leak-hero-completeness"
                         className={cn(
-                          'inline-flex min-h-8 items-center rounded-lg text-sm text-muted hover:text-ink hover:underline',
+                          'inline-flex min-h-11 items-center rounded-lg text-sm text-muted hover:text-ink hover:underline sm:min-h-8 [@media(pointer:coarse)]:min-h-11',
                           linkFocus,
                         )}
                       >
@@ -250,7 +257,7 @@ export function LeakHero(p: LeakHeroProps) {
                       href={p.tertiary.href}
                       data-testid={p.tertiary.testId}
                       className={cn(
-                        'inline-flex min-h-8 items-center rounded-lg text-sm font-semibold text-primary hover:underline',
+                        'inline-flex min-h-11 items-center rounded-lg text-sm font-semibold text-primary hover:underline sm:min-h-8 [@media(pointer:coarse)]:min-h-11',
                         linkFocus,
                       )}
                     >
@@ -259,13 +266,28 @@ export function LeakHero(p: LeakHeroProps) {
                   ) : null}
                 </div>
               ) : null}
+              {p.why ? (
+                <details className="group mt-1" data-testid={p.why.testId ?? 'leak-hero-why'}>
+                  <summary
+                    className={cn(
+                      // 44 px tap height on phone (a11y phone suite), 32 px from sm up.
+                      'inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-lg text-sm font-semibold text-primary hover:underline sm:min-h-8 [@media(pointer:coarse)]:min-h-11 [&::-webkit-details-marker]:hidden',
+                      linkFocus,
+                    )}
+                  >
+                    {p.why.label}
+                  </summary>
+                  <div className="mt-2 space-y-1.5 border-s-2 border-line ps-3 text-sm text-muted">{p.why.children}</div>
+                </details>
+              ) : null}
             </>
           )}
         </div>
 
         {hasParts ? (
           <div
-            className="grid min-w-0 grid-cols-2 gap-2"
+            // The "⋯" menu sits in the top end corner: the tiles start below it (no overlapping tap targets).
+            className={cn('grid min-w-0 grid-cols-2 gap-2', (p.more?.items.length ?? 0) > 0 && 'lg:mt-8')}
             role="group"
             aria-label={p.splitLabel}
           >
@@ -284,9 +306,7 @@ export function LeakHero(p: LeakHeroProps) {
               data-testid={p.primary.testId}
               className={cn(
                 'inline-flex min-h-12 items-center justify-center gap-1.5 rounded-xl px-4 text-sm font-semibold transition-colors max-lg:w-full sm:max-lg:w-auto',
-                leaked
-                  ? 'bg-danger text-on-primary hover:brightness-90'
-                  : 'border border-line-strong bg-surface text-ink hover:border-primary/40 hover:text-primary',
+                HERO_CTA_CLASS[heroCtaVariant(p.state)],
                 linkFocus,
               )}
             >

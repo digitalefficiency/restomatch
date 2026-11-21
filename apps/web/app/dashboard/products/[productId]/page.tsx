@@ -42,14 +42,11 @@ export default async function ProductPage({ params }: { params: Promise<{ produc
         level={1}
         title={name.primary}
         subtitle={
-          <>
-            {name.secondary ? (
-              <span className="mb-1 block text-base text-subtle" lang="he">
-                {name.secondary}
-              </span>
-            ) : null}
-            {t('subtitle')}
-          </>
+          name.secondary ? (
+            <span className="mb-1 block text-base text-subtle" lang="he">
+              {name.secondary}
+            </span>
+          ) : undefined
         }
       />
       <ProductEditor detail={detail} suppliers={suppliers} canEdit={canEdit} />

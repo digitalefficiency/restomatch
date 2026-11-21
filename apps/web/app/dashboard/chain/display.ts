@@ -14,3 +14,26 @@ export function wholeShekelRows(values: number[]): { rows: number[]; total: numb
   const rows = values.map((v) => Math.round(Math.round(v * 100) / 100));
   return { rows, total: rows.reduce((a, b) => a + b, 0) };
 }
+
+/**
+ * The chain KPI sparkline: Σ leak per month over the branches' heatmap rows.
+ * A missing or non-finite cell means that month is unknown for the chain, so
+ * the whole sparkline is unavailable (null → no sparkline, neutral T4). It is
+ * never read as ₪0 (G-16 money-swallow).
+ */
+export function chainSparkline(
+  months: string[],
+  heatmap: { cells: { month: string; leakIls: number | null | undefined }[] }[],
+): number[] | null {
+  const out: number[] = [];
+  for (const m of months) {
+    let agorot = 0;
+    for (const row of heatmap) {
+      const v = row.cells.find((c) => c.month === m)?.leakIls;
+      if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+      agorot += Math.round(v * 100);
+    }
+    out.push(agorot / 100);
+  }
+  return out;
+}
