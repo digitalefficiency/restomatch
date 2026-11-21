@@ -99,7 +99,7 @@ test.describe('1 · the build ships the token source', () => {
 test.describe('2 · focus', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
-  test('Tab stops on home show a 2 px outline in the focus colour with a 2 px offset', async ({ page }) => {
+  test('Tab stops on home show a 2 px outline in the focus colour, 2 px outside, or 2 px inside under data-focus="inset"', async ({ page }) => {
     await setLang(page, 'he');
     await page.goto('/dashboard');
     await page.locator('main').first().waitFor();
@@ -112,10 +112,13 @@ test.describe('2 · focus', () => {
         const r = el.getBoundingClientRect();
         if (r.width * r.height === 0) return null;
         const cs = getComputedStyle(el);
-        return { style: cs.outlineStyle, width: cs.outlineWidth, offset: cs.outlineOffset, color: cs.outlineColor };
+        // The side menu's rows (and rows in scroll containers) opt in to the inward outline (SPEC §4).
+        const inset = el.closest('[data-focus="inset"]') !== null;
+        return { style: cs.outlineStyle, width: cs.outlineWidth, offset: cs.outlineOffset, color: cs.outlineColor, inset };
       });
       if (!f) continue;
-      expect.soft(f).toEqual({ style: 'solid', width: '2px', offset: '2px', color: rgb(focus) });
+      const { inset, ...outline } = f;
+      expect.soft(outline).toEqual({ style: 'solid', width: '2px', offset: inset ? '-2px' : '2px', color: rgb(focus) });
       checked += 1;
     }
     expect(checked).toBeGreaterThanOrEqual(4);
@@ -210,7 +213,7 @@ test.describe('4 · tiers keep their meaning', () => {
     expect(colours.caught).toBe(T3);
     expect(colours.credited).toBe(T3);
     expect(colours.returned).toBe(T3);
-    expect(colours.claimed).toBe(rgb(status.primary.text));
+    expect(colours.claimed).toBe(T3);
     for (const s of ['leak', 'atRisk', 'outstanding', 'spend']) expect(colours[s], s).toBe(rgb(text.ink));
     for (const s of ['pending', 'zero']) expect(colours[s], s).toBe(rgb(text.muted));
     for (const [s, c] of Object.entries(colours)) {
