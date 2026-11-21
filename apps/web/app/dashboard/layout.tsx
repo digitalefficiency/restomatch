@@ -235,7 +235,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <LocaleSync />
                 {/* Always mounted: it only touches an EXISTING receiver queue, so a sign-out from a branch
                     without receiverPwa still wipes photos queued on another branch. */}
-                <PwaSessionGuard userId={userId} />
+                <PwaSessionGuard userId={userId} appPwa={features.includes('receiverPwa')} />
                 {children}
               </div>
             </main>
