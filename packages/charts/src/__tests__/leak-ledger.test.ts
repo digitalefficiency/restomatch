@@ -444,9 +444,13 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
       expect(by[c.invoiceId]).toMatchObject({ invoicePaid: false, paidAt: null });
       expect(by[e.invoiceId]).toMatchObject({ invoicePaid: true, paidAt: '2026-10-13T21:00:00.000Z' });
     } finally {
-      if (!had.payment_deductions) await db.execute(sql`DROP TABLE IF EXISTS payment_deductions`);
-      if (!had.payment_invoices) await db.execute(sql`DROP TABLE IF EXISTS payment_invoices`);
-      if (!had.payments) await db.execute(sql`DROP TABLE IF EXISTS payments`);
+      // A real table keeps its schema; only this test's rows go (its invoice FKs are NO ACTION).
+      if (had.payment_deductions) await db.execute(sql`DELETE FROM payment_deductions WHERE restaurant_id = ${rid}`);
+      else await db.execute(sql`DROP TABLE IF EXISTS payment_deductions`);
+      if (had.payment_invoices) await db.execute(sql`DELETE FROM payment_invoices WHERE restaurant_id = ${rid}`);
+      else await db.execute(sql`DROP TABLE IF EXISTS payment_invoices`);
+      if (had.payments) await db.execute(sql`DELETE FROM payments WHERE restaurant_id = ${rid}`);
+      else await db.execute(sql`DROP TABLE IF EXISTS payments`);
     }
   });
 
