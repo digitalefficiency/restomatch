@@ -61,7 +61,10 @@ the governing files. An agent that needs one changed proposes it and stops.
   or weaken an assertion.
 - `packages/db/src/plans.ts` (`PLAN_SEED` / `priceAgorotMonthly`) and `packages/billing/*`
   (pricing + entitlements).
-- `packages/api/src/approvals/engine.ts` (the rules that block before payment).
+- `packages/api/src/approvals/engine.ts` (the rules that block before payment) + `packages/charts/src/leak-views.ts`
+  (`LEAK_EXCLUDED_TYPES` / `isLeakType` — the "not a leak" list the approvals routing reads — and the
+  view-driven leak SQL; owner decision 11.11, G-15 Q7: a change to the leak definition must not silently
+  change who approves what).
 - `packages/api/src/notifications/outbox.ts` + `apps/worker/src/cron.ts` (delivery + scheduled jobs).
 - `packages/api/src/routers/leads.ts` + `apps/web/app/api/trpc/[trpc]/route.ts` (public attack surface)
   + `apps/web/lib/rateLimit.ts` (the Redis/memory rate-limit store).

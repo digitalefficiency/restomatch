@@ -30,6 +30,7 @@ export const en: Shape<typeof he> = {
     },
     copyLinkTitle: 'Copy the invite link',
     whatsapp: 'Send on WhatsApp',
+    qrAlt: 'QR code of the join link, to scan with a camera.',
     whatsappText: "You're invited to join the {restaurant} team on RestoMatch. Join here: {url}",
     rateLimited: 'Too many invites sent in the last hour. Please try again later.',
     copied: 'Copied',
