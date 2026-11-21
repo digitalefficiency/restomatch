@@ -93,7 +93,8 @@ describe('DS2 v2 names', () => {
 
   it('has 18 v2 type roles; with caption, body-sm and body that is the closed 21', () => {
     // DS2 closed 17; DS3-00 adds `row-title` and `row-sub` (SPEC §7: a queue row's compact steps) and
-    // `sub` and `lead` (SPEC §3: 13/18 and 18/24, asked for by DS3-03). Nothing else may join.
+    // `sub` and `lead` (SPEC §3: 13/18 and 18/24, asked for by DS3-03). A new role needs a SPEC step
+    // that no role carries; the other §3 steps re-valued existing roles (title-sm, money-card, money-hero).
     expect(Object.keys(tokens.typeScaleV2)).toHaveLength(18);
     expect(Object.keys(tokens.typeScaleV2)).toEqual(expect.arrayContaining(['row-title', 'row-sub', 'sub', 'lead']));
   });

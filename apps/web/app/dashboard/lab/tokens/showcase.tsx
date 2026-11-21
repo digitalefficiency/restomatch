@@ -75,7 +75,7 @@ const LAB_TODAY = new Date('2026-10-25T09:00:00+03:00');
 
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (
-    <section aria-labelledby={id} className="space-y-4 rounded-card border border-line bg-surface p-4 md:p-6">
+    <section aria-labelledby={id} className="space-y-4 rounded-card border border-line-rule bg-surface p-4 md:p-6">
       <h2 id={id} className="text-heading-md text-ink">
         {title}
       </h2>
@@ -196,7 +196,7 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
       <Section id="lab-type" title={lab('type')}>
         <div className="space-y-2">
           {Object.keys(typeRoles).map((role) => (
-            <div key={role} className="flex flex-wrap items-baseline gap-4 border-b border-line pb-2">
+            <div key={role} className="flex flex-wrap items-baseline gap-4 border-b border-line-rule pb-2">
               <span className="w-28 shrink-0 text-caption text-muted">
                 <bdi dir="ltr">{role}</bdi>
               </span>
@@ -211,7 +211,7 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
       <Section id="lab-shape" title={lab('shape')}>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           {(Object.keys(elevation) as Array<keyof typeof elevation>).map((e) => (
-            <div key={e} className={`flex h-20 items-center justify-center rounded-card border border-line bg-surface ${SHADOW_CLASS[e]}`}>
+            <div key={e} className={`flex h-20 items-center justify-center rounded-card border border-line-rule bg-surface ${SHADOW_CLASS[e]}`}>
               <bdi dir="ltr" className="text-caption font-semibold text-muted">
                 {e}
               </bdi>
@@ -402,9 +402,9 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
           <FilterChip label={lab('filterSupplier', { value: lab('supplier') })} active={filter} count={1} onRemove={() => setFilter(false)} onClick={() => setFilter(true)} />
           <FilterChip label={lab('filterSupplier', { value: lab('all') })} />
         </div>
-        <div data-density="compact" className="overflow-hidden rounded-card border border-line">
+        <div data-density="compact" className="overflow-hidden rounded-card border border-line-rule">
           {DENSITIES.map((d) => (
-            <div key={d} data-density={d} className="flex items-center justify-between border-b border-line px-[var(--cell-inline)] last:border-b-0" style={{ minHeight: 'var(--row-h)' }}>
+            <div key={d} data-density={d} className="flex items-center justify-between border-b border-line-rule px-[var(--cell-inline)] last:border-b-0" style={{ minHeight: 'var(--row-h)' }}>
               <span className="text-body-sm text-ink">{lab('density', { mode: d })}</span>
               <Money value={1240.5} context="line" />
             </div>

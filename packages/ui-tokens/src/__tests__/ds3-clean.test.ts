@@ -1,7 +1,7 @@
 // DS3 · the clean finish (docs/ux/ds3/SPEC.md §2, §3, §4, §7, §8; WORKPLAN DS3-00, with the handoff's
 // correction of 14.11). Pins every value the spec names to the DS2 role that carries it, the T3 move
 // (recovered money is its own green role), the contrast the reference holds, the motion scale DS3
-// confirms plus the side menu's one named set, and the type steps SPEC §3 names that DS2 lacked.
+// confirms plus the side menu's one named set, and the SPEC §3 steps the v2 type roles now carry.
 import { describe, expect, it } from 'vitest';
 import {
   action,
@@ -99,7 +99,7 @@ describe('DS3 · SPEC §2 colours land on the DS2 roles', () => {
 
   it('the generated block carries the clean values (channels)', () => {
     const css = cssVariables();
-    for (const decl of ['--c-bg: 246 248 247;', '--c-ink: 18 28 23;', '--c-focus: 34 86 187;', '--c-gold: 0 87 59;', '--c-gold-bold: 0 113 62;', '--c-danger-dot: 221 39 41;', '--c-warn-dot-ring: 185 117 0;', '--c-surface-hover: 235 240 237;']) {
+    for (const decl of ['--c-bg: 246 248 247;', '--c-ink: 18 28 23;', '--c-focus: 34 86 187;', '--c-gold: 0 113 62;', '--c-gold-text: 0 87 59;', '--c-gold-bold: 0 113 62;', '--c-danger-dot: 221 39 41;', '--c-warn-dot-ring: 185 117 0;', '--c-surface-hover: 235 240 237;']) {
       expect(css).toContain(decl);
     }
   });
@@ -141,8 +141,19 @@ describe('DS3 · tiers keep their meaning (SPEC §2 rules)', () => {
     for (const s of T3) expect([status.gold.text, status.primary.text], s).toContain(status[moneyStates[s].figure as StatusFamily].text);
     // Its own variable, even though the clean value equals the action colour (SPEC §2).
     const css = cssVariables();
-    expect(css).toContain(`--c-gold: ${channels(status.gold.text)};`);
+    expect(css).toContain(`--c-gold-text: ${channels(status.gold.text)};`);
     expect(css).toContain(`--c-primary: ${channels(status.primary.text)};`);
+  });
+
+  it('only T3 text reads the amount role; every T3 fill, tint, border, ring and gradient stays leaf', () => {
+    // So a gold fill beside a primary one never collapses into the action colour (Badge gold vs accent,
+    // the recovery funnel, the chain heat bands, the landing gradient, the money-flow motif).
+    const css = cssVariables();
+    expect(css).toContain(`--c-gold: ${channels(status.gold.bgBold)};`);
+    const theme = tailwindPreset.theme as unknown as { extend: Record<string, Record<string, Record<string, string>>> };
+    expect(theme.extend.colors!.gold!.DEFAULT).toBe('rgb(var(--c-gold) / <alpha-value>)');
+    expect(theme.extend.textColor!.gold!.DEFAULT).toBe('rgb(var(--c-gold-text) / <alpha-value>)');
+    expect(status.gold.bgBold).not.toBe(status.primary.bgBold);
   });
 
   it('`ok` is the good-news family by meaning: `text-ok` is --ok (the T3 bold); tint, border and dot are the T3 family\'s', () => {
@@ -226,9 +237,11 @@ describe('DS3 · contrast holds what the reference holds (5:1; lowest 5.42:1)', 
       return `#${[0, 1, 2].map((i) => Math.round(ch(fg, i) * a + ch(bg, i) * (1 - a)).toString(16).padStart(2, '0')).join('')}`;
     };
     for (const f of ['primary', 'danger', 'warn', 'gold', 'info'] as const) {
+      // `bg-gold/a` reads the T3 fill (leaf); `text-gold` the amount role.
+      const fill = f === 'gold' ? status.gold.bgBold : status[f].text;
       for (const a of [0.05, 0.08, 0.1, 0.12]) {
         for (const bg of [surfaces.surface, surfaces.canvas]) {
-          expect(contrastRatio(status[f].text, over(status[f].text, a, bg)), `${f}/${a * 100} on ${bg}`).toBeGreaterThanOrEqual(4.6);
+          expect(contrastRatio(status[f].text, over(fill, a, bg)), `${f}/${a * 100} on ${bg}`).toBeGreaterThanOrEqual(4.6);
         }
       }
     }
@@ -348,7 +361,7 @@ describe('DS3 · the large-text preference (WORKPLAN, "Personal preferences: one
   });
 });
 
-describe('DS3 · SPEC §3 type steps that DS2 lacked (asked for by DS3-03)', () => {
+describe('DS3 · SPEC §3 type steps on the v2 roles (DS3-03\'s requests, and the two the review found)', () => {
   const css = cssVariables();
   const rootBlock = css.slice(css.indexOf(':root {\n  --c-surface-canvas'), css.indexOf('}', css.indexOf(':root {\n  --c-surface-canvas')));
   // Every `@media (min-width: 768px)` block (the v1 one and the v2 one), as text.
@@ -359,6 +372,13 @@ describe('DS3 · SPEC §3 type steps that DS2 lacked (asked for by DS3-03)', () 
     expect(typeScaleV2['money-hero']).toEqual({ base: { fs: '5.25rem', lh: '5.5rem' }, phone: { fs: '4rem', lh: '4.375rem' }, field: { fs: '4rem', lh: '4.375rem' }, fw: 400, ls: '-0.03em' });
     for (const decl of ['--fs-money-hero: 4rem;', '--lh-money-hero: 4.375rem;', '--fw-money-hero: 400;', '--ls-money-hero: -0.03em;']) expect(rootBlock).toContain(decl);
     for (const decl of ['--fs-money-hero: 5.25rem;', '--lh-money-hero: 5.5rem;']) expect(md).toContain(decl);
+  });
+
+  it('the region title (title-sm) is 16/22; the leading figure that is not the hero (money-card) is 28/32 at 600', () => {
+    expect(typeScaleV2['title-sm']!.base).toEqual({ fs: '1rem', lh: '1.375rem' });
+    expect(typeScaleV2['money-card']!.base).toEqual({ fs: '1.75rem', lh: '2rem' });
+    expect(typeScaleV2['money-card']!.fw).toBe(600);
+    for (const decl of ['--lh-title-sm: 1.375rem;', '--lh-money-card: 2rem;', '--fw-money-card: 600;']) expect(rootBlock).toContain(decl);
   });
 
   it('`sub` is 13/18 in every density; `lead` is 18/24 at weight 500', () => {

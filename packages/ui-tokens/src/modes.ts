@@ -30,6 +30,8 @@ export function colorVarsV2(): Record<string, string> {
     'text-secondary': textV2.secondary,
     'text-tertiary': textV2.tertiary,
     'text-link': textV2.link,
+    // DS3 T3 (SPEC §2): the recovered amount, its own role — read by `text-gold` only.
+    'gold-text': status.gold.text,
     'border-subtle': border.subtle,
     'border-rule': border.rule,
     'border-control': border.control,
