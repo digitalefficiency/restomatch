@@ -129,11 +129,14 @@ function heroPayload(hero: LeakHero, invoices: Record<string, number>, tz: strin
       recoveredAgorot: agorot(hero.recoveredIls),
       pendingLinkAgorot: agorot(hero.pendingLinkIls),
       awaitingCountAgorot: agorot(hero.awaitingCountIls),
+      /** G-08: invoices held on an open "זה אותו מוצר?" question (in neither leak nor spend). */
+      awaitingQuestionAgorot: agorot(hero.awaitingQuestionIls),
       invoiceCount: hero.invoiceCount,
       matchedInvoiceCount: hero.matchedInvoiceCount,
       invoicesWithLeak: hero.invoicesWithLeak,
       pendingLinkCount: hero.pendingLinkCount,
       awaitingCountCount: hero.awaitingCountCount,
+      awaitingQuestionCount: hero.awaitingQuestionCount,
     },
     /** The leak per invoice at close (agorot; absent = 0): the correction baseline. */
     invoices,
