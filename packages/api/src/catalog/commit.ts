@@ -62,11 +62,13 @@ export interface CommitArgs {
  * together:
  *  - a new row: the file's values;
  *  - a blank price cell: the existing price basis stays (unit and pack);
- *  - a priced row: a mapped unit column gives the unit (a blank cell keeps the
- *    existing unit); a mapped pack column gives the pack (a blank cell is a
- *    single unit — null); an unmapped pack column keeps the existing pack only
- *    while the unit stays the same (a new unit with an old pack would be a
- *    different quantity), else null. Unmapped unit and pack: both kept.
+ *  - a priced row: a unit cell (mapped, readable) gives the unit; a pack cell
+ *    (mapped, readable) gives the pack. A blank / unreadable cell, or an
+ *    unmapped column, carries no information (round 5): the existing unit
+ *    stays, and the existing pack stays while the unit is the same unit
+ *    (sameUnit: יח' = יח׳) — a new unit with an old pack would be a different
+ *    quantity, so then the pack is dropped. Unmapped / blank unit and pack:
+ *    both kept, together.
  * Shared by the commit (what it writes and what the unit / pack fit checks) and
  * the preview (what it shows as kept / changed).
  */
@@ -78,8 +80,9 @@ export function storedBasis(
   if (!existing) return { unit: row.unit, packSize: packString(row.packSize) };
   if (row.listPrice == null) return { unit: existing.unit, packSize: existing.packSize };
   const unit = columns.unit && row.unit != null ? row.unit : existing.unit;
-  const unitChanged = (unit ?? null) !== (existing.unit ?? null);
-  const packSize = columns.packSize ? packString(row.packSize) : unitChanged ? null : existing.packSize;
+  const unitChanged = unit == null || existing.unit == null ? unit !== existing.unit : !sameUnit(unit, existing.unit);
+  const packSize =
+    columns.packSize && row.packSize != null ? packString(row.packSize) : unitChanged ? null : existing.packSize;
   return { unit, packSize };
 }
 
@@ -377,7 +380,8 @@ export async function commitCatalogRows(
             // asserted above, so this FK can never cross restaurants.
             supplierId,
             canonicalName: row.supplierNameRaw,
-            defaultUnit: row.unit,
+            // The unit the row will store (round 5), not a blank / unmapped cell.
+            defaultUnit: basis.unit,
             barcodeEan: row.barcodeEan,
             embedding,
           })
@@ -752,10 +756,10 @@ export function packString(pack: number | null | undefined): string | null {
   return pack == null ? null : (Math.round(pack * 1000) / 1000).toFixed(3);
 }
 
-/** The same pack size at the stored scale (3). */
-function samePack(a: string | null, b: string | null): boolean {
-  if (a == null || b == null) return a == null && b == null;
-  return Math.round(Number(a) * 1000) === Math.round(Number(b) * 1000);
+/** The same pack size at the stored scale (3); no pack is a pack of 1 (round 5). */
+export function samePack(a: string | null, b: string | null): boolean {
+  const n = (v: string | null) => (v == null ? 1000 : Math.round(Number(v) * 1000));
+  return n(a) === n(b);
 }
 
 /** Would writing `b` over `a` change anything stored? */

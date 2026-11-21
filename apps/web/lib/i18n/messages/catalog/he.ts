@@ -155,6 +155,7 @@ export const he = {
       keptPrice: 'המחיר הקיים נשמר',
       basisChanged: 'יחידה: {from} ← {to}',
       basisKept: 'היחידה הקיימת נשמרה: {unit}',
+      basisSummary: 'ב-{count} שורות היחידה או האריזה ישתנו.',
       flags: { ZERO: 'מחיר 0', HIGH: 'פי 5 ויותר מהמחיר הנוכחי', LOW: 'פחות מחמישית מהמחיר הנוכחי' },
       sampleNote: 'מוצגות 20 השורות הראשונות. כל השורות נבדקות.',
       flaggedSummary: '{count} מחירים רחוקים מהמחירון — בדקו לפני הייבוא.',

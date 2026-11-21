@@ -154,6 +154,7 @@ export const en: Shape<typeof he> = {
       keptPrice: 'Current price kept',
       basisChanged: 'Unit: {from} → {to}',
       basisKept: 'Current unit kept: {unit}',
+      basisSummary: '{count} rows change their unit or pack.',
       flags: { ZERO: 'Price is 0', HIGH: '5× or more the current price', LOW: 'Under a fifth of the current price' },
       sampleNote: 'Showing the first 20 rows. Every row is checked.',
       flaggedSummary: '{count} prices are far from the price list — check before importing.',

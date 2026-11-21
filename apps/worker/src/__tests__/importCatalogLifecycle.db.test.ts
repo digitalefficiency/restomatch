@@ -293,3 +293,18 @@ describe('round 4 MAJOR 2 · orphaned imports end failed in maintenance', () => 
     expect(summary!.after).toMatchObject({ partial: true, chunked: 1 });
   });
 });
+
+describe('round 5 nits · the finalize sweep', () => {
+  it('a failed import whose finalize job already ran (here: failed) is not queued again; the count is what was inserted', async () => {
+    const data = await newImport(five);
+    await commitImportInChunks(asDb, data, { chunkRows: 2, budgetMs: 0 }); // chunk 0 live
+    await db.update(catalogImports).set({ status: 'failed' }).where(eq(catalogImports.id, data.importId));
+    await qsql`
+      INSERT INTO job_queue (queue, payload, restaurant_id, status, dedupe_key, max_attempts, attempts, finished_at)
+      VALUES ('import-catalog', ${qsql.json({ importId: data.importId, finalize: true } as never)}, ${restaurantId}, 'failed',
+              ${`import-catalog:finalize:${data.importId}`}, 3, 3, now())`;
+    expect(await failOrphanedCatalogImports(qsql)).toBe(0);
+    const n = await qsql`SELECT 1 FROM job_queue WHERE queue = 'import-catalog' AND payload ->> 'importId' = ${data.importId}`;
+    expect(n.length).toBe(1);
+  });
+});

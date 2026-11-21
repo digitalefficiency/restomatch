@@ -14,6 +14,11 @@ import { IMPORT_CHUNK_AUDIT_ACTION, IMPORT_COMMITTED_AUDIT_ACTION, recordImportS
  * supplier) and the queue maintenance (failOrphanedCatalogImports, which does
  * see the jobs) mark it failed, and the worker stops at a failed import — so a
  * job that wakes up late can never write over a newer import.
+ *
+ * Accepted (round 5): an import whose job waits in the queue, or between
+ * retries, for more than the cutoff with no activity counts as expired and
+ * ends failed. No data risk — the worker stops at a failed import, and its
+ * chunks (if any) get the partial summary; the person re-imports.
  */
 export const LIVE_IMPORT_CUTOFF_MINUTES = 30;
 
@@ -21,24 +26,21 @@ export const LIVE_IMPORT_CUTOFF_MINUTES = 30;
 export function importActiveSql(restaurantId: string, idExpr: ReturnType<typeof sql>, createdAtExpr: ReturnType<typeof sql>) {
   return sql`greatest(${createdAtExpr}, coalesce((
       select max(c.at) from audit_log c
-       where c.restaurant_id = ${restaurantId} and c.entity_id = ${idExpr}
-         and c.action = ${IMPORT_CHUNK_AUDIT_ACTION}), ${createdAtExpr}))
+       where c.entity_type = 'catalog_import' and c.entity_id = ${idExpr}
+         and c.restaurant_id = ${restaurantId} and c.action = ${IMPORT_CHUNK_AUDIT_ACTION}), ${createdAtExpr}))
     > now() - ${LIVE_IMPORT_CUTOFF_MINUTES} * interval '1 minute'`;
 }
 
-/** Another live import of this supplier (pending / mapped, active within the cutoff)? */
-export async function otherLiveImport(
-  db: Database,
-  restaurantId: string,
-  supplierId: string,
-  excludeId: string | null,
-): Promise<boolean> {
+/**
+ * Any import of this supplier still pending / mapped (round 5: no activity
+ * condition — after expireStaleImports, one still open is live or held by
+ * another transaction).
+ */
+export async function anyOpenImport(db: Database, restaurantId: string, supplierId: string): Promise<boolean> {
   const rows = (await db.execute(sql`
     select 1 from catalog_imports o
      where o.restaurant_id = ${restaurantId} and o.supplier_id = ${supplierId}::uuid
        and o.status in ('pending', 'mapped')
-       and (${excludeId}::uuid is null or o.id <> ${excludeId}::uuid)
-       and ${importActiveSql(restaurantId, sql`o.id`, sql`o.created_at`)}
      limit 1
   `)) as unknown as unknown[];
   return rows.length > 0;

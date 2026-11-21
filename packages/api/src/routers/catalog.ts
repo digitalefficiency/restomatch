@@ -32,9 +32,9 @@ import {
   type CatalogImportMapping,
   type ParsedTable,
 } from '../catalog/parse';
-import { commitCatalogRows, lockSupplierCatalog, storedBasis } from '../catalog/commit';
+import { commitCatalogRows, lockSupplierCatalog, samePack, storedBasis } from '../catalog/commit';
 import { revertCatalogImport } from '../catalog/revert';
-import { expireStaleImports, importActiveSql, otherLiveImport } from '../catalog/importLifecycle';
+import { anyOpenImport, expireStaleImports, importActiveSql } from '../catalog/importLifecycle';
 import { catalogUnitPrice, cheapestComparable } from '../lib/unitPrice';
 
 /**
@@ -160,12 +160,6 @@ async function currentPrices(db: Database, restaurantId: string, supplierId: str
   /** The row the commit will write (null: the commit creates a new row). */
   return (sku: string | null, name: string): Current | null =>
     (sku ? bySku.get(sku) : byName.get(normalizeLinkName(name))) ?? null;
-}
-
-/** Two stored pack sizes (numeric(12,3) strings, or null) are the same. */
-function samePackStr(a: string | null, b: string | null): boolean {
-  if (a == null || b == null) return a == null && b == null;
-  return Math.round(Number(a) * 1000) === Math.round(Number(b) * 1000);
 }
 
 const embedder = new MockEmbeddingProvider(1536);
@@ -365,7 +359,7 @@ export const catalogRouter = router({
         const basisMoved =
           row != null &&
           basis != null &&
-          ((basis.unit ?? null) !== (row.unit ?? null) || !samePackStr(basis.packSize, row.packSize));
+          ((basis.unit ?? null) !== (row.unit ?? null) || !samePack(basis.packSize, row.packSize));
         const fileSilent = (!columns.unit || r.unit == null) && (!columns.packSize || r.packSize == null);
         return {
           rowNumber: r.rowNumber,
@@ -388,6 +382,8 @@ export const catalogRouter = router({
         };
       });
       const flagged = priced.filter((r) => r.flag != null);
+      // Over ALL rows, not the 20 shown (round 5): how many change their unit / pack.
+      const basisChangedCount = priced.filter((r) => r.basis?.change === 'changed').length;
       return {
         headers: table.headers,
         sample: table.rows.slice(0, 20),
@@ -403,6 +399,7 @@ export const catalogRouter = router({
           heldCount: analysis.held.length,
           flagged: flagged.slice(0, LIST_CAP),
           flaggedCount: flagged.length,
+          basisChangedCount,
         },
       };
     }),
@@ -468,12 +465,14 @@ export const catalogRouter = router({
         });
       }
 
-      // One import per supplier at a time (W3-10 round 4). An expired one ends
-      // failed first (it never blocks); the supplier lock makes two commits of
-      // the same supplier wait for each other, so both cannot pass this check.
+      // One import per supplier at a time (W3-10 rounds 4–5). Expired ones end
+      // failed first; then ANY import of the supplier still pending / mapped
+      // refuses — it is live, or another transaction holds it (skipped by the
+      // expiry, possibly mid-chunk). The supplier lock makes two commits of the
+      // same supplier wait for each other, so both cannot pass this check.
       await expireStaleImports(ctx.db, restaurantId, input.supplierId);
       await lockSupplierCatalog(ctx.db, restaurantId, input.supplierId);
-      if (await otherLiveImport(ctx.db, restaurantId, input.supplierId, null)) {
+      if (await anyOpenImport(ctx.db, restaurantId, input.supplierId)) {
         throw new TRPCError({ code: 'CONFLICT', message: 'CATALOG_IMPORT_RUNNING: ייבוא קודם של הספק הזה עדיין רץ' });
       }
 
@@ -613,12 +612,12 @@ export const catalogRouter = router({
            */
           revertable: sql<boolean>`${canRevert}
             AND "catalog_imports"."status" IN ('committed', 'failed')
-            AND EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = ${rid}
+            AND EXISTS (SELECT 1 FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.restaurant_id = ${rid}
               AND a.action IN ('catalog.import_committed', 'catalog.import_chunk_committed')
               AND a.entity_id = "catalog_imports"."id" AND (a.after ->> 'revertVersion') = '2')
-            AND (SELECT count(*) FROM audit_log a WHERE a.restaurant_id = ${rid}
+            AND (SELECT count(*) FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.restaurant_id = ${rid}
               AND a.action = 'catalog.import_committed' AND a.entity_id = "catalog_imports"."id") <= 1
-            AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = ${rid}
+            AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.restaurant_id = ${rid}
               AND a.action = 'catalog.import_reverted' AND a.entity_id = "catalog_imports"."id")
             AND NOT EXISTS (SELECT 1 FROM catalog_imports o WHERE o.restaurant_id = ${rid}
               AND o.supplier_id = "catalog_imports"."supplier_id" AND o.id <> "catalog_imports"."id"
@@ -630,11 +629,11 @@ export const catalogRouter = router({
               AND l.entity_id IS DISTINCT FROM "catalog_imports"."id"
               AND coalesce((l.after ->> 'lockedAt')::timestamptz, l.at) >
                 (SELECT max(coalesce((m.after ->> 'lockedAt')::timestamptz, m.at)) FROM audit_log m
-                  WHERE m.restaurant_id = ${rid} AND m.entity_id = "catalog_imports"."id"
+                  WHERE m.entity_type = 'catalog_import' AND m.restaurant_id = ${rid} AND m.entity_id = "catalog_imports"."id"
                   AND m.action IN ('catalog.import_committed', 'catalog.import_chunk_committed'))
-              AND NOT EXISTS (SELECT 1 FROM audit_log r WHERE r.restaurant_id = ${rid}
+              AND NOT EXISTS (SELECT 1 FROM audit_log r WHERE r.entity_type = 'catalog_import' AND r.restaurant_id = ${rid}
                 AND r.action = 'catalog.import_reverted' AND r.entity_id = l.entity_id))`,
-          reverted: sql<boolean>`EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = ${rid}
+          reverted: sql<boolean>`EXISTS (SELECT 1 FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.restaurant_id = ${rid}
             AND a.action = 'catalog.import_reverted' AND a.entity_id = "catalog_imports"."id")`,
         })
         .from(catalogImports)

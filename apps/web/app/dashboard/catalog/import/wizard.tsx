@@ -735,6 +735,11 @@ function PriceCheck({
           {t('import.check.flaggedSummary', { count: formatNumber(check.flaggedCount, locale) })}
         </p>
       )}
+      {check.basisChangedCount > 0 && (
+        <p className="mb-2 text-sm text-muted" data-testid="basis-summary">
+          {t('import.check.basisSummary', { count: formatNumber(check.basisChangedCount, locale) })}
+        </p>
+      )}
       <div className="overflow-x-auto rounded-xl border border-line">
         <table className="w-full text-start text-sm">
           <thead>

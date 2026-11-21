@@ -156,10 +156,10 @@ export async function revertCatalogImport(
          and l.entity_id is distinct from ${importId}::uuid
          and coalesce((l.after ->> 'lockedAt')::timestamptz, l.at) >
              (select max(coalesce((m.after ->> 'lockedAt')::timestamptz, m.at)) from audit_log m
-               where m.restaurant_id = ${rid} and m.entity_id = ${importId}::uuid
+               where m.entity_type = 'catalog_import' and m.restaurant_id = ${rid} and m.entity_id = ${importId}::uuid
                  and m.action in (${IMPORT_COMMITTED_AUDIT_ACTION}, ${IMPORT_CHUNK_AUDIT_ACTION}))
          and not exists (select 1 from audit_log r
-                          where r.restaurant_id = ${rid} and r.action = ${IMPORT_REVERTED_AUDIT_ACTION}
+                          where r.entity_type = 'catalog_import' and r.restaurant_id = ${rid} and r.action = ${IMPORT_REVERTED_AUDIT_ACTION}
                             and r.entity_id = l.entity_id)
        limit 1
     `)) as unknown as unknown[];

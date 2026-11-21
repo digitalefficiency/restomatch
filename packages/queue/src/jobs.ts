@@ -438,17 +438,23 @@ export async function failOrphanedCatalogImports(sql: Sql, cutoffMinutes = CATAL
            AND (
              (i.status IN ('pending', 'mapped')
               AND greatest(i.created_at, coalesce((SELECT max(a.at) FROM audit_log a
-                    WHERE a.restaurant_id = i.restaurant_id AND a.entity_id = i.id
+                    WHERE a.entity_type = 'catalog_import' AND a.entity_id = i.id
                       AND a.action = 'catalog.import_chunk_committed'), i.created_at))
                   < now() - ${cutoffMinutes} * interval '1 minute')
              OR
-             (i.status = 'failed'
-              AND EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = i.restaurant_id AND a.entity_id = i.id
+             (i.status = 'failed' AND i.created_at > now() - interval '7 days'
+              -- once: never again after its finalize job ran (done or failed)
+              AND NOT EXISTS (SELECT 1 FROM job_queue f WHERE f.queue = 'import-catalog'
+                                AND f.dedupe_key = 'import-catalog:finalize:' || i.id::text)
+              AND EXISTS (SELECT 1 FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.entity_id = i.id
                             AND a.action = 'catalog.import_chunk_committed')
-              AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = i.restaurant_id AND a.entity_id = i.id
+              AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.entity_type = 'catalog_import' AND a.entity_id = i.id
                                 AND a.action IN ('catalog.import_committed', 'catalog.import_reverted')))
            )
+         ORDER BY i.created_at, i.id
          LIMIT 100
+         -- never wait behind a tenant transaction holding the import row
+         FOR UPDATE OF i SKIP LOCKED
       ), marked AS (
         UPDATE catalog_imports c
            SET status = 'failed', error = coalesce(c.error, 'orphaned: no job and no progress')
@@ -456,8 +462,9 @@ export async function failOrphanedCatalogImports(sql: Sql, cutoffMinutes = CATAL
          WHERE c.id = cand.id AND c.status IN ('pending', 'mapped')
       )
       SELECT id::text, restaurant_id::text, supplier_id::text, filename, column_mapping FROM cand`;
+    let queued = 0;
     for (const r of rows) {
-      await insertJob(
+      const job = await insertJob(
         sql,
         'import-catalog',
         {
@@ -470,8 +477,9 @@ export async function failOrphanedCatalogImports(sql: Sql, cutoffMinutes = CATAL
         },
         { restaurantId: r.restaurant_id, maxAttempts: 3, dedupeKey: `import-catalog:finalize:${r.id}` },
       );
+      if (job) queued += 1;
     }
-    return rows.length;
+    return queued;
   } catch (err) {
     console.warn(`[queue] orphaned catalog import sweep failed: ${err instanceof Error ? err.message : err}`);
     return 0;

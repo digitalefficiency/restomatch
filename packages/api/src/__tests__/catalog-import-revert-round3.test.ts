@@ -120,6 +120,25 @@ describe('round 3 MINOR 5 · a blank unit / pack on a priced row keeps the exist
     expect(m.unit).toBe('ארגז');
     expect(m.pack).toBe('12.000');
   });
+
+  // Round 5: mapped columns with blank cells keep the basis too (a blank cell carries no information).
+  it('mapped unit + pack columns with blank cells: 120 per case of 12 → 125 per case of 12', async () => {
+    await importRows([{ sku: 'M', price: 120, unit: 'ארגז', pack: 12 }]);
+    await importRows([{ sku: 'M', price: 125, unit: null, pack: null }], db, { unit: true, packSize: true });
+    expect(await item('M')).toMatchObject({ price: '125.0000', unit: 'ארגז', pack: '12.000' });
+  });
+
+  it("an unreadable pack cell ('12 יח׳') keeps the case of 12", async () => {
+    await importRows([{ sku: 'M', price: 120, unit: 'ארגז', pack: 12 }]);
+    await callerFor(A).catalog.commitImport({
+      supplierId: A.supplierId,
+      file: { filename: 'p.csv', text: 'sku,name,unit,pack,price\nM,M,ארגז,12 יח׳,125\n' },
+      mapping: { sku: 'sku', name: 'name', unit: 'unit', packSize: 'pack', price: 'price' },
+      vatBasis: 'ex',
+      confirmFlagged: true,
+    });
+    expect(await item('M')).toMatchObject({ unit: 'ארגז', pack: '12.000' });
+  });
 });
 
 describe('round 3 MINOR 7 · name and barcode', () => {
