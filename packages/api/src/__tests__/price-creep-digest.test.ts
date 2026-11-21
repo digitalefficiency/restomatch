@@ -121,7 +121,7 @@ describe('AU-13 digest builder (pure)', () => {
     const en = buildOwnerDigest({ locale: 'en', creep: [line({})], ...empty, dishes: [dish] })!;
     expect(he.html).toContain('lang="he" dir="rtl"');
     expect(en.html).toContain('lang="en" dir="ltr"');
-    expect(he.html).toContain('#F6F8F7');
+    expect(he.html).toContain('#F8FBF9');
     expect(he.html.toLowerCase()).not.toContain('#0b1220');
     for (const m of [he, en]) {
       for (const s of [m.subject, m.text, m.html]) {
