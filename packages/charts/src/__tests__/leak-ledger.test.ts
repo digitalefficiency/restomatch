@@ -458,6 +458,14 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
   it('reads invoices.paid_at and discrepancies.basis once H-03 / G-03 add them (same SQL)', async () => {
     const { rid, invoice } = await setup();
     const { invoiceId, ids } = await invoice({ inclVat: '1000.00', d: [{ type: 'PRICE_HIGHER', delta: '10.00' }] });
+    // Drop afterwards only what this test added: once G-03 (basis) / H-03 (paid_at) ship the
+    // columns, dropping them here would break every later test that writes them.
+    const hasCol = async (table: string, column: string) =>
+      ((await db.execute(
+        sql`select 1 from information_schema.columns where table_schema = 'public' and table_name = ${table} and column_name = ${column}`,
+      )) as unknown as unknown[]).length > 0;
+    const hadPaidAt = await hasCol('invoices', 'paid_at');
+    const hadBasis = await hasCol('discrepancies', 'basis');
     await db.execute(sql`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS paid_at timestamptz`);
     await db.execute(sql`ALTER TABLE discrepancies ADD COLUMN IF NOT EXISTS basis jsonb`);
     try {
@@ -470,8 +478,8 @@ describe('caught before payment = detection or decision precedes paid_at [G-14]'
       expect(row).toMatchObject({ invoicePaid: true, paidAt: '2026-10-09T08:00:00.000Z', caughtBeforePayment: false, paidSource: 'paid_at' });
       expect(row!.basis).toEqual({ source: 'po', qtyUsed: 2, unitPriceUsed: 5 });
     } finally {
-      await db.execute(sql`ALTER TABLE invoices DROP COLUMN IF EXISTS paid_at`);
-      await db.execute(sql`ALTER TABLE discrepancies DROP COLUMN IF EXISTS basis`);
+      if (!hadPaidAt) await db.execute(sql`ALTER TABLE invoices DROP COLUMN IF EXISTS paid_at`);
+      if (!hadBasis) await db.execute(sql`ALTER TABLE discrepancies DROP COLUMN IF EXISTS basis`);
     }
   });
 
