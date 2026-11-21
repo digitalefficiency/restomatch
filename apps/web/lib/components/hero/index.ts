@@ -1,6 +1,6 @@
 // The owner home's leak card (DS3-03). The pace line and the split bar are the shared ones in
 // `lib/components/data-viz` (PaceLine, SplitBar, PACE_BOX, PaceSeries): import them from there.
-export { LeakHero } from './LeakHero';
+export { LeakHero, HeroNote } from './LeakHero';
 export type { LeakHeroLink, LeakHeroPart, LeakHeroProps } from './LeakHero';
 export { HeroAmount } from './HeroAmount';
 export type { HeroAmountProps } from './HeroAmount';
