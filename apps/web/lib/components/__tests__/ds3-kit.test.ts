@@ -322,7 +322,7 @@ describe('change against a previous period (kit "שינוי מול תקופה ק
     const bad = render(h(Delta, { current: 846, previous: 760, goodWhen: 'down' }));
     expect(bad).toContain('data-delta="bad"');
     expect(bad).toMatch(/<span data-delta="bad" class="[^"]*text-fg[^"]*"/);
-    expect(bad).toMatch(/<svg[^>]*class="[^"]*text-danger-dot/);
+    expect(bad).toMatch(/<svg[^>]*class="[^"]*stroke-danger-dot/);
     // the amount itself is never red
     expect(bad.replace(/<svg[\s\S]*?<\/svg>/g, '')).not.toContain('text-danger');
     const flat = render(h(Delta, { current: 760, previous: 760, goodWhen: 'down' }));
@@ -563,5 +563,57 @@ describe('charts (kit "גרפים", SPEC §10.1)', () => {
     const named = render(h(SplitBar, { first: 1, second: 0, label: 'שולם במלואו' }));
     expect(named).toContain('role="img" aria-label="שולם במלואו"');
     expect(named.match(/<i /g)).toHaveLength(1); // an empty part is not drawn
+  });
+});
+
+describe('handoff corrections (CHANGES.md 14.11, DS3-01)', () => {
+  it('radii: the phone-flow button has 12 px corners; icons 16 in content, 18 in the top bar', async () => {
+    const { Button } = await import('../Button');
+    const { Icon } = await import('../icon/Icon');
+    const { Check } = await import('lucide-react');
+    expect(render(h(Button, { size: 'xl' }, 'אישור: 24 ק״ג'))).toContain('rounded-card');
+    expect(render(h(Icon, { as: Check }))).toContain('h-4 w-4');
+    expect(render(h(Icon, { as: Check, size: 'bar' }))).toContain('size-[1.125rem]');
+  });
+
+  it("a card's border is --rule (MetricTile, the region empty state)", async () => {
+    const { MetricTile } = await import('../money/MetricTile');
+    expect(render(h(MetricTile, { label: 'דליפה החודש', value: 760 }))).toContain('border-line-rule');
+    expect(render(h(EmptyStateComp, { kind: 'inbox-zero', title: 'אין פערים פתוחים' }))).toContain('rounded-card border border-line-rule');
+  });
+
+  it('wording: never a singular imperative; "הכול" spelled in full', async () => {
+    const { he: viewsHe } = await import('../../i18n/messages/views/he');
+    const { he: commonHe } = await import('../../i18n/messages/common/he');
+    expect(viewsHe.toolbar.clearFilters).toBe('ניקוי הסינון');
+    expect(JSON.stringify(commonHe)).not.toMatch(/הכל(?!ו)/);
+  });
+});
+
+describe("DS3-03's requests to the shared components", () => {
+  it('Delta from a change computed upstream (agorot-exact, its own percent rule), the SPEC sentence', async () => {
+    const { Delta } = await import('../money/Delta');
+    const down = render(h(Delta, { change: { agorot: -1400, share: -0.02 }, goodWhen: 'down', showPercent: true, about: 'לעומת אותם ימים בספטמבר' }));
+    expect(down).toContain('data-delta="good"');
+    expect(textOf(down)).toContain('ירידה של');
+    expect(textOf(down)).toContain(formatIls(14));
+    expect(textOf(down)).toContain('(2%)');
+    expect(textOf(down)).toContain('לעומת אותם ימים בספטמבר');
+    // a thin base quotes no percent; a rise in leak keeps its words and ₪ in ink, only the arrow is red
+    const up = render(h(Delta, { change: { agorot: 5000, share: null }, goodWhen: 'down', showPercent: true }));
+    expect(up).toContain('data-delta="bad"');
+    expect(textOf(up)).not.toContain('%');
+    expect(up).toMatch(/<svg[^>]*class="[^"]*stroke-danger-dot/);
+    expect(up).not.toMatch(/text-danger(?!-dot)/);
+  });
+
+  it('TaskRow carries the decision row\'s blocking count (the one solid pill, apart from the count line)', async () => {
+    const { taskRow } = await import('../notifications/rows');
+    const task = { type: 'decision', tone: 'danger', deepLink: '/dashboard/approvals', ilsAgorot: 76000, count: 7, blocking: 3, detail: {}, entityId: 'x' };
+    const t = ((k: string) => k) as never;
+    const row = taskRow(task as never, t, 'he', (a: number) => String(a));
+    expect(row?.blocking).toBe(3);
+    const other = taskRow({ ...task, type: 'claim_to_send', blocking: 0 } as never, t, 'he', (a: number) => String(a));
+    expect(other).not.toHaveProperty('blocking');
   });
 });

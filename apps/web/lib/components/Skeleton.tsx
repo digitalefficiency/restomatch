@@ -52,7 +52,7 @@ export function Skeleton({
       return (
         <div aria-hidden="true" className={cn('grid grid-cols-2 gap-3 lg:grid-cols-4', className)}>
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="min-w-0 space-y-2 rounded-card border border-line bg-surface p-4">
+            <div key={i} className="min-w-0 space-y-2 rounded-card border border-line-rule bg-surface p-4">
               <div className={cn(bar, 'h-3 w-1/2')} />
               <div className={cn(bar, 'h-8 w-3/4')} />
             </div>
@@ -68,7 +68,7 @@ export function Skeleton({
       );
     case 'card':
       return (
-        <div aria-hidden="true" className={cn('space-y-3 rounded-card border border-line bg-surface p-5', className)}>
+        <div aria-hidden="true" className={cn('space-y-3 rounded-card border border-line-rule bg-surface p-5', className)}>
           <div className={cn(bar, 'h-4 w-1/3')} />
           <div className={cn(bar, 'h-4 w-2/3')} />
           <div className={cn(bar, 'h-4 w-1/2')} />
@@ -76,7 +76,7 @@ export function Skeleton({
       );
     case 'table':
       return (
-        <div aria-hidden="true" className={cn('overflow-hidden rounded-card border border-line bg-surface', className)}>
+        <div aria-hidden="true" className={cn('overflow-hidden rounded-card border border-line-rule bg-surface', className)}>
           <div className="flex h-10 items-center gap-3 border-b border-line px-4">
             <div className={cn(bar, 'h-3 w-24')} />
             <div className={cn(bar, 'ms-auto h-3 w-16')} />

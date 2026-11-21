@@ -40,6 +40,9 @@ import {
   Money,
   NumberField,
   PaceLine,
+  QtyKeypad,
+  QtyPad,
+  type QtyPadState,
   ReceiptGlyph,
   SegmentedControl,
   Skeleton,
@@ -94,7 +97,7 @@ function KitCard({ id, title, note, wide, children }: { id: string; title: strin
       id={id}
       aria-labelledby={`${id}-title`}
       data-kit-card={id}
-      className={cn('flex min-w-0 flex-col rounded-card border border-line bg-surface p-4 shadow-e1', wide && 'lg:col-span-2')}
+      className={cn('flex min-w-0 flex-col rounded-card border border-line-rule bg-surface p-4 shadow-e1', wide && 'lg:col-span-2')}
     >
       <h2 id={`${id}-title`} className="text-title-sm text-fg">
         {title}
@@ -130,6 +133,9 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
   const [threshold, setThreshold] = useState(10);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [skeletonKey, setSkeletonKey] = useState(0);
+  const [pad, setPad] = useState<QtyPadState>({ text: '24', first: true, damaged: false });
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [recorded, setRecorded] = useState<string | null>(null);
 
   const changeDensity = (next: KitDensity) => {
     setDensity(next);
@@ -518,6 +524,32 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
               </Tooltip>
             </Row>
           </div>
+        </KitCard>
+
+        <KitCard id="kit-keypad" title={c.cards.keypad} note={c.notes.keypad} wide>
+          <div className="grid gap-4 md:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+            <QtyPad state={pad} onChange={setPad} unit={d.kg} ordered={28.5} />
+            <div className="grid content-start gap-3">
+              <Row>
+                <Button variant="secondary" onClick={() => setSheetOpen(true)}>
+                  {d.keypadOpen}
+                </Button>
+              </Row>
+              {recorded ? <p className="text-body-sm text-fg-secondary">{d.keypadResult.replace('{qty}', recorded)}</p> : null}
+            </div>
+          </div>
+          <QtyKeypad
+            open={sheetOpen}
+            onClose={() => setSheetOpen(false)}
+            onConfirm={(v, meta) => {
+              setRecorded(`${v} ${d.kg}${meta.damaged ? ` · ${d.keypadDamaged}` : ''}`);
+              setSheetOpen(false);
+            }}
+            name={d.keypadItem}
+            unit={d.kg}
+            ordered={28.5}
+            initial={24}
+          />
         </KitCard>
       </div>
     </div>
