@@ -78,6 +78,10 @@ export const he = {
     zero: 'הכול מטופל ✓',
     zeroCaught: 'הכול מטופל ✓ · אין החלטות פתוחות',
     more: 'עוד {count}',
+    /** "עוד" at the foot of the card: how many rows wait behind it (a number). */
+    moreTasks: '{count, plural, one {עוד משימה אחת} two {עוד שתי משימות} other {עוד # משימות}}',
+    /** The solid pill on the decision row (T2): how many of its gaps block a payment (a number). */
+    blocking: '{count, plural, one {# חוסם תשלום} other {# חוסמים תשלום}}',
     decide: {
       label: 'ממתין להחלטה שלך',
       sub: '{count} פערים',

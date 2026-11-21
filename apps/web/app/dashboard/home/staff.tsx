@@ -11,7 +11,7 @@ import { BoardSkeleton, CardSkeleton } from './skeletons';
 import { ReceivingBoard } from './receiving-board';
 import { NeedsYou } from './needs-you';
 import { NeedsSkeleton } from './skeletons';
-import { taskRow } from '@/lib/components/notifications/rows';
+import { staffNeedRowsOf } from './need-rows';
 import type { Task } from '@/lib/components/notifications/model';
 
 /**
@@ -31,16 +31,13 @@ export function StaffNeeds({ load, homed = [], t, locale, fail }: { load: () => 
 
 async function StaffNeedsBody({ load, homed, t, locale }: { load: () => Promise<{ tasks: Task[]; failed: string[] }>; homed: readonly Task['type'][]; t: T; locale: Locale }) {
   const { tasks, failed } = await load();
-  const rows = tasks
-    .filter((x) => x.scope === 'mine' && !homed.includes(x.type))
-    .map((x) => taskRow({ ...x, ilsAgorot: null }, t, locale, () => ''))
-    .filter((r): r is NonNullable<typeof r> => r !== null)
-    .map((r) => ({ ...r, agorot: null, notes: undefined }));
+  const rows = staffNeedRowsOf(tasks, homed, t, locale);
   if (failed.length > 0 && rows.length === 0) throw new Error(`[home] task sources failed: ${failed.join(',')}`);
   if (rows.length === 0) return null;
   return (
-    <div className="mb-4 [&_#needs-you-title]:lg:sr-only">
-      <NeedsYou title={t('needs.title')} rows={rows} zero={t('needs.staffZero')} moreLabel={(c) => t('needs.more', { count: formatNumber(c, locale) })} />
+    // The same card as the finance homes, with no filled verb: the count tile's button is this home's primary.
+    <div className="mb-4 [&_[data-needs-head]]:lg:sr-only">
+      <NeedsYou title={t('needs.title')} rows={rows} zero={t('needs.staffZero')} moreLabel={(count) => t('needs.moreTasks', { count })} />
     </div>
   );
 }
@@ -70,12 +67,12 @@ export function ChefHome({ caller, t, locale, fail }: { caller: HomeCaller<'chef
   return (
     <div className="grid gap-4 lg:grid-cols-12 lg:items-start">
       <div className="lg:col-span-5">
-        <HomeSection name="count" fallback={<CardSkeleton className="h-36" />} forceFail={fail.has('count')}>
+        <HomeSection name="count" fallback={<CardSkeleton className="h-36 rounded-2xl" />} forceFail={fail.has('count')}>
           <CountTile caller={caller} t={t} locale={locale} />
         </HomeSection>
       </div>
       <div className="lg:col-span-7">
-        <HomeSection name="dishes" fallback={<CardSkeleton className="h-64" />} forceFail={fail.has('dishes')}>
+        <HomeSection name="dishes" fallback={<CardSkeleton className="h-64 rounded-2xl" />} forceFail={fail.has('dishes')}>
           <DishesOverTarget caller={caller} t={t} locale={locale} />
         </HomeSection>
       </div>

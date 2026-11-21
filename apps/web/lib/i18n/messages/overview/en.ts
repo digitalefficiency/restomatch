@@ -73,6 +73,8 @@ export const en: Shape<typeof he> = {
     zero: 'All handled ✓',
     zeroCaught: 'All handled ✓ · no open decisions',
     more: '{count} more',
+    moreTasks: '{count, plural, one {# more task} other {# more tasks}}',
+    blocking: '{count, plural, one {# blocking payment} other {# blocking payment}}',
     decide: {
       label: 'Awaiting your decision',
       sub: '{count} discrepancies',
