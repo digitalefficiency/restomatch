@@ -173,8 +173,22 @@ function SpotBody({
   const td = useT(receivingDelivery);
   const locale = useLocale();
   const unit = useUnitLabel();
+  // The pad's keys keep a screen reader on the key: the line it types into and its count are spoken
+  // here ("{name}: {text}", never the order — the check is blind).
+  const cur = lines[at];
+  const curText = cur ? (texts[lineKey(cur)] ?? '') : '';
+  const echo =
+    cur && curText
+      ? td('delivery.dock.gap.line', {
+          name: locale === 'en' && cur.productNameEn ? cur.productNameEn : cur.productName,
+          text: `${curText}${cur.poUnit ? ` ${unit(cur.poUnit)}` : ''}`,
+        })
+      : '';
   return (
     <div className="flex min-h-full flex-col" data-testid="spot-check">
+      <p className="sr-only" aria-live="polite">
+        {echo}
+      </p>
       <div className="mt-auto flex flex-col gap-2 pt-1">
         {askAll ? (
           <p role="alert" className="flex items-center gap-2 rounded-card border border-warn-subtle bg-warn-subtle px-3 py-1.5 text-body-sm text-ink" data-testid="spot-fill-all">
@@ -211,8 +225,9 @@ function SpotBody({
                   autoComplete="off"
                   autoCorrect="off"
                   spellCheck={false}
-                  // Empty: the page's direction (the Hebrew question reads right to left); digits: left to right.
-                  dir="auto"
+                  // Digits left to right; empty, no direction of its own, so the placeholder's question reads
+                  // in the page's direction (an empty dir="auto" field would still lay out left to right).
+                  dir={t ? 'ltr' : undefined}
                   aria-label={td('delivery.count.spotQtyFor', { name, unit: u || '—' })}
                   placeholder={td('delivery.dock.spot.empty')}
                   value={t}

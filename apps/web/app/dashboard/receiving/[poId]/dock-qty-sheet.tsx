@@ -239,7 +239,8 @@ export function DockQtySheet({
             <label
               // The box shows focus (the field inside it is only as wide as its digits).
               className={`flex h-16 min-w-0 flex-1 cursor-text items-center justify-center gap-1.5 rounded-card border-2 px-2 [@media(max-height:640px)]:h-[3.25rem] transition-colors duration-micro ease-standard focus-within:[outline-offset:var(--focus-offset,2px)] focus-within:[outline:var(--focus-width,2px)_solid_rgb(var(--c-focus))] ${
-                replace && text !== '' ? 'border-info bg-info-subtle' : 'border-line-strong bg-surface'
+                // "The next key replaces it": the colour, and the selection ring too (its width, not only its hue).
+                replace && text !== '' ? 'border-info bg-info-subtle [box-shadow:var(--ring-selected)]' : 'border-line-strong bg-surface'
               }`}
             >
               <input
