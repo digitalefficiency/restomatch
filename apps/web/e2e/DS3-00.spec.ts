@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { channels, colorVars, colorVarsV2, elevation, focus, indicator, motion, status, surfaces, text } from '@restomatch/ui-tokens';
+import { channels, colorVars, colorVarsV2, elevation, focus, indicator, menuMotion, motion, status, surfaces, text } from '@restomatch/ui-tokens';
 import { labHe } from '../app/dashboard/lab/tokens/copy';
 import { OWNER_STATE } from './env';
 
@@ -176,12 +176,13 @@ test.describe('3 · elevation', () => {
     expect(shadowOnly(await toast.evaluate((el) => getComputedStyle(el).boxShadow))).toBe(await computed(page, 'boxShadow', elevation.e2));
   });
 
-  test('home: every card drawn with the legacy card shadow now rests on sh1', async ({ page }) => {
+  test('home: every resting card (the legacy card shadow or e1) rests on sh1', async ({ page }) => {
     await setLang(page, 'he');
     await page.goto('/dashboard');
     const sh1 = await computed(page, 'boxShadow', elevation.e1);
-    const cards = await page.locator('main .shadow-card').evaluateAll((els) => els.map((el) => getComputedStyle(el).boxShadow));
-    expect(cards.length, 'home draws at least one legacy card').toBeGreaterThan(0);
+    // Either class, so a card that DS3-01 moves to `shadow-e1` keeps passing.
+    const cards = await page.locator('main :is(.shadow-card, .shadow-e1)').evaluateAll((els) => els.map((el) => getComputedStyle(el).boxShadow));
+    expect(cards.length, 'home draws at least one resting card').toBeGreaterThan(0);
     for (const s of cards) expect(shadowOnly(s)).toBe(sh1);
   });
 });
@@ -219,12 +220,18 @@ test.describe('4 · tiers keep their meaning', () => {
 
   test('wherever a page uses the T3 family as text, it renders green (home, credit requests)', async ({ page }) => {
     await setLang(page, 'he');
+    let seen = 0;
     for (const path of ['/dashboard', '/dashboard/recovery']) {
       await page.goto(path);
       await page.locator('main').first().waitFor();
-      const golds = await page.locator('main :is(.text-gold, .text-ok)').evaluateAll((els) => els.map((el) => getComputedStyle(el).color));
+      // The recovered amount is its own role (#00573B); `text-ok` is SPEC §2 `--ok`, the T3 bold.
+      const golds = await page.locator('main .text-gold').evaluateAll((els) => els.map((el) => getComputedStyle(el).color));
+      const oks = await page.locator('main .text-ok').evaluateAll((els) => els.map((el) => getComputedStyle(el).color));
       for (const c of golds) expect(c, path).toBe(rgb(status.gold.text));
+      for (const c of oks) expect(c, path).toBe(rgb(status.gold.bgBold));
+      seen += golds.length + oks.length;
     }
+    expect(seen, 'credit requests render at least one T3 figure').toBeGreaterThan(0);
   });
 });
 
@@ -309,5 +316,81 @@ test.describe('7 · the token lab shows the new roles', () => {
     const row = page.getByTestId('lab-indicators');
     await expect(row.locator('li')).toHaveCount(7);
     for (const name of ['primary-dot', 'danger-dot', 'warn-dot + ring', 'gold-dot (ok)', 'info-dot', 'neutral-dot', 'rule']) await expect(row).toContainText(name);
+  });
+
+  test('the amber dot carries its 1.5 px ring; in forced colours a dot keeps its colour (forced-color-adjust: none, as the reference)', async ({ page }) => {
+    await setLang(page, 'he');
+    await page.goto(LAB);
+    const dot = page.getByTestId('lab-indicators').locator('li', { hasText: 'warn-dot + ring' }).locator('span').first();
+    expect(await dot.evaluate((el) => getComputedStyle(el).boxShadow)).toContain(`${rgb(indicator.warnRing)} 0px 0px 0px 1.5px inset`);
+
+    // Control: the same fill without the opt-out, so the test proves the emulation really forces colours.
+    await page.evaluate(() => {
+      const probe = document.createElement('span');
+      probe.id = 'ds3-dot-probe';
+      probe.className = 'inline-block h-2 w-2 bg-warn-dot';
+      document.body.append(probe);
+    });
+    const probe = page.locator('#ds3-dot-probe');
+    expect(await probe.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(rgb(indicator.warn));
+    await page.emulateMedia({ forcedColors: 'active' });
+    expect(await probe.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe(rgb(indicator.warn));
+    expect(await dot.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(rgb(indicator.warn));
+  });
+});
+
+test.describe('8 · the side menu motion set, large text and the hero ₪ (correction of 14.11, DS3-03)', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test('the named motion set of the side menu is on :root for DS3-02, and the lab lists it', async ({ page }) => {
+    await setLang(page, 'he');
+    await page.goto(LAB);
+    const vars = await page.evaluate((names) => names.map((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim()), [
+      ...Object.keys(menuMotion.duration).map((k) => `--dur-menu-${k}`),
+      '--ease-menu',
+    ]);
+    // The CSS pipeline rewrites times and curves (120ms → .12s): compare numbers, not spellings.
+    expect(vars.slice(0, -1).map(ms)).toEqual(Object.values(menuMotion.duration).map(ms));
+    expect(curve(vars.at(-1)!)).toEqual(curve(menuMotion.easing));
+    await expect(page.getByTestId('lab-menu-motion').locator('li')).toHaveCount(Object.keys(menuMotion.duration).length + 1);
+  });
+
+  test('large text zooms the content 1.1× where the shell says data-text="large"; regular stays 1', async ({ page }) => {
+    await setLang(page, 'he');
+    await page.goto(LAB);
+    const zooms = await page.evaluate(() => {
+      const make = (text?: string) => {
+        const shell = document.createElement('div');
+        if (text) shell.setAttribute('data-text', text);
+        const content = document.createElement('div');
+        content.className = 'rm-text-zoom';
+        shell.append(content);
+        document.body.append(shell);
+        return getComputedStyle(content).zoom;
+      };
+      return [make('large'), make('regular'), make()];
+    });
+    expect(zooms).toEqual(['1.1', '1', '1']);
+  });
+
+  test('on the hero role the ₪ is 0.4 em, regular, tertiary and raised (SPEC §3)', async ({ page }) => {
+    await setLang(page, 'he');
+    await page.goto(LAB);
+    const g = await page.evaluate(() => {
+      const hero = document.createElement('span');
+      hero.className = 'text-money-hero';
+      hero.style.fontSize = '84px';
+      const glyph = document.createElement('span');
+      glyph.className = 'money-glyph';
+      glyph.textContent = '₪';
+      hero.append(glyph);
+      document.body.append(hero);
+      const cs = getComputedStyle(glyph);
+      return { size: cs.fontSize, weight: cs.fontWeight, color: cs.color, transform: cs.transform };
+    });
+    expect(g.size).toBe('33.6px');
+    expect(g.weight).toBe('400');
+    expect(g.color).toBe(rgb(text.subtle));
+    expect(g.transform).toBe('matrix(1, 0, 0, 1, 0, -3.36)');
   });
 });

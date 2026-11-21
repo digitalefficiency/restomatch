@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Pencil, Plus, Trash2, Truck } from 'lucide-react';
-import { border, contrastRatio, dataViz, elevation, focus, indicator, motion, status, surfaceV2, surfaces, text, typeRoles, type MoneyState, type StatusFamily } from '@restomatch/ui-tokens';
+import { border, contrastRatio, dataViz, elevation, focus, indicator, menuMotion, motion, status, surfaceV2, surfaces, text, typeRoles, type MoneyState, type StatusFamily } from '@restomatch/ui-tokens';
 import {
   Banner,
   Button,
@@ -153,7 +153,7 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
             [
               ['primary-dot', indicator.primary, 'bg-primary-dot', ''],
               ['danger-dot', indicator.danger, 'bg-danger-dot', ''],
-              ['warn-dot + ring', indicator.warnRing, 'bg-warn-dot', 'ring-1 ring-inset ring-warn-dot-ring'],
+              ['warn-dot + ring', indicator.warnRing, 'bg-warn-dot', 'ring-[1.5px] ring-inset ring-warn-dot-ring'],
               ['gold-dot (ok)', indicator.gold, 'bg-gold-dot', ''],
               ['info-dot', indicator.info, 'bg-info-dot', ''],
               ['neutral-dot', indicator.neutral, 'bg-neutral-dot', ''],
@@ -161,7 +161,8 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
             ] as const
           ).map(([name, hex, bg, ring]) => (
             <li key={name} className="flex items-center gap-2 text-caption text-muted">
-              <span aria-hidden className={`inline-block h-2 w-2 shrink-0 rounded-pill ${bg} ${ring}`} />
+              {/* forced-color-adjust: none keeps a dot's colour in forced-colours mode, as the reference's `.dot`. */}
+              <span aria-hidden className={`inline-block h-2 w-2 shrink-0 rounded-pill forced-color-adjust-none ${bg} ${ring}`} />
               <bdi dir="ltr">{name}</bdi>
               <span className="num">{lab('contrast', { ratio: contrastRatio(hex, surfaces.surface).toFixed(2) })}</span>
             </li>
@@ -235,6 +236,19 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
               </bdi>
             </li>
           ))}
+        </ul>
+        {/* DS3 SPEC §8: the side menu's one named set (sidebar spec §10), for DS3-02. */}
+        <ul className="mt-2 grid gap-2 sm:grid-cols-3" data-testid="lab-menu-motion">
+          {Object.entries(menuMotion.duration).map(([k, v]) => (
+            <li key={k} className="rounded-control border border-line px-3 py-2 text-caption text-muted">
+              <bdi dir="ltr">
+                --dur-menu-{k} · {v}
+              </bdi>
+            </li>
+          ))}
+          <li className="rounded-control border border-line px-3 py-2 text-caption text-muted sm:col-span-3">
+            <bdi dir="ltr">--ease-menu · {menuMotion.easing}</bdi>
+          </li>
         </ul>
       </Section>
 

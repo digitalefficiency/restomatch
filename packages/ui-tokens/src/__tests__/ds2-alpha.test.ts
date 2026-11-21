@@ -2,10 +2,11 @@
 // and Tailwind key renders exactly as before; only new names are added.
 //
 // DS3 (the clean finish, 14.11.2026) changed VALUES on purpose (docs/ux/ds3/SPEC.md §2, §4).
-// The two fixtures are the recorded baseline of the v1 names and were re-recorded from the
-// token source with the same procedure that reproduces main's fixtures byte for byte; their
-// diff in the DS3-00 pull request is the value change the owner signs. Everything else here
-// still holds: v1 names, the additive v2 blocks, rows, radii, the number family.
+// The two fixtures are the recorded baseline of the v1 names. Re-record them only for a deliberate
+// value change, with `pnpm --filter @restomatch/ui-tokens fixtures:record` (scripts/fixtures.ts, the
+// procedure that rebuilds main's fixtures byte for byte from main's code; `fixtures:check` compares);
+// their diff in the pull request is the value change the owner signs. Everything else here still
+// holds: v1 names, the additive v2 blocks, rows, radii, the number family.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -78,7 +79,7 @@ describe('DS2 v2 names', () => {
     '--c-action-primary-bg: 0 87 59;',
     '--row-default: 48px;',
     '--decision-row-h: 52px;', // DS3: the clean queue row (DS2 had 64)
-    '--fs-money-hero: 2.5rem;',
+    '--fs-money-hero: 4rem;', // DS3 SPEC §3: the hero, 64/70 on a phone (mobile first; 84/88 from 768 px)
     '--chrome-header-h: 56px;',
   ])('emits %s', (decl) => expect(css).toContain(decl));
 
@@ -90,9 +91,10 @@ describe('DS2 v2 names', () => {
     expect(tailwindPreset.theme.borderRadius).toHaveProperty('chip');
   });
 
-  it('has 16 v2 type roles; with caption, body-sm and body that is the closed 19', () => {
-    // DS2 closed 17; DS3-00 adds `row-title` and `row-sub` (SPEC §7: a queue row's compact steps).
-    expect(Object.keys(tokens.typeScaleV2)).toHaveLength(16);
-    expect(Object.keys(tokens.typeScaleV2)).toEqual(expect.arrayContaining(['row-title', 'row-sub']));
+  it('has 18 v2 type roles; with caption, body-sm and body that is the closed 21', () => {
+    // DS2 closed 17; DS3-00 adds `row-title` and `row-sub` (SPEC §7: a queue row's compact steps) and
+    // `sub` and `lead` (SPEC §3: 13/18 and 18/24, asked for by DS3-03). Nothing else may join.
+    expect(Object.keys(tokens.typeScaleV2)).toHaveLength(18);
+    expect(Object.keys(tokens.typeScaleV2)).toEqual(expect.arrayContaining(['row-title', 'row-sub', 'sub', 'lead']));
   });
 });

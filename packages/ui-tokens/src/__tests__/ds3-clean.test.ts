@@ -1,6 +1,7 @@
-// DS3 · the clean finish (docs/ux/ds3/SPEC.md §2, §4, §8; WORKPLAN DS3-00). Pins every value the
-// spec names to the DS2 role that carries it, the T3 move (recovered money is green), the contrast
-// the reference holds, and the motion and radius scales DS3 confirms without duplicating.
+// DS3 · the clean finish (docs/ux/ds3/SPEC.md §2, §3, §4, §7, §8; WORKPLAN DS3-00, with the handoff's
+// correction of 14.11). Pins every value the spec names to the DS2 role that carries it, the T3 move
+// (recovered money is its own green role), the contrast the reference holds, the motion scale DS3
+// confirms plus the side menu's one named set, and the type steps SPEC §3 names that DS2 lacked.
 import { describe, expect, it } from 'vitest';
 import {
   action,
@@ -12,6 +13,7 @@ import {
   focus,
   held,
   indicator,
+  menuMotion,
   moneyStates,
   moneyMarker,
   motion,
@@ -24,6 +26,7 @@ import {
   tailwindPreset,
   text,
   textV2,
+  typeScaleV2,
   type MoneyState,
   type StatusFamily,
 } from '../index';
@@ -54,8 +57,10 @@ const SPEC_COLOURS: Array<[prop: string, hex: string, roles: Record<string, stri
   ['--warn-ring', '#B97500', { 'indicator.warnRing': indicator.warnRing }],
   ['--warn-sub', '#FFF6E1', { 'status.warn.bgSubtle': status.warn.bgSubtle }],
   ['--warn-bd', '#F5D79A', { 'status.warn.borderSubtle': status.warn.borderSubtle }],
-  // T3: recovered money is green in the clean finish. The family keeps its v1 name (`gold`).
-  ['--ok', '#00713E', { 'status.gold.text': status.gold.text, 'status.gold.bgBold': status.gold.bgBold }],
+  // T3 (SPEC §2, correction of 14.11): the recovered amount is its own role at the dark green — never
+  // the action role — and `--ok` is that family's bold. The family keeps its v1 name (`gold`).
+  ['T3 recovered amount', '#00573B', { 'status.gold.text': status.gold.text }],
+  ['--ok', '#00713E', { 'status.gold.bgBold': status.gold.bgBold }],
   ['--ok-solid', '#0EA053', { 'indicator.gold': indicator.gold }],
   ['--ok-sub', '#E2FBE9', { 'status.gold.bgSubtle': status.gold.bgSubtle }],
   ['--ok-bd', '#ADE3BF', { 'status.gold.borderSubtle': status.gold.borderSubtle }],
@@ -94,7 +99,7 @@ describe('DS3 · SPEC §2 colours land on the DS2 roles', () => {
 
   it('the generated block carries the clean values (channels)', () => {
     const css = cssVariables();
-    for (const decl of ['--c-bg: 246 248 247;', '--c-ink: 18 28 23;', '--c-focus: 34 86 187;', '--c-gold: 0 113 62;', '--c-danger-dot: 221 39 41;', '--c-warn-dot-ring: 185 117 0;', '--c-surface-hover: 235 240 237;']) {
+    for (const decl of ['--c-bg: 246 248 247;', '--c-ink: 18 28 23;', '--c-focus: 34 86 187;', '--c-gold: 0 87 59;', '--c-gold-bold: 0 113 62;', '--c-danger-dot: 221 39 41;', '--c-warn-dot-ring: 185 117 0;', '--c-surface-hover: 235 240 237;']) {
       expect(css).toContain(decl);
     }
   });
@@ -126,7 +131,7 @@ describe('DS3 · SPEC §2 colours land on the DS2 roles', () => {
 describe('DS3 · tiers keep their meaning (SPEC §2 rules)', () => {
   const T3: MoneyState[] = ['caught', 'claimed', 'credited', 'returned'];
 
-  it('T3 (good news) is green: money that came back (caught, credited, returned) reads the T3 family (leaf); claimed reads the brand (basil)', () => {
+  it('T3 (good news) is green: money that came back (caught, credited, returned) reads the T3 family; claimed reads the brand', () => {
     for (const s of T3) expect(moneyStates[s].tier, s).toBe('T3');
     expect(moneyStates.caught.figure).toBe('gold');
     expect(moneyStates.credited.figure).toBe('gold');
@@ -134,14 +139,16 @@ describe('DS3 · tiers keep their meaning (SPEC §2 rules)', () => {
     // Held on `primary`: ds-foundation.test.ts:80 (DS3-01's folder) pins claimed's class (see the DS3-00 PR).
     expect(moneyStates.claimed.figure).toBe('primary');
     for (const s of T3) expect([status.gold.text, status.primary.text], s).toContain(status[moneyStates[s].figure as StatusFamily].text);
-    expect(status.gold.text).toBe('#00713E');
-    expect(status.primary.text).toBe('#00573B');
+    // Its own variable, even though the clean value equals the action colour (SPEC §2).
+    const css = cssVariables();
+    expect(css).toContain(`--c-gold: ${channels(status.gold.text)};`);
+    expect(css).toContain(`--c-primary: ${channels(status.primary.text)};`);
   });
 
-  it('`ok` is the T3 family by meaning: the same variables as `gold`', () => {
-    const c = tailwindPreset.theme.extend.colors as unknown as Record<string, unknown>;
+  it('`ok` is the good-news family by meaning: `text-ok` is --ok (the T3 bold); tint, border and dot are the T3 family\'s', () => {
+    const c = tailwindPreset.theme.extend.colors as unknown as Record<string, Record<string, string>>;
     const b = tailwindPreset.theme.extend.borderColor as unknown as Record<string, unknown>;
-    expect(c.ok).toEqual(c.gold);
+    expect(c.ok).toEqual({ ...c.gold, DEFAULT: 'rgb(var(--c-gold-bold) / <alpha-value>)' });
     expect(b.ok).toEqual(b.gold);
   });
 
@@ -158,8 +165,10 @@ describe('DS3 · tiers keep their meaning (SPEC §2 rules)', () => {
     expect(status.neutral.text).toBe(text.muted);
   });
 
-  it('the action (basil) and good news (leaf) are distinct greens; focus is distinct from both and from danger', () => {
-    expect(new Set([status.primary.text, status.gold.text, focus, status.danger.text]).size).toBe(4);
+  it('the action and --ok are distinct greens; focus is distinct from both and from danger', () => {
+    // The T3 amount shares the action's value as its own role (SPEC §2); every T3 fill reads leaf.
+    expect(new Set([status.primary.text, status.gold.bgBold, focus, status.danger.text]).size).toBe(4);
+    expect(new Set([status.primary.bgBold, status.gold.bgBold]).size).toBe(2);
   });
 });
 
@@ -201,6 +210,29 @@ describe('DS3 · contrast holds what the reference holds (5:1; lowest 5.42:1)', 
       for (const dot of [indicator.primary, indicator.info, indicator.neutral]) expect(contrastRatio(dot, bg)).toBeGreaterThanOrEqual(3);
     }
   });
+
+  it('the one indicator pair below 3:1 is documented and pinned: ok-solid on --hover (2.95:1)', () => {
+    // The reference never paints ok-solid on --hover, and a status dot always comes with its word
+    // (SPEC §2), so the dot is never the only cue. Listed under "Not done" in the PR; pinned so it cannot slip.
+    expect(contrastRatio(indicator.gold, surfaceV2.hover)).toBeGreaterThanOrEqual(2.95);
+  });
+
+  it('the v1 tint recipe the product paints most (`bg-{f}/a text-{f}`, a ≤ 12 %) stays ≥ 4.6:1 on surface and canvas', () => {
+    // apps/web, 14.11: 28 × `bg-primary/12 text-primary`, 18 × danger, 12 × warn, 5 × info, 4 × gold (Badge) …
+    // The re-valued families drive these translucent tints, which no other test reaches. Heavier tints
+    // (the chain heat band's `/20`) were already below AA on the canvas on main; the PR lists them as requests.
+    const over = (fg: string, a: number, bg: string) => {
+      const ch = (hex: string, i: number) => parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16);
+      return `#${[0, 1, 2].map((i) => Math.round(ch(fg, i) * a + ch(bg, i) * (1 - a)).toString(16).padStart(2, '0')).join('')}`;
+    };
+    for (const f of ['primary', 'danger', 'warn', 'gold', 'info'] as const) {
+      for (const a of [0.05, 0.08, 0.1, 0.12]) {
+        for (const bg of [surfaces.surface, surfaces.canvas]) {
+          expect(contrastRatio(status[f].text, over(status[f].text, a, bg)), `${f}/${a * 100} on ${bg}`).toBeGreaterThanOrEqual(4.6);
+        }
+      }
+    }
+  });
 });
 
 describe('DS3 · shape, elevation, focus (SPEC §4)', () => {
@@ -219,6 +251,12 @@ describe('DS3 · shape, elevation, focus (SPEC §4)', () => {
     expect(SHADOW_INK).toBe(channels(text.ink));
     expect(scrim).toBe(`rgb(${channels(text.ink)} / .48)`);
     for (const v of [...Object.values(elevation), ...Object.values(legacyShadow)]) expect(v).not.toMatch(/rgba?\(\s*\d+\s*,/);
+    // Every colour of a DS shadow (elevation, the card, the glows) is the ink or a role; Tailwind's
+    // deprecated defaults (sm … 2xl) keep their black on purpose.
+    const owned = [...Object.values(elevation), legacyShadow.card, ...Object.entries(legacyShadow).filter(([k]) => k.startsWith('glow-')).map(([, v]) => v)];
+    for (const v of owned) {
+      for (const m of v.matchAll(/rgba?\(([^)]*)\)/g)) expect(m[1]!.startsWith(`${SHADOW_INK} /`) || m[1]!.startsWith('var(--c-'), v).toBe(true);
+    }
   });
 
   it('focus is a 2 px outline with a 2 px offset in the focus colour', () => {
@@ -263,7 +301,7 @@ describe('DS3 · density variables express SPEC §7 (the switch itself is DS3-06
       expect(body).toContain(decl);
     }
     // The floor comes after the compact block, so it wins at equal specificity.
-    expect(css.indexOf("@media (pointer: coarse) {\n  [data-density='compact'] {")).toBeGreaterThan(css.indexOf("[data-density='compact'] {"));
+    expect(css.indexOf("@media (pointer: coarse) {\n  [data-density='compact'] {")).toBeGreaterThan(css.indexOf("[data-density='compact'] {\n  --fs-cell"));
   });
 });
 
@@ -281,5 +319,51 @@ describe('DS3 · motion is SPEC §8 already (confirmed, not duplicated)', () => 
     const css = cssVariables();
     expect(css).not.toMatch(/--t-(press|state|panel|explain)\b/);
     expect(css).not.toMatch(/--e-(std|out|exit)\b/);
+  });
+
+  it('the one addition is the side menu\'s named set (SPEC §8, sidebar spec §10), emitted once and in Tailwind', () => {
+    expect(menuMotion).toEqual({
+      duration: { fade: '80ms', tooltip: '90ms', chevron: '120ms', delay: '130ms', collapse: '160ms', expand: '200ms' },
+      easing: 'cubic-bezier(0.2,0,0,1)',
+    });
+    const css = cssVariables();
+    for (const [k, v] of Object.entries(menuMotion.duration)) expect(css.split(`--dur-menu-${k}: ${v};`).length - 1, k).toBe(1);
+    expect(css.split('--ease-menu: cubic-bezier(0.2,0,0,1);').length - 1).toBe(1);
+    // Nothing else adds a duration or a curve.
+    const names = (re: RegExp) => [...new Set([...css.matchAll(re)].map((m) => m[1]))].sort();
+    expect(names(/--dur-([a-z-]+):/g)).toEqual(['long', 'medium', 'menu-chevron', 'menu-collapse', 'menu-delay', 'menu-expand', 'menu-fade', 'menu-tooltip', 'micro', 'short']);
+    expect(names(/--ease-([a-z-]+):/g)).toEqual(['enter', 'exit', 'menu', 'standard']);
+    const theme = tailwindPreset.theme as unknown as Record<string, Record<string, unknown>>;
+    for (const k of Object.keys(menuMotion.duration)) expect(theme.transitionDuration![`menu-${k}`]).toBe(`var(--dur-menu-${k})`);
+    expect(theme.transitionTimingFunction!.menu).toBe('var(--ease-menu)');
+    expect((theme.extend!.transitionDelay as Record<string, string>).menu).toBe('var(--dur-menu-delay)');
+  });
+});
+
+describe('DS3 · the large-text preference (WORKPLAN, "Personal preferences: one contract")', () => {
+  it('--text-zoom is 1, and 1.1 under [data-text=\'large\'], as the reference zooms its content', () => {
+    const css = cssVariables();
+    expect(css).toContain('--text-zoom: 1;');
+    expect(css).toMatch(/\[data-text='large'\] \{\n {2}--text-zoom: 1\.1;\n\}/);
+  });
+});
+
+describe('DS3 · SPEC §3 type steps that DS2 lacked (asked for by DS3-03)', () => {
+  const css = cssVariables();
+  const rootBlock = css.slice(css.indexOf(':root {\n  --c-surface-canvas'), css.indexOf('}', css.indexOf(':root {\n  --c-surface-canvas')));
+  // Every `@media (min-width: 768px)` block (the v1 one and the v2 one), as text.
+  const md = css.split('@media (min-width: 768px) {').slice(1).map((s) => s.slice(0, s.indexOf('\n}'))).join('\n');
+  const compact = css.slice(css.indexOf("[data-density='compact'] {\n  --fs-cell"), css.indexOf('}', css.indexOf("[data-density='compact'] {\n  --fs-cell")));
+
+  it('the owner home\'s hero is 84/88 at weight 400, −0.03 em; 64/70 on a phone (mobile first)', () => {
+    expect(typeScaleV2['money-hero']).toEqual({ base: { fs: '5.25rem', lh: '5.5rem' }, phone: { fs: '4rem', lh: '4.375rem' }, field: { fs: '4rem', lh: '4.375rem' }, fw: 400, ls: '-0.03em' });
+    for (const decl of ['--fs-money-hero: 4rem;', '--lh-money-hero: 4.375rem;', '--fw-money-hero: 400;', '--ls-money-hero: -0.03em;']) expect(rootBlock).toContain(decl);
+    for (const decl of ['--fs-money-hero: 5.25rem;', '--lh-money-hero: 5.5rem;']) expect(md).toContain(decl);
+  });
+
+  it('`sub` is 13/18 in every density; `lead` is 18/24 at weight 500', () => {
+    for (const decl of ['--fs-sub: 0.8125rem;', '--lh-sub: 1.125rem;', '--fw-sub: 400;', '--fs-lead: 1.125rem;', '--lh-lead: 1.5rem;', '--fw-lead: 500;']) expect(rootBlock).toContain(decl);
+    expect(compact).not.toContain('--fs-sub:');
+    expect(compact).not.toContain('--fs-lead:');
   });
 });
