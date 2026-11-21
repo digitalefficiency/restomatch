@@ -14,6 +14,16 @@ import { Sheet } from './Sheet';
 /** The pad's own keys, in its own order. A tapped key is looked up here, never read back from the page. */
 const KEYS: readonly KeypadKey[] = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'del'];
 
+/**
+ * A hardware key as one of the pad's own keys (the reference's sheet: digits, '.' or ',' for the point,
+ * Backspace), or null. Combinations with Ctrl, ⌘ or Alt are never the pad's.
+ */
+export function keypadKeyOf(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean }): KeypadKey | null {
+  if (e.ctrlKey || e.metaKey || e.altKey) return null;
+  const want = /^[0-9]$/.test(e.key) ? e.key : e.key === '.' || e.key === ',' ? '.' : e.key === 'Backspace' ? 'del' : null;
+  return KEYS.find((k) => k === want) ?? null;
+}
+
 /** What the pad holds while it is open: the typed text, whether the next key replaces it, the "פגום" chip. */
 export interface QtyPadState {
   text: string;
@@ -90,7 +100,16 @@ export function QtyPad({
   };
 
   return (
-    <div className={cn('flex flex-col', className)} data-qty-pad="">
+    <div
+      className={cn('flex flex-col', className)}
+      data-qty-pad=""
+      onKeyDown={(e) => {
+        const k = keypadKeyOf(e);
+        if (!k) return;
+        e.preventDefault(); // the sheet's own listener skips a key the pad already typed
+        press(k);
+      }}
+    >
       {/* The live region is always there, so a note that appears is announced (one that arrives already filled is
           not); empty, it takes no room. The note sits above the stepper: the pad is bottom-aligned, so it grows upward
           and no key moves under the thumb. */}
@@ -219,6 +238,21 @@ export function QtyKeypad({
     if (open) setState({ text: initial == null ? '' : keypadDotText(initial), first: initial != null, damaged });
   }, [open, initial, damaged]);
 
+  // While the sheet is open, a hardware keyboard types into the pad wherever the focus is in it (the pad's
+  // own handler takes the keys when the focus is on a key or a chip).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const k = keypadKeyOf(e);
+      if (!k) return;
+      e.preventDefault();
+      setState((s) => ({ ...s, text: typeKeypadKey(s.text, s.first, k, whole), first: false }));
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, whole]);
+
   const value = parseKeypadDot(state.text);
   const hurt = state.damaged && value !== 0;
   const qtyText = value !== null ? `${keypadDotText(value)}${unit ? ` ${unit}` : ''}` : '';
@@ -232,7 +266,7 @@ export function QtyKeypad({
       description={
         ordered === undefined ? undefined : name ? t('ds.keypad.itemOrdered', { name, qty: orderedText }) : t('ds.keypad.ordered', { qty: orderedText })
       }
-      detent="full"
+      detent="auto"
       primary={
         <Button size="xl" className="w-full rounded-card" onClick={() => value !== null && onConfirm(value, { damaged: hurt })} disabled={value === null}>
           {value === null ? t('ds.keypad.confirmEmpty') : value === 0 ? t('ds.keypad.confirmMissing') : t('ds.keypad.confirmQty', { qty: qtyText })}

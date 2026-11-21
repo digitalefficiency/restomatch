@@ -279,14 +279,16 @@ describe('<MatchStrip>: ordered · received · billed in one line', () => {
 });
 
 describe('buttons and key caps (kit "כפתורים ומקשים", SPEC §5)', () => {
-  it('DS3 heights: sm 32 · md 36 · lg 44 · xl 56; coarse pointers keep 44', async () => {
+  it('DS3 heights: sm 32 · md 36 · lg 44 · xl 60 (the phone primary); coarse pointers keep 44', async () => {
     const { Button } = await import('../Button');
     expect(render(h(Button, { size: 'sm' }, 'x'))).toContain('min-h-8');
     const md = render(h(Button, {}, 'x'));
     expect(md).toContain('min-h-9');
     expect(md).toContain('[@media(pointer:coarse)]:min-h-11');
     expect(render(h(Button, { size: 'lg' }, 'x'))).toContain('min-h-11');
-    expect(render(h(Button, { size: 'xl' }, 'x'))).toContain('min-h-14');
+    const xl = render(h(Button, { size: 'xl' }, 'x'));
+    expect(xl).toContain('min-h-[3.75rem]');
+    expect(xl).toContain('text-lead'); // 18 px at 500, the reference's .ph-cta
     expect(md).toContain('font-medium');
   });
 
@@ -712,7 +714,7 @@ describe('review fixes (accessibility of the shared components)', () => {
     expect(seg).not.toMatch(/aria-checked="false"[^>]*forced-colors:outline/);
   });
 
-  it('a phone keeps the 44 px target on the segmented control; the switch track keeps its 44 × 24 shape', async () => {
+  it('a phone keeps the 44 px target on the segmented control; the switch track is 44 × 26 (SPEC §5), also on a phone', async () => {
     const { SegmentedControl } = await import('../form/SegmentedControl');
     for (const size of ['sm', 'md']) {
       const seg = render(h(SegmentedControl, { label: 'x', value: 'a', size, onChange: () => {}, options: [{ value: 'a', label: 'א' }, { value: 'b', label: 'ב' }] }));
@@ -720,7 +722,7 @@ describe('review fixes (accessibility of the shared components)', () => {
     }
     const { Switch } = await import('../form/Switch');
     const sw = render(h(Switch, { label: 'התראות', checked: true, onCheckedChange: () => {} }));
-    expect(sw).toMatch(/role="switch"[^>]*class="[^"]*h-6 min-h-6 w-11/);
+    expect(sw).toMatch(/role="switch"[^>]*class="[^"]*h-\[1\.625rem\] min-h-\[1\.625rem\] w-11 [^"]*p-\[3px\]/);
   });
 
   it('NumberField: `label` names the input itself, not only the group', async () => {
@@ -753,5 +755,71 @@ describe('review fixes (accessibility of the shared components)', () => {
   it('the credit-request track keeps its markers in forced colours (like the dots)', () => {
     const src = readFileSync(new URL('../StatusRail.tsx', import.meta.url), 'utf8');
     expect(src).toContain('size-2.5 rounded-full forced-color-adjust-none');
+  });
+});
+
+describe('review fixes (fidelity to the reference)', () => {
+  const read = (rel: string) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+
+  it('the number pad types from a hardware keyboard: digits, "." or "," for the point, Backspace; never a combination', async () => {
+    const { keypadKeyOf } = await import('../overlay/QtyKeypad');
+    expect(keypadKeyOf({ key: '7' })).toBe('7');
+    expect(keypadKeyOf({ key: '.' })).toBe('.');
+    expect(keypadKeyOf({ key: ',' })).toBe('.');
+    expect(keypadKeyOf({ key: 'Backspace' })).toBe('del');
+    expect(keypadKeyOf({ key: 'a' })).toBeNull();
+    expect(keypadKeyOf({ key: 'Enter' })).toBeNull();
+    expect(keypadKeyOf({ key: '5', ctrlKey: true })).toBeNull();
+    expect(keypadKeyOf({ key: '5', metaKey: true })).toBeNull();
+  });
+
+  it('the quantity sheet is as tall as its content, on sh2 without a border, its title on the DS3 role', async () => {
+    const { Sheet } = await import('../overlay/Sheet');
+    const html = render(h(Sheet, { open: true, onClose: () => {}, title: 'כמה הגיע?', detent: 'auto' }, 'x'));
+    expect(html).toContain('data-detent="auto"');
+    expect(html).toContain('max-h-[calc(100dvh-0.75rem)]');
+    expect(html).not.toMatch(/h-\[(92|50)dvh\]/);
+    expect(html).not.toMatch(/<dialog[^>]*border-line/);
+    expect(html).toMatch(/<h2[^>]*class="text-title-sm/);
+    expect(read('overlay/QtyKeypad.tsx')).toContain('detent="auto"');
+  });
+
+  it('the top-bar bell: 36 px (44 on a phone), an 18 px glyph, an ink dot and never a count', () => {
+    const src = read('notifications/Bell.tsx');
+    expect(src).toContain('size-9');
+    expect(src).toContain('[@media(pointer:coarse)]:size-11');
+    expect(src).toContain('<Icon as={BellIcon} size="bar" />');
+    expect(src).toMatch(/data-testid="bell-dot"\s+className="[^"]*size-2 rounded-full bg-fg ring-2 ring-surface/);
+    expect(src).not.toMatch(/bell-dot[\s\S]{0,400}\{cappedCount/);
+    // the number is still said: it is part of the trigger's name
+    expect(src).toMatch(/const label = unseen > 0 \? `\$\{t\('bell\.label'\)\}, \$\{t\('bell\.unseen', \{ count: cappedCount\(unseen, locale\) \}\)\}`/);
+  });
+
+  it('a figure that failed to load offers its one action when there is one; otherwise the words stay', () => {
+    const plain = render(h(Money, { value: null, unavailable: true }));
+    expect(textOf(plain)).toBe('לא זמין · נסו שוב');
+    expect(plain).not.toContain('<button');
+    const withRetry = render(h(Money, { value: null, unavailable: true, onRetry: () => {} }));
+    expect(textOf(withRetry)).toBe('לא זמין, נסו שוב');
+    expect(withRetry).toMatch(/<button type="button" class="[^"]*min-h-6[^"]*">נסו שוב<\/button>/);
+    expect(textOf(render(h(Money, { value: null, unavailable: true, onRetry: () => {} }), 'en'))).toBe('Unavailable, try again');
+  });
+
+  it('the views toolbar: its switches are the kit\'s segmented control, its buttons the small secondary, its filters pills', () => {
+    const src = read('views/ViewToolbar.tsx');
+    expect(src).toContain("on ? 'bg-surface text-fg shadow-e1 ring-1 ring-inset ring-fg");
+    expect(src).toContain('className="inline-flex rounded-control bg-surface-sunken p-0.5"');
+    expect(src).toContain('min-h-8 items-center gap-1.5 rounded-control border border-line-strong bg-surface px-3 text-sub');
+    expect(src).toContain('rounded-pill');
+    expect(src).not.toMatch(/bg-primary\/15|border-primary\/40 text-primary/);
+    expect(src).not.toMatch(/\bcn\(chip/);
+  });
+
+  it('cards rest on sh1; the calculation opens in a 12 px --rule panel; the tooltip fades on its named duration', async () => {
+    const { Card } = await import('../Card');
+    expect(render(h(Card, null, 'x'))).toContain('shadow-e1');
+    expect(render(h(Card, { elevated: true }, 'x'))).toContain('data-elevated="true"');
+    expect(read('Calculation.tsx')).toContain('rounded-card border border-line-rule bg-surface p-3');
+    expect(read('Tooltip.tsx')).toContain('duration-menu-tooltip');
   });
 });

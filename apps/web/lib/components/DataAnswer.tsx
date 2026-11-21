@@ -43,6 +43,7 @@ export function DataAnswer({
             <div key={i} className="min-w-0">
               <dt className="sr-only">{f.caption}</dt>
               <dd className="m-0">
+                {/* Pass an inline <Money> (no type role of its own), so the answer's 28 px regular figure applies. */}
                 <span className="block text-money-card font-normal">{f.value}</span>
                 <span aria-hidden="true" className="block text-body-sm text-fg-secondary">
                   {f.caption}

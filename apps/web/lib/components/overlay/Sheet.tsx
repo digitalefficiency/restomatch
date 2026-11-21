@@ -6,7 +6,8 @@ import { useT } from '@/lib/i18n/client';
 import { components } from '@/lib/i18n/messages/components';
 import { cnMerge as cn } from '../cn';
 
-export type SheetDetent = 'half' | 'full';
+/** `auto`: as tall as its content (up to the screen), for a sheet whose content has one size, like the number pad. */
+export type SheetDetent = 'half' | 'full' | 'auto';
 
 /**
  * Modal bottom sheet (lens-mobile-field §3.8). A native `<dialog>` opened with
@@ -61,8 +62,9 @@ export function Sheet({
     drag.current = null;
     if (!start) return;
     const dy = e.clientY - start.y;
-    if (Math.abs(dy) < 8) return setDetent((d) => (d === 'half' ? 'full' : 'half')); // a tap toggles
-    if (dy > 80) return detent === 'full' ? setDetent('half') : onClose();
+    const rest = initialDetent === 'full' ? 'half' : initialDetent; // where a shrink returns to
+    if (Math.abs(dy) < 8) return setDetent((d) => (d === 'full' ? rest : 'full')); // a tap toggles
+    if (dy > 80) return detent === 'full' ? setDetent(rest) : onClose();
     if (dy < -60) setDetent('full');
   }
 
@@ -80,9 +82,9 @@ export function Sheet({
       onClick={(e) => e.target === ref.current && onClose()}
       data-detent={detent}
       className={cn(
-        'rm-sheet fixed inset-x-0 bottom-0 top-auto z-sheet m-0 mx-auto w-full max-w-xl flex-col rounded-t-overlay border border-b-0 border-line bg-surface p-0 text-ink shadow-e3 open:flex',
+        'rm-sheet fixed inset-x-0 bottom-0 top-auto z-sheet m-0 mx-auto w-full max-w-xl flex-col rounded-t-overlay bg-surface p-0 text-ink shadow-e3 open:flex',
         'transition-[height] duration-long ease-standard',
-        detent === 'full' ? 'h-[92dvh]' : 'h-[50dvh]',
+        detent === 'full' ? 'h-[92dvh]' : detent === 'half' ? 'h-[50dvh]' : 'max-h-[calc(100dvh-0.75rem)]',
         className,
       )}
     >
@@ -96,14 +98,14 @@ export function Sheet({
               onPointerUp={onPointerUp}
               onKeyDown={(e) => {
                 if (e.key === 'ArrowUp') setDetent('full');
-                if (e.key === 'ArrowDown') setDetent('half');
+                if (e.key === 'ArrowDown') setDetent(initialDetent === 'full' ? 'half' : initialDetent);
               }}
               className="absolute inset-x-0 top-0 mx-auto flex h-12 w-24 touch-none items-start justify-center pt-2"
             >
               <span aria-hidden="true" className="h-1 w-8 rounded-pill bg-line-strong" />
             </button>
             <div className="min-w-0 flex-1 pt-8">
-              <h2 id={titleId} className="text-heading-sm text-ink">
+              <h2 id={titleId} className="text-title-sm text-ink">
                 {title}
               </h2>
               {description ? (

@@ -59,6 +59,11 @@ export interface MoneyProps {
   credit?: boolean;
   /** The value failed to load: "לא זמין · נסו שוב" — never ₪0. */
   unavailable?: boolean;
+  /**
+   * With `unavailable`: the one action an error gives. The words become "לא זמין," and a link-style
+   * "נסו שוב" button (the reference's kit). Without it the words stay as they were.
+   */
+  onRetry?: () => void;
   /** Not known yet (T4): "ממתין". */
   pending?: boolean;
   /** Locale override for server-rendered callers that already know it. */
@@ -121,6 +126,7 @@ export function Money({
   decimals,
   credit = false,
   unavailable = false,
+  onRetry,
   pending = false,
   locale: localeProp,
   symbol = 'inline',
@@ -142,6 +148,20 @@ export function Money({
     );
   }
   if (unavailable || shekels === null) {
+    if (onRetry) {
+      return (
+        <span className={cn('text-muted', className)}>
+          {t('ds.money.unavailableShort')},{' '}
+          <button
+            type="button"
+            onClick={onRetry}
+            className="inline-flex min-h-6 items-center font-medium text-primary underline underline-offset-[3px] [@media(pointer:coarse)]:min-h-11"
+          >
+            {t('ds.money.retry')}
+          </button>
+        </span>
+      );
+    }
     return <span className={cn('text-muted', className)}>{t('ds.money.unavailable')}</span>;
   }
 

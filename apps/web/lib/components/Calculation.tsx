@@ -122,7 +122,7 @@ export function CalculationFold({
         ref={d.panelProps.ref}
         aria-label={t('ds.calc.panel')}
         role="group"
-        className="mt-1 max-w-prose rounded-control border border-line bg-surface p-3 print:!block"
+        className="mt-1 max-w-prose rounded-card border border-line-rule bg-surface p-3 print:!block"
       >
         {children}
       </div>

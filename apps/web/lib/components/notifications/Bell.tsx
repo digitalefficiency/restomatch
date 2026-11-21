@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Bell as BellIcon, X } from 'lucide-react';
 import { cn } from '@/lib/components/cn';
+import { Icon } from '../icon/Icon';
 import { ActivityFeed } from '@/lib/components';
 import { Money } from '@/lib/components/money';
 import { Sheet } from '@/lib/components/overlay';
@@ -84,13 +85,17 @@ export function Bell({ className, activity = false }: { className?: string; /** 
         aria-expanded={open}
         onClick={toggle}
         data-testid="bell-trigger"
-        className={cn('relative inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted hover:bg-surface-hover hover:text-ink')}
+        // The reference's top-bar icon (.rm-ico): 36 px (44 on a phone), 8 px corners, an 18 px glyph, --sunken on hover.
+        className="relative inline-flex size-9 items-center justify-center rounded-control text-fg-secondary hover:bg-surface-sunken hover:text-fg [@media(pointer:coarse)]:size-11"
       >
-        <BellIcon className="h-5 w-5" aria-hidden="true" />
+        <Icon as={BellIcon} size="bar" />
         {unseen > 0 ? (
-          <span aria-hidden="true" data-testid="bell-dot" className="absolute end-1.5 top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.75rem] font-bold leading-none tabular-nums text-on-primary">
-            {cappedCount(unseen, locale)}
-          </span>
+          // An 8 px ink dot, never a count (the reference's .cnt-dot); the number stays in the trigger's name.
+          <span
+            aria-hidden="true"
+            data-testid="bell-dot"
+            className="absolute end-[7px] top-[7px] size-2 rounded-full bg-fg ring-2 ring-surface forced-color-adjust-none [@media(pointer:coarse)]:end-[11px] [@media(pointer:coarse)]:top-[11px]"
+          />
         ) : null}
       </button>
       {desk ? (

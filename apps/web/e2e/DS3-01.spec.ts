@@ -210,9 +210,17 @@ test.describe('DS3-01 kit page (platform admins)', () => {
     const sheet = page.getByRole('dialog', { name: 'כמה הגיע?' });
     await expect(sheet).toBeVisible();
     await expect(sheet).toContainText(`${kitHe.demo.keypadItem}, הוזמן 28.5 ק״ג`);
-    await sheet.getByRole('button', { name: 'אישור: 24 ק״ג' }).click();
+    await expect(sheet.getByRole('button', { name: 'אישור: 24 ק״ג' })).toBeVisible();
+    // a hardware keyboard types into the pad (the reference's sheet): the first key replaces, ',' is the point
+    await page.keyboard.press('2');
+    await page.keyboard.press('5');
+    await page.keyboard.press(',');
+    await page.keyboard.press('5');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
+    await sheet.getByRole('button', { name: 'אישור: 25 ק״ג' }).click();
     await expect(sheet).toBeHidden();
-    await expect(page.locator('#kit-keypad')).toContainText('נרשם: 24 ק״ג');
+    await expect(page.locator('#kit-keypad')).toContainText('נרשם: 25 ק״ג');
   });
 
   test('the three-way strip: one summary for assistive tech, the off cell tinted', async ({ page }) => {

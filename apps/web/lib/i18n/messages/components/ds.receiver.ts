@@ -12,6 +12,8 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
   ar: {
     money: {
       unavailable: 'غير متاح · حاول مرة أخرى',
+      unavailableShort: 'غير متاح',
+      retry: 'حاول مرة أخرى',
       pending: 'قيد الانتظار',
       na: 'غير منطبق',
       exact: 'المبلغ الدقيق: {amount}',
@@ -81,6 +83,8 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
   ru: {
     money: {
       unavailable: 'Недоступно · попробуйте ещё раз',
+      unavailableShort: 'Недоступно',
+      retry: 'попробуйте ещё раз',
       pending: 'Ожидает',
       na: 'Не применимо',
       exact: 'Точная сумма: {amount}',
@@ -150,6 +154,8 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
   th: {
     money: {
       unavailable: 'ไม่พร้อมใช้งาน · ลองอีกครั้ง',
+      unavailableShort: 'ไม่พร้อมใช้งาน',
+      retry: 'ลองอีกครั้ง',
       pending: 'รอดำเนินการ',
       na: 'ไม่เกี่ยวข้อง',
       exact: 'ยอดที่แน่นอน: {amount}',
@@ -219,6 +225,8 @@ export const dsReceiver: CompleteOverlays<typeof dsHe> = {
   ti: {
     money: {
       unavailable: 'ኣይርከብን · እንደገና ፈትን',
+      unavailableShort: 'ኣይርከብን',
+      retry: 'እንደገና ፈትን',
       pending: 'ይጽበ ኣሎ',
       na: 'ኣይምልከትን',
       exact: 'ልክዕ መጠን: {amount}',
