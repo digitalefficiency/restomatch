@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDb, creditNotes, eq, notificationsOutbox, recoveryClaims, recoveryEvents, suppliers, testDbUrl } from '@restomatch/db';
 import { supplierReminderDraft, waPhoneE164, type DraftClaim } from '../recovery/chase';
-import { enqueueRecoveryReminders, recoveryReminderEmail } from '../recovery/reminders';
+import { DESK_CREDIT_SUGGESTIONS_PATH, DESK_REMINDERS_PATH, enqueueRecoveryReminders, recoveryReminderEmail } from '../recovery/reminders';
 import { addClaim, addMember, setSettings } from './au03-helpers';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
@@ -109,22 +109,22 @@ describe('AU-03 · digest e-mail (pure)', () => {
       suppliers: [
         { supplierId: 's1', supplierName: 'ירקות', supplierNameEn: null, kind: 'no_reply', count: 2, outstandingAgorot: 20_150, oldestDays: 13, latestLetterAt: '2026-10-12T09:00:00Z' },
         { supplierId: 's1', supplierName: 'ירקות', supplierNameEn: null, kind: 'acknowledged', count: 1, outstandingAgorot: 1_000, oldestDays: 9, latestLetterAt: '2026-10-14T09:00:00Z' },
-        { supplierId: 's2', supplierName: 'דגים', supplierNameEn: null, kind: 'unsent', count: 1, outstandingAgorot: 500, oldestDays: 10, latestLetterAt: null },
       ],
       creditSuggestions: { count: 1, agorot: 4_000 },
     });
-    expect(e.subject).toMatch(/^בקשות זיכוי שממתינות 7\+ ימים · 2 ספקים · /);
-    expect(e.subject).toMatch(/216\.50/);
+    expect(e.subject).toMatch(/^בקשות זיכוי שממתינות 7\+ ימים · ספק אחד · /);
+    expect(e.subject).toMatch(/211\.50/);
     expect(e.text).toContain('אין תשובה 7+ ימים');
     expect(e.text).toContain('ירקות · 2 בקשות · ');
     expect(e.text).toContain('מכתב נשלח 12.10');
     expect(e.text).toContain('הספק אישר · ממתינים לחשבונית זיכוי');
-    expect(e.text).toContain('דגים · בקשה אחת · ');
-    expect(e.text).toContain('טרם נשלח מכתב');
+    // Train-C gate 11.11: a request whose letter never went out is never in a chase figure.
+    expect(e.text).not.toContain('טרם נשלח מכתב');
     expect(e.text).toContain('זיכויים שמחכים לאישור: 1 · ');
-    expect(e.text).toContain(
-      `https://app.test/dashboard/go?r=r1&to=${encodeURIComponent('/dashboard/recovery?s=s1&draft=1')}`,
-    );
+    // Links land on the desk row that acts on them: the reminder drafts, and W3-11's credit suggestions.
+    expect(e.text).toContain(`https://app.test/dashboard/go?r=r1&to=${encodeURIComponent(DESK_REMINDERS_PATH)}`);
+    expect(e.text).toContain(`https://app.test/dashboard/go?r=r1&to=${encodeURIComponent(DESK_CREDIT_SUGGESTIONS_PATH)}`);
+    expect(e.text).not.toContain('draft=1');
     for (const w of BANNED) {
       expect(e.subject, w).not.toContain(w);
       expect(e.text, w).not.toContain(w);
