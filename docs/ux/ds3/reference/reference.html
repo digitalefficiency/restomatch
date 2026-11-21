@@ -2971,9 +2971,10 @@ body{ margin:0 }
     if (m.keep) {
       try {
         var raw = window.localStorage.getItem(MKEY), p = raw ? JSON.parse(raw) : null;
-        if (p && typeof p.rail === 'boolean') m.rail = p.rail;
-        if (p && p.open && typeof p.open === 'object') NAV.forEach(function (g) { if (g.t && typeof p.open[g.id] === 'boolean' && g !== hg) m.open[g.id] = p.open[g.id]; });
-        if (p && Array.isArray(p.fav)) m.fav = p.fav.filter(function (k) { return !!navItem(k); }).slice(0, 5);
+        /* stored values only choose among the page's own constants: a flag is compared, a favourite is looked up */
+        if (p && typeof p.rail === 'boolean') m.rail = p.rail === true;
+        if (p && p.open && typeof p.open === 'object') NAV.forEach(function (g) { if (g.t && typeof p.open[g.id] === 'boolean' && g !== hg) m.open[g.id] = p.open[g.id] === true; });
+        if (p && Array.isArray(p.fav)) m.fav = p.fav.map(function (k) { var it = navItem(k); return it ? it.k : ''; }).filter(function (k) { return k !== ''; }).slice(0, 5);
       } catch (e) {}
     }
     el.innerHTML = '<div class="mn-in"></div><span class="mn-edge" data-m="toggle" aria-hidden="true"></span><p class="sr" role="status"></p>';
@@ -3078,7 +3079,16 @@ body{ margin:0 }
     var fresh0 = function () { return { dens: 'regular', text: 'regular', motion: 'on', keys: true }; };
     /* what a person chose is kept in this browser; a browser that refuses storage simply starts from the defaults */
     var ss = fresh0();
-    try { var rawS = window.localStorage.getItem(SKEY); if (rawS) { var pS = JSON.parse(rawS), kS; for (kS in ss) if (pS && pS[kS] !== undefined && typeof pS[kS] === typeof ss[kS]) ss[kS] = pS[kS]; } } catch (e) {}
+    var ALLOWED = { dens: ['regular', 'compact'], text: ['regular', 'large'], motion: ['on', 'off'] };
+    try {
+      var rawS = window.localStorage.getItem(SKEY);
+      if (rawS) {
+        /* a stored value only picks one of the allowed constants; anything else leaves the default */
+        var pS = JSON.parse(rawS) || {}, kS, iS;
+        for (kS in ALLOWED) { iS = ALLOWED[kS].indexOf(pS[kS]); if (iS >= 0) ss[kS] = ALLOWED[kS][iS]; }
+        if (typeof pS.keys === 'boolean') ss.keys = pS.keys === true;
+      }
+    } catch (e) {}
     var keep = function () { try { window.localStorage.setItem(SKEY, JSON.stringify(ss)); } catch (e) {} };
     var DEF = { pp: 2, pa: 5, qp: 3, qa: 1, bp: 10 };
     var LIM = { pp: [0, 15], pa: [0, 20], qp: [0, 15], qa: [0, 5], bp: [5, 20] };

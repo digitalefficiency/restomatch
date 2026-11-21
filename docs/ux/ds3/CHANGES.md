@@ -13,6 +13,11 @@ The reference's script (`reference/src/script.js` and its copy inside `reference
 the text of a marked-up label no longer strips tags with a pattern, which the code scanning flags; it reads the
 characters outside the tags one by one. Behaviour is the same (139 of 139 checks at 1440, 11 of 11 at 390).
 
+The same script, where it restores what a person chose (the menu's state and the display preferences) from
+the browser's storage: a stored value now only picks one of the page's own constants (a flag is compared, a
+favourite is looked up in the menu's table, a preference is matched against its allowed values). Nothing read
+from storage is written into the page as is. A product implementation should restore preferences the same way.
+
 ## 14.11.2026 · second correction
 
 From an independent review of this folder against the reference, today's code and the open pull requests.
