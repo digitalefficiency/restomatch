@@ -12,10 +12,12 @@ affected, and the mock-ups behave as before (139 of 139 checks at 1440, 11 of 11
   attribute were joined into markup and parsed.
 - **The phone's number pad** finds a tapped key in its own list of keys by the key's place there. Before, the
   text of the button's `data-d` attribute went into the typed quantity, and from there into the sheet's markup.
+- **The list beside a collapsed menu tile** writes the group's id from the menu's own table into its pin
+  button. Before, it wrote back the text of the tile's `data-g` attribute.
 
-Both are the same rule as the third correction: what the script reads back from the page (an attribute, a
-label, a stored value) is never written into the page as markup. `DS3-02` and `DS3-05`: build the tip and the
-number pad the same way.
+All three are the same rule as the third correction: what the script reads back from the page (an attribute,
+a label, a stored value) is never written into the page as markup. `DS3-02` and `DS3-05`: build the tip, the
+collapsed menu's list and the number pad the same way.
 
 ## 14.11.2026 · third correction
 

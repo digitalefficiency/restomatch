@@ -904,7 +904,7 @@
     clearTimeout(m.flyT); hideTip(m);
     var items = gid === 'fav' ? m.fav.map(navItem) : g.items;
     m.flyEl.innerHTML = '<div class="mn-fly-h"><b id="' + m.uid + '-fly-t">' + g.t + '</b>' +
-      (gid === 'fav' ? '' : '<button class="mn-ib" data-m="pin" data-g="' + gid + '" aria-label="הצמדת התפריט הפתוח עם ' + g.t + '" data-tip="הצמדת התפריט||פותח את התפריט המלא עם ' + g.t + '">' + icon('pin') + '</button>') + '</div>' +
+      (gid === 'fav' ? '' : '<button class="mn-ib" data-m="pin" data-g="' + g.id + '" aria-label="הצמדת התפריט הפתוח עם ' + g.t + '" data-tip="הצמדת התפריט||פותח את התפריט המלא עם ' + g.t + '">' + icon('pin') + '</button>') + '</div>' +
       '<ul class="mn-list">' + items.map(function (x) { return rowHtml(m, x, gid === 'fav' ? 'fav' : 'fly'); }).join('') + '</ul>';
     m.flyEl.setAttribute('aria-labelledby', m.uid + '-fly-t');
     m.flyEl.hidden = false; m.fly = gid; t.setAttribute('aria-expanded', 'true');
