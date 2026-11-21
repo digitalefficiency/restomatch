@@ -40,8 +40,9 @@ export function Card({
   return (
     <Tag
       className={cn(
-        'relative rounded-2xl border bg-surface',
-        tone === 'danger' ? 'border-danger/40' : tone === 'warn' ? 'border-warn/40' : tone === 'info' ? 'border-info/30' : 'border-line',
+        // SPEC §4 / D6: a card is white, 12 px corners, a 1 px --rule border (sh1 when elevated).
+        'relative rounded-card border bg-surface',
+        tone === 'danger' ? 'border-danger/40' : tone === 'warn' ? 'border-warn/40' : tone === 'info' ? 'border-info/30' : 'border-line-rule',
         flow && 'overflow-hidden',
         elevated ? 'shadow-card' : '',
         paddings[padding],

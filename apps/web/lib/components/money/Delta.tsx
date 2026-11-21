@@ -63,8 +63,9 @@ export function Delta({
       data-delta={meaning}
       className={cn(
         'inline-flex flex-wrap items-center gap-x-1.5 text-body-sm',
-        // SPEC kit "שינוי": good in the brand green, bad in ink with the arrow in the leak indicator, flat grey.
-        meaning === 'good' ? 'font-medium text-primary' : meaning === 'bad' ? 'font-medium text-fg' : cn(TEXT_TONE.neutral, 'font-normal'),
+        // SPEC kit "שינוי": good in the T3 green (the recovered role, #00573B; SPEC §2 correction of 14.11: never the
+        // action role), bad in ink with the arrow in the leak indicator, flat grey.
+        meaning === 'good' ? 'font-medium text-gold' : meaning === 'bad' ? 'font-medium text-fg' : cn(TEXT_TONE.neutral, 'font-normal'),
         className,
       )}
     >

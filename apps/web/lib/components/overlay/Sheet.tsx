@@ -116,7 +116,7 @@ export function Sheet({
               type="button"
               onClick={onClose}
               aria-label={t('ds.sheet.close')}
-              className="relative mt-5 inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-micro hover:bg-surface-2 hover:text-ink"
+              className="relative mt-5 inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-control text-muted transition-colors duration-micro hover:bg-surface-hover hover:text-ink"
             >
               <X className="h-5 w-5" aria-hidden="true" />
             </button>

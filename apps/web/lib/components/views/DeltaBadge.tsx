@@ -10,7 +10,7 @@ import { deltaView, type Compare } from './state';
 
 /**
  * ▲/▼ change against the comparison period. For a leak, up is bad (ink words, the arrow in the
- * leak colour; DS3) and down is good (primary); `upIsGood` flips that for spend-like figures shown
+ * leak colour; DS3) and down is good (the T3 green, `text-gold`); `upIsGood` flips that for spend-like figures shown
  * neutrally. Renders nothing when compare is off or `previous` is undefined (not compared). With `thinBase` (isThinBase)
  * it shows only the calm ₪ difference — never a % or a red ▲ against a period
  * that has almost no data.
@@ -86,7 +86,7 @@ export function DeltaBadge({
   // DS3: colour by meaning, and a money figure is never red. Bad keeps its words in ink; only the
   // arrow and the drawn mark take the leak colour.
   const bad = !flat && !neutral && up !== upIsGood;
-  const tone = flat || neutral ? 'text-muted' : bad ? 'text-fg' : 'text-primary';
+  const tone = flat || neutral ? 'text-muted' : bad ? 'text-fg' : 'text-gold';
   const Icon = flat ? Minus : up ? TrendingUp : TrendingDown;
   const pct = v.kind === 'change' && v.pct != null ? formatPercent(Math.abs(v.pct), locale, 1) : null;
   const text = flat

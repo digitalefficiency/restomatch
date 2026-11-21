@@ -1,5 +1,5 @@
 export { Money } from './Money';
-export type { MoneyProps } from './Money';
+export type { MoneyDisplayContext, MoneyProps } from './Money';
 export { Token } from './Token';
 export type { TokenKind } from './Token';
 export { Delta } from './Delta';

@@ -45,7 +45,8 @@ const disabledLook: Record<ButtonVariant, string> = {
 
 // Coarse pointers keep the 44 px floor even for sm/md (the utility would otherwise beat the base rule).
 const sizes: Record<ButtonSize, string> = {
-  sm: 'min-h-8 px-3 py-1 text-body-sm [@media(pointer:coarse)]:min-h-11',
+  // SPEC §5 small button: 32 px, 13 px text at 500 (DS3-00's `sub` role, 13/18 in every density).
+  sm: 'min-h-8 px-3 py-1 text-sub [@media(pointer:coarse)]:min-h-11',
   md: 'min-h-9 px-3.5 py-1.5 text-body-sm [@media(pointer:coarse)]:min-h-11',
   lg: 'min-h-11 px-5 py-2 text-body',
   // The phone flow's full-width action: every control of the phone flow has 12 px corners (SPEC §4, CHANGES.md 14.11).

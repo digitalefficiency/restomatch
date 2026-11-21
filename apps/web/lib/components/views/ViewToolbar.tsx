@@ -76,11 +76,11 @@ export interface ViewToolbarProps {
 }
 
 const chip =
-  'inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface-2 px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:border-primary/40 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60';
+  'inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface-2 px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:border-primary/40 hover:text-ink';
 const selectCls =
-  'rounded-xl border border-line-strong bg-surface py-1.5 pe-8 ps-3 text-sm text-ink focus:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60';
+  'rounded-xl border border-line-strong bg-surface py-1.5 pe-8 ps-3 text-sm text-ink';
 const popover =
-  'absolute top-full z-40 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-surface p-3 shadow-card start-0';
+  'absolute top-full z-40 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-card bg-surface p-3 shadow-e2 ring-1 ring-line-rule start-0';
 
 /**
  * The reusable dashboard view bar: period, compare, group-by, filters, chart
@@ -400,7 +400,7 @@ export function ViewToolbar(props: ViewToolbarProps) {
                     <li key={s.name} className="flex items-center justify-between gap-2">
                       <Link
                         href={s.query ? `${pathname}?${s.query}` : pathname}
-                        className="min-w-0 truncate rounded-lg px-2 py-1 text-sm text-ink hover:bg-surface-2"
+                        className="min-w-0 truncate rounded-lg px-2 py-1 text-sm text-ink hover:bg-surface-hover"
                       >
                         {s.name}
                       </Link>
@@ -549,7 +549,7 @@ function ViewSheet({
       aria-label={title}
       onClose={onClose}
       onClick={(e) => e.target === ref.current && onClose()}
-      className="fixed inset-x-0 bottom-0 top-auto m-0 max-h-[85vh] w-full max-w-none overflow-y-auto rounded-t-2xl border border-line bg-surface p-0 text-ink shadow-card backdrop:bg-black/40 lg:hidden"
+      className="fixed inset-x-0 bottom-0 top-auto m-0 max-h-[85vh] w-full max-w-none overflow-y-auto rounded-t-overlay bg-surface p-0 text-ink shadow-e3 backdrop:bg-black/40 lg:hidden"
     >
       {open ? (
         <div className="p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
@@ -628,7 +628,7 @@ function MultiFilter({
             const on = selected.includes(o.value);
             return (
               <li key={o.value}>
-                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink hover:bg-surface-2">
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink hover:bg-surface-hover">
                   <input
                     type="checkbox"
                     checked={on}
@@ -688,7 +688,7 @@ function Segmented({
             title={o.label}
             onClick={() => onChange(o.value)}
             className={cn(
-              'inline-flex min-h-9 items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+              'inline-flex min-h-9 items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold transition-colors',
               on ? 'bg-primary/15 text-primary' : 'text-muted hover:text-ink',
             )}
           >

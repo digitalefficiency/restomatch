@@ -1,5 +1,6 @@
 // DS3 · the clean finish (docs/ux/ds3/SPEC.md §2, §3, §5, kit cards "כסף", "סטטוס", "ההשוואה המשולשת").
 import './reactGlobal';
+import { readFileSync } from 'node:fs';
 import { createElement, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -315,7 +316,9 @@ describe('change against a previous period (kit "שינוי מול תקופה ק
     const { Delta } = await import('../money/Delta');
     const good = render(h(Delta, { current: 746, previous: 760, goodWhen: 'down', showPercent: true, about: 'בדליפה' }));
     expect(good).toContain('data-delta="good"');
-    expect(good).toContain('text-primary');
+    // good news is the T3 role (the recovered green, #00573B), never the action role (SPEC §2 correction of 14.11)
+    expect(good).toMatch(/<span data-delta="good" class="[^"]*text-gold/);
+    expect(good).not.toContain('text-primary');
     expect(textOf(good)).toContain('ירידה של');
     expect(textOf(good)).toContain('בדליפה');
     expect(textOf(good)).toContain(formatIls(14));
@@ -615,5 +618,82 @@ describe("DS3-03's requests to the shared components", () => {
     expect(row?.blocking).toBe(3);
     const other = taskRow({ ...task, type: 'claim_to_send', blocking: 0 } as never, t, 'he', (a: number) => String(a));
     expect(other).not.toHaveProperty('blocking');
+  });
+
+  it('request 9: the small button is 32 px with 13 px text at 500 (DS3-00\'s sub role), LinkButton too', async () => {
+    const { Button, LinkButton } = await import('../Button');
+    for (const html of [render(h(Button, { size: 'sm' }, 'x')), render(h(LinkButton, { href: '/x', size: 'sm' }, 'x'))]) {
+      expect(html).toContain('min-h-8');
+      expect(html).toContain('text-sub');
+      expect(html).toContain('font-medium');
+      expect(html).not.toContain('text-body-sm');
+    }
+    // the other sizes keep their roles
+    expect(render(h(Button, {}, 'x'))).toContain('text-body-sm');
+  });
+
+  it('request 5: Money context="display" is the home hero on the money-hero role, ₪ in its glyph span, whole shekels', () => {
+    const html = render(h(Money, { value: 759.54, context: 'display' }));
+    expect(html).toContain('text-money-hero');
+    expect(html).not.toContain('text-metric-hero');
+    expect(html).toContain('<span class="money-glyph">₪</span>');
+    expect(textOf(html)).toBe(formatIls(759.54, { maximumFractionDigits: 0 }));
+    expect(html).toMatch(/title="סכום מדויק: [^"]*759\.54/);
+    // `hero` keeps metric-hero for the screens that use it today
+    expect(render(h(Money, { value: 760, context: 'hero' }))).toContain('text-metric-hero');
+  });
+
+  it('DeltaBadge: a good change in the T3 role, a bad one in ink with the leak-coloured arrow', async () => {
+    const { DeltaBadge } = await import('../views/DeltaBadge');
+    const good = render(h(DeltaBadge, { current: 80, previous: 100, compare: 'prev' }));
+    expect(good).toContain('text-gold');
+    expect(good).not.toContain('text-primary');
+    const bad = render(h(DeltaBadge, { current: 120, previous: 100, compare: 'prev' }));
+    expect(bad).toContain('text-fg');
+    expect(bad).toMatch(/stroke-danger-dot/);
+  });
+});
+
+describe("DS3-00's requests to the shared components (PR #346, request 3)", () => {
+  const read = (rel: string) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+
+  it('floating layers rest on sh2 with the flyout\'s --rule ring, never the card shadow and a border (SPEC §4)', () => {
+    for (const file of ['views/ViewToolbar.tsx', 'PageHeader.tsx', 'notifications/Bell.tsx', 'table/Popover.tsx', 'overlay/RowActions.tsx']) {
+      const src = read(file);
+      expect(src, file).toContain('ring-1 ring-line-rule');
+      expect(src, file).not.toMatch(/border border-line bg-surface p-\d shadow-(card|e2)/);
+      expect(src, file).not.toContain('shadow-card');
+    }
+    // the views toolbar's phone sheet: 16 px top corners, sh2, no border
+    expect(read('views/ViewToolbar.tsx')).toContain('rounded-t-overlay bg-surface p-0 text-ink shadow-e3');
+  });
+
+  it('one focus indicator: no component adds a focus ring beside the global outline', () => {
+    const owned = ['views/ViewToolbar.tsx', 'views/TvMode.tsx', 'PageHeader.tsx', 'notifications/Bell.tsx', 'Breadcrumbs.tsx', 'Toast.tsx'];
+    for (const file of owned) expect(read(file), file).not.toMatch(/focus-visible:ring-|focus-visible:outline-on-bold/);
+  });
+
+  it('focus inside scroll containers is drawn inward; on the dark toast it is white (DS3-00 hooks)', () => {
+    expect(read('table/DataTable.tsx')).toContain('data-focus="inset"');
+    expect(read('table/Popover.tsx')).toContain('data-focus="inset"');
+    expect(read('Toast.tsx')).toContain('data-focus="on-dark"');
+  });
+
+  it('menus, rows and quiet icon buttons hover on --hover', () => {
+    for (const file of ['overlay/RowActions.tsx', 'overlay/Sheet.tsx', 'money/Token.tsx', 'views/BreakdownChart.tsx']) {
+      const src = read(file);
+      expect(src, file).toContain('hover:bg-surface-hover');
+      expect(src, file).not.toMatch(/hover:bg-surface-(2|sunken)\b/);
+    }
+  });
+
+  it('a card has 12 px corners and the --rule border (D6, SPEC §4)', async () => {
+    const { Card } = await import('../Card');
+    const html = render(h(Card, null, 'x'));
+    expect(html).toContain('rounded-card');
+    expect(html).toContain('border-line-rule');
+    expect(html).not.toContain('rounded-2xl');
+    // tones keep their own edge
+    expect(render(h(Card, { tone: 'warn' }, 'x'))).toContain('border-warn/40');
   });
 });

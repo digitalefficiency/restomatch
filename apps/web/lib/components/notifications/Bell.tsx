@@ -16,8 +16,6 @@ import { trpc } from '@/lib/trpc/client';
 import { cappedCount, readSeen, taskSig, unseenCount, writeSeen, type Task } from './model';
 import { othersLine, taskRow, type TaskRow } from './rows';
 
-const focusRing = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface';
-
 function storage(): Storage | null {
   try {
     return typeof window === 'undefined' ? null : window.localStorage;
@@ -86,7 +84,7 @@ export function Bell({ className, activity = false }: { className?: string; /** 
         aria-expanded={open}
         onClick={toggle}
         data-testid="bell-trigger"
-        className={cn('relative inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-ink', focusRing)}
+        className={cn('relative inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted hover:bg-surface-hover hover:text-ink')}
       >
         <BellIcon className="h-5 w-5" aria-hidden="true" />
         {unseen > 0 ? (
@@ -115,7 +113,7 @@ export function Bell({ className, activity = false }: { className?: string; /** 
       return (
         <p role="alert" className="flex items-center justify-between gap-2 text-sm text-ink">
           {t('bell.failed')}
-          <button type="button" onClick={onRetry} className={cn('min-h-11 rounded-lg px-3 font-semibold text-primary', focusRing)}>
+          <button type="button" onClick={onRetry} className={cn('min-h-11 rounded-lg px-3 font-semibold text-primary')}>
             {t('bell.retry')}
           </button>
         </p>
@@ -132,7 +130,7 @@ export function Bell({ className, activity = false }: { className?: string; /** 
                 href={r.href}
                 onClick={onNavigate}
                 data-testid={`bell-item-${r.type}`}
-                className={cn('flex min-h-14 items-center justify-between gap-3 rounded-xl border border-line bg-surface px-3 py-2 hover:border-primary/40', focusRing)}
+                className={cn('flex min-h-14 items-center justify-between gap-3 rounded-xl border border-line bg-surface px-3 py-2 hover:border-primary/40')}
               >
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-semibold text-ink">{r.label}</span>
@@ -183,13 +181,13 @@ function BellPanel({ open, onClose, title, closeLabel, children }: { open: boole
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed end-4 start-auto top-16 m-0 w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-surface p-4 text-ink shadow-card backdrop:bg-transparent"
+      className="fixed end-4 start-auto top-16 m-0 w-[360px] max-w-[calc(100vw-2rem)] rounded-overlay bg-surface p-4 text-ink shadow-e2 ring-1 ring-line-rule backdrop:bg-transparent"
     >
       <div className="mb-3 flex items-center justify-between gap-2">
         <h2 id={titleId} className="text-base font-bold">
           {title}
         </h2>
-        <button type="button" onClick={onClose} aria-label={closeLabel} className={cn('inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted hover:bg-surface-2', focusRing)}>
+        <button type="button" onClick={onClose} aria-label={closeLabel} className={cn('inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted hover:bg-surface-hover')}>
           <X className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
