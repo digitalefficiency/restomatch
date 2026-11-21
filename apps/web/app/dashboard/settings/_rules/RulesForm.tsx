@@ -227,16 +227,34 @@ export function RulesForm({
     const before = saved;
     const after = savedAfter(values, saved, defaults);
     setFailure(null);
+    // Read now: while saving, "שמרו" is disabled (the double-post guard) and the browser drops its focus.
+    const onBar = (el: Element | null) => !!el?.closest('[data-testid="settings-dirty-bar"]');
+    const focusWasOnBar = onBar(document.activeElement);
+    /** Focus left the bar only because the button was disabled, not because the person moved on. */
+    const focusStillOurs = () =>
+      focusWasOnBar &&
+      (!document.activeElement ||
+        document.activeElement === document.body ||
+        onBar(document.activeElement));
     update.mutate(patch, {
       onSuccess: () => {
         setSaved(after);
         setValues(after);
-        // Focus moves to "ביטול": the "שמרו" it was on has gone with the bar.
-        setUndo({ before, after, focus: true });
+        // Focus moves to "ביטול": the "שמרו" it was on goes with its bar.
+        setUndo({ before, after, focus: focusStillOurs() });
         announce(t('thresholds.save.sr.saved'));
         refreshAfterWrite();
       },
-      onError: (err) => setFailure(localizeServerError(err, locale, t('thresholds.save.failed'))),
+      onError: (err) => {
+        setFailure(localizeServerError(err, locale, t('thresholds.save.failed')));
+        // Back on "שמרו" once it is enabled again, so a keyboard user keeps their place.
+        if (focusStillOurs()) {
+          // Two frames: after the re-render that enables it again.
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => document.getElementById('settings-save-cta')?.focus()),
+          );
+        }
+      },
     });
   };
 
@@ -362,6 +380,8 @@ export function RulesForm({
     const field = (
       <NumberField
         id={id}
+        // Names the steppers' group, so "הפחתה" / "הוספה" are announced with their field.
+        label={label}
         value={shown}
         onValueChange={(n) => set(f.key, String(n))}
         min={0}
@@ -432,6 +452,7 @@ export function RulesForm({
   const approvalRow = (id: string, keys: FieldKey[]) => {
     const fields = keys.map(fieldDef);
     const label = t(`thresholds.approvals.${id}.label`);
+    const hintId = `hint-rule-${id}`;
     return (
       <SettingRow
         key={id}
@@ -445,7 +466,7 @@ export function RulesForm({
         }
         hint={
           <>
-            {t(`thresholds.approvals.${id}.hint`)} {errorLine(fields)}
+            <span id={hintId}>{t(`thresholds.approvals.${id}.hint`)}</span> {errorLine(fields)}
           </>
         }
         control={
@@ -456,6 +477,7 @@ export function RulesForm({
                 stepper(
                   f,
                   `${label}: ${t(f.kind === 'percent' ? 'thresholds.approvals.percent' : 'thresholds.approvals.amount')}`,
+                  hintId,
                 ),
               )}
             </span>
@@ -623,58 +645,66 @@ function UndoBar({
   const bar = useRef<HTMLDivElement | null>(null);
   const undoButton = useRef<HTMLButtonElement | null>(null);
   useActionBarHeight(bar);
+  // The parent hands new callbacks on every render; the window is the bar's own and must not restart.
+  const latest = useRef({ onEnd, returnFocus });
   useEffect(() => {
-    if (focusOnMount) undoButton.current?.focus();
-  }, [focusOnMount]);
+    latest.current = { onEnd, returnFocus };
+  });
   const timer = useRef<{ id: ReturnType<typeof setTimeout> | null; left: number; since: number }>({
     id: null,
     left: UNDO_MS,
     since: 0,
   });
+  /** The time waits while the pointer or focus is on the bar (SPEC §8). */
+  const inside = useRef({ pointer: false, focus: false });
   const anim = useRef<Animation | null>(null);
 
   const end = useCallback(() => {
     const hadFocus = !!bar.current && bar.current.contains(document.activeElement);
-    onEnd();
-    if (hadFocus) requestAnimationFrame(returnFocus);
-  }, [onEnd, returnFocus]);
+    latest.current.onEnd();
+    if (hadFocus) requestAnimationFrame(() => latest.current.returnFocus());
+  }, []);
 
   const run = useCallback(() => {
     const tm = timer.current;
-    if (tm.id) return;
+    if (tm.id || inside.current.pointer || inside.current.focus) return;
     tm.since = Date.now();
     tm.id = setTimeout(end, tm.left);
     anim.current?.play();
   }, [end]);
 
   const pause = useCallback(() => {
+    anim.current?.pause();
     const tm = timer.current;
     if (!tm.id) return;
     clearTimeout(tm.id);
     tm.id = null;
     tm.left = Math.max(0, tm.left - (Date.now() - tm.since));
-    anim.current?.pause();
   }, []);
 
   useEffect(() => {
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (line.current && !reduce && typeof line.current.animate === 'function') {
-      anim.current = line.current.animate(
-        [{ transform: 'scaleX(1)' }, { transform: 'scaleX(0)' }],
-        {
-          duration: UNDO_MS,
-          easing: 'linear',
-          fill: 'forwards',
-        },
-      );
+      const a = line.current.animate([{ transform: 'scaleX(1)' }, { transform: 'scaleX(0)' }], {
+        duration: UNDO_MS,
+        easing: 'linear',
+        fill: 'forwards',
+      });
+      a.pause();
+      anim.current = a;
     }
+    // Saved from the bar: "ביטול" takes the focus "שמרו" had, and the time waits while it is there.
+    if (focusOnMount) undoButton.current?.focus();
+    inside.current.focus = !!bar.current?.contains(document.activeElement);
     run();
     const tm = timer.current;
     return () => {
       if (tm.id) clearTimeout(tm.id);
+      tm.id = null;
       anim.current?.cancel();
+      anim.current = null;
     };
-  }, [run]);
+  }, [focusOnMount, run]);
 
   return (
     <div
@@ -682,11 +712,22 @@ function UndoBar({
       role="region"
       aria-label={t('thresholds.save.done')}
       data-testid="settings-undo-bar"
-      onPointerEnter={pause}
-      onPointerLeave={run}
-      onFocusCapture={pause}
+      onPointerEnter={() => {
+        inside.current.pointer = true;
+        pause();
+      }}
+      onPointerLeave={() => {
+        inside.current.pointer = false;
+        run();
+      }}
+      onFocusCapture={() => {
+        inside.current.focus = true;
+        pause();
+      }}
       onBlurCapture={(e) => {
-        if (!bar.current?.contains(e.relatedTarget as Node | null)) run();
+        if (bar.current?.contains(e.relatedTarget as Node | null)) return;
+        inside.current.focus = false;
+        run();
       }}
       className="sticky bottom-[calc(var(--rm-bottomnav-h,0px)+var(--consent-h,0px)+theme(spacing.4))] z-10 flex flex-wrap items-center gap-3 overflow-hidden rounded-card bg-ink px-4 py-3 text-on-bold shadow-e2"
     >

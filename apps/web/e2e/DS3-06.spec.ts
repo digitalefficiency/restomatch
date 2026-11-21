@@ -379,6 +379,57 @@ test('thresholds: save writes what settings.update writes, audited; 10 s undo; h
   }
 });
 
+test('the undo window waits while focus is on "ביטול" and ends ten seconds after it leaves', async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const sql = e2eSql();
+  const [restaurant] = await sql<{ id: string; settings: Record<string, unknown> }[]>`
+    select id, settings from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
+  const id = restaurant!.id;
+  const before = restaurant!.settings;
+  try {
+    await sql`update restaurants set settings = settings #- '{tolerances,pricePercent}' where id = ${id}`;
+    const errors = collectPageErrors(page);
+    // A clock the test moves (it runs on as usual in between).
+    await page.clock.install();
+    await prepare(page, 'he', 1440);
+    await page.goto(`${BASE}?s=rules`);
+    await page
+      .locator('#pricePercent')
+      .getByRole('button', { name: dsHe.quantity.increase })
+      .click();
+    await page
+      .getByTestId('settings-dirty-bar')
+      .getByRole('button', { name: sHe.thresholds.save.saveCta })
+      .click();
+    const undoBar = page.getByTestId('settings-undo-bar');
+    await expect(undoBar.getByRole('button', { name: sHe.thresholds.save.undoCta })).toBeFocused();
+    // The pointer away from the bar: only focus holds the time now.
+    await page.mouse.move(4, 4);
+    await page.clock.fastForward(12_000);
+    await expect(undoBar).toBeVisible();
+    // Focus leaves the bar: ten seconds from now it goes, and the history may restore again.
+    await page.locator('#set-pricePercent').focus();
+    await page.clock.fastForward(9_000);
+    await expect(undoBar).toBeVisible();
+    await page.clock.fastForward(1_500);
+    await expect(undoBar).toHaveCount(0);
+    await expect(page.locator('#set-pricePercent')).toBeFocused();
+    expect(
+      (
+        await sql<
+          { v: string | null }[]
+        >`select settings->'tolerances'->>'pricePercent' as v from restaurants where id = ${id}`
+      )[0]!.v,
+    ).toBe('0.03');
+    expect(errors).toEqual([]);
+  } finally {
+    await sql`update restaurants set settings = ${sql.json(before as never)} where id = ${id}`;
+    await sql.end();
+  }
+});
+
 test('old one-page anchors land on their section', async ({ page }) => {
   await prepare(page, 'he', 1440);
   await page.goto(`${BASE}#letterhead`);
