@@ -103,7 +103,7 @@ export const receivingDelivery: Shape<typeof he> = {
         asOrdered: 'Как в заказе',
         markRest: 'Отметить остальное ({count})',
         photo: 'Сфотографировать документ',
-        photoClose: 'Сфотографировать документ и закрыть',
+        photoClose: 'Сфотографировать и закрыть',
         closeNoDoc: 'Закрыть без документа',
         backToCount: 'Назад к подсчёту',
       },
@@ -134,7 +134,7 @@ export const receivingDelivery: Shape<typeof he> = {
       },
       spot: {
         fillAll: 'Укажите количество для каждого товара',
-        empty: 'Сколько посчитано?',
+        empty: 'Сколько?',
       },
       check: {
         title: 'Перед закрытием',
@@ -143,10 +143,10 @@ export const receivingDelivery: Shape<typeof he> = {
         docDone: 'Сфотографирован',
         docQueued: 'Сфотографирован, будет отправлен, когда связь вернётся',
         docNone: 'Ещё не сфотографирован',
-        hint: 'Запишите расхождение и в накладной',
+        hint: 'Запишите расхождения и в накладной',
       },
       done: {
-        titleQueued: 'Приёмка товара закрыта в телефоне',
+        titleQueued: 'Приёмка закрыта в телефоне',
         sum: '{items}, {rest}',
         clean: 'всё как в заказе',
         supplier: 'Поставщик',
