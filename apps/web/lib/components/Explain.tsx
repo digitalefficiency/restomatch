@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useT } from '@/lib/i18n/client';
 import { explain as explainNs } from '@/lib/i18n/messages/explain';
@@ -31,7 +31,11 @@ export interface DisclosureToggleProps {
 export interface DisclosurePanelProps {
   id: string;
   hidden: boolean;
-  ref: React.RefObject<HTMLDivElement>;
+  /**
+   * Typed from the 'react' import (React 19: `useRef<T>(null)` is `RefObject<T | null>`), not the
+   * global `React` namespace, which can resolve to a different @types/react in the next build check.
+   */
+  ref: RefObject<HTMLDivElement | null>;
 }
 
 /** Low-level disclosure: any layout. The panel MUST follow the toggle's row in DOM order. */
