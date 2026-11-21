@@ -71,10 +71,16 @@ import { featureEnabled } from '../lib/features';
 import { QTY_DISCREPANCY_TYPES, nullFields, seesNoMoney, stripMoneyDeep } from '../lib/staffMoney';
 import { invoiceReaderProcedure, managerProcedure, memberProcedure, receiverProcedure, router } from '../trpc';
 import { isFeatureOn } from '../lib/featureGate';
-import { dockPriceContext } from '../dockPriceContext/service';
+import { dockPriceContext, type DockPriceContextLine } from '../dockPriceContext/service';
 import { readConsolidatedRaw } from '../match/consolidated';
 import { invoiceQuestionCount } from '../catalog/linkQuestions';
 import { notifyBackorderDraft, prepareBackorderDraft } from '../orders/autopilot';
+
+/** A dock price line as priceContext returns it: the prices are null for staff roles (H-11). */
+type DockPriceContextView = Omit<DockPriceContextLine, 'billedUnitPrice' | 'usualUnitPrice'> & {
+  billedUnitPrice: number | null;
+  usualUnitPrice: number | null;
+};
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 /** R5: undated open POs this recent still show in the receiving inbox. */
@@ -1220,7 +1226,17 @@ export const receivingRouter = router({
           .select({ id: discrepancies.id })
           .from(discrepancies)
           .innerJoin(matchRuns, eq(matchRuns.id, discrepancies.matchRunId))
-          .where(and(eq(matchRuns.invoiceId, inv.id), eq(matchRuns.restaurantId, restaurantId), ne(discrepancies.resolutionStatus, 'open')))
+          // Any decision except a SYSTEM auto-accept (G-15 non-leak-acknowledge,
+          // minor-info): status 'accepted' with no resolved_at — a person's accept
+          // (approvals.decide) always stamps resolved_at.
+          .where(
+            and(
+              eq(matchRuns.invoiceId, inv.id),
+              eq(matchRuns.restaurantId, restaurantId),
+              sql`${discrepancies.resolutionStatus} <> 'open'`,
+              sql`not (${discrepancies.resolutionStatus} = 'accepted' and ${discrepancies.resolvedAt} is null)`,
+            ),
+          )
           .limit(1);
         if (decided) throw appError('PRECONDITION_FAILED', 'invoice.linesLocked', LINES_LOCKED_MSG.decided);
       }
@@ -1634,7 +1650,7 @@ export const receivingRouter = router({
                   sql`coalesce(${invoices.ocrPayload} -> 'raw' ->> 'linesCorrected', 'false') <> 'true'`,
                   managerTier ? undefined : sql`not exists (select 1 from ${matchRuns} r where r.invoice_id = ${invoices.id})`,
                   sql`not exists (select 1 from ${auditLog} where ${auditLog.restaurantId} = ${restaurantId} and ${auditLog.entityId} = ${invoices.id} and ${auditLog.action} = 'receiving.invoice_header_updated')`,
-                  sql`not exists (select 1 from ${discrepancies} d join ${matchRuns} r on r.id = d.match_run_id where r.invoice_id = ${invoices.id} and d.resolution_status <> 'open')`,
+                  sql`not exists (select 1 from ${discrepancies} d join ${matchRuns} r on r.id = d.match_run_id where r.invoice_id = ${invoices.id} and d.resolution_status <> 'open' and not (d.resolution_status = 'accepted' and d.resolved_at is null))`,
                   sql`not exists (select 1 from ${recoveryClaims} c where c.invoice_id = ${invoices.id} and c.restaurant_id = ${restaurantId})`,
                   sql`not exists (select 1 from ${creditNotes} n where n.invoice_id = ${invoices.id} and n.restaurant_id = ${restaurantId})`,
                 ),
@@ -1801,8 +1817,12 @@ export const receivingRouter = router({
     .input(z.object({ invoiceId: z.string().uuid().optional() }))
     .query(async ({ ctx, input }) => {
       const enabled = await isFeatureOn(ctx.db, ctx.session.restaurantId, 'dockPriceContext');
-      if (!enabled || !input.invoiceId) return { enabled, lines: [] };
-      return { enabled, lines: await dockPriceContext(ctx.db, ctx.session.restaurantId, input.invoiceId) };
+      if (!enabled || !input.invoiceId) return { enabled, lines: [] as DockPriceContextView[] };
+      const lines: DockPriceContextView[] = await dockPriceContext(ctx.db, ctx.session.restaurantId, input.invoiceId);
+      // H-11 strip (slice c): the receiver keeps the non-₪ signal ("מחיר גבוה
+      // מהרגיל": priceHigher, %, samples), never the prices themselves.
+      if (!seesNoMoney(ctx.session.role)) return { enabled, lines };
+      return { enabled, lines: lines.map((l) => ({ ...l, billedUnitPrice: null, usualUnitPrice: null })) };
     }),
 });
 

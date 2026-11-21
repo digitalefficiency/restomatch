@@ -104,3 +104,31 @@ export {
   type LeakDriver,
   type LeakDrivers,
 } from './leak-drivers';
+// G-14: the decision → ₪-effect table, the leak ledger + money-state partition, the METRICS
+// registry, and W3-09's pre-created coverage module.
+export {
+  DECISION_KEY_SQL,
+  DECISION_RULES,
+  DISCREPANCY_TYPES,
+  MONEY_STATES,
+  TOLERATED_SQL,
+  effectOf,
+  effectSql,
+  moneyStateOf,
+  type Decision,
+  type DecisionKey,
+  type Effect,
+  type MoneyState,
+} from './decisions';
+export {
+  computeLeakLedger,
+  computeLeakPartition,
+  heroLeakByInvoice,
+  partitionOf,
+  type LeakLedgerRow,
+  type LeakPartition,
+  type PaidSource,
+} from './leak-ledger';
+export { METRICS, METRIC_IDS, PAID_SOURCE, metricValue, type MetricDef, type MetricId, type MetricValue } from './metrics';
+// `Coverage` is period.ts's (train C); W3-09's order-coverage placeholder is exported under Order*.
+export { emptyCoverage, type Coverage as OrderCoverage, type CoverageRow as OrderCoverageRow } from './coverage';
