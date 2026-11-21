@@ -209,7 +209,7 @@ export function HeroMatch() {
                           <TriangleAlert className="h-3 w-3" aria-hidden="true" />
                           {t(STATUS_LABEL[r.status])}
                         </span>
-                        <span className="font-mono tabular-nums">{formatIls(r.delta, { locale })}</span>
+                        <span className="tabular-nums">{formatIls(r.delta, { locale })}</span>
                       </span>
                     ) : (
                       <>
@@ -237,7 +237,7 @@ export function HeroMatch() {
             </div>
             <p
               data-total
-              className="font-mono text-3xl font-extrabold tabular-nums tracking-tight text-danger drop-shadow-glow-danger sm:text-4xl"
+              className="text-3xl font-extrabold tabular-nums tracking-tight text-danger drop-shadow-glow-danger sm:text-4xl"
             >
               {formatIls(TOTAL, { locale })}
             </p>

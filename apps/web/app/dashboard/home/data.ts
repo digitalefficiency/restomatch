@@ -45,6 +45,9 @@ export const loadOpenCount = cache(async () => {
   return c.inventory.current();
 });
 
+/** PILOT (W2-02): invoices waiting for a person to complete their lines. */
+export const loadNeedsLines = cache(async () => (await caller()).invoices.needsLines());
+
 export const loadSuppliers = cache(async () => (await caller()).suppliers.list());
 
 /** The leak trend for a view (keyed by its serialized input), shared by the toolbar CSV and the trend card. */

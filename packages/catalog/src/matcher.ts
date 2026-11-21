@@ -1,5 +1,6 @@
 import {
   and,
+  desc,
   eq,
   isNull,
   or,
@@ -15,6 +16,14 @@ import {
   type MatchCandidate,
   type MatcherThresholds,
 } from './types';
+import { aliasProvenance, MACHINE_MAX_CONFIDENCE, normalizeLinkName } from './linkPolicy';
+import { normNameSql } from './normName';
+
+/** A stored alias's confidence (numeric(4,3) string) as a number; a missing one reads as the column default. */
+function storedConfidence(c: string | null | undefined): number {
+  const n = c == null ? 1 : Number(c);
+  return Number.isFinite(n) ? n : 1;
+}
 
 /**
  * pgvector literals are built by string interpolation; reject anything that is
@@ -146,6 +155,7 @@ export async function matchBySku(
       productId: products.id,
       canonicalName: products.canonicalName,
       aliasId: productAliases.id,
+      aliasConfidence: productAliases.confidence,
     })
     .from(productAliases)
     .innerJoin(
@@ -162,9 +172,12 @@ export async function matchBySku(
     return {
       productId: aliasRow.productId,
       canonicalName: aliasRow.canonicalName,
-      confidence: 1.0,
+      // G-08: the STORED confidence + its provenance — a guessed alias that
+      // learned a SKU is still a guess, never certainty.
+      confidence: storedConfidence(aliasRow.aliasConfidence),
       matchedBy: 'sku',
       aliasId: aliasRow.aliasId,
+      provenance: aliasProvenance({ confidence: aliasRow.aliasConfidence }),
     };
   }
 
@@ -192,7 +205,8 @@ export async function matchBySku(
   return {
     productId: catalogRow.productId,
     canonicalName: catalogRow.canonicalName,
-    confidence: 1.0,
+    // An exact supplier key, machine-proven: never the 1.000 reserved for a person.
+    confidence: MACHINE_MAX_CONFIDENCE,
     matchedBy: 'sku',
   };
 }
@@ -201,7 +215,8 @@ export async function matchBySku(
  * Strategy 1: alias exact lookup
  *
  * Restaurant-scoped (through products), then (supplier_id, supplier_name_raw)
- * — case insensitive. Confidence = 1.0 for exact matches.
+ * — case insensitive. Confidence = the alias's STORED confidence (G-08), with
+ * its provenance; only a person's link reads 1.000.
  * ────────────────────────────────────────────────────────────────────────── */
 
 export async function matchByAlias(
@@ -210,7 +225,9 @@ export async function matchByAlias(
   supplierId: string | null,
   rawName: string,
 ): Promise<MatchCandidate | null> {
-  const normalized = rawName.trim().toLowerCase();
+  // G-08: compare NORMALIZED names (spacing, gershayim, NBSP), so one learned
+  // alias answers every spelling of the same name.
+  const normalized = normalizeLinkName(rawName);
   if (!normalized) return null;
 
   const supplierFilter = supplierId
@@ -225,13 +242,16 @@ export async function matchByAlias(
       canonicalName: products.canonicalName,
       aliasId: productAliases.id,
       supplierNameRaw: productAliases.supplierNameRaw,
+      aliasConfidence: productAliases.confidence,
     })
     .from(productAliases)
     .innerJoin(
       products,
       and(eq(products.id, productAliases.productId), eq(products.restaurantId, restaurantId)),
     )
-    .where(and(supplierFilter, sql`lower(${productAliases.supplierNameRaw}) = ${normalized}`))
+    .where(and(supplierFilter, sql`${normNameSql(productAliases.supplierNameRaw)} = ${normalized}`))
+    // Deterministic when two aliases share a name: the strongest, then the newest.
+    .orderBy(desc(productAliases.confidence), desc(productAliases.createdAt))
     .limit(1);
 
   const row = rows[0];
@@ -239,9 +259,11 @@ export async function matchByAlias(
   return {
     productId: row.productId,
     canonicalName: row.canonicalName,
-    confidence: 1.0,
+    // G-08: the stored confidence + provenance, not a hard-coded 1.0.
+    confidence: storedConfidence(row.aliasConfidence),
     matchedBy: 'alias',
     aliasId: row.aliasId,
+    provenance: aliasProvenance({ confidence: row.aliasConfidence }),
   };
 }
 
@@ -475,7 +497,17 @@ export async function matchProductTopN(
     if (!candidates.some((c) => c.productId === f.productId)) candidates.push(f);
   }
 
-  return candidates.sort((a, b) => b.confidence - a.confidence).slice(0, limit);
+  // G-08 (owner decision 31.10): a candidate whose normalized name is IDENTICAL
+  // to the line's is an exact key — every candidate here is already scoped to
+  // THIS supplier (the false-leak guard), so a same-name product of another
+  // supplier never reaches this point. Anything less stays a name guess.
+  const wanted = normalizeLinkName(input.rawDescription);
+  const marked = candidates.map((c) =>
+    normalizeLinkName(c.canonicalName) === wanted
+      ? { ...c, confidence: Math.max(c.confidence, MACHINE_MAX_CONFIDENCE), provenance: 'exactKey' as const }
+      : c,
+  );
+  return marked.sort((a, b) => b.confidence - a.confidence).slice(0, limit);
 }
 
 async function topNByEmbedding(

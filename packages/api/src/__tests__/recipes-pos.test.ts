@@ -207,7 +207,8 @@ describe('recipes.posVsTheory', () => {
     await flags(A.restaurantId, { integrations: true });
     await expect(caller(A).recipes.posVsTheory()).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await flags(A.restaurantId, { recipes: true, integrations: true });
-    for (const role of ['receiver', 'bookkeeper'] as const) {
+    await expect(caller(A, 'bookkeeper').recipes.posVsTheory()).resolves.toMatchObject({ available: true }); // I3: reads
+    for (const role of ['receiver'] as const) {
       await expect(caller(A, role).recipes.posVsTheory()).rejects.toMatchObject({ code: 'FORBIDDEN' });
     }
     await expect(caller(A, 'chef').recipes.posVsTheory()).resolves.toMatchObject({ available: true });

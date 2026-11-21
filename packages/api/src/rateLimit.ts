@@ -16,6 +16,11 @@ export interface RateLimitStore {
   incr(key: string, windowSec: number): Promise<number>;
   /** Optional: drop the counter for `key` (resetRateLimit; e.g. a successful login). */
   del?(key: string): Promise<void>;
+  /**
+   * Optional: atomically decrement the counter for `key` by one, never below 0,
+   * and never creating a key (refundRateLimit; e.g. give back a successful login).
+   */
+  decr?(key: string): Promise<void>;
 }
 
 export interface RateLimitOptions {
@@ -79,6 +84,20 @@ export async function resetRateLimit(store: RateLimitStore, identifier: string, 
 }
 
 /**
+ * Give back ONE unit of `identifier`'s current-window count: for a limiter that
+ * must count every attempt atomically (so parallel bursts stay bounded) but
+ * should only let FAILED attempts accumulate — call it after a success. Throws
+ * when the store cannot decrement, so the caller's fail-open wrapper logs it
+ * instead of the limiter silently changing meaning. An attempt counted in the
+ * previous window and refunded in the next is a no-op (no key, never below 0).
+ */
+export async function refundRateLimit(store: RateLimitStore, identifier: string, opts: RateLimitOptions): Promise<void> {
+  if (!store.decr) throw new Error('rate-limit store does not support decr (refundRateLimit)');
+  const now = opts.now ? opts.now() : Date.now();
+  await store.decr(windowKey(identifier, opts, now).key);
+}
+
+/**
  * In-memory store. Process-local (no good across serverless instances) — for
  * tests and single-process dev only.
  */
@@ -99,6 +118,11 @@ export class MemoryRateLimitStore implements RateLimitStore {
 
   async del(key: string): Promise<void> {
     this.counters.delete(key);
+  }
+
+  async decr(key: string): Promise<void> {
+    const existing = this.counters.get(key);
+    if (existing && existing.expiresAt > this.now() && existing.count > 0) existing.count -= 1;
   }
 
   /** Test helper: drop all counters. */

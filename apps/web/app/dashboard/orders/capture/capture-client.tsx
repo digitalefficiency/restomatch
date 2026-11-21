@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CheckCircle2, MessageCircle, PencilLine } from 'lucide-react';
+import { CheckCircle2, ClipboardPaste, MessageCircle, PencilLine } from 'lucide-react';
 import { Badge, Button, Card, Field, LinkButton, Textarea, cn } from '@/lib/components';
 import { UnitText } from '@/lib/components/UnitText';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatNumber } from '@/lib/i18n/format';
 import { originalProps } from '@/lib/i18n/original';
 import { ingest } from '@/lib/i18n/messages/ingest';
+import { orders as ordersNs } from '@/lib/i18n/messages/orders';
 import { formatIls } from '@/lib/money';
 import { localizeServerError } from '@/lib/serverErrors';
 import { trpc } from '@/lib/trpc/client';
@@ -26,6 +27,8 @@ interface Candidate {
  */
 export function CaptureClient({ initialText }: { initialText: string }) {
   const t = useT(ingest);
+  const to = useT(ordersNs);
+  const [pasteFailed, setPasteFailed] = useState(false);
   const locale = useLocale();
   const [text, setText] = useState(initialText);
   const [error, setError] = useState<string | null>(null);
@@ -245,6 +248,24 @@ export function CaptureClient({ initialText }: { initialText: string }) {
           void submit();
         }}
       >
+        {/* W2-06 §5.6 (orders-17): one tap pastes the WhatsApp order already copied. */}
+        <Button
+          type="button"
+          variant="secondary"
+          className="mb-3 min-h-12 w-full sm:w-auto"
+          data-testid="capture-paste"
+          onClick={async () => {
+            try {
+              const clip = await navigator.clipboard.readText();
+              if (clip.trim()) setText(clip.slice(0, 8000));
+            } catch {
+              setPasteFailed(true);
+            }
+          }}
+        >
+          <ClipboardPaste className="h-5 w-5" aria-hidden="true" /> {to('w2.paste')}
+        </Button>
+        {pasteFailed ? <p role="status" className="mb-3 text-sm text-muted">{to('w2.pasteFailed')}</p> : null}
         <Field label={t('orderCapture.textLabel')} htmlFor="order-text" hint={t('orderCapture.textHint')}>
           <Textarea
             id="order-text"

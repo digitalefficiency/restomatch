@@ -138,20 +138,27 @@ export function summarize(model: string, effort: OcrEffort | undefined, recs: Ru
   ].join(' | ');
 }
 
+/** The synthetic fixtures in packages/ocr/bench (invoice-N.png + invoice-N.truth.json). */
+export function builtInFixtures(): BenchDoc[] {
+  const dir = fileURLToPath(new URL('../../bench/', import.meta.url));
+  return readdirSync(dir)
+    .filter((f) => /^invoice-\d+\.png$/.test(f))
+    .sort((a, b) => Number(a.match(/\d+/)![0]) - Number(b.match(/\d+/)![0]))
+    .map((f) => ({
+      name: `synthetic ${f}`,
+      kind: 'photo' as const,
+      bytes: readFileSync(join(dir, f)),
+      truth: JSON.parse(readFileSync(join(dir, f.replace(/\.png$/, '.truth.json')), 'utf8')) as TruthInvoice,
+    }));
+}
+
 async function main() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     console.error('bench: ANTHROPIC_API_KEY is not set — this benchmark makes paid API calls; nothing was run.');
     process.exit(2);
   }
-  const docs: BenchDoc[] = [
-    {
-      name: 'synthetic invoice-1.png',
-      kind: 'photo',
-      bytes: readFileSync(new URL('../../bench/invoice-1.png', import.meta.url)),
-      truth: JSON.parse(readFileSync(new URL('../../bench/invoice-1.truth.json', import.meta.url), 'utf8')) as TruthInvoice,
-    },
-  ];
+  const docs: BenchDoc[] = builtInFixtures();
   if (process.env.BENCH_DIR) {
     const dir = resolve(expandHome(process.env.BENCH_DIR));
     const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -180,7 +187,9 @@ async function main() {
           const secs = (performance.now() - t0) / 1000;
           const stub = new StubOcrProvider('claude_vision', got);
           const pipe = await runOcrPipeline(doc.bytes, { documentAi: stub, claude: stub });
-          const s = doc.truth ? scoreExtraction(doc.truth, got) : undefined;
+          const s = doc.truth
+            ? scoreExtraction(doc.truth, { ...got, consolidation: pipe.reconciled.consolidation })
+            : undefined;
           recs.push({
             doc,
             secs,

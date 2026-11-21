@@ -30,6 +30,34 @@ export function normalizeQty(raw: string): string | null | undefined {
   return /^\d{1,8}(\.\d{1,4})?$/.test(n) ? n : null;
 }
 
+export type QtyClass =
+  | { kind: 'empty' }
+  | { kind: 'typing' }
+  | { kind: 'invalid' }
+  | { kind: 'ok'; value: string }
+  | { kind: 'ambiguous'; options: [string, string] };
+
+/**
+ * The count's qty parser, with one more rule than `normalizeQty` (deep-fix class 12):
+ * "1,250" is AMBIGUOUS on a count (a Hebrew keypad's decimal comma, or a thousands
+ * group?) — the screen asks "1250 or 1.25?" instead of guessing. "0,250" stays 0.25,
+ * "2,5" stays 2.5, "1,200,000" stays a thousands-grouped number.
+ * TODO(G-13): delegate to `parseDecimalInput` once it is on the base.
+ */
+export function classifyQty(raw: string): QtyClass {
+  const v = raw.trim();
+  if (/^[1-9]\d{0,2},\d{3}$/.test(v)) {
+    const whole = v.replace(',', '');
+    const dec = v.replace(',', '.');
+    if (/^\d{1,8}(\.\d{1,4})?$/.test(whole) && /^\d{1,8}(\.\d{1,4})?$/.test(dec)) return { kind: 'ambiguous', options: [whole, dec] };
+  }
+  const n = normalizeQty(raw);
+  if (n === undefined) return { kind: 'typing' };
+  if (n === null) return { kind: 'invalid' };
+  if (n === '') return { kind: 'empty' };
+  return { kind: 'ok', value: n };
+}
+
 /** An unsaved line edit (qty null = cleared back to "not counted"). */
 export type LineEdit = { qty?: string | null; storageArea?: Area };
 

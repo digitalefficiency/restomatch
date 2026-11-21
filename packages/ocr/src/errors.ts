@@ -1,5 +1,5 @@
 /**
- * Typed, REVIEWABLE extraction failures. A caller (the OCR job) must route these
+ * Typed extraction failures — all REVIEWABLE except 'aborted'. A caller (the OCR job) must route these
  * to a person instead of retrying: the same document will fail the same way, and
  * a half-read invoice must never reach the leak figure.
  *
@@ -16,7 +16,9 @@ export type OcrFailureCode =
   /** The answer was not a JSON invoice (or failed the schema). */
   | 'invalid_output'
   /** Downloading the scan failed or timed out. */
-  | 'fetch_failed';
+  | 'fetch_failed'
+  /** The caller's AbortSignal fired (e.g. the worker's per-job deadline). NOT reviewable: retry. */
+  | 'aborted';
 
 export interface OcrUsage {
   inputTokens: number;
@@ -25,14 +27,18 @@ export interface OcrUsage {
 
 export class OcrExtractionError extends Error {
   override readonly name = 'OcrExtractionError';
-  /** Always true: these go to human review; retrying does not help. */
-  readonly reviewable = true;
+  /**
+   * True for every code but 'aborted': those go to human review; retrying does
+   * not help. An abort says nothing about the document — the caller retries.
+   */
+  readonly reviewable: boolean;
   constructor(
     readonly code: OcrFailureCode,
     message: string,
     readonly details: { usage?: OcrUsage; elapsedMs?: number; refusalCategory?: string | null } = {},
   ) {
     super(`ocr ${code}: ${message}`);
+    this.reviewable = code !== 'aborted';
   }
 }
 

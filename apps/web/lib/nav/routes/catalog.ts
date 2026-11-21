@@ -8,8 +8,21 @@ export const routes: RouteDef[] = [
     rank: 40,
     roles: ['owner', 'manager'],
     nav: 'item',
+    badge: null,
     aliases: ['קטלוג', 'מוצרים', 'catalog', 'products'],
   },
-  { key: 'catalogImport', path: '/dashboard/catalog/import', group: 'procure', parent: 'catalog', nav: 'linked' },
-  { key: 'catalogMapping', path: '/dashboard/catalog/mapping', group: 'procure', parent: 'catalog', nav: 'linked' },
+  { key: 'catalogImport', path: '/dashboard/catalog/import', group: 'procure', parent: 'catalog', nav: 'linked', badge: null },
+  // G-08: the chef answers "זה אותו מוצר?" here (name questions only, no ₪); the
+  // rest of /dashboard/catalog stays owner + manager. The chef cannot open the
+  // catalog parent, so the chef reaches it from the home question line (the
+  // named exception in nav-registry.test.ts).
+  {
+    key: 'catalogMapping',
+    path: '/dashboard/catalog/mapping',
+    group: 'procure',
+    parent: 'catalog',
+    nav: 'linked',
+    roles: ['owner', 'manager', 'chef'],
+    badge: null,
+  },
 ];

@@ -5,7 +5,8 @@ import { contactChannels, whatsappHref } from '@/lib/contact';
  * The public free-leak-check page (S15) is env-gated: LEAK_CHECK_PUBLIC=1, and
  * the FEATURES_OFF kill-switch (leakCheck / all) wins — the same check the
  * pages and APIs use, so no CTA ever links to a 404. Read at request time on
- * the server, so flipping the env needs no rebuild.
+ * the server, so flipping the env needs no code change (on Vercel an env
+ * change still takes a redeploy to reach the running deployment).
  */
 export function leakCheckPublic(): boolean {
   return lc.leakCheckPublicEnabled();

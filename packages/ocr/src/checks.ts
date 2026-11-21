@@ -10,17 +10,28 @@
  *
  * Tolerances (agorot): line 5, Σ lines vs subtotal 100, VAT 100, subtotal + VAT
  * vs total 5. A line with a printed discount skips the line check; an invoice
- * discount skips the Σ-lines check. Deposit (פיקדון) lines may sit inside or
+ * discount is subtracted in the Σ-lines check (and sends the invoice to review:
+ * 'invoice_discount'). Lines with ≥ 2 VAT rates ('mixed_vat') and deposit /
+ * delivery-fee lines ('deposit_or_fee_line') also go to review until matching
+ * handles them. Deposit (פיקדון) lines may sit inside or
  * outside the VAT base — both readings are accepted. VAT may be 0% (fresh
  * produce is zero-rated in Israel) or mixed per line (0% produce + 18% goods):
  * the VAT check accepts base × rate, Σ line × line rate, and a printed 0.
+ *
+ * Consolidated invoice (חשבונית מרכזת, ./consolidation): when every listed
+ * delivery note prints its own total, Σ note totals must equal the subtotal
+ * (tolerance 100 agorot) — a misread note total would otherwise surface as a
+ * leak on that delivery. Such a מרכזת may list notes only, no product lines,
+ * so no_lines is not raised for it.
  */
-import type { DocumentKind, LineKind } from './providers/invoiceSchema';
+import { classifyConsolidation, type Consolidation } from './consolidation';
+import type { DeliveryNoteRef, DocumentKind, LineKind } from './providers/invoiceSchema';
 
 export const LINE_TOLERANCE_AGOROT = 5;
 export const SUBTOTAL_TOLERANCE_AGOROT = 100;
 export const VAT_TOLERANCE_AGOROT = 100;
 export const TOTAL_TOLERANCE_AGOROT = 5;
+export const DELIVERY_NOTES_TOLERANCE_AGOROT = 100;
 
 export type OcrCheckReason =
   | 'missing_invoice_number'
@@ -33,6 +44,10 @@ export type OcrCheckReason =
   | 'subtotal_mismatch'
   | 'vat_mismatch'
   | 'total_mismatch'
+  | 'delivery_notes_total_mismatch'
+  | 'invoice_discount'
+  | 'mixed_vat'
+  | 'deposit_or_fee_line'
   | 'supplier_id_invalid'
   | 'supplier_id_mismatch'
   | 'document_kind_not_invoice'
@@ -71,6 +86,11 @@ export interface CheckableInvoice {
   invoiceDiscount?: number | null;
   continuesOnAnotherPage?: boolean;
   handwrittenCorrection?: boolean;
+  deliveryNotes?: DeliveryNoteRef[];
+  periodStart?: string;
+  periodEnd?: string;
+  /** As set by the pipeline; classified here when absent. */
+  consolidation?: Consolidation;
   lines: Array<{
     qty: number;
     unitPrice: number;
@@ -83,7 +103,7 @@ export interface CheckableInvoice {
 }
 
 export interface CheckOptions {
-  /** The supplier's ח״פ on file; a different printed one adds supplier_id_mismatch. */
+  /** The supplier's ח״פ on file; a different (valid) printed one adds supplier_id_mismatch. */
   expectedSupplierBusinessId?: string | null;
 }
 
@@ -122,7 +142,20 @@ export function isValidIsraeliBusinessId(raw: string | null | undefined): boolea
   return sum % 10 === 0;
 }
 
-const normId = (s: string | null | undefined) => (s ?? '').replace(/\D/g, '').replace(/^0+/, '');
+/**
+ * THE ח.פ. / ע.מ. normaliser (shared with the worker's persistence, S13):
+ * digits only; a 10-digit value with a leading 0 loses it; 8–9 digits are
+ * left-padded to 9; anything else, or a failed check digit, is UNKNOWN (null) —
+ * never a value to compare, so never a mismatch.
+ */
+export function normalizeBusinessId(v: unknown): string | null {
+  if (typeof v !== 'string' && typeof v !== 'number') return null;
+  let digits = String(v).replace(/\D/g, '');
+  if (digits.length === 10 && digits.startsWith('0')) digits = digits.slice(1);
+  if (digits.length < 8 || digits.length > 9) return null;
+  const id = digits.padStart(9, '0');
+  return isValidIsraeliBusinessId(id) ? id : null;
+}
 
 /** Israeli VAT by invoice date: 18% from 2025-01-01, 17% before. */
 export function defaultVatRate(isoDate: string | null | undefined): number {
@@ -153,7 +186,10 @@ export function checkInvoice(inv: CheckableInvoice, opts: CheckOptions = {}): Oc
   if (inv.totals.total === undefined) add('missing_total');
   if (inv.totals.subtotal === undefined) add('missing_subtotal');
   if (inv.totals.vat === undefined) add('missing_vat');
-  if (inv.lines.length === 0) add('no_lines');
+  const consolidated = (inv.consolidation ?? classifyConsolidation(inv).consolidation) === 'consolidated';
+  const notes = inv.deliveryNotes ?? [];
+  const notesPriced = consolidated && notes.length > 0 && notes.every((n) => n.totalExclVat !== undefined);
+  if (inv.lines.length === 0 && !notesPriced) add('no_lines');
 
   // ── Lines: qty × net unit price = line total (a discounted line is skipped)
   inv.lines.forEach((l, i) => {
@@ -171,14 +207,18 @@ export function checkInvoice(inv: CheckableInvoice, opts: CheckOptions = {}): Oc
   const vat = inv.totals.vat !== undefined ? toAgorot(inv.totals.vat) : undefined;
   const total = inv.totals.total !== undefined ? toAgorot(inv.totals.total) : undefined;
 
-  // ── Σ lines = subtotal (deposits inside or outside it); skipped under an invoice discount
-  if (subtotal !== undefined && inv.lines.length > 0 && !((inv.invoiceDiscount ?? 0) > 0)) {
+  // ── Σ lines − invoice discount = subtotal (deposits inside or outside it)
+  const discountAgorot = (inv.invoiceDiscount ?? 0) > 0 ? toAgorot(inv.invoiceDiscount!) : 0;
+  if (subtotal !== undefined && inv.lines.length > 0) {
     const delta = Math.min(
-      Math.abs(linesAgorot - subtotal),
-      Math.abs(linesAgorot - depositAgorot - subtotal),
+      Math.abs(linesAgorot - discountAgorot - subtotal),
+      Math.abs(linesAgorot - depositAgorot - discountAgorot - subtotal),
     );
     if (delta > SUBTOTAL_TOLERANCE_AGOROT) add('subtotal_mismatch', { deltaAgorot: delta });
   }
+  // Matching persists only the subtotal and the lines, so the discount would
+  // surface as a TOTAL_MISMATCH leak — a person handles it until matching does.
+  if (discountAgorot > 0) add('invoice_discount');
 
   // ── VAT = base × rate (base = subtotal, or subtotal without VAT-exempt deposits),
   //    or Σ line × its own rate (mixed 0% produce + 18% goods), or a printed 0
@@ -211,11 +251,30 @@ export function checkInvoice(inv: CheckableInvoice, opts: CheckOptions = {}): Oc
     if (delta > TOTAL_TOLERANCE_AGOROT) add('total_mismatch', { deltaAgorot: delta });
   }
 
+  // ── Consolidated: Σ delivery-note totals = subtotal
+  if (notesPriced && subtotal !== undefined) {
+    const notesAgorot = notes.reduce((s, n) => s + toAgorot(n.totalExclVat!), 0);
+    const delta = Math.abs(notesAgorot - subtotal);
+    if (delta > DELIVERY_NOTES_TOLERANCE_AGOROT) add('delivery_notes_total_mismatch', { deltaAgorot: delta });
+  }
+
+  // ── Lines matching cannot take as-is yet: ≥ 2 VAT rates (matching applies one
+  //    rate per invoice → false VAT_MISMATCH), and deposit / delivery-fee lines
+  //    (they are not products → UNORDERED_ITEM).
+  const lineRates = new Set(
+    inv.lines.map((l) => l.vatRate).filter((r): r is number => r !== undefined && r >= 0).map((r) => Math.round(r * 10000)),
+  );
+  if (lineRates.size >= 2) add('mixed_vat');
+  if (inv.lines.some((l) => l.lineKind !== undefined && l.lineKind !== 'item')) add('deposit_or_fee_line');
+
   // ── Supplier ח״פ
   const printedId = inv.supplier?.businessId;
   if (printedId && !isValidIsraeliBusinessId(printedId)) add('supplier_id_invalid');
-  const expected = opts.expectedSupplierBusinessId;
-  if (expected && normId(expected) !== normId(printedId)) add('supplier_id_mismatch');
+  // Mismatch only when BOTH sides are known (valid) and differ; unknown on
+  // either side is nothing to compare.
+  const expected = normalizeBusinessId(opts.expectedSupplierBusinessId);
+  const printed = normalizeBusinessId(printedId);
+  if (expected && printed && expected !== printed) add('supplier_id_mismatch');
 
   // ── Document flags
   if (inv.documentKind && NOT_AN_INVOICE.has(inv.documentKind)) add('document_kind_not_invoice');

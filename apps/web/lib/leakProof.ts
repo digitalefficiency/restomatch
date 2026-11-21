@@ -18,6 +18,8 @@ export interface ProofHero {
   invoicesWithLeak: number;
   pendingLinkCount: number;
   pendingLinkIls: number;
+  awaitingQuestionCount?: number;
+  awaitingQuestionIls?: number;
 }
 
 /** The owner.leakBreakdown fields the sheet uses. */

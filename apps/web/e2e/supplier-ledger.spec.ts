@@ -2,10 +2,12 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 import { claimableLines, sumClaims } from '../../../packages/api/src/lib/claims';
 import { DEMO_RESTAURANT_NAME, OWNER_STATE } from './env';
 import { collectPageErrors, e2eSql } from './helpers';
+import { seededLeakMonth } from './seededMonth';
 
 /**
  * Flag `supplierLedger` on the seeded demo tenant (settings.features.all).
- * ₪ consistency for the current month, summed over every supplier:
+ * ₪ consistency for the month the seed populated (this month, or last month in a month's first
+ * days — e2e/seededMonth.ts), summed over every supplier:
  *   - ledger leak == the hero leak (owner.leakHero);
  *   - credits asked == the claim letters' total (same shared claimable rule
  *     over owner.leakBreakdown — the letters page uses it too);
@@ -40,18 +42,37 @@ test.beforeAll(async () => {
 
 test('ledger ₪ ties out with the hero, the claim letters and the receiving data', async ({ page }) => {
   await page.goto('/dashboard');
+  const offset = await seededLeakMonth(page.request);
   const ledgers = await Promise.all(
     suppliers.map((s) => trpc<Ledger>(page.request, 'suppliers.ledger', { supplierId: s.id, months: 6 })),
   );
-  const current = ledgers.map((l) => l.months.find((m) => m.current)!);
+  // This month always ties out with the hero (₪0 = ₪0 in a month's first days)…
+  const thisMonth = ledgers.map((l) => l.months.find((m) => m.current)!);
+  const heroNow = await trpc<{ leakIls: number }>(page.request, 'owner.leakHero', {});
+  expect(thisMonth.reduce((s, m) => s + m.leakAgorot, 0)).toBe(Math.round(heroNow.leakIls * 100));
+  // …and the populated month carries every check below.
+  const monthKey = (cur: string): string => {
+    if (offset === 0) return cur;
+    const [y, mo] = cur.split('-').map(Number) as [number, number];
+    return mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, '0')}`;
+  };
+  const current = ledgers.map((l) => {
+    const key = monthKey(l.months.find((m) => m.current)!.month);
+    const m = l.months.find((x) => x.month === key);
+    expect(m, `ledger month ${key}`).toBeTruthy();
+    return m!;
+  });
 
-  const hero = await trpc<{ leakIls: number }>(page.request, 'owner.leakHero', {});
+  const hero = await trpc<{ leakIls: number }>(page.request, 'owner.leakHero', { monthOffset: offset });
   const leak = current.reduce((s, m) => s + m.leakAgorot, 0);
   expect(leak).toBe(Math.round(hero.leakIls * 100));
-  expect(leak, 'the demo seed leaks this month').toBeGreaterThan(0);
+  expect(leak, 'the demo seed leaks in the month it populated').toBeGreaterThan(0);
 
   // The letters' total: the shared rule (lib/claims) over the month's breakdown — the letters page uses it too.
-  const breakdown = await trpc<Array<Parameters<typeof claimableLines>[0]>>(page.request, 'owner.leakBreakdown', { limit: 200 });
+  const breakdown = await trpc<Array<Parameters<typeof claimableLines>[0]>>(page.request, 'owner.leakBreakdown', {
+    monthOffset: offset,
+    limit: 200,
+  });
   const letters = Math.round(sumClaims(breakdown.flatMap((inv) => claimableLines(inv))) * 100);
   expect(current.reduce((s, m) => s + m.creditsAskedAgorot, 0)).toBe(letters);
 

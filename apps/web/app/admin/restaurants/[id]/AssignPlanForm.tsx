@@ -8,6 +8,8 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { formatDate } from '@/lib/i18n/format';
 import { admin } from '@/lib/i18n/messages/admin';
 import { localizeServerError } from '@/lib/serverErrors';
+import { StagedChange } from '../../_components/StagedChange';
+import { changedFields, type StagedField } from '../../_components/staged';
 
 const PLANS = ['trial', 'basic', 'pro', 'chain'] as const;
 type PlanKey = (typeof PLANS)[number];
@@ -42,8 +44,13 @@ export function AssignPlanForm({
   // after mount only, so the server render never disagrees with the client.
   const [now, setNow] = useState<number | null>(null);
   useEffect(() => setNow(Date.now()), []);
+  // W3-07a: "שיוך" stages the change; the write happens only on confirm, with a reason.
+  const [staged, setStaged] = useState<StagedField[] | null>(null);
   const assign = trpc.admin.assignPlan.useMutation({
-    onSuccess: () => router.refresh(),
+    onSuccess: () => {
+      setStaged(null);
+      router.refresh();
+    },
   });
 
   const trialDays = Number(days);
@@ -52,18 +59,43 @@ export function AssignPlanForm({
     'rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm text-ink transition-colors focus:border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary';
   const labelCls = 'mb-1 block text-xs text-subtle';
 
-  function submit() {
+  function stage() {
+    if (status === 'trialing' && !daysValid) return;
+    const planLabel = (k: string | null) => (k ? t(`plans.${k}` as 'plans.trial') : '');
+    const statusLabel = (k: string | null) => (k ? t(`statuses.${k}` as 'statuses.active') : '');
+    const fields: StagedField[] = [
+      { key: 'plan', label: t('staged.fieldPlan'), before: planLabel(currentPlan), after: planLabel(plan) },
+      { key: 'status', label: t('staged.fieldStatus'), before: statusLabel(currentStatus), after: statusLabel(status) },
+    ];
+    if (status === 'trialing') {
+      fields.push({ key: 'trialDays', label: t('staged.fieldTrialDays'), before: '', after: String(trialDays) });
+    }
+    // Re-assigning the same plan still resets the trial clock, so a same-value
+    // staging shows every field rather than "nothing to save".
+    const diff = changedFields(fields);
+    setStaged(diff.length ? diff : fields);
+    assign.reset();
+  }
+
+  function confirm(reason: string) {
     if (status === 'trialing') {
       if (!daysValid) return;
-      assign.mutate({ restaurantId, planKey: plan, status, trialDays });
+      assign.mutate({ restaurantId, planKey: plan, status, trialDays, reason });
     } else {
-      assign.mutate({ restaurantId, planKey: plan, status });
+      assign.mutate({ restaurantId, planKey: plan, status, reason });
     }
+  }
+
+  function cancel() {
+    setStaged(null);
+    setPlan(PLANS.includes(currentPlan as PlanKey) ? (currentPlan as PlanKey) : 'pro');
+    setStatus(currentStatus === 'trialing' ? 'trialing' : 'active');
+    setDays(String(DEFAULT_TRIAL_DAYS));
   }
 
   return (
     <div>
-      <span className="mb-2 block font-mono text-xs font-medium uppercase tracking-wider text-subtle">
+      <span className="mb-2 block text-xs font-semibold text-subtle">
         {t('assign.label')}
       </span>
       <div className="flex flex-wrap items-end gap-3">
@@ -75,6 +107,7 @@ export function AssignPlanForm({
             id="assign-plan"
             value={plan}
             onChange={(e) => setPlan(e.target.value as PlanKey)}
+            disabled={staged !== null}
             className={selectCls}
           >
             {PLANS.map((p) => (
@@ -92,6 +125,7 @@ export function AssignPlanForm({
             id="assign-status"
             value={status}
             onChange={(e) => setStatus(e.target.value as Status)}
+            disabled={staged !== null}
             className={selectCls}
           >
             {STATUSES.map((s) => (
@@ -111,14 +145,17 @@ export function AssignPlanForm({
               inputMode="numeric"
               value={days}
               onChange={(e) => setDays(e.target.value)}
+              disabled={staged !== null}
               aria-invalid={!daysValid}
               className={`${selectCls} w-24`}
             />
           </div>
         ) : null}
-        <Button size="sm" onClick={submit} disabled={assign.isPending || (status === 'trialing' && !daysValid)}>
-          {assign.isPending ? t('assign.pending') : t('assign.submit')}
-        </Button>
+        {staged === null ? (
+          <Button size="sm" variant="secondary" onClick={stage} disabled={status === 'trialing' && !daysValid}>
+            {t('staged.review')}
+          </Button>
+        ) : null}
       </div>
       <p className="mt-2 text-xs text-muted" aria-live="polite">
         {status !== 'trialing'
@@ -129,8 +166,14 @@ export function AssignPlanForm({
               ? null
               : t('assign.endsOn', { date: formatDate(trialEnd(now, trialDays), locale, { dateStyle: 'full' }) })}
       </p>
-      {assign.error ? (
-        <p className="mt-2 text-xs text-danger">{localizeServerError(assign.error, locale, t('generic'))}</p>
+      {staged ? (
+        <StagedChange
+          fields={staged}
+          pending={assign.isPending}
+          error={assign.error ? localizeServerError(assign.error, locale, t('generic')) : null}
+          onConfirm={confirm}
+          onCancel={cancel}
+        />
       ) : null}
       {assign.isSuccess ? <p className="mt-2 text-xs text-primary">{t('assign.saved')}</p> : null}
     </div>

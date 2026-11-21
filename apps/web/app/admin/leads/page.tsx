@@ -26,7 +26,7 @@ export default async function AdminLeadsPage() {
 
       <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-card">
         <table className="w-full text-start text-sm">
-          <thead className="border-b border-line bg-surface-2 font-mono text-xs uppercase tracking-wider text-subtle">
+          <thead className="border-b border-line bg-surface-2 text-xs text-subtle">
             <tr>
               <th className="px-4 py-3 text-start font-medium">{t('leads.colName')}</th>
               <th className="px-4 py-3 text-start font-medium">{t('leads.colContact')}</th>
@@ -62,13 +62,13 @@ export default async function AdminLeadsPage() {
                   {!l.phone && !l.email ? '—' : null}
                 </td>
                 <td className="px-4 py-3 text-muted">{l.restaurantName ?? '—'}</td>
-                <td className="px-4 py-3 font-mono tabular-nums text-gold">
+                <td className="px-4 py-3 tabular-nums text-gold">
                   {l.monthlyProcurementAgorot
                     ? formatIls(l.monthlyProcurementAgorot / 100, { maximumFractionDigits: 0, locale })
                     : '—'}
                 </td>
                 <td className="px-4 py-3 text-subtle">{l.source ?? '—'}</td>
-                <td className="px-4 py-3 font-mono tabular-nums text-subtle">{formatDate(l.createdAt, locale)}</td>
+                <td className="px-4 py-3 tabular-nums text-subtle">{formatDate(l.createdAt, locale)}</td>
                 <td className="px-4 py-3">
                   <LeadEraseButton leadId={l.id} />
                 </td>

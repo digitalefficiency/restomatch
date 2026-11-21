@@ -23,10 +23,12 @@ import { authDb } from './lib/authDb';
 import { isEmailConfigured, sendEmail } from './lib/email';
 import { magicLinkEmail } from './lib/emailTemplates';
 import { LOCALE_COOKIE, resolveLocale, type Locale } from './lib/i18n/config';
+import { LoginRateLimited } from './lib/loginRateLimited';
 import { authorizeCredentials, getSessionSecurityState } from './lib/passwords';
 import { SIGNOUT_COOKIE, issuedBeforeSignOut, signOutCookieOptions } from './lib/signOutTombstone';
+import { bypassesSecondFactor } from './lib/secondFactorGate';
 import { consumeTwoFactorTicket } from './lib/totp';
-import { clearLoginFailures, enforceLoginLimit, enforceMagicLinkLimit, trustedProxyHops } from './lib/rateLimit';
+import { clearLoginFailures, enforceLoginLimit, enforceMagicLinkLimit, refundLoginIp, trustedProxyHops } from './lib/rateLimit';
 import {
   SESSION_TTL_LONG_SEC,
   isSessionExpired,
@@ -58,6 +60,12 @@ interface AppJwt {
   loginAt?: number;
   /** 2FA enrolled + second factor still pending (Epic C session gate). */
   twoFactorPending?: boolean;
+  /**
+   * The enrolment (user_credentials.totp_enabled_at, epoch ms) whose second
+   * factor this session passed, stamped when a server-verified 2FA ticket is
+   * consumed. Absent on a token that never did — see lib/secondFactorGate.
+   */
+  mfaFor?: number;
   [key: string]: unknown;
 }
 
@@ -167,16 +175,23 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         // the email+IP login limit must run INSIDE authorize() to be
         // un-bypassable. Reads the client IP from the request headers. Fails OPEN
         // on a rate-limit store outage — the durable floor is the per-account DB lockout in
-        // authorizeCredentials. A rate-limited attempt returns the same uniform
-        // null as a wrong password (surfaced as CredentialsSignin), revealing no
-        // account/lock state.
+        // authorizeCredentials. A rate-limited attempt throws LoginRateLimited
+        // (CredentialsSignin, code 'rate') so the page says "too many attempts"
+        // rather than "wrong password"; it reveals no account/lock state (the
+        // limiters key on any email string + IP). A wrong password and the DB
+        // lockout stay the uniform null → CredentialsSignin.
         const ip = clientIpFromHeaders(await headers(), { trustedProxyHops: trustedProxyHops() });
-        const rl = await enforceLoginLimit(email, ip);
-        if (!rl.allowed) return null;
+        // One timestamp for the count and its refund: the same fixed window.
+        const attemptAt = Date.now();
+        const rl = await enforceLoginLimit(email, ip, attemptAt);
+        if (!rl.allowed) throw new LoginRateLimited();
         const result = await authorizeCredentials({ email, password });
         if (!result) return null;
         // Correct password: only FAILED attempts count toward the per-account limit.
         await clearLoginFailures(email);
+        // Give back this attempt's per-IP unit: only failures count per network
+        // (owner decision 31.10; staff share one restaurant Wi-Fi).
+        await refundLoginIp(ip, attemptAt);
         const rememberMe =
           creds?.rememberMe === true ||
           creds?.rememberMe === 'true' ||
@@ -229,6 +244,9 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         if (typeof ticket === 'string' && ticket) {
           if (await consumeTwoFactorTicket(t.userId, ticket)) {
             t.twoFactorPending = false;
+            const enrolment = (await getSessionSecurityState(t.userId)).twoFactorEnabledAt;
+            if (enrolment === null) delete t.mfaFor;
+            else t.mfaFor = enrolment;
           }
         }
       }
@@ -250,6 +268,8 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         const sec = await getSessionSecurityState(signInId);
         t.ver = sec.tokenVersion;
         t.twoFactorPending = (u.twoFactorPending ?? false) || sec.twoFactorEnabled;
+        // A fresh sign-in has not passed a second factor yet (in this session).
+        delete t.mfaFor;
       }
       if (!t.userId) return t;
 
@@ -279,6 +299,21 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         // re-planted by a response that was in flight during sign-out must not
         // bring the session back (lib/signOutTombstone).
         if (issuedBeforeSignOut(t.loginAt, await readSignOutTombstone())) {
+          return {} as AppJwt;
+        }
+        // A token issued before the account enrolled 2FA (or before its current
+        // re-enrolment) was never pending and never passed THIS second factor:
+        // revoke it (same path as a token_version
+        // mismatch — edge middleware, tRPC 401 and RSC all handle the empty
+        // token), so the cross-tenant admin console and every other surface
+        // require a session that proved the second factor.
+        if (
+          bypassesSecondFactor({
+            twoFactorEnabledAt: sec.twoFactorEnabledAt,
+            twoFactorPending: t.twoFactorPending,
+            mfaFor: t.mfaFor,
+          })
+        ) {
           return {} as AppJwt;
         }
       }

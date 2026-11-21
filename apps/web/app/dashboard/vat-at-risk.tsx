@@ -1,15 +1,24 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { CheckCircle2, Copy, FileWarning } from 'lucide-react';
-import { Badge, Button, cn } from '@/lib/components';
+import { CheckCircle2, Copy, FileWarning, Mail, MessageCircle } from 'lucide-react';
+import { Badge, Button, cn, useToast } from '@/lib/components';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { formatDate, formatNumber } from '@/lib/i18n/format';
 import { originalProps } from '@/lib/i18n/original';
 import { vat } from '@/lib/i18n/messages/vat';
 import { formatIls } from '@/lib/money';
+import { trpc } from '@/lib/trpc/client';
 import { supplierRequestText } from '@/lib/vat/requestText';
+import {
+  groupStage,
+  handoffCtaKey,
+  israelDay,
+  newClientMutationId,
+  stageLine,
+  type AllocationStage,
+} from '@/lib/vat/caseView';
 
 export interface VatAtRiskRowView {
   invoiceId: string;
@@ -22,6 +31,9 @@ export interface VatAtRiskRowView {
   vatAtRisk: number;
   allocationNumber: string | null;
   daysLeft: number;
+  /** AU-08 case state (owner.vatAtRisk rows carry it; optional for older callers). */
+  stage?: AllocationStage;
+  requestedAt?: string | null;
 }
 
 const SHOWN = 3;
@@ -46,7 +58,6 @@ export function VatAtRiskCard({
   const t = useT(vat);
   const locale = useLocale();
   const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState<string | null>(null);
   const threshold = formatIls(thresholdIls, { locale });
   const supplierLabel = (r: Pick<VatAtRiskRowView, 'supplierName' | 'supplierNameEn'>) =>
     (locale === 'en' && r.supplierNameEn ? r.supplierNameEn : r.supplierName) ?? '—';
@@ -60,9 +71,14 @@ export function VatAtRiskCard({
     }
     return [...by.entries()].map(([key, list]) => ({
       key,
-      supplier: list[0]!.supplierName ?? 'ספק',
+      supplierId: list[0]!.supplierId,
       shown: supplierLabel(list[0]!),
-      text: supplierRequestText({ supplierName: list[0]!.supplierName ?? 'ספק', restaurantName, invoices: list }),
+      invoiceIds: list.map((r) => r.invoiceId),
+      stage: groupStage(list.map((r) => r.stage ?? 'new')),
+      requestedAt: list.reduce<string | null>((a, r) => (r.requestedAt && (!a || r.requestedAt > a) ? r.requestedAt : a), null),
+      daysLeft: Math.min(...list.map((r) => r.daysLeft)),
+      // Copy-only fallback for invoices with no supplier (no server draft to ask for).
+      fallbackText: supplierRequestText({ supplierName: list[0]!.supplierName ?? 'ספק', restaurantName, invoices: list }),
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, restaurantName, locale]);
@@ -164,37 +180,224 @@ export function VatAtRiskCard({
       {open ? (
         <div className="mt-4 space-y-4" data-testid="vat-request-panel">
           <p className="text-sm text-muted">{t('request.hint')}</p>
-          {requests.map((q) => (
-            <div key={q.key} className="rounded-xl border border-line bg-surface-2 p-4">
-              <p className="mb-2 text-sm font-semibold text-ink">
-                {t('request.title')} — <span {...originalProps(q.shown)}>{q.shown}</span>
-              </p>
-              <textarea
-                readOnly
-                dir="rtl"
-                lang="he"
-                rows={Math.min(12, q.text.split('\n').length + 1)}
-                value={q.text}
-                aria-label={`${t('request.title')} — ${q.shown}`}
-                className="w-full resize-y rounded-lg border border-line-strong bg-surface p-3 text-sm text-ink"
-                data-testid="vat-request-text"
+          {requests.map((q) =>
+            q.supplierId ? (
+              <SupplierRequest
+                key={q.key}
+                supplierId={q.supplierId}
+                shown={q.shown}
+                invoiceIds={q.invoiceIds}
+                stage={q.stage}
+                requestedAt={q.requestedAt}
+                daysLeft={q.daysLeft}
               />
-              <Button
-                variant="secondary"
-                size="sm"
-                className={cn('mt-2 min-h-11')}
-                onClick={async () => {
-                  await navigator.clipboard?.writeText(q.text).catch(() => null);
-                  setCopied(q.key);
-                }}
-              >
-                <Copy className="h-4 w-4" aria-hidden="true" />
-                {copied === q.key ? t('request.copied') : t('request.copy')}
-              </Button>
-            </div>
-          ))}
+            ) : (
+              <CopyOnlyRequest key={q.key} shown={q.shown} text={q.fallbackText} />
+            ),
+          )}
         </div>
       ) : null}
     </section>
+  );
+}
+
+/** How long "סומן כנשלח" can be undone before the request is recorded (shared undo pattern, ≥10 s). */
+const MARK_UNDO_MS = 10_000;
+
+/**
+ * AU-08 (A13): one supplier's allocation request inside the card.
+ *
+ * Stage line ("טרם נשלחה בקשה" / "נשלחה בקשה לפני 4 ימים" / "אין מענה 9 ימים ·
+ * שלחו תזכורת"), the server draft (first ask or a gentle reminder), and the
+ * hand-off: wa.me / mailto / copy. The server sends nothing. Right after a tap
+ * the UI offers "סומן כנשלח" with a 10 s undo and only then records the
+ * request (`vat.markRequested`; audit rows are append-only, so undo = never
+ * written). Owner + bookkeeper only (`canWrite`); a manager sees the draft.
+ */
+function SupplierRequest({
+  supplierId,
+  shown,
+  invoiceIds,
+  stage,
+  requestedAt,
+  daysLeft,
+}: {
+  supplierId: string;
+  shown: string;
+  invoiceIds: string[];
+  stage: AllocationStage;
+  requestedAt: string | null;
+  daysLeft: number;
+}) {
+  const t = useT(vat);
+  const toast = useToast();
+  const utils = trpc.useUtils();
+  const [copied, setCopied] = useState(false);
+  const [marked, setMarked] = useState(false);
+  const pending = useRef<number | null>(null);
+  const draftQ = trpc.vat.requestDraft.useQuery({ supplierId }, { retry: false });
+  const mark = trpc.vat.markRequested.useMutation({
+    onSuccess: async () => {
+      await Promise.all([utils.vat.requestDraft.invalidate({ supplierId }), utils.owner.vatAtRisk.invalidate()]);
+    },
+    onError: () => setMarked(false),
+  });
+  useEffect(() => () => {
+    if (pending.current) window.clearTimeout(pending.current);
+  }, []);
+
+  const draft = draftQ.data;
+  const effectiveRequestedAt = draft?.lastRequestedAt ?? requestedAt;
+  const line = stageLine({ stage, requestedAt: effectiveRequestedAt, daysLeft, todayIso: israelDay(new Date()) });
+  const text = draft?.text ?? '';
+  const canWrite = draft?.canWrite ?? false;
+
+  const scheduleMark = (channel: 'whatsapp' | 'email' | 'copy') => {
+    if (!canWrite || marked || !draft || draft.invoices.length === 0) return;
+    setMarked(true);
+    const ids = draft.invoices.map((i) => i.invoiceId).filter((id) => invoiceIds.includes(id));
+    const clientMutationId = newClientMutationId();
+    pending.current = window.setTimeout(() => {
+      pending.current = null;
+      mark.mutate({ supplierId, invoiceIds: ids.length ? ids : invoiceIds, channel, clientMutationId });
+    }, MARK_UNDO_MS);
+    toast.success(t('case.markedSent'), {
+      duration: MARK_UNDO_MS,
+      action: {
+        label: t('case.undo'),
+        onClick: () => {
+          if (pending.current) window.clearTimeout(pending.current);
+          pending.current = null;
+          setMarked(false);
+        },
+      },
+    });
+  };
+
+  const cta = t(handoffCtaKey(effectiveRequestedAt) as never);
+
+  return (
+    <div className="rounded-xl border border-line bg-surface-2 p-4" data-testid="vat-request-supplier" data-stage={stage}>
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm font-semibold text-ink">
+          {t('request.title')} — <span {...originalProps(shown)}>{shown}</span>
+        </p>
+        <p className="text-xs font-semibold text-muted" data-testid="vat-request-stage">
+          {t(line.key as never, line.params as never)}
+        </p>
+      </div>
+      {draftQ.isLoading ? <p className="text-sm text-muted">…</p> : null}
+      {text ? (
+        <textarea
+          readOnly
+          dir="rtl"
+          lang="he"
+          rows={Math.min(12, text.split('\n').length + 1)}
+          value={text}
+          aria-label={`${t('request.title')} — ${shown}`}
+          className="w-full resize-y rounded-lg border border-line-strong bg-surface p-3 text-sm text-ink"
+          data-testid="vat-request-text"
+        />
+      ) : null}
+      {draft ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {draft.waHref ? (
+            <a
+              href={draft.waHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => scheduleMark('whatsapp')}
+              data-testid="vat-request-wa"
+              className="inline-flex min-h-11 items-center gap-2 rounded-control border border-primary bg-surface px-4 text-sm font-semibold text-primary"
+            >
+              <MessageCircle className="h-4 w-4" aria-hidden="true" />
+              {cta}
+            </a>
+          ) : null}
+          {draft.mailtoHref ? (
+            <a
+              href={draft.mailtoHref}
+              onClick={() => scheduleMark('email')}
+              data-testid="vat-request-mail"
+              className={cn(
+                'inline-flex min-h-11 items-center gap-2 rounded-control border bg-surface px-4 text-sm font-semibold',
+                draft.waHref ? 'border-line-strong text-ink' : 'border-primary text-primary',
+              )}
+            >
+              <Mail className="h-4 w-4" aria-hidden="true" />
+              {draft.waHref ? t('case.byEmail') : cta}
+            </a>
+          ) : null}
+          <Button
+            variant="secondary"
+            size="sm"
+            className="min-h-11"
+            disabled={!text}
+            onClick={async () => {
+              await navigator.clipboard?.writeText(text).catch(() => null);
+              setCopied(true);
+            }}
+          >
+            <Copy className="h-4 w-4" aria-hidden="true" />
+            {copied ? t('request.copied') : t('request.copy')}
+          </Button>
+          {canWrite && text ? (
+            <Button
+              variant="tertiary"
+              size="sm"
+              className="min-h-11"
+              disabled={marked}
+              onClick={() => scheduleMark('copy')}
+              data-testid="vat-request-mark"
+            >
+              {marked ? t('case.markedSent') : t('case.markSent')}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {draft?.needsContact ? (
+        <p className="mt-2 text-xs text-muted">
+          {t('case.copyOnly')}{' '}
+          <Link href={draft.supplierHref} className="font-semibold text-primary underline underline-offset-4">
+            {t('case.addContact')}
+          </Link>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Invoices with no supplier on record: the copy-only text, as before. */
+function CopyOnlyRequest({ shown, text }: { shown: string; text: string }) {
+  const t = useT(vat);
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="rounded-xl border border-line bg-surface-2 p-4">
+      <p className="mb-2 text-sm font-semibold text-ink">
+        {t('request.title')} — <span {...originalProps(shown)}>{shown}</span>
+      </p>
+      <textarea
+        readOnly
+        dir="rtl"
+        lang="he"
+        rows={Math.min(12, text.split('\n').length + 1)}
+        value={text}
+        aria-label={`${t('request.title')} — ${shown}`}
+        className="w-full resize-y rounded-lg border border-line-strong bg-surface p-3 text-sm text-ink"
+        data-testid="vat-request-text"
+      />
+      <Button
+        variant="secondary"
+        size="sm"
+        className="mt-2 min-h-11"
+        onClick={async () => {
+          await navigator.clipboard?.writeText(text).catch(() => null);
+          setCopied(true);
+        }}
+      >
+        <Copy className="h-4 w-4" aria-hidden="true" />
+        {copied ? t('request.copied') : t('request.copy')}
+      </Button>
+    </div>
   );
 }

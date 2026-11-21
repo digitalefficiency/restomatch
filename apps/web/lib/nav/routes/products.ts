@@ -10,6 +10,7 @@ export const routes: RouteDef[] = [
     parent: 'catalog',
     roles: ['owner', 'manager'],
     nav: 'linked',
+    badge: null,
   },
-  { key: 'productDetail', path: '/dashboard/products/[productId]', group: 'procure', parent: 'products', nav: 'detail' },
+  { key: 'productDetail', path: '/dashboard/products/[productId]', group: 'procure', parent: 'products', nav: 'detail', badge: null },
 ];

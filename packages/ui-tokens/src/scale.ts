@@ -175,3 +175,84 @@ export const spacing = {
   xl: 32,
   '2xl': 48,
 } as const;
+
+// ── DS2 scales (docs/ux/ds2/DS2-SPEC.md §2.1.2, §2.3, §2.4, §5.3) ──────────
+// Added beside the v1 roles above. `heading-*` and `metric-*` keep their old
+// values as aliases; new code uses `title-*` and `money-*`. The roles that
+// already exist (`caption`, `body-sm`, `body`) are not re-valued before phase 3.
+
+/** One type role: size / line-height in rem, weight, tracking. */
+export interface TypeStep {
+  fs: string;
+  lh: string;
+}
+export interface TypeRoleV2 {
+  base: TypeStep;
+  /** ★ roles only: the compact density value. */
+  compact?: TypeStep;
+  /** Field mode (phone at the dock, count, supplier link). */
+  field?: TypeStep;
+  /** Below md (phone): the hero and the marketing display roles step down. */
+  phone?: TypeStep;
+  fw: number;
+  ls: string;
+}
+
+const t = (fs: number, lh: number): TypeStep => ({ fs: `${fs / 16}rem`, lh: `${lh / 16}rem` });
+
+/**
+ * The closed v2 scale, direction A values (DS2 §6.1: line-heights one step
+ * looser than the base because Plex's Hebrew is tall; titles at 600 so the ₪
+ * carries the weight; the hero at 700, Plex has no 800). `id` is Plex Sans 500
+ * with `tnum` (D3), never a mono face.
+ */
+export const typeScaleV2: Record<string, TypeRoleV2> = {
+  cell: { base: t(14, 22), compact: t(13, 20), field: t(16, 24), fw: 400, ls: '0' },
+  'title-sm': { base: t(16, 24), field: t(18, 26), fw: 600, ls: '0' },
+  'title-md': { base: t(20, 28), field: t(20, 28), fw: 600, ls: '0' },
+  'title-lg': { base: t(24, 32), field: t(22, 30), fw: 600, ls: '0' },
+  'money-dense': { base: t(14, 22), compact: t(13, 20), field: t(16, 24), fw: 400, ls: '0' },
+  'money-row': { base: t(16, 24), compact: t(14, 20), field: t(18, 26), fw: 600, ls: '0' },
+  'money-card': { base: t(28, 36), compact: t(24, 32), field: t(28, 36), fw: 700, ls: '-0.01em' },
+  'money-hero': { base: t(56, 64), phone: t(40, 48), field: t(40, 48), fw: 700, ls: '-0.01em' },
+  'qty-field': { base: t(20, 28), fw: 700, ls: '0' },
+  id: { base: t(13, 20), compact: t(12, 16), field: t(14, 20), fw: 500, ls: '0' },
+  kbd: { base: t(12, 16), fw: 500, ls: '0' },
+  'display-sm': { base: t(36, 44), phone: t(32, 40), fw: 700, ls: '-0.02em' },
+  'display-md': { base: t(48, 56), phone: t(40, 48), fw: 700, ls: '-0.02em' },
+  'display-lg': { base: t(64, 72), phone: t(44, 52), fw: 700, ls: '-0.02em' },
+};
+
+/** Tailwind `fontSize` entries for the v2 roles: every dial reads a variable. */
+export const typeRolesV2: Record<string, FontSize> = Object.fromEntries(
+  Object.keys(typeScaleV2).map((role) => [
+    role,
+    [`var(--fs-${role})`, { lineHeight: `var(--lh-${role})`, fontWeight: `var(--fw-${role})`, letterSpacing: `var(--ls-${role})` }],
+  ]),
+);
+
+/** Radius roles DS2 adds (D6 keeps control 8 · card 12 · overlay 16 above). */
+export const radiusRolesV2 = { xs: '0.25rem', chip: '9999px' } as const;
+
+/** Semantic spacing aliases (DS2 §2.3). Values that change by mode read a variable. */
+export const spaceRoles = {
+  'inset-chip': '0.5rem',
+  'inset-control': 'var(--inset-control)',
+  'inset-cell': 'var(--cell-px)',
+  'inset-card': '1rem',
+  'stack-xs': '0.25rem',
+  'stack-sm': '0.5rem',
+  'stack-md': '0.75rem',
+  'stack-lg': '1rem',
+  'stack-xl': '1.5rem',
+  'stack-2xl': '2rem',
+  'gutter-page': 'var(--gutter-page)',
+} as const;
+
+/** Chrome sizes (replace `h-[55px]`, `max-w-[1600px]` in phase 5). */
+export const chrome = {
+  'header-h': '56px',
+  'sidebar-w': '248px',
+  'rail-w': '64px',
+  'bottombar-h': '64px',
+} as const;

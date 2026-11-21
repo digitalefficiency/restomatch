@@ -54,6 +54,36 @@ export async function receiptState(
   return { open: gr?.status === 'pending', poId: gr?.poId ?? null };
 }
 
+/**
+ * HOLD an invoice for a receipt still being counted (round 6): matching now
+ * would read every line "received 0". Marks it raw.heldForReceipts = [grId] —
+ * the receipt's submit claims it (invoicesWaitingOnReceipt) and its job matches
+ * it (rematchHoldReason lets a never-matched invoice held for THAT receipt
+ * through). The status is left as it is (round 7): a 'parsed' invoice with no
+ * run is not "checked" — it stays out of the accounting export, in the pending
+ * list, and its lines stay editable until the run lands. A possible duplicate
+ * copy (raw.duplicateOf) waits for its review ('awaiting_review': the job skips
+ * it). Works on an invoice with no ocr_payload / raw yet (an emailed copy).
+ * Call under the invoice row lock.
+ */
+export async function holdForReceipt(
+  tx: Database,
+  restaurantId: string,
+  invoiceId: string,
+  grId: string,
+): Promise<'receipt_open' | 'awaiting_review'> {
+  const rows = (await tx.execute(sql`
+    UPDATE invoices
+       SET ocr_payload = coalesce(ocr_payload, '{}'::jsonb) || jsonb_build_object(
+             'raw',
+             (CASE WHEN jsonb_typeof(ocr_payload -> 'raw') = 'object' THEN ocr_payload -> 'raw' ELSE '{}'::jsonb END)
+               || jsonb_build_object(${HELD_FOR_RECEIPTS_KEY}::text, jsonb_build_array(${grId}::text))),
+           updated_at = now()
+     WHERE id = ${invoiceId} AND restaurant_id = ${restaurantId}
+     RETURNING coalesce(ocr_payload -> 'raw' ? 'duplicateOf', false) AS duplicate`)) as unknown as Array<{ duplicate: boolean }>;
+  return rows[0]?.duplicate ? 'awaiting_review' : 'receipt_open';
+}
+
 /** True while the receipt is still being counted (see receiptState). */
 export async function receiptStillOpen(tx: Database, restaurantId: string, grId: string): Promise<boolean> {
   return (await receiptState(tx, restaurantId, grId)).open;
@@ -250,6 +280,21 @@ export async function invoicesWaitingOnReceipt(
     if (raw?.duplicateOf !== undefined) continue; // OCR never auto-matches a held duplicate
     if (await pairsWithReceipt(tx, restaurantId, c.id, { id: grId, poId: gr.poId })) out.push(c.id);
   }
+  // Round 6: an invoice HELD for this receipt (holdForReceipt — a Re-run or a
+  // hand edit that landed on it while it was counting) is this receipt's to
+  // match, whatever its earlier run (none, or one with no receipt). Never a
+  // signed-off one, nor one still in OCR.
+  const held = await tx
+    .select({ id: invoices.id })
+    .from(invoices)
+    .where(
+      and(
+        eq(invoices.restaurantId, restaurantId),
+        sql`${invoices.ocrPayload} -> 'raw' -> ${sql.raw(`'${HELD_FOR_RECEIPTS_KEY}'`)} = jsonb_build_array(${grId}::text)`,
+        sql`${invoices.status} not in ('approved', 'paid', 'ocr_pending')`,
+      ),
+    );
+  for (const h of held) if (!out.includes(h.id)) out.push(h.id);
   return out;
 }
 
@@ -303,13 +348,27 @@ export async function scannedInvoicesForReceipt(
  *  • 'settled' — a person already approved/paid it on an earlier run; a submit
  *    never rewrites that match (only match.runForInvoice may);
  *  • 'awaiting_review' — never matched, and the OCR held it for a human (low
- *    confidence → 'parsed', or a possible duplicate copy).
+ *    confidence → 'parsed', or a possible duplicate copy). Not when a person or
+ *    a manager's Re-run held it for THIS receipt's count (holdForReceipt:
+ *    raw.heldForReceipts ∋ grId — the OCR job records a hold only on a
+ *    confident read, already 'matched'); a duplicate copy always waits.
  */
 export function rematchHoldReason(
   inv: { status: string; ocrPayload: unknown },
   hasPriorRun: boolean,
+  /** The receipt this re-match runs against (the job's / the slip's), when known. */
+  grId?: string | null,
 ): 'settled' | 'awaiting_review' | null {
   if (hasPriorRun) return inv.status === 'approved' || inv.status === 'paid' ? 'settled' : null;
   const raw = (inv.ocrPayload as { raw?: { duplicateOf?: unknown } } | null | undefined)?.raw;
-  return inv.status !== 'matched' || raw?.duplicateOf !== undefined ? 'awaiting_review' : null;
+  if (raw?.duplicateOf !== undefined) return 'awaiting_review';
+  if (inv.status === 'matched') return null;
+  return grId && heldForReceipts(inv.ocrPayload).includes(grId) ? null : 'awaiting_review';
+}
+
+/** The receipts an invoice is held for (raw.heldForReceipts), [] when none. */
+export function heldForReceipts(ocrPayload: unknown): string[] {
+  const raw = (ocrPayload as { raw?: Record<string, unknown> } | null | undefined)?.raw;
+  const held = raw && typeof raw === 'object' ? raw[HELD_FOR_RECEIPTS_KEY] : undefined;
+  return Array.isArray(held) ? held.filter((x): x is string => typeof x === 'string') : [];
 }

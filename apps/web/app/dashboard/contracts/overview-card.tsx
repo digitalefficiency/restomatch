@@ -18,7 +18,7 @@ export async function PriceAlertsTeaser() {
   return (
     <Link
       href="/dashboard/contracts?tab=alerts"
-      className="mt-4 block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+      className="mt-4 block rounded-2xl"
     >
       <Card elevated padding="md" className="flex flex-wrap items-center justify-between gap-3 border-danger/30 transition-colors hover:border-danger/50">
         <div className="flex min-w-0 items-center gap-3">

@@ -1,3 +1,5 @@
+import type { LinkProvenance } from './linkPolicy';
+
 export type MatchStrategy = 'sku' | 'alias' | 'barcode' | 'embedding' | 'fuzzy';
 
 export interface MatchCandidate {
@@ -6,6 +8,8 @@ export interface MatchCandidate {
   confidence: number;
   matchedBy: MatchStrategy;
   aliasId?: string | null;
+  /** G-08: where a stored alias came from (aliasProvenance). Absent for non-alias strategies. */
+  provenance?: LinkProvenance;
 }
 
 export interface CatalogMatchInput {

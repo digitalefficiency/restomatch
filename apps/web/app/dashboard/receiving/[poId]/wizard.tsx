@@ -24,9 +24,11 @@ import { isReceiverLocale } from '@/lib/i18n/config';
 import type { UploadedScan } from '@/lib/supabase/client';
 import { ingest } from '@/lib/i18n/messages/ingest';
 import { requestReauth } from '@/lib/net/reauth';
+import { blobToBase64, ensureUploadable } from '@/lib/scanPrep';
 import { isSessionExpired } from '@/lib/pwa/authGate';
 import { SYNCED_EVENT, enqueuePhoto, idbAvailable, isNetworkError, isTransientFailure, type SyncedPhotoDetail } from '@/lib/pwa/offlineQueue';
 import { adaptReconciliation, keepAdjusted, markFromCount, type PoLineRow, type ReceiptLineRow } from './_adapters';
+import { failedReadNotice, onRegisterError, type OcrNotice } from './_capture';
 import { fromGrLine } from './_count';
 import { withoutStamp, type GrLinePayload, type RowStamp } from '@/lib/pwa/lineOutbox';
 import { localizeInvoiceLines, localizePoLines, localizeReceiptLines, type LocalNames } from './_localize';
@@ -40,12 +42,16 @@ import {
   readLocalMarks,
   writeLocalMarks,
   useLeaveGuard,
+  useClaimReceiptGroup,
   useLineSaves,
   useFieldBarOffset,
   useWakeLock,
   writeDraft,
   type LeaveTarget,
 } from './_fieldHooks';
+import { clearCloseKey, closeKeyFor, uncountedLinesOf } from './_closeKey';
+import { SUBMIT_RECEIPT_KIND, receiptGroup, type SubmitReceiptPayload } from '@/lib/pwa/fieldOutbox';
+import { enqueue, idbOutboxStore, outboxKey } from '@/lib/pwa/outbox';
 import { ReceiptSummary } from './receipt-summary';
 
 // The slip is only needed once there is something to dispute: keep it out of the first load.
@@ -56,19 +62,6 @@ const BACKGROUND_POLL_MS = 10 * 60_000;
 /** After this long reading, offer "continue with the order" (perf-states-11, NN/g 10 s). */
 export const STILL_READING_AFTER_MS = 10_000;
 
-/** Why the review was built without (fresh) invoice lines. */
-type OcrNotice = null | 'reading' | 'failed' | 'quota' | 'ready';
-
-/** Encode a File to base64 (chunked to avoid call-stack limits on large files). */
-async function fileToBase64(file: File): Promise<string> {
-  const buf = new Uint8Array(await file.arrayBuffer());
-  let binary = '';
-  const CHUNK = 0x8000;
-  for (let i = 0; i < buf.length; i += CHUNK) {
-    binary += String.fromCharCode(...buf.subarray(i, i + CHUNK));
-  }
-  return btoa(binary);
-}
 
 interface PoForClient {
   id: string;
@@ -90,6 +83,8 @@ export interface ReceiptForClient {
   receivedAt: string | null;
   /** Its open/close cycle (`updatedAt`): offline rows from an earlier cycle are held, never replayed. */
   version: string | null;
+  /** W2-05: lines this receipt was closed with WITHOUT a count (recorded on the close). */
+  closedUncounted?: number;
   lines: ReceiptLineRow[];
 }
 
@@ -116,6 +111,7 @@ export function ReceivingWizard({
   tolerance,
   showMoney = false,
   receiverName = null,
+  readOnly = false,
 }: {
   po: PoForClient;
   restaurantId: string | null;
@@ -135,6 +131,12 @@ export function ReceivingWizard({
   showMoney?: boolean;
   /** Who is receiving (the signed-in person) — shown on the confirmation. */
   receiverName?: string | null;
+  /**
+   * View only (IA-03: routeAccess(role, path) === 'read'). Every line, count and
+   * invoice comparison stays visible; no photo, no receipt is started, no mark is
+   * saved, no close, no dock slip. Default false: nothing changes for callers.
+   */
+  readOnly?: boolean;
 }) {
   const t = useT(receiving);
   const td = useT(receivingDelivery);
@@ -172,6 +174,8 @@ export function ReceivingWizard({
   const [leaveAsk, setLeaveAsk] = useState<LeaveTarget | null>(null);
   const [next, setNext] = useState<{ poId: string; label: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The scan whose invoice could not be registered — retried with one tap. */
+  const [registerRetry, setRegisterRetry] = useState<CapturedImage | null>(null);
   /** Bumped on retake / skip / unmount — cancels any in-flight poll. */
   const pollTokenRef = useRef(0);
   const skipWaitRef = useRef(false);
@@ -225,7 +229,11 @@ export function ReceivingWizard({
       if (!cur) return 'unknown';
       return p.stamp && p.stamp.grId === cur.grId && p.stamp.version === cur.version ? 'current' : 'stale';
     },
+    restaurantId && userId ? { restaurantId, userId } : null,
   );
+  // A queued close hands the receipt to the background drainer: release the group.
+  const [closeQueued, setCloseQueued] = useState(false);
+  useClaimReceiptGroup(closeQueued ? null : grId);
   // Once the receipt's version is known, sort the stored rows: current ones go, stale ones are held.
   useEffect(() => {
     if (grId && receiptVersion && !closedAtOpen) void outbox.retry();
@@ -317,7 +325,11 @@ export function ReceivingWizard({
    * The browser sends only bytes — never a restaurant id or a storage prefix.
    */
   const authedUpload = useCallback(
-    async (file: File, clientUploadId: string): Promise<UploadedScan> => {
+    async (picked: File, clientUploadId: string): Promise<UploadedScan> => {
+      // Never send (or queue) more than Vercel's request body takes, nor a file the
+      // browser can't decode: shrink first, or fail HERE with the scan step's
+      // message — before any request (pilot: no photo may fail at the back door).
+      const file = await ensureUploadable(picked);
       // S13 receiverPwa: offline (or the network drops mid-upload) → keep the
       // photo in IndexedDB under the SAME clientUploadId; the PWA shell uploads
       // it when back online (idempotent, M8). An empty publicUrl = queued.
@@ -338,7 +350,7 @@ export function ReceivingWizard({
       };
       const canQueue = offlineQueue && Boolean(restaurantId) && Boolean(userId) && idbAvailable();
       if (canQueue && !navigator.onLine) return queue();
-      const contentBase64 = await fileToBase64(file);
+      const contentBase64 = await blobToBase64(file);
       let r;
       try {
         r = await uploadScan.mutateAsync({
@@ -381,6 +393,7 @@ export function ReceivingWizard({
       capturingRef.current = true;
       setImage(captured);
       setError(null);
+      setRegisterRetry(null);
 
       // Without an uploaded URL we cannot register/OCR.
       if (!captured.publicUrl) {
@@ -411,10 +424,12 @@ export function ReceivingWizard({
         }
 
         await pollAndShow(activeGrId, reg.invoiceId);
-      } catch (err) {
-        setError(errorText(err, t, locale));
-        // Degrade gracefully to receiving against the order.
-        await buildFromPoOnly(grId);
+      } catch {
+        // Not saved: say so, with one-tap retry of the same scan — never a silent
+        // count with no invoice (the receiver can still choose "no invoice now").
+        const failed = onRegisterError(captured);
+        setRegisterRetry(failed.retry);
+        setStep(failed.step);
       } finally {
         capturingRef.current = false;
       }
@@ -437,7 +452,7 @@ export function ReceivingWizard({
     if (outcome === 'ready' && invoice) {
       await showInvoice(activeGrId, id);
     } else if (outcome === 'failed') {
-      setOcrNotice(invoice?.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
+      setOcrNotice(failedReadNotice(invoice?.ocrFailureReason));
       await buildFromPoOnly(activeGrId);
     } else {
       // Timed out (or the receiver chose not to wait): count against the order
@@ -493,7 +508,7 @@ export function ReceivingWizard({
     });
     if (pollTokenRef.current !== token || submittingRef.current) return;
     if (outcome === 'ready') setOcrNotice('ready');
-    else if (outcome === 'failed') setOcrNotice(invoice?.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
+    else if (outcome === 'failed') setOcrNotice(failedReadNotice(invoice?.ocrFailureReason));
   }
 
   /** Manual refresh from the count / review ("still reading" / "ready" banner). */
@@ -504,7 +519,7 @@ export function ReceivingWizard({
       const inv = await utils.receiving.getInvoice.fetch({ invoiceId });
       // Closed, retaken or unmounted while the request was in flight.
       if (pollTokenRef.current !== token || submittingRef.current) return;
-      if (inv.ocrFailed) setOcrNotice(inv.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed');
+      if (inv.ocrFailed) setOcrNotice(failedReadNotice(inv.ocrFailureReason));
       else if (inv.status !== 'ocr_pending') await showInvoice(grId, invoiceId);
     } catch (err) {
       setError(errorText(err, t, locale));
@@ -600,9 +615,10 @@ export function ReceivingWizard({
   /** No invoice (or OCR failed / still reading): straight to the count, against the order (RCV-14/15). */
   async function buildFromPoOnly(knownGrId: string | null) {
     try {
-      const activeGrId = await ensureReceipt(knownGrId ?? grId);
-      const receipt = await loadReceipt(activeGrId);
-      noteVersion(activeGrId, receipt.updatedAt);
+      // Read-only never starts a receipt: the order alone (plus its receipt's counts, if one exists).
+      const activeGrId = readOnly ? (knownGrId ?? grId) : await ensureReceipt(knownGrId ?? grId);
+      const receipt = activeGrId ? await loadReceipt(activeGrId) : null;
+      if (activeGrId && receipt) noteVersion(activeGrId, receipt.updatedAt);
       const adapted = adaptReconciliation({
         po: {
           id: po.id,
@@ -613,7 +629,7 @@ export function ReceivingWizard({
           totalEstimated: po.totalEstimated,
         },
         poLines: localizePoLines(poLines, localNamesRef.current),
-        receiptLines: localizeReceiptLines(receipt.lines, localNamesRef.current),
+        receiptLines: localizeReceiptLines(receipt?.lines ?? [], localNamesRef.current),
         invoiceLines: [],
         invoiceMeta: null,
         labels: { unnamed: t('unnamedItem'), unordered: t('unorderedItem') },
@@ -640,22 +656,51 @@ export function ReceivingWizard({
     }
   }
 
+  // Read-only has no scan step: show the order (and any receipt counts) instead, once.
+  const readOnlyBuiltRef = useRef(false);
+  useEffect(() => {
+    if (!readOnly || step !== 'SCAN_INVOICE' || readOnlyBuiltRef.current) return;
+    readOnlyBuiltRef.current = true;
+    void buildFromPoOnly(grId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, step]);
+
   // Reopened mid-receipt (reload, a call, the tab was evicted): resume the count
   // with every saved mark — never restart at the scan step (RCV-02).
   useEffect(() => {
     if (step !== 'RESUMING' || !existingReceipt) return;
     const draft = readDraft(draftKey);
-    // Only an invoice read in THIS open/close cycle of the receipt (not before a close / reopen).
-    const knownInvoice = draft?.grId === existingReceipt.id && draft.version === existingReceipt.version ? draft.invoiceId : null;
     const serverProgress = existingReceipt.lines.some(
       (l) => Number(l.qtyReceived ?? 0) > 0 || Number(l.qtyRejected ?? 0) > 0 || Boolean(l.rejectReason),
     );
-    if (!serverProgress && !knownInvoice && outbox.pendingCount() === 0 && !draft) {
-      setStep('SCAN_INVOICE');
-      return;
-    }
-    setResumed(true);
     void (async () => {
+      // Closed on this phone with no signal, still waiting to send: show that, never the count again.
+      if (restaurantId && userId) {
+        const queued = await idbOutboxStore.get(outboxKey('submitReceipt', existingReceipt.id)).catch(() => undefined);
+        if (queued && queued.restaurantId === restaurantId) {
+          outbox.dispose();
+          setCloseQueued(true);
+          setStep('CONFIRMED');
+          return;
+        }
+      }
+      // Only an invoice read in THIS open/close cycle of the receipt (not before a close / reopen).
+      // This phone's draft first; else the server's record (a reload after the draft was lost,
+      // or another phone): resume at review — never a re-shoot, never a second OCR job (W2-05).
+      let knownInvoice = draft?.grId === existingReceipt.id && draft.version === existingReceipt.version ? draft.invoiceId : null;
+      if (!knownInvoice) {
+        const server = await utils.receiving.resumeState
+          .fetch({ poId: po.id }, { networkMode: 'always' })
+          .catch(() => null);
+        if (server?.grId === existingReceipt.id && server.version === existingReceipt.version && server.invoice) {
+          knownInvoice = server.invoice.invoiceId;
+        }
+      }
+      if (!serverProgress && !knownInvoice && outbox.pendingCount() === 0 && !draft) {
+        setStep('SCAN_INVOICE');
+        return;
+      }
+      setResumed(true);
       if (knownInvoice) {
         setInvoiceId(knownInvoice);
         try {
@@ -664,7 +709,7 @@ export function ReceivingWizard({
             await showInvoice(existingReceipt.id, knownInvoice, 'ADJUST_QUANTITIES');
             return;
           }
-          setOcrNotice(inv.ocrFailed ? (inv.ocrFailureReason === 'quota_exceeded' ? 'quota' : 'failed') : 'reading');
+          setOcrNotice(inv.ocrFailed ? (failedReadNotice(inv.ocrFailureReason)) : 'reading');
           if (!inv.ocrFailed) {
             const token = ++pollTokenRef.current;
             watchInBackground(knownInvoice, token).catch(() => null);
@@ -679,6 +724,7 @@ export function ReceivingWizard({
   }, [step]);
 
   function updateMark(key: string, patch: Partial<LineMark>) {
+    if (readOnly) return; // view only: nothing is marked or saved
     const existing = marksRef.current[key];
     // Nothing changes while the receipt is closing (it would be saved after the close).
     if (!existing || submittingRef.current) return;
@@ -726,9 +772,29 @@ export function ReceivingWizard({
     outbox.set({ ...row, stamp: stampRef.current });
   }
 
+  /** Put the close in the field outbox (offline) and show it as closed on the phone, waiting to send. */
+  async function queueClose(activeGrId: string) {
+    await enqueue(
+      idbOutboxStore,
+      'submitReceipt',
+      {
+        grId: activeGrId,
+        clientMutationId: closeKeyFor(activeGrId, receiptVersion),
+        invoiceIds: invoiceId ? [invoiceId] : undefined,
+      } satisfies SubmitReceiptPayload,
+      { restaurantId: restaurantId!, userId: userId!, capturedByName: receiverName ?? null, group: receiptGroup(activeGrId) },
+      { idempotencyKey: SUBMIT_RECEIPT_KIND.idempotencyKey({ grId: activeGrId, clientMutationId: '' }) },
+    );
+    // From here the shell's drainer owns this receipt: its rows, then the close, in order.
+    outbox.dispose();
+    setCloseQueued(true);
+    setConfirmedAt(new Date().toISOString());
+    setStep('CONFIRMED');
+  }
+
   /** Close the receipt: every line is already saved (or flushed now); then submitReceipt re-matches. */
   async function submit() {
-    if (!grId || !result) return;
+    if (readOnly || !grId || !result) return;
     // Double-tap on "close receipt" must not submit twice.
     if (submittingRef.current) return;
     submittingRef.current = true;
@@ -742,6 +808,10 @@ export function ReceivingWizard({
         if (authGate.blocked) {
           requestReauth();
           setFooterError(td('delivery.count.sessionExpired'));
+        } else if (restaurantId && userId && flushed.failed.length === 0) {
+          // No signal (W2-05): the close waits in the field outbox behind this receipt's counts and
+          // goes by itself — the same close key, so it is ONE close however often it is retried.
+          await queueClose(grId);
         } else setFooterError(td('delivery.count.offline'));
         return;
       }
@@ -755,10 +825,14 @@ export function ReceivingWizard({
         // The count is in: the server re-matches this invoice against it. No
         // signature: the invoice photo is not a driver's signature (RCV-07/08).
         invoiceIds: invoiceId ? [invoiceId] : undefined,
+        // ONE close per intent (W2-05): a retry after a lost answer, a reload or a
+        // double tap replays the same close — one close, one re-match.
+        clientMutationId: closeKeyFor(grId, receiptVersion),
       });
       setConfirmedAt(new Date().toISOString());
       setStep('CONFIRMED');
       writeDraft(draftKey, null);
+      clearCloseKey(grId, receiptVersion);
       // Closed: nothing left to send or restore for this receipt.
       outbox.clear();
       writeLocalMarks(localMarksKey, null);
@@ -768,7 +842,16 @@ export function ReceivingWizard({
       if (isSessionExpired(err)) {
         requestReauth();
         setFooterError(td('delivery.count.sessionExpired'));
-      } else setFooterError(isNetworkError(err) ? td('delivery.count.offline') : errorText(err, t, locale));
+      } else {
+        const uncounted = uncountedLinesOf(err);
+        setFooterError(
+          uncounted !== null
+            ? td('delivery.count.uncounted', { count: formatNumber(uncounted, locale) })
+            : isNetworkError(err)
+              ? td('delivery.count.offline')
+              : errorText(err, t, locale),
+        );
+      }
     } finally {
       submittingRef.current = false;
       setClosing(false);
@@ -851,6 +934,8 @@ export function ReceivingWizard({
             receivedAt={closedAtOpen.receivedAt}
             result={closedView.result}
             marks={closedView.initialMarks}
+            // The manager sees what was closed without a count (T4, never a false alarm); the receiver doesn't.
+            closedUncounted={showMoney ? (closedAtOpen.closedUncounted ?? 0) : 0}
           />
           {dockSlipOn ? (
             <div className="mx-auto max-w-md">
@@ -868,7 +953,21 @@ export function ReceivingWizard({
         </>
       ) : null}
 
-      {step === 'SCAN_INVOICE' ? (
+      {step === 'SCAN_INVOICE' && registerRetry && !readOnly ? (
+        <div role="alert" dir={dir} className="mb-4 space-y-3 rounded-2xl border border-warn/60 bg-surface p-4" data-testid="register-failed">
+          <p className="text-base font-semibold text-ink">{td('delivery.scan.registerFailed')}</p>
+          <button
+            type="button"
+            onClick={() => void onCapture(registerRetry)}
+            className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-primary bg-surface px-4 text-base font-semibold text-primary"
+            data-testid="register-retry"
+          >
+            <RefreshCw className="h-5 w-5" aria-hidden="true" />
+            {td('delivery.scan.registerRetry')}
+          </button>
+        </div>
+      ) : null}
+      {step === 'SCAN_INVOICE' && !readOnly ? (
         <InvoiceScan
           supplierName={supplierLabel}
           image={image}
@@ -893,7 +992,7 @@ export function ReceivingWizard({
       ) : null}
 
       {ocrNotice && counting ? (
-        <OcrNoticeBanner notice={ocrNotice} t={t} dir={dir} onRefresh={() => void refreshInvoice()} />
+        <OcrNoticeBanner notice={ocrNotice} t={t} td={td} dir={dir} onRefresh={() => void refreshInvoice()} />
       ) : null}
 
       {duplicateNumber && counting ? (
@@ -913,6 +1012,7 @@ export function ReceivingWizard({
         <Reconciliation
           result={result}
           showMoney={showMoney}
+          readOnly={readOnly}
           lineExtra={dockPriceLineExtra}
           onContinueAdjust={() => setStep('ADJUST_QUANTITIES')}
           onRetake={() => {
@@ -925,7 +1025,7 @@ export function ReceivingWizard({
           }}
         >
           {/* Dock dispute slip (flag dockSlip): quantities on the review, before the count. */}
-          {dockSlipOn && grId && slipNeeded ? (
+          {dockSlipOn && grId && slipNeeded && !readOnly ? (
             <div className="mt-4" dir={dir}>
               {showSlip ? (
                 <DockSlip
@@ -955,7 +1055,7 @@ export function ReceivingWizard({
 
       {step === 'ADJUST_QUANTITIES' && result ? (
         <>
-          {heldRows.length > 0 ? (
+          {heldRows.length > 0 && !readOnly ? (
             <HeldCounts
               rows={heldRows}
               result={result}
@@ -968,7 +1068,7 @@ export function ReceivingWizard({
               locale={locale}
             />
           ) : null}
-          {result.invoiceMeta.noInvoice && !invoiceId && !image ? (
+          {result.invoiceMeta.noInvoice && !invoiceId && !image && !readOnly ? (
             // The invoice can still be photographed: marks are kept (count first, invoice in parallel — RCV-05).
             <div className="mb-3 flex justify-end" dir={dir}>
               <button
@@ -986,6 +1086,7 @@ export function ReceivingWizard({
             result={result}
             marks={marks}
             onUpdateMark={updateMark}
+            readOnly={readOnly}
             onSubmit={() => void submit()}
             onBack={result.invoiceMeta.noInvoice ? undefined : () => setStep('RECONCILIATION_REVIEW')}
             eyebrow={supplierLabel}
@@ -1016,7 +1117,12 @@ export function ReceivingWizard({
         >
           {/* After the close the engine may add findings the count didn't show (VAT,
               total, duplicate): the slip decides itself whether there is anything to say. */}
-          {result && dockSlipOn && grId ? (
+          {closeQueued ? (
+            <p role="status" data-testid="close-queued" className="mx-auto mt-3 max-w-md rounded-2xl border border-line bg-surface-2 px-4 py-3 text-base text-ink">
+              {td('delivery.confirmed.queued')}
+            </p>
+          ) : null}
+          {result && dockSlipOn && grId && !closeQueued ? (
             <DockSlip
               grId={grId}
               invoiceId={invoiceId}
@@ -1104,11 +1210,13 @@ function LeaveSheet({
 function OcrNoticeBanner({
   notice,
   t,
+  td,
   dir,
   onRefresh,
 }: {
   notice: Exclude<OcrNotice, null>;
   t: Translator<typeof receiving.he>;
+  td: Translator<typeof receivingDelivery.he>;
   dir: 'rtl' | 'ltr';
   onRefresh: () => void;
 }) {
@@ -1119,7 +1227,9 @@ function OcrNoticeBanner({
         ? t('steps.processing.readyLater')
         : notice === 'quota'
           ? t('errors.ocrQuota')
-          : t('errors.ocrFailed');
+          : notice === 'disabled'
+            ? td('delivery.processing.ocrDisabled') // calm: this account doesn't read invoices — not an error
+            : t('errors.ocrFailed');
   const canRefresh = notice === 'reading' || notice === 'ready';
   return (
     <div

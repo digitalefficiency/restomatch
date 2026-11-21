@@ -169,7 +169,7 @@ describe('inventory: count → autosave → finish', () => {
 
     const before = await caller(A).inventory.period();
     expect(before).toMatchObject({ available: true, salesAgorot: null, actualBp: null });
-    await caller(A).inventory.setMeta({ countId: closing, foodSalesExVat: '10000.00' });
+    await caller(A).inventory.setSales({ countId: closing, foodSalesExVat: '10000.00' });
     const p = await caller(A).inventory.period();
     expect(p).toMatchObject({
       available: true,
@@ -224,7 +224,7 @@ describe('inventory: count → autosave → finish', () => {
     expect(await caller(B).inventory.current()).toBeNull();
     expect(await caller(B).inventory.period()).toEqual({ available: false, reason: 'noCounts' });
     await expect(caller(B).inventory.get({ countId: opening })).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    await expect(caller(B).inventory.setMeta({ countId: closing, foodSalesExVat: '1.00' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(caller(B).inventory.setSales({ countId: closing, foodSalesExVat: '1.00' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(caller(B).inventory.discard({ countId: closing })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     // B's own count never lists A's products, and B's invoice never reaches A's purchases (asserted above).
     const d = await caller(B).inventory.start();
@@ -241,9 +241,11 @@ describe('inventory: count → autosave → finish', () => {
 });
 
 describe('inventory: flag + roles', () => {
-  it('owner/manager/chef count; receiver/bookkeeper are FORBIDDEN', async () => {
-    for (const role of ['owner', 'manager', 'chef'] as const) await expect(caller(A, role).inventory.history()).resolves.toBeDefined();
-    for (const role of ['receiver', 'bookkeeper'] as const) await expect(caller(A, role).inventory.history()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  it('owner/manager/chef count; the bookkeeper reads (owner decision, W2-07); the receiver is FORBIDDEN', async () => {
+    for (const role of ['owner', 'manager', 'chef', 'bookkeeper'] as const) await expect(caller(A, role).inventory.history()).resolves.toBeDefined();
+    await expect(caller(A, 'receiver').inventory.history()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    // …but the bookkeeper never counts.
+    await expect(caller(A, 'bookkeeper').inventory.start()).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
   it('flag off ⇒ FORBIDDEN FEATURE_DISABLED (and enabled=false); FEATURES_OFF kills it', async () => {

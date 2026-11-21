@@ -109,6 +109,26 @@ async function setLocale(page: Page, locale: 'he' | 'en') {
   ]);
 }
 
+/**
+ * W2-06 (orders-01): a catalog line starts with an EMPTY qty — nothing is invented.
+ * These W1-11 flows used to get qty 1 for free; they now type it, as a user would.
+ */
+async function addItem(page: Page, item: Locator, how: 'tap' | 'click' = 'tap') {
+  // The order guide (W2-06) renders above the catalog: let it settle before tapping,
+  // or the list moves under the pointer.
+  await expect(page.getByTestId('order-guide').or(page.getByTestId('guide-empty'))).toBeVisible({ timeout: 30_000 });
+  // A tap before React hydrates is lost (dev server under load): wait for the live cart.
+  await expect(page.locator('[data-wizard-ready="true"]')).toHaveCount(1, { timeout: 30_000 });
+  await (how === 'tap' ? item.tap() : item.click());
+  const qty = page.getByTestId('order-line').getByRole('textbox', { name: /כמות|Quantity/ });
+  await expect(qty.last()).toBeVisible();
+  const n = await qty.count();
+  for (let i = 0; i < n; i++) {
+    const box = qty.nth(i);
+    if ((await box.inputValue()) === '') await box.fill('1');
+  }
+}
+
 /** Counts every tap the test makes — the acceptance is a tap budget. */
 function tapper() {
   let n = 0;
@@ -207,7 +227,7 @@ async function posSince(supplierId: string, since: Date): Promise<Array<{ id: st
   }
 }
 
-type StoredCarts = { carts: Record<string, { lines: unknown[]; draftId: string | null }> };
+type StoredCarts = { carts: Record<string, { lines: unknown[]; draftId: string | null; server?: unknown }> };
 async function deviceCarts(page: Page): Promise<StoredCarts['carts']> {
   const raw = await page.evaluate(() => {
     const k = Object.keys(localStorage).find((x) => x.startsWith('rm:orders:cart:v1:'));
@@ -284,8 +304,8 @@ test.describe('phone 390 · manager · he', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
-    await items.nth(1).tap();
+    await addItem(page, items.nth(0));
+    await addItem(page, items.nth(1));
     await expect(page.getByTestId('order-line')).toHaveCount(2);
 
     // Switch to B: A's 2 lines are kept, the switch can be undone for 10 s.
@@ -300,7 +320,7 @@ test.describe('phone 390 · manager · he', () => {
     await page.getByTestId('change-supplier').tap();
     await page.getByRole('dialog').getByTestId('supplier-row').filter({ hasText: supplierB.name }).tap();
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
+    await addItem(page, items.nth(0));
     await expect(page.getByTestId('order-line')).toHaveCount(1);
     await expect(page).toHaveURL(new RegExp(`supplierId=${supplierB.id}`));
     await page.reload();
@@ -327,7 +347,7 @@ test.describe('phone 390 · manager · he', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
+    await addItem(page, items.nth(0));
     // The day is settled while building (before any server draft exists).
     await expect(page.getByTestId('delivery-chip').first()).toBeVisible();
     await page.getByTestId('cart-primary').tap();
@@ -356,7 +376,8 @@ test.describe('phone 390 · manager · he', () => {
     expect(await poStatus(draftId)).toBe('draft');
     const list = await context.newPage();
     await list.goto('/dashboard/orders');
-    await list.getByRole('button', { name: m.filters.draft, exact: true }).click();
+    // W2-06: drafts are the "טיוטות" queue view (the status filter of the same name was folded into it).
+    await list.locator('[data-view="drafts"]').click();
     await expect(list.locator(`a[href="/dashboard/orders/${draftId}"]`).first()).toBeAttached({ timeout: 30_000 });
   });
 
@@ -404,8 +425,8 @@ test.describe('phone 390 · manager · review fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
-    await items.nth(1).tap();
+    await addItem(page, items.nth(0));
+    await addItem(page, items.nth(1));
     await expect(page.getByTestId('order-line')).toHaveCount(2);
 
     await page.goto(`/dashboard/orders/new?from=${reorderPo}`);
@@ -428,9 +449,16 @@ test.describe('phone 390 · manager · review fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
+    await addItem(page, items.nth(0));
     await page.getByTestId('cart-primary').tap(); // review → the server draft
-    await expect.poll(async () => (await deviceCarts(page))[supplierB.id]?.draftId ?? null, { timeout: 30_000 }).not.toBeNull();
+    // W2-06: the wizard may resume a server draft on open, so the id can exist before the
+    // review save. Wait for the save's read-back (`server`), not just the id.
+    await expect
+      .poll(async () => {
+        const c = (await deviceCarts(page))[supplierB.id];
+        return c?.draftId && c.server ? c.draftId : null;
+      }, { timeout: 30_000 })
+      .not.toBeNull();
     const draftId = (await deviceCarts(page))[supplierB.id]!.draftId!;
 
     // Someone sends it from the order page on another device.
@@ -449,7 +477,8 @@ test.describe('phone 390 · manager · review fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     await expect(page.getByTestId('catalog-item').first()).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId('order-line')).toHaveCount(0);
-    expect((await posSince(supplierB.id, since)).map((p) => p.id), 'no second PO').toEqual([draftId]);
+    // The draft may predate this test (resumed from the server, W2-06): no OTHER PO appears.
+    expect((await posSince(supplierB.id, since)).map((p) => p.id).filter((id) => id !== draftId), 'no second PO').toEqual([]);
   });
 
   test('the day is settled before the draft: picking another day sends ONE order, no phantom cancelled row', async ({ page }) => {
@@ -460,7 +489,7 @@ test.describe('phone 390 · manager · review fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
+    await addItem(page, items.nth(0));
     const chips = page.getByTestId('delivery-chip');
     await expect(chips.nth(1)).toBeVisible();
     await chips.nth(1).tap();
@@ -473,7 +502,7 @@ test.describe('phone 390 · manager · review fixes', () => {
     expect(pos.map((p) => p.status)).toEqual(['sent']);
   });
 
-  test('edits after the draft exists reach it; a draft replaced by an added line stays out of the list', async ({ page }) => {
+  test('edits after the draft exists reach it; an added line joins the SAME draft (W2-06: one draft, never replaced)', async ({ page }) => {
     test.setTimeout(150_000);
     const since = new Date(Date.now() - 1000);
     await setLocale(page, 'he');
@@ -481,8 +510,8 @@ test.describe('phone 390 · manager · review fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
-    await items.nth(1).tap();
+    await addItem(page, items.nth(0));
+    await addItem(page, items.nth(1));
     await page.getByTestId('cart-primary').tap(); // review → draft D
     await expect.poll(async () => (await deviceCarts(page))[supplierB.id]?.draftId ?? null, { timeout: 30_000 }).not.toBeNull();
     const d = (await deviceCarts(page))[supplierB.id]!.draftId!;
@@ -494,17 +523,16 @@ test.describe('phone 390 · manager · review fixes', () => {
     await lines.nth(1).getByRole('button', { name: /הסרת/ }).tap();
     await expect.poll(async () => (await poLines(d)).map((l) => l.qty), { timeout: 15_000 }).toEqual([7]);
 
-    // Adding a line after the draft exists replaces it at the next review: the old one
-    // is cancelled and never shows in the orders list.
-    await items.nth(1).tap(); // re-add the removed product: a new line for the draft
+    // W2-06 (§5.7, deliberate change): an added line is saved INTO the same server draft
+    // (one open draft per supplier and author) — no replacement, no cancelled phantom row.
+    await addItem(page, items.nth(1)); // re-add the removed product
     await expect(page.getByTestId('order-line')).toHaveCount(2);
+    await expect.poll(async () => (await poLines(d)).length, { timeout: 15_000 }).toBe(2);
     await page.getByTestId('cart-primary').tap();
-    await expect.poll(async () => (await deviceCarts(page))[supplierB.id]?.draftId, { timeout: 30_000 }).not.toBe(d);
-    expect(await poStatus(d)).toBe('cancelled');
-    await page.goto('/dashboard/orders');
-    await expect(page.getByTestId('order-card').first()).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator(`a[href="/dashboard/orders/${d}"]`)).toHaveCount(0);
-    expect((await posSince(supplierB.id, since)).filter((p) => p.status === 'draft')).toHaveLength(1);
+    expect((await deviceCarts(page))[supplierB.id]?.draftId).toBe(d);
+    expect(await poStatus(d)).toBe('draft');
+    const mine = await posSince(supplierB.id, since);
+    expect(mine.filter((p) => p.status === 'cancelled'), 'no phantom cancelled row').toEqual([]);
   });
 });
 
@@ -517,16 +545,18 @@ test.describe('phone 390 · manager · verifier fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
-    await expect(page.getByTestId('order-line')).toHaveCount(1);
+    await addItem(page, items.nth(0));
+    // W2-06: the cart may also hold this supplier's resumed server draft — count, don't assume 1.
+    const n = await page.getByTestId('order-line').count();
+    expect(n).toBeGreaterThanOrEqual(1);
     const before = await page.getByTestId('order-line').first().innerText();
 
     await page.goto(`/dashboard/orders/new?from=${reorderPo}`);
     await page.getByRole('button', { name: MSG.he.reorder.keep }).tap();
-    await expect(page.getByTestId('order-line')).toHaveCount(1);
+    await expect(page.getByTestId('order-line')).toHaveCount(n);
     expect(await page.getByTestId('order-line').first().innerText()).toBe(before);
     await expect(page.getByTestId('reorder-notice')).toHaveCount(0);
-    expect((await deviceCarts(page))[supplierA.id]?.lines).toHaveLength(1);
+    expect((await deviceCarts(page))[supplierA.id]?.lines).toHaveLength(n);
   });
 
   test('a line removed on the order page meanwhile is re-paired, not a stuck save', async ({ page }) => {
@@ -536,8 +566,8 @@ test.describe('phone 390 · manager · verifier fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
-    await items.nth(1).tap();
+    await addItem(page, items.nth(0));
+    await addItem(page, items.nth(1));
     await page.getByTestId('cart-primary').tap(); // review → draft D
     await expect.poll(async () => (await deviceCarts(page))[supplierB.id]?.draftId ?? null, { timeout: 30_000 }).not.toBeNull();
     const d = (await deviceCarts(page))[supplierB.id]!.draftId!;
@@ -568,8 +598,8 @@ test.describe('phone 390 · manager · verifier fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
-    await items.nth(1).tap();
+    await addItem(page, items.nth(0));
+    await addItem(page, items.nth(1));
     const bar = await page.getByTestId('cart-bar').boundingBox();
     // Walk the tab order through the build step; every focused control clears the bar.
     for (let i = 0; i < 40; i++) {
@@ -603,14 +633,16 @@ test.describe('phone 390 · manager · scope fixes', () => {
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     const items = page.getByTestId('catalog-item');
     await expect(items.first()).toBeVisible({ timeout: 30_000 });
-    await items.nth(0).tap();
+    await addItem(page, items.nth(0));
+    // W2-06: the wizard may resume this supplier's server draft, so count, don't assume 1.
+    const lineCount = await page.getByTestId('order-line').count();
     await page.getByTestId('cart-primary').tap(); // review
     await page.locator('#ord-channel').selectOption('none');
     await page.getByTestId('cart-primary').tap(); // send → countdown
     await expect(page.getByTestId('send-undo')).toBeVisible({ timeout: 30_000 });
     // The tab reloads inside the window (crash, swipe-refresh): nothing was sent yet.
     await page.reload();
-    await expect(page.getByTestId('order-line')).toHaveCount(1, { timeout: 30_000 });
+    await expect(page.getByTestId('order-line')).toHaveCount(lineCount, { timeout: 30_000 });
     const draftId = (await deviceCarts(page))[supplierB.id]?.draftId;
     expect(draftId, 'the draft id survived the reload').toBeTruthy();
     // Retry: review → send again, let it go through.
@@ -618,9 +650,10 @@ test.describe('phone 390 · manager · scope fixes', () => {
     await page.locator('#ord-channel').selectOption('none');
     await page.getByTestId('cart-primary').tap();
     await expect(page.getByRole('status').filter({ hasText: MSG.he.wizard.markedTitle })).toBeVisible({ timeout: 30_000 });
-    const pos = await posSince(supplierB.id, since);
-    expect(pos.map((p) => p.status), 'one PO, sent — never a second draft').toEqual(['sent']);
-    expect(pos[0]!.id).toBe(draftId);
+    // One PO, sent — never a second draft (the draft may predate this test: resumed, W2-06).
+    expect(await poStatus(draftId!)).toBe('sent');
+    const others = (await posSince(supplierB.id, since)).filter((p) => p.id !== draftId);
+    expect(others, 'one PO, sent — never a second draft').toEqual([]);
   });
 
   test('a unit price typed as "1,250" is ₪1,250 (and "0,250" is ₪0.25)', async ({ page }) => {
@@ -628,13 +661,15 @@ test.describe('phone 390 · manager · scope fixes', () => {
     page.on('dialog', (d) => void d.accept());
     await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
     await expect(page.getByTestId('catalog-item').first()).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId('catalog-item').first().tap();
+    await addItem(page, page.getByTestId('catalog-item').first());
     const price = page.getByTestId('order-line').first().getByRole('textbox', { name: /מחיר ליח׳/ });
     await price.fill('1,250');
     await page.getByTestId('order-line').first().getByRole('textbox', { name: /כמות/ }).fill('1');
-    await expect(page.getByTestId('order-total')).toContainText('1,250.00');
+    // The line's own total: the cart may hold a resumed server draft's other lines (W2-06).
+    const line = page.getByTestId('order-line').first();
+    await expect(line).toContainText('1,250.00');
     await price.fill('0,250');
-    await expect(page.getByTestId('order-total')).toContainText('0.25');
+    await expect(line).toContainText('0.25');
   });
 });
 
@@ -647,7 +682,7 @@ test.describe('desktop 1440 · manager · keyboard', () => {
     page.on('dialog', (d) => void d.accept());
     await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
     await expect(page.getByTestId('catalog-item').first()).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId('catalog-item').first().click();
+    await addItem(page, page.getByTestId('catalog-item').first(), 'click');
     await page.getByTestId('cart-primary').click();
     await page.locator('#ord-channel').selectOption('none');
     await page.getByTestId('cart-primary').focus();
@@ -691,7 +726,7 @@ test.describe('desktop 1440 · manager', () => {
     await setLocale(page, 'en');
     await page.goto(`/dashboard/orders/new?supplierId=${supplierA.id}`);
     await expect(page.getByTestId('catalog-item').first()).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId('catalog-item').first().click();
+    await addItem(page, page.getByTestId('catalog-item').first(), 'click');
     await expect(page.getByTestId('delivery-reason').or(page.getByText(MSG.en.wizard.noSchedule))).toBeVisible();
     await page.getByTestId('cart-primary').click();
     await expect(page.getByTestId('cart-primary')).toContainText('Send to');
@@ -716,8 +751,10 @@ test.describe('pilot · truthful send state · chef orders', () => {
         returning id`;
       await sql`insert into po_lines (po_id, raw_description, qty_ordered, unit, unit_price_expected)
                 values (${po!.id}, 'W1-11 pilot עגבניות', 4, 'ק״ג', 12)`;
-      await sql`insert into notifications_outbox (restaurant_id, channel, target, subject, body, status, last_error, related_entity_type, related_entity_id)
-                values (${restaurantId}, 'email', 'orders@supplier.test', 'הזמנה', 'הזמנה חדשה', ${status}, ${lastError}, 'purchase_order', ${po!.id})`;
+      // The order message as placeOrder writes it: its dedupe key is what the order screens read
+      // (other mail about the PO, e.g. the supplier-delays late chase, shares the entity fields).
+      await sql`insert into notifications_outbox (restaurant_id, channel, target, subject, body, status, last_error, related_entity_type, related_entity_id, dedupe_key)
+                values (${restaurantId}, 'email', 'orders@supplier.test', 'הזמנה', 'הזמנה חדשה', ${status}, ${lastError}, 'purchase_order', ${po!.id}, ${`po:${po!.id}:placed`})`;
       return po!.id;
     } finally {
       await sql.end();
@@ -793,7 +830,7 @@ test.describe('pilot · truthful send state · chef orders', () => {
       await page.goto(`/dashboard/orders/new?supplierId=${supplierB.id}`);
       const items = page.getByTestId('catalog-item');
       await expect(items.first()).toBeVisible({ timeout: 30_000 });
-      await items.nth(0).tap();
+      await addItem(page, items.nth(0)); // W2-06: the line starts with an empty qty; the helper types it
       await page.getByTestId('cart-primary').tap(); // review → the server draft
       await page.locator('#ord-channel').selectOption('none');
       await expect(page.locator('#ord-channel option[value="none"]')).toHaveText(MSG.he.wizard.channelNone);

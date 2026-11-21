@@ -23,6 +23,7 @@ that too: the **review rate** is how often the gate sends a read to a person.
 |---|---|
 | `bench/invoice-1.html` → `invoice-1.png` | synthetic Hebrew tax invoice (6 lines, SKUs, 18% VAT, 9-digit allocation number, valid ח״פ). Re-render with `node packages/ocr/bench/render-fixture.mjs`. |
 | `bench/invoice-1.truth.json` | its ground truth (unit-tested: internally consistent and passes the production gate) |
+| `bench/invoice-2..4` (`.html` / `.png` / `.truth.json`) | consolidated-invoice set: **2** a monthly חשבונית מרכזת listing five ת.מ. with per-note totals and no product lines; **3** a מרכזת with month-total product lines, a printed period and a ת.מ. list; **4** a regular tax invoice citing ONE ת.מ. (must stay `regular`). The truth states `consolidation`, the notes and the period; the bench scores them. `render-fixture.mjs` renders every `invoice-*.html` (or the names given). |
 | `bench/truth.template.json` | template for a real document's truth file |
 | `src/bench/score.ts` | grading: binary checks on supplier, number, date, allocation, every line field and the totals. **money-exact** = every line total plus subtotal/VAT/total right to the agora. |
 | `src/bench/run.ts` | runs the **production** reader (`ClaudeVision`, same prompt, same defaults) and the **production** review decision (`runOcrPipeline` + gate) N times per model × effort. It prints median / p95 / max seconds, accuracy, money-exact runs, review rate, errors, and $ per document, per photo and per PDF. |

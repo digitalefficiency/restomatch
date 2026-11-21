@@ -23,11 +23,14 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'team.userNotFound': 'userNotFound',
   'team.inviteWrongEmail': 'inviteWrongEmail',
   'onboarding.accountGone': 'accountGone',
+  // /onboarding shows its own invitation-only note; this is the generic fallback.
+  signup_closed: 'forbidden',
   'settings.invalidTimezone': 'invalidTimezone',
   'settings.noChanges': 'noChanges',
   'dsr.soleOwner': 'soleOwner',
   'admin.lastOwner': 'adminLastOwner',
   'admin.notFound': 'notFound',
+  'admin.noSubscription': 'adminNoSubscription',
   // /admin shows its own enrol-2FA prompt; this is the generic fallback.
   admin_requires_2fa: 'forbidden',
   'subscription.inactive': 'subscriptionInactive',
@@ -35,8 +38,16 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'entitlement.required': 'entitlementRequired',
   'auth.unauthorized': 'unauthorized',
   'auth.forbidden': 'forbidden',
+  'capability.required': 'forbidden',
   'input.invalid': 'invalidInput',
   'invoice.numberTaken': 'invoiceNumberTaken',
+  'invoice.linesLocked': 'invoiceLinesLocked',
+  'invoice.receiptOpen': 'invoiceReceiptOpen',
+  'invoice.beingRead': 'invoiceBeingRead',
+  'invoice.partialHeaderClear': 'invoicePartialHeaderClear',
+  'invoice.claimInProgress': 'invoiceClaimInProgress',
+  'invoice.unlinkedLines': 'invoiceUnlinkedLines',
+  'order.unlinkedLines': 'orderUnlinkedLines',
   // Wave-1 (S15) codes: generic fallbacks here; the owning screens (growth /
   // leakCheck namespaces) show their own specific copy.
   FEATURE_DISABLED: 'forbidden',
@@ -44,6 +55,11 @@ const BY_APP_CODE: Record<AppErrorCode, Key> = {
   'growth.referralInvalid': 'invalidInput',
   'growth.referralSelf': 'invalidInput',
   'growth.referralAlreadyRedeemed': 'invalidInput',
+  // G-05: owning screens may show who changed it and when (appParams); this is the generic copy.
+  'lifecycle.conflict': 'lifecycleConflict',
+  'lifecycle.refused': 'lifecycleRefused',
+  // AU-01: the automations page only offers allow-listed switches.
+  'automations.notOwnerToggleable': 'forbidden',
 };
 
 /**

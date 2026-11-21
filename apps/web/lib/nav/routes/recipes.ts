@@ -10,9 +10,10 @@ export const routes: RouteDef[] = [
     roles: ['owner', 'manager', 'chef'],
     features: ['recipes'],
     nav: 'item',
+    badge: null,
     bar: { chef: { slot: 3, label: 'dishes' } },
     aliases: ['מנה', 'מנות', 'עלות מזון', 'recipes', 'dishes', 'food cost'],
   },
-  { key: 'recipesNew', path: '/dashboard/recipes/new', group: 'kitchen', parent: 'recipes', nav: 'linked' },
-  { key: 'recipeDetail', path: '/dashboard/recipes/[recipeId]', group: 'kitchen', parent: 'recipes', nav: 'detail' },
+  { key: 'recipesNew', path: '/dashboard/recipes/new', group: 'kitchen', parent: 'recipes', nav: 'linked', badge: null },
+  { key: 'recipeDetail', path: '/dashboard/recipes/[recipeId]', group: 'kitchen', parent: 'recipes', nav: 'detail', badge: null },
 ];

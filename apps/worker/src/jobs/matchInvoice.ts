@@ -1,20 +1,32 @@
 import {
+  awaitingDecision,
   approvalNeededEmail,
   buildMatchInputForInvoice,
+  claimableLines,
   buildRules,
   createEmailNotifier,
   createPushNotifier,
   createWhatsAppNotifier,
   getEntitlements,
+  heldForReceipts,
   loadPriorDecisions,
+  rebindDecidedClaims,
+  lockRecovery,
+  orderQuestionCount,
+  pruneAnsweredReasons,
+  releaseQuestionHolds,
+  linkPinPoIdOf,
   receiptStillOpen,
   persistMatchRun,
   rematchHoldReason,
   recipientsForRestaurant,
   recordUsage,
+  releaseClaimsForRematch,
   resolveApprovalThresholds,
+  formatIlsAgorot,
 } from '@restomatch/api';
-import { and, desc, eq, invoices, matchRuns, restaurants, suppliers, type Database } from '@restomatch/db';
+import { and, desc, eq, invoices, matchRuns, restaurants, sql, suppliers, type Database } from '@restomatch/db';
+import { computeInvoiceLeak } from '@restomatch/charts';
 import { runMatch, type MatchOutput } from '@restomatch/matching';
 import { makeWorker, type WorkerJob } from '../queue';
 import { appBaseUrl } from '../lib/notifyHelpers';
@@ -45,6 +57,57 @@ export interface MatchInvoiceJob {
 
 const CLEAN: MatchOutput = { status: 'clean', totalDiscrepancyAmount: 0, discrepancies: [] };
 
+/* ── G-08 hold ───────────────────────────────────────────────────────────────
+ * The engine pairs lines only by product / SKU, so an unlinked line (a "זה אותו
+ * מוצר?" question) on the invoice or on its order would be reported MISSING +
+ * UNORDERED — a false leak. OCR holds such an invoice ('parsed', raw.reviewReasons
+ * 'unlinked'); this job holds a first match whose order still has unlinked
+ * name-only lines ('unlinkedPo'), and releases either hold here — AFTER every
+ * answer has committed — once nothing is left unlinked.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+/** Reasons only a person's answer clears; any other reason keeps the human hold. */
+const LINK_HOLD_REASONS = sql`array['unlinked', 'unlinkedPo']`;
+
+/**
+ * Release an invoice held ONLY for questions (the shared rule, @restomatch/api
+ * releaseQuestionHolds); returns the receipt's order (raw.scanGrId) to pin to.
+ */
+async function releaseLinkHold(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+): Promise<{ released: boolean; pinPoId: string | null }> {
+  const [rel] = await releaseQuestionHolds(db, restaurantId, [invoiceId]);
+  if (!rel) {
+    // Held for another reason too: prune the answered question reasons (round 3).
+    await pruneAnsweredReasons(db, restaurantId, [invoiceId]);
+    return { released: false, pinPoId: null };
+  }
+  if (!rel.scanGrId) return { released: true, pinPoId: null };
+  const [pin] = (await db.execute(sql`
+    select po_id from goods_receipts where id = ${rel.scanGrId}::uuid and restaurant_id = ${restaurantId}
+  `)) as unknown as Array<{ po_id: string | null }>;
+  return { released: true, pinPoId: pin?.po_id ?? null };
+}
+
+/** Hold a first match for the order's open questions (raw.reviewReasons += 'unlinkedPo'). */
+async function holdForOrderQuestions(db: Database, restaurantId: string, invoiceId: string, poId: string) {
+  await db.execute(sql`
+    update invoices i
+       set status = 'parsed',
+           ocr_payload = coalesce(i.ocr_payload, '{}'::jsonb) || jsonb_build_object(
+             'heldPoId', ${poId}::text,
+             'raw', coalesce(i.ocr_payload -> 'raw', '{}'::jsonb) || jsonb_build_object(
+               'reviewReasons',
+               (select coalesce(jsonb_agg(distinct x), '[]'::jsonb) from (
+                  select jsonb_array_elements_text(coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb)) as x
+                  union select 'unlinkedPo') u)))
+     where i.restaurant_id = ${restaurantId} and i.id = ${invoiceId}::uuid
+       and i.status not in ('approved', 'paid')
+  `);
+}
+
 export interface MatchJobOutcome {
   result: MatchOutput;
   /** The new run, or null when the job had nothing to do. */
@@ -52,7 +115,15 @@ export interface MatchJobOutcome {
   /** True when this run replaced an earlier run of the same invoice. */
   replaced: boolean;
   /** Why nothing ran (logs/tests). */
-  skipped?: 'ocr_pending' | 'already_matched' | 'awaiting_review' | 'no_lines' | 'settled' | 'po_rejected' | 'receipt_open';
+  skipped?:
+    | 'ocr_pending'
+    | 'already_matched'
+    | 'awaiting_review'
+    | 'no_lines'
+    | 'settled'
+    | 'po_rejected'
+    | 'receipt_open'
+    | 'claim_in_progress';
 }
 
 /**
@@ -67,7 +138,10 @@ export interface MatchJobOutcome {
  *    OCR held for a human (low confidence → 'parsed', or a possible duplicate)
  *    still waits for that human.
  */
-export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): Promise<MatchJobOutcome> {
+export async function matchInvoiceForJob(
+  db: Database,
+  data: MatchInvoiceJob,
+): Promise<MatchJobOutcome> {
   const { restaurantId, invoiceId } = data;
   const [inv] = await db
     .select({ status: invoices.status, ocrPayload: invoices.ocrPayload })
@@ -87,26 +161,49 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   if (priorRun && !data.rematch) {
     return { result: CLEAN, persisted: null, replaced: false, skipped: 'already_matched' };
   }
+  // G-08 hold: an invoice held only for questions is released here, after the
+  // answers committed (two concurrent answers can't strand it), and its match
+  // stays pinned to the order of the receipt it was scanned on.
+  let pinPoId: string | null = null;
+  if (!priorRun && inv.status === 'parsed') {
+    const rel = await releaseLinkHold(db, restaurantId, invoiceId);
+    if (rel.released) {
+      inv.status = 'matched';
+      pinPoId = rel.pinPoId;
+    }
+  }
   // A person already signed this invoice off (a receipt submit never rewrites
   // its match — only match.runForInvoice, a manager action, may), or the OCR
   // held a never-matched invoice for a human. Shared with the dock slip.
+  // A never-matched invoice a person / a Re-run held for a receipt's count
+  // (raw.heldForReceipts) goes through only for THAT receipt — decided below,
+  // once the receipt this job matches against is known.
+  const heldFor = heldForReceipts(inv.ocrPayload);
   if (data.rematch) {
     const hold = rematchHoldReason(inv, Boolean(priorRun));
-    if (hold) return { result: CLEAN, persisted: null, replaced: false, skipped: hold };
+    if (hold && !(hold === 'awaiting_review' && heldFor.length > 0)) {
+      return { result: CLEAN, persisted: null, replaced: false, skipped: hold };
+    }
   }
 
   // Discover the PO + assemble the 3-way MatchInput (tolerances/vat/baselines
   // resolved from the restaurant inside the assembler). The receipt's PO first,
   // else a re-match stays on the PO it was matched against.
+  // The receipt's PO is the order the receiver COUNTED: strict (no nearer
+  // order displaces it — the same rule as match.runForInvoice's scan pin).
   const built = await buildMatchInputForInvoice(db, restaurantId, invoiceId, {
-    pinnedPoId: data.poId ?? priorRun?.poId ?? null,
+    pinnedPoId: data.poId ?? priorRun?.poId ?? pinPoId ?? linkPinPoIdOf(inv.ocrPayload), // G-08 round 9: the question hold's order
+    strictPin: Boolean(data.poId),
   });
   if (!built) return { result: CLEAN, persisted: null, replaced: false, skipped: 'no_lines' };
   // The payload is not a trust boundary. A job's poId names the order that was
   // counted for this invoice: if the matcher wouldn't pair the invoice with it
   // (other supplier, outside the window, a sibling PO preferred), don't fall back
   // to some other order — skip.
-  if (data.poId && built.poId !== data.poId) {
+  if (data.rematch && rematchHoldReason(inv, Boolean(priorRun), built.grId)) {
+    return { result: CLEAN, persisted: null, replaced: false, skipped: 'awaiting_review' };
+  }
+  if (data.poId && built.poId !== data.poId && built.input.invoiceLines.length > 0) {
     console.warn(`[match-invoice] invoice=${invoiceId} does not pair with the job's po=${data.poId} — skipping`);
     return { result: CLEAN, persisted: null, replaced: false, skipped: 'po_rejected' };
   }
@@ -115,8 +212,20 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
   // waits for that submit to commit.
   if (built.grId) {
     const grId = built.grId;
-    const open = await db.transaction((tx) => receiptStillOpen(tx as unknown as Database, restaurantId, grId));
+    const open = await db.transaction((tx) =>
+      receiptStillOpen(tx as unknown as Database, restaurantId, grId),
+    );
     if (open) return { result: CLEAN, persisted: null, replaced: false, skipped: 'receipt_open' };
+  }
+
+  // G-08 hold (M-4, after the receipt check): a first match waits while its order still has unlinked
+  // name-only lines (a WhatsApp / text order) — the question is in the mapper.
+  // Round 7 HIGH: a RE-match waits too (an undo re-opened an order line): the
+  // prior run and its decisions stay until the question is answered — never a
+  // run that reads the unlinked order line as MISSING + the invoice line as UNORDERED.
+  if (built.poId && (await orderQuestionCount(db, restaurantId, built.poId)) > 0) {
+    if (!priorRun) await holdForOrderQuestions(db, restaurantId, invoiceId, built.poId);
+    return { result: CLEAN, persisted: null, replaced: false, skipped: 'awaiting_review' };
   }
 
   // Per-restaurant approval-routing thresholds (settings.approvalThresholds).
@@ -130,14 +239,87 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
 
   const persisted = await db.transaction(async (rawTx) => {
     const tx = rawTx as unknown as Database;
+    // K: a retake (registerInvoice) may have sent the invoice back to OCR while
+    // this job was matching the OLD read. Under the invoice row lock (the retake
+    // takes it too): an invoice being read again gets no run.
+    // G-08 hold (rounds 2–6), decided INSIDE this tx under the same row lock:
+    //   - never persist a run over an unlinked (question) line of an invoice held
+    //     for questions — first match or re-match: the prior run and its
+    //     decisions stay until the question is answered (round 6 HIGH);
+    //   - the same for a HAND-ENTERED invoice (#216: raw.ocrFailed / manualLines):
+    //     a hand line typed with no product never went through the OCR link hold,
+    //     yet it is the same question — match.runForInvoice refuses it
+    //     (invoice.unlinkedLines), so this job must not persist a run over it
+    //     either (one rule whether the receipt was open or closed when it was typed);
+    //   - the invoice was put back on hold meanwhile ('parsed' with a question
+    //     reason — a re-hold, or an order hold set while this job waited on the
+    //     lock) → skip. This is THE race guard: the checks above ran before the
+    //     lock and may be stale;
+    //   - the run seen at the start is gone (deleted by a re-hold) → skip — a
+    //     belt-and-braces check for a re-match; it never fires on a first match.
+    //   ONE row lock, FOR NO KEY UPDATE (round 7, #216 and G-08): still serialises
+    //   edits / re-holds / re-matches / retakes of this invoice, but lets a claim's
+    //   FK (KEY SHARE) through — a plain FOR UPDATE deadlocks with the claims-tracker sync.
+    //   The lock is taken in its OWN statement first: under READ COMMITTED a
+    //   statement that waits for a row lock keeps the snapshot it started with, so
+    //   its has_run subquery would miss a run a match.runForInvoice committed while
+    //   this job waited. The flags below are read by a NEW statement — a fresh
+    //   snapshot that sees everything committed before the lock was granted.
+    await tx.execute(sql`
+      select 1 from invoices where id = ${invoiceId}::uuid and restaurant_id = ${restaurantId}
+       for no key update
+    `);
+    const [race] = (await tx.execute(sql`
+      select i.status,
+             exists (select 1 from match_runs mr where mr.invoice_id = i.id and mr.restaurant_id = i.restaurant_id) as has_run,
+             exists (select 1 from invoice_lines il where il.invoice_id = i.id and il.product_id is null
+           and not (coalesce(i.ocr_payload -> 'chargeLineIds', '[]'::jsonb) ? il.id::text)) as unlinked,
+             (coalesce(i.ocr_payload ? 'linkReleasedAt', false)
+               or coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS}) as link_held,
+             (coalesce(i.ocr_payload -> 'raw' -> 'ocrFailed' = 'true'::jsonb, false)
+               or coalesce(i.ocr_payload -> 'raw' -> 'manualLines' = 'true'::jsonb, false)) as hand_entered,
+             coalesce(i.ocr_payload -> 'raw' -> 'reviewReasons', '[]'::jsonb) ?| ${LINK_HOLD_REASONS} as question_reason
+        from invoices i where i.id = ${invoiceId}::uuid and i.restaurant_id = ${restaurantId}
+       for no key update
+    `)) as unknown as Array<{ status: string; has_run: boolean; unlinked: boolean; link_held: boolean; hand_entered: boolean; question_reason: boolean }>;
+    if (!race || race.status === 'ocr_pending') return 'ocr_pending' as const;
+    if ((race.link_held || race.hand_entered) && race.unlinked) return 'awaiting_review' as const;
+    if (race.status === 'parsed' && race.question_reason) return 'awaiting_review' as const;
+    if (priorRun && !race.has_run) return 'awaiting_review' as const;
+    // The other direction: no run at the start, one now — a match.runForInvoice
+    // (manager Re-run) committed after this job's prior-run read. Its run stands;
+    // persisting this one too would be a SECOND run for the invoice (match_runs has
+    // no unique key on invoice_id): the leak counted twice, every finding twice in
+    // approvals, and a notification for the duplicate. Skip like any already-matched job.
+    if (!priorRun && race.has_run) return 'already_matched' as const;
     let prior: Awaited<ReturnType<typeof loadPriorDecisions>> | undefined;
     if (priorRun) {
+      // Claims on the run being replaced (round 7): bare ones go, a claim in
+      // progress is money history — skip (visible: the invoice keeps its run and
+      // the tracker shows the claim), never fail on the claim → finding FK.
+      // Lock order as everywhere: the invoice row (above) → recovery.
+      await lockRecovery(tx, restaurantId);
+      try {
+        await releaseClaimsForRematch(tx, restaurantId, invoiceId);
+      } catch (err) {
+        if ((err as { code?: string }).code !== 'CONFLICT') throw err;
+        // Say so on the invoice (round 8): the page and the dock slip show that
+        // the count's result was not applied — never a silent stale ₪.
+        await tx.execute(sql`
+          UPDATE invoices
+             SET ocr_payload = coalesce(ocr_payload, '{}'::jsonb) || jsonb_build_object('raw',
+                   (CASE WHEN jsonb_typeof(ocr_payload -> 'raw') = 'object' THEN ocr_payload -> 'raw' ELSE '{}'::jsonb END)
+                     || jsonb_build_object('rematchBlocked', jsonb_build_object(
+                          'grId', ${built.grId}::text, 'at', now(), 'reason', 'claim_in_progress')))
+           WHERE id = ${invoiceId} AND restaurant_id = ${restaurantId}`);
+        return 'claim_in_progress' as const;
+      }
       prior = await loadPriorDecisions(tx, restaurantId, invoiceId);
       await tx
         .delete(matchRuns)
         .where(and(eq(matchRuns.invoiceId, invoiceId), eq(matchRuns.restaurantId, restaurantId)));
     }
-    return persistMatchRun(
+    const out = await persistMatchRun(
       tx,
       { restaurantId, invoiceId, poId: built.poId, grId: built.grId },
       built.input,
@@ -145,7 +327,17 @@ export async function matchInvoiceForJob(db: Database, data: MatchInvoiceJob): P
       rules,
       prior,
     );
+    // W2-04 rebind: the claims released above come back for the re-applied
+    // accepted decisions, under their ORIGINAL decider (shared with match.runForInvoice).
+    if (priorRun) await rebindDecidedClaims(tx, restaurantId, out.matchRunId);
+    return out;
   });
+  if (typeof persisted === 'string') {
+    if (persisted === 'claim_in_progress') {
+      console.warn(`[match-invoice] invoice=${invoiceId} keeps its run — a credit claim on it is in progress`);
+    }
+    return { result: CLEAN, persisted: null, replaced: false, skipped: persisted };
+  }
   return { result, persisted, replaced: Boolean(priorRun) };
 }
 
@@ -156,6 +348,98 @@ const whatsapp = createWhatsAppNotifier();
 const push = createPushNotifier();
 // Real Resend email when RESEND_API_KEY is set, else dev/console EmailNotifier.
 const email = createEmailNotifier();
+
+/**
+ * The branch-aware deep link of every approval notification (ia-nav-09):
+ * `/dashboard/go?r=<restaurantId>&to=/dashboard/approvals?invoice=<id>`.
+ */
+export function approvalsGoLink(
+  restaurantId: string,
+  invoiceId: string | null,
+  base = appBaseUrl(),
+): string {
+  const to = invoiceId ? `/dashboard/approvals?invoice=${invoiceId}` : '/dashboard/approvals';
+  return `${base}/dashboard/go?r=${encodeURIComponent(restaurantId)}&to=${encodeURIComponent(to)}`;
+}
+
+/** Σ claimable agorot of one invoice: `claimableLines(computeInvoiceLeak(id))`. */
+export async function invoiceClaimAgorot(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+): Promise<number> {
+  return (await invoiceClaim(db, restaurantId, invoiceId)).agorot;
+}
+
+/**
+ * The invoice's claimable ₪ on the BEFORE-VAT basis only (a duplicate's incl.
+ * VAT or a VAT amount is never added into it), and whether it still waits for
+ * its PO link (then there is nothing to claim yet, and the copy says so).
+ */
+export async function invoiceClaim(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+): Promise<{ agorot: number; inclAgorot: number; pendingLink: boolean }> {
+  const inv = await computeInvoiceLeak(db, restaurantId, invoiceId);
+  if (!inv) return { agorot: 0, inclAgorot: 0, pendingLink: false };
+  const lines = claimableLines(inv);
+  const sum = (basis: string) =>
+    lines.filter((c) => c.basis === basis).reduce((n, c) => n + Math.round(c.amount * 100), 0);
+  // The duplicate's claim is on the incl.-VAT basis: named on its own, never added in.
+  return { agorot: sum('excl'), inclAgorot: sum('incl'), pendingLink: inv.pendingLink };
+}
+
+/**
+ * The ₪ an approval names, each VAT basis as its OWN labelled figure (never
+ * summed): the before-VAT claim, a duplicate invoice's incl.-VAT claim, and a
+ * VAT amount (a VAT_MISMATCH finding). Null when there is nothing to claim.
+ */
+export function claimFigure(exclAgorot: number, inclAgorot: number, vatAgorot = 0): string | null {
+  const ils = (a: number) => formatIlsAgorot(a, { maximumFractionDigits: 2 });
+  const parts: string[] = [];
+  if (exclAgorot > 0) parts.push(ils(exclAgorot));
+  if (inclAgorot > 0) parts.push(`${ils(inclAgorot)} כולל מע״מ (חשבונית כפולה)`);
+  if (vatAgorot > 0) parts.push(`${ils(vatAgorot)} מע״מ (הפרש מע״מ)`);
+  return parts.length ? parts.join(' + ') : null;
+}
+
+/**
+ * What the approval alert says about ONE invoice (Train C B1): the SAME rows and
+ * ₪ as its `?invoice=` queue — `awaitingDecision` (scope all, owner view), so an
+ * auto-approved info row or the ₪0 QTY_SHORT twin is never counted, and the ₪ is
+ * the letters' claims rule, per VAT basis.
+ */
+export async function invoiceAlert(
+  db: Database,
+  restaurantId: string,
+  invoiceId: string,
+): Promise<{ count: number; figure: string | null; pendingLink: boolean }> {
+  const a = await awaitingDecision(
+    db,
+    { session: { restaurantId, role: 'owner' } },
+    { scope: 'all', filters: { invoiceIds: [invoiceId] } },
+  );
+  const ag = (v: number | undefined) => Math.round((v ?? 0) * 100);
+  const figure = claimFigure(ag(a.ils?.excl), ag(a.ils?.incl), ag(a.ils?.vat));
+  return { count: a.count, figure, pendingLink: figure == null && a.pendingLink.count > 0 };
+}
+
+/** Push / WhatsApp body: "N פערים · ₪X לבקשת זיכוי" + the link. No baked ₪ template string. */
+export function approvalSummary(
+  count: number,
+  figure: string | null,
+  link: string,
+  opts: { pendingLink?: boolean } = {},
+): string {
+  const gaps = count === 1 ? 'פער אחד' : `${count} פערים`;
+  const tail = figure
+    ? ` בחשבונית · ${figure} לבקשת זיכוי`
+    : opts.pendingLink
+      ? ' בחשבונית · ממתינה לקישור להזמנה'
+      : ' לבדיקה בחשבונית';
+  return `${gaps}${tail}\n${link}`;
+}
 
 export function startMatchInvoiceWorker() {
   return makeWorker<MatchInvoiceJob>('match-invoice', processMatchInvoice);
@@ -188,10 +472,19 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
   // feature (whatsapp_alerts) — gate it on entitlements. Push is always on.
   // A re-match after the count replaces a run whose people were already told;
   // only a first match notifies (the approvals queue shows the fresh numbers).
-  if (!replaced && persisted.rolesNeedingNotification.length > 0) {
+  // ₪ = what this invoice can actually claim (the letters' rule), never the
+  // engine's raw Σ|Δ|; formatted once by the server money util. The link is
+  // the branch-aware go-link to this invoice's approval page (W2-04).
+  // TODO(W2-04): count and ₪ per recipient role (a manager sees manager-routed rows); today the owner's whole-invoice view.
+  const alert =
+    !replaced && persisted.rolesNeedingNotification.length > 0 ? await invoiceAlert(db, restaurantId, invoiceId) : null;
+  // Nothing open / decidable on this invoice (auto-approved or info only): send NOTHING —
+  // no push, no billed WhatsApp, no e-mail saying "0 פערים" (R4-1).
+  if (alert && alert.count > 0) {
     const ent = await getEntitlements(db, restaurantId);
     const whatsappAllowed = ent.active && ent.features.includes('whatsapp_alerts');
-    const summary = `${result.discrepancies.length} פערים, סה"כ הפסד פוטנציאלי ₪${result.totalDiscrepancyAmount.toFixed(0)}`;
+    const link = approvalsGoLink(restaurantId, invoiceId);
+    const summary = approvalSummary(alert.count, alert.figure, link, { pendingLink: alert.pendingLink });
     for (const role of persisted.rolesNeedingNotification) {
       if (whatsappAllowed) {
         await whatsapp.send(db, {
@@ -236,9 +529,13 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
         .limit(1);
       const rendered = approvalNeededEmail({
         supplierName: sup?.name ?? 'ספק',
-        discrepancyCount: result.discrepancies.length,
-        atRiskIls: `₪${result.totalDiscrepancyAmount.toFixed(0)}`,
-        approvalsUrl: `${appBaseUrl()}/dashboard/approvals`,
+        // The queue's count (open decidable rows, no ₪0 twin); ₪ only when there is ₪ to claim.
+        discrepancyCount: alert.count,
+        atRiskIls: null,
+        claimableIls: alert.figure,
+        pendingLink: alert.pendingLink,
+        invoiceUrl: link,
+        approvalsUrl: link,
       });
       for (const r of recipients) {
         await email.send(db, {
@@ -258,7 +555,7 @@ export async function processMatchInvoice(job: WorkerJob<MatchInvoiceJob>): Prom
   console.log(
     `[match-invoice] restaurant=${restaurantId} invoice=${invoiceId} ` +
       `status=${result.status} discrepancies=${persisted.discrepancyCount} ` +
-      `loss=₪${result.totalDiscrepancyAmount.toFixed(2)} ` +
+      `deltaAgorot=${Math.round(result.totalDiscrepancyAmount * 100)} ` +
       `notifications=${persisted.rolesNeedingNotification.length}`,
   );
 

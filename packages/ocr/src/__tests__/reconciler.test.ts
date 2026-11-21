@@ -95,3 +95,50 @@ describe('reconcile', () => {
     }
   });
 });
+
+describe('reconcile — v2 line facts (train-A review)', () => {
+  const base = {
+    supplier: { name: 'ספק', businessId: '514276385' },
+    invoiceNumber: '1',
+    invoiceDate: '2026-11-01',
+    totals: { subtotal: 120, vat: 18, total: 138 },
+  };
+  const docAi = {
+    ...base,
+    lines: [
+      { rawDescription: 'קמח', qty: 1, unit: 'שק', unitPrice: 100, lineTotal: 100 },
+      { rawDescription: 'פיקדון', qty: 4, unit: "יח'", unitPrice: 5, lineTotal: 20 },
+    ],
+  };
+  const claude = {
+    ...base,
+    lines: [
+      { rawDescription: 'קמח', qty: 1, unit: 'שק', unitPrice: 100, lineTotal: 100, lineKind: 'item', lineDiscountPct: 10 },
+      { rawDescription: 'פיקדון', qty: 4, unit: "יח'", unitPrice: 5, lineTotal: 20, lineKind: 'deposit' },
+    ],
+  };
+
+  it('carries lineKind and lineDiscountPct from the Claude read onto reconciled lines', () => {
+    const { result } = reconcile(docAi as never, claude as never);
+    expect(result.lines.map((l) => [l.lineKind, l.lineDiscountPct])).toEqual([
+      ['item', 10],
+      ['deposit', undefined],
+    ]);
+  });
+
+  it('single provider (production): the gate sees the deposit line and sends it to review', async () => {
+    const { runOcrPipeline } = await import('../pipeline');
+    const { StubOcrProvider } = await import('../providers/stub');
+    const stub = new StubOcrProvider('claude_vision', claude as never);
+    const r = await runOcrPipeline('x', { documentAi: stub, claude: stub });
+    expect(r.reconciled.lines[1]!.lineKind).toBe('deposit');
+    expect(r.checks.reasons).toContain('deposit_or_fee_line');
+    expect(r.needsHumanReview).toBe(true);
+  });
+
+  it('a line without v2 facts stays without them (no new keys)', () => {
+    const { result } = reconcile(docAi as never, docAi as never);
+    expect('lineKind' in result.lines[0]!).toBe(false);
+    expect('lineDiscountPct' in result.lines[0]!).toBe(false);
+  });
+});

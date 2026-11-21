@@ -13,4 +13,13 @@ export const routes: RouteDef[] = [
     nav: 'item',
     aliases: ['הגדרות', 'סיסמה', 'אימות דו-שלבי', 'settings', 'password', '2fa'],
   },
+  {
+    // AU-01: the owner's automations page (owner edits; manager + bookkeeper read).
+    key: 'automations',
+    path: '/dashboard/settings/automations',
+    parent: 'settings',
+    group: 'admin',
+    roles: ['owner', 'manager', 'bookkeeper'],
+    nav: 'hidden',
+  },
 ];

@@ -11,13 +11,29 @@ import {
   priceHistory,
   purchaseOrders,
   testDbUrl,
+  products,
+  sql,
 } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext } from '../context';
 import { normalizeInvoiceNumber } from '../match/buildMatchInput';
 import { backfillPriceHistory, writePriceHistoryForInvoice } from '../match/priceHistory';
-import { decisionStillApplies, matchActivitySummary, pairPriorDecisions, type PriorDecision } from '../match/persist';
-import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
+import { decisionStillApplies, matchActivitySummary, matchAlert, pairPriorDecisions, type PriorDecision } from '../match/persist';
+import { resetDb, seedPlans, seedTenant as seedTenantPending, type Tenant } from './fixtures';
+import { formatIlsAgorot } from '../reports/money';
+
+/** W2-13 / AU-07: the summary and alert ₪ come from the server money formatter (exact, from integer agorot). */
+const ILS = (agorot: number) => formatIlsAgorot(agorot);
+
+/**
+ * #216 F3: match.runForInvoice refuses a receipt still being counted. These
+ * re-matches stand on a COUNTED receipt (the fixture's 5 received): submitted.
+ */
+async function seedTenant(...args: Parameters<typeof seedTenantPending>): Promise<Tenant> {
+  const t = await seedTenantPending(...args);
+  await args[0].execute(sql`UPDATE goods_receipts SET status = 'completed' WHERE id = ${t.grId}`);
+  return t;
+}
 
 /**
  * S3 money-engine: the price_history writer (M1), its backfill, and
@@ -279,9 +295,11 @@ describe('invoice_matched activity carries structured metadata', () => {
       .from(activityEvents)
       .where(and(eq(activityEvents.restaurantId, A.restaurantId), eq(activityEvents.entityId, res.matchRunId!)));
     expect(ev!.eventType).toBe('invoice_matched');
-    expect(ev!.title).toBe(`חשבונית ${A.invoiceNumber} הותאמה`);
-    expect(ev!.detail).toContain(A.supplierName);
+    // W2-13: v2 rows carry a machine title and no detail; the feed renders from metadata.
+    expect(ev!.title).toBe(`invoice_matched:${A.invoiceNumber}`);
+    expect(ev!.detail).toBeNull();
     expect(ev!.metadata).toMatchObject({
+      v: 2,
       invoiceId: A.invoiceId,
       invoiceNumber: A.invoiceNumber,
       supplierName: A.supplierName,
@@ -289,6 +307,10 @@ describe('invoice_matched activity carries structured metadata', () => {
       potentialLossIls: res.totalDiscrepancyAmount,
       status: res.status,
     });
+    // The feed's ₪ is exact integer agorot of the leak figure (no baked ₪ text any more).
+    const meta = ev!.metadata as { leakIls: number; leakAgorot: number; leakCount: number };
+    expect(typeof meta.leakCount).toBe('number');
+    expect(meta.leakAgorot).toBe(Math.round(meta.leakIls * 100));
   });
 });
 
@@ -495,7 +517,7 @@ describe('the feed tells the hero’s story (matchActivitySummary)', () => {
 
   it('a clean match is calm — never "0 חריגות · ₪0"', () => {
     expect(matchActivitySummary([], 117, { poMatched: true })).toEqual({
-      detail: 'תואמת להזמנה ולקבלה',
+      detail: 'תואמת להזמנה ולקבלת הסחורה',
       leakCount: 0,
       leakIls: 0,
       pendingLink: false,
@@ -504,15 +526,22 @@ describe('the feed tells the hero’s story (matchActivitySummary)', () => {
     });
     // Inside-tolerance info + an AUTO-ACCEPTED under-charge: nothing leaked, nothing open.
     expect(matchActivitySummary([f('QTY_SHORT', 'info', 4), f('PRICE_LOWER', 'warn', 12, 'accepted')], 117, { poMatched: true }).detail).toBe(
-      'תואמת להזמנה ולקבלה',
+      'תואמת להזמנה ולקבלת הסחורה',
     );
   });
 
   it('"matches" only with a PO and nothing open; an open non-loss finding reads "to review"', () => {
-    expect(matchActivitySummary([f('PRICE_LOWER', 'warn', 12)], 117, { poMatched: true }).detail).toBe('חריגה אחת לבדיקה');
-    expect(matchActivitySummary([f('DATE_ANOMALY', 'warn', 0), f('PRICE_LOWER', 'warn', 3)], 117, { poMatched: true }).detail).toBe('2 חריגות לבדיקה');
+    expect(matchActivitySummary([f('PRICE_LOWER', 'warn', 12)], 117, { poMatched: true }).detail).toBe('פער אחד לבדיקה');
+    expect(matchActivitySummary([f('DATE_ANOMALY', 'warn', 0), f('PRICE_LOWER', 'warn', 3)], 117, { poMatched: true }).detail).toBe('שני פערים לבדיקה');
     // No PO and nothing pending (the no-PO finding was decided): say so, never "matches".
     expect(matchActivitySummary([f('UNORDERED_ARRIVAL', 'block', 117, 'accepted')], 117, { poMatched: false }).detail).toBe('ללא הזמנה מקושרת');
+  });
+
+  it('MISSING_ON_INVOICE is a review item, never ₪ in the leak (owner-approved 31.10)', () => {
+    const s = matchActivitySummary([f('MISSING_ON_INVOICE', 'block', 64), f('PRICE_HIGHER', 'warn', 10)], 1000, { poMatched: true });
+    expect(s.leakIls).toBe(10);
+    expect(s.leakCount).toBe(1);
+    expect(s.reviewCount).toBe(1);
   });
 
   it('no PO yet → pending, calm — not "הפסד פוטנציאלי ₪1,273"', () => {
@@ -520,19 +549,19 @@ describe('the feed tells the hero’s story (matchActivitySummary)', () => {
     expect(s).toEqual({ detail: 'ממתינה לשיוך להזמנה', leakCount: 0, leakIls: 0, pendingLink: true, poMatched: false, reviewCount: 0 });
     // …but a no-PO invoice whose duplicate / VAT / total finding counts as leak says so.
     expect(matchActivitySummary([f('UNORDERED_ARRIVAL', 'block', 1273), f('VAT_MISMATCH', 'warn', 12.6)], 1273, { poMatched: false }).detail).toBe(
-      'ממתינה לשיוך להזמנה · חריגה אחת · הפסד פוטנציאלי ₪13',
+      `ממתינה לשיוך להזמנה · פער אחד · ${ILS(1300)} בפערים`,
     );
   });
 
   it('singular / plural, grouped ₪, capped at the invoice total like the hero', () => {
-    expect(matchActivitySummary([f('PRICE_HIGHER', 'block', 104.8)], 2787.92).detail).toBe('חריגה אחת · הפסד פוטנציאלי ₪105');
+    expect(matchActivitySummary([f('PRICE_HIGHER', 'block', 104.8)], 2787.92).detail).toBe(`פער אחד · ${ILS(10500)} בפערים`);
     const two = matchActivitySummary([f('DUPLICATE_INVOICE', 'block', 1180), f('PRICE_HIGHER', 'block', 400)], 1180);
     expect(two).toMatchObject({ leakCount: 2, leakIls: 1180 });
-    expect(two.detail).toBe('2 חריגות · הפסד פוטנציאלי ₪1,180');
+    expect(two.detail).toBe(`שני פערים · ${ILS(118000)} בפערים`);
   });
 
   it('a duplicate rejected as "not a duplicate" is not a loss', () => {
-    expect(matchActivitySummary([f('DUPLICATE_INVOICE', 'block', 118, 'rejected')], 118).detail).toBe('תואמת להזמנה ולקבלה');
+    expect(matchActivitySummary([f('DUPLICATE_INVOICE', 'block', 118, 'rejected')], 118).detail).toBe('תואמת להזמנה ולקבלת הסחורה');
   });
 
   it('persisted: an invoice with no PO reads "pending", with no loss figure', async () => {
@@ -543,8 +572,40 @@ describe('the feed tells the hero’s story (matchActivitySummary)', () => {
     expect(res.poMatched).toBe(false);
     const [ev] = await db.select().from(activityEvents).where(eq(activityEvents.entityId, res.matchRunId!));
     // Pending a PO link, plus the small VAT finding that counts as leak (the hero counts it too).
-    expect(ev!.detail).toBe(`${A.supplierName} · ממתינה לשיוך להזמנה · חריגה אחת · הפסד פוטנציאלי ₪1`);
-    expect(ev!.metadata).toMatchObject({ pendingLink: true, poMatched: false, leakCount: 1, leakIls: 1 });
+    // W2-13: the same facts as metadata (v2), no baked Hebrew/₪ detail.
+    expect(ev!.detail).toBeNull();
+    expect(ev!.metadata).toMatchObject({ v: 2, supplierName: A.supplierName, pendingLink: true, poMatched: false, leakCount: 1, leakIls: 1, leakAgorot: 100 });
+  });
+});
+
+describe('match alerts (push / WhatsApp / approval email) use the hero leak rule, not the engine total (money review E)', () => {
+  const f = (type: string, severity: string, deltaAmount: number, resolutionStatus = 'open') => ({ type, severity, deltaAmount, resolutionStatus });
+
+  it('a MISSING_ON_INVOICE line and an info line are never in the alert ₪', () => {
+    const s = matchActivitySummary([f('MISSING_ON_INVOICE', 'block', 640), f('QTY_SHORT', 'info', 50), f('PRICE_HIGHER', 'warn', 104.8)], 5000);
+    const a = matchAlert(s);
+    expect(a.summary).toBe(`פער אחד, סה״כ ${ILS(10500)} בפערים · פער אחד לבדיקה`);
+    expect(a).toMatchObject({ count: 1, atRiskIls: `${ILS(10500)}` });
+  });
+
+  it('plural, capped at the invoice total like the hero', () => {
+    const a = matchAlert(matchActivitySummary([f('DUPLICATE_INVOICE', 'block', 1180), f('PRICE_HIGHER', 'block', 400)], 1180));
+    expect(a).toEqual({ summary: `שני פערים, סה״כ ${ILS(118000)} בפערים`, count: 2, atRiskIls: `${ILS(118000)}` });
+  });
+
+  it('a review-only match reads "N לבדיקה" with no ₪', () => {
+    const a = matchAlert(matchActivitySummary([f('MISSING_ON_INVOICE', 'block', 640), f('PRICE_LOWER', 'warn', 12)], 5000));
+    expect(a).toEqual({ summary: 'שני פערים לבדיקה', count: 2, atRiskIls: null });
+    expect(a.summary).not.toContain('₪');
+  });
+
+  it('runForInvoice returns the hero-rule leakIls (the correction screen’s "דליפה") and keeps the engine total raw (F)', async () => {
+    const A = await seedTenant(db, 'A');
+    const res = await ownerCaller(A).match.runForInvoice({ invoiceId: A.invoiceId });
+    const [ev] = await db.select().from(activityEvents).where(eq(activityEvents.entityId, res.matchRunId!));
+    const meta = ev!.metadata as { leakIls: number; potentialLossIls: number };
+    expect(res.leakIls).toBe(meta.leakIls);
+    expect(res.totalDiscrepancyAmount).toBe(meta.potentialLossIls);
   });
 });
 
@@ -661,6 +722,21 @@ describe('a decision only carries to an equivalent finding (decisionStillApplies
 describe('re-match: a materially different finding starts fresh (router)', () => {
   it('rejected finding grows after a correction → open again, routed, not the old note', async () => {
     const A = await seedTenant(db, 'A');
+    // An item the order never had (G-08: the seed's order line now carries its
+    // product, so the unordered item is a real one, not a name-only false pair).
+    const [extraProduct] = await db
+      .insert(products)
+      .values({ restaurantId: A.restaurantId, canonicalName: 'מלפפון', defaultUnit: 'ק״ג' })
+      .returning({ id: products.id });
+    await db.insert(invoiceLines).values({
+      invoiceId: A.invoiceId,
+      productId: extraProduct!.id,
+      rawDescription: 'מלפפון',
+      qtyBilled: '10',
+      unit: 'kg',
+      unitPriceBilled: '9',
+      lineTotal: '90.00',
+    });
     const caller = ownerCaller(A);
     await caller.match.runForInvoice({ invoiceId: A.invoiceId });
     const find = async () =>

@@ -1,0 +1,66 @@
+{
+  "documentKind": "consolidated",
+  "consolidation": "consolidated",
+  "supplier": {
+    "name": "מחלבות העמק בע\"מ",
+    "businessId": "515209641"
+  },
+  "invoiceNumber": "2026-0912",
+  "invoiceDate": "2026-09-30",
+  "allocationNumber": null,
+  "periodStart": "2026-09-01",
+  "periodEnd": "2026-09-30",
+  "deliveryNotes": [
+    {
+      "number": "88120"
+    },
+    {
+      "number": "88164"
+    },
+    {
+      "number": "88203"
+    },
+    {
+      "number": "88251"
+    }
+  ],
+  "lines": [
+    {
+      "sku": "7001",
+      "rawDescription": "חלב 3% בקרטון 1 ליטר",
+      "qty": 240,
+      "unit": "יח'",
+      "unitPrice": 6.1,
+      "lineTotal": 1464.0
+    },
+    {
+      "sku": "7012",
+      "rawDescription": "גבינה לבנה 5% 250 גרם",
+      "qty": 120,
+      "unit": "יח'",
+      "unitPrice": 5.4,
+      "lineTotal": 648.0
+    },
+    {
+      "sku": "7025",
+      "rawDescription": "שמנת מתוקה 32% 1 ליטר",
+      "qty": 36,
+      "unit": "יח'",
+      "unitPrice": 17.9,
+      "lineTotal": 644.4
+    },
+    {
+      "sku": "7040",
+      "rawDescription": "חמאה 200 גרם",
+      "qty": 48,
+      "unit": "יח'",
+      "unitPrice": 8.75,
+      "lineTotal": 420.0
+    }
+  ],
+  "totals": {
+    "subtotal": 3176.4,
+    "vat": 571.75,
+    "total": 3748.15
+  }
+}

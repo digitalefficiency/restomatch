@@ -228,7 +228,13 @@ export function DockSlip({
         </p>
       ) : note === 'held' ? (
         <p className="mt-2 text-sm text-muted" data-testid="dock-slip-held">
-          {t(data.engine.holdReason === 'settled' ? 'dockSlip.heldSettled' : 'dockSlip.heldReview')}
+          {t(
+            data.engine.holdReason === 'settled'
+              ? 'dockSlip.heldSettled'
+              : data.engine.holdReason === 'claim_in_progress'
+                ? 'dockSlip.heldClaim'
+                : 'dockSlip.heldReview',
+          )}
         </p>
       ) : note === 'computing' ? (
         <p className="mt-2 flex items-center gap-2 text-sm text-muted" data-testid="dock-slip-computing">

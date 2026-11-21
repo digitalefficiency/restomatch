@@ -483,8 +483,8 @@ export async function pricesWithSourceAsOf(
 }
 
 /**
- * Goods received per product in local dates (fromYmd, toYmd] (received −
- * rejected), in the product's default unit where the PO unit converts. Feeds the
+ * Goods received per product in local dates (fromYmd, toYmd] (net accepted
+ * qty of closed receipts), in the product's default unit where the PO unit converts. Feeds the
  * sanity check "counted more than last count + received since?".
  */
 export async function receivedBetween(
@@ -499,11 +499,15 @@ export async function receivedBetween(
   const ids = sql.join(productIds.map((id) => sql`${id}::uuid`), sql`, `);
   const rows = (await db.execute(sql`
     select coalesce(gl.product_id, pl.product_id) as pid, pl.unit,
-           sum(gl.qty_received - coalesce(gl.qty_rejected, 0))::numeric(14,4)::text as qty
+           sum(gl.qty_received)::numeric(14,4)::text as qty
     from goods_receipts gr
     join gr_lines gl on gl.gr_id = gr.id
     join po_lines pl on pl.id = gl.po_line_id
     where gr.restaurant_id = ${restaurantId}
+      -- Closed receipts only (a half-counted receipt adds nothing yet), and qty_received is
+      -- already NET of rejections (_count.ts writes the accepted qty): never subtract qty_rejected again.
+      -- TODO(G-04): swap to closedReceiptSql('gr') + countedLineSql('gl') from match/receiptTruth.ts.
+      and gr.status in ('completed', 'partial')
       and (gr.received_at at time zone ${tz})::date > ${fromYmd}::date
       and (gr.received_at at time zone ${tz})::date <= ${toYmd}::date
       and coalesce(gl.product_id, pl.product_id) in (${ids})

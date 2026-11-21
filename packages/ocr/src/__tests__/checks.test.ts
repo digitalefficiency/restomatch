@@ -82,12 +82,20 @@ describe('arithmetic gate (integer agorot)', () => {
     expect(checkInvoice({ ...zero, totals: { subtotal: 701, vat: 0, total: 827.18 } }).reasons).toEqual(['total_mismatch']);
   });
 
-  it('a mixed invoice (0% produce + 18% goods) passes line by line', () => {
+  it('a mixed invoice (0% produce + 18% goods) adds up line by line, but goes to review as mixed_vat', () => {
     const lines = CLEAN.lines.map((l, i) => ({ ...l, vatRate: i < 3 ? 0 : 0.18 }));
     // 18% only on 105 + 145 + 79.20 = 329.20 → 59.26
     const totals = { subtotal: 701, vat: 59.26, total: 760.26 };
-    expect(checkInvoice(withLines(lines, totals)).passed).toBe(true);
-    expect(checkInvoice(withLines(lines, { ...totals, vat: 95.26, total: 796.26 })).reasons).toEqual(['vat_mismatch']);
+    // Matching applies ONE VAT rate per invoice → a false VAT_MISMATCH; a person handles it.
+    expect(checkInvoice(withLines(lines, totals)).reasons).toEqual(['mixed_vat']);
+    expect(checkInvoice(withLines(lines, { ...totals, vat: 95.26, total: 796.26 })).reasons).toEqual(['vat_mismatch', 'mixed_vat']);
+  });
+
+  it('one VAT rate on every line (all 0% produce, or all 18%) is not mixed', () => {
+    const zero = CLEAN.lines.map((l) => ({ ...l, vatRate: 0 }));
+    expect(checkInvoice(withLines(zero, { subtotal: 701, vat: 0, total: 701 })).passed).toBe(true);
+    const full = CLEAN.lines.map((l) => ({ ...l, vatRate: 0.18 }));
+    expect(checkInvoice(withLines(full)).passed).toBe(true);
   });
 
   it('a discounted line passes (net unit price; the line check is skipped for it)', () => {
@@ -100,17 +108,42 @@ describe('arithmetic gate (integer agorot)', () => {
     expect(checkInvoice(withLines(lines)).reasons).toEqual(['line_math_mismatch']);
   });
 
-  it('an invoice-level discount skips Σ lines vs subtotal (VAT and total are still checked)', () => {
+  it('an invoice-level discount is subtracted in Σ lines vs subtotal, and the invoice goes to review', () => {
     const totals = { subtotal: 681, vat: 122.58, total: 803.58 }; // ₪20 off
     expect(checkInvoice(withLines(CLEAN.lines, totals)).reasons).toEqual(['subtotal_mismatch']);
-    expect(checkInvoice({ ...withLines(CLEAN.lines, totals), invoiceDiscount: 20 }).passed).toBe(true);
+    // Adds up with the discount — but matching would see the ₪20 as TOTAL_MISMATCH: review.
+    expect(checkInvoice({ ...withLines(CLEAN.lines, totals), invoiceDiscount: 20 }).reasons).toEqual(['invoice_discount']);
+    // A misread discount no longer slips through.
+    expect(checkInvoice({ ...withLines(CLEAN.lines, totals), invoiceDiscount: 50 }).reasons).toEqual([
+      'subtotal_mismatch',
+      'invoice_discount',
+    ]);
+  });
+
+  it('review example: lines ₪1,000, הנחה כללית ₪50, subtotal ₪950 → invoice_discount, never auto-matched', () => {
+    const lines = [{ rawDescription: 'קמח', qty: 10, unit: 'שק', unitPrice: 100, lineTotal: 1000 }];
+    const inv = { ...withLines(lines, { subtotal: 950, vat: 171, total: 1121 }), invoiceDiscount: 50 };
+    expect(checkInvoice(inv)).toMatchObject({ passed: false, reasons: ['invoice_discount'] });
   });
 
   it('deposit lines may sit outside the VAT base', () => {
     const deposit = { rawDescription: 'פיקדון ארגזים', qty: 4, unit: "יח'", unitPrice: 5, lineTotal: 20, lineKind: 'deposit' as const };
     // subtotal 721 includes the deposit; VAT only on 701; total = 721 + 126.18.
     const inv = withLines([...CLEAN.lines, deposit], { subtotal: 721, vat: 126.18, total: 847.18 });
-    expect(checkInvoice(inv).passed).toBe(true);
+    // The arithmetic is accepted; the deposit line is not a product → review.
+    expect(checkInvoice(inv).reasons).toEqual(['deposit_or_fee_line']);
+  });
+
+  it('a delivery-fee line goes to review; item lines (or no lineKind) do not', () => {
+    const fee = { rawDescription: 'דמי משלוח', qty: 1, unit: "יח'", unitPrice: 30, lineTotal: 30, lineKind: 'delivery_fee' as const };
+    const inv = withLines([...CLEAN.lines, fee], { subtotal: 731, vat: 131.58, total: 862.58 });
+    expect(checkInvoice(inv).reasons).toEqual(['deposit_or_fee_line']);
+    const items = CLEAN.lines.map((l) => ({ ...l, lineKind: 'item' as const }));
+    expect(checkInvoice(withLines(items)).passed).toBe(true);
+  });
+
+  it('control: a plain invoice still passes clean (auto-matches)', () => {
+    expect(checkInvoice(CLEAN)).toMatchObject({ passed: true, reasons: [], score: 1 });
   });
 
   it('missing invoice number, date or total is flagged', () => {
@@ -157,7 +190,31 @@ describe('ח״פ / ע״מ check digit', () => {
   it('an invalid printed ח״פ and a ח״פ different from the one on file are flagged', () => {
     expect(checkInvoice({ ...CLEAN, supplier: { businessId: '514276389' } }).reasons).toEqual(['supplier_id_invalid']);
     expect(checkInvoice(CLEAN, { expectedSupplierBusinessId: '514276385' }).passed).toBe(true);
-    expect(checkInvoice(CLEAN, { expectedSupplierBusinessId: '515555551' }).reasons).toEqual(['supplier_id_mismatch']);
+    expect(checkInvoice(CLEAN, { expectedSupplierBusinessId: '515209641' }).reasons).toEqual(['supplier_id_mismatch']);
+  });
+
+  it('unknown on either side is not a mismatch (missing, bad check digit, wrong length)', () => {
+    const noId = { ...CLEAN, supplier: {} };
+    expect(checkInvoice(noId, { expectedSupplierBusinessId: '515209641' }).passed).toBe(true);
+    expect(checkInvoice(CLEAN, { expectedSupplierBusinessId: '515555551' }).passed).toBe(true); // bad check digit on file
+    expect(checkInvoice({ ...CLEAN, supplier: { businessId: '514276389' } }, { expectedSupplierBusinessId: '515209641' }).reasons)
+      .toEqual(['supplier_id_invalid']);
+  });
+
+  it.each([
+    ['51-427638-5', '514276385'],
+    ['ח.פ. 514276385', '514276385'],
+    ['0514276385', '514276385'],
+    [514276385, '514276385'],
+    ['30123459', '030123459'], // 8 digits → padded (valid)
+    ['514276389', null], // check digit fails → unknown
+    ['123', null],
+    ['12345678901', null],
+    [undefined, null],
+    [null, null],
+  ] as const)('normalizeBusinessId(%s) → %s', async (v, want) => {
+    const { normalizeBusinessId } = await import('../checks');
+    expect(normalizeBusinessId(v)).toBe(want);
   });
 });
 
@@ -192,7 +249,7 @@ describe('runOcrPipeline + gate', () => {
 
   it('passes expectedSupplierBusinessId to the gate and carries the v2 fields onto the reconciled invoice', async () => {
     const v2 = { ...CLEAN, documentKind: 'tax_invoice', buyer: { name: 'ציקטי' }, totals: { ...CLEAN.totals, vatRate: 0.18 } };
-    const r = await runOcrPipeline('x', { ...single(v2 as InvoiceOcrResult), expectedSupplierBusinessId: '515555551' });
+    const r = await runOcrPipeline('x', { ...single(v2 as InvoiceOcrResult), expectedSupplierBusinessId: '515209641' });
     expect(r.checks.reasons).toEqual(['supplier_id_mismatch']);
     expect(r.needsHumanReview).toBe(true);
     expect(r.reconciled.documentKind).toBe('tax_invoice');

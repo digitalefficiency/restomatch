@@ -11,6 +11,7 @@ import { useOnline } from './online';
 import { switchBranchAction } from '@/app/dashboard/branch-actions';
 import { abandonReauth, completeReauth, dismissReauth, useReauthOpen } from './reauth';
 import { decideAfterSignIn } from './reauthDecision';
+import { reauthFailureKind } from './reauthFailure';
 
 /**
  * The shell's "no dead ends" layer (W1-04; lens-perf-states §2.5), mounted once
@@ -70,6 +71,7 @@ export interface Identity {
 type Phase =
   | { kind: 'form' }
   | { kind: 'wrong' }
+  | { kind: 'rate' }
   | { kind: 'twoFactor' }
   | { kind: 'stillOut' }
   | { kind: 'magicSent'; email: string }
@@ -217,7 +219,8 @@ function ReauthSheet({ identity }: { identity?: Identity }) {
       const res = await signIn('credentials', { email, password, rememberMe: 'false', redirect: false });
       setPassword('');
       if (!res || res.error) {
-        setPhase({ kind: 'wrong' });
+        // A throttled attempt says "too many attempts"; anything else stays uniform.
+        setPhase({ kind: reauthFailureKind(res) });
         return;
       }
       await finish(true);
@@ -245,7 +248,9 @@ function ReauthSheet({ identity }: { identity?: Identity }) {
   const message =
     phase.kind === 'wrong'
       ? t('shell.session.wrong')
-      : phase.kind === 'stillOut'
+      : phase.kind === 'rate'
+        ? t('shell.session.rate')
+        : phase.kind === 'stillOut'
         ? t('shell.session.stillOut')
         : phase.kind === 'magicFailed'
           ? t('shell.session.magicFailed')

@@ -1,10 +1,12 @@
 'use server';
 
+import { unstable_update } from '@/auth';
 import { requireFullSession } from '@/lib/authGuards';
 import {
   confirmTotpEnrollment,
   disableTwoFactor,
   isTwoFactorEnabled,
+  issueTwoFactorTicket,
   startTotpEnrollment,
   type EnrollmentChallenge,
 } from '@/lib/totp';
@@ -35,6 +37,12 @@ export async function confirmTwoFactorEnrollmentAction(
   const { userId } = await requireFullSession();
   const result = await confirmTotpEnrollment(userId, code);
   if (!result) return { ok: false };
+  // This session just proved a TOTP code: clear it through the same server-side
+  // ticket as /login/2fa, so it keeps working once 2FA is armed. Every OTHER
+  // session issued before enrolment is revoked on its next request (auth.ts jwt,
+  // lib/secondFactorGate).
+  const nonce = await issueTwoFactorTicket(userId);
+  await unstable_update({ twoFactorTicket: nonce } as unknown as Parameters<typeof unstable_update>[0]);
   return { ok: true, recoveryCodes: result.recoveryCodes };
 }
 

@@ -54,8 +54,8 @@ export const receiving: Shape<typeof he> = {
       bannerQueued: 'ኣብ ተሌፎን ተዓቂባ · ምትእስሳር ምስ ተመልሰ ክትለኣኽ እያ',
       uploadFailed: 'ምልኣኽ ኣይሰለጠን: {message}',
       bannerDemo: 'ናይ ፈተነ ኣገባብ — ኣብ ሰርቨር ኣይዕቀብን',
-      tooLarge: 'እቲ ፋይል ኣዝዩ ዓቢ እዩ (ክሳብ {mb} MB)። ኣብ ክንዲኡ ስእሊ ፋቱራ ኣልዕሉ፡ ወይ ነቲ PDF ምቀልዎ።',
-      unsupportedType: 'እዚ ዓይነት ፋይል ኣይድገፍን እዩ። ስእሊ (JPG / PNG / WEBP) ወይ PDF ኣእትዉ።',
+      tooLarge: 'እቲ ፋይል ኣዝዩ ዓቢ ወይ ዘይድገፍ ቅርጺ እዩ — ብካሜራ ደጊምኩም ስኣሉ፡ ወይ ካብ {mb} MB ዝነኣሰ PDF ስደዱ',
+      unsupportedType: 'እቲ ፋይል ኣዝዩ ዓቢ ወይ ዘይድገፍ ቅርጺ እዩ — ብካሜራ ደጊምኩም ስኣሉ፡ ወይ ካብ 3 MB ዝነኣሰ PDF ስደዱ',
       rateLimited: 'ብዙሕ ምልኣኽ ተገይሩ። ድሕሪ ቁሩብ ደቓይቕ እንደገና ፈትኑ።',
       network: 'ርክብ የለን። መርበብኩም ፈቲሽኩም እንደገና ፈትኑ።',
     },
@@ -205,6 +205,7 @@ export const receiving: Shape<typeof he> = {
     afterClose: 'መጠን ₪ ምቕባል ምስ ተዓጽወ ይውሰን — ናይ ምንጽጻር ሲስተም ምስ ብሓቂ ዝተቘጽረ የነጻጽሮ።', // review
     slow: 'ሕሳብ ካብ ልሙድ ንላዕሊ ግዜ ይወስድ ኣሎ። ብዝሒ ኣብዚ ኣሎ፤ ₪ ደሓር ክመጽእ እዩ።', // review
     heldReview: 'መጠናት ድሕሪ ምርመራ ፋቱራ ክውሰኑ እዮም።', // review
+    heldClaim: 'ውጽኢት ቆጸራ ኣብዚ ፋቱራ ኣይተተግበረን፡ ታሪኽ ዘለዎ ሕቶ ክረዲት ኣለዎ፣ ኣብ ምክትታል ምምላስ ይጸንሕ።', // review
     heldSettled: 'እዚ ፋቱራ ድሮ ጸዲቑ — መጠናቱ ኣብ ገጽ ምጽዳቕ ኣሎ።', // review
     refresh: 'ኣሐድሱ',
     copy: 'ጽሑፍ ቅዳሕ',

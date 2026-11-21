@@ -26,13 +26,22 @@ export function ddmmyyyy(isoDate: string, shortYear = false): string {
   return `${d}/${m}/${shortYear ? y!.slice(2) : y}`;
 }
 
-/** Supplier card code: explicit mapping → company id digits → a stable fallback. */
-export function supplierAccount(inv: AccountingInvoice, cfg: AccountingConfig): string {
+/**
+ * Supplier card code: explicit mapping → company id (ח״פ) digits → none.
+ * A code is NEVER invented (W2-14, admin-10): an invented `S…` card posted the
+ * purchase to a card that doesn't exist in the books. `null` = no card; the
+ * invoice is left out of the file and counted (`renderAccountingFile`).
+ */
+export function supplierAccountOrNull(inv: AccountingInvoice, cfg: AccountingConfig): string | null {
   const mapped = inv.supplierId ? cfg.supplierAccounts[inv.supplierId]?.trim() : undefined;
   if (mapped) return mapped;
   const digits = inv.supplierBusinessId.replace(/\D/g, '');
-  if (digits) return digits;
-  return inv.supplierId ? `S${inv.supplierId.replace(/-/g, '').slice(0, 8).toUpperCase()}` : 'SUPPLIER';
+  return digits || null;
+}
+
+/** The card code of an invoice the renderer was given (only mapped ones reach it). */
+export function supplierAccount(inv: AccountingInvoice, cfg: AccountingConfig): string {
+  return supplierAccountOrNull(inv, cfg) ?? '';
 }
 
 /**

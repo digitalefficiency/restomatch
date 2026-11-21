@@ -13,6 +13,7 @@ import { Chains, CHAINS_DURATION } from './scenes/Chains';
 import { Value } from './scenes/Value';
 import { Cta } from './scenes/Cta';
 import { HeroLoop, HERO_LOOP_FRAMES } from './scenes/HeroLoop';
+import { HeroLoopVertical } from './scenes/HeroLoopVertical';
 import { PhoneDash, PHONE_DASH_DURATION } from './scenes/PhoneDash';
 
 loadFonts();
@@ -96,5 +97,6 @@ export const Root: React.FC = () => (
       defaultProps={{ locale: 'he' as Locale }}
     />
     <Composition id="HeroLoop" component={Loop} durationInFrames={HERO_LOOP_FRAMES} fps={30} width={1280} height={720} defaultProps={{ locale: 'he' as Locale }} />
+    <Composition id="HeroLoopVertical" component={HeroLoopVertical} durationInFrames={HERO_LOOP_FRAMES} fps={30} width={1080} height={1920} />
   </>
 );

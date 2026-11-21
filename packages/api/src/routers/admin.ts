@@ -21,9 +21,37 @@ import { adminProcedure, authedProcedure, router } from '../trpc';
 import { recordAudit } from '../audit';
 import { appError } from '../errors';
 import { usagePeriod } from '../entitlements';
-import { FEATURE_KEYS, featureEnabled, type FeatureKey } from '../lib/features';
+import { DEFAULT_ON_FEATURES, FEATURE_KEYS, featureEnabled, type FeatureKey } from '../lib/features';
+import { releaseOrderQuestionHolds } from './mapping';
+import { automationKpis as computeAutomationKpis, AUTOMATION_MAX_WEEKS } from '@restomatch/charts';
 
 const PlanKeyEnum = z.enum(['trial', 'basic', 'pro', 'chain']);
+
+/**
+ * W3-07a: every platform-admin write carries a typed reason (staged in the
+ * console, confirmed with a reason). Trimmed, 3–500 chars; stored in the audit
+ * row's `after.reason` so the trail says WHY, not only what.
+ */
+export const AdminReason = z
+  .string()
+  // Control characters and bidi overrides/isolates could make a Hebrew audit
+  // line read differently from what was stored; drop them before validating.
+  .transform((v) => v.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, ' ').trim())
+  .pipe(z.string().min(3).max(500));
+
+/**
+ * The reason is OPTIONAL in the input type and REQUIRED at runtime. Typing it
+ * optional keeps callers that never reach the handler (the immutable
+ * cross-tenant attack suite, which is refused FORBIDDEN by adminProcedure
+ * before input parsing) compiling; the handler refuses a missing reason with
+ * BAD_REQUEST before it reads or writes anything.
+ */
+function requireReason(reason: string | undefined): string {
+  if (reason === undefined) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: 'a reason is required for admin writes' });
+  }
+  return reason;
+}
 const StatusEnum = z.enum(['trialing', 'active', 'past_due', 'canceled']);
 
 const OverridesSchema = z.object({
@@ -66,6 +94,8 @@ function featureState(settings: unknown) {
   return {
     stored,
     all: stored.all === true,
+    /** On unless stored false (G-08 orderQuestions) — what an unticked, never-saved box means. */
+    defaultOn: [...DEFAULT_ON_FEATURES] as string[],
     effective: Object.fromEntries(FEATURE_KEYS.map((k) => [k, featureEnabled(settings, k)])) as Record<
       FeatureKey,
       boolean
@@ -231,9 +261,11 @@ export const adminRouter = router({
         planKey: PlanKeyEnum,
         status: StatusEnum.optional(),
         trialDays: z.number().int().min(0).max(365).optional(),
+        reason: AdminReason.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const reason = requireReason(input.reason);
       const status = input.status ?? (input.planKey === 'trial' ? 'trialing' : 'active');
       const trialEndsAt =
         status === 'trialing' && input.trialDays
@@ -306,7 +338,7 @@ export const adminRouter = router({
           entityType: 'restaurant',
           entityId: r.id,
           before: prior ?? null,
-          after: { planKey: input.planKey, status, trialEndsAt },
+          after: { planKey: input.planKey, status, trialEndsAt, reason },
         });
 
         return { billingAccountId, planKey: input.planKey, status, trialEndsAt };
@@ -315,18 +347,22 @@ export const adminRouter = router({
 
   /** Set per-tenant limit / feature overrides on the subscription. */
   setOverrides: adminProcedure
-    .input(z.object({ restaurantId: z.string().uuid(), overrides: OverridesSchema }))
+    .input(
+      z.object({
+        restaurantId: z.string().uuid(),
+        overrides: OverridesSchema,
+        reason: AdminReason.optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
+      const reason = requireReason(input.reason);
       const [r] = await ctx.db
         .select({ billingAccountId: restaurants.billingAccountId })
         .from(restaurants)
         .where(eq(restaurants.id, input.restaurantId))
         .limit(1);
       if (!r?.billingAccountId) {
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: 'restaurant has no subscription — assign a plan first',
-        });
+        throw appError('BAD_REQUEST', 'admin.noSubscription', 'restaurant has no subscription — assign a plan first');
       }
       const overrides = {
         ...(input.overrides.limits
@@ -334,29 +370,37 @@ export const adminRouter = router({
           : {}),
         ...(input.overrides.features ? { features: input.overrides.features } : {}),
       };
-      // Capture the prior overrides for the audit before-image (RETURNING would
-      // give the post-update value).
-      const [prior] = await ctx.db
-        .select({ overrides: subscriptions.overrides })
-        .from(subscriptions)
-        .where(eq(subscriptions.billingAccountId, r.billingAccountId))
-        .limit(1);
-      if (!prior) {
-        throw new TRPCError({ code: 'NOT_FOUND', message: 'subscription not found' });
-      }
-      await ctx.db
-        .update(subscriptions)
-        .set({ overrides, updatedAt: new Date() })
-        .where(eq(subscriptions.billingAccountId, r.billingAccountId));
+      const billingAccountId = r.billingAccountId;
+      // One transaction: the write and its audit row land together or not at
+      // all (an unaudited admin write is not allowed).
+      await ctx.db.transaction(async (tx) => {
+        // Capture the prior overrides for the audit before-image (RETURNING would
+        // give the post-update value).
+        const [prior] = await tx
+          .select({ overrides: subscriptions.overrides })
+          .from(subscriptions)
+          .where(eq(subscriptions.billingAccountId, billingAccountId))
+          .for('update')
+          .limit(1);
+        if (!prior) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'subscription not found' });
+        }
+        await tx
+          .update(subscriptions)
+          .set({ overrides, updatedAt: new Date() })
+          .where(eq(subscriptions.billingAccountId, billingAccountId));
 
-      await recordAudit(ctx.db, {
-        restaurantId: input.restaurantId,
-        userId: ctx.session.userId,
-        action: 'admin.overrides_set',
-        entityType: 'restaurant',
-        entityId: input.restaurantId,
-        before: prior.overrides,
-        after: overrides,
+        // before/after keep the same shape ({ overrides }); the reason sits beside
+        // it, never inside the stored overrides.
+        await recordAudit(tx, {
+          restaurantId: input.restaurantId,
+          userId: ctx.session.userId,
+          action: 'admin.overrides_set',
+          entityType: 'restaurant',
+          entityId: input.restaurantId,
+          before: { overrides: prior.overrides },
+          after: { overrides, reason },
+        });
       });
       return { ok: true as const };
     }),
@@ -368,14 +412,24 @@ export const adminRouter = router({
    * the demo's 'all' — and every flag not in the patch stay exactly as they were.
    */
   setFeatures: adminProcedure
-    .input(z.object({ restaurantId: z.string().uuid(), features: FeaturePatchSchema }))
+    .input(
+      z.object({
+        restaurantId: z.string().uuid(),
+        features: FeaturePatchSchema,
+        // Optional until AU-01's FeaturesPanel sends it (W3-07a carve-out); then required.
+        reason: AdminReason.optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
-      return ctx.db.transaction(async (tx) => {
+      let orderQuestionsOff = false;
+      const out = await ctx.db.transaction(async (tx) => {
         const [r] = await tx
           .select({ id: restaurants.id, settings: restaurants.settings })
           .from(restaurants)
           .where(eq(restaurants.id, input.restaurantId))
-          .for('update')
+          // NO KEY UPDATE (as train B's other settings writers): a queue / claim
+          // insert's FK KEY SHARE on this row is not blocked behind an admin save.
+          .for('no key update')
           .limit(1);
         if (!r) throw appError('NOT_FOUND', 'admin.notFound', 'restaurant not found');
         const before = storedFeatures(r.settings);
@@ -389,6 +443,7 @@ export const adminRouter = router({
           .where(eq(restaurants.id, r.id))
           .returning({ settings: restaurants.settings });
         const after = storedFeatures(updated?.settings);
+        orderQuestionsOff = !featureEnabled(updated?.settings, 'orderQuestions');
 
         await recordAudit(tx, {
           restaurantId: r.id,
@@ -397,10 +452,27 @@ export const adminRouter = router({
           entityType: 'restaurant',
           entityId: r.id,
           before,
-          after,
+          after: input.reason ? { ...after, reason: input.reason } : after,
         });
         return { features: featureState(updated?.settings) };
       });
+      // G-08 kill switch: while order questions are OFF, every save releases and
+      // re-matches the invoices still waiting for them (after the commit, so the job
+      // reads the new flag). Idempotent, so a save is also the retry (round 10).
+      if (!orderQuestionsOff) return out;
+      try {
+        const r = await releaseOrderQuestionHolds(ctx.db, input.restaurantId);
+        return { ...out, release: { ok: true as const, released: r.released, requeued: r.requeued, failed: r.failed } };
+      } catch (err) {
+        console.error(`[admin.setFeatures] order-question release failed for restaurant=${input.restaurantId}`, err);
+        return {
+          ...out,
+          release: {
+            ok: false as const,
+            error: `saved; release failed — run release-order-holds --restaurant ${input.restaurantId}`,
+          },
+        };
+      }
     }),
 
   /** Change a member's role within a restaurant. */
@@ -410,9 +482,11 @@ export const adminRouter = router({
         restaurantId: z.string().uuid(),
         userId: z.string().uuid(),
         role: z.enum(['owner', 'manager', 'receiver', 'bookkeeper', 'chef']),
+        reason: AdminReason.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      const reason = requireReason(input.reason);
       const [current] = await ctx.db
         .select({ role: memberships.role })
         .from(memberships)
@@ -461,7 +535,7 @@ export const adminRouter = router({
         entityType: 'user',
         entityId: input.userId,
         before: { role: current.role },
-        after: { role: input.role },
+        after: { role: input.role, reason },
       });
       return { ok: true as const };
     }),
@@ -481,5 +555,58 @@ export const adminRouter = router({
         JSON.stringify({ audit: 'admin.viewed', entityType: 'leads', userId: ctx.session.userId, count: rows.length }),
       );
       return rows;
+    }),
+  /**
+   * AU-07 · automation telemetry for one restaurant, per Israel week (read-only).
+   * The SQL lives in @restomatch/charts (automation.ts) and filters restaurant_id
+   * itself: this runs on the cross-tenant owner connection. flagsOn is computed
+   * here because FEATURE_KEYS / featureEnabled live in api (charts may not import
+   * api). A read of aggregates: its only write is one 'admin.viewed' audit row (conductor F1, 11.11).
+   */
+  automationKpis: adminProcedure
+    .input(
+      z.object({
+        restaurantId: z.string().uuid(),
+        weeks: z.number().int().min(1).max(AUTOMATION_MAX_WEEKS).default(8),
+        rates: z
+          .object({
+            receiver: z.number().min(0).max(2000),
+            bookkeeper: z.number().min(0).max(2000),
+            manager: z.number().min(0).max(2000),
+            chef: z.number().min(0).max(2000),
+            owner: z.number().min(0).max(2000),
+          })
+          .partial()
+          .optional(),
+        bookkeeperFeeIls: z.number().min(0).max(100_000).optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const [r] = await ctx.db
+        .select({ id: restaurants.id, name: restaurants.name, settings: restaurants.settings })
+        .from(restaurants)
+        .where(eq(restaurants.id, input.restaurantId))
+        .limit(1);
+      if (!r) throw appError('NOT_FOUND', 'admin.notFound', 'restaurant not found');
+      // A platform admin reading a tenant's ₪ funnel leaves a trace, like getRestaurant (conductor F1, 11.11).
+      await recordAudit(ctx.db, {
+        restaurantId: r.id,
+        userId: ctx.session.userId,
+        action: 'admin.viewed',
+        entityType: 'restaurant',
+        entityId: r.id,
+        after: { view: 'automationKpis', restaurantId: r.id, weeks: input.weeks },
+      });
+      const kpis = await computeAutomationKpis(ctx.db, r.id, {
+        weeks: input.weeks,
+        rates: input.rates,
+        bookkeeperFeeIls: input.bookkeeperFeeIls,
+      });
+      return {
+        ...kpis,
+        restaurantName: r.name,
+        flagsOn: FEATURE_KEYS.filter((k) => featureEnabled(r.settings, k)).length,
+        flagsTotal: FEATURE_KEYS.length,
+      };
     }),
 });

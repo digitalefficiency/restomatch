@@ -4,6 +4,7 @@ import { marketing } from '@/lib/i18n/messages/marketing';
 import { getT } from '@/lib/i18n/server';
 import { alternatesFor, metadataBase, socialFor } from '../_components/seo';
 import { LegalShell, LegalSection, LegalClause } from '../_components/LegalShell';
+import { contactChannels, operatorText, PUBLIC_FACTS } from '@/lib/contact';
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getT(marketing);
@@ -21,32 +22,36 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 /**
- * Privacy policy (E.1). Bilingual (Hebrew prevails) skeleton covering the
- * duty-to-inform topics — controller identity, PII categories, purposes,
- * sub-processors, cross-border transfer, retention, data-subject rights,
- * cookies, contact/DPO. Copy: `marketing.legal.privacy.*`. Every substantive
- * sentence is tagged for legal review; no statutory citation, deadline, or
- * guarantee is asserted as fact.
+ * Privacy policy (E.1, pilot H-02). Bilingual (Hebrew prevails) draft: the
+ * operator and privacy contact come from `lib/contact.ts` (legal name only, no
+ * company number); controller vs holder split; the four sub-processors that
+ * actually receive data, with countries (docs/legal/SUBPROCESSORS.md);
+ * retention and rights. Copy: `marketing.legal.privacy.*`. Every clause is
+ * tagged for counsel; DPA status stays "in review" until signed.
  */
 const SUBPROCESSORS = [
-  { name: 'Supabase', purpose: 'supabase', country: 'unknown' },
-  { name: 'Resend', purpose: 'resend', country: 'unknown' },
+  { name: 'Supabase', purpose: 'supabase', country: 'japan' },
+  { name: 'Vercel', purpose: 'vercel', country: 'japanEdge' },
   { name: 'Anthropic', purpose: 'anthropic', country: 'us' },
-  { name: 'Google Document AI', purpose: 'googleDocAi', country: 'unknown' },
-  { name: 'Upstash', purpose: 'upstash', country: 'unknown' },
-  { name: 'Vercel', purpose: 'vercel', country: 'unknown' },
-  { name: 'Fly.io', purpose: 'fly', country: 'unknown' },
-  { name: 'Sentry', purpose: 'sentry', country: 'unknown' },
-  { name: 'Higgsfield', purpose: 'higgsfield', country: 'unknown' },
+  { name: 'Resend', purpose: 'resend', country: 'us' },
 ] as const;
+
+/** Privacy inbox: the dedicated privacy contact once set, else the site e-mail. */
+function privacyEmail(): string {
+  return PUBLIC_FACTS.company.privacyContact ?? contactChannels().email?.address ?? '—';
+}
 
 export default async function PrivacyPolicyPage() {
   const t = await getT(marketing);
+  // No company number on the site (owner decision 31.10): legal name only.
+  const operator = operatorText(t.locale, () => '') ?? t('legal.privacy.operatorPending');
+  const email = privacyEmail();
   return (
     <LegalShell title={t('legal.privacy.title')} intro={t('legal.privacy.intro')}>
       <LegalSection heading={t('legal.privacy.s1.heading')}>
-        <LegalClause>{t('legal.privacy.s1.c1')}</LegalClause>
+        <LegalClause>{t('legal.privacy.s1.c1', { operator, email })}</LegalClause>
         <LegalClause>{t('legal.privacy.s1.c2')}</LegalClause>
+        <LegalClause>{t('legal.privacy.s1.c3')}</LegalClause>
       </LegalSection>
 
       <LegalSection heading={t('legal.privacy.s2.heading')}>
@@ -88,6 +93,7 @@ export default async function PrivacyPolicyPage() {
           </table>
         </div>
         <LegalClause>{t('legal.privacy.s4.c2')}</LegalClause>
+        <LegalClause>{t('legal.privacy.s4.c3')}</LegalClause>
       </LegalSection>
 
       <LegalSection heading={t('legal.privacy.s5.heading')}>
@@ -98,11 +104,14 @@ export default async function PrivacyPolicyPage() {
       <LegalSection heading={t('legal.privacy.s6.heading')}>
         <LegalClause>{t('legal.privacy.s6.c1')}</LegalClause>
         <LegalClause>{t('legal.privacy.s6.c2')}</LegalClause>
+        <LegalClause>{t('legal.privacy.s6.c3')}</LegalClause>
+        <LegalClause>{t('legal.privacy.s6.c4')}</LegalClause>
       </LegalSection>
 
       <LegalSection heading={t('legal.privacy.s7.heading')}>
         <LegalClause>{t('legal.privacy.s7.c1')}</LegalClause>
         <LegalClause>{t('legal.privacy.s7.c2')}</LegalClause>
+        <LegalClause>{t('legal.privacy.s7.c3', { email })}</LegalClause>
         <p>
           {t('legal.privacy.s7.accountPrefix')}{' '}
           <Link href="/dashboard/settings" className="text-primary underline">
@@ -125,10 +134,12 @@ export default async function PrivacyPolicyPage() {
 
       <LegalSection heading={t('legal.privacy.s9.heading')}>
         <LegalClause>{t('legal.privacy.s9.c1')}</LegalClause>
+        <LegalClause>{t('legal.privacy.s9.c2')}</LegalClause>
       </LegalSection>
 
       <LegalSection heading={t('legal.privacy.s10.heading')}>
-        <LegalClause>{t('legal.privacy.s10.c1')}</LegalClause>
+        <LegalClause>{t('legal.privacy.s10.c1', { operator, email })}</LegalClause>
+        <LegalClause>{t('legal.privacy.s10.c2')}</LegalClause>
       </LegalSection>
     </LegalShell>
   );

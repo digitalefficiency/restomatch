@@ -23,6 +23,7 @@ import {
 } from '@restomatch/db';
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
+import { restaurantTodayAt } from './helpers/il-day';
 
 const TEST_DB_URL =
   testDbUrl();
@@ -79,10 +80,9 @@ async function seed(): Promise<Scenario> {
     .values({ restaurantId: restaurant.id, name: 'ירקני אבי' })
     .returning();
 
-  const today = new Date();
-  today.setHours(10, 0, 0, 0);
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
+  // The restaurant's (Israeli) today and yesterday at 10:00, not the runner's.
+  const today = restaurantTodayAt(10);
+  const yesterday = restaurantTodayAt(10, { dayOffset: -1 });
 
   const todayPo = await db
     .insert(purchaseOrders)
@@ -700,8 +700,7 @@ describe('receiving — multi-tenant isolation', () => {
       .insert(suppliers)
       .values({ restaurantId: otherRest!.id, name: 'Other Supplier' })
       .returning();
-    const today = new Date();
-    today.setHours(10, 0, 0, 0);
+    const today = restaurantTodayAt(10);
     await db.insert(purchaseOrders).values({
       restaurantId: otherRest!.id,
       supplierId: otherSup!.id,

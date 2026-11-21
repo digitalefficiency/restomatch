@@ -1,44 +1,64 @@
 import {
   and,
+  asc,
+  auditLog,
   catalogImports,
   eq,
+  isNull,
+  sql,
   products,
   suppliers,
   supplierCatalogItems,
   type Database,
 } from '@restomatch/db';
 import {
+  MAX_SUGGESTIONS,
+  REVIEW_FLOOR,
+  decideLink,
+  isExactKey,
   matchProductTopN,
+  normNameSql,
+  normalizeLinkName,
+  rankSuggestions,
   recordConfirmedMatch,
   type EmbeddingProvider,
+  type ReviewReason as LinkReviewReason,
 } from '@restomatch/catalog';
 import { areConvertible } from '@restomatch/matching';
 import { sameUnit } from '../lib/unitPrice';
 import type { CatalogRow } from './parse';
+import { toPriceUnits } from '../lib/parseMoneyCell';
 
-/**
- * Confidence at/above which a row auto-links to an existing product — and only
- * when its unit and pack also fit. Anything less is a suggestion for a person.
+/*
+ * G-08: the thresholds (auto ≥ 0.95 with a fitting unit/pack, review floor 0.6,
+ * 1.000 reserved for a person) live in ONE place — `decideLink` in
+ * `@restomatch/catalog` (linkPolicy.ts), shared with OCR and order capture.
  */
-const AUTO_LINK = 0.95;
-/**
- * Interim provenance: an alias at confidence 1.000 means a PERSON linked it
- * (mapping.confirm, the import review, a catalog edit). A machine link — an
- * automatic match, or a product made from this very row — is stored just below,
- * so a guess is never saved as certainty.
- */
-const MACHINE_MAX_CONFIDENCE = 0.999;
-/** Floor below which we create a new product instead of linking. */
-const REVIEW_FLOOR = 0.6;
 
 export interface CommitArgs {
   restaurantId: string;
   supplierId: string;
   sourceImportId?: string | null;
+  /** Who committed (inline tRPC import); null for the background worker. Stamped on the audit row. */
+  userId?: string | null;
+}
+
+/** W3-10 · the audit action AU-13's priceListDiff reads (one row per committed import). */
+export const IMPORT_COMMITTED_AUDIT_ACTION = 'catalog.import_committed';
+
+/** One list-price change in a committed import (NUMERIC strings, as stored). */
+export interface ImportPriceChange {
+  productId: string | null;
+  name: string;
+  sku: string | null;
+  oldListPrice: string;
+  newListPrice: string;
+  unit: string | null;
 }
 
 /** Why a suggested link needs a person ("בדיקה"). */
-export type ReviewReason = 'MEDIUM_CONFIDENCE' | 'UNIT_MISMATCH' | 'PACK_MISMATCH';
+export type ReviewReason = Exclude<LinkReviewReason, 'UNKNOWN_UNIT'>;
+type FitReason = 'UNIT_MISMATCH' | 'PACK_MISMATCH';
 
 /**
  * A price-list row saved WITHOUT a product link: the matcher found a candidate
@@ -59,6 +79,8 @@ export interface AmbiguousRow {
   confidence: number;
   matchedBy: string;
   reasons: ReviewReason[];
+  /** G-08: the top ≤3 candidates (best first) for the person to pick from; the first is `productId`. */
+  suggestions: Array<{ productId: string; canonicalName: string; confidence: number; matchedBy: string }>;
 }
 
 /** Write progress to the import row every this many rows (background imports). */
@@ -69,6 +91,8 @@ export interface CommitResult {
   updated: number;
   createdProducts: number;
   ambiguous: AmbiguousRow[];
+  /** Existing rows whose list price changed (also written to the audit row). */
+  priceChanges: ImportPriceChange[];
 }
 
 /**
@@ -110,14 +134,26 @@ export async function commitCatalogRows(
   let updated = 0;
   let createdProducts = 0;
   const ambiguous: AmbiguousRow[] = [];
+  const priceChanges: ImportPriceChange[] = [];
 
   for (const row of rows) {
-    // 1. Existing catalog item for this supplier? (by SKU when present, else name)
+    // 1. Existing catalog item for this supplier? By SKU when present, else by
+    // G-08's one name key (normalizeLinkName / its SQL twin normNameSql) on a
+    // no-SKU row — the same key W3-10's "מה ישתנה" preview matches on, so the
+    // preview and the commit agree row for row (W3-10b). The oldest row wins.
     const existingFilter = row.supplierSku
       ? eq(supplierCatalogItems.supplierSku, row.supplierSku)
-      : eq(supplierCatalogItems.supplierNameRaw, row.supplierNameRaw);
+      : and(
+          isNull(supplierCatalogItems.supplierSku),
+          sql`${normNameSql(supplierCatalogItems.supplierNameRaw)} = ${normalizeLinkName(row.supplierNameRaw)}`,
+        );
     const [existing] = await db
-      .select({ id: supplierCatalogItems.id, productId: supplierCatalogItems.productId })
+      .select({
+        id: supplierCatalogItems.id,
+        productId: supplierCatalogItems.productId,
+        listPrice: supplierCatalogItems.listPrice,
+        unit: supplierCatalogItems.unit,
+      })
       .from(supplierCatalogItems)
       .where(
         and(
@@ -126,13 +162,14 @@ export async function commitCatalogRows(
           existingFilter,
         ),
       )
+      .orderBy(asc(supplierCatalogItems.createdAt))
       .limit(1);
 
     // 2. Resolve the canonical product.
     let productId: string | null = existing?.productId ?? null;
     let createdNewProduct = false;
-    /** The matcher's confidence for an automatic link (learned as-is, never rounded up to 1). */
-    let linkConfidence: number | null = null;
+    /** An automatic link proven by an exact key: the only machine link that learns an alias. */
+    let exactKeyLink = false;
     let pendingReview: Omit<AmbiguousRow, 'itemId'> | null = null;
     let embedding: number[] | null = null;
     if (!productId) {
@@ -157,22 +194,26 @@ export async function commitCatalogRows(
               embedding,
               ...(row.barcodeEan ? { barcode: row.barcodeEan } : {}),
             },
-            1,
+            MAX_SUGGESTIONS,
           )
         : [];
-      const top = candidates[0];
-      const reasons: ReviewReason[] = [];
+      // G-08: ONE link policy. Unit/pack is checked against the best candidate.
+      const top = rankSuggestions(candidates)[0];
       let productUnit: string | null = null;
+      let fitReasons: FitReason[] = [];
       if (top && top.confidence >= REVIEW_FLOOR) {
-        if (top.confidence < AUTO_LINK) reasons.push('MEDIUM_CONFIDENCE');
         const fit = await unitPackFit(db, restaurantId, supplierId, top.productId, row);
         productUnit = fit.productUnit;
-        reasons.push(...fit.reasons);
+        fitReasons = fit.reasons;
       }
-      if (top && top.confidence >= REVIEW_FLOOR && reasons.length === 0) {
-        productId = top.productId;
-        linkConfidence = top.confidence;
-      } else if (top && top.confidence >= REVIEW_FLOOR) {
+      const decision = decideLink(candidates, {
+        unitPack: fitReasons.length > 0 ? 'mismatch' : 'match',
+        mismatch: fitReasons,
+      });
+      if (decision.decision === 'auto' && top) {
+        productId = decision.productId;
+        exactKeyLink = isExactKey(top);
+      } else if (decision.decision === 'review' && top) {
         // Suggest, never link: the row is saved unlinked (productId null) and
         // no alias is learned until a person accepts (catalog-01).
         pendingReview = {
@@ -184,7 +225,14 @@ export async function commitCatalogRows(
           productUnit,
           confidence: top.confidence,
           matchedBy: top.matchedBy,
-          reasons,
+          // Import always knows the row's unit fit, so UNKNOWN_UNIT never arises here.
+          reasons: decision.reasons.filter((r): r is ReviewReason => r !== 'UNKNOWN_UNIT'),
+          suggestions: decision.suggestions.map((c) => ({
+            productId: c.productId,
+            canonicalName: c.canonicalName,
+            confidence: c.confidence,
+            matchedBy: c.matchedBy,
+          })),
         };
       } else {
         const [p] = await db
@@ -231,6 +279,22 @@ export async function commitCatalogRows(
         .where(eq(supplierCatalogItems.id, existing.id));
       itemId = existing.id;
       updated += 1;
+      // W3-10 · a list-price change, compared in integer price units (1/100 agorot).
+      const newListPrice = itemValues.listPrice;
+      if (
+        existing.listPrice != null &&
+        newListPrice != null &&
+        toPriceUnits(Number(existing.listPrice)) !== toPriceUnits(Number(newListPrice))
+      ) {
+        priceChanges.push({
+          productId,
+          name: row.supplierNameRaw,
+          sku: row.supplierSku,
+          oldListPrice: existing.listPrice,
+          newListPrice,
+          unit: row.unit ?? existing.unit ?? null,
+        });
+      }
     } else {
       const [ins] = await db
         .insert(supplierCatalogItems)
@@ -243,19 +307,19 @@ export async function commitCatalogRows(
     if (pendingReview) ambiguous.push({ itemId, ...pendingReview });
 
     // 4. Learn the supplier-name → product alias for future invoice OCR — only
-    //    for a product made from this very row or an automatic link, at a
-    //    machine confidence (< 1.000, which is reserved for a person). An
-    //    existing link was already learned when it was made; a suggestion
-    //    learns nothing until accepted.
-    if (productId && (createdNewProduct || linkConfidence != null)) {
+    //    for a product made from this very row or an EXACT-KEY automatic link
+    //    (machine provenance, 0.999 interim; 1.000 is reserved for a person).
+    //    A name-similarity auto-link (embedding/fuzzy ≥ 0.95, unit fits) links
+    //    this price-list row but learns NO confirmed alias (G-08): a guess must
+    //    never auto-resolve every future invoice line. An existing link was
+    //    already learned when it was made; a suggestion learns nothing until accepted.
+    if (productId && (createdNewProduct || exactKeyLink)) {
       await recordConfirmedMatch(db, {
         productId,
         rawName: row.supplierNameRaw,
         supplierId,
         supplierSku: row.supplierSku,
-        confidence: createdNewProduct
-          ? MACHINE_MAX_CONFIDENCE
-          : Math.min(MACHINE_MAX_CONFIDENCE, Math.floor(linkConfidence! * 1000) / 1000),
+        provenance: createdNewProduct ? 'newProduct' : 'exactKey',
       });
     }
 
@@ -270,7 +334,19 @@ export async function commitCatalogRows(
     }
   }
 
-  return { created, updated, createdProducts, ambiguous };
+  // W3-10 · one audit row per committed import: the record AU-13's priceListDiff
+  // reads ({ supplierId, priceChanges }) and the trail a revert works from.
+  // Append-only (audit_log is immutable); written even when no price moved.
+  await db.insert(auditLog).values({
+    restaurantId,
+    userId: args.userId ?? null,
+    action: IMPORT_COMMITTED_AUDIT_ACTION,
+    entityType: 'catalog_import',
+    entityId: args.sourceImportId ?? null,
+    after: { supplierId, created, updated, createdProducts, priceChanges },
+  });
+
+  return { created, updated, createdProducts, ambiguous, priceChanges };
 }
 
 /**
@@ -285,14 +361,14 @@ async function unitPackFit(
   supplierId: string,
   productId: string,
   row: CatalogRow,
-): Promise<{ productUnit: string | null; reasons: ReviewReason[] }> {
+): Promise<{ productUnit: string | null; reasons: FitReason[] }> {
   const [p] = await db
     .select({ defaultUnit: products.defaultUnit })
     .from(products)
     .where(and(eq(products.id, productId), eq(products.restaurantId, restaurantId)))
     .limit(1);
   const productUnit = p?.defaultUnit ?? null;
-  const reasons: ReviewReason[] = [];
+  const reasons: FitReason[] = [];
   if (
     row.unit &&
     productUnit &&

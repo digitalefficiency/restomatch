@@ -1,3 +1,4 @@
+import type { LineKind } from './providers/invoiceSchema';
 import type { InvoiceOcrLine, InvoiceOcrResult } from '@restomatch/types';
 import type { OcrConflict, ResolvedInvoice, ResolvedInvoiceLine } from './types';
 
@@ -242,6 +243,10 @@ function reconcileLine(
 
   // English rendering: only Claude emits it; prefer it, fall back to Document AI.
   const rawDescriptionEn = englishOf(claudeLine) ?? englishOf(docLine);
+  // v2 line facts (only Claude reads them): carried so the gate's deposit and
+  // line-discount allowances apply, and deposit/fee lines are not products.
+  const lineKind = v2Of(claudeLine).lineKind ?? v2Of(docLine).lineKind;
+  const lineDiscountPct = v2Of(claudeLine).lineDiscountPct ?? v2Of(docLine).lineDiscountPct;
 
   return {
     sku,
@@ -252,6 +257,8 @@ function reconcileLine(
     unitPrice,
     lineTotal,
     vatRate,
+    ...(lineKind !== undefined ? { lineKind } : {}),
+    ...(lineDiscountPct !== undefined ? { lineDiscountPct } : {}),
     confidence: Math.min(docLine.confidence ?? 1, claudeLine.confidence ?? 1),
     productId: null,
     productCandidates: [],
@@ -303,4 +310,8 @@ function bigrams(s: string): Set<string> {
 function englishOf(line: InvoiceOcrLine): string | null {
   const en = (line as InvoiceOcrLine & { rawDescriptionEn?: unknown }).rawDescriptionEn;
   return typeof en === 'string' && en.trim() !== '' ? en.trim() : null;
+}
+
+function v2Of(line: InvoiceOcrLine): { lineKind?: LineKind; lineDiscountPct?: number } {
+  return line as { lineKind?: LineKind; lineDiscountPct?: number };
 }

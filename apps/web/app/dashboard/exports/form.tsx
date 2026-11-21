@@ -20,6 +20,7 @@ import { accounting } from '@/lib/i18n/messages/accounting';
 import { components } from '@/lib/i18n/messages/components';
 import { presetRange, rangeError, withBom, type RangePreset } from './range';
 import { AccountingFiles } from './accounting-files';
+import { ExportSummary } from './summary';
 
 const PRESETS: RangePreset[] = ['thisMonth', 'lastMonth', 'last30', 'thisYear'];
 
@@ -147,6 +148,8 @@ export function ExportsForm() {
         ) : null}
       </fieldset>
 
+      {!invalid ? <ExportSummary from={from} to={to} /> : null}
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="rounded-xl border border-line bg-surface-2 p-4">
           <div className="mb-3 flex items-center gap-2">
@@ -172,7 +175,7 @@ export function ExportsForm() {
 
         <div className="rounded-xl border border-line bg-surface-2 p-4">
           <div className="mb-3 flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gold/12 text-gold ring-1 ring-gold/25">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/12 text-primary ring-1 ring-primary/25">
               <FileText className="h-4 w-4" aria-hidden="true" />
             </span>
             <div>
@@ -181,7 +184,7 @@ export function ExportsForm() {
             </div>
           </div>
           <Button
-            variant="gold"
+            variant="secondary"
             className="w-full"
             onClick={() => download('uniform1000')}
             disabled={busy !== null || !!invalid}

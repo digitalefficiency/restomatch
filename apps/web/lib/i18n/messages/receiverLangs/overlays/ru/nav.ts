@@ -13,6 +13,7 @@ export const nav: Shape<typeof he> = {
     labDesk: 'Лаборатория таблиц',
     labDeskRow: 'Строка',
     approvals: 'Согласования',
+    approvalInvoice: 'Решение по счёту',
     payRun: 'Платёжный прогон',
     inbox: 'Входящие счета',
     invoices: 'Счета',
@@ -28,6 +29,7 @@ export const nav: Shape<typeof he> = {
     supplierDetail: 'Поставщик',
     supplierLeakCard: 'Карточка утечек поставщика',
     exports: 'Закрытие месяца и экспорт',
+    close: 'Закрытие месяца', // review
     reports: 'Отчёты',
     monthlyReport: 'Ежемесячный отчёт',
     digest: 'Просмотр ежемесячного письма',
@@ -36,6 +38,7 @@ export const nav: Shape<typeof he> = {
     ordersNew: 'Новый заказ',
     ordersCapture: 'Заказ из WhatsApp',
     orderDetail: 'Заказ',
+    recoverySupplierSheet: 'Лист поставщика',
     receiving: 'Приёмка товара',
     receivingPo: 'Приёмка поставки',
     catalog: 'Каталог',
@@ -52,10 +55,12 @@ export const nav: Shape<typeof he> = {
     inventoryCount: 'Подсчёт',
     inventoryDetail: 'Детали подсчёта',
     chain: 'Обзор сети',
+    chainMatrix: 'Все филиалы', // review
     branches: 'Филиалы',
     team: 'Команда',
     integrations: 'Интеграции',
     settings: 'Настройки',
+    automations: 'Автоматизации',
   },
   bar: {
     today: 'Сегодня',
@@ -126,4 +131,25 @@ export const nav: Shape<typeof he> = {
     ownerNotified: 'Владелец уже получил уведомление.',
   },
   loading: 'Загрузка',
+  badge: {
+    items: '{count} шт.',
+    atRisk: '{amount} под риском',
+    owed: '{amount} открытые кредиты',
+    blocking: 'блокирует оплату',
+  },
+  bell: {
+    activity: 'Что произошло',
+    label: 'Ждёт вас',
+    unseen: 'новых: {count}',
+    title: 'Ждёт вас',
+    empty: 'У вас всё сделано ✓',
+    close: 'Закрыть',
+    all: 'На главную',
+    failed: 'Не загрузилось · попробуйте ещё раз',
+    retry: 'Попробовать ещё раз',
+  },
+  whereIs: {
+    belongs: 'Эта запись относится к {branch}',
+    open: 'Открыть там',
+  },
 };

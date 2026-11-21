@@ -24,6 +24,8 @@ import { appRouter } from '../index';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
+import { addCalendarDaysInTz } from '../lib/time';
+import { RESTAURANT_TZ, restaurantDateKey } from './helpers/il-day';
 
 /**
  * CONSOLIDATED CROSS-MATCH ATTACK SUITE — consolidated.proposal / .coverage on
@@ -91,10 +93,13 @@ beforeAll(async () => {
   await flag(B, true);
 
   const now = new Date();
-  const day = (n: number) => new Date(now.getTime() - n * 24 * 60 * 60 * 1000);
-  // Keep both notes inside the invoice's month (fixture invoice day = today).
-  const d1 = now.getDate() > 2 ? day(2) : now;
-  const d2 = now.getDate() > 1 ? day(1) : now;
+  const day = (n: number) => addCalendarDaysInTz(now, -n, RESTAURANT_TZ);
+  // Keep both notes inside the invoice's month (fixture invoice day = today) — the
+  // restaurant's (Israeli) month, not the runner's: on the 1st between local midnight
+  // and 02:00/03:00 the runner's getDate() is still last month's last day.
+  const dayOfMonth = Number(restaurantDateKey({ now }).slice(8, 10));
+  const d1 = dayOfMonth > 2 ? day(2) : now;
+  const d2 = dayOfMonth > 1 ? day(1) : now;
   ownNotes.push(await deliveryNote(A, A.supplierId, A.productId, 10, 8.5, d1));
   ownNotes.push(await deliveryNote(A, A.supplierId, A.productId, 5, 8.5, d2));
   const [otherSupplier] = await ownerDb

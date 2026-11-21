@@ -14,7 +14,10 @@ import {
   sql,
   suppliers,
   type RestaurantSettings,
+  auditLog,
+  users,
 } from '@restomatch/db';
+import { recordAudit, type AuditAction } from '../audit';
 import { getAdapter, listSupportedPlatforms, type PlatformId } from '@restomatch/procurement';
 import { bookkeeperProcedure, chefProcedure, managerProcedure, memberProcedure, ownerProcedure, requireFeature, router } from '../trpc';
 import { featureEnabled } from '../lib/features';
@@ -44,12 +47,18 @@ type IntegrationSettings = RestaurantSettings & {
   integrations?: { accounting?: Partial<AccountingConfig> };
 };
 
-async function loadSettings(db: import('@restomatch/db').Database, restaurantId: string) {
-  const [row] = await db
+async function loadSettings(
+  db: import('@restomatch/db').Database,
+  restaurantId: string,
+  /** Read-modify-write: lock the row so a concurrent settings writer (e.g. G-08's learned charge keys) is not lost. */
+  forUpdate = false,
+) {
+  const q = db
     .select({ settings: restaurants.settings })
     .from(restaurants)
     .where(eq(restaurants.id, restaurantId))
     .limit(1);
+  const [row] = forUpdate ? await q.for('no key update') : await q;
   return (row?.settings ?? {}) as IntegrationSettings;
 }
 
@@ -65,6 +74,18 @@ const accountingProcedure = bookkeeperProcedure
     await assertIntegrations(ctx.db, ctx.session.restaurantId);
     return next();
   });
+/**
+ * Account-card mapping editors: owner + bookkeeper. Owner decision (wave-2
+ * README §7 Roles): "the bookkeeper reads everything and edits account cards,
+ * with an audit log". Interim for G-07's `can('accounting.edit')`.
+ */
+const accountingEditProcedure = bookkeeperProcedure.use(async ({ ctx, next }) => {
+  await assertIntegrations(ctx.db, ctx.session.restaurantId);
+  return next();
+});
+/** W2-14: G-05 pre-adds this AuditAction; cast until it merges. TODO(W2-14 rebase). */
+const ACCOUNTING_CONFIG_CHANGED = 'integrations.accounting_config_changed' as AuditAction;
+
 /** Owner-only integration settings. */
 const ownerIntegrationsProcedure = ownerProcedure.use(async ({ ctx, next }) => {
   await assertIntegrations(ctx.db, ctx.session.restaurantId);
@@ -181,18 +202,47 @@ export const integrationsRouter = router({
       .from(suppliers)
       .where(and(eq(suppliers.restaurantId, ctx.session.restaurantId), eq(suppliers.active, true)))
       .orderBy(suppliers.name);
+    // Who last changed the mapping (T4 line for the owner): the latest audit row.
+    const [last] = await ctx.db
+      .select({ at: auditLog.at, by: auditLog.userId })
+      .from(auditLog)
+      .where(and(eq(auditLog.restaurantId, ctx.session.restaurantId), eq(auditLog.action, ACCOUNTING_CONFIG_CHANGED)))
+      .orderBy(desc(auditLog.at))
+      .limit(1);
+    let lastChange: { at: Date; byName: string | null } | null = null;
+    if (last) {
+      const [u] = last.by
+        ? await (ctx.adminDb ?? ctx.db)
+            .select({ name: users.name, email: users.email })
+            .from(users)
+            .where(eq(users.id, last.by))
+            .limit(1)
+        : [];
+      lastChange = { at: last.at, byName: u ? u.name || u.email : null };
+    }
     return {
       config,
-      suppliers: rows.map((s) => ({
-        ...s,
-        account: config.supplierAccounts[s.id] ?? null,
-        defaultAccount: (s.businessId ?? '').replace(/\D/g, '') || `S${s.id.replace(/-/g, '').slice(0, 8).toUpperCase()}`,
-      })),
+      lastChange,
+      suppliers: rows.map((s) => {
+        const account = config.supplierAccounts[s.id] ?? null;
+        // The ח״פ digits are the default card. Without one there is NO card:
+        // a code is never invented (W2-14, admin-10).
+        const defaultAccount = (s.businessId ?? '').replace(/\D/g, '') || null;
+        return {
+          ...s,
+          account,
+          defaultAccount,
+          source: account ? ('mapped' as const) : defaultAccount ? ('businessId' as const) : ('missing' as const),
+        };
+      }),
     };
   }),
 
-  /** Owner-only: save the mapping (merged into restaurants.settings.integrations.accounting). */
-  setAccountingConfig: ownerIntegrationsProcedure
+  /**
+   * Owner or bookkeeper: save the mapping (merged into
+   * restaurants.settings.integrations.accounting). Audited with before/after.
+   */
+  setAccountingConfig: accountingEditProcedure
     .input(ConfigInput)
     .mutation(async ({ ctx, input }) => {
       const ids = Object.keys(input.supplierAccounts);
@@ -206,7 +256,7 @@ export const integrationsRouter = router({
       const supplierAccounts = Object.fromEntries(
         Object.entries(input.supplierAccounts).filter(([, code]) => code.length > 0),
       );
-      const current = await loadSettings(ctx.db, ctx.session.restaurantId);
+      const current = await loadSettings(ctx.db, ctx.session.restaurantId, true); // G-08: row lock
       const next: IntegrationSettings = {
         ...current,
         integrations: {
@@ -223,6 +273,15 @@ export const integrationsRouter = router({
         .update(restaurants)
         .set({ settings: next, updatedAt: new Date() })
         .where(eq(restaurants.id, ctx.session.restaurantId));
+      await recordAudit(ctx.db, {
+        restaurantId: ctx.session.restaurantId,
+        userId: ctx.session.userId,
+        action: ACCOUNTING_CONFIG_CHANGED,
+        entityType: 'restaurant',
+        entityId: ctx.session.restaurantId,
+        before: accountingConfigOf(current),
+        after: accountingConfigOf(next),
+      });
       return accountingConfigOf(next);
     }),
 
@@ -296,6 +355,8 @@ export const integrationsRouter = router({
         base64: Buffer.from(file.bytes).toString('base64'),
         rowCount: file.rowCount,
         skippedCount: skipped,
+        /** Left out: the supplier has no card code (no mapping, no ח״פ). */
+        unmappedCount: file.unmappedCount,
         derivedVatCount: derivedVat,
         replacedChars: file.replacedChars,
         undatedCount,

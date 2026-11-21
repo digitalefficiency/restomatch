@@ -7,10 +7,16 @@
  *   WHATSAPP_BUSINESS_ACCOUNT_ID
  *
  * No additional SDK install needed — uses fetch directly.
+ *
+ * A STAFF ALERT inside quiet hours / Shabbat or over the daily cap
+ * (sendWindow.ts) is only enqueued, due at the next allowed instant; the
+ * outbox dispatcher delivers it then.
  */
 
 import type { Database } from '@restomatch/db';
+import { holdQueuedRow } from './email';
 import { enqueueNotification, markSent } from './outbox';
+import { staffAlertHold } from './sendWindow';
 import type { Notifier, NotificationPayload, NotificationSendResult } from './types';
 
 export interface WhatsAppCloudConfig {
@@ -23,12 +29,22 @@ export class WhatsAppCloudNotifier implements Notifier {
   readonly channel = 'whatsapp' as const;
   private readonly apiBase: string;
 
-  constructor(private readonly config: WhatsAppCloudConfig) {
+  constructor(
+    private readonly config: WhatsAppCloudConfig,
+    private readonly clock: () => Date = () => new Date(),
+  ) {
     this.apiBase = config.apiBase ?? 'https://graph.facebook.com/v20.0';
   }
 
   async send(db: Database, payload: NotificationPayload): Promise<NotificationSendResult> {
+    const holdUntil = await staffAlertHold(db, payload, this.clock());
     const enqueued = await enqueueNotification(db, payload);
+    // Already enqueued (a held alert, a retried job): that row is the message.
+    if (enqueued.deduped) return { ok: true };
+    if (holdUntil) {
+      await holdQueuedRow(db, enqueued, holdUntil);
+      return { ok: true };
+    }
     try {
       const externalId = await this.dispatch(payload.target, payload.body);
       await markSent(db, enqueued.id, externalId);

@@ -34,6 +34,7 @@ import type { InvoiceOcrResult } from '@restomatch/types';
 import { appRouter } from '../index';
 import { buildMatchInputForInvoice } from '../match/buildMatchInput';
 import type { AppContext } from '../context';
+import { restaurantTodayAt } from './helpers/il-day';
 
 const TEST_DB_URL =
   testDbUrl();
@@ -91,10 +92,18 @@ describe('E2E — full receiving flow', () => {
         supplierId: supplier!.id,
       })
       .returning();
+    // G-08: OCR auto-links only an exact key. A person confirmed this supplier's
+    // name once (mapping.confirm → a 1.000 alias), so the invoice line resolves;
+    // a bare fuzzy name match alone would (correctly) go to review.
+    await db.insert(productAliases).values({
+      productId: tomatoProduct!.id,
+      supplierId: supplier!.id,
+      supplierNameRaw: 'עגבניה שרי',
+      confidence: '1.000',
+    });
 
     // ── PO scheduled for today
-    const today = new Date();
-    today.setHours(8, 0, 0, 0);
+    const today = restaurantTodayAt(8);
     const [po] = await db
       .insert(purchaseOrders)
       .values({
@@ -187,7 +196,7 @@ describe('E2E — full receiving flow', () => {
 
     expect(ocrResult.reconciled.lines).toHaveLength(1);
     expect(ocrResult.reconciled.lines[0]?.productCandidates.length).toBeGreaterThan(0);
-    // High fuzzy match auto-links the product
+    // The confirmed alias (an exact key) auto-links the product
     const linkedProductId = ocrResult.reconciled.lines[0]?.productId;
 
     // Persist invoice + lines (worker does this; we do it inline for the test)
@@ -279,8 +288,7 @@ describe('E2E — full receiving flow', () => {
         defaultUnit: 'ק״ג',
       })
       .returning();
-    const today = new Date();
-    today.setHours(8, 0, 0, 0);
+    const today = restaurantTodayAt(8);
     const [po] = await db
       .insert(purchaseOrders)
       .values({

@@ -11,9 +11,11 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "copy:baseline": "COPY_BASELINE=1 vitest run lib/copy/__tests__/copy-budget.test.ts",
     "test:e2e:smoke": "playwright test smoke",
     "test:e2e:install": "playwright install chromium",
-    "test:prod-softnav": "node scripts/check-soft-nav.mjs"
+    "test:prod-softnav": "node scripts/check-soft-nav.mjs",
+    "guards": "tsx scripts/guards/run.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.69.0",
@@ -31,6 +33,9 @@
     "@restomatch/types": "workspace:*",
     "@restomatch/ui-tokens": "workspace:*",
     "@restomatch/worker": "workspace:*",
+    "@sentry/node": "10.76.2",
+    "@simplewebauthn/browser": "9.0.1",
+    "@simplewebauthn/server": "9.0.3",
     "@supabase/supabase-js": "^2.106.1",
     "@tanstack/react-query": "^5.62.11",
     "@trpc/client": "^11.0.0-rc.683",

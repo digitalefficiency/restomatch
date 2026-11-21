@@ -3,13 +3,13 @@ import { Card, LinkButton } from '@/lib/components';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { suppliers as suppliersNs } from '@/lib/i18n/messages/suppliers';
 import { approvals as approvalsNs } from '@/lib/i18n/messages/approvals';
-import { loadSupplierLeakCard } from './leak-card-data';
+import { loadLeakCardOnce } from './overview-data';
 import { LeakCardBody } from './leak-card-view';
 
 /** "Leak" tab (flag `supplierLeakCard`): this supplier's last 90 days in ₪, with a printable negotiation card. */
 export async function SupplierLeakTab({ supplierId }: { supplierId: string }) {
   const [card, t, ta, locale] = await Promise.all([
-    loadSupplierLeakCard(supplierId),
+    loadLeakCardOnce(supplierId),
     getT(suppliersNs),
     getT(approvalsNs),
     getLocale(),

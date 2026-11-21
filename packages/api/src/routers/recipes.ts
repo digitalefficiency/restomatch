@@ -14,14 +14,11 @@ import {
   type Database,
 } from '@restomatch/db';
 import { featureEnabled } from '../lib/features';
-import { startOfDayInTz } from '../lib/time';
 import { chefProcedure, managerProcedure, memberProcedure, router } from '../trpc';
 import {
   assertNoCycle,
   costLight,
   costRecipes,
-  diffCosts,
-  parseScaled,
   RecipeCycleError,
   simulatePriceChange,
   unitsCompatible,
@@ -30,22 +27,23 @@ import {
 } from '../recipes/cost';
 import {
   assertRecipesEnabled,
-  earliestPricesFrom,
   latestPrices,
   loadPosSales,
   loadProducts,
   loadRecipes,
-  loadSuppliers,
   loadRestaurant,
   toCostRecipes,
   type ItemRow,
   type PriceWithDate,
   type RecipeRow,
-  type RestaurantCostContext,
 } from '../recipes/data';
 import { parseRecipeCsv, type CsvRecipe } from '../recipes/csv';
 import { posVsTheory } from '../recipes/pos';
 import { dishPriceAlerts } from '../recipes/alerts';
+import { previewDraft } from '../recipes/preview';
+import { computeChanges, startOfMonthInTz } from '../recipes/changes';
+
+export { startOfMonthInTz };
 
 /**
  * Food cost per dish (wave 1, flag `recipes`). Owner / manager / chef read and
@@ -107,6 +105,19 @@ const recipesProcedure = chefProcedure.use(async ({ ctx, next }) => {
   const rc = await assertRecipesEnabled(ctx.db, ctx.session.restaurantId);
   return next({ ctx: { ...ctx, rc } });
 });
+/**
+ * Owner decision I3 (W3-02): the bookkeeper reads everything, read-only. Every
+ * recipes.* READ (queries, preview included: it never writes) also admits the
+ * bookkeeper, ₪ visible (she is finance). Writes stay chef+ / manager+.
+ */
+const READ_ROLES = ['owner', 'manager', 'chef', 'bookkeeper'] as const;
+const recipesReadProcedure = memberProcedure.use(async ({ ctx, next }) => {
+  if (!(READ_ROLES as readonly string[]).includes(ctx.session.role)) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: `Required role: ${READ_ROLES.join('|')}, got: ${ctx.session.role}` });
+  }
+  const rc = await assertRecipesEnabled(ctx.db, ctx.session.restaurantId);
+  return next({ ctx: { ...ctx, rc } });
+});
 const recipesManagerProcedure = managerProcedure.use(async ({ ctx, next }) => {
   const rc = await assertRecipesEnabled(ctx.db, ctx.session.restaurantId);
   return next({ ctx: { ...ctx, rc } });
@@ -150,15 +161,6 @@ function summary(r: RecipeRow, c: RecipeCost | undefined, targetBp: number) {
     light: r.isSubRecipe ? ('none' as const) : costLight(c?.foodCostBp ?? null, targetBp),
     lineCount: c?.lines.length ?? 0,
   };
-}
-
-/** Start of the current calendar month on the restaurant's wall clock. */
-export function startOfMonthInTz(now: Date, tz: string): Date {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit' }).formatToParts(now);
-  const y = Number(parts.find((p) => p.type === 'year')!.value);
-  const m = Number(parts.find((p) => p.type === 'month')!.value);
-  // Noon UTC on the 1st is the 1st in every zone within ±12h; take its local midnight.
-  return startOfDayInTz(new Date(Date.UTC(y, m - 1, 1, 12)), tz);
 }
 
 /** Validate a save's lines: products + sub-recipes belong to the restaurant, units are costable, no cycle. */
@@ -302,106 +304,6 @@ async function writeRecipe(
   return id!;
 }
 
-/**
- * "What changed this month": each recipe costed at the prices in force at the
- * start of the restaurant's calendar month vs now, with the ingredient that
- * moved it most (the "why") and the supplier who charged today's price.
- * Shared by recipes.changes, recipes.priceAlerts and the overview card.
- */
-async function computeChanges(db: Database, rid: string, rc: RestaurantCostContext) {
-    const all = await loadAll(db, rid, rc.vatBp);
-    const since = startOfMonthInTz(new Date(), rc.timezone);
-    const productIds = [...all.prices.keys()];
-    const before = await latestPrices(db, rid, { before: since, productIds });
-    // A product first bought this month has no "before": its first price this month is the baseline.
-    const firstThisMonth = await earliestPricesFrom(db, rid, since, productIds);
-    for (const [pid, p] of firstThisMonth) if (!before.has(pid) && all.prices.has(pid)) before.set(pid, p);
-    const beforeCosts = costRecipes(all.costInput, before, rc.vatBp);
-    const diffs = diffCosts(all.costInput, beforeCosts, all.costs);
-    const byId = new Map(all.rows.map((r) => [r.id, r] as const));
-    const itemsById = new Map(all.items.map((i) => [i.id, i] as const));
-    const productInfo = await loadProducts(db, rid, productIds);
-    const supplierInfo = await loadSuppliers(db, rid, [...new Set([...all.prices.values()].map((p) => p.supplierId))]);
-    return {
-      since,
-      targetBp: rc.targetBp,
-      /** Active dishes on the menu (0 ⇒ "no recipes yet", never "prices are steady"). */
-      activeDishCount: all.rows.filter((r) => r.active && !r.isSubRecipe).length,
-      rows: diffs.map((d) => {
-        const r = byId.get(d.recipeId)!;
-        // The "why": the line whose cost moved most.
-        let driver: { itemId: string; deltaAgorot: number } | null = null;
-        for (const l of d.after.lines) {
-          const b = d.before.lines.find((x) => x.itemId === l.itemId);
-          const delta = l.costAgorot - (b?.costAgorot ?? 0);
-          if (!driver || Math.abs(delta) > Math.abs(driver.deltaAgorot)) driver = { itemId: l.itemId, deltaAgorot: delta };
-        }
-        const it = driver ? itemsById.get(driver.itemId) : undefined;
-        const prod = it?.productId ? productInfo.get(it.productId) : undefined;
-        const sub = it?.subRecipeId ? byId.get(it.subRecipeId) : undefined;
-        const priceBefore = it?.productId ? before.get(it.productId)?.unitPrice ?? null : null;
-        const priceNow = it?.productId ? all.prices.get(it.productId)?.unitPrice ?? null : null;
-        const supplierId = it?.productId ? all.prices.get(it.productId)?.supplierId ?? null : null;
-        const supplier = supplierId ? supplierInfo.get(supplierId) ?? null : null;
-        // The alert's "why" (dishPriceAlert): the biggest cost rise on a product
-        // line whose paid price went up at the same supplier as at the start of
-        // the month — never a supplier switch, a recipe edit or a price drop.
-        let riser: { itemId: string; productId: string; deltaAgorot: number } | null = null;
-        for (const l of d.after.lines) {
-          const pid = itemsById.get(l.itemId)?.productId;
-          if (!pid) continue;
-          const b0 = before.get(pid);
-          const n0 = all.prices.get(pid);
-          if (!b0 || !n0 || b0.supplierId !== n0.supplierId) continue;
-          if (parseScaled(n0.unitPrice, 4) <= parseScaled(b0.unitPrice, 4)) continue;
-          const delta = l.costAgorot - (d.before.lines.find((x) => x.itemId === l.itemId)?.costAgorot ?? 0);
-          if (delta > 0 && (!riser || delta > riser.deltaAgorot)) riser = { itemId: l.itemId, productId: pid, deltaAgorot: delta };
-        }
-        const riserProd = riser ? productInfo.get(riser.productId) : undefined;
-        const riserSupplierId = riser ? all.prices.get(riser.productId)!.supplierId : null;
-        const riserSupplier = riserSupplierId ? supplierInfo.get(riserSupplierId) ?? null : null;
-        return {
-          recipeId: r.id,
-          name: r.name,
-          nameEn: r.nameEn,
-          isSubRecipe: r.isSubRecipe,
-          active: r.active,
-          beforeCostAgorot: d.before.portionCostAgorot,
-          afterCostAgorot: d.after.portionCostAgorot,
-          beforeFoodCostBp: d.before.foodCostBp,
-          afterFoodCostBp: d.after.foodCostBp,
-          costDeltaAgorot: d.portionCostDeltaAgorot,
-          marginDeltaAgorot: d.marginDeltaAgorot,
-          afterLight: r.isSubRecipe ? ('none' as const) : costLight(d.after.foodCostBp, rc.targetBp),
-          driver: driver && it
-            ? {
-                kind: it.productId ? ('product' as const) : ('subRecipe' as const),
-                name: prod?.name ?? sub?.name ?? '',
-                nameEn: prod?.nameEn ?? sub?.nameEn ?? null,
-                unit: prod?.unit ?? (it.productId ? all.prices.get(it.productId)?.unit : null) ?? null,
-                deltaAgorot: driver.deltaAgorot,
-                priceBefore,
-                priceNow,
-                /** Who charged today's price (the latest paid price's supplier). */
-                supplier: supplier ? { id: supplierId!, name: supplier.name, nameEn: supplier.nameEn } : null,
-              }
-            : null,
-          riser: riser
-            ? {
-                name: riserProd?.name ?? '',
-                nameEn: riserProd?.nameEn ?? null,
-                unit: riserProd?.unit ?? all.prices.get(riser.productId)?.unit ?? null,
-                deltaAgorot: riser.deltaAgorot,
-                priceBefore: before.get(riser.productId)!.unitPrice,
-                priceNow: all.prices.get(riser.productId)!.unitPrice,
-                supplier: riserSupplier ? { id: riserSupplierId!, name: riserSupplier.name, nameEn: riserSupplier.nameEn } : null,
-              }
-            : null,
-        };
-      }),
-    };
-}
-
 export const recipesRouter = router({
   /** Whether the `recipes` feature is on for the caller's restaurant (drives the nav). Never FORBIDDEN. */
   enabled: memberProcedure.query(async ({ ctx }) => {
@@ -410,7 +312,7 @@ export const recipesRouter = router({
   }),
 
   /** Every recipe with its current cost, food-cost %, margin and traffic light. */
-  list: recipesProcedure.query(async ({ ctx }) => {
+  list: recipesReadProcedure.query(async ({ ctx }) => {
     const all = await loadAll(ctx.db, ctx.session.restaurantId, ctx.rc.vatBp);
     return {
       targetBp: ctx.rc.targetBp,
@@ -419,7 +321,7 @@ export const recipesRouter = router({
   }),
 
   /** One recipe with its costed lines (product / sub-recipe names, price used, unit). */
-  get: recipesProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {
+  get: recipesReadProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {
     const rid = ctx.session.restaurantId;
     const all = await loadAll(ctx.db, rid, ctx.rc.vatBp);
     const r = all.rows.find((x) => x.id === input.id);
@@ -458,6 +360,58 @@ export const recipesRouter = router({
     };
   }),
 
+  /**
+   * W3-02 · cost a draft recipe live (the editor, debounced) — NO write. The
+   * draft replaces the saved recipe of the same id. Foreign or unknown ids
+   * (recipe, product, sub-recipe) are NOT_FOUND with the save's tokens; unit
+   * mismatches and missing prices are line statuses, not errors (mid-typing).
+   */
+  preview: recipesReadProcedure.input(recipeInput).query(async ({ ctx, input }) => {
+    const rid = ctx.session.restaurantId;
+    const { rows, items } = await loadRecipes(ctx.db, rid);
+    if (input.id && !rows.some((r) => r.id === input.id)) fail('NOT_FOUND', 'notFound');
+    const productIds = [...new Set(input.items.map((i) => i.productId).filter((x): x is string => !!x))];
+    if (productIds.length) {
+      const owned = await loadProducts(ctx.db, rid, productIds);
+      if (owned.size !== productIds.length) fail('NOT_FOUND', 'productNotFound');
+    }
+    const byId = new Map(rows.map((r) => [r.id, r] as const));
+    for (const it of input.items) {
+      if (!it.subRecipeId) continue;
+      const sub = byId.get(it.subRecipeId);
+      if (!sub) fail('NOT_FOUND', 'subRecipeNotFound');
+      if (!sub.isSubRecipe) fail('BAD_REQUEST', 'notSubRecipe');
+    }
+    const saved = toCostRecipes(rows, items);
+    const allProducts = [
+      ...new Set([...productIds, ...items.map((i) => i.productId).filter((x): x is string => !!x)]),
+    ];
+    const prices = await latestPrices(ctx.db, rid, { productIds: allProducts });
+    return previewDraft(
+      saved,
+      {
+        id: input.id,
+        name: input.name,
+        isSubRecipe: input.isSubRecipe,
+        yieldQty: input.yieldQty,
+        yieldUnit: input.yieldUnit,
+        menuPriceAgorot: input.menuPriceAgorot ?? null,
+        menuPriceIncludesVat: input.menuPriceIncludesVat,
+        items: input.items.map((it) => ({
+          productId: it.productId ?? null,
+          subRecipeId: it.subRecipeId ?? null,
+          quantity: it.quantity,
+          unit: it.unit,
+          wastePct: it.wastePct.toFixed(2),
+          unitsPerProductUnit: it.unitsPerProductUnit ?? null,
+        })),
+      },
+      prices,
+      ctx.rc.vatBp,
+      ctx.rc.targetBp,
+    );
+  }),
+
   /** Create (no id) or replace (id) a recipe and all its lines. */
   save: recipesProcedure.input(recipeInput).mutation(async ({ ctx, input }) => {
     await lockRecipeWrites(ctx.db, ctx.session.restaurantId);
@@ -484,7 +438,7 @@ export const recipesRouter = router({
   }),
 
   /** Product picker for the editor: name/English match, with the latest paid price + unit. */
-  searchProducts: recipesProcedure
+  searchProducts: recipesReadProcedure
     .input(z.object({ search: z.string().trim().max(100).default(''), limit: z.number().int().min(1).max(50).default(20) }))
     .query(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
@@ -509,7 +463,7 @@ export const recipesRouter = router({
     }),
 
   /** Sub-recipes available to use inside another recipe. */
-  subRecipes: recipesProcedure.query(async ({ ctx }) => {
+  subRecipes: recipesReadProcedure.query(async ({ ctx }) => {
     return ctx.db
       .select({ id: recipes.id, name: recipes.name, nameEn: recipes.nameEn, yieldQty: recipes.yieldQty, yieldUnit: recipes.yieldUnit })
       .from(recipes)
@@ -521,7 +475,7 @@ export const recipesRouter = router({
    * "What if": the dishes affected when one product's price moves by
    * `changePct` (−90…+500), e.g. chicken +12% → schnitzel 31% → 34%, −₪2.10/plate.
    */
-  impact: recipesProcedure
+  impact: recipesReadProcedure
     .input(z.object({ productId: z.string().uuid(), changePct: z.number().min(-90).max(500) }))
     .query(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
@@ -563,7 +517,7 @@ export const recipesRouter = router({
    * start of the restaurant's calendar month vs now, sorted by the biggest move,
    * with the ingredient that moved it most (the "why").
    */
-  changes: recipesProcedure.query(({ ctx }) => computeChanges(ctx.db, ctx.session.restaurantId, ctx.rc)),
+  changes: recipesReadProcedure.query(({ ctx }) => computeChanges(ctx.db, ctx.session.restaurantId, ctx.rc)),
 
   /**
    * Dish price alerts (flag `dishPriceAlert`, on top of `recipes`): dishes whose
@@ -572,7 +526,7 @@ export const recipesRouter = router({
    * per plate, the ingredient's price move and the supplier who charged it.
    * With the flag off: `{ enabled: false, alerts: [] }` — never an error.
    */
-  priceAlerts: recipesProcedure.query(async ({ ctx }) => {
+  priceAlerts: recipesReadProcedure.query(async ({ ctx }) => {
     if (!featureEnabled(ctx.rc.settings, 'dishPriceAlert')) return { enabled: false as const, targetBp: ctx.rc.targetBp, alerts: [] };
     const ch = await computeChanges(ctx.db, ctx.session.restaurantId, ctx.rc);
     return { enabled: true as const, targetBp: ch.targetBp, alerts: dishPriceAlerts(ch.rows, ch.targetBp) };
@@ -585,7 +539,7 @@ export const recipesRouter = router({
    * table — it answers `available: false` with the reason, so the recipes page
    * shows a neutral empty state.
    */
-  posVsTheory: recipesProcedure
+  posVsTheory: recipesReadProcedure
     .input(z.object({ month: z.enum(['current', 'previous']).default('current') }).optional())
     .query(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;

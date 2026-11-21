@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { hostname } from 'node:os';
-import { claimAnySerial, queueDbUrl, queueSql, renewLocks, withRunScope, type Sql } from '@restomatch/queue';
+import { claimAnySerial, ocrJobHeadroomMs, queueDbUrl, queueSql, renewLocks, withRunScope, type Sql } from '@restomatch/queue';
 import { registerCronSchedules } from './cron';
 import { CRON_SKIP_ENV, isCronSkipped, parseCronSkip, unknownCronSkipNames } from './cronSkip';
 import { useServerlessPools } from './db';
@@ -62,7 +62,19 @@ export interface RunQueuedJobsOptions {
   renewEveryMs?: number;
   /** Told when a claimed job starts (true) and ends (false): the after() kick reads it (apps/web/lib/jobKick.ts). */
   onJob?: (running: boolean) => void;
+  /**
+   * When this invocation is cut off (epoch ms, the route's maxDuration end). An
+   * ocr-invoice job is claimed only while at least OCR_JOB_HEADROOM_MS is left
+   * before it. Default: the claim deadline (now + budgetMs) — the cron route's
+   * claim window, which ends before its maxDuration (cronJobs.ts).
+   */
+  endsAt?: number;
+  /** Tests: OCR_JOB_HEADROOM_MS (default from the environment). */
+  ocrHeadroomMs?: number;
 }
+
+/** The queue whose jobs are long and paid: claimed only with OCR_JOB_HEADROOM_MS left. */
+const OCR_QUEUE = 'ocr-invoice';
 
 export interface RunQueuedJobsResult {
   ran: number;
@@ -102,6 +114,8 @@ export async function runQueuedJobs(opts: RunQueuedJobsOptions): Promise<RunQueu
   const t0 = Date.now();
   const deadline = t0 + Math.max(0, opts.budgetMs);
   const scope = { queues: new Set<string>(opts.queues ?? HANDLED_QUEUES) };
+  const endsAt = opts.endsAt ?? deadline;
+  const ocrHeadroom = opts.ocrHeadroomMs ?? ocrJobHeadroomMs();
   const res: RunQueuedJobsResult = { ran: 0, done: 0, retried: 0, failed: 0, byQueue: {}, stoppedBy: 'empty', ms: 0 };
 
   await withRunScope(scope, async () => {
@@ -110,7 +124,14 @@ export async function runQueuedJobs(opts: RunQueuedJobsOptions): Promise<RunQueu
         res.stoppedBy = 'budget';
         return;
       }
-      const queues = [...scope.queues].filter((q) => Object.hasOwn(JOB_HANDLERS, q));
+      // Too little time left for a read: leave OCR queued for the next run
+      // (the cron minute) instead of starting a paid call that gets cut off.
+      const ocrFits = endsAt - Date.now() >= ocrHeadroom;
+      const queues = [...scope.queues].filter((q) => Object.hasOwn(JOB_HANDLERS, q) && (ocrFits || q !== OCR_QUEUE));
+      if (queues.length === 0) {
+        res.stoppedBy = 'budget';
+        return;
+      }
       let row;
       try {
         row = await claimAnySerial(sql, queues, workerId, STALL_AFTER_MS);

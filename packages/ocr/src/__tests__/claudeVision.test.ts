@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { OcrExtractionError } from '../errors';
+import { isOcrExtractionError, OcrExtractionError } from '../errors';
 import { ClaudeVision, DEFAULT_OCR_MODEL } from '../providers/claudeVision';
 
 // Canned Hebrew invoice the mocked model "returns" as a JSON text block.
@@ -381,5 +381,74 @@ describe('ClaudeVision — client limits, stop reasons, meta (PR-OCR-2)', () => 
     const err = await new ClaudeVision({ apiKey: 'k' }).extract(heic).catch((e) => e);
     expect(err).toMatchObject({ code: 'unsupported_format' });
     expect(createMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('ClaudeVision — cancellation and retries (worker deadline)', () => {
+  beforeEach(() => {
+    createMock.mockReset();
+    clientOpts.length = 0;
+  });
+
+  it('maxRetries is configurable (worker: 0); the default stays 1', async () => {
+    mockTextResponse(CANNED_INVOICE);
+    await new ClaudeVision({ apiKey: 'k', maxRetries: 0 }).extract('https://example.com/i.jpg');
+    expect(clientOpts[0]).toMatchObject({ maxRetries: 0 });
+    mockTextResponse(CANNED_INVOICE);
+    await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg');
+    expect(clientOpts[1]).toMatchObject({ maxRetries: 1 });
+  });
+
+  it('passes the AbortSignal to the SDK request; without one the call is unchanged', async () => {
+    const ac = new AbortController();
+    mockTextResponse(CANNED_INVOICE);
+    await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg', { signal: ac.signal });
+    expect(createMock.mock.calls[0]![1]).toEqual({ signal: ac.signal });
+    mockTextResponse(CANNED_INVOICE);
+    await new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg');
+    expect(createMock.mock.calls[1]).toHaveLength(1);
+  });
+
+  it('an abort mid-call surfaces as OcrExtractionError "aborted" — retryable, not reviewable', async () => {
+    const ac = new AbortController();
+    createMock.mockImplementationOnce(async () => {
+      ac.abort();
+      throw Object.assign(new Error('Request was aborted.'), { name: 'APIUserAbortError' });
+    });
+    const err = await new ClaudeVision({ apiKey: 'k' })
+      .extract('https://example.com/i.jpg', { signal: ac.signal })
+      .catch((e: unknown) => e);
+    expect(isOcrExtractionError(err)).toBe(true);
+    expect(err).toMatchObject({ code: 'aborted', reviewable: false });
+  });
+
+  it('an already-aborted signal never calls the API; other errors still pass through untouched', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    await expect(
+      new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg', { signal: ac.signal }),
+    ).rejects.toMatchObject({ code: 'aborted' });
+    expect(createMock).not.toHaveBeenCalled();
+    const boom = Object.assign(new Error('overloaded'), { status: 529 });
+    createMock.mockRejectedValueOnce(boom);
+    await expect(
+      new ClaudeVision({ apiKey: 'k' }).extract('https://example.com/i.jpg', { signal: new AbortController().signal }),
+    ).rejects.toBe(boom);
+  });
+
+  it('runOcrPipeline forwards options.signal to the provider', async () => {
+    const ac = new AbortController();
+    const seen: unknown[] = [];
+    const provider = {
+      id: 'claude_vision' as const,
+      extract: async (_img: unknown, o?: { signal?: AbortSignal }) => {
+        seen.push(o?.signal);
+        return CANNED_INVOICE as never;
+      },
+    };
+    const { runOcrPipeline } = await import('../pipeline');
+    await runOcrPipeline('x', { documentAi: provider, claude: provider, signal: ac.signal });
+    await runOcrPipeline('x', { documentAi: provider, claude: provider });
+    expect(seen).toEqual([ac.signal, undefined]);
   });
 });

@@ -27,7 +27,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium, type Page } from '@playwright/test';
 import postgres from 'postgres';
-import { computeLeakHero } from '@restomatch/charts';
+import { computeLeakHero, isLeakType } from '@restomatch/charts';
 import { createDb } from '@restomatch/db';
 import { en as marketingEn } from '../lib/i18n/messages/marketing/en';
 import { en as receivingEn } from '../lib/i18n/messages/receiving/en';
@@ -166,7 +166,7 @@ async function main() {
   const found = await sql<Array<{ type: string; severity: string; delta: string }>>`
     SELECT d.type, d.severity, d.delta_amount AS delta FROM discrepancies d JOIN match_runs mr ON mr.id = d.match_run_id
      WHERE mr.invoice_id = ${inv!.id} ORDER BY d.type`;
-  const leakFindings = found.filter((d) => ['warn', 'block'].includes(d.severity) && !['PRICE_LOWER', 'UNORDERED_ARRIVAL'].includes(d.type));
+  const leakFindings = found.filter((d) => ['warn', 'block'].includes(d.severity) && isLeakType(d.type));
   check('exactly one leak finding, PRICE_HIGHER', leakFindings.length === 1 && leakFindings[0]!.type === 'PRICE_HIGHER', found);
 
   const heroAfter = await computeLeakHero(db, rest.id, { now: new Date() });

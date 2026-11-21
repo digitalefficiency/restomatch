@@ -150,6 +150,421 @@
     --c-line-strong: 15 31 23;
   }
 }
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-hebrew/ibm-plex-sans-hebrew-hebrew-400-normal.woff2') format('woff2');
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-hebrew/ibm-plex-sans-hebrew-latin-400-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-hebrew/ibm-plex-sans-hebrew-latin-ext-400-normal.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20A9, U+20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-hebrew/ibm-plex-sans-hebrew-hebrew-500-normal.woff2') format('woff2');
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-hebrew/ibm-plex-sans-hebrew-latin-500-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-hebrew/ibm-plex-sans-hebrew-latin-ext-500-normal.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20A9, U+20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-hebrew/ibm-plex-sans-hebrew-hebrew-600-normal.woff2') format('woff2');
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-hebrew/ibm-plex-sans-hebrew-latin-600-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-hebrew/ibm-plex-sans-hebrew-latin-ext-600-normal.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20A9, U+20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-hebrew/ibm-plex-sans-hebrew-hebrew-700-normal.woff2') format('woff2');
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-hebrew/ibm-plex-sans-hebrew-latin-700-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/ibm-plex-sans-hebrew/ibm-plex-sans-hebrew-latin-ext-700-normal.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20A9, U+20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Frank Ruhl Libre';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/frank-ruhl-libre/frank-ruhl-libre-hebrew-600-normal.woff2') format('woff2');
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: 'Frank Ruhl Libre';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/frank-ruhl-libre/frank-ruhl-libre-latin-600-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Frank Ruhl Libre';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/frank-ruhl-libre/frank-ruhl-libre-hebrew-700-normal.woff2') format('woff2');
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: 'Frank Ruhl Libre';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/frank-ruhl-libre/frank-ruhl-libre-latin-700-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew Fallback';
+  font-weight: 100 449;
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  size-adjust: 98.65%;
+  ascent-override: 103.9%;
+  descent-override: 27.88%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew Fallback';
+  font-weight: 450 549;
+  src: local('Arial'), local('ArialMT'), local('Liberation Sans');
+  size-adjust: 100.88%;
+  ascent-override: 101.6%;
+  descent-override: 27.26%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew Fallback';
+  font-weight: 550 649;
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  size-adjust: 97.29%;
+  ascent-override: 105.36%;
+  descent-override: 28.27%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'IBM Plex Sans Hebrew Fallback';
+  font-weight: 650 900;
+  src: local('Arial Bold'), local('Arial-BoldMT'), local('Liberation Sans Bold');
+  size-adjust: 98.63%;
+  ascent-override: 103.93%;
+  descent-override: 27.88%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'Frank Ruhl Libre Fallback';
+  font-weight: 600 700;
+  src: local('Times New Roman Bold'), local('TimesNewRomanPS-BoldMT'), local('Liberation Serif Bold');
+  size-adjust: 103.16%;
+  ascent-override: 92.77%;
+  descent-override: 32.38%;
+  line-gap-override: 0%;
+}
+/* DS2 phase 1: new roles only. No v1 variable is re-bound below. */
+:root {
+  --c-surface-canvas: 246 248 247;
+  --c-surface-default: 255 255 255;
+  --c-surface-raised: 255 255 255;
+  --c-surface-overlay: 255 255 255;
+  --c-surface-selected: 235 242 253;
+  --c-text-primary: 15 31 23;
+  --c-text-secondary: 74 93 83;
+  --c-text-tertiary: 90 106 98;
+  --c-text-link: 26 91 199;
+  --c-border-subtle: 211 221 215;
+  --c-border-rule: 228 235 231;
+  --c-border-control: 122 139 130;
+  --c-border-field: 102 117 109;
+  --c-border-focus: 26 91 199;
+  --c-action-primary-bg: 6 107 74;
+  --c-action-primary-bg-hover: 5 88 61;
+  --c-action-primary-fg: 255 255 255;
+  --c-action-secondary-border: 122 139 130;
+  --c-action-secondary-bg: 255 255 255;
+  --c-action-secondary-bg-hover: 238 243 240;
+  --c-action-secondary-fg: 15 31 23;
+  --c-action-quiet-fg: 74 93 83;
+  --c-action-quiet-fg-hover: 15 31 23;
+  --c-action-quiet-bg-hover: 238 243 240;
+  --c-action-danger-bg: 184 15 42;
+  --c-action-danger-bg-hover: 153 12 35;
+  --c-action-danger-fg: 255 255 255;
+  --c-emphasis-t1-rail: 184 15 42;
+  --c-emphasis-t2-rail: 166 61 0;
+  --c-money-marker: 184 15 42;
+  --c-viz-cat-1: 26 91 199;
+  --c-viz-cat-2: 0 122 133;
+  --c-viz-cat-3: 138 79 191;
+  --c-viz-cat-4: 117 92 0;
+  --c-viz-cat-5: 74 93 83;
+  --c-viz-cat-6: 156 61 122;
+  --c-viz-up: 180 83 26;
+  --c-viz-down: 6 107 74;
+  --c-viz-prev: 122 139 130;
+  --c-viz-leak: 184 15 42;
+  --c-viz-grid: 211 221 215;
+  --font-ui-faces: 'IBM Plex Sans Hebrew', 'IBM Plex Sans Hebrew Fallback';
+  --font-ui: 'IBM Plex Sans Hebrew', 'IBM Plex Sans Hebrew Fallback', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-num: var(--font-ui);
+  --font-id: var(--font-ui);
+  --font-display: 'Frank Ruhl Libre', 'Frank Ruhl Libre Fallback', serif;
+  --font-report-display: var(--font-display);
+  --font-features-ui: normal;
+  --font-features-num: 'tnum' 1, 'lnum' 1;
+  --fs-cell: 0.875rem;
+  --lh-cell: 1.375rem;
+  --fw-cell: 400;
+  --ls-cell: 0;
+  --fs-title-sm: 1rem;
+  --lh-title-sm: 1.5rem;
+  --fw-title-sm: 600;
+  --ls-title-sm: 0;
+  --fs-title-md: 1.25rem;
+  --lh-title-md: 1.75rem;
+  --fw-title-md: 600;
+  --ls-title-md: 0;
+  --fs-title-lg: 1.5rem;
+  --lh-title-lg: 2rem;
+  --fw-title-lg: 600;
+  --ls-title-lg: 0;
+  --fs-money-dense: 0.875rem;
+  --lh-money-dense: 1.375rem;
+  --fw-money-dense: 400;
+  --ls-money-dense: 0;
+  --fs-money-row: 1rem;
+  --lh-money-row: 1.5rem;
+  --fw-money-row: 600;
+  --ls-money-row: 0;
+  --fs-money-card: 1.75rem;
+  --lh-money-card: 2.25rem;
+  --fw-money-card: 700;
+  --ls-money-card: -0.01em;
+  --fs-money-hero: 2.5rem;
+  --lh-money-hero: 3rem;
+  --fw-money-hero: 700;
+  --ls-money-hero: -0.01em;
+  --fs-qty-field: 1.25rem;
+  --lh-qty-field: 1.75rem;
+  --fw-qty-field: 700;
+  --ls-qty-field: 0;
+  --fs-id: 0.8125rem;
+  --lh-id: 1.25rem;
+  --fw-id: 500;
+  --ls-id: 0;
+  --fs-kbd: 0.75rem;
+  --lh-kbd: 1rem;
+  --fw-kbd: 500;
+  --ls-kbd: 0;
+  --fs-display-sm: 2rem;
+  --lh-display-sm: 2.5rem;
+  --fw-display-sm: 700;
+  --ls-display-sm: -0.02em;
+  --fs-display-md: 2.5rem;
+  --lh-display-md: 3rem;
+  --fw-display-md: 700;
+  --ls-display-md: -0.02em;
+  --fs-display-lg: 2.75rem;
+  --lh-display-lg: 3.25rem;
+  --fw-display-lg: 700;
+  --ls-display-lg: -0.02em;
+  --decision-row-h: 64px;
+  --btn-h-primary: 40px;
+  --chip-h: 24px;
+  --count-row-h: 72px;
+  --nav-item-h: 36px;
+  --icon-sm: 14px;
+  --icon-md: 16px;
+  --icon-lg: 20px;
+  --icon-xl: 24px;
+  --rail-w: 4px;
+  --inset-control: 12px;
+  --row-compact: 32px;
+  --row-default: 48px;
+  --row-touch: 56px;
+  --cell-px: 16px;
+  --radius-xs: 0.25rem;
+  --radius-chip: 9999px;
+  --ring-selected: inset 0 0 0 2px rgb(var(--c-action-primary-bg));
+  --gutter-page: 16px;
+  --chrome-header-h: 56px;
+  --chrome-sidebar-w: 248px;
+  --chrome-rail-w: 64px;
+  --chrome-bottombar-h: 64px;
+}
+@media (min-width: 768px) {
+  :root {
+    --fs-money-hero: 3.5rem;
+    --lh-money-hero: 4rem;
+    --fs-display-sm: 2.25rem;
+    --lh-display-sm: 2.75rem;
+    --fs-display-md: 3rem;
+    --lh-display-md: 3.5rem;
+    --fs-display-lg: 4rem;
+    --lh-display-lg: 4.5rem;
+    --gutter-page: 24px;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --gutter-page: 32px;
+  }
+}
+[data-density='compact'] {
+  --fs-cell: 0.8125rem;
+  --lh-cell: 1.25rem;
+  --fs-money-dense: 0.8125rem;
+  --lh-money-dense: 1.25rem;
+  --fs-money-row: 0.875rem;
+  --lh-money-row: 1.25rem;
+  --fs-money-card: 1.5rem;
+  --lh-money-card: 2rem;
+  --fs-id: 0.75rem;
+  --lh-id: 1rem;
+  --decision-row-h: 52px;
+  --btn-h-primary: 32px;
+  --chip-h: 20px;
+  --nav-item-h: 32px;
+  --icon-md: 14px;
+  --cell-px: 12px;
+}
+[data-density='default'] {
+  --fs-cell: 0.875rem;
+  --lh-cell: 1.375rem;
+  --fs-money-dense: 0.875rem;
+  --lh-money-dense: 1.375rem;
+  --fs-money-row: 1rem;
+  --lh-money-row: 1.5rem;
+  --fs-money-card: 1.75rem;
+  --lh-money-card: 2.25rem;
+  --fs-id: 0.8125rem;
+  --lh-id: 1.25rem;
+  --decision-row-h: 64px;
+  --btn-h-primary: 40px;
+  --chip-h: 24px;
+  --count-row-h: 72px;
+  --nav-item-h: 36px;
+  --icon-sm: 14px;
+  --icon-md: 16px;
+  --icon-lg: 20px;
+  --icon-xl: 24px;
+  --rail-w: 4px;
+  --inset-control: 12px;
+  --cell-px: 16px;
+}
+[data-density='touch'] {
+  --fs-cell: 0.875rem;
+  --lh-cell: 1.375rem;
+  --fs-money-dense: 0.875rem;
+  --lh-money-dense: 1.375rem;
+  --fs-money-row: 1rem;
+  --lh-money-row: 1.5rem;
+  --fs-money-card: 1.75rem;
+  --lh-money-card: 2.25rem;
+  --fs-id: 0.8125rem;
+  --lh-id: 1.25rem;
+  --btn-h-primary: 48px;
+  --chip-h: 28px;
+  --nav-item-h: 44px;
+  --cell-px: 16px;
+}
+/* DS2 field mode (C6): field type steps, ≥8.2:1 secondary text, no tertiary, field borders. */
+[data-mode='field'] {
+  --fs-cell: 1rem;
+  --lh-cell: 1.5rem;
+  --fs-title-sm: 1.125rem;
+  --lh-title-sm: 1.625rem;
+  --fs-title-md: 1.25rem;
+  --lh-title-md: 1.75rem;
+  --fs-title-lg: 1.375rem;
+  --lh-title-lg: 1.875rem;
+  --fs-money-dense: 1rem;
+  --lh-money-dense: 1.5rem;
+  --fs-money-row: 1.125rem;
+  --lh-money-row: 1.625rem;
+  --fs-money-card: 1.75rem;
+  --lh-money-card: 2.25rem;
+  --fs-money-hero: 2.5rem;
+  --lh-money-hero: 3rem;
+  --fs-id: 0.875rem;
+  --lh-id: 1.25rem;
+  --btn-h-primary: 56px;
+  --chip-h: 28px;
+  --count-row-h: 72px;
+  --inset-control: 16px;
+  --c-text-secondary: 59 75 67;
+  --c-text-tertiary: 59 75 67;
+  --c-border-control: 102 117 109;
+}
+@media (prefers-contrast: more) {
+  :root {
+    --c-text-secondary: 15 31 23;
+    --c-text-tertiary: 15 31 23;
+    --c-border-control: 15 31 23;
+  }
+}
 /* @tokens:end */
 
 @tailwind base;
@@ -205,9 +620,11 @@
 @layer base {
   :root {
     color-scheme: light;
-    /* Font stacks consumed by tailwind.config (fontFamily.sans / .mono). */
-    --font-heebo: 'Heebo';
-    --font-mono: 'JetBrains Mono';
+    /* Font stacks consumed by tailwind.config (fontFamily.sans / .mono). DS2 β:
+       both read the generated role variables (packages/ui-tokens fonts.ts):
+       `font-mono` (identifiers) paints Plex Sans (D3: no mono face); `font-sans`
+       reads --font-heebo, set in the S9 block below. Undo: ACTIVE_FACE = 'heebo'. */
+    --font-mono: var(--font-id);
     /* Colour, motion, layer and density variables are the GENERATED token
        block at the top of this file (packages/ui-tokens). Never hand-write a
        token value here. */
@@ -224,7 +641,9 @@
   body {
     color: rgb(var(--c-ink));
     background: transparent;
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    /* DS2 §2.1.1 rule 3: a missing weight shows as the nearest real one, never a fake bold.
+       (Inter's cv02–cv11 features are gone: no face in the stack has them.) */
+    font-synthesis: none;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
@@ -476,31 +895,31 @@ html {
 }
 
 /* Global fallback: Arabic/Thai/Ethiopic DATA inside he/en pages. Same stack as
-   Tailwind's font-sans, with the Noto families slotted right after Heebo. They
+   Tailwind's font-sans, with the Noto families slotted right after the UI faces. They
    must sit before Inter/system-ui/sans-serif: a generic or system font would
-   otherwise claim those glyphs first. Heebo stays first, so he/en text is
+   otherwise claim those glyphs first. The UI face stays first, so he/en text is
    unchanged; a Noto file loads only when its script's glyphs appear. */
 :root body,
 :root .font-sans {
-  font-family: var(--font-heebo), 'Heebo', 'Noto Sans Arabic', 'Noto Sans Thai', 'Noto Sans Ethiopic',
+  font-family: var(--font-heebo), 'Noto Sans Arabic', 'Noto Sans Thai', 'Noto Sans Ethiopic',
     'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
 
-/* Receiver locales: put the script font first; Heebo still covers Latin.
+/* Receiver locales: put the script font first; the UI face (Plex since DS2 β) still covers Latin.
    (ar is RTL via <html dir>; the default line-height works for Noto, so no tweak.) */
 html[lang='ar'] body,
 html[lang='ar'] .font-sans {
-  font-family: 'Noto Sans Arabic', 'Heebo', 'Inter', -apple-system, BlinkMacSystemFont, system-ui,
+  font-family: 'Noto Sans Arabic', var(--font-ui-faces), 'Inter', -apple-system, BlinkMacSystemFont, system-ui,
     sans-serif;
 }
 html[lang='th'] body,
 html[lang='th'] .font-sans {
-  font-family: 'Noto Sans Thai', 'Heebo', 'Inter', -apple-system, BlinkMacSystemFont, system-ui,
+  font-family: 'Noto Sans Thai', var(--font-ui-faces), 'Inter', -apple-system, BlinkMacSystemFont, system-ui,
     sans-serif;
 }
 html[lang='ti'] body,
 html[lang='ti'] .font-sans {
-  font-family: 'Noto Sans Ethiopic', 'Heebo', 'Inter', -apple-system, BlinkMacSystemFont, system-ui,
+  font-family: 'Noto Sans Ethiopic', var(--font-ui-faces), 'Inter', -apple-system, BlinkMacSystemFont, system-ui,
     sans-serif;
 }
 
@@ -531,7 +950,9 @@ html[lang='ti'] .font-sans {
 
 @layer base {
   :root {
-    --font-heebo: 'Heebo', 'Heebo Fallback';
+    /* DS2 β: the active UI faces (IBM Plex Sans Hebrew + its measured fallback), no
+       generic family, so the Noto script fonts that follow stay reachable. */
+    --font-heebo: var(--font-ui-faces);
   }
 
   /* Touch targets ≥ 44×44 CSS px on touch screens (phones, tablets). Desktop
@@ -585,6 +1006,47 @@ html[lang='ti'] .font-sans {
     position: absolute;
     inset-inline: 0;
     top: 0;
+  }
+}
+
+/* The one print rule (W2-15). lib/components/PrintButton sets html[data-printing]
+   (+ data-print-scope) and marks the matching [data-print-root=<scope>] with
+   data-print-active, then clears all of it on afterprint. A4, a white sheet,
+   tokens only. The xmatch block above stays as an alias until W2-02, W2-09 and
+   W2-10 move to the shared PrintButton; it goes in W2-15's final PR. */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  html[data-printing],
+  html[data-printing] body {
+    background: rgb(var(--c-surface)) !important;
+    background-image: none !important;
+  }
+  html[data-printing][data-print-scope] body * {
+    visibility: hidden;
+  }
+  html[data-printing][data-print-scope] [data-print-active],
+  html[data-printing][data-print-scope] [data-print-active] * {
+    visibility: visible;
+  }
+  html[data-printing][data-print-scope] [data-print-active] {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    margin: 0;
+    max-width: none;
+    color: rgb(var(--c-ink));
+    background: rgb(var(--c-surface));
+    border: 0;
+    box-shadow: none;
+  }
+  html[data-printing] [data-print-active] section {
+    break-inside: avoid;
+  }
+  html[data-printing] [data-print-button] {
+    display: none;
   }
 }
 

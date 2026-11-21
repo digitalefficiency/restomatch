@@ -4,6 +4,8 @@ import { auth } from '@/auth';
 import { Card } from '@/lib/components';
 import { common } from '@/lib/i18n/messages/common';
 import { getT } from '@/lib/i18n/server';
+import { LegalLinks } from '@/lib/legal/LegalLinks';
+import { LEGAL_NAV_LABEL } from '@/lib/legal/registry';
 import { MarketingShell } from './(marketing)/_components/MarketingShell';
 import { NotFoundContent } from './(marketing)/_components/NotFoundContent';
 
@@ -28,7 +30,7 @@ export default async function NotFound() {
   const t = await getT(common);
   return (
     <main
-      className="flex min-h-screen items-center justify-center px-6 py-16"
+      className="flex min-h-screen flex-col items-center justify-center gap-6 px-6 py-16"
       data-testid="not-found"
     >
       <Card
@@ -52,6 +54,9 @@ export default async function NotFound() {
           {t('actions.backToOverview')}
         </Link>
       </Card>
+      <nav aria-label={LEGAL_NAV_LABEL[t.locale === 'he' ? 'he' : 'en']} className="text-muted">
+        <LegalLinks locale={t.locale} variant="inline-row" />
+      </nav>
     </main>
   );
 }

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { memberProcedure, router } from '../trpc';
+import { receiverProcedure, router } from '../trpc';
 import { extFromMime, getServiceStorageClient } from '../lib/supabaseStorage';
 import { localScanStorageEnabled, localScanUrl, saveLocalScan } from '../lib/localScanStorage';
 
@@ -22,8 +22,10 @@ const ALLOWED_MIME = new Set([
  * A.3 — server-side invoice-scan upload with membership enforcement.
  *
  * SECURITY: this is the ONLY trusted write path for authenticated invoice
- * scans. memberProcedure guarantees the caller belongs to an active restaurant
- * (FORBIDDEN otherwise); the storage path and the invoice_scans.restaurant_id
+ * scans. receiverProcedure guarantees the caller belongs to an active restaurant
+ * AND is one of the roles that photograph invoices at the dock (owner / manager /
+ * receiver — the same gate as receiving.registerInvoice); a chef or bookkeeper
+ * gets FORBIDDEN and can store no orphan scan; the storage path and the invoice_scans.restaurant_id
  * are derived from `ctx.session.restaurantId` — NEVER from client input. The
  * client cannot choose its tenant, its prefix, or another tenant's namespace.
  *
@@ -33,7 +35,7 @@ const ALLOWED_MIME = new Set([
  * canonical viewer (/scans/[invoiceId]) re-signs per request from the session.
  */
 export const scansRouter = router({
-  upload: memberProcedure
+  upload: receiverProcedure
     .input(
       z.object({
         contentBase64: z.string().min(1).max(MAX_BASE64_LEN),

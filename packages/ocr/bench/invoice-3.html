@@ -1,0 +1,48 @@
+<!doctype html>
+<!-- Synthetic benchmark invoice (packages/ocr/bench). Ground truth: invoice-3.truth.json.
+     Re-render: node render-fixture.mjs (needs Playwright's Chromium). -->
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<style>
+  body { margin: 0; background: #fff; font-family: "DejaVu Sans", Arial, sans-serif; color: #111; }
+  .page { width: 794px; padding: 40px 48px; box-sizing: border-box; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .muted { color: #444; font-size: 14px; }
+  .row { display: flex; justify-content: space-between; margin: 18px 0; font-size: 15px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 12px; }
+  th, td { border: 1px solid #999; padding: 6px 8px; text-align: right; }
+  th { background: #eee; }
+  td.n { direction: ltr; text-align: left; font-variant-numeric: tabular-nums; }
+  .totals { width: 320px; margin-top: 16px; margin-right: auto; font-size: 15px; }
+  .totals td { border: none; padding: 3px 8px; }
+  .grand td { font-weight: bold; border-top: 2px solid #111; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>מחלבות העמק בע"מ</h1>
+  <div class="muted">ח.פ. 515209641 · מושב כפר יהושע · טל' 04-9530000</div>
+  <div class="row">
+    <div><b>חשבונית מרכזת מס' 2026-0912</b></div>
+    <div>תאריך: 30/09/2026</div>
+  </div>
+  <div class="row"><div>חודש: ספטמבר 2026 (01/09/2026 – 30/09/2026)</div><div>לכבוד: מסעדת כפר הזיתים</div></div>
+  <div class="muted">ריכוז תעודות משלוח: 88120, 88164, 88203, 88251</div>
+  <table>
+    <thead><tr><th>מק"ט</th><th>תיאור</th><th>כמות</th><th>יחידה</th><th>מחיר ליח'</th><th>סה"כ</th></tr></thead>
+    <tbody>
+      <tr><td class="n">7001</td><td>חלב 3% בקרטון 1 ליטר</td><td class="n">240</td><td>יח'</td><td class="n">6.10</td><td class="n">1464.00</td></tr>
+      <tr><td class="n">7012</td><td>גבינה לבנה 5% 250 גרם</td><td class="n">120</td><td>יח'</td><td class="n">5.40</td><td class="n">648.00</td></tr>
+      <tr><td class="n">7025</td><td>שמנת מתוקה 32% 1 ליטר</td><td class="n">36</td><td>יח'</td><td class="n">17.90</td><td class="n">644.40</td></tr>
+      <tr><td class="n">7040</td><td>חמאה 200 גרם</td><td class="n">48</td><td>יח'</td><td class="n">8.75</td><td class="n">420.00</td></tr>
+    </tbody>
+  </table>
+  <table class="totals">
+    <tr><td>סה"כ לפני מע"מ</td><td class="n">3176.40</td></tr>
+    <tr><td>מע"מ 18%</td><td class="n">571.75</td></tr>
+    <tr class="grand"><td>סה"כ לתשלום</td><td class="n">3748.15</td></tr>
+  </table>
+</div>
+</body>
+</html>

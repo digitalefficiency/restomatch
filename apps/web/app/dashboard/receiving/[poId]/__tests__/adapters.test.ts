@@ -286,3 +286,83 @@ describe('Delivery Check marks (RCV-01 / RCV-02)', () => {
     expect(out.a).toMatchObject({ qtyReceived: 4, touched: false });
   });
 });
+
+/**
+ * G-07 strip (pilot): the receiver's getInvoice lines carry no ₪
+ * (unitPriceBilled / lineTotal null) but a `priceRead` flag, so the wizard
+ * still tells a read line from an unread one. Without the flag (older server,
+ * or another branch) the price-based fallback applies unchanged.
+ */
+describe('adaptReconciliation — receiver lines without ₪ (priceRead)', () => {
+  const noMoney = (o: Partial<InvoiceLineRow>) => inv({ unitPriceBilled: null, lineTotal: null, priceRead: true, ...o });
+
+  it('a read line with nulled ₪ is NOT unreadable: qty differences are still detected', () => {
+    const { result } = adaptReconciliation({
+      po: { ...po, totalEstimated: null },
+      poLines: poLines.map((l) => ({ ...l, unitPriceExpected: null })),
+      receiptLines: [],
+      invoiceLines: [
+        noMoney({ id: 'a', productId: 'p1', rawDescription: 'חזה עוף', qtyBilled: '3' }),
+        noMoney({ id: 'b', productId: 'p2', rawDescription: 'עגבניה שרי', qtyBilled: '2' }),
+      ],
+    });
+    expect(result.lines.map((l) => l.status)).toEqual(['qty_diff', 'matched']);
+    expect(result.lines.every((l) => l.invoiceUnitPrice === null && l.poUnitPrice === null)).toBe(true);
+  });
+
+  it('a genuinely unread line (priceRead false) still goes to pending review', () => {
+    const { result } = adaptReconciliation({
+      po,
+      poLines,
+      receiptLines: [],
+      invoiceLines: [
+        noMoney({ id: 'a', productId: 'p1', rawDescription: 'חזה עוף', qtyBilled: '3', priceRead: false }),
+        noMoney({ id: 'b', productId: 'p2', rawDescription: 'עגבניה שרי', qtyBilled: '2' }),
+      ],
+    });
+    expect(result.lines.map((l) => l.status)).toEqual(['pending_review', 'matched']);
+  });
+
+  it('an unordered product-linked line with a read price is "unordered", not pending', () => {
+    const { result } = adaptReconciliation({
+      po,
+      poLines,
+      receiptLines: [],
+      invoiceLines: [noMoney({ id: 'x', productId: 'p9', rawDescription: 'שמן זית', qtyBilled: '1' })],
+    });
+    expect(result.lines.find((l) => l.productId === 'p9')?.status).toBe('unordered');
+  });
+
+  it('two invoice lines for one item fold to read only if both were read', () => {
+    const both = adaptReconciliation({
+      po,
+      poLines,
+      receiptLines: [],
+      invoiceLines: [
+        noMoney({ id: 'a1', productId: 'p1', rawDescription: 'חזה עוף', qtyBilled: '2' }),
+        noMoney({ id: 'a2', productId: 'p1', rawDescription: 'חזה עוף', qtyBilled: '2' }),
+      ],
+    });
+    expect(both.result.lines[0]?.status).toBe('matched');
+    const one = adaptReconciliation({
+      po,
+      poLines,
+      receiptLines: [],
+      invoiceLines: [
+        noMoney({ id: 'a1', productId: 'p1', rawDescription: 'חזה עוף', qtyBilled: '2' }),
+        noMoney({ id: 'a2', productId: 'p1', rawDescription: 'חזה עוף', qtyBilled: '2', priceRead: false }),
+      ],
+    });
+    expect(one.result.lines[0]?.status).toBe('pending_review');
+  });
+
+  it('no priceRead field (older server): the price-based rule is unchanged', () => {
+    const { result } = adaptReconciliation({
+      po,
+      poLines,
+      receiptLines: [],
+      invoiceLines: [inv({ id: 'a', productId: 'p1', rawDescription: 'חזה עוף', qtyBilled: '3', unitPriceBilled: null })],
+    });
+    expect(result.lines[0]?.status).toBe('pending_review');
+  });
+});

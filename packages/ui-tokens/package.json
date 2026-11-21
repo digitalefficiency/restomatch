@@ -9,7 +9,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "tokens:css": "tsx scripts/generate.ts"
+    "tokens:css": "tsx scripts/generate.ts",
+    "ds:baseline": "tsx scripts/ds-baseline.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

@@ -10,8 +10,11 @@ import { ReferralCard } from '@/lib/growth/ReferralCard';
 import { AccountSection } from './account-section';
 import { SettingsForm } from './form';
 import { ProfileForm } from './profile-form';
+import { LetterheadForm } from './letterhead-form';
 import { DsrSection } from './dsr';
 import { TwoFactorSection } from './TwoFactorSection';
+import { PhoneSection } from './phone-section';
+import { RulesPanel } from './rules-panel';
 
 /**
  * Settings. PERSONAL sections (language, password, devices, 2FA, DSR) are for
@@ -41,9 +44,16 @@ export default async function SettingsPage() {
   const isOwner = role === 'owner';
   const seesRestaurant = role === 'owner' || role === 'manager' || role === 'bookkeeper';
 
-  const [restaurantSettings, profile] = seesRestaurant
-    ? await Promise.all([caller.settings.get(), caller.settings.profile()])
-    : [null, null];
+  const [restaurantSettings, profile, letterhead, effective, history] = seesRestaurant
+    ? await Promise.all([
+        caller.settings.get(),
+        caller.settings.profile(),
+        caller.settings.letterhead(),
+        caller.settings.effective(),
+        caller.settings.history({ limit: 20 }),
+      ])
+    : [null, null, null, null, null];
+  const myPhone = await caller.settings.myPhone();
   // Referral programme (wave 1, S15 — flag `growth`): owner/manager see the
   // restaurant's code + stats; only the owner may redeem someone else's code.
   const referralOn =
@@ -51,6 +61,7 @@ export default async function SettingsPage() {
 
   return (
     <div className="space-y-10">
+      <SectionHeader level={1} title={t('title')} className="mb-0" />
       <div>
         <SectionHeader title={t('sections.accountTitle')} subtitle={t('sections.accountSubtitle')} />
         <AccountSection hasPassword={passwordSet} />
@@ -59,16 +70,42 @@ export default async function SettingsPage() {
         <SectionHeader title={t('sections.securityTitle')} subtitle={t('sections.securitySubtitle')} />
         <TwoFactorSection initialEnabled={twoFactorEnabled} recoveryRemaining={recoveryRemaining} />
       </div>
+      <div>
+        <SectionHeader title={t('phone.title')} />
+        <PhoneSection initial={myPhone.phone} />
+      </div>
       {profile ? (
         <div>
           <SectionHeader title={t('sections.profileTitle')} subtitle={t('sections.profileSubtitle')} />
           <ProfileForm initial={profile} canEdit={isOwner} />
         </div>
       ) : null}
+      {profile && letterhead ? (
+        <div id="letterhead" className="scroll-mt-24">
+          <SectionHeader title={t('sections.letterheadTitle')} subtitle={t('sections.letterheadSubtitle')} />
+          {/* Prefilled from the restaurant's name and ח״פ until the letterhead is saved. */}
+          <LetterheadForm
+            initial={{
+              legalName: letterhead.legalName ?? profile.name,
+              businessId: letterhead.businessId ?? (/^\d{9}$/.test(profile.businessId ?? '') ? profile.businessId! : ''),
+              address: letterhead.address ?? '',
+              phone: letterhead.phone ?? '',
+              email: letterhead.email ?? '',
+            }}
+            canEdit={role === 'owner' || role === 'manager'}
+          />
+        </div>
+      ) : null}
+      {effective ? (
+        <div>
+          <SectionHeader title={t('rules.title')} subtitle={t('rules.subtitle')} />
+          <RulesPanel rules={effective} history={history} />
+        </div>
+      ) : null}
       {restaurantSettings ? (
         <div>
           <SectionHeader title={t('sections.matchingTitle')} subtitle={t('sections.matchingSubtitle')} />
-          <SettingsForm initial={restaurantSettings} canEdit={isOwner} />
+          <SettingsForm initial={restaurantSettings} canEdit={isOwner} effective={effective!} />
         </div>
       ) : null}
       {referralOn ? <ReferralCard canRedeem={isOwner} /> : null}

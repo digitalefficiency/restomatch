@@ -285,18 +285,19 @@ async function seedSupplierConfirm(restaurantId: string) {
       .select({ id: poLines.id, qty: poLines.qtyOrdered, price: poLines.unitPriceExpected })
       .from(poLines)
       .where(eq(poLines.poId, answeredPo))
-      .orderBy(asc(poLines.id))
-      .limit(2);
+      .orderBy(asc(poLines.id));
     const link = await createSupplierLink(db, restaurantId, answeredPo);
     const resolved = link ? await resolveSupplierToken(db, link.token) : null;
     if (resolved?.ok && lines.length > 0) {
-      const answer = [
-        { poLineId: lines[0]!.id, qtyAvailable: Math.max(0, Math.floor(Number(lines[0]!.qty) * 0.6)) },
-        ...(lines[1] && lines[1].price != null
-          ? [{ poLineId: lines[1].id, proposedUnitPrice: Math.round(Number(lines[1].price) * 1.08 * 100) / 100 }]
-          : []),
-      ];
-      await submitSupplierAnswer(db, resolved.link, { lines: answer, note: 'חלק מהסחורה יגיע מחר בבוקר' });
+      // G-10: a complete answer — every line with its quantity. The same two
+      // differences as before (line 1 short to 60%, line 2 +8% price), so the
+      // stored diff is unchanged; every other line is confirmed as ordered.
+      const answer = lines.map((l, i) => ({
+        poLineId: l.id,
+        qtyAvailable: i === 0 ? Math.max(0, Math.floor(Number(l.qty) * 0.6)) : Number(l.qty),
+        proposedUnitPrice: i === 1 && l.price != null ? Math.round(Number(l.price) * 1.08 * 100) / 100 : null,
+      }));
+      await submitSupplierAnswer(db, resolved.link, { intent: 'with_changes', lines: answer, note: 'חלק מהסחורה יגיע מחר בבוקר' });
     }
   }
 

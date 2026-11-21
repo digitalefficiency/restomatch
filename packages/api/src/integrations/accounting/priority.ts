@@ -1,6 +1,6 @@
 import { agorotToPlain, CRLF, ddmmyyyy, safeCell, supplierAccount } from './common';
 import { encodeUtf16leBom } from './encoding';
-import type { AccountingConfig, AccountingFile, AccountingInvoice } from './types';
+import type { AccountingConfig, AccountingInvoice, RenderedFile } from './types';
 
 /**
  * Priority (פריוריטי) supplier-invoice load — a "ממשק טעינה" (form-load
@@ -49,7 +49,7 @@ export function priorityFile(
   invoices: AccountingInvoice[],
   cfg: AccountingConfig,
   period: { from: string; to: string },
-): AccountingFile {
+): RenderedFile {
   const lines = priorityLines(invoices, cfg);
   return {
     filename: `restomatch-priority-${period.from}-to-${period.to}.txt`,

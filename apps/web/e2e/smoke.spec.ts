@@ -57,6 +57,7 @@ const DASHBOARD_PAGES = [
 const PUBLIC_PAGES = [
   '/',
   '/pricing',
+  '/product',
   '/about',
   '/privacy',
   '/terms',
