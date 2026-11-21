@@ -44,7 +44,10 @@ export function ImportHistory({ supplierId }: { supplierId: string }) {
     onSuccess: (r) => {
       setConfirming(null);
       toast.success(t('history.revertDone', { restored: n(r.restored), deactivated: n(r.deactivated) }));
-      if (r.skipped.length > 0) toast.info(t('history.revertSkipped', { count: n(r.skipped.length) }));
+      const changed = r.skipped.filter((x) => x.reason === 'CHANGED_SINCE').length;
+      const gone = r.skipped.filter((x) => x.reason === 'GONE').length;
+      if (changed > 0) toast.info(t('history.revertSkippedChanged', { count: n(changed) }));
+      if (gone > 0) toast.info(t('history.revertSkippedGone', { count: n(gone) }));
       void utils.catalog.imports.invalidate();
       void utils.catalog.items.invalidate();
     },

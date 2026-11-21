@@ -46,9 +46,9 @@ export interface CommitArgs {
 /** W3-10 · the audit action AU-13's priceListDiff reads (one row per committed import). */
 export const IMPORT_COMMITTED_AUDIT_ACTION = 'catalog.import_committed';
 
-/** One list-price change in a committed import (NUMERIC strings, as stored). */
+/** One list-price change in a committed import (NUMERIC strings, as stored). AU-13 reads these. */
 export interface ImportPriceChange {
-  /** The supplier_catalog_items row (W3-10 revert works from it; older records lack it). */
+  /** The supplier_catalog_items row. */
   itemId?: string;
   productId: string | null;
   name: string;
@@ -57,6 +57,31 @@ export interface ImportPriceChange {
   newListPrice: string;
   unit: string | null;
 }
+
+/** The revertable fields of a catalog row, as stored (NUMERIC strings / ISO times). */
+export interface ItemSnapshot {
+  listPrice: string | null;
+  unit: string | null;
+  packSize: string | null;
+  productId: string | null;
+  active: boolean;
+}
+
+/**
+ * W3-10 · one pre-existing row this commit changed, merged per row (first
+ * `before`, last `after`): what a revert restores, together.
+ */
+export interface ImportRowChange {
+  itemId: string;
+  name: string;
+  sku: string | null;
+  before: ItemSnapshot & { updatedAt: string; observedAt: string | null; sourceImportId: string | null };
+  /** `updatedAt` is the exact stamp this commit's last write left on the row. */
+  after: ItemSnapshot & { updatedAt: string };
+}
+
+/** The record shape a revert accepts (older records carry no per-row snapshot). */
+export const IMPORT_RECORD_VERSION = 2;
 
 /** Why a suggested link needs a person ("בדיקה"). */
 export type ReviewReason = Exclude<LinkReviewReason, 'UNKNOWN_UNIT'>;
@@ -95,6 +120,8 @@ export interface CommitResult {
   ambiguous: AmbiguousRow[];
   /** Existing rows whose list price changed (also written to the audit row). */
   priceChanges: ImportPriceChange[];
+  /** Rows whose file cell had no price: their existing price was kept, not wiped. */
+  keptPriceOnBlank: number;
 }
 
 /**
@@ -136,9 +163,35 @@ export async function commitCatalogRows(
   let updated = 0;
   let createdProducts = 0;
   const ambiguous: AmbiguousRow[] = [];
-  const priceChanges: ImportPriceChange[] = [];
+  /**
+   * Every write of this commit gets its own stamp (commitAt + 1 ms per write),
+   * recorded per row: a revert restores a row only while it still carries that
+   * exact stamp. Distinct stamps also keep the 0031 updated_at trigger (which
+   * bumps an UPDATE that leaves updated_at unchanged to now()) out of the way
+   * when one file hits the same row twice. Any other write moves the stamp.
+   */
+  const commitAt = new Date();
+  let writeSeq = 0;
+  const stamp = () => new Date(commitAt.getTime() + writeSeq++);
+  /** Rows this commit inserted, with the stamp of their last write. */
+  const createdStamps = new Map<string, string>();
+  /** Pre-existing rows changed, merged per row (first before, last after). */
+  const rowChanges = new Map<string, ImportRowChange>();
   /** Rows this commit inserted (a revert turns them off). */
   const createdItemIds: string[] = [];
+  const createdSet = new Set<string>();
+  let keptPriceOnBlank = 0;
+  // Rows an earlier revert turned off: a re-import that matches one turns it back on.
+  const revertedOff = new Set(
+    (
+      (await db.execute(sql`
+        select jsonb_array_elements_text(coalesce(after -> 'deactivatedItemIds', '[]'::jsonb)) as id
+          from audit_log
+         where restaurant_id = ${restaurantId} and action = 'catalog.import_reverted'
+           and after ->> 'supplierId' = ${supplierId}
+      `)) as unknown as Array<{ id: string }>
+    ).map((r) => String(r.id)),
+  );
 
   for (const row of rows) {
     // 1. Existing catalog item for this supplier? By SKU when present, else by
@@ -157,6 +210,11 @@ export async function commitCatalogRows(
         productId: supplierCatalogItems.productId,
         listPrice: supplierCatalogItems.listPrice,
         unit: supplierCatalogItems.unit,
+        packSize: supplierCatalogItems.packSize,
+        active: supplierCatalogItems.active,
+        updatedAt: supplierCatalogItems.updatedAt,
+        observedAt: supplierCatalogItems.observedAt,
+        sourceImportId: supplierCatalogItems.sourceImportId,
       })
       .from(supplierCatalogItems)
       .where(
@@ -269,12 +327,18 @@ export async function commitCatalogRows(
       supplierNameRaw: row.supplierNameRaw,
       unit: row.unit,
       packSize: row.packSize == null ? null : row.packSize.toString(),
-      listPrice: row.listPrice == null ? null : row.listPrice.toString(),
+      // A blank / unreadable price cell never wipes a price the row already has
+      // (W3-10 review): the old price stays, and the commit counts it.
+      listPrice:
+        row.listPrice != null ? row.listPrice.toString() : existing?.listPrice != null ? existing.listPrice : null,
       barcodeEan: row.barcodeEan,
       sourceImportId: args.sourceImportId ?? null,
-      observedAt: new Date(),
-      updatedAt: new Date(),
+      observedAt: commitAt,
+      updatedAt: stamp(),
+      // A row an earlier revert turned off comes back when a file lists it again.
+      ...(existing && !existing.active && revertedOff.has(existing.id) ? { active: true } : {}),
     };
+    if (row.listPrice == null && existing?.listPrice != null) keptPriceOnBlank += 1;
     let itemId: string;
     if (existing) {
       await db
@@ -283,22 +347,40 @@ export async function commitCatalogRows(
         .where(eq(supplierCatalogItems.id, existing.id));
       itemId = existing.id;
       updated += 1;
-      // W3-10 · a list-price change, compared in integer price units (1/100 agorot).
-      const newListPrice = itemValues.listPrice;
-      if (
-        existing.listPrice != null &&
-        newListPrice != null &&
-        toPriceUnits(Number(existing.listPrice)) !== toPriceUnits(Number(newListPrice))
-      ) {
-        priceChanges.push({
-          itemId: existing.id,
-          productId,
-          name: row.supplierNameRaw,
-          sku: row.supplierSku,
-          oldListPrice: existing.listPrice,
-          newListPrice,
-          unit: row.unit ?? existing.unit ?? null,
-        });
+      if (createdSet.has(existing.id)) createdStamps.set(existing.id, itemValues.updatedAt.toISOString());
+      // W3-10 · record this row's revertable fields, merged per row: the first
+      // time it is touched keeps `before`, every later hit moves `after`.
+      if (!createdSet.has(existing.id)) {
+        const after: ImportRowChange['after'] = {
+          updatedAt: itemValues.updatedAt.toISOString(),
+          listPrice: itemValues.listPrice,
+          unit: itemValues.unit ?? null,
+          packSize: itemValues.packSize,
+          productId: itemValues.productId ?? null,
+          active: itemValues.active ?? existing.active,
+        };
+        const prev = rowChanges.get(existing.id);
+        if (prev) {
+          prev.after = after;
+          prev.name = row.supplierNameRaw;
+        } else {
+          rowChanges.set(existing.id, {
+            itemId: existing.id,
+            name: row.supplierNameRaw,
+            sku: row.supplierSku,
+            before: {
+              listPrice: existing.listPrice,
+              unit: existing.unit,
+              packSize: existing.packSize,
+              productId: existing.productId,
+              active: existing.active,
+              updatedAt: existing.updatedAt.toISOString(),
+              observedAt: existing.observedAt ? existing.observedAt.toISOString() : null,
+              sourceImportId: existing.sourceImportId,
+            },
+            after,
+          });
+        }
       }
     } else {
       const [ins] = await db
@@ -309,6 +391,8 @@ export async function commitCatalogRows(
       itemId = ins.id;
       created += 1;
       createdItemIds.push(ins.id);
+      createdSet.add(ins.id);
+      createdStamps.set(ins.id, itemValues.updatedAt.toISOString());
     }
     if (pendingReview) ambiguous.push({ itemId, ...pendingReview });
 
@@ -340,19 +424,47 @@ export async function commitCatalogRows(
     }
   }
 
-  // W3-10 · one audit row per committed import: the record AU-13's priceListDiff
-  // reads ({ supplierId, priceChanges }) and the trail a revert works from.
-  // Append-only (audit_log is immutable); written even when no price moved.
+  // W3-10 · keep only rows whose revertable fields really moved.
+  const changes = [...rowChanges.values()].filter((c) => !sameSnapshot(c.before, c.after));
+  // AU-13's list-price changes: both sides priced and different (integer price units).
+  const priceChanges: ImportPriceChange[] = changes
+    .filter((c) => c.before.listPrice != null && c.after.listPrice != null && !samePrice(c.before.listPrice, c.after.listPrice))
+    .map((c) => ({
+      itemId: c.itemId,
+      productId: c.after.productId,
+      name: c.name,
+      sku: c.sku,
+      oldListPrice: c.before.listPrice!,
+      newListPrice: c.after.listPrice!,
+      unit: c.after.unit ?? c.before.unit,
+    }));
+
+  // One audit row per committed import: the record AU-13's priceListDiff reads
+  // ({ supplierId, priceChanges }) and everything a revert needs (rowChanges with
+  // before/after snapshots, createdItemIds, commitAt). Append-only; written even
+  // when nothing moved.
   await db.insert(auditLog).values({
     restaurantId,
     userId: args.userId ?? null,
     action: IMPORT_COMMITTED_AUDIT_ACTION,
     entityType: 'catalog_import',
     entityId: args.sourceImportId ?? null,
-    after: { supplierId, created, updated, createdProducts, priceChanges, createdItemIds },
+    after: {
+      revertVersion: IMPORT_RECORD_VERSION,
+      commitAt: commitAt.toISOString(),
+      supplierId,
+      created,
+      updated,
+      createdProducts,
+      keptPriceOnBlank,
+      priceChanges,
+      rowChanges: changes,
+      createdItemIds,
+      createdItems: createdItemIds.map((id) => ({ itemId: id, updatedAt: createdStamps.get(id)! })),
+    },
   });
 
-  return { created, updated, createdProducts, ambiguous, priceChanges };
+  return { created, updated, createdProducts, ambiguous, priceChanges, keptPriceOnBlank };
 }
 
 /**
@@ -398,4 +510,21 @@ async function unitPackFit(
   const rowPack = row.packSize ?? 1;
   if (packs.length > 0 && packs.every((x) => Number(x.packSize ?? 1) !== rowPack)) reasons.push('PACK_MISMATCH');
   return { productUnit, reasons };
+}
+
+/** Two NUMERIC price strings (or nulls) are the same price in integer price units. */
+export function samePrice(a: string | null, b: string | null): boolean {
+  if (a == null || b == null) return a == null && b == null;
+  return toPriceUnits(Number(a)) === toPriceUnits(Number(b));
+}
+
+function sameSnapshot(a: ItemSnapshot, b: ItemSnapshot): boolean {
+  const pack = (v: string | null) => (v == null ? null : Number(v));
+  return (
+    samePrice(a.listPrice, b.listPrice) &&
+    (a.unit ?? null) === (b.unit ?? null) &&
+    pack(a.packSize) === pack(b.packSize) &&
+    (a.productId ?? null) === (b.productId ?? null) &&
+    a.active === b.active
+  );
 }

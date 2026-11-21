@@ -47,11 +47,12 @@ export async function processImportCatalog(job: WorkerJob<CatalogImportJob>) {
   try {
     const table = await parseCatalogFile(file);
     const rows = extractCatalogRows(table, mapping);
-    const result = await commitCatalogRows(
-      db,
-      { restaurantId, supplierId, sourceImportId: importId },
-      rows,
-      embedder,
+    // One transaction (W3-10 review): a failure at row k leaves nothing half
+    // written, and the import's audit record (what a revert works from) always
+    // matches what was committed. Progress writes inside it are not visible to
+    // the progress card until the end — the price of a revertable import.
+    const result = await db.transaction((tx) =>
+      commitCatalogRows(tx as unknown as typeof db, { restaurantId, supplierId, sourceImportId: importId }, rows, embedder),
     );
     await db
       .update(catalogImports)

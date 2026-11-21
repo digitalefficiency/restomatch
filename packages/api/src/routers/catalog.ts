@@ -134,7 +134,14 @@ async function currentPrices(db: Database, restaurantId: string, supplierId: str
       listPrice: supplierCatalogItems.listPrice,
     })
     .from(supplierCatalogItems)
-    .where(and(eq(supplierCatalogItems.restaurantId, restaurantId), eq(supplierCatalogItems.supplierId, supplierId)));
+    .where(
+      and(
+        eq(supplierCatalogItems.restaurantId, restaurantId),
+        eq(supplierCatalogItems.supplierId, supplierId),
+        // A row a revert (or a person) turned off is not today's price (W3-10 review).
+        eq(supplierCatalogItems.active, true),
+      ),
+    );
   const bySku = new Map<string, number>();
   const byName = new Map<string, number>();
   for (const it of items) {
@@ -502,6 +509,9 @@ export const catalogRouter = router({
       });
       if (res === 'NOT_FOUND') throw new TRPCError({ code: 'NOT_FOUND', message: 'import not found' });
       if (res === 'ALREADY_REVERTED') throw new TRPCError({ code: 'CONFLICT', message: 'import already reverted' });
+      if (res === 'NOT_REVERTABLE') {
+        throw new TRPCError({ code: 'PRECONDITION_FAILED', message: 'CATALOG_IMPORT_NOT_REVERTABLE: this import predates revertable records' });
+      }
       return res;
     }),
 
@@ -520,6 +530,8 @@ export const catalogRouter = router({
     )
     .query(async ({ ctx, input }) => {
       const rid = ctx.session.restaurantId;
+      // W3-10: only owner / manager may revert (the bookkeeper reads, never undoes).
+      const canRevert = ctx.session.role === 'owner' || ctx.session.role === 'manager';
       return ctx.db
         .select({
           id: catalogImports.id,
@@ -539,8 +551,9 @@ export const catalogRouter = router({
           unlinkedItems: sql<number>`(SELECT count(*)::int FROM supplier_catalog_items sci
             WHERE sci.source_import_id = "catalog_imports"."id" AND sci.restaurant_id = ${rid} AND sci.product_id IS NULL)`,
           /** W3-10: has an import_committed record (so it can be reverted) / was reverted. */
-          revertable: sql<boolean>`EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = ${rid}
-            AND a.action = 'catalog.import_committed' AND a.entity_id = "catalog_imports"."id")`,
+          revertable: sql<boolean>`${canRevert} AND EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = ${rid}
+            AND a.action = 'catalog.import_committed' AND a.entity_id = "catalog_imports"."id"
+            AND (a.after ->> 'revertVersion') = '2')`,
           reverted: sql<boolean>`EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = ${rid}
             AND a.action = 'catalog.import_reverted' AND a.entity_id = "catalog_imports"."id")`,
         })
