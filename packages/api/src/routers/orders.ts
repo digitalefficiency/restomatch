@@ -57,6 +57,7 @@ import {
 } from '../orders/document';
 import { addCalendarDaysInTz, localDateKeyInTz, startOfDayInTz, startOfLocalDateInTz } from '../lib/time';
 import { poRefOf, renderSupplierMessage } from '../orders/supplierMessage';
+import { rematchOnPoSent } from '../match/rematchOnPoSent';
 
 /** Cap on an uploaded order document, decoded — a single-page PO PDF is ~50KB. */
 const MAX_PO_DOC_BYTES = 8 * 1024 * 1024;
@@ -476,6 +477,9 @@ async function placeOrderImpl(
     .update(purchaseOrders)
     .set({ status: 'sent', sentAt: new Date(), sentChannel, updatedAt: new Date() })
     .where(eq(purchaseOrders.id, input.poId));
+  // G-04 Q4: the order left 'draft' — re-match the invoices it can now serve
+  // (best effort, deduped per PO + invoice; never fails the send).
+  await rematchOnPoSent(ctx.db, restaurantId, input.poId);
   return { ok: true as const, sentChannel };
 }
 

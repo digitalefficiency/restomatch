@@ -80,6 +80,8 @@ export async function requeueInvoicesForRematch(
   db: Database,
   restaurantId: string,
   invoiceIds: Iterable<string>,
+  /** Optional per-invoice dedupe key (G-04 Q4): at most one queued re-match per key. */
+  opts: { dedupeKey?: (invoiceId: string) => string } = {},
 ): Promise<RematchReport> {
   const ids = [...new Set(invoiceIds)];
   const report: RematchReport = { requeued: 0, blockedByClaims: 0, consolidated: 0, settled: 0, failed: 0 };
@@ -117,7 +119,10 @@ export async function requeueInvoicesForRematch(
     try {
       // Per job: each enqueue can take up to its own timeout, so a runAt fixed
       // before the loop could expire before this request commits.
-      await enqueue(MATCH_INVOICE_QUEUE, job, { runAt: new Date(Date.now() + REMATCH_DELAY_MS) });
+      await enqueue(MATCH_INVOICE_QUEUE, job, {
+        runAt: new Date(Date.now() + REMATCH_DELAY_MS),
+        ...(opts.dedupeKey ? { dedupeKey: opts.dedupeKey(inv.id) } : {}),
+      });
       report.requeued += 1;
     } catch (err) {
       report.failed += 1;
