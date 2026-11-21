@@ -30,12 +30,14 @@
   --rm-nav-rail-dot: 8px;
   --rm-nav-pill-h: 20px;
   --rm-nav-notch: 2px;
-  --rm-nav-fade: 80ms;
-  --rm-nav-collapse: 160ms;
-  --rm-nav-expand: 200ms;
-  --rm-nav-chevron: 120ms;
-  --rm-nav-tip: 90ms;
-  --rm-nav-ease: cubic-bezier(0.2, 0, 0, 1);
+  /* Motion (§10): DS3-00's menu motion set; the fallbacks are the same values, for a base without it. */
+  --rm-nav-fade: var(--dur-menu-fade, 80ms);
+  --rm-nav-collapse: var(--dur-menu-collapse, 160ms);
+  --rm-nav-expand: var(--dur-menu-expand, 200ms);
+  --rm-nav-chevron: var(--dur-menu-chevron, 120ms);
+  --rm-nav-tip: var(--dur-menu-tooltip, 90ms);
+  --rm-nav-delay: var(--dur-menu-delay, 130ms);
+  --rm-nav-ease: var(--ease-menu, cubic-bezier(0.2, 0, 0, 1));
 }
 /* Compact rows and tiles in a window lower than 800 px (§1.1, §1.2). */
 @media (max-height: 799.98px) {
@@ -760,9 +762,18 @@ button.headBtn:hover {
     height: var(--rm-nav-glyph-sm);
     stroke-width: 2;
   }
-  .gh .short,
-  .gh .lab {
+  .gh .short {
     display: none;
+  }
+  /* The header's name: the visible label (.ghLab, with the chevron) is aria-hidden, so .lab stays in the
+     accessibility tree, visually hidden as on the rail; display:none would leave the button nameless. */
+  .gh .lab {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
   .ghLab {
     display: inline-flex;
@@ -851,7 +862,7 @@ button.headBtn:hover {
   transition: opacity var(--rm-nav-fade) linear;
 }
 .app[data-nav-phase='in'] :is(.lab, .ghLab, .gx, .pill, .eye, .headText, .headChev, .cmdk, .help, .accText) {
-  animation: rmNavFadeIn 140ms linear 130ms both;
+  animation: rmNavFadeIn 140ms linear var(--rm-nav-delay) both;
 }
 .app[data-nav-phase='in'] .short {
   animation: rmNavFadeIn var(--rm-nav-fade) linear 120ms both;
@@ -865,11 +876,9 @@ button.headBtn:hover {
   }
 }
 
-/* Focus (§6): the one global focus ring (globals.css, 2 px, `--focus-offset`), drawn inside rows, tiles and
-   menu items here (offset −2), so the scroll region never clips it and it never touches a solid pill. */
-.side {
-  --focus-offset: -2px;
-}
+/* Focus (§6): the one global focus ring (globals.css, 2 px), drawn inside rows, tiles and menu items (offset
+   −2), so the scroll region never clips it and it never touches a solid pill: the aside carries DS3-00's
+   data-focus="inset", which every focusable in the menu inherits. */
 
 /* Windows high contrast (§6): the current row and tile get a Highlight outline, pills a CanvasText border,
    dots keep their colour. */

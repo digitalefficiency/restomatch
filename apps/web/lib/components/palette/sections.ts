@@ -107,6 +107,8 @@ export interface PaletteScreen {
   href: string;
   label: string;
   aliases: readonly string[];
+  /** A short second line (a setting's section, e.g. "תצוגה"). */
+  secondary?: string;
 }
 
 /**
@@ -297,7 +299,13 @@ export function buildPaletteSections(input: BuildInput): PaletteSection[] {
         input.settings ?? [],
         (s) => scoreText(s.label, s.aliases, query),
         input.limits?.settings ?? 5,
-      ).map((s) => ({ kind: 'setting' as const, id: s.key, label: s.label, href: s.href })),
+      ).map((s) => ({
+        kind: 'setting' as const,
+        id: s.key,
+        label: s.label,
+        href: s.href,
+        ...(s.secondary ? { secondary: s.secondary } : {}),
+      })),
     );
     if (input.ask && query.length >= 2) push('ask', [input.ask(query)]);
   }

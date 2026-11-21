@@ -1,4 +1,4 @@
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { originalProps } from '@/lib/i18n/original';
 import { auth, signOut } from '@/auth';
@@ -16,7 +16,8 @@ import { RouteTitle } from '@/lib/nav/RouteTitle';
 import { RouteFocus } from '@/lib/nav/useRouteFocus';
 import type { NavViewer } from '@/lib/nav';
 import { RAIL_COOKIE } from '@/lib/nav/prefs';
-import { PrefsRoot } from '@/lib/prefs/server';
+import { PrefsRoot, readDeviceHints } from '@/lib/prefs/server';
+import { shellAttrs } from '@/lib/prefs/schema';
 import { LocaleSync } from './locale-sync';
 import { BranchSwitcher } from './branch-switcher';
 import { getWave1Access } from './contracts/access';
@@ -64,13 +65,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Stage 1: the membership check, plus everything that needs no membership.
   // Member-only procedures (recovery.flags…) throw for a user without one, so
   // they wait until the /onboarding redirect below has had its chance.
-  const [memberships, t, ts, locale, platformAdmin, cookieStore] = await Promise.all([
+  const [memberships, t, ts, locale, platformAdmin, cookieStore, headerStore, deviceHints] = await Promise.all([
     caller.onboarding.myMemberships(),
     getT(nav),
     getT(navShell),
     getLocale(),
     isPlatformAdmin(userId).catch(() => false),
     cookies(),
+    headers(),
+    readDeviceHints(),
   ]);
 
   if (memberships.length === 0) {
@@ -149,6 +152,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   const viewer: NavViewer = { role: active.role, features, showChain };
   const rail = cookieStore.get(RAIL_COOKIE)?.value === '1';
+  // DS3 "Personal preferences: one contract": #rm-app carries data-density ("compact" or none) and data-text
+  // ("large" or none) from the first HTML, read from rm_density / rm_text; an absent cookie gives the role's
+  // default (the bookkeeper starts compact) and a phone the regular density (DS3-06 lib/prefs/README.md).
+  const display = shellAttrs(headerStore.get('cookie'), active.role, deviceHints);
 
   async function logout() {
     'use server';
@@ -179,6 +186,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <PrefsRoot role={active.role}>
               <ShellFrame
                 initialRail={rail}
+                density={display.density}
+                textSize={display.text}
                 viewer={viewer}
                 sidebar={
                   <Sidebar
@@ -242,7 +251,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
                   tabIndex={-1}
                   className="pb-[calc(var(--rm-bottomnav-h)+var(--consent-h,0px)+1.5rem)] focus:outline-none lg:pb-[calc(var(--consent-h,0px)+2rem)]"
                 >
-                  <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+                  {/* rm-text-zoom: large text enlarges the content beside the menu (DS3-00, data-text on #rm-app);
+                      not <main> or the column, whose padding-start holds the fixed menu, and not the top bar. */}
+                  <div className="rm-text-zoom mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
                     <WorkerStatusBanner status={workerStatus} />
                     <LocaleSync />
                     {/* Always mounted: it only touches an EXISTING receiver queue, so a sign-out from a branch

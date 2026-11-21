@@ -13,7 +13,7 @@ import {
   writeFavourites,
 } from '../prefs';
 import { sanitizeFavourites, toggleFavourite as toggleFavouriteIn } from '../favourites';
-import { tokenDensity, usePrefs } from '@/lib/prefs';
+import { densityAttr, textAttr, useHydrated, usePrefs } from '@/lib/prefs';
 import { shellModel } from '../shellModel';
 import css from './shell.module.css';
 import { NavTooltip } from './NavTooltip';
@@ -121,12 +121,18 @@ function restoreFocus(el: HTMLElement | null) {
  */
 export function ShellFrame({
   initialRail,
+  density,
+  textSize,
   viewer,
   sidebar,
   overlays,
   children,
 }: {
   initialRail: boolean;
+  /** `data-density` for the first HTML: DS3-06's `shellAttrs()` on the server ("compact", or none). */
+  density?: 'compact';
+  /** `data-text` for the first HTML: DS3-06's `shellAttrs()` on the server ("large", or none). */
+  textSize?: 'large';
   viewer: NavViewer;
   /** The side menu (rendered first: skip link → menu → top bar → main is the Tab order). */
   sidebar: React.ReactNode;
@@ -149,6 +155,7 @@ export function ShellFrame({
   // The single-key switch is a display preference: DS3-06's store (lib/prefs), mounted by the layout, so
   // the account menu, the cheat sheet, the palette, the settings screen and the desk keys share one value.
   const prefs = usePrefs();
+  const hydrated = useHydrated();
   const singleKeys = prefs.singleKeys;
   const setSingleKeys = prefs.setSingleKeys;
   const [favourites, setFavourites] = useState<string[]>([]);
@@ -350,17 +357,20 @@ export function ShellFrame({
     ],
   );
 
-  // DS3 "Personal preferences: one contract": the shell carries density and text size from the first HTML.
-  // The values come from DS3-06's store (its provider, mounted by the layout, hands over the server's cookie
-  // snapshot), so the shell, the settings screen and the tables always agree.
+  // DS3 "Personal preferences: one contract": #rm-app carries data-density ("compact" or none) and data-text
+  // ("large" or none). The first HTML takes them from the layout (DS3-06's shellAttrs, from the cookies); after
+  // hydration they follow DS3-06's store, so a change in settings or the palette applies at once, without a
+  // refresh, and the shell, the settings screen and the tables always agree.
+  const densityNow = hydrated ? densityAttr(prefs.appliedDensity) : density;
+  const textNow = hydrated ? textAttr(prefs.textSize) : textSize;
   return (
     <ShellUiProvider value={value}>
       <div
         id="rm-app"
         className={cn(css.app, 'min-h-screen')}
         data-rail={rail ? 'on' : 'off'}
-        data-density={tokenDensity(prefs.appliedDensity)}
-        data-text={prefs.textSize}
+        data-density={densityNow}
+        data-text={textNow}
         data-flat={flat ? '' : undefined}
         data-overlay={overlayOpen ? 'open' : undefined}
         data-nav-mode={viewport ? mode : undefined}

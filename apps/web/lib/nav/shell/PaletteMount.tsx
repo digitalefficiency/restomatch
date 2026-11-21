@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { CommandPalette, ShortcutSheet, type PaletteItem, type PaletteScreen } from '@/lib/components/palette';
+import { CommandPalette, ShortcutSheet, type PaletteCommand, type PaletteItem, type PaletteScreen } from '@/lib/components/palette';
 import { taskRow } from '@/lib/components/notifications/rows';
 import { trpc } from '@/lib/trpc/client';
 import { formatIls } from '@/lib/money';
@@ -11,13 +11,13 @@ import { useLocale, useT } from '@/lib/i18n/client';
 import { nav } from '@/lib/i18n/messages/nav';
 import { navShell } from '@/lib/i18n/messages/nav/shell';
 import { overview } from '@/lib/i18n/messages/overview';
-import { useMediaMatch, usePrefs } from '@/lib/prefs';
+import { useIsPhone } from '@/lib/prefs';
+import { useDisplayCommands, useSettingsPaletteScreens } from '@/app/dashboard/settings/_index/palette';
 import type { NavViewer } from '../types';
 import { routeByKey } from '../registry';
 import { canFollowPath } from '../visibility';
 import { shellModel } from '../shellModel';
 import { QUEUE_KEY } from '../queue';
-import { settingsFor } from '../settingsIndex';
 import type { ShellUi } from './ShellFrame';
 
 const FIELD_ROLES = new Set(['chef', 'receiver']);
@@ -30,6 +30,12 @@ const FIELD_ROLES = new Set(['chef', 'receiver']);
  * viewer's own menu entries (so a G-chord or a result never leads to a screen
  * the role cannot open), with their G-chord keys. A money action only opens
  * its own screen; nothing is approved from here (sidebar spec §7.4).
+ *
+ * The settings and the density, text and single-key commands are DS3-06's
+ * (app/dashboard/settings/_index/palette.ts): already role-filtered, translated,
+ * and absent where they do nothing on this device. The side menu's command is
+ * the shell's own setter (with its Ctrl/⌘ B chip, never for the flat rail),
+ * and the cheat sheet's is added here.
  */
 export function PaletteMount({ viewer, ui }: { viewer: NavViewer; ui: ShellUi }) {
   const router = useRouter();
@@ -38,11 +44,11 @@ export function PaletteMount({ viewer, ui }: { viewer: NavViewer; ui: ShellUi })
   const ts = useT(navShell) as unknown as (key: string) => string;
   const to = useT(overview);
   const fieldRole = FIELD_ROLES.has(viewer.role);
-  const prefs = usePrefs();
-  // DS3-06's rule: a setting that does nothing on this device is absent (lib/prefs/README.md). Density is
-  // fixed on a touch pointer or a narrow window; the side menu needs ≥ 1024; single keys need a keyboard.
-  const coarse = useMediaMatch('(pointer: coarse)');
-  const phone = ui.viewport === 'narrow' && coarse;
+  // DS3-06's rule: a command that does nothing on this device is absent (lib/prefs/README.md): no keyboard
+  // on a phone, so no cheat sheet there either.
+  const phone = useIsPhone();
+  const displayCommands = useDisplayCommands();
+  const settingScreens = useSettingsPaletteScreens();
 
   const screens: PaletteScreen[] = useMemo(() => {
     const m = shellModel(viewer);
@@ -82,7 +88,7 @@ export function PaletteMount({ viewer, ui }: { viewer: NavViewer; ui: ShellUi })
   }, [tasks.data, to, locale, fieldRole]);
 
   const commands = useMemo(() => {
-    const list: Array<{ id: string; label: string; keywords: readonly string[]; keys?: readonly string[]; run: () => void }> = [];
+    const list: PaletteCommand[] = [];
     if (!ui.flat && ui.viewport !== 'narrow') {
       list.push({
         id: 'rail',
@@ -92,31 +98,11 @@ export function PaletteMount({ viewer, ui }: { viewer: NavViewer; ui: ShellUi })
         run: ui.toggleRail,
       });
     }
-    if (!prefs.touch) {
-      const compact = prefs.density === 'compact';
-      list.push({
-        id: 'density',
-        label: compact ? ts('commands.densityRegular') : ts('commands.densityCompact'),
-        keywords: ['צפיפות', 'שורות', 'רגיל', 'צפוף', 'density', 'compact', 'rows'],
-        run: () => prefs.setDensity(compact ? 'regular' : 'compact'),
-      });
-    }
-    {
-      const large = prefs.textSize === 'large';
-      list.push({
-        id: 'textSize',
-        label: large ? ts('commands.textRegular') : ts('commands.textLarge'),
-        keywords: ['גודל טקסט', 'טקסט', 'אותיות', 'גדול', 'text', 'size', 'large'],
-        run: () => prefs.setTextSize(large ? 'regular' : 'large'),
-      });
+    // DS3-06's density, text-size and single-key commands; its own side-menu command is replaced by the one above.
+    for (const c of displayCommands) {
+      if (c.id !== 'rail') list.push({ id: c.id, label: c.label, keywords: c.keywords, run: c.run });
     }
     if (!phone) {
-      list.push({
-        id: 'singleKeys',
-        label: ui.singleKeys ? ts('commands.singleKeysOff') : ts('commands.singleKeysOn'),
-        keywords: ['קיצורים', 'מקשים', 'מקלדת', 'shortcuts', 'keys', 'keyboard'],
-        run: () => ui.setSingleKeys(!ui.singleKeys),
-      });
       list.push({
         id: 'shortcuts',
         label: ts('commands.shortcuts'),
@@ -126,17 +112,19 @@ export function PaletteMount({ viewer, ui }: { viewer: NavViewer; ui: ShellUi })
       });
     }
     return list;
-  }, [ui, ts, prefs, phone]);
+  }, [ui, ts, displayCommands, phone]);
 
+  // "הגדרות": every setting and section the viewer may open, with its section as the secondary line.
   const settings: PaletteScreen[] = useMemo(
     () =>
-      settingsFor(viewer.role).map((s) => ({
-        key: `setting:${s.id}`,
+      settingScreens.map((s) => ({
+        key: s.key,
         href: s.href,
-        label: s.label[locale],
-        aliases: s.keywords,
+        label: s.label,
+        aliases: s.aliases,
+        ...(s.section !== s.label ? { secondary: s.section } : {}),
       })),
-    [viewer.role, locale],
+    [settingScreens],
   );
 
   return (
@@ -147,7 +135,8 @@ export function PaletteMount({ viewer, ui }: { viewer: NavViewer; ui: ShellUi })
         role={viewer.role}
         locale={locale}
         screens={screens}
-        canSee={(href) => canFollowPath(viewer, href.split('#')[0]!)}
+        // A settings address carries ?s=… and #anchor; the route check reads the path.
+        canSee={(href) => canFollowPath(viewer, href.split(/[?#]/)[0]!)}
         onNavigate={(href) => router.push(href)}
         waiting={waiting}
         canAsk={viewer.features.includes('aiAssistant')}

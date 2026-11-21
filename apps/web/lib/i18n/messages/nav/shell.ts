@@ -66,17 +66,12 @@ export const he = {
     title: 'סניפים · נשארים באותו מסך',
     count: '{count} סניפים',
   },
-  /** Display commands in Ctrl K (DS3 SPEC §10.5). */
+  /** Display commands in Ctrl K (DS3 SPEC §10.5): the side menu and the cheat sheet; density, text size and
+   *  single-key shortcuts are DS3-06's (settings messages, `commands`). */
   commands: {
     collapse: 'כיווץ התפריט',
     expand: 'הרחבת התפריט',
-    singleKeysOn: 'הפעלת קיצורים בתו אחד',
-    singleKeysOff: 'כיבוי קיצורים בתו אחד',
     shortcuts: 'קיצורי מקלדת',
-    densityCompact: 'מעבר למצב צפוף',
-    densityRegular: 'מעבר למצב רגיל',
-    textLarge: 'מעבר לטקסט גדול',
-    textRegular: 'מעבר לטקסט רגיל',
   },
 };
 
@@ -131,13 +126,7 @@ export const en: Shape<typeof he> = {
   commands: {
     collapse: 'Collapse the menu',
     expand: 'Expand the menu',
-    singleKeysOn: 'Turn on single-key shortcuts',
-    singleKeysOff: 'Turn off single-key shortcuts',
     shortcuts: 'Keyboard shortcuts',
-    densityCompact: 'Switch to compact density',
-    densityRegular: 'Switch to regular density',
-    textLarge: 'Switch to large text',
-    textRegular: 'Switch to regular text',
   },
 };
 

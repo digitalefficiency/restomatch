@@ -608,7 +608,7 @@ export function Sidebar({ viewer, restaurantName, roleLabel, switcher, subline, 
   const HelpIcon = UTILITY_ICONS.help;
 
   return (
-    <aside ref={asideRef} aria-label={ts('aside')} className={css.side} data-testid="sidebar" onKeyDown={onKeyDown}>
+    <aside ref={asideRef} aria-label={ts('aside')} className={css.side} data-focus="inset" data-testid="sidebar" onKeyDown={onKeyDown}>
       <div className={css.inner}>
         <div className={css.head}>
           {switcher ?? (

@@ -254,6 +254,11 @@ export function CommandPalette(props: CommandPaletteProps) {
     } else if (e.key === 'Enter' && safeActive >= 0) {
       e.preventDefault();
       choose(items[safeActive]!);
+    } else if (e.key === 'Escape' && !e.nativeEvent.isComposing) {
+      // "Esc לסגירה" closes at once, typed text or not: a search field eats the first Esc to clear itself
+      // (Chromium), and the dialog then never hears it.
+      e.preventDefault();
+      onClose();
     }
   }
 
@@ -317,7 +322,8 @@ export function CommandPalette(props: CommandPaletteProps) {
               onKeyDown={onKeyDown}
               autoComplete="off"
               spellCheck={false}
-              className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-body text-ink [--focus-offset:-2px] placeholder:text-subtle"
+              data-focus="inset"
+              className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-body text-ink placeholder:text-subtle"
             />
           </label>
           <div className="max-h-[60vh] min-h-0 overflow-auto">
