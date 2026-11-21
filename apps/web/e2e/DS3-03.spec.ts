@@ -631,6 +631,7 @@ test.describe('owner · desk 1440×900', () => {
     const all = await measureWithHidden(page, []);
     const hero = await zoneNumbers(page, '[data-testid="leak-hero"]');
     const context = await zoneNumbers(page, '[data-testid="page-context"]');
+    // The task card outside its row data: both lists and the preview of the rows behind "עוד" are [data-record] (v4 H4, T7).
     const needsOutsideRows = await zoneNumbers(page, '[data-testid="needs-you"]', ['[data-testid="needs-you"] [data-record]']);
     const returned = await zoneNumbers(page, '[data-testid="hero-returned"]');
     const zones = `hero ${hero} · page-context ${context} · needs outside rows ${needsOutsideRows} · returned ${returned} · total ${all.numbers} · primary ${all.primary}`;
