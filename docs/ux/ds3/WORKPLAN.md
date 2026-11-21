@@ -46,19 +46,27 @@ is touched; `money-format-marshal` whenever ₪ is rendered; `icp-keeper` for sc
   label `links.<key>` in `messages/nav/{he,en}.ts` and in the four overlay `nav.ts` files. That is a permitted
   seam for every package: exactly those lines, named in the pull request. `DS3-02` owns the files and expects
   the lines.
-- **Personal preferences: one contract** (owner of the stored values: `DS3-06`, in `apps/web/lib/prefs/**`):
-  - single-key shortcuts: `localStorage` key `rm:keys:single`, values `'1'` / `'0'`, on when absent, every
-    read and write in try/catch (sidebar spec §13). `DS3-06` wraps this key in its store; `DS3-02` renders the
-    switch in the account menu, the cheat sheet and the palette through that store; the desk keys (`DS3-04`)
-    and `apps/web/lib/hotkeys.ts` (`DS3-02`) read it. Until the store is pushed, read the raw key.
-  - density: cookie `rm_density` mirrored in `localStorage` `rm:density`, values `regular` / `compact`
-    (worded "רגיל / צפוף"). It is the default for both existing switches: the table's `d` parameter
-    (`default` / `compact`; `touch` stays automatic on coarse pointers) and the views toolbar
-    (`comfortable` / `compact`). An explicit value in a page's address still wins for that view.
-  - text size: cookie `rm_text` mirrored in `rm:text`, values `regular` / `large`.
-  - before first paint: `DS3-02` reads the two cookies in `apps/web/app/dashboard/layout.tsx`, as it does for
-    `rm_nav_rail`, and sets `data-density` and `data-text` on the shell; it also mounts the provider. The
-    styles those attributes drive belong to `DS3-00` (tokens) and `DS3-01` (components).
+- **Personal preferences: one contract** (decided 21.11.2026: the contract is the store that `DS3-06` built,
+  `apps/web/lib/prefs/**`, and its `README.md` is the reference; the names first written here, `rm:keys:single`,
+  `rm_density` / `rm:density` and `rm_text` / `rm:text`, were never in the product and are withdrawn):
+  - storage: one first-party cookie, `rm_display`, holding only explicit choices (`density=regular|compact`,
+    `text=regular|large`, `keys=on|off`). Nothing in `localStorage`. An absent key means the role's default
+    (bookkeeper compact, everyone else regular; text regular; single keys on).
+  - readers never touch the cookie: React code calls `usePrefs()`, a key handler outside React calls
+    `singleKeysEnabled()`, a server component calls `readDisplayChoices()`. That is what keeps the name private
+    to the store. The desk keys (`DS3-04`) and `apps/web/lib/hotkeys.ts` (`DS3-02`) read `singleKeysEnabled()`.
+  - on the page: `PrefsRoot` renders `data-density` (`compact`, or absent for regular), `data-text-size`
+    (`regular` / `large`) and `data-single-keys` (`on` / `off`) from the first HTML. No package sets a second
+    attribute of its own for the same fact; styles hang on these three. They belong to `DS3-00` (tokens) and
+    `DS3-01` (components).
+  - density is the default for both existing switches: the table (`p.tableDensity`) and the views toolbar
+    (`p.viewDensity`). It is worded "רגיל / צפוף". On a touch pointer the regular density applies.
+  - mounting: `DS3-02` mounts `PrefsRoot` once in `apps/web/app/dashboard/layout.tsx` and renders the single-key
+    switch in the account menu, the cheat sheet and the palette through `usePrefs()`.
+  - the cookie policy page lists every cookie, so `rm_display` needs its line there before this ships. That is
+    a permitted seam for `DS3-06`: exactly one entry in the list of
+    `apps/web/app/(marketing)/cookies/page.tsx` (category "preference", one year) and its label strings, named
+    in the pull request.
 - **e2e:** one spec per package, `apps/web/e2e/DS3-NN.spec.ts` (plus `DS3-NN-*.spec.ts` if needed). Existing
   specs of your screen may be updated where the screen changed on purpose; shared helpers
   (`apps/web/e2e/helpers*`, `auth.setup.ts`, `env.ts`) are read-only.
@@ -176,9 +184,9 @@ with the reason stated) · `apps/web/e2e/DS3-02.spec.ts` and the existing naviga
 changed on purpose.
 
 **Seams.** `DS3-06` gives you a preferences provider (`apps/web/lib/prefs/**`); mounting it in `layout.tsx`
-is yours, and so is setting `data-density` and `data-text` on the shell before first paint from its two
-cookies (see "Personal preferences: one contract"). The single-key switch in the account menu, the cheat
-sheet and the palette writes through that store (key `rm:keys:single`). Other packages add one registry
+is yours: `PrefsRoot` then renders the three attributes from the first HTML, and the shell sets none of its
+own for the same facts (see "Personal preferences: one contract"). The single-key switch in the account menu,
+the cheat sheet and the palette reads and writes through `usePrefs()`. Other packages add one registry
 line and its labels for a new page: expect them. The menu's timings use the named motion set that `DS3-00`
 adds; until its branch is pushed, keep them in one place so that they are easy to swap. The star beside a
 page title needs the shared page header: ask `DS3-01` (or build the star inside your boundary and list it
@@ -253,7 +261,7 @@ toast with undo → keys honour the single-key preference (from `DS3-06`; until 
 key defensively) → narrow layout → empty state.
 
 **Acceptance.** Every decision still calls the same procedure with the same input. Keys never fire while
-typing, and they honour `rm:keys:single`. The visible undo window (10 s) stays shorter than the server's
+typing, and they honour `singleKeysEnabled()` from `apps/web/lib/prefs`. The visible undo window (10 s) stays shorter than the server's
 (`REOPEN_WINDOW_MS`, 15 s); change neither without saying so in the pull request. No ₪ shown to a role that
 must not see it. The desk's existing e2e specs pass or are updated with the reason. Copy of the dock slip
 (`apps/web/app/dashboard/receiving/[poId]/dock-slip.tsx` reads `messages/approvals`) is yours when `DS3-05`
@@ -318,11 +326,11 @@ would do to the gaps open now), calling the matching engine without editing it; 
 cross-tenant coverage manifest as `AGENTS.md` allows (add only). A new settings page needs its registry line
 and labels (see "Rules of the partition").
 
-**The preferences contract is yours to implement** (see "Personal preferences: one contract"): the storage
-key and cookie names there are fixed, because three other packages read them. You own the stored values and
-the store; `DS3-02` sets the attributes before first paint and renders the single-key switch outside the
-settings screen; `DS3-01` makes the two existing density switches read your default. Give them a hook and a
-short `apps/web/lib/prefs/README.md`, and push early.
+**The preferences contract is your store** (see "Personal preferences: one contract"): its cookie, its three
+attributes and its hooks are what three other packages read, so change none of them without a message to the
+coordinating session first. You own the stored values and the store; `DS3-02` mounts `PrefsRoot` and renders
+the single-key switch outside the settings screen; `DS3-01` makes the two existing density switches read your
+default. Keep `apps/web/lib/prefs/README.md` current, and add the cookie's line to the cookie policy page.
 
 **Not yours.** The schema (`packages/db/**`): preferences stay per device, so no column is needed. The
 approvals engine and the matching engine. Team and integrations screens. Pull requests `#324` (features hub)

@@ -3,6 +3,25 @@
 Newest first. When an entry names your package, refresh your copy of the handoff (`README.md`, "Where this
 folder lives") and read the sections it points to. Your contract is still your section of `WORKPLAN.md`.
 
+## 21.11.2026 · fifth correction
+
+**Personal preferences: the contract is now the store that exists.** `DS3-00`, `DS3-01`, `DS3-02`, `DS3-04`,
+`DS3-06`: read `WORKPLAN.md`, "Personal preferences: one contract" again.
+
+- The names first written in the work plan (`rm:keys:single`, `rm_density` / `rm:density`, `rm_text` /
+  `rm:text`, and the attribute `data-text`) were never in the product. They are withdrawn.
+- What holds is what `DS3-06` built in `apps/web/lib/prefs/**`: one cookie `rm_display` with explicit choices
+  only, nothing in `localStorage`, defaults by role, and three attributes rendered by `PrefsRoot` from the
+  first HTML: `data-density` (`compact` or absent), `data-text-size`, `data-single-keys`.
+- **Nobody reads the cookie or a storage key directly.** `usePrefs()` in React, `singleKeysEnabled()` in a key
+  handler, `readDisplayChoices()` on the server. `DS3-04`: the desk keys read `singleKeysEnabled()`.
+- `DS3-02` mounts `PrefsRoot` and sets no attribute of its own for density or text size. `DS3-00` and `DS3-01`
+  hang their styles on the three attributes above.
+- `DS3-06` adds the cookie's line to the cookie policy page (a permitted seam: one entry and its labels).
+
+Why this way round: three packages already build on the store, the server can read one cookie and render the
+final look in the first HTML, and a shared device gives each person their role's default.
+
 ## 21.11.2026 · fourth correction
 
 The reference's script only (`reference/src/script.js` and its copy inside `reference.html`). No package is
