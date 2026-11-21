@@ -322,7 +322,7 @@ describe('change against a previous period (kit "שינוי מול תקופה ק
     const bad = render(h(Delta, { current: 846, previous: 760, goodWhen: 'down' }));
     expect(bad).toContain('data-delta="bad"');
     expect(bad).toMatch(/<span data-delta="bad" class="[^"]*text-fg[^"]*"/);
-    expect(bad).toMatch(/<svg[^>]*class="[^"]*text-danger-dot/);
+    expect(bad).toMatch(/<svg[^>]*class="[^"]*stroke-danger-dot/);
     // the amount itself is never red
     expect(bad.replace(/<svg[\s\S]*?<\/svg>/g, '')).not.toContain('text-danger');
     const flat = render(h(Delta, { current: 760, previous: 760, goodWhen: 'down' }));
@@ -563,5 +563,29 @@ describe('charts (kit "גרפים", SPEC §10.1)', () => {
     const named = render(h(SplitBar, { first: 1, second: 0, label: 'שולם במלואו' }));
     expect(named).toContain('role="img" aria-label="שולם במלואו"');
     expect(named.match(/<i /g)).toHaveLength(1); // an empty part is not drawn
+  });
+});
+
+describe('handoff corrections (CHANGES.md 14.11, DS3-01)', () => {
+  it('radii: the phone-flow button has 12 px corners; icons 16 in content, 18 in the top bar', async () => {
+    const { Button } = await import('../Button');
+    const { Icon } = await import('../icon/Icon');
+    const { Check } = await import('lucide-react');
+    expect(render(h(Button, { size: 'xl' }, 'אישור: 24 ק״ג'))).toContain('rounded-card');
+    expect(render(h(Icon, { as: Check }))).toContain('h-4 w-4');
+    expect(render(h(Icon, { as: Check, size: 'bar' }))).toContain('size-[1.125rem]');
+  });
+
+  it("a card's border is --rule (MetricTile, the region empty state)", async () => {
+    const { MetricTile } = await import('../money/MetricTile');
+    expect(render(h(MetricTile, { label: 'דליפה החודש', value: 760 }))).toContain('border-line-rule');
+    expect(render(h(EmptyStateComp, { kind: 'inbox-zero', title: 'אין פערים פתוחים' }))).toContain('rounded-card border border-line-rule');
+  });
+
+  it('wording: never a singular imperative; "הכול" spelled in full', async () => {
+    const { he: viewsHe } = await import('../../i18n/messages/views/he');
+    const { he: commonHe } = await import('../../i18n/messages/common/he');
+    expect(viewsHe.toolbar.clearFilters).toBe('ניקוי הסינון');
+    expect(JSON.stringify(commonHe)).not.toMatch(/הכל(?!ו)/);
   });
 });

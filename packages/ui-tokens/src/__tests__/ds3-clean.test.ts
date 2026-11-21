@@ -99,27 +99,40 @@ describe('DS3 · SPEC §2 colours land on the DS2 roles', () => {
     }
   });
 
-  it('the new roles are Tailwind keys (dots, the ring, the hover surface)', () => {
-    const c = tailwindPreset.theme.extend.colors as unknown as Record<string, Record<string, string>>;
-    expect(c.danger!.dot).toBe('rgb(var(--c-danger-dot) / <alpha-value>)');
-    expect(c.warn!.dot).toBe('rgb(var(--c-warn-dot) / <alpha-value>)');
-    expect(c.warn!['dot-ring']).toBe('rgb(var(--c-warn-dot-ring) / <alpha-value>)');
-    expect(c.gold!.dot).toBe('rgb(var(--c-gold-dot) / <alpha-value>)');
-    expect(c.neutral!.dot).toBe('rgb(var(--c-neutral-dot) / <alpha-value>)');
-    expect(c.surface!.hover).toBe('rgb(var(--c-surface-hover) / <alpha-value>)');
+  it('the new roles are Tailwind keys: dots for fills, borders, rings and SVG paint — never text', () => {
+    const ext = tailwindPreset.theme.extend as unknown as Record<string, Record<string, Record<string, string>>>;
+    const fams = ['primary', 'danger', 'warn', 'gold', 'info', 'neutral'];
+    for (const key of ['backgroundColor', 'borderColor', 'ringColor', 'fill', 'stroke']) {
+      for (const f of fams) expect(ext[key]![f]!.dot, `${key}.${f}.dot`).toBe(`rgb(var(--c-${f}-dot) / <alpha-value>)`);
+      expect(ext[key]!.ok!.dot, `${key}.ok.dot`).toBe('rgb(var(--c-gold-dot) / <alpha-value>)');
+    }
+    expect(ext.ringColor!.warn!['dot-ring']).toBe('rgb(var(--c-warn-dot-ring) / <alpha-value>)');
+    // No `text-*-dot`: `colors` (which every text utility reads) carries no indicator.
+    for (const f of [...fams, 'ok']) expect(ext.colors![f]!.dot, `colors.${f}.dot`).toBeUndefined();
+    expect(ext.colors!.surface!.hover).toBe('rgb(var(--c-surface-hover) / <alpha-value>)');
+  });
+
+  it('every status family has the same role set, now with a dot (DS2 §2.2: six families, one role set)', () => {
+    const FAMS: StatusFamily[] = ['primary', 'danger', 'warn', 'gold', 'info', 'neutral'];
+    const css = cssVariables();
+    for (const f of FAMS) {
+      expect(Object.keys(status[f]).sort(), f).toEqual(['bgBold', 'bgBoldHover', 'bgSubtle', 'bgSubtleHover', 'borderSubtle', 'dot', 'onBold', 'text']);
+      expect(css, f).toContain(`--c-${f}-dot: ${channels(status[f].dot)};`);
+    }
+    expect(indicator).toEqual({ primary: status.primary.dot, danger: status.danger.dot, warn: status.warn.dot, warnRing: '#B97500', gold: status.gold.dot, info: status.info.dot, neutral: status.neutral.dot });
   });
 });
 
 describe('DS3 · tiers keep their meaning (SPEC §2 rules)', () => {
   const T3: MoneyState[] = ['caught', 'claimed', 'credited', 'returned'];
 
-  it('T3 (good news) is green: caught and returned read the T3 family (leaf), claimed and credited the brand (basil)', () => {
+  it('T3 (good news) is green: money that came back (caught, credited, returned) reads the T3 family (leaf); claimed reads the brand (basil)', () => {
     for (const s of T3) expect(moneyStates[s].tier, s).toBe('T3');
     expect(moneyStates.caught.figure).toBe('gold');
+    expect(moneyStates.credited.figure).toBe('gold');
     expect(moneyStates.returned.figure).toBe('gold');
-    // Held on `primary` until DS3-01 moves Money's class with its own test (see the DS3-00 PR).
+    // Held on `primary`: ds-foundation.test.ts:80 (DS3-01's folder) pins claimed's class (see the DS3-00 PR).
     expect(moneyStates.claimed.figure).toBe('primary');
-    expect(moneyStates.credited.figure).toBe('primary');
     for (const s of T3) expect([status.gold.text, status.primary.text], s).toContain(status[moneyStates[s].figure as StatusFamily].text);
     expect(status.gold.text).toBe('#00713E');
     expect(status.primary.text).toBe('#00573B');
@@ -183,8 +196,10 @@ describe('DS3 · contrast holds what the reference holds (5:1; lowest 5.42:1)', 
       expect(contrastRatio(indicator.danger, bg)).toBeGreaterThanOrEqual(3);
       expect(contrastRatio(indicator.warnRing, bg)).toBeGreaterThanOrEqual(3);
     }
-    for (const bg of [surfaces.canvas, surfaces.surface, surfaces.sunken, surfaceV2.selected]) expect(contrastRatio(indicator.gold, bg)).toBeGreaterThanOrEqual(3);
-    expect(contrastRatio(indicator.neutral, surfaces.surface)).toBeGreaterThanOrEqual(3);
+    for (const bg of [surfaces.canvas, surfaces.surface, surfaces.sunken, surfaceV2.selected, status.gold.bgSubtle]) expect(contrastRatio(indicator.gold, bg)).toBeGreaterThanOrEqual(3);
+    for (const bg of Object.values(TEXT_SURFACES)) {
+      for (const dot of [indicator.primary, indicator.info, indicator.neutral]) expect(contrastRatio(dot, bg)).toBeGreaterThanOrEqual(3);
+    }
   });
 });
 
@@ -222,20 +237,29 @@ describe('DS3 · density variables express SPEC §7 (the switch itself is DS3-06
     return css.slice(at, css.indexOf('}', at));
   };
 
-  it('compact: screen titles 20/26 and a queue row\'s block padding 4/5 (regular 7/8)', () => {
+  it('compact: screen titles 20/26, row titles and amounts 14/18, sub-lines 12/16, a queue row 43 px with 4/5 padding', () => {
     const compact = block("[data-density='compact'] {\n  --fs-cell"); // the v2 block (the v1 one sets --row-h)
-    for (const decl of ['--fs-title-lg: 1.25rem;', '--lh-title-lg: 1.625rem;', '--fs-title-md: 1.25rem;', '--lh-title-md: 1.625rem;', '--decision-row-pt: 4px;', '--decision-row-pb: 5px;']) {
+    for (const decl of [
+      '--fs-title-lg: 1.25rem;', '--lh-title-lg: 1.625rem;', '--fs-title-md: 1.25rem;', '--lh-title-md: 1.625rem;',
+      '--fs-row-title: 0.875rem;', '--lh-row-title: 1.125rem;', '--fs-row-sub: 0.75rem;', '--lh-row-sub: 1rem;',
+      '--decision-row-h: 43px;', '--decision-row-pt: 4px;', '--decision-row-pb: 5px;',
+    ]) {
       expect(compact).toContain(decl);
     }
     const root = block(':root {\n  --c-surface-canvas');
-    expect(root).toContain('--decision-row-pt: 7px;');
-    expect(root).toContain('--decision-row-pb: 8px;');
+    for (const decl of ['--fs-row-title: 0.875rem;', '--lh-row-title: 1.25rem;', '--fw-row-title: 500;', '--fs-row-sub: 0.8125rem;', '--lh-row-sub: 1.125rem;', '--decision-row-h: 52px;', '--decision-row-pt: 7px;', '--decision-row-pb: 8px;']) {
+      expect(root).toContain(decl);
+    }
+  });
+
+  it('selection is sea, never the brand: the selected ring reads --c-info', () => {
+    expect(cssVariables()).toContain('--ring-selected: inset 0 0 0 2px rgb(var(--c-info));');
   });
 
   it('a phone keeps regular density: a coarse pointer undoes every compact type step and dial', () => {
     const floor = css.slice(css.indexOf("@media (pointer: coarse) {\n  [data-density='compact'] {"));
     const body = floor.slice(0, floor.indexOf('}'));
-    for (const decl of ['--lh-title-lg: 2rem;', '--decision-row-pt: 7px;', '--decision-row-pb: 8px;', '--btn-h-primary: 40px;', '--chip-h: 24px;', '--nav-item-h: 36px;', '--fs-cell: 0.875rem;']) {
+    for (const decl of ['--lh-title-lg: 2rem;', '--lh-row-title: 1.25rem;', '--fs-row-sub: 0.8125rem;', '--decision-row-h: 52px;', '--decision-row-pt: 7px;', '--decision-row-pb: 8px;', '--btn-h-primary: 40px;', '--chip-h: 24px;', '--nav-item-h: 36px;', '--fs-cell: 0.875rem;']) {
       expect(body).toContain(decl);
     }
     // The floor comes after the compact block, so it wins at equal specificity.

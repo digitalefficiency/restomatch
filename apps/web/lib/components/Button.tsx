@@ -48,7 +48,8 @@ const sizes: Record<ButtonSize, string> = {
   sm: 'min-h-8 px-3 py-1 text-body-sm [@media(pointer:coarse)]:min-h-11',
   md: 'min-h-9 px-3.5 py-1.5 text-body-sm [@media(pointer:coarse)]:min-h-11',
   lg: 'min-h-11 px-5 py-2 text-body',
-  xl: 'min-h-14 w-full px-6 py-3 text-body',
+  // The phone flow's full-width action: every control of the phone flow has 12 px corners (SPEC §4, CHANGES.md 14.11).
+  xl: 'min-h-14 w-full rounded-card px-6 py-3 text-body',
 };
 
 /** Filled variants carry a light key cap; the rest the sunken one. */

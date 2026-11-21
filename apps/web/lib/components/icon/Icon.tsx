@@ -3,7 +3,11 @@ import { cnMerge as cn } from '../cn';
 import { DUO_GLYPHS } from './glyphs';
 
 /** Icon size follows the text it sits with: caption 14 · body-sm 16 · body 20 · ≥20 px text 24. */
-const SIZE = { caption: 'h-3.5 w-3.5', 'body-sm': 'h-4 w-4', body: 'h-5 w-5', heading: 'h-6 w-6' } as const;
+/**
+ * SPEC §6 (CHANGES.md 14.11): 16 px in content (`body-sm`, the default), 20 px in menu rows and tiles
+ * (`body`; a group glyph is 16), 18 px in the top bar (`bar`).
+ */
+const SIZE = { caption: 'h-3.5 w-3.5', 'body-sm': 'h-4 w-4', bar: 'size-[1.125rem]', body: 'h-5 w-5', heading: 'h-6 w-6' } as const;
 export type IconSize = keyof typeof SIZE;
 
 /**

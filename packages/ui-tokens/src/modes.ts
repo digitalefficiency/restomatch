@@ -7,7 +7,7 @@
 import { cellPx, dials, gutterPage, rowConstants, type DialMode } from './components';
 import { activeFonts } from './fonts';
 import { chrome, radiusRolesV2, typeScaleV2, type TypeStep } from './scale';
-import { action, border, dataVizV2, emphasis, moneyMarker, surfaceV2, text, textV2 } from './semantic';
+import { action, border, dataVizV2, emphasis, indicator, moneyMarker, status, surfaceV2, text, textV2, type StatusFamily } from './semantic';
 
 export interface VarBlock {
   comment?: string;
@@ -51,6 +51,9 @@ export function colorVarsV2(): Record<string, string> {
     'emphasis-t1-rail': emphasis.t1Rail,
     'emphasis-t2-rail': emphasis.t2Rail,
     'money-marker': moneyMarker,
+    // DS3: every family's indicator and the warn dot's ring (never text; see build.ts dotKeys()).
+    ...Object.fromEntries((['primary', 'danger', 'warn', 'gold', 'info', 'neutral'] as StatusFamily[]).map((f) => [`${f}-dot`, status[f].dot])),
+    'warn-dot-ring': indicator.warnRing,
     ...Object.fromEntries(dataVizV2.categorical.map((hex, i) => [`viz-cat-${i + 1}`, hex])),
     'viz-up': dataVizV2.up,
     'viz-down': dataVizV2.down,
@@ -128,7 +131,8 @@ export function v2Blocks(): VarBlock[] {
     '--cell-px': px(cell.default),
     '--radius-xs': radiusRolesV2.xs,
     '--radius-chip': radiusRolesV2.chip,
-    '--ring-selected': 'inset 0 0 0 2px rgb(var(--c-action-primary-bg))',
+    // DS3 SPEC §2: selection is a state of the interface — sea, never the brand.
+    '--ring-selected': 'inset 0 0 0 2px rgb(var(--c-info))',
     '--gutter-page': px(gutterPage.base),
   });
   for (const [k, v] of Object.entries(chrome)) root[`--chrome-${k}`] = v;
