@@ -84,12 +84,12 @@ export const en: Shape<typeof he> = {
     },
     receiverLateNotice: {
       name: 'Late delivery: notice to the receiver',
-      what: 'On the first day of a delay: a short note to the receiver that the delivery is late and management is on it with the supplier.',
+      what: 'Day one of a delay: the receiver hears management is on it.',
       when: 'Every day at 10:00',
     },
     rematchAlerts: {
       name: 'New gap after a re-check',
-      what: 'An invoice was checked again (a correction, a count or a product link) and a gap that was not there before was found.',
+      what: 'A re-check (correction, count or product link) found a new gap.',
       when: 'As soon as a re-check finds a new gap',
     },
     matchAlerts: {
