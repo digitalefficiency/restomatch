@@ -104,7 +104,7 @@ describe('H-11 slice c · receiver and chef get no ₪ (A own ids; B ids rejecte
     await resetDb(db);
   });
 
-  it('receiving.priceContext: the receiver gets the prices null and keeps priceHigher / % / samples', async () => {
+  it('receiving.priceContext: the receiver gets the prices, % and samples null and keeps priceHigher', async () => {
     const owner = await callerFor(A, 'owner').receiving.priceContext({ invoiceId: A.invoiceId });
     expect(owner.enabled).toBe(true);
     expect(owner.lines.length).toBeGreaterThan(0);
@@ -115,7 +115,7 @@ describe('H-11 slice c · receiver and chef get no ₪ (A own ids; B ids rejecte
     const receiver = await callerFor(A, 'receiver').receiving.priceContext({ invoiceId: A.invoiceId });
     expect(receiver).toEqual({
       enabled: true,
-      lines: owner.lines.map((l) => ({ ...l, billedUnitPrice: null, usualUnitPrice: null })),
+      lines: owner.lines.map((l) => ({ ...l, billedUnitPrice: null, usualUnitPrice: null, pctVsUsual: null, samples: null })),
     });
     // The chef is not an invoice reader: FORBIDDEN, as before.
     await expect(callerFor(A, 'chef').receiving.priceContext({ invoiceId: A.invoiceId })).rejects.toMatchObject({ code: 'FORBIDDEN' });

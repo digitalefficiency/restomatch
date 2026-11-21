@@ -13,7 +13,8 @@ export async function dockPriceNotesForInvoice(invoiceId: string): Promise<Recor
     if (!ctx.enabled) return {};
     const out: Record<string, React.ReactNode> = {};
     for (const l of ctx.lines) {
-      if (l.priceHigher && l.pctVsUsual > 0) out[l.invoiceLineId] = <DockPriceHint data={l} />;
+      // A role without ₪ gets no % (H-11): the matcher's flag alone decides.
+      if (l.priceHigher && (l.pctVsUsual === null || l.pctVsUsual > 0)) out[l.invoiceLineId] = <DockPriceHint data={l} />;
     }
     return out;
   } catch {

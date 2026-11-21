@@ -145,6 +145,16 @@ describe('receiving.priceContext (flag dockPriceContext)', () => {
     expect(r.lines.map((l) => l.invoiceLineId)).toEqual([A.invoiceLineId]);
   });
 
+  it('the receiver gets no ₪, no % and no count: only priceHigher (H-11, owner Q1)', async () => {
+    await seedHistory(A, [[5, '8.00'], [20, '8.00'], [40, '8.00']]);
+    const owner = await caller(A).receiving.priceContext({ invoiceId: A.invoiceId });
+    expect(owner.lines[0]).toMatchObject({ usualUnitPrice: 8, samples: 3 });
+    const r = await caller(A, 'receiver').receiving.priceContext({ invoiceId: A.invoiceId });
+    expect(r.lines).toEqual(
+      owner.lines.map((l) => ({ ...l, billedUnitPrice: null, usualUnitPrice: null, pctVsUsual: null, samples: null })),
+    );
+  });
+
   it('a chef cannot read invoice prices (same roles as receiving.getInvoice)', async () => {
     await expect(caller(A, 'chef').receiving.priceContext({ invoiceId: A.invoiceId })).rejects.toMatchObject({
       code: 'FORBIDDEN',
