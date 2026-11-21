@@ -12,7 +12,7 @@ import { CountBadge, pillToneOf, StatusChip, StatusDot, type StatusTone } from '
 import { DeadlineChip } from '../money/DeadlineChip';
 import { EmptyState as EmptyStateComp } from '../EmptyState';
 import { MatchStrip } from '../money/MatchStrip';
-import { bellPanelEnd } from '../notifications/place';
+import { bellPanelEnd, placeBellPanel } from '../notifications/place';
 import { Money } from '../money/Money';
 import { moneyFigureText, moneyGlyph, moneyText, splitMoney } from '../money/format';
 import { DOT_TONE, PILL_TONE } from '../tone';
@@ -794,10 +794,13 @@ describe('review fixes (fidelity to the reference)', () => {
     expect(src).toMatch(/data-testid="bell-trigger"[\s\S]{0,700}className="relative inline-flex size-8 [^"]*max-lg:size-11 \[@media\(pointer:coarse\)\]:size-11"/);
     expect(src).not.toMatch(/\bsize-9\b/);
     expect(src).toContain('<Icon as={BellIcon} size="bar" />');
-    // The dot keeps its place beside the glyph at every box size: 2 px outside the 18 px glyph's corner.
-    expect(src).toMatch(/data-testid="bell-dot"\s+className="absolute end-\[calc\(50%-11px\)\] top-\[calc\(50%-11px\)\] size-2 rounded-full bg-fg ring-2 ring-surface/);
+    // The dot keeps its place beside the glyph at every box size and text size: 2 px outside the 18 px glyph's
+    // corner, in rem like the glyph (half of 1.125rem plus 0.125rem).
+    expect(src).toMatch(/data-testid="bell-dot"\s+className="absolute end-\[calc\(50%-0\.6875rem\)\] top-\[calc\(50%-0\.6875rem\)\] size-2 rounded-full bg-fg ring-2 ring-surface/);
+    expect(src).not.toContain('11px)]');
     // §1.6: the desk panel is 384 wide (and still never wider than the window).
-    expect(src).toContain('w-[384px] max-w-[calc(100vw-2rem)]');
+    // For a fixed dialog 100% is the window less a classic scrollbar, the same width bellPanelEnd reasons in.
+    expect(src).toContain('w-[384px] max-w-[calc(100%-2rem)]');
     expect(src).not.toContain('w-[360px]');
     expect(src).not.toMatch(/bell-dot[\s\S]{0,400}\{cappedCount/);
     // the number is still said: it is part of the trigger's name
@@ -813,13 +816,49 @@ describe('review fixes (fidelity to the reference)', () => {
     expect(bellPanelEnd({ left: 4, right: 36 }, 1440, true)).toBe(16);
     // A bell far from the end still leaves the 384 px panel whole.
     expect(bellPanelEnd({ left: 900, right: 932 }, 1100, true)).toBe(1100 - 16 - 384);
-    // A window narrower than the panel: it fills the window less the two gutters.
+    // A window narrower than the panel fills the window less the two gutters, as max-w calc(100% - 2rem) does.
+    // (Defensive: the panel only mounts at 1024 and up.)
     expect(bellPanelEnd({ left: 300, right: 332 }, 400, true)).toBe(16);
-    // The component places it before it shows (no jump) and again when the window resizes.
+    // The component places it before it shows (no jump), checks it once it is laid out, and again on resize;
+    // the direction is the dialog's own, which is what inset-inline-end resolves against.
     const src = read('notifications/Bell.tsx');
-    expect(src).toMatch(/place\(\);\s+d\.showModal\(\);/);
+    expect(src).toMatch(/place\(\);\s+d\.showModal\(\);\s+place\(\);/);
+    expect(src).toContain("placeBellPanel(d, a.getBoundingClientRect(), document.documentElement.clientWidth, getComputedStyle(d).direction === 'rtl')");
     expect(src).toContain("window.addEventListener('resize', place)");
     expect(src).toContain('anchor={trigger}');
+  });
+
+  it('placeBellPanel writes inset-inline-end and, once open, corrects a gap between client coordinates and the fixed box', () => {
+    // A stand-in dialog whose fixed box starts `gap` px after client x = 0, as a page scrollbar on the left does
+    // (Firefox under a right-to-left interface); 1440 wide, the panel 384.
+    const dialog = (rtl: boolean, gap: number, open: boolean) => {
+      const d = {
+        open,
+        style: { insetInlineEnd: '' },
+        getBoundingClientRect() {
+          const inset = parseFloat(d.style.insetInlineEnd);
+          const left = rtl ? gap + inset : gap + 1440 - inset - 384;
+          return { left, right: left + 384 };
+        },
+      };
+      return d;
+    };
+    const he = { left: 170, right: 202 };
+    const en = { left: 1238, right: 1270 };
+    // Closed: the computed inset is written and nothing is measured.
+    const closed = dialog(true, 15, false);
+    expect(placeBellPanel(closed, he, 1440, true)).toBe(170);
+    expect(closed.style.insetInlineEnd).toBe('170px');
+    // Open, no gap (Chromium): it stays.
+    const chrome = dialog(true, 0, true);
+    expect(placeBellPanel(chrome, he, 1440, true)).toBe(170);
+    // Open with a 15 px gap: corrected so the panel's end edge lands on the bell's, in Hebrew and in English.
+    const rtl = dialog(true, 15, true);
+    expect(placeBellPanel(rtl, he, 1440, true)).toBe(155);
+    expect(rtl.getBoundingClientRect().left).toBe(he.left);
+    const ltr = dialog(false, 15, true);
+    expect(placeBellPanel(ltr, en, 1440, false)).toBe(185);
+    expect(ltr.getBoundingClientRect().right).toBe(en.right);
   });
 
   it('a figure that failed to load offers its one action when there is one; otherwise the words stay', () => {
