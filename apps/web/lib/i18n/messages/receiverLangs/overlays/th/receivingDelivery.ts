@@ -109,7 +109,7 @@ export const receivingDelivery: Shape<typeof he> = {
       },
       aria: {
         point: 'จุดทศนิยม',
-        del: 'ลบ',
+        del: 'ลบตัวเลข',
         gapFor: 'มีส่วนต่าง, {name}. เปลี่ยนจำนวน',
         changeQty: 'เปลี่ยนจำนวน, {name}, {qty}',
         other: 'ใส่จำนวนอื่น, {name}',
