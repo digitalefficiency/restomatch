@@ -12,14 +12,19 @@
 //
 // DS3-07 (an owner decision in the form of a pull request, 14.11.2026): Google Sans
 // as a third face, defined the same way as Plex, beside it. The switch is the one
-// line `ACTIVE_FACE` below; the undo is `ACTIVE_FACE = 'plex'`, which regenerates
-// the train C token block byte for byte (src/__tests__/ds3-07.test.ts holds that).
-// - Self-hosted Fontsource 5.3.2 subsets (SIL OFL, no Reserved Font Name; OFL.txt
-//   beside them). One variable file per script carries every weight 400–700, so
-//   Hebrew + Latin is 47.0 KiB for all four app weights (Plex: 99.8 KiB), both preloaded.
-// - Its default digits are proportional; with 'tnum' they are 0.600 em in every
-//   weight, like Plex's default digits. Its 'tnum' also sets ₪ , . : ; and the space
-//   to tabular widths, so it belongs on figures, never on running text. Figures get it
+// line `ACTIVE_FACE` below; the undo is `ACTIVE_FACE = 'plex'` and `tokens:css`, which
+// regenerates DS3-00's token block byte for byte, with train C's @font-face rules, roles
+// and preloads. No test pins the active face, so the undo needs no other edit.
+// - Self-hosted Fontsource 5.3.2 subsets (SIL OFL 1.1, no Reserved Font Name; OFL.txt
+//   beside them), unmodified except the latin file: it is published with seven Google
+//   logo glyphs that its 'liga' and 'calt' put in place of ordinary text ('store_logo.png'
+//   drew as "stor" + a logo e + ".png"), so they are removed (GOOGLE_SANS_LATIN_EDIT below).
+//   One variable file per script carries every weight 400–700, so Hebrew + Latin is
+//   46.6 KiB for all four app weights (Plex: 99.8 KiB), both preloaded.
+// - Its default digits are proportional (0.430–0.643 em); with 'tnum' they are 0.600 em
+//   in every weight, like Plex's default digits. Its 'tnum' also sets the space and
+//   . , : ; to 0.300 em and ₪ % # § + − × ÷ = < > ± ¬ $ € £ ¥ ¢ ¤ to 0.600 em (₪ and %
+//   redrawn narrower), so it belongs on figures, never on running text. Figures get it
 //   where they carry the number role (`.num`, `tabular-nums`); `featuresNum` is emitted
 //   as --font-features-num but nothing reads it yet. Digits rendered without the number
 //   role (they were fixed-width only because Plex's are) turn proportional.
@@ -92,6 +97,24 @@ export const activeFonts: FontRoles = fontRoles[ACTIVE_FACE];
 // Plex and Frank Ruhl Libre: Fontsource 5.3.0. Google Sans: @fontsource-variable/google-sans 5.3.2.
 
 /**
+ * The one change made to a published Google Sans file (OFL 1.1 allows modified versions; the
+ * family has no Reserved Font Name and the name table, with its copyright and licence, is kept).
+ * The latin file carries 'Google.logo', 'G.logo', 'G.super', 'e.logo', 'g.logo', 'l.logo' and
+ * 'o.logo', reached only through 20 ligature rules ('e_logo', 'google_logo', 'super_G_logo' …)
+ * that browsers apply by default. The fontTools subsetter drops those seven glyphs and the rules
+ * that make them; every other glyph, codepoint, feature, outline, advance and variation delta is
+ * the published file's (61,160 shaping comparisons, 4 weights × 11 feature sets, identical).
+ * Reproducible: same input, same bytes.
+ */
+export const GOOGLE_SANS_LATIN_EDIT = {
+  published: 'google-sans-latin-wght-normal.woff2, @fontsource-variable/google-sans@5.3.2 (35,968 B)',
+  removedGlyphs: ['Google.logo', 'G.logo', 'G.super', 'e.logo', 'g.logo', 'l.logo', 'o.logo'],
+  tool:
+    "fontTools 4.60.1 subset: glyphs = all but the seven, unicodes = the file's cmap, layout_features *, " +
+    'layout_closure off, glyph and name tables kept, hinting kept, timestamp kept, woff2 (brotli 1.2.1)',
+} as const;
+
+/**
  * Fontsource unicode ranges. Digits live in `latin`, ₪ (U+20AA) in `hebrew`.
  * Fontsource's latin-ext range also lists U+20AA, so every ₪ made the browser
  * fetch a latin-ext file too; ₪ is cut out of latin-ext here (the hebrew file draws it).
@@ -119,7 +142,12 @@ export interface FaceSet {
    * there is one @font-face per subset (`font-weight: min max`), not one per weight.
    */
   weightRange?: readonly [number, number];
+  /** Where a set's files cover a different range than UNICODE_RANGE (a newer Fontsource release). */
+  ranges?: Partial<Record<Subset, string>>;
 }
+
+/** The unicode-range a set's file for `subset` serves. */
+export const rangeOf = (set: FaceSet, subset: Subset): string => set.ranges?.[subset] ?? UNICODE_RANGE[subset];
 
 export const faces: Record<'plex' | 'google-sans' | 'display', FaceSet> = {
   plex: {
@@ -135,9 +163,16 @@ export const faces: Record<'plex' | 'google-sans' | 'display', FaceSet> = {
     dir: '/fonts/google-sans',
     // The `wght` axis only (opsz 18 and GRAD 0, the family's defaults, are fixed in the files).
     file: (s) => `google-sans-${s}-wght-normal.woff2`,
-    subsets: ['hebrew', 'latin', 'latin-ext', 'cyrillic'],
+    // latin last: for a character in two ranges the last rule is tried first, and the preloaded
+    // latin file draws ı Œ œ and the combining marks, so they never fetch latin-ext.
+    subsets: ['hebrew', 'cyrillic', 'latin-ext', 'latin'],
     weights: [400, 500, 600, 700],
     weightRange: [400, 700],
+    // Fontsource 5.3.2's latin-ext range (to U+20C4), with ₪ cut out as above.
+    ranges: {
+      'latin-ext':
+        'U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20A9, U+20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF',
+    },
   },
   display: {
     family: 'Frank Ruhl Libre',
@@ -163,23 +198,24 @@ export const fontUrl = (set: FaceSet, subset: Subset, weight: number): string =>
  * on /dashboard/leaks shifted, CLS 0.052). So 550+ falls back to Arial Bold.
  * Frank Ruhl 700: asc 957, desc 334; vs Times/Liberation Serif Bold.
  *
- * Google Sans (DS3-07): the same bands, asc 966, desc 286, gap 0 (USE_TYPO_METRICS),
- * measured against Liberation Sans (Arial's metrics) on the variable file instanced at
- * each band's weight. One size-adjust per band did not fit: against Arial, Google Sans's
- * Hebrew letters are 103–110 % wide, its Latin 100–107 %, its space 84 % and its
- * digits 98–108 %, and with the face held back the fallback moved phone layouts by up
- * to CLS 0.38 when it swapped in. So within each band a face per character class
- * (Latin, Hebrew, space, digits at the face's own proportional width), each weighted by
- * how often the product's own he/en message strings use each character, overrides the
- * DS2-method catch-all. On 537 Hebrew and 600 English catalogue strings the fallback is
- * within 0.2–0.6 % of the face at every weight (catch-all alone: −3.4 to +2.3 %); with
- * the face held back 3 s, 1 of 32 screen loads moved more than 0.01 (Plex: 3 of 32).
+ * Google Sans (DS3-07): the same bands, asc 966, desc 286, gap 0 (USE_TYPO_METRICS).
+ * One size-adjust per band did not fit both scripts: against Arial, Google Sans's Hebrew
+ * letters are 103–110 % wide and its Latin 100–107 %, and with the face held back 3 s the
+ * band catch-all alone moved a phone layout by CLS 0.38 when the face swapped in. So each
+ * band has two faces, fitted in Chromium on the product's own catalogue strings (537 he,
+ * 600 en) drawn in Liberation Sans, Arial's metric twin: the catch-all on the English
+ * strings, then a Hebrew face (the hebrew subset's range, defined after the catch-all so
+ * it is tried first there) on the Hebrew strings, the catch-all drawing their spaces,
+ * digits and punctuation. Median width, fallback ÷ face: 1.000–1.001 in both languages at
+ * every weight, 80 % of strings within ±2 % (Plex's: he 1.016–1.035, en 0.980–1.006).
+ * Faces for more classes (Latin, the space, the digits) fitted a little closer but cost
+ * first paint: each class splits text runs, and 20 faces delayed a throttled phone's
+ * Hebrew first paint by 40–90 ms, where the Hebrew face alone cost nothing measurable.
+ * While the fallback shows, ch and ex come from the catch-all (1ch ≈ 0.56 em; the face's
+ * is 0.643 em), so nothing that paints before the face may be sized in ch or ex.
  */
 const ARIAL = ["local('Arial')", "local('ArialMT')", "local('Liberation Sans')"] as const;
 const ARIAL_BOLD = ["local('Arial Bold')", "local('Arial-BoldMT')", "local('Liberation Sans Bold')"] as const;
-/** The space and no-break space (Google Sans: 84 % of Arial's) and the digits (its own, proportional: 98–104 %). */
-const FALLBACK_SPACE = 'U+0020, U+00A0';
-const FALLBACK_DIGITS = 'U+0030-0039';
 
 export const fallbackFaces = [
   { family: 'IBM Plex Sans Hebrew Fallback', weight: '100 449', local: ["local('Arial')", "local('ArialMT')", "local('Liberation Sans')"], sizeAdjust: '98.65%', ascent: '103.9%', descent: '27.88%', lineGap: '0%' },
@@ -187,28 +223,16 @@ export const fallbackFaces = [
   { family: 'IBM Plex Sans Hebrew Fallback', weight: '550 649', local: ["local('Arial Bold')", "local('Arial-BoldMT')", "local('Liberation Sans Bold')"], sizeAdjust: '97.29%', ascent: '105.36%', descent: '28.27%', lineGap: '0%' },
   { family: 'IBM Plex Sans Hebrew Fallback', weight: '650 900', local: ["local('Arial Bold')", "local('Arial-BoldMT')", "local('Liberation Sans Bold')"], sizeAdjust: '98.63%', ascent: '103.93%', descent: '27.88%', lineGap: '0%' },
   { family: 'Frank Ruhl Libre Fallback', weight: '600 700', local: ["local('Times New Roman Bold')", "local('TimesNewRomanPS-BoldMT')", "local('Liberation Serif Bold')"], sizeAdjust: '103.16%', ascent: '92.77%', descent: '32.38%', lineGap: '0%' },
-  // Google Sans, every other character (the DS2 method: one size-adjust per band).
-  { family: 'Google Sans Fallback', weight: '100 449', local: ARIAL, sizeAdjust: '101.33%', ascent: '95.33%', descent: '28.22%', lineGap: '0%' },
-  { family: 'Google Sans Fallback', weight: '450 549', local: ARIAL, sizeAdjust: '104.3%', ascent: '92.62%', descent: '27.42%', lineGap: '0%' },
-  { family: 'Google Sans Fallback', weight: '550 649', local: ARIAL_BOLD, sizeAdjust: '100.41%', ascent: '96.21%', descent: '28.48%', lineGap: '0%' },
-  { family: 'Google Sans Fallback', weight: '650 900', local: ARIAL_BOLD, sizeAdjust: '101.86%', ascent: '94.84%', descent: '28.08%', lineGap: '0%' },
-  // Google Sans per character class, after the catch-all so each wins for its range.
-  { family: 'Google Sans Fallback', weight: '100 449', local: ARIAL, sizeAdjust: '102.99%', ascent: '93.8%', descent: '27.77%', lineGap: '0%', unicodeRange: UNICODE_RANGE.latin },
-  { family: 'Google Sans Fallback', weight: '450 549', local: ARIAL, sizeAdjust: '106.66%', ascent: '90.57%', descent: '26.81%', lineGap: '0%', unicodeRange: UNICODE_RANGE.latin },
-  { family: 'Google Sans Fallback', weight: '550 649', local: ARIAL_BOLD, sizeAdjust: '99.95%', ascent: '96.65%', descent: '28.61%', lineGap: '0%', unicodeRange: UNICODE_RANGE.latin },
-  { family: 'Google Sans Fallback', weight: '650 900', local: ARIAL_BOLD, sizeAdjust: '101.69%', ascent: '94.99%', descent: '28.12%', lineGap: '0%', unicodeRange: UNICODE_RANGE.latin },
-  { family: 'Google Sans Fallback', weight: '100 449', local: ARIAL, sizeAdjust: '107.28%', ascent: '90.04%', descent: '26.66%', lineGap: '0%', unicodeRange: UNICODE_RANGE.hebrew },
-  { family: 'Google Sans Fallback', weight: '450 549', local: ARIAL, sizeAdjust: '109.96%', ascent: '87.85%', descent: '26.01%', lineGap: '0%', unicodeRange: UNICODE_RANGE.hebrew },
-  { family: 'Google Sans Fallback', weight: '550 649', local: ARIAL_BOLD, sizeAdjust: '102.9%', ascent: '93.88%', descent: '27.79%', lineGap: '0%', unicodeRange: UNICODE_RANGE.hebrew },
-  { family: 'Google Sans Fallback', weight: '650 900', local: ARIAL_BOLD, sizeAdjust: '104.18%', ascent: '92.72%', descent: '27.45%', lineGap: '0%', unicodeRange: UNICODE_RANGE.hebrew },
-  { family: 'Google Sans Fallback', weight: '100 449', local: ARIAL, sizeAdjust: '83.5%', ascent: '115.69%', descent: '34.25%', lineGap: '0%', unicodeRange: FALLBACK_SPACE },
-  { family: 'Google Sans Fallback', weight: '450 549', local: ARIAL, sizeAdjust: '83.86%', ascent: '115.19%', descent: '34.1%', lineGap: '0%', unicodeRange: FALLBACK_SPACE },
-  { family: 'Google Sans Fallback', weight: '550 649', local: ARIAL_BOLD, sizeAdjust: '83.86%', ascent: '115.19%', descent: '34.1%', lineGap: '0%', unicodeRange: FALLBACK_SPACE },
-  { family: 'Google Sans Fallback', weight: '650 900', local: ARIAL_BOLD, sizeAdjust: '84.22%', ascent: '114.7%', descent: '33.96%', lineGap: '0%', unicodeRange: FALLBACK_SPACE },
-  { family: 'Google Sans Fallback', weight: '100 449', local: ARIAL, sizeAdjust: '98.3%', ascent: '98.27%', descent: '29.09%', lineGap: '0%', unicodeRange: FALLBACK_DIGITS },
-  { family: 'Google Sans Fallback', weight: '450 549', local: ARIAL, sizeAdjust: '101.05%', ascent: '95.6%', descent: '28.3%', lineGap: '0%', unicodeRange: FALLBACK_DIGITS },
-  { family: 'Google Sans Fallback', weight: '550 649', local: ARIAL_BOLD, sizeAdjust: '102.44%', ascent: '94.3%', descent: '27.92%', lineGap: '0%', unicodeRange: FALLBACK_DIGITS },
-  { family: 'Google Sans Fallback', weight: '650 900', local: ARIAL_BOLD, sizeAdjust: '103.86%', ascent: '93.01%', descent: '27.54%', lineGap: '0%', unicodeRange: FALLBACK_DIGITS },
+  // Google Sans: the band catch-all, fitted on the English strings.
+  { family: 'Google Sans Fallback', weight: '100 449', local: ARIAL, sizeAdjust: '100.68%', ascent: '95.95%', descent: '28.41%', lineGap: '0%' },
+  { family: 'Google Sans Fallback', weight: '450 549', local: ARIAL, sizeAdjust: '104.12%', ascent: '92.78%', descent: '27.47%', lineGap: '0%' },
+  { family: 'Google Sans Fallback', weight: '550 649', local: ARIAL_BOLD, sizeAdjust: '98.18%', ascent: '98.39%', descent: '29.13%', lineGap: '0%' },
+  { family: 'Google Sans Fallback', weight: '650 900', local: ARIAL_BOLD, sizeAdjust: '99.75%', ascent: '96.84%', descent: '28.67%', lineGap: '0%' },
+  // Google Sans Hebrew, after the catch-all so it is tried first for its range; fitted on the Hebrew strings.
+  { family: 'Google Sans Fallback', weight: '100 449', local: ARIAL, sizeAdjust: '105.51%', ascent: '91.56%', descent: '27.11%', lineGap: '0%', unicodeRange: UNICODE_RANGE.hebrew },
+  { family: 'Google Sans Fallback', weight: '450 549', local: ARIAL, sizeAdjust: '107.81%', ascent: '89.6%', descent: '26.53%', lineGap: '0%', unicodeRange: UNICODE_RANGE.hebrew },
+  { family: 'Google Sans Fallback', weight: '550 649', local: ARIAL_BOLD, sizeAdjust: '101.57%', ascent: '95.11%', descent: '28.16%', lineGap: '0%', unicodeRange: UNICODE_RANGE.hebrew },
+  { family: 'Google Sans Fallback', weight: '650 900', local: ARIAL_BOLD, sizeAdjust: '102.75%', ascent: '94.01%', descent: '27.83%', lineGap: '0%', unicodeRange: UNICODE_RANGE.hebrew },
 ] as const;
 
 export interface FontPreloads {
@@ -221,8 +245,8 @@ export interface FontPreloads {
 /**
  * Preloaded files per base locale for a face (default: the active one; rule 2: both subsets for Hebrew money, the
  * two weights above the fold). 500/600, latin-ext and Frank Ruhl load on demand.
- * β budget: ≤50 KB preloaded (Plex 400 + 700 × hebrew + latin = 49.1 KiB).
- * Google Sans: one file per script holds all four weights (hebrew + latin = 47.0 KiB),
+ * β budget: ≤50 KB preloaded (Plex 400 + 700 × hebrew + latin = 48.8 KiB).
+ * Google Sans: one file per script holds all four weights (hebrew + latin = 46.6 KiB),
  * so nothing paints in a fallback weight once they arrive; ru also preloads Cyrillic.
  */
 export function fontPreloads(face: FaceId = ACTIVE_FACE): FontPreloads {
@@ -262,7 +286,7 @@ export function fontFaceCss(face: FaceId = ACTIVE_FACE): string {
       `  font-weight: ${weight};`,
       '  font-display: swap;',
       `  src: url('${url}') format('woff2');`,
-      `  unicode-range: ${UNICODE_RANGE[s]};`,
+      `  unicode-range: ${rangeOf(set, s)};`,
       '}',
     );
   const sets = faceSetsFor(face);
