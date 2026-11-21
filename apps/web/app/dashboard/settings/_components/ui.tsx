@@ -1,4 +1,4 @@
-import { cn } from '@/lib/components';
+import { StatusDot, cn } from '@/lib/components';
 import type { AbsentOn, SettingsScope } from '../_index/sections';
 
 /**
@@ -24,8 +24,10 @@ export function ScopeChip({ label, scope }: { label: string; scope: SettingsScop
   return (
     <span
       data-scope={scope}
-      className="inline-flex h-6 items-center whitespace-nowrap rounded-pill bg-surface-2 px-2.5 text-caption font-medium text-muted"
+      className="inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-pill bg-surface-2 px-2.5 text-caption font-medium text-muted"
     >
+      {/* The reference's neutral dot (decorative: the word says the scope). */}
+      <StatusDot tone="neutral" size="sm" />
       {label}
     </span>
   );

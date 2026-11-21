@@ -148,7 +148,7 @@ export const en: Shape<typeof he> = {
     railCollapsed: 'Collapsed',
     keysTitle: 'Single-key shortcuts',
     keysQueue: 'in the approvals queue',
-    keysSearch: 'to search',
+    keysMenu: 'for the menu',
     ctrlNote: 'Combinations with {mod} always work',
     reset: 'Back to default',
     sr: {
