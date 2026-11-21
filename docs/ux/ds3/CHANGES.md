@@ -5,22 +5,27 @@ folder lives") and read the sections it points to. Your contract is still your s
 
 ## 21.11.2026 · fifth correction
 
-**Personal preferences: the contract is now the store that exists.** `DS3-00`, `DS3-01`, `DS3-02`, `DS3-04`,
+**Personal preferences: the names in the work plan stand.** `DS3-00`, `DS3-01`, `DS3-02`, `DS3-04`,
 `DS3-06`: read `WORKPLAN.md`, "Personal preferences: one contract" again.
 
-- The names first written in the work plan (`rm:keys:single`, `rm_density` / `rm:density`, `rm_text` /
-  `rm:text`, and the attribute `data-text`) were never in the product. They are withdrawn.
-- What holds is what `DS3-06` built in `apps/web/lib/prefs/**`: one cookie `rm_display` with explicit choices
-  only, nothing in `localStorage`, defaults by role, and three attributes rendered by `PrefsRoot` from the
-  first HTML: `data-density` (`compact` or absent), `data-text-size`, `data-single-keys`.
-- **Nobody reads the cookie or a storage key directly.** `usePrefs()` in React, `singleKeysEnabled()` in a key
-  handler, `readDisplayChoices()` on the server. `DS3-04`: the desk keys read `singleKeysEnabled()`.
-- `DS3-02` mounts `PrefsRoot` and sets no attribute of its own for density or text size. `DS3-00` and `DS3-01`
-  hang their styles on the three attributes above.
-- `DS3-06` adds the cookie's line to the cookie policy page (a permitted seam: one entry and its labels).
+> An earlier version of this entry (commit `67aebf63`, about 07:02 UTC) said the opposite: that the contract
+> should follow a store with one cookie, `rm_display`. That was a mistake of the coordinating session and it is
+> withdrawn. It was written from an older copy of the store, minutes before `DS3-06` pushed the store under
+> the contract's names (`a89595b2`). If you acted on it, undo that.
 
-Why this way round: three packages already build on the store, the server can read one cookie and render the
-final look in the first HTML, and a shared device gives each person their role's default.
+- **The names:** cookies `rm_density` and `rm_text` with their `localStorage` mirrors, `rm:keys:single` in
+  `localStorage`; the shell carries `data-density` and `data-text`. This is what `DS3-06`'s store does now,
+  and what `DS3-00`'s styles hang on.
+- **Readers go through the store, never a raw key or cookie:** `usePrefs()`, `singleKeysEnabled()`,
+  `shellAttrs()` / `readDisplayChoices()`. `DS3-04`: the desk keys read `singleKeysEnabled()`. There is no
+  `data-single-keys` attribute.
+- **One copy of the store.** `DS3-01`, `DS3-02` and `DS3-04` carried an older copy of `apps/web/lib/prefs/**`
+  (one cookie `rm_display`, attribute `data-text-size`). Replace it by merging `claude/ds3-06-settings`; do not
+  edit a copy of your own.
+- **Large text has one mechanism**, `DS3-00`'s: `[data-text='large']` sets `--text-zoom`, and `rm-text-zoom`
+  on the content wrapper applies it. `DS3-02` adds the class; `DS3-06` removes the provider's interim zoom
+  rule once `DS3-00`'s is in its base, so nothing is enlarged twice.
+- `DS3-06` adds the two cookies and the three stored keys to the cookie policy page (a permitted seam).
 
 ## 21.11.2026 · fourth correction
 
