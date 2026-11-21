@@ -142,8 +142,16 @@ export function spotCountMatches(counted: number, ordered: number, tol: CountTol
 /** How many lines the receiver counts blind before a bulk "as ordered". */
 export const SPOT_CHECK_LINES = 2;
 
+/**
+ * A uniform draw in [0, 1) from the platform's cryptographic generator. Which lines are counted
+ * blind is a check on the count, so it must not be guessable; Math.random's sequence can be.
+ */
+export function unguessableRandom(): number {
+  return crypto.getRandomValues(new Uint32Array(1))[0]! / 2 ** 32;
+}
+
 /** Pick the spot-check lines at random (Fisher–Yates over a copy). */
-export function pickSpotCheck<T>(items: readonly T[], n: number = SPOT_CHECK_LINES, rand: () => number = Math.random): T[] {
+export function pickSpotCheck<T>(items: readonly T[], n: number = SPOT_CHECK_LINES, rand: () => number = unguessableRandom): T[] {
   const a = [...items];
   for (let i = a.length - 1; i > 0; i -= 1) {
     const j = Math.floor(rand() * (i + 1));

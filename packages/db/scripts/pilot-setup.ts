@@ -84,6 +84,8 @@ export const PILOT_FEATURE_KEYS = [
   'orderPricesOut',
   'supplierConfirm',
   'dockPriceContext',
+  // DS3-05: count before the photo, quantity field empty — not on for the pilot (owner decision open).
+  'dockCountFirst',
   'orderCapture',
   'leakProof',
   'vatAtRisk',

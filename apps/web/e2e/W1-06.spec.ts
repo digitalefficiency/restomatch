@@ -15,6 +15,52 @@ const RECEIVER = 'receiver@kfar-hazeitim.test';
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } as const;
 test.use(PHONE);
 
+/**
+ * DS3-05: this file drives today's order of steps (the invoice photo first, the
+ * quantity pre-filled). The demo restaurant's `features.all` turns the
+ * count-first flag (`dockCountFirst`) on, so the file pins it OFF and puts the
+ * setting back after its last test.
+ */
+let restoreCountFirst: (() => Promise<void>) | undefined;
+test.beforeAll(async () => {
+  restoreCountFirst = await pinCountFirstOff();
+});
+test.afterAll(async () => {
+  await restoreCountFirst?.();
+});
+
+async function pinCountFirstOff(): Promise<() => Promise<void>> {
+  const sql = e2eSql();
+  try {
+    const [row] = await sql<{ id: string; prev: string | null }[]>`
+      select id, (case jsonb_typeof(settings) when 'object' then settings when 'string' then (settings #>> '{}')::jsonb else '{}'::jsonb end) #>> '{features,dockCountFirst}' as prev
+      from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
+    if (!row) return async () => undefined;
+    await setCountFirst(row.id, false);
+    return () => setCountFirst(row.id, row.prev === null ? null : row.prev === 'true');
+  } finally {
+    await sql.end();
+  }
+}
+
+/** `features.dockCountFirst` on one restaurant: a value, or null to drop it (back to `features.all`). */
+async function setCountFirst(id: string, value: boolean | null) {
+  const sql = e2eSql();
+  try {
+    if (value === null) {
+      await sql`update restaurants
+        set settings = (case jsonb_typeof(settings) when 'object' then settings when 'string' then (settings #>> '{}')::jsonb else '{}'::jsonb end) #- '{features,dockCountFirst}'
+        where id = ${id}`;
+    } else {
+      await sql`update restaurants
+        set settings = jsonb_set(case jsonb_typeof(settings) when 'object' then settings when 'string' then (settings #>> '{}')::jsonb else '{}'::jsonb end, '{features,dockCountFirst}', to_jsonb(${value}::boolean), true)
+        where id = ${id}`;
+    }
+  } finally {
+    await sql.end();
+  }
+}
+
 /** The receiver signs in once for the file. */
 let receiverCookies: Awaited<ReturnType<import('@playwright/test').BrowserContext['cookies']>> = [];
 test.beforeAll(async ({ browser }) => {
@@ -269,15 +315,23 @@ test('invoice 10 = order 10, 8 arrived: recorded as qty_received 8 in ≤4 taps;
   await taps.tap(line.getByRole('button', { name: `הפחתת כמות — ${units!.name}` }));
   await taps.tap(line.getByRole('button', { name: `הפחתת כמות — ${units!.name}` }));
   await expect(line.getByRole('spinbutton', { name: new RegExp(`כמות שהתקבלה — ${units!.name}`) })).toHaveValue('8');
+  // DS3-05: the quantity sheet saves on the button that says what it confirms ("אישור: 8 יח׳").
+  await taps.tap(line.getByTestId('count-done'));
   expect(taps.count, 'short line taps').toBeLessThanOrEqual(4);
   await expect(line.getByTestId('line-save-state')).toHaveAttribute('data-state', 'saved', { timeout: 15_000 });
 
-  await expectPrimaryInThumbZone(page, 'close-receipt');
+  // DS3-05: one button at the bottom says the next step — here "סמנו את השאר (2)" — under the thumb.
+  await expectPrimaryInThumbZone(page, 'mark-rest');
   await page.getByTestId('mark-rest').tap();
   // Two lines left: the spot check counts both blind, so nothing is marked in bulk.
   expect((await passSpotCheck(page, po)).length).toBe(2);
   await expect(page.getByTestId('mark-rest-undo')).toHaveCount(0);
+  // Every line resolved: the one button is now the close, still under the thumb.
+  await expectPrimaryInThumbZone(page, 'close-receipt');
   await page.getByTestId('close-receipt').tap();
+  // DS3-05: a gap (8 of 10) shows the short check before closing, which names it.
+  await expect(page.getByTestId('close-check')).toContainText(units!.name);
+  await page.getByTestId('close-confirm').tap();
   await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 60_000 });
 
   const rows = await grLines(po.poId);
@@ -337,7 +391,7 @@ test('no invoice, everything arrived: 3 taps + a 2-line blind spot check, record
   // A step change moves focus to the step heading.
   await expect(page.locator(':focus')).toHaveText('בדיקת משלוח');
   await expectPrimaryInThumbZone(page, 'all-arrived');
-  await expect(page.getByTestId('all-arrived')).toHaveText(new RegExp(`הכל הגיע כמו בהזמנה \\(${po.lines.length}\\)`));
+  await expect(page.getByTestId('all-arrived')).toHaveText(new RegExp(`הכול הגיע כמו בהזמנה \\(${po.lines.length}\\)`));
   await taps.tap(page.getByTestId('all-arrived'));
   // Owner decision 20 (default): two random lines are counted blind before the bulk.
   const picked = await passSpotCheck(page, po, { taps });
@@ -439,6 +493,9 @@ test('a reload mid-count restores every mark; "חסר" is 0 received, nothing re
   await page.getByTestId('mark-rest').tap();
   await passSpotCheck(page, po);
   await page.getByTestId('close-receipt').tap();
+  // DS3-05: "חסר" is a gap — the short check before closing names it.
+  await expect(page.getByTestId('close-check')).toContainText('חסר');
+  await page.getByTestId('close-confirm').tap();
   const slip = page.getByTestId('dock-slip');
   await expect(slip).toBeVisible({ timeout: 60_000 });
   const text = (await slip.getByTestId('dock-slip-copy').getAttribute('data-slip-text'))!;
@@ -457,10 +514,11 @@ test('offline: marks are kept on the phone, the leave sheet stops a silent exit,
 
   await context.setOffline(true);
   await line.getByTestId('count-edit').tap();
-  // A weighed line takes a decimal comma and 3 decimals; far from the order it asks once.
+  // A weighed line takes a decimal comma and 3 decimals; far from the order, a plain note says so.
   await line.getByTestId('count-qty').fill('2,125');
   await expect(line.getByTestId('count-tolerance')).toBeVisible();
-  await line.getByTestId('count-confirm-qty').tap();
+  // DS3-05: the statement sits above the keys; the button that says the quantity confirms it.
+  await line.getByTestId('count-done').tap();
   await expect(line.getByTestId('line-save-state')).toHaveAttribute('data-state', 'queued', { timeout: 15_000 });
   await expect(line.getByTestId('line-save-state')).toHaveText('נשמר בטלפון');
 
@@ -515,7 +573,6 @@ test('a count on a line that is only on the invoice survives a reload', async ({
   if (await line.getByTestId('count-edit').count()) await line.getByTestId('count-edit').tap();
   await line.getByTestId('count-qty').fill('4');
   await line.getByTestId('count-qty').press('Enter');
-  if (await line.getByTestId('count-confirm-qty').count()) await line.getByTestId('count-confirm-qty').tap();
   await expect(line).toHaveAttribute('data-resolved', 'true');
 
   await page.reload();
@@ -576,7 +633,8 @@ test('a receipt closed elsewhere and reopened: the offline count from before is 
   await context.setOffline(true);
   await line.getByTestId('count-edit').tap();
   await line.getByTestId('count-qty').fill(String(phoneQty));
-  if (await line.getByTestId('count-confirm-qty').isVisible().catch(() => false)) await line.getByTestId('count-confirm-qty').tap();
+  // DS3-05: the quantity sheet saves on its button.
+  await line.getByTestId('count-done').tap();
   await expect(line.getByTestId('line-save-state')).toHaveAttribute('data-state', 'queued', { timeout: 15_000 });
   await page.close({ runBeforeUnload: false });
 
@@ -634,9 +692,10 @@ test('field mode: bar in the bottom third at 390×844 and 375×667, 48 px target
     await page.getByTestId('count-line').first().getByTestId('count-edit').tap();
     expect(await smallTargets(page), `count ${vp.width}`).toEqual([]);
     expect(await axe(page), `count axe ${vp.width}`).toEqual([]);
-    // Chips say their state; the editor toggle says it is open.
+    // Chips say their state; the quantity sheet (DS3-05) is a modal dialog in its row, its save under the thumb.
     await expect(page.getByTestId('chip-missing').first()).toHaveAttribute('aria-pressed', 'false');
-    await expect(page.getByTestId('count-done').first()).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByTestId('count-line').first().getByRole('dialog', { name: 'כמה הגיע?' })).toBeVisible();
+    await expectPrimaryInThumbZone(page, 'count-done');
   }
   // English, same screen.
   const url = test.info().project.use.baseURL!;

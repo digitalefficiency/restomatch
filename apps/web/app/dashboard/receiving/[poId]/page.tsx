@@ -40,6 +40,8 @@ export default async function ReceivingPoPage({
     enabledFeatures(restaurantId),
   ]);
   const pwa = features.includes('receiverPwa');
+  // DS3-05 (an open owner decision, off unless a restaurant opts in): count first, photo after, quantity empty.
+  const countFirst = features.includes('dockCountFirst');
 
   // Everything the first paint needs, in parallel (RCV-28). The English /
   // receiver-language names stay capped at 4 s each, and the wizard re-checks
@@ -159,6 +161,7 @@ export default async function ReceivingPoPage({
         existingReceipt={existingReceipt}
         showMoney={showMoney}
         receiverName={receiverName}
+        countFirst={countFirst}
         tolerance={{ qtyPercent: DEFAULT_TOLERANCES.qtyPercent, qtyAbsolute: DEFAULT_TOLERANCES.qtyAbsolute }}
       />
     </div>

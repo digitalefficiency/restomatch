@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   UNCOUNTED,
   bulkAsOrdered,
@@ -10,6 +10,7 @@ import {
   readMethod,
   spotCountMatches,
   toGrLine,
+  unguessableRandom,
   type LineCount,
 } from '../_count';
 
@@ -83,6 +84,25 @@ describe('spot check before a bulk "as ordered"', () => {
     const seen = new Set<string>();
     for (const r of [0, 0.3, 0.6, 0.99]) for (const x of pickSpotCheck(['a', 'b', 'c', 'd'], 2, () => r)) seen.add(x);
     expect(seen.size).toBeGreaterThan(2);
+  });
+
+  it('draws from the cryptographic generator by default, never Math.random: which lines are counted blind must not be guessable', () => {
+    const spy = vi.spyOn(Math, 'random');
+    try {
+      for (let k = 0; k < 20; k += 1) {
+        const picked = pickSpotCheck(['a', 'b', 'c', 'd', 'e'], 2);
+        expect(picked).toHaveLength(2);
+        expect(new Set(picked).size).toBe(2);
+      }
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+    for (let k = 0; k < 1000; k += 1) {
+      const r = unguessableRandom();
+      expect(r).toBeGreaterThanOrEqual(0);
+      expect(r).toBeLessThan(1);
+    }
   });
 
   it('a blind count matches the order the way the engine calls a quantity clean', () => {

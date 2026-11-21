@@ -22,6 +22,52 @@ import { e2eSql } from './helpers';
 
 test.use({ storageState: OWNER_STATE, viewport: { width: 1280, height: 860 } });
 
+/**
+ * DS3-05: this file drives today's order of steps (the invoice photo first, the
+ * quantity pre-filled). The demo restaurant's `features.all` turns the
+ * count-first flag (`dockCountFirst`) on, so the file pins it OFF and puts the
+ * setting back after its last test.
+ */
+let restoreCountFirst: (() => Promise<void>) | undefined;
+test.beforeAll(async () => {
+  restoreCountFirst = await pinCountFirstOff();
+});
+test.afterAll(async () => {
+  await restoreCountFirst?.();
+});
+
+async function pinCountFirstOff(): Promise<() => Promise<void>> {
+  const sql = e2eSql();
+  try {
+    const [row] = await sql<{ id: string; prev: string | null }[]>`
+      select id, (case jsonb_typeof(settings) when 'object' then settings when 'string' then (settings #>> '{}')::jsonb else '{}'::jsonb end) #>> '{features,dockCountFirst}' as prev
+      from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
+    if (!row) return async () => undefined;
+    await setCountFirst(row.id, false);
+    return () => setCountFirst(row.id, row.prev === null ? null : row.prev === 'true');
+  } finally {
+    await sql.end();
+  }
+}
+
+/** `features.dockCountFirst` on one restaurant: a value, or null to drop it (back to `features.all`). */
+async function setCountFirst(id: string, value: boolean | null) {
+  const sql = e2eSql();
+  try {
+    if (value === null) {
+      await sql`update restaurants
+        set settings = (case jsonb_typeof(settings) when 'object' then settings when 'string' then (settings #>> '{}')::jsonb else '{}'::jsonb end) #- '{features,dockCountFirst}'
+        where id = ${id}`;
+    } else {
+      await sql`update restaurants
+        set settings = jsonb_set(case jsonb_typeof(settings) when 'object' then settings when 'string' then (settings #>> '{}')::jsonb else '{}'::jsonb end, '{features,dockCountFirst}', to_jsonb(${value}::boolean), true)
+        where id = ${id}`;
+    }
+  } finally {
+    await sql.end();
+  }
+}
+
 const TINY_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
@@ -218,8 +264,10 @@ test('late OCR: the result lands after the order-only fallback and keeps what wa
   const lineC = page.getByTestId('count-line').filter({ hasText: c!.name });
   await lineC.getByTestId('count-edit').click();
   await lineC.getByTestId('count-qty').fill(String(c!.qty + 1));
-  await lineC.getByTestId('count-confirm-qty').click();
-  await expect(lineC.getByRole('textbox', { name: /כמות שהתקבלה/ })).toHaveValue(String(c!.qty + 1));
+  // DS3-05: the quantity sheet saves on the button that says the quantity, then closes; the row shows the count.
+  await expect(lineC.getByTestId('count-qty')).toHaveValue(String(c!.qty + 1));
+  await lineC.getByTestId('count-done').click();
+  await expect(lineC.getByTestId('count-line-result')).toHaveText(String(c!.qty + 1));
   await expect(lineC.getByTestId('line-save-state')).toHaveAttribute('data-state', 'saved', { timeout: 15_000 });
 
   // OCR finishes now — after the fallback.
@@ -244,6 +292,9 @@ test('late OCR: the result lands after the order-only fallback and keeps what wa
   await passSpotCheck(page);
   await expect(page.getByTestId('close-receipt')).toBeEnabled({ timeout: 15_000 });
   await page.getByTestId('close-receipt').click();
+  // DS3-05: c's own count is a gap against the order — the short check before closing names it.
+  await expect(page.getByTestId('close-check')).toContainText(c!.name);
+  await page.getByTestId('close-confirm').click();
   await expect(page.getByTestId('receipt-confirmed')).toBeVisible({ timeout: 60_000 });
 
   const sql = e2eSql();

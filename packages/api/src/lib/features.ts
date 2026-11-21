@@ -37,6 +37,10 @@ export const FEATURE_KEYS = [
   'orderPricesOut',
   'supplierConfirm',
   'dockPriceContext',
+  // DS3-05: the delivery check counts first (the photo after the count) and the quantity
+  // opens empty. An open owner decision: OFF unless a restaurant opts in (the demo's `all`
+  // turns it on; the pilot lists its flags and leaves it off).
+  'dockCountFirst',
   'orderCapture',
   // "How did we get to ₪X?" proof sheet under the dashboard hero (S12). Read-only, no new ₪ math.
   'leakProof',
