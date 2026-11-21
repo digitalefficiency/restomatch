@@ -23,6 +23,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useLocale, useT } from '@/lib/i18n/client';
+import { usePrefs, viewDensity } from '@/lib/prefs';
 import { views } from '@/lib/i18n/messages/views';
 import { approvals } from '@/lib/i18n/messages/approvals';
 import type { MessageKey } from '@/lib/i18n/translate';
@@ -57,7 +58,13 @@ export interface ViewToolbarProps {
   compare?: boolean;
   group?: boolean;
   chart?: boolean;
-  density?: boolean;
+  /**
+   * The density switch ("רגיל / צפוף"). `true`: the per-view switch in the address (`d`), as before —
+   * the page renders `view.density`. `'prefs'`: the device's display preference (DS3-06, lib/prefs):
+   * the switch reads and writes `usePrefs()`, leaves the address alone and is absent on a phone, where
+   * density is fixed. Use `'prefs'` once the page renders its rows from the preference.
+   */
+  density?: boolean | 'prefs';
   tv?: boolean;
   saved?: boolean;
   filters?: FilterName[];
@@ -89,6 +96,7 @@ export function ViewToolbar(props: ViewToolbarProps) {
   const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
+  const prefs = usePrefs();
   // Fixed per page, not useId() (see app/dashboard/search.tsx): one toolbar per page.
   const id = `view-toolbar-${page}`;
   // Optimistic: the control shows the choice at once while the server re-renders the data
@@ -350,7 +358,25 @@ export function ViewToolbar(props: ViewToolbarProps) {
             }))}
           />
         ) : null}
-        {props.density ? (
+        {props.density === 'prefs' ? (
+          // The device's preference: one choice for every screen, stored per device (DS3-06). An old
+          // link's `d` is dropped on the first change so the address and the screen cannot disagree.
+          <span className="contents max-lg:hidden [@media(pointer:coarse)]:hidden">
+            <Segmented
+              label={t('toolbar.density')}
+              value={viewDensity(prefs.density)}
+              onChange={(v) => {
+                prefs.setDensity(v === 'compact' ? 'compact' : 'regular');
+                if (view.density !== DEFAULT_VIEW.density) set({ density: DEFAULT_VIEW.density });
+              }}
+              options={DENSITIES.map((d) => ({
+                value: d,
+                label: t(`densities.${d}`),
+                icon: d === 'comfortable' ? Rows3 : Rows4,
+              }))}
+            />
+          </span>
+        ) : props.density ? (
           <Segmented
             label={t('toolbar.density')}
             value={view.density}

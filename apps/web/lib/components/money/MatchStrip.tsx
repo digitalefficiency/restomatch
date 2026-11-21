@@ -12,9 +12,12 @@ export type MatchCell = 'ordered' | 'received' | 'billed';
 
 /** The gap, written out: a quantity ("3 פחות") or a share of the expected price ("10% יותר"). */
 export interface MatchGap {
-  /** A quantity in the strip's unit, or a ratio for `pct` (0.1 = 10 %). Never signed: `direction` says which way. */
+  /**
+   * A quantity in the strip's unit, a ratio for `pct` (0.1 = 10 %), or shekels for `ils` (drawn
+   * through <Money>, in ink: a money figure is never red). Never signed: `direction` says which way.
+   */
   value: number;
-  kind: 'qty' | 'pct';
+  kind: 'qty' | 'pct' | 'ils';
   direction: 'less' | 'more';
 }
 
@@ -77,17 +80,34 @@ export function MatchStrip({
   const gapText: string | null =
     off && isGap(gap)
       ? t(gap.direction === 'less' ? 'ds.matchStrip.less' : 'ds.matchStrip.more', {
-          value: gap.kind === 'pct' ? formatPercent(Math.abs(gap.value), locale) : qty(Math.abs(gap.value)),
+          value:
+            gap.kind === 'pct'
+              ? formatPercent(Math.abs(gap.value), locale)
+              : gap.kind === 'ils'
+                ? moneyText(Math.abs(gap.value), 'line', locale)
+                : qty(Math.abs(gap.value)),
         })
       : off && typeof gap === 'string'
         ? gap
         : null;
-  // A gap passed as a node (a <Money>, a phrase with markup) is read where it stands, not in the summary.
-  const gapNode: React.ReactNode = off ? (gapText ?? (isGap(gap) ? null : (gap ?? null))) : null;
+  // A ₪ gap is drawn through <Money> in ink; a gap passed as a node is read where it stands.
+  const ilsGap = off && isGap(gap) && gap.kind === 'ils' ? gap : null;
+  const gapNode: React.ReactNode = off
+    ? ilsGap
+      ? (
+          <>
+            {t(ilsGap.direction === 'less' ? 'ds.matchStrip.lessBy' : 'ds.matchStrip.moreBy')}{' '}
+            <Money value={Math.abs(ilsGap.value)} context="line" split quietParts={false} />
+          </>
+        )
+      : (gapText ?? (isGap(gap) ? null : (gap ?? null)))
+    : null;
 
   // One sentence for assistive tech: "הוזמן 9.5, התקבל 6.5, חויב 9.5 ק״ג, 3 פחות". Prices are
   // spoken through the frozen formatter (formatIls via moneyText), never built by hand.
-  const plain = (n: number | null) => (n === null ? t('ds.matchStrip.none') : kind === 'price' ? moneyText(n, 'line', locale) : qty(n));
+  // Unknown is never 0: a quantity not counted yet says so; a price that does not exist is "אין".
+  const unknown = kind === 'price' ? t('ds.matchStrip.none') : t('ds.matchStrip.notCounted');
+  const plain = (n: number | null) => (n === null ? unknown : kind === 'price' ? moneyText(n, 'line', locale) : qty(n));
   const spoken = [cells.map((c) => `${c.label} ${plain(c.value)}`).join(', ') + (unitText ? ` ${unitText}` : ''), gapText ?? '']
     .filter(Boolean)
     .join(', ');
@@ -98,8 +118,11 @@ export function MatchStrip({
       aria-label={spoken}
       data-match-strip=""
       data-off={off ?? undefined}
-      className={cn('num flex max-w-full items-stretch overflow-hidden rounded-control border border-line-rule bg-surface', className)}
+      className={cn('num flex max-w-full flex-wrap items-stretch overflow-hidden rounded-control border border-line-rule bg-surface', className)}
     >
+      {/* The figures stay on one line; the unit and the gap follow them, or take a second line when
+          the strip is narrower than its content (a phone, a side panel), instead of overlapping. */}
+      <span className="flex shrink-0 items-stretch">
       {cells.map((c, i) => {
         const isOff = off === c.key;
         return (
@@ -108,14 +131,15 @@ export function MatchStrip({
             data-cell={c.key}
             aria-hidden
             className={cn(
-              'flex min-w-0 flex-col justify-center px-3 py-1.5',
-              i > 0 && 'border-s border-line-rule',
-              isOff && cn('border', SURFACE_TONE[tone], '[&+*]:border-s-transparent'),
+              // Every cell carries the same 1 px border, so an off cell never changes the strip's height.
+              'flex min-w-0 flex-col justify-center border border-transparent px-3 py-1.5',
+              i > 0 && 'border-s-line-rule',
+              isOff && cn(SURFACE_TONE[tone], '[&+*]:border-s-transparent'),
             )}
           >
             <small className="text-caption text-fg-tertiary">{c.label}</small>
             {c.value === null ? (
-              <b className={cn('text-body font-normal leading-5', MONEY_QUIET)}>{t('ds.matchStrip.none')}</b>
+              <b className={cn('text-body font-normal leading-5', MONEY_QUIET)}>{unknown}</b>
             ) : kind === 'price' ? (
               <b className={cn('text-body leading-5', isOff ? 'font-semibold' : 'font-medium')}>
                 <Money value={c.value} context="line" split />
@@ -128,18 +152,31 @@ export function MatchStrip({
           </span>
         );
       })}
-      {unitText ? (
-        <span aria-hidden className="flex items-center whitespace-nowrap border-s border-line-rule pe-1 ps-2.5 text-body-sm text-fg-secondary">
-          {unitText}
-        </span>
-      ) : null}
-      {gapNode ? (
+      </span>
+      {unitText || gapNode ? (
         <span
-          aria-hidden={gapText ? true : undefined}
-          data-gap=""
-          className={cn('me-2.5 ms-auto self-center whitespace-nowrap ps-2 text-body-sm font-semibold', TEXT_TONE[tone])}
+          data-strip-tail=""
+          className={cn(
+            // -1 px on the start and top: beside the figures the start border is the separator and the top
+            // border hides under the frame; on a line of its own the start border hides and the top one shows.
+            '-ms-px -mt-px flex min-w-0 grow items-center border-s border-t border-line-rule py-1',
+            off && off === cells[cells.length - 1]?.key && 'border-s-transparent',
+          )}
         >
-          {gapNode}
+          {unitText ? (
+            <span aria-hidden className="whitespace-nowrap pe-1 ps-2.5 text-body-sm text-fg-secondary">
+              {unitText}
+            </span>
+          ) : null}
+          {gapNode ? (
+            <span
+              aria-hidden={gapText ? true : undefined}
+              data-gap=""
+              className={cn('me-2.5 ms-auto whitespace-nowrap ps-2 text-body-sm font-semibold [&_[data-money-figure]]:text-fg', TEXT_TONE[tone])}
+            >
+              {gapNode}
+            </span>
+          ) : null}
         </span>
       ) : null}
     </div>

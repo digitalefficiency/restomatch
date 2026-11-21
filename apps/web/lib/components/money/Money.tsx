@@ -148,7 +148,7 @@ export function Money({
   const quiet = quietParts ?? (figureColour === undefined || figureColour === 'text-ink');
 
   return (
-    <span className={cn('inline-flex items-baseline gap-1', CONTEXT_CLASS[context], figureColour, className)}>
+    <span data-money-figure="" className={cn('inline-flex items-baseline gap-1', CONTEXT_CLASS[context], figureColour, className)}>
       {credit ? <span>{t('ds.money.credit')}</span> : null}
       <bdi className="num whitespace-nowrap" title={title ? t('ds.money.exact', { amount: title }) : undefined}>
         {context === 'hero' && !figureOnly ? (

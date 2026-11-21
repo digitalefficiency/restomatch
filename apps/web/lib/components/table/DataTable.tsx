@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, ChevronsUpDown, Lock, MoreHorizontal } from 'lucide
 import { useLocale } from '@/lib/i18n/client';
 import { formatDate } from '@/lib/i18n/format';
 import { formatIls } from '@/lib/money';
+import { tableDensity, usePrefs } from '@/lib/prefs';
 import { cn } from '../cn';
 import { Skeleton } from '../Skeleton';
 import { Peek } from '../desk/Peek';
@@ -43,6 +44,7 @@ export interface DataTableProps<Row> {
   /** Server-computed totals (count + Σ agorot); the totals row shows these, never a page sum. */
   totals?: TableTotals & { columnId: string };
   pageSize?: number;
+  /** Row density. Omit it to follow the device's display preference (DS3-06; the role's default until a choice is made). */
   density?: Density;
   status?: 'ready' | 'loading' | 'error';
   onRetry?: () => void;
@@ -75,13 +77,14 @@ const ROW_H: Record<Density, string> = {
 };
 // A coarse pointer never gets rows below the touch height (B6), whatever the density.
 const COARSE = '[@media(pointer:coarse)]:h-[var(--row-touch,56px)]';
-const CELL_PX: Record<Density, string> = { compact: '[--cell-px:12px]', default: '[--cell-px:16px]', touch: '[--cell-px:16px]' };
+// Cell padding comes from the density token (--cell-px, set by data-density on the table): no local values.
 const SELECT_W = 'w-10 min-w-10';
 // Row rail on the inline-start edge: 3 px tone for T2 queue rows, 2 px for the active/selected row.
 const RAIL = {
   danger: 'ltr:shadow-[inset_3px_0_0_rgb(var(--c-danger))] rtl:shadow-[inset_-3px_0_0_rgb(var(--c-danger))]',
   warn: 'ltr:shadow-[inset_3px_0_0_rgb(var(--c-warn))] rtl:shadow-[inset_-3px_0_0_rgb(var(--c-warn))]',
-  selected: 'ltr:shadow-[inset_2px_0_0_rgb(var(--c-primary))] rtl:shadow-[inset_-2px_0_0_rgb(var(--c-primary))]',
+  // DS3: selection is a state of the interface, so it is blue (info), never money green.
+  selected: 'ltr:shadow-[inset_2px_0_0_rgb(var(--c-info))] rtl:shadow-[inset_-2px_0_0_rgb(var(--c-info))]',
   none: undefined,
 } as const;
 const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-info';
@@ -111,7 +114,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
     defaultSort,
     totals,
     pageSize = 50,
-    density: densityProp = 'default',
+    density: densityProp,
     status = 'ready',
     onRetry,
     filtered,
@@ -143,7 +146,12 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   selectedRef.current = selected;
 
   const sort = state.sort && columns.some((c) => c.id === state.sort!.id && c.sortable !== false) ? state.sort : defaultSort;
-  const density = state.density ?? densityProp;
+  // DS3-06's display preference (lib/prefs): with no `density` from the caller the table follows the
+  // device's choice, and with no choice the role's default (D4: the bookkeeper's tables are compact).
+  // An explicit prop still wins, and the URL override `d` wins over both (shareable, as before).
+  const prefs = usePrefs();
+  const baseDensity: Density = densityProp ?? tableDensity(prefs.density);
+  const density = state.density ?? baseDensity;
   const visibleIds = state.cols ?? columns.filter((c) => !c.defaultHidden).map((c) => c.id);
   const visibleKey = visibleIds.join(',');
   const visible = useMemo(
@@ -313,7 +321,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
         aria-sort={aria}
         data-col={c.id}
         className={cn(
-          'sticky top-0 z-20 whitespace-nowrap border-b border-line bg-surface px-[var(--cell-px,16px)] text-xs font-semibold text-muted',
+          'sticky top-0 z-20 whitespace-nowrap border-b border-line bg-surface px-[var(--cell-px,16px)] text-caption font-medium text-fg-tertiary',
           num ? 'text-right' : 'text-start',
           c.identity && cn('z-30 start-0', selectable && 'start-10'),
           c.width,
@@ -420,7 +428,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       <div className="min-w-0 flex-1">{toolbar}</div>
       {!mobile ? (
         <div className="flex items-center gap-2 pb-1">
-          <DensityMenu value={density} onChange={(d) => update({ density: d === densityProp ? null : d })} />
+          <DensityMenu value={density} onChange={(d) => update({ density: d === baseDensity ? null : d })} />
           <ColumnsMenu columns={columns} visible={visibleIds} onChange={(cols) => update({ cols })} />
           <ExportMenu onCsv={exportCsv} />
         </div>
@@ -498,11 +506,11 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
               update({ sel: rid, ...(peek ? { peek: rid } : {}) });
             }}
             className={cn(
-              'group relative bg-surface text-sm [&>td]:py-0 [&>td]:border-b [&>td]:border-line [&:last-child>td]:border-b-0',
+              'group relative bg-surface text-sm [&>td]:py-0 [&>td]:border-b [&>td]:border-line-rule [&:last-child>td]:border-b-0',
               ROW_H[density],
               COARSE,
               FOCUS,
-              checked || active ? 'bg-surface-2' : 'hover:bg-surface-2',
+              checked || active ? 'bg-surface-selected' : 'hover:bg-surface-sunken',
             )}
           >
             {selectable ? (
@@ -551,7 +559,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
                                   close();
                                   a.onRun();
                                 }}
-                                className={cn('w-full rounded-lg px-2 py-1.5 text-start text-sm hover:bg-surface-2', FOCUS, a.tone === 'danger' ? 'text-danger' : 'text-ink')}
+                                className={cn('w-full rounded-lg px-2 py-1.5 text-start text-sm hover:bg-surface-hover', FOCUS, a.tone === 'danger' ? 'text-danger' : 'text-ink')}
                               >
                                 {a.label}
                               </button>
@@ -597,7 +605,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   let bodyRows: React.ReactNode;
   if (status === 'loading') {
     bodyRows = Array.from({ length: 8 }, (_, i) => (
-      <tr key={i} className={cn(ROW_H[density], COARSE, '[&>td]:border-b [&>td]:border-line')} aria-hidden>
+      <tr key={i} className={cn(ROW_H[density], COARSE, '[&>td]:border-b [&>td]:border-line-rule')} aria-hidden>
         {Array.from({ length: colCount }, (_, j) => (
           <td key={j} className="px-[var(--cell-px,16px)]">
             <Skeleton className="h-3 w-full max-w-32 rounded" />
@@ -648,11 +656,11 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       {toolbarRow}
       <div
         ref={scroller}
-        className="max-h-[min(72dvh,900px)] overflow-auto rounded-xl border border-line bg-surface"
+        className="max-h-[min(72dvh,900px)] overflow-auto rounded-card border border-line bg-surface"
         data-table-scroll=""
       >
         <table
-          className={cn('w-full border-separate border-spacing-0 text-sm', CELL_PX[density])}
+          className="w-full border-separate border-spacing-0 text-sm"
           data-density={density}
           aria-describedby={`${captionId}-keys`}
         >
@@ -701,17 +709,17 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
           {totals && totalsCol && status === 'ready' && sorted.length > 0 ? (
             <tfoot>
               <tr className={cn(ROW_H[density], COARSE, 'font-semibold text-ink')} data-totals="">
-                {selectable ? <td className={cn('sticky bottom-0 start-0 z-30 border-t border-line bg-surface-2', SELECT_W)} /> : null}
+                {selectable ? <td className={cn('sticky bottom-0 start-0 z-30 border-t-4 border-double border-fg bg-surface', SELECT_W)} /> : null}
                 {visible.map((c, i) =>
                   c.id === totals.columnId ? (
-                    <td key={c.id} data-totals-cell="" className={cn(NUM_ALIGN, 'sticky bottom-0 z-20 whitespace-nowrap border-t border-line bg-surface-2 px-[var(--cell-px,16px)]')}>
+                    <td key={c.id} data-totals-cell="" className={cn(NUM_ALIGN, 'sticky bottom-0 z-20 whitespace-nowrap border-t-4 border-double border-fg bg-surface px-[var(--cell-px,16px)]')}>
                       <NumValue value={totals.sumAgorot} kind="money" decimals={c.decimals} />
                     </td>
                   ) : (
                     <td
                       key={c.id}
                       className={cn(
-                        'sticky bottom-0 z-20 whitespace-nowrap border-t border-line bg-surface-2 px-[var(--cell-px,16px)]',
+                        'sticky bottom-0 z-20 whitespace-nowrap border-t-4 border-double border-fg bg-surface px-[var(--cell-px,16px)]',
                         c.identity && cn('z-30 start-0', selectable && 'start-10'),
                       )}
                     >
@@ -719,7 +727,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
                     </td>
                   ),
                 )}
-                {rowActions ? <td className="sticky bottom-0 end-0 z-30 border-t border-line bg-surface-2" /> : null}
+                {rowActions ? <td className="sticky bottom-0 end-0 z-30 border-t-4 border-double border-fg bg-surface" /> : null}
               </tr>
             </tfoot>
           ) : null}
