@@ -88,8 +88,8 @@ export async function computeOwnerKpis(
   //    G-14 Q3: the same shekel as every other ₪ figure — leak lines only (LEAK_FILTER), |Δ|
   //    like the hero, and the decision table's 'claim' effect, so a tolerance row the engine
   //    auto-approved (owner M7: waived) is never "captured". This subsumes G-15 Q8 (#357):
-  //    the routing engine's auto-accepts (non-leak-acknowledge / minor-info) are `info`, so
-  //    outside LEAK_FILTER, and a rule-tolerated accept is 'waive' in the decision table.
+  //    the routing engine's auto-accepts (non-leak-acknowledge / minor-info) always carry a
+  //    rule_id, so they are 'tolerated' → 'waive' (and are non-leak / info rows anyway).
   const savings = (await db.execute(sql`
     SELECT COALESCE(SUM(ABS(d.delta_amount)) FILTER (WHERE ${LEAK_FILTER} AND ${effectSql()} = 'claim'), 0) AS sum
     FROM discrepancies d
