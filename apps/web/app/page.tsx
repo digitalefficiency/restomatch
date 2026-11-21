@@ -1,14 +1,13 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { preload } from 'react-dom';
 import { Camera, Check, GitCompareArrows, Languages, PlayCircle, ShieldCheck } from 'lucide-react';
 import { PLAN_SEED } from '@restomatch/db';
 import { auth } from '@/auth';
 import { getLocale, getT } from '@/lib/i18n/server';
 import { landing } from '@/lib/i18n/messages/landing';
 import { formatNumber } from '@/lib/i18n/format';
-import { heroLoopFor, heroMedia, promoVideoFor } from '@/lib/heroMedia';
+import { PHONE_MEDIA, heroLoopFor, heroMedia, phoneLoopFor, promoVideoFor } from '@/lib/heroMedia';
 import { formatIls } from '@/lib/money';
 import { landingFlag } from '@/lib/landingFlags';
 import { cn } from '@/lib/components/cn';
@@ -16,6 +15,8 @@ import { MarketingShell } from './(marketing)/_components/MarketingShell';
 import { HeroMatch } from './(marketing)/_components/HeroMatch';
 import { HeroVideo } from './(marketing)/_components/HeroVideo';
 import { LazyLeadForm } from './(marketing)/_components/LazyLeadForm';
+import { leadAction } from './(marketing)/_components/leadAction';
+import { SAMPLE_LEAK_ILS, SAMPLE_LEAK_PCT, SAMPLE_PURCHASING_ILS } from './(marketing)/_components/sampleMonth';
 import { PromoVideoButton } from './(marketing)/_components/PromoVideoButton';
 import { ReceiverMorph } from './(marketing)/_components/ReceiverMorph';
 import { primaryCtaHref } from './(marketing)/_components/cta';
@@ -50,10 +51,8 @@ const MORPH_LINES = [
   { he: 'מוצרלה 3 ק״ג', en: 'Mozzarella · 3 kg' },
 ] as const;
 
-/** Worked example used by the proof block (same figures as the calculator default). */
-const EXAMPLE_PURCHASING_ILS = 150_000;
-/** An illustrative leak rate for the worked example — never presented as a target. */
-const EXAMPLE_LEAK_RATE = 0.015;
+/** Worked example used by the proof block: the ONE sample month (W3-06), same as the calculator default. */
+const EXAMPLE_PURCHASING_ILS = SAMPLE_PURCHASING_ILS;
 
 /**
  * Landing v2 — short and visual (owner: "efficient, not overloaded, invest in
@@ -72,16 +71,9 @@ export default async function Home() {
   const t = await getT(landing);
   const locale = await getLocale();
   const heroLoop = heroLoopFor(locale);
-  // The hero poster is the LCP: fetch it first, ahead of scripts and fonts.
-  if (heroMedia.available) {
-    preload(heroLoop.poster, {
-      as: 'image',
-      fetchPriority: 'high',
-      imageSrcSet: heroLoop.posterSrcSet,
-      imageSizes: heroMedia.posterSizes,
-    });
-  }
   const promoSrc = promoVideoFor(locale);
+  // Q1: the 9:16 cut is Hebrew-only; English phones get the localized HeroMatch.
+  const phoneLoop = phoneLoopFor(locale);
   const ctaHref = primaryCtaHref();
   const ils = (n: number) => formatIls(n, { locale });
   const basicIls = PLAN_SEED.basic.priceAgorotMonthly / 100;
@@ -95,15 +87,18 @@ export default async function Home() {
   ];
   const proof = [
     {
-      value: t('v2.proof.leakValue', { amount: ils(EXAMPLE_PURCHASING_ILS * EXAMPLE_LEAK_RATE) }),
-      label: t('v2.proof.leakLabel', { purchasing: ils(EXAMPLE_PURCHASING_ILS) }),
+      value: t('v2.proof.leakValue', { amount: ils(SAMPLE_LEAK_ILS) }),
+      label: t('v2.proof.leakLabel', {
+        purchasing: ils(EXAMPLE_PURCHASING_ILS),
+        pct: `${formatNumber(SAMPLE_LEAK_PCT, locale, { maximumFractionDigits: 1 })}%`,
+      }),
       tone: 'text-danger',
     },
     {
       value: t('v2.proof.breakevenValue', {
         pct: `${formatNumber(breakevenPct, locale, { maximumFractionDigits: 2 })}%`,
       }),
-      label: t('v2.proof.breakevenLabel', { price: ils(proIls) }),
+      label: t('v2.proof.breakevenLabel', { purchasing: ils(EXAMPLE_PURCHASING_ILS), price: ils(proIls) }),
       tone: 'text-gold',
     },
     { value: t('v2.proof.checksValue'), label: t('v2.proof.checksLabel'), tone: 'text-primary' },
@@ -133,6 +128,15 @@ export default async function Home() {
         lowPrice: 0,
         highPrice: PLAN_SEED.chain.priceAgorotMonthly / 100,
         offerCount: 4,
+        // Plan prices are quoted before VAT ("+ מע״מ" on every price).
+        priceSpecification: {
+          '@type': 'UnitPriceSpecification',
+          priceCurrency: 'ILS',
+          minPrice: 0,
+          maxPrice: PLAN_SEED.chain.priceAgorotMonthly / 100,
+          unitText: 'MONTH',
+          valueAddedTaxIncluded: false,
+        },
       },
     },
     {
@@ -148,6 +152,28 @@ export default async function Home() {
 
   return (
     <MarketingShell>
+      {/* The hero poster is the LCP: fetch it first. One poster per viewport (W3-06b):
+          phones never fetch the 16:9 one, desktops never the 9:16 one. React hoists these to <head>. */}
+      {heroMedia.available ? (
+        <link
+          rel="preload"
+          as="image"
+          href={heroLoop.poster}
+          imageSrcSet={heroLoop.posterSrcSet}
+          imageSizes={heroMedia.posterSizes}
+          fetchPriority="high"
+          media="(min-width: 640px)"
+        />
+      ) : null}
+      {heroMedia.available && phoneLoop ? (
+        <link
+          rel="preload"
+          as="image"
+          href={phoneLoop.poster}
+          fetchPriority="high"
+          media={PHONE_MEDIA}
+        />
+      ) : null}
       <link rel="canonical" href={locale === 'en' ? `${SITE_URL}/?lang=en` : `${SITE_URL}/`} />
       <link rel="alternate" hrefLang="he" href={`${SITE_URL}/`} />
       <link rel="alternate" hrefLang="en" href={`${SITE_URL}/?lang=en`} />
@@ -218,16 +244,37 @@ export default async function Home() {
             </ul>
           </div>
           {heroMedia.available ? (
-            <HeroVideo
-              webm={heroLoop.webm}
-              mp4={heroLoop.mp4}
-              poster={heroLoop.poster}
-              posterSrcSet={heroLoop.posterSrcSet}
-              posterSizes={heroMedia.posterSizes}
-              label={t('hero.watchTitle')}
-              pauseLabel={t('v2.video.pause')}
-              playLabel={t('v2.video.play')}
-            />
+            <>
+              {/* W3-06b: no 9:16 loop yet → phones get the legible product mock; the video is sm+. */}
+              {phoneLoop ? null : (
+                <div className="sm:hidden" data-testid="hero-phone-mock">
+                  <HeroMatch />
+                </div>
+              )}
+              <div
+                className={phoneLoop ? undefined : 'hidden sm:block'}
+                data-testid="hero-video-wrap"
+              >
+                <HeroVideo
+                  key={locale}
+                  webm={heroLoop.webm}
+                  mp4={heroLoop.mp4}
+                  poster={heroLoop.poster}
+                  posterSrcSet={heroLoop.posterSrcSet}
+                  posterSizes={heroMedia.posterSizes}
+                  label={t('v2.video.alt')}
+                  pauseLabel={t('v2.video.pause')}
+                  playLabel={t('v2.video.play')}
+                  minWidth={phoneLoop ? undefined : '(min-width: 640px)'}
+                  phone={phoneLoop}
+                  fallback={<HeroMatch />}
+                />
+                {/* M12: the loop is a sample, never a customer's numbers. */}
+                <p className="mt-2 text-center text-xs text-muted" data-testid="hero-video-caption">
+                  {t('v2.video.caption')}
+                </p>
+              </div>
+            </>
           ) : (
             <HeroMatch />
           )}
@@ -307,7 +354,11 @@ export default async function Home() {
               lines={MORPH_LINES}
               originalLabel={t('v2.receiver.original')}
               englishLabel={t('v2.receiver.english')}
-              labels={{ pause: t('visual.pause'), play: t('visual.play'), replay: t('visual.replay') }}
+              labels={{
+                pause: t('visual.pause'),
+                play: t('visual.play'),
+                replay: t('visual.replay'),
+              }}
             />
           </div>
         </div>
@@ -319,7 +370,10 @@ export default async function Home() {
       {landingFlag('landingCompare') && <LandingCompare />}
 
       {/* ───────────── 4 · PROOF — the honest math (PLAN_SEED + formatIls) ───────────── */}
-      <section className="rm-defer border-y border-line bg-surface/30" aria-labelledby="proof-title">
+      <section
+        className="rm-defer border-y border-line bg-surface/30"
+        aria-labelledby="proof-title"
+      >
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
           <div className="mx-auto mb-10 max-w-2xl text-center">
             <Eyebrow tone="gold">{t('v2.proof.eyebrow')}</Eyebrow>
@@ -338,7 +392,7 @@ export default async function Home() {
               >
                 <p
                   className={cn(
-                    'font-mono text-3xl font-extrabold tabular-nums tracking-tight sm:text-4xl',
+                    'text-3xl font-extrabold tabular-nums tracking-tight sm:text-4xl',
                     p.tone,
                   )}
                 >
@@ -355,7 +409,7 @@ export default async function Home() {
           </p>
           <p className="mt-4 text-center">
             <Link
-              href="/about#roi"
+              href="/product#roi"
               className="touch-target inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
             >
               {t('v2.proof.more')}
@@ -366,7 +420,10 @@ export default async function Home() {
       </section>
 
       {/* ───────────── 5 · PRICING TEASER ───────────── */}
-      <section className="rm-defer mx-auto max-w-6xl px-4 py-20 sm:px-6" aria-labelledby="pricing-title">
+      <section
+        className="rm-defer mx-auto max-w-6xl px-4 py-20 sm:px-6"
+        aria-labelledby="pricing-title"
+      >
         <div className="rm-reveal grid items-center gap-10 lg:grid-cols-[1fr_1.2fr]">
           <div>
             <Eyebrow tone="gold">{t('pricing.eyebrow')}</Eyebrow>
@@ -392,7 +449,7 @@ export default async function Home() {
               <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px flow-stream" />
               <p className="text-sm font-semibold text-gold">{t('pricing.fromLabel').trim()}</p>
               <p className="mt-2 flex items-baseline gap-1.5">
-                <span className="font-mono text-4xl font-extrabold tabular-nums text-ink">
+                <span className="text-4xl font-extrabold tabular-nums text-ink">
                   {ils(basicIls)}
                 </span>
                 <span className="text-sm text-muted">{t('pricing.perMonth')}</span>
@@ -429,12 +486,12 @@ export default async function Home() {
           </div>
           <div className="relative overflow-hidden rounded-3xl border border-line bg-surface p-6 shadow-card sm:p-8">
             <span aria-hidden="true" className="absolute inset-x-0 top-0 h-px flow-stream" />
-            <LazyLeadForm loadingLabel={t('v2.cta.loading')} noscriptLabel={t('v2.cta.noscript')} />
+            <LazyLeadForm action={leadAction} />
           </div>
           <p className="mt-6 text-center text-sm text-muted">
             <ShieldCheck className="me-1.5 inline h-4 w-4 text-info" aria-hidden="true" />
             {t('v2.cta.trust')} ·{' '}
-            <Link href="/about#trust" className="font-semibold text-primary hover:underline">
+            <Link href="/product#trust" className="font-semibold text-primary hover:underline">
               {t('v2.cta.trustLink')}
             </Link>
           </p>

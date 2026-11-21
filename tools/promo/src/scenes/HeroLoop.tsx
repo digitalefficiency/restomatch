@@ -1,18 +1,18 @@
 import React from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
-import { COPY, FACTS, ilsText, Locale } from '../copy';
+import { COPY, ilsText, Locale, SAMPLE } from '../copy';
 import { C, FONT, LIGHT } from '../theme';
 import { Background } from '../components/Background';
-import { Laptop, laptopScreen, Screen } from '../components/Devices';
+import { Laptop, laptopScreen } from '../components/Devices';
+import { SampleGoodNews, SampleHeroCard, SampleNeedsCard } from '../components/SampleCards';
 import { Chip } from '../components/primitives';
 import { zones } from '../layout';
-import { emailStrip } from '../rects';
 
 export const HERO_LOOP_FRAMES = 360; // 12 s @ 30 fps
 
 /**
- * Landing hero loop (for S6): the real dashboard on a slowly orbiting laptop,
- * a scan beam and floating ₪ callouts. EVERY motion is a function of the loop
+ * Landing hero loop: the site's sample month (copy.ts SAMPLE = sampleMonth.ts) as a product-style
+ * owner dashboard on a slowly orbiting laptop, a scan beam and floating ₪ callouts. EVERY motion is a function of the loop
  * phase (sin/cos of 2π·t, or a window strictly inside the loop), so frame 360
  * equals frame 0 → seamless when the <video> loops.
  */
@@ -30,9 +30,11 @@ export const HeroLoop: React.FC<{ locale: Locale; light?: boolean }> = ({ locale
 
   const { device, caption } = zones(width, height, locale);
   const W = Math.round(device.w * 0.88);
-  const { w: sw } = laptopScreen(W);
-  // gentle scroll down and back (periodic)
-  const scroll = ((1 - c) / 2) * 0.16 * sw;
+  const { w: sw, h: sh } = laptopScreen(W);
+  // the screen is a small owner dashboard drawn from components: two cards side by side
+  const pad = Math.round(sw * 0.035);
+  const colW = Math.round((sw - pad * 3) / 2);
+  const u = colW / 290; // product CSS px → screen px (cards drawn ~290 px wide so they fill the screen)
   const ry = -9 * s + (isRtl ? 6 : -6);
   const rx = 9 + 2.5 * c;
   const y = 10 * Math.sin(tau * ph * 2);
@@ -47,7 +49,7 @@ export const HeroLoop: React.FC<{ locale: Locale; light?: boolean }> = ({ locale
     const dy = 8 * Math.sin(tau * (ph * 2 + k / 3));
     return { opacity: o, transform: `translateY(${dy}px)` };
   };
-  const focus = { x: (isRtl ? 0.8 : 0.2) * sw, y: (isRtl ? 0.385 : 0.34) * sw - scroll, r: 300, amount: 0 };
+  const glow = 0.5 + 0.5 * Math.sin(tau * (ph - 0.25));
 
   return (
     <AbsoluteFill style={{ background: K.bgDeep }}>
@@ -67,7 +69,16 @@ export const HeroLoop: React.FC<{ locale: Locale; light?: boolean }> = ({ locale
       >
         <div style={{ transform: `translateY(${y + 10}px) rotateX(${rx}deg) rotateY(${ry}deg)`, transformStyle: 'preserve-3d' }}>
           <Laptop width={W} glare={ry / 12} finish={light ? 'silver' : 'dark'}>
-            <Screen src={`shots/dashboard-${locale}-full.png`} width={sw} scroll={scroll} focus={focus} redact={[emailStrip(`dashboard-${locale}-full`, isRtl ? { y: 0.027, h: 0.013, x: 0.72, w: 0.21 } : { y: 0.027, h: 0.013, x: 0.075, w: 0.21 })]} />
+            <div dir={isRtl ? 'rtl' : 'ltr'} style={{ width: sw, height: sh, background: K.bg, boxSizing: 'border-box', padding: pad, fontFamily: FONT.sans, overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <div style={{ fontSize: 15 * u * 1.2, fontWeight: 800, color: K.ink, marginBottom: pad * 0.8 }}>{t.sample.title}</div>
+              <div style={{ display: 'flex', gap: pad, alignItems: 'flex-start' }}>
+                <SampleHeroCard u={u} width={colW} locale={locale} numberGlow={glow} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: pad * 0.6 }}>
+                  <SampleNeedsCard u={u} width={colW} locale={locale} example={false} />
+                  <SampleGoodNews u={u} width={colW} locale={locale} />
+                </div>
+              </div>
+            </div>
             {beamOn ? (
               <div
                 style={{
@@ -104,20 +115,20 @@ export const HeroLoop: React.FC<{ locale: Locale; light?: boolean }> = ({ locale
       >
         <div style={chip(0)}>
           <Chip accent={K.danger} light={light} style={{ fontSize: 24 }}>
-            <span>{t.product.chipLeak}</span>
-            <bdi dir={isRtl ? 'rtl' : 'ltr'} style={{ color: K.danger, fontWeight: 800 }}>{ilsText(FACTS.leak, locale)}</bdi>
+            <span>{t.sample.label}</span>
+            <bdi dir={isRtl ? 'rtl' : 'ltr'} style={{ color: K.danger, fontWeight: 800 }}>{ilsText(SAMPLE.leak, locale)}</bdi>
           </Chip>
         </div>
         <div style={chip(1)}>
           <Chip accent={K.primary} light={light} style={{ fontSize: 24 }}>
-            <bdi dir="ltr" style={{ fontWeight: 800 }}>{FACTS.leakPct}</bdi>
-            <span>{t.product.chipPct}</span>
+            <bdi dir="ltr" style={{ fontWeight: 800 }}>{`${SAMPLE.leakPct}%`}</bdi>
+            <span>{t.sample.pct.replace('{pct} ', '')}</span>
           </Chip>
         </div>
         <div style={chip(2)}>
           <Chip accent={K.gold} light={light} style={{ fontSize: 24 }}>
-            <span>{t.product.chipCaught}</span>
-            <bdi dir={isRtl ? 'rtl' : 'ltr'} style={{ color: K.gold, fontWeight: 800 }}>{ilsText(FACTS.caught, locale)}</bdi>
+            <span>{t.sample.caught}</span>
+            <bdi dir={isRtl ? 'rtl' : 'ltr'} style={{ color: K.gold, fontWeight: 800 }}>{ilsText(SAMPLE.unpaid, locale)}</bdi>
           </Chip>
         </div>
       </div>

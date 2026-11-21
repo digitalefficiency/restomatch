@@ -29,7 +29,7 @@ export default async function IntegrationsPage() {
   return (
     <div className="space-y-8">
       <SectionHeader level={1} title={t('title')} subtitle={t('subtitle')} />
-      {finance ? <AccountingMapping canEdit={role === 'owner'} /> : null}
+      {finance ? <AccountingMapping canEdit={finance} /> : null}
       {ops ? <PosImport /> : null}
       {ops ? <ProcurementProviders /> : null}
     </div>

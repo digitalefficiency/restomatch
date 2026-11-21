@@ -17,7 +17,7 @@ import { invitationExpired, inviteFailure, type InviteFailure } from './failure'
 export const generateMetadata = () => authTitle('shell.titles.invite');
 
 interface PageProps {
-  searchParams: Promise<{ token?: string }>;
+  searchParams: Promise<{ token?: string; then?: string }>;
 }
 
 /**
@@ -46,12 +46,15 @@ async function inviteContext(
  * team.acceptInvite, which enforces token/email/expiry/status server-side.
  */
 export default async function InviteAcceptPage({ searchParams }: PageProps) {
-  const { token } = await searchParams;
+  const { token, then } = await searchParams;
   if (!token) redirect('/dashboard');
+  // W3-07b: a fresh joiner (from /join) continues to the first-run welcome.
+  const toWelcome = then === 'welcome';
+  const selfPath = `/invite/accept?token=${encodeURIComponent(token)}${toWelcome ? '&then=welcome' : ''}`;
 
   const session = await auth();
   if (!session?.user?.id) {
-    redirect(`/login?callbackUrl=${encodeURIComponent(`/invite/accept?token=${token}`)}`);
+    redirect(`/login?callbackUrl=${encodeURIComponent(selfPath)}`);
   }
 
   const locale = await getLocale();
@@ -68,7 +71,7 @@ export default async function InviteAcceptPage({ searchParams }: PageProps) {
   // redirect() must run outside the try/catch (it throws NEXT_REDIRECT). Go via
   // the refresh handler so the cookie carries the new membership's role (this
   // RSC cannot write cookies) and the edge role gate applies immediately.
-  if (!failure) redirect('/api/session/refresh?next=%2Fdashboard');
+  if (!failure) redirect(`/api/session/refresh?next=${encodeURIComponent(toWelcome ? '/welcome' : '/dashboard')}`);
 
   const [t, memberships, ctx] = await Promise.all([
     getT(authMessages),

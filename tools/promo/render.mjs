@@ -1,6 +1,6 @@
 // Renders the promo with the container's preinstalled Chromium (no download).
 //   node render.mjs stills [he|en] [frame,frame,...]   → out/frames/*.png
-//   node render.mjs he | en | vertical | loop | all
+//   node render.mjs he | en | vertical | loop | loop-en | loop-9x16 | all
 import { bundle } from '@remotion/bundler';
 import { renderMedia, renderStill, selectComposition } from '@remotion/renderer';
 import { mkdirSync, renameSync, unlinkSync } from 'node:fs';
@@ -75,4 +75,5 @@ if (mode === 'stills') {
   if (mode === 'vertical' || mode === 'all') await video('PromoVertical', 'he', 'restomatch-promo-he-vertical.mp4');
   if (mode === 'loop' || mode === 'all') await video('HeroLoop', 'he', 'hero-loop-master.mp4', { crf: 12 });
   if (mode === 'loop-en' || mode === 'all') await video('HeroLoop', 'en', 'hero-loop-en-master.mp4', { crf: 12 });
+  if (mode === 'loop-9x16' || mode === 'all') await video('HeroLoopVertical', 'he', 'hero-loop-9x16-master.mp4', { crf: 12 });
 }

@@ -2,9 +2,10 @@ import type { RouteDef } from '../types';
 
 export const routes: RouteDef[] = [
   {
-    // S13 invoice inbox (WhatsApp / e-mail ingestion): managers act, bookkeepers read.
-    // PLACEHOLDER until the invoice register (W2-02): the bookkeeper's "חשבוניות"
-    // bar slot points here; W2-02 moves it to `/dashboard/invoices`.
+    // S13 invoice inbox (WhatsApp / e-mail ingestion): owner, manager and bookkeeper
+    // approve intake (G-07 intake.approve). The bookkeeper's bar slot 4 moved to the
+    // register (`/dashboard/invoices`, W2-02); the inbox is its "נכנסות" tab.
+    // `?view=settings` = intake addresses + approved senders (off the queue).
     key: 'inbox',
     path: '/dashboard/inbox',
     group: 'money',
@@ -12,7 +13,6 @@ export const routes: RouteDef[] = [
     roles: ['owner', 'manager', 'bookkeeper'],
     features: ['ingestWhatsapp', 'ingestEmail'],
     nav: 'item',
-    bar: { bookkeeper: { slot: 4, label: 'invoices' } },
-    aliases: ['חשבוניות', 'תיבת חשבוניות', 'נכנסות', 'inbox', 'invoices'],
+    aliases: ['תיבת חשבוניות', 'נכנסות', 'inbox'],
   },
 ];

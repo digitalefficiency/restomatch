@@ -1,19 +1,20 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { FileUp, Loader2, ShieldCheck } from 'lucide-react';
+import { FileText, FileUp, Loader2, ShieldCheck, X } from 'lucide-react';
 import { Field, Input } from '@/lib/components';
 import { useT } from '@/lib/i18n/client';
 import { leakCheck } from '@/lib/i18n/messages/leakCheck';
+import { legalHref } from '@/lib/legal/registry';
+import { MAX_FILES, STAGES, addFiles, focusAfterRemove, isPreviewable, removeFileAt, stageNumber, type Stage } from './leakCheckForm.logic';
 
-const MAX_FILES = 10;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 /** Photos are downscaled in the browser so 10 phone shots fit one ~4 MB request. */
 const MAX_IMAGE_EDGE = 1800;
 const TOTAL_BUDGET = 4_300_000;
 
-type Phase = 'idle' | 'challenge' | 'pow' | 'upload';
+type Phase = 'idle' | Stage;
 
 async function sha256Bits(salt: string, nonce: number): Promise<Uint8Array> {
   const data = new TextEncoder().encode(`${salt}:${nonce}`);
@@ -72,6 +73,17 @@ const ERROR_KEYS = {
 export function LeakCheckForm() {
   const t = useT(leakCheck);
   const [files, setFiles] = useState<File[]>([]);
+  // W3-06b · after a ✕ the removed button is gone; move focus to the next ✕ (or the picker), never <body>.
+  const pickerRef = useRef<HTMLInputElement>(null);
+  const thumbsRef = useRef<HTMLUListElement>(null);
+  const pendingFocus = useRef<number | null>(null);
+  useEffect(() => {
+    const target = pendingFocus.current;
+    if (target === null) return;
+    pendingFocus.current = null;
+    const next = target >= 0 ? thumbsRef.current?.querySelector<HTMLButtonElement>(`[data-remove-index="${target}"]`) : null;
+    (next ?? pickerRef.current)?.focus();
+  }, [files]);
   const [priceList, setPriceList] = useState<File | null>(null);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -79,7 +91,9 @@ export function LeakCheckForm() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
 
+  const [dropped, setDropped] = useState(0);
   const busy = phase !== 'idle';
+
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -137,6 +151,7 @@ export function LeakCheckForm() {
           <FileUp className="h-5 w-5" aria-hidden="true" />
           {files.length > 0 ? t('form.selected', { n: files.length }) : t('form.choose')}
           <input
+            ref={pickerRef}
             id="lc-invoices"
             type="file"
             multiple
@@ -144,9 +159,48 @@ export function LeakCheckForm() {
             className="sr-only"
             aria-describedby="lc-invoices-hint"
             disabled={busy}
-            onChange={(e) => setFiles(Array.from(e.target.files ?? []).slice(0, MAX_FILES + 1))}
+            onChange={(e) => {
+              const r = addFiles(files, Array.from(e.target.files ?? []));
+              setFiles(r.files);
+              setDropped(r.dropped);
+              e.target.value = ''; // the same photo can be picked again after a ✕
+            }}
           />
         </label>
+        {files.length > 0 ? (
+          <ul ref={thumbsRef} className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5" data-testid="lc-thumbs">
+            {files.map((f, i) => (
+              <li key={`${f.name}:${f.size}:${f.lastModified}`} className="relative aspect-square overflow-hidden rounded-xl border border-line bg-surface-2">
+                {isPreviewable(f.type) ? (
+                  <Thumb file={f} />
+                ) : (
+                  <span className="flex h-full w-full flex-col items-center justify-center gap-1 p-1 text-center text-[11px] text-muted">
+                    <FileText className="h-6 w-6" aria-hidden="true" />
+                    <span className="line-clamp-2 break-all" dir="ltr">{f.name}</span>
+                  </span>
+                )}
+                <button
+                  type="button"
+                  disabled={busy}
+                  data-remove-index={i}
+                  onClick={() => {
+                    pendingFocus.current = focusAfterRemove(i, files.length);
+                    setFiles((cur) => removeFileAt(cur, i));
+                  }}
+                  aria-label={t('form.remove', { name: f.name })}
+                  className="touch-target absolute end-1 top-1 inline-flex h-8 w-8 items-center justify-center rounded-full bg-ink/80 text-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {dropped > 0 ? (
+          <p className="mt-2 text-sm text-warn" role="status">
+            {t('form.dropped', { n: dropped, max: MAX_FILES })}
+          </p>
+        ) : null}
       </Field>
 
       <Field htmlFor="lc-pricelist" label={t('form.priceList')} hint={t('form.priceListHint')}>
@@ -199,7 +253,7 @@ export function LeakCheckForm() {
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
         <span>
           {t('form.privacy')}{' '}
-          <Link href="/privacy" className="text-primary underline underline-offset-2">
+          <Link href={legalHref('privacy')} className="text-primary underline underline-offset-2">
             {t('form.privacyLink')}
           </Link>
         </span>
@@ -209,6 +263,20 @@ export function LeakCheckForm() {
         <p role="alert" className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
           {error}
         </p>
+      ) : null}
+
+      {busy ? (
+        <div data-testid="lc-stages">
+          <p className="mb-1.5 text-sm font-semibold text-ink">
+            {t('form.stage', { n: stageNumber(phase as Stage), total: STAGES.length })}
+          </p>
+          <progress
+            className="h-2 w-full overflow-hidden rounded-full accent-primary"
+            max={STAGES.length}
+            value={stageNumber(phase as Stage)}
+            aria-label={t(`form.working.${phase as Stage}`)}
+          />
+        </div>
       ) : null}
 
       <button
@@ -224,4 +292,33 @@ export function LeakCheckForm() {
       </p>
     </form>
   );
+}
+
+/**
+ * An image thumbnail drawn on a canvas from the picked file's pixels
+ * (createImageBitmap). No file-derived string ever becomes a URL or markup.
+ */
+function Thumb({ file }: { file: File }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    let cancelled = false;
+    createImageBitmap(file)
+      .then((bitmap) => {
+        const canvas = ref.current;
+        if (cancelled || !canvas) return bitmap.close();
+        const size = 160;
+        const scale = Math.max(size / bitmap.width, size / bitmap.height);
+        const w = bitmap.width * scale;
+        const h = bitmap.height * scale;
+        canvas.width = size;
+        canvas.height = size;
+        canvas.getContext('2d')?.drawImage(bitmap, (size - w) / 2, (size - h) / 2, w, h);
+        bitmap.close();
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [file]);
+  return <canvas ref={ref} aria-hidden="true" className="h-full w-full" />;
 }

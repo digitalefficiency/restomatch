@@ -36,6 +36,41 @@ export const OPEN_STATUSES: readonly RecoveryStatus[] = [
 /** Statuses the overdue reminder chases (waiting on the supplier). */
 export const AWAITING_SUPPLIER: readonly RecoveryStatus[] = ['claimed', 'letter_sent', 'acknowledged'];
 
+/**
+ * Edge metadata (deep-fix class 8): what a move needs and whether it closes
+ * the claim. Server-owned — the web renders `next[]` from `recovery.list`
+ * and never mirrors the table.
+ *  - `requiresReason`: the move needs a note (terminal edges; a short
+ *    `recovered` books the shortfall as written off, so it needs one too).
+ *  - `terminal`: the claim leaves the open list.
+ *  - `undoable`: the desk may offer a 10 s undo before commit.
+ */
+export interface RecoveryEdge {
+  to: RecoveryStatus;
+  requiresReason: boolean;
+  terminal: boolean;
+  undoable: boolean;
+}
+
+const TERMINAL: readonly RecoveryStatus[] = ['recovered', 'written_off'];
+
+/** Whether moving `claim` to `to` needs a reason: a terminal edge, or recovering with a shortfall. */
+export function edgeRequiresReason(to: RecoveryStatus, claim?: { amountAgorot: number; creditedAgorot: number }): boolean {
+  if (to === 'written_off') return true;
+  if (to === 'recovered') return claim != null && claim.creditedAgorot < claim.amountAgorot;
+  return false;
+}
+
+/** The moves a claim may take next, with their metadata (`credited` is a credit note, not a move). */
+export function nextEdges(status: RecoveryStatus, claim?: { amountAgorot: number; creditedAgorot: number }): RecoveryEdge[] {
+  return RECOVERY_TRANSITIONS[status].map((to) => ({
+    to,
+    requiresReason: edgeRequiresReason(to, claim),
+    terminal: TERMINAL.includes(to),
+    undoable: !TERMINAL.includes(to),
+  }));
+}
+
 export function canTransition(from: RecoveryStatus, to: RecoveryStatus): boolean {
   return RECOVERY_TRANSITIONS[from].includes(to);
 }

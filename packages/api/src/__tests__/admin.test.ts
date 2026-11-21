@@ -6,6 +6,9 @@ import { getEntitlements } from '../entitlements';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedPlans, seedTenant, type Tenant } from './fixtures';
 
+/** W3-07a: every admin write carries a reason. */
+const R = 'בדיקה אוטומטית';
+
 const TEST_DB_URL =
   testDbUrl();
 const db = createDb(TEST_DB_URL);
@@ -69,7 +72,7 @@ describe('admin plan assignment wires the entitlement flow', () => {
     // implicit trial grants accounting_export
     expect((await getEntitlements(db, T.restaurantId)).features).toContain('accounting_export');
 
-    const res = await adminCaller(adminUserId).admin.assignPlan({
+    const res = await adminCaller(adminUserId).admin.assignPlan({ reason: R,
       restaurantId: T.restaurantId,
       planKey: 'basic',
     });
@@ -91,8 +94,8 @@ describe('admin plan assignment wires the entitlement flow', () => {
 
   it('re-assigning changes the plan in place (single subscription per account)', async () => {
     const c = adminCaller(adminUserId);
-    await c.admin.assignPlan({ restaurantId: T.restaurantId, planKey: 'basic' });
-    await c.admin.assignPlan({ restaurantId: T.restaurantId, planKey: 'pro' });
+    await c.admin.assignPlan({ reason: R, restaurantId: T.restaurantId, planKey: 'basic' });
+    await c.admin.assignPlan({ reason: R, restaurantId: T.restaurantId, planKey: 'pro' });
     const ent = await getEntitlements(db, T.restaurantId);
     expect(ent.planKey).toBe('pro');
     expect(ent.features).toContain('advanced_analytics');
@@ -100,8 +103,8 @@ describe('admin plan assignment wires the entitlement flow', () => {
 
   it('setOverrides layers a feature onto a basic plan', async () => {
     const c = adminCaller(adminUserId);
-    await c.admin.assignPlan({ restaurantId: T.restaurantId, planKey: 'basic' });
-    await c.admin.setOverrides({
+    await c.admin.assignPlan({ reason: R, restaurantId: T.restaurantId, planKey: 'basic' });
+    await c.admin.setOverrides({ reason: R,
       restaurantId: T.restaurantId,
       overrides: { features: ['accounting_export'] },
     });
@@ -111,7 +114,7 @@ describe('admin plan assignment wires the entitlement flow', () => {
 
   it('setOverrides before any plan is a clean BAD_REQUEST', async () => {
     await expect(
-      adminCaller(adminUserId).admin.setOverrides({
+      adminCaller(adminUserId).admin.setOverrides({ reason: R,
         restaurantId: T.restaurantId,
         overrides: { features: ['accounting_export'] },
       }),
@@ -123,9 +126,9 @@ describe('admin action safety', () => {
   it('assignPlan is idempotent under concurrency: one account, one subscription', async () => {
     const c = adminCaller(adminUserId);
     const results = await Promise.allSettled([
-      c.admin.assignPlan({ restaurantId: T.restaurantId, planKey: 'pro' }),
-      c.admin.assignPlan({ restaurantId: T.restaurantId, planKey: 'pro' }),
-      c.admin.assignPlan({ restaurantId: T.restaurantId, planKey: 'pro' }),
+      c.admin.assignPlan({ reason: R, restaurantId: T.restaurantId, planKey: 'pro' }),
+      c.admin.assignPlan({ reason: R, restaurantId: T.restaurantId, planKey: 'pro' }),
+      c.admin.assignPlan({ reason: R, restaurantId: T.restaurantId, planKey: 'pro' }),
     ]);
     expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
     const accountIds = new Set(
@@ -138,7 +141,7 @@ describe('admin action safety', () => {
 
   it('refuses to demote the last owner', async () => {
     await expect(
-      adminCaller(adminUserId).admin.setMemberRole({
+      adminCaller(adminUserId).admin.setMemberRole({ reason: R,
         restaurantId: T.restaurantId,
         userId: T.ownerUserId,
         role: 'chef',
@@ -155,7 +158,7 @@ describe('admin action safety', () => {
       .insert(memberships)
       .values({ userId: second!.id, restaurantId: T.restaurantId, role: 'owner' });
     await expect(
-      adminCaller(adminUserId).admin.setMemberRole({
+      adminCaller(adminUserId).admin.setMemberRole({ reason: R,
         restaurantId: T.restaurantId,
         userId: T.ownerUserId,
         role: 'manager',
@@ -164,12 +167,12 @@ describe('admin action safety', () => {
   });
 
   it('rejects a 0 limit override (would silently hard-block)', async () => {
-    await adminCaller(adminUserId).admin.assignPlan({
+    await adminCaller(adminUserId).admin.assignPlan({ reason: R,
       restaurantId: T.restaurantId,
       planKey: 'pro',
     });
     await expect(
-      adminCaller(adminUserId).admin.setOverrides({
+      adminCaller(adminUserId).admin.setOverrides({ reason: R,
         restaurantId: T.restaurantId,
         overrides: { limits: { invoicesPerMonth: 0 } },
       }),

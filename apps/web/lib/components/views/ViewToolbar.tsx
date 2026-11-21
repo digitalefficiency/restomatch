@@ -280,6 +280,7 @@ export function ViewToolbar(props: ViewToolbarProps) {
           selected={view.filters.supplierIds}
           options={props.options.suppliers.map((s) => ({ value: s.id, label: locale === 'en' && s.nameEn?.trim() ? s.nameEn : s.name }))}
           onChange={(v) => setFilter('supplierIds', v)}
+          record
           allLabel={t('toolbar.all')}
           countLabel={(n) => t('toolbar.selected', { count: n })}
         />
@@ -290,6 +291,7 @@ export function ViewToolbar(props: ViewToolbarProps) {
           selected={view.filters.categories}
           options={props.options.categories.map((c) => ({ value: c, label: c }))}
           onChange={(v) => setFilter('categories', v)}
+          record
           allLabel={t('toolbar.all')}
           countLabel={(n) => t('toolbar.selected', { count: n })}
         />
@@ -569,6 +571,7 @@ function MultiFilter({
   selected,
   options,
   onChange,
+  record = false,
   allLabel,
   countLabel,
 }: {
@@ -576,6 +579,8 @@ function MultiFilter({
   selected: string[];
   options: { value: string; label: string }[];
   onChange: (values: string[]) => void;
+  /** The options are the tenant's own rows (suppliers, categories): data, not copy (W2-16 [data-record]). */
+  record?: boolean;
   allLabel: string;
   countLabel: (n: number) => string;
 }) {
@@ -612,7 +617,7 @@ function MultiFilter({
       </summary>
       <fieldset className={popover}>
         <legend className="sr-only">{label}</legend>
-        <ul className="max-h-64 space-y-0.5 overflow-y-auto">
+        <ul className="max-h-64 space-y-0.5 overflow-y-auto" data-record={record ? '' : undefined}>
           {options.map((o) => {
             const on = selected.includes(o.value);
             return (

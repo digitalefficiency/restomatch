@@ -1,0 +1,194 @@
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { expect, test, type Browser, type Page } from '@playwright/test';
+import { SCREENS, SLACK, TYPE_BUDGET, VIEWPORT, type CopyScreen } from '../lib/copy/screens';
+import { DEMO_RESTAURANT_NAME, E2E_DATABASE_URL } from './env';
+import { e2eSql, loginViaMagicLink } from './helpers';
+import { foldContract, measureCopy } from './helpers/copyBudget';
+import { clearCopyState, seedCopyState } from './helpers/copyState';
+
+/**
+ * W2-16 · Copy focus. Per screen: the word budget ratchet (folds closed; MECHANISM §5.1/§5.4) and the
+ * fold contract (§5.5). Non-blocking until W4-01 flips the gates: it prints the gap to the type budget
+ * and fails only when a screen GROWS past its recorded baseline (+3 for relative-time strings).
+ *
+ * The measured state is W2-16's own, so the numbers do not depend on spec order or on the calendar:
+ * every chrome section that only shows with certain data is made present by helpers/copyState.ts
+ * (rows dated from the DB clock in beforeAll, removed in afterAll), every screen renders in Hebrew
+ * (the §5.1 metric) whatever language a member saved, and the first screen is measured with the
+ * record rows collapsed (helpers/copyBudget.ts), so a longer list never moves copy below the fold.
+ */
+const AXE = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
+const EMAIL: Record<string, string> = {
+  owner: 'owner@kfar-hazeitim.test',
+  manager: 'manager@kfar-hazeitim.test',
+  bookkeeper: 'bookkeeper@kfar-hazeitim.test',
+  chef: 'chef@kfar-hazeitim.test',
+  receiver: 'receiver@kfar-hazeitim.test',
+};
+const HEARTBEAT = 'e2e-w2-16';
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+test.beforeAll(async () => {
+  // Measure the same data alone and in suite order: W2-12 (earlier in the run) adds the contracts demo
+  // (seed-wave1-contracts-demo.ts: additive + idempotent) and leaves it, which lights the
+  // 'מעל החוזה' card on /dashboard/leaks. Seed it here too, so the baselines always include it —
+  // the pilot runs with `contracts` ON, so this is the page the owner sees.
+  execFileSync('pnpm', ['--filter', '@restomatch/worker', 'exec', 'tsx', 'scripts/seed-wave1-contracts-demo.ts'], {
+    cwd: path.join(HERE, '..', '..', '..'),
+    env: { ...process.env, DATABASE_URL: E2E_DATABASE_URL },
+    stdio: 'pipe',
+  });
+  const sql = e2eSql();
+  try {
+    const [r] = await sql<{ id: string }[]>`select id from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
+    if (!r) throw new Error('no demo restaurant');
+    // The stale-worker banner would count as copy: mock a healthy worker (as W1-05 does).
+    await sql`insert into worker_heartbeats (worker_id, host, pid, workers, started_at, beat_at)
+              values (${HEARTBEAT}, 'e2e', 1, 1, now(), now() + interval '1 day')
+              on conflict (worker_id) do update set beat_at = now() + interval '1 day'`;
+    // Every data-gated chrome section present, dated from today's Israel day (helpers/copyState.ts).
+    await seedCopyState(sql, r.id);
+  } finally {
+    await sql.end();
+  }
+});
+
+test.afterAll(async () => {
+  const sql = e2eSql();
+  try {
+    await sql`delete from worker_heartbeats where worker_id = ${HEARTBEAT}`;
+    const [r] = await sql<{ id: string }[]>`select id from restaurants where name = ${DEMO_RESTAURANT_NAME} limit 1`;
+    if (r) await clearCopyState(sql, r.id);
+  } finally {
+    await sql.end();
+  }
+});
+
+// One magic-link sign-in per role for the whole run, cached on disk: Playwright restarts the worker
+// after a failing test, and the auth rate limit allows only a few magic links per minute.
+const STATE_DIR = 'test-results/.auth';
+async function stateFor(browser: Browser, role: string): Promise<string> {
+  const file = `${STATE_DIR}/w2-16-${role}.json`;
+  if (!existsSync(file)) {
+    mkdirSync(STATE_DIR, { recursive: true });
+    const ctx = await browser.newContext({ baseURL: test.info().project.use.baseURL });
+    const p = await ctx.newPage();
+    // Earlier specs in the run (W2-04, W2-06, W2-07) spend this mailbox's 3 magic links per 15 min
+    // (lib/rateLimit.ts): clear that counter first, as AU-08 does. The limit itself is unchanged.
+    const sql = e2eSql();
+    try {
+      await sql`delete from rate_limit_counters where key like ${'magiclink:%'}`;
+    } finally {
+      await sql.end();
+    }
+    await loginViaMagicLink(p, EMAIL[role]!);
+    await ctx.storageState({ path: file });
+    await ctx.close();
+  }
+  return file;
+}
+
+async function open(browser: Browser, s: CopyScreen): Promise<Page> {
+  const ctx = await browser.newContext({
+    baseURL: test.info().project.use.baseURL,
+    viewport: VIEWPORT[s.vp],
+    ...(s.role === 'anon' ? {} : { storageState: await stateFor(browser, s.role) }),
+  });
+  // The metric is Hebrew (§5.1): a member's saved language (the seed's receiver prefers English,
+  // a later spec clears it) must not switch the words being counted. The cookie wins over it.
+  await ctx.addCookies([{ name: 'rm_locale', value: 'he', url: test.info().project.use.baseURL! }]);
+  const page = await ctx.newPage();
+  await page.goto(s.route);
+  await page.waitForLoadState('networkidle');
+  return page;
+}
+
+async function axeSerious(page: Page): Promise<string[]> {
+  await page.addScriptTag({ content: AXE });
+  const res = await page.evaluate(async () => {
+    const axe = (window as unknown as { axe: { run: (c: unknown, o: unknown) => Promise<{ violations: Array<{ id: string; impact: string }> }> } }).axe;
+    return axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } });
+  });
+  return res.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id);
+}
+
+for (const s of SCREENS) {
+  test(`copy budget · ${s.id} (${s.role}, ${s.vp})`, async ({ browser }) => {
+    const page = await open(browser, s);
+    const m = await measureCopy(page);
+    const budget = TYPE_BUDGET[s.type];
+    const firstBudget = s.type === 'dashboard' && s.vp === 'phone' ? budget.phoneFirst! : budget.first;
+    const base = s.baseline === 'type' ? { first: firstBudget, page: budget.page, blocks: budget.blocks } : s.baseline;
+    console.info(
+      `[W2-16] ${s.id}: first ${m.first} (budget ${firstBudget}, gap ${m.first - firstBudget}) · page ${m.page} (budget ${budget.page}, gap ${m.page - budget.page})` +
+        ` · blocks>12 ${m.blocks.length} · body.innerText ${m.bodyWords} · exempt ${m.exemptWords} · baseline ${JSON.stringify(s.baseline)} · ${s.adopter}`,
+    );
+    if (!base) return; // seed on first run: copy the printed numbers into lib/copy/screens.ts
+    expect.soft(m.first, `${s.id} first screen grew`).toBeLessThanOrEqual(base.first + SLACK);
+    expect.soft(m.page, `${s.id} page grew`).toBeLessThanOrEqual(base.page + SLACK);
+    expect(await foldContract(page)).toEqual([]);
+  });
+}
+
+test('fold contract + axe with folds open (one real screen)', async ({ browser }) => {
+  const s = SCREENS.find((x) => x.id === 'owner-home')!;
+  const page = await open(browser, s);
+  expect(await axeSerious(page)).toEqual([]);
+  const toggles = page.locator('[data-explain-toggle]');
+  for (let i = 0; i < (await toggles.count()); i++) if (await toggles.nth(i).isVisible()) await toggles.nth(i).click();
+  expect(await axeSerious(page)).toEqual([]);
+  // Keyboard: Tab reaches a toggle; Enter and Space flip it.
+  if (await toggles.count()) {
+    const t = toggles.first();
+    await t.focus();
+    const before = await t.getAttribute('aria-expanded');
+    await page.keyboard.press('Enter');
+    expect(await t.getAttribute('aria-expanded')).not.toBe(before);
+    await page.keyboard.press('Space');
+    expect(await t.getAttribute('aria-expanded')).toBe(before);
+  }
+});
+
+test('measureCopy: headers, static lists and new paragraphs count; record rows never do', async ({ page }) => {
+  await page.setContent(`<main>
+    <h1>כותרת העמוד</h1>
+    <p>פסקה חדשה וארוכה בכרום של המסך שמסבירה בפירוט רב דבר שהמשתמש כבר יודע היטב</p>
+    <ul><li>הסבר קבוע אחד</li><li>הסבר קבוע שני</li></ul>
+    <ol><li>שלב ראשון</li></ol>
+    <table><thead><tr><th>ספק</th><th>סכום</th></tr></thead>
+      <tbody><tr><td>שורת נתונים שלא נספרת</td></tr></tbody></table>
+    <div role="table"><div role="row"><span role="columnheader">עמודה</span></div>
+      <div role="row"><span role="gridcell">תא נתונים</span></div></div>
+    <ul data-record><li>כרטיס רשומה שלא נספר</li></ul>
+    <article data-row>שורה מסומנת</article>
+    <fieldset><ul data-record><li>ספק מהנתונים</li></ul><ul><li>מחיר גבוה מהמצופה</li></ul></fieldset>
+    <section data-record><h2>באיחור</h2><ul><li>משאית ראשונה</li></ul></section>
+  </main>`);
+  const m = await measureCopy(page);
+  // כותרת העמוד (2) + the new paragraph (14) + 2×הסבר קבוע (3+3) + שלב ראשון (2) + ספק, סכום (2) + עמודה (1)
+  // + the static filter option 'מחיר גבוה מהמצופה' (3) = 30; the data option list and the record group count 0.
+  expect(m.page).toBe(30);
+  expect(m.blocks.map((b) => b.words)).toEqual([14]);
+});
+
+test('measureCopy: the first screen ignores the height of record rows, never the height of copy', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  // 40 records above the bucket heading (≈ 2000 px): the heading still counts as first-screen copy.
+  const rows = Array.from({ length: 40 }, (_, i) => `<tr><td style="height:50px">שורה ${i}</td></tr>`).join('');
+  await page.setContent(`<main>
+    <h1>כותרת</h1>
+    <table><thead><tr><th>ספק</th></tr></thead><tbody>${rows}</tbody></table>
+    <h2>מאוחר יותר</h2>
+    <div style="height:2000px">פסקה ארוכה של הסבר</div>
+    <p>מתחת לקפל</p>
+  </main>`);
+  const m = await measureCopy(page);
+  // כותרת (1) + ספק (1) + מאוחר יותר (2) + the tall explanation's 4 words are first; the 2 words after
+  // 2000 px of copy are not. The 40 rows count nowhere and push nothing.
+  expect(m.page).toBe(10);
+  expect(m.first).toBe(8);
+});

@@ -1,6 +1,8 @@
 import {
   activityEvents,
   and,
+  auditLog,
+  desc,
   discrepancies,
   eq,
   inArray,
@@ -23,6 +25,14 @@ import { buildRules } from '../approvals/engine';
 import { logActivity } from '../activity';
 import { canActOn } from '../lib/roles';
 import { writePriceHistoryForInvoice } from './priceHistory';
+import { EMAIL_COPY, fill } from '../notifications/copy';
+import { formatIlsAgorot } from '../reports/money';
+
+/** Hebrew match/alert copy (EMAIL_COPY.he.matchSummary): plurals with the dual, ₪ only from the formatter. */
+const MS = EMAIL_COPY.he.matchSummary;
+const say = (template: string, vars: Record<string, string | number> = {}) => fill(template, vars, { locale: 'he' });
+/** ₪ at 0 dp through the server money formatter (G-13 moneyText once it lands; AU-07). */
+const ilsText = (shekels: number) => formatIlsAgorot(Math.round(shekels * 100));
 
 export interface PersistMatchArgs {
   restaurantId: string;
@@ -47,6 +57,13 @@ export interface PriorDecision {
   deciderRole: UserRole | null;
   /** DUPLICATE_INVOICE: supplier|normalized number it matched (the prior run's feed metadata). */
   duplicateKey?: string | null;
+  /**
+   * Escalation provenance (W2-13, deep-fix class 14): who handed the finding to the owner
+   * and from which role. Read from the escalation's audit row; carried onto the new
+   * finding across a re-match so the escalator still sees it as "waiting for the owner".
+   */
+  escalatedBy?: string | null;
+  fromRole?: UserRole | null;
 }
 
 /**
@@ -166,6 +183,7 @@ export async function loadPriorDecisions(
   if (runs.length === 0) return [];
   const rows = await db
     .select({
+      id: discrepancies.id,
       type: discrepancies.type,
       invoiceLineId: discrepancies.invoiceLineId,
       poLineId: discrepancies.poLineId,
@@ -211,6 +229,32 @@ export async function loadPriorDecisions(
         ),
       ),
     );
+  // Escalation provenance: the latest `discrepancy.escalated` audit row of each escalated finding.
+  const escalatedIds = rows.filter((r) => r.resolutionStatus === 'escalated').map((r) => r.id);
+  const escalations =
+    escalatedIds.length === 0
+      ? []
+      : await db
+          .select({ entityId: auditLog.entityId, userId: auditLog.userId, after: auditLog.after })
+          .from(auditLog)
+          .where(
+            and(
+              eq(auditLog.restaurantId, restaurantId),
+              eq(auditLog.entityType, 'discrepancy'),
+              eq(auditLog.action, 'discrepancy.escalated'),
+              inArray(auditLog.entityId, escalatedIds),
+            ),
+          )
+          .orderBy(desc(auditLog.at));
+  const escalationOf = new Map<string, { escalatedBy: string | null; fromRole: UserRole | null }>();
+  for (const e of escalations) {
+    if (!e.entityId || escalationOf.has(e.entityId)) continue; // newest first
+    const after = (e.after ?? {}) as { fromRole?: unknown; escalatedBy?: unknown };
+    escalationOf.set(e.entityId, {
+      escalatedBy: typeof after.escalatedBy === 'string' ? after.escalatedBy : (e.userId ?? null),
+      fromRole: typeof after.fromRole === 'string' ? (after.fromRole as UserRole) : null,
+    });
+  }
   const dupKeyByRun = new Map(
     feed.map((f) => [f.entityId, typeof f.metadata?.duplicateKey === 'string' ? (f.metadata.duplicateKey as string) : null]),
   );
@@ -232,6 +276,9 @@ export async function loadPriorDecisions(
       deltaAmount: Number(r.deltaAmount ?? 0),
       deciderRole: r.resolutionStatus === 'escalated' ? 'owner' : (r.deciderRole ?? null),
       duplicateKey: dupKeyByRun.get(r.matchRunId) ?? null,
+      ...(r.resolutionStatus === 'escalated'
+        ? { escalatedBy: escalationOf.get(r.id)?.escalatedBy ?? null, fromRole: escalationOf.get(r.id)?.fromRole ?? null }
+        : {}),
     },
   }));
 }
@@ -277,14 +324,14 @@ export function matchActivitySummary(
   // Worded from the actual findings: the PO state first, then the loss, then
   // anything left to check — "matches" only when there was a PO and nothing is open.
   const parts: string[] = [];
-  if (!poMatched) parts.push(pendingLink ? 'ממתינה לשיוך להזמנה' : 'ללא הזמנה מקושרת');
+  if (!poMatched) parts.push(pendingLink ? MS.pendingLink : MS.noPo);
   if (leaking.length > 0) {
-    parts.push(leaking.length === 1 ? 'חריגה אחת' : `${leaking.length} חריגות`);
-    parts.push(`הפסד פוטנציאלי ₪${Math.round(leakIls).toLocaleString('he-IL')}`);
+    parts.push(say(MS.gaps, { count: leaking.length }));
+    parts.push(say(MS.inGaps, { amount: ilsText(leakIls) }));
   } else if (reviewCount > 0) {
-    parts.push(reviewCount === 1 ? 'חריגה אחת לבדיקה' : `${reviewCount} חריגות לבדיקה`);
+    parts.push(say(MS.toReview, { count: reviewCount }));
   } else if (poMatched) {
-    parts.push('תואמת להזמנה ולקבלה');
+    parts.push(MS.matches);
   }
   return { detail: parts.join(' · '), leakCount: leaking.length, leakIls, pendingLink, poMatched, reviewCount };
 }
@@ -300,13 +347,12 @@ export function matchAlert(s: { leakCount: number; leakIls: number; reviewCount:
   atRiskIls: string | null;
 } {
   if (s.leakCount > 0) {
-    const ils = `₪${Math.round(s.leakIls).toLocaleString('he-IL')}`;
-    const n = s.leakCount === 1 ? 'פער אחד' : `${s.leakCount} פערים`;
-    const review = s.reviewCount > 0 ? ` · ${s.reviewCount} לבדיקה` : '';
-    return { summary: `${n}, סה"כ הפסד פוטנציאלי ${ils}${review}`, count: s.leakCount, atRiskIls: ils };
+    const ils = ilsText(s.leakIls);
+    const review = s.reviewCount > 0 ? ` · ${say(MS.toReview, { count: s.reviewCount })}` : '';
+    return { summary: say(MS.alert, { gaps: say(MS.gaps, { count: s.leakCount }), amount: ils }) + review, count: s.leakCount, atRiskIls: ils };
   }
-  if (s.reviewCount > 0) return { summary: `${s.reviewCount} לבדיקה`, count: s.reviewCount, atRiskIls: null };
-  return { summary: s.pendingLink ? 'ממתינה לשיוך להזמנה' : 'לבדיקה', count: 0, atRiskIls: null };
+  if (s.reviewCount > 0) return { summary: say(MS.toReview, { count: s.reviewCount }), count: s.reviewCount, atRiskIls: null };
+  return { summary: s.pendingLink ? MS.pendingLink : MS.alertReview, count: 0, atRiskIls: null };
 }
 
 export interface PersistMatchResult {
@@ -390,7 +436,7 @@ export async function persistMatchRun(
         ? paired
         : undefined;
 
-    await db.insert(discrepancies).values({
+    const [inserted] = await db.insert(discrepancies).values({
       matchRunId: matchRun.id,
       restaurantId: args.restaurantId,
       type: d.type,
@@ -413,7 +459,28 @@ export async function persistMatchRun(
       resolvedBy: prior?.resolvedBy ?? null,
       resolvedAt: prior?.resolvedAt ?? null,
       resolutionNote: prior?.resolutionNote ?? null,
-    });
+    }).returning({ id: discrepancies.id });
+
+    // A carried escalation keeps its provenance on the new finding (W2-13): the audit row
+    // names who escalated and from which role, marked `carried` (no new human action).
+    if (prior?.resolutionStatus === 'escalated' && inserted && (prior.escalatedBy || prior.fromRole)) {
+      await db.insert(auditLog).values({
+        restaurantId: args.restaurantId,
+        userId: prior.escalatedBy ?? null,
+        action: 'discrepancy.escalated',
+        entityType: 'discrepancy',
+        entityId: inserted.id,
+        before: null,
+        after: {
+          status: 'escalated',
+          note: prior.resolutionNote ?? null,
+          fromRole: prior.fromRole ?? null,
+          escalatedBy: prior.escalatedBy ?? null,
+          carried: true,
+          matchRunId: matchRun.id,
+        },
+      });
+    }
 
     feedFindings.push({
       type: d.type,
@@ -463,9 +530,9 @@ export async function persistMatchRun(
     skip: result.discrepancies.some((d) => d.type === 'DUPLICATE_INVOICE'),
   });
 
-  // Activity entry: the Hebrew sentence (rendered as-is in Hebrew, and parsed by
-  // the web's activityText templates) plus structured metadata so any locale can
-  // render it from numbers rather than text.
+  // Activity entry, v2 (W2-13): structured metadata only. The title is a machine key
+  // (the column is NOT NULL), `detail` is null; no ₪ and no Hebrew are baked in.
+  // Every locale renders the row from the metadata (apps/web activityText).
   const [meta] = await db
     .select({ invoiceNumber: invoices.invoiceNumber, supplierName: suppliers.name, supplierNameEn: suppliers.nameEn })
     .from(invoices)
@@ -476,11 +543,12 @@ export async function persistMatchRun(
   await logActivity(db, {
     restaurantId: args.restaurantId,
     eventType: 'invoice_matched',
-    title: meta?.invoiceNumber ? `חשבונית ${meta.invoiceNumber} הותאמה` : 'חשבונית הותאמה',
-    detail: [meta?.supplierName ?? null, feed.detail].filter(Boolean).join(' · '),
+    title: `invoice_matched:${meta?.invoiceNumber ?? args.invoiceId}`,
+    detail: null,
     entityType: 'match_run',
     entityId: matchRun.id,
     metadata: {
+      v: 2,
       invoiceId: args.invoiceId,
       invoiceNumber: meta?.invoiceNumber ?? null,
       supplierName: meta?.supplierName ?? null,
@@ -491,6 +559,7 @@ export async function persistMatchRun(
       // What the feed tells: the hero's leak rule (matchActivitySummary).
       leakCount: feed.leakCount,
       leakIls: feed.leakIls,
+      leakAgorot: Math.round(feed.leakIls * 100),
       pendingLink: feed.pendingLink,
       poMatched: feed.poMatched,
       reviewCount: feed.reviewCount,

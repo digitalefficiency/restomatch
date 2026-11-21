@@ -27,6 +27,8 @@ interface Props {
   onQuickConfirm?: () => void;
   onContinueAdjust: () => void;
   onRetake: () => void;
+  /** View only: no retake (a new photo is a write). */
+  readOnly?: boolean;
   /** Optional per-line sub-line (flag `dockPriceContext`: "your usual price"). */
   lineExtra?: (line: ReconciliationLine) => React.ReactNode;
   eyebrow?: string;
@@ -42,7 +44,7 @@ interface Props {
  * comes only from the engine, on the dock slip — RCV-11), and ONE primary: on
  * to the Delivery Check, where every line is counted.
  */
-export function Reconciliation({ result, onContinueAdjust, onRetake, lineExtra, eyebrow, children, showMoney = true }: Props) {
+export function Reconciliation({ result, onContinueAdjust, onRetake, lineExtra, eyebrow, children, showMoney = true, readOnly = false }: Props) {
   const t = useT(receiving);
   const td = useT(receivingDelivery);
   const locale = useLocale();
@@ -281,10 +283,12 @@ export function Reconciliation({ result, onContinueAdjust, onRetake, lineExtra, 
       {children}
 
       <ActionBar testId="recon-actions">
-        <button type="button" onClick={onRetake} className={SECONDARY_48}>
-          <RefreshCw className="h-5 w-5" aria-hidden="true" />
-          {t('steps.recon.retake')}
-        </button>
+        {readOnly ? null : (
+          <button type="button" onClick={onRetake} className={SECONDARY_48} data-testid="recon-retake">
+            <RefreshCw className="h-5 w-5" aria-hidden="true" />
+            {t('steps.recon.retake')}
+          </button>
+        )}
         <button type="button" onClick={onContinueAdjust} data-testid="continue-adjust" className={PRIMARY_56}>
           {t('steps.recon.continueAdjust')}
           <ArrowLeft className="h-5 w-5 ltr:-scale-x-100" aria-hidden="true" />

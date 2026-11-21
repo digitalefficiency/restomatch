@@ -75,9 +75,11 @@ describe('recipes: feature flag + roles', () => {
     }
   });
 
-  it('chef/manager may read + edit; receiver/bookkeeper may not; target is manager+', async () => {
+  it('chef/manager may read + edit; the bookkeeper reads only (owner decision I3); the receiver may not; target is manager+', async () => {
     for (const role of ['owner', 'manager', 'chef'] as const) await expect(caller(role).recipes.list()).resolves.toBeDefined();
-    for (const role of ['receiver', 'bookkeeper'] as const) await expect(caller(role).recipes.list()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller('bookkeeper').recipes.list()).resolves.toBeDefined();
+    await expect(caller('receiver').recipes.list()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(caller('bookkeeper').recipes.setTarget({ targetPct: 28 })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(caller('chef').recipes.setTarget({ targetPct: 28 })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 });

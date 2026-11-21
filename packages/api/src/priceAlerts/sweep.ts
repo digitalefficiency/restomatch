@@ -17,8 +17,6 @@ import {
 } from '@restomatch/db';
 import { featureEnabled } from '../lib/features';
 import { catalogUnitPrice } from '../lib/unitPrice';
-import { enqueueNotification } from '../notifications/outbox';
-import { recipientsForRestaurant } from '../notifications/recipients';
 import { localDateKey } from '../contracts/core';
 import {
   cheaperOffer,
@@ -28,7 +26,13 @@ import {
   type PricePoint,
   type ThresholdRule,
 } from './detect';
-import { priceAlertEmail } from './email';
+import { buildChefDigest, buildOwnerDigest, type CreepLine, type DigestLinks } from './digest';
+import { loadDigestImpacts } from './impactAdapter';
+import { contractsEnding, markContractsAnnounced } from './contractExpiry';
+import { markListDiffsAnnounced, pendingListDiffs } from './priceListDiff';
+import { markDishesAnnounced, pendingDishCrossings, type DishChangesSource } from './dishCrossing';
+import { digestOptions, type DigestOptions } from './options';
+import { digestRecipients, enqueueDigest } from './notifyRoles';
 
 const DAY_MS = 86_400_000;
 
@@ -38,10 +42,18 @@ const DEFAULT_TZ = 'Asia/Jerusalem';
 
 export interface SweepOptions {
   now?: Date;
-  /** Enqueue an email per new alert to owners/managers via the outbox. */
+  /**
+   * Send the AU-13 morning digest: ONE mail per person per Israel day (owner and
+   * manager: price creep + contracts ending + new price lists + dishes; chef:
+   * dishes only). Detection is identical with or without it.
+   */
   notify?: boolean;
   /** Absolute base URL for the email CTA (worker passes APP_URL). */
   appBaseUrl?: string;
+  /** Tests only: override the AU-13 options (default: the restaurant's settings). */
+  digestOptions?: DigestOptions;
+  /** Tests only: the recipes seam for the dish section (default: W3-02's export, once it lands). */
+  dishChanges?: DishChangesSource | null;
 }
 
 export interface SweepResult {
@@ -75,6 +87,7 @@ export async function runPriceAlertSweep(
     return { skipped: true, created: 0, enqueued: 0 };
   }
   const tz = restaurant.timezone ?? DEFAULT_TZ;
+  const ctx: NotifyCtx = { restaurantId, now, tz, settings: restaurant.settings, opts };
 
   const rules: ThresholdRule[] = (
     await db
@@ -146,7 +159,7 @@ export async function runPriceAlertSweep(
   const pendingOnly = async (): Promise<SweepResult> => ({
     skipped: false,
     created: 0,
-    enqueued: opts.notify ? await notifyPending(db, restaurantId, now, opts.appBaseUrl) : 0,
+    enqueued: opts.notify ? await notifyPending(db, ctx) : 0,
   });
   if (detected.length === 0) return pendingOnly();
 
@@ -223,60 +236,131 @@ export async function runPriceAlertSweep(
 
   // Email every OPEN alert not yet notified — this run's and any created by an
   // in-app refresh or a previous run whose notify failed (notified_at NULL).
-  const enqueued = opts.notify ? await notifyPending(db, restaurantId, now, opts.appBaseUrl) : 0;
+  const enqueued = opts.notify ? await notifyPending(db, ctx) : 0;
   return { skipped: false, created: inserted.length, enqueued };
 }
 
-async function notifyPending(
-  db: Database,
-  restaurantId: string,
-  now: Date,
-  appBaseUrl?: string,
-): Promise<number> {
-  const pending = await db
-    .select({ id: priceAlerts.id })
-    .from(priceAlerts)
-    .where(
-      and(
-        eq(priceAlerts.restaurantId, restaurantId),
-        eq(priceAlerts.status, 'open'),
-        isNull(priceAlerts.notifiedAt),
-      ),
-    );
-  if (pending.length === 0) return 0;
-  const recipients = await recipientsForRestaurant(db, restaurantId);
-  if (recipients.length === 0) return 0;
-  const alerts = await loadAlertDetails(db, restaurantId, pending.map((p) => p.id));
-  let enqueued = 0;
-  for (const a of alerts) {
-    const email = priceAlertEmail({
-      productName: a.productName,
-      supplierName: a.supplierName,
-      pctChange: Number(a.pctChange),
-      windowDays: a.windowDays,
-      startPrice: Number(a.startPrice),
-      endPrice: Number(a.endPrice),
-      cheaperSupplierName: a.cheaperSupplierName,
-      cheaperPrice: a.cheaperPrice == null ? null : Number(a.cheaperPrice),
-      url: appBaseUrl ? `${appBaseUrl}/dashboard/contracts?tab=alerts` : undefined,
-    });
-    for (const r of recipients) {
-      const { deduped } = await enqueueNotification(db, {
-        restaurantId,
-        channel: 'email',
-        target: r.email,
-        subject: email.subject,
-        body: email.text,
-        html: email.html,
-        relatedEntityType: 'price_alert',
-        relatedEntityId: a.id,
-        dedupeKey: `price-alert:${a.id}:${r.email}`,
-      });
-      if (!deduped) enqueued += 1;
+interface NotifyCtx {
+  restaurantId: string;
+  now: Date;
+  tz: string;
+  settings: unknown;
+  opts: SweepOptions;
+}
+
+/**
+ * AU-13 — the 07:00 digest. Collects the restaurant's open, un-notified alerts
+ * (this run's, an in-app refresh's, or a run whose notify failed), contracts
+ * ending within 14 days, new price lists and dishes that crossed their target,
+ * and queues ONE mail per person: dedupe `au:A18:<rid>:<userId>:<ilDate>`.
+ *
+ * Marks (`notified_at`, the audit "once" rows) are written only AFTER every
+ * recipient is queued, and only when at least one row was newly queued — a
+ * same-day rerun whose mail already went leaves new items for tomorrow's mail.
+ * Returns the number of newly queued mails.
+ */
+async function notifyPending(db: Database, ctx: NotifyCtx): Promise<number> {
+  const { restaurantId, now, tz, settings, opts } = ctx;
+  const options = opts.digestOptions ?? digestOptions(settings as never);
+  const today = localDateKey(now, tz);
+  const month = today.slice(0, 7);
+  const skip = (what: string) => console.log(`[price-alerts] restaurant=${restaurantId} ${what} skipped: option off`);
+
+  let creep: CreepLine[] = [];
+  if (options.priceCreepDigest) {
+    const pending = await db
+      .select({ id: priceAlerts.id })
+      .from(priceAlerts)
+      .where(and(eq(priceAlerts.restaurantId, restaurantId), eq(priceAlerts.status, 'open'), isNull(priceAlerts.notifiedAt)));
+    if (pending.length) {
+      const alerts = await loadAlertDetails(db, restaurantId, pending.map((p) => p.id));
+      const impacts = await loadDigestImpacts(db, restaurantId, alerts);
+      creep = alerts.map((a) => ({
+        alertId: a.id,
+        productName: a.productName,
+        supplierName: a.supplierName,
+        pctChange: Number(a.pctChange),
+        windowDays: a.windowDays,
+        startPrice: Number(a.startPrice),
+        endPrice: Number(a.endPrice),
+        cheaperSupplierName: a.cheaperSupplierName,
+        cheaperPrice: a.cheaperPrice == null ? null : Number(a.cheaperPrice),
+        monthlyAgorot: impacts.get(a.id)?.monthlyAgorot ?? null,
+        tone: impacts.get(a.id)?.tone ?? 't4',
+      }));
     }
-    // Marked only after every recipient is queued (the outbox dedupes a retry).
-    await db.update(priceAlerts).set({ notifiedAt: now }).where(eq(priceAlerts.id, a.id));
+  } else skip('priceCreepDigest');
+  const contracts = options.contractExpiry ? await contractsEnding(db, restaurantId, today) : (skip('contractExpiry'), []);
+  const listDiffs = options.priceListDiff ? await pendingListDiffs(db, restaurantId, now, tz) : (skip('priceListDiff'), []);
+  const dishesOn = featureEnabled(settings, 'recipes') && featureEnabled(settings, 'dishPriceAlert');
+  const dishes = dishesOn ? await pendingDishCrossings(db, restaurantId, now, month, opts.dishChanges) : [];
+  if (creep.length + contracts.length + listDiffs.length + dishes.length === 0) return 0;
+
+  const base = opts.appBaseUrl;
+  const go = (to: string) => (base ? `${base}/dashboard/go?r=${restaurantId}&to=${encodeURIComponent(to)}` : undefined);
+  const links: DigestLinks = {
+    queue: go('/dashboard/contracts?tab=queue'),
+    contracts: go('/dashboard/contracts'),
+    catalog: go('/dashboard/catalog'),
+    recipe: (id) => go(`/dashboard/recipes/${id}`),
+  };
+
+  let enqueued = 0;
+  let ownersReached = false;
+  let chefsReached = false;
+  const ownerMail = buildOwnerDigest({ locale: 'he', creep, contracts, dishes, listDiffs, links });
+  if (ownerMail) {
+    for (const r of await digestRecipients(db, restaurantId, ['owner', 'manager'])) {
+      const fresh = await enqueueDigest(db, {
+        restaurantId,
+        recipient: r,
+        subject: ownerMail.subject,
+        text: ownerMail.text,
+        html: ownerMail.html,
+        dedupeKey: `au:A18:${restaurantId}:${r.userId}:${today}`,
+        relatedEntityType: ownerMail.alertIds.length ? 'price_alert' : 'price_digest',
+        relatedEntityId: ownerMail.alertIds[0] ?? null,
+        payload: { kpi: 'A18', alertIds: ownerMail.alertIds, creepMonthlyAgorot: ownerMail.creepMonthlyAgorot },
+      });
+      if (fresh) {
+        enqueued += 1;
+        ownersReached = true;
+      }
+    }
   }
+  const chefMail = buildChefDigest({ locale: 'he', dishes, links });
+  if (chefMail) {
+    for (const r of await digestRecipients(db, restaurantId, ['chef'])) {
+      const fresh = await enqueueDigest(db, {
+        restaurantId,
+        recipient: r,
+        subject: chefMail.subject,
+        text: chefMail.text,
+        html: chefMail.html,
+        dedupeKey: `au:A18:${restaurantId}:${r.userId}:${today}`,
+        relatedEntityType: 'price_digest',
+        relatedEntityId: null,
+        payload: { kpi: 'A18', dishes: dishes.length },
+      });
+      if (fresh) {
+        enqueued += 1;
+        chefsReached = true;
+      }
+    }
+  }
+
+  // Marked only after every recipient is queued (the outbox dedupes a retry).
+  if (ownersReached) {
+    if (creep.length) {
+      await db
+        .update(priceAlerts)
+        .set({ notifiedAt: now })
+        .where(and(eq(priceAlerts.restaurantId, restaurantId), inArray(priceAlerts.id, creep.map((c) => c.alertId))));
+    }
+    await markContractsAnnounced(db, restaurantId, contracts);
+    await markListDiffsAnnounced(db, restaurantId, listDiffs);
+  }
+  if (ownersReached || chefsReached) await markDishesAnnounced(db, restaurantId, month, dishes);
   return enqueued;
 }
 

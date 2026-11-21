@@ -129,5 +129,5 @@ export const he = {
     product: 'מוצר',
   },
   range: '{from} – {to}',
-  filteredNote: 'התצוגה מסוננת — המספרים מתייחסים לסינון בלבד.',
+  filteredNote: 'מוצג לפי הסינון',
 };

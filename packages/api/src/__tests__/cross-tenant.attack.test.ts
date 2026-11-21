@@ -41,6 +41,8 @@ import {
 import { appRouter } from '../index';
 import type { AppContext, Session } from '../context';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
+import { diffCoverage, loadFragments, mergeCoverage } from './coverage/index';
+import { syncClaims } from '../recovery/service';
 
 /**
  * CROSS-TENANT ATTACK SUITE
@@ -52,7 +54,13 @@ import { resetDb, seedTenant, type Tenant } from './fixtures';
  *
  * COVERAGE is enforced: a tRPC procedure that is not declared in COVERAGE
  * fails this suite. When you add a procedure, add an attack or isolation test
- * here and declare it — that is the price of admission.
+ * and declare it — that is the price of admission.
+ *
+ * COVERAGE = BASE_COVERAGE (below, human-owned) merged with the per-package
+ * fragments in ./coverage/<package-id>.ts. A package adds its procedures in its
+ * own fragment and its attack test in its own *.attack.test.ts — never here.
+ * mergeCoverage() rejects a fragment that re-declares a base key. See
+ * ./coverage/README.md.
  */
 
 const TEST_DB_URL =
@@ -103,7 +111,7 @@ afterAll(async () => {
  * 'isolation' → has a list/aggregate isolation test below
  * other       → explicit justification for why no test is required
  * ────────────────────────────────────────────────────────────────────────── */
-const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
+const BASE_COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // S14 wave 1 — receiver languages + AI assistant (flag-gated).
   'receiverLangs.status': 'isolation',
   'receiverLangs.localNames': 'attack',
@@ -412,17 +420,32 @@ const COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   'inventory.period': "attack — inventory-rls.attack.test.ts: B asking for the period of A's closed count → notFound; inventory-router.test.ts: A's purchases exclude B's ₪99,999 invoice on the same day; B's period is noCounts",
 };
 
+// Never a plain spread: mergeCoverage throws if a fragment re-declares (and so could downgrade) a base key.
+const COVERAGE = mergeCoverage(BASE_COVERAGE, loadFragments());
+
 function listProcedurePaths(): string[] {
   const def = (appRouter as { _def: { procedures?: Record<string, unknown> } })._def;
   if (!def.procedures) throw new Error('appRouter._def.procedures missing — tRPC internals changed');
   return Object.keys(def.procedures).sort();
 }
 
+/** Base entries at the W2-01 split. The base may grow (human PR); it may never shrink. */
+const BASE_COVERAGE_FLOOR = 216;
+
 describe('coverage completeness', () => {
   it('every registered procedure is declared in COVERAGE', () => {
     const registered = listProcedurePaths();
     const declared = Object.keys(COVERAGE).sort();
-    expect(registered).toEqual(declared);
+    const { missing, stale } = diffCoverage(registered, declared);
+    expect(
+      registered,
+      `COVERAGE out of sync — MISSING (registered, undeclared): ${JSON.stringify(missing)}; ` +
+        `STALE (declared, not registered): ${JSON.stringify(stale)}. Declare new procedures in coverage/<package-id>.ts.`,
+    ).toEqual(declared);
+  });
+
+  it('BASE_COVERAGE never shrinks (ratchet)', () => {
+    expect(Object.keys(BASE_COVERAGE).length).toBeGreaterThanOrEqual(BASE_COVERAGE_FLOOR);
   });
 });
 
@@ -2201,6 +2224,9 @@ describe('recovery + monthly report (A → B)', () => {
     for (const t of [A, B]) {
       await db.update(restaurants).set({ settings: { features: { all: true } } as never }).where(eq(restaurants.id, t.restaurantId));
       await db.update(discrepancies).set({ resolutionStatus: 'accepted' }).where(eq(discrepancies.id, t.discrepancyId));
+      // W2-10a: a read no longer creates claims (they are made at decision
+      // time). Materialise the accepted claim here, as the decision would.
+      await syncClaims(db, t.restaurantId);
     }
     aClaimId = (await callerFor(A).recovery.list())[0]!.id;
     bClaimId = (await callerFor(B).recovery.list())[0]!.id;

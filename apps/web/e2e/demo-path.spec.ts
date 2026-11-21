@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Browser, type BrowserContext, type Locator, type Page, type TestInfo } from '@playwright/test';
 import postgres from 'postgres';
+import { promoVideoFor } from '../lib/heroMedia';
 import { he as accountingHe } from '../lib/i18n/messages/accounting/he';
 import { en as accountingEn } from '../lib/i18n/messages/accounting/en';
 import { en as approvalsEn } from '../lib/i18n/messages/approvals/en';
@@ -411,8 +412,15 @@ test('A · landing + 60-second promo (logged out)', async ({ page }, info) => {
     await checkScreen(page, errors, L, 'A2-lead-form');
   });
 
-  await test.step('promo dialog opens, has the film, closes on Esc', async () => {
+  await test.step('promo dialog opens, has the film, closes on Esc (or: no promo while the films are off)', async () => {
     await page.evaluate(() => window.scrollTo(0, 0));
+    if (promoVideoFor(L) === null) {
+      // Conductor M1/R1: the promo films still carry the old demo figures, so the
+      // button is gone until S10's re-render; the hero offers /showcase instead.
+      await expect(page.getByRole('button', { name: t.hero.ctaWatch })).toHaveCount(0);
+      await expect(page.locator('main a[href^="/showcase"]').first()).toBeVisible();
+      return;
+    }
     await page.getByRole('button', { name: t.hero.ctaWatch }).click();
     const dialog = page.getByRole('dialog', { name: t.hero.watchTitle });
     await expect(dialog).toBeVisible();

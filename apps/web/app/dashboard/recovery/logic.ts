@@ -12,16 +12,16 @@ export type RecoveryStatus =
   | 'disputed'
   | 'written_off';
 
-/** Mirrors packages/api/src/recovery/lifecycle.ts (the server re-validates every move). */
-export const NEXT: Record<RecoveryStatus, RecoveryStatus[]> = {
-  claimed: ['letter_sent', 'acknowledged', 'disputed', 'written_off'],
-  letter_sent: ['acknowledged', 'disputed', 'written_off'],
-  acknowledged: ['disputed', 'written_off'],
-  credited: ['recovered', 'disputed'],
-  recovered: [],
-  disputed: ['letter_sent', 'acknowledged', 'written_off'],
-  written_off: ['claimed'],
-};
+/**
+ * The allowed moves come from the SERVER (`recovery.list` → `next[]`, from
+ * packages/api lifecycle.ts): this screen never mirrors the transition table.
+ */
+export interface NextEdge {
+  to: RecoveryStatus;
+  requiresReason: boolean;
+  terminal: boolean;
+  undoable: boolean;
+}
 
 /**
  * Ask recovery.list for EVERY claim (packages/api MAX_CLAIMS) — screens that sum
@@ -54,17 +54,19 @@ export function nextStep(status: RecoveryStatus): NextStep {
   }
 }
 
-/** The moves left for the ⋯ menu (everything allowed except the primary step). */
-export function menuMoves(status: RecoveryStatus): RecoveryStatus[] {
+const tos = (next: ReadonlyArray<NextEdge | RecoveryStatus>): RecoveryStatus[] => next.map((e) => (typeof e === 'string' ? e : e.to));
+
+/** The moves left for the ⋯ menu: the server's allowed moves except the primary step. */
+export function menuMoves(status: RecoveryStatus, next: ReadonlyArray<NextEdge | RecoveryStatus>): RecoveryStatus[] {
   const primary = nextStep(status);
-  return NEXT[status].filter((s) => !(primary?.kind === 'move' && primary.to === s));
+  return tos(next).filter((s) => !(primary?.kind === 'move' && primary.to === s));
 }
 
 /** Moves valid for EVERY selected claim (one batch call can then never half-fail on the lifecycle). */
-export function batchMoves(statuses: ReadonlyArray<RecoveryStatus>): RecoveryStatus[] {
-  if (statuses.length === 0) return [];
-  const [first, ...rest] = statuses;
-  return NEXT[first!].filter((to) => rest.every((s) => NEXT[s].includes(to)));
+export function batchMoves(nexts: ReadonlyArray<ReadonlyArray<NextEdge | RecoveryStatus>>): RecoveryStatus[] {
+  if (nexts.length === 0) return [];
+  const [first, ...rest] = nexts.map(tos);
+  return first!.filter((to) => rest.every((n) => n.includes(to)));
 }
 
 /**
@@ -177,11 +179,42 @@ export function countdownOf(
 }
 
 /**
- * The two T2 queues of the banner: letters never sent, and sent letters past the
- * answer window. "Late" is the SAME rule as the claims page's sent list and its
- * reminder: a supplier's letter is late when its LATEST send date is more than
- * ANSWER_DAYS ago, and then all its `letter_sent` claims wait (an acknowledged
- * claim is answered, so it is not "waiting").
+ * AU-03 · the browser mirror of packages/api `isAwaitingChase`
+ * (recovery/overdue.ts) — SAME signature and rule; this module runs in the
+ * browser and cannot import the server package, so a parity test
+ * (__tests__/logic.test.ts) runs every OVERDUE_BOUNDARY_CASES case and the
+ * status / option / outstanding / type cases through both and requires them
+ * to agree. A claim is awaiting a chase when its status is claimed,
+ * letter_sent or acknowledged (acknowledged only with `chaseAcknowledged`,
+ * default on), something is outstanding, its type is never one the owner does
+ * not ask back, and MORE than ANSWER_DAYS whole Israel days passed since the
+ * letter (or the claim). Membership is per claim — never by a supplier's
+ * latest letter (a fresh letter must not hide older waiting claims).
+ */
+export const NEVER_CLAIMABLE_TYPES_WEB = ['PRICE_LOWER', 'UNORDERED_ARRIVAL', 'MISSING_ON_INVOICE'] as const;
+export interface ChaseClaimWeb {
+  status: string;
+  outstandingAgorot: number;
+  letterSentAt: string | null;
+  claimedAt: string;
+  discrepancyType?: string | null;
+}
+export function isAwaitingChaseWeb(c: ChaseClaimWeb, nowIso: string, opts: { chaseAcknowledged?: boolean } = {}): boolean {
+  const chaseAck = opts.chaseAcknowledged ?? true;
+  if (!(AWAITING as readonly string[]).includes(c.status)) return false;
+  if (c.status === 'acknowledged' && !chaseAck) return false;
+  if (!(c.outstandingAgorot > 0)) return false;
+  if (c.discrepancyType && (NEVER_CLAIMABLE_TYPES_WEB as readonly string[]).includes(c.discrepancyType)) return false;
+  return israelDay(nowIso) - israelDay(c.letterSentAt ?? c.claimedAt) > ANSWER_DAYS;
+}
+
+/**
+ * The two T2 queues of the banner (and the home rows): letters never sent, and
+ * sent letters with no reply past the answer window. "Waiting" is the 08:30
+ * digest's rule (AU-03, one predicate, per claim) and equals the digest's
+ * "אין תשובה" section to the agora. An acknowledged claim did answer: it is not
+ * "waiting" here (the digest lists it under its own heading, AD5) unless a
+ * caller passes `chaseAcknowledged: true`.
  */
 export function followUps(
   claims: ReadonlyArray<{
@@ -190,30 +223,21 @@ export function followUps(
     letterSentAt: string | null;
     claimedAt: string;
     supplierName?: string | null;
+    discrepancyType?: string | null;
   }>,
   nowIso: string,
+  opts: { chaseAcknowledged?: boolean } = {},
 ): { unsent: { count: number; agorot: number }; waiting: { count: number; agorot: number } } {
   const unsent = { count: 0, agorot: 0 };
   const waiting = { count: 0, agorot: 0 };
-  const sent = new Map<string, { latest: string; count: number; agorot: number }>();
   for (const c of claims) {
     if (c.outstandingAgorot <= 0) continue;
     if (c.status === 'claimed') {
       unsent.count += 1;
       unsent.agorot += c.outstandingAgorot;
-    } else if (c.status === 'letter_sent' && c.letterSentAt) {
-      const key = (c.supplierName ?? '').trim() || '—';
-      const g = sent.get(key) ?? { latest: c.letterSentAt, count: 0, agorot: 0 };
-      g.count += 1;
-      g.agorot += c.outstandingAgorot;
-      if (c.letterSentAt > g.latest) g.latest = c.letterSentAt;
-      sent.set(key, g);
-    }
-  }
-  for (const g of sent.values()) {
-    if (israelDay(g.latest) + ANSWER_DAYS - israelDay(nowIso) < 0) {
-      waiting.count += g.count;
-      waiting.agorot += g.agorot;
+    } else if (isAwaitingChaseWeb(c, nowIso, { chaseAcknowledged: opts.chaseAcknowledged ?? false })) {
+      waiting.count += 1;
+      waiting.agorot += c.outstandingAgorot;
     }
   }
   return { unsent, waiting };
@@ -231,16 +255,75 @@ export function confirmAgorot(
 }
 
 /** Claims grouped by supplier (phone cards), largest outstanding first. */
-export function bySupplier<T extends { supplierId: string | null; supplierName: string | null; outstandingAgorot: number }>(
-  claims: ReadonlyArray<T>,
-): Array<{ key: string; claims: T[]; outstandingAgorot: number }> {
-  const m = new Map<string, { key: string; claims: T[]; outstandingAgorot: number }>();
+/**
+ * Claims grouped per supplier for the desk, RANKED by what waiting costs:
+ * Σ(owed agorot × days overdue) first (the server's `daysOverdue`, from the
+ * shared overdue constant — never a day count of this screen), then owed ₪.
+ * A supplier owing ₪0 (fully credited) never leads the open list.
+ */
+export function bySupplier<
+  T extends { supplierId: string | null; supplierName: string | null; outstandingAgorot: number; daysOverdue?: number },
+>(claims: ReadonlyArray<T>): Array<{ key: string; claims: T[]; outstandingAgorot: number; urgency: number }> {
+  const m = new Map<string, { key: string; claims: T[]; outstandingAgorot: number; urgency: number }>();
   for (const c of claims) {
     const key = c.supplierId ?? c.supplierName ?? '—';
-    const g = m.get(key) ?? { key, claims: [], outstandingAgorot: 0 };
+    const g = m.get(key) ?? { key, claims: [], outstandingAgorot: 0, urgency: 0 };
     g.claims.push(c);
     g.outstandingAgorot += c.outstandingAgorot;
+    g.urgency += c.outstandingAgorot * Math.max(0, c.daysOverdue ?? 0);
     m.set(key, g);
   }
-  return [...m.values()].sort((a, b) => b.outstandingAgorot - a.outstandingAgorot || a.key.localeCompare(b.key));
+  return [...m.values()].sort(
+    (a, b) =>
+      Number(b.outstandingAgorot > 0) - Number(a.outstandingAgorot > 0) ||
+      b.urgency - a.urgency ||
+      b.outstandingAgorot - a.outstandingAgorot ||
+      a.key.localeCompare(b.key),
+  );
+}
+
+/**
+ * DISPLAY-ONLY preview of the server's incl. → excl. VAT conversion
+ * (packages/api recovery/service.ts `exclVatAgorot`: integer agorot, half-up,
+ * the supplier's rate in basis points), so the credit form can show ✓ at 0
+ * before submit. The server converts again and is the only one that books.
+ */
+export function previewExclAgorot(printedAgorot: number, vat: 'incl' | 'excl', rateBp: number): number {
+  if (vat === 'excl') return printedAgorot;
+  const den = 10_000 + rateBp;
+  return Math.floor((2 * printedAgorot * 10_000 + den) / (2 * den));
+}
+
+/** The desk's period filter (acceptance 11). TODO(W2-09b): swap for `resolveWindow` once it lands. */
+export type Period = 'all' | 'month' | 'last' | 'd90';
+export const PERIODS: readonly Period[] = ['all', 'month', 'last', 'd90'];
+
+/**
+ * The window of a period in Israel calendar days, as [fromDay, toDay) day
+ * numbers (days since the epoch, like israelDay); null = no filter.
+ * month = this calendar month to today · last = the previous calendar month ·
+ * d90 = the last 90 days including today.
+ */
+export function periodWindow(p: Period, nowIso: string): { from: number; to: number } | null {
+  if (p === 'all') return null;
+  const today = israelDay(nowIso);
+  if (p === 'd90') return { from: today - 89, to: today + 1 };
+  const d = new Date(today * 86_400_000);
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  const startOf = (yy: number, mm: number) => Date.UTC(yy, mm, 1) / 86_400_000;
+  return p === 'month' ? { from: startOf(y, m), to: today + 1 } : { from: startOf(y, m - 1), to: startOf(y, m) };
+}
+
+/** A claim is in the period when it was claimed, credited or recovered inside it. */
+export function inPeriod(
+  c: { claimedAt: string; creditedAt: string | null; recoveredAt: string | null },
+  w: { from: number; to: number } | null,
+): boolean {
+  if (!w) return true;
+  return [c.claimedAt, c.creditedAt, c.recoveredAt].some((iso) => {
+    if (!iso) return false;
+    const day = israelDay(iso);
+    return day >= w.from && day < w.to;
+  });
 }
