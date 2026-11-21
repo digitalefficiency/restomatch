@@ -309,6 +309,35 @@ describe('DS3 · density variables express SPEC §7 (the switch itself is DS3-06
     // The floor comes after the compact block, so it wins at equal specificity.
     expect(css.indexOf("@media (pointer: coarse) {\n  [data-density='compact'] {")).toBeGreaterThan(css.indexOf("[data-density='compact'] {\n  --fs-cell"));
   });
+
+  it('density is fixed on a touch pointer as a CSS fact: every variable compact sets is undone there', () => {
+    // Top-level rules (a rule inside @media is indented), v1 and v2 blocks alike.
+    const top = (sel: string) => {
+      const vars = new Map<string, string>();
+      for (const m of css.matchAll(new RegExp(`(?:^|\\n)${sel.replace(/[[\]]/g, '\\$&')} \\{([^}]*)\\}`, 'g'))) {
+        for (const d of m[1]!.matchAll(/(--[\w-]+): ([^;]+);/g)) vars.set(d[1]!, d[2]!);
+      }
+      return vars;
+    };
+    const compact = top("[data-density='compact']");
+    const regular = top("[data-density='default']");
+    const touch = top("[data-density='touch']");
+    // What a coarse pointer sets for compact, or for every density (v1's touch floor).
+    const coarse = new Map<string, string>();
+    for (const m of css.matchAll(/@media \(pointer: coarse\) \{\n {2}([^{\n]+) \{([^}]*)\}/g)) {
+      if (!/\[data-density(='compact')?\]/.test(m[1]!)) continue;
+      for (const d of m[2]!.matchAll(/(--[\w-]+): ([^;]+);/g)) coarse.set(d[1]!, d[2]!);
+    }
+    expect(compact.size).toBeGreaterThan(25);
+    expect([...compact.keys()].filter((v) => !coarse.has(v)), 'compact variables a coarse pointer leaves compact').toEqual([]);
+    // Each falls back to the regular value; v1's row and control heights take the touch floor (DS2).
+    for (const [v, value] of coarse) {
+      if (!compact.has(v)) continue;
+      expect([regular.get(v), touch.get(v)], v).toContain(value);
+    }
+    expect(coarse.get('--cell-px')).toBe('16px');
+    expect(coarse.get('--cell-inline')).toBe('16px');
+  });
 });
 
 describe('DS3 · motion is SPEC §8 already (confirmed, not duplicated)', () => {

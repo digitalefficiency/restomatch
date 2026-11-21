@@ -133,6 +133,7 @@
   :root, [data-density] {
     --row-h: 56px;
     --control-h: 48px;
+    --cell-inline: 16px;
   }
 }
 /* Field mode (lens-mobile-field §3.6): bigger floor, stronger borders, 3 px focus. */
