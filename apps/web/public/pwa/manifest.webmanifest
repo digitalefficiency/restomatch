@@ -1,21 +1,33 @@
 {
   "id": "/dashboard/receiving",
-  "name": "RestoMatch — קבלת סחורה",
-  "short_name": "קבלת סחורה",
-  "description": "Receiving app: photograph supplier invoices, even offline.",
+  "name": "RestoMatch",
+  "short_name": "RestoMatch",
+  "description": "RestoMatch: receiving, counts, orders and approvals on the phone, even offline.",
   "lang": "he",
   "dir": "rtl",
-  "start_url": "/dashboard/receiving?source=pwa",
-  "scope": "/dashboard/receiving",
+  "start_url": "/dashboard?source=pwa",
+  "scope": "/dashboard/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#F6F8F7",
   "theme_color": "#F6F8F7",
   "categories": ["business", "productivity"],
+  "shortcuts": [
+    { "name": "קבלת משלוח", "short_name": "קבלה", "url": "/dashboard/receiving?source=pwa", "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192" }] },
+    { "name": "ספירה", "short_name": "ספירה", "url": "/dashboard/inventory/count?source=pwa", "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192" }] },
+    { "name": "הזמנה חדשה", "short_name": "הזמנה", "url": "/dashboard/orders/new?source=pwa", "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192" }] },
+    { "name": "אישורים", "short_name": "אישורים", "url": "/dashboard/approvals?source=pwa", "icons": [{ "src": "/pwa/icon-192.png", "sizes": "192x192" }] }
+  ],
   "share_target": {
-    "action": "/dashboard/receiving/share",
-    "method": "GET",
-    "params": { "title": "title", "text": "text", "url": "url" }
+    "action": "/dashboard/share/receive",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [{ "name": "files", "accept": ["image/*", "application/pdf"] }]
+    }
   },
   "icons": [
     { "src": "/pwa/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },

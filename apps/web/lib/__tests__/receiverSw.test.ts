@@ -94,8 +94,11 @@ describe('receiver service worker', () => {
       '/pwa/icon-512.png',
       '/pwa/icon-maskable-512.png',
     ]);
-    // W2-05: exactly one write, inside the /_next/static handler; the snapshot is never written here.
-    expect(src.match(/\.put\(/g)?.length).toBe(1);
+    // W2-05: one write for the network, inside the /_next/static handler; the snapshot is never written here.
+    // W3-03b: the only other writes park a share (the OS share sheet's POST) in SHARE_CACHE.
+    const shareFn = /async function parkShare\(req\) \{([\s\S]*?)\n\}/.exec(src)![1]!;
+    expect(shareFn).toMatch(/caches\.open\(SHARE_CACHE\)/);
+    expect(src.replace(shareFn, '').match(/\.put\(/g)?.length).toBe(1);
     const staticFn = /async function staticAsset\(req\) \{([\s\S]*?)\n\}/.exec(src)![1]!;
     expect(staticFn).toMatch(/\.put\(/);
     expect(staticFn).toMatch(/caches\.open\(STATIC_CACHE\)/);
@@ -159,18 +162,19 @@ describe('receiver service worker', () => {
     expect([...w.caches.stores.keys()].sort()).toEqual(['other-app', 'rm-receiver-snapshot-v1', 'rm-receiver-static-v1', 'rm-receiver-v2']);
   });
 
-  it('manifest scope + start_url stay inside the receiver flow', () => {
+  it('manifest scope + start_url cover the dashboard (W3-03b app-wide)', () => {
     const m = JSON.parse(readFileSync(join(__dirname, '../../public/pwa/manifest.webmanifest'), 'utf8')) as {
       scope: string;
       start_url: string;
       icons: Array<{ src: string }>;
       share_target?: { action: string; method: string };
     };
-    expect(m.scope).toBe('/dashboard/receiving');
-    expect(m.start_url.startsWith(m.scope)).toBe(true);
+    expect(m.scope).toBe('/dashboard/');
+    expect(m.start_url.startsWith('/dashboard')).toBe(true);
     expect(m.icons.every((i) => i.src.startsWith('/pwa/'))).toBe(true);
-    // orderCapture share target: inside the scope, GET only (no body to an authed route).
-    expect(m.share_target?.action.startsWith(`${m.scope}/`)).toBe(true);
-    expect(m.share_target?.method).toBe('GET');
+    // W3-03b share target: inside the scope; the POST is answered by the worker on the device
+    // (or by a redirect-only route that stores nothing), never by an authed write.
+    expect(m.share_target?.action.startsWith(m.scope)).toBe(true);
+    expect(m.share_target?.method).toBe('POST');
   });
 });
