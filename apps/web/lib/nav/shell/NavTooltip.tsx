@@ -74,7 +74,9 @@ export function NavTooltip({ mode }: { mode: NavMode }) {
   };
   const read = (el: HTMLElement): Tip | null => {
     const title = el.dataset.tip;
-    if (!title) return null;
+    // A trigger whose own popover or flyout is open says nothing: the open list or menu is the answer, and a
+    // tip would cover it (the account menu's last row, a flyout's title).
+    if (!title || el.getAttribute('aria-expanded') === 'true') return null;
     return { el, title, kbd: el.dataset.tipKbd || undefined, text: el.dataset.tipText || undefined };
   };
 
@@ -128,6 +130,8 @@ export function NavTooltip({ mode }: { mode: NavMode }) {
       }
     };
     const onDown = () => {
+      // A press ends any wait too: a tip timed from the hover must not appear over what the press opened.
+      clear();
       if (tip && !tip.note) hide();
     };
     const onNote = (e: Event) => {

@@ -55,10 +55,13 @@ async function axe(page: Page): Promise<string[]> {
   });
 }
 
-/** Shell chrome is still there (header with the restaurant + the nav). */
+/**
+ * Shell chrome is still there: the top bar, and the restaurant in the side menu's head. (DS3-02: the menu is
+ * a top-level <aside>, no longer inside the page <header>; the assertion is the same, read where it now is.)
+ */
 async function expectShell(page: Page) {
   await expect(page.locator('header').first()).toBeVisible();
-  await expect(page.locator('header').first()).toContainText(DEMO_RESTAURANT_NAME);
+  await expect(page.getByTestId('sidebar')).toContainText(DEMO_RESTAURANT_NAME);
 }
 
 /* ───────────────────────── fixtures: a second branch, a stranger branch ───────────────────────── */
@@ -301,7 +304,7 @@ test.describe('branch switch keeps the place (ia-nav-08, exec-desktop-23)', () =
     await expect(page.getByTestId('forbidden-page')).toContainText('אין לכם גישה לסניף הזה');
     await page.goto('/dashboard');
     await expect(page.getByTestId('branch-switcher')).not.toContainText(STRANGER_BRANCH);
-    await expect(page.locator('header').first()).toContainText(DEMO_RESTAURANT_NAME);
+    await expect(page.getByTestId('sidebar')).toContainText(DEMO_RESTAURANT_NAME);
     // Open redirect: `to` never leaves the app.
     const evil = await page.request.get(`/dashboard/go?r=${mainId}&to=${encodeURIComponent('//evil.example/x')}`, { maxRedirects: 0 });
     expect(new URL(evil.headers()['location']!, 'http://x').host).toBe(new URL(page.url()).host);

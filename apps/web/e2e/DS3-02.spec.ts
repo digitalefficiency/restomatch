@@ -181,7 +181,12 @@ test('§14.3–4 Ctrl+B on a Hebrew layout: icons never move sideways; the cooki
   await page.addInitScript(() => {
     new MutationObserver(() => {
       const a = document.querySelector('[data-testid="sidebar"]');
-      if (a) (window as unknown as { reportWidth: (w: number) => void }).reportWidth(Math.round(a.getBoundingClientRect().width));
+      // Count only once the shell's own styles apply: `next dev` injects CSS by script, so its first frame is
+      // unstyled (a production build links the CSS in <head> and every frame counts). What this guards is a
+      // width that flips after hydration, which would show here either way.
+      if (a && getComputedStyle(a).position === 'fixed') {
+        (window as unknown as { reportWidth: (w: number) => void }).reportWidth(Math.round(a.getBoundingClientRect().width));
+      }
     }).observe(document, { childList: true, subtree: true });
   });
   await page.reload();

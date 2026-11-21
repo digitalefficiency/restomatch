@@ -33,7 +33,12 @@ test('dashboard nav links: no console errors across client navigations', async (
     '/dashboard/receiving',
     '/dashboard',
   ]) {
-    const link = page.locator(`header a[href="${path}"]`).first();
+    // DS3-02: the menu is the side <aside>, no longer inside the page <header>; a link in a folded group
+    // is reached by opening its group first (the fit rule may fold a group at 1280×800).
+    const link = page.locator(`aside a[href="${path}"]`).first();
+    if (!(await link.isVisible())) {
+      await link.locator('xpath=ancestor::*[@role="group"][1]').locator('button[data-nav-group]').first().click();
+    }
     await link.click();
     await page.waitForURL((u) => u.pathname === path);
     await page.waitForLoadState('networkidle').catch(() => {});

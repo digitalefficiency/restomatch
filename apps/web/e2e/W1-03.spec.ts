@@ -317,7 +317,8 @@ test('admin layout: skip link, banner, labelled nav, main', async ({ browser, ba
 test('receiver: no supplier ledger in the nav, and the URL is refused (owner decision 2026-10-25)', async ({ browser, baseURL }) => {
   for (const device of [PHONE, DESK]) {
     const page = await open(browser, baseURL!, 'receiver', 'he', device);
-    await expect(page.locator('header a[href="/dashboard/suppliers/ledger"]')).toHaveCount(0);
+    // DS3-02: the menu is a top-level <aside>, outside the page <header>; check both chrome parts.
+    await expect(page.locator('header a[href="/dashboard/suppliers/ledger"], aside a[href="/dashboard/suppliers/ledger"]')).toHaveCount(0);
     if (device === PHONE) {
       await page.getByTestId('bottom-bar').locator('button[aria-controls="dashboard-drawer"]').click();
       await expect(page.locator('#dashboard-drawer a[href="/dashboard/suppliers/ledger"]')).toHaveCount(0);

@@ -85,7 +85,8 @@ export function BottomBar({ viewer }: { viewer: NavViewer }) {
   }, [hidden]);
 
   const slot = 'flex flex-1 flex-col items-center justify-center gap-1 px-0.5 text-xs leading-4';
-  const pill = 'relative inline-flex h-7 w-14 items-center justify-center rounded-pill transition-colors duration-micro';
+  // 56 × 32, as the bar has been since W1-03 (and as its spec pins).
+  const pill = 'relative inline-flex h-8 w-14 items-center justify-center rounded-pill transition-colors duration-micro';
 
   return (
     <nav

@@ -136,7 +136,8 @@ export async function assertQaTenant(page: Page, expectedId?: string): Promise<s
   const res = await page.request.get('/api/auth/session');
   const session = (await res.json().catch(() => null)) as { user?: { restaurantId?: string | null } } | null;
   const id = session?.user?.restaurantId ?? '';
-  const shell = ((await page.locator('header').first().textContent()) ?? '').replace(/[\u200e\u200f]/g, '');
+  // The shell's chrome: the side menu's head (desktop, a top-level <aside> since DS3-02) and the top bar.
+  const shell = (await page.locator('[data-testid="sidebar"], header').allTextContents()).join(' ').replace(/[\u200e\u200f]/g, '');
   if (!shell.includes(QA_TENANT_NAME)) {
     throw new Error(`[pilot] STOP: the signed-in tenant is not "${QA_TENANT_NAME}" — refusing to continue`);
   }
