@@ -782,6 +782,16 @@ function PriceCheck({
                   ) : (
                     money(r.price)
                   )}
+                  {r.basis ? (
+                    <span className="block text-xs font-normal text-subtle" data-testid="unit-basis">
+                      {r.basis.change === 'changed'
+                        ? t('import.check.basisChanged', {
+                            from: basisLabel(r.basis.from),
+                            to: basisLabel(r.basis.to),
+                          })
+                        : t('import.check.basisKept', { unit: basisLabel(r.basis.from) })}
+                    </span>
+                  ) : null}
                 </td>
                 <td className="hidden whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-muted sm:table-cell">
                   {money(r.currentPrice)}
@@ -1125,4 +1135,11 @@ function ReviewRow({
       )}
     </div>
   );
+}
+
+/** "ארגז ×12" / "ק״ג" — the unit and pack a row is priced in (W3-10 round 4). */
+function basisLabel(b: { unit: string | null; packSize: string | null }): string {
+  const pack = b.packSize == null ? null : Number(b.packSize);
+  const unit = b.unit ?? '—';
+  return pack != null && pack !== 1 ? `${unit} ×${pack}` : unit;
 }

@@ -32,8 +32,9 @@ import {
   type CatalogImportMapping,
   type ParsedTable,
 } from '../catalog/parse';
-import { commitCatalogRows } from '../catalog/commit';
+import { commitCatalogRows, lockSupplierCatalog, storedBasis } from '../catalog/commit';
 import { revertCatalogImport } from '../catalog/revert';
+import { expireStaleImports, importActiveSql, otherLiveImport } from '../catalog/importLifecycle';
 import { catalogUnitPrice, cheapestComparable } from '../lib/unitPrice';
 
 /**
@@ -138,14 +139,17 @@ async function currentPrices(db: Database, restaurantId: string, supplierId: str
       supplierSku: supplierCatalogItems.supplierSku,
       supplierNameRaw: supplierCatalogItems.supplierNameRaw,
       listPrice: supplierCatalogItems.listPrice,
+      unit: supplierCatalogItems.unit,
+      packSize: supplierCatalogItems.packSize,
     })
     .from(supplierCatalogItems)
     .where(and(eq(supplierCatalogItems.restaurantId, restaurantId), eq(supplierCatalogItems.supplierId, supplierId)))
     .orderBy(asc(supplierCatalogItems.createdAt), asc(supplierCatalogItems.id));
-  const bySku = new Map<string, number | null>();
-  const byName = new Map<string, number | null>();
+  type Current = { price: number | null; unit: string | null; packSize: string | null };
+  const bySku = new Map<string, Current>();
+  const byName = new Map<string, Current>();
   for (const it of items) {
-    const v = it.listPrice == null ? null : Number(it.listPrice);
+    const v: Current = { price: it.listPrice == null ? null : Number(it.listPrice), unit: it.unit, packSize: it.packSize };
     if (it.supplierSku) {
       if (!bySku.has(it.supplierSku)) bySku.set(it.supplierSku, v);
     } else {
@@ -153,8 +157,15 @@ async function currentPrices(db: Database, restaurantId: string, supplierId: str
       if (!byName.has(key)) byName.set(key, v);
     }
   }
-  return (sku: string | null, name: string): number | null =>
+  /** The row the commit will write (null: the commit creates a new row). */
+  return (sku: string | null, name: string): Current | null =>
     (sku ? bySku.get(sku) : byName.get(normalizeLinkName(name))) ?? null;
+}
+
+/** Two stored pack sizes (numeric(12,3) strings, or null) are the same. */
+function samePackStr(a: string | null, b: string | null): boolean {
+  if (a == null || b == null) return a == null && b == null;
+  return Math.round(Number(a) * 1000) === Math.round(Number(b) * 1000);
 }
 
 const embedder = new MockEmbeddingProvider(1536);
@@ -344,8 +355,18 @@ export const catalogRouter = router({
       const vatBasis = input.vatBasis ?? vatBasisDetected ?? 'ex';
       const analysis = analyzeCatalogRows(table, { ...mapping, vatBasis, vatRate });
       const current = await currentPrices(ctx.db, restaurantId, input.supplierId);
+      const columns = { unit: !!mapping.unit, packSize: !!mapping.packSize };
       const priced = analysis.rows.map((r) => {
-        const cur = current(r.supplierSku, r.supplierNameRaw);
+        const row = current(r.supplierSku, r.supplierNameRaw);
+        const cur = row?.price ?? null;
+        // The unit and pack the commit will store (one basis, round 4), next to
+        // what the row has today: kept (the file says nothing new) or changed.
+        const basis = row ? storedBasis(row, { unit: r.unit, packSize: r.packSize, listPrice: r.listPrice }, columns) : null;
+        const basisMoved =
+          row != null &&
+          basis != null &&
+          ((basis.unit ?? null) !== (row.unit ?? null) || !samePackStr(basis.packSize, row.packSize));
+        const fileSilent = (!columns.unit || r.unit == null) && (!columns.packSize || r.packSize == null);
         return {
           rowNumber: r.rowNumber,
           supplierNameRaw: r.supplierNameRaw,
@@ -356,6 +377,13 @@ export const catalogRouter = router({
           currentPrice: cur,
           /** A blank price cell on a priced row: the commit keeps that price (and its unit and pack). */
           keepsPrice: r.listPrice == null && cur != null,
+          /** The unit / pack basis the row will have, when it differs from the file or from today. */
+          basis:
+            row && basis && basisMoved
+              ? { change: 'changed' as const, from: { unit: row.unit, packSize: row.packSize }, to: basis }
+              : row && basis && fileSilent && (row.unit != null || row.packSize != null)
+                ? { change: 'kept' as const, from: { unit: row.unit, packSize: row.packSize }, to: basis }
+                : null,
           flag: priceFlag(r.listPrice, cur),
         };
       });
@@ -414,7 +442,7 @@ export const catalogRouter = router({
       if (!input.confirmFlagged) {
         const current = await currentPrices(ctx.db, restaurantId, input.supplierId);
         const flagged = analysis.rows.filter(
-          (r) => priceFlag(r.listPrice, current(r.supplierSku, r.supplierNameRaw)) != null,
+          (r) => priceFlag(r.listPrice, current(r.supplierSku, r.supplierNameRaw)?.price ?? null) != null,
         ).length;
         if (flagged > 0) {
           throw new TRPCError({
@@ -440,6 +468,15 @@ export const catalogRouter = router({
         });
       }
 
+      // One import per supplier at a time (W3-10 round 4). An expired one ends
+      // failed first (it never blocks); the supplier lock makes two commits of
+      // the same supplier wait for each other, so both cannot pass this check.
+      await expireStaleImports(ctx.db, restaurantId, input.supplierId);
+      await lockSupplierCatalog(ctx.db, restaurantId, input.supplierId);
+      if (await otherLiveImport(ctx.db, restaurantId, input.supplierId, null)) {
+        throw new TRPCError({ code: 'CONFLICT', message: 'CATALOG_IMPORT_RUNNING: ייבוא קודם של הספק הזה עדיין רץ' });
+      }
+
       const [imp] = await ctx.db
         .insert(catalogImports)
         .values({
@@ -463,6 +500,7 @@ export const catalogRouter = router({
           importId: imp.id,
           file: input.file,
           mapping: { ...mapping },
+          queuedAt: new Date().toISOString(),
         }).catch((err: unknown) => {
           if (!isQueueUnavailableError(err)) throw err;
           console.warn(`[catalog.import] ${err.message} — committing import=${imp.id} inline`);
@@ -486,7 +524,13 @@ export const catalogRouter = router({
 
       const result = await commitCatalogRows(
         ctx.db,
-        { restaurantId, supplierId: input.supplierId, sourceImportId: imp.id, userId: ctx.session.userId },
+        {
+          restaurantId,
+          supplierId: input.supplierId,
+          sourceImportId: imp.id,
+          userId: ctx.session.userId,
+          columns: { unit: !!input.mapping.unit, packSize: !!input.mapping.packSize },
+        },
         rows,
         embedder,
       );
@@ -578,7 +622,8 @@ export const catalogRouter = router({
               AND a.action = 'catalog.import_reverted' AND a.entity_id = "catalog_imports"."id")
             AND NOT EXISTS (SELECT 1 FROM catalog_imports o WHERE o.restaurant_id = ${rid}
               AND o.supplier_id = "catalog_imports"."supplier_id" AND o.id <> "catalog_imports"."id"
-              AND o.status IN ('pending', 'mapped'))
+              AND o.status IN ('pending', 'mapped')
+              AND ${importActiveSql(rid, sql`o.id`, sql`o.created_at`)})
             AND NOT EXISTS (SELECT 1 FROM audit_log l WHERE l.restaurant_id = ${rid}
               AND l.action IN ('catalog.import_committed', 'catalog.import_chunk_committed')
               AND l.after ->> 'supplierId' = "catalog_imports"."supplier_id"::text

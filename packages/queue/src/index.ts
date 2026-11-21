@@ -225,11 +225,22 @@ export interface CatalogImportQueueJob {
   importId: string;
   file: { filename: string; base64?: string; text?: string };
   mapping: Record<string, string | undefined>;
+  /**
+   * W3-10 round 4: when the import was first queued (ISO). A continuation is
+   * queued with run_at = this, so it stays ahead of jobs queued after it.
+   */
+  queuedAt?: string;
 }
 
-/** Enqueue an 'import-catalog' job (same contract as enqueueOcrInvoice). */
-export async function enqueueCatalogImport(payload: CatalogImportQueueJob): Promise<boolean> {
-  return enqueue(CATALOG_IMPORT_QUEUE, payload);
+/**
+ * Enqueue an 'import-catalog' job (same contract as enqueueOcrInvoice). A
+ * continuation passes `runAt` (the original queuedAt) to keep its place.
+ */
+export async function enqueueCatalogImport(
+  payload: CatalogImportQueueJob,
+  opts: { runAt?: Date } = {},
+): Promise<boolean> {
+  return enqueue(CATALOG_IMPORT_QUEUE, payload, opts.runAt ? { runAt: opts.runAt } : {});
 }
 
 export type { OcrInvoiceJob };

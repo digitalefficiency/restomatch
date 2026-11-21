@@ -412,6 +412,72 @@ async function markStalledCatalogImportsFailed(
   }
 }
 
+/** W3-10 round 4: an import with no job and no activity for this long is orphaned (api LIVE_IMPORT_CUTOFF_MINUTES). */
+export const CATALOG_IMPORT_ORPHAN_MINUTES = 30;
+
+/**
+ * W3-10 round 4 · queue maintenance for price-list imports (it sees job_queue,
+ * which the tenant connection cannot):
+ *  - an import still pending / mapped with no queued or active import-catalog
+ *    job and no activity (created, or a chunk recorded) for
+ *    CATALOG_IMPORT_ORPHAN_MINUTES is orphaned: it ends failed;
+ *  - an import that ended failed with chunks but no summary (its finalize could
+ *    not run) is finalized;
+ * both by queueing one `finalize` job per import (dedupe key), which writes the
+ * partial summary. Returns how many were queued. Logged, never thrown.
+ */
+export async function failOrphanedCatalogImports(sql: Sql, cutoffMinutes = CATALOG_IMPORT_ORPHAN_MINUTES): Promise<number> {
+  try {
+    const rows = await sql<Array<{ id: string; restaurant_id: string; supplier_id: string; filename: string; column_mapping: unknown }>>`
+      WITH cand AS (
+        SELECT i.id, i.restaurant_id, i.supplier_id, i.filename, i.column_mapping, i.status
+          FROM catalog_imports i
+         WHERE NOT EXISTS (SELECT 1 FROM job_queue j
+                            WHERE j.queue = 'import-catalog' AND j.status IN ('queued', 'active')
+                              AND j.payload ->> 'importId' = i.id::text)
+           AND (
+             (i.status IN ('pending', 'mapped')
+              AND greatest(i.created_at, coalesce((SELECT max(a.at) FROM audit_log a
+                    WHERE a.restaurant_id = i.restaurant_id AND a.entity_id = i.id
+                      AND a.action = 'catalog.import_chunk_committed'), i.created_at))
+                  < now() - ${cutoffMinutes} * interval '1 minute')
+             OR
+             (i.status = 'failed'
+              AND EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = i.restaurant_id AND a.entity_id = i.id
+                            AND a.action = 'catalog.import_chunk_committed')
+              AND NOT EXISTS (SELECT 1 FROM audit_log a WHERE a.restaurant_id = i.restaurant_id AND a.entity_id = i.id
+                                AND a.action IN ('catalog.import_committed', 'catalog.import_reverted')))
+           )
+         LIMIT 100
+      ), marked AS (
+        UPDATE catalog_imports c
+           SET status = 'failed', error = coalesce(c.error, 'orphaned: no job and no progress')
+          FROM cand
+         WHERE c.id = cand.id AND c.status IN ('pending', 'mapped')
+      )
+      SELECT id::text, restaurant_id::text, supplier_id::text, filename, column_mapping FROM cand`;
+    for (const r of rows) {
+      await insertJob(
+        sql,
+        'import-catalog',
+        {
+          restaurantId: r.restaurant_id,
+          supplierId: r.supplier_id,
+          importId: r.id,
+          file: { filename: r.filename },
+          mapping: r.column_mapping ?? {},
+          finalize: true,
+        },
+        { restaurantId: r.restaurant_id, maxAttempts: 3, dedupeKey: `import-catalog:finalize:${r.id}` },
+      );
+    }
+    return rows.length;
+  } catch (err) {
+    console.warn(`[queue] orphaned catalog import sweep failed: ${err instanceof Error ? err.message : err}`);
+    return 0;
+  }
+}
+
 export interface QueueCounts {
   waiting: number;
   active: number;

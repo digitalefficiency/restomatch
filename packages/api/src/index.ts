@@ -204,11 +204,13 @@ export {
 export {
   commitCatalogRows,
   recordImportSummary,
+  storedBasis,
   IMPORT_CHUNK_AUDIT_ACTION,
   type CommitArgs,
   type CommitResult,
   type AmbiguousRow,
 } from './catalog/commit';
+export { finalizeFailedImport, LIVE_IMPORT_CUTOFF_MINUTES } from './catalog/importLifecycle';
 // G-08 kill switch: release invoices held for order questions (admin + worker script).
 export { releaseOrderQuestionHolds } from './routers/mapping';
 // G-08: the shared "open question" rules (mapping router, match job, OCR job).

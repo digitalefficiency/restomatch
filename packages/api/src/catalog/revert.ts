@@ -1,5 +1,6 @@
 import { and, auditLog, catalogImports, eq, inArray, sql, supplierCatalogItems, type Database } from '@restomatch/db';
 import { recordAudit } from '../audit';
+import { importActiveSql } from './importLifecycle';
 import {
   IMPORT_CHUNK_AUDIT_ACTION,
   IMPORT_COMMITTED_AUDIT_ACTION,
@@ -138,13 +139,15 @@ export async function revertCatalogImport(
     if (units.some((u) => u.supplierId !== supplierId)) return 'NOT_REVERTABLE' as const;
 
     // Stack semantics: this is no longer the latest import when another import
-    // of the supplier is still on its way (pending / mapped), or committed later
+    // of the supplier is still live (pending / mapped with recent activity — an
+    // expired one never blocks, importLifecycle.ts), or committed later
     // and is not reverted. "Later" is the commit-order stamp each record takes
     // under the supplier lock (lockedAt), never a transaction-start time.
     const later = (await tx.execute(sql`
       select 1 from catalog_imports o
        where o.restaurant_id = ${rid} and o.supplier_id = ${supplierId}::uuid
          and o.id <> ${importId}::uuid and o.status in ('pending', 'mapped')
+         and ${importActiveSql(rid, sql`o.id`, sql`o.created_at`)}
       union all
       select 1 from audit_log l
        where l.restaurant_id = ${rid}

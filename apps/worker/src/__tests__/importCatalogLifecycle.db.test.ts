@@ -12,9 +12,18 @@ import {
   suppliers,
   testDbUrl,
   users,
+  sql,
   type Database,
 } from '@restomatch/db';
-import { MAX_ATTEMPTS, MAX_STALLED, insertJob, queueSql, recoverStalled } from '@restomatch/queue';
+import {
+  MAX_ATTEMPTS,
+  MAX_STALLED,
+  claimAnySerial,
+  failOrphanedCatalogImports,
+  insertJob,
+  queueSql,
+  recoverStalled,
+} from '@restomatch/queue';
 import type { WorkerJob } from '../queue';
 import {
   commitImportInChunks,
@@ -243,5 +252,44 @@ describe('round 3 nit · a resumed import keeps its recorded chunk size', () => 
     await commitImportInChunks(asDb, data, { chunkRows: 4 });
     expect(await chunkIndexes(data.importId)).toEqual([0, 1, 2]);
     expect(await items()).toHaveLength(5);
+  });
+});
+
+describe('round 4 MAJOR 1 · a continuation keeps its place in the queue', () => {
+  it('is queued at the original run_at and claimed before a job queued after it', async () => {
+    const data = { ...(await newImport(five)), queuedAt: new Date(Date.now() - 10 * 60_000).toISOString() };
+    const other = await newImport([['Z1', 'אחר', '1']]);
+    await insertJob(qsql, 'import-catalog', other, { restaurantId, maxAttempts: 3 }); // queued now
+    const out = await processImportCatalog(job(data), { budgetMs: 0, chunkRows: 2 });
+    expect(out).toMatchObject({ continued: 1 });
+    const claimed = await claimAnySerial<CatalogImportJob>(qsql, ['import-catalog'], 'test-runner', 120_000);
+    expect(claimed?.payload.importId).toBe(data.importId);
+    expect(claimed?.runAt.getTime()).toBe(new Date(data.queuedAt).getTime());
+  });
+});
+
+describe('round 4 MAJOR 2 · orphaned imports end failed in maintenance', () => {
+  it('pending with no job and no progress → failed + one finalize job; one with a queued job is left alone', async () => {
+    const orphan = await newImport(five);
+    await commitImportInChunks(asDb, orphan, { chunkRows: 2, budgetMs: 0 }); // chunk 0 live
+    const old = new Date(Date.now() - 2 * 3_600_000);
+    await db.update(catalogImports).set({ createdAt: old }).where(eq(catalogImports.id, orphan.importId));
+    await db.execute(sql`update audit_log set at = ${old.toISOString()}::timestamptz where entity_id = ${orphan.importId}::uuid`);
+    const waiting = await newImport(five);
+    await db.update(catalogImports).set({ createdAt: old }).where(eq(catalogImports.id, waiting.importId));
+    await insertJob(qsql, 'import-catalog', waiting, { restaurantId, maxAttempts: 3 });
+
+    expect(await failOrphanedCatalogImports(qsql)).toBe(1);
+    expect((await importRow(orphan.importId)).status).toBe('failed');
+    expect((await importRow(waiting.importId)).status).toBe('pending');
+    const fin = await qsql<Array<{ payload: CatalogImportJob }>>`
+      SELECT payload FROM job_queue WHERE queue = 'import-catalog' AND payload ->> 'finalize' = 'true'`;
+    expect(fin.map((f) => f.payload.importId)).toEqual([orphan.importId]);
+    // Once: a second sweep queues nothing new.
+    await failOrphanedCatalogImports(qsql);
+    expect((await qsql`SELECT 1 FROM job_queue WHERE queue = 'import-catalog' AND payload ->> 'finalize' = 'true'`).length).toBe(1);
+    await processImportCatalog(job(fin[0]!.payload));
+    const [summary] = await records(orphan.importId, 'catalog.import_committed');
+    expect(summary!.after).toMatchObject({ partial: true, chunked: 1 });
   });
 });

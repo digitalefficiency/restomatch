@@ -49,6 +49,38 @@ export interface CommitArgs {
    * `catalog.import_committed` summary (what AU-13 reads) after the last chunk.
    */
   chunk?: { index: number; count: number; size: number };
+  /**
+   * Which of the unit / pack columns the import maps (round 4: unit and pack
+   * are one basis). Unmapped → the row keeps its existing unit AND pack. Default:
+   * both mapped.
+   */
+  columns?: { unit: boolean; packSize: boolean };
+}
+
+/**
+ * W3-10 round 4 · the unit and pack a row will store — one basis, decided
+ * together:
+ *  - a new row: the file's values;
+ *  - a blank price cell: the existing price basis stays (unit and pack);
+ *  - a priced row: a mapped unit column gives the unit (a blank cell keeps the
+ *    existing unit); a mapped pack column gives the pack (a blank cell is a
+ *    single unit — null); an unmapped pack column keeps the existing pack only
+ *    while the unit stays the same (a new unit with an old pack would be a
+ *    different quantity), else null. Unmapped unit and pack: both kept.
+ * Shared by the commit (what it writes and what the unit / pack fit checks) and
+ * the preview (what it shows as kept / changed).
+ */
+export function storedBasis(
+  existing: { unit: string | null; packSize: string | null } | null,
+  row: { unit: string | null; packSize: number | null; listPrice: number | null },
+  columns: { unit: boolean; packSize: boolean } = { unit: true, packSize: true },
+): { unit: string | null; packSize: string | null } {
+  if (!existing) return { unit: row.unit, packSize: packString(row.packSize) };
+  if (row.listPrice == null) return { unit: existing.unit, packSize: existing.packSize };
+  const unit = columns.unit && row.unit != null ? row.unit : existing.unit;
+  const unitChanged = (unit ?? null) !== (existing.unit ?? null);
+  const packSize = columns.packSize ? packString(row.packSize) : unitChanged ? null : existing.packSize;
+  return { unit, packSize };
 }
 
 /**
@@ -260,6 +292,12 @@ export async function commitCatalogRows(
       .orderBy(asc(supplierCatalogItems.createdAt), asc(supplierCatalogItems.id))
       .limit(1);
 
+    // The unit and pack this row will store: the unit / pack fit judges these,
+    // not the raw file cells (round 4: an unlinked case/12 row with no unit /
+    // pack columns is a case/12, never a per-unit match).
+    const basis = storedBasis(existing ?? null, row, args.columns);
+    const fitRow: CatalogRow = { ...row, unit: basis.unit, packSize: basis.packSize == null ? null : Number(basis.packSize) };
+
     // 2. Resolve the canonical product.
     let productId: string | null = existing?.productId ?? null;
     let createdNewProduct = false;
@@ -297,7 +335,7 @@ export async function commitCatalogRows(
       let productUnit: string | null = null;
       let fitReasons: FitReason[] = [];
       if (top && top.confidence >= REVIEW_FLOOR) {
-        const fit = await unitPackFit(db, restaurantId, supplierId, top.productId, row);
+        const fit = await unitPackFit(db, restaurantId, supplierId, top.productId, fitRow);
         productUnit = fit.productUnit;
         fitReasons = fit.reasons;
       }
@@ -314,7 +352,7 @@ export async function commitCatalogRows(
         pendingReview = {
           supplierNameRaw: row.supplierNameRaw,
           supplierSku: row.supplierSku,
-          unit: row.unit,
+          unit: basis.unit,
           productId: top.productId,
           canonicalName: top.canonicalName,
           productUnit,
@@ -357,14 +395,12 @@ export async function commitCatalogRows(
     let itemId: string;
     if (existing) {
       // What this row would store. A blank / unreadable price cell keeps
-      // everything that defines the existing price — the price, its unit and
-      // its pack (round 2: 12.00/kg never becomes 12.00 per case of 12). A
-      // blank or unmapped unit / pack cell on a priced row keeps the existing
-      // one too (round 3: 120.00 per case of 12 never becomes 125.00 per unit).
+      // everything that defines the existing price (round 2); unit and pack are
+      // one basis (storedBasis, round 4).
       const next: ItemSnapshot = {
         listPrice: blankPrice ? existing.listPrice : String(row.listPrice),
-        unit: blankPrice || row.unit == null ? existing.unit : row.unit,
-        packSize: blankPrice || row.packSize == null ? existing.packSize : packString(row.packSize),
+        unit: basis.unit,
+        packSize: basis.packSize,
         productId,
         // A row an earlier revert turned off comes back when a file lists it
         // again, but only while it is exactly as that revert left it.
@@ -556,7 +592,7 @@ export async function recordImportSummary(
   db: Database,
   args: { restaurantId: string; supplierId: string; importId: string; userId?: string | null; partial?: boolean },
 ): Promise<{ created: number; updated: number; unchanged: number; createdProducts: number; chunks: number }> {
-  const lockedAt = await lockSupplierCatalog(db, args.restaurantId, args.supplierId);
+  const lockTime = await lockSupplierCatalog(db, args.restaurantId, args.supplierId);
   const recs = (
     await db
       .select({ after: auditLog.after })
@@ -573,6 +609,14 @@ export async function recordImportSummary(
     .sort((x, y) => (x.chunk?.index ?? 0) - (y.chunk?.index ?? 0));
   const sum = (k: 'created' | 'updated' | 'unchanged' | 'createdProducts' | 'keptPriceOnBlank') =>
     recs.reduce((n, r) => n + (r[k] ?? 0), 0);
+  // The summary ranks where its chunks went live (round 4): a partial summary
+  // written later at finalize must not rank as the supplier's latest import.
+  const [maxChunk] = (await db.execute(sql`
+    select max((after ->> 'lockedAt')::timestamptz)::text as t from audit_log
+     where restaurant_id = ${args.restaurantId} and entity_id = ${args.importId}::uuid
+       and action = ${IMPORT_CHUNK_AUDIT_ACTION}
+  `)) as unknown as Array<{ t: string | null }>;
+  const lockedAt = maxChunk?.t ?? lockTime;
   const createdHere = new Set(recs.flatMap((r) => r.createdItemIds ?? []));
   const rows = new Map<string, ImportRowChange>();
   for (const r of recs) {

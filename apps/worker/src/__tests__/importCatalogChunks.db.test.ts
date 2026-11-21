@@ -167,7 +167,7 @@ describe('background import · chunks', () => {
     await db.update(catalogImports).set({ status: 'failed' }).where(eq(catalogImports.id, job.importId));
     const r = await owner().catalog.revertImport({ importId: job.importId });
     expect(r.deactivated).toBe(2);
-    // A retry after the revert commits nothing more.
-    expect(await commitImportInChunks(asDb, job, { chunkRows: 2 })).toEqual({ status: 'skipped', reason: 'reverted' });
+    // A retry after the revert commits nothing more (failed is final, round 4).
+    expect(await commitImportInChunks(asDb, job, { chunkRows: 2 })).toEqual({ status: 'skipped', reason: 'failed' });
   });
 });

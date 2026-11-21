@@ -37,11 +37,11 @@ async function newImportRow(status: 'committed' | 'pending' = 'committed') {
     .returning({ id: catalogImports.id });
   return imp!.id;
 }
-async function importRows(rows: Row[], onDb: Database = db) {
+async function importRows(rows: Row[], onDb: Database = db, columns?: { unit: boolean; packSize: boolean }) {
   const id = await newImportRow();
   const res = await commitCatalogRows(
     onDb,
-    { restaurantId: A.restaurantId, supplierId: A.supplierId, sourceImportId: id, userId: A.ownerUserId },
+    { restaurantId: A.restaurantId, supplierId: A.supplierId, sourceImportId: id, userId: A.ownerUserId, columns },
     rows.map(toRow),
     embedder,
   );
@@ -111,9 +111,10 @@ describe('round 3 MAJOR 1 · a commit and a revert never interleave', () => {
 });
 
 describe('round 3 MINOR 5 · a blank unit / pack on a priced row keeps the existing one', () => {
+  // Round 4: this is the "unit and pack columns unmapped" case — both kept together.
   it('120.00 per case of 12 → 125.00 per case of 12, never per unit', async () => {
     await importRows([{ sku: 'M', price: 120, unit: 'ארגז', pack: 12 }]);
-    await importRows([{ sku: 'M', price: 125, unit: null, pack: null }]);
+    await importRows([{ sku: 'M', price: 125, unit: null, pack: null }], db, { unit: false, packSize: false });
     const m = await item('M');
     expect(Number(m.price)).toBe(125);
     expect(m.unit).toBe('ארגז');
