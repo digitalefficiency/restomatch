@@ -556,7 +556,10 @@ describe('approvals.queueSummary (approvals-08, functional-flows-07)', () => {
     // Σ|Δ| = 157.35 but the invoice is ₪150 — the letters claim at most ₪150.
     expect((await managerOf(s).approvals.queueSummary()).claimableIls).toBe(150);
     await managerOf(s).approvals.reject({ discrepancyId: big.id, reason: 'זניח', reasonCode: 'negligible' });
-    expect((await managerOf(s).approvals.queueSummary()).claimableIls).toBe(52.55);
+    // G-14 Q3: the leak ledger's tiers — a waiver (rejected) keeps its share of the invoice cap
+    // (tier 2, before undecided), so the open line gets what is left: 150 − 104.80 = 45.20,
+    // the same "to decide" ₪ the ledger / report / pay run show for this invoice.
+    expect((await managerOf(s).approvals.queueSummary()).claimableIls).toBe(45.2);
   });
 
   it('honours the view filters', async () => {
