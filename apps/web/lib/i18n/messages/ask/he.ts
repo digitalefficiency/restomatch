@@ -55,8 +55,8 @@ export const he = {
   },
   answers: {
     unknown: 'אני עונה כרגע על חמש שאלות נפוצות: למה הדליפה השתנתה, כמה דלף, איזה ספק העלה מחירים, איזה ספק הכי דולף ועל מה לבקש זיכוי. נסו אחת מהן.',
-    leakTotal: 'מתחילת החודש דלפו {leak}, {pct} מההוצאה שנבדקה, ב-{invoices} חשבוניות. {caught} נתפסו לפני תשלום.',
-    leakTotalNoPct: 'מתחילת החודש דלפו {leak} ב-{invoices} חשבוניות. {caught} נתפסו לפני תשלום.',
+    leakTotal: 'מתחילת החודש דלפו {leak}, {pct} מההוצאה שנבדקה, ב-{invoices} חשבוניות.',
+    leakTotalNoPct: 'מתחילת החודש דלפו {leak} ב-{invoices} חשבוניות.',
     leakUp: 'הדליפה עלתה ב-{delta} בימים {curSpan} לעומת {prevSpan}: {leak} מול {prev}.',
     leakDown: 'הדליפה ירדה ב-{delta} בימים {curSpan} לעומת {prevSpan}: {leak} מול {prev}.',
     leakSame: 'הדליפה דומה בימים {curSpan} לעומת {prevSpan}: {leak} מול {prev}.',
