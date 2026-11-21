@@ -356,8 +356,9 @@ export function Sidebar({ viewer, restaurantName, roleLabel, switcher, subline, 
       leaveTimer.current = null;
       if (fly?.group === group) return;
       if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
-      // Crossing another tile on the way to the open list: wait, and switch only if still here.
-      const wait = fly && fly.by === 'hover' && inAim(p) ? AIM_WAIT_MS : HOVER_OPEN_MS;
+      // Crossing another tile on the way to the open list (opened by hover, click or key): wait, and switch only
+      // if still here.
+      const wait = fly && inAim(p) ? AIM_WAIT_MS : HOVER_OPEN_MS;
       hoverTimer.current = window.setTimeout(() => {
         const tile = headerRefs.current.get(group);
         if (tile?.matches(':hover')) openFly(group, 'hover');
@@ -365,18 +366,28 @@ export function Sidebar({ viewer, restaurantName, roleLabel, switcher, subline, 
     },
     onPointerLeaveTile: (e: React.PointerEvent<HTMLButtonElement>) => {
       if (!rail || e.pointerType !== 'mouse') return;
-      lastPoint.current = { x: e.clientX, y: e.clientY };
+      const p = { x: e.clientX, y: e.clientY };
+      // The leave point is the apex of the safe triangle for the next tile the pointer crosses.
+      lastPoint.current = p;
       if (hoverTimer.current !== null && fly?.group !== group) {
         window.clearTimeout(hoverTimer.current);
         hoverTimer.current = null;
       }
-      if (fly?.group === group && fly.by === 'hover') {
+      // A hover-opened list closes once the pointer has left it — also when it leaves across other tiles (each
+      // entry clears the timer, so each exit starts it again). Heading into the triangle (judged from where the
+      // pointer is moving, not from the leave point itself) gives it 400 ms, else 300 (§7.2).
+      if (fly && fly.by === 'hover') {
         if (leaveTimer.current !== null) window.clearTimeout(leaveTimer.current);
-        const p = { x: e.clientX, y: e.clientY };
+        const open = fly.group;
+        const box = flyRefs.current.get(open);
+        const moving = e.movementX !== 0 || e.movementY !== 0;
+        const ahead = { x: p.x + e.movementX, y: p.y + e.movementY };
+        const aimed = Boolean(box) && moving && inSafeTriangle(ahead, p, box!.getBoundingClientRect(), dir);
         leaveTimer.current = window.setTimeout(() => {
-          const box = flyRefs.current.get(group);
-          if (box && !box.matches(':hover') && !box.contains(document.activeElement)) closeFly();
-        }, inAim(p) ? LEAVE_AIM_MS : LEAVE_MS);
+          const list = flyRefs.current.get(open);
+          const tile = headerRefs.current.get(open);
+          if (list && !list.matches(':hover') && !tile?.matches(':hover') && !list.contains(document.activeElement)) closeFly();
+        }, aimed ? LEAVE_AIM_MS : LEAVE_MS);
       }
     },
     onPointerEnterFly: () => {
@@ -494,6 +505,8 @@ export function Sidebar({ viewer, restaurantName, roleLabel, switcher, subline, 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
+      // A modal dialog (the palette, the cheat sheet) takes this Esc for itself.
+      if (document.querySelector('dialog[open]')) return;
       if (fly) {
         closeFly(Boolean(flyRefs.current.get(fly.group)?.contains(document.activeElement)));
         return;

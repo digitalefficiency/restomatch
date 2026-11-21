@@ -113,6 +113,15 @@ function restoreFocus(el: HTMLElement | null) {
   if (el && document.contains(el)) el.focus({ preventScroll: true });
 }
 
+/** The overlay just opened: unless focus is already in the menu, put it on the page's row or the first control. */
+function focusIntoPanel() {
+  const aside = document.querySelector<HTMLElement>('#rm-app aside');
+  if (!aside || aside.contains(document.activeElement)) return;
+  const target =
+    aside.querySelector<HTMLElement>('a[aria-current="page"]') ?? aside.querySelector<HTMLElement>('button, a[href]');
+  target?.focus({ preventScroll: true });
+}
+
 /**
  * The app frame (DS3-02). Owns the side menu's state and publishes it as data
  * attributes on #rm-app, where the stylesheet turns them into widths (so the
@@ -245,7 +254,14 @@ export function ShellFrame({
     // §8 Ctrl/⌘ B guards: the menu's popovers close first.
     closeNavPopovers();
     if (vp === 'mid') {
-      setOverlayOpen((o) => !o);
+      setOverlayOpen((o) => {
+        const next = !o;
+        // §7.1: focus stays in the modal panel. Opened from the page (Ctrl/⌘ B, `[`), focus would fall to <body>
+        // under main's inert: it moves to the page's row (else the panel's first control). Closed, it returns
+        // to the toggle.
+        requestAnimationFrame(() => (next ? focusIntoPanel() : restoreFocus(toggleRef.current)));
+        return next;
+      });
       return;
     }
     applyRail(!railRef.current, vp);

@@ -87,17 +87,20 @@ export function BranchSwitcher({
     const onDown = (e: MouseEvent) => {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
     };
+    // Capture phase, and the key is marked handled: one Esc closes the switcher only, not the 1024–1279
+    // overlay behind it as well (§8: tooltip → flyout → popover → overlay, one at a time).
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !e.defaultPrevented) {
+        e.preventDefault();
         setOpen(false);
         triggerRef.current?.focus();
       }
     };
     document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
+    document.addEventListener('keydown', onKey, true);
     return () => {
       document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('keydown', onKey, true);
     };
   }, [open]);
 

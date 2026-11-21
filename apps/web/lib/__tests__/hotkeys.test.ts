@@ -341,6 +341,26 @@ describe('the palette hook acts on the registry (usePalette → handlePaletteKey
     expect(h.log.rail).toBe(0);
   });
 
+  it('a held Ctrl/⌘K toggles the palette once, not on every repeat (§8: one press, one toggle)', () => {
+    const h = hook();
+    expect(h.press({ code: 'KeyK', ctrlKey: true })).toBe(true);
+    expect(h.ui.open).toBe(true);
+    for (let i = 0; i < 4; i++) h.press({ code: 'KeyK', ctrlKey: true, repeat: true });
+    expect(h.ui.open).toBe(true);
+  });
+
+  it('a G-chord does nothing while a modal dialog is open (the page behind the cheat sheet stays put)', () => {
+    const h = hook();
+    h.page.modal = true;
+    h.press({ code: 'KeyG' }, 100);
+    expect(h.press({ code: 'KeyH' }, 200)).toBe(false);
+    expect(h.log.go).toEqual([]);
+    h.page.modal = false;
+    h.press({ code: 'KeyG' }, 3000);
+    expect(h.press({ code: 'KeyH' }, 3100)).toBe(true);
+    expect(h.log.go).toEqual(['/dashboard']);
+  });
+
   it('the single-key switch reaches the registry, and a flipped switch applies from the next key', () => {
     const h = hook({ singleKeys: false });
     expect(h.press({ code: 'Slash' })).toBe(false);

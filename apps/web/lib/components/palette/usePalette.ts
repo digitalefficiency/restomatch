@@ -51,7 +51,8 @@ export interface PaletteKeyEnv {
  * `preventDefault`ed (a key the app does not act on stays the browser's).
  */
 export function handlePaletteKeydown(e: PaletteKeyEvent, env: PaletteKeyEnv): void {
-  if (e.repeat && e.code !== 'KeyK') return;
+  // A held key never acts again: one press, one toggle (sidebar spec §8 — Ctrl/⌘ K, Ctrl/⌘ B and `[` alike).
+  if (e.repeat) return;
   const opts = env.latest.current;
   const { action, state } = matchKeydown(e, env.chord.current, {
     pathname: opts.pathname,
@@ -71,6 +72,8 @@ export function handlePaletteKeydown(e: PaletteKeyEvent, env: PaletteKeyEnv): vo
       env.setCheatOpen(true);
       return;
     case 'go':
+      // A G-chord never navigates the page behind a modal dialog (the cheat sheet, the sheet, a desk Peek).
+      if (env.modalOpen()) return;
       if (opts.canGo(action.href)) {
         e.preventDefault();
         opts.go(action.href);
