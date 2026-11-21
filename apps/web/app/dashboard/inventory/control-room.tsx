@@ -248,6 +248,85 @@ export function ControlRoomCard() {
           ) : null}
         </section>
       ) : null}
+
+      {/* Category split: the rows add up to the usage above (one row reconciles what lines can't itemise). */}
+      {equation && q.data.categories.length > 0 ? (
+        <section aria-labelledby="cr-cat" className="space-y-2">
+          <h3 id="cr-cat" className="text-sm font-medium text-muted">
+            {t('controlRoom.categories')}
+          </h3>
+          <ul className="space-y-2" data-testid="control-room-categories">
+            {q.data.categories.map((row) => (
+              <li key={String(row.category)} className="space-y-1 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 truncate text-ink">
+                    {row.category == null
+                      ? t('controlRoom.categoryNone')
+                      : row.category === '__other__'
+                        ? t('controlRoom.categoryOther')
+                        : row.category === '__unitemized__'
+                          ? t('controlRoom.categoryUnitemized')
+                          : row.category}
+                  </span>
+                  <span className="shrink-0 tabular-nums text-ink">
+                    <Money agorot={row.usageAgorot} context="line" />
+                    <span className="ms-2 text-muted">{pct(row.shareBp, locale)}</span>
+                  </span>
+                </div>
+                <div className="h-1.5 rounded-full bg-surface-2" aria-hidden="true">
+                  <div
+                    className="h-1.5 rounded-full bg-primary/70"
+                    style={{ inlineSize: `${row.shareBp / 100}%` }}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {/* Top-10 unexplained usage: only against a trustworthy recipes × POS theory. */}
+      {equation ? (
+        <section aria-labelledby="cr-unx" className="space-y-2">
+          <div>
+            <h3 id="cr-unx" className="text-sm font-medium text-muted">
+              {t('controlRoom.unexplained')}
+            </h3>
+            {q.data.hasTheory ? (
+              <p className="text-xs text-subtle">{t('controlRoom.unexplainedHint')}</p>
+            ) : null}
+          </div>
+          {!q.data.hasTheory ? (
+            <p className="text-sm text-subtle">{t('controlRoom.unexplainedNoTheory')}</p>
+          ) : q.data.unexplained.length === 0 ? (
+            <p className="text-sm text-subtle">{t('controlRoom.unexplainedNone')}</p>
+          ) : (
+            <ol
+              className="divide-y divide-line rounded-xl border border-line"
+              data-testid="control-room-unexplained"
+            >
+              {q.data.unexplained.map((row) => (
+                <li
+                  key={row.productId}
+                  className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                >
+                  <span className="min-w-0 truncate text-ink">
+                    {locale === 'en' && row.nameEn ? row.nameEn : row.name}
+                    {row.noRecipe ? (
+                      <span className="ms-2 rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted">
+                        {t('controlRoom.noRecipe')}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="shrink-0 tabular-nums text-warn">
+                    <Money agorot={row.gapAgorot} context="line" />
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      ) : null}
     </Card>
   );
 }

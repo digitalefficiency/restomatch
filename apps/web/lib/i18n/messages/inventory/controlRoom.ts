@@ -27,6 +27,15 @@ export const controlRoomHe = {
   noSales: 'אין מכירות לתקופה: הזינו אותן בספירה הסוגרת',
   open: 'פתיחה: {what}',
   period: '{from} – {to}',
+  categories: 'לאן הלך הכסף, לפי קטגוריה',
+  categoryNone: 'ללא קטגוריה',
+  categoryOther: 'שאר הקטגוריות',
+  categoryUnitemized: 'חשבוניות בלי שורות, תעודות משלוח וזיכויים',
+  unexplained: 'מה נוצל מעבר למה שהמתכונים מסבירים',
+  unexplainedHint: 'שימוש בפועל פחות מה שהמנות שנמכרו היו אמורות לצרוך',
+  unexplainedNone: 'כל השימוש בתקופה מוסבר על ידי המתכונים.',
+  unexplainedNoTheory: 'צריך מכירות מהקופה ומתכונים כדי לחשב את הרשימה הזו.',
+  noRecipe: 'אין מתכון',
 };
 
 export const controlRoomEn: Shape<typeof controlRoomHe> = {
@@ -51,4 +60,13 @@ export const controlRoomEn: Shape<typeof controlRoomHe> = {
   noSales: 'No sales for this period: enter them on the closing count',
   open: 'Open: {what}',
   period: '{from} – {to}',
+  categories: 'Where the money went, by category',
+  categoryNone: 'No category',
+  categoryOther: 'Other categories',
+  categoryUnitemized: 'Invoices without lines, delivery notes and credits',
+  unexplained: 'Used beyond what the recipes explain',
+  unexplainedHint: 'Actual usage minus what the dishes sold should have used',
+  unexplainedNone: 'All usage this period is explained by the recipes.',
+  unexplainedNoTheory: 'This list needs POS sales and recipes.',
+  noRecipe: 'No recipe',
 };

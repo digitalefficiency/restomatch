@@ -59,6 +59,20 @@ describe('inventory.controlRoom', () => {
     for (const role of ['chef', 'receiver'] as const) await expect(callerAs(A, role).inventory.controlRoom()).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
+  it('the category split adds up to the usage to the agora; no POS theory → no "unexplained" list', async () => {
+    const room = await callerAs(A, 'owner').inventory.controlRoom();
+    const eq = room.equation!;
+    expect(room.categories.reduce((a, r) => a + r.usageAgorot, 0)).toBe(eq.usageAgorot);
+    // Counted stock change per category: beef 10 → 8 kg at ₪100, tomato 20 → 15 kg at ₪6.
+    const cat = (c: string) => room.categories.find((r) => r.category === c)?.usageAgorot;
+    expect(cat('בשר')).toBe(20_000);
+    expect(cat('ירקות')).toBe(3_000);
+    const positive = room.categories.filter((r) => r.usageAgorot > 0);
+    expect(positive.reduce((a, r) => a + r.shareBp, 0)).toBe(10_000);
+    expect(room.hasTheory).toBe(false);
+    expect(room.unexplained).toEqual([]);
+  });
+
   it("tenant isolation: B's control room holds only B's count, never A's", async () => {
     const room = await callerAs(B, 'owner').inventory.controlRoom();
     const ids = room.series.points.map((p) => p.closingCountId);
@@ -66,5 +80,7 @@ describe('inventory.controlRoom', () => {
     expect(ids).not.toContain(opening);
     expect(ids).not.toContain(closing);
     expect(room.equation).toBeNull();
+    expect(room.categories).toEqual([]);
+    expect(room.unexplained).toEqual([]);
   });
 });

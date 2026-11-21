@@ -14,8 +14,10 @@ import {
   completedCounts,
   defaultArea,
   endOfLocalDate,
+  foodPurchasesByProduct,
   foodValueOf,
   isFood,
+  isFoodCost,
   loadCount,
   loadDraft,
   loadLines,
@@ -30,7 +32,7 @@ import {
   type PricedWithSource,
 } from '../inventory/data';
 import { actualFoodCost, STORAGE_AREAS, valueCount, valueLine, type CountLineInput } from '../inventory/valuation';
-import { equation, periodSeries } from '../inventory/controlRoom';
+import { categorySplit, equation, periodSeries, theoryByProduct, topUnexplained, type CategoryFlow, type ProductUsage } from '../inventory/controlRoom';
 
 /**
  * Inventory counting (ספירת מלאי) → actual food cost per period. Flag
@@ -443,6 +445,72 @@ async function periodFor(db: Database, restaurantId: string, rc: Awaited<ReturnT
 
 /** How many closed periods the control-room sparkline shows. */
 const CONTROL_PERIODS = 6;
+
+/**
+ * W3-02b · the latest period broken down per product: valued opening and
+ * closing food lines, itemised food purchases, and (only when the period's
+ * theory is trustworthy) what the dishes sold should have used. Feeds the
+ * category split and the top-10 unexplained usage.
+ */
+async function periodBreakdown(
+  db: Database,
+  restaurantId: string,
+  rc: Awaited<ReturnType<typeof loadRestaurant>>,
+  opening: { id: string; countDate: string },
+  closing: { id: string; countDate: string },
+  withTheory: boolean,
+) {
+  type P = { name: string; nameEn: string | null; category: string | null; open: number; buy: number; close: number };
+  const byProduct = new Map<string, P>();
+  const get = (id: string, seed: Omit<P, 'open' | 'buy' | 'close'>) => {
+    let p = byProduct.get(id);
+    if (!p) byProduct.set(id, (p = { ...seed, open: 0, buy: 0, close: 0 }));
+    return p;
+  };
+  for (const [c, key] of [
+    [opening, 'open'],
+    [closing, 'close'],
+  ] as const) {
+    for (const l of await loadLines(db, restaurantId, c.id)) {
+      if (!isFoodCost(l.category, l.storageArea) || l.qty == null || l.valueAgorot == null) continue;
+      get(l.productId, { name: l.name, nameEn: l.nameEn, category: l.category })[key] += Number(l.valueAgorot);
+    }
+  }
+  for (const r of await foodPurchasesByProduct(db, restaurantId, rc.timezone, opening.countDate, closing.countDate)) {
+    get(r.productId, { name: r.name, nameEn: r.nameEn, category: r.category }).buy += r.agorot;
+  }
+  let theory: Map<string, number> | null = null;
+  if (withTheory) {
+    const from = localToday(rc.timezone, endOfLocalDate(opening.countDate, rc.timezone));
+    const pos = (await loadPosSales(db, restaurantId, from, closing.countDate)) ?? [];
+    const { rows, items } = await loadRecipes(db, restaurantId);
+    const costInput = toCostRecipes(rows, items);
+    const prices = await latestPrices(db, restaurantId, {
+      before: endOfLocalDate(closing.countDate, rc.timezone),
+      productIds: [...new Set(items.map((i) => i.productId).filter((x): x is string => !!x))],
+    });
+    const costs = costRecipes(costInput, prices, rc.vatBp);
+    const res = posVsTheory(pos, rows, costs);
+    theory = theoryByProduct(
+      res.rows.map((r) => ({ recipeId: r.recipeId, qtyMilli: BigInt(Math.round(r.qtySold * 1000)) })),
+      costInput,
+      costs,
+    );
+  }
+  const flows: CategoryFlow[] = [];
+  const usage: ProductUsage[] = [];
+  for (const [productId, p] of byProduct) {
+    flows.push({ category: p.category, openingAgorot: p.open, purchasesAgorot: p.buy, creditsAgorot: 0, closingAgorot: p.close });
+    usage.push({
+      productId,
+      name: p.name,
+      nameEn: p.nameEn,
+      actualUsageAgorot: p.open + p.buy - p.close,
+      theoreticalUsageAgorot: theory?.get(productId) ?? null,
+    });
+  }
+  return { flows, usage, hasTheory: theory != null };
+}
 
 export const inventoryRouter = router({
   /** Whether `inventoryCount` is on for the caller's restaurant (drives the nav). Never FORBIDDEN. */
@@ -905,10 +973,20 @@ export const inventoryRouter = router({
             salesSource: latest.salesSource,
           })
         : null;
+    const breakdown =
+      latest && latest.available && eq
+        ? await periodBreakdown(ctx.db, rid, ctx.rc, latest.opening, latest.closing, latest.theoreticalAgorot != null)
+        : null;
     return {
       targetBp: ctx.rc.targetBp,
       series,
       equation: eq,
+      /** Usage per category; the rows add up to the equation's usage (an `__unitemized__` row reconciles). */
+      categories: breakdown && eq ? categorySplit(breakdown.flows, 6, eq.usageAgorot) : [],
+      /** The 10 products used most beyond what the recipes explain; [] without a trustworthy POS theory. */
+      unexplained: breakdown ? topUnexplained(breakdown.usage, breakdown.hasTheory) : [],
+      /** Whether the period has a recipes × POS theory to compare against (else the list says why it is empty). */
+      hasTheory: !!breakdown?.hasTheory,
       /** The latest available period's dates (opening count → closing count). */
       period: latest && latest.available ? { from: latest.opening.countDate, to: latest.closing.countDate } : null,
       /** The latest period is plausible and fully counted (otherwise the UI labels the % "check the count"). */

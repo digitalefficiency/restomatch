@@ -17,7 +17,7 @@
  *  - topUnexplained() the 10 products whose actual usage most exceeds what
  *                     the recipes explain (the "where did it go?" list).
  */
-import { roundHalfUp } from '../recipes/cost';
+import { parseNumericScaled, roundHalfUp, type CostRecipe, type RecipeCost } from '../recipes/cost';
 import { sharesBp } from '../recipes/preview';
 
 /* ── Drill targets (the UI maps them to links) ─────────────────────────── */
@@ -147,7 +147,11 @@ export interface CategoryRow {
  * A category with negative usage (stock grew faster than purchases explain) is
  * kept with a 0 share, so a counting slip shows up instead of hiding.
  */
-export function categorySplit(flows: readonly CategoryFlow[], top = 6): CategoryRow[] {
+export const OTHER = '__other__';
+/** The row that reconciles itemised lines to the equation's usage (header-only invoices, delivery-note accruals, credits). */
+export const UNITEMIZED = '__unitemized__';
+
+export function categorySplit(flows: readonly CategoryFlow[], top = 6, reconcileTo?: number): CategoryRow[] {
   const byCat = new Map<string | null, number>();
   for (const f of flows) {
     const u = f.openingAgorot + f.purchasesAgorot - f.creditsAgorot - f.closingAgorot;
@@ -158,7 +162,13 @@ export function categorySplit(flows: readonly CategoryFlow[], top = 6): Category
   if (rows.length > top) {
     const head = rows.slice(0, top - 1);
     const rest = rows.slice(top - 1).reduce((a, r) => a + r.usageAgorot, 0);
-    rows = [...head, { category: '__other__', usageAgorot: rest }];
+    rows = [...head, { category: OTHER, usageAgorot: rest }];
+  }
+  // The rows then add up to the equation's usage to the agora: what the lines
+  // can't itemise is one honest row, never spread over the categories.
+  if (reconcileTo != null) {
+    const gap = reconcileTo - rows.reduce((a, r) => a + r.usageAgorot, 0);
+    if (gap !== 0) rows.push({ category: UNITEMIZED, usageAgorot: gap });
   }
   const shares = sharesBp(rows.map((r) => Math.max(0, r.usageAgorot)));
   return rows.map((r, i) => ({ ...r, shareBp: shares[i]! }));
@@ -212,4 +222,54 @@ export function topUnexplained(rows: readonly ProductUsage[], hasTheory: boolean
     .filter((r) => r.gapAgorot > 0)
     .sort((a, b) => b.gapAgorot - a.gapAgorot || a.name.localeCompare(b.name, 'he'))
     .slice(0, n);
+}
+
+/* ── 5. Theoretical usage per product (recipes × POS) ──────────────────── */
+
+export interface DishSold {
+  recipeId: string;
+  /** Units sold × 1000 (POS qty is NUMERIC(14,3)). */
+  qtyMilli: bigint;
+}
+
+/**
+ * What the dishes sold should have used, per product, in agorot at the same
+ * prices that cost the recipes. A dish sold `q` times uses q ÷ yield batches;
+ * each product line adds its batch cost × that, and a sub-recipe line is split
+ * over the sub-recipe's own product lines in proportion to their cost
+ * (recursively). Lines that are not `ok` (no price, cycle, unit problem) add
+ * nothing. Exact rationals, rounded half-up once per product.
+ */
+export function theoryByProduct(
+  dishes: readonly DishSold[],
+  recipes: readonly CostRecipe[],
+  costs: ReadonlyMap<string, RecipeCost>,
+): Map<string, number> {
+  const SCALE = 1_000_000n; // micro-agorot accumulator
+  const byId = new Map(recipes.map((r) => [r.id, r] as const));
+  const acc = new Map<string, bigint>();
+  const walk = (recipeId: string, num: bigint, den: bigint, depth: number) => {
+    const cost = costs.get(recipeId);
+    if (!cost || depth > 16 || num <= 0n) return;
+    for (const line of cost.lines) {
+      if (line.status !== 'ok' || line.costAgorot <= 0) continue;
+      if (line.productId) {
+        const add = roundHalfUp(BigInt(line.costAgorot) * num * SCALE, den);
+        acc.set(line.productId, (acc.get(line.productId) ?? 0n) + add);
+      } else if (line.subRecipeId) {
+        const sub = costs.get(line.subRecipeId);
+        if (!sub || sub.batchCostAgorot <= 0) continue;
+        walk(line.subRecipeId, num * BigInt(line.costAgorot), den * BigInt(sub.batchCostAgorot), depth + 1);
+      }
+    }
+  };
+  for (const d of dishes) {
+    const r = byId.get(d.recipeId);
+    if (!r || d.qtyMilli <= 0n) continue;
+    const yield4 = parseNumericScaled(r.yieldQty, 4); // × 10,000
+    if (yield4 <= 0n) continue;
+    // batches = (qtyMilli / 1000) / (yield4 / 10,000) = qtyMilli × 10 / yield4
+    walk(d.recipeId, d.qtyMilli * 10n, yield4, 0);
+  }
+  return new Map([...acc].map(([pid, v]) => [pid, Number(roundHalfUp(v, SCALE))] as const));
 }

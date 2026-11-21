@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { categorySplit, equation, periodSeries, topUnexplained } from '../inventory/controlRoom';
+import { categorySplit, equation, periodSeries, theoryByProduct, topUnexplained, UNITEMIZED } from '../inventory/controlRoom';
+import { costRecipes, type CostRecipe } from '../recipes/cost';
 
 /**
  * W3-02 slice b · the food-cost control room's pure core. The equation adds
@@ -85,6 +86,52 @@ describe('categorySplit', () => {
     expect(rows[2]!.usageAgorot).toBe(2000 + 1000 - 500);
     const neg = categorySplit(flows, 10).find((r) => r.category === 'ה')!;
     expect([neg.usageAgorot, neg.shareBp]).toEqual([-500, 0]);
+  });
+
+  it('reconciles to the equation with one "__unitemized__" row (none when the lines already add up)', () => {
+    const flows = [{ category: 'בשר', openingAgorot: 0, purchasesAgorot: 10_000, creditsAgorot: 0, closingAgorot: 0 }];
+    const rows = categorySplit(flows, 6, 12_345);
+    expect(rows.map((r) => [r.category, r.usageAgorot])).toEqual([['בשר', 10_000], [UNITEMIZED, 2_345]]);
+    expect(rows.reduce((a, r) => a + r.usageAgorot, 0)).toBe(12_345);
+    expect(rows.reduce((a, r) => a + r.shareBp, 0)).toBe(10_000);
+    expect(categorySplit(flows, 6, 10_000).map((r) => r.category)).toEqual(['בשר']);
+  });
+});
+
+describe('theoryByProduct', () => {
+  const item = (id: string, productId: string | null, subRecipeId: string | null, quantity: string, unit = 'ק״ג') => ({
+    id, productId, subRecipeId, quantity, unit, wastePct: '0', unitsPerProductUnit: null,
+  });
+  const recipes: CostRecipe[] = [
+    // A batch of 4 burgers: 0.8 kg beef + 1 kg sauce.
+    { id: 'burger', name: 'המבורגר', isSubRecipe: false, yieldQty: '4', yieldUnit: 'מנה', menuPriceAgorot: 6000, menuPriceIncludesVat: true,
+      items: [item('i1', 'beef', null, '0.8'), item('i2', null, 'sauce', '1')] },
+    // A 2 kg batch of sauce: 1 kg tomato + 0.5 kg oil.
+    { id: 'sauce', name: 'רוטב', isSubRecipe: true, yieldQty: '2', yieldUnit: 'ק״ג', menuPriceAgorot: null, menuPriceIncludesVat: false,
+      items: [item('s1', 'tomato', null, '1'), item('s2', 'oil', null, '0.5')] },
+  ];
+  const prices = new Map([
+    ['beef', { unitPrice: '100.0000', unit: 'ק״ג' }],
+    ['tomato', { unitPrice: '6.0000', unit: 'ק״ג' }],
+    ['oil', { unitPrice: '20.0000', unit: 'ק״ג' }],
+  ]);
+  const costs = costRecipes(recipes, prices, 1800n);
+
+  it('expands sub-recipes in proportion to cost; 10 burgers = 2.5 batches', () => {
+    const t = theoryByProduct([{ recipeId: 'burger', qtyMilli: 10_000n }], recipes, costs);
+    // beef: ₪80/batch × 2.5 = ₪200. Sauce: 1 kg of a 2 kg batch (₪16) = ₪8/batch → tomato ₪3, oil ₪5 per batch.
+    expect(t.get('beef')).toBe(20_000);
+    expect(t.get('tomato')).toBe(750);
+    expect(t.get('oil')).toBe(1_250);
+    // The products add up to the dish's batch cost × batches.
+    expect([...t.values()].reduce((a, b) => a + b, 0)).toBe(costs.get('burger')!.batchCostAgorot * 2.5);
+  });
+
+  it('nothing sold, an unknown dish or an unpriced line adds nothing', () => {
+    expect(theoryByProduct([{ recipeId: 'burger', qtyMilli: 0n }], recipes, costs).size).toBe(0);
+    expect(theoryByProduct([{ recipeId: 'nope', qtyMilli: 1000n }], recipes, costs).size).toBe(0);
+    const noOil = costRecipes(recipes, new Map([...prices].filter(([k]) => k !== 'oil')), 1800n);
+    expect(theoryByProduct([{ recipeId: 'burger', qtyMilli: 4000n }], recipes, noOil).has('oil')).toBe(false);
   });
 });
 
