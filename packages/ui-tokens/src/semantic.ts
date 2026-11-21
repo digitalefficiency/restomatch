@@ -1,33 +1,37 @@
-// Semantic colour roles — "Command Center Light v2" (docs/ux/review/lens-design-system.md §3.2).
+// Semantic colour roles — "Command Center Light v2" (docs/ux/review/lens-design-system.md §3.2),
+// valued in DS3's clean finish (docs/ux/ds3/SPEC.md §2). Every role reads a step of
+// `primitives.ts`; DS3 moved values and added a few roles, never a meaning. Exception: the v1
+// data-viz literals (`dataViz.categorical`, the creep fills) stay DS2 values until the charts
+// move to the v2 set (W2-09).
 //
 // Components consume ROLES, never raw hex: surfaces, text, the focus colour, six
 // status families (each with the same nine roles), money states and data-viz.
-// `build.ts` turns these into the CSS variables (apps/web/app/tokens.css) and the
+// `build.ts` turns these into the CSS variables (the generated block of apps/web/app/globals.css) and the
 // Tailwind preset; `__tests__/contrast.test.ts` fails any text/background pair
 // below 4.6:1 (AA 4.5 + a 0.1 safety margin, a11y-21).
 
 import { activeDirection } from './directions';
 import { ramp } from './primitives';
 
-/** Canvas, cards and borders. Values unchanged from v1 — now named by role. */
+/** Canvas, cards and borders (SPEC §2 paper and steel). */
 export const surfaces = {
-  canvas: '#F6F8F7', // page background (Tailwind `bg`)
-  surface: '#FFFFFF', // cards, tables, bars — solid, never glass on app chrome
-  sunken: '#EEF3F0', // inputs at rest, tile wells, T4 panels (Tailwind `surface-2` / `surface-sunken`)
-  line: '#D3DDD7', // decorative dividers only (1.39:1)
-  lineStrong: '#7A8B82', // control boundaries (≥3:1, WCAG 1.4.11)
-  lineField: '#66756D', // field-mode input borders (≥4.5:1, lens-mobile-field §3.6)
+  canvas: ramp.neutral[25], // page background and the side menu, which sits on the canvas (Tailwind `bg`; SPEC §2, sidebar spec §1.1)
+  surface: ramp.neutral[0], // cards, tables, panels, sheets, the flyout list, the current row of the side menu — solid, never glass on app chrome
+  sunken: ramp.neutral[50], // wells: inputs at rest, a key cap, a segmented track, a neutral pill (Tailwind `surface-2` / `surface-sunken`)
+  line: ramp.neutral[200], // edges of the frame and small chrome: the menu's edge, a key cap, a table header, the palette; decorative (1.41:1)
+  lineStrong: ramp.neutral[500], // control boundaries and secondary buttons (≥3:1, WCAG 1.4.11)
+  lineField: ramp.neutral[550], // field-mode input borders (≥4.5:1, lens-mobile-field §3.6)
 } as const;
 
 export const text = {
-  ink: '#0F1F17', // primary text and every money figure
-  muted: '#4A5D53', // secondary text, labels
-  subtle: '#5A6A62', // tertiary / placeholder — banned in field mode
-  onBold: '#FFFFFF', // text on any `bg-bold` fill
+  ink: ramp.neutral[950], // primary text and every money figure
+  muted: ramp.neutral[650], // secondary text, labels
+  subtle: ramp.neutral[600], // tertiary: the ₪ sign, the agorot, placeholders — banned in field mode
+  onBold: ramp.neutral[0], // text on any `bg-bold` fill
 } as const;
 
-/** R-5: one focus colour, distinct from money-green and danger. 6.24:1 on white. */
-export const focus = '#1A5BC7' as const;
+/** R-5: one focus colour, distinct from money-green and danger (SPEC §2 sea). 6.74:1 on white. */
+export const focus = ramp.blue[700];
 
 export type StatusFamily = 'primary' | 'danger' | 'warn' | 'gold' | 'info' | 'neutral';
 
@@ -41,17 +45,55 @@ export interface FamilyRoles {
   /** Decorative border on subtle surfaces (not a control boundary). */
   borderSubtle: string;
   onBold: string;
+  /**
+   * DS3: the family's solid indicator — a dot, a bar, the fill of a round tick — never text and
+   * never a money figure (SPEC §2 `--leak-solid`, `--warn-solid`, `--ok-solid`). ≥3:1 on the
+   * surfaces it sits on, except warn's amber, which always carries `indicator.warnRing`.
+   */
+  dot: string;
 }
 
-/** Text on `bgSubtle` ≥5.5:1, white on `bgBold` ≥6.2:1 (contrast test enforces ≥4.6). */
+/** A family read from one ramp: 700 text and fill, 800 hover, 50 / 100 tint, 200 tint border; the dot defaults to 700. */
+function fromRamp(r: { 50: string; 100: string; 200: string; 700: string; 800: string }, dot: string = r[700]): FamilyRoles {
+  return { text: r[700], bgBold: r[700], bgBoldHover: r[800], bgSubtle: r[50], bgSubtleHover: r[100], borderSubtle: r[200], onBold: text.onBold, dot };
+}
+
+/**
+ * Every text pair ≥5:1, white on every bold fill ≥6:1 (the contrast test gates ≥4.6).
+ * `primary` is the brand (basil): the primary action, links, the current page.
+ * `gold` is the T3 family — the name is v1's; in the clean finish money that came back is
+ * GREEN, so the role moved and no call site did. SPEC §2 (correction of 14.11): the recovered
+ * amount is its own role whose clean value is the dark green #00573B — the same hex as the
+ * action colour, never the action role — so `gold` text is green[700] while every other
+ * T3 role reads the leaf ramp: `--ok` (#00713E, a counted line, a good-news icon on the tint)
+ * is the family's bold, the tint and its border are `--ok-sub` / `--ok-bd`, the tick `--ok-solid`.
+ */
 export const status: Record<StatusFamily, FamilyRoles> = {
-  primary: { text: '#066B4A', bgBold: '#066B4A', bgBoldHover: '#05583D', bgSubtle: '#E7F3ED', bgSubtleHover: '#D3EADF', borderSubtle: '#A9D3C0', onBold: '#FFFFFF' },
-  danger: { text: '#B80F2A', bgBold: '#B80F2A', bgBoldHover: '#990C23', bgSubtle: '#FCECEF', bgSubtleHover: '#F8DADF', borderSubtle: '#EDB3BD', onBold: '#FFFFFF' },
-  warn: { text: '#A63D00', bgBold: '#A63D00', bgBoldHover: '#893200', bgSubtle: '#FDF0E7', bgSubtleHover: '#F9E0CF', borderSubtle: '#EBBF9F', onBold: '#FFFFFF' },
-  gold: { text: '#755C00', bgBold: '#755C00', bgBoldHover: '#5F4A00', bgSubtle: '#F8F2DD', bgSubtleHover: '#EFE6C3', borderSubtle: '#D9C789', onBold: '#FFFFFF' },
-  info: { text: '#1A5BC7', bgBold: '#1A5BC7', bgBoldHover: '#154BA6', bgSubtle: '#EBF2FD', bgSubtleHover: '#D9E6FB', borderSubtle: '#B1CAF1', onBold: '#FFFFFF' },
-  neutral: { text: '#4A5D53', bgBold: '#4A5D53', bgBoldHover: '#3B4B43', bgSubtle: '#EEF3F0', bgSubtleHover: '#E2EAE5', borderSubtle: '#D3DDD7', onBold: '#FFFFFF' },
+  primary: fromRamp(ramp.green),
+  danger: fromRamp(ramp.red, ramp.red[500]),
+  warn: fromRamp(ramp.amber, ramp.amber[400]),
+  // The v1 `--c-gold` (fills, tints, borders, rings, gradients) is this family's bold; only text reads
+  // `text` (build.ts, Tailwind `textColor.gold`), so no T3 fill turns into the action colour.
+  gold: { ...fromRamp(ramp.leaf, ramp.leaf[500]), text: ramp.green[700] },
+  info: fromRamp(ramp.blue),
+  neutral: { text: text.muted, bgBold: text.muted, bgBoldHover: ramp.neutral[800], bgSubtle: surfaces.sunken, bgSubtleHover: ramp.neutral[75], borderSubtle: surfaces.line, onBold: text.onBold, dot: text.subtle },
 };
+
+/**
+ * DS3: every family's dot (`status[f].dot`) in one place, plus the warn dot's ring. The amber
+ * dot alone is 1.98:1 on white, so it always carries a 1.5 px `warnRing` (3.75:1, WCAG 1.4.11).
+ * Primary and info draw their dot in their text colour; danger, warn and T3 (gold) have a
+ * brighter solid; neutral uses the tertiary text colour (as the reference's neutral pill).
+ */
+export const indicator = {
+  primary: status.primary.dot,
+  danger: status.danger.dot,
+  warn: status.warn.dot,
+  warnRing: ramp.amber[600],
+  gold: status.gold.dot,
+  info: status.info.dot,
+  neutral: status.neutral.dot,
+} as const;
 
 export type MoneyState =
   | 'leak'
@@ -73,9 +115,11 @@ export type MoneyState =
 export const moneyStates: Record<MoneyState, { figure: 'ink' | 'muted' | 'gold' | 'primary'; tier: 'T1' | 'T2' | 'T3' | 'T4' | null }> = {
   leak: { figure: 'ink', tier: 'T1' }, // ink figure + danger marker (rail) on the T1 hero only
   atRisk: { figure: 'ink', tier: 'T2' }, // bold StatusChip + ink figure + one primary CTA
+  // T3 is green in the clean finish: caught, claimed, credited and returned read the T3 family, whose
+  // text is the recovered amount's own role (#00573B, `--c-gold-text`), never the action role.
   caught: { figure: 'gold', tier: 'T3' },
-  claimed: { figure: 'primary', tier: 'T3' },
-  credited: { figure: 'primary', tier: 'T3' }, // + ✓ icon
+  claimed: { figure: 'gold', tier: 'T3' }, // asked for, not back yet
+  credited: { figure: 'gold', tier: 'T3' }, // + ✓ icon
   returned: { figure: 'gold', tier: 'T3' },
   outstanding: { figure: 'ink', tier: 'T2' }, // + DeadlineChip (warn ≤7 days, danger only when late)
   pending: { figure: 'muted', tier: 'T4' }, // + clock icon
@@ -89,11 +133,11 @@ export const dataViz = {
   categorical: ['#066B4A', '#1A5BC7', '#755C00', '#8A4FBF', '#00838F', '#A63D00'],
   /** Sequential "price creep" ramp with the text colour that passes on each step. */
   creep: [
-    { bg: '#FDF0E7', text: '#0F1F17' },
-    { bg: '#F4CDB0', text: '#0F1F17' },
-    { bg: '#E8A67A', text: '#0F1F17' },
-    { bg: '#B4531A', text: '#FFFFFF' },
-    { bg: '#7A2D00', text: '#FFFFFF' },
+    { bg: '#FDF0E7', text: text.ink },
+    { bg: '#F4CDB0', text: text.ink },
+    { bg: '#E8A67A', text: text.ink },
+    { bg: '#B4531A', text: text.onBold },
+    { bg: '#7A2D00', text: text.onBold },
   ],
   grid: surfaces.line,
   axis: text.muted,
@@ -115,7 +159,8 @@ export const textV2 = {
   tertiary: text.subtle,
   /** C6: field mode's darker secondary (≥8.2:1); tertiary is not allowed there. */
   secondaryField: activeDirection.neutrals.textSecondaryField,
-  link: focus,
+  /** SPEC §2: text links are the brand colour (basil), underlined; blue is selection and focus only. */
+  link: status.primary.text,
 } as const;
 
 export const surfaceV2 = {
@@ -126,11 +171,13 @@ export const surfaceV2 = {
   overlay: surfaces.surface,
   /** C3 / D9: selection is a UI state, so it is blue (today's info-subtle). */
   selected: status.info.bgSubtle,
+  /** DS3: the hover fill of a quiet control or a row (SPEC §2 `--hover`). */
+  hover: status.neutral.bgSubtleHover,
 } as const;
 
 export const border = {
   subtle: surfaces.line,
-  /** Ruled tables (direction A): horizontal hairlines, no zebra. Decorative. */
+  /** Hairlines between rows (direction A: no zebra) and the 1 px border of a card (SPEC §2, §4). Decorative. */
   rule: activeDirection.neutrals.borderRule,
   control: surfaces.lineStrong,
   field: surfaces.lineField,
@@ -145,7 +192,7 @@ export const border = {
 export const action = {
   primary: { bg: status.primary.bgBold, bgHover: status.primary.bgBoldHover, fg: text.onBold },
   secondary: { border: surfaces.lineStrong, bg: surfaces.surface, bgHover: surfaces.sunken, fg: text.ink },
-  quiet: { fg: text.muted, fgHover: text.ink, bgHover: surfaces.sunken },
+  quiet: { fg: text.muted, fgHover: text.ink, bgHover: status.neutral.bgSubtleHover },
   danger: { bg: status.danger.bgBold, bgHover: status.danger.bgBoldHover, fg: text.onBold },
 } as const;
 
@@ -155,8 +202,8 @@ export const emphasis = {
   t2Rail: status.warn.text,
 } as const;
 
-/** C4: figures are never red; danger reaches money only as a marker. */
-export const moneyMarker = status.danger.text;
+/** C4: figures are never red; danger reaches money only as a marker — in the clean finish the T1 dot (SPEC §2). */
+export const moneyMarker = indicator.danger;
 
 /**
  * DS2 §2.2.3. No green, red or orange in the categorical set: those keep their
@@ -166,8 +213,8 @@ export const moneyMarker = status.danger.text;
 export const dataVizV2 = {
   categorical: [ramp.blue[700], ramp.teal[700], ramp.violet[700], ramp.gold[700], ramp.neutral[650], ramp.plum[700]] as string[],
   up: ramp.orange[600], // a price rise (creep-4)
-  down: status.primary.text, // a price drop is T3 good news
+  down: status.gold.text, // a price drop is T3 good news: the dark green the reference paints a good delta in
   prev: surfaces.lineStrong, // the previous period, thin bar or 1.5 px line
-  leak: status.danger.text, // the only danger in a chart
+  leak: status.danger.dot, // the only danger in a chart; a bar, so the solid (SPEC §2 `--leak-solid`)
   grid: surfaces.line,
 } as const;

@@ -1,5 +1,12 @@
 // DS2 phase 1 (train α): the change is ADDITIVE. Every v1 variable, mode block
 // and Tailwind key renders exactly as before; only new names are added.
+//
+// DS3 (the clean finish, 14.11.2026) changed VALUES on purpose (docs/ux/ds3/SPEC.md §2, §4).
+// The two fixtures are the recorded baseline of the v1 names. Re-record them only for a deliberate
+// value change, with `pnpm --filter @restomatch/ui-tokens fixtures:record` (scripts/fixtures.ts, the
+// procedure that rebuilds main's fixtures byte for byte from main's code; `fixtures:check` compares);
+// their diff in the pull request is the value change the owner signs. Everything else here still
+// holds: v1 names, the additive v2 blocks, rows, radii, the number family.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -23,12 +30,12 @@ function isSubset(sub: unknown, full: unknown, path = ''): string | null {
   return JSON.stringify(sub) === JSON.stringify(full) ? null : path;
 }
 
-describe('DS2 α is additive (0 pixels change)', () => {
-  it('no colour, row or radius value moves before phase 3', () => {
+describe('DS2 α is additive; values move only through the recorded baseline', () => {
+  it('no row or radius value moves before phase 3 (DS3 moved colours and elevation only)', () => {
     expect(DS2_PHASE).toBeLessThan(3);
   });
 
-  it('the generated block starts with the v1 block, byte for byte', () => {
+  it('the generated block starts with the recorded v1 block, byte for byte', () => {
     const v1Body = V1_BLOCK.slice(0, V1_BLOCK.length - TOKENS_END.length);
     expect(cssVariables().startsWith(v1Body)).toBe(true);
   });
@@ -39,7 +46,7 @@ describe('DS2 α is additive (0 pixels change)', () => {
     expect(v2Names.filter((n) => v1Names.has(n))).toEqual([]);
   });
 
-  it('every v1 Tailwind key keeps its value', () => {
+  it('every v1 Tailwind key keeps its recorded value', () => {
     expect(isSubset(V1_PRESET, JSON.parse(JSON.stringify(tailwindPreset)))).toBeNull();
   });
 
@@ -66,13 +73,13 @@ describe('DS2 α is additive (0 pixels change)', () => {
 describe('DS2 v2 names', () => {
   const css = cssVariables();
   it.each([
-    '--c-surface-selected: 235 242 253;',
-    '--c-text-primary: 15 31 23;',
-    '--c-border-rule: 228 235 231;',
-    '--c-action-primary-bg: 6 107 74;',
+    '--c-surface-selected: 236 244 255;',
+    '--c-text-primary: 18 28 23;',
+    '--c-border-rule: 226 232 229;',
+    '--c-action-primary-bg: 0 87 59;',
     '--row-default: 48px;',
-    '--decision-row-h: 64px;',
-    '--fs-money-hero: 2.5rem;',
+    '--decision-row-h: 52px;', // DS3: the clean queue row (DS2 had 64)
+    '--fs-money-hero: 4rem;', // DS3 SPEC §3: the hero, 64/70 on a phone (mobile first; 84/88 from 768 px)
     '--chrome-header-h: 56px;',
   ])('emits %s', (decl) => expect(css).toContain(decl));
 
@@ -84,7 +91,11 @@ describe('DS2 v2 names', () => {
     expect(tailwindPreset.theme.borderRadius).toHaveProperty('chip');
   });
 
-  it('has 14 v2 type roles; with caption, body-sm and body that is the closed 17', () => {
-    expect(Object.keys(tokens.typeScaleV2)).toHaveLength(14);
+  it('has 18 v2 type roles; with caption, body-sm and body that is the closed 21', () => {
+    // DS2 closed 17; DS3-00 adds `row-title` and `row-sub` (SPEC §7: a queue row's compact steps) and
+    // `sub` and `lead` (SPEC §3: 13/18 and 18/24, asked for by DS3-03). A new role needs a SPEC step
+    // that no role carries; the other §3 steps re-valued existing roles (title-sm, money-card, money-hero).
+    expect(Object.keys(tokens.typeScaleV2)).toHaveLength(18);
+    expect(Object.keys(tokens.typeScaleV2)).toEqual(expect.arrayContaining(['row-title', 'row-sub', 'sub', 'lead']));
   });
 });

@@ -13,6 +13,7 @@ import {
   legacyFontSize,
   legacyRadius,
   legacyShadow,
+  menuMotion,
   motion,
   radiusRoles,
   scrim,
@@ -35,7 +36,7 @@ const FAMILIES: StatusFamily[] = ['primary', 'danger', 'warn', 'gold', 'info', '
 /** Every colour variable, by name (without the `--c-` prefix). */
 export function colorVars(): Record<string, string> {
   const vars: Record<string, string> = {
-    // v1 names — unchanged values, still consumed by every page.
+    // v1 names — still consumed by every page; DS3 re-valued them (the clean finish).
     bg: surfaces.canvas,
     surface: surfaces.surface,
     'surface-2': surfaces.sunken,
@@ -46,7 +47,9 @@ export function colorVars(): Record<string, string> {
     subtle: text.subtle,
     primary: status.primary.text,
     'on-primary': text.onBold,
-    gold: status.gold.text,
+    // T3: the v1 `gold` drives fills, tints, borders, rings and gradients — the family's leaf `--ok`.
+    // Only text reads the recovered amount's own role (`--c-gold-text`, Tailwind `textColor.gold`).
+    gold: status.gold.bgBold,
     danger: status.danger.text,
     warn: status.warn.text,
     info: status.info.text,
@@ -124,6 +127,9 @@ export function cssVariables(): string {
     `  :root, [data-density] {`,
     `    --row-h: ${density.touch.row}px;`,
     `    --control-h: ${density.touch.control}px;`,
+    // DS3 SPEC §7 (density is fixed on a phone): the cell padding takes the floor too, so compact's
+    // 12 px never reaches a thumb. The v2 floor in modes.ts does the same for `--cell-px`.
+    `    --cell-inline: ${density.touch.cellInline}px;`,
     '  }',
     '}',
     '/* Field mode (lens-mobile-field §3.6): bigger floor, stronger borders, 3 px focus. */',
@@ -142,7 +148,8 @@ export function cssVariables(): string {
     '  }',
     '}',
   );
-  // DS2 phase 1 (additive): the v1 lines above are byte-for-byte unchanged.
+  // DS2 phase 1 was additive; DS3 (the clean finish) re-valued the v1 lines above on purpose —
+  // their recorded baseline is __tests__/fixtures/v1-token-block.css (re-recorded, owner-signed).
   // DS2 phase 2 (β): the self-hosted faces and their measured fallbacks.
   if (ACTIVE_FACE !== 'heebo') lines.push(fontFaceCss());
   lines.push(v2Css(), TOKENS_END);
@@ -175,6 +182,23 @@ function family(f: StatusFamily) {
 }
 
 /**
+ * DS3 indicators (`bg-danger-dot`, `border-gold-dot`, `ring-warn-dot-ring`, `fill-info-dot` …):
+ * a dot, a bar, a tick's fill. Deliberately NOT under `colors`, so `text-warn-dot` (1.98:1) and
+ * the other text utilities never exist — an indicator is never text.
+ */
+function dotKeys(): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = Object.fromEntries(FAMILIES.map((f) => [f, { dot: v(`${f}-dot`) }]));
+  out.warn!['dot-ring'] = v('warn-dot-ring');
+  out.ok = { dot: v('gold-dot') };
+  return out;
+}
+
+/** The side menu's durations as Tailwind keys that read their variables (`duration-menu-collapse` …). */
+function menuKeys(keyPrefix: string, varPrefix: string): Record<string, string> {
+  return Object.fromEntries(Object.keys(menuMotion.duration).map((k) => [`${keyPrefix}${k}`, `var(--${varPrefix}${k})`]));
+}
+
+/**
  * Tailwind preset. `fontSize`, `borderRadius`, `boxShadow`, `transitionDuration`
  * and `transitionTimingFunction` are REPLACED (roles + deprecated v1 keys);
  * colours, layers and containers extend Tailwind's defaults.
@@ -184,12 +208,17 @@ export const tailwindPreset = {
     fontSize: { ...legacyFontSize, ...typeRoles, ...typeRolesV2 },
     borderRadius: { ...legacyRadius, ...radiusRoles, xs: 'var(--radius-xs)', chip: 'var(--radius-chip)' },
     boxShadow: { ...legacyShadow, ...elevation },
-    transitionDuration: { ...legacyDuration, ...motion.duration },
-    transitionTimingFunction: { ...legacyEasing, ...motion.easing },
+    transitionDuration: { ...legacyDuration, ...motion.duration, ...menuKeys('menu-', 'dur-menu-') },
+    transitionTimingFunction: { ...legacyEasing, ...motion.easing, menu: 'var(--ease-menu)' },
     extend: {
+      // DS3 SPEC §8: the side menu's labels come back after the width starts (`delay-menu`).
+      transitionDelay: { menu: 'var(--dur-menu-delay)' },
+      // DS3 T3 (SPEC §2): the recovered amount is its own role, so `text-gold` reads it (#00573B);
+      // bg-, border-, ring-, from-gold … keep the family's leaf (`--c-gold`, #00713E).
+      textColor: { gold: { DEFAULT: v('gold-text') } },
       colors: {
         bg: v('bg'),
-        surface: { DEFAULT: v('surface'), sunken: v('surface-sunken'), selected: v('surface-selected'), raised: v('surface-raised'), overlay: v('surface-overlay') },
+        surface: { DEFAULT: v('surface'), sunken: v('surface-sunken'), selected: v('surface-selected'), raised: v('surface-raised'), overlay: v('surface-overlay'), hover: v('surface-hover') },
         'surface-2': v('surface-2'),
         line: { DEFAULT: v('line'), strong: v('line-strong'), field: v('line-field'), rule: v('border-rule') },
         ink: v('ink'),
@@ -202,6 +231,10 @@ export const tailwindPreset = {
         danger: family('danger'),
         warn: family('warn'),
         gold: family('gold'),
+        // DS3: `ok` names the good-news family by meaning for new code: `text-ok` / `bg-ok` are SPEC §2
+        // `--ok` (#00713E, the T3 family's bold); its tint, border and dot are the T3 family's. The
+        // recovered amount itself is `text-gold` (#00573B, `--c-gold-text`; SPEC §2 correction of 14.11).
+        ok: { ...family('gold'), DEFAULT: v('gold-bold') },
         info: family('info'),
         neutral: family('neutral'),
         ...Object.fromEntries(dataViz.categorical.map((_, i) => [`viz-${i + 1}`, v(`viz-${i + 1}`)])),
@@ -232,9 +265,15 @@ export const tailwindPreset = {
             .map((k) => [k, v(k)]),
         ),
       },
+      // DS3 indicators: fills, borders, rings and SVG paint only (see dotKeys()).
+      backgroundColor: dotKeys(),
+      ringColor: dotKeys(),
+      fill: dotKeys(),
+      stroke: dotKeys(),
       // `border-danger-subtle` is the decorative border role, not the subtle fill.
       borderColor: {
-        ...Object.fromEntries(FAMILIES.map((f) => [f, { subtle: v(`${f}-border-subtle`) }])),
+        ...Object.fromEntries(FAMILIES.map((f) => [f, { subtle: v(`${f}-border-subtle`), ...dotKeys()[f] }])),
+        ok: { subtle: v('gold-border-subtle'), dot: v('gold-dot') },
         // DS2: the only routes to a danger/warn rail (`border-s-t1`, `border-s-t2`).
         t1: v('emphasis-t1-rail'),
         t2: v('emphasis-t2-rail'),

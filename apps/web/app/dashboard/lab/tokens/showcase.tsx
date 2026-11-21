@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Pencil, Plus, Trash2, Truck } from 'lucide-react';
-import { contrastRatio, dataViz, elevation, motion, status, surfaces, text, typeRoles, type MoneyState, type StatusFamily } from '@restomatch/ui-tokens';
+import { border, contrastRatio, dataViz, elevation, focus, indicator, menuMotion, motion, status, surfaceV2, surfaces, text, typeRoles, type MoneyState, type StatusFamily } from '@restomatch/ui-tokens';
 import {
   Banner,
   Button,
@@ -75,7 +75,7 @@ const LAB_TODAY = new Date('2026-10-25T09:00:00+03:00');
 
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (
-    <section aria-labelledby={id} className="space-y-4 rounded-card border border-line bg-surface p-4 md:p-6">
+    <section aria-labelledby={id} className="space-y-4 rounded-card border border-line-rule bg-surface p-4 md:p-6">
       <h2 id={id} className="text-heading-md text-ink">
         {title}
       </h2>
@@ -140,10 +140,34 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
           <Swatch name="sunken / muted" hex={surfaces.sunken} on={text.muted} />
           <Swatch name="surface / muted" hex={surfaces.surface} on={text.muted} />
           <Swatch name="surface / subtle" hex={surfaces.surface} on={text.subtle} />
+          <Swatch name="hover / muted" hex={surfaceV2.hover} on={text.muted} />
+          <Swatch name="selected / subtle" hex={surfaceV2.selected} on={text.subtle} />
           <Swatch name="line-strong" hex={surfaces.lineStrong} on={text.ink} />
           <Swatch name="line-field" hex={surfaces.lineField} on={text.onBold} />
-          <Swatch name="focus" hex="#1A5BC7" on={text.onBold} />
+          <Swatch name="focus" hex={focus} on={text.onBold} />
         </div>
+        {/* DS3 indicators: a dot or a bar, never text — the ratio is against the surface (WCAG 1.4.11).
+            A grid, not a wrapping row, so every Chromium build lays it out the same (W1-01 baseline). */}
+        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4" data-testid="lab-indicators">
+          {(
+            [
+              ['primary-dot', indicator.primary, 'bg-primary-dot', ''],
+              ['danger-dot', indicator.danger, 'bg-danger-dot', ''],
+              ['warn-dot + ring', indicator.warnRing, 'bg-warn-dot', 'ring-[1.5px] ring-inset ring-warn-dot-ring'],
+              ['gold-dot (ok)', indicator.gold, 'bg-gold-dot', ''],
+              ['info-dot', indicator.info, 'bg-info-dot', ''],
+              ['neutral-dot', indicator.neutral, 'bg-neutral-dot', ''],
+              ['rule', border.rule, 'bg-line-rule', ''],
+            ] as const
+          ).map(([name, hex, bg, ring]) => (
+            <li key={name} className="flex items-center gap-2 text-caption text-muted">
+              {/* forced-color-adjust: none keeps a dot's colour in forced-colours mode, as the reference's `.dot`. */}
+              <span aria-hidden className={`inline-block h-2 w-2 shrink-0 rounded-pill forced-color-adjust-none ${bg} ${ring}`} />
+              <bdi dir="ltr">{name}</bdi>
+              <span className="num">{lab('contrast', { ratio: contrastRatio(hex, surfaces.surface).toFixed(2) })}</span>
+            </li>
+          ))}
+        </ul>
       </Section>
 
       <Section id="lab-families" title={lab('families')}>
@@ -172,7 +196,7 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
       <Section id="lab-type" title={lab('type')}>
         <div className="space-y-2">
           {Object.keys(typeRoles).map((role) => (
-            <div key={role} className="flex flex-wrap items-baseline gap-4 border-b border-line pb-2">
+            <div key={role} className="flex flex-wrap items-baseline gap-4 border-b border-line-rule pb-2">
               <span className="w-28 shrink-0 text-caption text-muted">
                 <bdi dir="ltr">{role}</bdi>
               </span>
@@ -187,7 +211,7 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
       <Section id="lab-shape" title={lab('shape')}>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           {(Object.keys(elevation) as Array<keyof typeof elevation>).map((e) => (
-            <div key={e} className={`flex h-20 items-center justify-center rounded-card border border-line bg-surface ${SHADOW_CLASS[e]}`}>
+            <div key={e} className={`flex h-20 items-center justify-center rounded-card border border-line-rule bg-surface ${SHADOW_CLASS[e]}`}>
               <bdi dir="ltr" className="text-caption font-semibold text-muted">
                 {e}
               </bdi>
@@ -212,6 +236,19 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
               </bdi>
             </li>
           ))}
+        </ul>
+        {/* DS3 SPEC §8: the side menu's one named set (sidebar spec §10), for DS3-02. */}
+        <ul className="mt-2 grid gap-2 sm:grid-cols-3" data-testid="lab-menu-motion">
+          {Object.entries(menuMotion.duration).map(([k, v]) => (
+            <li key={k} className="rounded-control border border-line px-3 py-2 text-caption text-muted">
+              <bdi dir="ltr">
+                --dur-menu-{k} · {v}
+              </bdi>
+            </li>
+          ))}
+          <li className="rounded-control border border-line px-3 py-2 text-caption text-muted sm:col-span-3">
+            <bdi dir="ltr">--ease-menu · {menuMotion.easing}</bdi>
+          </li>
         </ul>
       </Section>
 
@@ -365,9 +402,9 @@ export function TokensShowcase({ density }: { density: (typeof DENSITIES)[number
           <FilterChip label={lab('filterSupplier', { value: lab('supplier') })} active={filter} count={1} onRemove={() => setFilter(false)} onClick={() => setFilter(true)} />
           <FilterChip label={lab('filterSupplier', { value: lab('all') })} />
         </div>
-        <div data-density="compact" className="overflow-hidden rounded-card border border-line">
+        <div data-density="compact" className="overflow-hidden rounded-card border border-line-rule">
           {DENSITIES.map((d) => (
-            <div key={d} data-density={d} className="flex items-center justify-between border-b border-line px-[var(--cell-inline)] last:border-b-0" style={{ minHeight: 'var(--row-h)' }}>
+            <div key={d} data-density={d} className="flex items-center justify-between border-b border-line-rule px-[var(--cell-inline)] last:border-b-0" style={{ minHeight: 'var(--row-h)' }}>
               <span className="text-body-sm text-ink">{lab('density', { mode: d })}</span>
               <Money value={1240.5} context="line" />
             </div>

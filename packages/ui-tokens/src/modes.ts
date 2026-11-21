@@ -6,8 +6,8 @@
 
 import { cellPx, dials, gutterPage, rowConstants, type DialMode } from './components';
 import { activeFonts } from './fonts';
-import { chrome, radiusRolesV2, typeScaleV2, type TypeStep } from './scale';
-import { action, border, dataVizV2, emphasis, moneyMarker, surfaceV2, text, textV2 } from './semantic';
+import { chrome, menuMotion, radiusRolesV2, typeScaleV2, waits, type TypeStep } from './scale';
+import { action, border, dataVizV2, emphasis, indicator, moneyMarker, status, surfaceV2, text, textV2, type StatusFamily } from './semantic';
 
 export interface VarBlock {
   comment?: string;
@@ -25,10 +25,13 @@ export function colorVarsV2(): Record<string, string> {
     'surface-raised': surfaceV2.raised,
     'surface-overlay': surfaceV2.overlay,
     'surface-selected': surfaceV2.selected,
+    'surface-hover': surfaceV2.hover,
     'text-primary': textV2.primary,
     'text-secondary': textV2.secondary,
     'text-tertiary': textV2.tertiary,
     'text-link': textV2.link,
+    // DS3 T3 (SPEC §2): the recovered amount, its own role — read by `text-gold` only.
+    'gold-text': status.gold.text,
     'border-subtle': border.subtle,
     'border-rule': border.rule,
     'border-control': border.control,
@@ -50,6 +53,9 @@ export function colorVarsV2(): Record<string, string> {
     'emphasis-t1-rail': emphasis.t1Rail,
     'emphasis-t2-rail': emphasis.t2Rail,
     'money-marker': moneyMarker,
+    // DS3: every family's indicator and the warn dot's ring (never text; see build.ts dotKeys()).
+    ...Object.fromEntries((['primary', 'danger', 'warn', 'gold', 'info', 'neutral'] as StatusFamily[]).map((f) => [`${f}-dot`, status[f].dot])),
+    'warn-dot-ring': indicator.warnRing,
     ...Object.fromEntries(dataVizV2.categorical.map((hex, i) => [`viz-cat-${i + 1}`, hex])),
     'viz-up': dataVizV2.up,
     'viz-down': dataVizV2.down,
@@ -91,6 +97,15 @@ function dialVars(mode: DialMode, fallbackToDefault: boolean): Record<string, st
   return out;
 }
 
+/** The default value of every dial that compact re-binds (the coarse-pointer floor). */
+function compactDialDefaults(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, byMode] of Object.entries(dials)) {
+    if (byMode.compact !== undefined && byMode.default !== undefined) out[`--${name}`] = px(byMode.default);
+  }
+  return out;
+}
+
 /** Every v2 variable block, in emission order. */
 export function v2Blocks(): VarBlock[] {
   const rows = rowConstants();
@@ -118,10 +133,18 @@ export function v2Blocks(): VarBlock[] {
     '--cell-px': px(cell.default),
     '--radius-xs': radiusRolesV2.xs,
     '--radius-chip': radiusRolesV2.chip,
-    '--ring-selected': 'inset 0 0 0 2px rgb(var(--c-action-primary-bg))',
+    // DS3 SPEC §2: selection is a state of the interface — sea, never the brand.
+    '--ring-selected': 'inset 0 0 0 2px rgb(var(--c-info))',
     '--gutter-page': px(gutterPage.base),
   });
   for (const [k, v] of Object.entries(chrome)) root[`--chrome-${k}`] = v;
+  // DS3 SPEC §8: the side menu's named set (scale.ts `menuMotion`), for DS3-02.
+  for (const [k, v] of Object.entries(menuMotion.duration)) root[`--dur-menu-${k}`] = v;
+  root['--ease-menu'] = menuMotion.easing;
+  // DS3: the two waits DS3-01 reads by name (scale.ts `waits`): the tooltip's rest, the skeleton's wait.
+  for (const [k, v] of Object.entries(waits)) root[`--dur-${k}`] = v;
+  // DS3: the large-text preference zooms the content beside the menu (`.rm-text-zoom` in globals.css).
+  root['--text-zoom'] = '1';
 
   const starred = (role: string) => typeScaleV2[role]!.compact;
   const base = (role: string) => (typeScaleV2[role]!.compact ? typeScaleV2[role]!.base : undefined);
@@ -138,6 +161,21 @@ export function v2Blocks(): VarBlock[] {
     { selector: "[data-density='default']", vars: { ...typeVars(base), ...dialVars('default', false), '--cell-px': px(cell.default) } },
     { selector: "[data-density='touch']", vars: { ...typeVars(base), ...dialVars('touch', false), '--cell-px': px(cell.touch) } },
     {
+      // DS3 SPEC §7: on a phone density is fixed. A coarse pointer undoes everything compact re-binds:
+      // its type steps, its dials and its cell padding `--cell-px`. The v1 variables (row and control
+      // heights, `--cell-inline`) take the touch floor in the v1 block (build.ts), since a v2 block never
+      // declares a v1 variable. So `data-density="compact"` is inert under a thumb as a CSS fact, and the
+      // preferences store (DS3-06) needs no User-Agent hint for it. ds3-clean.test.ts derives the list.
+      comment: 'DS3: density is fixed on a phone — under a coarse pointer everything compact re-binds falls back to default.',
+      media: '(pointer: coarse)',
+      selector: "[data-density='compact']",
+      vars: {
+        ...typeVars(base),
+        ...compactDialDefaults(),
+        '--cell-px': px(cell.default),
+      },
+    },
+    {
       comment: 'DS2 field mode (C6): field type steps, ≥8.2:1 secondary text, no tertiary, field borders.',
       selector: "[data-mode='field']",
       vars: {
@@ -147,6 +185,13 @@ export function v2Blocks(): VarBlock[] {
         '--c-text-tertiary': hexChannels(textV2.secondaryField),
         '--c-border-control': hexChannels(border.field),
       },
+    },
+    {
+      // DS3 (WORKPLAN, personal preferences): the shell carries data-text from the rm_text cookie;
+      // large text zooms the content 1.1×, as the reference does (`[data-text="large"] .rm-main`).
+      comment: 'DS3: large text (data-text on the shell) zooms the content beside the menu.',
+      selector: "[data-text='large']",
+      vars: { '--text-zoom': '1.1' },
     },
     {
       media: '(prefers-contrast: more)',
