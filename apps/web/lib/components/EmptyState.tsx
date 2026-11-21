@@ -53,7 +53,7 @@ const KIND_CHIP: Record<EmptyStateKind | 'legacy', string> = {
 
 /**
  * Empty / zero state. A typed `kind` says WHY it's empty — not set up
- * (`first-use`), hidden by a filter (`no-results`, offer "נקה סינון"), earned
+ * (`first-use`), hidden by a filter (`no-results`, offer "ניקוי הסינון"), earned
  * calm (`inbox-zero`, say what was handled), `error` or `permission` — so users
  * can tell "nothing to do" from "hidden" from "broken". TypeScript requires an
  * `action` for `first-use` and `no-results`.
@@ -72,7 +72,7 @@ export function EmptyState(props: EmptyStateProps) {
       data-empty-kind={kind}
       className={cn(
         'flex flex-col',
-        variant === 'region' ? 'rounded-card border border-line bg-surface px-6 py-10' : 'gap-0',
+        variant === 'region' ? 'rounded-card border border-line-rule bg-surface px-6 py-10' : 'gap-0',
         align === 'center' ? 'items-center text-center' : 'items-start text-start',
         className,
       )}

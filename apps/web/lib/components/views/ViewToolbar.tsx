@@ -23,12 +23,11 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useLocale, useT } from '@/lib/i18n/client';
-import { usePrefs, viewDensity } from '@/lib/prefs';
 import { views } from '@/lib/i18n/messages/views';
 import { approvals } from '@/lib/i18n/messages/approvals';
 import type { MessageKey } from '@/lib/i18n/translate';
 import type { he as approvalsHe } from '@/lib/i18n/messages/approvals/he';
-import { cn } from '../cn';
+import { cn, cnMerge } from '../cn';
 import { downloadCsv, type CsvColumn, type CsvRow } from './csv';
 import { deleteSavedView, listSavedViews, saveView, type SavedView } from './savedViews';
 import {
@@ -42,6 +41,7 @@ import {
   SEVERITIES,
   STATUSES,
   hasFilters,
+  resetView,
   serializeView,
   type ViewFilters,
   type ViewState,
@@ -59,12 +59,12 @@ export interface ViewToolbarProps {
   group?: boolean;
   chart?: boolean;
   /**
-   * The density switch ("רגיל / צפוף"). `true`: the per-view switch in the address (`d`), as before —
-   * the page renders `view.density`. `'prefs'`: the device's display preference (DS3-06, lib/prefs):
-   * the switch reads and writes `usePrefs()`, leaves the address alone and is absent on a phone, where
-   * density is fixed. Use `'prefs'` once the page renders its rows from the preference.
+   * The density switch ("רגיל / צפוף"): an explicit choice for this view, in the address (`d`). Its
+   * default is the device's display preference when the page parses with
+   * `parseView(searchParams, await viewDefaults(role))` (`views/defaults.ts`); the address omits `d`
+   * while the choice equals that default.
    */
-  density?: boolean | 'prefs';
+  density?: boolean;
   tv?: boolean;
   saved?: boolean;
   filters?: FilterName[];
@@ -76,12 +76,14 @@ export interface ViewToolbarProps {
   exportData?: { columns: CsvColumn[]; rows: CsvRow[] };
 }
 
+// The toolbar's buttons are SPEC §5's small secondary button (32 px, 13 px text, white on the line-strong edge, --sunken
+// on hover); its filters are the kit's filter chip (a pill). Variants are merged (cnMerge), so a later class wins.
 const chip =
-  'inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface-2 px-3 py-1.5 text-sm font-medium text-muted transition-colors hover:border-primary/40 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60';
+  'inline-flex min-h-8 items-center gap-1.5 rounded-control border border-line-strong bg-surface px-3 text-sub font-medium text-fg transition-colors duration-micro ease-standard hover:bg-surface-sunken [@media(pointer:coarse)]:min-h-11';
 const selectCls =
-  'rounded-xl border border-line-strong bg-surface py-1.5 pe-8 ps-3 text-sm text-ink focus:border-primary/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60';
+  'rounded-xl border border-line-strong bg-surface py-1.5 pe-8 ps-3 text-sm text-ink';
 const popover =
-  'absolute top-full z-40 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-surface p-3 shadow-card start-0';
+  'absolute top-full z-40 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-card bg-surface p-3 shadow-e2 ring-1 ring-line-rule start-0';
 
 /**
  * The reusable dashboard view bar: period, compare, group-by, filters, chart
@@ -96,7 +98,6 @@ export function ViewToolbar(props: ViewToolbarProps) {
   const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
-  const prefs = usePrefs();
   // Fixed per page, not useId() (see app/dashboard/search.tsx): one toolbar per page.
   const id = `view-toolbar-${page}`;
   // Optimistic: the control shows the choice at once while the server re-renders the data
@@ -240,7 +241,7 @@ export function ViewToolbar(props: ViewToolbarProps) {
             className={cn(selectCls, 'pe-3')}
             required
           />
-          <button type="submit" className={cn(chip, 'border-primary/40 text-primary')}>
+          <button type="submit" className={chip}>
             {t('toolbar.apply')}
           </button>
         </form>
@@ -337,7 +338,7 @@ export function ViewToolbar(props: ViewToolbarProps) {
       {hasFilters(view) ? (
         <button
           type="button"
-          className={cn(chip, 'border-transparent bg-transparent')}
+          className={cnMerge(chip, 'border-transparent bg-transparent')}
           onClick={() => go({ ...view, filters: DEFAULT_VIEW.filters })}
         >
           <Filter className="h-4 w-4" aria-hidden="true" />
@@ -358,25 +359,7 @@ export function ViewToolbar(props: ViewToolbarProps) {
             }))}
           />
         ) : null}
-        {props.density === 'prefs' ? (
-          // The device's preference: one choice for every screen, stored per device (DS3-06). An old
-          // link's `d` is dropped on the first change so the address and the screen cannot disagree.
-          <span className="contents max-lg:hidden [@media(pointer:coarse)]:hidden">
-            <Segmented
-              label={t('toolbar.density')}
-              value={viewDensity(prefs.density)}
-              onChange={(v) => {
-                prefs.setDensity(v === 'compact' ? 'compact' : 'regular');
-                if (view.density !== DEFAULT_VIEW.density) set({ density: DEFAULT_VIEW.density });
-              }}
-              options={DENSITIES.map((d) => ({
-                value: d,
-                label: t(`densities.${d}`),
-                icon: d === 'comfortable' ? Rows3 : Rows4,
-              }))}
-            />
-          </span>
-        ) : props.density ? (
+        {props.density ? (
           <Segmented
             label={t('toolbar.density')}
             value={view.density}
@@ -406,7 +389,7 @@ export function ViewToolbar(props: ViewToolbarProps) {
         ) : null}
         {props.saved ? (
           <details className="group relative">
-            <summary className={cn(chip, 'cursor-pointer list-none [&::-webkit-details-marker]:hidden')}>
+            <summary className={cnMerge(chip, 'cursor-pointer list-none [&::-webkit-details-marker]:hidden')}>
               <Bookmark className="h-4 w-4" aria-hidden="true" />
               {t('toolbar.saved')}
               <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" aria-hidden="true" />
@@ -420,7 +403,7 @@ export function ViewToolbar(props: ViewToolbarProps) {
                     <li key={s.name} className="flex items-center justify-between gap-2">
                       <Link
                         href={s.query ? `${pathname}?${s.query}` : pathname}
-                        className="min-w-0 truncate rounded-lg px-2 py-1 text-sm text-ink hover:bg-surface-2"
+                        className="min-w-0 truncate rounded-lg px-2 py-1 text-sm text-ink hover:bg-surface-hover"
                       >
                         {s.name}
                       </Link>
@@ -457,7 +440,7 @@ export function ViewToolbar(props: ViewToolbarProps) {
                   maxLength={60}
                   className={cn(selectCls, 'min-w-0 flex-1 pe-3')}
                 />
-                <button type="submit" disabled={!saveName.trim()} className={cn(chip, 'disabled:opacity-45')}>
+                <button type="submit" disabled={!saveName.trim()} className={cnMerge(chip, 'disabled:opacity-45')}>
                   {t('toolbar.save')}
                 </button>
               </form>
@@ -473,8 +456,8 @@ export function ViewToolbar(props: ViewToolbarProps) {
         ) : null}
         <button
           type="button"
-          className={cn(chip, 'border-transparent bg-transparent px-2')}
-          onClick={() => go({ ...DEFAULT_VIEW })}
+          className={cnMerge(chip, 'border-transparent bg-transparent px-2')}
+          onClick={() => go(resetView(view))}
           aria-label={t('toolbar.reset')}
           title={t('toolbar.reset')}
         >
@@ -491,7 +474,7 @@ export function ViewToolbar(props: ViewToolbarProps) {
       <div className="flex flex-wrap items-center gap-2 lg:hidden">
         <button
           type="button"
-          className={cn(chip, 'min-h-11', activeCount > 0 && 'border-primary/40 text-primary')}
+          className={cnMerge(chip, 'min-h-11')}
           aria-haspopup="dialog"
           aria-expanded={sheetOpen}
           onClick={() => setSheetOpen(true)}
@@ -502,7 +485,7 @@ export function ViewToolbar(props: ViewToolbarProps) {
         {hasFilters(view) ? (
           <button
             type="button"
-            className={cn(chip, 'min-h-11 border-transparent bg-transparent')}
+            className={cnMerge(chip, 'min-h-11 border-transparent bg-transparent')}
             onClick={() => go({ ...view, filters: DEFAULT_VIEW.filters })}
           >
             <Filter className="h-4 w-4" aria-hidden="true" />
@@ -569,7 +552,7 @@ function ViewSheet({
       aria-label={title}
       onClose={onClose}
       onClick={(e) => e.target === ref.current && onClose()}
-      className="fixed inset-x-0 bottom-0 top-auto m-0 max-h-[85vh] w-full max-w-none overflow-y-auto rounded-t-2xl border border-line bg-surface p-0 text-ink shadow-card backdrop:bg-black/40 lg:hidden"
+      className="fixed inset-x-0 bottom-0 top-auto m-0 max-h-[85vh] w-full max-w-none overflow-y-auto rounded-t-overlay bg-surface p-0 text-ink shadow-e3 backdrop:bg-black/40 lg:hidden"
     >
       {open ? (
         <div className="p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
@@ -631,10 +614,11 @@ function MultiFilter({
       }}
     >
       <summary
-        className={cn(
+        className={cnMerge(
           chip,
-          'cursor-pointer list-none [&::-webkit-details-marker]:hidden',
-          active && 'border-primary/40 text-primary',
+          'cursor-pointer list-none rounded-pill [&::-webkit-details-marker]:hidden',
+          // as the kit's FilterChip: an applied filter reads in medium weight, never in the action colour
+          active ? 'font-medium' : 'font-normal',
         )}
       >
         <span className="text-xs text-subtle">{label}:</span>
@@ -648,7 +632,7 @@ function MultiFilter({
             const on = selected.includes(o.value);
             return (
               <li key={o.value}>
-                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink hover:bg-surface-2">
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink hover:bg-surface-hover">
                   <input
                     type="checkbox"
                     checked={on}
@@ -681,7 +665,7 @@ function Segmented({
     <div
       role="radiogroup"
       aria-label={label}
-      className="inline-flex rounded-xl border border-line bg-surface-2 p-0.5"
+      className="inline-flex rounded-control bg-surface-sunken p-0.5"
       onKeyDown={(e) => {
         const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'];
         if (!keys.includes(e.key)) return;
@@ -708,8 +692,9 @@ function Segmented({
             title={o.label}
             onClick={() => onChange(o.value)}
             className={cn(
-              'inline-flex min-h-9 items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
-              on ? 'bg-primary/15 text-primary' : 'text-muted hover:text-ink',
+              // The kit's SegmentedControl: 28 px buttons in a 2 px track (44 px on a phone); the pressed one white with an ink ring.
+              'inline-flex min-h-7 items-center gap-1 rounded-md px-2 text-sub font-medium transition-colors duration-micro ease-standard [@media(pointer:coarse)]:min-h-11',
+              on ? 'bg-surface text-fg shadow-e1 ring-1 ring-inset ring-fg forced-colors:outline forced-colors:outline-2 forced-colors:-outline-offset-2 forced-colors:outline-[color:Highlight]' : 'text-fg-secondary hover:text-fg',
             )}
           >
             <Icon className="h-3.5 w-3.5" aria-hidden="true" />

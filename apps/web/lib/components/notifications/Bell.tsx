@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Bell as BellIcon, X } from 'lucide-react';
 import { cn } from '@/lib/components/cn';
+import { Icon } from '../icon/Icon';
 import { ActivityFeed } from '@/lib/components';
 import { Money } from '@/lib/components/money';
 import { Sheet } from '@/lib/components/overlay';
@@ -15,8 +16,6 @@ import { overview } from '@/lib/i18n/messages/overview';
 import { trpc } from '@/lib/trpc/client';
 import { cappedCount, readSeen, taskSig, unseenCount, writeSeen, type Task } from './model';
 import { othersLine, taskRow, type TaskRow } from './rows';
-
-const focusRing = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-surface';
 
 function storage(): Storage | null {
   try {
@@ -86,13 +85,17 @@ export function Bell({ className, activity = false }: { className?: string; /** 
         aria-expanded={open}
         onClick={toggle}
         data-testid="bell-trigger"
-        className={cn('relative inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-ink', focusRing)}
+        // The reference's top-bar icon (.rm-ico): 36 px (44 on a phone), 8 px corners, an 18 px glyph, --sunken on hover.
+        className="relative inline-flex size-9 items-center justify-center rounded-control text-fg-secondary hover:bg-surface-sunken hover:text-fg [@media(pointer:coarse)]:size-11"
       >
-        <BellIcon className="h-5 w-5" aria-hidden="true" />
+        <Icon as={BellIcon} size="bar" />
         {unseen > 0 ? (
-          <span aria-hidden="true" data-testid="bell-dot" className="absolute end-1.5 top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.75rem] font-bold leading-none tabular-nums text-on-primary">
-            {cappedCount(unseen, locale)}
-          </span>
+          // An 8 px ink dot, never a count (the reference's .cnt-dot); the number stays in the trigger's name.
+          <span
+            aria-hidden="true"
+            data-testid="bell-dot"
+            className="absolute end-[7px] top-[7px] size-2 rounded-full bg-fg ring-2 ring-surface forced-color-adjust-none [@media(pointer:coarse)]:end-[11px] [@media(pointer:coarse)]:top-[11px]"
+          />
         ) : null}
       </button>
       {desk ? (
@@ -115,7 +118,7 @@ export function Bell({ className, activity = false }: { className?: string; /** 
       return (
         <p role="alert" className="flex items-center justify-between gap-2 text-sm text-ink">
           {t('bell.failed')}
-          <button type="button" onClick={onRetry} className={cn('min-h-11 rounded-lg px-3 font-semibold text-primary', focusRing)}>
+          <button type="button" onClick={onRetry} className={cn('min-h-11 rounded-lg px-3 font-semibold text-primary')}>
             {t('bell.retry')}
           </button>
         </p>
@@ -132,7 +135,7 @@ export function Bell({ className, activity = false }: { className?: string; /** 
                 href={r.href}
                 onClick={onNavigate}
                 data-testid={`bell-item-${r.type}`}
-                className={cn('flex min-h-14 items-center justify-between gap-3 rounded-xl border border-line bg-surface px-3 py-2 hover:border-primary/40', focusRing)}
+                className={cn('flex min-h-14 items-center justify-between gap-3 rounded-xl border border-line bg-surface px-3 py-2 hover:border-primary/40')}
               >
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-semibold text-ink">{r.label}</span>
@@ -183,13 +186,13 @@ function BellPanel({ open, onClose, title, closeLabel, children }: { open: boole
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="fixed end-4 start-auto top-16 m-0 w-[360px] max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-surface p-4 text-ink shadow-card backdrop:bg-transparent"
+      className="fixed end-4 start-auto top-16 m-0 w-[360px] max-w-[calc(100vw-2rem)] rounded-overlay bg-surface p-4 text-ink shadow-e2 ring-1 ring-line-rule backdrop:bg-transparent"
     >
       <div className="mb-3 flex items-center justify-between gap-2">
         <h2 id={titleId} className="text-base font-bold">
           {title}
         </h2>
-        <button type="button" onClick={onClose} aria-label={closeLabel} className={cn('inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted hover:bg-surface-2', focusRing)}>
+        <button type="button" onClick={onClose} aria-label={closeLabel} className={cn('inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted hover:bg-surface-hover')}>
           <X className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>

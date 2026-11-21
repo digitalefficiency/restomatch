@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, ChevronsUpDown, Lock, MoreHorizontal } from 'lucide
 import { useLocale } from '@/lib/i18n/client';
 import { formatDate } from '@/lib/i18n/format';
 import { formatIls } from '@/lib/money';
-import { tableDensity, usePrefs } from '@/lib/prefs';
+import { usePrefs } from '@/lib/prefs';
 import { cn } from '../cn';
 import { Skeleton } from '../Skeleton';
 import { Peek } from '../desk/Peek';
@@ -146,11 +146,12 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   selectedRef.current = selected;
 
   const sort = state.sort && columns.some((c) => c.id === state.sort!.id && c.sortable !== false) ? state.sort : defaultSort;
-  // DS3-06's display preference (lib/prefs): with no `density` from the caller the table follows the
-  // device's choice, and with no choice the role's default (D4: the bookkeeper's tables are compact).
+  // DS3-06's display preference (lib/prefs; WORKPLAN "Personal preferences: one contract"): with no
+  // `density` from the caller the table follows the density in force on this device — the choice, else
+  // the role's default (D4: the bookkeeper's tables are compact), the regular size on a touch pointer.
   // An explicit prop still wins, and the URL override `d` wins over both (shareable, as before).
   const prefs = usePrefs();
-  const baseDensity: Density = densityProp ?? tableDensity(prefs.density);
+  const baseDensity: Density = densityProp ?? prefs.tableDensity;
   const density = state.density ?? baseDensity;
   const visibleIds = state.cols ?? columns.filter((c) => !c.defaultHidden).map((c) => c.id);
   const visibleKey = visibleIds.join(',');
@@ -656,7 +657,9 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       {toolbarRow}
       <div
         ref={scroller}
-        className="max-h-[min(72dvh,900px)] overflow-auto rounded-card border border-line bg-surface"
+        // Rows and cells sit in a scroll container: the global focus outline is drawn inside them (DS3-00 hook).
+        data-focus="inset"
+        className="max-h-[min(72dvh,900px)] overflow-auto rounded-card border border-line-rule bg-surface"
         data-table-scroll=""
       >
         <table
