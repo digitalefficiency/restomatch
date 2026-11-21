@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { isBarcodeQuery, normalizeForSearch, searchItems } from '../search-adapter';
 
-describe('W3-10 interim catalog search (until normalizeHe lands)', () => {
-  it('folds niqqud, final letters, geresh and punctuation', () => {
+describe('W3-10 catalog search on normalizeHe', () => {
+  it('uses normalizeHe: niqqud, final letters, gershayim, dashes', () => {
     expect(normalizeForSearch('  שָׁלוֹם ')).toBe('שלומ');
-    expect(normalizeForSearch('ק״ג')).toBe('ק ג');
+    expect(normalizeForSearch('ק״ג')).toBe(normalizeForSearch('קג'));
     expect(normalizeForSearch('Tomato-Cherry')).toBe('tomato cherry');
   });
 
