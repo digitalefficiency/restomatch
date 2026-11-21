@@ -105,7 +105,7 @@ export function NavGroup({
       >
         <span className={css.ic}>
           {/* Two-tone on the rail tile that holds the page; the panel's folded header hides it (CSS). */}
-          <NavIcon icon={Glyph} duo={current} />
+          <NavIcon icon={Glyph} duo={here} />
           {showDot ? <span aria-hidden="true" className={cn(css.railDot, DOT_CLASS[dot])} /> : null}
         </span>
         <span id={labId} className={css.lab}>

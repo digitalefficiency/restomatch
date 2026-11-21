@@ -184,6 +184,11 @@ button.headBtn:hover {
   color: rgb(var(--c-ink));
   box-shadow: inset 0 0 0 1px rgb(var(--c-line-strong)), var(--shadow-e1);
 }
+.cmdkBtn .ic svg {
+  /* The field's search glyph is 16 (§1.1), not the rows' 20. */
+  width: var(--rm-nav-glyph-sm);
+  height: var(--rm-nav-glyph-sm);
+}
 .cmdkLab {
   flex: 1;
   min-width: 0;
@@ -534,20 +539,37 @@ button.headBtn:hover {
   width: 18px;
   height: 18px;
 }
-/* A 6 px strip on the menu's inline-end edge; on hover a 2 px line (§1.1). Pointer only. */
+/* A 6 px strip on the menu's inline-end edge; on hover a 2 px line (§1.1). Pointer only. It lies against the
+   edge on the page's side (the page column starts with its gutter there), not inside the menu, where it would
+   cover the scroll region's scrollbar: grabbing the scrollbar must scroll, never collapse the menu. */
 .edge {
-  position: absolute;
-  inset-block: 0;
-  inset-inline-end: 0;
-  z-index: 3;
-  width: 6px;
-  cursor: pointer;
+  display: none;
+}
+@media (min-width: 1024px) {
+  .edge {
+    display: block;
+    position: fixed;
+    inset-block: 0;
+    inset-inline-start: var(--rm-sidebar-w);
+    z-index: calc(var(--z-top-bar) + 1);
+    width: 6px;
+    cursor: pointer;
+    transition: inset-inline-start var(--rm-nav-collapse) var(--rm-nav-ease);
+  }
+  .app[data-nav-dir='expand'] .edge {
+    transition-duration: var(--rm-nav-expand);
+  }
+  .app[data-overlay='open'] .edge {
+    inset-inline-start: var(--chrome-sidebar-w);
+    z-index: var(--z-sheet);
+  }
 }
 .edge::after {
   content: '';
   position: absolute;
   inset-block: 0;
-  inset-inline-end: 0;
+  /* Over the menu's 1 px border, so the line reads as the edge itself. */
+  inset-inline-start: -1px;
   width: 2px;
   background: rgb(var(--c-line-strong));
   opacity: 0;
@@ -573,8 +595,11 @@ button.headBtn:hover {
   text-align: center;
   transition: background-color var(--rm-nav-fade) linear;
 }
+/* A group tile whose flyout is open. Keyed on data-fly (set only while a flyout is open, so only on the rail),
+   not on aria-expanded, which in the panel means "the group is open" and would paint every open header as
+   hovered. :where keeps it at (0,2,0), so the here tile below still wins over it (§6). */
 .tile:hover,
-.gh.tile[aria-expanded='true'] {
+:where(.grp[data-fly='open']) > .gh.tile {
   background: rgb(var(--c-surface-2));
   color: rgb(var(--c-ink));
 }
@@ -606,13 +631,17 @@ button.headBtn:hover {
   border-radius: 50%;
   box-shadow: 0 0 0 2px rgb(var(--c-bg));
 }
-/* Here, on a tile (an item tile or the group tile that holds the page): the white tile and a 2 × 20 mark. */
-.tile[aria-current] {
+/* Here, on a tile (an item tile or the group tile that holds the page): the white tile and a 2 × 20 mark.
+   The group tile is keyed on the group's data-here as well, so the server's first paint at 1024–1279 (which
+   cannot know the width and renders the panel's aria state) already shows the rail's here tile. */
+.tile[aria-current],
+:where(.grp[data-here='true']) > .gh.tile {
   background: rgb(var(--c-surface));
   color: rgb(var(--c-ink));
   box-shadow: inset 0 0 0 1px rgb(var(--c-line)), var(--shadow-e1);
 }
-.tile[aria-current]::before {
+.tile[aria-current]::before,
+:where(.grp[data-here='true']) > .gh.tile::before {
   content: '';
   position: absolute;
   inset-inline-start: 0;
@@ -622,14 +651,17 @@ button.headBtn:hover {
   border-radius: 1px;
   background: rgb(var(--c-primary));
 }
-.tile[aria-current] .ic svg {
+.tile[aria-current] .ic svg,
+:where(.grp[data-here='true']) > .gh.tile .ic svg {
   color: rgb(var(--c-primary));
   stroke-width: 2;
 }
-.tile[aria-current] .short {
+.tile[aria-current] .short,
+:where(.grp[data-here='true']) > .gh.tile .short {
   font-weight: 600;
 }
-.tile[aria-current] .railDot {
+.tile[aria-current] .railDot,
+:where(.grp[data-here='true']) > .gh.tile .railDot {
   box-shadow: 0 0 0 2px rgb(var(--c-surface));
 }
 .searchTile,
@@ -787,20 +819,35 @@ button.headBtn:hover {
     flex: none;
     align-items: center;
   }
-  /* The group holding the page, folded: ink label, brand glyph, no card (§6). */
+  /* The group holding the page: no card in the panel (the row inside shows here); folded, an ink label and
+     the brand glyph (§6). */
+  :where(.grp[data-here='true']) > .gh.tile {
+    background: none;
+    box-shadow: none;
+    color: rgb(var(--c-subtle));
+  }
+  :where(.grp[data-here='true']) > .gh.tile::before,
+  .gh.tile[aria-current]::before {
+    content: none;
+  }
+  :where(.grp[data-here='true']) > .gh.tile .ic svg {
+    color: inherit;
+  }
   .gh.tile[aria-current] {
     background: none;
     box-shadow: none;
     color: rgb(var(--c-ink));
   }
-  .gh.tile[aria-current]::before {
-    content: none;
+  .gh.tile[aria-current] .ic svg {
+    color: rgb(var(--c-primary));
   }
   .gh .duoFill {
     display: none;
   }
+  :where(.grp[data-here='true']) > .gh.tile:hover,
   .gh.tile[aria-current]:hover {
     background: rgb(var(--c-surface-2));
+    color: rgb(var(--c-ink));
   }
   .grp[data-open='false'] > .fly {
     display: none;
@@ -910,6 +957,7 @@ button.headBtn:hover {
   .item,
   .tile,
   .chev,
+  .edge,
   .edge::after {
     transition: none;
   }

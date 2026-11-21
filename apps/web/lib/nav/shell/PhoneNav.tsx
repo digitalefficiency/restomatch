@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { LogOut, MoreHorizontal, Search, ShieldCheck, X } from 'lucide-react';
@@ -14,7 +14,7 @@ import { badgeLook, type BadgeValueLike } from '../badgeLook';
 import { isViewOnly } from '../viewOnly';
 import { inSpecOrder } from '../shellModel';
 import { SUPPORT_LINKS } from '../support';
-import { DOT_CLASS, NavIcon, Pill, badgeWordsFor, iconProps } from './NavItem';
+import { DOT_CLASS, NavIcon, Pill, badgeWordsFor, iconProps, useNavBadgeWords } from './NavItem';
 import { useShellUi } from './ShellFrame';
 
 const focusRing =
@@ -44,18 +44,6 @@ function useKeyboardOpen(): boolean {
   return open;
 }
 
-function useBadgeWords() {
-  const t = useT(nav) as unknown as (key: string, vars?: Record<string, string>) => string;
-  return useMemo(
-    () => ({
-      items: (count: string) => t('badge.items', { count }),
-      atRisk: (amount: string) => t('badge.atRisk', { amount }),
-      owed: (amount: string) => t('badge.owed', { amount }),
-      blocking: t('badge.blocking'),
-    }),
-    [t],
-  );
-}
 
 /**
  * Phone bottom bar (< 1024, sidebar spec §11): the role's four registry slots +
@@ -67,7 +55,7 @@ export function BottomBar({ viewer }: { viewer: NavViewer }) {
   const badges = useNavBadges();
   const t = useT(nav) as unknown as (key: string) => string;
   const locale = useLocale();
-  const words = useBadgeWords();
+  const words = useNavBadgeWords();
   const pathname = usePathname();
   const { moreOpen, openMore } = useShellUi();
   const keyboard = useKeyboardOpen();
@@ -103,7 +91,7 @@ export function BottomBar({ viewer }: { viewer: NavViewer }) {
           // A view-only row carries no badge (§4.1).
           const look = isViewOnly(viewer.role, def.key) ? null : badgeLook(value, { fieldRole });
           const { icon, k, mirrored } = iconProps(def.key);
-          const bw = badgeWordsFor(look ? value : undefined, locale, words);
+          const bw = badgeWordsFor(value, look, locale, words);
           return (
             <li key={def.key} className="flex min-w-0 flex-1">
               <Link
@@ -187,7 +175,7 @@ export function MoreSheet({
   const badges = useNavBadges();
   const t = useT(nav) as unknown as (key: string) => string;
   const locale = useLocale();
-  const words = useBadgeWords();
+  const words = useNavBadgeWords();
   const pathname = usePathname();
   const ui = useShellUi();
   const { moreOpen, closeMore } = ui;
@@ -318,7 +306,7 @@ export function MoreSheet({
                       const value = badges[d.key] as BadgeValueLike | undefined;
                       const look = isViewOnly(viewer.role, d.key) ? null : badgeLook(value, { fieldRole });
                       const { icon, k, mirrored } = iconProps(d.key);
-                      const bw = badgeWordsFor(look ? value : undefined, locale, words);
+                      const bw = badgeWordsFor(value, look, locale, words);
                       return (
                         <li key={d.key}>
                           <Link

@@ -36,6 +36,11 @@ export const he = {
     warn: 'יש בפנים כסף שמחכה לך',
   },
   viewOnly: 'צפייה בלבד',
+  /** A badge's count in screen-reader words where '{count} פריטים' does not fit (§5.1: "99+" reads "יותר מ־99"). */
+  badge: {
+    one: 'פריט אחד',
+    over: 'יותר מ־99 פריטים',
+  },
   /** The fit rule's polite announcement, also shown beside the folded group (§4.2). */
   fit: 'קיפלנו את {groups} כדי שהתפריט ייכנס במסך',
   /** Tooltip meaning line on a rail group tile (keyboard focus only). */
@@ -95,6 +100,10 @@ export const en: Shape<typeof he> = {
     warn: 'money inside waits for you',
   },
   viewOnly: 'view only',
+  badge: {
+    one: '1 item',
+    over: 'more than 99 items',
+  },
   fit: 'Folded {groups} so the menu fits on the screen',
   groupTip: 'Enter or the right arrow opens the list',
   pin: {

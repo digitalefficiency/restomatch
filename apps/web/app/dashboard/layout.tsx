@@ -189,8 +189,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 density={display.density}
                 textSize={display.text}
                 viewer={viewer}
+                // Keyed: an element handed to a client component as a prop and placed among its children
+                // otherwise reaches the browser flagged for a missing key (React's "unique key" warning in dev).
                 sidebar={
                   <Sidebar
+                    key="sidebar"
                     viewer={viewer}
                     restaurantName={active.restaurantName}
                     roleLabel={roleLabel}
@@ -209,6 +212,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 }
                 overlays={
                   <MoreSheet
+                    key="more-sheet"
                     viewer={viewer}
                     email={email}
                     isPlatformAdmin={platformAdmin}

@@ -1,11 +1,16 @@
 'use client';
 
+import { useMemo } from 'react';
 import Link from 'next/link';
 import { Eye, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/components/cn';
 import { Money } from '@/lib/components/money';
-import { badgeAria, cappedCount, type BadgeWords } from '@/lib/components/notifications';
+import { cappedCount, type BadgeWords } from '@/lib/components/notifications';
+import { useT } from '@/lib/i18n/client';
 import type { Locale } from '@/lib/i18n/config';
+import { nav } from '@/lib/i18n/messages/nav';
+import { navShell } from '@/lib/i18n/messages/nav/shell';
+import { formatIls } from '@/lib/money';
 import type { BadgeLook, BadgeValueLike, DotTone } from '../badgeLook';
 import { MIRRORED_ICONS, OPTICAL_SCALE, iconFor } from '../icons';
 import css from './shell.module.css';
@@ -42,15 +47,48 @@ export function iconProps(key: string): { icon: LucideIcon; k: number; mirrored:
 }
 
 /**
- * The badge's words for the link's accessible name: "4 פריטים, ‏296 ₪ בסיכון,
- * חוסם תשלום" (§9: meaning in visually hidden text inside the link). The
- * visible pill is aria-hidden.
+ * The badge's words for the link's accessible name and the rail tile's tooltip
+ * line: "4 פריטים, ‏296 ₪ בסיכון, חוסם תשלום" (§9: meaning in visually hidden
+ * text inside the link; the visible pill is aria-hidden). Built from the LOOK,
+ * so they say exactly what the pill shows: no ₪ where the pill has none — for
+ * chef and receiver (the client's second ₪ guard, §5.3) and for an amount that
+ * is not T2 money — and nothing for a row whose pill is not shown.
  */
-export function badgeWordsFor(value: BadgeValueLike | undefined, locale: Locale, words: BadgeWords): string | null {
-  if (!value || value.count <= 0) return null;
-  const full = badgeAria('', value as Parameters<typeof badgeAria>[1], locale, words);
-  const rest = full.replace(/^,\s*/, '');
-  return rest || null;
+export function badgeWordsFor(
+  value: BadgeValueLike | undefined,
+  look: BadgeLook | null,
+  locale: Locale,
+  words: BadgeWords,
+): string | null {
+  if (!value || !look) return null;
+  const parts: string[] = [];
+  if (look.count > 0) parts.push(words.items(cappedCount(look.count, locale)));
+  if (look.agorot !== null && look.agorot > 0) {
+    const amount = formatIls(look.agorot / 100, { locale });
+    parts.push(value.money === 'owed' ? words.owed(amount) : words.atRisk(amount));
+  }
+  if (value.block) parts.push(words.blocking);
+  return parts.length ? parts.join(', ') : null;
+}
+
+/** The badge words for the side menu and the phone bar: "פריט אחד", "{n} פריטים", "יותר מ־99 פריטים". */
+export function useNavBadgeWords(): BadgeWords {
+  const t = useT(nav) as unknown as (key: string, vars?: Record<string, string>) => string;
+  const ts = useT(navShell) as unknown as (key: string) => string;
+  return useMemo(
+    () => ({
+      items: (count: string) => {
+        const plain = count.replace(/[\u200e\u200f\u2066-\u2069]/g, '');
+        if (plain.endsWith('+')) return ts('badge.over');
+        if (plain === '1') return ts('badge.one');
+        return t('badge.items', { count });
+      },
+      atRisk: (amount: string) => t('badge.atRisk', { amount }),
+      owed: (amount: string) => t('badge.owed', { amount }),
+      blocking: t('badge.blocking'),
+    }),
+    [t, ts],
+  );
 }
 
 /**

@@ -12,6 +12,7 @@ import { chain } from '@/lib/i18n/messages/chain';
 import { nav } from '@/lib/i18n/messages/nav';
 import { navShell } from '@/lib/i18n/messages/nav/shell';
 import shellCss from '@/lib/nav/shell/shell.module.css';
+import { NAV_POPOVERS_CLOSE } from '@/lib/nav/shell/events';
 import { common } from '@/lib/i18n/messages/common';
 import { screenKeyForPath } from '@/lib/net/access';
 import { branchSafeTarget, type BranchTarget } from '@/lib/net/branchSafeTarget';
@@ -98,6 +99,19 @@ export function BranchSwitcher({
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
+  }, [open]);
+
+  // The side menu changes presentation (Ctrl/⌘ B and the rest): close first, not stay at the old place (§8);
+  // focus inside goes back to the trigger.
+  useEffect(() => {
+    if (!open) return;
+    const onClose = () => {
+      const inside = Boolean(menuRef.current?.contains(document.activeElement));
+      setOpen(false);
+      if (inside) triggerRef.current?.focus();
+    };
+    window.addEventListener(NAV_POPOVERS_CLOSE, onClose);
+    return () => window.removeEventListener(NAV_POPOVERS_CLOSE, onClose);
   }, [open]);
 
   // After the full navigation of a switch: say why we did not land on the same page.
@@ -303,6 +317,8 @@ export function BranchSwitcher({
             <span className="truncate text-sm font-semibold leading-[18px] text-ink">
               <span {...originalProps(active.restaurantName)}>{active.restaurantName}</span>
             </span>
+            {/* A real space between the two lines, for the button's name on the rail (see AccountMenu). */}
+            {subline ? ' ' : null}
             {subline ? <span className="truncate text-xs leading-4 text-subtle">{subline}</span> : null}
           </span>
           <ChevronsUpDown aria-hidden="true" width={16} height={16} strokeWidth={1.75} className={shellCss.headChev} />
@@ -315,7 +331,8 @@ export function BranchSwitcher({
             role="menu"
             aria-label={t('switcher.label')}
             onKeyDown={onMenuKey}
-            style={{ top: place?.top ?? 60, insetInlineStart: place?.start ?? 12, visibility: place ? 'visible' : 'hidden' }}
+            // Placed by the layout effect before the first paint; no visibility toggle (see AccountMenu).
+            style={{ top: place?.top ?? 60, insetInlineStart: place?.start ?? 12 }}
             className="fixed z-sheet w-[320px] max-w-[calc(100vw-1rem)] rounded-card bg-surface p-1 text-ink shadow-e2 ring-1 ring-line"
           >
             <p aria-hidden="true" className="px-3 pb-1 pt-2 text-xs font-semibold leading-4 text-subtle">

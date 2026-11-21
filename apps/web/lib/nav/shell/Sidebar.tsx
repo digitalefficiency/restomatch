@@ -5,14 +5,15 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { cn } from '@/lib/components/cn';
-import { toRouteBadges, useNavBadges, type BadgeWords } from '@/lib/components/notifications';
+import { toRouteBadges, useNavBadges } from '@/lib/components/notifications';
 import { trpc } from '@/lib/trpc/client';
 import { useLocale, useT } from '@/lib/i18n/client';
 import { dirOf } from '@/lib/i18n/config';
 import { nav } from '@/lib/i18n/messages/nav';
 import { common } from '@/lib/i18n/messages/common';
 import { navShell } from '@/lib/i18n/messages/nav/shell';
-import { HOTKEYS } from '@/lib/hotkeys';
+import { HOTKEYS, keyLabel } from '@/lib/hotkeys';
+import { useIsApple } from '@/lib/prefs';
 import type { GroupKey, NavViewer } from '../types';
 import { defaultOpenGroups, planFolds } from '../groups';
 import { readGroupState, safeStorage, writeGroupState } from '../prefs';
@@ -27,7 +28,7 @@ import { UTILITY_ICONS } from '../icons';
 import { SUPPORT_LINKS } from '../support';
 import { useShellUi } from './ShellFrame';
 import { NavGroup, type FlyKey } from './NavGroup';
-import { NavIcon, NavItem, badgeWordsFor } from './NavItem';
+import { NavIcon, NavItem, badgeWordsFor, useNavBadgeWords } from './NavItem';
 import { AccountMenu, type AccountMenuProps } from './AccountMenu';
 import { showNavNote } from './NavTooltip';
 import css from './shell.module.css';
@@ -75,6 +76,7 @@ export function Sidebar({ viewer, restaurantName, roleLabel, switcher, subline, 
   const ts = useT(navShell) as unknown as (key: string, vars?: Record<string, string | number>) => string;
   const tc = useT(common) as unknown as (key: string) => string;
   const locale = useLocale();
+  const apple = useIsApple();
   const dir = dirOf(locale);
   const pathname = usePathname();
   const badges = useNavBadges();
@@ -98,15 +100,7 @@ export function Sidebar({ viewer, restaurantName, roleLabel, switcher, subline, 
   });
   const queue = useMemo(() => queueBadge(tasks.data?.tasks), [tasks.data]);
 
-  const words: BadgeWords = useMemo(
-    () => ({
-      items: (count) => t('badge.items', { count }),
-      atRisk: (amount) => t('badge.atRisk', { amount }),
-      owed: (amount) => t('badge.owed', { amount }),
-      blocking: t('badge.blocking'),
-    }),
-    [t],
-  );
+  const words = useNavBadgeWords();
 
   const valueOf = useCallback(
     (key: string): BadgeValueLike | undefined => (key === QUEUE_KEY ? queue : (badges[key] as BadgeValueLike | undefined)),
@@ -194,6 +188,13 @@ export function Sidebar({ viewer, restaurantName, roleLabel, switcher, subline, 
 
   const setGroup = useCallback(
     (g: GroupKey, isOpen: boolean, persist = true) => {
+      // Only the person's own choice is stored: this group, as they set it, merged into what they set
+      // before. The fit rule's folds and the groups a navigation opened are not choices, so they never land
+      // in storage and never override the role's defaults on a later visit (§4.2, §13).
+      if (persist) {
+        const store = safeStorage();
+        writeGroupState(viewer.role, { ...(readGroupState(viewer.role, store) ?? {}), [g]: isOpen }, store);
+      }
       setOpen((prev) => {
         const next = new Set(prev);
         if (isOpen) {
@@ -202,15 +203,10 @@ export function Sidebar({ viewer, restaurantName, roleLabel, switcher, subline, 
           justOpened.current = g;
           announceNext.current = true;
         } else next.delete(g);
-        if (persist) {
-          const state: Partial<Record<GroupKey, boolean>> = {};
-          for (const x of allGroups) state[x.group] = next.has(x.group);
-          writeGroupState(viewer.role, state, safeStorage());
-        }
         return next;
       });
     },
-    [allGroups, viewer.role],
+    [viewer.role],
   );
 
   /* ── favourites (≤ 5, per role on this device) ── */
@@ -549,7 +545,7 @@ export function Sidebar({ viewer, restaurantName, roleLabel, switcher, subline, 
     const look = opts.fav ? null : (looks.get(item.key) ?? null);
     const value = valueOf(item.key);
     const chord = ui.singleKeys ? CHORDS.get(item.href) : undefined;
-    const bw = opts.fav ? null : badgeWordsFor(look ? value : undefined, locale, words);
+    const bw = opts.fav ? null : badgeWordsFor(value, look, locale, words);
     return (
       <li key={`${opts.fav ? 'fav-' : ''}${item.key}`}>
         <NavItem
@@ -605,175 +601,180 @@ export function Sidebar({ viewer, restaurantName, roleLabel, switcher, subline, 
   const ToggleIcon = dir === 'rtl' ? (rail ? PanelRightOpen : PanelRightClose) : rail ? PanelLeftOpen : PanelLeftClose;
   const toggleLabel = ui.mode === 'overlay' ? ts('toggle.closeOverlay') : rail ? t('shell.expand') : t('shell.collapse');
   const SearchIcon = UTILITY_ICONS.search;
+  // Shortcut chips name the platform's modifier: "⌘K" on Apple, "Ctrl K" elsewhere (§1.1; lib/hotkeys keyLabel).
+  const modKey = (key: string) => (apple ? `${keyLabel('Mod', true)}${key}` : `${keyLabel('Mod', false)} ${key}`);
   const HelpIcon = UTILITY_ICONS.help;
 
   return (
-    <aside ref={asideRef} aria-label={ts('aside')} className={css.side} data-focus="inset" data-testid="sidebar" onKeyDown={onKeyDown}>
-      <div className={css.inner}>
-        <div className={css.head}>
-          {switcher ?? (
-            <div className={css.headBtn}>
-              <span aria-hidden="true" className={cn(css.mono, 'text-xs font-bold leading-4')}>
-                {restaurantName.trim().charAt(0) || 'R'}
-              </span>
-              <span className={css.headText}>
-                <span className="truncate text-sm font-semibold leading-[18px] text-ink">{restaurantName}</span>
-                <span className="truncate text-xs leading-4 text-subtle">{subline}</span>
-              </span>
-            </div>
-          )}
-        </div>
-        <div className={css.cmdk}>
-          <button
-            type="button"
-            className={cn(css.cmdkBtn, 'text-sm leading-5')}
-            onClick={() => ui.openPalette()}
-            aria-keyshortcuts="Control+K Meta+K"
-            data-testid="sidebar-cmdk"
-          >
-            <span className={css.ic}>
-              <SearchIcon aria-hidden="true" width={16} height={16} strokeWidth={1.75} />
-            </span>
-            <span className={css.cmdkLab}>{ts('search.field')}</span>
-            <kbd dir="ltr" aria-hidden="true" className={cn(css.kbd, 'font-sans text-xs font-medium leading-4 text-muted')}>
-              Ctrl K
-            </kbd>
-          </button>
-        </div>
-        <nav aria-label={t('mainLabel')} className={css.nav}>
-          <div
-            ref={scrollRef}
-            className={cn(css.scroll, clip.t && css.clipT, clip.b && css.clipB)}
-            data-testid="sidebar-groups"
-            onScroll={measureClip}
-          >
-            <ul className={cn(css.list, css.top)}>
-              <li>
-                <button
-                  type="button"
-                  className={cn(css.item, css.tile, css.searchTile, 'text-sm font-medium leading-5')}
-                  onClick={() => ui.openPalette()}
-                  aria-keyshortcuts="Control+K Meta+K"
-                  data-tip={ts('search.field')}
-                  data-tip-kbd="Ctrl K"
-                  data-tip-when="rail"
-                >
-                  <span className={css.ic}>
-                    <NavIcon icon={SearchIcon} />
-                  </span>
-                  <span className={css.lab}>{ts('search.field')}</span>
-                  <span aria-hidden="true" className={cn(css.short, 'text-xs font-medium leading-4')}>
-                    {ts('search.tile')}
-                  </span>
-                </button>
-              </li>
-              {model.top.map((item) => renderItem(item, { tile: true }))}
-            </ul>
-            {!flat && favItems.length > 0 ? (
-              <NavGroup
-                group="favourites"
-                label={ts('favourites')}
-                open
-                flyOpen={fly?.group === 'favourites'}
-                rail={rail}
-                here={false}
-                dot={null}
-                fav
-                words={groupWords(ts('favourites'))}
-                flyTop={fly?.group === 'favourites' ? flyTop : null}
-                onHeader={onHeader('favourites')}
-                headerRef={(el) => {
-                  if (el) headerRefs.current.set('favourites', el);
-                  else headerRefs.current.delete('favourites');
-                }}
-                flyRef={(el) => {
-                  if (el) flyRefs.current.set('favourites', el);
-                  else flyRefs.current.delete('favourites');
-                }}
-                {...tileHandlers('favourites')}
-              >
-                {favItems.map((i) => renderItem(i, { fav: true }))}
-              </NavGroup>
-            ) : null}
-            {!flat && model.groups.length > 0 ? <div className={css.gap} aria-hidden="true" /> : null}
-            {model.groups.map((g) => renderGroup(g.group, g.items))}
+    <>
+      <aside ref={asideRef} aria-label={ts('aside')} className={css.side} data-focus="inset" data-testid="sidebar" onKeyDown={onKeyDown}>
+        <div className={css.inner}>
+          <div className={css.head}>
+            {switcher ?? (
+              <div className={css.headBtn}>
+                <span aria-hidden="true" className={cn(css.mono, 'text-xs font-bold leading-4')}>
+                  {restaurantName.trim().charAt(0) || 'R'}
+                </span>
+                <span className={css.headText}>
+                  <span className="truncate text-sm font-semibold leading-[18px] text-ink">{restaurantName}</span>
+                  <span className="truncate text-xs leading-4 text-subtle">{subline}</span>
+                </span>
+              </div>
+            )}
           </div>
-          <div className={css.foot}>
-            {model.footer.map((g) => renderGroup(g.group, g.items))}
-            <ul className={cn(css.list, css.help, 'text-xs leading-4')} aria-label={t('shell.support')} data-testid="support-links-sidebar">
-              {SUPPORT_LINKS.map((l) => {
-                const Icon = UTILITY_ICONS[l.icon];
-                // A short visible word where the full name is long; the accessible name keeps the full words,
-                // which contain the visible ones (label in name, WCAG 2.5.3).
-                const full = t(`shell.${l.key}`);
-                const shown = l.key === 'help' ? full : ts(`short.${l.key}`);
-                return (
-                  <li key={l.key}>
-                    <Link
-                      href={l.href}
-                      prefetch={false}
-                      className={css.helpLink}
-                      aria-label={shown === full ? undefined : full}
-                    >
-                      <Icon aria-hidden="true" width={16} height={16} strokeWidth={1.75} />
-                      <span className={css.helpText}>{shown}</span>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-            <ul className={css.list}>
-              <li>
-                <Link
-                  href={SUPPORT_LINKS[0].href}
-                  prefetch={false}
-                  className={cn(css.item, css.tile, css.helpTile, 'text-sm font-medium leading-5')}
-                  data-tip={t('shell.support')}
-                  data-tip-when="rail"
-                >
-                  <span className={css.ic}>
-                    <NavIcon icon={HelpIcon} />
-                  </span>
-                  <span className={css.lab}>{t('shell.support')}</span>
-                  <span aria-hidden="true" className={cn(css.short, 'text-xs font-medium leading-4')}>
-                    {t('shell.help')}
-                  </span>
-                </Link>
-              </li>
-            </ul>
-          </div>
-        </nav>
-        <div className={css.user}>
-          <AccountMenu
-            userName={userName}
-            email={email}
-            roleLabel={roleLabel}
-            isPlatformAdmin={isPlatformAdmin}
-            receiverLangs={receiverLangs}
-            logout={logout}
-          />
-          {flat ? null : (
+          <div className={css.cmdk}>
             <button
-              ref={(el) => {
-                ui.toggleRef.current = el;
-              }}
               type="button"
-              className={css.ib}
-              onClick={ui.toggleRail}
-              aria-label={toggleLabel}
-              aria-expanded={ui.mode === 'overlay' || ui.mode === 'panel'}
-              aria-keyshortcuts="Control+B Meta+B"
-              data-testid="sidebar-toggle"
-              data-tip={toggleLabel}
-              data-tip-kbd="Ctrl B"
-              data-tip-text={ui.mode === 'overlay' ? undefined : ts('toggle.meaning')}
+              className={cn(css.cmdkBtn, 'text-sm leading-5')}
+              onClick={() => ui.openPalette()}
+              aria-keyshortcuts="Control+K Meta+K"
+              data-testid="sidebar-cmdk"
             >
-              <ToggleIcon aria-hidden="true" strokeWidth={1.75} />
+              <span className={css.ic}>
+                <SearchIcon aria-hidden="true" width={16} height={16} strokeWidth={1.75} />
+              </span>
+              <span className={css.cmdkLab}>{ts('search.field')}</span>
+              <kbd dir="ltr" aria-hidden="true" className={cn(css.kbd, 'font-sans text-xs font-medium leading-4 text-muted')}>
+                {modKey('K')}
+              </kbd>
             </button>
-          )}
+          </div>
+          <nav aria-label={t('mainLabel')} className={css.nav}>
+            <div
+              ref={scrollRef}
+              className={cn(css.scroll, clip.t && css.clipT, clip.b && css.clipB)}
+              data-testid="sidebar-groups"
+              onScroll={measureClip}
+            >
+              <ul className={cn(css.list, css.top)}>
+                <li>
+                  <button
+                    type="button"
+                    className={cn(css.item, css.tile, css.searchTile, 'text-sm font-medium leading-5')}
+                    onClick={() => ui.openPalette()}
+                    aria-keyshortcuts="Control+K Meta+K"
+                    data-tip={ts('search.field')}
+                    data-tip-kbd={modKey('K')}
+                    data-tip-when="rail"
+                  >
+                    <span className={css.ic}>
+                      <NavIcon icon={SearchIcon} />
+                    </span>
+                    <span className={css.lab}>{ts('search.field')}</span>
+                    <span aria-hidden="true" className={cn(css.short, 'text-xs font-medium leading-4')}>
+                      {ts('search.tile')}
+                    </span>
+                  </button>
+                </li>
+                {model.top.map((item) => renderItem(item, { tile: true }))}
+              </ul>
+              {!flat && favItems.length > 0 ? (
+                <NavGroup
+                  group="favourites"
+                  label={ts('favourites')}
+                  open
+                  flyOpen={fly?.group === 'favourites'}
+                  rail={rail}
+                  here={false}
+                  dot={null}
+                  fav
+                  words={groupWords(ts('favourites'))}
+                  flyTop={fly?.group === 'favourites' ? flyTop : null}
+                  onHeader={onHeader('favourites')}
+                  headerRef={(el) => {
+                    if (el) headerRefs.current.set('favourites', el);
+                    else headerRefs.current.delete('favourites');
+                  }}
+                  flyRef={(el) => {
+                    if (el) flyRefs.current.set('favourites', el);
+                    else flyRefs.current.delete('favourites');
+                  }}
+                  {...tileHandlers('favourites')}
+                >
+                  {favItems.map((i) => renderItem(i, { fav: true }))}
+                </NavGroup>
+              ) : null}
+              {!flat && model.groups.length > 0 ? <div className={css.gap} aria-hidden="true" /> : null}
+              {model.groups.map((g) => renderGroup(g.group, g.items))}
+            </div>
+            <div className={css.foot}>
+              {model.footer.map((g) => renderGroup(g.group, g.items))}
+              <ul className={cn(css.list, css.help, 'text-xs leading-4')} aria-label={t('shell.support')} data-testid="support-links-sidebar">
+                {SUPPORT_LINKS.map((l) => {
+                  const Icon = UTILITY_ICONS[l.icon];
+                  // A short visible word where the full name is long; the accessible name keeps the full words,
+                  // which contain the visible ones (label in name, WCAG 2.5.3).
+                  const full = t(`shell.${l.key}`);
+                  const shown = l.key === 'help' ? full : ts(`short.${l.key}`);
+                  return (
+                    <li key={l.key}>
+                      <Link
+                        href={l.href}
+                        prefetch={false}
+                        className={css.helpLink}
+                        aria-label={shown === full ? undefined : full}
+                      >
+                        <Icon aria-hidden="true" width={16} height={16} strokeWidth={1.75} />
+                        <span className={css.helpText}>{shown}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+              <ul className={css.list}>
+                <li>
+                  <Link
+                    href={SUPPORT_LINKS[0].href}
+                    prefetch={false}
+                    className={cn(css.item, css.tile, css.helpTile, 'text-sm font-medium leading-5')}
+                    data-tip={t('shell.support')}
+                    data-tip-when="rail"
+                  >
+                    <span className={css.ic}>
+                      <NavIcon icon={HelpIcon} />
+                    </span>
+                    <span className={css.lab}>{t('shell.support')}</span>
+                    <span aria-hidden="true" className={cn(css.short, 'text-xs font-medium leading-4')}>
+                      {t('shell.help')}
+                    </span>
+                  </Link>
+                </li>
+              </ul>
+            </div>
+          </nav>
+          <div className={css.user}>
+            <AccountMenu
+              userName={userName}
+              email={email}
+              roleLabel={roleLabel}
+              isPlatformAdmin={isPlatformAdmin}
+              receiverLangs={receiverLangs}
+              logout={logout}
+            />
+            {flat ? null : (
+              <button
+                ref={(el) => {
+                  ui.toggleRef.current = el;
+                }}
+                type="button"
+                className={css.ib}
+                onClick={ui.toggleRail}
+                aria-label={toggleLabel}
+                aria-expanded={ui.mode === 'overlay' || ui.mode === 'panel'}
+                aria-keyshortcuts="Control+B Meta+B"
+                data-testid="sidebar-toggle"
+                data-tip={toggleLabel}
+                data-tip-kbd={modKey('B')}
+                data-tip-text={ui.mode === 'overlay' ? undefined : ts('toggle.meaning')}
+              >
+                <ToggleIcon aria-hidden="true" strokeWidth={1.75} />
+              </button>
+            )}
+          </div>
         </div>
-      </div>
-      {flat ? null : <span aria-hidden="true" className={css.edge} onClick={ui.toggleRail} />}
-    </aside>
+      </aside>
+      {/* The edge strip sits just outside the aside (over the page's gutter), not over the menu's scrollbar. */}
+      {flat ? null : <span aria-hidden="true" className={css.edge} onClick={ui.toggleRail} data-testid="sidebar-edge" />}
+    </>
   );
 }

@@ -18,6 +18,7 @@ import { shellModel } from '../shellModel';
 import css from './shell.module.css';
 import { NavTooltip } from './NavTooltip';
 import { PaletteMount } from './PaletteMount';
+import { closeNavPopovers } from './events';
 import type { NavViewer } from '../types';
 
 /** ≥ 1280 · 1024–1279 · < 1024 (sidebar spec §7.1). */
@@ -241,6 +242,8 @@ export function ShellFrame({
     if (flat || busy.current) return;
     const vp = currentViewport();
     if (vp === 'narrow') return;
+    // §8 Ctrl/⌘ B guards: the menu's popovers close first.
+    closeNavPopovers();
     if (vp === 'mid') {
       setOverlayOpen((o) => !o);
       return;
@@ -251,6 +254,7 @@ export function ShellFrame({
   const setRailPref = useCallback(
     (on: boolean) => {
       if (flat || busy.current || railRef.current === on) return;
+      closeNavPopovers();
       applyRail(on, currentViewport());
     },
     [flat, currentViewport, applyRail],

@@ -46,6 +46,10 @@ export function NavTooltip({ mode }: { mode: NavMode }) {
   const ref = useRef<HTMLDivElement>(null);
   const timer = useRef<number | null>(null);
   const noteTimer = useRef<number | null>(null);
+  // The pointer-out grace (80 ms). Its own ref, so a new hover or a fit-rule note cancels it; and it reads the
+  // tip through tipRef, never a stale closure (a note shown inside the grace would otherwise be wiped at once).
+  const outTimer = useRef<number | null>(null);
+  const tipRef = useRef<Tip | null>(null);
   const lastHide = useRef(0);
   const overTip = useRef(false);
   const modeRef = useRef(mode);
@@ -56,8 +60,13 @@ export function NavTooltip({ mode }: { mode: NavMode }) {
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = null;
   };
+  const clearOut = () => {
+    if (outTimer.current !== null) window.clearTimeout(outTimer.current);
+    outTimer.current = null;
+  };
   const hide = useCallback(() => {
     clear();
+    clearOut();
     if (noteTimer.current !== null) window.clearTimeout(noteTimer.current);
     noteTimer.current = null;
     setTip((cur) => {
@@ -80,13 +89,24 @@ export function NavTooltip({ mode }: { mode: NavMode }) {
     return { el, title, kbd: el.dataset.tipKbd || undefined, text: el.dataset.tipText || undefined };
   };
 
-  useEffect(() => hide(), [pathname, hide]);
+  // A new page or a new presentation of the menu: the tip's trigger moved or went.
+  useEffect(() => hide(), [pathname, mode, hide]);
+  useEffect(() => {
+    tipRef.current = tip;
+  }, [tip]);
+  useEffect(() => () => {
+    clear();
+    clearOut();
+    if (noteTimer.current !== null) window.clearTimeout(noteTimer.current);
+  }, []);
 
   useEffect(() => {
     const onOver = (e: PointerEvent) => {
       if (e.pointerType !== 'mouse') return;
       const el = tipTarget(e.target);
       if (!el || !allowed(el) || el.hasAttribute('data-tip-focus-only')) return;
+      // Back on a trigger inside the grace: the pending hide is moot (the next tip replaces this one).
+      clearOut();
       if (tip?.el === el) return;
       clear();
       const wait = performance.now() - lastHide.current < SKIP_MS || tip ? 0 : HOVER_MS;
@@ -101,9 +121,11 @@ export function NavTooltip({ mode }: { mode: NavMode }) {
       const to = e.relatedTarget as Node | null;
       if (to && (el.contains(to) || ref.current?.contains(to))) return;
       clear();
+      clearOut();
       // Hoverable (WCAG 1.4.13): a short grace lets the pointer cross onto the tooltip.
-      window.setTimeout(() => {
-        if (!overTip.current && !tip?.note) hide();
+      outTimer.current = window.setTimeout(() => {
+        outTimer.current = null;
+        if (!overTip.current && !tipRef.current?.note) hide();
       }, 80);
     };
     const onFocusIn = (e: FocusEvent) => {
@@ -138,7 +160,10 @@ export function NavTooltip({ mode }: { mode: NavMode }) {
       const d = (e as CustomEvent<{ el: HTMLElement; text: string; ms: number }>).detail;
       if (!d?.el || !document.contains(d.el)) return;
       clear();
-      setTip({ el: d.el, title: d.text, note: true });
+      clearOut();
+      const note: Tip = { el: d.el, title: d.text, note: true };
+      tipRef.current = note;
+      setTip(note);
       if (noteTimer.current !== null) window.clearTimeout(noteTimer.current);
       noteTimer.current = window.setTimeout(hide, d.ms);
     };

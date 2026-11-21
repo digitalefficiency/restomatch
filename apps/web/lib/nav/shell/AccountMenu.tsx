@@ -12,6 +12,7 @@ import { nav } from '@/lib/i18n/messages/nav';
 import { navShell } from '@/lib/i18n/messages/nav/shell';
 import { originalProps } from '@/lib/i18n/original';
 import { useShellUi } from './ShellFrame';
+import { NAV_POPOVERS_CLOSE } from './events';
 import css from './shell.module.css';
 
 export interface AccountMenuProps {
@@ -60,6 +61,13 @@ export function AccountMenu({ userName, email, roleLabel, isPlatformAdmin, recei
   }, []);
 
   useEffect(() => setOpen(false), [pathname]);
+  // The menu changes presentation (Ctrl/⌘ B and the rest): close first; focus inside goes back to the button.
+  useEffect(() => {
+    if (!open) return;
+    const onClose = () => close(Boolean(menuRef.current?.contains(document.activeElement)));
+    window.addEventListener(NAV_POPOVERS_CLOSE, onClose);
+    return () => window.removeEventListener(NAV_POPOVERS_CLOSE, onClose);
+  }, [open, close]);
 
   // Place the menu: above the user row in the panel; beside the rail, bottom-aligned, when collapsed.
   useLayoutEffect(() => {
@@ -182,6 +190,8 @@ export function AccountMenu({ userName, email, roleLabel, isPlatformAdmin, recei
           <span className="truncate text-sm font-semibold leading-[18px] text-ink">
             <span {...originalProps(userName || email)}>{userName || email}</span>
           </span>
+          {/* A real space: on the rail this box is visually hidden and inline, and its two lines would run
+              together in the button's name ("רון אלמוגבעלים"); the panel's grid ignores it. */}{' '}
           <span className="truncate text-xs leading-4 text-subtle">{roleLabel}</span>
         </span>
         <span className="sr-only">, {t('menu.account')}</span>
@@ -195,7 +205,10 @@ export function AccountMenu({ userName, email, roleLabel, isPlatformAdmin, recei
           onKeyDown={onMenuKey}
           onBlur={onLeave}
           data-testid="account-menu"
-          style={{ insetInlineStart: pos?.start ?? 12, bottom: pos?.bottom ?? 64, visibility: pos ? 'visible' : 'hidden' }}
+          // No visibility toggle while it is placed: the layout effect places it before the first paint, and a
+          // hidden → visible flip makes every row (with the global reduced-motion transition) inherit "hidden"
+          // for a frame or more — nameless to a screen reader or an audit in that moment.
+          style={{ insetInlineStart: pos?.start ?? 12, bottom: pos?.bottom ?? 64 }}
           className="fixed z-sheet w-[223px] rounded-card bg-surface p-1 text-ink shadow-e2 ring-1 ring-line"
         >
           <div className="border-b border-line px-2 pb-2 pt-1.5">
