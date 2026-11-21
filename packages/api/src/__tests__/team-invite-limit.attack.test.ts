@@ -6,10 +6,10 @@ import { TEAM_INVITE_LIMIT } from '../routers/team';
 import { resetDb, seedTenant, type Tenant } from './fixtures';
 
 /**
- * W3-07b follow-up (security review, /join): a per-owner cap on invite churn at
- * the tRPC layer — invite, resend and revoke share TEAM_INVITE_LIMIT per inviting
- * user, so a revoke → re-invite loop cannot spam a mailbox or probe /join.
- * Add-only attack suite.
+ * W3-07b follow-up (security review, /join): a per-owner cap on invite mail at
+ * the tRPC layer — invite and resend (they send e-mail) share TEAM_INVITE_LIMIT
+ * per inviting user, so a revoke → re-invite loop cannot spam a mailbox or probe
+ * /join. Revoke is never budgeted (review r1 finding 2). Add-only attack suite.
  */
 const db = createDb(testDbUrl());
 let A: Tenant;
@@ -66,23 +66,32 @@ describe('team: per-owner invite limit', () => {
   });
 
   it('review finding 2: with the budget used up, the owner can still revoke a live invite', async () => {
-    // a live owner-role invite to a mistyped address, made directly (the budget is spent)
+    // Its own tenant, and it spends the budget itself: passes alone (-t) or in any order.
+    const C = await seedTenant(db, 'C');
+    const owner = ownerOf(C);
     await db.insert(invitations).values({
-      restaurantId: A.restaurantId,
+      restaurantId: C.restaurantId,
       email: 'owner@mistyped.test',
       role: 'owner',
-      tokenHash: 'f'.repeat(64),
-      invitedByUserId: A.ownerUserId,
+      tokenHash: 'e'.repeat(64),
+      invitedByUserId: C.ownerUserId,
       status: 'pending',
       expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000),
     });
-    const owner = ownerOf(A);
-    await expect(owner.team.invite({ email: 'another@mailbox.test', role: 'chef' })).rejects.toMatchObject({
-      code: 'TOO_MANY_REQUESTS',
-    });
-    const id = await pendingId('owner@mistyped.test');
-    await expect(owner.team.revokeInvite({ id: id! })).resolves.toBeTruthy();
-    expect(await pendingId('owner@mistyped.test')).toBeUndefined();
+    let refused: unknown = null;
+    for (let i = 0; i <= TEAM_INVITE_LIMIT.limit && !refused; i += 1) {
+      await owner.team.invite({ email: `spent${i}@mailbox.test`, role: 'chef' }).catch((e: unknown) => {
+        refused = e;
+      });
+    }
+    expect(refused).toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+    const [live] = await db
+      .select({ id: invitations.id })
+      .from(invitations)
+      .where(and(eq(invitations.restaurantId, C.restaurantId), eq(invitations.email, 'owner@mistyped.test'), eq(invitations.status, 'pending')));
+    await expect(owner.team.revokeInvite({ id: live!.id })).resolves.toBeTruthy();
+    const [after] = await db.select({ status: invitations.status }).from(invitations).where(eq(invitations.id, live!.id));
+    expect(after?.status).toBe('revoked');
   });
 
   it("one owner's budget never blocks another owner", async () => {

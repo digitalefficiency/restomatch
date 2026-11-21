@@ -1,5 +1,5 @@
 import 'server-only';
-import { createHash, createHmac, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import {
   and,
   count,
@@ -234,7 +234,11 @@ const invTotalFailId = (invId: string) => `join-failtotal-inv:${invId}`;
 export type IssueResult =
   | { ok: true; code: string; email: string; locale: 'he' | 'en' | null }
   | { ok: false; reason: Exclude<InviteState, 'valid'> | 'rate' }
-  /** An existing account: no code. `throttled` = the per-address send cap is hit (same cap as a new address). */
+  /**
+   * An existing account: no code is sent (the caller e-mails a sign-in link). A
+   * decoy row is written when not throttled. `throttled` = the per-address send
+   * cap is hit (same cap as a new address); the caller answers like a sent e-mail.
+   */
   | { ok: false; reason: 'hasPassword'; throttled: boolean };
 
 /**
@@ -245,28 +249,57 @@ export async function issueJoinCode(token: string, now = Date.now()): Promise<Is
   const row = await inviteRowByToken(token);
   const state = stateOf(row, now);
   if (!row || state !== 'valid') return { ok: false, reason: state === 'valid' ? 'notFound' : state };
-  // Per-address send cap FIRST (durable; reserve, then count — holds when the limiter
-  // fails open), for existing and new addresses alike, so the cap is no account oracle.
+  // Per-address send cap FIRST, for existing and new addresses alike, so the cap
+  // is no account oracle. Durable (holds when the limiter fails open). Count
+  // first: at the cap, return throttled WITHOUT inserting, so a token holder
+  // cannot keep the cap up for free (review r2 finding 2). Below it, reserve,
+  // then recount (concurrent sends can't overshoot).
   const addr = joinAddressKey(row.email);
-  await authDb.insert(verificationTokens).values([
-    { identifier: sendId(addr), token: randomUUID(), expires: new Date(now + 15 * 60 * 1000) },
-    { identifier: sendDayId(addr), token: randomUUID(), expires: new Date(now + 24 * 60 * 60 * 1000) },
-  ]);
-  const [sent15, sentDay] = await Promise.all([countLive(sendId(addr), now), countLive(sendDayId(addr), now)]);
-  const throttled = sent15 > JOIN_CODE_SENDS_PER_15_MIN || sentDay > JOIN_CODE_SENDS_PER_DAY;
-  // An existing account gets a sign-in link from the caller instead of a code
-  // (unless throttled — then the caller answers "rate", exactly as for a new address).
-  if (await accountExists(row.email)) return { ok: false, reason: 'hasPassword', throttled };
-  if (throttled) return { ok: false, reason: 'rate' };
+  const sendCaps = [JOIN_CODE_SENDS_PER_15_MIN, JOIN_CODE_SENDS_PER_DAY];
+  const sendIds = [sendId(addr), sendDayId(addr)];
+  const preSends = await Promise.all(sendIds.map((id) => countLive(id, now)));
+  let throttled = preSends.some((c, i) => c >= sendCaps[i]!);
+  if (!throttled) {
+    await authDb.insert(verificationTokens).values([
+      { identifier: sendId(addr), token: randomUUID(), expires: new Date(now + 15 * 60 * 1000) },
+      { identifier: sendDayId(addr), token: randomUUID(), expires: new Date(now + 24 * 60 * 60 * 1000) },
+    ]);
+    const postSends = await Promise.all(sendIds.map((id) => countLive(id, now)));
+    throttled = postSends.some((c, i) => c > sendCaps[i]!);
+  }
+  // A throttled send leaves the code rows untouched, for both kinds of address.
+  // The caller answers it like a sent e-mail and sends nothing.
+  const existing = await accountExists(row.email);
+  if (throttled) return existing ? { ok: false, reason: 'hasPassword', throttled: true } : { ok: false, reason: 'rate' };
+  // Unthrottled: a code row is written either way, with the same TTL and the same
+  // transaction shape. A new address gets the real code. An existing account (the
+  // caller e-mails it a sign-in link) gets a DECOY: a random digest no 6-digit code
+  // can match. So completeJoin reads and charges the same counters in both cases:
+  // no cross-invite account oracle (review r2 finding 1). Even if a decoy matched,
+  // completeJoin refuses an existing account (B5).
+  //
+  // A decoy never replaces a live row: a real code minted before the account
+  // appeared keeps its token (completeJoin refuses it with 'hasPassword'). Its
+  // expiry moves to now + TTL, exactly as a resend's fresh code would, so how
+  // long a code row stays live does not tell the two cases apart either.
   const code = generateCode();
   await authDb.transaction(async (tx) => {
+    if (existing) {
+      const refreshed = await tx
+        .update(verificationTokens)
+        .set({ expires: new Date(now + JOIN_CODE_TTL_MS) })
+        .where(and(eq(verificationTokens.identifier, codeId(row.id)), gt(verificationTokens.expires, new Date(now))))
+        .returning({ identifier: verificationTokens.identifier });
+      if (refreshed.length > 0) return;
+    }
     await tx.delete(verificationTokens).where(eq(verificationTokens.identifier, codeId(row.id)));
     await tx.insert(verificationTokens).values({
       identifier: codeId(row.id),
-      token: codeDigest(row, code),
+      token: existing ? randomBytes(32).toString('hex') : codeDigest(row, code),
       expires: new Date(now + JOIN_CODE_TTL_MS),
     });
   });
+  if (existing) return { ok: false, reason: 'hasPassword', throttled: false };
   return {
     ok: true,
     code,

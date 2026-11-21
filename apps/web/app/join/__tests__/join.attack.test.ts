@@ -339,20 +339,19 @@ describe('join attack: no-code attempts never touch the address budget (security
 
   it('(a) earlier address markers from other restaurants do not change the inviting owner\'s trail', async () => {
     const email = uniqueEmail('seeded');
-    // 19 earlier failures on this address (e.g. other restaurants, within 7 days)
-    await ownerDb.insert(verificationTokens).values(
-      Array.from({ length: JOIN_CODE_MAX_TOTAL_ATTEMPTS - 1 }, () => ({
-        identifier: `join-failtotal:${joinAddressKey(email)}`,
-        token: randomBytes(16).toString('hex'),
-        expires: new Date(Date.now() + 6 * 24 * 3600 * 1000),
-      })),
-    );
+    // the address is AT both ceilings from earlier failures (e.g. other restaurants)
+    const seed = (identifier: string, n: number, ms: number) =>
+      Array.from({ length: n }, () => ({ identifier, token: randomBytes(16).toString('hex'), expires: new Date(Date.now() + ms) }));
+    await ownerDb.insert(verificationTokens).values([
+      ...seed(`join-failtotal:${joinAddressKey(email)}`, JOIN_CODE_MAX_TOTAL_ATTEMPTS, 6 * 24 * 3600 * 1000),
+      ...seed(`join-fail:${joinAddressKey(email)}`, JOIN_CODE_MAX_ATTEMPTS, JOIN_CODE_TTL_MS),
+    ]);
     const fresh = uniqueEmail('unseeded');
     const seeded = await makeInvite({ restaurantId: await makeRestaurant(), email });
     const control = await makeInvite({ restaurantId: await makeRestaurant(), email: fresh });
     // no code sent: the owner posts guesses straight away
     expect(await trail(seeded.token, JOIN_CODE_MAX_ATTEMPTS + 2)).toEqual(await trail(control.token, JOIN_CODE_MAX_ATTEMPTS + 2));
-    expect((await addrRows(email)).length).toBe(JOIN_CODE_MAX_TOTAL_ATTEMPTS - 1); // nothing added
+    expect((await addrRows(email)).length).toBe(JOIN_CODE_MAX_TOTAL_ATTEMPTS + JOIN_CODE_MAX_ATTEMPTS); // nothing added
   });
 
   it('(b) 21 no-code attempts through tenant A do not lock the address out of tenant B', async () => {
@@ -369,13 +368,95 @@ describe('join attack: no-code attempts never touch the address budget (security
     expect(await completeJoin({ token: b.token, code, name: 'דנה', password: PASSWORD }, now)).toMatchObject({ ok: true });
   });
 
-  it('attempts past a per-invitation lock insert no more markers', async () => {
-    const { token, id } = await makeInvite({ restaurantId: await makeRestaurant(), email: uniqueEmail('no-growth') });
+  /** Every attempt-counter row an invite can touch: its own two and its address's two. */
+  const allCounters = async (invId: string, email: string) =>
+    (
+      await ownerDb
+        .select()
+        .from(verificationTokens)
+        .where(
+          sql`${verificationTokens.identifier} in (${`join-fail-inv:${invId}`}, ${`join-failtotal-inv:${invId}`}, ${`join-fail:${joinAddressKey(email)}`}, ${`join-failtotal:${joinAddressKey(email)}`})`,
+        )
+    ).length;
+
+  it('attempts past a per-invitation lock insert no more markers (all four counters)', async () => {
+    const email = uniqueEmail('no-growth');
+    const { token, id } = await makeInvite({ restaurantId: await makeRestaurant(), email });
     await trail(token, JOIN_CODE_MAX_ATTEMPTS + 1);
-    const count = async () =>
-      (await ownerDb.select().from(verificationTokens).where(eq(verificationTokens.identifier, `join-fail-inv:${id}`))).length;
-    const before = await count();
+    const before = await allCounters(id, email);
     expect(await trail(token, 5)).toEqual(Array(5).fill('locked'));
-    expect(await count()).toBe(before);
+    expect(await allCounters(id, email)).toBe(before);
+  });
+
+  it('live-code variant: invite X spends the address window, invite Y (with a code) is locked and inserts no rows', async () => {
+    const email = uniqueEmail('no-growth-live');
+    const x = await makeInvite({ restaurantId: await makeRestaurant(), email });
+    const codeX = await issued(x.token);
+    for (let i = 0; i < JOIN_CODE_MAX_ATTEMPTS; i += 1) {
+      await completeJoin({ token: x.token, code: codeX === '000000' ? '111111' : '000000', name: 'דנה', password: PASSWORD });
+    }
+    const y = await makeInvite({ restaurantId: await makeRestaurant(), email });
+    const codeY = await issued(y.token);
+    const before = await allCounters(y.id, email);
+    expect(await completeJoin({ token: y.token, code: codeY, name: 'דנה', password: PASSWORD })).toMatchObject({ reason: 'locked' });
+    expect(await allCounters(y.id, email)).toBe(before);
+  });
+});
+
+describe('join attack: review r2 — no cross-invite account oracle, no free send-cap renewal', () => {
+  const revoke = (id: string) => ownerDb.update(invitations).set({ status: 'revoked' }).where(eq(invitations.id, id));
+
+  /** The r2 probe: invite A, send, 5 wrong guesses; revoke; invite B (another restaurant), send, 1 guess. */
+  async function probe(email: string): Promise<string[]> {
+    const out: string[] = [];
+    const a = await makeInvite({ restaurantId: await makeRestaurant(), email });
+    const sa = await issueJoinCode(a.token);
+    const wrongA = sa.ok && sa.code === '000000' ? '111111' : '000000';
+    for (let i = 0; i < JOIN_CODE_MAX_ATTEMPTS; i += 1) {
+      const r = await completeJoin({ token: a.token, code: wrongA, name: 'דנה', password: PASSWORD });
+      out.push(r.ok ? 'ok' : publicCompleteReason(r.reason));
+    }
+    await revoke(a.id);
+    const b = await makeInvite({ restaurantId: await makeRestaurant(), email });
+    const sb = await issueJoinCode(b.token);
+    const wrongB = sb.ok && sb.code === '000000' ? '111111' : '000000';
+    const r = await completeJoin({ token: b.token, code: wrongB, name: 'דנה', password: PASSWORD });
+    out.push(r.ok ? 'ok' : publicCompleteReason(r.reason));
+    return out;
+  }
+
+  it('the A-5-guesses / B-1-guess trail is identical for an existing account and a new address', async () => {
+    const existing = uniqueEmail('r2-existing');
+    await makeUser(existing, 'Has an account');
+    const trailExisting = await probe(existing);
+    const trailNew = await probe(uniqueEmail('r2-new'));
+    expect(trailExisting).toEqual(trailNew);
+    expect(trailNew).toEqual([...Array(JOIN_CODE_MAX_ATTEMPTS).fill('wrongCode'), 'locked']);
+  });
+
+  it('an existing account gets a decoy row (no code it could ever receive) and still never gets a password', async () => {
+    const email = uniqueEmail('r2-decoy');
+    const uid = await makeUser(email, 'Has an account');
+    const { token, id } = await makeInvite({ restaurantId: await makeRestaurant(), email });
+    expect(await issueJoinCode(token)).toMatchObject({ ok: false, reason: 'hasPassword', throttled: false });
+    const [row] = await ownerDb.select().from(verificationTokens).where(eq(verificationTokens.identifier, `join:${id}`));
+    expect(row?.token).toMatch(/^[0-9a-f]{64}$/);
+    expect(await ownerDb.select().from(userCredentials).where(eq(userCredentials.userId, uid))).toEqual([]);
+  });
+
+  it('at the send cap, more sends insert no send markers (a token holder cannot keep the cap up for free)', async () => {
+    const email = uniqueEmail('r2-sendcap');
+    const sendRows = async () =>
+      (
+        await ownerDb
+          .select()
+          .from(verificationTokens)
+          .where(sql`${verificationTokens.identifier} in (${`join-send:${joinAddressKey(email)}`}, ${`join-send-d:${joinAddressKey(email)}`})`)
+      ).length;
+    const { token } = await makeInvite({ restaurantId: await makeRestaurant(), email });
+    for (let i = 0; i < JOIN_CODE_SENDS_PER_15_MIN; i += 1) expect((await issueJoinCode(token)).ok).toBe(true);
+    const atCap = await sendRows();
+    for (let i = 0; i < 3; i += 1) expect(await issueJoinCode(token)).toMatchObject({ ok: false, reason: 'rate' });
+    expect(await sendRows()).toBe(atCap);
   });
 });

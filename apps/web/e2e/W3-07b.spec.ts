@@ -59,7 +59,11 @@ async function inviteFromTeamScreen(page: Page, email: string): Promise<string> 
 test.describe('W3-07b join', () => {
   test.use({ storageState: OWNER_STATE });
 
-  test.beforeAll(async () => {
+  // Before EACH test: the soft per-IP send limiter (10 / 15 min) is shared by the
+  // whole run from localhost, and the send-cap tests spend most of it. Only the
+  // fail-open limiter rows go; the durable per-address caps (verification_tokens)
+  // are what the tests assert, and they stay.
+  test.beforeEach(async () => {
     const sql = e2eSql();
     await sql`delete from rate_limit_counters`;
     await sql.end();
@@ -162,6 +166,57 @@ test.describe('W3-07b join', () => {
     // ... and nothing was sent
     await new Promise((r) => setTimeout(r, 1500));
     await expect(readFile(JOIN_CODE_FILE, 'utf8')).rejects.toThrow();
+    await ctx.close();
+  });
+
+  test('review r2: the quiet send cap holds for an existing account too (sent=1, nothing sent)', async ({ page, browser }) => {
+    const email = `xcapacct${Date.now()}z@oracle.e2e.test`;
+    const SIGNIN_FILE = MAGIC_LINK_FILE.replace('magic-link', 'join-signin');
+    const db = e2eSql();
+    await db`insert into users (email, name, email_verified) values (${email}, 'Existing account', now())`;
+    await db.end();
+    const first = await inviteFromTeamScreen(page, email);
+    const ctx = await browser.newContext({ storageState: undefined, locale: 'he-IL' });
+    const base = test.info().project.use.baseURL!;
+    await ctx.addCookies([
+      { name: 'rm_cookie_consent', value: 'necessary', url: base },
+      { name: 'rm_locale', value: 'he', url: base },
+    ]);
+    const anon = await ctx.newPage();
+    const sentAt = async (): Promise<number> => {
+      try {
+        const v = JSON.parse(await readFile(SIGNIN_FILE, 'utf8')) as { to: string; at: number };
+        return v.to === email ? v.at : 0;
+      } catch {
+        return 0;
+      }
+    };
+    const sendAndWait = async (click: () => Promise<void>) => {
+      const before = await sentAt();
+      await click();
+      await expect.poll(sentAt, { timeout: 30_000 }).toBeGreaterThan(before);
+    };
+    await unlink(SIGNIN_FILE).catch(() => {});
+    await anon.goto(first);
+    await sendAndWait(() => anon.getByTestId('join-send-code').click());
+    await expect(anon.getByTestId('join-code-form')).toBeVisible();
+    for (let i = 0; i < 2; i += 1) {
+      await sendAndWait(() => anon.getByRole('button', { name: 'שליחת קוד חדש' }).click());
+      await expect(anon.getByTestId('join-code-form')).toBeVisible();
+    }
+    const db2 = e2eSql();
+    await db2`update invitations set status = 'revoked' where email = ${email} and status = 'pending'`;
+    await db2.end();
+    const second = await inviteFromTeamScreen(page, email);
+    await unlink(SIGNIN_FILE).catch(() => {});
+    await anon.goto(second);
+    await anon.getByTestId('join-send-code').click();
+    await anon.waitForURL(/step=code/);
+    const url = new URL(anon.url());
+    expect(url.searchParams.get('sent')).toBe('1');
+    expect(url.searchParams.get('e')).toBeNull();
+    await new Promise((r) => setTimeout(r, 1500));
+    await expect(readFile(SIGNIN_FILE, 'utf8')).rejects.toThrow();
     await ctx.close();
   });
 
