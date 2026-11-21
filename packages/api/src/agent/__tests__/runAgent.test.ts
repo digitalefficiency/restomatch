@@ -5,6 +5,7 @@ import { __resetAgentBudget } from '../budget';
 import { AgentDbError, callTool, runInAgentTx, ToolNotAllowedError } from '../caller';
 import { HE } from '../copy/he';
 import { __resetAgentMemory, __setAgentClient, runAgent, setAgentTurnSink, type AgentTurnEvent } from '../index';
+import { STATIC_PROMPT } from '../prompt';
 import { moneyLeaks } from '../redact';
 import { appRoleDb, fakeBinding, final, ownerDb, recordedModel, setFeatures, toolResults, toolUse } from './helpers';
 
@@ -226,8 +227,10 @@ describe('grounding, ₪ and links (§5.5, §5.6)', () => {
     expect(events.at(-1)).toMatchObject({ automationId: 'WA', role: 'owner', intent: 'leak', grounded: true, tools: ['leak_hero'] });
     expect(JSON.stringify(events.at(-1))).not.toContain('דלף');
     // prompt caching on the static prefix; no tenant data in it
-    expect(m.bodies[0]!.system[0].cache_control).toEqual({ type: 'ephemeral' });
-    expect(m.bodies[0]!.system[0].text).not.toContain(A.restaurantId);
+    // Ask's loop carries the request; the static prefix leads the system prompt and holds no tenant data
+    expect(m.bodies[0]!.system.startsWith(STATIC_PROMPT)).toBe(true);
+    expect(STATIC_PROMPT).not.toContain(A.restaurantId);
+    expect(m.bodies[0]!.system).not.toContain(A.restaurantId);
   });
 
   it('₪ written by the model is replaced by the facts text', async () => {

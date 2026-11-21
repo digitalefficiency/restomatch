@@ -50,7 +50,8 @@ export const PO_INPUT_JSON = {
 /** Run one of Ask's read-only leak tools in the binding's tenant transaction. */
 export async function runAskTool(ctx: ToolRunContext, name: ToolName, input: unknown): Promise<ToolRunOutput> {
   const out = await ctx.tx((tx) =>
-    runTool(name, input, { db: tx, restaurantId: ctx.binding.restaurantId, now: ctx.now, locale: 'he' }),
+    // role from the binding: Ask's own role table (ask/roles.ts) is the second lock.
+    runTool(name, input, { db: tx, restaurantId: ctx.binding.restaurantId, now: ctx.now, locale: 'he', role: ctx.binding.role }),
   );
   return { data: dropMissingOnInvoice(out.data), links: out.links.map((l) => l.href) };
 }
