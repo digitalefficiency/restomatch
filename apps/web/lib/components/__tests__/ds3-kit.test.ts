@@ -322,7 +322,7 @@ describe('change against a previous period (kit "שינוי מול תקופה ק
     const bad = render(h(Delta, { current: 846, previous: 760, goodWhen: 'down' }));
     expect(bad).toContain('data-delta="bad"');
     expect(bad).toMatch(/<span data-delta="bad" class="[^"]*text-fg[^"]*"/);
-    expect(bad).toMatch(/<svg[^>]*class="[^"]*text-danger-dot/);
+    expect(bad).toMatch(/<svg[^>]*class="[^"]*stroke-danger-dot/);
     // the amount itself is never red
     expect(bad.replace(/<svg[\s\S]*?<\/svg>/g, '')).not.toContain('text-danger');
     const flat = render(h(Delta, { current: 760, previous: 760, goodWhen: 'down' }));
