@@ -254,9 +254,11 @@ test('bar labels never truncate at 360 px in he / en / ar / ru', async ({ browse
   for (const role of ['owner', 'manager', 'bookkeeper'] as const) {
     for (const locale of ['he', 'en', 'ar', 'ru']) {
       const page = await open(browser, baseURL!, role, locale, { ...PHONE, viewport: { width: 360, height: 780 } });
+      // The visible labels (DS3-02: each link also holds its badge's meaning as visually hidden text, §9, and a
+      // dot that overhangs the icon box, so "the last span" is no longer the label).
       const cut = await page
         .getByTestId('bottom-bar')
-        .locator('li span:last-child')
+        .locator('li [data-bar-label]')
         .evaluateAll((els) => els.filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent));
       expect(cut, `${role} ${locale}`).toEqual([]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${role} ${locale} overflow`).toBe(true);
