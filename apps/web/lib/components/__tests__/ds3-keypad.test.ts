@@ -38,6 +38,12 @@ describe('the typing rule: Latin digits, a point, 4 + 3 digits', () => {
 
   it('whole units take no point', () => {
     expect(typeAll(['1', '.', '2'], '', false, true)).toBe('12');
+    // the point does nothing at all, not even replace the value the sheet opened on
+    expect(typeKeypadKey('23', true, '.', true)).toBe('23');
+    expect(typeKeypadKey('23', false, '.', true)).toBe('23');
+    // and the sheet keeps the selection (no state change), from the screen or a keyboard
+    const src = readFileSync(new URL('../overlay/QtyKeypad.tsx', import.meta.url), 'utf8');
+    expect(src.match(/if \(k === '\.' && whole\) return;/g)).toHaveLength(2);
   });
 
   it('parses what can be counted, and nothing else', () => {

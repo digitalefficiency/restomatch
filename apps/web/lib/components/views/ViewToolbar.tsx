@@ -41,6 +41,7 @@ import {
   SEVERITIES,
   STATUSES,
   hasFilters,
+  resetView,
   serializeView,
   type ViewFilters,
   type ViewState,
@@ -456,7 +457,7 @@ export function ViewToolbar(props: ViewToolbarProps) {
         <button
           type="button"
           className={cnMerge(chip, 'border-transparent bg-transparent px-2')}
-          onClick={() => go({ ...DEFAULT_VIEW })}
+          onClick={() => go(resetView(view))}
           aria-label={t('toolbar.reset')}
           title={t('toolbar.reset')}
         >

@@ -14,7 +14,7 @@ export const he = {
     density: 'צפיפות',
     from: 'מתאריך',
     to: 'עד תאריך',
-    apply: 'החל',
+    apply: 'החלה',
     filters: 'סינון',
     clearFilters: 'ניקוי הסינון',
     reset: 'איפוס תצוגה',

@@ -591,6 +591,7 @@ describe('handoff corrections (CHANGES.md 14.11, DS3-01)', () => {
     const { he: viewsHe } = await import('../../i18n/messages/views/he');
     const { he: commonHe } = await import('../../i18n/messages/common/he');
     expect(viewsHe.toolbar.clearFilters).toBe('ניקוי הסינון');
+    expect(viewsHe.toolbar).toMatchObject({ apply: 'החלה', save: 'שמירה', delete: 'מחיקה', reset: 'איפוס תצוגה' });
     expect(JSON.stringify(commonHe)).not.toMatch(/הכל(?!ו)/);
   });
 });
@@ -821,5 +822,54 @@ describe('review fixes (fidelity to the reference)', () => {
     expect(render(h(Card, { elevated: true }, 'x'))).toContain('data-elevated="true"');
     expect(read('Calculation.tsx')).toContain('rounded-card border border-line-rule bg-surface p-3');
     expect(read('Tooltip.tsx')).toContain('duration-menu-tooltip');
+  });
+});
+
+describe('review fixes (correctness)', () => {
+  it('a change shown as ₪0 is no change: never "עלייה של ₪0" with an arrow; the basis stays in the sentence', async () => {
+    const { Delta } = await import('../money/Delta');
+    const tiny = render(h(Delta, { change: { agorot: 40, share: null }, goodWhen: 'down' }));
+    expect(tiny).toContain('data-delta="flat"');
+    expect(textOf(tiny)).toBe('ללא שינוי מהותי');
+    expect(textOf(tiny)).not.toContain('₪0');
+    const tinyAbout = render(h(Delta, { change: { agorot: -49, share: -0.001 }, goodWhen: 'down', about: 'לעומת אותם ימים בספטמבר' }));
+    expect(textOf(tinyAbout)).toBe('ללא שינוי מהותי לעומת אותם ימים בספטמבר');
+    // shekel figures: under half a shekel rounds to ₪0 inline
+    expect(render(h(Delta, { current: 100.3, previous: 100, goodWhen: 'down' }))).toContain('data-delta="flat"');
+    // from half a shekel the change shows, as before
+    const half = render(h(Delta, { change: { agorot: 50, share: null }, goodWhen: 'down' }));
+    expect(half).toContain('data-delta="bad"');
+    expect(textOf(half)).toContain('עלייה של');
+    // no change at all keeps its own words, with the basis
+    expect(textOf(render(h(Delta, { current: 5, previous: 5, about: 'בדליפה' })))).toBe('ללא שינוי בדליפה');
+    // counts and percents are not money: a small count change still shows
+    expect(render(h(Delta, { current: 1, previous: 0, kind: 'count', goodWhen: 'up' }))).toContain('data-delta="good"');
+  });
+
+  it('NumberField: leaving an unedited field saves nothing; the arrows and steppers start from what is typed', async () => {
+    const { blurAction, fieldNumber } = await import('../form/NumberField');
+    // a stored 2.5 shown as "3" (0 decimals), or a stored 25 above max: untouched, nothing is committed
+    expect(blurAction('3', '3', 0)).toEqual({ kind: 'none' });
+    expect(blurAction('25', '25', 0)).toEqual({ kind: 'none' });
+    expect(blurAction('abc', '3', 0)).toEqual({ kind: 'reset' });
+    expect(blurAction('', '3', 0)).toEqual({ kind: 'reset' });
+    expect(blurAction('4', '3', 0)).toEqual({ kind: 'commit', n: 4 });
+    expect(blurAction('2,5', '3', 1)).toEqual({ kind: 'commit', n: 2.5 });
+    expect(fieldNumber('7', 3, 0)).toBe(7);
+    expect(fieldNumber('7.5', 3, 1)).toBe(7.5);
+    expect(fieldNumber('x', 3, 0)).toBe(3);
+    const src = readFileSync(new URL('../form/NumberField.tsx', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/commit\(value [+-] step\)/);
+    expect(src.match(/commit\(base\(\) [+-] step\)/g)).toHaveLength(4);
+  });
+
+  it("the quantity sheet names the item also when nothing was ordered (an arrival that wasn't on the order)", async () => {
+    const { QtyKeypad } = await import('../overlay/QtyKeypad');
+    const noop = () => {};
+    const named = render(h(QtyKeypad, { open: true, onClose: noop, onConfirm: noop, name: 'עגבניות שרי', unit: 'ק״ג' }));
+    expect(textOf(named)).toContain('עגבניות שרי');
+    const ordered = render(h(QtyKeypad, { open: true, onClose: noop, onConfirm: noop, name: 'עגבניות שרי', unit: 'ק״ג', ordered: 6.5 }));
+    expect(textOf(ordered)).toContain('עגבניות שרי');
+    expect(textOf(ordered)).toContain('6.5');
   });
 });

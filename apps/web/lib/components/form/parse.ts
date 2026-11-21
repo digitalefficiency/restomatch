@@ -90,6 +90,7 @@ export function formatKeypadText(value: number): string {
 export type KeypadKey = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '.' | 'del';
 
 export function typeKeypadKey(text: string, first: boolean, key: KeypadKey, whole = false): string {
+  if (key === '.' && whole) return text; // whole units take no point: nothing changes, not even a selected value
   if (key === 'del') return first ? '' : text.slice(0, -1);
   const t = first ? '' : text;
   const dot = t.indexOf('.');

@@ -167,6 +167,14 @@ export function parseView(sp: ParamSource, defaults?: { density?: Density }): Vi
   };
 }
 
+/**
+ * "איפוס תצוגה": the page's own defaults. The density is the one the page parsed with (the preference, via
+ * `parseView(sp, defaults)`), so a reset never flips the switch to the global default or loses a later choice.
+ */
+export function resetView(v: ViewState): ViewState {
+  return v.densityDefault ? { ...DEFAULT_VIEW, density: v.densityDefault, densityDefault: v.densityDefault } : { ...DEFAULT_VIEW };
+}
+
 /** Serialize a view; defaults are omitted so the plain URL stays the default view. */
 export function serializeView(v: ViewState, keep?: URLSearchParams): URLSearchParams {
   const out = new URLSearchParams();

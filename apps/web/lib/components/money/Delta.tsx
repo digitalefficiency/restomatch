@@ -52,7 +52,9 @@ export function Delta({
   const diff = change ? change.agorot : current - previous;
   const abs = Math.abs(diff);
   const share = change ? (change.share === null ? null : Math.abs(change.share)) : previous !== 0 ? abs / Math.abs(previous) : null;
-  const negligible = diff !== 0 && flatBelow !== undefined && share !== null && share < flatBelow;
+  // What the reader sees decides: a change shown as ₪0 (under half a shekel) is never "עלייה של ₪0" with a red arrow.
+  const roundsToZero = change ? Math.round(abs / 100) === 0 : kind === 'ils' ? Math.round(abs) === 0 : false;
+  const negligible = diff !== 0 && (roundsToZero || (flatBelow !== undefined && share !== null && share < flatBelow));
   const dir = diff === 0 || negligible ? 'same' : diff > 0 ? 'up' : 'down';
   const meaning = dir === 'same' || goodWhen === 'neutral' ? 'flat' : dir === goodWhen ? 'good' : 'bad';
   const Icon = dir === 'up' ? TrendingUp : dir === 'down' ? TrendingDown : Minus;
@@ -72,7 +74,10 @@ export function Delta({
       {/* The arrow is a drawing in the leak indicator (DS3-00 generates the dot roles for strokes and fills, never text). */}
       <Icon className={cn('h-4 w-4 shrink-0', meaning === 'bad' && 'stroke-danger-dot')} aria-hidden="true" />
       {dir === 'same' ? (
-        <span>{t(negligible ? 'ds.delta.negligible' : 'ds.delta.same')}</span>
+        <span>
+          {t(negligible ? 'ds.delta.negligible' : 'ds.delta.same')}
+          {about ? ` ${about}` : null}
+        </span>
       ) : (
         <span>
           {t(dir === 'up' ? 'ds.delta.upBy' : 'ds.delta.downBy')}{' '}
