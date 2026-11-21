@@ -3,6 +3,7 @@ import { cookies, headers } from 'next/headers';
 import NextAuth, { type DefaultSession } from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import Nodemailer from 'next-auth/providers/nodemailer';
+import Passkey from 'next-auth/providers/passkey';
 import { clientIpFromHeaders } from '@restomatch/api';
 import {
   accounts,
@@ -28,6 +29,14 @@ import { authorizeCredentials, getSessionSecurityState } from './lib/passwords';
 import { SIGNOUT_COOKIE, issuedBeforeSignOut, signOutCookieOptions } from './lib/signOutTombstone';
 import { bypassesSecondFactor } from './lib/secondFactorGate';
 import { consumeTwoFactorTicket } from './lib/totp';
+import { liftLoginCodeLock, verifyLoginCode } from './app/login/_lib/loginCode';
+import {
+  assertPasskeysConfig,
+  passkeyGetUserInfo,
+  passkeySignInAllowed,
+  passkeysEnabled,
+  relyingParty,
+} from './app/(auth)/_lib/passkeys';
 import { clearLoginFailures, enforceLoginLimit, enforceMagicLinkLimit, refundLoginIp, trustedProxyHops } from './lib/rateLimit';
 import {
   SESSION_TTL_LONG_SEC,
@@ -144,6 +153,9 @@ async function sendMagicLink({
   await sendEmail({ to: identifier, subject, html, text });
 }
 
+// Passkeys: refuse to start if PASSKEYS_ENABLED=1 while blockers are open.
+assertPasskeysConfig();
+
 export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
   ...authConfig,
   adapter,
@@ -158,6 +170,7 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
   // the cookie lifetime ceiling.
   useSecureCookies,
   cookies: authCookieConfig(useSecureCookies),
+  ...(passkeysEnabled() ? { experimental: { enableWebAuthn: true } } : {}),
   providers: [
     // Password (argon2id) — PRIMARY. Lives ONLY here (node runtime): argon2 must
     // never enter the edge bundle (auth.config.ts / middleware stay
@@ -189,6 +202,9 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         if (!result) return null;
         // Correct password: only FAILED attempts count toward the per-account limit.
         await clearLoginFailures(email);
+        // A password sign-in lifts an active code-sign-in day lock by a small
+        // budget, keeping the history (W3-07b N2).
+        await liftLoginCodeLock(result.email);
         // Give back this attempt's per-IP unit: only failures count per network
         // (owner decision 31.10; staff share one restaurant Wi-Fi).
         await refundLoginIp(ip, attemptAt);
@@ -206,6 +222,42 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
         } as unknown as { id: string };
       },
     }),
+    // W3-07b slice b: sign in with a 6-digit e-mail code (app/login/_lib/loginCode).
+    // The SAME per-email + per-IP login limiter as passwords runs here, inside
+    // authorize(), so a script POSTing to /api/auth/callback/email-code cannot
+    // skip it; the durable 5-try ceiling lives in verifyLoginCode. The 2FA gate
+    // still applies: jwt() reads twoFactorEnabled for every sign-in.
+    Credentials({
+      id: 'email-code',
+      name: 'email-code',
+      credentials: { email: {}, code: {}, rememberMe: {} },
+      authorize: async (creds) => {
+        const email = typeof creds?.email === 'string' ? creds.email : '';
+        const code = typeof creds?.code === 'string' ? creds.code : '';
+        if (!email || !code) return null;
+        const ip = clientIpFromHeaders(await headers(), { trustedProxyHops: trustedProxyHops() });
+        const rl = await enforceLoginLimit(email, ip);
+        if (!rl.allowed) throw new LoginRateLimited();
+        const res = await verifyLoginCode(email, code);
+        if (!res.ok) {
+          // Locked: the SAME code as the limiter (review N1 — no lock-state
+          // oracle; any address locks at the same attempt). A wrong or expired
+          // code stays the uniform null.
+          if (res.reason === 'locked') throw new LoginRateLimited();
+          return null;
+        }
+        const [u] = await authDb
+          .select({ id: users.id, email: users.email, name: users.name })
+          .from(users)
+          .where(eq(users.id, res.userId))
+          .limit(1);
+        if (!u) return null;
+        await clearLoginFailures(email);
+        const rememberMe =
+          creds?.rememberMe === true || creds?.rememberMe === 'true' || creds?.rememberMe === 'on';
+        return { id: u.id, email: u.email, name: u.name, rememberMe } as unknown as { id: string };
+      },
+    }),
     Nodemailer({
       from: process.env.EMAIL_FROM ?? 'auth@restomatch.local',
       server: {
@@ -215,6 +267,8 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
       },
       sendVerificationRequest: sendMagicLink,
     }),
+    // W3-07b slice b: passkeys for owner + bookkeeper, OFF unless PASSKEYS_ENABLED=1.
+    ...(passkeysEnabled() ? [Passkey({ relayingParty: relyingParty()!, getUserInfo: passkeyGetUserInfo })] : []),
   ],
   events: {
     // Every signOut() — the dashboard / onboarding / 2FA-cancel buttons and "log
@@ -228,7 +282,21 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
     },
   },
   callbacks: {
-    async jwt({ token, user, trigger, session }) {
+    // Passkeys (register AND sign-in) only for an owner / bookkeeper account.
+    async signIn({ user, account }) {
+      if (account?.provider === 'passkey') {
+        return passkeySignInAllowed({
+          userId: user?.id,
+          credentialId: account.providerAccountId,
+          liveSession: async () => {
+            const s = await auth();
+            return s?.user ? { id: s.user.id, twoFactorPending: s.user.twoFactorPending } : null;
+          },
+        });
+      }
+      return true;
+    },
+    async jwt({ token, user, account, trigger, session }) {
       const t = token as AppJwt;
       const now = Date.now();
       const signInId = user?.id;
@@ -250,6 +318,9 @@ export const { handlers, signIn, signOut, auth, unstable_update } = NextAuth({
           }
         }
       }
+
+      // A magic-link sign-in lifts an active code-sign-in day lock (W3-07b N2).
+      if (signInId && account?.provider === 'nodemailer' && user?.email) await liftLoginCodeLock(user.email);
 
       if (signInId) {
         t.userId = signInId;
