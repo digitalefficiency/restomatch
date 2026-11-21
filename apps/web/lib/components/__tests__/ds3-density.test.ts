@@ -1,5 +1,6 @@
 // DS3-01 × DS3-06: the shared components read the device's display density (lib/prefs/README.md, "Who reads what").
 import './reactGlobal';
+import { readFileSync } from 'node:fs';
 import { createElement, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -15,7 +16,7 @@ const { I18nProvider } = await import('../../i18n/client');
 const { NavProvider } = await import('../../nav/NavProvider');
 const { DataTable } = await import('../table/DataTable');
 const { ViewToolbar } = await import('../views/ViewToolbar');
-const { DEFAULT_VIEW } = await import('../views/state');
+const { DEFAULT_VIEW, parseView, resetView, serializeView } = await import('../views/state');
 
 // Loosely typed createElement: two @types/react majors are hoisted in the workspace (STATE.md).
 const h = createElement as unknown as (type: unknown, props?: Record<string, unknown> | null, ...children: unknown[]) => ReactElement;
@@ -50,19 +51,60 @@ describe('DataTable takes its default density from the display preference (DS3-0
   });
 });
 
-describe('the views density switch', () => {
-  const toolbar = (density: boolean | 'prefs', view = DEFAULT_VIEW) => h(ViewToolbar, { page: 'approvals', view, density });
+describe('the views density switch takes its default from the preference; the address wins', () => {
+  const toolbar = (view = DEFAULT_VIEW) => h(ViewToolbar, { page: 'approvals', view, density: true });
   const checked = (html: string) => html.match(/<button[^>]*role="radio" aria-checked="true"[^>]*title="([^"]+)"/)?.[1];
 
-  it('`density` (true) is the per-view switch in the address, as before', () => {
-    expect(checked(render(toolbar(true), 'bookkeeper'))).toBe('רגיל');
-    expect(checked(render(toolbar(true, { ...DEFAULT_VIEW, density: 'compact' }), 'owner'))).toBe('צפוף');
+  it('parseView: the page passes the preference as the default; an explicit d still wins', () => {
+    expect(parseView(new URLSearchParams(''), { density: 'compact' })).toMatchObject({ density: 'compact', densityDefault: 'compact' });
+    expect(parseView(new URLSearchParams('d=comfortable'), { density: 'compact' }).density).toBe('comfortable');
+    // without a default the parser is exactly what it was (no new field)
+    expect(parseView(new URLSearchParams(''))).toEqual(DEFAULT_VIEW);
+    // a value outside the vocabulary is ignored
+    expect(parseView(new URLSearchParams(''), { density: 'huge' as never }).density).toBe(DEFAULT_VIEW.density);
   });
 
-  it("`density=\"prefs\"` reads the device's preference (the role's default until a choice), labelled רגיל / צפוף", () => {
-    expect(checked(render(toolbar('prefs'), 'bookkeeper'))).toBe('צפוף');
-    expect(checked(render(toolbar('prefs'), 'owner'))).toBe('רגיל');
-    // absent on a phone, where density is fixed — by CSS, so the first HTML never flashes it
-    expect(render(toolbar('prefs'), 'owner')).toContain('class="contents max-lg:hidden [@media(pointer:coarse)]:hidden"');
+  it('serializeView: d only when the choice differs from the page default', () => {
+    const compactDefault = parseView(new URLSearchParams(''), { density: 'compact' });
+    expect(serializeView(compactDefault).get('d')).toBeNull();
+    expect(serializeView({ ...compactDefault, density: 'comfortable' }).get('d')).toBe('comfortable');
+    expect(serializeView({ ...DEFAULT_VIEW, density: 'compact' }).get('d')).toBe('compact');
+    expect(serializeView(DEFAULT_VIEW).get('d')).toBeNull();
+  });
+
+  it('"איפוס תצוגה" goes back to the page\'s defaults, the preferred density included', () => {
+    const fromPref = parseView(new URLSearchParams('d=comfortable&g=category&sev=block'), { density: 'compact' });
+    const reset = resetView(fromPref);
+    expect(reset).toEqual({ ...DEFAULT_VIEW, density: 'compact', densityDefault: 'compact' });
+    // the reset address is the plain one
+    expect(serializeView(reset).toString()).toBe('');
+    // a page without a preference resets to the global default, as before
+    expect(resetView({ ...DEFAULT_VIEW, density: 'compact', group: 'category' })).toEqual(DEFAULT_VIEW);
+    expect(readFileSync(new URL('../views/ViewToolbar.tsx', import.meta.url), 'utf8')).toContain('go(resetView(view))');
+  });
+
+  it('the switch shows what the page renders, labelled רגיל / צפוף', () => {
+    expect(checked(render(toolbar(), 'bookkeeper'))).toBe('רגיל');
+    expect(checked(render(toolbar(parseView(new URLSearchParams(''), { density: 'compact' })), 'bookkeeper'))).toBe('צפוף');
+    expect(checked(render(toolbar({ ...DEFAULT_VIEW, density: 'compact' }), 'owner'))).toBe('צפוף');
+  });
+});
+
+describe('viewDefaults (server): the preference in force on the requesting device', () => {
+  it('the choice, else the role default; the regular size on a phone or tablet', async () => {
+    const prefsServer = await import('../../prefs/server');
+    const { viewDefaults } = await import('../views/defaults');
+    const choices = vi.spyOn(prefsServer, 'readDisplayChoices');
+    const hints = vi.spyOn(prefsServer, 'readDeviceHints');
+    choices.mockResolvedValue({});
+    hints.mockResolvedValue({ coarse: false, apple: false });
+    expect(await viewDefaults('bookkeeper')).toEqual({ density: 'compact' });
+    expect(await viewDefaults('owner')).toEqual({ density: 'comfortable' });
+    choices.mockResolvedValue({ density: 'compact' });
+    expect(await viewDefaults('owner')).toEqual({ density: 'compact' });
+    hints.mockResolvedValue({ coarse: true, apple: false });
+    expect(await viewDefaults('bookkeeper')).toEqual({ density: 'comfortable' });
+    choices.mockRestore();
+    hints.mockRestore();
   });
 });

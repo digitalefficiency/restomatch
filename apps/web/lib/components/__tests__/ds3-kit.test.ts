@@ -1,5 +1,6 @@
 // DS3 · the clean finish (docs/ux/ds3/SPEC.md §2, §3, §5, kit cards "כסף", "סטטוס", "ההשוואה המשולשת").
 import './reactGlobal';
+import { readFileSync } from 'node:fs';
 import { createElement, type ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -11,6 +12,7 @@ import { CountBadge, pillToneOf, StatusChip, StatusDot, type StatusTone } from '
 import { DeadlineChip } from '../money/DeadlineChip';
 import { EmptyState as EmptyStateComp } from '../EmptyState';
 import { MatchStrip } from '../money/MatchStrip';
+import { bellPanelEnd } from '../notifications/place';
 import { Money } from '../money/Money';
 import { moneyFigureText, moneyGlyph, moneyText, splitMoney } from '../money/format';
 import { DOT_TONE, PILL_TONE } from '../tone';
@@ -93,7 +95,9 @@ describe('<Money> in the clean finish (SPEC §3)', () => {
     expect(tile).toContain('data-money="cur"');
     expect(tile).not.toContain('data-money="dec"');
     const green = render(h(Money, { value: 296, context: 'line', state: 'claimed', split: true }));
-    expect(green).toContain('text-primary');
+    // `claimed` reads the T3 family since DS3-00 700952c0 (it was text-primary; both are #00573B).
+    expect(green).toContain('text-gold');
+    expect(green).not.toContain('text-primary');
     expect(green).not.toContain('text-fg-tertiary');
     expect(render(h(Money, { value: 296, context: 'line', split: true, quietParts: false }))).not.toContain('text-fg-tertiary');
   });
@@ -278,14 +282,16 @@ describe('<MatchStrip>: ordered · received · billed in one line', () => {
 });
 
 describe('buttons and key caps (kit "כפתורים ומקשים", SPEC §5)', () => {
-  it('DS3 heights: sm 32 · md 36 · lg 44 · xl 56; coarse pointers keep 44', async () => {
+  it('DS3 heights: sm 32 · md 36 · lg 44 · xl 60 (the phone primary); coarse pointers keep 44', async () => {
     const { Button } = await import('../Button');
     expect(render(h(Button, { size: 'sm' }, 'x'))).toContain('min-h-8');
     const md = render(h(Button, {}, 'x'));
     expect(md).toContain('min-h-9');
     expect(md).toContain('[@media(pointer:coarse)]:min-h-11');
     expect(render(h(Button, { size: 'lg' }, 'x'))).toContain('min-h-11');
-    expect(render(h(Button, { size: 'xl' }, 'x'))).toContain('min-h-14');
+    const xl = render(h(Button, { size: 'xl' }, 'x'));
+    expect(xl).toContain('min-h-[3.75rem]');
+    expect(xl).toContain('text-lead'); // 18 px at 500, the reference's .ph-cta
     expect(md).toContain('font-medium');
   });
 
@@ -315,7 +321,9 @@ describe('change against a previous period (kit "שינוי מול תקופה ק
     const { Delta } = await import('../money/Delta');
     const good = render(h(Delta, { current: 746, previous: 760, goodWhen: 'down', showPercent: true, about: 'בדליפה' }));
     expect(good).toContain('data-delta="good"');
-    expect(good).toContain('text-primary');
+    // good news is the T3 role (the recovered green, #00573B), never the action role (SPEC §2 correction of 14.11)
+    expect(good).toMatch(/<span data-delta="good" class="[^"]*text-gold/);
+    expect(good).not.toContain('text-primary');
     expect(textOf(good)).toContain('ירידה של');
     expect(textOf(good)).toContain('בדליפה');
     expect(textOf(good)).toContain(formatIls(14));
@@ -428,11 +436,11 @@ describe('loading, empty, error (kit "טעינה, ריק, שגיאה")', () => {
     expect(html).not.toMatch(/danger/);
   });
 
-  it('a delayed skeleton waits a second before it fades in (CSS only, server-safe)', async () => {
+  it('a delayed skeleton waits (SPEC §9: one second, on a DS3-00 motion token) before it fades in (CSS only, server-safe)', async () => {
     const { Skeleton } = await import('../Skeleton');
     const html = render(h(Skeleton, { variant: 'card', delayed: true }));
     expect(html).toContain('[@starting-style]:opacity-0');
-    expect(html).toContain('delay-1000');
+    expect(html).toContain('[transition-delay:var(--dur-skeleton-wait,0ms)]');
     expect(render(h(Skeleton, { variant: 'card' }))).not.toContain('starting-style');
   });
 });
@@ -518,7 +526,7 @@ describe('tabs, filters and controls (kit "לשוניות ומסננים", SPEC 
     const html = render(h(Tooltip, { label: 'הגדרות', kbd: 'G S' }, h('button', { 'aria-label': 'הגדרות' }, 'x')));
     expect(html).toMatch(/<span aria-hidden="true" class="invisible absolute/);
     expect(html).toContain('bg-fg');
-    expect(html).toContain('group-hover/tip:delay-500');
+    expect(html).toContain('group-hover/tip:[transition-delay:var(--dur-tooltip-rest,0ms)]');
     expect(html).toContain('<kbd');
   });
 });
@@ -563,5 +571,393 @@ describe('charts (kit "גרפים", SPEC §10.1)', () => {
     const named = render(h(SplitBar, { first: 1, second: 0, label: 'שולם במלואו' }));
     expect(named).toContain('role="img" aria-label="שולם במלואו"');
     expect(named.match(/<i /g)).toHaveLength(1); // an empty part is not drawn
+  });
+});
+
+describe('handoff corrections (CHANGES.md 14.11, DS3-01)', () => {
+  it('radii: the phone-flow button has 12 px corners; icons 16 in content, 18 in the top bar', async () => {
+    const { Button } = await import('../Button');
+    const { Icon } = await import('../icon/Icon');
+    const { Check } = await import('lucide-react');
+    expect(render(h(Button, { size: 'xl' }, 'אישור: 24 ק״ג'))).toContain('rounded-card');
+    expect(render(h(Icon, { as: Check }))).toContain('h-4 w-4');
+    expect(render(h(Icon, { as: Check, size: 'bar' }))).toContain('size-[1.125rem]');
+  });
+
+  it("a card's border is --rule (MetricTile, the region empty state)", async () => {
+    const { MetricTile } = await import('../money/MetricTile');
+    expect(render(h(MetricTile, { label: 'דליפה החודש', value: 760 }))).toContain('border-line-rule');
+    expect(render(h(EmptyStateComp, { kind: 'inbox-zero', title: 'אין פערים פתוחים' }))).toContain('rounded-card border border-line-rule');
+  });
+
+  it('wording: never a singular imperative; "הכול" spelled in full', async () => {
+    const { he: viewsHe } = await import('../../i18n/messages/views/he');
+    const { he: commonHe } = await import('../../i18n/messages/common/he');
+    expect(viewsHe.toolbar.clearFilters).toBe('ניקוי הסינון');
+    expect(viewsHe.toolbar).toMatchObject({ apply: 'החלה', save: 'שמירה', delete: 'מחיקה', reset: 'איפוס תצוגה' });
+    expect(JSON.stringify(commonHe)).not.toMatch(/הכל(?!ו)/);
+  });
+});
+
+describe("DS3-03's requests to the shared components", () => {
+  it('Delta from a change computed upstream (agorot-exact, its own percent rule), the SPEC sentence', async () => {
+    const { Delta } = await import('../money/Delta');
+    const down = render(h(Delta, { change: { agorot: -1400, share: -0.02 }, goodWhen: 'down', showPercent: true, about: 'לעומת אותם ימים בספטמבר' }));
+    expect(down).toContain('data-delta="good"');
+    expect(textOf(down)).toContain('ירידה של');
+    expect(textOf(down)).toContain(formatIls(14));
+    expect(textOf(down)).toContain('(2%)');
+    expect(textOf(down)).toContain('לעומת אותם ימים בספטמבר');
+    // a thin base quotes no percent; a rise in leak keeps its words and ₪ in ink, only the arrow is red
+    const up = render(h(Delta, { change: { agorot: 5000, share: null }, goodWhen: 'down', showPercent: true }));
+    expect(up).toContain('data-delta="bad"');
+    expect(textOf(up)).not.toContain('%');
+    expect(up).toMatch(/<svg[^>]*class="[^"]*stroke-danger-dot/);
+    expect(up).not.toMatch(/text-danger(?!-dot)/);
+  });
+
+  it('TaskRow carries the decision row\'s blocking count (the one solid pill, apart from the count line)', async () => {
+    const { taskRow } = await import('../notifications/rows');
+    const task = { type: 'decision', tone: 'danger', deepLink: '/dashboard/approvals', ilsAgorot: 76000, count: 7, blocking: 3, detail: {}, entityId: 'x' };
+    const t = ((k: string) => k) as never;
+    const row = taskRow(task as never, t, 'he', (a: number) => String(a));
+    expect(row?.blocking).toBe(3);
+    const other = taskRow({ ...task, type: 'claim_to_send', blocking: 0 } as never, t, 'he', (a: number) => String(a));
+    expect(other).not.toHaveProperty('blocking');
+  });
+
+  it('request 9: the small button is 32 px with 13 px text at 500 (DS3-00\'s sub role), LinkButton too', async () => {
+    const { Button, LinkButton } = await import('../Button');
+    for (const html of [render(h(Button, { size: 'sm' }, 'x')), render(h(LinkButton, { href: '/x', size: 'sm' }, 'x'))]) {
+      expect(html).toContain('min-h-8');
+      expect(html).toContain('text-sub');
+      expect(html).toContain('font-medium');
+      expect(html).not.toContain('text-body-sm');
+    }
+    // the other sizes keep their roles
+    expect(render(h(Button, {}, 'x'))).toContain('text-body-sm');
+  });
+
+  it('request 5: Money context="display" is the home hero on the money-hero role, ₪ in its glyph span, whole shekels', () => {
+    const html = render(h(Money, { value: 759.54, context: 'display' }));
+    expect(html).toContain('text-money-hero');
+    expect(html).not.toContain('text-metric-hero');
+    expect(html).toContain('<span class="money-glyph">₪</span>');
+    expect(textOf(html)).toBe(formatIls(759.54, { maximumFractionDigits: 0 }));
+    expect(html).toMatch(/title="סכום מדויק: [^"]*759\.54/);
+    // `hero` keeps metric-hero for the screens that use it today
+    expect(render(h(Money, { value: 760, context: 'hero' }))).toContain('text-metric-hero');
+  });
+
+  it('DeltaBadge: a good change in the T3 role, a bad one in ink with the leak-coloured arrow', async () => {
+    const { DeltaBadge } = await import('../views/DeltaBadge');
+    const good = render(h(DeltaBadge, { current: 80, previous: 100, compare: 'prev' }));
+    expect(good).toContain('text-gold');
+    expect(good).not.toContain('text-primary');
+    const bad = render(h(DeltaBadge, { current: 120, previous: 100, compare: 'prev' }));
+    expect(bad).toContain('text-fg');
+    expect(bad).toMatch(/stroke-danger-dot/);
+  });
+});
+
+describe("DS3-00's requests to the shared components (PR #346, request 3)", () => {
+  const read = (rel: string) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+
+  it('floating layers rest on sh2 with the flyout\'s --rule ring, never the card shadow and a border (SPEC §4)', () => {
+    for (const file of ['views/ViewToolbar.tsx', 'PageHeader.tsx', 'notifications/Bell.tsx', 'table/Popover.tsx', 'overlay/RowActions.tsx']) {
+      const src = read(file);
+      expect(src, file).toContain('ring-1 ring-line-rule');
+      expect(src, file).not.toMatch(/border border-line bg-surface p-\d shadow-(card|e2)/);
+      expect(src, file).not.toContain('shadow-card');
+    }
+    // the views toolbar's phone sheet: 16 px top corners, sh2, no border
+    expect(read('views/ViewToolbar.tsx')).toContain('rounded-t-overlay bg-surface p-0 text-ink shadow-e3');
+  });
+
+  it('one focus indicator: no component adds a focus ring beside the global outline', () => {
+    const owned = ['views/ViewToolbar.tsx', 'views/TvMode.tsx', 'PageHeader.tsx', 'notifications/Bell.tsx', 'Breadcrumbs.tsx', 'Toast.tsx'];
+    for (const file of owned) expect(read(file), file).not.toMatch(/focus-visible:ring-|focus-visible:outline-on-bold/);
+  });
+
+  it('focus inside scroll containers is drawn inward; on the dark toast it is white (DS3-00 hooks)', () => {
+    expect(read('table/DataTable.tsx')).toContain('data-focus="inset"');
+    expect(read('table/Popover.tsx')).toContain('data-focus="inset"');
+    expect(read('Toast.tsx')).toContain('data-focus="on-dark"');
+  });
+
+  it('menus, rows and quiet icon buttons hover on --hover', () => {
+    for (const file of ['overlay/RowActions.tsx', 'overlay/Sheet.tsx', 'money/Token.tsx', 'views/BreakdownChart.tsx']) {
+      const src = read(file);
+      expect(src, file).toContain('hover:bg-surface-hover');
+      expect(src, file).not.toMatch(/hover:bg-surface-(2|sunken)\b/);
+    }
+  });
+
+  it('a card has 12 px corners and the --rule border (D6, SPEC §4)', async () => {
+    const { Card } = await import('../Card');
+    const html = render(h(Card, null, 'x'));
+    expect(html).toContain('rounded-card');
+    expect(html).toContain('border-line-rule');
+    expect(html).not.toContain('rounded-2xl');
+    // tones keep their own edge
+    expect(render(h(Card, { tone: 'warn' }, 'x'))).toContain('border-warn/40');
+  });
+});
+
+describe('review fixes (accessibility of the shared components)', () => {
+  it('forced colours: every button and the toast keep a 1 px ButtonText edge; a checked segment an outline', async () => {
+    const { Button } = await import('../Button');
+    for (const variant of ['primary', 'secondary', 'ghost', 'danger']) {
+      expect(render(h(Button, { variant }, 'x')), variant).toContain('forced-colors:border-[color:ButtonText]');
+    }
+    const read = (rel: string) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+    expect(read('Toast.tsx')).toMatch(/bg-fg [^"]*forced-colors:border-\[color:ButtonText\]/);
+    const { SegmentedControl } = await import('../form/SegmentedControl');
+    const seg = render(h(SegmentedControl, { label: 'צפיפות', value: 'a', onChange: () => {}, options: [{ value: 'a', label: 'רגיל' }, { value: 'b', label: 'צפוף' }] }));
+    expect(seg).toMatch(/aria-checked="true"[^>]*forced-colors:outline-\[color:Highlight\]/);
+    expect(seg).not.toMatch(/aria-checked="false"[^>]*forced-colors:outline/);
+  });
+
+  it('a phone keeps the 44 px target on the segmented control; the switch track is 44 × 26 (SPEC §5), also on a phone', async () => {
+    const { SegmentedControl } = await import('../form/SegmentedControl');
+    for (const size of ['sm', 'md']) {
+      const seg = render(h(SegmentedControl, { label: 'x', value: 'a', size, onChange: () => {}, options: [{ value: 'a', label: 'א' }, { value: 'b', label: 'ב' }] }));
+      expect(seg, size).toContain('[@media(pointer:coarse)]:min-h-11');
+    }
+    const { Switch } = await import('../form/Switch');
+    const sw = render(h(Switch, { label: 'התראות', checked: true, onCheckedChange: () => {} }));
+    expect(sw).toMatch(/role="switch"[^>]*class="[^"]*h-\[1\.625rem\] min-h-\[1\.625rem\] w-11 [^"]*p-\[3px\]/);
+  });
+
+  it('NumberField: `label` names the input itself, not only the group', async () => {
+    const { NumberField } = await import('../form/NumberField');
+    const html = render(h(NumberField, { label: 'סף כמות', value: 5, min: 0, max: 20, onValueChange: () => {} }));
+    expect(html).toMatch(/<input[^>]*aria-label="סף כמות"/);
+  });
+
+  it('where the amount comes from: the operator and the equals sign are read, not hidden', async () => {
+    const { Calculation } = await import('../Calculation');
+    const html = render(h(Calculation, { terms: ['3 ק״ג', '12.90'], operator: 'times', result: '38.70' }));
+    expect(html).not.toMatch(/aria-hidden="true"[^>]*>(×|=)</);
+    expect(html).toMatch(/>×</);
+    expect(html).toMatch(/>=</);
+  });
+
+  it('Delta: the percent sits after a space outside its isolate, never glued to the ₪', async () => {
+    const { Delta } = await import('../money/Delta');
+    const html = render(h(Delta, { current: 746, previous: 760, goodWhen: 'down', showPercent: true }));
+    expect(html).toMatch(/<bdi class="whitespace-nowrap"><span class="num">\([^)]*%\)<\/span><\/bdi>/);
+    expect(html).not.toMatch(/<bdi[^>]*>\s+\(/);
+    // `bdi.num` is the money figure (W1-01 reads every one for a ₪ left of the digits): none here lacks a ₪
+    const figures = html.match(/<bdi class="num[^"]*"[^>]*>[\s\S]*?<\/bdi>/g) ?? [];
+    expect(figures.length).toBeGreaterThan(0);
+    for (const f of figures) expect(f, f).toContain('₪');
+    const count = render(h(Delta, { current: 12, previous: 10, goodWhen: 'down', kind: 'count', showPercent: true }));
+    expect(count.match(/<bdi class="num/g) ?? []).toHaveLength(0);
+  });
+
+  it('the credit-request track keeps its markers in forced colours (like the dots)', () => {
+    const src = readFileSync(new URL('../StatusRail.tsx', import.meta.url), 'utf8');
+    expect(src).toContain('size-2.5 rounded-full forced-color-adjust-none');
+  });
+});
+
+describe('review fixes (fidelity to the reference)', () => {
+  const read = (rel: string) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+
+  it('the number pad types from a hardware keyboard: digits, "." or "," for the point, Backspace; never a combination', async () => {
+    const { keypadKeyOf } = await import('../overlay/QtyKeypad');
+    expect(keypadKeyOf({ key: '7' })).toBe('7');
+    expect(keypadKeyOf({ key: '.' })).toBe('.');
+    expect(keypadKeyOf({ key: ',' })).toBe('.');
+    expect(keypadKeyOf({ key: 'Backspace' })).toBe('del');
+    expect(keypadKeyOf({ key: 'a' })).toBeNull();
+    expect(keypadKeyOf({ key: 'Enter' })).toBeNull();
+    expect(keypadKeyOf({ key: '5', ctrlKey: true })).toBeNull();
+    expect(keypadKeyOf({ key: '5', metaKey: true })).toBeNull();
+  });
+
+  it('the quantity sheet is as tall as its content, on sh2 without a border, its title on the DS3 role', async () => {
+    const { Sheet } = await import('../overlay/Sheet');
+    const html = render(h(Sheet, { open: true, onClose: () => {}, title: 'כמה הגיע?', detent: 'auto' }, 'x'));
+    expect(html).toContain('data-detent="auto"');
+    expect(html).toContain('max-h-[calc(100dvh-0.75rem)]');
+    expect(html).not.toMatch(/h-\[(92|50)dvh\]/);
+    expect(html).not.toMatch(/<dialog[^>]*border-line/);
+    expect(html).toMatch(/<h2[^>]*class="text-title-sm/);
+    expect(read('overlay/QtyKeypad.tsx')).toContain('detent="auto"');
+  });
+
+  it('the top-bar bell: 32 × 32 at the desk, 44 under 1024 or on touch, an 18 px glyph, an ink dot and never a count; a 384 px panel', () => {
+    const src = read('notifications/Bell.tsx');
+    // The sidebar spec is binding on sizes (DS3 SPEC §10.4): §1.5 32 × 32, §11 44 × 44 under 1024; DS3 SPEC §5 44 px touch target.
+    expect(src).toMatch(/data-testid="bell-trigger"[\s\S]{0,700}className="relative inline-flex size-8 [^"]*max-lg:size-11 \[@media\(pointer:coarse\)\]:size-11"/);
+    expect(src).not.toMatch(/\bsize-9\b/);
+    expect(src).toContain('<Icon as={BellIcon} size="bar" />');
+    // The dot keeps its place beside the glyph at every box size: 2 px outside the 18 px glyph's corner.
+    expect(src).toMatch(/data-testid="bell-dot"\s+className="absolute end-\[calc\(50%-11px\)\] top-\[calc\(50%-11px\)\] size-2 rounded-full bg-fg ring-2 ring-surface/);
+    // §1.6: the desk panel is 384 wide (and still never wider than the window).
+    expect(src).toContain('w-[384px] max-w-[calc(100vw-2rem)]');
+    expect(src).not.toContain('w-[360px]');
+    expect(src).not.toMatch(/bell-dot[\s\S]{0,400}\{cappedCount/);
+    // the number is still said: it is part of the trigger's name
+    expect(src).toMatch(/const label = unseen > 0 \? `\$\{t\('bell\.label'\)\}, \$\{t\('bell\.unseen', \{ count: cappedCount\(unseen, locale\) \}\)\}`/);
+  });
+
+  it('the desk panel sits below-end of the bell (sidebar SPEC §1.6), whole and inside the window', () => {
+    // Hebrew: the end edge is the left, and the panel's end edge lands on the bell's.
+    expect(bellPanelEnd({ left: 170, right: 202 }, 1440, true)).toBe(170);
+    // English: the end edge is the right.
+    expect(bellPanelEnd({ left: 1238, right: 1270 }, 1440, false)).toBe(170);
+    // Never closer than 16 px to the window's edge.
+    expect(bellPanelEnd({ left: 4, right: 36 }, 1440, true)).toBe(16);
+    // A bell far from the end still leaves the 384 px panel whole.
+    expect(bellPanelEnd({ left: 900, right: 932 }, 1100, true)).toBe(1100 - 16 - 384);
+    // A window narrower than the panel: it fills the window less the two gutters.
+    expect(bellPanelEnd({ left: 300, right: 332 }, 400, true)).toBe(16);
+    // The component places it before it shows (no jump) and again when the window resizes.
+    const src = read('notifications/Bell.tsx');
+    expect(src).toMatch(/place\(\);\s+d\.showModal\(\);/);
+    expect(src).toContain("window.addEventListener('resize', place)");
+    expect(src).toContain('anchor={trigger}');
+  });
+
+  it('a figure that failed to load offers its one action when there is one; otherwise the words stay', () => {
+    const plain = render(h(Money, { value: null, unavailable: true }));
+    expect(textOf(plain)).toBe('לא זמין · נסו שוב');
+    expect(plain).not.toContain('<button');
+    const withRetry = render(h(Money, { value: null, unavailable: true, onRetry: () => {} }));
+    expect(textOf(withRetry)).toBe('לא זמין, נסו שוב');
+    expect(withRetry).toMatch(/<button type="button" class="[^"]*min-h-6[^"]*">נסו שוב<\/button>/);
+    expect(textOf(render(h(Money, { value: null, unavailable: true, onRetry: () => {} }), 'en'))).toBe('Unavailable, try again');
+  });
+
+  it('the views toolbar: its switches are the kit\'s segmented control, its buttons the small secondary, its filters pills', () => {
+    const src = read('views/ViewToolbar.tsx');
+    expect(src).toContain("on ? 'bg-surface text-fg shadow-e1 ring-1 ring-inset ring-fg");
+    expect(src).toContain('className="inline-flex rounded-control bg-surface-sunken p-0.5"');
+    expect(src).toContain('min-h-8 items-center gap-1.5 rounded-control border border-line-strong bg-surface px-3 text-sub');
+    expect(src).toContain('rounded-pill');
+    expect(src).not.toMatch(/bg-primary\/15|border-primary\/40 text-primary/);
+    expect(src).not.toMatch(/\bcn\(chip/);
+  });
+
+  it('cards rest on sh1; the calculation opens in a 12 px --rule panel; the tooltip fades on its named duration', async () => {
+    const { Card } = await import('../Card');
+    expect(render(h(Card, null, 'x'))).toContain('shadow-e1');
+    expect(render(h(Card, { elevated: true }, 'x'))).toContain('data-elevated="true"');
+    expect(read('Calculation.tsx')).toContain('rounded-card border border-line-rule bg-surface p-3');
+    expect(read('Tooltip.tsx')).toContain('duration-menu-tooltip');
+  });
+});
+
+describe('review fixes (correctness)', () => {
+  it('no time value outside the tokens: no delay from Tailwind\'s default scale in the shared components', async () => {
+    const { readdirSync, statSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const root = new URL('..', import.meta.url).pathname;
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (name === '__tests__' || name === 'node_modules' || (dir.replace(/\/$/, '') === root.replace(/\/$/, '') && ['palette', 'hero', 'desk'].includes(name))) continue;
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.tsx?$/.test(name)) files.push(p);
+      }
+    };
+    walk(root);
+    const offScale = files.filter((f) => /\bdelay-(75|100|150|200|300|500|700|1000)\b/.test(readFileSync(f, 'utf8')));
+    expect(offScale).toEqual([]);
+  });
+
+  it('a change shown as ₪0 is no change: never "עלייה של ₪0" with an arrow; the basis stays in the sentence', async () => {
+    const { Delta } = await import('../money/Delta');
+    const tiny = render(h(Delta, { change: { agorot: 40, share: null }, goodWhen: 'down' }));
+    expect(tiny).toContain('data-delta="flat"');
+    expect(textOf(tiny)).toBe('ללא שינוי מהותי');
+    expect(textOf(tiny)).not.toContain('₪0');
+    const tinyAbout = render(h(Delta, { change: { agorot: -49, share: -0.001 }, goodWhen: 'down', about: 'לעומת אותם ימים בספטמבר' }));
+    expect(textOf(tinyAbout)).toBe('ללא שינוי מהותי לעומת אותם ימים בספטמבר');
+    // shekel figures: under half a shekel rounds to ₪0 inline
+    expect(render(h(Delta, { current: 100.3, previous: 100, goodWhen: 'down' }))).toContain('data-delta="flat"');
+    // from half a shekel the change shows, as before
+    const half = render(h(Delta, { change: { agorot: 50, share: null }, goodWhen: 'down' }));
+    expect(half).toContain('data-delta="bad"');
+    expect(textOf(half)).toContain('עלייה של');
+    // no change at all keeps its own words, with the basis
+    expect(textOf(render(h(Delta, { current: 5, previous: 5, about: 'בדליפה' })))).toBe('ללא שינוי בדליפה');
+    // counts and percents are not money: a small count change still shows
+    expect(render(h(Delta, { current: 1, previous: 0, kind: 'count', goodWhen: 'up' }))).toContain('data-delta="good"');
+  });
+
+  it('NumberField: leaving an unedited field saves nothing; the arrows and steppers start from what is typed', async () => {
+    const { blurAction, fieldNumber } = await import('../form/NumberField');
+    // a stored 2.5 shown as "3" (0 decimals), or a stored 25 above max: untouched, nothing is committed
+    expect(blurAction('3', '3', 0)).toEqual({ kind: 'none' });
+    expect(blurAction('25', '25', 0)).toEqual({ kind: 'none' });
+    expect(blurAction('abc', '3', 0)).toEqual({ kind: 'reset' });
+    expect(blurAction('', '3', 0)).toEqual({ kind: 'reset' });
+    expect(blurAction('4', '3', 0)).toEqual({ kind: 'commit', n: 4 });
+    expect(blurAction('2,5', '3', 1)).toEqual({ kind: 'commit', n: 2.5 });
+    expect(fieldNumber('7', 3, 0)).toBe(7);
+    expect(fieldNumber('7.5', 3, 1)).toBe(7.5);
+    expect(fieldNumber('x', 3, 0)).toBe(3);
+    const src = readFileSync(new URL('../form/NumberField.tsx', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/commit\(value [+-] step\)/);
+    expect(src.match(/commit\(base\(\) [+-] step\)/g)).toHaveLength(4);
+  });
+
+  it("the quantity sheet names the item also when nothing was ordered (an arrival that wasn't on the order)", async () => {
+    const { QtyKeypad } = await import('../overlay/QtyKeypad');
+    const noop = () => {};
+    const named = render(h(QtyKeypad, { open: true, onClose: noop, onConfirm: noop, name: 'עגבניות שרי', unit: 'ק״ג' }));
+    expect(textOf(named)).toContain('עגבניות שרי');
+    const ordered = render(h(QtyKeypad, { open: true, onClose: noop, onConfirm: noop, name: 'עגבניות שרי', unit: 'ק״ג', ordered: 6.5 }));
+    expect(textOf(ordered)).toContain('עגבניות שרי');
+    expect(textOf(ordered)).toContain('6.5');
+  });
+});
+
+describe("DS3-07's requests: digits that line up or change in place are tabular in any face; no measure in ch", () => {
+  const read = (rel: string) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
+
+  it('identifiers, deadlines and tile context render in tabular figures', async () => {
+    const { Token } = await import('../money/Token');
+    const { MetricTile } = await import('../money/MetricTile');
+    expect(render(h(Token, { value: 'ST-24108', kind: 'invoice' }))).toMatch(/<bdi dir="ltr" class="[^"]*tabular-nums/);
+    expect(render(h(DeadlineChip, { due: '2026-12-12', today: new Date('2026-11-21T09:00:00+02:00') }))).toContain('tabular-nums');
+    expect(render(h(MetricTile, { label: 'דליפה החודש', value: 760, context: '35 חשבוניות נבדקו' }))).toMatch(/<p class="[^"]*tabular-nums[^"]*">35 חשבוניות נבדקו/);
+  });
+
+  it('the table, the batch bar, the change badge, the phone cards, the bell and the pad keep their digits in place', () => {
+    const table = read('table/DataTable.tsx');
+    expect(table).toContain('<p data-table-showing className="tabular-nums">');
+    expect(table).toContain("c.kind === 'date' && 'tabular-nums'");
+    expect(table).toMatch(/bg-surface px-\[var\(--cell-px,16px\)\] tabular-nums',\s*c\.identity/);
+    expect(read('table/BatchBar.tsx')).toContain('<span data-batch-count className="tabular-nums">');
+    expect(read('views/DeltaBadge.tsx')).toContain('<span className="tabular-nums">{text}</span>');
+    expect(read('table/MobileCardList.tsx')).toContain('text-sm tabular-nums text-muted');
+    expect(read('KpiCard.tsx')).toContain('<p className="text-xs tabular-nums text-muted">{subtitle}</p>');
+    expect(read('StatCard.tsx')).toContain('<p className="mt-1 text-xs tabular-nums text-muted">{hint}</p>');
+    expect(read('notifications/Bell.tsx').match(/tabular-nums text-(muted|primary)/g)).toHaveLength(2);
+    expect(read('overlay/QtyKeypad.tsx')).toContain('<span className="tabular-nums">');
+  });
+
+  it('no reading measure or size in ch or ex in the shared components (they differ between the fallback and the face)', async () => {
+    const { readdirSync, statSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const root = new URL('..', import.meta.url).pathname;
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (name === '__tests__' || name === 'node_modules' || (dir.replace(/\/$/, '') === root.replace(/\/$/, '') && ['palette', 'hero', 'desk'].includes(name))) continue;
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.tsx?$/.test(name)) files.push(p);
+      }
+    };
+    walk(root);
+    const offenders = files.filter((f) => /max-w-prose|\[[0-9.]+(ch|ex)\]/.test(readFileSync(f, 'utf8')));
+    expect(offenders).toEqual([]);
   });
 });

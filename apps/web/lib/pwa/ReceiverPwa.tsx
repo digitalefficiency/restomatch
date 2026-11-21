@@ -250,7 +250,7 @@ export function ReceiverPwa({
     <>
       <link rel="manifest" href="/pwa/manifest.webmanifest" />
       <link rel="apple-touch-icon" href="/pwa/apple-touch-icon.png" />
-      <meta name="theme-color" content="#F6F8F7" />
+      <meta name="theme-color" content="#F8FBF9" />
       <meta name="mobile-web-app-capable" content="yes" />
       <meta name="apple-mobile-web-app-capable" content="yes" />
       <style>{INSTALLED_CSS}</style>

@@ -74,7 +74,8 @@ export function ToolbarPopover({
       {open ? (
         <div
           id={id}
-          className="absolute end-0 top-full z-[46] mt-1 min-w-56 rounded-xl border border-line bg-surface p-2 shadow-card"
+          data-focus="inset"
+          className="absolute end-0 top-full z-[46] mt-1 min-w-56 rounded-card bg-surface p-2 shadow-e2 ring-1 ring-line-rule"
         >
           {children(close)}
         </div>

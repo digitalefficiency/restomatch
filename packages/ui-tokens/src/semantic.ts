@@ -13,22 +13,12 @@
 import { activeDirection } from './directions';
 import { ramp } from './primitives';
 
-/**
- * SPEC §2 values that DS3-00 could not land yet: a test outside the token package pins today's
- * literal. Each is invisible at a glance (ΔL < 1 %), passes every contrast gate either way, and
- * flips with one line in primitives.ts once its owner reads the token instead of the literal.
- */
-export const held = {
-  canvas: { spec: '#F8FBF9', pinnedBy: 'packages/api/src/__tests__/price-creep-digest.test.ts:124' },
-  lineStrong: { spec: '#808984', pinnedBy: 'apps/web/e2e/W1-09.spec.ts:495' },
-} as const;
-
 /** Canvas, cards and borders (SPEC §2 paper and steel). */
 export const surfaces = {
-  canvas: ramp.neutral[25], // page background (Tailwind `bg`)
-  surface: ramp.neutral[0], // cards, tables, the side menu, sheets — solid, never glass on app chrome
+  canvas: ramp.neutral[25], // page background and the side menu, which sits on the canvas (Tailwind `bg`; SPEC §2, sidebar spec §1.1)
+  surface: ramp.neutral[0], // cards, tables, panels, sheets, the flyout list, the current row of the side menu — solid, never glass on app chrome
   sunken: ramp.neutral[50], // wells: inputs at rest, a key cap, a segmented track, a neutral pill (Tailwind `surface-2` / `surface-sunken`)
-  line: ramp.neutral[200], // border of a card or a field at rest; decorative (1.41:1)
+  line: ramp.neutral[200], // edges of the frame and small chrome: the menu's edge, a key cap, a table header, the palette; decorative (1.41:1)
   lineStrong: ramp.neutral[500], // control boundaries and secondary buttons (≥3:1, WCAG 1.4.11)
   lineField: ramp.neutral[550], // field-mode input borders (≥4.5:1, lens-mobile-field §3.6)
 } as const;
@@ -71,14 +61,20 @@ function fromRamp(r: { 50: string; 100: string; 200: string; 700: string; 800: s
 /**
  * Every text pair ≥5:1, white on every bold fill ≥6:1 (the contrast test gates ≥4.6).
  * `primary` is the brand (basil): the primary action, links, the current page.
- * `gold` is the T3 family — the name is v1's; in the clean finish money that came
- * back is GREEN (leaf, SPEC §2 `--ok`), so the role moved and no call site did.
+ * `gold` is the T3 family — the name is v1's; in the clean finish money that came back is
+ * GREEN, so the role moved and no call site did. SPEC §2 (correction of 14.11): the recovered
+ * amount is its own role whose clean value is the dark green #00573B — the same hex as the
+ * action colour, never the action role — so `gold` text is green[700] while every other
+ * T3 role reads the leaf ramp: `--ok` (#00713E, a counted line, a good-news icon on the tint)
+ * is the family's bold, the tint and its border are `--ok-sub` / `--ok-bd`, the tick `--ok-solid`.
  */
 export const status: Record<StatusFamily, FamilyRoles> = {
   primary: fromRamp(ramp.green),
   danger: fromRamp(ramp.red, ramp.red[500]),
   warn: fromRamp(ramp.amber, ramp.amber[400]),
-  gold: fromRamp(ramp.leaf, ramp.leaf[500]),
+  // The v1 `--c-gold` (fills, tints, borders, rings, gradients) is this family's bold; only text reads
+  // `text` (build.ts, Tailwind `textColor.gold`), so no T3 fill turns into the action colour.
+  gold: { ...fromRamp(ramp.leaf, ramp.leaf[500]), text: ramp.green[700] },
   info: fromRamp(ramp.blue),
   neutral: { text: text.muted, bgBold: text.muted, bgBoldHover: ramp.neutral[800], bgSubtle: surfaces.sunken, bgSubtleHover: ramp.neutral[75], borderSubtle: surfaces.line, onBold: text.onBold, dot: text.subtle },
 };
@@ -119,11 +115,10 @@ export type MoneyState =
 export const moneyStates: Record<MoneyState, { figure: 'ink' | 'muted' | 'gold' | 'primary'; tier: 'T1' | 'T2' | 'T3' | 'T4' | null }> = {
   leak: { figure: 'ink', tier: 'T1' }, // ink figure + danger marker (rail) on the T1 hero only
   atRisk: { figure: 'ink', tier: 'T2' }, // bold StatusChip + ink figure + one primary CTA
-  // T3 is green in the clean finish: `gold` is the T3 family, now leaf (SPEC §2 `--ok`, "money
-  // that came back"). `claimed` (asked for, not back yet) keeps `primary` (basil, also green):
-  // lib/components/__tests__/ds-foundation.test.ts:80 pins its class, outside this package.
+  // T3 is green in the clean finish: caught, claimed, credited and returned read the T3 family, whose
+  // text is the recovered amount's own role (#00573B, `--c-gold-text`), never the action role.
   caught: { figure: 'gold', tier: 'T3' },
-  claimed: { figure: 'primary', tier: 'T3' },
+  claimed: { figure: 'gold', tier: 'T3' }, // asked for, not back yet
   credited: { figure: 'gold', tier: 'T3' }, // + ✓ icon
   returned: { figure: 'gold', tier: 'T3' },
   outstanding: { figure: 'ink', tier: 'T2' }, // + DeadlineChip (warn ≤7 days, danger only when late)
@@ -182,7 +177,7 @@ export const surfaceV2 = {
 
 export const border = {
   subtle: surfaces.line,
-  /** Ruled tables (direction A): horizontal hairlines, no zebra. Decorative. */
+  /** Hairlines between rows (direction A: no zebra) and the 1 px border of a card (SPEC §2, §4). Decorative. */
   rule: activeDirection.neutrals.borderRule,
   control: surfaces.lineStrong,
   field: surfaces.lineField,
@@ -218,7 +213,7 @@ export const moneyMarker = indicator.danger;
 export const dataVizV2 = {
   categorical: [ramp.blue[700], ramp.teal[700], ramp.violet[700], ramp.gold[700], ramp.neutral[650], ramp.plum[700]] as string[],
   up: ramp.orange[600], // a price rise (creep-4)
-  down: status.gold.text, // a price drop is T3 good news (green in the clean finish)
+  down: status.gold.text, // a price drop is T3 good news: the dark green the reference paints a good delta in
   prev: surfaces.lineStrong, // the previous period, thin bar or 1.5 px line
   leak: status.danger.dot, // the only danger in a chart; a bar, so the solid (SPEC §2 `--leak-solid`)
   grid: surfaces.line,

@@ -1,11 +1,11 @@
 /* @tokens:start — GENERATED from packages/ui-tokens; do not edit by hand.
    Regenerate: pnpm --filter @restomatch/ui-tokens tokens:css */
 :root {
-  --c-bg: 246 248 247; /* #F6F8F7 */
+  --c-bg: 248 251 249; /* #F8FBF9 */
   --c-surface: 255 255 255; /* #FFFFFF */
   --c-surface-2: 241 245 243; /* #F1F5F3 */
   --c-line: 212 219 216; /* #D4DBD8 */
-  --c-line-strong: 122 139 130; /* #7A8B82 */
+  --c-line-strong: 128 137 132; /* #808984 */
   --c-ink: 18 28 23; /* #121C17 */
   --c-muted: 73 82 78; /* #49524E */
   --c-subtle: 93 101 97; /* #5D6561 */
@@ -133,6 +133,7 @@
   :root, [data-density] {
     --row-h: 56px;
     --control-h: 48px;
+    --cell-inline: 16px;
   }
 }
 /* Field mode (lens-mobile-field §3.6): bigger floor, stronger borders, 3 px focus. */
@@ -325,7 +326,7 @@
 }
 /* DS2 phase 1: new roles only. No v1 variable is re-bound below. */
 :root {
-  --c-surface-canvas: 246 248 247;
+  --c-surface-canvas: 248 251 249;
   --c-surface-default: 255 255 255;
   --c-surface-raised: 255 255 255;
   --c-surface-overlay: 255 255 255;
@@ -335,15 +336,16 @@
   --c-text-secondary: 73 82 78;
   --c-text-tertiary: 93 101 97;
   --c-text-link: 0 87 59;
+  --c-gold-text: 0 87 59;
   --c-border-subtle: 212 219 216;
   --c-border-rule: 226 232 229;
-  --c-border-control: 122 139 130;
+  --c-border-control: 128 137 132;
   --c-border-field: 102 117 109;
   --c-border-focus: 34 86 187;
   --c-action-primary-bg: 0 87 59;
   --c-action-primary-bg-hover: 0 69 45;
   --c-action-primary-fg: 255 255 255;
-  --c-action-secondary-border: 122 139 130;
+  --c-action-secondary-border: 128 137 132;
   --c-action-secondary-bg: 255 255 255;
   --c-action-secondary-bg-hover: 241 245 243;
   --c-action-secondary-fg: 18 28 23;
@@ -370,8 +372,8 @@
   --c-viz-cat-5: 73 82 78;
   --c-viz-cat-6: 156 61 122;
   --c-viz-up: 180 83 26;
-  --c-viz-down: 0 113 62;
-  --c-viz-prev: 122 139 130;
+  --c-viz-down: 0 87 59;
+  --c-viz-prev: 128 137 132;
   --c-viz-leak: 221 39 41;
   --c-viz-grid: 212 219 216;
   --font-ui-faces: 'IBM Plex Sans Hebrew', 'IBM Plex Sans Hebrew Fallback';
@@ -387,7 +389,7 @@
   --fw-cell: 400;
   --ls-cell: 0;
   --fs-title-sm: 1rem;
-  --lh-title-sm: 1.5rem;
+  --lh-title-sm: 1.375rem;
   --fw-title-sm: 600;
   --ls-title-sm: 0;
   --fs-title-md: 1.25rem;
@@ -407,13 +409,13 @@
   --fw-money-row: 600;
   --ls-money-row: 0;
   --fs-money-card: 1.75rem;
-  --lh-money-card: 2.25rem;
-  --fw-money-card: 700;
+  --lh-money-card: 2rem;
+  --fw-money-card: 600;
   --ls-money-card: -0.01em;
-  --fs-money-hero: 2.5rem;
-  --lh-money-hero: 3rem;
-  --fw-money-hero: 700;
-  --ls-money-hero: -0.01em;
+  --fs-money-hero: 4rem;
+  --lh-money-hero: 4.375rem;
+  --fw-money-hero: 400;
+  --ls-money-hero: -0.03em;
   --fs-qty-field: 1.25rem;
   --lh-qty-field: 1.75rem;
   --fw-qty-field: 700;
@@ -430,6 +432,14 @@
   --lh-row-sub: 1.125rem;
   --fw-row-sub: 400;
   --ls-row-sub: 0;
+  --fs-sub: 0.8125rem;
+  --lh-sub: 1.125rem;
+  --fw-sub: 400;
+  --ls-sub: 0;
+  --fs-lead: 1.125rem;
+  --lh-lead: 1.5rem;
+  --fw-lead: 500;
+  --ls-lead: 0;
   --fs-kbd: 0.75rem;
   --lh-kbd: 1rem;
   --fw-kbd: 500;
@@ -450,7 +460,7 @@
   --decision-row-pt: 7px;
   --decision-row-pb: 8px;
   --btn-h-primary: 40px;
-  --chip-h: 24px;
+  --chip-h: 22px;
   --count-row-h: 72px;
   --nav-item-h: 36px;
   --icon-sm: 14px;
@@ -471,11 +481,21 @@
   --chrome-sidebar-w: 248px;
   --chrome-rail-w: 64px;
   --chrome-bottombar-h: 64px;
+  --dur-menu-fade: 80ms;
+  --dur-menu-tooltip: 90ms;
+  --dur-menu-chevron: 120ms;
+  --dur-menu-delay: 130ms;
+  --dur-menu-collapse: 160ms;
+  --dur-menu-expand: 200ms;
+  --ease-menu: cubic-bezier(0.2,0,0,1);
+  --dur-tooltip-rest: 450ms;
+  --dur-skeleton-wait: 1000ms;
+  --text-zoom: 1;
 }
 @media (min-width: 768px) {
   :root {
-    --fs-money-hero: 3.5rem;
-    --lh-money-hero: 4rem;
+    --fs-money-hero: 5.25rem;
+    --lh-money-hero: 5.5rem;
     --fs-display-sm: 2.25rem;
     --lh-display-sm: 2.75rem;
     --fs-display-md: 3rem;
@@ -530,7 +550,7 @@
   --fs-money-row: 1rem;
   --lh-money-row: 1.5rem;
   --fs-money-card: 1.75rem;
-  --lh-money-card: 2.25rem;
+  --lh-money-card: 2rem;
   --fs-id: 0.8125rem;
   --lh-id: 1.25rem;
   --fs-row-title: 0.875rem;
@@ -541,7 +561,7 @@
   --decision-row-pt: 7px;
   --decision-row-pb: 8px;
   --btn-h-primary: 40px;
-  --chip-h: 24px;
+  --chip-h: 22px;
   --count-row-h: 72px;
   --nav-item-h: 36px;
   --icon-sm: 14px;
@@ -564,7 +584,7 @@
   --fs-money-row: 1rem;
   --lh-money-row: 1.5rem;
   --fs-money-card: 1.75rem;
-  --lh-money-card: 2.25rem;
+  --lh-money-card: 2rem;
   --fs-id: 0.8125rem;
   --lh-id: 1.25rem;
   --fs-row-title: 0.875rem;
@@ -576,7 +596,7 @@
   --nav-item-h: 44px;
   --cell-px: 16px;
 }
-/* DS3: density is fixed on a phone — compact type steps and dials fall back to default under a coarse pointer. */
+/* DS3: density is fixed on a phone — under a coarse pointer everything compact re-binds falls back to default. */
 @media (pointer: coarse) {
   [data-density='compact'] {
     --fs-cell: 0.875rem;
@@ -590,7 +610,7 @@
     --fs-money-row: 1rem;
     --lh-money-row: 1.5rem;
     --fs-money-card: 1.75rem;
-    --lh-money-card: 2.25rem;
+    --lh-money-card: 2rem;
     --fs-id: 0.8125rem;
     --lh-id: 1.25rem;
     --fs-row-title: 0.875rem;
@@ -601,9 +621,10 @@
     --decision-row-pt: 7px;
     --decision-row-pb: 8px;
     --btn-h-primary: 40px;
-    --chip-h: 24px;
+    --chip-h: 22px;
     --nav-item-h: 36px;
     --icon-md: 16px;
+    --cell-px: 16px;
   }
 }
 /* DS2 field mode (C6): field type steps, ≥8.2:1 secondary text, no tertiary, field borders. */
@@ -622,14 +643,16 @@
   --lh-money-row: 1.625rem;
   --fs-money-card: 1.75rem;
   --lh-money-card: 2.25rem;
-  --fs-money-hero: 2.5rem;
-  --lh-money-hero: 3rem;
+  --fs-money-hero: 4rem;
+  --lh-money-hero: 4.375rem;
   --fs-id: 0.875rem;
   --lh-id: 1.25rem;
   --fs-row-title: 1rem;
   --lh-row-title: 1.5rem;
   --fs-row-sub: 0.875rem;
   --lh-row-sub: 1.25rem;
+  --fs-sub: 0.875rem;
+  --lh-sub: 1.25rem;
   --btn-h-primary: 56px;
   --chip-h: 28px;
   --count-row-h: 72px;
@@ -637,6 +660,10 @@
   --c-text-secondary: 59 75 67;
   --c-text-tertiary: 59 75 67;
   --c-border-control: 102 117 109;
+}
+/* DS3: large text (data-text on the shell) zooms the content beside the menu. */
+[data-text='large'] {
+  --text-zoom: 1.1;
 }
 @media (prefers-contrast: more) {
   :root {
@@ -742,10 +769,12 @@
     color: rgb(var(--c-ink));
   }
 
-  /* Quiet light scrollbar (DS3: tokens only; the reference's thumb is the card line). */
+  /* Quiet light scrollbar (DS3: tokens only). The thumb is line-strong at 45 %: 1.66:1 on white, no fainter
+     than DS2's thumb (1.61:1); 65 % on hover (2.14:1, DS2 2.11:1). The reference draws only the menu's own
+     scroller in --line (the frame line), so the global thumb keeps DS2's strength. */
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgb(var(--c-line)) transparent;
+    scrollbar-color: rgb(var(--c-line-strong) / 0.45) transparent;
   }
   *::-webkit-scrollbar {
     width: 10px;
@@ -755,13 +784,13 @@
     background: transparent;
   }
   *::-webkit-scrollbar-thumb {
-    background: rgb(var(--c-line));
+    background: rgb(var(--c-line-strong) / 0.45);
     border-radius: 9999px;
     border: 2px solid transparent;
     background-clip: padding-box;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: rgb(var(--c-line-strong) / 0.6);
+    background: rgb(var(--c-line-strong) / 0.65);
     background-clip: padding-box;
   }
 }
@@ -1225,6 +1254,25 @@ html[lang='ti'] .font-sans {
   font-size: 0.55em;
   font-weight: 600;
   color: rgb(var(--c-muted));
+}
+/* DS3 SPEC §3: on the owner home's hero (the `money-hero` type role) the ₪ is 0.4 em, regular, in the
+   tertiary colour and raised slightly, as the reference's `.hero-num .money .cur`. Scoped to that
+   role, so the screens that keep `metric-hero` keep the glyph above. */
+.text-money-hero .money-glyph {
+  display: inline-block;
+  font-size: 0.4em;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: rgb(var(--c-subtle));
+  transform: translateY(-0.1em);
+}
+
+/* DS3 (WORKPLAN, personal preferences): large text. The shell carries data-text from the rm_text
+   cookie (DS3-02); --text-zoom is 1, or 1.1 under [data-text='large'], as the reference zooms its
+   content. Put the class on the content wrapper beside the menu — not on <main>, whose
+   padding-start holds the fixed menu and would grow with it. */
+.rm-text-zoom {
+  zoom: var(--text-zoom, 1);
 }
 
 /* Bottom sheet detents (lib/components/overlay/Sheet). */

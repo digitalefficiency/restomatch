@@ -104,12 +104,19 @@ test.describe('DS3-01 kit page (platform admins)', () => {
         return { text: el.textContent ?? '', left: digit ? cur.right <= digit.left + 0.5 : false, smaller: curSize < figSize, floor: curSize >= 12 };
       }),
     );
-    expect(checks.length).toBeGreaterThan(3);
+    // The card's three split figures that carry a ₪ (a line, a unit price, a credit); the bookkeeper's
+    // compact-table figure below prints no ₪ by design (D8: the column header carries it once).
+    expect(checks.length).toBe(3);
     for (const c of checks) {
       expect(c.left, `₪ left of digits in "${c.text}"`).toBe(true);
       expect(c.smaller, `smaller ₪ in "${c.text}"`).toBe(true);
       expect(c.floor, `₪ at least 12 px in "${c.text}"`).toBe(true);
     }
+    // D8: the compact-table figure shows the digits only and keeps the exact amount with ₪ in its title
+    const header = page.locator('#kit-money bdi.num', { hasText: '38.70' });
+    await expect(header).toHaveCount(1);
+    await expect(header).not.toContainText('₪');
+    await expect(header).toHaveAttribute('title', /₪/);
   });
 
   test('status: one solid pill with a white word; pending is grey with a clock, never a warning', async ({ page }) => {
@@ -170,6 +177,52 @@ test.describe('DS3-01 kit page (platform admins)', () => {
     await expect(tip).toBeHidden();
   });
 
+  test('the number pad: the first key replaces, a decimal point, a plain note far from the order, the chips, the sheet', async ({ page }) => {
+    await setLang(page, 'he');
+    await page.goto(KIT);
+    const pad = page.locator('#kit-keypad [data-qty-pad]').first();
+    const value = pad.locator('[data-qty-value] > span').first();
+    await expect(value).toHaveText('24');
+    await expect(value).toHaveAttribute('data-selected', '');
+    await pad.getByRole('button', { name: '7', exact: true }).click();
+    await expect(value).toHaveText('7');
+    await expect(value).not.toHaveAttribute('data-selected', '');
+    await pad.getByRole('button', { name: 'נקודה עשרונית' }).click();
+    await pad.getByRole('button', { name: '5', exact: true }).click();
+    await expect(value).toHaveText('7.5');
+    // 7.5 of 28.5 ordered: one plain note, above the stepper, so no key moved under the thumb
+    await expect(pad.getByRole('status')).toHaveText(/שונה ב־74% מההזמנה \(28\.5 ק״ג\)/);
+    await pad.getByRole('button', { name: 'כמו בהזמנה' }).click();
+    await expect(value).toHaveText('28.5');
+    // the live region stays (so the next note is announced) and is empty
+    await expect(pad.getByRole('status')).toHaveCount(1);
+    await expect(pad.getByRole('status')).toBeEmpty();
+    await pad.getByRole('button', { name: 'פגום' }).click();
+    await expect(pad.getByRole('button', { name: 'פגום' })).toHaveAttribute('aria-pressed', 'true');
+    await pad.getByRole('button', { name: 'חסר' }).click();
+    await expect(value).toHaveText('0');
+    await expect(pad.getByRole('button', { name: 'פגום' })).toHaveAttribute('aria-pressed', 'false');
+    await expect(pad.getByRole('button', { name: 'פגום' })).toHaveAttribute('aria-disabled', 'true');
+    const key = await pad.getByRole('button', { name: '1', exact: true }).boundingBox();
+    expect(Math.round(key!.height)).toBe(64);
+
+    await page.getByRole('button', { name: kitHe.demo.keypadOpen }).click();
+    const sheet = page.getByRole('dialog', { name: 'כמה הגיע?' });
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText(`${kitHe.demo.keypadItem}, הוזמן 28.5 ק״ג`);
+    await expect(sheet.getByRole('button', { name: 'אישור: 24 ק״ג' })).toBeVisible();
+    // a hardware keyboard types into the pad (the reference's sheet): the first key replaces, ',' is the point
+    await page.keyboard.press('2');
+    await page.keyboard.press('5');
+    await page.keyboard.press(',');
+    await page.keyboard.press('5');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('Backspace');
+    await sheet.getByRole('button', { name: 'אישור: 25 ק״ג' }).click();
+    await expect(sheet).toBeHidden();
+    await expect(page.locator('#kit-keypad')).toContainText('נרשם: 25 ק״ג');
+  });
+
   test('the three-way strip: one summary for assistive tech, the off cell tinted', async ({ page }) => {
     await setLang(page, 'he');
     await page.goto(KIT);
@@ -178,6 +231,41 @@ test.describe('DS3-01 kit page (platform admins)', () => {
     const off = strip.locator('[data-cell="received"]');
     const bg = await off.evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(bg).not.toBe('rgba(0, 0, 0, 0)');
+  });
+
+  // The sidebar spec is binding on sizes (DS3 SPEC §10.4): the bell is 32 × 32 at the desk (§1.5) with a
+  // 384 px dialog below-end of it (§1.6), and 44 × 44 under 1024 (§11). The dot sits 2 px outside the glyph's top-end corner.
+  test('the top-bar bell: 32 × 32 at the desk with a 384 px panel below-end of it, 44 × 44 under 1024, the dot beside the glyph', async ({ page }) => {
+    await setLang(page, 'he');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const tasksLoaded = page.waitForResponse((r) => r.url().includes('/api/trpc/') && r.url().includes('tasks.mine'));
+    await page.goto(KIT);
+    await tasksLoaded;
+    const bell = page.getByTestId('bell-trigger');
+    const size = async () => {
+      const b = await bell.boundingBox();
+      return [b?.width, b?.height];
+    };
+    expect(await size()).toEqual([32, 32]);
+    // The seed leaves the demo owner gaps to decide (W2-08 reads the same queue), and a fresh context has seen none.
+    const dot = page.getByTestId('bell-dot');
+    await expect(dot).toBeVisible();
+    const d = (await dot.boundingBox())!;
+    const g = (await bell.locator('svg').boundingBox())!;
+    // Hebrew: the end side is the left.
+    expect([d.width, d.height, d.x - g.x, d.y - g.y]).toEqual([8, 8, -2, -2]);
+    await bell.click();
+    const panel = page.getByTestId('bell-panel');
+    await expect(panel).toBeVisible();
+    const p = (await panel.boundingBox())!;
+    const b = (await bell.boundingBox())!;
+    // "Below-end of the bell": in Hebrew the end edge is the left one, and the panel's lands on the bell's.
+    expect([p.width, Math.round(p.x)]).toEqual([384, Math.round(b.x)]);
+    expect(p.y).toBeGreaterThan(b.y + b.height);
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(size).toEqual([44, 44]);
   });
 });
 

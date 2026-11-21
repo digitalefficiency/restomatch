@@ -56,7 +56,7 @@ export function StatCard({
       >
         {value}
       </p>
-      {hint ? <p className="mt-1 text-xs text-muted">{hint}</p> : null}
+      {hint ? <p className="mt-1 text-xs tabular-nums text-muted">{hint}</p> : null}
     </div>
   );
 }

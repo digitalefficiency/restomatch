@@ -40,7 +40,7 @@ export function Token({
 
   return (
     <span className={cn('inline-flex items-center gap-1', className)} data-token={kind}>
-      <bdi dir="ltr" className="whitespace-nowrap font-mono text-[0.8125rem] font-medium">
+      <bdi dir="ltr" className="whitespace-nowrap font-mono text-[0.8125rem] font-medium tabular-nums">
         {value}
       </bdi>
       {copy ? (
@@ -49,7 +49,7 @@ export function Token({
           onClick={onCopy}
           aria-label={copied ? t('ds.token.copied') : t('ds.token.copy', { value })}
           title={copied ? t('ds.token.copied') : t('ds.token.copy', { value })}
-          className="inline-flex h-6 w-6 items-center justify-center rounded-control text-muted transition-colors duration-micro hover:bg-surface-2 hover:text-ink"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-control text-muted transition-colors duration-micro hover:bg-surface-hover hover:text-ink"
         >
           {copied ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
         </button>

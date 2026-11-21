@@ -165,7 +165,8 @@ function ToastCard({ item, onDismiss, dismissLabel }: { item: ToastItem; onDismi
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPaused(false);
       }}
-      className="pointer-events-auto relative flex w-full items-center gap-3 overflow-hidden rounded-card bg-fg px-3.5 py-2.5 text-body-sm text-on-bold shadow-e2 motion-safe:animate-[rm-toast-in_var(--dur-medium)_var(--ease-enter)]"
+      data-focus="on-dark"
+      className="pointer-events-auto relative flex w-full items-center gap-3 overflow-hidden rounded-card bg-fg px-3.5 py-2.5 text-body-sm text-on-bold shadow-e2 forced-colors:border forced-colors:border-[color:ButtonText] motion-safe:animate-[rm-toast-in_var(--dur-medium)_var(--ease-enter)]"
     >
       {item.kind === 'error' ? <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" /> : null}
       <p className="min-w-0 flex-1">{item.message}</p>
@@ -176,7 +177,7 @@ function ToastCard({ item, onDismiss, dismissLabel }: { item: ToastItem; onDismi
             item.action!.onClick();
             onDismiss();
           }}
-          className="inline-flex min-h-7 shrink-0 items-center rounded-control px-1 font-medium text-on-bold underline-offset-2 transition-colors duration-micro ease-standard hover:underline focus-visible:outline-on-bold [@media(pointer:coarse)]:min-h-11"
+          className="inline-flex min-h-7 shrink-0 items-center rounded-control px-1 font-medium text-on-bold underline-offset-2 transition-colors duration-micro ease-standard hover:underline [@media(pointer:coarse)]:min-h-11"
         >
           {item.action.label}
         </button>
@@ -185,7 +186,7 @@ function ToastCard({ item, onDismiss, dismissLabel }: { item: ToastItem; onDismi
         type="button"
         onClick={onDismiss}
         aria-label={dismissLabel}
-        className="-m-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-on-bold transition-colors duration-micro ease-standard hover:bg-on-bold/15 focus-visible:outline-on-bold [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+        className="-m-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-on-bold transition-colors duration-micro ease-standard hover:bg-on-bold/15 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
       >
         <X className="h-4 w-4" aria-hidden="true" />
       </button>

@@ -40,6 +40,9 @@ import {
   Money,
   NumberField,
   PaceLine,
+  QtyKeypad,
+  QtyPad,
+  type QtyPadState,
   ReceiptGlyph,
   SegmentedControl,
   Skeleton,
@@ -57,6 +60,7 @@ import { DataTable } from '@/lib/components/table/DataTable';
 import { ViewTabs } from '@/lib/components/table/ViewTabs';
 import type { ColumnDef } from '@/lib/components/table/types';
 import { BreakdownChart } from '@/lib/components/views/BreakdownChart';
+import { formatIls } from '@/lib/money';
 import { kitCopy, type KitCopy } from './_copy';
 
 type KitDensity = 'regular' | 'compact';
@@ -94,7 +98,7 @@ function KitCard({ id, title, note, wide, children }: { id: string; title: strin
       id={id}
       aria-labelledby={`${id}-title`}
       data-kit-card={id}
-      className={cn('flex min-w-0 flex-col rounded-card border border-line bg-surface p-4 shadow-e1', wide && 'lg:col-span-2')}
+      className={cn('flex min-w-0 flex-col rounded-card border border-line-rule bg-surface p-4 shadow-e1', wide && 'lg:col-span-2')}
     >
       <h2 id={`${id}-title`} className="text-title-sm text-fg">
         {title}
@@ -130,6 +134,11 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
   const [threshold, setThreshold] = useState(10);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [skeletonKey, setSkeletonKey] = useState(0);
+  const [pad, setPad] = useState<QtyPadState>({ text: '24', first: true, damaged: false });
+  // The money card's failed figure: "נסו שוב" loads it (a demo of the one action an error gives).
+  const [retried, setRetried] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [recorded, setRecorded] = useState<string | null>(null);
 
   const changeDensity = (next: KitDensity) => {
     setDensity(next);
@@ -189,7 +198,7 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-title-lg text-fg">{c.title}</h1>
-          <p className="mt-1 max-w-prose text-body-sm text-fg-secondary">{c.intro}</p>
+          <p className="mt-1 max-w-xl text-body-sm text-fg-secondary">{c.intro}</p>
           <p className="mt-0.5 text-caption text-fg-tertiary">{c.source}</p>
         </div>
         <SegmentedControl<KitDensity>
@@ -257,7 +266,7 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
             <Money value={null} pending />
           </Labelled>
           <Labelled label={d.unavailable}>
-            <Money value={null} unavailable />
+            {retried ? <Money value={1104.8} context="line" /> : <Money value={null} unavailable onRetry={() => setRetried(true)} />}
           </Labelled>
           <Labelled label={d.header}>
             <Money value={38.7} context="line" symbol="header" split />
@@ -327,7 +336,13 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
             {filters.supplier ? (
               <FilterChip label={d.supplierFilter} active onRemove={() => setFilters((f) => ({ ...f, supplier: false }))} />
             ) : null}
-            {filters.over ? <FilterChip label={d.overFilter} active onRemove={() => setFilters((f) => ({ ...f, over: false }))} /> : null}
+            {filters.over ? (
+              <FilterChip
+                label={d.overFilter.replace('{amount}', formatIls(50, { maximumFractionDigits: 0, locale }))}
+                active
+                onRemove={() => setFilters((f) => ({ ...f, over: false }))}
+              />
+            ) : null}
             <Button variant="ghost" size="sm" onClick={() => setFilters({ supplier: false, over: false })}>
               {d.clear}
             </Button>
@@ -394,8 +409,8 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
           <DataAnswer
             question={d.question}
             figures={[
-              { value: <Money value={760} context="tile" split />, caption: d.leakSince },
-              { value: <Money value={296} context="tile" split />, caption: d.unpaid },
+              { value: <Money value={760} context="inline" split />, caption: d.leakSince },
+              { value: <Money value={296} context="inline" split />, caption: d.unpaid },
             ]}
             facts={[d.checked, d.openGaps]}
             action={
@@ -518,6 +533,32 @@ export function KitPage({ initialDensity, locale, role }: { initialDensity: KitD
               </Tooltip>
             </Row>
           </div>
+        </KitCard>
+
+        <KitCard id="kit-keypad" title={c.cards.keypad} note={c.notes.keypad} wide>
+          <div className="grid gap-4 md:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+            <QtyPad state={pad} onChange={setPad} unit={d.kg} ordered={28.5} />
+            <div className="grid content-start gap-3">
+              <Row>
+                <Button variant="secondary" onClick={() => setSheetOpen(true)}>
+                  {d.keypadOpen}
+                </Button>
+              </Row>
+              {recorded ? <p className="text-body-sm text-fg-secondary">{d.keypadResult.replace('{qty}', recorded)}</p> : null}
+            </div>
+          </div>
+          <QtyKeypad
+            open={sheetOpen}
+            onClose={() => setSheetOpen(false)}
+            onConfirm={(v, meta) => {
+              setRecorded(`${v} ${d.kg}${meta.damaged ? ` · ${d.keypadDamaged}` : ''}`);
+              setSheetOpen(false);
+            }}
+            name={d.keypadItem}
+            unit={d.kg}
+            ordered={28.5}
+            initial={24}
+          />
         </KitCard>
       </div>
     </div>

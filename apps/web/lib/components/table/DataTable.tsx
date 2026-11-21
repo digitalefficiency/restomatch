@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, ChevronsUpDown, Lock, MoreHorizontal } from 'lucide
 import { useLocale } from '@/lib/i18n/client';
 import { formatDate } from '@/lib/i18n/format';
 import { formatIls } from '@/lib/money';
-import { tableDensity, usePrefs } from '@/lib/prefs';
+import { usePrefs } from '@/lib/prefs';
 import { cn } from '../cn';
 import { Skeleton } from '../Skeleton';
 import { Peek } from '../desk/Peek';
@@ -146,11 +146,12 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
   selectedRef.current = selected;
 
   const sort = state.sort && columns.some((c) => c.id === state.sort!.id && c.sortable !== false) ? state.sort : defaultSort;
-  // DS3-06's display preference (lib/prefs): with no `density` from the caller the table follows the
-  // device's choice, and with no choice the role's default (D4: the bookkeeper's tables are compact).
+  // DS3-06's display preference (lib/prefs; WORKPLAN "Personal preferences: one contract"): with no
+  // `density` from the caller the table follows the density in force on this device — the choice, else
+  // the role's default (D4: the bookkeeper's tables are compact), the regular size on a touch pointer.
   // An explicit prop still wins, and the URL override `d` wins over both (shareable, as before).
   const prefs = usePrefs();
-  const baseDensity: Density = densityProp ?? tableDensity(prefs.density);
+  const baseDensity: Density = densityProp ?? prefs.tableDensity;
   const density = state.density ?? baseDensity;
   const visibleIds = state.cols ?? columns.filter((c) => !c.defaultHidden).map((c) => c.id);
   const visibleKey = visibleIds.join(',');
@@ -363,6 +364,8 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
         className={cn(
           'px-[var(--cell-px,16px)]',
           num && NUM_ALIGN,
+          // Dates line up down the column in any face (DS3-07: digits outside the number role can be proportional).
+          c.kind === 'date' && 'tabular-nums',
           c.identity
             ? cn('sticky z-10 start-0 min-w-[200px] max-w-[320px] bg-inherit', selectable && 'start-10')
             : 'whitespace-nowrap',
@@ -438,7 +441,9 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
 
   const footer = (
     <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-sm text-muted">
-      <p data-table-showing>{copy.showing(win.from, win.to, sorted.length)}</p>
+      <p data-table-showing className="tabular-nums">
+        {copy.showing(win.from, win.to, sorted.length)}
+      </p>
       {win.pages > 1 ? (
         <nav aria-label={copy.pager} className="flex items-center gap-1">
           <button
@@ -656,7 +661,9 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
       {toolbarRow}
       <div
         ref={scroller}
-        className="max-h-[min(72dvh,900px)] overflow-auto rounded-card border border-line bg-surface"
+        // Rows and cells sit in a scroll container: the global focus outline is drawn inside them (DS3-00 hook).
+        data-focus="inset"
+        className="max-h-[min(72dvh,900px)] overflow-auto rounded-card border border-line-rule bg-surface"
         data-table-scroll=""
       >
         <table
@@ -719,7 +726,7 @@ export function DataTable<Row>(props: DataTableProps<Row>) {
                     <td
                       key={c.id}
                       className={cn(
-                        'sticky bottom-0 z-20 whitespace-nowrap border-t-4 border-double border-fg bg-surface px-[var(--cell-px,16px)]',
+                        'sticky bottom-0 z-20 whitespace-nowrap border-t-4 border-double border-fg bg-surface px-[var(--cell-px,16px)] tabular-nums',
                         c.identity && cn('z-30 start-0', selectable && 'start-10'),
                       )}
                     >

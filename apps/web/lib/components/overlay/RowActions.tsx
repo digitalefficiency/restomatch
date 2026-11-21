@@ -92,7 +92,7 @@ export function Menu({ items, label }: { items: RowAction[]; label?: string }) {
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-control text-muted transition-colors duration-micro hover:bg-surface-2 hover:text-ink [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-control text-muted transition-colors duration-micro hover:bg-surface-hover hover:text-ink [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
       >
         <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
       </button>
@@ -103,7 +103,7 @@ export function Menu({ items, label }: { items: RowAction[]; label?: string }) {
           role="menu"
           aria-label={name}
           onKeyDown={onKeyDown}
-          className="absolute end-0 top-full z-sheet mt-1 min-w-44 rounded-card border border-line bg-surface p-1 shadow-e2"
+          className="absolute end-0 top-full z-sheet mt-1 min-w-44 rounded-card bg-surface p-1 shadow-e2 ring-1 ring-line-rule"
         >
           {items.map((a) =>
             a.href ? (
@@ -112,7 +112,7 @@ export function Menu({ items, label }: { items: RowAction[]; label?: string }) {
                 href={a.href}
                 role="menuitem"
                 tabIndex={-1}
-                className="flex min-h-9 items-center gap-2 rounded-control px-3 text-body-sm text-ink hover:bg-surface-2"
+                className="flex min-h-9 items-center gap-2 rounded-control px-3 text-body-sm text-ink hover:bg-surface-hover"
               >
                 {a.icon}
                 {a.label}
@@ -130,7 +130,7 @@ export function Menu({ items, label }: { items: RowAction[]; label?: string }) {
                   close();
                 }}
                 className={cn(
-                  'flex min-h-9 w-full items-center gap-2 rounded-control px-3 text-start text-body-sm hover:bg-surface-2 aria-disabled:cursor-not-allowed aria-disabled:text-subtle',
+                  'flex min-h-9 w-full items-center gap-2 rounded-control px-3 text-start text-body-sm hover:bg-surface-hover aria-disabled:cursor-not-allowed aria-disabled:text-subtle',
                   a.tone === 'danger' ? 'text-danger' : 'text-ink',
                 )}
               >

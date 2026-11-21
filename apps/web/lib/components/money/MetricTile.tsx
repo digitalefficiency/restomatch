@@ -46,7 +46,7 @@ export function MetricTile({
 }) {
   return (
     <div
-      className={cn('flex min-w-0 flex-col gap-1 rounded-card border border-line bg-surface p-4 md:p-5', className)}
+      className={cn('flex min-w-0 flex-col gap-1 rounded-card border border-line-rule bg-surface p-4 md:p-5', className)}
       aria-busy={loading || undefined}
     >
       <div className="flex items-start justify-between gap-2">
@@ -71,7 +71,7 @@ export function MetricTile({
           {value}
         </div>
       )}
-      {context ? <p className="line-clamp-2 text-body-sm text-muted">{context}</p> : null}
+      {context ? <p className="line-clamp-2 text-body-sm tabular-nums text-muted">{context}</p> : null}
       {delta || sparkline ? (
         <div className="mt-1 flex items-end justify-between gap-3">
           {delta ?? <span />}

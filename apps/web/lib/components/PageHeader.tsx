@@ -16,8 +16,6 @@ export interface PageHeaderOverflowItem {
   href: string;
 }
 
-const focusRing = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60';
-
 /**
  * The page-header contract (lens-ia-nav §9, design-system-18): exactly one
  * `h1` (heading-lg, 24/32 700) that defaults to the route's nav label, a
@@ -75,7 +73,7 @@ export function PageHeader({
           <Link
             href={up.href}
             data-testid="page-up-link"
-            className={cn('mb-1 inline-flex min-h-11 items-center gap-1 rounded text-sm text-muted hover:text-ink lg:hidden', focusRing)}
+            className={cn('mb-1 inline-flex min-h-11 items-center gap-1 rounded text-sm text-muted hover:text-ink lg:hidden')}
           >
             <ChevronRight className="h-4 w-4 ltr:rotate-180" aria-hidden="true" />
             {t(`links.${up.key}`)}
@@ -141,18 +139,18 @@ function OverflowMenu({ items, label }: { items: PageHeaderOverflowItem[]; label
         aria-expanded={open}
         aria-controls="page-header-overflow"
         aria-label={label}
-        className={cn('inline-flex h-10 w-10 items-center justify-center rounded-lg border border-line text-ink hover:bg-surface-2', focusRing)}
+        className={cn('inline-flex h-10 w-10 items-center justify-center rounded-lg border border-line text-ink hover:bg-surface-2')}
       >
         <MoreHorizontal className="h-5 w-5" aria-hidden="true" />
       </button>
       <ul
         id="page-header-overflow"
         hidden={!open}
-        className="absolute end-0 top-full z-30 mt-2 min-w-48 rounded-xl border border-line bg-surface p-1 shadow-card"
+        className="absolute end-0 top-full z-30 mt-2 min-w-48 rounded-card bg-surface p-1 shadow-e2 ring-1 ring-line-rule"
       >
         {items.map((it) => (
           <li key={it.href}>
-            <Link href={it.href} className={cn('flex min-h-11 items-center rounded-lg px-3 text-sm text-ink hover:bg-surface-2', focusRing)}>
+            <Link href={it.href} className={cn('flex min-h-11 items-center rounded-lg px-3 text-sm text-ink hover:bg-surface-hover')}>
               {it.label}
             </Link>
           </li>

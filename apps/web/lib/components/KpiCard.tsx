@@ -100,7 +100,7 @@ export function KpiCard({
       </p>
 
       <div className="mt-2 flex items-end justify-between gap-3">
-        {subtitle ? <p className="text-xs text-muted">{subtitle}</p> : <span />}
+        {subtitle ? <p className="text-xs tabular-nums text-muted">{subtitle}</p> : <span />}
         {sparkline && sparkline.length > 1 ? (
           <Sparkline data={sparkline} className="h-7 w-24 opacity-90" />
         ) : null}

@@ -74,7 +74,7 @@ export function TvMode({ active, children }: { active: boolean; children: React.
           <button
             type="button"
             onClick={exit}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface-2 px-3 py-1.5 text-sm font-semibold text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface-2 px-3 py-1.5 text-sm font-semibold text-muted transition-colors hover:text-ink"
           >
             <Minimize2 className="h-4 w-4" aria-hidden="true" />
             {t('tv.exit')}

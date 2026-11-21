@@ -113,6 +113,33 @@ export const motion = {
   },
 } as const;
 
+/**
+ * DS3 SPEC §8: the side menu's own named set, the one addition to motion. The owner-approved
+ * sidebar spec (§10) fixes these timings and DS3-02 uses them: the labels fade out (and a row's
+ * hover fill fades) in `fade`, linearly; the width collapses in `collapse` and expands in
+ * `expand`, on `easing`; the labels come back `delay` after the width starts; a tooltip fades in
+ * `tooltip`; the chevron turns in `chevron` (the reference runs it on the standard curve).
+ * The sidebar spec's 150 ms badge cross-fade is `--dur-short`. Its 140 ms label fade-in and 180 ms
+ * icon glide are not among SPEC §8's six values, so they are an open owner question (see the PR).
+ * Under prefers-reduced-motion the global rule of globals.css (a11y-15) takes every transition
+ * and delay to 0, so nothing is duplicated here.
+ */
+export const menuMotion = {
+  duration: { fade: '80ms', tooltip: '90ms', chevron: '120ms', delay: '130ms', collapse: '160ms', expand: '200ms' },
+  easing: 'cubic-bezier(0.2,0,0,1)',
+} as const;
+
+/**
+ * Two waits: how long something holds back before it appears. Neither moves anything, so SPEC §8's
+ * rule (nothing else adds a duration or a curve) still holds; ds3-clean pins the exact list. DS3-01
+ * reads them by name: the tooltip waits for the pointer to rest (the reference's 450 ms,
+ * `reference/src/script.js`), and `Skeleton delayed` appears only once the wait passes one second
+ * (SPEC §9, "loading that does not flicker"). Under prefers-reduced-motion the global rule of
+ * globals.css (a11y-15) sets every transition delay to 0, so a wait applied as a transition delay is
+ * skipped there.
+ */
+export const waits = { 'tooltip-rest': '450ms', 'skeleton-wait': '1000ms' } as const;
+
 export const legacyDuration = {
   0: '0s',
   75: '75ms',
@@ -211,25 +238,35 @@ const t = (fs: number, lh: number): TypeStep => ({ fs: `${fs / 16}rem`, lh: `${l
 /**
  * The closed v2 scale, direction A values (DS2 §6.1: line-heights one step
  * looser than the base because Plex's Hebrew is tall; titles at 600 so the ₪
- * carries the weight; the hero at 700, Plex has no 800). `id` is Plex Sans 500
- * with `tnum` (D3), never a mono face.
+ * carries the weight). `id` is Plex Sans 500 with `tnum` (D3), never a mono face.
+ * DS3 SPEC §3 moved four of them to the clean finish's steps — the region title (title-sm 16/22),
+ * the leading figure that is not the hero (money-card 28/32 at 600), the hero (money-hero 84/88 at
+ * 400) — and added `sub`, `lead`, `row-title` and `row-sub`. None of the v2 roles has a call site yet.
  */
 export const typeScaleV2: Record<string, TypeRoleV2> = {
   cell: { base: t(14, 22), compact: t(13, 20), field: t(16, 24), fw: 400, ls: '0' },
-  'title-sm': { base: t(16, 24), field: t(18, 26), fw: 600, ls: '0' },
+  'title-sm': { base: t(16, 22), field: t(18, 26), fw: 600, ls: '0' }, // DS3 SPEC §3: the region title is 16/22
   // DS3 SPEC §7: in compact density a screen title is 20/26 (★ from DS3; nothing reads these roles yet).
   'title-md': { base: t(20, 28), compact: t(20, 26), field: t(20, 28), fw: 600, ls: '0' },
   'title-lg': { base: t(24, 32), compact: t(20, 26), field: t(22, 30), fw: 600, ls: '0' },
   'money-dense': { base: t(14, 22), compact: t(13, 20), field: t(16, 24), fw: 400, ls: '0' },
   'money-row': { base: t(16, 24), compact: t(14, 20), field: t(18, 26), fw: 600, ls: '0' },
-  'money-card': { base: t(28, 36), compact: t(24, 32), field: t(28, 36), fw: 700, ls: '-0.01em' },
-  'money-hero': { base: t(56, 64), phone: t(40, 48), field: t(40, 48), fw: 700, ls: '-0.01em' },
+  // DS3 SPEC §3: "28/32 where a screen has one leading figure that is not the hero", at 600 (700 is the monogram's).
+  'money-card': { base: t(28, 32), compact: t(24, 32), field: t(28, 36), fw: 600, ls: '-0.01em' },
+  // DS3 SPEC §3: the owner home's one number — 84/88 at weight 400, 64/70 on a phone (no call site yet;
+  // `metric-hero` stays for the screens that use it today).
+  'money-hero': { base: t(84, 88), phone: t(64, 70), field: t(64, 70), fw: 400, ls: '-0.03em' },
   'qty-field': { base: t(20, 28), fw: 700, ls: '0' },
   id: { base: t(13, 20), compact: t(12, 16), field: t(14, 20), fw: 500, ls: '0' },
   // DS3 SPEC §3/§7: a queue row's title and amount (14/20 → 14/18 compact) and its sub-line
   // (13/18 → 12/16 compact). No DS2 role has these steps; nothing reads them yet.
   'row-title': { base: t(14, 20), compact: t(14, 18), field: t(16, 24), fw: 500, ls: '0' },
   'row-sub': { base: t(13, 18), compact: t(12, 16), field: t(14, 20), fw: 400, ls: '0' },
+  // DS3 SPEC §3 steps no DS2 role had (asked for by DS3-03): a secondary line, a note or the key of a
+  // value at 13/18 in every density (a queue row's sub-line is `row-sub`); and 18/24 for a value that
+  // leads inside a card (a split figure, an amount waiting, a line's name on the phone).
+  sub: { base: t(13, 18), field: t(14, 20), fw: 400, ls: '0' },
+  lead: { base: t(18, 24), fw: 500, ls: '0' },
   kbd: { base: t(12, 16), fw: 500, ls: '0' },
   'display-sm': { base: t(36, 44), phone: t(32, 40), fw: 700, ls: '-0.02em' },
   'display-md': { base: t(48, 56), phone: t(40, 48), fw: 700, ls: '-0.02em' },

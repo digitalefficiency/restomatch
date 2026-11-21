@@ -199,13 +199,13 @@ export function Calendar({
       onKeyDown={onKeyDown}
     >
       <div className="mb-2 flex items-center justify-between">
-        <button type="button" aria-label={t('ds.dateField.prev')} onClick={() => setFocusDay(addDays(`${focusDay.slice(0, 8)}01`, -1))} className="inline-flex h-8 w-8 items-center justify-center rounded-control text-muted hover:bg-surface-2">
+        <button type="button" aria-label={t('ds.dateField.prev')} onClick={() => setFocusDay(addDays(`${focusDay.slice(0, 8)}01`, -1))} className="inline-flex h-8 w-8 items-center justify-center rounded-control text-muted hover:bg-surface-hover">
           <PrevIcon className="h-4 w-4" aria-hidden="true" />
         </button>
         <p className="text-body-sm font-semibold text-ink" aria-live="polite">
           {title}
         </p>
-        <button type="button" aria-label={t('ds.dateField.next')} onClick={() => setFocusDay(addDays(`${focusDay.slice(0, 8)}28`, 7))} className="inline-flex h-8 w-8 items-center justify-center rounded-control text-muted hover:bg-surface-2">
+        <button type="button" aria-label={t('ds.dateField.next')} onClick={() => setFocusDay(addDays(`${focusDay.slice(0, 8)}28`, 7))} className="inline-flex h-8 w-8 items-center justify-center rounded-control text-muted hover:bg-surface-hover">
           <NextIcon className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
@@ -241,7 +241,7 @@ export function Calendar({
                     }}
                     className={cn(
                       'num inline-flex h-9 w-9 items-center justify-center rounded-control text-body-sm transition-colors duration-micro',
-                      isSel ? 'bg-primary-bold font-semibold text-on-bold' : 'hover:bg-surface-2',
+                      isSel ? 'bg-primary-bold font-semibold text-on-bold' : 'hover:bg-surface-hover',
                       outside && !isSel ? 'text-subtle' : !isSel ? 'text-ink' : '',
                       isToday && !isSel ? 'border border-primary' : '',
                       'disabled:cursor-not-allowed disabled:text-line-strong',

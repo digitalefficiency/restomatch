@@ -77,7 +77,7 @@ describe('<Money> renders formatIls() output unchanged (acceptance 4)', () => {
     expect(stateClass('leak', 0)).toBe('text-muted');
     expect(stateClass('outstanding', 1759)).toBe('text-ink');
     expect(stateClass('caught', 296)).toBe('text-gold');
-    expect(stateClass('claimed', 10)).toBe('text-primary');
+    expect(stateClass('claimed', 10)).toBe('text-gold');
     expect(render(h(Money, { value: 0, state: 'leak' }))).not.toContain('danger');
   });
 
@@ -179,7 +179,7 @@ describe('component contracts', () => {
   });
 
   it('Button: v2 sizes, aliases kept, loading is busy with a decorative spinner, disabledReason is linked', () => {
-    expect(render(h(Button, { size: 'xl', children: 'x' }))).toContain('min-h-14');
+    expect(render(h(Button, { size: 'xl', children: 'x' }))).toContain('min-h-[3.75rem]'); // SPEC §5 phone primary: 60 px
     expect(render(h(Button, { variant: 'gold', children: 'x' }))).toContain('bg-gold-bold');
     expect(render(h(Button, { variant: 'accent', children: 'x' }))).toContain('bg-primary-bold');
     const loading = render(h(Button, { loading: true, children: 'שמירה' }));
