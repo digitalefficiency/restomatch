@@ -129,6 +129,17 @@ export const menuMotion = {
   easing: 'cubic-bezier(0.2,0,0,1)',
 } as const;
 
+/**
+ * Two waits: how long something holds back before it appears. Neither moves anything, so SPEC §8's
+ * rule (nothing else adds a duration or a curve) still holds; ds3-clean pins the exact list. DS3-01
+ * reads them by name: the tooltip waits for the pointer to rest (the reference's 450 ms,
+ * `reference/src/script.js`), and `Skeleton delayed` appears only once the wait passes one second
+ * (SPEC §9, "loading that does not flicker"). Under prefers-reduced-motion the global rule of
+ * globals.css (a11y-15) sets every transition delay to 0, so a wait applied as a transition delay is
+ * skipped there.
+ */
+export const waits = { 'tooltip-rest': '450ms', 'skeleton-wait': '1000ms' } as const;
+
 export const legacyDuration = {
   0: '0s',
   75: '75ms',
