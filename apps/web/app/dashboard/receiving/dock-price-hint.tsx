@@ -9,7 +9,8 @@ import { formatIls } from '@/lib/money';
 const MIN_SHOWN_PCT = 0.005;
 
 export interface DockPriceHintData {
-  usualUnitPrice: number;
+  /** null for a role without ₪ (H-11): the hint then says "higher than usual" with no price. */
+  usualUnitPrice: number | null;
   pctVsUsual: number;
   samples: number;
 }
@@ -25,16 +26,24 @@ export function DockPriceHint({ data }: { data: DockPriceHintData }) {
   const t = useT(dockPrice);
   const locale = useLocale();
   const pct = data.pctVsUsual;
+  // Without a price (H-11), the hint only says "higher than usual", so it needs a positive %.
+  if (data.usualUnitPrice === null && !(pct > 0)) return null;
   return (
     <p
       className="mt-1 text-sm text-muted"
       data-testid="dock-price-hint"
       title={t('title', { days: DOCK_PRICE_DAYS, count: data.samples })}
     >
-      {t('usual')}{' '}
-      {/* ₪ in the page direction (no LTR isolate, no mono): ₪ sits left of the digits in Hebrew. */}
-      <bdi className="tabular-nums">{formatIls(data.usualUnitPrice, { locale, maximumFractionDigits: 2 })}</bdi>{' '}
-      {t('window', { days: DOCK_PRICE_DAYS })}
+      {data.usualUnitPrice === null ? (
+        t('higher')
+      ) : (
+        <>
+          {t('usual')}{' '}
+          {/* ₪ in the page direction (no LTR isolate, no mono): ₪ sits left of the digits in Hebrew. */}
+          <bdi className="tabular-nums">{formatIls(data.usualUnitPrice, { locale, maximumFractionDigits: 2 })}</bdi>{' '}
+          {t('window', { days: DOCK_PRICE_DAYS })}
+        </>
+      )}
       {Math.abs(pct) >= MIN_SHOWN_PCT ? (
         <>
           {' · '}

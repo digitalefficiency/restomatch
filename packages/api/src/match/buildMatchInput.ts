@@ -33,13 +33,18 @@ import { addCalendarDaysInTz, endOfDayInTz, startOfDayInTz } from '../lib/time';
 import { featureEnabled } from '../lib/features';
 import { applyContractPrices } from '../contracts/load';
 import { localDateKey } from '../contracts/core';
+import { closedReceiptSql, countedLineSql, isPoPinnable, PO_MATCHABLE } from './receiptTruth';
 import { chargeKeyCovers } from '../catalog/linkQuestions';
 import { normalizeLinkName } from '@restomatch/catalog';
 
 const DEFAULT_TZ = 'Asia/Jerusalem';
 
-/** PO statuses eligible to be matched against an incoming invoice. */
-const ELIGIBLE_PO_STATUSES = ['sent', 'confirmed', 'partial'] as const;
+/**
+ * PO statuses discovery may match an incoming invoice against: receiptTruth's
+ * PO_MATCHABLE (everything but draft / cancelled). `closed` is included — a
+ * MarketMan / Zester PO syncs as closed before its invoice arrives (G-04).
+ */
+const ELIGIBLE_PO_STATUSES = PO_MATCHABLE;
 /** ± window (days) around the invoice date in which a PO's expected delivery may fall. */
 export const PO_MATCH_WINDOW_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -50,6 +55,12 @@ export interface BuiltMatchInput {
   /** Resolved PO / GR for matchRuns.po_id / gr_id provenance (null when none matched). */
   poId: string | null;
   grId: string | null;
+  /**
+   * Set when the re-match pin was NOT used because the pinned PO is still a draft
+   * (a walk-in's retro PO before the manager confirms it): the invoice is matched
+   * as if unpinned (usually UNORDERED_ARRIVAL). Additive and optional (G-04).
+   */
+  pinSkipped?: 'po_draft';
 }
 
 const num = (v: string | null, fallback = 0): number => (v == null ? fallback : Number(v));
@@ -66,9 +77,13 @@ export const firstVatRate = (...rates: Array<string | null>): number => {
 };
 
 /**
- * "The PO has a goods receipt". The outer column is spelled out: in a one-table
- * select drizzle renders `${purchaseOrders.id}` unqualified, which inside the
- * subquery would resolve to the receipt's own id.
+ * "The PO has a goods receipt" — its goods reached the door (open or closed). This
+ * only RANKS candidates (which PO a scan belongs to); what the engine is fed is
+ * receipt truth below (closed receipts, counted lines). An open receipt still
+ * ranks: the receiving wizard's scan pairs with the PO being counted right now
+ * (receiving/matchTriggers.ts pairsWithReceipt relies on it). The outer column is
+ * spelled out: in a one-table select drizzle renders `${purchaseOrders.id}`
+ * unqualified, which inside the subquery would resolve to the receipt's own id.
  */
 const receivedSql = (restaurantId: string) =>
   sql<boolean>`EXISTS (SELECT 1 FROM goods_receipts gr WHERE gr.po_id = "purchase_orders"."id" AND gr.restaurant_id = ${restaurantId})`;
@@ -77,7 +92,7 @@ interface PoCandidate {
   id: string;
   expectedDeliveryAt: Date | null;
   vatRate: string | null;
-  /** The PO has a goods receipt — its goods arrived. */
+  /** The PO has a goods receipt (open or closed) — its goods arrived. */
   received: boolean;
 }
 
@@ -94,9 +109,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * returns an input with empty poLines, so the engine emits UNORDERED_ARRIVAL.
  *
  * `pinnedPoId` (a re-match): the PO the invoice was already matched against. It
- * is used whatever its status — by then it is usually `received`/`closed`, which
- * discovery skips, and re-matching against "no PO" would flag the whole invoice
- * as UNORDERED_ARRIVAL. It is one more discovery candidate (nearest day wins —
+ * is used whatever its status but draft / cancelled (receiptTruth PO_PINNABLE) —
+ * by then it is usually `received`/`closed`, and re-matching against "no PO" would
+ * flag the whole invoice as UNORDERED_ARRIVAL. A draft pin (a walk-in's retro PO
+ * before the manager confirms it) is skipped and reported as `pinSkipped`. It is one more discovery candidate (nearest day wins —
  * received first for a photo, and a received pin is never displaced by an
  * undelivered PO — ties to it), dropped when gone, cancelled, of another supplier, or outside the
  * ±PO_MATCH_WINDOW_DAYS window around the invoice date — so after a corrected
@@ -298,6 +314,7 @@ export async function buildMatchInputForInvoice(
   // ── Discover the candidate PO: same supplier, eligible status, expected
   //    delivery within ±window of the invoice date; nearest delivery wins. ──
   let po: PoCandidate | null = null;
+  let pinSkipped: BuiltMatchInput['pinSkipped'];
   // The PO window: from the start of the local day PO_MATCH_WINDOW_DAYS before
   // the invoice date to the end of the day PO_MATCH_WINDOW_DAYS after it —
   // aligned to the restaurant's calendar (DST-safe) instead of raw getTime() ±
@@ -311,10 +328,13 @@ export async function buildMatchInputForInvoice(
   if (inv.supplierId && !options.skipPoDiscovery && !allChargeCandidate) {
     const candidates: PoCandidate[] = [];
     // A re-match's pinned PO is ONE MORE candidate, never a short-circuit: it
-    // skips the status filter (by then it is usually closed / received, which
-    // discovery skips) but is dropped when cancelled, from another supplier or
+    // passes PO_PINNABLE (by then it is usually closed / received) but is dropped
+    // when draft or cancelled, from another supplier or
     // out of the window. Listed first, so a tie goes to it (pickNearest keeps the
     // first of equals). How candidates rank depends on the invoice's source — below.
+    // A DRAFT pin is skipped (receiptTruth PO_PINNABLE): a walk-in's retro PO is
+    // not an order until the manager confirms it, and pinning it would erase the
+    // owner's UNORDERED_ARRIVAL hold. Reported as `pinSkipped: 'po_draft'`.
     if (options.pinnedPoId) {
       const [pinned] = await db
         .select({
@@ -328,9 +348,12 @@ export async function buildMatchInputForInvoice(
         .from(purchaseOrders)
         .where(and(eq(purchaseOrders.id, options.pinnedPoId), eq(purchaseOrders.restaurantId, restaurantId)))
         .limit(1);
+      if (pinned?.status === 'draft' && pinned.supplierId === inv.supplierId && inWindow(pinned.expectedDeliveryAt)) {
+        pinSkipped = 'po_draft';
+      }
       if (
         pinned &&
-        pinned.status !== 'cancelled' &&
+        isPoPinnable(pinned.status) &&
         pinned.supplierId === inv.supplierId &&
         inWindow(pinned.expectedDeliveryAt)
       ) {
@@ -355,6 +378,12 @@ export async function buildMatchInputForInvoice(
           eq(purchaseOrders.restaurantId, restaurantId),
           eq(purchaseOrders.supplierId, inv.supplierId),
           inArray(purchaseOrders.status, [...ELIGIBLE_PO_STATUSES]),
+          // A CLOSED PO is discovered only while no other invoice's run uses it (the Zester
+          // case: synced closed before its invoice). A closed PO another invoice already
+          // matched is done: a second invoice for it — a re-bill under a new number — must
+          // stay UNORDERED_ARRIVAL, never pair "clean" with goods already billed. (A pin
+          // keeps its own closed PO: that run is this invoice's.)
+          sql`(${purchaseOrders.status} <> 'closed' OR NOT EXISTS (SELECT 1 FROM match_runs mr WHERE mr.po_id = "purchase_orders"."id" AND mr.restaurant_id = ${restaurantId} AND mr.invoice_id IS DISTINCT FROM ${invoiceId}))`,
           // A null expected_delivery_at shouldn't exclude a candidate (it may
           // still be the right PO); treat null as "passes the bound".
           or(isNull(purchaseOrders.expectedDeliveryAt), gte(purchaseOrders.expectedDeliveryAt, lo)),
@@ -448,13 +477,20 @@ export async function buildMatchInputForInvoice(
       unitPriceExpected: p.unitPriceExpected == null ? null : Number(p.unitPriceExpected),
     }));
 
+    // grId stays the PO's latest receipt (any status): it is provenance — which
+    // receipt the invoice pairs with (matchTriggers compares it to the receipt being
+    // submitted). Receipt truth decides what the engine is FED: only CLOSED
+    // receipts, and only their COUNTED lines. A pending receipt (autosaved while the
+    // receiver is still counting) feeds nothing, and an untouched 0/0 line is
+    // unknown — not "received 0" — so the engine skips its qty checks (`if (gr)`)
+    // instead of inventing a whole-line shortfall.
     const grs = await db
-      .select({ id: goodsReceipts.id })
+      .select({ id: goodsReceipts.id, closed: closedReceiptSql() })
       .from(goodsReceipts)
       .where(and(eq(goodsReceipts.poId, po.id), eq(goodsReceipts.restaurantId, restaurantId)))
       .orderBy(asc(goodsReceipts.receivedAt));
-    const grIds = grs.map((g) => g.id);
-    grId = grIds.length > 0 ? grIds[grIds.length - 1]! : null;
+    grId = grs.length > 0 ? grs[grs.length - 1]!.id : null;
+    const grIds = grs.filter((g) => g.closed).map((g) => g.id);
     if (grIds.length > 0) {
       const grLineRows = await db
         .select({
@@ -464,7 +500,7 @@ export async function buildMatchInputForInvoice(
           qtyReceived: grLines.qtyReceived,
         })
         .from(grLines)
-        .where(inArray(grLines.grId, grIds));
+        .where(and(inArray(grLines.grId, grIds), countedLineSql()));
       // Round 7 LOW-7: a charge order line is not counted goods — its receipt line
       // ("received 0" for a deposit) would read QTY_OVER against the ₪0 twin.
       const chargePoIds = new Set(poLineRows.filter((p) => p.charge === true).map((p) => p.id));
@@ -619,7 +655,7 @@ export async function buildMatchInputForInvoice(
     ...(po?.expectedDeliveryAt ? { expectedDeliveryDate: po.expectedDeliveryAt } : {}),
   };
 
-  return { input, poId: po?.id ?? null, grId };
+  return { input, poId: po?.id ?? null, grId, ...(pinSkipped ? { pinSkipped } : {}) };
 }
 
 /** The printed VAT in agorot; when none is printed but the subtotal and total are, their gap (round 7 LOW-2). */
