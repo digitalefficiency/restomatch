@@ -473,7 +473,7 @@ export const catalogRouter = router({
 
       const result = await commitCatalogRows(
         ctx.db,
-        { restaurantId, supplierId: input.supplierId, sourceImportId: imp.id },
+        { restaurantId, supplierId: input.supplierId, sourceImportId: imp.id, userId: ctx.session.userId },
         rows,
         embedder,
       );

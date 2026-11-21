@@ -77,14 +77,59 @@ describe('leads.create (public, honeypot)', () => {
   });
 
   it('empty/whitespace hp is treated as not-tripped (inserts)', async () => {
-    await publicCaller().leads.create({ name: 'human', hp: '   ' });
+    await publicCaller().leads.create({ name: 'human', phone: '050-1234567', hp: '   ' });
     expect(await leadCount()).toBe(1);
   });
 
   it('rejects an over-long name', async () => {
     await expect(
-      publicCaller().leads.create({ name: 'x'.repeat(201) }),
+      publicCaller().leads.create({ name: 'x'.repeat(201), phone: '050-1234567' }),
     ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+
+  // SEC-1: the public door enforces the form's contact rule (phone OR email).
+  it('rejects a name-only lead (no phone, no email) and inserts nothing', async () => {
+    await expect(publicCaller().leads.create({ name: 'רק שם' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(
+      publicCaller().leads.create({ name: 'רווחים', phone: '   ', email: undefined }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(await leadCount()).toBe(0);
+  });
+
+  it('accepts phone-only and email-only leads', async () => {
+    await publicCaller().leads.create({ name: 'טלפון', phone: '050-1234567' });
+    await publicCaller().leads.create({ name: 'מייל', email: 'mail@example.com' });
+    expect(await leadCount()).toBe(2);
+  });
+
+  // SEC-1: the phone must be a valid Israeli number, exactly as the form demands.
+  it.each(['abc', '1', '-', '📞', '050-123', '12345678901'])(
+    'rejects a junk phone %j (even with a name) and inserts nothing',
+    async (phone) => {
+      await expect(publicCaller().leads.create({ name: 'זבל', phone })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+      expect(await leadCount()).toBe(0);
+    },
+  );
+
+  it('rejects a junk phone even when a valid email is also given (same as the form)', async () => {
+    await expect(
+      publicCaller().leads.create({ name: 'זבל', phone: 'abc', email: 'ok@example.com' }),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(await leadCount()).toBe(0);
+  });
+
+  it.each(['0501234567', '050-1234567', '+972501234567', '+972-50-123-4567', '00972501234567', '03-1234567', '077 1234567'])(
+    'accepts a valid Israeli phone %j',
+    async (phone) => {
+      await publicCaller().leads.create({ name: 'תקין', phone });
+      expect(await leadCount()).toBe(1);
+    },
+  );
+
+  it('honeypot without contact still answers ok silently (no oracle) and inserts nothing', async () => {
+    await expect(publicCaller().leads.create({ name: 'bot', hp: 'x' })).resolves.toEqual({ ok: true });
+    await expect(publicCaller().leads.create({ name: 'bot', phone: 'abc', hp: 'x' })).resolves.toEqual({ ok: true });
+    expect(await leadCount()).toBe(0);
   });
 
   it('rejects a malformed email', async () => {
