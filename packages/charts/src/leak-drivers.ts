@@ -1,5 +1,5 @@
 import { sql, type Database } from '@restomatch/db';
-import { lineFilter, viewInvoicesSql, type ViewSpec } from './leak-views';
+import { computeLeakSummary, lineFilter, viewInvoicesSql, type ViewSpec } from './leak-views';
 import { computeLeakComparison, type LeakComparison } from './period';
 
 type SQL = ReturnType<typeof sql>;
@@ -19,6 +19,17 @@ type SQL = ReturnType<typeof sql>;
  * each line gets floor(|Δ|·C / R); the agorot left over go one each to the lines
  * with the largest remainders, ties by line id. So Σ lines = C exactly, and
  * Σ over all groups of a window = that window's hero leak.
+ *
+ * An invoice with no leak lines still counts min(0, T) in the hero (a credit
+ * document with a negative total). By supplier it is added to its supplier, so
+ * every supplier chip = its landing; by product / type it has no line to carry
+ * it, so the "אחר" remainder absorbs it.
+ *
+ * Windows are the hero's own: the current window is the view itself and the
+ * previous one is computeLeakSummary(view, 'prev')'s SQL bounds (boundsCte),
+ * converted to the restaurant's local dates, so the chips can never count an
+ * invoice the hero's Δ leaves out (month end, Feb 28/29, quarter end, running
+ * custom ranges, the restaurant's timezone).
  */
 
 export const DRIVER_DIMENSIONS = ['supplier', 'product', 'type'] as const;
@@ -45,7 +56,11 @@ export interface LeakDrivers {
   otherAgorot: number;
 }
 
-/** Same keys and labels as the explorer's group-by (leak-views GROUP_SQL). */
+/**
+ * Mirrors leak-views.ts GROUP_SQL (supplier / product / type: key, label, join),
+ * which is not exported; keep them in step. The parity test pins the keys and
+ * labels against computeLeakGrouped.
+ */
 const GROUP: Record<DriverDimension, { key: SQL; label: SQL; labelEn: SQL; join: (rid: string) => SQL }> = {
   supplier: {
     key: sql`COALESCE(per.supplier_id::text, '')`,
@@ -156,6 +171,26 @@ async function capLines(db: Database, restaurantId: string, spec: ViewSpec, by: 
   }));
 }
 
+/** Invoices with no leak lines and a negative total: the hero counts min(0, total) for each, per supplier. */
+async function negativeWithoutLines(db: Database, restaurantId: string, spec: ViewSpec): Promise<CapGroup[]> {
+  const g = GROUP.supplier;
+  const res = await db.execute(sql`
+    WITH ${viewInvoicesSql(restaurantId, spec)}
+    SELECT ${g.key} AS key, MAX(${g.label}) AS label, MAX(${g.labelEn}) AS label_en,
+           SUM(ROUND(per.total * 100))::bigint AS agorot
+    FROM per
+    ${g.join(restaurantId)}
+    WHERE per.raw_leak = 0 AND per.total < 0
+    GROUP BY 1
+  `);
+  return rowsOf(res).map((r) => ({
+    key: String(r.key ?? ''),
+    label: (r.label as string | null) ?? null,
+    labelEn: (r.label_en as string | null) ?? null,
+    agorot: Number(r.agorot),
+  }));
+}
+
 /** Capped leak per group for one window of the view (`previous` = the comparison's previous span). */
 export async function computeCappedGroups(
   db: Database,
@@ -163,7 +198,35 @@ export async function computeCappedGroups(
   spec: ViewSpec,
   by: DriverDimension,
 ): Promise<Map<string, CapGroup>> {
-  return allocateCapped(await capLines(db, restaurantId, spec, by));
+  const groups = allocateCapped(await capLines(db, restaurantId, spec, by));
+  if (by === 'supplier') {
+    for (const n of await negativeWithoutLines(db, restaurantId, spec)) {
+      const g = groups.get(n.key);
+      if (g) {
+        g.agorot += n.agorot;
+        g.label ??= n.label;
+        g.labelEn ??= n.labelEn;
+      } else groups.set(n.key, n);
+    }
+  }
+  return groups;
+}
+
+/**
+ * The hero's comparison window for `spec` (boundsCte 'prev', in the restaurant's
+ * timezone) as a custom view over the same filters; null when it is empty.
+ */
+export async function previousWindowSpec(db: Database, restaurantId: string, spec: ViewSpec): Promise<ViewSpec | null> {
+  const prev = await computeLeakSummary(db, restaurantId, spec, 'prev');
+  const res = await db.execute(sql`
+    SELECT to_char((${prev.monthStart}::timestamptz AT TIME ZONE r.tz), 'YYYY-MM-DD') AS from_d,
+           to_char((${prev.monthEnd}::timestamptz AT TIME ZONE r.tz) - interval '1 day', 'YYYY-MM-DD') AS to_d,
+           (${prev.monthEnd}::timestamptz > ${prev.monthStart}::timestamptz) AS nonempty
+    FROM (SELECT COALESCE(timezone, 'Asia/Jerusalem') AS tz FROM restaurants WHERE id = ${restaurantId}) r
+  `);
+  const r = rowsOf(res)[0];
+  if (!r || !r.nonempty) return null;
+  return { period: 'custom', from: String(r.from_d), to: String(r.to_d), filters: spec.filters, now: spec.now };
 }
 
 export async function computeLeakDrivers(
@@ -175,17 +238,13 @@ export async function computeLeakDrivers(
   const by = opts.by ?? 'supplier';
   const top = Math.min(Math.max(opts.top ?? 3, 1), 10);
   const spec = { ...view, now: view.now ?? new Date() };
-  const comparison = await computeLeakComparison(db, restaurantId, spec, opts.tz);
-  const prevSpec: ViewSpec = {
-    period: 'custom',
-    from: comparison.previous.from,
-    to: comparison.previous.to,
-    filters: spec.filters,
-    now: spec.now,
-  };
+  const [comparison, prevSpec] = await Promise.all([
+    computeLeakComparison(db, restaurantId, spec, opts.tz),
+    previousWindowSpec(db, restaurantId, spec),
+  ]);
   const [cur, prev] = await Promise.all([
     computeCappedGroups(db, restaurantId, spec, by),
-    computeCappedGroups(db, restaurantId, prevSpec, by),
+    prevSpec ? computeCappedGroups(db, restaurantId, prevSpec, by) : Promise.resolve(new Map<string, CapGroup>()),
   ]);
   const map = new Map<string, LeakDriver>();
   const row = (g: CapGroup) => {
