@@ -228,7 +228,7 @@ export const en: Shape<typeof he> = {
       notOpenedAmount: '{count, plural, one {One gap would not have opened, {amount} before VAT} other {# gaps would not have opened, {amount} before VAT}}',
       andMore: '{count, plural, one {and one more} other {and # more}}',
       unnamed: 'an invoice line',
-      notEvaluated: '{count, plural, one {One gap was not re-checked and is counted as open} other {# gaps were not re-checked and are counted as open}}',
+      notEvaluated: '{count, plural, one {One gap counts as open: its outcome under the new thresholds is unknown} other {# gaps count as open: their outcome under the new thresholds is unknown}}',
       stricter: 'Stricter thresholds may open more gaps on the next invoices',
       computing: 'Working it out…',
       applies: 'A new threshold applies to invoices checked from now on, including an open invoice checked again',
