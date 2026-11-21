@@ -2,7 +2,7 @@ import type { Shape } from '../../../../translate';
 import type { he } from '../../../auth/he';
 
 /** auth — th overlay (Thai). */
-export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 'signin'>> = {
+export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 'signin' | 'codeLogin' | 'passkeys'>> = {
   login: {
     title: 'เข้าสู่ระบบ RestoMatch',
     subtitle: 'เข้าสู่ระบบด้วยรหัสผ่าน หรือรับลิงก์เข้าสู่ระบบทางอีเมล',
@@ -56,5 +56,32 @@ export const auth: Shape<Pick<typeof he, 'login' | 'checkEmail' | 'twoFactor' | 
     switchUser: 'เข้าสู่ระบบด้วยผู้ใช้อื่น',
     newHere: 'ใหม่กับ RestoMatch? การเข้าสู่ระบบครั้งแรกด้วยลิงก์ทางอีเมลจะเปิดบัญชีให้',
     demo: 'ดูเดโม',
+  },
+  codeLogin: {
+    button: 'ส่งรหัสให้ฉันทางอีเมล',
+    title: 'รหัสกำลังส่งไป',
+    sentTo: 'หากที่อยู่นี้ลงทะเบียนไว้กับเรา เราได้ส่งรหัส 6 หลักไปให้แล้ว:',
+    validFor: 'รหัสใช้ได้ 10 นาที',
+    codeLabel: 'รหัสจากอีเมล',
+    submit: 'เข้าสู่ระบบ',
+    resend: 'ส่งรหัสใหม่',
+    resent: 'เราส่งรหัสใหม่แล้ว ใช้รหัสจากอีเมลล่าสุด',
+    useOther: 'เข้าสู่ระบบด้วยวิธีอื่น',
+    errors: {
+      sendRate: 'เราส่งรหัสไปหลายครั้งแล้ว ใช้รหัสจากอีเมลล่าสุด',
+      wrongCode: 'รหัสไม่ตรงหรือหมดอายุแล้ว ตรวจสอบอีเมลล่าสุด',
+      rate: 'การเข้าสู่ระบบด้วยรหัสถูกล็อกอยู่ เข้าสู่ระบบด้วยรหัสผ่านหรือลิงก์ในอีเมล',
+    },
+  },
+  passkeys: {
+    title: 'พาสคีย์',
+    intro: 'เข้าสู่ระบบด้วยลายนิ้วมือ ใบหน้า หรือรหัสเครื่อง โดยไม่ต้องใช้รหัสผ่าน',
+    introWhere: 'พาสคีย์เก็บอยู่ในเครื่องของคุณ ไม่ได้เก็บไว้ที่เรา',
+    notForRole: 'พาสคีย์ใช้ได้เฉพาะเจ้าของร้านและฝ่ายบัญชีเท่านั้น',
+    count: '{count, plural, =0 {บัญชีนี้ยังไม่มีพาสคีย์} other {จำนวนพาสคีย์ในบัญชีนี้: #}}',
+    add: 'เพิ่มพาสคีย์ในเครื่องนี้',
+    signIn: 'เข้าสู่ระบบด้วยพาสคีย์',
+    failed: 'ใช้พาสคีย์ไม่สำเร็จ ลองอีกครั้งหรือเข้าสู่ระบบด้วยรหัสผ่าน',
+    back: 'กลับไปที่แอป',
   },
 };
