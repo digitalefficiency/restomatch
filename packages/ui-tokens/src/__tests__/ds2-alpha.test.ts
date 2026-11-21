@@ -77,7 +77,7 @@ describe('DS2 v2 names', () => {
     '--c-border-rule: 226 232 229;',
     '--c-action-primary-bg: 0 87 59;',
     '--row-default: 48px;',
-    '--decision-row-h: 64px;',
+    '--decision-row-h: 52px;', // DS3: the clean queue row (DS2 had 64)
     '--fs-money-hero: 2.5rem;',
     '--chrome-header-h: 56px;',
   ])('emits %s', (decl) => expect(css).toContain(decl));
@@ -90,7 +90,9 @@ describe('DS2 v2 names', () => {
     expect(tailwindPreset.theme.borderRadius).toHaveProperty('chip');
   });
 
-  it('has 14 v2 type roles; with caption, body-sm and body that is the closed 17', () => {
-    expect(Object.keys(tokens.typeScaleV2)).toHaveLength(14);
+  it('has 16 v2 type roles; with caption, body-sm and body that is the closed 19', () => {
+    // DS2 closed 17; DS3-00 adds `row-title` and `row-sub` (SPEC §7: a queue row's compact steps).
+    expect(Object.keys(tokens.typeScaleV2)).toHaveLength(16);
+    expect(Object.keys(tokens.typeScaleV2)).toEqual(expect.arrayContaining(['row-title', 'row-sub']));
   });
 });
