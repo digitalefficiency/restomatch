@@ -105,18 +105,21 @@ for (const role of ROLES) {
 
       const bar = page.getByTestId('bottom-bar');
       await expect(bar).toBeVisible();
-      expect(await bar.locator('li').allInnerTexts()).toEqual(BARS[role][locale]);
+      // DS3-02: a badge's meaning is visually hidden text inside the link (sidebar spec §9), so the visible
+      // label is read from its own element, not from the link's whole text.
+      expect(await bar.locator('li [data-bar-label]').allInnerTexts()).toEqual(BARS[role][locale]);
       const box = (await bar.boundingBox())!;
       expect(box.height).toBeGreaterThanOrEqual(64);
-      // Home is active, with aria-current and a 56×32 pill.
+      // Home is active, with aria-current and a 56×28 pill (DS3-02: sidebar spec §11 "icon 24 inside a 56×28 pill";
+      // W1-03 had drawn it 56×32).
       const active = bar.locator('a[aria-current="page"]');
       await expect(active).toHaveCount(1);
       await expect(active).toHaveAttribute('href', '/dashboard');
       const pill = (await active.locator('span').first().boundingBox())!;
       expect(Math.round(pill.width)).toBe(56);
-      expect(Math.round(pill.height)).toBe(32);
+      expect(Math.round(pill.height)).toBe(28);
       // 12 px labels, never truncated.
-      const labels = await bar.locator('li span:last-child').evaluateAll((els) =>
+      const labels = await bar.locator('li [data-bar-label]').evaluateAll((els) =>
         els.map((el) => ({ fs: getComputedStyle(el).fontSize, cut: el.scrollWidth > el.clientWidth + 1 })),
       );
       for (const l of labels) expect(l).toEqual({ fs: '12px', cut: false });
@@ -138,7 +141,8 @@ for (const role of ROLES) {
       const page = await open(browser, baseURL!, role, locale, DESK);
       const sidebar = page.getByTestId('sidebar');
       await expect(sidebar).toBeVisible();
-      expect(Math.round((await sidebar.boundingBox())!.width)).toBe(248);
+      // DS3-02 (sidebar spec §1.4): chef and receiver get the flat labelled 64 px rail.
+      expect(Math.round((await sidebar.boundingBox())!.width)).toBe(role === 'chef' || role === 'receiver' ? 64 : 248);
       await expect(page.getByTestId('bottom-bar')).toBeHidden();
       // Content starts high: a 56 px top bar, no wrapped tab rows.
       const top = await page.locator('#main-content > div').evaluate((el) => el.getBoundingClientRect().top);
@@ -251,9 +255,11 @@ test('bar labels never truncate at 360 px in he / en / ar / ru', async ({ browse
   for (const role of ['owner', 'manager', 'bookkeeper'] as const) {
     for (const locale of ['he', 'en', 'ar', 'ru']) {
       const page = await open(browser, baseURL!, role, locale, { ...PHONE, viewport: { width: 360, height: 780 } });
+      // The visible labels (DS3-02: each link also holds its badge's meaning as visually hidden text, §9, and a
+      // dot that overhangs the icon box, so "the last span" is no longer the label).
       const cut = await page
         .getByTestId('bottom-bar')
-        .locator('li span:last-child')
+        .locator('li [data-bar-label]')
         .evaluateAll((els) => els.filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent));
       expect(cut, `${role} ${locale}`).toEqual([]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${role} ${locale} overflow`).toBe(true);
@@ -262,14 +268,16 @@ test('bar labels never truncate at 360 px in he / en / ar / ru', async ({ browse
   }
 });
 
-test('search "מסכים": screens by role, from the first characters', async ({ browser, baseURL }) => {
+test('search "מסכים": screens by role, from the first characters (DS3-02: in the command palette)', async ({ browser, baseURL }) => {
   const page = await open(browser, baseURL!, 'bookkeeper', 'he', DESK);
-  const input = page.locator('header').getByRole('combobox', { name: 'חיפוש כללי' });
+  await page.keyboard.press('Control+KeyK');
+  const dialog = page.locator('dialog[open]');
+  const input = dialog.getByRole('combobox');
   await input.fill('כרט');
-  await expect(page.locator('#dashboard-search-header-list [role=option]').first()).toHaveText('כרטסת ספקים');
+  await expect(dialog.locator('[role=option]').first()).toContainText('כרטסת ספקים');
   await input.fill('הזמנ');
   // The bookkeeper can't open orders: no screen offered.
-  await expect(page.locator('#dashboard-search-header-list [role=group][aria-label="מסכים"]')).toHaveCount(0);
+  await expect(dialog.locator('[role=option]', { hasText: /^הזמנות/ })).toHaveCount(0);
   await page.context().close();
 });
 
@@ -284,17 +292,18 @@ test('account menu: sign-out keeps the data-rm-logout form contract', async ({ b
   await page.context().close();
 });
 
-test('language picker: a button + menu; arrow keys never switch the language', async ({ browser, baseURL }) => {
+test('language: in the account menu (DS3-02); arrow keys move, never switch the language', async ({ browser, baseURL }) => {
   const page = await open(browser, baseURL!, 'owner', 'he', DESK);
-  const picker = page.locator('header [data-testid="language-picker"]');
-  await expect(picker).toHaveAttribute('aria-haspopup', 'menu');
-  await picker.focus();
+  const account = page.getByTestId('avatar-menu');
+  await expect(account).toHaveAttribute('aria-haspopup', 'menu');
+  await account.click();
+  await expect(page.locator('#rm-account-panel [role=menuitemradio]').first()).toBeVisible();
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   expect(await page.evaluate(() => document.documentElement.lang)).toBe('he');
   await page.keyboard.press('Escape');
-  await expect(picker).toBeFocused();
+  await expect(account).toBeFocused();
   expect(await page.evaluate(() => document.documentElement.lang)).toBe('he');
   await page.context().close();
 });
@@ -311,7 +320,8 @@ test('admin layout: skip link, banner, labelled nav, main', async ({ browser, ba
 test('receiver: no supplier ledger in the nav, and the URL is refused (owner decision 2026-10-25)', async ({ browser, baseURL }) => {
   for (const device of [PHONE, DESK]) {
     const page = await open(browser, baseURL!, 'receiver', 'he', device);
-    await expect(page.locator('header a[href="/dashboard/suppliers/ledger"]')).toHaveCount(0);
+    // DS3-02: the menu is a top-level <aside>, outside the page <header>; check both chrome parts.
+    await expect(page.locator('header a[href="/dashboard/suppliers/ledger"], aside a[href="/dashboard/suppliers/ledger"]')).toHaveCount(0);
     if (device === PHONE) {
       await page.getByTestId('bottom-bar').locator('button[aria-controls="dashboard-drawer"]').click();
       await expect(page.locator('#dashboard-drawer a[href="/dashboard/suppliers/ledger"]')).toHaveCount(0);
@@ -352,7 +362,8 @@ test('"עוד" sheet: navigating from it lands focus on the new page h1, not on 
   await page.getByTestId('bottom-bar').locator('button[aria-controls="dashboard-drawer"]').click();
   await page.locator('#dashboard-drawer a[href="/dashboard/suppliers"]').click();
   await page.waitForURL('**/dashboard/suppliers');
-  await expect(page.locator('#dashboard-drawer')).toHaveCount(0);
+  // DS3-02: the sheet is a native <dialog> (sidebar spec §11) that stays in the page closed; "gone" = not open.
+  await expect(page.locator('#dashboard-drawer[open]')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-controls'))).not.toBe('dashboard-drawer');
   await expect
     .poll(() => page.evaluate(() => document.activeElement?.tagName))
@@ -380,7 +391,8 @@ test('"עוד" sheet: rotating past 1024 px closes it and the app is usable (not
   await page.getByTestId('bottom-bar').locator('button[aria-controls="dashboard-drawer"]').click();
   await expect(page.locator('#dashboard-drawer')).toBeVisible();
   await page.setViewportSize({ width: 1180, height: 820 });
-  await expect(page.locator('#dashboard-drawer')).toHaveCount(0);
+  // DS3-02: the sheet is a native <dialog> (sidebar spec §11) that stays in the page closed; "gone" = not open.
+  await expect(page.locator('#dashboard-drawer[open]')).toHaveCount(0);
   await expect(page.locator('#rm-app')).not.toHaveAttribute('inert', '');
   await page.context().close();
 });
@@ -442,15 +454,16 @@ test('receiver: searches screens only, and an invoice page is refused (owner dec
   page.on('request', (r) => {
     if (r.url().includes('search.global')) records.push(r.url());
   });
+  // DS3-02: the phone search opens the command palette, screens only for the receiver.
   await page.locator('header').getByRole('button', { name: 'חיפוש' }).first().click();
-  const input = page.getByRole('combobox', { name: 'חיפוש כללי' }).last();
-  await expect(input).toHaveAttribute('placeholder', 'חיפוש מסך…');
+  const dialog = page.locator('dialog[open]');
+  const input = dialog.getByRole('combobox');
   await input.fill('INV');
   await page.waitForTimeout(600);
   expect(records, 'no record search for the receiver').toEqual([]);
-  await expect(page.locator('[role=group][aria-label="חשבוניות"]')).toHaveCount(0);
-  // Nothing matched: "no results", never the "type at least 2 characters" hint.
-  await expect(page.getByText('לא נמצאו תוצאות')).toBeVisible();
+  await expect(dialog.locator('[role=group][aria-label="רשומות"]')).toHaveCount(0);
+  // Nothing matched: the zero-result line, never a "type more" hint.
+  await expect(dialog.getByRole('status')).toBeVisible();
   const res = await page.goto('/dashboard/invoices/00000000-0000-4000-8000-000000000000');
   expect(/\/dashboard$/.test(page.url()) || res?.status() === 403).toBe(true);
   await page.context().close();

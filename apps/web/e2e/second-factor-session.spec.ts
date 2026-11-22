@@ -83,7 +83,8 @@ test('enrolling 2FA in Settings keeps THIS session signed in (it just proved a T
   await page.locator('form:has(#password) button[type=submit]').click();
   await expect(page).toHaveURL(/\/dashboard/);
 
-  await page.goto('/dashboard/settings');
+  // DS3-06: two-factor sign-in has its own section, "אבטחה".
+  await page.goto('/dashboard/settings?s=security');
   await page.getByRole('button', { name: 'הפעלת אימות דו-שלבי' }).click();
   const secret = (await page.locator('code').first().innerText()).trim();
   await page.locator('#confirm-code').fill(authenticator.generate(secret));

@@ -1,14 +1,28 @@
 import { describe, expect, it } from 'vitest';
+import type { HotkeyDef } from '@/lib/hotkeys';
+import { GLOSSARY } from '../../../i18n/glossary';
+import { lint } from '../../../i18n/__tests__/copyGate';
 import {
   buildPaletteSections,
+  chooseOption,
+  chordsByHref,
   flatItems,
+  paletteStatus,
   parsePrefix,
   recordItems,
+  recordSearch,
+  SECTION_ORDER,
+  withoutMoney,
   type BuildInput,
+  type PaletteCommand,
+  type PaletteItem,
+  type PaletteLinkItem,
+  type PaletteSection,
 } from '../sections';
 import { defaultActions } from '../actions';
 import { paletteCopy } from '../copy';
 import {
+  browserStorage,
   loadRecents,
   rankRecents,
   recordVisit,
@@ -173,5 +187,379 @@ describe('owner decision 7.11: "בקשות זיכוי"', () => {
     const found = (q: string) => flatItems(buildPaletteSections(base(`>${q}`))).map((i) => i.id);
     expect(found('דרישה')).toContain('claims');
     expect(found('בקשות')).toContain('claims');
+  });
+});
+
+/* ── DS3-02: מעבר אל, תצוגה, הגדרות, command items, chord chips (sidebar spec §1.6, DS3 §10.5) ── */
+
+const runs: string[] = [];
+const commands: PaletteCommand[] = [
+  {
+    id: 'rail',
+    label: 'כיווץ התפריט',
+    keywords: ['תפריט', 'collapse', 'menu'],
+    keys: ['Mod', 'B'],
+    run: () => void runs.push('rail'),
+  },
+  {
+    id: 'singleKeys',
+    label: 'כיבוי קיצורים בתו אחד',
+    keywords: ['קיצורים', 'shortcuts'],
+    secondary: 'פועל',
+    run: () => void runs.push('singleKeys'),
+  },
+];
+const settings = [
+  {
+    key: 'profile',
+    href: '/dashboard/settings',
+    label: 'פרופיל המסעדה',
+    aliases: ['ח״פ', 'VAT', 'profile'],
+  },
+  {
+    key: 'letterhead',
+    href: '/dashboard/settings#letterhead',
+    label: 'נייר מכתבים',
+    aliases: ['letterhead'],
+  },
+];
+const chords = { '/dashboard/invoices': ['G', 'I'], '/dashboard/orders': ['G', 'O'] };
+const full = (raw: string, over: Partial<BuildInput> = {}) =>
+  base(raw, { commands, settings, chords, ...over });
+const keysOf = (raw: string, over: Partial<BuildInput> = {}) =>
+  buildPaletteSections(full(raw, over)).map((s) => s.key);
+const section = (raw: string, key: string, over: Partial<BuildInput> = {}) =>
+  buildPaletteSections(full(raw, over)).find((s) => s.key === key)?.items ?? [];
+const isCommand = (i: PaletteItem | undefined): i is Extract<PaletteItem, { kind: 'command' }> =>
+  i?.kind === 'command';
+
+describe('DS3-02 · section order and the new sections', () => {
+  it('one order: מחכה לך → אחרונים → מעבר אל → רשומות → פעולות → תצוגה → הגדרות, Ask last', () => {
+    expect(SECTION_ORDER).toEqual([
+      'waiting',
+      'recents',
+      'screens',
+      'records',
+      'actions',
+      'display',
+      'settings',
+      'ask',
+    ]);
+    // One query that every section matches: each one appears, in that order.
+    const word = 'בדיקה';
+    const keys = buildPaletteSections({
+      raw: word,
+      waiting: [
+        { kind: 'waiting', id: 'w', label: `${word} ממתינה`, href: '/dashboard/approvals' },
+      ],
+      recents: [{ kind: 'recent', id: 'screen:x', label: word, href: '/dashboard/x' }],
+      screens: [{ key: 'x', href: '/dashboard/x', label: word, aliases: [] }],
+      records: [{ kind: 'supplier', id: 's', label: word, href: '/dashboard/suppliers/s' }],
+      actions: [{ id: 'a', label: `${word} חדשה`, href: '/dashboard/x/new' }],
+      commands: [{ id: 'c', label: `${word} בתצוגה`, run: () => undefined }],
+      settings: [{ key: 's', href: '/dashboard/settings', label: `${word} בהגדרות`, aliases: [] }],
+      ask: (q) => ({ kind: 'ask', id: 'ask', label: q, href: `/dashboard/ask?q=${q}` }),
+    }).map((s) => s.key);
+    expect(keys).toEqual([
+      'waiting',
+      'screens',
+      'records',
+      'actions',
+      'display',
+      'settings',
+      'ask',
+    ]);
+    expect(keys).toEqual(SECTION_ORDER.filter((k) => keys.includes(k)));
+  });
+
+  it('0 characters: waiting, recents, then the display commands (short); no screens, records or settings', () => {
+    expect(keysOf('')).toEqual(['waiting', 'recents', 'display']);
+    expect(section('', 'display').map((i) => i.id)).toEqual(['rail', 'singleKeys']);
+    expect(keysOf('   ')).toEqual(['waiting', 'recents', 'display']);
+  });
+
+  it('תצוגה with a query: only the commands that match, through keywords and finals; no section when none does', () => {
+    expect(section('תפריט', 'display').map((i) => i.id)).toEqual(['rail']);
+    expect(section('collapse', 'display').map((i) => i.id)).toEqual(['rail']);
+    expect(section('קיצורימ', 'display').map((i) => i.id)).toEqual(['singleKeys']);
+    expect(keysOf('ספקים')).not.toContain('display');
+  });
+
+  it('הגדרות: listed only once the viewer types, matched like screens (finals, aliases, wrong layout)', () => {
+    expect(keysOf('')).not.toContain('settings');
+    const ids = (raw: string) => section(raw, 'settings').map((i) => i.id);
+    expect(ids('פרופיל')).toEqual(['profile']);
+    expect(ids('vat')).toEqual(['profile']);
+    expect(ids('pruphk')).toEqual(['profile']); // "פרופיל" typed on EN
+    expect(ids('מכתבימ')).toEqual(['letterhead']); // a regular mem where the label has a final
+    expect(section('נייר', 'settings')[0]).toEqual({
+      kind: 'setting',
+      id: 'letterhead',
+      label: 'נייר מכתבים',
+      href: '/dashboard/settings#letterhead',
+    });
+    expect(ids('zzz')).toEqual([]);
+  });
+
+  it('> keeps actions and the display commands; # and @ list neither, nor settings', () => {
+    expect(keysOf('>')).toEqual(['actions', 'display']);
+    expect(new Set(flatItems(buildPaletteSections(full('>כיווץ'))).map((i) => i.kind))).toEqual(
+      new Set(['command']),
+    );
+    for (const raw of ['#10', '@תנו', '#פרופיל', '@כיווץ']) {
+      const keys = keysOf(raw);
+      expect(keys, raw).not.toContain('display');
+      expect(keys, raw).not.toContain('settings');
+    }
+  });
+
+  it("a command item has no href; choosing it is the caller's run(), with its keys and state", () => {
+    const items = flatItems(buildPaletteSections(full('')));
+    const rail = items.find((i) => i.id === 'rail');
+    expect(isCommand(rail)).toBe(true);
+    expect(rail).not.toHaveProperty('href');
+    expect(rail).toMatchObject({ kind: 'command', label: 'כיווץ התפריט', keys: ['Mod', 'B'] });
+    expect(items.find((i) => i.id === 'singleKeys')).toMatchObject({ secondary: 'פועל' });
+    if (!isCommand(rail)) throw new Error('rail is a command');
+    rail.run();
+    expect(runs).toEqual(['rail']);
+    for (const i of items.filter((x) => x.kind === 'command')) expect(i).not.toHaveProperty('href');
+  });
+
+  it('"מעבר אל" items carry their G-chord keys when given, and none otherwise', () => {
+    const orders = section('הזמנ', 'screens').find((i) => i.id === 'orders');
+    expect(orders).toMatchObject({ kind: 'screen', href: '/dashboard/orders', keys: ['G', 'O'] });
+    expect(section('jacubh', 'screens')[0]).toMatchObject({ id: 'invoices', keys: ['G', 'I'] });
+    // A screen with no chord, and the same screen with no `chords` at all: no keys property.
+    expect(section('ספק', 'screens').find((i) => i.id === 'suppliers')).not.toHaveProperty('keys');
+    expect(section('הזמנ', 'screens', { chords: undefined })[0]).not.toHaveProperty('keys');
+    // Only "מעבר אל" items take chord chips: records and recents for the same href do not.
+    expect(section('הזמנ', 'records').some((i) => i.keys)).toBe(false);
+    expect(section('', 'recents').some((i) => i.keys)).toBe(false);
+  });
+
+  it('chordsByHref maps each G-chord destination to its keys (first per href wins); HOTKEYS fits it', () => {
+    expect(
+      chordsByHref([
+        { keys: ['Mod', 'K'] },
+        { keys: ['G', 'A'], chord: { href: '/dashboard/approvals' } },
+        { keys: ['G', 'X'], chord: { href: '/dashboard/approvals' } },
+        { keys: ['G', 'I'], chord: { href: '/dashboard/invoices' } },
+      ]),
+    ).toEqual({ '/dashboard/approvals': ['G', 'A'], '/dashboard/invoices': ['G', 'I'] });
+    // Compile-time: the shell can pass the registry as is (`chordsByHref(HOTKEYS)`).
+    const fromRegistry: (defs: readonly HotkeyDef[]) => Record<string, readonly string[]> =
+      chordsByHref;
+    expect(fromRegistry([])).toEqual({});
+  });
+});
+
+describe('DS3-02 · no ₪ for chef or receiver (second guard)', () => {
+  const sections: PaletteSection[] = [
+    {
+      key: 'waiting',
+      items: [
+        { kind: 'waiting', id: 'w1', label: '3 פערים · ‏104.80 ₪', href: '/dashboard/approvals' },
+        {
+          kind: 'waiting',
+          id: 'w2',
+          label: 'המשלוח הבא: ירקות השרון',
+          secondary: '‏52.50 ₪',
+          href: '/dashboard/receiving',
+        },
+      ],
+    },
+    {
+      key: 'recents',
+      items: [{ kind: 'recent', id: 'x', label: '‏451 ₪ לשליחה', href: '/dashboard/recovery' }],
+    },
+    {
+      key: 'display',
+      items: [{ kind: 'command', id: 'rail', label: 'כיווץ התפריט', run: () => undefined }],
+    },
+  ];
+
+  it('drops an option whose label carries ₪, blanks a ₪ secondary line, and drops emptied sections', () => {
+    const out = withoutMoney(sections);
+    expect(out.map((s) => s.key)).toEqual(['waiting', 'display']);
+    expect(out[0]!.items).toEqual([
+      {
+        kind: 'waiting',
+        id: 'w2',
+        label: 'המשלוח הבא: ירקות השרון',
+        secondary: undefined,
+        href: '/dashboard/receiving',
+      },
+    ]);
+    expect(JSON.stringify(out)).not.toContain('₪');
+  });
+
+  it('leaves ₪-free sections as they are', () => {
+    const clean = buildPaletteSections(full('הזמנ'));
+    expect(withoutMoney(clean)).toEqual(clean);
+  });
+});
+
+describe('DS3-02 · frecency and storage', () => {
+  it('a command never becomes a recent (it has no href to reopen)', () => {
+    const cmd: PaletteItem = {
+      kind: 'command',
+      id: 'rail',
+      label: 'כיווץ התפריט',
+      run: () => undefined,
+    };
+    expect(recordVisit([], cmd, 0)).toEqual([]);
+    const settingVisit = recordVisit(
+      [],
+      { kind: 'setting', id: 'profile', label: 'פרופיל המסעדה', href: '/dashboard/settings' },
+      0,
+    );
+    expect(rankRecents(settingVisit, 0, () => true).map((r) => r.id)).toEqual(['setting:profile']);
+  });
+
+  it('browserStorage() is undefined on the server instead of throwing', () => {
+    expect(browserStorage()).toBeUndefined();
+    expect(loadRecents(browserStorage())).toEqual([]);
+  });
+});
+
+describe('DS3-02 · copy (sidebar spec §1.6)', () => {
+  it('the screens section is "מעבר אל" / "Go to"; תצוגה and הגדרות exist in both languages', () => {
+    expect(paletteCopy.he.sections).toMatchObject({
+      screens: 'מעבר אל',
+      display: 'תצוגה',
+      settings: 'הגדרות',
+    });
+    expect(paletteCopy.en.sections).toMatchObject({
+      screens: 'Go to',
+      display: 'Display',
+      settings: 'Settings',
+    });
+    for (const k of SECTION_ORDER) {
+      expect(paletteCopy.he.sections[k], k).toBeTruthy();
+      expect(paletteCopy.en.sections[k], k).toBeTruthy();
+    }
+  });
+
+  it('the zero-result copy names the query inside „…" and says what to try; the footer adds the money line', () => {
+    expect(paletteCopy.he.noResults).toBe('אין תוצאות ל„{q}". נסו שם ספק, מספר חשבונית או מסך.');
+    expect(paletteCopy.en.noResults).toBe(
+      'No results for “{q}”. Try a supplier name, an invoice number or a screen.',
+    );
+    expect(paletteCopy.he.noResultsScreens).toContain('ל„{q}".');
+    expect(paletteCopy.he.footerMoney).toBe('פעולת כסף נפתחת במסך שלה · לא מאשרים מכאן');
+    expect(paletteCopy.en.footerMoney).toBe(
+      'A money action opens on its own screen · nothing is approved here',
+    );
+  });
+
+  /** Every Hebrew string of the palette copy, functions called with sample arguments. */
+  function heStrings(): Array<[string, string]> {
+    const out: Array<[string, string]> = [];
+    const walk = (v: unknown, path: string) => {
+      if (typeof v === 'string') out.push([path, v]);
+      else if (typeof v === 'function')
+        out.push([path, String((v as (...a: string[]) => unknown)('תנובה', '77'))]);
+      else if (v && typeof v === 'object')
+        for (const [k, x] of Object.entries(v)) walk(x, path ? `${path}.${k}` : k);
+    };
+    walk(paletteCopy.he, '');
+    return out;
+  }
+
+  it('house style (copy gate rules): plural imperatives, no gendered "you"; only the spec-pinned quotes around {q}', () => {
+    const findings = heStrings().flatMap(([where, text]) =>
+      lint(text, 'he')
+        // The spec pins „{q}" verbatim (sidebar spec §1.6), like the gate's own ALLOW for pinned quotes.
+        .filter((f) => !(f.rule === 'sign-next-to-placeholder' && where.startsWith('noResults')))
+        .map((f) => `${where} ${f.rule}: ${f.match}`),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it('never the retired claims words in visible copy (owner 7.11)', () => {
+    const retired = GLOSSARY.find((g) => g.concept === 'creditClaim')!.retireHe;
+    const offenders = heStrings().filter(([, text]) => retired.some((t) => text.includes(t)));
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe('DS3-02 · choosing an option (chooseOption)', () => {
+  const fx = () => {
+    const log: string[] = [];
+    return {
+      log,
+      fx: {
+        close: () => void log.push('close'),
+        navigate: (href: string) => void log.push(`navigate ${href}`),
+        remember: (item: PaletteLinkItem) => void log.push(`remember ${item.kind}:${item.id}`),
+      },
+    };
+  };
+
+  it('a display command closes the palette first, then runs; it never navigates and is never remembered', () => {
+    const { log, fx: effects } = fx();
+    const cmd: PaletteItem = {
+      kind: 'command',
+      id: 'rail',
+      label: 'כיווץ התפריט',
+      run: () => void log.push('run'),
+    };
+    chooseOption(cmd, effects);
+    expect(log).toEqual(['close', 'run']);
+  });
+
+  it('a link is remembered, then the palette closes, then the page opens', () => {
+    const { log, fx: effects } = fx();
+    chooseOption(
+      { kind: 'setting', id: 'profile', label: 'פרופיל המסעדה', href: '/dashboard/settings' },
+      effects,
+    );
+    expect(log).toEqual(['remember setting:profile', 'close', 'navigate /dashboard/settings']);
+  });
+});
+
+describe('DS3-02 · record search and the status line (never "no results" before a search ran)', () => {
+  it('runs from 2 debounced characters; due while the debounce lags behind what is typed', () => {
+    expect(recordSearch('24950', '', true)).toEqual({ run: false, due: true });
+    expect(recordSearch('24950', '2495', true)).toEqual({ run: true, due: true });
+    expect(recordSearch('24950', '24950', true)).toEqual({ run: true, due: false });
+    // One character: no search will run (search.global takes min 2), so nothing is due.
+    expect(recordSearch('1', '1', true)).toEqual({ run: false, due: false });
+    // Prefixes: `#` and `@` search their term; `>` (actions, commands) never searches records.
+    expect(recordSearch('#24950', '24950', true)).toEqual({ run: true, due: false });
+    expect(recordSearch('@תנובה', 'תנו', true)).toEqual({ run: true, due: true });
+    expect(recordSearch('>כיווץ', 'כיווץ', true)).toEqual({ run: false, due: false });
+  });
+
+  it('a role that finds screens only (or a closed palette) never searches records', () => {
+    expect(recordSearch('INV', '', false)).toEqual({ run: false, due: false });
+    expect(recordSearch('INV', 'INV', false)).toEqual({ run: false, due: false });
+  });
+
+  it('status: error beats everything; options speak for themselves; pending says searching; else no results', () => {
+    const s = (over: Partial<Parameters<typeof paletteStatus>[0]>) =>
+      paletteStatus({ query: '24950', count: 0, pending: false, failed: false, ...over });
+    expect(s({ failed: true })).toBe('error');
+    expect(s({ failed: true, count: 3 })).toBe('error');
+    expect(s({ count: 1 })).toBeNull();
+    expect(s({ count: 1, pending: true })).toBeNull();
+    expect(s({ pending: true })).toBe('searching');
+    expect(s({})).toBe('noResults');
+  });
+
+  it('a bare prefix (# or @) names no term, so it never claims no results', () => {
+    for (const raw of ['#', '@', '  @ ']) {
+      const { query } = parsePrefix(raw);
+      const search = recordSearch(raw, query, true);
+      expect(
+        paletteStatus({ query, count: 0, pending: search.due, failed: false }),
+        raw,
+      ).toBeNull();
+    }
+    // Typing the term brings the claim back once nothing matched and nothing is pending.
+    expect(paletteStatus({ query: 'zz', count: 0, pending: false, failed: false })).toBe(
+      'noResults',
+    );
   });
 });

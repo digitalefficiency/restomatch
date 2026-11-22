@@ -32,7 +32,9 @@ test.describe('password login', () => {
     // The form also carries the email-link button (formAction): press the password submit.
     await passwordSubmit(page).click();
     await expect(page).toHaveURL(/\/dashboard/);
-    await expect(page.locator('header')).toContainText('e2e-password@restomatch.test');
+    // DS3-02: the e-mail sits in the account menu of the side menu's user row (sidebar spec §1.6).
+    await page.getByTestId('avatar-menu').click();
+    await expect(page.getByTestId('account-menu')).toContainText('e2e-password@restomatch.test');
   });
 
   test('wrong password → uniform error, stays on /login', async ({ page }) => {
@@ -81,7 +83,9 @@ test.describe('two-factor (TOTP)', () => {
     await page.locator('form', { has: page.locator('input[name="code"]') }).locator('button[type="submit"]').first().click();
     await expect(page).toHaveURL(/\/dashboard/);
     await expect(page.locator('input[name="code"]')).toHaveCount(0);
-    await expect(page.locator('header')).toContainText('e2e-2fa@restomatch.test');
+    // DS3-02: the e-mail sits in the account menu of the side menu's user row (sidebar spec §1.6).
+    await page.getByTestId('avatar-menu').click();
+    await expect(page.getByTestId('account-menu')).toContainText('e2e-2fa@restomatch.test');
   });
 
   test('wrong code keeps the gate closed', async ({ page }) => {
@@ -128,6 +132,7 @@ test.describe('magic link (backup) + onboarding', () => {
     await form.locator('input#name').fill('מסעדת E2E');
     await form.locator('button[type="submit"]').click();
     await expect(page).toHaveURL(/\/dashboard/);
-    await expect(page.getByRole('banner')).toContainText('מסעדת E2E');
+    // DS3-02: the restaurant's name heads the side menu (a top-level <aside>, no longer inside the banner).
+    await expect(page.getByTestId('sidebar')).toContainText('מסעדת E2E');
   });
 });

@@ -154,7 +154,8 @@ for (const locale of LOCALES) {
       test(`${locale} ${path}`, async ({ page }) => {
         await visit(page, locale, path, true);
         if (locale === 'en') {
-          const leaks = (await chromeText(page, 'header nav a, header nav button, header form button')).filter(
+          // DS3-02: the menu's links and group headers live in the side menu's <nav>, outside <header>.
+          const leaks = (await chromeText(page, 'header nav a, header nav button, header form button, aside nav a, aside nav button')).filter(
             (t) => HEBREW.test(t),
           );
           expect.soft(leaks, `${path}: Hebrew left in English chrome`).toEqual([]);
@@ -201,7 +202,8 @@ for (const locale of LOCALES) {
         await expect(notFound).toBeVisible();
         await expect(notFound.getByRole('heading', { level: 1 })).toHaveText(c.shell.notFound.title);
         await expect(page.getByTestId('not-found-up')).toHaveAttribute('href', up);
-        await expect(page.locator('header').first()).toContainText(DEMO_RESTAURANT_NAME);
+        // DS3-02: the restaurant heads the side menu (a top-level <aside>, no longer inside the page <header>).
+        await expect(page.getByTestId('sidebar')).toContainText(DEMO_RESTAURANT_NAME);
         for (const errorTitle of [c.errorPage.title, c.shell.error.title]) {
           await expect(page.getByRole('heading', { name: errorTitle, exact: true })).toHaveCount(0);
         }

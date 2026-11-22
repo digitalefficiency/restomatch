@@ -46,6 +46,16 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true, caret: 'initial' });
 }
 
+/** An amount field's ₪ adornment sits LEFT of its digits in he-IL (DoD-4; DS3-06 made the rules editable fields). */
+async function shekelIsLeftOfField(row: Locator): Promise<boolean> {
+  return row.evaluate((root) => {
+    const sign = root.querySelector('[data-currency]');
+    const input = root.querySelector('input');
+    if (!sign || !input) return false;
+    return sign.getBoundingClientRect().right <= input.getBoundingClientRect().left + 0.5;
+  });
+}
+
 /** In he-IL the ₪ glyph renders to the LEFT of the first digit (DoD-4). */
 async function shekelIsLeftOfDigits(el: Locator): Promise<boolean> {
   return el.evaluate((root) => {
@@ -91,46 +101,57 @@ async function seriousAxe(page: Page): Promise<string[]> {
 test('settings: one h1, the approval rules in force with ₪ and a default/custom chip', async ({ page }) => {
   const errors = collectPageErrors(page);
   await prepare(page, 'he', 1440);
-  await page.goto('/dashboard/settings');
+  // DS3-06: settings opens on "תצוגה"; the rules are their own section (?s=rules), the
+  // phone row is under "חשבון" (?s=account) and the restaurant profile under ?s=restaurant.
+  await page.goto('/dashboard/settings?s=rules');
   await expect(page.locator('h1')).toHaveCount(1);
   await expect(page.locator('h1')).toHaveText('הגדרות');
   const rules = page.getByTestId('rules-in-force');
   await expect(rules).toBeVisible();
-  const noPo = rules.locator('li', { hasText: 'חשבונית בלי הזמנה מעל' });
+  const noPo = rules.locator('[data-setting-row="approvals"]');
+  await expect(noPo).toContainText('חשבונית בלי הזמנה');
   await expect(noPo).toContainText('₪');
   await expect(noPo.getByText(/ברירת מחדל|הותאם/)).toBeVisible();
-  expect(await shekelIsLeftOfDigits(noPo)).toBe(true);
-  await expect(rules.locator('li', { hasText: 'פריט שלא הוזמן' })).toContainText('₪');
-  // No number inputs remain for ₪ rules on this route's new sections.
+  expect(await shekelIsLeftOfField(noPo)).toBe(true);
+  await expect(rules.locator('[data-setting-row="rule-unordered"]')).toContainText('₪');
+  // No number inputs for the ₪ rules: text fields with steppers.
   await expect(rules.locator('input[type=number]')).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'טלפון נייד' })).toBeVisible();
   // The rule inputs are text + decimal (no type=number), accept "7,5", and a
-  // change raises the dirty bar; Discard restores. VAT is read-only + "שנו…".
+  // change raises the dirty bar; a value past the limit is brought back to it
+  // (the shared number field says its limits); Discard restores.
   await expect(page.locator('input[type=number]')).toHaveCount(0);
   const pricePct = page.locator('#set-pricePercent');
   await expect(pricePct).toHaveAttribute('inputmode', 'decimal');
   await pricePct.fill('7,5');
+  await pricePct.press('Enter');
   const dirtyBar = page.getByTestId('settings-dirty-bar');
   await expect(dirtyBar).toContainText('יש שינויים שלא נשמרו');
   await pricePct.fill('170');
-  await expect(page.getByText('אחוז בין 0 ל-100')).toBeVisible();
+  await pricePct.press('Enter');
+  await expect(pricePct).toHaveValue('100');
+  await expect(page.locator('#pricePercent')).toContainText('בין 0 ל־100');
   await dirtyBar.getByRole('button', { name: 'בטלו' }).click();
   await expect(dirtyBar).toHaveCount(0);
-  await expect(page.getByTestId('vat-readonly')).toContainText('%');
-  await expect(page.locator('#prof-tz')).toHaveJSProperty('tagName', 'SELECT');
   await shot(page, 'settings-he-1440');
   expect(await seriousAxe(page)).toEqual([]);
+  await page.goto('/dashboard/settings?s=account');
+  // The phone is a row of "חשבון" now (its anchor is the old #phone), no longer a section heading.
+  await expect(page.locator('[data-setting-row="phone"]')).toContainText('טלפון נייד');
+  // VAT is read-only + "שנו…".
+  await page.goto('/dashboard/settings?s=restaurant');
+  await expect(page.getByTestId('vat-readonly')).toContainText('%');
+  await expect(page.locator('#prof-tz')).toHaveJSProperty('tagName', 'SELECT');
 
   await prepare(page, 'he', 390);
-  await page.goto('/dashboard/settings');
+  await page.goto('/dashboard/settings?s=rules');
   await expect(page.getByTestId('rules-in-force')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await shot(page, 'settings-he-390');
 
   await prepare(page, 'en', 1440);
-  await page.goto('/dashboard/settings');
+  await page.goto('/dashboard/settings?s=rules');
   await expect(page.locator('h1')).toHaveText('Settings');
-  await expect(page.getByTestId('rules-in-force')).toContainText('An invoice without an order above');
+  await expect(page.getByTestId('rules-in-force')).toContainText('An invoice without an order');
   await shot(page, 'settings-en-1440');
   expect(await seriousAxe(page)).toEqual([]);
   expect(errors).toEqual([]);

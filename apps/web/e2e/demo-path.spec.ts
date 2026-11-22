@@ -455,7 +455,8 @@ test('B · owner: hero ₪, leak detective, approvals, claims, report, chain, br
 
   await test.step('login → /dashboard of the main branch', async () => {
     await login(page, BASE!, OWNER, L);
-    await expect(page.locator('header').first()).toContainText(MAIN_BRANCH);
+    // DS3-02: the branch heads the side menu (a top-level <aside>, no longer inside the page <header>).
+    await expect(page.getByTestId('sidebar')).toContainText(MAIN_BRANCH);
     await checkScreen(page, errors, L, 'B1-login-dashboard');
   });
 

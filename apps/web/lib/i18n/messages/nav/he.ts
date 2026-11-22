@@ -5,7 +5,7 @@
  */
 export const he = {
   mainLabel: 'ניווט ראשי',
-  mobileLabel: 'ניווט מהיר',
+  mobileLabel: 'ניווט תחתון',
   skipToContent: 'דילוג לתוכן',
   /** One label per registry route (`lib/nav/routes/*.ts`): nav label = page title. */
   links: {
@@ -24,7 +24,7 @@ export const he = {
     leaks: 'דליפה',
     leaksBreakdown: 'פירוק הדליפה',
     leaksProof: 'הוכחת הדליפה',
-    leaksReport: 'דוח דליפות להדפסה',
+    leaksReport: 'דוח הדליפה להדפסה',
     claims: 'בקשות זיכוי',
     recovery: 'מעקב זיכויים',
     suppliers: 'ספקים',
@@ -83,7 +83,7 @@ export const he = {
   groups: {
     top: 'ראשי',
     money: 'כסף',
-    leaks: 'דליפה ומחירים',
+    leaks: 'ניתוח',
     procure: 'רכש',
     kitchen: 'מטבח',
     chain: 'רשת',
@@ -105,7 +105,7 @@ export const he = {
     platformAdmin: 'קונסולת פלטפורמה',
     help: 'עזרה',
     accessibility: 'הצהרת נגישות',
-    contact: 'צור קשר',
+    contact: 'צרו קשר',
     support: 'עזרה ונגישות',
     keyboardHint: 'Ctrl+B לכיווץ',
   },

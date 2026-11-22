@@ -1,4 +1,4 @@
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { originalProps } from '@/lib/i18n/original';
 import { auth, signOut } from '@/auth';
@@ -8,6 +8,7 @@ import { getLocale, getT } from '@/lib/i18n/server';
 import { PersistingLanguagePicker } from '@/lib/i18n/PersistingLanguagePicker';
 import { LocaleSwitcher } from '@/lib/i18n/LocaleSwitcher';
 import { nav } from '@/lib/i18n/messages/nav';
+import { navShell } from '@/lib/i18n/messages/nav/shell';
 import { isPlatformAdmin } from '@/lib/admin';
 import { labelForRole } from '@/lib/roles';
 import { NavProvider } from '@/lib/nav/NavProvider';
@@ -15,20 +16,12 @@ import { RouteTitle } from '@/lib/nav/RouteTitle';
 import { RouteFocus } from '@/lib/nav/useRouteFocus';
 import type { NavViewer } from '@/lib/nav';
 import { RAIL_COOKIE } from '@/lib/nav/prefs';
+import { PrefsRoot, readDeviceHints } from '@/lib/prefs/server';
+import { shellAttrs } from '@/lib/prefs/schema';
 import { LocaleSync } from './locale-sync';
 import { BranchSwitcher } from './branch-switcher';
 import { getWave1Access } from './contracts/access';
-import {
-  AvatarMenu,
-  BottomBar,
-  MobileSearchButton,
-  MoreSheet,
-  SearchSheet,
-  ShellFrame,
-  Sidebar,
-  TopCrumbs,
-} from './nav';
-import { DashboardSearch } from './search';
+import { BottomBar, MoreSheet, ShellFrame, Sidebar, TopBar } from './nav';
 import { WorkerStatusBanner, readWorkerStatus } from './worker-status';
 import { TrpcProvider } from '@/lib/trpc/client';
 import { Bell, NavBadgesProvider } from '@/lib/components/notifications';
@@ -46,15 +39,15 @@ const CHROME_VARS =
   '@media (min-width:1024px){:root{--rm-bottomnav-h:0px}}';
 
 /**
- * Dashboard app shell v2, driven by the nav registry (lib/nav).
- * - Desktop (≥1024): an inline-start sidebar (248 px, or a 64 px rail on
- *   Ctrl/⌘+B) with job-ordered groups, and a 56 px top bar: branch chip ·
- *   breadcrumb · search · language · account menu. Fluid content to 1,600 px.
- * - Phone: a 56 px top bar (branch / restaurant + role · 🔍 · account), a
- *   server-rendered role bottom bar and the "עוד" sheet.
- * The sidebar and the bottom bar sit inside the one <header> landmark; the
- * header has no backdrop-filter, so their `position: fixed` is viewport-based.
- * Logical properties throughout, so RTL (he) and LTR (en) both lay out right.
+ * Dashboard app shell (DS3-02 · docs/ux/sidebar/SPEC.md, owner-approved 31.10.2026), driven by the
+ * nav registry (lib/nav).
+ * - Desktop (≥ 1024): the side menu `<aside aria-label="תפריט צד">` on the inline-start edge — the
+ *   branch switcher, Ctrl K, the groups, help, the account menu and the collapse toggle — 248 px or a
+ *   64 px rail (cookie `rm_nav_rail`, read here, so the server renders the final width); 1024–1279 is
+ *   a rail whose panel opens over the page. Chef and receiver get a flat labelled rail. The 56 px top
+ *   bar holds the crumbs, the favourite star, the page's slots and the bell. Fluid content to 1,600 px.
+ * - Phone: a 56 px top bar (branch · search · bell), the role's bottom bar and the "עוד" sheet.
+ * Tab order = DOM order: skip link → side menu → top bar → main. Logical properties throughout.
  */
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -72,12 +65,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Stage 1: the membership check, plus everything that needs no membership.
   // Member-only procedures (recovery.flags…) throw for a user without one, so
   // they wait until the /onboarding redirect below has had its chance.
-  const [memberships, t, locale, platformAdmin, cookieStore] = await Promise.all([
+  const [memberships, t, ts, locale, platformAdmin, cookieStore, headerStore, deviceHints] = await Promise.all([
     caller.onboarding.myMemberships(),
     getT(nav),
+    getT(navShell),
     getLocale(),
     isPlatformAdmin(userId).catch(() => false),
     cookies(),
+    headers(),
+    readDeviceHints(),
   ]);
 
   if (memberships.length === 0) {
@@ -136,6 +132,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   });
   const roleLabel = labelForRole(active.role, locale);
   const email = session.user.email ?? '';
+  const userName = (session.user as { name?: string | null }).name?.trim() || email;
   // Branches (S8): the switcher lists every membership; the chain group is for
   // owners who run more than one branch (same rule as the chain router: owner
   // branches on the ACTIVE billing account).
@@ -150,9 +147,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
     .map((m) => ({ restaurantId: m.restaurantId, restaurantName: m.restaurantName, role: m.role }))
     .sort((a, b) => a.restaurantName.localeCompare(b.restaurantName, 'he') || a.restaurantId.localeCompare(b.restaurantId));
   const multiBranch = memberships.length > 1;
+  // "בעלים · 3 סניפים" under the restaurant name in the side menu's head (sidebar spec §1.1).
+  const subline = multiBranch ? `${roleLabel} · ${ts('switcher.count', { count: memberships.length })}` : roleLabel;
 
   const viewer: NavViewer = { role: active.role, features, showChain };
   const rail = cookieStore.get(RAIL_COOKIE)?.value === '1';
+  // DS3 "Personal preferences: one contract": #rm-app carries data-density ("compact" or none) and data-text
+  // ("large" or none) from the first HTML, read from rm_density / rm_text; an absent cookie gives the role's
+  // default (the bookkeeper starts compact) and a phone the regular density (DS3-06 lib/prefs/README.md).
+  const display = shellAttrs(headerStore.get('cookie'), active.role, deviceHints);
 
   async function logout() {
     'use server';
@@ -168,91 +171,104 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <ToastProvider>
         <NavProvider value={{ ...viewer, branch: multiBranch ? active.restaurantName : null }}>
           <NavBadgesProvider>
-          <style>{CHROME_VARS}</style>
-          <a
-            href="#main-content"
-            data-rm-skip-link=""
-            className="sr-only focus:not-sr-only focus:fixed focus:start-4 focus:top-4 focus:z-[60] focus:rounded-lg focus:bg-primary focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-on-primary"
-          >
-            {t('skipToContent')}
-          </a>
-          <RouteTitle />
-          <RouteFocus />
-          <ShellFrame initialRail={rail}>
-            <header className="sticky top-0 z-40 border-b border-line bg-surface lg:ps-[var(--rm-sidebar-w)]">
-              <Sidebar viewer={viewer} restaurantName={active.restaurantName} roleLabel={roleLabel} />
-              {/* 55 px + the header's 1 px border = a 56 px top bar, level with the sidebar's brand row. */}
-              <div className="flex h-[55px] items-center gap-2 px-3 sm:px-4 lg:gap-3 lg:px-8">
-                {multiBranch ? (
-                  // The chip names the branch; the role is in its list and in the account menu.
-                  <BranchSwitcher branches={switcherBranches} activeId={active.restaurantId} className="min-w-0" />
-                ) : (
-                  <div className="min-w-0 lg:hidden">
-                    <p className="truncate text-base font-bold text-ink">
-                      {/* Tenant data (usually Hebrew) inside a possibly-English UI: mark the
-                          language and isolate its direction without changing alignment. */}
-                      <span {...originalProps(active.restaurantName)}>{active.restaurantName}</span>
-                    </p>
-                    <p className="truncate text-xs text-subtle">{roleLabel}</p>
-                  </div>
-                )}
-                {multiBranch ? (
-                  <span aria-hidden="true" className="hidden h-5 w-px bg-line lg:block" />
-                ) : null}
-                <TopCrumbs viewer={viewer} />
-                {/* Period / compare chip slot for pages with views (filled from wave 2). */}
-                <div id="rm-topbar-period" className="ms-auto hidden items-center lg:flex" />
-                <div className="ms-auto flex shrink-0 items-center gap-1 lg:ms-0 lg:gap-2">
-                  <div className="hidden lg:block">
-                    <DashboardSearch role={active.role} className="w-72" />
-                  </div>
-                  <MobileSearchButton />
-                  {/* The bell (W2-08): the same task spine as the home and the badges. */}
-                  <Bell activity={active.role === 'owner' || active.role === 'manager' || active.role === 'bookkeeper'} />
-                  {/* Phone: language lives in "עוד", except for the receiver with receiver languages
-                      on — that phone is often shared, so it stays one tap away. */}
-                  <div className={receiverLangsOn && active.role === 'receiver' ? 'block' : 'hidden lg:block'}>
-                    {languageFor()}
-                  </div>
-                  <AvatarMenu
-                    email={email}
-                    roleLabel={roleLabel}
-                    restaurantName={active.restaurantName}
-                    isPlatformAdmin={platformAdmin}
-                    logout={logout}
-                  />
-                </div>
-              </div>
-              <BottomBar viewer={viewer} />
-            </header>
-            <main
-              id="main-content"
-              tabIndex={-1}
-              className="pb-[calc(var(--rm-bottomnav-h)+var(--consent-h,0px)+1.5rem)] focus:outline-none lg:ps-[var(--rm-sidebar-w)] lg:pb-[calc(var(--consent-h,0px)+2rem)]"
+            <style>{CHROME_VARS}</style>
+            <a
+              href="#main-content"
+              data-rm-skip-link=""
+              className="sr-only focus:not-sr-only focus:fixed focus:start-4 focus:top-4 focus:z-skip-link focus:rounded-control focus:bg-primary focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-on-primary focus:shadow-e2"
             >
-              <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-                <WorkerStatusBanner status={workerStatus} />
-                <LocaleSync />
-                {/* Always mounted: it only touches an EXISTING receiver queue, so a sign-out from a branch
-                    without receiverPwa still wipes photos queued on another branch. */}
-                <PwaSessionGuard userId={userId} />
-                {children}
-              </div>
-            </main>
-            {/* Overlays portal to <body>, outside #rm-app, which turns inert while they are open. */}
-            <MoreSheet
-              viewer={viewer}
-              // 44 px targets in the sheet (the picker's class lands on its wrapper, the toggle's on itself).
-              language={languageFor('rm-lang-sheet min-h-11 [&>button]:min-h-11')}
-              logout={logout}
-              branchList={
-                multiBranch ? (
-                  <BranchSwitcher variant="list" branches={switcherBranches} activeId={active.restaurantId} />
-                ) : undefined
-              }
-            />
-            <SearchSheet role={active.role} />
-          </ShellFrame>
+              {t('skipToContent')}
+            </a>
+            <RouteTitle />
+            <RouteFocus />
+            {/* DS3-06's display preferences (density, text size, single-key shortcuts): one store for the shell,
+                the settings screen and the tables, applied from the first HTML. */}
+            <PrefsRoot role={active.role}>
+              <ShellFrame
+                initialRail={rail}
+                density={display.density}
+                textSize={display.text}
+                viewer={viewer}
+                // Keyed: an element handed to a client component as a prop and placed among its children
+                // otherwise reaches the browser flagged for a missing key (React's "unique key" warning in dev).
+                sidebar={
+                  <Sidebar
+                    key="sidebar"
+                    viewer={viewer}
+                    restaurantName={active.restaurantName}
+                    roleLabel={roleLabel}
+                    subline={subline}
+                    userName={userName}
+                    email={email}
+                    isPlatformAdmin={platformAdmin}
+                    receiverLangs={receiverLangsOn}
+                    logout={logout}
+                    switcher={
+                      multiBranch ? (
+                        <BranchSwitcher variant="head" branches={switcherBranches} activeId={active.restaurantId} subline={subline} />
+                      ) : undefined
+                    }
+                  />
+                }
+                overlays={
+                  <MoreSheet
+                    key="more-sheet"
+                    viewer={viewer}
+                    email={email}
+                    isPlatformAdmin={platformAdmin}
+                    // 44 px targets in the sheet (the picker's class lands on its wrapper, the toggle's on itself).
+                    language={languageFor('rm-lang-sheet min-h-11 [&>button]:min-h-11')}
+                    logout={logout}
+                    branchList={
+                      multiBranch ? (
+                        <BranchSwitcher variant="list" branches={switcherBranches} activeId={active.restaurantId} />
+                      ) : undefined
+                    }
+                  />
+                }
+              >
+                <TopBar
+                  viewer={viewer}
+                  phoneBranch={
+                    multiBranch ? (
+                      // The chip names the branch; the role is in its list and in the "עוד" sheet.
+                      <BranchSwitcher branches={switcherBranches} activeId={active.restaurantId} className="min-w-0" />
+                    ) : (
+                      <div className="min-w-0">
+                        <p className="truncate text-base font-bold text-ink">
+                          {/* Tenant data (usually Hebrew) inside a possibly-English UI: mark the
+                              language and isolate its direction without changing alignment. */}
+                          <span {...originalProps(active.restaurantName)}>{active.restaurantName}</span>
+                        </p>
+                        <p className="truncate text-xs text-subtle">{roleLabel}</p>
+                      </div>
+                    )
+                  }
+                  // The bell (W2-08): the same task spine as the home and the badges.
+                  bell={<Bell activity={active.role === 'owner' || active.role === 'manager' || active.role === 'bookkeeper'} />}
+                  // Phone: language lives in "עוד", except for the receiver with receiver languages on —
+                  // that phone is often shared, so it stays one tap away. Desktop: the account menu.
+                  phoneLanguage={receiverLangsOn && active.role === 'receiver' ? languageFor() : undefined}
+                />
+                <main
+                  id="main-content"
+                  tabIndex={-1}
+                  className="pb-[calc(var(--rm-bottomnav-h)+var(--consent-h,0px)+1.5rem)] focus:outline-none lg:pb-[calc(var(--consent-h,0px)+2rem)]"
+                >
+                  {/* rm-text-zoom: large text enlarges the content beside the menu (DS3-00, data-text on #rm-app);
+                      not <main> or the column, whose padding-start holds the fixed menu, and not the top bar. */}
+                  <div className="rm-text-zoom mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+                    <WorkerStatusBanner status={workerStatus} />
+                    <LocaleSync />
+                    {/* Always mounted: it only touches an EXISTING receiver queue, so a sign-out from a branch
+                        without receiverPwa still wipes photos queued on another branch. */}
+                    <PwaSessionGuard userId={userId} />
+                    {children}
+                  </div>
+                </main>
+                <BottomBar viewer={viewer} />
+              </ShellFrame>
+            </PrefsRoot>
           </NavBadgesProvider>
         </NavProvider>
       </ToastProvider>

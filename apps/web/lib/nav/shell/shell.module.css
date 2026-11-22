@@ -1,0 +1,1056 @@
+/*
+ * DS3-02 · the side menu and its frame (docs/ux/sidebar/SPEC.md, owner-approved 31.10.2026, in the DS3 clean finish).
+ *
+ * One DOM, two presentations. The aside is a size container: at its rail width (64) it presents tiles, at its panel
+ * width (248) rows and group headers. The width comes from the server-rendered cookie (data-rail) and the viewport
+ * (media queries), so the first paint is final at every width and nothing re-renders to switch presentation.
+ *
+ * Colours, shadows, radii and z-layers are DS2 token variables (packages/ui-tokens). The sidebar's own metrics and
+ * motion (sidebar spec §1, §2.2, §10) are the named --rm-nav-* variables below: proposed for promotion into the
+ * token pipeline (DS3-00), listed in the pull request.
+ */
+
+.app {
+  --rm-sidebar-w: 0px;
+  --rm-nav-row: 32px;
+  --rm-nav-tile-h: 48px;
+  /* §1.2: the icon at the top, padding-top 5 (the reference draws 4; the spec wins). */
+  --rm-nav-tile-pt: 5px;
+  --rm-nav-tile-gap: 4px;
+  --rm-nav-tile-w: 56px;
+  --rm-nav-gutter: 12px;
+  --rm-nav-pad: 8px;
+  --rm-nav-gap: 8px;
+  --rm-nav-box: 24px;
+  --rm-nav-glyph: 20px;
+  --rm-nav-glyph-sm: 16px;
+  --rm-nav-head-h: 56px;
+  --rm-nav-flyout-w: 240px;
+  --rm-nav-offset: 8px;
+  --rm-nav-dot: 6px;
+  --rm-nav-rail-dot: 8px;
+  --rm-nav-pill-h: 20px;
+  --rm-nav-notch: 2px;
+  /* Motion (§10): DS3-00's menu motion set; the fallbacks are the same values, for a base without it. */
+  --rm-nav-fade: var(--dur-menu-fade, 80ms);
+  --rm-nav-collapse: var(--dur-menu-collapse, 160ms);
+  --rm-nav-expand: var(--dur-menu-expand, 200ms);
+  --rm-nav-chevron: var(--dur-menu-chevron, 120ms);
+  --rm-nav-tip: var(--dur-menu-tooltip, 90ms);
+  --rm-nav-delay: var(--dur-menu-delay, 130ms);
+  --rm-nav-ease: var(--ease-menu, cubic-bezier(0.2, 0, 0, 1));
+}
+/* Compact rows and tiles in a window lower than 800 px (§1.1, §1.2). */
+@media (max-height: 799.98px) {
+  .app {
+    --rm-nav-row: 28px;
+    --rm-nav-tile-h: 44px;
+    --rm-nav-tile-pt: 2px;
+    --rm-nav-tile-gap: 2px;
+  }
+}
+/* 1024–1279: the rail; the 248 panel opens over the page (§7.1). ≥ 1280: the panel unless the cookie says rail.
+   chef and receiver: a flat labelled rail at every desktop width (§1.4). */
+@media (min-width: 1024px) {
+  .app {
+    --rm-sidebar-w: var(--chrome-rail-w);
+  }
+}
+@media (min-width: 1280px) {
+  .app[data-rail='off']:not([data-flat]) {
+    --rm-sidebar-w: var(--chrome-sidebar-w);
+  }
+}
+
+/* ── the page column: follows the menu's width in the same motion ─────────────────────────────── */
+@media (min-width: 1024px) {
+  .col {
+    padding-inline-start: var(--rm-sidebar-w);
+    transition: padding-inline-start var(--rm-nav-collapse) var(--rm-nav-ease);
+  }
+  .app[data-nav-dir='expand'] .col {
+    transition-duration: var(--rm-nav-expand);
+  }
+}
+
+/* ── the aside ──────────────────────────────────────────────────────────────────────────────── */
+.side {
+  display: none;
+}
+@media (min-width: 1024px) {
+  .side {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    inset-block: 0;
+    inset-inline-start: 0;
+    z-index: calc(var(--z-top-bar) + 1);
+    width: var(--rm-sidebar-w);
+    overflow: hidden;
+    background: rgb(var(--c-bg));
+    border-inline-end: 1px solid rgb(var(--c-line));
+    container: rm-side / inline-size;
+    transition: width var(--rm-nav-collapse) var(--rm-nav-ease);
+  }
+  .app[data-nav-dir='expand'] .side {
+    transition-duration: var(--rm-nav-expand);
+  }
+  /* 1024–1279: the panel over the page, never squeezing it (§7.1). */
+  .app[data-overlay='open'] .side {
+    width: var(--chrome-sidebar-w);
+    z-index: var(--z-sheet);
+    box-shadow: var(--shadow-e3);
+  }
+}
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-scrim);
+  background: rgb(var(--c-ink) / 0.12);
+}
+
+.inner {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  width: calc(var(--chrome-rail-w) - 1px);
+}
+
+/* ── head: the branch switcher ─────────────────────────────────────────────────────────────── */
+.head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: var(--rm-nav-head-h);
+  padding-inline: var(--rm-nav-gutter) 0;
+  border-bottom: 1px solid rgb(var(--c-line));
+}
+.headBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--rm-nav-gap);
+  min-width: 0;
+  height: 40px;
+  padding-inline: var(--rm-nav-pad) 0;
+  border-radius: var(--radius-control);
+  color: rgb(var(--c-ink));
+  text-align: start;
+}
+button.headBtn:hover {
+  background: rgb(var(--c-surface-2));
+}
+.mono {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--rm-nav-box);
+  height: var(--rm-nav-box);
+  border-radius: 6px;
+  background: rgb(var(--c-primary));
+  color: rgb(var(--c-on-primary));
+}
+.headText {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.headChev {
+  display: none;
+}
+
+/* ── Ctrl K field (panel) and the search tile (rail) ───────────────────────────────────────── */
+.cmdk {
+  display: none;
+  flex: none;
+  padding: var(--rm-nav-pad) var(--rm-nav-gutter);
+}
+.cmdkBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--rm-nav-gap);
+  width: 100%;
+  height: var(--rm-nav-row);
+  padding-inline: var(--rm-nav-pad);
+  border-radius: var(--radius-control);
+  background: rgb(var(--c-surface));
+  box-shadow: inset 0 0 0 1px rgb(var(--c-line)), var(--shadow-e1);
+  color: rgb(var(--c-subtle));
+  text-align: start;
+}
+.cmdkBtn:hover {
+  color: rgb(var(--c-ink));
+  box-shadow: inset 0 0 0 1px rgb(var(--c-line-strong)), var(--shadow-e1);
+}
+.cmdkBtn .ic svg {
+  /* The field's search glyph is 16 (§1.1), not the rows' 20. */
+  width: var(--rm-nav-glyph-sm);
+  height: var(--rm-nav-glyph-sm);
+}
+.cmdkLab {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kbd {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 20px;
+  padding-inline: 6px;
+  border-radius: var(--radius-xs);
+  background: rgb(var(--c-surface-2));
+}
+
+/* ── the scroll region ─────────────────────────────────────────────────────────────────────── */
+.nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 0 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-line)) transparent;
+}
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.top {
+  display: grid;
+  gap: var(--rm-nav-tile-gap);
+  justify-items: start;
+}
+/* Rail: a 24 px rule between the top tiles and the group tiles (§1.2). Panel: an 8 px gap (§1.1). */
+.gap {
+  width: 24px;
+  height: 1px;
+  margin: 4px 20px;
+  background: rgb(var(--c-line));
+}
+
+/* ── a row (panel rows and every row in a flyout) ──────────────────────────────────────────── */
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--rm-nav-gap);
+  height: var(--rm-nav-row);
+  padding-inline: var(--rm-nav-pad);
+  border-radius: var(--radius-control);
+  position: relative;
+  color: rgb(var(--c-muted));
+  transition: background-color var(--rm-nav-fade) linear;
+}
+.item:hover {
+  background: rgb(var(--c-surface-2));
+  color: rgb(var(--c-ink));
+}
+.item:active {
+  background: rgb(var(--c-ink) / 0.07);
+}
+/* Here: a white raised card, a 2 × 16 brand mark at its start edge, never a tinted fill (§6). */
+.item[aria-current='page'] {
+  background: rgb(var(--c-surface));
+  color: rgb(var(--c-ink));
+  box-shadow: inset 0 0 0 1px rgb(var(--c-line)), var(--shadow-e1);
+}
+.item[aria-current='page']::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  top: calc(50% - 8px);
+  width: var(--rm-nav-notch);
+  height: 16px;
+  border-radius: 1px;
+  background: rgb(var(--c-primary));
+}
+.item[aria-current='page'] .ic svg {
+  color: rgb(var(--c-primary));
+  stroke-width: 2;
+}
+.ic {
+  display: grid;
+  flex: none;
+  place-items: center;
+  position: relative;
+  width: var(--rm-nav-box);
+  height: var(--rm-nav-box);
+}
+.ic svg {
+  width: var(--rm-nav-glyph);
+  height: var(--rm-nav-glyph);
+}
+/* DS3 two-tone (the current page): the filled copy sits under the line glyph at 18 %. */
+.duo {
+  display: grid;
+  place-items: center;
+}
+.duo > svg {
+  grid-area: 1 / 1;
+}
+.duoFill {
+  opacity: 0.18;
+}
+.lab {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.short,
+.railDot {
+  display: none;
+}
+
+/* ── badges (§5.1): only money that waits is coloured; at most one solid pill ──────────────── */
+.pill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: var(--rm-nav-pill-h);
+  margin-inline-start: auto;
+  padding-inline: 7px;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--c-surface-2));
+  color: rgb(var(--c-muted));
+  box-shadow: inset 0 0 0 1px rgb(var(--c-line));
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.item:hover .pill:not(.pillSolid):not(.pillWarn) {
+  background: rgb(var(--c-surface));
+}
+.pillSolid {
+  background: rgb(var(--c-danger));
+  color: rgb(var(--c-on-primary));
+  box-shadow: none;
+}
+.pillWarn {
+  background: rgb(var(--c-warn-subtle));
+  color: rgb(var(--c-warn));
+  box-shadow: inset 0 0 0 1px rgb(var(--c-warn-border-subtle));
+}
+.pillIn {
+  animation: rmNavFadeIn var(--dur-short) linear both;
+}
+.tipIn {
+  animation: rmNavFadeIn var(--rm-nav-tip) linear both;
+}
+.innerDot {
+  display: block;
+  flex: none;
+  width: var(--rm-nav-dot);
+  height: var(--rm-nav-dot);
+  border-radius: 50%;
+  background: rgb(var(--c-danger));
+}
+.eye {
+  flex: none;
+  margin-inline-start: auto;
+  color: rgb(var(--c-subtle));
+}
+.pill + .eye {
+  margin-inline-start: 0;
+}
+.dotDanger {
+  background: rgb(var(--c-danger));
+}
+.dotWarn {
+  background: rgb(var(--c-warn));
+}
+.dotNeutral {
+  background: rgb(var(--c-ink) / 0.72);
+}
+
+/* ── groups ────────────────────────────────────────────────────────────────────────────────── */
+.grp {
+  margin-top: var(--rm-nav-tile-gap);
+}
+.gh {
+  position: relative;
+  color: rgb(var(--c-muted));
+  text-align: start;
+}
+.ghLab {
+  display: none;
+}
+.gx {
+  display: none;
+}
+.chev {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  transition: transform var(--rm-nav-chevron) var(--ease-standard);
+}
+:global([dir='rtl']) .grp[data-open='false'] .chev {
+  transform: rotate(90deg);
+}
+:global([dir='ltr']) .grp[data-open='false'] .chev {
+  transform: rotate(-90deg);
+}
+.gdot {
+  display: block;
+  width: var(--rm-nav-dot);
+  height: var(--rm-nav-dot);
+  border-radius: 50%;
+}
+.favHead {
+  cursor: default;
+}
+
+/* The flyout (rail): the group's own list, beside the rail (§1.3, §7.2). Hidden until it opens. */
+.fly {
+  display: none;
+}
+.grp[data-fly='open'] > .fly {
+  display: block;
+  position: fixed;
+  top: var(--rm-fly-top, 64px);
+  inset-inline-start: calc(var(--rm-sidebar-w) + var(--rm-nav-offset));
+  z-index: 2;
+  width: var(--rm-nav-flyout-w);
+  padding: 4px 0 6px;
+  border-radius: var(--radius-card);
+  background: rgb(var(--c-surface));
+  box-shadow: var(--shadow-e2), 0 0 0 1px rgb(var(--c-border-rule));
+  animation: rmNavFadeIn var(--rm-nav-tip) linear both;
+}
+.flyHead {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding-inline: 16px 6px;
+}
+.flyTitle {
+  flex: 1;
+  min-width: 0;
+}
+.fly .list {
+  padding-inline: var(--rm-nav-pad);
+}
+/* The flyout is white: its current row takes the canvas fill and a hairline instead of the raised card. */
+.fly .item[aria-current='page'] {
+  background: rgb(var(--c-bg));
+  box-shadow: inset 0 0 0 1px rgb(var(--c-line));
+}
+
+/* ── footer, help row, user row ────────────────────────────────────────────────────────────── */
+.foot {
+  flex: none;
+  padding: var(--rm-nav-pad) 0 4px;
+  border-top: 1px solid rgb(var(--c-line));
+}
+.help {
+  display: none;
+}
+.helpLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  height: 28px;
+  border-radius: var(--radius-xs);
+  color: rgb(var(--c-subtle));
+  white-space: nowrap;
+}
+.helpLink > svg {
+  flex: none;
+}
+.helpText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.helpLink:hover {
+  color: rgb(var(--c-ink));
+  text-decoration: underline;
+}
+.user {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: var(--rm-nav-pad) 0;
+  border-top: 1px solid rgb(var(--c-line));
+  position: relative;
+}
+.acc {
+  display: flex;
+  align-items: center;
+  gap: var(--rm-nav-gap);
+  min-width: 0;
+  height: 40px;
+  padding-inline: var(--rm-nav-pad);
+  border-radius: var(--radius-control);
+  color: rgb(var(--c-ink));
+  text-align: start;
+}
+.acc:hover,
+.acc[aria-expanded='true'] {
+  background: rgb(var(--c-surface-2));
+}
+.ava {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--rm-nav-box);
+  height: var(--rm-nav-box);
+  border-radius: 50%;
+  background: rgb(var(--c-surface-2));
+  box-shadow: inset 0 0 0 1px rgb(var(--c-line));
+}
+.accText {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.ib {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-control);
+  color: rgb(var(--c-muted));
+}
+.ib:hover,
+.ib[aria-pressed='true'] {
+  background: rgb(var(--c-surface-2));
+  color: rgb(var(--c-ink));
+}
+.ib svg {
+  width: 18px;
+  height: 18px;
+}
+/* A 6 px strip on the menu's inline-end edge; on hover a 2 px line (§1.1). Pointer only. It lies against the
+   edge on the page's side (the page column starts with its gutter there), not inside the menu, where it would
+   cover the scroll region's scrollbar: grabbing the scrollbar must scroll, never collapse the menu. */
+.edge {
+  display: none;
+}
+@media (min-width: 1024px) {
+  .edge {
+    display: block;
+    position: fixed;
+    inset-block: 0;
+    inset-inline-start: var(--rm-sidebar-w);
+    z-index: calc(var(--z-top-bar) + 1);
+    width: 6px;
+    cursor: pointer;
+    transition: inset-inline-start var(--rm-nav-collapse) var(--rm-nav-ease);
+  }
+  .app[data-nav-dir='expand'] .edge {
+    transition-duration: var(--rm-nav-expand);
+  }
+  .app[data-overlay='open'] .edge {
+    inset-inline-start: var(--chrome-sidebar-w);
+    z-index: var(--z-sheet);
+  }
+}
+.edge::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  /* Over the menu's 1 px border, so the line reads as the edge itself. */
+  inset-inline-start: -1px;
+  width: 2px;
+  background: rgb(var(--c-line-strong));
+  opacity: 0;
+  transition: opacity var(--rm-nav-fade) linear;
+}
+.edge:hover::after {
+  opacity: 1;
+}
+
+/* ── the rail: tiles (base presentation, also chef and receiver) ───────────────────────────── */
+.tile {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 0;
+  width: var(--rm-nav-tile-w);
+  height: var(--rm-nav-tile-h);
+  margin-inline: 4px;
+  padding: var(--rm-nav-tile-pt) 0 0;
+  border-radius: var(--radius-control);
+  position: relative;
+  color: rgb(var(--c-muted));
+  text-align: center;
+  transition: background-color var(--rm-nav-fade) linear;
+}
+/* A group tile whose flyout is open. Keyed on data-fly (set only while a flyout is open, so only on the rail),
+   not on aria-expanded, which in the panel means "the group is open" and would paint every open header as
+   hovered. :where keeps it at (0,2,0), so the here tile below still wins over it (§6). */
+.tile:hover,
+:where(.grp[data-fly='open']) > .gh.tile {
+  background: rgb(var(--c-surface-2));
+  color: rgb(var(--c-ink));
+}
+.tile .lab {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.tile .short {
+  display: block;
+  max-width: 54px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.tile .pill,
+.tile .eye {
+  display: none;
+}
+.tile .railDot {
+  display: block;
+  position: absolute;
+  top: -3px;
+  inset-inline-end: -3px;
+  width: var(--rm-nav-rail-dot);
+  height: var(--rm-nav-rail-dot);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgb(var(--c-bg));
+}
+/* Here, on a tile (an item tile or the group tile that holds the page): the white tile and a 2 × 20 mark.
+   The group tile is keyed on the group's data-here as well, so the server's first paint at 1024–1279 (which
+   cannot know the width and renders the panel's aria state) already shows the rail's here tile. */
+.tile[aria-current],
+:where(.grp[data-here='true']) > .gh.tile {
+  background: rgb(var(--c-surface));
+  color: rgb(var(--c-ink));
+  box-shadow: inset 0 0 0 1px rgb(var(--c-line)), var(--shadow-e1);
+}
+.tile[aria-current]::before,
+:where(.grp[data-here='true']) > .gh.tile::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  top: calc(50% - 10px);
+  width: var(--rm-nav-notch);
+  height: 20px;
+  border-radius: 1px;
+  background: rgb(var(--c-primary));
+}
+.tile[aria-current] .ic svg,
+:where(.grp[data-here='true']) > .gh.tile .ic svg {
+  color: rgb(var(--c-primary));
+  stroke-width: 2;
+}
+.tile[aria-current] .short,
+:where(.grp[data-here='true']) > .gh.tile .short {
+  font-weight: 600;
+}
+.tile[aria-current] .railDot,
+:where(.grp[data-here='true']) > .gh.tile .railDot {
+  box-shadow: 0 0 0 2px rgb(var(--c-surface));
+}
+.searchTile,
+.helpTile {
+  display: grid;
+}
+/* Rail: start-anchored so both controls sit on the 32 px icon axis (40 wide at 12, 32 wide at 16). */
+.user .acc {
+  justify-content: center;
+  width: 40px;
+  margin-inline-start: 12px;
+  padding: 0;
+}
+.user .ib {
+  margin-inline-start: 16px;
+}
+
+/* ── the panel presentation: the aside is wide enough (248) ────────────────────────────────── */
+@container rm-side (min-width: 120px) {
+  .inner {
+    width: calc(var(--chrome-sidebar-w) - 1px);
+  }
+  .head {
+    padding-inline: var(--rm-nav-gutter);
+  }
+  .headBtn {
+    flex: 1;
+    padding-inline: var(--rm-nav-pad) 10px;
+  }
+  .headText {
+    position: static;
+    display: grid;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    overflow: hidden;
+    clip: auto;
+  }
+  .headChev {
+    display: block;
+    flex: none;
+    color: rgb(var(--c-subtle));
+  }
+  .cmdk {
+    display: block;
+  }
+  .scroll {
+    padding: 4px var(--rm-nav-gutter) 6px;
+  }
+  .scroll.clipB {
+    -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to bottom, black calc(100% - 28px), transparent);
+  }
+  .scroll.clipT {
+    -webkit-mask-image: linear-gradient(to top, black calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to top, black calc(100% - 28px), transparent);
+  }
+  .scroll.clipT.clipB {
+    -webkit-mask-image: linear-gradient(to bottom, transparent, black 28px, black calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to bottom, transparent, black 28px, black calc(100% - 28px), transparent);
+  }
+  .top {
+    display: block;
+    justify-items: normal;
+  }
+  .gap {
+    width: auto;
+    height: 8px;
+    margin: 0;
+    background: none;
+  }
+  /* A top tile becomes a row again. */
+  .tile {
+    display: flex;
+    align-items: center;
+    justify-items: normal;
+    gap: var(--rm-nav-gap);
+    width: auto;
+    height: var(--rm-nav-row);
+    margin-inline: 0;
+    padding: 0 var(--rm-nav-pad);
+    text-align: start;
+  }
+  .tile .lab {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: hidden;
+    clip: auto;
+    text-overflow: ellipsis;
+  }
+  .tile .short,
+  .tile .railDot {
+    display: none;
+  }
+  .tile .pill {
+    display: inline-flex;
+  }
+  .tile .eye {
+    display: block;
+  }
+  /* The rail's search and help tiles: the panel has the Ctrl K field and the help row instead (§1.1). */
+  .tile.searchTile,
+  .tile.helpTile {
+    display: none;
+  }
+  .tile[aria-current]::before {
+    top: calc(50% - 8px);
+    height: 16px;
+  }
+  /* Group headers: glyph 16 at stroke 2 on the icon axis, label 12/16 600, chevron, the T2 dot (§1.1). */
+  .grp {
+    margin-top: 0;
+  }
+  .grp[data-open='true'] {
+    margin-bottom: var(--rm-nav-gap);
+  }
+  .grp[data-open='false'] + .grp[data-open='true'] {
+    margin-top: var(--rm-nav-gap);
+  }
+  .gh.tile {
+    width: 100%;
+    color: rgb(var(--c-subtle));
+  }
+  .gh.tile:hover {
+    color: rgb(var(--c-ink));
+  }
+  .gh .ic svg {
+    width: var(--rm-nav-glyph-sm);
+    height: var(--rm-nav-glyph-sm);
+    stroke-width: 2;
+  }
+  .gh .short {
+    display: none;
+  }
+  /* The header's name: the visible label (.ghLab, with the chevron) is aria-hidden, so .lab stays in the
+     accessibility tree, visually hidden as on the rail; display:none would leave the button nameless. */
+  .gh .lab {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .ghLab {
+    display: inline-flex;
+    flex: 1;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+  .gx {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+  }
+  /* The group holding the page: no card in the panel (the row inside shows here); folded, an ink label and
+     the brand glyph (§6). */
+  :where(.grp[data-here='true']) > .gh.tile {
+    background: none;
+    box-shadow: none;
+    color: rgb(var(--c-subtle));
+  }
+  :where(.grp[data-here='true']) > .gh.tile::before,
+  .gh.tile[aria-current]::before {
+    content: none;
+  }
+  :where(.grp[data-here='true']) > .gh.tile .ic svg {
+    color: inherit;
+  }
+  .gh.tile[aria-current] {
+    background: none;
+    box-shadow: none;
+    color: rgb(var(--c-ink));
+  }
+  .gh.tile[aria-current] .ic svg {
+    color: rgb(var(--c-primary));
+  }
+  .gh .duoFill {
+    display: none;
+  }
+  :where(.grp[data-here='true']) > .gh.tile:hover,
+  .gh.tile[aria-current]:hover {
+    background: rgb(var(--c-surface-2));
+    color: rgb(var(--c-ink));
+  }
+  .grp[data-open='false'] > .fly {
+    display: none;
+  }
+  .grp[data-open='true'] > .fly {
+    display: block;
+  }
+  .flyHead {
+    display: none;
+  }
+  .fly .list {
+    padding-inline: 0;
+  }
+  .fav .favHead {
+    color: rgb(var(--c-subtle));
+  }
+  .foot {
+    padding: var(--rm-nav-pad) var(--rm-nav-gutter) 4px;
+  }
+  .help {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 32px;
+    padding-inline: var(--rm-nav-pad) 0;
+  }
+  .help > li {
+    min-width: 0;
+  }
+  .user {
+    flex-direction: row;
+    align-items: center;
+    padding: var(--rm-nav-pad) var(--rm-nav-gutter);
+  }
+  .user .acc {
+    flex: 1;
+    justify-content: flex-start;
+    width: auto;
+    margin-inline-start: 0;
+    padding-inline: var(--rm-nav-pad) 0;
+  }
+  .user .ib {
+    margin-inline-start: 0;
+  }
+  .accText {
+    position: static;
+    display: grid;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    overflow: hidden;
+    clip: auto;
+  }
+}
+
+/* ── collapse motion (§10): the words fade, then the width moves; on expand the words arrive after ── */
+.app[data-nav-phase='out'] :is(.lab, .short, .ghLab, .gx, .pill, .eye, .headText, .headChev, .cmdk, .help, .accText) {
+  opacity: 0;
+  transition: opacity var(--rm-nav-fade) linear;
+}
+.app[data-nav-phase='in'] :is(.lab, .ghLab, .gx, .pill, .eye, .headText, .headChev, .cmdk, .help, .accText) {
+  animation: rmNavFadeIn 140ms linear var(--rm-nav-delay) both;
+}
+.app[data-nav-phase='in'] .short {
+  animation: rmNavFadeIn var(--rm-nav-fade) linear 120ms both;
+}
+@keyframes rmNavFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Focus (§6): the one global focus ring (globals.css, 2 px), drawn inside rows, tiles and menu items (offset
+   −2), so the scroll region never clips it and it never touches a solid pill: the aside carries DS3-00's
+   data-focus="inset", which every focusable in the menu inherits. */
+
+/* Pressed (§6: ink 7 %), after every hover rule so it shows on rows, tiles, group headers and the menu's icon
+   buttons alike (a later :hover of equal weight used to mask it). The here tile keeps its white card. */
+.item:active,
+.tile:active:not([aria-current]),
+.ib:active {
+  background: rgb(var(--c-ink) / 0.07);
+}
+
+/* The page's h1 (§9): kept clear of the sticky top bar when focus or a jump lands on it, and the focus the route
+   change puts on it draws no ring: it is not a control (tabindex −1). The global ring reads --focus-width. */
+.col :global(h1) {
+  scroll-margin-top: 80px;
+}
+.col :global(h1[tabindex='-1']) {
+  --focus-width: 0px;
+}
+
+/* Windows high contrast (§6): the current row and tile get a Highlight outline, pills a CanvasText border,
+   dots keep their colour. */
+@media (forced-colors: active) {
+  .item[aria-current='page'],
+  .tile[aria-current] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  .pill {
+    border: 1px solid CanvasText;
+  }
+  .railDot,
+  .gdot,
+  .innerDot,
+  .item[aria-current='page']::before,
+  .tile[aria-current]::before {
+    forced-color-adjust: none;
+  }
+  /* The outline marks the current page; a tinted fill would turn into a solid system-colour blot. */
+  .duoFill {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .side,
+  .col,
+  .item,
+  .tile,
+  .chev,
+  .edge,
+  .edge::after {
+    transition: none;
+  }
+  .pillIn,
+  .tipIn,
+  .grp[data-fly='open'] > .fly {
+    animation: none;
+  }
+  .app[data-nav-phase] :is(.lab, .short, .ghLab, .gx, .pill, .eye, .headText, .headChev, .cmdk, .help, .accText) {
+    opacity: 1;
+    transition: none;
+    animation: none;
+  }
+}
+
+/* ── the top bar (§1.5) ───────────────────────────────────────────────────────────────────── */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-top-bar);
+  border-bottom: 1px solid rgb(var(--c-line));
+  background: rgb(var(--c-bg));
+}
+.topRow {
+  display: flex;
+  align-items: center;
+  gap: var(--rm-nav-gap);
+  height: calc(var(--chrome-header-h) - 1px);
+  padding-inline: 12px;
+}
+@media (min-width: 640px) {
+  .topRow {
+    padding-inline: 16px;
+  }
+}
+@media (min-width: 1024px) {
+  .topRow {
+    gap: 12px;
+    padding-inline: 32px 20px;
+  }
+}
+.crumbSep {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: rgb(var(--c-line-strong));
+}
+.slots {
+  display: none;
+}
+@media (min-width: 1024px) {
+  .slots {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+}
+.slot:empty {
+  display: none;
+}
+.divider {
+  display: none;
+}
+@media (min-width: 1024px) {
+  .slots:has(> .slot:not(:empty)) + .divider {
+    display: block;
+    width: 1px;
+    height: 20px;
+    background: rgb(var(--c-line));
+  }
+}
+
+/* The star beside the page name: a two-tone fill when on (DS3 SPEC §6). */
+.star[aria-pressed='true'] svg {
+  color: rgb(var(--c-warn));
+  fill: currentColor;
+  fill-opacity: 0.9;
+}
