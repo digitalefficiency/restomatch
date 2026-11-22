@@ -205,6 +205,7 @@ const BASE_COVERAGE: Record<string, 'attack' | 'isolation' | string> = {
   // W1-08 pilot: the credit-letter letterhead (letterhead.test.ts covers the isolation).
   'settings.letterhead': 'isolation',
   'settings.updateLetterhead': 'isolation',
+  'settings.previewThresholds': 'isolation — settings-preview.attack.test.ts (DS3-06): A’s preview counts and names only A’s open gaps; receiver/chef FORBIDDEN; writes nothing',
   'search.global': 'isolation',
   // Phase-2 supplier-centric surface (suppliers / catalog / orders / on-demand match).
   // Every procedure that takes a client-supplied supplierId / productId / poId /
